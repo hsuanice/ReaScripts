@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<index version="1" name="hsuanice" commit="fea7cd1eddb5b604830f7e58377ccc2e8c596aca">
+<index version="1" name="hsuanice Scripts" commit="fea7cd1eddb5b604830f7e58377ccc2e8c596aca">
   <category name="Example">
     <reapack name="cfillion_Hello world.lua" type="script" desc="Hello world">
       <metadata>
