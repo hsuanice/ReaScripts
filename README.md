@@ -4,4 +4,4 @@ Install ReaPack
 https://reapack.com/
 
 Import this repository inside Reaper via ReaPack
-[https://github.com/`<your username>`/`<repository name>`/raw/master/index.xml]
+[https://github.com/hsuanice/ReaScripts/raw/master/index.xml]
