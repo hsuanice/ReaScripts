@@ -1,27 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<index version="1" name="hsuanice Scripts" commit="5dbb6f3cecc02b7ec02b9ecc228fa6bb93a36a25">
-  <category name="Hover Mode">
-    <reapack name="hsuanice_Hover Mode_Split Item by Selection or Edit or Mouse Cursor.lua" type="script" desc="Hover Mode - Split Item by Selection or Edit or Mouse Cursor">
-      <version name="1.0" author="hsuanice" time="2025-08-07T18:14:58Z">
-        <source main="main">https://github.com/hsuanice/ReaScripts/raw/5dbb6f3cecc02b7ec02b9ecc228fa6bb93a36a25/Hover%20Mode/hsuanice_Hover%20Mode_Split%20Item%20by%20Selection%20or%20Edit%20or%20Mouse%20Cursor.lua</source>
-      </version>
-    </reapack>
-    <reapack name="hsuanice_Hover Mode_Toggle.lua" type="script" desc="Hover Mode - Toggle Hover Mode (Syncable)">
-      <version name="1.0" author="hsuanice" time="2025-08-07T18:14:58Z">
-        <source main="main">https://github.com/hsuanice/ReaScripts/raw/5dbb6f3cecc02b7ec02b9ecc228fa6bb93a36a25/Hover%20Mode/hsuanice_Hover%20Mode_Toggle.lua</source>
-      </version>
-    </reapack>
-    <reapack name="hsuanice_Hover Mode_Trim or Extend Left Edge of Item.lua" type="script" desc="Hover Mode - Trim or Extend Left Edge of Item (Preserve Fade)">
-      <version name="1.0" author="hsuanice" time="2025-08-07T18:14:58Z">
-        <source main="main">https://github.com/hsuanice/ReaScripts/raw/5dbb6f3cecc02b7ec02b9ecc228fa6bb93a36a25/Hover%20Mode/hsuanice_Hover%20Mode_Trim%20or%20Extend%20Left%20Edge%20of%20Item.lua</source>
-      </version>
-    </reapack>
-    <reapack name="hsuanice_Hover Mode_Trim or Extend Right Edge of Item.lua" type="script" desc="Hover Mode - Trim or Extend Right Edge of Item (Preserve Fade)">
-      <version name="1.0" author="hsuanice" time="2025-08-07T18:14:58Z">
-        <source main="main">https://github.com/hsuanice/ReaScripts/raw/5dbb6f3cecc02b7ec02b9ecc228fa6bb93a36a25/Hover%20Mode/hsuanice_Hover%20Mode_Trim%20or%20Extend%20Right%20Edge%20of%20Item.lua</source>
-      </version>
-    </reapack>
-  </category>
+<index version="1" name="hsuanice Scripts" commit="fb0f4595a68edad4e90dc0a0c3ed5e7b8e0f6b62">
   <category name="Pro Tools">
     <reapack name="hsuanice_Pro Tools_Display Timeline Selection End.lua" type="script" desc="Pro Tools - Display Timeline Selection End">
       <version name="1.0" author="hsuanice" time="2025-08-07T18:14:58Z">
