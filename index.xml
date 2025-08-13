@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<index version="1" name="hsuanice Scripts" commit="fbd65aac3db9b3b5f0bbd4b9f44d9862e9d0fcc4">
+<index version="1" name="hsuanice Scripts" commit="ea6fae7b2868d02be28480e1b2dc0e9bd90d8b94">
   <category name="Beta Testing">
     <reapack name="hsuanice_Count Item and Track and Toggle Show Item Details.lua" type="script" desc="ReaImGui - Count Items/Tracks and Toggle Show Item Details">
       <metadata>
@@ -418,6 +418,11 @@ v0.1 - Beta release]]></changelog>
       <version name="0.1" author="hsuanice" time="2025-08-13T07:33:10Z">
         <changelog><![CDATA[v0.1 - Beta release]]></changelog>
         <source main="main">https://github.com/hsuanice/ReaScripts/raw/20128d4abc5ecce7bcaa7840d72a69ef1fcdc68c/Beta%20Testing/hsuanice_Rename%20Active%20Take%20from%20File%20Metadata.lua</source>
+      </version>
+      <version name="0.2" author="hsuanice" time="2025-08-13T08:00:29Z">
+        <changelog><![CDATA[v0.2 - Add ESC close function
+v0.1 - Beta release]]></changelog>
+        <source main="main">https://github.com/hsuanice/ReaScripts/raw/ea6fae7b2868d02be28480e1b2dc0e9bd90d8b94/Beta%20Testing/hsuanice_Rename%20Active%20Take%20from%20File%20Metadata.lua</source>
       </version>
     </reapack>
     <reapack name="hsuanice_Show Frame Rate.lua" type="script" desc="ReaImGui - Show Project Frame Rate">
