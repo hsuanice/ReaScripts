@@ -1,5 +1,99 @@
 <?xml version="1.0" encoding="utf-8"?>
-<index version="1" name="hsuanice Scripts" commit="b040c27e8e708263a19f9cdd03b3731682cfe8b7">
+<index version="1" name="hsuanice Scripts" commit="1358adfe92741cd6fcec7e3c2815afccf7d52ada">
+  <category name="Beta Testing">
+    <reapack name="hsuanice_Count Item and Track and Toggle Show Item Details.lua" type="script" desc="ReaImGui - Count Items/Tracks and Toggle Show Item Details">
+      <version name="1.0" author="hsuanice" time="2025-08-13T07:09:16Z">
+        <source main="main">https://github.com/hsuanice/ReaScripts/raw/1358adfe92741cd6fcec7e3c2815afccf7d52ada/Beta%20Testing/hsuanice_Count%20Item%20and%20Track%20and%20Toggle%20Show%20Item%20Details.lua</source>
+      </version>
+    </reapack>
+    <reapack name="hsuanice_Display Edit Cursor Position.lua" type="script" desc="ReaImGui - Display Edit Cursor Position (Unit Selector)">
+      <version name="1.0" author="hsuanice" time="2025-08-13T07:09:16Z">
+        <source main="main">https://github.com/hsuanice/ReaScripts/raw/1358adfe92741cd6fcec7e3c2815afccf7d52ada/Beta%20Testing/hsuanice_Display%20Edit%20Cursor%20Position.lua</source>
+      </version>
+    </reapack>
+    <reapack name="hsuanice_Hover Mode Split Item by Selection or Edit or Mouse Cursor.lua" type="script" desc="Hover Mode - Split Item by Selection or Edit or Mouse Cursor">
+      <version name="1.0" author="hsuanice" time="2025-08-13T07:09:16Z">
+        <source main="main">https://github.com/hsuanice/ReaScripts/raw/1358adfe92741cd6fcec7e3c2815afccf7d52ada/Beta%20Testing/hsuanice_Hover%20Mode%20Split%20Item%20by%20Selection%20or%20Edit%20or%20Mouse%20Cursor.lua</source>
+      </version>
+    </reapack>
+    <reapack name="hsuanice_Hover Mode Toggle.lua" type="script" desc="Hover Mode - Toggle Hover Mode (Syncable)">
+      <version name="1.0" author="hsuanice" time="2025-08-13T07:09:16Z">
+        <source main="main">https://github.com/hsuanice/ReaScripts/raw/1358adfe92741cd6fcec7e3c2815afccf7d52ada/Beta%20Testing/hsuanice_Hover%20Mode%20Toggle.lua</source>
+      </version>
+    </reapack>
+    <reapack name="hsuanice_Hover Mode Trim or Extend Left Edge of Item.lua" type="script" desc="Hover Mode - Trim or Extend Left Edge of Item (Preserve Fade)">
+      <version name="1.0" author="hsuanice" time="2025-08-13T07:09:16Z">
+        <source main="main">https://github.com/hsuanice/ReaScripts/raw/1358adfe92741cd6fcec7e3c2815afccf7d52ada/Beta%20Testing/hsuanice_Hover%20Mode%20Trim%20or%20Extend%20Left%20Edge%20of%20Item.lua</source>
+      </version>
+    </reapack>
+    <reapack name="hsuanice_Hover Mode Trim or Extend Right Edge of Item.lua" type="script" desc="Hover Mode - Trim or Extend Right Edge of Item (Preserve Fade)">
+      <version name="1.0" author="hsuanice" time="2025-08-13T07:09:16Z">
+        <source main="main">https://github.com/hsuanice/ReaScripts/raw/1358adfe92741cd6fcec7e3c2815afccf7d52ada/Beta%20Testing/hsuanice_Hover%20Mode%20Trim%20or%20Extend%20Right%20Edge%20of%20Item.lua</source>
+      </version>
+    </reapack>
+    <reapack name="hsuanice_Import audio files per folder into separate tracks.lua" type="script" desc="Import audio: one folder -&gt; one folder track, with child tracks (Sequence only, streaming, Stop button, pre-confirm &amp; finish summary). Root treated as a folder. Supports channel-split patterns: &quot;.A&lt;number&gt;&quot; or &quot;_&lt;number&gt;&quot;">
+      <metadata>
+        <description><![CDATA[{\rtf1\ansi\deff0{\fonttbl{\f0 \fswiss Helvetica;}{\f1 \fmodern Courier;}}
+{\colortbl;\red255\green0\blue0;\red0\green0\blue255;}
+\widowctrl\hyphauto
+
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Pre-confirm dialog: shows total folders/files, lets you choose channel naming pattern [.A] or [_], then buttons [Import] / [Cancel].\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Sequence only (append at end of target track).\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Every directory that contains audio becomes a folder parent track (including the selected root).\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Non-channel-split files (.A/_ not matched) go onto the PARENT folder track (one track per folder, including root).\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Channel-split files -> child tracks named "Ch XX" (XX is the parsed channel number).\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Scan all depths but do NOT nest folder tracks beyond 2 levels: each directory with files is its own parent+children block.\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Streaming import with a small ReaImGui "Stop" window (ESC also works on some systems). On completion/abort: auto-close progress, then show finish summary.\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab No ImGui Destroy/Detach calls (to avoid crashes on some builds).\sa180\par}
+}
+]]></description>
+      </metadata>
+      <version name="0.6.5.0" author="hsuanice" time="2025-08-13T07:09:16Z">
+        <changelog><![CDATA[v0.6.5.0 - Feature: add user-selectable channel naming pattern at import start (".A<number>" or "_<number>"); keeps all previous behaviors intact.]]></changelog>
+        <source main="main">https://github.com/hsuanice/ReaScripts/raw/1358adfe92741cd6fcec7e3c2815afccf7d52ada/Beta%20Testing/hsuanice_Import%20audio%20files%20per%20folder%20into%20separate%20tracks.lua</source>
+      </version>
+    </reapack>
+    <reapack name="hsuanice_Item Reposition.lua" type="script" desc="ReaImGui - Item Reposition Tool (Interval + Mode + Undo)">
+      <version name="1.0" author="hsuanice" time="2025-08-13T07:09:16Z">
+        <source main="main">https://github.com/hsuanice/ReaScripts/raw/1358adfe92741cd6fcec7e3c2815afccf7d52ada/Beta%20Testing/hsuanice_Item%20Reposition.lua</source>
+      </version>
+    </reapack>
+    <reapack name="hsuanice_Monitor_Show Frame Rate.lua" type="script" desc="ReaImGui - Show Project Frame Rate">
+      <version name="1.0" author="hsuanice" time="2025-08-13T07:09:16Z">
+        <source main="main">https://github.com/hsuanice/ReaScripts/raw/1358adfe92741cd6fcec7e3c2815afccf7d52ada/Beta%20Testing/hsuanice_Monitor_Show%20Frame%20Rate.lua</source>
+      </version>
+    </reapack>
+    <reapack name="hsuanice_Pro Tools Display Timeline Selection End.lua" type="script" desc="Pro Tools - Display Timeline Selection End">
+      <version name="1.0" author="hsuanice" time="2025-08-13T07:09:16Z">
+        <source main="main">https://github.com/hsuanice/ReaScripts/raw/1358adfe92741cd6fcec7e3c2815afccf7d52ada/Beta%20Testing/hsuanice_Pro%20Tools%20Display%20Timeline%20Selection%20End.lua</source>
+      </version>
+    </reapack>
+    <reapack name="hsuanice_Pro Tools Display Timeline Selection Start.lua" type="script" desc="Pro Tools - Trim Clips Start To File Start">
+      <version name="1.1" author="hsuanice" time="2025-08-13T07:09:16Z">
+        <source main="main">https://github.com/hsuanice/ReaScripts/raw/1358adfe92741cd6fcec7e3c2815afccf7d52ada/Beta%20Testing/hsuanice_Pro%20Tools%20Display%20Timeline%20Selection%20Start.lua</source>
+      </version>
+    </reapack>
+    <reapack name="hsuanice_Pro Tools Trim Clip To File Boundaries.lua" type="script" desc="Pro Tools - Trim Clip To File Boundaries">
+      <version name="1.1" author="hsuanice" time="2025-08-13T07:09:16Z">
+        <source main="main">https://github.com/hsuanice/ReaScripts/raw/1358adfe92741cd6fcec7e3c2815afccf7d52ada/Beta%20Testing/hsuanice_Pro%20Tools%20Trim%20Clip%20To%20File%20Boundaries.lua</source>
+      </version>
+    </reapack>
+    <reapack name="hsuanice_Pro Tools Trim Clips End To File End.lua" type="script" desc="Pro Tools - Trim Clips End To File End">
+      <version name="1.1" author="hsuanice" time="2025-08-13T07:09:16Z">
+        <source main="main">https://github.com/hsuanice/ReaScripts/raw/1358adfe92741cd6fcec7e3c2815afccf7d52ada/Beta%20Testing/hsuanice_Pro%20Tools%20Trim%20Clips%20End%20To%20File%20End.lua</source>
+      </version>
+    </reapack>
+    <reapack name="hsuanice_Pro Tools Trim Clips Start To File Start.lua" type="script" desc="Pro Tools - Trim Clips Start To File Start">
+      <version name="1.1" author="hsuanice" time="2025-08-13T07:09:16Z">
+        <source main="main">https://github.com/hsuanice/ReaScripts/raw/1358adfe92741cd6fcec7e3c2815afccf7d52ada/Beta%20Testing/hsuanice_Pro%20Tools%20Trim%20Clips%20Start%20To%20File%20Start.lua</source>
+      </version>
+    </reapack>
+    <reapack name="hsuanice_Rename Active Take from File Metadata.lua" type="script" desc="ReaImGui - Rename Active Take from Metadata (caret insert + cached preview + copy/export)">
+      <version name="1.13.6" author="hsuanice" time="2025-08-13T07:09:16Z">
+        <source main="main">https://github.com/hsuanice/ReaScripts/raw/1358adfe92741cd6fcec7e3c2815afccf7d52ada/Beta%20Testing/hsuanice_Rename%20Active%20Take%20from%20File%20Metadata.lua</source>
+      </version>
+    </reapack>
+  </category>
   <metadata>
     <description><![CDATA[{\rtf1\ansi\deff0{\fonttbl{\f0 \fswiss Helvetica;}{\f1 \fmodern Courier;}}
 {\colortbl;\red255\green0\blue0;\red0\green0\blue255;}
