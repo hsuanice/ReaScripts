@@ -1,6 +1,6 @@
 --[[
 @description ReaImGui - Rename Active Take from Metadata (caret insert + cached preview + copy/export)
-@version 0.2
+@version 0.3
 @author hsuanice
 @about
   Rename active takes and/or item notes from BWF/iXML and true source metadata using a fast ReaImGui UI.
@@ -29,6 +29,7 @@
   This script was generated using ChatGPT based on design concepts and iterative testing by hsuanice.
   hsuanice served as the workflow designer, tester, and integrator for this tool.
 @changelog
+  v0.3 - Add Selected/Scanned/Cached status view
   v0.2 - Add ESC close function
   v0.1 - Beta release
 --]]
@@ -653,17 +654,13 @@ local function take_note_inputs()
   if changed_note then NOTE_TEMPLATE = new_note; if SCAN_CACHE then recompute_preview_from_cache() end end
 end
 
--- ===== Top bar (Undo/Redo + Preview first) =====
+-- ===== Top bar (Undo/Redo only) =====
 local function draw_top_bar()
   if reaper.ImGui_Button(ctx, "Undo", 80, 0) then reaper.Undo_DoUndo2(0) end
   reaper.ImGui_SameLine(ctx)
   if reaper.ImGui_Button(ctx, "Redo", 80, 0) then reaper.Undo_DoRedo2(0) end
-  reaper.ImGui_SameLine(ctx)
-  reaper.ImGui_Text(ctx, "Preview first"); reaper.ImGui_SameLine(ctx)
-  reaper.ImGui_SetNextItemWidth(ctx, 90)
-  local chg, n = reaper.ImGui_InputInt(ctx, "##preview_limit", preview_limit)
-  if chg then preview_limit = math.max(1, math.min(10000, n or preview_limit)); if SCAN_CACHE then recompute_preview_from_cache() end end
 end
+
 
 -- ===== View/Copy split panes =====
 local function draw_view_pane(available_h)
@@ -877,6 +874,53 @@ local function loop()
       reaper.ImGui_SameLine(ctx)
       if reaper.ImGui_Button(ctx, "Cancel", 150, 28) then close_after_apply = true end
     end
+
+
+    -- Status row: Selected / Scanned / Cached / Preview first (with input)
+do
+  -- live selection and cache state
+  local nsel = reaper.CountSelectedMediaItems(0)
+  local scanned = (SCAN_CACHE and #SCAN_CACHE.list) or 0
+  local _, sig = get_selected_items_and_sig()
+  local cached_ok = (SCAN_CACHE and SCAN_CACHE.sig == sig)
+
+  local flags = TF('ImGui_TableFlags_SizingFixedFit')
+  if reaper.ImGui_BeginTable(ctx, "StatusRow", 4, flags) then
+    reaper.ImGui_TableSetupColumn(ctx, "Sel")
+    reaper.ImGui_TableSetupColumn(ctx, "Scan")
+    reaper.ImGui_TableSetupColumn(ctx, "Cache")
+    reaper.ImGui_TableSetupColumn(ctx, "Prev")
+
+    reaper.ImGui_TableNextRow(ctx)
+
+    -- Selected
+    reaper.ImGui_TableNextColumn(ctx)
+    reaper.ImGui_Text(ctx, ("Selected: %d"):format(nsel))
+
+    -- Scanned
+    reaper.ImGui_TableNextColumn(ctx)
+    reaper.ImGui_Text(ctx, ("Scanned: %d"):format(scanned))
+
+    -- Cached state
+    reaper.ImGui_TableNextColumn(ctx)
+    reaper.ImGui_Text(ctx, cached_ok and "Cached: Yes" or "Cached: No")
+    -- 想顯示 "Catched" 就把上行字串改成 "Catched: Yes/No"
+
+    -- Preview first input (moved here)
+    reaper.ImGui_TableNextColumn(ctx)
+    reaper.ImGui_Text(ctx, "Preview first"); reaper.ImGui_SameLine(ctx)
+    reaper.ImGui_SetNextItemWidth(ctx, 90)
+    local chg, n = reaper.ImGui_InputInt(ctx, "##preview_limit", preview_limit)
+    if chg then
+      preview_limit = math.max(1, math.min(10000, n or preview_limit))
+      if SCAN_CACHE then recompute_preview_from_cache() end
+    end
+
+    reaper.ImGui_EndTable(ctx)
+  end
+end
+
+
 
     -- View/Copy split panes
     reaper.ImGui_Separator(ctx)
