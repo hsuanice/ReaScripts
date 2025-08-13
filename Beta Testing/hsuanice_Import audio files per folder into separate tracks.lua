@@ -1,5 +1,5 @@
 --[[
-@description ReaImGUI - Import audio: one folder -> one folder track, with child tracks (Sequence only, streaming, Stop button, pre-confirm & finish summary). Root treated as a folder. Supports channel-split patterns: ".A<number>" or "_<number>"
+@description ReaImGUI - Import audio files per folder into separate tracks, poly and channel splited files.
 @version 0.1
 @author hsuanice
 @about
