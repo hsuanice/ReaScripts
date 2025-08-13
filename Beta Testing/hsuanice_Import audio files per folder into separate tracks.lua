@@ -1,6 +1,6 @@
 --[[
 @description ReaImGUI - Import audio files per folder into separate tracks, poly and channel splited files.
-@version 0.1
+@version 0.1.1
 @author hsuanice
 @about
   - Pre-confirm dialog: shows total folders/files, lets you choose channel naming pattern [.A<number>] or [_<number>], then buttons [Import] / [Cancel].
@@ -28,24 +28,10 @@
   This script was generated using ChatGPT based on design concepts and iterative testing by hsuanice.
   hsuanice served as the workflow designer, tester, and integrator for this tool.
 @changelog
+  v0.1.1 - Update description
   v0.1 - Beta release
 --]]
---[[
-@description Import audio: one folder -> one folder track, with child tracks (Sequence only, streaming, Stop button, pre-confirm & finish summary). Root treated as a folder. Supports channel-split patterns: ".A<number>" or "_<number>"
-@version 0.6.5.0
-@author hsuanice
-@about
-  - Pre-confirm dialog: shows total folders/files, lets you choose channel naming pattern [.A<number>] or [_<number>], then buttons [Import] / [Cancel].
-  - Sequence only (append at end of target track).
-  - Every directory that contains audio becomes a folder parent track (including the selected root).
-  - Non-channel-split files (.A/_ not matched) go onto the PARENT folder track (one track per folder, including root).
-  - Channel-split files -> child tracks named "Ch XX" (XX is the parsed channel number).
-  - Scan all depths but do NOT nest folder tracks beyond 2 levels: each directory with files is its own parent+children block.
-  - Streaming import with a small ReaImGui "Stop" window (ESC also works on some systems). On completion/abort: auto-close progress, then show finish summary.
-  - No ImGui Destroy/Detach calls (to avoid crashes on some builds).
-@changelog
-  v0.6.5.0 - Feature: add user-selectable channel naming pattern at import start (".A<number>" or "_<number>"); keeps all previous behaviors intact.
-]]
+
 
 ---------------------------------------
 -- Tunables
