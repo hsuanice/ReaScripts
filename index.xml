@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<index version="1" name="hsuanice Scripts" commit="20128d4abc5ecce7bcaa7840d72a69ef1fcdc68c">
+<index version="1" name="hsuanice Scripts" commit="fbd65aac3db9b3b5f0bbd4b9f44d9862e9d0fcc4">
   <category name="Beta Testing">
     <reapack name="hsuanice_Count Item and Track and Toggle Show Item Details.lua" type="script" desc="ReaImGui - Count Items/Tracks and Toggle Show Item Details">
       <metadata>
@@ -182,26 +182,42 @@
         <source main="main">https://github.com/hsuanice/ReaScripts/raw/20128d4abc5ecce7bcaa7840d72a69ef1fcdc68c/Beta%20Testing/hsuanice_Hover%20Mode%20Trim%20or%20Extend%20Right%20Edge%20of%20Item.lua</source>
       </version>
     </reapack>
-    <reapack name="hsuanice_Import audio files per folder into separate tracks.lua" type="script" desc="Import audio: one folder -&gt; one folder track, with child tracks (Sequence only, streaming, Stop button, pre-confirm &amp; finish summary). Root treated as a folder. Supports channel-split patterns: &quot;.A&lt;number&gt;&quot; or &quot;_&lt;number&gt;&quot;">
+    <reapack name="hsuanice_Import audio files per folder into separate tracks.lua" type="script" desc="ReaImGUI - Import audio files per folder into separate tracks, poly and channel splited files.">
       <metadata>
         <description><![CDATA[{\rtf1\ansi\deff0{\fonttbl{\f0 \fswiss Helvetica;}{\f1 \fmodern Courier;}}
 {\colortbl;\red255\green0\blue0;\red0\green0\blue255;}
 \widowctrl\hyphauto
 
 {\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Pre-confirm dialog: shows total folders/files, lets you choose channel naming pattern [.A] or [_], then buttons [Import] / [Cancel].\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Sequence only (append at end of target track).\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Every directory that contains audio becomes a folder parent track (including the selected root).\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Non-channel-split files (.A/_ not matched) go onto the PARENT folder track (one track per folder, including root).\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Channel-split files -> child tracks named "Ch XX" (XX is the parsed channel number).\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Scan all depths but do NOT nest folder tracks beyond 2 levels: each directory with files is its own parent+children block.\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Streaming import with a small ReaImGui "Stop" window (ESC also works on some systems). On completion/abort: auto-close progress, then show finish summary.\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab No ImGui Destroy/Detach calls (to avoid crashes on some builds).\sa180\par}
+{\pard \ql \f0 \sa0 \li720 \fi-360 \endash \tx360\tab Sequence only (append at end of target track).\par}
+{\pard \ql \f0 \sa0 \li720 \fi-360 \endash \tx360\tab Every directory that contains audio becomes a folder parent track (including the selected root).\par}
+{\pard \ql \f0 \sa0 \li720 \fi-360 \endash \tx360\tab Non-channel-split files (.A/_ not matched) go onto the PARENT folder track (one track per folder, including root).\par}
+{\pard \ql \f0 \sa0 \li720 \fi-360 \endash \tx360\tab Channel-split files -> child tracks named "Ch XX" (XX is the parsed channel number).\par}
+{\pard \ql \f0 \sa0 \li720 \fi-360 \endash \tx360\tab Scan all depths but do NOT nest folder tracks beyond 2 levels: each directory with files is its own parent+children block.\par}
+{\pard \ql \f0 \sa0 \li720 \fi-360 \endash \tx360\tab Streaming import with a small ReaImGui "Stop" window (ESC also works on some systems). On completion/abort: auto-close progress, then show finish summary.\par}
+{\pard \ql \f0 \sa0 \li720 \fi-360 \endash \tx360\tab No ImGui Destroy/Detach calls (to avoid crashes on some builds).\sa180\sa180\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 Features:\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Built with ReaImGUI for a compact, responsive UI.\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Designed for fast, keyboard-light workflows.\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Optionally leverages js_ReaScriptAPI for advanced interactions.\sa180\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 References:\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab REAPER ReaScript API (Lua)\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab js_ReaScriptAPI\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab ReaImGUI (ReaScript ImGui binding)\sa180\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 Note:\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab This is a 0.1 beta release for internal testing.\sa180\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 This script was generated using ChatGPT based on design concepts and iterative testing by hsuanice. hsuanice served as the workflow designer, tester, and integrator for this tool.\par}
 }
 ]]></description>
       </metadata>
       <version name="0.6.5.0" author="hsuanice" time="2025-08-13T07:33:10Z">
         <changelog><![CDATA[v0.6.5.0 - Feature: add user-selectable channel naming pattern at import start (".A<number>" or "_<number>"); keeps all previous behaviors intact.]]></changelog>
         <source main="main">https://github.com/hsuanice/ReaScripts/raw/20128d4abc5ecce7bcaa7840d72a69ef1fcdc68c/Beta%20Testing/hsuanice_Import%20audio%20files%20per%20folder%20into%20separate%20tracks.lua</source>
+      </version>
+      <version name="0.1.1" author="hsuanice" time="2025-08-13T07:50:33Z">
+        <changelog><![CDATA[v0.1.1 - Update description
+v0.1 - Beta release]]></changelog>
+        <source main="main">https://github.com/hsuanice/ReaScripts/raw/fbd65aac3db9b3b5f0bbd4b9f44d9862e9d0fcc4/Beta%20Testing/hsuanice_Import%20audio%20files%20per%20folder%20into%20separate%20tracks.lua</source>
       </version>
     </reapack>
     <reapack name="hsuanice_Item Reposition.lua" type="script" desc="ReaImGui - Item Reposition Tool (Interval + Mode + Undo)">
