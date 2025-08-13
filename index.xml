@@ -1,5 +1,439 @@
 <?xml version="1.0" encoding="utf-8"?>
-<index version="1" name="hsuanice Scripts" commit="af7efc179fbad9e45f604ddc4e3d8ed0f373a820">
+<index version="1" name="hsuanice Scripts" commit="20128d4abc5ecce7bcaa7840d72a69ef1fcdc68c">
+  <category name="Beta Testing">
+    <reapack name="hsuanice_Count Item and Track and Toggle Show Item Details.lua" type="script" desc="ReaImGui - Count Items/Tracks and Toggle Show Item Details">
+      <metadata>
+        <description><![CDATA[{\rtf1\ansi\deff0{\fonttbl{\f0 \fswiss Helvetica;}{\f1 \fmodern Courier;}}
+{\colortbl;\red255\green0\blue0;\red0\green0\blue255;}
+\widowctrl\hyphauto
+
+{\pard \ql \f0 \sa180 \li0 \fi0 A HUD for monitoring selected item and track counts, sorted by type and channel format.\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Displays counts of audio, MIDI, and empty items.\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Auto-resizes and updates in real time.\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Toggle detail view for channel summary (mono, stereo, multichannel).\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Right-click inside window to close instantly.\sa180\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 \u55357 ?\u56481 ? Designed for ReaImGui workflows with minimal screen space usage.\line Integrates well with hsuanice\u8217's HUD-based editing and selection tools.\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 This script was generated using ChatGPT based on design concepts and iterative testing by hsuanice.\line hsuanice served as the workflow designer, tester, and integrator for this tool.\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 Features:\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Built with ReaImGUI for a compact, responsive UI.\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Designed for fast, keyboard-light workflows.\sa180\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 References:\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab REAPER ReaScript API (Lua)\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab ReaImGUI (ReaScript ImGui binding)\sa180\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 Note:\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab This is a 0.1 beta release for internal testing.\sa180\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 This script was generated using ChatGPT based on design concepts and iterative testing by hsuanice. hsuanice served as the workflow designer, tester, and integrator for this tool.\par}
+}
+]]></description>
+      </metadata>
+      <version name="0.1" author="hsuanice" time="2025-08-13T07:33:10Z">
+        <changelog><![CDATA[v0.1 - Beta release]]></changelog>
+        <source main="main">https://github.com/hsuanice/ReaScripts/raw/20128d4abc5ecce7bcaa7840d72a69ef1fcdc68c/Beta%20Testing/hsuanice_Count%20Item%20and%20Track%20and%20Toggle%20Show%20Item%20Details.lua</source>
+      </version>
+    </reapack>
+    <reapack name="hsuanice_Display Edit Cursor Position.lua" type="script" desc="ReaImGui - Display Edit Cursor Position (Unit Selector)">
+      <metadata>
+        <description><![CDATA[{\rtf1\ansi\deff0{\fonttbl{\f0 \fswiss Helvetica;}{\f1 \fmodern Courier;}}
+{\colortbl;\red255\green0\blue0;\red0\green0\blue255;}
+\widowctrl\hyphauto
+
+{\pard \ql \f0 \sa180 \li0 \fi0 Displays the current edit cursor position in various time formats.\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Supports project default, minutes:seconds, timecode, and beats.\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Includes unit selector dropdown.\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Window auto-resizes and updates in real time.\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Right-click inside window to close instantly.\sa180\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 \u55357 ?\u56481 ? Ideal for timeline navigation and precision editing at-a-glance.\line Integrates seamlessly with hsuanice\u8217's ReaImGui-based HUD workflows.\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 This script was generated using ChatGPT based on design concepts and iterative testing by hsuanice.\line hsuanice served as the workflow designer, tester, and integrator for this tool.\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 Features:\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Built with ReaImGUI for a compact, responsive UI.\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Designed for fast, keyboard-light workflows.\sa180\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 References:\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab REAPER ReaScript API (Lua)\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab ReaImGUI (ReaScript ImGui binding)\sa180\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 Note:\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab This is a 0.1 beta release for internal testing.\sa180\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 This script was generated using ChatGPT based on design concepts and iterative testing by hsuanice. hsuanice served as the workflow designer, tester, and integrator for this tool.\par}
+}
+]]></description>
+      </metadata>
+      <version name="0.1" author="hsuanice" time="2025-08-13T07:33:10Z">
+        <changelog><![CDATA[v0.1 - Beta release]]></changelog>
+        <source main="main">https://github.com/hsuanice/ReaScripts/raw/20128d4abc5ecce7bcaa7840d72a69ef1fcdc68c/Beta%20Testing/hsuanice_Display%20Edit%20Cursor%20Position.lua</source>
+      </version>
+    </reapack>
+    <reapack name="hsuanice_Hover Mode Split Item by Selection or Edit or Mouse Cursor.lua" type="script" desc="Hover Mode - Split Item by Selection or Edit or Mouse Cursor">
+      <metadata>
+        <description><![CDATA[{\rtf1\ansi\deff0{\fonttbl{\f0 \fswiss Helvetica;}{\f1 \fmodern Courier;}}
+{\colortbl;\red255\green0\blue0;\red0\green0\blue255;}
+\widowctrl\hyphauto
+
+{\pard \ql \f0 \sa180 \li0 \fi0 Context-aware item splitting script that prioritizes razor area, time selection, and mouse/edit cursor logic. Follows snap-to-grid setting only when using mouse position.\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 This script was generated using ChatGPT based on design concepts and iterative testing by hsuanice. hsuanice served as the workflow designer, tester, and integrator for this tool.\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 References: \u8226 ? TJF: Split Item (Hover Mode Dependant) \u8226 ? TJF: Hover Mode Toggle \u8226 ? LKC: HOVER EDIT - Toggle hovering \u8226 ? az: Smart split items by mouse cursor \u8226 ? ek: Smart split items by mouse cursor\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 Features:\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Designed for fast, keyboard-light workflows.\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Supports Hover Mode via shared ExtState for cursor-aware actions.\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Integrates with Razor Edit regions when available.\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Uses SWS extension APIs where available.\sa180\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 References:\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab REAPER ReaScript API (Lua)\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab SWS Extension API\sa180\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 Note:\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab This is a 0.1 beta release for internal testing.\sa180\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 This script was generated using ChatGPT based on design concepts and iterative testing by hsuanice. hsuanice served as the workflow designer, tester, and integrator for this tool.\par}
+}
+]]></description>
+      </metadata>
+      <version name="0.1" author="hsuanice" time="2025-08-13T07:33:10Z">
+        <changelog><![CDATA[v0.1 - Beta release]]></changelog>
+        <source main="main">https://github.com/hsuanice/ReaScripts/raw/20128d4abc5ecce7bcaa7840d72a69ef1fcdc68c/Beta%20Testing/hsuanice_Hover%20Mode%20Split%20Item%20by%20Selection%20or%20Edit%20or%20Mouse%20Cursor.lua</source>
+      </version>
+    </reapack>
+    <reapack name="hsuanice_Hover Mode Toggle.lua" type="script" desc="Hover Mode - Toggle Hover Mode (Syncable)">
+      <metadata>
+        <description><![CDATA[{\rtf1\ansi\deff0{\fonttbl{\f0 \fswiss Helvetica;}{\f1 \fmodern Courier;}}
+{\colortbl;\red255\green0\blue0;\red0\green0\blue255;}
+\widowctrl\hyphauto
+
+{\pard \ql \f0 \sa180 \li0 \fi0 Toggles Hover Mode (mouse vs. edit cursor) for hsuanice's hover editing tools.\line Uses ExtState: hsuanice_TrimTools / HoverMode.\line Maintains toolbar toggle state and can sync with other toggle scripts.\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 \u55357 ?\u56481 ? This script is extensible: you can sync it with other toggle scripts (e.g., TJF, LKC). To add them: 1. Open Action List 2. Locate the script (e.g., "TJF Hover Mode Toggle") 3. Right-click \u8594 ? "Copy selected action command ID" 4. Paste it into the USER CONFIG: Sync with other toggle scripts table below.\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 Based on or inspired by: \u8226 ? TJF: Hover Mode Toggle \u8212- Script: TJF Hover Mode Toggle.lua\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 Features:\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Designed for fast, keyboard-light workflows.\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Supports Hover Mode via shared ExtState for cursor-aware actions.\sa180\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 References:\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab REAPER ReaScript API (Lua)\sa180\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 Note:\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab This is a 0.1 beta release for internal testing.\sa180\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 This script was generated using ChatGPT based on design concepts and iterative testing by hsuanice. hsuanice served as the workflow designer, tester, and integrator for this tool.\par}
+}
+]]></description>
+      </metadata>
+      <version name="0.1" author="hsuanice" time="2025-08-13T07:33:10Z">
+        <changelog><![CDATA[v0.1 - Beta release]]></changelog>
+        <source main="main">https://github.com/hsuanice/ReaScripts/raw/20128d4abc5ecce7bcaa7840d72a69ef1fcdc68c/Beta%20Testing/hsuanice_Hover%20Mode%20Toggle.lua</source>
+      </version>
+    </reapack>
+    <reapack name="hsuanice_Hover Mode Trim or Extend Left Edge of Item.lua" type="script" desc="Hover Mode - Trim or Extend Left Edge of Item (Preserve Fade)">
+      <metadata>
+        <description><![CDATA[{\rtf1\ansi\deff0{\fonttbl{\f0 \fswiss Helvetica;}{\f1 \fmodern Courier;}}
+{\colortbl;\red255\green0\blue0;\red0\green0\blue255;}
+\widowctrl\hyphauto
+
+{\pard \ql \f0 \sa180 \li0 \fi0 Trims or extends the {\b left edge} of audio/MIDI/empty items depending on context.\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Hover Mode ON: Uses mouse cursor position.\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Hover Mode OFF: Uses edit cursor and selected tracks.\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab \u55358 ?\u56800 ? Special behavior: When the mouse is hovering over the {\b Ruler (Timeline)}, the script temporarily switches to {\b Edit Cursor Mode}, even if Hover Mode is enabled.\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Preserves existing fade-in shape and position.\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Ignores invisible items; partial visibility is accepted.\sa180\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 \u55357 ?\u56481 ? Supports extensible hover-edit system. Hover Mode is toggled via ExtState:\line hsuanice_TrimTools / HoverMode\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 Inspired by: \u8226 ? X-Raym: Trim Item Edges \u8212- Script: X-Raym_Trim left edge of item under mouse or the next one to mouse cursor without changing fade-in end.lua\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 Features:\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Designed for fast, keyboard-light workflows.\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Supports Hover Mode via shared ExtState for cursor-aware actions.\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Uses SWS extension APIs where available.\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Optionally leverages js_ReaScriptAPI for advanced interactions.\sa180\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 References:\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab REAPER ReaScript API (Lua)\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab SWS Extension API\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab js_ReaScriptAPI\sa180\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 Note:\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab This is a 0.1 beta release for internal testing.\sa180\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 This script was generated using ChatGPT based on design concepts and iterative testing by hsuanice. hsuanice served as the workflow designer, tester, and integrator for this tool.\par}
+}
+]]></description>
+      </metadata>
+      <version name="0.1" author="hsuanice" time="2025-08-13T07:33:10Z">
+        <changelog><![CDATA[v0.1 - Beta release]]></changelog>
+        <source main="main">https://github.com/hsuanice/ReaScripts/raw/20128d4abc5ecce7bcaa7840d72a69ef1fcdc68c/Beta%20Testing/hsuanice_Hover%20Mode%20Trim%20or%20Extend%20Left%20Edge%20of%20Item.lua</source>
+      </version>
+    </reapack>
+    <reapack name="hsuanice_Hover Mode Trim or Extend Right Edge of Item.lua" type="script" desc="Hover Mode - Trim or Extend Right Edge of Item (Preserve Fade)">
+      <metadata>
+        <description><![CDATA[{\rtf1\ansi\deff0{\fonttbl{\f0 \fswiss Helvetica;}{\f1 \fmodern Courier;}}
+{\colortbl;\red255\green0\blue0;\red0\green0\blue255;}
+\widowctrl\hyphauto
+
+{\pard \ql \f0 \sa180 \li0 \fi0 Trims or extends the {\b right edge} of audio/MIDI/empty items depending on context.\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Hover Mode ON: Uses mouse cursor position.\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Hover Mode OFF: Uses edit cursor and selected tracks.\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab \u55358 ?\u56800 ? Special behavior: When the mouse is hovering over the {\b Ruler (Timeline)}, the script temporarily switches to {\b Edit Cursor Mode}, even if Hover Mode is enabled.\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Preserves existing fade-out shape and position.\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Ignores invisible items; partial visibility is accepted.\sa180\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 \u55357 ?\u56481 ? Supports extensible hover-edit system. Hover Mode is toggled via ExtState:\line hsuanice_TrimTools / HoverMode\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 Inspired by: \u8226 ? X-Raym: Trim Item Edges \u8212- Script: X-Raym_Trim right edge of item under mouse or the previous one to mouse cursor without changing fade-out start.lua\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 Features:\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Designed for fast, keyboard-light workflows.\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Supports Hover Mode via shared ExtState for cursor-aware actions.\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Uses SWS extension APIs where available.\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Optionally leverages js_ReaScriptAPI for advanced interactions.\sa180\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 References:\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab REAPER ReaScript API (Lua)\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab SWS Extension API\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab js_ReaScriptAPI\sa180\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 Note:\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab This is a 0.1 beta release for internal testing.\sa180\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 This script was generated using ChatGPT based on design concepts and iterative testing by hsuanice. hsuanice served as the workflow designer, tester, and integrator for this tool.\par}
+}
+]]></description>
+      </metadata>
+      <version name="0.1" author="hsuanice" time="2025-08-13T07:33:10Z">
+        <changelog><![CDATA[v0.1 - Beta release]]></changelog>
+        <source main="main">https://github.com/hsuanice/ReaScripts/raw/20128d4abc5ecce7bcaa7840d72a69ef1fcdc68c/Beta%20Testing/hsuanice_Hover%20Mode%20Trim%20or%20Extend%20Right%20Edge%20of%20Item.lua</source>
+      </version>
+    </reapack>
+    <reapack name="hsuanice_Import audio files per folder into separate tracks.lua" type="script" desc="Import audio: one folder -&gt; one folder track, with child tracks (Sequence only, streaming, Stop button, pre-confirm &amp; finish summary). Root treated as a folder. Supports channel-split patterns: &quot;.A&lt;number&gt;&quot; or &quot;_&lt;number&gt;&quot;">
+      <metadata>
+        <description><![CDATA[{\rtf1\ansi\deff0{\fonttbl{\f0 \fswiss Helvetica;}{\f1 \fmodern Courier;}}
+{\colortbl;\red255\green0\blue0;\red0\green0\blue255;}
+\widowctrl\hyphauto
+
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Pre-confirm dialog: shows total folders/files, lets you choose channel naming pattern [.A] or [_], then buttons [Import] / [Cancel].\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Sequence only (append at end of target track).\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Every directory that contains audio becomes a folder parent track (including the selected root).\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Non-channel-split files (.A/_ not matched) go onto the PARENT folder track (one track per folder, including root).\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Channel-split files -> child tracks named "Ch XX" (XX is the parsed channel number).\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Scan all depths but do NOT nest folder tracks beyond 2 levels: each directory with files is its own parent+children block.\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Streaming import with a small ReaImGui "Stop" window (ESC also works on some systems). On completion/abort: auto-close progress, then show finish summary.\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab No ImGui Destroy/Detach calls (to avoid crashes on some builds).\sa180\par}
+}
+]]></description>
+      </metadata>
+      <version name="0.6.5.0" author="hsuanice" time="2025-08-13T07:33:10Z">
+        <changelog><![CDATA[v0.6.5.0 - Feature: add user-selectable channel naming pattern at import start (".A<number>" or "_<number>"); keeps all previous behaviors intact.]]></changelog>
+        <source main="main">https://github.com/hsuanice/ReaScripts/raw/20128d4abc5ecce7bcaa7840d72a69ef1fcdc68c/Beta%20Testing/hsuanice_Import%20audio%20files%20per%20folder%20into%20separate%20tracks.lua</source>
+      </version>
+    </reapack>
+    <reapack name="hsuanice_Item Reposition.lua" type="script" desc="ReaImGui - Item Reposition Tool (Interval + Mode + Undo)">
+      <metadata>
+        <description><![CDATA[{\rtf1\ansi\deff0{\fonttbl{\f0 \fswiss Helvetica;}{\f1 \fmodern Courier;}}
+{\colortbl;\red255\green0\blue0;\red0\green0\blue255;}
+\widowctrl\hyphauto
+
+{\pard \ql \f0 \sa180 \li0 \fi0 A GUI tool for repositioning selected items with flexible options.\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Supports interval units: Seconds / Frames / Grid.\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Choose position from Item Start or End.\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Cross-track or per-track modes supported.\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Includes Undo / Redo buttons for keyboard-less workflows.\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Real-time adjustable via ImGUI with auto-resize.\sa180\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 \u55357 ?\u56481 ? Designed for precise spacing and layout control in complex editing sessions.\line Integrates with hsuanice\u8217's ReaImGui workflow tools for item/selection editing.\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 This script was generated using ChatGPT based on design concepts and iterative testing by hsuanice.\line hsuanice served as the workflow designer, tester, and integrator for this tool.\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 Features:\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Built with ReaImGUI for a compact, responsive UI.\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Designed for fast, keyboard-light workflows.\sa180\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 References:\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab REAPER ReaScript API (Lua)\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab ReaImGUI (ReaScript ImGui binding)\sa180\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 Note:\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab This is a 0.1 beta release for internal testing.\sa180\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 This script was generated using ChatGPT based on design concepts and iterative testing by hsuanice. hsuanice served as the workflow designer, tester, and integrator for this tool.\par}
+}
+]]></description>
+      </metadata>
+      <version name="0.1" author="hsuanice" time="2025-08-13T07:33:10Z">
+        <changelog><![CDATA[v0.1 - Beta release]]></changelog>
+        <source main="main">https://github.com/hsuanice/ReaScripts/raw/20128d4abc5ecce7bcaa7840d72a69ef1fcdc68c/Beta%20Testing/hsuanice_Item%20Reposition.lua</source>
+      </version>
+    </reapack>
+    <reapack name="hsuanice_Pro Tools Display Timeline Selection End.lua" type="script" desc="Pro Tools - Display Timeline Selection End">
+      <metadata>
+        <description><![CDATA[{\rtf1\ansi\deff0{\fonttbl{\f0 \fswiss Helvetica;}{\f1 \fmodern Courier;}}
+{\colortbl;\red255\green0\blue0;\red0\green0\blue255;}
+\widowctrl\hyphauto
+
+{\pard \ql \f0 \sa180 \li0 \fi0 Mimics Pro Tools' "Display Timeline Selection End" behavior.\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Priority: Razor Edit > Time Selection > Item Selection.\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab View scrolls to the end of the active selection without changing zoom level or play/edit cursor.\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Useful for navigating to timeline boundaries in a non-destructive way.\sa180\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 This script was generated using ChatGPT based on design concepts and iterative testing by hsuanice.\line hsuanice served as the workflow designer, tester, and integrator for this tool.\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 Features:\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Designed for fast, keyboard-light workflows.\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Integrates with Razor Edit regions when available.\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Uses SWS extension APIs where available.\sa180\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 References:\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab REAPER ReaScript API (Lua)\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab SWS Extension API\sa180\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 Note:\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab This is a 0.1 beta release for internal testing.\sa180\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 This script was generated using ChatGPT based on design concepts and iterative testing by hsuanice. hsuanice served as the workflow designer, tester, and integrator for this tool.\par}
+}
+]]></description>
+      </metadata>
+      <version name="0.1" author="hsuanice" time="2025-08-13T07:33:10Z">
+        <changelog><![CDATA[v0.1 - Beta release]]></changelog>
+        <source main="main">https://github.com/hsuanice/ReaScripts/raw/20128d4abc5ecce7bcaa7840d72a69ef1fcdc68c/Beta%20Testing/hsuanice_Pro%20Tools%20Display%20Timeline%20Selection%20End.lua</source>
+      </version>
+    </reapack>
+    <reapack name="hsuanice_Pro Tools Display Timeline Selection Start.lua" type="script" desc="Pro Tools - Trim Clips Start To File Start">
+      <metadata>
+        <description><![CDATA[{\rtf1\ansi\deff0{\fonttbl{\f0 \fswiss Helvetica;}{\f1 \fmodern Courier;}}
+{\colortbl;\red255\green0\blue0;\red0\green0\blue255;}
+\widowctrl\hyphauto
+
+{\pard \ql \f0 \sa180 \li0 \fi0 Emulates Pro Tools' "Trim Clip Start to File Start" behavior.\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Extends the left edge of selected item(s) to the previous item's end, or to the source media start.\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Prevents revealing beyond recorded content, preserving original sync and offset.\sa180\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 \u55357 ?\u56481 ? Useful for reclaiming pre-roll or missed in-point material without shifting content.\line Integrates well with hsuanice's Pro Tools-style clip editing and timeline workflows.\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 This script was generated using ChatGPT based on design concepts and iterative testing by hsuanice.\line hsuanice served as the workflow designer, tester, and integrator for this tool.\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 Features:\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Designed for fast, keyboard-light workflows.\sa180\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 References:\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab REAPER ReaScript API (Lua)\sa180\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 Note:\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab This is a 0.1 beta release for internal testing.\sa180\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 This script was generated using ChatGPT based on design concepts and iterative testing by hsuanice. hsuanice served as the workflow designer, tester, and integrator for this tool.\par}
+}
+]]></description>
+      </metadata>
+      <version name="0.1" author="hsuanice" time="2025-08-13T07:33:10Z">
+        <changelog><![CDATA[v0.1 - Beta release]]></changelog>
+        <source main="main">https://github.com/hsuanice/ReaScripts/raw/20128d4abc5ecce7bcaa7840d72a69ef1fcdc68c/Beta%20Testing/hsuanice_Pro%20Tools%20Display%20Timeline%20Selection%20Start.lua</source>
+      </version>
+    </reapack>
+    <reapack name="hsuanice_Pro Tools Trim Clip To File Boundaries.lua" type="script" desc="Pro Tools - Trim Clip To File Boundaries">
+      <metadata>
+        <description><![CDATA[{\rtf1\ansi\deff0{\fonttbl{\f0 \fswiss Helvetica;}{\f1 \fmodern Courier;}}
+{\colortbl;\red255\green0\blue0;\red0\green0\blue255;}
+\widowctrl\hyphauto
+
+{\pard \ql \f0 \sa180 \li0 \fi0 Emulates Pro Tools' "Trim Clip to File Boundaries" behavior.\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Extends both left and right edges of selected item(s) based on neighboring items.\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Falls back to full file start/end if no neighbors exist.\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Always respects file content bounds, avoiding empty/unrecorded areas.\sa180\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 \u55357 ?\u56481 ? Ideal for reclaiming full usable media without overshooting source boundaries.\line Integrates well with hsuanice's Pro Tools-style editing workflow.\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 This script was generated using ChatGPT based on design concepts and iterative testing by hsuanice.\line hsuanice served as the workflow designer, tester, and integrator for this tool.\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 Features:\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Designed for fast, keyboard-light workflows.\sa180\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 References:\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab REAPER ReaScript API (Lua)\sa180\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 Note:\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab This is a 0.1 beta release for internal testing.\sa180\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 This script was generated using ChatGPT based on design concepts and iterative testing by hsuanice. hsuanice served as the workflow designer, tester, and integrator for this tool.\par}
+}
+]]></description>
+      </metadata>
+      <version name="0.1" author="hsuanice" time="2025-08-13T07:33:10Z">
+        <changelog><![CDATA[v0.1 - Beta release]]></changelog>
+        <source main="main">https://github.com/hsuanice/ReaScripts/raw/20128d4abc5ecce7bcaa7840d72a69ef1fcdc68c/Beta%20Testing/hsuanice_Pro%20Tools%20Trim%20Clip%20To%20File%20Boundaries.lua</source>
+      </version>
+    </reapack>
+    <reapack name="hsuanice_Pro Tools Trim Clips End To File End.lua" type="script" desc="Pro Tools - Trim Clips End To File End">
+      <metadata>
+        <description><![CDATA[{\rtf1\ansi\deff0{\fonttbl{\f0 \fswiss Helvetica;}{\f1 \fmodern Courier;}}
+{\colortbl;\red255\green0\blue0;\red0\green0\blue255;}
+\widowctrl\hyphauto
+
+{\pard \ql \f0 \sa180 \li0 \fi0 Emulates Pro Tools' "Trim Clip End to File End" behavior.\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Extends the right edge of selected item(s) to the next item's start, or to the source media end.\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Prevents extending into unrecorded/empty content area.\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Automatically respects source limits and adjusts for playrate and offset.\sa180\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 \u55357 ?\u56481 ? Ideal for reclaiming usable audio content without overshooting media length. Integrates well with hsuanice's Pro Tools-style timeline workflows.\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 This script was generated using ChatGPT based on design concepts and iterative testing by hsuanice. hsuanice served as the workflow designer, tester, and integrator for this tool.\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 Features:\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Designed for fast, keyboard-light workflows.\sa180\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 References:\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab REAPER ReaScript API (Lua)\sa180\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 Note:\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab This is a 0.1 beta release for internal testing.\sa180\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 This script was generated using ChatGPT based on design concepts and iterative testing by hsuanice. hsuanice served as the workflow designer, tester, and integrator for this tool.\par}
+}
+]]></description>
+      </metadata>
+      <version name="0.1" author="hsuanice" time="2025-08-13T07:33:10Z">
+        <changelog><![CDATA[v0.1 - Beta release]]></changelog>
+        <source main="main">https://github.com/hsuanice/ReaScripts/raw/20128d4abc5ecce7bcaa7840d72a69ef1fcdc68c/Beta%20Testing/hsuanice_Pro%20Tools%20Trim%20Clips%20End%20To%20File%20End.lua</source>
+      </version>
+    </reapack>
+    <reapack name="hsuanice_Pro Tools Trim Clips Start To File Start.lua" type="script" desc="Pro Tools - Trim Clips Start To File Start">
+      <metadata>
+        <description><![CDATA[{\rtf1\ansi\deff0{\fonttbl{\f0 \fswiss Helvetica;}{\f1 \fmodern Courier;}}
+{\colortbl;\red255\green0\blue0;\red0\green0\blue255;}
+\widowctrl\hyphauto
+
+{\pard \ql \f0 \sa180 \li0 \fi0 Emulates Pro Tools' "Trim Clip Start to File Start" behavior.\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Extends the left edge of selected item(s) to the previous item's end, or to the source media start.\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Prevents revealing beyond recorded content, preserving original sync and offset.\sa180\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 \u55357 ?\u56481 ? Useful for reclaiming pre-roll or missed in-point material without shifting content.\line Integrates well with hsuanice's Pro Tools-style clip editing and timeline workflows.\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 This script was generated using ChatGPT based on design concepts and iterative testing by hsuanice.\line hsuanice served as the workflow designer, tester, and integrator for this tool.\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 Features:\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Designed for fast, keyboard-light workflows.\sa180\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 References:\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab REAPER ReaScript API (Lua)\sa180\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 Note:\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab This is a 0.1 beta release for internal testing.\sa180\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 This script was generated using ChatGPT based on design concepts and iterative testing by hsuanice. hsuanice served as the workflow designer, tester, and integrator for this tool.\par}
+}
+]]></description>
+      </metadata>
+      <version name="0.1" author="hsuanice" time="2025-08-13T07:33:10Z">
+        <changelog><![CDATA[v0.1 - Beta release]]></changelog>
+        <source main="main">https://github.com/hsuanice/ReaScripts/raw/20128d4abc5ecce7bcaa7840d72a69ef1fcdc68c/Beta%20Testing/hsuanice_Pro%20Tools%20Trim%20Clips%20Start%20To%20File%20Start.lua</source>
+      </version>
+    </reapack>
+    <reapack name="hsuanice_Rename Active Take from File Metadata.lua" type="script" desc="ReaImGui - Rename Active Take from Metadata (caret insert + cached preview + copy/export)">
+      <metadata>
+        <description><![CDATA[{\rtf1\ansi\deff0{\fonttbl{\f0 \fswiss Helvetica;}{\f1 \fmodern Courier;}}
+{\colortbl;\red255\green0\blue0;\red0\green0\blue255;}
+\widowctrl\hyphauto
+
+{\pard \ql \f0 \sa180 \li0 \fi0 Rename active takes and/or item notes from BWF/iXML and true source metadata using a fast ReaImGui UI.\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Two templates: Take Name + Item Note (empty note template = skip).\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Click tokens to insert at caret; caret snaps outside existing $tokens.\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Robust around separators: safe with "--" and "__"; underscores no longer swallow preceding tokens.\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Reads metadata once per selection ("Get Metadata") and caches it; configurable preview limit.\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Apply uses current selection; reuses cache if unchanged; Undo / Redo supported.\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Channel-aware tokens: $trk (auto per-take), $trkN, and $trkall (from iXML/BWF track list, with fallbacks).\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab True source tokens: $srcfile, $srcbase, $srcext, $srcpath, $srcdir (actual media filename/paths).\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Metadata panel + preview table with quick copy; export preview table as Tab or CSV.\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Works on audio items; items without takes (empty/MIDI) can still update notes.\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Requires: ReaImGui (install via ReaPack).\sa180\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 Features:\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Built with ReaImGUI for a compact, responsive UI.\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Designed for fast, keyboard-light workflows.\sa180\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 References:\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab REAPER ReaScript API (Lua)\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab ReaImGUI (ReaScript ImGui binding)\sa180\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 Note:\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab This is a 0.1 beta release for internal testing.\sa180\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 This script was generated using ChatGPT based on design concepts and iterative testing by hsuanice. hsuanice served as the workflow designer, tester, and integrator for this tool.\par}
+}
+]]></description>
+      </metadata>
+      <version name="0.1" author="hsuanice" time="2025-08-13T07:33:10Z">
+        <changelog><![CDATA[v0.1 - Beta release]]></changelog>
+        <source main="main">https://github.com/hsuanice/ReaScripts/raw/20128d4abc5ecce7bcaa7840d72a69ef1fcdc68c/Beta%20Testing/hsuanice_Rename%20Active%20Take%20from%20File%20Metadata.lua</source>
+      </version>
+    </reapack>
+    <reapack name="hsuanice_Show Frame Rate.lua" type="script" desc="ReaImGui - Show Project Frame Rate">
+      <metadata>
+        <description><![CDATA[{\rtf1\ansi\deff0{\fonttbl{\f0 \fswiss Helvetica;}{\f1 \fmodern Courier;}}
+{\colortbl;\red255\green0\blue0;\red0\green0\blue255;}
+\widowctrl\hyphauto
+
+{\pard \ql \f0 \sa180 \li0 \fi0 Displays current project frame rate in a minimal HUD.\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Auto-resizes to fit content.\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Updates in real time.\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Right-click inside window to close instantly.\sa180\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 \u55357 ?\u56481 ? Useful for video-sync workflows and visual debugging.\line Designed for ReaImGui environments where timeline FPS feedback is critical.\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 This script was generated using ChatGPT based on design concepts and iterative testing by hsuanice.\line hsuanice served as the workflow designer, tester, and integrator for this tool.\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 Features:\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Built with ReaImGUI for a compact, responsive UI.\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Designed for fast, keyboard-light workflows.\sa180\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 References:\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab REAPER ReaScript API (Lua)\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab ReaImGUI (ReaScript ImGui binding)\sa180\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 Note:\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab This is a 0.1 beta release for internal testing.\sa180\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 This script was generated using ChatGPT based on design concepts and iterative testing by hsuanice. hsuanice served as the workflow designer, tester, and integrator for this tool.\par}
+}
+]]></description>
+      </metadata>
+      <version name="0.1" author="hsuanice" time="2025-08-13T07:33:10Z">
+        <changelog><![CDATA[v0.1 - Beta release]]></changelog>
+        <source main="main">https://github.com/hsuanice/ReaScripts/raw/20128d4abc5ecce7bcaa7840d72a69ef1fcdc68c/Beta%20Testing/hsuanice_Show%20Frame%20Rate.lua</source>
+      </version>
+    </reapack>
+  </category>
   <metadata>
     <description><![CDATA[{\rtf1\ansi\deff0{\fonttbl{\f0 \fswiss Helvetica;}{\f1 \fmodern Courier;}}
 {\colortbl;\red255\green0\blue0;\red0\green0\blue255;}
