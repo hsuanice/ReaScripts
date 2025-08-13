@@ -1,6 +1,6 @@
 --[[
 @description ReaImGui - Rename Active Take from Metadata (caret insert + cached preview + copy/export)
-@version 0.1
+@version 0.2
 @author hsuanice
 @about
   Rename active takes and/or item notes from BWF/iXML and true source metadata using a fast ReaImGui UI.
@@ -29,8 +29,11 @@
   This script was generated using ChatGPT based on design concepts and iterative testing by hsuanice.
   hsuanice served as the workflow designer, tester, and integrator for this tool.
 @changelog
+  v0.2 - Add ESC close function
   v0.1 - Beta release
 --]]
+
+
 -- ===== Guard ReaImGui =====
 if not reaper or not reaper.ImGui_CreateContext then
   reaper.ShowMessageBox("This script requires ReaImGui (install via ReaPack).", "Missing dependency", 0)
@@ -42,6 +45,10 @@ local ctx = reaper.ImGui_CreateContext('Rename Active Take from Metadata')
 local FLT_MIN = reaper.ImGui_NumericLimits_Float()
 local WIN_W, WIN_H = 1020, 720
 local function TF(name) local fn = reaper[name]; return (type(fn)=="function") and fn() or 0 end
+
+-- ESC key enum (works across ReaImGui versions)
+local KEY_ESC = TF('ImGui_Key_Escape')
+
 
 -- ===== ExtState (defaults) =====
 local EXT_NS = "RENAME_TAKE_FROM_METADATA_V1"
@@ -815,6 +822,15 @@ local function loop()
   reaper.ImGui_SetNextWindowSize(ctx, WIN_W, WIN_H, reaper.ImGui_Cond_FirstUseEver())
   local visible, open = reaper.ImGui_Begin(ctx, 'Rename Active Take from Metadata', true, TF('ImGui_WindowFlags_NoScrollbar'))
   if visible then
+
+    -- ESC to Cancel/Close (press Esc anywhere to close the window)
+    if reaper.ImGui_IsWindowFocused(ctx, TF('ImGui_FocusedFlags_RootAndChildWindows')) 
+      and reaper.ImGui_IsKeyPressed(ctx, KEY_ESC, false) then
+      close_after_apply = true
+    end
+
+
+
     -- Top row: Undo / Redo / Preview first
     draw_top_bar()
     reaper.ImGui_Separator(ctx)
