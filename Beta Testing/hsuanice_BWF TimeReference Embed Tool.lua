@@ -1,6 +1,6 @@
 --[[
 @description Embed BWF TimeReference to Active take from Take 1 or Current Position TC
-@version 0.7.3
+@version 0.7.4
 @author hsuanice
 
 @about
@@ -27,13 +27,22 @@
   ReaImGui: https://github.com/cfillion/reaper-imgui
 
 @changelog
+  v0.7.4
+    - Option 2: refine the "Yes to All" flow — after the first "Yes", ask once whether to apply to all remaining items.
+      If "No", do not ask again for the rest of this run; if "Yes", overwrite all remaining without further prompts.
+    - Batch flags are reset per run; no duplicate "apply to all" prompts.
+    - Minor copy and doc cleanups.
+
   v0.7.3
-    - Add overwirte to all for Option 2 worning.
+    - Option 2: add "Yes to All" choice to overwrite remaining items without per-item prompts.
+
   v0.7.2
-    - Add overwrite warning for Option 2 now shows Track name and Project-time position.
-    - Add warning before overwriting an existing TimeReference.
+    - Option 2: overwrite warning now shows Track name and Item start position in the project's time display.
+    - Add safety prompt before overwriting a non-zero TimeReference.
+
   v0.7.1
-    - Add Esc to cancel, add Cancel button.
+    - UI: ESC to close; add "Cancel" button.
+    - Remove ImGui_DestroyContext usage; clean UI shutdown.
 ]]
 
 local R = reaper
@@ -221,18 +230,25 @@ local function perform_embed(mode)
   -- When true, overwrite all remaining items without further prompts (Option 2 only).
   local yes_to_all = false
 
+    -- Ask the "apply to all?" question at most once per run.
+  local asked_apply_all = false
+
   R.Undo_BeginBlock()
 
   -- Prompt wrapper that supports a "Yes to All" flow for Option 2.
-  -- Returns "yes" | "no" | "cancel". If user picks "Yes" and then "Apply to all",
-  -- it sets yes_to_all=true so subsequent items won't prompt again.
+  -- Returns "yes" | "no" | "cancel".
+  -- Behavior:
+  --   * If yes_to_all is true -> always "yes" without prompting.
+  --   * If user presses "Yes" and we have NOT asked the "apply to all?" question yet,
+  --     ask it once; if user chooses Yes there, set yes_to_all=true.
+  --   * If user chooses "No" on the "apply to all?" question, we set asked_apply_all=true
+  --     so we won't ask that secondary question again for the rest of the batch.
   local function ask_overwrite_TR_with_all(it, dst_path, existing_tr, new_tr, item_start_pos)
-    -- If user already chose "Yes to All", auto-approve.
     if yes_to_all then
       return "yes"
     end
 
-    -- Build the same contextual message you already had
+    -- Build contextual message (track, file, path, and project-time)
     local track_lbl = item_track_label(it)
     local proj_pos  = format_project_time(item_start_pos or 0)
     local fname     = base(dst_path)
@@ -256,13 +272,15 @@ local function perform_embed(mode)
       "Cancel = Abort batch"
     }, "\n")
 
-    -- First dialog: Yes / No / Cancel
     local btn = reaper.MB(prompt, "BWF MetaEdit Tool", 3) -- 3 = Yes/No/Cancel
     if btn == 6 then
-      -- Second dialog: apply to all the remaining items?
-      local all_btn = reaper.MB("Apply this choice to all remaining items?", "BWF MetaEdit Tool", 4) -- 4 = Yes/No
-      if all_btn == 6 then
-        yes_to_all = true
+      -- Only the first time we choose "Yes", we offer "apply to all?".
+      if not asked_apply_all then
+        local all_btn = reaper.MB("Apply this choice to all remaining items?", "BWF MetaEdit Tool", 4) -- 4 = Yes/No
+        asked_apply_all = true
+        if all_btn == 6 then
+          yes_to_all = true
+        end
       end
       return "yes"
     elseif btn == 7 then
@@ -271,6 +289,8 @@ local function perform_embed(mode)
       return "cancel"
     end
   end
+
+
 
   for i, it in ipairs(items) do
     if not it or not R.ValidatePtr(it, "MediaItem*") then
