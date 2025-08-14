@@ -1,6 +1,6 @@
 --[[
 @description Embed BWF TimeReference to Active take from Take 1 or Current Position TC
-@version 0.7.2
+@version 0.7.3
 @author hsuanice
 
 @about
@@ -27,9 +27,10 @@
   ReaImGui: https://github.com/cfillion/reaper-imgui
 
 @changelog
+  v0.7.3
+    - Add overwirte to all for Option 2 worning.
   v0.7.2
-    - Fix: remove duplicate helper definitions that caused nil-call errors.
-    - Add: overwrite warning for Option 2 now shows Track name and Project-time position.
+    - Add overwrite warning for Option 2 now shows Track name and Project-time position.
     - Add warning before overwriting an existing TimeReference.
   v0.7.1
     - Add Esc to cancel, add Cancel button.
@@ -217,7 +218,59 @@ local function perform_embed(mode)
   local ok_cnt, fail_cnt, skip_cnt = 0, 0, 0
   local modified, aborted = {}, false
 
+  -- When true, overwrite all remaining items without further prompts (Option 2 only).
+  local yes_to_all = false
+
   R.Undo_BeginBlock()
+
+  -- Prompt wrapper that supports a "Yes to All" flow for Option 2.
+  -- Returns "yes" | "no" | "cancel". If user picks "Yes" and then "Apply to all",
+  -- it sets yes_to_all=true so subsequent items won't prompt again.
+  local function ask_overwrite_TR_with_all(it, dst_path, existing_tr, new_tr, item_start_pos)
+    -- If user already chose "Yes to All", auto-approve.
+    if yes_to_all then
+      return "yes"
+    end
+
+    -- Build the same contextual message you already had
+    local track_lbl = item_track_label(it)
+    local proj_pos  = format_project_time(item_start_pos or 0)
+    local fname     = base(dst_path)
+    local fpath     = dst_path or "(nil)"
+
+    local prompt = table.concat({
+      "The active take already has a non-zero TimeReference.",
+      "",
+      "Track: "..track_lbl,
+      "File:  "..fname,
+      "Path:  "..fpath,
+      "Item start (project time): "..proj_pos,
+      "",
+      ("Existing TR: %d samples"):format(existing_tr or 0),
+      ("New TR (Item Start): %d samples"):format(new_tr or 0),
+      "",
+      "Overwrite with the new value?",
+      "",
+      "Yes = Overwrite",
+      "No  = Skip this item",
+      "Cancel = Abort batch"
+    }, "\n")
+
+    -- First dialog: Yes / No / Cancel
+    local btn = reaper.MB(prompt, "BWF MetaEdit Tool", 3) -- 3 = Yes/No/Cancel
+    if btn == 6 then
+      -- Second dialog: apply to all the remaining items?
+      local all_btn = reaper.MB("Apply this choice to all remaining items?", "BWF MetaEdit Tool", 4) -- 4 = Yes/No
+      if all_btn == 6 then
+        yes_to_all = true
+      end
+      return "yes"
+    elseif btn == 7 then
+      return "no"
+    else
+      return "cancel"
+    end
+  end
 
   for i, it in ipairs(items) do
     if not it or not R.ValidatePtr(it, "MediaItem*") then
@@ -278,8 +331,10 @@ local function perform_embed(mode)
 
             local do_write = true
             if mode == 2 and (tonumber(existing_tr or 0) ~= 0) then
+              -- Provide track label and project-time position in the prompt
               local item_start_pos = R.GetMediaItemInfo_Value(it, "D_POSITION") or 0.0
-              local ans = confirm_overwrite_TR_with_context(it, dst_path, existing_tr, target_tr, item_start_pos)
+              -- Use the wrapper that supports "Yes to All"
+              local ans = ask_overwrite_TR_with_all(it, dst_path, existing_tr, target_tr, item_start_pos)
               if ans == "cancel" then
                 aborted = true
                 msg("    [ABORT] user canceled the batch")
