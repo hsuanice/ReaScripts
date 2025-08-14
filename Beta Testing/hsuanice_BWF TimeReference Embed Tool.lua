@@ -1,6 +1,6 @@
 --[[
 @description Embed BWF TimeReference to Active take from Take 1 or Current Position TC
-@version 0.7.1
+@version 0.7.2
 @author hsuanice
 
 @about
@@ -27,16 +27,13 @@
   ReaImGui: https://github.com/cfillion/reaper-imgui
 
 @changelog
+  v0.7.2
+    - Fix: remove duplicate helper definitions that caused nil-call errors.
+    - Add: overwrite warning for Option 2 now shows Track name and Project-time position.
+    - Add warning before overwriting an existing TimeReference.
   v0.7.1
     - Add Esc to cancel, add Cancel button.
-  v0.7.x
-    - Batch-safe refresh and shell robustness.
-  v0.6.x
-    - Batch write & verify TimeReference; improved console diagnostics.
-  v0.5.x
-    - Initial ReaImGui UI with two TC embed options, prompt to refresh items.
 ]]
-
 
 local R = reaper
 
@@ -52,30 +49,30 @@ local function msg(s) R.ShowConsoleMsg(tostring(s).."\n") end
 local function base(p) return (p and p:match("([^/\\]+)$")) or tostring(p) end
 local function is_wav(p) return p and p:lower():sub(-4)==".wav" end
 
--- Wrap a shell command so ExecProcess runs it via a shell (handles spaces/quotes)
+-- Shell wrapper for ExecProcess (handles spaces/quotes)
 local function sh_wrap(cmd)
   if IS_WIN then
     return 'cmd.exe /C "'..cmd..'"'
   else
-    return "/bin/sh -lc '"..cmd:gsub("'",[['"'"']]).."'" -- safe-escape single quotes
+    return "/bin/sh -lc '"..cmd:gsub("'",[['"'"']]).."'" -- escape single quotes safely
   end
 end
 
--- Execute a shell command and return exit code and stdout
+-- Execute a shell command, return exit code and stdout
 local function exec_shell(cmd, ms)
   local ret = R.ExecProcess(sh_wrap(cmd), ms or 20000) or ""
   local code, out = ret:match("^(%d+)\n(.*)$")
   return tonumber(code or -1), (out or "")
 end
 
--- Check bwfmetaedit executable works
+-- Check bwfmetaedit executable
 local function test_cli(p)
   if not p or p=="" then return false end
   local code = select(1, exec_shell('"'..p..'" --Version', 4000))
   return code == 0
 end
 
--- Resolve bwfmetaedit path, remember in extstate
+-- Resolve bwfmetaedit path (remember via extstate)
 local function resolve_cli()
   local saved = R.GetExtState(EXT_NS, EXT_KEY)
   if saved ~= "" and test_cli(saved) then return saved end
@@ -108,7 +105,7 @@ local function resolve_cli()
   return nil
 end
 
--- Read TimeReference via bwfmetaedit --out-xml=-
+-- Read TimeReference via --out-xml=-
 local function read_TR(cli, wav_path)
   local cmd = ('"%s" --out-xml=- "%s"'):format(cli, wav_path)
   local code, out = exec_shell(cmd, 20000)
@@ -123,46 +120,52 @@ local function write_TR(cli, wav_path, tr)
   return code, out
 end
 
+-- Track label: "Track <index>: <name>"
+local function item_track_label(it)
+  local tr = it and reaper.GetMediaItem_Track(it)
+  if not tr then return "(no track)" end
+  local _, name = reaper.GetTrackName(tr)
+  local idx = reaper.CSurf_TrackToID(tr, false) or 0
+  if not name or name == "" then
+    return ("Track %d"):format(idx)
+  end
+  return ("Track %d: %s"):format(idx, name)
+end
 
--- Ask user before overwriting a non-zero TimeReference on the destination.
--- Returns "yes" | "no" | "cancel".
-local function confirm_overwrite_TR(dst_path, existing, target)
-  local msg = (
-    "The active take already has a non-zero TimeReference.\n\n" ..
-    "File: %s\n" ..
-    "Existing TR: %d samples\n" ..
-    "New TR (Item Start): %d samples\n\n" ..
-    "Overwrite with the new value?\n\n" ..
-    "Yes = Overwrite\nNo = Skip this item\nCancel = Abort batch"
-  ):format(base(dst_path or "(unknown)"), tonumber(existing or 0), tonumber(target or 0))
+-- Project time formatter (uses project display: timecode / bars:beats / etc.)
+local function format_project_time(pos)
+  return reaper.format_timestr_pos(pos or 0, "", -1)
+end
 
-  -- 3 = MB_YESNOCANCEL; return: 6=Yes, 7=No, 2=Cancel
-  local btn = R.MB(msg, "BWF MetaEdit Tool", 3)
+-- Overwrite warning with track/file/path/project-time context (Option 2)
+local function confirm_overwrite_TR_with_context(it, dst_path, existing_tr, new_tr, item_start_pos)
+  local track_lbl = item_track_label(it)
+  local proj_pos  = format_project_time(item_start_pos or 0)
+  local fname     = base(dst_path)
+  local fpath     = dst_path or "(nil)"
+
+  local prompt = table.concat({
+    "The active take already has a non-zero TimeReference.",
+    "",
+    "Track: "..track_lbl,
+    "File:  "..fname,
+    "Path:  "..fpath,
+    "Item start (project time): "..proj_pos,
+    "",
+    ("Existing TR: %d samples"):format(existing_tr or 0),
+    ("New TR (Item Start): %d samples"):format(new_tr or 0),
+    "",
+    "Overwrite with the new value?",
+    "",
+    "Yes = Overwrite",
+    "No  = Skip this item",
+    "Cancel = Abort batch"
+  }, "\n")
+
+  local btn = reaper.MB(prompt, "BWF MetaEdit Tool", 3) -- 3 = Yes/No/Cancel
   if btn == 6 then return "yes"
   elseif btn == 7 then return "no"
   else return "cancel" end
-end
-
-
-
-
-
-
-
--- Get media source path of a take
-local function take_path(take)
-  local src = take and R.GetMediaItemTake_Source(take) or nil
-  return src and R.GetMediaSourceFileName(src, "") or nil
-end
-
--- Get sample rate of a take (fallback to project SR)
-local function take_sr(take)
-  local src = take and R.GetMediaItemTake_Source(take) or nil
-  local sr = src and select(2, R.GetMediaSourceSampleRate(src)) or 0
-  if not sr or sr <= 0 then
-    sr = R.GetSetProjectInfo(0, "PROJECT_SRATE", 0, false) or 48000
-  end
-  return math.floor(sr + 0.5)
 end
 
 -- Select only specific items
@@ -176,7 +179,7 @@ local function select_only(items)
   R.UpdateArrange()
 end
 
--- Offline → Online → Rebuild peaks for given items
+-- Offline → Online → Rebuild peaks
 local function refresh_and_rebuild(modified_items)
   if not modified_items or #modified_items == 0 then return end
   select_only(modified_items)
@@ -185,7 +188,11 @@ local function refresh_and_rebuild(modified_items)
   R.Main_OnCommand(40441, 0) -- Peaks: Rebuild peaks for selected items
 end
 
--- Core worker. mode=1 (take1->active) or mode=2 (item start -> active)
+-- =========================
+-- Core worker
+-- =========================
+
+-- mode=1 (take1->active) or mode=2 (item start -> active)
 local function perform_embed(mode)
   local cli = resolve_cli()
   if not cli then
@@ -201,20 +208,14 @@ local function perform_embed(mode)
     return
   end
 
-  -- Snapshot selection to avoid side-effects
   local items = {}
   for i=0, n_sel-1 do items[#items+1] = R.GetSelectedMediaItem(0, i) end
 
   R.ClearConsole()
   msg(("=== BWF MetaEdit ===\nCLI : %s\nSel : %d\n"):format(cli, #items))
 
-  -- Counters and flags for the batch
   local ok_cnt, fail_cnt, skip_cnt = 0, 0, 0
-  local modified = {}
-  local aborted  = false  -- set to true if user presses Cancel on overwrite prompt
-
-  local ok_cnt, fail_cnt, skip_cnt = 0, 0, 0
-  local modified = {}
+  local modified, aborted = {}, false
 
   R.Undo_BeginBlock()
 
@@ -228,7 +229,11 @@ local function perform_embed(mode)
         skip_cnt = skip_cnt + 1
         msg(("Item %d [SKIP] no active take"):format(i))
       else
-        local dst_path = take_path(takeA)
+        local dst_path = (function()
+          local src = R.GetMediaItemTake_Source(takeA)
+          return src and R.GetMediaSourceFileName(src, "") or nil
+        end)()
+
         msg(("Item %d -------------------------"):format(i))
         msg(("  dst : %s"):format(base(dst_path or "(nil)")))
         if not (dst_path and is_wav(dst_path)) then
@@ -239,7 +244,10 @@ local function perform_embed(mode)
 
           if mode == 1 then
             local take1 = R.GetMediaItemTake(it, 0)
-            local src_path = take_path(take1)
+            local src_path = (function()
+              local s = take1 and R.GetMediaItemTake_Source(take1) or nil
+              return s and R.GetMediaSourceFileName(s, "") or nil
+            end)()
             msg(("  src : %s"):format(base(src_path or "(nil)")))
             if not (take1 and src_path and is_wav(src_path)) then
               skip_cnt = skip_cnt + 1
@@ -253,21 +261,25 @@ local function perform_embed(mode)
               end
             end
           else
-            local sr = take_sr(takeA)
+            local sr  = (function()
+              local s = R.GetMediaItemTake_Source(takeA)
+              local v  = s and select(2, R.GetMediaSourceSampleRate(s)) or 0
+              if not v or v <= 0 then v = R.GetSetProjectInfo(0, "PROJECT_SRATE", 0, false) or 48000 end
+              return math.floor(v + 0.5)
+            end)()
             local pos = R.GetMediaItemInfo_Value(it, "D_POSITION") or 0.0
             target_tr = math.floor(pos * sr + 0.5)
             msg(("    itemStart=%.6fs, SR=%d -> TR=%d"):format(pos, sr, target_tr))
           end
 
           if target_tr then
-            -- Read existing TR on destination for safety prompt (only for Option 2).
             local existing_tr = select(1, read_TR(cli, dst_path))
             msg(("    EXIST dst TR : %s"):format(tostring(existing_tr)))
 
-            -- If mode=2 and destination already has a non-zero TR, ask user.
             local do_write = true
             if mode == 2 and (tonumber(existing_tr or 0) ~= 0) then
-              local ans = confirm_overwrite_TR(dst_path, existing_tr, target_tr)
+              local item_start_pos = R.GetMediaItemInfo_Value(it, "D_POSITION") or 0.0
+              local ans = confirm_overwrite_TR_with_context(it, dst_path, existing_tr, target_tr, item_start_pos)
               if ans == "cancel" then
                 aborted = true
                 msg("    [ABORT] user canceled the batch")
@@ -303,24 +315,14 @@ local function perform_embed(mode)
 
   R.Undo_EndBlock("BWF TimeReference embed", -1)
 
-
-  -- Build and print summary
   local summary = ("Summary: OK=%d  FAIL=%d  SKIP=%d"):format(ok_cnt, fail_cnt, skip_cnt)
+  if aborted then summary = summary .. "  (ABORTED)" end
+  msg(summary); msg("=== End ===")
 
-  -- Append aborted marker if user canceled during option 2 overwrite prompt
-  if aborted then
-    summary = summary .. "  (ABORTED)"
-  end
-
-  msg(summary)
-  msg("=== End ===")
-
-  -- (Optional) extra notice when aborted; delete this block if you don't want an extra popup
   if aborted then
     R.MB("Operation was aborted by user.\n\n" .. summary, "BWF TimeReference", 0)
   end
 
-  -- Ask to refresh (offline→online→rebuild peaks) if there are modified items
   if #modified > 0 then
     local btn = R.MB(
       summary .. ("\n\nRefresh now?\n(%d item(s) will be refreshed)"):format(#modified),
@@ -334,29 +336,12 @@ local function perform_embed(mode)
   end
 end
 
-
--- Close the current ImGui window when ESC is pressed.
--- It ignores ESC while typing into a widget (so it won't close while editing a text field).
-local function esc_to_close(ctx)
-  -- Close only if our window (or its children) has focus,
-  -- and no widget is currently active (typing/editing).
-  local focused = reaper.ImGui_IsWindowFocused(ctx, reaper.ImGui_FocusedFlags_AnyWindow())
-  local typing  = reaper.ImGui_IsAnyItemActive(ctx)
-  local esc     = reaper.ImGui_IsKeyPressed(ctx, reaper.ImGui_Key_Escape(), false)
-  return focused and esc
-end
-
-
-
-
-
 -- =========================
 -- UI (ReaImGui)
 -- =========================
 
 local has_imgui = type(reaper.ImGui_CreateContext) == "function"
 if not has_imgui then
-  -- Fallback UI when ReaImGui is not installed
   local ok, inp = R.GetUserInputs("BWF MetaEdit Tool", 1, "Select: 1=Take1→Active, 2=ItemStart→Active", "")
   if not ok then return end
   local mode = tonumber((inp or ""):match("(%d+)") or "")
@@ -366,49 +351,26 @@ if not has_imgui then
 end
 
 local imgui = reaper
--- Window title: BWF MetaEdit Tool
 local ctx  = imgui.ImGui_CreateContext('BWF MetaEdit Tool', imgui.ImGui_ConfigFlags_NoSavedSettings())
-local FONT = imgui.ImGui_CreateFont('sans-serif', 16)
-imgui.ImGui_Attach(ctx, FONT)
+local FONT = imgui.ImGui_CreateFont('sans-serif', 16); imgui.ImGui_Attach(ctx, FONT)
 
--- Unify button sizes; the 3rd button is "Cancel"
 local BTN_W, BTN_H = 350, 28
-
-local chosen_mode  = nil     -- 1 or 2 (trigger write on click)
-local should_close = false   -- set true by Cancel or ESC
+local chosen_mode, should_close = nil, false
 
 local function loop()
-  -- Create the window once with a reasonable size
   imgui.ImGui_SetNextWindowSize(ctx, 360, 180, imgui.ImGui_Cond_Once())
-
-  -- Begin the window; "open" becomes false if user clicks the X button
   local visible, open = imgui.ImGui_Begin(ctx, 'BWF MetaEdit Tool', true)
   if visible then
     imgui.ImGui_Text(ctx, 'Write BWF TimeReference to ACTIVE take:')
     imgui.ImGui_Dummy(ctx, 1, 6)
 
-    -- Button 1: Embed Take 1 TC
-    if imgui.ImGui_Button(ctx, 'Embed Take 1 TC', BTN_W, BTN_H) then
-      chosen_mode = 1
-    end
-
+    if imgui.ImGui_Button(ctx, 'Embed Take 1 TC', BTN_W, BTN_H) then chosen_mode = 1 end
     imgui.ImGui_Dummy(ctx, 1, 6)
-
-    -- Button 2: Embed TC to Current Position
-    if imgui.ImGui_Button(ctx, 'Embed TC to Current Position', BTN_W, BTN_H) then
-      chosen_mode = 2
-    end
-
+    if imgui.ImGui_Button(ctx, 'Embed TC to Current Position', BTN_W, BTN_H) then chosen_mode = 2 end
     imgui.ImGui_Dummy(ctx, 1, 6)
+    if imgui.ImGui_Button(ctx, 'Cancel', BTN_W, BTN_H) then should_close = true end
 
-    -- Button 3: Cancel (same size, third row)
-    if imgui.ImGui_Button(ctx, 'Cancel', BTN_W, BTN_H) then
-      should_close = true
-    end
-
-    -- ESC to close:
-    -- Only close if the window (or its children) is focused
-    -- and no item is currently active (avoid closing while editing).
+    -- ESC to close (only when window focused and no active widget)
     local esc = imgui.ImGui_IsKeyPressed(ctx, imgui.ImGui_Key_Escape(), false)
     if esc
        and imgui.ImGui_IsWindowFocused(ctx, imgui.ImGui_FocusedFlags_RootAndChildWindows())
@@ -420,19 +382,9 @@ local function loop()
     imgui.ImGui_End(ctx)
   end
 
-  -- Exit conditions: user closed the window, pressed ESC, or clicked Cancel
-  if not open or should_close then
-    return
-  end
-
-  -- If a mode was chosen, run the worker once and exit the UI
-  if chosen_mode then
-    perform_embed(chosen_mode)
-    return
-  end
-
+  if not open or should_close then return end
+  if chosen_mode then perform_embed(chosen_mode); return end
   R.defer(loop)
 end
 
 loop()
-
