@@ -1,9 +1,9 @@
 --[[
-@description ReaImGUI - Import audio files per folder into separate tracks, poly and channel splited files.
-@version 0.1.1
+@description ReaImGUI - Import audio: one folder -> one folder track, with child tracks (Sequence only, streaming, Stop button, pre-confirm & finish summary). Root treated as a folder. Supports channel-split patterns: ".A<number>" or "_<number>"
+@version 0.2
 @author hsuanice
 @about
-  - Pre-confirm dialog: shows total folders/files, lets you choose channel naming pattern [.A<number>] or [_<number>], then buttons [Import] / [Cancel].
+  - Pre-confirm dialog: shows total folders/files, lets you choose channel naming pattern or custom set, then buttons [Import] / [Cancel].
     - Sequence only (append at end of target track).
     - Every directory that contains audio becomes a folder parent track (including the selected root).
     - Non-channel-split files (.A/_ not matched) go onto the PARENT folder track (one track per folder, including root).
@@ -22,12 +22,13 @@
   - js_ReaScriptAPI
   - ReaImGUI (ReaScript ImGui binding)
   
-  Note:
-  - This is a 0.1 beta release for internal testing.
+ 
   
   This script was generated using ChatGPT based on design concepts and iterative testing by hsuanice.
   hsuanice served as the workflow designer, tester, and integrator for this tool.
+
 @changelog
+  v0.2 - Add custom channel pattern input as thrid options
   v0.1.1 - Update description
   v0.1 - Beta release
 --]]
@@ -38,6 +39,14 @@
 ---------------------------------------
 local JOB_SIZE = 8          -- files per frame; raise for speed
 ---------------------------------------
+
+-- Channel parsing mode switches (for split-channel naming)
+-- 1 = ".A<number>"  (e.g., W-001.A7.wav)
+-- 2 = "_<number>"   (e.g., W-001_7.wav)
+-- 3 = custom mask (user enters a mask with % as the channel digits)
+local CHAN_MODE = 1
+local CHAN_CUSTOM_MASK = ""  -- used only when CHAN_MODE == 3
+
 
 -- ========= helpers =========
 local function log(s) reaper.ShowConsoleMsg(tostring(s).."\n") end
@@ -102,6 +111,55 @@ local function nat_less(a,b)
   end
   return a<b
 end
+
+
+-- ===== Channel parsers =====
+local function chan_from_U(fn)  -- "_<number>.wav"
+  local n = fn:match("_(%d+)%.[^%.]+$") or fn:match("_(%d+)$")
+  if n then return tonumber(n) end
+end
+
+-- 將使用者自訂的 mask 轉成 Lua pattern，% 代表捕捉數字
+-- 例：  "%_AAP" -> "(%d+)_AAP"   或   "[chan %]" -> "%[chan (%d+)%]"
+local function mask_to_pattern(mask)
+  if not mask or mask == "" then return nil end
+  -- 先 escape Lua pattern 特殊字元
+  local esc = mask:gsub("([%%%^%$%(%)%.%[%]%*%+%-%?])", "%%%1")
+  -- 將單一 % 轉成 (%d+)
+  esc = esc:gsub("%%%%", "%%")          -- 先保護 "%%" -> "%"
+  esc = esc:gsub("%%", "(%%d+)")        -- 單個 % => (%d+)
+  return esc
+end
+
+local function chan_from_custom(fn, mask)
+  local pat = mask_to_pattern(mask)
+  if not pat then return nil end
+  -- 在副檔名前比對一次、整個檔名再比對一次，增加容錯
+  local base = fn:match("([^/\\]+)$") or fn
+  local stemOnly = base:gsub("%.%w+$","")
+  local cap = stemOnly:match(pat) or base:match(pat)
+  if cap and tonumber(cap) then return tonumber(cap) end
+end
+
+
+-- 統一入口：依 CHAN_MODE 取出 channel number
+local function chan_from_filename(fn)
+  if CHAN_MODE == 1 then
+    return chan_from_A(fn)
+  elseif CHAN_MODE == 2 then
+    return chan_from_U(fn)
+  elseif CHAN_MODE == 3 then
+    return chan_from_custom(fn, CHAN_CUSTOM_MASK)
+  else
+    return chan_from_A(fn) -- 安全預設
+  end
+end
+
+
+
+
+
+
 
 -- ======= (we no longer use TC for placement; kept here only if needed later) =======
 local function meta(file,key)
@@ -253,22 +311,7 @@ local function finish_all_parents()
   if current_parent_key then finish_parent(current_parent_key) end
 end
 
--- ========= Channel pattern choice =========
--- Default keeps backward compatibility: ".A<number>"
-local channel_pattern_choice = ".A"  -- allowed values: ".A" or "_"
 
-local function chan_from_filename(fn)
-  -- Return channel number according to user's chosen pattern; nil if not matched
-  if channel_pattern_choice == ".A" then
-    local a = fn:match("%.[Aa](%d+)%.[^%.]+$")   -- ...A12.WAV
-    if a then return tonumber(a) end
-  elseif channel_pattern_choice == "_" then
-    -- match trailing "_<num>.ext" (right before file extension)
-    local u = fn:match("._(%d+)%.[^%.]+$")       -- ..._12.WAV
-    if u then return tonumber(u) end
-  end
-  return nil
-end
 
 -- ========= UIs (no Destroy/Detach) =========
 local UI_PRE = { ctx=nil, choice=nil }       -- "import" or "cancel"
@@ -287,16 +330,7 @@ local function ui_pre_open(base_name, folders, files, on_decide)
       reaper.ImGui_Text(UI_PRE.ctx, ('Folders: %d    Files: %d'):format(folders, files))
       reaper.ImGui_Separator(UI_PRE.ctx)
 
-      reaper.ImGui_Text(UI_PRE.ctx, 'Channel split pattern (choose one):')
-      -- radio: ".A<number>"
-      local a_selected = (channel_pattern_choice == ".A")
-      local u_selected = (channel_pattern_choice == "_")
-      if reaper.ImGui_RadioButton(UI_PRE.ctx, '.A<number>   e.g. "File.A3.wav"', a_selected) then
-        channel_pattern_choice = ".A"
-      end
-      if reaper.ImGui_RadioButton(UI_PRE.ctx, ' _<number>   e.g. "File_3.wav"', u_selected) then
-        channel_pattern_choice = "_"
-      end
+      
 
       reaper.ImGui_Separator(UI_PRE.ctx)
       local avail = reaper.ImGui_GetContentRegionAvail(UI_PRE.ctx)
@@ -379,6 +413,85 @@ local function esc_pressed()
   local state = reaper.JS_VKeys_GetState(0)
   return state and #state>=256 and (state:byte(27)~=0) or false
 end
+
+
+-- ========= choose channel mode (A#, _#, or custom) =========
+local function ui_choose_mode(on_done)
+  local ctx = reaper.ImGui_CreateContext('Channel Naming')
+  local mode = CHAN_MODE
+  local custom = CHAN_CUSTOM_MASK or ""
+
+  local decided = false
+  local accepted = false
+
+  local function loop()
+    if not ctx then return end
+    reaper.ImGui_SetNextWindowSize(ctx, 320, 220, reaper.ImGui_Cond_Once())
+    local vis, open = reaper.ImGui_Begin(ctx, 'Channel naming rule', true)
+    if vis then
+      reaper.ImGui_Text(ctx, 'Select split-channel naming:')
+      reaper.ImGui_Separator(ctx)
+
+      local changed
+
+      if reaper.ImGui_RadioButton(ctx, '".A%"  (e.g., File.A3.WAV', mode == 1) then mode = 1 end
+      if reaper.ImGui_RadioButton(ctx, '"_%"   (e.g., File_3.WAV)', mode == 2) then mode = 2 end
+      if reaper.ImGui_RadioButton(ctx, 'Custom (use % for digits)', mode == 3) then mode = 3 end
+
+      if mode == 3 then
+       -- inside: if mode == 3 then
+        reaper.ImGui_Spacing(ctx)
+        reaper.ImGui_Text(ctx, 'Custom example: "File[%_AAP].extension"')
+
+        -- lay out:  File [ INPUT ] .extension
+        local avail_w = reaper.ImGui_GetContentRegionAvail(ctx)
+        local input_w = math.max(120, avail_w - 140)  -- leave room for "File[" and "].extension"
+
+        reaper.ImGui_Text(ctx, 'File')
+        reaper.ImGui_SameLine(ctx)
+
+        reaper.ImGui_SetNextItemWidth(ctx, input_w)
+        local edited; edited, custom = reaper.ImGui_InputText(ctx, '##mask', custom or "", reaper.ImGui_InputTextFlags_CharsNoBlank())
+        if edited then custom = custom:gsub("%s+", "") end  -- keep mask compact (optional)
+
+        reaper.ImGui_SameLine(ctx)
+        reaper.ImGui_Text(ctx, '.extension')
+      
+
+      end
+
+      reaper.ImGui_Separator(ctx)
+      local avail = reaper.ImGui_GetContentRegionAvail(ctx)
+      local half = (avail - 12) / 2
+      if reaper.ImGui_Button(ctx, 'OK', half, 30) then
+        CHAN_MODE = mode
+        CHAN_CUSTOM_MASK = (mode == 3) and (custom or "") or ""
+        decided, accepted = true, true
+      end
+      reaper.ImGui_SameLine(ctx, nil, 12)
+      if reaper.ImGui_Button(ctx, 'Cancel', half, 30) then
+         decided, accepted = true, false
+      end
+    end
+    reaper.ImGui_End(ctx)
+    if decided or not open then
+      ctx = nil
+      on_done(accepted and true or false)
+      return
+    end
+
+    reaper.defer(loop)
+  end
+  reaper.defer(loop)
+end
+
+
+
+
+
+
+
+
 
 -- ========= runner =========
 local function run_after_confirm(base, list)
@@ -510,18 +623,23 @@ local function main()
   local base = choose_base(); if not base then return end
   local list = scan_all(base); if #list==0 then reaper.MB("No audio files found.","Import",0); return end
 
-  -- Pre-confirm counts
-  local folders_set = {}
-  for _,n in ipairs(list) do folders_set[n.rel or ""] = true end
-  local folder_count = 0; for _ in pairs(folders_set) do folder_count=folder_count+1 end
+  -- 先問 channel 命名規則
+  ui_choose_mode(function(ok)
+    if not ok then return end
 
-  -- Show pre-confirm dialog (with channel pattern choice); on Import -> run; on Cancel -> do nothing
-  ui_pre_open(basename(base), folder_count, #list, function(choice)
-    if choice == 'import' then
-      run_after_confirm(base, list)
-    else
-      -- cancelled
-    end
+    -- Pre-confirm counts
+    local folders_set = {}
+    for _,n in ipairs(list) do folders_set[n.rel or ""] = true end
+    local folder_count = 0; for _ in pairs(folders_set) do folder_count=folder_count+1 end
+
+    -- 再跑原本的「Import / Cancel」視窗
+    ui_pre_open(basename(base), folder_count, #list, function(choice)
+      if choice == 'import' then
+        run_after_confirm(base, list)
+      else
+        -- cancelled
+      end
+    end)
   end)
 end
 
