@@ -1,6 +1,6 @@
 --[[
 @description Pro Tools - Trim Clip To File Boundaries
-@version 0.1
+@version 0.1.1
 @author hsuanice
 @about
   Emulates Pro Tools' "Trim Clip to File Boundaries" behavior.  
@@ -21,38 +21,67 @@
   - REAPER ReaScript API (Lua)
   
   Note:
-  - This is a 0.1 beta release for internal testing.
-  
   This script was generated using ChatGPT based on design concepts and iterative testing by hsuanice.
   hsuanice served as the workflow designer, tester, and integrator for this tool.
+  
 @changelog
-  v0.1 - Beta release
+  v0.1.1 - Fix: items stretched beyond source by "SWS/AW: Trim selected items to fill selection"
+           could create a blank loop on the left (negative D_STARTOFFS). Now:
+           • Left side is clamped back to true file start (D_STARTOFFS → 0).
+           • Right side overrun/loop is unlooped and clamped to file end.
+           • normalize_loop_and_clamp() refactor to handle both sides robustly.
+           • Turn off B_LOOPSRC before clamping to honor pref 42218.
+           • Minor: take_offset/playrate/src_len declared local (avoid globals).
+           • Behavior preserved: never overlaps neighbors; fades untouched.
+  v0.1   - Beta release
 --]]
 reaper.Undo_BeginBlock()
 
 local num_items = reaper.CountSelectedMediaItems(0)
 if num_items == 0 then return end
 
+-- Drop-in replacement for normalize_loop_and_clamp()
 local function normalize_loop_and_clamp(item, take)
-  local len = reaper.GetMediaItemInfo_Value(item, "D_LENGTH")
-  local take_offset = reaper.GetMediaItemTakeInfo_Value(take, "D_STARTOFFS")
-  local playrate = reaper.GetMediaItemTakeInfo_Value(take, "D_PLAYRATE")
-  local source = reaper.GetMediaItemTake_Source(take)
-  local src_len, isQN = reaper.GetMediaSourceLength(source)
-  if isQN then return len, take_offset, playrate, src_len end
+  -- Read current geometry
+  local pos  = reaper.GetMediaItemInfo_Value(item, "D_POSITION")
+  local len  = reaper.GetMediaItemInfo_Value(item, "D_LENGTH")
+  local offs = reaper.GetMediaItemTakeInfo_Value(take, "D_STARTOFFS")
+  local rate = reaper.GetMediaItemTakeInfo_Value(take, "D_PLAYRATE")
+  rate = math.max(1e-12, rate)
 
-  local max_len_from_offset = math.max(0, (src_len - take_offset) / math.max(1e-12, playrate))
+  local src  = reaper.GetMediaItemTake_Source(take)
+  local src_len, isQN = reaper.GetMediaSourceLength(src)
+  if isQN then return len, offs, rate, src_len end
 
-  local is_loop = reaper.GetMediaItemInfo_Value(item, "B_LOOPSRC")
-  if is_loop == 1 or len > max_len_from_offset + 1e-9 then
+  -- ---- Right-side: unloop + clamp to file end ----
+  local max_len_from_offs = math.max(0, (src_len - offs) / rate)
+
+  if reaper.GetMediaItemInfo_Value(item, "B_LOOPSRC") == 1 or len > max_len_from_offs + 1e-9 then
+    -- turn off looping so 42218 can actually constrain the item
     reaper.SetMediaItemInfo_Value(item, "B_LOOPSRC", 0)
-    if len > max_len_from_offset then
-      reaper.SetMediaItemInfo_Value(item, "D_LENGTH", max_len_from_offset)
-      len = max_len_from_offset
+    if len > max_len_from_offs then
+      len = max_len_from_offs
+      reaper.SetMediaItemInfo_Value(item, "D_LENGTH", len)
     end
   end
 
-  return len, take_offset, playrate, src_len
+  -- ---- Left-side: clamp if start offset went negative (blank loop on the left) ----
+  if offs < 0 then
+    local overshoot = (-offs) / rate     -- seconds exceeded before file start
+    local new_pos   = pos + overshoot
+    local new_len   = math.max(0, len - overshoot)
+
+    reaper.SetMediaItemInfo_Value(item, "D_POSITION", new_pos)
+    reaper.SetMediaItemInfo_Value(item, "D_LENGTH",   new_len)
+    reaper.SetMediaItemTakeInfo_Value(take, "D_STARTOFFS", 0)
+
+    -- update locals so callers see the corrected geometry
+    pos  = new_pos
+    len  = new_len
+    offs = 0
+  end
+
+  return len, offs, rate, src_len
 end
 
 for i = 0, num_items - 1 do
@@ -65,7 +94,8 @@ for i = 0, num_items - 1 do
 
   if not take or reaper.TakeIsMIDI(take) then goto continue end
 
-  -- Normalize loop/length first
+  -- Normalize loop/length first (handles both right overrun and left blank-loop)
+  local take_offset, playrate, src_len
   len, take_offset, playrate, src_len = normalize_loop_and_clamp(item, take)
   pos = reaper.GetMediaItemInfo_Value(item, "D_POSITION")
   item_end = pos + len
@@ -74,7 +104,7 @@ for i = 0, num_items - 1 do
   local available_tail = max_total_len - (take_offset / playrate + len)
   if available_tail < 0 then available_tail = 0 end
 
-  -- Find neighbors
+  -- Find neighbors on the same track
   local item_count = reaper.CountTrackMediaItems(track)
   local prev_edge = 0
   local next_pos = math.huge
@@ -95,7 +125,7 @@ for i = 0, num_items - 1 do
     end
   end
 
-  -- Extend right edge
+  -- Extend right edge up to next item or file end
   local want_extend = (next_pos < math.huge) and (next_pos - item_end) or available_tail
   local actual_extend = math.min(want_extend, available_tail)
   if actual_extend > 0 then
@@ -104,7 +134,7 @@ for i = 0, num_items - 1 do
     item_end = pos + len
   end
 
-  -- Reveal left edge
+  -- Reveal left edge up to previous item or file start
   local max_reveal = (take_offset / playrate)
   local want_reveal = pos - prev_edge
   local actual_reveal = math.min(want_reveal, math.max(0, max_reveal))
@@ -123,4 +153,3 @@ end
 
 reaper.UpdateArrange()
 reaper.Undo_EndBlock("Extend item both edges to item or full content", -1)
-
