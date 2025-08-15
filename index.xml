@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<index version="1" name="hsuanice Scripts" commit="71f5fda343495aa7e39aa25e19fe7814208ba5a2">
+<index version="1" name="hsuanice Scripts" commit="bd6b32a7ab0c13fa53d8f96f5d8d1e01134181bb">
   <category name="Beta Testing">
     <reapack name="hsuanice_BWF TimeReference Embed Tool.lua" type="script" desc="Embed BWF TimeReference to Active take from Take 1 or Current Position TC">
       <version name="0.7.1" author="hsuanice" time="2025-08-14T17:52:57Z">
@@ -196,7 +196,7 @@
         <source main="main">https://github.com/hsuanice/ReaScripts/raw/20128d4abc5ecce7bcaa7840d72a69ef1fcdc68c/Beta%20Testing/hsuanice_Hover%20Mode%20Trim%20or%20Extend%20Right%20Edge%20of%20Item.lua</source>
       </version>
     </reapack>
-    <reapack name="hsuanice_Import audio files per folder into separate tracks.lua" type="script" desc="ReaImGui - Import audio: one folder -&gt; one folder track, with child tracks (sequence only, streaming, Stop button, pre-confirm &amp; finish summary). Root treated as a folder. Supports channel-split patterns: &quot;.A&lt;number&gt;&quot; or &quot;_&lt;number&gt;&quot;">
+    <reapack name="hsuanice_Import audio files per folder into separate tracks.lua" type="script" desc="ReaImGui - Import audio: one folder per track; channel-split files go to child tracks. Sequence only.">
       <metadata>
         <description><![CDATA[{\rtf1\ansi\deff0{\fonttbl{\f0 \fswiss Helvetica;}{\f1 \fmodern Courier;}}
 {\colortbl;\red255\green0\blue0;\red0\green0\blue255;}
@@ -239,6 +239,9 @@ v0.1 - Beta release]]></changelog>
       </version>
       <version name="0.3.1" author="hsuanice" time="2025-08-15T12:40:12Z">
         <source main="main">https://github.com/hsuanice/ReaScripts/raw/71f5fda343495aa7e39aa25e19fe7814208ba5a2/Beta%20Testing/hsuanice_Import%20audio%20files%20per%20folder%20into%20separate%20tracks.lua</source>
+      </version>
+      <version name="0.4.0" author="hsuanice" time="2025-08-15T13:52:52Z">
+        <source main="main">https://github.com/hsuanice/ReaScripts/raw/bd6b32a7ab0c13fa53d8f96f5d8d1e01134181bb/Beta%20Testing/hsuanice_Import%20audio%20files%20per%20folder%20into%20separate%20tracks.lua</source>
       </version>
     </reapack>
     <reapack name="hsuanice_Item Reposition.lua" type="script" desc="ReaImGui - Item Reposition Tool (Interval + Mode + Undo)">
