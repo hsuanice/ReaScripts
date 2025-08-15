@@ -1,37 +1,38 @@
 --[[
 @description ReaImGui - Import audio: one folder -> one folder track, with child tracks (sequence only, streaming, Stop button, pre-confirm & finish summary). Root treated as a folder. Supports channel-split patterns: ".A<number>" or "_<number>"
-@version 0.2.1
+@version 0.3.1
 @author hsuanice
 @about
   - Pre-confirm dialog: shows total folders/files, lets you choose a channel naming pattern or a custom mask, then offers [Import] / [Cancel].
     - Sequence only (append at the end of the target track).
     - Every directory that contains audio becomes a folder parent track (including the selected root).
-    - Non-channel-split files (no ".A<number>" or "_<number>" match) go onto the PARENT folder track (one track per folder, including root).
-    - Channel-split files -> child tracks named "Ch XX" (XX is the parsed channel number).
+    - Non–channel-split files (no ".A<number>" or "_<number>" match) go onto the PARENT folder track (one track per folder, including root).
+    - Channel-split files → child tracks named "Ch XX" (XX is the parsed channel number).
     - Recursively scans all subfolders but does NOT nest folder tracks beyond two levels: each directory with files is its own parent+children block.
     - Streaming import with a small ReaImGui "Stop" window (ESC also works on some systems). On completion/abort: auto-close progress, then show a finish summary.
     - No ImGui Destroy/Detach calls (avoids crashes on some builds).
-  
+
   Features:
   - Built with ReaImGui for a compact, responsive UI.
   - Designed for fast, keyboard-light workflows.
   - Optionally leverages js_ReaScriptAPI for advanced interactions.
-  
+
   References:
   - REAPER ReaScript API (Lua)
   - js_ReaScriptAPI
   - ReaImGui (ReaScript ImGui binding)
-  
+
   This script was generated using ChatGPT based on design concepts and iterative testing by hsuanice.
   hsuanice served as the workflow designer, tester, and integrator for this tool.
 
 @changelog
+  v0.3.1 - Fix: ESC closes dialogs; remembers the last setting.
+         - Add Custom Mask Presets: 3 slots with clickable tokens; Save/Clear controls; focus returns to the custom input; presets persist via ExtState.
   v0.2.1 - Fix error when using ".A" option; translate Chinese comments to English.
   v0.2   - Add custom channel pattern input as the third option.
   v0.1.1 - Update description.
   v0.1   - Beta release.
 --]]
-
 
 
 ---------------------------------------
@@ -44,8 +45,46 @@ local JOB_SIZE = 8          -- files per frame; raise for speed
 -- 1 = ".A<number>"  (e.g., W-001.A7.wav)
 -- 2 = "_<number>"   (e.g., W-001_7.wav)
 -- 3 = custom mask (user enters a mask with % as the channel digits)
-local CHAN_MODE = 1
-local CHAN_CUSTOM_MASK = ""  -- used only when CHAN_MODE == 3
+
+-- Persist last choice
+local MODE_SECTION = "hsuanice_ImportAudio_Folder"
+local MODE_KEY     = "LastMode"
+local MASK_KEY     = "LastMask"
+
+local CHAN_MODE = tonumber(reaper.GetExtState(MODE_SECTION, MODE_KEY)) or 1
+local CHAN_CUSTOM_MASK = reaper.GetExtState(MODE_SECTION, MASK_KEY) or ""
+
+-- === Custom Mask Presets (ExtState) =========================================
+local MASK_PRESET_SECTION = "hsuanice_ImportAudio_Folder"
+local MASK_PRESET_KEY     = "CustomMaskPresets_v1"  -- newline-separated list
+local MAX_MASK_PRESETS    = 3
+
+local function load_mask_presets()
+  local s = reaper.GetExtState(MASK_PRESET_SECTION, MASK_PRESET_KEY)
+  local t = {}
+  if s and s ~= "" then
+    for line in s:gmatch("([^\n]+)") do
+      t[#t+1] = line
+    end
+  end
+  for i = #t + 1, MAX_MASK_PRESETS do t[i] = "" end
+  return t
+end
+
+local function save_mask_presets(presets)
+  local lines = {}
+  for i = 1, MAX_MASK_PRESETS do
+    local v = presets[i] or ""
+    v = v:gsub("[\r\n]", " ")  -- sanitize
+    lines[#lines+1] = v
+  end
+  reaper.SetExtState(MASK_PRESET_SECTION, MASK_PRESET_KEY, table.concat(lines, "\n"), true)
+end
+
+-- cache in memory for the UI session
+local mask_presets = load_mask_presets()
+local focus_custom_mask = false  -- when true, focus goes back to the custom input on next frame
+-- ============================================================================
 
 
 -- ========= helpers =========
@@ -175,16 +214,6 @@ local function chan_from_filename(fn)
 end
 
 
-
-
-
-
-
--- ======= (we no longer use TC for placement; kept here only if needed later) =======
-local function meta(file,key)
-  local ok,v=pcall(reaper.GetMediaFileMetadata,file,key)
-  if ok and v and v~="" then return v end
-end
 
 -- ========= scan (all depths). Each file node: abs, rel (full relative dir) =========
 local function scan_all(base)
@@ -357,6 +386,12 @@ local function ui_pre_open(base_name, folders, files, on_decide)
       if reaper.ImGui_Button(UI_PRE.ctx, 'Import', half, 34) then UI_PRE.choice='import' end
       reaper.ImGui_SameLine(UI_PRE.ctx, nil, 12)
       if reaper.ImGui_Button(UI_PRE.ctx, 'Cancel', half, 34) then UI_PRE.choice='cancel' end
+      if (reaper.ImGui_IsKeyPressed and reaper.ImGui_Key_Escape
+    and reaper.ImGui_IsKeyPressed(UI_PRE.ctx, reaper.ImGui_Key_Escape()))
+   or esc_pressed() then
+  UI_PRE.choice = 'cancel'
+end
+
     end
     reaper.ImGui_End(UI_PRE.ctx)
     if not open then UI_PRE.ctx=nil; on_decide('cancel'); return end
@@ -384,6 +419,7 @@ local function ui_progress_open(total_files, total_groups)
       reaper.ImGui_Separator(UI_PROGRESS.ctx)
       if reaper.ImGui_Button(UI_PROGRESS.ctx, 'Stop', 320, 28) then UI_PROGRESS.stop = true end
       reaper.ImGui_Text(UI_PROGRESS.ctx, '(ESC also works)')
+      if esc_any(UI_PROGRESS.ctx) then UI_PROGRESS.stop = true end
     end
     reaper.ImGui_End(UI_PROGRESS.ctx)
     if UI_PROGRESS.stop or not open then
@@ -427,12 +463,21 @@ local function ui_post_open(message)
   reaper.defer(loop)
 end
 
-local function esc_pressed()
+function esc_pressed()
   if not reaper.APIExists("JS_VKeys_GetState") then return false end
   local state = reaper.JS_VKeys_GetState(0)
   return state and #state>=256 and (state:byte(27)~=0) or false
 end
 
+-- Prefer ImGui key state if available; fall back to JS_VKeys
+function esc_any(ctx)
+  if reaper.ImGui_IsKeyPressed and reaper.ImGui_Key_Escape then
+    if reaper.ImGui_IsKeyPressed(ctx, reaper.ImGui_Key_Escape()) then
+      return true
+    end
+  end
+  return esc_pressed()
+end
 
 -- ========= choose channel mode (A#, _#, or custom) =========
 local function ui_choose_mode(on_done)
@@ -445,38 +490,78 @@ local function ui_choose_mode(on_done)
 
   local function loop()
     if not ctx then return end
-    reaper.ImGui_SetNextWindowSize(ctx, 320, 220, reaper.ImGui_Cond_Once())
+    reaper.ImGui_SetNextWindowSize(ctx, 320, 300, reaper.ImGui_Cond_Once())
     local vis, open = reaper.ImGui_Begin(ctx, 'Channel naming rule', true)
     if vis then
       reaper.ImGui_Text(ctx, 'Select split-channel naming:')
       reaper.ImGui_Separator(ctx)
 
-      local changed
-
       if reaper.ImGui_RadioButton(ctx, '".A%"  (e.g., File.A3.WAV)', mode == 1) then mode = 1 end
       if reaper.ImGui_RadioButton(ctx, '"_%"   (e.g., File_3.WAV)', mode == 2) then mode = 2 end
-      if reaper.ImGui_RadioButton(ctx, 'Custom (use % for digits)', mode == 3) then mode = 3 end
+      if reaper.ImGui_RadioButton(ctx, 'Custom Rule', mode == 3) then mode = 3 end
 
+      -- Custom UI
       if mode == 3 then
-       -- inside: if mode == 3 then
+        -- Instruction (do not repeat "Custom")
         reaper.ImGui_Spacing(ctx)
-        reaper.ImGui_Text(ctx, 'Custom example: "File[%_AAP].extension"')
+        reaper.ImGui_Text(ctx, 'use "%" for channel number')
 
-        -- lay out:  File [ INPUT ] .extension
-        local avail_w = reaper.ImGui_GetContentRegionAvail(ctx)
-        local input_w = math.max(120, avail_w - 140)  -- leave room for "File[" and "].extension"
+        -- Compute input width to layout as: File[ INPUT ].extension
+        local left_txt  = 'File'
+        local right_txt = '.extension'
+        local avail_w   = reaper.ImGui_GetContentRegionAvail(ctx) -- width
+        local left_w    = select(1, reaper.ImGui_CalcTextSize(ctx, left_txt))
+        local right_w   = select(1, reaper.ImGui_CalcTextSize(ctx, right_txt))
+        local pad       = 16
+        local input_w   = math.max(80, avail_w - left_w - right_w - pad)
 
-        reaper.ImGui_Text(ctx, 'File')
+        -- If a token was clicked, return keyboard focus to the input on the next frame
+        if focus_custom_mask then
+          reaper.ImGui_SetKeyboardFocusHere(ctx)
+          focus_custom_mask = false
+        end
+
+        -- Render: File[ INPUT ].extension
+        reaper.ImGui_Text(ctx, left_txt)
         reaper.ImGui_SameLine(ctx)
-
         reaper.ImGui_SetNextItemWidth(ctx, input_w)
-        local edited; edited, custom = reaper.ImGui_InputText(ctx, '##mask', custom or "", reaper.ImGui_InputTextFlags_CharsNoBlank())
-        if edited then custom = custom:gsub("%s+", "") end  -- keep mask compact (optional)
-
+        local edited; edited, custom = reaper.ImGui_InputText(
+            ctx, '##custom_mask', custom or "", 0)
+        if edited then CHAN_CUSTOM_MASK = custom end
         reaper.ImGui_SameLine(ctx)
-        reaper.ImGui_Text(ctx, '.extension')
-      
+        reaper.ImGui_Text(ctx, right_txt)
 
+        -- 3-column table to keep Preset and Save vertically aligned
+        reaper.ImGui_Spacing(ctx)
+        if reaper.ImGui_BeginTable(ctx, 'mask_preset_table', MAX_MASK_PRESETS, reaper.ImGui_TableFlags_SizingStretchProp()) then
+          -- Row 1: Preset tokens (click to insert into the input)
+          reaper.ImGui_TableNextRow(ctx)
+          for i = 1, MAX_MASK_PRESETS do
+            reaper.ImGui_TableNextColumn(ctx)
+            local v = mask_presets[i] or ""
+            local label = (v ~= "" and ('['..v..']##masktok'..i)) or ('Preset '..i..'##masktok'..i)
+            local disabled = (v == "")
+            if disabled then reaper.ImGui_BeginDisabled(ctx, true) end
+            if reaper.ImGui_Button(ctx, label) and not disabled then
+              custom = v
+              CHAN_CUSTOM_MASK = custom
+              focus_custom_mask = true
+            end
+            if disabled then reaper.ImGui_EndDisabled(ctx) end
+          end
+
+          -- Row 2: Save P1 / P2 / P3 (aligned under each preset)
+          reaper.ImGui_TableNextRow(ctx)
+          for i = 1, MAX_MASK_PRESETS do
+            reaper.ImGui_TableNextColumn(ctx)
+            if reaper.ImGui_SmallButton(ctx, ('Save P%d##masksave%d'):format(i, i)) then
+              mask_presets[i] = custom or ""
+              save_mask_presets(mask_presets)
+            end
+          end
+
+          reaper.ImGui_EndTable(ctx)
+        end
       end
 
       reaper.ImGui_Separator(ctx)
@@ -485,31 +570,29 @@ local function ui_choose_mode(on_done)
       if reaper.ImGui_Button(ctx, 'OK', half, 30) then
         CHAN_MODE = mode
         CHAN_CUSTOM_MASK = (mode == 3) and (custom or "") or ""
+        reaper.SetExtState(MODE_SECTION, MODE_KEY, tostring(CHAN_MODE), true)
+        reaper.SetExtState(MODE_SECTION, MASK_KEY, CHAN_CUSTOM_MASK or "", true)
         decided, accepted = true, true
+        
+
       end
       reaper.ImGui_SameLine(ctx, nil, 12)
       if reaper.ImGui_Button(ctx, 'Cancel', half, 30) then
          decided, accepted = true, false
       end
+      if esc_any(ctx) then decided, accepted = true, false end
     end
     reaper.ImGui_End(ctx)
+
     if decided or not open then
       ctx = nil
       on_done(accepted and true or false)
       return
     end
-
     reaper.defer(loop)
   end
   reaper.defer(loop)
 end
-
-
-
-
-
-
-
 
 
 -- ========= runner =========
