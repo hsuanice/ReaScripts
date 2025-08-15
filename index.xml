@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<index version="1" name="hsuanice Scripts" commit="4a5c58b4bc95f7439e80b74a059e488c188c0d62">
+<index version="1" name="hsuanice Scripts" commit="dc6a46a0b4ce7720a77469b46c074b027f403b24">
   <category name="Beta Testing">
     <reapack name="hsuanice_BWF TimeReference Embed Tool.lua" type="script" desc="Embed BWF TimeReference to Active take from Take 1 or Current Position TC">
       <version name="0.7.1" author="hsuanice" time="2025-08-14T17:52:57Z">
@@ -196,28 +196,28 @@
         <source main="main">https://github.com/hsuanice/ReaScripts/raw/20128d4abc5ecce7bcaa7840d72a69ef1fcdc68c/Beta%20Testing/hsuanice_Hover%20Mode%20Trim%20or%20Extend%20Right%20Edge%20of%20Item.lua</source>
       </version>
     </reapack>
-    <reapack name="hsuanice_Import audio files per folder into separate tracks.lua" type="script" desc="ReaImGUI - Import audio: one folder -&gt; one folder track, with child tracks (Sequence only, streaming, Stop button, pre-confirm &amp; finish summary). Root treated as a folder. Supports channel-split patterns: &quot;.A&lt;number&gt;&quot; or &quot;_&lt;number&gt;&quot;">
+    <reapack name="hsuanice_Import audio files per folder into separate tracks.lua" type="script" desc="ReaImGui - Import audio: one folder -&gt; one folder track, with child tracks (sequence only, streaming, Stop button, pre-confirm &amp; finish summary). Root treated as a folder. Supports channel-split patterns: &quot;.A&lt;number&gt;&quot; or &quot;_&lt;number&gt;&quot;">
       <metadata>
         <description><![CDATA[{\rtf1\ansi\deff0{\fonttbl{\f0 \fswiss Helvetica;}{\f1 \fmodern Courier;}}
 {\colortbl;\red255\green0\blue0;\red0\green0\blue255;}
 \widowctrl\hyphauto
 
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Pre-confirm dialog: shows total folders/files, lets you choose channel naming pattern or custom set, then buttons [Import] / [Cancel].\par}
-{\pard \ql \f0 \sa0 \li720 \fi-360 \endash \tx360\tab Sequence only (append at end of target track).\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Pre-confirm dialog: shows total folders/files, lets you choose a channel naming pattern or a custom mask, then offers [Import] / [Cancel].\par}
+{\pard \ql \f0 \sa0 \li720 \fi-360 \endash \tx360\tab Sequence only (append at the end of the target track).\par}
 {\pard \ql \f0 \sa0 \li720 \fi-360 \endash \tx360\tab Every directory that contains audio becomes a folder parent track (including the selected root).\par}
-{\pard \ql \f0 \sa0 \li720 \fi-360 \endash \tx360\tab Non-channel-split files (.A/_ not matched) go onto the PARENT folder track (one track per folder, including root).\par}
+{\pard \ql \f0 \sa0 \li720 \fi-360 \endash \tx360\tab Non-channel-split files (no ".A" or "_" match) go onto the PARENT folder track (one track per folder, including root).\par}
 {\pard \ql \f0 \sa0 \li720 \fi-360 \endash \tx360\tab Channel-split files -> child tracks named "Ch XX" (XX is the parsed channel number).\par}
-{\pard \ql \f0 \sa0 \li720 \fi-360 \endash \tx360\tab Scan all depths but do NOT nest folder tracks beyond 2 levels: each directory with files is its own parent+children block.\par}
-{\pard \ql \f0 \sa0 \li720 \fi-360 \endash \tx360\tab Streaming import with a small ReaImGui "Stop" window (ESC also works on some systems). On completion/abort: auto-close progress, then show finish summary.\par}
-{\pard \ql \f0 \sa0 \li720 \fi-360 \endash \tx360\tab No ImGui Destroy/Detach calls (to avoid crashes on some builds).\sa180\sa180\par}
+{\pard \ql \f0 \sa0 \li720 \fi-360 \endash \tx360\tab Recursively scans all subfolders but does NOT nest folder tracks beyond two levels: each directory with files is its own parent+children block.\par}
+{\pard \ql \f0 \sa0 \li720 \fi-360 \endash \tx360\tab Streaming import with a small ReaImGui "Stop" window (ESC also works on some systems). On completion/abort: auto-close progress, then show a finish summary.\par}
+{\pard \ql \f0 \sa0 \li720 \fi-360 \endash \tx360\tab No ImGui Destroy/Detach calls (avoids crashes on some builds).\sa180\sa180\par}
 {\pard \ql \f0 \sa180 \li0 \fi0 Features:\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Built with ReaImGUI for a compact, responsive UI.\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Built with ReaImGui for a compact, responsive UI.\par}
 {\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Designed for fast, keyboard-light workflows.\par}
 {\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Optionally leverages js_ReaScriptAPI for advanced interactions.\sa180\par}
 {\pard \ql \f0 \sa180 \li0 \fi0 References:\par}
 {\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab REAPER ReaScript API (Lua)\par}
 {\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab js_ReaScriptAPI\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab ReaImGUI (ReaScript ImGui binding)\sa180\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab ReaImGui (ReaScript ImGui binding)\sa180\par}
 {\pard \ql \f0 \sa180 \li0 \fi0 This script was generated using ChatGPT based on design concepts and iterative testing by hsuanice. hsuanice served as the workflow designer, tester, and integrator for this tool.\par}
 }
 ]]></description>
@@ -233,6 +233,9 @@ v0.1 - Beta release]]></changelog>
       </version>
       <version name="0.2" author="hsuanice" time="2025-08-14T07:19:47Z">
         <source main="main">https://github.com/hsuanice/ReaScripts/raw/61a45e8418c2253624c3ec353c07c326d42bafda/Beta%20Testing/hsuanice_Import%20audio%20files%20per%20folder%20into%20separate%20tracks.lua</source>
+      </version>
+      <version name="0.2.1" author="hsuanice" time="2025-08-15T09:34:04Z">
+        <source main="main">https://github.com/hsuanice/ReaScripts/raw/dc6a46a0b4ce7720a77469b46c074b027f403b24/Beta%20Testing/hsuanice_Import%20audio%20files%20per%20folder%20into%20separate%20tracks.lua</source>
       </version>
     </reapack>
     <reapack name="hsuanice_Item Reposition.lua" type="script" desc="ReaImGui - Item Reposition Tool (Interval + Mode + Undo)">
