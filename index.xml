@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<index version="1" name="hsuanice Scripts" commit="dc6a46a0b4ce7720a77469b46c074b027f403b24">
+<index version="1" name="hsuanice Scripts" commit="71f5fda343495aa7e39aa25e19fe7814208ba5a2">
   <category name="Beta Testing">
     <reapack name="hsuanice_BWF TimeReference Embed Tool.lua" type="script" desc="Embed BWF TimeReference to Active take from Take 1 or Current Position TC">
       <version name="0.7.1" author="hsuanice" time="2025-08-14T17:52:57Z">
@@ -205,8 +205,8 @@
 {\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Pre-confirm dialog: shows total folders/files, lets you choose a channel naming pattern or a custom mask, then offers [Import] / [Cancel].\par}
 {\pard \ql \f0 \sa0 \li720 \fi-360 \endash \tx360\tab Sequence only (append at the end of the target track).\par}
 {\pard \ql \f0 \sa0 \li720 \fi-360 \endash \tx360\tab Every directory that contains audio becomes a folder parent track (including the selected root).\par}
-{\pard \ql \f0 \sa0 \li720 \fi-360 \endash \tx360\tab Non-channel-split files (no ".A" or "_" match) go onto the PARENT folder track (one track per folder, including root).\par}
-{\pard \ql \f0 \sa0 \li720 \fi-360 \endash \tx360\tab Channel-split files -> child tracks named "Ch XX" (XX is the parsed channel number).\par}
+{\pard \ql \f0 \sa0 \li720 \fi-360 \endash \tx360\tab Non\u8211-channel-split files (no ".A" or "_" match) go onto the PARENT folder track (one track per folder, including root).\par}
+{\pard \ql \f0 \sa0 \li720 \fi-360 \endash \tx360\tab Channel-split files \u8594 ? child tracks named "Ch XX" (XX is the parsed channel number).\par}
 {\pard \ql \f0 \sa0 \li720 \fi-360 \endash \tx360\tab Recursively scans all subfolders but does NOT nest folder tracks beyond two levels: each directory with files is its own parent+children block.\par}
 {\pard \ql \f0 \sa0 \li720 \fi-360 \endash \tx360\tab Streaming import with a small ReaImGui "Stop" window (ESC also works on some systems). On completion/abort: auto-close progress, then show a finish summary.\par}
 {\pard \ql \f0 \sa0 \li720 \fi-360 \endash \tx360\tab No ImGui Destroy/Detach calls (avoids crashes on some builds).\sa180\sa180\par}
@@ -236,6 +236,9 @@ v0.1 - Beta release]]></changelog>
       </version>
       <version name="0.2.1" author="hsuanice" time="2025-08-15T09:34:04Z">
         <source main="main">https://github.com/hsuanice/ReaScripts/raw/dc6a46a0b4ce7720a77469b46c074b027f403b24/Beta%20Testing/hsuanice_Import%20audio%20files%20per%20folder%20into%20separate%20tracks.lua</source>
+      </version>
+      <version name="0.3.1" author="hsuanice" time="2025-08-15T12:40:12Z">
+        <source main="main">https://github.com/hsuanice/ReaScripts/raw/71f5fda343495aa7e39aa25e19fe7814208ba5a2/Beta%20Testing/hsuanice_Import%20audio%20files%20per%20folder%20into%20separate%20tracks.lua</source>
       </version>
     </reapack>
     <reapack name="hsuanice_Item Reposition.lua" type="script" desc="ReaImGui - Item Reposition Tool (Interval + Mode + Undo)">
