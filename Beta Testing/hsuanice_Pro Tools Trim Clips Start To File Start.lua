@@ -1,57 +1,69 @@
 --[[
 @description Pro Tools - Trim Clips Start To File Start
-@version 0.1
+@version 0.1.1
 @author hsuanice
 @about
-  Emulates Pro Tools' "Trim Clip Start to File Start" behavior.  
-    - Extends the left edge of selected item(s) to the previous item's end, or to the source media start.  
-    - Prevents revealing beyond recorded content, preserving original sync and offset.
-  
-    💡 Useful for reclaiming pre-roll or missed in-point material without shifting content.  
-      Integrates well with hsuanice's Pro Tools-style clip editing and timeline workflows.
-  
-    This script was generated using ChatGPT based on design concepts and iterative testing by hsuanice.  
-    hsuanice served as the workflow designer, tester, and integrator for this tool.
-  
-  Features:
-  - Designed for fast, keyboard-light workflows.
-  
-  References:
-  - REAPER ReaScript API (Lua)
-  
-  Note:
-  - This is a 0.1 beta release for internal testing.
-  
+  Emulates Pro Tools' "Trim Clip Start to File Start" behavior.
+    - Extends the left edge of selected item(s) up to the previous item's end, or to the source media start.
+    - Prevents revealing beyond recorded content.
+    - Keeps normal left-edge reveal behavior when there is available headroom.
+    - If a left blank loop was created by "SWS/AW: Trim selected items to fill selection",
+      the loop is collapsed in a content-preserving way (push start right by overshoot, shorten length, zero offset).
+
   This script was generated using ChatGPT based on design concepts and iterative testing by hsuanice.
   hsuanice served as the workflow designer, tester, and integrator for this tool.
+
 @changelog
-  v0.1 - Beta release
+  v0.1.1 - Fix: collapse LEFT blank loop without shifting perceived content earlier:
+           • If D_STARTOFFS < 0, move item start right by overshoot, shorten length by overshoot,
+             and set D_STARTOFFS = 0 (mirrors Boundaries behavior). Right side untouched.
+           • Preserve normal left-edge reveal in non-loop cases (can extend to true file start).
+  v0.1   - Beta release
 --]]
+
 reaper.Undo_BeginBlock()
 
 local num_items = reaper.CountSelectedMediaItems(0)
 if num_items == 0 then return end
 
-local function normalize_loop_and_clamp(item, take)
+-- Normalize ONLY the left blank-loop case in a content-preserving way:
+-- If D_STARTOFFS < 0, push start RIGHT by the overshoot, shorten length by the same amount,
+-- and zero the offset. Do NOT touch right-side behavior.
+-- Returns: len, take_offset, playrate, src_len, left_fixed (boolean)
+local function normalize_left_blank_loop_preserve_content(item, take)
+  local pos = reaper.GetMediaItemInfo_Value(item, "D_POSITION")
   local len = reaper.GetMediaItemInfo_Value(item, "D_LENGTH")
   local take_offset = reaper.GetMediaItemTakeInfo_Value(take, "D_STARTOFFS")
   local playrate = reaper.GetMediaItemTakeInfo_Value(take, "D_PLAYRATE")
+
   local source = reaper.GetMediaItemTake_Source(take)
   local src_len, isQN = reaper.GetMediaSourceLength(source)
-  if isQN then return len, take_offset, playrate, src_len end
-
-  local max_len_from_offset = math.max(0, (src_len - take_offset) / math.max(1e-12, playrate))
-
-  local is_loop = reaper.GetMediaItemInfo_Value(item, "B_LOOPSRC")
-  if is_loop == 1 or len > max_len_from_offset + 1e-9 then
-    reaper.SetMediaItemInfo_Value(item, "B_LOOPSRC", 0)
-    if len > max_len_from_offset then
-      reaper.SetMediaItemInfo_Value(item, "D_LENGTH", max_len_from_offset)
-      len = max_len_from_offset
-    end
+  if isQN then
+    return len, take_offset, playrate, src_len, false
   end
 
-  return len, take_offset, playrate, src_len
+  local safe_rate = math.max(1e-12, playrate)
+  local left_fixed = false
+
+  if take_offset < 0 then
+    -- Amount exceeded before true file start (seconds at project rate)
+    local overshoot = (-take_offset) / safe_rate
+    local new_pos   = pos + overshoot
+    local new_len   = math.max(0, len - overshoot)
+
+    -- Content-preserving collapse: push start right, shorten length, zero offset
+    reaper.SetMediaItemInfo_Value(item, "D_POSITION", new_pos)
+    reaper.SetMediaItemInfo_Value(item, "D_LENGTH",   new_len)
+    reaper.SetMediaItemTakeInfo_Value(take, "D_STARTOFFS", 0)
+
+    -- Update locals
+    pos = new_pos
+    len = new_len
+    take_offset = 0
+    left_fixed = true
+  end
+
+  return len, take_offset, playrate, src_len, left_fixed
 end
 
 for i = 0, num_items - 1 do
@@ -61,18 +73,28 @@ for i = 0, num_items - 1 do
   local len = reaper.GetMediaItemInfo_Value(item, "D_LENGTH")
   local item_end = pos + len
   local take = reaper.GetActiveTake(item)
-
   if not take or reaper.TakeIsMIDI(take) then goto continue end
 
-  -- Normalize loop/length first
-  len, take_offset, playrate, src_len = normalize_loop_and_clamp(item, take)
+  -- Step 1: collapse left blank loop (if any) in a content-preserving way
+  local take_offset, playrate, src_len, left_fixed
+  len, take_offset, playrate, src_len, left_fixed = normalize_left_blank_loop_preserve_content(item, take)
+
+  -- Refresh geometry after normalization
   pos = reaper.GetMediaItemInfo_Value(item, "D_POSITION")
+  len = reaper.GetMediaItemInfo_Value(item, "D_LENGTH")
   item_end = pos + len
 
-  local max_reveal = (take_offset / math.max(1e-12, playrate))
+  -- If we just collapsed a left blank loop, stop here to avoid additional reveal in this pass.
+  if left_fixed then
+    goto continue
+  end
 
-  -- Find previous neighbor end on the same track
-  local prev_edge = 0 
+  -- Step 2: normal left-edge reveal (original behavior)
+  local safe_rate = math.max(1e-12, playrate)
+  local max_reveal = (take_offset / safe_rate) -- seconds of headroom to the true file start
+
+  -- Find the end of the previous neighbor on the same track
+  local prev_edge = 0
   local item_count = reaper.CountTrackMediaItems(track)
   for j = 0, item_count - 1 do
     local other = reaper.GetTrackMediaItem(track, j)
@@ -92,7 +114,7 @@ for i = 0, num_items - 1 do
   if actual_reveal > 0 then
     local new_pos = pos - actual_reveal
     local new_len = item_end - new_pos
-    local new_offset = take_offset - (actual_reveal * playrate)
+    local new_offset = take_offset - (actual_reveal * safe_rate)
 
     reaper.SetMediaItemInfo_Value(item, "D_POSITION", new_pos)
     reaper.SetMediaItemInfo_Value(item, "D_LENGTH", new_len)
@@ -103,5 +125,4 @@ for i = 0, num_items - 1 do
 end
 
 reaper.UpdateArrange()
-reaper.Undo_EndBlock("Extend item left edge to prev item or full content", -1)
-
+reaper.Undo_EndBlock("Extend item left edge to previous item or source start", -1)
