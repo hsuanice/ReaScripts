@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<index version="1" name="hsuanice Scripts" commit="db983c4eeff865a0ebbe449a85d5526ec9009f6d">
+<index version="1" name="hsuanice Scripts" commit="d1e065a42fa47cbb9736076b2e31cbf957f56979">
   <category name="Beta Testing">
     <reapack name="hsuanice_BWF TimeReference Embed Tool.lua" type="script" desc="Embed BWF TimeReference to Active take from Take 1 or Current Position TC">
       <version name="0.7.1" author="hsuanice" time="2025-08-14T17:52:57Z">
@@ -392,16 +392,10 @@ v0.1 - Beta release]]></changelog>
 \widowctrl\hyphauto
 
 {\pard \ql \f0 \sa180 \li0 \fi0 Emulates Pro Tools' "Trim Clip Start to File Start" behavior.\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Extends the left edge of selected item(s) to the previous item's end, or to the source media start.\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Prevents revealing beyond recorded content, preserving original sync and offset.\sa180\par}
-{\pard \ql \f0 \sa180 \li0 \fi0 \u55357 ?\u56481 ? Useful for reclaiming pre-roll or missed in-point material without shifting content.\line Integrates well with hsuanice's Pro Tools-style clip editing and timeline workflows.\par}
-{\pard \ql \f0 \sa180 \li0 \fi0 This script was generated using ChatGPT based on design concepts and iterative testing by hsuanice.\line hsuanice served as the workflow designer, tester, and integrator for this tool.\par}
-{\pard \ql \f0 \sa180 \li0 \fi0 Features:\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Designed for fast, keyboard-light workflows.\sa180\par}
-{\pard \ql \f0 \sa180 \li0 \fi0 References:\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab REAPER ReaScript API (Lua)\sa180\par}
-{\pard \ql \f0 \sa180 \li0 \fi0 Note:\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab This is a 0.1 beta release for internal testing.\sa180\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Extends the left edge of selected item(s) up to the previous item's end, or to the source media start.\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Prevents revealing beyond recorded content.\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Keeps normal left-edge reveal behavior when there is available headroom.\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab If a left blank loop was created by "SWS/AW: Trim selected items to fill selection", the loop is collapsed in a content-preserving way (push start right by overshoot, shorten length, zero offset).\sa180\par}
 {\pard \ql \f0 \sa180 \li0 \fi0 This script was generated using ChatGPT based on design concepts and iterative testing by hsuanice. hsuanice served as the workflow designer, tester, and integrator for this tool.\par}
 }
 ]]></description>
@@ -409,6 +403,9 @@ v0.1 - Beta release]]></changelog>
       <version name="0.1" author="hsuanice" time="2025-08-13T07:33:10Z">
         <changelog><![CDATA[v0.1 - Beta release]]></changelog>
         <source main="main">https://github.com/hsuanice/ReaScripts/raw/20128d4abc5ecce7bcaa7840d72a69ef1fcdc68c/Beta%20Testing/hsuanice_Pro%20Tools%20Trim%20Clips%20Start%20To%20File%20Start.lua</source>
+      </version>
+      <version name="0.1.1" author="hsuanice" time="2025-08-15T17:25:25Z">
+        <source main="main">https://github.com/hsuanice/ReaScripts/raw/d1e065a42fa47cbb9736076b2e31cbf957f56979/Beta%20Testing/hsuanice_Pro%20Tools%20Trim%20Clips%20Start%20To%20File%20Start.lua</source>
       </version>
     </reapack>
     <reapack name="hsuanice_Rename Active Take from File Metadata.lua" type="script" desc="ReaImGui - Rename Active Take from Metadata (caret insert + cached preview + copy/export)">
