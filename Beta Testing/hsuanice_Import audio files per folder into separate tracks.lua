@@ -1,37 +1,37 @@
 --[[
-@description ReaImGUI - Import audio: one folder -> one folder track, with child tracks (Sequence only, streaming, Stop button, pre-confirm & finish summary). Root treated as a folder. Supports channel-split patterns: ".A<number>" or "_<number>"
-@version 0.2
+@description ReaImGui - Import audio: one folder -> one folder track, with child tracks (sequence only, streaming, Stop button, pre-confirm & finish summary). Root treated as a folder. Supports channel-split patterns: ".A<number>" or "_<number>"
+@version 0.2.1
 @author hsuanice
 @about
-  - Pre-confirm dialog: shows total folders/files, lets you choose channel naming pattern or custom set, then buttons [Import] / [Cancel].
-    - Sequence only (append at end of target track).
+  - Pre-confirm dialog: shows total folders/files, lets you choose a channel naming pattern or a custom mask, then offers [Import] / [Cancel].
+    - Sequence only (append at the end of the target track).
     - Every directory that contains audio becomes a folder parent track (including the selected root).
-    - Non-channel-split files (.A/_ not matched) go onto the PARENT folder track (one track per folder, including root).
+    - Non-channel-split files (no ".A<number>" or "_<number>" match) go onto the PARENT folder track (one track per folder, including root).
     - Channel-split files -> child tracks named "Ch XX" (XX is the parsed channel number).
-    - Scan all depths but do NOT nest folder tracks beyond 2 levels: each directory with files is its own parent+children block.
-    - Streaming import with a small ReaImGui "Stop" window (ESC also works on some systems). On completion/abort: auto-close progress, then show finish summary.
-    - No ImGui Destroy/Detach calls (to avoid crashes on some builds).
+    - Recursively scans all subfolders but does NOT nest folder tracks beyond two levels: each directory with files is its own parent+children block.
+    - Streaming import with a small ReaImGui "Stop" window (ESC also works on some systems). On completion/abort: auto-close progress, then show a finish summary.
+    - No ImGui Destroy/Detach calls (avoids crashes on some builds).
   
   Features:
-  - Built with ReaImGUI for a compact, responsive UI.
+  - Built with ReaImGui for a compact, responsive UI.
   - Designed for fast, keyboard-light workflows.
   - Optionally leverages js_ReaScriptAPI for advanced interactions.
   
   References:
   - REAPER ReaScript API (Lua)
   - js_ReaScriptAPI
-  - ReaImGUI (ReaScript ImGui binding)
-  
- 
+  - ReaImGui (ReaScript ImGui binding)
   
   This script was generated using ChatGPT based on design concepts and iterative testing by hsuanice.
   hsuanice served as the workflow designer, tester, and integrator for this tool.
 
 @changelog
-  v0.2 - Add custom channel pattern input as thrid options
-  v0.1.1 - Update description
-  v0.1 - Beta release
+  v0.2.1 - Fix error when using ".A" option; translate Chinese comments to English.
+  v0.2   - Add custom channel pattern input as the third option.
+  v0.1.1 - Update description.
+  v0.1   - Beta release.
 --]]
+
 
 
 ---------------------------------------
@@ -119,22 +119,41 @@ local function chan_from_U(fn)  -- "_<number>.wav"
   if n then return tonumber(n) end
 end
 
--- 將使用者自訂的 mask 轉成 Lua pattern，% 代表捕捉數字
--- 例：  "%_AAP" -> "(%d+)_AAP"   或   "[chan %]" -> "%[chan (%d+)%]"
+-- ".A<number>" pattern (e.g., "Name.A7.wav" or "Name.A7")
+local function chan_from_A(fn)
+  -- Work on basename only
+  local base = fn:match("([^/\\]+)$") or fn
+
+  -- Match ".A<digits>" right before the extension, or at the very end (no extension)
+  -- Also accept lowercase ".a<digits>" just in case
+  local n = base:match("%.A(%d+)%.[^%.]+$")   -- "Name.A7.wav"
+        or base:match("%.a(%d+)%.[^%.]+$")   -- "Name.a7.wav"
+        or base:match("%.A(%d+)$")           -- "Name.A7"
+        or base:match("%.a(%d+)$")           -- "Name.a7"
+
+  if n then return tonumber(n) end
+end
+
+
+
+
+
+-- Convert the user-defined mask into a Lua pattern; “%” represents a numeric capture.
+-- Example: “%_AAP” → “(%d+)_AAP”, or “[chan %]” → “%[chan (%d+)%]”.
 local function mask_to_pattern(mask)
   if not mask or mask == "" then return nil end
-  -- 先 escape Lua pattern 特殊字元
+  -- First escape Lua pattern special characters.
   local esc = mask:gsub("([%%%^%$%(%)%.%[%]%*%+%-%?])", "%%%1")
-  -- 將單一 % 轉成 (%d+)
-  esc = esc:gsub("%%%%", "%%")          -- 先保護 "%%" -> "%"
-  esc = esc:gsub("%%", "(%%d+)")        -- 單個 % => (%d+)
+  -- Convert a single “%” into “(%d+)”.
+  esc = esc:gsub("%%%%", "%%")          -- Protect “%%” so it remains “%”.
+  esc = esc:gsub("%%", "(%%d+)")        -- A single “%” ⇒ “(%d+)”.
   return esc
 end
 
 local function chan_from_custom(fn, mask)
   local pat = mask_to_pattern(mask)
   if not pat then return nil end
-  -- 在副檔名前比對一次、整個檔名再比對一次，增加容錯
+  -- Match once before the file extension, then match against the entire filename to increase robustness.
   local base = fn:match("([^/\\]+)$") or fn
   local stemOnly = base:gsub("%.%w+$","")
   local cap = stemOnly:match(pat) or base:match(pat)
@@ -142,7 +161,7 @@ local function chan_from_custom(fn, mask)
 end
 
 
--- 統一入口：依 CHAN_MODE 取出 channel number
+-- Unified entry point: extract the channel number according to CHAN_MODE.
 local function chan_from_filename(fn)
   if CHAN_MODE == 1 then
     return chan_from_A(fn)
@@ -151,7 +170,7 @@ local function chan_from_filename(fn)
   elseif CHAN_MODE == 3 then
     return chan_from_custom(fn, CHAN_CUSTOM_MASK)
   else
-    return chan_from_A(fn) -- 安全預設
+    return chan_from_A(fn) -- Safe default.
   end
 end
 
@@ -313,7 +332,7 @@ end
 
 
 
--- ========= UIs (no Destroy/Detach) =========
+-- ========= UIs =========
 local UI_PRE = { ctx=nil, choice=nil }       -- "import" or "cancel"
 local UI_PROGRESS = { ctx=nil, stop=false, total=0, done=0 }
 local UI_POST = { ctx=nil, show=false, msg="" }
@@ -434,7 +453,7 @@ local function ui_choose_mode(on_done)
 
       local changed
 
-      if reaper.ImGui_RadioButton(ctx, '".A%"  (e.g., File.A3.WAV', mode == 1) then mode = 1 end
+      if reaper.ImGui_RadioButton(ctx, '".A%"  (e.g., File.A3.WAV)', mode == 1) then mode = 1 end
       if reaper.ImGui_RadioButton(ctx, '"_%"   (e.g., File_3.WAV)', mode == 2) then mode = 2 end
       if reaper.ImGui_RadioButton(ctx, 'Custom (use % for digits)', mode == 3) then mode = 3 end
 
@@ -623,7 +642,7 @@ local function main()
   local base = choose_base(); if not base then return end
   local list = scan_all(base); if #list==0 then reaper.MB("No audio files found.","Import",0); return end
 
-  -- 先問 channel 命名規則
+  -- Ask for the channel naming convention first
   ui_choose_mode(function(ok)
     if not ok then return end
 
@@ -632,7 +651,7 @@ local function main()
     for _,n in ipairs(list) do folders_set[n.rel or ""] = true end
     local folder_count = 0; for _ in pairs(folders_set) do folder_count=folder_count+1 end
 
-    -- 再跑原本的「Import / Cancel」視窗
+    -- Then show the original "Import / Cancel" dialog
     ui_pre_open(basename(base), folder_count, #list, function(choice)
       if choice == 'import' then
         run_after_confirm(base, list)
