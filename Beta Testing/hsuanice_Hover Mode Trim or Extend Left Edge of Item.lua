@@ -1,6 +1,6 @@
 --[[
 @description Hover Mode - Trim or Extend Left Edge of Item (Preserve Fade)
-@version 0.1.1
+@version 0.1.2
 @author hsuanice
 @about
   Trims or extends the **left edge** of audio/MIDI/empty items depending on context.  
@@ -31,8 +31,11 @@
   This script was generated using ChatGPT based on design concepts and iterative testing by hsuanice.
   hsuanice served as the workflow designer, tester, and integrator for this tool.
 
-
 @changelog
+  v0.1.2
+    - Boundary-as-gap policy in Hover mode: when mouse ≈ item edge (± half-pixel), treat UNDER as empty.
+      A now consistently EXTENDS the nearest Next-left-edge to mouse in gaps or on boundaries; no trim at edges.
+    - Pixel hit at an edge is ignored (falls back to gap handling) to avoid accidental trims.
   v0.1.1
     - Edge-aware boundary resolution with zoom-adaptive half-pixel epsilon (GetHZoomLevel).
     - Pixel-accurate hit using GetItemFromPoint; time-based fallback; SWS helpers when available.
@@ -42,9 +45,6 @@
   v0.1
     - Beta release
 --]]
-
-
-
 
 ----------------------------------------
 -- Config
@@ -109,7 +109,7 @@ end
 
 ----------------------------------------
 -- Find targets (Edit-Cursor mode)
---  • If cursor is inside the item (or at its start within eps): TRIM.
+--  • If cursor is inside the item (strictly away from edges): TRIM.
 --  • Else: EXTEND the nearest item to the right.
 ----------------------------------------
 local function find_items_edit_mode(tracks)
@@ -121,17 +121,15 @@ local function find_items_edit_mode(tracks)
     local inside, extend_target = nil, nil
     local best_right = math.huge
 
-    -- iterate items (no need to sort for this use)
     local n = reaper.CountTrackMediaItems(tr)
     for i = 0, n - 1 do
       local it = reaper.GetTrackMediaItem(tr, i)
       local st = reaper.GetMediaItemInfo_Value(it, "D_POSITION")
       local en = st + reaper.GetMediaItemInfo_Value(it, "D_LENGTH")
 
-      local at_start = math.abs(pos - st) <= eps
       local inside_open = (pos > st + eps and pos < en - eps)
 
-      if at_start or inside_open then
+      if inside_open then
         inside = it; break
       elseif st >= pos and st < best_right then
         extend_target = it; best_right = st
@@ -150,11 +148,10 @@ end
 
 ----------------------------------------
 -- Find targets (Hover mode, mouse-based, SINGLE track)
---  Priority:
---   1) Pixel hit on the item under the mouse  → TRIM that item.
---   2) If not, time-based (eps-aware):
---      - inside or at-start → TRIM that item (boundary prefers right-hand item).
---      - else → EXTEND the nearest item to the right.
+--  Boundary-as-gap policy:
+--   - If mouse is within ±ε of any item edge, treat UNDER as empty (no trim).
+--   - A (Left tool) in gap/boundary → EXTEND the nearest Next (start >= mouse).
+--   - Only when mouse is strictly inside an item do we TRIM its left edge.
 ----------------------------------------
 local function find_items_hover_mode()
   local x, y = reaper.GetMousePosition()
@@ -166,13 +163,23 @@ local function find_items_hover_mode()
 
   local eps = half_pixel_sec()
 
-  -- 1) Pixel hit (UI-accurate) — ignore locked
+  -- 1) Pixel hit — ignore if at boundary (treat as gap)
   local hit = reaper.GetItemFromPoint(x, y, false)
   if hit and reaper.GetMediaItem_Track(hit) == tr then
-    return pos, { { item = hit, mode = "trim" } }
+    local st = reaper.GetMediaItemInfo_Value(hit, "D_POSITION")
+    local en = st + reaper.GetMediaItemInfo_Value(hit, "D_LENGTH")
+    local near_left  = math.abs(pos - st) <= eps
+    local near_right = math.abs(pos - en) <= eps
+    if not (near_left or near_right) then
+      -- strictly inside → trim
+      if pos > st + eps and pos < en - eps then
+        return pos, { { item = hit, mode = "trim" } }
+      end
+    end
+    -- else: boundary → fallthrough to gap handling
   end
 
-  -- 2) Time-based with boundary rule (prefer right-hand item at start)
+  -- 2) Time-based scan (boundary treated as gap)
   local inside, extend_target = nil, nil
   local best_right = math.huge
 
@@ -182,11 +189,9 @@ local function find_items_hover_mode()
     local st = reaper.GetMediaItemInfo_Value(it, "D_POSITION")
     local en = st + reaper.GetMediaItemInfo_Value(it, "D_LENGTH")
 
-    local at_start = math.abs(pos - st) <= eps
     local inside_open = (pos > st + eps and pos < en - eps)
 
-    if at_start or inside_open then
-      -- Boundary prefers the right-hand item (this "it" is exactly the RHS at start)
+    if inside_open then
       inside = it; break
     elseif st >= pos and st < best_right then
       extend_target = it; best_right = st
@@ -218,11 +223,11 @@ local function apply_left_edge(entry, target_pos)
   local is_midi = take and reaper.TakeIsMIDI(take)
   local is_empty = not take
 
-  -- compute leftmost allowed start (for audio, limited by source offset; MIDI/empty can go far left)
+  -- earliest allowed start (audio limited by source offset)
   local max_left
   if (not is_empty) and (not is_midi) then
     local offs = reaper.GetMediaItemTakeInfo_Value(take, "D_STARTOFFS") or 0
-    max_left = st - offs  -- earliest project position without looping
+    max_left = st - offs
   else
     max_left = -math.huge
   end
@@ -232,7 +237,7 @@ local function apply_left_edge(entry, target_pos)
 
   local new_ln = en - new_st
 
-  -- adjust source start offset for audio takes
+  -- adjust source start offset for audio
   if (not is_empty) and (not is_midi) then
     local offs  = reaper.GetMediaItemTakeInfo_Value(take, "D_STARTOFFS") or 0
     local rate  = reaper.GetMediaItemTakeInfo_Value(take, "D_PLAYRATE") or 1.0
