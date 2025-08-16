@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<index version="1" name="hsuanice Scripts" commit="4077781c0fa32991d4ee8cfe8ba3741384ec242c">
+<index version="1" name="hsuanice Scripts" commit="b0b581d010a3ee7d37327a48766bd0a9889918af">
   <category name="Beta Testing">
     <reapack name="hsuanice_BWF TimeReference Embed Tool.lua" type="script" desc="Embed BWF TimeReference to Active take from Take 1 or Current Position TC">
       <version name="0.7.1" author="hsuanice" time="2025-08-14T17:52:57Z">
@@ -195,6 +195,21 @@
       </version>
       <version name="0.1.2" author="hsuanice" time="2025-08-16T09:44:27Z">
         <source main="main">https://github.com/hsuanice/ReaScripts/raw/6958dd49178d0cbe4cad0fb27ff98cd17fd7c27a/Beta%20Testing/hsuanice_Hover%20Mode%20Trim%20or%20Extend%20Right%20Edge%20of%20Item.lua</source>
+      </version>
+    </reapack>
+    <reapack name="hsuanice_Hover Mode Trim Tool Monitor.Lua" type="script" desc="Hover Mode Trim Tool Monitor — Live HUD + A/S Snapshot &amp; Diff">
+      <metadata>
+        <description><![CDATA[{\rtf1\ansi\deff0{\fonttbl{\f0 \fswiss Helvetica;}{\f1 \fmodern Courier;}}
+{\colortbl;\red255\green0\blue0;\red0\green0\blue255;}
+\widowctrl\hyphauto
+
+{\pard \ql \f0 \sa180 \li0 \fi0 Live monitor for Hover Mode trim tools. Shows mouse/track context and triplet (Prev/Under/Next), captures A=Left Trim / S=Right Trim, takes TRUE BEFORE & AFTER snapshots (ring buffer / WM key), and prints GUID-mapped global diffs. Edge-aware "Under" uses zoom-adaptive epsilon and pixel-accurate hit tests (SWS/js_ReaScriptAPI when available). Undo-assisted trigger/ready; ESC/Cancel to quit.\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 Note: This script was generated using ChatGPT based on design concepts and iterative testing by hsuanice. hsuanice served as the workflow designer, tester, and integrator for this tool.\par}
+}
+]]></description>
+      </metadata>
+      <version name="0.1.0" author="hsuanice" time="2025-08-16T09:47:32Z">
+        <source main="main">https://github.com/hsuanice/ReaScripts/raw/b0b581d010a3ee7d37327a48766bd0a9889918af/Beta%20Testing/hsuanice_Hover%20Mode%20Trim%20Tool%20Monitor.Lua</source>
       </version>
     </reapack>
     <reapack name="hsuanice_Import audio files per folder into separate tracks.lua" type="script" desc="ReaImGui - Import audio: one folder per track; channel-split files go to child tracks. Sequence only.">
