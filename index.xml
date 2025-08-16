@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<index version="1" name="hsuanice Scripts" commit="39185dee0c1b4ea150fe974c80aa93787d178102">
+<index version="1" name="hsuanice Scripts" commit="a9bf9ca23782f8426851acd8063fad366c8fbbc6">
   <category name="Beta Testing">
     <reapack name="hsuanice_BWF TimeReference Embed Tool.lua" type="script" desc="Embed BWF TimeReference to Active take from Take 1 or Current Position TC">
       <version name="0.7.1" author="hsuanice" time="2025-08-14T17:52:57Z">
@@ -422,6 +422,25 @@ v0.1 - Beta release]]></changelog>
       </version>
       <version name="0.1.1" author="hsuanice" time="2025-08-15T17:25:25Z">
         <source main="main">https://github.com/hsuanice/ReaScripts/raw/d1e065a42fa47cbb9736076b2e31cbf957f56979/Beta%20Testing/hsuanice_Pro%20Tools%20Trim%20Clips%20Start%20To%20File%20Start.lua</source>
+      </version>
+    </reapack>
+    <reapack name="hsuanice_Razor and Item Link like Pro Tools.lua" type="script" desc="hsuanice_Razor Area and Item Link">
+      <metadata>
+        <description><![CDATA[{\rtf1\ansi\deff0{\fonttbl{\f0 \fswiss Helvetica;}{\f1 \fmodern Courier;}}
+{\colortbl;\red255\green0\blue0;\red0\green0\blue255;}
+\widowctrl\hyphauto
+
+{\pard \ql \f0 \sa180 \li0 \fi0 Single-button toggle. When ON, continuously add-select media items that overlap any Razor Area on the same track (partial or full overlap). When OFF, the watcher stops.\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Coexists with Razor Areas (never modifies or hides them).\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Add-only selection (does not clear existing item selection).\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab No "Task control" dialog: relaunching this action terminates the previous instance automatically and keeps the toolbar state in sync.\sa180\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 This script was generated using ChatGPT based on design concepts and iterative testing by hsuanice. hsuanice served as the workflow designer, tester, and integrator for this tool.\par}
+}
+]]></description>
+      </metadata>
+      <version name="0.1" author="hsuanice" time="2025-08-16T15:22:03Z">
+        <changelog><![CDATA[v0.1 - Beta release]]></changelog>
+        <source main="main">https://github.com/hsuanice/ReaScripts/raw/a9bf9ca23782f8426851acd8063fad366c8fbbc6/Beta%20Testing/hsuanice_Razor%20and%20Item%20Link%20like%20Pro%20Tools.lua</source>
       </version>
     </reapack>
     <reapack name="hsuanice_Razor and Item Link.lua" type="script" desc="hsuanice_Razor Area and Item Link">
