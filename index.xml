@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<index version="1" name="hsuanice Scripts" commit="f527c56f1bc1dbc6511d8fdd66bce22f832831fb">
+<index version="1" name="hsuanice Scripts" commit="4077781c0fa32991d4ee8cfe8ba3741384ec242c">
   <category name="Beta Testing">
     <reapack name="hsuanice_BWF TimeReference Embed Tool.lua" type="script" desc="Embed BWF TimeReference to Active take from Take 1 or Current Position TC">
       <version name="0.7.1" author="hsuanice" time="2025-08-14T17:52:57Z">
@@ -162,6 +162,9 @@
       <version name="0.1.1" author="hsuanice" time="2025-08-16T08:31:04Z">
         <source main="main">https://github.com/hsuanice/ReaScripts/raw/abd8233feef06a7f855fa5b36360bea3481694bd/Beta%20Testing/hsuanice_Hover%20Mode%20Trim%20or%20Extend%20Left%20Edge%20of%20Item.lua</source>
       </version>
+      <version name="0.1.2" author="hsuanice" time="2025-08-16T09:44:54Z">
+        <source main="main">https://github.com/hsuanice/ReaScripts/raw/4077781c0fa32991d4ee8cfe8ba3741384ec242c/Beta%20Testing/hsuanice_Hover%20Mode%20Trim%20or%20Extend%20Left%20Edge%20of%20Item.lua</source>
+      </version>
     </reapack>
     <reapack name="hsuanice_Hover Mode Trim or Extend Right Edge of Item.lua" type="script" desc="Hover Mode - Trim or Extend Right Edge of Item (Preserve Fade)">
       <metadata>
@@ -178,7 +181,7 @@
 {\pard \ql \f0 \sa180 \li0 \fi0 \u55357 ?\u56481 ? Hover Mode is toggled via ExtState: hsuanice_TrimTools / HoverMode\par}
 {\pard \ql \f0 \sa180 \li0 \fi0 Notes:\par}
 {\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Snap-to-grid is respected in true Hover mode (not when forced to Edit Cursor via Ruler).\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Boundary rule for RIGHT tool: if the mouse is exactly at a butt join, prefer the {\b left-hand item} (so repeated Right actions at the boundary become NO-OP instead of extending the next item).\sa180\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Boundary-as-gap for RIGHT tool: if mouse \u8776 ? any item edge (\u177 ? half-pixel), treat UNDER as empty. S now consistently EXTENDS the nearest Prev-right-edge to mouse in gaps or on boundaries; no trim at edges.\sa180\par}
 {\pard \ql \f0 \sa180 \li0 \fi0 Inspired by: \u8226 ? X-Raym - Trim right edge under mouse or previous one without changing fade-out start.\par}
 }
 ]]></description>
@@ -189,6 +192,9 @@
       </version>
       <version name="0.1.1" author="hsuanice" time="2025-08-16T08:52:52Z">
         <source main="main">https://github.com/hsuanice/ReaScripts/raw/f527c56f1bc1dbc6511d8fdd66bce22f832831fb/Beta%20Testing/hsuanice_Hover%20Mode%20Trim%20or%20Extend%20Right%20Edge%20of%20Item.lua</source>
+      </version>
+      <version name="0.1.2" author="hsuanice" time="2025-08-16T09:44:27Z">
+        <source main="main">https://github.com/hsuanice/ReaScripts/raw/6958dd49178d0cbe4cad0fb27ff98cd17fd7c27a/Beta%20Testing/hsuanice_Hover%20Mode%20Trim%20or%20Extend%20Right%20Edge%20of%20Item.lua</source>
       </version>
     </reapack>
     <reapack name="hsuanice_Import audio files per folder into separate tracks.lua" type="script" desc="ReaImGui - Import audio: one folder per track; channel-split files go to child tracks. Sequence only.">
