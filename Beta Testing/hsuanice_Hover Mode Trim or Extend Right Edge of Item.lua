@@ -1,6 +1,6 @@
 --[[
 @description Hover Mode - Trim or Extend Right Edge of Item (Preserve Fade)
-@version 0.1.1
+@version 0.1.2
 @author hsuanice
 @about
   Trims or extends the **right edge** of audio/MIDI/empty items depending on context.
@@ -16,13 +16,16 @@
 
   Notes:
     - Snap-to-grid is respected in true Hover mode (not when forced to Edit Cursor via Ruler).
-    - Boundary rule for RIGHT tool: if the mouse is exactly at a butt join, prefer the **left-hand item**
-      (so repeated Right actions at the boundary become NO-OP instead of extending the next item).
+    - Boundary-as-gap for RIGHT tool: if mouse ≈ any item edge (± half-pixel), treat UNDER as empty.
+      S now consistently EXTENDS the nearest Prev-right-edge to mouse in gaps or on boundaries; no trim at edges.
 
   Inspired by:
     • X-Raym - Trim right edge under mouse or previous one without changing fade-out start.
 
 @changelog
+  v0.1.2
+    - Boundary-as-gap policy in Hover mode identical to Left tool: edges never trim; S extends Prev to mouse.
+    - Pixel hit at an edge is ignored to avoid accidental trims; only strictly-inside hits trim.
   v0.1.1
     - Edge-aware boundary resolution with zoom-adaptive half-pixel epsilon (GetHZoomLevel).
     - Pixel-accurate hit using GetItemFromPoint; time-based fallback; optional SWS mouse position.
@@ -89,8 +92,8 @@ end
 
 ----------------------------------------
 -- Edit-cursor mode: per selected track
---  • inside OR near-right-edge (≤ ε) → TRIM
---  • otherwise                       → EXTEND nearest left item (end ≤ pos)
+--  • strictly inside → TRIM
+--  • otherwise       → EXTEND nearest left item (end ≤ pos)
 ----------------------------------------
 local function find_items_edit_mode()
   local pos = reaper.GetCursorPosition()
@@ -108,10 +111,9 @@ local function find_items_edit_mode()
       local st = reaper.GetMediaItemInfo_Value(it, "D_POSITION")
       local en = st + reaper.GetMediaItemInfo_Value(it, "D_LENGTH")
 
-      local at_right = math.abs(pos - en) <= eps
       local inside_open = (pos > st + eps and pos < en - eps)
 
-      if at_right or inside_open then
+      if inside_open then
         inside = it; break
       elseif en <= pos and en > best_left_end then
         extend_from = it; best_left_end = en
@@ -130,11 +132,9 @@ end
 
 ----------------------------------------
 -- Hover mode (single track under mouse)
--- Priority:
---  1) Pixel hit via GetItemFromPoint → TRIM that item.
---  2) Time-based with ε:
---     • inside OR at-right-edge (≤ ε) → TRIM that item (boundary prefers left-hand item).
---     • otherwise                     → EXTEND nearest left item (end ≤ pos).
+-- Boundary-as-gap:
+--  1) If pixel-hit is at an edge (±ε), ignore the hit → treat as gap.
+--  2) Only strictly-inside items trim; otherwise extend Prev (end ≤ mouse).
 ----------------------------------------
 local function find_items_hover_mode()
   local x, y = reaper.GetMousePosition()
@@ -146,13 +146,23 @@ local function find_items_hover_mode()
 
   local eps = half_pixel_sec()
 
-  -- 1) Pixel-accurate
+  -- 1) Pixel-accurate hit, but ignore when near edges (boundary-as-gap)
   local hit = reaper.GetItemFromPoint(x, y, false)
   if hit and reaper.GetMediaItem_Track(hit) == tr then
-    return pos, { { item = hit, mode = "trim" } }
+    local st = reaper.GetMediaItemInfo_Value(hit, "D_POSITION")
+    local en = st + reaper.GetMediaItemInfo_Value(hit, "D_LENGTH")
+    local near_left  = math.abs(pos - st) <= eps
+    local near_right = math.abs(pos - en) <= eps
+    if not (near_left or near_right) then
+      -- strictly inside → TRIM
+      if pos > st + eps and pos < en - eps then
+        return pos, { { item = hit, mode = "trim" } }
+      end
+    end
+    -- else: treat as gap
   end
 
-  -- 2) Time-based
+  -- 2) Time-based with boundary-as-gap
   local inside, extend_from = nil, nil
   local best_left_end = -math.huge
 
@@ -162,11 +172,9 @@ local function find_items_hover_mode()
     local st = reaper.GetMediaItemInfo_Value(it, "D_POSITION")
     local en = st + reaper.GetMediaItemInfo_Value(it, "D_LENGTH")
 
-    local at_right = math.abs(pos - en) <= eps
     local inside_open = (pos > st + eps and pos < en - eps)
 
-    if at_right or inside_open then
-      -- boundary: prefer the left-hand item (this "it" ends at pos)
+    if inside_open then
       inside = it; break
     elseif en <= pos and en > best_left_end then
       extend_from = it; best_left_end = en
@@ -206,11 +214,9 @@ local function apply_right_edge(entry, target_pos)
     if isQN then src_len = reaper.TimeMap_QNToTime(src_len) end
     local offs = reaper.GetMediaItemTakeInfo_Value(take, "D_STARTOFFS") or 0
     local rate = reaper.GetMediaItemTakeInfo_Value(take, "D_PLAYRATE") or 1.0
-    -- end = st + (src_len - offs)/rate
     max_right = st + math.max(0, (src_len - offs)) / (rate ~= 0 and rate or 1.0)
   end
 
-  -- clamp and avoid degenerate zero length
   local new_en = math.min(target_pos, max_right)
   if new_en <= st + 1e-9 then new_en = st + 1e-9 end
   if math.abs(new_en - en0) < 1e-9 then return end -- no-op
