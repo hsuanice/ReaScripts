@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<index version="1" name="hsuanice Scripts" commit="abd8233feef06a7f855fa5b36360bea3481694bd">
+<index version="1" name="hsuanice Scripts" commit="f527c56f1bc1dbc6511d8fdd66bce22f832831fb">
   <category name="Beta Testing">
     <reapack name="hsuanice_BWF TimeReference Embed Tool.lua" type="script" desc="Embed BWF TimeReference to Active take from Take 1 or Current Position TC">
       <version name="0.7.1" author="hsuanice" time="2025-08-14T17:52:57Z">
@@ -170,31 +170,25 @@
 \widowctrl\hyphauto
 
 {\pard \ql \f0 \sa180 \li0 \fi0 Trims or extends the {\b right edge} of audio/MIDI/empty items depending on context.\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Hover Mode ON: Uses mouse cursor position.\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Hover Mode OFF: Uses edit cursor and selected tracks.\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab \u55358 ?\u56800 ? Special behavior: When the mouse is hovering over the {\b Ruler (Timeline)}, the script temporarily switches to {\b Edit Cursor Mode}, even if Hover Mode is enabled.\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Preserves existing fade-out shape and position.\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Ignores invisible items; partial visibility is accepted.\sa180\par}
-{\pard \ql \f0 \sa180 \li0 \fi0 \u55357 ?\u56481 ? Supports extensible hover-edit system. Hover Mode is toggled via ExtState:\line hsuanice_TrimTools / HoverMode\par}
-{\pard \ql \f0 \sa180 \li0 \fi0 Inspired by: \u8226 ? X-Raym: Trim Item Edges \u8212- Script: X-Raym_Trim right edge of item under mouse or the previous one to mouse cursor without changing fade-out start.lua\par}
-{\pard \ql \f0 \sa180 \li0 \fi0 Features:\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Designed for fast, keyboard-light workflows.\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Supports Hover Mode via shared ExtState for cursor-aware actions.\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Uses SWS extension APIs where available.\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Optionally leverages js_ReaScriptAPI for advanced interactions.\sa180\par}
-{\pard \ql \f0 \sa180 \li0 \fi0 References:\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab REAPER ReaScript API (Lua)\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab SWS Extension API\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab js_ReaScriptAPI\sa180\par}
-{\pard \ql \f0 \sa180 \li0 \fi0 Note:\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab This is a 0.1 beta release for internal testing.\sa180\par}
-{\pard \ql \f0 \sa180 \li0 \fi0 This script was generated using ChatGPT based on design concepts and iterative testing by hsuanice. hsuanice served as the workflow designer, tester, and integrator for this tool.\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Hover Mode ON : uses mouse timeline position (pixel-accurate hit test preferred).\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Hover Mode OFF: uses edit cursor on selected tracks.\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab \u55358 ?\u56800 ? Special behavior: when the mouse is over the {\b Ruler (Timeline)}, the script temporarily switches to {\b Edit Cursor Mode}, even if Hover Mode is enabled.\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Preserves the existing fade-out end-time (keeps fade start), adjusting only its length.\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Ignores fully invisible items; partial visibility is accepted.\sa180\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 \u55357 ?\u56481 ? Hover Mode is toggled via ExtState: hsuanice_TrimTools / HoverMode\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 Notes:\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Snap-to-grid is respected in true Hover mode (not when forced to Edit Cursor via Ruler).\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Boundary rule for RIGHT tool: if the mouse is exactly at a butt join, prefer the {\b left-hand item} (so repeated Right actions at the boundary become NO-OP instead of extending the next item).\sa180\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 Inspired by: \u8226 ? X-Raym - Trim right edge under mouse or previous one without changing fade-out start.\par}
 }
 ]]></description>
       </metadata>
       <version name="0.1" author="hsuanice" time="2025-08-13T07:33:10Z">
         <changelog><![CDATA[v0.1 - Beta release]]></changelog>
         <source main="main">https://github.com/hsuanice/ReaScripts/raw/20128d4abc5ecce7bcaa7840d72a69ef1fcdc68c/Beta%20Testing/hsuanice_Hover%20Mode%20Trim%20or%20Extend%20Right%20Edge%20of%20Item.lua</source>
+      </version>
+      <version name="0.1.1" author="hsuanice" time="2025-08-16T08:52:52Z">
+        <source main="main">https://github.com/hsuanice/ReaScripts/raw/f527c56f1bc1dbc6511d8fdd66bce22f832831fb/Beta%20Testing/hsuanice_Hover%20Mode%20Trim%20or%20Extend%20Right%20Edge%20of%20Item.lua</source>
       </version>
     </reapack>
     <reapack name="hsuanice_Import audio files per folder into separate tracks.lua" type="script" desc="ReaImGui - Import audio: one folder per track; channel-split files go to child tracks. Sequence only.">
