@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<index version="1" name="hsuanice Scripts" commit="91e33977190fc23df7f15557e25f39d3a71b1797">
+<index version="1" name="hsuanice Scripts" commit="9b053ca0be4a2da3ebd881e2f1f752080b06f840">
   <category name="Beta Testing">
     <reapack name="hsuanice_BWF TimeReference Embed Tool.lua" type="script" desc="Embed BWF TimeReference to Active take from Take 1 or Current Position TC">
       <version name="0.7.1" author="hsuanice" time="2025-08-14T17:52:57Z">
@@ -534,6 +534,29 @@ v0.1 - Beta release]]></changelog>
       <version name="0.1" author="hsuanice" time="2025-08-13T07:33:10Z">
         <changelog><![CDATA[v0.1 - Beta release]]></changelog>
         <source main="main">https://github.com/hsuanice/ReaScripts/raw/20128d4abc5ecce7bcaa7840d72a69ef1fcdc68c/Beta%20Testing/hsuanice_Show%20Frame%20Rate.lua</source>
+      </version>
+    </reapack>
+    <reapack name="hsuanice_Track and Razor Item Link like Pro Tools.lua" type="script" desc="hsuanice_Track and Razor Item Link like Pro Tools">
+      <metadata>
+        <description><![CDATA[{\rtf1\ansi\deff0{\fonttbl{\f0 \fswiss Helvetica;}{\f1 \fmodern Courier;}}
+{\colortbl;\red255\green0\blue0;\red0\green0\blue255;}
+\widowctrl\hyphauto
+
+{\pard \ql \f0 \sa180 \li0 \fi0 Pro Tools\u8211-style Link Track and Edit Selection, where "Edit" = Razor Areas OR Item selection.\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 Priority per track:\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab If a track has any track-level Razor Area \u8594 ? STRICT Razor \u8644 ? Track sync for that track (Item link disabled on that track).\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab If a track has NO Razor Area \u8594 ? Item \u8644 ? Track link is enabled, with Track\u8594 ?Item = removal only.\sa180\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 Global behavior:\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Razor exists \u8594 ? STRICT Razor\u8594 ?Track mirror and Track\u8594 ?Razor apply/clear (union template).\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab No Razor \u8594 ? item-based linking only.\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Track-level Razor only; envelope-lane razors preserved but ignored.\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Coexists with your Razor\u8596 ?Item watcher; this script never auto-selects items.\sa180\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 Note: This script was generated using ChatGPT based on design concepts and iterative testing by hsuanice. hsuanice served as the workflow designer, tester, and integrator for this tool.\par}
+}
+]]></description>
+      </metadata>
+      <version name="0.3.2" author="hsuanice" time="2025-08-16T16:53:45Z">
+        <source main="main">https://github.com/hsuanice/ReaScripts/raw/9b053ca0be4a2da3ebd881e2f1f752080b06f840/Beta%20Testing/hsuanice_Track%20and%20Razor%20Item%20Link%20like%20Pro%20Tools.lua</source>
       </version>
     </reapack>
     <reapack name="hsuanice_Track and Razor Link like Pro Tools.lua" type="script" desc="hsuanice_Track and Razor Link like Pro Tools">
