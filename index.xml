@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<index version="1" name="hsuanice Scripts" commit="eecba92775e48de52f3ab230ad3bf65781e23e0d">
+<index version="1" name="hsuanice Scripts" commit="fad9ec7adcb422f9e0defdbad5124d8f24c569fb">
   <category name="Beta Testing">
     <reapack name="hsuanice_BWF TimeReference Embed Tool.lua" type="script" desc="Embed BWF TimeReference to Active take from Take 1 or Current Position TC">
       <version name="0.7.1" author="hsuanice" time="2025-08-14T17:52:57Z">
@@ -531,11 +531,15 @@ v0.1 - Beta release]]></changelog>
 {\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Track-level Razor only; envelope-lane razors preserved but ignored.\par}
 {\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Coexists with your Razor\u8596 ?Item watcher; this script never auto-selects items.\sa180\par}
 {\pard \ql \f0 \sa180 \li0 \fi0 Note: This script was generated using ChatGPT based on design concepts and iterative testing by hsuanice. hsuanice served as the workflow designer, tester, and integrator for this tool.\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 Reference: Script: X_Raym_Ugurcan Orcun_Toggle Mouse Click for track selection in preference.lua\par}
 }
 ]]></description>
       </metadata>
       <version name="0.3.2" author="hsuanice" time="2025-08-16T16:53:45Z">
         <source main="main">https://github.com/hsuanice/ReaScripts/raw/9b053ca0be4a2da3ebd881e2f1f752080b06f840/Beta%20Testing/hsuanice_Track%20and%20Razor%20Item%20Link%20like%20Pro%20Tools.lua</source>
+      </version>
+      <version name="0.3.4" author="hsuanice" time="2025-08-17T04:28:24Z">
+        <source main="main">https://github.com/hsuanice/ReaScripts/raw/fad9ec7adcb422f9e0defdbad5124d8f24c569fb/Beta%20Testing/hsuanice_Track%20and%20Razor%20Item%20Link%20like%20Pro%20Tools.lua</source>
       </version>
     </reapack>
     <reapack name="hsuanice_Track and Razor Item Link Monitor.lua" type="script" desc="hsuanice_Track and Razor Item Link Monitor (names only + per-item ranges)">
