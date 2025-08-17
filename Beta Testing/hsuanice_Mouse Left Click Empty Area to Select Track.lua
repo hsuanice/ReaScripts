@@ -1,53 +1,51 @@
 --[[
-@description Mouse Left Click Empty Area to Select Track (Mouse-up; Console ON/OFF)
-@version 0.1.0
+@description hsuanice_Mouse Left Click Empty Area to Select Track
+@version 0.2.2
 @author hsuanice
 @about
-  Background watcher that selects the track immediately on **mouse-down**
-  when you click on **EMPTY** space in the Arrange view track lanes.
-  - Does nothing if clicking on items, envelopes, ruler, TCP/MCP, etc.
-  - Toolbar-friendly toggle: run once to start, run again to stop.
-  - Console Monitor can be turned ON or OFF without stopping the watcher.
-
-  Console Monitor (ON/OFF):
-    - Hold **ALT** while running this script:
-      • If the watcher is **not running** → toggles the console monitor preference and then starts.
-      • If the watcher is **already running** → toggles the console monitor live (no restart).
-    - Preference is persisted via ExtState and read live by the watcher loop.
-
-  Integration notes:
-    - This watcher does not intercept or eat mouse messages, so REAPER's native click behaviors
-      (e.g., moving the edit cursor) still occur. If you have Mouse Modifiers assigned to the same
-      "left click on empty track lane" context, both will run (first this watcher selects the track,
-      then your modifier action runs). Adjust your modifier if you want different timing.
-    - Safe to run alongside your "Razor ↔ Item link" or "Link like Pro Tools" watchers; this one
-      only manages track selection on empty-lane mousedown and does not touch Razor/Item states.
-
-  Requirements:
-    - SWS Extension (BR_GetMouseCursorContext*, BR_*AtMouseCursor)
-    - js_ReaScriptAPI (JS_Mouse_GetState, JS_VKeys_GetState)
+  Select the track immediately on **mouse-down** when clicking on **EMPTY** space
+  in the Arrange view track lanes. Skips items/envelopes/ruler/TCP/MCP.
+  Toolbar-friendly background watcher: run once to start, run again to stop (true toggle).
+  Optional console logging via WANT_DEBUG.
 
   Note:
-    This script was generated using ChatGPT based on design concepts and iterative testing by hsuanice.
-    hsuanice served as the workflow designer, tester, and integrator for this tool.
+  This script was generated using ChatGPT based on design concepts and iterative testing by hsuanice.
+  hsuanice served as the workflow designer, tester, and integrator for this tool.
 
+@requires js_ReaScriptAPI
+@provides [main] .
 @changelog
-  v0.1.0 - Beta release. Select on mouse-down in empty arrange lanes; toolbar toggle; ALT to toggle Console Monitor live.
+  0.2.2 - True toggle: use set_action_options(1+4) to auto-terminate running instance without Task Control dialog;
+          remove ExtState-based toggling; keep toolbar ON at start and OFF on exit.
+  0.2.1 - Add set_action_options to auto-terminate previous instance (no Task Control dialog) and sync toolbar ON/OFF.
+  0.2.0 - Change: select on mouse-down; add immediate UI refresh; pointer validation.
+  0.1.0 - Initial release (selected on mouse-up).
 ]]
 
-local WANT_DEBUG   = false   -- true for Console Monitor;false to not show Console Monitor
-local MOVE_THRESH  = 6       -- pixels tolerated while mouse is down (click vs drag)
-local CLICK_MAX_S  = 0.5     -- seconds within which it's considered a click
+-- Auto-terminate previous instance (no dialog), set toolbar ON
+-- 1 = terminate if running, 4 = mark this action as toggled ON
+if reaper.set_action_options then
+  reaper.set_action_options(1 + 4)
+end
 
+----------------------------------------------------------------
+-- User option
+----------------------------------------------------------------
+local WANT_DEBUG = false  -- true = print to console
+
+----------------------------------------------------------------
+-- Logger
+----------------------------------------------------------------
 local function Log(msg)
   if WANT_DEBUG then
     reaper.ShowConsoleMsg(os.date("[%H:%M:%S] ") .. tostring(msg) .. "\n")
   end
 end
 
--- Correctly retrieve sectionID/cmdID (3rd and 4th return values)
+----------------------------------------------------------------
+-- Toolbar toggle helpers
+----------------------------------------------------------------
 local _, _, sectionID, cmdID = reaper.get_action_context()
-
 local function setToggle(on)
   if sectionID and cmdID and cmdID ~= 0 then
     reaper.SetToggleCommandState(sectionID, cmdID, on and 1 or 0)
@@ -55,108 +53,96 @@ local function setToggle(on)
   end
 end
 
--- State for click detection
-local lastDown        = false
-local downX, downY    = 0, 0
-local movedWhileDown  = false
-local tDown           = 0
-
--- Resolve track under (x,y) when clicking empty arrange space
+----------------------------------------------------------------
+-- Hit-tests (screen-space)
+----------------------------------------------------------------
 local function TrackIfClickOnArrangeEmpty(x, y)
-  local _, info = reaper.GetThingFromPoint(x, y)  -- e.g. "arrange"
-  local isArrange = info == "arrange" or (info and info:find("arrange"))
+  -- Only act inside Arrange
+  local _, info = reaper.GetThingFromPoint(x, y)    -- e.g. "arrange", "tcp", "ruler"...
+  local isArrange = (info == "arrange") or (type(info) == "string" and info:find("arrange", 1, true))
   if not isArrange then
     return nil, ("not arrange (info=%s)"):format(tostring(info))
   end
-
-  -- If clicking on an item, skip
-  local item = reaper.GetItemFromPoint(x, y, true) -- true: count locked items too
+  -- Skip if on an item (locked items included)
+  local item = reaper.GetItemFromPoint(x, y, true)
   if item then
     return nil, "clicked on item"
   end
-
+  -- Resolve track
   local tr = reaper.GetTrackFromPoint(x, y)
   if not tr then
-    return nil, "no track at this point (maybe in ruler/gap)"
+    return nil, "no track at this point (ruler/gap?)"
   end
   return tr, nil
 end
 
 local function SelectOnlyTrack(tr)
+  if not (tr and reaper.ValidatePtr(tr, "MediaTrack*")) then return end
   reaper.SetOnlyTrackSelected(tr)
+  -- Immediate visual refresh (helps with large track counts)
+  reaper.TrackList_AdjustWindows(false)
+  reaper.UpdateArrange()
 end
 
+----------------------------------------------------------------
+-- Watcher loop (select on DOWN edge)
+----------------------------------------------------------------
+local lastDown = false
+
 local function watch()
-  -- Need js_ReaScriptAPI for JS_Mouse_GetState
+  -- Dependency check
   if not reaper.APIExists("JS_Mouse_GetState") then
     Log("❌ Missing js_ReaScriptAPI. Install via ReaPack.")
     setToggle(false)
     return
   end
 
-  local state = reaper.JS_Mouse_GetState(1)   -- check LMB
+  local state = reaper.JS_Mouse_GetState(1)   -- 1 = check LMB bit
   local x, y  = reaper.GetMousePosition()
+  local lmb   = (state & 1) == 1
 
-  if (state & 1) == 1 then
-    -- LMB down
+  if lmb then
+    -- DOWN edge: do the selection immediately
     if not lastDown then
-      lastDown       = true
-      downX, downY   = x, y
-      movedWhileDown = false
-      tDown          = reaper.time_precise()
+      lastDown = true
       Log(("⬇︎ down  (%d,%d)"):format(x, y))
-    else
-      if not movedWhileDown and (math.abs(x - downX) > MOVE_THRESH or math.abs(y - downY) > MOVE_THRESH) then
-        movedWhileDown = true
+      local tr, why = TrackIfClickOnArrangeEmpty(x, y)
+      if tr then
+        reaper.Undo_BeginBlock()
+        SelectOnlyTrack(tr)
+        reaper.Undo_EndBlock("Click empty arrange selects track (mouse-down)", -1)
+        local ok, name = reaper.GetTrackName(tr)
+        Log(("✅ selected track: %s"):format(ok and name or "(unnamed)"))
+      else
+        Log("skip: " .. tostring(why))
       end
     end
   else
-    -- LMB up
+    -- UP edge: log only (no selection here)
     if lastDown then
       lastDown = false
-      local dt = reaper.time_precise() - tDown
-      local isClick = (not movedWhileDown) and (dt <= CLICK_MAX_S)
-
-      if isClick then
-        local tr, why = TrackIfClickOnArrangeEmpty(x, y)
-        if tr then
-          reaper.Undo_BeginBlock()
-          SelectOnlyTrack(tr)
-          reaper.Undo_EndBlock("Click empty arrange selects track", -1)
-          reaper.UpdateArrange()
-          local ok, name = reaper.GetTrackName(tr)
-          Log(("✅ selected track: %s"):format(ok and name or "(unnamed)"))
-        else
-          Log("skip: " .. tostring(why))
-        end
-      else
-        Log(movedWhileDown and "skip: drag" or "skip: long/double click")
-      end
-      Log(("⬆︎ up    (%d,%d)  Δt=%.3fs"):format(x, y, dt))
+      Log(("⬆︎ up    (%d,%d)"):format(x, y))
     end
   end
 
   reaper.defer(watch)
 end
 
--- Toggle behavior (run once to start, run again to stop)
-local RUN_NS  = "hsuanice_ClickEmptySelectTrack"
-local RUN_KEY = "watcher_running"
-local running = reaper.GetExtState(RUN_NS, RUN_KEY) == "1"
+----------------------------------------------------------------
+-- Start (no ExtState toggle; true one-button toggle is handled by set_action_options)
+----------------------------------------------------------------
+if WANT_DEBUG then reaper.ClearConsole() end
+setToggle(true)
+Log("=== Click-empty-select-track watcher started (mouse-down) ===")
 
-if running then
-  reaper.SetExtState(RUN_NS, RUN_KEY, "0", false)
+reaper.atexit(function()
+  -- Set toolbar OFF on exit (pairs with ON at start)
+  if reaper.set_action_options then
+    -- 8 = mark this action as toggled OFF
+    reaper.set_action_options(8)
+  end
   setToggle(false)
-  Log("🛑 watcher stopped")
-else
-  if WANT_DEBUG then reaper.ClearConsole() end
-  Log("=== Click-empty-select-track watcher started ===")
-  reaper.SetExtState(RUN_NS, RUN_KEY, "1", false)
-  setToggle(true)
-  reaper.atexit(function()
-    reaper.SetExtState(RUN_NS, RUN_KEY, "0", false)
-    setToggle(false)
-    Log("🧹 exit cleanup")
-  end)
-  watch()
-end
+  Log("🧹 exit cleanup")
+end)
+
+watch()
