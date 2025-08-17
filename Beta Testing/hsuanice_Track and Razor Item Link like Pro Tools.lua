@@ -1,6 +1,6 @@
 --[[
 @description hsuanice_Track and Razor Item Link like Pro Tools
-@version 0.3.2
+@version 0.3.4
 @author hsuanice
 @about
   Pro Tools–style Link Track and Edit Selection, where "Edit" = Razor Areas OR Item selection.
@@ -19,17 +19,172 @@
     This script was generated using ChatGPT based on design concepts and iterative testing by hsuanice.
     hsuanice served as the workflow designer, tester, and integrator for this tool.
 
+  Reference:
+    Script: X_Raym_Ugurcan Orcun_Toggle Mouse Click for track selection in preference.lua
+
 @changelog
+  v0.3.4 - On toggle ON: run an immediate initial sync with Razor priority:
+           • If any track-level Razor exists → mirror Razor→Track right away.
+           • Else if items are selected → mirror Item→Track right away.
+           (Turning OFF does not clear Razor or item selection.)
+  v0.3.3 - Metadata + preference toggle scaffold.
   v0.3.2 - Refine item⇄track linking: only active when items are selected; Track→Item is removal-only.
-  v0.3.1 - Remove Track→Item selection (PT-correct).
-  v0.3   - Add Item⇄Track (non-Razor tracks), keep Razor⇄Track strict priority.
-  v0.2   - STRICT Razor⇄Track (add & remove)
-  v0.1   - Beta (add-only prototype)
 ]]
+
 
 -- Toolbar toggle
 if reaper.set_action_options then reaper.set_action_options(1 | 4) end
 reaper.atexit(function() if reaper.set_action_options then reaper.set_action_options(8) end end)
+
+-- === Preference: Arrange click selects track (enable while running; restore on exit) ===
+-- Uses SWS: SNM_GetIntConfigVar / SNM_SetIntConfigVar with key 'trackselonmouse' (1=ON, 0=OFF).
+-- We force it ON while the script runs, and restore the original value on exit.
+do
+  local HAS_SWS = reaper.APIExists and reaper.APIExists("SNM_GetIntConfigVar")
+  if HAS_SWS then
+    local orig = reaper.SNM_GetIntConfigVar("trackselonmouse", -1) -- current value
+    if orig ~= 1 then reaper.SNM_SetIntConfigVar("trackselonmouse", 1) end
+    reaper.atexit(function()
+      if orig ~= -1 then reaper.SNM_SetIntConfigVar("trackselonmouse", orig) end
+    end)
+  else
+    -- SWS not installed: cannot toggle the preference programmatically.
+    -- The script still runs; consider installing SWS for full integration.
+  end
+end
+
+
+-- === Initial sync on activation (Razor priority) ===
+-- When the script turns ON, immediately mirror the current state:
+--   • If any track-level Razor exists: mirror Razor → Track right away.
+--   • Else if items are selected: mirror Item → Track right away.
+-- Turning the script OFF does NOT clear Razor or item selections.
+do
+  local function track_has_tracklevel_razor(tr)
+    local ok, s = reaper.GetSetMediaTrackInfo_String(tr, "P_RAZOREDITS", "", false)
+    if not ok or s == "" then return false end
+    for a,b,g in s:gmatch("(%S+)%s+(%S+)%s+(%S+)") do
+      if g == "\"\"" then return true end -- GUID=="" means track-level Razor
+    end
+    return false
+  end
+
+  local function any_track_has_razor()
+    local tcnt = reaper.CountTracks(0)
+    for i = 0, tcnt-1 do
+      if track_has_tracklevel_razor(reaper.GetTrack(0,i)) then return true end
+    end
+    return false
+  end
+
+  local function any_item_selected()
+    local icnt = reaper.CountMediaItems(0)
+    for i = 0, icnt-1 do
+      local it = reaper.GetMediaItem(0,i)
+      if reaper.GetMediaItemInfo_Value(it, "B_UISEL") == 1 then return true end
+    end
+    return false
+  end
+
+  reaper.PreventUIRefresh(1)
+
+  if any_track_has_razor() then
+    -- Razor → Track mirror now (select tracks that have a track-level Razor)
+    local tcnt = reaper.CountTracks(0)
+    for i = 0, tcnt-1 do
+      local tr = reaper.GetTrack(0,i)
+      reaper.SetTrackSelected(tr, track_has_tracklevel_razor(tr))
+    end
+
+  elseif any_item_selected() then
+    -- Item → Track mirror now (select tracks that contain any selected item)
+    -- This does not modify items; your regular logic will handle Track→Item later as needed.
+    local tcnt = reaper.CountTracks(0)
+    for i = 0, tcnt-1 do
+      local tr = reaper.GetTrack(0,i)
+      local has_sel = false
+      local ic = reaper.CountTrackMediaItems(tr)
+      for j = 0, ic-1 do
+        local it = reaper.GetTrackMediaItem(tr, j)
+        if reaper.GetMediaItemInfo_Value(it, "B_UISEL") == 1 then has_sel = true break end
+      end
+      reaper.SetTrackSelected(tr, has_sel)
+    end
+  end
+
+  reaper.PreventUIRefresh(-1)
+  reaper.UpdateArrange()
+end
+
+
+-- === Initial sync on activation (Razor priority) ===
+-- When the script turns ON, immediately mirror the current state:
+--   • If any track-level Razor exists: mirror Razor → Track right away.
+--   • Else if items are selected: mirror Item → Track right away.
+-- Turning the script OFF does NOT clear Razor or item selections.
+do
+  local function track_has_tracklevel_razor(tr)
+    local ok, s = reaper.GetSetMediaTrackInfo_String(tr, "P_RAZOREDITS", "", false)
+    if not ok or s == "" then return false end
+    for a,b,g in s:gmatch("(%S+)%s+(%S+)%s+(%S+)") do
+      if g == "\"\"" then return true end -- GUID=="" means track-level Razor
+    end
+    return false
+  end
+
+  local function any_track_has_razor()
+    local tcnt = reaper.CountTracks(0)
+    for i = 0, tcnt-1 do
+      if track_has_tracklevel_razor(reaper.GetTrack(0,i)) then return true end
+    end
+    return false
+  end
+
+  local function any_item_selected()
+    local icnt = reaper.CountMediaItems(0)
+    for i = 0, icnt-1 do
+      local it = reaper.GetMediaItem(0,i)
+      if reaper.GetMediaItemInfo_Value(it, "B_UISEL") == 1 then return true end
+    end
+    return false
+  end
+
+  reaper.PreventUIRefresh(1)
+
+  if any_track_has_razor() then
+    -- Razor → Track mirror now (select tracks that have a track-level Razor)
+    local tcnt = reaper.CountTracks(0)
+    for i = 0, tcnt-1 do
+      local tr = reaper.GetTrack(0,i)
+      reaper.SetTrackSelected(tr, track_has_tracklevel_razor(tr))
+    end
+
+  elseif any_item_selected() then
+    -- Item → Track mirror now (select tracks that contain any selected item)
+    -- This does not modify items; your regular logic will handle Track→Item later as needed.
+    local tcnt = reaper.CountTracks(0)
+    for i = 0, tcnt-1 do
+      local tr = reaper.GetTrack(0,i)
+      local has_sel = false
+      local ic = reaper.CountTrackMediaItems(tr)
+      for j = 0, ic-1 do
+        local it = reaper.GetTrackMediaItem(tr, j)
+        if reaper.GetMediaItemInfo_Value(it, "B_UISEL") == 1 then has_sel = true break end
+      end
+      reaper.SetTrackSelected(tr, has_sel)
+    end
+  end
+
+  reaper.PreventUIRefresh(-1)
+  reaper.UpdateArrange()
+end
+
+
+
+
+
+
+
 
 -- ---------- Helpers ----------
 local function track_selected(tr) return (reaper.GetMediaTrackInfo_Value(tr, "I_SELECTED") or 0) > 0.5 end
