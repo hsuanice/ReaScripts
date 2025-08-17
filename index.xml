@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<index version="1" name="hsuanice Scripts" commit="b9213106a8ed6d2d995d416a7cbd5845d4d190fd">
+<index version="1" name="hsuanice Scripts" commit="eecba92775e48de52f3ab230ad3bf65781e23e0d">
   <category name="Beta Testing">
     <reapack name="hsuanice_BWF TimeReference Embed Tool.lua" type="script" desc="Embed BWF TimeReference to Active take from Take 1 or Current Position TC">
       <version name="0.7.1" author="hsuanice" time="2025-08-14T17:52:57Z">
@@ -536,6 +536,26 @@ v0.1 - Beta release]]></changelog>
       </metadata>
       <version name="0.3.2" author="hsuanice" time="2025-08-16T16:53:45Z">
         <source main="main">https://github.com/hsuanice/ReaScripts/raw/9b053ca0be4a2da3ebd881e2f1f752080b06f840/Beta%20Testing/hsuanice_Track%20and%20Razor%20Item%20Link%20like%20Pro%20Tools.lua</source>
+      </version>
+    </reapack>
+    <reapack name="hsuanice_Track and Razor Item Link Monitor.lua" type="script" desc="hsuanice_Track and Razor Item Link Monitor (names only + per-item ranges)">
+      <metadata>
+        <description><![CDATA[{\rtf1\ansi\deff0{\fonttbl{\f0 \fswiss Helvetica;}{\f1 \fmodern Courier;}}
+{\colortbl;\red255\green0\blue0;\red0\green0\blue255;}
+\widowctrl\hyphauto
+
+{\pard \ql \f0 \sa180 \li0 \fi0 Console monitor for the link relationships among Tracks, Razor Areas, and Items.\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 It prints: \u8226 ? Toggle status (ON/OFF) of your link scripts, showing HUMAN-READABLE SCRIPT NAMES (no IDs shown) \u8226 ? REAPER Preference state: Arrange click selects track (requires SWS to read) \u8226 ? Selected Tracks (names) \u8226 ? Track-level Razor Areas (per track) + GLOBAL UNION \u8226 ? Selected Items (GLOBAL): lists active-take names + each item's [start..end] time range \u8226 ? For each track that HAS Razor Areas: lists that track's SELECTED items (take names + ranges) \u8226 ? Link summary (which link scripts are ACTIVE)\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 Controls: \u8226 ? Small gfx window shows \u8220"Cancel\u8221" button; press ESC or click the button to stop the monitor.\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 Note: This script was generated using ChatGPT based on design concepts and iterative testing by hsuanice. hsuanice served as the workflow designer, tester, and integrator for this tool.\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 Reference: Script: X_Raym_Ugurcan Orcun_Toggle Mouse Click for track selection in preference.lua\par}
+}
+]]></description>
+      </metadata>
+      <version name="0.8.1" author="hsuanice" time="2025-08-17T04:08:51Z">
+        <changelog><![CDATA[v0.8.1 - Metadata: added Note and Reference sections.
+v0.8   - Fix undefined compute_item_sel_range(); add Cancel UI; add preference monitoring.]]></changelog>
+        <source main="main">https://github.com/hsuanice/ReaScripts/raw/eecba92775e48de52f3ab230ad3bf65781e23e0d/Beta%20Testing/hsuanice_Track%20and%20Razor%20Item%20Link%20Monitor.lua</source>
       </version>
     </reapack>
   </category>
