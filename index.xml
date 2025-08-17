@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<index version="1" name="hsuanice Scripts" commit="05cdf77e9c2fab7b2152e0d8a7b97dc5c40cdd52">
+<index version="1" name="hsuanice Scripts" commit="8173a6cbeb26e1329a42916992a988ea8d229d4d">
   <category name="Beta Testing">
     <reapack name="hsuanice_BWF TimeReference Embed Tool.lua" type="script" desc="Embed BWF TimeReference to Active take from Take 1 or Current Position TC">
       <version name="0.7.1" author="hsuanice" time="2025-08-14T17:52:57Z">
@@ -289,6 +289,33 @@ v0.1 - Beta release]]></changelog>
       <version name="0.1" author="hsuanice" time="2025-08-13T07:33:10Z">
         <changelog><![CDATA[v0.1 - Beta release]]></changelog>
         <source main="main">https://github.com/hsuanice/ReaScripts/raw/20128d4abc5ecce7bcaa7840d72a69ef1fcdc68c/Beta%20Testing/hsuanice_Item%20Reposition.lua</source>
+      </version>
+    </reapack>
+    <reapack name="hsuanice_Mouse Left Click Empty Area to Select Track.lua" type="script" desc="Mouse Left Click Empty Area to Select Track (Mouse-up; Console ON/OFF)">
+      <metadata>
+        <description><![CDATA[{\rtf1\ansi\deff0{\fonttbl{\f0 \fswiss Helvetica;}{\f1 \fmodern Courier;}}
+{\colortbl;\red255\green0\blue0;\red0\green0\blue255;}
+\widowctrl\hyphauto
+
+{\pard \ql \f0 \sa180 \li0 \fi0 Background watcher that selects the track immediately on {\b mouse-down} when you click on {\b EMPTY} space in the Arrange view track lanes.\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Does nothing if clicking on items, envelopes, ruler, TCP/MCP, etc.\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Toolbar-friendly toggle: run once to start, run again to stop.\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Console Monitor can be turned ON or OFF without stopping the watcher.\sa180\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 Console Monitor (ON/OFF):\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Hold {\b ALT} while running this script: \u8226 ? If the watcher is {\b not running} \u8594 ? toggles the console monitor preference and then starts. \u8226 ? If the watcher is {\b already running} \u8594 ? toggles the console monitor live (no restart).\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Preference is persisted via ExtState and read live by the watcher loop.\sa180\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 Integration notes:\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab This watcher does not intercept or eat mouse messages, so REAPER's native click behaviors (e.g., moving the edit cursor) still occur. If you have Mouse Modifiers assigned to the same "left click on empty track lane" context, both will run (first this watcher selects the track, then your modifier action runs). Adjust your modifier if you want different timing.\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Safe to run alongside your "Razor \u8596 ? Item link" or "Link like Pro Tools" watchers; this one only manages track selection on empty-lane mousedown and does not touch Razor/Item states.\sa180\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 Requirements:\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab SWS Extension (BR_GetMouseCursorContext*, BR_*AtMouseCursor)\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab js_ReaScriptAPI (JS_Mouse_GetState, JS_VKeys_GetState)\sa180\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 Note: This script was generated using ChatGPT based on design concepts and iterative testing by hsuanice. hsuanice served as the workflow designer, tester, and integrator for this tool.\par}
+}
+]]></description>
+      </metadata>
+      <version name="0.1.0" author="hsuanice" time="2025-08-17T09:00:07Z">
+        <source main="main">https://github.com/hsuanice/ReaScripts/raw/8173a6cbeb26e1329a42916992a988ea8d229d4d/Beta%20Testing/hsuanice_Mouse%20Left%20Click%20Empty%20Area%20to%20Select%20Track.lua</source>
       </version>
     </reapack>
     <reapack name="hsuanice_Pro Tools Display Timeline Selection End.lua" type="script" desc="Pro Tools - Display Timeline Selection End">
