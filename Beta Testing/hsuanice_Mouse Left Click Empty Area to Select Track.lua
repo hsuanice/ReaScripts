@@ -13,7 +13,6 @@
   hsuanice served as the workflow designer, tester, and integrator for this tool.
 
 @requires js_ReaScriptAPI
-@provides [main] .
 @changelog
   0.2.2 - True toggle: use set_action_options(1+4) to auto-terminate running instance without Task Control dialog;
           remove ExtState-based toggling; keep toolbar ON at start and OFF on exit.
