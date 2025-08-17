@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<index version="1" name="hsuanice Scripts" commit="3b93d495b540663a37a66a81fe5de5e2287a2829">
+<index version="1" name="hsuanice Scripts" commit="3b875e08fd721dfccc8a8ed8cab086cd06812e19">
   <category name="Beta Testing">
     <reapack name="hsuanice_BWF TimeReference Embed Tool.lua" type="script" desc="Embed BWF TimeReference to Active take from Take 1 or Current Position TC">
       <version name="0.7.1" author="hsuanice" time="2025-08-14T17:52:57Z">
@@ -422,6 +422,23 @@ v0.1 - Beta release]]></changelog>
       </version>
       <version name="0.1.1" author="hsuanice" time="2025-08-15T17:25:25Z">
         <source main="main">https://github.com/hsuanice/ReaScripts/raw/d1e065a42fa47cbb9736076b2e31cbf957f56979/Beta%20Testing/hsuanice_Pro%20Tools%20Trim%20Clips%20Start%20To%20File%20Start.lua</source>
+      </version>
+    </reapack>
+    <reapack name="hsuanice_Razor and Item Link with Mode Switch to Overlap or Contain like Pro Tools.lua" type="script" desc="hsuanice_Razor and Item Link with Mode switch to Overlap or Contain like Pro Tools">
+      <metadata>
+        <description><![CDATA[{\rtf1\ansi\deff0{\fonttbl{\f0 \fswiss Helvetica;}{\f1 \fmodern Courier;}}
+{\colortbl;\red255\green0\blue0;\red0\green0\blue255;}
+\widowctrl\hyphauto
+
+{\pard \ql \f0 \sa180 \li0 \fi0 Single-button toggle watcher that add-selects media items on each track according to that track's TRACK-LEVEL Razor Areas (GUID == ""). Envelope-lane razors are preserved but ignored for matching.\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 MODE (user option inside the script): \u8226 ? RANGE_MODE = 1 \u8594 ? Overlap : item is selected if it INTERSECTS any Razor range \u8226 ? RANGE_MODE = 2 \u8594 ? Contain : item is selected only if it is FULLY inside a Razor range (INCLUSIVE with tiny EPS tolerance, so equal-length is selected; Pro Tools-like)\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 Behavior: \u8226 ? Add-only selection (does not clear existing item selection unless STRICT_SYNC = true). \u8226 ? Does not modify Razor Areas; only reads them. \u8226 ? Relaunching terminates the previous instance and keeps a toolbar toggle in sync.\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 Note: This script was generated using ChatGPT based on design concepts and iterative testing by hsuanice. hsuanice served as the workflow designer, tester, and integrator for this tool.\par}
+}
+]]></description>
+      </metadata>
+      <version name="0.2.1" author="hsuanice" time="2025-08-17T01:09:30Z">
+        <source main="main">https://github.com/hsuanice/ReaScripts/raw/3b875e08fd721dfccc8a8ed8cab086cd06812e19/Beta%20Testing/hsuanice_Razor%20and%20Item%20Link%20with%20Mode%20Switch%20to%20Overlap%20or%20Contain%20like%20Pro%20Tools.lua</source>
       </version>
     </reapack>
     <reapack name="hsuanice_Rename Active Take from File Metadata.lua" type="script" desc="ReaImGui - Rename Active Take from Metadata (caret insert + cached preview + copy/export)">
