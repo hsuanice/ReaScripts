@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<index version="1" name="hsuanice Scripts" commit="fad9ec7adcb422f9e0defdbad5124d8f24c569fb">
+<index version="1" name="hsuanice Scripts" commit="05cdf77e9c2fab7b2152e0d8a7b97dc5c40cdd52">
   <category name="Beta Testing">
     <reapack name="hsuanice_BWF TimeReference Embed Tool.lua" type="script" desc="Embed BWF TimeReference to Active take from Take 1 or Current Position TC">
       <version name="0.7.1" author="hsuanice" time="2025-08-14T17:52:57Z">
@@ -521,17 +521,18 @@ v0.1 - Beta release]]></changelog>
 {\colortbl;\red255\green0\blue0;\red0\green0\blue255;}
 \widowctrl\hyphauto
 
-{\pard \ql \f0 \sa180 \li0 \fi0 Pro Tools\u8211-style Link Track and Edit Selection, where "Edit" = Razor Areas OR Item selection.\par}
-{\pard \ql \f0 \sa180 \li0 \fi0 Priority per track:\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab If a track has any track-level Razor Area \u8594 ? STRICT Razor \u8644 ? Track sync for that track (Item link disabled on that track).\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab If a track has NO Razor Area \u8594 ? Item \u8644 ? Track link is enabled, with Track\u8594 ?Item = removal only.\sa180\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 Pro Tools\u8211-style "Link Track and Edit Selection", where Edit = Razor Areas OR Item selection.\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 Per-track priority:\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab If a track has any TRACK-LEVEL Razor Area \u8594 ? STRICT Razor \u8644 ? Track sync for that track (Item link disabled on that track).\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab If a track has NO Razor Area \u8594 ? Item \u8644 ? Track link with an ephemeral Edit Range: \u8226 ? When items are selected, remember [leftmost item start, rightmost item end] as the Edit Range. \u8226 ? While that Edit Range is valid, selecting/deselecting tracks will add/remove selection ONLY for items that match the range on those tracks (rule configurable via RANGE_MODE). \u8226 ? The Edit Range is invalidated by other edit actions: moving the Edit Cursor, or changing the Time Selection.\sa180\par}
 {\pard \ql \f0 \sa180 \li0 \fi0 Global behavior:\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Razor exists \u8594 ? STRICT Razor\u8594 ?Track mirror and Track\u8594 ?Razor apply/clear (union template).\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab No Razor \u8594 ? item-based linking only.\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Track-level Razor only; envelope-lane razors preserved but ignored.\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Coexists with your Razor\u8596 ?Item watcher; this script never auto-selects items.\sa180\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab If any Razor exists \u8594 ? STRICT Razor\u8594 ?Track mirror and Track\u8594 ?Razor apply/clear (union template).\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab If no Razor exists \u8594 ? item-based linking with the ephemeral Edit Range as above.\sa180\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 Notes:\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab TRACK-LEVEL Razor only (GUID == ""); envelope-lane razors are preserved but ignored for linking.\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Coexists with your Razor\u8596 ?Item watcher; this script never auto-selects all items.\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Toolbar-friendly background watcher (auto-terminate previous instance, toggle sync).\sa180\par}
 {\pard \ql \f0 \sa180 \li0 \fi0 Note: This script was generated using ChatGPT based on design concepts and iterative testing by hsuanice. hsuanice served as the workflow designer, tester, and integrator for this tool.\par}
-{\pard \ql \f0 \sa180 \li0 \fi0 Reference: Script: X_Raym_Ugurcan Orcun_Toggle Mouse Click for track selection in preference.lua\par}
 }
 ]]></description>
       </metadata>
@@ -540,6 +541,9 @@ v0.1 - Beta release]]></changelog>
       </version>
       <version name="0.3.4" author="hsuanice" time="2025-08-17T04:28:24Z">
         <source main="main">https://github.com/hsuanice/ReaScripts/raw/fad9ec7adcb422f9e0defdbad5124d8f24c569fb/Beta%20Testing/hsuanice_Track%20and%20Razor%20Item%20Link%20like%20Pro%20Tools.lua</source>
+      </version>
+      <version name="0.4.5" author="hsuanice" time="2025-08-17T06:00:35Z">
+        <source main="main">https://github.com/hsuanice/ReaScripts/raw/05cdf77e9c2fab7b2152e0d8a7b97dc5c40cdd52/Beta%20Testing/hsuanice_Track%20and%20Razor%20Item%20Link%20like%20Pro%20Tools.lua</source>
       </version>
     </reapack>
     <reapack name="hsuanice_Track and Razor Item Link Monitor.lua" type="script" desc="hsuanice_Track and Razor Item Link Monitor (names only + per-item ranges)">
