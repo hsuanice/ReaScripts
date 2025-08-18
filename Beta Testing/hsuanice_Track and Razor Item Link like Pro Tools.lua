@@ -1,6 +1,6 @@
 --[[
 @description hsuanice_Track and Razor Item Link like Pro Tools
-@version 0.4.5
+@version 0.4.6
 @author hsuanice
 @about
   Pro Tools–style "Link Track and Edit Selection", where Edit = Razor Areas OR Item selection.
@@ -27,7 +27,9 @@
     hsuanice served as the workflow designer, tester, and integrator for this tool.
 
 @changelog
-  v0.4.5 - Remove debug console; tidy syntax; keep USER OPTION RANGE_MODE (1=overlap, 2=contain/PT).
+  v0.4.6 - Removed all Time Selection related logic. Edit Range now relies only on item selection or Razor Area range.
+           Script exclusively links Razor, Item, and Track without any dependency on Time Selection.
+  v0.4.5 - Removed debug console; tidied syntax; kept RANGE_MODE (1=overlap, 2=contain/PT) user option.
 ]]
 
 -------------------------
@@ -36,7 +38,7 @@
 -- RANGE_MODE:
 --   1 = overlap : item is selected if it intersects the remembered Edit Range at all
 --   2 = contain : item must be fully inside the Edit Range (Pro Tools mode)
-local RANGE_MODE = 1
+local RANGE_MODE = 2
 
 ---------------------------------------
 -- Toolbar auto-terminate + toggle sync
@@ -228,10 +230,6 @@ end
 local edit_range_active = false
 local edit_range_start, edit_range_end = 0.0, 0.0
 local cursor_at_capture = reaper.GetCursorPosition()
-local ts_s_at_capture, ts_e_at_capture = (function()
-  local s, e = reaper.GetSet_LoopTimeRange2(0, false, false, 0, 0, false)
-  return s, e
-end)()
 
 local function capture_edit_range_from_items()
   local icnt = reaper.CountMediaItems(0)
@@ -250,14 +248,12 @@ local function capture_edit_range_from_items()
     edit_range_active = true
     edit_range_start, edit_range_end = min_s, max_e
     cursor_at_capture = reaper.GetCursorPosition()
-    ts_s_at_capture, ts_e_at_capture = reaper.GetSet_LoopTimeRange2(0, false, false, 0, 0, false)
   end
 end
 
 local function invalidate_edit_range_if_edited()
   if not edit_range_active then return end
   local cur_cur = reaper.GetCursorPosition()
-  local cur_ts_s, cur_ts_e = reaper.GetSet_LoopTimeRange2(0, false, false, 0, 0, false)
   if cur_cur ~= cursor_at_capture or cur_ts_s ~= ts_s_at_capture or cur_ts_e ~= ts_e_at_capture then
     edit_range_active = false
   end
