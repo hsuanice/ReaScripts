@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<index version="1" name="hsuanice Scripts" commit="e488b581d28dcc6f00ee9ce4cc063e6303bc1b38">
+<index version="1" name="hsuanice Scripts" commit="29dfe4231115301d7cd3885686957ba71ebdae9b">
   <category name="Beta Testing">
     <reapack name="hsuanice_BWF TimeReference Embed Tool.lua" type="script" desc="Embed BWF TimeReference to Active take from Take 1 or Current Position TC">
       <version name="0.7.1" author="hsuanice" time="2025-08-14T17:52:57Z">
@@ -313,8 +313,8 @@
 {\colortbl;\red255\green0\blue0;\red0\green0\blue255;}
 \widowctrl\hyphauto
 
-{\pard \ql \f0 \sa180 \li0 \fi0 Select the track immediately on {\b mouse-down} when clicking on {\b EMPTY} space in the Arrange view track lanes. Skips items/envelopes/ruler/TCP/MCP. Toolbar-friendly background watcher: run once to start, run again to stop (true toggle). Optional console logging via WANT_DEBUG.\par}
-{\pard \ql \f0 \sa180 \li0 \fi0 Note: This script was generated using ChatGPT based on design concepts and iterative testing by hsuanice. hsuanice served as the workflow designer, tester, and integrator for this tool.\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 Select the track immediately on {\b mouse-up} when clicking on {\b EMPTY} space in the Arrange view track lanes. Skips items/envelopes/ruler/TCP/MCP. Only triggers if mouse-down and mouse-up are at (almost) the same point. Toolbar-friendly background watcher: run once to start, run again to stop (true toggle). Optional console logging via WANT_DEBUG.\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 Note: This script was generated using ChatGPT and Copilot based on design concepts and iterative testing by hsuanice. hsuanice served as the workflow designer, tester, and integrator for this tool.\par}
 }
 ]]></description>
       </metadata>
@@ -323,6 +323,9 @@
       </version>
       <version name="0.2.2" author="hsuanice" time="2025-08-17T09:28:38Z">
         <source main="main">https://github.com/hsuanice/ReaScripts/raw/5d28797b1a33c455e5754c15c461e733ebbacbd0/Beta%20Testing/hsuanice_Mouse%20Left%20Click%20Empty%20Area%20to%20Select%20Track.lua</source>
+      </version>
+      <version name="0.2.3" author="hsuanice" time="2025-08-18T14:01:00Z">
+        <source main="main">https://github.com/hsuanice/ReaScripts/raw/29dfe4231115301d7cd3885686957ba71ebdae9b/Beta%20Testing/hsuanice_Mouse%20Left%20Click%20Empty%20Area%20to%20Select%20Track.lua</source>
       </version>
     </reapack>
     <reapack name="hsuanice_Pro Tools Display Timeline Selection End.lua" type="script" desc="Pro Tools - Display Timeline Selection End">
