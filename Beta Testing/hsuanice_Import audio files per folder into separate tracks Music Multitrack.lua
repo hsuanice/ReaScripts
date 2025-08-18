@@ -1,13 +1,13 @@
 --[[
-@description ReaImGui - Import audio: one folder per folder track; each file in folder as child track (music multitrack style, recursive).
-@version 0.1.2
+@description ReaImGui - Import audio: one folder per folder track; each file in folder as child track.
+@version 0.1.3
 @author hsuanice
 @about
   - Pre-confirm dialog: shows total folders/files, then offers [Import] / [Cancel].
-    - Each directory becomes a folder parent track (including selected root).
-    - Each file in folder becomes a child track (track name = filename, no extension), file spot at position 0s.
-    - Subfolders recursively become child folder tracks (multi-level nesting supported).
-    - Streaming import with progress window (ESC and Cancel supported).
+    - Each folder (including subfolders) that contains audio becomes a parent folder track.
+    - Each file in a folder becomes a child track (track name = filename without extension).
+    - Subfolders are treated as independent parent folder tracks (no nested folder tracks beyond two levels).
+    - Streaming import with progress window (ESC and Cancel supported). Files and tracks are imported into REAPER one by one.
     - On completion/abort: auto-close progress, then show summary dialog.
     - No ImGui Destroy/Detach calls (avoids crashes on some builds).
 
@@ -25,16 +25,10 @@
   hsuanice served as the workflow designer, tester, and integrator for this tool.
 
 @changelog
-  v0.1.2 - Change: file tracks are now named without extension (e.g. "Kick.wav" -> "Kick").
-  v0.1.1 - Fix: folder track nesting and child tracks are now correctly grouped under their parent folders; fix ImGui End() bug in summary dialog.
-  v0.1.0 - Initial release: Import audio files per folder as separate tracks with recursive folder structure, streaming, UI/ESC/cancel, summary.
+  v0.1.3 - Streaming import: insert tracks one by one with progress.
+        - English comments and metadata format update.
+  v0.1.2 - File tracks are now named without extension; bug fixes for folder grouping.
 --]]
-
----------------------------------------
--- Tunables
----------------------------------------
-local JOB_SIZE = 6          -- files per frame; raise for speed
----------------------------------------
 
 local AUDIO_EXTS = { wav=true, aif=true, aiff=true, flac=true, ogg=true, mp3=true, caf=true, m4a=true, bwf=true, ogm=true, opus=true }
 local function is_audio(fn)
@@ -60,40 +54,38 @@ local function basename(p)
 end
 
 local function stem(fn)
-  -- 去掉副檔名
+  -- Remove file extension
   local name = fn:match("([^/\\]+)$") or fn
   return (name:gsub("%.[%w]+$",""))
 end
 
--- ========= scan folder tree =========
--- returns tree: { name, path, files={...}, children={...} }
-local function scan_tree(base)
+-- ========= Scan all folders (flat, two-level only) =========
+-- Returns { {folder="name", files={...}}, ... }
+local function scan_flat_groups(base)
+  local result = {}
   local function walk(dir)
-    local node = { name = basename(dir), path = dir, files = {}, children = {} }
-    -- files
-    local i=0; local names={}
+    local group = { folder = basename(dir), files = {} }
+    -- Files in this folder
+    local i=0
     while true do
       local fn=reaper.EnumerateFiles(dir,i); if not fn then break end
-      if is_audio(fn) then names[#names+1]=fn end
+      if is_audio(fn) then group.files[#group.files+1]=join(dir,fn) end
       i=i+1
     end
-    table.sort(names)
-    for _,fn in ipairs(names) do
-      node.files[#node.files+1] = join(dir,fn)
+    -- Add group only if there are files (including root)
+    if #group.files > 0 then
+      result[#result+1] = group
     end
-    -- subdirs
-    i=0; local subs={}
+    -- Subfolders (each becomes a new group, no nesting)
+    i=0
     while true do
       local sd=reaper.EnumerateSubdirectories(dir,i); if not sd then break end
-      subs[#subs+1]=sd; i=i+1
+      walk(join(dir,sd))
+      i=i+1
     end
-    table.sort(subs)
-    for _,sd in ipairs(subs) do
-      node.children[#node.children+1] = walk(join(dir,sd))
-    end
-    return node
   end
-  return walk(base)
+  walk(base)
+  return result
 end
 
 -- ========= UI =========
@@ -116,7 +108,7 @@ local function esc_any(ctx)
   return esc_pressed()
 end
 
-local function ui_pre_open(root_name, folder_count, file_count, on_decide)
+local function ui_pre_open(base_name, folder_n, file_n, on_decide)
   UI_PRE.choice = nil
   UI_PRE.ctx = reaper.ImGui_CreateContext('Confirm Import')
   local function loop()
@@ -124,8 +116,8 @@ local function ui_pre_open(root_name, folder_count, file_count, on_decide)
     reaper.ImGui_SetNextWindowSize(UI_PRE.ctx, 480, 170, reaper.ImGui_Cond_Once())
     local vis, open = reaper.ImGui_Begin(UI_PRE.ctx, 'Confirm Import', true)
     if vis then
-      reaper.ImGui_Text(UI_PRE.ctx, ('Base: %s'):format(root_name))
-      reaper.ImGui_Text(UI_PRE.ctx, ('Folders: %d    Files: %d'):format(folder_count, file_count))
+      reaper.ImGui_Text(UI_PRE.ctx, ('Base: %s'):format(base_name))
+      reaper.ImGui_Text(UI_PRE.ctx, ('Folders: %d    Files: %d'):format(folder_n, file_n))
       reaper.ImGui_Separator(UI_PRE.ctx)
       local avail = reaper.ImGui_GetContentRegionAvail(UI_PRE.ctx)
       local half = (avail - 12) / 2
@@ -205,10 +197,7 @@ local function ui_post_open(message)
   reaper.defer(loop)
 end
 
--- ========= Folder/Track creation =========
 local function set_depth(tr,val) reaper.SetMediaTrackInfo_Value(tr,"I_FOLDERDEPTH",val) end
-local function track_index(tr) return math.max(0,(reaper.GetMediaTrackInfo_Value(tr,"IP_TRACKNUMBER") or 1)-1) end
-
 local function create_track_at(idx, name, depth)
   reaper.InsertTrackAtIndex(idx,true)
   local tr = reaper.GetTrack(0, idx)
@@ -216,17 +205,14 @@ local function create_track_at(idx, name, depth)
   set_depth(tr, depth or 0)
   return tr
 end
-
 local function append_track(name, depth)
   return create_track_at(reaper.CountTracks(0), name, depth or 0)
 end
-
 local function select_only_track(tr)
   reaper.Main_OnCommand(40297,0)
   if reaper.SetOnlyTrackSelected then reaper.SetOnlyTrackSelected(tr)
   else reaper.SetTrackSelected(tr,true) end
 end
-
 local function insert_file_to_track(tr, file_abs)
   select_only_track(tr)
   reaper.SetEditCurPos(0, false, false)
@@ -236,101 +222,68 @@ local function insert_file_to_track(tr, file_abs)
   return after>before
 end
 
--- ========= Recursive import runner =========
-local function flatten_tree(tree)
-  local folders, files = 0, 0
-  local function walk(node)
-    folders = folders + 1
-    files = files + #node.files
-    for _,child in ipairs(node.children) do walk(child) end
-  end
-  walk(tree)
-  return folders, files
-end
-
--- Main recursive folder import (修正版)
-local function import_tree(node, imported, on_update)
-  local tr_list = {}
-
-  -- 1. 插入folder track
-  local folder_tr = append_track(node.name, 1)
-  table.insert(tr_list, folder_tr)
-
-  -- 2. 插入檔案的child track（不帶副檔名）
-  for _, file in ipairs(node.files) do
-    if UI_PROGRESS.stop or esc_pressed() then return "aborted", tr_list end
-    local child_tr = append_track(stem(file), 0)
-    table.insert(tr_list, child_tr)
-    imported.count = imported.count + 1
-    on_update()
-    insert_file_to_track(child_tr, file)
-  end
-
-  -- 3. 插入子資料夾（遞迴）
-  for _, child in ipairs(node.children) do
-    if UI_PROGRESS.stop or esc_pressed() then return "aborted", tr_list end
-    local result, child_trs = import_tree(child, imported, on_update)
-    if result == "aborted" then return "aborted", tr_list end
-    for _, tr in ipairs(child_trs) do
-      table.insert(tr_list, tr)
-    end
-  end
-
-  -- 4. 最後一個child/child folder track設 end folder
-  set_depth(tr_list[#tr_list], -1)
-  return "done", tr_list
-end
-
--- ========= Entry =========
-local function choose_base()
+-- ========= STREAMING IMPORT RUNNER =========
+local function main()
+  local base = nil
   if reaper.APIExists("JS_Dialog_BrowseForFolder") then
     local ok,folder=reaper.JS_Dialog_BrowseForFolder("Select base folder","")
-    if not ok or not folder or folder=="" then return nil end
+    if not ok or not folder or folder=="" then return end
     if reaper.GetOS():find("Win") then folder=folder:gsub("/", "\\") else folder=folder:gsub("\\","/") end
-    return folder
+    base = folder
+  else
+    local rv,ret=reaper.GetUserInputs("Base Folder",1,"Path:", ""); if not rv or ret=="" then return nil end; base = ret
   end
-  local rv,ret=reaper.GetUserInputs("Base Folder",1,"Path:", ""); if not rv or ret=="" then return nil end; return ret
-end
 
-reaper.ShowConsoleMsg("")
-local function main()
-  local base = choose_base(); if not base then return end
-  local tree = scan_tree(base)
-  local folder_count, file_count = flatten_tree(tree)
+  local groups = scan_flat_groups(base)
+  local folder_count = #groups
+  local file_count = 0
+  for _,g in ipairs(groups) do file_count = file_count + #g.files end
 
   ui_pre_open(basename(base), folder_count, file_count, function(choice)
     if choice ~= 'import' then return end
-
     ui_progress_open(file_count, folder_count)
     local t0 = reaper.time_precise()
-    local imported = { count = 0 }
-    local aborted = false
-
-    local function on_update()
-      UI_PROGRESS.done = imported.count
-      reaper.UpdateArrange()
-    end
-
+    local imported = 0
+    local group_idx, file_idx = 1, 1
+    local folder_tr = nil
     local function step()
       if UI_PROGRESS.stop or esc_pressed() then
-        aborted = true
         ui_progress_close()
         local dt = reaper.time_precise() - t0
         local msg = string.format("Imported folders: %d\nImported files: %d\nStatus: Aborted\nElapsed: %.2fs",
-                                  folder_count, imported.count, dt)
+                                  folder_count, imported, dt)
         ui_post_open(msg)
         return
       end
-      reaper.Undo_BeginBlock()
-      local result = import_tree(tree, imported, on_update)
-      reaper.Undo_EndBlock("Folder->child tracks (music multitrack) import", -1)
-      ui_progress_close()
-      local dt = reaper.time_precise() - t0
-      local msg = string.format("Imported folders: %d\nImported files: %d\nStatus: Completed\nElapsed: %.2fs",
-                                folder_count, imported.count, dt)
-      ui_post_open(msg)
+      if group_idx > #groups then
+        ui_progress_close()
+        local dt = reaper.time_precise() - t0
+        local msg = string.format("Imported folders: %d\nImported files: %d\nStatus: Completed\nElapsed: %.2fs",
+                                  folder_count, imported, dt)
+        ui_post_open(msg)
+        return
+      end
+      local group = groups[group_idx]
+      if file_idx == 1 then
+        folder_tr = append_track(group.folder, 1) -- Create parent folder track
+      end
+      if file_idx <= #group.files then
+        local file = group.files[file_idx]
+        local tr = append_track(stem(file), 0) -- Create child track for file
+        insert_file_to_track(tr, file)
+        imported = imported + 1
+        UI_PROGRESS.done = imported
+        file_idx = file_idx + 1
+        reaper.defer(step)
+        return
+      else
+        set_depth(reaper.GetTrack(0, reaper.CountTracks(0)-1), -1) -- Set last child track of this folder
+        group_idx = group_idx + 1
+        file_idx = 1
+        reaper.defer(step)
+        return
+      end
     end
-
     reaper.defer(step)
   end)
 end
