@@ -1,6 +1,6 @@
 --[[
 @description hsuanice_Mouse Left Click Empty Area to Select Track
-@version 0.2.3
+@version 0.3.0
 @author hsuanice
 @about
   Select the track immediately on **mouse-up** when clicking on **EMPTY** space
@@ -14,7 +14,9 @@
   hsuanice served as the workflow designer, tester, and integrator for this tool.
 
 @requires js_ReaScriptAPI
+
 @changelog
+  0.3.0 - Add option SELECT_ON_MOUSE_UP: true=mouse-up, false=mouse-down
   0.2.3 - Select only if mouse-up is at same position as mouse-down (prevents drag misfires)
   0.2.2 - True toggle: set_action_options(1+4) to auto-terminate running instance, toolbar ON/OFF
   0.2.1 - Add set_action_options for auto-terminate, sync toolbar ON/OFF
@@ -22,18 +24,25 @@
   0.1.0 - Initial release (selected on mouse-up)
 ]]
 
-if reaper.set_action_options then
-  reaper.set_action_options(1 + 4)
-end
+-------------------------------------------------------------
+-- User options
+-------------------------------------------------------------
+local SELECT_ON_MOUSE_UP = true -- true: mouse-up, false: mouse-down
+local WANT_DEBUG = false        -- true: print to console
+local clickTolerance = 3        -- pixels for mouse-up (allow tiny moves)
 
-local WANT_DEBUG = false
-
+-------------------------------------------------------------
+-- Logger
+-------------------------------------------------------------
 local function Log(msg)
   if WANT_DEBUG then
     reaper.ShowConsoleMsg(os.date("[%H:%M:%S] ") .. tostring(msg) .. "\n")
   end
 end
 
+-------------------------------------------------------------
+-- Toolbar toggle helpers
+-------------------------------------------------------------
 local _, _, sectionID, cmdID = reaper.get_action_context()
 local function setToggle(on)
   if sectionID and cmdID and cmdID ~= 0 then
@@ -42,6 +51,9 @@ local function setToggle(on)
   end
 end
 
+-------------------------------------------------------------
+-- Hit-tests (screen-space)
+-------------------------------------------------------------
 local function TrackIfClickOnArrangeEmpty(x, y)
   local _, info = reaper.GetThingFromPoint(x, y)
   local isArrange = (info == "arrange") or (type(info) == "string" and info:find("arrange", 1, true))
@@ -66,9 +78,11 @@ local function SelectOnlyTrack(tr)
   reaper.UpdateArrange()
 end
 
+-------------------------------------------------------------
+-- Watcher loop (mouse-up or mouse-down selectable)
+-------------------------------------------------------------
 local lastDown = false
 local lastDownPos = {x = nil, y = nil}
-local clickTolerance = 3 -- pixels, allow for tiny moves
 
 local function watch()
   if not reaper.APIExists("JS_Mouse_GetState") then
@@ -81,31 +95,57 @@ local function watch()
   local x, y  = reaper.GetMousePosition()
   local lmb   = (state & 1) == 1
 
-  if lmb then
-    if not lastDown then
-      lastDown = true
-      lastDownPos.x, lastDownPos.y = x, y
-      Log(("⬇︎ down  (%d,%d)"):format(x, y))
+  if SELECT_ON_MOUSE_UP then
+    -- mouse-up模式
+    if lmb then
+      if not lastDown then
+        lastDown = true
+        lastDownPos.x, lastDownPos.y = x, y
+        Log(("⬇︎ down  (%d,%d)"):format(x, y))
+      end
+    else
+      if lastDown then
+        lastDown = false
+        Log(("⬆︎ up    (%d,%d)"):format(x, y))
+        local dx = math.abs(x - (lastDownPos.x or x))
+        local dy = math.abs(y - (lastDownPos.y or y))
+        if dx <= clickTolerance and dy <= clickTolerance then
+          local tr, why = TrackIfClickOnArrangeEmpty(x, y)
+          if tr then
+            reaper.Undo_BeginBlock()
+            SelectOnlyTrack(tr)
+            reaper.Undo_EndBlock("Click empty arrange selects track (mouse-up)", -1)
+            local ok, name = reaper.GetTrackName(tr)
+            Log(("✅ selected track: %s"):format(ok and name or "(unnamed)"))
+          else
+            Log("skip: " .. tostring(why))
+          end
+        else
+          Log(string.format("skip: drag detected (delta %d,%d)", dx, dy))
+        end
+      end
     end
   else
-    if lastDown then
-      lastDown = false
-      Log(("⬆︎ up    (%d,%d)"):format(x, y))
-      local dx = math.abs(x - (lastDownPos.x or x))
-      local dy = math.abs(y - (lastDownPos.y or y))
-      if dx <= clickTolerance and dy <= clickTolerance then
+    -- mouse-down模式
+    if lmb then
+      if not lastDown then
+        lastDown = true
+        Log(("⬇︎ down  (%d,%d)"):format(x, y))
         local tr, why = TrackIfClickOnArrangeEmpty(x, y)
         if tr then
           reaper.Undo_BeginBlock()
           SelectOnlyTrack(tr)
-          reaper.Undo_EndBlock("Click empty arrange selects track (mouse-up)", -1)
+          reaper.Undo_EndBlock("Click empty arrange selects track (mouse-down)", -1)
           local ok, name = reaper.GetTrackName(tr)
           Log(("✅ selected track: %s"):format(ok and name or "(unnamed)"))
         else
           Log("skip: " .. tostring(why))
         end
-      else
-        Log(string.format("skip: drag detected (delta %d,%d)", dx, dy))
+      end
+    else
+      if lastDown then
+        lastDown = false
+        Log(("⬆︎ up    (%d,%d)"):format(x, y))
       end
     end
   end
@@ -113,9 +153,12 @@ local function watch()
   reaper.defer(watch)
 end
 
+if reaper.set_action_options then
+  reaper.set_action_options(1 + 4)
+end
 if WANT_DEBUG then reaper.ClearConsole() end
 setToggle(true)
-Log("=== Click-empty-select-track watcher started (mouse-up, click only) ===")
+Log("=== Click-empty-select-track watcher started (" .. (SELECT_ON_MOUSE_UP and "mouse-up" or "mouse-down") .. ") ===")
 
 reaper.atexit(function()
   if reaper.set_action_options then
