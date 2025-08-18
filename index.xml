@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<index version="1" name="hsuanice Scripts" commit="5d28797b1a33c455e5754c15c461e733ebbacbd0">
+<index version="1" name="hsuanice Scripts" commit="e71addecca4141670f938aa595df3e7917589fdc">
   <category name="Beta Testing">
     <reapack name="hsuanice_BWF TimeReference Embed Tool.lua" type="script" desc="Embed BWF TimeReference to Active take from Take 1 or Current Position TC">
       <version name="0.7.1" author="hsuanice" time="2025-08-14T17:52:57Z">
@@ -338,21 +338,23 @@ v0.1 - Beta release]]></changelog>
         <source main="main">https://github.com/hsuanice/ReaScripts/raw/20128d4abc5ecce7bcaa7840d72a69ef1fcdc68c/Beta%20Testing/hsuanice_Pro%20Tools%20Display%20Timeline%20Selection%20End.lua</source>
       </version>
     </reapack>
-    <reapack name="hsuanice_Pro Tools Display Timeline Selection Start.lua" type="script" desc="Pro Tools - Trim Clips Start To File Start">
+    <reapack name="hsuanice_Pro Tools Display Timeline Selection Start.lua" type="script" desc="Pro Tools - Display Timeline Selection Start">
       <metadata>
         <description><![CDATA[{\rtf1\ansi\deff0{\fonttbl{\f0 \fswiss Helvetica;}{\f1 \fmodern Courier;}}
 {\colortbl;\red255\green0\blue0;\red0\green0\blue255;}
 \widowctrl\hyphauto
 
-{\pard \ql \f0 \sa180 \li0 \fi0 Emulates Pro Tools' "Trim Clip Start to File Start" behavior.\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Extends the left edge of selected item(s) to the previous item's end, or to the source media start.\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Prevents revealing beyond recorded content, preserving original sync and offset.\sa180\par}
-{\pard \ql \f0 \sa180 \li0 \fi0 \u55357 ?\u56481 ? Useful for reclaiming pre-roll or missed in-point material without shifting content.\line Integrates well with hsuanice's Pro Tools-style clip editing and timeline workflows.\par}
-{\pard \ql \f0 \sa180 \li0 \fi0 This script was generated using ChatGPT based on design concepts and iterative testing by hsuanice.\line hsuanice served as the workflow designer, tester, and integrator for this tool.\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 Mimics Pro Tools' "Display Timeline Selection Start" behavior.\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Priority: Razor Edit > Time Selection > Item Selection.\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab View scrolls to the start of the active selection without changing zoom level or play/edit cursor.\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Useful for navigating to timeline boundaries in a non-destructive way.\sa180\par}
 {\pard \ql \f0 \sa180 \li0 \fi0 Features:\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Designed for fast, keyboard-light workflows.\sa180\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Designed for fast, keyboard-light workflows.\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Integrates with Razor Edit regions when available.\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Uses SWS extension APIs where available.\sa180\par}
 {\pard \ql \f0 \sa180 \li0 \fi0 References:\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab REAPER ReaScript API (Lua)\sa180\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab REAPER ReaScript API (Lua)\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab SWS Extension API\sa180\par}
 {\pard \ql \f0 \sa180 \li0 \fi0 Note:\par}
 {\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab This is a 0.1 beta release for internal testing.\sa180\par}
 {\pard \ql \f0 \sa180 \li0 \fi0 This script was generated using ChatGPT based on design concepts and iterative testing by hsuanice. hsuanice served as the workflow designer, tester, and integrator for this tool.\par}
