@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<index version="1" name="hsuanice Scripts" commit="28fc6f885d3da2f94ad2ffc963e6bc20f87de202">
+<index version="1" name="hsuanice Scripts" commit="7286ccfecfc83b2c364b4782f3b0723a309a3867">
   <category name="Beta Testing">
     <reapack name="hsuanice_BWF TimeReference Embed Tool.lua" type="script" desc="Embed BWF TimeReference to Active take from Take 1 or Current Position TC">
       <version name="0.7.1" author="hsuanice" time="2025-08-14T17:52:57Z">
@@ -210,6 +210,35 @@
       </metadata>
       <version name="0.1.0" author="hsuanice" time="2025-08-16T10:12:53Z">
         <source main="main">https://github.com/hsuanice/ReaScripts/raw/0bcde98d45bbb4335393d80fa2fc652200458d53/Beta%20Testing/hsuanice_Hover%20Mode%20Trim%20Tool%20Monitor.lua</source>
+      </version>
+    </reapack>
+    <reapack name="hsuanice_Import audio files per folder into separate tracks Music Multitrack.lua" type="script" desc="ReaImGui - Import audio: one folder per folder track; each file in folder as child track (music multitrack style, recursive).">
+      <metadata>
+        <description><![CDATA[{\rtf1\ansi\deff0{\fonttbl{\f0 \fswiss Helvetica;}{\f1 \fmodern Courier;}}
+{\colortbl;\red255\green0\blue0;\red0\green0\blue255;}
+\widowctrl\hyphauto
+
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Pre-confirm dialog: shows total folders/files, then offers [Import] / [Cancel].\par}
+{\pard \ql \f0 \sa0 \li720 \fi-360 \endash \tx360\tab Each directory becomes a folder parent track (including selected root).\par}
+{\pard \ql \f0 \sa0 \li720 \fi-360 \endash \tx360\tab Each file in folder becomes a child track (track name = filename, no extension), file spot at position 0s.\par}
+{\pard \ql \f0 \sa0 \li720 \fi-360 \endash \tx360\tab Subfolders recursively become child folder tracks (multi-level nesting supported).\par}
+{\pard \ql \f0 \sa0 \li720 \fi-360 \endash \tx360\tab Streaming import with progress window (ESC and Cancel supported).\par}
+{\pard \ql \f0 \sa0 \li720 \fi-360 \endash \tx360\tab On completion/abort: auto-close progress, then show summary dialog.\par}
+{\pard \ql \f0 \sa0 \li720 \fi-360 \endash \tx360\tab No ImGui Destroy/Detach calls (avoids crashes on some builds).\sa180\sa180\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 Features:\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Built with ReaImGui for a compact, responsive UI.\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Designed for fast, keyboard-light workflows.\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Optionally leverages js_ReaScriptAPI for advanced interactions.\sa180\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 References:\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab REAPER ReaScript API (Lua)\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab js_ReaScriptAPI\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab ReaImGui (ReaScript ImGui binding)\sa180\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 This script was generated using ChatGPT and Copilot based on design concepts and iterative testing by hsuanice. hsuanice served as the workflow designer, tester, and integrator for this tool.\par}
+}
+]]></description>
+      </metadata>
+      <version name="0.1.2" author="hsuanice" time="2025-08-18T11:49:36Z">
+        <source main="main">https://github.com/hsuanice/ReaScripts/raw/7286ccfecfc83b2c364b4782f3b0723a309a3867/Beta%20Testing/hsuanice_Import%20audio%20files%20per%20folder%20into%20separate%20tracks%20Music%20Multitrack.lua</source>
       </version>
     </reapack>
     <reapack name="hsuanice_Import audio files per folder into separate tracks.lua" type="script" desc="ReaImGui - Import audio: one folder per track; channel-split files go to child tracks. Sequence only.">
