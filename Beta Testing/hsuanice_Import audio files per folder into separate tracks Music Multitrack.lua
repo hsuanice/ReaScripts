@@ -1,12 +1,11 @@
 --[[
-@description ReaImGui - Import audio: one folder per folder track; each file in folder as child track.
-@version 0.1.3
+@description Import audio files per folder into separate tracks Music Multitrack
+@version 0.1.4
 @author hsuanice
 @about
   - Pre-confirm dialog: shows total folders/files, then offers [Import] / [Cancel].
-    - Each folder (including subfolders) that contains audio becomes a parent folder track.
-    - Each file in a folder becomes a child track (track name = filename without extension).
-    - Subfolders are treated as independent parent folder tracks (no nested folder tracks beyond two levels).
+    - Each subfolder that contains audio becomes a parent folder track with child tracks (no nesting).
+    - Files in the base folder are imported as single tracks (not grouped under a parent folder track).
     - Streaming import with progress window (ESC and Cancel supported). Files and tracks are imported into REAPER one by one.
     - On completion/abort: auto-close progress, then show summary dialog.
     - No ImGui Destroy/Detach calls (avoids crashes on some builds).
@@ -21,10 +20,11 @@
   - js_ReaScriptAPI
   - ReaImGui (ReaScript ImGui binding)
 
-  This script was generated using ChatGPT and Copilot based on design concepts and iterative testing by hsuanice.
+  This script was generated using ChatGPT based on design concepts and iterative testing by hsuanice.
   hsuanice served as the workflow designer, tester, and integrator for this tool.
 
 @changelog
+  v0.1.4 - Flat folder import: base folder files as single tracks, subfolders as folder tracks. No base folder track.
   v0.1.3 - Streaming import: insert tracks one by one with progress.
         - English comments and metadata format update.
   v0.1.2 - File tracks are now named without extension; bug fixes for folder grouping.
@@ -59,32 +59,47 @@ local function stem(fn)
   return (name:gsub("%.[%w]+$",""))
 end
 
--- ========= Scan all folders (flat, two-level only) =========
--- Returns { {folder="name", files={...}}, ... }
-local function scan_flat_groups(base)
+-- ========= Scan folder structure: flat groups =========
+local function scan_groups_flat(base)
   local result = {}
+  -- Collect files in base folder (not grouped)
+  local root_files = {}
+  local i = 0
+  while true do
+    local fn = reaper.EnumerateFiles(base, i); if not fn then break end
+    if is_audio(fn) then root_files[#root_files+1] = join(base, fn) end
+    i = i + 1
+  end
+  if #root_files > 0 then
+    result[#result+1] = { folder = "", files = root_files }
+  end
+  -- Recursively collect folders (each folder independently)
   local function walk(dir)
-    local group = { folder = basename(dir), files = {} }
-    -- Files in this folder
-    local i=0
+    local group_files = {}
+    local i = 0
     while true do
-      local fn=reaper.EnumerateFiles(dir,i); if not fn then break end
-      if is_audio(fn) then group.files[#group.files+1]=join(dir,fn) end
-      i=i+1
+      local fn = reaper.EnumerateFiles(dir, i); if not fn then break end
+      if is_audio(fn) then group_files[#group_files+1] = join(dir, fn) end
+      i = i + 1
     end
-    -- Add group only if there are files (including root)
-    if #group.files > 0 then
-      result[#result+1] = group
+    if #group_files > 0 then
+      result[#result+1] = { folder = basename(dir), files = group_files }
     end
-    -- Subfolders (each becomes a new group, no nesting)
-    i=0
+    -- Subfolders (each is independent group, no nesting)
+    i = 0
     while true do
-      local sd=reaper.EnumerateSubdirectories(dir,i); if not sd then break end
-      walk(join(dir,sd))
-      i=i+1
+      local sd = reaper.EnumerateSubdirectories(dir, i); if not sd then break end
+      walk(join(dir, sd))
+      i = i + 1
     end
   end
-  walk(base)
+  -- Only walk subfolders, not base itself (already handled root_files)
+  i = 0
+  while true do
+    local sd = reaper.EnumerateSubdirectories(base, i); if not sd then break end
+    walk(join(base, sd))
+    i = i + 1
+  end
   return result
 end
 
@@ -222,7 +237,7 @@ local function insert_file_to_track(tr, file_abs)
   return after>before
 end
 
--- ========= STREAMING IMPORT RUNNER =========
+-- ========= Streaming Import Runner =========
 local function main()
   local base = nil
   if reaper.APIExists("JS_Dialog_BrowseForFolder") then
@@ -234,10 +249,13 @@ local function main()
     local rv,ret=reaper.GetUserInputs("Base Folder",1,"Path:", ""); if not rv or ret=="" then return nil end; base = ret
   end
 
-  local groups = scan_flat_groups(base)
-  local folder_count = #groups
+  local groups = scan_groups_flat(base)
+  local folder_count = 0
   local file_count = 0
-  for _,g in ipairs(groups) do file_count = file_count + #g.files end
+  for _,g in ipairs(groups) do
+    if g.folder ~= "" then folder_count = folder_count + 1 end
+    file_count = file_count + #g.files
+  end
 
   ui_pre_open(basename(base), folder_count, file_count, function(choice)
     if choice ~= 'import' then return end
@@ -264,24 +282,44 @@ local function main()
         return
       end
       local group = groups[group_idx]
-      if file_idx == 1 then
-        folder_tr = append_track(group.folder, 1) -- Create parent folder track
-      end
-      if file_idx <= #group.files then
-        local file = group.files[file_idx]
-        local tr = append_track(stem(file), 0) -- Create child track for file
-        insert_file_to_track(tr, file)
-        imported = imported + 1
-        UI_PROGRESS.done = imported
-        file_idx = file_idx + 1
-        reaper.defer(step)
-        return
+      if group.folder == "" then
+        -- Root files: each imported as a single track (no folder track)
+        if file_idx <= #group.files then
+          local file = group.files[file_idx]
+          local tr = append_track(stem(file), 0)
+          insert_file_to_track(tr, file)
+          imported = imported + 1
+          UI_PROGRESS.done = imported
+          file_idx = file_idx + 1
+          reaper.defer(step)
+          return
+        else
+          group_idx = group_idx + 1
+          file_idx = 1
+          reaper.defer(step)
+          return
+        end
       else
-        set_depth(reaper.GetTrack(0, reaper.CountTracks(0)-1), -1) -- Set last child track of this folder
-        group_idx = group_idx + 1
-        file_idx = 1
-        reaper.defer(step)
-        return
+        -- Folder group: create folder track and child tracks
+        if file_idx == 1 then
+          folder_tr = append_track(group.folder, 1)
+        end
+        if file_idx <= #group.files then
+          local file = group.files[file_idx]
+          local tr = append_track(stem(file), 0)
+          insert_file_to_track(tr, file)
+          imported = imported + 1
+          UI_PROGRESS.done = imported
+          file_idx = file_idx + 1
+          reaper.defer(step)
+          return
+        else
+          set_depth(reaper.GetTrack(0, reaper.CountTracks(0)-1), -1)
+          group_idx = group_idx + 1
+          file_idx = 1
+          reaper.defer(step)
+          return
+        end
       end
     end
     reaper.defer(step)
