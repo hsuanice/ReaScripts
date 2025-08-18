@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<index version="1" name="hsuanice Scripts" commit="b9213106a8ed6d2d995d416a7cbd5845d4d190fd">
+<index version="1" name="hsuanice Scripts" commit="7286ccfecfc83b2c364b4782f3b0723a309a3867">
   <category name="Beta Testing">
     <reapack name="hsuanice_BWF TimeReference Embed Tool.lua" type="script" desc="Embed BWF TimeReference to Active take from Take 1 or Current Position TC">
       <version name="0.7.1" author="hsuanice" time="2025-08-14T17:52:57Z">
@@ -212,6 +212,35 @@
         <source main="main">https://github.com/hsuanice/ReaScripts/raw/0bcde98d45bbb4335393d80fa2fc652200458d53/Beta%20Testing/hsuanice_Hover%20Mode%20Trim%20Tool%20Monitor.lua</source>
       </version>
     </reapack>
+    <reapack name="hsuanice_Import audio files per folder into separate tracks Music Multitrack.lua" type="script" desc="ReaImGui - Import audio: one folder per folder track; each file in folder as child track (music multitrack style, recursive).">
+      <metadata>
+        <description><![CDATA[{\rtf1\ansi\deff0{\fonttbl{\f0 \fswiss Helvetica;}{\f1 \fmodern Courier;}}
+{\colortbl;\red255\green0\blue0;\red0\green0\blue255;}
+\widowctrl\hyphauto
+
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Pre-confirm dialog: shows total folders/files, then offers [Import] / [Cancel].\par}
+{\pard \ql \f0 \sa0 \li720 \fi-360 \endash \tx360\tab Each directory becomes a folder parent track (including selected root).\par}
+{\pard \ql \f0 \sa0 \li720 \fi-360 \endash \tx360\tab Each file in folder becomes a child track (track name = filename, no extension), file spot at position 0s.\par}
+{\pard \ql \f0 \sa0 \li720 \fi-360 \endash \tx360\tab Subfolders recursively become child folder tracks (multi-level nesting supported).\par}
+{\pard \ql \f0 \sa0 \li720 \fi-360 \endash \tx360\tab Streaming import with progress window (ESC and Cancel supported).\par}
+{\pard \ql \f0 \sa0 \li720 \fi-360 \endash \tx360\tab On completion/abort: auto-close progress, then show summary dialog.\par}
+{\pard \ql \f0 \sa0 \li720 \fi-360 \endash \tx360\tab No ImGui Destroy/Detach calls (avoids crashes on some builds).\sa180\sa180\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 Features:\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Built with ReaImGui for a compact, responsive UI.\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Designed for fast, keyboard-light workflows.\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Optionally leverages js_ReaScriptAPI for advanced interactions.\sa180\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 References:\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab REAPER ReaScript API (Lua)\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab js_ReaScriptAPI\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab ReaImGui (ReaScript ImGui binding)\sa180\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 This script was generated using ChatGPT and Copilot based on design concepts and iterative testing by hsuanice. hsuanice served as the workflow designer, tester, and integrator for this tool.\par}
+}
+]]></description>
+      </metadata>
+      <version name="0.1.2" author="hsuanice" time="2025-08-18T11:49:36Z">
+        <source main="main">https://github.com/hsuanice/ReaScripts/raw/7286ccfecfc83b2c364b4782f3b0723a309a3867/Beta%20Testing/hsuanice_Import%20audio%20files%20per%20folder%20into%20separate%20tracks%20Music%20Multitrack.lua</source>
+      </version>
+    </reapack>
     <reapack name="hsuanice_Import audio files per folder into separate tracks.lua" type="script" desc="ReaImGui - Import audio: one folder per track; channel-split files go to child tracks. Sequence only.">
       <metadata>
         <description><![CDATA[{\rtf1\ansi\deff0{\fonttbl{\f0 \fswiss Helvetica;}{\f1 \fmodern Courier;}}
@@ -291,59 +320,40 @@ v0.1 - Beta release]]></changelog>
         <source main="main">https://github.com/hsuanice/ReaScripts/raw/20128d4abc5ecce7bcaa7840d72a69ef1fcdc68c/Beta%20Testing/hsuanice_Item%20Reposition.lua</source>
       </version>
     </reapack>
-    <reapack name="hsuanice_Pro Tools Display Timeline Selection End.lua" type="script" desc="Pro Tools - Display Timeline Selection End">
+    <reapack name="hsuanice_Mouse Left Click Empty Area to Select Track.lua" type="script" desc="hsuanice_Mouse Left Click Empty Area to Select Track">
       <metadata>
         <description><![CDATA[{\rtf1\ansi\deff0{\fonttbl{\f0 \fswiss Helvetica;}{\f1 \fmodern Courier;}}
 {\colortbl;\red255\green0\blue0;\red0\green0\blue255;}
 \widowctrl\hyphauto
 
-{\pard \ql \f0 \sa180 \li0 \fi0 Mimics Pro Tools' "Display Timeline Selection End" behavior.\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Priority: Razor Edit > Time Selection > Item Selection.\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab View scrolls to the end of the active selection without changing zoom level or play/edit cursor.\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Useful for navigating to timeline boundaries in a non-destructive way.\sa180\par}
-{\pard \ql \f0 \sa180 \li0 \fi0 This script was generated using ChatGPT based on design concepts and iterative testing by hsuanice.\line hsuanice served as the workflow designer, tester, and integrator for this tool.\par}
-{\pard \ql \f0 \sa180 \li0 \fi0 Features:\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Designed for fast, keyboard-light workflows.\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Integrates with Razor Edit regions when available.\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Uses SWS extension APIs where available.\sa180\par}
-{\pard \ql \f0 \sa180 \li0 \fi0 References:\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab REAPER ReaScript API (Lua)\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab SWS Extension API\sa180\par}
-{\pard \ql \f0 \sa180 \li0 \fi0 Note:\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab This is a 0.1 beta release for internal testing.\sa180\par}
-{\pard \ql \f0 \sa180 \li0 \fi0 This script was generated using ChatGPT based on design concepts and iterative testing by hsuanice. hsuanice served as the workflow designer, tester, and integrator for this tool.\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 Select the track immediately on {\b mouse-down} when clicking on {\b EMPTY} space in the Arrange view track lanes. Skips items/envelopes/ruler/TCP/MCP. Toolbar-friendly background watcher: run once to start, run again to stop (true toggle). Optional console logging via WANT_DEBUG.\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 Note: This script was generated using ChatGPT based on design concepts and iterative testing by hsuanice. hsuanice served as the workflow designer, tester, and integrator for this tool.\par}
 }
 ]]></description>
       </metadata>
+      <version name="0.1.0" author="hsuanice" time="2025-08-17T09:00:07Z">
+        <source main="main">https://github.com/hsuanice/ReaScripts/raw/8173a6cbeb26e1329a42916992a988ea8d229d4d/Beta%20Testing/hsuanice_Mouse%20Left%20Click%20Empty%20Area%20to%20Select%20Track.lua</source>
+      </version>
+      <version name="0.2.2" author="hsuanice" time="2025-08-17T09:28:38Z">
+        <source main="main">https://github.com/hsuanice/ReaScripts/raw/5d28797b1a33c455e5754c15c461e733ebbacbd0/Beta%20Testing/hsuanice_Mouse%20Left%20Click%20Empty%20Area%20to%20Select%20Track.lua</source>
+      </version>
+    </reapack>
+    <reapack name="hsuanice_Pro Tools Display Timeline Selection End.lua" type="script" desc="Pro Tools - Display Timeline Selection End">
       <version name="0.1" author="hsuanice" time="2025-08-13T07:33:10Z">
         <changelog><![CDATA[v0.1 - Beta release]]></changelog>
         <source main="main">https://github.com/hsuanice/ReaScripts/raw/20128d4abc5ecce7bcaa7840d72a69ef1fcdc68c/Beta%20Testing/hsuanice_Pro%20Tools%20Display%20Timeline%20Selection%20End.lua</source>
       </version>
+      <version name="0.2 beta x" author="hsuanice" time="2025-08-18T04:37:37Z">
+        <source main="main">https://github.com/hsuanice/ReaScripts/raw/28fc6f885d3da2f94ad2ffc963e6bc20f87de202/Beta%20Testing/hsuanice_Pro%20Tools%20Display%20Timeline%20Selection%20End.lua</source>
+      </version>
     </reapack>
-    <reapack name="hsuanice_Pro Tools Display Timeline Selection Start.lua" type="script" desc="Pro Tools - Trim Clips Start To File Start">
-      <metadata>
-        <description><![CDATA[{\rtf1\ansi\deff0{\fonttbl{\f0 \fswiss Helvetica;}{\f1 \fmodern Courier;}}
-{\colortbl;\red255\green0\blue0;\red0\green0\blue255;}
-\widowctrl\hyphauto
-
-{\pard \ql \f0 \sa180 \li0 \fi0 Emulates Pro Tools' "Trim Clip Start to File Start" behavior.\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Extends the left edge of selected item(s) to the previous item's end, or to the source media start.\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Prevents revealing beyond recorded content, preserving original sync and offset.\sa180\par}
-{\pard \ql \f0 \sa180 \li0 \fi0 \u55357 ?\u56481 ? Useful for reclaiming pre-roll or missed in-point material without shifting content.\line Integrates well with hsuanice's Pro Tools-style clip editing and timeline workflows.\par}
-{\pard \ql \f0 \sa180 \li0 \fi0 This script was generated using ChatGPT based on design concepts and iterative testing by hsuanice.\line hsuanice served as the workflow designer, tester, and integrator for this tool.\par}
-{\pard \ql \f0 \sa180 \li0 \fi0 Features:\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Designed for fast, keyboard-light workflows.\sa180\par}
-{\pard \ql \f0 \sa180 \li0 \fi0 References:\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab REAPER ReaScript API (Lua)\sa180\par}
-{\pard \ql \f0 \sa180 \li0 \fi0 Note:\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab This is a 0.1 beta release for internal testing.\sa180\par}
-{\pard \ql \f0 \sa180 \li0 \fi0 This script was generated using ChatGPT based on design concepts and iterative testing by hsuanice. hsuanice served as the workflow designer, tester, and integrator for this tool.\par}
-}
-]]></description>
-      </metadata>
+    <reapack name="hsuanice_Pro Tools Display Timeline Selection Start.lua" type="script" desc="Pro Tools - Display Timeline Selection Start">
       <version name="0.1" author="hsuanice" time="2025-08-13T07:33:10Z">
         <changelog><![CDATA[v0.1 - Beta release]]></changelog>
         <source main="main">https://github.com/hsuanice/ReaScripts/raw/20128d4abc5ecce7bcaa7840d72a69ef1fcdc68c/Beta%20Testing/hsuanice_Pro%20Tools%20Display%20Timeline%20Selection%20Start.lua</source>
+      </version>
+      <version name="0.2" author="hsuanice" time="2025-08-18T04:36:47Z">
+        <source main="main">https://github.com/hsuanice/ReaScripts/raw/6960f510f173ad6e3085e74c59a64a390781d434/Beta%20Testing/hsuanice_Pro%20Tools%20Display%20Timeline%20Selection%20Start.lua</source>
       </version>
     </reapack>
     <reapack name="hsuanice_Pro Tools Trim Clip To File Boundaries.lua" type="script" desc="Pro Tools - Trim Clip To File Boundaries">
@@ -521,21 +531,49 @@ v0.1 - Beta release]]></changelog>
 {\colortbl;\red255\green0\blue0;\red0\green0\blue255;}
 \widowctrl\hyphauto
 
-{\pard \ql \f0 \sa180 \li0 \fi0 Pro Tools\u8211-style Link Track and Edit Selection, where "Edit" = Razor Areas OR Item selection.\par}
-{\pard \ql \f0 \sa180 \li0 \fi0 Priority per track:\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab If a track has any track-level Razor Area \u8594 ? STRICT Razor \u8644 ? Track sync for that track (Item link disabled on that track).\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab If a track has NO Razor Area \u8594 ? Item \u8644 ? Track link is enabled, with Track\u8594 ?Item = removal only.\sa180\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 Pro Tools\u8211-style "Link Track and Edit Selection", where Edit = Razor Areas OR Item selection.\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 Per-track priority:\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab If a track has any TRACK-LEVEL Razor Area \u8594 ? STRICT Razor \u8644 ? Track sync for that track (Item link disabled on that track).\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab If a track has NO Razor Area \u8594 ? Item \u8644 ? Track link with an ephemeral Edit Range: \u8226 ? When items are selected, remember [leftmost item start, rightmost item end] as the Edit Range. \u8226 ? While that Edit Range is valid, selecting/deselecting tracks will add/remove selection ONLY for items that match the range on those tracks (rule configurable via RANGE_MODE). \u8226 ? The Edit Range is invalidated by other edit actions: moving the Edit Cursor, or changing the Time Selection.\sa180\par}
 {\pard \ql \f0 \sa180 \li0 \fi0 Global behavior:\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Razor exists \u8594 ? STRICT Razor\u8594 ?Track mirror and Track\u8594 ?Razor apply/clear (union template).\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab No Razor \u8594 ? item-based linking only.\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Track-level Razor only; envelope-lane razors preserved but ignored.\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Coexists with your Razor\u8596 ?Item watcher; this script never auto-selects items.\sa180\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab If any Razor exists \u8594 ? STRICT Razor\u8594 ?Track mirror and Track\u8594 ?Razor apply/clear (union template).\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab If no Razor exists \u8594 ? item-based linking with the ephemeral Edit Range as above.\sa180\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 Notes:\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab TRACK-LEVEL Razor only (GUID == ""); envelope-lane razors are preserved but ignored for linking.\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Coexists with your Razor\u8596 ?Item watcher; this script never auto-selects all items.\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Toolbar-friendly background watcher (auto-terminate previous instance, toggle sync).\sa180\par}
 {\pard \ql \f0 \sa180 \li0 \fi0 Note: This script was generated using ChatGPT based on design concepts and iterative testing by hsuanice. hsuanice served as the workflow designer, tester, and integrator for this tool.\par}
 }
 ]]></description>
       </metadata>
       <version name="0.3.2" author="hsuanice" time="2025-08-16T16:53:45Z">
         <source main="main">https://github.com/hsuanice/ReaScripts/raw/9b053ca0be4a2da3ebd881e2f1f752080b06f840/Beta%20Testing/hsuanice_Track%20and%20Razor%20Item%20Link%20like%20Pro%20Tools.lua</source>
+      </version>
+      <version name="0.3.4" author="hsuanice" time="2025-08-17T04:28:24Z">
+        <source main="main">https://github.com/hsuanice/ReaScripts/raw/fad9ec7adcb422f9e0defdbad5124d8f24c569fb/Beta%20Testing/hsuanice_Track%20and%20Razor%20Item%20Link%20like%20Pro%20Tools.lua</source>
+      </version>
+      <version name="0.4.5" author="hsuanice" time="2025-08-17T06:00:35Z">
+        <source main="main">https://github.com/hsuanice/ReaScripts/raw/05cdf77e9c2fab7b2152e0d8a7b97dc5c40cdd52/Beta%20Testing/hsuanice_Track%20and%20Razor%20Item%20Link%20like%20Pro%20Tools.lua</source>
+      </version>
+    </reapack>
+    <reapack name="hsuanice_Track and Razor Item Link Monitor.lua" type="script" desc="hsuanice_Track and Razor Item Link Monitor (names only + per-item ranges)">
+      <metadata>
+        <description><![CDATA[{\rtf1\ansi\deff0{\fonttbl{\f0 \fswiss Helvetica;}{\f1 \fmodern Courier;}}
+{\colortbl;\red255\green0\blue0;\red0\green0\blue255;}
+\widowctrl\hyphauto
+
+{\pard \ql \f0 \sa180 \li0 \fi0 Console monitor for the link relationships among Tracks, Razor Areas, and Items.\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 It prints: \u8226 ? Toggle status (ON/OFF) of your link scripts, showing HUMAN-READABLE SCRIPT NAMES (no IDs shown) \u8226 ? REAPER Preference state: Arrange click selects track (requires SWS to read) \u8226 ? Selected Tracks (names) \u8226 ? Track-level Razor Areas (per track) + GLOBAL UNION \u8226 ? Selected Items (GLOBAL): lists active-take names + each item's [start..end] time range \u8226 ? For each track that HAS Razor Areas: lists that track's SELECTED items (take names + ranges) \u8226 ? Link summary (which link scripts are ACTIVE)\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 Controls: \u8226 ? Small gfx window shows \u8220"Cancel\u8221" button; press ESC or click the button to stop the monitor.\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 Note: This script was generated using ChatGPT based on design concepts and iterative testing by hsuanice. hsuanice served as the workflow designer, tester, and integrator for this tool.\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 Reference: Script: X_Raym_Ugurcan Orcun_Toggle Mouse Click for track selection in preference.lua\par}
+}
+]]></description>
+      </metadata>
+      <version name="0.8.1" author="hsuanice" time="2025-08-17T04:08:51Z">
+        <changelog><![CDATA[v0.8.1 - Metadata: added Note and Reference sections.
+v0.8   - Fix undefined compute_item_sel_range(); add Cancel UI; add preference monitoring.]]></changelog>
+        <source main="main">https://github.com/hsuanice/ReaScripts/raw/eecba92775e48de52f3ab230ad3bf65781e23e0d/Beta%20Testing/hsuanice_Track%20and%20Razor%20Item%20Link%20Monitor.lua</source>
       </version>
     </reapack>
   </category>
