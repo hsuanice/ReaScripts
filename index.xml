@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<index version="1" name="hsuanice Scripts" commit="3d8d1cfab440500059de12fd63fcd20e2b1928c8">
+<index version="1" name="hsuanice Scripts" commit="89f7f0f8d57ad38e9f237f362d52e1d0fd0f52f8">
   <category name="Beta Testing">
     <reapack name="hsuanice_BWF TimeReference Embed Tool.lua" type="script" desc="Embed BWF TimeReference to Active take from Take 1 or Current Position TC">
       <version name="0.7.1" author="hsuanice" time="2025-08-14T17:52:57Z">
@@ -576,13 +576,14 @@ v0.8   - Fix undefined compute_item_sel_range(); add Cancel UI; add preference m
         <source main="main">https://github.com/hsuanice/ReaScripts/raw/eecba92775e48de52f3ab230ad3bf65781e23e0d/Beta%20Testing/hsuanice_Track%20and%20Razor%20Item%20Link%20Monitor.lua</source>
       </version>
     </reapack>
-    <reapack name="hsuanice_Track link for Razor and Item Selection.lua" type="script" desc="hsuanice_Track link for Razor Selection only (Toggle, Lightweight)">
+    <reapack name="hsuanice_Track link for Razor and Item Selection.lua" type="script" desc="hsuanice_Track link for Razor and Item Selection (Toggle, Lightweight)">
       <metadata>
         <description><![CDATA[{\rtf1\ansi\deff0{\fonttbl{\f0 \fswiss Helvetica;}{\f1 \fmodern Courier;}}
 {\colortbl;\red255\green0\blue0;\red0\green0\blue255;}
 \widowctrl\hyphauto
 
-{\pard \ql \f0 \sa180 \li0 \fi0 Focuses only on arrangement Razor Areas to synchronize track selection state. Does not process item selection or any item-related logic. No reverse operation (track selection does not affect Razor). Extremely lightweight and optimized for large projects. Supports Toggle, suitable for Toolbar.\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 Synchronizes track selection with Razor Area selection and Item selection (Razor priority). If any track has a Razor Area, only Razor Areas link track selection. If no Razor Areas, item selection links track selection (tracks with selected items are selected). Track selection never affects Razor or item selection (one-way link). Extremely lightweight and optimized for large projects. Supports Toggle, suitable for Toolbar.\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 Note: This script was generated using ChatGPT and Copilot based on design concepts and iterative testing by hsuanice. hsuanice served as the workflow designer, tester, and integrator for this tool.\par}
 }
 ]]></description>
       </metadata>
@@ -591,6 +592,9 @@ v0.8   - Fix undefined compute_item_sel_range(); add Cancel UI; add preference m
       </version>
       <version name="1.0.0" author="hsuanice" time="2025-08-20T09:56:15Z">
         <source main="main">https://github.com/hsuanice/ReaScripts/raw/3d8d1cfab440500059de12fd63fcd20e2b1928c8/Beta%20Testing/hsuanice_Track%20link%20for%20Razor%20and%20Item%20Selection.lua</source>
+      </version>
+      <version name="1.1.0" author="hsuanice" time="2025-08-20T10:05:59Z">
+        <source main="main">https://github.com/hsuanice/ReaScripts/raw/89f7f0f8d57ad38e9f237f362d52e1d0fd0f52f8/Beta%20Testing/hsuanice_Track%20link%20for%20Razor%20and%20Item%20Selection.lua</source>
       </version>
     </reapack>
   </category>
