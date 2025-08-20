@@ -1,6 +1,6 @@
 --[[
 @description hsuanice_Track link for Razor Selection only (Toggle, Lightweight)
-@version 0.1.1
+@version 1.0.0
 @author hsuanice
 @about
   Focuses only on arrangement Razor Areas to synchronize track selection state.
@@ -8,16 +8,8 @@
   No reverse operation (track selection does not affect Razor).
   Extremely lightweight and optimized for large projects.
   Supports Toggle, suitable for Toolbar.
-
-  Note:
-    This script was generated using ChatGPT and Copilot based on design concepts and iterative testing by hsuanice.
-    hsuanice served as the workflow designer, tester, and integrator for this tool.
-
-@changelog
-  v0.1.1 - Added ExtState integration for external sync, cleaned up code comments, English metadata.
 ]]
 
--- Set ExtState ON at script start (tracklink enabled)
 reaper.SetExtState("hsuanice_tracklink", "enabled", "1", true)
 
 ----------------------
