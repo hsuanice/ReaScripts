@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<index version="1" name="hsuanice Scripts" commit="b431c5c1299c6d176efd44638d56847fdac1b82b">
+<index version="1" name="hsuanice Scripts" commit="3748b45aec1d4457b86ef914104b4982318a67bf">
   <category name="Beta Testing">
     <reapack name="hsuanice_BWF TimeReference Embed Tool.lua" type="script" desc="Embed BWF TimeReference to Active take from Take 1 or Current Position TC">
       <version name="0.7.1" author="hsuanice" time="2025-08-14T17:52:57Z">
@@ -574,6 +574,21 @@ v0.1 - Beta release]]></changelog>
         <changelog><![CDATA[v0.8.1 - Metadata: added Note and Reference sections.
 v0.8   - Fix undefined compute_item_sel_range(); add Cancel UI; add preference monitoring.]]></changelog>
         <source main="main">https://github.com/hsuanice/ReaScripts/raw/eecba92775e48de52f3ab230ad3bf65781e23e0d/Beta%20Testing/hsuanice_Track%20and%20Razor%20Item%20Link%20Monitor.lua</source>
+      </version>
+    </reapack>
+    <reapack name="hsuanice_Track link for Razor and Item Selection.lua" type="script" desc="hsuanice_Track link for Razor Selection only (Toggle, Lightweight)">
+      <metadata>
+        <description><![CDATA[{\rtf1\ansi\deff0{\fonttbl{\f0 \fswiss Helvetica;}{\f1 \fmodern Courier;}}
+{\colortbl;\red255\green0\blue0;\red0\green0\blue255;}
+\widowctrl\hyphauto
+
+{\pard \ql \f0 \sa180 \li0 \fi0 Focuses only on arrangement Razor Areas to synchronize track selection state. Does not process item selection or any item-related logic. No reverse operation (track selection does not affect Razor). Extremely lightweight and optimized for large projects. Supports Toggle, suitable for Toolbar.\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 Note: This script was generated using ChatGPT and Copilot based on design concepts and iterative testing by hsuanice. hsuanice served as the workflow designer, tester, and integrator for this tool.\par}
+}
+]]></description>
+      </metadata>
+      <version name="0.1.1" author="hsuanice" time="2025-08-20T09:46:52Z">
+        <source main="main">https://github.com/hsuanice/ReaScripts/raw/3748b45aec1d4457b86ef914104b4982318a67bf/Beta%20Testing/hsuanice_Track%20link%20for%20Razor%20and%20Item%20Selection.lua</source>
       </version>
     </reapack>
   </category>
