@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<index version="1" name="hsuanice Scripts" commit="d1d1e9330721734bcc0e2e6fd74cb5c3100739a1">
+<index version="1" name="hsuanice Scripts" commit="e84d6d6b8482210c7afc481a7dcd566bcf969d06">
   <category name="Beta Testing">
     <reapack name="hsuanice_BWF TimeReference Embed Tool.lua" type="script" desc="Embed BWF TimeReference to Active take from Take 1 or Current Position TC">
       <version name="0.7.1" author="hsuanice" time="2025-08-14T17:52:57Z">
@@ -518,24 +518,18 @@ v0.1 - Beta release]]></changelog>
         <source main="main">https://github.com/hsuanice/ReaScripts/raw/20128d4abc5ecce7bcaa7840d72a69ef1fcdc68c/Beta%20Testing/hsuanice_Show%20Frame%20Rate.lua</source>
       </version>
     </reapack>
-    <reapack name="hsuanice_Track and Razor Item Link like Pro Tools.lua" type="script" desc="hsuanice_Track and Razor Item Link like Pro Tools">
+    <reapack name="hsuanice_Track and Razor Item Link like Pro Tools.lua" type="script" desc="Track and Razor Item Link like Pro Tools">
       <metadata>
         <description><![CDATA[{\rtf1\ansi\deff0{\fonttbl{\f0 \fswiss Helvetica;}{\f1 \fmodern Courier;}}
 {\colortbl;\red255\green0\blue0;\red0\green0\blue255;}
 \widowctrl\hyphauto
 
-{\pard \ql \f0 \sa180 \li0 \fi0 Pro Tools\u8211-style "Link Track and Edit Selection", where Edit = Razor Areas OR Item selection. Now supports simultaneous memory for Razor Area range (Pro Tools style) and item selection range (REAPER style).\par}
-{\pard \ql \f0 \sa180 \li0 \fi0 Per-track priority:\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab If a track has any TRACK-LEVEL Razor Area \u8594 ? STRICT Razor \u8644 ? Track sync for that track (Item link disabled on that track).\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab If a track has NO Razor Area \u8594 ? Item \u8644 ? Track link with an ephemeral Edit Range: \u8226 ? When items are selected, remember [leftmost item start, rightmost item end] as the Edit Range. \u8226 ? While that Edit Range is valid, selecting/deselecting tracks will add/remove selection ONLY for items that match the range on those tracks (rule configurable via RANGE_MODE). \u8226 ? The Edit Range is invalidated by other edit actions: moving the Edit Cursor, or changing the Time Selection.\sa180\par}
-{\pard \ql \f0 \sa180 \li0 \fi0 Global behavior:\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab If any Razor exists \u8594 ? STRICT Razor\u8594 ?Track mirror and Track\u8594 ?Razor apply/clear (union template).\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab If no Razor exists \u8594 ? item-based linking with the ephemeral Edit Range as above.\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Pro Tools style: Razor Area range memory is always updated when Razor Areas change, and can be recalled to create Razor Areas when track selection changes and Razor Areas are empty.\sa180\par}
-{\pard \ql \f0 \sa180 \li0 \fi0 Notes:\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab TRACK-LEVEL Razor only (GUID == ""); envelope-lane razors are preserved but ignored for linking.\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Coexists with your Razor\u8596 ?Item watcher; this script never auto-selects all items.\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Toolbar-friendly background watcher (auto-terminate previous instance, toggle sync).\sa180\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 Pro Tools-style "Link Track and Edit Selection" script. Edit Selection = Razor Area or Item Selection. Now supports automatic Razor Area creation/move/remove on track select/unselect based on current Time Selection. Razor and Item selection are synced: when operating on the Track TCP, item selection will follow razor selection. Envelope lane razors are preserved but ignored for syncing. Toolbar-friendly: auto-terminates previous instance and supports toggle.\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 Main features:\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 1.\tx360\tab If Time Selection exists, selecting/deselecting tracks automatically creates/moves/removes Razor Area on those tracks (using the Time Selection range).\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 2.\tx360\tab When Razor Area follows track selection, item selection under the area is also synced (select/unselect).\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 3.\tx360\tab Razor Area and Item Selection are always kept in sync. Track TCP operations are fully reflected.\sa180\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 Note: Only track-level Razor Areas are processed; envelope-lane razors are preserved. Script is designed for background toolbar operation (toggle).\par}
 {\pard \ql \f0 \sa180 \li0 \fi0 This script was generated using ChatGPT and Copilot based on design concepts and iterative testing by hsuanice. hsuanice served as the workflow designer, tester, and integrator for this tool.\par}
 }
 ]]></description>
@@ -554,6 +548,9 @@ v0.1 - Beta release]]></changelog>
       </version>
       <version name="0.5.0" author="hsuanice" time="2025-08-18T17:03:41Z">
         <source main="main">https://github.com/hsuanice/ReaScripts/raw/b431c5c1299c6d176efd44638d56847fdac1b82b/Beta%20Testing/hsuanice_Track%20and%20Razor%20Item%20Link%20like%20Pro%20Tools.lua</source>
+      </version>
+      <version name="0.6.0" author="hsuanice" time="2025-08-21T06:34:59Z">
+        <source main="main">https://github.com/hsuanice/ReaScripts/raw/e84d6d6b8482210c7afc481a7dcd566bcf969d06/Beta%20Testing/hsuanice_Track%20and%20Razor%20Item%20Link%20like%20Pro%20Tools.lua</source>
       </version>
     </reapack>
     <reapack name="hsuanice_Track and Razor Item Link Monitor.lua" type="script" desc="hsuanice_Track and Razor Item Link Monitor (names only + per-item ranges)">
