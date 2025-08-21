@@ -1,6 +1,6 @@
 --[[
 @description ReaImGui - Rename Active Take from Metadata (caret insert + cached preview + copy/export)
-@version 0.3
+@version 0.4.0
 @author hsuanice
 @about
   Rename active takes and/or item notes from BWF/iXML and true source metadata using a fast ReaImGui UI.
@@ -29,11 +29,11 @@
   This script was generated using ChatGPT based on design concepts and iterative testing by hsuanice.
   hsuanice served as the workflow designer, tester, and integrator for this tool.
 @changelog
+  v0.4.0 - Add $srcbaseprefix:N and $srcbasesuffix:N tokens to extract the first/last N characters of the filename (without extension).
   v0.3 - Add Selected/Scanned/Cached status view
   v0.2 - Add ESC close function
   v0.1 - Beta release
 --]]
-
 
 -- ===== Guard ReaImGui =====
 if not reaper or not reaper.ImGui_CreateContext then
@@ -49,7 +49,6 @@ local function TF(name) local fn = reaper[name]; return (type(fn)=="function") a
 
 -- ESC key enum (works across ReaImGui versions)
 local KEY_ESC = TF('ImGui_Key_Escape')
-
 
 -- ===== ExtState (defaults) =====
 local EXT_NS = "RENAME_TAKE_FROM_METADATA_V1"
@@ -165,7 +164,7 @@ local function token_spans_chars(s)
   -- $word
   i = 1
   while true do
-    local bs, be = s:find("%$[%a%d]+", i); if not bs then break end
+    local bs, be = s:find("%$[%a%d:]+", i); if not bs then break end
     if s:sub(bs+1, bs+1) ~= "{" then
       tokens[#tokens+1] = { byte_to_char_index(s, bs), byte_to_char_index(s, be) }
     end
@@ -382,6 +381,36 @@ end
 local function expand_template(tpl, fields, counter)
   local function repl(tok)
     local tkl = string.lower(tok)
+    -- $srcbaseprefix:N - first N characters of srcbase
+    local prefix = tkl:match("^srcbaseprefix:(%d+)$")
+    if prefix then
+      local n = tonumber(prefix) or 0
+      local srcbase = fields.srcbase or fields.filename or ""
+      if n > 0 then
+        local spans = utf8_spans(srcbase)
+        local len = math.min(n, #spans)
+        if len > 0 then
+          local cut = srcbase:sub(1, spans[len][2])
+          return cut
+        end
+      end
+      return ""
+    end
+    -- $srcbasesuffix:N - last N characters of srcbase
+    local suffix = tkl:match("^srcbasesuffix:(%d+)$")
+    if suffix then
+      local n = tonumber(suffix) or 0
+      local srcbase = fields.srcbase or fields.filename or ""
+      local spans = utf8_spans(srcbase)
+      local len = #spans
+      if n > 0 and len > 0 then
+        local start_i = math.max(1, len - n + 1)
+        local cut = srcbase:sub(spans[start_i][1], spans[len][2])
+        return cut
+      end
+      return ""
+    end
+    -- original tokens
     local digits = tkl:match("^counter:(%d+)$")
     if digits then
       local n = tonumber(digits) or 0
@@ -413,7 +442,7 @@ local function expand_template(tpl, fields, counter)
   end
   local out = tpl or ""
   out = out:gsub("%${(.-)}", function(s) return repl(s) end)
-  out = out:gsub("%$([%a%d]+)", function(s) return repl(s) end)
+  out = out:gsub("%$([%a%d:]+)", function(s) return repl(s) end)
   out = out:gsub("%s+"," "):gsub("^%s+",""):gsub("%s+$","")
   return out
 end
@@ -444,7 +473,7 @@ local _last_my = 0
 
 -- ===== Token list =====
 local TOKEN_LIST = {
-  "$track","$filename","$srcfile","$srcbase","$srcext","$srcpath","$srcdir",
+  "$track","$filename","$srcfile","$srcbase",'$srcbaseprefix:N','$srcbasesuffix:N',"$srcext","$srcpath","$srcdir",
   "$samplerate","$channels","$length",
   "$project","$scene","$take","$tape",
   "$trk","$trkall","$trk1","$trk2","$trk3","$trk4","$trk5","$trk6","$trk7","$trk8",
@@ -498,7 +527,7 @@ local function build_left_copy_text_from_fields(f)
   if #list>0 then add("$trkall", table.concat(list, "_")) end
   local ordered = {
     "project","scene","take","tape","track",
-    "filename","srcfile","srcbase","srcext","srcpath","srcdir","filepath",
+    "filename","srcfile","srcbase",'srcbaseprefix:N','srcbasesurfix:N',"srcext","srcpath","srcdir","filepath",
     "samplerate","channels","length",
     "date","time","year","originationdate","originationtime","startoffset",
     "framerate","speed","ubits","originator","originatorreference","timereference",
