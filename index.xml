@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<index version="1" name="hsuanice Scripts" commit="e84d6d6b8482210c7afc481a7dcd566bcf969d06">
+<index version="1" name="hsuanice Scripts" commit="196c5b62ea06bf327a6a61ed571f879c40441586">
   <category name="Beta Testing">
     <reapack name="hsuanice_BWF TimeReference Embed Tool.lua" type="script" desc="Embed BWF TimeReference to Active take from Take 1 or Current Position TC">
       <version name="0.7.1" author="hsuanice" time="2025-08-14T17:52:57Z">
@@ -524,12 +524,17 @@ v0.1 - Beta release]]></changelog>
 {\colortbl;\red255\green0\blue0;\red0\green0\blue255;}
 \widowctrl\hyphauto
 
-{\pard \ql \f0 \sa180 \li0 \fi0 Pro Tools-style "Link Track and Edit Selection" script. Edit Selection = Razor Area or Item Selection. Now supports automatic Razor Area creation/move/remove on track select/unselect based on current Time Selection. Razor and Item selection are synced: when operating on the Track TCP, item selection will follow razor selection. Envelope lane razors are preserved but ignored for syncing. Toolbar-friendly: auto-terminates previous instance and supports toggle.\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 Pro Tools-style "Link Track and Edit Selection" script. Edit Selection = Razor Area or Item Selection. Independent: Does not require or interact with any other link scripts, ExtState, or external state.\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Razor Area and Item Selection will automatically sync track selection (Razor takes priority).\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab With Time Selection, (un)selecting tracks will create/move/remove Razor Area on those tracks and sync item selection.\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab All logic is self-contained and does not depend on other scripts.\sa180\par}
 {\pard \ql \f0 \sa180 \li0 \fi0 Main features:\par}
 {\pard \ql \f0 \sa0 \li360 \fi-360 1.\tx360\tab If Time Selection exists, selecting/deselecting tracks automatically creates/moves/removes Razor Area on those tracks (using the Time Selection range).\par}
 {\pard \ql \f0 \sa0 \li360 \fi-360 2.\tx360\tab When Razor Area follows track selection, item selection under the area is also synced (select/unselect).\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 3.\tx360\tab Razor Area and Item Selection are always kept in sync. Track TCP operations are fully reflected.\sa180\par}
-{\pard \ql \f0 \sa180 \li0 \fi0 Note: Only track-level Razor Areas are processed; envelope-lane razors are preserved. Script is designed for background toolbar operation (toggle).\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 3.\tx360\tab Razor Area or Item Selection will sync track selection (Razor > Item).\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 4.\tx360\tab Envelope lane razors are preserved but ignored for syncing.\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 5.\tx360\tab Toolbar-friendly: auto-terminates previous instance and supports toggle.\sa180\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 Note: Only track-level Razor Areas are processed; envelope-lane razors are preserved.\par}
 {\pard \ql \f0 \sa180 \li0 \fi0 This script was generated using ChatGPT and Copilot based on design concepts and iterative testing by hsuanice. hsuanice served as the workflow designer, tester, and integrator for this tool.\par}
 }
 ]]></description>
@@ -551,6 +556,9 @@ v0.1 - Beta release]]></changelog>
       </version>
       <version name="0.6.0" author="hsuanice" time="2025-08-21T06:34:59Z">
         <source main="main">https://github.com/hsuanice/ReaScripts/raw/e84d6d6b8482210c7afc481a7dcd566bcf969d06/Beta%20Testing/hsuanice_Track%20and%20Razor%20Item%20Link%20like%20Pro%20Tools.lua</source>
+      </version>
+      <version name="0.7.0" author="hsuanice" time="2025-08-21T07:12:53Z">
+        <source main="main">https://github.com/hsuanice/ReaScripts/raw/196c5b62ea06bf327a6a61ed571f879c40441586/Beta%20Testing/hsuanice_Track%20and%20Razor%20Item%20Link%20like%20Pro%20Tools.lua</source>
       </version>
     </reapack>
     <reapack name="hsuanice_Track and Razor Item Link Monitor.lua" type="script" desc="hsuanice_Track and Razor Item Link Monitor (names only + per-item ranges)">
