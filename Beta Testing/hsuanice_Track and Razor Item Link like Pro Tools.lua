@@ -1,65 +1,54 @@
 --[[
-@description hsuanice_Track and Razor Item Link like Pro Tools
-@version 0.5.0
+@description Track and Razor Item Link like Pro Tools
+@version 0.6.0
 @author hsuanice
 @about
-  Pro Tools–style "Link Track and Edit Selection", where Edit = Razor Areas OR Item selection.
-  Now supports simultaneous memory for Razor Area range (Pro Tools style) and item selection range (REAPER style).
+  Pro Tools-style "Link Track and Edit Selection" script. Edit Selection = Razor Area or Item Selection.
+  Now supports automatic Razor Area creation/move/remove on track select/unselect based on current Time Selection.
+  Razor and Item selection are synced: when operating on the Track TCP, item selection will follow razor selection.
+  Envelope lane razors are preserved but ignored for syncing.
+  Toolbar-friendly: auto-terminates previous instance and supports toggle.
 
-  Per-track priority:
-    - If a track has any TRACK-LEVEL Razor Area → STRICT Razor ⇄ Track sync for that track (Item link disabled on that track).
-    - If a track has NO Razor Area → Item ⇄ Track link with an ephemeral Edit Range:
-        • When items are selected, remember [leftmost item start, rightmost item end] as the Edit Range.
-        • While that Edit Range is valid, selecting/deselecting tracks will add/remove selection ONLY for items that match the range on those tracks (rule configurable via RANGE_MODE).
-        • The Edit Range is invalidated by other edit actions: moving the Edit Cursor, or changing the Time Selection.
+  Main features:
+    1. If Time Selection exists, selecting/deselecting tracks automatically creates/moves/removes Razor Area on those tracks (using the Time Selection range).
+    2. When Razor Area follows track selection, item selection under the area is also synced (select/unselect).
+    3. Razor Area and Item Selection are always kept in sync. Track TCP operations are fully reflected.
 
-  Global behavior:
-    - If any Razor exists → STRICT Razor→Track mirror and Track→Razor apply/clear (union template).
-    - If no Razor exists → item-based linking with the ephemeral Edit Range as above.
-    - Pro Tools style: Razor Area range memory is always updated when Razor Areas change, and can be recalled to create Razor Areas when track selection changes and Razor Areas are empty.
+  Note: Only track-level Razor Areas are processed; envelope-lane razors are preserved. 
+        Script is designed for background toolbar operation (toggle).
 
-  Notes:
-    - TRACK-LEVEL Razor only (GUID == ""); envelope-lane razors are preserved but ignored for linking.
-    - Coexists with your Razor↔Item watcher; this script never auto-selects all items.
-    - Toolbar-friendly background watcher (auto-terminate previous instance, toggle sync).
-
-    
-  
   This script was generated using ChatGPT and Copilot based on design concepts and iterative testing by hsuanice.
   hsuanice served as the workflow designer, tester, and integrator for this tool.
 
 @changelog
-  v0.5.0 - Dual memory: Razor Area (Pro Tools style) + item selection (REAPER style) can coexist and work independently. Track selection can recall either according to context.
-  v0.4.7 - Pro Tools style edit selection memory. Always update memory when Razor Area changes; clear memory on item selection change or Razor Area removal; auto-create Razor Area from memory when track selection changes and no Razor Area exists.
-  v0.4.6 - Removed all Time Selection related logic. Edit Range now relies only on item selection or Razor Area range.
-           Script exclusively links Razor, Item, and Track without any dependency on Time Selection.
-]]
+  v0.6.0 - Added automatic Razor Area creation/move/remove based on Time Selection; Razor/Item selection sync; Track TCP full sync.
+--]]
 
 -------------------------
 -- === USER OPTIONS === --
 -------------------------
 -- RANGE_MODE:
---   1 = overlap : item is selected if it intersects the remembered Edit Range at all
---   2 = contain : item must be fully inside the Edit Range (Pro Tools mode)
-local RANGE_MODE = 1
+--   1 = overlap : Item is selected if it overlaps the target range
+--   2 = contain : Item must be fully within the target range (Pro Tools style)
+local RANGE_MODE = 2
 
 ---------------------------------------
--- Toolbar auto-terminate + toggle sync
+-- Toolbar auto-terminate + toggle support
 ---------------------------------------
 if reaper.set_action_options then
-  -- 1: auto-terminate previous instance on restart
-  -- 4: set toggle ON for toolbar button
+  -- 1: Auto-terminate previous instance
+  -- 4: Toolbar button ON
   reaper.set_action_options(1 | 4)
 end
 reaper.atexit(function()
   if reaper.set_action_options then
-    -- 8: set toggle OFF on exit
+    -- 8: Toolbar button OFF
     reaper.set_action_options(8)
   end
 end)
 
 ----------------
--- Small helpers
+-- Helper functions
 ----------------
 local function track_selected(tr)
   return (reaper.GetMediaTrackInfo_Value(tr, "I_SELECTED") or 0) > 0.5
@@ -117,6 +106,7 @@ local function any_razor_exists()
   return false
 end
 
+-- Set track-level Razor Areas (preserves envelope-lane razors)
 local function set_track_level_ranges(tr, newRanges)
   local ok, s = reaper.GetSetMediaTrackInfo_String(tr, "P_RAZOREDITS", "", false)
   s = (ok and s) and s or ""
@@ -132,6 +122,7 @@ local function set_track_level_ranges(tr, newRanges)
   reaper.GetSetMediaTrackInfo_String(tr, "P_RAZOREDITS", table.concat(keep, " "), true)
 end
 
+-- Collect the union of all track-level Razor Area ranges
 local function collect_union_ranges()
   local tcnt = reaper.CountTracks(0)
   local set, out = {}, {}
@@ -180,23 +171,24 @@ local function build_item_sel_sig()
   return table.concat(parts, "|")
 end
 
--- Item utils (range-based)
+-- Item utility (range-based)
 local function item_bounds(it)
   local pos = reaper.GetMediaItemInfo_Value(it, "D_POSITION")
   local len = reaper.GetMediaItemInfo_Value(it, "D_LENGTH")
   return pos, pos + len
 end
 
--- Range match: RANGE_MODE 1=overlap, 2=contain (PT)
+-- Determine if item matches the range (overlap/contain)
 local EPS = 1e-9
 local function item_matches_range(s, e, rs, re_)
   if RANGE_MODE == 1 then
     return (e > rs + EPS) and (s < re_ - EPS)        -- overlap
   else
-    return (s >= rs - EPS) and (e <= re_ + EPS)      -- contain (PT)
+    return (s >= rs - EPS) and (e <= re_ + EPS)      -- contain
   end
 end
 
+-- Select/unselect items in track that match the range
 local function track_select_items_matching_range(tr, rs, re_, sel)
   local changed = false
   local icnt = reaper.CountTrackMediaItems(tr)
@@ -217,6 +209,7 @@ local function track_select_items_matching_range(tr, rs, re_, sel)
   return changed
 end
 
+-- Check if track has any selected item
 local function track_has_any_selected_item(tr)
   local icnt = reaper.CountTrackMediaItems(tr)
   for i = 0, icnt - 1 do
@@ -228,199 +221,76 @@ local function track_has_any_selected_item(tr)
 end
 
 -------------------------------
--- Ephemeral Edit Range memory (REAPER style)
+-- Get current Time Selection range
 -------------------------------
-local edit_range_active = false
-local edit_range_start, edit_range_end = 0.0, 0.0
-local cursor_at_capture = reaper.GetCursorPosition()
-
-local function capture_edit_range_from_items()
-  local icnt = reaper.CountMediaItems(0)
-  local have = false
-  local min_s, max_e = math.huge, -math.huge
-  for i = 0, icnt - 1 do
-    local it = reaper.GetMediaItem(0, i)
-    if reaper.GetMediaItemInfo_Value(it, "B_UISEL") == 1 then
-      have = true
-      local s, e = item_bounds(it)
-      if s < min_s then min_s = s end
-      if e > max_e then max_e = e end
-    end
-  end
-  if have and max_e > min_s then
-    edit_range_active = true
-    edit_range_start, edit_range_end = min_s, max_e
-    cursor_at_capture = reaper.GetCursorPosition()
-  end
-end
-
-local function invalidate_edit_range_if_edited()
-  if not edit_range_active then return end
-  local cur_cur = reaper.GetCursorPosition()
-  if cur_cur ~= cursor_at_capture then
-    edit_range_active = false
+local function get_time_selection()
+  local start, end_ = reaper.GetSet_LoopTimeRange(false, false, 0, 0, false)
+  if end_ > start then
+    return start, end_
   end
 end
 
 -------------------------------
--- Pro Tools style Edit Selection memory (Razor Area)
+-- Main watcher loop
 -------------------------------
-local edit_selection_range = nil
-
-----------------
--- Main watcher
-----------------
 local last_razor_sig = build_razor_sig()
 local last_trk_sig   = build_track_sel_sig()
 local last_item_sig  = build_item_sel_sig()
 
 local function mainloop()
-  -- Snapshot previous signatures
+  -- Snapshot previous states
   local prev_razor_sig = last_razor_sig
   local prev_trk_sig   = last_trk_sig
   local prev_item_sig  = last_item_sig
 
-  -- Read current signatures
+  -- Get current states
   local cur_razor_sig = build_razor_sig()
   local cur_trk_sig   = build_track_sel_sig()
   local cur_item_sig  = build_item_sel_sig()
   local hasRazor      = any_razor_exists()
+  local ts, te        = get_time_selection()
 
-  -- Maintain/Edit Range memory (REAPER style)
-  if cur_item_sig ~= prev_item_sig and cur_item_sig ~= "" then
-    capture_edit_range_from_items()
-  end
-  invalidate_edit_range_if_edited()
-
-  -- Pro Tools style: Always update Edit Selection range if Razor Area changes and exists
-  if cur_razor_sig ~= prev_razor_sig and hasRazor then
-    local union = collect_union_ranges()
-    if #union > 0 then
-      -- Find the min start and max end across all Razor Areas
-      local min_s, max_e = math.huge, -math.huge
-      for _, r in ipairs(union) do
-        if r[1] < min_s then min_s = r[1] end
-        if r[2] > max_e then max_e = r[2] end
-      end
-      edit_selection_range = {min_s, max_e}
-    end
-  end
-
-  -- Pro Tools style: Clear Edit Selection if Razor Area removed OR item selection changes
-  if (cur_razor_sig ~= prev_razor_sig and not hasRazor) or
-     (cur_item_sig ~= prev_item_sig and cur_item_sig ~= "") then
-    edit_selection_range = nil
-  end
-
-  -- 1) RAZOR -> TRACK (STRICT) when any Razor exists
-  if cur_razor_sig ~= prev_razor_sig and hasRazor then
-    reaper.PreventUIRefresh(1)
+  -- 1. If time selection exists, selecting/unselecting tracks will create/move/remove Razor Area on those tracks
+  if ts and te and cur_trk_sig ~= prev_trk_sig then
     local tcnt = reaper.CountTracks(0)
-    for i = 0, tcnt - 1 do
-      local tr = reaper.GetTrack(0, i)
-      local want_sel = track_has_razor(tr)
-      if want_sel ~= track_selected(tr) then
-        set_track_selected(tr, want_sel)
-      end
-    end
-    reaper.PreventUIRefresh(-1)
-    reaper.UpdateArrange()
-    cur_trk_sig = build_track_sel_sig()
-  end
-
-  -- 2) TRACK -> RAZOR (STRICT) when any Razor exists
-  if cur_trk_sig ~= prev_trk_sig and hasRazor then
-    local template = collect_union_ranges()
     reaper.PreventUIRefresh(1)
-    local tcnt = reaper.CountTracks(0)
     for i = 0, tcnt - 1 do
       local tr = reaper.GetTrack(0, i)
       if track_selected(tr) then
-        set_track_level_ranges(tr, template)
+        -- Create/move Razor Area to time selection range
+        set_track_level_ranges(tr, { {ts, te} })
+        -- Razor sync: if the track has item selection, item selection is synced
+        track_select_items_matching_range(tr, ts, te, true)
       else
+        -- Unselecting track removes Razor Area
         set_track_level_ranges(tr, {})
+        -- Razor sync: items in range are unselected
+        track_select_items_matching_range(tr, ts, te, false)
       end
     end
     reaper.PreventUIRefresh(-1)
     reaper.UpdateArrange()
     cur_razor_sig = build_razor_sig()
+    cur_item_sig  = build_item_sel_sig()
   end
 
-  -- Pro Tools style: If Edit Selection range exists, no Razor Area, and track selection changes, create Razor Area on selected tracks
-  -- This takes priority over item selection recall.
-  if cur_trk_sig ~= prev_trk_sig and not hasRazor and edit_selection_range then
-    reaper.PreventUIRefresh(1)
+  -- 2. When Razor and track selection change, item selection is synced
+  if cur_razor_sig ~= prev_razor_sig or cur_trk_sig ~= prev_trk_sig then
     local tcnt = reaper.CountTracks(0)
     for i = 0, tcnt - 1 do
       local tr = reaper.GetTrack(0, i)
-      if track_selected(tr) then
-        set_track_level_ranges(tr, {edit_selection_range})
+      local ranges = get_track_level_ranges(tr)
+      for _, r in ipairs(ranges) do
+        -- Items within Razor Area are synced with track selection
+        track_select_items_matching_range(tr, r[1], r[2], track_selected(tr))
       end
     end
-    reaper.PreventUIRefresh(-1)
-    reaper.UpdateArrange()
-    cur_razor_sig = build_razor_sig()
-  end
-
-  -- 3) ITEM -> TRACK (STRICT, non-Razor tracks) — mirror selected items to track selection (REAPER style)
-  if cur_item_sig ~= prev_item_sig and cur_item_sig ~= "" then
-    reaper.PreventUIRefresh(1)
-    local tcnt = reaper.CountTracks(0)
-    for i = 0, tcnt - 1 do
-      local tr = reaper.GetTrack(0, i)
-      if not track_has_razor(tr) then
-        local want_sel = track_has_any_selected_item(tr)
-        if want_sel ~= track_selected(tr) then
-          set_track_selected(tr, want_sel)
-        end
-      end
-    end
-    reaper.PreventUIRefresh(-1)
-    reaper.UpdateArrange()
-    cur_trk_sig = build_track_sel_sig()
-  end
-
-  -- 4) TRACK -> ITEM via Edit Range (non-Razor tracks), only while range is active (REAPER style)
-  -- This is only used when there are no Razor Areas and no Razor Area memory to recall.
-  if edit_range_active and cur_trk_sig ~= prev_trk_sig and not hasRazor and not edit_selection_range then
-    -- Build prev/current selected track sets
-    local prev_set, cur_set = {}, {}
-    for g in (prev_trk_sig or ""):gmatch("[^|]+") do
-      prev_set[g] = true
-    end
-    local tcnt = reaper.CountTracks(0)
-    for i = 0, tcnt - 1 do
-      local tr = reaper.GetTrack(0, i)
-      if track_selected(tr) then
-        cur_set[track_guid(tr)] = tr
-      end
-    end
-
-    reaper.PreventUIRefresh(1)
-    -- Newly selected tracks → select items matching the remembered range
-    for g, tr in pairs(cur_set) do
-      if not prev_set[g] and not track_has_razor(tr) then
-        track_select_items_matching_range(tr, edit_range_start, edit_range_end, true)
-      end
-    end
-    -- Newly deselected tracks → deselect items matching the remembered range
-    for g in pairs(prev_set) do
-      if not cur_set[g] then
-        for i = 0, tcnt - 1 do
-          local tr = reaper.GetTrack(0, i)
-          if track_guid(tr) == g and not track_has_razor(tr) then
-            track_select_items_matching_range(tr, edit_range_start, edit_range_end, false)
-            break
-          end
-        end
-      end
-    end
-    reaper.PreventUIRefresh(-1)
-    reaper.UpdateArrange()
     cur_item_sig = build_item_sel_sig()
   end
 
-  -- Update "last_*" only at end of loop
+  -- 3. Additional syncing logic can be added here
+
+  -- Update last states
   last_razor_sig = cur_razor_sig
   last_trk_sig   = cur_trk_sig
   last_item_sig  = cur_item_sig
