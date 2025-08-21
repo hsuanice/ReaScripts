@@ -1,27 +1,31 @@
 --[[
 @description Track and Razor Item Link like Pro Tools
-@version 0.6.0
+@version 0.7.0
 @author hsuanice
 @about
   Pro Tools-style "Link Track and Edit Selection" script. Edit Selection = Razor Area or Item Selection.
-  Now supports automatic Razor Area creation/move/remove on track select/unselect based on current Time Selection.
-  Razor and Item selection are synced: when operating on the Track TCP, item selection will follow razor selection.
-  Envelope lane razors are preserved but ignored for syncing.
-  Toolbar-friendly: auto-terminates previous instance and supports toggle.
+  Independent: Does not require or interact with any other link scripts, ExtState, or external state.
+  - Razor Area and Item Selection will automatically sync track selection (Razor takes priority).
+  - With Time Selection, (un)selecting tracks will create/move/remove Razor Area on those tracks and sync item selection.
+  - All logic is self-contained and does not depend on other scripts.
 
   Main features:
     1. If Time Selection exists, selecting/deselecting tracks automatically creates/moves/removes Razor Area on those tracks (using the Time Selection range).
     2. When Razor Area follows track selection, item selection under the area is also synced (select/unselect).
-    3. Razor Area and Item Selection are always kept in sync. Track TCP operations are fully reflected.
+    3. Razor Area or Item Selection will sync track selection (Razor > Item).
+    4. Envelope lane razors are preserved but ignored for syncing.
+    5. Toolbar-friendly: auto-terminates previous instance and supports toggle.
 
-  Note: Only track-level Razor Areas are processed; envelope-lane razors are preserved. 
-        Script is designed for background toolbar operation (toggle).
+  Note: Only track-level Razor Areas are processed; envelope-lane razors are preserved.
 
   This script was generated using ChatGPT and Copilot based on design concepts and iterative testing by hsuanice.
   hsuanice served as the workflow designer, tester, and integrator for this tool.
 
 @changelog
-  v0.6.0 - Added automatic Razor Area creation/move/remove based on Time Selection; Razor/Item selection sync; Track TCP full sync.
+  v0.7.0 - Independent version: Track selection is always synced to Razor or Item selection (Razor priority). No external state or link scripts needed.
+
+  0.6.0和0.7.0都非常慢，因為掃描了全部的軌道和item。修正中
+
 --]]
 
 -------------------------
@@ -122,23 +126,6 @@ local function set_track_level_ranges(tr, newRanges)
   reaper.GetSetMediaTrackInfo_String(tr, "P_RAZOREDITS", table.concat(keep, " "), true)
 end
 
--- Collect the union of all track-level Razor Area ranges
-local function collect_union_ranges()
-  local tcnt = reaper.CountTracks(0)
-  local set, out = {}, {}
-  for i = 0, tcnt - 1 do
-    local tr = reaper.GetTrack(0, i)
-    for _, r in ipairs(get_track_level_ranges(tr)) do
-      local key = string.format("%.17f|%.17f", r[1], r[2])
-      if not set[key] then
-        set[key] = true
-        out[#out+1] = {r[1], r[2]}
-      end
-    end
-  end
-  return out
-end
-
 local function build_razor_sig()
   local t, tcnt = {}, reaper.CountTracks(0)
   for i = 0, tcnt - 1 do
@@ -190,23 +177,14 @@ end
 
 -- Select/unselect items in track that match the range
 local function track_select_items_matching_range(tr, rs, re_, sel)
-  local changed = false
   local icnt = reaper.CountTrackMediaItems(tr)
   for i = 0, icnt - 1 do
     local it = reaper.GetTrackMediaItem(tr, i)
     local s, e = item_bounds(it)
     if item_matches_range(s, e, rs, re_) then
-      local cur = reaper.GetMediaItemInfo_Value(it, "B_UISEL") == 1
-      if sel and (not cur) then
-        reaper.SetMediaItemInfo_Value(it, "B_UISEL", 1)
-        changed = true
-      elseif (not sel) and cur then
-        reaper.SetMediaItemInfo_Value(it, "B_UISEL", 0)
-        changed = true
-      end
+      reaper.SetMediaItemInfo_Value(it, "B_UISEL", sel and 1 or 0)
     end
   end
-  return changed
 end
 
 -- Check if track has any selected item
@@ -238,33 +216,51 @@ local last_trk_sig   = build_track_sel_sig()
 local last_item_sig  = build_item_sel_sig()
 
 local function mainloop()
-  -- Snapshot previous states
   local prev_razor_sig = last_razor_sig
   local prev_trk_sig   = last_trk_sig
   local prev_item_sig  = last_item_sig
 
-  -- Get current states
   local cur_razor_sig = build_razor_sig()
   local cur_trk_sig   = build_track_sel_sig()
   local cur_item_sig  = build_item_sel_sig()
   local hasRazor      = any_razor_exists()
-  local ts, te        = get_time_selection()
+  local tcnt = reaper.CountTracks(0)
+  local ts, te = get_time_selection()
 
-  -- 1. If time selection exists, selecting/unselecting tracks will create/move/remove Razor Area on those tracks
+  -- 1. Razor Area -> Track selection (STRICT SYNC, Razor has highest priority)
+  if cur_razor_sig ~= prev_razor_sig and hasRazor then
+    reaper.PreventUIRefresh(1)
+    for i = 0, tcnt - 1 do
+      local tr = reaper.GetTrack(0, i)
+      set_track_selected(tr, track_has_razor(tr))
+    end
+    reaper.PreventUIRefresh(-1)
+    reaper.UpdateArrange()
+    cur_trk_sig = build_track_sel_sig()
+  end
+
+  -- 2. Item selection -> Track selection (only if no Razor Area exists)
+  if not hasRazor and cur_item_sig ~= prev_item_sig then
+    reaper.PreventUIRefresh(1)
+    for i = 0, tcnt - 1 do
+      local tr = reaper.GetTrack(0, i)
+      set_track_selected(tr, track_has_any_selected_item(tr))
+    end
+    reaper.PreventUIRefresh(-1)
+    reaper.UpdateArrange()
+    cur_trk_sig = build_track_sel_sig()
+  end
+
+  -- 3. Track selection + time selection -> Razor Area + Item selection
   if ts and te and cur_trk_sig ~= prev_trk_sig then
-    local tcnt = reaper.CountTracks(0)
     reaper.PreventUIRefresh(1)
     for i = 0, tcnt - 1 do
       local tr = reaper.GetTrack(0, i)
       if track_selected(tr) then
-        -- Create/move Razor Area to time selection range
         set_track_level_ranges(tr, { {ts, te} })
-        -- Razor sync: if the track has item selection, item selection is synced
         track_select_items_matching_range(tr, ts, te, true)
       else
-        -- Unselecting track removes Razor Area
         set_track_level_ranges(tr, {})
-        -- Razor sync: items in range are unselected
         track_select_items_matching_range(tr, ts, te, false)
       end
     end
@@ -274,27 +270,21 @@ local function mainloop()
     cur_item_sig  = build_item_sel_sig()
   end
 
-  -- 2. When Razor and track selection change, item selection is synced
+  -- 4. Razor Area + Track selection -> Item selection (sync items under razor area)
   if cur_razor_sig ~= prev_razor_sig or cur_trk_sig ~= prev_trk_sig then
-    local tcnt = reaper.CountTracks(0)
     for i = 0, tcnt - 1 do
       local tr = reaper.GetTrack(0, i)
       local ranges = get_track_level_ranges(tr)
       for _, r in ipairs(ranges) do
-        -- Items within Razor Area are synced with track selection
         track_select_items_matching_range(tr, r[1], r[2], track_selected(tr))
       end
     end
     cur_item_sig = build_item_sel_sig()
   end
 
-  -- 3. Additional syncing logic can be added here
-
-  -- Update last states
   last_razor_sig = cur_razor_sig
   last_trk_sig   = cur_trk_sig
   last_item_sig  = cur_item_sig
-
   reaper.defer(mainloop)
 end
 
