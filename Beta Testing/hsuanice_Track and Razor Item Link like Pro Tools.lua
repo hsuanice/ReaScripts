@@ -1,34 +1,34 @@
 --[[
-@description Track and Razor Item Link like Pro Tools
-@version 0.7.5-hotfix1
+@description Track and Razor Item Link like Pro Tools (performance edition)
+@version 0.8.2-perf
 @author hsuanice
 @about
   Pro Tools-style "Link Track and Edit Selection". Edit Selection = Razor Area or Item Selection.
-  Priority:
+
+  Performance principles:
+    • Event-gated scans using GetProjectStateChangeCount(): do nothing heavy when nothing changed.
+    • Enumerate ONLY selected tracks/items (no full project sweeps unless necessary).
+    • Cache per-track Razor info and recompute only when project-state changed.
+    • Apply item selection only on tracks whose selection state changed.
+    • Keep Latched Virtual Range; publish ProjExtState only when changed.
+
+  Priority (unchanged):
     1) Razor exists → use Razor (highest)
-    2) Else Item Selection → use VIRTUAL range [min item start, max item end], but now it is LATCHED
-       (sticky) until you explicitly change selection or create a real Time Selection.
-    3) Else no active range.
+    2) Else Item Selection → use VIRTUAL (latched) span [min..max] of selected items
+    3) Else no active range
 
-  Behaviors (unchanged except for latching):
-    - Razor/Item auto-sync Track selection (Razor priority).
-    - With a REAL Time Selection present, changing Track selection creates/moves/removes Razor on those tracks
-      and syncs items under the range.
-    - Moving selected items across tracks updates Track selection (no Razor).
-
-  This script was generated using ChatGPT based on design concepts and iterative testing by hsuanice.
-  hsuanice served as the workflow designer, tester, and integrator for this tool.
-
-@changelog
-  v0.7.5-hotfix1 - Fix Lua syntax: replace patterns like `local a={},b=...` with `local a, b = ..., ...`.
-  v0.7.5 - LATCHED VIRTUAL RANGE (see previous notes).
+  Change log:
+    v0.8.2-perf - FIX: Do not shrink latched span after Track Toggle.
+                   Added suppress_latch_next flag to skip one-shot relatch when items were changed by script.
+    v0.8.1-perf-hotfix - Restore set_track_level_ranges().
+    v0.8.0-perf - Major perf pass.
 ]]
 
 -------------------------
 -- === USER OPTIONS === --
 -------------------------
 local RANGE_MODE = 2  -- 1=overlap, 2=contain (Pro Tools style)
-local LATCH_CLEAR_ON_CURSOR_MOVE = true  -- true: moving edit cursor clears virtual latch when no TS/Razor
+local LATCH_CLEAR_ON_CURSOR_MOVE = true  -- moving edit cursor clears virtual latch when no TS/Razor
 
 ---------------------------------------
 -- Toolbar auto-terminate + toggle support
@@ -37,102 +37,68 @@ if reaper.set_action_options then reaper.set_action_options(1|4) end
 reaper.atexit(function() if reaper.set_action_options then reaper.set_action_options(8) end end)
 
 ----------------
--- Helpers
+-- Tiny utils
+----------------
+local EPS = 1e-9
+local function nearly_eq(a,b) return math.abs((a or 0)-(b or 0)) < 1e-12 end
+local function tconcat_keys_sorted(set)
+  local keys = {}; for k,_ in pairs(set) do keys[#keys+1]=k end
+  table.sort(keys); return table.concat(keys, "|")
+end
+
+----------------
+-- Track helpers
 ----------------
 local function track_selected(tr) return (reaper.GetMediaTrackInfo_Value(tr,"I_SELECTED") or 0) > 0.5 end
-local function set_track_selected(tr,sel) reaper.SetTrackSelected(tr, sel and true or false) end
+local function set_track_selected(tr, sel) reaper.SetTrackSelected(tr, sel and true or false) end
 local function track_guid(tr) return reaper.GetTrackGUID(tr) end
-
--- Parse P_RAZOREDITS into triplets {start,end,guid}
-local function parse_triplets(s)
-  local out, toks = {}, {}
-  if not s or s=="" then return out end
-  for w in s:gmatch("%S+") do toks[#toks+1] = w end
-  for i=1,#toks,3 do
-    local a = tonumber(toks[i]); local b = tonumber(toks[i+1]); local g = toks[i+2] or "\"\""
-    if a and b and b > a then out[#out+1] = {a, b, g} end
-  end
-  return out
-end
-
-local function get_track_level_ranges(tr)
-  local ok, s = reaper.GetSetMediaTrackInfo_String(tr,"P_RAZOREDITS","",false)
-  if not ok then return {} end
-  local out = {}
-  for _, t in ipairs(parse_triplets(s)) do if t[3] == "\"\"" then out[#out+1] = {t[1], t[2]} end end
-  return out
-end
-local function track_has_razor(tr) return #get_track_level_ranges(tr) > 0 end
-local function any_razor_exists()
-  local n = reaper.CountTracks(0)
-  for i=0, n-1 do if track_has_razor(reaper.GetTrack(0,i)) then return true end end
-  return false
-end
-
-local function set_track_level_ranges(tr, newRanges)
-  local ok, s = reaper.GetSetMediaTrackInfo_String(tr,"P_RAZOREDITS","",false)
-  s = (ok and s) and s or ""
-  local keep = {}
-  for _, t in ipairs(parse_triplets(s)) do
-    if t[3] ~= "\"\"" then keep[#keep+1] = string.format("%.17f %.17f %s", t[1], t[2], t[3]) end
-  end
-  for _, r in ipairs(newRanges) do keep[#keep+1] = string.format("%.17f %.17f \"\"", r[1], r[2]) end
-  reaper.GetSetMediaTrackInfo_String(tr, "P_RAZOREDITS", table.concat(keep, " "), true)
-end
-
-local function build_razor_sig()
-  local t, n = {}, reaper.CountTracks(0)
+local function get_selected_tracks_set_and_sig()
+  local set = {}
+  local n = reaper.CountSelectedTracks(0)
   for i=0, n-1 do
-    local _, s = reaper.GetSetMediaTrackInfo_String(reaper.GetTrack(0,i),"P_RAZOREDITS","",false)
-    t[#t+1] = s or ""
+    local tr = reaper.GetSelectedTrack(0, i)
+    set[track_guid(tr)] = true
   end
-  return table.concat(t, "|")
+  return set, tconcat_keys_sorted(set)
 end
 
-local function build_track_sel_sig()
-  local t, n = {}, reaper.CountTracks(0)
-  for i=0, n-1 do
-    local tr = reaper.GetTrack(0, i)
-    if track_selected(tr) then t[#t+1] = track_guid(tr) end
-  end
-  return table.concat(t, "|")
-end
-
-local function build_item_sel_sig()
-  local parts, n = {}, reaper.CountMediaItems(0)
-  for i=0, n-1 do
-    local it = reaper.GetMediaItem(0, i)
-    if reaper.GetMediaItemInfo_Value(it, "B_UISEL") == 1 then
-      local _, g = reaper.GetSetMediaItemInfo_String(it, "GUID", "", false)
-      parts[#parts+1] = g or tostring(it)
-    end
-  end
-  return table.concat(parts, "|")
-end
-
-local function build_item_tracks_sig()
-  local set, n = {}, reaper.CountMediaItems(0)
-  for i=0, n-1 do
-    local it = reaper.GetMediaItem(0, i)
-    if reaper.GetMediaItemInfo_Value(it, "B_UISEL") == 1 then
-      local tr = reaper.GetMediaItem_Track(it)
-      if tr then set[track_guid(tr)] = true end
-    end
-  end
-  local keys = {}
-  for g,_ in pairs(set) do keys[#keys+1] = g end
-  table.sort(keys)
-  return table.concat(keys, "|")
-end
-
--- Item/Range utils
+----------------
+-- Item helpers (selected only)
+----------------
 local function item_bounds(it)
   local pos = reaper.GetMediaItemInfo_Value(it,"D_POSITION")
   local len = reaper.GetMediaItemInfo_Value(it,"D_LENGTH")
   return pos, pos+len
 end
 
-local EPS = 1e-9
+local function get_selected_items_info()
+  local n = reaper.CountSelectedMediaItems(0)
+  local sig_parts = {}
+  local span_min, span_max = math.huge, -math.huge
+  local tracks_with_sel_items = {}
+
+  for i=0, n-1 do
+    local it = reaper.GetSelectedMediaItem(0, i)
+    local _, g = reaper.GetSetMediaItemInfo_String(it, "GUID", "", false)
+    sig_parts[#sig_parts+1] = g or tostring(it)
+    local s, e = item_bounds(it)
+    if s < span_min then span_min = s end
+    if e > span_max then span_max = e end
+    local tr = reaper.GetMediaItem_Track(it)
+    if tr then tracks_with_sel_items[track_guid(tr)] = true end
+  end
+
+  local has_span = (#sig_parts > 0) and (span_max > span_min)
+  return {
+    count = n,
+    sig   = table.concat(sig_parts, "|"),
+    span_s= has_span and span_min or nil,
+    span_e= has_span and span_max or nil,
+    tr_set= tracks_with_sel_items,
+    tr_sig= tconcat_keys_sorted(tracks_with_sel_items),
+  }
+end
+
 local function item_matches_range(s,e,rs,re_)
   if RANGE_MODE == 1 then return (e > rs + EPS) and (s < re_ - EPS)
   else                     return (s >= rs - EPS) and (e <= re_ + EPS)
@@ -141,6 +107,7 @@ end
 
 local function track_select_items_matching_range(tr, rs, re_, sel)
   local n = reaper.CountTrackMediaItems(tr)
+  if n == 0 then return end
   for i=0, n-1 do
     local it = reaper.GetTrackMediaItem(tr, i)
     local s, e = item_bounds(it)
@@ -150,223 +117,322 @@ local function track_select_items_matching_range(tr, rs, re_, sel)
   end
 end
 
-local function track_has_any_selected_item(tr)
-  local n = reaper.CountTrackMediaItems(tr)
-  for i=0, n-1 do
-    if reaper.GetMediaItemInfo_Value(reaper.GetTrackMediaItem(tr, i), "B_UISEL") == 1 then return true end
+----------------
+-- Razor cache & helpers
+----------------
+local Razor = {
+  sig = "",
+  t_has = {},     -- [track_guid] = true/false
+  t_ranges = {},  -- [track_guid] = { {s,e}, ... } (track-level only)
+  union_s = nil,
+  union_e = nil,
+  cnt_tracks_with = 0,
+  last_scan_psc = -1,
+}
+
+local function parse_triplets(s)
+  local out = {}
+  if not s or s=="" then return out end
+  local toks = {}
+  for w in s:gmatch("%S+") do toks[#toks+1] = w end
+  for i=1,#toks,3 do
+    local a = tonumber(toks[i]); local b = tonumber(toks[i+1]); local g = toks[i+2] or "\"\""
+    if a and b and b>a then out[#out+1] = {a,b,g} end
   end
-  return false
+  return out
 end
 
--- Real TS (we don't modify it when none)
+local function set_track_level_ranges(tr, newRanges)
+  local ok, s = reaper.GetSetMediaTrackInfo_String(tr,"P_RAZOREDITS","",false)
+  s = (ok and s) and s or ""
+  local keep = {}
+  for _, t in ipairs(parse_triplets(s)) do
+    if t[3] ~= "\"\"" then
+      keep[#keep+1] = string.format("%.17f %.17f %s", t[1], t[2], t[3])
+    end
+  end
+  for _, r in ipairs(newRanges) do
+    keep[#keep+1] = string.format("%.17f %.17f \"\"", r[1], r[2])
+  end
+  reaper.GetSetMediaTrackInfo_String(tr, "P_RAZOREDITS", table.concat(keep, " "), true)
+end
+
+local function scan_razors_if_needed(psc)
+  if Razor.last_scan_psc == psc then return end
+  Razor.last_scan_psc = psc
+  Razor.sig = ""
+  Razor.t_has, Razor.t_ranges = {}, {}
+  Razor.union_s, Razor.union_e = nil, nil
+  Razor.cnt_tracks_with = 0
+
+  local tcnt = reaper.CountTracks(0)
+  local parts = {}
+  for i=0, tcnt-1 do
+    local tr = reaper.GetTrack(0,i)
+    local ok, s = reaper.GetSetMediaTrackInfo_String(tr,"P_RAZOREDITS","",false)
+    s = (ok and s) and s or ""
+    parts[#parts+1] = s
+    local g = track_guid(tr)
+    local ranges = {}
+    for _, t in ipairs(parse_triplets(s)) do
+      if t[3] == "\"\"" then
+        ranges[#ranges+1] = {t[1], t[2]}
+        Razor.union_s = (not Razor.union_s) and t[1] or math.min(Razor.union_s, t[1])
+        Razor.union_e = (not Razor.union_e) and t[2] or math.max(Razor.union_e, t[2])
+      end
+    end
+    if #ranges > 0 then
+      Razor.t_has[g] = true
+      Razor.t_ranges[g] = ranges
+      Razor.cnt_tracks_with = Razor.cnt_tracks_with + 1
+    else
+      Razor.t_has[g] = false
+    end
+  end
+  Razor.sig = table.concat(parts, "|")
+end
+
+----------------
+-- Time selection helpers
+----------------
 local function get_time_selection()
   local ts, te = reaper.GetSet_LoopTimeRange(false,false,0,0,false)
   if te > ts then return ts, te end
 end
 
--- Selected items span (no side effects)
-local function selected_items_span()
-  local n = reaper.CountMediaItems(0)
-  local have = false; local min_s = math.huge; local max_e = -math.huge
-  for i=0, n-1 do
-    local it = reaper.GetMediaItem(0, i)
-    if reaper.GetMediaItemInfo_Value(it, "B_UISEL") == 1 then
-      local s, e = item_bounds(it)
-      if s < min_s then min_s = s end
-      if e > max_e then max_e = e end
-      have = true
-    end
-  end
-  if have and max_e > min_s then return min_s, max_e end
-end
-
--------------------------------------------------
--- LATCHED virtual range state
--------------------------------------------------
+----------------
+-- Latched virtual range + suppression
+----------------
 local latched_vs, latched_ve = nil, nil
+local suppress_latch_next = false   -- NEW: skip next relatch if items were changed by script
 local last_cursor = reaper.GetCursorPosition()
 
--- Active range resolver (uses latch when present)
--- returns rs,re,src where src = "razor"|"virtual_latched"|"virtual"|nil
-local function resolve_active_range()
-  -- Razor (union)
-  local n = reaper.CountTracks(0); local found = false; local rs, re_ = math.huge, -math.huge
-  for i=0, n-1 do
-    for _, r in ipairs(get_track_level_ranges(reaper.GetTrack(0,i))) do
-      if r[1] < rs then rs = r[1] end
-      if r[2] > re_ then re_ = r[2] end
-      found = true
-    end
+local function active_range(selected_items_info)
+  if Razor.cnt_tracks_with > 0 and Razor.union_s and Razor.union_e and Razor.union_e > Razor.union_s then
+    return Razor.union_s, Razor.union_e, "razor"
   end
-  if found and re_ > rs then return rs, re_, "razor" end
-
-  -- latched virtual
-  if latched_vs and latched_ve and latched_ve > latched_vs then return latched_vs, latched_ve, "virtual_latched" end
-
-  -- current virtual (not latched yet)
-  local vs, ve = selected_items_span()
-  if vs and ve and ve > vs then return vs, ve, "virtual" end
-
+  if latched_vs and latched_ve and latched_ve > latched_vs then
+    return latched_vs, latched_ve, "virtual_latched"
+  end
+  if selected_items_info and selected_items_info.span_s and selected_items_info.span_e then
+    return selected_items_info.span_s, selected_items_info.span_e, "virtual"
+  end
   return nil, nil, nil
 end
 
------------------------------
--- Shared state publisher (for Monitor)
------------------------------
+----------------
+-- Shared state publisher (only on change)
+----------------
 local EXT_NS = "hsuanice_Link"
-local function publish_state(args)
-  local function setk(k,v) reaper.SetProjExtState(0, EXT_NS, k, v or "") end
-  setk("active_src", args.active_src or "none")
-  setk("active_start", args.active_s and string.format("%.17f",args.active_s) or "")
-  setk("active_end",   args.active_e and string.format("%.17f",args.active_e) or "")
-  setk("item_span_start", args.item_s and string.format("%.17f",args.item_s) or "")
-  setk("item_span_end",   args.item_e and string.format("%.17f",args.item_e) or "")
-  setk("virt_latched_start", latched_vs and string.format("%.17f",latched_vs) or "")
-  setk("virt_latched_end",   latched_ve and string.format("%.17f",latched_ve) or "")
-  setk("ts_start", args.ts_s and string.format("%.17f",args.ts_s) or "")
-  setk("ts_end",   args.ts_e and string.format("%.17f",args.ts_e) or "")
-  setk("has_razor", args.has_razor and "1" or "0")
-  setk("ts_has_real", (args.ts_s and args.ts_e) and "1" or "0")
+local last_published = {}
+local function publish_once(args)
+  local function fmtf(x) return x and string.format("%.17f",x) or "" end
+  local payload = {
+    active_src = args.active_src or "none",
+    active_s   = fmtf(args.active_s),
+    active_e   = fmtf(args.active_e),
+    item_s     = fmtf(args.item_s),
+    item_e     = fmtf(args.item_e),
+    virt_s     = fmtf(args.virt_s),
+    virt_e     = fmtf(args.virt_e),
+    ts_s       = fmtf(args.ts_s),
+    ts_e       = fmtf(args.ts_e),
+    has_razor  = args.has_razor and "1" or "0",
+    ts_has_real= (args.ts_s and args.ts_e) and "1" or "0",
+  }
+  local dirty = false
+  for k,v in pairs(payload) do if last_published[k] ~= v then dirty = true; break end end
+  if not dirty then return end
+  reaper.SetProjExtState(0, EXT_NS, "active_src", payload.active_src)
+  reaper.SetProjExtState(0, EXT_NS, "active_start", payload.active_s)
+  reaper.SetProjExtState(0, EXT_NS, "active_end",   payload.active_e)
+  reaper.SetProjExtState(0, EXT_NS, "item_span_start", payload.item_s)
+  reaper.SetProjExtState(0, EXT_NS, "item_span_end",   payload.item_e)
+  reaper.SetProjExtState(0, EXT_NS, "virt_latched_start", payload.virt_s)
+  reaper.SetProjExtState(0, EXT_NS, "virt_latched_end",   payload.virt_e)
+  reaper.SetProjExtState(0, EXT_NS, "ts_start", payload.ts_s)
+  reaper.SetProjExtState(0, EXT_NS, "ts_end",   payload.ts_e)
+  reaper.SetProjExtState(0, EXT_NS, "has_razor", payload.has_razor)
+  reaper.SetProjExtState(0, EXT_NS, "ts_has_real", payload.ts_has_real)
+  last_published = payload
 end
 
--------------------------------
--- Main watcher loop
--------------------------------
-local last_razor_sig     = build_razor_sig()
-local last_trk_sig       = build_track_sel_sig()
-local last_item_sig      = build_item_sel_sig()
-local last_item_trk_sig  = build_item_tracks_sig()
+----------------
+-- Signatures / state
+----------------
+local prev = {
+  psc = -1,
+  ts_s = nil, ts_e = nil,
+  cursor = last_cursor,
+  tr_sel_sig = "",
+  it_sel_sig = "",
+  it_tr_sig  = "",
+  razor_sig  = "",
+}
 
+----------------
+-- Main loop
+----------------
 local function mainloop()
-  local prev_razor_sig      = last_razor_sig
-  local prev_trk_sig        = last_trk_sig
-  local prev_item_sig       = last_item_sig
-  local prev_item_trk_sig   = last_item_trk_sig
+  local psc = reaper.GetProjectStateChangeCount(0)
+  local cursor = reaper.GetCursorPosition()
+  local ts, te = get_time_selection()
 
-  local cur_razor_sig       = build_razor_sig()
-  local cur_trk_sig         = build_track_sel_sig()
-  local cur_item_sig        = build_item_sel_sig()
-  local cur_item_trk_sig    = build_item_tracks_sig()
-  local hasRazor            = any_razor_exists()
-  local ts, te              = get_time_selection()
-  local cursor              = reaper.GetCursorPosition()
-  local tcnt                = reaper.CountTracks(0)
+  local sel_tracks_set, tr_sel_sig = get_selected_tracks_set_and_sig()
+  local it_info = get_selected_items_info()
+  local it_sel_sig = it_info.sig
+  local it_tr_sig  = it_info.tr_sig
 
-  -------------------------------------------------
-  -- LATCH management (no side effects on selection)
-  -------------------------------------------------
-  if hasRazor or (ts and te) then
-    -- explicit edit selection exists → clear latch
+  if psc ~= prev.psc then scan_razors_if_needed(psc) end
+
+  -- LATCH management (with suppression)
+  if Razor.cnt_tracks_with > 0 or (ts and te) then
     latched_vs, latched_ve = nil, nil
+    suppress_latch_next = false
   else
-    -- Create latch if none yet and items exist now
-    local vs, ve = selected_items_span()
-    if (not latched_vs) and vs and ve then
-      latched_vs, latched_ve = vs, ve
+    if (not latched_vs) and it_info.span_s and it_info.span_e and (not suppress_latch_next) then
+      latched_vs, latched_ve = it_info.span_s, it_info.span_e
     end
-    -- Refresh latch ONLY when it looks like a user did item reselect (items changed but tracks didn't)
-    if (cur_item_sig ~= prev_item_sig) and (cur_trk_sig == prev_trk_sig) and (not hasRazor) and (not (ts and te)) then
-      if vs and ve then latched_vs, latched_ve = vs, ve else latched_vs, latched_ve = nil, nil end
+    if (it_sel_sig ~= prev.it_sel_sig) and (tr_sel_sig == prev.tr_sel_sig) and (not ts) then
+      if not suppress_latch_next then
+        if it_info.span_s and it_info.span_e then
+          latched_vs, latched_ve = it_info.span_s, it_info.span_e
+        else
+          latched_vs, latched_ve = nil, nil
+        end
+      end
     end
-    -- Optional: moving edit cursor clears latch
-    if LATCH_CLEAR_ON_CURSOR_MOVE and math.abs(cursor - last_cursor) > EPS then
+    if LATCH_CLEAR_ON_CURSOR_MOVE and (not nearly_eq(cursor, prev.cursor)) then
       latched_vs, latched_ve = nil, nil
+      suppress_latch_next = false
     end
   end
-  last_cursor = cursor
+  -- consume suppression after decision phase
+  suppress_latch_next = false
 
-  -------------------------------------------------
-  -- 1) Razor change → Track selection (highest)
-  -------------------------------------------------
-  if cur_razor_sig ~= prev_razor_sig and hasRazor then
+  -- === Sync logic ===
+
+  -- A) Razor changed → Track selection equals "tracks with razor"
+  if (Razor.sig ~= prev.razor_sig) and (Razor.cnt_tracks_with > 0) then
     reaper.PreventUIRefresh(1)
+    local want = Razor.t_has
+    local tcnt = reaper.CountTracks(0)
     for i=0, tcnt-1 do
       local tr = reaper.GetTrack(0,i)
-      set_track_selected(tr, track_has_razor(tr))
+      local g  = track_guid(tr)
+      local should = want[g] or false
+      local is     = sel_tracks_set[g] or false
+      if should ~= is then set_track_selected(tr, should) end
     end
     reaper.PreventUIRefresh(-1); reaper.UpdateArrange()
-    cur_trk_sig = build_track_sel_sig()
+    sel_tracks_set, tr_sel_sig = get_selected_tracks_set_and_sig()
   end
 
-  -------------------------------------------------
-  -- 2) Item selection OR its TRACK set changed and NO Razor → Track selection
-  -------------------------------------------------
-  if not hasRazor and (cur_item_sig ~= prev_item_sig or cur_item_trk_sig ~= prev_item_trk_sig) then
+  -- B) Items changed (or their track set) and NO Razor → Track selection follows items' tracks
+  if (Razor.cnt_tracks_with == 0) and ((it_sel_sig ~= prev.it_sel_sig) or (it_tr_sig ~= prev.it_tr_sig)) then
     reaper.PreventUIRefresh(1)
-    local want = {}
-    for i=0, tcnt-1 do
-      local tr = reaper.GetTrack(0,i)
-      want[track_guid(tr)] = track_has_any_selected_item(tr)
+    local want = it_info.tr_set
+    for g,_ in pairs(sel_tracks_set) do
+      if not want[g] then
+        local tr = reaper.BR_GetMediaTrackByGUID and reaper.BR_GetMediaTrackByGUID(0, g) or nil
+        if not tr then
+          local tcnt2 = reaper.CountTracks(0)
+          for i=0, tcnt2-1 do
+            local tr2 = reaper.GetTrack(0,i)
+            if track_guid(tr2) == g then tr = tr2; break end
+          end
+        end
+        if tr then set_track_selected(tr, false) end
+      end
     end
+    local tcnt = reaper.CountTracks(0)
     for i=0, tcnt-1 do
       local tr = reaper.GetTrack(0,i)
-      set_track_selected(tr, want[track_guid(tr)] or false)
+      local g  = track_guid(tr)
+      if want[g] and (not sel_tracks_set[g]) then set_track_selected(tr, true) end
     end
     reaper.PreventUIRefresh(-1); reaper.UpdateArrange()
-    cur_trk_sig = build_track_sel_sig()
+    sel_tracks_set, tr_sel_sig = get_selected_tracks_set_and_sig()
   end
 
-  -------------------------------------------------
-  -- 3) Track selection changed + REAL TS present → create Razor + sync items
-  -------------------------------------------------
-  if ts and te and cur_trk_sig ~= prev_trk_sig then
+  -- C) Track selection changed + REAL TS present → build/remove Razor on changed tracks + sync items
+  if tr_sel_sig ~= prev.tr_sel_sig and ts and te then
+    local prev_set = {}; for g in string.gmatch(prev.tr_sel_sig or "", "[^|]+") do prev_set[g] = true end
+    local changed = {}
+    for g,_ in pairs(sel_tracks_set) do if not prev_set[g] then changed[g] = true end end
+    for g,_ in pairs(prev_set) do if not sel_tracks_set[g] then changed[g] = true end end
+
     reaper.PreventUIRefresh(1)
+    local tcnt = reaper.CountTracks(0)
     for i=0, tcnt-1 do
       local tr = reaper.GetTrack(0,i)
-      if track_selected(tr) then
-        set_track_level_ranges(tr, { {ts, te} })
-        track_select_items_matching_range(tr, ts, te, true)
-      else
-        set_track_level_ranges(tr, {})
-        track_select_items_matching_range(tr, ts, te, false)
+      local g  = track_guid(tr)
+      if changed[g] then
+        if sel_tracks_set[g] then
+          set_track_level_ranges(tr, { {ts, te} })
+          track_select_items_matching_range(tr, ts, te, true)
+        else
+          set_track_level_ranges(tr, {})
+          track_select_items_matching_range(tr, ts, te, false)
+        end
       end
     end
     reaper.PreventUIRefresh(-1); reaper.UpdateArrange()
-    cur_razor_sig = build_razor_sig(); cur_item_sig = build_item_sel_sig()
+    suppress_latch_next = true  -- items were changed by script due to track change
   end
 
-  -------------------------------------------------
-  -- 4) Razor/Track changes → sync items under ACTIVE range (razor or latched virtual)
-  -------------------------------------------------
-  if cur_razor_sig ~= prev_razor_sig or cur_trk_sig ~= prev_trk_sig then
-    local rs, re_, src = resolve_active_range()
-    if rs and re_ and src then
-      for i=0, tcnt-1 do
-        local tr  = reaper.GetTrack(0,i)
-        local sel = track_selected(tr)
-        if src == "razor" then
-          local ranges = get_track_level_ranges(tr)
+  -- D) Razor/Track changed → sync items under ACTIVE range (only on changed tracks)
+  local a_s, a_e, a_src = active_range(it_info)
+  if (a_s and a_e) and ((Razor.sig ~= prev.razor_sig) or (tr_sel_sig ~= prev.tr_sel_sig)) then
+    local prev_set = {}; for g in string.gmatch(prev.tr_sel_sig or "", "[^|]+") do prev_set[g] = true end
+    local changed = {}
+    for g,_ in pairs(sel_tracks_set) do if not prev_set[g] then changed[g] = true end end
+    for g,_ in pairs(prev_set) do if not sel_tracks_set[g] then changed[g] = true end end
+
+    reaper.PreventUIRefresh(1)
+    local tcnt = reaper.CountTracks(0)
+    for i=0, tcnt-1 do
+      local tr = reaper.GetTrack(0,i)
+      local g  = track_guid(tr)
+      if changed[g] then
+        local sel = sel_tracks_set[g] or false
+        if a_src == "razor" then
+          local ranges = Razor.t_ranges[g] or {}
           if #ranges > 0 then
             for _, r in ipairs(ranges) do track_select_items_matching_range(tr, r[1], r[2], sel) end
           else
-            track_select_items_matching_range(tr, rs, re_, false)
+            track_select_items_matching_range(tr, a_s, a_e, false)
           end
-        else  -- virtual / virtual_latched
-          track_select_items_matching_range(tr, rs, re_, sel)
+        else
+          track_select_items_matching_range(tr, a_s, a_e, sel)
         end
       end
-      cur_item_sig = build_item_sel_sig()
     end
+    reaper.PreventUIRefresh(-1); reaper.UpdateArrange()
+    suppress_latch_next = true  -- items were changed by script due to track change
   end
 
-  -- Publish shared state for Monitor (includes latched)
+  -- Publish
   do
-    local a_s, a_e, a_src = resolve_active_range()
-    local i_s, i_e = selected_items_span()
-    publish_state{
+    publish_once{
       active_src = a_src or "none",
       active_s   = a_s, active_e = a_e,
-      item_s     = i_s, item_e   = i_e,
-      ts_s       = ts,  ts_e     = te,
-      has_razor  = hasRazor
+      item_s     = it_info.span_s, item_e = it_info.span_e,
+      virt_s     = latched_vs, virt_e = latched_ve,
+      ts_s       = ts, ts_e = te,
+      has_razor  = (Razor.cnt_tracks_with > 0)
     }
   end
 
-  -- persist signatures
-  last_razor_sig     = cur_razor_sig
-  last_trk_sig       = cur_trk_sig
-  last_item_sig      = cur_item_sig
-  last_item_trk_sig  = cur_item_trk_sig
+  -- Save prev
+  prev.psc = psc
+  prev.cursor = cursor
+  prev.ts_s, prev.ts_e = ts, te
+  prev.tr_sel_sig = tr_sel_sig
+  prev.it_sel_sig = it_sel_sig
+  prev.it_tr_sig  = it_tr_sig
+  prev.razor_sig  = Razor.sig
+
   reaper.defer(mainloop)
 end
 
