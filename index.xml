@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<index version="1" name="hsuanice Scripts" commit="fed2597ee5e9088b3938e7581e5fe5f3ac2db550">
+<index version="1" name="hsuanice Scripts" commit="da79946bcfe7132ad05caf9854d28675fbb8e03f">
   <category name="Beta Testing">
     <reapack name="hsuanice_BWF TimeReference Embed Tool.lua" type="script" desc="Embed BWF TimeReference to Active take from Take 1 or Current Position TC">
       <version name="0.7.1" author="hsuanice" time="2025-08-14T17:52:57Z">
@@ -543,7 +543,7 @@ v0.1 - Beta release]]></changelog>
 {\pard \ql \f0 \sa0 \li360 \fi-360 1)\tx360\tab Razor exists \u8594 ? use Razor (highest)\par}
 {\pard \ql \f0 \sa0 \li360 \fi-360 2)\tx360\tab Else Item Selection \u8594 ? use VIRTUAL (latched) span [min..max] of selected items\par}
 {\pard \ql \f0 \sa0 \li360 \fi-360 3)\tx360\tab Else no active range\sa180\par}
-{\pard \ql \f0 \sa180 \li0 \fi0 Change log: v0.8.2-perf - FIX: Do not shrink latched span after Track Toggle. Added suppress_latch_next flag to skip one-shot relatch when items were changed by script. v0.8.1-perf-hotfix - Restore set_track_level_ranges(). v0.8.0-perf - Major perf pass.\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 Change log: v0.8.3-perf-bugfix - Fix: Track click ignored when Razor exists (had to click twice). - Gate "track=razor" sync so it runs only if Razor really changed AND track selection didn't change this tick. - Use canonical Razor signature (sorted track-level ranges) to avoid false positives. v0.8.2-perf - Suppress relatch shrink after script-driven item changes. v0.8.1-perf-hotfix - Restore set_track_level_ranges(). v0.8.0-perf - Major perf pass.\par}
 }
 ]]></description>
       </metadata>
@@ -579,6 +579,9 @@ v0.1 - Beta release]]></changelog>
       </version>
       <version name="0.8.2-perf" author="hsuanice" time="2025-08-22T17:47:56Z">
         <source main="main">https://github.com/hsuanice/ReaScripts/raw/fed2597ee5e9088b3938e7581e5fe5f3ac2db550/Beta%20Testing/hsuanice_Track%20and%20Razor%20Item%20Link%20like%20Pro%20Tools.lua</source>
+      </version>
+      <version name="0.8.3-perf-bugfix" author="hsuanice" time="2025-08-22T18:04:52Z">
+        <source main="main">https://github.com/hsuanice/ReaScripts/raw/da79946bcfe7132ad05caf9854d28675fbb8e03f/Beta%20Testing/hsuanice_Track%20and%20Razor%20Item%20Link%20like%20Pro%20Tools.lua</source>
       </version>
     </reapack>
     <reapack name="hsuanice_Track and Razor Item Link Monitor.lua" type="script" desc="hsuanice_Track and Razor Item Link Monitor (names only + per-item ranges)">
