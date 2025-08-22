@@ -1,6 +1,6 @@
 --[[
 @description Track and Razor Item Link like Pro Tools (performance edition)
-@version 0.8.2-perf
+@version 0.8.3-perf-bugfix
 @author hsuanice
 @about
   Pro Tools-style "Link Track and Edit Selection". Edit Selection = Razor Area or Item Selection.
@@ -18,8 +18,11 @@
     3) Else no active range
 
   Change log:
-    v0.8.2-perf - FIX: Do not shrink latched span after Track Toggle.
-                   Added suppress_latch_next flag to skip one-shot relatch when items were changed by script.
+    v0.8.3-perf-bugfix
+      - Fix: Track click ignored when Razor exists (had to click twice).
+      - Gate "track=razor" sync so it runs only if Razor really changed AND track selection didn't change this tick.
+      - Use canonical Razor signature (sorted track-level ranges) to avoid false positives.
+    v0.8.2-perf - Suppress relatch shrink after script-driven item changes.
     v0.8.1-perf-hotfix - Restore set_track_level_ranges().
     v0.8.0-perf - Major perf pass.
 ]]
@@ -121,9 +124,9 @@ end
 -- Razor cache & helpers
 ----------------
 local Razor = {
-  sig = "",
-  t_has = {},     -- [track_guid] = true/false
-  t_ranges = {},  -- [track_guid] = { {s,e}, ... } (track-level only)
+  sig = "",             -- canonical signature: per-track sorted track-level ranges "s:e;s:e|..."
+  t_has = {},           -- [track_guid] = true/false
+  t_ranges = {},        -- [track_guid] = { {s,e}, ... } (track-level only)
   union_s = nil,
   union_e = nil,
   cnt_tracks_with = 0,
@@ -157,21 +160,32 @@ local function set_track_level_ranges(tr, newRanges)
   reaper.GetSetMediaTrackInfo_String(tr, "P_RAZOREDITS", table.concat(keep, " "), true)
 end
 
+-- Canonicalize per-track ranges into a stable string
+local function canonical_track_ranges_str(ranges)
+  if not ranges or #ranges==0 then return "" end
+  table.sort(ranges, function(a,b) return (a[1]<b[1]) or (a[1]==b[1] and a[2]<b[2]) end)
+  local parts = {}
+  for i=1,#ranges do
+    parts[#parts+1] = string.format("%.9f:%.9f", ranges[i][1], ranges[i][2])
+  end
+  return table.concat(parts, ";")
+end
+
 local function scan_razors_if_needed(psc)
   if Razor.last_scan_psc == psc then return end
   Razor.last_scan_psc = psc
-  Razor.sig = ""
+
   Razor.t_has, Razor.t_ranges = {}, {}
   Razor.union_s, Razor.union_e = nil, nil
   Razor.cnt_tracks_with = 0
 
   local tcnt = reaper.CountTracks(0)
-  local parts = {}
+  local sig_parts = {}
+
   for i=0, tcnt-1 do
     local tr = reaper.GetTrack(0,i)
     local ok, s = reaper.GetSetMediaTrackInfo_String(tr,"P_RAZOREDITS","",false)
     s = (ok and s) and s or ""
-    parts[#parts+1] = s
     local g = track_guid(tr)
     local ranges = {}
     for _, t in ipairs(parse_triplets(s)) do
@@ -187,9 +201,12 @@ local function scan_razors_if_needed(psc)
       Razor.cnt_tracks_with = Razor.cnt_tracks_with + 1
     else
       Razor.t_has[g] = false
+      Razor.t_ranges[g] = {}
     end
+    sig_parts[#sig_parts+1] = canonical_track_ranges_str(Razor.t_ranges[g])
   end
-  Razor.sig = table.concat(parts, "|")
+
+  Razor.sig = table.concat(sig_parts, "|")
 end
 
 ----------------
@@ -204,7 +221,7 @@ end
 -- Latched virtual range + suppression
 ----------------
 local latched_vs, latched_ve = nil, nil
-local suppress_latch_next = false   -- NEW: skip next relatch if items were changed by script
+local suppress_latch_next = false
 local last_cursor = reaper.GetCursorPosition()
 
 local function active_range(selected_items_info)
@@ -307,15 +324,15 @@ local function mainloop()
       suppress_latch_next = false
     end
   end
-  -- consume suppression after decision phase
-  suppress_latch_next = false
+  suppress_latch_next = false -- consume after decision
 
   -- === Sync logic ===
 
   -- A) Razor changed → Track selection equals "tracks with razor"
-  if (Razor.sig ~= prev.razor_sig) and (Razor.cnt_tracks_with > 0) then
+  --    Only if track selection did NOT change this tick (so we don't override a user click).
+  if (Razor.sig ~= prev.razor_sig) and (Razor.cnt_tracks_with > 0) and (tr_sel_sig == prev.tr_sel_sig) then
     reaper.PreventUIRefresh(1)
-    local want = Razor.t_has
+    local want = Razor.t_has  -- map[guid]=bool
     local tcnt = reaper.CountTracks(0)
     for i=0, tcnt-1 do
       local tr = reaper.GetTrack(0,i)
@@ -378,7 +395,7 @@ local function mainloop()
       end
     end
     reaper.PreventUIRefresh(-1); reaper.UpdateArrange()
-    suppress_latch_next = true  -- items were changed by script due to track change
+    suppress_latch_next = true
   end
 
   -- D) Razor/Track changed → sync items under ACTIVE range (only on changed tracks)
@@ -397,7 +414,7 @@ local function mainloop()
       if changed[g] then
         local sel = sel_tracks_set[g] or false
         if a_src == "razor" then
-          local ranges = Razor.t_ranges[g] or {}
+          local ranges = (Razor.t_ranges[g] or {})
           if #ranges > 0 then
             for _, r in ipairs(ranges) do track_select_items_matching_range(tr, r[1], r[2], sel) end
           else
@@ -409,7 +426,7 @@ local function mainloop()
       end
     end
     reaper.PreventUIRefresh(-1); reaper.UpdateArrange()
-    suppress_latch_next = true  -- items were changed by script due to track change
+    suppress_latch_next = true
   end
 
   -- Publish
