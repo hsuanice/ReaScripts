@@ -1,6 +1,6 @@
 --[[
 @description hsuanice_Track and Razor Item Link Monitor (names only + per-item ranges)
-@version 0.9.0
+@version 0.9.1
 @author hsuanice
 @about
   Console monitor for the link relationships among Tracks, Razor Areas, and Items.
@@ -11,21 +11,22 @@
     • Selected Tracks (names)
     • Track-level Razor Areas (per track) + GLOBAL UNION
     • Selected Items (GLOBAL): active-take names + per-item [start..end]
-    • NEW: Shared Link State (from Project ExtState "hsuanice_Link"):
-           - active_src (razor|virtual|none) + active_start/end
-           - item_span_start/end
-           - ts_start/end  (real TS if present)
-           - has_razor
+    • Shared Link State (from Project ExtState "hsuanice_Link"):
+         - active_src (razor|virtual|virtual_latched|none) + active_start/end
+         - item_span_start/end
+         - virt_latched_start/end  (latched virtual range from main script v0.7.5+)
+         - ts_start/end  (real TS if present)
+         - has_razor
 
-  This script was generated using ChatGPT based on design concepts and iterative testing by hsuanice.
-  hsuanice served as the workflow designer, tester, and integrator for this tool.
+  Notes:
+    - Requires the companion main script to publish Project ExtState under "hsuanice_Link".
+    - Works without SWS, but preference readout shows "UNKNOWN (SWS not installed)".
 
   Reference:
     Script: X_Raym_Ugurcan Orcun_Toggle Mouse Click for track selection in preference.lua
 @changelog
-  v0.9.0 - NEW: Read & display shared link state from Project ExtState "hsuanice_Link".
-  v0.8.1 - Metadata: add Note and Reference sections.
-  v0.8   - Fix undefined compute_item_sel_range(); add Cancel UI; add preference monitoring.
+  v0.9.1 - Show latched virtual range (virt_latched_start/end). Refresh signature includes these.
+  v0.9.0 - Added Shared Link State section from Project ExtState "hsuanice_Link".
 ]]
 
 ----------------------------
@@ -81,7 +82,9 @@ local function active_take_name(it)
   return "<unnamed>"
 end
 
--- Parse P_RAZOREDITS
+----------------------------
+-- Razor helpers
+----------------------------
 local function parse_triplets(s)
   local out = {}
   if not s or s == "" then return out end
@@ -173,6 +176,8 @@ local function read_shared_state()
     active_e   = read_shared_key("active_end"),
     item_s     = read_shared_key("item_span_start"),
     item_e     = read_shared_key("item_span_end"),
+    virt_s     = read_shared_key("virt_latched_start"), -- NEW
+    virt_e     = read_shared_key("virt_latched_end"),   -- NEW
     ts_s       = read_shared_key("ts_start"),
     ts_e       = read_shared_key("ts_end"),
     has_razor  = read_shared_key("has_razor"),
@@ -285,13 +290,13 @@ local function print_selected_items_global()
   end
 end
 
--- NEW: print shared link state published by main script
 local function print_shared_state()
   local st = read_shared_state()
   reaper.ShowConsoleMsg("Shared Link State (ProjExtState: hsuanice_Link):\n")
   reaper.ShowConsoleMsg(("  active_src   : %s\n"):format(st.active_src ~= "" and st.active_src or "none"))
   reaper.ShowConsoleMsg(("  active_range : [%s .. %s]\n"):format(fmt_time(st.active_s), fmt_time(st.active_e)))
   reaper.ShowConsoleMsg(("  item_span    : [%s .. %s]\n"):format(fmt_time(st.item_s), fmt_time(st.item_e)))
+  reaper.ShowConsoleMsg(("  virt_latched : [%s .. %s]\n"):format(fmt_time(st.virt_s), fmt_time(st.virt_e))) -- NEW
   reaper.ShowConsoleMsg(("  real TS      : [%s .. %s]  (%s)\n"):format(
     fmt_time(st.ts_s), fmt_time(st.ts_e), (st.ts_has_real=="1" and "present" or "none")))
   reaper.ShowConsoleMsg(("  has_razor    : %s\n\n"):format(st.has_razor=="1" and "YES" or "NO"))
@@ -317,7 +322,7 @@ local function print_snapshot()
   print_selected_tracks()
   print_razors_and_selected_items_per_track()
   print_selected_items_global()
-  print_shared_state()      -- NEW
+  print_shared_state()
   print_link_summary()
 end
 
@@ -362,10 +367,15 @@ local function sig_scripts_toggle()
 end
 
 local function sig_pref_selects_track() return tostring(read_pref_selects_track_raw()) end
-local function sig_shared_state()        -- include shared state in signature so monitor refreshes
+
+-- Include shared state (with latched values) so UI refreshes when they change
+local function sig_shared_state()
   local st = read_shared_state()
   return table.concat({
-    st.active_src, st.active_s, st.active_e, st.item_s, st.item_e, st.ts_s, st.ts_e, st.has_razor
+    st.active_src, st.active_s, st.active_e,
+    st.item_s, st.item_e,
+    st.virt_s, st.virt_e,  -- NEW
+    st.ts_s, st.ts_e, st.has_razor
   }, "|")
 end
 
@@ -377,7 +387,7 @@ local function build_sig()
     sig_razor_all(),
     sig_scripts_toggle(),
     sig_pref_selects_track(),
-    sig_shared_state(),     -- NEW
+    sig_shared_state(),     -- include shared state
   }, "||")
 end
 
