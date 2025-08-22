@@ -1,37 +1,39 @@
 --[[
 @description Track and Razor Item Link like Pro Tools (performance edition)
-@version 0.8.3-perf-bugfix
+@version 0.8.5-perf-bugfix3
 @author hsuanice
 @about
   Pro Tools-style "Link Track and Edit Selection". Edit Selection = Razor Area or Item Selection.
 
-  Performance principles:
-    • Event-gated scans using GetProjectStateChangeCount(): do nothing heavy when nothing changed.
-    • Enumerate ONLY selected tracks/items (no full project sweeps unless necessary).
-    • Cache per-track Razor info and recompute only when project-state changed.
-    • Apply item selection only on tracks whose selection state changed.
-    • Keep Latched Virtual Range; publish ProjExtState only when changed.
+  Perf principles:
+    • Gate heavy scans by GetProjectStateChangeCount().
+    • Enumerate ONLY selected tracks/items when possible.
+    • Cache per-track Razor; recompute on project-state changes only.
+    • Apply changes only on delta tracks; publish ExtState only on change.
+    • Keep Latched Virtual Range; avoid shrinking on track toggles.
 
-  Priority (unchanged):
+  Priority:
     1) Razor exists → use Razor (highest)
-    2) Else Item Selection → use VIRTUAL (latched) span [min..max] of selected items
+    2) Else Item Selection → use VIRTUAL (latched) span [min..max]
     3) Else no active range
 
-  Change log:
-    v0.8.3-perf-bugfix
-      - Fix: Track click ignored when Razor exists (had to click twice).
-      - Gate "track=razor" sync so it runs only if Razor really changed AND track selection didn't change this tick.
-      - Use canonical Razor signature (sorted track-level ranges) to avoid false positives.
-    v0.8.2-perf - Suppress relatch shrink after script-driven item changes.
-    v0.8.1-perf-hotfix - Restore set_track_level_ranges().
-    v0.8.0-perf - Major perf pass.
+  Changelog:
+    v0.8.5-perf-bugfix3
+      - NEW gate: If track selection changed because ITEMS changed this tick (e.g. 40182 "Select all"),
+        do NOT run step C (build razors on TS) nor step D (range-based item sync).
+        Prevents unintended "becoming Razor/TS" right after Select-All.
+    v0.8.4-perf-bugfix2 - Step B: absolute set for track selection to avoid edge cases after 40182.
+    v0.8.3-perf-bugfix   - Fix "need to click twice" with Razor; canonical Razor signature.
+    v0.8.2-perf          - Suppress relatch shrink after script-driven item changes.
+    v0.8.1-perf-hotfix   - Restore set_track_level_ranges().
+    v0.8.0-perf          - Major perf pass.
 ]]
 
 -------------------------
 -- === USER OPTIONS === --
 -------------------------
-local RANGE_MODE = 2  -- 1=overlap, 2=contain (Pro Tools style)
-local LATCH_CLEAR_ON_CURSOR_MOVE = true  -- moving edit cursor clears virtual latch when no TS/Razor
+local RANGE_MODE = 2  -- 1=overlap, 2=contain
+local LATCH_CLEAR_ON_CURSOR_MOVE = true
 
 ---------------------------------------
 -- Toolbar auto-terminate + toggle support
@@ -124,8 +126,8 @@ end
 -- Razor cache & helpers
 ----------------
 local Razor = {
-  sig = "",             -- canonical signature: per-track sorted track-level ranges "s:e;s:e|..."
-  t_has = {},           -- [track_guid] = true/false
+  sig = "",             -- canonical signature
+  t_has = {},           -- [track_guid]=bool
   t_ranges = {},        -- [track_guid] = { {s,e}, ... } (track-level only)
   union_s = nil,
   union_e = nil,
@@ -160,7 +162,6 @@ local function set_track_level_ranges(tr, newRanges)
   reaper.GetSetMediaTrackInfo_String(tr, "P_RAZOREDITS", table.concat(keep, " "), true)
 end
 
--- Canonicalize per-track ranges into a stable string
 local function canonical_track_ranges_str(ranges)
   if not ranges or #ranges==0 then return "" end
   table.sort(ranges, function(a,b) return (a[1]<b[1]) or (a[1]==b[1] and a[2]<b[2]) end)
@@ -302,6 +303,10 @@ local function mainloop()
 
   if psc ~= prev.psc then scan_razors_if_needed(psc) end
 
+  -- Did items change this tick?
+  local items_changed_this_tick = (it_sel_sig ~= prev.it_sel_sig) or (it_tr_sig ~= prev.it_tr_sig)
+  local tracks_changed_by_items = false
+
   -- LATCH management (with suppression)
   if Razor.cnt_tracks_with > 0 or (ts and te) then
     latched_vs, latched_ve = nil, nil
@@ -310,7 +315,7 @@ local function mainloop()
     if (not latched_vs) and it_info.span_s and it_info.span_e and (not suppress_latch_next) then
       latched_vs, latched_ve = it_info.span_s, it_info.span_e
     end
-    if (it_sel_sig ~= prev.it_sel_sig) and (tr_sel_sig == prev.tr_sel_sig) and (not ts) then
+    if items_changed_this_tick and (tr_sel_sig == prev.tr_sel_sig) and (not ts) then
       if not suppress_latch_next then
         if it_info.span_s and it_info.span_e then
           latched_vs, latched_ve = it_info.span_s, it_info.span_e
@@ -332,48 +337,35 @@ local function mainloop()
   --    Only if track selection did NOT change this tick (so we don't override a user click).
   if (Razor.sig ~= prev.razor_sig) and (Razor.cnt_tracks_with > 0) and (tr_sel_sig == prev.tr_sel_sig) then
     reaper.PreventUIRefresh(1)
-    local want = Razor.t_has  -- map[guid]=bool
+    local want = Razor.t_has
     local tcnt = reaper.CountTracks(0)
     for i=0, tcnt-1 do
       local tr = reaper.GetTrack(0,i)
       local g  = track_guid(tr)
-      local should = want[g] or false
-      local is     = sel_tracks_set[g] or false
-      if should ~= is then set_track_selected(tr, should) end
+      set_track_selected(tr, want[g] or false)
     end
     reaper.PreventUIRefresh(-1); reaper.UpdateArrange()
     sel_tracks_set, tr_sel_sig = get_selected_tracks_set_and_sig()
   end
 
-  -- B) Items changed (or their track set) and NO Razor → Track selection follows items' tracks
-  if (Razor.cnt_tracks_with == 0) and ((it_sel_sig ~= prev.it_sel_sig) or (it_tr_sig ~= prev.it_tr_sig)) then
+  -- B) Items changed (or their track set) and NO Razor → Track selection follows items' tracks (absolute set)
+  if (Razor.cnt_tracks_with == 0) and items_changed_this_tick then
     reaper.PreventUIRefresh(1)
     local want = it_info.tr_set
-    for g,_ in pairs(sel_tracks_set) do
-      if not want[g] then
-        local tr = reaper.BR_GetMediaTrackByGUID and reaper.BR_GetMediaTrackByGUID(0, g) or nil
-        if not tr then
-          local tcnt2 = reaper.CountTracks(0)
-          for i=0, tcnt2-1 do
-            local tr2 = reaper.GetTrack(0,i)
-            if track_guid(tr2) == g then tr = tr2; break end
-          end
-        end
-        if tr then set_track_selected(tr, false) end
-      end
-    end
     local tcnt = reaper.CountTracks(0)
     for i=0, tcnt-1 do
       local tr = reaper.GetTrack(0,i)
       local g  = track_guid(tr)
-      if want[g] and (not sel_tracks_set[g]) then set_track_selected(tr, true) end
+      set_track_selected(tr, want[g] or false)
     end
     reaper.PreventUIRefresh(-1); reaper.UpdateArrange()
     sel_tracks_set, tr_sel_sig = get_selected_tracks_set_and_sig()
+    tracks_changed_by_items = true
   end
 
-  -- C) Track selection changed + REAL TS present → build/remove Razor on changed tracks + sync items
-  if tr_sel_sig ~= prev.tr_sel_sig and ts and te then
+  -- C) Track selection changed + REAL TS present → build/remove Razor + sync items
+  --    BUT skip if tracks_changed_by_items (e.g. came from 40182 Select-All)
+  if (tr_sel_sig ~= prev.tr_sel_sig) and ts and te and (not tracks_changed_by_items) then
     local prev_set = {}; for g in string.gmatch(prev.tr_sel_sig or "", "[^|]+") do prev_set[g] = true end
     local changed = {}
     for g,_ in pairs(sel_tracks_set) do if not prev_set[g] then changed[g] = true end end
@@ -399,8 +391,9 @@ local function mainloop()
   end
 
   -- D) Razor/Track changed → sync items under ACTIVE range (only on changed tracks)
+  --    BUT skip if tracks_changed_by_items to avoid re-touching selection right after Select-All
   local a_s, a_e, a_src = active_range(it_info)
-  if (a_s and a_e) and ((Razor.sig ~= prev.razor_sig) or (tr_sel_sig ~= prev.tr_sel_sig)) then
+  if (a_s and a_e) and ((Razor.sig ~= prev.razor_sig) or (tr_sel_sig ~= prev.tr_sel_sig)) and (not tracks_changed_by_items) then
     local prev_set = {}; for g in string.gmatch(prev.tr_sel_sig or "", "[^|]+") do prev_set[g] = true end
     local changed = {}
     for g,_ in pairs(sel_tracks_set) do if not prev_set[g] then changed[g] = true end end
@@ -429,7 +422,7 @@ local function mainloop()
     suppress_latch_next = true
   end
 
-  -- Publish
+  -- Publish (monitor)
   do
     publish_once{
       active_src = a_src or "none",
