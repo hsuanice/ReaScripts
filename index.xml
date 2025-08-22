@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<index version="1" name="hsuanice Scripts" commit="206c11e40799794e5c290afa30e5c7c7be468605">
+<index version="1" name="hsuanice Scripts" commit="8465b54732ef0aab85ff190ae560d30cadf9abbf">
   <category name="Beta Testing">
     <reapack name="hsuanice_BWF TimeReference Embed Tool.lua" type="script" desc="Embed BWF TimeReference to Active take from Take 1 or Current Position TC">
       <version name="0.7.1" author="hsuanice" time="2025-08-14T17:52:57Z">
@@ -537,18 +537,17 @@ v0.1 - Beta release]]></changelog>
 {\colortbl;\red255\green0\blue0;\red0\green0\blue255;}
 \widowctrl\hyphauto
 
-{\pard \ql \f0 \sa180 \li0 \fi0 Pro Tools-style "Link Track and Edit Selection" script. Edit Selection = Razor Area or Item Selection. Independent: Does not require or interact with any other link scripts, ExtState, or external state.\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Razor Area and Item Selection will automatically sync track selection (Razor takes priority).\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab With Time Selection, (un)selecting tracks will create/move/remove Razor Area on those tracks and sync item selection.\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab All logic is self-contained and does not depend on other scripts.\sa180\par}
-{\pard \ql \f0 \sa180 \li0 \fi0 Main features:\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 1.\tx360\tab If Time Selection exists, selecting/deselecting tracks automatically creates/moves/removes Razor Area on those tracks (using the Time Selection range).\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 2.\tx360\tab When Razor Area follows track selection, item selection under the area is also synced (select/unselect).\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 3.\tx360\tab Razor Area or Item Selection will sync track selection (Razor > Item).\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 4.\tx360\tab Envelope lane razors are preserved but ignored for syncing.\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 5.\tx360\tab Toolbar-friendly: auto-terminates previous instance and supports toggle.\sa180\par}
-{\pard \ql \f0 \sa180 \li0 \fi0 Note: Only track-level Razor Areas are processed; envelope-lane razors are preserved.\par}
-{\pard \ql \f0 \sa180 \li0 \fi0 This script was generated using ChatGPT and Copilot based on design concepts and iterative testing by hsuanice. hsuanice served as the workflow designer, tester, and integrator for this tool.\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 Pro Tools-style "Link Track and Edit Selection" script. Edit Selection = Razor Area or Item Selection. Independent and toolbar-friendly.\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 Priority & range source:\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 1)\tx360\tab Razor Area exists -> use Razor ranges (highest priority)\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 2)\tx360\tab Else if Item Selection exists -> use VIRTUAL range [min item start, max item end] (internal only; does NOT write to Time Selection)\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 3)\tx360\tab Else no active range\sa180\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 Behaviors:\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Razor or Item Selection will auto-sync Track selection (Razor priority).\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab If a REAL Time Selection exists and Track selection changes, it creates/moves/removes Razor Area on those tracks and syncs item selection.\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab When there is NO Razor: moving selected items across tracks updates track selection.\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Envelope-lane razors are preserved but ignored for syncing.\sa180\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 This script was generated using ChatGPT based on design concepts and iterative testing by hsuanice. hsuanice served as the workflow designer, tester, and integrator for this tool.\par}
 }
 ]]></description>
       </metadata>
@@ -576,6 +575,9 @@ v0.1 - Beta release]]></changelog>
       <version name="0.7.1" author="hsuanice" time="2025-08-22T16:19:09Z">
         <source main="main">https://github.com/hsuanice/ReaScripts/raw/206c11e40799794e5c290afa30e5c7c7be468605/Beta%20Testing/hsuanice_Track%20and%20Razor%20Item%20Link%20like%20Pro%20Tools.lua</source>
       </version>
+      <version name="0.7.4" author="hsuanice" time="2025-08-22T16:52:06Z">
+        <source main="main">https://github.com/hsuanice/ReaScripts/raw/8465b54732ef0aab85ff190ae560d30cadf9abbf/Beta%20Testing/hsuanice_Track%20and%20Razor%20Item%20Link%20like%20Pro%20Tools.lua</source>
+      </version>
     </reapack>
     <reapack name="hsuanice_Track and Razor Item Link Monitor.lua" type="script" desc="hsuanice_Track and Razor Item Link Monitor (names only + per-item ranges)">
       <metadata>
@@ -584,9 +586,8 @@ v0.1 - Beta release]]></changelog>
 \widowctrl\hyphauto
 
 {\pard \ql \f0 \sa180 \li0 \fi0 Console monitor for the link relationships among Tracks, Razor Areas, and Items.\par}
-{\pard \ql \f0 \sa180 \li0 \fi0 It prints: \u8226 ? Toggle status (ON/OFF) of your link scripts, showing HUMAN-READABLE SCRIPT NAMES (no IDs shown) \u8226 ? REAPER Preference state: Arrange click selects track (requires SWS to read) \u8226 ? Selected Tracks (names) \u8226 ? Track-level Razor Areas (per track) + GLOBAL UNION \u8226 ? Selected Items (GLOBAL): lists active-take names + each item's [start..end] time range \u8226 ? For each track that HAS Razor Areas: lists that track's SELECTED items (take names + ranges) \u8226 ? Link summary (which link scripts are ACTIVE)\par}
-{\pard \ql \f0 \sa180 \li0 \fi0 Controls: \u8226 ? Small gfx window shows \u8220"Cancel\u8221" button; press ESC or click the button to stop the monitor.\par}
-{\pard \ql \f0 \sa180 \li0 \fi0 Note: This script was generated using ChatGPT based on design concepts and iterative testing by hsuanice. hsuanice served as the workflow designer, tester, and integrator for this tool.\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 It prints: \u8226 ? Toggle status (ON/OFF) of your link scripts (human-readable names) \u8226 ? REAPER Preference: Arrange click selects track (SWS) \u8226 ? Selected Tracks (names) \u8226 ? Track-level Razor Areas (per track) + GLOBAL UNION \u8226 ? Selected Items (GLOBAL): active-take names + per-item [start..end] \u8226 ? NEW: Shared Link State (from Project ExtState "hsuanice_Link"): - active_src (razor|virtual|none) + active_start/end - item_span_start/end - ts_start/end (real TS if present) - has_razor\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 This script was generated using ChatGPT based on design concepts and iterative testing by hsuanice. hsuanice served as the workflow designer, tester, and integrator for this tool.\par}
 {\pard \ql \f0 \sa180 \li0 \fi0 Reference: Script: X_Raym_Ugurcan Orcun_Toggle Mouse Click for track selection in preference.lua\par}
 }
 ]]></description>
@@ -595,6 +596,12 @@ v0.1 - Beta release]]></changelog>
         <changelog><![CDATA[v0.8.1 - Metadata: added Note and Reference sections.
 v0.8   - Fix undefined compute_item_sel_range(); add Cancel UI; add preference monitoring.]]></changelog>
         <source main="main">https://github.com/hsuanice/ReaScripts/raw/eecba92775e48de52f3ab230ad3bf65781e23e0d/Beta%20Testing/hsuanice_Track%20and%20Razor%20Item%20Link%20Monitor.lua</source>
+      </version>
+      <version name="0.9.0" author="hsuanice" time="2025-08-22T16:51:52Z">
+        <changelog><![CDATA[v0.9.0 - NEW: Read & display shared link state from Project ExtState "hsuanice_Link".
+v0.8.1 - Metadata: add Note and Reference sections.
+v0.8   - Fix undefined compute_item_sel_range(); add Cancel UI; add preference monitoring.]]></changelog>
+        <source main="main">https://github.com/hsuanice/ReaScripts/raw/de17b91c1b110ac25224bf67a7a2d6cfe39369cb/Beta%20Testing/hsuanice_Track%20and%20Razor%20Item%20Link%20Monitor.lua</source>
       </version>
     </reapack>
   </category>
