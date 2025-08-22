@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<index version="1" name="hsuanice Scripts" commit="da79946bcfe7132ad05caf9854d28675fbb8e03f">
+<index version="1" name="hsuanice Scripts" commit="e4f080c1d16e39093433aa983dc0da9cad144a06">
   <category name="Beta Testing">
     <reapack name="hsuanice_BWF TimeReference Embed Tool.lua" type="script" desc="Embed BWF TimeReference to Active take from Take 1 or Current Position TC">
       <version name="0.7.1" author="hsuanice" time="2025-08-14T17:52:57Z">
@@ -538,12 +538,12 @@ v0.1 - Beta release]]></changelog>
 \widowctrl\hyphauto
 
 {\pard \ql \f0 \sa180 \li0 \fi0 Pro Tools-style "Link Track and Edit Selection". Edit Selection = Razor Area or Item Selection.\par}
-{\pard \ql \f0 \sa180 \li0 \fi0 Performance principles: \u8226 ? Event-gated scans using GetProjectStateChangeCount(): do nothing heavy when nothing changed. \u8226 ? Enumerate ONLY selected tracks/items (no full project sweeps unless necessary). \u8226 ? Cache per-track Razor info and recompute only when project-state changed. \u8226 ? Apply item selection only on tracks whose selection state changed. \u8226 ? Keep Latched Virtual Range; publish ProjExtState only when changed.\par}
-{\pard \ql \f0 \sa180 \li0 \fi0 Priority (unchanged):\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 Perf principles: \u8226 ? Gate heavy scans by GetProjectStateChangeCount(). \u8226 ? Enumerate ONLY selected tracks/items when possible. \u8226 ? Cache per-track Razor; recompute on project-state changes only. \u8226 ? Apply changes only on delta tracks; publish ExtState only on change. \u8226 ? Keep Latched Virtual Range; avoid shrinking on track toggles.\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 Priority:\par}
 {\pard \ql \f0 \sa0 \li360 \fi-360 1)\tx360\tab Razor exists \u8594 ? use Razor (highest)\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 2)\tx360\tab Else Item Selection \u8594 ? use VIRTUAL (latched) span [min..max] of selected items\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 2)\tx360\tab Else Item Selection \u8594 ? use VIRTUAL (latched) span [min..max]\par}
 {\pard \ql \f0 \sa0 \li360 \fi-360 3)\tx360\tab Else no active range\sa180\par}
-{\pard \ql \f0 \sa180 \li0 \fi0 Change log: v0.8.3-perf-bugfix - Fix: Track click ignored when Razor exists (had to click twice). - Gate "track=razor" sync so it runs only if Razor really changed AND track selection didn't change this tick. - Use canonical Razor signature (sorted track-level ranges) to avoid false positives. v0.8.2-perf - Suppress relatch shrink after script-driven item changes. v0.8.1-perf-hotfix - Restore set_track_level_ranges(). v0.8.0-perf - Major perf pass.\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 Changelog: v0.8.5-perf-bugfix3 - NEW gate: If track selection changed because ITEMS changed this tick (e.g. 40182 "Select all"), do NOT run step C (build razors on TS) nor step D (range-based item sync). Prevents unintended "becoming Razor/TS" right after Select-All. v0.8.4-perf-bugfix2 - Step B: absolute set for track selection to avoid edge cases after 40182. v0.8.3-perf-bugfix - Fix "need to click twice" with Razor; canonical Razor signature. v0.8.2-perf - Suppress relatch shrink after script-driven item changes. v0.8.1-perf-hotfix - Restore set_track_level_ranges(). v0.8.0-perf - Major perf pass.\par}
 }
 ]]></description>
       </metadata>
@@ -582,6 +582,9 @@ v0.1 - Beta release]]></changelog>
       </version>
       <version name="0.8.3-perf-bugfix" author="hsuanice" time="2025-08-22T18:04:52Z">
         <source main="main">https://github.com/hsuanice/ReaScripts/raw/da79946bcfe7132ad05caf9854d28675fbb8e03f/Beta%20Testing/hsuanice_Track%20and%20Razor%20Item%20Link%20like%20Pro%20Tools.lua</source>
+      </version>
+      <version name="0.8.5-perf-bugfix3" author="hsuanice" time="2025-08-22T18:20:38Z">
+        <source main="main">https://github.com/hsuanice/ReaScripts/raw/e4f080c1d16e39093433aa983dc0da9cad144a06/Beta%20Testing/hsuanice_Track%20and%20Razor%20Item%20Link%20like%20Pro%20Tools.lua</source>
       </version>
     </reapack>
     <reapack name="hsuanice_Track and Razor Item Link Monitor.lua" type="script" desc="hsuanice_Track and Razor Item Link Monitor (names only + per-item ranges)">
