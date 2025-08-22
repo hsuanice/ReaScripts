@@ -1,6 +1,6 @@
 --[[
 @description Track and Razor Item Link like Pro Tools
-@version 0.7.0
+@version 0.7.1
 @author hsuanice
 @about
   Pro Tools-style "Link Track and Edit Selection" script. Edit Selection = Razor Area or Item Selection.
@@ -22,11 +22,9 @@
   hsuanice served as the workflow designer, tester, and integrator for this tool.
 
 @changelog
+  v0.7.1 - Fix: Track selection now updates when selected items are MOVED between tracks (even if the item set itself didn't change).
   v0.7.0 - Independent version: Track selection is always synced to Razor or Item selection (Razor priority). No external state or link scripts needed.
-
-  0.6.0和0.7.0都非常慢，因為掃描了全部的軌道和item。修正中
-
---]]
+]]
 
 -------------------------
 -- === USER OPTIONS === --
@@ -34,20 +32,17 @@
 -- RANGE_MODE:
 --   1 = overlap : Item is selected if it overlaps the target range
 --   2 = contain : Item must be fully within the target range (Pro Tools style)
-local RANGE_MODE = 2
+local RANGE_MODE = 1
 
 ---------------------------------------
 -- Toolbar auto-terminate + toggle support
 ---------------------------------------
 if reaper.set_action_options then
-  -- 1: Auto-terminate previous instance
-  -- 4: Toolbar button ON
-  reaper.set_action_options(1 | 4)
+  reaper.set_action_options(1 | 4) -- auto-terminate + toolbar ON
 end
 reaper.atexit(function()
   if reaper.set_action_options then
-    -- 8: Toolbar button OFF
-    reaper.set_action_options(8)
+    reaper.set_action_options(8)   -- toolbar OFF
   end
 end)
 
@@ -158,6 +153,23 @@ local function build_item_sel_sig()
   return table.concat(parts, "|")
 end
 
+-- NEW: signature of TRACKS that contain at least one selected item
+local function build_item_tracks_sig()
+  local tset = {}
+  local icnt = reaper.CountMediaItems(0)
+  for i = 0, icnt - 1 do
+    local it = reaper.GetMediaItem(0, i)
+    if reaper.GetMediaItemInfo_Value(it, "B_UISEL") == 1 then
+      local tr = reaper.GetMediaItem_Track(it)
+      if tr then tset[track_guid(tr)] = true end
+    end
+  end
+  local keys = {}
+  for g,_ in pairs(tset) do keys[#keys+1] = g end
+  table.sort(keys)
+  return table.concat(keys, "|")
+end
+
 -- Item utility (range-based)
 local function item_bounds(it)
   local pos = reaper.GetMediaItemInfo_Value(it, "D_POSITION")
@@ -211,23 +223,26 @@ end
 -------------------------------
 -- Main watcher loop
 -------------------------------
-local last_razor_sig = build_razor_sig()
-local last_trk_sig   = build_track_sel_sig()
-local last_item_sig  = build_item_sel_sig()
+local last_razor_sig       = build_razor_sig()
+local last_trk_sig         = build_track_sel_sig()
+local last_item_sig        = build_item_sel_sig()
+local last_item_tracks_sig = build_item_tracks_sig()   -- NEW
 
 local function mainloop()
-  local prev_razor_sig = last_razor_sig
-  local prev_trk_sig   = last_trk_sig
-  local prev_item_sig  = last_item_sig
+  local prev_razor_sig       = last_razor_sig
+  local prev_trk_sig         = last_trk_sig
+  local prev_item_sig        = last_item_sig
+  local prev_item_tracks_sig = last_item_tracks_sig   -- NEW
 
-  local cur_razor_sig = build_razor_sig()
-  local cur_trk_sig   = build_track_sel_sig()
-  local cur_item_sig  = build_item_sel_sig()
-  local hasRazor      = any_razor_exists()
+  local cur_razor_sig       = build_razor_sig()
+  local cur_trk_sig         = build_track_sel_sig()
+  local cur_item_sig        = build_item_sel_sig()
+  local cur_item_tracks_sig = build_item_tracks_sig() -- NEW
+  local hasRazor            = any_razor_exists()
   local tcnt = reaper.CountTracks(0)
   local ts, te = get_time_selection()
 
-  -- 1. Razor Area -> Track selection (STRICT SYNC, Razor has highest priority)
+  -- 1) Razor Area -> Track selection (highest priority)
   if cur_razor_sig ~= prev_razor_sig and hasRazor then
     reaper.PreventUIRefresh(1)
     for i = 0, tcnt - 1 do
@@ -239,19 +254,26 @@ local function mainloop()
     cur_trk_sig = build_track_sel_sig()
   end
 
-  -- 2. Item selection -> Track selection (only if no Razor Area exists)
-  if not hasRazor and cur_item_sig ~= prev_item_sig then
+  -- 2) Item selection OR the set of tracks containing selected items -> Track selection (only if NO Razor)
+  --    This covers both: selecting/deselecting items AND MOVING selected items across tracks.
+  if not hasRazor and (cur_item_sig ~= prev_item_sig or cur_item_tracks_sig ~= prev_item_tracks_sig) then
     reaper.PreventUIRefresh(1)
+    -- Build a quick lookup of tracks that should be selected
+    local want = {}
     for i = 0, tcnt - 1 do
       local tr = reaper.GetTrack(0, i)
-      set_track_selected(tr, track_has_any_selected_item(tr))
+      want[track_guid(tr)] = track_has_any_selected_item(tr)
+    end
+    for i = 0, tcnt - 1 do
+      local tr = reaper.GetTrack(0, i)
+      set_track_selected(tr, want[track_guid(tr)] or false)
     end
     reaper.PreventUIRefresh(-1)
     reaper.UpdateArrange()
     cur_trk_sig = build_track_sel_sig()
   end
 
-  -- 3. Track selection + time selection -> Razor Area + Item selection
+  -- 3) Track selection + Time selection -> Razor Area + Item selection
   if ts and te and cur_trk_sig ~= prev_trk_sig then
     reaper.PreventUIRefresh(1)
     for i = 0, tcnt - 1 do
@@ -270,7 +292,7 @@ local function mainloop()
     cur_item_sig  = build_item_sel_sig()
   end
 
-  -- 4. Razor Area + Track selection -> Item selection (sync items under razor area)
+  -- 4) Razor Area + Track selection -> Item selection (sync items under razor area)
   if cur_razor_sig ~= prev_razor_sig or cur_trk_sig ~= prev_trk_sig then
     for i = 0, tcnt - 1 do
       local tr = reaper.GetTrack(0, i)
@@ -282,9 +304,11 @@ local function mainloop()
     cur_item_sig = build_item_sel_sig()
   end
 
-  last_razor_sig = cur_razor_sig
-  last_trk_sig   = cur_trk_sig
-  last_item_sig  = cur_item_sig
+  -- persist
+  last_razor_sig       = cur_razor_sig
+  last_trk_sig         = cur_trk_sig
+  last_item_sig        = cur_item_sig
+  last_item_tracks_sig = cur_item_tracks_sig -- NEW
   reaper.defer(mainloop)
 end
 
