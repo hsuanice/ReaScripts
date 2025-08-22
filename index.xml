@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<index version="1" name="hsuanice Scripts" commit="63ffe14305a25c96df092e541b7707701f90884d">
+<index version="1" name="hsuanice Scripts" commit="fed2597ee5e9088b3938e7581e5fe5f3ac2db550">
   <category name="Beta Testing">
     <reapack name="hsuanice_BWF TimeReference Embed Tool.lua" type="script" desc="Embed BWF TimeReference to Active take from Take 1 or Current Position TC">
       <version name="0.7.1" author="hsuanice" time="2025-08-14T17:52:57Z">
@@ -531,21 +531,19 @@ v0.1 - Beta release]]></changelog>
         <source main="main">https://github.com/hsuanice/ReaScripts/raw/20128d4abc5ecce7bcaa7840d72a69ef1fcdc68c/Beta%20Testing/hsuanice_Show%20Frame%20Rate.lua</source>
       </version>
     </reapack>
-    <reapack name="hsuanice_Track and Razor Item Link like Pro Tools.lua" type="script" desc="Track and Razor Item Link like Pro Tools">
+    <reapack name="hsuanice_Track and Razor Item Link like Pro Tools.lua" type="script" desc="Track and Razor Item Link like Pro Tools (performance edition)">
       <metadata>
         <description><![CDATA[{\rtf1\ansi\deff0{\fonttbl{\f0 \fswiss Helvetica;}{\f1 \fmodern Courier;}}
 {\colortbl;\red255\green0\blue0;\red0\green0\blue255;}
 \widowctrl\hyphauto
 
-{\pard \ql \f0 \sa180 \li0 \fi0 Pro Tools-style "Link Track and Edit Selection". Edit Selection = Razor Area or Item Selection. Priority:\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 Pro Tools-style "Link Track and Edit Selection". Edit Selection = Razor Area or Item Selection.\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 Performance principles: \u8226 ? Event-gated scans using GetProjectStateChangeCount(): do nothing heavy when nothing changed. \u8226 ? Enumerate ONLY selected tracks/items (no full project sweeps unless necessary). \u8226 ? Cache per-track Razor info and recompute only when project-state changed. \u8226 ? Apply item selection only on tracks whose selection state changed. \u8226 ? Keep Latched Virtual Range; publish ProjExtState only when changed.\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 Priority (unchanged):\par}
 {\pard \ql \f0 \sa0 \li360 \fi-360 1)\tx360\tab Razor exists \u8594 ? use Razor (highest)\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 2)\tx360\tab Else Item Selection \u8594 ? use VIRTUAL range [min item start, max item end], but now it is LATCHED (sticky) until you explicitly change selection or create a real Time Selection.\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 3)\tx360\tab Else no active range.\sa180\par}
-{\pard \ql \f0 \sa180 \li0 \fi0 Behaviors (unchanged except for latching):\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Razor/Item auto-sync Track selection (Razor priority).\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab With a REAL Time Selection present, changing Track selection creates/moves/removes Razor on those tracks and syncs items under the range.\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Moving selected items across tracks updates Track selection (no Razor).\sa180\par}
-{\pard \ql \f0 \sa180 \li0 \fi0 This script was generated using ChatGPT based on design concepts and iterative testing by hsuanice. hsuanice served as the workflow designer, tester, and integrator for this tool.\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 2)\tx360\tab Else Item Selection \u8594 ? use VIRTUAL (latched) span [min..max] of selected items\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 3)\tx360\tab Else no active range\sa180\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 Change log: v0.8.2-perf - FIX: Do not shrink latched span after Track Toggle. Added suppress_latch_next flag to skip one-shot relatch when items were changed by script. v0.8.1-perf-hotfix - Restore set_track_level_ranges(). v0.8.0-perf - Major perf pass.\par}
 }
 ]]></description>
       </metadata>
@@ -578,6 +576,9 @@ v0.1 - Beta release]]></changelog>
       </version>
       <version name="0.7.5-hotfix1" author="hsuanice" time="2025-08-22T17:20:18Z">
         <source main="main">https://github.com/hsuanice/ReaScripts/raw/a10b21ae8d00baa32f7a9cc20135bfbe6c49641d/Beta%20Testing/hsuanice_Track%20and%20Razor%20Item%20Link%20like%20Pro%20Tools.lua</source>
+      </version>
+      <version name="0.8.2-perf" author="hsuanice" time="2025-08-22T17:47:56Z">
+        <source main="main">https://github.com/hsuanice/ReaScripts/raw/fed2597ee5e9088b3938e7581e5fe5f3ac2db550/Beta%20Testing/hsuanice_Track%20and%20Razor%20Item%20Link%20like%20Pro%20Tools.lua</source>
       </version>
     </reapack>
     <reapack name="hsuanice_Track and Razor Item Link Monitor.lua" type="script" desc="hsuanice_Track and Razor Item Link Monitor (names only + per-item ranges)">
