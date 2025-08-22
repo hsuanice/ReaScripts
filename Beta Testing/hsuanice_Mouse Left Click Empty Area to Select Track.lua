@@ -1,21 +1,29 @@
 --[[
 @description hsuanice_Mouse Left Click Empty Area to Select Track
-@version 0.3.0
+@version 0.4.0
 @author hsuanice
 @about
-  Select the track immediately on **mouse-up** when clicking on **EMPTY** space
-  in the Arrange view track lanes. Skips items/envelopes/ruler/TCP/MCP.
-  Only triggers if mouse-down and mouse-up are at (almost) the same point.
+  Select the track when clicking either:
+    • EMPTY arrange area in a track lane, or
+    • The UPPER HALF of a media item in arrange (non-envelope).
+  Supports mouse-up or mouse-down trigger (user option).
+  Only triggers if mouse-down and mouse-up are at (almost) the same point (for mouse-up mode).
   Toolbar-friendly background watcher: run once to start, run again to stop (true toggle).
   Optional console logging via WANT_DEBUG.
 
-  Note:
-  This script was generated using ChatGPT and Copilot based on design concepts and iterative testing by hsuanice.
+  Notes:
+  - Uses item screen metrics (I_LASTY/I_LASTH) and the track TCP screen rect (P_UI_RECT:tcp.size) to test "upper half".
+  - Requires js_ReaScriptAPI for mouse state polling.
+
+  This script was generated using ChatGPT based on design concepts and iterative testing by hsuanice.
   hsuanice served as the workflow designer, tester, and integrator for this tool.
 
 @requires js_ReaScriptAPI
 
 @changelog
+  0.4.0 - New: Also select track when clicking the UPPER HALF of a media item.
+          Add ENABLE_ITEM_UPPER_HALF_SELECT option.
+          Fix: console log string concatenation.
   0.3.0 - Add option SELECT_ON_MOUSE_UP: true=mouse-up, false=mouse-down
   0.2.3 - Select only if mouse-up is at same position as mouse-down (prevents drag misfires)
   0.2.2 - True toggle: set_action_options(1+4) to auto-terminate running instance, toolbar ON/OFF
@@ -27,9 +35,10 @@
 -------------------------------------------------------------
 -- User options
 -------------------------------------------------------------
-local SELECT_ON_MOUSE_UP = true -- true: mouse-up, false: mouse-down
-local WANT_DEBUG = false        -- true: print to console
-local clickTolerance = 3        -- pixels for mouse-up (allow tiny moves)
+local SELECT_ON_MOUSE_UP = true   -- true: mouse-up, false: mouse-down
+local ENABLE_ITEM_UPPER_HALF_SELECT = true -- click item upper-half also selects track
+local WANT_DEBUG = false          -- true: print to console
+local clickTolerance = 3          -- pixels for mouse-up (allow tiny moves)
 
 -------------------------------------------------------------
 -- Logger
@@ -52,23 +61,67 @@ local function setToggle(on)
 end
 
 -------------------------------------------------------------
--- Hit-tests (screen-space)
+-- Geometry helpers
 -------------------------------------------------------------
-local function TrackIfClickOnArrangeEmpty(x, y)
+-- Parse "P_UI_RECT:tcp.size" -> x, y, w, h (numbers) when possible.
+local function GetTrackTCPRect(tr)
+  local ok, rect = reaper.GetSetMediaTrackInfo_String(tr, "P_UI_RECT:tcp.size", "", false)
+  if not ok or not rect or rect == "" then return nil end
+  -- Accept both "x y w h" or "l t r b"
+  local a, b, c, d = rect:match("(-?%d+)%s+(-?%d+)%s+(-?%d+)%s+(-?%d+)")
+  if not a then return nil end
+  a, b, c, d = tonumber(a), tonumber(b), tonumber(c), tonumber(d)
+  if not (a and b and c and d) then return nil end
+  -- Heuristic: if values look like left,top,right,bottom convert to x,y,w,h
+  if c > a and d > b and (c - a) > 0 and (d - b) > 0 and (c > 200 or d > 40) then
+    return a, b, (c - a), (d - b)
+  else
+    return a, b, c, d
+  end
+end
+
+-- Return track if mouse is over arrange empty area OR over the upper half of an item.
+local function TrackIfClickSelectTarget(x, y)
   local _, info = reaper.GetThingFromPoint(x, y)
   local isArrange = (info == "arrange") or (type(info) == "string" and info:find("arrange", 1, true))
   if not isArrange then
     return nil, ("not arrange (info=%s)"):format(tostring(info))
   end
+
+  -- First, check if we're over an item.
   local item = reaper.GetItemFromPoint(x, y, true)
   if item then
-    return nil, "clicked on item"
+    if not ENABLE_ITEM_UPPER_HALF_SELECT then
+      return nil, "clicked on item (upper-half select disabled)"
+    end
+    local tr = reaper.GetMediaItem_Track(item)
+    if not tr then return nil, "no track for item" end
+
+    -- Item Y/H are relative to top of track; we need track top in screen coords.
+    local item_rel_y = reaper.GetMediaItemInfo_Value(item, "I_LASTY") or 0
+    local item_h     = reaper.GetMediaItemInfo_Value(item, "I_LASTH") or 0
+
+    local tx, ty, tw, th = GetTrackTCPRect(tr)
+    if not (ty and th and item_h and item_h > 0) then
+      return nil, "couldn't resolve track/item screen rect"
+    end
+
+    local item_top_screen = ty + item_rel_y
+    local item_mid_screen = item_top_screen + (item_h * 0.5)
+
+    if y <= item_mid_screen then
+      return tr, "clicked item upper half"
+    else
+      return nil, "clicked item lower half"
+    end
   end
+
+  -- Otherwise, empty arrange area: select that lane's track.
   local tr = reaper.GetTrackFromPoint(x, y)
   if not tr then
     return nil, "no track at this point (ruler/gap?)"
   end
-  return tr, nil
+  return tr, "clicked arrange empty"
 end
 
 local function SelectOnlyTrack(tr)
@@ -96,7 +149,7 @@ local function watch()
   local lmb   = (state & 1) == 1
 
   if SELECT_ON_MOUSE_UP then
-    -- mouse-up模式
+    -- mouse-up mode
     if lmb then
       if not lastDown then
         lastDown = true
@@ -110,13 +163,13 @@ local function watch()
         local dx = math.abs(x - (lastDownPos.x or x))
         local dy = math.abs(y - (lastDownPos.y or y))
         if dx <= clickTolerance and dy <= clickTolerance then
-          local tr, why = TrackIfClickOnArrangeEmpty(x, y)
+          local tr, why = TrackIfClickSelectTarget(x, y)
           if tr then
             reaper.Undo_BeginBlock()
             SelectOnlyTrack(tr)
-            reaper.Undo_EndBlock("Click empty arrange selects track (mouse-up)", -1)
+            reaper.Undo_EndBlock("Select track by empty/upper-half click (mouse-up)", -1)
             local ok, name = reaper.GetTrackName(tr)
-            Log(("✅ selected track: %s"):format(ok and name or "(unnamed)"))
+            Log(("✅ selected track: %s (%s)"):format(ok and name or "(unnamed)", tostring(why)))
           else
             Log("skip: " .. tostring(why))
           end
@@ -126,18 +179,18 @@ local function watch()
       end
     end
   else
-    -- mouse-down模式
+    -- mouse-down mode
     if lmb then
       if not lastDown then
         lastDown = true
         Log(("⬇︎ down  (%d,%d)"):format(x, y))
-        local tr, why = TrackIfClickOnArrangeEmpty(x, y)
+        local tr, why = TrackIfClickSelectTarget(x, y)
         if tr then
           reaper.Undo_BeginBlock()
           SelectOnlyTrack(tr)
-          reaper.Undo_EndBlock("Click empty arrange selects track (mouse-down)", -1)
+          reaper.Undo_EndBlock("Select track by empty/upper-half click (mouse-down)", -1)
           local ok, name = reaper.GetTrackName(tr)
-          Log(("✅ selected track: %s"):format(ok and name or "(unnamed)"))
+          Log(("✅ selected track: %s (%s)"):format(ok and name or "(unnamed)", tostring(why)))
         else
           Log("skip: " .. tostring(why))
         end
@@ -154,11 +207,11 @@ local function watch()
 end
 
 if reaper.set_action_options then
-  reaper.set_action_options(1 + 4)
+  reaper.set_action_options(1 + 4) -- auto-terminate previous instance, sync toolbar
 end
 if WANT_DEBUG then reaper.ClearConsole() end
 setToggle(true)
-Log("=== Click-empty-select-track watcher started (" .. (SELECT_ON_MOUSE_UP and "mouse-up" or "mouse-down") .. ") ===")
+Log("=== Click-select-track watcher started (" .. (SELECT_ON_MOUSE_UP and "mouse-up" or "mouse-down") .. ") ===")
 
 reaper.atexit(function()
   if reaper.set_action_options then
