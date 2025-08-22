@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<index version="1" name="hsuanice Scripts" commit="03446f8a457cd7edc646b7cae671021f10e968ae">
+<index version="1" name="hsuanice Scripts" commit="de1374ebc8090e405b38fe30451f6fe42b8ac738">
   <category name="Beta Testing">
     <reapack name="hsuanice_BWF TimeReference Embed Tool.lua" type="script" desc="Embed BWF TimeReference to Active take from Take 1 or Current Position TC">
       <version name="0.7.1" author="hsuanice" time="2025-08-14T17:52:57Z">
@@ -313,8 +313,11 @@
 {\colortbl;\red255\green0\blue0;\red0\green0\blue255;}
 \widowctrl\hyphauto
 
-{\pard \ql \f0 \sa180 \li0 \fi0 Select the track immediately on {\b mouse-up} when clicking on {\b EMPTY} space in the Arrange view track lanes. Skips items/envelopes/ruler/TCP/MCP. Only triggers if mouse-down and mouse-up are at (almost) the same point. Toolbar-friendly background watcher: run once to start, run again to stop (true toggle). Optional console logging via WANT_DEBUG.\par}
-{\pard \ql \f0 \sa180 \li0 \fi0 Note: This script was generated using ChatGPT and Copilot based on design concepts and iterative testing by hsuanice. hsuanice served as the workflow designer, tester, and integrator for this tool.\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 Select the track when clicking either: \u8226 ? EMPTY arrange area in a track lane, or \u8226 ? The UPPER HALF of a media item in arrange (non-envelope). Supports mouse-up or mouse-down trigger (user option). Only triggers if mouse-down and mouse-up are at (almost) the same point (for mouse-up mode). Toolbar-friendly background watcher: run once to start, run again to stop (true toggle). Optional console logging via WANT_DEBUG.\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 Notes:\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Uses item screen metrics (I_LASTY/I_LASTH) and the track TCP screen rect (P_UI_RECT:tcp.size) to test "upper half".\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Requires js_ReaScriptAPI for mouse state polling.\sa180\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 This script was generated using ChatGPT based on design concepts and iterative testing by hsuanice. hsuanice served as the workflow designer, tester, and integrator for this tool.\par}
 }
 ]]></description>
       </metadata>
@@ -329,6 +332,9 @@
       </version>
       <version name="0.3.0" author="hsuanice" time="2025-08-18T14:06:57Z">
         <source main="main">https://github.com/hsuanice/ReaScripts/raw/4ff9a1365ef25358fd0138dab5e71a00bea60412/Beta%20Testing/hsuanice_Mouse%20Left%20Click%20Empty%20Area%20to%20Select%20Track.lua</source>
+      </version>
+      <version name="0.4.0" author="hsuanice" time="2025-08-22T16:11:40Z">
+        <source main="main">https://github.com/hsuanice/ReaScripts/raw/de1374ebc8090e405b38fe30451f6fe42b8ac738/Beta%20Testing/hsuanice_Mouse%20Left%20Click%20Empty%20Area%20to%20Select%20Track.lua</source>
       </version>
     </reapack>
     <reapack name="hsuanice_Pro Tools Display Timeline Selection End.lua" type="script" desc="Pro Tools - Display Timeline Selection End">
