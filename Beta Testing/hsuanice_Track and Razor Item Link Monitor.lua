@@ -1,37 +1,24 @@
 --[[
-@description hsuanice_Track and Razor Item Link Monitor (names only + per-item ranges)
-@version 0.9.1
+@description Track • Razor • Item LINK — MONITOR (driver-aware)
+@version 0.9.5-driver
 @author hsuanice
 @about
-  Console monitor for the link relationships among Tracks, Razor Areas, and Items.
+  監控 Track / Razor / Item 的連動關係與狀態。
 
-  It prints:
-    • Toggle status (ON/OFF) of your link scripts (human-readable names)
-    • REAPER Preference: Arrange click selects track (SWS)
-    • Selected Tracks (names)
-    • Track-level Razor Areas (per track) + GLOBAL UNION
-    • Selected Items (GLOBAL): active-take names + per-item [start..end]
-    • Shared Link State (from Project ExtState "hsuanice_Link"):
-         - active_src (razor|virtual|virtual_latched|none) + active_start/end
-         - item_span_start/end
-         - virt_latched_start/end  (latched virtual range from main script v0.7.5+)
-         - ts_start/end  (real TS if present)
-         - has_razor
-
-  Notes:
-    - Requires the companion main script to publish Project ExtState under "hsuanice_Link".
-    - Works without SWS, but preference readout shows "UNKNOWN (SWS not installed)".
-
-  Reference:
-    Script: X_Raym_Ugurcan Orcun_Toggle Mouse Click for track selection in preference.lua
-@changelog
-  v0.9.1 - Show latched virtual range (virt_latched_start/end). Refresh signature includes these.
-  v0.9.0 - Added Shared Link State section from Project ExtState "hsuanice_Link".
+  新增：
+    • 顯示 driver（ARR / TCP / none）
+    • 顯示 latched track count（latched_track_count）
+    • 仍支援舊鍵名（active_start/active_end 等），保留 Shift-Add Guard 與 “由 items 造成選軌改變” 判斷
 ]]
 
-----------------------------
--- Config: scripts to watch
-----------------------------
+----------------------------------------------------------------
+-- 設定
+----------------------------------------------------------------
+local MAX_ITEMS_LIST_GLOBAL    = 500
+
+----------------------------------------------------------------
+-- 腳本切換狀態（依你的實際命令 ID）
+----------------------------------------------------------------
 local SCRIPTS = {
   {"hsuanice_Razor and Item Link with Mode Switch to Overlap or Contain like Pro Tools.lua",
     "_RS6f4e0dfffa0b2d8dbfb1d1f52ed8053bfb935b93", "razor_item"},
@@ -39,15 +26,11 @@ local SCRIPTS = {
     "_RScb810d93e985a5df273b63589ec315d81fa18529", "track_razor_item"},
 }
 
-local MAX_ITEMS_LIST_GLOBAL    = 500
-local MAX_ITEMS_LIST_PER_TRACK = 100
-
-----------------
--- Utils
-----------------
-local function fmt_time(t)
-  if not t or t == "" then return "n/a" end
-  local n = tonumber(t); if not n then return "n/a" end
+----------------------------------------------------------------
+-- 小工具
+----------------------------------------------------------------
+local function fmt_time_num(n)
+  if not n then return "n/a" end
   local h = math.floor(n / 3600)
   local m = math.floor((n % 3600) / 60)
   local s = math.floor(n % 60)
@@ -55,8 +38,8 @@ local function fmt_time(t)
   return string.format("%02d:%02d:%02d.%03d", h, m, s, ms)
 end
 
-local function track_guid(tr) return reaper.GetTrackGUID(tr) end
 local function track_name(tr) local _, n = reaper.GetTrackName(tr, "") return n end
+local function track_guid(tr) return reaper.GetTrackGUID(tr) end
 local function track_selected(tr) return (reaper.GetMediaTrackInfo_Value(tr, "I_SELECTED") or 0) > 0.5 end
 
 local function get_toggle_txt(cmd_str)
@@ -64,6 +47,146 @@ local function get_toggle_txt(cmd_str)
   if cmd == 0 then return "UNKNOWN" end
   local st = reaper.GetToggleCommandStateEx(0, cmd)
   return (st == 1 and "ON") or (st == 0 and "OFF") or "UNKNOWN"
+end
+
+----------------------------------------------------------------
+-- 偏好顯示
+----------------------------------------------------------------
+local function pref_selects_track_label()
+  if reaper.APIExists and reaper.APIExists("SNM_GetIntConfigVar") then
+    local v = reaper.SNM_GetIntConfigVar("trackselonmouse", -1)
+    if v == 1 then return "ON" elseif v==0 then return "OFF" else return "UNKNOWN" end
+  end
+  return "UNKNOWN (SWS not installed)"
+end
+
+----------------------------------------------------------------
+-- 共享狀態讀取（相容）
+----------------------------------------------------------------
+local EXT_NS = "hsuanice_Link"
+local function R(k) local _, v = reaper.GetProjExtState(0, EXT_NS, k); return v ~= "" and v or nil end
+local function num(v) return v and tonumber(v) or nil end
+
+local function read_shared_state()
+  local active_s = num(R("active_s") or R("active_start"))
+  local active_e = num(R("active_e") or R("active_end"))
+  local item_s   = num(R("item_s")   or R("item_span_start"))
+  local item_e   = num(R("item_e")   or R("item_span_end"))
+  local virt_s   = num(R("virt_s")   or R("virt_latched_start"))
+  local virt_e   = num(R("virt_e")   or R("virt_latched_end"))
+  local ts_s     = num(R("ts_s")     or R("ts_start"))
+  local ts_e     = num(R("ts_e")     or R("ts_end"))
+  local has_raz  = (R("has_razor") == "1")
+  local ts_real  = (R("ts_has_real") == "1")
+  local driver   = R("driver") or "none"
+  local ltc      = tonumber(R("latched_track_count") or "0") or 0
+
+  return {
+    active_src = R("active_src") or "none",
+    active_s = active_s, active_e = active_e,
+    item_s = item_s, item_e = item_e,
+    virt_s = virt_s, virt_e = virt_e,
+    ts_s = ts_s, ts_e = ts_e,
+    has_razor = has_raz, ts_has_real = ts_real,
+    driver = driver, ltc = ltc,
+    -- 可能存在（新主腳本才會寫）
+    anchor_guid = R("anchor_guid"),
+    anchor_idx  = R("anchor_idx"),
+    anchor_src  = R("anchor_src"),
+    tr_evt      = R("tr_evt"),
+  }
+end
+
+----------------------------------------------------------------
+-- Razor 讀取
+----------------------------------------------------------------
+local function parse_track_level_razor(tr)
+  local ok, s = reaper.GetSetMediaTrackInfo_String(tr, "P_RAZOREDITS", "", false)
+  if not ok then return {} end
+  local out = {}
+  for a,b,g in string.gmatch(s, "([%d%.%-]+) ([%d%.%-]+) (%b\"\")") do
+    if g == '""' then out[#out+1] = {tonumber(a), tonumber(b)} end
+  end
+  table.sort(out, function(x,y) return x[1] < y[1] end)
+  return out
+end
+
+local function razor_union_all_tracks()
+  local keys, out = {}, {}
+  local tcnt = reaper.CountTracks(0)
+  for i=0, tcnt-1 do
+    local tr = reaper.GetTrack(0,i)
+    for _, r in ipairs(parse_track_level_razor(tr)) do
+      local k = string.format("%.9f|%.9f", r[1], r[2])
+      if not keys[k] then keys[k]=true; out[#out+1] = {r[1], r[2]} end
+    end
+  end
+  table.sort(out, function(a,b) return a[1] < b[1] end)
+  return out
+end
+
+----------------------------------------------------------------
+-- 狀態快照（事件分類用）
+----------------------------------------------------------------
+local function selected_tracks_set_and_sig()
+  local set, list = {}, {}
+  local tcnt = reaper.CountTracks(0)
+  for i=0, tcnt-1 do
+    local tr = reaper.GetTrack(0,i)
+    if track_selected(tr) then
+      local g = track_guid(tr)
+      set[g] = true
+      list[#list+1] = g
+    end
+  end
+  table.sort(list)
+  return set, table.concat(list, "|")
+end
+
+local function selected_items_sig_and_count()
+  local parts, cnt = {}, 0
+  local icnt = reaper.CountMediaItems(0)
+  for i=0, icnt-1 do
+    local it = reaper.GetMediaItem(0, i)
+    if reaper.GetMediaItemInfo_Value(it, "B_UISEL") == 1 then
+      cnt = cnt + 1
+      local _, g = reaper.GetSetMediaItemInfo_String(it, "GUID", "", false)
+      parts[#parts+1] = g or tostring(it)
+    end
+  end
+  table.sort(parts)
+  return table.concat(parts, "|"), cnt
+end
+
+local function razor_sig_all_tracks()
+  local parts = {}
+  local tcnt = reaper.CountTracks(0)
+  for i=0, tcnt-1 do
+    local tr = reaper.GetTrack(0,i)
+    local ok, s = reaper.GetSetMediaTrackInfo_String(tr, "P_RAZOREDITS", "", false)
+    parts[#parts+1] = (ok and s) and s or ""
+  end
+  return table.concat(parts, "|")
+end
+
+----------------------------------------------------------------
+-- 輸出
+----------------------------------------------------------------
+local function print_header()
+  reaper.ShowConsoleMsg("=== Track • Razor • Item LINK — MONITOR ===\n")
+  for _, rec in ipairs(SCRIPTS) do
+    reaper.ShowConsoleMsg(string.format("  %s: %s\n", rec[1], get_toggle_txt(rec[2])))
+  end
+  reaper.ShowConsoleMsg(("REAPER Preference — Arrange click selects track: %s\n\n"):format(pref_selects_track_label()))
+end
+
+local function print_selected_tracks()
+  local names = {}
+  local tcnt = reaper.CountTracks(0)
+  for i=0, tcnt-1 do local tr = reaper.GetTrack(0,i); if track_selected(tr) then names[#names+1]=track_name(tr) end end
+  reaper.ShowConsoleMsg(("# Selected Tracks: %d\n"):format(#names))
+  if #names>0 then reaper.ShowConsoleMsg("  "..table.concat(names, ", ").."\n") end
+  reaper.ShowConsoleMsg("\n")
 end
 
 local function active_take_name(it)
@@ -74,232 +197,79 @@ local function active_take_name(it)
   local src = reaper.GetMediaItemTake_Source(tk)
   if src then
     local buf = reaper.GetMediaSourceFileName(src, "")
-    if buf and buf ~= "" then
-      local base = buf:match("[^/\\]+$") or buf
-      return base
-    end
+    if buf and buf ~= "" then return buf:match("[^/\\]+$") or buf end
   end
   return "<unnamed>"
 end
 
-----------------------------
--- Razor helpers
-----------------------------
-local function parse_triplets(s)
-  local out = {}
-  if not s or s == "" then return out end
-  local toks = {}
-  for w in s:gmatch("%S+") do toks[#toks+1] = w end
-  for i = 1, #toks, 3 do
-    local a = tonumber(toks[i]); local b = tonumber(toks[i+1]); local g = toks[i+2] or "\"\""
-    if a and b and b > a then out[#out+1] = {a, b, g} end
-  end
-  return out
-end
-
-local function track_level_ranges(tr)
-  local ok, s = reaper.GetSetMediaTrackInfo_String(tr, "P_RAZOREDITS", "", false)
-  if not ok then return {} end
-  local out = {}
-  for _, t in ipairs(parse_triplets(s)) do
-    if t[3] == "\"\"" then out[#out+1] = {t[1], t[2]} end
-  end
-  table.sort(out, function(a,b) return a[1] < b[1] end)
-  return out
-end
-
-local function razor_union_all_tracks()
-  local set, out = {}, {}
-  local tcnt = reaper.CountTracks(0)
-  for i = 0, tcnt - 1 do
-    local tr = reaper.GetTrack(0, i)
-    for _, r in ipairs(track_level_ranges(tr)) do
-      local key = string.format("%.17f|%.17f", r[1], r[2])
-      if not set[key] then set[key] = true; out[#out+1] = {r[1], r[2]} end
-    end
-  end
-  table.sort(out, function(a,b) return a[1] < b[1] end)
-  return out
-end
-
---------------------------
--- REAPER Pref monitoring
---------------------------
-local function read_pref_selects_track_raw()
-  if reaper.APIExists and reaper.APIExists("SNM_GetIntConfigVar") then
-    return reaper.SNM_GetIntConfigVar("trackselonmouse", -1)
-  end
-  return -999
-end
-local function pref_selects_track_label()
-  local v = read_pref_selects_track_raw()
-  if v == 1 then return "ON"
-  elseif v == 0 then return "OFF"
-  elseif v == -1 then return "UNKNOWN"
-  elseif v == -999 then return "UNKNOWN (SWS not installed)"
-  else return ("UNKNOWN ("..tostring(v)..")") end
-end
-
------------------
--- Item range util
------------------
-local function compute_item_sel_range()
+local function print_items_global()
   local icnt = reaper.CountMediaItems(0)
+  local rows, total = {}, 0
   local min_s, max_e = math.huge, -math.huge
-  local any = false
-  for i = 0, icnt - 1 do
+  for i=0, icnt-1 do
     local it = reaper.GetMediaItem(0, i)
     if reaper.GetMediaItemInfo_Value(it, "B_UISEL") == 1 then
-      any = true
+      total = total + 1
       local s = reaper.GetMediaItemInfo_Value(it, "D_POSITION")
       local e = s + reaper.GetMediaItemInfo_Value(it, "D_LENGTH")
       if s < min_s then min_s = s end
       if e > max_e then max_e = e end
-    end
-  end
-  if any and max_e > min_s then return true, min_s, max_e end
-  return false, 0, 0
-end
-
------------------
--- Shared Link State (ProjExtState "hsuanice_Link")
------------------
-local EXT_NS = "hsuanice_Link"
-local function read_shared_key(k)
-  local _, v = reaper.GetProjExtState(0, EXT_NS, k)
-  return v or ""
-end
-local function read_shared_state()
-  return {
-    active_src = read_shared_key("active_src"),
-    active_s   = read_shared_key("active_start"),
-    active_e   = read_shared_key("active_end"),
-    item_s     = read_shared_key("item_span_start"),
-    item_e     = read_shared_key("item_span_end"),
-    virt_s     = read_shared_key("virt_latched_start"), -- NEW
-    virt_e     = read_shared_key("virt_latched_end"),   -- NEW
-    ts_s       = read_shared_key("ts_start"),
-    ts_e       = read_shared_key("ts_end"),
-    has_razor  = read_shared_key("has_razor"),
-    ts_has_real= read_shared_key("ts_has_real"),
-  }
-end
-
------------------
--- Pretty print
------------------
-local function print_script_toggles()
-  for _, rec in ipairs(SCRIPTS) do
-    local name, id = rec[1], rec[2]
-    reaper.ShowConsoleMsg(string.format("  %s: %s\n", name, get_toggle_txt(id)))
-  end
-end
-
-local function print_pref_state()
-  reaper.ShowConsoleMsg(("REAPER Preference — Arrange click selects track: %s\n\n"):format(pref_selects_track_label()))
-end
-
-local function print_selected_tracks()
-  local tcnt = reaper.CountTracks(0)
-  local sel = {}
-  for i = 0, tcnt - 1 do
-    local tr = reaper.GetTrack(0, i)
-    if track_selected(tr) then sel[#sel+1] = track_name(tr) end
-  end
-  reaper.ShowConsoleMsg(("# Selected Tracks: %d\n"):format(#sel))
-  if #sel > 0 then reaper.ShowConsoleMsg("  " .. table.concat(sel, ", ") .. "\n") end
-  reaper.ShowConsoleMsg("\n")
-end
-
-local function print_razors_and_selected_items_per_track()
-  local tcnt = reaper.CountTracks(0)
-  reaper.ShowConsoleMsg("Razor Areas (TRACK-LEVEL only):\n")
-  local any = false
-  for i = 0, tcnt - 1 do
-    local tr = reaper.GetTrack(0, i)
-    local ranges = track_level_ranges(tr)
-    if #ranges > 0 then
-      any = true
-      reaper.ShowConsoleMsg(("  - %s:\n"):format(track_name(tr)))
-      for _, r in ipairs(ranges) do
-        reaper.ShowConsoleMsg(("      [%s .. %s]  (%.6f .. %.6f)\n"):format(
-          fmt_time(r[1]), fmt_time(r[2]), r[1], r[2]))
-      end
-      -- list selected items on this track
-      local icnt = reaper.CountTrackMediaItems(tr)
-      local rows, total_sel = {}, 0
-      for j = 0, icnt - 1 do
-        local it = reaper.GetTrackMediaItem(tr, j)
-        if reaper.GetMediaItemInfo_Value(it, "B_UISEL") == 1 then
-          total_sel = total_sel + 1
-          if #rows < MAX_ITEMS_LIST_PER_TRACK then
-            local pos = reaper.GetMediaItemInfo_Value(it, "D_POSITION")
-            local len = reaper.GetMediaItemInfo_Value(it, "D_LENGTH")
-            local s, e = pos, pos+len
-            rows[#rows+1] = string.format("%s [%s..%s]", active_take_name(it), fmt_time(s), fmt_time(e))
-          end
-        end
-      end
-      if total_sel > 0 then
-        local extra = total_sel - #rows
-        reaper.ShowConsoleMsg("      Selected items (take names + ranges):\n")
-        for _, line in ipairs(rows) do reaper.ShowConsoleMsg("        • "..line.."\n") end
-        if extra > 0 then reaper.ShowConsoleMsg(("        (+%d more)\n"):format(extra)) end
-      end
-    end
-  end
-  if not any then reaper.ShowConsoleMsg("  (none)\n") end
-
-  local uni = razor_union_all_tracks()
-  reaper.ShowConsoleMsg(("\nRazor UNION ranges: %d\n"):format(#uni))
-  for _, r in ipairs(uni) do
-    reaper.ShowConsoleMsg(("  [%s .. %s]  (%.6f .. %.6f)\n"):format(
-      fmt_time(r[1]), fmt_time(r[2]), r[1], r[2]))
-  end
-  reaper.ShowConsoleMsg("\n")
-end
-
-local function print_selected_items_global()
-  local icnt = reaper.CountMediaItems(0)
-  local rows, total = {}, 0
-  for i = 0, icnt - 1 do
-    local it = reaper.GetMediaItem(0, i)
-    if reaper.GetMediaItemInfo_Value(it, "B_UISEL") == 1 then
-      total = total + 1
       if #rows < MAX_ITEMS_LIST_GLOBAL then
-        local pos = reaper.GetMediaItemInfo_Value(it, "D_POSITION")
-        local len = reaper.GetMediaItemInfo_Value(it, "D_LENGTH")
-        local s, e = pos, pos+len
-        rows[#rows+1] = string.format("%s  [%s..%s]", active_take_name(it), fmt_time(s), fmt_time(e))
+        rows[#rows+1] = string.format("%s  [%s..%s]", active_take_name(it), fmt_time_num(s), fmt_time_num(e))
       end
     end
   end
   reaper.ShowConsoleMsg(("# Selected Items: %d\n"):format(total))
-  if total > 0 then
-    for _, line in ipairs(rows) do reaper.ShowConsoleMsg("  • "..line.."\n") end
-    local extra = total - #rows
-    if extra > 0 then reaper.ShowConsoleMsg(("  (+%d more)\n"):format(extra)) end
-  end
-
-  local has_rng, s, e = compute_item_sel_range()
-  if has_rng then
-    reaper.ShowConsoleMsg(("  Computed item range: [%s .. %s]  (%.6f .. %.6f)\n\n"):format(
-      fmt_time(s), fmt_time(e), s, e))
+  for _,line in ipairs(rows) do reaper.ShowConsoleMsg("  • "..line.."\n") end
+  if total > #rows then reaper.ShowConsoleMsg(("  (+%d more)\n"):format(total-#rows)) end
+  if total>0 then
+    reaper.ShowConsoleMsg(("  Computed item range: [%s .. %s]  (%.6f .. %.6f)\n\n"):format(fmt_time_num(min_s), fmt_time_num(max_e), min_s, max_e))
   else
     reaper.ShowConsoleMsg("  Computed item range: (none)\n\n")
   end
 end
 
-local function print_shared_state()
-  local st = read_shared_state()
+local function print_razors()
+  reaper.ShowConsoleMsg("Razor Areas (TRACK-LEVEL only):\n")
+  local any = false
+  local tcnt = reaper.CountTracks(0)
+  for i=0, tcnt-1 do
+    local tr = reaper.GetTrack(0,i)
+    local ranges = parse_track_level_razor(tr)
+    if #ranges>0 then
+      any = true
+      reaper.ShowConsoleMsg(("  - %s:\n"):format(track_name(tr)))
+      for _,r in ipairs(ranges) do
+        reaper.ShowConsoleMsg(("      [%s .. %s]  (%.6f .. %.6f)\n"):format(fmt_time_num(r[1]), fmt_time_num(r[2]), r[1], r[2]))
+      end
+    end
+  end
+  if not any then reaper.ShowConsoleMsg("  (none)\n") end
+  local uni = razor_union_all_tracks()
+  reaper.ShowConsoleMsg(("\nRazor UNION ranges: %d\n"):format(#uni))
+  for _,r in ipairs(uni) do reaper.ShowConsoleMsg(("  [%s .. %s]  (%.6f .. %.6f)\n"):format(fmt_time_num(r[1]), fmt_time_num(r[2]), r[1], r[2])) end
+  reaper.ShowConsoleMsg("\n")
+end
+
+local function print_shared_state_extras(st, flags)
   reaper.ShowConsoleMsg("Shared Link State (ProjExtState: hsuanice_Link):\n")
-  reaper.ShowConsoleMsg(("  active_src   : %s\n"):format(st.active_src ~= "" and st.active_src or "none"))
-  reaper.ShowConsoleMsg(("  active_range : [%s .. %s]\n"):format(fmt_time(st.active_s), fmt_time(st.active_e)))
-  reaper.ShowConsoleMsg(("  item_span    : [%s .. %s]\n"):format(fmt_time(st.item_s), fmt_time(st.item_e)))
-  reaper.ShowConsoleMsg(("  virt_latched : [%s .. %s]\n"):format(fmt_time(st.virt_s), fmt_time(st.virt_e))) -- NEW
-  reaper.ShowConsoleMsg(("  real TS      : [%s .. %s]  (%s)\n"):format(
-    fmt_time(st.ts_s), fmt_time(st.ts_e), (st.ts_has_real=="1" and "present" or "none")))
-  reaper.ShowConsoleMsg(("  has_razor    : %s\n\n"):format(st.has_razor=="1" and "YES" or "NO"))
+  reaper.ShowConsoleMsg(("  active_src   : %s\n"):format(st.active_src))
+  reaper.ShowConsoleMsg(("  active_range : [%s .. %s]\n"):format(fmt_time_num(st.active_s), fmt_time_num(st.active_e)))
+  reaper.ShowConsoleMsg(("  item_span    : [%s .. %s]\n"):format(fmt_time_num(st.item_s), fmt_time_num(st.item_e)))
+  reaper.ShowConsoleMsg(("  virt_latched : [%s .. %s]\n"):format(fmt_time_num(st.virt_s), fmt_time_num(st.virt_e)))
+  reaper.ShowConsoleMsg(("  real TS      : [%s .. %s]  (%s)\n"):format(fmt_time_num(st.ts_s), fmt_time_num(st.ts_e), st.ts_has_real and "present" or "none"))
+  reaper.ShowConsoleMsg(("  has_razor    : %s\n"):format(st.has_razor and "YES" or "NO"))
+  reaper.ShowConsoleMsg(("  driver       : %s\n"):format(st.driver))
+  reaper.ShowConsoleMsg(("  latched_track_count : %d\n"):format(st.ltc or 0))
+
+  if flags then
+    reaper.ShowConsoleMsg(("  tracks_changed_by_items : %s\n"):format(flags.tracks_changed_by_items and "YES" or "NO"))
+    reaper.ShowConsoleMsg(("  shift_add_guard         : %s\n"):format(flags.shift_add_guard and "ON" or "OFF"))
+    if st.tr_evt and st.tr_evt ~= "" then
+      reaper.ShowConsoleMsg(("  tr_evt (from script)    : %s\n"):format(st.tr_evt))
+    end
+  end
+  reaper.ShowConsoleMsg("\n")
 end
 
 local function print_link_summary()
@@ -314,87 +284,61 @@ local function print_link_summary()
   reaper.ShowConsoleMsg(string.format("  Track <> Razor+Item link: %s\n\n", on_trk and "ACTIVE" or "OFF"))
 end
 
-local function print_snapshot()
+----------------------------------------------------------------
+-- 事件分類（本地推斷）
+----------------------------------------------------------------
+local prev = {
+  tr_sig = "",          -- tracks
+  it_sig = "", it_cnt = 0,  -- items
+  rz_sig = "",          -- razor raw sig
+}
+
+local function classify_and_print_snapshot()
   reaper.ClearConsole()
-  reaper.ShowConsoleMsg("=== Track • Razor • Item LINK — MONITOR ===\n")
-  print_script_toggles()
-  print_pref_state()
+  print_header()
   print_selected_tracks()
-  print_razors_and_selected_items_per_track()
-  print_selected_items_global()
-  print_shared_state()
-  print_link_summary()
-end
+  print_razors()
+  print_items_global()
 
------------------
--- Change watcher
------------------
-local function sig_tracks_selected()
-  local t, tcnt = {}, reaper.CountTracks(0)
-  for i = 0, tcnt - 1 do
-    local tr = reaper.GetTrack(0, i)
-    if track_selected(tr) then t[#t+1] = track_guid(tr) end
-  end
-  return table.concat(t, "|")
-end
-
-local function sig_items_selected()
-  local parts, icnt = {}, reaper.CountMediaItems(0)
-  for i = 0, icnt - 1 do
-    local it = reaper.GetMediaItem(0, i)
-    if reaper.GetMediaItemInfo_Value(it, "B_UISEL") == 1 then
-      local _, g = reaper.GetSetMediaItemInfo_String(it, "GUID", "", false)
-      parts[#parts+1] = g or tostring(it)
-    end
-  end
-  return table.concat(parts, "|")
-end
-
-local function sig_razor_all()
-  local t, tcnt = {}, reaper.CountTracks(0)
-  for i = 0, tcnt - 1 do
-    local tr = reaper.GetTrack(0, i)
-    local ok, s = reaper.GetSetMediaTrackInfo_String(tr, "P_RAZOREDITS", "", false)
-    t[#t+1] = (ok and s) and s or ""
-  end
-  return table.concat(t, "|")
-end
-
-local function sig_scripts_toggle()
-  local parts = {}
-  for i=1,#SCRIPTS do parts[#parts+1] = get_toggle_txt(SCRIPTS[i][2]) end
-  return table.concat(parts, "|")
-end
-
-local function sig_pref_selects_track() return tostring(read_pref_selects_track_raw()) end
-
--- Include shared state (with latched values) so UI refreshes when they change
-local function sig_shared_state()
   local st = read_shared_state()
-  return table.concat({
-    st.active_src, st.active_s, st.active_e,
-    st.item_s, st.item_e,
-    st.virt_s, st.virt_e,  -- NEW
-    st.ts_s, st.ts_e, st.has_razor
-  }, "|")
+  local tr_set, tr_sig = selected_tracks_set_and_sig()
+  local it_sig, it_cnt = selected_items_sig_and_count()
+  local rz_sig = razor_sig_all_tracks()
+
+  local tracks_changed   = (tr_sig ~= prev.tr_sig)
+  local items_changed    = (it_sig ~= prev.it_sig)
+  local razors_changed   = (rz_sig ~= prev.rz_sig)
+
+  local shift_add_guard = false
+  if items_changed == false and tracks_changed == true and it_cnt > 0 then
+    local is_superset = true
+    for g in string.gmatch(prev.tr_sig or "", "[^|]+") do
+      if g ~= "" then
+        local still = tr_set[g] or false
+        if not still then is_superset = false; break end
+      end
+    end
+    if is_superset then shift_add_guard = true end
+  end
+
+  local flags = {
+    tracks_changed_by_items = (items_changed and tracks_changed) or false,
+    shift_add_guard = shift_add_guard,
+  }
+
+  print_shared_state_extras(st, flags)
+  print_link_summary()
+
+  prev.tr_sig = tr_sig
+  prev.it_sig = it_sig
+  prev.it_cnt = it_cnt
+  prev.rz_sig = rz_sig
 end
 
-local last_sig = ""
-local function build_sig()
-  return table.concat({
-    sig_tracks_selected(),
-    sig_items_selected(),
-    sig_razor_all(),
-    sig_scripts_toggle(),
-    sig_pref_selects_track(),
-    sig_shared_state(),     -- include shared state
-  }, "||")
-end
-
------------------
--- Tiny Cancel UI
------------------
-local GFX_W, GFX_H = 420, 64
+----------------------------------------------------------------
+-- GFX（ESC/Cancel）
+----------------------------------------------------------------
+local GFX_W, GFX_H = 560, 64
 local BTN_W, BTN_H = 96, 26
 local BTN_X, BTN_Y = GFX_W - BTN_W - 12, 12
 local prev_cap = 0
@@ -420,14 +364,31 @@ local function draw_cancel_ui()
   return false
 end
 
------------------
--- Main loop
------------------
+----------------------------------------------------------------
+-- 主迴圈
+----------------------------------------------------------------
+local function build_sig_for_redraw()
+  local st = read_shared_state()
+  local _, tr_sig = selected_tracks_set_and_sig()
+  local it_sig = selected_items_sig_and_count()
+  return table.concat({
+    tr_sig, it_sig, razor_sig_all_tracks(),
+    st.active_src, st.driver or "",
+    tostring(st.active_s or ""), tostring(st.active_e or ""),
+    tostring(st.item_s or ""), tostring(st.item_e or ""),
+    tostring(st.virt_s or ""), tostring(st.virt_e or ""),
+    tostring(st.ts_s or ""), tostring(st.ts_e or ""),
+    st.has_razor and "1" or "0",
+    tostring(st.ltc or 0),
+  }, "||")
+end
+
+local last_sig = ""
 local function loop()
   if draw_cancel_ui() then gfx.quit(); return end
-  local cur = build_sig()
+  local cur = build_sig_for_redraw()
   if cur ~= last_sig then
-    print_snapshot()
+    classify_and_print_snapshot()
     last_sig = cur
   end
   reaper.defer(loop)
@@ -435,6 +396,6 @@ end
 
 gfx.init("Track • Razor • Item LINK — MONITOR (ESC/Cancel)", GFX_W, GFX_H, 0, 100, 100)
 reaper.ShowConsoleMsg("")
-print_snapshot()
-last_sig = build_sig()
+classify_and_print_snapshot()
+last_sig = build_sig_for_redraw()
 loop()
