@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<index version="1" name="hsuanice Scripts" commit="e4f080c1d16e39093433aa983dc0da9cad144a06">
+<index version="1" name="hsuanice Scripts" commit="4cbf0bc3b73b3663d34432f20539549b13c5bfc7">
   <category name="Beta Testing">
     <reapack name="hsuanice_BWF TimeReference Embed Tool.lua" type="script" desc="Embed BWF TimeReference to Active take from Take 1 or Current Position TC">
       <version name="0.7.1" author="hsuanice" time="2025-08-14T17:52:57Z">
@@ -587,18 +587,14 @@ v0.1 - Beta release]]></changelog>
         <source main="main">https://github.com/hsuanice/ReaScripts/raw/e4f080c1d16e39093433aa983dc0da9cad144a06/Beta%20Testing/hsuanice_Track%20and%20Razor%20Item%20Link%20like%20Pro%20Tools.lua</source>
       </version>
     </reapack>
-    <reapack name="hsuanice_Track and Razor Item Link Monitor.lua" type="script" desc="hsuanice_Track and Razor Item Link Monitor (names only + per-item ranges)">
+    <reapack name="hsuanice_Track and Razor Item Link Monitor.lua" type="script" desc="Track • Razor • Item LINK — MONITOR (driver-aware)">
       <metadata>
         <description><![CDATA[{\rtf1\ansi\deff0{\fonttbl{\f0 \fswiss Helvetica;}{\f1 \fmodern Courier;}}
 {\colortbl;\red255\green0\blue0;\red0\green0\blue255;}
 \widowctrl\hyphauto
 
-{\pard \ql \f0 \sa180 \li0 \fi0 Console monitor for the link relationships among Tracks, Razor Areas, and Items.\par}
-{\pard \ql \f0 \sa180 \li0 \fi0 It prints: \u8226 ? Toggle status (ON/OFF) of your link scripts (human-readable names) \u8226 ? REAPER Preference: Arrange click selects track (SWS) \u8226 ? Selected Tracks (names) \u8226 ? Track-level Razor Areas (per track) + GLOBAL UNION \u8226 ? Selected Items (GLOBAL): active-take names + per-item [start..end] \u8226 ? Shared Link State (from Project ExtState "hsuanice_Link"): - active_src (razor|virtual|virtual_latched|none) + active_start/end - item_span_start/end - virt_latched_start/end (latched virtual range from main script v0.7.5+) - ts_start/end (real TS if present) - has_razor\par}
-{\pard \ql \f0 \sa180 \li0 \fi0 Notes:\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Requires the companion main script to publish Project ExtState under "hsuanice_Link".\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Works without SWS, but preference readout shows "UNKNOWN (SWS not installed)".\sa180\par}
-{\pard \ql \f0 \sa180 \li0 \fi0 Reference: Script: X_Raym_Ugurcan Orcun_Toggle Mouse Click for track selection in preference.lua\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 \u30435 ?\u25511 ? Track / Razor / Item \u30340 ?\u36899 ?\u21205 ?\u38364 ?\u20418 ?\u33287 ?\u29376 ?\u24907 ?\u12290 ?\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 \u26032 ?\u22686 ?\u65306 ? \u8226 ? \u39023 ?\u31034 ? driver\u65288 ?ARR / TCP / none\u65289 ? \u8226 ? \u39023 ?\u31034 ? latched track count\u65288 ?latched_track_count\u65289 ? \u8226 ? \u20173 ?\u25903 ?\u25588 ?\u33290 ?\u37749 ?\u21517 ?\u65288 ?active_start/active_end \u31561 ?\u65289 ?\u65292 ?\u20445 ?\u30041 ? Shift-Add Guard \u33287 ? \u8220"\u30001 ? items \u36896 ?\u25104 ?\u36984 ?\u36556 ?\u25913 ?\u35722 ?\u8221" \u21028 ?\u26039 ?\par}
 }
 ]]></description>
       </metadata>
@@ -617,6 +613,9 @@ v0.8   - Fix undefined compute_item_sel_range(); add Cancel UI; add preference m
         <changelog><![CDATA[v0.9.1 - Show latched virtual range (virt_latched_start/end). Refresh signature includes these.
 v0.9.0 - Added Shared Link State section from Project ExtState "hsuanice_Link".]]></changelog>
         <source main="main">https://github.com/hsuanice/ReaScripts/raw/63ffe14305a25c96df092e541b7707701f90884d/Beta%20Testing/hsuanice_Track%20and%20Razor%20Item%20Link%20Monitor.lua</source>
+      </version>
+      <version name="0.9.5-driver" author="hsuanice" time="2025-08-23T10:54:41Z">
+        <source main="main">https://github.com/hsuanice/ReaScripts/raw/4cbf0bc3b73b3663d34432f20539549b13c5bfc7/Beta%20Testing/hsuanice_Track%20and%20Razor%20Item%20Link%20Monitor.lua</source>
       </version>
     </reapack>
   </category>
