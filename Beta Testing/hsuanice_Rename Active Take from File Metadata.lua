@@ -28,8 +28,9 @@
   
   This script was generated using ChatGPT based on design concepts and iterative testing by hsuanice.
   hsuanice served as the workflow designer, tester, and integrator for this tool.
+
 @changelog
-  v0.7.1   Fix preset preview length from 24 to 64
+  v0.7.1 - Increase preset button label preview from 24 to 64 characters (Take & Note).
   v0.7.0 - Add $curnote token
   v0.6.2 - Change Clear/Default/Save to Clear/Save/Default, each input section has its own buttons
   v0.6.1 - Preset now can be seen directly, no need to hover
@@ -193,6 +194,31 @@ local function byte_to_char_index(s, bpos)
   for i, sp in ipairs(spans) do if bpos <= sp[2] then return i end end
   return #spans
 end
+
+-- 根據可用寬度（像素）截斷並加省略號
+local function ellipsize_to_width(ctx, s, max_w)
+  s = tostring(s or "")
+  if max_w <= 0 then return "…" end
+  local w = select(1, reaper.ImGui_CalcTextSize(ctx, s)) or 0
+  if w <= max_w then return s end
+  -- 二分搜尋最長可顯示的字元數
+  local spans = utf8_spans(s)
+  local lo, hi, best = 0, #spans, 0
+  while lo <= hi do
+    local mid = math.floor((lo + hi) / 2)
+    local pw = utf8_width_first_k(ctx, s, mid)
+    if pw <= (max_w - 8) then  -- 留一點邊距
+      best = mid; lo = mid + 1
+    else
+      hi = mid - 1
+    end
+  end
+  if best <= 0 then return "…" end
+  return utf8_sub(s, 1, best) .. "…"
+end
+
+
+
 
 -- ===== Token spans (for snapping) =====
 local function token_spans_chars(s)
