@@ -1,6 +1,6 @@
 --[[
 @description ReaImGui - Rename Active Take from Metadata (caret insert + cached preview + copy/export)
-@version 0.7.0
+@version 0.7.1
 @author hsuanice
 @about
   Rename active takes and/or item notes from BWF/iXML and true source metadata using a fast ReaImGui UI.
@@ -29,6 +29,7 @@
   This script was generated using ChatGPT based on design concepts and iterative testing by hsuanice.
   hsuanice served as the workflow designer, tester, and integrator for this tool.
 @changelog
+  v0.7.1   Fix preset preview length from 24 to 64
   v0.7.0 - Add $curnote token
   v0.6.2 - Change Clear/Default/Save to Clear/Save/Default, each input section has its own buttons
   v0.6.1 - Preset now can be seen directly, no need to hover
@@ -855,7 +856,7 @@ function draw_preset_row(label, presets, on_load_click, on_save_click)
       reaper.ImGui_TableNextColumn(ctx)
       local raw = (presets[i] or ""):gsub("[%c\r\n]", " ")
       local show = (raw ~= "" and raw or "(empty)")
-      local label_text = ellipsize_utf8(show, 24)  -- 顯示最多 24 個字，可自行調整
+      local label_text = ellipsize_utf8(show, 64)  -- 顯示最多 24 個字，可自行調整
       local btn = ("%s##%s_load_%d"):format(label_text, label, i)
       if reaper.ImGui_SmallButton(ctx, btn) then on_load_click(i) end
       -- 仍保留完整內容的 tooltip（可選）
