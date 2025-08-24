@@ -1,6 +1,6 @@
 --[[
 @description ReaImGui - Rename Active Take from Metadata (caret insert + cached preview + copy/export)
-@version 0.7.3
+@version 0.7.4
 @author hsuanice
 @about
   Rename active takes and/or item notes from BWF/iXML and true source metadata using a fast ReaImGui UI.
@@ -28,6 +28,7 @@
   hsuanice served as the workflow designer, tester, and integrator for this tool.
 
 @changelog
+  v0.7.4 – Fix: disable filename-style sanitization when expanding Note templates; Take Name expansion unchanged.
   v0.7.3 - Token normalization & adjacency fix
     - Automatically wraps bare $tokens as ${token} during expansion.
     - Adjacent letters/digits are now safe (e.g., "$sceneT$take" works as "${scene}T${take}").
@@ -490,10 +491,11 @@ local function normalize_tokens(s)
     "ubits","framerate","speed","date","time","year","originationdate","originationtime","startoffset",
     "filepath","originator","originatorreference","timereference","description"
   }
+  table.sort(known, function(a,b) return #a > #b end)  -- NEW
   for _,k in ipairs(known) do
-    -- don't touch ${...}; only wrap bare $k
     s = s:gsub("%$"..k, "${"..k.."}")
   end
+
   return s
 end
 
@@ -902,7 +904,7 @@ function draw_preset_row(label, presets, on_load_click, on_save_click)
     for i=1,PRESET_SLOTS do
       reaper.ImGui_TableNextColumn(ctx)
       local raw = (presets[i] or ""):gsub("[%c\r\n]", " ")
-      local show = (raw ~= "" and raw or "(empty)")
+      local show = (raw ~= "" and raw or "(unchanged)")
       local label_text = ellipsize_utf8(show, 64)  -- 顯示最多 24 個字，可自行調整
       local btn = ("%s##%s_load_%d"):format(label_text, label, i)
       if reaper.ImGui_SmallButton(ctx, btn) then on_load_click(i) end
