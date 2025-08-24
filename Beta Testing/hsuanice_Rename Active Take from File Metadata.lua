@@ -1,6 +1,6 @@
 --[[
 @description ReaImGui - Rename Active Take from Metadata (caret insert + cached preview + copy/export)
-@version 0.6.2
+@version 0.7.0
 @author hsuanice
 @about
   Rename active takes and/or item notes from BWF/iXML and true source metadata using a fast ReaImGui UI.
@@ -29,6 +29,7 @@
   This script was generated using ChatGPT based on design concepts and iterative testing by hsuanice.
   hsuanice served as the workflow designer, tester, and integrator for this tool.
 @changelog
+  v0.7.0 - Add $curnote token
   v0.6.2 - Change Clear/Default/Save to Clear/Save/Default, each input section has its own buttons
   v0.6.1 - Preset now can be seen directly, no need to hover
   v0.6.0 - Add 5 presets for Take/Note templates (save & click to load). Fix $curtake parsing bug. Show $curtake in Detected fields.
@@ -429,6 +430,18 @@ local function collect_metadata_for_item(item)
     t.curtake = "(no take)"
   end
 
+  -- current item note
+  do
+    local _, note = reaper.GetSetMediaItemInfo_String(item, "P_NOTES", "", false)
+    if note and note ~= "" then
+      t.curnote = note
+    else
+      t.curnote = ""
+    end
+  end
+
+
+
   
   return t
 end
@@ -542,7 +555,7 @@ local _last_my = 0
 
 -- ===== Token list =====
 local TOKEN_LIST = {
-  "$curtake","$track","$filename","$srcfile","$srcbase",'$srcbaseprefix:N','$srcbasesuffix:N',"$srcext","$srcpath","$srcdir",
+  "$curtake","$curnote","$track","$filename","$srcfile","$srcbase",'$srcbaseprefix:N','$srcbasesuffix:N',"$srcext","$srcpath","$srcdir",
   "$samplerate","$channels","$length",
   "$project","$scene","$take","$tape",
   "$trk","$trkall","$trk1","$trk2","$trk3","$trk4","$trk5","$trk6","$trk7","$trk8",
@@ -911,6 +924,14 @@ local function draw_view_pane(available_h)
           reaper.ImGui_SameLine(ctx); reaper.ImGui_Text(ctx, label..": "); reaper.ImGui_SameLine(ctx)
           reaper.ImGui_TextWrapped(ctx, tostring(f.curtake or ""))
         end
+
+        do
+          local label = "$curnote"
+          if reaper.ImGui_SmallButton(ctx, label .. "##field") then append_token(label) end
+          reaper.ImGui_SameLine(ctx); reaper.ImGui_Text(ctx, label..": "); reaper.ImGui_SameLine(ctx)
+          reaper.ImGui_TextWrapped(ctx, tostring(f.curnote or ""))
+        end
+
 
         reaper.ImGui_Separator(ctx)
         local ordered = {
