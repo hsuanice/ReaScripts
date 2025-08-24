@@ -1,6 +1,6 @@
 --[[
 @description ReaImGui - Rename Active Take from Metadata (caret insert + cached preview + copy/export)
-@version 0.7.2
+@version 0.7.3
 @author hsuanice
 @about
   Rename active takes and/or item notes from BWF/iXML and true source metadata using a fast ReaImGui UI.
@@ -24,13 +24,16 @@
   - ReaImGUI (ReaScript ImGui binding)
   
   Note:
-  - This is a 0.1 beta release for internal testing.
-  
   This script was generated using ChatGPT based on design concepts and iterative testing by hsuanice.
   hsuanice served as the workflow designer, tester, and integrator for this tool.
 
 @changelog
-  v0.7.2 - Fix: Show "(no change)" in Note preview when template is blank; fix Default (Note) to restore $curnote when ExtState is empty.
+  v0.7.3 - Token normalization & adjacency fix
+    - Automatically wraps bare $tokens as ${token} during expansion.
+    - Adjacent letters/digits are now safe (e.g., "$sceneT$take" works as "${scene}T${take}").
+    - Supports $trkN, ${counter:N}, ${srcbaseprefix:N}, ${srcbasesuffix:N}.
+    - Backward compatible with existing templates.
+  v0.7.2 - Fix: Show "(unchanged)" in Note preview when template is blank; fix Default (Note) to restore $curnote when ExtState is empty.
   v0.7.1 - Increase preset button label preview from 24 to 64 characters (Take & Note).
   v0.7.0 - Add $curnote token
   v0.6.2 - Change Clear/Default/Save to Clear/Save/Default, each input section has its own buttons
@@ -38,9 +41,9 @@
   v0.6.0 - Add 5 presets for Take/Note templates (save & click to load). Fix $curtake parsing bug. Show $curtake in Detected fields.
   v0.5.0 - Add $curtake token
   v0.4.0 - Add $srcbaseprefix:N and $srcbasesuffix:N tokens to extract the first/last N characters of the filename (without extension).
-  v0.3 - Add Selected/Scanned/Cached status view
-  v0.2 - Add ESC close function
-  v0.1 - Beta release
+  v0.3.0 - Add Selected/Scanned/Cached status view
+  v0.2.0 - Add ESC close function
+  v0.1.0 - Beta release
 --]]
 
 -- ===== Guard ReaImGui =====
@@ -467,12 +470,33 @@ local function collect_metadata_for_item(item)
       t.curnote = ""
     end
   end
-
-
-
-  
   return t
 end
+
+-- Wrap known $tokens to ${token} so $sceneT$take -> ${scene}T${take}
+local function normalize_tokens(s)
+  s = tostring(s or "")
+
+  -- forms with numbers/colon
+  s = s:gsub("%$trk(%d+)", "${trk%1}")
+  s = s:gsub("%$(counter:%d+)", "${%1}")
+  s = s:gsub("%$(srcbaseprefix:%d+)", "${%1}")
+  s = s:gsub("%$(srcbasesuffix:%d+)", "${%1}")
+
+  -- plain known tokens
+  local known = {
+    "curtake","curnote","track","filename","srcfile","srcbase","srcext","srcpath","srcdir",
+    "samplerate","channels","length","project","scene","take","tape","trk","trkall",
+    "ubits","framerate","speed","date","time","year","originationdate","originationtime","startoffset",
+    "filepath","originator","originatorreference","timereference","description"
+  }
+  for _,k in ipairs(known) do
+    -- don't touch ${...}; only wrap bare $k
+    s = s:gsub("%$"..k, "${"..k.."}")
+  end
+  return s
+end
+
 
 -- ===== Template expansion =====
 local function expand_template(tpl, fields, counter)
@@ -537,7 +561,7 @@ local function expand_template(tpl, fields, counter)
     local v = fields[tkl] or fields[tok] or ""
     return trim(tostring(v or ""):gsub('[\\/:*?"<>|%c]','_'))
   end
-  local out = tpl or ""
+  local out = normalize_tokens(tpl or "")
   out = out:gsub("%${(.-)}", function(s) return repl(s) end)
   out = out:gsub("%$([%a%d:]+)", function(s) return repl(s) end)
   out = out:gsub("%s+"," "):gsub("^%s+",""):gsub("%s+$","")
