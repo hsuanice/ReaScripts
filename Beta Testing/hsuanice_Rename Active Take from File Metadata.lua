@@ -1,6 +1,6 @@
 --[[
 @description ReaImGui - Rename Active Take from Metadata (caret insert + cached preview + copy/export)
-@version 0.7.1
+@version 0.7.2
 @author hsuanice
 @about
   Rename active takes and/or item notes from BWF/iXML and true source metadata using a fast ReaImGui UI.
@@ -30,6 +30,7 @@
   hsuanice served as the workflow designer, tester, and integrator for this tool.
 
 @changelog
+  v0.7.2 - Fix: Show "(no change)" in Note preview when template is blank; fix Default (Note) to restore $curnote when ExtState is empty.
   v0.7.1 - Increase preset button label preview from 24 to 64 characters (Take & Note).
   v0.7.0 - Add $curnote token
   v0.6.2 - Change Clear/Default/Save to Clear/Save/Default, each input section has its own buttons
@@ -65,7 +66,7 @@ local function load_defaults()
   local t = reaper.GetExtState(EXT_NS, "default_take_template")
   local n = reaper.GetExtState(EXT_NS, "default_note_template")
   if not t or t == "" then t = DEFAULT_TAKE_TEMPLATE_INIT end
-  if not n then n = DEFAULT_NOTE_TEMPLATE_INIT end
+  if not n or n == "" then n = DEFAULT_NOTE_TEMPLATE_INIT end
   return t, n
 end
 local function save_defaults(t, n)
@@ -1005,8 +1006,8 @@ local function draw_view_pane(available_h)
               reaper.ImGui_TableNextRow(ctx)
               reaper.ImGui_TableNextColumn(ctx); reaper.ImGui_Text(ctx, tostring(i))
               reaper.ImGui_TableNextColumn(ctx); reaper.ImGui_TextWrapped(ctx, row.current ~= "" and row.current or "(unnamed)")
-              reaper.ImGui_TableNextColumn(ctx); reaper.ImGui_TextWrapped(ctx, row.newname ~= "" and row.newname or "(empty)")
-              reaper.ImGui_TableNextColumn(ctx); reaper.ImGui_TextWrapped(ctx, row.newnote ~= "" and row.newnote or "")
+              reaper.ImGui_TableNextColumn(ctx); reaper.ImGui_TextWrapped(ctx, row.newname ~= "" and row.newname or "(unchanged)")
+              reaper.ImGui_TableNextColumn(ctx); reaper.ImGui_TextWrapped(ctx, row.newnote ~= "" and row.newnote or "(unchanged)")
             end
           end
           reaper.ImGui_EndTable(ctx)
