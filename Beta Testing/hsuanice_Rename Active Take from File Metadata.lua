@@ -1,6 +1,6 @@
 --[[
 @description ReaImGui - Rename Active Take from Metadata (caret insert + cached preview + copy/export)
-@version 0.7.4
+@version 0.7.5
 @author hsuanice
 @about
   Rename active takes and/or item notes from BWF/iXML and true source metadata using a fast ReaImGui UI.
@@ -28,6 +28,12 @@
   hsuanice served as the workflow designer, tester, and integrator for this tool.
 
 @changelog
+  v0.7.5
+    - Fix: Token normalization now processes longer tokens first, avoiding prefix collisions
+          (e.g., $trkall, $timereference, $originatorreference).
+    - QA: Verified adjacent-letter cases such as "$sceneT$take" expand as expected.
+    - Docs: Clarify that Note template expansion preserves whitespace/newlines;
+            Take Name continues to collapse consecutive whitespace.
   v0.7.4 – Fix: disable filename-style sanitization when expanding Note templates; Take Name expansion unchanged.
   v0.7.3 - Token normalization & adjacency fix
     - Automatically wraps bare $tokens as ${token} during expansion.
@@ -501,7 +507,12 @@ end
 
 
 -- ===== Template expansion =====
-local function expand_template(tpl, fields, counter)
+local function expand_template(tpl, fields, counter, sanitize)
+  if sanitize == nil then sanitize = true end
+  local function maybe_sanitize(s)
+    if sanitize then return (s:gsub('[\\/:*?"<>|%c]', '_')) end
+    return s
+  end
   local function repl(tok)
     local tkl = string.lower(tok)
     -- $srcbaseprefix:N - first N characters of srcbase
@@ -547,7 +558,10 @@ local function expand_template(tpl, fields, counter)
       if not name and fields.__trk_table then
         for i=1,64 do if fields.__trk_table[i] then name = fields.__trk_table[i] break end end
       end
-      return trim(tostring(name or ""):gsub('[\\/:*?"<>|%c]','_'))
+
+      local s = tostring(name or "")
+      return trim(maybe_sanitize(s))
+
     end
     if tkl == "trkall" then
       local list = {}
@@ -558,10 +572,14 @@ local function expand_template(tpl, fields, counter)
     if nidx then
       local idx = tonumber(nidx)
       local v = (fields.__trk_table and fields.__trk_table[idx]) or fields["trk"..nidx] or fields["TRK"..nidx]
-      return trim(tostring(v or ""):gsub('[\\/:*?"<>|%c]','_'))
+      local s = tostring(v or "")
+      return trim(maybe_sanitize(s))
+
     end
     local v = fields[tkl] or fields[tok] or ""
-    return trim(tostring(v or ""):gsub('[\\/:*?"<>|%c]','_'))
+    local s = tostring(v or "")
+    return trim(maybe_sanitize(s))
+
   end
   local out = normalize_tokens(tpl or "")
   out = out:gsub("%${(.-)}", function(s) return repl(s) end)
@@ -629,7 +647,7 @@ local function append_token(tk)
     for i, e in ipairs(SCAN_CACHE.list) do
       if not preview_limit or shown < preview_limit then
         local newname = expand_template(TAKE_TEMPLATE, e.fields, i)
-        local newnote = (NOTE_TEMPLATE ~= "" and expand_template(NOTE_TEMPLATE, e.fields, i)) or ""
+        local newnote = (NOTE_TEMPLATE ~= "" and expand_template(NOTE_TEMPLATE, e.fields, i, false)) or ""
         preview_rows[#preview_rows+1] = { current=e.current, newname=newname, newnote=newnote }
         shown = shown + 1
       end
@@ -705,7 +723,7 @@ local function scan_metadata()
   for i, e in ipairs(SCAN_CACHE.list) do
     if not preview_limit or shown < preview_limit then
       local newname = expand_template(TAKE_TEMPLATE, e.fields, i)
-      local newnote = (NOTE_TEMPLATE ~= "" and expand_template(NOTE_TEMPLATE, e.fields, i)) or ""
+      local newnote = (NOTE_TEMPLATE ~= "" and expand_template(NOTE_TEMPLATE, e.fields, i, false)) or ""
       preview_rows[#preview_rows+1] = { current=e.current, newname=newname, newnote=newnote }
       shown = shown + 1
     end
@@ -723,7 +741,7 @@ local function recompute_preview_from_cache()
   for i, e in ipairs(SCAN_CACHE.list) do
     if not preview_limit or shown < preview_limit then
       local newname = expand_template(TAKE_TEMPLATE, e.fields, i)
-      local newnote = (NOTE_TEMPLATE ~= "" and expand_template(NOTE_TEMPLATE, e.fields, i)) or ""
+      local newnote = (NOTE_TEMPLATE ~= "" and expand_template(NOTE_TEMPLATE, e.fields, i, false)) or ""
       preview_rows[#preview_rows+1] = { current=e.current, newname=newname, newnote=newnote }
       shown = shown + 1
     end
@@ -748,12 +766,12 @@ local function apply_renaming()
       local name = expand_template(TAKE_TEMPLATE, fields, counter)
       if name ~= "" then reaper.GetSetMediaItemTakeInfo_String(take,"P_NAME",name,true); renamed=renamed+1 end
       if NOTE_TEMPLATE ~= "" then
-        local note = expand_template(NOTE_TEMPLATE, fields, counter)
+        local note = expand_template(NOTE_TEMPLATE, fields, counter, false)
         reaper.GetSetMediaItemInfo_String(item, "P_NOTES", note, true); noted=noted+1
       end
     else
       if NOTE_TEMPLATE ~= "" then
-        local note = expand_template(NOTE_TEMPLATE, fields, counter)
+        local note = expand_template(NOTE_TEMPLATE, fields, counter, false)
         reaper.GetSetMediaItemInfo_String(item, "P_NOTES", note, true); noted=noted+1
       else
         skipped=skipped+1
