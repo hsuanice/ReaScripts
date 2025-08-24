@@ -542,10 +542,6 @@ local function expand_template(tpl, fields, counter)
   out = out:gsub("%$([%a%d:]+)", function(s) return repl(s) end)
   out = out:gsub("%s+"," "):gsub("^%s+",""):gsub("%s+$","")
 
-    if tkl == "curtake" then
-      return trim(tostring(fields.curtake or ""):gsub('[\\/:*?"<>|%c]','_'))
-    end
-
 
   
   return out
