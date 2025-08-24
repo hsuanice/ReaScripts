@@ -29,7 +29,7 @@
   This script was generated using ChatGPT based on design concepts and iterative testing by hsuanice.
   hsuanice served as the workflow designer, tester, and integrator for this tool.
 @changelog
-  v0.6.1 - Reorder UI
+  v0.6.1 - Preset now can be seen directly, no need to hover
   v0.6.0 - Add 5 presets for Take/Note templates (save & click to load). Fix $curtake parsing bug. Show $curtake in Detected fields.
   v0.5.0 - Add $curtake token
   v0.4.0 - Add $srcbaseprefix:N and $srcbasesuffix:N tokens to extract the first/last N characters of the filename (without extension).
