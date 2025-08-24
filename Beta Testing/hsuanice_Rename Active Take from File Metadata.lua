@@ -1,6 +1,6 @@
 --[[
 @description ReaImGui - Rename Active Take from Metadata (caret insert + cached preview + copy/export)
-@version 0.4.0
+@version 0.5.0
 @author hsuanice
 @about
   Rename active takes and/or item notes from BWF/iXML and true source metadata using a fast ReaImGui UI.
@@ -29,6 +29,7 @@
   This script was generated using ChatGPT based on design concepts and iterative testing by hsuanice.
   hsuanice served as the workflow designer, tester, and integrator for this tool.
 @changelog
+  v0.5.0 - Add $curtake token
   v0.4.0 - Add $srcbaseprefix:N and $srcbasesuffix:N tokens to extract the first/last N characters of the filename (without extension).
   v0.3 - Add Selected/Scanned/Cached status view
   v0.2 - Add ESC close function
@@ -374,6 +375,20 @@ local function collect_metadata_for_item(item)
   t.__chan_index = guess_channel_index(item, t)
   if not t.__chan_index then for i=1,64 do if t.__trk_table[i] then t.__chan_index=i break end end end
   if t.__chan_index and t.__trk_table[t.__chan_index] then t.__trk_name = t.__trk_table[t.__chan_index] end
+  
+  -- current take name
+  if take then
+    local _, cur_name = reaper.GetSetMediaItemTakeInfo_String(take, "P_NAME", "", false)
+    if cur_name and cur_name ~= "" then
+      t.curtake = cur_name
+    else
+      t.curtake = "(unnamed)"
+    end
+  else
+    t.curtake = "(no take)"
+  end
+
+  
   return t
 end
 
@@ -444,6 +459,11 @@ local function expand_template(tpl, fields, counter)
   out = out:gsub("%${(.-)}", function(s) return repl(s) end)
   out = out:gsub("%$([%a%d:]+)", function(s) return repl(s) end)
   out = out:gsub("%s+"," "):gsub("^%s+",""):gsub("%s+$","")
+
+  if tkl == "curtake" then
+    return trim(tostring(fields.curtake or ""):gsub('[\\/:*?"<>|%c]','_'))
+  end
+  
   return out
 end
 
@@ -473,7 +493,7 @@ local _last_my = 0
 
 -- ===== Token list =====
 local TOKEN_LIST = {
-  "$track","$filename","$srcfile","$srcbase",'$srcbaseprefix:N','$srcbasesuffix:N',"$srcext","$srcpath","$srcdir",
+  "$curtake","$track","$filename","$srcfile","$srcbase",'$srcbaseprefix:N','$srcbasesuffix:N',"$srcext","$srcpath","$srcdir",
   "$samplerate","$channels","$length",
   "$project","$scene","$take","$tape",
   "$trk","$trkall","$trk1","$trk2","$trk3","$trk4","$trk5","$trk6","$trk7","$trk8",
