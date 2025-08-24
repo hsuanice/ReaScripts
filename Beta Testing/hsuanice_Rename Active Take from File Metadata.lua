@@ -1,6 +1,6 @@
 --[[
 @description ReaImGui - Rename Active Take from Metadata (caret insert + cached preview + copy/export)
-@version 0.5.0
+@version 0.6.1
 @author hsuanice
 @about
   Rename active takes and/or item notes from BWF/iXML and true source metadata using a fast ReaImGui UI.
@@ -29,6 +29,8 @@
   This script was generated using ChatGPT based on design concepts and iterative testing by hsuanice.
   hsuanice served as the workflow designer, tester, and integrator for this tool.
 @changelog
+  v0.6.1 - Reorder UI
+  v0.6.0 - Add 5 presets for Take/Note templates (save & click to load). Fix $curtake parsing bug. Show $curtake in Detected fields.
   v0.5.0 - Add $curtake token
   v0.4.0 - Add $srcbaseprefix:N and $srcbasesuffix:N tokens to extract the first/last N characters of the filename (without extension).
   v0.3 - Add Selected/Scanned/Cached status view
@@ -66,6 +68,35 @@ local function save_defaults(t, n)
   reaper.SetExtState(EXT_NS, "default_take_template", tostring(t or ""), true)
   reaper.SetExtState(EXT_NS, "default_note_template", tostring(n or ""), true)
 end
+
+-- ===== Template Presets (5 slots each for Take/Note) =====
+local TAKE_PRESETS_KEY = "take_template_presets_v1"  -- newline-separated 5 lines
+local NOTE_PRESETS_KEY = "note_template_presets_v1"  -- newline-separated 5 lines
+local PRESET_SLOTS = 5
+
+local function load_presets(key)
+  local s = reaper.GetExtState(EXT_NS, key)
+  local t = {}
+  if s and s ~= "" then
+    for line in s:gmatch("([^\n]*)\n?") do
+      if line ~= nil then t[#t+1] = line end
+    end
+  end
+  for i = #t + 1, PRESET_SLOTS do t[i] = "" end
+  return t
+end
+
+local function save_presets(key, list)
+  local lines = {}
+  for i=1, PRESET_SLOTS do
+    local v = (list[i] or ""):gsub("[\r\n]", " ")
+    lines[#lines+1] = v
+  end
+  reaper.SetExtState(EXT_NS, key, table.concat(lines, "\n"), true)
+end
+
+
+
 
 -- Persist split ratio
 local function load_split_ratio()
@@ -114,6 +145,15 @@ local function utf8_sub(s, ci1, ci2)
   local b = spans[ci1][1]; local e = spans[ci2][2]
   return s:sub(b, e)
 end
+
+-- ===== helpers: UTF-8 ellipsis for preset preview =====
+local function ellipsize_utf8(s, max_chars)
+  s = tostring(s or "")
+  local n = utf8_len(s)
+  if n <= max_chars then return s end
+  return utf8_sub(s, 1, math.max(1, max_chars - 1)) .. "…"
+end
+
 local function utf8_width_first_k(ctx, s, k)
   s = tostring(s or ""); local spans = utf8_spans(s)
   if k <= 0 then return 0 end
@@ -460,9 +500,11 @@ local function expand_template(tpl, fields, counter)
   out = out:gsub("%$([%a%d:]+)", function(s) return repl(s) end)
   out = out:gsub("%s+"," "):gsub("^%s+",""):gsub("%s+$","")
 
-  if tkl == "curtake" then
-    return trim(tostring(fields.curtake or ""):gsub('[\\/:*?"<>|%c]','_'))
-  end
+    if tkl == "curtake" then
+      return trim(tostring(fields.curtake or ""):gsub('[\\/:*?"<>|%c]','_'))
+    end
+
+
   
   return out
 end
@@ -478,6 +520,11 @@ end
 
 -- ===== UI / State =====
 local TAKE_TEMPLATE, NOTE_TEMPLATE = load_defaults()
+-- Presets (in-memory) + focus flags
+local TAKE_PRESETS = load_presets(TAKE_PRESETS_KEY)
+local NOTE_PRESETS = load_presets(NOTE_PRESETS_KEY)
+local focus_take_input, focus_note_input = false, false
+
 local caret_take_char, caret_note_char = nil, nil
 local preview_limit = 50
 local preview_rows, status_msg = {}, ""
@@ -490,6 +537,7 @@ local RIGHT_SELECTABLE_VIEW = false
 local SPLIT_RATIO = load_split_ratio()
 local _drag_active = false
 local _last_my = 0
+
 
 -- ===== Token list =====
 local TOKEN_LIST = {
@@ -547,7 +595,7 @@ local function build_left_copy_text_from_fields(f)
   if #list>0 then add("$trkall", table.concat(list, "_")) end
   local ordered = {
     "project","scene","take","tape","track",
-    "filename","srcfile","srcbase",'srcbaseprefix:N','srcbasesurfix:N',"srcext","srcpath","srcdir","filepath",
+    "filename","srcfile","srcbase",'srcbaseprefix:N','srcbasesuffix:N',"srcext","srcpath","srcdir","filepath",
     "samplerate","channels","length",
     "date","time","year","originationdate","originationtime","startoffset",
     "framerate","speed","ubits","originator","originatorreference","timereference",
@@ -676,6 +724,9 @@ local function take_note_inputs()
   reaper.ImGui_Text(ctx, "Take Name"); reaper.ImGui_SameLine(ctx); reaper.ImGui_TextDisabled(ctx, "(click to set caret; snaps out of tokens)")
   reaper.ImGui_SetNextItemWidth(ctx, -FLT_MIN)
   local changed_take, new_take = reaper.ImGui_InputText(ctx, "##take_name_tpl", TAKE_TEMPLATE)
+
+  if focus_take_input then reaper.ImGui_SetKeyboardFocusHere(ctx); focus_take_input = false end
+
   if reaper.ImGui_IsItemActive(ctx) then active_box = "take" end
   if reaper.ImGui_IsItemHovered(ctx) and reaper.ImGui_IsMouseClicked(ctx, 0) then
     local mx, _ = reaper.ImGui_GetMousePos(ctx); local rx, _ = reaper.ImGui_GetItemRectMin(ctx)
@@ -685,10 +736,18 @@ local function take_note_inputs()
   end
   if changed_take then TAKE_TEMPLATE = new_take; if SCAN_CACHE then recompute_preview_from_cache() end end
 
+
+
+
   -- Item note
   reaper.ImGui_Text(ctx, "Item Note"); reaper.ImGui_SameLine(ctx); reaper.ImGui_TextDisabled(ctx, "(empty = skip)")
   reaper.ImGui_SetNextItemWidth(ctx, -FLT_MIN)
+
+  
   local changed_note, new_note = reaper.ImGui_InputTextMultiline(ctx, "##item_note_tpl", NOTE_TEMPLATE, -FLT_MIN, 92)
+
+  if focus_note_input then reaper.ImGui_SetKeyboardFocusHere(ctx); focus_note_input = false end
+
   if reaper.ImGui_IsItemActive(ctx) then active_box = "note" end
   if reaper.ImGui_IsItemHovered(ctx) and reaper.ImGui_IsMouseClicked(ctx, 0) then
     local mx, my = reaper.ImGui_GetMousePos(ctx); local rx, ry = reaper.ImGui_GetItemRectMin(ctx)
@@ -709,6 +768,37 @@ local function draw_top_bar()
   reaper.ImGui_SameLine(ctx)
   if reaper.ImGui_Button(ctx, "Redo", 80, 0) then reaper.Undo_DoRedo2(0) end
 end
+
+-- ===== Preset Helper UI =====
+local function draw_preset_row(label, presets, on_load_click, on_save_click)
+  reaper.ImGui_Text(ctx, label); reaper.ImGui_SameLine(ctx); reaper.ImGui_TextDisabled(ctx, "(click Pn to load; Save Pn to store current)")
+  if reaper.ImGui_BeginTable(ctx, label.."##preset_table", PRESET_SLOTS, TF('ImGui_TableFlags_SizingStretchProp')) then
+    -- Row 1: P1..P5
+    reaper.ImGui_TableNextRow(ctx)
+    for i=1,PRESET_SLOTS do
+      reaper.ImGui_TableNextColumn(ctx)
+      local raw = (presets[i] or ""):gsub("[%c\r\n]", " ")
+      local show = (raw ~= "" and raw or "(empty)")
+      local label_text = ellipsize_utf8(show, 24)  -- 顯示最多 24 個字，可自行調整
+      local btn = ("%s##%s_load_%d"):format(label_text, label, i)
+      if reaper.ImGui_SmallButton(ctx, btn) then on_load_click(i) end
+      -- 仍保留完整內容的 tooltip（可選）
+      if raw ~= "" and reaper.ImGui_IsItemHovered(ctx) then
+        reaper.ImGui_BeginTooltip(ctx); reaper.ImGui_Text(ctx, raw); reaper.ImGui_EndTooltip(ctx)
+      end
+
+    end
+    -- Row 2: Save P1..P5
+    reaper.ImGui_TableNextRow(ctx)
+    for i=1,PRESET_SLOTS do
+      reaper.ImGui_TableNextColumn(ctx)
+      local btn = ("Save P%d##%s_save_%d"):format(i, label, i)
+      if reaper.ImGui_SmallButton(ctx, btn) then on_save_click(i) end
+    end
+    reaper.ImGui_EndTable(ctx)
+  end
+end
+
 
 
 -- ===== View/Copy split panes =====
@@ -751,6 +841,14 @@ local function draw_view_pane(available_h)
           reaper.ImGui_SameLine(ctx); reaper.ImGui_Text(ctx, label..": "); reaper.ImGui_SameLine(ctx)
           reaper.ImGui_TextWrapped(ctx, table.concat(preview_all, "_"))
         end
+
+        do
+          local label = "$curtake"
+          if reaper.ImGui_SmallButton(ctx, label .. "##field") then append_token(label) end
+          reaper.ImGui_SameLine(ctx); reaper.ImGui_Text(ctx, label..": "); reaper.ImGui_SameLine(ctx)
+          reaper.ImGui_TextWrapped(ctx, tostring(f.curtake or ""))
+        end
+
         reaper.ImGui_Separator(ctx)
         local ordered = {
           "project","scene","take","tape","track",
@@ -763,6 +861,9 @@ local function draw_view_pane(available_h)
         }
         for _,k in ipairs(ordered) do if f[k] ~= nil then field_row_token(k, f[k]) end end
       end
+
+
+
 
       -- Right panel
       reaper.ImGui_TableSetColumnIndex(ctx, 1)
@@ -898,6 +999,46 @@ local function loop()
     end
     reaper.ImGui_SameLine(ctx)
     if reaper.ImGui_Button(ctx, "Save", 80, 0) then save_defaults(TAKE_TEMPLATE, NOTE_TEMPLATE) end
+
+    -- Presets for Take/Note templates
+    reaper.ImGui_Separator(ctx)
+
+    draw_preset_row("Take Presets",
+      TAKE_PRESETS,
+      function(i) -- load
+        local v = TAKE_PRESETS[i] or ""
+        if v ~= "" then
+          TAKE_TEMPLATE = v
+          if SCAN_CACHE then recompute_preview_from_cache() end
+          -- 聚焦到 take 輸入框
+          -- 如果你有 take_note_inputs() 裡的 focus_take_input 判斷，這會生效
+          focus_take_input = true
+        end
+      end,
+      function(i) -- save
+        TAKE_PRESETS[i] = TAKE_TEMPLATE or ""
+        save_presets(TAKE_PRESETS_KEY, TAKE_PRESETS)
+      end
+    )
+
+    draw_preset_row("Note Presets",
+      NOTE_PRESETS,
+      function(i) -- load
+        local v = NOTE_PRESETS[i] or ""
+        if v ~= "" then
+          NOTE_TEMPLATE = v
+          if SCAN_CACHE then recompute_preview_from_cache() end
+          focus_note_input = true
+        end
+      end,
+      function(i) -- save
+        NOTE_PRESETS[i] = NOTE_TEMPLATE or ""
+        save_presets(NOTE_PRESETS_KEY, NOTE_PRESETS)
+      end
+    )
+
+
+
 
     -- Action row: left = Get Metadata, right = Apply buttons (no status text)
     do
