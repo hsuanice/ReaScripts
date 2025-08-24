@@ -1,6 +1,6 @@
 --[[
 @description ReaImGui - Rename Active Take from Metadata (caret insert + cached preview + copy/export)
-@version 0.6.1
+@version 0.6.2
 @author hsuanice
 @about
   Rename active takes and/or item notes from BWF/iXML and true source metadata using a fast ReaImGui UI.
@@ -29,6 +29,7 @@
   This script was generated using ChatGPT based on design concepts and iterative testing by hsuanice.
   hsuanice served as the workflow designer, tester, and integrator for this tool.
 @changelog
+  v0.6.2 - Change Clear/Default/Save to Clear/Save/Default
   v0.6.1 - Preset now can be seen directly, no need to hover
   v0.6.0 - Add 5 presets for Take/Note templates (save & click to load). Fix $curtake parsing bug. Show $curtake in Detected fields.
   v0.5.0 - Add $curtake token
@@ -55,8 +56,8 @@ local KEY_ESC = TF('ImGui_Key_Escape')
 
 -- ===== ExtState (defaults) =====
 local EXT_NS = "RENAME_TAKE_FROM_METADATA_V1"
-local DEFAULT_TAKE_TEMPLATE_INIT = "$scene_$take_$trk"
-local DEFAULT_NOTE_TEMPLATE_INIT = ""
+local DEFAULT_TAKE_TEMPLATE_INIT = "$curtake"
+local DEFAULT_NOTE_TEMPLATE_INIT = "$curnote"
 local function load_defaults()
   local t = reaper.GetExtState(EXT_NS, "default_take_template")
   local n = reaper.GetExtState(EXT_NS, "default_note_template")
@@ -993,12 +994,16 @@ local function loop()
       if active_box == "note" then NOTE_TEMPLATE = "" else TAKE_TEMPLATE = "" end
       if SCAN_CACHE then recompute_preview_from_cache() end
     end
-    reaper.ImGui_SameLine(ctx)
-    if reaper.ImGui_Button(ctx, "Default", 90, 0) then
-      local t, n2 = load_defaults(); TAKE_TEMPLATE, NOTE_TEMPLATE = t, n2; if SCAN_CACHE then recompute_preview_from_cache() end
-    end
+
     reaper.ImGui_SameLine(ctx)
     if reaper.ImGui_Button(ctx, "Save", 80, 0) then save_defaults(TAKE_TEMPLATE, NOTE_TEMPLATE) end
+
+    reaper.ImGui_SameLine(ctx)
+    if reaper.ImGui_Button(ctx, "Default", 80, 0) then
+      local t, n2 = load_defaults(); TAKE_TEMPLATE, NOTE_TEMPLATE = t, n2; if SCAN_CACHE then recompute_preview_from_cache() end
+    end
+    
+
 
     -- Presets for Take/Note templates
     reaper.ImGui_Separator(ctx)
