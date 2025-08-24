@@ -29,7 +29,7 @@
   This script was generated using ChatGPT based on design concepts and iterative testing by hsuanice.
   hsuanice served as the workflow designer, tester, and integrator for this tool.
 @changelog
-  v0.6.2 - Change Clear/Default/Save to Clear/Save/Default
+  v0.6.2 - Change Clear/Default/Save to Clear/Save/Default, each input section has its own buttons
   v0.6.1 - Preset now can be seen directly, no need to hover
   v0.6.0 - Add 5 presets for Take/Note templates (save & click to load). Fix $curtake parsing bug. Show $curtake in Detected fields.
   v0.5.0 - Add $curtake token
@@ -719,14 +719,18 @@ local function draw_token_row()
   end
 end
 
+
+
 -- ===== UI: inputs =====
+local draw_preset_row   -- ← 前置宣告，讓下面可以看見這個區域變數
 local function take_note_inputs()
   -- Take name
   reaper.ImGui_Text(ctx, "Take Name"); reaper.ImGui_SameLine(ctx); reaper.ImGui_TextDisabled(ctx, "(click to set caret; snaps out of tokens)")
   reaper.ImGui_SetNextItemWidth(ctx, -FLT_MIN)
+  if focus_take_input then reaper.ImGui_SetKeyboardFocusHere(ctx); focus_take_input = false end  
   local changed_take, new_take = reaper.ImGui_InputText(ctx, "##take_name_tpl", TAKE_TEMPLATE)
 
-  if focus_take_input then reaper.ImGui_SetKeyboardFocusHere(ctx); focus_take_input = false end
+
 
   if reaper.ImGui_IsItemActive(ctx) then active_box = "take" end
   if reaper.ImGui_IsItemHovered(ctx) and reaper.ImGui_IsMouseClicked(ctx, 0) then
@@ -737,6 +741,46 @@ local function take_note_inputs()
   end
   if changed_take then TAKE_TEMPLATE = new_take; if SCAN_CACHE then recompute_preview_from_cache() end end
 
+  -- Take tools (Clear / Save / Default)
+  if reaper.ImGui_SmallButton(ctx, "Clear##take") then
+    TAKE_TEMPLATE = ""
+    if SCAN_CACHE then recompute_preview_from_cache() end
+  end
+  reaper.ImGui_SameLine(ctx)
+  if reaper.ImGui_SmallButton(ctx, "Save##take") then
+    -- 目前沿用同一組 defaults：把 Take/Note 一起存回（簡單、相容）
+    save_defaults(TAKE_TEMPLATE, NOTE_TEMPLATE)
+  end
+  reaper.ImGui_SameLine(ctx)
+  if reaper.ImGui_SmallButton(ctx, "Default##take") then
+    local tdef, ndef = load_defaults()
+    TAKE_TEMPLATE = tdef
+    if SCAN_CACHE then recompute_preview_from_cache() end
+  end
+
+  --（可選）和下方 presets 稍微留一點距離
+  -- reaper.ImGui_Spacing(ctx)
+
+
+
+
+  -- Take Presets（移到 Take Name 下面）
+  draw_preset_row("Take Presets",
+    TAKE_PRESETS,
+    function(i) -- load
+      local v = TAKE_PRESETS[i] or ""
+      if v ~= "" then
+        TAKE_TEMPLATE = v
+        if SCAN_CACHE then recompute_preview_from_cache() end
+        focus_take_input = true -- 讓游標回到 Take 欄位（若你有 focus_* 邏輯）
+      end
+    end,
+    function(i) -- save
+      TAKE_PRESETS[i] = TAKE_TEMPLATE or ""
+      save_presets(TAKE_PRESETS_KEY, TAKE_PRESETS)
+    end
+  )
+  
 
 
 
@@ -761,6 +805,24 @@ local function take_note_inputs()
     caret_note_char = snap_caret_out_of_word(NOTE_TEMPLATE, caret_note_char, "right")
   end
   if changed_note then NOTE_TEMPLATE = new_note; if SCAN_CACHE then recompute_preview_from_cache() end end
+
+  -- Note tools (Clear / Save / Default)
+  if reaper.ImGui_SmallButton(ctx, "Clear##note") then
+    NOTE_TEMPLATE = ""
+    if SCAN_CACHE then recompute_preview_from_cache() end
+  end
+  reaper.ImGui_SameLine(ctx)
+  if reaper.ImGui_SmallButton(ctx, "Save##note") then
+    -- 延用同一組 defaults：把 Take/Note 一起存回，簡單相容
+    save_defaults(TAKE_TEMPLATE, NOTE_TEMPLATE)
+  end
+  reaper.ImGui_SameLine(ctx)
+  if reaper.ImGui_SmallButton(ctx, "Default##note") then
+    local tdef, ndef = load_defaults()
+    NOTE_TEMPLATE = ndef
+    if SCAN_CACHE then recompute_preview_from_cache() end
+  end
+
 end
 
 -- ===== Top bar (Undo/Redo only) =====
@@ -771,7 +833,7 @@ local function draw_top_bar()
 end
 
 -- ===== Preset Helper UI =====
-local function draw_preset_row(label, presets, on_load_click, on_save_click)
+function draw_preset_row(label, presets, on_load_click, on_save_click)
   reaper.ImGui_Text(ctx, label); reaper.ImGui_SameLine(ctx); reaper.ImGui_TextDisabled(ctx, "(click Pn to load; Save Pn to store current)")
   if reaper.ImGui_BeginTable(ctx, label.."##preset_table", PRESET_SLOTS, TF('ImGui_TableFlags_SizingStretchProp')) then
     -- Row 1: P1..P5
@@ -989,42 +1051,9 @@ local function loop()
     reaper.ImGui_Separator(ctx)
     take_note_inputs()
 
-    -- Template tools
-    if reaper.ImGui_Button(ctx, "Clear", 80, 0) then
-      if active_box == "note" then NOTE_TEMPLATE = "" else TAKE_TEMPLATE = "" end
-      if SCAN_CACHE then recompute_preview_from_cache() end
-    end
-
-    reaper.ImGui_SameLine(ctx)
-    if reaper.ImGui_Button(ctx, "Save", 80, 0) then save_defaults(TAKE_TEMPLATE, NOTE_TEMPLATE) end
-
-    reaper.ImGui_SameLine(ctx)
-    if reaper.ImGui_Button(ctx, "Default", 80, 0) then
-      local t, n2 = load_defaults(); TAKE_TEMPLATE, NOTE_TEMPLATE = t, n2; if SCAN_CACHE then recompute_preview_from_cache() end
-    end
-    
-
-
     -- Presets for Take/Note templates
     reaper.ImGui_Separator(ctx)
 
-    draw_preset_row("Take Presets",
-      TAKE_PRESETS,
-      function(i) -- load
-        local v = TAKE_PRESETS[i] or ""
-        if v ~= "" then
-          TAKE_TEMPLATE = v
-          if SCAN_CACHE then recompute_preview_from_cache() end
-          -- 聚焦到 take 輸入框
-          -- 如果你有 take_note_inputs() 裡的 focus_take_input 判斷，這會生效
-          focus_take_input = true
-        end
-      end,
-      function(i) -- save
-        TAKE_PRESETS[i] = TAKE_TEMPLATE or ""
-        save_presets(TAKE_PRESETS_KEY, TAKE_PRESETS)
-      end
-    )
 
     draw_preset_row("Note Presets",
       NOTE_PRESETS,
