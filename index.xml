@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<index version="1" name="hsuanice Scripts" commit="8459292af3b925f6dc47fe4e8fc11202d7e73530">
+<index version="1" name="hsuanice Scripts" commit="0d44951d03a16d6641b469a51c02715d44d95f6f">
   <category name="Beta Testing">
     <reapack name="hsuanice_BWF TimeReference Embed Tool.lua" type="script" desc="Embed BWF TimeReference to Active take from Take 1 or Current Position TC">
       <version name="0.7.1" author="hsuanice" time="2025-08-14T17:52:57Z">
@@ -508,6 +508,16 @@ v0.3 - Add Selected/Scanned/Cached status view
 v0.2 - Add ESC close function
 v0.1 - Beta release]]></changelog>
         <source main="main">https://github.com/hsuanice/ReaScripts/raw/8459292af3b925f6dc47fe4e8fc11202d7e73530/Beta%20Testing/hsuanice_Rename%20Active%20Take%20from%20File%20Metadata.lua</source>
+      </version>
+      <version name="0.6.1" author="hsuanice" time="2025-08-24T14:11:21Z">
+        <changelog><![CDATA[v0.6.1 - Reorder UI
+v0.6.0 - Add 5 presets for Take/Note templates (save & click to load). Fix $curtake parsing bug. Show $curtake in Detected fields.
+v0.5.0 - Add $curtake token
+v0.4.0 - Add $srcbaseprefix:N and $srcbasesuffix:N tokens to extract the first/last N characters of the filename (without extension).
+v0.3 - Add Selected/Scanned/Cached status view
+v0.2 - Add ESC close function
+v0.1 - Beta release]]></changelog>
+        <source main="main">https://github.com/hsuanice/ReaScripts/raw/d41041f8dadad313b3a7c606c718f7125c63bc2c/Beta%20Testing/hsuanice_Rename%20Active%20Take%20from%20File%20Metadata.lua</source>
       </version>
     </reapack>
     <reapack name="hsuanice_Show Frame Rate.lua" type="script" desc="ReaImGui - Show Project Frame Rate">
