@@ -3,7 +3,7 @@
 @version 0.2.3
 @author hsuanice
 @about
-  MRX-style "Repeat to Fill", Razor-only, multi-item & multitrack clipboard.
+  Pro Tools-style "Paste Special: Repeat to Fill Selection"
   - Stage whole block at a far "staging area", then move once into Razor.
   - No system Auto-Crossfade; ALL fades are applied manually.
   - JOIN crossfades between repeated tiles (after moving into target we verify/repair).
