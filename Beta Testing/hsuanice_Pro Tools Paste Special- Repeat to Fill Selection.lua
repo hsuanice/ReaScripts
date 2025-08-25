@@ -1,6 +1,6 @@
 --[[
 @description hsuanice_Pro Tools Paste Special: Repeat to Fill Selection
-@version 0.2.3
+@version 0.2.4
 @author hsuanice
 @about
   Pro Tools-style "Paste Special: Repeat to Fill Selection"
@@ -18,6 +18,23 @@
   hsuanice served as the workflow designer, tester, and integrator for this tool.
 
   Reference: MRX_PasteItemToFill_Items_and_EnvelopeLanes.lua
+
+@changelog
+  v0.2.4 - Fix: Strengthened Razor-area clearing (FIPM-safe). Uses a 1 ms tolerance
+           and two rounds of split+delete to ensure all content inside the range is removed;
+           preserves items that butt exactly at the boundaries, so left/right neighbors
+           are no longer deleted. (No centered option; boundary crossfades remain
+           edge-to-edge only.)
+  v0.2.3 - After moving into the target, re-check JOIN; if items butt or the overlap
+           is too small, extend the left item’s right edge to create the overlap, then
+           apply fades manually (without moving any item). Pre-clears the Razor area;
+           supports multiple areas and cross-track.
+  v0.2.1 - No Auto-Crossfade anywhere; all crossfades are applied manually. Boundary
+           crossfades only when edge-to-edge, and outside items are never moved.
+  v0.2.0 - Added a User Options block; tunable parameters for JOIN and boundary crossfades.
+  v0.1.x - Initial release: stage in a far area → move once into the target; restores
+           selection and arrange view.
+
 --]]
 
 local r = reaper
@@ -26,10 +43,10 @@ local r = reaper
 -- ***** USER OPTIONS *****
 --------------------------------------------------------------------------------
 -- Cursor return: 0 = initial, 1 = selection start, 2 = selection end
-local leaveCursorLocation       = 0
+local leaveCursorLocation       = 1
 
 -- Boundary crossfades (seconds) at Razor left/right (edge-to-edge only).
-local edgeXFadeLen              = 0.5
+local edgeXFadeLen              = 0.083
 
 -- JOIN crossfades (seconds) between repeated tiles inside the filled area.
 --  -1.0 = use edgeXFadeLen (default ON)
@@ -149,29 +166,60 @@ local function group_areas_by_range(areas)
 end
 
 -- ============================== target pre-clear (Split+Delete) ==============================
+-- 僅清除 [t1,t2] 內的片段；保留貼齊邊界的外側 item
+-- 在 FIPM 下也會逐個 lane 精準切割與刪除
 local function clear_items_in_range_on_tracks(t1,t2, tracks_sorted)
+  -- 用較寬鬆的容差（約 1 ms），避免浮點/取樣邊界漏切
+  local EPSX = 0.001
+
   for _,tr in ipairs(tracks_sorted) do
-    -- split at boundaries where needed
-    for i=r.CountTrackMediaItems(tr)-1,0,-1 do
-      local it=r.GetTrackMediaItem(tr,i)
-      local p=r.GetMediaItemInfo_Value(it,"D_POSITION")
-      local l=r.GetMediaItemInfo_Value(it,"D_LENGTH")
-      local e=p+l
-      if e>t1+EPS and p<t2-EPS then
-        if p<t1-EPS and e>t1+EPS then r.SplitMediaItem(it,t1) end
-        if p<t2-EPS and e>t2+EPS then r.SplitMediaItem(it,t2) end
+    -- pass1：把跨越 t1/t2 的 item 先切開（剛好等於邊界的不切）
+    for i = r.CountTrackMediaItems(tr)-1, 0, -1 do
+      local it = r.GetTrackMediaItem(tr,i)
+      local p  = r.GetMediaItemInfo_Value(it,"D_POSITION")
+      local l  = r.GetMediaItemInfo_Value(it,"D_LENGTH")
+      local e  = p + l
+      if p < t1 - EPSX and e > t1 + EPSX then r.SplitMediaItem(it, t1) end
+      if p < t2 - EPSX and e > t2 + EPSX then r.SplitMediaItem(it, t2) end
+    end
+
+    -- pass2：刪除完全落在 [t1-ε, t2+ε] 內的片段（含剛好等於邊界）
+    for i = r.CountTrackMediaItems(tr)-1, 0, -1 do
+      local it = r.GetTrackMediaItem(tr,i)
+      local p  = r.GetMediaItemInfo_Value(it,"D_POSITION")
+      local l  = r.GetMediaItemInfo_Value(it,"D_LENGTH")
+      local e  = p + l
+      if p >= t1 - EPSX and e <= t2 + EPSX then
+        r.DeleteTrackMediaItem(tr, it)
       end
     end
-    -- delete items fully inside
-    for i=r.CountTrackMediaItems(tr)-1,0,-1 do
-      local it=r.GetTrackMediaItem(tr,i)
-      local p=r.GetMediaItemInfo_Value(it,"D_POSITION")
-      local l=r.GetMediaItemInfo_Value(it,"D_LENGTH")
-      local e=p+l
-      if p>=t1-EPS and e<=t2+EPS then r.DeleteTrackMediaItem(tr,it) end
+
+    -- pass3（保險）：若仍有殘留與區段相交者，再切再刪一次
+    for i = r.CountTrackMediaItems(tr)-1, 0, -1 do
+      local it = r.GetTrackMediaItem(tr,i)
+      local p  = r.GetMediaItemInfo_Value(it,"D_POSITION")
+      local l  = r.GetMediaItemInfo_Value(it,"D_LENGTH")
+      local e  = p + l
+      if e > t1 + EPSX and p < t2 - EPSX then
+        -- 這裡一定是跨界殘留（例如極小浮點誤差），直接在邊界再切一次再判斷
+        if p < t1 - EPSX and e > t1 + EPSX then r.SplitMediaItem(it, t1) end
+        if p < t2 - EPSX and e > t2 + EPSX then r.SplitMediaItem(it, t2) end
+      end
+    end
+    for i = r.CountTrackMediaItems(tr)-1, 0, -1 do
+      local it = r.GetTrackMediaItem(tr,i)
+      local p  = r.GetMediaItemInfo_Value(it,"D_POSITION")
+      local l  = r.GetMediaItemInfo_Value(it,"D_LENGTH")
+      local e  = p + l
+      if p >= t1 - EPSX and e <= t2 + EPSX then
+        r.DeleteTrackMediaItem(tr, it)
+      end
     end
   end
 end
+
+
+
 
 -- ============================== staging helpers ==============================
 local function remap_selected_items_by_relative_top(tracks_sorted)
