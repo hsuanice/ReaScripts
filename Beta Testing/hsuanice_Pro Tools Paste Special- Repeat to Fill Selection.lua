@@ -1,6 +1,6 @@
 --[[
 @description hsuanice_Pro Tools Paste Special: Repeat to Fill Selection
-@version 0.4.0
+@version 0.4.2
 @author hsuanice
 @about
   Pro Tools-style "Paste Special: Repeat to Fill Selection"
@@ -13,6 +13,10 @@
   - Items only; envelopes not supported yet (Razor contains envelope -> abort).
   - Restores original item/track selection.
 
+  Known issues:
+  - CF_UNIT="grid" is currently inaccurate; seconds/frames work correctly. Grid unit
+    will be reworked using SWS grid divisions at the reference time.
+
   Note:
   This script was generated using ChatGPT based on design concepts and iterative testing by hsuanice.
   hsuanice served as the workflow designer, tester, and integrator for this tool.
@@ -20,22 +24,44 @@
   Reference: MRX_PasteItemToFill_Items_and_EnvelopeLanes.lua
 
 @changelog
+  v0.4.2 - Fix: Multitrack paste restored — use single anchor (top) track + reassert
+           "last touched" before each paste so clipboard distributes across tracks
+           correctly. Feat: System equal-power stamping — when CF_SHAPE_PRESET="equal_power"
+           and CF_EQUALPOWER_VIA_ACTION=true, expand time selection to include boundary
+           neighbors and apply Action 41529 to set crossfade shape (both sides match
+           REAPER’s default). Fix: stamp_system_equal_power scope & call order.
+
+  v0.4.1 - Fix/Feat: Unified crossfade length control — CF_VALUE + CF_UNIT now drive both
+           boundary and JOIN crossfades (edgeXFadeLen is no longer used for length).
+           Feat: Equal-power polarity switch via CF_EQUALPOWER_FLIP to match preferred
+           curve direction. Fix: Added hang guard — if requested crossfade ≥ tile length,
+           clamp to (tile_len − 1e-4) and show a one-time notice.
+           NOTE: CF_UNIT="grid" is currently not working (inaccurate) — see Known issues.
+
+  v0.4.0 - Added crossfade length units: seconds / frames / grid (initial implementation;
+           grid currently inaccurate — will be revised).
+
   v0.3.0 - Crossfade shape presets (linear / equal_power / custom) via apply_item_fade_shape().
-  v0.4.0 - Crossfade length units: seconds / frames / grid (SWS grid-division accurate).
+
   v0.2.4 - Fix: Strengthened Razor-area clearing (FIPM-safe). Uses a 1 ms tolerance
            and two rounds of split+delete to ensure all content inside the range is removed;
            preserves items that butt exactly at the boundaries, so left/right neighbors
            are no longer deleted. (No centered option; boundary crossfades remain
            edge-to-edge only.)
+
   v0.2.3 - After moving into the target, re-check JOIN; if items butt or the overlap
            is too small, extend the left item’s right edge to create the overlap, then
            apply fades manually (without moving any item). Pre-clears the Razor area;
            supports multiple areas and cross-track.
+
   v0.2.1 - No Auto-Crossfade anywhere; all crossfades are applied manually. Boundary
            crossfades only when edge-to-edge, and outside items are never moved.
+
   v0.2.0 - Added a User Options block; tunable parameters for JOIN and boundary crossfades.
+
   v0.1.x - Initial release: stage in a far area → move once into the target; restores
            selection and arrange view.
+
 
 --]]
 
@@ -53,10 +79,13 @@ CF_GRID_REF    = "left"            -- 以哪個時間點換算 grid 長度："le
 
 -- Crossfade shape options (v0.3.0)
 CF_SHAPE_PRESET   = "equal_power"  -- "linear" | "equal_power" | "custom"
+CF_EQUALPOWER_VIA_ACTION = true   -- true: 用 41529 Item: Set crossfade shape to type 2 (equal power) 蓋系統等功率；false: 用自家曲率近似
 CF_SHAPE_IN       = 0              -- only used when PRESET="custom", 0..6 (0=linear)
 CF_SHAPE_OUT      = 0              -- only used when PRESET="custom", 0..6
 CF_CURVE_IN       = 0            -- -1..1, only used when PRESET="custom"
 CF_CURVE_OUT      = 0            -- -1..1, only used when PRESET="custom"
+CF_EQUALPOWER_FLIP = true   -- set true if you feel the equal-power curvature is reversed
+
 
 
 
@@ -64,7 +93,7 @@ CF_CURVE_OUT      = 0            -- -1..1, only used when PRESET="custom"
 local leaveCursorLocation       = 1
 
 -- Boundary crossfades (seconds) at Razor left/right (edge-to-edge only).
-local edgeXFadeLen              = 1
+-- local edgeXFadeLen              = 1
 
 -- JOIN crossfades (seconds) between repeated tiles inside the filled area.
 --  -1.0 = use edgeXFadeLen (default ON)
@@ -85,6 +114,8 @@ local restoreRazorEdits         = true
 local STAGE_PAD                 = 60.0
 
 local EPS                       = 1e-9
+
+local warned_join_clamp = false
 --------------------------------------------------------------------------------
 
 -- ============================== selection snapshot ==============================
@@ -112,6 +143,17 @@ end
 -- ============================== utils ==============================
 local function track_index(tr) return math.floor(r.GetMediaTrackInfo_Value(tr,"IP_TRACKNUMBER") or 0) end
 local function unselect_all() r.Main_OnCommand(40289,0); r.Main_OnCommand(40297,0) end
+
+-- 選取整組目標軌，並把第一條設為 last touched（作為貼上的基準）
+local function select_tracks_block(tracks_sorted)
+  r.Main_OnCommand(40297,0) -- Unselect all tracks
+  for _,tr in ipairs(tracks_sorted) do
+    r.SetMediaTrackInfo_Value(tr,"I_SELECTED",1)
+  end
+  r.Main_OnCommand(40914,0) -- Track: Set first selected track as last touched track
+end
+
+
 local function project_last_item_end()
   local last=0.0
   for i=0, r.CountMediaItems(0)-1 do
@@ -333,12 +375,12 @@ end
 
 -- edge/join crossfade length (in SECONDS) at a given reference time
 local function edge_len_seconds(refTime)
-  return cf_to_seconds(edgeXFadeLen, refTime)
+  return cf_to_seconds(CF_VALUE, refTime)
 end
 
 local function join_len_seconds(refTime)
-  local v = (joinXFadeLen == -1.0) and edgeXFadeLen or joinXFadeLen
-  return cf_to_seconds(v, refTime)
+  local units = (joinXFadeLen == -1.0) and CF_VALUE or joinXFadeLen
+  return cf_to_seconds(units, refTime)
 end
 
 
@@ -362,11 +404,18 @@ local function apply_item_fade_shape(it, fadeInLen, fadeOutLen)
     reaper.SetMediaItemInfo_Value(it, "D_FADEOUTDIR",   0.0)
 
   elseif preset == "equal_power" then
-    -- complementary curves (equal-power 近似)
-    reaper.SetMediaItemInfo_Value(it, "C_FADEINSHAPE",  0)
-    reaper.SetMediaItemInfo_Value(it, "C_FADEOUTSHAPE", 0)
-    reaper.SetMediaItemInfo_Value(it, "D_FADEINDIR",    0.50)
-    reaper.SetMediaItemInfo_Value(it, "D_FADEOUTDIR",  -0.50)
+    if CF_EQUALPOWER_VIA_ACTION then
+      -- 讓 41529 Item: Set crossfade shape to type 2 (equal power)來蓋「等功率」形狀；這裡只保證長度有設到（上面已寫 D_FADEIN/OUTLEN）
+      -- 不再在這裡寫 shape/curve，避免和 41529 打架
+    else
+      -- 若想用自家近似（不用 41529），就保留下面這段
+      local s = (CF_EQUALPOWER_FLIP and -1 or 1)
+      reaper.SetMediaItemInfo_Value(it, "C_FADEINSHAPE",  0)
+      reaper.SetMediaItemInfo_Value(it, "C_FADEOUTSHAPE", 0)
+      reaper.SetMediaItemInfo_Value(it, "D_FADEINDIR",   0.45 * s)
+      reaper.SetMediaItemInfo_Value(it, "D_FADEOUTDIR", -0.45 * s)
+    end
+
 
   else -- "custom"
     reaper.SetMediaItemInfo_Value(it, "C_FADEINSHAPE",  math.floor(CF_SHAPE_IN or 0))
@@ -420,13 +469,30 @@ end
 
 -- Build the staged block of length total_len at stage_pos (JOIN overlaps applied in staging too)
 local function build_staging_block(stage_pos, total_len, tile_len, base_track, tracks_sorted)
+  -- 多軌貼上的正確作法：只選本組的最上面那一軌當「錨點」
   select_only_track(base_track)
+  r.Main_OnCommand(40914,0) -- Track: Set first selected track as last touched track（保險重申一次）
+
   local join = join_len_seconds(stage_pos)
-  local step = math.max(EPS, tile_len - join)
+
+  local CLAMP_EPS = 1e-4
+  if join >= tile_len - CLAMP_EPS then
+    if not warned_join_clamp then
+      r.ShowMessageBox(
+        string.format("JOIN crossfade (%.3fs) >= tile length (%.3fs).\nClamped to %.3fs to prevent hang.",
+                      join, tile_len, tile_len - CLAMP_EPS),
+        "Repeat to Fill — Notice", 0)
+      warned_join_clamp = true
+    end
+    join = tile_len - CLAMP_EPS
+  end
+  local step = tile_len - join
+
 
   local t = stage_pos
   while t < stage_pos + total_len - EPS do
     r.SetEditCurPos(t, false, false)
+    r.Main_OnCommand(40914,0) -- reassert last touched to the top track
     r.Main_OnCommand(42398,0) -- Paste
     remap_selected_items_by_relative_top(tracks_sorted)
     t = t + step
@@ -436,6 +502,7 @@ local function build_staging_block(stage_pos, total_len, tile_len, base_track, t
   end
   if t < stage_pos + total_len - EPS then
     r.SetEditCurPos(t, false, false)
+    r.Main_OnCommand(40914,0) -- reassert last touched
     r.Main_OnCommand(42398,0)
     remap_selected_items_by_relative_top(tracks_sorted)
   end
@@ -523,6 +590,10 @@ local function apply_boundary_crossfades(start_t, end_t, tracks_sorted, fadeLen)
       end
     end
 
+
+
+
+
     -- RIGHT boundary
     local rightN = find_right_neighbor(tr, end_t)
     if rightN or not edgeToEdgeOnly then
@@ -544,6 +615,47 @@ local function apply_boundary_crossfades(start_t, end_t, tracks_sorted, fadeLen)
     end
   end
 end
+
+-- 用系統等功率形狀（Action 41529）蓋掉選區內、指定軌的交叉形狀
+local function stamp_system_equal_power(start_t, end_t, tracks_sorted)
+  -- 1) 暫存原本的 time selection & selection
+  local ts_st, ts_en = r.GetSet_LoopTimeRange2(0, false, false, 0, 0, false)
+  local saved_items, saved_tracks = {}, {}
+  for i=0, r.CountSelectedMediaItems(0)-1 do
+    saved_items[#saved_items+1] = r.GetSelectedMediaItem(0,i)
+  end
+  for i=0, r.CountTracks(0)-1 do
+    local tr = r.GetTrack(0,i)
+    if r.GetMediaTrackInfo_Value(tr,"I_SELECTED") > 0.5 then saved_tracks[#saved_tracks+1]=tr end
+  end
+
+  -- 2) 選本組軌
+  r.Main_OnCommand(40297,0)
+  for _,tr in ipairs(tracks_sorted) do r.SetMediaTrackInfo_Value(tr,"I_SELECTED",1) end
+
+  -- 3) 依邊界交叉長度擴張 time selection（確保包含邊界兩側的成對 items）
+  local edgeL = edge_len_seconds(start_t)
+  local edgeR = edge_len_seconds(end_t)
+  local padL  = (edgeL > 0) and edgeL or 0
+  local padR  = (edgeR > 0) and edgeR or 0
+  local t1    = start_t - padL
+  local t2    = end_t   + padR
+  r.GetSet_LoopTimeRange2(0, true, false, t1, t2, false)
+
+  -- 4) 選擇這些軌在 time selection 內的所有 items
+  r.Main_OnCommand(40718,0) -- Item: Select all items on selected tracks in current time selection
+
+  -- 5) 套等功率形狀（41529）
+  r.Main_OnCommand(41529,0) -- Item: Set crossfade shape to type 2 (equal power)
+
+  -- 6) 還原
+  r.GetSet_LoopTimeRange2(0, true, false, ts_st, ts_en, false)
+  r.Main_OnCommand(40289,0) -- Unselect items
+  for _,it in ipairs(saved_items) do if r.ValidatePtr2(0,it,"MediaItem*") then r.SetMediaItemSelected(it, true) end end
+  r.Main_OnCommand(40297,0)
+  for _,tr in ipairs(saved_tracks) do if r.ValidatePtr2(0,tr,"MediaTrack*") then r.SetMediaTrackInfo_Value(tr,"I_SELECTED",1) end end
+end
+
 
 
 -- ============================== measurement of clipboard ==============================
@@ -592,9 +704,14 @@ local function process_group(start_t, end_t, tracks_sorted, tile_len)
 
   -- ensure JOIN crossfades inside target (repair butts by extending left edge)
   local join = join_len_seconds(start_t)
+  local CLAMP_EPS = 1e-4
   if join > EPS then
-    ensure_join_crossfades_in_range(start_t, end_t, tracks_sorted, join)
+    if join >= tile_len - CLAMP_EPS then join = tile_len - CLAMP_EPS end
+    if join > EPS then
+      ensure_join_crossfades_in_range(start_t, end_t, tracks_sorted, join)
+    end
   end
+
 
   -- boundary crossfades (edge-to-edge only if option true), no item movement
   local edgeSec = edge_len_seconds(start_t)
@@ -602,9 +719,20 @@ local function process_group(start_t, end_t, tracks_sorted, tile_len)
     apply_boundary_crossfades(start_t, end_t, tracks_sorted, edgeSec)
   end
 
+  -- 若選擇用系統等功率形狀，最後蓋一次（JOIN + 邊界一起）
+  if (CF_SHAPE_PRESET or "equal_power") == "equal_power" and CF_EQUALPOWER_VIA_ACTION then
+    stamp_system_equal_power(start_t, end_t, tracks_sorted)
+  end
+
+
+
   -- cleanup staging envelopes (if any were pasted there)
   purge_track_envelopes_in_range(stage_pos-0.001, stage_pos + total + 0.001)
 end
+
+
+
+
 
 -- ============================== main ==============================
 local function main()
@@ -665,7 +793,7 @@ local function main()
   r.GetSet_ArrangeView2(0,true,0,0,arrangeStart,arrangeEnd)
 
   r.PreventUIRefresh(-1)
-  r.Undo_EndBlock("hsuanice — Paste Special: Repeat to Fill Selection (v0.4.0)", -1)
+  r.Undo_EndBlock("hsuanice — Paste Special: Repeat to Fill Selection", -1)
   r.UpdateArrange()
 end
 
