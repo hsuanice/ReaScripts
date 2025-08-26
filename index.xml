@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<index version="1" name="hsuanice Scripts" commit="db197b453222807d293e3e8896b13bb522502749">
+<index version="1" name="hsuanice Scripts" commit="c0d79af7107e23a7d29b9b3e0b76f97350b81d82">
   <category name="Beta Testing">
     <reapack name="hsuanice_BWF TimeReference Embed Tool.lua" type="script" desc="Embed BWF TimeReference to Active take from Take 1 or Current Position TC">
       <version name="0.7.1" author="hsuanice" time="2025-08-14T17:52:57Z">
@@ -371,7 +371,8 @@
 {\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Items only; envelopes not supported yet (Razor contains envelope -> abort).\par}
 {\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Restores original item/track selection.\sa180\par}
 {\pard \ql \f0 \sa180 \li0 \fi0 Known issues:\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab CF_UNIT="grid" is currently inaccurate; seconds/frames work correctly. Grid unit will be reworked using SWS grid divisions at the reference time.\sa180\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab CF_UNIT="grid" is still inaccurate/experimental; use seconds/frames for reliable results.\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab When requested JOIN is much larger than the tile length, the script auto-adjusts JOIN to a fraction of the tile for stability. In certain source/material combinations this may still yield visually irregular overlaps. Workarounds: lower CF_VALUE or copy a longer source tile.\sa180\par}
 {\pard \ql \f0 \sa180 \li0 \fi0 Note: This script was generated using ChatGPT based on design concepts and iterative testing by hsuanice. hsuanice served as the workflow designer, tester, and integrator for this tool.\par}
 {\pard \ql \f0 \sa180 \li0 \fi0 Reference: MRX_PasteItemToFill_Items_and_EnvelopeLanes.lua\par}
 }
@@ -391,6 +392,9 @@
       </version>
       <version name="0.4.3" author="hsuanice" time="2025-08-26T07:32:25Z">
         <source main="main">https://github.com/hsuanice/ReaScripts/raw/db197b453222807d293e3e8896b13bb522502749/Beta%20Testing/hsuanice_Pro%20Tools%20Paste%20Special-%20Repeat%20to%20Fill%20Selection.lua</source>
+      </version>
+      <version name="0.4.4" author="hsuanice" time="2025-08-26T08:03:09Z">
+        <source main="main">https://github.com/hsuanice/ReaScripts/raw/c0d79af7107e23a7d29b9b3e0b76f97350b81d82/Beta%20Testing/hsuanice_Pro%20Tools%20Paste%20Special-%20Repeat%20to%20Fill%20Selection.lua</source>
       </version>
     </reapack>
     <reapack name="hsuanice_Pro Tools Trim Clip To File Boundaries.lua" type="script" desc="Pro Tools - Trim Clip To File Boundaries">
