@@ -1,6 +1,6 @@
 --[[
 @description hsuanice_Pro Tools Paste Special: Repeat to Fill Selection
-@version 0.2.4
+@version 0.4.0
 @author hsuanice
 @about
   Pro Tools-style "Paste Special: Repeat to Fill Selection"
@@ -20,6 +20,8 @@
   Reference: MRX_PasteItemToFill_Items_and_EnvelopeLanes.lua
 
 @changelog
+  v0.3.0 - Crossfade shape presets (linear / equal_power / custom) via apply_item_fade_shape().
+  v0.4.0 - Crossfade length units: seconds / frames / grid (SWS grid-division accurate).
   v0.2.4 - Fix: Strengthened Razor-area clearing (FIPM-safe). Uses a 1 ms tolerance
            and two rounds of split+delete to ensure all content inside the range is removed;
            preserves items that butt exactly at the boundaries, so left/right neighbors
@@ -42,11 +44,27 @@ local r = reaper
 --------------------------------------------------------------------------------
 -- ***** USER OPTIONS *****
 --------------------------------------------------------------------------------
+-- Crossfade length unit (v0.4.0)
+CF_UNIT        = "frames"            -- "seconds" | "frames" | "grid"
+CF_VALUE       = 1.0               -- 若 seconds=秒；frames=影格數；grid=幾個 grid 單位
+CF_GRID_REF    = "left"            -- 以哪個時間點換算 grid 長度："left"|"center"|"right"（建議 left）
+
+
+
+-- Crossfade shape options (v0.3.0)
+CF_SHAPE_PRESET   = "equal_power"  -- "linear" | "equal_power" | "custom"
+CF_SHAPE_IN       = 0              -- only used when PRESET="custom", 0..6 (0=linear)
+CF_SHAPE_OUT      = 0              -- only used when PRESET="custom", 0..6
+CF_CURVE_IN       = 0            -- -1..1, only used when PRESET="custom"
+CF_CURVE_OUT      = 0            -- -1..1, only used when PRESET="custom"
+
+
+
 -- Cursor return: 0 = initial, 1 = selection start, 2 = selection end
 local leaveCursorLocation       = 1
 
 -- Boundary crossfades (seconds) at Razor left/right (edge-to-edge only).
-local edgeXFadeLen              = 0.083
+local edgeXFadeLen              = 1
 
 -- JOIN crossfades (seconds) between repeated tiles inside the filled area.
 --  -1.0 = use edgeXFadeLen (default ON)
@@ -68,11 +86,6 @@ local STAGE_PAD                 = 60.0
 
 local EPS                       = 1e-9
 --------------------------------------------------------------------------------
-
-local function get_join_len()
-  if joinXFadeLen == -1.0 then return edgeXFadeLen end
-  return math.max(0, joinXFadeLen or 0)
-end
 
 -- ============================== selection snapshot ==============================
 local function snapshot_selection()
@@ -266,6 +279,106 @@ local function trim_selection_to_right(end_time)
   end
 end
 
+-- convert a length value (edgeXFadeLen / joinXFadeLen) from CF_UNIT to seconds
+-- return seconds for CF_VALUE in the selected unit, referenced at refTime
+local function cf_grid_len_seconds(units, refTime)
+  -- anchor：依設定抓參考點附近的格線，統一從「左邊格線」開始量
+  local t_ref = refTime or reaper.GetCursorPosition()
+  local t_left = reaper.BR_GetClosestGridDivision(t_ref)
+  if t_left > t_ref + 1e-12 then
+    -- 最靠近但在右邊，就退到前一格
+    t_left = reaper.BR_GetPrevGridDivision(t_left)
+  end
+  if CF_GRID_REF == "right" then
+    -- 以右側為基準則先進一格當起點
+    t_left = reaper.BR_GetNextGridDivision(t_left)
+  elseif CF_GRID_REF == "center" then
+    -- 以中心為基準：先找到邊界所在格，再往左半格
+    local t_next = reaper.BR_GetNextGridDivision(t_left)
+    local half = (t_next - t_left) * 0.5
+    t_left = t_ref - half
+  end
+
+  local whole = math.floor(units)
+  local frac  = units - whole
+  local t0    = t_left
+  local sec   = 0.0
+
+  for _=1, whole do
+    local t1 = reaper.BR_GetNextGridDivision(t0)
+    sec = sec + (t1 - t0)
+    t0  = t1
+  end
+  if frac > 0 then
+    local t1 = reaper.BR_GetNextGridDivision(t0)
+    sec = sec + (t1 - t0) * frac
+  end
+  return sec
+end
+
+local function cf_to_seconds(v, refTime)
+  if v == nil then return 0 end
+  if CF_UNIT == "seconds" then
+    return v
+  elseif CF_UNIT == "frames" then
+    local fps = reaper.TimeMap_curFrameRate(0) -- seconds/frame = 1/fps
+    return v / (fps > 0 and fps or 1)
+  elseif CF_UNIT == "grid" then
+    return cf_grid_len_seconds(v, refTime)
+  else
+    return v -- fallback
+  end
+end
+
+
+-- edge/join crossfade length (in SECONDS) at a given reference time
+local function edge_len_seconds(refTime)
+  return cf_to_seconds(edgeXFadeLen, refTime)
+end
+
+local function join_len_seconds(refTime)
+  local v = (joinXFadeLen == -1.0) and edgeXFadeLen or joinXFadeLen
+  return cf_to_seconds(v, refTime)
+end
+
+
+
+
+-- Apply fade length + shape to one item.
+-- Pass nil to keep that side's length unchanged.
+local function apply_item_fade_shape(it, fadeInLen, fadeOutLen)
+  if fadeInLen and fadeInLen > 0 then
+    reaper.SetMediaItemInfo_Value(it, "D_FADEINLEN",  fadeInLen)
+  end
+  if fadeOutLen and fadeOutLen > 0 then
+    reaper.SetMediaItemInfo_Value(it, "D_FADEOUTLEN", fadeOutLen)
+  end
+
+  local preset = (CF_SHAPE_PRESET or "equal_power"):lower()
+  if preset == "linear" then
+    reaper.SetMediaItemInfo_Value(it, "C_FADEINSHAPE",  0)
+    reaper.SetMediaItemInfo_Value(it, "C_FADEOUTSHAPE", 0)
+    reaper.SetMediaItemInfo_Value(it, "D_FADEINDIR",    0.0)
+    reaper.SetMediaItemInfo_Value(it, "D_FADEOUTDIR",   0.0)
+
+  elseif preset == "equal_power" then
+    -- complementary curves (equal-power 近似)
+    reaper.SetMediaItemInfo_Value(it, "C_FADEINSHAPE",  0)
+    reaper.SetMediaItemInfo_Value(it, "C_FADEOUTSHAPE", 0)
+    reaper.SetMediaItemInfo_Value(it, "D_FADEINDIR",    0.50)
+    reaper.SetMediaItemInfo_Value(it, "D_FADEOUTDIR",  -0.50)
+
+  else -- "custom"
+    reaper.SetMediaItemInfo_Value(it, "C_FADEINSHAPE",  math.floor(CF_SHAPE_IN or 0))
+    reaper.SetMediaItemInfo_Value(it, "C_FADEOUTSHAPE", math.floor(CF_SHAPE_OUT or 0))
+    reaper.SetMediaItemInfo_Value(it, "D_FADEINDIR",    CF_CURVE_IN  or 0.0)
+    reaper.SetMediaItemInfo_Value(it, "D_FADEOUTDIR",   CF_CURVE_OUT or 0.0)
+  end
+end
+
+
+
+
 -- Manual JOIN crossfades（確保相鄰 item 之間一定有交叉；必要時延長左邊 item 的右緣）
 local function ensure_join_crossfades_in_range(a, b, tracks_sorted, joinLen)
   if not joinLen or joinLen <= EPS then return end
@@ -297,9 +410,10 @@ local function ensure_join_crossfades_in_range(a, b, tracks_sorted, joinLen)
 
       if overlap > EPS then
         local fade = math.min(joinLen, overlap)
-        r.SetMediaItemInfo_Value(L.it, "D_FADEOUTLEN", fade)
-        r.SetMediaItemInfo_Value(R.it, "D_FADEINLEN",  fade)
+        apply_item_fade_shape(L.it, nil,  fade)  -- 左塊：只設出淡
+        apply_item_fade_shape(R.it, fade, nil )  -- 右塊：只設入淡
       end
+
     end
   end
 end
@@ -307,7 +421,7 @@ end
 -- Build the staged block of length total_len at stage_pos (JOIN overlaps applied in staging too)
 local function build_staging_block(stage_pos, total_len, tile_len, base_track, tracks_sorted)
   select_only_track(base_track)
-  local join = get_join_len()
+  local join = join_len_seconds(stage_pos)
   local step = math.max(EPS, tile_len - join)
 
   local t = stage_pos
@@ -394,29 +508,43 @@ local function apply_boundary_crossfades(start_t, end_t, tracks_sorted, fadeLen)
     if leftN or not edgeToEdgeOnly then
       local first = first_item_in_area_on_track(tr, start_t, end_t)
       if first then
-        r.SetMediaItemInfo_Value(first, "D_FADEINLEN", math.max(fadeLen, r.GetMediaItemInfo_Value(first,"D_FADEINLEN")))
+        -- 第一個：淡入
+        apply_item_fade_shape(first,
+          math.max(fadeLen, r.GetMediaItemInfo_Value(first,"D_FADEINLEN")), nil)
+
+        -- 左鄰：延長右緣 + 淡出
         if leftN then
-          local ll = r.GetMediaItemInfo_Value(leftN,"D_LENGTH")
-          r.SetMediaItemInfo_Value(leftN,"D_LENGTH", ll + fadeLen) -- extend right edge only
-          r.SetMediaItemInfo_Value(leftN,"D_FADEOUTLEN", math.max(fadeLen, r.GetMediaItemInfo_Value(leftN,"D_FADEOUTLEN")))
+          local ll = reaper.GetMediaItemInfo_Value(leftN,"D_LENGTH")
+          reaper.SetMediaItemInfo_Value(leftN,"D_LENGTH", ll + fadeLen) -- extend right edge only
+          apply_item_fade_shape(leftN, nil,
+            math.max(fadeLen, r.GetMediaItemInfo_Value(leftN,"D_FADEOUTLEN")))
+
         end
       end
     end
+
     -- RIGHT boundary
     local rightN = find_right_neighbor(tr, end_t)
     if rightN or not edgeToEdgeOnly then
       local last  = last_item_in_area_on_track(tr, start_t, end_t)
       if last then
-        local llen = r.GetMediaItemInfo_Value(last,"D_LENGTH")
-        r.SetMediaItemInfo_Value(last,"D_LENGTH", llen + fadeLen) -- extend to right (no move)
-        r.SetMediaItemInfo_Value(last,"D_FADEOUTLEN", math.max(fadeLen, r.GetMediaItemInfo_Value(last,"D_FADEOUTLEN")))
+        -- 最後一個：延長右緣 + 淡出
+        local llen = reaper.GetMediaItemInfo_Value(last,"D_LENGTH")
+        reaper.SetMediaItemInfo_Value(last,"D_LENGTH", llen + fadeLen) -- extend to right (no move)
+        apply_item_fade_shape(last, nil,
+          math.max(fadeLen, r.GetMediaItemInfo_Value(last,"D_FADEOUTLEN")))
+
+        -- 右鄰：淡入
         if rightN then
-          r.SetMediaItemInfo_Value(rightN, "D_FADEINLEN", math.max(fadeLen, r.GetMediaItemInfo_Value(rightN,"D_FADEINLEN")))
+        apply_item_fade_shape(rightN,
+          math.max(fadeLen, r.GetMediaItemInfo_Value(rightN,"D_FADEINLEN")), nil)
+
         end
       end
     end
   end
 end
+
 
 -- ============================== measurement of clipboard ==============================
 local function measure_clipboard_tile_len(stage_track)
@@ -463,13 +591,16 @@ local function process_group(start_t, end_t, tracks_sorted, tile_len)
   r.Main_OnCommand(40289,0) -- unselect staged
 
   -- ensure JOIN crossfades inside target (repair butts by extending left edge)
-  local join = get_join_len()
+  local join = join_len_seconds(start_t)
   if join > EPS then
     ensure_join_crossfades_in_range(start_t, end_t, tracks_sorted, join)
   end
 
   -- boundary crossfades (edge-to-edge only if option true), no item movement
-  if edgeXFadeLen>EPS then apply_boundary_crossfades(start_t, end_t, tracks_sorted, edgeXFadeLen) end
+  local edgeSec = edge_len_seconds(start_t)
+  if edgeSec > EPS then
+    apply_boundary_crossfades(start_t, end_t, tracks_sorted, edgeSec)
+  end
 
   -- cleanup staging envelopes (if any were pasted there)
   purge_track_envelopes_in_range(stage_pos-0.001, stage_pos + total + 0.001)
@@ -534,7 +665,7 @@ local function main()
   r.GetSet_ArrangeView2(0,true,0,0,arrangeStart,arrangeEnd)
 
   r.PreventUIRefresh(-1)
-  r.Undo_EndBlock("hsuanice — Paste Special: Repeat to Fill Selection (v0.2.3)", -1)
+  r.Undo_EndBlock("hsuanice — Paste Special: Repeat to Fill Selection (v0.4.0)", -1)
   r.UpdateArrange()
 end
 
