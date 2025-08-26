@@ -1,6 +1,6 @@
 --[[
 @description hsuanice_Pro Tools Paste Special: Repeat to Fill Selection
-@version 0.4.3
+@version 0.4.4
 @author hsuanice
 @about
   Pro Tools-style "Paste Special: Repeat to Fill Selection"
@@ -14,8 +14,11 @@
   - Restores original item/track selection.
 
   Known issues:
-  - CF_UNIT="grid" is currently inaccurate; seconds/frames work correctly. Grid unit
-    will be reworked using SWS grid divisions at the reference time.
+  - CF_UNIT="grid" is still inaccurate/experimental; use seconds/frames for reliable results.
+  - When requested JOIN is much larger than the tile length, the script auto-adjusts JOIN
+    to a fraction of the tile for stability. In certain source/material combinations this
+    may still yield visually irregular overlaps. Workarounds: lower CF_VALUE or copy a
+    longer source tile.
 
   Note:
   This script was generated using ChatGPT based on design concepts and iterative testing by hsuanice.
@@ -24,49 +27,48 @@
   Reference: MRX_PasteItemToFill_Items_and_EnvelopeLanes.lua
 
 @changelog
-  v0.4.3 - Boundary crossfade alignment options ("left" / "center" / "right");
-          "center" splits overlap evenly across the Razor border. For the right edge,
-          centering may extend the outside neighbor left by half (configurable via
-          EDGE_XF_MOVE_OUTSIDE). Temporarily disables "Trim content behind…" during
-          edge centering to preserve overlap; restored afterward. JOIN tiles unchanged.
+  v0.4.4 - Robust handling when JOIN ≈ tile:
+           • Auto-adjust JOIN to a percent of tile (configurable via
+             JOIN_CLAMP_TRIGGER_RATIO / JOIN_CLAMP_TO_TILE_RATIO) to keep layout stable.
+           • Staging switches to butt-pastes when JOIN is near tile
+             (MAX_JOIN_RATIO_FOR_STAGING) to avoid tiny step sizes and UI stalls.
+           • Only one warning dialog (“Auto-adjust”) is shown; removed the extra
+             “Clamped to prevent hang” dialog in staging.
+           • Performance: no beachball; repeat-to-fill completes immediately even in
+             extreme JOIN requests.
+           NOTE: In rare edge cases the visual arrangement may still look irregular after
+             auto-adjust; see Known issues.
 
-  v0.4.2 - Fix: Multitrack paste restored — use single anchor (top) track + reassert
-           "last touched" before each paste so clipboard distributes across tracks
-           correctly. Feat: System equal-power stamping — when CF_SHAPE_PRESET="equal_power"
-           and CF_EQUALPOWER_VIA_ACTION=true, expand time selection to include boundary
-           neighbors and apply Action 41529 to set crossfade shape (both sides match
-           REAPER’s default). Fix: stamp_system_equal_power scope & call order.
+  v0.4.3 - Boundary crossfade alignment options (“left” / “center” / “right”).
+           Centering the right edge may extend the outside neighbor’s left edge
+           (configurable via EDGE_XF_MOVE_OUTSIDE). JOIN tiles unchanged.
 
-  v0.4.1 - Fix/Feat: Unified crossfade length control — CF_VALUE + CF_UNIT now drive both
-           boundary and JOIN crossfades (edgeXFadeLen is no longer used for length).
-           Feat: Equal-power polarity switch via CF_EQUALPOWER_FLIP to match preferred
-           curve direction. Fix: Added hang guard — if requested crossfade ≥ tile length,
-           clamp to (tile_len − 1e-4) and show a one-time notice.
-           NOTE: CF_UNIT="grid" is currently not working (inaccurate) — see Known issues.
+  v0.4.2 - Fix: multitrack paste restored (single anchor track + reassert last-touched
+           before each paste). Feat: system equal-power stamping via Action 41529 with
+           expanded time selection to include boundary neighbors.
 
-  v0.4.0 - Added crossfade length units: seconds / frames / grid (initial implementation;
-           grid currently inaccurate — will be revised).
+  v0.4.1 - Unified crossfade length control — CF_VALUE + CF_UNIT drive both boundary and
+           JOIN CFs. Equal-power polarity switch (CF_EQUALPOWER_FLIP). Hang guard when
+           CF ≥ tile length (clamp to tile−ε).
 
-  v0.3.0 - Crossfade shape presets (linear / equal_power / custom) via apply_item_fade_shape().
+  v0.4.0 - Crossfade length units: seconds / frames / grid (initial grid impl).
 
-  v0.2.4 - Fix: Strengthened Razor-area clearing (FIPM-safe). Uses a 1 ms tolerance
-           and two rounds of split+delete to ensure all content inside the range is removed;
-           preserves items that butt exactly at the boundaries, so left/right neighbors
-           are no longer deleted. (No centered option; boundary crossfades remain
-           edge-to-edge only.)
+  v0.3.0 - Crossfade shape presets (linear / equal_power / custom) via
+           apply_item_fade_shape().
 
-  v0.2.3 - After moving into the target, re-check JOIN; if items butt or the overlap
-           is too small, extend the left item’s right edge to create the overlap, then
-           apply fades manually (without moving any item). Pre-clears the Razor area;
-           supports multiple areas and cross-track.
+  v0.2.4 - Stronger Razor clearing (FIPM-safe; 1 ms tolerance; two rounds of split+delete).
+           Preserve neighbors that butt the edges.
 
-  v0.2.1 - No Auto-Crossfade anywhere; all crossfades are applied manually. Boundary
-           crossfades only when edge-to-edge, and outside items are never moved.
+  v0.2.3 - After moving to target, re-check JOIN and synthesize overlap if needed;
+           apply fades manually; pre-clear Razor; multi-area & cross-track.
 
-  v0.2.0 - Added a User Options block; tunable parameters for JOIN and boundary crossfades.
+  v0.2.1 - No Auto-Crossfade; all fades are manual. Boundary CF only when edge-to-edge
+           and outside items are never moved.
 
-  v0.1.x - Initial release: stage in a far area → move once into the target; restores
-           selection and arrange view.
+  v0.2.0 - User options for JOIN and boundary CFs.
+
+  v0.1.x - Initial release: stage once → move into target; restore selection & view.
+
 
 
 --]]
@@ -103,6 +105,13 @@ JOIN_XF_ALIGN = "center"   -- "right" | "center" | "left"
 EDGE_XF_ALIGN = "center"   -- "right" | "center" | "left"
 EDGE_XF_MOVE_OUTSIDE = true
 
+-- When JOIN >= this ratio of tile_len, stage with BUTT pastes (join_for_staging=0)
+-- and create overlaps later in target (prevents long loops & beachball).
+MAX_JOIN_RATIO_FOR_STAGING = 0.80
+
+-- If requested JOIN is too large vs tile, auto-scale JOIN to a percent of tile:
+JOIN_CLAMP_TRIGGER_RATIO = 0.85   -- 當 (JOIN >= 85% * tile_len) 就觸發縮減
+JOIN_CLAMP_TO_TILE_RATIO = 0.35   -- 縮減為 tile_len 的 45%（可改 0.3~0.6 視口味）
 
 
 
@@ -133,7 +142,8 @@ local STAGE_PAD                 = 60.0
 
 local EPS                       = 1e-9
 
-local warned_join_clamp = false
+local warned_join_clamp   = false
+local warned_join_fallback = false   -- ⬅︎ 新增：JOIN 太大時只彈一次提示
 --------------------------------------------------------------------------------
 
 -- ============================== selection snapshot ==============================
@@ -401,6 +411,27 @@ local function join_len_seconds(refTime)
   return cf_to_seconds(units, refTime)
 end
 
+-- 取「有效 JOIN 秒數」；若過大，依比例縮減（僅 JOIN 用；邊界不受影響）
+local function effective_join_len_seconds(tile_len, refTime)
+  local req = join_len_seconds(refTime)              -- 你原本的換算（秒）
+  local trig = (JOIN_CLAMP_TRIGGER_RATIO or 0.85) * tile_len
+  if req >= trig and tile_len > EPS then
+    local eff = (JOIN_CLAMP_TO_TILE_RATIO or 0.45) * tile_len
+    eff = math.max(EPS, math.min(eff, tile_len - 1e-4))
+    if not warned_join_fallback then
+      r.ShowMessageBox(
+        string.format(
+          "Requested JOIN crossfade (%.3fs) is too large vs tile (%.3fs).\nUsing %.3fs (%.0f%% of tile) to keep layout stable.",
+          req, tile_len, eff, (eff/tile_len)*100),
+        "Repeat to Fill — Auto-adjust", 0)
+      warned_join_fallback = true
+    end
+    return eff
+  end
+  -- 正常情況直接用原請求（含你已有的 clamp）
+  return math.min(req, tile_len - 1e-4)
+end
+
 
 
 
@@ -514,21 +545,17 @@ local function build_staging_block(stage_pos, total_len, tile_len, base_track, t
   select_only_track(base_track)
   r.Main_OnCommand(40914,0) -- Track: Set first selected track as last touched track（保險重申一次）
 
-  local join = join_len_seconds(stage_pos)
+  local join_req = join_len_seconds(stage_pos)
+  local join_eff = effective_join_len_seconds(tile_len, stage_pos)
 
-  local CLAMP_EPS = 1e-4
-  if join >= tile_len - CLAMP_EPS then
-    if not warned_join_clamp then
-      r.ShowMessageBox(
-        string.format("JOIN crossfade (%.3fs) >= tile length (%.3fs).\nClamped to %.3fs to prevent hang.",
-                      join, tile_len, tile_len - CLAMP_EPS),
-        "Repeat to Fill — Notice", 0)
-      warned_join_clamp = true
-    end
-    join = tile_len - CLAMP_EPS
-  end
-  local step = tile_len - join
 
+  -- staging 若為極端（JOIN 逼近 tile），一律用 butt 貼（join_for_staging=0）
+  local join_for_staging = (join_req >= tile_len * (MAX_JOIN_RATIO_FOR_STAGING or 0.80)) and 0 or join_eff
+  local step = math.max(EPS, tile_len - join_for_staging)
+
+
+  local max_iters = math.ceil((total_len / math.max(step, 1e-3)) + 2)
+  if max_iters > 4000 then step = math.max(step, 0.01) end
 
   local t = stage_pos
   while t < stage_pos + total_len - EPS do
@@ -538,7 +565,7 @@ local function build_staging_block(stage_pos, total_len, tile_len, base_track, t
     remap_selected_items_by_relative_top(tracks_sorted)
     t = t + step
     local left = (stage_pos + total_len) - t
-    local tiny_threshold = math.max(2*join + 1e-4, total_len * preventTinyLastFactor)
+    local tiny_threshold = math.max(2*join_for_staging + 1e-4, total_len * preventTinyLastFactor)
     if left < tiny_threshold then break end
   end
   if t < stage_pos + total_len - EPS then
@@ -801,13 +828,9 @@ local function process_group(start_t, end_t, tracks_sorted, tile_len)
   r.Main_OnCommand(40289,0) -- unselect staged
 
   -- ensure JOIN crossfades inside target (repair butts by extending left edge)
-  local join = join_len_seconds(start_t)
-  local CLAMP_EPS = 1e-4
+  local join = effective_join_len_seconds(tile_len, start_t)
   if join > EPS then
-    if join >= tile_len - CLAMP_EPS then join = tile_len - CLAMP_EPS end
-    if join > EPS then
-      ensure_join_crossfades_in_range(start_t, end_t, tracks_sorted, join)
-    end
+    ensure_join_crossfades_in_range(start_t, end_t, tracks_sorted, join)
   end
 
 
