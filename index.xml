@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<index version="1" name="hsuanice Scripts" commit="047f13c29b866686be30dc99ef051ee9bb579221">
+<index version="1" name="hsuanice Scripts" commit="cf6ce2b80dc0c95bdfed697cf454325acde758c4">
   <category name="Beta Testing">
     <reapack name="hsuanice_BWF TimeReference Embed Tool.lua" type="script" desc="Embed BWF TimeReference to Active take from Take 1 or Current Position TC">
       <version name="0.7.1" author="hsuanice" time="2025-08-14T17:52:57Z">
@@ -370,6 +370,8 @@
 {\pard \ql \f0 \sa0 \li720 \fi-360 \endash \tx360\tab Right boundary: extend LAST-IN-AREA item's right edge (no move).\sa180\par}
 {\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Items only; envelopes not supported yet (Razor contains envelope -> abort).\par}
 {\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Restores original item/track selection.\sa180\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 Known issues:\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab CF_UNIT="grid" is currently inaccurate; seconds/frames work correctly. Grid unit will be reworked using SWS grid divisions at the reference time.\sa180\par}
 {\pard \ql \f0 \sa180 \li0 \fi0 Note: This script was generated using ChatGPT based on design concepts and iterative testing by hsuanice. hsuanice served as the workflow designer, tester, and integrator for this tool.\par}
 {\pard \ql \f0 \sa180 \li0 \fi0 Reference: MRX_PasteItemToFill_Items_and_EnvelopeLanes.lua\par}
 }
@@ -383,6 +385,9 @@
       </version>
       <version name="0.4.0" author="hsuanice" time="2025-08-26T04:52:34Z">
         <source main="main">https://github.com/hsuanice/ReaScripts/raw/047f13c29b866686be30dc99ef051ee9bb579221/Beta%20Testing/hsuanice_Pro%20Tools%20Paste%20Special-%20Repeat%20to%20Fill%20Selection.lua</source>
+      </version>
+      <version name="0.4.2" author="hsuanice" time="2025-08-26T06:06:50Z">
+        <source main="main">https://github.com/hsuanice/ReaScripts/raw/cf6ce2b80dc0c95bdfed697cf454325acde758c4/Beta%20Testing/hsuanice_Pro%20Tools%20Paste%20Special-%20Repeat%20to%20Fill%20Selection.lua</source>
       </version>
     </reapack>
     <reapack name="hsuanice_Pro Tools Trim Clip To File Boundaries.lua" type="script" desc="Pro Tools - Trim Clip To File Boundaries">
