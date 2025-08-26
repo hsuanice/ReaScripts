@@ -1,6 +1,6 @@
 --[[
 @description hsuanice_Pro Tools Paste Special: Repeat to Fill Selection
-@version 0.4.2
+@version 0.4.3
 @author hsuanice
 @about
   Pro Tools-style "Paste Special: Repeat to Fill Selection"
@@ -24,6 +24,12 @@
   Reference: MRX_PasteItemToFill_Items_and_EnvelopeLanes.lua
 
 @changelog
+  v0.4.3 - Boundary crossfade alignment options ("left" / "center" / "right");
+          "center" splits overlap evenly across the Razor border. For the right edge,
+          centering may extend the outside neighbor left by half (configurable via
+          EDGE_XF_MOVE_OUTSIDE). Temporarily disables "Trim content behind…" during
+          edge centering to preserve overlap; restored afterward. JOIN tiles unchanged.
+
   v0.4.2 - Fix: Multitrack paste restored — use single anchor (top) track + reassert
            "last touched" before each paste so clipboard distributes across tracks
            correctly. Feat: System equal-power stamping — when CF_SHAPE_PRESET="equal_power"
@@ -72,7 +78,7 @@ local r = reaper
 --------------------------------------------------------------------------------
 -- Crossfade length unit (v0.4.0)
 CF_UNIT        = "frames"            -- "seconds" | "frames" | "grid"
-CF_VALUE       = 1.0               -- 若 seconds=秒；frames=影格數；grid=幾個 grid 單位
+CF_VALUE       = 48               -- 若 seconds=秒；frames=影格數；grid=幾個 grid 單位
 CF_GRID_REF    = "left"            -- 以哪個時間點換算 grid 長度："left"|"center"|"right"（建議 left）
 
 
@@ -85,6 +91,18 @@ CF_SHAPE_OUT      = 0              -- only used when PRESET="custom", 0..6
 CF_CURVE_IN       = 0            -- -1..1, only used when PRESET="custom"
 CF_CURVE_OUT      = 0            -- -1..1, only used when PRESET="custom"
 CF_EQUALPOWER_FLIP = true   -- set true if you feel the equal-power curvature is reversed
+
+-- Edge (boundary) crossfade alignment on the Razor borders only:
+--   "right"  = 全部在邊界內側（現行行為）
+--   "center" = 以邊界為中心，左右各一半
+--   "left"   = 全部在邊界外側
+-- 內部 JOIN：置中
+JOIN_XF_ALIGN = "center"   -- "right" | "center" | "left"
+
+-- 邊界 EDGE：置中，允許向外側延左緣（只動左緣、不動右邊界）
+EDGE_XF_ALIGN = "center"   -- "right" | "center" | "left"
+EDGE_XF_MOVE_OUTSIDE = true
+
 
 
 
@@ -425,6 +443,29 @@ local function apply_item_fade_shape(it, fadeInLen, fadeOutLen)
   end
 end
 
+-- 向左延伸 item 的左緣 amt 秒，保持右邊界不動；若素材不夠，回傳實際可延長秒數
+local function extend_item_left_no_move_right_clamped(it, amt)
+  if not it or not (amt and amt > 0) then return 0 end
+  local tk = r.GetActiveTake(it)
+  if not tk then return 0 end
+
+  local pos = r.GetMediaItemInfo_Value(it, "D_POSITION")
+  local len = r.GetMediaItemInfo_Value(it, "D_LENGTH")
+  local rate = r.GetMediaItemTakeInfo_Value(tk, "D_PLAYRATE")
+  local offs = r.GetMediaItemTakeInfo_Value(tk, "D_STARTOFFS")       -- 秒（source domain）
+  local loop = r.GetMediaItemTakeInfo_Value(tk, "B_LOOPSRC") > 0.5
+
+  -- 在不 Loop 的情況下，可向左延的「工程秒」= offs / rate
+  local max_left = loop and amt or math.min(amt, (offs or 0) / math.max(rate, 1e-9))
+
+  if max_left <= 0 then return 0 end
+  r.SetMediaItemInfo_Value(it, "D_POSITION", pos - max_left)
+  r.SetMediaItemInfo_Value(it, "D_LENGTH",   len + max_left)
+  -- 同步滑移 take offset，確保內容不變
+  r.SetMediaItemTakeInfo_Value(tk, "D_STARTOFFS", math.max(0, offs - max_left * rate))
+  return max_left
+end
+
 
 
 
@@ -569,52 +610,109 @@ end
 
 local function apply_boundary_crossfades(start_t, end_t, tracks_sorted, fadeLen)
   if fadeLen<=EPS then return end
+  local align = (EDGE_XF_ALIGN or "right"):lower()
+  local half  = fadeLen * 0.5
+
+  -- 在置中時，為避免「Trim content behind」把重疊的一側吃掉，可暫時關掉；做完還原
+  local TRIM_CMD = 41117 -- Options: Trim content behind media items when editing
+  local trim_was_on = (r.GetToggleCommandState(TRIM_CMD) == 1)
+  local need_temp_untrim = (align=="center" or align=="left")  -- 會做左延時才需要
+  if need_temp_untrim and trim_was_on then r.Main_OnCommand(TRIM_CMD,0) end
+
   for _,tr in ipairs(tracks_sorted) do
-    -- LEFT boundary
+    -- ===== LEFT boundary =====
     local leftN  = find_left_neighbor(tr, start_t)
-    if leftN or not edgeToEdgeOnly then
-      local first = first_item_in_area_on_track(tr, start_t, end_t)
-      if first then
-        -- 第一個：淡入
-        apply_item_fade_shape(first,
-          math.max(fadeLen, r.GetMediaItemInfo_Value(first,"D_FADEINLEN")), nil)
+    local first  = first_item_in_area_on_track(tr, start_t, end_t)
 
-        -- 左鄰：延長右緣 + 淡出
-        if leftN then
-          local ll = reaper.GetMediaItemInfo_Value(leftN,"D_LENGTH")
-          reaper.SetMediaItemInfo_Value(leftN,"D_LENGTH", ll + fadeLen) -- extend right edge only
-          apply_item_fade_shape(leftN, nil,
-            math.max(fadeLen, r.GetMediaItemInfo_Value(leftN,"D_FADEOUTLEN")))
+    if first then
+      if leftN then
+        if align == "center" then
+          -- 左鄰向右延一半；區內第一塊向左延一半（置中）
+          local ll = r.GetMediaItemInfo_Value(leftN,"D_LENGTH")
+          r.SetMediaItemInfo_Value(leftN,"D_LENGTH", ll + half)
+          extend_item_left_no_move_right_clamped(first, half)
+        elseif align == "left" then
+          -- 全部放在邊界外側：只把區內第一塊向左延整個長度
+          extend_item_left_no_move_right_clamped(first, fadeLen)
+        else -- "right"
+          -- 現行：全在內側，僅左鄰向右延整個長度
+          local ll = r.GetMediaItemInfo_Value(leftN,"D_LENGTH")
+          r.SetMediaItemInfo_Value(leftN,"D_LENGTH", ll + fadeLen)
+        end
 
+        -- 形狀/長度（兩側都至少是 fadeLen）
+        local fin  = math.max(fadeLen, r.GetMediaItemInfo_Value(first, "D_FADEINLEN"))
+        local fout = math.max(fadeLen, r.GetMediaItemInfo_Value(leftN, "D_FADEOUTLEN"))
+        apply_item_fade_shape(first, fin, nil)
+        apply_item_fade_shape(leftN, nil,  fout)
+      else
+        -- 沒有左鄰，但若你不強制 edge-to-edge 才做，可以在此僅對第一塊給淡入
+        if not edgeToEdgeOnly then
+          local fin = math.max(fadeLen, r.GetMediaItemInfo_Value(first,"D_FADEINLEN"))
+          apply_item_fade_shape(first, fin, nil)
         end
       end
     end
 
-
-
-
-
-    -- RIGHT boundary
+    -- ===== RIGHT boundary =====
     local rightN = find_right_neighbor(tr, end_t)
-    if rightN or not edgeToEdgeOnly then
-      local last  = last_item_in_area_on_track(tr, start_t, end_t)
-      if last then
-        -- 最後一個：延長右緣 + 淡出
-        local llen = reaper.GetMediaItemInfo_Value(last,"D_LENGTH")
-        reaper.SetMediaItemInfo_Value(last,"D_LENGTH", llen + fadeLen) -- extend to right (no move)
-        apply_item_fade_shape(last, nil,
-          math.max(fadeLen, r.GetMediaItemInfo_Value(last,"D_FADEOUTLEN")))
+    local last   = last_item_in_area_on_track(tr, start_t, end_t)
 
-        -- 右鄰：淡入
-        if rightN then
-        apply_item_fade_shape(rightN,
-          math.max(fadeLen, r.GetMediaItemInfo_Value(rightN,"D_FADEINLEN")), nil)
+    if last then
+      if rightN then
+        if (EDGE_XF_ALIGN or "right"):lower() == "center" and EDGE_XF_MOVE_OUTSIDE then
+          -- 置中：區內最後一塊向右延一半；右鄰向左延一半（若素材不足，會夾緊）
+          local half  = fadeLen * 0.5
+          local llen  = r.GetMediaItemInfo_Value(last,"D_LENGTH")
+          r.SetMediaItemInfo_Value(last,"D_LENGTH", llen + half)
 
+          local gotR  = extend_item_left_no_move_right_clamped(rightN, half)
+          if gotR < half - EPS then
+            -- 右鄰素材不足：把「置中」改為「可達到的對稱值」
+            local want = gotR
+            -- 回退內側延伸，保持重疊對稱
+            r.SetMediaItemInfo_Value(last,"D_LENGTH", llen + want)
+            half = want
+          end
+          -- 設置兩側淡化（長度至少 half）
+          local fout = math.max(half, r.GetMediaItemInfo_Value(last,   "D_FADEOUTLEN"))
+          local fin  = math.max(half, r.GetMediaItemInfo_Value(rightN, "D_FADEINLEN"))
+          apply_item_fade_shape(last,   nil, fout)
+          apply_item_fade_shape(rightN, fin, nil )
+
+        elseif (EDGE_XF_ALIGN or "right"):lower() == "left" and EDGE_XF_MOVE_OUTSIDE then
+          -- 全部在外側：只把右鄰向左延整個長度（不足則夾緊）
+          local got = extend_item_left_no_move_right_clamped(rightN, fadeLen)
+          local fout = math.max(got, r.GetMediaItemInfo_Value(last,"D_FADEOUTLEN"))
+          local fin  = math.max(got, r.GetMediaItemInfo_Value(rightN,"D_FADEINLEN"))
+          apply_item_fade_shape(last, nil, fout)
+          apply_item_fade_shape(rightN, fin, nil)
+
+        else
+          -- "right" 或不允許動外側：全在內側，只延長區內最後一塊
+          local llen = r.GetMediaItemInfo_Value(last,"D_LENGTH")
+          r.SetMediaItemInfo_Value(last,"D_LENGTH", llen + fadeLen)
+          local fout = math.max(fadeLen, r.GetMediaItemInfo_Value(last,"D_FADEOUTLEN"))
+          local fin  = math.max(fadeLen, r.GetMediaItemInfo_Value(rightN,"D_FADEINLEN"))
+          apply_item_fade_shape(last, nil, fout)
+          apply_item_fade_shape(rightN, fin, nil)
+        end
+
+      else
+        -- 沒右鄰；若非 edge-to-edge 限制，可只對 last 給淡出
+        if not edgeToEdgeOnly then
+          local fout = math.max(fadeLen, r.GetMediaItemInfo_Value(last,"D_FADEOUTLEN"))
+          apply_item_fade_shape(last, nil, fout)
         end
       end
     end
+
   end
+
+  -- 還原 Trim behind
+  if need_temp_untrim and trim_was_on then r.Main_OnCommand(TRIM_CMD,0) end
 end
+
 
 -- 用系統等功率形狀（Action 41529）蓋掉選區內、指定軌的交叉形狀
 local function stamp_system_equal_power(start_t, end_t, tracks_sorted)
