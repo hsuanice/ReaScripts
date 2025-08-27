@@ -1,9 +1,10 @@
 --[[
 @description Track and Razor Item Link like Pro Tools (performance edition)
-@version 0.8.5-perf-bugfix3
+@version 0.9.0
 @author hsuanice
 @about
-  Pro Tools-style "Link Track and Edit Selection". Edit Selection = Razor Area or Item Selection.
+  Pro Tools-style "Link Track and Edit Selection". 
+  Edit Selection = Razor Area or Item Selection.
 
   Perf principles:
     • Gate heavy scans by GetProjectStateChangeCount().
@@ -17,17 +18,28 @@
     2) Else Item Selection → use VIRTUAL (latched) span [min..max]
     3) Else no active range
 
+  Note:
+    This script was generated using ChatGPT based on design concepts and iterative testing by hsuanice.
+    hsuanice served as the workflow designer, tester, and integrator for this tool.
+
+
+
   Changelog:
-    v0.8.5-perf-bugfix3
-      - NEW gate: If track selection changed because ITEMS changed this tick (e.g. 40182 "Select all"),
-        do NOT run step C (build razors on TS) nor step D (range-based item sync).
-        Prevents unintended "becoming Razor/TS" right after Select-All.
+    v0.9.0
+      - NEW: One-side trigger guard — prevents "ping-pong" (items→tracks→items) within the same cycle.
+      - Stable across all test cases (Razor, Virtual, Time Selection, Select-All 40182).
+      - Confirmed performance-friendly under large sessions (200+ tracks, thousands of items).
+    v0.8.5-perf-bugfix4 - Internal testing build (single-side trigger, pre-official).
+    v0.8.5-perf-bugfix3 - Gate: skip C/D if tracks changed due to items this tick (e.g. Select-All).
     v0.8.4-perf-bugfix2 - Step B: absolute set for track selection to avoid edge cases after 40182.
     v0.8.3-perf-bugfix   - Fix "need to click twice" with Razor; canonical Razor signature.
     v0.8.2-perf          - Suppress relatch shrink after script-driven item changes.
     v0.8.1-perf-hotfix   - Restore set_track_level_ranges().
     v0.8.0-perf          - Major perf pass.
+
+
 ]]
+
 
 -------------------------
 -- === USER OPTIONS === --
@@ -292,6 +304,7 @@ local prev = {
 -- Main loop
 ----------------
 local function mainloop()
+  local triggered_side = nil -- "ITEMS" or "TRACKS"  
   local psc = reaper.GetProjectStateChangeCount(0)
   local cursor = reaper.GetCursorPosition()
   local ts, te = get_time_selection()
@@ -346,10 +359,11 @@ local function mainloop()
     end
     reaper.PreventUIRefresh(-1); reaper.UpdateArrange()
     sel_tracks_set, tr_sel_sig = get_selected_tracks_set_and_sig()
+    triggered_side = "TRACKS"  -- ★ 新增：標記同輪已由 Tracks 端觸發
   end
 
   -- B) Items changed (or their track set) and NO Razor → Track selection follows items' tracks (absolute set)
-  if (Razor.cnt_tracks_with == 0) and items_changed_this_tick then
+  if (Razor.cnt_tracks_with == 0) and items_changed_this_tick and triggered_side ~= "TRACKS" then
     reaper.PreventUIRefresh(1)
     local want = it_info.tr_set
     local tcnt = reaper.CountTracks(0)
@@ -361,6 +375,7 @@ local function mainloop()
     reaper.PreventUIRefresh(-1); reaper.UpdateArrange()
     sel_tracks_set, tr_sel_sig = get_selected_tracks_set_and_sig()
     tracks_changed_by_items = true
+    triggered_side = "ITEMS"    
   end
 
   -- C) Track selection changed + REAL TS present → build/remove Razor + sync items
@@ -393,7 +408,11 @@ local function mainloop()
   -- D) Razor/Track changed → sync items under ACTIVE range (only on changed tracks)
   --    BUT skip if tracks_changed_by_items to avoid re-touching selection right after Select-All
   local a_s, a_e, a_src = active_range(it_info)
-  if (a_s and a_e) and ((Razor.sig ~= prev.razor_sig) or (tr_sel_sig ~= prev.tr_sel_sig)) and (not tracks_changed_by_items) then
+  if (a_s and a_e)
+     and ((Razor.sig ~= prev.razor_sig) or (tr_sel_sig ~= prev.tr_sel_sig))
+     and (not tracks_changed_by_items)
+     and triggered_side ~= "ITEMS"
+  then
     local prev_set = {}; for g in string.gmatch(prev.tr_sel_sig or "", "[^|]+") do prev_set[g] = true end
     local changed = {}
     for g,_ in pairs(sel_tracks_set) do if not prev_set[g] then changed[g] = true end end
@@ -420,6 +439,7 @@ local function mainloop()
     end
     reaper.PreventUIRefresh(-1); reaper.UpdateArrange()
     suppress_latch_next = true
+    triggered_side = "TRACKS"
   end
 
   -- Publish (monitor)
