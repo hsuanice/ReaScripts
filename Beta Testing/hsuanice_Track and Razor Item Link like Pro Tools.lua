@@ -1,6 +1,6 @@
 --[[
 @description Track and Razor Item Link like Pro Tools (performance edition)
-@version 0.9.0
+@version 0.10.0
 @author hsuanice
 @about
   Pro Tools-style "Link Track and Edit Selection". 
@@ -24,18 +24,29 @@
 
 
 
-  Changelog:
+@changelog
+  v0.10.0
+    - Interop: respect external Edit Link master toggle (Project ExtState):
+        • Namespace "hsuanice_RazorItemLink", Key "enabled" ("1"/"0")
+        • OFF → skip Razor→Items sync (D) AND suppress TS→Items in C
+               (still builds/clears Razor ranges for visual feedback)
+        • ON / unset → behavior unchanged (backward-compatible)
+    - Fix: C-block if/else structure (remove stray "..." placeholder) and
+           avoid duplicate local RIL_enabled; eliminates syntax error/crash.
+    - Perf: only adds a constant-time flag check; no extra enumerations;
+            UpdateArrange usage unchanged.
+    - Meta: align namespace names; keep "Note" credits in header.
     v0.9.0
       - NEW: One-side trigger guard — prevents "ping-pong" (items→tracks→items) within the same cycle.
       - Stable across all test cases (Razor, Virtual, Time Selection, Select-All 40182).
       - Confirmed performance-friendly under large sessions (200+ tracks, thousands of items).
-    v0.8.5-perf-bugfix4 - Internal testing build (single-side trigger, pre-official).
-    v0.8.5-perf-bugfix3 - Gate: skip C/D if tracks changed due to items this tick (e.g. Select-All).
-    v0.8.4-perf-bugfix2 - Step B: absolute set for track selection to avoid edge cases after 40182.
-    v0.8.3-perf-bugfix   - Fix "need to click twice" with Razor; canonical Razor signature.
-    v0.8.2-perf          - Suppress relatch shrink after script-driven item changes.
-    v0.8.1-perf-hotfix   - Restore set_track_level_ranges().
-    v0.8.0-perf          - Major perf pass.
+    v0.8.5 - perf-bugfix4  - Internal testing build (single-side trigger, pre-official).
+    v0.8.5 - perf-bugfix3  - Gate: skip C/D if tracks changed due to items this tick (e.g. Select-All).
+    v0.8.4 - perf-bugfix2  - Step B: absolute set for track selection to avoid edge cases after 40182.
+    v0.8.3 - perf-bugfix   - Fix "need to click twice" with Razor; canonical Razor signature.
+    v0.8.2 - perf          - Suppress relatch shrink after script-driven item changes.
+    v0.8.1 - perf-hotfix   - Restore set_track_level_ranges().
+    v0.8.0 - perf          - Major perf pass.
 
 
 ]]
@@ -61,6 +72,15 @@ local function nearly_eq(a,b) return math.abs((a or 0)-(b or 0)) < 1e-12 end
 local function tconcat_keys_sorted(set)
   local keys = {}; for k,_ in pairs(set) do keys[#keys+1]=k end
   table.sort(keys); return table.concat(keys, "|")
+end
+
+-- Honor external master toggle from companion script:
+-- Namespace: "hsuanice_RazorItemLink", key: "enabled" (true/false, 1/0, on/off)
+local function is_razor_item_link_enabled()
+  local _, v = reaper.GetProjExtState(0, "hsuanice_RazorItemLink", "enabled")
+  if v == "" then return true end  -- default ON for backward-compat
+  v = v:lower()
+  return not (v == "0" or v == "false" or v == "off")
 end
 
 ----------------
@@ -308,6 +328,7 @@ local function mainloop()
   local psc = reaper.GetProjectStateChangeCount(0)
   local cursor = reaper.GetCursorPosition()
   local ts, te = get_time_selection()
+  local RIL_enabled = is_razor_item_link_enabled()
 
   local sel_tracks_set, tr_sel_sig = get_selected_tracks_set_and_sig()
   local it_info = get_selected_items_info()
@@ -394,10 +415,11 @@ local function mainloop()
       if changed[g] then
         if sel_tracks_set[g] then
           set_track_level_ranges(tr, { {ts, te} })
-          track_select_items_matching_range(tr, ts, te, true)
+          if RIL_enabled then track_select_items_matching_range(tr, ts, te, true) end
         else
           set_track_level_ranges(tr, {})
-          track_select_items_matching_range(tr, ts, te, false)
+          if RIL_enabled then track_select_items_matching_range(tr, ts, te, false) end
+
         end
       end
     end
@@ -409,9 +431,10 @@ local function mainloop()
   --    BUT skip if tracks_changed_by_items to avoid re-touching selection right after Select-All
   local a_s, a_e, a_src = active_range(it_info)
   if (a_s and a_e)
-     and ((Razor.sig ~= prev.razor_sig) or (tr_sel_sig ~= prev.tr_sel_sig))
-     and (not tracks_changed_by_items)
-     and triggered_side ~= "ITEMS"
+    and ((Razor.sig ~= prev.razor_sig) or (tr_sel_sig ~= prev.tr_sel_sig))
+    and (not tracks_changed_by_items)
+    and triggered_side ~= "ITEMS"
+    and (RIL_enabled or (a_src ~= "razor"))
   then
     local prev_set = {}; for g in string.gmatch(prev.tr_sel_sig or "", "[^|]+") do prev_set[g] = true end
     local changed = {}
