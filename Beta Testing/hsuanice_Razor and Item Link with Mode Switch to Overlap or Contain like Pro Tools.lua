@@ -1,6 +1,6 @@
 --[[
 @description hsuanice_Razor and Item Link with Mode switch to Overlap or Contain like Pro Tools
-@version 0.2.1
+@version 0.2.2
 @author hsuanice
 @about
   Single-button toggle watcher that add-selects media items on each track according to that track's
@@ -21,6 +21,14 @@
     hsuanice served as the workflow designer, tester, and integrator for this tool.
 
 @changelog
+  v0.2.2 - Rename Project ExtState namespace for master toggle:
+           • Namespace: "hsuanice_RazorItemLink", Key: "enabled" ("1"/"0")
+           • Align with Track-Link script; no behavior change.
+           Master toggle storage switched to Project ExtState (per-project, interoperable):
+           • Namespace: "hsuanice_RazorItemLink", Key: "enabled" ("1"/"0")
+           • Writes ON at launch, OFF on exit
+           • Deprecates old global ExtState "hsuanice_RazorItemLink_ProTools"
+           • No change to range logic; still add-only unless STRICT_SYNC = true
   v0.2.1 - Updated header/name, added explicit inclusive contain note and credits. No functional change.
 ]]
 
@@ -29,7 +37,7 @@
 -- Range matching rule for selecting items against Razor Areas:
 --   1 = overlap (select if item intersects any range)
 --   2 = contain (select if item is fully inside a range; inclusive; Pro Tools mode)
-local RANGE_MODE = 2
+local RANGE_MODE = 1
 
 -- If you prefer hard sync (clear selection first, then select matches only), set true:
 local STRICT_SYNC = false
@@ -44,11 +52,11 @@ if reaper.set_action_options then reaper.set_action_options(1 | 4) end
 -- Ensure toolbar toggles OFF on exit; also publish enabled=0 for compatibility
 reaper.atexit(function()
   if reaper.set_action_options then reaper.set_action_options(8) end -- 8=toggle OFF
-  reaper.SetExtState("hsuanice_RazorItemLink_ProTools", "enabled", "0", true)
+  reaper.SetProjExtState(0, "hsuanice_RazorItemLink", "enabled", "0")
 end)
 
 -- Mark as enabled for this run (legacy/compat)
-reaper.SetExtState("hsuanice_RazorItemLink_ProTools", "enabled", "1", true)
+reaper.SetProjExtState(0, "hsuanice_RazorItemLink", "enabled", "1")
 
 -- Read all TRACK-LEVEL Razor ranges for a given track.
 -- Prefer P_RAZOREDITS_EXT; fall back to P_RAZOREDITS.
