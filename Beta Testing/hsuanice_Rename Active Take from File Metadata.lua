@@ -1,6 +1,6 @@
 --[[
 @description ReaImGui - Rename Active Take from Metadata (caret insert + cached preview + copy/export)
-@version 0.8.1
+@version 0.8.2
 @author hsuanice
 @about
   Rename active takes and/or item notes from BWF/iXML and true source metadata using a fast ReaImGui UI.
@@ -11,7 +11,7 @@
     - Apply uses current selection; reuses cache if unchanged; Undo / Redo supported.
     - Channel-aware tokens: $trk (auto per-take), $trkN, and $trkall (from iXML/BWF track list, with fallbacks).
     - True source tokens: $srcfile, $srcbase, $srcext, $srcpath, $srcdir (actual media filename/paths).
-    - Metadata panel + preview table with quick copy; export preview table as Tab or CSV.
+    - Metadata panel + preview table with quick copy; export preview table as TSV or CSV.
     - Works on audio items; items without takes (empty/MIDI) can still update notes.
     - Requires: ReaImGui (install via ReaPack).
   
@@ -28,6 +28,11 @@
   hsuanice served as the workflow designer, tester, and integrator for this tool.
 
 @changelog
+  v0.8.2 - Consistency: unified all internal "tab" format identifiers to "tsv"; default right_copy_fmt = "tsv".
+           - UI: "Copy preview table" uses TSV/CSV buttons (clipboard copy via ImGui_SetClipboardText).
+           - Preview: right pane preview text reflects current cached rows and respects preview_limit.
+           - Save dialog: silent write for .tsv/.csv; cancel returns nil from choose_save_path() (no write, no popup).
+           - Stability: verified matching Begin/End for Child and Table scopes in view/copy panes.
   v0.8.1 - UI: Unified “Copy preview table” buttons to TSV + CSV (renamed Tab → TSV); logic unchanged, TSV uses tab delimiter.
            - Result dialog: Save as .tsv / .csv now writes silently without REAPER popup.
              • If user cancels the file dialog → no file is written, no message shown.
@@ -619,7 +624,7 @@ local close_after_apply = false
 local active_box = "take"
 local SCAN_CACHE = nil
 local left_copy_text, right_copy_text = "", ""
-local right_copy_fmt = "tab"
+local right_copy_fmt = "tsv"
 local RIGHT_SELECTABLE_VIEW = false
 local SPLIT_RATIO = load_split_ratio()
 local _drag_active = false
@@ -754,8 +759,7 @@ local function draw_result_modal()
       local path = choose_save_path(name, "Tab-separated (*.tsv)\0*.tsv\0All (*.*)\0*.*\0")
       -- If canceled, path is nil → do nothing
       if path then
-        -- "tab" means tab-delimited (TSV content)
-        local _ = write_text_file(path, build_result_text("tab", r.rows))
+        local _ = write_text_file(path, build_result_text("tsv", r.rows))
         -- optional: update status line in the main UI (no modal)
         -- status_msg = _ and ("Saved: " .. path) or "Save failed."
       end
@@ -1268,8 +1272,8 @@ local function draw_view_pane(available_h)
       reaper.ImGui_TableSetColumnIndex(ctx, 1)
       reaper.ImGui_Text(ctx, "Copy preview table:")
       reaper.ImGui_SameLine(ctx)
-      if reaper.ImGui_SmallButton(ctx, "Tab##copytable") then
-        local text = build_right_copy_text_from_rows("tab")
+      if reaper.ImGui_SmallButton(ctx, "TSV##copytable") then
+        local text = build_right_copy_text_from_rows("tsv")
         reaper.ImGui_SetClipboardText(ctx, text or "")
       end
       reaper.ImGui_SameLine(ctx)
