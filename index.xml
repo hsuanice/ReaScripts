@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<index version="1" name="hsuanice Scripts" commit="ce22374db79c7456614df4a3948cbf5e48f61cef">
+<index version="1" name="hsuanice Scripts" commit="a217ea8eebb52c38f42ef32fcc2d75354385e6e0">
   <category name="Beta Testing">
     <reapack name="hsuanice_BWF TimeReference Embed Tool.lua" type="script" desc="Embed BWF TimeReference to Active take from Take 1 or Current Position TC">
       <version name="0.7.1" author="hsuanice" time="2025-08-14T17:52:57Z">
@@ -658,7 +658,8 @@ v0.1 - Beta release]]></changelog>
 {\pard \ql \f0 \sa0 \li360 \fi-360 1)\tx360\tab Razor exists \u8594 ? use Razor (highest)\par}
 {\pard \ql \f0 \sa0 \li360 \fi-360 2)\tx360\tab Else Item Selection \u8594 ? use VIRTUAL (latched) span [min..max]\par}
 {\pard \ql \f0 \sa0 \li360 \fi-360 3)\tx360\tab Else no active range\sa180\par}
-{\pard \ql \f0 \sa180 \li0 \fi0 Changelog: v0.8.5-perf-bugfix3 - NEW gate: If track selection changed because ITEMS changed this tick (e.g. 40182 "Select all"), do NOT run step C (build razors on TS) nor step D (range-based item sync). Prevents unintended "becoming Razor/TS" right after Select-All. v0.8.4-perf-bugfix2 - Step B: absolute set for track selection to avoid edge cases after 40182. v0.8.3-perf-bugfix - Fix "need to click twice" with Razor; canonical Razor signature. v0.8.2-perf - Suppress relatch shrink after script-driven item changes. v0.8.1-perf-hotfix - Restore set_track_level_ranges(). v0.8.0-perf - Major perf pass.\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 Note: This script was generated using ChatGPT based on design concepts and iterative testing by hsuanice. hsuanice served as the workflow designer, tester, and integrator for this tool.\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 Changelog: v0.9.0 - NEW: One-side trigger guard \u8212- prevents "ping-pong" (items\u8594 ?tracks\u8594 ?items) within the same cycle. - Stable across all test cases (Razor, Virtual, Time Selection, Select-All 40182). - Confirmed performance-friendly under large sessions (200+ tracks, thousands of items). v0.8.5-perf-bugfix4 - Internal testing build (single-side trigger, pre-official). v0.8.5-perf-bugfix3 - Gate: skip C/D if tracks changed due to items this tick (e.g. Select-All). v0.8.4-perf-bugfix2 - Step B: absolute set for track selection to avoid edge cases after 40182. v0.8.3-perf-bugfix - Fix "need to click twice" with Razor; canonical Razor signature. v0.8.2-perf - Suppress relatch shrink after script-driven item changes. v0.8.1-perf-hotfix - Restore set_track_level_ranges(). v0.8.0-perf - Major perf pass.\par}
 }
 ]]></description>
       </metadata>
@@ -700,6 +701,19 @@ v0.1 - Beta release]]></changelog>
       </version>
       <version name="0.8.5-perf-bugfix3" author="hsuanice" time="2025-08-22T18:20:38Z">
         <source main="main">https://github.com/hsuanice/ReaScripts/raw/e4f080c1d16e39093433aa983dc0da9cad144a06/Beta%20Testing/hsuanice_Track%20and%20Razor%20Item%20Link%20like%20Pro%20Tools.lua</source>
+      </version>
+      <version name="0.9.0" author="hsuanice" time="2025-08-27T16:27:18Z">
+        <changelog><![CDATA[- NEW: One-side trigger guard — prevents "ping-pong" (items→tracks→items) within the same cycle.
+- Stable across all test cases (Razor, Virtual, Time Selection, Select-All 40182).
+- Confirmed performance-friendly under large sessions (200+ tracks, thousands of items).
+v0.8.5-perf-bugfix4 - Internal testing build (single-side trigger, pre-official).
+v0.8.5-perf-bugfix3 - Gate: skip C/D if tracks changed due to items this tick (e.g. Select-All).
+v0.8.4-perf-bugfix2 - Step B: absolute set for track selection to avoid edge cases after 40182.
+v0.8.3-perf-bugfix   - Fix "need to click twice" with Razor; canonical Razor signature.
+v0.8.2-perf          - Suppress relatch shrink after script-driven item changes.
+v0.8.1-perf-hotfix   - Restore set_track_level_ranges().
+v0.8.0-perf          - Major perf pass.]]></changelog>
+        <source main="main">https://github.com/hsuanice/ReaScripts/raw/a217ea8eebb52c38f42ef32fcc2d75354385e6e0/Beta%20Testing/hsuanice_Track%20and%20Razor%20Item%20Link%20like%20Pro%20Tools.lua</source>
       </version>
     </reapack>
     <reapack name="hsuanice_Track and Razor Item Link Monitor.lua" type="script" desc="Track • Razor • Item LINK — MONITOR (driver-aware)">
