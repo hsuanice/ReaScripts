@@ -1,6 +1,6 @@
 --[[
 @description Track and Razor Item Link like Pro Tools (performance edition)
-@version 0.10.0
+@version 0.10.1
 @author hsuanice
 @about
   Pro Tools-style "Link Track and Edit Selection". 
@@ -25,6 +25,14 @@
 
 
 @changelog
+  v0.10.1
+    - TCP → Razor toggle honors Edit Link (ON) with Overlap selection:
+        • When Edit Link is ON, items overlapping the Razor range are selected/unselected
+          as you toggle tracks in TCP (C block now calls Overlap explicitly). 
+        • When Edit Link is OFF, still builds/clears Razor for visualization but does not touch item selection.
+    - Align Razor-sourced sync (D block) to Overlap as well, so it won’t “rewrite” C’s Overlap with Contain.
+    - Internal: item/range matcher and per-track selector now accept an explicit match mode parameter;
+      no extra enumeration or UI refresh added (perf-neutral).
   v0.10.0
     - Interop: respect external Edit Link master toggle (Project ExtState):
         • Namespace "hsuanice_RazorItemLink", Key "enabled" ("1"/"0")
@@ -47,8 +55,6 @@
     v0.8.2 - perf          - Suppress relatch shrink after script-driven item changes.
     v0.8.1 - perf-hotfix   - Restore set_track_level_ranges().
     v0.8.0 - perf          - Major perf pass.
-
-
 ]]
 
 
@@ -136,19 +142,22 @@ local function get_selected_items_info()
   }
 end
 
-local function item_matches_range(s,e,rs,re_)
-  if RANGE_MODE == 1 then return (e > rs + EPS) and (s < re_ - EPS)
-  else                     return (s >= rs - EPS) and (e <= re_ + EPS)
+local function item_matches_range(s,e,rs,re_, mode)
+  mode = mode or RANGE_MODE   -- 1=overlap, 2=contain (default=global)
+  if mode == 1 then
+    return (e > rs + EPS) and (s < re_ - EPS)     -- overlap
+  else
+    return (s >= rs - EPS) and (e <= re_ + EPS)   -- contain（含EPS，含邊界）
   end
 end
 
-local function track_select_items_matching_range(tr, rs, re_, sel)
+local function track_select_items_matching_range(tr, rs, re_, sel, mode)
   local n = reaper.CountTrackMediaItems(tr)
   if n == 0 then return end
   for i=0, n-1 do
     local it = reaper.GetTrackMediaItem(tr, i)
     local s, e = item_bounds(it)
-    if item_matches_range(s, e, rs, re_) then
+    if item_matches_range(s, e, rs, re_, mode) then
       reaper.SetMediaItemInfo_Value(it, "B_UISEL", sel and 1 or 0)
     end
   end
@@ -415,10 +424,10 @@ local function mainloop()
       if changed[g] then
         if sel_tracks_set[g] then
           set_track_level_ranges(tr, { {ts, te} })
-          if RIL_enabled then track_select_items_matching_range(tr, ts, te, true) end
+          if RIL_enabled then track_select_items_matching_range(tr, ts, te, true,  1) end  -- Overlap
         else
           set_track_level_ranges(tr, {})
-          if RIL_enabled then track_select_items_matching_range(tr, ts, te, false) end
+          if RIL_enabled then track_select_items_matching_range(tr, ts, te, false, 1) end  -- Overlap
 
         end
       end
@@ -451,9 +460,9 @@ local function mainloop()
         if a_src == "razor" then
           local ranges = (Razor.t_ranges[g] or {})
           if #ranges > 0 then
-            for _, r in ipairs(ranges) do track_select_items_matching_range(tr, r[1], r[2], sel) end
+            for _, r in ipairs(ranges) do track_select_items_matching_range(tr, r[1], r[2], sel,   1) end  -- Overlap
           else
-            track_select_items_matching_range(tr, a_s, a_e, false)
+            track_select_items_matching_range(tr, a_s, a_e, false, 1)                                    -- Overlap
           end
         else
           track_select_items_matching_range(tr, a_s, a_e, sel)
