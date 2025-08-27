@@ -1,6 +1,6 @@
 --[[
 @description ReaImGui - Rename Active Take from Metadata (caret insert + cached preview + copy/export)
-@version 0.7.5
+@version 0.8.0
 @author hsuanice
 @about
   Rename active takes and/or item notes from BWF/iXML and true source metadata using a fast ReaImGui UI.
@@ -28,6 +28,10 @@
   hsuanice served as the workflow designer, tester, and integrator for this tool.
 
 @changelog
+  v0.8.0 - New: post-Apply result dialog
+           • Shows totals: items selected, renamed, notes updated, skipped
+           • “Save as .tsv” / “Save as .csv” buttons, with optional save dialog (js_ReaScriptAPI). 
+             If unavailable, auto-saves to the current project folder (or REAPER resource path)
   v0.7.5
     - Fix: Token normalization now processes longer tokens first, avoiding prefix collisions
           (e.g., $trkall, $timereference, $originatorreference).
@@ -620,6 +624,11 @@ local SPLIT_RATIO = load_split_ratio()
 local _drag_active = false
 local _last_my = 0
 
+-- ===== Post-Apply result state =====
+local SHOW_RESULT_MODAL = false
+local LAST_RESULT = nil  -- { total_sel, renamed, noted, skipped, rows = { {idx, old, newname, newnote, status}... } }
+
+
 
 -- ===== Token list =====
 local TOKEN_LIST = {
@@ -666,6 +675,102 @@ end
 
 -- ===== CSV helpers =====
 local function csv_escape(s) s=tostring(s or ""); if s:find('[,\r\n"]') then s='"'..s:gsub('"','""')..'"' end; return s end
+
+-- ===== File save helpers =====
+local function default_save_dir()
+  local ok, proj_path = reaper.EnumProjects(-1, "")
+  if proj_path and proj_path ~= "" then
+    local dir = proj_path:match("^(.*)[/\\]") or proj_path
+    if dir and dir ~= "" then return dir end
+  end
+  return reaper.GetResourcePath() or "."
+end
+
+local function timestamp()
+  local t = os.date("*t")
+  return string.format("%04d%02d%02d_%02d%02d%02d", t.year, t.month, t.day, t.hour, t.min, t.sec)
+end
+
+local function write_text_file(path, text)
+  local f, err = io.open(path, "w")
+  if not f then return false, tostring(err or "open failed") end
+  f:write(text or "")
+  f:close()
+  return true
+end
+
+-- 優先用 js_ReaScriptAPI 的另存對話框；若沒有，直接自動存到專案資料夾
+local function choose_save_path(default_name, filter)
+  local js = reaper.JS_Dialog_BrowseForSaveFile
+  if type(js) == "function" then
+    local ret, fn = js("Save list", default_save_dir(), default_name, filter or "All (*.*)\0*.*\0")
+    if ret and ret ~= 0 and fn and fn ~= "" then
+      return fn
+    end
+  end
+  return (default_save_dir() .. "/" .. default_name)
+end
+
+local function build_result_text(fmt, rows)
+  local sep = (fmt == "csv") and "," or "\t"
+  local out = {}
+  local function esc(s)
+    s = tostring(s or "")
+    if fmt == "csv" and s:find('[,\r\n"]') then s = '"'..s:gsub('"','""')..'"' end
+    return s
+  end
+  out[#out+1] = table.concat({ "#","Status","Current Take Name","New Name","New Note" }, sep)
+  for _, r in ipairs(rows or {}) do
+    out[#out+1] = table.concat({ esc(r.idx), esc(r.status), esc(r.old), esc(r.newname), esc(r.newnote) }, sep)
+  end
+  return table.concat(out, "\n")
+end
+
+-- ===== Result modal =====
+local function open_result_modal(res)
+  LAST_RESULT = res
+  SHOW_RESULT_MODAL = true
+  reaper.ImGui_OpenPopup(ctx, "Apply Result")
+end
+
+local function draw_result_modal()
+  if not SHOW_RESULT_MODAL then return end
+  local opened = reaper.ImGui_BeginPopupModal(ctx, "Apply Result", true)
+  if opened then
+    local r = LAST_RESULT or { total_sel=0, renamed=0, noted=0, skipped=0, rows={} }
+    reaper.ImGui_Text(ctx, ("Selected: %d"):format(r.total_sel or 0))
+    reaper.ImGui_Text(ctx, ("Renamed:  %d"):format(r.renamed or 0))
+    reaper.ImGui_Text(ctx, ("Notes:    %d"):format(r.noted or 0))
+    reaper.ImGui_Text(ctx, ("Skipped:  %d"):format(r.skipped or 0))
+    reaper.ImGui_Separator(ctx)
+
+    -- Save buttons
+    if reaper.ImGui_Button(ctx, "Save as .tsv", 150, 26) then
+      local name = ("RenameResult_%s.tsv"):format(timestamp())
+      local path = choose_save_path(name, "Tab-separated (*.tsv)\0*.tsv\0All (*.*)\0*.*\0")
+      local ok = write_text_file(path, build_result_text("tab", r.rows))
+      if ok then reaper.ShowMessageBox("Saved:\n"..path, "Saved", 0) else reaper.ShowMessageBox("Failed to save TSV.", "Error", 0) end
+    end
+    reaper.ImGui_SameLine(ctx)
+    if reaper.ImGui_Button(ctx, "Save as .csv", 150, 26) then
+      local name = ("RenameResult_%s.csv"):format(timestamp())
+      local path = choose_save_path(name, "CSV (*.csv)\0*.csv\0All (*.*)\0*.*\0")
+      local ok = write_text_file(path, build_result_text("csv", r.rows))
+      if ok then reaper.ShowMessageBox("Saved:\n"..path, "Saved", 0) else reaper.ShowMessageBox("Failed to save CSV.", "Error", 0) end
+    end
+
+    reaper.ImGui_Spacing(ctx)
+    if reaper.ImGui_Button(ctx, "Close", 100, 26) then
+      SHOW_RESULT_MODAL = false
+      reaper.ImGui_CloseCurrentPopup(ctx)
+    end
+    reaper.ImGui_EndPopup(ctx)
+  else
+    -- 關閉/ESC 後清旗標
+    SHOW_RESULT_MODAL = false
+  end
+end
+
 
 -- ===== Build left/right copy texts =====
 local function build_left_copy_text_from_fields(f)
@@ -753,37 +858,87 @@ end
 -- ===== Apply =====
 local function apply_renaming()
   local items, sig = get_selected_items_and_sig()
-  if #items == 0 then status_msg="No items selected."; return end
+  local total = #items
+  if total == 0 then status_msg="No items selected."; return end
+
   local can_use_cache = (SCAN_CACHE and SCAN_CACHE.sig == sig)
+
   reaper.Undo_BeginBlock()
   local renamed, noted, skipped, counter = 0, 0, 0, 1
-  for _, item in ipairs(items) do
+  local rows = {} -- for result list
+
+  for i, item in ipairs(items) do
     local take = get_active_take(item)
     local fields
-    if can_use_cache then local e=SCAN_CACHE.map[get_item_guid(item)]; fields = e and e.fields end
-    if not fields then fields = collect_metadata_for_item(item) end
-    if take then
-      local name = expand_template(TAKE_TEMPLATE, fields, counter)
-      if name ~= "" then reaper.GetSetMediaItemTakeInfo_String(take,"P_NAME",name,true); renamed=renamed+1 end
-      if NOTE_TEMPLATE ~= "" then
-        local note = expand_template(NOTE_TEMPLATE, fields, counter, false)
-        reaper.GetSetMediaItemInfo_String(item, "P_NOTES", note, true); noted=noted+1
-      end
-    else
-      if NOTE_TEMPLATE ~= "" then
-        local note = expand_template(NOTE_TEMPLATE, fields, counter, false)
-        reaper.GetSetMediaItemInfo_String(item, "P_NOTES", note, true); noted=noted+1
-      else
-        skipped=skipped+1
-      end
+    local entry
+    if can_use_cache then
+      local e = SCAN_CACHE.map[get_item_guid(item)]
+      fields = e and e.fields
+      entry  = e
     end
+    if not fields then
+      fields = collect_metadata_for_item(item)
+    end
+
+    -- old state
+    local old_take_name = "(no take)"
+    if take then
+      local _, cur_name = reaper.GetSetMediaItemTakeInfo_String(take, "P_NAME", "", false)
+      old_take_name = (cur_name and cur_name ~= "") and cur_name or "(unnamed)"
+    end
+
+    -- compute new
+    local new_name = (take and expand_template(TAKE_TEMPLATE, fields, counter)) or ""
+    local new_note = (NOTE_TEMPLATE ~= "" and expand_template(NOTE_TEMPLATE, fields, counter, false)) or ""
+
+    local did_rename, did_note = false, false
+
+    if take and new_name ~= "" then
+      reaper.GetSetMediaItemTakeInfo_String(take, "P_NAME", new_name, true)
+      did_rename = true
+      renamed = renamed + 1
+    end
+
+    if NOTE_TEMPLATE ~= "" then
+      reaper.GetSetMediaItemInfo_String(item, "P_NOTES", new_note, true)
+      did_note = true
+      noted = noted + 1
+    else
+      if not take then skipped = skipped + 1 end
+    end
+
+    local status
+    if did_rename and did_note then
+      status = "Renamed+Note"
+    elseif did_rename then
+      status = "Renamed"
+    elseif did_note then
+      status = "NoteOnly"
+    else
+      status = "Skipped"
+    end
+    rows[#rows+1] = { idx = i, old = old_take_name, newname = new_name, newnote = new_note, status = status }
+
     counter = counter + 1
   end
+
   reaper.UpdateArrange()
   reaper.Undo_EndBlock(string.format("Rename %d take(s), update %d note(s), skipped %d (no take)", renamed, noted, skipped), -1)
-  status_msg = string.format("Done: %d renamed, %d notes updated, %d skipped (no take). You can Undo/Redo.", renamed, noted, skipped)
+  status_msg = string.format("Done: %d renamed, %d notes updated, %d skipped.", renamed, noted, skipped)
+
+  -- 重新產生右側預覽（保留原行為）
   recompute_preview_from_cache()
+
+  -- 啟動結果視窗
+  open_result_modal({
+    total_sel = total,
+    renamed   = renamed,
+    noted     = noted,
+    skipped   = skipped,
+    rows      = rows
+  })
 end
+
 
 -- ===== UI: token row =====
 local function draw_token_row()
@@ -1239,6 +1394,10 @@ end
     reaper.ImGui_Separator(ctx)
     local _, avail_h = reaper.ImGui_GetContentRegionAvail(ctx)
     draw_view_pane(avail_h)
+
+    -- Draw result modal if needed
+    draw_result_modal()
+
 
     reaper.ImGui_End(ctx)
   end
