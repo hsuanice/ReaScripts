@@ -1,6 +1,6 @@
 --[[
 @description ReaImGui - Rename Active Take from Metadata (caret insert + cached preview + copy/export)
-@version 0.8.0
+@version 0.8.1
 @author hsuanice
 @about
   Rename active takes and/or item notes from BWF/iXML and true source metadata using a fast ReaImGui UI.
@@ -28,10 +28,11 @@
   hsuanice served as the workflow designer, tester, and integrator for this tool.
 
 @changelog
-  v0.8.0 - New: post-Apply result dialog
-           • Shows totals: items selected, renamed, notes updated, skipped
-           • “Save as .tsv” / “Save as .csv” buttons, with optional save dialog (js_ReaScriptAPI). 
-             If unavailable, auto-saves to the current project folder (or REAPER resource path)
+  v0.8.1 - UI: Unified “Copy preview table” buttons to TSV + CSV (renamed Tab → TSV); logic unchanged, TSV uses tab delimiter.
+           - Result dialog: Save as .tsv / .csv now writes silently without REAPER popup.
+             • If user cancels the file dialog → no file is written, no message shown.
+             • If save succeeds/fails → no blocking popup; optional status_msg can be used instead.
+           - Internal: choose_save_path() returns nil on cancel (instead of default path).
   v0.7.5
     - Fix: Token normalization now processes longer tokens first, avoiding prefix collisions
           (e.g., $trkall, $timereference, $originatorreference).
@@ -706,8 +707,11 @@ local function choose_save_path(default_name, filter)
     local ret, fn = js("Save list", default_save_dir(), default_name, filter or "All (*.*)\0*.*\0")
     if ret and ret ~= 0 and fn and fn ~= "" then
       return fn
+    else
+      return nil -- user canceled
     end
   end
+  -- Fallback when JS API is unavailable: autosave to default folder
   return (default_save_dir() .. "/" .. default_name)
 end
 
@@ -744,20 +748,31 @@ local function draw_result_modal()
     reaper.ImGui_Text(ctx, ("Skipped:  %d"):format(r.skipped or 0))
     reaper.ImGui_Separator(ctx)
 
-    -- Save buttons
+    -- Save buttons (no popups; silent on success/cancel/failure)
     if reaper.ImGui_Button(ctx, "Save as .tsv", 150, 26) then
       local name = ("RenameResult_%s.tsv"):format(timestamp())
       local path = choose_save_path(name, "Tab-separated (*.tsv)\0*.tsv\0All (*.*)\0*.*\0")
-      local ok = write_text_file(path, build_result_text("tab", r.rows))
-      if ok then reaper.ShowMessageBox("Saved:\n"..path, "Saved", 0) else reaper.ShowMessageBox("Failed to save TSV.", "Error", 0) end
+      -- If canceled, path is nil → do nothing
+      if path then
+        -- "tab" means tab-delimited (TSV content)
+        local _ = write_text_file(path, build_result_text("tab", r.rows))
+        -- optional: update status line in the main UI (no modal)
+        -- status_msg = _ and ("Saved: " .. path) or "Save failed."
+      end
     end
+
     reaper.ImGui_SameLine(ctx)
+
     if reaper.ImGui_Button(ctx, "Save as .csv", 150, 26) then
       local name = ("RenameResult_%s.csv"):format(timestamp())
       local path = choose_save_path(name, "CSV (*.csv)\0*.csv\0All (*.*)\0*.*\0")
-      local ok = write_text_file(path, build_result_text("csv", r.rows))
-      if ok then reaper.ShowMessageBox("Saved:\n"..path, "Saved", 0) else reaper.ShowMessageBox("Failed to save CSV.", "Error", 0) end
+      if path then
+        local _ = write_text_file(path, build_result_text("csv", r.rows))
+        -- optional: status_msg = _ and ("Saved: " .. path) or "Save failed."
+      end
     end
+
+
 
     reaper.ImGui_Spacing(ctx)
     if reaper.ImGui_Button(ctx, "Close", 100, 26) then
