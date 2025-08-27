@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<index version="1" name="hsuanice Scripts" commit="65febccf0aefde4ed9d409b2512a59d89c76d2cd">
+<index version="1" name="hsuanice Scripts" commit="ce22374db79c7456614df4a3948cbf5e48f61cef">
   <category name="Beta Testing">
     <reapack name="hsuanice_BWF TimeReference Embed Tool.lua" type="script" desc="Embed BWF TimeReference to Active take from Take 1 or Current Position TC">
       <version name="0.7.1" author="hsuanice" time="2025-08-14T17:52:57Z">
@@ -506,7 +506,7 @@
 {\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Apply uses current selection; reuses cache if unchanged; Undo / Redo supported.\par}
 {\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Channel-aware tokens: $trk (auto per-take), $trkN, and $trkall (from iXML/BWF track list, with fallbacks).\par}
 {\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab True source tokens: $srcfile, $srcbase, $srcext, $srcpath, $srcdir (actual media filename/paths).\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Metadata panel + preview table with quick copy; export preview table as Tab or CSV.\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Metadata panel + preview table with quick copy; export preview table as TSV or CSV.\par}
 {\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Works on audio items; items without takes (empty/MIDI) can still update notes.\par}
 {\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Requires: ReaImGui (install via ReaPack).\sa180\par}
 {\pard \ql \f0 \sa180 \li0 \fi0 Features:\par}
@@ -612,6 +612,9 @@ v0.1 - Beta release]]></changelog>
       </version>
       <version name="0.8.1" author="hsuanice" time="2025-08-27T05:13:33Z">
         <source main="main">https://github.com/hsuanice/ReaScripts/raw/65febccf0aefde4ed9d409b2512a59d89c76d2cd/Beta%20Testing/hsuanice_Rename%20Active%20Take%20from%20File%20Metadata.lua</source>
+      </version>
+      <version name="0.8.2" author="hsuanice" time="2025-08-27T05:22:20Z">
+        <source main="main">https://github.com/hsuanice/ReaScripts/raw/ce22374db79c7456614df4a3948cbf5e48f61cef/Beta%20Testing/hsuanice_Rename%20Active%20Take%20from%20File%20Metadata.lua</source>
       </version>
     </reapack>
     <reapack name="hsuanice_Show Frame Rate.lua" type="script" desc="ReaImGui - Show Project Frame Rate">
