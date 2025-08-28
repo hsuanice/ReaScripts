@@ -1,6 +1,6 @@
 --[[
 @description ReaImGui - Rename Active Take from Metadata (caret insert + cached preview + copy/export)
-@version 0.11.0
+@version 0.11.1
 @author hsuanice
 @about
   Rename active takes and/or item notes from BWF/iXML and true source metadata using a fast ReaImGui UI.
@@ -33,6 +33,9 @@
   hsuanice served as the workflow designer, tester, and integrator for this tool.
 
 @changelog
+  v0.11.1 - Export parity with preview:
+          • Final TSV/CSV export now includes "Current Note" (order: #, Status, Current Take Name, New Name, Current Note, New Note).
+          • Fix: corrected result export builder to write header and rows consistently (no more nil 'r' error).
   v0.11.0 - Preview table & export include Current Note:
           • Preview table adds a "Current Note" column and reorders columns to:
             #, Current Take Name, New Name, Current Note, New Note.
@@ -928,9 +931,9 @@ local function build_result_text(fmt, rows)
     if fmt == "csv" and s:find('[,\r\n"]') then s = '"'..s:gsub('"','""')..'"' end
     return s
   end
-  out[#out+1] = table.concat({ "#","Status","Current Take Name","New Name","New Note" }, sep)
+    out[#out+1] = table.concat({ "#","Status","Current Take Name","New Name","Current Note","New Note" }, sep)
   for _, r in ipairs(rows or {}) do
-    out[#out+1] = table.concat({ esc(r.idx), esc(r.status), esc(r.old), esc(r.newname), esc(r.newnote) }, sep)
+    out[#out+1] = table.concat({ esc(r.idx), esc(r.status), esc(r.old), esc(r.newname), esc(r.current_note), esc(r.newnote) }, sep)
   end
   return table.concat(out, "\n")
 end
@@ -1163,8 +1166,7 @@ local function apply_renaming()
     else
       status = "Skipped"
     end
-    rows[#rows+1] = { idx = i, old = old_take_name, newname = new_name, newnote = new_note, status = status }
-
+    rows[#rows+1] = { idx = i, old = old_take_name, newname = new_name, current_note = tostring(fields and fields.curnote or ""), newnote = new_note, status = status }
     counter = counter + 1
   end
 
