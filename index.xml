@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<index version="1" name="hsuanice Scripts" commit="c739dadc8f4fa42c5bd7451380a499cad220b4ae">
+<index version="1" name="hsuanice Scripts" commit="14d9115e2db0108fadf78db46ad37236eca7d4ee">
   <category name="Beta Testing">
     <reapack name="hsuanice_BWF TimeReference Embed Tool.lua" type="script" desc="Embed BWF TimeReference to Active take from Take 1 or Current Position TC">
       <version name="0.7.1" author="hsuanice" time="2025-08-14T17:52:57Z">
@@ -655,6 +655,9 @@ v0.1 - Beta release]]></changelog>
       </version>
       <version name="0.11.5" author="hsuanice" time="2025-08-28T10:07:36Z">
         <source main="main">https://github.com/hsuanice/ReaScripts/raw/c739dadc8f4fa42c5bd7451380a499cad220b4ae/Beta%20Testing/hsuanice_Rename%20Active%20Take%20from%20File%20Metadata.lua</source>
+      </version>
+      <version name="0.11.6" author="hsuanice" time="2025-08-28T11:10:28Z">
+        <source main="main">https://github.com/hsuanice/ReaScripts/raw/14d9115e2db0108fadf78db46ad37236eca7d4ee/Beta%20Testing/hsuanice_Rename%20Active%20Take%20from%20File%20Metadata.lua</source>
       </version>
     </reapack>
     <reapack name="hsuanice_Show Frame Rate.lua" type="script" desc="ReaImGui - Show Project Frame Rate">
