@@ -1,6 +1,6 @@
 --[[
 @description ReaImGui - Rename Active Take from Metadata (caret insert + cached preview + copy/export)
-@version 0.11.1
+@version 0.11.2
 @author hsuanice
 @about
   Rename active takes and/or item notes from BWF/iXML and true source metadata using a fast ReaImGui UI.
@@ -33,6 +33,10 @@
   hsuanice served as the workflow designer, tester, and integrator for this tool.
 
 @changelog
+  v0.11.2 - Export format update:
+          • Removed "Status" column from final TSV/CSV.
+          • Added top "Info" row summarizing the run:
+            Take=<template> | Note=<template> | Replace=<from→to; ...>.
   v0.11.1 - Export parity with preview:
           • Final TSV/CSV export now includes "Current Note" (order: #, Status, Current Take Name, New Name, Current Note, New Note).
           • Fix: corrected result export builder to write header and rows consistently (no more nil 'r' error).
@@ -931,9 +935,25 @@ local function build_result_text(fmt, rows)
     if fmt == "csv" and s:find('[,\r\n"]') then s = '"'..s:gsub('"','""')..'"' end
     return s
   end
-    out[#out+1] = table.concat({ "#","Status","Current Take Name","New Name","Current Note","New Note" }, sep)
+    -- Info row（最上面一行）
+    local rule_str = ""
+    if TAKE_RENAMER and TAKE_RENAMER.enable and TAKE_RENAMER.rules and #TAKE_RENAMER.rules > 0 then
+      for i, p in ipairs(TAKE_RENAMER.rules) do
+        if p and (p.from or "") ~= "" then
+          rule_str = rule_str .. (i>1 and "; " or "") .. tostring(p.from or "") .. "→" .. tostring(p.to or "")
+        end
+      end
+    else
+      rule_str = "(none)"
+    end
+    out[#out+1] = table.concat({
+      "Info",
+      "Take="..tostring(TAKE_TEMPLATE or "").." | Note="..tostring(NOTE_TEMPLATE or "").." | Replace="..rule_str,
+      "", "", ""
+    }, sep)
+    out[#out+1] = table.concat({ "#","Current Take Name","New Name","Current Note","New Note" }, sep)
   for _, r in ipairs(rows or {}) do
-    out[#out+1] = table.concat({ esc(r.idx), esc(r.status), esc(r.old), esc(r.newname), esc(r.current_note), esc(r.newnote) }, sep)
+    out[#out+1] = table.concat({ esc(r.idx), esc(r.old), esc(r.newname), esc(r.current_note), esc(r.newnote) }, sep)
   end
   return table.concat(out, "\n")
 end
