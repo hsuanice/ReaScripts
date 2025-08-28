@@ -1,6 +1,6 @@
 --[[
 @description ReaImGui - Rename Active Take from Metadata (caret insert + cached preview + copy/export)
-@version 0.10.0
+@version 0.10.1
 @author hsuanice
 @about
   Rename active takes and/or item notes from BWF/iXML and true source metadata using a fast ReaImGui UI.
@@ -33,6 +33,7 @@
   hsuanice served as the workflow designer, tester, and integrator for this tool.
 
 @changelog
+  v0.10.1 - UI: Move “+ Add rename rule” next to the Enable checkbox (same line) for quicker access.
   v0.10.0 - Replace Take Name filter with Take Name renamer:
           • Multi-rule, user-configurable rename system (From → To).
           • Enable/Disable checkbox; rules managed via [+] / [-] buttons; persisted via ExtState.
@@ -1225,6 +1226,15 @@ local function take_note_inputs()
     if SCAN_CACHE then recompute_preview_from_cache() end
   end
 
+  reaper.ImGui_SameLine(ctx)
+  if reaper.ImGui_SmallButton(ctx, "+ Add rename rule##takeren_add_top") then
+    local rules = TAKE_RENAMER.rules or {}
+    rules[#rules+1] = { from = "", to = "" }
+    TAKE_RENAMER.rules = rules
+    save_take_renamer(TAKE_RENAMER)
+    if SCAN_CACHE then recompute_preview_from_cache() end
+  end
+
   -- Rules table
   local rules = TAKE_RENAMER.rules or {}
   local tblFlags = TF('ImGui_TableFlags_Borders') | TF('ImGui_TableFlags_RowBg')
@@ -1263,11 +1273,7 @@ local function take_note_inputs()
     reaper.ImGui_EndTable(ctx)
   end
 
-  -- Add rule button
-  if reaper.ImGui_SmallButton(ctx, "+ Add rename rule") then
-    rules[#rules+1] = { from = "", to = "" }
-    save_take_renamer(TAKE_RENAMER)
-  end
+
 
 
 
