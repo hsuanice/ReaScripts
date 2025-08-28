@@ -1,6 +1,6 @@
 --[[
 @description ReaImGui - Reorder or sort selected items vertically
-@version 0.3.1
+@version 0.3.2
 @author hsuanice
 @about
   Provides two vertical re-arrangement modes for selected items:
@@ -27,6 +27,10 @@
     hsuanice served as the workflow designer, tester, and integrator for this tool.
 
 @changelog
+  v0.3.2
+         - Fix: Sort Vertically sometimes raised "invalid order function for sorting".
+          Replaced comparator with single-key total ordering (string-composed key).
+
   v0.3.1 - Fix: Always call ImGui_End() to prevent "Missing End()" error.
          - Improved metadata parsing: support $trk, $trkall, TRK{n}, and filename patterns (_AAP_N, tN__PN).
          - New "Copy to New Tracks by Metadata" mode: auto-create destination tracks named from metadata, copy items there.
@@ -153,18 +157,34 @@ local function key_file_name(it)
   return path_basename(src_path(src))
 end
 
+-- 以穩定鍵值排序：把 (key, trackIndex, startTime, originalIndex) 組成單一字串鍵比較
 local function sort_cluster(cluster, keyfn, asc)
-  table.sort(cluster, function(a,b)
-    local ka, kb = keyfn(a), keyfn(b)
-    ka, kb = tostring(ka or ""):lower(), tostring(kb or ""):lower()
-    if ka ~= kb then return asc and (ka < kb) or (ka > kb) end
-    local ta,tb = track_index(item_track(a)), track_index(item_track(b))
-    if ta ~= tb then return ta < tb end
-    local sa,sb = item_start(a), item_start(b)
-    if math.abs(sa - sb) > TIME_TOL then return sa < sb end
-    return false
-  end)
+  local recs = {}
+  for i, it in ipairs(cluster) do
+    local k  = tostring(keyfn(it) or ""):lower()
+    local tr = item_track(it)
+    local ti = tr and track_index(tr) or 2147483647
+    local st = item_start(it) or 0
+    -- 組合單一鍵：字串可比性強、全序；time 固定小數位避免浮點誤差
+    local ord = table.concat({
+      k,
+      string.format("%09d", ti),
+      string.format("%015.6f", st),
+      string.format("%09d", i)
+    }, "|")
+    recs[#recs+1] = { it = it, ord = ord }
+  end
+
+  if asc then
+    table.sort(recs, function(a,b) return a.ord < b.ord end)
+  else
+    table.sort(recs, function(a,b) return a.ord > b.ord end)
+  end
+
+  for i, r in ipairs(recs) do cluster[i] = r.it end
 end
+
+
 
 ---------------------------------------
 -- 計畫：Reorder / Sort
