@@ -1,6 +1,6 @@
 --[[
 @description ReaImGui - Rename Active Take from Metadata (caret insert + cached preview + copy/export)
-@version 0.10.1
+@version 0.10.2
 @author hsuanice
 @about
   Rename active takes and/or item notes from BWF/iXML and true source metadata using a fast ReaImGui UI.
@@ -33,6 +33,8 @@
   hsuanice served as the workflow designer, tester, and integrator for this tool.
 
 @changelog
+  v0.10.2 - UI: Add "Clear All" button to Take Name renamer rules table header (top-right).
+             • Clears all rename rules at once (does not affect Take Name/Item Note templates).
   v0.10.1 - UI: Move “+ Add rename rule” next to the Enable checkbox (same line) for quicker access.
   v0.10.0 - Replace Take Name filter with Take Name renamer:
           • Multi-rule, user-configurable rename system (From → To).
@@ -1241,8 +1243,16 @@ local function take_note_inputs()
   if reaper.ImGui_BeginTable(ctx, "TakeRenRules", 3, tblFlags) then
     reaper.ImGui_TableSetupColumn(ctx, "From", TF('ImGui_TableColumnFlags_WidthStretch'), 0.48)
     reaper.ImGui_TableSetupColumn(ctx, "To",   TF('ImGui_TableColumnFlags_WidthStretch'), 0.48)
-    reaper.ImGui_TableSetupColumn(ctx, "",     TF('ImGui_TableColumnFlags_WidthFixed'),   40)
+    reaper.ImGui_TableSetupColumn(ctx, "",     TF('ImGui_TableColumnFlags_WidthFixed'),   60)
     reaper.ImGui_TableHeadersRow(ctx)
+
+  -- Header rightmost: Clear All button
+  reaper.ImGui_TableSetColumnIndex(ctx, 2)
+  if reaper.ImGui_SmallButton(ctx, "Clear All##takeren_clear") then
+    TAKE_RENAMER.rules = {}
+    save_take_renamer(TAKE_RENAMER)
+    if SCAN_CACHE then recompute_preview_from_cache() end
+  end
 
     for i=#rules,1,-1 do
       local row = rules[i]
