@@ -1,6 +1,6 @@
 --[[
 @description ReaImGui - Rename Active Take from Metadata (caret insert + cached preview + copy/export)
-@version 0.11.2
+@version 0.11.3
 @author hsuanice
 @about
   Rename active takes and/or item notes from BWF/iXML and true source metadata using a fast ReaImGui UI.
@@ -33,6 +33,9 @@
   hsuanice served as the workflow designer, tester, and integrator for this tool.
 
 @changelog
+  v0.11.3 - Export: add per-row "Replaced" column showing hit rename rules (e.g., 2.0→2; 1.0→1).
+             • Keeps top Info row (templates + all rules).
+             • Preview table unchanged.
   v0.11.2 - Export format update:
           • Removed "Status" column from final TSV/CSV.
           • Added top "Info" row summarizing the run:
@@ -303,17 +306,24 @@ local TAKE_RENAMER = load_take_renamer()
 
 local function apply_take_renamer(name)
   local out = tostring(name or "")
+  local hits = {}
   if TAKE_RENAMER.enable and TAKE_RENAMER.rules then
     for _, pair in ipairs(TAKE_RENAMER.rules) do
       local from = pair.from or ""
       local to   = pair.to   or ""
       if from ~= "" then
-        out = out:gsub(_escape_lua_pat_safe(from), to)
+        local pat = _escape_lua_pat_safe(from)
+        local replaced
+        out, replaced = out:gsub(pat, to)
+        if replaced and replaced > 0 then
+          hits[#hits+1] = from .. "→" .. to
+        end
       end
     end
   end
-  return out
+  return out, hits
 end
+
 
 
 
@@ -951,9 +961,9 @@ local function build_result_text(fmt, rows)
       "Take="..tostring(TAKE_TEMPLATE or "").." | Note="..tostring(NOTE_TEMPLATE or "").." | Replace="..rule_str,
       "", "", ""
     }, sep)
-    out[#out+1] = table.concat({ "#","Current Take Name","New Name","Current Note","New Note" }, sep)
+    out[#out+1] = table.concat({ "#","Current Take Name","New Name","Replaced","Current Note","New Note" }, sep)
   for _, r in ipairs(rows or {}) do
-    out[#out+1] = table.concat({ esc(r.idx), esc(r.old), esc(r.newname), esc(r.current_note), esc(r.newnote) }, sep)
+    out[#out+1] = table.concat({ esc(r.idx), esc(r.old), esc(r.newname), esc(r.replaced or ""), esc(r.current_note), esc(r.newnote) }, sep)
   end
   return table.concat(out, "\n")
 end
@@ -1157,7 +1167,9 @@ local function apply_renaming()
     -- compute new
     local new_name = (take and expand_template(TAKE_TEMPLATE, fields, counter)) or ""
     new_name = apply_take_filter(new_name)
-    new_name = apply_take_renamer(new_name)
+    local _renamed, _hits = apply_take_renamer(new_name)
+    new_name = _renamed
+    local ren_hits_str = table.concat(_hits or {}, "; ")
     local new_note = (NOTE_TEMPLATE ~= "" and expand_template(NOTE_TEMPLATE, fields, counter, false)) or ""
 
     local did_rename, did_note = false, false
@@ -1186,7 +1198,14 @@ local function apply_renaming()
     else
       status = "Skipped"
     end
-    rows[#rows+1] = { idx = i, old = old_take_name, newname = new_name, current_note = tostring(fields and fields.curnote or ""), newnote = new_note, status = status }
+    rows[#rows+1] = {
+      idx = i,
+      old = old_take_name,
+      newname = new_name,
+      replaced = ren_hits_str,  -- 新增：本列命中的 rename 規則（空字串 = 無）
+      current_note = tostring(fields and fields.curnote or ""),
+      newnote = new_note
+    }
     counter = counter + 1
   end
 
