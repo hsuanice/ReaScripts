@@ -1,6 +1,6 @@
 --[[
 @description ReaImGui - Rename Active Take from Metadata (caret insert + cached preview + copy/export)
-@version 0.8.3
+@version 0.9.0
 @author hsuanice
 @about
   Rename active takes and/or item notes from BWF/iXML and true source metadata using a fast ReaImGui UI.
@@ -28,6 +28,11 @@
   hsuanice served as the workflow designer, tester, and integrator for this tool.
 
 @changelog
+  v0.9.0 - Take Name post-filter (user-configurable):
+          • Enable/Disable; Disallow chars (literal list); Replacement char; Collapse repeats.
+          • Applied after token expansion; affects Take Name only (Note unaffected).
+          • Settings persist via ExtState and update previews in real time.
+
   v0.8.3 - Preset persistence: store P1–P5 in a single-line, escaped ExtState value.
           - Fixes issue where only P1 survived after REAPER restart (INI newline cutoff).
           - Supports multi-line Note presets; no data loss across sessions.
@@ -166,6 +171,53 @@ local function save_presets(key, list)
   reaper.SetExtState(EXT_NS, key, join_by_sep(packed), true)
 end
 
+-- ===== Take Name post-filter (user-configurable) =====
+local function load_take_filter()
+  local en   = (reaper.GetExtState(EXT_NS, "take_filter_enable") == "1")
+  local ch   = reaper.GetExtState(EXT_NS, "take_filter_chars"); if ch == "" then ch = nil end
+  local repl = reaper.GetExtState(EXT_NS, "take_filter_repl");  if repl == "" then repl = nil end
+  local col  = (reaper.GetExtState(EXT_NS, "take_filter_collapse") == "1")
+  return {
+    enable   = en,
+    chars    = ch or ".",   -- 預設把 '.' 視為不允許
+    repl     = repl or "_", -- 預設用底線取代
+    collapse = col,
+  }
+end
+local function save_take_filter(F)
+  reaper.SetExtState(EXT_NS, "take_filter_enable",   F.enable and "1" or "0", true)
+  reaper.SetExtState(EXT_NS, "take_filter_chars",    tostring(F.chars or ""), true)
+  reaper.SetExtState(EXT_NS, "take_filter_repl",     tostring(F.repl  or "_"), true)
+  reaper.SetExtState(EXT_NS, "take_filter_collapse", F.collapse and "1" or "0", true)
+end
+local TAKE_FILTER = load_take_filter()
+
+-- 把使用者輸入的「字元清單」組成 Lua 字元類別，處理必要跳脫
+local function _build_charclass(literals)
+  literals = tostring(literals or "")
+  -- 在 [] 內要跳脫的字元：^ - ]
+  literals = literals:gsub("([%^%-%]])", "%%%1")
+  return "[" .. literals .. "]"
+end
+
+-- 把 literal 字串轉成 Lua pattern-safe（用於 collapse 重複）
+local function _escape_lua_pat(s) return tostring(s or ""):gsub("(%W)", "%%%1") end
+
+local function apply_take_filter(name)
+  local out = tostring(name or "")
+  if TAKE_FILTER.enable and TAKE_FILTER.chars and TAKE_FILTER.chars ~= "" then
+    local cls = _build_charclass(TAKE_FILTER.chars)
+    local repl = TAKE_FILTER.repl or "_"
+    -- 1) 不允許的字元 → 取代字元（留空代表刪除）
+    out = out:gsub(cls, repl)
+    -- 2) 折疊連續取代字元
+    if TAKE_FILTER.collapse and repl ~= "" then
+      local rp = _escape_lua_pat(repl)
+      out = out:gsub(rp.."+", repl)
+    end
+  end
+  return out
+end
 
 
 
@@ -182,21 +234,29 @@ local function save_split_ratio(ratio)
   reaper.SetExtState(EXT_NS, "split_ratio", string.format("%.4f", ratio or 0.62), true)
 end
 
--- ===== Safe BeginChild (compat for different ReaImGui signatures) =====
+-- ===== Safe BeginChild (cross-version) =====
+-- 回傳兩個值：begun:boolean, visible:boolean
 local function BeginChildSafe(id, w, h, border, flags)
-  flags = flags or 0
-  -- Variant A: (ctx, id, w, h, flags:number)
-  local ok, ret = pcall(reaper.ImGui_BeginChild, ctx, id, w, h, flags)
-  if ok and ret ~= nil then return ret end
-  -- Variant B: (ctx, id, w, h, border:boolean, flags:number)
-  ok, ret = pcall(reaper.ImGui_BeginChild, ctx, id, w, h, border and true or false, flags)
-  if ok and ret ~= nil then return ret end
-  -- Variant C: (ctx, id, w, h)
+  border = not not border
+  flags  = flags or 0
+
+  -- 最常見簽名：(ctx, id, w, h, border:boolean, flags:number)
+  local ok, ret = pcall(reaper.ImGui_BeginChild, ctx, id, w, h, border, flags)
+  if ok then return true, ret end
+
+  -- 舊綁定簽名 A：(ctx, id, w, h, flags:number)
+  ok, ret = pcall(reaper.ImGui_BeginChild, ctx, id, w, h, flags)
+  if ok then return true, ret end
+
+  -- 舊綁定簽名 B：(ctx, id, w, h)
   ok, ret = pcall(reaper.ImGui_BeginChild, ctx, id, w, h)
-  if ok and ret ~= nil then return ret end
-  -- Final fallback: numeric flags at arg#5
-  return reaper.ImGui_BeginChild(ctx, id, w, h, 0)
+  if ok then return true, ret end
+
+  -- 全部失敗 → 沒有開始 child（千萬別 EndChild）
+  return false, false
 end
+
+
 
 -- ===== UTF-8 helpers =====
 local function trim(s) return (tostring(s or "")):gsub("^%s+",""):gsub("%s+$","") end
@@ -711,6 +771,7 @@ local function append_token(tk)
     for i, e in ipairs(SCAN_CACHE.list) do
       if not preview_limit or shown < preview_limit then
         local newname = expand_template(TAKE_TEMPLATE, e.fields, i)
+        newname = apply_take_filter(newname)
         local newnote = (NOTE_TEMPLATE ~= "" and expand_template(NOTE_TEMPLATE, e.fields, i, false)) or ""
         preview_rows[#preview_rows+1] = { current=e.current, newname=newname, newnote=newnote }
         shown = shown + 1
@@ -896,6 +957,7 @@ local function scan_metadata()
   for i, e in ipairs(SCAN_CACHE.list) do
     if not preview_limit or shown < preview_limit then
       local newname = expand_template(TAKE_TEMPLATE, e.fields, i)
+      newname = apply_take_filter(newname)      
       local newnote = (NOTE_TEMPLATE ~= "" and expand_template(NOTE_TEMPLATE, e.fields, i, false)) or ""
       preview_rows[#preview_rows+1] = { current=e.current, newname=newname, newnote=newnote }
       shown = shown + 1
@@ -914,6 +976,7 @@ local function recompute_preview_from_cache()
   for i, e in ipairs(SCAN_CACHE.list) do
     if not preview_limit or shown < preview_limit then
       local newname = expand_template(TAKE_TEMPLATE, e.fields, i)
+      newname = apply_take_filter(newname)
       local newnote = (NOTE_TEMPLATE ~= "" and expand_template(NOTE_TEMPLATE, e.fields, i, false)) or ""
       preview_rows[#preview_rows+1] = { current=e.current, newname=newname, newnote=newnote }
       shown = shown + 1
@@ -1045,6 +1108,9 @@ local function take_note_inputs()
   end
   if changed_take then TAKE_TEMPLATE = new_take; if SCAN_CACHE then recompute_preview_from_cache() end end
 
+
+
+  
   -- Take tools (Clear / Save / Default)
   if reaper.ImGui_SmallButton(ctx, "Clear##take") then
     TAKE_TEMPLATE = ""
@@ -1065,6 +1131,51 @@ local function take_note_inputs()
   --（可選）和下方 presets 稍微留一點距離
   -- reaper.ImGui_Spacing(ctx)
 
+  -- === Take Name Filter (post expansion) ===
+  reaper.ImGui_Separator(ctx)
+  reaper.ImGui_Text(ctx, "Take Name filter"); 
+  reaper.ImGui_SameLine(ctx); 
+  reaper.ImGui_TextDisabled(ctx, "(applies after token expansion; Note unaffected)")
+
+  -- Enable
+  local chgEn, en = reaper.ImGui_Checkbox(ctx, "Enable##takefilter", TAKE_FILTER.enable)
+  if chgEn then
+    TAKE_FILTER.enable = en; save_take_filter(TAKE_FILTER)
+    if SCAN_CACHE then recompute_preview_from_cache() end
+  end
+
+  -- Disallow chars
+  reaper.ImGui_SameLine(ctx)
+  reaper.ImGui_Text(ctx, "Disallow:")
+  reaper.ImGui_SameLine(ctx)
+  reaper.ImGui_SetNextItemWidth(ctx, 120)
+  local chgCh, chs = reaper.ImGui_InputText(ctx, "##takefilter_chars", TAKE_FILTER.chars or "")
+  if chgCh then
+    TAKE_FILTER.chars = chs
+    save_take_filter(TAKE_FILTER)
+    if SCAN_CACHE then recompute_preview_from_cache() end
+  end
+
+  -- Replacement
+  reaper.ImGui_SameLine(ctx)
+  reaper.ImGui_Text(ctx, "→")
+  reaper.ImGui_SameLine(ctx)
+  reaper.ImGui_SetNextItemWidth(ctx, 90)
+  local chgRp, rp = reaper.ImGui_InputText(ctx, "##takefilter_repl", TAKE_FILTER.repl or "_")
+  if chgRp then
+    TAKE_FILTER.repl = rp
+    save_take_filter(TAKE_FILTER)
+    if SCAN_CACHE then recompute_preview_from_cache() end
+  end
+
+  -- Collapse repeats
+  reaper.ImGui_SameLine(ctx)
+  local chgCol, col = reaper.ImGui_Checkbox(ctx, "collapse repeats##takefilter", TAKE_FILTER.collapse or false)
+  if chgCol then
+    TAKE_FILTER.collapse = col
+    save_take_filter(TAKE_FILTER)
+    if SCAN_CACHE then recompute_preview_from_cache() end
+  end
 
 
 
@@ -1174,8 +1285,19 @@ local function draw_view_pane(available_h)
   local view_h = math.max(150, math.floor(available_h * SPLIT_RATIO) - math.floor(split_thickness/2))
   local copy_h = math.max(120, available_h - view_h - split_thickness)
 
+  local total_h = view_h + copy_h + split_thickness
+  local avail = math.max(0, available_h or (WIN_H - 100))
+  if total_h > avail and avail > 0 then
+    local k = (avail - split_thickness) / (view_h + copy_h)
+    view_h = math.max(80, math.floor(view_h * k))
+    copy_h = math.max(80, math.floor(copy_h * k))
+  end
+
+
+
   -- Top view child
-  BeginChildSafe("ViewPane", -1, view_h, true)
+  local begun, _ = BeginChildSafe("ViewPane", -1, view_h, true)
+  if begun then
     local splitFlags = TF('ImGui_TableFlags_Resizable') | TF('ImGui_TableFlags_BordersInnerV')
     if reaper.ImGui_BeginTable(ctx, "MainSplit", 2, splitFlags) then
       reaper.ImGui_TableSetupColumn(ctx, "Fields", TF('ImGui_TableColumnFlags_WidthStretch'), 0.5)
@@ -1276,11 +1398,11 @@ local function draw_view_pane(available_h)
           reaper.ImGui_EndTable(ctx)
         end
       end
-
       reaper.ImGui_EndTable(ctx)
     end
-  reaper.ImGui_EndChild(ctx)
-
+    reaper.ImGui_EndChild(ctx)
+  end
+    
   -- Splitter (drag to resize)
   reaper.ImGui_InvisibleButton(ctx, "VSplit", -1, split_thickness)
   if reaper.ImGui_IsItemActive(ctx) then
@@ -1299,8 +1421,14 @@ local function draw_view_pane(available_h)
     _drag_active = false
   end
 
+
+
+
+
+
   -- Bottom copy child
-  BeginChildSafe("CopyPane", -1, copy_h, true)
+  local begun, _ = BeginChildSafe("CopyPane", -1, copy_h, true)
+  if begun then
     local copyFlags = TF('ImGui_TableFlags_Resizable') | TF('ImGui_TableFlags_BordersInnerV')
     if reaper.ImGui_BeginTable(ctx, "CopySplit", 2, copyFlags) then
       reaper.ImGui_TableSetupColumn(ctx, "CopyLeft", TF('ImGui_TableColumnFlags_WidthStretch'), 0.5)
@@ -1336,7 +1464,8 @@ local function draw_view_pane(available_h)
 
       reaper.ImGui_EndTable(ctx)
     end
-  reaper.ImGui_EndChild(ctx)
+    reaper.ImGui_EndChild(ctx)
+  end
 end
 
 -- ===== Main loop =====
