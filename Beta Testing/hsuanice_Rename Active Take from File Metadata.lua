@@ -1,6 +1,6 @@
 --[[
 @description ReaImGui - Rename Active Take from Metadata (caret insert + cached preview + copy/export)
-@version 0.11.4
+@version 0.11.5
 @author hsuanice
 @about
   Rename active takes and/or item notes from BWF/iXML and true source metadata using a fast ReaImGui UI.
@@ -33,6 +33,11 @@
   hsuanice served as the workflow designer, tester, and integrator for this tool.
 
 @changelog
+  v0.11.5 - Export Info row re-mapped:
+          • New Take Name column shows the Take template (rename tokens).
+          • New Take Note column shows the Note template (rename tokens).
+          • Replace column keeps the consolidated rename rules (e.g., 2.0→2; 1.0→1).
+          • No change to data rows or preview.
   v0.11.4 - UI cleanup: removed "Apply & Close" button.
           • Kept two-button layout: Apply / Cancel (right-aligned, consistent spacing).
           • Eliminates a non-functional action; no changes to apply/preview/export logic.
@@ -960,9 +965,12 @@ local function build_result_text(fmt, rows)
       rule_str = "(none)"
     end
     out[#out+1] = table.concat({
-      "Info",
-      "Take="..tostring(TAKE_TEMPLATE or "").." | Note="..tostring(NOTE_TEMPLATE or "").." | Replace="..rule_str,
-      "", "", ""
+      "Info",                         -- # 欄
+      "",                             -- Current Take Name 欄（留空）
+      tostring(TAKE_TEMPLATE or ""),  -- New Name 欄：放 Take Name rename token
+      rule_str,                       -- Replaced 欄：放 Replace 規則彙總
+      "",                             -- Current Note 欄（留空）
+      tostring(NOTE_TEMPLATE or "")   -- New Note 欄：放 Take Note rename token
     }, sep)
     out[#out+1] = table.concat({ "#","Current Take Name","New Name","Replaced","Current Note","New Note" }, sep)
   for _, r in ipairs(rows or {}) do
