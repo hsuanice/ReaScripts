@@ -1,6 +1,6 @@
 --[[
 @description ReaImGui - Vertical Reorder and Sort (items)
-@version 0.3.4 Vertical UI
+@version 0.3.5a
 @author hsuanice
 @about
   Provides two vertical re-arrangement modes for selected items (stacked UI):
@@ -26,6 +26,23 @@
     - Script generated and refined with ChatGPT.
 
 @changelog
+  v0.3.5a
+    - Fix: "invalid order function for sorting" when using Copy to Sort.
+           Now uses stable string-based order keys for both Track Name
+           and Channel Number modes, preventing type/nil comparison errors.
+    - Behavior unchanged: 
+        • Track Name mode → new track named by metadata Track Name.
+        • Channel Number mode → new track named "Ch 01/02/…".
+    - Stability: Copy-to-Sort now guaranteed consistent ordering regardless
+      of mixed metadata types or missing values.
+  v0.3.5
+    - UX: Removed duplicated "Copy to New Tracks" section.
+    - UX: When Sort key = Metadata, the main action button becomes "Copy to Sort"
+          and performs copy → new tracks using the chosen Metadata sub-key
+          (Track Name / Channel Number) and Asc/Desc.
+    - Copy naming:
+        • Track Name mode → new track named by metadata Track Name.
+        • Channel Number mode → new track named "Ch 01/02/…".
   v0.3.4 Vertical UI
     - UI: Window renamed to "Vertical Reorder and Sort".
     - UI: Layout changed to vertical stack:
@@ -380,6 +397,23 @@ end
 ---------------------------------------
 -- Copy-to-New-Tracks：核心
 ---------------------------------------
+
+-- Copy 模式的排序依據：1=Track Name, 2=Channel Number
+local COPY_SORT_MODE = 1
+local COPY_ASC = true
+
+local function channel_label(n)
+  if not n or n==999 then return "Ch ??" end
+  return string.format("Ch %02d", tonumber(n) or 0)
+end
+
+-- 自然排序鍵（用於名稱 A↔Z 比較）
+local function natural_key(s)
+  s = tostring(s or ""):lower():gsub("%s+", " ")
+  return s:gsub("(%d+)", function(d) return string.format("%09d", tonumber(d)) end)
+end
+
+
 local META_NAME_KEY = "trk" -- 預設讀 $trk（建議）
 local SHOW_PREVIEW  = false
 local PREVIEW_TEXT  = ""
@@ -450,51 +484,99 @@ end
 
 local ORDER_BY_NAME_ONLY = false
 
-local function run_copy_to_new_tracks()
+-- mode: 1=Track Name, 2=Channel Number
+-- asc : true=Ascending, false=Descending
+local function run_copy_to_new_tracks(mode, asc)
   local items = get_selected_items()
   if #items==0 then return end
   reaper.Undo_BeginBlock()
 
-  local groups = {}  -- name => { ch=min_ch, items={ {it, ch}... } }
+  local function channel_label(n)
+    if not n or n==999 then return "Ch ??" end
+    return string.format("Ch %02d", tonumber(n) or 0)
+  end
+  local function natural_key(s)
+    s = tostring(s or ""):lower():gsub("%s+"," ")
+    return s:gsub("(%d+)", function(d) return string.format("%09d", tonumber(d)) end)
+  end
+
+  -- 蒐集 rows：{it, name, ch}
+  local rows = {}
   for _,it in ipairs(items) do
     if not is_item_locked(it) then
       local f = collect_fields(it)
-      local name, ch = extract_name_and_chan(f, META_NAME_KEY)
-      name = tostring(name or ""):gsub("^%s+",""):gsub("%s+$","")
-      if name=="" or not name then name = "(Unknown)" end
-      local g = groups[name] or { ch=ch or 999, items={} }
-      if ch and (not g.ch or ch < g.ch) then g.ch = ch end
-      table.insert(g.items, {it=it, ch=ch or 999})
-      groups[name] = g
+      local name, ch = extract_name_and_chan(f, "trk")
+      name = (tostring(name or ""):match("^%s*(.-)%s*$"))
+      rows[#rows+1] = { it=it, name = (name~="" and name) or "(Unknown)", ch = ch or 999 }
     end
   end
 
-  local names = {}
-  for n,_ in pairs(groups) do names[#names+1]=n end
-  table.sort(names, function(a,b)
-    if ORDER_BY_NAME_ONLY then
-      return natural_key(a) < natural_key(b)
-    else
-      local ca,cb = groups[a].ch or 999, groups[b].ch or 999
-      if ca ~= cb then return ca < cb end
-      return natural_key(a) < natural_key(b)
+  -- 分組 + 排序（改成先做統一的字串排序鍵 ord，避免比較異常）
+  local groups = {}     -- key -> { label=, items={}, ord= }
+  local order  = {}     -- 有序陣列 { {g=group, ord=...}, ... }
+
+  if mode == 1 then
+    -- Track Name 模式：key=名稱
+    for _,r in ipairs(rows) do
+      local key = r.name
+      local g = groups[key]
+      if not g then
+        g = { label = r.name, items = {} }
+        g.ord = "N|" .. (natural_key(r.name) or "")
+        groups[key] = g
+        order[#order+1] = { g = g, ord = g.ord }
+      end
+      g.items[#g.items+1] = r.it
     end
+  else
+    -- Channel Number 模式：key=通道號
+    for _,r in ipairs(rows) do
+      local key = tonumber(r.ch) or 999
+      local g = groups[key]
+      if not g then
+        g = { label = channel_label(key), items = {} }
+        g.ord = string.format("C|%09d", key)  -- 統一為字串鍵
+        groups[key] = g
+        order[#order+1] = { g = g, ord = g.ord }
+      end
+      g.items[#g.items+1] = r.it
+    end
+  end
+
+  table.sort(order, function(a,b)
+    if asc then return a.ord < b.ord else return a.ord > b.ord end
   end)
 
-  local last_idx = reaper.CountTracks(0)
-  local created, order, copied = {}, {}, 0
-
-  for _,name in ipairs(names) do
-    local tr = ensure_target_track(name, groups[name].ch, last_idx, created, order)
-    for _,row in ipairs(groups[name].items) do
-      copy_item_to_track(row.it, tr); copied = copied + 1
+  -- 建軌 + 複製（照 order 逐一建立）
+  local base = reaper.CountTracks(0)
+  local created, copied = {}, 0
+  for _,rec in ipairs(order) do
+    local g = rec.g
+    reaper.InsertTrackAtIndex(base + (#created), true)
+    local tr = reaper.GetTrack(0, base + (#created))
+    set_track_name(tr, g.label) -- 依模式命名：Track Name 或 Ch 01/02…
+    created[#created+1] = tr
+    for _,it in ipairs(g.items) do
+      local s  = item_start(it)
+      local ln = item_len(it)
+      local new = reaper.AddMediaItemToTrack(tr)
+      reaper.SetMediaItemInfo_Value(new, "D_POSITION", s)
+      reaper.SetMediaItemInfo_Value(new, "D_LENGTH",   ln)
+      local ok, chunk = reaper.GetItemStateChunk(it, "", false)
+      if ok then
+        chunk = chunk:gsub("\n%s*SEL%s+1", "\n  SEL 0")
+        reaper.SetItemStateChunk(new, chunk, false)
+      end
+      copied = copied + 1
     end
   end
 
-  reaper.Undo_EndBlock("Copy selected items to NEW tracks by metadata ($"..META_NAME_KEY..")", -1)
+  reaper.Undo_EndBlock("Copy selected items to NEW tracks by metadata", -1)
   reaper.UpdateArrange()
-  reaper.MB(("Completed.\nNew tracks: %d\nItems copied: %d\nKey: $%s\n\nNote:\n- Track order = %s.\n- Original tracks/items untouched.")
-    :format(#order, copied, META_NAME_KEY, ORDER_BY_NAME_ONLY and "A→Z by name" or "by Channel # (unknown=999), then by name"), "Copy to New Tracks", 0)
+  local mode_msg = (mode==1) and "Track Name" or "Channel Number"
+  local order_msg = asc and "Ascending" or "Descending"
+  reaper.MB(("Completed.\nNew tracks: %d\nItems copied: %d\nMode: %s (%s).")
+    :format(#created, copied, mode_msg, order_msg), "Copy to New Tracks", 0)
 end
 
 ---------------------------------------
@@ -574,8 +656,10 @@ local function draw_confirm()
 
   reaper.ImGui_Separator(ctx)
 
-  -- 2) Sort Vertically
+  -- 2) Sort Vertically（單一主按鈕；依 Metadata 與否改標籤與行為）
   reaper.ImGui_Text(ctx, "Sort Vertically")
+
+  -- 2a) Sort key 選項
   local labels = { "Take name", "File name", "Metadata" }
   for i=1,3 do
     if reaper.ImGui_RadioButton(ctx, labels[i], sort_key_idx==i) then sort_key_idx=i end
@@ -583,7 +667,7 @@ local function draw_confirm()
   end
   local _, asc_chk = reaper.ImGui_Checkbox(ctx, "Ascending", sort_asc); sort_asc = asc_chk
 
-  -- 2a) Sort by Metadata（只在選到 Metadata 時顯示）
+  -- 2b) 若選 Metadata，顯示子選項 + Preview
   if sort_key_idx==3 then
     reaper.ImGui_Spacing(ctx)
     reaper.ImGui_Text(ctx, "Sort by Metadata:")
@@ -593,18 +677,12 @@ local function draw_confirm()
     if reaper.ImGui_RadioButton(ctx, "Channel Number", meta_sort_mode==2) then meta_sort_mode=2 end
 
     reaper.ImGui_Spacing(ctx)
-    if reaper.ImGui_Button(ctx, "Run Sort Vertically", 220, 26) then
-      MODE="sort"; prepare_plan(); run_engine()
-      SUMMARY=("Completed. Items=%d, Moved=%d, Skipped=%d."):format(TOTAL,MOVED,SKIPPED); STATE="summary"
-    end
-
-    -- Preview：兩欄表（Channel ↔ Track Name）
-    reaper.ImGui_Spacing(ctx)
     reaper.ImGui_Text(ctx, "Preview detected fields")
-    if reaper.ImGui_Button(ctx, "Scan first ~80 items", 200, 22) then build_preview_pairs(SELECTED_ITEMS); end
+    if reaper.ImGui_Button(ctx, "Scan first ~80 items", 200, 22) then build_preview_pairs(SELECTED_ITEMS) end
     reaper.ImGui_Spacing(ctx)
 
-    if reaper.ImGui_BeginTable(ctx, "tbl_preview", 2, reaper.ImGui_TableFlags_Borders() | reaper.ImGui_TableFlags_RowBg(), -1, 220) then
+    if reaper.ImGui_BeginTable(ctx, "tbl_preview", 2,
+        reaper.ImGui_TableFlags_Borders() | reaper.ImGui_TableFlags_RowBg(), -1, 220) then
       reaper.ImGui_TableSetupColumn(ctx, "Channel #")
       reaper.ImGui_TableSetupColumn(ctx, "Track Name")
       reaper.ImGui_TableHeadersRow(ctx)
@@ -615,27 +693,23 @@ local function draw_confirm()
       end
       reaper.ImGui_EndTable(ctx)
     end
-  else
-    -- 非 metadata 時提供一個按鈕來執行 sort
-    reaper.ImGui_Spacing(ctx)
-    if reaper.ImGui_Button(ctx, "Run Sort Vertically", 220, 26) then
+  end
+
+  -- 2c) 主按鈕：非 Metadata = Run Sort Vertically；Metadata = Copy to Sort
+  reaper.ImGui_Spacing(ctx)
+  local btn_label = (sort_key_idx==3) and "Copy to Sort" or "Run Sort Vertically"
+  if reaper.ImGui_Button(ctx, btn_label, 220, 28) then
+    if sort_key_idx==3 then
+      -- 用目前 Metadata 子選項與升降冪，複製到新軌並命名
+      run_copy_to_new_tracks(meta_sort_mode, sort_asc)
+      SUMMARY=""; STATE="summary"
+    else
       MODE="sort"; prepare_plan(); run_engine()
       SUMMARY=("Completed. Items=%d, Moved=%d, Skipped=%d."):format(TOTAL,MOVED,SKIPPED); STATE="summary"
     end
   end
 
   reaper.ImGui_Separator(ctx)
-
-  -- 3) Copy to New Tracks by Metadata（保留）
-  reaper.ImGui_Text(ctx, "Copy to New Tracks by Metadata")
-  -- 讓使用者選：新軌 A→Z 名稱排序（忽略 channel）
-  local _, name_only = reaper.ImGui_Checkbox(ctx, "Order new tracks alphabetically (ignore channel #)", ORDER_BY_NAME_ONLY)
-  ORDER_BY_NAME_ONLY = name_only
-  reaper.ImGui_Spacing(ctx)
-  if reaper.ImGui_Button(ctx, "Copy now", 150, 26) then run_copy_to_new_tracks() end
-
-  reaper.ImGui_Spacing(ctx)
-  if reaper.ImGui_Button(ctx, "Close", 100, 24) or esc_pressed() then STATE="summary"; SUMMARY=""; end
 end
 
 local function draw_summary()
