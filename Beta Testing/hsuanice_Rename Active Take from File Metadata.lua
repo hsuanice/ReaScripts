@@ -1,6 +1,6 @@
 --[[
 @description ReaImGui - Rename Active Take from Metadata (caret insert + cached preview + copy/export)
-@version 0.10.3
+@version 0.11.0
 @author hsuanice
 @about
   Rename active takes and/or item notes from BWF/iXML and true source metadata using a fast ReaImGui UI.
@@ -33,6 +33,11 @@
   hsuanice served as the workflow designer, tester, and integrator for this tool.
 
 @changelog
+  v0.11.0 - Preview table & export include Current Note:
+          • Preview table adds a "Current Note" column and reorders columns to:
+            #, Current Take Name, New Name, Current Note, New Note.
+          • Copy/Export (TSV/CSV) now includes "Current Note" in the same order as the preview.
+          • Internals: preview row builder now attaches current_note for each item; no changes to templates or renamer behavior.
   v0.10.3 - UI polish for Take Name renamer:
           • Use a custom header row so "Clear All" sits on the same line as "From" / "To".
           • "From" / "To" now left-aligned for clearer scanning; button remains in the right header cell.
@@ -856,8 +861,9 @@ local function append_token(tk)
         local newname = expand_template(TAKE_TEMPLATE, e.fields, i)
         newname = apply_take_filter(newname)
         newname = apply_take_renamer(newname)
-        local newnote = (NOTE_TEMPLATE ~= "" and expand_template(NOTE_TEMPLATE, e.fields, i, false)) or ""
-        preview_rows[#preview_rows+1] = { current=e.current, newname=newname, newnote=newnote }
+        local newnote  = (NOTE_TEMPLATE ~= "" and expand_template(NOTE_TEMPLATE, e.fields, i, false)) or ""
+        local currnote = tostring(e.fields and e.fields.curnote or "")
+        preview_rows[#preview_rows+1] = { current=e.current, newname=newname, current_note=currnote, newnote=newnote }
         shown = shown + 1
       end
     end
@@ -1009,10 +1015,28 @@ end
 local function build_right_copy_text_from_rows(fmt)
   local sep = (fmt == "csv") and "," or "\t"
   local out = {}
-  local function add(...) local a={...}; if fmt=="csv" then for i=1,#a do a[i]=csv_escape(a[i]) end end; out[#out+1]=table.concat(a,sep) end
-  add("#","Current Take Name","New Name","New Note")
-  if preview_rows and #preview_rows>0 then
-    for i,r in ipairs(preview_rows) do add(tostring(i), r.current or "", r.newname or "", r.newnote or "") end
+  local function add(...)
+    local a = { ... }
+    if fmt == "csv" then
+      for i = 1, #a do a[i] = csv_escape(a[i]) end
+    end
+    out[#out + 1] = table.concat(a, sep)
+  end
+
+  -- 表頭（順序：#, Current Take Name, New Name, Current Note, New Note）
+  add("#","Current Take Name","New Name","Current Note","New Note")
+
+  -- 內容
+  if preview_rows and #preview_rows > 0 then
+    for i, r in ipairs(preview_rows) do
+      add(
+        tostring(i),
+        r.current or "",
+        r.newname or "",
+        r.current_note or "",
+        r.newnote or ""
+      )
+    end
   end
   return table.concat(out, "\n")
 end
@@ -1043,8 +1067,10 @@ local function scan_metadata()
       local newname = expand_template(TAKE_TEMPLATE, e.fields, i)
       newname = apply_take_filter(newname)      
       newname = apply_take_renamer(newname)
-      local newnote = (NOTE_TEMPLATE ~= "" and expand_template(NOTE_TEMPLATE, e.fields, i, false)) or ""
-      preview_rows[#preview_rows+1] = { current=e.current, newname=newname, newnote=newnote }
+      local newnote  = (NOTE_TEMPLATE ~= "" and expand_template(NOTE_TEMPLATE, e.fields, i, false)) or ""
+      local currnote = tostring(e.fields and e.fields.curnote or "")
+      preview_rows[#preview_rows+1] = { current=e.current, newname=newname, current_note=currnote, newnote=newnote }
+
       shown = shown + 1
     end
   end
@@ -1063,8 +1089,9 @@ local function recompute_preview_from_cache()
       local newname = expand_template(TAKE_TEMPLATE, e.fields, i)
       newname = apply_take_filter(newname)
       newname = apply_take_renamer(newname)
-      local newnote = (NOTE_TEMPLATE ~= "" and expand_template(NOTE_TEMPLATE, e.fields, i, false)) or ""
-      preview_rows[#preview_rows+1] = { current=e.current, newname=newname, newnote=newnote }
+      local newnote  = (NOTE_TEMPLATE ~= "" and expand_template(NOTE_TEMPLATE, e.fields, i, false)) or ""
+      local currnote = tostring(e.fields and e.fields.curnote or "")
+      preview_rows[#preview_rows+1] = { current=e.current, newname=newname, current_note=currnote, newnote=newnote }
       shown = shown + 1
     end
   end
@@ -1504,26 +1531,31 @@ local function draw_view_pane(available_h)
         reaper.ImGui_InputTextMultiline(ctx, "##right_sel_view", right_copy_text or "", -FLT_MIN, 240, reaper.ImGui_InputTextFlags_ReadOnly())
       else
         local prevFlags = TF('ImGui_TableFlags_Borders') | TF('ImGui_TableFlags_RowBg')
-        if reaper.ImGui_BeginTable(ctx, "PreviewTable", 4, prevFlags) then
+        if reaper.ImGui_BeginTable(ctx, "PreviewTable", 5, prevFlags) then
           reaper.ImGui_TableSetupColumn(ctx, "#", TF('ImGui_TableColumnFlags_WidthFixed'), 36)
           reaper.ImGui_TableSetupColumn(ctx, "Current Take Name")
           reaper.ImGui_TableSetupColumn(ctx, "New Name")
+          reaper.ImGui_TableSetupColumn(ctx, "Current Note")
           reaper.ImGui_TableSetupColumn(ctx, "New Note")
           reaper.ImGui_TableHeadersRow(ctx)
           if not SCAN_CACHE or #preview_rows == 0 then
             reaper.ImGui_TableNextRow(ctx)
             reaper.ImGui_TableNextColumn(ctx); reaper.ImGui_TextDisabled(ctx, "-")
-            reaper.ImGui_TableNextColumn(ctx); reaper.ImGui_TextDisabled(ctx, "No cache. Click 'Get Metadata (Preview)'.")
-            reaper.ImGui_TableNextColumn(ctx); reaper.ImGui_TextDisabled(ctx, "")
-            reaper.ImGui_TableNextColumn(ctx); reaper.ImGui_TextDisabled(ctx, "")
+            reaper.ImGui_TableNextColumn(ctx); reaper.ImGui_TextDisabled(ctx, "No cache. Click 'Get Metadata (Preview)'.") -- Current Take Name
+            reaper.ImGui_TableNextColumn(ctx); reaper.ImGui_TextDisabled(ctx, "")   -- New Name
+            reaper.ImGui_TableNextColumn(ctx); reaper.ImGui_TextDisabled(ctx, "")   -- Current Note
+            reaper.ImGui_TableNextColumn(ctx); reaper.ImGui_TextDisabled(ctx, "")   -- New Note
+
           else
             for i, row in ipairs(preview_rows) do
               reaper.ImGui_TableNextRow(ctx)
               reaper.ImGui_TableNextColumn(ctx); reaper.ImGui_Text(ctx, tostring(i))
               reaper.ImGui_TableNextColumn(ctx); reaper.ImGui_TextWrapped(ctx, row.current ~= "" and row.current or "(unnamed)")
               reaper.ImGui_TableNextColumn(ctx); reaper.ImGui_TextWrapped(ctx, row.newname ~= "" and row.newname or "(unchanged)")
+              reaper.ImGui_TableNextColumn(ctx); reaper.ImGui_TextWrapped(ctx, (row.current_note and row.current_note ~= "" ) and row.current_note or "(empty)")
               reaper.ImGui_TableNextColumn(ctx); reaper.ImGui_TextWrapped(ctx, row.newnote ~= "" and row.newnote or "(unchanged)")
             end
+
           end
           reaper.ImGui_EndTable(ctx)
         end
