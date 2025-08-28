@@ -1,6 +1,6 @@
 --[[
 @description ReaImGui - Rename Active Take from Metadata (caret insert + cached preview + copy/export)
-@version 0.9.0
+@version 0.10.0
 @author hsuanice
 @about
   Rename active takes and/or item notes from BWF/iXML and true source metadata using a fast ReaImGui UI.
@@ -14,29 +14,34 @@
     - Metadata panel + preview table with quick copy; export preview table as TSV or CSV.
     - Works on audio items; items without takes (empty/MIDI) can still update notes.
     - Requires: ReaImGui (install via ReaPack).
-  
+
   Features:
   - Built with ReaImGUI for a compact, responsive UI.
   - Designed for fast, keyboard-light workflows.
-  
+  - Take Name renamer (multi-rule, user-configurable):
+    • Enable/Disable checkbox; stored via ExtState, persistent across sessions.
+    • Add unlimited rename rules (From → To); manage with [+] / [-] buttons.
+    • Applies after token expansion; affects Take Name only (Note unaffected).
+    • Real-time preview update and applied in final Apply/Summary (TSV/CSV export now matches preview).
+
   References:
   - REAPER ReaScript API (Lua)
   - ReaImGUI (ReaScript ImGui binding)
-  
+
   Note:
   This script was generated using ChatGPT based on design concepts and iterative testing by hsuanice.
   hsuanice served as the workflow designer, tester, and integrator for this tool.
 
 @changelog
-  v0.9.0 - Take Name post-filter (user-configurable):
-          • Enable/Disable; Disallow chars (literal list); Replacement char; Collapse repeats.
-          • Applied after token expansion; affects Take Name only (Note unaffected).
-          • Settings persist via ExtState and update previews in real time.
-
+  v0.10.0 - Replace Take Name filter with Take Name renamer:
+          • Multi-rule, user-configurable rename system (From → To).
+          • Enable/Disable checkbox; rules managed via [+] / [-] buttons; persisted via ExtState.
+          • Applies after token expansion; affects Take Name only (Note unaffected).
+          • Real-time preview update; applied in Apply and Summary (TSV/CSV export).
+  v0.9.0 - (removed) Take Name filter (single disallow/replacement) → superseded by v0.10.0 renamer.
   v0.8.3 - Preset persistence: store P1–P5 in a single-line, escaped ExtState value.
           - Fixes issue where only P1 survived after REAPER restart (INI newline cutoff).
           - Supports multi-line Note presets; no data loss across sessions.
-
   v0.8.2 - Consistency: unified all internal "tab" format identifiers to "tsv"; default right_copy_fmt = "tsv".
            - UI: "Copy preview table" uses TSV/CSV buttons (clipboard copy via ImGui_SetClipboardText).
            - Preview: right pane preview text reflects current cached rows and respects preview_limit.
@@ -46,7 +51,6 @@
            - Result dialog: Save as .tsv / .csv now writes silently without REAPER popup.
              • If user cancels the file dialog → no file is written, no message shown.
              • If save succeeds/fails → no blocking popup; optional status_msg can be used instead.
-           - Internal: choose_save_path() returns nil on cancel (instead of default path).
   v0.7.5
     - Fix: Token normalization now processes longer tokens first, avoiding prefix collisions
           (e.g., $trkall, $timereference, $originatorreference).
@@ -71,6 +75,7 @@
   v0.2.0 - Add ESC close function
   v0.1.0 - Beta release
 --]]
+
 
 -- ===== Guard ReaImGui =====
 if not reaper or not reaper.ImGui_CreateContext then
@@ -219,6 +224,76 @@ local function apply_take_filter(name)
   return out
 end
 
+-- ===== Take Name renamer (user-configurable, after filter) =====
+local R_ITEM_SEP  = string.char(31)
+local R_FIELD_SEP = string.char(30)
+
+local function _escape_lua_pat_safe(s) return tostring(s or ""):gsub("(%W)","%%%1") end
+
+local function pack_rules(rules)
+  -- rules: { {from="2.0", to="2"}, {from="1.0", to="1"}, ... }
+  local packed = {}
+  for i=1, #(rules or {}) do
+    local p = rules[i]
+    local from = esc(p.from or "")
+    local to   = esc(p.to   or "")
+    packed[#packed+1] = from .. R_FIELD_SEP .. to
+  end
+  return table.concat(packed, R_ITEM_SEP)
+end
+
+local function unpack_rules(s)
+  local out = {}
+  if s and s ~= "" then
+    local items = split_by_sep(s:gsub(R_FIELD_SEP, R_FIELD_SEP)) -- reuse splitter
+    -- 手動 split item → fields（from/to）
+    local start = 1
+    local function split_once(str, sep)
+      local i = str:find(sep, 1, true)
+      if not i then return str, "" end
+      return str:sub(1, i-1), str:sub(i+1)
+    end
+    local idx = 1
+    for chunk in s:gmatch("([^" .. R_ITEM_SEP .. "]*)"..R_ITEM_SEP.."*") do
+      if chunk == "" then
+        if s:sub(#s) == R_ITEM_SEP then break end
+      end
+      local a, b = split_once(chunk, R_FIELD_SEP)
+      out[#out+1] = { from = unesc(a or ""), to = unesc(b or "") }
+      idx = idx + 1
+      if idx > 999 then break end
+    end
+  end
+  return out
+end
+
+local function load_take_renamer()
+  local en = (reaper.GetExtState(EXT_NS, "take_ren_enable") == "1")
+  local raw = reaper.GetExtState(EXT_NS, "take_ren_rules")
+  local rules = unpack_rules(raw)
+  return { enable = en, rules = rules }
+end
+
+local function save_take_renamer(R)
+  reaper.SetExtState(EXT_NS, "take_ren_enable", R.enable and "1" or "0", true)
+  reaper.SetExtState(EXT_NS, "take_ren_rules",  pack_rules(R.rules or {}), true)
+end
+
+local TAKE_RENAMER = load_take_renamer()
+
+local function apply_take_renamer(name)
+  local out = tostring(name or "")
+  if TAKE_RENAMER.enable and TAKE_RENAMER.rules then
+    for _, pair in ipairs(TAKE_RENAMER.rules) do
+      local from = pair.from or ""
+      local to   = pair.to   or ""
+      if from ~= "" then
+        out = out:gsub(_escape_lua_pat_safe(from), to)
+      end
+    end
+  end
+  return out
+end
 
 
 
@@ -772,6 +847,7 @@ local function append_token(tk)
       if not preview_limit or shown < preview_limit then
         local newname = expand_template(TAKE_TEMPLATE, e.fields, i)
         newname = apply_take_filter(newname)
+        newname = apply_take_renamer(newname)
         local newnote = (NOTE_TEMPLATE ~= "" and expand_template(NOTE_TEMPLATE, e.fields, i, false)) or ""
         preview_rows[#preview_rows+1] = { current=e.current, newname=newname, newnote=newnote }
         shown = shown + 1
@@ -958,6 +1034,7 @@ local function scan_metadata()
     if not preview_limit or shown < preview_limit then
       local newname = expand_template(TAKE_TEMPLATE, e.fields, i)
       newname = apply_take_filter(newname)      
+      newname = apply_take_renamer(newname)
       local newnote = (NOTE_TEMPLATE ~= "" and expand_template(NOTE_TEMPLATE, e.fields, i, false)) or ""
       preview_rows[#preview_rows+1] = { current=e.current, newname=newname, newnote=newnote }
       shown = shown + 1
@@ -977,6 +1054,7 @@ local function recompute_preview_from_cache()
     if not preview_limit or shown < preview_limit then
       local newname = expand_template(TAKE_TEMPLATE, e.fields, i)
       newname = apply_take_filter(newname)
+      newname = apply_take_renamer(newname)
       local newnote = (NOTE_TEMPLATE ~= "" and expand_template(NOTE_TEMPLATE, e.fields, i, false)) or ""
       preview_rows[#preview_rows+1] = { current=e.current, newname=newname, newnote=newnote }
       shown = shown + 1
@@ -1020,6 +1098,8 @@ local function apply_renaming()
 
     -- compute new
     local new_name = (take and expand_template(TAKE_TEMPLATE, fields, counter)) or ""
+    new_name = apply_take_filter(new_name)
+    new_name = apply_take_renamer(new_name)
     local new_note = (NOTE_TEMPLATE ~= "" and expand_template(NOTE_TEMPLATE, fields, counter, false)) or ""
 
     local did_rename, did_note = false, false
@@ -1131,50 +1211,62 @@ local function take_note_inputs()
   --（可選）和下方 presets 稍微留一點距離
   -- reaper.ImGui_Spacing(ctx)
 
-  -- === Take Name Filter (post expansion) ===
+  -- === Take Name renamer (after token expansion & filter) ===
   reaper.ImGui_Separator(ctx)
-  reaper.ImGui_Text(ctx, "Take Name filter"); 
-  reaper.ImGui_SameLine(ctx); 
-  reaper.ImGui_TextDisabled(ctx, "(applies after token expansion; Note unaffected)")
+  reaper.ImGui_Text(ctx, "Take Name renamer")
+  reaper.ImGui_SameLine(ctx)
+  reaper.ImGui_TextDisabled(ctx, "(applies after tokens & filter; Note unaffected)")
 
   -- Enable
-  local chgEn, en = reaper.ImGui_Checkbox(ctx, "Enable##takefilter", TAKE_FILTER.enable)
+  local chgEn, en = reaper.ImGui_Checkbox(ctx, "Enable##takeren", TAKE_RENAMER.enable or false)
   if chgEn then
-    TAKE_FILTER.enable = en; save_take_filter(TAKE_FILTER)
+    TAKE_RENAMER.enable = en
+    save_take_renamer(TAKE_RENAMER)
     if SCAN_CACHE then recompute_preview_from_cache() end
   end
 
-  -- Disallow chars
-  reaper.ImGui_SameLine(ctx)
-  reaper.ImGui_Text(ctx, "Disallow:")
-  reaper.ImGui_SameLine(ctx)
-  reaper.ImGui_SetNextItemWidth(ctx, 120)
-  local chgCh, chs = reaper.ImGui_InputText(ctx, "##takefilter_chars", TAKE_FILTER.chars or "")
-  if chgCh then
-    TAKE_FILTER.chars = chs
-    save_take_filter(TAKE_FILTER)
-    if SCAN_CACHE then recompute_preview_from_cache() end
+  -- Rules table
+  local rules = TAKE_RENAMER.rules or {}
+  local tblFlags = TF('ImGui_TableFlags_Borders') | TF('ImGui_TableFlags_RowBg')
+  if reaper.ImGui_BeginTable(ctx, "TakeRenRules", 3, tblFlags) then
+    reaper.ImGui_TableSetupColumn(ctx, "From", TF('ImGui_TableColumnFlags_WidthStretch'), 0.48)
+    reaper.ImGui_TableSetupColumn(ctx, "To",   TF('ImGui_TableColumnFlags_WidthStretch'), 0.48)
+    reaper.ImGui_TableSetupColumn(ctx, "",     TF('ImGui_TableColumnFlags_WidthFixed'),   40)
+    reaper.ImGui_TableHeadersRow(ctx)
+
+    for i=#rules,1,-1 do
+      local row = rules[i]
+      reaper.ImGui_TableNextRow(ctx)
+      -- From
+      reaper.ImGui_TableSetColumnIndex(ctx, 0)
+      reaper.ImGui_SetNextItemWidth(ctx, -FLT_MIN)
+      local chgF, vF = reaper.ImGui_InputText(ctx, ("##ren_from_%d"):format(i), row.from or "")
+      if chgF then
+        row.from = vF; save_take_renamer(TAKE_RENAMER)
+        if SCAN_CACHE then recompute_preview_from_cache() end
+      end
+      -- To
+      reaper.ImGui_TableSetColumnIndex(ctx, 1)
+      reaper.ImGui_SetNextItemWidth(ctx, -FLT_MIN)
+      local chgT, vT = reaper.ImGui_InputText(ctx, ("##ren_to_%d"):format(i), row.to or "")
+      if chgT then
+        row.to = vT; save_take_renamer(TAKE_RENAMER)
+        if SCAN_CACHE then recompute_preview_from_cache() end
+      end
+      -- Del
+      reaper.ImGui_TableSetColumnIndex(ctx, 2)
+      if reaper.ImGui_SmallButton(ctx, ("-##delren_%d"):format(i)) then
+        table.remove(rules, i); save_take_renamer(TAKE_RENAMER)
+        if SCAN_CACHE then recompute_preview_from_cache() end
+      end
+    end
+    reaper.ImGui_EndTable(ctx)
   end
 
-  -- Replacement
-  reaper.ImGui_SameLine(ctx)
-  reaper.ImGui_Text(ctx, "→")
-  reaper.ImGui_SameLine(ctx)
-  reaper.ImGui_SetNextItemWidth(ctx, 90)
-  local chgRp, rp = reaper.ImGui_InputText(ctx, "##takefilter_repl", TAKE_FILTER.repl or "_")
-  if chgRp then
-    TAKE_FILTER.repl = rp
-    save_take_filter(TAKE_FILTER)
-    if SCAN_CACHE then recompute_preview_from_cache() end
-  end
-
-  -- Collapse repeats
-  reaper.ImGui_SameLine(ctx)
-  local chgCol, col = reaper.ImGui_Checkbox(ctx, "collapse repeats##takefilter", TAKE_FILTER.collapse or false)
-  if chgCol then
-    TAKE_FILTER.collapse = col
-    save_take_filter(TAKE_FILTER)
-    if SCAN_CACHE then recompute_preview_from_cache() end
+  -- Add rule button
+  if reaper.ImGui_SmallButton(ctx, "+ Add rename rule") then
+    rules[#rules+1] = { from = "", to = "" }
+    save_take_renamer(TAKE_RENAMER)
   end
 
 
