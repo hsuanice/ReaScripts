@@ -1,6 +1,6 @@
 --[[
 @description ReaImGui - Vertical Reorder and Sort (items)
-@version 0.3.5a
+@version 0.3.6
 @author hsuanice
 @about
   Provides two vertical re-arrangement modes for selected items (stacked UI):
@@ -26,6 +26,11 @@
     - Script generated and refined with ChatGPT.
 
 @changelog
+  v0.3.6
+    - UI: Moved the main action button directly under
+          "Sort by Metadata: Track Name / Channel Number".
+          The Preview list now comes after the button so it never pushes
+          the button off-screen.
   v0.3.5a
     - Fix: "invalid order function for sorting" when using Copy to Sort.
            Now uses stable string-based order keys for both Track Name
@@ -642,6 +647,7 @@ end
 ---------------------------------------
 -- UI：畫面（直向）
 ---------------------------------------
+-- === REPLACE WHOLE FUNCTION ===
 local function draw_confirm()
   compute_selection_and_tracks()
   reaper.ImGui_Text(ctx, string.format("Selected: %d item(s) across %d track(s).", #SELECTED_ITEMS, #ACTIVE_TRACKS))
@@ -656,10 +662,10 @@ local function draw_confirm()
 
   reaper.ImGui_Separator(ctx)
 
-  -- 2) Sort Vertically（單一主按鈕；依 Metadata 與否改標籤與行為）
+  -- 2) Sort Vertically
   reaper.ImGui_Text(ctx, "Sort Vertically")
 
-  -- 2a) Sort key 選項
+  -- Sort key 選項
   local labels = { "Take name", "File name", "Metadata" }
   for i=1,3 do
     if reaper.ImGui_RadioButton(ctx, labels[i], sort_key_idx==i) then sort_key_idx=i end
@@ -667,8 +673,8 @@ local function draw_confirm()
   end
   local _, asc_chk = reaper.ImGui_Checkbox(ctx, "Ascending", sort_asc); sort_asc = asc_chk
 
-  -- 2b) 若選 Metadata，顯示子選項 + Preview
   if sort_key_idx==3 then
+    -- ---- Metadata 子選項 ----
     reaper.ImGui_Spacing(ctx)
     reaper.ImGui_Text(ctx, "Sort by Metadata:")
     reaper.ImGui_SameLine(ctx)
@@ -676,11 +682,20 @@ local function draw_confirm()
     reaper.ImGui_SameLine(ctx)
     if reaper.ImGui_RadioButton(ctx, "Channel Number", meta_sort_mode==2) then meta_sort_mode=2 end
 
+    -- ★ 主按鈕放在這裡（Preview 上方）
+    reaper.ImGui_Spacing(ctx)
+    if reaper.ImGui_Button(ctx, "Copy to Sort", 220, 26) then
+      run_copy_to_new_tracks(meta_sort_mode, sort_asc)
+      SUMMARY=""; STATE="summary"
+    end
+
+    -- Preview（選擇性資訊，放在按鈕之後）
     reaper.ImGui_Spacing(ctx)
     reaper.ImGui_Text(ctx, "Preview detected fields")
-    if reaper.ImGui_Button(ctx, "Scan first ~80 items", 200, 22) then build_preview_pairs(SELECTED_ITEMS) end
+    if reaper.ImGui_Button(ctx, "Scan first ~80 items", 200, 22) then
+      build_preview_pairs(SELECTED_ITEMS)
+    end
     reaper.ImGui_Spacing(ctx)
-
     if reaper.ImGui_BeginTable(ctx, "tbl_preview", 2,
         reaper.ImGui_TableFlags_Borders() | reaper.ImGui_TableFlags_RowBg(), -1, 220) then
       reaper.ImGui_TableSetupColumn(ctx, "Channel #")
@@ -693,17 +708,10 @@ local function draw_confirm()
       end
       reaper.ImGui_EndTable(ctx)
     end
-  end
-
-  -- 2c) 主按鈕：非 Metadata = Run Sort Vertically；Metadata = Copy to Sort
-  reaper.ImGui_Spacing(ctx)
-  local btn_label = (sort_key_idx==3) and "Copy to Sort" or "Run Sort Vertically"
-  if reaper.ImGui_Button(ctx, btn_label, 220, 28) then
-    if sort_key_idx==3 then
-      -- 用目前 Metadata 子選項與升降冪，複製到新軌並命名
-      run_copy_to_new_tracks(meta_sort_mode, sort_asc)
-      SUMMARY=""; STATE="summary"
-    else
+  else
+    -- 非 Metadata：這裡才畫 Sort 的主按鈕
+    reaper.ImGui_Spacing(ctx)
+    if reaper.ImGui_Button(ctx, "Run Sort Vertically", 220, 26) then
       MODE="sort"; prepare_plan(); run_engine()
       SUMMARY=("Completed. Items=%d, Moved=%d, Skipped=%d."):format(TOTAL,MOVED,SKIPPED); STATE="summary"
     end
