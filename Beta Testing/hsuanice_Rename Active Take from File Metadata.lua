@@ -1,6 +1,6 @@
 --[[
 @description ReaImGui - Rename Active Take from Metadata (caret insert + cached preview + copy/export)
-@version 0.10.2
+@version 0.10.3
 @author hsuanice
 @about
   Rename active takes and/or item notes from BWF/iXML and true source metadata using a fast ReaImGui UI.
@@ -33,6 +33,11 @@
   hsuanice served as the workflow designer, tester, and integrator for this tool.
 
 @changelog
+  v0.10.3 - UI polish for Take Name renamer:
+          • Use a custom header row so "Clear All" sits on the same line as "From" / "To".
+          • "From" / "To" now left-aligned for clearer scanning; button remains in the right header cell.
+          • Replaced auto TableHeadersRow and version-dependent calls with a safer approach (GetContentRegionAvail);
+            no behavior changes to preview/apply/export.
   v0.10.2 - UI: Add "Clear All" button to Take Name renamer rules table header (top-right).
              • Clears all rename rules at once (does not affect Take Name/Item Note templates).
   v0.10.1 - UI: Move “+ Add rename rule” next to the Enable checkbox (same line) for quicker access.
@@ -1241,18 +1246,35 @@ local function take_note_inputs()
   local rules = TAKE_RENAMER.rules or {}
   local tblFlags = TF('ImGui_TableFlags_Borders') | TF('ImGui_TableFlags_RowBg')
   if reaper.ImGui_BeginTable(ctx, "TakeRenRules", 3, tblFlags) then
-    reaper.ImGui_TableSetupColumn(ctx, "From", TF('ImGui_TableColumnFlags_WidthStretch'), 0.48)
-    reaper.ImGui_TableSetupColumn(ctx, "To",   TF('ImGui_TableColumnFlags_WidthStretch'), 0.48)
-    reaper.ImGui_TableSetupColumn(ctx, "",     TF('ImGui_TableColumnFlags_WidthFixed'),   60)
-    reaper.ImGui_TableHeadersRow(ctx)
+  reaper.ImGui_TableSetupColumn(ctx, "From", TF('ImGui_TableFlags_None')|TF('ImGui_TableColumnFlags_WidthStretch'), 0.48)
+  reaper.ImGui_TableSetupColumn(ctx, "To",   TF('ImGui_TableFlags_None')|TF('ImGui_TableColumnFlags_WidthStretch'), 0.48)
+  reaper.ImGui_TableSetupColumn(ctx, "",     TF('ImGui_TableFlags_None')|TF('ImGui_TableColumnFlags_WidthFixed'),   60)
 
-  -- Header rightmost: Clear All button
+  -- 自畫一列表頭（這一列就是你看到的那一行）
+  reaper.ImGui_TableNextRow(ctx, TF('ImGuiTableRowFlags_Headers'))
+
+  -- From
+  reaper.ImGui_TableSetColumnIndex(ctx, 0)
+  reaper.ImGui_Text(ctx, "From")
+
+  -- To
+  reaper.ImGui_TableSetColumnIndex(ctx, 1)
+  reaper.ImGui_Text(ctx, "To")
+
+  -- Clear All（同一行，置中）
   reaper.ImGui_TableSetColumnIndex(ctx, 2)
-  if reaper.ImGui_SmallButton(ctx, "Clear All##takeren_clear") then
-    TAKE_RENAMER.rules = {}
-    save_take_renamer(TAKE_RENAMER)
-    if SCAN_CACHE then recompute_preview_from_cache() end
+  do
+    local label = "Clear All"
+    local w = select(1, reaper.ImGui_GetContentRegionAvail(ctx))
+    local t = reaper.ImGui_CalcTextSize(ctx, label) -- 小按鈕寬 ≈ 文本寬，視覺可接受
+    reaper.ImGui_SetCursorPosX(ctx, reaper.ImGui_GetCursorPosX(ctx) + math.max(0, (w - t) * 0.5))
+    if reaper.ImGui_SmallButton(ctx, label.."##takeren_clear") then
+      TAKE_RENAMER.rules = {}
+      save_take_renamer(TAKE_RENAMER)
+      if SCAN_CACHE then recompute_preview_from_cache() end
+    end
   end
+
 
     for i=#rules,1,-1 do
       local row = rules[i]
