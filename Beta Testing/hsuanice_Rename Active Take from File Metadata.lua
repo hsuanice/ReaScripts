@@ -1,6 +1,6 @@
 --[[
 @description ReaImGui - Rename Active Take from Metadata (caret insert + cached preview + copy/export)
-@version 0.11.5
+@version 0.11.6
 @author hsuanice
 @about
   Rename active takes and/or item notes from BWF/iXML and true source metadata using a fast ReaImGui UI.
@@ -33,6 +33,11 @@
   hsuanice served as the workflow designer, tester, and integrator for this tool.
 
 @changelog
+  v0.11.6 - Note clearing + preview clarity:
+          • Added $clearnote token to explicitly clear Item Note (template expands to empty string).
+          • Preview table: when Note template is applied and results in an empty string (e.g., $clearnote),
+            "New Note" now shows (empty). If Note template is blank (skipped), it still shows (unchanged).
+          • Token appears in the Template tokens row; no impact on Take Name or renamer behavior.
   v0.11.5 - Export Info row re-mapped:
           • New Take Name column shows the Take template (rename tokens).
           • New Take Note column shows the Note template (rename tokens).
@@ -724,7 +729,7 @@ local function normalize_tokens(s)
 
   -- plain known tokens
   local known = {
-    "curtake","curnote","track","filename","srcfile","srcbase","srcext","srcpath","srcdir",
+    "curtake","curnote","clearnote","track","filename","srcfile","srcbase","srcext","srcpath","srcdir",
     "samplerate","channels","length","project","scene","take","tape","trk","trkall",
     "ubits","framerate","speed","date","time","year","originationdate","originationtime","startoffset",
     "filepath","originator","originatorreference","timereference","description"
@@ -745,8 +750,10 @@ local function expand_template(tpl, fields, counter, sanitize)
     if sanitize then return (s:gsub('[\\/:*?"<>|%c]', '_')) end
     return s
   end
-  local function repl(tok)
-    local tkl = string.lower(tok)
+  local function repl(name)
+    local tkl = string.lower(name or "")
+    if tkl == "clearnote" then return "" end
+
     -- $srcbaseprefix:N - first N characters of srcbase
     local prefix = tkl:match("^srcbaseprefix:(%d+)$")
     if prefix then
@@ -808,18 +815,15 @@ local function expand_template(tpl, fields, counter, sanitize)
       return trim(maybe_sanitize(s))
 
     end
-    local v = fields[tkl] or fields[tok] or ""
+    local v = fields[tkl] or fields[name] or ""
     local s = tostring(v or "")
     return trim(maybe_sanitize(s))
-
   end
+
   local out = normalize_tokens(tpl or "")
   out = out:gsub("%${(.-)}", function(s) return repl(s) end)
   out = out:gsub("%$([%a%d:]+)", function(s) return repl(s) end)
-  out = out:gsub("%s+"," "):gsub("^%s+",""):gsub("%s+$","")
-
-
-  
+  out = out:gsub("%s+"," "):gsub("^%s+",""):gsub("%s+$","")  
   return out
 end
 
@@ -860,7 +864,7 @@ local LAST_RESULT = nil  -- { total_sel, renamed, noted, skipped, rows = { {idx,
 
 -- ===== Token list =====
 local TOKEN_LIST = {
-  "$curtake","$curnote","$track","$filename","$srcfile","$srcbase",'$srcbaseprefix:N','$srcbasesuffix:N',"$srcext","$srcpath","$srcdir",
+  "$curtake","$curnote","$clearnote","$track","$filename","$srcfile","$srcbase",'$srcbaseprefix:N','$srcbasesuffix:N',"$srcext","$srcpath","$srcdir",
   "$samplerate","$channels","$length",
   "$project","$scene","$take","$tape",
   "$trk","$trkall","$trk1","$trk2","$trk3","$trk4","$trk5","$trk6","$trk7","$trk8",
@@ -888,7 +892,7 @@ local function append_token(tk)
         newname = apply_take_renamer(newname)
         local newnote  = (NOTE_TEMPLATE ~= "" and expand_template(NOTE_TEMPLATE, e.fields, i, false)) or ""
         local currnote = tostring(e.fields and e.fields.curnote or "")
-        preview_rows[#preview_rows+1] = { current=e.current, newname=newname, current_note=currnote, newnote=newnote }
+        preview_rows[#preview_rows+1] = { current=e.current, newname=newname, current_note=currnote, newnote=newnote, note_applied = (NOTE_TEMPLATE ~= "") }
         shown = shown + 1
       end
     end
@@ -1113,7 +1117,7 @@ local function scan_metadata()
       newname = apply_take_renamer(newname)
       local newnote  = (NOTE_TEMPLATE ~= "" and expand_template(NOTE_TEMPLATE, e.fields, i, false)) or ""
       local currnote = tostring(e.fields and e.fields.curnote or "")
-      preview_rows[#preview_rows+1] = { current=e.current, newname=newname, current_note=currnote, newnote=newnote }
+      preview_rows[#preview_rows+1] = { current=e.current, newname=newname, current_note=currnote, newnote=newnote, note_applied = (NOTE_TEMPLATE ~= "") }
 
       shown = shown + 1
     end
@@ -1135,7 +1139,7 @@ local function recompute_preview_from_cache()
       newname = apply_take_renamer(newname)
       local newnote  = (NOTE_TEMPLATE ~= "" and expand_template(NOTE_TEMPLATE, e.fields, i, false)) or ""
       local currnote = tostring(e.fields and e.fields.curnote or "")
-      preview_rows[#preview_rows+1] = { current=e.current, newname=newname, current_note=currnote, newnote=newnote }
+      preview_rows[#preview_rows+1] = { current=e.current, newname=newname, current_note=currnote, newnote=newnote, note_applied = (NOTE_TEMPLATE ~= "") }
       shown = shown + 1
     end
   end
@@ -1605,7 +1609,13 @@ local function draw_view_pane(available_h)
               reaper.ImGui_TableNextColumn(ctx); reaper.ImGui_TextWrapped(ctx, row.current ~= "" and row.current or "(unnamed)")
               reaper.ImGui_TableNextColumn(ctx); reaper.ImGui_TextWrapped(ctx, row.newname ~= "" and row.newname or "(unchanged)")
               reaper.ImGui_TableNextColumn(ctx); reaper.ImGui_TextWrapped(ctx, (row.current_note and row.current_note ~= "" ) and row.current_note or "(empty)")
-              reaper.ImGui_TableNextColumn(ctx); reaper.ImGui_TextWrapped(ctx, row.newnote ~= "" and row.newnote or "(unchanged)")
+              reaper.ImGui_TableNextColumn(ctx)
+              local applied = row.note_applied
+              if applied then
+                reaper.ImGui_TextWrapped(ctx, (row.newnote ~= "" ) and row.newnote or "(empty)")
+              else
+                reaper.ImGui_TextWrapped(ctx, "(unchanged)")
+              end
             end
 
           end
