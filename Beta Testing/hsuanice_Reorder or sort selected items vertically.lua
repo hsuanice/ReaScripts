@@ -1,6 +1,6 @@
 --[[
 @description ReaImGui - Reorder or sort selected items vertically
-@version 0.3.2
+@version 0.3.3
 @author hsuanice
 @about
   Provides two vertical re-arrangement modes for selected items:
@@ -27,6 +27,16 @@
     hsuanice served as the workflow designer, tester, and integrator for this tool.
 
 @changelog
+  v0.3.3
+    - New: Option "Order new tracks alphabetically (ignore channel #)" for Copy-to-New-Tracks.
+           Uses natural sort so names with numbers order intuitively (e.g., CHEN 2.0 < CHEN 10.0).
+    - Tweak: Name sort now uses a natural string key for consistent A→Z ordering.
+  v0.3.2
+    - Fix: "invalid order function for sorting" in Sort Vertically by Take/File; use single-key total ordering.
+  v0.3.1
+    - Fix: Always call ImGui_End() to prevent "Missing End()" error.
+    - Added Copy-to-New-Tracks-by-Metadata and metadata parsing improvements.
+
   v0.3.2
          - Fix: Sort Vertically sometimes raised "invalid order function for sorting".
           Replaced comparator with single-key total ordering (string-composed key).
@@ -388,6 +398,17 @@ end
 ---------------------------------------
 -- Copy-to-New-Tracks：核心
 ---------------------------------------
+-- 排序選項：true = 只按名稱 A→Z；false = 先 Channel# 再名稱
+local ORDER_BY_NAME_ONLY = false
+
+-- 自然排序鍵：把數字補零，避免 "10" 小於 "2" 的問題（CHEN 2.0 < CHEN 10.0）
+local function natural_key(s)
+  s = tostring(s or ""):lower()
+  s = s:gsub("%s+", " ")
+  s = s:gsub("(%d+)", function(d) return string.format("%09d", tonumber(d)) end)
+  return s
+end
+
 local META_NAME_KEY = "trk" -- 預設讀 $trk（建議）
 local SHOW_PREVIEW  = false
 local PREVIEW_TEXT  = ""
@@ -465,9 +486,13 @@ local function run_copy_to_new_tracks()
   local names = {}
   for n,_ in pairs(groups) do names[#names+1]=n end
   table.sort(names, function(a,b)
-    local ca,cb = groups[a].ch or 999, groups[b].ch or 999
-    if ca ~= cb then return ca < cb end
-    return a:lower() < b:lower()
+    if ORDER_BY_NAME_ONLY then
+      return natural_key(a) < natural_key(b)
+    else
+      local ca,cb = groups[a].ch or 999, groups[b].ch or 999
+      if ca ~= cb then return ca < cb end
+      return natural_key(a) < natural_key(b)
+    end
   end)
 
   local last_idx = reaper.CountTracks(0)
@@ -556,6 +581,9 @@ local function draw_confirm()
   if changed then META_NAME_KEY = buf end
   reaper.ImGui_SameLine(ctx)
   if reaper.ImGui_Button(ctx, "Preview detected fields", 200, 24) then SHOW_PRE=true; build_preview_text(SELECTED_ITEMS) end
+  reaper.ImGui_SameLine(ctx)
+  local _, name_only = reaper.ImGui_Checkbox(ctx, "Order new tracks alphabetically (ignore channel #)", ORDER_BY_NAME_ONLY)
+  ORDER_BY_NAME_ONLY = name_only  
   local _, asc_chk = reaper.ImGui_Checkbox(ctx, "Ascending (for Sort Vertically)", sort_asc); sort_asc = asc_chk
 
   if SHOW_PRE then
