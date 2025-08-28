@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<index version="1" name="hsuanice Scripts" commit="1a5d81b7b8e1b4c1464e1baf45b7ffacd637fb55">
+<index version="1" name="hsuanice Scripts" commit="b9d17f2963df3dd0cba7b6a0e550723e14c443f7">
   <category name="Beta Testing">
     <reapack name="hsuanice_BWF TimeReference Embed Tool.lua" type="script" desc="Embed BWF TimeReference to Active take from Take 1 or Current Position TC">
       <version name="0.7.1" author="hsuanice" time="2025-08-14T17:52:57Z">
@@ -660,26 +660,27 @@ v0.1 - Beta release]]></changelog>
         <source main="main">https://github.com/hsuanice/ReaScripts/raw/14d9115e2db0108fadf78db46ad37236eca7d4ee/Beta%20Testing/hsuanice_Rename%20Active%20Take%20from%20File%20Metadata.lua</source>
       </version>
     </reapack>
-    <reapack name="hsuanice_Reorder or sort selected items vertically.lua" type="script" desc="ReaImGui - Reorder or sort selected items vertically">
+    <reapack name="hsuanice_Reorder or sort selected items vertically.lua" type="script" desc="ReaImGui - Vertical Reorder and Sort (items)">
       <metadata>
         <description><![CDATA[{\rtf1\ansi\deff0{\fonttbl{\f0 \fswiss Helvetica;}{\f1 \fmodern Courier;}}
 {\colortbl;\red255\green0\blue0;\red0\green0\blue255;}
 \widowctrl\hyphauto
 
-{\pard \ql \f0 \sa180 \li0 \fi0 Provides two vertical re-arrangement modes for selected items:\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 Provides two vertical re-arrangement modes for selected items (stacked UI):\par}
 {\pard \ql \f0 \sa180 \li0 \fi0 \u8226 ? Reorder (fill upward)\par}
 {\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Keeps items at their original timeline position.\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Packs items upward into available selected tracks, avoiding gaps.\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Useful to condense scattered clips without changing their order.\sa180\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Packs items upward into available selected tracks, avoiding gaps.\sa180\par}
 {\pard \ql \f0 \sa180 \li0 \fi0 \u8226 ? Sort Vertically\par}
 {\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Groups items by near-identical start time.\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Within each time cluster, re-orders items top-to-bottom by:\line Take Name / File Name / Metadata field.\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Optional Ascending / Descending toggle.\sa180\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Within each time cluster, re-orders items top-to-bottom by: Take Name / File Name / Metadata (Track Name or Channel Number).\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Ascending / Descending toggle.\sa180\par}
 {\pard \ql \f0 \sa180 \li0 \fi0 \u8226 ? Copy to New Tracks by Metadata\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab NEW: Duplicates selected items onto newly created tracks,\line named from metadata (e.g. $trk, $trkall, TRK1\u8230 ?TRK64).\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Tracks are ordered by Channel Number, then by Name.\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Duplicates selected items onto newly created tracks, named from metadata (e.g. $trk, $trkall, TRK1\u8230 ?TRK64).\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Tracks ordered by Channel number (or optional A\u8594 ?Z by name).\par}
 {\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Original tracks/items remain untouched.\sa180\par}
-{\pard \ql \f0 \sa180 \li0 \fi0 Note: This script was generated using ChatGPT based on design concepts and iterative testing by hsuanice. hsuanice served as the workflow designer, tester, and integrator for this tool.\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 Notes:\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Based on design concepts and iterative testing by hsuanice.\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Script generated and refined with ChatGPT.\sa180\par}
 }
 ]]></description>
       </metadata>
@@ -691,6 +692,9 @@ v0.1 - Beta release]]></changelog>
       </version>
       <version name="0.3.3" author="hsuanice" time="2025-08-28T17:56:58Z">
         <source main="main">https://github.com/hsuanice/ReaScripts/raw/1a5d81b7b8e1b4c1464e1baf45b7ffacd637fb55/Beta%20Testing/hsuanice_Reorder%20or%20sort%20selected%20items%20vertically.lua</source>
+      </version>
+      <version name="0.3.4 Vertical UI" author="hsuanice" time="2025-08-28T18:20:39Z">
+        <source main="main">https://github.com/hsuanice/ReaScripts/raw/b9d17f2963df3dd0cba7b6a0e550723e14c443f7/Beta%20Testing/hsuanice_Reorder%20or%20sort%20selected%20items%20vertically.lua</source>
       </version>
     </reapack>
     <reapack name="hsuanice_Show Frame Rate.lua" type="script" desc="ReaImGui - Show Project Frame Rate">
