@@ -1,6 +1,6 @@
 --[[
 @description ReaImGui - Rename Active Take from Metadata (caret insert + cached preview + copy/export)
-@version 0.11.3
+@version 0.11.4
 @author hsuanice
 @about
   Rename active takes and/or item notes from BWF/iXML and true source metadata using a fast ReaImGui UI.
@@ -33,6 +33,9 @@
   hsuanice served as the workflow designer, tester, and integrator for this tool.
 
 @changelog
+  v0.11.4 - UI cleanup: removed "Apply & Close" button.
+          • Kept two-button layout: Apply / Cancel (right-aligned, consistent spacing).
+          • Eliminates a non-functional action; no changes to apply/preview/export logic.
   v0.11.3 - Export: add per-row "Replaced" column showing hit rename rules (e.g., 2.0→2; 1.0→1).
              • Keeps top Info row (templates + all rules).
              • Preview table unchanged.
@@ -1722,25 +1725,26 @@ local function loop()
     do
       local full_w = select(1, reaper.ImGui_GetContentRegionAvail(ctx))
       local left_btn_w = 210
-      local btn_w = 150*3 + 16*2
+
 
       -- Left button
       if reaper.ImGui_Button(ctx, "Get Metadata (Preview)", left_btn_w, 28) then scan_metadata() end
 
       -- Right-aligned Apply buttons
-      local right_x = full_w - btn_w
+      local right_x = full_w - (150*2 + 16*1)
       if right_x > (left_btn_w + 12) then
         reaper.ImGui_SameLine(ctx, right_x)
       else
         reaper.ImGui_NewLine(ctx)
         local fw2 = select(1, reaper.ImGui_GetContentRegionAvail(ctx))
-        reaper.ImGui_SameLine(ctx, math.max(0, fw2 - btn_w))
+        reaper.ImGui_SameLine(ctx, math.max(0, fw2 - (150*2 + 16*1)))
       end
+
+      -- 只留 Apply / Cancel 兩顆
       if reaper.ImGui_Button(ctx, "Apply", 150, 28) then apply_renaming() end
       reaper.ImGui_SameLine(ctx)
-      if reaper.ImGui_Button(ctx, "Apply & Close", 150, 28) then apply_renaming(); close_after_apply = true end
-      reaper.ImGui_SameLine(ctx)
       if reaper.ImGui_Button(ctx, "Cancel", 150, 28) then close_after_apply = true end
+
     end
 
 
