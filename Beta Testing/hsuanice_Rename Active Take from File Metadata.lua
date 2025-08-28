@@ -1,6 +1,6 @@
 --[[
 @description ReaImGui - Rename Active Take from Metadata (caret insert + cached preview + copy/export)
-@version 0.8.2
+@version 0.8.3
 @author hsuanice
 @about
   Rename active takes and/or item notes from BWF/iXML and true source metadata using a fast ReaImGui UI.
@@ -28,6 +28,10 @@
   hsuanice served as the workflow designer, tester, and integrator for this tool.
 
 @changelog
+  v0.8.3 - Preset persistence: store P1–P5 in a single-line, escaped ExtState value.
+          - Fixes issue where only P1 survived after REAPER restart (INI newline cutoff).
+          - Supports multi-line Note presets; no data loss across sessions.
+
   v0.8.2 - Consistency: unified all internal "tab" format identifiers to "tsv"; default right_copy_fmt = "tsv".
            - UI: "Copy preview table" uses TSV/CSV buttons (clipboard copy via ImGui_SetClipboardText).
            - Preview: right pane preview text reflects current cached rows and respects preview_limit.
@@ -94,6 +98,48 @@ local function save_defaults(t, n)
   reaper.SetExtState(EXT_NS, "default_note_template", tostring(n or ""), true)
 end
 
+-- ===== Safe string pack for ExtState (single-line storage) =====
+local SEP = string.char(31) -- ASCII Unit Separator; 不會出現在一般文字中
+
+local function esc(s)
+  s = tostring(s or "")
+  -- 歸一化換行 → \n
+  s = s:gsub("\r\n", "\n"):gsub("\r", "\n")
+  -- 轉義：反斜線、分隔符、以及換行
+  s = s:gsub("\\", "\\\\")
+       :gsub(SEP, "\\x1F")
+       :gsub("\n", "\\n")
+  return s
+end
+
+local function unesc(s)
+  s = tostring(s or "")
+  s = s:gsub("\\n", "\n")
+       :gsub("\\x1F", SEP)
+       :gsub("\\\\", "\\")
+  return s
+end
+
+local function split_by_sep(s)
+  local t = {}
+  local from = 1
+  while true do
+    local i, j = s:find(SEP, from, true)
+    if not i then
+      t[#t+1] = s:sub(from)
+      break
+    end
+    t[#t+1] = s:sub(from, i-1)
+    from = j + 1
+  end
+  return t
+end
+
+local function join_by_sep(list)
+  return table.concat(list, SEP)
+end
+
+
 -- ===== Template Presets (5 slots each for Take/Note) =====
 local TAKE_PRESETS_KEY = "take_template_presets_v1"  -- newline-separated 5 lines
 local NOTE_PRESETS_KEY = "note_template_presets_v1"  -- newline-separated 5 lines
@@ -103,8 +149,9 @@ local function load_presets(key)
   local s = reaper.GetExtState(EXT_NS, key)
   local t = {}
   if s and s ~= "" then
-    for line in s:gmatch("([^\n]*)\n?") do
-      if line ~= nil then t[#t+1] = line end
+    local parts = split_by_sep(s)
+    for i = 1, math.min(#parts, PRESET_SLOTS) do
+      t[i] = unesc(parts[i])
     end
   end
   for i = #t + 1, PRESET_SLOTS do t[i] = "" end
@@ -112,13 +159,15 @@ local function load_presets(key)
 end
 
 local function save_presets(key, list)
-  local lines = {}
-  for i=1, PRESET_SLOTS do
-    local v = (list[i] or ""):gsub("[\r\n]", " ")
-    lines[#lines+1] = v
+  local packed = {}
+  for i = 1, PRESET_SLOTS do
+    packed[i] = esc(list[i] or "")
   end
-  reaper.SetExtState(EXT_NS, key, table.concat(lines, "\n"), true)
+  reaper.SetExtState(EXT_NS, key, join_by_sep(packed), true)
 end
+
+
+
 
 
 
