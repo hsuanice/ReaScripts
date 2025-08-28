@@ -26,7 +26,7 @@
     - Script generated and refined with ChatGPT.
 
 @changelog
-  v0.3.4
+  v0.3.4 Vertical UI
     - UI: Window renamed to "Vertical Reorder and Sort".
     - UI: Layout changed to vertical stack:
           Reorder → Sort Vertically → Sort by Metadata → Copy to New Tracks.
@@ -45,7 +45,6 @@
   v0.3.1
     - Fix: Always call ImGui_End() to prevent "Missing End()" error.
     - Added Copy-to-New-Tracks-by-Metadata and metadata parsing improvements.
-
 ]]
 
 ---------------------------------------
