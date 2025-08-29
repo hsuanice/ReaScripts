@@ -1,6 +1,6 @@
 --[[
 @description ReaImGui - Rename Active Take from Metadata (caret insert + cached preview + copy/export)
-@version 0.11.6
+@version 0.11.9
 @author hsuanice
 @about
   Rename active takes and/or item notes from BWF/iXML and true source metadata using a fast ReaImGui UI.
@@ -33,6 +33,22 @@
   hsuanice served as the workflow designer, tester, and integrator for this tool.
 
 @changelog
+  v0.11.9 - Poly interleave-resolved $trk/$trkall (metadata-only)
+    • $trk now resolves strictly from metadata by Interleave index:
+      - Primary: iXML TRACK_LIST (CHANNEL_INDEX → NAME), Wave Agent–style.
+      - Fallback: TRK# (incl. normalized dTRK#) sorted numerically → mapped to Interleave 1..N.
+    • $trkall concatenates names in Interleave order.
+    • Channel selection derives Interleave index from I_CHANMODE (Mono of N), clamped to 1..num_channels.
+    • Removed filename-based inference (.A#, chN, isoN) for track naming.
+
+  v0.11.8 - $trk/$trkall metadata-only:
+    • $trk now resolves strictly from metadata track lists:
+      - Primary: iXML TRACK_LIST (CHANNEL_INDEX → NAME).
+      - Fallback: BWF:Description dTRK# pairs.
+    • Removed filename-based patterns (.A#, chN, isoN, etc.) from $trk resolution.
+    • Channel selection uses item I_CHANMODE (Mono of N). If not set, falls back to the first TRK in metadata.
+    • BWF:Description normalization: dSCENE/dTAKE/dUBITS/... → SCENE/TAKE/UBITS; dTRK# → TRK#.
+
   v0.11.6 - Note clearing + preview clarity:
           • Added $clearnote token to explicitly clear Item Note (template expands to empty string).
           • Preview table: when Note template is applied and results in an empty string (e.g., $clearnote),
@@ -544,26 +560,41 @@ local function get_item_track_name(item) local tr=reaper.GetMediaItem_Track(item
 local function get_item_length_sec(item) return reaper.GetMediaItemInfo_Value(item,"D_LENGTH") or 0.0 end
 local function seconds_to_m_ss_mmm(sec) local s=math.max(0,tonumber(sec) or 0) local m=math.floor(s/60) local r=s-m*60 return string.format("%d:%06.3f", m, r) end
 
--- channel guess
-local function guess_channel_index(item, fields)
-  local take = get_active_take(item)
+-- Return the number of channels in the true source (poly N).
+local function get_source_num_channels(item, fields)
+  -- 1) Prefer the media source (most reliable)
+  local take = reaper.GetActiveTake(item)
   if take then
-    local cm = reaper.GetMediaItemTakeInfo_Value(take, "I_CHANMODE") or 0
-    if cm >= 3 and cm <= 66 then return math.floor(cm - 2) end
+    local src = reaper.GetMediaItemTake_Source(take)
+    if src then
+      local nch = reaper.GetMediaSourceNumChannels(src)
+      if type(nch) == "number" and nch > 0 then return nch end
+    end
   end
-  local fname = fields and (fields.srcfile or fields.filepath or fields.filename) or (take and source_filename(take_source(take))) or ""
-  local name = basename(tostring(fname)):lower()
-  local idx =
-      tonumber(name:match("[_%-%.]pn[_%-]?([0-9]+)%.%w+$")) or
-      tonumber(name:match("[_%-%.]pm[_%-]?([0-9]+)%.%w+$")) or
-      tonumber(name:match("[_%-%.]n[_%-]?([0-9]+)%.%w+$"))  or
-      tonumber(name:match("[_%-%.]a([0-9]+)%.%w+$"))        or
-      tonumber(name:match("[_%-%.]ch([0-9]+)%.%w+$"))       or
-      tonumber(name:match("[_%-%.]iso[_%-]?([0-9]+)%.%w+$"))or
-      tonumber(name:match("[_%-%s]([0-9]+)%.%w+$"))
-  if idx and idx>=1 and idx<=64 then return idx end
-  return nil
+  -- 2) Fallback: metadata $channels
+  local n = tonumber(fields and fields.channels)
+  if n and n > 0 then return n end
+  return 1
 end
+
+-- Interleave-only: derive Interleave index N from I_CHANMODE (Mono of N), clamped to 1..num_channels.
+local function guess_channel_index(item, fields)
+  local take = reaper.GetActiveTake(item)
+  if not take then return nil end
+
+  local cm = reaper.GetMediaItemTakeInfo_Value(take, "I_CHANMODE") or 0
+  -- Mono of N: cm = 2 + N  →  N = cm - 2
+  if cm >= 3 and cm <= 66 then
+    local n = math.floor(cm - 2)
+    local nch = get_source_num_channels(item, fields)
+    if n < 1 then n = 1 end
+    if n > nch then n = nch end
+    return n -- Interleave index (1..N), not the recorder's channel label (3/4/5/...).
+  end
+
+  return nil -- No Mono-of-N set; $trk branch will decide fallback behavior.
+end
+
 
 -- metadata keys
 local BWF_KEYS = {
@@ -581,17 +612,34 @@ local function get_meta(src, key)
   if ok == 1 and val ~= "" then return val end
   return nil
 end
+-- Parse "key=value" pairs from BWF:Description and normalize:
+--   dSCENE/dTAKE/... → SCENE/TAKE/...
+--   dTRK#/TRK#       → TRK#/trk#
 local function parse_description_pairs(desc_text, out_tbl)
   for line in (tostring(desc_text or "") .. "\n"):gmatch("(.-)\n") do
     local k, v = line:match("^%s*([%w_%-]+)%s*=%s*(.-)%s*$")
     if k and v and k ~= "" then
-      out_tbl[k] = v; out_tbl[string.lower(k)] = v
-      if k:sub(1,1) == 's' and #k > 1 then
-        local base = k:sub(2); out_tbl[base] = v; out_tbl[string.lower(base)] = v
+      out_tbl[k] = v
+      out_tbl[string.lower(k)] = v
+
+      -- Map dXXXX → XXXX (upper & lower)
+      local up = k:upper()
+      local base = up:match("^D([A-Z0-9_]+)$")
+      if base and base ~= "" then
+        out_tbl[base] = v
+        out_tbl[string.lower(base)] = v
+      end
+
+      -- Map dTRK#/TRK# → TRK#/trk#
+      local n = up:match("^D?TRK(%d+)$")
+      if n then
+        out_tbl["TRK"..n] = v
+        out_tbl["trk"..n] = v
       end
     end
   end
 end
+
 local function fill_ixml_tracklist(src, t)
   local ok, count = reaper.GetMediaFileMetadata(src, "IXML:TRACK_LIST:TRACK_COUNT")
   if ok == 1 then
@@ -717,6 +765,58 @@ local function collect_metadata_for_item(item)
   return t
 end
 
+-- Build a map: Interleave index (1..N) → Track Name.
+-- Priority: iXML TRACK_LIST (CHANNEL_INDEX → NAME).
+-- Fallback: TRK# keys (incl. normalized dTRK#) sorted numerically → mapped to 1..N.
+local function build_interleave_name_list(fields)
+  if fields.__trk_by_interleave then return fields.__trk_by_interleave end
+
+  local by_interleave = {}
+  local have_ixml = false
+
+  -- 1) iXML source (if your parser filled this):
+  --    fields.__ixml_tracks = { {channel_index=1, channel=3, name="BOOM1"}, ... }
+  if fields.__ixml_tracks and type(fields.__ixml_tracks) == "table" then
+    for _, t in ipairs(fields.__ixml_tracks) do
+      local idx = tonumber(t.channel_index)
+      local nm  = t.name
+      if idx and idx >= 1 and nm and nm ~= "" then
+        by_interleave[idx] = nm
+        have_ixml = true
+      end
+    end
+  end
+
+  -- 2) Fallback: derive Interleave order from TRK# keys (dedup by channel number)
+  if not have_ixml then
+    local pairs_chan = {}  -- { {chan=3,name="BOOM1"}, ... }
+    local seen = {}        -- deduplicate by channel number
+
+    for k, v in pairs(fields or {}) do
+      -- Accept both "TRK#" and "trk#" but keep only the first occurrence per channel
+      local n = k:match("^TRK(%d+)$") or k:match("^trk(%d+)$")
+      if n then
+        local ch = tonumber(n)
+        if ch and v and v ~= "" and not seen[ch] then
+          pairs_chan[#pairs_chan+1] = { chan = ch, name = v }
+          seen[ch] = true
+        end
+      end
+    end
+
+    table.sort(pairs_chan, function(a,b) return a.chan < b.chan end)
+    for i, e in ipairs(pairs_chan) do
+      by_interleave[i] = e.name
+    end
+  end
+
+  fields.__trk_by_interleave = by_interleave
+  return by_interleave
+end
+
+
+
+
 -- Wrap known $tokens to ${token} so $sceneT$take -> ${scene}T${take}
 local function normalize_tokens(s)
   s = tostring(s or "")
@@ -791,22 +891,39 @@ local function expand_template(tpl, fields, counter, sanitize)
       if n>0 then val = string.rep("0", math.max(0, n-#val))..val end
       return val
     end
+
+    -- $trk → Interleave-resolved name (metadata-only, Wave Agent–style)
     if tkl == "trk" then
-      local idx = fields.__chan_index
-      local name = idx and fields.__trk_table and fields.__trk_table[idx]
-      if not name and fields.__trk_table then
-        for i=1,64 do if fields.__trk_table[i] then name = fields.__trk_table[i] break end end
+      local interleave = fields.__chan_index  -- produced by guess_channel_index(item, fields)
+      local list = build_interleave_name_list(fields)
+      local s = ""
+      if interleave and list and list[interleave] then
+        s = list[interleave]
+      else
+        -- Fallback: pick the first available interleave name to avoid empty result
+        if list then
+          for i = 1, 128 do
+            if list[i] and list[i] ~= "" then s = list[i]; break end
+          end
+        end
       end
-
-      local s = tostring(name or "")
-      return trim(maybe_sanitize(s))
-
+      return trim(maybe_sanitize(s or ""))
     end
+
+
+    -- $trkall → names concatenated in Interleave order (metadata-only)
     if tkl == "trkall" then
-      local list = {}
-      if fields.__trk_table then for i=1,20 do local v=fields.__trk_table[i]; if v and v~="" then list[#list+1]=v end end end
-      return table.concat(list, "_")
+      local list = build_interleave_name_list(fields)
+      local out = {}
+      if list then
+        for i = 1, 256 do
+          local v = list[i]
+          if v and v ~= "" then out[#out+1] = v end
+        end
+      end
+      return table.concat(out, "_")
     end
+    
     local nidx = tkl:match("^trk(%d+)$")
     if nidx then
       local idx = tonumber(nidx)
