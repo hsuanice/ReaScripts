@@ -1,6 +1,6 @@
 --[[
 @description ReaImGui - Rename Active Take from Metadata (caret insert + cached preview + copy/export)
-@version 0.11.19
+@version 0.11.20
 @author hsuanice
 @about
   Rename active takes and/or item notes from BWF/iXML and true source metadata using a fast ReaImGui UI.
@@ -34,6 +34,15 @@
   hsuanice served as the workflow designer, tester, and integrator for this tool.
 
 @changelog
+      v0.11.20
+    - Apply Result: added “Skipped details (empty-token skips)” section.
+      • Columns: #, Reason, Current Take Name, Srcfile.
+      • Actions: Save skipped as .tsv / .csv, Copy skipped (TSV).
+      • Only lists items skipped by the “empty token” rule (i.e., when Skip option is ON).
+    - Data plumbing: Apply now collects per-row skip info (reason + $srcfile) into the modal.
+    - UI: keeps existing summary (Selected / Renamed / Notes / Skipped) and the original full-result export.
+    - Stability: preserves 0.11.12 interleave/TRK resolution and caret/hover order for token insertion.
+    - Note: non–empty-token causes (e.g., no-take) are counted in “Skipped” but not listed in this table by design.
     v0.11.19
     - Take-only option: “Skip rename if any token empty”.
       • When enabled, if any token in the Take Name template expands to empty, the item’s Take rename is skipped.
@@ -1267,6 +1276,26 @@ local function build_result_text(fmt, rows)
   return table.concat(out, "\n")
 end
 
+-- Build text (TSV/CSV) for skipped list (only empty-token skips)
+local function build_skipped_text(fmt, srows)
+  local sep = (fmt == "csv") and "," or "\t"
+  local out = {}
+  local function esc(s)
+    s = tostring(s or "")
+    if fmt == "csv" and s:find('[,\r\n"]') then s = '"'..s:gsub('"','""')..'"' end
+    return s
+  end
+  out[#out+1] = table.concat({ "#", "Reason", "Current Take Name", "Srcfile" }, sep)
+  for _, r in ipairs(srows or {}) do
+    out[#out+1] = table.concat({
+      esc(r.idx), esc(r.reason), esc(r.current), esc(r.srcfile)
+    }, sep)
+  end
+  return table.concat(out, "\n")
+end
+
+
+
 -- ===== Result modal =====
 local function open_result_modal(res)
   LAST_RESULT = res
@@ -1308,6 +1337,62 @@ local function draw_result_modal()
       end
     end
 
+    -- ----- Skipped details (only empty-token skips) -----
+    reaper.ImGui_Separator(ctx)
+    local srows = r.skipped_rows or {}
+    reaper.ImGui_Text(ctx, ("Skipped details (empty-token skips): %d"):format(#srows))
+
+    do
+      local begun, _ = BeginChildSafe("##skip_list_child", -1, 220, true)
+      if begun then
+        local flags = TF('ImGui_TableFlags_Borders') | TF('ImGui_TableFlags_RowBg')
+        if reaper.ImGui_BeginTable(ctx, "SkippedTable", 4, flags) then
+          reaper.ImGui_TableSetupColumn(ctx, "#", TF('ImGui_TableColumnFlags_WidthFixed'), 36)
+          reaper.ImGui_TableSetupColumn(ctx, "Reason")
+          reaper.ImGui_TableSetupColumn(ctx, "Current Take Name")
+          reaper.ImGui_TableSetupColumn(ctx, "Srcfile")
+          reaper.ImGui_TableHeadersRow(ctx)
+
+          if #srows == 0 then
+            reaper.ImGui_TableNextRow(ctx)
+            reaper.ImGui_TableNextColumn(ctx); reaper.ImGui_TextDisabled(ctx, "-")
+            reaper.ImGui_TableNextColumn(ctx); reaper.ImGui_TextDisabled(ctx, "(none)")
+            reaper.ImGui_TableNextColumn(ctx); reaper.ImGui_TextDisabled(ctx, "")
+            reaper.ImGui_TableNextColumn(ctx); reaper.ImGui_TextDisabled(ctx, "")
+          else
+            for _, sr in ipairs(srows) do
+              reaper.ImGui_TableNextRow(ctx)
+              reaper.ImGui_TableNextColumn(ctx); reaper.ImGui_Text(ctx, tostring(sr.idx or ""))
+              reaper.ImGui_TableNextColumn(ctx); reaper.ImGui_TextWrapped(ctx, tostring(sr.reason or ""))
+              reaper.ImGui_TableNextColumn(ctx); reaper.ImGui_TextWrapped(ctx, tostring(sr.current or ""))
+              reaper.ImGui_TableNextColumn(ctx); reaper.ImGui_TextWrapped(ctx, tostring(sr.srcfile or ""))
+            end
+          end
+
+          reaper.ImGui_EndTable(ctx)
+        end
+        reaper.ImGui_EndChild(ctx)
+      end
+    end
+
+    -- Save/Copy skipped list
+    if srows and #srows > 0 then
+      if reaper.ImGui_Button(ctx, "Save skipped as .tsv", 180, 24) then
+        local name = ("Skipped_%s.tsv"):format(timestamp())
+        local path = choose_save_path(name, "Tab-separated (*.tsv)\0*.tsv\0All (*.*)\0*.*\0")
+        if path then write_text_file(path, build_skipped_text("tsv", srows)) end
+      end
+      reaper.ImGui_SameLine(ctx)
+      if reaper.ImGui_Button(ctx, "Save skipped as .csv", 180, 24) then
+        local name = ("Skipped_%s.csv"):format(timestamp())
+        local path = choose_save_path(name, "CSV (*.csv)\0*.csv\0All (*.*)\0*.*\0")
+        if path then write_text_file(path, build_skipped_text("csv", srows)) end
+      end
+      reaper.ImGui_SameLine(ctx)
+      if reaper.ImGui_Button(ctx, "Copy skipped (TSV)", 180, 24) then
+        reaper.ImGui_SetClipboardText(ctx, build_skipped_text("tsv", srows))
+      end
+    end
 
 
     reaper.ImGui_Spacing(ctx)
@@ -1487,7 +1572,9 @@ local function apply_renaming()
 
   reaper.Undo_BeginBlock()
   local renamed, noted, skipped, counter = 0, 0, 0, 1
-  local rows = {} -- for result list
+  local rows = {}           -- for result list (renamed / note rows)
+  local skipped_rows = {}   -- only empty-token skipped rows (for modal list/export)
+
 
   for i, item in ipairs(items) do
     local take = get_active_take(item)
@@ -1508,6 +1595,10 @@ local function apply_renaming()
       local _, cur_name = reaper.GetSetMediaItemTakeInfo_String(take, "P_NAME", "", false)
       old_take_name = (cur_name and cur_name ~= "") and cur_name or "(unnamed)"
     end
+
+    local srcfile_for_row = tostring(fields and fields.srcfile or "")
+
+
 
     -- compute new
     local new_name = (take and expand_template(TAKE_TEMPLATE, fields, counter)) or ""
@@ -1569,6 +1660,19 @@ local function apply_renaming()
     counter = counter + 1
   end
 
+  -- Collect skipped rows (only when skip_reason is present = empty-token skip)
+  if skip_reason then
+    skipped_rows[#skipped_rows+1] = {
+      idx     = i,
+      current = old_take_name,
+      srcfile = srcfile_for_row,
+      reason  = skip_reason
+    }
+  end
+
+
+
+
   reaper.UpdateArrange()
   reaper.Undo_EndBlock(string.format("Rename %d take(s), update %d note(s), skipped %d (no take)", renamed, noted, skipped), -1)
   status_msg = string.format("Done: %d renamed, %d notes updated, %d skipped.", renamed, noted, skipped)
@@ -1582,8 +1686,10 @@ local function apply_renaming()
     renamed   = renamed,
     noted     = noted,
     skipped   = skipped,
-    rows      = rows
+    rows      = rows,
+    skipped_rows = skipped_rows
   })
+
 end
 
 
