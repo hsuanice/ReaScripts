@@ -1,6 +1,6 @@
 --[[
 @description ReaImGui - Rename Active Take from Metadata (caret insert + cached preview + copy/export)
-@version 0.11.18
+@version 0.11.19
 @author hsuanice
 @about
   Rename active takes and/or item notes from BWF/iXML and true source metadata using a fast ReaImGui UI.
@@ -34,6 +34,19 @@
   hsuanice served as the workflow designer, tester, and integrator for this tool.
 
 @changelog
+    v0.11.19
+    - Take-only option: “Skip rename if any token empty”.
+      • When enabled, if any token in the Take Name template expands to empty, the item’s Take rename is skipped.
+      • Notes are unaffected and still apply.
+      • Setting persists via ExtState (key: skip_empty_tokens). Default OFF.
+    - UI: Added the checkbox under the Take Name input. Reordered caret/hover capture
+      so token buttons insert into the Take field correctly.
+    - Apply: Updated logic to honor skip (new_name ~= "" AND not skip_reason).
+      Skipped items are counted in the Apply Result (no list yet).
+    - Parser fix: Corrected token extraction pattern to `%${...}` so empty-token detection works.
+    - Stability fix: Made `expand_template` forward-declared/assigned to avoid upvalue nil errors.
+    - TRK/Interleave behavior: unchanged from 0.11.12 (poly track name resolution preserved).
+    - Result modal/export: unchanged in this build (counts only; no skipped list UI).
   v0.11.12
     - Fix: validate MediaItem before calling GetActiveTake to prevent intermittent
       “bad argument #1 to 'GetActiveTake' (MediaItem expected)” errors when clicking
@@ -935,11 +948,17 @@ local function normalize_tokens(s)
   return s
 end
 
+-- Forward declare so helpers below can call it before its definition
+local expand_template
+
+
+
+
 -- 列出樣板中實際使用到的 token（以 normalize 後的 ${...} 為準）
 local function template_token_list(tpl)
   local list, seen = {}, {}
   local s = normalize_tokens(tpl or "")
-  for name in s:gmatch("%%${([%w_:]+)}") do
+  for name in s:gmatch("%${([%w_:]+)}") do
     if not seen[name] then
       seen[name] = true
       list[#list+1] = name
@@ -966,7 +985,7 @@ local function empty_tokens_in_take_template(tpl, fields, counter)
 end
 
 -- ===== Template expansion =====
-local function expand_template(tpl, fields, counter, sanitize)
+function expand_template(tpl, fields, counter, sanitize)
   if sanitize == nil then sanitize = true end
 
   local function maybe_sanitize(s)
@@ -1140,7 +1159,24 @@ local function append_token(tk)
         newname = apply_take_renamer(newname)
         local newnote  = (NOTE_TEMPLATE ~= "" and expand_template(NOTE_TEMPLATE, e.fields, i, false)) or ""
         local currnote = tostring(e.fields and e.fields.curnote or "")
-        preview_rows[#preview_rows+1] = { current=e.current, newname=newname, current_note=currnote, newnote=newnote, note_applied = (NOTE_TEMPLATE ~= "") }
+
+        -- 判斷這列是否會因空白 token 而被 Skip（只影響預覽標記）
+        local will_skip = false
+        if SKIP_EMPTY_TOKENS then
+          local empties = empty_tokens_in_take_template(TAKE_TEMPLATE, e.fields, i)
+          will_skip = (#empties > 0)
+        end
+
+        preview_rows[#preview_rows+1] = {
+          current = e.current,
+          newname = newname,
+          current_note = currnote,
+          newnote = newnote,
+          note_applied = (NOTE_TEMPLATE ~= ""),
+          will_skip = will_skip
+        }
+
+
         shown = shown + 1
       end
     end
@@ -1379,7 +1415,22 @@ local function scan_metadata()
       newname = apply_take_renamer(newname)
       local newnote  = (NOTE_TEMPLATE ~= "" and expand_template(NOTE_TEMPLATE, e.fields, i, false)) or ""
       local currnote = tostring(e.fields and e.fields.curnote or "")
-      preview_rows[#preview_rows+1] = { current=e.current, newname=newname, current_note=currnote, newnote=newnote, note_applied = (NOTE_TEMPLATE ~= "") }
+      -- 判斷這列是否會因空白 token 而被 Skip（只影響預覽標記）
+      local will_skip = false
+      if SKIP_EMPTY_TOKENS then
+        local empties = empty_tokens_in_take_template(TAKE_TEMPLATE, e.fields, i)
+        will_skip = (#empties > 0)
+      end
+
+      preview_rows[#preview_rows+1] = {
+        current = e.current,
+        newname = newname,
+        current_note = currnote,
+        newnote = newnote,
+        note_applied = (NOTE_TEMPLATE ~= ""),
+        will_skip = will_skip
+      }
+
 
       shown = shown + 1
     end
@@ -1403,7 +1454,22 @@ local function recompute_preview_from_cache()
       newname = apply_take_renamer(newname)
       local newnote  = (NOTE_TEMPLATE ~= "" and expand_template(NOTE_TEMPLATE, e.fields, i, false)) or ""
       local currnote = tostring(e.fields and e.fields.curnote or "")
-      preview_rows[#preview_rows+1] = { current=e.current, newname=newname, current_note=currnote, newnote=newnote, note_applied = (NOTE_TEMPLATE ~= "") }
+      -- 判斷這列是否會因空白 token 而被 Skip（只影響預覽標記）
+      local will_skip = false
+      if SKIP_EMPTY_TOKENS then
+        local empties = empty_tokens_in_take_template(TAKE_TEMPLATE, e.fields, i)
+        will_skip = (#empties > 0)
+      end
+
+      preview_rows[#preview_rows+1] = {
+        current = e.current,
+        newname = newname,
+        current_note = currnote,
+        newnote = newnote,
+        note_applied = (NOTE_TEMPLATE ~= ""),
+        will_skip = will_skip
+      }
+      
       shown = shown + 1
     end
   end
@@ -1473,7 +1539,7 @@ local function apply_renaming()
       -- 只有有 take 的情況，才因空 token 計入 skipped
       skipped = skipped + 1
     end
-    
+
     if NOTE_TEMPLATE ~= "" then
       reaper.GetSetMediaItemInfo_String(item, "P_NOTES", new_note, true)
       did_note = true
@@ -1906,7 +1972,12 @@ local function draw_view_pane(available_h)
               reaper.ImGui_TableNextRow(ctx)
               reaper.ImGui_TableNextColumn(ctx); reaper.ImGui_Text(ctx, tostring(i))
               reaper.ImGui_TableNextColumn(ctx); reaper.ImGui_TextWrapped(ctx, row.current ~= "" and row.current or "(unnamed)")
-              reaper.ImGui_TableNextColumn(ctx); reaper.ImGui_TextWrapped(ctx, row.newname ~= "" and row.newname or "(unchanged)")
+              reaper.ImGui_TableNextColumn(ctx)
+              if row.will_skip then
+                reaper.ImGui_TextWrapped(ctx, "(will skip)")
+              else
+                reaper.ImGui_TextWrapped(ctx, row.newname ~= "" and row.newname or "(unchanged)")
+              end
               reaper.ImGui_TableNextColumn(ctx); reaper.ImGui_TextWrapped(ctx, (row.current_note and row.current_note ~= "" ) and row.current_note or "(empty)")
               reaper.ImGui_TableNextColumn(ctx)
               local applied = row.note_applied
