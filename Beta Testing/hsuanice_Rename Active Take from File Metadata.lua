@@ -1,6 +1,6 @@
 --[[
 @description ReaImGui - Rename Active Take from Metadata (caret insert + cached preview + copy/export)
-@version 0.11.10
+@version 0.11.11
 @author hsuanice
 @about
   Rename active takes and/or item notes from BWF/iXML and true source metadata using a fast ReaImGui UI.
@@ -14,8 +14,6 @@
     - Metadata panel + preview table with quick copy; export preview table as TSV or CSV.
     - Works on audio items; items without takes (empty/MIDI) can still update notes.
     - Requires: ReaImGui (install via ReaPack).
-
-  Known Issue: Can't Copy metadata at tmeh moment
 
   Features:
   - Built with ReaImGUI for a compact, responsive UI.
@@ -35,18 +33,24 @@
   hsuanice served as the workflow designer, tester, and integrator for this tool.
 
 @changelog
-  v0.11.10
-    - Detected fields ($trk/$trkall) now show Interleave-resolved names (metadata-only).
-    - Preview/Copy: recompute interleave diagnostics before expansion to avoid stale values.
-    - Uses Wave Agent–style Interleave mapping; no filename-based inference for track naming.
+  v0.11.11
+    - Fix: crash in “Get Metadata (Preview)” caused by referencing a non-existent variable `f`.
+    - Preview rows now recompute Interleave diagnostics per row using `e.fields` / `e.item` before expansion, preventing stale caches.
 
-  v0.11.9 - Poly interleave-resolved $trk/$trkall (metadata-only)
-    • $trk now resolves strictly from metadata by Interleave index:
-      - Primary: iXML TRACK_LIST (CHANNEL_INDEX → NAME), Wave Agent–style.
-      - Fallback: TRK# (incl. normalized dTRK#) sorted numerically → mapped to Interleave 1..N.
-    • $trkall concatenates names in Interleave order.
-    • Channel selection derives Interleave index from I_CHANMODE (Mono of N), clamped to 1..num_channels.
-    • Removed filename-based inference (.A#, chN, isoN) for track naming.
+  v0.11.10
+    - Left panel “Detected fields” now shows $trk / $trkall in Interleave order (1..N), strictly from metadata.
+    - “Copy metadata” updated to use the same Interleave logic as the left panel/preview.
+    - Before expanding any template (Take/Note), Interleave mapping/diagnostics are recomputed to avoid stale values.
+    - Uses Wave Agent–style Interleave mapping; no filename-based inference for track names.
+
+  v0.11.9
+    - $trk resolves strictly from metadata by Interleave index:
+      • Primary: iXML TRACK_LIST (CHANNEL_INDEX → NAME).
+      • Fallback: TRK# (incl. normalized dTRK#) sorted numerically → mapped to Interleave 1..N.
+    - $trkall concatenates names in Interleave order.
+    - Interleave index for $trk derives from I_CHANMODE (Mono of N), clamped to the actual number of channels.
+    - Removed all filename-based inference (.A#, chN, isoN, etc.).
+
 
   v0.11.8 - $trk/$trkall metadata-only:
     • $trk now resolves strictly from metadata track lists:
@@ -1311,8 +1315,8 @@ local function scan_metadata()
   local shown = 0
   for i, e in ipairs(SCAN_CACHE.list) do
     if not preview_limit or shown < preview_limit then
-      f.__trk_by_interleave = nil
-      compute_interleave_diag(f, item)
+      e.fields.__trk_by_interleave = nil
+      compute_interleave_diag(e.fields, e.item)
       local newname = expand_template(TAKE_TEMPLATE, e.fields, i)
       newname = apply_take_filter(newname)      
       newname = apply_take_renamer(newname)
@@ -1335,8 +1339,8 @@ local function recompute_preview_from_cache()
   local shown = 0
   for i, e in ipairs(SCAN_CACHE.list) do
     if not preview_limit or shown < preview_limit then
-      f.__trk_by_interleave = nil
-      compute_interleave_diag(f, e.item)
+      e.fields.__trk_by_interleave = nil
+      compute_interleave_diag(e.fields, e.item)
       local newname = expand_template(TAKE_TEMPLATE, e.fields, i)
       newname = apply_take_filter(newname)
       newname = apply_take_renamer(newname)
