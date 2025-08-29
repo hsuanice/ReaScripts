@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<index version="1" name="hsuanice Scripts" commit="ad6db12c946c5d9b6a57e92699214e4bb8c67cc9">
+<index version="1" name="hsuanice Scripts" commit="6615672bf82817455d2b99981a0f957e2df5deea">
   <category name="Beta Testing">
     <reapack name="hsuanice_BWF TimeReference Embed Tool.lua" type="script" desc="Embed BWF TimeReference to Active take from Take 1 or Current Position TC">
       <version name="0.7.1" author="hsuanice" time="2025-08-14T17:52:57Z">
@@ -658,6 +658,9 @@ v0.1 - Beta release]]></changelog>
       </version>
       <version name="0.11.6" author="hsuanice" time="2025-08-28T11:10:28Z">
         <source main="main">https://github.com/hsuanice/ReaScripts/raw/14d9115e2db0108fadf78db46ad37236eca7d4ee/Beta%20Testing/hsuanice_Rename%20Active%20Take%20from%20File%20Metadata.lua</source>
+      </version>
+      <version name="0.11.9" author="hsuanice" time="2025-08-29T14:55:40Z">
+        <source main="main">https://github.com/hsuanice/ReaScripts/raw/6615672bf82817455d2b99981a0f957e2df5deea/Beta%20Testing/hsuanice_Rename%20Active%20Take%20from%20File%20Metadata.lua</source>
       </version>
     </reapack>
     <reapack name="hsuanice_Reorder or sort selected items vertically.lua" type="script" desc="ReaImGui - Vertical Reorder and Sort (items)">
