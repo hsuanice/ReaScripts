@@ -1,6 +1,6 @@
 --[[
 @description ReaImGui - Rename Active Take from Metadata (caret insert + cached preview + copy/export)
-@version 0.11.20
+@version 0.11.21
 @author hsuanice
 @about
   Rename active takes and/or item notes from BWF/iXML and true source metadata using a fast ReaImGui UI.
@@ -34,7 +34,15 @@
   hsuanice served as the workflow designer, tester, and integrator for this tool.
 
 @changelog
-      v0.11.20
+  v0.11.21
+    - Apply Result: Skipped details table now correctly populated (empty-token skips only).
+      • Columns: #, Reason, Current Take Name, Srcfile.
+      • Actions: Save skipped as .tsv / .csv, Copy skipped (TSV).
+    - Fix: Moved skipped-row collection into the apply loop and removed the stray post-loop block,
+      which previously caused “0” rows to appear despite nonzero Skipped count.
+    - No changes to rename logic, interleave/TRK resolution, or the main result export.
+
+  v0.11.20
     - Apply Result: added “Skipped details (empty-token skips)” section.
       • Columns: #, Reason, Current Take Name, Srcfile.
       • Actions: Save skipped as .tsv / .csv, Copy skipped (TSV).
@@ -43,7 +51,7 @@
     - UI: keeps existing summary (Selected / Renamed / Notes / Skipped) and the original full-result export.
     - Stability: preserves 0.11.12 interleave/TRK resolution and caret/hover order for token insertion.
     - Note: non–empty-token causes (e.g., no-take) are counted in “Skipped” but not listed in this table by design.
-    v0.11.19
+  v0.11.19
     - Take-only option: “Skip rename if any token empty”.
       • When enabled, if any token in the Take Name template expands to empty, the item’s Take rename is skipped.
       • Notes are unaffected and still apply.
@@ -1629,7 +1637,15 @@ local function apply_renaming()
     elseif skip_reason and take then
       -- 只有有 take 的情況，才因空 token 計入 skipped
       skipped = skipped + 1
+      -- 記錄到結果視窗的 skipped list（僅空 token 的情況）
+      skipped_rows[#skipped_rows+1] = {
+        idx     = i,
+        current = old_take_name,
+        srcfile = srcfile_for_row,
+        reason  = skip_reason
+      }
     end
+
 
     if NOTE_TEMPLATE ~= "" then
       reaper.GetSetMediaItemInfo_String(item, "P_NOTES", new_note, true)
@@ -1660,15 +1676,7 @@ local function apply_renaming()
     counter = counter + 1
   end
 
-  -- Collect skipped rows (only when skip_reason is present = empty-token skip)
-  if skip_reason then
-    skipped_rows[#skipped_rows+1] = {
-      idx     = i,
-      current = old_take_name,
-      srcfile = srcfile_for_row,
-      reason  = skip_reason
-    }
-  end
+
 
 
 
