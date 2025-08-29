@@ -1,6 +1,6 @@
 --[[
 @description ReaImGui - Rename Active Take from Metadata (caret insert + cached preview + copy/export)
-@version 0.11.13 no skip UI
+@version 0.11.15
 @author hsuanice
 @about
   Rename active takes and/or item notes from BWF/iXML and true source metadata using a fast ReaImGui UI.
@@ -33,6 +33,9 @@
   hsuanice served as the workflow designer, tester, and integrator for this tool.
 
 @changelog
+  v0.11.15
+    - Fix: define skip-if-empty helper functions at top-level so Apply can call them (no more nil global error).
+
   v0.11.13
     - Option: Skip rename on Take if any token expands to empty; unaffected items still rename.
     - Summary modal lists skipped items with reasons (e.g., "empty token(s): $trk").
@@ -877,6 +880,35 @@ end
   return out
 end
 
+
+-- ===== Skip-If-Empty helpers (top-level) =====
+-- Extract token names from a template (after normalization).
+local function template_token_list(tpl)
+  local out = {}
+  local seen = {}
+  local norm = normalize_tokens(tpl or "")
+  for name in norm:gmatch("%${(.-)}") do
+    if not seen[name] then
+      out[#out+1] = name
+      seen[name] = true
+    end
+  end
+  return out
+end
+
+-- Return a list of tokens that expand to empty ("") for this item.
+local function empty_tokens_in_take_template(tpl, fields, counter)
+  local empty = {}
+  for _, name in ipairs(template_token_list(tpl)) do
+    local v = expand_template("${"..name.."}", fields, counter, false)
+    if v == "" then
+      empty[#empty+1] = "$"..name
+    end
+  end
+  return empty
+end
+
+
 -- ===== Selection & cache =====
 local function get_item_guid(item) local _,guid=reaper.GetSetMediaItemInfo_String(item,"GUID","",false); return guid or "" end
 local function get_selected_items_and_sig()
@@ -1058,7 +1090,9 @@ local function draw_result_modal()
       if any then
         reaper.ImGui_Separator(ctx)
         reaper.ImGui_Text(ctx, "Skipped (reasons):")
-        if reaper.ImGui_BeginChild(ctx, "##skiplist", -FLT_MIN, 120, true) then
+        local _CF_BORDER = (reaper.ImGui_ChildFlags_Border and reaper.ImGui_ChildFlags_Border()) or 0
+        if reaper.ImGui_BeginChild(ctx, "##skiplist", -FLT_MIN, 120, _CF_BORDER) then
+
           for _, rrow in ipairs(r.rows or {}) do
             if (rrow.status == "Skipped") and (rrow.reason and rrow.reason ~= "") then
               reaper.ImGui_TextWrapped(ctx, string.format("#%d  %s  —  %s", rrow.idx or 0, tostring(rrow.old or ""), tostring(rrow.reason or "")))
@@ -1351,6 +1385,15 @@ local function take_note_inputs()
   reaper.ImGui_SetNextItemWidth(ctx, -FLT_MIN)
   if focus_take_input then reaper.ImGui_SetKeyboardFocusHere(ctx); focus_take_input = false end  
   local changed_take, new_take = reaper.ImGui_InputText(ctx, "##take_name_tpl", TAKE_TEMPLATE)
+-- Skip-if-empty toggle (Take-only)
+-- When enabled, if any token in the Take Name template expands to an empty string (e.g. $trk missing),
+-- this item will be skipped for renaming. Notes are unaffected.
+local chg_skip_empty, val_skip_empty = reaper.ImGui_Checkbox(ctx, "Skip rename if any token empty", SKIP_EMPTY_TOKENS)
+if chg_skip_empty then
+  SKIP_EMPTY_TOKENS = val_skip_empty
+  save_skip_empty_tokens(val_skip_empty)
+  if SCAN_CACHE then recompute_preview_from_cache() end
+end
 
 
 
