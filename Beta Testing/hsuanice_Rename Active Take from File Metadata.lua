@@ -1,6 +1,6 @@
 --[[
 @description ReaImGui - Rename Active Take from Metadata (caret insert + cached preview + copy/export)
-@version 0.11.21
+@version 0.11.22
 @author hsuanice
 @about
   Rename active takes and/or item notes from BWF/iXML and true source metadata using a fast ReaImGui UI.
@@ -34,6 +34,12 @@
   hsuanice served as the workflow designer, tester, and integrator for this tool.
 
 @changelog
+  v0.11.22
+    - Skipped details: column order changed to
+      “#, Current Take Name, Srcfile, Reason”.
+    - Export/Copy (TSV/CSV): updated to use the same column order.
+    - Fix: added missing `end` in the Result modal’s Skipped section (syntax error resolved).
+    - No other changes: Skip-if-empty behavior, TRK/Interleave resolution, preview/apply flow remain unchanged.
   v0.11.21
     - Apply Result: Skipped details table now correctly populated (empty-token skips only).
       • Columns: #, Reason, Current Take Name, Srcfile.
@@ -1293,10 +1299,14 @@ local function build_skipped_text(fmt, srows)
     if fmt == "csv" and s:find('[,\r\n"]') then s = '"'..s:gsub('"','""')..'"' end
     return s
   end
-  out[#out+1] = table.concat({ "#", "Reason", "Current Take Name", "Srcfile" }, sep)
+  -- Header：#, Current Take Name, Srcfile, Reason
+  out[#out+1] = table.concat({ "#", "Current Take Name", "Srcfile", "Reason" }, sep)
   for _, r in ipairs(srows or {}) do
     out[#out+1] = table.concat({
-      esc(r.idx), esc(r.reason), esc(r.current), esc(r.srcfile)
+      esc(r.idx),
+      esc(r.current or ""),
+      esc(r.srcfile or ""),
+      esc(r.reason or "")
     }, sep)
   end
   return table.concat(out, "\n")
@@ -1355,10 +1365,11 @@ local function draw_result_modal()
       if begun then
         local flags = TF('ImGui_TableFlags_Borders') | TF('ImGui_TableFlags_RowBg')
         if reaper.ImGui_BeginTable(ctx, "SkippedTable", 4, flags) then
+          -- 新順序：#, Current Take Name, Srcfile, Reason
           reaper.ImGui_TableSetupColumn(ctx, "#", TF('ImGui_TableColumnFlags_WidthFixed'), 36)
-          reaper.ImGui_TableSetupColumn(ctx, "Reason")
           reaper.ImGui_TableSetupColumn(ctx, "Current Take Name")
           reaper.ImGui_TableSetupColumn(ctx, "Srcfile")
+          reaper.ImGui_TableSetupColumn(ctx, "Reason")
           reaper.ImGui_TableHeadersRow(ctx)
 
           if #srows == 0 then
@@ -1371,9 +1382,9 @@ local function draw_result_modal()
             for _, sr in ipairs(srows) do
               reaper.ImGui_TableNextRow(ctx)
               reaper.ImGui_TableNextColumn(ctx); reaper.ImGui_Text(ctx, tostring(sr.idx or ""))
-              reaper.ImGui_TableNextColumn(ctx); reaper.ImGui_TextWrapped(ctx, tostring(sr.reason or ""))
               reaper.ImGui_TableNextColumn(ctx); reaper.ImGui_TextWrapped(ctx, tostring(sr.current or ""))
               reaper.ImGui_TableNextColumn(ctx); reaper.ImGui_TextWrapped(ctx, tostring(sr.srcfile or ""))
+              reaper.ImGui_TableNextColumn(ctx); reaper.ImGui_TextWrapped(ctx, tostring(sr.reason or ""))
             end
           end
 
@@ -1381,8 +1392,7 @@ local function draw_result_modal()
         end
         reaper.ImGui_EndChild(ctx)
       end
-    end
-
+    end  
     -- Save/Copy skipped list
     if srows and #srows > 0 then
       if reaper.ImGui_Button(ctx, "Save skipped as .tsv", 180, 24) then
