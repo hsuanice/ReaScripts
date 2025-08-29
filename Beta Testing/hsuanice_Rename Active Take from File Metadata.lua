@@ -1,6 +1,6 @@
 --[[
 @description ReaImGui - Rename Active Take from Metadata (caret insert + cached preview + copy/export)
-@version 0.11.11
+@version 0.11.12
 @author hsuanice
 @about
   Rename active takes and/or item notes from BWF/iXML and true source metadata using a fast ReaImGui UI.
@@ -14,6 +14,7 @@
     - Metadata panel + preview table with quick copy; export preview table as TSV or CSV.
     - Works on audio items; items without takes (empty/MIDI) can still update notes.
     - Requires: ReaImGui (install via ReaPack).
+
 
   Features:
   - Built with ReaImGUI for a compact, responsive UI.
@@ -33,6 +34,13 @@
   hsuanice served as the workflow designer, tester, and integrator for this tool.
 
 @changelog
+  v0.11.12
+    - Fix: validate MediaItem before calling GetActiveTake to prevent intermittent
+      “bad argument #1 to 'GetActiveTake' (MediaItem expected)” errors when clicking
+      Item Note “Clear” or applying Take presets on poly files.
+    - Stabilized preview/preset flows: recompute Interleave diagnostics safely even
+      when an item handle is missing; no crashes, consistent $trk/$trkall.
+    - No changes to naming behavior: still metadata-only, Wave Agent–style Interleave mapping.
   v0.11.11
     - Fix: crash in “Get Metadata (Preview)” caused by referencing a non-existent variable `f`.
     - Preview rows now recompute Interleave diagnostics per row using `e.fields` / `e.item` before expansion, preventing stale caches.
@@ -560,7 +568,17 @@ local function safe_insert_token(str, caret_ci, token)
 end
 
 -- ===== REAPER helpers =====
-local function get_active_take(item) local tk=reaper.GetActiveTake(item); if tk and reaper.ValidatePtr2(0,tk,'MediaItem_Take*') then return tk end end
+local function get_active_take(item)
+  if not (item and reaper.ValidatePtr2 and reaper.ValidatePtr2(0, item, 'MediaItem*')) then
+    return nil
+  end
+  local tk = reaper.GetActiveTake(item)
+  if tk and reaper.ValidatePtr2(0, tk, 'MediaItem_Take*') then
+    return tk
+  end
+  return nil
+end
+
 local function take_source(take) if not take then return nil end local s=reaper.GetMediaItemTake_Source(take); if s and reaper.ValidatePtr2(0,s,'PCM_source*') then return s end end
 local function source_filename(src) if not src then return nil end local p=reaper.GetMediaSourceFileName(src,''); return (p~='' and p) or nil end
 local function basename(p) return p and (p:match("([^/\\]+)$") or p) or "" end
