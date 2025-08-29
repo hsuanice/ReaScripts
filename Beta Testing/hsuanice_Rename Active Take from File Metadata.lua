@@ -1,6 +1,6 @@
 --[[
 @description ReaImGui - Rename Active Take from Metadata (caret insert + cached preview + copy/export)
-@version 0.11.12
+@version 0.11.13 no skip UI
 @author hsuanice
 @about
   Rename active takes and/or item notes from BWF/iXML and true source metadata using a fast ReaImGui UI.
@@ -14,7 +14,6 @@
     - Metadata panel + preview table with quick copy; export preview table as TSV or CSV.
     - Works on audio items; items without takes (empty/MIDI) can still update notes.
     - Requires: ReaImGui (install via ReaPack).
-
 
   Features:
   - Built with ReaImGUI for a compact, responsive UI.
@@ -34,39 +33,13 @@
   hsuanice served as the workflow designer, tester, and integrator for this tool.
 
 @changelog
+  v0.11.13
+    - Option: Skip rename on Take if any token expands to empty; unaffected items still rename.
+    - Summary modal lists skipped items with reasons (e.g., "empty token(s): $trk").
+    - Persist setting in ExtState; toggle next to Take Name template.
+
   v0.11.12
-    - Fix: validate MediaItem before calling GetActiveTake to prevent intermittent
-      “bad argument #1 to 'GetActiveTake' (MediaItem expected)” errors when clicking
-      Item Note “Clear” or applying Take presets on poly files.
-    - Stabilized preview/preset flows: recompute Interleave diagnostics safely even
-      when an item handle is missing; no crashes, consistent $trk/$trkall.
-    - No changes to naming behavior: still metadata-only, Wave Agent–style Interleave mapping.
-  v0.11.11
-    - Fix: crash in “Get Metadata (Preview)” caused by referencing a non-existent variable `f`.
-    - Preview rows now recompute Interleave diagnostics per row using `e.fields` / `e.item` before expansion, preventing stale caches.
-
-  v0.11.10
-    - Left panel “Detected fields” now shows $trk / $trkall in Interleave order (1..N), strictly from metadata.
-    - “Copy metadata” updated to use the same Interleave logic as the left panel/preview.
-    - Before expanding any template (Take/Note), Interleave mapping/diagnostics are recomputed to avoid stale values.
-    - Uses Wave Agent–style Interleave mapping; no filename-based inference for track names.
-
-  v0.11.9
-    - $trk resolves strictly from metadata by Interleave index:
-      • Primary: iXML TRACK_LIST (CHANNEL_INDEX → NAME).
-      • Fallback: TRK# (incl. normalized dTRK#) sorted numerically → mapped to Interleave 1..N.
-    - $trkall concatenates names in Interleave order.
-    - Interleave index for $trk derives from I_CHANMODE (Mono of N), clamped to the actual number of channels.
-    - Removed all filename-based inference (.A#, chN, isoN, etc.).
-
-
-  v0.11.8 - $trk/$trkall metadata-only:
-    • $trk now resolves strictly from metadata track lists:
-      - Primary: iXML TRACK_LIST (CHANNEL_INDEX → NAME).
-      - Fallback: BWF:Description dTRK# pairs.
-    • Removed filename-based patterns (.A#, chN, isoN, etc.) from $trk resolution.
-    • Channel selection uses item I_CHANMODE (Mono of N). If not set, falls back to the first TRK in metadata.
-    • BWF:Description normalization: dSCENE/dTAKE/dUBITS/... → SCENE/TAKE/UBITS; dTRK# → TRK#.
+    - Fix: validate MediaItem handle before GetActiveTake to avoid intermittent preview/preset crashes.
 
   v0.11.6 - Note clearing + preview clarity:
           • Added $clearnote token to explicitly clear Item Note (template expands to empty string).
@@ -247,6 +220,15 @@ local function save_presets(key, list)
   reaper.SetExtState(EXT_NS, key, join_by_sep(packed), true)
 end
 
+
+-- ===== Skip-If-Empty (Take-only) =====
+local function load_skip_empty_tokens()
+  return reaper.GetExtState(EXT_NS, "skip_empty_tokens") == "1"
+end
+local function save_skip_empty_tokens(v)
+  reaper.SetExtState(EXT_NS, "skip_empty_tokens", v and "1" or "0", true)
+end
+local SKIP_EMPTY_TOKENS = load_skip_empty_tokens()
 -- ===== Take Name post-filter (user-configurable) =====
 local function load_take_filter()
   local en   = (reaper.GetExtState(EXT_NS, "take_filter_enable") == "1")
@@ -470,7 +452,7 @@ end
 local function utf8_char_at(s, ci)
   if not s or s=="" then return "" end
   local n = utf8_len(s); if ci < 1 or ci > n then return "" end
-  return utf8_sub(s, 1, 1)
+  return utf8_sub(s, ci, ci)
 end
 local function byte_to_char_index(s, bpos)
   local spans = utf8_spans(s)
@@ -569,16 +551,11 @@ end
 
 -- ===== REAPER helpers =====
 local function get_active_take(item)
-  if not (item and reaper.ValidatePtr2 and reaper.ValidatePtr2(0, item, 'MediaItem*')) then
-    return nil
-  end
+  if not (item and reaper.ValidatePtr2 and reaper.ValidatePtr2(0, item, 'MediaItem*')) then return nil end
   local tk = reaper.GetActiveTake(item)
-  if tk and reaper.ValidatePtr2(0, tk, 'MediaItem_Take*') then
-    return tk
-  end
+  if tk and reaper.ValidatePtr2(0, tk, 'MediaItem_Take*') then return tk end
   return nil
 end
-
 local function take_source(take) if not take then return nil end local s=reaper.GetMediaItemTake_Source(take); if s and reaper.ValidatePtr2(0,s,'PCM_source*') then return s end end
 local function source_filename(src) if not src then return nil end local p=reaper.GetMediaSourceFileName(src,''); return (p~='' and p) or nil end
 local function basename(p) return p and (p:match("([^/\\]+)$") or p) or "" end
@@ -589,49 +566,26 @@ local function get_item_track_name(item) local tr=reaper.GetMediaItem_Track(item
 local function get_item_length_sec(item) return reaper.GetMediaItemInfo_Value(item,"D_LENGTH") or 0.0 end
 local function seconds_to_m_ss_mmm(sec) local s=math.max(0,tonumber(sec) or 0) local m=math.floor(s/60) local r=s-m*60 return string.format("%d:%06.3f", m, r) end
 
--- Return the number of channels in the true source (poly N).
-local function get_source_num_channels(item, fields)
-  -- 1) Prefer the media source (most reliable)
-  local take = reaper.GetActiveTake(item)
-  if take then
-    local src = reaper.GetMediaItemTake_Source(take)
-    if src then
-      local nch = reaper.GetMediaSourceNumChannels(src)
-      if type(nch) == "number" and nch > 0 then
-        return nch
-      end
-    end
-  end
-  -- 2) Fallback: metadata $channels
-  local n = tonumber(fields and fields.channels)
-  if n and n > 0 then
-    return n
-  end
-  return 1
-end
-
--- Interleave-only: derive Interleave index N from I_CHANMODE (Mono of N),
--- then clamp to 1..num_channels. This returns Interleave index (1..N),
--- not the recorder's channel label (3/4/5/...).
+-- channel guess
 local function guess_channel_index(item, fields)
-  local take = reaper.GetActiveTake(item)
-  if not take then
-    return nil
+  local take = get_active_take(item)
+  if take then
+    local cm = reaper.GetMediaItemTakeInfo_Value(take, "I_CHANMODE") or 0
+    if cm >= 3 and cm <= 66 then return math.floor(cm - 2) end
   end
-
-  local cm = reaper.GetMediaItemTakeInfo_Value(take, "I_CHANMODE") or 0
-  -- Mono of N: cm = 2 + N  →  N = cm - 2
-  if cm >= 3 and cm <= 66 then
-    local n = math.floor(cm - 2)
-    local nch = get_source_num_channels(item, fields)
-    if n < 1 then n = 1 end
-    if n > nch then n = nch end
-    return n
-  end
-
-  return nil -- No Mono-of-N set; $trk branch will decide fallback behavior.
+  local fname = fields and (fields.srcfile or fields.filepath or fields.filename) or (take and source_filename(take_source(take))) or ""
+  local name = basename(tostring(fname)):lower()
+  local idx =
+      tonumber(name:match("[_%-%.]pn[_%-]?([0-9]+)%.%w+$")) or
+      tonumber(name:match("[_%-%.]pm[_%-]?([0-9]+)%.%w+$")) or
+      tonumber(name:match("[_%-%.]n[_%-]?([0-9]+)%.%w+$"))  or
+      tonumber(name:match("[_%-%.]a([0-9]+)%.%w+$"))        or
+      tonumber(name:match("[_%-%.]ch([0-9]+)%.%w+$"))       or
+      tonumber(name:match("[_%-%.]iso[_%-]?([0-9]+)%.%w+$"))or
+      tonumber(name:match("[_%-%s]([0-9]+)%.%w+$"))
+  if idx and idx>=1 and idx<=64 then return idx end
+  return nil
 end
-
 
 -- metadata keys
 local BWF_KEYS = {
@@ -649,34 +603,17 @@ local function get_meta(src, key)
   if ok == 1 and val ~= "" then return val end
   return nil
 end
--- Parse "key=value" pairs from BWF:Description and normalize:
---   dSCENE/dTAKE/... → SCENE/TAKE/...
---   dTRK#/TRK#       → TRK#/trk#
 local function parse_description_pairs(desc_text, out_tbl)
   for line in (tostring(desc_text or "") .. "\n"):gmatch("(.-)\n") do
     local k, v = line:match("^%s*([%w_%-]+)%s*=%s*(.-)%s*$")
     if k and v and k ~= "" then
-      out_tbl[k] = v
-      out_tbl[string.lower(k)] = v
-
-      -- Map dXXXX → XXXX (upper & lower)
-      local up = k:upper()
-      local base = up:match("^D([A-Z0-9_]+)$")
-      if base and base ~= "" then
-        out_tbl[base] = v
-        out_tbl[string.lower(base)] = v
-      end
-
-      -- Map dTRK#/TRK# → TRK#/trk#
-      local n = up:match("^D?TRK(%d+)$")
-      if n then
-        out_tbl["TRK"..n] = v
-        out_tbl["trk"..n] = v
+      out_tbl[k] = v; out_tbl[string.lower(k)] = v
+      if k:sub(1,1) == 's' and #k > 1 then
+        local base = k:sub(2); out_tbl[base] = v; out_tbl[string.lower(base)] = v
       end
     end
   end
 end
-
 local function fill_ixml_tracklist(src, t)
   local ok, count = reaper.GetMediaFileMetadata(src, "IXML:TRACK_LIST:TRACK_COUNT")
   if ok == 1 then
@@ -777,10 +714,7 @@ local function collect_metadata_for_item(item)
   t.__chan_index = guess_channel_index(item, t)
   if not t.__chan_index then for i=1,64 do if t.__trk_table[i] then t.__chan_index=i break end end end
   if t.__chan_index and t.__trk_table[t.__chan_index] then t.__trk_name = t.__trk_table[t.__chan_index] end
-
-  -- 讓左欄診斷可直接取得 item（供 I_CHANMODE 讀取）
-  t.__item = item
-
+  
   -- current take name
   if take then
     local _, cur_name = reaper.GetSetMediaItemTakeInfo_String(take, "P_NAME", "", false)
@@ -804,101 +738,6 @@ local function collect_metadata_for_item(item)
   end
   return t
 end
-
--- Build a map: Interleave index (1..N) → Track Name.
--- Priority: iXML TRACK_LIST (CHANNEL_INDEX → NAME).
--- Fallback: TRK# keys (incl. normalized dTRK#) sorted numerically → mapped to 1..N.
-local function build_interleave_name_list(fields)
-  if fields.__trk_by_interleave then return fields.__trk_by_interleave end
-
-  local by_interleave = {}
-  local have_ixml = false
-
-  -- 1) iXML source (if your parser filled this):
-  --    fields.__ixml_tracks = { {channel_index=1, channel=3, name="BOOM1"}, ... }
-  if fields.__ixml_tracks and type(fields.__ixml_tracks) == "table" then
-    for _, t in ipairs(fields.__ixml_tracks) do
-      local idx = tonumber(t.channel_index)
-      local nm  = t.name
-      if idx and idx >= 1 and nm and nm ~= "" then
-        by_interleave[idx] = nm
-        have_ixml = true
-      end
-    end
-  end
-
-  -- 2) Fallback: derive Interleave order from TRK# keys (dedup by channel number)
-  if not have_ixml then
-    local pairs_chan = {}  -- { {chan=3,name="BOOM1"}, ... }
-    local seen = {}        -- deduplicate by channel number
-
-    for k, v in pairs(fields or {}) do
-      -- Accept both "TRK#" and "trk#" but keep only the first occurrence per channel
-      local n = k:match("^TRK(%d+)$") or k:match("^trk(%d+)$")
-      if n then
-        local ch = tonumber(n)
-        if ch and v and v ~= "" and not seen[ch] then
-          pairs_chan[#pairs_chan+1] = { chan = ch, name = v }
-          seen[ch] = true
-        end
-      end
-    end
-
-    table.sort(pairs_chan, function(a,b) return a.chan < b.chan end)
-    for i, e in ipairs(pairs_chan) do
-      by_interleave[i] = e.name
-    end
-  end
-
-  fields.__trk_by_interleave = by_interleave
-  return by_interleave
-end
-
--- Compute interleave diagnostics for UI and copy/preview paths.
--- Fills:
---   fields.__diag_interleave = {
---     index  = <N>,             -- Interleave index (1..num_channels) from I_CHANMODE
---     total  = <num_channels>,  -- Actual poly channel count (from source or $channels)
---     name   = <string>,        -- Interleave-resolved track name
---     all    = <string>         -- $trkall concatenated in interleave order
---   }
-local function compute_interleave_diag(fields, item)
-  -- (Re)build interleave table: [1..N] -> track name (iXML CHANNEL_INDEX or TRK# fallback)
-  local list = build_interleave_name_list(fields)
-
-  -- Interleave index from I_CHANMODE (clamped to 1..num_channels)
-  local nch = get_source_num_channels(item, fields)
-  local idx = guess_channel_index(item, fields)
-
-  local name = ""
-  if idx and list and list[idx] then
-    name = list[idx]
-  else
-    -- Fallback: first available name to avoid empty UI
-    if list then
-      for i = 1, 256 do
-        if list[i] and list[i] ~= "" then name = list[i]; break end
-      end
-    end
-  end
-
-  local all = {}
-  if list then
-    for i = 1, 256 do
-      local v = list[i]
-      if v and v ~= "" then all[#all+1] = v end
-    end
-  end
-
-  fields.__diag_interleave = {
-    index = idx,
-    total = nch,
-    name  = name,
-    all   = table.concat(all, "_"),
-  }
-end
-
-
 
 -- Wrap known $tokens to ${token} so $sceneT$take -> ${scene}T${take}
 local function normalize_tokens(s)
@@ -930,17 +769,42 @@ end
 local function expand_template(tpl, fields, counter, sanitize)
   if sanitize == nil then sanitize = true end
 
+
+-- Extract token names from a template (after normalization).
+local function template_token_list(tpl)
+  local out = {}
+  local seen = {}
+  local norm = normalize_tokens(tpl or "")
+  for name in norm:gmatch("%${(.-)}") do
+    if not seen[name] then
+      out[#out+1] = name
+      seen[name] = true
+    end
+  end
+  return out
+end
+
+-- Return a list of tokens that expand to empty ("") for this item.
+local function empty_tokens_in_take_template(tpl, fields, counter)
+  local empty = {}
+  for _, name in ipairs(template_token_list(tpl)) do
+    local v = expand_template("${"..name.."}", fields, counter, false)
+    if v == "" then
+      empty[#empty+1] = "$"..name
+    end
+  end
+  return empty
+end
+
   local function maybe_sanitize(s)
-    s = tostring(s or "")
     if sanitize then return (s:gsub('[\\/:*?"<>|%c]', '_')) end
     return s
   end
-
   local function repl(name)
     local tkl = string.lower(name or "")
     if tkl == "clearnote" then return "" end
 
-    -- $srcbaseprefix:N - first N chars of srcbase
+    -- $srcbaseprefix:N - first N characters of srcbase
     local prefix = tkl:match("^srcbaseprefix:(%d+)$")
     if prefix then
       local n = tonumber(prefix) or 0
@@ -955,8 +819,7 @@ local function expand_template(tpl, fields, counter, sanitize)
       end
       return ""
     end
-
-    -- $srcbasesuffix:N - last N chars of srcbase
+    -- $srcbasesuffix:N - last N characters of srcbase
     local suffix = tkl:match("^srcbasesuffix:(%d+)$")
     if suffix then
       local n = tonumber(suffix) or 0
@@ -970,57 +833,38 @@ local function expand_template(tpl, fields, counter, sanitize)
       end
       return ""
     end
-
-    -- ${counter:N}
+    -- original tokens
     local digits = tkl:match("^counter:(%d+)$")
     if digits then
       local n = tonumber(digits) or 0
       local val = tostring(counter or 1)
-      if n > 0 then val = string.rep("0", math.max(0, n - #val)) .. val end
+      if n>0 then val = string.rep("0", math.max(0, n-#val))..val end
       return val
     end
-
-    -- $trk → Interleave-resolved name (metadata-only, Wave Agent–style)
     if tkl == "trk" then
-      local interleave = fields.__chan_index
-      local list = build_interleave_name_list(fields)
-      local s = ""
-      if interleave and list and list[interleave] then
-        s = list[interleave]
-      else
-        -- Fallback: first available name
-        if list then
-          for i = 1, 128 do
-            if list[i] and list[i] ~= "" then s = list[i]; break end
-          end
-        end
+      local idx = fields.__chan_index
+      local name = idx and fields.__trk_table and fields.__trk_table[idx]
+      if not name and fields.__trk_table then
+        for i=1,64 do if fields.__trk_table[i] then name = fields.__trk_table[i] break end end
       end
-      return trim(maybe_sanitize(s or ""))
-    end
 
-    -- $trkall → names concatenated in Interleave order (metadata-only)
+      local s = tostring(name or "")
+      return trim(maybe_sanitize(s))
+
+    end
     if tkl == "trkall" then
-      local list = build_interleave_name_list(fields)
-      local out = {}
-      if list then
-        for i = 1, 256 do
-          local v = list[i]
-          if v and v ~= "" then out[#out+1] = v end
-        end
-      end
-      return table.concat(out, "_")
+      local list = {}
+      if fields.__trk_table then for i=1,20 do local v=fields.__trk_table[i]; if v and v~="" then list[#list+1]=v end end end
+      return table.concat(list, "_")
     end
-
-    -- $trkN (explicit by recorder channel number indexing table)
     local nidx = tkl:match("^trk(%d+)$")
     if nidx then
       local idx = tonumber(nidx)
       local v = (fields.__trk_table and fields.__trk_table[idx]) or fields["trk"..nidx] or fields["TRK"..nidx]
       local s = tostring(v or "")
       return trim(maybe_sanitize(s))
-    end
 
-    -- default: plain field
+    end
     local v = fields[tkl] or fields[name] or ""
     local s = tostring(v or "")
     return trim(maybe_sanitize(s))
@@ -1029,7 +873,7 @@ local function expand_template(tpl, fields, counter, sanitize)
   local out = normalize_tokens(tpl or "")
   out = out:gsub("%${(.-)}", function(s) return repl(s) end)
   out = out:gsub("%$([%a%d:]+)", function(s) return repl(s) end)
-  out = out:gsub("%s+", " "):gsub("^%s+", ""):gsub("%s+$", "")
+  out = out:gsub("%s+"," "):gsub("^%s+",""):gsub("%s+$","")  
   return out
 end
 
@@ -1093,9 +937,6 @@ local function append_token(tk)
     local shown = 0
     for i, e in ipairs(SCAN_CACHE.list) do
       if not preview_limit or shown < preview_limit then
-        -- refresh interleave map/diag before expanding either template
-        e.fields.__trk_by_interleave = nil          -- drop old interleave cache
-        compute_interleave_diag(e.fields, e.item)   -- rebuild interleave map + diag
         local newname = expand_template(TAKE_TEMPLATE, e.fields, i)
         newname = apply_take_filter(newname)
         newname = apply_take_renamer(newname)
@@ -1208,6 +1049,26 @@ local function draw_result_modal()
     reaper.ImGui_Text(ctx, ("Renamed:  %d"):format(r.renamed or 0))
     reaper.ImGui_Text(ctx, ("Notes:    %d"):format(r.noted or 0))
     reaper.ImGui_Text(ctx, ("Skipped:  %d"):format(r.skipped or 0))
+    -- Skipped list with reasons (Take-only skip on empty tokens)
+    do
+      local any = false
+      for _, rrow in ipairs(r.rows or {}) do
+        if (rrow.status == "Skipped") and (rrow.reason and rrow.reason ~= "") then any = true; break end
+      end
+      if any then
+        reaper.ImGui_Separator(ctx)
+        reaper.ImGui_Text(ctx, "Skipped (reasons):")
+        if reaper.ImGui_BeginChild(ctx, "##skiplist", -FLT_MIN, 120, true) then
+          for _, rrow in ipairs(r.rows or {}) do
+            if (rrow.status == "Skipped") and (rrow.reason and rrow.reason ~= "") then
+              reaper.ImGui_TextWrapped(ctx, string.format("#%d  %s  —  %s", rrow.idx or 0, tostring(rrow.old or ""), tostring(rrow.reason or "")))
+            end
+          end
+          reaper.ImGui_EndChild(ctx)
+        end
+      end
+    end
+
     reaper.ImGui_Separator(ctx)
 
     -- Save buttons (no popups; silent on success/cancel/failure)
@@ -1250,24 +1111,12 @@ end
 
 -- ===== Build left/right copy texts =====
 local function build_left_copy_text_from_fields(f)
-  -- Ensure interleave diagnostics are ready
-  if not f.__diag_interleave then compute_interleave_diag(f, f.__item or nil) end
-  local diag = f.__diag_interleave or {}
-
   local lines = {}
   local function add(k, v) if v and v~="" then lines[#lines+1] = tostring(k).."\t"..tostring(v) end end
-
-  -- $trk (interleave-resolved)
-  local trk_line = (diag.name and diag.name ~= "" and diag.name) or ""
-  if diag.index and diag.total then
-    trk_line = string.format("%s (interleave %d/%d)", trk_line, diag.index or 0, diag.total or 0)
-  end
-  add("$trk", trk_line)
-
-  -- $trkall (interleave order)
-  add("$trkall", diag.all or "")
-
-  -- rest in stable order (unchanged)
+  local trk_auto = (f.__trk_name and (f.__trk_name.." (ch "..tostring(f.__chan_index or 0)..")")) or ""
+  add("$trk", trk_auto)
+  local list = {}; if f.__trk_table then for i=1,20 do local v=f.__trk_table[i]; if v and v~="" then list[#list+1]=v end end end
+  if #list>0 then add("$trkall", table.concat(list, "_")) end
   local ordered = {
     "project","scene","take","tape","track",
     "filename","srcfile","srcbase",'srcbaseprefix:N','srcbasesuffix:N',"srcext","srcpath","srcdir","filepath",
@@ -1333,8 +1182,6 @@ local function scan_metadata()
   local shown = 0
   for i, e in ipairs(SCAN_CACHE.list) do
     if not preview_limit or shown < preview_limit then
-      e.fields.__trk_by_interleave = nil
-      compute_interleave_diag(e.fields, e.item)
       local newname = expand_template(TAKE_TEMPLATE, e.fields, i)
       newname = apply_take_filter(newname)      
       newname = apply_take_renamer(newname)
@@ -1357,8 +1204,6 @@ local function recompute_preview_from_cache()
   local shown = 0
   for i, e in ipairs(SCAN_CACHE.list) do
     if not preview_limit or shown < preview_limit then
-      e.fields.__trk_by_interleave = nil
-      compute_interleave_diag(e.fields, e.item)
       local newname = expand_template(TAKE_TEMPLATE, e.fields, i)
       newname = apply_take_filter(newname)
       newname = apply_take_renamer(newname)
@@ -1410,15 +1255,26 @@ local function apply_renaming()
     local _renamed, _hits = apply_take_renamer(new_name)
     new_name = _renamed
     local ren_hits_str = table.concat(_hits or {}, "; ")
+
+    -- Skip-if-empty (Take-only): detect empty tokens
+    local skip_reason = nil
+    if SKIP_EMPTY_TOKENS then
+      local empties = empty_tokens_in_take_template(TAKE_TEMPLATE, fields, counter)
+      if #empties > 0 then
+        skip_reason = "empty token(s): " .. table.concat(empties, ", ")
+      end
+    end
+
     local new_note = (NOTE_TEMPLATE ~= "" and expand_template(NOTE_TEMPLATE, fields, counter, false)) or ""
 
     local did_rename, did_note = false, false
 
-    if take and new_name ~= "" then
+    if take and new_name ~= "" and not skip_reason then
       reaper.GetSetMediaItemTakeInfo_String(take, "P_NAME", new_name, true)
       did_rename = true
       renamed = renamed + 1
     end
+  
 
     if NOTE_TEMPLATE ~= "" then
       reaper.GetSetMediaItemInfo_String(item, "P_NOTES", new_note, true)
@@ -1430,23 +1286,26 @@ local function apply_renaming()
 
     local status
     if did_rename and did_note then
-      status = "Renamed+Note"
-    elseif did_rename then
-      status = "Renamed"
-    elseif did_note then
-      status = "NoteOnly"
-    else
-      status = "Skipped"
-    end
-    rows[#rows+1] = {
-      idx = i,
-      old = old_take_name,
-      newname = new_name,
-      replaced = ren_hits_str,  -- 新增：本列命中的 rename 規則（空字串 = 無）
-      current_note = tostring(fields and fields.curnote or ""),
-      newnote = new_note
-    }
-    counter = counter + 1
+        status = "Renamed+Note"
+      elseif did_rename then
+        status = "Renamed"
+      elseif did_note and not skip_reason then
+        status = "NoteOnly"
+      else
+        status = "Skipped"
+      end
+      if skip_reason then skipped = skipped + 1 end
+      rows[#rows+1] = {
+        idx = i,
+        old = old_take_name,
+        newname = new_name,
+        replaced = ren_hits_str,  -- rename rules hit (empty = none)
+        current_note = tostring(fields and fields.curnote or ""),
+        newnote = new_note,
+        status = status,
+        reason = skip_reason
+      }
+counter = counter + 1
   end
 
   reaper.UpdateArrange()
@@ -1754,33 +1613,19 @@ local function draw_view_pane(available_h)
         local f = collect_metadata_for_item(first)
         left_copy_text = build_left_copy_text_from_fields(f)
 
-        -- $trk (Interleave-resolved, metadata-only)
         do
           local label = "$trk"
           if reaper.ImGui_SmallButton(ctx, label .. "##field") then append_token(label) end
           reaper.ImGui_SameLine(ctx); reaper.ImGui_Text(ctx, label..": "); reaper.ImGui_SameLine(ctx)
-
-          -- Ensure interleave diagnostics are up-to-date
-          if not f.__diag_interleave then compute_interleave_diag(f, f.__item or item) end
-          local diag = f.__diag_interleave or {}
-
-          -- e.g. "LAN (interleave 5/8)"
-          local out = (diag.name and diag.name ~= "" and diag.name) or "(auto)"
-          if diag.index and diag.total then
-            out = string.format("%s (interleave %d/%d)", out, diag.index, diag.total)
-          end
-          reaper.ImGui_TextWrapped(ctx, out)
+          local auto = (f.__trk_name and (f.__trk_name.." (ch "..tostring(f.__chan_index or 0)..")")) or "(auto)"
+          reaper.ImGui_TextWrapped(ctx, auto)
         end
-
-        -- $trkall (Interleave order concatenation)
         do
           local label = "$trkall"
+          local preview_all = {}; if f.__trk_table then for i=1,20 do local v=f.__trk_table[i]; if v and v~="" then preview_all[#preview_all+1]=v end end end
           if reaper.ImGui_SmallButton(ctx, label .. "##field") then append_token(label) end
           reaper.ImGui_SameLine(ctx); reaper.ImGui_Text(ctx, label..": "); reaper.ImGui_SameLine(ctx)
-
-          if not f.__diag_interleave then compute_interleave_diag(f, f.__item or item) end
-          local all = (f.__diag_interleave and f.__diag_interleave.all) or ""
-          reaper.ImGui_TextWrapped(ctx, all)
+          reaper.ImGui_TextWrapped(ctx, table.concat(preview_all, "_"))
         end
 
         do
