@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<index version="1" name="hsuanice Scripts" commit="729bc9effccc6b19ece530a2adb76ac720692333">
+<index version="1" name="hsuanice Scripts" commit="55e39885ee540b1e1af1f1f141fe0feeed96b3a2">
   <category name="Beta Testing">
     <reapack name="hsuanice_BWF TimeReference Embed Tool.lua" type="script" desc="Embed BWF TimeReference to Active take from Take 1 or Current Position TC">
       <version name="0.7.1" author="hsuanice" time="2025-08-14T17:52:57Z">
@@ -73,6 +73,24 @@
       <version name="0.1" author="hsuanice" time="2025-08-13T07:33:10Z">
         <changelog><![CDATA[v0.1 - Beta release]]></changelog>
         <source main="main">https://github.com/hsuanice/ReaScripts/raw/20128d4abc5ecce7bcaa7840d72a69ef1fcdc68c/Beta%20Testing/hsuanice_Display%20Edit%20Cursor%20Position.lua</source>
+      </version>
+    </reapack>
+    <reapack name="hsuanice_Embed iXML and BWF Metadata from Take 1 to Active Take.lua" type="script" desc="Embed iXML and BWF Metadata from Take 1 to Active Take">
+      <metadata>
+        <description><![CDATA[{\rtf1\ansi\deff0{\fonttbl{\f0 \fswiss Helvetica;}{\f1 \fmodern Courier;}}
+{\colortbl;\red255\green0\blue0;\red0\green0\blue255;}
+\widowctrl\hyphauto
+
+{\pard \ql \f0 \sa180 \li0 \fi0 Copy all metadata (iXML + BWF bext/INFO) from Take 1's source file to the active take's source file. Uses BWF MetaEdit CLI for export/import. For each selected item (or the item under edit), this script copies ALL metadata from TAKE 1's source file to the ACTIVE take's source file: \u8226 ? iXML chunk (entire XML) \u8212- exported from source as sidecar *.iXML.xml and imported to target. \u8226 ? BWF bext/INFO (CORE Document) \u8212- exported from source as CSV and imported to target by mapping FileName to the target path.\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 Requirements: \u8226 ? BWF MetaEdit CLI ({\f1 bwfmetaedit}) available in PATH (or you will be prompted to locate it). \u8226 ? Optional: js_ReaScriptAPI for nicer file-chooser (falls back if absent).\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 Notes: \u8226 ? This writes metadata INTO the target WAV/BWF. Audio essence is untouched by BWF MetaEdit when only metadata is changed per design. \u8226 ? Safety: uses {\f1 --reject-overwrite} where appropriate and writes to temp sidecars before import.\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 References: \u8226 ? BWF MetaEdit CORE document import/export (bext/INFO) \u8212- official help/workflows. \u8226 ? iXML/XMP/XML-chunk sidecar export/import behavior (GUI/CLI parity). \u8226 ? CLI example shows {\f1 --in-XMP-xml/--out-XMP-xml}; iXML follows the same sidecar pattern.\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 Credit: This script was generated using ChatGPT based on design concepts and iterative testing by hsuanice. hsuanice served as the workflow designer, tester, and integrator for this tool.\par}
+}
+]]></description>
+      </metadata>
+      <version name="0.1.0" author="hsuanice" time="2025-08-30T19:08:04Z">
+        <source main="main">https://github.com/hsuanice/ReaScripts/raw/55e39885ee540b1e1af1f1f141fe0feeed96b3a2/Beta%20Testing/hsuanice_Embed%20iXML%20and%20BWF%20Metadata%20from%20Take%201%20to%20Active%20Take.lua</source>
       </version>
     </reapack>
     <reapack name="hsuanice_Hover Mode Split Item by Selection or Edit or Mouse Cursor.lua" type="script" desc="Hover Mode - Split Item by Selection or Edit or Mouse Cursor">
