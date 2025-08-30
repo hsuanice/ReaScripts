@@ -1,6 +1,6 @@
 --[[
 @description Reorder/Sort — Monitor & Debug
-@version 0.1.2
+@version 0.1.3 No Filename
 @author hsuanice
 @about
   Shows a live table of the currently selected items and all sort-relevant fields:
@@ -17,6 +17,32 @@
     • Export or Copy (TSV/CSV) for either the live view or snapshots
 
   Requires: ReaImGui (install via ReaPack)
+
+@Changelog
+  v0.1.3
+    - File name reliability: now resolves source file names (with extensions) even for SECTION/non-PCM sources via safe pcall wrapper.
+    - New column: End (Start + Length). Also added EndTime to TSV/CSV exports.
+    - Table: column count updated to 10; minor utils added (item_len), formatting helpers unchanged.
+
+  v0.1.2
+    - UI always renders content (removed 'visible' guard after Begin to avoid blank window in some docks/themes).
+    - Table sizing: use -FLT_MIN width for stable full-width layout across ReaImGui builds.
+    - Compatibility: safe ESC detection, tolerant handling when Begin returns only one value, save dialog fallback if JS_ReaScriptAPI is missing (auto-save to project folder with notice).
+
+  v0.1.1
+    - Compatibility hardening:
+      • Avoided font Attach/PushFont when APIs are unavailable.
+      • Added guards around keyboard APIs and window-‘open’ handling.
+      • General nil-safety for selection scanning and sources.
+
+  v0.1.0
+    - Initial release:
+      • Live monitor of selected items with columns: #, TrackIdx, Track Name, Take Name, File Name, Meta Track Name (interleave-resolved), Chan#, Interleave, Start.
+      • Auto-refresh / manual Refresh Now.
+      • Capture BEFORE / AFTER snapshots.
+      • Export/Copy selection or snapshots as TSV/CSV.
+
+
 ]]
 
 ---------------------------------------
@@ -53,22 +79,21 @@ local function track_index(tr) return math.floor(reaper.GetMediaTrackInfo_Value(
 local function track_name(tr) local _, n = reaper.GetTrackName(tr, "") return n end
 local function take_of(it) local tk=it and reaper.GetActiveTake(it); if tk and reaper.ValidatePtr2(0,tk,"MediaItem_Take*") then return tk end end
 local function src_of_take(tk) return tk and reaper.GetMediaItemTake_Source(tk) or nil end
+local function item_len(it)   return reaper.GetMediaItemInfo_Value(it,"D_LENGTH") end
+
+
 
 -- 取來源檔名（安全版：允許 nil、MIDI、生成器、SECTION 等）
 local function src_path(src)
-  -- 沒有來源
-  if not src then return "" end
-  -- 不是 PCM 音檔來源（例如 MIDI/生成器），跳過
-  if reaper.GetMediaSourceType and reaper.GetMediaSourceType(src, "") == "MIDI" then
-    return ""
+  if not src or not reaper.GetMediaSourceFileName then return "" end
+  -- 直接用 pcall 包起來：SECTION/非 PCM 也能安全返回（抓到底層檔名時可用）
+  local ok, ok2, p = pcall(reaper.GetMediaSourceFileName, src, "")
+  if ok and ok2 and type(p) == "string" then
+    return p
   end
-  -- 僅對 PCM_source 呼叫 GetMediaSourceFileName
-  if reaper.ValidatePtr2 and not reaper.ValidatePtr2(0, src, "PCM_source*") then
-    return ""
-  end
-  local ok, p = reaper.GetMediaSourceFileName(src, "")
-  return (ok == true or ok == 1) and (p or "") or ""
+  return ""
 end
+
 
 
 
@@ -143,6 +168,7 @@ local function collect_fields_for_item(it)
     channel_num = nil,
     interleave = nil,
     start_time = item_start(it) or 0,
+    end_time   = 0,                    -- ← 新增
   }
 
   local tr = item_track(it)
@@ -168,6 +194,7 @@ local function collect_fields_for_item(it)
   local nm, ch = resolve_trk_name_by_interleave(fields, row.interleave or 1)
   row.meta_trk_name = nm or ""
   row.channel_num   = ch
+  row.end_time = (row.start_time or 0) + (item_len(it) or 0)
 
   return row
 end
@@ -212,8 +239,9 @@ local function build_table_text(fmt, rows)
   end
   out[#out+1] = table.concat({
     "#", "TrackIdx", "TrackName", "TakeName", "FileName",
-    "MetaTrackName", "Channel#", "Interleave", "StartTime"
+    "MetaTrackName", "Channel#", "Interleave", "StartTime", "EndTime"
   }, sep)
+
   for i, r in ipairs(rows or {}) do
     out[#out+1] = table.concat({
       esc(i),
@@ -225,6 +253,7 @@ local function build_table_text(fmt, rows)
       esc(r.channel_num or ""),
       esc(r.interleave or ""),
       esc(fmt_time(r.start_time)),
+      esc(fmt_time(r.end_time)), 
     }, sep)
   end
   return table.concat(out, "\n")
@@ -296,7 +325,7 @@ end
 
 local function draw_table(rows, height)
   local flags = TF('ImGui_TableFlags_Borders') | TF('ImGui_TableFlags_RowBg') | TF('ImGui_TableFlags_SizingStretchProp')
-  if reaper.ImGui_BeginTable(ctx, "live_table", 9, flags, -FLT_MIN, height or 360) then
+  if reaper.ImGui_BeginTable(ctx, "live_table", 10, flags, -FLT_MIN, height or 360) then
     reaper.ImGui_TableSetupColumn(ctx, "#", TF('ImGui_TableColumnFlags_WidthFixed'), 36)
     reaper.ImGui_TableSetupColumn(ctx, "TrackIdx", TF('ImGui_TableColumnFlags_WidthFixed'), 72)
     reaper.ImGui_TableSetupColumn(ctx, "Track Name")
@@ -306,6 +335,7 @@ local function draw_table(rows, height)
     reaper.ImGui_TableSetupColumn(ctx, "Chan#", TF('ImGui_TableColumnFlags_WidthFixed'), 64)
     reaper.ImGui_TableSetupColumn(ctx, "Interleave", TF('ImGui_TableColumnFlags_WidthFixed'), 88)
     reaper.ImGui_TableSetupColumn(ctx, "Start", TF('ImGui_TableColumnFlags_WidthFixed'), 96)
+    reaper.ImGui_TableSetupColumn(ctx, "End",   TF('ImGui_TableColumnFlags_WidthFixed'), 96)
     reaper.ImGui_TableHeadersRow(ctx)
 
     for i, r in ipairs(rows or {}) do
@@ -319,6 +349,7 @@ local function draw_table(rows, height)
       reaper.ImGui_TableNextColumn(ctx); reaper.ImGui_Text(ctx, tostring(r.channel_num or ""))
       reaper.ImGui_TableNextColumn(ctx); reaper.ImGui_Text(ctx, tostring(r.interleave or ""))
       reaper.ImGui_TableNextColumn(ctx); reaper.ImGui_Text(ctx, fmt_time(r.start_time))
+      reaper.ImGui_TableNextColumn(ctx); reaper.ImGui_Text(ctx, fmt_time(r.end_time))
     end
 
     reaper.ImGui_EndTable(ctx)
