@@ -1,6 +1,6 @@
 --[[
 @description Reorder/Sort — Monitor & Debug
-@version 0.1.3 No Filename
+@version 0.1.4
 @author hsuanice
 @about
   Shows a live table of the currently selected items and all sort-relevant fields:
@@ -19,7 +19,14 @@
   Requires: ReaImGui (install via ReaPack)
 
 @Changelog
-  v0.1.3
+  v0.1.4
+  - Column rename: “Source File” (formerly “File Name”).
+  - Source resolution now mirrors the Rename script’s $srcfile:
+      active take → source → unwrap SECTION (handles nested) → real file path (with extension).
+  - Metadata read (iXML/TRK) also uses the unwrapped source for better accuracy on poly/SECTION items.
+  - Export headers updated to “Source File”; keeps EndTime from 0.1.3.
+  - Cleanup/robustness: removed old src_path usage; safer guards for nil/non-PCM sources.
+
     - File name reliability: now resolves source file names (with extensions) even for SECTION/non-PCM sources via safe pcall wrapper.
     - New column: End (Start + Length). Also added EndTime to TSV/CSV exports.
     - Table: column count updated to 10; minor utils added (item_len), formatting helpers unchanged.
@@ -79,20 +86,40 @@ local function track_index(tr) return math.floor(reaper.GetMediaTrackInfo_Value(
 local function track_name(tr) local _, n = reaper.GetTrackName(tr, "") return n end
 local function take_of(it) local tk=it and reaper.GetActiveTake(it); if tk and reaper.ValidatePtr2(0,tk,"MediaItem_Take*") then return tk end end
 local function src_of_take(tk) return tk and reaper.GetMediaItemTake_Source(tk) or nil end
+
+-- Unwrap SECTION → return the real parent source (or original if not SECTION)
+local function resolved_source_of_take(take)
+  if not take then return nil end
+  local src = reaper.GetMediaItemTake_Source(take)
+  if not src then return nil end
+
+  local function stype(s)
+    local ok, t = pcall(reaper.GetMediaSourceType, s, "")
+    return ok and t or ""
+  end
+
+  local t = stype(src)
+  while t == "SECTION" do
+    local ok, parent = pcall(reaper.GetMediaSourceParent, src)
+    if not ok or not parent then break end
+    src = parent
+    t = stype(src)
+  end
+  return src
+end
+
+-- Safe filename for any source (after unwrapped): returns full path; "" if none
+local function source_file_path(src)
+  if not src then return "" end
+  local ok, path = pcall(reaper.GetMediaSourceFileName, src, "")
+  if ok and type(path) == "string" then return path end
+  return ""
+end
+
 local function item_len(it)   return reaper.GetMediaItemInfo_Value(it,"D_LENGTH") end
 
 
 
--- 取來源檔名（安全版：允許 nil、MIDI、生成器、SECTION 等）
-local function src_path(src)
-  if not src or not reaper.GetMediaSourceFileName then return "" end
-  -- 直接用 pcall 包起來：SECTION/非 PCM 也能安全返回（抓到底層檔名時可用）
-  local ok, ok2, p = pcall(reaper.GetMediaSourceFileName, src, "")
-  if ok and ok2 and type(p) == "string" then
-    return p
-  end
-  return ""
-end
 
 
 
@@ -183,11 +210,14 @@ local function collect_fields_for_item(it)
     row.take_name = "<no take>"
   end
 
-  local src = src_of_take(tk)
-  local fpath = src_path(src)
-  row.file_name = basename(fpath)
+  -- Use the same pipeline as Rename's $srcfile:
+  --   active take -> source -> unwrap SECTION -> filename (with extension)
+  local src_unwrapped = resolved_source_of_take(tk)
+  local fpath = source_file_path(src_unwrapped)
+  row.file_name = basename(fpath)  -- == $srcfile
 
-  local trk_table, interleave_list = collect_ixml_tracklist(src)
+  -- iXML/BWF should read from the real parent source too
+  local trk_table, interleave_list = collect_ixml_tracklist(src_unwrapped)
   local fields = { trk_table = trk_table, interleave_list = interleave_list }
 
   row.interleave = guess_interleave_index(it)
@@ -238,7 +268,7 @@ local function build_table_text(fmt, rows)
     return s
   end
   out[#out+1] = table.concat({
-    "#", "TrackIdx", "TrackName", "TakeName", "FileName",
+    "#", "TrackIdx", "TrackName", "TakeName", "Source File",
     "MetaTrackName", "Channel#", "Interleave", "StartTime", "EndTime"
   }, sep)
 
@@ -330,7 +360,7 @@ local function draw_table(rows, height)
     reaper.ImGui_TableSetupColumn(ctx, "TrackIdx", TF('ImGui_TableColumnFlags_WidthFixed'), 72)
     reaper.ImGui_TableSetupColumn(ctx, "Track Name")
     reaper.ImGui_TableSetupColumn(ctx, "Take Name")
-    reaper.ImGui_TableSetupColumn(ctx, "File Name")
+    reaper.ImGui_TableSetupColumn(ctx, "Source File")
     reaper.ImGui_TableSetupColumn(ctx, "Meta Track Name")
     reaper.ImGui_TableSetupColumn(ctx, "Chan#", TF('ImGui_TableColumnFlags_WidthFixed'), 64)
     reaper.ImGui_TableSetupColumn(ctx, "Interleave", TF('ImGui_TableColumnFlags_WidthFixed'), 88)
