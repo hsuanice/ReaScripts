@@ -1,6 +1,6 @@
 --[[
 @description Reorder/Sort — Monitor & Debug
-@version 0.1.4
+@version 0.1.5
 @author hsuanice
 @about
   Shows a live table of the currently selected items and all sort-relevant fields:
@@ -19,6 +19,10 @@
   Requires: ReaImGui (install via ReaPack)
 
 @Changelog
+  v0.1.5
+  - UI: moved Snapshot BEFORE/AFTER section to appear directly under the top toolbar,
+        before the live table (content unchanged).
+
   v0.1.4
   - Column rename: “Source File” (formerly “File Name”).
   - Source resolution now mirrors the Rename script’s $srcfile:
@@ -414,14 +418,14 @@ local function loop()
 
   reaper.ImGui_SetNextWindowSize(ctx, 1000, 640, reaper.ImGui_Cond_FirstUseEver())
   local flags = reaper.ImGui_WindowFlags_NoCollapse()
-  local visible, open = reaper.ImGui_Begin(ctx, "Reorder/Sort — Monitor & Debug", true, flags)
+  local visible, open = reaper.ImGui_Begin(ctx, "Reorder or Sort — Monitor & Debug", true, flags)
   if open == nil then open = true end
 
   -- 無 guard：一律繪製內容，避免某些版本/停駐情境 visible=false 導致空白
   draw_toolbar()
+  draw_snapshots()            -- ← 先顯示 BEFORE/AFTER 兩行
   reaper.ImGui_Spacing(ctx)
   draw_table(ROWS, 360)
-  draw_snapshots()
 
   reaper.ImGui_End(ctx)
   if open and not esc_pressed() then reaper.defer(loop) end
