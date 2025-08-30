@@ -1,6 +1,6 @@
 --[[
 @description ReaImGui - Vertical Reorder and Sort (items)
-@version 0.3.6
+@version 0.3.7
 @author hsuanice
 @about
   Provides two vertical re-arrangement modes for selected items (stacked UI):
@@ -505,42 +505,52 @@ local function run_copy_to_new_tracks(mode, asc)
     return s:gsub("(%d+)", function(d) return string.format("%09d", tonumber(d)) end)
   end
 
-  -- 蒐集 rows：{it, name, ch}
+  -- 蒐集 rows：{ it, name, ch }
+  -- 以 iXML → Interleave 解析（和你 Rename 腳本一致）
   local rows = {}
-  for _,it in ipairs(items) do
-    if not is_item_locked(it) then
-      local f = collect_fields(it)
-      local name, ch = extract_name_and_chan(f, "trk")
-      name = (tostring(name or ""):match("^%s*(.-)%s*$"))
-      rows[#rows+1] = { it=it, name = (name~="" and name) or "(Unknown)", ch = ch or 999 }
-    end
+  for _, it in ipairs(items) do
+    -- 讀 metadata 欄（含 iXML TRACK_LIST 與 TRK#）
+    local f = collect_fields(it)
+    -- 用你現成的抽取器：回傳 (name, ch)
+    local name, ch = extract_name_and_chan(f, "trk")
+    name = tostring(name or ""):gsub("^%s+",""):gsub("%s+$","")
+    ch   = tonumber(ch) or 999
+    rows[#rows+1] = { it = it, name = name, ch = ch }
   end
 
-  -- 分組 + 排序（改成先做統一的字串排序鍵 ord，避免比較異常）
-  local groups = {}     -- key -> { label=, items={}, ord= }
-  local order  = {}     -- 有序陣列 { {g=group, ord=...}, ... }
+
+  -- 分組：mode=1 依名稱；mode=2 依通道
+  local groups, order = {}, {}
+  local function natural_key(s)
+    s = tostring(s or ""):lower():gsub("%s+", " ")
+    return s:gsub("(%d+)", function(d) return string.format("%09d", tonumber(d)) end)
+  end
+  local function channel_label(n)
+    if not n or n==999 then return "Ch ??" end
+    return string.format("Ch %02d", tonumber(n) or 0)
+  end
 
   if mode == 1 then
-    -- Track Name 模式：key=名稱
-    for _,r in ipairs(rows) do
-      local key = r.name
+    -- Track Name
+    for _, r in ipairs(rows) do
+      local key = r.name ~= "" and r.name or "(unnamed)"
       local g = groups[key]
       if not g then
-        g = { label = r.name, items = {} }
-        g.ord = "N|" .. (natural_key(r.name) or "")
+        g = { label = key, items = {} }
+        g.ord = "N|" .. natural_key(key)
         groups[key] = g
         order[#order+1] = { g = g, ord = g.ord }
       end
       g.items[#g.items+1] = r.it
     end
   else
-    -- Channel Number 模式：key=通道號
-    for _,r in ipairs(rows) do
+    -- Channel Number
+    for _, r in ipairs(rows) do
       local key = tonumber(r.ch) or 999
       local g = groups[key]
       if not g then
-        g = { label = channel_label(key), items = {} }
-        g.ord = string.format("C|%09d", key)  -- 統一為字串鍵
+        g = { label = channel_label(key), items = {}, key = key }
+        g.ord = string.format("C|%09d", key)
         groups[key] = g
         order[#order+1] = { g = g, ord = g.ord }
       end
@@ -552,29 +562,50 @@ local function run_copy_to_new_tracks(mode, asc)
     if asc then return a.ord < b.ord else return a.ord > b.ord end
   end)
 
-  -- 建軌 + 複製（照 order 逐一建立）
-  local base = reaper.CountTracks(0)
-  local created, copied = {}, 0
-  for _,rec in ipairs(order) do
-    local g = rec.g
-    reaper.InsertTrackAtIndex(base + (#created), true)
-    local tr = reaper.GetTrack(0, base + (#created))
-    set_track_name(tr, g.label) -- 依模式命名：Track Name 或 Ch 01/02…
-    created[#created+1] = tr
-    for _,it in ipairs(g.items) do
-      local s  = item_start(it)
-      local ln = item_len(it)
-      local new = reaper.AddMediaItemToTrack(tr)
-      reaper.SetMediaItemInfo_Value(new, "D_POSITION", s)
-      reaper.SetMediaItemInfo_Value(new, "D_LENGTH",   ln)
-      local ok, chunk = reaper.GetItemStateChunk(it, "", false)
-      if ok then
-        chunk = chunk:gsub("\n%s*SEL%s+1", "\n  SEL 0")
-        reaper.SetItemStateChunk(new, chunk, false)
-      end
+  -- 目的軌：以名稱去重，每個名稱只建一次
+  local base = reaper.CountTracks(0) -- 直接接在最末端
+  local existing = {}                -- name -> track
+  local created  = {}                -- 依順序記錄
+  local copied   = 0
+
+  for _, rec in ipairs(order) do
+    local label = rec.g.label
+    local tr = existing[label]
+    if not tr then
+      reaper.InsertTrackAtIndex(base + #created, true)
+      tr = reaper.GetTrack(0, base + #created)
+      set_track_name(tr, label)
+      existing[label] = tr
+      created[#created+1] = tr
+    end
+    for _, it in ipairs(rec.g.items) do
+      copy_item_to_track(it, tr)
       copied = copied + 1
     end
   end
+
+  -- Optional: 檢查新建軌有沒有 time overlap
+  local overlaps = 0
+  for _, tr in ipairs(created) do
+    local n = reaper.CountTrackMediaItems(tr)
+    local t = {}
+    for i=0,n-1 do
+      local it = reaper.GetTrackMediaItem(tr,i)
+      t[#t+1] = { s = reaper.GetMediaItemInfo_Value(it,"D_POSITION"),
+                  e = reaper.GetMediaItemInfo_Value(it,"D_POSITION") + reaper.GetMediaItemInfo_Value(it,"D_LENGTH") }
+    end
+    table.sort(t, function(a,b) return a.s<b.s end)
+    local last = -1e18
+    for _, seg in ipairs(t) do
+      if seg.s < last - 1e-9 then overlaps = overlaps + 1 break end
+      if seg.e > last then last = seg.e end
+    end
+  end
+  if overlaps > 0 then
+    reaper.MB(("Warning: %d track(s) have overlaps after copy."):format(overlaps), "Overlap check", 0)
+  end
+
+
 
   reaper.Undo_EndBlock("Copy selected items to NEW tracks by metadata", -1)
   reaper.UpdateArrange()
