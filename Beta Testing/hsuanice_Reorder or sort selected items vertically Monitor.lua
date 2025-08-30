@@ -20,8 +20,12 @@
 
 @Changelog
   v0.1.5
-  - UI: moved Snapshot BEFORE/AFTER section to appear directly under the top toolbar,
-        before the live table (content unchanged).
+    - UI: Moved the “Snapshot BEFORE/AFTER” block to appear directly
+          under the top toolbar (above the live table), content unchanged.
+    - Exports: BEFORE/AFTER snapshots save as timestamped TSV/CSV
+          (e.g., ReorderSort_Before_YYYYMMDD_HHMMSS.tsv / _After_...).
+    - Minor polish: kept spacing/separator so the two snapshot lines
+          visually read as part of the toolbar section.
 
   v0.1.4
   - Column rename: “Source File” (formerly “File Name”).
