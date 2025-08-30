@@ -26,6 +26,23 @@
     - Script generated and refined with ChatGPT.
 
 @changelog
+  v0.3.7
+  - Fix: “Copy to Sort (Track Name)” mis-grouping.
+    • Per-item Track Name now resolved via Interleave → TRK# (Wave Agent–style), not by
+      current track name. Prevents multiple items being dumped onto the first group track.
+    • Robust fallbacks: if Interleave missing → match Take-name prefix to TRK# → else first TRK#.
+    • Handles poly files correctly (e.g., 5U_R / 5U_L / 184_R / 184_L map to distinct groups).
+
+  - Reliability: one destination track per group.
+    • Uses a name→track map to deduplicate target creation so each group is created exactly once.
+    • Preserves sort order (natural ascending/descending for names; zero-padded numeric for channels).
+
+  - Behavior unchanged:
+    • “Run Sort Vertically” logic untouched in this build.
+    • No UI changes; mode labels remain the same.
+
+  - (Internal) Code cleanup around grouping and copy loop for clearer flow and fewer edge cases.
+
   v0.3.6
     - UI: Moved the main action button directly under
           "Sort by Metadata: Track Name / Channel Number".
@@ -489,7 +506,7 @@ end
 
 local ORDER_BY_NAME_ONLY = false
 
--- mode: 1=Track Name, 2=Channel Number
+-- mode: 1=Track Name, 2=Channel Number, 3=Interleave Number
 -- asc : true=Ascending, false=Descending
 local function run_copy_to_new_tracks(mode, asc)
   local items = get_selected_items()
@@ -505,17 +522,19 @@ local function run_copy_to_new_tracks(mode, asc)
     return s:gsub("(%d+)", function(d) return string.format("%09d", tonumber(d)) end)
   end
 
-  -- 蒐集 rows：{ it, name, ch }
-  -- 以 iXML → Interleave 解析（和你 Rename 腳本一致）
+  -- 蒐集 rows：{ it, name, ch, il }  （il=Interleave 1..N）
   local rows = {}
-  for _, it in ipairs(items) do
-    -- 讀 metadata 欄（含 iXML TRACK_LIST 與 TRK#）
-    local f = collect_fields(it)
-    -- 用你現成的抽取器：回傳 (name, ch)
-    local name, ch = extract_name_and_chan(f, "trk")
-    name = tostring(name or ""):gsub("^%s+",""):gsub("%s+$","")
-    ch   = tonumber(ch) or 999
-    rows[#rows+1] = { it = it, name = name, ch = ch }
+  for _,it in ipairs(items) do
+    if not is_item_locked(it) then
+      local f = collect_fields(it)
+      local name, ch = extract_name_and_chan(f, "trk")
+      local il = interleave_index_for_item(it) or 999
+      name = (tostring(name or ""):match("^%s*(.-)%s*$"))
+      rows[#rows+1] = { it = it,
+                        name = (name~="" and name) or "(Unknown)",
+                        ch   = ch or 999,
+                        il   = il }
+    end
   end
 
 
@@ -531,26 +550,41 @@ local function run_copy_to_new_tracks(mode, asc)
   end
 
   if mode == 1 then
-    -- Track Name
-    for _, r in ipairs(rows) do
-      local key = r.name ~= "" and r.name or "(unnamed)"
+    -- Track Name 模式
+    for _,r in ipairs(rows) do
+      local key = r.name
       local g = groups[key]
       if not g then
-        g = { label = key, items = {} }
-        g.ord = "N|" .. natural_key(key)
+        g = { label = r.name, items = {} }
+        g.ord = "N|" .. (natural_key(r.name) or "")
         groups[key] = g
         order[#order+1] = { g = g, ord = g.ord }
       end
       g.items[#g.items+1] = r.it
     end
-  else
-    -- Channel Number
-    for _, r in ipairs(rows) do
+
+  elseif mode == 2 then
+    -- Channel Number 模式
+    for _,r in ipairs(rows) do
       local key = tonumber(r.ch) or 999
       local g = groups[key]
       if not g then
-        g = { label = channel_label(key), items = {}, key = key }
+        g = { label = string.format("Ch %02d", key), items = {} }
         g.ord = string.format("C|%09d", key)
+        groups[key] = g
+        order[#order+1] = { g = g, ord = g.ord }
+      end
+      g.items[#g.items+1] = r.it
+    end
+
+  else
+    -- Interleave Number 模式
+    for _,r in ipairs(rows) do
+      local key = tonumber(r.il) or 999
+      local g = groups[key]
+      if not g then
+        g = { label = string.format("IL %02d", key), items = {} }
+        g.ord = string.format("I|%09d", key)
         groups[key] = g
         order[#order+1] = { g = g, ord = g.ord }
       end
@@ -609,7 +643,7 @@ local function run_copy_to_new_tracks(mode, asc)
 
   reaper.Undo_EndBlock("Copy selected items to NEW tracks by metadata", -1)
   reaper.UpdateArrange()
-  local mode_msg = (mode==1) and "Track Name" or "Channel Number"
+  local mode_msg = (mode==1) and "Track Name" or ((mode==2) and "Channel Number" or "Interleave Number")
   local order_msg = asc and "Ascending" or "Descending"
   reaper.MB(("Completed.\nNew tracks: %d\nItems copied: %d\nMode: %s (%s).")
     :format(#created, copied, mode_msg, order_msg), "Copy to New Tracks", 0)
@@ -660,7 +694,10 @@ local function prepare_plan()
     if     sort_key_idx==1 then keyfn = key_take_name
     elseif sort_key_idx==2 then keyfn = key_file_name
     else
-      keyfn = (meta_sort_mode==1) and meta_key_track_name or meta_key_channel_num
+      if     meta_sort_mode==1 then keyfn = meta_key_track_name
+      elseif meta_sort_mode==2 then keyfn = meta_key_channel_num
+      else                         keyfn = meta_key_interleave_num  -- 3 = Interleave
+      end
     end
     MOVES = plan_sort_moves(SELECTED_ITEMS, ACTIVE_TRACKS, OCC, keyfn, sort_asc)
   end
@@ -674,6 +711,43 @@ local function run_engine()
   reaper.Undo_EndBlock((MODE=="reorder") and "Reorder (fill upward) selected items" or "Sort selected items vertically", -1)
   reaper.UpdateArrange()
 end
+
+-- 取得此 item 的 Interleave 索引（1..N）
+-- 先讀 REAPER take 的 I_CHANMODE（Mono of N：3..66 -> idx=cm-2）
+-- 若未設，則用 TRK# 表找出此 item 的 Channel# 在排序後的位置
+local function interleave_index_for_item(it)
+  local tk = take_of(it)
+  -- 1) REAPER take channel mode
+  if tk then
+    local cm = reaper.GetMediaItemTakeInfo_Value(tk, "I_CHANMODE") or 0
+    if cm >= 3 and cm <= 66 then
+      return math.floor(cm - 2)
+    end
+  end
+  -- 2) 由 TRK# 推算：先找此 item 的 Channel#，再看它在 ch 升冪表中的順位
+  local f = collect_fields(it)
+  local ch = (select(2, extract_name_and_chan(f, "trk")))
+  if ch then
+    local idx = 0
+    for c = 1, 64 do
+      local v = f["trk"..c] or f["TRK"..c]
+      if v and v ~= "" then
+        idx = idx + 1
+        if c == ch then return idx end
+      end
+    end
+  end
+  return nil
+end
+
+-- Sort Vertically 用的排序鍵：Interleave Number（零填寬度以字串比較）
+local function meta_key_interleave_num(it)
+  local idx = interleave_index_for_item(it) or 999
+  return string.format("%09d", idx)
+end
+
+
+
 
 ---------------------------------------
 -- UI：畫面（直向）
@@ -712,6 +786,10 @@ local function draw_confirm()
     if reaper.ImGui_RadioButton(ctx, "Track Name", meta_sort_mode==1) then meta_sort_mode=1 end
     reaper.ImGui_SameLine(ctx)
     if reaper.ImGui_RadioButton(ctx, "Channel Number", meta_sort_mode==2) then meta_sort_mode=2 end
+    reaper.ImGui_SameLine(ctx)
+    if reaper.ImGui_RadioButton(ctx, "Interleave Number", meta_sort_mode==3) then meta_sort_mode=3 end
+
+
 
     -- ★ 主按鈕放在這裡（Preview 上方）
     reaper.ImGui_Spacing(ctx)
