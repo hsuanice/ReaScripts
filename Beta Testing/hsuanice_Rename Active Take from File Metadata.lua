@@ -1,6 +1,6 @@
 --[[
 @description ReaImGui - Rename Active Take from Metadata (caret insert + cached preview + copy/export)
-@version 0.11.22
+@version 0.11.23
 @author hsuanice
 @about
   Rename active takes and/or item notes from BWF/iXML and true source metadata using a fast ReaImGui UI.
@@ -34,6 +34,22 @@
   hsuanice served as the workflow designer, tester, and integrator for this tool.
 
 @changelog
+  v0.11.23
+    - Fix: Extended BWF/iXML Description parser to normalize `sXXXX=` keys 
+      (introduced by Vordio AAF conversion) in addition to `dXXXX=`.
+      • Examples: 
+        `sSCENE=80-2`   → parsed as `scene`
+        `sTAKE=04`      → parsed as `take`
+        `sTAPE=25Y04M23`→ parsed as `tape`
+        `sUBITS=00000000` → parsed as `ubits`
+        `sFRAMERATE=24.000ND` → parsed as `framerate`
+        `sSPEED=024.000-ND`  → parsed as `speed`
+        `sTRK10=WANG1`  → parsed as `trk10` / `TRK10`
+    - `$trk`, `$trkN`, `$trkall` now resolve correctly when Vordio’s 
+      `sTRK#` fields are present.
+    - Backward compatibility preserved: `dXXXX`, `TRK#`, and standard 
+      iXML/BWF keys remain supported.
+
   v0.11.22
     - Skipped details: column order changed to
       “#, Current Take Name, Srcfile, Reason”.
@@ -707,14 +723,14 @@ local function parse_description_pairs(desc_text, out_tbl)
 
       -- Map dXXXX → XXXX (upper & lower)
       local up = k:upper()
-      local base = up:match("^D([A-Z0-9_]+)$")
+      local base = up:match("^[SD]([A-Z0-9_]+)$")
       if base and base ~= "" then
         out_tbl[base] = v
         out_tbl[string.lower(base)] = v
       end
 
-      -- Map dTRK#/TRK# → TRK#/trk#
-      local n = up:match("^D?TRK(%d+)$")
+      -- Map dTRK#/TRK#/sTRK# → TRK#/trk#
+      local n = up:match("^[SD]?TRK(%d+)$")
       if n then
         out_tbl["TRK"..n] = v
         out_tbl["trk"..n] = v
