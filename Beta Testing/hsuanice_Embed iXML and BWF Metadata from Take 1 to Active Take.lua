@@ -22,30 +22,27 @@
     This script was generated using ChatGPT based on design concepts and iterative testing by hsuanice.
 
 @changelog
-  v0.3.0 - Enhancement: Auto-clean iXML sidecar after embed
-           • After successful iXML import, temporary sidecar file is deleted automatically.
-           • Prevents accumulation of .ixml files in the working folder.
-           • Added logging to confirm sidecar cleanup.
-
-  v0.3.1 - Fix: CORE(FLAGS) handling for CodingHistory and newline warning
-           • Skip unsupported CodingHistory block during CORE copy (avoid crash).
-           • Added warning if post-check snapshot still contained "\n" escape instead of real newlines.
-           • Improved resilience when handling complex Soundminer metadata.
-
-  v0.3.2 - Enhancement: Normalize metadata newlines
-           • Added `normalize_newlines()` to ensure Comment/Description/ICMT fields use clean real line breaks.
-           • Prevents ugly `\n` sequences in BWF/INFO/ID3 text blocks after embed.
-
-  v0.3.3 - Enhancement: Improved readability of multi-line metadata
-           • Switched from inline "·" separators to real line breaks in metadata fields.
-           • Restored natural formatting in Comment/Description/ICMT blocks.
-           • User-readable output matches original capture metadata more closely.
-
   v0.3.4 - Fix: Shell expansion issue with `$` in flags (e.g. `sUBITS=$00000000` → `/bin/sh0000000`)
            • Introduced `sh_quote()` to wrap all metadata values in single quotes when calling bwfmetaedit.
            • Prevents shell from interpreting `$`, backslashes, or special characters.
            • Result: `sUBITS=$00000000` now embeds correctly without corruption.
            • Restored clean multi-line formatting for Comment/Description/ICMT fields.
+           
+  v0.3.3 - Enhancement: Improved readability of multi-line metadata
+          • Switched from inline "·" separators to real line breaks in metadata fields.
+          • Restored natural formatting in Comment/Description/ICMT blocks.
+          • User-readable output matches original capture metadata more closely.
+  v0.3.2 - Enhancement: Normalize metadata newlines
+          • Added `normalize_newlines()` to ensure Comment/Description/ICMT fields use clean real line breaks.
+          • Prevents ugly `\n` sequences in BWF/INFO/ID3 text blocks after embed.
+  v0.3.1 - Fix: CORE(FLAGS) handling for CodingHistory and newline warning
+          • Skip unsupported CodingHistory block during CORE copy (avoid crash).
+          • Added warning if post-check snapshot still contained "\n" escape instead of real newlines.
+          • Improved resilience when handling complex Soundminer metadata.
+  v0.3.0 - Enhancement: Auto-clean iXML sidecar after embed
+          • After successful iXML import, temporary sidecar file is deleted automatically.
+          • Prevents accumulation of .ixml files in the working folder.
+          • Added logging to confirm sidecar cleanup.
   v0.2.3
     - CORE (bext/INFO) write:
         • Added strict escaping for \, ", $, and backticks before passing to CLI.
