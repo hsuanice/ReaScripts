@@ -1,6 +1,6 @@
 --[[
 @description hsuanice_Embed iXML and BWF Metadata from Take 1 to Active Take
-@version 0.2.3
+@version 0.3.0
 @author hsuanice
 @about
   Copy ALL metadata from TAKE 1's source file to the ACTIVE take's source file, with full console logs and a summary:
@@ -22,6 +22,20 @@
     This script was generated using ChatGPT based on design concepts and iterative testing by hsuanice.
 
 @changelog
+  v0.3.0
+    - iXML sidecar auto-cleanup:
+        • After embedding (success or fail), the script now automatically deletes any temporary *.iXML.xml sidecars created during export/import.
+        • Prevents clutter in source/target folders.
+    - CORE (bext/INFO) write:
+        • Retains robust per-field flag approach.
+        • INFO:ISFT is now always overridden to "BWF MetaEdit" (avoids legacy "Soundminer" values).
+    - USER.EMBEDDER normalization:
+        • After iXML copy, <USER><EMBEDDER> in the target file is forced to "BWF MetaEdit".
+    - Console + Summary:
+        • Logs mirror the TimeReference tool with detailed per-step messages and an end summary (OK/FAIL/SKIP).
+    - Workflow parity:
+        • iXML copy (sidecar export/import), CORE copy, and TimeReference embed remain identical to 0.2.x, but with cleanup and embedder/ISFT normalization built-in.
+
   v0.2.3
     - CORE (bext/INFO) write:
         • Added strict escaping for \, ", $, and backticks before passing to CLI.
@@ -74,6 +88,13 @@ local R = reaper
 local function msg(s) R.ShowConsoleMsg(tostring(s).."\n") end
 local function base(p) return (p and p:match("([^/\\]+)$")) or tostring(p) end
 local function is_wav(p) return p and p:lower():sub(-4)==".wav" end
+
+-- remove file if exists, ignore errors
+local function remove_file_silent(path)
+  if not path or path == "" then return end
+  local f = io.open(path, "rb")
+  if f then f:close(); os.remove(path) end
+end
 
 -- =========================
 -- Shell wrappers (borrowed style from your TC tool)
@@ -365,7 +386,12 @@ local function set_ixml_embedder(cli, wav_path, newval)
   -- import iXML back to target
   local codeI = select(1, exec_shell(('"%'..'s" --in-iXML-xml --continue-errors --verbose "%s"'):format(cli, wav_path), 20000))
   msg(("    iXML: set USER.EMBEDDER=\"%s\" (code=%s)"):format(newval, tostring(codeI)))
+
+  -- cleanup sidecar regardless of success
+  remove_file_silent(side)
+
   return codeI == 0
+
 end
 
 
@@ -486,6 +512,9 @@ local function run_worker()
             fail_cnt = fail_cnt + 1
             msg("  RESULT: FAIL")
           end
+          -- cleanup iXML sidecars for both src and dst (best-effort)
+          remove_file_silent(src .. ".iXML.xml")
+          remove_file_silent(dst .. ".iXML.xml")          
         end
       end
     end
