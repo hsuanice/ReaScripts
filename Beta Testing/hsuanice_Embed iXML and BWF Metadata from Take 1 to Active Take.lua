@@ -1,6 +1,6 @@
 --[[
 @description hsuanice_Embed iXML and BWF Metadata from Take 1 to Active Take
-@version 0.3.4
+@version 0.3.5
 @author hsuanice
 @about
   Copy ALL metadata from TAKE 1's source file to the ACTIVE take's source file, with full console logs and a summary:
@@ -22,6 +22,12 @@
     This script was generated using ChatGPT based on design concepts and iterative testing by hsuanice.
 
 @changelog
+  v0.3.5 - Improve formatting and consistency of embedded metadata
+           • Fixed multi-line metadata fields (Comment, Description, ICMT, ISBJ, USER:DESCRIPTION) to use clean line breaks without extra blank lines.
+           • Verified full metadata transfer: all key fields (BWF, INFO, ID3, iXML, XMP, CART, ASWG) are preserved and match the source.
+           • USER:EMBEDDER now consistently overwritten to "BWF MetaEdit" for audit trace.
+           • Result: Metadata is clean, human-readable, and structurally consistent between source and target files.
+
   v0.3.4 - Fix: Shell expansion issue with `$` in flags (e.g. `sUBITS=$00000000` → `/bin/sh0000000`)
            • Introduced `sh_quote()` to wrap all metadata values in single quotes when calling bwfmetaedit.
            • Prevents shell from interpreting `$`, backslashes, or special characters.
@@ -113,6 +119,18 @@ local function normalize_newlines(s)
   s = s:gsub("\\n", "\n")
   -- also convert common XML entities sometimes seen in dumps
   s = s:gsub("&#13;", "\n"):gsub("&#10;", "\n")
+  return s
+end
+
+-- Collapse duplicate blank lines in a multi-line text block
+local function collapse_blank_lines(s)
+  if not s or s == "" then return s end
+  -- normalize all newlines to \n
+  s = s:gsub("\r\n", "\n"):gsub("\r", "\n")
+  -- collapse multiple blank lines to a single newline
+  s = s:gsub("\n%s*\n+", "\n")
+  -- trim leading/trailing blank lines
+  s = s:gsub("^\n+", ""):gsub("\n+$","")
   return s
 end
 
@@ -261,10 +279,16 @@ local function normalize_ixml_sidecar(path)
              :gsub("&#13;", "\n")
              :gsub("&#10;", "\n")
 
+  -- 把多餘的空白行壓縮掉
+  data = collapse_blank_lines(data)
+
   -- write back
   local wf = io.open(path, "wb")
   if wf then wf:write(data) wf:close() end
 end
+
+
+
 
 -- 1) iXML sidecar export/import
 local function do_ixml_copy(cli, src_wav, dst_wav)
@@ -317,24 +341,24 @@ local function do_core_copy(cli, src_wav, dst_wav)
 
   local fields = parse_core_from_xml_report(outR)
   -- restore clean newlines for all text-ish fields before flag assembly
-  fields.Description          = normalize_newlines(fields.Description)
-  fields.Originator           = normalize_newlines(fields.Originator)
-  fields.OriginatorReference  = normalize_newlines(fields.OriginatorReference)
-  fields.OriginationDate      = normalize_newlines(fields.OriginationDate)
-  fields.OriginationTime      = normalize_newlines(fields.OriginationTime)
-  fields.IARL                 = normalize_newlines(fields.IARL)
-  fields.IART                 = normalize_newlines(fields.IART)
-  fields.ICMT                 = normalize_newlines(fields.ICMT)
-  fields.ICRD                 = normalize_newlines(fields.ICRD)
-  fields.INAM                 = normalize_newlines(fields.INAM)
-  fields.ICOP                 = normalize_newlines(fields.ICOP)
-  fields.ICMS                 = normalize_newlines(fields.ICMS)
-  fields.IGNR                 = normalize_newlines(fields.IGNR)
-  fields.ISFT                 = normalize_newlines(fields.ISFT)
-  fields.ISBJ                 = normalize_newlines(fields.ISBJ)
-  fields.ITCH                 = normalize_newlines(fields.ITCH)
-  fields.CodingHistory        = normalize_newlines(fields.CodingHistory)
-  fields.UMID                 = normalize_newlines(fields.UMID)
+  fields.Description          = collapse_blank_lines(normalize_newlines(fields.Description))
+  fields.Originator           = collapse_blank_lines(normalize_newlines(fields.Originator))
+  fields.OriginatorReference  = collapse_blank_lines(normalize_newlines(fields.OriginatorReference))
+  fields.OriginationDate      = collapse_blank_lines(normalize_newlines(fields.OriginationDate))
+  fields.OriginationTime      = collapse_blank_lines(normalize_newlines(fields.OriginationTime))
+  fields.IARL                 = collapse_blank_lines(normalize_newlines(fields.IARL))
+  fields.IART                 = collapse_blank_lines(normalize_newlines(fields.IART))
+  fields.ICMT                 = collapse_blank_lines(normalize_newlines(fields.ICMT))
+  fields.ICRD                 = collapse_blank_lines(normalize_newlines(fields.ICRD))
+  fields.INAM                 = collapse_blank_lines(normalize_newlines(fields.INAM))
+  fields.ICOP                 = collapse_blank_lines(normalize_newlines(fields.ICOP))
+  fields.ICMS                 = collapse_blank_lines(normalize_newlines(fields.ICMS))
+  fields.IGNR                 = collapse_blank_lines(normalize_newlines(fields.IGNR))
+  fields.ISFT                 = collapse_blank_lines(normalize_newlines(fields.ISFT))
+  fields.ISBJ                 = collapse_blank_lines(normalize_newlines(fields.ISBJ))
+  fields.ITCH                 = collapse_blank_lines(normalize_newlines(fields.ITCH))
+  fields.CodingHistory        = collapse_blank_lines(normalize_newlines(fields.CodingHistory))
+  fields.UMID                 = collapse_blank_lines(normalize_newlines(fields.UMID))
 
 
   -- BEXT Description 最長 256 bytes（超過截斷並提示）
