@@ -23,15 +23,17 @@
 
 @changelog
   v0.2.3
-    - CORE (bext/INFO) write: Added strict shell escaping (\ " $ `) for field values.
-        • Prevents unwanted shell expansions (e.g., $0 → /bin/sh).
-        • Ensures fields like sUBITS=$00000000 remain intact across Description/ICMT/ISBJ.
-    - CORE (bext/INFO) ISFT override:
-        • Regardless of source, INFO:ISFT is now explicitly set to "BWF MetaEdit".
-        • Avoids legacy "Soundminer" values carrying over into target files.
-    - Maintains all previous behavior:
-        • iXML copy (sidecar), TimeReference embed, console logging, summary report.
-        • USER:EMBEDDER normalized to "BWF MetaEdit".
+    - CORE (bext/INFO) write:
+        • Added strict escaping for \, ", $, and backticks before passing to CLI.
+        • Prevents shell expansions (e.g., $0 → /bin/sh), ensuring fields like sUBITS=$00000000 remain intact.
+    - ISFT field override:
+        • INFO:ISFT is now explicitly set to "BWF MetaEdit", avoiding legacy "Soundminer" values in target files.
+    - USER:EMBEDDER normalization:
+        • After iXML copy, <USER><EMBEDDER> is forced to "BWF MetaEdit".
+    - Maintains existing workflow:
+        • iXML sidecar copy, CORE per-field flags, and TimeReference embed.
+        • Console logging and final OK/FAIL summary consistent with previous versions.
+
   v0.2.2
     - Added iXML USER.EMBEDDER normalization:
         • After iXML copy, the script now rewrites <USER><EMBEDDER> to "BWF MetaEdit" on the target file.
