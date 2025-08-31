@@ -1,6 +1,6 @@
 --[[
 @description hsuanice_Embed iXML and BWF Metadata from Take 1 to Active Take
-@version 0.2.1 embed ok
+@version 0.2.2
 @author hsuanice
 @about
   Copy ALL metadata from TAKE 1's source file to the ACTIVE take's source file, with full console logs and a summary:
@@ -18,18 +18,34 @@
   Credits:
     • TC embed logic/UX adapted from "hsuanice_BWF TimeReference Embed Tool.lua".
     • iXML/CORE flow adapted from the previous "Embed iXML and BWF Metadata..." implementation.
+ 
     This script was generated using ChatGPT based on design concepts and iterative testing by hsuanice.
+    
+@changelog
+  v0.2.2
+    - Added iXML USER.EMBEDDER normalization:
+        • After iXML copy, the script now rewrites <USER><EMBEDDER> to "BWF MetaEdit" on the target file.
+        • This replaces legacy "Soundminer" stamps so tools (e.g., Wave Agent) show a consistent embedder.
+    - Kept the robust CORE (bext/INFO) per-field write path from 0.2.1:
+        • Uses individual flags (e.g., --Description=..., --Originator=..., etc.) for broad CLI compatibility.
+        • Success is determined by exit code; a post-check snapshot is logged but not used for pass/fail.
+    - Console UX parity and summary:
+        • Mirrors the TimeReference tool style with detailed step-by-step logs and a final OK/FAIL summary.
+    - Notes:
+        • iXML copy (sidecar export/import) unchanged.
+        • TimeReference (TR) copy unchanged and verified.
+        • File length must match when writing certain CORE fields (preservation behavior of the CLI).
 
-v0.2.1
-  - Reworked CORE (bext/INFO) copy method:
-      • Removed reliance on deprecated `--in-core-csv` / `--in-xml`.
-      • Implemented per-field flags (`--Description=... --Originator=...` etc.) for maximum CLI compatibility.
-  - Improved verification:
-      • Success is now determined by exit code (`code=0`) instead of strict XML string matching.
-      • Post-check uses `--out-xml=-` only for logging (avoids false negatives on multi-line/escaped fields).
-  - Console output updated with clearer messages:
-      • Added "CORE(FLAGS): post-check (dst snapshot) captured." after writing.
-  - End-to-end workflow (iXML → CORE → TR) now reports `RESULT: OK` correctly.
+  v0.2.1
+    - Reworked CORE (bext/INFO) copy method:
+        • Removed reliance on deprecated `--in-core-csv` / `--in-xml`.
+        • Implemented per-field flags (`--Description=... --Originator=...` etc.) for maximum CLI compatibility.
+    - Improved verification:
+        • Success is now determined by exit code (`code=0`) instead of strict XML string matching.
+        • Post-check uses `--out-xml=-` only for logging (avoids false negatives on multi-line/escaped fields).
+    - Console output updated with clearer messages:
+        • Added "CORE(FLAGS): post-check (dst snapshot) captured." after writing.
+    - End-to-end workflow (iXML → CORE → TR) now reports `RESULT: OK` correctly.
   v0.2.0
     - Add TR (TimeReference) embed from Take 1 → Active, using your existing CLI wrapper pattern.
     - Add full console logs (per-step read/write/verify) and end-of-run summary + refresh prompt.
@@ -289,6 +305,44 @@ local function write_TR(cli, wav_path, tr)
   return code, out
 end
 
+-- 4) iXML USER.EMBEDDER patch
+local function set_ixml_embedder(cli, wav_path, newval)
+  -- export iXML from target
+  local codeE = select(1, exec_shell(('"%'..'s" --out-iXML-xml --continue-errors --verbose "%s"'):format(cli, wav_path), 20000))
+  msg(("    iXML: export dst for USER.EMBEDDER (code=%s)"):format(tostring(codeE)))
+
+  local side = wav_path .. ".iXML.xml"
+  local xml  = read_file(side) or ""
+  if xml == "" then
+    msg("    iXML: no iXML present on dst -> SKIP USER.EMBEDDER")
+    return true
+  end
+
+  -- try replace existing <EMBEDDER>...</EMBEDDER>
+  local patched, n = xml:gsub("(<%s*EMBEDDER%s*>)(.-)(</%s*EMBEDDER%s*>)", "%1"..newval.."%3", 1)
+
+  if n == 0 then
+    -- if no EMBEDDER tag yet, insert one inside <USER>..., or append before the iXML closing tag
+    if xml:find("<USER%s*>") then
+      patched = xml:gsub("(<USER%s*>)", "%1<EMBEDDER>"..newval.."</EMBEDDER>", 1)
+    else
+      patched = xml
+      patched = patched:gsub("(</BWFXML>)", "<USER><EMBEDDER>"..newval.."</EMBEDDER></USER>%1", 1)
+      patched = patched:gsub("(</iXML>)",   "<USER><EMBEDDER>"..newval.."</EMBEDDER></USER>%1", 1)
+    end
+  end
+
+  write_file(side, patched)
+
+  -- import iXML back to target
+  local codeI = select(1, exec_shell(('"%'..'s" --in-iXML-xml --continue-errors --verbose "%s"'):format(cli, wav_path), 20000))
+  msg(("    iXML: set USER.EMBEDDER=\"%s\" (code=%s)"):format(newval, tostring(codeI)))
+  return codeI == 0
+end
+
+
+
+
 -- =========================
 -- Refresh helper (offline → online → rebuild peaks)
 -- =========================
@@ -373,6 +427,9 @@ local function run_worker()
           -- iXML
           local ok_ixml = do_ixml_copy(cli, src, dst)
           msg(("  iXML result    : %s"):format(ok_ixml and "OK" or "FAIL"))
+
+        -- optional: force USER.EMBEDDER patch
+        set_ixml_embedder(cli, dst, "BWF MetaEdit")
 
           -- CORE
           local ok_core = do_core_copy(cli, src, dst)
