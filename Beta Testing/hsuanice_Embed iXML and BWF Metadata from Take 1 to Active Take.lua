@@ -1,6 +1,6 @@
 --[[
 @description hsuanice_Embed iXML and BWF Metadata from Take 1 to Active Take
-@version 0.3.2
+@version 0.3.3
 @author hsuanice
 @about
   Copy ALL metadata from TAKE 1's source file to the ACTIVE take's source file, with full console logs and a summary:
@@ -22,6 +22,24 @@
     This script was generated using ChatGPT based on design concepts and iterative testing by hsuanice.
 
 @changelog
+  v0.3.3
+- Improve: INFO fields (e.g., ICMT, ISBJ) that contain multi-line values are now reformatted into a single human-readable line with " · " separators.
+  Example:
+    sSPEED=024.000-ND
+    sTAKE=03
+    sTRK3=BOOM1
+  → stored as:
+    sSPEED=024.000-ND · sTAKE=03 · sTRK3=BOOM1
+- Reason: BWF MetaEdit CLI does not accept literal line breaks in INFO fields, which previously caused “carriage return not acceptable” errors.
+- Keep: BEXT Description and iXML USER:DESCRIPTION continue to preserve true multi-line formatting for accurate readability.
+- Log: When INFO newlines are collapsed, console shows a warning:
+    CORE(FLAGS): ICMT had newlines -> formatted as single line
+
+  v0.3.2
+- Fix: Normalize all text-based metadata (Description, Comment, USER:DESCRIPTION, etc.) to use clean \n line breaks instead of literal "\n" escape sequences.
+- Improve: Added normalize_newlines() function and applied it during iXML sidecar creation and BWF/INFO field writing, ensuring all multi-line metadata appears as real line breaks when viewed in REAPER or Wave Agent.
+- Result: Metadata readability restored to the same style as original field recordings (multi-line lists are vertically aligned, not embedded with "\n").
+
   v0.3.1
   - CORE (bext/INFO) write:
       • Disabled CodingHistory field for per-flag write mode, since some bwfmetaedit CLI builds reject --CodingHistory= and cause write failure.
@@ -361,13 +379,21 @@ local function do_core_copy(cli, src_wav, dst_wav)
     end
   end
 
-  -- INFO-safe add: collapse newlines to spaces (INFO chunk does not accept CR/LF)
+  -- INFO-safe add: collapse newlines to a readable single line
   local function add_info(k, v)
     if v and v ~= "" then
-      if v:find("\n", 1, true) then
-        msg(("    CORE(FLAGS): %s contains newlines -> collapsing to single line"):format(k))
-        v = v:gsub("[%r\n]+", " ")      -- turn CR/LF to spaces
-        v = v:gsub("%s%s+", " ")        -- squeeze multiple spaces
+      if v:find("\n", 1, true) or v:find("\r", 1, true) then
+        -- 將多行轉為「 · 」分隔的一行，提升可讀性
+        local before = v
+        v = v:gsub("\r\n", "\n"):gsub("\r", "\n")
+        -- 移除行首行尾空白，再用分隔符連接
+        local parts = {}
+        for line in v:gmatch("[^\n]+") do
+          line = line:gsub("^%s+", ""):gsub("%s+$", "")
+          if line ~= "" then parts[#parts+1] = line end
+        end
+        v = table.concat(parts, " · ")
+        msg(("    CORE(FLAGS): %s had newlines -> formatted as single line"):format(k))
       end
       v = v:gsub('"','\\"')
       flags[#flags+1] = ('--%s="%s"'):format(k, v)
