@@ -1,6 +1,6 @@
 --[[
 @description hsuanice_Embed iXML and BWF Metadata from Take 1 to Active Take
-@version 0.2.2
+@version 0.2.3
 @author hsuanice
 @about
   Copy ALL metadata from TAKE 1's source file to the ACTIVE take's source file, with full console logs and a summary:
@@ -20,8 +20,13 @@
     • iXML/CORE flow adapted from the previous "Embed iXML and BWF Metadata..." implementation.
  
     This script was generated using ChatGPT based on design concepts and iterative testing by hsuanice.
-    
+
 @changelog
+  v0.2.3
+    - Shell-safe escaping for CORE (bext/INFO) per-field writes:
+        • Added robust escaping for \, ", $, and backticks before passing values to the CLI.
+        • Prevents accidental shell expansions (e.g., $0 → /bin/sh) in Description/ICMT/ISBJ/etc.
+    - No behavior changes to iXML copy, TimeReference, console logs, summary, or USER.EMBEDDER rewrite.
   v0.2.2
     - Added iXML USER.EMBEDDER normalization:
         • After iXML copy, the script now rewrites <USER><EMBEDDER> to "BWF MetaEdit" on the target file.
@@ -215,6 +220,21 @@ local function do_ixml_copy(cli, src_wav, dst_wav)
   end
 end
 
+-- Escape a value for safe use inside our shell-wrapped command.
+-- We already wrap the whole command in single quotes via sh_wrap(),
+-- but we still sanitize to avoid edge cases in ExecProcess/sh:
+--   - backslash, double-quote, dollar, backtick
+local function sh_escape_value(v)
+  if not v or v == "" then return "" end
+  v = v:gsub("\\", "\\\\")   -- escape backslashes
+  v = v:gsub('"', '\\"')     -- escape double quotes
+  v = v:gsub("%$", "\\$")    -- escape $ (prevents $0 -> /bin/sh etc.)
+  v = v:gsub("`", "\\`")     -- escape backticks
+  return v
+end
+
+
+
 -- 2) CORE (bext/INFO) via per-field flags (robust across CLI versions) — v2 (fixed)
 local function do_core_copy(cli, src_wav, dst_wav)
   -- 讀來源 XML 報告（stdout）
@@ -243,7 +263,7 @@ local function do_core_copy(cli, src_wav, dst_wav)
   local flags = {}
   local function add(k, v)
     if v and v ~= "" then
-      v = v:gsub('"','\\"') -- 基本引號跳脫
+      v = sh_escape_value(v)
       flags[#flags+1] = ('--%s="%s"'):format(k, v)
     end
   end
