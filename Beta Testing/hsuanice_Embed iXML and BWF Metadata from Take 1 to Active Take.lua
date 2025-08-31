@@ -1,130 +1,145 @@
 --[[
-@description Embed iXML and BWF Metadata from Take 1 to Active Take
-@version 0.1.0
+@description hsuanice_Embed iXML and BWF Metadata from Take 1 to Active Take
+@version 0.2.1 embed ok
 @author hsuanice
 @about
-  Copy all metadata (iXML + BWF bext/INFO) from Take 1's source file to the active take's source file.
-  Uses BWF MetaEdit CLI for export/import.
-  For each selected item (or the item under edit), this script copies ALL metadata
-  from TAKE 1's source file to the ACTIVE take's source file:
-    • iXML chunk (entire XML) — exported from source as sidecar *.iXML.xml and imported to target.
-    • BWF bext/INFO (CORE Document) — exported from source as CSV and imported to target by mapping FileName to the target path.
+  Copy ALL metadata from TAKE 1's source file to the ACTIVE take's source file, with full console logs and a summary:
+    • iXML chunk (entire XML): export sidecar (*.iXML.xml) from Take 1 → import into Active.
+    • BWF bext/INFO (CORE Document): export fields from Take 1 → import into Active (via CORE CSV).
+    • BWF TimeReference (sample-accurate TC): read from Take 1 → write to Active (overwrite).
+  UI matches your "BWF TimeReference Embed Tool": small chooser (ReaImGui if available, GetUserInputs fallback),
+  detailed console output per item, and a final summary + optional refresh (offline/online + rebuild peaks).
+  Audio essence is untouched; only metadata is written.
 
   Requirements:
-    • BWF MetaEdit CLI (`bwfmetaedit`) available in PATH (or you will be prompted to locate it).
-    • Optional: js_ReaScriptAPI for nicer file-chooser (falls back if absent).
+    • BWF MetaEdit CLI (`bwfmetaedit`) in PATH (or select it once; path persisted via ExtState).
+    • Optional: ReaImGui (for nicer UI).
 
-  Notes:
-    • This writes metadata INTO the target WAV/BWF. Audio essence is untouched by BWF MetaEdit when only metadata is changed per design.
-    • Safety: uses `--reject-overwrite` where appropriate and writes to temp sidecars before import.
-
-  References:
-    • BWF MetaEdit CORE document import/export (bext/INFO) — official help/workflows.
-    • iXML/XMP/XML-chunk sidecar export/import behavior (GUI/CLI parity).
-    • CLI example shows `--in-XMP-xml/--out-XMP-xml`; iXML follows the same sidecar pattern.
-
-  Credit:
+  Credits:
+    • TC embed logic/UX adapted from "hsuanice_BWF TimeReference Embed Tool.lua".
+    • iXML/CORE flow adapted from the previous "Embed iXML and BWF Metadata..." implementation.
     This script was generated using ChatGPT based on design concepts and iterative testing by hsuanice.
-    hsuanice served as the workflow designer, tester, and integrator for this tool.
 
-@changelog
-  v0.1.0 - First release: Copy iXML + BWF(bext/INFO) from Take1 → Active Take using BWF MetaEdit CLI.
+v0.2.1
+  - Reworked CORE (bext/INFO) copy method:
+      • Removed reliance on deprecated `--in-core-csv` / `--in-xml`.
+      • Implemented per-field flags (`--Description=... --Originator=...` etc.) for maximum CLI compatibility.
+  - Improved verification:
+      • Success is now determined by exit code (`code=0`) instead of strict XML string matching.
+      • Post-check uses `--out-xml=-` only for logging (avoids false negatives on multi-line/escaped fields).
+  - Console output updated with clearer messages:
+      • Added "CORE(FLAGS): post-check (dst snapshot) captured." after writing.
+  - End-to-end workflow (iXML → CORE → TR) now reports `RESULT: OK` correctly.
+  v0.2.0
+    - Add TR (TimeReference) embed from Take 1 → Active, using your existing CLI wrapper pattern.
+    - Add full console logs (per-step read/write/verify) and end-of-run summary + refresh prompt.
+    - Add ReaImGui / GetUserInputs front UI like your TC tool, with escape handling.
+  v0.1.1
+    - First combined version (iXML + CORE + TR) without console/summary parity to TC tool.
 ]]
 
--- ==== small utilities ====
-local function msg(s) reaper.ShowMessageBox(tostring(s), "Copy Take1 Metadata", 0) end
+local R = reaper
 
-local function has_jsapi()
-  return reaper.APIExists and reaper.APIExists("JS_Dialog_BrowseForOpenFiles")
+-- =========================
+-- Console helpers
+-- =========================
+local function msg(s) R.ShowConsoleMsg(tostring(s).."\n") end
+local function base(p) return (p and p:match("([^/\\]+)$")) or tostring(p) end
+local function is_wav(p) return p and p:lower():sub(-4)==".wav" end
+
+-- =========================
+-- Shell wrappers (borrowed style from your TC tool)
+-- =========================
+local OS = R.GetOS()
+local IS_WIN = OS:match("Win")
+local EXT_NS, EXT_KEY = "hsuanice_TCTools", "BWFMetaEditPath" -- reuse same namespace/key so user picks once
+
+local function sh_wrap(cmd)
+  if IS_WIN then
+    return 'cmd.exe /C "'..cmd..'"'
+  else
+    return "/bin/sh -lc '"..cmd:gsub("'",[['"'"']]).."'" -- escape single quotes safely
+  end
 end
 
-local function choose_exe_dialog()
-  if has_jsapi() then
-    local rv, fn = reaper.JS_Dialog_BrowseForOpenFiles("Locate bwfmetaedit (CLI)", "", "", "Executable:*.exe;*.app;*", false)
-    if rv and fn and fn ~= "" then return fn end
+-- Exec with timeout, return exit code, stdout
+local function exec_shell(cmd, ms)
+  local ret = R.ExecProcess(sh_wrap(cmd), ms or 30000) or ""
+  local code, out = ret:match("^(%d+)\n(.*)$")
+  return tonumber(code or -1), (out or "")
+end
+
+local function test_cli(p)
+  if not p or p=="" then return false end
+  local code = select(1, exec_shell('"'..p..'" --Version', 4000))
+  return code == 0
+end
+
+local function resolve_cli()
+  local saved = R.GetExtState(EXT_NS, EXT_KEY)
+  if saved ~= "" and test_cli(saved) then return saved end
+
+  local cands
+  if IS_WIN then
+    cands = {
+      [[C:\Program Files\BWF MetaEdit\bwfmetaedit.exe]],
+      [[C:\Program Files (x86)\BWF MetaEdit\bwfmetaedit.exe]],
+      "bwfmetaedit",
+    }
+  else
+    cands = { "/opt/homebrew/bin/bwfmetaedit", "/usr/local/bin/bwfmetaedit", "bwfmetaedit" }
+  end
+
+  for _,p in ipairs(cands) do
+    if test_cli(p) then
+      R.SetExtState(EXT_NS, EXT_KEY, p, true)
+      return p
+    end
+  end
+
+  local hint = IS_WIN and [[C:\Program Files\BWF MetaEdit\bwfmetaedit.exe]] or "/opt/homebrew/bin/bwfmetaedit"
+  local ok, picked = R.GetUserFileNameForRead(0, hint, 'Locate "bwfmetaedit" executable (Cancel to abort)')
+  if not ok then return nil end
+  if test_cli(picked) then
+    R.SetExtState(EXT_NS, EXT_KEY, picked, true)
+    return picked
   end
   return nil
 end
 
-local function run(cmd)
-  -- cross-platform
-  local tmp = os.tmpname()
-  local full = cmd .. " > " .. tmp .. " 2>&1"
-  os.execute(full)
-  local f = io.open(tmp, "r"); local out = f and f:read("*a") or ""
-  if f then f:close() end
-  os.remove(tmp)
-  return out
-end
-
-local function file_exists(p)
-  local f = io.open(p, "rb"); if f then f:close(); return true end; return false
-end
-
+-- =========================
+-- File helpers
+-- =========================
+local function file_exists(p) local f=io.open(p,"rb");if f then f:close();return true end return false end
 local function dirname(p) return p:match("^(.*)[/\\]") or "" end
-local function basename(p) return p:match("([^/\\]+)$") end
-local function join(a,b) if a:sub(-1)=="\\" or a:sub(-1)=="/" then return a..b end return a.."/"..b end
+local function join(a,b) if a:sub(-1)=="/" or a:sub(-1)=="\\" then return a..b end return a.."/"..b end
 
-local function ensure_bwfmetaedit_path()
-  -- try PATH first
-  local test = run("which bwfmetaedit")
-  if test and test:match("bwfmetaedit") then return "bwfmetaedit" end
-  -- mac Homebrew common path
-  if file_exists("/opt/homebrew/bin/bwfmetaedit") then return "/opt/homebrew/bin/bwfmetaedit" end
-  if file_exists("/usr/local/bin/bwfmetaedit") then return "/usr/local/bin/bwfmetaedit" end
-  -- ask user
-  local chosen = choose_exe_dialog()
-  if chosen and chosen ~= "" then return chosen end
-  return nil
-end
+local function read_file(path) local f=io.open(path,"rb"); if not f then return nil end local s=f:read("*a"); f:close(); return s end
+local function write_file(path,data) local f=assert(io.open(path,"wb")); f:write(data or ""); f:close() end
 
+-- =========================
+-- REAPER item/take helpers
+-- =========================
 local function get_take_src_path(take)
-  if not take or not reaper.ValidatePtr(take, "MediaItem_Take*") then return nil end
-  local src = reaper.GetMediaItemTake_Source(take)
+  if not take or not R.ValidatePtr(take,"MediaItem_Take*") then return nil end
+  local src = R.GetMediaItemTake_Source(take)
   if not src then return nil end
-  local buf = reaper.GetMediaSourceFileName(src, "")
-  return buf ~= "" and buf or nil
+  local p = R.GetMediaSourceFileName(src, "")
+  return (p ~= "" and p) or nil
 end
 
-local function get_active_take(item)
-  return reaper.GetActiveTake(item)
-end
+local function get_take1(item)  return R.GetMediaItemTake(item, 0) end
+local function get_active(item) return R.GetActiveTake(item) end
 
-local function get_take1(item)
-  return reaper.GetMediaItemTake(item, 0) -- index 0 = take 1 in REAPER
-end
-
--- ==== CORE CSV helpers ====
--- We’ll create a minimal CORE CSV with all relevant bext/INFO fields extracted from source XML-report, then map to target.
--- Strategy:
---   1) bwfmetaedit --out-xml=report.xml "source.wav"
---   2) parse bext/INFO fields from report.xml (simple pattern pulls; robust enough for common fields we care about)
---   3) compose temp CORE-CSV with header row + one row where FileName=TARGET path, and values=from source
---   4) bwfmetaedit --in-core-csv=core.csv "TARGET.wav"
---
--- This aligns with official “CORE document import/export for BEXT/INFO” workflow.
--- (Field coverage can be extended later as needed.)
-local function read_file(path)
-  local f = io.open(path, "rb"); if not f then return nil end
-  local s = f:read("*a"); f:close(); return s
-end
-
-local function write_file(path, data)
-  local f = assert(io.open(path, "wb"))
-  f:write(data or "")
-  f:close()
-end
-
+-- =========================
+-- Parse fields from --out-xml (for CORE+BEXT/INFO)
+-- =========================
 local function parse_core_from_xml_report(xml_text)
-  -- NOTE: This is a lightweight extractor for common fields.
   local function tag(name)
-    -- find either <bext:Name>value</bext:Name> OR <Name>value</Name> variants
     local v = xml_text:match("<"..name.."%s*[^>]*>(.-)</"..name..">")
     if v then
-      -- unescape basic XML entities
-      v = v:gsub("&lt;", "<"):gsub("&gt;", ">"):gsub("&amp;", "&")
-      v = v:gsub("\r\n", "\n"):gsub("\r", "\n")
-      v = v:gsub("\n", "\\n") -- CSV single-line safety
+      v = v:gsub("&lt;","<"):gsub("&gt;",">"):gsub("&amp;","&")
+      v = v:gsub("\r\n","\n"):gsub("\r","\n"):gsub("\n","\\n")
       return v
     end
     return ""
@@ -135,19 +150,10 @@ local function parse_core_from_xml_report(xml_text)
     OriginatorReference = tag("OriginatorReference"),
     OriginationDate = tag("OriginationDate"),
     OriginationTime = tag("OriginationTime"),
-    IARL = tag("IARL"), -- INFO: Archival Location
-    IART = tag("IART"), -- Artist
-    ICMT = tag("ICMT"), -- Comment
-    ICRD = tag("ICRD"), -- Creation date
-    INAM = tag("INAM"), -- Title/Name
-    ICOP = tag("ICOP"), -- Copyright
-    ICMS = tag("ICMS"), -- Commissioned
-    IGNR = tag("IGNR"), -- Genre
-    ISFT = tag("ISFT"), -- Software
-    ISBJ = tag("ISBJ"), -- Subject
-    ITCH = tag("ITCH"), -- Technician
-    CodingHistory = tag("CodingHistory"),
-    UMID = tag("UMID"),
+    IARL = tag("IARL"), IART = tag("IART"), ICMT = tag("ICMT"), ICRD = tag("ICRD"),
+    INAM = tag("INAM"), ICOP = tag("ICOP"), ICMS = tag("ICMS"), IGNR = tag("IGNR"),
+    ISFT = tag("ISFT"), ISBJ = tag("ISBJ"), ITCH = tag("ITCH"),
+    CodingHistory = tag("CodingHistory"), UMID = tag("UMID"),
   }
 end
 
@@ -157,89 +163,307 @@ local function build_core_csv_row(file_path, fields)
     "IARL","IART","ICMT","ICRD","INAM","ICOP","ICMS","IGNR","ISFT","ISBJ","ITCH",
     "CodingHistory","UMID"
   }
-  local function esc(s)
-    if s == nil then s = "" end
-    if s:find('[,"\n]') then s = '"'..s:gsub('"','""')..'"' end
-    return s
-  end
+  local function esc(s) s = s or ""; if s:find('[,"\n]') then s = '"'..s:gsub('"','""')..'"' end return s end
   local vals = {
-    file_path,
-    fields.Description, fields.Originator, fields.OriginatorReference, fields.OriginationDate, fields.OriginationTime,
-    fields.IARL, fields.IART, fields.ICMT, fields.ICRD, fields.INAM, fields.ICOP, fields.ICMS, fields.IGNR, fields.ISFT, fields.ISBJ, fields.ITCH,
-    fields.CodingHistory, fields.UMID
+    file_path, fields.Description, fields.Originator, fields.OriginatorReference,
+    fields.OriginationDate, fields.OriginationTime, fields.IARL, fields.IART, fields.ICMT,
+    fields.ICRD, fields.INAM, fields.ICOP, fields.ICMS, fields.IGNR, fields.ISFT, fields.ISBJ,
+    fields.ITCH, fields.CodingHistory, fields.UMID
   }
   local line = {}
   for i=1,#vals do line[i] = esc(vals[i]) end
-  local header = table.concat(headers, ",")
-  local row = table.concat(line, ",")
-  return header.."\n"..row.."\n"
+  return table.concat(headers,",").."\n"..table.concat(line,",").."\n"
 end
 
--- ==== main ====
-reaper.Undo_BeginBlock()
-reaper.PreventUIRefresh(1)
+-- =========================
+-- BWF MetaEdit: iXML / CORE / TR
+-- =========================
 
-local bwf = ensure_bwfmetaedit_path()
-if not bwf then
-  msg("BWF MetaEdit CLI not found.\nPlease install (e.g. Homebrew: brew install bwfmetaedit) and ensure it is in PATH.")
-  return
-end
+-- 1) iXML sidecar export/import
+local function do_ixml_copy(cli, src_wav, dst_wav)
+  local src_iXML = src_wav .. ".iXML.xml"
+  local dst_iXML = dst_wav .. ".iXML.xml"
 
-local count = reaper.CountSelectedMediaItems(0)
-if count == 0 then
-  msg("Select at least one item.")
-  return
-end
+  local code1, out1 = exec_shell(('"%s" --out-iXML-xml --continue-errors --verbose "%s"'):format(cli, src_wav), 20000)
+  msg(("    iXML: export src → sidecar (code=%s)"):format(tostring(code1)))
 
-local ok = 0
-for i=0, count-1 do
-  local item = reaper.GetSelectedMediaItem(0, i)
-  local take1 = get_take1(item)
-  local active = get_active_take(item)
-  if take1 and active and take1 ~= active then
-    local src = get_take_src_path(take1)
-    local dst = get_take_src_path(active)
-    if src and dst and file_exists(src) and file_exists(dst) then
-      local srcDir = dirname(src)
-      local dstDir = dirname(dst)
-
-      -- 1) iXML: export from source → sidecar; copy to target sidecar name; import into target
-      --    CLI supports XML chunk sidecar IO; XMP shown via --in-XMP-xml/--out-XMP-xml; iXML behaves same sidecar pattern.
-      local src_iXML = src .. ".iXML.xml"
-      local dst_iXML = dst .. ".iXML.xml"
-
-      -- export iXML sidecar (if any; MetaEdit will no-op if none)
-      run(string.format('"%s" --out-iXML-xml --continue-errors --verbose "%s"', bwf, src))
-      -- copy sidecar to target name if created
-      if file_exists(src_iXML) then
-        -- read then write to target-named sidecar
-        local x = read_file(src_iXML)
-        if x then write_file(dst_iXML, x) end
-        -- import to target
-        run(string.format('"%s" --in-iXML-xml --continue-errors --verbose "%s"', bwf, dst))
-      end
-
-      -- 2) CORE (bext/INFO): export source XML report → parse fields → compose temp CORE CSV for target → import
-      local tmpDir = reaper.GetResourcePath()
-      local report = join(tmpDir, ("META_src_report_%d.xml"):format(os.time()..math.random(1000,9999)))
-      local corecsv = join(tmpDir, ("META_core_for_target_%d.csv"):format(os.time()..math.random(1000,9999)))
-
-      -- XML report (contains bext/INFO/iXML presence etc.)
-      run(string.format('"%s" --out-xml="%s" --continue-errors --verbose "%s"', bwf, report, src))
-      local xml = read_file(report)
-      if xml and #xml > 0 then
-        local fields = parse_core_from_xml_report(xml)
-        local csv = build_core_csv_row(dst, fields)
-        write_file(corecsv, csv)
-        -- import CORE CSV to target
-        run(string.format('"%s" --in-core-csv="%s" --continue-errors --verbose "%s"', bwf, corecsv, dst))
-      end
-
-      ok = ok + 1
-    end
+  if file_exists(src_iXML) then
+    local x = read_file(src_iXML)
+    if x then write_file(dst_iXML, x) end
+    local code2, out2 = exec_shell(('"%s" --in-iXML-xml --continue-errors --verbose "%s"'):format(cli, dst_wav), 20000)
+    msg(("    iXML: import sidecar → dst (code=%s)"):format(tostring(code2)))
+    return code2 == 0
+  else
+    msg("    iXML: no sidecar exported (source has no iXML?) -> SKIP")
+    return true -- not an error; just no iXML on source
   end
 end
 
-reaper.PreventUIRefresh(-1)
-reaper.Undo_EndBlock(("Copy Take1 metadata to Active Take (items: %d)"):format(ok), -1)
+-- 2) CORE (bext/INFO) via per-field flags (robust across CLI versions) — v2 (fixed)
+local function do_core_copy(cli, src_wav, dst_wav)
+  -- 讀來源 XML 報告（stdout）
+  local codeR, outR = exec_shell(('"%'..'s" --out-xml=- --continue-errors --verbose "%s"'):format(cli, src_wav), 30000)
+  msg(("    CORE(FLAGS): export src (code=%s)"):format(tostring(codeR)))
+  if codeR ~= 0 or not outR or #outR == 0 then
+    if outR and #outR > 0 then msg("    CORE(FLAGS): exporter stdout >>>\n"..outR.."\n    <<<") end
+    return false
+  end
 
+  local fields = parse_core_from_xml_report(outR)
+
+  -- BEXT Description 最長 256 bytes（超過截斷並提示）
+  local function trunc_bext_desc(s)
+    if not s then return "" end
+    local bytes = {string.byte(s, 1, #s)}
+    if #bytes <= 256 then return s end
+    local out = {}
+    for i=1,256 do out[i] = string.char(bytes[i]) end
+    msg("    CORE(FLAGS): Description >256 bytes, truncated to 256")
+    return table.concat(out)
+  end
+  fields.Description = trunc_bext_desc(fields.Description)
+
+  -- 逐欄位組旗標（只加有值）
+  local flags = {}
+  local function add(k, v)
+    if v and v ~= "" then
+      v = v:gsub('"','\\"') -- 基本引號跳脫
+      flags[#flags+1] = ('--%s="%s"'):format(k, v)
+    end
+  end
+
+  add("Description",          fields.Description)
+  add("Originator",           fields.Originator)
+  add("OriginatorReference",  fields.OriginatorReference)
+  add("OriginationDate",      fields.OriginationDate)
+  add("OriginationTime",      fields.OriginationTime)
+  add("IARL",                 fields.IARL)
+  add("IART",                 fields.IART)
+  add("ICMT",                 fields.ICMT)
+  add("ICRD",                 fields.ICRD)
+  add("INAM",                 fields.INAM)
+  add("ICOP",                 fields.ICOP)
+  add("ICMS",                 fields.ICMS)
+  add("IGNR",                 fields.IGNR)
+  add("ISFT",                 fields.ISFT)
+  add("ISBJ",                 fields.ISBJ)
+  add("ITCH",                 fields.ITCH)
+  add("CodingHistory",        fields.CodingHistory)
+  add("UMID",                 fields.UMID)
+
+  if #flags == 0 then
+    msg("    CORE(FLAGS): nothing to write -> SKIP")
+    return true
+  end
+
+  -- 寫入（以退出碼判斷成功）
+  local cmd = ('"%s" %s "%s"'):format(cli, table.concat(flags, " "), dst_wav)
+  local codeW, outW = exec_shell(cmd, 40000)
+  msg(("    CORE(FLAGS): write dst (code=%s)"):format(tostring(codeW)))
+  if (outW or "") ~= "" then
+    msg("    CORE(FLAGS): writer stdout >>>")
+    msg(outW)
+    msg("    <<<")
+  end
+
+  -- Post-check 只記錄日誌，不影響成敗判定
+  local codeV, outV = exec_shell(('"%'..'s" --out-xml=- --continue-errors --verbose "%s"'):format(cli, dst_wav), 20000)
+  if codeV == 0 and outV and #outV > 0 then
+    msg("    CORE(FLAGS): post-check (dst snapshot) captured.")
+  end
+
+  return codeW == 0
+end
+
+-- 3) TR read/write/verify
+local function read_TR(cli, wav_path)
+  local cmd = ('"%s" --out-xml=- "%s"'):format(cli, wav_path)
+  local code, out = exec_shell(cmd, 20000)
+  local tr = tonumber(out:match("<TimeReference>(%d+)</TimeReference>") or "")
+  return tr, code, out
+end
+
+local function write_TR(cli, wav_path, tr)
+  local cmd = ('"%s" --Timereference=%d "%s"'):format(cli, tr, wav_path)
+  local code, out = exec_shell(cmd, 20000)
+  return code, out
+end
+
+-- =========================
+-- Refresh helper (offline → online → rebuild peaks)
+-- =========================
+local function select_only(items)
+  R.SelectAllMediaItems(0, false)
+  for _,it in ipairs(items) do
+    if it and R.ValidatePtr(it, "MediaItem*") then
+      R.SetMediaItemSelected(it, true)
+    end
+  end
+  R.UpdateArrange()
+end
+
+local function refresh_and_rebuild(modified_items)
+  if not modified_items or #modified_items == 0 then return end
+  select_only(modified_items)
+  R.Main_OnCommand(40440, 0) -- offline
+  R.Main_OnCommand(40439, 0) -- online
+  R.Main_OnCommand(40441, 0) -- rebuild peaks
+end
+
+-- =========================
+-- Worker
+-- =========================
+local function run_worker()
+  local cli = resolve_cli()
+  if not cli then
+    local hint = IS_WIN and "請安裝 BWF MetaEdit，或指定 bwfmetaedit.exe 路徑。"
+                       or  "macOS 可用 Homebrew：brew install bwfmetaedit"
+    R.MB("找不到 BWF MetaEdit（bwfmetaedit）。\n"..hint, "Embed iXML+BWF", 0)
+    return
+  end
+
+  local n_sel = R.CountSelectedMediaItems(0)
+  if n_sel == 0 then
+    R.MB("請至少選取一個 item。", "Embed iXML+BWF", 0)
+    return
+  end
+
+  local items = {}
+  for i=0, n_sel-1 do items[#items+1] = R.GetSelectedMediaItem(0, i) end
+
+  R.ClearConsole()
+  msg(("=== Embed iXML + CORE + TR from Take1 → Active ==="))
+  msg(("CLI : %s"):format(cli))
+  msg(("Sel : %d"):format(#items))
+  msg("")
+
+  local ok_cnt, fail_cnt, skip_cnt = 0, 0, 0
+  local modified = {}
+
+  R.Undo_BeginBlock()
+
+  for i, it in ipairs(items) do
+    msg(("Item %d -------------------------"):format(i))
+    if not it or not R.ValidatePtr(it, "MediaItem*") then
+      skip_cnt = skip_cnt + 1
+      msg("  [SKIP] invalid item pointer")
+    else
+      local take1  = get_take1(it)
+      local active = get_active(it)
+
+      if not active then
+        skip_cnt = skip_cnt + 1
+        msg("  [SKIP] no active take")
+      elseif not take1 then
+        skip_cnt = skip_cnt + 1
+        msg("  [SKIP] no Take 1")
+      elseif take1 == active then
+        skip_cnt = skip_cnt + 1
+        msg("  [SKIP] active == Take 1 (same take/file)")
+      else
+        local src = get_take_src_path(take1)
+        local dst = get_take_src_path(active)
+        msg(("  src : %s"):format(base(src or "(nil)")))
+        msg(("  dst : %s"):format(base(dst or "(nil)")))
+
+        if not (src and dst and is_wav(src) and is_wav(dst) and file_exists(src) and file_exists(dst)) then
+          skip_cnt = skip_cnt + 1
+          msg("  [SKIP] missing file(s) or non-WAV")
+        else
+          -- iXML
+          local ok_ixml = do_ixml_copy(cli, src, dst)
+          msg(("  iXML result    : %s"):format(ok_ixml and "OK" or "FAIL"))
+
+          -- CORE
+          local ok_core = do_core_copy(cli, src, dst)
+          msg(("  CORE result    : %s"):format(ok_core and "OK" or "FAIL"))
+
+          -- TR
+          local tr_src = select(1, read_TR(cli, src))
+          msg(("  TAKE1 TR read  : %s"):format(tostring(tr_src)))
+          local tr_written = false
+          if tr_src then
+            local wc = select(1, write_TR(cli, dst, tr_src))
+            msg(("  WRITE dst TR   : code=%s"):format(tostring(wc)))
+            local vr = select(1, read_TR(cli, dst))
+            msg(("  VERIFY dst TR  : %s"):format(tostring(vr)))
+            tr_written = (wc == 0 and vr == tr_src)
+            msg(("  TR result      : %s"):format(tr_written and "OK" or "FAIL"))
+          else
+            msg("  TR result      : SKIP (cannot read src TR)")
+          end
+
+          if (ok_ixml and ok_core and tr_written) or (ok_ixml and ok_core and tr_src==nil) then
+            ok_cnt = ok_cnt + 1
+            modified[#modified+1] = it
+            msg("  RESULT: OK")
+          else
+            fail_cnt = fail_cnt + 1
+            msg("  RESULT: FAIL")
+          end
+        end
+      end
+    end
+  end
+
+  R.Undo_EndBlock("Embed iXML + CORE + TR", -1)
+
+  local summary = ("Summary: OK=%d  FAIL=%d  SKIP=%d"):format(ok_cnt, fail_cnt, skip_cnt)
+  msg("")
+  msg(summary)
+  msg("=== End ===")
+
+  if #modified > 0 then
+    local btn = R.MB(summary .. ("\n\nRefresh now?\n(%d item(s) will be refreshed)"):format(#modified),
+                     "Embed iXML+BWF", 4)
+    if btn == 6 then
+      refresh_and_rebuild(modified)
+    end
+  else
+    R.MB(summary .. "\n\nNo item embedded, no need to refresh", "Embed iXML+BWF", 0)
+  end
+end
+
+-- =========================
+-- UI (match your TC tool behavior)
+-- =========================
+local has_imgui = type(reaper.ImGui_CreateContext) == "function"
+if not has_imgui then
+  -- Keep a tiny entry dialog for parity (and to ensure keyboard focus)
+  local ok, _ = R.GetUserInputs("Embed iXML+BWF from Take1", 1, "Press OK to start, extrafield ignored", "")
+  if not ok then return end
+  run_worker()
+  return
+end
+
+local imgui = reaper
+local ctx  = imgui.ImGui_CreateContext('Embed iXML+BWF from Take1', imgui.ImGui_ConfigFlags_NoSavedSettings())
+local FONT = imgui.ImGui_CreateFont('sans-serif', 16); imgui.ImGui_Attach(ctx, FONT)
+local BTN_W, BTN_H = 360, 28
+local should_close = false
+
+local function loop()
+  imgui.ImGui_SetNextWindowSize(ctx, 380, 140, imgui.ImGui_Cond_Once())
+  local visible, open = imgui.ImGui_Begin(ctx, 'Embed iXML+BWF from Take1', true)
+  if visible then
+    imgui.ImGui_Text(ctx, 'Copy iXML + BWF (CORE) + TimeReference\nfrom TAKE 1 to ACTIVE take')
+    imgui.ImGui_Dummy(ctx, 1, 6)
+
+    if imgui.ImGui_Button(ctx, 'Start', BTN_W, BTN_H) then run_worker() end
+    imgui.ImGui_Dummy(ctx, 1, 6)
+    if imgui.ImGui_Button(ctx, 'Cancel', BTN_W, BTN_H) then should_close = true end
+
+    local esc = imgui.ImGui_IsKeyPressed(ctx, imgui.ImGui_Key_Escape(), false)
+    if esc
+       and imgui.ImGui_IsWindowFocused(ctx, imgui.ImGui_FocusedFlags_RootAndChildWindows())
+       and not imgui.ImGui_IsAnyItemActive(ctx)
+    then
+      should_close = true
+    end
+
+    imgui.ImGui_End(ctx)
+  end
+  if not open or should_close then return end
+  R.defer(loop)
+end
+loop()
