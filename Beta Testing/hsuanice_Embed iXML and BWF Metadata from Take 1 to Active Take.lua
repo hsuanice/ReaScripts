@@ -1,6 +1,6 @@
 --[[
 @description hsuanice_Embed iXML and BWF Metadata from Take 1 to Active Take
-@version 0.3.1
+@version 0.3.2
 @author hsuanice
 @about
   Copy ALL metadata from TAKE 1's source file to the ACTIVE take's source file, with full console logs and a summary:
@@ -102,6 +102,19 @@ local function remove_file_silent(path)
   if not path or path == "" then return end
   local f = io.open(path, "rb")
   if f then f:close(); os.remove(path) end
+end
+
+-- turn any textual "\n" into real newlines, normalize CRLF/CR to LF, and decode common XML entities
+local function normalize_newlines(s)
+  if not s or s == "" then return s end
+  -- unify OS line endings first
+  s = s:gsub("\r\n", "\n"):gsub("\r", "\n")
+  -- convert literal backslash-n to real newline
+  -- pattern needs double escaping: "\\n" as text -> "\\\\n" in Lua pattern
+  s = s:gsub("\\n", "\n")
+  -- also convert common XML entities sometimes seen in dumps
+  s = s:gsub("&#13;", "\n"):gsub("&#10;", "\n")
+  return s
 end
 
 -- =========================
@@ -236,6 +249,24 @@ end
 -- BWF MetaEdit: iXML / CORE / TR
 -- =========================
 
+-- normalize iXML sidecar before import
+local function normalize_ixml_sidecar(path)
+  local f = io.open(path, "rb")
+  if not f then return end
+  local data = f:read("*a")
+  f:close()
+  if not data or #data == 0 then return end
+
+  -- replace literal "\n" with real newline
+  data = data:gsub("\\n", "\n")
+             :gsub("&#13;", "\n")
+             :gsub("&#10;", "\n")
+
+  -- write back
+  local wf = io.open(path, "wb")
+  if wf then wf:write(data) wf:close() end
+end
+
 -- 1) iXML sidecar export/import
 local function do_ixml_copy(cli, src_wav, dst_wav)
   local src_iXML = src_wav .. ".iXML.xml"
@@ -247,12 +278,16 @@ local function do_ixml_copy(cli, src_wav, dst_wav)
   if file_exists(src_iXML) then
     local x = read_file(src_iXML)
     if x then write_file(dst_iXML, x) end
+
+    -- ★ 新增：先把字面 "\n" 轉回真正換行
+    normalize_ixml_sidecar(dst_iXML)
+
     local code2, out2 = exec_shell(('"%s" --in-iXML-xml --continue-errors --verbose "%s"'):format(cli, dst_wav), 20000)
     msg(("    iXML: import sidecar → dst (code=%s)"):format(tostring(code2)))
     return code2 == 0
   else
     msg("    iXML: no sidecar exported (source has no iXML?) -> SKIP")
-    return true -- not an error; just no iXML on source
+    return true
   end
 end
 
@@ -282,6 +317,26 @@ local function do_core_copy(cli, src_wav, dst_wav)
   end
 
   local fields = parse_core_from_xml_report(outR)
+  -- restore clean newlines for all text-ish fields before flag assembly
+  fields.Description          = normalize_newlines(fields.Description)
+  fields.Originator           = normalize_newlines(fields.Originator)
+  fields.OriginatorReference  = normalize_newlines(fields.OriginatorReference)
+  fields.OriginationDate      = normalize_newlines(fields.OriginationDate)
+  fields.OriginationTime      = normalize_newlines(fields.OriginationTime)
+  fields.IARL                 = normalize_newlines(fields.IARL)
+  fields.IART                 = normalize_newlines(fields.IART)
+  fields.ICMT                 = normalize_newlines(fields.ICMT)
+  fields.ICRD                 = normalize_newlines(fields.ICRD)
+  fields.INAM                 = normalize_newlines(fields.INAM)
+  fields.ICOP                 = normalize_newlines(fields.ICOP)
+  fields.ICMS                 = normalize_newlines(fields.ICMS)
+  fields.IGNR                 = normalize_newlines(fields.IGNR)
+  fields.ISFT                 = normalize_newlines(fields.ISFT)
+  fields.ISBJ                 = normalize_newlines(fields.ISBJ)
+  fields.ITCH                 = normalize_newlines(fields.ITCH)
+  fields.CodingHistory        = normalize_newlines(fields.CodingHistory)
+  fields.UMID                 = normalize_newlines(fields.UMID)
+
 
   -- BEXT Description 最長 256 bytes（超過截斷並提示）
   local function trunc_bext_desc(s)
@@ -295,32 +350,54 @@ local function do_core_copy(cli, src_wav, dst_wav)
   end
   fields.Description = trunc_bext_desc(fields.Description)
 
-  -- 逐欄位組旗標（只加有值）
+  -- build flags per field
   local flags = {}
+
+  -- basic add: keep real newlines (for BEXT Description, etc.)
   local function add(k, v)
     if v and v ~= "" then
-      v = sh_escape_value(v)
+      v = v:gsub('"','\\"')   -- only escape double-quotes
       flags[#flags+1] = ('--%s="%s"'):format(k, v)
     end
   end
 
-  add("Description",          fields.Description)
+  -- INFO-safe add: collapse newlines to spaces (INFO chunk does not accept CR/LF)
+  local function add_info(k, v)
+    if v and v ~= "" then
+      if v:find("\n", 1, true) then
+        msg(("    CORE(FLAGS): %s contains newlines -> collapsing to single line"):format(k))
+        v = v:gsub("[%r\n]+", " ")      -- turn CR/LF to spaces
+        v = v:gsub("%s%s+", " ")        -- squeeze multiple spaces
+      end
+      v = v:gsub('"','\\"')
+      flags[#flags+1] = ('--%s="%s"'):format(k, v)
+    end
+  end
+
+  -- Keep multi-line only where allowed/meaningful:
+  add("Description",          fields.Description)          -- BEXT Description (multi-line OK)
+
+  -- INFO chunk family: must be single-line
+  add_info("IARL",            fields.IARL)
+  add_info("IART",            fields.IART)
+  add_info("ICMT",            fields.ICMT)                 -- <- 這個就是剛剛出錯的欄位
+  add_info("ICRD",            fields.ICRD)
+  add_info("INAM",            fields.INAM)
+  add_info("ICOP",            fields.ICOP)
+  add_info("ICMS",            fields.ICMS)
+  add_info("IGNR",            fields.IGNR)
+  add_info("ISFT",            fields.ISFT)
+  add_info("ISBJ",            fields.ISBJ)
+  add_info("ITCH",            fields.ITCH)
+
+  -- Others
   add("Originator",           fields.Originator)
   add("OriginatorReference",  fields.OriginatorReference)
   add("OriginationDate",      fields.OriginationDate)
   add("OriginationTime",      fields.OriginationTime)
-  add("IARL",                 fields.IARL)
-  add("IART",                 fields.IART)
-  add("ICMT",                 fields.ICMT)
-  add("ICRD",                 fields.ICRD)
-  add("INAM",                 fields.INAM)
-  add("ICOP",                 fields.ICOP)
-  add("ICMS",                 fields.ICMS)
-  add("IGNR",                 fields.IGNR)
-  -- instead of copying fields.ISFT, force override
-  add("ISFT", "BWF MetaEdit")
-  add("ISBJ",                 fields.ISBJ)
-  add("ITCH",                 fields.ITCH)
+  add("CodingHistory",        fields.CodingHistory)  -- 你已經有「跳過寫入」的判斷，保留此列無妨
+  add("UMID",                 fields.UMID)
+
   -- CodingHistory is often multi-line and not supported by some CLI versions with flags.
   -- Temporarily skip to keep the write robust across environments.
   local WRITE_CODING_HISTORY = false
@@ -351,6 +428,17 @@ local function do_core_copy(cli, src_wav, dst_wav)
   local codeV, outV = exec_shell(('"%'..'s" --out-xml=- --continue-errors --verbose "%s"'):format(cli, dst_wav), 20000)
   if codeV == 0 and outV and #outV > 0 then
     msg("    CORE(FLAGS): post-check (dst snapshot) captured.")
+    -- Post-check 只記錄日誌，不影響成敗判定
+    local codeV, outV = exec_shell(('"%'..'s" --out-xml=- --continue-errors --verbose "%s"'):format(cli, dst_wav), 20000)
+    if codeV == 0 and outV and #outV > 0 then
+      msg("    CORE(FLAGS): post-check (dst snapshot) captured.")
+      -- ★ 在這裡加上你的檢查
+      if outV:find("\\n", 1, true) then
+        msg("    CORE(FLAGS): WARNING - \\n remains in dst snapshot (should be real newlines)")
+      end
+    end
+
+
   end
 
   return codeW == 0
@@ -398,6 +486,9 @@ local function set_ixml_embedder(cli, wav_path, newval)
   end
 
   write_file(side, patched)
+
+  -- 匯入前再清一次，避免任何殘留的文字型 \n
+  normalize_ixml_sidecar(side)
 
   -- import iXML back to target
   local codeI = select(1, exec_shell(('"%'..'s" --in-iXML-xml --continue-errors --verbose "%s"'):format(cli, wav_path), 20000))
