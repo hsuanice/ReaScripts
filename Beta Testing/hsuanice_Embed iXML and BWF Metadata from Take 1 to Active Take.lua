@@ -1,6 +1,6 @@
 --[[
 @description hsuanice_Embed iXML and BWF Metadata from Take 1 to Active Take
-@version 0.3.0
+@version 0.3.1
 @author hsuanice
 @about
   Copy ALL metadata from TAKE 1's source file to the ACTIVE take's source file, with full console logs and a summary:
@@ -22,6 +22,14 @@
     This script was generated using ChatGPT based on design concepts and iterative testing by hsuanice.
 
 @changelog
+  v0.3.1
+  - CORE (bext/INFO) write:
+      • Disabled CodingHistory field for per-flag write mode, since some bwfmetaedit CLI builds reject --CodingHistory= and cause write failure.
+      • Now logs "skip CodingHistory (unsupported by this CLI)" in console instead of failing.
+  - Ensures all other CORE fields (Description, Originator, OriginatorReference, OriginationDate, OriginationTime, INFO group, UMID, ISFT override) continue to be written correctly.
+  - Maintains iXML copy, USER.EMBEDDER normalization, ISFT override, and TimeReference embed unchanged.
+  - Console + Summary:
+      • Updated logging reflects skip behavior for CodingHistory.
   v0.3.0
     - iXML sidecar auto-cleanup:
         • After embedding (success or fail), the script now automatically deletes any temporary *.iXML.xml sidecars created during export/import.
@@ -313,7 +321,15 @@ local function do_core_copy(cli, src_wav, dst_wav)
   add("ISFT", "BWF MetaEdit")
   add("ISBJ",                 fields.ISBJ)
   add("ITCH",                 fields.ITCH)
-  add("CodingHistory",        fields.CodingHistory)
+  -- CodingHistory is often multi-line and not supported by some CLI versions with flags.
+  -- Temporarily skip to keep the write robust across environments.
+  local WRITE_CODING_HISTORY = false
+  if WRITE_CODING_HISTORY and fields.CodingHistory and fields.CodingHistory ~= "" then
+    add("CodingHistory", fields.CodingHistory) -- may fail on some CLI builds
+  else
+    msg("    CORE(FLAGS): skip CodingHistory (unsupported by this CLI)")
+  end
+
   add("UMID",                 fields.UMID)
 
   if #flags == 0 then
