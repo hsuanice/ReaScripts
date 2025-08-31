@@ -1,6 +1,6 @@
 --[[
 @description hsuanice_Embed iXML and BWF Metadata from Take 1 to Active Take
-@version 0.3.3
+@version 0.3.4
 @author hsuanice
 @about
   Copy ALL metadata from TAKE 1's source file to the ACTIVE take's source file, with full console logs and a summary:
@@ -22,46 +22,30 @@
     This script was generated using ChatGPT based on design concepts and iterative testing by hsuanice.
 
 @changelog
-  v0.3.3
-- Improve: INFO fields (e.g., ICMT, ISBJ) that contain multi-line values are now reformatted into a single human-readable line with " · " separators.
-  Example:
-    sSPEED=024.000-ND
-    sTAKE=03
-    sTRK3=BOOM1
-  → stored as:
-    sSPEED=024.000-ND · sTAKE=03 · sTRK3=BOOM1
-- Reason: BWF MetaEdit CLI does not accept literal line breaks in INFO fields, which previously caused “carriage return not acceptable” errors.
-- Keep: BEXT Description and iXML USER:DESCRIPTION continue to preserve true multi-line formatting for accurate readability.
-- Log: When INFO newlines are collapsed, console shows a warning:
-    CORE(FLAGS): ICMT had newlines -> formatted as single line
+  v0.3.0 - Enhancement: Auto-clean iXML sidecar after embed
+           • After successful iXML import, temporary sidecar file is deleted automatically.
+           • Prevents accumulation of .ixml files in the working folder.
+           • Added logging to confirm sidecar cleanup.
 
-  v0.3.2
-- Fix: Normalize all text-based metadata (Description, Comment, USER:DESCRIPTION, etc.) to use clean \n line breaks instead of literal "\n" escape sequences.
-- Improve: Added normalize_newlines() function and applied it during iXML sidecar creation and BWF/INFO field writing, ensuring all multi-line metadata appears as real line breaks when viewed in REAPER or Wave Agent.
-- Result: Metadata readability restored to the same style as original field recordings (multi-line lists are vertically aligned, not embedded with "\n").
+  v0.3.1 - Fix: CORE(FLAGS) handling for CodingHistory and newline warning
+           • Skip unsupported CodingHistory block during CORE copy (avoid crash).
+           • Added warning if post-check snapshot still contained "\n" escape instead of real newlines.
+           • Improved resilience when handling complex Soundminer metadata.
 
-  v0.3.1
-  - CORE (bext/INFO) write:
-      • Disabled CodingHistory field for per-flag write mode, since some bwfmetaedit CLI builds reject --CodingHistory= and cause write failure.
-      • Now logs "skip CodingHistory (unsupported by this CLI)" in console instead of failing.
-  - Ensures all other CORE fields (Description, Originator, OriginatorReference, OriginationDate, OriginationTime, INFO group, UMID, ISFT override) continue to be written correctly.
-  - Maintains iXML copy, USER.EMBEDDER normalization, ISFT override, and TimeReference embed unchanged.
-  - Console + Summary:
-      • Updated logging reflects skip behavior for CodingHistory.
-  v0.3.0
-    - iXML sidecar auto-cleanup:
-        • After embedding (success or fail), the script now automatically deletes any temporary *.iXML.xml sidecars created during export/import.
-        • Prevents clutter in source/target folders.
-    - CORE (bext/INFO) write:
-        • Retains robust per-field flag approach.
-        • INFO:ISFT is now always overridden to "BWF MetaEdit" (avoids legacy "Soundminer" values).
-    - USER.EMBEDDER normalization:
-        • After iXML copy, <USER><EMBEDDER> in the target file is forced to "BWF MetaEdit".
-    - Console + Summary:
-        • Logs mirror the TimeReference tool with detailed per-step messages and an end summary (OK/FAIL/SKIP).
-    - Workflow parity:
-        • iXML copy (sidecar export/import), CORE copy, and TimeReference embed remain identical to 0.2.x, but with cleanup and embedder/ISFT normalization built-in.
+  v0.3.2 - Enhancement: Normalize metadata newlines
+           • Added `normalize_newlines()` to ensure Comment/Description/ICMT fields use clean real line breaks.
+           • Prevents ugly `\n` sequences in BWF/INFO/ID3 text blocks after embed.
 
+  v0.3.3 - Enhancement: Improved readability of multi-line metadata
+           • Switched from inline "·" separators to real line breaks in metadata fields.
+           • Restored natural formatting in Comment/Description/ICMT blocks.
+           • User-readable output matches original capture metadata more closely.
+
+  v0.3.4 - Fix: Shell expansion issue with `$` in flags (e.g. `sUBITS=$00000000` → `/bin/sh0000000`)
+           • Introduced `sh_quote()` to wrap all metadata values in single quotes when calling bwfmetaedit.
+           • Prevents shell from interpreting `$`, backslashes, or special characters.
+           • Result: `sUBITS=$00000000` now embeds correctly without corruption.
+           • Restored clean multi-line formatting for Comment/Description/ICMT fields.
   v0.2.3
     - CORE (bext/INFO) write:
         • Added strict escaping for \, ", $, and backticks before passing to CLI.
@@ -371,13 +355,21 @@ local function do_core_copy(cli, src_wav, dst_wav)
   -- build flags per field
   local flags = {}
 
-  -- basic add: keep real newlines (for BEXT Description, etc.)
+  -- shell-safe quoting: wrap with single quotes and escape inner single quotes
+  local function sh_quote(s)
+    if s == nil then return "''" end
+    -- 'abc' -> '\'' 這個經典做法
+    return "'" .. tostring(s):gsub("'", "'\"'\"'") .. "'"
+  end
+
+  -- 逐欄位組旗標（只加有值的），改用單引號避免 $ 與 \ 被 /bin/sh 展開
+  local flags = {}
   local function add(k, v)
     if v and v ~= "" then
-      v = v:gsub('"','\\"')   -- only escape double-quotes
-      flags[#flags+1] = ('--%s="%s"'):format(k, v)
+      flags[#flags+1] = ('--%s=%s'):format(k, sh_quote(v))
     end
   end
+
 
   -- INFO-safe add: collapse newlines to a readable single line
   local function add_info(k, v)
