@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<index version="1" name="hsuanice Scripts" commit="ecc280f127c819aa59d817dc0b504204c7f9165f">
+<index version="1" name="hsuanice Scripts" commit="23738c5e09cd4d46876578619d4fe358ca7fac26">
   <category name="Beta Testing">
     <reapack name="hsuanice_BWF TimeReference Embed Tool.lua" type="script" desc="Embed BWF TimeReference to Active take from Take 1 or Current Position TC">
       <version name="0.7.1" author="hsuanice" time="2025-08-14T17:52:57Z">
@@ -111,6 +111,9 @@
       </version>
       <version name="0.3.3" author="hsuanice" time="2025-08-31T09:59:30Z">
         <source main="main">https://github.com/hsuanice/ReaScripts/raw/ecc280f127c819aa59d817dc0b504204c7f9165f/Beta%20Testing/hsuanice_Embed%20iXML%20and%20BWF%20Metadata%20from%20Take%201%20to%20Active%20Take.lua</source>
+      </version>
+      <version name="0.3.4" author="hsuanice" time="2025-08-31T10:07:35Z">
+        <source main="main">https://github.com/hsuanice/ReaScripts/raw/23738c5e09cd4d46876578619d4fe358ca7fac26/Beta%20Testing/hsuanice_Embed%20iXML%20and%20BWF%20Metadata%20from%20Take%201%20to%20Active%20Take.lua</source>
       </version>
     </reapack>
     <reapack name="hsuanice_Hover Mode Split Item by Selection or Edit or Mouse Cursor.lua" type="script" desc="Hover Mode - Split Item by Selection or Edit or Mouse Cursor">
