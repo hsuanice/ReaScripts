@@ -1,6 +1,6 @@
 --[[
 @description ReaImGui - Rename Active Take from Metadata (caret insert + cached preview + copy/export)
-@version 0.11.23
+@version 0.11.24
 @author hsuanice
 @about
   Rename active takes and/or item notes from BWF/iXML and true source metadata using a fast ReaImGui UI.
@@ -34,6 +34,13 @@
   hsuanice served as the workflow designer, tester, and integrator for this tool.
 
 @changelog
+  v0.11.24
+  - New numeric tokens:
+    • ${interleave} (alias ${interum}) → current interleave index (1..N) from I_CHANMODE.
+    • ${chnum} (alias ${channelnum})  → recorder channel number:
+        - Uses TRK# / iXML track list to map interleave position → channel number.
+        - Falls back to ${interleave} when TRK info is absent.
+  - No behavior changes to $trk / $trkN / $trkall.
   v0.11.23
     - Fix: Extended BWF/iXML Description parser to normalize `sXXXX=` keys 
       (introduced by Vordio AAF conversion) in addition to `dXXXX=`.
@@ -960,6 +967,33 @@ local function compute_interleave_diag(fields, item)
   }
 end
 
+-- === Interleave / ChannelNumber helpers (NEW) ===
+local function get_current_interleave_index(fields)
+  local idx = tonumber(fields and fields.__chan_index) or 1
+  if idx < 1 then idx = 1 end
+  return idx
+end
+
+local function get_recorder_channel_number(fields)
+  -- 先蒐集 TRK 表（錄音機 channel → 名稱）
+  local pairs_chan, seen = {}, {}
+  for k, v in pairs(fields or {}) do
+    local n = k:match("^TRK(%d+)$") or k:match("^trk(%d+)$")
+    if n and not seen[n] then
+      seen[n] = true
+      pairs_chan[#pairs_chan+1] = { chan = tonumber(n), name = v }
+    end
+  end
+  table.sort(pairs_chan, function(a,b) return (a.chan or 0) < (b.chan or 0) end)
+
+  local il = get_current_interleave_index(fields)
+  if #pairs_chan > 0 then
+    local e = pairs_chan[il]
+    if e and e.chan then return e.chan end
+  end
+  -- 找不到 TRK# → 回退用 interleave
+  return il
+end
 
 
 -- Wrap known $tokens to ${token} so $sceneT$take -> ${scene}T${take}
@@ -977,7 +1011,7 @@ local function normalize_tokens(s)
     "curtake","curnote","clearnote","track","filename","srcfile","srcbase","srcext","srcpath","srcdir",
     "samplerate","channels","length","project","scene","take","tape","trk","trkall",
     "ubits","framerate","speed","date","time","year","originationdate","originationtime","startoffset",
-    "filepath","originator","originatorreference","timereference","description"
+    "filepath","originator","originatorreference","timereference","description", "interleave","interum","chnum","channelnum",
   }
   table.sort(known, function(a,b) return #a > #b end)  -- NEW
   for _,k in ipairs(known) do
@@ -1117,6 +1151,19 @@ function expand_template(tpl, fields, counter, sanitize)
       return trim(maybe_sanitize(s))
     end
 
+    -- ${interleave} / ${interum} → 目前 Interleave 序號（1..N）
+    if tkl == "interleave" or tkl == "interum" then
+      local idx = get_current_interleave_index(fields)
+      return tostring(idx or "")
+    end
+
+    -- ${chnum} / ${channelnum} → 錄音機的 Channel 編號（優先 TRK#，否則退回 interleave）
+    if tkl == "chnum" or tkl == "channelnum" then
+      local chn = get_recorder_channel_number(fields)
+      return tostring(chn or "")
+    end
+
+
     -- default: plain field
     local v = fields[tkl] or fields[name] or ""
     local s = tostring(v or "")
@@ -1173,7 +1220,7 @@ local TOKEN_LIST = {
   "$trk","$trkall","$trk1","$trk2","$trk3","$trk4","$trk5","$trk6","$trk7","$trk8",
   "$ubits","$framerate","$speed",
   "$date","$time","$year","$originationdate","$originationtime","$startoffset",
-  "${counter:2}","${counter:3}"
+  "${counter:2}","${counter:3}","$interleave","$interum","$chnum",
 }
 
 -- ===== Token insertion (caret only) =====
