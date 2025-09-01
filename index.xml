@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<index version="1" name="hsuanice Scripts" commit="c6e4f89b36780d5539df4ae65d0eb4656062dbab">
+<index version="1" name="hsuanice Scripts" commit="b4bcd06bdeaa2948b0ba419444152518b547dc9b">
   <category name="Beta Testing">
     <reapack name="hsuanice_BWF TimeReference Embed Tool.lua" type="script" desc="Embed BWF TimeReference to Active take from Take 1 or Current Position TC">
       <version name="0.7.1" author="hsuanice" time="2025-08-14T17:52:57Z">
@@ -597,6 +597,9 @@
       </version>
       <version name="0.1.5" author="hsuanice" time="2025-08-30T06:03:30Z">
         <source main="main">https://github.com/hsuanice/ReaScripts/raw/8ac4c2be5fcf11382564bbdd53c09a6881c9f5e9/Beta%20Testing/hsuanice_Reorder%20or%20sort%20selected%20items%20vertically%20Monitor.lua</source>
+      </version>
+      <version name="0.1.6" author="hsuanice" time="2025-09-01T02:39:35Z">
+        <source main="main">https://github.com/hsuanice/ReaScripts/raw/e8a0346bfa72eaa7c54bb56bc482376fedee8f3c/Beta%20Testing/hsuanice_Reorder%20or%20sort%20selected%20items%20vertically%20Monitor.lua</source>
       </version>
     </reapack>
     <reapack name="hsuanice_Reorder or sort selected items vertically.lua" type="script" desc="ReaImGui - Vertical Reorder and Sort (items)">
