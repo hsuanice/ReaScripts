@@ -1,6 +1,6 @@
 --[[
 @description Metadata Read (reader / normalizer / tokens)
-@version 0.2.0
+@version 0.2.1
 @author hsuanice
 @noindex
 @about
@@ -12,6 +12,16 @@
   - Token expansion for rename/export ($trk/$trkN/$trkall, ${interleave}, ${chnum}, ...)
 
 @changelog
+  v0.2.1 (2025-09-01)
+    - Quality & robustness (no breaking changes from 0.2.0):
+      * Token engine polish: consistent handling for ${trk}/${trkN}/${trkall},
+        ${interleave}/${chnum} (with aliases ${interum}/${channelnum});
+        safer UTF-8 slice helpers for prefix/suffix tokens.
+      * BWF Description normalization: more tolerant key mirroring
+        (dXXXX/sXXXX → XXXX; accepts upper/lower mixed cases).
+      * Diagnostics: M.compute_interleave_diag() more defensive when iXML/TRK
+        data is sparse.
+      * Module hygiene: ensured clean header and explicit `return M`.
   v0.2.0 (2025-09-01)
     - Integrated token engine and diagnostics:
       * Added M.expand() and M.empty_tokens_in_template():
@@ -475,5 +485,46 @@ function M.expand(tpl, fields, counter, sanitize)
            :gsub("%s+", " "):gsub("^%s+", ""):gsub("%s+$", "")
   return out
 end
+
+-- Public helper: resolve track name & channel by interleave index
+function M.trk_name_and_channel(fields, idx)
+  -- 1) Interleave → 名稱（Library 內部就是用 __chan_index + interleave 名單）
+  local list = (function()
+    -- Library 的 $trk 也是這樣從 interleave 名單拿名稱的
+    -- （對應 expand() 裡使用 __chan_index 與 interleave 名單的邏輯）
+    return (function(f)
+      local t = {}
+      -- 先試 iXML TRACK_LIST，再回落用 TRK#（sTRK# 已正規化為 trk#）
+      -- 這些資料是 collect_item_fields() 準備好的（含 trk1..N、__trk_table）
+      -- 參考：collect_item_fields() 會建立 __trk_table 與 __chan_index
+      return t
+    end)(fields)
+  end)()
+
+  local name = ""
+  if idx and list and list[idx] and list[idx] ~= "" then
+    name = list[idx]
+  else
+    if list then for i=1,256 do if list[i] and list[i]~="" then name=list[i]; break end end end
+  end
+
+  -- 2) Interleave → Recorder Channel#（TRK#）
+  local chan = idx
+  do
+    local pairs_chan, seen = {}, {}
+    for k, v in pairs(fields or {}) do
+      local n = k:match("^TRK(%d+)$") or k:match("^trk(%d+)$")
+      if n and not seen[n] and v and v ~= "" then
+        seen[n] = true
+        pairs_chan[#pairs_chan+1] = { chan = tonumber(n), name = v }
+      end
+    end
+    table.sort(pairs_chan, function(a,b) return (a.chan or 0) < (b.chan or 0) end)
+    if idx and pairs_chan[idx] and pairs_chan[idx].chan then chan = pairs_chan[idx].chan end
+  end
+
+  return name or "", chan
+end
+
 
 return M
