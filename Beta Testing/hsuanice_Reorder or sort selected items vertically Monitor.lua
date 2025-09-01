@@ -1,6 +1,6 @@
 --[[
 @description Reorder/Sort — Monitor & Debug
-@version 0.1.6
+@version 0.2.0 Library
 @author hsuanice
 @about
   Shows a live table of the currently selected items and all sort-relevant fields:
@@ -18,7 +18,16 @@
 
   Requires: ReaImGui (install via ReaPack)
 
-@Changelog
+@changelog
+  v0.2.0 (2025-09-01)
+    - Switched to 'hsuanice Metadata Read' (>= 0.2.0) for all metadata:
+      * Uses Library to read/normalize metadata (unwrap SECTION, iXML TRACK_LIST first;
+        falls back to BWF Description sTRK#=Name for EdiLoad-split files).
+      * Interleave is derived from REAPER take channel mode (Mono-of-N); 
+        Meta Track Name and Channel# are resolved from the Library fields.
+      * Removed legacy in-file parsers; behavior for Wave Agent is unchanged,
+        and EdiLoad-split is now robustly supported.
+      * Minor safety/UX hardening (no functional change to table/snapshots/exports).
   v0.1.6
   - Metadata: Added fallback for EdiLoad-split mono files.
     • If IXML TRACK_LIST is missing, parse sTRK#=NAME from BWF/Description.
@@ -60,6 +69,83 @@
 
 
 ]]
+
+-- ===== Integrate with hsuanice Metadata Read (>= 0.2.0) =====
+local META = dofile(
+  reaper.GetResourcePath() ..
+  "/Scripts/hsuanice Scripts/Library/hsuanice_Metadata Read.lua"
+)
+assert(META and (META.VERSION or "0") >= "0.2.0",
+       "Please update 'hsuanice Metadata Read' to >= 0.2.0")
+
+
+-- ===== Override local helpers to use Library =====
+do
+  -- collect_fields_for_item → use META.collect_item_fields + row assembly
+  if collect_fields_for_item ~= nil then
+    local _old_collect = collect_fields_for_item
+  end
+  function collect_fields_for_item(item)
+    local f = META.collect_item_fields(item)
+    local row = {}
+
+    -- Track index/name
+    local tr = reaper.GetMediaItemTrack(item)
+    row.track_idx  = tr and math.floor(reaper.GetMediaTrackInfo_Value(tr, "IP_TRACKNUMBER") or 0) or 0
+    row.track_name = tr and (select(2, reaper.GetTrackName(tr, "")) or "") or ""
+
+    -- File/take from fields
+    row.file_name  = f.srcfile or ""
+    row.take_name  = f.curtake or ""
+
+    -- Interleave & meta name/chan
+    local idx      = META.guess_interleave_index(item, f)
+
+    -- 1) Interleave 索引
+    local idx = META.guess_interleave_index(item, f) or f.__chan_index or 1
+
+    -- 2) 取 Meta Track Name（優先用當前 Interleave，否則取第一個非空）
+    local name = ""
+    if f.__trk_table and f.__trk_table[idx] and f.__trk_table[idx] ~= "" then
+      name = f.__trk_table[idx]
+    elseif f.__trk_table then
+      for i = 1, 64 do
+        if f.__trk_table[i] and f.__trk_table[i] ~= "" then name = f.__trk_table[i]; break end
+      end
+    end
+
+    -- 3) 計算 Recorder Channel#（EdiLoad 的 sTRK# 回落）
+    local ch = idx
+    do
+      local chan_list = {}
+      for k, v in pairs(f) do
+        local n = tonumber(k:match("^TRK(%d+)$") or k:match("^trk(%d+)$"))
+        if n and v and v ~= "" then
+          chan_list[#chan_list+1] = { ch = n, name = v }
+        end
+      end
+      table.sort(chan_list, function(a,b) return (a.ch or 0) < (b.ch or 0) end)
+      if chan_list[idx] then ch = chan_list[idx].ch end
+    end
+
+    -- 4) 寫回到你的 row 欄位
+    row.interleave    = idx
+    row.meta_trk_name = name or ""
+    row.channel_num   = ch
+
+    -- Item bounds
+    local pos = reaper.GetMediaItemInfo_Value(item, "D_POSITION") or 0
+    local len = reaper.GetMediaItemInfo_Value(item, "D_LENGTH") or 0
+    row.start_time = pos
+    row.end_time   = pos + len
+
+    -- Keep original fields for UI if needed
+    row.__fields = f
+
+    return row
+  end
+end
+
 
 ---------------------------------------
 -- Dependency check
@@ -143,142 +229,11 @@ local function fmt_time(s) if not s then return "" end return string.format("%.6
 -- IXML TRACK_LIST → build both:
 --   trk_table[ch] = name
 --   interleave_list = { {name=..., chan=...}, ... }  -- order = interleave (1..N)
-local function collect_ixml_tracklist(src)
-  local trk_table, interleave_list = {}, {}
-  if not src or not reaper.GetMediaFileMetadata then return trk_table, interleave_list end
-  local ok, count = reaper.GetMediaFileMetadata(src, "IXML:TRACK_LIST:TRACK_COUNT")
-  if ok == 1 then
-    local n = tonumber(count) or 0
-    for i=1,n do
-      local suffix = (i>1) and (":"..i) or ""
-      local _, ch  = reaper.GetMediaFileMetadata(src, "IXML:TRACK_LIST:TRACK:CHANNEL_INDEX"..suffix)
-      local _, nm  = reaper.GetMediaFileMetadata(src, "IXML:TRACK_LIST:TRACK:NAME"..suffix)
-      local ci = tonumber(ch or "")
-      if ci and ci >= 1 then
-        if nm and nm ~= "" then trk_table[ci] = nm end
-        interleave_list[#interleave_list+1] = { name = nm or "", chan = ci }
-      end
-    end
-  end
-  return trk_table, interleave_list
-end
-
-
 -- Fallback: parse sTRK#=NAME from Description (BWF / generic)
-local function collect_trk_from_description(src)
-  local trk_table, interleave_list = {}, {}
-  if not src or not reaper.GetMediaFileMetadata then return trk_table, interleave_list end
-
-  -- Try BWF:Description first, then generic Description
-  local descs = {}
-  local ok1, d1 = reaper.GetMediaFileMetadata(src, "BWF:Description")
-  if ok1 == 1 and d1 and d1 ~= "" then descs[#descs+1] = d1 end
-  local ok2, d2 = reaper.GetMediaFileMetadata(src, "Description")
-  if ok2 == 1 and d2 and d2 ~= "" then descs[#descs+1] = d2 end
-
-  -- Concatenate and parse sTRK#=NAME (case-sensitive key 'sTRK' per common practice)
-  local blob = table.concat(descs, "\n")
-  for ch, name in tostring(blob):gmatch("sTRK(%d+)%s*=%s*([^\r\n]+)") do
-    local ci = tonumber(ch)
-    if ci and ci >= 1 then
-      trk_table[ci] = name
-    end
-  end
-
-  -- Build interleave_list ordered by channel number (when IXML isn't available)
-  if next(trk_table) ~= nil then
-    local tmp = {}
-    for ci, nm in pairs(trk_table) do tmp[#tmp+1] = { chan = ci, name = nm } end
-    table.sort(tmp, function(a,b) return a.chan < b.chan end)
-    for _, e in ipairs(tmp) do interleave_list[#interleave_list+1] = { name = e.name, chan = e.chan } end
-  end
-
-  return trk_table, interleave_list
-end
-
-
-
 -- Guess Interleave index 1..N using REAPER take channel mode: Mono-of-N (3..66 → i = cm-2)
-local function guess_interleave_index(it)
-  local tk = take_of(it); if not tk then return nil end
-  local cm = reaper.GetMediaItemTakeInfo_Value(tk, "I_CHANMODE") or 0
-  if cm >= 3 and cm <= 66 then return math.floor(cm - 2) end
-  return nil
-end
-
 -- Resolve "$trk" by Interleave (Wave Agent style).
 -- Prefer interleave_list if present; fallback: build from TRK# sorted by channel number.
-local function resolve_trk_name_by_interleave(fields, interleave_idx)
-  local list = fields.interleave_list
-  if (not list or #list == 0) and fields.trk_table then
-    list = {}
-    local pairs_chan = {}
-    for ch, name in pairs(fields.trk_table) do pairs_chan[#pairs_chan+1] = { chan=ch, name=name } end
-    table.sort(pairs_chan, function(a,b) return a.chan < b.chan end)
-    for _, e in ipairs(pairs_chan) do list[#list+1] = { name=e.name or "", chan=e.chan } end
-  end
-  if list and interleave_idx and list[interleave_idx] then
-    local rec = list[interleave_idx]
-    return rec.name or "", rec.chan
-  end
-  -- fallback: first non-empty
-  if list then
-    for i=1,#list do if list[i].name and list[i].name ~= "" then return list[i].name, list[i].chan end end
-  end
-  return "", nil
-end
-
 -- Collect all fields for a single item
-local function collect_fields_for_item(it)
-  local row = {
-    track_idx = 0,
-    track_name = "",
-    take_name = "",
-    file_name = "",
-    meta_trk_name = "",
-    channel_num = nil,
-    interleave = nil,
-    start_time = item_start(it) or 0,
-    end_time   = 0,                    -- ← 新增
-  }
-
-  local tr = item_track(it)
-  row.track_idx  = tr and track_index(tr) or 0
-  row.track_name = tr and track_name(tr) or "<no track>"
-
-  local tk = take_of(it)
-  if tk then
-    local _, nm = reaper.GetSetMediaItemTakeInfo_String(tk, "P_NAME", "", false)
-    row.take_name = nm or ""
-  else
-    row.take_name = "<no take>"
-  end
-
-  -- Use the same pipeline as Rename's $srcfile:
-  --   active take -> source -> unwrap SECTION -> filename (with extension)
-  local src_unwrapped = resolved_source_of_take(tk)
-  local fpath = source_file_path(src_unwrapped)
-  row.file_name = basename(fpath)  -- == $srcfile
-
-  -- iXML/BWF should read from the real parent source too
-  local trk_table, interleave_list = collect_ixml_tracklist(src_unwrapped)
-  if next(trk_table) == nil then
-    local t2, il2 = collect_trk_from_description(src_unwrapped)
-    if next(t2) ~= nil then
-      trk_table, interleave_list = t2, il2
-    end
-  end
-  local fields = { trk_table = trk_table, interleave_list = interleave_list }
-
-  row.interleave = guess_interleave_index(it)
-  local nm, ch = resolve_trk_name_by_interleave(fields, row.interleave or 1)
-  row.meta_trk_name = nm or ""
-  row.channel_num   = ch
-  row.end_time = (row.start_time or 0) + (item_len(it) or 0)
-
-  return row
-end
-
 ---------------------------------------
 -- Selection scan
 ---------------------------------------
@@ -376,6 +331,9 @@ end
 -- UI
 ---------------------------------------
 local function draw_toolbar()
+  reaper.ImGui_SameLine(ctx)
+  reaper.ImGui_Text(ctx, "  |  Metadata Read v"..tostring(META.VERSION))
+
   reaper.ImGui_Text(ctx, string.format("Selected items: %d", #ROWS))
   reaper.ImGui_SameLine(ctx)
   local chg, v = reaper.ImGui_Checkbox(ctx, "Auto-refresh", AUTO); if chg then AUTO = v end
