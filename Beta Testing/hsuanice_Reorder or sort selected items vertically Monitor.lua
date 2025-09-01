@@ -1,6 +1,6 @@
 --[[
-@description Reorder/Sort — Monitor & Debug
-@version 0.2.1
+@description Monitor - Reorder or sort selected items vertically
+@version 0.2.2
 @author hsuanice
 @about
   Shows a live table of the currently selected items and all sort-relevant fields:
@@ -19,6 +19,10 @@
   Requires: ReaImGui (install via ReaPack)
 
 @changelog
+  v0.2.2 (2025-09-01)
+    - UI: Show "Metadata Read vX.Y.Z" in the window title (computed before ImGui_Begin).
+    - Cleanup: Optionally remove the toolbar version label to avoid duplication.
+    - Behavior: Monitoring, refresh, and exports unchanged from 0.2.1.
   v0.2.1 (2025-09-01)
     - Fully delegate metadata resolution to the Library:
       * Use META.guess_interleave_index() + META.expand("${trk}") / "${chnum}"
@@ -145,7 +149,9 @@ end
 ---------------------------------------
 -- ImGui setup
 ---------------------------------------
-local ctx = reaper.ImGui_CreateContext('Reorder/Sort — Monitor & Debug')
+local ctx = reaper.ImGui_CreateContext('eorder or sort selected items Monitor')
+local LIBVER = (META and META.VERSION) and (' | Metadata Read v'..tostring(META.VERSION)) or ''
+
 -- 使用預設字型，避免某些版本沒有 Attach/PushFont
 -- local FONT = reaper.ImGui_CreateFont('sans-serif', 14)
 -- if reaper.ImGui_Attach then reaper.ImGui_Attach(ctx, FONT) end
@@ -319,7 +325,6 @@ end
 ---------------------------------------
 local function draw_toolbar()
   reaper.ImGui_SameLine(ctx)
-  reaper.ImGui_Text(ctx, "  |  Metadata Read v"..tostring(META.VERSION))
 
   reaper.ImGui_Text(ctx, string.format("Selected items: %d", #ROWS))
   reaper.ImGui_SameLine(ctx)
@@ -409,7 +414,7 @@ local function loop()
 
   reaper.ImGui_SetNextWindowSize(ctx, 1000, 640, reaper.ImGui_Cond_FirstUseEver())
   local flags = reaper.ImGui_WindowFlags_NoCollapse()
-  local visible, open = reaper.ImGui_Begin(ctx, "Reorder or Sort — Monitor & Debug", true, flags)
+  reaper.ImGui_Begin(ctx, "Reorder or Sort — Monitor & Debug"..LIBVER, true, flags)
   if open == nil then open = true end
 
   -- 無 guard：一律繪製內容，避免某些版本/停駐情境 visible=false 導致空白
