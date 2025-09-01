@@ -1,6 +1,6 @@
 --[[
 @description ReaImGui - Rename Active Take from Metadata (caret insert + cached preview + copy/export)
-@version 0.12.1
+@version 0.12.2
 @author hsuanice
 @about
   Rename active takes and/or item notes from BWF/iXML and true source metadata using a fast ReaImGui UI.
@@ -34,6 +34,11 @@
   hsuanice served as the workflow designer, tester, and integrator for this tool.
 
 @changelog
+  v0.12.2 (2025-09-01)
+    - UI: Show "Metadata Read vX.Y.Z" in the window title.
+    - Init: Compute LIBVER before ImGui_Begin to avoid nil-concat errors; falls back to empty when library is missing.
+    - Cleanup: Removed inline version text and leftover debug prints.
+    - Behavior: Rename / Preview / Export unchanged from 0.12.1.
   v0.12.1 (2025-09-01)
     - More robust library loading:
       * Switch to dofile() with an absolute path to load 'hsuanice Metadata Read'
@@ -240,6 +245,7 @@ end
 
 -- ===== ImGui basics =====
 local ctx = reaper.ImGui_CreateContext('Rename Active Take from Metadata')
+local LIBVER = (META and META.VERSION) and (' | Metadata Read v'..tostring(META.VERSION)) or ''
 local FLT_MIN = reaper.ImGui_NumericLimits_Float()
 local WIN_W, WIN_H = 1020, 720
 local function TF(name) local fn = reaper[name]; return (type(fn)=="function") and fn() or 0 end
@@ -2312,8 +2318,7 @@ end
 -- ===== Main loop =====
 local function loop()
   reaper.ImGui_SetNextWindowSize(ctx, WIN_W, WIN_H, reaper.ImGui_Cond_FirstUseEver())
-  local visible, open = reaper.ImGui_Begin(ctx, 'Rename Active Take from Metadata', true, TF('ImGui_WindowFlags_NoScrollbar'))
-  reaper.ImGui_Text(ctx, "Metadata Read v"..tostring(META.VERSION))
+  local visible, open = reaper.ImGui_Begin(ctx, 'Rename Active Take from Metadata'..LIBVER, true, TF('ImGui_WindowFlags_NoScrollbar'))
   if visible then
 
     -- ESC to Cancel/Close (press Esc anywhere to close the window)
