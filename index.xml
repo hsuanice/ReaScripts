@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<index version="1" name="hsuanice Scripts" commit="168878debee4af8ebf4dd348f799c9d3f2510803">
+<index version="1" name="hsuanice Scripts" commit="de31f12e16079e7f72daac5ac140ed7416b984ea">
   <category name="Beta Testing">
     <reapack name="hsuanice_BWF TimeReference Embed Tool.lua" type="script" desc="Embed BWF TimeReference to Active take from Take 1 or Current Position TC">
       <version name="0.7.1" author="hsuanice" time="2025-08-14T17:52:57Z">
@@ -577,7 +577,7 @@
         <source main="main">https://github.com/hsuanice/ReaScripts/raw/168878debee4af8ebf4dd348f799c9d3f2510803/Beta%20Testing/hsuanice_Rename%20Active%20Take%20from%20File%20Metadata.lua</source>
       </version>
     </reapack>
-    <reapack name="hsuanice_Reorder or sort selected items vertically Monitor.lua" type="script" desc="Reorder/Sort — Monitor &amp; Debug">
+    <reapack name="hsuanice_Reorder or sort selected items vertically Monitor.lua" type="script" desc="Monitor - Reorder or sort selected items vertically">
       <metadata>
         <description><![CDATA[{\rtf1\ansi\deff0{\fonttbl{\f0 \fswiss Helvetica;}{\f1 \fmodern Courier;}}
 {\colortbl;\red255\green0\blue0;\red0\green0\blue255;}
@@ -609,6 +609,9 @@
       </version>
       <version name="0.2.1" author="hsuanice" time="2025-09-01T03:32:58Z">
         <source main="main">https://github.com/hsuanice/ReaScripts/raw/021b3eeba7af485fc7c1b5b001766f5a32a94d31/Beta%20Testing/hsuanice_Reorder%20or%20sort%20selected%20items%20vertically%20Monitor.lua</source>
+      </version>
+      <version name="0.2.2" author="hsuanice" time="2025-09-01T11:16:10Z">
+        <source main="main">https://github.com/hsuanice/ReaScripts/raw/de31f12e16079e7f72daac5ac140ed7416b984ea/Beta%20Testing/hsuanice_Reorder%20or%20sort%20selected%20items%20vertically%20Monitor.lua</source>
       </version>
     </reapack>
     <reapack name="hsuanice_Reorder or sort selected items vertically.lua" type="script" desc="ReaImGui - Vertical Reorder and Sort (items)">
