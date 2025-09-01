@@ -1,6 +1,6 @@
 --[[
 @description Reorder/Sort — Monitor & Debug
-@version 0.2.0 Library
+@version 0.2.1
 @author hsuanice
 @about
   Shows a live table of the currently selected items and all sort-relevant fields:
@@ -19,6 +19,13 @@
   Requires: ReaImGui (install via ReaPack)
 
 @changelog
+  v0.2.1 (2025-09-01)
+    - Fully delegate metadata resolution to the Library:
+      * Use META.guess_interleave_index() + META.expand("${trk}") / "${chnum}"
+        (no local interleave→name/chan logic). Sets __chan_index before expand.
+      * Fix: removed a duplicate local 'idx' declaration; more nil-safety.
+    - UI: keeps the Library version label; no visual/format changes.
+    - Exports/Snapshots: unchanged from 0.2.0 (backward compatible).
   v0.2.0 (2025-09-01)
     - Switched to 'hsuanice Metadata Read' (>= 0.2.0) for all metadata:
       * Uses Library to read/normalize metadata (unwrap SECTION, iXML TRACK_LIST first;
@@ -98,51 +105,31 @@ do
     row.file_name  = f.srcfile or ""
     row.take_name  = f.curtake or ""
 
-    -- Interleave & meta name/chan
-    local idx      = META.guess_interleave_index(item, f)
-
-    -- 1) Interleave 索引
+    -- Interleave & meta name/chan（全部交給 Library）
     local idx = META.guess_interleave_index(item, f) or f.__chan_index or 1
+    f.__chan_index = idx  -- 讓 Library 的 token 引擎知道目前 interleave
 
-    -- 2) 取 Meta Track Name（優先用當前 Interleave，否則取第一個非空）
-    local name = ""
-    if f.__trk_table and f.__trk_table[idx] and f.__trk_table[idx] ~= "" then
-      name = f.__trk_table[idx]
-    elseif f.__trk_table then
-      for i = 1, 64 do
-        if f.__trk_table[i] and f.__trk_table[i] ~= "" then name = f.__trk_table[i]; break end
-      end
-    end
+    -- 直接用 Library 的 token 展開（false = 不做檔名安全清理，保留原字）
+    local name = META.expand("${trk}",    f, nil, false)
+    local ch   = tonumber(META.expand("${chnum}", f, nil, false)) or idx
 
-    -- 3) 計算 Recorder Channel#（EdiLoad 的 sTRK# 回落）
-    local ch = idx
-    do
-      local chan_list = {}
-      for k, v in pairs(f) do
-        local n = tonumber(k:match("^TRK(%d+)$") or k:match("^trk(%d+)$"))
-        if n and v and v ~= "" then
-          chan_list[#chan_list+1] = { ch = n, name = v }
-        end
-      end
-      table.sort(chan_list, function(a,b) return (a.ch or 0) < (b.ch or 0) end)
-      if chan_list[idx] then ch = chan_list[idx].ch end
-    end
-
-    -- 4) 寫回到你的 row 欄位
     row.interleave    = idx
     row.meta_trk_name = name or ""
     row.channel_num   = ch
 
-    -- Item bounds
+    -- Item bounds（少了這段就不會回傳任何列）
     local pos = reaper.GetMediaItemInfo_Value(item, "D_POSITION") or 0
     local len = reaper.GetMediaItemInfo_Value(item, "D_LENGTH") or 0
     row.start_time = pos
     row.end_time   = pos + len
 
-    -- Keep original fields for UI if needed
+    -- 保留原始欄位（可給 Copy/除錯）
     row.__fields = f
 
     return row
+
+
+
   end
 end
 
