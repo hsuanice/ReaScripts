@@ -1,6 +1,6 @@
 --[[
 @description ReaImGui - Rename Active Take from Metadata (caret insert + cached preview + copy/export)
-@version 0.12.0
+@version 0.12.1
 @author hsuanice
 @about
   Rename active takes and/or item notes from BWF/iXML and true source metadata using a fast ReaImGui UI.
@@ -34,6 +34,14 @@
   hsuanice served as the workflow designer, tester, and integrator for this tool.
 
 @changelog
+  v0.12.1 (2025-09-01)
+    - More robust library loading:
+      * Switch to dofile() with an absolute path to load 'hsuanice Metadata Read'
+        (works reliably with spaces in paths).
+      * Added version gate (requires >= 0.2.0) with clearer error messaging.
+    - UI: Optionally shows the Metadata Read version at the top of the window for quick verification.
+    - Cleanup: Removed temporary console prints / debug code.
+    - Behavior: Rename/Preview/Export logic unchanged from 0.12.0.
   v0.12.0 (2025-09-01)
     - Integrate with "hsuanice Metadata Read" library (>= 0.2.0).
       * Removed internal iXML/TRK parsing & interleave name resolution in favor of Library.
@@ -213,6 +221,15 @@
   v0.2.0 - Add ESC close function
   v0.1.0 - Beta release
 --]]
+
+-- ===== Integrate with hsuanice Metadata Read (>= 0.2.0) =====
+local META = dofile(
+  reaper.GetResourcePath() ..
+  "/Scripts/hsuanice Scripts/Library/hsuanice_Metadata Read.lua"
+)
+assert(META and (META.VERSION or "0") >= "0.2.0",
+       "Please update 'hsuanice Metadata Read' to >= 0.2.0")
+
 
 
 -- ===== Guard ReaImGui =====
@@ -2296,6 +2313,7 @@ end
 local function loop()
   reaper.ImGui_SetNextWindowSize(ctx, WIN_W, WIN_H, reaper.ImGui_Cond_FirstUseEver())
   local visible, open = reaper.ImGui_Begin(ctx, 'Rename Active Take from Metadata', true, TF('ImGui_WindowFlags_NoScrollbar'))
+  reaper.ImGui_Text(ctx, "Metadata Read v"..tostring(META.VERSION))
   if visible then
 
     -- ESC to Cancel/Close (press Esc anywhere to close the window)
