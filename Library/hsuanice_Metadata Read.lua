@@ -1,5 +1,5 @@
 --[[
-@description hsuanice Metadata Read (reader / normalizer / tokens)
+@description Metadata Read (reader / normalizer / tokens)
 @version 0.2.0
 @author hsuanice
 @noindex
@@ -13,33 +13,34 @@
 
 @changelog
   v0.2.0 (2025-09-01)
-    - 整合 Rename 的 token 引擎與診斷：
-      * 新增 M.expand() 與 M.empty_tokens_in_template()，支援：
-        - $trk / $trkN / $trkall
-        - ${interleave} / ${chnum}（由 I_CHANMODE 與 TRK# 對映）
-        - ${counter:N}、${srcbaseprefix:N}、${srcbasesuffix:N}
-      * 新增 UTF-8 安全切字工具，避免多字節截斷（prefix/suffix token 使用）。
-      * 新增 M.compute_interleave_diag(fields, item) 產生 index/total/name/all 診斷欄位。
-    - 欄位/正規化提升：
-      * M.collect_item_fields() 回傳 srcpath/srcfile/srcbase/srcext/srcdir、samplerate/channels、
-        __trk_table、__chan_index、__trk_name 等一致欄位。
-      * 將 BWF/Description 的 dXXXX / sXXXX 視為鏡射鍵，統一映射到 XXXX（同時提供大小寫兩種 key）。
-      * 自動建立 TRK# 表（trk1..trk64），供 token 與對映使用。
-    - Interleave 對應更健壯：
-      * M.guess_interleave_index() 會切到合法範圍（1..N），N 來自來源聲道數。
-      * M.resolve_trk_by_interleave() 先用 iXML TRACK_LIST；若無則用 sTRK# 排序；再無則回傳第一個非空名。
-    - 效能：
-      * 保留 run-level metadata 快取（M.begin_batch/M.end_batch）；避免重複 IO。
-    - 相容性：
-      * 僅對可讀 metadata 的 PCM 容器（WAV/W64/AIFF）執行讀取；其他來源安全跳過。
+    - Integrated token engine and diagnostics:
+      * Added M.expand() and M.empty_tokens_in_template():
+        - Supports $trk / $trkN / $trkall
+        - Supports ${interleave} / ${chnum} (from I_CHANMODE and TRK# mapping)
+        - Supports ${counter:N}, ${srcbaseprefix:N}, ${srcbasesuffix:N}
+      * Added UTF-8-safe substring helpers (used by prefix/suffix tokens).
+      * Added M.compute_interleave_diag(fields, item) to expose index/total/name/all.
+    - Field normalization:
+      * M.collect_item_fields() now returns srcpath/srcfile/srcbase/srcext/srcdir,
+        samplerate/channels, __trk_table, __chan_index, __trk_name, etc.
+      * BWF/Description mirrors (dXXXX/sXXXX) are normalized to XXXX (both upper/lower keys).
+      * Automatically populates TRK# table (trk1..trk64) for tokens/mapping.
+    - Interleave mapping is more robust:
+      * M.guess_interleave_index() clamps to 1..N (N derived from source channel count).
+      * M.resolve_trk_by_interleave() prefers iXML TRACK_LIST; falls back to sTRK# order;
+        if neither is present, returns the first non-empty name.
+    - Performance:
+      * Retains run-level metadata cache (M.begin_batch/M.end_batch) to avoid redundant I/O.
+    - Compatibility:
+      * Metadata reading is limited to PCM containers (WAV/W64/AIFF); other sources are skipped safely.
 
   v0.1.0 (2025-09-01)
-    - 初版：唯讀解析與正規化
-      * 解除 SECTION → 取得真正母來源。
-      * 快取 GetMediaFileMetadata。
-      * 讀取 iXML TRACK_LIST（CHANNEL_INDEX/NAME）。
-      * 無 TRACK_LIST 時，fallback 解析 BWF/Description 的 sTRK#=Name（EdiLoad split 相容）。
-      * 提供 Interleave ↔ TRK# 的基本對映（$trk/$trkall 的基礎）。
+    - Initial release (read-only parsing & normalization):
+      * Unwrap SECTION to get the real parent source.
+      * Cached GetMediaFileMetadata lookups.
+      * Read iXML TRACK_LIST (CHANNEL_INDEX/NAME).
+      * When TRACK_LIST is missing, fall back to BWF/Description sTRK#=Name (EdiLoad split compatible).
+      * Basic Interleave ↔ TRK# mapping to power $trk/$trkall.
 ]]
 
 
