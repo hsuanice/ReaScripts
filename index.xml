@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<index version="1" name="hsuanice Scripts" commit="38d1fe496d0a486090e5e3692cf43b9cd62e7b37">
+<index version="1" name="hsuanice Scripts" commit="40f9acccc5ebd434409615a98117dd533b1d8fc2">
   <category name="Beta Testing">
     <reapack name="hsuanice_BWF TimeReference Embed Tool.lua" type="script" desc="Embed BWF TimeReference to Active take from Take 1 or Current Position TC">
       <version name="0.7.1" author="hsuanice" time="2025-08-14T17:52:57Z">
@@ -385,6 +385,9 @@
       </version>
       <version name="0.4.0" author="hsuanice" time="2025-08-22T16:11:40Z">
         <source main="main">https://github.com/hsuanice/ReaScripts/raw/de1374ebc8090e405b38fe30451f6fe42b8ac738/Beta%20Testing/hsuanice_Mouse%20Left%20Click%20Empty%20Area%20to%20Select%20Track.lua</source>
+      </version>
+      <version name="0.4.1" author="hsuanice" time="2025-09-02T11:12:49Z">
+        <source main="main">https://github.com/hsuanice/ReaScripts/raw/40f9acccc5ebd434409615a98117dd533b1d8fc2/Beta%20Testing/hsuanice_Mouse%20Left%20Click%20Empty%20Area%20to%20Select%20Track.lua</source>
       </version>
     </reapack>
     <reapack name="hsuanice_Pro Tools Display Timeline Selection End.lua" type="script" desc="Pro Tools - Display Timeline Selection End">
