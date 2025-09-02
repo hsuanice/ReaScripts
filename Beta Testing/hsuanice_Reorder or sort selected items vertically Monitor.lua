@@ -1,6 +1,6 @@
 --[[
 @description Monitor - Reorder or sort selected items vertically
-@version 0.3.1
+@version 0.3.5
 @author hsuanice
 @about
   Shows a live table of the currently selected items and all sort-relevant fields:
@@ -19,6 +19,20 @@
   Requires: ReaImGui (install via ReaPack)
 
 @changelog
+  v0.3.5 (2025-09-02)
+    - Feature: Display mode expanded to three options — Seconds / Timecode / Beats.
+    - Refactor: Adopt hsuanice_TimeFormat v0.2.0 (MODE + make_formatter + headers).
+    - Exports (TSV/CSV) automatically follow the selected mode.
+  v0.3.4 (2025-09-02)
+    - Refactor: Adopt hsuanice_TimeFormat v0.2.0 (unified MODE + formatter/headers).
+    - Feature: Display mode expanded to three options — Seconds / Timecode / Beats.
+    - Exports (TSV/CSV) follow the current mode automatically.
+  v0.3.3 (2025-09-02)
+    - Fix: Resolve naming collision between TF() (REAPER flag helper) and TimeFormat table.
+           Renamed the library alias to TFLib to prevent "attempt to call a table value" error.
+
+  v0.3.2 (2025-09-02)
+    - Refactor: Use hsuanice_TimeFormat library for Seconds/TC formatting (with fallback if library missing).
   v0.3.1 (2025-09-02)
     - Fix: Restored missing helpers from 0.2.x (selection scan, save dialogs, ImGui context, etc.)
            to resolve "attempt to call a nil value (global 'refresh_now')" and related issues.
@@ -47,25 +61,25 @@
         and EdiLoad-split is now robustly supported.
       * Minor safety/UX hardening (no functional change to table/snapshots/exports).
   v0.1.6
-  - Metadata: Added fallback for EdiLoad-split mono files.
-    • If IXML TRACK_LIST is missing, parse sTRK#=NAME from BWF/Description.
-    • Resolves Meta Track Name and Channel# via existing Interleave pipeline.
+    - Metadata: Added fallback for EdiLoad-split mono files.
+      • If IXML TRACK_LIST is missing, parse sTRK#=NAME from BWF/Description.
+      • Resolves Meta Track Name and Channel# via existing Interleave pipeline.
   
   v0.1.5
-  - UI: moved Snapshot BEFORE/AFTER section to appear directly under the top toolbar,
-        before the live table (content unchanged).
+    - UI: moved Snapshot BEFORE/AFTER section to appear directly under the top toolbar,
+          before the live table (content unchanged).
 
   v0.1.4
-  - Column rename: “Source File” (formerly “File Name”).
-  - Source resolution now mirrors the Rename script’s $srcfile:
-      active take → source → unwrap SECTION (handles nested) → real file path (with extension).
-  - Metadata read (iXML/TRK) also uses the unwrapped source for better accuracy on poly/SECTION items.
-  - Export headers updated to “Source File”; keeps EndTime from 0.1.3.
-  - Cleanup/robustness: removed old src_path usage; safer guards for nil/non-PCM sources.
+    - Column rename: “Source File” (formerly “File Name”).
+    - Source resolution now mirrors the Rename script’s $srcfile:
+        active take → source → unwrap SECTION (handles nested) → real file path (with extension).
+    - Metadata read (iXML/TRK) also uses the unwrapped source for better accuracy on poly/SECTION items.
+    - Export headers updated to “Source File”; keeps EndTime from 0.1.3.
+    - Cleanup/robustness: removed old src_path usage; safer guards for nil/non-PCM sources.
 
-    - File name reliability: now resolves source file names (with extensions) even for SECTION/non-PCM sources via safe pcall wrapper.
-    - New column: End (Start + Length). Also added EndTime to TSV/CSV exports.
-    - Table: column count updated to 10; minor utils added (item_len), formatting helpers unchanged.
+      - File name reliability: now resolves source file names (with extensions) even for SECTION/non-PCM sources via safe pcall wrapper.
+      - New column: End (Start + Length). Also added EndTime to TSV/CSV exports.
+      - Table: column count updated to 10; minor utils added (item_len), formatting helpers unchanged.
 
   v0.1.2
     - UI always renders content (removed 'visible' guard after Begin to avoid blank window in some docks/themes).
@@ -128,6 +142,32 @@ local function track_name(tr) local _, n = reaper.GetTrackName(tr, "") return n 
 
 local function fmt_seconds(s) if not s then return "" end return string.format("%.6f", s) end
 local function fmt_tc(s)      if not s then return "" end return reaper.format_timestr_pos(s, "", 5) end
+
+-- Time Format Library (with fallback)
+local ok, TFLib = pcall(dofile, reaper.GetResourcePath().."/Scripts/hsuanice Scripts/Library/hsuanice_TimeFormat.lua")
+if not ok or not TFLib or not TFLib.make_formatter then
+  -- minimal fallback (Seconds/TC only); Beats 顯示將退回秒數
+  TFLib = {
+    VERSION="fallback",
+    MODE={ SEC="sec", TC="tc", BEATS="beats" },
+    make_formatter=function(mode, opts)
+      local dec=(opts and opts.decimals) or 6
+      if mode=="tc" then return function(sec) return reaper.format_timestr_pos(sec or 0, "", 5) end end
+      return function(sec) return string.format("%."..dec.."f", sec or 0) end
+    end,
+    headers=function(mode)
+      if mode=="tc" then return "Start (TC)","End (TC)" end
+      if mode=="beats" then return "Start (s)","End (s)" end
+      return "Start (s)","End (s)"
+    end,
+    format=function(sec, mode, opts)
+      return (TFLib.make_formatter(mode, opts))(sec)
+    end
+  }
+end
+
+
+
 
 -- file ops
 local function choose_save_path(default_name, filter)
@@ -218,12 +258,19 @@ end
 -- State (UI)
 ---------------------------------------
 local AUTO = true
-local SHOW_TC = true
+-- 以三段模式取代 boolean
+local TIME_MODE = TFLib.MODE.TC   -- 預設顯示 TC；你也可改成 TFLib.MODE.SEC
+local ROWS = {}
+local SNAP_BEFORE, SNAP_AFTER = {}, {}
 local ROWS = {}
 local SNAP_BEFORE, SNAP_AFTER = {}, {}
 
+-- 建立可重用 formatter（在表格列與輸出都共用）
+local FORMAT = TFLib.make_formatter(TIME_MODE, {decimals=6})
+
+-- 最薄的轉接：之後如果要改用 FORMAT 直接呼叫，也可移除這個 wrapper
 local function format_time(val)
-  return SHOW_TC and fmt_tc(val) or fmt_seconds(val)
+  return FORMAT(val)
 end
 
 local function refresh_now()
@@ -271,7 +318,23 @@ local function draw_toolbar()
   reaper.ImGui_SameLine(ctx)
   local chg, v = reaper.ImGui_Checkbox(ctx, "Auto-refresh", AUTO); if chg then AUTO = v end
   reaper.ImGui_SameLine(ctx)
-  local chg2, v2 = reaper.ImGui_Checkbox(ctx, "Show Timecode", SHOW_TC); if chg2 then SHOW_TC = v2 end
+-- 三段模式：Seconds / TC / Beats
+reaper.ImGui_SameLine(ctx)
+if reaper.ImGui_RadioButton(ctx, "Seconds", TIME_MODE==TFLib.MODE.SEC) then
+  TIME_MODE = TFLib.MODE.SEC
+  FORMAT = TFLib.make_formatter(TIME_MODE, {decimals=6})
+end
+reaper.ImGui_SameLine(ctx)
+if reaper.ImGui_RadioButton(ctx, "TC", TIME_MODE==TFLib.MODE.TC) then
+  TIME_MODE = TFLib.MODE.TC
+  FORMAT = TFLib.make_formatter(TIME_MODE)
+end
+reaper.ImGui_SameLine(ctx)
+if reaper.ImGui_RadioButton(ctx, "Beats", TIME_MODE==TFLib.MODE.BEATS) then
+  TIME_MODE = TFLib.MODE.BEATS
+  FORMAT = TFLib.make_formatter(TIME_MODE)
+end
+
   reaper.ImGui_SameLine(ctx)
   if reaper.ImGui_Button(ctx, "Refresh Now", 110, 24) then refresh_now() end
 
@@ -302,8 +365,9 @@ local function draw_table(rows, height)
     reaper.ImGui_TableSetupColumn(ctx, "Meta Track Name")
     reaper.ImGui_TableSetupColumn(ctx, "Chan#", TF('ImGui_TableColumnFlags_WidthFixed'), 64)
     reaper.ImGui_TableSetupColumn(ctx, "Interleave", TF('ImGui_TableColumnFlags_WidthFixed'), 88)
-    reaper.ImGui_TableSetupColumn(ctx, SHOW_TC and "Start (TC)" or "Start (s)", TF('ImGui_TableColumnFlags_WidthFixed'), 120)
-    reaper.ImGui_TableSetupColumn(ctx, SHOW_TC and "End (TC)"   or "End (s)",   TF('ImGui_TableColumnFlags_WidthFixed'), 120)
+    local startHeader, endHeader = TFLib.headers(TIME_MODE)
+    reaper.ImGui_TableSetupColumn(ctx, startHeader, TF('ImGui_TableColumnFlags_WidthFixed'), 120)
+    reaper.ImGui_TableSetupColumn(ctx, endHeader,   TF('ImGui_TableColumnFlags_WidthFixed'), 120)
     reaper.ImGui_TableHeadersRow(ctx)
 
     for i, r in ipairs(rows or {}) do
