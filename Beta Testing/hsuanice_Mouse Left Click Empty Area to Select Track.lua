@@ -1,6 +1,6 @@
 --[[
 @description hsuanice_Mouse Left Click Empty Area to Select Track
-@version 0.4.0
+@version 0.4.1
 @author hsuanice
 @about
   Select the track when clicking either:
@@ -21,6 +21,11 @@
 @requires js_ReaScriptAPI
 
 @changelog
+  0.4.1 - Fix: Prevent "ghost" track selection when interacting with context menus.
+           • Suppress selection while right mouse button is down.
+           • Suppress selection when mouse is over popup menus or non-REAPER windows 
+             (detected via JS_Window_FromPoint, class names like #32768 / NSMenu).
+           • Clears lastDown state when a popup is active to avoid accidental triggers.
   0.4.0 - New: Also select track when clicking the UPPER HALF of a media item.
           Add ENABLE_ITEM_UPPER_HALF_SELECT option.
           Fix: console log string concatenation.
@@ -36,9 +41,10 @@
 -- User options
 -------------------------------------------------------------
 local SELECT_ON_MOUSE_UP = true   -- true: mouse-up, false: mouse-down
-local ENABLE_ITEM_UPPER_HALF_SELECT = true -- click item upper-half also selects track
+local ENABLE_ITEM_UPPER_HALF_SELECT = false -- click item upper-half also selects track
 local WANT_DEBUG = false          -- true: print to console
 local clickTolerance = 3          -- pixels for mouse-up (allow tiny moves)
+local SUPPRESS_POPUP_MENU = true
 
 -------------------------------------------------------------
 -- Logger
@@ -144,9 +150,37 @@ local function watch()
     return
   end
 
-  local state = reaper.JS_Mouse_GetState(1)
+  -- 舊：local state = reaper.JS_Mouse_GetState(1)
+  local state = reaper.JS_Mouse_GetState(1 + 2)  -- 1=Left, 2=Right
   local x, y  = reaper.GetMousePosition()
-  local lmb   = (state & 1) == 1
+
+  -- === Guard: 抑制右鍵／選單互動 ===
+  if SUPPRESS_POPUP_MENU then
+    -- A) 右鍵按下時，直接跳過
+    if (state & 2) == 2 then
+      lastDown = false
+      reaper.defer(watch); return
+    end
+
+    -- B) 滑鼠當前位於 REAPER 之外（例如系統選單、工具提示…）時，跳過
+    if reaper.APIExists("JS_Window_FromPoint") then
+      local hwnd = reaper.JS_Window_FromPoint(x, y)
+      local main = reaper.GetMainHwnd()
+      if hwnd then
+        local cls = reaper.JS_Window_GetClassName(hwnd) or ""
+        local isChild = reaper.JS_Window_IsChild(main, hwnd)
+        local overNonMain = (hwnd ~= main and not isChild)
+
+        -- Windows 的右鍵選單類名多為 "#32768"；macOS 常見為 "NSMenu"
+        if overNonMain or cls == "#32768" or cls == "NSMenu" then
+          -- 重要：把 lastDown 清掉，避免「吃到」選單裡那次左鍵的 mouse-up
+          lastDown = false
+          reaper.defer(watch); return
+        end
+      end
+    end
+  end
+  
 
   if SELECT_ON_MOUSE_UP then
     -- mouse-up mode
