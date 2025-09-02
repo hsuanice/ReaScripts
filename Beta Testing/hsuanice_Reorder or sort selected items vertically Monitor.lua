@@ -1,6 +1,6 @@
 --[[
 @description Monitor - Reorder or sort selected items vertically
-@version 0.3.15
+@version 0.3.16
 @author hsuanice
 @about
   Shows a live table of the currently selected items and all sort-relevant fields:
@@ -33,9 +33,10 @@
   mm:ss.SSS → 83:07.250
 
 
-
-
 @changelog
+  v0.3.16 (2025-09-03)
+    - Fix: Auto-refresh preference now persists correctly. (Added AUTO to forward declarations and removed local shadowing in State (UI).)
+
   v0.3.15 (2025-09-03)
     - New: Added “Show BEFORE” and “Show AFTER” buttons in the snapshot section (inline with Copy/Save).
     - UX: “Refresh Now” resets the table view back to Live (from Before/After).
@@ -189,7 +190,7 @@ end
 ---------------------------------------
 
 -- Forward declarations so load_prefs() updates the same locals (not globals)
-local TIME_MODE, CUSTOM_PATTERN, FORMAT
+local TIME_MODE, CUSTOM_PATTERN, FORMAT, AUTO
 
 -- === Preferences (persist across runs) ===
 local EXT_NS = "hsuanice_ReorderSort_Monitor"
@@ -374,8 +375,8 @@ end
 ---------------------------------------
 -- State (UI)
 ---------------------------------------
-local AUTO = true
-local TABLE_SOURCE = "live"   -- "live" | "before" | "after"
+AUTO = true
+TABLE_SOURCE = "live"   -- "live" | "before" | "after"
 
 -- Display mode state (persisted)
 TIME_MODE = TFLib.MODE.MS        -- 預設 m:s；load_prefs() 會覆寫為上次選擇
