@@ -1,6 +1,6 @@
 --[[
 @description Monitor - Reorder or sort selected items vertically
-@version 0.3.17
+@version 0.4.0
 @author hsuanice
 @about
   Shows a live table of the currently selected items and all sort-relevant fields:
@@ -34,6 +34,16 @@
 
 
 @changelog
+  v0.4.0 (2025-09-03)
+    - New: Summary modal (button next to "Save .csv"). Shows item count, total span, total length, and position range.
+            Text is selectable, with a one-click Copy, respects current time mode (m:s / TC / Beats / Custom).
+    - New: Added Mute and Color columns (swatch + hex).
+    - Fix: Removed duplicate table render in main loop (was drawing twice).
+    - Fix: Added bootstrap at file end (conditional initial refresh + loop()) so the window launches correctly.
+  v0.3.18 (2025-09-03)
+    - New: Added "Mute" and "Color" columns (color swatch + hex).
+    - New: Summary panel (counts, total duration span, total length sum, and position range),
+           fully respecting the current time display mode (m:s / TC / Beats / Custom).
   v0.3.17 (2025-09-03)
     - Fix: When Auto-refresh is OFF, the script no longer performs an initial scan on launch.
            (Guarded the startup refresh; now only runs if AUTO is true.)
@@ -313,6 +323,34 @@ local function timestamp()
   local t=os.date("*t"); return string.format("%04d%02d%02d_%02d%02d%02d",t.year,t.month,t.day,t.hour,t.min,t.sec)
 end
 
+local function compute_summary(rows)
+  local n = #rows
+  if n == 0 then return {count=0} end
+  local min_start = math.huge
+  local max_end   = -math.huge
+  local sum_len   = 0.0
+  for _, r in ipairs(rows) do
+    local s = tonumber(r.start_time) or 0
+    local e = tonumber(r.end_time)   or s
+    if s < min_start then min_start = s end
+    if e > max_end   then max_end   = e end
+    sum_len = sum_len + (e - s)
+  end
+  local span = max_end - min_start
+  return {
+    count = n,
+    min_start = min_start,
+    max_end   = max_end,
+    span      = span,
+    sum_len   = sum_len
+  }
+end
+
+
+
+
+
+
 ---------------------------------------
 -- Selection scan
 ---------------------------------------
@@ -363,6 +401,21 @@ local function collect_fields_for_item(item)
   row.start_time = pos
   row.end_time   = pos + len
 
+  -- Mute state
+  row.muted = (reaper.GetMediaItemInfo_Value(item, "B_MUTE") or 0) > 0.5
+
+  -- Item color
+  local native = reaper.GetDisplayedMediaItemColor(item) or 0
+  if native ~= 0 then
+    local r, g, b = reaper.ColorFromNative(native)
+    row.color_rgb = { r, g, b }
+    row.color_hex = string.format("#%02X%02X%02X", r, g, b)
+  else
+    row.color_rgb, row.color_hex = nil, ""
+  end
+
+
+
   row.__fields = f
   return row
 end
@@ -403,6 +456,57 @@ end
 -- 啟動時讀回上次的模式與 pattern，並重建 FORMAT
 if load_prefs then load_prefs() end
 
+
+
+local function build_summary_text(rows)
+  local S = compute_summary(rows or {})
+  if not S or (S.count or 0) == 0 then return "No items." end
+  local from = format_time(S.min_start)
+  local to   = format_time(S.max_end)
+  local span = format_time(S.span)
+  local sum  = format_time(S.sum_len)
+  return table.concat({
+    ("Number of items:\n%d"):format(S.count),
+    "",
+    ("Total duration:\n%s"):format(span),
+    "",
+    ("Total length:\n%s"):format(sum),
+    "",
+    ("Position:\n%s - %s"):format(from, to),
+  }, "\n")
+end
+
+local function draw_summary_popup()
+  if reaper.ImGui_BeginPopupModal(ctx, "Summary", true, reaper.ImGui_WindowFlags_AlwaysAutoResize()) then
+    -- 依目前顯示來源挑 rows（你現在有 live/before/after 的切換）
+    local rows = ROWS
+    if     TABLE_SOURCE == "before" then rows = SNAP_BEFORE
+    elseif TABLE_SOURCE == "after"  then rows = SNAP_AFTER end
+
+    local txt = build_summary_text(rows)
+
+    -- 可選可複製：用唯讀的多行輸入框
+    reaper.ImGui_SetNextItemWidth(ctx, 560)
+    reaper.ImGui_InputTextMultiline(ctx, "##summary_text", txt, 560, 140,
+      reaper.ImGui_InputTextFlags_ReadOnly())
+
+    -- Copy / OK
+    if reaper.ImGui_Button(ctx, "Copy", 80, 24) then
+      reaper.ImGui_SetClipboardText(ctx, txt)
+    end
+    reaper.ImGui_SameLine(ctx)
+    if reaper.ImGui_Button(ctx, "OK", 80, 24) 
+       or reaper.ImGui_IsKeyPressed(ctx, reaper.ImGui_Key_Escape()) then
+      reaper.ImGui_CloseCurrentPopup(ctx)
+    end
+
+    reaper.ImGui_EndPopup(ctx)
+  end
+end
+
+
+
+
 ---------------------------------------
 -- Export helpers
 ---------------------------------------
@@ -414,11 +518,14 @@ local function build_table_text(fmt, rows)
     if fmt == "csv" and s:find('[,\r\n"]') then s = '"'..s:gsub('"','""')..'"' end
     return s
   end
+
+  -- header（加入 Mute / ColorHex）
   out[#out+1] = table.concat({
-    "#", "TrackIdx", "TrackName", "TakeName", "Source File",
-    "MetaTrackName", "Channel#", "Interleave", "StartTime", "EndTime"
+    "#","TrackIdx","TrackName","TakeName","Source File",
+    "MetaTrackName","Channel#","Interleave","Mute","ColorHex","StartTime","EndTime"
   }, sep)
 
+  -- rows
   for i, r in ipairs(rows or {}) do
     out[#out+1] = table.concat({
       esc(i),
@@ -429,10 +536,13 @@ local function build_table_text(fmt, rows)
       esc(r.meta_trk_name),
       esc(r.channel_num or ""),
       esc(r.interleave or ""),
+      esc(r.muted and "1" or "0"),
+      esc(r.color_hex or ""),
       esc(format_time(r.start_time)),
       esc(format_time(r.end_time)),
     }, sep)
   end
+
   return table.concat(out, "\n")
 end
 
@@ -526,11 +636,19 @@ end
     local p = choose_save_path("ReorderSort_Monitor_"..timestamp()..".csv","CSV (*.csv)\0*.csv\0All (*.*)\0*.*\0")
     if p then write_text_file(p, build_table_text("csv", ROWS)) end
   end
+
+  reaper.ImGui_SameLine(ctx)
+  if reaper.ImGui_Button(ctx, "Summary", 100, 24) then
+    reaper.ImGui_OpenPopup(ctx, "Summary")
+  end
+
+
+
 end
 
 local function draw_table(rows, height)
   local flags = TF('ImGui_TableFlags_Borders') | TF('ImGui_TableFlags_RowBg') | TF('ImGui_TableFlags_SizingStretchProp')
-  if reaper.ImGui_BeginTable(ctx, "live_table", 10, flags, -FLT_MIN, height or 360) then
+  if reaper.ImGui_BeginTable(ctx, "live_table", 12, flags, -FLT_MIN, height or 360) then
     reaper.ImGui_TableSetupColumn(ctx, "#", TF('ImGui_TableColumnFlags_WidthFixed'), 36)
     reaper.ImGui_TableSetupColumn(ctx, "TrackIdx", TF('ImGui_TableColumnFlags_WidthFixed'), 45)
     reaper.ImGui_TableSetupColumn(ctx, "Track Name")
@@ -540,8 +658,11 @@ local function draw_table(rows, height)
     reaper.ImGui_TableSetupColumn(ctx, "Chan#", TF('ImGui_TableColumnFlags_WidthFixed'), 36)
     reaper.ImGui_TableSetupColumn(ctx, "Interleave", TF('ImGui_TableColumnFlags_WidthFixed'), 50)
     local startHeader, endHeader = TFLib.headers(TIME_MODE, {pattern=CUSTOM_PATTERN})
-    reaper.ImGui_TableSetupColumn(ctx, startHeader, TF('ImGui_TableColumnFlags_WidthFixed'), 100)
-    reaper.ImGui_TableSetupColumn(ctx, endHeader,   TF('ImGui_TableColumnFlags_WidthFixed'), 100)
+    reaper.ImGui_TableSetupColumn(ctx, "Mute", TF('ImGui_TableColumnFlags_WidthFixed'), 52)
+    reaper.ImGui_TableSetupColumn(ctx, "Color", TF('ImGui_TableColumnFlags_WidthFixed'), 120)
+    reaper.ImGui_TableSetupColumn(ctx, startHeader, TF('ImGui_TableColumnFlags_WidthFixed'), 120)
+    reaper.ImGui_TableSetupColumn(ctx, endHeader,   TF('ImGui_TableColumnFlags_WidthFixed'), 120)
+
     reaper.ImGui_TableHeadersRow(ctx)
 
     for i, r in ipairs(rows or {}) do
@@ -554,6 +675,23 @@ local function draw_table(rows, height)
       reaper.ImGui_TableNextColumn(ctx); reaper.ImGui_TextWrapped(ctx, tostring(r.meta_trk_name or ""))
       reaper.ImGui_TableNextColumn(ctx); reaper.ImGui_Text(ctx, tostring(r.channel_num or ""))
       reaper.ImGui_TableNextColumn(ctx); reaper.ImGui_Text(ctx, tostring(r.interleave or ""))
+
+      -- Mute
+      reaper.ImGui_TableNextColumn(ctx)
+      reaper.ImGui_Text(ctx, r.muted and "M" or "")
+
+      -- Color
+      reaper.ImGui_TableNextColumn(ctx)
+      if r.color_rgb and r.color_rgb[1] then
+        local rr, gg, bb = r.color_rgb[1]/255, r.color_rgb[2]/255, r.color_rgb[3]/255
+        local col = reaper.ImGui_ColorConvertDouble4ToU32(rr, gg, bb, 1.0)
+        reaper.ImGui_TextColored(ctx, col, "■")
+        reaper.ImGui_SameLine(ctx)
+        reaper.ImGui_Text(ctx, r.color_hex or "")
+      else
+        reaper.ImGui_Text(ctx, "")
+      end
+
       reaper.ImGui_TableNextColumn(ctx); reaper.ImGui_Text(ctx, format_time(r.start_time))
       reaper.ImGui_TableNextColumn(ctx); reaper.ImGui_Text(ctx, format_time(r.end_time))
     end
@@ -561,6 +699,9 @@ local function draw_table(rows, height)
     reaper.ImGui_EndTable(ctx)
   end
 end
+
+
+
 
 local function draw_snapshots()
   reaper.ImGui_Separator(ctx)
@@ -604,13 +745,21 @@ local function loop()
   local flags = reaper.ImGui_WindowFlags_NoCollapse()
   local visible, open = reaper.ImGui_Begin(ctx, "Reorder or Sort — Monitor & Debug"..LIBVER, true, flags)
 
+  -- Top bar + Summary popup
   draw_toolbar()
+  draw_summary_popup()
+
+  -- Snapshots 區塊（在上方）
   draw_snapshots()
   reaper.ImGui_Spacing(ctx)
+
+  -- 依目前來源決定要畫哪個 rows
   local rows_to_show = ROWS
   if     TABLE_SOURCE == "before" then rows_to_show = SNAP_BEFORE
   elseif TABLE_SOURCE == "after"  then rows_to_show = SNAP_AFTER
   end
+
+  -- Live/Before/After 的 table（只畫一次）
   draw_table(rows_to_show, 360)
 
   reaper.ImGui_End(ctx)
@@ -618,10 +767,10 @@ local function loop()
   if open and not esc_pressed() then
     reaper.defer(loop)
   else
-    -- 視窗被 X 關閉，或按下 ESC → 結束前保險存一次
     save_prefs()
   end
 end
 
-if AUTO then refresh_now() end
-loop()
+-- Boot
+if AUTO then refresh_now() end  -- Auto-refresh 開啟才在啟動時掃一次
+loop()                           -- 啟動 UI 主迴圈
