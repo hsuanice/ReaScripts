@@ -1,6 +1,6 @@
 --[[
 @description Monitor - Reorder or sort selected items vertically
-@version 0.3.7
+@version 0.3.8
 @author hsuanice
 @about
   Shows a live table of the currently selected items and all sort-relevant fields:
@@ -34,6 +34,9 @@
 
 
 @changelog
+  v0.3.8 (2025-09-03)
+    - UI: Moved Custom pattern input inline to the right of the "Custom" mode selector.
+    - UX: Added tooltip (ⓘ) explaining pattern tokens.
   v0.3.7 (2025-09-02)
     - New: Added "Custom" display mode. Users can type patterns like "hh:mm:ss", "h:mm", "mm:ss.SSS".
     - API: Integrated with hsuanice_Time Format v0.3.0 (MODE.CUSTOM + pattern support).
@@ -365,38 +368,47 @@ local function draw_toolbar()
   local chg, v = reaper.ImGui_Checkbox(ctx, "Auto-refresh", AUTO); if chg then AUTO = v end
   reaper.ImGui_SameLine(ctx)
   
-  -- 四種：m:s / TC / Beats / Custom
-  reaper.ImGui_SameLine(ctx)
-  if reaper.ImGui_RadioButton(ctx, "m:s", TIME_MODE==TFLib.MODE.MS) then
-    TIME_MODE = TFLib.MODE.MS
-    FORMAT = TFLib.make_formatter(TIME_MODE, {decimals=3})
-  end
-  reaper.ImGui_SameLine(ctx)
-  if reaper.ImGui_RadioButton(ctx, "TC", TIME_MODE==TFLib.MODE.TC) then
-    TIME_MODE = TFLib.MODE.TC
-    FORMAT = TFLib.make_formatter(TIME_MODE)
-  end
-  reaper.ImGui_SameLine(ctx)
-  if reaper.ImGui_RadioButton(ctx, "Beats", TIME_MODE==TFLib.MODE.BEATS) then
-    TIME_MODE = TFLib.MODE.BEATS
-    FORMAT = TFLib.make_formatter(TIME_MODE)
-  end
-  reaper.ImGui_SameLine(ctx)
-  if reaper.ImGui_RadioButton(ctx, "Custom", TIME_MODE==TFLib.MODE.CUSTOM) then
-    TIME_MODE = TFLib.MODE.CUSTOM
+-- 四種：m:s / TC / Beats / Custom（Input 直接在 Custom 右邊）
+reaper.ImGui_SameLine(ctx)
+if reaper.ImGui_RadioButton(ctx, "m:s", TIME_MODE==TFLib.MODE.MS) then
+  TIME_MODE = TFLib.MODE.MS
+  FORMAT = TFLib.make_formatter(TIME_MODE, {decimals=3})
+end
+reaper.ImGui_SameLine(ctx)
+if reaper.ImGui_RadioButton(ctx, "TC", TIME_MODE==TFLib.MODE.TC) then
+  TIME_MODE = TFLib.MODE.TC
+  FORMAT = TFLib.make_formatter(TIME_MODE)
+end
+reaper.ImGui_SameLine(ctx)
+if reaper.ImGui_RadioButton(ctx, "Beats", TIME_MODE==TFLib.MODE.BEATS) then
+  TIME_MODE = TFLib.MODE.BEATS
+  FORMAT = TFLib.make_formatter(TIME_MODE)
+end
+reaper.ImGui_SameLine(ctx)
+if reaper.ImGui_RadioButton(ctx, "Custom", TIME_MODE==TFLib.MODE.CUSTOM) then
+  TIME_MODE = TFLib.MODE.CUSTOM
+  FORMAT = TFLib.make_formatter(TIME_MODE, {pattern=CUSTOM_PATTERN})
+end
+-- ← 直接接在 Custom 後面放輸入框
+reaper.ImGui_SameLine(ctx)
+reaper.ImGui_Text(ctx, "Pattern:")
+reaper.ImGui_SameLine(ctx)
+reaper.ImGui_SetNextItemWidth(ctx, 180)  -- 你可改寬度
+local changed, newpat = reaper.ImGui_InputText(ctx, "##custom_pattern", CUSTOM_PATTERN)
+if changed then
+  CUSTOM_PATTERN = newpat
+  if TIME_MODE==TFLib.MODE.CUSTOM then
     FORMAT = TFLib.make_formatter(TIME_MODE, {pattern=CUSTOM_PATTERN})
   end
-
-  -- 換行顯示輸入框與提示
-  reaper.ImGui_Spacing(ctx)
-  local changed, newpat = reaper.ImGui_InputText(ctx, "Custom pattern  (e.g. hh:mm:ss, h:mm, mm:ss.SSS)", CUSTOM_PATTERN)
-  if changed then
-    CUSTOM_PATTERN = newpat
-    if TIME_MODE==TFLib.MODE.CUSTOM then
-      FORMAT = TFLib.make_formatter(TIME_MODE, {pattern=CUSTOM_PATTERN})
-    end
-  end
-  reaper.ImGui_TextDisabled(ctx, "Tokens: h hh  |  m mm  |  s ss  |  S.. = fractional seconds (e.g. SSS)")
+end
+-- 小提示（hover 顯示）
+reaper.ImGui_SameLine(ctx)
+reaper.ImGui_TextDisabled(ctx, "ⓘ")
+if reaper.ImGui_IsItemHovered(ctx) then
+  reaper.ImGui_BeginTooltip(ctx)
+  reaper.ImGui_Text(ctx, "Tokens: h | hh | m | mm | s | ss | S… (e.g. SSS = .mmm)")
+  reaper.ImGui_EndTooltip(ctx)
+end
 
 
   reaper.ImGui_SameLine(ctx)
