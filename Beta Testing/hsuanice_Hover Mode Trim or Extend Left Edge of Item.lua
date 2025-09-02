@@ -1,12 +1,13 @@
 --[[
 @description Hover Mode - Trim or Extend Left Edge of Item (Preserve Fade)
-@version 0.1.2
+@version 0.2.0
 @author hsuanice
 @about
   Trims or extends the **left edge** of audio/MIDI/empty items depending on context.  
     - Hover Mode ON: Uses mouse cursor position.  
     - Hover Mode OFF: Uses edit cursor and selected tracks.  
-    - 🧠 Special behavior: When the mouse is hovering over the **Ruler (Timeline)**, the script temporarily switches to **Edit Cursor Mode**, even if Hover Mode is enabled.  
+    - 🧠 Special behavior: When the mouse is hovering over the **Ruler (Timeline)** or **TCP area**,  
+      the script temporarily switches to **Edit Cursor Mode**, even if Hover Mode is enabled.  
     - Preserves existing fade-in shape and position.  
     - Ignores invisible items; partial visibility is accepted.
   
@@ -32,6 +33,8 @@
   hsuanice served as the workflow designer, tester, and integrator for this tool.
 
 @changelog
+  v0.2.0
+    - Added: TCP area behaves like Ruler — temporarily forces Edit Cursor Mode even if Hover Mode is ON.
   v0.1.2
     - Boundary-as-gap policy in Hover mode: when mouse ≈ item edge (± half-pixel), treat UNDER as empty.
       A now consistently EXTENDS the nearest Next-left-edge to mouse in gaps or on boundaries; no trim at edges.
@@ -67,11 +70,13 @@ local function is_hover_enabled()
   return (v == "true" or v == "1")
 end
 
-local function is_mouse_over_ruler()
+local function is_mouse_over_ruler_or_tcp()
   if not reaper.JS_Window_FromPoint then return false end
   local x, y = reaper.GetMousePosition()
   local hwnd = reaper.JS_Window_FromPoint(x, y)
-  return hwnd and reaper.JS_Window_GetClassName(hwnd) == "REAPERTimeDisplay"
+  if not hwnd then return false end
+  local class = reaper.JS_Window_GetClassName(hwnd)
+  return (class == "REAPERTimeDisplay" or class == "REAPERTCPDisplay")
 end
 
 local function mouse_timeline_pos()
@@ -267,7 +272,7 @@ local target_pos, picks
 local from_ruler = false
 
 if hover_on then
-  if is_mouse_over_ruler() then
+  if is_mouse_over_ruler_or_tcp() then
     target_pos, picks = find_items_edit_mode(get_selected_tracks())
     from_ruler = true
   else
