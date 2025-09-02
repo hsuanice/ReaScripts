@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<index version="1" name="hsuanice Scripts" commit="bcf354cd720d59be6affab75b935c1c13150b3c0">
+<index version="1" name="hsuanice Scripts" commit="f46c50757492cb1c8e4a4ece20fba3b0fb6e0cb8">
   <category name="Beta Testing">
     <reapack name="hsuanice_BWF TimeReference Embed Tool.lua" type="script" desc="Embed BWF TimeReference to Active take from Take 1 or Current Position TC">
       <version name="0.7.1" author="hsuanice" time="2025-08-14T17:52:57Z">
@@ -603,6 +603,7 @@
 {\pard \ql \f0 \sa180 \li0 \fi0 Requires: ReaImGui (install via ReaPack)\par}
 {\pard \ql \f0 \sa180 \li0 \fi0 Note: \u20351 ?\u29992 ?\u35498 ?\u26126 ?\u65288 ?\u21487 ?\u36028 ?\u22312 ? README \u25110 ?\u33139 ?\u26412 ?\u35387 ?\u35299 ?\u65289 ?\par}
 {\pard \ql \f0 \sa180 \li0 \fi0 \u27169 ?\u24335 ?\u65306 ?m:s / TC / Beats / Custom\u12290 ? Custom \u31684 ?\u26412 ? tokens\u65306 ? h, hh\u65306 ?\u23567 ?\u26178 ?\u65288 ?\u19981 ?\u35036 ?\u38646 ?\u65295 ?\u20841 ?\u20301 ?\u65289 ? m, mm\u65306 ?\u20998 ?\u37912 ?\u65288 ?0\u8211-59\u65289 ? s, ss\u65306 ?\u31186 ?\u65288 ?0\u8211-59\u65289 ? S...\u65306 ?\u23567 ?\u25976 ?\u31186 ?\u65292 ?S \u25976 ?\u37327 ? = \u20301 ?\u25976 ?\u65292 ?\u20363 ?\u22914 ? SSS = \u27627 ?\u31186 ? \u31684 ?\u20363 ?\u65306 ? hh:mm:ss \u8594 ? 01:23:45 h:mm \u8594 ? 1:23 mm:ss.SSS \u8594 ? 83:07.250\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 Reference: Script: zaibuyidao_Display Total Length Of Selected Items.lua\par}
 }
 ]]></description>
       </metadata>
@@ -666,6 +667,9 @@
       <version name="0.4.0" author="hsuanice" time="2025-09-02T18:32:45Z">
         <source main="main">https://github.com/hsuanice/ReaScripts/raw/bcf354cd720d59be6affab75b935c1c13150b3c0/Beta%20Testing/hsuanice_Reorder%20or%20sort%20selected%20items%20vertically%20Monitor.lua</source>
       </version>
+      <version name="0.4.2" author="hsuanice" time="2025-09-02T19:44:10Z">
+        <source main="main">https://github.com/hsuanice/ReaScripts/raw/f46c50757492cb1c8e4a4ece20fba3b0fb6e0cb8/Beta%20Testing/hsuanice_Reorder%20or%20sort%20selected%20items%20vertically%20Monitor.lua</source>
+      </version>
     </reapack>
     <reapack name="hsuanice_Reorder or sort selected items vertically.lua" type="script" desc="ReaImGui - Vertical Reorder and Sort (items)">
       <metadata>
@@ -722,6 +726,9 @@
       </version>
       <version name="0.5.2" author="hsuanice" time="2025-09-02T03:51:40Z">
         <source main="main">https://github.com/hsuanice/ReaScripts/raw/f454450af1597e73706ae8b6fa7ab42cd242c959/Beta%20Testing/hsuanice_Reorder%20or%20sort%20selected%20items%20vertically.lua</source>
+      </version>
+      <version name="0.5.3" author="hsuanice" time="2025-09-02T19:43:47Z">
+        <source main="main">https://github.com/hsuanice/ReaScripts/raw/c1067c6546718b463557c60b68a9fbc2c3de12c0/Beta%20Testing/hsuanice_Reorder%20or%20sort%20selected%20items%20vertically.lua</source>
       </version>
     </reapack>
     <reapack name="hsuanice_Show Frame Rate.lua" type="script" desc="ReaImGui - Show Project Frame Rate">
