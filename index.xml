@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<index version="1" name="hsuanice Scripts" commit="83ff5b5f1e96c32407bbd46d9e47ae34aed0e960">
+<index version="1" name="hsuanice Scripts" commit="38d1fe496d0a486090e5e3692cf43b9cd62e7b37">
   <category name="Beta Testing">
     <reapack name="hsuanice_BWF TimeReference Embed Tool.lua" type="script" desc="Embed BWF TimeReference to Active take from Take 1 or Current Position TC">
       <version name="0.7.1" author="hsuanice" time="2025-08-14T17:52:57Z">
@@ -181,7 +181,7 @@
 {\pard \ql \f0 \sa180 \li0 \fi0 Trims or extends the {\b left edge} of audio/MIDI/empty items depending on context.\par}
 {\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Hover Mode ON: Uses mouse cursor position.\par}
 {\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Hover Mode OFF: Uses edit cursor and selected tracks.\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab \u55358 ?\u56800 ? Special behavior: When the mouse is hovering over the {\b Ruler (Timeline)}, the script temporarily switches to {\b Edit Cursor Mode}, even if Hover Mode is enabled.\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab \u55358 ?\u56800 ? Special behavior: When the mouse is hovering over the {\b Ruler (Timeline)} or {\b TCP area},\line the script temporarily switches to {\b Edit Cursor Mode}, even if Hover Mode is enabled.\par}
 {\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Preserves existing fade-in shape and position.\par}
 {\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Ignores invisible items; partial visibility is accepted.\sa180\par}
 {\pard \ql \f0 \sa180 \li0 \fi0 \u55357 ?\u56481 ? Supports extensible hover-edit system. Hover Mode is toggled via ExtState:\line hsuanice_TrimTools / HoverMode\par}
@@ -208,6 +208,9 @@
       </version>
       <version name="0.1.2" author="hsuanice" time="2025-08-16T09:44:54Z">
         <source main="main">https://github.com/hsuanice/ReaScripts/raw/4077781c0fa32991d4ee8cfe8ba3741384ec242c/Beta%20Testing/hsuanice_Hover%20Mode%20Trim%20or%20Extend%20Left%20Edge%20of%20Item.lua</source>
+      </version>
+      <version name="0.2.0" author="hsuanice" time="2025-09-02T04:33:12Z">
+        <source main="main">https://github.com/hsuanice/ReaScripts/raw/38d1fe496d0a486090e5e3692cf43b9cd62e7b37/Beta%20Testing/hsuanice_Hover%20Mode%20Trim%20or%20Extend%20Left%20Edge%20of%20Item.lua</source>
       </version>
     </reapack>
     <reapack name="hsuanice_Hover Mode Trim or Extend Right Edge of Item.lua" type="script" desc="Hover Mode - Trim or Extend Right Edge of Item (Preserve Fade)">
