@@ -1,6 +1,6 @@
 --[[
 @description Monitor - Reorder or sort selected items vertically
-@version 0.3.13
+@version 0.3.14
 @author hsuanice
 @about
   Shows a live table of the currently selected items and all sort-relevant fields:
@@ -35,7 +35,9 @@
 
 
 
-@changelog
+  v0.3.14
+    - Restore: Added “Capture BEFORE” & “Capture AFTER” buttons to the toolbar.
+    - Feature: Auto-refresh state is now persisted across sessions.
   v0.3.13 (2025-09-03)
     - Fix: Persisted time mode & custom pattern now restore correctly.
       (Forward-declared TIME_MODE/CUSTOM_PATTERN/FORMAT and removed local shadowing in State (UI).)
@@ -190,6 +192,7 @@ local EXT_NS = "hsuanice_ReorderSort_Monitor"
 local function save_prefs()
   reaper.SetExtState(EXT_NS, "time_mode", TIME_MODE or "", true)
   reaper.SetExtState(EXT_NS, "custom_pattern", CUSTOM_PATTERN or "", true)
+  reaper.SetExtState(EXT_NS, "auto_refresh", AUTO and "1" or "0", true)
 end
 
 local function load_prefs()
@@ -215,6 +218,10 @@ local function load_prefs()
   else
     FORMAT = TFLib.make_formatter(TIME_MODE)
   end
+
+  -- restpre auto-refresh state
+  local a = reaper.GetExtState(EXT_NS, "auto_refresh")
+  if a ~= "" then AUTO = (a ~= "0") end
 end
 
 
@@ -424,7 +431,11 @@ end
 local function draw_toolbar()
   reaper.ImGui_Text(ctx, string.format("Selected items: %d", #ROWS))
   reaper.ImGui_SameLine(ctx)
-  local chg, v = reaper.ImGui_Checkbox(ctx, "Auto-refresh", AUTO); if chg then AUTO = v end
+  local chg, v = reaper.ImGui_Checkbox(ctx, "Auto-refresh", AUTO)
+  if chg then
+    AUTO = v
+    reaper.SetExtState(EXT_NS, "auto_refresh", v and "1" or "0", true)
+  end
   reaper.ImGui_SameLine(ctx)
   
 -- 四種：m:s / TC / Beats / Custom（Input 直接在 Custom 右邊）
@@ -477,6 +488,15 @@ end
 
 
   if reaper.ImGui_Button(ctx, "Refresh Now", 110, 24) then refresh_now() end
+
+  reaper.ImGui_SameLine(ctx)
+  if reaper.ImGui_Button(ctx, "Capture BEFORE", 130, 24) then
+    SNAP_BEFORE = scan_selection_rows()
+  end
+  reaper.ImGui_SameLine(ctx)
+  if reaper.ImGui_Button(ctx, "Capture AFTER", 120, 24) then
+    SNAP_AFTER = scan_selection_rows()
+  end
 
   reaper.ImGui_SameLine(ctx)
   if reaper.ImGui_Button(ctx, "Copy (TSV)", 110, 24) then
