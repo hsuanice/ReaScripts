@@ -1,6 +1,6 @@
 --[[
 @description ReaImGui - Vertical Reorder and Sort (items)
-@version 0.5.0
+@version 0.5.1
 @author hsuanice
 @about
   Provides three vertical re-arrangement modes for selected items (stacked UI):
@@ -25,6 +25,12 @@
     - Script generated and refined with ChatGPT.
 
 @changelog
+  v0.5.1 (2025-09-02)
+    - UX: Keep the main window open after actions.
+    - New: Result Summary popup (ESC to close).
+      • After any action (Reorder / Sort / Sort in Place / Copy to Sort),
+        a modal popup shows “Items / Moved / Skipped”.
+      • Close via the Close button or ESC; the main UI stays active.  
   v0.5.0 (2025-09-02)
     - New: Added "Sort in Place" for Metadata mode.
       • Works directly on existing tracks, no renaming or new tracks.
@@ -653,6 +659,35 @@ local SEL_TR_SET, SEL_TR_ORDER, ACTIVE_TRACKS, OCC, MOVES = {}, {}, {}, nil, {}
 local MOVED, SKIPPED, TOTAL = 0, 0, 0
 local SUMMARY = ""
 
+-- === Summary popup state ===
+local WANT_POPUP = false
+local POPUP_TITLE = "Result Summary"
+
+local function draw_summary_popup()
+  -- 如果剛剛要求彈窗，先開啟
+  if WANT_POPUP then
+    reaper.ImGui_OpenPopup(ctx, POPUP_TITLE)
+    WANT_POPUP = false
+  end
+
+  local flags = reaper.ImGui_WindowFlags_AlwaysAutoResize()
+  if reaper.ImGui_BeginPopupModal(ctx, POPUP_TITLE, true, flags) then
+    reaper.ImGui_Text(ctx, SUMMARY ~= "" and SUMMARY or "Done.")
+    reaper.ImGui_Spacing(ctx)
+
+    -- ESC 關閉（額外保險）
+    if esc_pressed() then
+      reaper.ImGui_CloseCurrentPopup(ctx)
+    end
+
+    if reaper.ImGui_Button(ctx, "Close", 90, 26) then
+      reaper.ImGui_CloseCurrentPopup(ctx)
+    end
+    reaper.ImGui_EndPopup(ctx)
+  end
+end
+
+
 local function compute_selection_and_tracks()
   SELECTED_ITEMS = get_selected_items()
   SELECTED_SET = {}; for _,it in ipairs(SELECTED_ITEMS) do SELECTED_SET[it]=true end
@@ -715,11 +750,15 @@ local function draw_confirm()
   reaper.ImGui_Text(ctx, string.format("Selected: %d item(s) across %d track(s).", #SELECTED_ITEMS, #ACTIVE_TRACKS))
   reaper.ImGui_Spacing(ctx)
 
+  -- Draw result popup if needed
+  draw_summary_popup()
+
   -- 1) Reorder
   reaper.ImGui_Text(ctx, "Reorder")
   if reaper.ImGui_Button(ctx, "Reorder (fill upward)", 220, 28) then
     MODE="reorder"; prepare_plan(); run_engine()
-    SUMMARY=("Completed. Items=%d, Moved=%d, Skipped=%d."):format(TOTAL,MOVED,SKIPPED); STATE="summary"
+    SUMMARY = ("Completed. Items=%d, Moved=%d, Skipped=%d."):format(TOTAL, MOVED, SKIPPED)
+    WANT_POPUP = true
   end
 
   reaper.ImGui_Separator(ctx)
@@ -751,20 +790,19 @@ local function draw_confirm()
     if reaper.ImGui_Button(ctx, "Sort in Place", 220, 26) then
       -- 使用現有的「Sort Vertically」引擎，但 key 來自 Metadata
       MODE = "sort"
-      -- 告訴引擎現在是在 Metadata 模式下排序
-      sort_key_idx = 3  -- 1=Take, 2=File, 3=Metadata（保持現狀，確保用 meta_key_*）
+      sort_key_idx = 3
       prepare_plan()
       run_engine()
       SUMMARY = ("Completed. Items=%d, Moved=%d, Skipped=%d."):format(TOTAL, MOVED, SKIPPED)
-      STATE = "summary"
+      WANT_POPUP = true
     end
     reaper.ImGui_SameLine(ctx)
 
     -- 既有的 Copy to Sort（保留原行為：複製到新軌）
     if reaper.ImGui_Button(ctx, "Copy to Sort", 220, 26) then
       run_copy_to_new_tracks(meta_sort_mode, sort_asc)
-      SUMMARY = ""
-      STATE = "summary"
+      SUMMARY = "Completed Copy to Sort."
+      WANT_POPUP = true
     end
 
     -- Preview（選擇性資訊，放在按鈕之後）
@@ -791,17 +829,15 @@ local function draw_confirm()
     reaper.ImGui_Spacing(ctx)
     if reaper.ImGui_Button(ctx, "Run Sort Vertically", 220, 26) then
       MODE="sort"; prepare_plan(); run_engine()
-      SUMMARY=("Completed. Items=%d, Moved=%d, Skipped=%d."):format(TOTAL,MOVED,SKIPPED); STATE="summary"
+      SUMMARY = ("Completed. Items=%d, Moved=%d, Skipped=%d."):format(TOTAL, MOVED, SKIPPED)
+      WANT_POPUP = true
     end
   end
 
   reaper.ImGui_Separator(ctx)
 end
 
-local function draw_summary()
-  if SUMMARY ~= "" then reaper.ImGui_Text(ctx, SUMMARY); reaper.ImGui_Spacing(ctx) end
-  if reaper.ImGui_Button(ctx, "Close", 90, 26) or esc_pressed() then return true end
-end
+
 
 local function loop()
   reaper.ImGui_SetNextWindowSize(ctx, 720, 560, reaper.ImGui_Cond_FirstUseEver())
