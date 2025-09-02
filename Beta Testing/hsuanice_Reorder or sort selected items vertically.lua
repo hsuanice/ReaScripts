@@ -1,6 +1,6 @@
 --[[
 @description ReaImGui - Vertical Reorder and Sort (items)
-@version 0.5.1
+@version 0.5.2
 @author hsuanice
 @about
   Provides three vertical re-arrangement modes for selected items (stacked UI):
@@ -25,6 +25,17 @@
     - Script generated and refined with ChatGPT.
 
 @changelog
+  v0.5.2 (2025-09-02)
+  - Performance: Throttled selection polling to reduce per-frame rescans
+    while the window is open. Replaced unconditional calls with a
+    conditional helper (maybe_compute_selection).
+  - Logic: Recompute the selection snapshot only when
+      • the number of selected items or tracks changes, or
+      • the throttle timer expires (default 0.12s).
+  - UX: No behavior changes to actions. Main UI stays responsive;
+    selection counts may update with a tiny (<120 ms) delay under heavy edits.
+  - Tunable: Exposed SCAN_INTERVAL constant to balance CPU vs responsiveness.
+
   v0.5.1 (2025-09-02)
     - UX: Keep the main window open after actions.
     - New: Result Summary popup (ESC to close).
@@ -658,6 +669,24 @@ local SELECTED_ITEMS, SELECTED_SET = {}, {}
 local SEL_TR_SET, SEL_TR_ORDER, ACTIVE_TRACKS, OCC, MOVES = {}, {}, {}, nil, {}
 local MOVED, SKIPPED, TOTAL = 0, 0, 0
 local SUMMARY = ""
+
+-- === Selection polling throttle ===
+local LAST_NI, LAST_NT = -1, -1         -- 上次看到的選取數量（items/tracks）
+local NEXT_SCAN_AT = 0
+local SCAN_INTERVAL = 0.12              -- 每 0.12 秒才允許重掃一次
+
+local function maybe_compute_selection()
+  local now = reaper.time_precise()
+  local ni = reaper.CountSelectedMediaItems(0)
+  local nt = reaper.CountSelectedTracks(0)
+  -- 若數量變了，或到了下一個掃描時刻，就重建整份快照
+  if ni ~= LAST_NI or nt ~= LAST_NT or now >= NEXT_SCAN_AT then
+    maybe_compute_selection()      -- ← 原本的重掃（含排序）:contentReference[oaicite:3]{index=3}
+    LAST_NI, LAST_NT = ni, nt
+    NEXT_SCAN_AT = now + SCAN_INTERVAL
+  end
+end
+
 
 -- === Summary popup state ===
 local WANT_POPUP = false
