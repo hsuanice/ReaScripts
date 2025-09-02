@@ -1,16 +1,16 @@
 --[[
 @description Monitor - Reorder or sort selected items vertically
-@version 0.2.2
+@version 0.3.1
 @author hsuanice
 @about
   Shows a live table of the currently selected items and all sort-relevant fields:
     • Track Index / Track Name
     • Take Name
-    • File Name
+    • Source File
     • Metadata Track Name (resolved by Interleave, Wave Agent–style)
     • Channel Number (recorder channel, TRK#)
     • Interleave (1..N from REAPER take channel mode: Mono-of-N)
-    • Item start time
+    • Item start/end (toggle Seconds vs Timecode, follows project frame rate)
 
   Also supports:
     • Capture BEFORE / AFTER snapshots
@@ -19,6 +19,13 @@
   Requires: ReaImGui (install via ReaPack)
 
 @changelog
+  v0.3.1 (2025-09-02)
+    - Fix: Restored missing helpers from 0.2.x (selection scan, save dialogs, ImGui context, etc.)
+           to resolve "attempt to call a nil value (global 'refresh_now')" and related issues.
+    - Feature (from 0.3.0): Toolbar checkbox to toggle Start/End display:
+        • Seconds (6 decimals) or
+        • Timecode (uses project frame rate via format_timestr_pos mode=5).
+    - Exports (TSV/CSV) honor the current display mode.
   v0.2.2 (2025-09-01)
     - UI: Show "Metadata Read vX.Y.Z" in the window title (computed before ImGui_Begin).
     - Cleanup: Optionally remove the toolbar version label to avoid duplication.
@@ -89,57 +96,8 @@ local META = dofile(
 assert(META and (META.VERSION or "0") >= "0.2.0",
        "Please update 'hsuanice Metadata Read' to >= 0.2.0")
 
-
--- ===== Override local helpers to use Library =====
-do
-  -- collect_fields_for_item → use META.collect_item_fields + row assembly
-  if collect_fields_for_item ~= nil then
-    local _old_collect = collect_fields_for_item
-  end
-  function collect_fields_for_item(item)
-    local f = META.collect_item_fields(item)
-    local row = {}
-
-    -- Track index/name
-    local tr = reaper.GetMediaItemTrack(item)
-    row.track_idx  = tr and math.floor(reaper.GetMediaTrackInfo_Value(tr, "IP_TRACKNUMBER") or 0) or 0
-    row.track_name = tr and (select(2, reaper.GetTrackName(tr, "")) or "") or ""
-
-    -- File/take from fields
-    row.file_name  = f.srcfile or ""
-    row.take_name  = f.curtake or ""
-
-    -- Interleave & meta name/chan（全部交給 Library）
-    local idx = META.guess_interleave_index(item, f) or f.__chan_index or 1
-    f.__chan_index = idx  -- 讓 Library 的 token 引擎知道目前 interleave
-
-    -- 直接用 Library 的 token 展開（false = 不做檔名安全清理，保留原字）
-    local name = META.expand("${trk}",    f, nil, false)
-    local ch   = tonumber(META.expand("${chnum}", f, nil, false)) or idx
-
-    row.interleave    = idx
-    row.meta_trk_name = name or ""
-    row.channel_num   = ch
-
-    -- Item bounds（少了這段就不會回傳任何列）
-    local pos = reaper.GetMediaItemInfo_Value(item, "D_POSITION") or 0
-    local len = reaper.GetMediaItemInfo_Value(item, "D_LENGTH") or 0
-    row.start_time = pos
-    row.end_time   = pos + len
-
-    -- 保留原始欄位（可給 Copy/除錯）
-    row.__fields = f
-
-    return row
-
-
-
-  end
-end
-
-
 ---------------------------------------
--- Dependency check
+-- Dependency check for ImGui
 ---------------------------------------
 if not reaper or not reaper.ImGui_CreateContext then
   reaper.MB("ReaImGui is required (install via ReaPack).", "Missing dependency", 0)
@@ -149,14 +107,9 @@ end
 ---------------------------------------
 -- ImGui setup
 ---------------------------------------
-local ctx = reaper.ImGui_CreateContext('eorder or sort selected items Monitor')
+local ctx = reaper.ImGui_CreateContext('Reorder or sort selected items Monitor')
 local LIBVER = (META and META.VERSION) and (' | Metadata Read v'..tostring(META.VERSION)) or ''
-
--- 使用預設字型，避免某些版本沒有 Attach/PushFont
--- local FONT = reaper.ImGui_CreateFont('sans-serif', 14)
--- if reaper.ImGui_Attach then reaper.ImGui_Attach(ctx, FONT) end
-
-local FLT_MIN = 1.175494e-38 -- 用於 -FLT_MIN 佔滿寬度
+local FLT_MIN = 1.175494e-38
 local function TF(name) local f = reaper[name]; return f and f() or 0 end
 local function esc_pressed()
   if reaper.ImGui_Key_Escape and reaper.ImGui_IsKeyPressed then
@@ -172,61 +125,32 @@ local function item_start(it) return reaper.GetMediaItemInfo_Value(it,"D_POSITIO
 local function item_track(it) return reaper.GetMediaItemTrack(it) end
 local function track_index(tr) return math.floor(reaper.GetMediaTrackInfo_Value(tr,"IP_TRACKNUMBER") or 0) end
 local function track_name(tr) local _, n = reaper.GetTrackName(tr, "") return n end
-local function take_of(it) local tk=it and reaper.GetActiveTake(it); if tk and reaper.ValidatePtr2(0,tk,"MediaItem_Take*") then return tk end end
-local function src_of_take(tk) return tk and reaper.GetMediaItemTake_Source(tk) or nil end
 
--- Unwrap SECTION → return the real parent source (or original if not SECTION)
-local function resolved_source_of_take(take)
-  if not take then return nil end
-  local src = reaper.GetMediaItemTake_Source(take)
-  if not src then return nil end
+local function fmt_seconds(s) if not s then return "" end return string.format("%.6f", s) end
+local function fmt_tc(s)      if not s then return "" end return reaper.format_timestr_pos(s, "", 5) end
 
-  local function stype(s)
-    local ok, t = pcall(reaper.GetMediaSourceType, s, "")
-    return ok and t or ""
+-- file ops
+local function choose_save_path(default_name, filter)
+  if reaper.JS_Dialog_BrowseForSaveFile then
+    local ok, fn = reaper.JS_Dialog_BrowseForSaveFile("Save", "", default_name, filter)
+    if ok and fn and fn ~= "" then return fn end
+    return nil
   end
-
-  local t = stype(src)
-  while t == "SECTION" do
-    local ok, parent = pcall(reaper.GetMediaSourceParent, src)
-    if not ok or not parent then break end
-    src = parent
-    t = stype(src)
-  end
-  return src
+  local proj, projfn = reaper.EnumProjects(-1, "")
+  local base = projfn ~= "" and projfn:match("^(.*)[/\\]") or reaper.GetResourcePath()
+  return (base or reaper.GetResourcePath()) .. "/" .. default_name
 end
 
--- Safe filename for any source (after unwrapped): returns full path; "" if none
-local function source_file_path(src)
-  if not src then return "" end
-  local ok, path = pcall(reaper.GetMediaSourceFileName, src, "")
-  if ok and type(path) == "string" then return path end
-  return ""
+local function write_text_file(path, text)
+  if not path or path == "" then return false end
+  local f = io.open(path, "wb"); if not f then return false end
+  f:write(text or ""); f:close(); return true
 end
 
-local function item_len(it)   return reaper.GetMediaItemInfo_Value(it,"D_LENGTH") end
+local function timestamp()
+  local t=os.date("*t"); return string.format("%04d%02d%02d_%02d%02d%02d",t.year,t.month,t.day,t.hour,t.min,t.sec)
+end
 
-
-
-
-
-
-
-
-local function basename(p) p=tostring(p or ""); return p:match("([^/\\]+)$") or p end
-local function fmt_time(s) if not s then return "" end return string.format("%.6f", s) end
-
----------------------------------------
--- Metadata helpers (BWF/iXML)
----------------------------------------
--- IXML TRACK_LIST → build both:
---   trk_table[ch] = name
---   interleave_list = { {name=..., chan=...}, ... }  -- order = interleave (1..N)
--- Fallback: parse sTRK#=NAME from Description (BWF / generic)
--- Guess Interleave index 1..N using REAPER take channel mode: Mono-of-N (3..66 → i = cm-2)
--- Resolve "$trk" by Interleave (Wave Agent style).
--- Prefer interleave_list if present; fallback: build from TRK# sorted by channel number.
--- Collect all fields for a single item
 ---------------------------------------
 -- Selection scan
 ---------------------------------------
@@ -245,6 +169,42 @@ local function get_selected_items_sorted()
   return t
 end
 
+---------------------------------------
+-- Collect item fields (uses Library)
+---------------------------------------
+local function collect_fields_for_item(item)
+  local f = META.collect_item_fields(item)
+  local row = {}
+
+  -- Track index/name
+  local tr = reaper.GetMediaItemTrack(item)
+  row.track_idx  = tr and math.floor(reaper.GetMediaTrackInfo_Value(tr, "IP_TRACKNUMBER") or 0) or 0
+  row.track_name = tr and (select(2, reaper.GetTrackName(tr, "")) or "") or ""
+
+  -- File/take from fields
+  row.file_name  = f.srcfile or ""
+  row.take_name  = f.curtake or ""
+
+  -- Interleave & meta name/chan（Library）
+  local idx = META.guess_interleave_index(item, f) or f.__chan_index or 1
+  f.__chan_index = idx
+  local name = META.expand("${trk}", f, nil, false)
+  local ch   = tonumber(META.expand("${chnum}", f, nil, false)) or idx
+
+  row.interleave    = idx
+  row.meta_trk_name = name or ""
+  row.channel_num   = ch
+
+  -- Item bounds
+  local pos = reaper.GetMediaItemInfo_Value(item, "D_POSITION") or 0
+  local len = reaper.GetMediaItemInfo_Value(item, "D_LENGTH") or 0
+  row.start_time = pos
+  row.end_time   = pos + len
+
+  row.__fields = f
+  return row
+end
+
 local function scan_selection_rows()
   local its = get_selected_items_sorted()
   local rows = {}
@@ -252,6 +212,22 @@ local function scan_selection_rows()
     rows[#rows+1] = collect_fields_for_item(it)
   end
   return rows
+end
+
+---------------------------------------
+-- State (UI)
+---------------------------------------
+local AUTO = true
+local SHOW_TC = true
+local ROWS = {}
+local SNAP_BEFORE, SNAP_AFTER = {}, {}
+
+local function format_time(val)
+  return SHOW_TC and fmt_tc(val) or fmt_seconds(val)
+end
+
+local function refresh_now()
+  ROWS = scan_selection_rows()
 end
 
 ---------------------------------------
@@ -280,62 +256,24 @@ local function build_table_text(fmt, rows)
       esc(r.meta_trk_name),
       esc(r.channel_num or ""),
       esc(r.interleave or ""),
-      esc(fmt_time(r.start_time)),
-      esc(fmt_time(r.end_time)), 
+      esc(format_time(r.start_time)),
+      esc(format_time(r.end_time)),
     }, sep)
   end
   return table.concat(out, "\n")
-end
-
-local function choose_save_path(default_name, filter)
-  if reaper.JS_Dialog_BrowseForSaveFile then
-    local ok, fn = reaper.JS_Dialog_BrowseForSaveFile("Save", "", default_name, filter)
-    if ok and fn and fn ~= "" then return fn end
-  end
-  -- 沒有 JS_ReaScriptAPI：直接放到專案資料夾
-  local proj, projfn = reaper.EnumProjects(-1, "")
-  local base = projfn ~= "" and projfn:match("^(.*)[/\\]") or reaper.GetResourcePath()
-  local p = (base or reaper.GetResourcePath()) .. "/" .. default_name
-  reaper.ShowMessageBox("JS_ReaScriptAPI not installed.\nSaved to:\n"..p, "Info", 0)
-  return p
-end
-
-local function write_text_file(path, text)
-  local f = io.open(path, "wb"); if not f then return false end
-  f:write(text or ""); f:close(); return true
-end
-
-local function timestamp()
-  local t=os.date("*t"); return string.format("%04d%02d%02d_%02d%02d%02d",t.year,t.month,t.day,t.hour,t.min,t.sec)
-end
-
----------------------------------------
--- State (UI)
----------------------------------------
-local AUTO = true
-local ROWS = {}
-local SNAP_BEFORE, SNAP_AFTER = {}, {}
-
-local function refresh_now()
-  ROWS = scan_selection_rows()
 end
 
 ---------------------------------------
 -- UI
 ---------------------------------------
 local function draw_toolbar()
-  reaper.ImGui_SameLine(ctx)
-
   reaper.ImGui_Text(ctx, string.format("Selected items: %d", #ROWS))
   reaper.ImGui_SameLine(ctx)
   local chg, v = reaper.ImGui_Checkbox(ctx, "Auto-refresh", AUTO); if chg then AUTO = v end
   reaper.ImGui_SameLine(ctx)
+  local chg2, v2 = reaper.ImGui_Checkbox(ctx, "Show Timecode", SHOW_TC); if chg2 then SHOW_TC = v2 end
+  reaper.ImGui_SameLine(ctx)
   if reaper.ImGui_Button(ctx, "Refresh Now", 110, 24) then refresh_now() end
-
-  reaper.ImGui_SameLine(ctx)
-  if reaper.ImGui_Button(ctx, "Capture BEFORE", 130, 24) then SNAP_BEFORE = scan_selection_rows() end
-  reaper.ImGui_SameLine(ctx)
-  if reaper.ImGui_Button(ctx, "Capture AFTER", 120, 24) then SNAP_AFTER = scan_selection_rows() end
 
   reaper.ImGui_SameLine(ctx)
   if reaper.ImGui_Button(ctx, "Copy (TSV)", 110, 24) then
@@ -364,8 +302,8 @@ local function draw_table(rows, height)
     reaper.ImGui_TableSetupColumn(ctx, "Meta Track Name")
     reaper.ImGui_TableSetupColumn(ctx, "Chan#", TF('ImGui_TableColumnFlags_WidthFixed'), 64)
     reaper.ImGui_TableSetupColumn(ctx, "Interleave", TF('ImGui_TableColumnFlags_WidthFixed'), 88)
-    reaper.ImGui_TableSetupColumn(ctx, "Start", TF('ImGui_TableColumnFlags_WidthFixed'), 96)
-    reaper.ImGui_TableSetupColumn(ctx, "End",   TF('ImGui_TableColumnFlags_WidthFixed'), 96)
+    reaper.ImGui_TableSetupColumn(ctx, SHOW_TC and "Start (TC)" or "Start (s)", TF('ImGui_TableColumnFlags_WidthFixed'), 120)
+    reaper.ImGui_TableSetupColumn(ctx, SHOW_TC and "End (TC)"   or "End (s)",   TF('ImGui_TableColumnFlags_WidthFixed'), 120)
     reaper.ImGui_TableHeadersRow(ctx)
 
     for i, r in ipairs(rows or {}) do
@@ -378,8 +316,8 @@ local function draw_table(rows, height)
       reaper.ImGui_TableNextColumn(ctx); reaper.ImGui_TextWrapped(ctx, tostring(r.meta_trk_name or ""))
       reaper.ImGui_TableNextColumn(ctx); reaper.ImGui_Text(ctx, tostring(r.channel_num or ""))
       reaper.ImGui_TableNextColumn(ctx); reaper.ImGui_Text(ctx, tostring(r.interleave or ""))
-      reaper.ImGui_TableNextColumn(ctx); reaper.ImGui_Text(ctx, fmt_time(r.start_time))
-      reaper.ImGui_TableNextColumn(ctx); reaper.ImGui_Text(ctx, fmt_time(r.end_time))
+      reaper.ImGui_TableNextColumn(ctx); reaper.ImGui_Text(ctx, format_time(r.start_time))
+      reaper.ImGui_TableNextColumn(ctx); reaper.ImGui_Text(ctx, format_time(r.end_time))
     end
 
     reaper.ImGui_EndTable(ctx)
@@ -414,12 +352,10 @@ local function loop()
 
   reaper.ImGui_SetNextWindowSize(ctx, 1000, 640, reaper.ImGui_Cond_FirstUseEver())
   local flags = reaper.ImGui_WindowFlags_NoCollapse()
-  reaper.ImGui_Begin(ctx, "Reorder or Sort — Monitor & Debug"..LIBVER, true, flags)
-  if open == nil then open = true end
+  local open = reaper.ImGui_Begin(ctx, "Reorder or Sort — Monitor & Debug"..LIBVER, true, flags)
 
-  -- 無 guard：一律繪製內容，避免某些版本/停駐情境 visible=false 導致空白
   draw_toolbar()
-  draw_snapshots()            -- ← 先顯示 BEFORE/AFTER 兩行
+  draw_snapshots()
   reaper.ImGui_Spacing(ctx)
   draw_table(ROWS, 360)
 
