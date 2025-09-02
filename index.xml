@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<index version="1" name="hsuanice Scripts" commit="80b48f8c06843079a7e3d71c26807a1cf3bbf572">
+<index version="1" name="hsuanice Scripts" commit="30b86aa159023f2e06245af1cbb3732818ce4446">
   <category name="Beta Testing">
     <reapack name="hsuanice_BWF TimeReference Embed Tool.lua" type="script" desc="Embed BWF TimeReference to Active take from Take 1 or Current Position TC">
       <version name="0.7.1" author="hsuanice" time="2025-08-14T17:52:57Z">
@@ -601,6 +601,8 @@
 {\pard \ql \f0 \sa180 \li0 \fi0 Shows a live table of the currently selected items and all sort-relevant fields: \u8226 ? Track Index / Track Name \u8226 ? Take Name \u8226 ? Source File \u8226 ? Metadata Track Name (resolved by Interleave, Wave Agent\u8211-style) \u8226 ? Channel Number (recorder channel, TRK#) \u8226 ? Interleave (1..N from REAPER take channel mode: Mono-of-N) \u8226 ? Item start/end (toggle Seconds vs Timecode, follows project frame rate)\par}
 {\pard \ql \f0 \sa180 \li0 \fi0 Also supports: \u8226 ? Capture BEFORE / AFTER snapshots \u8226 ? Export or Copy (TSV/CSV) for either the live view or snapshots\par}
 {\pard \ql \f0 \sa180 \li0 \fi0 Requires: ReaImGui (install via ReaPack)\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 Note: \u20351 ?\u29992 ?\u35498 ?\u26126 ?\u65288 ?\u21487 ?\u36028 ?\u22312 ? README \u25110 ?\u33139 ?\u26412 ?\u35387 ?\u35299 ?\u65289 ?\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 \u27169 ?\u24335 ?\u65306 ?m:s / TC / Beats / Custom\u12290 ? Custom \u31684 ?\u26412 ? tokens\u65306 ? h, hh\u65306 ?\u23567 ?\u26178 ?\u65288 ?\u19981 ?\u35036 ?\u38646 ?\u65295 ?\u20841 ?\u20301 ?\u65289 ? m, mm\u65306 ?\u20998 ?\u37912 ?\u65288 ?0\u8211-59\u65289 ? s, ss\u65306 ?\u31186 ?\u65288 ?0\u8211-59\u65289 ? S...\u65306 ?\u23567 ?\u25976 ?\u31186 ?\u65292 ?S \u25976 ?\u37327 ? = \u20301 ?\u25976 ?\u65292 ?\u20363 ?\u22914 ? SSS = \u27627 ?\u31186 ? \u31684 ?\u20363 ?\u65306 ? hh:mm:ss \u8594 ? 01:23:45 h:mm \u8594 ? 1:23 mm:ss.SSS \u8594 ? 83:07.250\par}
 }
 ]]></description>
       </metadata>
@@ -636,6 +638,9 @@
       </version>
       <version name="0.3.6" author="hsuanice" time="2025-09-02T15:22:10Z">
         <source main="main">https://github.com/hsuanice/ReaScripts/raw/80b48f8c06843079a7e3d71c26807a1cf3bbf572/Beta%20Testing/hsuanice_Reorder%20or%20sort%20selected%20items%20vertically%20Monitor.lua</source>
+      </version>
+      <version name="0.3.7" author="hsuanice" time="2025-09-02T16:13:11Z">
+        <source main="main">https://github.com/hsuanice/ReaScripts/raw/30b86aa159023f2e06245af1cbb3732818ce4446/Beta%20Testing/hsuanice_Reorder%20or%20sort%20selected%20items%20vertically%20Monitor.lua</source>
       </version>
     </reapack>
     <reapack name="hsuanice_Reorder or sort selected items vertically.lua" type="script" desc="ReaImGui - Vertical Reorder and Sort (items)">
