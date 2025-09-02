@@ -1,6 +1,6 @@
 --[[
 @description Monitor - Reorder or sort selected items vertically
-@version 0.3.14
+@version 0.3.15
 @author hsuanice
 @about
   Shows a live table of the currently selected items and all sort-relevant fields:
@@ -34,6 +34,11 @@
 
 
 
+
+@changelog
+  v0.3.15 (2025-09-03)
+    - New: Added “Show BEFORE” and “Show AFTER” buttons in the snapshot section (inline with Copy/Save).
+    - UX: “Refresh Now” resets the table view back to Live (from Before/After).
 
   v0.3.14
     - Restore: Added “Capture BEFORE” & “Capture AFTER” buttons to the toolbar.
@@ -370,6 +375,7 @@ end
 -- State (UI)
 ---------------------------------------
 local AUTO = true
+local TABLE_SOURCE = "live"   -- "live" | "before" | "after"
 
 -- Display mode state (persisted)
 TIME_MODE = TFLib.MODE.MS        -- 預設 m:s；load_prefs() 會覆寫為上次選擇
@@ -558,6 +564,11 @@ local function draw_snapshots()
     if p then write_text_file(p, build_table_text("tsv", SNAP_BEFORE)) end
   end
 
+  reaper.ImGui_SameLine(ctx)
+  if reaper.ImGui_Button(ctx, "Show BEFORE", 130, 22) then
+    TABLE_SOURCE = "before"
+  end
+
   reaper.ImGui_Spacing(ctx)
   reaper.ImGui_Text(ctx, string.format("Snapshot AFTER : %d rows  ", #SNAP_AFTER)); reaper.ImGui_SameLine(ctx)
   if reaper.ImGui_Button(ctx, "Copy AFTER (TSV)", 150, 22) then reaper.ImGui_SetClipboardText(ctx, build_table_text("tsv", SNAP_AFTER)) end
@@ -566,6 +577,13 @@ local function draw_snapshots()
     local p = choose_save_path("ReorderSort_After_"..timestamp()..".tsv","Tab-separated (*.tsv)\0*.tsv\0All (*.*)\0*.*\0")
     if p then write_text_file(p, build_table_text("tsv", SNAP_AFTER)) end
   end
+
+  reaper.ImGui_SameLine(ctx)
+  if reaper.ImGui_Button(ctx, "Show AFTER", 120, 22) then
+    TABLE_SOURCE = "after"
+  end
+
+
 end
 
 ---------------------------------------
@@ -581,7 +599,11 @@ local function loop()
   draw_toolbar()
   draw_snapshots()
   reaper.ImGui_Spacing(ctx)
-  draw_table(ROWS, 360)
+  local rows_to_show = ROWS
+  if     TABLE_SOURCE == "before" then rows_to_show = SNAP_BEFORE
+  elseif TABLE_SOURCE == "after"  then rows_to_show = SNAP_AFTER
+  end
+  draw_table(rows_to_show, 360)
 
   reaper.ImGui_End(ctx)
 
