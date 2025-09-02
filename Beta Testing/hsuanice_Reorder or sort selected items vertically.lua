@@ -1,6 +1,6 @@
 --[[
 @description ReaImGui - Vertical Reorder and Sort (items)
-@version 0.5.2
+@version 0.5.3
 @author hsuanice
 @about
   Provides three vertical re-arrangement modes for selected items (stacked UI):
@@ -25,6 +25,17 @@
     - Script generated and refined with ChatGPT.
 
 @changelog
+  v0.5.3 (2025-09-03)
+    - Feature: Auto-capture hooks for Monitor integration.
+      Emits an ExtState signal before/after operations so the Monitor script can snapshot automatically.
+        • Namespace: "hsuanice_ReorderSort_Signal"
+        • Key:       "capture"
+        • Values:    "before:<timestamp>", "after:<timestamp>"
+      Covered actions: Reorder, Sort vertically, Sort-in-place (if present), and Copy-to-Sort (new tracks).
+    - Implementation: Added helper emit_capture(tag) and invoked it at the start ("before") and end ("after")
+      of the execution paths (run_engine / run_copy_to_new_tracks). Signals are non-persistent (SetExtState …, false).
+    - Safety: No dependency on the Monitor; if it’s not running the signals are simply ignored.
+
   v0.5.2 (2025-09-02)
   - Performance: Throttled selection polling to reduce per-frame rescans
     while the window is open. Replaced unconditional calls with a
@@ -142,6 +153,42 @@ local function take_of(it) local tk=it and reaper.GetActiveTake(it); if tk and r
 local function source_of_take(tk) return tk and reaper.GetMediaItemTake_Source(tk) or nil end
 local function src_path(src) local ok,p=reaper.GetMediaSourceFileName(src,""); return ok and (p or "") or (p or "") end
 local function path_basename(p) p=tostring(p or ""); return p:match("([^/\\]+)$") or p end
+
+
+
+
+-- === Cross-script signal for Monitor auto-capture ===
+local SIG_NS = "hsuanice_ReorderSort_Signal"
+
+
+-- === Monitor auto-capture preference ===
+local CAPTURE_ON = (reaper.GetExtState(SIG_NS, "enable") == "1")
+
+local function set_capture_enabled(on)
+  CAPTURE_ON = not not on
+  -- 持久化，重開 REAPER 仍保留
+  reaper.SetExtState(SIG_NS, "enable", CAPTURE_ON and "1" or "0", true)
+end
+
+-- 發訊號（只有在 CAPTURE_ON==true 才送）
+local function emit_capture(tag)  -- tag = "before" | "after"
+  if not CAPTURE_ON then return end
+  local key = (tag == "before") and "capture_before" or "capture_after"
+  local payload_key = (tag == "before") and "snapshot_before" or "snapshot_after"
+  reaper.SetExtState(SIG_NS, key, tostring(reaper.time_precise()), false)
+  reaper.SetExtState(SIG_NS, payload_key, snapshot_rows_tsv_from_selection(), false)
+end
+
+
+-- 記憶使用者偏好（你現有的 CAPTURE_ON / set_capture_enabled 保留）
+-- ...
+
+local function emit_capture(tag)  -- tag = "before" | "after"
+  if not CAPTURE_ON then return end
+  local key = (tag == "before") and "capture_before" or "capture_after"
+  reaper.SetExtState(SIG_NS, key, tostring(reaper.time_precise()), false)
+end
+
 
 ---------------------------------------
 -- 選取集合
@@ -384,6 +431,65 @@ local function collect_fields(it)
   return t
 end
 
+-- === Snapshot payload (TSV) ===
+local function snapshot_rows_tsv_from_selection()
+  local items = get_selected_items()
+  local sep = "\t"
+  local out = {}
+  local function esc(s)
+    s = tostring(s or "")
+    s = s:gsub("\r"," "):gsub("\n"," "):gsub("\t"," ")
+    return s
+  end
+  -- header（與 Monitor 的匯出欄位一致）
+  out[#out+1] = table.concat({
+    "#","TrackIdx","TrackName","TakeName","Source File",
+    "MetaTrackName","Channel#","Interleave","Mute","ColorHex","StartTime","EndTime"
+  }, sep)
+
+  for i, it in ipairs(items) do
+    -- 這段做法與 Monitor 的 collect_fields_for_item 對齊 :contentReference[oaicite:1]{index=1}
+    local f = META.collect_item_fields(it)
+    local tr = item_track(it)
+    local track_idx  = tr and track_index(tr) or 0
+    local track_name = tr and (select(2, reaper.GetTrackName(tr, "")) or "") or ""
+    local file_name  = f.srcfile or ""
+    local take_name  = f.curtake or ""
+    local idx = META.guess_interleave_index(it, f) or f.__chan_index or 1
+    f.__chan_index = idx
+    local meta_trk_name = META.expand("${trk}", f, nil, false) or ""
+    local channel_num   = tonumber(META.expand("${chnum}", f, nil, false)) or idx
+    local pos = reaper.GetMediaItemInfo_Value(it, "D_POSITION") or 0
+    local len = reaper.GetMediaItemInfo_Value(it, "D_LENGTH") or 0
+    local muted = (reaper.GetMediaItemInfo_Value(it, "B_MUTE") or 0) > 0.5
+    local native = reaper.GetDisplayedMediaItemColor(it) or 0
+    local color_hex = ""
+    if native ~= 0 then
+      local r,g,b = reaper.ColorFromNative(native)
+      color_hex = string.format("#%02X%02X%02X", r,g,b)
+    end
+
+    out[#out+1] = table.concat({
+      esc(i),
+      esc(track_idx),
+      esc(track_name),
+      esc(take_name),
+      esc(file_name),
+      esc(meta_trk_name),
+      esc(channel_num),
+      esc(idx),
+      esc(muted and "1" or "0"),
+      esc(color_hex),
+      esc(pos),
+      esc(pos + len),
+    }, sep)
+  end
+
+  return table.concat(out, "\n")
+end
+
+
+
 -- 解析：從檔名推 channel；優先用 TRK{ch} 取 name；最後才用 $trk 的 "Name (ch N)"
 local function extract_name_and_chan(fields, name_key)
   local k = normalize_key(name_key)
@@ -480,7 +586,7 @@ end
 local function build_preview_pairs(items)
   PREVIEW_PAIRS = {}
   local seen = {}
-  local sample = math.min(80, #items)
+  local sample = math.min(10, #items)
   for i=1, sample do
     local f = META.collect_item_fields(items[i])
     for ch=1,64 do
@@ -536,6 +642,7 @@ local ORDER_BY_NAME_ONLY = false
 -- mode: 1=Track Name, 2=Channel Number
 -- asc : true=Ascending, false=Descending
 local function run_copy_to_new_tracks(mode, asc)
+  emit_capture("before")              -- ★ 新增
   local items = get_selected_items()
   if #items==0 then return end
   reaper.Undo_BeginBlock()
@@ -653,6 +760,7 @@ local function run_copy_to_new_tracks(mode, asc)
 
   reaper.Undo_EndBlock("Copy selected items to NEW tracks by metadata", -1)
   reaper.UpdateArrange()
+  emit_capture("after")               -- ★ 新增
   local mode_msg = (mode==1) and "Track Name" or "Channel Number"
   local order_msg = asc and "Ascending" or "Descending"
   reaper.MB(("Completed.\nNew tracks: %d\nItems copied: %d\nMode: %s (%s).")
@@ -681,7 +789,7 @@ local function maybe_compute_selection()
   local nt = reaper.CountSelectedTracks(0)
   -- 若數量變了，或到了下一個掃描時刻，就重建整份快照
   if ni ~= LAST_NI or nt ~= LAST_NT or now >= NEXT_SCAN_AT then
-    maybe_compute_selection()      -- ← 原本的重掃（含排序）:contentReference[oaicite:3]{index=3}
+    compute_selection_and_tracks()
     LAST_NI, LAST_NT = ni, nt
     NEXT_SCAN_AT = now + SCAN_INTERVAL
   end
@@ -763,12 +871,17 @@ local function prepare_plan()
 end
 
 local function run_engine()
+  emit_capture("before")                     -- ★ 新增：通知 Monitor 取 BEFORE
   reaper.Undo_BeginBlock()
   apply_moves(MOVES)
   MOVED = #MOVES
-  reaper.Undo_EndBlock((MODE=="reorder") and "Reorder (fill upward) selected items" or "Sort selected items vertically", -1)
+  reaper.Undo_EndBlock((MODE=="reorder") and
+    "Reorder (fill upward) selected items" or
+    "Sort selected items vertically", -1)
   reaper.UpdateArrange()
+  emit_capture("after")                      -- ★ 新增：通知 Monitor 取 AFTER
 end
+
 
 ---------------------------------------
 -- UI：畫面（直向）
@@ -778,6 +891,10 @@ local function draw_confirm()
   compute_selection_and_tracks()
   reaper.ImGui_Text(ctx, string.format("Selected: %d item(s) across %d track(s).", #SELECTED_ITEMS, #ACTIVE_TRACKS))
   reaper.ImGui_Spacing(ctx)
+
+  reaper.ImGui_SameLine(ctx)
+  local chg, v = reaper.ImGui_Checkbox(ctx, "Monitor auto-capture", CAPTURE_ON)
+  if chg then set_capture_enabled(v) end
 
   -- Draw result popup if needed
   draw_summary_popup()
@@ -837,7 +954,7 @@ local function draw_confirm()
     -- Preview（選擇性資訊，放在按鈕之後）
     reaper.ImGui_Spacing(ctx)
     reaper.ImGui_Text(ctx, "Preview detected fields")
-    if reaper.ImGui_Button(ctx, "Scan first ~80 items", 200, 22) then
+    if reaper.ImGui_Button(ctx, "Scan first 10 items", 200, 22) then
       build_preview_pairs(SELECTED_ITEMS)
     end
     reaper.ImGui_Spacing(ctx)
