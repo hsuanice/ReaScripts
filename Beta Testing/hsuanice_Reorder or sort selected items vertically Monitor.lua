@@ -1,6 +1,6 @@
 --[[
 @description Monitor - Reorder or sort selected items vertically
-@version 0.3.5
+@version 0.3.6
 @author hsuanice
 @about
   Shows a live table of the currently selected items and all sort-relevant fields:
@@ -19,12 +19,16 @@
   Requires: ReaImGui (install via ReaPack)
 
 @changelog
+  v0.3.6 (2025-09-02)
+    - Feature: Replace "Seconds" with "Minutes:Seconds" (m:s) display and export.
+    - Fix: Beats mode now formats correctly (no longer falls back to seconds).
+    - UI: Start/End headers switch to "Start (m:s) / End (m:s)" when m:s mode is selected.
   v0.3.5 (2025-09-02)
     - Feature: Display mode expanded to three options — Seconds / Timecode / Beats.
-    - Refactor: Adopt hsuanice_TimeFormat v0.2.0 (MODE + make_formatter + headers).
+    - Refactor: Adopt hsuanice_Time Format v0.2.0 (MODE + make_formatter + headers).
     - Exports (TSV/CSV) automatically follow the selected mode.
   v0.3.4 (2025-09-02)
-    - Refactor: Adopt hsuanice_TimeFormat v0.2.0 (unified MODE + formatter/headers).
+    - Refactor: Adopt hsuanice_Time Format v0.2.0 (unified MODE + formatter/headers).
     - Feature: Display mode expanded to three options — Seconds / Timecode / Beats.
     - Exports (TSV/CSV) follow the current mode automatically.
   v0.3.3 (2025-09-02)
@@ -32,7 +36,7 @@
            Renamed the library alias to TFLib to prevent "attempt to call a table value" error.
 
   v0.3.2 (2025-09-02)
-    - Refactor: Use hsuanice_TimeFormat library for Seconds/TC formatting (with fallback if library missing).
+    - Refactor: Use hsuanice_Time Format library for Seconds/TC formatting (with fallback if library missing).
   v0.3.1 (2025-09-02)
     - Fix: Restored missing helpers from 0.2.x (selection scan, save dialogs, ImGui context, etc.)
            to resolve "attempt to call a nil value (global 'refresh_now')" and related issues.
@@ -144,21 +148,41 @@ local function fmt_seconds(s) if not s then return "" end return string.format("
 local function fmt_tc(s)      if not s then return "" end return reaper.format_timestr_pos(s, "", 5) end
 
 -- Time Format Library (with fallback)
-local ok, TFLib = pcall(dofile, reaper.GetResourcePath().."/Scripts/hsuanice Scripts/Library/hsuanice_TimeFormat.lua")
+local ok, TFLib = pcall(dofile, reaper.GetResourcePath().."/Scripts/hsuanice Scripts/Library/hsuanice_Time Format.lua")
 if not ok or not TFLib or not TFLib.make_formatter then
-  -- minimal fallback (Seconds/TC only); Beats 顯示將退回秒數
+  -- fallback: 支援 m:s / TC / Beats（三種）
+  local function _fmt_ms(sec, decimals)
+    if sec == nil then return "" end
+    local sign = ""
+    if sec < 0 then sign = "-"; sec = -sec end
+    local m = math.floor(sec / 60)
+    local dec = tonumber(decimals) or 3
+    local s = sec - m*60
+    local cap = 60 - (10^-dec) * 0.5
+    if s >= cap then m = m + 1; s = 0 end
+    local s_fmt = ("%0."..dec.."f"):format(s)
+    if tonumber(s_fmt) < 10 then s_fmt = "0"..s_fmt end
+    return ("%s%d:%s"):format(sign, m, s_fmt)
+  end
   TFLib = {
     VERSION="fallback",
-    MODE={ SEC="sec", TC="tc", BEATS="beats" },
+    MODE={ SEC="sec", MS="ms", TC="tc", BEATS="beats" },
     make_formatter=function(mode, opts)
-      local dec=(opts and opts.decimals) or 6
-      if mode=="tc" then return function(sec) return reaper.format_timestr_pos(sec or 0, "", 5) end end
-      return function(sec) return string.format("%."..dec.."f", sec or 0) end
+      local m = mode
+      if m=="tc" then return function(sec) return reaper.format_timestr_pos(sec or 0, "", 5) end end
+      if m=="beats" then return function(sec) return reaper.format_timestr_pos(sec or 0, "", 1) end end
+      if m=="sec" then
+        local dec=(opts and opts.decimals) or 6
+        return function(sec) return string.format("%."..dec.."f", sec or 0) end
+      end
+      local dec=(opts and opts.decimals) or 3
+      return function(sec) return _fmt_ms(sec or 0, dec) end
     end,
     headers=function(mode)
       if mode=="tc" then return "Start (TC)","End (TC)" end
-      if mode=="beats" then return "Start (s)","End (s)" end
-      return "Start (s)","End (s)"
+      if mode=="beats" then return "Start (Beats)","End (Beats)" end
+      if mode=="sec" then return "Start (s)","End (s)" end
+      return "Start (m:s)","End (m:s)"
     end,
     format=function(sec, mode, opts)
       return (TFLib.make_formatter(mode, opts))(sec)
@@ -259,7 +283,7 @@ end
 ---------------------------------------
 local AUTO = true
 -- 以三段模式取代 boolean
-local TIME_MODE = TFLib.MODE.TC   -- 預設顯示 TC；你也可改成 TFLib.MODE.SEC
+local TIME_MODE = TFLib.MODE.MS   -- 預設改為 m:s, 你也可改成 TFLib.MODE.TC
 local ROWS = {}
 local SNAP_BEFORE, SNAP_AFTER = {}, {}
 local ROWS = {}
@@ -318,22 +342,23 @@ local function draw_toolbar()
   reaper.ImGui_SameLine(ctx)
   local chg, v = reaper.ImGui_Checkbox(ctx, "Auto-refresh", AUTO); if chg then AUTO = v end
   reaper.ImGui_SameLine(ctx)
--- 三段模式：Seconds / TC / Beats
-reaper.ImGui_SameLine(ctx)
-if reaper.ImGui_RadioButton(ctx, "Seconds", TIME_MODE==TFLib.MODE.SEC) then
-  TIME_MODE = TFLib.MODE.SEC
-  FORMAT = TFLib.make_formatter(TIME_MODE, {decimals=6})
-end
-reaper.ImGui_SameLine(ctx)
-if reaper.ImGui_RadioButton(ctx, "TC", TIME_MODE==TFLib.MODE.TC) then
-  TIME_MODE = TFLib.MODE.TC
-  FORMAT = TFLib.make_formatter(TIME_MODE)
-end
-reaper.ImGui_SameLine(ctx)
-if reaper.ImGui_RadioButton(ctx, "Beats", TIME_MODE==TFLib.MODE.BEATS) then
-  TIME_MODE = TFLib.MODE.BEATS
-  FORMAT = TFLib.make_formatter(TIME_MODE)
-end
+  
+  -- 三段模式：m:s / TC / Beats
+  reaper.ImGui_SameLine(ctx)
+  if reaper.ImGui_RadioButton(ctx, "m:s", TIME_MODE==TFLib.MODE.MS) then
+    TIME_MODE = TFLib.MODE.MS
+    FORMAT = TFLib.make_formatter(TIME_MODE, {decimals=3})
+  end
+  reaper.ImGui_SameLine(ctx)
+  if reaper.ImGui_RadioButton(ctx, "TC", TIME_MODE==TFLib.MODE.TC) then
+    TIME_MODE = TFLib.MODE.TC
+    FORMAT = TFLib.make_formatter(TIME_MODE)
+  end
+  reaper.ImGui_SameLine(ctx)
+  if reaper.ImGui_RadioButton(ctx, "Beats", TIME_MODE==TFLib.MODE.BEATS) then
+    TIME_MODE = TFLib.MODE.BEATS
+    FORMAT = TFLib.make_formatter(TIME_MODE)
+  end
 
   reaper.ImGui_SameLine(ctx)
   if reaper.ImGui_Button(ctx, "Refresh Now", 110, 24) then refresh_now() end
