@@ -1,6 +1,6 @@
 --[[
 @description Monitor - Reorder or sort selected items vertically
-@version 0.3.16
+@version 0.3.17
 @author hsuanice
 @about
   Shows a live table of the currently selected items and all sort-relevant fields:
@@ -34,6 +34,10 @@
 
 
 @changelog
+  v0.3.17 (2025-09-03)
+    - Fix: When Auto-refresh is OFF, the script no longer performs an initial scan on launch.
+           (Guarded the startup refresh; now only runs if AUTO is true.)
+    - UX: Refresh Now resets the table view to Live before scanning.
   v0.3.16 (2025-09-03)
     - Fix: Auto-refresh preference now persists correctly. (Added AUTO to forward declarations and removed local shadowing in State (UI).)
 
@@ -494,7 +498,10 @@ end
 
 
 
-  if reaper.ImGui_Button(ctx, "Refresh Now", 110, 24) then refresh_now() end
+  if reaper.ImGui_Button(ctx, "Refresh Now", 110, 24) then
+    TABLE_SOURCE = "live"
+    refresh_now()
+  end
 
   reaper.ImGui_SameLine(ctx)
   if reaper.ImGui_Button(ctx, "Capture BEFORE", 130, 24) then
@@ -616,5 +623,5 @@ local function loop()
   end
 end
 
-refresh_now()
+if AUTO then refresh_now() end
 loop()
