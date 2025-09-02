@@ -1,13 +1,13 @@
 --[[
 @description Hover Mode - Trim or Extend Right Edge of Item (Preserve Fade)
-@version 0.1.2
+@version 0.2.0
 @author hsuanice
 @about
   Trims or extends the **right edge** of audio/MIDI/empty items depending on context.
     - Hover Mode ON : uses mouse timeline position (pixel-accurate hit test preferred).
     - Hover Mode OFF: uses edit cursor on selected tracks.
-    - 🧠 Special behavior: when the mouse is over the **Ruler (Timeline)**, the script temporarily switches
-      to **Edit Cursor Mode**, even if Hover Mode is enabled.
+    - 🧠 Special behavior: when the mouse is over the **Ruler (Timeline)** or **TCP area**,  
+      the script temporarily switches to **Edit Cursor Mode**, even if Hover Mode is enabled.
     - Preserves the existing fade-out end-time (keeps fade start), adjusting only its length.
     - Ignores fully invisible items; partial visibility is accepted.
 
@@ -23,7 +23,8 @@
     • X-Raym - Trim right edge under mouse or previous one without changing fade-out start.
 
 @changelog
-  v0.1.2
+  v0.2.0
+    - Added: TCP area behaves like Ruler — temporarily forces Edit Cursor Mode even if Hover Mode is ON.  v0.1.2
     - Boundary-as-gap policy in Hover mode identical to Left tool: edges never trim; S extends Prev to mouse.
     - Pixel hit at an edge is ignored to avoid accidental trims; only strictly-inside hits trim.
   v0.1.1
@@ -51,11 +52,14 @@ local function is_hover_enabled()
   return (v == "true" or v == "1")
 end
 
-local function mouse_over_ruler()
+-- Treat TCP like the Ruler: force Edit-Cursor mode when hovering over TCP
+local function mouse_over_ruler_or_tcp()
   if not reaper.JS_Window_FromPoint then return false end
   local x, y = reaper.GetMousePosition()
   local hwnd = reaper.JS_Window_FromPoint(x, y)
-  return hwnd and reaper.JS_Window_GetClassName(hwnd) == "REAPERTimeDisplay"
+  if not hwnd then return false end
+  local class = reaper.JS_Window_GetClassName(hwnd)
+  return (class == "REAPERTimeDisplay" or class == "REAPERTCPDisplay")
 end
 
 local function mouse_timeline_pos()
@@ -234,7 +238,7 @@ local target_pos, picks
 local forced_cursor = false
 
 if hover_on then
-  if mouse_over_ruler() then
+  if mouse_over_ruler_or_tcp() then
     target_pos, picks = find_items_edit_mode()
     forced_cursor = true
   else
