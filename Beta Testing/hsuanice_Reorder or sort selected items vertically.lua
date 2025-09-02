@@ -1,9 +1,9 @@
 --[[
 @description ReaImGui - Vertical Reorder and Sort (items)
-@version 0.4.0
+@version 0.5.0
 @author hsuanice
 @about
-  Provides two vertical re-arrangement modes for selected items (stacked UI):
+  Provides three vertical re-arrangement modes for selected items (stacked UI):
 
   • Reorder (fill upward)
     - Keeps items at their original timeline position.
@@ -15,17 +15,27 @@
         Take Name / File Name / Metadata (Track Name or Channel Number).
     - Ascending / Descending toggle.
 
-  • Copy to New Tracks by Metadata
-    - Duplicates selected items onto newly created tracks,
-      named from metadata (e.g. $trk, $trkall, TRK1…TRK64).
-    - Tracks ordered by Channel number (or optional A→Z by name).
-    - Original tracks/items remain untouched.
+  • Metadata modes
+    - Copy to Sort: duplicates selected items to NEW tracks grouped by metadata.
+    - Sort in Place: reorders items on their existing tracks based on metadata
+      (Track Name or Channel Number). No new tracks are created, no names changed.
 
   Notes:
     - Based on design concepts and iterative testing by hsuanice.
     - Script generated and refined with ChatGPT.
 
 @changelog
+  v0.5.0 (2025-09-02)
+    - New: Added "Sort in Place" for Metadata mode.
+      • Works directly on existing tracks, no renaming or new tracks.
+      • Sort key selectable: Track Name or Channel Number.
+      • Ascending/Descending toggle supported.
+    - "Copy to Sort" behavior unchanged.
+    - UI: Metadata section now has two buttons:
+        • Sort in Place
+        • Copy to Sort
+    - This allows users to sort selected items across existing tracks
+      or duplicate them to new metadata-grouped tracks.
   v0.4.0 (2025-09-01)
     - Switch all metadata reading to 'hsuanice Metadata Read' (>= 0.2.0):
       * iXML TRACK_LIST preferred; fallback to BWF Description sTRK#=Name (EdiLoad split).
@@ -736,9 +746,25 @@ local function draw_confirm()
 
     -- ★ 主按鈕放在這裡（Preview 上方）
     reaper.ImGui_Spacing(ctx)
+
+    -- 🆕 Sort in Place（就地排序）
+    if reaper.ImGui_Button(ctx, "Sort in Place", 220, 26) then
+      -- 使用現有的「Sort Vertically」引擎，但 key 來自 Metadata
+      MODE = "sort"
+      -- 告訴引擎現在是在 Metadata 模式下排序
+      sort_key_idx = 3  -- 1=Take, 2=File, 3=Metadata（保持現狀，確保用 meta_key_*）
+      prepare_plan()
+      run_engine()
+      SUMMARY = ("Completed. Items=%d, Moved=%d, Skipped=%d."):format(TOTAL, MOVED, SKIPPED)
+      STATE = "summary"
+    end
+    reaper.ImGui_SameLine(ctx)
+
+    -- 既有的 Copy to Sort（保留原行為：複製到新軌）
     if reaper.ImGui_Button(ctx, "Copy to Sort", 220, 26) then
       run_copy_to_new_tracks(meta_sort_mode, sort_asc)
-      SUMMARY=""; STATE="summary"
+      SUMMARY = ""
+      STATE = "summary"
     end
 
     -- Preview（選擇性資訊，放在按鈕之後）
