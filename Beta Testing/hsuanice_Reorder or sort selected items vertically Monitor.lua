@@ -1,6 +1,6 @@
 --[[
 @description Monitor - Reorder or sort selected items vertically
-@version 0.4.0
+@version 0.4.2
 @author hsuanice
 @about
   Shows a live table of the currently selected items and all sort-relevant fields:
@@ -32,8 +32,14 @@
   h:mm → 1:23
   mm:ss.SSS → 83:07.250
 
+  Reference: Script: zaibuyidao_Display Total Length Of Selected Items.lua
+
+
 
 @changelog
+  v0.4.2
+    - Fix: Restored per-frame polling of cross-script signals (poll_reorder_signal) in the main loop,
+            so auto-capture from the Reorder script works again.
   v0.4.0 (2025-09-03)
     - New: Summary modal (button next to "Save .csv"). Shows item count, total span, total length, and position range.
             Text is selectable, with a one-click Copy, respects current time mode (m:s / TC / Beats / Custom).
@@ -205,6 +211,7 @@ end
 
 -- Forward declarations so load_prefs() updates the same locals (not globals)
 local TIME_MODE, CUSTOM_PATTERN, FORMAT, AUTO
+local scan_selection_rows
 
 -- === Preferences (persist across runs) ===
 local EXT_NS = "hsuanice_ReorderSort_Monitor"
@@ -348,7 +355,45 @@ end
 
 
 
+-- === Cross-script signal (auto-capture from Reorder) ===
+local SIG_NS = "hsuanice_ReorderSort_Signal"
+local LAST_BEFORE, LAST_AFTER = "", ""
 
+
+-- forward locals (避免之後被重新 local 化)
+ROWS = {}
+SNAP_BEFORE, SNAP_AFTER = {}, {}
+
+
+local function poll_reorder_signal()
+  -- BEFORE
+  local vb = reaper.GetExtState(SIG_NS, "capture_before")
+  if vb ~= "" and vb ~= LAST_BEFORE then
+    LAST_BEFORE = vb
+    local payload = reaper.GetExtState(SIG_NS, "snapshot_before")
+    if payload ~= "" then
+      SNAP_BEFORE = parse_snapshot_tsv(payload)
+      reaper.DeleteExtState(SIG_NS, "snapshot_before", true)
+    else
+      SNAP_BEFORE = scan_selection_rows() -- 後備
+    end
+    reaper.DeleteExtState(SIG_NS, "capture_before", true)
+  end
+
+  -- AFTER
+  local va = reaper.GetExtState(SIG_NS, "capture_after")
+  if va ~= "" and va ~= LAST_AFTER then
+    LAST_AFTER = va
+    local payload = reaper.GetExtState(SIG_NS, "snapshot_after")
+    if payload ~= "" then
+      SNAP_AFTER = parse_snapshot_tsv(payload)
+      reaper.DeleteExtState(SIG_NS, "snapshot_after", true)
+    else
+      SNAP_AFTER = scan_selection_rows()
+    end
+    reaper.DeleteExtState(SIG_NS, "capture_after", true)
+  end
+end
 
 
 ---------------------------------------
@@ -420,7 +465,7 @@ local function collect_fields_for_item(item)
   return row
 end
 
-local function scan_selection_rows()
+function scan_selection_rows()
   local its = get_selected_items_sorted()
   local rows = {}
   for _, it in ipairs(its) do
@@ -432,7 +477,8 @@ end
 ---------------------------------------
 -- State (UI)
 ---------------------------------------
-AUTO = true
+AUTO = (AUTO == nil) and true or AUTO
+
 TABLE_SOURCE = "live"   -- "live" | "before" | "after"
 
 -- Display mode state (persisted)
@@ -440,8 +486,8 @@ TIME_MODE = TFLib.MODE.MS        -- 預設 m:s；load_prefs() 會覆寫為上次
 CUSTOM_PATTERN = "hh:mm:ss"
 
 -- Data
-local ROWS = {}
-local SNAP_BEFORE, SNAP_AFTER = {}, {}
+ROWS = {}
+SNAP_BEFORE, SNAP_AFTER = {}, {}
 
 -- Current formatter（會在切換模式/修改 pattern 時重建）
 FORMAT = TFLib.make_formatter(TIME_MODE, {decimals=3})
@@ -505,6 +551,41 @@ local function draw_summary_popup()
 end
 
 
+-- === Parse snapshot TSV coming from Reorder ===
+local function parse_snapshot_tsv(text)
+  local rows = {}
+  if not text or text == "" then return rows end
+  local first = true
+  for line in tostring(text):gmatch("([^\n]*)\n?") do
+    if line == "" then break end
+    if first then first = false -- skip header
+    else
+      local cols = {}
+      local i = 1
+      for c in (line.."\t"):gmatch("([^\t]*)\t") do cols[i]=c; i=i+1 end
+      local r = {
+        track_idx    = tonumber(cols[2]) or 0,
+        track_name   = cols[3] or "",
+        take_name    = cols[4] or "",
+        file_name    = cols[5] or "",
+        meta_trk_name= cols[6] or "",
+        channel_num  = tonumber(cols[7]) or nil,
+        interleave   = tonumber(cols[8]) or nil,
+        muted        = (cols[9] == "1"),
+        color_hex    = cols[10] or "",
+        start_time   = tonumber(cols[11]) or 0,
+        end_time     = tonumber(cols[12]) or 0,
+      }
+      -- 供色塊用：把 hex 轉成 rgb
+      if r.color_hex ~= "" then
+        local rr,gg,bb = r.color_hex:match("^#?(%x%x)(%x%x)(%x%x)$")
+        if rr then r.color_rgb = { tonumber(rr,16), tonumber(gg,16), tonumber(bb,16) } end
+      end
+      rows[#rows+1] = r
+    end
+  end
+  return rows
+end
 
 
 ---------------------------------------
@@ -620,6 +701,7 @@ end
   reaper.ImGui_SameLine(ctx)
   if reaper.ImGui_Button(ctx, "Capture AFTER", 120, 24) then
     SNAP_AFTER = scan_selection_rows()
+    refresh_now()
   end
 
   reaper.ImGui_SameLine(ctx)
@@ -745,21 +827,23 @@ local function loop()
   local flags = reaper.ImGui_WindowFlags_NoCollapse()
   local visible, open = reaper.ImGui_Begin(ctx, "Reorder or Sort — Monitor & Debug"..LIBVER, true, flags)
 
+  -- 🔧 補回這行：每幀輪詢 Reorder 的訊號
+  poll_reorder_signal()
+
   -- Top bar + Summary popup
   draw_toolbar()
   draw_summary_popup()
 
-  -- Snapshots 區塊（在上方）
+  -- Snapshots
   draw_snapshots()
   reaper.ImGui_Spacing(ctx)
 
-  -- 依目前來源決定要畫哪個 rows
+  -- 決定要顯示的 rows（Live / BEFORE / AFTER）
   local rows_to_show = ROWS
   if     TABLE_SOURCE == "before" then rows_to_show = SNAP_BEFORE
   elseif TABLE_SOURCE == "after"  then rows_to_show = SNAP_AFTER
   end
 
-  -- Live/Before/After 的 table（只畫一次）
   draw_table(rows_to_show, 360)
 
   reaper.ImGui_End(ctx)
