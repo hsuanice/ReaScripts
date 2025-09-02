@@ -1,6 +1,6 @@
 --[[
 @description Monitor - Reorder or sort selected items vertically
-@version 0.3.6
+@version 0.3.7
 @author hsuanice
 @about
   Shows a live table of the currently selected items and all sort-relevant fields:
@@ -18,7 +18,26 @@
 
   Requires: ReaImGui (install via ReaPack)
 
+  Note:
+  使用說明（可貼在 README 或腳本註解）
+
+  模式：m:s / TC / Beats / Custom。
+  Custom 範本 tokens：
+  h, hh：小時（不補零／兩位）
+  m, mm：分鐘（0–59）
+  s, ss：秒（0–59）
+  S...：小數秒，S 數量 = 位數，例如 SSS = 毫秒
+  範例：
+  hh:mm:ss → 01:23:45
+  h:mm → 1:23
+  mm:ss.SSS → 83:07.250
+
+
 @changelog
+  v0.3.7 (2025-09-02)
+    - New: Added "Custom" display mode. Users can type patterns like "hh:mm:ss", "h:mm", "mm:ss.SSS".
+    - API: Integrated with hsuanice_Time Format v0.3.0 (MODE.CUSTOM + pattern support).
+    - UI: Start/End headers now show the selected pattern, e.g. "Start (hh:mm:ss)".
   v0.3.6 (2025-09-02)
     - Feature: Replace "Seconds" with "Minutes:Seconds" (m:s) display and export.
     - Fix: Beats mode now formats correctly (no longer falls back to seconds).
@@ -292,6 +311,9 @@ local SNAP_BEFORE, SNAP_AFTER = {}, {}
 -- 建立可重用 formatter（在表格列與輸出都共用）
 local FORMAT = TFLib.make_formatter(TIME_MODE, {decimals=6})
 
+local CUSTOM_PATTERN = "hh:mm:ss"
+
+
 -- 最薄的轉接：之後如果要改用 FORMAT 直接呼叫，也可移除這個 wrapper
 local function format_time(val)
   return FORMAT(val)
@@ -343,7 +365,7 @@ local function draw_toolbar()
   local chg, v = reaper.ImGui_Checkbox(ctx, "Auto-refresh", AUTO); if chg then AUTO = v end
   reaper.ImGui_SameLine(ctx)
   
-  -- 三段模式：m:s / TC / Beats
+  -- 四種：m:s / TC / Beats / Custom
   reaper.ImGui_SameLine(ctx)
   if reaper.ImGui_RadioButton(ctx, "m:s", TIME_MODE==TFLib.MODE.MS) then
     TIME_MODE = TFLib.MODE.MS
@@ -359,6 +381,23 @@ local function draw_toolbar()
     TIME_MODE = TFLib.MODE.BEATS
     FORMAT = TFLib.make_formatter(TIME_MODE)
   end
+  reaper.ImGui_SameLine(ctx)
+  if reaper.ImGui_RadioButton(ctx, "Custom", TIME_MODE==TFLib.MODE.CUSTOM) then
+    TIME_MODE = TFLib.MODE.CUSTOM
+    FORMAT = TFLib.make_formatter(TIME_MODE, {pattern=CUSTOM_PATTERN})
+  end
+
+  -- 換行顯示輸入框與提示
+  reaper.ImGui_Spacing(ctx)
+  local changed, newpat = reaper.ImGui_InputText(ctx, "Custom pattern  (e.g. hh:mm:ss, h:mm, mm:ss.SSS)", CUSTOM_PATTERN)
+  if changed then
+    CUSTOM_PATTERN = newpat
+    if TIME_MODE==TFLib.MODE.CUSTOM then
+      FORMAT = TFLib.make_formatter(TIME_MODE, {pattern=CUSTOM_PATTERN})
+    end
+  end
+  reaper.ImGui_TextDisabled(ctx, "Tokens: h hh  |  m mm  |  s ss  |  S.. = fractional seconds (e.g. SSS)")
+
 
   reaper.ImGui_SameLine(ctx)
   if reaper.ImGui_Button(ctx, "Refresh Now", 110, 24) then refresh_now() end
@@ -390,7 +429,7 @@ local function draw_table(rows, height)
     reaper.ImGui_TableSetupColumn(ctx, "Meta Track Name")
     reaper.ImGui_TableSetupColumn(ctx, "Chan#", TF('ImGui_TableColumnFlags_WidthFixed'), 64)
     reaper.ImGui_TableSetupColumn(ctx, "Interleave", TF('ImGui_TableColumnFlags_WidthFixed'), 88)
-    local startHeader, endHeader = TFLib.headers(TIME_MODE)
+    local startHeader, endHeader = TFLib.headers(TIME_MODE, {pattern=CUSTOM_PATTERN})
     reaper.ImGui_TableSetupColumn(ctx, startHeader, TF('ImGui_TableColumnFlags_WidthFixed'), 120)
     reaper.ImGui_TableSetupColumn(ctx, endHeader,   TF('ImGui_TableColumnFlags_WidthFixed'), 120)
     reaper.ImGui_TableHeadersRow(ctx)
