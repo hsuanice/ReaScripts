@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<index version="1" name="hsuanice Scripts" commit="2dccc0506ccd1418f132cbdba679b48ff57855bc">
+<index version="1" name="hsuanice Scripts" commit="328bd5279f17d2c5f641b81e4fca77c1bbb73cff">
   <category name="Beta Testing">
     <reapack name="hsuanice_BWF TimeReference Embed Tool.lua" type="script" desc="Embed BWF TimeReference to Active take from Take 1 or Current Position TC">
       <version name="0.7.1" author="hsuanice" time="2025-08-14T17:52:57Z">
@@ -603,70 +603,6 @@
 {\pard \ql \f0 \sa180 \li0 \fi0 Requires: ReaImGui (install via ReaPack)\par}
 {\pard \ql \f0 \sa180 \li0 \fi0 Note: \u20351 ?\u29992 ?\u35498 ?\u26126 ?\u65288 ?\u21487 ?\u36028 ?\u22312 ? README \u25110 ?\u33139 ?\u26412 ?\u35387 ?\u35299 ?\u65289 ?\par}
 {\pard \ql \f0 \sa180 \li0 \fi0 \u27169 ?\u24335 ?\u65306 ?m:s / TC / Beats / Custom\u12290 ? Custom \u31684 ?\u26412 ? tokens\u65306 ? h, hh\u65306 ?\u23567 ?\u26178 ?\u65288 ?\u19981 ?\u35036 ?\u38646 ?\u65295 ?\u20841 ?\u20301 ?\u65289 ? m, mm\u65306 ?\u20998 ?\u37912 ?\u65288 ?0\u8211-59\u65289 ? s, ss\u65306 ?\u31186 ?\u65288 ?0\u8211-59\u65289 ? S...\u65306 ?\u23567 ?\u25976 ?\u31186 ?\u65292 ?S \u25976 ?\u37327 ? = \u20301 ?\u25976 ?\u65292 ?\u20363 ?\u22914 ? SSS = \u27627 ?\u31186 ? \u31684 ?\u20363 ?\u65306 ? hh:mm:ss \u8594 ? 01:23:45 h:mm \u8594 ? 1:23 mm:ss.SSS \u8594 ? 83:07.250\par}
-{\pard \ql \f0 \sa180 \li0 \fi0 v0.3.14\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Restore: Added \u8220"Capture BEFORE\u8221" & \u8220"Capture AFTER\u8221" buttons to the toolbar.\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Feature: Auto-refresh state is now persisted across sessions. v0.3.13 (2025-09-03)\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Fix: Persisted time mode & custom pattern now restore correctly. (Forward-declared TIME_MODE/CUSTOM_PATTERN/FORMAT and removed local shadowing in State (UI).)\sa180\par}
-{\pard \ql \f0 \sa180 \li0 \fi0 v0.3.12 (2025-09-03)\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Fix: Persist selection \u8212- time mode and custom pattern now saved on every change (Radio/Input) via ExtState.\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab UX: Window close button (X) now works. Begin() captures (visible, open); loop stops when open == false or ESC is pressed. v0.3.11 (2025-09-03)\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Fix: Forward-declared TFLib and changed library load to assign instead of re-declare (removed 'local' before TFLib). This prevents load_prefs() from capturing a nil global TFLib and restores the saved mode on startup.\sa180\par}
-{\pard \ql \f0 \sa180 \li0 \fi0 v0.3.10 (2025-09-03)\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Persistence: Remembers the selected time display mode (m:s / TC / Beats / Custom) and the custom pattern across runs via ExtState. Re-opening the script restores your last choice; if it was Custom, the previous pattern is applied automatically. v0.3.9 (2025-09-03)\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab UI: Moved "Refresh Now" and Copy/Save buttons to the next row by removing an extra ImGui_SameLine(). No NewLine/Spacing added to maintain minimal vertical gap and a tighter layout. v0.3.8 (2025-09-03)\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab UI: Moved Custom pattern input inline to the right of the "Custom" mode selector.\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab UX: Added tooltip (\u9432 ?) explaining pattern tokens. v0.3.7 (2025-09-02)\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab New: Added "Custom" display mode. Users can type patterns like "hh:mm:ss", "h:mm", "mm:ss.SSS".\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab API: Integrated with hsuanice_Time Format v0.3.0 (MODE.CUSTOM + pattern support).\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab UI: Start/End headers now show the selected pattern, e.g. "Start (hh:mm:ss)". v0.3.6 (2025-09-02)\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Feature: Replace "Seconds" with "Minutes:Seconds" (m:s) display and export.\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Fix: Beats mode now formats correctly (no longer falls back to seconds).\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab UI: Start/End headers switch to "Start (m:s) / End (m:s)" when m:s mode is selected. v0.3.5 (2025-09-02)\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Feature: Display mode expanded to three options \u8212- Seconds / Timecode / Beats.\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Refactor: Adopt hsuanice_Time Format v0.2.0 (MODE + make_formatter + headers).\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Exports (TSV/CSV) automatically follow the selected mode. v0.3.4 (2025-09-02)\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Refactor: Adopt hsuanice_Time Format v0.2.0 (unified MODE + formatter/headers).\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Feature: Display mode expanded to three options \u8212- Seconds / Timecode / Beats.\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Exports (TSV/CSV) follow the current mode automatically. v0.3.3 (2025-09-02)\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Fix: Resolve naming collision between TF() (REAPER flag helper) and TimeFormat table. Renamed the library alias to TFLib to prevent "attempt to call a table value" error.\sa180\par}
-{\pard \ql \f0 \sa180 \li0 \fi0 v0.3.2 (2025-09-02)\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Refactor: Use hsuanice_Time Format library for Seconds/TC formatting (with fallback if library missing). v0.3.1 (2025-09-02)\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Fix: Restored missing helpers from 0.2.x (selection scan, save dialogs, ImGui context, etc.) to resolve "attempt to call a nil value (global 'refresh_now')" and related issues.\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Feature (from 0.3.0): Toolbar checkbox to toggle Start/End display: \u8226 ? Seconds (6 decimals) or \u8226 ? Timecode (uses project frame rate via format_timestr_pos mode=5).\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Exports (TSV/CSV) honor the current display mode. v0.2.2 (2025-09-01)\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab UI: Show "Metadata Read vX.Y.Z" in the window title (computed before ImGui_Begin).\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Cleanup: Optionally remove the toolbar version label to avoid duplication.\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Behavior: Monitoring, refresh, and exports unchanged from 0.2.1. v0.2.1 (2025-09-01)\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Fully delegate metadata resolution to the Library:\par}
-{\pard \ql \f0 \sa0 \li720 \fi-360 \endash \tx360\tab Use META.guess_interleave_index() + META.expand("$\{trk\}") / "$\{chnum\}" (no local interleave\u8594 ?name/chan logic). Sets __chan_index before expand.\par}
-{\pard \ql \f0 \sa0 \li720 \fi-360 \endash \tx360\tab Fix: removed a duplicate local 'idx' declaration; more nil-safety.\sa180\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab UI: keeps the Library version label; no visual/format changes.\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Exports/Snapshots: unchanged from 0.2.0 (backward compatible). v0.2.0 (2025-09-01)\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Switched to 'hsuanice Metadata Read' (>= 0.2.0) for all metadata:\par}
-{\pard \ql \f0 \sa0 \li720 \fi-360 \endash \tx360\tab Uses Library to read/normalize metadata (unwrap SECTION, iXML TRACK_LIST first; falls back to BWF Description sTRK#=Name for EdiLoad-split files).\par}
-{\pard \ql \f0 \sa0 \li720 \fi-360 \endash \tx360\tab Interleave is derived from REAPER take channel mode (Mono-of-N); Meta Track Name and Channel# are resolved from the Library fields.\par}
-{\pard \ql \f0 \sa0 \li720 \fi-360 \endash \tx360\tab Removed legacy in-file parsers; behavior for Wave Agent is unchanged, and EdiLoad-split is now robustly supported.\par}
-{\pard \ql \f0 \sa0 \li720 \fi-360 \endash \tx360\tab Minor safety/UX hardening (no functional change to table/snapshots/exports). v0.1.6\sa180\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Metadata: Added fallback for EdiLoad-split mono files. \u8226 ? If IXML TRACK_LIST is missing, parse sTRK#=NAME from BWF/Description. \u8226 ? Resolves Meta Track Name and Channel# via existing Interleave pipeline.\sa180\par}
-{\pard \ql \f0 \sa180 \li0 \fi0 v0.1.5\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab UI: moved Snapshot BEFORE/AFTER section to appear directly under the top toolbar, before the live table (content unchanged).\sa180\par}
-{\pard \ql \f0 \sa180 \li0 \fi0 v0.1.4\par}
-{\pard \ql \f0 \sa180 \li360 \fi-360 \bullet \tx360\tab Column rename: \u8220"Source File\u8221" (formerly \u8220"File Name\u8221").\par}
-{\pard \ql \f0 \sa180 \li360 \fi-360 \bullet \tx360\tab Source resolution now mirrors the Rename script\u8217's $srcfile: active take \u8594 ? source \u8594 ? unwrap SECTION (handles nested) \u8594 ? real file path (with extension).\par}
-{\pard \ql \f0 \sa180 \li360 \fi-360 \bullet \tx360\tab Metadata read (iXML/TRK) also uses the unwrapped source for better accuracy on poly/SECTION items.\par}
-{\pard \ql \f0 \sa180 \li360 \fi-360 \bullet \tx360\tab Export headers updated to \u8220"Source File\u8221"; keeps EndTime from 0.1.3.\par}
-{\pard \ql \f0 \sa180 \li360 \fi-360 \bullet \tx360\tab Cleanup/robustness: removed old src_path usage; safer guards for nil/non-PCM sources.\par}
-{\pard \ql \f0 \sa0 \li720 \fi-360 \endash \tx360\tab File name reliability: now resolves source file names (with extensions) even for SECTION/non-PCM sources via safe pcall wrapper.\par}
-{\pard \ql \f0 \sa0 \li720 \fi-360 \endash \tx360\tab New column: End (Start + Length). Also added EndTime to TSV/CSV exports.\par}
-{\pard \ql \f0 \sa0 \li720 \fi-360 \endash \tx360\tab Table: column count updated to 10; minor utils added (item_len), formatting helpers unchanged.\sa180\sa180\par}
-{\pard \ql \f0 \sa180 \li0 \fi0 v0.1.2\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab UI always renders content (removed 'visible' guard after Begin to avoid blank window in some docks/themes).\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Table sizing: use -FLT_MIN width for stable full-width layout across ReaImGui builds.\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Compatibility: safe ESC detection, tolerant handling when Begin returns only one value, save dialog fallback if JS_ReaScriptAPI is missing (auto-save to project folder with notice).\sa180\par}
-{\pard \ql \f0 \sa180 \li0 \fi0 v0.1.1\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Compatibility hardening: \u8226 ? Avoided font Attach/PushFont when APIs are unavailable. \u8226 ? Added guards around keyboard APIs and window-\u8216'open\u8217' handling. \u8226 ? General nil-safety for selection scanning and sources.\sa180\par}
-{\pard \ql \f0 \sa180 \li0 \fi0 v0.1.0\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Initial release: \u8226 ? Live monitor of selected items with columns: #, TrackIdx, Track Name, Take Name, File Name, Meta Track Name (interleave-resolved), Chan#, Interleave, Start. \u8226 ? Auto-refresh / manual Refresh Now. \u8226 ? Capture BEFORE / AFTER snapshots. \u8226 ? Export/Copy selection or snapshots as TSV/CSV.\sa180\par}
 }
 ]]></description>
       </metadata>
@@ -717,6 +653,12 @@
       </version>
       <version name="0.3.14" author="hsuanice" time="2025-09-02T17:24:02Z">
         <source main="main">https://github.com/hsuanice/ReaScripts/raw/2dccc0506ccd1418f132cbdba679b48ff57855bc/Beta%20Testing/hsuanice_Reorder%20or%20sort%20selected%20items%20vertically%20Monitor.lua</source>
+      </version>
+      <version name="0.3.15" author="hsuanice" time="2025-09-02T17:34:09Z">
+        <source main="main">https://github.com/hsuanice/ReaScripts/raw/e2ad2db0a12aba0acc582e1c7e566140c7d7b8ff/Beta%20Testing/hsuanice_Reorder%20or%20sort%20selected%20items%20vertically%20Monitor.lua</source>
+      </version>
+      <version name="0.3.16" author="hsuanice" time="2025-09-02T17:38:35Z">
+        <source main="main">https://github.com/hsuanice/ReaScripts/raw/328bd5279f17d2c5f641b81e4fca77c1bbb73cff/Beta%20Testing/hsuanice_Reorder%20or%20sort%20selected%20items%20vertically%20Monitor.lua</source>
       </version>
     </reapack>
     <reapack name="hsuanice_Reorder or sort selected items vertically.lua" type="script" desc="ReaImGui - Vertical Reorder and Sort (items)">
