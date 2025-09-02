@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<index version="1" name="hsuanice Scripts" commit="de31f12e16079e7f72daac5ac140ed7416b984ea">
+<index version="1" name="hsuanice Scripts" commit="00854f932318504e28ec8add7f28cd4e626b4102">
   <category name="Beta Testing">
     <reapack name="hsuanice_BWF TimeReference Embed Tool.lua" type="script" desc="Embed BWF TimeReference to Active take from Take 1 or Current Position TC">
       <version name="0.7.1" author="hsuanice" time="2025-08-14T17:52:57Z">
@@ -620,7 +620,7 @@
 {\colortbl;\red255\green0\blue0;\red0\green0\blue255;}
 \widowctrl\hyphauto
 
-{\pard \ql \f0 \sa180 \li0 \fi0 Provides two vertical re-arrangement modes for selected items (stacked UI):\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 Provides three vertical re-arrangement modes for selected items (stacked UI):\par}
 {\pard \ql \f0 \sa180 \li0 \fi0 \u8226 ? Reorder (fill upward)\par}
 {\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Keeps items at their original timeline position.\par}
 {\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Packs items upward into available selected tracks, avoiding gaps.\sa180\par}
@@ -628,10 +628,9 @@
 {\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Groups items by near-identical start time.\par}
 {\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Within each time cluster, re-orders items top-to-bottom by: Take Name / File Name / Metadata (Track Name or Channel Number).\par}
 {\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Ascending / Descending toggle.\sa180\par}
-{\pard \ql \f0 \sa180 \li0 \fi0 \u8226 ? Copy to New Tracks by Metadata\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Duplicates selected items onto newly created tracks, named from metadata (e.g. $trk, $trkall, TRK1\u8230 ?TRK64).\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Tracks ordered by Channel number (or optional A\u8594 ?Z by name).\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Original tracks/items remain untouched.\sa180\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 \u8226 ? Metadata modes\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Copy to Sort: duplicates selected items to NEW tracks grouped by metadata.\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Sort in Place: reorders items on their existing tracks based on metadata (Track Name or Channel Number). No new tracks are created, no names changed.\sa180\par}
 {\pard \ql \f0 \sa180 \li0 \fi0 Notes:\par}
 {\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Based on design concepts and iterative testing by hsuanice.\par}
 {\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Script generated and refined with ChatGPT.\sa180\par}
@@ -661,6 +660,9 @@
       </version>
       <version name="0.4.0" author="hsuanice" time="2025-09-01T06:06:35Z">
         <source main="main">https://github.com/hsuanice/ReaScripts/raw/8044b7cda56de7a03e73d7903f70557baf59600f/Beta%20Testing/hsuanice_Reorder%20or%20sort%20selected%20items%20vertically.lua</source>
+      </version>
+      <version name="0.5.0" author="hsuanice" time="2025-09-02T02:46:26Z">
+        <source main="main">https://github.com/hsuanice/ReaScripts/raw/00854f932318504e28ec8add7f28cd4e626b4102/Beta%20Testing/hsuanice_Reorder%20or%20sort%20selected%20items%20vertically.lua</source>
       </version>
     </reapack>
     <reapack name="hsuanice_Show Frame Rate.lua" type="script" desc="ReaImGui - Show Project Frame Rate">
