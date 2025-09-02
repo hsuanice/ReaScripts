@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<index version="1" name="hsuanice Scripts" commit="a9077fcf15f3f6d0ac5ae9de5c0469ee6061ba03">
+<index version="1" name="hsuanice Scripts" commit="e5ae65869876b1d805eced48cf9442c604f465e0">
   <category name="Beta Testing">
     <reapack name="hsuanice_BWF TimeReference Embed Tool.lua" type="script" desc="Embed BWF TimeReference to Active take from Take 1 or Current Position TC">
       <version name="0.7.1" author="hsuanice" time="2025-08-14T17:52:57Z">
@@ -598,7 +598,7 @@
 {\colortbl;\red255\green0\blue0;\red0\green0\blue255;}
 \widowctrl\hyphauto
 
-{\pard \ql \f0 \sa180 \li0 \fi0 Shows a live table of the currently selected items and all sort-relevant fields: \u8226 ? Track Index / Track Name \u8226 ? Take Name \u8226 ? File Name \u8226 ? Metadata Track Name (resolved by Interleave, Wave Agent\u8211-style) \u8226 ? Channel Number (recorder channel, TRK#) \u8226 ? Interleave (1..N from REAPER take channel mode: Mono-of-N) \u8226 ? Item start time\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 Shows a live table of the currently selected items and all sort-relevant fields: \u8226 ? Track Index / Track Name \u8226 ? Take Name \u8226 ? Source File \u8226 ? Metadata Track Name (resolved by Interleave, Wave Agent\u8211-style) \u8226 ? Channel Number (recorder channel, TRK#) \u8226 ? Interleave (1..N from REAPER take channel mode: Mono-of-N) \u8226 ? Item start/end (toggle Seconds vs Timecode, follows project frame rate)\par}
 {\pard \ql \f0 \sa180 \li0 \fi0 Also supports: \u8226 ? Capture BEFORE / AFTER snapshots \u8226 ? Export or Copy (TSV/CSV) for either the live view or snapshots\par}
 {\pard \ql \f0 \sa180 \li0 \fi0 Requires: ReaImGui (install via ReaPack)\par}
 }
@@ -627,6 +627,9 @@
       </version>
       <version name="0.2.2" author="hsuanice" time="2025-09-01T11:16:10Z">
         <source main="main">https://github.com/hsuanice/ReaScripts/raw/de31f12e16079e7f72daac5ac140ed7416b984ea/Beta%20Testing/hsuanice_Reorder%20or%20sort%20selected%20items%20vertically%20Monitor.lua</source>
+      </version>
+      <version name="0.3.1" author="hsuanice" time="2025-09-02T13:49:51Z">
+        <source main="main">https://github.com/hsuanice/ReaScripts/raw/e5ae65869876b1d805eced48cf9442c604f465e0/Beta%20Testing/hsuanice_Reorder%20or%20sort%20selected%20items%20vertically%20Monitor.lua</source>
       </version>
     </reapack>
     <reapack name="hsuanice_Reorder or sort selected items vertically.lua" type="script" desc="ReaImGui - Vertical Reorder and Sort (items)">
