@@ -1,6 +1,6 @@
 --[[
 @description Monitor - Reorder or sort selected items vertically
-@version 0.3.8
+@version 0.3.9
 @author hsuanice
 @about
   Shows a live table of the currently selected items and all sort-relevant fields:
@@ -34,6 +34,9 @@
 
 
 @changelog
+  v0.3.9 (2025-09-03)
+    - UI: Moved "Refresh Now" and Copy/Save buttons to the next row by removing an extra ImGui_SameLine().
+      No NewLine/Spacing added to maintain minimal vertical gap and a tighter layout.
   v0.3.8 (2025-09-03)
     - UI: Moved Custom pattern input inline to the right of the "Custom" mode selector.
     - UX: Added tooltip (ⓘ) explaining pattern tokens.
@@ -411,7 +414,7 @@ if reaper.ImGui_IsItemHovered(ctx) then
 end
 
 
-  reaper.ImGui_SameLine(ctx)
+
   if reaper.ImGui_Button(ctx, "Refresh Now", 110, 24) then refresh_now() end
 
   reaper.ImGui_SameLine(ctx)
@@ -434,16 +437,16 @@ local function draw_table(rows, height)
   local flags = TF('ImGui_TableFlags_Borders') | TF('ImGui_TableFlags_RowBg') | TF('ImGui_TableFlags_SizingStretchProp')
   if reaper.ImGui_BeginTable(ctx, "live_table", 10, flags, -FLT_MIN, height or 360) then
     reaper.ImGui_TableSetupColumn(ctx, "#", TF('ImGui_TableColumnFlags_WidthFixed'), 36)
-    reaper.ImGui_TableSetupColumn(ctx, "TrackIdx", TF('ImGui_TableColumnFlags_WidthFixed'), 72)
+    reaper.ImGui_TableSetupColumn(ctx, "TrackIdx", TF('ImGui_TableColumnFlags_WidthFixed'), 45)
     reaper.ImGui_TableSetupColumn(ctx, "Track Name")
     reaper.ImGui_TableSetupColumn(ctx, "Take Name")
     reaper.ImGui_TableSetupColumn(ctx, "Source File")
     reaper.ImGui_TableSetupColumn(ctx, "Meta Track Name")
-    reaper.ImGui_TableSetupColumn(ctx, "Chan#", TF('ImGui_TableColumnFlags_WidthFixed'), 64)
-    reaper.ImGui_TableSetupColumn(ctx, "Interleave", TF('ImGui_TableColumnFlags_WidthFixed'), 88)
+    reaper.ImGui_TableSetupColumn(ctx, "Chan#", TF('ImGui_TableColumnFlags_WidthFixed'), 36)
+    reaper.ImGui_TableSetupColumn(ctx, "Interleave", TF('ImGui_TableColumnFlags_WidthFixed'), 50)
     local startHeader, endHeader = TFLib.headers(TIME_MODE, {pattern=CUSTOM_PATTERN})
-    reaper.ImGui_TableSetupColumn(ctx, startHeader, TF('ImGui_TableColumnFlags_WidthFixed'), 120)
-    reaper.ImGui_TableSetupColumn(ctx, endHeader,   TF('ImGui_TableColumnFlags_WidthFixed'), 120)
+    reaper.ImGui_TableSetupColumn(ctx, startHeader, TF('ImGui_TableColumnFlags_WidthFixed'), 100)
+    reaper.ImGui_TableSetupColumn(ctx, endHeader,   TF('ImGui_TableColumnFlags_WidthFixed'), 100)
     reaper.ImGui_TableHeadersRow(ctx)
 
     for i, r in ipairs(rows or {}) do
