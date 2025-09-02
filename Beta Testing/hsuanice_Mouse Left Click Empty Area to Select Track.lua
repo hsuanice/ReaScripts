@@ -1,6 +1,6 @@
 --[[
 @description hsuanice_Mouse Left Click Empty Area to Select Track
-@version 0.4.3
+@version 0.4.4
 @author hsuanice
 @about
   Select the track when clicking either:
@@ -21,6 +21,11 @@
 @requires js_ReaScriptAPI
 
 @changelog
+  0.4.4 - Add explicit menu window guard.
+           • Detect context menu window classes (#32768 on Windows, NSMenu on macOS).
+           • Suppress track selection while the mouse is over these menus,
+             regardless of right-button cooldown timing.
+           • Keeps RBUTTON_COOLDOWN as a fallback protection.
   0.4.3 - Bugfix: restore left-click handling (missing lmb definition caused clicks to be ignored).
            • Define lmb = ((JS_Mouse_GetState(...) & 1) == 1) after reading mouse state.
            • Keeps 0.4.2 right-click menu cooldown logic intact.
@@ -54,7 +59,7 @@ local WANT_DEBUG = false          -- true: print to console
 local clickTolerance = 3          -- pixels for mouse-up (allow tiny moves)
 -- NEW: 抑制右鍵選單穿透（啟用 + 冷卻時間秒）
 local SUPPRESS_RBUTTON_MENU = true
-local RBUTTON_COOLDOWN = 0.40  -- 右鍵放開後 0.40 秒內不觸發選軌
+local RBUTTON_COOLDOWN = 0.10  -- 右鍵放開後 0.40 秒內不觸發選軌
 
 -------------------------------------------------------------
 -- Logger
@@ -167,6 +172,21 @@ local function watch()
   -- 同時讀左鍵(1)與右鍵(2)
   local state = reaper.JS_Mouse_GetState(1 + 2)
   local x, y  = reaper.GetMousePosition()
+  local lmb   = (state & 1) == 1
+
+  -- === Guard: 如果目前滑鼠正位於右鍵選單上，直接跳過 ===
+  do
+    if reaper.APIExists("JS_Window_FromPoint") then
+      local hwnd = reaper.JS_Window_FromPoint(x, y)
+      if hwnd then
+        local cls = reaper.JS_Window_GetClassName(hwnd) or ""
+        if cls == "#32768" or cls == "NSMenu" then
+          lastDown = false
+          reaper.defer(watch); return
+        end
+      end
+    end
+  end
 
   -- ✅ 補這行（缺它就永遠不會進入 left-click 分支）
   local lmb   = (state & 1) == 1
@@ -196,32 +216,6 @@ local function watch()
     end
   end
 
-  -- === Guard: 抑制右鍵／選單互動 ===
-  if SUPPRESS_POPUP_MENU then
-    -- A) 右鍵按下時，直接跳過
-    if (state & 2) == 2 then
-      lastDown = false
-      reaper.defer(watch); return
-    end
-
-    -- B) 滑鼠當前位於 REAPER 之外（例如系統選單、工具提示…）時，跳過
-    if reaper.APIExists("JS_Window_FromPoint") then
-      local hwnd = reaper.JS_Window_FromPoint(x, y)
-      local main = reaper.GetMainHwnd()
-      if hwnd then
-        local cls = reaper.JS_Window_GetClassName(hwnd) or ""
-        local isChild = reaper.JS_Window_IsChild(main, hwnd)
-        local overNonMain = (hwnd ~= main and not isChild)
-
-        -- Windows 的右鍵選單類名多為 "#32768"；macOS 常見為 "NSMenu"
-        if overNonMain or cls == "#32768" or cls == "NSMenu" then
-          -- 重要：把 lastDown 清掉，避免「吃到」選單裡那次左鍵的 mouse-up
-          lastDown = false
-          reaper.defer(watch); return
-        end
-      end
-    end
-  end
   
 
   if SELECT_ON_MOUSE_UP then
