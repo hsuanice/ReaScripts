@@ -1,6 +1,6 @@
 --[[
 @description Monitor - Reorder or sort selected items vertically
-@version 0.3.9
+@version 0.3.13
 @author hsuanice
 @about
   Shows a live table of the currently selected items and all sort-relevant fields:
@@ -33,7 +33,23 @@
   mm:ss.SSS → 83:07.250
 
 
+
+
 @changelog
+  v0.3.13 (2025-09-03)
+    - Fix: Persisted time mode & custom pattern now restore correctly.
+      (Forward-declared TIME_MODE/CUSTOM_PATTERN/FORMAT and removed local shadowing in State (UI).)
+
+  v0.3.12 (2025-09-03)
+    - Fix: Persist selection — time mode and custom pattern now saved on every change (Radio/Input) via ExtState.
+    - UX: Window close button (X) now works. Begin() captures (visible, open); loop stops when open == false or ESC is pressed.
+  v0.3.11 (2025-09-03)
+    - Fix: Forward-declared TFLib and changed library load to assign instead of re-declare (removed 'local' before TFLib).
+      This prevents load_prefs() from capturing a nil global TFLib and restores the saved mode on startup.
+
+  v0.3.10 (2025-09-03)
+    - Persistence: Remembers the selected time display mode (m:s / TC / Beats / Custom) and the custom pattern across runs via ExtState.
+      Re-opening the script restores your last choice; if it was Custom, the previous pattern is applied automatically.
   v0.3.9 (2025-09-03)
     - UI: Moved "Refresh Now" and Copy/Save buttons to the next row by removing an extra ImGui_SameLine().
       No NewLine/Spacing added to maintain minimal vertical gap and a tighter layout.
@@ -164,6 +180,44 @@ end
 ---------------------------------------
 -- Small utils
 ---------------------------------------
+
+-- Forward declarations so load_prefs() updates the same locals (not globals)
+local TIME_MODE, CUSTOM_PATTERN, FORMAT
+
+-- === Preferences (persist across runs) ===
+local EXT_NS = "hsuanice_ReorderSort_Monitor"
+
+local function save_prefs()
+  reaper.SetExtState(EXT_NS, "time_mode", TIME_MODE or "", true)
+  reaper.SetExtState(EXT_NS, "custom_pattern", CUSTOM_PATTERN or "", true)
+end
+
+local function load_prefs()
+  -- restore mode
+  local m = reaper.GetExtState(EXT_NS, "time_mode")
+  if m and m ~= "" then
+    if     m == "ms"     then TIME_MODE = TFLib.MODE.MS
+    elseif m == "tc"     then TIME_MODE = TFLib.MODE.TC
+    elseif m == "beats"  then TIME_MODE = TFLib.MODE.BEATS
+    elseif m == "sec"    then TIME_MODE = TFLib.MODE.SEC
+    elseif m == "custom" then TIME_MODE = TFLib.MODE.CUSTOM
+    end
+  end
+  -- restore pattern
+  local pat = reaper.GetExtState(EXT_NS, "custom_pattern")
+  if pat and pat ~= "" then CUSTOM_PATTERN = pat end
+
+  -- rebuild formatter according to restored state
+  if TIME_MODE == TFLib.MODE.MS then
+    FORMAT = TFLib.make_formatter(TIME_MODE, {decimals=3})
+  elseif TIME_MODE == TFLib.MODE.CUSTOM then
+    FORMAT = TFLib.make_formatter(TIME_MODE, {pattern=CUSTOM_PATTERN})
+  else
+    FORMAT = TFLib.make_formatter(TIME_MODE)
+  end
+end
+
+
 local function item_start(it) return reaper.GetMediaItemInfo_Value(it,"D_POSITION") end
 local function item_track(it) return reaper.GetMediaItemTrack(it) end
 local function track_index(tr) return math.floor(reaper.GetMediaTrackInfo_Value(tr,"IP_TRACKNUMBER") or 0) end
@@ -173,7 +227,9 @@ local function fmt_seconds(s) if not s then return "" end return string.format("
 local function fmt_tc(s)      if not s then return "" end return reaper.format_timestr_pos(s, "", 5) end
 
 -- Time Format Library (with fallback)
-local ok, TFLib = pcall(dofile, reaper.GetResourcePath().."/Scripts/hsuanice Scripts/Library/hsuanice_Time Format.lua")
+local ok
+ok, TFLib = pcall(dofile, reaper.GetResourcePath().."/Scripts/hsuanice Scripts/Library/hsuanice_Time Format.lua")
+
 if not ok or not TFLib or not TFLib.make_formatter then
   -- fallback: 支援 m:s / TC / Beats（三種）
   local function _fmt_ms(sec, decimals)
@@ -307,27 +363,27 @@ end
 -- State (UI)
 ---------------------------------------
 local AUTO = true
--- 以三段模式取代 boolean
-local TIME_MODE = TFLib.MODE.MS   -- 預設改為 m:s, 你也可改成 TFLib.MODE.TC
+
+-- Display mode state (persisted)
+TIME_MODE = TFLib.MODE.MS        -- 預設 m:s；load_prefs() 會覆寫為上次選擇
+CUSTOM_PATTERN = "hh:mm:ss"
+
+-- Data
 local ROWS = {}
 local SNAP_BEFORE, SNAP_AFTER = {}, {}
-local ROWS = {}
-local SNAP_BEFORE, SNAP_AFTER = {}, {}
 
--- 建立可重用 formatter（在表格列與輸出都共用）
-local FORMAT = TFLib.make_formatter(TIME_MODE, {decimals=6})
+-- Current formatter（會在切換模式/修改 pattern 時重建）
+FORMAT = TFLib.make_formatter(TIME_MODE, {decimals=3})
 
-local CUSTOM_PATTERN = "hh:mm:ss"
-
-
--- 最薄的轉接：之後如果要改用 FORMAT 直接呼叫，也可移除這個 wrapper
-local function format_time(val)
-  return FORMAT(val)
-end
+-- 超薄轉接（保留相容性；也可以讓 table/export 都直接叫 FORMAT(r.start_time)）
+local function format_time(val) return FORMAT(val) end
 
 local function refresh_now()
   ROWS = scan_selection_rows()
 end
+
+-- 啟動時讀回上次的模式與 pattern，並重建 FORMAT
+if load_prefs then load_prefs() end
 
 ---------------------------------------
 -- Export helpers
@@ -376,33 +432,38 @@ reaper.ImGui_SameLine(ctx)
 if reaper.ImGui_RadioButton(ctx, "m:s", TIME_MODE==TFLib.MODE.MS) then
   TIME_MODE = TFLib.MODE.MS
   FORMAT = TFLib.make_formatter(TIME_MODE, {decimals=3})
+  save_prefs()
 end
 reaper.ImGui_SameLine(ctx)
 if reaper.ImGui_RadioButton(ctx, "TC", TIME_MODE==TFLib.MODE.TC) then
   TIME_MODE = TFLib.MODE.TC
   FORMAT = TFLib.make_formatter(TIME_MODE)
+  save_prefs()
 end
 reaper.ImGui_SameLine(ctx)
 if reaper.ImGui_RadioButton(ctx, "Beats", TIME_MODE==TFLib.MODE.BEATS) then
   TIME_MODE = TFLib.MODE.BEATS
   FORMAT = TFLib.make_formatter(TIME_MODE)
+  save_prefs()
 end
 reaper.ImGui_SameLine(ctx)
 if reaper.ImGui_RadioButton(ctx, "Custom", TIME_MODE==TFLib.MODE.CUSTOM) then
   TIME_MODE = TFLib.MODE.CUSTOM
   FORMAT = TFLib.make_formatter(TIME_MODE, {pattern=CUSTOM_PATTERN})
+  save_prefs()
 end
 -- ← 直接接在 Custom 後面放輸入框
 reaper.ImGui_SameLine(ctx)
 reaper.ImGui_Text(ctx, "Pattern:")
 reaper.ImGui_SameLine(ctx)
-reaper.ImGui_SetNextItemWidth(ctx, 180)  -- 你可改寬度
+reaper.ImGui_SetNextItemWidth(ctx, 180)
 local changed, newpat = reaper.ImGui_InputText(ctx, "##custom_pattern", CUSTOM_PATTERN)
 if changed then
   CUSTOM_PATTERN = newpat
   if TIME_MODE==TFLib.MODE.CUSTOM then
     FORMAT = TFLib.make_formatter(TIME_MODE, {pattern=CUSTOM_PATTERN})
   end
+  save_prefs()
 end
 -- 小提示（hover 顯示）
 reaper.ImGui_SameLine(ctx)
@@ -495,7 +556,7 @@ local function loop()
 
   reaper.ImGui_SetNextWindowSize(ctx, 1000, 640, reaper.ImGui_Cond_FirstUseEver())
   local flags = reaper.ImGui_WindowFlags_NoCollapse()
-  local open = reaper.ImGui_Begin(ctx, "Reorder or Sort — Monitor & Debug"..LIBVER, true, flags)
+  local visible, open = reaper.ImGui_Begin(ctx, "Reorder or Sort — Monitor & Debug"..LIBVER, true, flags)
 
   draw_toolbar()
   draw_snapshots()
@@ -503,7 +564,13 @@ local function loop()
   draw_table(ROWS, 360)
 
   reaper.ImGui_End(ctx)
-  if open and not esc_pressed() then reaper.defer(loop) end
+
+  if open and not esc_pressed() then
+    reaper.defer(loop)
+  else
+    -- 視窗被 X 關閉，或按下 ESC → 結束前保險存一次
+    save_prefs()
+  end
 end
 
 refresh_now()
