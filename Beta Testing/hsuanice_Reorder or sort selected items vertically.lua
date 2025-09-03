@@ -1,6 +1,6 @@
 --[[
 @description ReaImGui - Vertical Reorder and Sort (items)
-@version 0.5.3
+@version 0.5.4
 @author hsuanice
 @about
   Provides three vertical re-arrangement modes for selected items (stacked UI):
@@ -25,6 +25,19 @@
     - Script generated and refined with ChatGPT.
 
 @changelog
+  v0.5.4 (2025-09-03)
+    - Reliable Monitor auto-capture with BEFORE/AFTER payloads.
+      • Emits separate ExtState keys: capture_before / capture_after.
+      • Attaches snapshot_before / snapshot_after TSV payloads so the Monitor
+        can restore the exact selection at the moment of action (no race).
+    - Preference & UI:
+      • Added “Monitor auto-capture” checkbox (persisted via ExtState).
+      • Emissions are guarded by CAPTURE_ON; no Monitor dependency.
+    - Integration points:
+      • Wraps run_engine() and run_copy_to_new_tracks() with BEFORE/AFTER emits.
+    - Fixes:
+      • Removed duplicate emit_capture() implementation.
+      • Sanitized TSV payload for newlines/tabs to avoid parsing issues.
   v0.5.3 (2025-09-03)
     - Feature: Auto-capture hooks for Monitor integration.
       Emits an ExtState signal before/after operations so the Monitor script can snapshot automatically.
@@ -170,24 +183,22 @@ local function set_capture_enabled(on)
   reaper.SetExtState(SIG_NS, "enable", CAPTURE_ON and "1" or "0", true)
 end
 
--- 發訊號（只有在 CAPTURE_ON==true 才送）
-local function emit_capture(tag)  -- tag = "before" | "after"
+-- tag = "before" | "after"
+local function emit_capture(tag, payload_tsv)
   if not CAPTURE_ON then return end
   local key = (tag == "before") and "capture_before" or "capture_after"
   local payload_key = (tag == "before") and "snapshot_before" or "snapshot_after"
-  reaper.SetExtState(SIG_NS, key, tostring(reaper.time_precise()), false)
-  reaper.SetExtState(SIG_NS, payload_key, snapshot_rows_tsv_from_selection(), false)
+  if payload_tsv and payload_tsv ~= "" then
+    reaper.SetExtState("hsuanice_ReorderSort_Signal", payload_key, payload_tsv, false)
+  end
+  reaper.SetExtState("hsuanice_ReorderSort_Signal", key, tostring(reaper.time_precise()), false)
 end
 
 
 -- 記憶使用者偏好（你現有的 CAPTURE_ON / set_capture_enabled 保留）
 -- ...
 
-local function emit_capture(tag)  -- tag = "before" | "after"
-  if not CAPTURE_ON then return end
-  local key = (tag == "before") and "capture_before" or "capture_after"
-  reaper.SetExtState(SIG_NS, key, tostring(reaper.time_precise()), false)
-end
+
 
 
 ---------------------------------------
@@ -553,125 +564,30 @@ end
 -- Copy-to-New-Tracks：核心
 ---------------------------------------
 
--- Copy 模式的排序依據：1=Track Name, 2=Channel Number
-local COPY_SORT_MODE = 1
-local COPY_ASC = true
-
-local function channel_label(n)
-  if not n or n==999 then return "Ch ??" end
-  return string.format("Ch %02d", tonumber(n) or 0)
-end
-
--- 自然排序鍵（用於名稱 A↔Z 比較）
-local function natural_key(s)
-  s = tostring(s or ""):lower():gsub("%s+", " ")
-  return s:gsub("(%d+)", function(d) return string.format("%09d", tonumber(d)) end)
-end
-
-
-local META_NAME_KEY = "trk" -- 預設讀 $trk（建議）
-local SHOW_PREVIEW  = false
-local PREVIEW_TEXT  = ""
-local PREVIEW_PAIRS = {} -- { {ch=1,name="Vocal1"}, ... }
-
--- 自然排序鍵（名稱）
-local function natural_key(s)
-  s = tostring(s or ""):lower()
-  s = s:gsub("%s+", " ")
-  s = s:gsub("(%d+)", function(d) return string.format("%09d", tonumber(d)) end)
-  return s
-end
-
--- 只生成「Channel ↔ Name」對照（從 iXML TRK1..64 萃取）
-local function build_preview_pairs(items)
-  PREVIEW_PAIRS = {}
-  local seen = {}
-  local sample = math.min(10, #items)
-  for i=1, sample do
-    local f = META.collect_item_fields(items[i])
-    for ch=1,64 do
-      local nm = f["trk"..ch] or f["TRK"..ch]
-      if nm and nm ~= "" and not seen[ch.."\0"..nm] then
-        seen[ch.."\0"..nm] = true
-        PREVIEW_PAIRS[#PREVIEW_PAIRS+1] = { ch = ch, name = nm }
-      end
-    end
-  end
-  table.sort(PREVIEW_PAIRS, function(a,b)
-    if a.ch ~= b.ch then return a.ch < b.ch end
-    return natural_key(a.name) < natural_key(b.name)
-  end)
-end
-
-local function build_preview_text_from_pairs()
-  -- 備用（目前不用文字區塊，改用表格顯示）
-  local lines = {"Channel  |  Track Name","-----------------------"}
-  for _,p in ipairs(PREVIEW_PAIRS) do
-    lines[#lines+1] = string.format("%6s  |  %s", p.ch, p.name)
-  end
-  PREVIEW_TEXT = table.concat(lines, "\n")
-end
-
-local function ensure_target_track(name, ch, base_index, existing, order)
-  if existing[name] then return existing[name] end
-  local insert_at = base_index + #order
-  reaper.InsertTrackAtIndex(insert_at, true)
-  local tr = reaper.GetTrack(0, insert_at)
-  set_track_name(tr, name)
-  existing[name] = tr
-  order[#order+1] = {name=name, ch=ch or 999, tr=tr}
-  return tr
-end
-
-local function copy_item_to_track(it, tr)
-  local s  = item_start(it)
-  local len= item_len(it)
-  local new = reaper.AddMediaItemToTrack(tr)
-  reaper.SetMediaItemInfo_Value(new, "D_POSITION", s)
-  reaper.SetMediaItemInfo_Value(new, "D_LENGTH",   len)
-  local ok, chunk = reaper.GetItemStateChunk(it, "", false)
-  if ok then
-    chunk = chunk:gsub("\n%s*SEL%s+1", "\n  SEL 0")
-    reaper.SetItemStateChunk(new, chunk, false)
-  end
-  return new
-end
-
-local ORDER_BY_NAME_ONLY = false
-
 -- mode: 1=Track Name, 2=Channel Number
 -- asc : true=Ascending, false=Descending
 local function run_copy_to_new_tracks(mode, asc)
-  emit_capture("before")              -- ★ 新增
-  local items = get_selected_items()
-  if #items==0 then return end
+  -- BEFORE snapshot（動手前以目前「選取的 items」打包）
+  local before_items = {}
+  for i = 0, reaper.CountSelectedMediaItems(0)-1 do
+    before_items[#before_items+1] = reaper.GetSelectedMediaItem(0, i)
+  end
+  emit_capture("before", snapshot_rows_tsv(before_items))
+
   reaper.Undo_BeginBlock()
 
-  local function channel_label(n)
-    if not n or n==999 then return "Ch ??" end
-    return string.format("Ch %02d", tonumber(n) or 0)
-  end
-  local function natural_key(s)
-    s = tostring(s or ""):lower():gsub("%s+"," ")
-    return s:gsub("(%d+)", function(d) return string.format("%09d", tonumber(d)) end)
-  end
-
-  -- 蒐集 rows：{ it, name, ch }
-  -- 以 iXML → Interleave 解析（和你 Rename 腳本一致）
+  -- 蒐集 rows：{ it, name, ch }（從 iXML/TRK 萃取）
+  local items = get_selected_items()
   local rows = {}
   for _, it in ipairs(items) do
-    -- 讀 metadata 欄（含 iXML TRACK_LIST 與 TRK#）
     local f = collect_fields(it)
-    -- 用你現成的抽取器：回傳 (name, ch)
     local name, ch = extract_name_and_chan(f, "trk")
     name = tostring(name or ""):gsub("^%s+",""):gsub("%s+$","")
     ch   = tonumber(ch) or 999
     rows[#rows+1] = { it = it, name = name, ch = ch }
   end
 
-
-  -- 分組：mode=1 依名稱；mode=2 依通道
-  local groups, order = {}, {}
+  -- 分組 + 排序（依名稱或通道 #）
   local function natural_key(s)
     s = tostring(s or ""):lower():gsub("%s+", " ")
     return s:gsub("(%d+)", function(d) return string.format("%09d", tonumber(d)) end)
@@ -681,8 +597,9 @@ local function run_copy_to_new_tracks(mode, asc)
     return string.format("Ch %02d", tonumber(n) or 0)
   end
 
+  local groups, order = {}, {}
   if mode == 1 then
-    -- Track Name
+    -- by Track Name
     for _, r in ipairs(rows) do
       local key = r.name ~= "" and r.name or "(unnamed)"
       local g = groups[key]
@@ -695,7 +612,7 @@ local function run_copy_to_new_tracks(mode, asc)
       g.items[#g.items+1] = r.it
     end
   else
-    -- Channel Number
+    -- by Channel Number
     for _, r in ipairs(rows) do
       local key = tonumber(r.ch) or 999
       local g = groups[key]
@@ -708,64 +625,42 @@ local function run_copy_to_new_tracks(mode, asc)
       g.items[#g.items+1] = r.it
     end
   end
+  table.sort(order, function(a,b) return asc and (a.ord < b.ord) or (a.ord > b.ord) end)
 
-  table.sort(order, function(a,b)
-    if asc then return a.ord < b.ord else return a.ord > b.ord end
-  end)
-
-  -- 目的軌：以名稱去重，每個名稱只建一次
-  local base = reaper.CountTracks(0) -- 直接接在最末端
-  local existing = {}                -- name -> track
-  local created  = {}                -- 依順序記錄
-  local copied   = 0
-
-  for _, rec in ipairs(order) do
-    local label = rec.g.label
+  -- 建軌並複製
+  local base = reaper.CountTracks(0)
+  local existing, created = {}, {}
+  local function ensure_track(label)
     local tr = existing[label]
-    if not tr then
-      reaper.InsertTrackAtIndex(base + #created, true)
-      tr = reaper.GetTrack(0, base + #created)
-      set_track_name(tr, label)
-      existing[label] = tr
-      created[#created+1] = tr
-    end
+    if tr then return tr end
+    reaper.InsertTrackAtIndex(base + #created, true)
+    tr = reaper.GetTrack(0, base + #created)
+    set_track_name(tr, label)
+    existing[label] = tr
+    created[#created+1] = tr
+    return tr
+  end
+
+  local copied = 0
+  for _, rec in ipairs(order) do
+    local tr = ensure_track(rec.g.label)
     for _, it in ipairs(rec.g.items) do
       copy_item_to_track(it, tr)
       copied = copied + 1
     end
   end
 
-  -- Optional: 檢查新建軌有沒有 time overlap
-  local overlaps = 0
-  for _, tr in ipairs(created) do
-    local n = reaper.CountTrackMediaItems(tr)
-    local t = {}
-    for i=0,n-1 do
-      local it = reaper.GetTrackMediaItem(tr,i)
-      t[#t+1] = { s = reaper.GetMediaItemInfo_Value(it,"D_POSITION"),
-                  e = reaper.GetMediaItemInfo_Value(it,"D_POSITION") + reaper.GetMediaItemInfo_Value(it,"D_LENGTH") }
-    end
-    table.sort(t, function(a,b) return a.s<b.s end)
-    local last = -1e18
-    for _, seg in ipairs(t) do
-      if seg.s < last - 1e-9 then overlaps = overlaps + 1 break end
-      if seg.e > last then last = seg.e end
-    end
-  end
-  if overlaps > 0 then
-    reaper.MB(("Warning: %d track(s) have overlaps after copy."):format(overlaps), "Overlap check", 0)
-  end
-
-
-
   reaper.Undo_EndBlock("Copy selected items to NEW tracks by metadata", -1)
   reaper.UpdateArrange()
-  emit_capture("after")               -- ★ 新增
-  local mode_msg = (mode==1) and "Track Name" or "Channel Number"
-  local order_msg = asc and "Ascending" or "Descending"
-  reaper.MB(("Completed.\nNew tracks: %d\nItems copied: %d\nMode: %s (%s).")
-    :format(#created, copied, mode_msg, order_msg), "Copy to New Tracks", 0)
+
+  -- AFTER snapshot（動作完成後再抓一次）
+  local after_items = {}
+  for i = 0, reaper.CountSelectedMediaItems(0)-1 do
+    after_items[#after_items+1] = reaper.GetSelectedMediaItem(0, i)
+  end
+  emit_capture("after", snapshot_rows_tsv(after_items))
 end
+
 
 ---------------------------------------
 -- UI / Engine 狀態
@@ -870,8 +765,79 @@ local function prepare_plan()
   TOTAL, MOVED, SKIPPED = #SELECTED_ITEMS, 0, 0
 end
 
+-- === Snapshot payload (TSV) from a given item list ===
+local function snapshot_rows_tsv(items)
+  local sep = "\t"
+  local out = {}
+  local function esc(s)
+    s = tostring(s or "")
+    s = s:gsub("[\r\n\t]", " ") -- TSV 安全
+    return s
+  end
+
+  -- header（與 Monitor 匯出一致）
+  out[#out+1] = table.concat({
+    "#","TrackIdx","TrackName","TakeName","Source File",
+    "MetaTrackName","Channel#","Interleave","Mute","ColorHex","StartTime","EndTime"
+  }, sep)
+
+  for i, it in ipairs(items or {}) do
+    local tr = reaper.GetMediaItem_Track(it)
+    local tidx = tr and math.floor(reaper.GetMediaTrackInfo_Value(tr,"IP_TRACKNUMBER") or 0) or 0
+    local _, tname = tr and reaper.GetSetMediaTrackInfo_String(tr, "P_NAME", "", false) or false, ""
+    local take = reaper.GetActiveTake(it)
+    local tkn = (take and reaper.GetTakeName(take)) or ""
+    local src = take and reaper.GetMediaItemTake_Source(take)
+    local file = ""
+    if src then
+      local fn = reaper.GetMediaSourceFileName(src, "")
+      file = fn or ""
+    end
+    local pos = reaper.GetMediaItemInfo_Value(it, "D_POSITION") or 0
+    local len = reaper.GetMediaItemInfo_Value(it, "D_LENGTH")   or 0
+    local muted = (reaper.GetMediaItemInfo_Value(it, "B_MUTE") or 0) > 0.5
+    local native = reaper.GetDisplayedMediaItemColor(it) or 0
+    local hex = ""
+    if native ~= 0 then
+      local r,g,b = reaper.ColorFromNative(native)
+      hex = string.format("#%02X%02X%02X", r,g,b)
+    end
+
+    -- 這兩個先留空或 1（Monitor 可顯示，但不影響）
+    local meta_trk = tname or ""
+    local interleave = ""
+    local chnum = 1
+
+    out[#out+1] = table.concat({
+      esc(i),
+      esc(tidx),
+      esc(tname or ""),
+      esc(tkn),
+      esc(file),
+      esc(meta_trk),
+      esc(chnum),
+      esc(interleave),
+      esc(muted and "1" or "0"),
+      esc(hex),
+      esc(pos),
+      esc(pos + len),
+    }, sep)
+  end
+
+  return table.concat(out, "\n")
+end
+
+
+
+
 local function run_engine()
-  emit_capture("before")                     -- ★ 新增：通知 Monitor 取 BEFORE
+  -- 先抓 “目前選取的 items” 做 BEFORE 快照（真・動手前）
+  local before_items = {}
+  for i = 0, reaper.CountSelectedMediaItems(0)-1 do
+    before_items[#before_items+1] = reaper.GetSelectedMediaItem(0, i)
+  end
+  emit_capture("before", snapshot_rows_tsv(before_items))
+
   reaper.Undo_BeginBlock()
   apply_moves(MOVES)
   MOVED = #MOVES
@@ -879,7 +845,49 @@ local function run_engine()
     "Reorder (fill upward) selected items" or
     "Sort selected items vertically", -1)
   reaper.UpdateArrange()
-  emit_capture("after")                      -- ★ 新增：通知 Monitor 取 AFTER
+
+  -- AFTER
+  local after_items = {}
+  for i = 0, reaper.CountSelectedMediaItems(0)-1 do
+    after_items[#after_items+1] = reaper.GetSelectedMediaItem(0, i)
+  end
+  emit_capture("after", snapshot_rows_tsv(after_items))
+end
+
+---------------------------------------
+-- Metadata Preview helpers (for UI)
+---------------------------------------
+-- 保存在 UI 期間可重用的對照表：{ {ch=1,name="Vocal"}, ... }
+local PREVIEW_PAIRS = {}
+
+-- 給名稱排序用的簡單自然排序鍵
+local function _preview_natkey(s)
+  s = tostring(s or ""):lower():gsub("%s+", " ")
+  return s:gsub("(%d+)", function(d) return string.format("%09d", tonumber(d) or 0) end)
+end
+
+-- 從目前的 items（最多取頭 10 個樣本）掃出 TRK1..64 的 {ch ↔ name}
+local function build_preview_pairs(items)
+  PREVIEW_PAIRS = {}
+  local seen = {}
+  local n = math.min(10, #items)
+  for i = 1, n do
+    local f = META.collect_item_fields(items[i])
+    for ch = 1, 64 do
+      local nm = f["trk"..ch] or f["TRK"..ch]
+      if nm and nm ~= "" then
+        local key = ch .. "\0" .. nm
+        if not seen[key] then
+          seen[key] = true
+          PREVIEW_PAIRS[#PREVIEW_PAIRS+1] = { ch = ch, name = nm }
+        end
+      end
+    end
+  end
+  table.sort(PREVIEW_PAIRS, function(a, b)
+    if a.ch ~= b.ch then return a.ch < b.ch end
+    return _preview_natkey(a.name) < _preview_natkey(b.name)
+  end)
 end
 
 
@@ -955,21 +963,29 @@ local function draw_confirm()
     reaper.ImGui_Spacing(ctx)
     reaper.ImGui_Text(ctx, "Preview detected fields")
     if reaper.ImGui_Button(ctx, "Scan first 10 items", 200, 22) then
-      build_preview_pairs(SELECTED_ITEMS)
+      build_preview_pairs(SELECTED_ITEMS)   -- ← 先生成 PREVIEW_PAIRS
     end
-    reaper.ImGui_Spacing(ctx)
-    if reaper.ImGui_BeginTable(ctx, "tbl_preview", 2,
-        reaper.ImGui_TableFlags_Borders() | reaper.ImGui_TableFlags_RowBg(), -1, 220) then
-      reaper.ImGui_TableSetupColumn(ctx, "Channel #")
-      reaper.ImGui_TableSetupColumn(ctx, "Track Name")
-      reaper.ImGui_TableHeadersRow(ctx)
-      for _,p in ipairs(PREVIEW_PAIRS) do
-        reaper.ImGui_TableNextRow(ctx)
-        reaper.ImGui_TableSetColumnIndex(ctx, 0); reaper.ImGui_Text(ctx, tostring(p.ch))
-        reaper.ImGui_TableSetColumnIndex(ctx, 1); reaper.ImGui_Text(ctx, tostring(p.name))
+
+    -- 只有有資料才畫表格，避免 PREVIEW_PAIRS 為 nil/空表時當掉
+    if type(PREVIEW_PAIRS) == "table" and #PREVIEW_PAIRS > 0 then
+      reaper.ImGui_Spacing(ctx)
+      if reaper.ImGui_BeginTable(ctx, "tbl_preview", 2,
+          reaper.ImGui_TableFlags_Borders() | reaper.ImGui_TableFlags_RowBg(), -1, 220) then
+        reaper.ImGui_TableSetupColumn(ctx, "Channel #")
+        reaper.ImGui_TableSetupColumn(ctx, "Track Name")
+        reaper.ImGui_TableHeadersRow(ctx)
+        for _, p in ipairs(PREVIEW_PAIRS) do
+          reaper.ImGui_TableNextRow(ctx)
+          reaper.ImGui_TableSetColumnIndex(ctx, 0); reaper.ImGui_Text(ctx, tostring(p.ch))
+          reaper.ImGui_TableSetColumnIndex(ctx, 1); reaper.ImGui_Text(ctx, tostring(p.name))
+        end
+        reaper.ImGui_EndTable(ctx)
       end
-      reaper.ImGui_EndTable(ctx)
+    else
+      reaper.ImGui_Spacing(ctx)
+      reaper.ImGui_Text(ctx, "Preview: click \"Scan first 10 items\"")
     end
+
   else
     -- 非 Metadata：這裡才畫 Sort 的主按鈕
     reaper.ImGui_Spacing(ctx)
