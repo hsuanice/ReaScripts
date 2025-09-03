@@ -1,22 +1,21 @@
 --[[
-@description Delete Selected Tracks (safe: skip prompt if empty; prompt if folder parents with children)
-@version 0.2.0
+@description Delete Selected Tracks (safe; prompt if content or folders; show selection & child counts)
+@version 0.2.1
 @author hsuanice
 @about
   Delete selected tracks with safety:
-    • If ALL selected tracks are empty (no items, no automation/envelope data) AND none of them is a folder parent with children, delete immediately with no prompt.
-    • If ANY selected track contains items or automation, OR is a folder parent that currently has child tracks, show a summary and ask for confirmation.
-    • When no track is selected, show an info message.
-
-  Definitions:
-    - "Automation present" = any track envelope has ≥1 point OR ≥1 automation item.
-    - "Folder parent with children" = a selected track whose folder depth is less than the next track's depth (i.e., it currently has at least one child track underneath).
-
+    • If ALL selected tracks are empty (no items, no automation/envelope data) AND none is a folder parent with children, delete immediately with no prompt.
+    • If ANY selected track contains items or automation, OR is a folder parent with children, show a summary and ask for confirmation.
+    • Always shows how many tracks are selected and how many child tracks are under any selected folder parents.
   Notes:
+    - "Automation present" = any track envelope has ≥1 point OR ≥1 automation item.
+    - "Folder parent with children" = a selected track whose next track depth is greater than its own.
+    - Child tracks counting includes all descendants under a selected folder parent (until depth returns to or above the parent's depth).
     - Master track is ignored by REAPER's CountSelectedTracks().
 
 @changelog
-  v0.2.0 - Messages in English; added safety prompt when selection includes any folder parent with child tracks.
+  v0.2.1 - Add summary lines for "Selected tracks" and total "Child tracks".
+  v0.2.0 - English messages; prompt when selection includes folder parents with children.
   v0.1.0 - Initial release.
 ]]
 
@@ -28,8 +27,7 @@ local function collect_selected_tracks()
   local t = {}
   local n = r.CountSelectedTracks(0) -- master ignored
   for i = 0, n-1 do
-    local tr = r.GetSelectedTrack(0, i)
-    t[#t+1] = tr
+    t[#t+1] = r.GetSelectedTrack(0, i)
   end
   return t
 end
@@ -39,38 +37,54 @@ local function track_has_automation(tr)
   for i = 0, env_count-1 do
     local env = r.GetTrackEnvelope(tr, i)
     if env then
-      -- any automation items?
-      if r.CountAutomationItems(env) > 0 then
-        return true
-      end
-      -- any underlying envelope points?
-      if r.CountEnvelopePointsEx(env, -1) > 0 then
-        return true
-      end
+      if r.CountAutomationItems(env) > 0 then return true end
+      if r.CountEnvelopePointsEx(env, -1) > 0 then return true end
     end
   end
   return false
 end
 
--- Determine if a track is a folder parent with at least one child.
--- Strategy: compare this track's depth to the NEXT track's depth.
--- If next depth > current depth, then this is a parent with children.
+-- Is this track a folder parent (with at least one child) by depth comparison?
 local function is_folder_parent_with_children(tr)
   if not tr then return false end
-  local idx_1based = r.GetMediaTrackInfo_Value(tr, "IP_TRACKNUMBER") -- 1-based
-  if not idx_1based or idx_1based <= 0 then return false end
-  local idx = math.floor(idx_1based) - 1                              -- 0-based
+  local idx_1 = r.GetMediaTrackInfo_Value(tr, "IP_TRACKNUMBER") -- 1-based
+  if not idx_1 or idx_1 <= 0 then return false end
+  local idx0 = math.floor(idx_1) - 1                            -- 0-based
   local this_depth = r.GetTrackDepth(tr)
-  local next_tr = r.GetTrack(0, idx + 1)
+  local next_tr = r.GetTrack(0, idx0 + 1)
   if not next_tr then return false end
   local next_depth = r.GetTrackDepth(next_tr)
   return (next_depth or 0) > (this_depth or 0)
+end
+
+-- Count ALL descendant tracks of a folder parent (direct + nested) until depth returns.
+local function count_children_for_parent(tr)
+  if not tr then return 0 end
+  local idx_1 = r.GetMediaTrackInfo_Value(tr, "IP_TRACKNUMBER") -- 1-based
+  if not idx_1 or idx_1 <= 0 then return 0 end
+  local start_idx = math.floor(idx_1) - 1                        -- 0-based
+  local parent_depth = r.GetTrackDepth(tr)
+  local total = 0
+
+  local i = start_idx + 1
+  while true do
+    local t = r.GetTrack(0, i)
+    if not t then break end
+    local d = r.GetTrackDepth(t)
+    if (d or 0) <= (parent_depth or 0) then
+      break -- scope ended
+    end
+    total = total + 1
+    i = i + 1
+  end
+  return total
 end
 
 local function summarize_selection(tracks)
   local total_items = 0
   local tracks_with_auto = 0
   local folder_parents_with_children = 0
+  local total_children = 0
 
   for _, tr in ipairs(tracks) do
     total_items = total_items + r.CountTrackMediaItems(tr)
@@ -79,16 +93,16 @@ local function summarize_selection(tracks)
     end
     if is_folder_parent_with_children(tr) then
       folder_parents_with_children = folder_parents_with_children + 1
+      total_children = total_children + count_children_for_parent(tr)
     end
   end
 
-  return total_items, tracks_with_auto, folder_parents_with_children
+  return total_items, tracks_with_auto, folder_parents_with_children, total_children
 end
 
 local function delete_tracks(tracks)
   r.Undo_BeginBlock()
   r.PreventUIRefresh(1)
-  -- delete bottom-up
   for i = #tracks, 1, -1 do
     r.DeleteTrack(tracks[i])
   end
@@ -100,14 +114,16 @@ end
 -- --- Entry -------------------------------------------------------------------
 
 local sel_tracks = collect_selected_tracks()
-if #sel_tracks == 0 then
+local sel_count = #sel_tracks
+if sel_count == 0 then
   r.ShowMessageBox("No track is selected.", "Delete Selected Tracks", 0)
   return
 end
 
-local total_items, tracks_with_auto, folder_parents_with_children = summarize_selection(sel_tracks)
+local total_items, tracks_with_auto, folder_parents_with_children, total_children =
+  summarize_selection(sel_tracks)
 
--- If everything is empty and there is no folder parent-with-children, delete with no prompt.
+-- Prompt if there is any content OR any folder structure involved.
 local should_prompt =
   (total_items > 0) or
   (tracks_with_auto > 0) or
@@ -121,11 +137,13 @@ end
 -- Build confirmation summary (English UI)
 local msg = string.format(
   "Your selection includes content or folder parents:\n\n" ..
+  "• Selected tracks: %d\n" ..
   "• Items: %d\n" ..
   "• Tracks with automation/envelope data: %d\n" ..
-  "• Folder parents with child tracks: %d\n\n" ..
+  "• Folder parents with child tracks: %d\n" ..
+  "• Child tracks (total): %d\n\n" ..
   "Do you still want to DELETE the selected track(s)?",
-  total_items, tracks_with_auto, folder_parents_with_children
+  sel_count, total_items, tracks_with_auto, folder_parents_with_children, total_children
 )
 
 -- 4 = MB_YESNO, returns 6 if Yes
