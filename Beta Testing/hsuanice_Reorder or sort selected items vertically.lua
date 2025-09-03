@@ -1,6 +1,6 @@
 --[[
 @description ReaImGui - Vertical Reorder and Sort (items)
-@version 0.5.5.1 Add ESC close
+@version 0.5.5.2 UI refined
 @author hsuanice
 @about
   Provides three vertical re-arrangement modes for selected items (stacked UI):
@@ -29,7 +29,10 @@
 
 
 @changelog
-  - UX: Press ESC to close the Reorder window (modal summary still closes first).
+  v0.5.5.2
+    - UI refined
+  v0.5.5.1
+    - UX: Press ESC to close the Reorder window (modal summary still closes first).
   v0.5.5
     - Refactor: Decoupled auto-capture from metadata payloads.
       Reorder now issues handshake requests (req_before/req_after) and waits for ack,
@@ -954,6 +957,7 @@ local function draw_confirm()
   compute_selection_and_tracks()
   reaper.ImGui_Text(ctx, string.format("Selected: %d item(s) across %d track(s).", #SELECTED_ITEMS, #ACTIVE_TRACKS))
   reaper.ImGui_Spacing(ctx)
+  reaper.ImGui_Spacing(ctx)
 
   reaper.ImGui_SameLine(ctx)
   local chg, v = reaper.ImGui_Checkbox(ctx, "Monitor auto-capture", CAPTURE_ON)
@@ -964,7 +968,7 @@ local function draw_confirm()
 
   -- 1) Reorder
   reaper.ImGui_Text(ctx, "Reorder")
-  if reaper.ImGui_Button(ctx, "Reorder (fill upward)", 220, 28) then
+  if reaper.ImGui_Button(ctx, "Reorder (fill upward)", 222, 28) then
     MODE="reorder"; prepare_plan(); run_engine()
     SUMMARY = ("Completed. Items=%d, Moved=%d, Skipped=%d."):format(TOTAL, MOVED, SKIPPED)
     WANT_POPUP = true
@@ -990,13 +994,13 @@ local function draw_confirm()
     reaper.ImGui_SameLine(ctx)
     if reaper.ImGui_RadioButton(ctx, "Track Name", meta_sort_mode==1) then meta_sort_mode=1 end
     reaper.ImGui_SameLine(ctx)
-    if reaper.ImGui_RadioButton(ctx, "Channel Number", meta_sort_mode==2) then meta_sort_mode=2 end
+    if reaper.ImGui_RadioButton(ctx, "Channel#", meta_sort_mode==2) then meta_sort_mode=2 end
 
     -- ★ 主按鈕放在這裡（Preview 上方）
     reaper.ImGui_Spacing(ctx)
 
     -- 🆕 Sort in Place（就地排序）
-    if reaper.ImGui_Button(ctx, "Sort in Place", 220, 26) then
+    if reaper.ImGui_Button(ctx, "Sort in Place", 108, 26) then
       -- 使用現有的「Sort Vertically」引擎，但 key 來自 Metadata
       MODE = "sort"
       sort_key_idx = 3
@@ -1008,7 +1012,7 @@ local function draw_confirm()
     reaper.ImGui_SameLine(ctx)
 
         -- 既有的 Copy to Sort（保留原行為：複製到新軌）
-    if reaper.ImGui_Button(ctx, "Copy to Sort", 220, 26) then
+    if reaper.ImGui_Button(ctx, "Copy to Sort", 108, 26) then
       local res = run_copy_to_new_tracks(meta_sort_mode, sort_asc)
       if res then
         SUMMARY = string.format(
