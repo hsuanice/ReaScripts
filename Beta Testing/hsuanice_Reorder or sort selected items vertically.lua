@@ -1,6 +1,6 @@
 --[[
 @description ReaImGui - Vertical Reorder and Sort (items)
-@version 0.5.4.4 Copy to Sort fixed and get Summary
+@version 0.5.5.1 Add ESC close
 @author hsuanice
 @about
   Provides three vertical re-arrangement modes for selected items (stacked UI):
@@ -29,6 +29,11 @@
 
 
 @changelog
+  - UX: Press ESC to close the Reorder window (modal summary still closes first).
+  v0.5.5
+    - Refactor: Decoupled auto-capture from metadata payloads.
+      Reorder now issues handshake requests (req_before/req_after) and waits for ack,
+      leaving all scanning to the Monitor. No TSV payload in Reorder anymore.
   v0.5.4.4
     - Copy to Sort: Added result summary (tracks created, items copied) and overlap warning.
     - Summary popup now shows detailed counts right after the action completes.
@@ -200,6 +205,27 @@ local function path_basename(p) p=tostring(p or ""); return p:match("([^/\\]+)$"
 -- === Cross-script signal for Monitor auto-capture ===
 local SIG_NS = "hsuanice_ReorderSort_Signal"
 
+local function request_capture(tag, timeout_sec)
+  if not CAPTURE_ON then return end
+  local req_key = (tag == "before") and "req_before" or "req_after"
+  local ack_key = (tag == "before") and "ack_before" or "ack_after"
+  local token = string.format("%.6f", reaper.time_precise())
+
+  -- 清掉上一筆 ACK，送出請求
+  reaper.DeleteExtState(SIG_NS, ack_key, true)
+  reaper.SetExtState(SIG_NS, req_key, token, false)
+
+  -- 等待 Monitor 回 ACK（最長 0.5 秒）
+  local deadline = reaper.time_precise() + (timeout_sec or 0.5)
+  while reaper.time_precise() < deadline do
+    if reaper.GetExtState(SIG_NS, ack_key) == token then
+      reaper.DeleteExtState(SIG_NS, ack_key, true)
+      return true
+    end
+  end
+  return false  -- 超時也放行，不阻塞工作流
+end
+
 
 -- === Monitor auto-capture preference ===
 local CAPTURE_ON = (reaper.GetExtState(SIG_NS, "enable") == "1")
@@ -210,16 +236,7 @@ local function set_capture_enabled(on)
   reaper.SetExtState(SIG_NS, "enable", CAPTURE_ON and "1" or "0", true)
 end
 
--- tag = "before" | "after"
-local function emit_capture(tag, payload_tsv)
-  if not CAPTURE_ON then return end
-  local key = (tag == "before") and "capture_before" or "capture_after"
-  local payload_key = (tag == "before") and "snapshot_before" or "snapshot_after"
-  if payload_tsv and payload_tsv ~= "" then
-    reaper.SetExtState("hsuanice_ReorderSort_Signal", payload_key, payload_tsv, false)
-  end
-  reaper.SetExtState("hsuanice_ReorderSort_Signal", key, tostring(reaper.time_precise()), false)
-end
+
 
 
 -- 記憶使用者偏好（你現有的 CAPTURE_ON / set_capture_enabled 保留）
@@ -527,62 +544,6 @@ local function collect_fields(it)
   return t
 end
 
--- === Snapshot payload (TSV) ===
-local function snapshot_rows_tsv_from_selection()
-  local items = get_selected_items()
-  local sep = "\t"
-  local out = {}
-  local function esc(s)
-    s = tostring(s or "")
-    s = s:gsub("\r"," "):gsub("\n"," "):gsub("\t"," ")
-    return s
-  end
-  -- header（與 Monitor 的匯出欄位一致）
-  out[#out+1] = table.concat({
-    "#","TrackIdx","TrackName","TakeName","Source File",
-    "MetaTrackName","Channel#","Interleave","Mute","ColorHex","StartTime","EndTime"
-  }, sep)
-
-  for i, it in ipairs(items) do
-    -- 這段做法與 Monitor 的 collect_fields_for_item 對齊 :contentReference[oaicite:1]{index=1}
-    local f = META.collect_item_fields(it)
-    local tr = item_track(it)
-    local track_idx  = tr and track_index(tr) or 0
-    local track_name = tr and (select(2, reaper.GetTrackName(tr, "")) or "") or ""
-    local file_name  = f.srcfile or ""
-    local take_name  = f.curtake or ""
-    local idx = META.guess_interleave_index(it, f) or f.__chan_index or 1
-    f.__chan_index = idx
-    local meta_trk_name = META.expand("${trk}", f, nil, false) or ""
-    local channel_num   = tonumber(META.expand("${chnum}", f, nil, false)) or idx
-    local pos = reaper.GetMediaItemInfo_Value(it, "D_POSITION") or 0
-    local len = reaper.GetMediaItemInfo_Value(it, "D_LENGTH") or 0
-    local muted = (reaper.GetMediaItemInfo_Value(it, "B_MUTE") or 0) > 0.5
-    local native = reaper.GetDisplayedMediaItemColor(it) or 0
-    local color_hex = ""
-    if native ~= 0 then
-      local r,g,b = reaper.ColorFromNative(native)
-      color_hex = string.format("#%02X%02X%02X", r,g,b)
-    end
-
-    out[#out+1] = table.concat({
-      esc(i),
-      esc(track_idx),
-      esc(track_name),
-      esc(take_name),
-      esc(file_name),
-      esc(meta_trk_name),
-      esc(channel_num),
-      esc(idx),
-      esc(muted and "1" or "0"),
-      esc(color_hex),
-      esc(pos),
-      esc(pos + len),
-    }, sep)
-  end
-
-  return table.concat(out, "\n")
-end
 
 
 
@@ -657,36 +618,33 @@ local snapshot_rows_tsv
 -- mode: 1=Track Name, 2=Channel Number
 -- asc : true=Ascending, false=Descending
 local function run_copy_to_new_tracks(mode, asc)
-  -- BEFORE snapshot（動手前以目前「選取的 items」打包）
-  local before_items = {}
-  for i = 0, reaper.CountSelectedMediaItems(0)-1 do
-    before_items[#before_items+1] = reaper.GetSelectedMediaItem(0, i)
-  end
-  emit_capture("before", snapshot_rows_tsv(before_items))
+  -- 1) 請 Monitor 先抓 BEFORE
+  request_capture("before")
 
   reaper.Undo_BeginBlock()
 
-  -- 蒐集 rows：{ it, name, ch }（從 iXML/TRK 萃取）
+  -- 2) 取目前選取 items，抽出 metadata（與 Monitor 一致）
   local items = get_selected_items()
   local rows = {}
   for _, it in ipairs(items) do
-    local f = collect_fields(it)
-    local name, ch = extract_name_and_chan(f, "trk")
-    name = tostring(name or ""):gsub("^%s+",""):gsub("%s+$","")
-    ch   = tonumber(ch) or 999
+    local f   = META.collect_item_fields(it)
+    local idx = META.guess_interleave_index(it, f) or f.__chan_index or 1
+    f.__chan_index = idx
+    local name = tostring(META.expand("${trk}",   f, nil, false) or "")
+    local ch   = tonumber(META.expand("${chnum}", f, nil, false) or idx) or idx
     rows[#rows+1] = { it = it, name = name, ch = ch }
   end
 
-  -- 分組 + 排序（依名稱或通道 #）
+  -- 排序鍵工具
   local function natural_key(s)
-    s = tostring(s or ""):lower():gsub("%s+", " ")
-    return s:gsub("(%d+)", function(d) return string.format("%09d", tonumber(d)) end)
+    s = tostring(s or ""):lower():gsub("%s+"," ")
+    return s:gsub("(%d+)", function(d) return string.format("%09d", tonumber(d) or 0) end)
   end
   local function channel_label(n)
-    if not n or n==999 then return "Ch ??" end
-    return string.format("Ch %02d", tonumber(n) or 0)
+    return (n and n ~= 999) and string.format("Ch %02d", n) or "Ch ??"
   end
 
+  -- 3) 依 Track Name 或 Channel 分組
   local groups, order = {}, {}
   if mode == 1 then
     -- by Track Name
@@ -694,10 +652,9 @@ local function run_copy_to_new_tracks(mode, asc)
       local key = r.name ~= "" and r.name or "(unnamed)"
       local g = groups[key]
       if not g then
-        g = { label = key, items = {} }
-        g.ord = "N|" .. natural_key(key)
+        g = { label = key, items = {}, ord = "N|" .. natural_key(key) }
         groups[key] = g
-        order[#order+1] = { g = g, ord = g.ord }
+        order[#order+1] = g
       end
       g.items[#g.items+1] = r.it
     end
@@ -707,31 +664,27 @@ local function run_copy_to_new_tracks(mode, asc)
       local key = tonumber(r.ch) or 999
       local g = groups[key]
       if not g then
-        g = { label = channel_label(key), items = {}, key = key }
-        g.ord = string.format("C|%09d", key)
+        g = { label = channel_label(key), items = {}, ord = string.format("C|%09d", key) }
         groups[key] = g
-        order[#order+1] = { g = g, ord = g.ord }
+        order[#order+1] = g
       end
       g.items[#g.items+1] = r.it
     end
   end
 
-  -- 安全的序鍵比較：先轉成字串，確保存在
-  local function ord_lt(x, y)
-    local ax = tostring(x and x.ord or "")
-    local ay = tostring(y and y.ord or "")
-    if ax == ay then return false end   -- 嚴格弱序：相等時不可回 true
+  -- 4) 依 ord 排序群組（嚴格弱序）
+  local function ord_lt(a, b)
+    local ax, ay = tostring(a and a.ord or ""), tostring(b and b.ord or "")
+    if ax == ay then return false end
     return ax < ay
   end
-
   if asc then
     table.sort(order, ord_lt)
   else
     table.sort(order, function(x, y) return ord_lt(y, x) end)
   end
 
-
-  -- 建軌並複製
+  -- 5) 建新軌並複製
   local base = reaper.CountTracks(0)
   local existing, created = {}, {}
   local function ensure_track(label)
@@ -745,30 +698,21 @@ local function run_copy_to_new_tracks(mode, asc)
     return tr
   end
 
-  -- 統計：items 複製數、overlap 次數
-  local copied = 0
-  local overlaps = 0
-  local spans = {}   -- 每個 label 一份時間區間表：label -> { {s,e}, ... }
+  local copied, overlaps = 0, 0
+  local spans = {} -- label -> { {s,e}, ... }
 
-  for _, rec in ipairs(order) do
-    local label = rec.g.label
+  for _, g in ipairs(order) do
+    local label = g.label
     local tr = ensure_track(label)
     local arr = spans[label] or {}
     spans[label] = arr
-
-    for _, it in ipairs(rec.g.items) do
+    for _, it in ipairs(g.items) do
       local s = item_start(it) or 0
       local e = s + (item_len(it) or 0)
-
-      -- 檢查同一目標軌內是否重疊（只要偵測到一次就 +1）
       local hit = false
-      for i = 1, #arr do
-        local seg = arr[i]
-        if e > seg.s and seg.e > s then hit = true; break end
-      end
+      for i = 1, #arr do local seg = arr[i]; if e > seg.s and seg.e > s then hit = true; break end end
       if hit then overlaps = overlaps + 1 end
       arr[#arr+1] = { s = s, e = e }
-
       copy_item_to_track(it, tr)
       copied = copied + 1
     end
@@ -777,16 +721,12 @@ local function run_copy_to_new_tracks(mode, asc)
   reaper.Undo_EndBlock("Copy selected items to NEW tracks by metadata", -1)
   reaper.UpdateArrange()
 
-  -- AFTER snapshot（動作完成後再抓一次）
-  local after_items = {}
-  for i = 0, reaper.CountSelectedMediaItems(0)-1 do
-    after_items[#after_items+1] = reaper.GetSelectedMediaItem(0, i)
-  end
-  emit_capture("after", snapshot_rows_tsv(after_items))
+  -- 6) 請 Monitor 抓 AFTER
+  request_capture("after")
 
-  -- 回傳統計：新建軌數、複製數、overlap 次數
   return { tracks_created = #created, items_copied = copied, overlaps = overlaps }
 end
+
 
 
 ---------------------------------------
@@ -958,13 +898,7 @@ end
 
 
 local function run_engine()
-  -- 先抓 “目前選取的 items” 做 BEFORE 快照（真・動手前）
-  local before_items = {}
-  for i = 0, reaper.CountSelectedMediaItems(0)-1 do
-    before_items[#before_items+1] = reaper.GetSelectedMediaItem(0, i)
-  end
-  emit_capture("before", snapshot_rows_tsv(before_items))
-
+  request_capture("before")          -- ★ 先請 Monitor 抓 BEFORE
   reaper.Undo_BeginBlock()
   apply_moves(MOVES)
   MOVED = #MOVES
@@ -972,13 +906,7 @@ local function run_engine()
     "Reorder (fill upward) selected items" or
     "Sort selected items vertically", -1)
   reaper.UpdateArrange()
-
-  -- AFTER
-  local after_items = {}
-  for i = 0, reaper.CountSelectedMediaItems(0)-1 do
-    after_items[#after_items+1] = reaper.GetSelectedMediaItem(0, i)
-  end
-  emit_capture("after", snapshot_rows_tsv(after_items))
+  request_capture("after")           -- ★ 完成後請 Monitor 抓 AFTER
 end
 
 ---------------------------------------
@@ -1139,6 +1067,11 @@ local function loop()
   reaper.ImGui_SetNextWindowSize(ctx, 720, 560, reaper.ImGui_Cond_FirstUseEver())
   local flags = reaper.ImGui_WindowFlags_NoCollapse()
   local visible, open = reaper.ImGui_Begin(ctx, "Vertical Reorder and Sort"..LIBVER, true, flags)
+
+  -- ESC 關閉整個視窗（若 Summary modal 開著，先只關 modal）
+  if esc_pressed() and not reaper.ImGui_IsPopupOpen(ctx, POPUP_TITLE) then
+    open = false
+  end
 
   if visible then
     if STATE=="confirm" then draw_confirm()
