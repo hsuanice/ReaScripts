@@ -1,6 +1,6 @@
 --[[
 @description Monitor - Reorder or sort selected items vertically
-@version 0.4.3.1 tested ok
+@version 0.4.4.2
 @author hsuanice
 @about
   Shows a live table of the currently selected items and all sort-relevant fields:
@@ -38,6 +38,13 @@
 
 
 @changelog
+  v0.4.4.2
+    - Fix: ESC on main window not working — removed a duplicate ImGui_CreateContext/ctx block that shadowed the real context; unified to a single context so esc_pressed() and the window share the same ctx.
+    - Behavior: Summary ESC closes only the popup; when no popup is open, ESC closes the main window.
+  v0.4.4
+    - Feature: Handshake-based auto-capture.
+      Listens for req_before/req_after and replies with ack_before/ack_after
+      after taking snapshots internally. Backward-compatible with legacy capture_* keys.
   V0.4.3.1
     - Fix: Crash on startup (“attempt to call a nil value 'parse_snapshot_tsv'”).
       Forward-declared the parser and bound the later definition so polling can call it safely.
@@ -198,6 +205,7 @@ end
 ---------------------------------------
 -- ImGui setup
 ---------------------------------------
+-- ImGui setup (唯一的一組，請勿重複建立)
 local ctx = reaper.ImGui_CreateContext('Reorder or sort selected items Monitor')
 local LIBVER = (META and META.VERSION) and (' | Metadata Read v'..tostring(META.VERSION)) or ''
 local FLT_MIN = 1.175494e-38
@@ -208,6 +216,13 @@ local function esc_pressed()
   end
   return false
 end
+
+
+
+-- Popup title（供 ESC 判斷與 BeginPopupModal 使用）
+local POPUP_TITLE = "Summary"
+
+
 
 ---------------------------------------
 -- Small utils
@@ -360,9 +375,7 @@ end
 
 
 
--- === Cross-script signal (auto-capture from Reorder) ===
-local SIG_NS = "hsuanice_ReorderSort_Signal"
-local LAST_BEFORE, LAST_AFTER = "", ""
+
 
 
 -- forward locals (避免之後被重新 local 化)
@@ -370,34 +383,30 @@ ROWS = {}
 SNAP_BEFORE, SNAP_AFTER = {}, {}
 
 
+-- === Cross-script signal (auto-capture from Reorder) ===
+local SIG_NS = "hsuanice_ReorderSort_Signal"
+local LAST_REQ_BEFORE, LAST_REQ_AFTER = "", ""
+
 local function poll_reorder_signal()
-  -- BEFORE
-  local vb = reaper.GetExtState(SIG_NS, "capture_before")
-  if vb ~= "" and vb ~= LAST_BEFORE then
-    LAST_BEFORE = vb
-    local payload = reaper.GetExtState(SIG_NS, "snapshot_before")
-    if payload ~= "" then
-      SNAP_BEFORE = parse_snapshot_tsv(payload)
-      reaper.DeleteExtState(SIG_NS, "snapshot_before", true)
-    else
-      SNAP_BEFORE = scan_selection_rows() -- 後備
-    end
-    reaper.DeleteExtState(SIG_NS, "capture_before", true)
+  -- New handshake: BEFORE
+  local rb = reaper.GetExtState(SIG_NS, "req_before")
+  if rb ~= "" and rb ~= LAST_REQ_BEFORE then
+    LAST_REQ_BEFORE = rb
+    SNAP_BEFORE = scan_selection_rows()                     -- 由 Monitor 自己掃
+    reaper.SetExtState(SIG_NS, "ack_before", rb, false)      -- 回 ACK
+    reaper.DeleteExtState(SIG_NS, "req_before", true)
   end
 
-  -- AFTER
-  local va = reaper.GetExtState(SIG_NS, "capture_after")
-  if va ~= "" and va ~= LAST_AFTER then
-    LAST_AFTER = va
-    local payload = reaper.GetExtState(SIG_NS, "snapshot_after")
-    if payload ~= "" then
-      SNAP_AFTER = parse_snapshot_tsv(payload)
-      reaper.DeleteExtState(SIG_NS, "snapshot_after", true)
-    else
-      SNAP_AFTER = scan_selection_rows()
-    end
-    reaper.DeleteExtState(SIG_NS, "capture_after", true)
+  -- New handshake: AFTER
+  local ra = reaper.GetExtState(SIG_NS, "req_after")
+  if ra ~= "" and ra ~= LAST_REQ_AFTER then
+    LAST_REQ_AFTER = ra
+    SNAP_AFTER = scan_selection_rows()
+    reaper.SetExtState(SIG_NS, "ack_after", ra, false)
+    reaper.DeleteExtState(SIG_NS, "req_after", true)
   end
+
+  -- （選擇性）支援舊的 capture_* / snapshot_*，你可保留原本 parse_snapshot_tsv 的分支；不再贅述。
 end
 
 
@@ -528,7 +537,7 @@ local function build_summary_text(rows)
 end
 
 local function draw_summary_popup()
-  if reaper.ImGui_BeginPopupModal(ctx, "Summary", true, reaper.ImGui_WindowFlags_AlwaysAutoResize()) then
+  if reaper.ImGui_BeginPopupModal(ctx, POPUP_TITLE, true, reaper.ImGui_WindowFlags_AlwaysAutoResize()) then
     -- 依目前顯示來源挑 rows（你現在有 live/before/after 的切換）
     local rows = ROWS
     if     TABLE_SOURCE == "before" then rows = SNAP_BEFORE
@@ -725,8 +734,8 @@ end
   end
 
   reaper.ImGui_SameLine(ctx)
-  if reaper.ImGui_Button(ctx, "Summary", 100, 24) then
-    reaper.ImGui_OpenPopup(ctx, "Summary")
+  if reaper.ImGui_Button(ctx, POPUP_TITLE, 100, 24) then
+    reaper.ImGui_OpenPopup(ctx, POPUP_TITLE)
   end
 
 
@@ -832,6 +841,13 @@ local function loop()
   local flags = reaper.ImGui_WindowFlags_NoCollapse()
   local visible, open = reaper.ImGui_Begin(ctx, "Reorder or Sort — Monitor & Debug"..LIBVER, true, flags)
 
+
+  -- ESC 關閉整個視窗（若 Summary modal 開著，先只關 modal）
+  if esc_pressed() and not reaper.ImGui_IsPopupOpen(ctx, POPUP_TITLE) then
+    open = false
+  end
+
+
   -- 🔧 補回這行：每幀輪詢 Reorder 的訊號
   poll_reorder_signal()
 
@@ -853,7 +869,8 @@ local function loop()
 
   reaper.ImGui_End(ctx)
 
-  if open and not esc_pressed() then
+  -- GOOD：要不要續跑只看 `open`；按 ESC 的判斷已在上面完成
+  if open then
     reaper.defer(loop)
   else
     save_prefs()
