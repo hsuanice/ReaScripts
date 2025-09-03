@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<index version="1" name="hsuanice Scripts" commit="c4e16a37f14ac1bf2bce72b49c8d3a2f928368e5">
+<index version="1" name="hsuanice Scripts" commit="aa4b107d98cb16bdf1d7be185c6d5459d00d2bd1">
   <category name="Beta Testing">
     <reapack name="hsuanice_BWF TimeReference Embed Tool.lua" type="script" desc="Embed BWF TimeReference to Active take from Take 1 or Current Position TC">
       <version name="0.7.1" author="hsuanice" time="2025-08-14T17:52:57Z">
@@ -738,6 +738,9 @@
       </version>
       <version name="0.5.4.3 No sopy to sort result summary and overlap warning" author="hsuanice" time="2025-09-03T04:15:06Z">
         <source main="main">https://github.com/hsuanice/ReaScripts/raw/c4e16a37f14ac1bf2bce72b49c8d3a2f928368e5/Beta%20Testing/hsuanice_Reorder%20or%20sort%20selected%20items%20vertically.lua</source>
+      </version>
+      <version name="0.5.4.4 Copy to Sort fixed and get Summary" author="hsuanice" time="2025-09-03T04:27:20Z">
+        <source main="main">https://github.com/hsuanice/ReaScripts/raw/aa4b107d98cb16bdf1d7be185c6d5459d00d2bd1/Beta%20Testing/hsuanice_Reorder%20or%20sort%20selected%20items%20vertically.lua</source>
       </version>
     </reapack>
     <reapack name="hsuanice_Show Frame Rate.lua" type="script" desc="ReaImGui - Show Project Frame Rate">
