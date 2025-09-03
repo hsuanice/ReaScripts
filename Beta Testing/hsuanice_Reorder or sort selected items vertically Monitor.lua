@@ -1,6 +1,6 @@
 --[[
 @description Monitor - Reorder or sort selected items vertically
-@version 0.4.2
+@version 0.4.3.1 tested ok
 @author hsuanice
 @about
   Shows a live table of the currently selected items and all sort-relevant fields:
@@ -36,7 +36,11 @@
 
 
 
+
 @changelog
+  V0.4.3.1
+    - Fix: Crash on startup (“attempt to call a nil value 'parse_snapshot_tsv'”).
+      Forward-declared the parser and bound the later definition so polling can call it safely.
   v0.4.2
     - Fix: Restored per-frame polling of cross-script signals (poll_reorder_signal) in the main loop,
             so auto-capture from the Reorder script works again.
@@ -212,6 +216,7 @@ end
 -- Forward declarations so load_prefs() updates the same locals (not globals)
 local TIME_MODE, CUSTOM_PATTERN, FORMAT, AUTO
 local scan_selection_rows
+local parse_snapshot_tsv   -- ← 新增：先宣告，讓上面可以呼叫
 
 -- === Preferences (persist across runs) ===
 local EXT_NS = "hsuanice_ReorderSort_Monitor"
@@ -533,7 +538,7 @@ local function draw_summary_popup()
 
     -- 可選可複製：用唯讀的多行輸入框
     reaper.ImGui_SetNextItemWidth(ctx, 560)
-    reaper.ImGui_InputTextMultiline(ctx, "##summary_text", txt, 560, 140,
+    reaper.ImGui_InputTextMultiline(ctx, "##summary_text", txt, 560, 200,
       reaper.ImGui_InputTextFlags_ReadOnly())
 
     -- Copy / OK
@@ -552,7 +557,7 @@ end
 
 
 -- === Parse snapshot TSV coming from Reorder ===
-local function parse_snapshot_tsv(text)
+function parse_snapshot_tsv(text)
   local rows = {}
   if not text or text == "" then return rows end
   local first = true
