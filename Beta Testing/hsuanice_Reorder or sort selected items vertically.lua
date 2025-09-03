@@ -1,6 +1,6 @@
 --[[
 @description ReaImGui - Vertical Reorder and Sort (items)
-@version 0.5.4.3
+@version 0.5.4.3 No sopy to sort result summary and overlap warning
 @author hsuanice
 @about
   Provides three vertical re-arrangement modes for selected items (stacked UI):
