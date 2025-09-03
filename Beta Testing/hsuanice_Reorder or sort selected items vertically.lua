@@ -1,6 +1,6 @@
 --[[
 @description ReaImGui - Vertical Reorder and Sort (items)
-@version 0.5.4.3 No sopy to sort result summary and overlap warning
+@version 0.5.4.4 Copy to Sort fixed and get Summary
 @author hsuanice
 @about
   Provides three vertical re-arrangement modes for selected items (stacked UI):
@@ -27,7 +27,11 @@
 
 
 
+
 @changelog
+  v0.5.4.4
+    - Copy to Sort: Added result summary (tracks created, items copied) and overlap warning.
+    - Summary popup now shows detailed counts right after the action completes.
   v0.5.4.3 (2025-09-03)
     - Fix: Restored missing helper copy_item_to_track used by Copy-to-Sort.
       Copies item properties (pos/len/mute/vol/fades/color) and the active take
@@ -741,10 +745,30 @@ local function run_copy_to_new_tracks(mode, asc)
     return tr
   end
 
+  -- 統計：items 複製數、overlap 次數
   local copied = 0
+  local overlaps = 0
+  local spans = {}   -- 每個 label 一份時間區間表：label -> { {s,e}, ... }
+
   for _, rec in ipairs(order) do
-    local tr = ensure_track(rec.g.label)
+    local label = rec.g.label
+    local tr = ensure_track(label)
+    local arr = spans[label] or {}
+    spans[label] = arr
+
     for _, it in ipairs(rec.g.items) do
+      local s = item_start(it) or 0
+      local e = s + (item_len(it) or 0)
+
+      -- 檢查同一目標軌內是否重疊（只要偵測到一次就 +1）
+      local hit = false
+      for i = 1, #arr do
+        local seg = arr[i]
+        if e > seg.s and seg.e > s then hit = true; break end
+      end
+      if hit then overlaps = overlaps + 1 end
+      arr[#arr+1] = { s = s, e = e }
+
       copy_item_to_track(it, tr)
       copied = copied + 1
     end
@@ -759,6 +783,9 @@ local function run_copy_to_new_tracks(mode, asc)
     after_items[#after_items+1] = reaper.GetSelectedMediaItem(0, i)
   end
   emit_capture("after", snapshot_rows_tsv(after_items))
+
+  -- 回傳統計：新建軌數、複製數、overlap 次數
+  return { tracks_created = #created, items_copied = copied, overlaps = overlaps }
 end
 
 
@@ -1052,10 +1079,17 @@ local function draw_confirm()
     end
     reaper.ImGui_SameLine(ctx)
 
-    -- 既有的 Copy to Sort（保留原行為：複製到新軌）
+        -- 既有的 Copy to Sort（保留原行為：複製到新軌）
     if reaper.ImGui_Button(ctx, "Copy to Sort", 220, 26) then
-      run_copy_to_new_tracks(meta_sort_mode, sort_asc)
-      SUMMARY = "Completed Copy to Sort."
+      local res = run_copy_to_new_tracks(meta_sort_mode, sort_asc)
+      if res then
+        SUMMARY = string.format(
+          "Copy to Sort — Done.\nTracks created: %d\nItems copied: %d\nOverlaps detected: %d",
+          res.tracks_created or 0, res.items_copied or 0, res.overlaps or 0
+        )
+      else
+        SUMMARY = "Copy to Sort — Done."
+      end
       WANT_POPUP = true
     end
 
