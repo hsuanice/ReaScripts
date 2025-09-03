@@ -1,9 +1,9 @@
 --[[
 @description Track and Razor Item Link like Pro Tools (performance edition)
-@version 0.10.2 temp turn off AB block
+@version 0.11.0 Add 4 mode toggle
 @author hsuanice
 @about
-  Pro Tools-style "Link Track and Edit Selection". 
+  Pro Tools-style "Link Track and Edit Selection".
   Edit Selection = Razor Area or Item Selection.
 
   Perf principles:
@@ -18,13 +18,24 @@
     2) Else Item Selection → use VIRTUAL (latched) span [min..max]
     3) Else no active range
 
-  Note:
+  Notes:
+    • ABCD switches added (USER OPTIONS) to enable/disable each main section:
+        A) Razor changed → Track selection follows "tracks with Razor"
+        B) Items changed (no Razor) → Track selection follows items' tracks
+        C) Track selection changed + REAL TS → build/clear Razor + sync items (Overlap)
+        D) Razor/Track changed → sync items under ACTIVE range on changed tracks
+    • DEBUG_PRINT will log which section fired (A/B/C/D) for instant diagnosis.
+
+  Credits:
     This script was generated using ChatGPT based on design concepts and iterative testing by hsuanice.
     hsuanice served as the workflow designer, tester, and integrator for this tool.
 
-
-
 @changelog
+  v0.11.0
+    - NEW: ABCD per-section switches in USER OPTIONS (ENABLE_A..D) for fast isolation & debugging.
+    - NEW: DEBUG_PRINT flag + dbg() helper to log which section fires (A/B/C/D) each tick.
+    - Behavior unchanged when all ENABLE_* = true (backward-compatible).
+    - Tip presets (commented): set ENABLE_A=false & ENABLE_B=false to fully disable Arrange→TCP linking.
   v0.10.2 
     - temp turn off AB block
   v0.10.1
@@ -59,12 +70,32 @@
     v0.8.0 - perf          - Major perf pass.
 ]]
 
-
 -------------------------
 -- === USER OPTIONS === --
 -------------------------
-local RANGE_MODE = 2  -- 1=overlap, 2=contain
+-- Range matching for item-range checks inside C/D when needed:
+-- 1=overlap, 2=contain (default: contain)
+local RANGE_MODE = 2
+
+-- Clear latched virtual range on cursor move
 local LATCH_CLEAR_ON_CURSOR_MOVE = true
+
+-- ====== ABCD section switches ======
+-- A) Razor changed → Track selection equals "tracks with razor"
+local ENABLE_A = false
+-- B) Items changed (and NO Razor) → Track selection follows items' tracks (absolute set)
+local ENABLE_B = false
+-- C) Track selection changed + REAL TS → build/clear Razor + sync items (Overlap)
+local ENABLE_C = true
+-- D) Razor/Track changed → sync items under ACTIVE range (only on changed tracks)
+local ENABLE_D = true
+
+-- (Quick preset to disable Arrange→TCP fully)
+-- ENABLE_A = false; ENABLE_B = false
+
+-- Debug console print which section fired (A/B/C/D)
+local DEBUG_PRINT = false
+---------------------------------------
 
 ---------------------------------------
 -- Toolbar auto-terminate + toggle support
@@ -80,6 +111,10 @@ local function nearly_eq(a,b) return math.abs((a or 0)-(b or 0)) < 1e-12 end
 local function tconcat_keys_sorted(set)
   local keys = {}; for k,_ in pairs(set) do keys[#keys+1]=k end
   table.sort(keys); return table.concat(keys, "|")
+end
+local function dbg(fmt, ...)
+  if not DEBUG_PRINT then return end
+  reaper.ShowConsoleMsg(("[LinkDBG] "..fmt.."\n"):format(...))
 end
 
 -- Honor external master toggle from companion script:
@@ -145,7 +180,7 @@ local function get_selected_items_info()
 end
 
 local function item_matches_range(s,e,rs,re_, mode)
-  mode = mode or RANGE_MODE   -- 1=overlap, 2=contain (default=global)
+  mode = mode or RANGE_MODE   -- 1=overlap, 2=contain
   if mode == 1 then
     return (e > rs + EPS) and (s < re_ - EPS)     -- overlap
   else
@@ -335,7 +370,7 @@ local prev = {
 -- Main loop
 ----------------
 local function mainloop()
-  local triggered_side = nil -- "ITEMS" or "TRACKS"  
+  local triggered_side = nil -- "ITEMS" or "TRACKS"
   local psc = reaper.GetProjectStateChangeCount(0)
   local cursor = reaper.GetCursorPosition()
   local ts, te = get_time_selection()
@@ -351,17 +386,6 @@ local function mainloop()
   -- Did items change this tick?
   local items_changed_this_tick = (it_sel_sig ~= prev.it_sel_sig) or (it_tr_sig ~= prev.it_tr_sig)
   local tracks_changed_by_items = false
-
-  -- === HARD BLOCK: Arrangement -> TCP linking guard ===
-  -- If only items changed this tick (track selection stayed the same),
-  -- treat this cycle as "ITEMS-triggered" and prevent any track writes.
-  if items_changed_this_tick and (tr_sel_sig == prev.tr_sel_sig) then
-    triggered_side = "ITEMS"        -- 告訴後面：本輪是由 items 端觸發
-    tracks_changed_by_items = true  -- 讓 C/D 都因為這個旗標而跳過
-  end
-
-
-
 
   -- LATCH management (with suppression)
   if Razor.cnt_tracks_with > 0 or (ts and te) then
@@ -389,11 +413,13 @@ local function mainloop()
 
   -- === Sync logic ===
 
-
---[[  
   -- A) Razor changed → Track selection equals "tracks with razor"
   --    Only if track selection did NOT change this tick (so we don't override a user click).
-  if (Razor.sig ~= prev.razor_sig) and (Razor.cnt_tracks_with > 0) and (tr_sel_sig == prev.tr_sel_sig) then
+  if ENABLE_A
+     and (Razor.sig ~= prev.razor_sig)
+     and (Razor.cnt_tracks_with > 0)
+     and (tr_sel_sig == prev.tr_sel_sig)
+  then
     reaper.PreventUIRefresh(1)
     local want = Razor.t_has
     local tcnt = reaper.CountTracks(0)
@@ -404,13 +430,16 @@ local function mainloop()
     end
     reaper.PreventUIRefresh(-1); reaper.UpdateArrange()
     sel_tracks_set, tr_sel_sig = get_selected_tracks_set_and_sig()
-    triggered_side = "TRACKS"  -- ★ 新增：標記同輪已由 Tracks 端觸發
+    triggered_side = "TRACKS"
+    dbg("A fired: Razor→Tracks")
   end
---]]
 
---[[  
   -- B) Items changed (or their track set) and NO Razor → Track selection follows items' tracks (absolute set)
-  if (Razor.cnt_tracks_with == 0) and items_changed_this_tick and triggered_side ~= "TRACKS" then
+  if ENABLE_B
+     and (Razor.cnt_tracks_with == 0)
+     and items_changed_this_tick
+     and triggered_side ~= "TRACKS"
+  then
     reaper.PreventUIRefresh(1)
     local want = it_info.tr_set
     local tcnt = reaper.CountTracks(0)
@@ -422,14 +451,17 @@ local function mainloop()
     reaper.PreventUIRefresh(-1); reaper.UpdateArrange()
     sel_tracks_set, tr_sel_sig = get_selected_tracks_set_and_sig()
     tracks_changed_by_items = true
-    triggered_side = "ITEMS"    
+    triggered_side = "ITEMS"
+    dbg("B fired: Items→Tracks (no Razor)")
   end
-
-  --]]
 
   -- C) Track selection changed + REAL TS present → build/remove Razor + sync items
   --    BUT skip if tracks_changed_by_items (e.g. came from 40182 Select-All)
-  if (tr_sel_sig ~= prev.tr_sel_sig) and ts and te and (not tracks_changed_by_items) then
+  if ENABLE_C
+     and (tr_sel_sig ~= prev.tr_sel_sig)
+     and ts and te
+     and (not tracks_changed_by_items)
+  then
     local prev_set = {}; for g in string.gmatch(prev.tr_sel_sig or "", "[^|]+") do prev_set[g] = true end
     local changed = {}
     for g,_ in pairs(sel_tracks_set) do if not prev_set[g] then changed[g] = true end end
@@ -443,26 +475,31 @@ local function mainloop()
       if changed[g] then
         if sel_tracks_set[g] then
           set_track_level_ranges(tr, { {ts, te} })
-          if RIL_enabled then track_select_items_matching_range(tr, ts, te, true,  1) end  -- Overlap
+          if is_razor_item_link_enabled() then
+            track_select_items_matching_range(tr, ts, te, true,  1) -- Overlap
+          end
         else
           set_track_level_ranges(tr, {})
-          if RIL_enabled then track_select_items_matching_range(tr, ts, te, false, 1) end  -- Overlap
-
+          if is_razor_item_link_enabled() then
+            track_select_items_matching_range(tr, ts, te, false, 1) -- Overlap
+          end
         end
       end
     end
     reaper.PreventUIRefresh(-1); reaper.UpdateArrange()
     suppress_latch_next = true
+    dbg("C fired: Tracks+TS→Razor/Items (Overlap)")
   end
 
   -- D) Razor/Track changed → sync items under ACTIVE range (only on changed tracks)
   --    BUT skip if tracks_changed_by_items to avoid re-touching selection right after Select-All
   local a_s, a_e, a_src = active_range(it_info)
-  if (a_s and a_e)
-    and ((Razor.sig ~= prev.razor_sig) or (tr_sel_sig ~= prev.tr_sel_sig))
-    and (not tracks_changed_by_items)
-    and triggered_side ~= "ITEMS"
-    and (RIL_enabled or (a_src ~= "razor"))
+  if ENABLE_D
+     and (a_s and a_e)
+     and ((Razor.sig ~= prev.razor_sig) or (tr_sel_sig ~= prev.tr_sel_sig))
+     and (not tracks_changed_by_items)
+     and triggered_side ~= "ITEMS"
+     and (is_razor_item_link_enabled() or (a_src ~= "razor"))
   then
     local prev_set = {}; for g in string.gmatch(prev.tr_sel_sig or "", "[^|]+") do prev_set[g] = true end
     local changed = {}
@@ -479,9 +516,9 @@ local function mainloop()
         if a_src == "razor" then
           local ranges = (Razor.t_ranges[g] or {})
           if #ranges > 0 then
-            for _, r in ipairs(ranges) do track_select_items_matching_range(tr, r[1], r[2], sel,   1) end  -- Overlap
+            for _, r in ipairs(ranges) do track_select_items_matching_range(tr, r[1], r[2], sel, 1) end -- Overlap
           else
-            track_select_items_matching_range(tr, a_s, a_e, false, 1)                                    -- Overlap
+            track_select_items_matching_range(tr, a_s, a_e, false, 1)                                   -- Overlap
           end
         else
           track_select_items_matching_range(tr, a_s, a_e, sel)
@@ -491,6 +528,7 @@ local function mainloop()
     reaper.PreventUIRefresh(-1); reaper.UpdateArrange()
     suppress_latch_next = true
     triggered_side = "TRACKS"
+    dbg("D fired: Razor/Tracks→Items (Active=%s)", a_src or "none")
   end
 
   -- Publish (monitor)
@@ -499,8 +537,8 @@ local function mainloop()
       active_src = a_src or "none",
       active_s   = a_s, active_e = a_e,
       item_s     = it_info.span_s, item_e = it_info.span_e,
-      virt_s     = latched_vs, virt_e = latched_ve,
-      ts_s       = ts, ts_e = te,
+      virt_s     = latched_vs,     virt_e = latched_ve,
+      ts_s       = ts,             ts_e   = te,
       has_razor  = (Razor.cnt_tracks_with > 0)
     }
   end
