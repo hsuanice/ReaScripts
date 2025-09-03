@@ -1,6 +1,6 @@
 --[[
 @description ReaImGui - Vertical Reorder and Sort (items)
-@version 0.5.4
+@version 0.5.4.3
 @author hsuanice
 @about
   Provides three vertical re-arrangement modes for selected items (stacked UI):
@@ -24,8 +24,31 @@
     - Based on design concepts and iterative testing by hsuanice.
     - Script generated and refined with ChatGPT.
 
+
+
+
 @changelog
+  v0.5.4.3 (2025-09-03)
+    - Fix: Restored missing helper copy_item_to_track used by Copy-to-Sort.
+      Copies item properties (pos/len/mute/vol/fades/color) and the active take
+      (source, start offset, playrate, pitch, name).
+  v0.5.4.2 (2025-09-03)
+    - Fix: Copy-to-Sort “invalid order function for sorting”.
+      Replaced comparator with a stable string-key comparator (guards nil/types and enforces strict weak ordering).
+
+  v0.5.4.1 (2025-09-03)
+    - Fix: Copy-to-Sort crash (“attempt to call a nil value 'snapshot_rows_tsv'”).
+      Added forward declaration and bound the function definition so callers can invoke it reliably.
+    - Fix: Metadata preview stability.
+      Introduced PREVIEW_PAIRS / build_preview_pairs() and UI guards (generate via “Scan first 10 items”)
+      to prevent nil indexing before data exists.
+    - Cleanup: Removed stray duplicate emit_capture() and kept the payload-capable version used by
+      run_engine() / run_copy_to_new_tracks().
+    - Misc: Small refactors and comments; no functional changes to core reordering/sorting.
+
   v0.5.4 (2025-09-03)
+    - Feature: Opt-in Monitor auto-capture.
+      • Added “Monitor auto-capture” checkbox; preference is persisted via ExtState.
     - Reliable Monitor auto-capture with BEFORE/AFTER payloads.
       • Emits separate ExtState keys: capture_before / capture_after.
       • Attaches snapshot_before / snapshot_after TSV payloads so the Monitor
@@ -199,6 +222,64 @@ end
 -- ...
 
 
+-- 複製單一 item 到指定軌道（保留位置/長度/靜音/顏色/音量/淡入淡出；複製「現用 take」的來源與參數）
+local function copy_item_to_track(src_it, dst_tr)
+  if not (src_it and dst_tr) then return nil end
+  if not reaper.ValidatePtr2(0, src_it, "MediaItem*") then return nil end
+  if not reaper.ValidatePtr2(0, dst_tr, "MediaTrack*") then return nil end
+
+  -- Item 屬性
+  local pos   = reaper.GetMediaItemInfo_Value(src_it, "D_POSITION") or 0
+  local len   = reaper.GetMediaItemInfo_Value(src_it, "D_LENGTH")   or 0
+  local mute  = reaper.GetMediaItemInfo_Value(src_it, "B_MUTE")     or 0
+  local vol   = reaper.GetMediaItemInfo_Value(src_it, "D_VOL")      or 1
+  local so    = reaper.GetMediaItemInfo_Value(src_it, "D_SNAPOFFSET") or 0
+  local fi    = reaper.GetMediaItemInfo_Value(src_it, "D_FADEINLEN")  or 0
+  local fo    = reaper.GetMediaItemInfo_Value(src_it, "D_FADEOUTLEN") or 0
+  local lock  = reaper.GetMediaItemInfo_Value(src_it, "C_LOCK") or 0
+  local color = reaper.GetDisplayedMediaItemColor(src_it) or 0
+
+  -- 建立新 item
+  local it = reaper.AddMediaItemToTrack(dst_tr)
+  reaper.SetMediaItemInfo_Value(it, "D_POSITION", pos)
+  reaper.SetMediaItemInfo_Value(it, "D_LENGTH",   len)
+  reaper.SetMediaItemInfo_Value(it, "B_MUTE",     mute)
+  reaper.SetMediaItemInfo_Value(it, "D_VOL",      vol)
+  reaper.SetMediaItemInfo_Value(it, "D_SNAPOFFSET", so)
+  reaper.SetMediaItemInfo_Value(it, "D_FADEINLEN",  fi)
+  reaper.SetMediaItemInfo_Value(it, "D_FADEOUTLEN", fo)
+  reaper.SetMediaItemInfo_Value(it, "C_LOCK",     lock)
+  if color ~= 0 then
+    -- I_CUSTOMCOLOR 要帶「啟用」bit；GetDisplayedMediaItemColor 已經是 native 值
+    reaper.SetMediaItemInfo_Value(it, "I_CUSTOMCOLOR", color | 0x1000000)
+  end
+
+  -- 複製現用 take
+  local src_tk = reaper.GetActiveTake(src_it)
+  if src_tk then
+    local new_tk = reaper.AddTakeToMediaItem(it)
+    local src = reaper.GetMediaItemTake_Source(src_tk)
+    if reaper.SetMediaItemTake_Source then
+      reaper.SetMediaItemTake_Source(new_tk, src)
+    end
+    -- take 參數
+    local soffs   = reaper.GetMediaItemTakeInfo_Value(src_tk, "D_STARTOFFS") or 0
+    local rate    = reaper.GetMediaItemTakeInfo_Value(src_tk, "D_PLAYRATE")  or 1
+    local pitch   = reaper.GetMediaItemTakeInfo_Value(src_tk, "D_PITCH")     or 0
+    reaper.SetMediaItemTakeInfo_Value(new_tk, "D_STARTOFFS", soffs)
+    reaper.SetMediaItemTakeInfo_Value(new_tk, "D_PLAYRATE",  rate)
+    reaper.SetMediaItemTakeInfo_Value(new_tk, "D_PITCH",     pitch)
+    -- take 名稱
+    local _, tkn = reaper.GetSetMediaItemTakeInfo_String(src_tk, "P_NAME", "", false)
+    if tkn and tkn ~= "" then
+      reaper.GetSetMediaItemTakeInfo_String(new_tk, "P_NAME", tkn, true)
+    end
+    reaper.SetActiveTake(new_tk)
+  end
+
+  reaper.UpdateItemInProject(it)
+  return it
+end
 
 
 ---------------------------------------
@@ -560,6 +641,11 @@ local function extract_name_and_chan(fields, name_key)
   return name, ch
 end
 
+
+-- forward declarations
+local snapshot_rows_tsv
+
+
 ---------------------------------------
 -- Copy-to-New-Tracks：核心
 ---------------------------------------
@@ -625,7 +711,21 @@ local function run_copy_to_new_tracks(mode, asc)
       g.items[#g.items+1] = r.it
     end
   end
-  table.sort(order, function(a,b) return asc and (a.ord < b.ord) or (a.ord > b.ord) end)
+
+  -- 安全的序鍵比較：先轉成字串，確保存在
+  local function ord_lt(x, y)
+    local ax = tostring(x and x.ord or "")
+    local ay = tostring(y and y.ord or "")
+    if ax == ay then return false end   -- 嚴格弱序：相等時不可回 true
+    return ax < ay
+  end
+
+  if asc then
+    table.sort(order, ord_lt)
+  else
+    table.sort(order, function(x, y) return ord_lt(y, x) end)
+  end
+
 
   -- 建軌並複製
   local base = reaper.CountTracks(0)
@@ -766,7 +866,7 @@ local function prepare_plan()
 end
 
 -- === Snapshot payload (TSV) from a given item list ===
-local function snapshot_rows_tsv(items)
+function snapshot_rows_tsv(items)
   local sep = "\t"
   local out = {}
   local function esc(s)
