@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<index version="1" name="hsuanice Scripts" commit="f81965f0023b7107393855cc623c69ccbd0ac9cf">
+<index version="1" name="hsuanice Scripts" commit="4fc3e7a5d3a9a700712eaa8e1fc854a7d86a0efa">
   <category name="Beta Testing">
     <reapack name="hsuanice_BWF TimeReference Embed Tool.lua" type="script" desc="Embed BWF TimeReference to Active take from Take 1 or Current Position TC">
       <version name="0.7.1" author="hsuanice" time="2025-08-14T17:52:57Z">
@@ -817,7 +817,8 @@
 {\pard \ql \f0 \sa0 \li360 \fi-360 1)\tx360\tab Razor exists \u8594 ? use Razor (highest)\par}
 {\pard \ql \f0 \sa0 \li360 \fi-360 2)\tx360\tab Else Item Selection \u8594 ? use VIRTUAL (latched) span [min..max]\par}
 {\pard \ql \f0 \sa0 \li360 \fi-360 3)\tx360\tab Else no active range\sa180\par}
-{\pard \ql \f0 \sa180 \li0 \fi0 Note: This script was generated using ChatGPT based on design concepts and iterative testing by hsuanice. hsuanice served as the workflow designer, tester, and integrator for this tool.\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 Notes: \u8226 ? ABCD switches added (USER OPTIONS) to enable/disable each main section: A) Razor changed \u8594 ? Track selection follows "tracks with Razor" B) Items changed (no Razor) \u8594 ? Track selection follows items' tracks C) Track selection changed + REAL TS \u8594 ? build/clear Razor + sync items (Overlap) D) Razor/Track changed \u8594 ? sync items under ACTIVE range on changed tracks \u8226 ? DEBUG_PRINT will log which section fired (A/B/C/D) for instant diagnosis.\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 Credits: This script was generated using ChatGPT based on design concepts and iterative testing by hsuanice. hsuanice served as the workflow designer, tester, and integrator for this tool.\par}
 }
 ]]></description>
       </metadata>
@@ -881,6 +882,9 @@ v0.8.0-perf          - Major perf pass.]]></changelog>
       </version>
       <version name="0.10.2 temp turn off AB block" author="hsuanice" time="2025-09-03T13:35:10Z">
         <source main="main">https://github.com/hsuanice/ReaScripts/raw/f81965f0023b7107393855cc623c69ccbd0ac9cf/Beta%20Testing/hsuanice_Track%20and%20Razor%20Item%20Link%20like%20Pro%20Tools.lua</source>
+      </version>
+      <version name="0.11.0 Add 4 mode toggle" author="hsuanice" time="2025-09-03T14:37:33Z">
+        <source main="main">https://github.com/hsuanice/ReaScripts/raw/4fc3e7a5d3a9a700712eaa8e1fc854a7d86a0efa/Beta%20Testing/hsuanice_Track%20and%20Razor%20Item%20Link%20like%20Pro%20Tools.lua</source>
       </version>
     </reapack>
     <reapack name="hsuanice_Track and Razor Item Link Monitor.lua" type="script" desc="Track • Razor • Item LINK — MONITOR (driver-aware)">
