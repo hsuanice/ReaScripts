@@ -1,6 +1,6 @@
 --[[
 @description Track and Razor Item Link like Pro Tools (performance edition)
-@version 0.10.1
+@version 0.10.2 temp turn off AB block
 @author hsuanice
 @about
   Pro Tools-style "Link Track and Edit Selection". 
@@ -25,6 +25,8 @@
 
 
 @changelog
+  v0.10.2 
+    - temp turn off AB block
   v0.10.1
     - TCP → Razor toggle honors Edit Link (ON) with Overlap selection:
         • When Edit Link is ON, items overlapping the Razor range are selected/unselected
@@ -350,6 +352,17 @@ local function mainloop()
   local items_changed_this_tick = (it_sel_sig ~= prev.it_sel_sig) or (it_tr_sig ~= prev.it_tr_sig)
   local tracks_changed_by_items = false
 
+  -- === HARD BLOCK: Arrangement -> TCP linking guard ===
+  -- If only items changed this tick (track selection stayed the same),
+  -- treat this cycle as "ITEMS-triggered" and prevent any track writes.
+  if items_changed_this_tick and (tr_sel_sig == prev.tr_sel_sig) then
+    triggered_side = "ITEMS"        -- 告訴後面：本輪是由 items 端觸發
+    tracks_changed_by_items = true  -- 讓 C/D 都因為這個旗標而跳過
+  end
+
+
+
+
   -- LATCH management (with suppression)
   if Razor.cnt_tracks_with > 0 or (ts and te) then
     latched_vs, latched_ve = nil, nil
@@ -376,6 +389,8 @@ local function mainloop()
 
   -- === Sync logic ===
 
+
+--[[  
   -- A) Razor changed → Track selection equals "tracks with razor"
   --    Only if track selection did NOT change this tick (so we don't override a user click).
   if (Razor.sig ~= prev.razor_sig) and (Razor.cnt_tracks_with > 0) and (tr_sel_sig == prev.tr_sel_sig) then
@@ -391,7 +406,9 @@ local function mainloop()
     sel_tracks_set, tr_sel_sig = get_selected_tracks_set_and_sig()
     triggered_side = "TRACKS"  -- ★ 新增：標記同輪已由 Tracks 端觸發
   end
+--]]
 
+--[[  
   -- B) Items changed (or their track set) and NO Razor → Track selection follows items' tracks (absolute set)
   if (Razor.cnt_tracks_with == 0) and items_changed_this_tick and triggered_side ~= "TRACKS" then
     reaper.PreventUIRefresh(1)
@@ -407,6 +424,8 @@ local function mainloop()
     tracks_changed_by_items = true
     triggered_side = "ITEMS"    
   end
+
+  --]]
 
   -- C) Track selection changed + REAL TS present → build/remove Razor + sync items
   --    BUT skip if tracks_changed_by_items (e.g. came from 40182 Select-All)
