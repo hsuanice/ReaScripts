@@ -1,6 +1,6 @@
 --[[
 @description Track and Razor Item Link like Pro Tools (performance edition)
-@version 0.11.0 Add 4 mode toggle
+@version 0.11.0 ABCD switches
 @author hsuanice
 @about
   Pro Tools-style "Link Track and Edit Selection".
