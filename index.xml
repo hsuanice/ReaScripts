@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<index version="1" name="hsuanice Scripts" commit="d740a978f375b5f01498d31cd7ffa6e49c5c06f5">
+<index version="1" name="hsuanice Scripts" commit="aa0e4e5cda91ea1be80439e72213508decdfc8ce">
   <category name="Beta Testing">
     <reapack name="hsuanice_BWF TimeReference Embed Tool.lua" type="script" desc="Embed BWF TimeReference to Active take from Take 1 or Current Position TC">
       <version name="0.7.1" author="hsuanice" time="2025-08-14T17:52:57Z">
@@ -43,6 +43,22 @@
       <version name="0.1" author="hsuanice" time="2025-08-13T07:33:10Z">
         <changelog><![CDATA[v0.1 - Beta release]]></changelog>
         <source main="main">https://github.com/hsuanice/ReaScripts/raw/20128d4abc5ecce7bcaa7840d72a69ef1fcdc68c/Beta%20Testing/hsuanice_Count%20Item%20and%20Track%20and%20Toggle%20Show%20Item%20Details.lua</source>
+      </version>
+    </reapack>
+    <reapack name="hsuanice_Delete Selected Tracks with Warning.lua" type="script" desc="Delete Selected Tracks (safe: skip prompt if empty)">
+      <metadata>
+        <description><![CDATA[{\rtf1\ansi\deff0{\fonttbl{\f0 \fswiss Helvetica;}{\f1 \fmodern Courier;}}
+{\colortbl;\red255\green0\blue0;\red0\green0\blue255;}
+\widowctrl\hyphauto
+
+{\pard \ql \f0 \sa180 \li0 \fi0 Delete selected tracks with safety: \u8226 ? If ALL selected tracks are empty (no items, no automation/envelope data), delete immediately with no prompt. \u8226 ? If ANY selected track contains items or automation, show a summary and ask for confirmation. Notes:\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Master track is ignored by REAPER's CountSelectedTracks(), so no special handling is required.\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab "Automation present" means: any track envelope has \u8805 ?1 point or \u8805 ?1 automation item.\sa180\par}
+}
+]]></description>
+      </metadata>
+      <version name="0.1.0" author="hsuanice" time="2025-09-03T11:05:04Z">
+        <source main="main">https://github.com/hsuanice/ReaScripts/raw/aa0e4e5cda91ea1be80439e72213508decdfc8ce/Beta%20Testing/hsuanice_Delete%20Selected%20Tracks%20with%20Warning.lua</source>
       </version>
     </reapack>
     <reapack name="hsuanice_Display Edit Cursor Position.lua" type="script" desc="ReaImGui - Display Edit Cursor Position (Unit Selector)">
