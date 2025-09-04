@@ -1,6 +1,6 @@
 --[[
 @description hsuanice_Mouse Left Click Empty Area to Select Track
-@version 0.4.4
+@version 0.4.7 menu click fixed
 @author hsuanice
 @about
   Select the track when clicking either:
@@ -20,7 +20,18 @@
 
 @requires js_ReaScriptAPI
 
+
+
 @changelog
+  0.4.7 - Fix: safer IsPopupMenuOpen().
+          • Use JS_Window_Find("#32768") / JS_Window_Find("NSMenu") instead of ListAllTop.
+          • Prevented 'expected void*' errors when class name check was called with invalid handle.
+
+  0.4.6 - Robust menu suppression:
+          • NEW IsPopupMenuOpen(): global scan for popup menu windows (#32768 / NSMenu).
+          • Skip track selection while any popup is open (cursor position no longer required).
+          • Removed the old JS_Window_FromPoint menu check and duplicate lmb definition.
+
   0.4.4 - Add explicit menu window guard.
            • Detect context menu window classes (#32768 on Windows, NSMenu on macOS).
            • Suppress track selection while the mouse is over these menus,
@@ -80,6 +91,26 @@ local function setToggle(on)
     reaper.RefreshToolbar2(sectionID, cmdID)
   end
 end
+
+
+-------------------------------------------------------------
+-- Popup menu detector (global guard, safe)
+-------------------------------------------------------------
+local function IsPopupMenuOpen()
+  if not reaper.APIExists("JS_Window_Find") then return false end
+
+  -- Windows context menu (#32768) or macOS menu (NSMenu)
+  local hwnd1 = reaper.JS_Window_Find("#32768", true)
+  if hwnd1 and hwnd1 ~= 0 then return true end
+
+  local hwnd2 = reaper.JS_Window_Find("NSMenu", true)
+  if hwnd2 and hwnd2 ~= 0 then return true end
+
+  return false
+end
+
+
+
 
 -------------------------------------------------------------
 -- Geometry helpers
@@ -163,6 +194,15 @@ local rbtn_down_time = -1
 local rbtn_up_time   = -1
 
 local function watch()
+
+  -- 全域 Guard: 若有菜單存在，就直接跳過
+  if IsPopupMenuOpen() then
+    lastDown = false
+    reaper.defer(watch)
+    return
+  end
+
+
   if not reaper.APIExists("JS_Mouse_GetState") then
     Log("❌ Missing js_ReaScriptAPI. Install via ReaPack.")
     setToggle(false)
@@ -174,22 +214,19 @@ local function watch()
   local x, y  = reaper.GetMousePosition()
   local lmb   = (state & 1) == 1
 
-  -- === Guard: 如果目前滑鼠正位於右鍵選單上，直接跳過 ===
-  do
-    if reaper.APIExists("JS_Window_FromPoint") then
-      local hwnd = reaper.JS_Window_FromPoint(x, y)
-      if hwnd then
-        local cls = reaper.JS_Window_GetClassName(hwnd) or ""
-        if cls == "#32768" or cls == "NSMenu" then
-          lastDown = false
-          reaper.defer(watch); return
-        end
-      end
+  -- Global guard: if any popup menu exists, skip all selection logic
+  if IsPopupMenuOpen then
+    if IsPopupMenuOpen() then
+      lastDown = false
+      reaper.defer(watch)
+      return
     end
   end
 
-  -- ✅ 補這行（缺它就永遠不會進入 left-click 分支）
-  local lmb   = (state & 1) == 1
+
+
+
+
 
   -- === Guard: 右鍵選單保護（簡潔穩定版） ===
   if SUPPRESS_RBUTTON_MENU then
