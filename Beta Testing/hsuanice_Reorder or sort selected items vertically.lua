@@ -28,6 +28,14 @@
 
 
 @changelog
+  v0.5.7.1
+    - Copy-to-Sort: Keep the insertion behavior introduced in v0.5.7.
+      • New tracks are inserted immediately after the last selected track.
+      • Folder context is preserved: if the last selected track is a folder
+        parent, new tracks become its children; if it is inside a folder,
+        new tracks remain inside that folder.
+    - Note: Insertion point selection is deferred. There is currently no UI
+      to choose the insertion location (by design for this version).
   v0.5.7
     - Copy-to-Sort: New tracks are now inserted immediately after the last
       selected track (instead of always at the project end).
