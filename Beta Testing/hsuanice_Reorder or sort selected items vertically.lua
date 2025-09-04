@@ -1,6 +1,6 @@
 --[[
 @description ReaImGui - Vertical Reorder and Sort (items)
-@version 0.5.6.1  Copy to Sort Naming option add
+@version 0.5.7 insert new track after selected
 @author hsuanice
 @about
   Provides three vertical re-arrangement modes for selected items (stacked UI):
@@ -27,8 +27,14 @@
 
 
 
-
 @changelog
+  v0.5.7
+    - Copy-to-Sort: New tracks are now inserted immediately after the last
+      selected track (instead of always at the project end).
+      • If the last selected track is a folder parent, new tracks become its child tracks.
+      • If the last selected track is inside a folder, new tracks remain in that folder.
+    - Note: Insertion point is not yet configurable. Currently, the only
+      supported behavior is "after last selected track".
   v0.5.6.1
     - UI: Simplified Copy-to-Sort "TCP naming" section.
       • Removed the "(grouping)" suffix.
@@ -738,13 +744,42 @@ local function run_copy_to_new_tracks(name_mode, order_mode, asc)
     table.sort(order, function(x, y) return ord_lt(y, x) end)
   end
 
-  -- 5) 建新軌並複製
-  local base = reaper.CountTracks(0)
+  -- 取得最後選取的軌（沒有選取軌就 fallback 到 items 所在軌）
+  local function last_selected_track_index(rows)
+    local _, order = get_selected_tracks_set()
+    if #order > 0 then
+      return track_index(order[#order])  -- 1-based
+    end
+    -- 沒選取任何軌，就從 rows 抓最高的那條軌當 fallback
+    local idx = 0
+    for _, r in ipairs(rows or {}) do
+      local tr = item_track(r.it)
+      if tr then idx = math.max(idx, track_index(tr)) end
+    end
+    return idx  -- 1-based；0 表示找不到
+  end
+
+  -- 設定插入基準 base（0-based）
+  local base
+  if ins_mode == 2 then
+    -- 2) At project end（舊行為）
+    base = reaper.CountTracks(0)
+  else
+    -- 1) After selected tracks（永遠接在最後選取軌後面）
+    local anchor_idx = last_selected_track_index(rows)  -- 1-based
+    if anchor_idx > 0 then
+      base = anchor_idx          -- 轉為 0-based 的「插在 anchor 後面」
+    else
+      base = reaper.CountTracks(0)  -- 沒有任何選取或 rows，退回專案尾端
+    end
+  end
+
+  -- === track allocator (create-once by label) ===
   local existing, created = {}, {}
   local function ensure_track(label)
     local tr = existing[label]
     if tr then return tr end
-    reaper.InsertTrackAtIndex(base + #created, true)
+    reaper.InsertTrackAtIndex(base + #created, true)    -- 以 base 為錨，連續插入
     tr = reaper.GetTrack(0, base + #created)
     set_track_name(tr, label)
     existing[label] = tr
