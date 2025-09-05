@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<index version="1" name="hsuanice Scripts" commit="ad333a2caeafcfeeafea1e47eabd563f2df2b366">
+<index version="1" name="hsuanice Scripts" commit="068c9c717671679b532fb5b1b99b83bf1c7c894a">
   <category name="Beta Testing">
     <reapack name="hsuanice_BWF TimeReference Embed Tool.lua" type="script" desc="Embed BWF TimeReference to Active take from Take 1 or Current Position TC">
       <version name="0.7.1" author="hsuanice" time="2025-08-14T17:52:57Z">
@@ -387,12 +387,16 @@
 {\colortbl;\red255\green0\blue0;\red0\green0\blue255;}
 \widowctrl\hyphauto
 
-{\pard \ql \f0 \sa180 \li0 \fi0 Background watcher that mirrors current ITEM SELECTION to the TIME SELECTION: \u8226 ? When item selection changes, set time selection to [min(item.start) .. max(item.end)]. \u8226 ? Does nothing when selection unchanged \u8212- ultra lightweight, no UI, no lag. Conventions: \u8226 ? Auto-terminate previous instance on relaunch; keep toolbar toggle in sync (same pattern as Razor-Link). \u8226 ? Publishes a per-project enabled flag for interoperability if needed.\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 Background watcher that mirrors current ITEM SELECTION to the TIME SELECTION: \u8226 ? When item selection changes, set time selection to [min(item.start) .. max(item.end)]. \u8226 ? Pauses when any Razor Areas exist in the project (respect Razor). \u8226 ? Ultra lightweight, no UI, no lag.\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 Conventions: \u8226 ? Auto-terminate previous instance on relaunch; keep toolbar toggle in sync (same pattern as Razor-Link). \u8226 ? Publishes a per-project enabled flag for interoperability if needed.\par}
 }
 ]]></description>
       </metadata>
       <version name="0.1.0" author="hsuanice" time="2025-09-05T11:02:18Z">
         <source main="main">https://github.com/hsuanice/ReaScripts/raw/a7cfdb182db8978eb30b2af209cbc2420fe7aa55/Beta%20Testing/hsuanice_Item%20Selection%20Link%20to%20Time.lua</source>
+      </version>
+      <version name="0.1.1" author="hsuanice" time="2025-09-05T13:03:34Z">
+        <source main="main">https://github.com/hsuanice/ReaScripts/raw/068c9c717671679b532fb5b1b99b83bf1c7c894a/Beta%20Testing/hsuanice_Item%20Selection%20Link%20to%20Time.lua</source>
       </version>
     </reapack>
     <reapack name="hsuanice_Mouse Left Click Empty Area to Select Track.lua" type="script" desc="hsuanice_Mouse Left Click Empty Area to Select Track">
