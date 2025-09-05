@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<index version="1" name="hsuanice Scripts" commit="b85d18a93c7aa3876c783b5d2e82bf2298f966c4">
+<index version="1" name="hsuanice Scripts" commit="cba36a04f84aef966d43de3a28db6e2fb47bdfa9">
   <category name="Beta Testing">
     <reapack name="hsuanice_BWF TimeReference Embed Tool.lua" type="script" desc="Embed BWF TimeReference to Active take from Take 1 or Current Position TC">
       <version name="0.7.1" author="hsuanice" time="2025-08-14T17:52:57Z">
@@ -400,6 +400,9 @@
       </version>
       <version name="0.1.1" author="hsuanice" time="2025-09-05T13:03:34Z">
         <source main="main">https://github.com/hsuanice/ReaScripts/raw/068c9c717671679b532fb5b1b99b83bf1c7c894a/Beta%20Testing/hsuanice_Item%20Selection%20Link%20to%20Time.lua</source>
+      </version>
+      <version name="0.1.2 edit cursor follow time selection" author="hsuanice" time="2025-09-05T14:07:49Z">
+        <source main="main">https://github.com/hsuanice/ReaScripts/raw/cba36a04f84aef966d43de3a28db6e2fb47bdfa9/Beta%20Testing/hsuanice_Item%20Selection%20Link%20to%20Time.lua</source>
       </version>
     </reapack>
     <reapack name="hsuanice_Mouse Left Click Empty Area to Select Track.lua" type="script" desc="hsuanice_Mouse Left Click Empty Area to Select Track">
