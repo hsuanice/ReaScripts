@@ -1,6 +1,6 @@
 --[[
 @description hsuanice_Pro Tools Paste Special: Repeat to Fill Selection
-@version 0.4.4
+@version 0.4.6 right boundary center mode fixed
 @author hsuanice
 @about
   Pro Tools-style "Paste Special: Repeat to Fill Selection"
@@ -26,7 +26,15 @@
 
   Reference: MRX_PasteItemToFill_Items_and_EnvelopeLanes.lua
 
+
 @changelog
+  v0.4.6 - Fix: Right-boundary crossfades in "center" alignment now respect the full
+           requested length (CF_VALUE). Previously each side only applied half the length,
+           causing too-short overlaps (e.g. 1f+1f when CF_VALUE=2f). Both last-in-area and
+           right-neighbor items now receive at least CF_VALUE fade lengths, consistent
+           with left-boundary behavior.
+  v0.4.5 - Boundary XF: default to centered; always suspend “Trim content behind…” during
+           boundary XF to prevent right-edge being eaten; restore preference afterward.
   v0.4.4 - Robust handling when JOIN ≈ tile:
            • Auto-adjust JOIN to a percent of tile (configurable via
              JOIN_CLAMP_TRIGGER_RATIO / JOIN_CLAMP_TO_TILE_RATIO) to keep layout stable.
@@ -80,7 +88,7 @@ local r = reaper
 --------------------------------------------------------------------------------
 -- Crossfade length unit (v0.4.0)
 CF_UNIT        = "frames"            -- "seconds" | "frames" | "grid"
-CF_VALUE       = 48               -- 若 seconds=秒；frames=影格數；grid=幾個 grid 單位
+CF_VALUE       = 2               -- 若 seconds=秒；frames=影格數；grid=幾個 grid 單位
 CF_GRID_REF    = "left"            -- 以哪個時間點換算 grid 長度："left"|"center"|"right"（建議 left）
 
 
@@ -138,7 +146,7 @@ local preventTinyLastFactor     = 0.1  -- 10%
 local restoreRazorEdits         = true
 
 -- Staging safety pad to the right of the last project item (seconds)
-local STAGE_PAD                 = 60.0
+local STAGE_PAD                 = 2
 
 local EPS                       = 1e-9
 
@@ -636,15 +644,15 @@ local function last_item_in_area_on_track(tr, a, b)
 end
 
 local function apply_boundary_crossfades(start_t, end_t, tracks_sorted, fadeLen)
+  -- 暫停「Trim content behind…」，避免邊界延伸時被系統吃掉
+  local TRIM_CMD = 41117
+  local trim_was_on = (r.GetToggleCommandState(TRIM_CMD) == 1)
+  if trim_was_on then r.Main_OnCommand(TRIM_CMD,0) end
+
   if fadeLen<=EPS then return end
   local align = (EDGE_XF_ALIGN or "right"):lower()
   local half  = fadeLen * 0.5
 
-  -- 在置中時，為避免「Trim content behind」把重疊的一側吃掉，可暫時關掉；做完還原
-  local TRIM_CMD = 41117 -- Options: Trim content behind media items when editing
-  local trim_was_on = (r.GetToggleCommandState(TRIM_CMD) == 1)
-  local need_temp_untrim = (align=="center" or align=="left")  -- 會做左延時才需要
-  if need_temp_untrim and trim_was_on then r.Main_OnCommand(TRIM_CMD,0) end
 
   for _,tr in ipairs(tracks_sorted) do
     -- ===== LEFT boundary =====
@@ -702,8 +710,8 @@ local function apply_boundary_crossfades(start_t, end_t, tracks_sorted, fadeLen)
             half = want
           end
           -- 設置兩側淡化（長度至少 half）
-          local fout = math.max(half, r.GetMediaItemInfo_Value(last,   "D_FADEOUTLEN"))
-          local fin  = math.max(half, r.GetMediaItemInfo_Value(rightN, "D_FADEINLEN"))
+          local fout = math.max(fadeLen, r.GetMediaItemInfo_Value(last,   "D_FADEOUTLEN"))
+          local fin  = math.max(fadeLen, r.GetMediaItemInfo_Value(rightN, "D_FADEINLEN"))
           apply_item_fade_shape(last,   nil, fout)
           apply_item_fade_shape(rightN, fin, nil )
 
@@ -737,7 +745,7 @@ local function apply_boundary_crossfades(start_t, end_t, tracks_sorted, fadeLen)
   end
 
   -- 還原 Trim behind
-  if need_temp_untrim and trim_was_on then r.Main_OnCommand(TRIM_CMD,0) end
+  if trim_was_on then r.Main_OnCommand(TRIM_CMD,0) end
 end
 
 
