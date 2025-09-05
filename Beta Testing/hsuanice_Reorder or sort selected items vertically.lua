@@ -1,6 +1,6 @@
 --[[
 @description ReaImGui - Vertical Reorder and Sort (items)
-@version 0.5.7 insert new track after selected
+@version 0.6.0 Remember last-used UI settings
 @author hsuanice
 @about
   Provides three vertical re-arrangement modes for selected items (stacked UI):
@@ -28,6 +28,13 @@
 
 
 @changelog
+  v0.6.0
+  - Preferences: Remember last-used UI settings via ExtState (persisted across sessions):
+    • Sort key (Take/File/Metadata)
+    • Ascending toggle
+    • Metadata sort key (Track Name / Channel)
+    • TCP naming (Track Name / Channel# / Channel# — Track Name)
+    • Group order (Track Name / Channel)
   v0.5.7.1
     - Copy-to-Sort: Keep the insertion behavior introduced in v0.5.7.
       • New tracks are inserted immediately after the last selected track.
@@ -275,7 +282,23 @@ end
 
 
 -- 記憶使用者偏好（你現有的 CAPTURE_ON / set_capture_enabled 保留）
--- ...
+-- === Preferences (ExtState) — persist UI choices ===
+local PREF_NS = "hsuanice_ReorderPrefs"
+local function pref_get_int(key, default)
+  local v = tonumber(reaper.GetExtState(PREF_NS, key))
+  if v == nil then return default end
+  return v
+end
+local function pref_get_bool(key, default)
+  local s = reaper.GetExtState(PREF_NS, key)
+  if s == "" then return default end
+  if s == "1" then return true elseif s == "0" then return false end
+  return default
+end
+local function pref_set(key, val)
+  reaper.SetExtState(PREF_NS, key, tostring(val), true) -- persistent
+end
+
 
 
 -- 複製單一 item 到指定軌道（保留位置/長度/靜音/顏色/音量/淡入淡出；複製「現用 take」的來源與參數）
@@ -830,14 +853,15 @@ end
 -- UI / Engine 狀態
 ---------------------------------------
 local STATE, MODE, EXIT = "confirm", nil, false
-local sort_key_idx, sort_asc = 1, true -- 預設 Take name
-local meta_sort_mode = 1 -- 1=Track Name, 2=Channel Number
-
+-- Persisted UI prefs
+local sort_key_idx  = pref_get_int("sort_key_idx", 1)           -- 1=Take name, 2=File name, 3=Metadata
+local sort_asc      = pref_get_bool("sort_asc", true)           -- true=Ascending
+local meta_sort_mode= pref_get_int("meta_sort_mode", 1)         -- 1=Track Name, 2=Channel Number
 -- TCP naming / Group order
 -- meta_name_mode: 1=Track Name, 2=Channel#, 3=Channel# — Track Name
-local meta_name_mode  = 1
+local meta_name_mode  = pref_get_int("meta_name_mode", 1)
 -- meta_order_mode: 1=Track Name, 2=Channel#
-local meta_order_mode = 1
+local meta_order_mode = pref_get_int("meta_order_mode", 1)
 
 
 local SELECTED_ITEMS, SELECTED_SET = {}, {}
@@ -1084,19 +1108,27 @@ local function draw_confirm()
   -- Sort key 選項
   local labels = { "Take name", "File name", "Metadata" }
   for i=1,3 do
-    if reaper.ImGui_RadioButton(ctx, labels[i], sort_key_idx==i) then sort_key_idx=i end
+    if reaper.ImGui_RadioButton(ctx, labels[i], sort_key_idx==i) then
+      sort_key_idx = i
+      pref_set("sort_key_idx", i)
+    end
     if i<3 then reaper.ImGui_SameLine(ctx) end
   end
-  local _, asc_chk = reaper.ImGui_Checkbox(ctx, "Ascending", sort_asc); sort_asc = asc_chk
+
+  local changed, asc_chk = reaper.ImGui_Checkbox(ctx, "Ascending", sort_asc)
+  if changed then
+    sort_asc = asc_chk
+    pref_set("sort_asc", asc_chk and "1" or "0")
+  end
 
   if sort_key_idx==3 then
     -- ---- Metadata 子選項（分離命名與排序）----
     reaper.ImGui_Spacing(ctx)
     reaper.ImGui_Text(ctx, "Sort by Metadata (engine key):")
     reaper.ImGui_SameLine(ctx)
-    if reaper.ImGui_RadioButton(ctx, "Track Name##key", meta_sort_mode==1) then meta_sort_mode=1 end
+    if reaper.ImGui_RadioButton(ctx, "Track Name##key", meta_sort_mode==1) then meta_sort_mode=1; pref_set("meta_sort_mode", 1) end
     reaper.ImGui_SameLine(ctx)
-    if reaper.ImGui_RadioButton(ctx, "Channel##key",   meta_sort_mode==2) then meta_sort_mode=2 end
+    if reaper.ImGui_RadioButton(ctx, "Channel##key",   meta_sort_mode==2) then meta_sort_mode=2; pref_set("meta_sort_mode", 2) end
 
     -- ★ 主按鈕放在這裡（Preview 上方）
     reaper.ImGui_Spacing(ctx)
@@ -1116,18 +1148,18 @@ local function draw_confirm()
     -- Copy-to-Sort — TCP naming
     reaper.ImGui_Text(ctx, "TCP naming:")
     reaper.ImGui_SameLine(ctx)
-    if reaper.ImGui_RadioButton(ctx, "Track Name##nm", meta_name_mode==1) then meta_name_mode=1 end
+    if reaper.ImGui_RadioButton(ctx, "Track Name##nm", meta_name_mode==1) then meta_name_mode=1; pref_set("meta_name_mode", 1) end
     reaper.ImGui_SameLine(ctx)
-    if reaper.ImGui_RadioButton(ctx, "Channel##nm",    meta_name_mode==2) then meta_name_mode=2 end
+    if reaper.ImGui_RadioButton(ctx, "Channel##nm",    meta_name_mode==2) then meta_name_mode=2; pref_set("meta_name_mode", 2) end
     reaper.ImGui_SameLine(ctx)
-    if reaper.ImGui_RadioButton(ctx, "Channel# — Track Name##nm", meta_name_mode==3) then meta_name_mode=3 end
+    if reaper.ImGui_RadioButton(ctx, "Channel# — Track Name##nm", meta_name_mode==3) then meta_name_mode=3; pref_set("meta_name_mode", 3) end
 
     -- Group order
     reaper.ImGui_Text(ctx, "Group order:")
     reaper.ImGui_SameLine(ctx)
-    if reaper.ImGui_RadioButton(ctx, "Track Name##ord", meta_order_mode==1) then meta_order_mode=1 end
+    if reaper.ImGui_RadioButton(ctx, "Track Name##ord", meta_order_mode==1) then meta_order_mode=1; pref_set("meta_order_mode", 1) end
     reaper.ImGui_SameLine(ctx)
-    if reaper.ImGui_RadioButton(ctx, "Channel##ord",    meta_order_mode==2) then meta_order_mode=2 end
+    if reaper.ImGui_RadioButton(ctx, "Channel##ord",    meta_order_mode==2) then meta_order_mode=2; pref_set("meta_order_mode", 2) end
 
 
 
