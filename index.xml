@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<index version="1" name="hsuanice Scripts" commit="a7cfdb182db8978eb30b2af209cbc2420fe7aa55">
+<index version="1" name="hsuanice Scripts" commit="ad333a2caeafcfeeafea1e47eabd563f2df2b366">
   <category name="Beta Testing">
     <reapack name="hsuanice_BWF TimeReference Embed Tool.lua" type="script" desc="Embed BWF TimeReference to Active take from Take 1 or Current Position TC">
       <version name="0.7.1" author="hsuanice" time="2025-08-14T17:52:57Z">
@@ -495,6 +495,9 @@
       </version>
       <version name="0.4.4" author="hsuanice" time="2025-08-26T08:03:09Z">
         <source main="main">https://github.com/hsuanice/ReaScripts/raw/c0d79af7107e23a7d29b9b3e0b76f97350b81d82/Beta%20Testing/hsuanice_Pro%20Tools%20Paste%20Special-%20Repeat%20to%20Fill%20Selection.lua</source>
+      </version>
+      <version name="0.4.6 right boundary center mode fixed" author="hsuanice" time="2025-09-05T12:58:07Z">
+        <source main="main">https://github.com/hsuanice/ReaScripts/raw/ad333a2caeafcfeeafea1e47eabd563f2df2b366/Beta%20Testing/hsuanice_Pro%20Tools%20Paste%20Special-%20Repeat%20to%20Fill%20Selection.lua</source>
       </version>
     </reapack>
     <reapack name="hsuanice_Pro Tools Trim Clip To File Boundaries.lua" type="script" desc="Pro Tools - Trim Clip To File Boundaries">
