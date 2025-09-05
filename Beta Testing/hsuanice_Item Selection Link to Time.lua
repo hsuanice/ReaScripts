@@ -1,16 +1,20 @@
 --[[
 @description hsuanice_Item Selection and link to Time
-@version 0.1.0
+@version 0.1.1
 @author hsuanice
 @about
   Background watcher that mirrors current ITEM SELECTION to the TIME SELECTION:
     • When item selection changes, set time selection to [min(item.start) .. max(item.end)].
-    • Does nothing when selection unchanged — ultra lightweight, no UI, no lag.
+    • Pauses when any Razor Areas exist in the project (respect Razor).
+    • Ultra lightweight, no UI, no lag.
+
   Conventions:
     • Auto-terminate previous instance on relaunch; keep toolbar toggle in sync (same pattern as Razor-Link).
     • Publishes a per-project enabled flag for interoperability if needed.
 
 @changelog
+  v0.1.1 - Respect Razor Areas: if any Razor exists (track-level or fallback), do not link item → time.
+           Keeps original light watcher, only adds a cheap Razor presence check per cycle.
   v0.1.0 - Initial release. Ultra-light item→time selection link with state-change gating and toolbar sync.
 ]]
 
@@ -36,10 +40,6 @@ reaper.SetProjExtState(0, "hsuanice_ItemTimeLink", "enabled", "1")
 local function selection_signature()
   local n = reaper.CountSelectedMediaItems(0)
   if n == 0 then return "0|" end
-  -- For cheap and stable sig: count + first/last item's pos/end (sorted by position)
-  local items = {}
-  items[#items+1] = n
-  -- sample up to a few items to avoid O(N log N) sort on huge sets
   local min_pos, max_end = math.huge, -math.huge
   for i = 0, n-1 do
     local it  = reaper.GetSelectedMediaItem(0, i)
@@ -49,9 +49,7 @@ local function selection_signature()
     local iend = pos + len
     if iend > max_end then max_end = iend end
   end
-  items[#items+1] = string.format("%.12f", min_pos)
-  items[#items+1] = string.format("%.12f", max_end)
-  return table.concat(items, "|")
+  return string.format("%d|%.12f|%.12f", n, min_pos, max_end)
 end
 
 -- Apply time selection from current item selection.
@@ -79,20 +77,55 @@ local function apply_time_from_selection()
   end
 end
 
+-- ----- Razor presence (project-wide) -----
+-- We respect *any* track-level Razor segments. We read EXT first, then fallback.
+local function razor_signature()
+  local parts = {}
+  local tcnt = reaper.CountTracks(0)
+  for i = 0, tcnt-1 do
+    local tr = reaper.GetTrack(0, i)
+    local _, s1 = reaper.GetSetMediaTrackInfo_String(tr, "P_RAZOREDITS_EXT", "", false)
+    local _, s2 = reaper.GetSetMediaTrackInfo_String(tr, "P_RAZOREDITS", "", false)
+    parts[#parts+1] = s1 or ""
+    parts[#parts+1] = s2 or ""
+  end
+  return table.concat(parts, "|")
+end
+
+local function razor_exists(sig)
+  -- Any pair of numbers like "<start> <end>" indicates presence.
+  -- We do not parse GUIDs here; any numeric pair is enough to pause linking.
+  return sig:find("[-%d%.]+%s+[-%d%.]+") ~= nil
+end
+-- ----------------------------------------
+
 -- Gated main loop: only run when project state or selection sig changes.
 local last_psc = -1
-local last_sig = ""
+local last_sel_sig = ""
+local last_razor_sig = ""
+local last_razor_has = false
 
 local function mainloop()
   local psc = reaper.GetProjectStateChangeCount(0)  -- cheap global change counter
-  local sig = selection_signature()
 
-  if psc ~= last_psc or sig ~= last_sig then
-    -- Update only when something relevant changed.
+  -- Update razor presence only when its signature changes (cheap join of strings).
+  local r_sig = razor_signature()
+  if r_sig ~= last_razor_sig then
+    last_razor_sig = r_sig
+    last_razor_has = razor_exists(r_sig)
+  end
+
+  local s_sig = selection_signature()
+
+  if psc ~= last_psc or s_sig ~= last_sel_sig then
     last_psc = psc
-    if sig ~= last_sig then
-      last_sig = sig
-      apply_time_from_selection()
+    if s_sig ~= last_sel_sig then
+      last_sel_sig = s_sig
+      -- Respect Razor: if any Razor exists, do nothing.
+      if not last_razor_has then
+        apply_time_from_selection()
+      end
+      -- else paused while Razor exists
     end
   end
 
@@ -100,4 +133,3 @@ local function mainloop()
 end
 
 mainloop()
-
