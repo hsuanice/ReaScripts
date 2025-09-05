@@ -1,6 +1,6 @@
 --[[
 @description hsuanice_Item Selection and link to Time
-@version 0.1.1
+@version 0.1.2 edit cursor follow time selection
 @author hsuanice
 @about
   Background watcher that mirrors current ITEM SELECTION to the TIME SELECTION:
@@ -13,8 +13,8 @@
     • Publishes a per-project enabled flag for interoperability if needed.
 
 @changelog
+  v0.1.2 - After linking, move edit cursor to the time selection start (still respecting Razor).
   v0.1.1 - Respect Razor Areas: if any Razor exists (track-level or fallback), do not link item → time.
-           Keeps original light watcher, only adds a cheap Razor presence check per cycle.
   v0.1.0 - Initial release. Ultra-light item→time selection link with state-change gating and toolbar sync.
 ]]
 
@@ -36,6 +36,19 @@ reaper.atexit(function()
 end)
 reaper.SetProjExtState(0, "hsuanice_ItemTimeLink", "enabled", "1")
 
+-- Razor presence check (track property P_RAZOREDITS / P_RAZOREDITS_EXT)
+local function any_razor_exists()
+  local tcnt = reaper.CountTracks(0)
+  for i = 0, tcnt-1 do
+    local tr = reaper.GetTrack(0, i)
+    local _, ext = reaper.GetSetMediaTrackInfo_String(tr, "P_RAZOREDITS_EXT", "", false)
+    if ext and ext ~= "" then return true end
+    local _, fbk = reaper.GetSetMediaTrackInfo_String(tr, "P_RAZOREDITS", "", false)
+    if fbk and fbk ~= "" then return true end
+  end
+  return false
+end
+
 -- Build a tiny signature for current item selection to detect changes cheaply.
 local function selection_signature()
   local n = reaper.CountSelectedMediaItems(0)
@@ -52,7 +65,7 @@ local function selection_signature()
   return string.format("%d|%.12f|%.12f", n, min_pos, max_end)
 end
 
--- Apply time selection from current item selection.
+-- Apply time selection from current item selection, and move edit cursor to start
 local function apply_time_from_selection()
   local n = reaper.CountSelectedMediaItems(0)
   if n == 0 then
@@ -72,63 +85,30 @@ local function apply_time_from_selection()
     if iend > max_end then max_end = iend end
   end
 
-  if min_pos < (max_end - EPS) then
-    reaper.GetSet_LoopTimeRange(true, false, min_pos, max_end, false)
-  end
+  -- Link: set time selection
+  reaper.GetSet_LoopTimeRange(true, false, min_pos, max_end, false)
+  -- NEW in 0.1.2: move edit cursor to time selection start (no view scroll, no seek)
+  reaper.SetEditCurPos(min_pos, false, false)
 end
 
--- ----- Razor presence (project-wide) -----
--- We respect *any* track-level Razor segments. We read EXT first, then fallback.
-local function razor_signature()
-  local parts = {}
-  local tcnt = reaper.CountTracks(0)
-  for i = 0, tcnt-1 do
-    local tr = reaper.GetTrack(0, i)
-    local _, s1 = reaper.GetSetMediaTrackInfo_String(tr, "P_RAZOREDITS_EXT", "", false)
-    local _, s2 = reaper.GetSetMediaTrackInfo_String(tr, "P_RAZOREDITS", "", false)
-    parts[#parts+1] = s1 or ""
-    parts[#parts+1] = s2 or ""
-  end
-  return table.concat(parts, "|")
-end
-
-local function razor_exists(sig)
-  -- Any pair of numbers like "<start> <end>" indicates presence.
-  -- We do not parse GUIDs here; any numeric pair is enough to pause linking.
-  return sig:find("[-%d%.]+%s+[-%d%.]+") ~= nil
-end
--- ----------------------------------------
-
--- Gated main loop: only run when project state or selection sig changes.
-local last_psc = -1
-local last_sel_sig = ""
-local last_razor_sig = ""
-local last_razor_has = false
-
+-- Main watcher loop
+local last_sig = ""
 local function mainloop()
-  local psc = reaper.GetProjectStateChangeCount(0)  -- cheap global change counter
-
-  -- Update razor presence only when its signature changes (cheap join of strings).
-  local r_sig = razor_signature()
-  if r_sig ~= last_razor_sig then
-    last_razor_sig = r_sig
-    last_razor_has = razor_exists(r_sig)
+  if any_razor_exists() then
+    -- respect Razor: do nothing this cycle
+    last_sig = selection_signature() -- keep sig in sync to avoid false triggers later
+    reaper.defer(mainloop)
+    return
   end
 
-  local s_sig = selection_signature()
-
-  if psc ~= last_psc or s_sig ~= last_sel_sig then
-    last_psc = psc
-    if s_sig ~= last_sel_sig then
-      last_sel_sig = s_sig
-      -- Respect Razor: if any Razor exists, do nothing.
-      if not last_razor_has then
-        apply_time_from_selection()
-      end
-      -- else paused while Razor exists
-    end
+  local sig = selection_signature()
+  if sig ~= last_sig then
+    last_sig = sig
+    reaper.PreventUIRefresh(1)
+    apply_time_from_selection()
+    reaper.PreventUIRefresh(-1)
+    reaper.UpdateArrange()
   end
-
   reaper.defer(mainloop)
 end
 
