@@ -1,6 +1,6 @@
 --[[
 @description Monitor - Reorder or sort selected items vertically
-@version 0.6.1 Editable Table, ID ok, edit not ok
+@version 0.6.2 Editable Table, Track Name and Item Note ok, Take Name not ok
 @author hsuanice
 @about
   Shows a live table of the currently selected items and all sort-relevant fields:
@@ -38,6 +38,11 @@
 
 
 @changelog
+  v0.6.2
+- Editing UX: Fixed focus so double-click reliably enters inline edit and the input is immediately active with the text preselected.
+- Commit behavior: Leaving the cell (losing focus) now commits just like pressing Enter; Esc cancels. Only writes (and creates one Undo step) when the value actually changes.
+- Stability: While a cell is being edited we render only the InputText (no overlapping Selectable), avoiding focus flicker and ID conflicts.
+- Auto-refresh: Continues to refresh when not editing, pauses during edit, and resumes as soon as the edit ends (on Enter, blur, or Esc).
   v0.6.1
   - Fix: Resolved Dear ImGui ID conflicts in editable cells (Track Name, Take Name, Item Note)
          by using a row-level PushID keyed by item GUID plus per-cell "##trk"/"##take"/"##note" IDs.
@@ -566,7 +571,7 @@ SNAP_BEFORE, SNAP_AFTER = {}, {}
 FORMAT = TFLib.make_formatter(TIME_MODE, {decimals=3})
 
 -- === Inline edit state ===
-local EDIT = { row = nil, col = nil, buf = "" }
+local EDIT = { row = nil, col = nil, buf = "", want_focus = false }
 local COL = { TRACK_NAME = 3, TAKE_NAME = 4, ITEM_NOTE = 5 } -- 以表頭順序為準（#、TrackIdx、Track Name、Take Name、Item Note、Source File...）
 
 local function _trim(s)
@@ -880,31 +885,33 @@ local function draw_table(rows, height)
       -- Track Name（single-click select / double-click edit）
       reaper.ImGui_TableNextColumn(ctx)
       local track_txt = tostring(r.track_name or "")
-      -- 顯示：固定 ID 後綴 ##trk（即使內容為空也不會 ID 衝突）
-      reaper.ImGui_Selectable(ctx, (track_txt ~= "" and track_txt or " ") .. "##trk", false)
-      if reaper.ImGui_IsItemHovered(ctx) and reaper.ImGui_IsMouseDoubleClicked(ctx, 0) then
-        EDIT = { row = r, col = 3, buf = track_txt }  -- 3 = Track Name 欄
-      end
-      -- 編輯：InputText 的 ID 也只用 ##trk（靠 PushID 區分每列）
-      if EDIT and EDIT.row == r and EDIT.col == 3 then
-        reaper.ImGui_SameLine(ctx)
+      local editing_trk = (EDIT and EDIT.row == r and EDIT.col == 3)
+
+      if not editing_trk then
+        -- 顯示模式：可單擊選取、雙擊進入編輯
+        reaper.ImGui_Selectable(ctx, (track_txt ~= "" and track_txt or " ") .. "##trk", false)
+        if reaper.ImGui_IsItemHovered(ctx) and reaper.ImGui_IsMouseDoubleClicked(ctx, 0) then
+          EDIT = { row = r, col = 3, buf = track_txt, want_focus = true }
+        end
+      else
+        -- 編輯模式：只畫 InputText，確保鍵盤焦點在這格
         reaper.ImGui_SetNextItemWidth(ctx, -1)
+        if EDIT.want_focus then
+          reaper.ImGui_SetKeyboardFocusHere(ctx)
+          EDIT.want_focus = false
+        end
         local flags = reaper.ImGui_InputTextFlags_AutoSelectAll() | reaper.ImGui_InputTextFlags_EnterReturnsTrue()
         local changed, newv = reaper.ImGui_InputText(ctx, "##trk", EDIT.buf, flags)
         if changed then EDIT.buf = newv end
-        local commit = changed and reaper.ImGui_IsItemDeactivatedAfterEdit(ctx)
-                    or reaper.ImGui_IsKeyPressed(ctx, reaper.ImGui_Key_Enter())
-        if commit then
-          -- 只改「這一條 Track 物件」（以 track 指標判斷，不連動同名他軌）
-          if r.__track then
-            reaper.Undo_BeginBlock2(0)
-            reaper.GetSetMediaTrackInfo_String(r.__track, "P_NAME", (EDIT.buf:gsub("^%s+",""):gsub("%s+$","")), true)
-            reaper.Undo_EndBlock2(0, "[Monitor] Rename Track", -1)
-            reaper.UpdateArrange()
-            r.track_name = EDIT.buf
-          end
+
+        local submit = reaper.ImGui_IsKeyPressed(ctx, reaper.ImGui_Key_Enter())
+                      or reaper.ImGui_IsItemDeactivated(ctx)   -- 失焦也提交（可能沒改值）
+        local cancel = reaper.ImGui_IsKeyPressed(ctx, reaper.ImGui_Key_Escape())
+
+        if submit then
+          if r.__track then apply_track_name(r.__track, EDIT.buf, rows) end
           EDIT = nil
-        elseif reaper.ImGui_IsKeyPressed(ctx, reaper.ImGui_Key_Escape()) then
+        elseif cancel then
           EDIT = nil
         end
       end
@@ -912,28 +919,31 @@ local function draw_table(rows, height)
       -- Take Name（允許沒有 active take 也能編輯）
       reaper.ImGui_TableNextColumn(ctx)
       local take_txt = tostring(r.take_name or "")
-      reaper.ImGui_Selectable(ctx, (take_txt ~= "" and take_txt or " ") .. "##take", false)
-      if reaper.ImGui_IsItemHovered(ctx) and reaper.ImGui_IsMouseDoubleClicked(ctx, 0) then
-        EDIT = { row = r, col = 4, buf = take_txt }  -- 4 = Take Name 欄
-      end
-      if EDIT and EDIT.row == r and EDIT.col == 4 then
-        reaper.ImGui_SameLine(ctx)
+      local editing_take = (EDIT and EDIT.row == r and EDIT.col == 4)
+
+      if not editing_take then
+        reaper.ImGui_Selectable(ctx, (take_txt ~= "" and take_txt or " ") .. "##take", false)
+        if reaper.ImGui_IsItemHovered(ctx) and reaper.ImGui_IsMouseDoubleClicked(ctx, 0) then
+          EDIT = { row = r, col = 4, buf = take_txt, want_focus = true }
+        end
+      else
         reaper.ImGui_SetNextItemWidth(ctx, -1)
+        if EDIT.want_focus then
+          reaper.ImGui_SetKeyboardFocusHere(ctx)
+          EDIT.want_focus = false
+        end
         local flags = reaper.ImGui_InputTextFlags_AutoSelectAll() | reaper.ImGui_InputTextFlags_EnterReturnsTrue()
         local changed, newv = reaper.ImGui_InputText(ctx, "##take", EDIT.buf, flags)
         if changed then EDIT.buf = newv end
-        local commit = changed and reaper.ImGui_IsItemDeactivatedAfterEdit(ctx)
-                    or reaper.ImGui_IsKeyPressed(ctx, reaper.ImGui_Key_Enter())
-        if commit then
-          if r.__take then
-            reaper.Undo_BeginBlock2(0)
-            reaper.GetSetMediaItemTakeInfo_String(r.__take, "P_NAME", (EDIT.buf:gsub("^%s+",""):gsub("%s+$","")), true)
-            reaper.Undo_EndBlock2(0, "[Monitor] Rename Take", -1)
-            r.take_name = EDIT.buf
-            reaper.UpdateArrange()
-          end
+
+        local submit = reaper.ImGui_IsKeyPressed(ctx, reaper.ImGui_Key_Enter())
+                      or reaper.ImGui_IsItemDeactivated(ctx)
+        local cancel = reaper.ImGui_IsKeyPressed(ctx, reaper.ImGui_Key_Escape())
+
+        if submit then
+          apply_take_name(r.__take, EDIT.buf, r)
           EDIT = nil
-        elseif reaper.ImGui_IsKeyPressed(ctx, reaper.ImGui_Key_Escape()) then
+        elseif cancel then
           EDIT = nil
         end
       end
@@ -943,26 +953,31 @@ local function draw_table(rows, height)
       -- Item Note
       reaper.ImGui_TableNextColumn(ctx)
       local note_txt = tostring(r.item_note or "")
-      reaper.ImGui_Selectable(ctx, (note_txt ~= "" and note_txt or " ") .. "##note", false)
-      if reaper.ImGui_IsItemHovered(ctx) and reaper.ImGui_IsMouseDoubleClicked(ctx, 0) then
-        EDIT = { row = r, col = 5, buf = note_txt }  -- 5 = Item Note 欄
-      end
-      if EDIT and EDIT.row == r and EDIT.col == 5 then
-        reaper.ImGui_SameLine(ctx)
+      local editing_note = (EDIT and EDIT.row == r and EDIT.col == 5)
+
+      if not editing_note then
+        reaper.ImGui_Selectable(ctx, (note_txt ~= "" and note_txt or " ") .. "##note", false)
+        if reaper.ImGui_IsItemHovered(ctx) and reaper.ImGui_IsMouseDoubleClicked(ctx, 0) then
+          EDIT = { row = r, col = 5, buf = note_txt, want_focus = true }
+        end
+      else
         reaper.ImGui_SetNextItemWidth(ctx, -1)
+        if EDIT.want_focus then
+          reaper.ImGui_SetKeyboardFocusHere(ctx)
+          EDIT.want_focus = false
+        end
         local flags = reaper.ImGui_InputTextFlags_AutoSelectAll() | reaper.ImGui_InputTextFlags_EnterReturnsTrue()
         local changed, newv = reaper.ImGui_InputText(ctx, "##note", EDIT.buf, flags)
         if changed then EDIT.buf = newv end
-        local commit = changed and reaper.ImGui_IsItemDeactivatedAfterEdit(ctx)
-                    or reaper.ImGui_IsKeyPressed(ctx, reaper.ImGui_Key_Enter())
-        if commit then
-          reaper.Undo_BeginBlock2(0)
-          reaper.GetSetMediaItemInfo_String(r.__item, "P_NOTES", (EDIT.buf:gsub("^%s+",""):gsub("%s+$","")), true)
-          reaper.Undo_EndBlock2(0, "[Monitor] Edit Item Note", -1)
-          r.item_note = EDIT.buf
-          reaper.UpdateArrange()
+
+        local submit = reaper.ImGui_IsKeyPressed(ctx, reaper.ImGui_Key_Enter())
+                      or reaper.ImGui_IsItemDeactivated(ctx)
+        local cancel = reaper.ImGui_IsKeyPressed(ctx, reaper.ImGui_Key_Escape())
+
+        if submit then
+          apply_item_note(r.__item, EDIT.buf, r)
           EDIT = nil
-        elseif reaper.ImGui_IsKeyPressed(ctx, reaper.ImGui_Key_Escape()) then
+        elseif cancel then
           EDIT = nil
         end
       end
@@ -1044,7 +1059,7 @@ end
 -- Main loop
 ---------------------------------------
 local function loop()
-  if AUTO and (not EDIT or not EDIT.col) then refresh_now() end
+  if AUTO and not (EDIT and EDIT.col) then refresh_now() end
 
 
   reaper.ImGui_SetNextWindowSize(ctx, 1000, 640, reaper.ImGui_Cond_FirstUseEver())
