@@ -1,6 +1,6 @@
 --[[
 @description Monitor - Reorder or sort selected items vertically
-@version 0.6.11 Fill now support mullti-columns
+@version 0.6.12 Spill now support multi-columns
 @author hsuanice
 @about
   Shows a live table of the currently selected items and all sort-relevant fields:
@@ -39,6 +39,16 @@
 
 
 @changelog
+  v0.6.12
+    - Paste (spill): multi-cell sources now spill across writable columns as well.
+      • When only one destination cell is selected, the paste expands from that cell
+        in row-major order but only targets writable columns (3=Track, 4=Take, 5=Item Note).
+      • The first writable column at or to the right of the anchor is used as the start;
+        values beyond column 5 are truncated (no wrap), matching spreadsheet behavior.
+      • Works together with v0.6.11 (fill-down for single-row sources) and v0.6.9 rules.
+    - Live view only. Non-writable columns remain read-only (safe to select/copy, ignored on write).
+    - One undo per paste; undo/redo keeps your item selection (v0.6.8.1).
+
   v0.6.11
     - Paste: when the source is a single row spanning multiple columns (e.g., Take Name + Item Note),
       pasting into a multi-row selection now “fills down” row-by-row, Excel-style.
@@ -818,6 +828,37 @@ local function build_dst_by_anchor_and_shape(rows, anchor_desc, src_rows, src_co
       end
     end
   end
+  table.sort(dst, function(a,b)
+    if a.row_index ~= b.row_index then return a.row_index < b.row_index end
+    return a.col < b.col
+  end)
+  return dst
+end
+
+-- 依來源形狀與單一錨點，產生「只落在可寫欄位 3/4/5」的展開目標
+local function build_dst_spill_writable(rows, anchor_desc, src_rows, src_cols)
+  local dst = {}
+  local writable = {3,4,5}
+  -- 找到 >= 錨點欄 的第一個可寫欄位；若沒有（例如錨在 6），就用最後一個（5）
+  local start_idx
+  for idx, c in ipairs(writable) do
+    if c >= (anchor_desc.col or 3) then start_idx = idx; break end
+  end
+  if not start_idx then start_idx = #writable end
+
+  for i = 0, src_rows - 1 do
+    local ri = (anchor_desc.row_index or 1) + i
+    if ri >= 1 and ri <= #rows then
+      local r = rows[ri]
+      for j = 0, src_cols - 1 do
+        local wi = start_idx + j
+        if wi > #writable then break end  -- 超出可寫欄位就截斷
+        local col = writable[wi]
+        dst[#dst+1] = { row_index = ri, col = col, row = r }
+      end
+    end
+  end
+
   table.sort(dst, function(a,b)
     if a.row_index ~= b.row_index then return a.row_index < b.row_index end
     return a.col < b.col
@@ -1638,9 +1679,9 @@ local function loop()
         for i=1, #dst do apply_cell(dst[i], v) end
 
       elseif #dst == 1 then
-        -- 來源多值、目標只選一格：依來源 2D 形狀向右、向下展開（0.6.10）
-        local anchor = dst[1]  -- 單一目標格描述（含 row_index/col）
-        local dst2 = build_dst_by_anchor_and_shape(ROWS, anchor, src_h, src_w)
+        -- 來源多值、目標只選一格：依來源 2D 形狀向右、向下展開（0.6.12：僅落在 3/4/5）
+        local anchor = dst[1]
+        local dst2 = build_dst_spill_writable(ROWS, anchor, src_h, src_w)
         local n = math.min(#src, #dst2)
         for k = 1, n do apply_cell(dst2[k], src[k]) end
 
