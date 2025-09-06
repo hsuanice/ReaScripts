@@ -1,6 +1,6 @@
 --[[
 @description Monitor - Reorder or sort selected items vertically
-@version 0.6.8 Add undo/redo, need undo preference set with item selection
+@version 0.6.8.1 Undo ok without preference setting to item selection
 @author hsuanice
 @about
   Shows a live table of the currently selected items and all sort-relevant fields:
@@ -39,6 +39,12 @@
 
 
 @changelog
+  v0.6.8.1
+- Undo/Redo selection protection (always on):
+  • When using table shortcuts (Cmd/Ctrl+Z, Cmd/Ctrl+Shift+Z or Cmd/Ctrl+Y),
+    the current item selection is snapshotted by GUID and restored after Undo/Redo.
+  • Works even if REAPER Preferences → Undo → “Include selection: item” is OFF.
+  • Live view refreshes right after to stay in sync.
   v0.6.8
   - Shortcuts: Undo (Cmd/Ctrl+Z) and Redo (Cmd/Ctrl+Shift+Z or Cmd/Ctrl+Y).
   - All write operations already create undo points:
@@ -758,6 +764,38 @@ local function parse_clipboard_table(text)
   end
   return rows
 end
+
+-- === Undo/Redo 選取保護（以 GUID 快照） ===
+local function _snapshot_selected_item_guids()
+  local list = {}
+  local n = reaper.CountSelectedMediaItems(0)
+  for i = 0, n-1 do
+    local it = reaper.GetSelectedMediaItem(0, i)
+    local _, g = reaper.GetSetMediaItemInfo_String(it, "GUID", "", false)
+    list[#list+1] = g
+  end
+  return list
+end
+
+local function _restore_item_selection_by_guids(guids)
+  if not guids or #guids == 0 then return end
+  -- 先清空目前選取
+  reaper.Main_OnCommand(40289, 0) -- Unselect all items
+  -- 建索引表以加速比對
+  local want = {}
+  for _, g in ipairs(guids) do if g and g ~= "" then want[g] = true end end
+  -- 逐一掃描專案 item，比對 GUID 後重選
+  local total = reaper.CountMediaItems(0)
+  for i = 0, total-1 do
+    local it = reaper.GetMediaItem(0, i)
+    local _, g = reaper.GetSetMediaItemInfo_String(it, "GUID", "", false)
+    if want[g] then reaper.SetMediaItemSelected(it, true) end
+  end
+  reaper.UpdateArrange()
+end
+
+
+
 
 -- Bulk-commit（一次 Undo、最後再 UpdateArrange/Refresh）
 local BULK = false
@@ -1551,19 +1589,24 @@ local function loop()
       end
     end
 
-    -- Undo / Redo（專案層級；非編輯狀態才攔截）
+    -- Undo / Redo（專案層級；保護 item 選取）
     do
       local m = _mods()
       if m.shortcut then
-        -- Redo：Cmd/Ctrl+Shift+Z 或 Cmd/Ctrl+Y（先判斷，避免 Shift+Z 被當成 Undo）
+        -- 先快照目前選取（以 GUID）
+        local sel_snapshot = _snapshot_selected_item_guids()
+
+        -- 先判斷 Redo：Cmd/Ctrl+Shift+Z 或 Cmd/Ctrl+Y
         local redo_combo = (m.shift and reaper.ImGui_IsKeyPressed(ctx, reaper.ImGui_Key_Z(), false))
                         or reaper.ImGui_IsKeyPressed(ctx, reaper.ImGui_Key_Y(), false)
         if redo_combo then
           reaper.Undo_DoRedo2(0)
+          _restore_item_selection_by_guids(sel_snapshot)
           refresh_now()
         elseif reaper.ImGui_IsKeyPressed(ctx, reaper.ImGui_Key_Z(), false) then
           -- Undo：Cmd/Ctrl+Z
           reaper.Undo_DoUndo2(0)
+          _restore_item_selection_by_guids(sel_snapshot)
           refresh_now()
         end
       end
