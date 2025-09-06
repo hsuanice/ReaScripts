@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<index version="1" name="hsuanice Scripts" commit="ecacd4a5b4366214c399169ba6a26d12ccbf398e">
+<index version="1" name="hsuanice Scripts" commit="8e08b6526acb74b9650cbb54c69b4e31d852d612">
   <category name="Beta Testing">
     <reapack name="hsuanice_BWF TimeReference Embed Tool.lua" type="script" desc="Embed BWF TimeReference to Active take from Take 1 or Current Position TC">
       <version name="0.7.1" author="hsuanice" time="2025-08-14T17:52:57Z">
@@ -780,6 +780,12 @@
       </version>
       <version name="0.6.11 Fill now support mullti-columns" author="hsuanice" time="2025-09-06T22:24:31Z">
         <source main="main">https://github.com/hsuanice/ReaScripts/raw/ecacd4a5b4366214c399169ba6a26d12ccbf398e/Beta%20Testing/hsuanice_Reorder%20or%20sort%20selected%20items%20vertically%20Monitor.lua</source>
+      </version>
+      <version name="0.6.12 Spill now support multi-columns" author="hsuanice" time="2025-09-06T22:34:17Z">
+        <source main="main">https://github.com/hsuanice/ReaScripts/raw/fb60836937f5c850a8e31894f9003e2ced63599f/Beta%20Testing/hsuanice_Reorder%20or%20sort%20selected%20items%20vertically%20Monitor.lua</source>
+      </version>
+      <version name="0.6.12.1 Spill more like excel" author="hsuanice" time="2025-09-06T22:36:49Z">
+        <source main="main">https://github.com/hsuanice/ReaScripts/raw/8e08b6526acb74b9650cbb54c69b4e31d852d612/Beta%20Testing/hsuanice_Reorder%20or%20sort%20selected%20items%20vertically%20Monitor.lua</source>
       </version>
     </reapack>
     <reapack name="hsuanice_Reorder or sort selected items vertically.lua" type="script" desc="ReaImGui - Vertical Reorder and Sort (items)">
