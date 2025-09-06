@@ -1,6 +1,6 @@
 --[[
 @description Monitor - Reorder or sort selected items vertically
-@version 0.6.9 Paste Now more like Excel
+@version 0.6.10 Add Spill paste
 @author hsuanice
 @about
   Shows a live table of the currently selected items and all sort-relevant fields:
@@ -39,6 +39,15 @@
 
 
 @changelog
+  v0.6.10
+    - Paste: multi-cell sources now “spill” from a single target cell, Excel-style.
+      • If the source has multiple values but only one destination cell is selected,
+        the paste expands from that cell in row-major order, matching the source’s 2D shape.
+      • Single value still fills all selected cells (across columns or non-contiguous ranges).
+      • Multi→multi keeps row-major mapping and truncates when destination is smaller (no wrap).
+    - Writable columns remain Track Name / Take Name / Item Note; other columns safely ignore writes.
+    - One undo per paste; Live view only; selection protection on undo/redo remains in effect.
+
   v0.6.9
     - Paste behavior now matches spreadsheet intuition:
       • Single source value fills all selected cells.
@@ -775,6 +784,38 @@ local function parse_clipboard_table(text)
   end
   return rows
 end
+
+
+-- 來源 2D 形狀：回傳 rows, cols（以各列最大欄數為寬）
+local function src_shape_dims(tbl)
+  local rows = #tbl
+  local cols = 0
+  for i = 1, rows do
+    if #tbl[i] > cols then cols = #tbl[i] end
+  end
+  return rows, cols
+end
+
+-- 依「來源形狀」與「單一錨點（選到的一格）」產生展開後的目標格清單（行優先、左到右）
+local function build_dst_by_anchor_and_shape(rows, anchor_desc, src_rows, src_cols)
+  local dst = {}
+  for i = 0, src_rows - 1 do
+    local ri = (anchor_desc.row_index or 1) + i
+    if ri >= 1 and ri <= #rows then
+      local r = rows[ri]
+      for j = 0, src_cols - 1 do
+        local col = (anchor_desc.col or 1) + j
+        dst[#dst+1] = { row_index = ri, col = col, row = r }
+      end
+    end
+  end
+  table.sort(dst, function(a,b)
+    if a.row_index ~= b.row_index then return a.row_index < b.row_index end
+    return a.col < b.col
+  end)
+  return dst
+end
+
 
 -- 扁平化來源：把剪貼簿解析結果 (2D) 依「行優先、左到右」展開成一維
 local function flatten_tsv_to_list(tbl)
@@ -1578,16 +1619,27 @@ local function loop()
         end
       end
 
-      -- 一次 Undo：單值填滿；多值截斷
+      -- 一次 Undo：單值填滿；多值截斷；若只選 1 格則依來源形狀展開
       reaper.Undo_BeginBlock2(0)
+
       if #src == 1 then
+        -- 單值填滿（跨欄位、非矩形都可）
         local v = src[1]
         for i=1, #dst do apply_cell(dst[i], v) end
+      elseif #dst == 1 then
+        -- 來源多值、目標只選一格：依來源 2D 形狀向右、向下展開
+        local src_h, src_w = src_shape_dims(tbl)
+        local anchor = dst[1]  -- 單一目標格描述（含 row_index/col）
+        local dst2 = build_dst_by_anchor_and_shape(ROWS, anchor, src_h, src_w)
+        local n = math.min(#src, #dst2)
+        for k = 1, n do apply_cell(dst2[k], src[k]) end
       else
+        -- 多對多：依 row-major 對應到 min(#src, #dst)
         local n = math.min(#src, #dst)
         for k=1, n do apply_cell(dst[k], src[k]) end
       end
       reaper.Undo_EndBlock2(0, "[Monitor] Paste", -1)
+
       reaper.UpdateArrange()
       refresh_now()
 
