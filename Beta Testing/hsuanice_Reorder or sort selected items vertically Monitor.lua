@@ -1,6 +1,6 @@
 --[[
 @description Monitor - Reorder or sort selected items vertically
-@version 0.6.12.1 Spill more like excel
+@version 0.7.0 Column Reorder
 @author hsuanice
 @about
   Shows a live table of the currently selected items and all sort-relevant fields:
@@ -38,7 +38,18 @@
 
 
 
+
+
 @changelog
+  v0.7.0
+    - Columns: Moved Start/End to appear right after Track Name by default (before Take Name/Item Note).
+    - Column Reordering: You can now drag column headers to reorder them (ImGui TableFlags_Reorderable).
+    - Selection/Copy/Paste respect the current visual column order:
+      • Shift-rectangle selection expands by the visual positions, not fixed IDs.
+      • Copy outputs a rectangle according to the on-screen order.
+      • Paste destination ordering also follows the current on-screen order.
+    - Logic IDs unchanged for safety (3=Track, 4=Take, 5=Item Note, 12=Start, 13=End), so editing/paste rules remain stable.
+
   v0.6.12.1
     - Paste: when the source contains multiple cells but the selection has fewer cells than the source,
       the paste now spills the entire source block from the top-left selected cell (anchor), Excel-style.
@@ -727,12 +738,20 @@ local function sel_rect_apply(rows, row_index_map, cur_guid, cur_col)
   local a_idx = row_index_map[SEL.anchor.guid] or 1
   local b_idx = row_index_map[cur_guid] or a_idx
   local r1, r2 = math.min(a_idx, b_idx), math.max(a_idx, b_idx)
-  local c1, c2 = math.min(SEL.anchor.col, cur_col), math.max(SEL.anchor.col, cur_col)
+
+  -- 依畫面順序的欄位位置算矩形，再轉回邏輯欄位 id
+  local p1 = COL_POS[SEL.anchor.col] or SEL.anchor.col
+  local p2 = COL_POS[cur_col] or cur_col
+  local c1, c2 = math.min(p1, p2), math.max(p1, p2)
+
   for i = r1, r2 do
     local g = rows[i].__item_guid
-    for c = c1, c2 do sel_add(g, c) end
+    for pos = c1, c2 do
+      local logical_col = COL_ORDER[pos]
+      if logical_col then sel_add(g, logical_col) end
+    end
   end
-end
+end  -- ★★★ 補這個 end，結束 sel_rect_apply() 函式
 
 -- 取得某格「顯示用文字」（複製用；與 UI 呈現一致）
 local function get_cell_text(i, r, col, fmt)
@@ -756,7 +775,8 @@ end
 -- 複製目前選取到剪貼簿（TSV）
 local function copy_selection(rows, row_index_map)
   -- 找出被選的所有 (row,col)，並計算最小包圍矩形
-  local minr, maxr, minc, maxc = math.huge, -math.huge, math.huge, -math.huge
+  local minr, maxr = math.huge, -math.huge
+  local minp, maxp = math.huge, -math.huge  -- 畫面欄位位置
   local selected = {}
   for guid_col, _ in pairs(SEL.cells) do
     local g, c = guid_col:match("^(.-):(%d+)$")
@@ -766,8 +786,9 @@ local function copy_selection(rows, row_index_map)
       selected[#selected+1] = {row=rowi, col=col}
       if rowi < minr then minr = rowi end
       if rowi > maxr then maxr = rowi end
-      if col  < minc then minc = col  end
-      if col  > maxc then maxc = col  end
+      local pos = COL_POS[col] or col
+      if pos  < minp then minp = pos end
+      if pos  > maxp then maxp = pos end
     end
   end
   if #selected == 0 then return end
@@ -775,9 +796,10 @@ local function copy_selection(rows, row_index_map)
   for i=minr, maxr do
     local r = rows[i]
     local line = {}
-    for c=minc, maxc do
-      if sel_has(r.__item_guid, c) then
-        line[#line+1] = get_cell_text(i, r, c)
+    for pos=minp, maxp do
+      local logical_col = COL_ORDER[pos]
+      if logical_col and sel_has(r.__item_guid, logical_col) then
+        line[#line+1] = get_cell_text(i, r, logical_col)
       else
         line[#line+1] = ""
       end
@@ -900,11 +922,48 @@ local function build_dst_list_from_selection(rows)
   end
   table.sort(dst, function(a,b)
     if a.row_index ~= b.row_index then return a.row_index < b.row_index end
-    return a.col < b.col
+    local pa = COL_POS[a.col] or a.col
+    local pb = COL_POS[b.col] or b.col
+    return pa < pb
   end)
+
   return dst
 end
 
+-- === Column label ↔ logical id mapping ===
+local COL_ORDER, COL_POS = {}, {}   -- COL_ORDER[display_idx] = logical_col_id; COL_POS[logical_col_id] = display_idx
+
+local function _colid_from_label(label, startHeader, endHeader)
+  if label == "#" then return 1 end
+  if label == "TrkID" then return 2 end
+  if label == "Track Name" then return 3 end
+  if label == "Take Name" then return 4 end
+  if label == "Item Note" then return 5 end
+  if label == "Source File" then return 6 end
+  if label == "Meta Track Name" then return 7 end
+  if label == "Chan#" then return 8 end
+  if label == "Interleave" then return 9 end
+  if label == "Mute" then return 10 end
+  if label == "Color" then return 11 end
+  if label == startHeader then return 12 end
+  if label == endHeader   then return 13 end
+  return nil
+end
+
+local function rebuild_display_mapping()
+  COL_ORDER, COL_POS = {}, {}
+  local n = reaper.ImGui_TableGetColumnCount(ctx)
+  -- 動態取得當前 Start/End 標題（因為模式變更會換字）
+  local startHeader, endHeader = TFLib.headers(TIME_MODE, {pattern=CUSTOM_PATTERN})
+  for i = 0, n-1 do
+    local label = reaper.ImGui_TableGetColumnName(ctx, i) or ""
+    local id = _colid_from_label(label, startHeader, endHeader)
+    if id then
+      COL_ORDER[i+1] = id
+      COL_POS[id]    = i+1
+    end
+  end
+end
 
 
 -- === Undo/Redo 選取保護（以 GUID 快照） ===
@@ -1310,12 +1369,19 @@ local function draw_table(rows, height)
             | TF('ImGui_TableFlags_RowBg')
             | TF('ImGui_TableFlags_SizingFixedFit')
             | TF('ImGui_TableFlags_ScrollX')
-            | TF('ImGui_TableFlags_Resizable')  if reaper.ImGui_BeginTable(ctx, "live_table", 13, flags, -FLT_MIN, height or 360) then
+            | TF('ImGui_TableFlags_Resizable')  
+            | TF('ImGui_TableFlags_Reorderable')   -- 允許拖曳重排欄位            
+  if reaper.ImGui_BeginTable(ctx, "live_table", 13, flags, -FLT_MIN, height or 360) then
+    -- ★ 先取得動態表頭文字（m:s / TC / Beats / Custom）
+    local startHeader, endHeader = TFLib.headers(TIME_MODE, {pattern=CUSTOM_PATTERN})
+    
     reaper.ImGui_TableSetupColumn(ctx, "#", TF('ImGui_TableColumnFlags_WidthFixed'), 28)
     reaper.ImGui_TableSetupColumn(ctx, "TrkID", TF('ImGui_TableColumnFlags_WidthFixed'), 44)
 
     -- 可編輯欄：給足閱讀寬度，固定寬內自動換行
     reaper.ImGui_TableSetupColumn(ctx, "Track Name", TF('ImGui_TableColumnFlags_WidthFixed'), 140)
+    reaper.ImGui_TableSetupColumn(ctx, startHeader, TF('ImGui_TableColumnFlags_WidthFixed'), 120)
+    reaper.ImGui_TableSetupColumn(ctx, endHeader,   TF('ImGui_TableColumnFlags_WidthFixed'), 120)    
     reaper.ImGui_TableSetupColumn(ctx, "Take Name",  TF('ImGui_TableColumnFlags_WidthFixed'), 200)
     reaper.ImGui_TableSetupColumn(ctx, "Item Note",  TF('ImGui_TableColumnFlags_WidthFixed'), 320)
 
@@ -1325,13 +1391,12 @@ local function draw_table(rows, height)
     reaper.ImGui_TableSetupColumn(ctx, "Chan#",       TF('ImGui_TableColumnFlags_WidthFixed'), 44)
     reaper.ImGui_TableSetupColumn(ctx, "Interleave",  TF('ImGui_TableColumnFlags_WidthFixed'), 60)
 
-    local startHeader, endHeader = TFLib.headers(TIME_MODE, {pattern=CUSTOM_PATTERN})
     reaper.ImGui_TableSetupColumn(ctx, "Mute",   TF('ImGui_TableColumnFlags_WidthFixed'), 46)
     reaper.ImGui_TableSetupColumn(ctx, "Color",  TF('ImGui_TableColumnFlags_WidthFixed'), 96)
-    reaper.ImGui_TableSetupColumn(ctx, startHeader, TF('ImGui_TableColumnFlags_WidthFixed'), 120)
-    reaper.ImGui_TableSetupColumn(ctx, endHeader,   TF('ImGui_TableColumnFlags_WidthFixed'), 120)
+
 
     reaper.ImGui_TableHeadersRow(ctx)
+    rebuild_display_mapping()  -- ← 讀當前顯示順序（含使用者拖曳後）
 
         -- Build row-index map for selection math
     local row_index_map = build_row_index_map(rows)
@@ -1354,192 +1419,143 @@ local function draw_table(rows, height)
     end
 
 
+    -- === 取代原本每欄固定順序的整段：改成依 COL_ORDER 繪製 ===
     for i, r in ipairs(rows or {}) do
       reaper.ImGui_TableNextRow(ctx)
-      reaper.ImGui_PushID(ctx, (r.__item_guid ~= "" and r.__item_guid) or tostring(i))    -- 0.6.1
-      -- # (col 1)
-      reaper.ImGui_TableNextColumn(ctx)
-      local sel1 = sel_has(r.__item_guid, 1)
-      reaper.ImGui_Selectable(ctx, tostring(i) .. "##c1", sel1)
-      if reaper.ImGui_IsItemClicked(ctx) then handle_cell_click(r.__item_guid, 1) end
+      reaper.ImGui_PushID(ctx, (r.__item_guid ~= "" and r.__item_guid) or tostring(i))
 
-      -- TrkID (col 2)
-      reaper.ImGui_TableNextColumn(ctx)
-      local sel2 = sel_has(r.__item_guid, 2)
-      reaper.ImGui_Selectable(ctx, tostring(r.track_idx or "") .. "##c2", sel2)
-      if reaper.ImGui_IsItemClicked(ctx) then handle_cell_click(r.__item_guid, 2) end
+      for disp = 1, reaper.ImGui_TableGetColumnCount(ctx) do
+        reaper.ImGui_TableSetColumnIndex(ctx, disp-1)
+        local col = COL_ORDER[disp]
 
+        if col == 1 then
+          local sel = sel_has(r.__item_guid, 1)
+          reaper.ImGui_Selectable(ctx, tostring(i).."##c1", sel)
+          if reaper.ImGui_IsItemClicked(ctx) then handle_cell_click(r.__item_guid, 1) end
 
-        -- Track Name（click = select, double-click = edit）
-        reaper.ImGui_TableNextColumn(ctx)
-        local track_txt = tostring(r.track_name or "")
-        local editing_trk = (EDIT and EDIT.row == r and EDIT.col == 3)
-        local is_sel3 = sel_has(r.__item_guid, 3)
+        elseif col == 2 then
+          local sel = sel_has(r.__item_guid, 2)
+          reaper.ImGui_Selectable(ctx, tostring(r.track_idx or "").."##c2", sel)
+          if reaper.ImGui_IsItemClicked(ctx) then handle_cell_click(r.__item_guid, 2) end
 
-        if not editing_trk then
-          reaper.ImGui_Selectable(ctx, (track_txt ~= "" and track_txt or " ") .. "##trk", is_sel3)
-          if reaper.ImGui_IsItemClicked(ctx) then handle_cell_click(r.__item_guid, 3) end
-          if reaper.ImGui_IsItemHovered(ctx) and reaper.ImGui_IsMouseDoubleClicked(ctx, 0) then
-            if TABLE_SOURCE == "live" then
+        elseif col == 3 then
+          -- Track Name（維持你原本的可編輯行為）
+          local track_txt = tostring(r.track_name or "")
+          local editing = (EDIT and EDIT.row == r and EDIT.col == 3)
+          local sel = sel_has(r.__item_guid, 3)
+          if not editing then
+            reaper.ImGui_Selectable(ctx, (track_txt ~= "" and track_txt or " ").."##trk", sel)
+            if reaper.ImGui_IsItemClicked(ctx) then handle_cell_click(r.__item_guid, 3) end
+            if reaper.ImGui_IsItemHovered(ctx) and reaper.ImGui_IsMouseDoubleClicked(ctx, 0) and TABLE_SOURCE=="live" then
               EDIT = { row = r, col = 3, buf = track_txt, want_focus = true }
             end
+          else
+            reaper.ImGui_SetNextItemWidth(ctx, -1)
+            if EDIT.want_focus then reaper.ImGui_SetKeyboardFocusHere(ctx); EDIT.want_focus=false end
+            local flags = reaper.ImGui_InputTextFlags_AutoSelectAll() | reaper.ImGui_InputTextFlags_EnterReturnsTrue()
+            local changed, newv = reaper.ImGui_InputText(ctx, "##trk", EDIT.buf, flags)
+            if changed then EDIT.buf = newv end
+            local submit = reaper.ImGui_IsKeyPressed(ctx, reaper.ImGui_Key_Enter()) or reaper.ImGui_IsItemDeactivated(ctx)
+            local cancel = reaper.ImGui_IsKeyPressed(ctx, reaper.ImGui_Key_Escape())
+            if submit then if r.__track then apply_track_name(r.__track, EDIT.buf, rows) end; EDIT=nil
+            elseif cancel then EDIT=nil end
           end
-        else
 
-        -- 編輯模式：只畫 InputText，確保鍵盤焦點在這格
-        reaper.ImGui_SetNextItemWidth(ctx, -1)
-        if EDIT.want_focus then
-          reaper.ImGui_SetKeyboardFocusHere(ctx)
-          EDIT.want_focus = false
-        end
-        local flags = reaper.ImGui_InputTextFlags_AutoSelectAll() | reaper.ImGui_InputTextFlags_EnterReturnsTrue()
-        local changed, newv = reaper.ImGui_InputText(ctx, "##trk", EDIT.buf, flags)
-        if changed then EDIT.buf = newv end
+        elseif col == 12 then
+          local t = format_time(r.start_time); local sel = sel_has(r.__item_guid, 12)
+          reaper.ImGui_Selectable(ctx, (t ~= "" and t or " ").."##c12", sel)
+          if reaper.ImGui_IsItemClicked(ctx) then handle_cell_click(r.__item_guid, 12) end
 
-        local submit = reaper.ImGui_IsKeyPressed(ctx, reaper.ImGui_Key_Enter())
-                      or reaper.ImGui_IsItemDeactivated(ctx)   -- 失焦也提交（可能沒改值）
-        local cancel = reaper.ImGui_IsKeyPressed(ctx, reaper.ImGui_Key_Escape())
+        elseif col == 13 then
+          local t = format_time(r.end_time); local sel = sel_has(r.__item_guid, 13)
+          reaper.ImGui_Selectable(ctx, (t ~= "" and t or " ").."##c13", sel)
+          if reaper.ImGui_IsItemClicked(ctx) then handle_cell_click(r.__item_guid, 13) end
 
-        if submit then
-          if r.__track then apply_track_name(r.__track, EDIT.buf, rows) end
-          EDIT = nil
-        elseif cancel then
-          EDIT = nil
-        end
-      end
-
-      -- Take Name（允許沒有 active take 也能編輯）
-      reaper.ImGui_TableNextColumn(ctx)
-      local take_txt = tostring(r.take_name or "")
-      local editing_take = (EDIT and EDIT.row == r and EDIT.col == 4)
-      local is_sel4 = sel_has(r.__item_guid, 4)
-
-      if not editing_take then
-        reaper.ImGui_Selectable(ctx, (take_txt ~= "" and take_txt or " ") .. "##take", is_sel4)
-        if reaper.ImGui_IsItemClicked(ctx) then handle_cell_click(r.__item_guid, 4) end
-        if reaper.ImGui_IsItemHovered(ctx) and reaper.ImGui_IsMouseDoubleClicked(ctx, 0) then
-          if TABLE_SOURCE == "live" then
-            EDIT = { row = r, col = 4, buf = take_txt, want_focus = true }
+        elseif col == 4 then
+          -- Take Name（維持原本可編輯）
+          local take_txt = tostring(r.take_name or "")
+          local editing = (EDIT and EDIT.row == r and EDIT.col == 4)
+          local sel = sel_has(r.__item_guid, 4)
+          if not editing then
+            reaper.ImGui_Selectable(ctx, (take_txt ~= "" and take_txt or " ").."##take", sel)
+            if reaper.ImGui_IsItemClicked(ctx) then handle_cell_click(r.__item_guid, 4) end
+            if reaper.ImGui_IsItemHovered(ctx) and reaper.ImGui_IsMouseDoubleClicked(ctx, 0) and TABLE_SOURCE=="live" then
+              EDIT = { row = r, col = 4, buf = take_txt, want_focus = true }
+            end
+          else
+            reaper.ImGui_SetNextItemWidth(ctx, -1)
+            if EDIT.want_focus then reaper.ImGui_SetKeyboardFocusHere(ctx); EDIT.want_focus=false end
+            local flags = reaper.ImGui_InputTextFlags_AutoSelectAll() | reaper.ImGui_InputTextFlags_EnterReturnsTrue()
+            local changed, newv = reaper.ImGui_InputText(ctx, "##take", EDIT.buf, flags)
+            if changed then EDIT.buf = newv end
+            local submit = reaper.ImGui_IsKeyPressed(ctx, reaper.ImGui_Key_Enter()) or reaper.ImGui_IsItemDeactivated(ctx)
+            local cancel = reaper.ImGui_IsKeyPressed(ctx, reaper.ImGui_Key_Escape())
+            if submit then apply_take_name(r.__take, EDIT.buf, r); EDIT=nil
+            elseif cancel then EDIT=nil end
           end
-        end
-      else
 
-        
-        reaper.ImGui_SetNextItemWidth(ctx, -1)
-        if EDIT.want_focus then
-          reaper.ImGui_SetKeyboardFocusHere(ctx)
-          EDIT.want_focus = false
-        end
-        local flags = reaper.ImGui_InputTextFlags_AutoSelectAll() | reaper.ImGui_InputTextFlags_EnterReturnsTrue()
-        local changed, newv = reaper.ImGui_InputText(ctx, "##take", EDIT.buf, flags)
-        if changed then EDIT.buf = newv end
-
-        local submit = reaper.ImGui_IsKeyPressed(ctx, reaper.ImGui_Key_Enter())
-                      or reaper.ImGui_IsItemDeactivated(ctx)
-        local cancel = reaper.ImGui_IsKeyPressed(ctx, reaper.ImGui_Key_Escape())
-
-        if submit then
-          apply_take_name(r.__take, EDIT.buf, r)
-          EDIT = nil
-        elseif cancel then
-          EDIT = nil
-        end
-      end
-
-
-
-      -- Item Note
-      reaper.ImGui_TableNextColumn(ctx)
-      local note_txt = tostring(r.item_note or "")
-      local editing_note = (EDIT and EDIT.row == r and EDIT.col == 5)
-      local is_sel5 = sel_has(r.__item_guid, 5)
-
-      if not editing_note then
-        reaper.ImGui_Selectable(ctx, (note_txt ~= "" and note_txt or " ") .. "##note", is_sel5)
-        if reaper.ImGui_IsItemClicked(ctx) then handle_cell_click(r.__item_guid, 5) end
-        if reaper.ImGui_IsItemHovered(ctx) and reaper.ImGui_IsMouseDoubleClicked(ctx, 0) then
-          if TABLE_SOURCE == "live" then
-            EDIT = { row = r, col = 5, buf = note_txt, want_focus = true }
+        elseif col == 5 then
+          -- Item Note（維持原本可編輯）
+          local note_txt = tostring(r.item_note or "")
+          local editing = (EDIT and EDIT.row == r and EDIT.col == 5)
+          local sel = sel_has(r.__item_guid, 5)
+          if not editing then
+            reaper.ImGui_Selectable(ctx, (note_txt ~= "" and note_txt or " ").."##note", sel)
+            if reaper.ImGui_IsItemClicked(ctx) then handle_cell_click(r.__item_guid, 5) end
+            if reaper.ImGui_IsItemHovered(ctx) and reaper.ImGui_IsMouseDoubleClicked(ctx, 0) and TABLE_SOURCE=="live" then
+              EDIT = { row = r, col = 5, buf = note_txt, want_focus = true }
+            end
+          else
+            reaper.ImGui_SetNextItemWidth(ctx, -1)
+            if EDIT.want_focus then reaper.ImGui_SetKeyboardFocusHere(ctx); EDIT.want_focus=false end
+            local flags = reaper.ImGui_InputTextFlags_AutoSelectAll() | reaper.ImGui_InputTextFlags_EnterReturnsTrue()
+            local changed, newv = reaper.ImGui_InputText(ctx, "##note", EDIT.buf, flags)
+            if changed then EDIT.buf = newv end
+            local submit = reaper.ImGui_IsKeyPressed(ctx, reaper.ImGui_Key_Enter()) or reaper.ImGui_IsItemDeactivated(ctx)
+            local cancel = reaper.ImGui_IsKeyPressed(ctx, reaper.ImGui_Key_Escape())
+            if submit then apply_item_note(r.__item, EDIT.buf, r); EDIT=nil
+            elseif cancel then EDIT=nil end
           end
-        end
-      else
-        reaper.ImGui_SetNextItemWidth(ctx, -1)
-        if EDIT.want_focus then
-          reaper.ImGui_SetKeyboardFocusHere(ctx)
-          EDIT.want_focus = false
-        end
-        local flags = reaper.ImGui_InputTextFlags_AutoSelectAll() | reaper.ImGui_InputTextFlags_EnterReturnsTrue()
-        local changed, newv = reaper.ImGui_InputText(ctx, "##note", EDIT.buf, flags)
-        if changed then EDIT.buf = newv end
 
-        local submit = reaper.ImGui_IsKeyPressed(ctx, reaper.ImGui_Key_Enter())
-                      or reaper.ImGui_IsItemDeactivated(ctx)
-        local cancel = reaper.ImGui_IsKeyPressed(ctx, reaper.ImGui_Key_Escape())
+        elseif col == 6 then
+          local t = tostring(r.file_name or ""); local sel = sel_has(r.__item_guid, 6)
+          reaper.ImGui_Selectable(ctx, (t ~= "" and t or " ").."##c6", sel)
+          if reaper.ImGui_IsItemClicked(ctx) then handle_cell_click(r.__item_guid, 6) end
 
-        if submit then
-          apply_item_note(r.__item, EDIT.buf, r)
-          EDIT = nil
-        elseif cancel then
-          EDIT = nil
+        elseif col == 7 then
+          local t = tostring(r.meta_trk_name or ""); local sel = sel_has(r.__item_guid, 7)
+          reaper.ImGui_Selectable(ctx, (t ~= "" and t or " ").."##c7", sel)
+          if reaper.ImGui_IsItemClicked(ctx) then handle_cell_click(r.__item_guid, 7) end
+
+        elseif col == 8 then
+          local t = tostring(r.channel_num or ""); local sel = sel_has(r.__item_guid, 8)
+          reaper.ImGui_Selectable(ctx, (t ~= "" and t or " ").."##c8", sel)
+          if reaper.ImGui_IsItemClicked(ctx) then handle_cell_click(r.__item_guid, 8) end
+
+        elseif col == 9 then
+          local t = tostring(r.interleave or ""); local sel = sel_has(r.__item_guid, 9)
+          reaper.ImGui_Selectable(ctx, (t ~= "" and t or " ").."##c9", sel)
+          if reaper.ImGui_IsItemClicked(ctx) then handle_cell_click(r.__item_guid, 9) end
+
+        elseif col == 10 then
+          local t = r.muted and "M" or ""; local sel = sel_has(r.__item_guid, 10)
+          reaper.ImGui_Selectable(ctx, (t ~= "" and t or " ").."##c10", sel)
+          if reaper.ImGui_IsItemClicked(ctx) then handle_cell_click(r.__item_guid, 10) end
+
+        elseif col == 11 then
+          if r.color_rgb and r.color_rgb[1] then
+            local rr, gg, bb = r.color_rgb[1]/255, r.color_rgb[2]/255, r.color_rgb[3]/255
+            local colu = reaper.ImGui_ColorConvertDouble4ToU32(rr, gg, bb, 1.0)
+            reaper.ImGui_TextColored(ctx, colu, "■")
+            reaper.ImGui_SameLine(ctx)
+          end
+          local t = tostring(r.color_hex or ""); local sel = sel_has(r.__item_guid, 11)
+          reaper.ImGui_Selectable(ctx, (t ~= "" and t or " ").."##c11", sel)
+          if reaper.ImGui_IsItemClicked(ctx) then handle_cell_click(r.__item_guid, 11) end
         end
       end
 
-      -- 6 Source File
-      reaper.ImGui_TableNextColumn(ctx)
-      local t6 = tostring(r.file_name or ""); local s6 = sel_has(r.__item_guid, 6)
-      reaper.ImGui_Selectable(ctx, (t6 ~= "" and t6 or " ") .. "##c6", s6)
-      if reaper.ImGui_IsItemClicked(ctx) then handle_cell_click(r.__item_guid, 6) end
-
-      -- 7 Meta Track Name
-      reaper.ImGui_TableNextColumn(ctx)
-      local t7 = tostring(r.meta_trk_name or ""); local s7 = sel_has(r.__item_guid, 7)
-      reaper.ImGui_Selectable(ctx, (t7 ~= "" and t7 or " ") .. "##c7", s7)
-      if reaper.ImGui_IsItemClicked(ctx) then handle_cell_click(r.__item_guid, 7) end
-
-      -- 8 Chan#
-      reaper.ImGui_TableNextColumn(ctx)
-      local t8 = tostring(r.channel_num or ""); local s8 = sel_has(r.__item_guid, 8)
-      reaper.ImGui_Selectable(ctx, (t8 ~= "" and t8 or " ") .. "##c8", s8)
-      if reaper.ImGui_IsItemClicked(ctx) then handle_cell_click(r.__item_guid, 8) end
-
-      -- 9 Interleave
-      reaper.ImGui_TableNextColumn(ctx)
-      local t9 = tostring(r.interleave or ""); local s9 = sel_has(r.__item_guid, 9)
-      reaper.ImGui_Selectable(ctx, (t9 ~= "" and t9 or " ") .. "##c9", s9)
-      if reaper.ImGui_IsItemClicked(ctx) then handle_cell_click(r.__item_guid, 9) end
-
-      -- 10 Mute
-      reaper.ImGui_TableNextColumn(ctx)
-      local t10 = r.muted and "M" or ""; local s10 = sel_has(r.__item_guid, 10)
-      reaper.ImGui_Selectable(ctx, (t10 ~= "" and t10 or " ") .. "##c10", s10)
-      if reaper.ImGui_IsItemClicked(ctx) then handle_cell_click(r.__item_guid, 10) end
-
-      -- 11 Color（顯示色塊 + 以 hex 為可選文字）
-      reaper.ImGui_TableNextColumn(ctx)
-      if r.color_rgb and r.color_rgb[1] then
-        local rr, gg, bb = r.color_rgb[1]/255, r.color_rgb[2]/255, r.color_rgb[3]/255
-        local col = reaper.ImGui_ColorConvertDouble4ToU32(rr, gg, bb, 1.0)
-        reaper.ImGui_TextColored(ctx, col, "■")
-        reaper.ImGui_SameLine(ctx)
-      end
-      local t11 = tostring(r.color_hex or ""); local s11 = sel_has(r.__item_guid, 11)
-      reaper.ImGui_Selectable(ctx, (t11 ~= "" and t11 or " ") .. "##c11", s11)
-      if reaper.ImGui_IsItemClicked(ctx) then handle_cell_click(r.__item_guid, 11) end
-
-      -- 12 Start
-      reaper.ImGui_TableNextColumn(ctx)
-      local t12 = format_time(r.start_time); local s12 = sel_has(r.__item_guid, 12)
-      reaper.ImGui_Selectable(ctx, (t12 ~= "" and t12 or " ") .. "##c12", s12)
-      if reaper.ImGui_IsItemClicked(ctx) then handle_cell_click(r.__item_guid, 12) end
-
-      -- 13 End
-      reaper.ImGui_TableNextColumn(ctx)
-      local t13 = format_time(r.end_time); local s13 = sel_has(r.__item_guid, 13)
-      reaper.ImGui_Selectable(ctx, (t13 ~= "" and t13 or " ") .. "##c13", s13)
-      if reaper.ImGui_IsItemClicked(ctx) then handle_cell_click(r.__item_guid, 13) end
-
-      reaper.ImGui_PopID(ctx)   -- 0.6.1
-
+      reaper.ImGui_PopID(ctx)
     end
 
     reaper.ImGui_EndTable(ctx)
