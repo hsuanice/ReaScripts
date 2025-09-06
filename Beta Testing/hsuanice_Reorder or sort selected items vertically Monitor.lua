@@ -1,6 +1,6 @@
 --[[
 @description Monitor - Reorder or sort selected items vertically
-@version 0.5.1 Change Mute State output to M or blan
+@version 0.5.2 compatibility for "1" or "M"
 @author hsuanice
 @about
   Shows a live table of the currently selected items and all sort-relevant fields:
@@ -38,6 +38,10 @@
 
 
 @changelog
+  v0.5.2
+  - Parser: Updated parse_snapshot_tsv() to accept both "M" and "1" as muted values in TSV input,
+            ensuring compatibility with exports from v0.5.1 and later (which use "M"/blank).
+  - No other functional changes; UI and exports remain identical to v0.5.1.
   v0.5.1
   - Export: Changed the Mute column in TSV/CSV exports to output "M" when muted and blank when unmuted (was previously 1/0).
   v0.5.0
@@ -590,7 +594,7 @@ function parse_snapshot_tsv(text)
         meta_trk_name= cols[6] or "",
         channel_num  = tonumber(cols[7]) or nil,
         interleave   = tonumber(cols[8]) or nil,
-        muted        = (cols[9] == "1"),
+        muted = (cols[9] == "1" or cols[9] == "M"),
         color_hex    = cols[10] or "",
         start_time   = tonumber(cols[11]) or 0,
         end_time     = tonumber(cols[12]) or 0,
