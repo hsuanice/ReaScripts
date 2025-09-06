@@ -1,6 +1,6 @@
 --[[
 @description Monitor - Reorder or sort selected items vertically
-@version 0.4.4.2
+@version 0.5.0 Add Item Note view
 @author hsuanice
 @about
   Shows a live table of the currently selected items and all sort-relevant fields:
@@ -38,6 +38,9 @@
 
 
 @changelog
+  v0.5.0
+  - NEW: Inserted "Item Note" column (between Take Name and Source File) across UI and TSV/CSV exports.
+  - Compat (optional): Snapshot TSV parser now accepts both legacy 12-column and new 13-column formats.
   v0.4.4.2
     - Fix: ESC on main window not working — removed a duplicate ImGui_CreateContext/ctx block that shadowed the real context; unified to a single context so esc_pressed() and the window share the same ctx.
     - Behavior: Summary ESC closes only the popup; when no popup is open, ESC closes the main window.
@@ -443,6 +446,7 @@ local function collect_fields_for_item(item)
   -- File/take from fields
   row.file_name  = f.srcfile or ""
   row.take_name  = f.curtake or ""
+  row.item_note  = f.curnote or ""   -- NEW (0.5.0)
 
   -- Interleave & meta name/chan（Library）
   local idx = META.guess_interleave_index(item, f) or f.__chan_index or 1
@@ -616,7 +620,7 @@ local function build_table_text(fmt, rows)
 
   -- header（加入 Mute / ColorHex）
   out[#out+1] = table.concat({
-    "#","TrackIdx","TrackName","TakeName","Source File",
+    "#","TrackIdx","TrackName","TakeName","ItemNote","Source File",
     "MetaTrackName","Channel#","Interleave","Mute","ColorHex","StartTime","EndTime"
   }, sep)
 
@@ -627,6 +631,7 @@ local function build_table_text(fmt, rows)
       esc(r.track_idx),
       esc(r.track_name),
       esc(r.take_name),
+      esc(r.item_note or ""), -- NEW (0.5.0)
       esc(r.file_name),
       esc(r.meta_trk_name),
       esc(r.channel_num or ""),
@@ -744,11 +749,12 @@ end
 
 local function draw_table(rows, height)
   local flags = TF('ImGui_TableFlags_Borders') | TF('ImGui_TableFlags_RowBg') | TF('ImGui_TableFlags_SizingStretchProp')
-  if reaper.ImGui_BeginTable(ctx, "live_table", 12, flags, -FLT_MIN, height or 360) then
+  if reaper.ImGui_BeginTable(ctx, "live_table", 13, flags, -FLT_MIN, height or 360) then
     reaper.ImGui_TableSetupColumn(ctx, "#", TF('ImGui_TableColumnFlags_WidthFixed'), 36)
     reaper.ImGui_TableSetupColumn(ctx, "TrackIdx", TF('ImGui_TableColumnFlags_WidthFixed'), 45)
     reaper.ImGui_TableSetupColumn(ctx, "Track Name")
     reaper.ImGui_TableSetupColumn(ctx, "Take Name")
+    reaper.ImGui_TableSetupColumn(ctx, "Item Note")   -- NEW (0.5.0)
     reaper.ImGui_TableSetupColumn(ctx, "Source File")
     reaper.ImGui_TableSetupColumn(ctx, "Meta Track Name")
     reaper.ImGui_TableSetupColumn(ctx, "Chan#", TF('ImGui_TableColumnFlags_WidthFixed'), 36)
@@ -767,6 +773,7 @@ local function draw_table(rows, height)
       reaper.ImGui_TableNextColumn(ctx); reaper.ImGui_Text(ctx, tostring(r.track_idx or ""))
       reaper.ImGui_TableNextColumn(ctx); reaper.ImGui_TextWrapped(ctx, tostring(r.track_name or ""))
       reaper.ImGui_TableNextColumn(ctx); reaper.ImGui_TextWrapped(ctx, tostring(r.take_name or ""))
+      reaper.ImGui_TableNextColumn(ctx); reaper.ImGui_TextWrapped(ctx, tostring(r.item_note or "")) -- NEW (0.5.0)      
       reaper.ImGui_TableNextColumn(ctx); reaper.ImGui_TextWrapped(ctx, tostring(r.file_name or ""))
       reaper.ImGui_TableNextColumn(ctx); reaper.ImGui_TextWrapped(ctx, tostring(r.meta_trk_name or ""))
       reaper.ImGui_TableNextColumn(ctx); reaper.ImGui_Text(ctx, tostring(r.channel_num or ""))
