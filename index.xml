@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<index version="1" name="hsuanice Scripts" commit="2aaa45bdc7bc767e06bcbf1df33b292b2f146dcf">
+<index version="1" name="hsuanice Scripts" commit="44fc314d3f84a3bff6b90d1b14f3072e53401710">
   <category name="Beta Testing">
     <reapack name="hsuanice_BWF TimeReference Embed Tool.lua" type="script" desc="Embed BWF TimeReference to Active take from Take 1 or Current Position TC">
       <version name="0.7.1" author="hsuanice" time="2025-08-14T17:52:57Z">
@@ -792,6 +792,9 @@
       </version>
       <version name="0.7.1 Fix Copy and Save to text column order but Copy and Shift Select broken" author="hsuanice" time="2025-09-06T23:44:34Z">
         <source main="main">https://github.com/hsuanice/ReaScripts/raw/2aaa45bdc7bc767e06bcbf1df33b292b2f146dcf/Beta%20Testing/hsuanice_Reorder%20or%20sort%20selected%20items%20vertically%20Monitor.lua</source>
+      </version>
+      <version name="0.7.1.1 Fix: Copy (Cmd/Ctrl+C) and Shift-rectangle selection could error" author="hsuanice" time="2025-09-06T23:57:35Z">
+        <source main="main">https://github.com/hsuanice/ReaScripts/raw/44fc314d3f84a3bff6b90d1b14f3072e53401710/Beta%20Testing/hsuanice_Reorder%20or%20sort%20selected%20items%20vertically%20Monitor.lua</source>
       </version>
     </reapack>
     <reapack name="hsuanice_Reorder or sort selected items vertically.lua" type="script" desc="ReaImGui - Vertical Reorder and Sort (items)">
