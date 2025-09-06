@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<index version="1" name="hsuanice Scripts" commit="c87f00151ca186cf372cb25e767a9dd6c82fc9ef">
+<index version="1" name="hsuanice Scripts" commit="5941f1bda17effa38a0543d8ad27c28e19aeb4fc">
   <category name="Beta Testing">
     <reapack name="hsuanice_BWF TimeReference Embed Tool.lua" type="script" desc="Embed BWF TimeReference to Active take from Take 1 or Current Position TC">
       <version name="0.7.1" author="hsuanice" time="2025-08-14T17:52:57Z">
@@ -765,6 +765,9 @@
       </version>
       <version name="0.6.7 Add Delete fuction for table" author="hsuanice" time="2025-09-06T11:58:19Z">
         <source main="main">https://github.com/hsuanice/ReaScripts/raw/c87f00151ca186cf372cb25e767a9dd6c82fc9ef/Beta%20Testing/hsuanice_Reorder%20or%20sort%20selected%20items%20vertically%20Monitor.lua</source>
+      </version>
+      <version name="0.6.8 Add undo/redo, need undo preference set with item selection" author="hsuanice" time="2025-09-06T13:38:40Z">
+        <source main="main">https://github.com/hsuanice/ReaScripts/raw/5941f1bda17effa38a0543d8ad27c28e19aeb4fc/Beta%20Testing/hsuanice_Reorder%20or%20sort%20selected%20items%20vertically%20Monitor.lua</source>
       </version>
     </reapack>
     <reapack name="hsuanice_Reorder or sort selected items vertically.lua" type="script" desc="ReaImGui - Vertical Reorder and Sort (items)">
