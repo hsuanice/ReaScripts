@@ -1,6 +1,6 @@
 --[[
 @description Monitor - Reorder or sort selected items vertically
-@version 0.6.7 Add Delete fuction for table
+@version 0.6.8 Add undo/redo, need undo preference set with item selection
 @author hsuanice
 @about
   Shows a live table of the currently selected items and all sort-relevant fields:
@@ -37,7 +37,18 @@
 
 
 
+
 @changelog
+  v0.6.8
+  - Shortcuts: Undo (Cmd/Ctrl+Z) and Redo (Cmd/Ctrl+Shift+Z or Cmd/Ctrl+Y).
+  - All write operations already create undo points:
+  - Inline edits (Track / Take / Item Note) — one undo per commit.
+  - Paste (block) — one undo per paste.
+  - Delete (clear selected cell text) — one undo per delete.
+  - The table refreshes immediately after Undo/Redo to stay in sync.
+  - Note: For predictable selection behavior during Undo/Redo, enable:
+    “Preferences → General → Undo → Include selection: item”.
+
   v0.6.7
   - New: Delete clears text in the selected cells (Live view only).
     • Writable columns: Track Name, Take Name, Item Note.
@@ -1539,9 +1550,25 @@ local function loop()
         delete_selected_cells()
       end
     end
+
+    -- Undo / Redo（專案層級；非編輯狀態才攔截）
+    do
+      local m = _mods()
+      if m.shortcut then
+        -- Redo：Cmd/Ctrl+Shift+Z 或 Cmd/Ctrl+Y（先判斷，避免 Shift+Z 被當成 Undo）
+        local redo_combo = (m.shift and reaper.ImGui_IsKeyPressed(ctx, reaper.ImGui_Key_Z(), false))
+                        or reaper.ImGui_IsKeyPressed(ctx, reaper.ImGui_Key_Y(), false)
+        if redo_combo then
+          reaper.Undo_DoRedo2(0)
+          refresh_now()
+        elseif reaper.ImGui_IsKeyPressed(ctx, reaper.ImGui_Key_Z(), false) then
+          -- Undo：Cmd/Ctrl+Z
+          reaper.Undo_DoUndo2(0)
+          refresh_now()
+        end
+      end
+    end
   end
-
-
 
   reaper.ImGui_End(ctx)
 
