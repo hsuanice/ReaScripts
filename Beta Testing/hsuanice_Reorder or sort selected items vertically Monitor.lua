@@ -40,10 +40,8 @@
 @changelog
   v0.5.1
   - Export: Changed the Mute column in TSV/CSV exports to output "M" when muted and blank when unmuted (was previously 1/0).
-  - Parser: For backward compatibility, parse_snapshot_tsv() now accepts both "1" and "M" as muted.
   v0.5.0
   - NEW: Inserted "Item Note" column (between Take Name and Source File) across UI and TSV/CSV exports.
-  - Compat (optional): Snapshot TSV parser now accepts both legacy 12-column and new 13-column formats.
   v0.4.4.2
     - Fix: ESC on main window not working — removed a duplicate ImGui_CreateContext/ctx block that shadowed the real context; unified to a single context so esc_pressed() and the window share the same ctx.
     - Behavior: Summary ESC closes only the popup; when no popup is open, ESC closes the main window.
