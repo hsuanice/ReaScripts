@@ -1,6 +1,6 @@
 --[[
 @description Monitor - Reorder or sort selected items vertically
-@version 0.6.10 Add Spill paste
+@version 0.6.11 Fill now support mullti-columns
 @author hsuanice
 @about
   Shows a live table of the currently selected items and all sort-relevant fields:
@@ -39,6 +39,15 @@
 
 
 @changelog
+  v0.6.11
+    - Paste: when the source is a single row spanning multiple columns (e.g., Take Name + Item Note),
+      pasting into a multi-row selection now “fills down” row-by-row, Excel-style.
+      • Each destination row receives the source row’s values left-to-right.
+      • No wrap: if a destination row has more selected columns than the source width, extras are left untouched.
+      • Still supports: single value → fill all; multi → single cell spill (0.6.10); multi → multi row-major mapping (0.6.9).
+    - Live view only; Track/Take/Item Note remain the only writable columns; others safely ignore writes.
+    - One undo per paste; undo/redo keeps your item selection (0.6.8.1).
+
   v0.6.10
     - Paste: multi-cell sources now “spill” from a single target cell, Excel-style.
       • If the source has multiple values but only one destination cell is selected,
@@ -1583,6 +1592,7 @@ local function loop()
       local tbl  = parse_clipboard_table(clip)
       local src  = flatten_tsv_to_list(tbl)
       if #src == 0 then goto PASTE_END end
+      local src_h, src_w = src_shape_dims(tbl)
 
       -- 目標格（行優先、左到右），包含所有被選欄；實際寫回僅 3/4/5
       local rows = ROWS
@@ -1619,25 +1629,44 @@ local function loop()
         end
       end
 
-      -- 一次 Undo：單值填滿；多值截斷；若只選 1 格則依來源形狀展開
+      -- 一次 Undo：單值填滿；多值截斷；若只選 1 格則依來源形狀展開；單列來源可往下填滿
       reaper.Undo_BeginBlock2(0)
 
       if #src == 1 then
         -- 單值填滿（跨欄位、非矩形都可）
         local v = src[1]
         for i=1, #dst do apply_cell(dst[i], v) end
+
       elseif #dst == 1 then
-        -- 來源多值、目標只選一格：依來源 2D 形狀向右、向下展開
-        local src_h, src_w = src_shape_dims(tbl)
+        -- 來源多值、目標只選一格：依來源 2D 形狀向右、向下展開（0.6.10）
         local anchor = dst[1]  -- 單一目標格描述（含 row_index/col）
         local dst2 = build_dst_by_anchor_and_shape(ROWS, anchor, src_h, src_w)
         local n = math.min(#src, #dst2)
         for k = 1, n do apply_cell(dst2[k], src[k]) end
+
+      elseif src_h == 1 then
+        -- 0.6.11：來源是「單一列、跨多欄」，目標選了多格（通常為多列相同欄）→ 往下填滿
+        -- 作法：把目標依 row 分組，每一列按欄順序貼上「來源該列的前 src_w 個值」（不循環）
+        local by_row = {}
+        for _, d in ipairs(dst) do
+          local t = by_row[d.row_index]; if not t then t = {}; by_row[d.row_index] = t end
+          t[#t+1] = d
+        end
+        for _, cells in pairs(by_row) do
+          table.sort(cells, function(a,b) return a.col < b.col end)
+          local m = math.min(#cells, src_w)
+          for j = 1, m do
+            local v = _trim((tbl[1] and tbl[1][j]) or "")
+            apply_cell(cells[j], v)
+          end
+        end
+
       else
-        -- 多對多：依 row-major 對應到 min(#src, #dst)
+        -- 多對多：依 row-major 對應到 min(#src, #dst)（0.6.9）
         local n = math.min(#src, #dst)
         for k=1, n do apply_cell(dst[k], src[k]) end
       end
+
       reaper.Undo_EndBlock2(0, "[Monitor] Paste", -1)
 
       reaper.UpdateArrange()
