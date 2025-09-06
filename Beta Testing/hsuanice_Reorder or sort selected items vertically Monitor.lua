@@ -1,6 +1,6 @@
 --[[
 @description Monitor - Reorder or sort selected items vertically
-@version 0.6.8.1 Undo ok without preference setting to item selection
+@version 0.6.9 Paste Now more like Excel
 @author hsuanice
 @about
   Shows a live table of the currently selected items and all sort-relevant fields:
@@ -39,39 +39,48 @@
 
 
 @changelog
+  v0.6.9
+    - Paste behavior now matches spreadsheet intuition:
+      • Single source value fills all selected cells.
+      • Multiple source values map to selected cells in row-major order, truncating if destination is larger (no wrap).
+      • Selection can be non-rectangular; shape does not need to match.
+    - Writable columns remain Track Name / Take Name / Item Note; other columns accept paste but are ignored safely.
+    - Live view only; Snapshots stay read-only. One undo per paste; table refreshes after paste.
+    - If no cell is selected when pasting, a message box prompts you to select cells first.
+
   v0.6.8.1
-- Undo/Redo selection protection (always on):
-  • When using table shortcuts (Cmd/Ctrl+Z, Cmd/Ctrl+Shift+Z or Cmd/Ctrl+Y),
-    the current item selection is snapshotted by GUID and restored after Undo/Redo.
-  • Works even if REAPER Preferences → Undo → “Include selection: item” is OFF.
-  • Live view refreshes right after to stay in sync.
+    - Undo/Redo selection protection (always on):
+      • When using table shortcuts (Cmd/Ctrl+Z, Cmd/Ctrl+Shift+Z or Cmd/Ctrl+Y),
+        the current item selection is snapshotted by GUID and restored after Undo/Redo.
+      • Works even if REAPER Preferences → Undo → “Include selection: item” is OFF.
+      • Live view refreshes right after to stay in sync.
   v0.6.8
-  - Shortcuts: Undo (Cmd/Ctrl+Z) and Redo (Cmd/Ctrl+Shift+Z or Cmd/Ctrl+Y).
-  - All write operations already create undo points:
-  - Inline edits (Track / Take / Item Note) — one undo per commit.
-  - Paste (block) — one undo per paste.
-  - Delete (clear selected cell text) — one undo per delete.
-  - The table refreshes immediately after Undo/Redo to stay in sync.
-  - Note: For predictable selection behavior during Undo/Redo, enable:
-    “Preferences → General → Undo → Include selection: item”.
+    - Shortcuts: Undo (Cmd/Ctrl+Z) and Redo (Cmd/Ctrl+Shift+Z or Cmd/Ctrl+Y).
+    - All write operations already create undo points:
+    - Inline edits (Track / Take / Item Note) — one undo per commit.
+    - Paste (block) — one undo per paste.
+    - Delete (clear selected cell text) — one undo per delete.
+    - The table refreshes immediately after Undo/Redo to stay in sync.
+    - Note: For predictable selection behavior during Undo/Redo, enable:
+      “Preferences → General → Undo → Include selection: item”.
 
   v0.6.7
-  - New: Delete clears text in the selected cells (Live view only).
-    • Writable columns: Track Name, Take Name, Item Note.
-    • Non-writable columns are ignored.
-    • Works with single cell, Cmd/Ctrl multi-select, and Shift rectangular selection.
-    • One Undo block; table refreshes after deletion.
+    - New: Delete clears text in the selected cells (Live view only).
+      • Writable columns: Track Name, Take Name, Item Note.
+      • Non-writable columns are ignored.
+      • Works with single cell, Cmd/Ctrl multi-select, and Shift rectangular selection.
+      • One Undo block; table refreshes after deletion.
 
   v0.6.6 — fix click anchor
-  - Fix: Shift+click rectangular selection didn’t work after a plain click.
-    • Root cause: the code set SEL.anchor and then immediately cleared it via sel_clear(),
-      both in handle_cell_click() and in the first-time branch of sel_rect_apply().
-    • Change: clear selected cells first, then set the anchor; and on first Shift action,
-      keep the anchor (reset only SEL.cells).
-  - Result: Single-click sets the anchor; Shift+click extends a rectangle from that anchor;
-    Cmd/Ctrl+click toggles cells without touching the anchor.
-  - No behavior changes to editing (double-click to edit), copy, or paste rules
-    (paste still Live-only and only for Track/Take/Item Note).
+    - Fix: Shift+click rectangular selection didn’t work after a plain click.
+      • Root cause: the code set SEL.anchor and then immediately cleared it via sel_clear(),
+        both in handle_cell_click() and in the first-time branch of sel_rect_apply().
+      • Change: clear selected cells first, then set the anchor; and on first Shift action,
+        keep the anchor (reset only SEL.cells).
+    - Result: Single-click sets the anchor; Shift+click extends a rectangle from that anchor;
+      Cmd/Ctrl+click toggles cells without touching the anchor.
+    - No behavior changes to editing (double-click to edit), copy, or paste rules
+      (paste still Live-only and only for Track/Take/Item Note).
   v0.6.5
     - Make First and Second columns selectable
   v0.6.4
@@ -329,6 +338,8 @@ local TIME_MODE, CUSTOM_PATTERN, FORMAT, AUTO
 local scan_selection_rows
 local parse_snapshot_tsv   -- ← 先宣告
 local refresh_now          -- ← 新增：先宣告 refresh_now，讓上面函式抓到 local
+local _trim               -- ← 新增：先宣告 _trim，供前面函式當作同一個 local 來引用
+
 
 
 -- === Preferences (persist across runs) ===
@@ -765,6 +776,39 @@ local function parse_clipboard_table(text)
   return rows
 end
 
+-- 扁平化來源：把剪貼簿解析結果 (2D) 依「行優先、左到右」展開成一維
+local function flatten_tsv_to_list(tbl)
+  local list = {}
+  for i = 1, #tbl do
+    local row = tbl[i]
+    for j = 1, #row do
+      list[#list+1] = _trim(row[j] or "")
+    end
+  end
+  return list
+end
+
+-- 依「行優先、左到右」取得目前選取的目標格（含所有欄；真正寫回只在 3/4/5 欄）
+local function build_dst_list_from_selection(rows)
+  local rim = build_row_index_map(rows)
+  local dst = {}
+  for key,_ in pairs(SEL.cells or {}) do
+    local g, cstr = key:match("^(.-):(%d+)$")
+    local col = tonumber(cstr)
+    local ri = rim[g]
+    if ri and col then
+      dst[#dst+1] = { row_index = ri, col = col, row = rows[ri] }
+    end
+  end
+  table.sort(dst, function(a,b)
+    if a.row_index ~= b.row_index then return a.row_index < b.row_index end
+    return a.col < b.col
+  end)
+  return dst
+end
+
+
+
 -- === Undo/Redo 選取保護（以 GUID 快照） ===
 local function _snapshot_selected_item_guids()
   local list = {}
@@ -876,7 +920,7 @@ end
 
 local COL = { TRACK_NAME = 3, TAKE_NAME = 4, ITEM_NOTE = 5 } -- 以表頭順序為準（#、TrackIdx、Track Name、Take Name、Item Note、Source File...）
 
-local function _trim(s)
+function _trim(s)
   s = tostring(s or "")
   return (s:gsub("^%s+", ""):gsub("%s+$", ""))
 end
@@ -1485,97 +1529,71 @@ local function loop()
       copy_selection(rows, rim)
     end
 
-    -- Paste (Live only)
+    -- Paste（Live only，Excel 風規則）
     if TABLE_SOURCE == "live" and shortcut_pressed(reaper.ImGui_Key_V()) then
-      local clip = reaper.ImGui_GetClipboardText(ctx) or ""
-      local tbl  = parse_clipboard_table(clip)
-      -- 決定貼上起點：若有矩形選取，用其左上角；若只有單格，用該格
-      local rows = ROWS
-      local rim  = build_row_index_map(rows)
-
-      -- 找選取矩形左上角
-      local minr, minc = math.huge, math.huge
-      for k,_ in pairs(SEL.cells) do
-        local g,c = k:match("^(.-):(%d+)$"); c = tonumber(c)
-        local ri  = rim[g]
-        if ri and c then
-          if ri < minr then minr = ri end
-          if c  < minc then minc = c  end
-        end
-      end
-      if minr == math.huge then
-        -- 沒有選取，則以可見表格第一列第3欄當起點（Track Name）
-        minr, minc = 1, 3
-      end
-
-      -- 僅接受 1x1 或 與選區等大的矩形；否則拒絕（之後可擴充）
-      local H = #tbl
-      local W = (H>0) and #tbl[1] or 0
-      if H == 0 or W == 0 then goto PASTE_END end
-
-      -- 計算選區寬高（若有選區）
-      local maxr, maxc = minr, minc
-      for k,_ in pairs(SEL.cells) do
-        local g,c = k:match("^(.-):(%d+)$"); c = tonumber(c)
-        local ri  = rim[g]
-        if ri and c then
-          if ri > maxr then maxr = ri end
-          if c  > maxc then maxc = c  end
-        end
-      end
-      local selH = (maxr - minr + 1)
-      local selW = (maxc - minc + 1)
-
-      if not ((H==1 and W==1) or (selH == H and selW == W)) then
-        -- 尺寸不相符：不貼
+      -- 檢查是否有選取
+      if not SEL or not SEL.cells or next(SEL.cells) == nil then
+        reaper.ShowMessageBox("沒有選取任何格子。請先選取要貼上的目標格。", "貼上", 0)
         goto PASTE_END
       end
 
-      -- 進入批次模式（一次 Undo）
-      bulk_begin()
-      reaper.Undo_BeginBlock2(0)
+      -- 解析剪貼簿 → 扁平化來源
+      local clip = reaper.ImGui_GetClipboardText(ctx) or ""
+      local tbl  = parse_clipboard_table(clip)
+      local src  = flatten_tsv_to_list(tbl)
+      if #src == 0 then goto PASTE_END end
 
-      local tracks_renamed, takes_named, notes_set = 0,0,0
-      local takes_created = 0
+      -- 目標格（行優先、左到右），包含所有被選欄；實際寫回僅 3/4/5
+      local rows = ROWS
+      local dst  = build_dst_list_from_selection(rows)
+      if #dst == 0 then goto PASTE_END end
 
-      for dy=0,H-1 do
-        for dx=0,W-1 do
-          local target_col = minc + dx
-          local row        = rows[minr + dy]
-          if row then
-            local val = _trim(tbl[dy+1][dx+1] or "")
-            if target_col == 3 then
-              if row.__track and val ~= row.track_name then
-                reaper.GetSetMediaTrackInfo_String(row.__track, "P_NAME", val, true)
-                row.track_name = val
-                tracks_renamed = tracks_renamed + 1
-              end
-            elseif target_col == 4 then
-              local tk = row.__take
-              if not tk then
-                -- 自動建立空 take 再命名
-                tk = reaper.AddTakeToMediaItem(row.__item)
-                row.__take = tk
-                takes_created = takes_created + 1
-              end
-              if tk and val ~= row.take_name then
-                reaper.GetSetMediaItemTakeInfo_String(tk, "P_NAME", val, true)
-                row.take_name = val
-                takes_named = takes_named + 1
-              end
-            elseif target_col == 5 then
-              if val ~= row.item_note then
-                reaper.GetSetMediaItemInfo_String(row.__item, "P_NOTES", val, true)
-                row.item_note = val
-                notes_set = notes_set + 1
-              end
-            end
+      -- 寫入工具：只在 3/4/5 欄動作
+      local tracks_renamed, takes_named, notes_set, takes_created, skipped = 0,0,0,0,0
+      local function apply_cell(d, val)
+        local r, col = d.row, d.col
+        if not r then skipped = skipped + 1; return end
+        if col == 3 then
+          if r.__track and val ~= r.track_name then
+            reaper.GetSetMediaTrackInfo_String(r.__track, "P_NAME", val, true)
+            r.track_name = val; tracks_renamed = tracks_renamed + 1
           end
+        elseif col == 4 then
+          local tk = r.__take
+          if not tk then
+            tk = reaper.AddTakeToMediaItem(r.__item); r.__take = tk; takes_created = takes_created + 1
+          end
+          if tk and val ~= r.take_name then
+            reaper.GetSetMediaItemTakeInfo_String(tk, "P_NAME", val, true)
+            r.take_name = val; takes_named = takes_named + 1
+          end
+        elseif col == 5 then
+          if val ~= r.item_note then
+            reaper.GetSetMediaItemInfo_String(r.__item, "P_NOTES", val, true)
+            r.item_note = val; notes_set = notes_set + 1
+          end
+        else
+          -- 非可寫欄：接受但不寫
+          skipped = skipped + 1
         end
       end
 
+      -- 一次 Undo：單值填滿；多值截斷
+      reaper.Undo_BeginBlock2(0)
+      if #src == 1 then
+        local v = src[1]
+        for i=1, #dst do apply_cell(dst[i], v) end
+      else
+        local n = math.min(#src, #dst)
+        for k=1, n do apply_cell(dst[k], src[k]) end
+      end
       reaper.Undo_EndBlock2(0, "[Monitor] Paste", -1)
-      bulk_end(function() refresh_now() end)
+      reaper.UpdateArrange()
+      refresh_now()
+
+      --（可選）你若有狀態列，可顯示摘要；沒有就略過
+      -- status(string.format("Paste: trk=%d, take=%d (+%d), note=%d, skipped=%d",
+      --   tracks_renamed, takes_named, takes_created, notes_set, skipped))
 
       ::PASTE_END::
     end
