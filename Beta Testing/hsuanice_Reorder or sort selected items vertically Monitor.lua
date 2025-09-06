@@ -1,6 +1,6 @@
 --[[
 @description Monitor - Reorder or sort selected items vertically
-@version 0.6.5 First and Second column selectable
+@version 0.6.6 fix click anchor shift click select ok
 @author hsuanice
 @about
   Shows a live table of the currently selected items and all sort-relevant fields:
@@ -38,6 +38,16 @@
 
 
 @changelog
+  v0.6.6 — fix click anchor
+  - Fix: Shift+click rectangular selection didn’t work after a plain click.
+    • Root cause: the code set SEL.anchor and then immediately cleared it via sel_clear(),
+      both in handle_cell_click() and in the first-time branch of sel_rect_apply().
+    • Change: clear selected cells first, then set the anchor; and on first Shift action,
+      keep the anchor (reset only SEL.cells).
+  - Result: Single-click sets the anchor; Shift+click extends a rectangle from that anchor;
+    Cmd/Ctrl+click toggles cells without touching the anchor.
+  - No behavior changes to editing (double-click to edit), copy, or paste rules
+    (paste still Live-only and only for Track/Take/Item Note).
   v0.6.5
     - Make First and Second columns selectable
   v0.6.4
@@ -637,7 +647,8 @@ end
 local function sel_rect_apply(rows, row_index_map, cur_guid, cur_col)
   if not (SEL.anchor and SEL.anchor.guid and SEL.anchor.col) then
     SEL.anchor = { guid = cur_guid, col = cur_col }
-    sel_clear(); sel_add(cur_guid, cur_col)
+    -- 只清已選的 cells，不要清掉 anchor
+    SEL.cells = {}; sel_add(cur_guid, cur_col)
     return
   end
   SEL.cells = {}
@@ -1069,9 +1080,9 @@ local function draw_table(rows, height)
         if not SEL.anchor then SEL.anchor = { guid = guid, col = col } end
         sel_toggle(guid, col)
       else
-        -- 設新錨點 + 清空再選單格
-        SEL.anchor = { guid = guid, col = col }
+        -- 清空已選 → 設新錨點 → 選單格（避免把剛設的 anchor 清掉）
         sel_clear()
+        SEL.anchor = { guid = guid, col = col }
         sel_add(guid, col)
       end
     end
