@@ -1,6 +1,6 @@
 --[[
 @description Monitor - Reorder or sort selected items vertically
-@version 0.5.0 Add Item Note view
+@version 0.5.1 Change Mute State output to M or blan
 @author hsuanice
 @about
   Shows a live table of the currently selected items and all sort-relevant fields:
@@ -38,6 +38,9 @@
 
 
 @changelog
+  v0.5.1
+  - Export: Changed the Mute column in TSV/CSV exports to output "M" when muted and blank when unmuted (was previously 1/0).
+  - Parser: For backward compatibility, parse_snapshot_tsv() now accepts both "1" and "M" as muted.
   v0.5.0
   - NEW: Inserted "Item Note" column (between Take Name and Source File) across UI and TSV/CSV exports.
   - Compat (optional): Snapshot TSV parser now accepts both legacy 12-column and new 13-column formats.
@@ -636,7 +639,7 @@ local function build_table_text(fmt, rows)
       esc(r.meta_trk_name),
       esc(r.channel_num or ""),
       esc(r.interleave or ""),
-      esc(r.muted and "1" or "0"),
+      esc(r.muted and "M" or ""),   -- 0.5.1: export M/blank
       esc(r.color_hex or ""),
       esc(format_time(r.start_time)),
       esc(format_time(r.end_time)),
