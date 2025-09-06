@@ -88,7 +88,7 @@ local r = reaper
 --------------------------------------------------------------------------------
 -- Crossfade length unit (v0.4.0)
 CF_UNIT        = "frames"            -- "seconds" | "frames" | "grid"
-CF_VALUE       = 2               -- 若 seconds=秒；frames=影格數；grid=幾個 grid 單位
+CF_VALUE       = 1               -- 若 seconds=秒；frames=影格數；grid=幾個 grid 單位
 CF_GRID_REF    = "left"            -- 以哪個時間點換算 grid 長度："left"|"center"|"right"（建議 left）
 
 
