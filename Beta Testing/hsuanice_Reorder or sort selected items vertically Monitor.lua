@@ -1,6 +1,6 @@
 --[[
 @description Monitor - Reorder or sort selected items vertically
-@version 0.6.3 switch to adjustable fixed-width columns
+@version 0.6.4 Table Single Click Copy and Paste ok
 @author hsuanice
 @about
   Shows a live table of the currently selected items and all sort-relevant fields:
@@ -38,6 +38,17 @@
 
 
 @changelog
+  v0.6.4
+    - Excel-like selection & clipboard:
+        • Click selects a cell; Shift+click selects a rectangular range; Cmd/Ctrl+click toggles noncontiguous cells.
+        • Cmd/Ctrl+C copies the selection as TSV (tab/newline delimited).
+        • Cmd/Ctrl+V pastes into the Live view: 1×1 fills the selection; shape-matched blocks paste 1:1.
+    - Writable columns (Live only): Track Name, Take Name, Item Note.
+        • Track names apply strictly by Track object (GUID) — never by text, so identically named tracks are unaffected.
+        • Take names auto-create an empty take if missing; Item Notes write to P_NOTES.
+    - Safety & UX: one Undo block per paste; auto-refresh pauses during edit/paste and resumes after; clear, predictable behavior.
+    - Snapshots: copy allowed; paste is disabled by design.
+
   v0.6.3
     - Table layout: switched to fixed-width columns with horizontal scrolling (no more squeezing).
     - Set practical default widths for all columns; key edit fields (Track/Take/Item Note) stay readable.
@@ -578,6 +589,155 @@ FORMAT = TFLib.make_formatter(TIME_MODE, {decimals=3})
 
 -- === Inline edit state ===
 local EDIT = { row = nil, col = nil, buf = "", want_focus = false }
+
+-- === Selection model (Excel-like) & clipboard ===
+local SEL = {
+  cells = {},            -- set: ["<item_guid>:<col>"]=true
+  anchor = nil,          -- { guid = "...", col = N }
+}
+local function _cell_key(guid, col) return (guid or "") .. ":" .. tostring(col or "") end
+local function sel_clear() SEL.cells = {}; SEL.anchor = nil end
+local function sel_has(guid, col) return SEL.cells[_cell_key(guid, col)] == true end
+local function sel_add(guid, col) SEL.cells[_cell_key(guid, col)] = true end
+local function sel_toggle(guid, col)
+  local k = _cell_key(guid, col)
+  SEL.cells[k] = not SEL.cells[k] or nil
+end
+
+-- 取得目前是否按住 CmdOrCtrl / Shift
+local function _mods()
+  local mods = reaper.ImGui_GetKeyMods(ctx)
+  local has = function(mask) return (mask ~= 0) and ((mods & mask) ~= 0) end
+  local M = {
+    ctrl  = has(reaper.ImGui_Mod_Ctrl and reaper.ImGui_Mod_Ctrl() or 0),
+    super = has(reaper.ImGui_Mod_Super and reaper.ImGui_Mod_Super() or 0),
+    shift = has(reaper.ImGui_Mod_Shift and reaper.ImGui_Mod_Shift() or 0),
+    alt   = has(reaper.ImGui_Mod_Alt and reaper.ImGui_Mod_Alt() or 0),
+  }
+  M.shortcut = has(reaper.ImGui_Mod_Shortcut and reaper.ImGui_Mod_Shortcut() or 0) or M.ctrl or M.super
+  return M
+end
+local function shortcut_pressed(key_const)
+  local m = _mods()
+  return m.shortcut and reaper.ImGui_IsKeyPressed(ctx, key_const, false)
+end
+
+-- 由 rows 建立 rowIndex 對照（以 item_guid 為鍵）
+local function build_row_index_map(rows)
+  local map = {}
+  for i, rr in ipairs(rows or {}) do
+    map[rr.__item_guid or ("row"..i)] = i
+  end
+  return map
+end
+
+-- 計算矩形選取（anchor 與目前 guid,col 之間）
+local function sel_rect_apply(rows, row_index_map, cur_guid, cur_col)
+  if not (SEL.anchor and SEL.anchor.guid and SEL.anchor.col) then
+    SEL.anchor = { guid = cur_guid, col = cur_col }
+    sel_clear(); sel_add(cur_guid, cur_col)
+    return
+  end
+  SEL.cells = {}
+  local a_idx = row_index_map[SEL.anchor.guid] or 1
+  local b_idx = row_index_map[cur_guid] or a_idx
+  local r1, r2 = math.min(a_idx, b_idx), math.max(a_idx, b_idx)
+  local c1, c2 = math.min(SEL.anchor.col, cur_col), math.max(SEL.anchor.col, cur_col)
+  for i = r1, r2 do
+    local g = rows[i].__item_guid
+    for c = c1, c2 do sel_add(g, c) end
+  end
+end
+
+-- 取得某格「顯示用文字」（複製用；與 UI 呈現一致）
+local function get_cell_text(i, r, col, fmt)
+  if     col == 1  then return tostring(i)
+  elseif col == 2  then return tostring(r.track_idx or "")
+  elseif col == 3  then return tostring(r.track_name or "")
+  elseif col == 4  then return tostring(r.take_name or "")
+  elseif col == 5  then return tostring(r.item_note or "")
+  elseif col == 6  then return tostring(r.file_name or "")
+  elseif col == 7  then return tostring(r.meta_trk_name or "")
+  elseif col == 8  then return tostring(r.channel_num or "")
+  elseif col == 9  then return tostring(r.interleave or "")
+  elseif col == 10 then return r.muted and "M" or ""
+  elseif col == 11 then return tostring(r.color_hex or "")
+  elseif col == 12 then return FORMAT(r.start_time)
+  elseif col == 13 then return FORMAT(r.end_time)
+  end
+  return ""
+end
+
+-- 複製目前選取到剪貼簿（TSV）
+local function copy_selection(rows, row_index_map)
+  -- 找出被選的所有 (row,col)，並計算最小包圍矩形
+  local minr, maxr, minc, maxc = math.huge, -math.huge, math.huge, -math.huge
+  local selected = {}
+  for guid_col, _ in pairs(SEL.cells) do
+    local g, c = guid_col:match("^(.-):(%d+)$")
+    local rowi = row_index_map[g]
+    local col  = tonumber(c)
+    if rowi and col then
+      selected[#selected+1] = {row=rowi, col=col}
+      if rowi < minr then minr = rowi end
+      if rowi > maxr then maxr = rowi end
+      if col  < minc then minc = col  end
+      if col  > maxc then maxc = col  end
+    end
+  end
+  if #selected == 0 then return end
+  local out = {}
+  for i=minr, maxr do
+    local r = rows[i]
+    local line = {}
+    for c=minc, maxc do
+      if sel_has(r.__item_guid, c) then
+        line[#line+1] = get_cell_text(i, r, c)
+      else
+        line[#line+1] = ""
+      end
+    end
+    out[#out+1] = table.concat(line, "\t")
+  end
+  reaper.ImGui_SetClipboardText(ctx, table.concat(out, "\n"))
+end
+
+-- 解析剪貼簿文字成 2D 陣列（TSV / 簡單 CSV）
+local function parse_clipboard_table(text)
+  text = tostring(text or "")
+  if text == "" then return {} end
+  local rows = {}
+  text = text:gsub("\r\n", "\n"):gsub("\r", "\n")
+  for line in (text.."\n"):gmatch("([^\n]*)\n") do
+    if line == "" then
+      rows[#rows+1] = {""}
+    else
+      local cols = {}
+      -- 先試 TSV
+      for c in (line.."\t"):gmatch("([^\t]*)\t") do cols[#cols+1] = c end
+      -- 若只有 1 欄且含逗號，視為簡單 CSV
+      if #cols == 1 and line:find(",") then
+        cols = {}
+        for c in (line..","):gmatch("([^,]*),") do cols[#cols+1] = (c or ""):gsub('^"(.*)"$','%1'):gsub('""','"') end
+      end
+      rows[#rows+1] = cols
+    end
+  end
+  return rows
+end
+
+-- Bulk-commit（一次 Undo、最後再 UpdateArrange/Refresh）
+local BULK = false
+local function bulk_begin() BULK = true end
+local function bulk_end(refresh_cb)
+  BULK = false
+  reaper.UpdateArrange()
+  if type(refresh_cb) == "function" then refresh_cb() end
+end
+
+
+
+
 local COL = { TRACK_NAME = 3, TAKE_NAME = 4, ITEM_NOTE = 5 } -- 以表頭順序為準（#、TrackIdx、Track Name、Take Name、Item Note、Source File...）
 
 local function _trim(s)
@@ -589,10 +749,14 @@ local function _commit_if_changed(label, oldv, newv, fn_apply)
   newv = _trim(newv or "")
   oldv = tostring(oldv or "")
   if newv == oldv then return false end
-  reaper.Undo_BeginBlock2(0)
-  fn_apply(newv)
-  reaper.Undo_EndBlock2(0, "[Monitor] "..label, -1)
-  reaper.UpdateArrange()
+  if BULK then
+    fn_apply(newv)
+  else
+    reaper.Undo_BeginBlock2(0)
+    fn_apply(newv)
+    reaper.Undo_EndBlock2(0, "[Monitor] "..label, -1)
+    reaper.UpdateArrange()
+  end
   return true
 end
 
@@ -890,24 +1054,49 @@ local function draw_table(rows, height)
 
     reaper.ImGui_TableHeadersRow(ctx)
 
+        -- Build row-index map for selection math
+    local row_index_map = build_row_index_map(rows)
+
+    -- 點擊單一格的統一處理：單擊＝選取；Shift＝矩形；Cmd/Ctrl＝增減
+    local function handle_cell_click(guid, col)
+      local m = _mods()
+      if m.shift and SEL.anchor then
+        sel_rect_apply(rows, row_index_map, guid, col)
+      elseif m.shortcut then
+        -- 切換單格
+        if not SEL.anchor then SEL.anchor = { guid = guid, col = col } end
+        sel_toggle(guid, col)
+      else
+        -- 設新錨點 + 清空再選單格
+        SEL.anchor = { guid = guid, col = col }
+        sel_clear()
+        sel_add(guid, col)
+      end
+    end
+
+
     for i, r in ipairs(rows or {}) do
       reaper.ImGui_TableNextRow(ctx)
       reaper.ImGui_PushID(ctx, (r.__item_guid ~= "" and r.__item_guid) or tostring(i))    -- 0.6.1
       reaper.ImGui_TableNextColumn(ctx); reaper.ImGui_Text(ctx, tostring(i))
       reaper.ImGui_TableNextColumn(ctx); reaper.ImGui_Text(ctx, tostring(r.track_idx or ""))
 
-      -- Track Name（single-click select / double-click edit）
-      reaper.ImGui_TableNextColumn(ctx)
-      local track_txt = tostring(r.track_name or "")
-      local editing_trk = (EDIT and EDIT.row == r and EDIT.col == 3)
+        -- Track Name（click = select, double-click = edit）
+        reaper.ImGui_TableNextColumn(ctx)
+        local track_txt = tostring(r.track_name or "")
+        local editing_trk = (EDIT and EDIT.row == r and EDIT.col == 3)
+        local is_sel3 = sel_has(r.__item_guid, 3)
 
-      if not editing_trk then
-        -- 顯示模式：可單擊選取、雙擊進入編輯
-        reaper.ImGui_Selectable(ctx, (track_txt ~= "" and track_txt or " ") .. "##trk", false)
-        if reaper.ImGui_IsItemHovered(ctx) and reaper.ImGui_IsMouseDoubleClicked(ctx, 0) then
-          EDIT = { row = r, col = 3, buf = track_txt, want_focus = true }
-        end
-      else
+        if not editing_trk then
+          reaper.ImGui_Selectable(ctx, (track_txt ~= "" and track_txt or " ") .. "##trk", is_sel3)
+          if reaper.ImGui_IsItemClicked(ctx) then handle_cell_click(r.__item_guid, 3) end
+          if reaper.ImGui_IsItemHovered(ctx) and reaper.ImGui_IsMouseDoubleClicked(ctx, 0) then
+            if TABLE_SOURCE == "live" then
+              EDIT = { row = r, col = 3, buf = track_txt, want_focus = true }
+            end
+          end
+        else
+
         -- 編輯模式：只畫 InputText，確保鍵盤焦點在這格
         reaper.ImGui_SetNextItemWidth(ctx, -1)
         if EDIT.want_focus then
@@ -934,13 +1123,19 @@ local function draw_table(rows, height)
       reaper.ImGui_TableNextColumn(ctx)
       local take_txt = tostring(r.take_name or "")
       local editing_take = (EDIT and EDIT.row == r and EDIT.col == 4)
+      local is_sel4 = sel_has(r.__item_guid, 4)
 
       if not editing_take then
-        reaper.ImGui_Selectable(ctx, (take_txt ~= "" and take_txt or " ") .. "##take", false)
+        reaper.ImGui_Selectable(ctx, (take_txt ~= "" and take_txt or " ") .. "##take", is_sel4)
+        if reaper.ImGui_IsItemClicked(ctx) then handle_cell_click(r.__item_guid, 4) end
         if reaper.ImGui_IsItemHovered(ctx) and reaper.ImGui_IsMouseDoubleClicked(ctx, 0) then
-          EDIT = { row = r, col = 4, buf = take_txt, want_focus = true }
+          if TABLE_SOURCE == "live" then
+            EDIT = { row = r, col = 4, buf = take_txt, want_focus = true }
+          end
         end
       else
+
+        
         reaper.ImGui_SetNextItemWidth(ctx, -1)
         if EDIT.want_focus then
           reaper.ImGui_SetKeyboardFocusHere(ctx)
@@ -968,11 +1163,15 @@ local function draw_table(rows, height)
       reaper.ImGui_TableNextColumn(ctx)
       local note_txt = tostring(r.item_note or "")
       local editing_note = (EDIT and EDIT.row == r and EDIT.col == 5)
+      local is_sel5 = sel_has(r.__item_guid, 5)
 
       if not editing_note then
-        reaper.ImGui_Selectable(ctx, (note_txt ~= "" and note_txt or " ") .. "##note", false)
+        reaper.ImGui_Selectable(ctx, (note_txt ~= "" and note_txt or " ") .. "##note", is_sel5)
+        if reaper.ImGui_IsItemClicked(ctx) then handle_cell_click(r.__item_guid, 5) end
         if reaper.ImGui_IsItemHovered(ctx) and reaper.ImGui_IsMouseDoubleClicked(ctx, 0) then
-          EDIT = { row = r, col = 5, buf = note_txt, want_focus = true }
+          if TABLE_SOURCE == "live" then
+            EDIT = { row = r, col = 5, buf = note_txt, want_focus = true }
+          end
         end
       else
         reaper.ImGui_SetNextItemWidth(ctx, -1)
@@ -996,35 +1195,59 @@ local function draw_table(rows, height)
         end
       end
 
-
-
-
-
-
-
-      reaper.ImGui_TableNextColumn(ctx); reaper.ImGui_TextWrapped(ctx, tostring(r.file_name or ""))
-      reaper.ImGui_TableNextColumn(ctx); reaper.ImGui_TextWrapped(ctx, tostring(r.meta_trk_name or ""))
-      reaper.ImGui_TableNextColumn(ctx); reaper.ImGui_Text(ctx, tostring(r.channel_num or ""))
-      reaper.ImGui_TableNextColumn(ctx); reaper.ImGui_Text(ctx, tostring(r.interleave or ""))
-
-      -- Mute
+      -- 6 Source File
       reaper.ImGui_TableNextColumn(ctx)
-      reaper.ImGui_Text(ctx, r.muted and "M" or "")
+      local t6 = tostring(r.file_name or ""); local s6 = sel_has(r.__item_guid, 6)
+      reaper.ImGui_Selectable(ctx, (t6 ~= "" and t6 or " ") .. "##c6", s6)
+      if reaper.ImGui_IsItemClicked(ctx) then handle_cell_click(r.__item_guid, 6) end
 
-      -- Color
+      -- 7 Meta Track Name
+      reaper.ImGui_TableNextColumn(ctx)
+      local t7 = tostring(r.meta_trk_name or ""); local s7 = sel_has(r.__item_guid, 7)
+      reaper.ImGui_Selectable(ctx, (t7 ~= "" and t7 or " ") .. "##c7", s7)
+      if reaper.ImGui_IsItemClicked(ctx) then handle_cell_click(r.__item_guid, 7) end
+
+      -- 8 Chan#
+      reaper.ImGui_TableNextColumn(ctx)
+      local t8 = tostring(r.channel_num or ""); local s8 = sel_has(r.__item_guid, 8)
+      reaper.ImGui_Selectable(ctx, (t8 ~= "" and t8 or " ") .. "##c8", s8)
+      if reaper.ImGui_IsItemClicked(ctx) then handle_cell_click(r.__item_guid, 8) end
+
+      -- 9 Interleave
+      reaper.ImGui_TableNextColumn(ctx)
+      local t9 = tostring(r.interleave or ""); local s9 = sel_has(r.__item_guid, 9)
+      reaper.ImGui_Selectable(ctx, (t9 ~= "" and t9 or " ") .. "##c9", s9)
+      if reaper.ImGui_IsItemClicked(ctx) then handle_cell_click(r.__item_guid, 9) end
+
+      -- 10 Mute
+      reaper.ImGui_TableNextColumn(ctx)
+      local t10 = r.muted and "M" or ""; local s10 = sel_has(r.__item_guid, 10)
+      reaper.ImGui_Selectable(ctx, (t10 ~= "" and t10 or " ") .. "##c10", s10)
+      if reaper.ImGui_IsItemClicked(ctx) then handle_cell_click(r.__item_guid, 10) end
+
+      -- 11 Color（顯示色塊 + 以 hex 為可選文字）
       reaper.ImGui_TableNextColumn(ctx)
       if r.color_rgb and r.color_rgb[1] then
         local rr, gg, bb = r.color_rgb[1]/255, r.color_rgb[2]/255, r.color_rgb[3]/255
         local col = reaper.ImGui_ColorConvertDouble4ToU32(rr, gg, bb, 1.0)
         reaper.ImGui_TextColored(ctx, col, "■")
         reaper.ImGui_SameLine(ctx)
-        reaper.ImGui_Text(ctx, r.color_hex or "")
-      else
-        reaper.ImGui_Text(ctx, "")
       end
+      local t11 = tostring(r.color_hex or ""); local s11 = sel_has(r.__item_guid, 11)
+      reaper.ImGui_Selectable(ctx, (t11 ~= "" and t11 or " ") .. "##c11", s11)
+      if reaper.ImGui_IsItemClicked(ctx) then handle_cell_click(r.__item_guid, 11) end
 
-      reaper.ImGui_TableNextColumn(ctx); reaper.ImGui_Text(ctx, format_time(r.start_time))
-      reaper.ImGui_TableNextColumn(ctx); reaper.ImGui_Text(ctx, format_time(r.end_time))
+      -- 12 Start
+      reaper.ImGui_TableNextColumn(ctx)
+      local t12 = format_time(r.start_time); local s12 = sel_has(r.__item_guid, 12)
+      reaper.ImGui_Selectable(ctx, (t12 ~= "" and t12 or " ") .. "##c12", s12)
+      if reaper.ImGui_IsItemClicked(ctx) then handle_cell_click(r.__item_guid, 12) end
+
+      -- 13 End
+      reaper.ImGui_TableNextColumn(ctx)
+      local t13 = format_time(r.end_time); local s13 = sel_has(r.__item_guid, 13)
+      reaper.ImGui_Selectable(ctx, (t13 ~= "" and t13 or " ") .. "##c13", s13)
+      if reaper.ImGui_IsItemClicked(ctx) then handle_cell_click(r.__item_guid, 13) end
 
       reaper.ImGui_PopID(ctx)   -- 0.6.1
 
@@ -1105,6 +1328,112 @@ local function loop()
   end
 
   draw_table(rows_to_show, 360)
+
+  -- Clipboard shortcuts (when NOT in InputText editing)
+  if not (EDIT and EDIT.col) then
+    -- Copy selection (any view)
+    if shortcut_pressed(reaper.ImGui_Key_C()) then
+      local rows = rows_to_show
+      local rim  = build_row_index_map(rows)
+      copy_selection(rows, rim)
+    end
+
+    -- Paste (Live only)
+    if TABLE_SOURCE == "live" and shortcut_pressed(reaper.ImGui_Key_V()) then
+      local clip = reaper.ImGui_GetClipboardText(ctx) or ""
+      local tbl  = parse_clipboard_table(clip)
+      -- 決定貼上起點：若有矩形選取，用其左上角；若只有單格，用該格
+      local rows = ROWS
+      local rim  = build_row_index_map(rows)
+
+      -- 找選取矩形左上角
+      local minr, minc = math.huge, math.huge
+      for k,_ in pairs(SEL.cells) do
+        local g,c = k:match("^(.-):(%d+)$"); c = tonumber(c)
+        local ri  = rim[g]
+        if ri and c then
+          if ri < minr then minr = ri end
+          if c  < minc then minc = c  end
+        end
+      end
+      if minr == math.huge then
+        -- 沒有選取，則以可見表格第一列第3欄當起點（Track Name）
+        minr, minc = 1, 3
+      end
+
+      -- 僅接受 1x1 或 與選區等大的矩形；否則拒絕（之後可擴充）
+      local H = #tbl
+      local W = (H>0) and #tbl[1] or 0
+      if H == 0 or W == 0 then goto PASTE_END end
+
+      -- 計算選區寬高（若有選區）
+      local maxr, maxc = minr, minc
+      for k,_ in pairs(SEL.cells) do
+        local g,c = k:match("^(.-):(%d+)$"); c = tonumber(c)
+        local ri  = rim[g]
+        if ri and c then
+          if ri > maxr then maxr = ri end
+          if c  > maxc then maxc = c  end
+        end
+      end
+      local selH = (maxr - minr + 1)
+      local selW = (maxc - minc + 1)
+
+      if not ((H==1 and W==1) or (selH == H and selW == W)) then
+        -- 尺寸不相符：不貼
+        goto PASTE_END
+      end
+
+      -- 進入批次模式（一次 Undo）
+      bulk_begin()
+      reaper.Undo_BeginBlock2(0)
+
+      local tracks_renamed, takes_named, notes_set = 0,0,0
+      local takes_created = 0
+
+      for dy=0,H-1 do
+        for dx=0,W-1 do
+          local target_col = minc + dx
+          local row        = rows[minr + dy]
+          if row then
+            local val = _trim(tbl[dy+1][dx+1] or "")
+            if target_col == 3 then
+              if row.__track and val ~= row.track_name then
+                reaper.GetSetMediaTrackInfo_String(row.__track, "P_NAME", val, true)
+                row.track_name = val
+                tracks_renamed = tracks_renamed + 1
+              end
+            elseif target_col == 4 then
+              local tk = row.__take
+              if not tk then
+                -- 自動建立空 take 再命名
+                tk = reaper.AddTakeToMediaItem(row.__item)
+                row.__take = tk
+                takes_created = takes_created + 1
+              end
+              if tk and val ~= row.take_name then
+                reaper.GetSetMediaItemTakeInfo_String(tk, "P_NAME", val, true)
+                row.take_name = val
+                takes_named = takes_named + 1
+              end
+            elseif target_col == 5 then
+              if val ~= row.item_note then
+                reaper.GetSetMediaItemInfo_String(row.__item, "P_NOTES", val, true)
+                row.item_note = val
+                notes_set = notes_set + 1
+              end
+            end
+          end
+        end
+      end
+
+      reaper.Undo_EndBlock2(0, "[Monitor] Paste", -1)
+      bulk_end(function() refresh_now() end)
+
+      ::PASTE_END::
+    end
+  end
+
 
   reaper.ImGui_End(ctx)
 
