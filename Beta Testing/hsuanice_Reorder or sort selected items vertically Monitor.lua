@@ -1,6 +1,6 @@
 --[[
 @description Monitor - Reorder or sort selected items vertically
-@version 0.5.2 compatibility for "1" or "M"
+@version 0.6.0 Editable Table, not working yet
 @author hsuanice
 @about
   Shows a live table of the currently selected items and all sort-relevant fields:
@@ -38,6 +38,24 @@
 
 
 @changelog
+  v0.6.0
+  - Inline editing (Excel-like) in the table:
+      • Single-click selects a cell so you can copy/paste its text.
+      • Double-click enters edit mode (InputText) with the current value preselected.
+  - Editable columns: Track Name, Take Name, Item Note.
+      • Track Name writes to the exact Track object (by GUID) — only that track is renamed,
+        even if other tracks share the same name.
+      • Take Name and Item Note write to the specific item/take of that row.
+      • Edits are allowed even when the item has no active take; handled safely without touching BWF/iXML.
+  - Commit & cancel behavior:
+      • Enter / Tab / clicking outside commits the edit.
+      • Esc cancels and restores the original value.
+  - Safety & consistency:
+      • Only writes (and creates one Undo step) when the value actually changes.
+      • Trims leading/trailing whitespace (keeps interior spaces); applies a reasonable length limit.
+      • After commit, the view refreshes so all rows tied to the same Track object update consistently.
+  - No change to embedded metadata (BWF/iXML).
+  - Exports (TSV/CSV) and BEFORE/AFTER snapshots reflect the edited values.
   v0.5.2
   - Parser: Updated parse_snapshot_tsv() to accept both "M" and "1" as muted values in TSV input,
             ensuring compatibility with exports from v0.5.1 and later (which use "M"/blank).
@@ -482,6 +500,16 @@ local function collect_fields_for_item(item)
     row.color_rgb, row.color_hex = nil, ""
   end
 
+  -- Keep object references for editing
+  row.__item  = item
+  row.__track = tr
+  row.__take  = reaper.GetActiveTake(item)
+
+  -- Item note (trim head/tail spaces; keep middle spaces)
+  local ok_note, note = reaper.GetSetMediaItemInfo_String(item, "P_NOTES", "", false)
+  row.item_note = (ok_note and (note or "")) or ""
+
+
 
 
   row.__fields = f
@@ -514,6 +542,55 @@ SNAP_BEFORE, SNAP_AFTER = {}, {}
 
 -- Current formatter（會在切換模式/修改 pattern 時重建）
 FORMAT = TFLib.make_formatter(TIME_MODE, {decimals=3})
+
+-- === Inline edit state ===
+local EDIT = { row = nil, col = nil, buf = "" }
+local COL = { TRACK_NAME = 3, TAKE_NAME = 4, ITEM_NOTE = 5 } -- 以表頭順序為準（#、TrackIdx、Track Name、Take Name、Item Note、Source File...）
+
+local function _trim(s)
+  s = tostring(s or "")
+  return (s:gsub("^%s+", ""):gsub("%s+$", ""))
+end
+
+local function _commit_if_changed(label, oldv, newv, fn_apply)
+  newv = _trim(newv or "")
+  oldv = tostring(oldv or "")
+  if newv == oldv then return false end
+  reaper.Undo_BeginBlock2(0)
+  fn_apply(newv)
+  reaper.Undo_EndBlock2(0, "[Monitor] "..label, -1)
+  reaper.UpdateArrange()
+  return true
+end
+
+-- 寫回：Track / Take / Item Note
+local function apply_track_name(tr, newname, rows)
+  _commit_if_changed("Rename Track", select(2, reaper.GetTrackName(tr, "")), newname, function(v)
+    reaper.GetSetMediaTrackInfo_String(tr, "P_NAME", v, true)
+    -- 同一個 track 之所有列同步更新（依物件，而非名字）
+    for _, rr in ipairs(rows or {}) do
+      if rr.__track == tr then rr.track_name = v end
+    end
+  end)
+end
+
+local function apply_take_name(tk, newname, row)
+  if not tk then return end
+  _commit_if_changed("Rename Take", row.take_name, newname, function(v)
+    reaper.GetSetMediaItemTakeInfo_String(tk, "P_NAME", v, true)
+    row.take_name = v
+  end)
+end
+
+local function apply_item_note(it, newnote, row)
+  _commit_if_changed("Edit Item Note", row.item_note, newnote, function(v)
+    reaper.GetSetMediaItemInfo_String(it, "P_NOTES", v, true)
+    row.item_note = v
+  end)
+end
+
+
+
 
 -- 超薄轉接（保留相容性；也可以讓 table/export 都直接叫 FORMAT(r.start_time)）
 local function format_time(val) return FORMAT(val) end
@@ -776,9 +853,82 @@ local function draw_table(rows, height)
       reaper.ImGui_TableNextRow(ctx)
       reaper.ImGui_TableNextColumn(ctx); reaper.ImGui_Text(ctx, tostring(i))
       reaper.ImGui_TableNextColumn(ctx); reaper.ImGui_Text(ctx, tostring(r.track_idx or ""))
-      reaper.ImGui_TableNextColumn(ctx); reaper.ImGui_TextWrapped(ctx, tostring(r.track_name or ""))
-      reaper.ImGui_TableNextColumn(ctx); reaper.ImGui_TextWrapped(ctx, tostring(r.take_name or ""))
-      reaper.ImGui_TableNextColumn(ctx); reaper.ImGui_TextWrapped(ctx, tostring(r.item_note or "")) -- NEW (0.5.0)      
+
+      -- Track Name（單擊選取、雙擊進入編輯）
+      reaper.ImGui_TableNextColumn(ctx)
+      local track_txt = tostring(r.track_name or "")
+      reaper.ImGui_Selectable(ctx, track_txt, false)
+      if reaper.ImGui_IsItemHovered(ctx) and reaper.ImGui_IsMouseDoubleClicked(ctx, 0) then
+        EDIT = { row = r, col = COL.TRACK_NAME, buf = track_txt }
+      end
+      if EDIT.row == r and EDIT.col == COL.TRACK_NAME then
+        reaper.ImGui_SameLine(ctx)
+        reaper.ImGui_SetNextItemWidth(ctx, -1)
+        local changed, newv = reaper.ImGui_InputText(ctx, "##trkname"..tostring(r), EDIT.buf,
+          reaper.ImGui_InputTextFlags_EnterReturnsTrue())
+        if changed then EDIT.buf = newv end
+        local commit = changed and reaper.ImGui_IsItemDeactivatedAfterEdit(ctx)
+                      or reaper.ImGui_IsKeyPressed(ctx, reaper.ImGui_Key_Enter())
+        if commit then
+          apply_track_name(r.__track, EDIT.buf, rows)
+          EDIT.row, EDIT.col = nil, nil
+        elseif reaper.ImGui_IsKeyPressed(ctx, reaper.ImGui_Key_Escape()) then
+          EDIT.row, EDIT.col = nil, nil
+        end
+      end
+
+      -- Take Name（單擊選取、雙擊編輯；即使沒有 take 也允許輸入）
+      reaper.ImGui_TableNextColumn(ctx)
+      local take_txt = tostring(r.take_name or "")
+      reaper.ImGui_Selectable(ctx, take_txt, false)
+      if reaper.ImGui_IsItemHovered(ctx) and reaper.ImGui_IsMouseDoubleClicked(ctx, 0) then
+        EDIT = { row = r, col = COL.TAKE_NAME, buf = take_txt }
+      end
+      if EDIT.row == r and EDIT.col == COL.TAKE_NAME then
+        reaper.ImGui_SameLine(ctx)
+        reaper.ImGui_SetNextItemWidth(ctx, -1)
+        local flags = reaper.ImGui_InputTextFlags_EnterReturnsTrue()
+        local changed, newv = reaper.ImGui_InputText(ctx, "##takename"..tostring(r), EDIT.buf, flags)
+        if changed then EDIT.buf = newv end
+        local commit = changed and reaper.ImGui_IsItemDeactivatedAfterEdit(ctx)
+                      or reaper.ImGui_IsKeyPressed(ctx, reaper.ImGui_Key_Enter())
+        if commit then
+          apply_take_name(r.__take, EDIT.buf, r)
+          EDIT.row, EDIT.col = nil, nil
+        elseif reaper.ImGui_IsKeyPressed(ctx, reaper.ImGui_Key_Escape()) then
+          EDIT.row, EDIT.col = nil, nil
+        end
+      end
+
+      -- Item Note（單擊選取、雙擊編輯）
+      reaper.ImGui_TableNextColumn(ctx)
+      local note_txt = tostring(r.item_note or "")
+      reaper.ImGui_Selectable(ctx, note_txt, false)
+      if reaper.ImGui_IsItemHovered(ctx) and reaper.ImGui_IsMouseDoubleClicked(ctx, 0) then
+        EDIT = { row = r, col = COL.ITEM_NOTE, buf = note_txt }
+      end
+      if EDIT.row == r and EDIT.col == COL.ITEM_NOTE then
+        reaper.ImGui_SameLine(ctx)
+        reaper.ImGui_SetNextItemWidth(ctx, -1)
+        local flags = reaper.ImGui_InputTextFlags_EnterReturnsTrue()
+        local changed, newv = reaper.ImGui_InputText(ctx, "##itemnote"..tostring(r), EDIT.buf, flags)
+        if changed then EDIT.buf = newv end
+        local commit = changed and reaper.ImGui_IsItemDeactivatedAfterEdit(ctx)
+                      or reaper.ImGui_IsKeyPressed(ctx, reaper.ImGui_Key_Enter())
+        if commit then
+          apply_item_note(r.__item, EDIT.buf, r)
+          EDIT.row, EDIT.col = nil, nil
+        elseif reaper.ImGui_IsKeyPressed(ctx, reaper.ImGui_Key_Escape()) then
+          EDIT.row, EDIT.col = nil, nil
+        end
+      end
+
+
+
+
+
+
+
       reaper.ImGui_TableNextColumn(ctx); reaper.ImGui_TextWrapped(ctx, tostring(r.file_name or ""))
       reaper.ImGui_TableNextColumn(ctx); reaper.ImGui_TextWrapped(ctx, tostring(r.meta_trk_name or ""))
       reaper.ImGui_TableNextColumn(ctx); reaper.ImGui_Text(ctx, tostring(r.channel_num or ""))
