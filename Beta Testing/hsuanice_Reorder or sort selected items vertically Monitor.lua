@@ -1,6 +1,6 @@
 --[[
 @description Monitor - Reorder or sort selected items vertically
-@version 0.6.12 Spill now support multi-columns
+@version 0.6.12.1 Spill more like excel
 @author hsuanice
 @about
   Shows a live table of the currently selected items and all sort-relevant fields:
@@ -39,6 +39,13 @@
 
 
 @changelog
+  v0.6.12.1
+    - Paste: when the source contains multiple cells but the selection has fewer cells than the source,
+      the paste now spills the entire source block from the top-left selected cell (anchor), Excel-style.
+      • Spill targets only writable columns (3/4/5); overflow is truncated (no wrap).
+      • Works together with 0.6.12 (single-cell spill), 0.6.11 (single-row fill-down), and 0.6.9 rules.
+    - One undo per paste; Live view only; selection protection on undo/redo remains enabled.
+
   v0.6.12
     - Paste (spill): multi-cell sources now spill across writable columns as well.
       • When only one destination cell is selected, the paste expands from that cell
@@ -1679,15 +1686,21 @@ local function loop()
         for i=1, #dst do apply_cell(dst[i], v) end
 
       elseif #dst == 1 then
-        -- 來源多值、目標只選一格：依來源 2D 形狀向右、向下展開（0.6.12：僅落在 3/4/5）
+        -- 來源多值、目標只選一格：spill（僅 3/4/5）
         local anchor = dst[1]
         local dst2 = build_dst_spill_writable(ROWS, anchor, src_h, src_w)
         local n = math.min(#src, #dst2)
         for k = 1, n do apply_cell(dst2[k], src[k]) end
 
+      elseif #dst < #src then
+        -- 0.6.12.1：來源多格、目標少於來源 → 以選取中「最左上」錨點整塊 spill（僅 3/4/5）
+        local anchor = dst[1]  -- dst 已依 row-major 排序，dst[1] 即最左上
+        local dst2 = build_dst_spill_writable(ROWS, anchor, src_h, src_w)
+        local n = math.min(#src, #dst2)
+        for k = 1, n do apply_cell(dst2[k], src[k]) end
+
       elseif src_h == 1 then
-        -- 0.6.11：來源是「單一列、跨多欄」，目標選了多格（通常為多列相同欄）→ 往下填滿
-        -- 作法：把目標依 row 分組，每一列按欄順序貼上「來源該列的前 src_w 個值」（不循環）
+        -- 單列來源：fill down（逐列複製來源該列的前 src_w 個值）
         local by_row = {}
         for _, d in ipairs(dst) do
           local t = by_row[d.row_index]; if not t then t = {}; by_row[d.row_index] = t end
@@ -1703,7 +1716,7 @@ local function loop()
         end
 
       else
-        -- 多對多：依 row-major 對應到 min(#src, #dst)（0.6.9）
+        -- 多對多：row-major 對應到 min(#src, #dst)
         local n = math.min(#src, #dst)
         for k=1, n do apply_cell(dst[k], src[k]) end
       end
