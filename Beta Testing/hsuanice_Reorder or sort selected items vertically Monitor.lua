@@ -1,6 +1,6 @@
 --[[
 @description Monitor - Reorder or sort selected items vertically
-@version 0.7.1 Fix Copy and Save to text column order but Copy and Shift Select broken
+@version 0.7.1.1 Fix: Copy (Cmd/Ctrl+C) and Shift-rectangle selection could error
 @author hsuanice
 @about
   Shows a live table of the currently selected items and all sort-relevant fields:
@@ -42,6 +42,16 @@
 
 
 @changelog
+  v0.7.1.1
+    - Fix: Copy (Cmd/Ctrl+C) and Shift-rectangle selection could error with
+      “attempt to index a nil value (global 'COL_POS')” on first use.
+      • Root cause: multiple local re-declarations of COL_ORDER/COL_POS and
+        functions defined before their locals existed.
+      • Change: single forward declaration of COL_ORDER/COL_POS; removed duplicate
+        local re-declarations; added nil-safe fallbacks where COL_POS is read.
+    - Result: Copy/Shift-select work reliably; outputs still follow the on-screen
+      column order. Paste behavior unchanged.
+
   v0.7.1
     - Copy & Export (TSV/CSV) now follow the on-screen column order for all views (Live/BEFORE/AFTER).
       • Headers use the current labels (e.g., Start/End reflect the active time display mode).
@@ -395,6 +405,8 @@ local parse_snapshot_tsv   -- ← 先宣告
 local refresh_now          -- ← 新增：先宣告 refresh_now，讓上面函式抓到 local
 local _trim               -- ← 新增：先宣告 _trim，供前面函式當作同一個 local 來引用
 
+-- Column order mapping (single source of truth)
+local COL_ORDER, COL_POS = {}, {}   -- visual→logical / logical→visual
 
 
 -- === Preferences (persist across runs) ===
@@ -749,8 +761,8 @@ local function sel_rect_apply(rows, row_index_map, cur_guid, cur_col)
   local r1, r2 = math.min(a_idx, b_idx), math.max(a_idx, b_idx)
 
   -- 依畫面順序的欄位位置算矩形，再轉回邏輯欄位 id
-  local p1 = COL_POS[SEL.anchor.col] or SEL.anchor.col
-  local p2 = COL_POS[cur_col] or cur_col
+  local p1 = (COL_POS and COL_POS[SEL.anchor.col]) or SEL.anchor.col
+  local p2 = (COL_POS and COL_POS[cur_col])       or cur_col
   local c1, c2 = math.min(p1, p2), math.max(p1, p2)
   for i = r1, r2 do
     local g = rows[i].__item_guid
@@ -794,7 +806,7 @@ local function copy_selection(rows, row_index_map)
       selected[#selected+1] = {row=rowi, col=col}
       if rowi < minr then minr = rowi end
       if rowi > maxr then maxr = rowi end
-      local pos = COL_POS[col] or col
+      local pos = (COL_POS and COL_POS[col]) or col
       if pos  < minp then minp = pos end
       if pos  > maxp then maxp = pos end
     end
@@ -844,7 +856,7 @@ end
 -- === Column order mapping (visual <-> logical) & header text ===
 -- COL_ORDER[display_index] = logical_col_id
 -- COL_POS[logical_col_id]  = display_index
-local COL_ORDER, COL_POS = {}, {}
+
 
 local function _col_header_label(col_id)
   if col_id == 1  then return "#" end
@@ -993,48 +1005,14 @@ local function build_dst_list_from_selection(rows)
   end
   table.sort(dst, function(a,b)
     if a.row_index ~= b.row_index then return a.row_index < b.row_index end
-    local pa = COL_POS[a.col] or a.col
-    local pb = COL_POS[b.col] or b.col
+    local pa = (COL_POS and COL_POS[a.col]) or a.col
+    local pb = (COL_POS and COL_POS[b.col]) or b.col
     return pa < pb
   end)
 
   return dst
 end
 
--- === Column label ↔ logical id mapping ===
-local COL_ORDER, COL_POS = {}, {}   -- COL_ORDER[display_idx] = logical_col_id; COL_POS[logical_col_id] = display_idx
-
-local function _colid_from_label(label, startHeader, endHeader)
-  if label == "#" then return 1 end
-  if label == "TrkID" then return 2 end
-  if label == "Track Name" then return 3 end
-  if label == "Take Name" then return 4 end
-  if label == "Item Note" then return 5 end
-  if label == "Source File" then return 6 end
-  if label == "Meta Track Name" then return 7 end
-  if label == "Chan#" then return 8 end
-  if label == "Interleave" then return 9 end
-  if label == "Mute" then return 10 end
-  if label == "Color" then return 11 end
-  if label == startHeader then return 12 end
-  if label == endHeader   then return 13 end
-  return nil
-end
-
-local function rebuild_display_mapping()
-  COL_ORDER, COL_POS = {}, {}
-  local n = reaper.ImGui_TableGetColumnCount(ctx)
-  -- 動態取得當前 Start/End 標題（因為模式變更會換字）
-  local startHeader, endHeader = TFLib.headers(TIME_MODE, {pattern=CUSTOM_PATTERN})
-  for i = 0, n-1 do
-    local label = reaper.ImGui_TableGetColumnName(ctx, i) or ""
-    local id = _colid_from_label(label, startHeader, endHeader)
-    if id then
-      COL_ORDER[i+1] = id
-      COL_POS[id]    = i+1
-    end
-  end
-end
 
 
 -- === Undo/Redo 選取保護（以 GUID 快照） ===
