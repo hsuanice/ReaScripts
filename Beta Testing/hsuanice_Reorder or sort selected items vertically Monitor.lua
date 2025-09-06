@@ -1,6 +1,6 @@
 --[[
 @description Monitor - Reorder or sort selected items vertically
-@version 0.6.6 fix click anchor shift click select ok
+@version 0.6.7 Add Delete fuction for table
 @author hsuanice
 @about
   Shows a live table of the currently selected items and all sort-relevant fields:
@@ -38,6 +38,13 @@
 
 
 @changelog
+  v0.6.7
+  - New: Delete clears text in the selected cells (Live view only).
+    • Writable columns: Track Name, Take Name, Item Note.
+    • Non-writable columns are ignored.
+    • Works with single cell, Cmd/Ctrl multi-select, and Shift rectangular selection.
+    • One Undo block; table refreshes after deletion.
+
   v0.6.6 — fix click anchor
   - Fix: Shift+click rectangular selection didn’t work after a plain click.
     • Root cause: the code set SEL.anchor and then immediately cleared it via sel_clear(),
@@ -303,7 +310,9 @@ local POPUP_TITLE = "Summary"
 -- Forward declarations so load_prefs() updates the same locals (not globals)
 local TIME_MODE, CUSTOM_PATTERN, FORMAT, AUTO
 local scan_selection_rows
-local parse_snapshot_tsv   -- ← 新增：先宣告，讓上面可以呼叫
+local parse_snapshot_tsv   -- ← 先宣告
+local refresh_now          -- ← 新增：先宣告 refresh_now，讓上面函式抓到 local
+
 
 -- === Preferences (persist across runs) ===
 local EXT_NS = "hsuanice_ReorderSort_Monitor"
@@ -749,6 +758,71 @@ local function bulk_end(refresh_cb)
 end
 
 
+-- 清除目前選取到的「格子文字」（只在 Live 視圖；僅 3/4/5 欄可寫）
+local function delete_selected_cells()
+  if TABLE_SOURCE ~= "live" then return end
+  if not SEL or not SEL.cells or next(SEL.cells) == nil then return end
+
+  local rows = ROWS
+  local rim  = build_row_index_map(rows)
+
+  -- 以物件去重：Track / Take / Item
+  local tr_set, tk_set, it_set = {}, {}, {}
+
+  for key,_ in pairs(SEL.cells) do
+    local g, cstr = key:match("^(.-):(%d+)$")
+    local col = tonumber(cstr)
+    local ri  = rim[g]
+    if ri and col then
+      local r = rows[ri]
+      if col == 3 and r and r.__track then
+        tr_set[r.__track] = true
+      elseif col == 4 and r and r.__take then
+        tk_set[r.__take] = true
+      elseif col == 5 and r and r.__item then
+        it_set[r.__item] = true
+      end
+    end
+  end
+
+  -- 沒有任何可寫欄被選到就不動作
+  if next(tr_set) == nil and next(tk_set) == nil and next(it_set) == nil then return end
+
+  reaper.Undo_BeginBlock2(0)
+
+  -- 清 Track Name（空字串 = 還原為預設 Track 名顯示）
+  for tr,_ in pairs(tr_set) do
+    reaper.GetSetMediaTrackInfo_String(tr, "P_NAME", "", true)
+    -- 同步更新目前 rows 的顯示值
+    for _, rr in ipairs(rows) do
+      if rr.__track == tr then rr.track_name = "" end
+    end
+  end
+
+  -- 清 Take Name（僅當下有 take；不自動建立 take）
+  for tk,_ in pairs(tk_set) do
+    reaper.GetSetMediaItemTakeInfo_String(tk, "P_NAME", "", true)
+  end
+  -- 同步 rows
+  for _, rr in ipairs(rows) do
+    if rr.__take and tk_set[rr.__take] then rr.take_name = "" end
+  end
+
+  -- 清 Item Note
+  for it,_ in pairs(it_set) do
+    reaper.GetSetMediaItemInfo_String(it, "P_NOTES", "", true)
+  end
+  -- 同步 rows
+  for _, rr in ipairs(rows) do
+    if rr.__item and it_set[rr.__item] then rr.item_note = "" end
+  end
+
+  reaper.Undo_EndBlock2(0, "[Monitor] Clear selected cell text", -1)
+  reaper.UpdateArrange()
+  refresh_now()
+end
+
+
 
 
 local COL = { TRACK_NAME = 3, TAKE_NAME = 4, ITEM_NOTE = 5 } -- 以表頭順序為準（#、TrackIdx、Track Name、Take Name、Item Note、Source File...）
@@ -772,6 +846,7 @@ local function _commit_if_changed(label, oldv, newv, fn_apply)
   end
   return true
 end
+
 
 -- 寫回：Track / Take / Item Note
 local function apply_track_name(tr, newname, rows)
@@ -805,7 +880,7 @@ end
 -- 超薄轉接（保留相容性；也可以讓 table/export 都直接叫 FORMAT(r.start_time)）
 local function format_time(val) return FORMAT(val) end
 
-local function refresh_now()
+function refresh_now()
   ROWS = scan_selection_rows()
 end
 
@@ -1455,7 +1530,17 @@ local function loop()
 
       ::PASTE_END::
     end
+
+    -- Delete（Live only）：Delete 或 Backspace 皆可
+    if TABLE_SOURCE == "live" then
+      local del_pressed = reaper.ImGui_IsKeyPressed(ctx, reaper.ImGui_Key_Delete(), false)
+                       or reaper.ImGui_IsKeyPressed(ctx, reaper.ImGui_Key_Backspace(), false)
+      if del_pressed then
+        delete_selected_cells()
+      end
+    end
   end
+
 
 
   reaper.ImGui_End(ctx)
