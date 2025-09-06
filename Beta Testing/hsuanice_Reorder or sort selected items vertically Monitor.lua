@@ -1,6 +1,6 @@
 --[[
 @description Monitor - Reorder or sort selected items vertically
-@version 0.6.2 Editable Table, Track Name and Item Note ok, Take Name not ok
+@version 0.6.2 Editable Table OK
 @author hsuanice
 @about
   Shows a live table of the currently selected items and all sort-relevant fields:
