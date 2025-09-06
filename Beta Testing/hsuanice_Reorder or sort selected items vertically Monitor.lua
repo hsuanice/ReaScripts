@@ -1,6 +1,6 @@
 --[[
 @description Monitor - Reorder or sort selected items vertically
-@version 0.6.4 Table Single Click Copy and Paste ok
+@version 0.6.5 First and Second column selectable
 @author hsuanice
 @about
   Shows a live table of the currently selected items and all sort-relevant fields:
@@ -38,6 +38,8 @@
 
 
 @changelog
+  v0.6.5
+    - Make First and Second columns selectable
   v0.6.4
     - Excel-like selection & clipboard:
         • Click selects a cell; Shift+click selects a rectangular range; Cmd/Ctrl+click toggles noncontiguous cells.
@@ -1078,8 +1080,18 @@ local function draw_table(rows, height)
     for i, r in ipairs(rows or {}) do
       reaper.ImGui_TableNextRow(ctx)
       reaper.ImGui_PushID(ctx, (r.__item_guid ~= "" and r.__item_guid) or tostring(i))    -- 0.6.1
-      reaper.ImGui_TableNextColumn(ctx); reaper.ImGui_Text(ctx, tostring(i))
-      reaper.ImGui_TableNextColumn(ctx); reaper.ImGui_Text(ctx, tostring(r.track_idx or ""))
+      -- # (col 1)
+      reaper.ImGui_TableNextColumn(ctx)
+      local sel1 = sel_has(r.__item_guid, 1)
+      reaper.ImGui_Selectable(ctx, tostring(i) .. "##c1", sel1)
+      if reaper.ImGui_IsItemClicked(ctx) then handle_cell_click(r.__item_guid, 1) end
+
+      -- TrkID (col 2)
+      reaper.ImGui_TableNextColumn(ctx)
+      local sel2 = sel_has(r.__item_guid, 2)
+      reaper.ImGui_Selectable(ctx, tostring(r.track_idx or "") .. "##c2", sel2)
+      if reaper.ImGui_IsItemClicked(ctx) then handle_cell_click(r.__item_guid, 2) end
+
 
         -- Track Name（click = select, double-click = edit）
         reaper.ImGui_TableNextColumn(ctx)
