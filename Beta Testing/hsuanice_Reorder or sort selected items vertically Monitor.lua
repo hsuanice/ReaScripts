@@ -1,6 +1,6 @@
 --[[
 @description Monitor - Reorder or sort selected items vertically
-@version 0.6.2 Editable Table OK
+@version 0.6.3 switch to adjustable fixed-width columns
 @author hsuanice
 @about
   Shows a live table of the currently selected items and all sort-relevant fields:
@@ -38,49 +38,55 @@
 
 
 @changelog
+  v0.6.3
+    - Table layout: switched to fixed-width columns with horizontal scrolling (no more squeezing).
+    - Set practical default widths for all columns; key edit fields (Track/Take/Item Note) stay readable.
+    - Header tweak: “TrackIdx” → “TrkID”.
+    - Wrapping: long text wraps inside its fixed-width cell; overflow is available via horizontal scroll.
+    - Columns remain resizable by the user; widths can be fine-tuned interactively.
   v0.6.2
-- Editing UX: Fixed focus so double-click reliably enters inline edit and the input is immediately active with the text preselected.
-- Commit behavior: Leaving the cell (losing focus) now commits just like pressing Enter; Esc cancels. Only writes (and creates one Undo step) when the value actually changes.
-- Stability: While a cell is being edited we render only the InputText (no overlapping Selectable), avoiding focus flicker and ID conflicts.
-- Auto-refresh: Continues to refresh when not editing, pauses during edit, and resumes as soon as the edit ends (on Enter, blur, or Esc).
+    - Editing UX: Fixed focus so double-click reliably enters inline edit and the input is immediately active with the text preselected.
+    - Commit behavior: Leaving the cell (losing focus) now commits just like pressing Enter; Esc cancels. Only writes (and creates one Undo step) when the value actually changes.
+    - Stability: While a cell is being edited we render only the InputText (no overlapping Selectable), avoiding focus flicker and ID conflicts.
+    - Auto-refresh: Continues to refresh when not editing, pauses during edit, and resumes as soon as the edit ends (on Enter, blur, or Esc).
   v0.6.1
-  - Fix: Resolved Dear ImGui ID conflicts in editable cells (Track Name, Take Name, Item Note)
-         by using a row-level PushID keyed by item GUID plus per-cell "##trk"/"##take"/"##note" IDs.
-  - Change: Entering edit mode no longer immediately collapses (auto-refresh is paused while editing).
-  - Known issue: After double-click, the input field shows but sometimes doesn’t accept typing
-                 (focus isn’t captured). Will be addressed next by giving the editor explicit focus
-                 and rendering it exclusively while active.
-  - Known issue: With the guard `if AUTO and (not EDIT or not EDIT.col) then refresh_now() end`,
-                 auto-refresh may remain suspended in some setups. Use
-                 `if AUTO and not (EDIT and EDIT.col) then refresh_now() end`
-                 as a temporary workaround; a proper fix will follow.
-  - No changes to exports, snapshots, or metadata handling.
+    - Fix: Resolved Dear ImGui ID conflicts in editable cells (Track Name, Take Name, Item Note)
+          by using a row-level PushID keyed by item GUID plus per-cell "##trk"/"##take"/"##note" IDs.
+    - Change: Entering edit mode no longer immediately collapses (auto-refresh is paused while editing).
+    - Known issue: After double-click, the input field shows but sometimes doesn’t accept typing
+                  (focus isn’t captured). Will be addressed next by giving the editor explicit focus
+                  and rendering it exclusively while active.
+    - Known issue: With the guard `if AUTO and (not EDIT or not EDIT.col) then refresh_now() end`,
+                  auto-refresh may remain suspended in some setups. Use
+                  `if AUTO and not (EDIT and EDIT.col) then refresh_now() end`
+                  as a temporary workaround; a proper fix will follow.
+    - No changes to exports, snapshots, or metadata handling.
   v0.6.0
-  - Inline editing (Excel-like) in the table:
-      • Single-click selects a cell so you can copy/paste its text.
-      • Double-click enters edit mode (InputText) with the current value preselected.
-  - Editable columns: Track Name, Take Name, Item Note.
-      • Track Name writes to the exact Track object (by GUID) — only that track is renamed,
-        even if other tracks share the same name.
-      • Take Name and Item Note write to the specific item/take of that row.
-      • Edits are allowed even when the item has no active take; handled safely without touching BWF/iXML.
-  - Commit & cancel behavior:
-      • Enter / Tab / clicking outside commits the edit.
-      • Esc cancels and restores the original value.
-  - Safety & consistency:
-      • Only writes (and creates one Undo step) when the value actually changes.
-      • Trims leading/trailing whitespace (keeps interior spaces); applies a reasonable length limit.
-      • After commit, the view refreshes so all rows tied to the same Track object update consistently.
-  - No change to embedded metadata (BWF/iXML).
-  - Exports (TSV/CSV) and BEFORE/AFTER snapshots reflect the edited values.
+    - Inline editing (Excel-like) in the table:
+        • Single-click selects a cell so you can copy/paste its text.
+        • Double-click enters edit mode (InputText) with the current value preselected.
+    - Editable columns: Track Name, Take Name, Item Note.
+        • Track Name writes to the exact Track object (by GUID) — only that track is renamed,
+          even if other tracks share the same name.
+        • Take Name and Item Note write to the specific item/take of that row.
+        • Edits are allowed even when the item has no active take; handled safely without touching BWF/iXML.
+    - Commit & cancel behavior:
+        • Enter / Tab / clicking outside commits the edit.
+        • Esc cancels and restores the original value.
+    - Safety & consistency:
+        • Only writes (and creates one Undo step) when the value actually changes.
+        • Trims leading/trailing whitespace (keeps interior spaces); applies a reasonable length limit.
+        • After commit, the view refreshes so all rows tied to the same Track object update consistently.
+    - No change to embedded metadata (BWF/iXML).
+    - Exports (TSV/CSV) and BEFORE/AFTER snapshots reflect the edited values.
   v0.5.2
-  - Parser: Updated parse_snapshot_tsv() to accept both "M" and "1" as muted values in TSV input,
-            ensuring compatibility with exports from v0.5.1 and later (which use "M"/blank).
-  - No other functional changes; UI and exports remain identical to v0.5.1.
+    - Parser: Updated parse_snapshot_tsv() to accept both "M" and "1" as muted values in TSV input,
+              ensuring compatibility with exports from v0.5.1 and later (which use "M"/blank).
+    - No other functional changes; UI and exports remain identical to v0.5.1.
   v0.5.1
-  - Export: Changed the Mute column in TSV/CSV exports to output "M" when muted and blank when unmuted (was previously 1/0).
+    - Export: Changed the Mute column in TSV/CSV exports to output "M" when muted and blank when unmuted (was previously 1/0).
   v0.5.0
-  - NEW: Inserted "Item Note" column (between Take Name and Source File) across UI and TSV/CSV exports.
+    - NEW: Inserted "Item Note" column (between Take Name and Source File) across UI and TSV/CSV exports.
   v0.4.4.2
     - Fix: ESC on main window not working — removed a duplicate ImGui_CreateContext/ctx block that shadowed the real context; unified to a single context so esc_pressed() and the window share the same ctx.
     - Behavior: Summary ESC closes only the popup; when no popup is open, ESC closes the main window.
@@ -857,20 +863,28 @@ end
 end
 
 local function draw_table(rows, height)
-  local flags = TF('ImGui_TableFlags_Borders') | TF('ImGui_TableFlags_RowBg') | TF('ImGui_TableFlags_SizingStretchProp')
-  if reaper.ImGui_BeginTable(ctx, "live_table", 13, flags, -FLT_MIN, height or 360) then
-    reaper.ImGui_TableSetupColumn(ctx, "#", TF('ImGui_TableColumnFlags_WidthFixed'), 36)
-    reaper.ImGui_TableSetupColumn(ctx, "TrackIdx", TF('ImGui_TableColumnFlags_WidthFixed'), 45)
-    reaper.ImGui_TableSetupColumn(ctx, "Track Name")
-    reaper.ImGui_TableSetupColumn(ctx, "Take Name")
-    reaper.ImGui_TableSetupColumn(ctx, "Item Note")   -- NEW (0.5.0)
-    reaper.ImGui_TableSetupColumn(ctx, "Source File")
-    reaper.ImGui_TableSetupColumn(ctx, "Meta Track Name")
-    reaper.ImGui_TableSetupColumn(ctx, "Chan#", TF('ImGui_TableColumnFlags_WidthFixed'), 36)
-    reaper.ImGui_TableSetupColumn(ctx, "Interleave", TF('ImGui_TableColumnFlags_WidthFixed'), 50)
+  local flags = TF('ImGui_TableFlags_Borders')
+            | TF('ImGui_TableFlags_RowBg')
+            | TF('ImGui_TableFlags_SizingFixedFit')
+            | TF('ImGui_TableFlags_ScrollX')
+            | TF('ImGui_TableFlags_Resizable')  if reaper.ImGui_BeginTable(ctx, "live_table", 13, flags, -FLT_MIN, height or 360) then
+    reaper.ImGui_TableSetupColumn(ctx, "#", TF('ImGui_TableColumnFlags_WidthFixed'), 28)
+    reaper.ImGui_TableSetupColumn(ctx, "TrkID", TF('ImGui_TableColumnFlags_WidthFixed'), 44)
+
+    -- 可編輯欄：給足閱讀寬度，固定寬內自動換行
+    reaper.ImGui_TableSetupColumn(ctx, "Track Name", TF('ImGui_TableColumnFlags_WidthFixed'), 140)
+    reaper.ImGui_TableSetupColumn(ctx, "Take Name",  TF('ImGui_TableColumnFlags_WidthFixed'), 200)
+    reaper.ImGui_TableSetupColumn(ctx, "Item Note",  TF('ImGui_TableColumnFlags_WidthFixed'), 320)
+
+    -- 其他資訊欄
+    reaper.ImGui_TableSetupColumn(ctx, "Source File",      TF('ImGui_TableColumnFlags_WidthFixed'), 220)
+    reaper.ImGui_TableSetupColumn(ctx, "Meta Track Name",  TF('ImGui_TableColumnFlags_WidthFixed'), 160)
+    reaper.ImGui_TableSetupColumn(ctx, "Chan#",       TF('ImGui_TableColumnFlags_WidthFixed'), 44)
+    reaper.ImGui_TableSetupColumn(ctx, "Interleave",  TF('ImGui_TableColumnFlags_WidthFixed'), 60)
+
     local startHeader, endHeader = TFLib.headers(TIME_MODE, {pattern=CUSTOM_PATTERN})
-    reaper.ImGui_TableSetupColumn(ctx, "Mute", TF('ImGui_TableColumnFlags_WidthFixed'), 52)
-    reaper.ImGui_TableSetupColumn(ctx, "Color", TF('ImGui_TableColumnFlags_WidthFixed'), 120)
+    reaper.ImGui_TableSetupColumn(ctx, "Mute",   TF('ImGui_TableColumnFlags_WidthFixed'), 46)
+    reaper.ImGui_TableSetupColumn(ctx, "Color",  TF('ImGui_TableColumnFlags_WidthFixed'), 96)
     reaper.ImGui_TableSetupColumn(ctx, startHeader, TF('ImGui_TableColumnFlags_WidthFixed'), 120)
     reaper.ImGui_TableSetupColumn(ctx, endHeader,   TF('ImGui_TableColumnFlags_WidthFixed'), 120)
 
