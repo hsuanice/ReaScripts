@@ -1,6 +1,6 @@
 --[[
 @description Monitor - Reorder or sort selected items vertically
-@version 0.7.0 Column Reorder
+@version 0.7.1 Fix Copy and Save to text column order but Copy and Shift Select broken
 @author hsuanice
 @about
   Shows a live table of the currently selected items and all sort-relevant fields:
@@ -40,7 +40,16 @@
 
 
 
+
 @changelog
+  v0.7.1
+    - Copy & Export (TSV/CSV) now follow the on-screen column order for all views (Live/BEFORE/AFTER).
+      • Headers use the current labels (e.g., Start/End reflect the active time display mode).
+      • Data rows output in the exact visual order (including after you drag-reorder columns).
+      • Safe fallback: if no mapping is available, exports use the classic fixed order.
+    - (If not yet applied) Shift-rectangle selection can be switched to use visual column positions too,
+      so selections align with your dragged column order.
+
   v0.7.0
     - Columns: Moved Start/End to appear right after Track Name by default (before Take Name/Item Note).
     - Column Reordering: You can now drag column headers to reorder them (ImGui TableFlags_Reorderable).
@@ -743,7 +752,6 @@ local function sel_rect_apply(rows, row_index_map, cur_guid, cur_col)
   local p1 = COL_POS[SEL.anchor.col] or SEL.anchor.col
   local p2 = COL_POS[cur_col] or cur_col
   local c1, c2 = math.min(p1, p2), math.max(p1, p2)
-
   for i = r1, r2 do
     local g = rows[i].__item_guid
     for pos = c1, c2 do
@@ -776,7 +784,7 @@ end
 local function copy_selection(rows, row_index_map)
   -- 找出被選的所有 (row,col)，並計算最小包圍矩形
   local minr, maxr = math.huge, -math.huge
-  local minp, maxp = math.huge, -math.huge  -- 畫面欄位位置
+  local minp, maxp = math.huge, -math.huge  -- visual position
   local selected = {}
   for guid_col, _ in pairs(SEL.cells) do
     local g, c = guid_col:match("^(.-):(%d+)$")
@@ -831,6 +839,69 @@ local function parse_clipboard_table(text)
     end
   end
   return rows
+end
+
+-- === Column order mapping (visual <-> logical) & header text ===
+-- COL_ORDER[display_index] = logical_col_id
+-- COL_POS[logical_col_id]  = display_index
+local COL_ORDER, COL_POS = {}, {}
+
+local function _col_header_label(col_id)
+  if col_id == 1  then return "#" end
+  if col_id == 2  then return "TrkID" end
+  if col_id == 3  then return "Track Name" end
+  if col_id == 4  then return "Take Name" end
+  if col_id == 5  then return "Item Note" end
+  if col_id == 6  then return "Source File" end
+  if col_id == 7  then return "Meta Track Name" end
+  if col_id == 8  then return "Chan#" end
+  if col_id == 9  then return "Interleave" end
+  if col_id == 10 then return "Mute" end
+  if col_id == 11 then return "Color" end
+  if col_id == 12 or col_id == 13 then
+    local sh, eh = TFLib.headers(TIME_MODE, {pattern=CUSTOM_PATTERN})
+    return (col_id == 12) and sh or eh
+  end
+  return tostring(col_id)
+end
+
+local function _colid_from_label(label)
+  -- 時間欄位標題是動態的，要先取出目前的 Start/End 名稱來比對
+  local sh, eh = TFLib.headers(TIME_MODE, {pattern=CUSTOM_PATTERN})
+  if label == "#"                then return 1 end
+  if label == "TrkID"            then return 2 end
+  if label == "Track Name"       then return 3 end
+  if label == "Take Name"        then return 4 end
+  if label == "Item Note"        then return 5 end
+  if label == "Source File"      then return 6 end
+  if label == "Meta Track Name"  then return 7 end
+  if label == "Chan#"            then return 8 end
+  if label == "Interleave"       then return 9 end
+  if label == "Mute"             then return 10 end
+  if label == "Color"            then return 11 end
+  if label == sh                 then return 12 end
+  if label == eh                 then return 13 end
+  return nil
+end
+
+-- 讀取目前表格（ImGui Table）的「顯示欄位順序」到 COL_ORDER/COL_POS
+local function rebuild_display_mapping()
+  COL_ORDER, COL_POS = {}, {}
+  local cnt = reaper.ImGui_TableGetColumnCount(ctx) or 0
+  for i = 0, cnt-1 do
+    local label = reaper.ImGui_TableGetColumnName(ctx, i) or ""
+    local id = _colid_from_label(label)
+    if id then
+      COL_ORDER[i+1] = id
+      COL_POS[id]    = i+1
+    end
+  end
+  -- 保險：如果讀不到（理論上不會），回退固定順序
+  if #COL_ORDER == 0 then
+    COL_ORDER = {1,2,3,4,5,6,7,8,9,10,11,12,13}
+    COL_POS   = {}
+    for i,id in ipairs(COL_ORDER) do COL_POS[id] = i end
+  end
 end
 
 
@@ -1235,29 +1306,21 @@ local function build_table_text(fmt, rows)
     return s
   end
 
-  -- header（加入 Mute / ColorHex）
-  out[#out+1] = table.concat({
-    "#","TrackIdx","TrackName","TakeName","ItemNote","Source File",
-    "MetaTrackName","Channel#","Interleave","Mute","ColorHex","StartTime","EndTime"
-  }, sep)
+  -- header：依目前畫面欄位順序輸出（若 mapping 尚未建立，回退固定順序）
+  local export_cols = (#COL_ORDER > 0) and COL_ORDER or {1,2,3,4,5,6,7,8,9,10,11,12,13}
+  local header = {}
+  for _, cid in ipairs(export_cols) do
+    header[#header+1] = _col_header_label(cid)
+  end
+  out[#out+1] = table.concat(header, sep)
 
-  -- rows
+  -- rows：依畫面順序輸出每列
   for i, r in ipairs(rows or {}) do
-    out[#out+1] = table.concat({
-      esc(i),
-      esc(r.track_idx),
-      esc(r.track_name),
-      esc(r.take_name),
-      esc(r.item_note or ""), -- NEW (0.5.0)
-      esc(r.file_name),
-      esc(r.meta_trk_name),
-      esc(r.channel_num or ""),
-      esc(r.interleave or ""),
-      esc(r.muted and "M" or ""),   -- 0.5.1: export M/blank
-      esc(r.color_hex or ""),
-      esc(format_time(r.start_time)),
-      esc(format_time(r.end_time)),
-    }, sep)
+    local line = {}
+    for _, cid in ipairs(export_cols) do
+      line[#line+1] = esc(get_cell_text(i, r, cid, fmt))
+    end
+    out[#out+1] = table.concat(line, sep)
   end
 
   return table.concat(out, "\n")
@@ -1374,7 +1437,7 @@ local function draw_table(rows, height)
   if reaper.ImGui_BeginTable(ctx, "live_table", 13, flags, -FLT_MIN, height or 360) then
     -- ★ 先取得動態表頭文字（m:s / TC / Beats / Custom）
     local startHeader, endHeader = TFLib.headers(TIME_MODE, {pattern=CUSTOM_PATTERN})
-    
+
     reaper.ImGui_TableSetupColumn(ctx, "#", TF('ImGui_TableColumnFlags_WidthFixed'), 28)
     reaper.ImGui_TableSetupColumn(ctx, "TrkID", TF('ImGui_TableColumnFlags_WidthFixed'), 44)
 
@@ -1396,9 +1459,9 @@ local function draw_table(rows, height)
 
 
     reaper.ImGui_TableHeadersRow(ctx)
-    rebuild_display_mapping()  -- ← 讀當前顯示順序（含使用者拖曳後）
+    rebuild_display_mapping()  -- ★ 讀取目前表格的欄位顯示順序
 
-        -- Build row-index map for selection math
+    -- Build row-index map for selection math
     local row_index_map = build_row_index_map(rows)
 
     -- 點擊單一格的統一處理：單擊＝選取；Shift＝矩形；Cmd/Ctrl＝增減
