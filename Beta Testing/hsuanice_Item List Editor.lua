@@ -1,6 +1,6 @@
 --[[
 @description Item List Editor
-@version 0.8.4 WIP
+@version 0.9.0 Add Column Presets
 @author hsuanice
 @about
   Shows a live, spreadsheet-style table of the currently selected items and all
@@ -40,6 +40,8 @@
 
 
 @changelog
+  v0.9.0
+    - add column presets
   v0.8.4
     - Refactor: Moved the paste dispatcher into the List Table library.
       • New LT.apply_paste(rows, dst, tbl, COL_ORDER, COL_POS, apply_cell_cb)
@@ -510,10 +512,7 @@ local function esc_pressed()
   return false
 end
 
--- tiny logger
-local function log(fmt, ...)
-  reaper.ShowConsoleMsg(string.format((fmt or "") .. "\n", ...))
-end
+
 
 -- Popup title（供 ESC 判斷與 BeginPopupModal 使用）
 local POPUP_TITLE = "Summary"
@@ -545,6 +544,52 @@ end
 -- Column order mapping (single source of truth)
 local COL_ORDER, COL_POS = {}, {}   -- visual→logical / logical→visual
 
+-- === Column Preset (save/load) ===
+local COL_PRESET_NAME = ""  -- 狀態列小字用：目前啟用的 preset 名稱；空字串表示尚未存
+
+local function _split_csv_nums(s)
+  local t = {}
+  for num in tostring(s or ""):gmatch("%d+") do t[#t+1] = tonumber(num) end
+  return t
+end
+
+-- 將目前畫面上的欄位順序（COL_ORDER）存成 preset
+local function save_col_preset(name)
+  name = name or "A"
+  -- 將 COL_ORDER 序列化成 "1,2,3,..."
+  local parts = {}
+  for i = 1, #COL_ORDER do parts[#parts+1] = tostring(COL_ORDER[i]) end
+  local payload = table.concat(parts, ",")
+  reaper.SetExtState(EXT_NS, "col_preset_" .. name, payload, true)
+  COL_PRESET_NAME = name
+end
+
+-- 讀取 preset 到 COL_ORDER/COL_POS（僅更新 Editor 這邊的序列，用於 Copy/Save 等）
+local function load_col_preset(name)
+  name = name or "A"
+  local payload = reaper.GetExtState(EXT_NS, "col_preset_" .. name)
+  if payload and payload ~= "" then
+    local order = _split_csv_nums(payload)
+    if #order > 0 then
+      COL_ORDER = order
+      COL_POS = {}
+      for vis, logical in ipairs(COL_ORDER) do
+        COL_POS[logical] = vis
+      end
+      COL_PRESET_NAME = name
+    end
+  end
+end
+
+-- 供 UI 顯示的小字狀態
+local function col_preset_status_text()
+  if COL_PRESET_NAME ~= "" then
+    return string.format("(preset %s)", COL_PRESET_NAME)
+  end
+  return "(columns not saved)"
+end
+
+
 
 -- === Preferences (persist across runs) ===
 local EXT_NS = "hsuanice_ItemListEditor"
@@ -566,6 +611,57 @@ local function load_prefs()
     elseif m == "custom" then TIME_MODE = TFLib.MODE.CUSTOM
     end
   end
+
+-- ===== BEGIN Column Preset helpers =====
+-- 把目前視覺欄序 COL_ORDER 存成 preset，或讀回來；給 toolbar 顯示小字狀態用。
+-- 這段僅依賴：EXT_NS, COL_ORDER, COL_POS 已在前面被宣告。
+
+local COL_PRESET_NAME = ""  -- 狀態小字用：目前使用中的 preset 名稱；空字表示未存
+
+local function _split_csv_nums(s)
+  local t = {}
+  for num in tostring(s or ""):gmatch("%d+") do t[#t+1] = tonumber(num) end
+  return t
+end
+
+-- 將現在畫面欄序存成 preset（可改成 A/B/C 等名稱）
+local function save_col_preset(name)
+  name = name or "A"
+  local parts = {}
+  for i = 1, #(COL_ORDER or {}) do parts[#parts+1] = tostring(COL_ORDER[i]) end
+  local payload = table.concat(parts, ",")
+  reaper.SetExtState(EXT_NS, "col_preset_" .. name, payload, true)
+  COL_PRESET_NAME = name
+end
+
+-- 讀取 preset → 回填到 COL_ORDER / COL_POS（供 Copy/Save/Paste 使用）
+local function load_col_preset(name)
+  name = name or "A"
+  local payload = reaper.GetExtState(EXT_NS, "col_preset_" .. name)
+  if payload and payload ~= "" then
+    local order = _split_csv_nums(payload)
+    if #order > 0 then
+      COL_ORDER = order
+      COL_POS = {}
+      for vis, logical in ipairs(COL_ORDER) do
+        if logical then COL_POS[logical] = vis end
+      end
+      COL_PRESET_NAME = name
+    end
+  end
+end
+
+-- 狀態小字：已存顯示 (preset X)，未存顯示 (columns not saved)
+local function col_preset_status_text()
+  if COL_PRESET_NAME ~= "" then
+    return string.format("(preset %s)", COL_PRESET_NAME)
+  end
+  return "(columns not saved)"
+end
+-- ===== END Column Preset helpers =====
+
+
+
   -- restore pattern
   local pat = reaper.GetExtState(EXT_NS, "custom_pattern")
   if pat and pat ~= "" then CUSTOM_PATTERN = pat end
@@ -582,7 +678,76 @@ local function load_prefs()
   -- restpre auto-refresh state
   local a = reaper.GetExtState(EXT_NS, "auto_refresh")
   if a ~= "" then AUTO = (a ~= "0") end
+
+  -- Column preset
+  load_col_preset("A")
 end
+
+-- === Column Preset (persist visual order across runs) ===
+-- Default logical order (match your current defaults):
+local DEFAULT_COL_ORDER = { 1,2,3,12,13,4,5,6,7,8,9,10,11 }
+
+-- Runtime cache
+local PRESET = nil          -- {logical_id,...} read from ExtState
+local LAST_SAVED_STR = nil  -- csv cache for quick compare
+local PRESET_STATUS = ""    -- "Preset ✓" / "Column not saved" 等小字提示
+
+local function _csv_from_order(order)
+  local t = {}
+  for i=1,#order do t[i] = tostring(order[i] or "") end
+  return table.concat(t, ",")
+end
+
+local function _order_from_csv(s)
+  local out = {}
+  for num in tostring(s or ""):gmatch("([^,]+)") do
+    local v = tonumber(num); if v then out[#out+1] = v end
+  end
+  return (#out > 0) and out or nil
+end
+
+local function _order_equal(a,b)
+  if not (a and b) then return false end
+  if #a ~= #b then return false end
+  for i=1,#a do if a[i] ~= b[i] then return false end end
+  return true
+end
+
+local function _normalize_full_order(order)
+  -- 確保包含 1..13 全部欄位，缺的補上（避免舊版本或不完整資料）
+  local seen, out = {}, {}
+  for i=1,#(order or {}) do
+    local v = tonumber(order[i]); if v and not seen[v] then seen[v]=true; out[#out+1]=v end
+  end
+  for id=1,13 do if not seen[id] then out[#out+1]=id end end
+  return out
+end
+
+local function load_col_preset()
+  local csv = reaper.GetExtState(EXT_NS, "col_preset")
+  local ord = _normalize_full_order(_order_from_csv(csv))
+  if ord then
+    PRESET = ord
+    LAST_SAVED_STR = _csv_from_order(ord)
+  else
+    PRESET = nil
+    LAST_SAVED_STR = nil
+  end
+end
+
+local function save_col_preset(order, note)
+  local ord = _normalize_full_order(order or COL_ORDER or DEFAULT_COL_ORDER)
+  local csv = _csv_from_order(ord)
+  reaper.SetExtState(EXT_NS, "col_preset", csv, true)
+  reaper.SetExtState(EXT_NS, "col_preset_saved_at", tostring(os.time()), true)
+  PRESET = ord
+  LAST_SAVED_STR = csv
+  PRESET_STATUS = note or "Preset ✓"
+end
+
+
+
+
 
 
 local function item_start(it) return reaper.GetMediaItemInfo_Value(it,"D_POSITION") end
@@ -1515,9 +1680,22 @@ if reaper.ImGui_Button(ctx, "Save .csv", 100, 24) then
 end
 
 reaper.ImGui_SameLine(ctx)
+-- [ANCHOR] Summary button cluster (REPLACED)
+reaper.ImGui_SameLine(ctx)
 if reaper.ImGui_Button(ctx, POPUP_TITLE, 100, 24) then
   reaper.ImGui_OpenPopup(ctx, POPUP_TITLE)
 end
+
+-- Summary 右側：Save preset + 小字狀態
+reaper.ImGui_SameLine(ctx)
+if reaper.ImGui_Button(ctx, "Save preset", 100, 24) then
+  -- 先固定存為 "A"；之後要做下拉多組 preset 再延伸
+  save_col_preset("A")
+end
+
+reaper.ImGui_SameLine(ctx)
+reaper.ImGui_TextDisabled(ctx, col_preset_status_text())
+
 
 
 
@@ -1535,30 +1713,67 @@ local function draw_table(rows, height)
     -- ★ 先取得動態表頭文字（m:s / TC / Beats / Custom）
     local startHeader, endHeader = TFLib.headers(TIME_MODE, {pattern=CUSTOM_PATTERN})
 
-    reaper.ImGui_TableSetupColumn(ctx, "#", TF('ImGui_TableColumnFlags_WidthFixed'), 28)
-    reaper.ImGui_TableSetupColumn(ctx, "TrkID", TF('ImGui_TableColumnFlags_WidthFixed'), 44)
+    -- 建一個依照「邏輯 ID」畫欄位的輔助函式
+    local function _setup_column_by_id(id)
+      if id == 1 then
+        reaper.ImGui_TableSetupColumn(ctx, "#", TF('ImGui_TableColumnFlags_WidthFixed'), 28)
+      elseif id == 2 then
+        reaper.ImGui_TableSetupColumn(ctx, "TrkID", TF('ImGui_TableColumnFlags_WidthFixed'), 44)
+      elseif id == 3 then
+        reaper.ImGui_TableSetupColumn(ctx, "Track Name", TF('ImGui_TableColumnFlags_WidthFixed'), 140)
+      elseif id == 4 then
+        reaper.ImGui_TableSetupColumn(ctx, "Take Name",  TF('ImGui_TableColumnFlags_WidthFixed'), 200)
+      elseif id == 5 then
+        reaper.ImGui_TableSetupColumn(ctx, "Item Note",  TF('ImGui_TableColumnFlags_WidthFixed'), 320)
+      elseif id == 6 then
+        reaper.ImGui_TableSetupColumn(ctx, "Source File", TF('ImGui_TableColumnFlags_WidthFixed'), 220)
+      elseif id == 7 then
+        reaper.ImGui_TableSetupColumn(ctx, "Meta Trk Name", TF('ImGui_TableColumnFlags_WidthFixed'), 160)
+      elseif id == 8 then
+        reaper.ImGui_TableSetupColumn(ctx, "Chan#", TF('ImGui_TableColumnFlags_WidthFixed'), 44)
+      elseif id == 9 then
+        reaper.ImGui_TableSetupColumn(ctx, "Interleave", TF('ImGui_TableColumnFlags_WidthFixed'), 60)
+      elseif id == 10 then
+        reaper.ImGui_TableSetupColumn(ctx, "Mute", TF('ImGui_TableColumnFlags_WidthFixed'), 46)
+      elseif id == 11 then
+        reaper.ImGui_TableSetupColumn(ctx, "Color", TF('ImGui_TableColumnFlags_WidthFixed'), 96)
+      elseif id == 12 then
+        local startHeader, _ = TFLib.headers(TIME_MODE, {pattern=CUSTOM_PATTERN})
+        reaper.ImGui_TableSetupColumn(ctx, startHeader, TF('ImGui_TableColumnFlags_WidthFixed'), 120)
+      elseif id == 13 then
+        local _, endHeader = TFLib.headers(TIME_MODE, {pattern=CUSTOM_PATTERN})
+        reaper.ImGui_TableSetupColumn(ctx, endHeader,   TF('ImGui_TableColumnFlags_WidthFixed'), 120)
+      end
+    end
 
-    -- 可編輯欄：給足閱讀寬度，固定寬內自動換行
-    reaper.ImGui_TableSetupColumn(ctx, "Track Name", TF('ImGui_TableColumnFlags_WidthFixed'), 140)
-    reaper.ImGui_TableSetupColumn(ctx, startHeader, TF('ImGui_TableColumnFlags_WidthFixed'), 120)
-    reaper.ImGui_TableSetupColumn(ctx, endHeader,   TF('ImGui_TableColumnFlags_WidthFixed'), 120)    
-    reaper.ImGui_TableSetupColumn(ctx, "Take Name",  TF('ImGui_TableColumnFlags_WidthFixed'), 200)
-    reaper.ImGui_TableSetupColumn(ctx, "Item Note",  TF('ImGui_TableColumnFlags_WidthFixed'), 320)
-
-    -- 其他資訊欄
-    reaper.ImGui_TableSetupColumn(ctx, "Source File",      TF('ImGui_TableColumnFlags_WidthFixed'), 220)
-    reaper.ImGui_TableSetupColumn(ctx, "Meta Trk Name",  TF('ImGui_TableColumnFlags_WidthFixed'), 160)
-    reaper.ImGui_TableSetupColumn(ctx, "Chan#",       TF('ImGui_TableColumnFlags_WidthFixed'), 44)
-    reaper.ImGui_TableSetupColumn(ctx, "Interleave",  TF('ImGui_TableColumnFlags_WidthFixed'), 60)
-
-    reaper.ImGui_TableSetupColumn(ctx, "Mute",   TF('ImGui_TableColumnFlags_WidthFixed'), 46)
-    reaper.ImGui_TableSetupColumn(ctx, "Color",  TF('ImGui_TableColumnFlags_WidthFixed'), 96)
+    -- 用「預設或使用者保存的順序」來建立欄位
+    local initial_order = _normalize_full_order(PRESET or DEFAULT_COL_ORDER)
+    for i=1,#initial_order do _setup_column_by_id(initial_order[i]) end
 
 
 
 
     -- 表頭
     reaper.ImGui_TableHeadersRow(ctx)
+
+    -- 先重建一遍（需要先知道目前視覺→邏輯）
+    rebuild_display_mapping()
+
+    -- 偵測：若現在畫面順序 != 上次保存的預設 → 立刻 Auto-save
+    do
+      local cur = COL_ORDER or {}
+      local cur_csv = _csv_from_order(cur)
+      if cur_csv ~= LAST_SAVED_STR and #cur > 0 then
+        save_col_preset(cur, "Preset ✓ (auto-saved)")
+      end
+      if PRESET and _order_equal(PRESET, cur) then
+        PRESET_STATUS = "Preset ✓"
+      else
+        PRESET_STATUS = "Column not saved"
+      end
+    end
+
+
 
     -- 這裡立刻重算顯示→邏輯的映射
     rebuild_display_mapping()
