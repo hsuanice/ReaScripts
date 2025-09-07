@@ -1,6 +1,6 @@
 --[[
 @description Item List Editor
-@version 0.8.2 Paste function Fixed
+@version 0.8.2.1 fix dual table issue
 @author hsuanice
 @about
   Shows a live, spreadsheet-style table of the currently selected items and all
@@ -40,6 +40,11 @@
 
 
 @changelog
+  v0.8.2.1
+    - Fix: Inline editing no longer renders two overlapping tables.
+      • Removed duplicate draw_table() call in the main loop.
+      • Double-click editing now stays stable in a single table (no “jumping” between lists).
+
   v0.8.2
     - Paste & Delete refactor to use LT destination lists:
       • Switched Editor to consume LT.build_dst_list_from_selection() results
@@ -1633,13 +1638,9 @@ local function loop()
 
   -- Top bar + Summary popup
   draw_toolbar()
-  draw_table(ROWS)
   draw_summary_popup()   -- ← 要保留這行
 
-
   local rows_to_show = ROWS
-
-
   draw_table(rows_to_show, 360)
 
   -- Clipboard shortcuts (when NOT in InputText editing)
