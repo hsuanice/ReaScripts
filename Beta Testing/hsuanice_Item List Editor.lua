@@ -1,6 +1,6 @@
 --[[
 @description Item List Editor
-@version 0.9.1 Column Presets (toolbar) + stability fixes
+@version 0.9.2 Named Column Presets (recallable; no auto-save)
 @author hsuanice
 @about
   Shows a live, spreadsheet-style table of the currently selected items and all
@@ -40,6 +40,14 @@
 
 
 @changelog
+  v0.9.2
+    - New: Named Column Presets with dropdown + explicit Recall / Save as… / Delete.
+      • Save with a user-defined name; multiple presets stored in ExtState.
+      • Recall applies the saved logical column order to the current session.
+      • Delete removes the selected preset from both index and storage.
+    - Behavior: Removed auto-save. ExtState only updates on user actions.
+    - UI: Preset controls live to the right of "Summary" (compact toolbar group).
+
   v0.9.1
     - New (UI): Added "Save preset" button and status text to the right of "Summary".
       • One-click saves the current on-screen column order (visual → logical) to ExtState.
@@ -569,6 +577,131 @@ local function save_prefs()
   reaper.SetExtState(EXT_NS, "auto_refresh", AUTO and "1" or "0", true)
 end
 
+-- ===== BEGIN Column Presets (named) =====
+-- Persist multiple named presets. No auto-save. Recall explicitly by user.
+-- Keys:
+--   col_presets             = "name1|name2|..."
+--   col_preset_active       = last selected name (optional)
+--   col_preset.<sanitized>  = "1,2,3,...,13" (logical column IDs)
+
+local PRESETS, PRESET_SET = {}, {}     -- list + set of names
+local ACTIVE_PRESET = nil              -- string or nil
+local PRESET_STATUS = "No preset"
+local PRESET_NAME_BUF = ""             -- popup input buffer
+
+local function _csv_from_order(order)
+  local t = {}
+  for i=1,#(order or {}) do t[i] = tostring(order[i]) end
+  return table.concat(t, ",")
+end
+
+local function _order_from_csv(s)
+  local out = {}
+  for num in tostring(s or ""):gmatch("([^,]+)") do
+    local v = tonumber(num); if v then out[#out+1] = v end
+  end
+  return (#out > 0) and out or nil
+end
+
+local function _normalize_full_order(order)
+  local seen, out = {}, {}
+  for i=1,#(order or {}) do
+    local v = tonumber(order[i]); if v and not seen[v] then seen[v]=true; out[#out+1]=v end
+  end
+  for id=1,13 do if not seen[id] then out[#out+1]=id end end
+  return out
+end
+
+local function _sanitize_name(name)
+  name = (name or ""):gsub("^%s+",""):gsub("%s+$",""):gsub("[%c\r\n]","")
+  return name
+end
+
+local function _key_for(name)
+  local safe = name:gsub("[^%w%._%-]", "_") -- spaces & specials -> "_"
+  return "col_preset." .. safe
+end
+
+local function _preset_load_index()
+  PRESETS, PRESET_SET = {}, {}
+  local s = reaper.GetExtState(EXT_NS, "col_presets") or ""
+  for name in s:gmatch("([^|]+)") do
+    name = _sanitize_name(name)
+    if name ~= "" and not PRESET_SET[name] then
+      PRESETS[#PRESETS+1] = name
+      PRESET_SET[name] = true
+    end
+  end
+  table.sort(PRESETS, function(a,b) return a:lower()<b:lower() end)
+end
+
+local function _preset_save_index()
+  reaper.SetExtState(EXT_NS, "col_presets", table.concat(PRESETS, "|"), true)
+end
+
+local function preset_save_as(name, order)
+  name = _sanitize_name(name)
+  if name == "" then PRESET_STATUS = "Name required"; return false end
+  order = _normalize_full_order(order or COL_ORDER)
+  reaper.SetExtState(EXT_NS, _key_for(name), _csv_from_order(order), true)
+  if not PRESET_SET[name] then
+    PRESET_SET[name]=true; PRESETS[#PRESETS+1]=name; table.sort(PRESETS, function(a,b) return a:lower()<b:lower() end)
+    _preset_save_index()
+  end
+  ACTIVE_PRESET = name
+  reaper.SetExtState(EXT_NS, "col_preset_active", name, true)
+  PRESET_STATUS = "Saved: "..name
+  return true
+end
+
+local function preset_recall(name)
+  name = _sanitize_name(name)
+  if name == "" then PRESET_STATUS = "No preset selected"; return false end
+  local payload = reaper.GetExtState(EXT_NS, _key_for(name))
+  local ord = _order_from_csv(payload)
+  if ord and #ord>0 then
+    ord = _normalize_full_order(ord)
+    COL_ORDER = ord
+    COL_POS = {}
+    for vis,id in ipairs(ord) do if id then COL_POS[id]=vis end end
+    ACTIVE_PRESET = name
+    reaper.SetExtState(EXT_NS, "col_preset_active", name, true)
+    PRESET_STATUS = "Preset: "..name
+    return true
+  end
+  PRESET_STATUS = "Preset not found"
+  return false
+end
+
+local function preset_delete(name)
+  name = _sanitize_name(name)
+  if name == "" then return end
+  reaper.DeleteExtState(EXT_NS, _key_for(name), true)
+  if PRESET_SET[name] then
+    PRESET_SET[name] = nil
+    for i,n in ipairs(PRESETS) do if n==name then table.remove(PRESETS, i); break end end
+    _preset_save_index()
+  end
+  if ACTIVE_PRESET == name then
+    ACTIVE_PRESET = nil
+    reaper.SetExtState(EXT_NS, "col_preset_active", "", true)
+  end
+  PRESET_STATUS = "Deleted: "..name
+end
+
+local function presets_init()
+  _preset_load_index()
+  local last = reaper.GetExtState(EXT_NS, "col_preset_active")
+  if last and last ~= "" then
+    if not preset_recall(last) then PRESET_STATUS = "No preset" end
+  else
+    PRESET_STATUS = (#PRESETS>0) and ("Preset: "..PRESETS[1]) or "No preset"
+  end
+end
+-- ===== END Column Presets (named) =====
+
+
+
 local function load_prefs()
   -- restore mode
   local m = reaper.GetExtState(EXT_NS, "time_mode")
@@ -581,53 +714,6 @@ local function load_prefs()
     end
   end
 
--- ===== BEGIN Column Preset helpers =====
--- 把目前視覺欄序 COL_ORDER 存成 preset，或讀回來；給 toolbar 顯示小字狀態用。
--- 這段僅依賴：EXT_NS, COL_ORDER, COL_POS 已在前面被宣告。
-
-
-
-local function _split_csv_nums(s)
-  local t = {}
-  for num in tostring(s or ""):gmatch("%d+") do t[#t+1] = tonumber(num) end
-  return t
-end
-
--- 將現在畫面欄序存成 preset（可改成 A/B/C 等名稱）
-local function save_col_preset(name)
-  name = name or "A"
-  local parts = {}
-  for i = 1, #(COL_ORDER or {}) do parts[#parts+1] = tostring(COL_ORDER[i]) end
-  local payload = table.concat(parts, ",")
-  reaper.SetExtState(EXT_NS, "col_preset_" .. name, payload, true)
-  COL_PRESET_NAME = name
-end
-
--- 讀取 preset → 回填到 COL_ORDER / COL_POS（供 Copy/Save/Paste 使用）
-local function load_col_preset(name)
-  name = name or "A"
-  local payload = reaper.GetExtState(EXT_NS, "col_preset_" .. name)
-  if payload and payload ~= "" then
-    local order = _split_csv_nums(payload)
-    if #order > 0 then
-      COL_ORDER = order
-      COL_POS = {}
-      for vis, logical in ipairs(COL_ORDER) do
-        if logical then COL_POS[logical] = vis end
-      end
-      COL_PRESET_NAME = name
-    end
-  end
-end
-
--- 狀態小字：已存顯示 (preset X)，未存顯示 (columns not saved)
-local function col_preset_status_text()
-  if COL_PRESET_NAME ~= "" then
-    return string.format("(preset %s)", COL_PRESET_NAME)
-  end
-  return "(columns not saved)"
-end
--- ===== END Column Preset helpers =====
 
 
 
@@ -648,8 +734,8 @@ end
   local a = reaper.GetExtState(EXT_NS, "auto_refresh")
   if a ~= "" then AUTO = (a ~= "0") end
 
-  -- Column preset (new API, no args)
-  load_col_preset()
+  -- Column presets (named) — initialize index and optionally recall last active
+  presets_init()
 end
 
 -- === Column Preset (persist visual order across runs) ===
@@ -1655,11 +1741,72 @@ if reaper.ImGui_Button(ctx, POPUP_TITLE, 100, 24) then
   reaper.ImGui_OpenPopup(ctx, POPUP_TITLE)
 end
 
--- Summary 右側：Save preset + 小字狀態（使用新版 API）
+-- === Column Presets UI (right of Summary) ===
 reaper.ImGui_SameLine(ctx)
-if reaper.ImGui_Button(ctx, "Save preset", 100, 24) then
-  -- 新版 API：把目前畫面欄序 COL_ORDER 傳入，並寫個狀態訊息
-  save_col_preset(COL_ORDER, "Preset ✓ (manual)")
+reaper.ImGui_Text(ctx, "Preset:")
+reaper.ImGui_SameLine(ctx)
+do
+  local current = ACTIVE_PRESET or "(none)"
+  reaper.ImGui_SetNextItemWidth(ctx, 160)
+  if reaper.ImGui_BeginCombo(ctx, "##colpreset_combo", current) then
+    -- "(none)" option
+    local sel = (ACTIVE_PRESET == nil)
+    if reaper.ImGui_Selectable(ctx, "(none)", sel) then ACTIVE_PRESET = nil; PRESET_STATUS = "No preset" end
+    reaper.ImGui_Separator(ctx)
+    for i, name in ipairs(PRESETS) do
+      local selected = (name == ACTIVE_PRESET)
+      if reaper.ImGui_Selectable(ctx, name, selected) then
+        ACTIVE_PRESET = name
+      end
+    end
+    reaper.ImGui_EndCombo(ctx)
+  end
+end
+
+reaper.ImGui_SameLine(ctx)
+if reaper.ImGui_Button(ctx, "Recall", 72, 24) then
+  if not ACTIVE_PRESET or ACTIVE_PRESET=="" then
+    PRESET_STATUS = "No preset selected"
+  else
+    preset_recall(ACTIVE_PRESET)
+  end
+end
+
+reaper.ImGui_SameLine(ctx)
+if reaper.ImGui_Button(ctx, "Save as…", 88, 24) then
+  PRESET_NAME_BUF = ACTIVE_PRESET or PRESET_NAME_BUF or ""
+  reaper.ImGui_OpenPopup(ctx, "Save preset as")
+end
+
+reaper.ImGui_SameLine(ctx)
+local can_delete = (ACTIVE_PRESET and ACTIVE_PRESET~="")
+if reaper.ImGui_BeginDisabled(ctx, not can_delete) then end
+if reaper.ImGui_Button(ctx, "Delete", 68, 24) and can_delete then
+  preset_delete(ACTIVE_PRESET)
+end
+if reaper.ImGui_EndDisabled then reaper.ImGui_EndDisabled(ctx) end
+
+reaper.ImGui_SameLine(ctx)
+reaper.ImGui_TextDisabled(ctx, PRESET_STATUS or "")
+
+-- Save-as popup
+if reaper.ImGui_BeginPopupModal(ctx, "Save preset as", true, TF('ImGui_WindowFlags_AlwaysAutoResize')) then
+  reaper.ImGui_Text(ctx, "Preset name:")
+  reaper.ImGui_SetNextItemWidth(ctx, 220)
+  PRESET_NAME_BUF = PRESET_NAME_BUF or ""
+  local changed, txt = reaper.ImGui_InputText(ctx, "##presetname", PRESET_NAME_BUF)
+  if changed then PRESET_NAME_BUF = txt end
+
+  if reaper.ImGui_Button(ctx, "Save", 82, 24) then
+    if preset_save_as(PRESET_NAME_BUF, COL_ORDER) then
+      reaper.ImGui_CloseCurrentPopup(ctx)
+    end
+  end
+  reaper.ImGui_SameLine(ctx)
+  if reaper.ImGui_Button(ctx, "Cancel", 82, 24) then
+    reaper.ImGui_CloseCurrentPopup(ctx)
+  end
+  reaper.ImGui_EndPopup(ctx)
 end
 
 reaper.ImGui_SameLine(ctx)
