@@ -3,7 +3,7 @@ hsuanice_List Table.lua
 Minimal helper library for Item List Editor
 (No UI. Pure helpers for columns/selection/clipboard/paste/export.)
 Exports a single table: LT = { ... }
-
+@version 0.2.0
 @about
   hsuanice_List Table.lua — Minimal helper library for Item List Editor.
   Provides pure, side-effect-free utilities (no UI, no REAPER writes).
@@ -25,6 +25,8 @@ Exports a single table: LT = { ... }
     focused on UI and REAPER state changes only.
 
 @changelog
+  v0.2.0 
+    - Add 貼上動作的分流（dispatcher）
   v0.1.0
     - Initial release of hsuanice_List Table library.
     - Provides pure helper functions for Item List Editor (no UI, no REAPER writes).
@@ -43,7 +45,7 @@ Exports a single table: LT = { ... }
 
 
 local LT = {}
-LT.VERSION = "0.1.0"
+LT.VERSION = "0.2.0"
 ------------------------------------------------------------
 -- Columns: visual <-> logical mapping
 ------------------------------------------------------------
@@ -285,6 +287,74 @@ function LT.build_dst_by_anchor_and_shape(rows, anchor, src_h, src_w)
   return dst
 end
 
+-- Apply paste according to Excel-like rules.
+-- rows: 可見列（Editor 依 UI 狀態傳入）
+-- dst:  目標格列表（行優先、左到右），通常由 LT.build_dst_list_from_selection() 回傳
+-- tbl:  2D 來源（parse_clipboard_table 的結果）
+-- COL_ORDER/COL_POS: 視覺欄序映射（維持與畫面一致）
+-- apply_cell_cb(d, value): 實際寫入一格的 callback（由 Editor 提供）
+function LT.apply_paste(rows, dst, tbl, COL_ORDER, COL_POS, apply_cell_cb)
+  -- 前置：將來源扁平化並取得形狀
+  local src   = LT.flatten_tsv_to_list(tbl)
+  if #src == 0 or #dst == 0 then return 0 end
+  local src_h, src_w = LT.src_shape_dims(tbl)
+
+  local function spill_from_anchor(anchor_desc, only_writable)
+    local ddst
+    if only_writable then
+      -- 僅 3/4/5 欄（可寫）
+      ddst = LT.build_dst_spill_writable(rows, anchor_desc, src_h, src_w, COL_ORDER, COL_POS)
+    else
+      -- 依來源形狀完整展開（所有欄；實際寫回交給 apply_cell_cb 決定要不要忽略）
+      ddst = LT.build_dst_by_anchor_and_shape(rows, anchor_desc, src_h, src_w, COL_ORDER, COL_POS)
+    end
+    local n = math.min(#src, #ddst)
+    for k = 1, n do apply_cell_cb(ddst[k], src[k]) end
+    return n
+  end
+
+  local written = 0
+  if #src == 1 then
+    -- 單值 → 填滿選取
+    local v = src[1]
+    for i = 1, #dst do apply_cell_cb(dst[i], v); written = written + 1 end
+
+  elseif #dst == 1 then
+    -- 多值 → 單一目標格：以該格為錨點 spill（僅可寫欄位）
+    written = written + spill_from_anchor(dst[1], true)
+
+  elseif #dst < #src then
+    -- 來源大於目標：以選取「最左上」為錨點 spill（僅可寫欄位）
+    written = written + spill_from_anchor(dst[1], true)
+
+  elseif src_h == 1 then
+    -- 單列來源 → fill-down：每一列取前 src_w 格逐列套用
+    -- 先按列分組，再由左到右對應
+    local by_row = {}
+    for _, d in ipairs(dst) do
+      local t = by_row[d.row_index]; if not t then t = {}; by_row[d.row_index] = t end
+      t[#t+1] = d
+    end
+    for _, cells in pairs(by_row) do
+      table.sort(cells, function(a,b)
+        local pa = (COL_POS and COL_POS[a.col]) or a.col
+        local pb = (COL_POS and COL_POS[b.col]) or b.col
+        return pa < pb
+      end)
+      local m = math.min(#cells, src_w)
+      for j = 1, m do apply_cell_cb(cells[j], (tbl[1] and tbl[1][j]) or ""); written = written + 1 end
+    end
+
+  else
+    -- 多對多：row-major 一一對應
+    local n = math.min(#src, #dst)
+    for k = 1, n do apply_cell_cb(dst[k], src[k]); written = written + 1 end
+  end
+
+  return written
+end
+
+
 ------------------------------------------------------------
 -- Summary helpers (pure aggregation; no UI/formatting)
 ------------------------------------------------------------
@@ -347,5 +417,3 @@ function LT.build_table_text(fmt, rows, COL_ORDER, header_label_from_id, get_cel
 end
 
 return LT
-
-
