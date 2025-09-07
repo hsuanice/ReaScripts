@@ -3,7 +3,7 @@ hsuanice_List Table.lua
 Minimal helper library for Item List Editor
 (No UI. Pure helpers for columns/selection/clipboard/paste/export.)
 Exports a single table: LT = { ... }
-@version 0.2.1
+@version 0.2.2
 @about
   hsuanice_List Table.lua — Minimal helper library for Item List Editor.
   Provides pure, side-effect-free utilities (no UI, no REAPER writes).
@@ -25,6 +25,15 @@ Exports a single table: LT = { ... }
     focused on UI and REAPER state changes only.
 
 @changelog
+  v0.2.2
+    - Paste spill now honors VISUAL column order:
+      • LT.build_dst_spill_writable(): expands to the right by on-screen order,
+        but only into writable columns (3=Track, 4=Take, 5=Item Note).
+      • LT.build_dst_by_anchor_and_shape(): expands by visual positions for
+        all-columns mapping (many-to-many), keeping row-major order stable.
+    - This fixes cases where Take Name and Item Note were swapped: pasting a
+      2-column source into a single Take Name cell now spills into the next
+      writable column on screen (which is Item Note after the swap).
   v0.2.1
     - Added LT.build_dst_spill_writable(): Excel-style spill expansion limited
       to writable columns (3=Track, 4=Take, 5=Item Note).
@@ -52,7 +61,7 @@ Exports a single table: LT = { ... }
 
 
 local LT = {}
-LT.VERSION = "0.2.1"
+LT.VERSION = "0.2.2"
 ------------------------------------------------------------
 -- Columns: visual <-> logical mapping
 ------------------------------------------------------------
@@ -263,73 +272,93 @@ end
 ------------------------------------------------------------
 -- anchor: { guid=..., col=..., row_index=..., visual_pos=... }  (caller may pass any subset;
 --         if row_index/visual_pos missing we recompute from rows/COL_ORDER)
-function LT.build_dst_by_anchor_and_shape(rows, anchor, src_h, src_w)
-  if not (rows and anchor and src_h and src_w) then return {} end
-  local writable = { [3]=true, [4]=true, [5]=true }
-  -- compute anchor row index if missing
+-- Expand by anchor & shape over ALL columns, following VISUAL left→right.
+function LT.build_dst_by_anchor_and_shape(rows, anchor, src_h, src_w, COL_ORDER, COL_POS)
+  if not (rows and anchor and src_h and src_w and COL_ORDER and COL_POS) then return {} end
+
   local r0 = anchor.row_index or 1
-  if not anchor.row_index and anchor.guid then
-    for i, row in ipairs(rows) do if row.__item_guid == anchor.guid then r0 = i break end end
+  if (not anchor.row_index) and anchor.guid then
+    for i, row in ipairs(rows) do
+      if row.__item_guid == anchor.guid then r0 = i; break end
+    end
   end
-  -- compute first writable logical col at/after anchor.col (fallback to 3)
-  local start_col = 3
-  if type(anchor.col)=="number" and writable[anchor.col] then start_col = anchor.col
-  else
-    for _, cid in ipairs({anchor.col, 3,4,5}) do if type(cid)=="number" and writable[cid] then start_col = cid break end end
-  end
+  local colA = anchor.col or 1
+  local posA = (COL_POS and COL_POS[colA]) or colA
 
   local dst = {}
   local rmax = math.min(#rows, r0 + src_h - 1)
+  local pmax = #COL_ORDER
+
   for ri = r0, rmax do
-    local g = rows[ri].__item_guid
-    local wrote = 0
-    for logical = start_col, 5 do
-      if writable[logical] then
-        dst[#dst+1] = { guid = g, col = logical, row_index = ri }
-        wrote = wrote + 1
-        if wrote >= src_w then break end
+    for j = 0, src_w - 1 do
+      local pos = posA + j
+      if pos > pmax then break end           -- 視覺上超過右界，截斷
+      local logical = COL_ORDER[pos]
+      if logical then
+        dst[#dst+1] = { row_index = ri, col = logical, row = rows[ri] }
       end
     end
   end
+
+  table.sort(dst, function(a,b)
+    if a.row_index ~= b.row_index then return a.row_index < b.row_index end
+    local pa = (COL_POS and COL_POS[a.col]) or a.col
+    local pb = (COL_POS and COL_POS[b.col]) or b.col
+    return pa < pb
+  end)
+
   return dst
 end
 
--- Spill by anchor & shape (Excel-style), writable cols only (3/4/5)
+-- Spill by anchor & shape (Excel-style), but ONLY into writable cols (3/4/5),
+-- and strictly follow the current VISUAL order (COL_ORDER/COL_POS).
 function LT.build_dst_spill_writable(rows, anchor, src_h, src_w, COL_ORDER, COL_POS)
-  if not (rows and anchor and src_h and src_w) then return {} end
-  local writable = { [3]=true, [4]=true, [5]=true }
+  if not (rows and anchor and src_h and src_w and COL_ORDER and COL_POS) then return {} end
 
-  -- 確定 anchor 的 row index
+  local WRITABLE = { [3]=true, [4]=true, [5]=true }
+
+  -- 1) 取得 anchor 的 row_index 與「視覺位置」posA
   local r0 = anchor.row_index or 1
-  if not anchor.row_index and anchor.guid then
+  if (not anchor.row_index) and anchor.guid then
     for i, row in ipairs(rows) do
-      if row.__item_guid == anchor.guid then r0 = i break end
+      if row.__item_guid == anchor.guid then r0 = i; break end
     end
   end
 
-  -- 確定起始欄位（必須是可寫欄；fallback 到 3）
-  local start_col = 3
-  if type(anchor.col)=="number" and writable[anchor.col] then
-    start_col = anchor.col
-  else
-    for _, cid in ipairs({anchor.col, 3,4,5}) do
-      if type(cid)=="number" and writable[cid] then start_col = cid break end
-    end
-  end
+  local colA = anchor.col or 3
+  local posA = (COL_POS and COL_POS[colA]) or colA  -- anchor 在畫面中的位置（1-based）
 
+  -- 2) 從畫面右邊開始找「可寫欄」的視覺位置，依序收集 src_w 個
+  local vis_targets = {}
+  local pos = posA
+  while #vis_targets < src_w and pos <= #COL_ORDER do
+    local logical = COL_ORDER[pos]
+    if logical and WRITABLE[logical] then
+      vis_targets[#vis_targets+1] = logical
+    end
+    pos = pos + 1
+  end
+  -- 若右邊不夠欄就截斷（符合你一直以來「不換行、不環繞」的規則）
+  if #vis_targets == 0 then return {} end
+
+  -- 3) 產生目的地清單：每一列都用同一組 vis_targets
   local dst = {}
   local rmax = math.min(#rows, r0 + src_h - 1)
   for ri = r0, rmax do
-    local g = rows[ri].__item_guid
-    local wrote = 0
-    for logical = start_col, 5 do
-      if writable[logical] then
-        dst[#dst+1] = { guid = g, col = logical, row_index = ri }
-        wrote = wrote + 1
-        if wrote >= src_w then break end
-      end
+    for j = 1, math.min(#vis_targets, src_w) do
+      local col = vis_targets[j]
+      dst[#dst+1] = { row_index = ri, col = col, row = rows[ri] }
     end
   end
+
+  -- 4) 穩定排序（行優先、視覺位置往右）
+  table.sort(dst, function(a,b)
+    if a.row_index ~= b.row_index then return a.row_index < b.row_index end
+    local pa = (COL_POS and COL_POS[a.col]) or a.col
+    local pb = (COL_POS and COL_POS[b.col]) or b.col
+    return pa < pb
+  end)
+
   return dst
 end
 
