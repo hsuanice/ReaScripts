@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<index version="1" name="hsuanice Scripts" commit="f911484dc1e4385a4087a67fe873479bad077e0a">
+<index version="1" name="hsuanice Scripts" commit="13dc0987448c8a61eacfb0c8b3284cb078294c8a">
   <category name="Beta Testing">
     <reapack name="hsuanice_BWF TimeReference Embed Tool.lua" type="script" desc="Embed BWF TimeReference to Active take from Take 1 or Current Position TC">
       <version name="0.7.1" author="hsuanice" time="2025-08-14T17:52:57Z">
@@ -1056,6 +1056,25 @@ v0.9.0 - Added Shared Link State section from Project ExtState "hsuanice_Link".]
       </version>
       <version name="0.9.5-driver" author="hsuanice" time="2025-08-23T10:54:41Z">
         <source main="main">https://github.com/hsuanice/ReaScripts/raw/4cbf0bc3b73b3663d34432f20539549b13c5bfc7/Beta%20Testing/hsuanice_Track%20and%20Razor%20Item%20Link%20Monitor.lua</source>
+      </version>
+    </reapack>
+  </category>
+  <category name="Library">
+    <reapack name="hsuanice_List Table.lua" type="script" desc="Item List Editor">
+      <metadata>
+        <description><![CDATA[{\rtf1\ansi\deff0{\fonttbl{\f0 \fswiss Helvetica;}{\f1 \fmodern Courier;}}
+{\colortbl;\red255\green0\blue0;\red0\green0\blue255;}
+\widowctrl\hyphauto
+
+{\pard \ql \f0 \sa180 \li0 \fi0 Shows a live, spreadsheet-style table of the currently selected items and all sort-relevant fields: \u8226 ? Track Index / Track Name \u8226 ? Take Name \u8226 ? Item Note \u8226 ? Source File \u8226 ? Metadata Track Name (resolved by Interleave, Wave Agent\u8211-style) \u8226 ? Channel Number (recorder channel, TRK#) \u8226 ? Interleave (1..N from REAPER take channel mode: Mono-of-N) \u8226 ? Item Start / End (toggle display format)\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 Features: \u8226 ? Inline editing of Track Name, Take Name, and Item Note \u8226 ? Excel-like selection model (click, Shift rectangle, Cmd/Ctrl multi-select) \u8226 ? Copy and Paste with spill/fill rules, one undo per operation \u8226 ? Drag-reorderable columns; Copy/Export follows on-screen order \u8226 ? Export or Copy as TSV/CSV \u8226 ? Summary popup: item count, total span, total length, position range \u8226 ? Option to hide muted items (rows are filtered, not removed)\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 Time display modes: \u8226 ? m:s (minutes:seconds), Timecode, Beats, or Custom pattern \u8226 ? Custom pattern tokens: h, hh \u8211- hours (unpadded / two-digit) m, mm \u8211- minutes (0\u8211-59) s, ss \u8211- seconds (0\u8211-59) S\u8230 ? \u8211- fractional seconds, digits = precision (e.g. SSS = milliseconds) Examples: hh:mm:ss \u8594 ? 01:23:45 h:mm \u8594 ? 1:23 mm:ss.SSS \u8594 ? 83:07.250\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 Requires: ReaImGui (install via ReaPack) Reference: Script: zaibuyidao_Display Total Length Of Selected Items.lua\par}
+}
+]]></description>
+      </metadata>
+      <version name="0.8.0" author="hsuanice" time="2025-09-07T05:15:31Z">
+        <source main="main">https://github.com/hsuanice/ReaScripts/raw/13dc0987448c8a61eacfb0c8b3284cb078294c8a/Library/hsuanice_List%20Table.lua</source>
       </version>
     </reapack>
   </category>
