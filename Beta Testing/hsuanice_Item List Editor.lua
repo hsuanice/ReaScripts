@@ -1,6 +1,6 @@
 --[[
 @description Item List Editor
-@version 0.8.3.1
+@version 0.8.4 WIP
 @author hsuanice
 @about
   Shows a live, spreadsheet-style table of the currently selected items and all
@@ -40,6 +40,15 @@
 
 
 @changelog
+  v0.8.4
+    - Refactor: Moved the paste dispatcher into the List Table library.
+      • New LT.apply_paste(rows, dst, tbl, COL_ORDER, COL_POS, apply_cell_cb)
+        routes all cases (single fill, single-cell spill, block spill, fill-down,
+        many-to-many) and honors visual column order and visible-row filtering.
+      • Editor now only provides the visible rows, destination list, column
+        mapping, and a small apply_cell() that writes Track/Take/Item Note.
+    - Behavior unchanged by design; tests cover single/multi cell, spill/fill,
+      Show-muted filtering, and column reordering.
   v0.8.3.1
     - Clean refactor: Editor’s Copy/Save (TSV/CSV) now calls LT.build_table_text()
       directly instead of a local stub.
@@ -526,7 +535,10 @@ local _trim               -- ← 新增：先宣告 _trim，供前面函式當�
 if SHOW_MUTED_ITEMS == nil then SHOW_MUTED_ITEMS = true end
 
 
-
+-- log
+local function log(fmt, ...)
+  reaper.ShowConsoleMsg((fmt.."\n"):format(...))
+end
 
 
 
@@ -687,6 +699,37 @@ end
 
 -- forward locals (避免之後被重新 local 化)
 ROWS = {}
+
+
+
+-- ===== Debug: dump current on-screen column order =====
+local __last_order_dump = ""
+local function dump_order_once()
+  local parts = {}
+  for i, id in ipairs(COL_ORDER or {}) do
+    parts[#parts+1] = string.format("%d:%d", i, id) -- visual_index:logical_col_id
+  end
+  local s = "[ORDER] " .. table.concat(parts, ", ")
+  if s ~= __last_order_dump then
+    reaper.ShowConsoleMsg(s .. "\n")
+    __last_order_dump = s
+  end
+end
+
+-- 可附帶標籤與 COL_POS 的即時輸出
+local function dump_cols(tag)
+  local a = {}
+  for i, id in ipairs(COL_ORDER or {}) do a[#a+1] = string.format("%d:%d", i, id) end
+  reaper.ShowConsoleMsg(string.format("[%s][ORDER] %s\n", tag or "?", table.concat(a, ", ")))
+  local b = {}
+  if COL_POS then
+    for id, pos in pairs(COL_POS) do b[#b+1] = string.format("%d->%d", id, pos) end
+    table.sort(b)
+    reaper.ShowConsoleMsg(string.format("[%s][POS]   %s\n", tag or "?", table.concat(b, ", ")))
+  end
+end
+
+
 
 ---------------------------------------
 -- Selection scan
@@ -961,6 +1004,42 @@ local function header_label_from_id(col_id)
   return tostring(col_id)
 end
 
+-- === Header label helpers (for mapping display order) ===
+-- 依你目前的邏輯欄位 ID 來填；4/5/12/13 的 Start/End 會用 FORMAT 抬頭
+local HEADER_BY_ID = {
+  [1]  = "#",
+  [2]  = "TrkID",
+  [3]  = "Track Name",
+  [4]  = "Take Name",
+  [5]  = "Item Note",
+  [6]  = "Source File",
+  [7]  = "Meta Trk Name",
+  [8]  = "Chan#",
+  [9]  = "Interleave",
+  [10] = "Mute",
+  [11] = "Color",
+  [12] = nil,  -- Start (動態)
+  [13] = nil,  -- End   (動態)
+}
+
+local function current_start_label()
+  -- 這裡沿用你畫抬頭用的同一套邏輯 / TFLib
+  if TIME_MODE == TFLib.MODE.MS      then return "Start (m:s)"
+  elseif TIME_MODE == TFLib.MODE.TC  then return "Start (TC)"
+  elseif TIME_MODE == TFLib.MODE.BEATS then return "Start (Beats)"
+  elseif TIME_MODE == TFLib.MODE.CUSTOM then return ("Start (%s)"):format(CUSTOM_PATTERN or "")
+  else return "Start (s)" end
+end
+
+
+local function label_for_id(id)
+  if id == 12 then return current_start_label()
+  elseif id == 13 then return current_end_label()
+  else return HEADER_BY_ID[id] end
+end
+
+
+
 local function _colid_from_label(label)
   -- 時間欄位標題是動態的，要先取出目前的 Start/End 名稱來比對
   local sh, eh = TFLib.headers(TIME_MODE, {pattern=CUSTOM_PATTERN})
@@ -980,23 +1059,38 @@ local function _colid_from_label(label)
   return nil
 end
 
--- 讀取目前表格（ImGui Table）的「顯示欄位順序」到 COL_ORDER/COL_POS
+-- 讀取「顯示欄位順序」→ COL_ORDER / COL_POS
+-- COL_ORDER[display_pos] = logical_col_id
+-- COL_POS[logical_col_id] = display_pos
+-- 這個函式放在 Editor 檔案頂層（有 ctx 與 _colid_from_label 可用的範圍）
 local function rebuild_display_mapping()
-  COL_ORDER, COL_POS = {}, {}
+  -- 用 Library 的：回傳顯示序 → 邏輯 id 映射 & 反向位置表
+  COL_ORDER, COL_POS = LT.rebuild_display_mapping(ctx, _colid_from_label)
+
+  -- 可選：Debug 輸出一次，確認真的會變
+  if COL_ORDER then
+    local parts = {}
+    for i, id in ipairs(COL_ORDER) do parts[#parts+1] = string.format("%d:%s", i, tostring(id)) end
+    reaper.ShowConsoleMsg("[ORDER] " .. table.concat(parts, ", ") .. "\n")
+  end
+
   local cnt = reaper.ImGui_TableGetColumnCount(ctx) or 0
-  for i = 0, cnt-1 do
-    local label = reaper.ImGui_TableGetColumnName(ctx, i) or ""
+  for display_pos = 0, cnt - 1 do
+    -- 先把「目前欄位」切到畫面上的第 display_pos 個
+    reaper.ImGui_TableSetColumnIndex(ctx, display_pos)
+    -- 直接用「當前欄」拿欄名（-1 表示 current column）
+    local label = reaper.ImGui_TableGetColumnName(ctx, -1) or ""
     local id = _colid_from_label(label)
     if id then
-      COL_ORDER[i+1] = id
-      COL_POS[id]    = i+1
+      COL_ORDER[display_pos + 1] = id
+      COL_POS[id] = display_pos + 1
     end
   end
-  -- 保險：如果讀不到（理論上不會），回退固定順序
+  -- 萬一讀不到就回退固定順序
   if #COL_ORDER == 0 then
     COL_ORDER = {1,2,3,4,5,6,7,8,9,10,11,12,13}
-    COL_POS   = {}
-    for i,id in ipairs(COL_ORDER) do COL_POS[id] = i end
+    COL_POS = {}
+    for i, id in ipairs(COL_ORDER) do COL_POS[id] = i end
   end
 end
 
@@ -1461,17 +1555,44 @@ local function draw_table(rows, height)
     reaper.ImGui_TableSetupColumn(ctx, "Color",  TF('ImGui_TableColumnFlags_WidthFixed'), 96)
 
 
-    reaper.ImGui_TableHeadersRow(ctx)
-    rebuild_display_mapping()  -- ★ 讀取目前表格的欄位顯示順序
 
-    -- Build row-index map for selection math
+
+    -- 表頭
+    reaper.ImGui_TableHeadersRow(ctx)
+
+    -- 這裡立刻重算顯示→邏輯的映射
+    rebuild_display_mapping()
+
+    -- （可選）列印一次，方便你看拖拽後是否有更新
+    dump_order_once()
+
+    -- 建 row_index_map（給 Shift-矩形選取等）
     local row_index_map = LT.build_row_index_map(rows)
 
+
+
+
+
+    
     -- 點擊單一格的統一處理：單擊＝選取；Shift＝矩形；Cmd/Ctrl＝增減
     local function handle_cell_click(guid, col)
       local m = _mods()
       if m.shift and SEL.anchor then
-        sel_rect_apply(rows, row_index_map, guid, col)
+        -- 用 Library 內建：視覺欄序（COL_ORDER/COL_POS）版本的矩形選取
+        LT.sel_rect_apply(
+          rows,
+          row_index_map,
+          SEL.anchor.guid,  -- anchor guid
+          guid,             -- current guid
+          SEL.anchor.col,   -- anchor col (邏輯欄位 ID)
+          col,              -- current col (邏輯欄位 ID)
+          COL_ORDER,        -- 視覺→邏輯欄序
+          COL_POS,          -- 邏輯→視覺欄序
+          sel_add           -- 把每個被選的 cell 加入 SEL 的 callback
+        )
+
+
+        
       elseif m.shortcut then
         -- 切換單格
         if not SEL.anchor then SEL.anchor = { guid = guid, col = col } end
@@ -1483,6 +1604,38 @@ local function draw_table(rows, height)
         sel_add(guid, col)
       end
     end
+
+    -- 視覺順序版：依畫面欄位順序（COL_POS/COL_ORDER）做 Shift 矩形
+    local function sel_rect_apply_visual(rows, row_index_map, guid, col, COL_ORDER, COL_POS)
+      local a = SEL and SEL.anchor
+      if not (a and a.guid and a.col) then return end
+
+      -- 轉成「視覺位置」再求區間
+      local p1 = (COL_POS and COL_POS[a.col]) or a.col
+      local p2 = (COL_POS and COL_POS[col])   or col
+      if not (p1 and p2) then return end
+      if p1 > p2 then p1, p2 = p2, p1 end        -- 視覺欄位區間（左→右）
+
+      local r1 = row_index_map[a.guid]
+      local r2 = row_index_map[guid]
+      if not (r1 and r2) then return end
+      if r1 > r2 then r1, r2 = r2, r1 end        -- 列區間（上→下）
+
+      -- 以視覺位置回推邏輯欄位，再逐格加入
+      -- 保留 anchor，不清空 anchor 本身
+      SEL.cells = {}                             -- 只清「選取的格」，錨點照舊
+      for ri = r1, r2 do
+        local row = rows[ri]
+        local row_guid = row and row.__item_guid
+        if row_guid then
+          for pos = p1, p2 do
+            local logical_col = COL_ORDER and COL_ORDER[pos] or pos
+            if logical_col then sel_add(row_guid, logical_col) end
+          end
+        end
+      end
+    end
+
 
 
     -- === 取代原本每欄固定順序的整段：改成依 COL_ORDER 繪製 ===
@@ -1667,6 +1820,8 @@ local function loop()
     if shortcut_pressed(reaper.ImGui_Key_C()) then
       local rows = get_view_rows()                     -- 可見列（跟 UI 一致）
       local rim  = LT.build_row_index_map(rows)        -- guid -> row_index
+      local rim  = LT.build_row_index_map(rows)
+      dump_cols("COPY")  -- ⬅ 印出當下 COL_ORDER/COL_POS      
       local tsv  = LT.copy_selection(
         rows, rim, sel_has, COL_ORDER, COL_POS,
         function(i, r, col) return get_cell_text(i, r, col, "tsv") end
@@ -1683,6 +1838,8 @@ local function loop()
         reaper.ShowMessageBox("No cells selected. Please select target cells before pasting.", "Pasting", 0)
         goto PASTE_END
       end
+
+      dump_cols("PASTE")  -- ⬅ 印出當下 COL_ORDER/COL_POS
 
 
       -- 解析剪貼簿 → 扁平化來源
@@ -1742,46 +1899,46 @@ local function loop()
       -- 一次 Undo：單值填滿；多值截斷；若只選 1 格則依來源形狀展開；單列來源可往下填滿
       reaper.Undo_BeginBlock2(0)
 
-      if #src == 1 then
-        -- 單值填滿（跨欄位、非矩形都可）
-        local v = src[1]
-        for i=1, #dst do apply_cell(dst[i], v) end
+      -- 解析剪貼簿 → 2D
+      local clip = reaper.ImGui_GetClipboardText(ctx) or ""
+      local tbl  = LT.parse_clipboard_table(clip)
+      if not tbl or #tbl == 0 then goto PASTE_END end
 
-      elseif #dst == 1 then
-        -- 來源多值、目標只選一格：spill（僅 3/4/5）
-        local anchor = dst[1]
-        local dst2 = build_dst_by_anchor_and_shape(rows, anchor, src_h, src_w)
-        local n = math.min(#src, #dst2)
-        for k = 1, n do apply_cell(dst2[k], src[k]) end
-
-      elseif #dst < #src then
-        -- 0.6.12.1：來源多格、目標少於來源 → 以選取中「最左上」錨點整塊 spill（僅 3/4/5）
-        local anchor = dst[1]  -- dst 已依 row-major 排序，dst[1] 即最左上
-        local dst2 = build_dst_by_anchor_and_shape(rows, anchor, src_h, src_w)
-        local n = math.min(#src, #dst2)
-        for k = 1, n do apply_cell(dst2[k], src[k]) end
-
-      elseif src_h == 1 then
-        -- 單列來源：fill down（逐列複製來源該列的前 src_w 個值）
-        local by_row = {}
-        for _, d in ipairs(dst) do
-          local t = by_row[d.row_index]; if not t then t = {}; by_row[d.row_index] = t end
-          t[#t+1] = d
-        end
-        for _, cells in pairs(by_row) do
-          table.sort(cells, function(a,b) return a.col < b.col end)
-          local m = math.min(#cells, src_w)
-          for j = 1, m do
-            local v = _trim((tbl[1] and tbl[1][j]) or "")
-            apply_cell(cells[j], v)
+      -- 寫入工具（只處理 3/4/5；其餘欄 apply_cell_cb 直接忽略）
+      local function apply_cell(d, val)
+        local r = rows[d.row_index]
+        local col = d.col
+        if col == 3 then
+          local tr = r.track or r.__track
+          if tr and reaper.ValidatePtr(tr, "MediaTrack*") then
+            reaper.GetSetMediaTrackInfo_String(tr, "P_NAME", tostring(val or ""), true)
+            r.track_name = tostring(val or "")
+          end
+        elseif col == 4 then
+          local tk = r.take or r.__take or ((r.item or r.__item) and reaper.GetActiveTake(r.item or r.__item))
+          if not tk and (r.item or r.__item) then
+            tk = reaper.AddTakeToMediaItem(r.item or r.__item); r.__take = tk
+          end
+          if tk and reaper.ValidatePtr(tk, "MediaItem_Take*") then
+            reaper.GetSetMediaItemTakeInfo_String(tk, "P_NAME", tostring(val or ""), true)
+            r.take_name = tostring(val or "")
+          end
+        elseif col == 5 then
+          local it = r.item or r.__item
+          if it and reaper.ValidatePtr(it, "MediaItem*") then
+            reaper.GetSetMediaItemInfo_String(it, "P_NOTES", tostring(val or ""), true)
+            r.item_note = tostring(val or "")
           end
         end
-
-      else
-        -- 多對多：row-major 對應到 min(#src, #dst)
-        local n = math.min(#src, #dst)
-        for k=1, n do apply_cell(dst[k], src[k]) end
       end
+
+      -- 一次 Undo：交給 Library 做分流
+      reaper.Undo_BeginBlock2(0)
+      LT.apply_paste(rows, dst, tbl, COL_ORDER, COL_POS, apply_cell)
+      reaper.Undo_EndBlock2(0, "[Editor] Paste", -1)
+
+      reaper.UpdateArrange()
+      refresh_now()
 
       reaper.Undo_EndBlock2(0, "[Monitor] Paste", -1)
 
