@@ -41,9 +41,9 @@ Exports a single table: LT = { ... }
       • Export table as TSV/CSV following on-screen column order
 --]]
 
-LT.VERSION = "0.1.0"
-local LT = {}
 
+local LT = {}
+LT.VERSION = "0.1.0"
 ------------------------------------------------------------
 -- Columns: visual <-> logical mapping
 ------------------------------------------------------------
