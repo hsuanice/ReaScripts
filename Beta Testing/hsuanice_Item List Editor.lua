@@ -1,6 +1,6 @@
 --[[
 @description Item List Editor
-@version 0.8.3
+@version 0.8.3.1
 @author hsuanice
 @about
   Shows a live, spreadsheet-style table of the currently selected items and all
@@ -40,6 +40,12 @@
 
 
 @changelog
+  v0.8.3.1
+    - Clean refactor: Editor’s Copy/Save (TSV/CSV) now calls LT.build_table_text()
+      directly instead of a local stub.
+    - Behavior unchanged: exports follow visual column order, reflect current
+      time mode/pattern, and include only visible rows.
+
   v0.8.3
     - Refactor: Moved TSV/CSV utilities into the List Table library.
       • Removed local implementations of:
@@ -936,7 +942,7 @@ end
 -- COL_ORDER[display_index] = logical_col_id
 -- COL_POS[logical_col_id]  = display_index
 
-local function _col_header_label(col_id)
+local function header_label_from_id(col_id)
   if col_id == 1  then return "#" end
   if col_id == 2  then return "TrkID" end
   if col_id == 3  then return "Track Name" end
@@ -1349,32 +1355,75 @@ end
 
 
 
-  if reaper.ImGui_Button(ctx, "Refresh Now", 110, 24) then
-    TABLE_SOURCE = "live"
-    refresh_now()
-  end
+if reaper.ImGui_Button(ctx, "Refresh Now", 110, 24) then
+  TABLE_SOURCE = "live"
+  refresh_now()
+end
 
 
-  reaper.ImGui_SameLine(ctx)
-  if reaper.ImGui_Button(ctx, "Copy (TSV)", 110, 24) then
-    reaper.ImGui_SetClipboardText(ctx, build_table_text("tsv", get_view_rows()))
+reaper.ImGui_SameLine(ctx)
+if reaper.ImGui_Button(ctx, "Copy (TSV)", 110, 24) then
+  local rows = get_view_rows()
+  local text = LT.build_table_text(
+    "tsv",
+    rows,
+    COL_ORDER,
+    header_label_from_id,
+    function(i, r, col) return get_cell_text(i, r, col, "tsv") end
+  )
+  if text and text ~= "" then
+    local rows = get_view_rows()
+    local text = LT.build_table_text(
+      "tsv",
+      rows,
+      COL_ORDER,
+      header_label_from_id,                              -- ★ 改這裡：傳入欄頭函式
+      function(i, r, col) return get_cell_text(i, r, col, "tsv") end
+    )
+    if text and text ~= "" then
+      reaper.ImGui_SetClipboardText(ctx, text)
+    end
+
+  end
+end
+
+
+reaper.ImGui_SameLine(ctx)
+if reaper.ImGui_Button(ctx, "Save .tsv", 100, 24) then
+  local p = choose_save_path("Item List_"..timestamp()..".tsv","Tab-separated (*.tsv)\0*.tsv\0All (*.*)\0*.*\0")
+  if p then
+    local rows = get_view_rows()
+    local text = LT.build_table_text(
+      "tsv",
+      rows,
+      COL_ORDER,
+      header_label_from_id,
+      function(i, r, col) return get_cell_text(i, r, col, "tsv") end
+    )
+    write_text_file(p, text)
   end
 
-  reaper.ImGui_SameLine(ctx)
-  if reaper.ImGui_Button(ctx, "Save .tsv", 100, 24) then
-    local p = choose_save_path("Item List_"..timestamp()..".tsv","Tab-separated (*.tsv)\0*.tsv\0All (*.*)\0*.*\0")
-    if p then write_text_file(p, build_table_text("tsv", get_view_rows())) end
+end
+reaper.ImGui_SameLine(ctx)
+if reaper.ImGui_Button(ctx, "Save .csv", 100, 24) then
+  local p = choose_save_path("Item List_"..timestamp()..".csv","CSV (*.csv)\0*.csv\0All (*.*)\0*.*\0")
+  if p then
+    local rows = get_view_rows()
+    local text = LT.build_table_text(
+      "csv",
+      rows,
+      COL_ORDER,
+      header_label_from_id,                            -- ★
+      function(i, r, col) return get_cell_text(i, r, col, "csv") end
+    )
+    write_text_file(p, text)
   end
-  reaper.ImGui_SameLine(ctx)
-  if reaper.ImGui_Button(ctx, "Save .csv", 100, 24) then
-    local p = choose_save_path("Item List_"..timestamp()..".csv","CSV (*.csv)\0*.csv\0All (*.*)\0*.*\0")
-    if p then write_text_file(p, build_table_text("csv", get_view_rows())) end
-  end
+end
 
-  reaper.ImGui_SameLine(ctx)
-  if reaper.ImGui_Button(ctx, POPUP_TITLE, 100, 24) then
-    reaper.ImGui_OpenPopup(ctx, POPUP_TITLE)
-  end
+reaper.ImGui_SameLine(ctx)
+if reaper.ImGui_Button(ctx, POPUP_TITLE, 100, 24) then
+  reaper.ImGui_OpenPopup(ctx, POPUP_TITLE)
+end
 
 
 
