@@ -1,6 +1,6 @@
 --[[
 @description Item List Editor
-@version 0.8.0
+@version 0.8.0 not use List Table library yet
 @author hsuanice
 @about
   Shows a live, spreadsheet-style table of the currently selected items and all
