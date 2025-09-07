@@ -1,6 +1,6 @@
 --[[
 @description Item List Editor
-@version 0.9.0 Add Column Presets
+@version 0.9.1 Column Presets (toolbar) + stability fixes
 @author hsuanice
 @about
   Shows a live, spreadsheet-style table of the currently selected items and all
@@ -40,6 +40,18 @@
 
 
 @changelog
+  v0.9.1
+    - New (UI): Added "Save preset" button and status text to the right of "Summary".
+      • One-click saves the current on-screen column order (visual → logical) to ExtState.
+      • Status shows "(preset …)" when saved, or "(columns not saved)" otherwise.
+    - Fix: Resolved duplicate preset helper definitions (old name-based API vs new order-based API)
+      that caused "Save preset" to no-op or steal focus to header.
+      • Unified to: save_col_preset(order, note), load_col_preset().
+      • Toolbar button now calls the unified API; removed name-based variants.
+    - Behavior: Copy / Paste / Save (TSV/CSV) continue to follow the live on-screen order.
+      Preset only persists your preferred order across sessions (stored at ExtState: col_preset).
+    - Internal: Guarded header→ID mapping and preset normalization (fills missing 1..13 IDs).
+      Optional auto-save hook kept out by default; can be enabled after TableHeadersRow().
   v0.9.0
     - add column presets
   v0.8.4
@@ -544,50 +556,7 @@ end
 -- Column order mapping (single source of truth)
 local COL_ORDER, COL_POS = {}, {}   -- visual→logical / logical→visual
 
--- === Column Preset (save/load) ===
-local COL_PRESET_NAME = ""  -- 狀態列小字用：目前啟用的 preset 名稱；空字串表示尚未存
 
-local function _split_csv_nums(s)
-  local t = {}
-  for num in tostring(s or ""):gmatch("%d+") do t[#t+1] = tonumber(num) end
-  return t
-end
-
--- 將目前畫面上的欄位順序（COL_ORDER）存成 preset
-local function save_col_preset(name)
-  name = name or "A"
-  -- 將 COL_ORDER 序列化成 "1,2,3,..."
-  local parts = {}
-  for i = 1, #COL_ORDER do parts[#parts+1] = tostring(COL_ORDER[i]) end
-  local payload = table.concat(parts, ",")
-  reaper.SetExtState(EXT_NS, "col_preset_" .. name, payload, true)
-  COL_PRESET_NAME = name
-end
-
--- 讀取 preset 到 COL_ORDER/COL_POS（僅更新 Editor 這邊的序列，用於 Copy/Save 等）
-local function load_col_preset(name)
-  name = name or "A"
-  local payload = reaper.GetExtState(EXT_NS, "col_preset_" .. name)
-  if payload and payload ~= "" then
-    local order = _split_csv_nums(payload)
-    if #order > 0 then
-      COL_ORDER = order
-      COL_POS = {}
-      for vis, logical in ipairs(COL_ORDER) do
-        COL_POS[logical] = vis
-      end
-      COL_PRESET_NAME = name
-    end
-  end
-end
-
--- 供 UI 顯示的小字狀態
-local function col_preset_status_text()
-  if COL_PRESET_NAME ~= "" then
-    return string.format("(preset %s)", COL_PRESET_NAME)
-  end
-  return "(columns not saved)"
-end
 
 
 
@@ -616,7 +585,7 @@ local function load_prefs()
 -- 把目前視覺欄序 COL_ORDER 存成 preset，或讀回來；給 toolbar 顯示小字狀態用。
 -- 這段僅依賴：EXT_NS, COL_ORDER, COL_POS 已在前面被宣告。
 
-local COL_PRESET_NAME = ""  -- 狀態小字用：目前使用中的 preset 名稱；空字表示未存
+
 
 local function _split_csv_nums(s)
   local t = {}
@@ -679,8 +648,8 @@ end
   local a = reaper.GetExtState(EXT_NS, "auto_refresh")
   if a ~= "" then AUTO = (a ~= "0") end
 
-  -- Column preset
-  load_col_preset("A")
+  -- Column preset (new API, no args)
+  load_col_preset()
 end
 
 -- === Column Preset (persist visual order across runs) ===
@@ -1686,15 +1655,15 @@ if reaper.ImGui_Button(ctx, POPUP_TITLE, 100, 24) then
   reaper.ImGui_OpenPopup(ctx, POPUP_TITLE)
 end
 
--- Summary 右側：Save preset + 小字狀態
+-- Summary 右側：Save preset + 小字狀態（使用新版 API）
 reaper.ImGui_SameLine(ctx)
 if reaper.ImGui_Button(ctx, "Save preset", 100, 24) then
-  -- 先固定存為 "A"；之後要做下拉多組 preset 再延伸
-  save_col_preset("A")
+  -- 新版 API：把目前畫面欄序 COL_ORDER 傳入，並寫個狀態訊息
+  save_col_preset(COL_ORDER, "Preset ✓ (manual)")
 end
 
 reaper.ImGui_SameLine(ctx)
-reaper.ImGui_TextDisabled(ctx, col_preset_status_text())
+reaper.ImGui_TextDisabled(ctx, PRESET_STATUS or "")
 
 
 
