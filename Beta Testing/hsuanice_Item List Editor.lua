@@ -1,6 +1,6 @@
 --[[
 @description Item List Editor
-@version 0.8.1 Summary now call LT.compute_summary()
+@version 0.8.2 Paste function Fixed
 @author hsuanice
 @about
   Shows a live, spreadsheet-style table of the currently selected items and all
@@ -40,6 +40,23 @@
 
 
 @changelog
+  v0.8.2
+    - Paste & Delete refactor to use LT destination lists:
+      • Switched Editor to consume LT.build_dst_list_from_selection() results
+        and access rows via rows[d.row_index] (no more d.row), fixing single-cell
+        spill cases and keeping behavior aligned with visible rows and visual
+        column order. (Library: hsuanice_List Table v0.1.0)
+      • Paste now consistently targets only visible rows (get_view_rows → LT.filter_rows).
+      • Message box when pasting with no selection now uses English text.
+    - Summary popup:
+      • Unified modal (“Summary”) with a single read-only multiline box and Copy button.
+      • Summary body is built via LT.compute_summary() and follows the active time mode.
+    - UI minor:
+      • Removed use of ImGui_ImVec2 constructor; use plain width/height arguments for
+        InputTextMultiline to improve compatibility across ReaImGui builds.
+    - Cleanup:
+      • Deleted remaining local variants of row/dst helpers; Editor delegates to LT for
+        row index map, selection rectangle, copy/export, and destination building.
   v0.8.1
     - Summary calculation now calls LT.compute_summary() from the List Table library.
       • Removed the local compute_summary() implementation in Editor.
@@ -453,7 +470,10 @@ local function esc_pressed()
   return false
 end
 
-
+-- tiny logger
+local function log(fmt, ...)
+  reaper.ShowConsoleMsg(string.format((fmt or "") .. "\n", ...))
+end
 
 -- Popup title（供 ESC 判斷與 BeginPopupModal 使用）
 local POPUP_TITLE = "Summary"
@@ -599,6 +619,39 @@ end
 local function timestamp()
   local t=os.date("*t"); return string.format("%04d%02d%02d_%02d%02d%02d",t.year,t.month,t.day,t.hour,t.min,t.sec)
 end
+
+
+-- Build human-readable summary text (uses current time formatter)
+local function build_summary_text(rows)
+  local S = LT.compute_summary(rows or {})
+  if not S or (S.count or 0) == 0 then return "No items." end
+
+  -- 如果你已有 format_time()，直接用。沒有的話，改用下面 fallback：
+  local function _fmt(sec)
+    if format_time then return format_time(sec) end
+    -- fallback: 直接用 TFLib 依目前 TIME_MODE 格式化
+    local opts = (TIME_MODE == TFLib.MODE.MS) and {decimals=3}
+              or (TIME_MODE == TFLib.MODE.CUSTOM) and {pattern=CUSTOM_PATTERN}
+              or nil
+    return TFLib.format(sec, TIME_MODE, opts)
+  end
+
+  local from = _fmt(S.min_start)
+  local to   = _fmt(S.max_end)
+  local span = _fmt(S.span)
+  local sum  = _fmt(S.sum_len)
+
+  return table.concat({
+    ("Number of items:\n%d"):format(S.count),
+    "",
+    ("Total span (first to last):\n%s"):format(span),
+    "",
+    ("Sum of lengths:\n%s"):format(sum),
+    "",
+    ("Range:\n%s  →  %s"):format(from, to),
+  }, "\n")
+end
+
 
 
 -- forward locals (避免之後被重新 local 化)
@@ -755,14 +808,16 @@ local function shortcut_pressed(key_const)
   return m.shortcut and reaper.ImGui_IsKeyPressed(ctx, key_const, false)
 end
 
--- 由 rows 建立 rowIndex 對照（以 item_guid 為鍵）
-local function build_row_index_map(rows)
-  local map = {}
-  for i, rr in ipairs(rows or {}) do
-    map[rr.__item_guid or ("row"..i)] = i
-  end
-  return map
-end
+
+
+
+
+
+
+
+
+
+
 
 -- 計算矩形選取（anchor 與目前 guid,col 之間）
 local function sel_rect_apply(rows, row_index_map, cur_guid, cur_col)
@@ -809,43 +864,6 @@ local function get_cell_text(i, r, col, fmt)
   return ""
 end
 
--- 複製目前選取到剪貼簿（TSV）
-local function copy_selection(rows, row_index_map)
-  -- 找出被選的所有 (row,col)，並計算最小包圍矩形
-  local minr, maxr = math.huge, -math.huge
-  local minp, maxp = math.huge, -math.huge  -- visual position
-  local selected = {}
-  for guid_col, _ in pairs(SEL.cells) do
-    local g, c = guid_col:match("^(.-):(%d+)$")
-    local rowi = row_index_map[g]
-    local col  = tonumber(c)
-    if rowi and col then
-      selected[#selected+1] = {row=rowi, col=col}
-      if rowi < minr then minr = rowi end
-      if rowi > maxr then maxr = rowi end
-      local pos = (COL_POS and COL_POS[col]) or col
-      if pos  < minp then minp = pos end
-      if pos  > maxp then maxp = pos end
-    end
-  end
-  if #selected == 0 then return end
-  local out = {}
-  for i=minr, maxr do
-    local r = rows[i]
-    local line = {}
-    for pos=minp, maxp do
-      local logical_col = COL_ORDER[pos]
-      if logical_col and sel_has(r.__item_guid, logical_col) then
-        line[#line+1] = get_cell_text(i, r, logical_col)
-      else
-        line[#line+1] = ""
-      end
-    end
-    out[#out+1] = table.concat(line, "\t")
-  end
-  reaper.ImGui_SetClipboardText(ctx, table.concat(out, "\n"))
-end
-
 -- 解析剪貼簿文字成 2D 陣列（TSV / 簡單 CSV）
 local function parse_clipboard_table(text)
   text = tostring(text or "")
@@ -870,16 +888,20 @@ local function parse_clipboard_table(text)
   return rows
 end
 
--- 依目前設定回傳「可見列」：若未勾選顯示靜音，則過濾掉 muted 列
+-- Delegate to Library: return visible rows (honors Show muted items toggle)
 local function get_view_rows()
-  local src_rows = src or ROWS or {}
-  if SHOW_MUTED_ITEMS then return src_rows end
-  local out = {}
-  for _, r in ipairs(src_rows) do
-    if not r.muted then out[#out+1] = r end
-  end
-  return out
+  return LT.filter_rows(ROWS, { show_muted = SHOW_MUTED_ITEMS })
 end
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -1025,27 +1047,27 @@ local function flatten_tsv_to_list(tbl)
   return list
 end
 
--- 依「行優先、左到右」取得目前選取的目標格（含所有欄；真正寫回只在 3/4/5 欄）
-local function build_dst_list_from_selection(rows)
-  local rim = build_row_index_map(rows)
-  local dst = {}
-  for key,_ in pairs(SEL.cells or {}) do
-    local g, cstr = key:match("^(.-):(%d+)$")
-    local col = tonumber(cstr)
-    local ri = rim[g]
-    if ri and col then
-      dst[#dst+1] = { row_index = ri, col = col, row = rows[ri] }
-    end
-  end
-  table.sort(dst, function(a,b)
-    if a.row_index ~= b.row_index then return a.row_index < b.row_index end
-    local pa = (COL_POS and COL_POS[a.col]) or a.col
-    local pb = (COL_POS and COL_POS[b.col]) or b.col
-    return pa < pb
-  end)
 
-  return dst
-end
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -1093,67 +1115,46 @@ end
 
 -- 清除目前選取到的「格子文字」（只在 Live 視圖；僅 3/4/5 欄可寫）
 local function delete_selected_cells()
-  if TABLE_SOURCE ~= "live" then return end
+  -- 0) 沒選取就離開
   if not SEL or not SEL.cells or next(SEL.cells) == nil then return end
 
-  local rows = ROWS
-  local rim  = build_row_index_map(rows)
+  -- 1) 可見列 + 以畫面欄位順序展開選取
+  local rows = get_view_rows()                              -- ← 替代 ROWS
+  local dst = LT.build_dst_list_from_selection(rows, sel_has, COL_ORDER, COL_POS)
+  if #dst == 0 then return end
 
-  -- 以物件去重：Track / Take / Item
-  local tr_set, tk_set, it_set = {}, {}, {}
-
-  for key,_ in pairs(SEL.cells) do
-    local g, cstr = key:match("^(.-):(%d+)$")
-    local col = tonumber(cstr)
-    local ri  = rim[g]
-    if ri and col then
-      local r = rows[ri]
-      if col == 3 and r and r.__track then
-        tr_set[r.__track] = true
-      elseif col == 4 and r and r.__take then
-        tk_set[r.__take] = true
-      elseif col == 5 and r and r.__item then
-        it_set[r.__item] = true
+  reaper.Undo_BeginBlock2(0)
+  for i = 1, #dst do
+    local d = dst[i]
+    local r = rows[d.row_index]             -- ★ 用 row_index 取 row
+    local col = d.col
+    if col == 3 then
+      local tr = r.track or r.__track
+      if tr and reaper.ValidatePtr(tr, "MediaTrack*") then
+        reaper.GetSetMediaTrackInfo_String(tr, "P_NAME", "", true)
+        r.track_name = ""
+      end
+    elseif col == 4 then
+      local tk = r.take or r.__take or (r.item or r.__item)
+          and reaper.GetActiveTake(r.item or r.__item)
+      if tk and reaper.ValidatePtr(tk, "MediaItem_Take*") then
+        reaper.GetSetMediaItemTakeInfo_String(tk, "P_NAME", "", true)
+        r.take_name = ""
+      end
+    elseif col == 5 then
+      local it = r.item or r.__item
+      if it and reaper.ValidatePtr(it, "MediaItem*") then
+        reaper.GetSetMediaItemInfo_String(it, "P_NOTES", "", true)
+        r.item_note = ""
       end
     end
   end
-
-  -- 沒有任何可寫欄被選到就不動作
-  if next(tr_set) == nil and next(tk_set) == nil and next(it_set) == nil then return end
-
-  reaper.Undo_BeginBlock2(0)
-
-  -- 清 Track Name（空字串 = 還原為預設 Track 名顯示）
-  for tr,_ in pairs(tr_set) do
-    reaper.GetSetMediaTrackInfo_String(tr, "P_NAME", "", true)
-    -- 同步更新目前 rows 的顯示值
-    for _, rr in ipairs(rows) do
-      if rr.__track == tr then rr.track_name = "" end
-    end
-  end
-
-  -- 清 Take Name（僅當下有 take；不自動建立 take）
-  for tk,_ in pairs(tk_set) do
-    reaper.GetSetMediaItemTakeInfo_String(tk, "P_NAME", "", true)
-  end
-  -- 同步 rows
-  for _, rr in ipairs(rows) do
-    if rr.__take and tk_set[rr.__take] then rr.take_name = "" end
-  end
-
-  -- 清 Item Note
-  for it,_ in pairs(it_set) do
-    reaper.GetSetMediaItemInfo_String(it, "P_NOTES", "", true)
-  end
-  -- 同步 rows
-  for _, rr in ipairs(rows) do
-    if rr.__item and it_set[rr.__item] then rr.item_note = "" end
-  end
-
-  reaper.Undo_EndBlock2(0, "[Monitor] Clear selected cell text", -1)
+  reaper.Undo_EndBlock2(0, "[Editor] Clear selected cells", -1)
   reaper.UpdateArrange()
   refresh_now()
 end
+
+
 
 
 
@@ -1232,11 +1233,11 @@ local function build_summary_text(rows)
   return table.concat({
     ("Number of items:\n%d"):format(S.count),
     "",
-    ("Total duration:\n%s"):format(span),
+    ("Total span (first to last):\n%s"):format(span),
     "",
-    ("Total length:\n%s"):format(sum),
+    ("Sum of lengths:\n%s"):format(sum),
     "",
-    ("Position:\n%s - %s"):format(from, to),
+    ("Range:\n%s - %s"):format(from, to),
   }, "\n")
 end
 
@@ -1387,12 +1388,12 @@ end
 
   reaper.ImGui_SameLine(ctx)
   if reaper.ImGui_Button(ctx, "Save .tsv", 100, 24) then
-    local p = choose_save_path("ReorderSort_Monitor_"..timestamp()..".tsv","Tab-separated (*.tsv)\0*.tsv\0All (*.*)\0*.*\0")
+    local p = choose_save_path("Item List_"..timestamp()..".tsv","Tab-separated (*.tsv)\0*.tsv\0All (*.*)\0*.*\0")
     if p then write_text_file(p, build_table_text("tsv", get_view_rows())) end
   end
   reaper.ImGui_SameLine(ctx)
   if reaper.ImGui_Button(ctx, "Save .csv", 100, 24) then
-    local p = choose_save_path("ReorderSort_Monitor_"..timestamp()..".csv","CSV (*.csv)\0*.csv\0All (*.*)\0*.*\0")
+    local p = choose_save_path("Item List_"..timestamp()..".csv","CSV (*.csv)\0*.csv\0All (*.*)\0*.*\0")
     if p then write_text_file(p, build_table_text("csv", get_view_rows())) end
   end
 
@@ -1441,7 +1442,7 @@ local function draw_table(rows, height)
     rebuild_display_mapping()  -- ★ 讀取目前表格的欄位顯示順序
 
     -- Build row-index map for selection math
-    local row_index_map = build_row_index_map(rows)
+    local row_index_map = LT.build_row_index_map(rows)
 
     -- 點擊單一格的統一處理：單擊＝選取；Shift＝矩形；Cmd/Ctrl＝增減
     local function handle_cell_click(guid, col)
@@ -1601,6 +1602,8 @@ local function draw_table(rows, height)
     end
 
     reaper.ImGui_EndTable(ctx)
+
+
   end
 end
 
@@ -1630,7 +1633,8 @@ local function loop()
 
   -- Top bar + Summary popup
   draw_toolbar()
-  draw_summary_popup()
+  draw_table(ROWS)
+  draw_summary_popup()   -- ← 要保留這行
 
 
   local rows_to_show = ROWS
@@ -1640,20 +1644,27 @@ local function loop()
 
   -- Clipboard shortcuts (when NOT in InputText editing)
   if not (EDIT and EDIT.col) then
-    -- Copy selection (any view)
+    -- Copy selection (follows visible rows & on-screen column order)
     if shortcut_pressed(reaper.ImGui_Key_C()) then
-      local rows = get_view_rows()
-      local rim  = build_row_index_map(rows)
-      copy_selection(rows, rim)
+      local rows = get_view_rows()                     -- 可見列（跟 UI 一致）
+      local rim  = LT.build_row_index_map(rows)        -- guid -> row_index
+      local tsv  = LT.copy_selection(
+        rows, rim, sel_has, COL_ORDER, COL_POS,
+        function(i, r, col) return get_cell_text(i, r, col, "tsv") end
+      )
+      if tsv and tsv ~= "" then
+        reaper.ImGui_SetClipboardText(ctx, tsv)
+      end
     end
 
     -- Paste（Live only，Excel 風規則）
-    if TABLE_SOURCE == "live" and shortcut_pressed(reaper.ImGui_Key_V()) then
-      -- 檢查是否有選取
+    if shortcut_pressed(reaper.ImGui_Key_V()) then
+      -- 檢查是否有選取      
       if not SEL or not SEL.cells or next(SEL.cells) == nil then
-        reaper.ShowMessageBox("沒有選取任何格子。請先選取要貼上的目標格。", "貼上", 0)
+        reaper.ShowMessageBox("No cells selected. Please select target cells before pasting.", "Pasting", 0)
         goto PASTE_END
       end
+
 
       -- 解析剪貼簿 → 扁平化來源
       local clip = reaper.ImGui_GetClipboardText(ctx) or ""
@@ -1663,37 +1674,49 @@ local function loop()
       local src_h, src_w = src_shape_dims(tbl)
 
       -- 目標格（行優先、左到右），包含所有被選欄；實際寫回僅 3/4/5
-      local rows = ROWS
-      local dst  = build_dst_list_from_selection(rows)
+      local rows = get_view_rows()
+      local dst  = LT.build_dst_list_from_selection(rows, sel_has, COL_ORDER, COL_POS)
       if #dst == 0 then goto PASTE_END end
 
       -- 寫入工具：只在 3/4/5 欄動作
       local tracks_renamed, takes_named, notes_set, takes_created, skipped = 0,0,0,0,0
+      -- 只示範關鍵幾行，其他維持你現有邏輯（Track/Take/Item Note 寫入與 ValidatePtr）
       local function apply_cell(d, val)
-        local r, col = d.row, d.col
-        if not r then skipped = skipped + 1; return end
+        local col = d.col
+        local r   = rows[d.row_index]              -- ★ 改這裡：用 row_index 取 row
+        if not r then return end
+
         if col == 3 then
-          if r.__track and val ~= r.track_name then
-            reaper.GetSetMediaTrackInfo_String(r.__track, "P_NAME", val, true)
-            r.track_name = val; tracks_renamed = tracks_renamed + 1
+          local tr = r.track or r.__track          -- 兩種欄位名都相容
+          if tr and reaper.ValidatePtr(tr, "MediaTrack*") then
+            local cur = r.track_name or ""
+            if val ~= cur then
+              reaper.GetSetMediaTrackInfo_String(tr, "P_NAME", val, true)
+              r.track_name = val                  -- 同步 rows
+            end
           end
+
         elseif col == 4 then
-          local tk = r.__take
-          if not tk then
-            tk = reaper.AddTakeToMediaItem(r.__item); r.__take = tk; takes_created = takes_created + 1
+          local it = r.item or r.__item
+          local tk = r.take or r.__take or (it and reaper.GetActiveTake(it))
+          if tk and reaper.ValidatePtr(tk, "MediaItem_Take*") then
+            local cur = r.take_name or ""
+            if val ~= cur then
+              reaper.GetSetMediaItemTakeInfo_String(tk, "P_NAME", val, true)
+              r.take_name = val
+            end
           end
-          if tk and val ~= r.take_name then
-            reaper.GetSetMediaItemTakeInfo_String(tk, "P_NAME", val, true)
-            r.take_name = val; takes_named = takes_named + 1
-          end
+          -- 若你想恢復「沒有 take 時自動建立」的舊行為，可在這裡加偏好開關再 AddTake（可另給我就地 patch）
+
         elseif col == 5 then
-          if val ~= r.item_note then
-            reaper.GetSetMediaItemInfo_String(r.__item, "P_NOTES", val, true)
-            r.item_note = val; notes_set = notes_set + 1
+          local it = r.item or r.__item
+          if it and reaper.ValidatePtr(it, "MediaItem*") then
+            local cur = r.item_note or ""
+            if val ~= cur then
+              reaper.GetSetMediaItemInfo_String(it, "P_NOTES", val, true)
+              r.item_note = val
+            end
           end
-        else
-          -- 非可寫欄：接受但不寫
-          skipped = skipped + 1
         end
       end
 
