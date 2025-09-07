@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<index version="1" name="hsuanice Scripts" commit="a8176b5ecc4998e4c00acda321becbf2b6c1d9df">
+<index version="1" name="hsuanice Scripts" commit="26b9208a5b8bc9a4ea3729f18b224a7b9caf827f">
   <category name="Beta Testing">
     <reapack name="hsuanice_BWF TimeReference Embed Tool.lua" type="script" desc="Embed BWF TimeReference to Active take from Take 1 or Current Position TC">
       <version name="0.7.1" author="hsuanice" time="2025-08-14T17:52:57Z">
@@ -1095,6 +1095,9 @@ v0.9.0 - Added Shared Link State section from Project ExtState "hsuanice_Link".]
       </version>
       <version name="0.2.1" time="2025-09-07T12:37:32Z">
         <source main="main">https://github.com/hsuanice/ReaScripts/raw/a8176b5ecc4998e4c00acda321becbf2b6c1d9df/Library/hsuanice_List%20Table.lua</source>
+      </version>
+      <version name="0.2.2" time="2025-09-07T12:53:41Z">
+        <source main="main">https://github.com/hsuanice/ReaScripts/raw/26b9208a5b8bc9a4ea3729f18b224a7b9caf827f/Library/hsuanice_List%20Table.lua</source>
       </version>
     </reapack>
   </category>
