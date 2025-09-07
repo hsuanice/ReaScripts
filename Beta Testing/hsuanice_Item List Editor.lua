@@ -1,6 +1,6 @@
 --[[
 @description Item List Editor
-@version 0.9.2 Named Column Presets (recallable; no auto-save)
+@version 0.9.3
 @author hsuanice
 @about
   Shows a live, spreadsheet-style table of the currently selected items and all
@@ -40,6 +40,7 @@
 
 
 @changelog
+  v0.9.3
   v0.9.2
     - New: Named Column Presets with dropdown + explicit Recall / Save as… / Delete.
       • Save with a user-defined name; multiple presets stored in ExtState.
@@ -689,6 +690,18 @@ local function preset_delete(name)
   PRESET_STATUS = "Deleted: "..name
 end
 
+-- 讓 UI 右上角的下拉選單可以拿到所有名稱
+local function preset_list()
+  return PRESETS
+end
+
+-- 讓 Summary 右側的小字狀態能顯示目前狀態
+local function col_preset_status_text()
+  return PRESET_STATUS or ""
+end
+
+
+
 local function presets_init()
   _preset_load_index()
   local last = reaper.GetExtState(EXT_NS, "col_preset_active")
@@ -738,9 +751,7 @@ local function load_prefs()
   presets_init()
 end
 
--- === Column Preset (persist visual order across runs) ===
--- Default logical order (match your current defaults):
-local DEFAULT_COL_ORDER = { 1,2,3,12,13,4,5,6,7,8,9,10,11 }
+
 
 -- Runtime cache
 local PRESET = nil          -- {logical_id,...} read from ExtState
@@ -1745,72 +1756,51 @@ end
 reaper.ImGui_SameLine(ctx)
 reaper.ImGui_Text(ctx, "Preset:")
 reaper.ImGui_SameLine(ctx)
-do
-  local current = ACTIVE_PRESET or "(none)"
-  reaper.ImGui_SetNextItemWidth(ctx, 160)
-  if reaper.ImGui_BeginCombo(ctx, "##colpreset_combo", current) then
-    -- "(none)" option
-    local sel = (ACTIVE_PRESET == nil)
-    if reaper.ImGui_Selectable(ctx, "(none)", sel) then ACTIVE_PRESET = nil; PRESET_STATUS = "No preset" end
-    reaper.ImGui_Separator(ctx)
-    for i, name in ipairs(PRESETS) do
-      local selected = (name == ACTIVE_PRESET)
-      if reaper.ImGui_Selectable(ctx, name, selected) then
-        ACTIVE_PRESET = name
-      end
+
+local preview = (ACTIVE_PRESET ~= "" and (ACTIVE_PRESET.." (active)") or "(none)")
+if reaper.ImGui_BeginCombo(ctx, "##colpreset_combo", preview, reaper.ImGui_ComboFlags_HeightLargest()) then
+  -- 預設順序（無 preset）
+  if reaper.ImGui_Selectable(ctx, "Default order (none)", ACTIVE_PRESET=="") then
+    preset_recall("")  -- 選到就直接套用
+  end
+  -- 已存的 preset 名單
+  local names = preset_list()
+  for i, name in ipairs(names) do
+    local selected = (name == ACTIVE_PRESET)
+    if reaper.ImGui_Selectable(ctx, name, selected) then
+      preset_recall(name) -- 選到就直接套用
     end
-    reaper.ImGui_EndCombo(ctx)
+    reaper.ImGui_SameLine(ctx)
+    if reaper.ImGui_SmallButton(ctx, "Del##preset_del_"..i) then
+      preset_delete(name)
+    end
   end
+  reaper.ImGui_EndCombo(ctx)
 end
 
 reaper.ImGui_SameLine(ctx)
-if reaper.ImGui_Button(ctx, "Recall", 72, 24) then
-  if not ACTIVE_PRESET or ACTIVE_PRESET=="" then
-    PRESET_STATUS = "No preset selected"
-  else
-    preset_recall(ACTIVE_PRESET)
-  end
+if reaper.ImGui_Button(ctx, "Save as...", 90, 24) then
+  reaper.ImGui_OpenPopup(ctx, "Save Preset")
 end
-
-reaper.ImGui_SameLine(ctx)
-if reaper.ImGui_Button(ctx, "Save as…", 88, 24) then
-  PRESET_NAME_BUF = ACTIVE_PRESET or PRESET_NAME_BUF or ""
-  reaper.ImGui_OpenPopup(ctx, "Save preset as")
-end
-
-reaper.ImGui_SameLine(ctx)
-local can_delete = (ACTIVE_PRESET and ACTIVE_PRESET~="")
-if reaper.ImGui_BeginDisabled(ctx, not can_delete) then end
-if reaper.ImGui_Button(ctx, "Delete", 68, 24) and can_delete then
-  preset_delete(ACTIVE_PRESET)
-end
-if reaper.ImGui_EndDisabled then reaper.ImGui_EndDisabled(ctx) end
-
-reaper.ImGui_SameLine(ctx)
-reaper.ImGui_TextDisabled(ctx, PRESET_STATUS or "")
-
--- Save-as popup
-if reaper.ImGui_BeginPopupModal(ctx, "Save preset as", true, TF('ImGui_WindowFlags_AlwaysAutoResize')) then
+if reaper.ImGui_BeginPopupModal(ctx, "Save Preset", true, reaper.ImGui_WindowFlags_AlwaysAutoResize()) then
   reaper.ImGui_Text(ctx, "Preset name:")
-  reaper.ImGui_SetNextItemWidth(ctx, 220)
-  PRESET_NAME_BUF = PRESET_NAME_BUF or ""
-  local changed, txt = reaper.ImGui_InputText(ctx, "##presetname", PRESET_NAME_BUF)
-  if changed then PRESET_NAME_BUF = txt end
-
-  if reaper.ImGui_Button(ctx, "Save", 82, 24) then
-    if preset_save_as(PRESET_NAME_BUF, COL_ORDER) then
-      reaper.ImGui_CloseCurrentPopup(ctx)
-    end
+  reaper.ImGui_SameLine(ctx)
+  if not SAVE_PRESET_BUF then SAVE_PRESET_BUF = "" end
+  local changed, buf = reaper.ImGui_InputText(ctx, "##preset_name", SAVE_PRESET_BUF)
+  if changed then SAVE_PRESET_BUF = buf end
+  if reaper.ImGui_Button(ctx, "OK", 80, 24) then
+    preset_save_as(SAVE_PRESET_BUF)
+    reaper.ImGui_CloseCurrentPopup(ctx)
   end
   reaper.ImGui_SameLine(ctx)
-  if reaper.ImGui_Button(ctx, "Cancel", 82, 24) then
+  if reaper.ImGui_Button(ctx, "Cancel", 80, 24) then
     reaper.ImGui_CloseCurrentPopup(ctx)
   end
   reaper.ImGui_EndPopup(ctx)
 end
 
 reaper.ImGui_SameLine(ctx)
-reaper.ImGui_TextDisabled(ctx, PRESET_STATUS or "")
+reaper.ImGui_TextDisabled(ctx, col_preset_status_text())
 
 
 
@@ -1824,47 +1814,24 @@ local function draw_table(rows, height)
             | TF('ImGui_TableFlags_ScrollX')
             | TF('ImGui_TableFlags_Resizable')  
             | TF('ImGui_TableFlags_Reorderable')   -- 允許拖曳重排欄位            
-  if reaper.ImGui_BeginTable(ctx, "live_table", 13, flags, -FLT_MIN, height or 360) then
-    local rows = get_view_rows(rows)  -- 用呼叫者給的 rows，然後依勾選過濾
-    -- ★ 先取得動態表頭文字（m:s / TC / Beats / Custom）
-    local startHeader, endHeader = TFLib.headers(TIME_MODE, {pattern=CUSTOM_PATTERN})
-
-    -- 建一個依照「邏輯 ID」畫欄位的輔助函式
+  -- 依目前 ACTIVE_PRESET 生成唯一表格 ID，避免 ImGui 重用舊排序
+  local table_id = "items_" .. ((ACTIVE_PRESET and ACTIVE_PRESET ~= "" and ACTIVE_PRESET) or "default")
+  if reaper.ImGui_BeginTable(ctx, table_id, 13, flags, -FLT_MIN, height or 360) then
+    -- 先定義一個 helper（若檔案裡還沒有）
     local function _setup_column_by_id(id)
-      if id == 1 then
-        reaper.ImGui_TableSetupColumn(ctx, "#", TF('ImGui_TableColumnFlags_WidthFixed'), 28)
-      elseif id == 2 then
-        reaper.ImGui_TableSetupColumn(ctx, "TrkID", TF('ImGui_TableColumnFlags_WidthFixed'), 44)
-      elseif id == 3 then
-        reaper.ImGui_TableSetupColumn(ctx, "Track Name", TF('ImGui_TableColumnFlags_WidthFixed'), 140)
-      elseif id == 4 then
-        reaper.ImGui_TableSetupColumn(ctx, "Take Name",  TF('ImGui_TableColumnFlags_WidthFixed'), 200)
-      elseif id == 5 then
-        reaper.ImGui_TableSetupColumn(ctx, "Item Note",  TF('ImGui_TableColumnFlags_WidthFixed'), 320)
-      elseif id == 6 then
-        reaper.ImGui_TableSetupColumn(ctx, "Source File", TF('ImGui_TableColumnFlags_WidthFixed'), 220)
-      elseif id == 7 then
-        reaper.ImGui_TableSetupColumn(ctx, "Meta Trk Name", TF('ImGui_TableColumnFlags_WidthFixed'), 160)
-      elseif id == 8 then
-        reaper.ImGui_TableSetupColumn(ctx, "Chan#", TF('ImGui_TableColumnFlags_WidthFixed'), 44)
-      elseif id == 9 then
-        reaper.ImGui_TableSetupColumn(ctx, "Interleave", TF('ImGui_TableColumnFlags_WidthFixed'), 60)
-      elseif id == 10 then
-        reaper.ImGui_TableSetupColumn(ctx, "Mute", TF('ImGui_TableColumnFlags_WidthFixed'), 46)
-      elseif id == 11 then
-        reaper.ImGui_TableSetupColumn(ctx, "Color", TF('ImGui_TableColumnFlags_WidthFixed'), 96)
-      elseif id == 12 then
-        local startHeader, _ = TFLib.headers(TIME_MODE, {pattern=CUSTOM_PATTERN})
-        reaper.ImGui_TableSetupColumn(ctx, startHeader, TF('ImGui_TableColumnFlags_WidthFixed'), 120)
-      elseif id == 13 then
-        local _, endHeader = TFLib.headers(TIME_MODE, {pattern=CUSTOM_PATTERN})
-        reaper.ImGui_TableSetupColumn(ctx, endHeader,   TF('ImGui_TableColumnFlags_WidthFixed'), 120)
-      end
+      local label = header_label_from_id(id) or tostring(id)
+      -- 如需寬度/旗標可在這裡加第三參數
+      reaper.ImGui_TableSetupColumn(ctx, label, reaper.ImGui_TableColumnFlags_None())
     end
 
-    -- 用「預設或使用者保存的順序」來建立欄位
-    local initial_order = _normalize_full_order(PRESET or DEFAULT_COL_ORDER)
-    for i=1,#initial_order do _setup_column_by_id(initial_order[i]) end
+    -- 依現有 COL_ORDER 來畫表頭；若還沒任何順序則用預設
+    local DEFAULT_COL_ORDER = { 1, 2, 3, 12, 13, 4, 5, 6, 7, 8, 9, 10, 11 }
+    local initial_order = (COL_ORDER and #COL_ORDER > 0) and COL_ORDER or DEFAULT_COL_ORDER
+    for i = 1, #initial_order do
+      _setup_column_by_id(initial_order[i])
+    end
+
+    reaper.ImGui_TableHeadersRow(ctx)
 
 
 
@@ -1875,32 +1842,14 @@ local function draw_table(rows, height)
     -- 先重建一遍（需要先知道目前視覺→邏輯）
     rebuild_display_mapping()
 
-    -- 偵測：若現在畫面順序 != 上次保存的預設 → 立刻 Auto-save
-    do
-      local cur = COL_ORDER or {}
-      local cur_csv = _csv_from_order(cur)
-      if cur_csv ~= LAST_SAVED_STR and #cur > 0 then
-        save_col_preset(cur, "Preset ✓ (auto-saved)")
-      end
-      if PRESET and _order_equal(PRESET, cur) then
-        PRESET_STATUS = "Preset ✓"
-      else
-        PRESET_STATUS = "Column not saved"
-      end
-    end
-
 
 
     -- 這裡立刻重算顯示→邏輯的映射
     rebuild_display_mapping()
 
-    -- （可選）列印一次，方便你看拖拽後是否有更新
-    dump_order_once()
 
     -- 建 row_index_map（給 Shift-矩形選取等）
     local row_index_map = LT.build_row_index_map(rows)
-
-
 
 
 
