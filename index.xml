@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<index version="1" name="hsuanice Scripts" commit="b35d0a3454980ceea058726963d668e0bf0f52a8">
+<index version="1" name="hsuanice Scripts" commit="3de15ee483c019897fc394d5cc6c5557f3159121">
   <category name="Beta Testing">
     <reapack name="hsuanice_BWF TimeReference Embed Tool.lua" type="script" desc="Embed BWF TimeReference to Active take from Take 1 or Current Position TC">
       <version name="0.7.1" author="hsuanice" time="2025-08-14T17:52:57Z">
@@ -377,6 +377,9 @@
       </version>
       <version name="0.8.1 Summary now call LT.compute_summary()" author="hsuanice" time="2025-09-07T05:45:00Z">
         <source main="main">https://github.com/hsuanice/ReaScripts/raw/b35d0a3454980ceea058726963d668e0bf0f52a8/Beta%20Testing/hsuanice_Item%20List%20Editor.lua</source>
+      </version>
+      <version name="0.8.2 Paste function Fixed" author="hsuanice" time="2025-09-07T11:20:09Z">
+        <source main="main">https://github.com/hsuanice/ReaScripts/raw/3de15ee483c019897fc394d5cc6c5557f3159121/Beta%20Testing/hsuanice_Item%20List%20Editor.lua</source>
       </version>
     </reapack>
     <reapack name="hsuanice_Item Reposition.lua" type="script" desc="ReaImGui - Item Reposition Tool (Interval + Mode + Undo)">
