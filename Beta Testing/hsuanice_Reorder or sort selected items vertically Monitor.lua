@@ -1,6 +1,6 @@
 --[[
 @description Monitor - Reorder or sort selected items vertically
-@version 0.7.1.1 Fix: Copy (Cmd/Ctrl+C) and Shift-rectangle selection could error
+@version 0.7.2
 @author hsuanice
 @about
   Shows a live table of the currently selected items and all sort-relevant fields:
@@ -36,12 +36,15 @@
 
 
 
-
-
-
-
-
 @changelog
+  v0.7.2
+    - New: “Show muted items” toggle in the toolbar.
+      • When off, rows with Mute=on are hidden from the table.
+      • Copy and Save (TSV/CSV) export only the currently visible rows, in the exact on-screen column order.
+      • Toggling clears any active inline edit and selection to avoid acting on hidden rows.
+    - Paste/spill/fill now operate strictly on visible rows (no accidental writes to hidden muted items).
+    - Mute column remains visible (we hide rows, not the column).
+
   v0.7.1.1
     - Fix: Copy (Cmd/Ctrl+C) and Shift-rectangle selection could error with
       “attempt to index a nil value (global 'COL_POS')” on first use.
@@ -400,10 +403,19 @@ local POPUP_TITLE = "Summary"
 
 -- Forward declarations so load_prefs() updates the same locals (not globals)
 local TIME_MODE, CUSTOM_PATTERN, FORMAT, AUTO
+local SHOW_MUTED_ITEMS      -- ← 新增：是否顯示「被靜音的列」
 local scan_selection_rows
 local parse_snapshot_tsv   -- ← 先宣告
 local refresh_now          -- ← 新增：先宣告 refresh_now，讓上面函式抓到 local
 local _trim               -- ← 新增：先宣告 _trim，供前面函式當作同一個 local 來引用
+
+-- defaults
+if SHOW_MUTED_ITEMS == nil then SHOW_MUTED_ITEMS = true end
+
+
+
+
+
 
 -- Column order mapping (single source of truth)
 local COL_ORDER, COL_POS = {}, {}   -- visual→logical / logical→visual
@@ -584,6 +596,8 @@ local function poll_reorder_signal()
 
   -- （選擇性）支援舊的 capture_* / snapshot_*，你可保留原本 parse_snapshot_tsv 的分支；不再贅述。
 end
+
+
 
 
 ---------------------------------------
@@ -853,10 +867,28 @@ local function parse_clipboard_table(text)
   return rows
 end
 
+-- 依目前設定回傳「可見列」：若未勾選顯示靜音，則過濾掉 muted 列
+local function get_view_rows(src)
+  local src_rows = src or ROWS or {}
+  if SHOW_MUTED_ITEMS then return src_rows end
+  local out = {}
+  for _, r in ipairs(src_rows) do
+    if not r.muted then out[#out+1] = r end
+  end
+  return out
+end
+
+-- 取得「目前視圖」的列（Live / BEFORE / AFTER）
+local function rows_for_current_view()
+  if     TABLE_SOURCE == "before" then return SNAP_BEFORE
+  elseif TABLE_SOURCE == "after"  then return SNAP_AFTER
+  else return ROWS end
+end
+
+
 -- === Column order mapping (visual <-> logical) & header text ===
 -- COL_ORDER[display_index] = logical_col_id
 -- COL_POS[logical_col_id]  = display_index
-
 
 local function _col_header_label(col_id)
   if col_id == 1  then return "#" end
@@ -940,9 +972,12 @@ local function build_dst_by_anchor_and_shape(rows, anchor_desc, src_rows, src_co
       end
     end
   end
+  -- 依畫面欄位順序排序（與 COL_ORDER/COL_POS 一致）
   table.sort(dst, function(a,b)
     if a.row_index ~= b.row_index then return a.row_index < b.row_index end
-    return a.col < b.col
+    local pa = (COL_POS and COL_POS[a.col]) or a.col
+    local pb = (COL_POS and COL_POS[b.col]) or b.col
+    return pa < pb
   end)
   return dst
 end
@@ -1316,6 +1351,17 @@ local function draw_toolbar()
     reaper.SetExtState(EXT_NS, "auto_refresh", v and "1" or "0", true)
   end
   reaper.ImGui_SameLine(ctx)
+
+-- Show muted items（隱藏被靜音的列；影響當前表格與輸出）
+local changed, nv = reaper.ImGui_Checkbox(ctx, "Show muted items", SHOW_MUTED_ITEMS)
+reaper.ImGui_SameLine(ctx)
+if changed then
+  SHOW_MUTED_ITEMS = nv
+  EDIT = nil
+  sel_clear()
+  refresh_now()
+end
+
   
 -- 四種：m:s / TC / Beats / Custom（Input 直接在 Custom 右邊）
 reaper.ImGui_SameLine(ctx)
@@ -1383,17 +1429,19 @@ end
 
   reaper.ImGui_SameLine(ctx)
   if reaper.ImGui_Button(ctx, "Copy (TSV)", 110, 24) then
-    reaper.ImGui_SetClipboardText(ctx, build_table_text("tsv", ROWS))
+    local src = rows_for_current_view()
+    reaper.ImGui_SetClipboardText(ctx, build_table_text("tsv", get_view_rows(src)))
   end
+
   reaper.ImGui_SameLine(ctx)
   if reaper.ImGui_Button(ctx, "Save .tsv", 100, 24) then
     local p = choose_save_path("ReorderSort_Monitor_"..timestamp()..".tsv","Tab-separated (*.tsv)\0*.tsv\0All (*.*)\0*.*\0")
-    if p then write_text_file(p, build_table_text("tsv", ROWS)) end
+    if p then write_text_file(p, build_table_text("tsv", get_view_rows())) end
   end
   reaper.ImGui_SameLine(ctx)
   if reaper.ImGui_Button(ctx, "Save .csv", 100, 24) then
     local p = choose_save_path("ReorderSort_Monitor_"..timestamp()..".csv","CSV (*.csv)\0*.csv\0All (*.*)\0*.*\0")
-    if p then write_text_file(p, build_table_text("csv", ROWS)) end
+    if p then write_text_file(p, build_table_text("csv", get_view_rows())) end
   end
 
   reaper.ImGui_SameLine(ctx)
@@ -1413,6 +1461,7 @@ local function draw_table(rows, height)
             | TF('ImGui_TableFlags_Resizable')  
             | TF('ImGui_TableFlags_Reorderable')   -- 允許拖曳重排欄位            
   if reaper.ImGui_BeginTable(ctx, "live_table", 13, flags, -FLT_MIN, height or 360) then
+    local rows = get_view_rows(rows)  -- 用呼叫者給的 rows，然後依勾選過濾
     -- ★ 先取得動態表頭文字（m:s / TC / Beats / Custom）
     local startHeader, endHeader = TFLib.headers(TIME_MODE, {pattern=CUSTOM_PATTERN})
 
@@ -1679,7 +1728,8 @@ local function loop()
   if not (EDIT and EDIT.col) then
     -- Copy selection (any view)
     if shortcut_pressed(reaper.ImGui_Key_C()) then
-      local rows = rows_to_show
+      local src  = rows_for_current_view()
+      local rows = get_view_rows(src)
       local rim  = build_row_index_map(rows)
       copy_selection(rows, rim)
     end
@@ -1745,14 +1795,14 @@ local function loop()
       elseif #dst == 1 then
         -- 來源多值、目標只選一格：spill（僅 3/4/5）
         local anchor = dst[1]
-        local dst2 = build_dst_spill_writable(ROWS, anchor, src_h, src_w)
+        local dst2 = build_dst_by_anchor_and_shape(rows, anchor, src_h, src_w)
         local n = math.min(#src, #dst2)
         for k = 1, n do apply_cell(dst2[k], src[k]) end
 
       elseif #dst < #src then
         -- 0.6.12.1：來源多格、目標少於來源 → 以選取中「最左上」錨點整塊 spill（僅 3/4/5）
         local anchor = dst[1]  -- dst 已依 row-major 排序，dst[1] 即最左上
-        local dst2 = build_dst_spill_writable(ROWS, anchor, src_h, src_w)
+        local dst2 = build_dst_by_anchor_and_shape(rows, anchor, src_h, src_w)
         local n = math.min(#src, #dst2)
         for k = 1, n do apply_cell(dst2[k], src[k]) end
 
