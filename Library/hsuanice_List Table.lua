@@ -3,7 +3,7 @@ hsuanice_List Table.lua
 Minimal helper library for Item List Editor
 (No UI. Pure helpers for columns/selection/clipboard/paste/export.)
 Exports a single table: LT = { ... }
-@version 0.2.2
+@version 0.2.3
 @about
   hsuanice_List Table.lua — Minimal helper library for Item List Editor.
   Provides pure, side-effect-free utilities (no UI, no REAPER writes).
@@ -61,7 +61,7 @@ Exports a single table: LT = { ... }
 
 
 local LT = {}
-LT.VERSION = "0.2.2"
+LT.VERSION = "0.2.3"
 ------------------------------------------------------------
 -- Columns: visual <-> logical mapping
 ------------------------------------------------------------
@@ -70,14 +70,23 @@ function LT.rebuild_display_mapping(ctx, resolve_label_to_id)
   local n = reaper.ImGui_TableGetColumnCount(ctx) or 0
   local order = {}
   local pos   = {}  -- pos[logical_id] = visual_pos
-  for i = 1, n do
-    local name = reaper.ImGui_TableGetColumnName(ctx, i-1) or ""
+
+  -- 以「顯示序」(display order) 逐欄走訪
+  for disp = 0, n-1 do
+    -- 把「目前欄」切到顯示序的第 disp 欄
+    reaper.ImGui_TableSetColumnIndex(ctx, disp)
+
+    -- 現在位於該顯示欄位上，取得其名稱（或你也可直接用 resolve_label_to_id）
+    local name = reaper.ImGui_TableGetColumnName(ctx, reaper.ImGui_TableGetColumnIndex(ctx)) or ""
     local id   = resolve_label_to_id(name)
-    order[i] = id
-    if id then pos[id] = i end
+
+    order[disp + 1] = id
+    if id then pos[id] = disp + 1 end
   end
+
   return order, pos
 end
+
 
 ------------------------------------------------------------
 -- Rows: visible rows index map (GUID -> row index for current view)
