@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<index version="1" name="hsuanice Scripts" commit="c60cb43bdfb7e12e92be8d54f694fd27682b40df">
+<index version="1" name="hsuanice Scripts" commit="108761bdfba2a05a209491b9f5bead7d8e56b897">
   <category name="Beta Testing">
     <reapack name="hsuanice_BWF TimeReference Embed Tool.lua" type="script" desc="Embed BWF TimeReference to Active take from Take 1 or Current Position TC">
       <version name="0.7.1" author="hsuanice" time="2025-08-14T17:52:57Z">
@@ -383,6 +383,9 @@
       </version>
       <version name="0.8.2.1 fix dual table issue" author="hsuanice" time="2025-09-07T11:31:40Z">
         <source main="main">https://github.com/hsuanice/ReaScripts/raw/c60cb43bdfb7e12e92be8d54f694fd27682b40df/Beta%20Testing/hsuanice_Item%20List%20Editor.lua</source>
+      </version>
+      <version name="0.8.3" author="hsuanice" time="2025-09-07T11:55:09Z">
+        <source main="main">https://github.com/hsuanice/ReaScripts/raw/108761bdfba2a05a209491b9f5bead7d8e56b897/Beta%20Testing/hsuanice_Item%20List%20Editor.lua</source>
       </version>
     </reapack>
     <reapack name="hsuanice_Item Reposition.lua" type="script" desc="ReaImGui - Item Reposition Tool (Interval + Mode + Undo)">
