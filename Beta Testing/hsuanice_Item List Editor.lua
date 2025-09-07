@@ -1,6 +1,6 @@
 --[[
 @description Item List Editor
-@version 0.8.2.1 fix dual table issue
+@version 0.8.3
 @author hsuanice
 @about
   Shows a live, spreadsheet-style table of the currently selected items and all
@@ -40,6 +40,23 @@
 
 
 @changelog
+  v0.8.3
+    - Refactor: Moved TSV/CSV utilities into the List Table library.
+      • Removed local implementations of:
+          - parse_clipboard_table() (clipboard → 2D table)
+          - flatten_tsv_to_list() (2D → flat list)
+          - src_shape_dims() (source height/width detection)
+          - build_dst_by_anchor_and_shape() / build_dst_spill_writable()
+      • Editor now delegates to LT.* equivalents, keeping all copy/paste
+        and export logic consistent across scripts.
+    - Editor side: only minimal glue remains (get_cell_text, COL_ORDER/COL_POS).
+    - Behavior unchanged:
+      • Copy/Export still follow on-screen column order.
+      • Paste still supports single-value fill, multi-cell spill, fill-down,
+        and Excel-style block mapping.
+    - Cleanup: consolidated file I/O helpers (choose_save_path, write_text_file, timestamp)
+      to prepare for future library migration.
+
   v0.8.2.1
     - Fix: Inline editing no longer renders two overlapping tables.
       • Removed duplicate draw_table() call in the main loop.
@@ -450,7 +467,10 @@ local LT = dofile(
 assert(LT and (LT.VERSION or "0") >= "0.1.0",
        "Please update 'hsuanice List Table' to >= 0.1.0")
 
-
+-- TSV/CSV helpers: delegate to Library
+local parse_clipboard_table = LT.parse_clipboard_table
+local flatten_tsv_to_list   = LT.flatten_tsv_to_list
+local src_shape_dims        = LT.src_shape_dims
 
 ---------------------------------------
 -- Dependency check for ImGui
@@ -1052,30 +1072,6 @@ local function flatten_tsv_to_list(tbl)
   return list
 end
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 -- === Undo/Redo 選取保護（以 GUID 快照） ===
 local function _snapshot_selected_item_guids()
   local list = {}
@@ -1278,34 +1274,7 @@ end
 ---------------------------------------
 -- Export helpers
 ---------------------------------------
-local function build_table_text(fmt, rows)
-  local sep = (fmt == "csv") and "," or "\t"
-  local out = {}
-  local function esc(s)
-    s = tostring(s or "")
-    if fmt == "csv" and s:find('[,\r\n"]') then s = '"'..s:gsub('"','""')..'"' end
-    return s
-  end
 
-  -- header：依目前畫面欄位順序輸出（若 mapping 尚未建立，回退固定順序）
-  local export_cols = (#COL_ORDER > 0) and COL_ORDER or {1,2,3,4,5,6,7,8,9,10,11,12,13}
-  local header = {}
-  for _, cid in ipairs(export_cols) do
-    header[#header+1] = _col_header_label(cid)
-  end
-  out[#out+1] = table.concat(header, sep)
-
-  -- rows：依畫面順序輸出每列
-  for i, r in ipairs(rows or {}) do
-    local line = {}
-    for _, cid in ipairs(export_cols) do
-      line[#line+1] = esc(get_cell_text(i, r, cid, fmt))
-    end
-    out[#out+1] = table.concat(line, sep)
-  end
-
-  return table.concat(out, "\n")
-end
 
 ---------------------------------------
 -- UI
