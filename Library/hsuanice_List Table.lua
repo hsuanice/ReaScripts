@@ -3,7 +3,7 @@ hsuanice_List Table.lua
 Minimal helper library for Item List Editor
 (No UI. Pure helpers for columns/selection/clipboard/paste/export.)
 Exports a single table: LT = { ... }
-@version 0.2.0
+@version 0.2.1
 @about
   hsuanice_List Table.lua — Minimal helper library for Item List Editor.
   Provides pure, side-effect-free utilities (no UI, no REAPER writes).
@@ -25,6 +25,13 @@ Exports a single table: LT = { ... }
     focused on UI and REAPER state changes only.
 
 @changelog
+  v0.2.1
+    - Added LT.build_dst_spill_writable(): Excel-style spill expansion limited
+      to writable columns (3=Track, 4=Take, 5=Item Note).
+      • Used by LT.apply_paste() when handling multi-cell sources into a
+        single-cell or smaller destination selection.
+    - Ensures Editor paste behavior matches previous local implementation.
+
   v0.2.0 
     - Add 貼上動作的分流（dispatcher）
   v0.1.0
@@ -45,7 +52,7 @@ Exports a single table: LT = { ... }
 
 
 local LT = {}
-LT.VERSION = "0.2.0"
+LT.VERSION = "0.2.1"
 ------------------------------------------------------------
 -- Columns: visual <-> logical mapping
 ------------------------------------------------------------
@@ -286,6 +293,48 @@ function LT.build_dst_by_anchor_and_shape(rows, anchor, src_h, src_w)
   end
   return dst
 end
+
+-- Spill by anchor & shape (Excel-style), writable cols only (3/4/5)
+function LT.build_dst_spill_writable(rows, anchor, src_h, src_w, COL_ORDER, COL_POS)
+  if not (rows and anchor and src_h and src_w) then return {} end
+  local writable = { [3]=true, [4]=true, [5]=true }
+
+  -- 確定 anchor 的 row index
+  local r0 = anchor.row_index or 1
+  if not anchor.row_index and anchor.guid then
+    for i, row in ipairs(rows) do
+      if row.__item_guid == anchor.guid then r0 = i break end
+    end
+  end
+
+  -- 確定起始欄位（必須是可寫欄；fallback 到 3）
+  local start_col = 3
+  if type(anchor.col)=="number" and writable[anchor.col] then
+    start_col = anchor.col
+  else
+    for _, cid in ipairs({anchor.col, 3,4,5}) do
+      if type(cid)=="number" and writable[cid] then start_col = cid break end
+    end
+  end
+
+  local dst = {}
+  local rmax = math.min(#rows, r0 + src_h - 1)
+  for ri = r0, rmax do
+    local g = rows[ri].__item_guid
+    local wrote = 0
+    for logical = start_col, 5 do
+      if writable[logical] then
+        dst[#dst+1] = { guid = g, col = logical, row_index = ri }
+        wrote = wrote + 1
+        if wrote >= src_w then break end
+      end
+    end
+  end
+  return dst
+end
+
+
+
 
 -- Apply paste according to Excel-like rules.
 -- rows: 可見列（Editor 依 UI 狀態傳入）
