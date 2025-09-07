@@ -1,6 +1,6 @@
 --[[
 @description Item List Editor
-@version 0.8.0 not use List Table library yet
+@version 0.8.1 Summary now call LT.compute_summary()
 @author hsuanice
 @about
   Shows a live, spreadsheet-style table of the currently selected items and all
@@ -40,6 +40,9 @@
 
 
 @changelog
+  v0.8.1
+    - Summary calculation now calls LT.compute_summary() from the List Table library.
+      • Removed the local compute_summary() implementation in Editor.
   v0.8.0
     - Major refactor: split from "Monitor" into a standalone Item List Editor.
       • Removed BEFORE/AFTER snapshot capture, cross-script handshake, and all
@@ -407,6 +410,7 @@
 
 ]]
 
+
 -- ===== Integrate with hsuanice Metadata Read (>= 0.2.0) =====
 local META = dofile(
   reaper.GetResourcePath() ..
@@ -414,6 +418,17 @@ local META = dofile(
 )
 assert(META and (META.VERSION or "0") >= "0.2.0",
        "Please update 'hsuanice Metadata Read' to >= 0.2.0")
+
+
+-- ===== Integrate with hsuanice List Table (>= 0.1.0) =====
+local LT = dofile(
+  reaper.GetResourcePath() ..
+  "/Scripts/hsuanice Scripts/Library/hsuanice_List Table.lua"
+)
+assert(LT and (LT.VERSION or "0") >= "0.1.0",
+       "Please update 'hsuanice List Table' to >= 0.1.0")
+
+
 
 ---------------------------------------
 -- Dependency check for ImGui
@@ -585,28 +600,6 @@ local function timestamp()
   local t=os.date("*t"); return string.format("%04d%02d%02d_%02d%02d%02d",t.year,t.month,t.day,t.hour,t.min,t.sec)
 end
 
-local function compute_summary(rows)
-  local n = #rows
-  if n == 0 then return {count=0} end
-  local min_start = math.huge
-  local max_end   = -math.huge
-  local sum_len   = 0.0
-  for _, r in ipairs(rows) do
-    local s = tonumber(r.start_time) or 0
-    local e = tonumber(r.end_time)   or s
-    if s < min_start then min_start = s end
-    if e > max_end   then max_end   = e end
-    sum_len = sum_len + (e - s)
-  end
-  local span = max_end - min_start
-  return {
-    count = n,
-    min_start = min_start,
-    max_end   = max_end,
-    span      = span,
-    sum_len   = sum_len
-  }
-end
 
 -- forward locals (避免之後被重新 local 化)
 ROWS = {}
@@ -1230,7 +1223,7 @@ if load_prefs then load_prefs() end
 
 
 local function build_summary_text(rows)
-  local S = compute_summary(rows or {})
+  local S = LT.compute_summary(rows or {})
   if not S or (S.count or 0) == 0 then return "No items." end
   local from = format_time(S.min_start)
   local to   = format_time(S.max_end)
