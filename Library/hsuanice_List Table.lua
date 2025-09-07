@@ -4,6 +4,26 @@ Minimal helper library for Item List Editor
 (No UI. Pure helpers for columns/selection/clipboard/paste/export.)
 Exports a single table: LT = { ... }
 
+@about
+  hsuanice_List Table.lua — Minimal helper library for Item List Editor.
+  Provides pure, side-effect-free utilities (no UI, no REAPER writes).
+
+  Functions include:
+    • Column helpers: rebuild_display_mapping()
+    • Row helpers: build_row_index_map(), filter_rows()
+    • Selection helpers: sel_rect_apply() (Shift-rectangle)
+    • Clipboard helpers: copy_selection(), parse_clipboard_table(),
+      flatten_tsv_to_list(), src_shape_dims()
+    • Destination builders: build_dst_list_from_selection(),
+      build_dst_by_anchor_and_shape()
+    • Summary: compute_summary() for item count, span, length totals
+    • Export: build_table_text() to TSV/CSV (follows visual column order)
+
+  Intended usage:
+    Called from the Item List Editor (or similar scripts) to handle
+    table logic, selection mechanics, and text I/O, keeping the Editor
+    focused on UI and REAPER state changes only.
+
 @changelog
   v0.1.0
     - Initial release of hsuanice_List Table library.
@@ -19,8 +39,8 @@ Exports a single table: LT = { ... }
       • Build destination list from selection (row-major, visual order)  
       • Spill by anchor & shape (Excel-style), restricted to writable columns (3=Track, 4=Take, 5=Item Note)  
       • Export table as TSV/CSV following on-screen column order
-
 --]]
+
 local LT = {}
 
 ------------------------------------------------------------
