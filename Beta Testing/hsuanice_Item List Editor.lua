@@ -1,6 +1,6 @@
 --[[
 @description Item List Editor
-@version 0.9.3
+@version 0.9.4
 @author hsuanice
 @about
   Shows a live, spreadsheet-style table of the currently selected items and all
@@ -40,7 +40,18 @@
 
 
 @changelog
-  v0.9.3
+  v0.9.4
+  - Presets UX: The dropdown now applies a preset immediately on selection (no “Recall” button).
+    • Added a width limit for the preview field and a height-capped, scrollable list.
+    • “(none)” cleanly resets to the default column order.
+  - Table rebuild: The table ID is now keyed by the active preset, ensuring a fresh
+    rebuild so headers/columns reflect the saved order right away after switching.
+  - Fix: Removed a rare “double header” render path when switching presets; the header
+    is drawn once and the display→logical mapping is rebuilt predictably.
+  - Cleanup: Deleted legacy/overlapping preset helpers; unified on named presets
+    stored as an index plus `col_preset.<name>` and `col_preset_active`. Includes
+    defensive normalization for incomplete orders (fills IDs 1..13).
+  - Status: The toolbar status text now reflects the active preset or shows “No preset”.
   v0.9.2
     - New: Named Column Presets with dropdown + explicit Recall / Save as… / Delete.
       • Save with a user-defined name; multiple presets stored in ExtState.
@@ -1756,48 +1767,72 @@ end
 reaper.ImGui_SameLine(ctx)
 reaper.ImGui_Text(ctx, "Preset:")
 reaper.ImGui_SameLine(ctx)
+do
+  local current = ACTIVE_PRESET or "(none)"
+  -- 固定預覽欄位寬度，避免太長
+  reaper.ImGui_SetNextItemWidth(ctx, 160)
+  -- 控制彈出高度不要過長（可捲動）
+  if reaper.ImGui_BeginCombo(ctx, "##colpreset_combo", current, reaper.ImGui_ComboFlags_HeightRegular()) then
+    -- "(none)"：清空預設，不套用任何儲存的順序
+    local sel = (ACTIVE_PRESET == nil)
+    if reaper.ImGui_Selectable(ctx, "(none)", sel) then
+      ACTIVE_PRESET = nil
+      PRESET_STATUS = "No preset"
+    end
+    reaper.ImGui_Separator(ctx)
 
-local preview = (ACTIVE_PRESET ~= "" and (ACTIVE_PRESET.." (active)") or "(none)")
-if reaper.ImGui_BeginCombo(ctx, "##colpreset_combo", preview, reaper.ImGui_ComboFlags_HeightLargest()) then
-  -- 預設順序（無 preset）
-  if reaper.ImGui_Selectable(ctx, "Default order (none)", ACTIVE_PRESET=="") then
-    preset_recall("")  -- 選到就直接套用
-  end
-  -- 已存的 preset 名單
-  local names = preset_list()
-  for i, name in ipairs(names) do
-    local selected = (name == ACTIVE_PRESET)
-    if reaper.ImGui_Selectable(ctx, name, selected) then
-      preset_recall(name) -- 選到就直接套用
+    -- 列出使用者命名的所有 preset；選到就「立即套用」
+    for i, name in ipairs(PRESETS) do
+      local selected = (name == ACTIVE_PRESET)
+      if reaper.ImGui_Selectable(ctx, name, selected) then
+        ACTIVE_PRESET = name
+        preset_recall(name)       -- ← 直接套用，不需要再按 Recall
+      end
     end
-    reaper.ImGui_SameLine(ctx)
-    if reaper.ImGui_SmallButton(ctx, "Del##preset_del_"..i) then
-      preset_delete(name)
-    end
+    reaper.ImGui_EndCombo(ctx)
   end
-  reaper.ImGui_EndCombo(ctx)
 end
 
+-- 「Save as…」：用使用者自訂名稱另存
 reaper.ImGui_SameLine(ctx)
-if reaper.ImGui_Button(ctx, "Save as...", 90, 24) then
-  reaper.ImGui_OpenPopup(ctx, "Save Preset")
+if reaper.ImGui_Button(ctx, "Save as…", 88, 24) then
+  PRESET_NAME_BUF = ACTIVE_PRESET or PRESET_NAME_BUF or ""
+  reaper.ImGui_OpenPopup(ctx, "Save preset as")
 end
-if reaper.ImGui_BeginPopupModal(ctx, "Save Preset", true, reaper.ImGui_WindowFlags_AlwaysAutoResize()) then
+
+-- 「Delete」：刪除目前選到的 preset
+reaper.ImGui_SameLine(ctx)
+local can_delete = (ACTIVE_PRESET and ACTIVE_PRESET~="")
+if reaper.ImGui_BeginDisabled(ctx, not can_delete) then end
+if reaper.ImGui_Button(ctx, "Delete", 68, 24) and can_delete then
+  preset_delete(ACTIVE_PRESET)
+end
+if reaper.ImGui_EndDisabled then reaper.ImGui_EndDisabled(ctx) end
+
+-- 小字狀態
+reaper.ImGui_SameLine(ctx)
+reaper.ImGui_TextDisabled(ctx, PRESET_STATUS or "")
+
+-- Save-as modal
+if reaper.ImGui_BeginPopupModal(ctx, "Save preset as", true, TF('ImGui_WindowFlags_AlwaysAutoResize')) then
   reaper.ImGui_Text(ctx, "Preset name:")
-  reaper.ImGui_SameLine(ctx)
-  if not SAVE_PRESET_BUF then SAVE_PRESET_BUF = "" end
-  local changed, buf = reaper.ImGui_InputText(ctx, "##preset_name", SAVE_PRESET_BUF)
-  if changed then SAVE_PRESET_BUF = buf end
-  if reaper.ImGui_Button(ctx, "OK", 80, 24) then
-    preset_save_as(SAVE_PRESET_BUF)
-    reaper.ImGui_CloseCurrentPopup(ctx)
+  reaper.ImGui_SetNextItemWidth(ctx, 220)
+  PRESET_NAME_BUF = PRESET_NAME_BUF or ""
+  local changed, txt = reaper.ImGui_InputText(ctx, "##presetname", PRESET_NAME_BUF)
+  if changed then PRESET_NAME_BUF = txt end
+
+  if reaper.ImGui_Button(ctx, "Save", 82, 24) then
+    if preset_save_as(PRESET_NAME_BUF, COL_ORDER) then
+      reaper.ImGui_CloseCurrentPopup(ctx)
+    end
   end
   reaper.ImGui_SameLine(ctx)
-  if reaper.ImGui_Button(ctx, "Cancel", 80, 24) then
+  if reaper.ImGui_Button(ctx, "Cancel", 82, 24) then
     reaper.ImGui_CloseCurrentPopup(ctx)
   end
   reaper.ImGui_EndPopup(ctx)
 end
+-----------------------
 
 reaper.ImGui_SameLine(ctx)
 reaper.ImGui_TextDisabled(ctx, col_preset_status_text())
@@ -1830,10 +1865,6 @@ local function draw_table(rows, height)
     for i = 1, #initial_order do
       _setup_column_by_id(initial_order[i])
     end
-
-    reaper.ImGui_TableHeadersRow(ctx)
-
-
 
 
     -- 表頭
