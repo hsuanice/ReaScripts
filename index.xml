@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<index version="1" name="hsuanice Scripts" commit="46350b910622f651bf688ad527ff422e853245fb">
+<index version="1" name="hsuanice Scripts" commit="db1bdb4f6dd57addfa9b7c8629238a4feec43fef">
   <category name="Beta Testing">
     <reapack name="hsuanice_BWF TimeReference Embed Tool.lua" type="script" desc="Embed BWF TimeReference to Active take from Take 1 or Current Position TC">
       <version name="0.7.1" author="hsuanice" time="2025-08-14T17:52:57Z">
@@ -443,9 +443,9 @@
 {\colortbl;\red255\green0\blue0;\red0\green0\blue255;}
 \widowctrl\hyphauto
 
-{\pard \ql \f0 \sa180 \li0 \fi0 Background watcher that mirrors current ITEM SELECTION to the TIME SELECTION (configurable): \u8226 ? Default: ONLY link when selection changed by marquee selection, actions, or other scripts. (Simple mouse single-click selection, including Ctrl/\u8984 ?-click toggles, is suppressed by default.) \u8226 ? Respects Razor Areas \u8212- if any Razor exists, pausing the link. \u8226 ? After linking, moves edit cursor to the time selection start. \u8226 ? Ultra lightweight, no UI, no lag.\par}
-{\pard \ql \f0 \sa180 \li0 \fi0 How simple-click suppression works (no perfect source-of-change signal in REAPER): \u8226 ? We track mouse down/up and motion distance on Arrange. \u8226 ? If a selection change happens within a short window after a non-drag left click (a "simple click"), we suppress linking. Dragging beyond a pixel threshold counts as marquee (allowed).\par}
-{\pard \ql \f0 \sa180 \li0 \fi0 Dependencies (optional but recommended): \u8226 ? JS_ReaScriptAPI (for precise mouse pos/state) and SWS (for BR_GetMouseCursorContext). If missing, the script gracefully falls back to "always allow" (i.e., behaves like 0.1.2).\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 Background watcher that mirrors current ITEM SELECTION to the TIME SELECTION (configurable): \u8226 ? Default: ONLY link when selection changed by marquee selection, actions, or other scripts. (Simple mouse single-click selection, including Ctrl/\u8984 ?-click toggles, is suppressed by default.) \u8226 ? Respects Razor Areas \u8212- if any Razor exists, pausing the link. \u8226 ? After linking, moves edit cursor to the time selection start {\b only for marquee selections}. \u8226 ? Ultra lightweight, no UI, no lag.\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 How simple-click suppression works: \u8226 ? Track mouse down/up and motion distance in Arrange. \u8226 ? Drag beyond a pixel threshold counts as marquee (allowed + cursor move). \u8226 ? Single-click (no drag) within a short window is suppressed from linking.\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 Dependencies (optional): \u8226 ? JS_ReaScriptAPI & SWS recommended. If missing, the script falls back to permissive behavior like 0.1.2.\par}
 }
 ]]></description>
       </metadata>
@@ -460,6 +460,9 @@
       </version>
       <version name="0.2.0 edit cursor follow time selection + suppress simple-click triggers (default)" author="hsuanice" time="2025-09-08T06:14:49Z">
         <source main="main">https://github.com/hsuanice/ReaScripts/raw/46350b910622f651bf688ad527ff422e853245fb/Beta%20Testing/hsuanice_Item%20Selection%20Link%20to%20Time.lua</source>
+      </version>
+      <version name="0.2.1 marquee-only cursor move; suppress simple-click triggers (default)" author="hsuanice" time="2025-09-08T06:23:25Z">
+        <source main="main">https://github.com/hsuanice/ReaScripts/raw/db1bdb4f6dd57addfa9b7c8629238a4feec43fef/Beta%20Testing/hsuanice_Item%20Selection%20Link%20to%20Time.lua</source>
       </version>
     </reapack>
     <reapack name="hsuanice_Mouse Left Click Empty Area to Select Track.lua" type="script" desc="hsuanice_Mouse Left Click Empty Area to Select Track">
