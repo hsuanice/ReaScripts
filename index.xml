@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<index version="1" name="hsuanice Scripts" commit="2ca6770a896037bba21da4a32bbfc1ba5394faff">
+<index version="1" name="hsuanice Scripts" commit="95375b03b8f8691dde454499894f07a4dfeb61c6">
   <category name="Beta Testing">
     <reapack name="hsuanice_BWF TimeReference Embed Tool.lua" type="script" desc="Embed BWF TimeReference to Active take from Take 1 or Current Position TC">
       <version name="0.7.1" author="hsuanice" time="2025-08-14T17:52:57Z">
@@ -404,6 +404,9 @@
       </version>
       <version name="0.9.3" author="hsuanice" time="2025-09-07T17:21:13Z">
         <source main="main">https://github.com/hsuanice/ReaScripts/raw/e16e4ddfc0bcfea44563b05b23ac6f833b3b6134/Beta%20Testing/hsuanice_Item%20List%20Editor.lua</source>
+      </version>
+      <version name="0.9.4" author="hsuanice" time="2025-09-08T13:08:18Z">
+        <source main="main">https://github.com/hsuanice/ReaScripts/raw/95375b03b8f8691dde454499894f07a4dfeb61c6/Beta%20Testing/hsuanice_Item%20List%20Editor.lua</source>
       </version>
     </reapack>
     <reapack name="hsuanice_Item Reposition.lua" type="script" desc="ReaImGui - Item Reposition Tool (Interval + Mode + Undo)">
