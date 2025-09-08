@@ -1,36 +1,35 @@
 --[[
 @description hsuanice_Item Selection and link to Time
-@version 0.2.1 marquee-only cursor move; suppress simple-click triggers (default)
+@version 0.2.2 marquee-only link + marquee-only cursor move; suppress simple-click (default)
 @author hsuanice
 @about
-  Background watcher that mirrors current ITEM SELECTION to the TIME SELECTION (configurable):
-    • Default: ONLY link when selection changed by marquee selection, actions, or other scripts.
-      (Simple mouse single-click selection, including Ctrl/⌘-click toggles, is suppressed by default.)
-    • Respects Razor Areas — if any Razor exists, pausing the link.
-    • After linking, moves edit cursor to the time selection start **only for marquee selections**.
+  Background watcher that mirrors ITEM SELECTION to TIME SELECTION (highly conservative):
+    • NOW: Only marquee selection (drag in Arrange) will link & move cursor.
+    • Simple single-click (incl. Ctrl/⌘-click) is suppressed by default.
+    • Selection changes from actions or other scripts are IGNORED by default.
+    • Respects Razor Areas — if any Razor exists, pause linking.
     • Ultra lightweight, no UI, no lag.
 
-  How simple-click suppression works:
-    • Track mouse down/up and motion distance in Arrange.
-    • Drag beyond a pixel threshold counts as marquee (allowed + cursor move).
-    • Single-click (no drag) within a short window is suppressed from linking.
-
-  Dependencies (optional):
-    • JS_ReaScriptAPI & SWS recommended. If missing, the script falls back to permissive behavior like 0.1.2.
+  Notes:
+    • Requires JS_ReaScriptAPI & SWS to robustly classify marquee vs. click/action/script.
+      If not present, falls back to permissive behavior (same as 0.1.2) so it never blocks your workflow.
 
 @changelog
+  v0.2.2
+    - Change: Time link now triggers ONLY on marquee selection (mouse drag beyond threshold in Arrange).
+    - Change: Action-/Script-driven selection changes are suppressed (no link) by default.
+    - Keep: Edit cursor moves to range start only for marquee selections.
+    - Keep: Simple-click suppression (incl. Ctrl/⌘-click) remains ON by default.
   v0.2.1
-    - Change: Edit cursor now moves to time selection start ONLY when the selection change came from a marquee drag.
-      (Action/Script-triggered selection updates keep time selection in sync but do NOT move the edit cursor.)
+    - Cursor moves only for marquee; actions/scripts still linked (now disabled in 0.2.2).
   v0.2.0
-    - Feature: Suppress time-link for simple mouse single-click selection (incl. Ctrl/⌘-click). Default ON (suppressed).
-    - Behavior: Marquee allowed; single-click suppressed. Fallback to 0.1.2 if JS/SWS not present.
+    - Added simple-click suppression switches; marquee allowed; fallback to 0.1.2 if JS/SWS missing.
   v0.1.2
-    - After linking, move edit cursor to time selection start (still respecting Razor).
+    - Move edit cursor to time selection start after linking.
   v0.1.1
-    - Respect Razor Areas: if any Razor exists (track-level or fallback), do not link item → time.
+    - Respect Razor Areas: pause linking when any Razor exists.
   v0.1.0
-    - Initial release. Ultra-light item→time selection link with state-change gating and toolbar sync.
+    - Initial release.
 ]]
 
 -------------------- USER OPTIONS --------------------
@@ -38,10 +37,13 @@
 local CLEAR_WHEN_EMPTY = false
 
 -- Suppress simple mouse single-click selection (incl. Ctrl/⌘-click) from triggering the link.
--- Default = true (i.e., simple-click 不觸發；只保留 marquee / Action / Script)
+-- Default = true (i.e., simple-click 不觸發)
 local SUPPRESS_SIMPLE_CLICK = true
 
--- Pixel distance regarded as "drag" (>= → treated as marquee, allowed)
+-- Only marquee may link (actions/scripts ignored). Default true per 0.2.2.
+local ONLY_MARQUEE_LINKS = true
+
+-- Pixel distance regarded as "drag" (>= → treated as marquee)
 local DRAG_THRESHOLD_PX = 4
 
 -- Time window (ms) after a simple click within which a selection-change is considered "from a click"
@@ -114,9 +116,7 @@ local function apply_time_from_selection(move_cursor)
     if iend > max_end then max_end = iend end
   end
 
-  -- Link: set time selection
   reaper.GetSet_LoopTimeRange(true, false, min_pos, max_end, false)
-  -- Move cursor only when requested (i.e., marquee selection)
   if move_cursor then
     reaper.SetEditCurPos(min_pos, false, false)
   end
@@ -133,9 +133,7 @@ local mouse = {
   down_ctx = "",   -- cursor context at mouse-down
 }
 
-local function now_ms()
-  return reaper.time_precise() * 1000.0
-end
+local function now_ms() return reaper.time_precise() * 1000.0 end
 
 local function get_mouse_xy()
   if HAS_JS then
@@ -176,33 +174,35 @@ local function update_mouse_state()
   elseif (not left_down) and mouse.down then
     mouse.down = false
     mouse.last_up_time_ms = now_ms()
-    -- keep mouse.dragged as-is for this cycle (so we can detect marquee on release)
   end
 end
 
--- Decide whether to allow linking for this selection change
+-- Decide whether this selection change should trigger LINK at all
 local function should_allow_link_for_this_change()
-  if not SUPPRESS_SIMPLE_CLICK then
-    return true
-  end
+  -- If we can't classify (no JS), be permissive like 0.1.2 to avoid breaking workflows.
   if not HAS_JS then
     return true
   end
-  local tnow = now_ms()
-  local recent_click = (mouse.last_up_time_ms >= 0) and ((tnow - mouse.last_up_time_ms) <= CLICK_SUPPRESS_MS)
-  if recent_click and (mouse.dragged == false) and (mouse.down_ctx == "arrange") then
-    return false -- simple click; suppress
+
+  -- If only marquee may link, require: dragged in Arrange.
+  if ONLY_MARQUEE_LINKS then
+    return mouse.dragged and (mouse.down_ctx == "arrange")
   end
-  return true -- marquee/actions/scripts
+
+  -- Otherwise (not only-marquee):
+  if SUPPRESS_SIMPLE_CLICK then
+    local tnow = now_ms()
+    local recent_click = (mouse.last_up_time_ms >= 0) and ((tnow - mouse.last_up_time_ms) <= CLICK_SUPPRESS_MS)
+    if recent_click and (mouse.dragged == false) and (mouse.down_ctx == "arrange") then
+      return false -- simple click; suppress
+    end
+  end
+  return true -- allow actions/scripts
 end
 
 -- Determine whether this change should MOVE the cursor (only for marquee)
 local function should_move_cursor_for_this_change()
-  if not HAS_JS then
-    -- Without JS we can't reliably detect marquee; be conservative: don't move.
-    return false
-  end
-  -- Consider marquee if drag occurred in Arrange during this interaction
+  if not HAS_JS then return false end
   return mouse.dragged and (mouse.down_ctx == "arrange")
 end
 
@@ -220,7 +220,7 @@ local function mainloop()
   local sig = selection_signature()
   if sig ~= last_sig then
     local allow = should_allow_link_for_this_change()
-    local move_cursor = should_move_cursor_for_this_change() -- marquee → true; others → false
+    local move_cursor = should_move_cursor_for_this_change() -- only marquee → true
     last_sig = sig
     if allow then
       reaper.PreventUIRefresh(1)
