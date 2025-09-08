@@ -1,31 +1,30 @@
 --[[
 @description hsuanice_Item Selection and link to Time
-@version 0.2.0 edit cursor follow time selection + suppress simple-click triggers (default)
+@version 0.2.1 marquee-only cursor move; suppress simple-click triggers (default)
 @author hsuanice
 @about
   Background watcher that mirrors current ITEM SELECTION to the TIME SELECTION (configurable):
     • Default: ONLY link when selection changed by marquee selection, actions, or other scripts.
       (Simple mouse single-click selection, including Ctrl/⌘-click toggles, is suppressed by default.)
     • Respects Razor Areas — if any Razor exists, pausing the link.
-    • After linking, moves edit cursor to the time selection start.
+    • After linking, moves edit cursor to the time selection start **only for marquee selections**.
     • Ultra lightweight, no UI, no lag.
 
-  How simple-click suppression works (no perfect source-of-change signal in REAPER):
-    • We track mouse down/up and motion distance on Arrange. 
-    • If a selection change happens within a short window after a non-drag left click (a "simple click"),
-      we suppress linking. Dragging beyond a pixel threshold counts as marquee (allowed).
+  How simple-click suppression works:
+    • Track mouse down/up and motion distance in Arrange.
+    • Drag beyond a pixel threshold counts as marquee (allowed + cursor move).
+    • Single-click (no drag) within a short window is suppressed from linking.
 
-  Dependencies (optional but recommended):
-    • JS_ReaScriptAPI (for precise mouse pos/state) and SWS (for BR_GetMouseCursorContext).
-      If missing, the script gracefully falls back to "always allow" (i.e., behaves like 0.1.2).
+  Dependencies (optional):
+    • JS_ReaScriptAPI & SWS recommended. If missing, the script falls back to permissive behavior like 0.1.2.
 
 @changelog
+  v0.2.1
+    - Change: Edit cursor now moves to time selection start ONLY when the selection change came from a marquee drag.
+      (Action/Script-triggered selection updates keep time selection in sync but do NOT move the edit cursor.)
   v0.2.0
-    - Feature: Added switches to suppress time-link for simple mouse single-click selection
-      (including Ctrl/⌘-click). Default OFF (suppressed). Marquee, actions, and scripts still trigger.
-    - Behavior: Marquee (drag beyond threshold) is allowed; single-click (no drag) suppressed.
-    - Robustness: If JS/SWS not installed, falls back to 0.1.2 behavior so it never breaks your workflow.
-    - Kept: Razor-aware pause; edit cursor jumps to range start; auto-terminate + toolbar sync.
+    - Feature: Suppress time-link for simple mouse single-click selection (incl. Ctrl/⌘-click). Default ON (suppressed).
+    - Behavior: Marquee allowed; single-click suppressed. Fallback to 0.1.2 if JS/SWS not present.
   v0.1.2
     - After linking, move edit cursor to time selection start (still respecting Razor).
   v0.1.1
@@ -95,8 +94,8 @@ local function selection_signature()
   return string.format("%d|%.12f|%.12f", n, min_pos, max_end)
 end
 
--- Apply time selection from current item selection, and move edit cursor to start
-local function apply_time_from_selection()
+-- Apply time selection from current item selection; optionally move edit cursor to start
+local function apply_time_from_selection(move_cursor)
   local n = reaper.CountSelectedMediaItems(0)
   if n == 0 then
     if CLEAR_WHEN_EMPTY then
@@ -117,8 +116,10 @@ local function apply_time_from_selection()
 
   -- Link: set time selection
   reaper.GetSet_LoopTimeRange(true, false, min_pos, max_end, false)
-  -- Keep: move edit cursor to time selection start (no view scroll, no seek)
-  reaper.SetEditCurPos(min_pos, false, false)
+  -- Move cursor only when requested (i.e., marquee selection)
+  if move_cursor then
+    reaper.SetEditCurPos(min_pos, false, false)
+  end
 end
 
 ----------------------------------------------------------------
@@ -141,7 +142,6 @@ local function get_mouse_xy()
     local x, y = reaper.GetMousePosition()
     return x or 0, y or 0
   end
-  -- Fallback: no JS — we won't be able to detect drag reliably
   return 0, 0
 end
 
@@ -150,7 +150,6 @@ local function is_arrange_context()
     local _, ctx = reaper.BR_GetMouseCursorContext()
     return (ctx == "arrange")
   end
-  -- Without SWS, we can't tell; treat as unknown/true to avoid false blocks
   return true
 end
 
@@ -162,13 +161,11 @@ local function update_mouse_state()
   local x, y = get_mouse_xy()
 
   if left_down and not mouse.down then
-    -- mouse pressed
     mouse.down = true
     mouse.down_x, mouse.down_y = x, y
     mouse.dragged = false
     mouse.down_ctx = (is_arrange_context() and "arrange") or "other"
   elseif left_down and mouse.down then
-    -- mouse held: check drag distance
     if not mouse.dragged then
       local dx = math.abs(x - mouse.down_x)
       local dy = math.abs(y - mouse.down_y)
@@ -177,9 +174,9 @@ local function update_mouse_state()
       end
     end
   elseif (not left_down) and mouse.down then
-    -- mouse released
     mouse.down = false
     mouse.last_up_time_ms = now_ms()
+    -- keep mouse.dragged as-is for this cycle (so we can detect marquee on release)
   end
 end
 
@@ -188,45 +185,46 @@ local function should_allow_link_for_this_change()
   if not SUPPRESS_SIMPLE_CLICK then
     return true
   end
-
-  -- If we don't have JS/SWS, we cannot classify — don't block.
   if not HAS_JS then
     return true
   end
-
-  -- If mouse was recently released and it wasn't a drag, and down was on Arrange => simple click
   local tnow = now_ms()
   local recent_click = (mouse.last_up_time_ms >= 0) and ((tnow - mouse.last_up_time_ms) <= CLICK_SUPPRESS_MS)
   if recent_click and (mouse.dragged == false) and (mouse.down_ctx == "arrange") then
-    -- Suppress: likely a single click (incl. Ctrl/⌘-click toggle)
+    return false -- simple click; suppress
+  end
+  return true -- marquee/actions/scripts
+end
+
+-- Determine whether this change should MOVE the cursor (only for marquee)
+local function should_move_cursor_for_this_change()
+  if not HAS_JS then
+    -- Without JS we can't reliably detect marquee; be conservative: don't move.
     return false
   end
-
-  -- Otherwise allow (covers marquee drag, actions, scripts, non-arrange sources)
-  return true
+  -- Consider marquee if drag occurred in Arrange during this interaction
+  return mouse.dragged and (mouse.down_ctx == "arrange")
 end
 
 -- Main watcher loop
 local last_sig = ""
 local function mainloop()
   if any_razor_exists() then
-    -- respect Razor: do nothing this cycle
-    last_sig = selection_signature() -- keep sig in sync to avoid false triggers later
+    last_sig = selection_signature()
     reaper.defer(mainloop)
     return
   end
 
-  -- Update mouse tracker each frame
   update_mouse_state()
 
   local sig = selection_signature()
   if sig ~= last_sig then
-    -- selection just changed (could be marquee / action / script / click)
     local allow = should_allow_link_for_this_change()
+    local move_cursor = should_move_cursor_for_this_change() -- marquee → true; others → false
     last_sig = sig
     if allow then
       reaper.PreventUIRefresh(1)
-      apply_time_from_selection()
+      apply_time_from_selection(move_cursor)
       reaper.PreventUIRefresh(-1)
       reaper.UpdateArrange()
     end
