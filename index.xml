@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<index version="1" name="hsuanice Scripts" commit="553a29aa77095df45f0013a2fbcf8b2cf1b698bc">
+<index version="1" name="hsuanice Scripts" commit="c715bb58de0e5f254353d80b630c16c4f513b786">
   <category name="Beta Testing">
     <reapack name="hsuanice_BWF TimeReference Embed Tool.lua" type="script" desc="Embed BWF TimeReference to Active take from Take 1 or Current Position TC">
       <version name="0.7.1" author="hsuanice" time="2025-08-14T17:52:57Z">
@@ -478,6 +478,12 @@
       </version>
       <version name="0.3.1 not ok yet" author="hsuanice" time="2025-09-09T14:16:38Z">
         <source main="main">https://github.com/hsuanice/ReaScripts/raw/553a29aa77095df45f0013a2fbcf8b2cf1b698bc/Beta%20Testing/hsuanice_Item%20Selection%20Link%20to%20Time.lua</source>
+      </version>
+      <version name="0.3.2 not ok yet" author="hsuanice" time="2025-09-09T14:27:42Z">
+        <source main="main">https://github.com/hsuanice/ReaScripts/raw/1f0e0349af3d667cea5f79e9930788476abd5fa4/Beta%20Testing/hsuanice_Item%20Selection%20Link%20to%20Time.lua</source>
+      </version>
+      <version name="0.4.0" author="hsuanice" time="2025-09-09T14:33:43Z">
+        <source main="main">https://github.com/hsuanice/ReaScripts/raw/c715bb58de0e5f254353d80b630c16c4f513b786/Beta%20Testing/hsuanice_Item%20Selection%20Link%20to%20Time.lua</source>
       </version>
     </reapack>
     <reapack name="hsuanice_Mouse Left Click Empty Area to Select Track.lua" type="script" desc="hsuanice_Mouse Left Click Empty Area to Select Track">
