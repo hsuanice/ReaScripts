@@ -1,6 +1,6 @@
 --[[
 @description hsuanice_Item Selection and link to Time
-@version 0.2.3 marquee-only cursor move; suppress simple-click triggers (default)
+@version 0.3.0 not ok yet
 @author hsuanice
 @about
   Background watcher that mirrors current ITEM SELECTION to the TIME SELECTION (configurable):
@@ -19,6 +19,11 @@
     • JS_ReaScriptAPI & SWS recommended. If missing, the script falls back to permissive behavior like 0.1.2.
 
 @changelog
+  v0.3.0
+    - Fix: Prevent transient "set time on mouse-down then cancel on mouse-up" when simple clicks are suppressed.
+          Implemented time-selection snapshot on mouse-down and automatic restore if the change is classified as a simple click.
+    - Option: RESTORE_TS_ON_SUPPRESSED_CLICK (default = true).
+    - No behavior change for marquee/action/script updates; cursor move policy unchanged.
   v0.2.1
     - Change: Edit cursor now moves to time selection start ONLY when the selection change came from a marquee drag.
       (Action/Script-triggered selection updates keep time selection in sync but do NOT move the edit cursor.)
@@ -46,6 +51,9 @@ local DRAG_THRESHOLD_PX = 4
 
 -- Time window (ms) after a simple click within which a selection-change is considered "from a click"
 local CLICK_SUPPRESS_MS = 250
+
+-- 當「簡單點擊」被抑制時，是否把在 mouse-down 前的時間選取還原
+local RESTORE_TS_ON_SUPPRESSED_CLICK = true
 
 -- Tiny tolerance in seconds to avoid floating-point edge issues.
 local EPS = 1e-12
@@ -131,6 +139,7 @@ local mouse = {
   last_up_time_ms = -1,
   dragged = false,
   down_ctx = "",   -- cursor context at mouse-down
+  ts_snap = nil,   -- ★ 新增：時間選取快照（在左鍵按下那一刻存）
 }
 
 local function now_ms()
@@ -165,6 +174,14 @@ local function update_mouse_state()
     mouse.down_x, mouse.down_y = x, y
     mouse.dragged = false
     mouse.down_ctx = (is_arrange_context() and "arrange") or "other"
+    -- ★ 在左鍵剛按下時，若在 Arrange，就拍一張當下的時間選取快照
+    if RESTORE_TS_ON_SUPPRESSED_CLICK and (mouse.down_ctx == "arrange") then
+      local ts_s, ts_e = reaper.GetSet_LoopTimeRange(false, false, 0, 0, false)
+      mouse.ts_snap = { s = ts_s, e = ts_e }
+    else
+      mouse.ts_snap = nil
+    end
+
   elseif left_down and mouse.down then
     if not mouse.dragged then
       local dx = math.abs(x - mouse.down_x)
@@ -222,11 +239,24 @@ local function mainloop()
     local allow = should_allow_link_for_this_change()
     local move_cursor = should_move_cursor_for_this_change() -- marquee → true; others → false
     last_sig = sig
+
     if allow then
       reaper.PreventUIRefresh(1)
       apply_time_from_selection(move_cursor)
       reaper.PreventUIRefresh(-1)
       reaper.UpdateArrange()
+      -- ★ 成功連動後就丟掉快照
+      mouse.ts_snap = nil
+    else
+      -- ★ 被判定為「簡單點擊」→ 不連動：如有快照且 TS 已被動到，就還原
+      if RESTORE_TS_ON_SUPPRESSED_CLICK and mouse.ts_snap then
+        local cur_s, cur_e = reaper.GetSet_LoopTimeRange(false, false, 0, 0, false)
+        local function diff(a,b) return math.abs((a or 0) - (b or 0)) end
+        if diff(cur_s, mouse.ts_snap.s) > EPS or diff(cur_e, mouse.ts_snap.e) > EPS then
+          reaper.GetSet_LoopTimeRange(true, false, mouse.ts_snap.s or 0, mouse.ts_snap.e or 0, false)
+        end
+        mouse.ts_snap = nil
+      end
     end
   end
 
