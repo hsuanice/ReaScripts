@@ -1,6 +1,6 @@
 --[[
 @description hsuanice_Item Selection and link to Time
-@version 0.3.1 not ok yet
+@version 0.3.2 not ok yet
 @author hsuanice
 @about
   Background watcher that mirrors current ITEM SELECTION to the TIME SELECTION (configurable):
@@ -63,6 +63,9 @@ local RESTORE_TS_ON_SUPPRESSED_CLICK = true
 -- Debug console output
 local DEBUG_ITEMTIME = true      -- 打開/關閉除錯輸出（true/false）
 local DEBUG_PREFIX   = "[ItemTime] "
+
+-- Optional: only log Razor gating on state changes (not every cycle)
+local DEBUG_RAZOR_VERBOSE = false
 
 -- Tiny tolerance in seconds to avoid floating-point edge issues.
 local EPS = 1e-12
@@ -158,10 +161,14 @@ local mouse = {
   down = false,
   down_x = 0, down_y = 0,
   last_up_time_ms = -1,
+  down_time_ms = -1, -- ★ 新增：記住按下時刻
   dragged = false,
   down_ctx = "",   -- cursor context at mouse-down
   ts_snap = nil,   -- ★ 新增：時間選取快照（在左鍵按下那一刻存）
 }
+local prev_razor_exists = nil -- ★ 新增：Razor 是否存在的前一輪狀態（用來降噪）
+
+
 
 local function now_ms()
   return reaper.time_precise() * 1000.0
@@ -191,6 +198,7 @@ local function update_mouse_state()
   local x, y = get_mouse_xy()
 
   if left_down and not mouse.down then
+    mouse.down_time_ms = now_ms()
     mouse.down = true
     mouse.down_x, mouse.down_y = x, y
     mouse.dragged = false
@@ -219,8 +227,10 @@ local function update_mouse_state()
   elseif (not left_down) and mouse.down then
     mouse.down = false
     mouse.last_up_time_ms = now_ms()
-    local press_ms = (mouse.down_time_ms or mouse.last_up_time_ms) and (now_ms() - (mouse.down_time_ms or mouse.last_up_time_ms)) or -1
+    local press_ms = (mouse.down_time_ms >= 0) and (now_ms() - mouse.down_time_ms) or 0
     D(("mouse_up    x=%d y=%d  dragged=%s  press=%dms"):format(x, y, tostring(mouse.dragged), math.floor(press_ms)))
+    mouse.down_time_ms = -1
+
 
     -- keep mouse.dragged as-is for this cycle (so we can detect marquee on release)
   end
@@ -260,11 +270,20 @@ local function mainloop()
     D(("opts  SUPPRESS_SIMPLE_CLICK=%s  DRAG_THRESHOLD_PX=%d  CLICK_SUPPRESS_MS=%d  RESTORE_TS_ON_SUPPRESSED_CLICK=%s")
       :format(tostring(SUPPRESS_SIMPLE_CLICK), DRAG_THRESHOLD_PX, CLICK_SUPPRESS_MS, tostring(RESTORE_TS_ON_SUPPRESSED_CLICK)))
   end  
-  if any_razor_exists() then
+  local has_razor = any_razor_exists()
+  if has_razor then
+    if DEBUG_ITEMTIME and (DEBUG_RAZOR_VERBOSE or prev_razor_exists ~= true) then
+      D("razor_exists: skip linking this cycle")
+    end
+    prev_razor_exists = true
     last_sig = selection_signature()
-    D("razor_exists: skip linking this cycle")
     reaper.defer(mainloop)
     return
+  else
+    if DEBUG_ITEMTIME and (DEBUG_RAZOR_VERBOSE or prev_razor_exists ~= false) then
+      D("razor_cleared: resume linking")
+    end
+    prev_razor_exists = false
   end
 
   update_mouse_state()
@@ -272,27 +291,29 @@ local function mainloop()
   local sig = selection_signature()
   if sig ~= last_sig then
     local allow = should_allow_link_for_this_change()
-    local move_cursor = should_move_cursor_for_this_change() -- marquee → true; others → false
-    local before_s, before_e = reaper.GetSet_LoopTimeRange(false, false, 0, 0, false)
-    D(("link_apply  BEFORE %s"):format(fmt_ts(before_s, before_e)))
-    -- 原本的 apply_time_from_selection(move_cursor)
-    local after_s, after_e = reaper.GetSet_LoopTimeRange(false, false, 0, 0, false)
-    D(("link_apply  AFTER  %s"):format(fmt_ts(after_s, after_e)))
-
+    local move_cursor = should_move_cursor_for_this_change()
+    D(("sel_change  allow=%s  move_cursor=%s  dragged=%s ctx=%s")
+      :format(tostring(allow), tostring(move_cursor), tostring(mouse.dragged), tostring(mouse.down_ctx)))
     last_sig = sig
 
     if allow then
+      local before_s, before_e = reaper.GetSet_LoopTimeRange(false, false, 0, 0, false)
+      D(("link_apply  BEFORE %s"):format(fmt_ts(before_s, before_e)))
+
       reaper.PreventUIRefresh(1)
       apply_time_from_selection(move_cursor)
       reaper.PreventUIRefresh(-1)
       reaper.UpdateArrange()
-      -- ★ 成功連動後就丟掉快照
+
+      local after_s, after_e = reaper.GetSet_LoopTimeRange(false, false, 0, 0, false)
+      D(("link_apply  AFTER  %s"):format(fmt_ts(after_s, after_e)))
+
       mouse.ts_snap = nil
     else
-      -- ★ 被判定為「簡單點擊」→ 不連動：如有快照且 TS 已被動到，就還原
+      D("sel_change  SUPPRESSED (simple-click)")
       if RESTORE_TS_ON_SUPPRESSED_CLICK and mouse.ts_snap then
-        D(("ts_restore   cur=%s  ->  snap=%s"):format(fmt_ts(cur_s, cur_e), fmt_ts(mouse.ts_snap.s, mouse.ts_snap.e)))
         local cur_s, cur_e = reaper.GetSet_LoopTimeRange(false, false, 0, 0, false)
+        D(("ts_restore   cur=%s  ->  snap=%s"):format(fmt_ts(cur_s, cur_e), fmt_ts(mouse.ts_snap.s, mouse.ts_snap.e)))
         local function diff(a,b) return math.abs((a or 0) - (b or 0)) end
         if diff(cur_s, mouse.ts_snap.s) > EPS or diff(cur_e, mouse.ts_snap.e) > EPS then
           reaper.GetSet_LoopTimeRange(true, false, mouse.ts_snap.s or 0, mouse.ts_snap.e or 0, false)
