@@ -1,6 +1,6 @@
 --[[
 @description hsuanice_Item Selection and link to Time
-@version 0.3.2 not ok yet
+@version 0.4.0
 @author hsuanice
 @about
   Background watcher that mirrors current ITEM SELECTION to the TIME SELECTION (configurable):
@@ -19,6 +19,24 @@
     • JS_ReaScriptAPI & SWS recommended. If missing, the script falls back to permissive behavior like 0.1.2.
 
 @changelog
+  v0.4.0 — Performance & Diagnostics
+
+    - New: Adaptive Razor scan throttling
+      • Options: RAZOR_SCAN_WHEN_ABSENT=0.08s, RAZOR_SCAN_WHEN_PRESENT=0.25s.
+      • Caches last Razor presence and scans on interval to reduce CPU when Razor is active.
+
+    - New: Razor logging policy
+      • State-change logging by default; toggle per-cycle logs via DEBUG_RAZOR_VERBOSE.
+
+    - Improved: Debug console coverage and accuracy
+      • Correct press duration via down_time_ms; explicit mouse_down / marquee_start / mouse_up logs.
+      • Selection-change summary line (allow/move_cursor/dragged/context).
+      • BEFORE/AFTER Time Selection now wraps the actual apply_time_from_selection call.
+      • Snapshot/restore logs show current → snapshot values.
+
+    - Behavior: No changes to marquee vs. simple-click classification or cursor-move policy.
+    - Compatibility: Backward-compatible options; defaults favor low overhead with minimal responsiveness impact.
+
   v0.3.1
     - Debug: Added optional console logging to observe mouse down/up, marquee detection,
             selection-change classification, Razor gating, and time selection snapshot/restore.
@@ -66,6 +84,11 @@ local DEBUG_PREFIX   = "[ItemTime] "
 
 -- Optional: only log Razor gating on state changes (not every cycle)
 local DEBUG_RAZOR_VERBOSE = false
+
+-- Throttle Razor scan frequency (seconds)
+-- Razor 不存在：掃快一點；Razor 存在：掃慢一點更省
+local RAZOR_SCAN_WHEN_ABSENT  = 0.08
+local RAZOR_SCAN_WHEN_PRESENT = 0.25
 
 -- Tiny tolerance in seconds to avoid floating-point edge issues.
 local EPS = 1e-12
@@ -166,7 +189,11 @@ local mouse = {
   down_ctx = "",   -- cursor context at mouse-down
   ts_snap = nil,   -- ★ 新增：時間選取快照（在左鍵按下那一刻存）
 }
-local prev_razor_exists = nil -- ★ 新增：Razor 是否存在的前一輪狀態（用來降噪）
+local prev_razor_exists = nil -- ★ Razor 是否存在的前一輪狀態（用來降噪）
+
+-- Razor scan throttle cache
+local _razor_cached = false
+local _razor_last_scan_t = 0.0
 
 
 
@@ -270,8 +297,15 @@ local function mainloop()
     D(("opts  SUPPRESS_SIMPLE_CLICK=%s  DRAG_THRESHOLD_PX=%d  CLICK_SUPPRESS_MS=%d  RESTORE_TS_ON_SUPPRESSED_CLICK=%s")
       :format(tostring(SUPPRESS_SIMPLE_CLICK), DRAG_THRESHOLD_PX, CLICK_SUPPRESS_MS, tostring(RESTORE_TS_ON_SUPPRESSED_CLICK)))
   end  
-  local has_razor = any_razor_exists()
-  if has_razor then
+  -- Throttled Razor scan
+  local now = reaper.time_precise()
+  local want_interval = (_razor_cached and RAZOR_SCAN_WHEN_PRESENT) or RAZOR_SCAN_WHEN_ABSENT
+  if (now - _razor_last_scan_t) >= (want_interval or 0.1) then
+    _razor_cached = any_razor_exists()
+    _razor_last_scan_t = now
+  end
+
+  if _razor_cached then
     if DEBUG_ITEMTIME and (DEBUG_RAZOR_VERBOSE or prev_razor_exists ~= true) then
       D("razor_exists: skip linking this cycle")
     end
@@ -285,7 +319,7 @@ local function mainloop()
     end
     prev_razor_exists = false
   end
-
+  --------------------------
   update_mouse_state()
 
   local sig = selection_signature()
