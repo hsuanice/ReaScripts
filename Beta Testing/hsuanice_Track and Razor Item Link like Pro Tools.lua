@@ -1,6 +1,6 @@
 --[[
 @description Track and Razor Item Link like Pro Tools (performance edition)
-@version 0.13.0
+@version 0.13.1 Menu OK
 @author hsuanice
 @about
   Pro Tools-style "Link Track and Edit Selection".
@@ -106,25 +106,30 @@
 -------------------------
 
 -- === CLICK-SELECT (integrated) OPTIONS ===
-local ENABLE_CLICK_SELECT_TRACK       = true    -- 總開關：整合版「點一下選軌」
-local CLICK_SELECT_ON_MOUSE_UP        = true    -- true: mouse-up、false: mouse-down（建議用 mouse-up）
-local CLICK_ENABLE_ITEM_UPPER_HALF    = false   -- 點 Item 上半部也算選軌
-local CLICK_TOLERANCE_PX              = 3       -- mouse-up 模式允許的微小移動像素
-local CLICK_SUPPRESS_RBUTTON_MENU     = true    -- 有右鍵選單或剛放開右鍵的冷卻期內，不處理左鍵點擊
-local CLICK_RBUTTON_COOLDOWN_SEC      = 0.15    -- 右鍵放開後冷卻時間（秒）
-local CLICK_MENU_CLOSE_GRACE_SEC      = 0.20   -- 選單關閉後的短暫保護窗（秒）
--- 忽略「選單操作」殘留的左鍵整段序列（直到放開）
-local CLICK_BLOCK_LEFT_AFTER_MENU = true
--- 焦點從外部/插件回到 REAPER 主視窗後，短暫保護窗（秒）
-local CLICK_FOCUS_RETURN_GRACE_SEC = 0.15
-local CLICK_WANT_DEBUG                = false   -- 顯示 Click 模組除錯訊息
+local ENABLE_CLICK_SELECT_TRACK        = true   -- 開整合點擊選軌
+local CLICK_SELECT_ON_MOUSE_UP         = true   -- 建議用 mouse-up
+local CLICK_ENABLE_ITEM_UPPER_HALF     = false  -- 點 item 上半部不選軌
+local CLICK_TOLERANCE_PX               = 3      -- 點擊移動容差(px)
+
+-- 防穿透／穩定性
+local CLICK_SUPPRESS_RBUTTON_MENU      = false   -- 必開
+local CLICK_RBUTTON_COOLDOWN_SEC       = 0.18   -- 右鍵冷卻
+local CLICK_MENU_CLOSE_GRACE_SEC       = 0.25   -- 菜單關閉保護窗
+local CLICK_FOCUS_RETURN_GRACE_SEC     = 0.20   -- 焦點回來保護窗
+-- 反穿透加強
+local CLICK_REQUIRE_FRESH_LMB          = true   -- 寬限期後，必須「重新武裝」的第一次 LMB 才會生效
+local CLICK_POST_GUARD_IDLE_SEC        = 0.12   -- 兩鍵皆彈起且無變化多久，才視為已重新武裝
+local CLICK_DEBUG_VERBOSE_HOLD         = false  -- 關掉每幀的 rbutton_session_hold spam
+
+-- 除錯
+local CLICK_WANT_DEBUG                 = true  -- 需要時再開
 
 
 -- === CLICK-SELECT hook phase ===
 -- "pre":  在 mainloop 一開始就處理點一下→選軌（0.12.0 的做法）
 -- "post": 在 mainloop 結尾再處理（本版預設，讓 ABCD 在下一圈才吃到選軌變化）
 local CLICK_HOOK_PHASE = "post"
-
+--------------------------------
 
 -- Range matching for item-range checks inside C/D when needed:
 -- 1=overlap, 2=contain (default: contain)
@@ -244,6 +249,8 @@ local CLICK_STATE = "IDLE"   -- "IDLE","LMB_GESTURE","RMB_SESSION","MENU_COOLDOW
 -- edges / gesture tracking
 local CLICK_prev_lmb, CLICK_prev_rmb = false, false
 local CLICK_down_x, CLICK_down_y, CLICK_down_t = nil, nil, -1
+local CLICK_lmb_armed = true
+local CLICK_last_btn_change_t = -1
 
 -- popup / rbutton / focus trackers
 local CLICK_menu_open          = false
@@ -320,6 +327,11 @@ local function Click_TickMaybeSelectTrack()
   local r_down = ( rmb and not CLICK_prev_rmb)
   local r_up   = ((not rmb) and CLICK_prev_rmb)
 
+  if (lmb ~= CLICK_prev_lmb) or (rmb ~= CLICK_prev_rmb) then
+    CLICK_last_btn_change_t = now
+  end
+
+
   -- === 右鍵 session / 冷卻（避免 rmb→lmb 交界殘留） ===
   if CLICK_SUPPRESS_RBUTTON_MENU then
     if r_down then
@@ -332,7 +344,7 @@ local function Click_TickMaybeSelectTrack()
 
     if CLICK_STATE == "RMB_SESSION" then
       if rmb then
-        Click_Log("guard: rbutton_session_hold")
+        if CLICK_DEBUG_VERBOSE_HOLD then Click_Log("guard: rbutton_session_hold") end
         CLICK_prev_lmb, CLICK_prev_rmb = lmb, rmb
         return false
       end
@@ -358,6 +370,19 @@ local function Click_TickMaybeSelectTrack()
   local did = false
 
   if CLICK_STATE == "IDLE" then
+    -- 需要重新武裝：兩鍵都已彈起並經過一小段 idle，再遇到「新的 l_down」才解鎖
+    if CLICK_REQUIRE_FRESH_LMB and not CLICK_lmb_armed then
+      local idle_ok = (CLICK_last_btn_change_t >= 0)
+                      and ((now - CLICK_last_btn_change_t) >= (CLICK_POST_GUARD_IDLE_SEC or 0))
+      if l_down and idle_ok then
+        CLICK_lmb_armed = true   -- 這一下視為「新手勢」的開始
+      else
+        CLICK_prev_lmb, CLICK_prev_rmb = lmb, rmb
+        return false             -- 還沒重新武裝好，吞掉
+      end
+    end
+
+
     if l_down then
       CLICK_down_x, CLICK_down_y, CLICK_down_t = x, y, now
       if not CLICK_SELECT_ON_MOUSE_UP then
