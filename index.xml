@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<index version="1" name="hsuanice Scripts" commit="1e86196b4b777054fc77651d6a7e8a5af5be57ab">
+<index version="1" name="hsuanice Scripts" commit="32d82dbe8b397536d03b02f7d0ae4d50308cefa2">
   <category name="Beta Testing">
     <reapack name="hsuanice_BWF TimeReference Embed Tool.lua" type="script" desc="Embed BWF TimeReference to Active take from Take 1 or Current Position TC">
       <version name="0.7.1" author="hsuanice" time="2025-08-14T17:52:57Z">
@@ -1080,6 +1080,9 @@ v0.8.0-perf          - Major perf pass.]]></changelog>
       </version>
       <version name="0.12.3" author="hsuanice" time="2025-09-09T07:19:56Z">
         <source main="main">https://github.com/hsuanice/ReaScripts/raw/1e86196b4b777054fc77651d6a7e8a5af5be57ab/Beta%20Testing/hsuanice_Track%20and%20Razor%20Item%20Link%20like%20Pro%20Tools.lua</source>
+      </version>
+      <version name="0.13.0" author="hsuanice" time="2025-09-09T10:58:08Z">
+        <source main="main">https://github.com/hsuanice/ReaScripts/raw/32d82dbe8b397536d03b02f7d0ae4d50308cefa2/Beta%20Testing/hsuanice_Track%20and%20Razor%20Item%20Link%20like%20Pro%20Tools.lua</source>
       </version>
     </reapack>
     <reapack name="hsuanice_Track and Razor Item Link Monitor.lua" type="script" desc="Track • Razor • Item LINK — MONITOR (driver-aware)">
