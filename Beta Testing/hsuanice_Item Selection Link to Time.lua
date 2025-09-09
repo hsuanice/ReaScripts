@@ -1,6 +1,6 @@
 --[[
 @description hsuanice_Item Selection and link to Time
-@version 0.4.0
+@version 0.4.1
 @author hsuanice
 @about
   Background watcher that mirrors current ITEM SELECTION to the TIME SELECTION (configurable):
@@ -19,6 +19,29 @@
     • JS_ReaScriptAPI & SWS recommended. If missing, the script falls back to permissive behavior like 0.1.2.
 
 @changelog
+  v0.4.1 — Menu Guard (No Click-Through)
+
+    - New: Popup/Menu guard to prevent click-through while menus are open or just closed.
+      • Detects OS/REAPER menus (#32768 on Windows / NSMenu on macOS) and suspends linking.
+      • Adds a short post-close grace window to absorb residual clicks.
+
+    - Options:
+      • SUPPRESS_WHEN_MENU = true (default) — enable the guard.
+      • MENU_CLOSE_GRACE_MS = 180 — grace after the menu closes.
+
+    - Debug:
+      • When DEBUG_ITEMTIME=true, prints “menu_guard: block this cycle” whenever the guard latches.
+
+    - Behavior:
+      • Marquee vs. simple-click classification unchanged.
+      • No item→time updates while a menu is modal; reduces accidental TS flicker around context-menu use.
+
+    - Interop:
+      • Guard semantics aligned with the Track/Razor script’s click FSM to reduce cross-script interference.
+
+    - Performance:
+      • Razor scan throttling from 0.4.0 unchanged; no additional CPU overhead in normal operation.
+
   v0.4.0 — Performance & Diagnostics
 
     - New: Adaptive Razor scan throttling
@@ -101,6 +124,41 @@ end
 local function fmt_ts(s, e)
   return ("TS=[%.9f .. %.9f]"):format(s or 0, e or 0)
 end
+
+-- Menu guard (block updates while popup menu is open or just closed)
+local SUPPRESS_WHEN_MENU = true
+local MENU_CLOSE_GRACE_MS = 180   -- short grace after menu closes
+
+
+
+------------utilities-------------
+local function _is_popup_menu_open()
+  if not reaper.APIExists("JS_Window_Find") then return false end
+  local h1 = reaper.JS_Window_Find("#32768", true) -- Windows
+  local h2 = reaper.JS_Window_Find("NSMenu",  true) -- macOS
+  return (h1 and h1 ~= 0) or (h2 and h2 ~= 0)
+end
+
+local _menu_open, _menu_closed_t = false, -1
+local function menu_guard()
+  if not SUPPRESS_WHEN_MENU then return false end
+  local now = reaper.time_precise()
+  if _is_popup_menu_open() then
+    _menu_open = true
+    return true
+  end
+  if _menu_open then
+    _menu_open = false
+    _menu_closed_t = now
+    return true
+  end
+  if _menu_closed_t >= 0 and (now - _menu_closed_t) < (MENU_CLOSE_GRACE_MS/1000.0) then
+    return true
+  end
+  return false
+end
+
+
 
 -----------------------------------------------------
 if DEBUG_ITEMTIME then reaper.ShowConsoleMsg("") end
@@ -319,6 +377,14 @@ local function mainloop()
     end
     prev_razor_exists = false
   end
+  --------------------------
+  if menu_guard() then
+    -- 可選：開 debug 時印訊息
+    if DEBUG_ITEMTIME then D("menu_guard: block this cycle") end
+    reaper.defer(mainloop)
+    return
+  end
+
   --------------------------
   update_mouse_state()
 
