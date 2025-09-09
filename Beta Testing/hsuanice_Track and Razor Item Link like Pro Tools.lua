@@ -1,6 +1,6 @@
 --[[
 @description Track and Razor Item Link like Pro Tools (performance edition)
-@version 0.12.1
+@version 0.12.3
 @author hsuanice
 @about
   Pro Tools-style "Link Track and Edit Selection".
@@ -31,6 +31,24 @@
     hsuanice served as the workflow designer, tester, and integrator for this tool.
 
 @changelog
+  v0.12.3
+    - Fix: Block the entire post-menu left-click sequence until LMB is released, preventing
+          "selected track" immediately after rbutton cooldown or menu close.
+    - New: CLICK_BLOCK_LEFT_AFTER_MENU (default: true).
+    - New: Focus-return guard (JS_Window_GetFocus/IsChild) with CLICK_FOCUS_RETURN_GRACE_SEC (default: 0.15s)
+          to cover non-#32768 / non-NSMenu popups (e.g. some plugin menus).
+    - Tweak: rbutton down/up paths now latch the left-sequence block as well.
+
+  v0.12.2
+    - Fix: Prevented click-through when a popup/menu is open or has just closed.
+      • Added latched detection of popup state and a short "menu-close grace" window to swallow residual LMB-up.
+      • Respects both Windows (“#32768”) and macOS (“NSMenu”) popups.
+    - Change: CLICK_SUPPRESS_RBUTTON_MENU default → true (enable right-button cooldown by default).
+    - New: CLICK_MENU_CLOSE_GRACE_SEC option to tune the post-menu protection window (default 0.12s).
+    - Internal: Added CLICK_menu_open / CLICK_menu_closed_time state; reordered guards so menu checks run before any click processing.
+    - No behavior changes to ABCD semantics; CLICK_HOOK_PHASE ("pre"/"post") remains available (default "post").
+    - Note: Keyboard-invoked menus won’t trigger right-button cooldown, but the new menu-close grace still prevents click-through.
+
   v0.12.1
     - Change: Added CLICK_HOOK_PHASE option ("pre" or "post"). Default to "post" so the integrated
       click-to-select-track runs at the end of mainloop. ABCD logic now consumes the track-selection
@@ -89,14 +107,20 @@ local ENABLE_CLICK_SELECT_TRACK       = true    -- 總開關：整合版「點�
 local CLICK_SELECT_ON_MOUSE_UP        = true    -- true: mouse-up、false: mouse-down（建議用 mouse-up）
 local CLICK_ENABLE_ITEM_UPPER_HALF    = false   -- 點 Item 上半部也算選軌
 local CLICK_TOLERANCE_PX              = 3       -- mouse-up 模式允許的微小移動像素
-local CLICK_SUPPRESS_RBUTTON_MENU     = false    -- 有右鍵選單或剛放開右鍵的冷卻期內，不處理左鍵點擊
+local CLICK_SUPPRESS_RBUTTON_MENU     = true    -- 有右鍵選單或剛放開右鍵的冷卻期內，不處理左鍵點擊
 local CLICK_RBUTTON_COOLDOWN_SEC      = 0.10    -- 右鍵放開後冷卻時間（秒）
-local CLICK_WANT_DEBUG                = false   -- 顯示 Click 模組除錯訊息
+local CLICK_MENU_CLOSE_GRACE_SEC      = 0.12   -- 選單關閉後的短暫保護窗（秒）
+local CLICK_WANT_DEBUG                = true   -- 顯示 Click 模組除錯訊息
 -- === CLICK-SELECT hook phase ===
 -- "pre":  在 mainloop 一開始就處理點一下→選軌（0.12.0 的做法）
 -- "post": 在 mainloop 結尾再處理（本版預設，讓 ABCD 在下一圈才吃到選軌變化）
 local CLICK_HOOK_PHASE = "post"
 
+-- 忽略「選單操作」殘留的左鍵整段序列（直到放開）
+local CLICK_BLOCK_LEFT_AFTER_MENU = true
+
+-- 焦點從外部/插件回到 REAPER 主視窗後，短暫保護窗（秒）
+local CLICK_FOCUS_RETURN_GRACE_SEC = 0.15
 
 -- Range matching for item-range checks inside C/D when needed:
 -- 1=overlap, 2=contain (default: contain)
@@ -113,7 +137,7 @@ local ENABLE_B = true
 -- C) Track selection changed + REAL TS → build/clear Razor + sync items (Overlap)
 local ENABLE_C = true
 -- D) Razor/Track changed → sync items under ACTIVE range (only on changed tracks)
-local ENABLE_D = true
+local ENABLE_D = false
 
 -- (Quick preset to disable Arrange→TCP fully)
 -- ENABLE_A = false; ENABLE_B = false
@@ -217,16 +241,73 @@ local CLICK_lastDown = false
 local CLICK_lastDownPos = {x=nil, y=nil}
 local CLICK_rbtn_down_time = -1
 local CLICK_rbtn_up_time   = -1
+local CLICK_menu_open = false
+local CLICK_menu_closed_time = -1
+local CLICK_block_left_seq = false
+local CLICK_focus_return_time = -1
+local CLICK_focus_was_main = true
 
 -- 每圈呼叫；若這一圈內「真的有處理一個點擊→選軌」，回傳 true
 local function Click_TickMaybeSelectTrack()
+
+-- 焦點回復保護（有些外部/插件選單抓不到 #32768 / NSMenu）
+if reaper.APIExists("JS_Window_GetFocus") and reaper.APIExists("JS_Window_IsChild") then
+  local main = reaper.GetMainHwnd()
+  local fh = reaper.JS_Window_GetFocus()
+  local focus_back = false
+  if fh and main then
+    local is_child = reaper.JS_Window_IsChild(main, fh) == 1
+    focus_back = (fh == main) or is_child
+  end
+  if focus_back and not CLICK_focus_was_main then
+    CLICK_focus_return_time = reaper.time_precise()
+    CLICK_block_left_seq = true  -- 回到 REAPER 的同時，封鎖這段左鍵序列
+    Click_Log("guard: focus_return_latch")
+  end
+  CLICK_focus_was_main = focus_back
+end
+
+-- 焦點回復後的保護窗
+if CLICK_focus_return_time >= 0
+   and (reaper.time_precise() - CLICK_focus_return_time) < (CLICK_FOCUS_RETURN_GRACE_SEC or 0)
+then
+  Click_Log(("guard: focus_return_grace dt=%.3f"):format(
+    reaper.time_precise() - CLICK_focus_return_time))
+  return false
+end
+
+
   if not ENABLE_CLICK_SELECT_TRACK then return false end
+
+  -- Popup 開著：鎖存狀態並清掉本次 left-down
   if Click_IsPopupMenuOpen() then
+    CLICK_menu_open = true
     CLICK_lastDown = false
+    Click_Log("guard: popup_open")       -- ← 新增
     return false
   end
+
+  -- 剛關閉選單：記錄時間並吞掉這一回合
+  if CLICK_menu_open then
+    CLICK_menu_open = false
+    CLICK_menu_closed_time = reaper.time_precise()
+    CLICK_block_left_seq = true             -- ★ 新增：封鎖這段左鍵序列
+    Click_Log("guard: menu_closed_latch")
+    return false
+  end
+
+  -- 選單關閉後的保護窗：忽略殘留的 left-up（避免穿透）
+  if CLICK_menu_closed_time >= 0
+    and (reaper.time_precise() - CLICK_menu_closed_time) < (CLICK_MENU_CLOSE_GRACE_SEC or 0)
+  then
+    Click_Log(("guard: menu_close_grace dt=%.3f"):format(
+      reaper.time_precise() - CLICK_menu_closed_time))   -- ← 新增
+    return false
+  end
+
+
   if not reaper.APIExists("JS_Mouse_GetState") then
-    -- 沒有 js_ReaScriptAPI 就不做點擊整合
+    Click_Log("guard: no_js_api")  -- ← 新增
     return false
   end
 
@@ -234,18 +315,37 @@ local function Click_TickMaybeSelectTrack()
   local x, y  = reaper.GetMousePosition()
   local lmb   = (state & 1) == 1
 
+  -- 封鎖一整段左鍵序列：直到我們看到 LMB 變回 false 才解除
+  if CLICK_block_left_seq and CLICK_BLOCK_LEFT_AFTER_MENU then
+    if lmb then
+      CLICK_lastDown = false
+      Click_Log("guard: block_left_seq_hold")
+      return false
+    else
+      CLICK_block_left_seq = false
+      Click_Log("guard: block_left_seq_clear")
+      return false
+    end
+  end
+
   -- 右鍵守門與冷卻
   if CLICK_SUPPRESS_RBUTTON_MENU then
     local now = reaper.time_precise()
+
     if (state & 2) == 2 then
       if CLICK_rbtn_down_time < 0 then CLICK_rbtn_down_time = now end
       CLICK_lastDown = false
+      CLICK_block_left_seq = true           -- ★ 新增：右鍵期間封鎖左鍵序列
+      Click_Log("guard: rbutton_down")
       return false
     else
       if CLICK_rbtn_down_time >= 0 and CLICK_rbtn_up_time < CLICK_rbtn_down_time then
         CLICK_rbtn_up_time = now; CLICK_rbtn_down_time = -1; CLICK_lastDown = false
+        CLICK_block_left_seq = true         -- ★ 新增：剛放開右鍵，封鎖一段左鍵序列
       end
       if CLICK_rbtn_up_time >= 0 and (now - CLICK_rbtn_up_time) < CLICK_RBUTTON_COOLDOWN_SEC then
+        Click_Log(("guard: rbutton_cooldown rem=%.3f"):format(
+          CLICK_RBUTTON_COOLDOWN_SEC - (now - CLICK_rbtn_up_time)))
         return false
       end
     end
