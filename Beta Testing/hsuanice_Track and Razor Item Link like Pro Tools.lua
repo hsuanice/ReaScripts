@@ -1,6 +1,6 @@
 --[[
 @description Track and Razor Item Link like Pro Tools (performance edition)
-@version 0.11.0 ABCD switches
+@version 0.12.0 Integrated Click-select Track
 @author hsuanice
 @about
   Pro Tools-style "Link Track and Edit Selection".
@@ -31,6 +31,11 @@
     hsuanice served as the workflow designer, tester, and integrator for this tool.
 
 @changelog
+  v0.12.0
+  - NEW: Integrated "Click-select Track" watcher (mouse-up/down, item upper-half option, popup guard).
+    • Runs at the start of each cycle so ABCD logic sees the fresh track selection.
+    • Options: ENABLE_CLICK_SELECT_TRACK, CLICK_SELECT_ON_MOUSE_UP, CLICK_ENABLE_ITEM_UPPER_HALF, etc.
+  - No changes to ABCD semantics. Interop with Razor↔Item master toggle preserved.
   v0.11.0
     - NEW: ABCD per-section switches in USER OPTIONS (ENABLE_A..D) for fast isolation & debugging.
     - NEW: DEBUG_PRINT flag + dbg() helper to log which section fires (A/B/C/D) each tick.
@@ -73,6 +78,17 @@
 -------------------------
 -- === USER OPTIONS === --
 -------------------------
+
+-- === CLICK-SELECT (integrated) OPTIONS ===
+local ENABLE_CLICK_SELECT_TRACK       = true    -- 總開關：整合版「點一下選軌」
+local CLICK_SELECT_ON_MOUSE_UP        = true    -- true: mouse-up、false: mouse-down（建議用 mouse-up）
+local CLICK_ENABLE_ITEM_UPPER_HALF    = false   -- 點 Item 上半部也算選軌
+local CLICK_TOLERANCE_PX              = 3       -- mouse-up 模式允許的微小移動像素
+local CLICK_SUPPRESS_RBUTTON_MENU     = true    -- 有右鍵選單或剛放開右鍵的冷卻期內，不處理左鍵點擊
+local CLICK_RBUTTON_COOLDOWN_SEC      = 0.10    -- 右鍵放開後冷卻時間（秒）
+local CLICK_WANT_DEBUG                = false   -- 顯示 Click 模組除錯訊息
+
+
 -- Range matching for item-range checks inside C/D when needed:
 -- 1=overlap, 2=contain (default: contain)
 local RANGE_MODE = 2
@@ -82,9 +98,9 @@ local LATCH_CLEAR_ON_CURSOR_MOVE = true
 
 -- ====== ABCD section switches ======
 -- A) Razor changed → Track selection equals "tracks with razor"
-local ENABLE_A = false
+local ENABLE_A = true
 -- B) Items changed (and NO Razor) → Track selection follows items' tracks (absolute set)
-local ENABLE_B = false
+local ENABLE_B = true
 -- C) Track selection changed + REAL TS → build/clear Razor + sync items (Overlap)
 local ENABLE_C = true
 -- D) Razor/Track changed → sync items under ACTIVE range (only on changed tracks)
@@ -125,6 +141,156 @@ local function is_razor_item_link_enabled()
   v = v:lower()
   return not (v == "0" or v == "false" or v == "off")
 end
+
+-- === CLICK-SELECT helpers (popup/menu guard + geometry + hit test) ===
+local function Click_Log(msg)
+  if CLICK_WANT_DEBUG then reaper.ShowConsoleMsg(("[Click] %s\n"):format(tostring(msg))) end
+end
+
+local function Click_IsPopupMenuOpen()
+  if not reaper.APIExists("JS_Window_Find") then return false end
+  local h1 = reaper.JS_Window_Find("#32768", true) -- Windows context menu
+  if h1 and h1 ~= 0 then return true end
+  local h2 = reaper.JS_Window_Find("NSMenu", true) -- macOS menu
+  if h2 and h2 ~= 0 then return true end
+  return false
+end
+
+-- Parse "P_UI_RECT:tcp.size" to x,y,w,h
+local function Click_GetTrackTCPRect(tr)
+  local ok, rect = reaper.GetSetMediaTrackInfo_String(tr, "P_UI_RECT:tcp.size", "", false)
+  if not ok or not rect or rect == "" then return end
+  local a,b,c,d = rect:match("(-?%d+)%s+(-?%d+)%s+(-?%d+)%s+(-?%d+)")
+  if not a then return end
+  a,b,c,d = tonumber(a),tonumber(b),tonumber(c),tonumber(d)
+  if not (a and b and c and d) then return end
+  if c > a and d > b then return a,b,(c-a),(d-b) else return a,b,c,d end
+end
+
+-- 命中測試：回傳「要被選取的 track」或 nil
+local function Click_TrackIfSelectTarget(x, y)
+  local _, info = reaper.GetThingFromPoint(x, y)
+  local isArrange = (info == "arrange") or (type(info)=="string" and info:find("arrange",1,true))
+  if not isArrange then return nil, ("not arrange (info=%s)"):format(tostring(info)) end
+
+  local item = reaper.GetItemFromPoint(x, y, true)
+  if item then
+    if not CLICK_ENABLE_ITEM_UPPER_HALF then
+      return nil, "clicked on item (upper-half select disabled)"
+    end
+    local tr = reaper.GetMediaItem_Track(item); if not tr then return nil, "no track for item" end
+    local item_rel_y = reaper.GetMediaItemInfo_Value(item, "I_LASTY") or 0
+    local item_h     = reaper.GetMediaItemInfo_Value(item, "I_LASTH") or 0
+    local tx, ty, tw, th = Click_GetTrackTCPRect(tr)
+    if not (ty and th and item_h and item_h>0) then return nil, "couldn't resolve track/item rect" end
+    local item_top = ty + item_rel_y
+    local item_mid = item_top + (item_h * 0.5)
+    if y <= item_mid then return tr, "clicked item upper half" else return nil, "clicked item lower half" end
+  end
+
+  local tr = reaper.GetTrackFromPoint(x, y)
+  if not tr then return nil, "no track at this point (ruler/gap?)" end
+  return tr, "clicked arrange empty"
+end
+
+local function Click_SelectOnlyTrack(tr)
+  if tr and reaper.ValidatePtr(tr, "MediaTrack*") then
+    reaper.SetOnlyTrackSelected(tr)
+    reaper.TrackList_AdjustWindows(false)
+    reaper.UpdateArrange()
+  end
+end
+
+
+
+-- === CLICK-SELECT state ===
+local CLICK_lastDown = false
+local CLICK_lastDownPos = {x=nil, y=nil}
+local CLICK_rbtn_down_time = -1
+local CLICK_rbtn_up_time   = -1
+
+-- 每圈呼叫；若這一圈內「真的有處理一個點擊→選軌」，回傳 true
+local function Click_TickMaybeSelectTrack()
+  if not ENABLE_CLICK_SELECT_TRACK then return false end
+  if Click_IsPopupMenuOpen() then
+    CLICK_lastDown = false
+    return false
+  end
+  if not reaper.APIExists("JS_Mouse_GetState") then
+    -- 沒有 js_ReaScriptAPI 就不做點擊整合
+    return false
+  end
+
+  local state = reaper.JS_Mouse_GetState(1 + 2) -- 左鍵+右鍵
+  local x, y  = reaper.GetMousePosition()
+  local lmb   = (state & 1) == 1
+
+  -- 右鍵守門與冷卻
+  if CLICK_SUPPRESS_RBUTTON_MENU then
+    local now = reaper.time_precise()
+    if (state & 2) == 2 then
+      if CLICK_rbtn_down_time < 0 then CLICK_rbtn_down_time = now end
+      CLICK_lastDown = false
+      return false
+    else
+      if CLICK_rbtn_down_time >= 0 and CLICK_rbtn_up_time < CLICK_rbtn_down_time then
+        CLICK_rbtn_up_time = now; CLICK_rbtn_down_time = -1; CLICK_lastDown = false
+      end
+      if CLICK_rbtn_up_time >= 0 and (now - CLICK_rbtn_up_time) < CLICK_RBUTTON_COOLDOWN_SEC then
+        return false
+      end
+    end
+  end
+
+  local did = false
+  if CLICK_SELECT_ON_MOUSE_UP then
+    if lmb then
+      if not CLICK_lastDown then
+        CLICK_lastDown = true
+        CLICK_lastDownPos.x, CLICK_lastDownPos.y = x, y
+      end
+    else
+      if CLICK_lastDown then
+        CLICK_lastDown = false
+        local dx = math.abs(x - (CLICK_lastDownPos.x or x))
+        local dy = math.abs(y - (CLICK_lastDownPos.y or y))
+        if dx <= CLICK_TOLERANCE_PX and dy <= CLICK_TOLERANCE_PX then
+          local tr, why = Click_TrackIfSelectTarget(x, y)
+          if tr then
+            reaper.Undo_BeginBlock()
+            Click_SelectOnlyTrack(tr)
+            reaper.Undo_EndBlock("Click-select track (integrated, mouse-up)", -1)
+            Click_Log(("selected track (%s)"):format(tostring(why)))
+            did = true
+          else
+            Click_Log(("skip: %s"):format(tostring(why)))
+          end
+        end
+      end
+    end
+  else
+    -- mouse-down 模式
+    if lmb and not CLICK_lastDown then
+      CLICK_lastDown = true
+      local tr, why = Click_TrackIfSelectTarget(x, y)
+      if tr then
+        reaper.Undo_BeginBlock()
+        Click_SelectOnlyTrack(tr)
+        reaper.Undo_EndBlock("Click-select track (integrated, mouse-down)", -1)
+        Click_Log(("selected track (%s)"):format(tostring(why)))
+        did = true
+      else
+        Click_Log(("skip: %s"):format(tostring(why)))
+      end
+    elseif (not lmb) and CLICK_lastDown then
+      CLICK_lastDown = false
+    end
+  end
+
+  return did
+end
+
+
 
 ----------------
 -- Track helpers
@@ -370,6 +536,9 @@ local prev = {
 -- Main loop
 ----------------
 local function mainloop()
+  -- 先處理 Click-select（讓後續 A/B/C/D 看見本次點擊帶來的「選軌」變化）
+  local CLICK_did_select = Click_TickMaybeSelectTrack()
+  -----------------------------------------------------
   local triggered_side = nil -- "ITEMS" or "TRACKS"
   local psc = reaper.GetProjectStateChangeCount(0)
   local cursor = reaper.GetCursorPosition()
