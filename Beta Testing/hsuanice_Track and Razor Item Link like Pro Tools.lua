@@ -1,6 +1,6 @@
 --[[
 @description Track and Razor Item Link like Pro Tools (performance edition)
-@version 0.12.0 Integrated Click-select Track
+@version 0.12.1
 @author hsuanice
 @about
   Pro Tools-style "Link Track and Edit Selection".
@@ -31,11 +31,16 @@
     hsuanice served as the workflow designer, tester, and integrator for this tool.
 
 @changelog
+  v0.12.1
+    - Change: Added CLICK_HOOK_PHASE option ("pre" or "post"). Default to "post" so the integrated
+      click-to-select-track runs at the end of mainloop. ABCD logic now consumes the track-selection
+      change on the next cycle, reducing timing contention with other watchers (menu guards, TS suppress).
+    - No changes to ABCD semantics; only the timing of when they observe selection changes.
   v0.12.0
-  - NEW: Integrated "Click-select Track" watcher (mouse-up/down, item upper-half option, popup guard).
-    • Runs at the start of each cycle so ABCD logic sees the fresh track selection.
-    • Options: ENABLE_CLICK_SELECT_TRACK, CLICK_SELECT_ON_MOUSE_UP, CLICK_ENABLE_ITEM_UPPER_HALF, etc.
-  - No changes to ABCD semantics. Interop with Razor↔Item master toggle preserved.
+    - NEW: Integrated "Click-select Track" watcher (mouse-up/down, item upper-half option, popup guard).
+      • Runs at the start of each cycle so ABCD logic sees the fresh track selection.
+      • Options: ENABLE_CLICK_SELECT_TRACK, CLICK_SELECT_ON_MOUSE_UP, CLICK_ENABLE_ITEM_UPPER_HALF, etc.
+    - No changes to ABCD semantics. Interop with Razor↔Item master toggle preserved.
   v0.11.0
     - NEW: ABCD per-section switches in USER OPTIONS (ENABLE_A..D) for fast isolation & debugging.
     - NEW: DEBUG_PRINT flag + dbg() helper to log which section fires (A/B/C/D) each tick.
@@ -84,9 +89,13 @@ local ENABLE_CLICK_SELECT_TRACK       = true    -- 總開關：整合版「點�
 local CLICK_SELECT_ON_MOUSE_UP        = true    -- true: mouse-up、false: mouse-down（建議用 mouse-up）
 local CLICK_ENABLE_ITEM_UPPER_HALF    = false   -- 點 Item 上半部也算選軌
 local CLICK_TOLERANCE_PX              = 3       -- mouse-up 模式允許的微小移動像素
-local CLICK_SUPPRESS_RBUTTON_MENU     = true    -- 有右鍵選單或剛放開右鍵的冷卻期內，不處理左鍵點擊
+local CLICK_SUPPRESS_RBUTTON_MENU     = false    -- 有右鍵選單或剛放開右鍵的冷卻期內，不處理左鍵點擊
 local CLICK_RBUTTON_COOLDOWN_SEC      = 0.10    -- 右鍵放開後冷卻時間（秒）
 local CLICK_WANT_DEBUG                = false   -- 顯示 Click 模組除錯訊息
+-- === CLICK-SELECT hook phase ===
+-- "pre":  在 mainloop 一開始就處理點一下→選軌（0.12.0 的做法）
+-- "post": 在 mainloop 結尾再處理（本版預設，讓 ABCD 在下一圈才吃到選軌變化）
+local CLICK_HOOK_PHASE = "post"
 
 
 -- Range matching for item-range checks inside C/D when needed:
@@ -536,9 +545,11 @@ local prev = {
 -- Main loop
 ----------------
 local function mainloop()
-  -- 先處理 Click-select（讓後續 A/B/C/D 看見本次點擊帶來的「選軌」變化）
-  local CLICK_did_select = Click_TickMaybeSelectTrack()
-  -----------------------------------------------------
+
+  if CLICK_HOOK_PHASE == "pre" then
+    Click_TickMaybeSelectTrack()
+  end
+
   local triggered_side = nil -- "ITEMS" or "TRACKS"
   local psc = reaper.GetProjectStateChangeCount(0)
   local cursor = reaper.GetCursorPosition()
@@ -720,6 +731,10 @@ local function mainloop()
   prev.it_sel_sig = it_sel_sig
   prev.it_tr_sig  = it_tr_sig
   prev.razor_sig  = Razor.sig
+
+  if CLICK_HOOK_PHASE == "post" then
+    Click_TickMaybeSelectTrack()
+  end
 
   reaper.defer(mainloop)
 end
