@@ -1,6 +1,6 @@
 --[[
 @description Hover Mode - Split Items (Selection-first in Hover, Mouse/Edit aware) + Simple Debug Switch
-@version 0.2.1
+@version 0.2.1.1
 @author hsuanice
 @about
   Context-aware item splitting with unified hover/edit logic via library, but performs the split
@@ -16,6 +16,9 @@
        - Non-hover (Ruler/TCP or Hover OFF):
            Split items crossing Edit Cursor on selected tracks (fallback).
 
+  Selection policy:
+    • Original selection is preserved. If a previously-selected item is split, BOTH resulting halves remain selected.
+
   Library path: REAPER/Scripts/hsuanice Scripts/Library/hsuanice_Hover.lua
 
   Debug:
@@ -23,14 +26,12 @@
     • Output → ReaScript console (View → Show console output).
 
 @changelog
+  v0.2.1.1
+    - Preserve original selection across split: for previously-selected items that get split, select both halves.
   v0.2.1
-    - Added: USER OPTION `IGNORE_TIME_SELECTION` (default false). When true, time selection priority is skipped.
+    - Added: USER OPTION `IGNORE_TIME_SELECTION` (default false).
   v0.2.0
-    - Change: Use Action 40757 for splitting (parity with v0.1) to avoid transient fade visuals from SplitMediaItem().
-    - Refactor: Uses hsuanice_Hover.lua (v0.1.0) for position/targets; selection-first when true hover.
-    - Kept: Razor Edit & Time Selection priority; forced UpdateArrange for immediate redraw.
-  v0.1
-    - Initial beta (pre-library)
+    - Use Action 40757 for splitting; integrated hover library and forced redraw.
 --]]
 
 ----------------------------------------
@@ -38,7 +39,7 @@
 ----------------------------------------
 local DEBUG                 = false  -- ← 設 true 開啟除錯輸出
 local CLEAR_ON_RUN          = false  -- ← 設 true 在每次執行且 DEBUG=ON 時先清空 console
-local IGNORE_TIME_SELECTION = true  -- ← 設 true 直接忽略 Time Selection 優先權（走下一層流程）
+local IGNORE_TIME_SELECTION = false  -- ← 設 true 直接忽略 Time Selection 優先權（走下一層流程）
 
 ----------------------------------------
 -- Load shared Hover library
@@ -66,7 +67,7 @@ if DEBUG and CLEAR_ON_RUN then reaper.ShowConsoleMsg("") end
 log("[HoverSplit] --- run ---")
 
 ----------------------------------------
--- Local helpers
+-- Local helpers (selection save/restore & split)
 ----------------------------------------
 local function save_item_selection()
   local list = {}
@@ -85,25 +86,67 @@ local function restore_item_selection(list)
   end
 end
 
--- Use native Action 40757 to perform the actual split (parity with v0.1 visuals)
-local function split_via_action(pos, targets)
+-- 事先記錄「原本已選且會被切到的 items」資訊（track + 舊的 end），以便分割後選到右半
+local function build_selected_items_split_info(pos, eps)
+  local info = {}
+  for i = 0, reaper.CountSelectedMediaItems(0) - 1 do
+    local it  = reaper.GetSelectedMediaItem(0, i)
+    local st  = reaper.GetMediaItemInfo_Value(it, "D_POSITION")
+    local en  = st + reaper.GetMediaItemInfo_Value(it, "D_LENGTH")
+    if pos > st + eps and pos < en - eps then
+      info[#info+1] = {
+        track   = reaper.GetMediaItemTrack(it),
+        old_end = en
+      }
+    end
+  end
+  logf("[HoverSplit] will-split selected items: %d", #info)
+  return info
+end
+
+-- 分割後，針對「原本已選且被切」的每個 item，把右半也選回來（start≈pos 且 end≈old_end）
+local function select_right_halves_after_split(split_info, pos, eps)
+  for _, s in ipairs(split_info) do
+    local tr = s.track
+    local old_end = s.old_end
+    if reaper.ValidatePtr(tr, "MediaTrack*") then
+      for i = 0, reaper.CountTrackMediaItems(tr) - 1 do
+        local it = reaper.GetTrackMediaItem(tr, i)
+        local st = reaper.GetMediaItemInfo_Value(it, "D_POSITION")
+        local en = st + reaper.GetMediaItemInfo_Value(it, "D_LENGTH")
+        if math.abs(st - pos) <= (eps * 2) and math.abs(en - old_end) <= (eps * 2) then
+          reaper.SetMediaItemSelected(it, true)
+          logf("[HoverSplit] select right-half: start=%.6f end=%.6f", st, en)
+          break
+        end
+      end
+    end
+  end
+end
+
+-- 用原生 Action 40757 來分割，並正確保留原本選取（若原本已選且被切 → 左右半都保持選取）
+local function split_via_action_preserve_selection(pos, targets, eps)
   if #targets == 0 then return end
-  local old_cur = reaper.GetCursorPosition()
-  local prev_sel = save_item_selection()
+  local old_cur   = reaper.GetCursorPosition()
+  local prev_sel  = save_item_selection()
+  local sel_split = build_selected_items_split_info(pos, eps)
 
   reaper.Main_OnCommand(40289, 0)              -- Unselect all
   for _, it in ipairs(targets) do
-    reaper.SetMediaItemSelected(it, true)       -- select only intended items
+    reaper.SetMediaItemSelected(it, true)       -- 只選要切的目標
   end
   reaper.SetEditCurPos(pos, false, false)
   reaper.Main_OnCommand(40757, 0)               -- Split items at edit cursor
   reaper.SetEditCurPos(old_cur, false, false)
 
+  -- 還原原本選取（此時原 item 指標對應「左半」），再把右半也補選回來
   restore_item_selection(prev_sel)
-  logf("[HoverSplit] split_via_action: %d items", #targets)
+  select_right_halves_after_split(sel_split, pos, eps)
+
+  logf("[HoverSplit] split_via_action_preserve_selection: targets=%d, split_sel=%d", #targets, #sel_split)
 end
 
--- Collect items on currently selected tracks that strictly cover 'pos'
+-- Fallback：在已選軌上收集覆蓋 pos 的 items
 local function collect_items_on_selected_tracks_at(pos)
   local result = {}
   local selected_tracks = {}
@@ -195,7 +238,7 @@ local function handle_time_selection_if_any()
   reaper.Undo_BeginBlock()
   reaper.PreventUIRefresh(1)
   reaper.Main_OnCommand(40061, 0) -- Split at time selection
-  reaper.Main_OnCommand(40289, 0) -- Unselect all (parity with previous behavior)
+  reaper.Main_OnCommand(40289, 0) -- Unselect all (沿用舊行為；如需保留選取可再談)
   reaper.PreventUIRefresh(-1)
   reaper.UpdateArrange()
   reaper.Undo_EndBlock("Split by Time Selection (selected items only)", -1)
@@ -222,11 +265,9 @@ local function main_hover_or_edit()
 
   local targets
   if is_true_hover then
-    -- Hover=ON & not over Ruler/TCP → selection-first via library
     targets = hover.build_targets_for_split(pos, { prefer_selection_when_hover = true })
     logf("[HoverSplit] targets via library (true hover): %d", #targets)
   else
-    -- Non-hover path: edit cursor on selected tracks
     targets = collect_items_on_selected_tracks_at(pos)
   end
 
@@ -238,7 +279,8 @@ local function main_hover_or_edit()
   reaper.Undo_BeginBlock()
   reaper.PreventUIRefresh(1)
 
-  split_via_action(pos, targets)
+  local eps = hover.half_pixel_sec()
+  split_via_action_preserve_selection(pos, targets, eps)
 
   reaper.PreventUIRefresh(-1)
   reaper.UpdateArrange()
