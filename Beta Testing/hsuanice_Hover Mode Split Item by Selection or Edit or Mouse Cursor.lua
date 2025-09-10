@@ -1,6 +1,6 @@
 --[[
 @description Hover Mode - Split Items (Selection-first in Hover, Mouse/Edit aware) + Simple Debug Switch
-@version 0.2.1.1
+@version 0.2.2
 @author hsuanice
 @about
   Context-aware item splitting with unified hover/edit logic via library, but performs the split
@@ -11,8 +11,9 @@
     2) Time Selection (with selected items) → split, then unselect all（可在 USER OPTIONS 設定忽略）.
     3) Hover/Edit path:
        - True Hover (mouse over arrange, not Ruler/TCP):
-           If there are selected items, split only those crossing the mouse time.
-           Otherwise split the item strictly under the mouse.
+           • If there are selected items, split those crossing the mouse time;
+             additionally, if the item under mouse is OUTSIDE selection but crosses the time, split it too.
+           • If there is no selection, split the item strictly under the mouse.
        - Non-hover (Ruler/TCP or Hover OFF):
            Split items crossing Edit Cursor on selected tracks (fallback).
 
@@ -26,10 +27,12 @@
     • Output → ReaScript console (View → Show console output).
 
 @changelog
+  v0.2.2
+    - True Hover: When selection exists, also split the item under mouse if it's outside selection but crosses the time.
   v0.2.1.1
-    - Preserve original selection across split: for previously-selected items that get split, select both halves.
+    - Preserve original selection across split (both halves stay selected for originally-selected items).
   v0.2.1
-    - Added: USER OPTION `IGNORE_TIME_SELECTION` (default false).
+    - USER OPTION `IGNORE_TIME_SELECTION`.
   v0.2.0
     - Use Action 40757 for splitting; integrated hover library and forced redraw.
 --]]
@@ -169,6 +172,37 @@ local function collect_items_on_selected_tracks_at(pos)
   return result
 end
 
+-- 工具：把 hovered item（若未選且覆蓋 pos）加入 targets
+local function maybe_add_hover_item_outside_selection(targets, pos, eps)
+  local x, y = reaper.GetMousePosition()
+  local hit  = reaper.GetItemFromPoint(x, y, false)
+  if not hit then
+    log("[HoverSplit] hover item: none")
+    return
+  end
+  -- 未選才考慮（需求：在 selection 以外才補切 hovered）
+  if reaper.IsMediaItemSelected(hit) then
+    log("[HoverSplit] hover item: is selected → already covered by selection path")
+    return
+  end
+  local st = reaper.GetMediaItemInfo_Value(hit, "D_POSITION")
+  local en = st + reaper.GetMediaItemInfo_Value(hit, "D_LENGTH")
+  local inside = (pos > st + eps and pos < en - eps)
+  if not inside then
+    log("[HoverSplit] hover item: exists but not crossing time")
+    return
+  end
+  -- 避免重複
+  for _, it in ipairs(targets) do
+    if it == hit then
+      log("[HoverSplit] hover item: already in targets")
+      return
+    end
+  end
+  table.insert(targets, hit)
+  logf("[HoverSplit] hover item added (outside selection): start=%.6f end=%.6f", st, en)
+end
+
 ----------------------------------------
 -- 1) Razor Edit priority (unchanged in spirit)
 ----------------------------------------
@@ -264,10 +298,16 @@ local function main_hover_or_edit()
   end
 
   local targets
+  local eps = hover.half_pixel_sec()
+
   if is_true_hover then
+    -- 先取「覆蓋滑鼠時間點的已選 items」
     targets = hover.build_targets_for_split(pos, { prefer_selection_when_hover = true })
-    logf("[HoverSplit] targets via library (true hover): %d", #targets)
+    logf("[HoverSplit] targets via library (true hover, sel-first): %d", #targets)
+    -- 額外：若滑鼠下那顆不在 selection 且覆蓋時間點，把它也加進來
+    maybe_add_hover_item_outside_selection(targets, pos, eps)
   else
+    -- 非 hover 路徑：以 Edit Cursor 在已選軌上收集目標
     targets = collect_items_on_selected_tracks_at(pos)
   end
 
@@ -279,7 +319,6 @@ local function main_hover_or_edit()
   reaper.Undo_BeginBlock()
   reaper.PreventUIRefresh(1)
 
-  local eps = hover.half_pixel_sec()
   split_via_action_preserve_selection(pos, targets, eps)
 
   reaper.PreventUIRefresh(-1)
