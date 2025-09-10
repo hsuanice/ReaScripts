@@ -1,6 +1,6 @@
 --[[
 @description Hover_Mode_-_Trim_or_Extend_Left_Edge_of_Item (Preserve Fade End, No Flicker)
-@version 0.3.0
+@version 0.3.1
 @author hsuanice
 @about
   Left-edge trim/extend that preserves the fade-in END (not the length), using a shared Hover library
@@ -14,6 +14,8 @@
     • True Hover (mouse over arrange, not Ruler/TCP):
         - library decides trim vs extend (boundary-as-gap).
         - selection-first when Hover is ON (per library).
+        - NEW in 0.3.1: When there is NO selection and mouse is on a GAP,
+          also extend the next item on the mouse track (nearest start ≥ position).
     • Non-hover (Ruler/TCP or Hover OFF):
         - Edit Cursor + selected tracks fallback:
             inside → trim; else extend nearest item to the right.
@@ -27,15 +29,12 @@
   Library path:
     REAPER/Scripts/hsuanice Scripts/Library/hsuanice_Hover.lua
 
-  Notes:
-    - Designed to avoid the "flash" you reported: no auto-fade is briefly drawn.
-
 @changelog
+  v0.3.1
+    - True Hover: when there is NO selection and the mouse is over a GAP, also extend the next item on the mouse track.
   v0.3.0
     - Switched to hsuanice_Hover.lua for position/targets/snap.
-    - Added DEBUG user option.
-    - No-flicker write order with D_FADEINLEN_AUTO cleared; preserves fade-in END.
-    - Added robust Edit-Cursor+Selected-Tracks fallback for non-hover contexts.
+    - Added DEBUG option; no-flicker write order with D_FADEINLEN_AUTO cleared; preserves fade-in END.
 --]]
 
 ----------------------------------------
@@ -108,6 +107,39 @@ local function collect_picks_edit_mode(pos)
   return picks
 end
 
+-- NEW in 0.3.1:
+-- If true hover, NO selection, and mouse is over a GAP (library returned empty),
+-- find the next item on the mouse TRACK (nearest start >= pos) and extend it.
+local function picks_extend_from_gap_on_mouse_track(pos)
+  local picks = {}
+  if not reaper.BR_GetMouseCursorContext then
+    return picks
+  end
+  local window, segment = reaper.BR_GetMouseCursorContext()
+  if window ~= "arrange" then return picks end
+
+  local tr = reaper.BR_GetMouseCursorContext_Track()
+  if not tr then return picks end
+
+  local eps = hover.half_pixel_sec()
+  local target, best_st = nil, math.huge
+  local n = reaper.CountTrackMediaItems(tr)
+  for i = 0, n - 1 do
+    local it = reaper.GetTrackMediaItem(tr, i)
+    local st = reaper.GetMediaItemInfo_Value(it, "D_POSITION")
+    if st >= pos - eps and st < best_st then
+      target, best_st = it, st
+    end
+  end
+  if target then
+    table.insert(picks, { item = target, mode = "extend" })
+    logf("[LeftEdge] gap→extend on mouse track: pick start=%.6f", best_st)
+  else
+    log("[LeftEdge] gap→extend on mouse track: no item to the right")
+  end
+  return picks
+end
+
 -- Apply left-edge trim/extend preserving fade-in END, with no flicker.
 -- One-shot write order inside PreventUIRefresh:
 --   1) compute new fade-in length (keep end time)
@@ -145,7 +177,6 @@ local function apply_left_edge(entry, target_pos)
     local rate = reaper.GetMediaItemTakeInfo_Value(take, "D_PLAYRATE") or 1.0
     if rate <= 0 then rate = 1.0 end
     -- minimal start allowed without making source offset negative:
-    -- new_offs = offs + (new_st - st) * rate >= 0  ⇒  new_st >= st - offs / rate
     local min_st = st - (offs / rate)
     if new_st < min_st then new_st = min_st end
   end
@@ -168,7 +199,6 @@ local function apply_left_edge(entry, target_pos)
   end
 
   -- Write (no flicker): clear auto first, then offsets → pos → len → fade
-  -- All inside an ongoing PreventUIRefresh in main()
   reaper.SetMediaItemInfo_Value(it, "D_FADEINLEN_AUTO", 0) -- avoid transient auto-fade drawing
 
   if is_audio then
@@ -203,13 +233,24 @@ local function main()
     logf("[LeftEdge] EditCursor: %.6f", pos)
   end
 
-  -- 2) build picks via library; fallback for non-hover if empty
+  -- 2) build picks via library
   local picks = hover.build_targets_for_trim_extend("left", pos, { prefer_selection_when_hover = true })
   logf("[LeftEdge] library picks: %d", #picks)
 
+  -- 2.1) NEW in 0.3.1:
+  -- If TRUE HOVER, NO selection, and library returned nothing (likely mouse on a GAP),
+  -- also extend next item on the MOUSE TRACK.
+  if is_true_hover and (#picks == 0) and (reaper.CountSelectedMediaItems(0) == 0) then
+    local extra = picks_extend_from_gap_on_mouse_track(pos)
+    for i = 1, #extra do picks[#picks+1] = extra[i] end
+    logf("[LeftEdge] added gap-extend pick(s): %d", #extra)
+  end
+
+  -- 2.2) Non-hover fallback: Edit Cursor + Selected Tracks
   if (not is_true_hover) and (#picks == 0) then
     picks = collect_picks_edit_mode(pos)
   end
+
   if #picks == 0 then log("[LeftEdge] no picks; exit"); return end
 
   -- 3) apply in one UI freeze to avoid flicker
