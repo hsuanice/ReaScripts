@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<index version="1" name="hsuanice Scripts" commit="672ce97d01d12bcb174664feacf2796816728a31">
+<index version="1" name="hsuanice Scripts" commit="16f164d0efa16edbb8e8fb3288d6dfe180903844">
   <category name="Beta Testing">
     <reapack name="hsuanice_BWF TimeReference Embed Tool.lua" type="script" desc="Embed BWF TimeReference to Active take from Take 1 or Current Position TC">
       <version name="0.7.1" author="hsuanice" time="2025-08-14T17:52:57Z">
@@ -1153,6 +1153,26 @@ v0.9.0 - Added Shared Link State section from Project ExtState "hsuanice_Link".]
     </reapack>
   </category>
   <category name="Library">
+    <reapack name="hsuanice_Hover.lua" type="script" desc="hsuanice Hover Library (Shared helpers for Hover Mode editing tools)">
+      <metadata>
+        <description><![CDATA[{\rtf1\ansi\deff0{\fonttbl{\f0 \fswiss Helvetica;}{\f1 \fmodern Courier;}}
+{\colortbl;\red255\green0\blue0;\red0\green0\blue255;}
+\widowctrl\hyphauto
+
+{\pard \ql \f0 \sa180 \li0 \fi0 Common utilities for Hover Mode scripts (Split / Trim / Extend). Centralizes hover/edit cursor decision, snap behavior, pixel epsilon, and target item selection (hover, edit, or selection priority).\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 Path: REAPER/Scripts/hsuanice Scripts/Library/hsuanice_Hover.lua\par}
+}
+]]></description>
+      </metadata>
+      <version name="0.1.0" author="hsuanice" time="2025-09-10T12:27:19Z">
+        <changelog><![CDATA[v0.1.0 - Initial skeleton:
+  • Unified function naming (is_/build_/resolve_/apply_ separation).
+  • Provides hover state, ruler detection, mouse timeline pos,
+    snap-in-hover, half-pixel epsilon, item visibility.
+  • Target builders for Split and Trim/Extend.]]></changelog>
+        <source main="main">https://github.com/hsuanice/ReaScripts/raw/16f164d0efa16edbb8e8fb3288d6dfe180903844/Library/hsuanice_Hover.lua</source>
+      </version>
+    </reapack>
     <reapack name="hsuanice_List Table.lua" type="script">
       <metadata>
         <description><![CDATA[{\rtf1\ansi\deff0{\fonttbl{\f0 \fswiss Helvetica;}{\f1 \fmodern Courier;}}
