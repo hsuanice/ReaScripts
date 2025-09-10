@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<index version="1" name="hsuanice Scripts" commit="e1ff1b2b1b37603d1547458d19f19ff894c76bc8">
+<index version="1" name="hsuanice Scripts" commit="58097109273aeeada64649ef410d533a2820c2bc">
   <category name="Beta Testing">
     <reapack name="hsuanice_BWF TimeReference Embed Tool.lua" type="script" desc="Embed BWF TimeReference to Active take from Take 1 or Current Position TC">
       <version name="0.7.1" author="hsuanice" time="2025-08-14T17:52:57Z">
@@ -238,6 +238,9 @@
       </version>
       <version name="0.3.1" author="hsuanice" time="2025-09-10T15:47:52Z">
         <source main="main">https://github.com/hsuanice/ReaScripts/raw/e1ff1b2b1b37603d1547458d19f19ff894c76bc8/Beta%20Testing/hsuanice_Hover%20Mode%20Trim%20or%20Extend%20Left%20Edge%20of%20Item.lua</source>
+      </version>
+      <version name="0.3.1 item selection trim/extend overlapped need fix" author="hsuanice" time="2025-09-10T16:10:40Z">
+        <source main="main">https://github.com/hsuanice/ReaScripts/raw/58097109273aeeada64649ef410d533a2820c2bc/Beta%20Testing/hsuanice_Hover%20Mode%20Trim%20or%20Extend%20Left%20Edge%20of%20Item.lua</source>
       </version>
     </reapack>
     <reapack name="hsuanice_Hover Mode Trim or Extend Right Edge of Item.lua" type="script" desc="Hover Mode - Trim or Extend Right Edge of Item (Preserve Fade)">
