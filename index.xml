@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<index version="1" name="hsuanice Scripts" commit="feb15d82b34bac7593becfd9ce30ee66b67d299b">
+<index version="1" name="hsuanice Scripts" commit="f4ee4ff8da36f3e6cf7015aa4e899b02f706ffcf">
   <category name="Beta Testing">
     <reapack name="hsuanice_BWF TimeReference Embed Tool.lua" type="script" desc="Embed BWF TimeReference to Active take from Take 1 or Current Position TC">
       <version name="0.7.1" author="hsuanice" time="2025-08-14T17:52:57Z">
@@ -246,23 +246,16 @@
         <source main="main">https://github.com/hsuanice/ReaScripts/raw/feb15d82b34bac7593becfd9ce30ee66b67d299b/Beta%20Testing/hsuanice_Hover%20Mode%20Trim%20or%20Extend%20Left%20Edge%20of%20Item.lua</source>
       </version>
     </reapack>
-    <reapack name="hsuanice_Hover Mode Trim or Extend Right Edge of Item.lua" type="script" desc="Hover Mode - Trim or Extend Right Edge of Item (Preserve Fade)">
+    <reapack name="hsuanice_Hover Mode Trim or Extend Right Edge of Item.lua" type="script" desc="Hover_Mode_-_Trim_or_Extend_Right_Edge_of_Item (Preserve Fade Start, No Flicker)">
       <metadata>
         <description><![CDATA[{\rtf1\ansi\deff0{\fonttbl{\f0 \fswiss Helvetica;}{\f1 \fmodern Courier;}}
 {\colortbl;\red255\green0\blue0;\red0\green0\blue255;}
 \widowctrl\hyphauto
 
-{\pard \ql \f0 \sa180 \li0 \fi0 Trims or extends the {\b right edge} of audio/MIDI/empty items depending on context.\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Hover Mode ON : uses mouse timeline position (pixel-accurate hit test preferred).\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Hover Mode OFF: uses edit cursor on selected tracks.\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab \u55358 ?\u56800 ? Special behavior: when the mouse is over the {\b Ruler (Timeline)} or {\b TCP area},\line the script temporarily switches to {\b Edit Cursor Mode}, even if Hover Mode is enabled.\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Preserves the existing fade-out end-time (keeps fade start), adjusting only its length.\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Ignores fully invisible items; partial visibility is accepted.\sa180\par}
-{\pard \ql \f0 \sa180 \li0 \fi0 \u55357 ?\u56481 ? Hover Mode is toggled via ExtState: hsuanice_TrimTools / HoverMode\par}
-{\pard \ql \f0 \sa180 \li0 \fi0 Notes:\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Snap-to-grid is respected in true Hover mode (not when forced to Edit Cursor via Ruler).\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Boundary-as-gap for RIGHT tool: if mouse \u8776 ? any item edge (\u177 ? half-pixel), treat UNDER as empty. S now consistently EXTENDS the nearest Prev-right-edge to mouse in gaps or on boundaries; no trim at edges.\sa180\par}
-{\pard \ql \f0 \sa180 \li0 \fi0 Inspired by: \u8226 ? X-Raym - Trim right edge under mouse or previous one without changing fade-out start.\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 Right-edge trim/extend that preserves the FADE-OUT START time (not the length), using the shared Hover library for position & target selection. Implements a no-flicker write order and no-overlap extend behavior.\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 Behavior summary: \u8226 ? True Hover (mouse over arrange, not Ruler/TCP): - selection-first via library. - When there IS selection: only process the RIGHTMOST selected item per track (skip others). - When there is NO selection and mouse is on a GAP: extend the previous item on the mouse track (nearest item whose END \u8804 ? mouse time). - Only strictly-inside hits TRIM; edge-as-gap avoids accidental trims on boundaries. \u8226 ? Non-hover (Ruler/TCP or Hover OFF): - Edit Cursor + selected tracks fallback: inside \u8594 ? trim; otherwise \u8594 ? extend nearest left (prev) item. \u8226 ? Snap only in true hover (per library).\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 Fade policy: \u8226 ? Preserve FADE-OUT START. If original fade-out = 0, stays 0. \u8226 ? Clear D_FADEOUTLEN_AUTO to avoid transient auto-fade visuals. \u8226 ? Fade shape is not modified.\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 Library path: REAPER/Scripts/hsuanice Scripts/Library/hsuanice_Hover.lua\par}
 }
 ]]></description>
       </metadata>
@@ -278,6 +271,9 @@
       </version>
       <version name="0.2.0" author="hsuanice" time="2025-09-02T04:24:29Z">
         <source main="main">https://github.com/hsuanice/ReaScripts/raw/83ff5b5f1e96c32407bbd46d9e47ae34aed0e960/Beta%20Testing/hsuanice_Hover%20Mode%20Trim%20or%20Extend%20Right%20Edge%20of%20Item.lua</source>
+      </version>
+      <version name="0.3.0" author="hsuanice" time="2025-09-10T16:27:15Z">
+        <source main="main">https://github.com/hsuanice/ReaScripts/raw/f4ee4ff8da36f3e6cf7015aa4e899b02f706ffcf/Beta%20Testing/hsuanice_Hover%20Mode%20Trim%20or%20Extend%20Right%20Edge%20of%20Item.lua</source>
       </version>
     </reapack>
     <reapack name="hsuanice_Hover Mode Trim Tool Monitor.lua" type="script" desc="Hover Mode Trim Tool Monitor — Live HUD + A/S Snapshot &amp; Diff">
