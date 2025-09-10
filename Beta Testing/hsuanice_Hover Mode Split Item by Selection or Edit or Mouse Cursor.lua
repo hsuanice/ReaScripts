@@ -1,6 +1,6 @@
 --[[
 @description Hover Mode - Split Items (Selection-first in Hover, Mouse/Edit aware) + Simple Debug Switch
-@version 0.2.0
+@version 0.2.1
 @author hsuanice
 @about
   Context-aware item splitting with unified hover/edit logic via library, but performs the split
@@ -8,7 +8,7 @@
 
   Priority:
     1) Razor Edit spans → split at time selection, keep overlapped items selected, clear razor visuals.
-    2) Time Selection (with selected items) → split, then unselect all (parity with old behavior).
+    2) Time Selection (with selected items) → split, then unselect all（可在 USER OPTIONS 設定忽略）.
     3) Hover/Edit path:
        - True Hover (mouse over arrange, not Ruler/TCP):
            If there are selected items, split only those crossing the mouse time.
@@ -23,10 +23,12 @@
     • Output → ReaScript console (View → Show console output).
 
 @changelog
+  v0.2.1
+    - Added: USER OPTION `IGNORE_TIME_SELECTION` (default false). When true, time selection priority is skipped.
   v0.2.0
-    - Change: Perform splitting via Action 40757 (like v0.1) to avoid transient fade visuals seen with SplitMediaItem().
-    - Refactor: Uses hsuanice_Hover.lua (v0.1.0) to resolve position & targets; selection-first when true hover.
-    - Kept: Razor Edit & Time Selection priority; added forced UpdateArrange for immediate redraw.
+    - Change: Use Action 40757 for splitting (parity with v0.1) to avoid transient fade visuals from SplitMediaItem().
+    - Refactor: Uses hsuanice_Hover.lua (v0.1.0) for position/targets; selection-first when true hover.
+    - Kept: Razor Edit & Time Selection priority; forced UpdateArrange for immediate redraw.
   v0.1
     - Initial beta (pre-library)
 --]]
@@ -34,8 +36,9 @@
 ----------------------------------------
 -- USER OPTIONS
 ----------------------------------------
-local DEBUG        = false   -- ← 設 true 開啟除錯輸出
-local CLEAR_ON_RUN = false   -- ← 設 true 在每次執行且 DEBUG=ON 時先清空 console
+local DEBUG                 = false  -- ← 設 true 開啟除錯輸出
+local CLEAR_ON_RUN          = false  -- ← 設 true 在每次執行且 DEBUG=ON 時先清空 console
+local IGNORE_TIME_SELECTION = true  -- ← 設 true 直接忽略 Time Selection 優先權（走下一層流程）
 
 ----------------------------------------
 -- Load shared Hover library
@@ -175,9 +178,14 @@ local function handle_razor_edit_if_any()
 end
 
 ----------------------------------------
--- 2) Time Selection priority (unchanged)
+-- 2) Time Selection priority (respect user option)
 ----------------------------------------
 local function handle_time_selection_if_any()
+  if IGNORE_TIME_SELECTION then
+    log("[HoverSplit] TimeSelection: ignored by user option")
+    return false
+  end
+
   local ts_start, ts_end = reaper.GetSet_LoopTimeRange2(0, false, false, 0, 0, false)
   local sel_items = reaper.CountSelectedMediaItems(0)
   if ts_start == ts_end or sel_items == 0 then return false end
