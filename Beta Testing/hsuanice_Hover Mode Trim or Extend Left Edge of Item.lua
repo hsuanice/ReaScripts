@@ -1,6 +1,6 @@
 --[[
 @description Hover_Mode_-_Trim_or_Extend_Left_Edge_of_Item (Preserve Fade End, No Flicker)
-@version 0.3.1
+@version 0.3.1 item selection trim/extend overlapped need fix
 @author hsuanice
 @about
   Left-edge trim/extend that preserves the fade-in END (not the length), using a shared Hover library
