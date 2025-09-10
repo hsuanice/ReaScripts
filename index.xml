@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<index version="1" name="hsuanice Scripts" commit="bc3c675ba47b0acc294e4093b3a8d0bbd94d3409">
+<index version="1" name="hsuanice Scripts" commit="672ce97d01d12bcb174664feacf2796816728a31">
   <category name="Beta Testing">
     <reapack name="hsuanice_BWF TimeReference Embed Tool.lua" type="script" desc="Embed BWF TimeReference to Active take from Take 1 or Current Position TC">
       <version name="0.7.1" author="hsuanice" time="2025-08-14T17:52:57Z">
@@ -547,6 +547,23 @@
       </version>
       <version name="0.2" author="hsuanice" time="2025-08-18T04:36:47Z">
         <source main="main">https://github.com/hsuanice/ReaScripts/raw/6960f510f173ad6e3085e74c59a64a390781d434/Beta%20Testing/hsuanice_Pro%20Tools%20Display%20Timeline%20Selection%20Start.lua</source>
+      </version>
+    </reapack>
+    <reapack name="hsuanice_Pro Tools Mute Unmute Clip.lua" type="script" desc="Pro Tools-style Item Mute/Unmute Toggle (uniformize mixed -&gt; unmute)">
+      <metadata>
+        <description><![CDATA[{\rtf1\ansi\deff0{\fonttbl{\f0 \fswiss Helvetica;}{\f1 \fmodern Courier;}}
+{\colortbl;\red255\green0\blue0;\red0\green0\blue255;}
+\widowctrl\hyphauto
+
+{\pard \ql \f0 \sa180 \li0 \fi0 Single item = normal toggle. Multiple items:\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab mixed mute states -> unify to UNMUTE\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab uniform state -> toggle all\sa180\par}
+}
+]]></description>
+      </metadata>
+      <version name="0.1.0" author="hsuanice" time="2025-09-10T11:12:40Z">
+        <changelog><![CDATA[0.1.0 - Initial release: mixed selection becomes unmute; uniform selection toggles.]]></changelog>
+        <source main="main">https://github.com/hsuanice/ReaScripts/raw/672ce97d01d12bcb174664feacf2796816728a31/Beta%20Testing/hsuanice_Pro%20Tools%20Mute%20Unmute%20Clip.lua</source>
       </version>
     </reapack>
     <reapack name="hsuanice_Pro Tools Paste Special- Repeat to Fill Selection.lua" type="script" desc="hsuanice_Pro Tools Paste Special: Repeat to Fill Selection">
