@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<index version="1" name="hsuanice Scripts" commit="16f164d0efa16edbb8e8fb3288d6dfe180903844">
+<index version="1" name="hsuanice Scripts" commit="9e4dd1b491e228efdc6796e9d71420c6ed59071e">
   <category name="Beta Testing">
     <reapack name="hsuanice_BWF TimeReference Embed Tool.lua" type="script" desc="Embed BWF TimeReference to Active take from Take 1 or Current Position TC">
       <version name="0.7.1" author="hsuanice" time="2025-08-14T17:52:57Z">
@@ -146,32 +146,30 @@
         <source main="main">https://github.com/hsuanice/ReaScripts/raw/5e4ae21ce5c21a22e75c62011f538a696dddb6a2/Beta%20Testing/hsuanice_Embed%20iXML%20and%20BWF%20Metadata%20from%20Take%201%20to%20Active%20Take.lua</source>
       </version>
     </reapack>
-    <reapack name="hsuanice_Hover Mode Split Item by Selection or Edit or Mouse Cursor.lua" type="script" desc="Hover Mode - Split Item by Selection or Edit or Mouse Cursor">
+    <reapack name="hsuanice_Hover Mode Split Item by Selection or Edit or Mouse Cursor.lua" type="script" desc="Hover Mode - Split Items (Selection-first in Hover, Mouse/Edit aware) + Simple Debug Switch">
       <metadata>
         <description><![CDATA[{\rtf1\ansi\deff0{\fonttbl{\f0 \fswiss Helvetica;}{\f1 \fmodern Courier;}}
 {\colortbl;\red255\green0\blue0;\red0\green0\blue255;}
 \widowctrl\hyphauto
 
-{\pard \ql \f0 \sa180 \li0 \fi0 Context-aware item splitting script that prioritizes razor area, time selection, and mouse/edit cursor logic. Follows snap-to-grid setting only when using mouse position.\par}
-{\pard \ql \f0 \sa180 \li0 \fi0 This script was generated using ChatGPT based on design concepts and iterative testing by hsuanice. hsuanice served as the workflow designer, tester, and integrator for this tool.\par}
-{\pard \ql \f0 \sa180 \li0 \fi0 References: \u8226 ? TJF: Split Item (Hover Mode Dependant) \u8226 ? TJF: Hover Mode Toggle \u8226 ? LKC: HOVER EDIT - Toggle hovering \u8226 ? az: Smart split items by mouse cursor \u8226 ? ek: Smart split items by mouse cursor\par}
-{\pard \ql \f0 \sa180 \li0 \fi0 Features:\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Designed for fast, keyboard-light workflows.\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Supports Hover Mode via shared ExtState for cursor-aware actions.\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Integrates with Razor Edit regions when available.\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Uses SWS extension APIs where available.\sa180\par}
-{\pard \ql \f0 \sa180 \li0 \fi0 References:\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab REAPER ReaScript API (Lua)\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab SWS Extension API\sa180\par}
-{\pard \ql \f0 \sa180 \li0 \fi0 Note:\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab This is a 0.1 beta release for internal testing.\sa180\par}
-{\pard \ql \f0 \sa180 \li0 \fi0 This script was generated using ChatGPT based on design concepts and iterative testing by hsuanice. hsuanice served as the workflow designer, tester, and integrator for this tool.\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 Context-aware item splitting with unified hover/edit logic via library, but performs the split using the native Action 40757 (Split items at edit cursor) to avoid visual fade artifacts.\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 Priority:\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 1)\tx360\tab Razor Edit spans \u8594 ? split at time selection, keep overlapped items selected, clear razor visuals.\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 2)\tx360\tab Time Selection (with selected items) \u8594 ? split, then unselect all (parity with old behavior).\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 3)\tx360\tab Hover/Edit path:\par}
+{\pard \ql \f0 \sa0 \li720 \fi-360 \endash \tx360\tab True Hover (mouse over arrange, not Ruler/TCP): If there are selected items, split only those crossing the mouse time. Otherwise split the item strictly under the mouse.\par}
+{\pard \ql \f0 \sa0 \li720 \fi-360 \endash \tx360\tab Non-hover (Ruler/TCP or Hover OFF): Split items crossing Edit Cursor on selected tracks (fallback).\sa180\sa180\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 Library path: REAPER/Scripts/hsuanice Scripts/Library/hsuanice_Hover.lua\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 Debug: \u8226 ? Toggle in USER OPTIONS: DEBUG = true/false \u8226 ? Output \u8594 ? ReaScript console (View \u8594 ? Show console output).\par}
 }
 ]]></description>
       </metadata>
       <version name="0.1" author="hsuanice" time="2025-08-13T07:33:10Z">
         <changelog><![CDATA[v0.1 - Beta release]]></changelog>
         <source main="main">https://github.com/hsuanice/ReaScripts/raw/20128d4abc5ecce7bcaa7840d72a69ef1fcdc68c/Beta%20Testing/hsuanice_Hover%20Mode%20Split%20Item%20by%20Selection%20or%20Edit%20or%20Mouse%20Cursor.lua</source>
+      </version>
+      <version name="0.2.0" author="hsuanice" time="2025-09-10T13:59:17Z">
+        <source main="main">https://github.com/hsuanice/ReaScripts/raw/9e4dd1b491e228efdc6796e9d71420c6ed59071e/Beta%20Testing/hsuanice_Hover%20Mode%20Split%20Item%20by%20Selection%20or%20Edit%20or%20Mouse%20Cursor.lua</source>
       </version>
     </reapack>
     <reapack name="hsuanice_Hover Mode Toggle.lua" type="script" desc="Hover Mode - Toggle Hover Mode (Syncable)">
