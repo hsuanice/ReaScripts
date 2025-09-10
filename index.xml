@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<index version="1" name="hsuanice Scripts" commit="4f20980d1453402a0bbc267a924893db6b24a98d">
+<index version="1" name="hsuanice Scripts" commit="f984f42f219b0b2161a4d72e8bc4042e0cd3b78f">
   <category name="Beta Testing">
     <reapack name="hsuanice_BWF TimeReference Embed Tool.lua" type="script" desc="Embed BWF TimeReference to Active take from Take 1 or Current Position TC">
       <version name="0.7.1" author="hsuanice" time="2025-08-14T17:52:57Z">
@@ -157,7 +157,7 @@
 {\pard \ql \f0 \sa0 \li360 \fi-360 1)\tx360\tab Razor Edit spans \u8594 ? split at time selection, keep overlapped items selected, clear razor visuals.\par}
 {\pard \ql \f0 \sa0 \li360 \fi-360 2)\tx360\tab Time Selection (with selected items) \u8594 ? split, then unselect all\u65288 ?\u21487 ?\u22312 ? USER OPTIONS \u35373 ?\u23450 ?\u24573 ?\u30053 ?\u65289 ?.\par}
 {\pard \ql \f0 \sa0 \li360 \fi-360 3)\tx360\tab Hover/Edit path:\par}
-{\pard \ql \f0 \sa0 \li720 \fi-360 \endash \tx360\tab True Hover (mouse over arrange, not Ruler/TCP): If there are selected items, split only those crossing the mouse time. Otherwise split the item strictly under the mouse.\par}
+{\pard \ql \f0 \sa0 \li720 \fi-360 \endash \tx360\tab True Hover (mouse over arrange, not Ruler/TCP): \u8226 ? If there are selected items, split those crossing the mouse time; additionally, if the item under mouse is OUTSIDE selection but crosses the time, split it too. \u8226 ? If there is no selection, split the item strictly under the mouse.\par}
 {\pard \ql \f0 \sa0 \li720 \fi-360 \endash \tx360\tab Non-hover (Ruler/TCP or Hover OFF): Split items crossing Edit Cursor on selected tracks (fallback).\sa180\sa180\par}
 {\pard \ql \f0 \sa180 \li0 \fi0 Selection policy: \u8226 ? Original selection is preserved. If a previously-selected item is split, BOTH resulting halves remain selected.\par}
 {\pard \ql \f0 \sa180 \li0 \fi0 Library path: REAPER/Scripts/hsuanice Scripts/Library/hsuanice_Hover.lua\par}
@@ -177,6 +177,9 @@
       </version>
       <version name="0.2.1.1" author="hsuanice" time="2025-09-10T14:13:44Z">
         <source main="main">https://github.com/hsuanice/ReaScripts/raw/4f20980d1453402a0bbc267a924893db6b24a98d/Beta%20Testing/hsuanice_Hover%20Mode%20Split%20Item%20by%20Selection%20or%20Edit%20or%20Mouse%20Cursor.lua</source>
+      </version>
+      <version name="0.2.2" author="hsuanice" time="2025-09-10T14:27:04Z">
+        <source main="main">https://github.com/hsuanice/ReaScripts/raw/f984f42f219b0b2161a4d72e8bc4042e0cd3b78f/Beta%20Testing/hsuanice_Hover%20Mode%20Split%20Item%20by%20Selection%20or%20Edit%20or%20Mouse%20Cursor.lua</source>
       </version>
     </reapack>
     <reapack name="hsuanice_Hover Mode Toggle.lua" type="script" desc="Hover Mode - Toggle Hover Mode (Syncable)">
