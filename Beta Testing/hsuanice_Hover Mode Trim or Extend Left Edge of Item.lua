@@ -1,126 +1,83 @@
 --[[
-@description Hover Mode - Trim or Extend Left Edge of Item (Preserve Fade)
-@version 0.2.0
+@description Hover_Mode_-_Trim_or_Extend_Left_Edge_of_Item (Preserve Fade End, No Flicker)
+@version 0.3.0
 @author hsuanice
 @about
-  Trims or extends the **left edge** of audio/MIDI/empty items depending on context.  
-    - Hover Mode ON: Uses mouse cursor position.  
-    - Hover Mode OFF: Uses edit cursor and selected tracks.  
-    - 🧠 Special behavior: When the mouse is hovering over the **Ruler (Timeline)** or **TCP area**,  
-      the script temporarily switches to **Edit Cursor Mode**, even if Hover Mode is enabled.  
-    - Preserves existing fade-in shape and position.  
-    - Ignores invisible items; partial visibility is accepted.
-  
-    💡 Supports extensible hover-edit system. Hover Mode is toggled via ExtState:  
-      hsuanice_TrimTools / HoverMode  
-  
-    Inspired by:
-      • X-Raym: Trim Item Edges — Script: X-Raym_Trim left edge of item under mouse or the next one to mouse cursor without changing fade-in end.lua
-  
-  Features:
-  - Designed for fast, keyboard-light workflows.
-  - Supports Hover Mode via shared ExtState for cursor-aware actions.
-  - Uses SWS extension APIs where available.
-  - Optionally leverages js_ReaScriptAPI for advanced interactions.
-  
-  References:
-  - REAPER ReaScript API (Lua)
-  - SWS Extension API
-  - js_ReaScriptAPI
-  
-  Note:
-  This script was generated using ChatGPT based on design concepts and iterative testing by hsuanice.
-  hsuanice served as the workflow designer, tester, and integrator for this tool.
+  Left-edge trim/extend that preserves the fade-in END (not the length), using a shared Hover library
+  for position & target selection. Implements a no-flicker write order:
+    • compute new fade-in length (keep end),
+    • clear D_FADEINLEN_AUTO,
+    • write take start offset → item start → item length → fade-in length,
+    • then force a redraw.
+
+  Behavior summary:
+    • True Hover (mouse over arrange, not Ruler/TCP):
+        - library decides trim vs extend (boundary-as-gap).
+        - selection-first when Hover is ON (per library).
+    • Non-hover (Ruler/TCP or Hover OFF):
+        - Edit Cursor + selected tracks fallback:
+            inside → trim; else extend nearest item to the right.
+    • Snap only in true hover (per library).
+
+  Fade policy:
+    • Preserve fade-in END. If original fade-in = 0, stays 0.
+    • Clear D_FADEINLEN_AUTO to avoid transient auto-fade visuals.
+    • Fade shape is not modified.
+
+  Library path:
+    REAPER/Scripts/hsuanice Scripts/Library/hsuanice_Hover.lua
+
+  Notes:
+    - Designed to avoid the "flash" you reported: no auto-fade is briefly drawn.
 
 @changelog
-  v0.2.0
-    - Added: TCP area behaves like Ruler — temporarily forces Edit Cursor Mode even if Hover Mode is ON.
-  v0.1.2
-    - Boundary-as-gap policy in Hover mode: when mouse ≈ item edge (± half-pixel), treat UNDER as empty.
-      A now consistently EXTENDS the nearest Next-left-edge to mouse in gaps or on boundaries; no trim at edges.
-    - Pixel hit at an edge is ignored (falls back to gap handling) to avoid accidental trims.
-  v0.1.1
-    - Edge-aware boundary resolution with zoom-adaptive half-pixel epsilon (GetHZoomLevel).
-    - Pixel-accurate hit using GetItemFromPoint; time-based fallback; SWS helpers when available.
-    - Prevents extending the Next item / XFADE when pressing Left repeatedly at a boundary.
-    - Preserves fade-in end; respects Hover/Ruler behavior and snap in true hover.
-    - Comments rewritten in English.
-  v0.1
-    - Beta release
+  v0.3.0
+    - Switched to hsuanice_Hover.lua for position/targets/snap.
+    - Added DEBUG user option.
+    - No-flicker write order with D_FADEINLEN_AUTO cleared; preserves fade-in END.
+    - Added robust Edit-Cursor+Selected-Tracks fallback for non-hover contexts.
 --]]
 
 ----------------------------------------
--- Config
+-- USER OPTIONS
 ----------------------------------------
-local EXT_NS        = "hsuanice_TrimTools"
-local EXT_HOVER_KEY = "HoverMode"
+local DEBUG        = false  -- ← set true to print debug logs to ReaScript console
+local CLEAR_ON_RUN = false  -- ← set true to clear console on each run when DEBUG=true
 
--- epsilon = half a pixel in seconds (zoom-adaptive)
-local function half_pixel_sec()
-  local pps = reaper.GetHZoomLevel() or 100.0 -- pixels per second
-  if pps <= 0 then pps = 100.0 end
-  return 0.5 / pps
+----------------------------------------
+-- Load shared Hover library
+----------------------------------------
+local LIB_PATH = reaper.GetResourcePath().."/Scripts/hsuanice Scripts/Library/hsuanice_Hover.lua"
+local ok, hover = pcall(dofile, LIB_PATH)
+if not ok or type(hover) ~= "table" then
+  reaper.ShowMessageBox("Missing or invalid library:\n"..LIB_PATH..
+    "\n\nPlease install hsuanice_Hover.lua v0.1.0+.", "hsuanice Hover Library", 0)
+  return
 end
 
 ----------------------------------------
--- Small utilities
+-- Debug helpers
 ----------------------------------------
-local function is_hover_enabled()
-  local v = reaper.GetExtState(EXT_NS, EXT_HOVER_KEY)
-  return (v == "true" or v == "1")
-end
-
-local function is_mouse_over_ruler_or_tcp()
-  if not reaper.JS_Window_FromPoint then return false end
-  local x, y = reaper.GetMousePosition()
-  local hwnd = reaper.JS_Window_FromPoint(x, y)
-  if not hwnd then return false end
-  local class = reaper.JS_Window_GetClassName(hwnd)
-  return (class == "REAPERTimeDisplay" or class == "REAPERTCPDisplay")
-end
-
-local function mouse_timeline_pos()
-  if reaper.BR_GetMouseCursorContext_Position then
-    reaper.BR_GetMouseCursorContext() -- refresh SWS mouse context
-    return reaper.BR_GetMouseCursorContext_Position()
-  end
-  if reaper.BR_PositionAtMouseCursor then
-    return reaper.BR_PositionAtMouseCursor(true)
-  end
-  return nil
-end
-
-local function ensure_visible(item)
-  local pos = reaper.GetMediaItemInfo_Value(item, "D_POSITION")
-  local len = reaper.GetMediaItemInfo_Value(item, "D_LENGTH")
-  local right = pos + len
-  local vstart, vend = reaper.GetSet_ArrangeView2(0, false, 0, 0)
-  return (right >= vstart and pos <= vend)
-end
+local function log(s)   if DEBUG then reaper.ShowConsoleMsg(tostring(s).."\n") end end
+local function logf(f, ...) if DEBUG then reaper.ShowConsoleMsg(string.format(f, ...).."\n") end end
+if DEBUG and CLEAR_ON_RUN then reaper.ShowConsoleMsg("") end
+log("[LeftEdge] --- run ---")
 
 ----------------------------------------
--- Fade preserving (keep fade end time)
+-- Helpers
 ----------------------------------------
-local function preserve_fade_in(item, old_start, new_start)
-  local fade_len = reaper.GetMediaItemInfo_Value(item, "D_FADEINLEN")
-  if fade_len <= 0 then
-    reaper.SetMediaItemInfo_Value(item, "D_FADEINLEN", 0)
-    return
-  end
-  local fade_end = old_start + fade_len
-  local new_len = math.max(0, fade_end - new_start)
-  reaper.SetMediaItemInfo_Value(item, "D_FADEINLEN", new_len)
-end
 
-----------------------------------------
--- Find targets (Edit-Cursor mode)
---  • If cursor is inside the item (strictly away from edges): TRIM.
---  • Else: EXTEND the nearest item to the right.
-----------------------------------------
-local function find_items_edit_mode(tracks)
-  local pos = reaper.GetCursorPosition()
-  local eps = half_pixel_sec()
+-- Build picks in Edit-Cursor mode on selected tracks:
+-- per track: if inside → trim; else extend nearest start >= pos
+local function collect_picks_edit_mode(pos)
   local picks = {}
+  local eps = hover.half_pixel_sec()
+
+  -- gather selected tracks
+  local tracks = {}
+  for i = 0, reaper.CountSelectedTracks(0) - 1 do
+    tracks[#tracks+1] = reaper.GetSelectedTrack(0, i)
+  end
 
   for _, tr in ipairs(tracks) do
     local inside, extend_target = nil, nil
@@ -131,7 +88,6 @@ local function find_items_edit_mode(tracks)
       local it = reaper.GetTrackMediaItem(tr, i)
       local st = reaper.GetMediaItemInfo_Value(it, "D_POSITION")
       local en = st + reaper.GetMediaItemInfo_Value(it, "D_LENGTH")
-
       local inside_open = (pos > st + eps and pos < en - eps)
 
       if inside_open then
@@ -148,151 +104,126 @@ local function find_items_edit_mode(tracks)
     end
   end
 
-  return pos, picks
+  logf("[LeftEdge] collect_picks_edit_mode: pos=%.6f, picks=%d", pos, #picks)
+  return picks
 end
 
-----------------------------------------
--- Find targets (Hover mode, mouse-based, SINGLE track)
---  Boundary-as-gap policy:
---   - If mouse is within ±ε of any item edge, treat UNDER as empty (no trim).
---   - A (Left tool) in gap/boundary → EXTEND the nearest Next (start >= mouse).
---   - Only when mouse is strictly inside an item do we TRIM its left edge.
-----------------------------------------
-local function find_items_hover_mode()
-  local x, y = reaper.GetMousePosition()
-  local pos = mouse_timeline_pos()
-  if not pos then return pos, {} end
-
-  local tr = reaper.GetTrackFromPoint(x, y)
-  if not tr then return pos, {} end
-
-  local eps = half_pixel_sec()
-
-  -- 1) Pixel hit — ignore if at boundary (treat as gap)
-  local hit = reaper.GetItemFromPoint(x, y, false)
-  if hit and reaper.GetMediaItem_Track(hit) == tr then
-    local st = reaper.GetMediaItemInfo_Value(hit, "D_POSITION")
-    local en = st + reaper.GetMediaItemInfo_Value(hit, "D_LENGTH")
-    local near_left  = math.abs(pos - st) <= eps
-    local near_right = math.abs(pos - en) <= eps
-    if not (near_left or near_right) then
-      -- strictly inside → trim
-      if pos > st + eps and pos < en - eps then
-        return pos, { { item = hit, mode = "trim" } }
-      end
-    end
-    -- else: boundary → fallthrough to gap handling
-  end
-
-  -- 2) Time-based scan (boundary treated as gap)
-  local inside, extend_target = nil, nil
-  local best_right = math.huge
-
-  local n = reaper.CountTrackMediaItems(tr)
-  for i = 0, n - 1 do
-    local it = reaper.GetTrackMediaItem(tr, i)
-    local st = reaper.GetMediaItemInfo_Value(it, "D_POSITION")
-    local en = st + reaper.GetMediaItemInfo_Value(it, "D_LENGTH")
-
-    local inside_open = (pos > st + eps and pos < en - eps)
-
-    if inside_open then
-      inside = it; break
-    elseif st >= pos and st < best_right then
-      extend_target = it; best_right = st
-    end
-  end
-
-  if inside then
-    return pos, { { item = inside, mode = "trim" } }
-  elseif extend_target then
-    return pos, { { item = extend_target, mode = "extend" } }
-  else
-    return pos, {}
-  end
-end
-
-----------------------------------------
--- Apply: Trim/Extend LEFT edge to target_pos (preserve fade end)
-----------------------------------------
+-- Apply left-edge trim/extend preserving fade-in END, with no flicker.
+-- One-shot write order inside PreventUIRefresh:
+--   1) compute new fade-in length (keep end time)
+--   2) Set D_FADEINLEN_AUTO=0 (avoid transient auto-fade)
+--   3) Set take D_STARTOFFS (audio only) → item D_POSITION → item D_LENGTH → item D_FADEINLEN
 local function apply_left_edge(entry, target_pos)
   local it = entry.item
-  if not ensure_visible(it) then return end
+  if not hover.is_item_visible(it) then
+    log("[LeftEdge] skip: item not visible"); return
+  end
 
   local st = reaper.GetMediaItemInfo_Value(it, "D_POSITION")
   local ln = reaper.GetMediaItemInfo_Value(it, "D_LENGTH")
   local en = st + ln
-  if target_pos >= en - 1e-6 then return end -- ignore degenerate
-
-  local take = reaper.GetActiveTake(it)
-  local is_midi = take and reaper.TakeIsMIDI(take)
-  local is_empty = not take
-
-  -- earliest allowed start (audio limited by source offset)
-  local max_left
-  if (not is_empty) and (not is_midi) then
-    local offs = reaper.GetMediaItemTakeInfo_Value(take, "D_STARTOFFS") or 0
-    max_left = st - offs
-  else
-    max_left = -math.huge
+  if target_pos >= en - 1e-9 then
+    logf("[LeftEdge] skip: target beyond end (pos=%.6f, end=%.6f)", target_pos, en)
+    return
   end
 
-  local new_st = math.min(math.max(target_pos, max_left), en - 1e-6)
-  if math.abs(new_st - st) < 1e-9 then return end -- no-op
+  local take = reaper.GetActiveTake(it)
+  local is_empty = (take == nil)
+  local is_midi  = (take and reaper.TakeIsMIDI(take)) or false
+  local is_audio = (take and (not is_midi)) or false
+
+  -- clamp new start by source offset (no negative start in source)
+  local new_st
+  if entry.mode == "trim" then
+    new_st = math.min(target_pos, en - 1e-9)
+  else -- "extend"
+    new_st = target_pos
+  end
+
+  if is_audio then
+    local offs = reaper.GetMediaItemTakeInfo_Value(take, "D_STARTOFFS") or 0
+    local rate = reaper.GetMediaItemTakeInfo_Value(take, "D_PLAYRATE") or 1.0
+    if rate <= 0 then rate = 1.0 end
+    -- minimal start allowed without making source offset negative:
+    -- new_offs = offs + (new_st - st) * rate >= 0  ⇒  new_st >= st - offs / rate
+    local min_st = st - (offs / rate)
+    if new_st < min_st then new_st = min_st end
+  end
+
+  -- no-op?
+  if math.abs(new_st - st) < 1e-12 then
+    log("[LeftEdge] no-op: start unchanged"); return
+  end
 
   local new_ln = en - new_st
 
-  -- adjust source start offset for audio
-  if (not is_empty) and (not is_midi) then
-    local offs  = reaper.GetMediaItemTakeInfo_Value(take, "D_STARTOFFS") or 0
-    local rate  = reaper.GetMediaItemTakeInfo_Value(take, "D_PLAYRATE") or 1.0
-    local d_src = (new_st - st) * (rate > 0 and rate or 1.0)
-    local new_offs = math.max(0, offs + d_src)
+  -- Compute fade-in END preservation
+  local old_fi = reaper.GetMediaItemInfo_Value(it, "D_FADEINLEN") or 0
+  local fade_end = st + math.max(0, old_fi)  -- absolute time of fade-in end
+  local new_fi = 0
+  if old_fi > 0 then
+    new_fi = math.max(0, fade_end - new_st)
+  else
+    new_fi = 0
+  end
+
+  -- Write (no flicker): clear auto first, then offsets → pos → len → fade
+  -- All inside an ongoing PreventUIRefresh in main()
+  reaper.SetMediaItemInfo_Value(it, "D_FADEINLEN_AUTO", 0) -- avoid transient auto-fade drawing
+
+  if is_audio then
+    local offs = reaper.GetMediaItemTakeInfo_Value(take, "D_STARTOFFS") or 0
+    local rate = reaper.GetMediaItemTakeInfo_Value(take, "D_PLAYRATE") or 1.0
+    if rate <= 0 then rate = 1.0 end
+    local new_offs = offs + (new_st - st) * rate
+    if new_offs < 0 then new_offs = 0 end  -- clamp
     reaper.SetMediaItemTakeInfo_Value(take, "D_STARTOFFS", new_offs)
   end
 
   reaper.SetMediaItemInfo_Value(it, "D_POSITION", new_st)
   reaper.SetMediaItemInfo_Value(it, "D_LENGTH",  new_ln)
-  preserve_fade_in(it, st, new_st)
+  reaper.SetMediaItemInfo_Value(it, "D_FADEINLEN", new_fi)
+
+  logf("[LeftEdge] %s  st:%.6f→%.6f  len:%.6f→%.6f  fi:%.6f→%.6f",
+       entry.mode, st, new_st, ln, new_ln, old_fi, new_fi)
 end
 
 ----------------------------------------
 -- Main
 ----------------------------------------
-local function get_selected_tracks()
-  local t = {}
-  for i = 0, reaper.CountSelectedTracks(0) - 1 do
-    t[#t+1] = reaper.GetSelectedTrack(0, i)
-  end
-  return t
-end
-
-local hover_on = is_hover_enabled()
-local target_pos, picks
-local from_ruler = false
-
-if hover_on then
-  if is_mouse_over_ruler_or_tcp() then
-    target_pos, picks = find_items_edit_mode(get_selected_tracks())
-    from_ruler = true
+local function main()
+  -- 1) resolve pos + snap (snap only in true hover)
+  local pos, is_true_hover = hover.resolve_target_pos()
+  if not pos then log("[LeftEdge] abort: pos=nil"); return end
+  local raw_pos = pos
+  pos = hover.snap_in_true_hover(pos, is_true_hover)
+  if is_true_hover then
+    logf("[LeftEdge] TrueHover: raw=%.6f snapped=%s%.6f", raw_pos, (pos~=raw_pos and "*" or ""), pos)
   else
-    target_pos, picks = find_items_hover_mode()
+    logf("[LeftEdge] EditCursor: %.6f", pos)
   end
-else
-  target_pos, picks = find_items_edit_mode(get_selected_tracks())
+
+  -- 2) build picks via library; fallback for non-hover if empty
+  local picks = hover.build_targets_for_trim_extend("left", pos, { prefer_selection_when_hover = true })
+  logf("[LeftEdge] library picks: %d", #picks)
+
+  if (not is_true_hover) and (#picks == 0) then
+    picks = collect_picks_edit_mode(pos)
+  end
+  if #picks == 0 then log("[LeftEdge] no picks; exit"); return end
+
+  -- 3) apply in one UI freeze to avoid flicker
+  reaper.Undo_BeginBlock()
+  reaper.PreventUIRefresh(1)
+
+  for _, entry in ipairs(picks) do
+    apply_left_edge(entry, pos)
+  end
+
+  reaper.PreventUIRefresh(-1)
+  reaper.UpdateArrange()
+  reaper.Undo_EndBlock("Trim/Extend Left Edge (hover/edit aware, preserve fade end)", -1)
+  log("[LeftEdge] done")
 end
 
--- Snap only in true hover-with-mouse (not when using the Ruler/EditCursor)
-if hover_on and not from_ruler and reaper.GetToggleCommandState(1157) == 1 then
-  target_pos = reaper.SnapToGrid(0, target_pos)
-end
-
-if not target_pos or #picks == 0 then return end
-
-reaper.Undo_BeginBlock()
-reaper.PreventUIRefresh(1)
-for _, entry in ipairs(picks) do
-  apply_left_edge(entry, target_pos)
-end
-reaper.PreventUIRefresh(-1)
-reaper.Undo_EndBlock("Trim or extend item left edge (hover/edit mode)", -1)
+main()
