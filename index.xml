@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<index version="1" name="hsuanice Scripts" commit="2112c1bb3e0a4fa614943ec602a49691b2aba14a">
+<index version="1" name="hsuanice Scripts" commit="d41f6f0b0a750a5fb346896aa2d63814138b0f95">
   <category name="Beta Testing">
     <reapack name="hsuanice_BWF TimeReference Embed Tool.lua" type="script" desc="Embed BWF TimeReference to Active take from Take 1 or Current Position TC">
       <version name="0.7.1" author="hsuanice" time="2025-08-14T17:52:57Z">
@@ -1198,7 +1198,8 @@ v0.9.0 - Added Shared Link State section from Project ExtState "hsuanice_Link".]
 {\colortbl;\red255\green0\blue0;\red0\green0\blue255;}
 \widowctrl\hyphauto
 
-{\pard \ql \f0 \sa180 \li0 \fi0 Common utilities for Hover Mode scripts (Split / Trim / Extend). Centralizes hover/edit cursor decision, snap behavior, pixel epsilon, and target item selection (hover, edit, or selection priority).\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 Common utilities for Hover Mode scripts (Split / Trim / Extend). Centralizes hover/edit cursor decision, snap behavior, pixel epsilon, target selection (hover, edit, or selection priority), and write helpers.\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 This version keeps full backward compatibility with v0.1.0: \u8226 ? resolve_target_pos / snap_in_true_hover \u8226 ? half_pixel_sec / is_item_visible \u8226 ? build_targets_for_split / build_targets_for_trim_extend \u8230 ?and adds a comprehensive set of high/mid/low ROI helpers (see changelog).\par}
 {\pard \ql \f0 \sa180 \li0 \fi0 Path: REAPER/Scripts/hsuanice Scripts/Library/hsuanice_Hover.lua\par}
 }
 ]]></description>
@@ -1210,6 +1211,31 @@ v0.9.0 - Added Shared Link State section from Project ExtState "hsuanice_Link".]
     snap-in-hover, half-pixel epsilon, item visibility.
   • Target builders for Split and Trim/Extend.]]></changelog>
         <source main="main">https://github.com/hsuanice/ReaScripts/raw/16f164d0efa16edbb8e8fb3288d6dfe180903844/Library/hsuanice_Hover.lua</source>
+      </version>
+      <version name="0.2.0" author="hsuanice" time="2025-09-11T16:07:19Z">
+        <changelog><![CDATA[v0.2.0
+  HIGH ROI
+    • selection_sync_enabled(is_true_hover, min)  → bool, sel_count
+    • filter_leftmost_selected_per_track(picks)   → picks (left only)
+    • filter_rightmost_selected_per_track(picks)  → picks (right only)
+    • pick_on_gap(side, pos)                      → { {item=…, mode="extend"} } from mouse track
+    • clamp_left_extend_no_overlap(item, new_st, eps)  → clamped start
+    • clamp_right_extend_no_overlap(item, new_en, eps) → clamped end
+    • apply_left_edge_no_flicker(item, target_pos)     (preserve fade-in END, audio offset, no flicker)
+    • apply_right_edge_no_flicker(item, target_pos)    (preserve fade-out START, no flicker)
+    • collect_edit_mode_picks(side, pos)          → picks for non-hover (Edit Cursor + selected tracks)
+
+  MID ROI
+    • ts_overlap_stats(ts_start, ts_end, items_opt) → {overlaps, boundary_hits, edges_only, list}
+    • run_split_by_time_selection(overlapped_items) → do 40061 + reselect overlapped
+    • log / logf with library-level toggle: set_debug(true/false)
+    • eps() alias to half_pixel_sec()
+
+  LOW ROI
+    • save_item_selection() / restore_item_selection(list)
+    • build_selected_items_split_info(pos, eps) & select_right_halves_after_split(split_info, pos, eps)
+    • add_hover_item_outside_selection_crossing(targets, pos, eps)  (for split “hover also”)]]></changelog>
+        <source main="main">https://github.com/hsuanice/ReaScripts/raw/d41f6f0b0a750a5fb346896aa2d63814138b0f95/Library/hsuanice_Hover.lua</source>
       </version>
     </reapack>
     <reapack name="hsuanice_List Table.lua" type="script">
