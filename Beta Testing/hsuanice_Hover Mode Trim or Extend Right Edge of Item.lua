@@ -1,18 +1,18 @@
 --[[
 @description Hover_Mode_-_Trim_or_Extend_Right_Edge_of_Item (Preserve Fade Start, No Flicker)
-@version 0.3.0
+@version 0.3.2
 @author hsuanice
 @about
   Right-edge trim/extend that preserves the FADE-OUT START time (not the length), using the shared
-  Hover library for position & target selection. Implements a no-flicker write order and no-overlap
-  extend behavior.
+  Hover library for position & target selection. No-flicker write order and no-overlap extends.
 
   Behavior summary:
     • True Hover (mouse over arrange, not Ruler/TCP):
-        - selection-first via library.
-        - When there IS selection: only process the RIGHTMOST selected item per track (skip others).
-        - When there is NO selection and mouse is on a GAP: extend the previous item on the mouse track
-          (nearest item whose END ≤ mouse time).
+        - Selection-sync only when selected item count ≥ SYNC_SELECTION_MIN (default: 2).
+          If only ONE item is selected, treat as no-selection (individual editing feel).
+        - When selection-sync is ON: only process the RIGHTMOST selected item per track (skip others).
+        - When selection-sync is OFF (no/one selection) and mouse is on a GAP:
+          extend the previous item on the mouse track (nearest item whose END ≤ mouse time).
         - Only strictly-inside hits TRIM; edge-as-gap avoids accidental trims on boundaries.
     • Non-hover (Ruler/TCP or Hover OFF):
         - Edit Cursor + selected tracks fallback:
@@ -28,19 +28,20 @@
     REAPER/Scripts/hsuanice Scripts/Library/hsuanice_Hover.lua
 
 @changelog
-  v0.3.0
-    - Library integration; DEBUG option.
-    - True Hover: selection-first; with selection only the RIGHTMOST selected item per track is processed.
-    - No-selection + gap on mouse track → extend the previous (left) item on that track.
-    - Extend clamps to next item start - epsilon on the same track and to audio source tail (when non-loop).
-    - No-flicker write order; preserve fade-OUT START.
+  v0.3.2
+    - Selection-sync in True Hover now requires ≥2 selected items. With a single selected item, behave like no-selection.
+    - Passed `prefer_selection` into the library, gated the rightmost-per-track filter with this flag,
+      and enabled the gap→extend fallback only when selection-sync is OFF (no/one selection).
+  v0.3.1
+    - Initial Right-edge port with no-flicker writes and no-overlap extends; library integration.
 --]]
 
 ----------------------------------------
 -- USER OPTIONS
 ----------------------------------------
-local DEBUG        = false  -- set true to print debug logs
-local CLEAR_ON_RUN = false  -- set true to clear console on each run when DEBUG=true
+local DEBUG              = false  -- set true to print debug logs
+local CLEAR_ON_RUN       = false  -- set true to clear console on each run when DEBUG=true
+local SYNC_SELECTION_MIN = 2      -- selection-sync threshold in True Hover (default: 2)
 
 ----------------------------------------
 -- Load shared Hover library
@@ -56,8 +57,8 @@ end
 ----------------------------------------
 -- Debug helpers
 ----------------------------------------
-local function log(s)              if DEBUG then reaper.ShowConsoleMsg(tostring(s).."\n") end end
-local function logf(f, ...)        if DEBUG then reaper.ShowConsoleMsg(string.format(f, ...).."\n") end end
+local function log(s)       if DEBUG then reaper.ShowConsoleMsg(tostring(s).."\n") end end
+local function logf(f, ...) if DEBUG then reaper.ShowConsoleMsg(string.format(f, ...).."\n") end end
 if DEBUG and CLEAR_ON_RUN then reaper.ShowConsoleMsg("") end
 log("[RightEdge] --- run ---")
 
@@ -97,7 +98,7 @@ local function collect_picks_edit_mode_right(pos)
   return picks
 end
 
--- True hover, NO selection, and library returned nothing (likely on GAP) → extend PREV on mouse track
+-- True hover, selection-sync OFF (no/one selection), and library returned nothing (likely on GAP) → extend PREV on mouse track
 local function picks_extend_from_gap_on_mouse_track_right(pos)
   local picks = {}
   if not reaper.BR_GetMouseCursorContext then return picks end
@@ -142,7 +143,7 @@ local function map_rightmost_selected_end_by_track()
   return m
 end
 
--- Filter: when selection present → keep ONLY rightmost selected per track
+-- Filter: when selection-sync is ON → keep ONLY rightmost selected per track
 local function filter_picks_rightmost_selected_per_track(picks)
   if reaper.CountSelectedMediaItems(0) == 0 then return picks end
   local eps = hover.half_pixel_sec()
@@ -230,9 +231,6 @@ local function apply_right_edge(entry, target_pos)
       -- never reduce length when extending
       if desired_en > max_no_overlap then desired_en = max_no_overlap end
       if desired_en < en0 then desired_en = en0 end
-    else
-      -- trim 不需要特別考慮下一顆
-      -- 但仍確保最小長度
     end
   end
 
@@ -253,12 +251,7 @@ local function apply_right_edge(entry, target_pos)
   -- Preserve FADE-OUT START
   local old_fo = reaper.GetMediaItemInfo_Value(it, "D_FADEOUTLEN") or 0
   local fade_start = en0 - math.max(0, old_fo)   -- absolute time
-  local new_fo = 0
-  if old_fo > 0 then
-    new_fo = math.max(0, desired_en - fade_start)
-  else
-    new_fo = 0
-  end
+  local new_fo = (old_fo > 0) and math.max(0, desired_en - fade_start) or 0
 
   -- No-flicker write order
   reaper.SetMediaItemInfo_Value(it, "D_FADEOUTLEN_AUTO", 0) -- avoid transient auto-fade drawing
@@ -284,30 +277,39 @@ local function main()
     logf("[RightEdge] EditCursor: %.6f", pos)
   end
 
-  -- 2) build picks via library (right edge)
-  local picks = hover.build_targets_for_trim_extend("right", pos, { prefer_selection_when_hover = true })
-  logf("[RightEdge] library picks: %d", #picks)
+  -- 2) decide selection-sync (≥ SYNC_SELECTION_MIN)
+  local sel_count = reaper.CountSelectedMediaItems(0)
+  local prefer_selection = is_true_hover and (sel_count >= (SYNC_SELECTION_MIN or 2))
+  logf("[RightEdge] sel_count=%d, prefer_selection=%s", sel_count, tostring(prefer_selection))
 
-  -- 2.1) True Hover + selection present → keep ONLY rightmost selected item per track
-  if is_true_hover and reaper.CountSelectedMediaItems(0) > 0 then
-    picks = filter_picks_rightmost_selected_per_track(picks)
-  end
+  -- 3) build picks
+  local picks
+  if is_true_hover then
+    -- pass prefer_selection into library
+    picks = hover.build_targets_for_trim_extend("right", pos, {
+      prefer_selection_when_hover = prefer_selection
+    })
+    logf("[RightEdge] library picks: %d", #picks)
 
-  -- 2.2) True Hover + NO selection + nothing from library → extend prev on mouse track
-  if is_true_hover and (#picks == 0) and (reaper.CountSelectedMediaItems(0) == 0) then
-    local extra = picks_extend_from_gap_on_mouse_track_right(pos)
-    for i = 1, #extra do picks[#picks+1] = extra[i] end
-    logf("[RightEdge] added gap-extend prev pick(s): %d", #extra)
-  end
+    -- selection-sync ON → keep ONLY rightmost selected per track
+    if prefer_selection and (#picks > 0) then
+      picks = filter_picks_rightmost_selected_per_track(picks)
+    end
 
-  -- 2.3) Non-hover fallback: Edit Cursor + Selected Tracks
-  if (not is_true_hover) and (#picks == 0) then
+    -- selection-sync OFF（no/one selection）+ nothing from library → gap extend on mouse track
+    if (not prefer_selection) and (#picks == 0) then
+      local extra = picks_extend_from_gap_on_mouse_track_right(pos)
+      for i = 1, #extra do picks[#picks+1] = extra[i] end
+      logf("[RightEdge] added gap-extend prev pick(s): %d", #extra)
+    end
+  else
+    -- Non-hover fallback
     picks = collect_picks_edit_mode_right(pos)
   end
 
-  if #picks == 0 then log("[RightEdge] no picks; exit"); return end
+  if (not picks) or (#picks == 0) then log("[RightEdge] no picks; exit"); return end
 
-  -- 3) apply in one UI freeze to avoid flicker
+  -- 4) apply in one UI freeze to avoid flicker
   reaper.Undo_BeginBlock()
   reaper.PreventUIRefresh(1)
 
