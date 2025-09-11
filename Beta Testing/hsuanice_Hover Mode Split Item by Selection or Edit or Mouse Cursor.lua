@@ -1,6 +1,6 @@
 --[[
 @description Hover Mode - Split Items (Selection-first in Hover, Mouse/Edit aware) + Simple Debug Switch
-@version 0.2.2
+@version 0.2.3
 @author hsuanice
 @about
   Context-aware item splitting with unified hover/edit logic via library, but performs the split
@@ -27,6 +27,7 @@
     • Output → ReaScript console (View → Show console output).
 
 @changelog
+  v0.2.3 - Hover selection-sync requires >=2 selected items; single selection behaves like no-selection.
   v0.2.2
     - True Hover: When selection exists, also split the item under mouse if it's outside selection but crosses the time.
   v0.2.1.1
@@ -43,6 +44,7 @@
 local DEBUG                 = false  -- ← 設 true 開啟除錯輸出
 local CLEAR_ON_RUN          = false  -- ← 設 true 在每次執行且 DEBUG=ON 時先清空 console
 local IGNORE_TIME_SELECTION = false  -- ← 設 true 直接忽略 Time Selection 優先權（走下一層流程）
+local SYNC_SELECTION_MIN = 2  -- Hover 下啟用「選取同步」的最小選取數
 
 ----------------------------------------
 -- Load shared Hover library
@@ -284,6 +286,12 @@ end
 ----------------------------------------
 local function main_hover_or_edit()
   local pos, is_true_hover = hover.resolve_target_pos()
+  local sel_count = reaper.CountSelectedMediaItems(0)
+  local prefer_selection = is_true_hover and (sel_count >= (SYNC_SELECTION_MIN or 2))
+  if DEBUG then
+    logf("[HoverSplit] selection count=%d; prefer_selection=%s",
+        sel_count, tostring(prefer_selection))
+  end  
   if not pos then
     log("[HoverSplit] resolve_target_pos: nil (abort)")
     return
@@ -301,11 +309,15 @@ local function main_hover_or_edit()
   local eps = hover.half_pixel_sec()
 
   if is_true_hover then
-    -- 先取「覆蓋滑鼠時間點的已選 items」
-    targets = hover.build_targets_for_split(pos, { prefer_selection_when_hover = true })
-    logf("[HoverSplit] targets via library (true hover, sel-first): %d", #targets)
-    -- 額外：若滑鼠下那顆不在 selection 且覆蓋時間點，把它也加進來
-    maybe_add_hover_item_outside_selection(targets, pos, eps)
+    targets = hover.build_targets_for_split(pos, { prefer_selection_when_hover = prefer_selection })
+    logf("[HoverSplit] targets via library (true hover, prefer_selection=%s): %d",
+        tostring(prefer_selection), #targets)
+
+    -- 只有在啟用「選取同步」（≥2）時，才同時把 selection 以外、滑鼠下那顆也納入
+    if prefer_selection then
+      local eps = hover.half_pixel_sec()
+      maybe_add_hover_item_outside_selection(targets, pos, eps)
+    end
   else
     -- 非 hover 路徑：以 Edit Cursor 在已選軌上收集目標
     targets = collect_items_on_selected_tracks_at(pos)
