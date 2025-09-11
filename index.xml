@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<index version="1" name="hsuanice Scripts" commit="cb42360dcf065ef35aeb44398e4ec7166f818467">
+<index version="1" name="hsuanice Scripts" commit="8e76115d82aa9ac06453831935a861559fef2ce2">
   <category name="Beta Testing">
     <reapack name="hsuanice_BWF TimeReference Embed Tool.lua" type="script" desc="Embed BWF TimeReference to Active take from Take 1 or Current Position TC">
       <version name="0.7.1" author="hsuanice" time="2025-08-14T17:52:57Z">
@@ -174,6 +174,9 @@
       </version>
       <version name="0.2.3" author="hsuanice" time="2025-09-11T09:01:48Z">
         <source main="main">https://github.com/hsuanice/ReaScripts/raw/cb42360dcf065ef35aeb44398e4ec7166f818467/Beta%20Testing/hsuanice_Hover%20Mode%20Split%20Item%20by%20Selection%20or%20Edit%20or%20Mouse%20Cursor.lua</source>
+      </version>
+      <version name="0.2.4" author="hsuanice" time="2025-09-11T10:59:02Z">
+        <source main="main">https://github.com/hsuanice/ReaScripts/raw/8e76115d82aa9ac06453831935a861559fef2ce2/Beta%20Testing/hsuanice_Hover%20Mode%20Split%20Item%20by%20Selection%20or%20Edit%20or%20Mouse%20Cursor.lua</source>
       </version>
     </reapack>
     <reapack name="hsuanice_Hover Mode Toggle.lua" type="script" desc="Hover Mode - Toggle Hover Mode (Syncable)">
