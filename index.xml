@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<index version="1" name="hsuanice Scripts" commit="1f7afb84517acb37fe6699917bb32a66fa403972">
+<index version="1" name="hsuanice Scripts" commit="4564cef34da8a960bfd48c0fc3dbfc66ad2dbd1e">
   <category name="Beta Testing">
     <reapack name="hsuanice_BWF TimeReference Embed Tool.lua" type="script" desc="Embed BWF TimeReference to Active take from Take 1 or Current Position TC">
       <version name="0.7.1" author="hsuanice" time="2025-08-14T17:52:57Z">
@@ -993,13 +993,13 @@
         <source main="main">https://github.com/hsuanice/ReaScripts/raw/2247051f789764d9ac7bf77fd4fec102129986f9/Beta%20Testing/hsuanice_Reorder%20or%20sort%20selected%20items%20vertically.lua</source>
       </version>
     </reapack>
-    <reapack name="hsuanice_Set Time to Item Selection Mouse Right-Drag Release.lua" type="script" desc="Set Time to Item on Right-Drag Release (Toggle, Fast)">
+    <reapack name="hsuanice_Set Time to Item Selection Mouse Right-Drag Release.lua" type="script" desc="Set Time to Item on Right-Drag Release (Toggle, One-Pass Perf)">
       <metadata>
         <description><![CDATA[{\rtf1\ansi\deff0{\fonttbl{\f0 \fswiss Helvetica;}{\f1 \fmodern Courier;}}
 {\colortbl;\red255\green0\blue0;\red0\green0\blue255;}
 \widowctrl\hyphauto
 
-{\pard \ql \f0 \sa180 \li0 \fi0 \u20597 ?\u28204 ?\u12300 ?\u21491 ?\u37749 ?\u25302 ?\u26355 ? \u8594 ? \u25918 ?\u38283 ?\u12301 ?\u24460 ?\u65292 ?\u31435 ?\u21363 ?\u25226 ?\u30446 ?\u21069 ?\u36984 ?\u21462 ?\u30340 ? items \u31684 ?\u22285 ?\u35373 ?\u28858 ? time selection\u12290 ? \u31227 ?\u38500 ?\u21491 ?\u37749 ?\u20919 ?\u21371 ?\u33287 ?\u36984 ?\u21934 ?/\u28966 ?\u40670 ?\u32233 ?\u34909 ?\u65292 ?\u20570 ?\u21040 ?\u24190 ?\u20046 ?\u12300 ?\u21363 ?\u25918 ?\u21363 ?\u35373 ?\u12301 ?\u12290 ? \u38656 ?\u35201 ? hsuanice_Mouse.lua\u65288 ?\u33258 ?\u21205 ?\u23563 ?\u25214 ?\u21547 ? {\f1 /Scripts/hsuanice Scripts/Library/}\u65289 ?\u12290 ?\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 \u21491 ?\u37749 ?\u12300 ?\u26377 ?\u25302 ?\u26355 ?\u12301 ?\u8594 ? \u22312 ?\u12300 ?\u25918 ?\u38283 ?\u12301 ?\u30070 ?\u24128 ?\u65288 ?\u21487 ?\u36984 ?\u24310 ?\u19968 ?\u24128 ?\u65289 ?\u25226 ?\u30446 ?\u21069 ?\u36984 ?\u21462 ? items \u30340 ?\u26368 ?\u23567 ?\u38283 ?\u22987 ?/\u26368 ?\u22823 ?\u32080 ?\u26463 ?\u35373 ?\u28858 ? time selection\u12290 ? \u23560 ?\u28858 ?\u22823 ?\u23560 ?\u26696 ?\u20778 ?\u21270 ?\u65306 ?\u25918 ?\u38283 ?\u26178 ?\u20677 ?\u12300 ?\u21934 ?\u36255 ?\u25475 ?\u25551 ?\u12301 ?\u36984 ?\u21462 ? items\u65288 ?\u19981 ?\u24314 ?\u31435 ? GUID \u34920 ?\u12289 ?\u19981 ?\u20570 ?\u21069 ?\u24460 ?\u27604 ?\u23565 ?\u65289 ?\u65292 ?\u21487 ?\u36984 ?\u25799 ?\u36991 ?\u20813 ?\u37325 ?\u35079 ?\u35373 ?\u20540 ?\u12290 ? \u33258 ?\u21205 ?\u23563 ?\u25214 ? hsuanice_Mouse.lua\u65288 ?\u21547 ? {\f1 /Scripts/hsuanice Scripts/Library/} \u36335 ?\u24465 ?\u65289 ?\u12290 ?\par}
 }
 ]]></description>
       </metadata>
@@ -1021,6 +1021,10 @@ v0.1.0  初版]]></changelog>
       <version name="0.4.4" author="hsuanice" time="2025-09-11T03:23:53Z">
         <changelog><![CDATA[v0.4.4  改為直接偵測當幀右鍵釋放；Mouse lib 用零冷卻（menu_grace/rmb_cooldown/focus_grace=0）]]></changelog>
         <source main="main">https://github.com/hsuanice/ReaScripts/raw/1f7afb84517acb37fe6699917bb32a66fa403972/Beta%20Testing/hsuanice_Set%20Time%20to%20Item%20Selection%20Mouse%20Right-Drag%20Release.lua</source>
+      </version>
+      <version name="0.4.5" author="hsuanice" time="2025-09-11T03:28:32Z">
+        <changelog><![CDATA[v0.4.5  大專案優化：放開時單趟掃描、可啟用 RMB 真拖曳偵測、加入 time 快取避免重複設值；維持真兩段 toggle]]></changelog>
+        <source main="main">https://github.com/hsuanice/ReaScripts/raw/4564cef34da8a960bfd48c0fc3dbfc66ad2dbd1e/Beta%20Testing/hsuanice_Set%20Time%20to%20Item%20Selection%20Mouse%20Right-Drag%20Release.lua</source>
       </version>
     </reapack>
     <reapack name="hsuanice_Show Frame Rate.lua" type="script" desc="ReaImGui - Show Project Frame Rate">
