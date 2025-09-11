@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<index version="1" name="hsuanice Scripts" commit="8e76115d82aa9ac06453831935a861559fef2ce2">
+<index version="1" name="hsuanice Scripts" commit="3a399bdf53a5c2d2c8983f100348b28986751f55">
   <category name="Beta Testing">
     <reapack name="hsuanice_BWF TimeReference Embed Tool.lua" type="script" desc="Embed BWF TimeReference to Active take from Take 1 or Current Position TC">
       <version name="0.7.1" author="hsuanice" time="2025-08-14T17:52:57Z">
@@ -241,6 +241,9 @@
       </version>
       <version name="0.3.2 overlap fixed" author="hsuanice" time="2025-09-10T16:12:53Z">
         <source main="main">https://github.com/hsuanice/ReaScripts/raw/feb15d82b34bac7593becfd9ce30ee66b67d299b/Beta%20Testing/hsuanice_Hover%20Mode%20Trim%20or%20Extend%20Left%20Edge%20of%20Item.lua</source>
+      </version>
+      <version name="0.3.4" time="2025-09-11T11:37:45Z">
+        <source main="main">https://github.com/hsuanice/ReaScripts/raw/3a399bdf53a5c2d2c8983f100348b28986751f55/Beta%20Testing/hsuanice_Hover%20Mode%20Trim%20or%20Extend%20Left%20Edge%20of%20Item.lua</source>
       </version>
     </reapack>
     <reapack name="hsuanice_Hover Mode Trim or Extend Right Edge of Item.lua" type="script" desc="Hover_Mode_-_Trim_or_Extend_Right_Edge_of_Item (Preserve Fade Start, No Flicker)">
