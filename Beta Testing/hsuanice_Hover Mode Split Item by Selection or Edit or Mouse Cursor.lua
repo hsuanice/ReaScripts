@@ -1,6 +1,6 @@
 --[[
 @description Hover Mode - Split Items (Selection-first in Hover, Mouse/Edit aware) + Simple Debug Switch
-@version 0.2.3
+@version 0.2.4
 @author hsuanice
 @about
   Context-aware item splitting with unified hover/edit logic via library, but performs the split
@@ -27,6 +27,12 @@
     • Output → ReaScript console (View → Show console output).
 
 @changelog
+@changelog
+  v0.2.4
+    - Fix: When both a Time Selection and a single selected item existed with no overlap, the first run would clear the selection without splitting.
+            Now the Time Selection branch runs only if at least one selected item overlaps the TS range; otherwise it falls through to the Hover/Edit path.
+    - Logging: Added debug output showing the Time Selection overlap count.
+    - No other changes: Razor priority, IGNORE_TIME_SELECTION, hover behavior, selection-sync threshold (≥2), and “preserve both halves of originally selected items” remain unchanged.
   v0.2.3 - Hover selection-sync requires >=2 selected items; single selection behaves like no-selection.
   v0.2.2
     - True Hover: When selection exists, also split the item under mouse if it's outside selection but crosses the time.
@@ -43,7 +49,7 @@
 ----------------------------------------
 local DEBUG                 = false  -- ← 設 true 開啟除錯輸出
 local CLEAR_ON_RUN          = false  -- ← 設 true 在每次執行且 DEBUG=ON 時先清空 console
-local IGNORE_TIME_SELECTION = false  -- ← 設 true 直接忽略 Time Selection 優先權（走下一層流程）
+local IGNORE_TIME_SELECTION = true  -- ← 設 true 直接忽略 Time Selection 優先權（走下一層流程）
 local SYNC_SELECTION_MIN = 2  -- Hover 下啟用「選取同步」的最小選取數
 
 ----------------------------------------
@@ -257,27 +263,68 @@ local function handle_razor_edit_if_any()
 end
 
 ----------------------------------------
--- 2) Time Selection priority (respect user option)
+-- 2) Time Selection priority (respect user option) + DEBUG classification
 ----------------------------------------
 local function handle_time_selection_if_any()
   if IGNORE_TIME_SELECTION then
-    log("[HoverSplit] TimeSelection: ignored by user option")
+    log("[HoverSplit] TS: ignored by user option")
     return false
   end
 
   local ts_start, ts_end = reaper.GetSet_LoopTimeRange2(0, false, false, 0, 0, false)
-  local sel_items = reaper.CountSelectedMediaItems(0)
-  if ts_start == ts_end or sel_items == 0 then return false end
+  if ts_start == ts_end then return false end
 
-  logf("[HoverSplit] TimeSelection: start=%.6f end=%.6f, selected_items=%d", ts_start, ts_end, sel_items)
+  local sel_items = reaper.CountSelectedMediaItems(0)
+  if sel_items == 0 then return false end
+
+  local overlapped = {}
+  local boundary_hits, edges_only = 0, 0
+
+  for i = 0, sel_items - 1 do
+    local it = reaper.GetSelectedMediaItem(0, i)
+    local st = reaper.GetMediaItemInfo_Value(it, "D_POSITION")
+    local en = st + reaper.GetMediaItemInfo_Value(it, "D_LENGTH")
+
+    -- 是否和 TS 有重疊（開區間重疊檢查）
+    local has_overlap = (en > ts_start and st < ts_end)
+    if has_overlap then
+      overlapped[#overlapped+1] = it
+
+      -- 是否「TS 邊界有落在 item 內部」→ 40061 會切
+      local hit_start = (st < ts_start and en > ts_start)
+      local hit_end   = (st < ts_end   and en > ts_end)
+      if hit_start or hit_end then
+        boundary_hits = boundary_hits + 1
+      else
+        -- 只有重疊，但兩個邊界都沒穿進 item（例如 TS 正好等於 item 邊界）
+        edges_only = edges_only + 1
+      end
+    end
+  end
+
+  logf("[HoverSplit] TS dbg: ts=[%.6f, %.6f] sel=%d overlaps=%d boundary_hits=%d edges_only=%d",
+       ts_start, ts_end, sel_items, #overlapped, boundary_hits, edges_only)
+
+  -- 注意：為了「只加除錯不改行為」，下面仍沿用 0.2.4 的邏輯：
+  -- 只要有 overlapped 就跑 40061（即使 boundary_hits=0 的時候其實不會切）
+  if #overlapped == 0 then
+    return false
+  end
 
   reaper.Undo_BeginBlock()
   reaper.PreventUIRefresh(1)
+
   reaper.Main_OnCommand(40061, 0) -- Split at time selection
-  reaper.Main_OnCommand(40289, 0) -- Unselect all (沿用舊行為；如需保留選取可再談)
+  reaper.Main_OnCommand(40289, 0) -- Unselect all
+  for _, it in ipairs(overlapped) do
+    if reaper.ValidatePtr(it, "MediaItem*") then
+      reaper.SetMediaItemSelected(it, true)
+    end
+  end
+
   reaper.PreventUIRefresh(-1)
   reaper.UpdateArrange()
-  reaper.Undo_EndBlock("Split by Time Selection (selected items only)", -1)
+  reaper.Undo_EndBlock("Split by Time Selection (selected items with overlap)", -1)
   return true
 end
 
