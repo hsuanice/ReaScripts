@@ -1,7 +1,6 @@
 --[[
 @description Hover_Mode_-_Trim_or_Extend_Left_Edge_of_Item (Preserve Fade End, No Flicker)
-@version 0.3.2 overlap fixed
-@author hsuanice
+@version 0.3.4
 @about
   Left-edge trim/extend that preserves the fade-in END (not the length), using a shared Hover library
   for position & target selection. No-flicker write order and no-overlap extends.
@@ -25,6 +24,14 @@
     REAPER/Scripts/hsuanice Scripts/Library/hsuanice_Hover.lua
 
 @changelog
+  v0.3.4
+    - Fix: Single selected item in True Hover no longer forces selection-sync.
+           We now pass `prefer_selection` to the library, gate the leftmost-per-track filter by this flag,
+           and enable the gap→extend fallback only when selection-sync is OFF (no selection or single selection).
+    - Behavior: With ≥2 selected items, selection-sync remains unchanged.
+  v0.3.3
+    - Selection-sync in True Hover now requires ≥2 selected items. With a single selected item, behave like no-selection (individual editing).
+    - Added debug logs for selection count and prefer_selection flag.
   v0.3.2
     - True Hover + selection: only process the LEFTMOST selected item on each track (skip others).
     - Extend now clamps to previous item end + epsilon on the same track (no overlap).
@@ -39,6 +46,7 @@
 ----------------------------------------
 local DEBUG        = false  -- ← set true to print debug logs to ReaScript console
 local CLEAR_ON_RUN = false  -- ← set true to clear console on each run when DEBUG=true
+local SYNC_SELECTION_MIN = 2  -- selection-sync threshold in True Hover (default: 2)
 
 ----------------------------------------
 -- Load shared Hover library
@@ -274,17 +282,25 @@ local function main()
     logf("[LeftEdge] EditCursor: %.6f", pos)
   end
 
+  -- decide selection-sync (≥ SYNC_SELECTION_MIN)
+  local sel_count = reaper.CountSelectedMediaItems(0)
+  local prefer_selection = is_true_hover and (sel_count >= (SYNC_SELECTION_MIN or 2))
+  logf("[LeftEdge] sel_count=%d, prefer_selection=%s", sel_count, tostring(prefer_selection))
+
+
   -- 2) build picks via library
-  local picks = hover.build_targets_for_trim_extend("left", pos, { prefer_selection_when_hover = true })
+  local picks = hover.build_targets_for_trim_extend("left", pos, {
+    prefer_selection_when_hover = prefer_selection
+  })
   logf("[LeftEdge] library picks: %d", #picks)
 
   -- 2.1) True Hover + selection present → keep ONLY leftmost selected item per track
-  if is_true_hover and reaper.CountSelectedMediaItems(0) > 0 then
+  if is_true_hover and prefer_selection and (#picks > 0) then
     picks = filter_picks_leftmost_selected_per_track(picks)
   end
 
   -- 2.2) True Hover + NO selection + nothing from library → extend next on mouse track
-  if is_true_hover and (#picks == 0) and (reaper.CountSelectedMediaItems(0) == 0) then
+  if is_true_hover and (not prefer_selection) and (#picks == 0) then
     local extra = picks_extend_from_gap_on_mouse_track(pos)
     for i = 1, #extra do picks[#picks+1] = extra[i] end
     logf("[LeftEdge] added gap-extend pick(s): %d", #extra)
