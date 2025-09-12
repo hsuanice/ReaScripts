@@ -1,6 +1,6 @@
 --[[
 @description hsuanice Metadata Embed (BWF MetaEdit helpers)
-@version 0.2.4
+@version 0.2.5
 @author hsuanice
 @noindex
 @about
@@ -11,6 +11,21 @@
   - Post-embed refresh (offline->online, rebuild peaks)
 
 @changelog
+  v0.2.5 (2025-09-12)
+    - Added: E.write_bext_originator_reference() for writing BWF
+      OriginatorReference field.
+      * Sanitizes input: strips control characters, replaces newlines
+        with spaces, non-ASCII with '?', and truncates to 32 bytes.
+    - Changed: E.write_bext_umid() clearly separated from
+      OriginatorReference writer.
+      * UMID cleaning is now explicitly documented as
+        "Aggressive clean → keep only 0-9A-F, uppercase".
+    - Both functions return (ok, code, out, cmd) so calling tools
+      can log the actual CLI command executed.
+    - Ensures OriginatorReference can be patched alongside UMID
+      when missing, improving interoperability with Pro Tools and
+      AATranslator workflows.
+
   v0.2.4 (2025-09-12)
     - Changed: E.write_bext_umid() now returns the actual command string
       used for execution, in addition to (ok, code, out).
@@ -69,7 +84,7 @@ function E.write_bext_umid(cli, wav_path, umid_hex)
   local G = E._G or G
   local h = tostring(umid_hex or "")
 
-  -- Aggressive clean → 只留 0-9A-F，統一大寫
+  -- Aggressive clean → keep only 0-9A-F, force uppercase
   h = h:gsub("[^0-9A-Fa-f]", ""):upper()
   if G and G.normalize_umid then h = G.normalize_umid(h) end
 
@@ -80,8 +95,27 @@ function E.write_bext_umid(cli, wav_path, umid_hex)
     return false, "Missing bwfmetaedit CLI path"
   end
 
-  -- 依 BWF MetaEdit CLI 官方說明，直接用 --UMID= 寫入即可，無需 in-place 旗標
+  -- Official BWF MetaEdit syntax: --UMID=<hex>
   local cmd = ('"%s" --UMID=%s "%s"'):format(cli, h, wav_path)
+  local code, out = exec_shell(cmd, 20000)
+  return (code == 0), code, out, cmd
+end
+
+-- ===== OriginatorReference writer (explicit CLI path) =====
+-- Usage: E.write_bext_originator_reference(cli, wav_path, value)
+function E.write_bext_originator_reference(cli, wav_path, value)
+  if not cli or cli == "" then
+    return false, "Missing bwfmetaedit CLI path"
+  end
+  local v = tostring(value or "")
+
+  -- sanitize: strip control chars, newlines→space, keep ASCII, max 32 bytes
+  v = v:gsub("[%z\1-\31]", ""):gsub("\r\n", "\n"):gsub("\n", " ")
+  v = v:gsub("[\128-\255]", "?")
+  if #v > 32 then v = v:sub(1, 32) end
+  if v == "" then return false, "OriginatorReference is empty after sanitize" end
+
+  local cmd = ('"%s" --OriginatorReference=%s "%s"'):format(cli, v, wav_path)
   local code, out = exec_shell(cmd, 20000)
   return (code == 0), code, out, cmd
 end
