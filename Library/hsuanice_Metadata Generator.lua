@@ -29,7 +29,7 @@
 ]]
 
 local G = {}
-G.VERSION = "0.2.1
+G.VERSION = "0.2.1"
 -- ===== hex helpers =====
 local HEX = {}; for i=0,255 do HEX[i]=string.format("%02X",i) end
 local function tohex(s) local t={}; for i=1,#s do t[i]=HEX[s:byte(i)] end; return table.concat(t) end
