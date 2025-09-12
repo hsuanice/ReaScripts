@@ -1,6 +1,6 @@
 --[[
 @description SMPTE UMID Generate & Embed Tool (bext:UMID only)
-@version 0.1.1
+@version 0.1.2
 @author hsuanice
 @about
   Generate a strict SMPTE ST 330 Basic UMID (32B → 64 hex) and embed it
@@ -14,6 +14,14 @@
   - iXML UMID is NOT written (leave to recorders).
 
 @changelog
+  v0.1.2 (2025-09-12)
+    - Added: detailed debug logging for write step
+      * Prints the exact bwfmetaedit command (DEBUG CMD).
+      * Prints exit code (DEBUG CODE).
+      * Prints CLI output (DEBUG OUT) if available.
+    - Purpose: allow direct copy of the command into terminal
+      to diagnose permission or format issues (exit code 1).
+    - No change to generation logic or verification.
   v0.1.1 (2025-09-12)
     - Fixed: Updated call to E.write_bext_umid() to use the new v0.2.1
       signature (cli_path, wav_path, umid_hex).
@@ -197,7 +205,13 @@ local function do_embed(strategy)
               :format(#raw_umid, tostring(raw_umid:match("^[0-9A-F]+$") ~= nil)))
 
           -- 新版簽名：要把 CLI 路徑一起傳進去
-          local ok, code = E.write_bext_umid(cli, path, raw_umid)
+
+          local ok, code, out = E.write_bext_umid(cli, path, raw_umid)
+          msg(("    DEBUG CMD   : \"%s\" --UMID=%s --in-place \"%s\""):format(cli, raw_umid, path))
+          msg(("    DEBUG CODE  : %s"):format(tostring(code)))
+          if out and out ~= "" then
+            msg("    DEBUG OUT   : "..out)
+          end          
 
           -- 驗證：用 CLI 讀回，再正規化比對
           local after = select(1, read_umid_hex(cli, path)) or ""
