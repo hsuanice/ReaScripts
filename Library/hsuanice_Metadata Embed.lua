@@ -1,6 +1,6 @@
 --[[
 @description hsuanice Metadata Embed (BWF MetaEdit helpers)
-@version 0.2.2
+@version 0.2.3
 @author hsuanice
 @noindex
 @about
@@ -34,7 +34,7 @@
 ]]
 
 local E = {}
-E.VERSION = "0.2.2"
+E.VERSION = "0.2.3"
 
 -- ===== Shell wrapper / exec (same as TR tool style) =====
 local IS_WIN = reaper.GetOS():match("Win")
@@ -54,20 +54,24 @@ local function exec_shell(cmd, ms)
 end
 
 -- ===== UMID writer (explicit CLI path) =====
--- Usage: E.write_bext_umid(cli_path, wav_path, umid_hex)
+-- Usage: E.write_bext_umid(cli, wav_path, umid_hex)
 function E.write_bext_umid(cli, wav_path, umid_hex)
   local G = E._G or G
   local h = tostring(umid_hex or "")
 
-  -- aggressive clean：去掉非 0-9A-F、轉大寫
+  -- Aggressive clean → 只留 0-9A-F，統一大寫
   h = h:gsub("[^0-9A-Fa-f]", ""):upper()
   if G and G.normalize_umid then h = G.normalize_umid(h) end
 
   if not h:match("^[0-9A-F]+$") or #h ~= 64 then
     return false, "UMID must be 64 hex chars"
   end
+  if not cli or cli == "" then
+    return false, "Missing bwfmetaedit CLI path"
+  end
 
-  local cmd = ('"%s" --UMID=%s --in-place "%s"'):format(cli, h, wav_path)
+  -- 依 BWF MetaEdit CLI 官方說明，直接用 --UMID= 寫入即可，無需 in-place 旗標
+  local cmd = ('"%s" --UMID=%s "%s"'):format(cli, h, wav_path)
   local code, out = exec_shell(cmd, 20000)
   return (code == 0), code, out
 end
