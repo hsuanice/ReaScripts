@@ -1,6 +1,6 @@
 --[[
 @description ReaImGui - Rename Active Take from Metadata (caret insert + cached preview + copy/export)
-@version 0.12.2
+@version 0.12.3
 @author hsuanice
 @about
   Rename active takes and/or item notes from BWF/iXML and true source metadata using a fast ReaImGui UI.
@@ -34,6 +34,17 @@
   hsuanice served as the workflow designer, tester, and integrator for this tool.
 
 @changelog
+  v0.12.3 (2025-09-12)
+    - Added: Display of UMID (BWF:UMID 64-hex uppercase) and UMID (PT style)
+      in the Detected fields panel.
+      * Each has its own row with a copyable token button ($umid, $umid_pt).
+      * Values are taken from hsuanice_Metadata Read (v0.3.0).
+    - Improved: Users can now directly insert $umid and $umid_pt tokens
+      into rename templates for batch renaming or copy/export.
+    - UI/Flow: UMID fields are shown immediately below the separator
+      in the left pane, before the ordered generic field list.
+    - Note: Tokens are empty if REAPER does not expose BWF:UMID on the
+      current build; planned CLI fallback will fill them in later.
   v0.12.2 (2025-09-01)
     - UI: Show "Metadata Read vX.Y.Z" in the window title.
     - Init: Compute LIBVER before ImGui_Begin to avoid nil-concat errors; falls back to empty when library is missing.
@@ -1285,7 +1296,7 @@ local TOKEN_LIST = {
   "$project","$scene","$take","$tape",
   "$trk","$trkall","$trk1","$trk2","$trk3","$trk4","$trk5","$trk6","$trk7","$trk8",
   "$ubits","$framerate","$speed",
-  "$date","$time","$year","$originationdate","$originationtime","$startoffset",
+  "$date","$time","$year","$originationdate","$umid", "$umid_pt","$originationtime","$startoffset",
   "${counter:2}","${counter:3}","$interleave","$interum","$chnum",
 }
 
@@ -2176,8 +2187,22 @@ local function draw_view_pane(available_h)
           reaper.ImGui_TextWrapped(ctx, tostring(f.curnote or ""))
         end
 
-
         reaper.ImGui_Separator(ctx)
+
+        -- UMID (raw 64 HEX)
+        if f.umid then
+          if reaper.ImGui_SmallButton(ctx, "$umid##field") then append_token("$umid") end
+          reaper.ImGui_SameLine(ctx); reaper.ImGui_Text(ctx, "$umid: "); reaper.ImGui_SameLine(ctx)
+          reaper.ImGui_TextWrapped(ctx, tostring(f.umid))
+        end
+
+        -- UMID (Pro Tools style)
+        if f.umid_pt then
+          if reaper.ImGui_SmallButton(ctx, "$umid_pt##field") then append_token("$umid_pt") end
+          reaper.ImGui_SameLine(ctx); reaper.ImGui_Text(ctx, "$umid_pt: "); reaper.ImGui_SameLine(ctx)
+          reaper.ImGui_TextWrapped(ctx, tostring(f.umid_pt))
+        end
+
         local ordered = {
           "project","scene","take","tape","track",
           "filename","srcfile","srcbase","srcext","srcpath","srcdir","filepath",
