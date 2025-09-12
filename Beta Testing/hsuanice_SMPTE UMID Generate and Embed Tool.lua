@@ -1,6 +1,6 @@
 --[[
 @description SMPTE UMID Generate & Embed Tool (bext:UMID only)
-@version 0.1.2
+@version 0.1.4
 @author hsuanice
 @about
   Generate a strict SMPTE ST 330 Basic UMID (32B → 64 hex) and embed it
@@ -14,24 +14,28 @@
   - iXML UMID is NOT written (leave to recorders).
 
 @changelog
+  v0.1.4 (2025-09-12)
+    - Updated: Debug output now displays the actual command string
+      returned from E.write_bext_umid(), instead of reconstructing it.
+    - Removed: hard-coded "--in-place" text in DEBUG CMD log.
+      Output now always reflects the exact CLI command executed.
+    - Improved: avoids confusion when library behavior changes,
+      ensures tool log is faithful to real CLI usage.
+    - No changes to generation, verification, or strategy logic.
+
+  v0.1.3 (2025-09-12)
+    - Console behavior now mirrors the iXML+BWF tool:
+      * Console opens and is cleared at the start of the Run (do_embed),
+        not at script launch. Keeps run logs clean and consistent.
+    - Includes detailed write-step debug (CMD/CODE/OUT).
+    - No changes to UMID generation or CLI resolution logic.
   v0.1.2 (2025-09-12)
-    - Added: detailed debug logging for write step
-      * Prints the exact bwfmetaedit command (DEBUG CMD).
-      * Prints exit code (DEBUG CODE).
-      * Prints CLI output (DEBUG OUT) if available.
-    - Purpose: allow direct copy of the command into terminal
-      to diagnose permission or format issues (exit code 1).
+    - Added: detailed debug logging for write step (DEBUG CMD/CODE/OUT).
     - No change to generation logic or verification.
   v0.1.1 (2025-09-12)
-    - Fixed: Updated call to E.write_bext_umid() to use the new v0.2.1
-      signature (cli_path, wav_path, umid_hex).
-    - Added: Normalize and sanitize UMID before writing
-      * Remove any non-hex characters, force uppercase.
-      * Added DEBUG log: print UMID length and hex check result.
-    - Improved: Verification now compares normalized UMID
-      against post-write readback from bwfmetaedit.
-    - Result: More robust write + verify cycle, avoids
-      hidden character issues and function mismatch errors.
+    - Fixed: Updated call to E.write_bext_umid() to use new signature
+      (cli_path, wav_path, umid_hex).
+    - Added: Normalize and sanitize UMID before writing, plus DEBUG length/hex check.
   v0.1.0
     - Initial: UI (ReaImGui / fallback prompt), batch over selected items,
       per-item verification, summary & optional refresh.
@@ -40,7 +44,7 @@
 local R = reaper
 
 -- =========================
--- Config / Paths
+-- Small helpers / paths
 -- =========================
 local function msg(s) R.ShowConsoleMsg(tostring(s).."\n") end
 local function exists(path) local f=io.open(path,"rb"); if f then f:close(); return true end end
@@ -101,9 +105,8 @@ local function read_umid_hex(cli, wav_path)
   return umid, code, out
 end
 
--- Resolve bwfmetaedit via your Embed’s bwfme_exec pathing or direct test
+-- Resolve bwfmetaedit
 local function resolve_cli_from_embed()
-  -- Try known paths used by your TimeReference tool’s resolver
   local cands = IS_WIN and {
     [[C:\Program Files\BWF MetaEdit\bwfmetaedit.exe]],
     [[C:\Program Files (x86)\BWF MetaEdit\bwfmetaedit.exe]],
@@ -125,7 +128,7 @@ local function resolve_cli_from_embed()
 end
 
 -- =========================
--- Core Worker
+-- Core Worker (console opens/clears HERE like the iXML+BWF script)
 -- =========================
 -- strategy: 1=Copy if present, Generate if missing (default)
 --           2=Always generate new
@@ -145,9 +148,13 @@ local function do_embed(strategy)
     return
   end
 
+  -- 開始執行才開/清空 Console（同 iXML+BWF 腳本）
   R.ClearConsole()
-  msg(("=== SMPTE UMID Tool ===\nCLI : %s\nLib :\n  G=%s (v%s)\n  E=%s (v%s)\nSel : %d\n")
-      :format(cli, base(GPATH), tostring(G.VERSION), base(EPATH), tostring(E.VERSION), sel))
+  msg(("=== SMPTE UMID Tool ==="))
+  msg(("CLI : %s"):format(cli))
+  msg(("Lib : G=%s (v%s)  E=%s (v%s)"):format(base(GPATH), tostring(G.VERSION), base(EPATH), tostring(E.VERSION)))
+  msg(("Sel : %d"):format(sel))
+  msg("")
 
   local ok_cnt, fail_cnt, skip_cnt = 0, 0, 0
   local modified = {}
@@ -178,18 +185,14 @@ local function do_embed(strategy)
 
         local final_umid = nil
         if strategy == 1 then
-          -- Copy if present, Generate if missing
           if has_umid then
             final_umid = current_norm
           else
-            -- material: 以檔名基底當作語意來源；instance 0
             final_umid = G.generate_umid_basic({ material = base(path), instance = 0 })
           end
         elseif strategy == 2 then
-          -- Always generate new
           final_umid = G.generate_umid_basic({ material = base(path), instance = os.time() % 1e6 })
         else
-          -- Patch missing only
           if has_umid then
             msg("    [SKIP] already has UMID (patch-missing only)")
             skip_cnt = skip_cnt + 1
@@ -199,21 +202,17 @@ local function do_embed(strategy)
         end
 
         if final_umid then
-          -- 先正規化，避免混入不可見字元或 dash
+          -- normalize to clean 64-hex
           local raw_umid = G.normalize_umid(final_umid):gsub("[^0-9A-Fa-f]", ""):upper()
           msg(("    DEBUG UMID len=%d isHEX=%s")
               :format(#raw_umid, tostring(raw_umid:match("^[0-9A-F]+$") ~= nil)))
 
-          -- 新版簽名：要把 CLI 路徑一起傳進去
-
-          local ok, code, out = E.write_bext_umid(cli, path, raw_umid)
-          msg(("    DEBUG CMD   : \"%s\" --UMID=%s --in-place \"%s\""):format(cli, raw_umid, path))
+          -- write (Embed v0.2.1+ signature uses explicit CLI path)
+          local ok, code, out, cmd = E.write_bext_umid(cli, path, raw_umid)
+          msg(("    DEBUG CMD   : %s"):format(cmd or "(nil)"))
           msg(("    DEBUG CODE  : %s"):format(tostring(code)))
-          if out and out ~= "" then
-            msg("    DEBUG OUT   : "..out)
-          end          
-
-          -- 驗證：用 CLI 讀回，再正規化比對
+          if out and out ~= "" then msg("    DEBUG OUT   : "..out) end
+          -- verify by reading back
           local after = select(1, read_umid_hex(cli, path)) or ""
           local after_norm = G.normalize_umid(after)
           local pt_view = G.format_umid_protools_style(raw_umid)
@@ -231,9 +230,6 @@ local function do_embed(strategy)
             msg("    RESULT: FAIL")
           end
         end
-
-        
-
       end
     end
   end
@@ -249,7 +245,6 @@ local function do_embed(strategy)
       "SMPTE UMID", 4 -- Yes/No
     )
     if btn == 6 and E.refresh_media_item_take then
-      -- refresh each modified item once
       for _,it in ipairs(modified) do
         local take = R.GetActiveTake(it)
         if take then E.refresh_media_item_take(take) end
