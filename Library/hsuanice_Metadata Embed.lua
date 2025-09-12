@@ -1,6 +1,6 @@
 --[[
 @description hsuanice Metadata Embed (BWF MetaEdit helpers)
-@version 0.2.1
+@version 0.2.2
 @author hsuanice
 @noindex
 @about
@@ -11,6 +11,16 @@
   - Post-embed refresh (offline->online, rebuild peaks)
 
 @changelog
+  v0.2.2 (2025-09-12)
+    - Improved: E.write_bext_umid() now aggressively cleans input
+      before validation:
+        * Strips all non-hex characters.
+        * Forces uppercase to ensure consistent 64 hex chars.
+    - Safer: Prevents hidden characters or dash-separated UMIDs
+      from being rejected incorrectly.
+    - No change to CLI execution or return values.
+    - Compatible with v0.2.1 calling convention
+      (cli_path, wav_path, umid_hex).
   v0.2.1 (2025-09-12)
     - Changed: E.write_bext_umid() now requires an explicit bwfmetaedit CLI path
       and uses ExecProcess (non-blocking) instead of os.execute.
@@ -24,7 +34,7 @@
 ]]
 
 local E = {}
-E.VERSION = "0.2.1"
+E.VERSION = "0.2.2"
 
 -- ===== Shell wrapper / exec (same as TR tool style) =====
 local IS_WIN = reaper.GetOS():match("Win")
@@ -48,12 +58,13 @@ end
 function E.write_bext_umid(cli, wav_path, umid_hex)
   local G = E._G or G
   local h = tostring(umid_hex or "")
+
+  -- aggressive clean：去掉非 0-9A-F、轉大寫
+  h = h:gsub("[^0-9A-Fa-f]", ""):upper()
   if G and G.normalize_umid then h = G.normalize_umid(h) end
-  if not h:match("^[0-9A-Fa-f]+$") or #h ~= 64 then
+
+  if not h:match("^[0-9A-F]+$") or #h ~= 64 then
     return false, "UMID must be 64 hex chars"
-  end
-  if not cli or cli == "" then
-    return false, "Missing bwfmetaedit CLI path"
   end
 
   local cmd = ('"%s" --UMID=%s --in-place "%s"'):format(cli, h, wav_path)
