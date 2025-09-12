@@ -1,6 +1,6 @@
 --[[
 @description ReaImGui - Rename Active Take from Metadata (caret insert + cached preview + copy/export)
-@version 0.12.3
+@version 0.12.4
 @author hsuanice
 @about
   Rename active takes and/or item notes from BWF/iXML and true source metadata using a fast ReaImGui UI.
@@ -34,6 +34,18 @@
   hsuanice served as the workflow designer, tester, and integrator for this tool.
 
 @changelog
+  v0.12.4 (2025-09-13)
+    - Added: $umid (64-hex uppercase) and $umid_pt (PT style 26-6-16-12-4)
+      tokens to the Template toolbar for caret insert.
+    - Added: Detected fields panel now shows UMID and UMID (PT) directly
+      under $originatorreference.
+    - Added: "Copy metadata" output includes $umid and $umid_pt in the
+      same order, for quick paste into notes or sheets.
+    - Tokenization: normalize_tokens() recognizes $umid and $umid_pt so
+      bare tokens are auto-wrapped as ${umid} / ${umid_pt}.
+    - Dependency: expects Metadata Read v0.3.0 (provides fields.umid /
+      fields.umid_pt; optional CLI fallback via bwfmetaedit when needed).
+
   v0.12.3 (2025-09-12)
     - Added: Display of UMID (BWF:UMID 64-hex uppercase) and UMID (PT style)
       in the Detected fields panel.
@@ -1588,11 +1600,14 @@ local function build_left_copy_text_from_fields(f)
   -- rest in stable order (unchanged)
   local ordered = {
     "project","scene","take","tape","track",
-    "filename","srcfile","srcbase",'srcbaseprefix:N','srcbasesuffix:N',"srcext","srcpath","srcdir","filepath",
+    "filename","srcfile","srcbase","srcext","srcpath","srcdir","filepath",
     "samplerate","channels","length",
     "date","time","year","originationdate","originationtime","startoffset",
-    "framerate","speed","ubits","originator","originatorreference","timereference",
-    "trk1","trk2","trk3","trk4","trk5","trk6","trk7","trk8","trk9","trk10","trk11","trk12","trk13","trk14","trk15","trk16",
+    "framerate","speed","ubits","originator","originatorreference",
+    "umid","umid_pt",
+    "timereference",
+    "trk1","trk2","trk3","trk4","trk5","trk6","trk7","trk8","trk9","trk10",
+    "trk11","trk12","trk13","trk14","trk15","trk16",
     "description"
   }
   for _,k in ipairs(ordered) do if f[k] ~= nil then add("$"..k, f[k]) end end
@@ -2208,8 +2223,11 @@ local function draw_view_pane(available_h)
           "filename","srcfile","srcbase","srcext","srcpath","srcdir","filepath",
           "samplerate","channels","length",
           "date","time","year","originationdate","originationtime","startoffset",
-          "framerate","speed","ubits","originator","originatorreference","timereference",
-          "trk1","trk2","trk3","trk4","trk5","trk6","trk7","trk8","trk9","trk10","trk11","trk12","trk13","trk14","trk15","trk16",
+          "framerate","speed","ubits","originator","originatorreference",
+          "umid","umid_pt",
+          "timereference",
+          "trk1","trk2","trk3","trk4","trk5","trk6","trk7","trk8","trk9","trk10",
+          "trk11","trk12","trk13","trk14","trk15","trk16",
           "description"
         }
         for _,k in ipairs(ordered) do if f[k] ~= nil then field_row_token(k, f[k]) end end
