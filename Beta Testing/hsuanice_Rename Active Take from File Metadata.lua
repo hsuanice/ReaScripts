@@ -1,6 +1,6 @@
 --[[
 @description ReaImGui - Rename Active Take from Metadata (caret insert + cached preview + copy/export)
-@version 0.12.4
+@version 0.12.5
 @author hsuanice
 @about
   Rename active takes and/or item notes from BWF/iXML and true source metadata using a fast ReaImGui UI.
@@ -34,6 +34,15 @@
   hsuanice served as the workflow designer, tester, and integrator for this tool.
 
 @changelog
+  v0.12.5 (2025-09-13)
+    - Fixed: UMID rows were shown twice in Detected fields. Removed the
+      manual UMID block and now render via the ordered field list only.
+    - Order tweak: $umid and $umid_pt now appear directly under
+      $originatorreference (before $timereference).
+    - Copy panel: Keeps $umid / $umid_pt in the same order for easier
+      cross-checking with Pro Tools.
+    - Dependency note: Requires Metadata Read v0.3.0 (provides umid and
+      umid_pt fields, with bwfmetaedit fallback when needed).
   v0.12.4 (2025-09-13)
     - Added: $umid (64-hex uppercase) and $umid_pt (PT style 26-6-16-12-4)
       tokens to the Template toolbar for caret insert.
@@ -2203,20 +2212,6 @@ local function draw_view_pane(available_h)
         end
 
         reaper.ImGui_Separator(ctx)
-
-        -- UMID (raw 64 HEX)
-        if f.umid then
-          if reaper.ImGui_SmallButton(ctx, "$umid##field") then append_token("$umid") end
-          reaper.ImGui_SameLine(ctx); reaper.ImGui_Text(ctx, "$umid: "); reaper.ImGui_SameLine(ctx)
-          reaper.ImGui_TextWrapped(ctx, tostring(f.umid))
-        end
-
-        -- UMID (Pro Tools style)
-        if f.umid_pt then
-          if reaper.ImGui_SmallButton(ctx, "$umid_pt##field") then append_token("$umid_pt") end
-          reaper.ImGui_SameLine(ctx); reaper.ImGui_Text(ctx, "$umid_pt: "); reaper.ImGui_SameLine(ctx)
-          reaper.ImGui_TextWrapped(ctx, tostring(f.umid_pt))
-        end
 
         local ordered = {
           "project","scene","take","tape","track",
