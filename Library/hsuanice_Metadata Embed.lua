@@ -1,6 +1,6 @@
 --[[
 @description hsuanice Metadata Embed (BWF MetaEdit helpers)
-@version 0.2.0
+@version 0.2.1
 @author hsuanice
 @noindex
 @about
@@ -10,80 +10,66 @@
   - Copy iXML/core, read/write TimeReference
   - Post-embed refresh (offline->online, rebuild peaks)
 
-
 @changelog
-  v0.2.0 (2025-09-12)
-    - Added: E.write_bext_umid(wav_path, umid_hex)
-      * Embed a 32-byte Basic UMID (64 hex characters) into the BWF bext:UMID field.
-      * Uses BWF MetaEdit CLI: --UMID=<hex> --in-place.
-      * Only writes to the bext chunk; iXML UMID is left to recorders.
-    - Added: sh_quote() and bwfme_exec() helpers
-      * POSIX-safe shell quoting for file paths and arguments.
-      * Simple wrapper for calling bwfmetaedit (can be replaced with async implementation).
-    - Added: E.refresh_media_item_take(take)
-      * Forces REAPER to refresh item/take after metadata embedding
-        (poke + UpdateItemInProject).
+  v0.2.1 (2025-09-12)
+    - Changed: E.write_bext_umid() now requires an explicit bwfmetaedit CLI path
+      and uses ExecProcess (non-blocking) instead of os.execute.
+      * Usage: E.write_bext_umid(cli_path, wav_path, umid_hex)
+      * CLI path can be resolved via the same logic as BWF TimeReference tool.
+    - Improved: sh_wrap() and exec_shell() helpers added (consistent with TR tool).
     - Notes:
-      * Requires BWF MetaEdit to be installed and accessible from system PATH.
-      * Recommended to pair with hsuanice_Metadata Generator.lua >= v0.2.1
-        for strict UMID generation and Pro Tools style formatting.
-    - No breaking changes:
-      * Does not affect existing TimeReference or other metadata helpers;
-        only adds UMID writing capability.
-  
+      * Only writes to BWF bext:UMID; iXML UMID is left to recorders.
+      * Requires BWF MetaEdit installed and accessible (path must be provided).
+    - No breaking changes besides function signature update.
 ]]
+
 local E = {}
-E.VERSION = "0.2.0"
+E.VERSION = "0.2.1"
 
--- TODO: sh_quote, normalize_ixml_text, bwfme_exec, read_TR, write_TR, refresh_project_peaks ...
+-- ===== Shell wrapper / exec (same as TR tool style) =====
+local IS_WIN = reaper.GetOS():match("Win")
 
--- ===== shell quoting =====
-local function sh_quote(s)
-  s = tostring(s or "")
-  if s == "" then return "''" end
-  -- POSIX-safe quoting
-  return "'" .. s:gsub("'", [['"'"']]) .. "'"
+local function sh_wrap(cmd)
+  if IS_WIN then
+    return 'cmd.exe /C "'..cmd..'"'
+  else
+    return "/bin/sh -lc '"..cmd:gsub("'",[['"'"']]).."'" -- escape safely
+  end
 end
 
--- ===== BWF MetaEdit wrapper =====
-local function bwfme_exec(args_tbl)
-  -- 你自己的尋路邏輯：假設系統已可直接呼叫 bwfmetaedit
-  local cmd = "bwfmetaedit " .. table.concat(args_tbl, " ")
-  -- 注意：在 REAPER 裡用 os.execute 會阻塞；若你已有非阻塞封裝，改成你的
-  return os.execute(cmd)
+local function exec_shell(cmd, ms)
+  local ret = reaper.ExecProcess(sh_wrap(cmd), ms or 20000) or ""
+  local code, out = ret:match("^(%d+)\n(.*)$")
+  return tonumber(code or -1), (out or "")
 end
 
--- ===== UMID writer =====
-function E.write_bext_umid(wav_path, umid_hex)
-  -- 正規化：嵌入建議用「raw 64 hex（大寫或小寫皆可）」；我們統一用大寫
-  local G = E._G or G  -- 若外部已載入 Generator，可經由 E._G 傳入；否則用全域 G
+-- ===== UMID writer (explicit CLI path) =====
+-- Usage: E.write_bext_umid(cli_path, wav_path, umid_hex)
+function E.write_bext_umid(cli, wav_path, umid_hex)
+  local G = E._G or G
   local h = tostring(umid_hex or "")
   if G and G.normalize_umid then h = G.normalize_umid(h) end
-  -- 基本長度檢查（64 hex）
   if not h:match("^[0-9A-Fa-f]+$") or #h ~= 64 then
     return false, "UMID must be 64 hex chars"
   end
-  -- --UMID=<hex> 寫進 bext；--in-place 直接覆寫
-  local ok = bwfme_exec({
-    "--UMID=" .. h,
-    "--in-place",
-    sh_quote(wav_path),
-  })
-  return ok == true or ok == 0, ok
+  if not cli or cli == "" then
+    return false, "Missing bwfmetaedit CLI path"
+  end
+
+  local cmd = ('"%s" --UMID=%s --in-place "%s"'):format(cli, h, wav_path)
+  local code, out = exec_shell(cmd, 20000)
+  return (code == 0), code, out
 end
 
--- （可選）如果你也要同步寫 iXML:<UMID>，可在此加另一個 helper：
--- function E.write_ixml_umid(wav_path, umid_hex) ... end
-
--- =====（可選）刷新 REAPER 媒體，使變更即時可見 =====
+-- ===== Optional: refresh media item to force REAPER reload =====
 function E.refresh_media_item_take(take)
   if not take then return end
   local item = reaper.GetMediaItemTake_Item(take)
   if item then
-    reaper.SetMediaItemInfo_Value(item, "B_LOOPSRC", reaper.GetMediaItemInfo_Value(item, "B_LOOPSRC")) -- poke
+    reaper.SetMediaItemInfo_Value(item, "B_LOOPSRC",
+      reaper.GetMediaItemInfo_Value(item, "B_LOOPSRC")) -- poke
     reaper.UpdateItemInProject(item)
   end
 end
-
 
 return E
