@@ -1,6 +1,6 @@
 --[[
 @description hsuanice Metadata Generator (UMID / IDs) — STRICT
-@version 0.2.0
+@version 0.2.1
 @author hsuanice
 @noindex
 @about
@@ -12,6 +12,14 @@
   - Backward alias: G.generate_umid_basic = G.generate_umid_basic_strict
 
 @changelog
+  v0.2.1 (2025-09-12)
+    - Added: G.format_umid_protools_style()
+      * Formats a 32-byte Basic UMID into Pro Tools display style
+        (lowercase hex + dash grouping 26-6-16-12-4).
+      * Useful for log/console/debug output to match Pro Tools SMPTE ID field.
+    - No changes to UMID generation logic or Embed/Read compatibility.
+    - Backward compatibility: existing functions unchanged.
+
   v0.2.0
     - Strict lengths & segment layout for UMID (Basic 32B / Extended 64B)
     - Configurable UMID Universal Label (UL) constant (16B)
@@ -21,8 +29,7 @@
 ]]
 
 local G = {}
-G.VERSION = "0.2.0"
-
+G.VERSION = "0.2.1
 -- ===== hex helpers =====
 local HEX = {}; for i=0,255 do HEX[i]=string.format("%02X",i) end
 local function tohex(s) local t={}; for i=1,#s do t[i]=HEX[s:byte(i)] end; return table.concat(t) end
@@ -108,8 +115,22 @@ function G.explain_basic_layout(h)
            note="UL(16B) + material(16B with instance folded into last 8B)." }
 end
 
+--- Format UMID like Pro Tools shows (26-6-16-12-4 groups, lowercase + dashes)
+function G.format_umid_protools_style(hex)
+  local h = G.normalize_umid(hex):lower()
+  if #h ~= 64 then return h end -- only valid for Basic 32B
+  return table.concat({
+    h:sub(1,26),
+    h:sub(27,32),
+    h:sub(33,48),
+    h:sub(49,60),
+    h:sub(61,64)
+  }, "-")
+end
+
 -- backward aliases for drop-in replacement
 G.generate_umid_basic    = G.generate_umid_basic_strict
 G.generate_umid_extended = G.generate_umid_extended_strict
 
 return G
+
