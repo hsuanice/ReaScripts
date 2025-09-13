@@ -1,6 +1,6 @@
 --[[
 @description SMPTE UMID Generate & Embed Tool (bext:UMID only)
-@version 0.1.4
+@version 0.1.4.1
 @author hsuanice
 @about
   Generate a strict SMPTE ST 330 Basic UMID (32B → 64 hex) and embed it
@@ -14,6 +14,13 @@
   - iXML UMID is NOT written (leave to recorders).
 
 @changelog
+  v0.1.4.1 (2025-09-13)
+    - Fix: Always call ImGui_End() after ImGui_Begin(), regardless of
+      the 'visible' flag. Prevents "ImGui_SameLine: expected a valid
+      ImGui_Context*" on ReaImGui 0.9.3.2 and ensures proper stack
+      balance when the window is collapsed/hidden.
+    - No change to UMID generation/embedding; purely UI stability.
+    - Fix reaper.ImGui_End(ctx)
   v0.1.4 (2025-09-12)
     - Updated: Debug output now displays the actual command string
       returned from E.write_bext_umid(), instead of reconstructing it.
@@ -303,9 +310,9 @@ local function loop()
     then
       should_close = true
     end
-
-    imgui.ImGui_End(ctx)
   end
+  imgui.ImGui_End(ctx)
+
   if not open or should_close then return end
   R.defer(loop)
 end
