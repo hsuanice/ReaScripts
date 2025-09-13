@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<index version="1" name="hsuanice Scripts" commit="7ae674637cae2fcb5feb225ed62f3c1e59ab7b6f">
+<index version="1" name="hsuanice Scripts" commit="c87001ac866ea98c3d8fca1a5e651c3a2b84ec39">
   <category name="Beta Testing">
     <reapack name="hsuanice_BWF TimeReference Embed Tool.lua" type="script" desc="Embed BWF TimeReference to Active take from Take 1 or Current Position TC">
       <version name="0.7.1" author="hsuanice" time="2025-08-14T17:52:57Z">
@@ -138,6 +138,32 @@
       </version>
       <version name="0.3.5" author="hsuanice" time="2025-08-31T11:09:15Z">
         <source main="main">https://github.com/hsuanice/ReaScripts/raw/5e4ae21ce5c21a22e75c62011f538a696dddb6a2/Beta%20Testing/hsuanice_Embed%20iXML%20and%20BWF%20Metadata%20from%20Take%201%20to%20Active%20Take.lua</source>
+      </version>
+    </reapack>
+    <reapack name="hsuanice_Fix Overlap Items Partial or Complete.lua" type="script" desc="hsuanice_Fix Overlap Items Partial or Complete">
+      <metadata>
+        <description><![CDATA[{\rtf1\ansi\deff0{\fonttbl{\f0 \fswiss Helvetica;}{\f1 \fmodern Courier;}}
+{\colortbl;\red255\green0\blue0;\red0\green0\blue255;}
+\widowctrl\hyphauto
+
+{\pard \ql \f0 \sa180 \li0 \fi0 Finds item overlaps on each track (ignores cross-track). For every overlapping pair:\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Marks BOTH related items with a take marker at the overlap start position.\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Writes a TSV report with Track | Take | Start/End (TC & samples) | Note.\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab No auto-fix yet. You can manually resolve using the take markers. Future: options to trim, heal, or promote one of the items automatically.\sa180\par}
+}
+]]></description>
+      </metadata>
+      <version name="0.1.1" author="hsuanice" time="2025-09-13T14:48:16Z">
+        <changelog><![CDATA[v0.1.1 (2025-09-13)
+  - Ignore intended crossfades: if the entire overlap lies within
+    the left item's fade-out and the right item's fade-in (manual or auto),
+    the pair is skipped (no marker, no report).
+v0.1.0 (2025-09-13)
+  - Initial release: scan all (non-hidden) tracks for item overlaps per track.
+  - Classifies as Partial or Complete overlap with sample-accurate tolerance.
+  - Adds take markers: "Review: Item overlap — partial/complete".
+  - Prints a TSV report to Console and saves a copy next to the project (Overlaps.tsv).]]></changelog>
+        <source main="main">https://github.com/hsuanice/ReaScripts/raw/c87001ac866ea98c3d8fca1a5e651c3a2b84ec39/Beta%20Testing/hsuanice_Fix%20Overlap%20Items%20Partial%20or%20Complete.lua</source>
       </version>
     </reapack>
     <reapack name="hsuanice_Hover Mode Split Item by Selection or Edit or Mouse Cursor.lua" type="script" desc="Hover Mode - Split Items (Selection-first in Hover, Mouse/Edit aware) + Simple Debug Switch">
