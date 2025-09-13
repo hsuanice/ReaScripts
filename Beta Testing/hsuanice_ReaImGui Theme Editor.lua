@@ -1,6 +1,6 @@
 --[[
 @description hsuanice ReaImGui Theme Editor
-@version 0.3.4
+@version 0.4.0
 @author hsuanice
 @about
   Dedicated GUI for editing the shared ReaImGui theme (colors + presets).
@@ -8,6 +8,16 @@
   Requires: "Scripts/hsuanice Scripts/Library/hsuanice_ReaImGui Theme Color.lua"
 
 @changelog
+  v0.4.0  Live preview & global apply:
+          - The editor now previews from the in-memory palette (S.current) instead of ExtState.
+          - Any color change immediately writes to ExtState via THEME.set_overrides(), so all
+            scripts using THEME.apply() update in real time (no more reselect/Activate needed).
+          - Title bar text color (TitleText) is previewed from S.current by pushing before Begin()
+            and popping right after.
+          - Preset selection still auto-activates and loads into S.current; Save/Save As only
+            control preset files (not required for live applying).
+          No API changes to the library.
+
   v0.3.4  Layout: dedicate a top status line for "(not saved) / Saved"; move the "Preset:" row below it.
           Preset: replace the titlebar Preset menu/button with a plain "Preset:" label + dropdown.
           Behavior: auto-activate the selected preset immediately; remove the separate Activate button.
@@ -87,8 +97,14 @@ local function draw_color_grid()
     ImGui.Text(ctx, k)
     local rgba = S.current[k] or THEME.colors[k] or 0xffffffff
     ImGui.SetNextItemWidth(ctx, UI.color_edit_w)
+
     local changed, new_rgba = reaper.ImGui_ColorEdit4(ctx, "##"..k, rgba, flags)
-    if changed then S.current[k] = new_rgba; S.changed = true end
+    if changed then
+      S.current[k] = new_rgba
+      S.changed = true
+      THEME.set_overrides(S.current, true)  -- ★ live apply to ExtState (global)
+    end
+
     ImGui.EndGroup(ctx)
     i = i + 1
   end
@@ -99,16 +115,19 @@ local open = true
 local function loop()
   if not S.init then init_state() end
 
-  local pushed = THEME.apply(ctx, ImGui) or 0 -- preview current theme
+  local pushed = THEME.apply(ctx, ImGui, { use_extstate = false, overrides = S.current }) or 0
+
 
   -- （可選）在 Begin 前暫時覆蓋標題字色
-  local did_title = THEME.push_title_text(ctx, ImGui)
+  -- 使用 S.current 的 TitleText（沒有就用庫的預設）
+  local title_col = (S.current and S.current.TitleText) or THEME.colors.TitleText
+  ImGui.PushStyleColor(ctx, ImGui.Col_Text, title_col)
 
   ImGui.SetNextWindowSize(ctx, 720, 520, ImGui.Cond_FirstUseEver)
   local vis; vis, open = ImGui.Begin(ctx, "hsuanice Theme Editor", true,
     ImGui.WindowFlags_NoCollapse | ImGui.WindowFlags_MenuBar)
 
-  if did_title then THEME.pop_title_text(ctx, ImGui) end
+  ImGui.PopStyleColor(ctx)
 
   -- ESC 關閉（僅當視窗被聚焦時）
   if ImGui.IsWindowFocused(ctx) and ImGui.IsKeyPressed(ctx, ImGui.Key_Escape) then
@@ -168,7 +187,7 @@ local function loop()
     end
 
     -- Row 2: Name + Save/Save As/Reset
-    ImGui.Text(ctx, "Name:"); ImGui.SameLine(ctx)
+    ImGui.Text(ctx, "Name: "); ImGui.SameLine(ctx)
     ImGui.SetNextItemWidth(ctx, UI.field_w)  -- 統一寬度
     local changed, newname = ImGui.InputText(ctx, "##name", S.name_field, ImGui.InputTextFlags_CharsNoBlank)
     if changed then S.name_field = newname end
