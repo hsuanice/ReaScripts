@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<index version="1" name="hsuanice Scripts" commit="4e73e743da51ea7f24a920dafd36dc2966f294c4">
+<index version="1" name="hsuanice Scripts" commit="c007efcdd96030cbfc7f11614e3eff4e4b1145dd">
   <category name="Beta Testing">
     <reapack name="hsuanice_BWF TimeReference Embed Tool.lua" type="script" desc="Embed BWF TimeReference to Active take from Take 1 or Current Position TC">
       <version name="0.7.1" author="hsuanice" time="2025-08-14T17:52:57Z">
@@ -737,6 +737,18 @@ v0.1.1  (prev) Theme Color Editor rename & title update.]]></changelog>
         Add width controls (preset combo, name input, color editor).
 v0.2.0  Previous rename and future-proof notes.]]></changelog>
         <source main="main">https://github.com/hsuanice/ReaScripts/raw/4de38b1f03fd4a2a7762000db56110a033247d1c/Beta%20Testing/hsuanice_ReaImGui%20Theme%20Editor.lua</source>
+      </version>
+      <version name="0.3.1" author="hsuanice" time="2025-09-13T12:48:55Z">
+        <changelog><![CDATA[v0.3.1  Stability: move PushFont to after Begin() and PopFont before End() to ensure a valid frame/context.
+        Title bar text color: integrate the library's TitleText via push before Begin() and pop right after,
+        so only the window title text changes while the body follows the theme.
+        Lifecycle: remove duplicated Begin()/apply() block; keep a single window per frame.
+        Loading: deduplicate library loading and keep a single, correct library path usage.
+        UI: keep width controls for preset combo/name/color editors; no breaking UI logic changes.
+v0.3.0  Move all editor GUI out of the library into this script.
+        Add width controls (preset combo, name input, color editor).
+v0.2.0  Previous rename and future-proof notes.]]></changelog>
+        <source main="main">https://github.com/hsuanice/ReaScripts/raw/c007efcdd96030cbfc7f11614e3eff4e4b1145dd/Beta%20Testing/hsuanice_ReaImGui%20Theme%20Editor.lua</source>
       </version>
     </reapack>
     <reapack name="hsuanice_Rename Active Take from File Metadata.lua" type="script" desc="ReaImGui - Rename Active Take from Metadata (caret insert + cached preview + copy/export)">
