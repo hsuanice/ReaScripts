@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<index version="1" name="hsuanice Scripts" commit="0d91931ce9886bd946b75bfc9f22d5922be6f3a0">
+<index version="1" name="hsuanice Scripts" commit="851ca4359c89a1fd32b1d970516a4f0be31ef82a">
   <category name="Beta Testing">
     <reapack name="hsuanice_BWF TimeReference Embed Tool.lua" type="script" desc="Embed BWF TimeReference to Active take from Take 1 or Current Position TC">
       <version name="0.7.1" author="hsuanice" time="2025-08-14T17:52:57Z">
@@ -155,6 +155,20 @@ v0.1.0 (2025-09-13)
       </version>
       <version name="0.1.2" author="hsuanice" time="2025-09-13T15:21:06Z">
         <source main="main">https://github.com/hsuanice/ReaScripts/raw/0d91931ce9886bd946b75bfc9f22d5922be6f3a0/Beta%20Testing/hsuanice_Fix%20Overlap%20Items%20Partial%20or%20Complete.lua</source>
+      </version>
+      <version name="0.1.3" author="hsuanice" time="2025-09-13T15:23:25Z">
+        <changelog><![CDATA[v0.1.3 (2025-09-13)
+  - 移除 TSV 相關功能與檔案輸出
+  - 一開始先強制打開 Console，再清空，避免某些環境下視窗不彈出
+  - Summary 改為掃描結束後再印（避免顯示 0 計數）
+v0.1.2 (2025-09-13)
+  - 掃描結束印出 summary（partial / complete / total）
+v0.1.1 (2025-09-13)
+  - 忽略「純交叉淡變」造成的重疊（手動/自動淡入淡出都納入）
+v0.1.0 (2025-09-13)
+  - 掃描所有軌（不依選取），每軌找 item 重疊，分類 partial/complete
+  - 在相關 items 上加 take marker：Review: Item overlap — partial/complete]]></changelog>
+        <source main="main">https://github.com/hsuanice/ReaScripts/raw/851ca4359c89a1fd32b1d970516a4f0be31ef82a/Beta%20Testing/hsuanice_Fix%20Overlap%20Items%20Partial%20or%20Complete.lua</source>
       </version>
     </reapack>
     <reapack name="hsuanice_Hover Mode Split Item by Selection or Edit or Mouse Cursor.lua" type="script" desc="Hover Mode - Split Items (Selection-first in Hover, Mouse/Edit aware) + Simple Debug Switch">
