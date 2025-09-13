@@ -1,6 +1,6 @@
 --[[
 @description ReaImGui - Count Items/Tracks and Toggle Show Item Details (throttled)
-@version 0.2.0
+@version 0.2.0.1
 @author hsuanice
 @about
   A tiny HUD for monitoring selected item/track counts, with optional details.
@@ -10,6 +10,14 @@
     - Summary (items/tracks) path is O(1) per frame
 
 @changelog
+  v0.2.0.1 (2025-09-13)
+    - Fix: Always call ImGui_End() after ImGui_Begin(), regardless of
+      the 'visible' flag. Prevents "ImGui_SameLine: expected a valid
+      ImGui_Context*" on ReaImGui 0.9.3.2 and ensures proper stack
+      balance when the window is collapsed/hidden.
+    - No change to UMID generation/embedding; purely UI stability.
+  v0.2.0.1
+  - Fix reaper.ImGui_End(ctx)
   v0.2.0
   - Performance: throttle/debounce heavy scans (details) to at most every 150 ms
   - Performance: when details panel is collapsed, skip per-item scanning entirely
@@ -221,9 +229,9 @@ local function main_loop()
     if reaper.ImGui_IsMouseClicked(ctx, 1) and reaper.ImGui_IsWindowHovered(ctx) then
       open = false
     end
-
-    reaper.ImGui_End(ctx)
   end
+  reaper.ImGui_End(ctx)
+
 
   if open then
     reaper.defer(main_loop)
