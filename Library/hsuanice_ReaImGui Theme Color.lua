@@ -1,24 +1,16 @@
 --[[
-@description hsuanice ReaImGui Theme Color (library + simple editor API)
-@version 0.2.2
-
-
+@description hsuanice ReaImGui Theme Color (library only)
+@version 0.3.0
 @author hsuanice
 @about
-  Shared theme palette + helpers for ReaImGui UIs, plus a minimal editor API.
-  - apply()/pop() to push/pop a unified color scheme across scripts
-  - ExtState overrides per-key, and named Presets (save/load/delete/activate)
-  - Simple editor drawer (M.editor) for quick color picking & preset management
+  Library for shared ReaImGui theme colors: palette, apply/pop, ExtState overrides, presets API.
+  GUI/editor code has been removed from the library; use a dedicated Editor script instead.
 @changelog
-  v0.2.2  Fix: Color editor now uses the U32 integer workflow via `reaper.ImGui_ColorEdit4(ctx, label, rgba[, flags])`, preventing arg-count errors.
-        Safety: Guard against `nil` values; fallback to defaults or `0xffffffff` to avoid crashes.
-        Hardening: ExtState hex parser accepts both `AABBCCDD` and `0xAABBCCDD`.
-        UI: Improve two-column alignment for color swatches.
-        Internal: Keep `u32_to_d4()` / `d4_to_u32()` for future use; editor no longer depends on them.
-        API: No changes (`apply()/pop()/set_accent()/editor()` remain the same).
-  v0.2.1  Fix: use reaper.ImGui_ColorEdit4(ctx,label,rgba[,flags]) to avoid arg-count error.
-  v0.2.0  Add presets (save/load/delete/activate) and a minimal GUI editor (M.editor).
-  v0.1.0  First release: default dark palette, apply()/pop(), set_accent(), ExtState override.
+  v0.3.0  Split responsibilities: remove all editor/GUI from the library. Keep only data & APIs.
+          Add helpers: get_effective_colors(), set_overrides(colors[, persist]).
+  v0.2.2  Fixes for ColorEdit and robustness (now handled by the external editor).
+  v0.2.0  Presets API; minimal GUI editor (removed in v0.3.0).
+  v0.1.0  Initial: default palette + apply()/pop() + set_accent() + ExtState overrides.
 @noindex
 ]]
 
@@ -27,10 +19,10 @@ local M = {}
 ----------------------------------------------------------------
 -- Namespaces and constants
 ----------------------------------------------------------------
-M.NS_COLORS  = "hsuanice_ImGui_Col"          -- per-key overrides used by apply()
-M.NS_PRESETS = "hsuanice_ImGui_Col_Presets"  -- presets storage (name -> serialized palette)
-M.KEY_PRESETS_LIST = "PRESETS"               -- comma-separated preset names
-M.KEY_ACTIVE       = "ACTIVE"                -- active preset name
+M.NS_COLORS        = "hsuanice_ImGui_Col"           -- per-key overrides used by apply()
+M.NS_PRESETS       = "hsuanice_ImGui_Col_Presets"   -- presets storage (name -> serialized palette)
+M.KEY_PRESETS_LIST = "PRESETS"                      -- comma-separated preset names
+M.KEY_ACTIVE       = "ACTIVE"                       -- active preset name
 
 ----------------------------------------------------------------
 -- Default palette (0xRRGGBBAA). Add/remove keys as you like.
@@ -97,10 +89,8 @@ end
 local function parse_ext_hex(s)
   if not s or s == "" then return nil end
   s = tostring(s):gsub("^0[xX]", "")
-  local n = tonumber(s, 16)
-  return n
+  return tonumber(s, 16)
 end
-
 
 ----------------------------------------------------------------
 -- ExtState: per-key overrides used by apply()
@@ -117,8 +107,8 @@ local function read_overrides()
 end
 
 local function write_overrides(colors, persist)
-  for k,v in pairs(M.colors) do
-    local val = colors[k]
+  for k,_ in pairs(M.colors) do
+    local val = colors and colors[k] or nil
     if val then
       reaper.SetExtState(M.NS_COLORS, k, string.format("%08x", val), persist and true or false)
     else
@@ -127,14 +117,24 @@ local function write_overrides(colors, persist)
   end
 end
 
+-- Public helpers for callers/editor
+function M.get_effective_colors()
+  local effective = copy_table(M.colors)
+  local ov = read_overrides()
+  for k,v in pairs(ov) do effective[k] = v end
+  return effective
+end
+
+function M.set_overrides(colors, persist)
+  write_overrides(colors, persist ~= false)
+end
+
 function M.reset_overrides(persist)
-  for k,_ in pairs(M.colors) do
-    reaper.DeleteExtState(M.NS_COLORS, k, persist and true or false)
-  end
+  write_overrides(nil, persist)
 end
 
 ----------------------------------------------------------------
--- Public: Apply/Pop in scripts
+-- Apply/Pop in scripts
 ----------------------------------------------------------------
 local _push_counts = setmetatable({}, { __mode = "k" })
 
@@ -177,6 +177,7 @@ function M.set_accent(rgba)
   M.colors.SeparatorActive  = rgba
 end
 
+-- Optional helper: convert "#RRGGBB" + alpha(0..1) to U32.
 function M.hex_u32(ImGui, hex, alpha)
   alpha = (alpha == nil) and 1 or alpha
   local h = tostring(hex):gsub("#","")
@@ -192,14 +193,11 @@ end
 local function read_presets_list()
   local s = reaper.GetExtState(M.NS_PRESETS, M.KEY_PRESETS_LIST) or ""
   local list = {}
-  for name in s:gmatch("[^,]+") do
-    list[#list+1] = name
-  end
+  for name in s:gmatch("[^,]+") do list[#list+1] = name end
   return list
 end
 
 local function write_presets_list(list)
-  -- de-dupe
   local seen, out = {}, {}
   for _,name in ipairs(list) do
     if name ~= "" and not seen[name] then
@@ -210,23 +208,16 @@ local function write_presets_list(list)
   reaper.SetExtState(M.NS_PRESETS, M.KEY_PRESETS_LIST, table.concat(out, ","), true)
 end
 
-function M.list_presets()
-  return read_presets_list()
-end
+function M.list_presets() return read_presets_list() end
 
 function M.save_preset(name, colors)
   if not name or name == "" then return false, "empty name" end
-  local pal = colors or (read_overrides())
-  -- if nothing in overrides, save current defaults so it’s explicit
-  if not next(pal) then pal = copy_table(M.colors) end
+  local pal = colors or M.get_effective_colors()
   reaper.SetExtState(M.NS_PRESETS, name, serialize_palette(pal), true)
   local list = read_presets_list()
   local exists = false
   for _,n in ipairs(list) do if n == name then exists = true break end end
-  if not exists then
-    list[#list+1] = name
-    write_presets_list(list)
-  end
+  if not exists then list[#list+1] = name; write_presets_list(list) end
   return true
 end
 
@@ -245,16 +236,14 @@ function M.delete_preset(name)
   for _,n in ipairs(list) do if n ~= name then out[#out+1] = n end end
   write_presets_list(out)
   local active = reaper.GetExtState(M.NS_PRESETS, M.KEY_ACTIVE)
-  if active == name then
-    reaper.DeleteExtState(M.NS_PRESETS, M.KEY_ACTIVE, true)
-  end
+  if active == name then reaper.DeleteExtState(M.NS_PRESETS, M.KEY_ACTIVE, true) end
   return true
 end
 
 function M.activate_preset(name, persist)
   local pal = M.load_preset(name)
   if not pal then return false, "preset not found" end
-  write_overrides(pal, persist ~= false)
+  M.set_overrides(pal, persist ~= false)
   reaper.SetExtState(M.NS_PRESETS, M.KEY_ACTIVE, name, true)
   return true
 end
@@ -262,180 +251,6 @@ end
 function M.get_active_preset()
   local n = reaper.GetExtState(M.NS_PRESETS, M.KEY_ACTIVE)
   return n ~= "" and n or nil
-end
-
-----------------------------------------------------------------
--- Minimal Editor (draw inside your ImGui context)
-----------------------------------------------------------------
--- Usage in a script:
---   local pushed = THEME.apply(ctx, ImGui) -- optional, for preview
---   THEME.editor(ctx, ImGui)               -- draw editor window
---   if pushed>0 then THEME.pop(ctx, ImGui) end
---
--- Or run from the provided "Theme Editor" launcher script.
-
-local EDITOR = { init = false, current = {}, changed = false, active_name = nil, renamed = "" }
-
-local function ensure_editor_state(ImGui)
-  if EDITOR.init then return end
-  -- Start from effective colors (defaults + overrides)
-  local effective = copy_table(M.colors)
-  local ov = read_overrides()
-  for k,v in pairs(ov) do effective[k] = v end
-  EDITOR.current = effective
-  EDITOR.active_name = M.get_active_preset()
-  EDITOR.renamed = EDITOR.active_name or ""
-  EDITOR.init = true
-end
-
--- 替換整個 draw_color_grid(ctx, ImGui) 函式
-local function draw_color_grid(ctx, ImGui)
-  local flags = 0 -- 需要可加：ImGui.ColorEditFlags_NoInputs 等
-  local two_cols = true
-  local i = 0
-
-  for k,_ in pairs(M.colors) do
-    -- 兩欄排版
-    if two_cols and (i % 2 ~= 0) then ImGui.SameLine(ctx) end
-
-    ImGui.BeginGroup(ctx)
-    ImGui.Text(ctx, k)
-
-    -- 以 U32 整數色值搭配底線 API，最多 4 參數（ctx,label,color[,flags]）
-    local rgba = EDITOR.current[k] or M.colors[k] or 0xffffffff
-    local changed, new_rgba = reaper.ImGui_ColorEdit4(ctx, "##"..k, rgba, flags)
-    if changed then
-      EDITOR.current[k] = new_rgba
-      EDITOR.changed = true
-    end
-
-    ImGui.EndGroup(ctx)
-    i = i + 1
-  end
-end
---------------------------------------------
-
-function M.editor(ctx, ImGui)
-  ensure_editor_state(ImGui)
-
-  ImGui.SetNextWindowSize(ctx, 680, 480, ImGui.Cond_FirstUseEver)
-  local open = true
-  local visible; visible, open = ImGui.Begin(ctx, "hsuanice Theme Editor", true,
-    ImGui.WindowFlags_NoCollapse | ImGui.WindowFlags_MenuBar)
-
-  if visible then
-    -- Menu bar: Preset ops
-    if ImGui.BeginMenuBar(ctx) then
-      if ImGui.BeginMenu(ctx, "Preset") then
-        if ImGui.MenuItem(ctx, "Save", "Ctrl+S") then
-          local name = EDITOR.renamed ~= "" and EDITOR.renamed or (EDITOR.active_name or "default")
-          M.save_preset(name, EDITOR.current)
-          EDITOR.active_name = name
-        end
-        if ImGui.MenuItem(ctx, "Save As...") then
-          -- use the input box below in body; here just a shortcut
-        end
-        if ImGui.MenuItem(ctx, "Activate") then
-          if EDITOR.active_name then M.activate_preset(EDITOR.active_name, true) end
-        end
-        if ImGui.MenuItem(ctx, "Delete") then
-          if EDITOR.active_name then
-            M.delete_preset(EDITOR.active_name)
-            EDITOR.active_name = nil
-            EDITOR.renamed = ""
-          end
-        end
-        if ImGui.MenuItem(ctx, "Reset to Defaults") then
-          EDITOR.current = copy_table(M.colors)
-          EDITOR.changed = true
-        end
-        ImGui.EndMenu(ctx)
-      end
-      ImGui.EndMenuBar(ctx)
-    end
-
-    -- Active preset selector + name edit
-    local list = M.list_presets()
-    local current_idx = 0
-    local labels = {"(none)"}
-    for i,n in ipairs(list) do
-      labels[#labels+1] = n
-      if n == EDITOR.active_name then current_idx = i end
-    end
-
-    ImGui.Text(ctx, "Active Preset:")
-    ImGui.SameLine(ctx)
-    if ImGui.BeginCombo(ctx, "##preset", labels[current_idx+1] or "(none)") then
-      if ImGui.Selectable(ctx, "(none)", current_idx==0) then
-        EDITOR.active_name = nil
-        EDITOR.renamed = ""
-      end
-      for i,n in ipairs(list) do
-        local sel = (i == current_idx)
-        if ImGui.Selectable(ctx, n, sel) then
-          EDITOR.active_name = n
-          EDITOR.renamed = n
-          local pal = M.load_preset(n)
-          if pal and next(pal) then
-            EDITOR.current = copy_table(M.colors)
-            for k,v in pairs(pal) do EDITOR.current[k] = v end
-            EDITOR.changed = false
-          end
-        end
-      end
-      ImGui.EndCombo(ctx)
-    end
-
-    ImGui.SameLine(ctx); ImGui.Text(ctx, "Name:")
-    ImGui.SameLine(ctx)
-    local changed, newname = ImGui.InputText(ctx, "##name", EDITOR.renamed, ImGui.InputTextFlags_CharsNoBlank)
-    if changed then EDITOR.renamed = newname end
-
-    ImGui.SameLine(ctx)
-    if ImGui.Button(ctx, "Save") then
-      local name = EDITOR.renamed ~= "" and EDITOR.renamed or (EDITOR.active_name or "default")
-      M.save_preset(name, EDITOR.current)
-      EDITOR.active_name = name
-    end
-    ImGui.SameLine(ctx)
-    if ImGui.Button(ctx, "Save As") then
-      if EDITOR.renamed ~= "" then
-        M.save_preset(EDITOR.renamed, EDITOR.current)
-        EDITOR.active_name = EDITOR.renamed
-      end
-    end
-    ImGui.SameLine(ctx)
-    if ImGui.Button(ctx, "Activate") then
-      if EDITOR.active_name then M.activate_preset(EDITOR.active_name, true) end
-    end
-    ImGui.SameLine(ctx)
-    if ImGui.Button(ctx, "Delete") then
-      if EDITOR.active_name then
-        M.delete_preset(EDITOR.active_name)
-        EDITOR.active_name = nil
-        EDITOR.renamed = ""
-      end
-    end
-    ImGui.SameLine(ctx)
-    if ImGui.Button(ctx, "Reset Defaults") then
-      EDITOR.current = copy_table(M.colors)
-      EDITOR.changed = true
-    end
-
-    ImGui.Separator(ctx)
-    -- Color grid
-    draw_color_grid(ctx, ImGui)
-
-    ImGui.Separator(ctx)
-    ImGui.TextDisabled(ctx, EDITOR.changed and "Changed (not saved)" or "Saved")
-    if EDITOR.active_name then
-      ImGui.SameLine(ctx); ImGui.TextDisabled(ctx, "Active: " .. EDITOR.active_name)
-    end
-
-    ImGui.End(ctx)
-  end
-
-  return open
 end
 
 return M
