@@ -1,6 +1,9 @@
 --[[
 @description hsuanice ReaImGui Theme Color (library + simple editor API)
-@version 0.2.0
+@version 0.2.1
+@changelog
+  v0.2.1  Fix: use reaper.ImGui_ColorEdit4(ctx,label,rgba[,flags]) to avoid arg-count error.
+
 @author hsuanice
 @about
   Shared theme palette + helpers for ReaImGui UIs, plus a minimal editor API.
@@ -299,7 +302,7 @@ local function draw_color_grid(ctx, ImGui)
     ImGui.BeginGroup(ctx)
     ImGui.Text(ctx, k)
     local r,g,b,a = u32_to_d4(ImGui, EDITOR.current[k])
-    local changed, nr,ng,nb,na = ImGui.ColorEdit4(ctx, "##"..k, r,g,b,a, flags)
+    local changed, new_rgba = reaper.ImGui_ColorEdit4(ctx, "##"..k, rgba, flags)
     if changed then
       EDITOR.current[k] = d4_to_u32(ImGui, nr,ng,nb,na)
       EDITOR.changed = true
