@@ -1,11 +1,14 @@
 --[[
 @description hsuanice ReaImGui Theme Color (library only)
-@version 0.3.2
+@version 0.3.2.1
 @author hsuanice
 @about
   Library for shared ReaImGui theme colors: palette, apply/pop, ExtState overrides, presets API.
   GUI/editor code is NOT included; use the dedicated Editor script.
 @changelog
+  v0.3.2.1  Default: set TitleText to white (0xffffffff) so the window title remains readable
+            on dark TitleBg when a preset lacks TitleText. No API changes.
+
   v0.3.2  Fix: restore proper function structure for apply()/pop() (no stray top-level loop/return).
           Safety: validate ImGui context in apply(); keep shim-based Push/Pop for consistent ctx.
           Feature: keep "TitleText" pseudo slot and title push/pop helpers; preset-compatible.
@@ -31,7 +34,7 @@ M.KEY_ACTIVE       = "ACTIVE"                       -- active preset name
 -- Default palette (0xRRGGBBAA). Add/remove keys as you like.
 ----------------------------------------------------------------
 M.colors = {
-  TitleText         = 0x000000ff, -- pseudo slot: title-bar text color (push before Begin, pop after)
+  TitleText         = 0xffffffff, -- pseudo slot: title-bar text color (push before Begin, pop after)
   WindowBg          = 0x292929ff,
   Border            = 0x2a2a2aff,
   Button            = 0x454545ff,
