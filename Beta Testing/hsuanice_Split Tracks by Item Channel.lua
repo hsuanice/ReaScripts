@@ -1,23 +1,23 @@
--- @description hsuanice_Split Tracks by Item Channel
--- @version 0.1.0
--- @author hsuanice
--- @changelog
---   v0.1.0 - Initial release:
---     • Scan all non-hidden tracks and detect mixed item channel counts
---     • Optional auto-split into separate tracks per channel (Mono/Stereo/N-Ch)
---     • Duplicates track settings/FX/routing (no Fixed Lanes), then moves items
---     • Uses take playback channel (source channels + I_CHANMODE)
--- @about
---   Detects tracks that contain items with mixed channel counts (1/2/3+).
---   If the user confirms, the script creates new tracks per channel group:
---     "OriginalName Mono", "OriginalName Stereo", "OriginalName N-Ch" (N>=3),
---   keeps the original track for the most frequent group, and moves items
---   accordingly. It does not use Fixed Lanes; new tracks are made by duplicating
---   the original track (to preserve FX/routing), then clearing items.
--- @link https://www.reaper.fm/sdk/reascript/reascript.php
+--[[
+@description hsuanice_Split Tracks by Item Channel
+@version 0.1.1
+@author hsuanice
+@about
+  Scan all non-hidden tracks and detect mixed item channel counts (1/2/3+).
+  If confirmed, split items into separate tracks per channel group:
+    "OriginalName Mono", "OriginalName Stereo", "OriginalName N-Ch" (N>=3).
+  The original track is duplicated to preserve FX/routing; the duplicates are
+  cleared via API and the relevant items are moved to them. No Fixed Lanes used.
+  Effective channel count is taken from the source; takes with I_CHANMODE set to
+  downmix/left/right are treated as Mono.
 
--- hsuanice_Split Tracks by Item Channel.lua
--- v0.1.0
+@changelog
+  v0.1.1
+  - Make duplicated tracks truly empty via API (no action IDs).
+  - Fix case where the "Mono" track ended up containing all items.
+  v0.1.0
+  - Initial release.
+]]
 
 local r = reaper
 
@@ -72,27 +72,31 @@ local function get_track_index(tr)
   return r.GetMediaTrackInfo_Value(tr, "IP_TRACKNUMBER") - 1
 end
 
-local function deselect_all_tracks()
-  for i = 0, r.CountTracks(0)-1 do
-    r.SetTrackSelected(r.GetTrack(0, i), false)
+-- Delete all items on a given track (robust, no reliance on actions)
+local function delete_all_items_in_track(tr)
+  local n = r.CountTrackMediaItems(tr)
+  for i = n-1, 0, -1 do
+    local it = r.GetTrackMediaItem(tr, i)
+    r.DeleteTrackMediaItem(tr, it)
   end
-end
-
-local function clear_items_on_selected_tracks()
-  r.Main_OnCommand(40129, 0) -- Select all items on selected tracks
-  r.Main_OnCommand(40006, 0) -- Remove items
 end
 
 -- Duplicate a track (preserving settings/FX/routing), then clear copied items.
 local function duplicate_track_empty(tr)
-  deselect_all_tracks()
+  -- Select only the source track and duplicate
+  for i = 0, r.CountTracks(0)-1 do r.SetTrackSelected(r.GetTrack(0, i), false) end
   r.SetTrackSelected(tr, true)
   r.Main_OnCommand(40062, 0) -- Track: Duplicate tracks
+
+  -- The duplicate is placed right after the original
   local idx = get_track_index(tr)
   local new_tr = r.GetTrack(0, idx + 1)
-  deselect_all_tracks()
-  r.SetTrackSelected(new_tr, true)
-  clear_items_on_selected_tracks()
+
+  -- Make absolutely sure it has no items
+  delete_all_items_in_track(new_tr)
+
+  -- Deselect to keep state clean
+  r.SetTrackSelected(new_tr, false)
   return new_tr
 end
 
@@ -172,7 +176,7 @@ local function split_track_by_groups(entry)
   for ch, g in pairs(groups) do
     if ch ~= primary_ch then
       for _, it in ipairs(g.items) do
-        r.MoveMediaItemToTrack(it, target_tracks[ch])
+        r.MoveMediaItemToTrack(it, target_tracks[ch]) -- move (not copy)
       end
     end
   end
