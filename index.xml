@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<index version="1" name="hsuanice Scripts" commit="c007efcdd96030cbfc7f11614e3eff4e4b1145dd">
+<index version="1" name="hsuanice Scripts" commit="f84371df4f8f8f4b13b3edb133c8430d106f1221">
   <category name="Beta Testing">
     <reapack name="hsuanice_BWF TimeReference Embed Tool.lua" type="script" desc="Embed BWF TimeReference to Active take from Take 1 or Current Position TC">
       <version name="0.7.1" author="hsuanice" time="2025-08-14T17:52:57Z">
@@ -749,6 +749,9 @@ v0.3.0  Move all editor GUI out of the library into this script.
         Add width controls (preset combo, name input, color editor).
 v0.2.0  Previous rename and future-proof notes.]]></changelog>
         <source main="main">https://github.com/hsuanice/ReaScripts/raw/c007efcdd96030cbfc7f11614e3eff4e4b1145dd/Beta%20Testing/hsuanice_ReaImGui%20Theme%20Editor.lua</source>
+      </version>
+      <version name="0.3.3" author="hsuanice" time="2025-09-13T13:12:10Z">
+        <source main="main">https://github.com/hsuanice/ReaScripts/raw/f84371df4f8f8f4b13b3edb133c8430d106f1221/Beta%20Testing/hsuanice_ReaImGui%20Theme%20Editor.lua</source>
       </version>
     </reapack>
     <reapack name="hsuanice_Rename Active Take from File Metadata.lua" type="script" desc="ReaImGui - Rename Active Take from Metadata (caret insert + cached preview + copy/export)">
