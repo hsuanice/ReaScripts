@@ -1,6 +1,6 @@
 --[[
 @description hsuanice ReaImGui Theme Editor
-@version 0.4.0
+@version 0.4.1
 @author hsuanice
 @about
   Dedicated GUI for editing the shared ReaImGui theme (colors + presets).
@@ -8,6 +8,13 @@
   Requires: "Scripts/hsuanice Scripts/Library/hsuanice_ReaImGui Theme Color.lua"
 
 @changelog
+  v0.4.1  Save-awareness: the status now reflects whether changes are saved to the current preset
+          (including overwriting an existing preset). Internally tracks a saved snapshot
+          (name + palette) and marks "(not saved)" whenever the in-memory palette differs.
+          Live apply: color edits still update ExtState immediately; the status purely indicates
+          preset persistence. Preset selection auto-activates and also resets the saved snapshot.
+          No library API changes.
+
   v0.4.0  Live preview & global apply:
           - The editor now previews from the in-memory palette (S.current) instead of ExtState.
           - Any color change immediately writes to ExtState via THEME.set_overrides(), so all
@@ -76,14 +83,53 @@ local UI = {
 }
 
 -- 5) Local editor state (kept inside the editor script)
-local S = { init=false, current={}, changed=false, active_name=nil, name_field="" }
+local S = {
+  init=false, current={}, changed=false,
+  active_name=nil, name_field="",
+  saved_name=nil, saved_serial=nil,  -- ★ 新增：最後一次「已儲存」的名稱與內容快照
+  dirty=false,                        -- ★ 新增：是否有未儲存變更
+}
+
+-- ★ 用於比對內容是否與已儲存相同（key 排序，避免順序造成差異）
+local function serialize_palette_for_compare(colors)
+  local keys = {}
+  for k in pairs(colors) do keys[#keys+1] = k end
+  table.sort(keys)
+  local out = {}
+  for _,k in ipairs(keys) do
+    out[#out+1] = string.format("%s=%08x", k, colors[k] or 0)
+  end
+  return table.concat(out, ";")
+end
+
+-- ★ 更新 dirty 狀態（名稱或內容有任何差異就視為未儲存）
+local function update_dirty()
+  local cur_serial = serialize_palette_for_compare(S.current)
+  S.dirty = (cur_serial ~= S.saved_serial) or (S.active_name ~= S.saved_name)
+  S.changed = S.dirty  -- 沿用舊標籤的語意
+end
+
+-- ★ 設定「已儲存」快照（在 Save/Save As/載入 preset 後呼叫）
+local function mark_saved()
+  S.saved_name   = S.active_name
+  S.saved_serial = serialize_palette_for_compare(S.current)
+  update_dirty()
+end
+
 
 local function init_state()
-  S.current     = THEME.get_effective_colors()
   S.active_name = THEME.get_active_preset()
   S.name_field  = S.active_name or ""
-  S.changed     = false
-  S.init        = true
+
+  -- 以預設表為底，再覆蓋 active preset（若有）
+  S.current = {}; for k,v in pairs(THEME.colors) do S.current[k] = v end
+  if S.active_name then
+    local pal = THEME.load_preset(S.active_name)
+    if pal and next(pal) then for k,v in pairs(pal) do S.current[k] = v end end
+  end
+
+  mark_saved()     -- ★ 一開始就把目前狀態當成「已儲存」
+  S.init = true
 end
 
 
@@ -101,8 +147,8 @@ local function draw_color_grid()
     local changed, new_rgba = reaper.ImGui_ColorEdit4(ctx, "##"..k, rgba, flags)
     if changed then
       S.current[k] = new_rgba
-      S.changed = true
-      THEME.set_overrides(S.current, true)  -- ★ live apply to ExtState (global)
+      THEME.set_overrides(S.current, true)  -- live 全域（維持）
+      update_dirty()                        -- ★ 變更後立刻更新狀態
     end
 
     ImGui.EndGroup(ctx)
@@ -138,7 +184,7 @@ local function loop()
 
   if vis then
     -- Row 0: Status line（獨立一行）
-    ImGui.TextDisabled(ctx, S.changed and "(not saved)" or "Saved")
+    ImGui.TextDisabled(ctx, S.dirty and "(Not saved)" or "Saved")
 
     -- Row 1: Preset label + dropdown + Activate/Delete
     local list = THEME.list_presets()
@@ -168,10 +214,11 @@ local function loop()
           if pal and next(pal) then
             S.current = {}; for k,v in pairs(THEME.colors) do S.current[k] = v end
             for k,v in pairs(pal) do S.current[k] = v end
-            S.changed = false
-            THEME.activate_preset(n, true)  -- ← 立刻啟用（寫入 ExtState）
+            THEME.activate_preset(n, true)  -- 自動啟用（寫入 ExtState）
+            mark_saved()                    -- ★ 切換後視為「已儲存」狀態
           end
         end
+
       end
       ImGui.EndCombo(ctx)
     end
@@ -197,19 +244,22 @@ local function loop()
       local nm = (S.name_field ~= "" and S.name_field) or (S.active_name or "default")
       THEME.save_preset(nm, S.current)
       S.active_name = nm
+      mark_saved()  -- ★
     end
-    ImGui.SameLine(ctx)
+
     if ImGui.Button(ctx, "Save As") then
       if S.name_field ~= "" then
         THEME.save_preset(S.name_field, S.current)
         S.active_name = S.name_field
+        mark_saved()  -- ★
       end
     end
+
     ImGui.SameLine(ctx)
     if ImGui.Button(ctx, "Reset Defaults") then
-      S.current = {}
-      for k,v in pairs(THEME.colors) do S.current[k] = v end
-      S.changed = true
+      S.current = {}; for k,v in pairs(THEME.colors) do S.current[k] = v end
+      THEME.set_overrides(S.current, true)  -- 也同步全域
+      update_dirty()                        -- ★ 依目前快照判斷是否「已儲存」
     end
 
     ImGui.Separator(ctx)
