@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<index version="1" name="hsuanice Scripts" commit="28a4e690303fa6bcdeff6bdbfaa911527d3faec6">
+<index version="1" name="hsuanice Scripts" commit="b1804e1d29f3130c01a61479ff9922633a84e902">
   <category name="Beta Testing">
     <reapack name="hsuanice_BWF TimeReference Embed Tool.lua" type="script" desc="Embed BWF TimeReference to Active take from Take 1 or Current Position TC">
       <version name="0.7.1" author="hsuanice" time="2025-08-14T17:52:57Z">
@@ -1039,16 +1039,18 @@ v0.1.0  初版]]></changelog>
         <source main="main">https://github.com/hsuanice/ReaScripts/raw/4564cef34da8a960bfd48c0fc3dbfc66ad2dbd1e/Beta%20Testing/hsuanice_Set%20Time%20to%20Item%20Selection%20Mouse%20Right-Drag%20Release.lua</source>
       </version>
     </reapack>
-    <reapack name="hsuanice_Show Frame Rate.lua" type="script" desc="ReaImGui - Show Project Frame Rate (XR-style font &amp; theme)">
+    <reapack name="hsuanice_Show Frame Rate.lua" type="script" desc="ReaImGui - Show Project Frame Rate (XR-style font &amp; shared theme, warn once if theme missing)">
       <metadata>
         <description><![CDATA[{\rtf1\ansi\deff0{\fonttbl{\f0 \fswiss Helvetica;}{\f1 \fmodern Courier;}}
 {\colortbl;\red255\green0\blue0;\red0\green0\blue255;}
 \widowctrl\hyphauto
 
 {\pard \ql \f0 \sa180 \li0 \fi0 Minimal HUD that displays current project frame rate, styled like X-Raym ReaImGui scripts:\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab ReaImGui version lock, dark theme, 16pt sans-serif font\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab ReaImGui version lock, 16pt sans-serif font\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Shared theme via library: "hsuanice_ReaImGui Theme Color.lua"\par}
 {\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab No title bar, auto-resize, compact and easy to read\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Drag window from title bar only (avoid\u35492 ?\u25302 ?), right-click inside window to close\sa180\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Warn once if theme library is missing, then continue with default colors\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Right-click inside window to close\sa180\par}
 }
 ]]></description>
       </metadata>
@@ -1063,6 +1065,18 @@ v0.1.0  初版]]></changelog>
 v0.1.0
 - Initial minimal HUD (no custom font/theme)]]></changelog>
         <source main="main">https://github.com/hsuanice/ReaScripts/raw/28a4e690303fa6bcdeff6bdbfaa911527d3faec6/Beta%20Testing/hsuanice_Show%20Frame%20Rate.lua</source>
+      </version>
+      <version name="0.2.2" author="hsuanice" time="2025-09-13T06:16:58Z">
+        <changelog><![CDATA[v0.2.2
+- Implement mode B: show a warning dialog once if the theme library is missing, but do not abort.
+v0.2.1
+- Use shared color library: hsuanice_ReaImGui Theme Color.lua (apply/pop per frame)
+- Remove local theme table and push_theme(); add safe fallback if library missing
+v0.2.0
+- XR-style stack: ReaImGui lock (0.9.3.2), dark theme table, 16pt font, docking config
+v0.1.0
+- Initial minimal HUD (no custom font/theme)]]></changelog>
+        <source main="main">https://github.com/hsuanice/ReaScripts/raw/b1804e1d29f3130c01a61479ff9922633a84e902/Beta%20Testing/hsuanice_Show%20Frame%20Rate.lua</source>
       </version>
     </reapack>
     <reapack name="hsuanice_SMPTE UMID Generate and Embed Tool.lua" type="script" desc="SMPTE UMID Generate &amp; Embed Tool (bext:UMID only)">
