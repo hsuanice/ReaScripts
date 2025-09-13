@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<index version="1" name="hsuanice Scripts" commit="851ca4359c89a1fd32b1d970516a4f0be31ef82a">
+<index version="1" name="hsuanice Scripts" commit="492c35e4380f327ccba412b58fd5830c9d7ce4d1">
   <category name="Beta Testing">
     <reapack name="hsuanice_BWF TimeReference Embed Tool.lua" type="script" desc="Embed BWF TimeReference to Active take from Take 1 or Current Position TC">
       <version name="0.7.1" author="hsuanice" time="2025-08-14T17:52:57Z">
@@ -169,6 +169,24 @@ v0.1.0 (2025-09-13)
   - 掃描所有軌（不依選取），每軌找 item 重疊，分類 partial/complete
   - 在相關 items 上加 take marker：Review: Item overlap — partial/complete]]></changelog>
         <source main="main">https://github.com/hsuanice/ReaScripts/raw/851ca4359c89a1fd32b1d970516a4f0be31ef82a/Beta%20Testing/hsuanice_Fix%20Overlap%20Items%20Partial%20or%20Complete.lua</source>
+      </version>
+    </reapack>
+    <reapack name="hsuanice_Fix Split Items at Fade Edges.lua" type="script" desc="hsuanice_Fix Split Items at Fade Edges">
+      <metadata>
+        <description><![CDATA[{\rtf1\ansi\deff0{\fonttbl{\f0 \fswiss Helvetica;}{\f1 \fmodern Courier;}}
+{\colortbl;\red255\green0\blue0;\red0\green0\blue255;}
+\widowctrl\hyphauto
+
+{\pard \ql \f0 \sa180 \li0 \fi0 Flag items whose fade-in or fade-out length is (nearly) the same as the item length. For each hit, add take marker(s) and print a console report.\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 Notes:\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Scans all tracks (no selection needed).\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Uses the larger of manual/auto fade lengths (AUTO = -1 means none).\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Tolerances configurable below (samples and relative %).\sa180\par}
+}
+]]></description>
+      </metadata>
+      <version name="0.2.0" author="hsuanice" time="2025-09-13T16:26:09Z">
+        <source main="main">https://github.com/hsuanice/ReaScripts/raw/492c35e4380f327ccba412b58fd5830c9d7ce4d1/Beta%20Testing/hsuanice_Fix%20Split%20Items%20at%20Fade%20Edges.lua</source>
       </version>
     </reapack>
     <reapack name="hsuanice_Hover Mode Split Item by Selection or Edit or Mouse Cursor.lua" type="script" desc="Hover Mode - Split Items (Selection-first in Hover, Mouse/Edit aware) + Simple Debug Switch">
