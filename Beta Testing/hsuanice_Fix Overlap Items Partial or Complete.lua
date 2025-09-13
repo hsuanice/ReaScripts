@@ -1,8 +1,12 @@
 --[[
 @description hsuanice_Fix Overlap Items Partial or Complete
-@version 0.1.1
+@version 0.1.2
 @author hsuanice
+
 @changelog
+  v0.1.2 (2025-09-13)
+    - Added summary after scan: counts of partial and complete overlaps,
+      or a clear "No overlaps found." message. Summary also appended to TSV.
   v0.1.1 (2025-09-13)
     - Ignore intended crossfades: if the entire overlap lies within
       the left item's fade-out and the right item's fade-in (manual or auto),
@@ -21,7 +25,7 @@
 --]]
 
 local r = reaper
-
+reaper.ShowConsoleMsg(" \n")  -- 注意：不要用 "!SHOW:" 前綴
 ----------------------------------------------------------------
 -- user options
 ----------------------------------------------------------------
@@ -123,63 +127,60 @@ end
 ----------------------------------------------------------------
 -- main scan
 ----------------------------------------------------------------
+
 local function scan_overlaps()
-  local tol = get_sample_tolerance()
-  local rows = {}  -- TSV rows
-  local header = table.concat({
-    "Track", "Take name",
-    "Start (TC)", "End (TC)",
-    "Start (samples)", "End (samples)",
-    "Note"
-  }, "\t")
-  table.insert(rows, header)
+  -- 1) 強制打開 Console 視窗（Show console output）
+  reaper.Main_OnCommand(40440, 0)  -- 40440 = Show console output
+  -- 2) 清空
+  reaper.ClearConsole()
+  -- 3) 連續執行時，重置計數器
+  COUNT_PARTIAL, COUNT_COMPLETE = 0, 0
 
-  local proj_path = r.GetProjectPath("")  -- path only
-  local proj, proj_fn = r.EnumProjects(-1, "")
-  local tcount = r.CountTracks(0)
+  local tol  = get_sample_tolerance()
+  local rows = {}
+  table.insert(rows, table.concat({
+    "Track","Take name","Start (TC)","End (TC)","Start (samples)","End (samples)","Note"
+  }, "\t"))
 
+  local proj_path = reaper.GetProjectPath("")
+  local tcount    = reaper.CountTracks(0)
+
+  -- === 掃描並累計 ===
   for ti = 0, tcount-1 do
-    local tr = r.GetTrack(0, ti)
+    local tr = reaper.GetTrack(0, ti)
     if tr and get_track_visibility(tr) then
-      local _, tr_name = r.GetSetMediaTrackInfo_String(tr, "P_NAME", "", false)
-
-      -- collect items on this track
-      local n_it = r.CountTrackMediaItems(tr)
+      local _, tr_name = reaper.GetSetMediaTrackInfo_String(tr, "P_NAME", "", false)
+      local n_it = reaper.CountTrackMediaItems(tr)
       if n_it > 1 then
         local items = {}
         for i = 0, n_it-1 do
-          local it = r.GetTrackMediaItem(tr, i)
+          local it = reaper.GetTrackMediaItem(tr, i)
           local s, e = get_item_bounds(it)
           items[#items+1] = { it=it, s=s, e=e }
         end
         table.sort(items, function(a,b) return a.s < b.s end)
 
-        -- sweep line: compare current with next
         for i = 1, #items-1 do
-          local A = items[i]
-          local B = items[i+1]
-
-          -- if next starts before current ends -> overlap
+          local A, B = items[i], items[i+1]
           if B.s < (A.e - tol) then
-            -- 交叉淡變的重疊：忽略
-            if is_crossfade(A, B, tol) then
-              goto continue_pair
-            end
+            -- 交叉淡變：整段重疊都落於 A 淡出 + B 淡入內 → 忽略
+            if is_crossfade(A, B, tol) then goto continue_pair end
 
             local overlap_start = math.max(A.s, B.s)
-            local overlap_end   = math.min(A.e, B.e)
             local is_complete = (math.abs(A.s - B.s) <= tol) and (math.abs(A.e - B.e) <= tol)
 
+            if is_complete then COUNT_COMPLETE = COUNT_COMPLETE + 1
+            else COUNT_PARTIAL = COUNT_PARTIAL + 1 end
 
             local note = is_complete and "Item overlap — complete" or "Item overlap — partial"
 
-            -- add take markers on BOTH related items at overlap start
+            -- 兩個相關 items 都加 take marker（重疊起點）
             add_overlap_marker(A.it, overlap_start, "Review: " .. note)
             add_overlap_marker(B.it, overlap_start, "Review: " .. note)
 
-            -- report both items as separate rows (方便之後各別定位)
+            -- 報表：各別列 A / B，方便定位
             for _, node in ipairs({A,B}) do
-              local take = r.GetActiveTake(node.it)
+              local take = reaper.GetActiveTake(node.it)
               local take_name = get_take_name_safe(take)
               table.insert(rows, table.concat({
                 tr_name or "",
@@ -189,29 +190,36 @@ local function scan_overlaps()
                 note
               }, "\t"))
             end
-            ::continue_pair::
           end
+          ::continue_pair::
         end
       end
     end
   end
 
-  -- write console + file
-  r.ClearConsole()
+  -- === 掃描完成 → 產生 Summary ===
+  local total = COUNT_PARTIAL + COUNT_COMPLETE
+  table.insert(rows, "")
+  table.insert(rows, "=== Summary ===")
+  if total == 0 then
+    table.insert(rows, "No overlaps found.")
+  else
+    table.insert(rows, string.format("Partial overlaps\t%d",  COUNT_PARTIAL))
+    table.insert(rows, string.format("Complete overlaps\t%d", COUNT_COMPLETE))
+    table.insert(rows, string.format("Total\t%d",            total))
+  end
+
+  -- === Console 輸出（不要再 ClearConsole 了）===
   msg("=== Overlap report (per track) ===")
   for _, line in ipairs(rows) do msg(line) end
 
+  -- === TSV 一次寫完（含 Summary）===
   if WRITE_TSV then
     local sep = package.config:sub(1,1)
     local out = (proj_path or "") .. sep .. TSV_FILENAME
     local f = io.open(out, "w")
-    if f then
-      f:write(table.concat(rows, "\n"))
-      f:close()
-      msg("\nSaved TSV: " .. out)
-    else
-      msg("\n[WARN] Cannot write TSV file: " .. tostring(out))
-    end
+    if f then f:write(table.concat(rows, "\n")); f:close(); msg("\nSaved TSV: " .. out)
+    else msg("\n[WARN] Cannot write TSV file: " .. tostring(out)) end
   end
 end
 
