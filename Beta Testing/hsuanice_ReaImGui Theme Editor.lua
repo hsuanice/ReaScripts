@@ -1,6 +1,6 @@
 --[[
 @description hsuanice ReaImGui Theme Editor
-@version 0.3.3
+@version 0.3.4
 @author hsuanice
 @about
   Dedicated GUI for editing the shared ReaImGui theme (colors + presets).
@@ -8,6 +8,13 @@
   Requires: "Scripts/hsuanice Scripts/Library/hsuanice_ReaImGui Theme Color.lua"
 
 @changelog
+  v0.3.4  Layout: dedicate a top status line for "(not saved) / Saved"; move the "Preset:" row below it.
+          Preset: replace the titlebar Preset menu/button with a plain "Preset:" label + dropdown.
+          Behavior: auto-activate the selected preset immediately; remove the separate Activate button.
+          Spacing: remove the extra blank line between the Preset and Name rows.
+          Keyboard: press ESC to close the editor window.
+          No API changes; presets and color grid behavior are unchanged.
+
   v0.3.3  Layout: move the "(not saved) · Active: <name>" status to its own top line.
           Preset row: reintroduce a plain "Preset:" label before the dropdown (no button),
           keeping the unified width for the dropdown (`field_w`). No API changes.
@@ -101,33 +108,18 @@ local function loop()
   local vis; vis, open = ImGui.Begin(ctx, "hsuanice Theme Editor", true,
     ImGui.WindowFlags_NoCollapse | ImGui.WindowFlags_MenuBar)
 
-  -- 一進 Begin 立刻還原，避免內文字色被換掉
   if did_title then THEME.pop_title_text(ctx, ImGui) end
 
-  -- 現在開始才 PushFont（在視窗 frame 內）
+  -- ESC 關閉（僅當視窗被聚焦時）
+  if ImGui.IsWindowFocused(ctx) and ImGui.IsKeyPressed(ctx, ImGui.Key_Escape) then
+    open = false
+  end
+
   ImGui.PushFont(ctx, font)
 
   if vis then
-    -- Menu Bar (optional quick ops)
-    if ImGui.BeginMenuBar(ctx) then
-      if ImGui.BeginMenu(ctx, "Preset") then
-        if ImGui.MenuItem(ctx, "Activate") then
-          if S.active_name then THEME.activate_preset(S.active_name, true) end
-        end
-        if ImGui.MenuItem(ctx, "Reset to Defaults") then
-          S.current = {}
-          for k,v in pairs(THEME.colors) do S.current[k] = v end
-          S.changed = true
-        end
-        ImGui.EndMenu(ctx)
-      end
-      ImGui.EndMenuBar(ctx)
-    end
-
     -- Row 0: Status line（獨立一行）
     ImGui.TextDisabled(ctx, S.changed and "(not saved)" or "Saved")
-    ImGui.SameLine(ctx)
-    ImGui.TextDisabled(ctx, "Active: " .. (S.active_name or "(none)"))
 
     -- Row 1: Preset label + dropdown + Activate/Delete
     local list = THEME.list_presets()
@@ -137,12 +129,16 @@ local function loop()
       if n == S.active_name then current_idx = i end
     end
 
-    ImGui.Text(ctx, "Preset:")                 -- 純文字標籤
+    ImGui.Text(ctx, "Preset:")
     ImGui.SameLine(ctx)
-    ImGui.SetNextItemWidth(ctx, UI.field_w)    -- 下拉寬度統一
+    ImGui.SetNextItemWidth(ctx, UI.field_w)
     if ImGui.BeginCombo(ctx, "##preset", labels[current_idx+1] or "(none)") then
       if ImGui.Selectable(ctx, "(none)", current_idx==0) then
-        S.active_name = nil; S.name_field = ""
+        -- 取消啟用：清空 active，回到預設色票（不寫入 ExtState）
+        S.active_name = nil
+        S.name_field  = ""
+        S.current = {}; for k,v in pairs(THEME.colors) do S.current[k] = v end
+        S.changed = false
       end
       for i,n in ipairs(list) do
         local sel = (i == current_idx)
@@ -154,16 +150,14 @@ local function loop()
             S.current = {}; for k,v in pairs(THEME.colors) do S.current[k] = v end
             for k,v in pairs(pal) do S.current[k] = v end
             S.changed = false
+            THEME.activate_preset(n, true)  -- ← 立刻啟用（寫入 ExtState）
           end
         end
       end
       ImGui.EndCombo(ctx)
     end
 
-    ImGui.SameLine(ctx)
-    if ImGui.Button(ctx, "Activate") then
-      if S.active_name then THEME.activate_preset(S.active_name, true) end
-    end
+    -- （移除 Activate 按鈕）
     ImGui.SameLine(ctx)
     if ImGui.Button(ctx, "Delete") then
       if S.active_name then
@@ -174,7 +168,6 @@ local function loop()
     end
 
     -- Row 2: Name + Save/Save As/Reset
-    ImGui.NewLine(ctx)
     ImGui.Text(ctx, "Name:"); ImGui.SameLine(ctx)
     ImGui.SetNextItemWidth(ctx, UI.field_w)  -- 統一寬度
     local changed, newname = ImGui.InputText(ctx, "##name", S.name_field, ImGui.InputTextFlags_CharsNoBlank)
