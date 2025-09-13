@@ -1,15 +1,18 @@
 --[[
 @description hsuanice ReaImGui Theme Color (library only)
-@version 0.3.0
+@version 0.3.2
 @author hsuanice
 @about
   Library for shared ReaImGui theme colors: palette, apply/pop, ExtState overrides, presets API.
-  GUI/editor code has been removed from the library; use a dedicated Editor script instead.
+  GUI/editor code is NOT included; use the dedicated Editor script.
 @changelog
-  v0.3.0  Split responsibilities: remove all editor/GUI from the library. Keep only data & APIs.
-          Add helpers: get_effective_colors(), set_overrides(colors[, persist]).
-  v0.2.2  Fixes for ColorEdit and robustness (now handled by the external editor).
-  v0.2.0  Presets API; minimal GUI editor (removed in v0.3.0).
+  v0.3.2  Fix: restore proper function structure for apply()/pop() (no stray top-level loop/return).
+          Safety: validate ImGui context in apply(); keep shim-based Push/Pop for consistent ctx.
+          Feature: keep "TitleText" pseudo slot and title push/pop helpers; preset-compatible.
+  v0.3.1  Add "TitleText" pseudo slot and helpers to color only the window title text.
+          Skip TitleText in apply() since it has no Col_* enum.
+  v0.3.0  Split responsibilities: library = data/APIs only. Add get_effective_colors()/set_overrides().
+  v0.2.x  Robustness fixes previously handled inside the editor; now moved out.
   v0.1.0  Initial: default palette + apply()/pop() + set_accent() + ExtState overrides.
 @noindex
 ]]
@@ -28,6 +31,7 @@ M.KEY_ACTIVE       = "ACTIVE"                       -- active preset name
 -- Default palette (0xRRGGBBAA). Add/remove keys as you like.
 ----------------------------------------------------------------
 M.colors = {
+  TitleText         = 0x000000ff, -- pseudo slot: title-bar text color (push before Begin, pop after)
   WindowBg          = 0x292929ff,
   Border            = 0x2a2a2aff,
   Button            = 0x454545ff,
@@ -60,7 +64,6 @@ local function copy_table(t)
 end
 
 local function serialize_palette(colors)
-  -- key=hex;key=hex; ...
   local parts = {}
   for k,v in pairs(colors) do
     parts[#parts+1] = string.format("%s=%08x", k, v)
@@ -79,17 +82,17 @@ local function deserialize_palette(s)
   return t
 end
 
--- internal: resolve ImGui color enum by key, tolerant to both styles.
-local function col_enum(ImGui, key)
-  return (ImGui["Col_" .. key])
-      or (reaper and reaper["ImGui_Col_" .. key] and reaper["ImGui_Col_" .. key]())
-end
-
--- internal: parse hex string from ExtState; accept "0xAABBCCDD" or "AABBCCDD"
+-- parse hex string from ExtState; accept "0xAABBCCDD" or "AABBCCDD"
 local function parse_ext_hex(s)
   if not s or s == "" then return nil end
   s = tostring(s):gsub("^0[xX]", "")
   return tonumber(s, 16)
+end
+
+-- resolve ImGui color enum index by key (prefer shim constants, fallback to raw getters)
+local function col_index(ImGui, key)
+  return (ImGui and ImGui["Col_" .. key])
+      or (reaper["ImGui_Col_" .. key] and reaper["ImGui_Col_" .. key]())
 end
 
 ----------------------------------------------------------------
@@ -139,6 +142,9 @@ end
 local _push_counts = setmetatable({}, { __mode = "k" })
 
 function M.apply(ctx, ImGui, opts)
+  -- Validate ctx (defensive)
+  if not reaper.ImGui_ValidatePtr(ctx, 'ImGui_Context*') then return 0 end  -- doc: ValidatePtr :contentReference[oaicite:3]{index=3}
+
   opts = opts or {}
   local use_ext   = (opts.use_extstate ~= false)
   local overrides = opts.overrides or {}
@@ -146,23 +152,25 @@ function M.apply(ctx, ImGui, opts)
 
   local pushed = 0
   for k, def in pairs(M.colors) do
-    -- overrides[k] = false → skip pushing
-    if overrides[k] ~= false then
+    -- TitleText 是自訂虛擬槽（沒有 Col_*），在這裡略過
+    if k ~= "TitleText" and overrides[k] ~= false then
       local color = overrides[k] or from_ext[k] or def
-      local ce = col_enum(ImGui, k)
-      if ce then
-        ImGui.PushStyleColor(ctx, ce, color)
+      local idx = col_index(ImGui, k)
+      if idx then
+        -- Use shim Push/Pop to stay in the same API layer; doc: PushStyleColor(ctx, idx, col) :contentReference[oaicite:4]{index=4}
+        ImGui.PushStyleColor(ctx, idx, color)
         pushed = pushed + 1
       end
     end
   end
+
   _push_counts[ctx] = pushed
   return pushed
 end
 
 function M.pop(ctx, ImGui)
   local n = _push_counts[ctx] or 0
-  if n > 0 then ImGui.PopStyleColor(ctx, n) end
+  if n > 0 then ImGui.PopStyleColor(ctx, n) end  -- doc: PopStyleColor(ctx, count) :contentReference[oaicite:5]{index=5}
   _push_counts[ctx] = 0
 end
 
@@ -178,13 +186,34 @@ function M.set_accent(rgba)
 end
 
 -- Optional helper: convert "#RRGGBB" + alpha(0..1) to U32.
-function M.hex_u32(ImGui, hex, alpha)
+function M.hex_u32(_ImGui_unused, hex, alpha)
   alpha = (alpha == nil) and 1 or alpha
   local h = tostring(hex):gsub("#","")
   local r = tonumber(h:sub(1,2),16) or 0
   local g = tonumber(h:sub(3,4),16) or 0
   local b = tonumber(h:sub(5,6),16) or 0
-  return ImGui.ColorConvertDouble4ToU32(r/255, g/255, b/255, alpha)
+  return reaper.ImGui_ColorConvertDouble4ToU32(r/255, g/255, b/255, alpha)
+end
+
+-- Title text color helpers (pseudo slot)
+local _title_pushed = setmetatable({}, { __mode = "k" })
+
+function M.push_title_text(ctx, ImGui)
+  if not reaper.ImGui_ValidatePtr(ctx, 'ImGui_Context*') then return false end
+  local eff = M.get_effective_colors()
+  local col = eff.TitleText or 0xffffffff
+  ImGui.PushStyleColor(ctx, ImGui.Col_Text, col) -- only affects the title when pushed before Begin()
+  _title_pushed[ctx] = true
+  return true
+end
+
+function M.pop_title_text(ctx, ImGui)
+  if _title_pushed[ctx] then
+    ImGui.PopStyleColor(ctx, 1)
+    _title_pushed[ctx] = false
+    return true
+  end
+  return false
 end
 
 ----------------------------------------------------------------
