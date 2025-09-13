@@ -1,21 +1,26 @@
 --[[
 @description hsuanice ReaImGui Theme Editor
-@version 0.3.1
+@version 0.3.3
 @author hsuanice
 @about
   Dedicated GUI for editing the shared ReaImGui theme (colors + presets).
   Library holds only data/APIs; all UI belongs here.
   Requires: "Scripts/hsuanice Scripts/Library/hsuanice_ReaImGui Theme Color.lua"
+
 @changelog
-  v0.3.1  Stability: move PushFont to after Begin() and PopFont before End() to ensure a valid frame/context.
-          Title bar text color: integrate the library's TitleText via push before Begin() and pop right after,
-          so only the window title text changes while the body follows the theme.
-          Lifecycle: remove duplicated Begin()/apply() block; keep a single window per frame.
-          Loading: deduplicate library loading and keep a single, correct library path usage.
-          UI: keep width controls for preset combo/name/color editors; no breaking UI logic changes.
-  v0.3.0  Move all editor GUI out of the library into this script.
-          Add width controls (preset combo, name input, color editor).
+  v0.3.3  Layout: move the "(not saved) · Active: <name>" status to its own top line.
+          Preset row: reintroduce a plain "Preset:" label before the dropdown (no button),
+          keeping the unified width for the dropdown (`field_w`). No API changes.
+  v0.3.2  UI cleanup: remove the redundant "Preset" label below the title bar.
+          Move the "Saved / (not saved) · Active: <name>" status to that header slot.
+          Unify widths for the Preset dropdown and Name input using a single `field_w`.
+          No API changes; color grid and preset actions unchanged.
+  v0.3.1  Stability: move PushFont to after Begin() and PopFont before End().
+          Integrate TitleText (push before Begin, pop right after) to color only the title bar text.
+          Remove duplicated Begin/apply block and deduplicate library loading.
+  v0.3.0  Move all editor GUI out of the library into this script; add width controls.
   v0.2.0  Previous rename and future-proof notes.
+
 ]]
 
 -- 1) Load ReaImGui (lock version)
@@ -49,9 +54,8 @@ ImGui.Attach(ctx, font)  -- 很重要：把字型綁到該 ctx【Attach】
 
 -- 4) UI width presets (adjust here)
 local UI = {
-  preset_combo_w = 140,
-  name_input_w   = 160,
-  color_edit_w   = 200, -- overall width for ColorEdit4 (controls R/G/B/A widths)
+  field_w       = 160,  -- NEW: 統一給 Preset 下拉與 Name 輸入用
+  color_edit_w  = 200,
 }
 
 -- 5) Local editor state (kept inside the editor script)
@@ -120,7 +124,12 @@ local function loop()
       ImGui.EndMenuBar(ctx)
     end
 
-    -- Row 1: preset dropdown + Activate/Delete
+    -- Row 0: Status line（獨立一行）
+    ImGui.TextDisabled(ctx, S.changed and "(not saved)" or "Saved")
+    ImGui.SameLine(ctx)
+    ImGui.TextDisabled(ctx, "Active: " .. (S.active_name or "(none)"))
+
+    -- Row 1: Preset label + dropdown + Activate/Delete
     local list = THEME.list_presets()
     local labels = {"(none)"}; local current_idx = 0
     for i,n in ipairs(list) do
@@ -128,9 +137,9 @@ local function loop()
       if n == S.active_name then current_idx = i end
     end
 
-    ImGui.Text(ctx, "Preset:")
+    ImGui.Text(ctx, "Preset:")                 -- 純文字標籤
     ImGui.SameLine(ctx)
-    ImGui.SetNextItemWidth(ctx, UI.preset_combo_w)
+    ImGui.SetNextItemWidth(ctx, UI.field_w)    -- 下拉寬度統一
     if ImGui.BeginCombo(ctx, "##preset", labels[current_idx+1] or "(none)") then
       if ImGui.Selectable(ctx, "(none)", current_idx==0) then
         S.active_name = nil; S.name_field = ""
@@ -142,8 +151,7 @@ local function loop()
           S.name_field  = n
           local pal = THEME.load_preset(n)
           if pal and next(pal) then
-            S.current = {}
-            for k,v in pairs(THEME.colors) do S.current[k] = v end
+            S.current = {}; for k,v in pairs(THEME.colors) do S.current[k] = v end
             for k,v in pairs(pal) do S.current[k] = v end
             S.changed = false
           end
@@ -168,7 +176,7 @@ local function loop()
     -- Row 2: Name + Save/Save As/Reset
     ImGui.NewLine(ctx)
     ImGui.Text(ctx, "Name:"); ImGui.SameLine(ctx)
-    ImGui.SetNextItemWidth(ctx, UI.name_input_w)
+    ImGui.SetNextItemWidth(ctx, UI.field_w)  -- 統一寬度
     local changed, newname = ImGui.InputText(ctx, "##name", S.name_field, ImGui.InputTextFlags_CharsNoBlank)
     if changed then S.name_field = newname end
 
@@ -196,12 +204,6 @@ local function loop()
 
     -- Color grid
     draw_color_grid()
-
-    ImGui.Separator(ctx)
-    ImGui.TextDisabled(ctx, S.changed and "(not saved)" or "Saved")
-    if S.active_name then
-      ImGui.SameLine(ctx); ImGui.TextDisabled(ctx, "Active: " .. S.active_name)
-    end
 
     ImGui.PopFont(ctx)
     ImGui.End(ctx)
