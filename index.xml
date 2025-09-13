@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<index version="1" name="hsuanice Scripts" commit="46e6eb4e4e73512bd0736628aca6e4ab4bd95522">
+<index version="1" name="hsuanice Scripts" commit="7ae674637cae2fcb5feb225ed62f3c1e59ab7b6f">
   <category name="Beta Testing">
     <reapack name="hsuanice_BWF TimeReference Embed Tool.lua" type="script" desc="Embed BWF TimeReference to Active take from Take 1 or Current Position TC">
       <version name="0.7.1" author="hsuanice" time="2025-08-14T17:52:57Z">
@@ -758,6 +758,9 @@ v0.2.0  Previous rename and future-proof notes.]]></changelog>
       </version>
       <version name="0.4.0" author="hsuanice" time="2025-09-13T13:37:04Z">
         <source main="main">https://github.com/hsuanice/ReaScripts/raw/46e6eb4e4e73512bd0736628aca6e4ab4bd95522/Beta%20Testing/hsuanice_ReaImGui%20Theme%20Editor.lua</source>
+      </version>
+      <version name="0.4.1" author="hsuanice" time="2025-09-13T13:47:36Z">
+        <source main="main">https://github.com/hsuanice/ReaScripts/raw/7ae674637cae2fcb5feb225ed62f3c1e59ab7b6f/Beta%20Testing/hsuanice_ReaImGui%20Theme%20Editor.lua</source>
       </version>
     </reapack>
     <reapack name="hsuanice_Rename Active Take from File Metadata.lua" type="script" desc="ReaImGui - Rename Active Take from Metadata (caret insert + cached preview + copy/export)">
