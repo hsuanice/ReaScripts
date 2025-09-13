@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<index version="1" name="hsuanice Scripts" commit="4de38b1f03fd4a2a7762000db56110a033247d1c">
+<index version="1" name="hsuanice Scripts" commit="4e73e743da51ea7f24a920dafd36dc2966f294c4">
   <category name="Beta Testing">
     <reapack name="hsuanice_BWF TimeReference Embed Tool.lua" type="script" desc="Embed BWF TimeReference to Active take from Take 1 or Current Position TC">
       <version name="0.7.1" author="hsuanice" time="2025-08-14T17:52:57Z">
@@ -34,6 +34,9 @@
       </version>
       <version name="0.2.0" author="hsuanice" time="2025-09-11T05:13:19Z">
         <source main="main">https://github.com/hsuanice/ReaScripts/raw/919cdc12ae486efc4b9819b435a9fb3d88c3bc75/Beta%20Testing/hsuanice_Count%20Item%20and%20Track%20and%20Toggle%20Show%20Item%20Details.lua</source>
+      </version>
+      <version name="0.2.0.1" author="hsuanice" time="2025-09-13T11:18:44Z">
+        <source main="main">https://github.com/hsuanice/ReaScripts/raw/4e73e743da51ea7f24a920dafd36dc2966f294c4/Beta%20Testing/hsuanice_Count%20Item%20and%20Track%20and%20Toggle%20Show%20Item%20Details.lua</source>
       </version>
     </reapack>
     <reapack name="hsuanice_Delete Selected Tracks with Warning.lua" type="script" desc="Delete Selected Tracks (safe; prompt if content/folders/FX/routing; show selection, children &amp; FX/routing counts)">
@@ -1125,6 +1128,9 @@ v0.1.0
       </version>
       <version name="0.1.4" author="hsuanice" time="2025-09-12T11:29:00Z">
         <source main="main">https://github.com/hsuanice/ReaScripts/raw/762c91df46b876744d9dbd132a61c29de78ffc24/Beta%20Testing/hsuanice_SMPTE%20UMID%20Generate%20and%20Embed%20Tool.lua</source>
+      </version>
+      <version name="0.1.4.1" author="hsuanice" time="2025-09-13T11:17:46Z">
+        <source main="main">https://github.com/hsuanice/ReaScripts/raw/5ca136c528980f67b4f42b0aa33e3f50d2c134e6/Beta%20Testing/hsuanice_SMPTE%20UMID%20Generate%20and%20Embed%20Tool.lua</source>
       </version>
     </reapack>
     <reapack name="hsuanice_Track and Razor Item Link like Pro Tools.lua" type="script" desc="Track and Razor Item Link like Pro Tools (performance edition)">
