@@ -1,51 +1,36 @@
 --[[
 @description hsuanice_Fix Overlap Items Partial or Complete
-@version 0.1.2
+@version 0.1.3
 @author hsuanice
-
 @changelog
+  v0.1.3 (2025-09-13)
+    - 移除 TSV 相關功能與檔案輸出
+    - 一開始先強制打開 Console，再清空，避免某些環境下視窗不彈出
+    - Summary 改為掃描結束後再印（避免顯示 0 計數）
   v0.1.2 (2025-09-13)
-    - Added summary after scan: counts of partial and complete overlaps,
-      or a clear "No overlaps found." message. Summary also appended to TSV.
+    - 掃描結束印出 summary（partial / complete / total）
   v0.1.1 (2025-09-13)
-    - Ignore intended crossfades: if the entire overlap lies within
-      the left item's fade-out and the right item's fade-in (manual or auto),
-      the pair is skipped (no marker, no report).
+    - 忽略「純交叉淡變」造成的重疊（手動/自動淡入淡出都納入）
   v0.1.0 (2025-09-13)
-    - Initial release: scan all (non-hidden) tracks for item overlaps per track.
-    - Classifies as Partial or Complete overlap with sample-accurate tolerance.
-    - Adds take markers: "Review: Item overlap — partial/complete".
-    - Prints a TSV report to Console and saves a copy next to the project (Overlaps.tsv).
-@about
-  Finds item overlaps on each track (ignores cross-track). For every overlapping pair:
-  - Marks BOTH related items with a take marker at the overlap start position.
-  - Writes a TSV report with Track | Take | Start/End (TC & samples) | Note.
-  - No auto-fix yet. You can manually resolve using the take markers.
-  Future: options to trim, heal, or promote one of the items automatically.
+    - 掃描所有軌（不依選取），每軌找 item 重疊，分類 partial/complete
+    - 在相關 items 上加 take marker：Review: Item overlap — partial/complete
 --]]
 
 local r = reaper
-reaper.ShowConsoleMsg(" \n")  -- 注意：不要用 "!SHOW:" 前綴
-----------------------------------------------------------------
--- user options
-----------------------------------------------------------------
-local DRY_RUN           = true    -- this version only reports/marks; no destructive edit
-local WRITE_TSV         = true
-local TSV_FILENAME      = "Overlaps.tsv"
--- tolerance: treat times within ≤ 1 sample as equal (avoid float jitter)
+
+-- ========= User options =========
+local DRY_RUN = true -- 目前只標記與列出，不做自動修復
+
+-- ========= Utils =========
+local function msg(s) r.ShowConsoleMsg(tostring(s).."\n") end
+local function fmt_tc(sec)  return r.format_timestr_pos(sec, "", 5) end  -- h:m:s:f
+local function fmt_smp(sec) return r.format_timestr_pos(sec, "", 4) end  -- samples
+
 local function get_sample_tolerance()
-  local sr = r.GetSetProjectInfo(0, "PROJECT_SRATE", 0, false)  -- 0 if "project default"
+  local sr = r.GetSetProjectInfo(0, "PROJECT_SRATE", 0, false)
   if sr == 0 or sr < 1 then sr = 48000 end
   return 1.0 / sr
 end
-
-----------------------------------------------------------------
--- utils
-----------------------------------------------------------------
-local function fmt_tc(sec)  return r.format_timestr_pos(sec, "", 5) end   -- h:m:s:f
-local function fmt_smp(sec) return r.format_timestr_pos(sec, "", 4) end   -- samples
-
-local function msg(s) r.ShowConsoleMsg(tostring(s) .. "\n") end
 
 local function get_item_bounds(it)
   local pos = r.GetMediaItemInfo_Value(it, "D_POSITION")
@@ -59,27 +44,26 @@ local function get_take_name_safe(tk)
   return name or ""
 end
 
--- convert a project-time position to the take's source time for SetTakeMarker
+-- 把「專案時間」換成 take/source 時間，供 SetTakeMarker 使用
 local function projtime_to_taketime(take, item, project_pos)
   if not take or not item then return 0 end
   local item_pos = r.GetMediaItemInfo_Value(item, "D_POSITION")
   local rate     = r.GetMediaItemTakeInfo_Value(take, "D_PLAYRATE")
   if rate == 0 then rate = 1 end
   local offs     = r.GetMediaItemTakeInfo_Value(take, "D_STARTOFFS")
-  local take_time = (project_pos - item_pos) / rate + offs
-  if take_time < 0 then take_time = 0 end
-  return take_time
+  local tpos = (project_pos - item_pos) / rate + offs
+  if tpos < 0 then tpos = 0 end
+  return tpos
 end
 
 local function add_overlap_marker(item, proj_pos, label)
   local take = r.GetActiveTake(item)
   if not take then return end
   local tpos = projtime_to_taketime(take, item, proj_pos)
-  -- idx=-1 appends; position is in TAKE (source) time
-  r.SetTakeMarker(take, -1, label, tpos)
+  r.SetTakeMarker(take, -1, label, tpos) -- -1=append
 end
 
--- 有效淡變長度（手動與自動取最大，AUTO=-1 視為 0）
+-- 取有效淡入/淡出秒數（手動與自動取最大，AUTO=-1 視為 0）
 local function effective_fadesec(it)
   local fi  = r.GetMediaItemInfo_Value(it, "D_FADEINLEN") or 0
   local fo  = r.GetMediaItemInfo_Value(it, "D_FADEOUTLEN") or 0
@@ -90,145 +74,112 @@ local function effective_fadesec(it)
   return math.max(fi, fia), math.max(fo, foa) -- in_len, out_len
 end
 
--- 判斷 A(左) 與 B(右) 的重疊是否屬於「交叉淡變」
+-- 判斷 A(左) 與 B(右) 的重疊是否屬於「交叉淡變」→ 若是就忽略
 local function is_crossfade(A, B, tol)
-  -- 先確保 A 在左、B 在右
   if not (A.s <= B.s) then return false end
   local overlap_start = math.max(A.s, B.s)
   local overlap_end   = math.min(A.e, B.e)
   if overlap_end <= overlap_start + tol then return false end
 
-  local in_len_B, out_len_A = nil, nil
   local inA, outA = effective_fadesec(A.it)
   local inB, outB = effective_fadesec(B.it)
-  -- A 的有效淡出、B 的有效淡入
-  out_len_A = outA
-  in_len_B  = inB
+  local out_len_A = outA
+  local in_len_B  = inB
 
-  -- A 的淡出開始點、B 的淡入結束點（專案時間）
   local A_fadeout_start = A.e - out_len_A
   local B_fadein_end    = B.s + in_len_B
 
-  -- crossfade 定義：重疊區完全位於 A 的淡出區間與 B 的淡入區間之內
   local within_A = overlap_start >= (A_fadeout_start - tol)
   local within_B = overlap_end   <= (B_fadein_end    + tol)
 
   return (out_len_A > tol) and (in_len_B > tol) and within_A and within_B
 end
 
-
-local function get_track_visibility(tr)
-  -- TCP visibility bitfield: &1 = visible in TCP, &2 = NOT visible in Mixer
-  -- 我們只需要 TCP 可見；若你確定專案「沒有隱藏」，也可以略過這個檢查。
-  local vis = r.GetMediaTrackInfo_Value(tr, "B_SHOWINTCP")
-  return vis == 1
-end
-
-----------------------------------------------------------------
--- main scan
-----------------------------------------------------------------
+-- ========= Main =========
+local COUNT_PARTIAL  = 0
+local COUNT_COMPLETE = 0
 
 local function scan_overlaps()
-  -- 1) 強制打開 Console 視窗（Show console output）
-  reaper.Main_OnCommand(40440, 0)  -- 40440 = Show console output
-  -- 2) 清空
-  reaper.ClearConsole()
-  -- 3) 連續執行時，重置計數器
-  COUNT_PARTIAL, COUNT_COMPLETE = 0, 0
+  local tol = get_sample_tolerance()
+  local lines = {}
+  lines[#lines+1] = "Track\tTake name\tStart (TC)\tEnd (TC)\tStart (samples)\tEnd (samples)\tNote"
 
-  local tol  = get_sample_tolerance()
-  local rows = {}
-  table.insert(rows, table.concat({
-    "Track","Take name","Start (TC)","End (TC)","Start (samples)","End (samples)","Note"
-  }, "\t"))
-
-  local proj_path = reaper.GetProjectPath("")
-  local tcount    = reaper.CountTracks(0)
-
-  -- === 掃描並累計 ===
+  local tcount = r.CountTracks(0)
   for ti = 0, tcount-1 do
-    local tr = reaper.GetTrack(0, ti)
-    if tr and get_track_visibility(tr) then
-      local _, tr_name = reaper.GetSetMediaTrackInfo_String(tr, "P_NAME", "", false)
-      local n_it = reaper.CountTrackMediaItems(tr)
+    local tr = r.GetTrack(0, ti)
+    if tr then
+      local _, tr_name = r.GetSetMediaTrackInfo_String(tr, "P_NAME", "", false)
+
+      local n_it = r.CountTrackMediaItems(tr)
       if n_it > 1 then
         local items = {}
         for i = 0, n_it-1 do
-          local it = reaper.GetTrackMediaItem(tr, i)
+          local it = r.GetTrackMediaItem(tr, i)
           local s, e = get_item_bounds(it)
           items[#items+1] = { it=it, s=s, e=e }
         end
         table.sort(items, function(a,b) return a.s < b.s end)
 
+        -- 逐一檢查相鄰的 A(左) 與 B(右)
         for i = 1, #items-1 do
-          local A, B = items[i], items[i+1]
+          local A = items[i]
+          local B = items[i+1]
+
           if B.s < (A.e - tol) then
-            -- 交叉淡變：整段重疊都落於 A 淡出 + B 淡入內 → 忽略
+            -- 純交叉淡變 → 忽略
             if is_crossfade(A, B, tol) then goto continue_pair end
 
             local overlap_start = math.max(A.s, B.s)
-            local is_complete = (math.abs(A.s - B.s) <= tol) and (math.abs(A.e - B.e) <= tol)
+            local overlap_end   = math.min(A.e, B.e)
+            local is_complete   = (math.abs(A.s - B.s) <= tol) and (math.abs(A.e - B.e) <= tol)
 
             if is_complete then COUNT_COMPLETE = COUNT_COMPLETE + 1
             else COUNT_PARTIAL = COUNT_PARTIAL + 1 end
 
             local note = is_complete and "Item overlap — complete" or "Item overlap — partial"
 
-            -- 兩個相關 items 都加 take marker（重疊起點）
+            -- 兩個 item 都加 marker（用相同 label）
             add_overlap_marker(A.it, overlap_start, "Review: " .. note)
             add_overlap_marker(B.it, overlap_start, "Review: " .. note)
 
-            -- 報表：各別列 A / B，方便定位
+            -- 各自列一行（之後比較好逐一定位/處理）
             for _, node in ipairs({A,B}) do
-              local take = reaper.GetActiveTake(node.it)
-              local take_name = get_take_name_safe(take)
-              table.insert(rows, table.concat({
+              local tk  = r.GetActiveTake(node.it)
+              local tnm = get_take_name_safe(tk)
+              lines[#lines+1] = table.concat({
                 tr_name or "",
-                take_name,
+                tnm or "",
                 fmt_tc(node.s), fmt_tc(node.e),
                 fmt_smp(node.s), fmt_smp(node.e),
                 note
-              }, "\t"))
+              }, "\t")
             end
+            ::continue_pair::
           end
-          ::continue_pair::
         end
       end
     end
   end
 
-  -- === 掃描完成 → 產生 Summary ===
-  local total = COUNT_PARTIAL + COUNT_COMPLETE
-  table.insert(rows, "")
-  table.insert(rows, "=== Summary ===")
-  if total == 0 then
-    table.insert(rows, "No overlaps found.")
-  else
-    table.insert(rows, string.format("Partial overlaps\t%d",  COUNT_PARTIAL))
-    table.insert(rows, string.format("Complete overlaps\t%d", COUNT_COMPLETE))
-    table.insert(rows, string.format("Total\t%d",            total))
-  end
-
-  -- === Console 輸出（不要再 ClearConsole 了）===
+  -- 強制打開 Console，再清空，然後輸出
+  r.ShowConsoleMsg(" \n")  -- 這行會「開啟」Console（不是 !SHOW: 前綴）
+  r.ClearConsole()
   msg("=== Overlap report (per track) ===")
-  for _, line in ipairs(rows) do msg(line) end
+  for _, line in ipairs(lines) do msg(line) end
 
-  -- === TSV 一次寫完（含 Summary）===
-  if WRITE_TSV then
-    local sep = package.config:sub(1,1)
-    local out = (proj_path or "") .. sep .. TSV_FILENAME
-    local f = io.open(out, "w")
-    if f then f:write(table.concat(rows, "\n")); f:close(); msg("\nSaved TSV: " .. out)
-    else msg("\n[WARN] Cannot write TSV file: " .. tostring(out)) end
+  local total = COUNT_PARTIAL + COUNT_COMPLETE
+  msg("\n=== Summary ===")
+  if total == 0 then
+    msg("No overlaps found.")
+  else
+    msg(string.format("Partial overlaps : %d", COUNT_PARTIAL))
+    msg(string.format("Complete overlaps: %d", COUNT_COMPLETE))
+    msg(string.format("Total            : %d", total))
   end
 end
 
-----------------------------------------------------------------
--- run
-----------------------------------------------------------------
 r.Undo_BeginBlock()
 r.PreventUIRefresh(1)
 scan_overlaps()
 r.PreventUIRefresh(-1)
-r.Undo_EndBlock("Scan overlaps and add take markers (partial/complete)", -1)
-
+r.Undo_EndBlock("Scan overlaps and add take markers (partial/complete, skip crossfades)", -1)
