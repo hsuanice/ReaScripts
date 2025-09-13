@@ -1,12 +1,18 @@
 --[[
 @description hsuanice ReaImGui Theme Editor
-@version 0.3.0
+@version 0.3.1
 @author hsuanice
 @about
   Dedicated GUI for editing the shared ReaImGui theme (colors + presets).
   Library holds only data/APIs; all UI belongs here.
   Requires: "Scripts/hsuanice Scripts/Library/hsuanice_ReaImGui Theme Color.lua"
 @changelog
+  v0.3.1  Stability: move PushFont to after Begin() and PopFont before End() to ensure a valid frame/context.
+          Title bar text color: integrate the library's TitleText via push before Begin() and pop right after,
+          so only the window title text changes while the body follows the theme.
+          Lifecycle: remove duplicated Begin()/apply() block; keep a single window per frame.
+          Loading: deduplicate library loading and keep a single, correct library path usage.
+          UI: keep width controls for preset combo/name/color editors; no breaking UI logic changes.
   v0.3.0  Move all editor GUI out of the library into this script.
           Add width controls (preset combo, name input, color editor).
   v0.2.0  Previous rename and future-proof notes.
@@ -20,19 +26,26 @@ local ImGui = dofile(imgui_path)('0.9.3.2')
 local LIB_PATH = reaper.GetResourcePath()
   .. '/Scripts/hsuanice Scripts/Library/hsuanice_ReaImGui Theme Color.lua'
 
-local ok, THEME = pcall(dofile, LIB_PATH)
-if not ok or type(THEME) ~= 'table' then
-  reaper.MB("Missing or invalid theme color library:\n" .. LIB_PATH, "Error", 0)
+reaper.ShowConsoleMsg("[Theme Editor] Loading library:\n" .. LIB_PATH .. "\n")
+
+local ok, mod_or_err = pcall(dofile, LIB_PATH)
+if not ok then
+  reaper.MB("Theme library error:\n" .. tostring(mod_or_err) .. "\n\nPath:\n" .. LIB_PATH, "Error", 0)
   return
 end
 
--- 3) Context + font
-local ctx = ImGui.CreateContext("hsuanice Theme Editor",
-  ImGui.ConfigFlags_DockingEnable | ImGui.ConfigFlags_NavEnableKeyboard)
-ImGui.SetConfigVar(ctx, ImGui.ConfigVar_WindowsMoveFromTitleBarOnly, 1)
+local THEME = mod_or_err
+if type(THEME) ~= 'table' then
+  reaper.MB("Theme library returned a non-table.\nPath:\n" .. LIB_PATH, "Error", 0)
+  return
+end
 
-local font = ImGui.CreateFont('sans-serif', 16)
-ImGui.Attach(ctx, font)
+
+
+-- 3) Context + font
+local ctx  = ImGui.CreateContext('hsuanice Theme Editor')
+local font = ImGui.CreateFont('sans-serif', 16)  -- 或你的字型/大小
+ImGui.Attach(ctx, font)  -- 很重要：把字型綁到該 ctx【Attach】
 
 -- 4) UI width presets (adjust here)
 local UI = {
@@ -51,6 +64,8 @@ local function init_state()
   S.changed     = false
   S.init        = true
 end
+
+
 
 local function draw_color_grid()
   local flags = 0 -- e.g. ImGui.ColorEditFlags_NoInputs if you want no numeric inputs
@@ -74,11 +89,19 @@ local function loop()
   if not S.init then init_state() end
 
   local pushed = THEME.apply(ctx, ImGui) or 0 -- preview current theme
-  ImGui.PushFont(ctx, font)
+
+  -- （可選）在 Begin 前暫時覆蓋標題字色
+  local did_title = THEME.push_title_text(ctx, ImGui)
 
   ImGui.SetNextWindowSize(ctx, 720, 520, ImGui.Cond_FirstUseEver)
   local vis; vis, open = ImGui.Begin(ctx, "hsuanice Theme Editor", true,
     ImGui.WindowFlags_NoCollapse | ImGui.WindowFlags_MenuBar)
+
+  -- 一進 Begin 立刻還原，避免內文字色被換掉
+  if did_title then THEME.pop_title_text(ctx, ImGui) end
+
+  -- 現在開始才 PushFont（在視窗 frame 內）
+  ImGui.PushFont(ctx, font)
 
   if vis then
     -- Menu Bar (optional quick ops)
@@ -180,11 +203,12 @@ local function loop()
       ImGui.SameLine(ctx); ImGui.TextDisabled(ctx, "Active: " .. S.active_name)
     end
 
+    ImGui.PopFont(ctx)
     ImGui.End(ctx)
   end
 
-  ImGui.PopFont(ctx)
   if pushed > 0 then THEME.pop(ctx, ImGui) end
+
   if open then reaper.defer(loop) end
 end
 
