@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<index version="1" name="hsuanice Scripts" commit="a6cdba4002c924dc51d3e325035c086e49bd9502">
+<index version="1" name="hsuanice Scripts" commit="4de38b1f03fd4a2a7762000db56110a033247d1c">
   <category name="Beta Testing">
     <reapack name="hsuanice_BWF TimeReference Embed Tool.lua" type="script" desc="Embed BWF TimeReference to Active take from Take 1 or Current Position TC">
       <version name="0.7.1" author="hsuanice" time="2025-08-14T17:52:57Z">
@@ -720,7 +720,7 @@
 {\colortbl;\red255\green0\blue0;\red0\green0\blue255;}
 \widowctrl\hyphauto
 
-{\pard \ql \f0 \sa180 \li0 \fi0 Launch a GUI to edit the shared ReaImGui theme. Currently includes Color editor & presets. Future-ready to add Style (padding/rounding/etc.) as another tab in the same editor. Requires: "Scripts/hsuanice Scripts/Library/hsuanice_ReaImGui Theme Color.lua"\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 Dedicated GUI for editing the shared ReaImGui theme (colors + presets). Library holds only data/APIs; all UI belongs here. Requires: "Scripts/hsuanice Scripts/Library/hsuanice_ReaImGui Theme Color.lua"\par}
 }
 ]]></description>
       </metadata>
@@ -728,6 +728,12 @@
         <changelog><![CDATA[v0.2.0  Rename to 'hsuanice_ReaImGui Theme Editor.lua' and keep future-proof naming.
 v0.1.1  (prev) Theme Color Editor rename & title update.]]></changelog>
         <source main="main">https://github.com/hsuanice/ReaScripts/raw/b38e87ecff87b69a874e1f0ea1ac4a1e386fada7/Beta%20Testing/hsuanice_ReaImGui%20Theme%20Editor.lua</source>
+      </version>
+      <version name="0.3.0" author="hsuanice" time="2025-09-13T07:28:36Z">
+        <changelog><![CDATA[v0.3.0  Move all editor GUI out of the library into this script.
+        Add width controls (preset combo, name input, color editor).
+v0.2.0  Previous rename and future-proof notes.]]></changelog>
+        <source main="main">https://github.com/hsuanice/ReaScripts/raw/4de38b1f03fd4a2a7762000db56110a033247d1c/Beta%20Testing/hsuanice_ReaImGui%20Theme%20Editor.lua</source>
       </version>
     </reapack>
     <reapack name="hsuanice_Rename Active Take from File Metadata.lua" type="script" desc="ReaImGui - Rename Active Take from Metadata (caret insert + cached preview + copy/export)">
@@ -1326,15 +1332,6 @@ v0.9.0 - Added Shared Link State section from Project ExtState "hsuanice_Link".]
       </version>
       <version name="0.2.3" time="2025-09-07T14:43:29Z">
         <source main="main">https://github.com/hsuanice/ReaScripts/raw/642011b5fafad57b87ee38939899a3c26b73072f/Library/hsuanice_List%20Table.lua</source>
-      </version>
-    </reapack>
-    <reapack name="hsuanice_ReaImGui Theme Color.lua" type="script" desc="hsuanice ReaImGui Theme Color (library + simple editor API)">
-      <version name="0.2.1" time="2025-09-13T06:36:29Z">
-        <changelog><![CDATA[v0.2.1  Fix: use reaper.ImGui_ColorEdit4(ctx,label,rgba[,flags]) to avoid arg-count error.]]></changelog>
-        <source main="main">https://github.com/hsuanice/ReaScripts/raw/04e5173ad6f3beebf5f2fdc36d3a0c673bb49540/Library/hsuanice_ReaImGui%20Theme%20Color.lua</source>
-      </version>
-      <version name="0.2.2" time="2025-09-13T06:55:50Z">
-        <source main="main">https://github.com/hsuanice/ReaScripts/raw/a6cdba4002c924dc51d3e325035c086e49bd9502/Library/hsuanice_ReaImGui%20Theme%20Color.lua</source>
       </version>
     </reapack>
   </category>
