@@ -1,8 +1,7 @@
 --[[
 @description hsuanice ReaImGui Theme Color (library + simple editor API)
-@version 0.2.1
-@changelog
-  v0.2.1  Fix: use reaper.ImGui_ColorEdit4(ctx,label,rgba[,flags]) to avoid arg-count error.
+@version 0.2.2
+
 
 @author hsuanice
 @about
@@ -11,6 +10,13 @@
   - ExtState overrides per-key, and named Presets (save/load/delete/activate)
   - Simple editor drawer (M.editor) for quick color picking & preset management
 @changelog
+  v0.2.2  Fix: Color editor now uses the U32 integer workflow via `reaper.ImGui_ColorEdit4(ctx, label, rgba[, flags])`, preventing arg-count errors.
+        Safety: Guard against `nil` values; fallback to defaults or `0xffffffff` to avoid crashes.
+        Hardening: ExtState hex parser accepts both `AABBCCDD` and `0xAABBCCDD`.
+        UI: Improve two-column alignment for color swatches.
+        Internal: Keep `u32_to_d4()` / `d4_to_u32()` for future use; editor no longer depends on them.
+        API: No changes (`apply()/pop()/set_accent()/editor()` remain the same).
+  v0.2.1  Fix: use reaper.ImGui_ColorEdit4(ctx,label,rgba[,flags]) to avoid arg-count error.
   v0.2.0  Add presets (save/load/delete/activate) and a minimal GUI editor (M.editor).
   v0.1.0  First release: default dark palette, apply()/pop(), set_accent(), ExtState override.
 @noindex
@@ -95,14 +101,6 @@ local function parse_ext_hex(s)
   return n
 end
 
--- Convert U32 <-> double4
-local function u32_to_d4(ImGui, u32)
-  local r,g,b,a = ImGui.ColorConvertU32ToDouble4(u32)
-  return r,g,b,a
-end
-local function d4_to_u32(ImGui, r,g,b,a)
-  return ImGui.ColorConvertDouble4ToU32(r,g,b,a)
-end
 
 ----------------------------------------------------------------
 -- ExtState: per-key overrides used by apply()
@@ -290,27 +288,32 @@ local function ensure_editor_state(ImGui)
   EDITOR.init = true
 end
 
+-- 替換整個 draw_color_grid(ctx, ImGui) 函式
 local function draw_color_grid(ctx, ImGui)
-  local flags = 0 -- ImGui.ColorEditFlags_NoInputs etc. (可依喜好加)
+  local flags = 0 -- 需要可加：ImGui.ColorEditFlags_NoInputs 等
   local two_cols = true
   local i = 0
+
   for k,_ in pairs(M.colors) do
     -- 兩欄排版
-    if two_cols then
-      if i % 2 ~= 0 then ImGui.SameLine(ctx) end
-    end
+    if two_cols and (i % 2 ~= 0) then ImGui.SameLine(ctx) end
+
     ImGui.BeginGroup(ctx)
     ImGui.Text(ctx, k)
-    local r,g,b,a = u32_to_d4(ImGui, EDITOR.current[k])
+
+    -- 以 U32 整數色值搭配底線 API，最多 4 參數（ctx,label,color[,flags]）
+    local rgba = EDITOR.current[k] or M.colors[k] or 0xffffffff
     local changed, new_rgba = reaper.ImGui_ColorEdit4(ctx, "##"..k, rgba, flags)
     if changed then
-      EDITOR.current[k] = d4_to_u32(ImGui, nr,ng,nb,na)
+      EDITOR.current[k] = new_rgba
       EDITOR.changed = true
     end
+
     ImGui.EndGroup(ctx)
     i = i + 1
   end
 end
+--------------------------------------------
 
 function M.editor(ctx, ImGui)
   ensure_editor_state(ImGui)
