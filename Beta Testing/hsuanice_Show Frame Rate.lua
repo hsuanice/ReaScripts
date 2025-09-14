@@ -1,6 +1,6 @@
 --[[
 @description ReaImGui - Show Project Frame Rate (XR-style font & shared theme, warn once if theme missing)
-@version 0.2.2
+@version 0.2.2.1
 @author hsuanice
 @about
   Minimal HUD that displays current project frame rate, styled like X-Raym ReaImGui scripts:
@@ -10,6 +10,16 @@
   - Warn once if theme library is missing, then continue with default colors
   - Right-click inside window to close
 @changelog
+  v0.2.2.1 (2025-09-14)
+    - Fix: Added ensure_ctx() guard to handle project switching.
+      When loading a new project, the old ImGui context/font may
+      be invalidated; ensure_ctx() now recreates them before any
+      ImGui calls. Prevents errors like
+      "ImGui_SetNextWindowSize: expected a valid ImGui_Context*".
+    - Internal: validate font pointer each frame and recreate if
+      needed.
+    - No functional/UI changes; only stability improvement.
+
   v0.2.2
   - Implement mode B: show a warning dialog once if the theme library is missing, but do not abort.
   v0.2.1
@@ -80,13 +90,33 @@ local window_flags =
   ImGui.WindowFlags_NoResize |
   ImGui.WindowFlags_AlwaysAutoResize
 
+
+-- Guard: re-create context/font when project switching invalidates ctx
+local function ensure_ctx()
+  if not reaper.ImGui_ValidatePtr(ctx, 'ImGui_Context*') then
+    -- recreate context
+    ctx = ImGui.CreateContext(WINDOW_TITLE,
+      ImGui.ConfigFlags_DockingEnable | ImGui.ConfigFlags_NavEnableKeyboard)
+    ImGui.SetConfigVar(ctx, ImGui.ConfigVar_DockingNoSplit, 1)
+    ImGui.SetConfigVar(ctx, ImGui.ConfigVar_WindowsMoveFromTitleBarOnly, 1)
+
+    -- recreate font
+    font = ImGui.CreateFont('sans-serif', FONT_SIZE)
+    ImGui.Attach(ctx, font)
+  elseif not reaper.ImGui_ValidatePtr(font, 'ImGui_Font*') then
+    font = ImGui.CreateFont('sans-serif', FONT_SIZE)
+    ImGui.Attach(ctx, font)
+  end
+end
+
 ---------------------------------------
 -- Main Loop
 ---------------------------------------
 local open = true
 
 local function loop()
-  -- 初次尺寸
+  ensure_ctx()  -- <== 新增這行，確保 ctx/font 有效
+
   ImGui.SetNextWindowSize(ctx, 220, 40, ImGui.Cond_FirstUseEver)
   ImGui.SetNextWindowBgAlpha(ctx, 1.0)
 
