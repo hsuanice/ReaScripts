@@ -1,112 +1,137 @@
 --[[
-@description ReaImGui - Count Items/Tracks and Toggle Show Item Details (throttled)
-@version 0.2.0.1
+@description ReaImGui - Count Items/Tracks (XR-style GUI, throttled details)
+@version 0.3.0
 @author hsuanice
 @about
-  A tiny HUD for monitoring selected item/track counts, with optional details.
-  This version is optimized for large sessions:
-    - Throttled scanning (debounced) to avoid per-frame heavy loops
-    - Only scans per-item details when the panel is expanded AND selection changed
-    - Summary (items/tracks) path is O(1) per frame
+  Drop-in GUI refresh of the previous "Count Items/Tracks and Toggle Show Item Details" HUD.
+  Functional behavior is unchanged; UI now follows the shared XR-style stack:
+    - Shared theme via library: "hsuanice_ReaImGui Theme Color.lua" (applied each frame)
+    - 16pt sans-serif font, no title bar, compact auto-resize HUD
+    - Right-click inside window to close; warns once if theme lib is missing, then continues
+  Performance safeguards are preserved:
+    - Summary path is O(1) per frame (no per-item walks)
+    - Details scan is throttled (debounced) and runs only when panel expanded AND selection changed
 
 @changelog
-  v0.2.0.1 (2025-09-13)
-    - Fix: Always call ImGui_End() after ImGui_Begin(), regardless of
-      the 'visible' flag. Prevents "ImGui_SameLine: expected a valid
-      ImGui_Context*" on ReaImGui 0.9.3.2 and ensures proper stack
-      balance when the window is collapsed/hidden.
-    - No change to UMID generation/embedding; purely UI stability.
-  v0.2.0.1
-  - Fix reaper.ImGui_End(ctx)
-  v0.2.0
-  - Performance: throttle/debounce heavy scans (details) to at most every 150 ms
-  - Performance: when details panel is collapsed, skip per-item scanning entirely
-  - Correctly detect selection changes via project state version + counts
-  - Minor UI clean-up; right-click to close preserved
+  v0.3.0 (2025-09-14)
+    - New: XR-style GUI with shared color theme + 16pt font (warn once if theme lib missing)
+    - Keep: Same counting logic and throttled details scanning as prior version
+    - Fix: Always End() after Begin(), mirroring stability guard in 0.2.0.1
 --]]
 
 -------------------------------------------
 -- User options
 -------------------------------------------
-local align_mode     = "left"   -- "left" | "center" | "right"
-local initial_width  = 240
-local initial_height = 60
-local SCAN_INTERVAL  = 0.15     -- seconds, throttle heavy scans
+local ALIGN_MODE     = "left"   -- "left" | "center" | "right"
+local INITIAL_WIDTH  = 260
+local INITIAL_HEIGHT = 64
+local SCAN_INTERVAL  = 0.15      -- seconds, throttle heavy scans (unchanged)
 -------------------------------------------
 
-local ctx = reaper.ImGui_CreateContext('Selection Monitor Expand')
+-- ReaImGui context
+local ctx = reaper.ImGui_CreateContext('Count Items/Tracks HUD')
+
+-- Fonts (XR-style: single readable 16pt)
+local FONT_MAIN = reaper.ImGui_CreateFont('sans-serif', 16)
+reaper.ImGui_Attach(ctx, FONT_MAIN)
+
+-- Window flags (XR-style)
 local window_flags =
     reaper.ImGui_WindowFlags_NoTitleBar()
   | reaper.ImGui_WindowFlags_NoCollapse()
   | reaper.ImGui_WindowFlags_NoResize()
   | reaper.ImGui_WindowFlags_AlwaysAutoResize()
 
-local show_details   = false
-local white          = 0xFFFFFFFF
-local first_frame    = true
+-- Theme library (shared colors)
+local THEME_OK, WARNED_ONCE = false, false
+local apply_theme, pop_theme, push_title, pop_title
 
--- cache / debounce
+-- ImGui shim (works with both namespaced and underscore APIs)
+local IM = rawget(reaper, 'ImGui') or {}
+if not IM.PushStyleColor then function IM.PushStyleColor(ctx, idx, col) reaper.ImGui_PushStyleColor(ctx, idx, col) end end
+if not IM.PopStyleColor  then function IM.PopStyleColor (ctx, n)   reaper.ImGui_PopStyleColor (ctx, n or 1) end end
+IM.Col_Text = IM.Col_Text or (reaper.ImGui_Col_Text and reaper.ImGui_Col_Text())
+
+do
+  local theme_path = reaper.GetResourcePath() .. '/Scripts/hsuanice Scripts/Library/hsuanice_ReaImGui Theme Color.lua'
+  local env = setmetatable({ reaper = reaper }, { __index = _G })
+  local chunk = loadfile(theme_path, 'bt', env)
+  if chunk then
+    local ok, M = pcall(chunk)
+    if ok and type(M) == 'table' then
+      apply_theme = function(ctx) M.apply(ctx, IM) end
+      pop_theme   = function(ctx) M.pop(ctx, IM) end
+      push_title  = function(ctx) if M.push_title_text then M.push_title_text(ctx, IM) end end
+      pop_title   = function(ctx) if M.pop_title_text  then M.pop_title_text (ctx, IM) end end
+      THEME_OK = true
+    end
+  end
+  if not THEME_OK then
+    apply_theme = function(_) end
+    pop_theme   = function(_) end
+    push_title  = function(_) end
+    pop_title   = function(_) end
+  end
+end
+
+-- State
+local show_details   = false
+local first_frame    = true
+local white          = 0xFFFFFFFF
+
+-- caches / debounce
 local last_proj_ver      = -1
 local last_item_count    = -1
 local last_track_count   = -1
 local next_allowed_scan  = 0.0
 local cached_stats       = {
-  item_count   = 0,
-  track_count  = 0,
-  type_count   = { midi = 0, audio = 0, empty = 0 },
-  channel_count= {}
+  item_count    = 0,
+  track_count   = 0,
+  type_count    = { midi = 0, audio = 0, empty = 0 },
+  channel_count = {}
 }
 
 -------------------------------------------
--- UI helpers
+-- Small helpers
 -------------------------------------------
-local function calc_text_w(ctx, text)
+local function calc_text_w(text)
   local w = select(1, reaper.ImGui_CalcTextSize(ctx, text))
   return w or 0
 end
 
-local function get_win_w(ctx)
+local function win_w()
   local w = select(1, reaper.ImGui_GetWindowSize(ctx))
   return w or 0
 end
 
-local function draw_aligned_text(ctx, text)
-  local width = calc_text_w(ctx, text)
-  local win_w = get_win_w(ctx)
-  if align_mode == "center" then
-    reaper.ImGui_SetCursorPosX(ctx, (win_w - width) / 2)
-  elseif align_mode == "right" then
-    reaper.ImGui_SetCursorPosX(ctx, win_w - width - 10)
+local function aligned_text(text, color)
+  local width = calc_text_w(text)
+  local ww = win_w()
+  if ALIGN_MODE == 'center' then
+    reaper.ImGui_SetCursorPosX(ctx, (ww - width) / 2)
+  elseif ALIGN_MODE == 'right' then
+    reaper.ImGui_SetCursorPosX(ctx, ww - width - 10)
   end
-  reaper.ImGui_Text(ctx, text)
-end
-
-local function draw_aligned_label(ctx, text, color)
-  local width = calc_text_w(ctx, text)
-  local win_w = get_win_w(ctx)
-  if align_mode == "center" then
-    reaper.ImGui_SetCursorPosX(ctx, (win_w - width) / 2)
-  elseif align_mode == "right" then
-    reaper.ImGui_SetCursorPosX(ctx, win_w - width - 10)
+  if color then
+    reaper.ImGui_TextColored(ctx, color, text)
+  else
+    reaper.ImGui_Text(ctx, text)
   end
-  reaper.ImGui_TextColored(ctx, color or white, text)
 end
 
 -------------------------------------------
--- Scanners
+-- Scanners (unchanged behavior)
 -------------------------------------------
 local function scan_summary_only()
-  -- O(1), no per-item walks
   cached_stats.item_count  = reaper.CountSelectedMediaItems(0)
   cached_stats.track_count = reaper.CountSelectedTracks(0)
 end
 
 local function scan_details_heavy()
-  -- Per-item walk, throttled & only when needed
-  local item_count = reaper.CountSelectedMediaItems(0)
+  local item_count  = reaper.CountSelectedMediaItems(0)
   local track_count = reaper.CountSelectedTracks(0)
 
-  local type_count = { midi = 0, audio = 0, empty = 0 }
+  local type_count    = { midi = 0, audio = 0, empty = 0 }
   local channel_count = {}
 
   for i = 0, item_count - 1 do
@@ -115,9 +140,9 @@ local function scan_details_heavy()
     if not take then
       type_count.empty = type_count.empty + 1
     else
-      local src = reaper.GetMediaItemTake_Source(take)
-      local srctype = reaper.GetMediaSourceType(src, "")
-      if srctype == "MIDI" or srctype == "REX" then
+      local src     = reaper.GetMediaItemTake_Source(take)
+      local srctype = reaper.GetMediaSourceType(src, '')
+      if srctype == 'MIDI' or srctype == 'REX' then
         type_count.midi = type_count.midi + 1
       else
         type_count.audio = type_count.audio + 1
@@ -134,53 +159,47 @@ local function scan_details_heavy()
 end
 
 -------------------------------------------
--- Draw
+-- UI draw
 -------------------------------------------
-local function draw_summary_row(ctx, stats)
-  local summary = string.format("Items: %d    Tracks: %d", stats.item_count, stats.track_count)
-  local summary_w = calc_text_w(ctx, summary)
-  local win_w     = get_win_w(ctx)
-
-  if align_mode == "center" then
-    reaper.ImGui_SetCursorPosX(ctx, (win_w - summary_w) / 2 - 20)
-  elseif align_mode == "right" then
-    reaper.ImGui_SetCursorPosX(ctx, win_w - summary_w - 40)
+local function draw_summary_row()
+  local s = string.format('Items: %d    Tracks: %d', cached_stats.item_count, cached_stats.track_count)
+  local sw = calc_text_w(s)
+  local ww = win_w()
+  if ALIGN_MODE == 'center' then
+    reaper.ImGui_SetCursorPosX(ctx, (ww - sw) / 2 - 20)
+  elseif ALIGN_MODE == 'right' then
+    reaper.ImGui_SetCursorPosX(ctx, ww - sw - 40)
   end
-
-  reaper.ImGui_Text(ctx, summary)
+  reaper.ImGui_Text(ctx, s)
   reaper.ImGui_SameLine(ctx)
-
-  if reaper.ImGui_ArrowButton(ctx, "details_toggle",
-      show_details and reaper.ImGui_Dir_Down() or reaper.ImGui_Dir_Right()) then
+  if reaper.ImGui_ArrowButton(ctx, 'details_toggle', show_details and reaper.ImGui_Dir_Down() or reaper.ImGui_Dir_Right()) then
     show_details = not show_details
   end
 end
 
-local function draw_details(ctx, stats)
-  draw_aligned_text(ctx, string.format("MIDI: %d",  stats.type_count.midi))
-  draw_aligned_text(ctx, string.format("Audio: %d", stats.type_count.audio))
-  draw_aligned_text(ctx, string.format("Empty: %d", stats.type_count.empty))
+local function draw_details()
+  aligned_text(string.format('MIDI: %d',  cached_stats.type_count.midi))
+  aligned_text(string.format('Audio: %d', cached_stats.type_count.audio))
+  aligned_text(string.format('Empty: %d', cached_stats.type_count.empty))
 
   reaper.ImGui_Dummy(ctx, 0, 5)
-  draw_aligned_label(ctx, "Channel Count:", white)
+  aligned_text('Channel Count:', white)
 
   local ch_list = {}
-  for ch, count in pairs(stats.channel_count) do
+  for ch, count in pairs(cached_stats.channel_count) do
     ch_list[#ch_list+1] = { ch = ch, count = count }
   end
   table.sort(ch_list, function(a, b) return a.ch < b.ch end)
-
-  for _, entry in ipairs(ch_list) do
-    local label = (entry.ch == 1 and "Mono") or (entry.ch == 2 and "Stereo") or (entry.ch .. "-Ch")
-    draw_aligned_text(ctx, string.format("%s: %d", label, entry.count))
+  for _, e in ipairs(ch_list) do
+    local label = (e.ch == 1 and 'Mono') or (e.ch == 2 and 'Stereo') or (e.ch .. '-Ch')
+    aligned_text(string.format('%s: %d', label, e.count))
   end
 end
 
 -------------------------------------------
--- Main loop
+-- Throttle gate
 -------------------------------------------
 local function need_heavy_rescan(now)
-  -- 依 selection 指紋 + 專案版本 來決定是否要重掃
   local proj_ver    = reaper.GetProjectStateChangeCount(0) or 0
   local item_count  = reaper.CountSelectedMediaItems(0)
   local track_count = reaper.CountSelectedTracks(0)
@@ -189,55 +208,61 @@ local function need_heavy_rescan(now)
                or (item_count ~= last_item_count)
                or (track_count ~= last_track_count)
 
-  -- 節流：距離上次允許時間之前，不做重掃
   if not changed or now < next_allowed_scan then
     return false
   end
 
-  last_proj_ver    = proj_ver
-  last_item_count  = item_count
-  last_track_count = track_count
+  last_proj_ver     = proj_ver
+  last_item_count   = item_count
+  last_track_count  = track_count
   next_allowed_scan = now + SCAN_INTERVAL
   return true
 end
 
-local function main_loop()
+-------------------------------------------
+-- Main loop
+-------------------------------------------
+local function main()
   if first_frame then
-    reaper.ImGui_SetNextWindowSize(ctx, initial_width, initial_height)
+    reaper.ImGui_SetNextWindowSize(ctx, INITIAL_WIDTH, INITIAL_HEIGHT)
     first_frame = false
   end
 
+  reaper.ImGui_PushFont(ctx, FONT_MAIN)
+  apply_theme(ctx)
+
   local visible, open = reaper.ImGui_Begin(ctx, 'Selection Monitor', true, window_flags)
   if visible then
-    local now = reaper.time_precise()
+    if not THEME_OK and not WARNED_ONCE then
+      reaper.ImGui_TextColored(ctx, 0xFFAAAAFF, 'Theme lib not found: hsuanice_ReaImGui Theme Color.lua')
+      WARNED_ONCE = true
+    end
 
+    local now = reaper.time_precise()
     if show_details then
       if need_heavy_rescan(now) then
         scan_details_heavy()
       end
     else
-      -- 純 Summary 路徑：每幀 O(1) 更新，不會做 per-item heavy scan
-      scan_summary_only()
+      scan_summary_only() -- O(1) per frame
     end
 
-    draw_summary_row(ctx, cached_stats)
-    if show_details then
-      draw_details(ctx, cached_stats)
-    end
+    draw_summary_row()
+    if show_details then draw_details() end
 
-    -- 右鍵視窗快速關閉
+    -- Right-click inside window to close
     if reaper.ImGui_IsMouseClicked(ctx, 1) and reaper.ImGui_IsWindowHovered(ctx) then
       open = false
     end
   end
   reaper.ImGui_End(ctx)
 
+  pop_theme(ctx)
+  reaper.ImGui_PopFont(ctx)
 
   if open then
-    reaper.defer(main_loop)
-  else
-    ctx = nil
+    reaper.defer(main)
   end
 end
 
-reaper.defer(main_loop)
+reaper.defer(main)
