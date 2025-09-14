@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<index version="1" name="hsuanice Scripts" commit="a861d984e68b39b43d64090e351a3a559f4c5e33">
+<index version="1" name="hsuanice Scripts" commit="339040bdf01f749989c1ab0bf541d392c5b3134a">
   <category name="Beta Testing">
     <reapack name="hsuanice_BWF TimeReference Embed Tool.lua" type="script" desc="Embed BWF TimeReference to Active take from Take 1 or Current Position TC">
       <version name="0.7.1" author="hsuanice" time="2025-08-14T17:52:57Z">
@@ -13,6 +13,30 @@
       </version>
       <version name="0.7.4" author="hsuanice" time="2025-08-14T19:11:06Z">
         <source main="main">https://github.com/hsuanice/ReaScripts/raw/4a5c58b4bc95f7439e80b74a059e488c188c0d62/Beta%20Testing/hsuanice_BWF%20TimeReference%20Embed%20Tool.lua</source>
+      </version>
+    </reapack>
+    <reapack name="hsuanice_Copy Unmuted Child Items to Parent Folder Track.lua" type="script" desc="Copy UNMUTED child items to the parent folder track (pre-check overlaps → mark &amp; abort)">
+      <metadata>
+        <description><![CDATA[{\rtf1\ansi\deff0{\fonttbl{\f0 \fswiss Helvetica;}{\f1 \fmodern Courier;}}
+{\colortbl;\red255\green0\blue0;\red0\green0\blue255;}
+\widowctrl\hyphauto
+
+{\pard \ql \f0 \sa180 \li0 \fi0 Non-destructive helper for vocal comping. This script never moves or edits child items.\par}
+}
+]]></description>
+      </metadata>
+      <version name="0.1.1" author="hsuanice" time="2025-09-14T12:57:53Z">
+        <changelog><![CDATA[v0.1.1
+  - Fix: Use GetTrackMediaItem(track, i) instead of GetMediaItem(proj, i) when iterating items on a track.
+v0.1.0
+  - Initial release:
+    * Select a FOLDER (parent) track and run
+    * Scan all children; if ANY unmuted child item would overlap existing parent items:
+        - add a TAKE MARKER "OVERLAP" on that child item's active take (at source start)
+        - abort without copying anything
+    * If no overlaps detected, copy all unmuted items in-place to the parent (state-chunk)
+    * Show a simple summary dialog]]></changelog>
+        <source main="main">https://github.com/hsuanice/ReaScripts/raw/339040bdf01f749989c1ab0bf541d392c5b3134a/Beta%20Testing/hsuanice_Copy%20Unmuted%20Child%20Items%20to%20Parent%20Folder%20Track.lua</source>
       </version>
     </reapack>
     <reapack name="hsuanice_Count Item and Track and Toggle Show Item Details.lua" type="script" desc="ReaImGui - Count Items/Tracks (XR-style GUI, throttled details)">
