@@ -1,6 +1,6 @@
 --[[
 @description hsuanice ReaImGui Theme Color (library only)
-@version 0.3.3
+@version 0.4.0
 @author hsuanice
 @about
   Library for shared ReaImGui theme colors: palette, apply/pop, ExtState overrides, presets API.
