@@ -1,11 +1,16 @@
 --[[
 @description hsuanice ReaImGui Theme Editor
-@version 0.5.1
+@version 0.5.2
 @author hsuanice
 @about
   Dedicated GUI for editing the shared ReaImGui theme (colors + presets).
   Works with ReaImGui 0.10.x.
 @changelog
+  v0.5.2
+    - Change: Use ScriptTitle* branding via THEME.push_script_title()/pop_script_title() for the window title (orange bg + blue text by default).
+    - Change: Title text coloring no longer relies on the global Col_Text hack; avoids altering ReaImGui system default colors (e.g., docking hints).
+    - Keep: Body text/controls continue to use THEME.push_font('default') and THEME.push_body_text() inside the visible block; overall behavior unchanged.
+    - Compat: Targets ReaImGui 0.10.x.
   v0.5.1
     - Change: Load ReaImGui with "0.10" (stop pinning to 0.9.3.2); targets 0.10.x including 0.10.0.2.
     - Change: Move font handling to the Theme Color library; replace local CreateFont/Attach with THEME.push_font/pop_font.
@@ -185,16 +190,15 @@ local function loop()
 
 
 
-  -- Begin 之前：只上「標題字色」＋「標題字型」
-  THEME.push_title_text(ctx, ImGui)
-  THEME.push_font(ctx, ImGui, 'title')  -- ★ 新增：讓標題用 title 字型與字級
+  -- Begin 之前：只上「腳本品牌標題」配色（文字 + 橘色底 + 聚焦底 + 標題字型）
+  THEME.push_script_title(ctx, ImGui)
 
   local vis; vis, open = ImGui.Begin(ctx, "hsuanice Theme Editor", true,
     ImGui.WindowFlags_NoCollapse | ImGui.WindowFlags_MenuBar)
 
-  -- Begin 之後立刻把「標題用」的兩個 push 彈回（不影響內文）
-  THEME.pop_title_text(ctx, ImGui)
-  THEME.pop_font(ctx, ImGui)            -- ★ 新增：對應上面的 push_font('title')
+  -- Begin 之後立刻彈回，避免影響內容區與系統預設
+  THEME.pop_script_title(ctx, ImGui)    -- ★ 這裡已經包含 PopFont，不要再另外 PopFont
+
 
 
   -- ESC 關閉（僅當視窗被聚焦時）
