@@ -1,6 +1,6 @@
 --[[
 @description ReaImGui - Count Items/Tracks (XR-style GUI, throttled details)
-@version 0.3.0
+@version 0.3.1
 @author hsuanice
 @about
   Drop-in GUI refresh of the previous "Count Items/Tracks and Toggle Show Item Details" HUD.
@@ -12,7 +12,12 @@
     - Summary path is O(1) per frame (no per-item walks)
     - Details scan is throttled (debounced) and runs only when panel expanded AND selection changed
 
+
 @changelog
+  v0.3.1 (2025-09-14)
+    - Fix: Guarded Begin/End pairing during docking/undocking and project switching
+    - Fix: Theme push/pop balanced, preventing "PushStyleColor/PopStyleColor Mismatch" assertions
+
   v0.3.0 (2025-09-14)
     - New: XR-style GUI with shared color theme + 16pt font (warn once if theme lib missing)
     - Keep: Same counting logic and throttled details scanning as prior version
@@ -228,10 +233,11 @@ local function main()
     first_frame = false
   end
 
+  local visible, open
   reaper.ImGui_PushFont(ctx, FONT_MAIN)
   apply_theme(ctx)
 
-  local visible, open = reaper.ImGui_Begin(ctx, 'Selection Monitor', true, window_flags)
+  visible, open = reaper.ImGui_Begin(ctx, 'Selection Monitor', true, window_flags)
   if visible then
     if not THEME_OK and not WARNED_ONCE then
       reaper.ImGui_TextColored(ctx, 0xFFAAAAFF, 'Theme lib not found: hsuanice_ReaImGui Theme Color.lua')
@@ -244,21 +250,24 @@ local function main()
         scan_details_heavy()
       end
     else
-      scan_summary_only() -- O(1) per frame
+      scan_summary_only()
     end
 
     draw_summary_row()
     if show_details then draw_details() end
 
-    -- Right-click inside window to close
     if reaper.ImGui_IsMouseClicked(ctx, 1) and reaper.ImGui_IsWindowHovered(ctx) then
       open = false
     end
+
+    reaper.ImGui_End(ctx)   -- ✅ 只在 visible=true 時呼叫
+  else
+    -- 如果 Begin 失敗，不呼叫 End
   end
-  reaper.ImGui_End(ctx)
 
   pop_theme(ctx)
   reaper.ImGui_PopFont(ctx)
+
 
   if open then
     reaper.defer(main)
