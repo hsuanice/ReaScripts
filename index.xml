@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<index version="1" name="hsuanice Scripts" commit="dd2002c71eec88af9bc56ba4892ffedcae32e622">
+<index version="1" name="hsuanice Scripts" commit="0bbc4a51963137865e7601c0e126f26188da2aab">
   <category name="Beta Testing">
     <reapack name="hsuanice_BWF TimeReference Embed Tool.lua" type="script" desc="Embed BWF TimeReference to Active take from Take 1 or Current Position TC">
       <version name="0.7.1" author="hsuanice" time="2025-08-14T17:52:57Z">
@@ -42,6 +42,9 @@
       </version>
       <version name="0.3.0" author="hsuanice" time="2025-09-14T02:32:52Z">
         <source main="main">https://github.com/hsuanice/ReaScripts/raw/42f9515aacfedd2618e380422e703e78971a6a27/Beta%20Testing/hsuanice_Count%20Item%20and%20Track%20and%20Toggle%20Show%20Item%20Details.lua</source>
+      </version>
+      <version name="0.3.1" author="hsuanice" time="2025-09-14T03:03:23Z">
+        <source main="main">https://github.com/hsuanice/ReaScripts/raw/0bbc4a51963137865e7601c0e126f26188da2aab/Beta%20Testing/hsuanice_Count%20Item%20and%20Track%20and%20Toggle%20Show%20Item%20Details.lua</source>
       </version>
     </reapack>
     <reapack name="hsuanice_Delete Selected Tracks with Warning.lua" type="script" desc="Delete Selected Tracks (safe; prompt if content/folders/FX/routing; show selection, children &amp; FX/routing counts)">
