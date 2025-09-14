@@ -1,6 +1,6 @@
 --[[
 @description hsuanice ReaImGui Theme Editor
-@version 0.4.1
+@version 0.4.2
 @author hsuanice
 @about
   Dedicated GUI for editing the shared ReaImGui theme (colors + presets).
@@ -8,6 +8,16 @@
   Requires: "Scripts/hsuanice Scripts/Library/hsuanice_ReaImGui Theme Color.lua"
 
 @changelog
+  v0.4.2 (2025-09-14)
+    - Add: BodyText color slot support in the editor UI.
+      * Color grid now includes BodyText alongside TitleText.
+      * Live preview: pushes BodyText after Begin(), pops before End(),
+        so content text uses the configured color while the window is open.
+    - Update: clarified TitleText preview logic 
+      (push before Begin(), pop immediately after) so only the title bar text
+      is affected.
+    - Behavior: no changes to presets, saving, or other editor features.
+
   v0.4.1  Save-awareness: the status now reflects whether changes are saved to the current preset
           (including overwriting an existing preset). Internally tracks a saved snapshot
           (name + palette) and marks "(not saved)" whenever the in-memory palette differs.
@@ -173,7 +183,12 @@ local function loop()
   local vis; vis, open = ImGui.Begin(ctx, "hsuanice Theme Editor", true,
     ImGui.WindowFlags_NoCollapse | ImGui.WindowFlags_MenuBar)
 
-  ImGui.PopStyleColor(ctx)
+  ImGui.PopStyleColor(ctx)  -- TitleText pop（保留）
+
+  -- ★ 新增：讓內文吃到 BodyText（用當前編修色票優先，沒有就用預設）
+  THEME.push_body_text(ctx, ImGui, (S.current and S.current.BodyText) or THEME.colors.BodyText)
+
+
 
   -- ESC 關閉（僅當視窗被聚焦時）
   if ImGui.IsWindowFocused(ctx) and ImGui.IsKeyPressed(ctx, ImGui.Key_Escape) then
@@ -268,6 +283,7 @@ local function loop()
     draw_color_grid()
 
     ImGui.PopFont(ctx)
+    THEME.pop_body_text(ctx, ImGui)
     ImGui.End(ctx)
   end
 
