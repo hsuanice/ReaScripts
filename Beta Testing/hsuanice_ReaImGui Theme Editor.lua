@@ -1,11 +1,19 @@
 --[[
 @description hsuanice ReaImGui Theme Editor
-@version 0.5.0
+@version 0.5.1
 @author hsuanice
 @about
   Dedicated GUI for editing the shared ReaImGui theme (colors + presets).
   Works with ReaImGui 0.10.x.
 @changelog
+  v0.5.1
+    - Change: Load ReaImGui with "0.10" (stop pinning to 0.9.3.2); targets 0.10.x including 0.10.0.2.
+    - Change: Move font handling to the Theme Color library; replace local CreateFont/Attach with THEME.push_font/pop_font.
+    - Add: Title font support — push "title" font before Begin() and pop immediately after, so the window title uses the configured size (override via THEME.set_font('title', 'sans-serif', SIZE)).
+    - Fix: ImGui_End: Missing PopFont() by scoping push_font/pop_font inside the vis==true block and always calling ImGui.End(ctx) once per frame.
+    - Fix: Ensure a single THEME.apply(...) at frame start pairs with THEME.pop(...) at frame end; keep preview using overrides=S.current without touching ExtState until Save/Activate.
+    - Polish: Removed redundant "Activate" button; keep "Delete / Save / Save As / Reset Defaults"; status line correctly shows "Saved / (Not saved)" after operations.
+
   v0.5.0
   - Change: stop pinning to 0.9.3.2; require ReaImGui ≥ 0.10 (use dofile(... )('0.10')).
   - Fix: avoid "ImGui__init: version number is empty" by always passing a non-empty version string.
@@ -84,10 +92,9 @@ end
 
 
 -- 3) Context + font
-local ctx = ImGui.CreateContext('hsuanice Theme Editor')
-
--- 建議在建立 ctx 後設定一次預設字型給 library（專案統一基準）
+local ctx  = ImGui.CreateContext('hsuanice Theme Editor')
 THEME.set_font('default', 'sans-serif', 16)
+THEME.set_font('title',   'sans-serif', 16)   -- ★ 新增：標題字級（覺得小就改 18、20）
 
 -- 4) UI width presets (adjust here)
 local UI = {
@@ -178,11 +185,17 @@ local function loop()
 
 
 
-  -- Begin 之前：只上「標題字色」
+  -- Begin 之前：只上「標題字色」＋「標題字型」
   THEME.push_title_text(ctx, ImGui)
+  THEME.push_font(ctx, ImGui, 'title')  -- ★ 新增：讓標題用 title 字型與字級
+
   local vis; vis, open = ImGui.Begin(ctx, "hsuanice Theme Editor", true,
     ImGui.WindowFlags_NoCollapse | ImGui.WindowFlags_MenuBar)
-  THEME.pop_title_text(ctx, ImGui)  -- 立刻彈回，避免影響內文
+
+  -- Begin 之後立刻把「標題用」的兩個 push 彈回（不影響內文）
+  THEME.pop_title_text(ctx, ImGui)
+  THEME.pop_font(ctx, ImGui)            -- ★ 新增：對應上面的 push_font('title')
+
 
   -- ESC 關閉（僅當視窗被聚焦時）
   if ImGui.IsWindowFocused(ctx) and ImGui.IsKeyPressed(ctx, ImGui.Key_Escape) then
