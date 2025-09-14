@@ -5,7 +5,10 @@
 @about
   Library for shared ReaImGui theme colors: palette, apply/pop, ExtState overrides, presets API.
   GUI/editor code is NOT included; use the dedicated Editor script.
-@changelog
+  v0.4.0 (2025-09-14)
+    - Add: Font registry + helpers (set_font / ensure_font / push_font / pop_font)
+      * 0.10+ compatible: CreateFont 不帶 size，PushFont 以第三參數傳入基準字級。
+      * 統一由 library 管理字型建立與 Attach，腳本只需呼叫 push_font/pop_font。
   v0.3.3 (2025-09-14)
     - Add: BodyText (pseudo slot) to control general content text color,
       complementing TitleText for the title bar.
@@ -246,6 +249,53 @@ function M.pop_body_text(ctx, ImGui)
   end
   return false
 end
+
+----------------------------------------------------------------
+-- Font registry (ReaImGui 0.10+)
+-- 0.10 起 CreateFont(家族, flags)；字級在 PushFont 的第三參數指定。
+----------------------------------------------------------------
+local _FONTS = {
+  default = { family = 'sans-serif',  size = 16, flags = nil, handle = nil },
+  mono    = { family = 'monospace',   size = 14, flags = nil, handle = nil },
+}
+
+-- 修改或設定某個字型規格；任何參數給 nil 代表「不變」。
+function M.set_font(which, family, size, flags)
+  local spec = _FONTS[which]
+  if not spec then return false, "unknown font key: "..tostring(which) end
+  if family ~= nil then spec.family = family end
+  if size   ~= nil then spec.size   = size   end
+  if flags  ~= nil then spec.flags  = flags  end
+  spec.handle = nil -- 規格變了，下次 ensure 會重建並 Attach
+  return true
+end
+
+-- 確保字型已建立並附掛到 ctx；回傳 (font_handle, base_size)
+function M.ensure_font(ctx, ImGui, which)
+  local spec = _FONTS[which or 'default']; if not spec then return nil end
+  if not spec.handle then
+    local flags = spec.flags or ImGui.FontFlags_None
+    spec.handle = ImGui.CreateFont(spec.family, flags) -- 0.10：不帶 size
+    ImGui.Attach(ctx, spec.handle)                     -- 綁到此 ctx
+  end
+  return spec.handle, spec.size
+end
+
+-- 推入字型（含基準字級，符合 0.10 的第三參數）
+function M.push_font(ctx, ImGui, which)
+  local font, base = M.ensure_font(ctx, ImGui, which or 'default')
+  if font and base then ImGui.PushFont(ctx, font, base) end
+end
+
+-- 彈出字型
+function M.pop_font(ctx, ImGui)
+  ImGui.PopFont(ctx)
+end
+
+----------------------------------------------------------------
+-- Presets API
+----------------------------------------------------------------
+
 
 
 ----------------------------------------------------------------
