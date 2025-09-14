@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<index version="1" name="hsuanice Scripts" commit="24742e36e51863fffb993d3c793cf521a63c1352">
+<index version="1" name="hsuanice Scripts" commit="4d1ebf012f05114fedc8ca69554c8d14e9c4e7ec">
   <category name="Beta Testing">
     <reapack name="hsuanice_BWF TimeReference Embed Tool.lua" type="script" desc="Embed BWF TimeReference to Active take from Take 1 or Current Position TC">
       <version name="0.7.1" author="hsuanice" time="2025-08-14T17:52:57Z">
@@ -881,6 +881,67 @@ v0.3.0  Move all editor GUI out of the library into this script; add width contr
 v0.2.0  Previous rename and future-proof notes.]]></changelog>
         <source main="main">https://github.com/hsuanice/ReaScripts/raw/24742e36e51863fffb993d3c793cf521a63c1352/Beta%20Testing/hsuanice_ReaImGui%20Theme%20Editor.lua</source>
       </version>
+      <version name="0.5.1" author="hsuanice" time="2025-09-14T11:04:22Z">
+        <changelog><![CDATA[v0.5.1
+  - Change: Load ReaImGui with "0.10" (stop pinning to 0.9.3.2); targets 0.10.x including 0.10.0.2.
+  - Change: Move font handling to the Theme Color library; replace local CreateFont/Attach with THEME.push_font/pop_font.
+  - Add: Title font support — push "title" font before Begin() and pop immediately after, so the window title uses the configured size (override via THEME.set_font('title', 'sans-serif', SIZE)).
+  - Fix: ImGui_End: Missing PopFont() by scoping push_font/pop_font inside the vis==true block and always calling ImGui.End(ctx) once per frame.
+  - Fix: Ensure a single THEME.apply(...) at frame start pairs with THEME.pop(...) at frame end; keep preview using overrides=S.current without touching ExtState until Save/Activate.
+  - Polish: Removed redundant "Activate" button; keep "Delete / Save / Save As / Reset Defaults"; status line correctly shows "Saved / (Not saved)" after operations.
+
+v0.5.0
+- Change: stop pinning to 0.9.3.2; require ReaImGui ≥ 0.10 (use dofile(... )('0.10')).
+- Fix: avoid "ImGui__init: version number is empty" by always passing a non-empty version string.
+- Keep: all editor behaviors and the Theme Color library APIs unchanged.
+v0.4.2 (2025-09-14)
+  - Add: BodyText color slot support in the editor UI.
+    * Color grid now includes BodyText alongside TitleText.
+    * Live preview: pushes BodyText after Begin(), pops before End(),
+      so content text uses the configured color while the window is open.
+  - Update: clarified TitleText preview logic 
+    (push before Begin(), pop immediately after) so only the title bar text
+    is affected.
+  - Behavior: no changes to presets, saving, or other editor features.
+
+v0.4.1  Save-awareness: the status now reflects whether changes are saved to the current preset
+        (including overwriting an existing preset). Internally tracks a saved snapshot
+        (name + palette) and marks "(not saved)" whenever the in-memory palette differs.
+        Live apply: color edits still update ExtState immediately; the status purely indicates
+        preset persistence. Preset selection auto-activates and also resets the saved snapshot.
+        No library API changes.
+
+v0.4.0  Live preview & global apply:
+        - The editor now previews from the in-memory palette (S.current) instead of ExtState.
+        - Any color change immediately writes to ExtState via THEME.set_overrides(), so all
+          scripts using THEME.apply() update in real time (no more reselect/Activate needed).
+        - Title bar text color (TitleText) is previewed from S.current by pushing before Begin()
+          and popping right after.
+        - Preset selection still auto-activates and loads into S.current; Save/Save As only
+          control preset files (not required for live applying).
+        No API changes to the library.
+
+v0.3.4  Layout: dedicate a top status line for "(not saved) / Saved"; move the "Preset:" row below it.
+        Preset: replace the titlebar Preset menu/button with a plain "Preset:" label + dropdown.
+        Behavior: auto-activate the selected preset immediately; remove the separate Activate button.
+        Spacing: remove the extra blank line between the Preset and Name rows.
+        Keyboard: press ESC to close the editor window.
+        No API changes; presets and color grid behavior are unchanged.
+
+v0.3.3  Layout: move the "(not saved) · Active: <name>" status to its own top line.
+        Preset row: reintroduce a plain "Preset:" label before the dropdown (no button),
+        keeping the unified width for the dropdown (`field_w`). No API changes.
+v0.3.2  UI cleanup: remove the redundant "Preset" label below the title bar.
+        Move the "Saved / (not saved) · Active: <name>" status to that header slot.
+        Unify widths for the Preset dropdown and Name input using a single `field_w`.
+        No API changes; color grid and preset actions unchanged.
+v0.3.1  Stability: move PushFont to after Begin() and PopFont before End().
+        Integrate TitleText (push before Begin, pop right after) to color only the title bar text.
+        Remove duplicated Begin/apply block and deduplicate library loading.
+v0.3.0  Move all editor GUI out of the library into this script; add width controls.
+v0.2.0  Previous rename and future-proof notes.]]></changelog>
+        <source main="main">https://github.com/hsuanice/ReaScripts/raw/fe46f6bb023e87a3595a4041a5c2aabf7576c23a/Beta%20Testing/hsuanice_ReaImGui%20Theme%20Editor.lua</source>
+      </version>
     </reapack>
     <reapack name="hsuanice_Rename Active Take from File Metadata.lua" type="script" desc="ReaImGui - Rename Active Take from Metadata (caret insert + cached preview + copy/export)">
       <metadata>
@@ -1525,6 +1586,20 @@ v0.9.0 - Added Shared Link State section from Project ExtState "hsuanice_Link".]
       </version>
       <version name="0.2.3" time="2025-09-07T14:43:29Z">
         <source main="main">https://github.com/hsuanice/ReaScripts/raw/642011b5fafad57b87ee38939899a3c26b73072f/Library/hsuanice_List%20Table.lua</source>
+      </version>
+    </reapack>
+    <reapack name="hsuanice_ReaImGui Theme Color.lua" type="script" desc="hsuanice ReaImGui Theme Color (library only)">
+      <metadata>
+        <description><![CDATA[{\rtf1\ansi\deff0{\fonttbl{\f0 \fswiss Helvetica;}{\f1 \fmodern Courier;}}
+{\colortbl;\red255\green0\blue0;\red0\green0\blue255;}
+\widowctrl\hyphauto
+
+{\pard \ql \f0 \sa180 \li0 \fi0 Library for shared ReaImGui theme colors: palette, apply/pop, ExtState overrides, presets API. GUI/editor code is NOT included; use the dedicated Editor script.\par}
+}
+]]></description>
+      </metadata>
+      <version name="0.4.1" author="hsuanice" time="2025-09-14T11:04:40Z">
+        <source main="main">https://github.com/hsuanice/ReaScripts/raw/4d1ebf012f05114fedc8ca69554c8d14e9c4e7ec/Library/hsuanice_ReaImGui%20Theme%20Color.lua</source>
       </version>
     </reapack>
   </category>
