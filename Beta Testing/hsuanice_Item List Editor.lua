@@ -1,6 +1,6 @@
 --[[
 @description Item List Editor
-@version 0.9.4
+@version 0.10.0 Text color wrong
 @author hsuanice
 @about
   Shows a live, spreadsheet-style table of the currently selected items and all
@@ -40,6 +40,11 @@
 
 
 @changelog
+  v0.10.0 (2025-09-14)
+    - GUI refresh: adopt XR-style theme via "hsuanice_ReaImGui Theme Color.lua".
+    - Stability: added ImGui context/font guards to survive project switching/loading
+      (no more crashes like "expected a valid ImGui_Context*").
+    - Behavior unchanged: table, editing, copy/paste, presets, and exports remain identical.
   v0.9.4
   - Presets UX: The dropdown now applies a preset immediately on selection (no “Recall” button).
     • Added a width limit for the preview field and a height-capped, scrollable list.
@@ -532,9 +537,10 @@ end
 ---------------------------------------
 -- ImGui setup
 ---------------------------------------
--- ImGui setup (唯一的一組，請勿重複建立)
 local ctx = reaper.ImGui_CreateContext('Item List Editor')
 local LIBVER = (META and META.VERSION) and (' | Metadata Read v'..tostring(META.VERSION)) or ''
+-- [TITLE_CONST] 統一標題文字（含版本字串）
+local WINDOW_TITLE = "Item List Editor" .. (LIBVER or "")
 local FLT_MIN = 1.175494e-38
 local function TF(name) local f = reaper[name]; return f and f() or 0 end
 local function esc_pressed()
@@ -544,7 +550,61 @@ local function esc_pressed()
   return false
 end
 
+-- XR-style font
+local FONT_MAIN = reaper.ImGui_CreateFont('sans-serif', 16)
+reaper.ImGui_Attach(ctx, FONT_MAIN)
 
+-- Optional: compact HUD flags（不強改你的既有 flags；保留以後需要時可用）
+local window_flags =
+    reaper.ImGui_WindowFlags_NoCollapse()
+  | reaper.ImGui_WindowFlags_NoSavedSettings()
+
+-- ImGui shim：同時支援 ImGui 命名空間與底層函式
+local IM = rawget(reaper, 'ImGui') or {}
+if not IM.PushStyleColor then function IM.PushStyleColor(c, idx, col) reaper.ImGui_PushStyleColor(c, idx, col) end end
+if not IM.PopStyleColor  then function IM.PopStyleColor (c, n)        reaper.ImGui_PopStyleColor (c, n or 1) end end
+IM.Col_Text = IM.Col_Text or (reaper.ImGui_Col_Text and reaper.ImGui_Col_Text())
+
+-- 載入共用顏色主題（Lua 5.3 相容）
+local THEME_OK, WARNED_THEME = false, false
+local apply_theme, pop_theme, push_title, pop_title
+do
+  local theme_path = reaper.GetResourcePath() .. '/Scripts/hsuanice Scripts/Library/hsuanice_ReaImGui Theme Color.lua'
+  local env = setmetatable({ reaper = reaper }, { __index = _G })
+  local chunk = loadfile(theme_path, 'bt', env)
+  if chunk then
+    local ok, M = pcall(chunk)
+    if ok and type(M) == 'table' then
+      apply_theme = function(c) M.apply(c, IM) end
+      pop_theme   = function(c) M.pop(c, IM) end
+      push_title  = function(c) if M.push_title_text then M.push_title_text(c, IM) end end
+      pop_title   = function(c) if M.pop_title_text  then M.pop_title_text (c, IM) end end
+      THEME_OK = true
+    end
+  end
+  if not THEME_OK then
+    apply_theme = function(_) end
+    pop_theme   = function(_) end
+    push_title  = function(_) end
+    pop_title   = function(_) end
+  end
+end
+
+-- 專案切換保護：確保 ctx / font 永遠有效
+local first_frame = true
+local function ensure_imgui()
+  if not reaper.ImGui_ValidatePtr(ctx, 'ImGui_Context*') then
+    ctx = reaper.ImGui_CreateContext('Item List Editor')
+    FONT_MAIN = reaper.ImGui_CreateFont('sans-serif', 16)
+    reaper.ImGui_Attach(ctx, FONT_MAIN)
+    first_frame = true
+  end
+  if not reaper.ImGui_ValidatePtr(FONT_MAIN, 'ImGui_Font*') then
+    FONT_MAIN = reaper.ImGui_CreateFont('sans-serif', 16)
+    reaper.ImGui_Attach(ctx, FONT_MAIN)
+  end
+end
+---------------------------------
 
 -- Popup title（供 ESC 判斷與 BeginPopupModal 使用）
 local POPUP_TITLE = "Summary"
@@ -2102,12 +2162,30 @@ end
 -- Main loop
 ---------------------------------------
 local function loop()
+
+  ensure_imgui()
+  if first_frame then
+    reaper.ImGui_SetNextWindowSize(ctx, 1100, 560, reaper.ImGui_Cond_FirstUseEver())
+    first_frame = false
+  end
+
   if AUTO and not (EDIT and EDIT.col) then refresh_now() end
 
 
   reaper.ImGui_SetNextWindowSize(ctx, 1000, 640, reaper.ImGui_Cond_FirstUseEver())
   local flags = reaper.ImGui_WindowFlags_NoCollapse()
-  local visible, open = reaper.ImGui_Begin(ctx, "Item List Editor"..LIBVER, true, flags)
+
+  -- 顏色主題與字體（Guard）
+  apply_theme(ctx)
+  reaper.ImGui_PushFont(ctx, FONT_MAIN)
+
+  -- ★ TitleText 需在 Begin() 前 push
+  push_title(ctx)
+
+  -- ✅ 用常數 WINDOW_TITLE；用前面定好的 flags
+  local visible, open = reaper.ImGui_Begin(ctx, WINDOW_TITLE, true, flags)
+
+
 
 
   -- ESC 關閉整個視窗（若 Summary modal 開著，先只關 modal）
@@ -2297,6 +2375,12 @@ local function loop()
   end
 
   reaper.ImGui_End(ctx)
+
+  -- ★ 與 push_title 成對，避免 "PushStyleColor/PopStyleColor Mismatch"
+  pop_title(ctx)
+
+  reaper.ImGui_PopFont(ctx)
+  pop_theme(ctx)
 
   -- GOOD：要不要續跑只看 `open`；按 ESC 的判斷已在上面完成
   if open then
