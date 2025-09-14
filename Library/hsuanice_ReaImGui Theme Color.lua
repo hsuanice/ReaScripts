@@ -1,12 +1,18 @@
 --[[
 @description hsuanice ReaImGui Theme Color (library only)
-@version 0.4.2
+@version 0.4.3
 @author hsuanice
 @about
   Library for shared ReaImGui theme colors: palette, apply/pop, ExtState overrides, presets API.
   GUI/editor code is NOT included; use the dedicated Editor script.
 
 @changelog
+  v0.4.3
+    - Change: ScriptTitle helpers no longer push Col_Text by default; they only tint TitleBg/TitleBgActive. Opt-in title text tint via THEME.push_script_title(..., {tint_text=true}) or THEME.set_title_text_tint_enabled(true).
+    - Fix: apply() explicitly skips all pseudo slots (TitleText, BodyText, ScriptTitle*) so they’re never treated as global Col_*.
+    - Fix: col_index() now guards lookups (pcall) and returns nil for unknown keys to avoid unpaired Push/Pop on errors.
+    - Improve: push_script_title()/pop_script_title() keep exact push/pop counts; safer even if called in early-return paths.
+    - Compat: ReaImGui 0.10.x (incl. 0.10.0.2); font helpers (set_font/ensure_font/push_font/pop_font) unchanged.
   v0.4.2
     - Add: ScriptTitle* branding colors (ScriptTitleText, ScriptTitleBg, ScriptTitleBgActive, optional ScriptTitleBgCollapsed) for per-script window titles.
     - Add: THEME.push_script_title()/pop_script_title() — apply title text/background colors (and title font) only around Begin(), then pop immediately, so system defaults are not affected.
