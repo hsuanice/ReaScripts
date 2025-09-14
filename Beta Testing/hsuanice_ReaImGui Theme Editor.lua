@@ -1,13 +1,15 @@
 --[[
 @description hsuanice ReaImGui Theme Editor
-@version 0.4.2
+@version 0.5.0
 @author hsuanice
 @about
   Dedicated GUI for editing the shared ReaImGui theme (colors + presets).
-  Library holds only data/APIs; all UI belongs here.
-  Requires: "Scripts/hsuanice Scripts/Library/hsuanice_ReaImGui Theme Color.lua"
-
+  Works with ReaImGui 0.10.x.
 @changelog
+  v0.5.0
+  - Change: stop pinning to 0.9.3.2; require ReaImGui ≥ 0.10 (use dofile(... )('0.10')).
+  - Fix: avoid "ImGui__init: version number is empty" by always passing a non-empty version string.
+  - Keep: all editor behaviors and the Theme Color library APIs unchanged.
   v0.4.2 (2025-09-14)
     - Add: BodyText color slot support in the editor UI.
       * Color grid now includes BodyText alongside TitleText.
@@ -57,9 +59,9 @@
 
 ]]
 
--- 1) Load ReaImGui (lock version)
+-- 1) Load ReaImGui (no version lock; follow installed ReaImGui, e.g. 0.10.0.2)
 local imgui_path = reaper.ImGui_GetBuiltinPath() .. '/imgui.lua'
-local ImGui = dofile(imgui_path)('0.9.3.2')
+local ImGui = dofile(imgui_path)('0.10')   -- 允許 0.10.x（含 0.10.0.2）
 
 -- 2) Load Theme Color Library (data/APIs only)
 local LIB_PATH = reaper.GetResourcePath()
@@ -82,9 +84,10 @@ end
 
 
 -- 3) Context + font
-local ctx  = ImGui.CreateContext('hsuanice Theme Editor')
-local font = ImGui.CreateFont('sans-serif', 16)  -- 或你的字型/大小
-ImGui.Attach(ctx, font)  -- 很重要：把字型綁到該 ctx【Attach】
+local ctx = ImGui.CreateContext('hsuanice Theme Editor')
+
+-- 建議在建立 ctx 後設定一次預設字型給 library（專案統一基準）
+THEME.set_font('default', 'sans-serif', 16)
 
 -- 4) UI width presets (adjust here)
 local UI = {
@@ -169,39 +172,32 @@ end
 -- 6) Main loop
 local open = true
 local function loop()
+  local pushed = THEME.apply(ctx, ImGui, { use_extstate = false, overrides = S.current }) or 0
   if not S.init then init_state() end
 
-  local pushed = THEME.apply(ctx, ImGui, { use_extstate = false, overrides = S.current }) or 0
 
 
-  -- （可選）在 Begin 前暫時覆蓋標題字色
-  -- 使用 S.current 的 TitleText（沒有就用庫的預設）
-  local title_col = (S.current and S.current.TitleText) or THEME.colors.TitleText
-  ImGui.PushStyleColor(ctx, ImGui.Col_Text, title_col)
 
-  ImGui.SetNextWindowSize(ctx, 720, 520, ImGui.Cond_FirstUseEver)
+  -- Begin 之前：只上「標題字色」
+  THEME.push_title_text(ctx, ImGui)
   local vis; vis, open = ImGui.Begin(ctx, "hsuanice Theme Editor", true,
     ImGui.WindowFlags_NoCollapse | ImGui.WindowFlags_MenuBar)
-
-  ImGui.PopStyleColor(ctx)  -- TitleText pop（保留）
-
-  -- ★ 新增：讓內文吃到 BodyText（用當前編修色票優先，沒有就用預設）
-  THEME.push_body_text(ctx, ImGui, (S.current and S.current.BodyText) or THEME.colors.BodyText)
-
-
+  THEME.pop_title_text(ctx, ImGui)  -- 立刻彈回，避免影響內文
 
   -- ESC 關閉（僅當視窗被聚焦時）
   if ImGui.IsWindowFocused(ctx) and ImGui.IsKeyPressed(ctx, ImGui.Key_Escape) then
     open = false
   end
 
-  ImGui.PushFont(ctx, font)
-
   if vis then
+    -- Begin 之後才上「內文字色」與「字型」
+    THEME.push_body_text(ctx, ImGui, (S.current and S.current.BodyText) or THEME.colors.BodyText)
+    THEME.push_font(ctx, ImGui, 'default')  -- 交給 library，內含第三參數（基準字級）
+
     -- Row 0: Status line（獨立一行）
     ImGui.TextDisabled(ctx, S.dirty and "(Not saved)" or "Saved")
 
-    -- Row 1: Preset label + dropdown + Activate/Delete
+    -- Row 1: Preset label + dropdown + Delete
     local list = THEME.list_presets()
     local labels = {"(none)"}; local current_idx = 0
     for i,n in ipairs(list) do
@@ -214,7 +210,6 @@ local function loop()
     ImGui.SetNextItemWidth(ctx, UI.field_w)
     if ImGui.BeginCombo(ctx, "##preset", labels[current_idx+1] or "(none)") then
       if ImGui.Selectable(ctx, "(none)", current_idx==0) then
-        -- 取消啟用：清空 active，回到預設色票（不寫入 ExtState）
         S.active_name = nil
         S.name_field  = ""
         S.current = {}; for k,v in pairs(THEME.colors) do S.current[k] = v end
@@ -230,15 +225,13 @@ local function loop()
             S.current = {}; for k,v in pairs(THEME.colors) do S.current[k] = v end
             for k,v in pairs(pal) do S.current[k] = v end
             THEME.activate_preset(n, true)  -- 自動啟用（寫入 ExtState）
-            mark_saved()                    -- ★ 切換後視為「已儲存」狀態
+            mark_saved()
           end
         end
-
       end
       ImGui.EndCombo(ctx)
     end
 
-    -- （移除 Activate 按鈕）
     ImGui.SameLine(ctx)
     if ImGui.Button(ctx, "Delete") then
       if S.active_name then
@@ -250,7 +243,7 @@ local function loop()
 
     -- Row 2: Name + Save/Save As/Reset
     ImGui.Text(ctx, "Name: "); ImGui.SameLine(ctx)
-    ImGui.SetNextItemWidth(ctx, UI.field_w)  -- 統一寬度
+    ImGui.SetNextItemWidth(ctx, UI.field_w)
     local changed, newname = ImGui.InputText(ctx, "##name", S.name_field, ImGui.InputTextFlags_CharsNoBlank)
     if changed then S.name_field = newname end
 
@@ -259,22 +252,22 @@ local function loop()
       local nm = (S.name_field ~= "" and S.name_field) or (S.active_name or "default")
       THEME.save_preset(nm, S.current)
       S.active_name = nm
-      mark_saved()  -- ★
+      mark_saved()
     end
 
     if ImGui.Button(ctx, "Save As") then
       if S.name_field ~= "" then
         THEME.save_preset(S.name_field, S.current)
         S.active_name = S.name_field
-        mark_saved()  -- ★
+        mark_saved()
       end
     end
 
     ImGui.SameLine(ctx)
     if ImGui.Button(ctx, "Reset Defaults") then
       S.current = {}; for k,v in pairs(THEME.colors) do S.current[k] = v end
-      THEME.set_overrides(S.current, true)  -- 也同步全域
-      update_dirty()                        -- ★ 依目前快照判斷是否「已儲存」
+      THEME.set_overrides(S.current, true)
+      update_dirty()
     end
 
     ImGui.Separator(ctx)
@@ -282,14 +275,20 @@ local function loop()
     -- Color grid
     draw_color_grid()
 
-    ImGui.PopFont(ctx)
+    -- 先彈字型，再彈內文字色（順序與 Push 對應）
+    THEME.pop_font(ctx, ImGui)
     THEME.pop_body_text(ctx, ImGui)
-    ImGui.End(ctx)
   end
 
+  -- 無論 vis 真或假，都一定要 End 一次
+  ImGui.End(ctx)
+
+  -- 套用主題的 Pop（跟 loop 開頭的 apply 配對）
   if pushed > 0 then THEME.pop(ctx, ImGui) end
 
+  -- 循環
   if open then reaper.defer(loop) end
+
 end
 
 reaper.defer(loop)
