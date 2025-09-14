@@ -1,10 +1,18 @@
 --[[
 @description hsuanice ReaImGui Theme Color (library only)
-@version 0.4.0
+@version 0.4.1
 @author hsuanice
 @about
   Library for shared ReaImGui theme colors: palette, apply/pop, ExtState overrides, presets API.
   GUI/editor code is NOT included; use the dedicated Editor script.
+
+@changelog
+  v0.4.1
+    - Add: Font registry + helpers (set_font, ensure_font, push_font, pop_font) centralized in the library; ReaImGui 0.10-compatible (CreateFont without size, pass base size via PushFont 3rd arg).
+    - Add: Built-in font presets "default", "mono", and "title" (override with THEME.set_font(...)).
+    - Improve: Safer push/pop bookkeeping for pseudo slots (TitleText, BodyText) to avoid mismatched stacks across frames.
+    - Maintain: apply()/pop() theming flow and preset APIs unchanged; existing scripts keep working and can opt-in to library-managed fonts.
+
   v0.4.0 (2025-09-14)
     - Add: Font registry + helpers (set_font / ensure_font / push_font / pop_font)
       * 0.10+ compatible: CreateFont 不帶 size，PushFont 以第三參數傳入基準字級。
@@ -257,6 +265,7 @@ end
 local _FONTS = {
   default = { family = 'sans-serif',  size = 16, flags = nil, handle = nil },
   mono    = { family = 'monospace',   size = 14, flags = nil, handle = nil },
+  title   = { family = 'sans-serif',  size = 16, flags = nil, handle = nil },  -- ★ 新增：標題用字型（先設 16）
 }
 
 -- 修改或設定某個字型規格；任何參數給 nil 代表「不變」。
