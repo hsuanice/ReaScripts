@@ -1,11 +1,18 @@
 --[[
 @description hsuanice ReaImGui Theme Editor
-@version 0.5.2
+@version 0.5.3
 @author hsuanice
 @about
   Dedicated GUI for editing the shared ReaImGui theme (colors + presets).
   Works with ReaImGui 0.10.x.
 @changelog
+  v0.5.3
+    - Change: Replaced native title bar with a custom branded header (NoTitleBar + draw_script_header); ScriptTitle* palette drives the header, system defaults remain untouched.
+    - Change: Removed WindowFlags_MenuBar by default to prevent the menubar strip from covering the custom header.
+    - Fix: Defined draw_script_header with other helpers (before the main loop) to resolve “attempt to call a nil value”.
+    - Fix: Strict Begin/End and PushFont/PopFont pairing; removed duplicate PopFont and stray end; eliminates previous stack errors.
+    - Polish: Minor cleanup and comments; body UI still uses THEME.push_font('default') + THEME.push_body_text() and preview via overrides=S.current.
+    - Compat: ReaImGui 0.10.x (incl. 0.10.0.2).
   v0.5.2
     - Change: Use ScriptTitle* branding via THEME.push_script_title()/pop_script_title() for the window title (orange bg + blue text by default).
     - Change: Title text coloring no longer relies on the global Col_Text hack; avoids altering ReaImGui system default colors (e.g., docking hints).
@@ -115,6 +122,51 @@ local S = {
   dirty=false,                        -- ★ 新增：是否有未儲存變更
 }
 
+
+-- 自繪品牌標題列：只畫背景與文字，並提供拖曳移動視窗
+local function draw_script_header(ctx, ImGui, title, palette)
+  local pal = palette or THEME.colors
+  local bg_active   = pal.ScriptTitleBgActive or THEME.colors.ScriptTitleBgActive
+  local bg_inactive = pal.ScriptTitleBg       or THEME.colors.ScriptTitleBg
+  local fg          = pal.ScriptTitleText     or THEME.colors.ScriptTitleText
+  local focused     = ImGui.IsWindowFocused(ctx)
+  local bg          = focused and bg_active or bg_inactive
+
+  -- 視窗座標與尺寸
+  local wx, wy = ImGui.GetWindowPos(ctx)
+  local ww, wh = ImGui.GetWindowSize(ctx)
+
+  -- 以 title 字型決定標題列高度
+  local _, TITLE_SIZE = THEME.ensure_font(ctx, ImGui, 'title')
+  if not TITLE_SIZE then TITLE_SIZE = 16 end
+  local PAD_X, PAD_Y = 10, 6
+  local HEADER_H = math.floor(TITLE_SIZE + PAD_Y * 2)
+
+  -- 背景（用 drawlist，不動到系統顏色）
+  local dl = ImGui.GetWindowDrawList(ctx)
+  ImGui.DrawList_AddRectFilled(dl, wx, wy, wx + ww, wy + HEADER_H, bg)
+
+  -- 拖曳區（整條標題列）
+  ImGui.SetCursorPos(ctx, 0, 0)
+  ImGui.InvisibleButton(ctx, "##script_header_drag", ww, HEADER_H)
+  if ImGui.IsItemActive(ctx) and ImGui.IsMouseDragging(ctx, ImGui.MouseButton_Left) then
+    local dx, dy = ImGui.GetMouseDelta(ctx)
+    ImGui.SetWindowPos(ctx, wx + dx, wy + dy)
+  end
+
+  -- 標題文字（只在本區塊暫時推字型與文字色）
+  THEME.push_font(ctx, ImGui, 'title')
+  ImGui.PushStyleColor(ctx, ImGui.Col_Text, fg)
+  ImGui.SetCursorPos(ctx, PAD_X, math.floor((HEADER_H - TITLE_SIZE) * 0.5))
+  ImGui.Text(ctx, title)
+  ImGui.PopStyleColor(ctx)
+  THEME.pop_font(ctx, ImGui)
+
+  -- 把游標移到標題列下方，讓後面的內容從這裡開始
+  ImGui.SetCursorPos(ctx, 0, HEADER_H)
+end
+
+
 -- ★ 用於比對內容是否與已儲存相同（key 排序，避免順序造成差異）
 local function serialize_palette_for_compare(colors)
   local keys = {}
@@ -190,14 +242,14 @@ local function loop()
 
 
 
-  -- Begin 之前：只上「腳本品牌標題」配色（文字 + 橘色底 + 聚焦底 + 標題字型）
-  THEME.push_script_title(ctx, ImGui)
+
+
 
   local vis; vis, open = ImGui.Begin(ctx, "hsuanice Theme Editor", true,
-    ImGui.WindowFlags_NoCollapse | ImGui.WindowFlags_MenuBar)
+    ImGui.WindowFlags_NoTitleBar
+    | ImGui.WindowFlags_NoCollapse)
 
-  -- Begin 之後立刻彈回，避免影響內容區與系統預設
-  THEME.pop_script_title(ctx, ImGui)    -- ★ 這裡已經包含 PopFont，不要再另外 PopFont
+  
 
 
 
@@ -207,9 +259,12 @@ local function loop()
   end
 
   if vis then
-    -- Begin 之後才上「內文字色」與「字型」
+    -- 自繪品牌標題列（不動到系統色）
+    draw_script_header(ctx, ImGui, "hsuanice Theme Editor", S.current or THEME.colors)
+
+    -- 接著再進入內容區：內文顏色與內文字型
     THEME.push_body_text(ctx, ImGui, (S.current and S.current.BodyText) or THEME.colors.BodyText)
-    THEME.push_font(ctx, ImGui, 'default')  -- 交給 library，內含第三參數（基準字級）
+    THEME.push_font(ctx, ImGui, 'default')
 
     -- Row 0: Status line（獨立一行）
     ImGui.TextDisabled(ctx, S.dirty and "(Not saved)" or "Saved")
@@ -289,8 +344,14 @@ local function loop()
 
     ImGui.Separator(ctx)
 
+
+
+
     -- Color grid
     draw_color_grid()
+
+
+
 
     -- 先彈字型，再彈內文字色（順序與 Push 對應）
     THEME.pop_font(ctx, ImGui)
