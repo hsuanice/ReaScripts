@@ -1,12 +1,17 @@
 --[[
 @description hsuanice ReaImGui Theme Color (library only)
-@version 0.4.1
+@version 0.4.2
 @author hsuanice
 @about
   Library for shared ReaImGui theme colors: palette, apply/pop, ExtState overrides, presets API.
   GUI/editor code is NOT included; use the dedicated Editor script.
 
 @changelog
+  v0.4.2
+    - Add: ScriptTitle* branding colors (ScriptTitleText, ScriptTitleBg, ScriptTitleBgActive, optional ScriptTitleBgCollapsed) for per-script window titles.
+    - Add: THEME.push_script_title()/pop_script_title() — apply title text/background colors (and title font) only around Begin(), then pop immediately, so system defaults are not affected.
+    - Add: Config toggle for legacy TitleText tint (THEME.set_title_text_tint_enabled(on)); default OFF to avoid changing ReaImGui’s global text color.
+    - Keep: Existing apply()/pop(), preset APIs, and font helpers unchanged and compatible with ReaImGui 0.10.x.
   v0.4.1
     - Add: Font registry + helpers (set_font, ensure_font, push_font, pop_font) centralized in the library; ReaImGui 0.10-compatible (CreateFont without size, pass base size via PushFont 3rd arg).
     - Add: Built-in font presets "default", "mono", and "title" (override with THEME.set_font(...)).
@@ -51,6 +56,9 @@ M.KEY_ACTIVE       = "ACTIVE"                       -- active preset name
 -- Default palette (0xRRGGBBAA). Add/remove keys as you like.
 ----------------------------------------------------------------
 M.colors = {
+  ScriptTitleText       = 0xFF003DFF,  -- 預設：藍色字（之後你在 Editor 裡想改就改）
+  ScriptTitleBg         = 0xFFFFC700,  -- 預設：亮金橘底
+  ScriptTitleBgActive   = 0xFFFFA500,  -- 預設：標題被聚焦時的橘
   TitleText         = 0xffffffff, -- pseudo slot: title-bar text color (push before Begin, pop after)
   BodyText          = 0xffffffff, -- pseudo slot: general content text color (push after Begin, pop before End)
   WindowBg          = 0x292929ff,
@@ -112,9 +120,22 @@ end
 
 -- resolve ImGui color enum index by key (prefer shim constants, fallback to raw getters)
 local function col_index(ImGui, key)
-  return (ImGui and ImGui["Col_" .. key])
-      or (reaper["ImGui_Col_" .. key] and reaper["ImGui_Col_" .. key]())
+  if not ImGui then return nil end
+
+  -- 先嘗試從 shim 的常數表取值（有些鍵不存在會丟錯，pcall 保護）
+  local ok1, val1 = pcall(function() return ImGui["Col_" .. key] end)
+  if ok1 and val1 then return val1 end
+
+  -- 再嘗試 REAPER 提供的 getter（同樣以 pcall 保護）
+  local getter = reaper["ImGui_Col_" .. key]
+  if getter then
+    local ok2, val2 = pcall(getter)
+    if ok2 then return val2 end
+  end
+
+  return nil
 end
+
 
 ----------------------------------------------------------------
 -- ExtState: per-key overrides used by apply()
@@ -163,8 +184,7 @@ end
 local _push_counts = setmetatable({}, { __mode = "k" })
 
 function M.apply(ctx, ImGui, opts)
-  -- Validate ctx (defensive)
-  if not reaper.ImGui_ValidatePtr(ctx, 'ImGui_Context*') then return 0 end  -- doc: ValidatePtr :contentReference[oaicite:3]{index=3}
+  if not reaper.ImGui_ValidatePtr(ctx, 'ImGui_Context*') then return 0 end
 
   opts = opts or {}
   local use_ext   = (opts.use_extstate ~= false)
@@ -173,12 +193,12 @@ function M.apply(ctx, ImGui, opts)
 
   local pushed = 0
   for k, def in pairs(M.colors) do
-    -- TitleText / BodyText 都是自訂虛擬槽（沒有 Col_*），在這裡略過
-    if k ~= "TitleText" and k ~= "BodyText" and overrides[k] ~= false then
+    -- ★ 偽槽：TitleText / BodyText / ScriptTitle* 一律略過（沒有對應的 Col_*）
+    local is_pseudo = (k == "TitleText" or k == "BodyText" or k:sub(1,12) == "ScriptTitle")
+    if (not is_pseudo) and overrides[k] ~= false then
       local color = overrides[k] or from_ext[k] or def
       local idx = col_index(ImGui, k)
       if idx then
-        -- Use shim Push/Pop to stay in the same API layer; doc: PushStyleColor(ctx, idx, col) :contentReference[oaicite:4]{index=4}
         ImGui.PushStyleColor(ctx, idx, color)
         pushed = pushed + 1
       end
@@ -300,6 +320,58 @@ end
 function M.pop_font(ctx, ImGui)
   ImGui.PopFont(ctx)
 end
+
+
+----------------------------------------------------------------
+-- Script Title helpers: push just for Begin(), pop right after
+----------------------------------------------------------------
+local _st_pushed = {}  -- 每個 ctx 記錄這次推了幾個 color、是否也推了字型
+
+function M.push_script_title(ctx, ImGui, opts)
+  if not reaper.ImGui_ValidatePtr(ctx, 'ImGui_Context*') then return 0 end
+  local eff = M.get_effective_colors()
+  local pushed_colors = 0
+
+  -- 1) 先推字型（可關閉）
+  local use_font = true
+  if opts and opts.no_font then use_font = false end
+  if use_font and M.push_font then
+    M.push_font(ctx, ImGui, 'title')
+    _st_pushed[ctx] = _st_pushed[ctx] or {}
+    _st_pushed[ctx].font = true
+  end
+
+  -- 2) 再推三個色：Text / TitleBg / TitleBgActive（以及可選的 TitleBgCollapsed）
+  local col_text = eff.ScriptTitleText
+  local col_bg   = eff.ScriptTitleBg
+  local col_bga  = eff.ScriptTitleBgActive
+  local col_bgc  = eff.ScriptTitleBgCollapsed
+
+  if col_text then ImGui.PushStyleColor(ctx, ImGui.Col_Text, col_text); pushed_colors = pushed_colors + 1 end
+  if col_bg   then ImGui.PushStyleColor(ctx, ImGui.Col_TitleBg, col_bg); pushed_colors = pushed_colors + 1 end
+  if col_bga  then ImGui.PushStyleColor(ctx, ImGui.Col_TitleBgActive, col_bga); pushed_colors = pushed_colors + 1 end
+  if col_bgc  then ImGui.PushStyleColor(ctx, ImGui.Col_TitleBgCollapsed, col_bgc); pushed_colors = pushed_colors + 1 end
+
+  _st_pushed[ctx] = _st_pushed[ctx] or {}
+  _st_pushed[ctx].colors = pushed_colors
+
+  return pushed_colors
+end
+
+function M.pop_script_title(ctx, ImGui)
+  local st = _st_pushed[ctx]
+  if st then
+    if st.colors and st.colors > 0 then
+      ImGui.PopStyleColor(ctx, st.colors)  -- 一次彈回剛剛推的所有顏色
+    end
+    if st.font and M.pop_font then
+      M.pop_font(ctx, ImGui)               -- 最後再彈字型（與 push 順序相反）
+    end
+  end
+  _st_pushed[ctx] = nil
+end
+
+
 
 ----------------------------------------------------------------
 -- Presets API
