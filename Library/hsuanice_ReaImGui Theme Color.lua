@@ -1,11 +1,17 @@
 --[[
 @description hsuanice ReaImGui Theme Color (library only)
-@version 0.3.2.1
+@version 0.3.3
 @author hsuanice
 @about
   Library for shared ReaImGui theme colors: palette, apply/pop, ExtState overrides, presets API.
   GUI/editor code is NOT included; use the dedicated Editor script.
 @changelog
+  v0.3.3 (2025-09-14)
+    - Add: BodyText (pseudo slot) to control general content text color,
+      complementing TitleText for the title bar.
+    - API: apply() now skips both TitleText and BodyText (pseudo slots).
+    - API: new helpers push_body_text()/pop_body_text() for per-window body text color.
+    - No breaking changes; existing presets remain valid.
   v0.3.2.1  Default: set TitleText to white (0xffffffff) so the window title remains readable
             on dark TitleBg when a preset lacks TitleText. No API changes.
 
@@ -35,6 +41,7 @@ M.KEY_ACTIVE       = "ACTIVE"                       -- active preset name
 ----------------------------------------------------------------
 M.colors = {
   TitleText         = 0xffffffff, -- pseudo slot: title-bar text color (push before Begin, pop after)
+  BodyText          = 0xffffffff, -- pseudo slot: general content text color (push after Begin, pop before End)
   WindowBg          = 0x292929ff,
   Border            = 0x2a2a2aff,
   Button            = 0x454545ff,
@@ -155,8 +162,8 @@ function M.apply(ctx, ImGui, opts)
 
   local pushed = 0
   for k, def in pairs(M.colors) do
-    -- TitleText 是自訂虛擬槽（沒有 Col_*），在這裡略過
-    if k ~= "TitleText" and overrides[k] ~= false then
+    -- TitleText / BodyText 都是自訂虛擬槽（沒有 Col_*），在這裡略過
+    if k ~= "TitleText" and k ~= "BodyText" and overrides[k] ~= false then
       local color = overrides[k] or from_ext[k] or def
       local idx = col_index(ImGui, k)
       if idx then
@@ -218,6 +225,28 @@ function M.pop_title_text(ctx, ImGui)
   end
   return false
 end
+
+-- Body text color helpers (pseudo slot)
+local _body_pushed = setmetatable({}, { __mode = "k" })
+
+-- 可選參數 rgba：若提供就用該色；否則從有效色票抓 BodyText
+function M.push_body_text(ctx, ImGui, rgba)
+  if not reaper.ImGui_ValidatePtr(ctx, 'ImGui_Context*') then return false end
+  local col = rgba or (M.get_effective_colors().BodyText or 0xffffffff)
+  ImGui.PushStyleColor(ctx, ImGui.Col_Text, col) -- 內容文字在 Begin() 之後推
+  _body_pushed[ctx] = true
+  return true
+end
+
+function M.pop_body_text(ctx, ImGui)
+  if _body_pushed[ctx] then
+    ImGui.PopStyleColor(ctx, 1) -- 在 End() 之前彈回
+    _body_pushed[ctx] = false
+    return true
+  end
+  return false
+end
+
 
 ----------------------------------------------------------------
 -- Presets API
