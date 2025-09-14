@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<index version="1" name="hsuanice Scripts" commit="42f9515aacfedd2618e380422e703e78971a6a27">
+<index version="1" name="hsuanice Scripts" commit="dd2002c71eec88af9bc56ba4892ffedcae32e622">
   <category name="Beta Testing">
     <reapack name="hsuanice_BWF TimeReference Embed Tool.lua" type="script" desc="Embed BWF TimeReference to Active take from Take 1 or Current Position TC">
       <version name="0.7.1" author="hsuanice" time="2025-08-14T17:52:57Z">
@@ -1180,6 +1180,28 @@ v0.2.0
 v0.1.0
 - Initial minimal HUD (no custom font/theme)]]></changelog>
         <source main="main">https://github.com/hsuanice/ReaScripts/raw/b1804e1d29f3130c01a61479ff9922633a84e902/Beta%20Testing/hsuanice_Show%20Frame%20Rate.lua</source>
+      </version>
+      <version name="0.2.2.1" author="hsuanice" time="2025-09-14T02:42:23Z">
+        <changelog><![CDATA[v0.2.2.1 (2025-09-14)
+  - Fix: Added ensure_ctx() guard to handle project switching.
+    When loading a new project, the old ImGui context/font may
+    be invalidated; ensure_ctx() now recreates them before any
+    ImGui calls. Prevents errors like
+    "ImGui_SetNextWindowSize: expected a valid ImGui_Context*".
+  - Internal: validate font pointer each frame and recreate if
+    needed.
+  - No functional/UI changes; only stability improvement.
+
+v0.2.2
+- Implement mode B: show a warning dialog once if the theme library is missing, but do not abort.
+v0.2.1
+- Use shared color library: hsuanice_ReaImGui Theme Color.lua (apply/pop per frame)
+- Remove local theme table and push_theme(); add safe fallback if library missing
+v0.2.0
+- XR-style stack: ReaImGui lock (0.9.3.2), dark theme table, 16pt font, docking config
+v0.1.0
+- Initial minimal HUD (no custom font/theme)]]></changelog>
+        <source main="main">https://github.com/hsuanice/ReaScripts/raw/dd2002c71eec88af9bc56ba4892ffedcae32e622/Beta%20Testing/hsuanice_Show%20Frame%20Rate.lua</source>
       </version>
     </reapack>
     <reapack name="hsuanice_SMPTE UMID Generate and Embed Tool.lua" type="script" desc="SMPTE UMID Generate &amp; Embed Tool (bext:UMID only)">
