@@ -1,6 +1,6 @@
 --[[
 @description Item List Editor
-@version 0.10.0 Text color wrong
+@version 0.10.0.1
 @author hsuanice
 @about
   Shows a live, spreadsheet-style table of the currently selected items and all
@@ -40,6 +40,15 @@
 
 
 @changelog
+  v0.10.0.1 (2025-09-14)
+    - GUI/Theme: Integrated BodyText color slot (new in Theme library).
+      * push_body_text() after Begin(), pop_body_text() before End(),
+        so all content text inside the editor uses the configured BodyText color.
+    - Refined: TitleText handling unchanged (push before Begin(),
+      pop immediately after), so only the window title uses TitleText color.
+    - No functional changes to table editing, toolbar, summary,
+      copy/paste, or presets.
+
   v0.10.0 (2025-09-14)
     - GUI refresh: adopt XR-style theme via "hsuanice_ReaImGui Theme Color.lua".
     - Stability: added ImGui context/font guards to survive project switching/loading
@@ -567,7 +576,7 @@ IM.Col_Text = IM.Col_Text or (reaper.ImGui_Col_Text and reaper.ImGui_Col_Text())
 
 -- 載入共用顏色主題（Lua 5.3 相容）
 local THEME_OK, WARNED_THEME = false, false
-local apply_theme, pop_theme, push_title, pop_title
+local apply_theme, pop_theme, push_title, pop_title, push_body_text, pop_body_text
 do
   local theme_path = reaper.GetResourcePath() .. '/Scripts/hsuanice Scripts/Library/hsuanice_ReaImGui Theme Color.lua'
   local env = setmetatable({ reaper = reaper }, { __index = _G })
@@ -575,10 +584,13 @@ do
   if chunk then
     local ok, M = pcall(chunk)
     if ok and type(M) == 'table' then
-      apply_theme = function(c) M.apply(c, IM) end
-      pop_theme   = function(c) M.pop(c, IM) end
-      push_title  = function(c) if M.push_title_text then M.push_title_text(c, IM) end end
-      pop_title   = function(c) if M.pop_title_text  then M.pop_title_text (c, IM) end end
+      apply_theme     = function(c) M.apply(c, IM) end
+      pop_theme       = function(c) M.pop(c, IM) end
+      push_title      = function(c) if M.push_title_text then M.push_title_text(c, IM) end end
+      pop_title       = function(c) if M.pop_title_text  then M.pop_title_text (c, IM) end end
+      -- ★ 新增：把 BodyText 的 helper 也綁進來（可接受可選 rgba）
+      push_body_text  = function(c, _Im, rgba) if M.push_body_text then return M.push_body_text(c, IM, rgba) end end
+      pop_body_text   = function(c)             if M.pop_body_text  then return M.pop_body_text (c, IM)       end end
       THEME_OK = true
     end
   end
@@ -2179,13 +2191,15 @@ local function loop()
   apply_theme(ctx)
   reaper.ImGui_PushFont(ctx, FONT_MAIN)
 
-  -- ★ TitleText 需在 Begin() 前 push
+  -- [A1] TitleText 只想上在標題：Begin() 前 push
   push_title(ctx)
 
-  -- ✅ 用常數 WINDOW_TITLE；用前面定好的 flags
+  -- Begin 會把標題畫出來
   local visible, open = reaper.ImGui_Begin(ctx, WINDOW_TITLE, true, flags)
+  pop_title(ctx) -- Begin() 立刻之後 pop（OK）
 
-
+  -- ★ 新增：讓內文文字吃到 BodyText 顏色
+  push_body_text(ctx, reaper.ImGui)
 
 
   -- ESC 關閉整個視窗（若 Summary modal 開著，先只關 modal）
@@ -2374,13 +2388,14 @@ local function loop()
     end
   end
 
-  reaper.ImGui_End(ctx)
+  -- ★ End 之前先彈回 BodyText
+  pop_body_text(ctx, reaper.ImGui)
 
-  -- ★ 與 push_title 成對，避免 "PushStyleColor/PopStyleColor Mismatch"
-  pop_title(ctx)
+  reaper.ImGui_End(ctx)
 
   reaper.ImGui_PopFont(ctx)
   pop_theme(ctx)
+
 
   -- GOOD：要不要續跑只看 `open`；按 ESC 的判斷已在上面完成
   if open then
