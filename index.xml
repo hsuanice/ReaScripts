@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<index version="1" name="hsuanice Scripts" commit="abb803d9be1342c800c98a546d0308de715479b7">
+<index version="1" name="hsuanice Scripts" commit="1e465c35bfe68b43f1f0e29fdaf984e799b908ae">
   <category name="Beta Testing">
     <reapack name="hsuanice_BWF TimeReference Embed Tool.lua" type="script" desc="Embed BWF TimeReference to Active take from Take 1 or Current Position TC">
       <version name="0.7.1" author="hsuanice" time="2025-08-14T17:52:57Z">
@@ -1195,11 +1195,12 @@ v0.2.0  Previous rename and future-proof notes.]]></changelog>
 {\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Restores the visible edges and transfers the left-compensation offset to the NEW take.\sa180\par}
 {\pard \ql \f0 \sa180 \li0 \fi0 Multiple items:\par}
 {\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Only the leftmost item gets a left handle; only the rightmost item gets a right handle.\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab NEW in v0.1.2: handle size is limited by SOURCE HEADROOM (not by the visible item length), so you can get the full requested handle length when the source has enough margin.\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Uses SOURCE headroom (not visible item length) to decide actual handle sizes.\par}
 {\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Disables Loop source on the outer items during processing to avoid loop \u8220"fake\u8221" headroom.\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Sets a global time selection that includes both handles, glues into a single item, then trims back to the original group span. (No takes are created in this mode.)\sa180\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Sets a global time selection that includes both handles, glues into a single item, then trims back to the original group span. (No takes are created in this mode.)\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab NEW in v0.1.3: preserves fades \u8212- leftmost item's fade-in and rightmost item's fade-out are restored to the glued result (length, shape, curve).\sa180\par}
 {\pard \ql \f0 \sa180 \li0 \fi0 Notes:\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Fades are not baked by glue; item volume is baked when processing a single item.\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Fades are not baked by glue by default; this script re-applies edge fades after glue.\par}
 {\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Requires SWS (BR_SetItemEdges). Reference:\par}
 {\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Technique inspired by: Script: az_Open item copy in primary external editor with handles.lua\par}
 {\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab The script internally uses SWS/Xenakios actions to apply item volume while keeping track FX out.\sa180\par}
@@ -1211,6 +1212,9 @@ v0.2.0  Previous rename and future-proof notes.]]></changelog>
       </version>
       <version name="0.1.2 glue handle fixed" author="hsuanice" time="2025-09-15T19:15:32Z">
         <source main="main">https://github.com/hsuanice/ReaScripts/raw/abb803d9be1342c800c98a546d0308de715479b7/Beta%20Testing/hsuanice_Render%20or%20Glue%20Items%20with%20Handles.lua</source>
+      </version>
+      <version name="0.1.3 Glue fade fixed" author="hsuanice" time="2025-09-15T19:28:49Z">
+        <source main="main">https://github.com/hsuanice/ReaScripts/raw/1e465c35bfe68b43f1f0e29fdaf984e799b908ae/Beta%20Testing/hsuanice_Render%20or%20Glue%20Items%20with%20Handles.lua</source>
       </version>
     </reapack>
     <reapack name="hsuanice_Reorder or sort selected items vertically Monitor.lua" type="script" desc="Monitor - Reorder or sort selected items vertically">
