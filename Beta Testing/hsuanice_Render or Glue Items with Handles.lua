@@ -1,6 +1,6 @@
 --[[
 @description Render or Glue Items with Handles
-@version 0.1.2 glue handle fixed
+@version 0.1.3 Glue fade fixed
 @author hsuanice
 @about
   Single item:
@@ -12,20 +12,24 @@
 
   Multiple items:
     - Only the leftmost item gets a left handle; only the rightmost item gets a right handle.
-    - NEW in v0.1.2: handle size is limited by SOURCE HEADROOM (not by the visible item length),
-      so you can get the full requested handle length when the source has enough margin.
+    - Uses SOURCE headroom (not visible item length) to decide actual handle sizes.
     - Disables Loop source on the outer items during processing to avoid loop “fake” headroom.
     - Sets a global time selection that includes both handles, glues into a single item,
       then trims back to the original group span. (No takes are created in this mode.)
+    - NEW in v0.1.3: preserves fades — leftmost item's fade-in and rightmost item's fade-out
+      are restored to the glued result (length, shape, curve).
 
   Notes:
-    - Fades are not baked by glue; item volume is baked when processing a single item.
+    - Fades are not baked by glue by default; this script re-applies edge fades after glue.
     - Requires SWS (BR_SetItemEdges).
   Reference:
     - Technique inspired by: Script: az_Open item copy in primary external editor with handles.lua
     - The script internally uses SWS/Xenakios actions to apply item volume while keeping track FX out.  
 
 @changelog
+  v0.1.3
+    - After multi-item glue, restore the leftmost fade-in and rightmost fade-out on the glued item(s),
+      including length, shape and curve (clamped to the new item length).
   v0.1.2
     - Multi-item (glue) handles now use SOURCE headroom (left: start offset; right: remaining source)
       instead of capping by each outer item’s visible length.
@@ -35,6 +39,7 @@
     - Single-item path bakes item volume while bypassing track FX.
     - Multi-item path: group glue with handles only on outermost items; restore visual span.
 --]]
+
 
 local R = reaper
 
@@ -110,6 +115,51 @@ local function headroom_right_sec(it, take)
   return math.max(0, max_total - (off / pr + len))
 end
 
+-- Capture fades of an item (for preserving after glue)
+local function capture_fades(it)
+  local fin_len   = R.GetMediaItemInfo_Value(it, "D_FADEINLEN") or 0
+  local fin_shape = R.GetMediaItemInfo_Value(it, "C_FADEINSHAPE") or 0
+  local fin_dir   = R.GetMediaItemInfo_Value(it, "D_FADEINDIR") or 0
+  local fin_auto  = R.GetMediaItemInfo_Value(it, "D_FADEINLEN_AUTO") or 0
+
+  local fout_len   = R.GetMediaItemInfo_Value(it, "D_FADEOUTLEN") or 0
+  local fout_shape = R.GetMediaItemInfo_Value(it, "C_FADEOUTSHAPE") or 0
+  local fout_dir   = R.GetMediaItemInfo_Value(it, "D_FADEOUTDIR") or 0
+  local fout_auto  = R.GetMediaItemInfo_Value(it, "D_FADEOUTLEN_AUTO") or 0
+
+  return {
+    fin_len=fin_len, fin_shape=fin_shape, fin_dir=fin_dir, fin_auto=fin_auto,
+    fout_len=fout_len, fout_shape=fout_shape, fout_dir=fout_dir, fout_auto=fout_auto
+  }
+end
+
+-- Apply captured fades to a (new) item, clamped to its length
+local function apply_fades(it, cap)
+  if not cap or not it or not R.ValidatePtr(it,"MediaItem*") then return end
+  local _, _, ilen = get_bounds(it)
+  local in_len  = math.max(0, math.min(cap.fin_len  or 0, ilen))
+  local out_len = math.max(0, math.min(cap.fout_len or 0, ilen))
+
+  if in_len > 0 then
+    R.SetMediaItemInfo_Value(it, "D_FADEINLEN", in_len)
+    R.SetMediaItemInfo_Value(it, "C_FADEINSHAPE", cap.fin_shape or 0)
+    R.SetMediaItemInfo_Value(it, "D_FADEINDIR", cap.fin_dir or 0)
+    R.SetMediaItemInfo_Value(it, "D_FADEINLEN_AUTO", cap.fin_auto or 0)
+  else
+    -- keep zero if no fade
+    R.SetMediaItemInfo_Value(it, "D_FADEINLEN", 0)
+  end
+
+  if out_len > 0 then
+    R.SetMediaItemInfo_Value(it, "D_FADEOUTLEN", out_len)
+    R.SetMediaItemInfo_Value(it, "C_FADEOUTSHAPE", cap.fout_shape or 0)
+    R.SetMediaItemInfo_Value(it, "D_FADEOUTDIR", cap.fout_dir or 0)
+    R.SetMediaItemInfo_Value(it, "D_FADEOUTLEN_AUTO", cap.fout_auto or 0)
+  else
+    R.SetMediaItemInfo_Value(it, "D_FADEOUTLEN", 0)
+  end
+end
+
 -- AZ-style: temporary edge expansion + left-offset compensation
 local function az_expand_item_edges(it, left_sec, right_sec)
   local pos, ed, _ = get_bounds(it)
@@ -160,7 +210,6 @@ local function do_single_item(it)
   if not it or not R.ValidatePtr(it,"MediaItem*") then return end
   local tk_before = get_active_take(it); if not tk_before then return end
 
-  -- keep 0.1.1 caps (visual length + start) for single item as previously approved
   local pos, ed, len = get_bounds(it)
   local left_cap  = math.min(HANDLE_SEC, pos)
   local right_cap = math.min(HANDLE_SEC, len)
@@ -178,7 +227,7 @@ local function do_single_item(it)
 end
 
 -------------------------------------------------
--- Multi-items path (glue; use SOURCE headroom, no visible-length cap)
+-- Multi-items path (glue; source-headroom handles + preserve outer fades)
 -------------------------------------------------
 local function do_multi_items(items)
   if #items == 0 then return end
@@ -195,7 +244,11 @@ local function do_multi_items(items)
   end
   if not L or not Rr then return end
 
-  -- compute handles from SOURCE headroom (cap only by HANDLE_SEC and project 0s)
+  -- capture fades from outer items BEFORE glue
+  local capL = capture_fades(L)    -- we only need fade-in from L, but capturing both is fine
+  local capR = capture_fades(Rr)   -- we only need fade-out from R
+
+  -- compute handles from SOURCE headroom
   local tkL = get_active_take(L)
   local tkR = get_active_take(Rr)
   if not tkL or not tkR then return end
@@ -207,15 +260,14 @@ local function do_multi_items(items)
   if loopR ~= 0 then R.SetMediaItemInfo_Value(Rr,"B_LOOPSRC", 0) end
 
   local left_room  = headroom_left_sec(tkL)
-  local right_room = headroom_right_sec(Rr, tkR)  -- needs item len internally
+  local right_room = headroom_right_sec(Rr, tkR)
 
   local L_left  = math.min(HANDLE_SEC, left_room)
   local R_right = math.min(HANDLE_SEC, right_room)
 
   -- temporary edge expansion (AZ style)
-  local infoL, infoR = nil, nil
-  if L_left  > 0 then infoL = az_expand_item_edges(L,  L_left, 0) end
-  if R_right > 0 then infoR = az_expand_item_edges(Rr, 0, R_right) end
+  if L_left  > 0 then az_expand_item_edges(L,  L_left, 0) end
+  if R_right > 0 then az_expand_item_edges(Rr, 0, R_right) end
 
   -- global TS with handles (left clamped at project 0)
   local ts_a = math.max(0, L_start - L_left)
@@ -233,7 +285,19 @@ local function do_multi_items(items)
   R.Main_OnCommand(CMD_TRIM_TS, 0)
   restore_ts(tsa, tsb)
 
-  -- no need to restore edges/loop flags: originals are replaced by glue
+  -- after glue+trim, selected item(s) are the results → apply fades:
+  local sel = R.CountSelectedMediaItems(0)
+  for i=0, sel-1 do
+    local g = R.GetSelectedMediaItem(0, i)
+    if g and R.ValidatePtr(g,"MediaItem*") then
+      -- apply left fade-in from L, right fade-out from R
+      local cap = {
+        fin_len=capL.fin_len, fin_shape=capL.fin_shape, fin_dir=capL.fin_dir, fin_auto=capL.fin_auto,
+        fout_len=capR.fout_len, fout_shape=capR.fout_shape, fout_dir=capR.fout_dir, fout_auto=capR.fout_auto
+      }
+      apply_fades(g, cap)
+    end
+  end
 end
 
 -------------------------------------------------
@@ -251,7 +315,9 @@ local function main()
   R.PreventUIRefresh(1)
 
   if #items == 1 then
-    if not require_xen() then R.PreventUIRefresh(-1); R.Undo_EndBlock("Render/Glue with Handles (abort)", -1); return end
+    if not require_xen() then
+      R.PreventUIRefresh(-1); R.Undo_EndBlock("Render/Glue with Handles (abort)", -1); return
+    end
     do_single_item(items[1])
   else
     do_multi_items(items)
