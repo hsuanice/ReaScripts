@@ -1,39 +1,39 @@
 --[[
 @description Render or Glue Items with Handles
-@version 0.1.1
+@version 0.1.2 glue handle fixed
 @author hsuanice
 @about
   Single item:
-    - Temporarily expands item edges to include user handles (pre/post-roll) without visual jumps,
+    - Temporarily expands item edges to include user handles (pre/post-roll) without visible jumps,
       using offset compensation when the left handle would cross project 0s.
-    - Bypasses all track FX, applies item volume to audio (new take), then un-bypasses track FX.
-    - Finally restores the visible item edges; the new take now contains the hidden handles.
+    - Temporarily bypasses all track FX, applies item volume to audio (creates a new take),
+      then un-bypasses track FX.
+    - Restores the visible edges and transfers the left-compensation offset to the NEW take.
 
   Multiple items:
     - Only the leftmost item gets a left handle; only the rightmost item gets a right handle.
-    - Sets a global time selection that includes both handles, glues the selection into a single item,
+    - NEW in v0.1.2: handle size is limited by SOURCE HEADROOM (not by the visible item length),
+      so you can get the full requested handle length when the source has enough margin.
+    - Disables Loop source on the outer items during processing to avoid loop “fake” headroom.
+    - Sets a global time selection that includes both handles, glues into a single item,
       then trims back to the original group span. (No takes are created in this mode.)
 
   Notes:
-    - Handle length is capped per item by its visible length; the left handle is also capped by item start.
     - Fades are not baked by glue; item volume is baked when processing a single item.
-    - Requires SWS (BR_SetItemEdges). Uses the well-known “temporary edge expansion + offset compensation”
-      approach (inspired by community scripts), and the common “apply item volume while avoiding track FX”
-      trick (temporarily bypassing track FX).
-
+    - Requires SWS (BR_SetItemEdges).
   Reference:
     - Technique inspired by: Script: az_Open item copy in primary external editor with handles.lua
-    - The script internally uses SWS/Xenakios actions to apply item volume while keeping track FX out.
+    - The script internally uses SWS/Xenakios actions to apply item volume while keeping track FX out.  
 
 @changelog
+  v0.1.2
+    - Multi-item (glue) handles now use SOURCE headroom (left: start offset; right: remaining source)
+      instead of capping by each outer item’s visible length.
+    - Temporarily disables Loop source on the two outer items to avoid looping being mistaken for headroom.
   v0.1.1
-    - Switch to AZ-style handle creation: temporary edge expansion with left-offset compensation.
-    - Single-item path: bake item volume into a fresh take while bypassing track FX to avoid printing them.
-    - Multi-item path: group glue with handles only on the outermost items; restore visual span.
-    - Stability: pointer guards (ValidatePtr), no visible edge jumps during processing.
-
-  v0.1.0
-    - Initial “TS + TrimFill + Apply Track FX Mono ResetVol” prototype (no metadata).
+    - AZ-style handle creation (temporary edge expansion + left-offset compensation) for single item.
+    - Single-item path bakes item volume while bypassing track FX.
+    - Multi-item path: group glue with handles only on outermost items; restore visual span.
 --]]
 
 local R = reaper
@@ -41,7 +41,7 @@ local R = reaper
 -------------------------------------------------
 -- User option
 -------------------------------------------------
-local HANDLE_SEC = 2.0   -- 預設 handle 秒數（秒）
+local HANDLE_SEC = 5.0   -- default handle length in seconds
 
 -------------------------------------------------
 -- Command IDs
@@ -57,7 +57,7 @@ local CMD_XEN_MONO_RESET = R.NamedCommandLookup("_XENAKIOS_APPLYTRACKFXMONORESET
 -------------------------------------------------
 local function require_sws()
   if not R.APIExists or not R.APIExists("BR_SetItemEdges") then
-    R.MB("需要 SWS 才能執行（缺少 BR_SetItemEdges）。","Missing SWS",0)
+    R.MB("SWS is required (missing BR_SetItemEdges).","Missing SWS",0)
     return false
   end
   return true
@@ -65,7 +65,7 @@ end
 
 local function require_xen()
   if not CMD_XEN_MONO_RESET or CMD_XEN_MONO_RESET <= 0 then
-    R.MB("找不到 _XENAKIOS_APPLYTRACKFXMONORESETVOL（請安裝/啟用 SWS/Xenakios）。","Missing Xenakios",0)
+    R.MB("Missing _XENAKIOS_APPLYTRACKFXMONORESETVOL (please install/enable SWS/Xenakios).","Missing Xenakios",0)
     return false
   end
   return true
@@ -86,9 +86,6 @@ local function get_bounds(it)
   return s, s+l, l
 end
 
-local function clamp(v,a,b) if v<a then return a elseif v>b then return b else return v end end
-
--- 取得 take、確保有效
 local function get_active_take(it)
   if not it or not R.ValidatePtr(it,"MediaItem*") then return nil end
   local tk = R.GetActiveTake(it)
@@ -96,11 +93,26 @@ local function get_active_take(it)
   return tk
 end
 
--- === AZ-style: 暫時擴邊 + 左越界 offset 補償 ===
--- left_sec/right_sec：希望擴出的秒數（已在外面夾過上限）
--- 回傳一個 table 以便事後還原（orig_pos, orig_end, need_fix, left_shift, take_off_backup）
+-- source headroom (seconds)
+local function headroom_left_sec(take)
+  local off = R.GetMediaItemTakeInfo_Value(take, "D_STARTOFFS")
+  local pr  = R.GetMediaItemTakeInfo_Value(take, "D_PLAYRATE")
+  return math.max(0, off / math.max(1e-12, pr))
+end
+local function headroom_right_sec(it, take)
+  local pr  = R.GetMediaItemTakeInfo_Value(take, "D_PLAYRATE")
+  local off = R.GetMediaItemTakeInfo_Value(take, "D_STARTOFFS")
+  local src = R.GetMediaItemTake_Source(take)
+  local slen, isQN = R.GetMediaSourceLength(src)
+  if isQN then return 0 end
+  local len = R.GetMediaItemInfo_Value(it, "D_LENGTH")
+  local max_total = slen / math.max(1e-12, pr)
+  return math.max(0, max_total - (off / pr + len))
+end
+
+-- AZ-style: temporary edge expansion + left-offset compensation
 local function az_expand_item_edges(it, left_sec, right_sec)
-  local pos, ed, len = get_bounds(it)
+  local pos, ed, _ = get_bounds(it)
   local tk = get_active_take(it); if not tk then return nil end
 
   local widePos = pos - (left_sec or 0)
@@ -109,41 +121,29 @@ local function az_expand_item_edges(it, left_sec, right_sec)
   local off_backup = R.GetMediaItemTakeInfo_Value(tk, "D_STARTOFFS") or 0
 
   if widePos < 0 then
-    -- 補償：右邊增加同樣的量，並把原 take 的 offset 先往左挪
-    wideEnd = wideEnd - widePos         -- widePos 是負數
-    R.SetMediaItemTakeInfo_Value(tk, "D_STARTOFFS", off_backup + widePos)
+    wideEnd = wideEnd - widePos
+    R.SetMediaItemTakeInfo_Value(tk, "D_STARTOFFS", off_backup + widePos) -- widePos negative
     need_fix = true
   end
 
-  -- 暫時擴邊（UI 隱藏）
   R.BR_SetItemEdges(it, (widePos < 0) and 0 or widePos, wideEnd)
 
   return {
     orig_pos = pos, orig_end = ed,
     need_fix = need_fix,
-    left_shift = widePos,      -- <0 表示有左補償量
+    left_shift = widePos,
     off_backup = off_backup,
   }
 end
 
--- 還原邊界，並把左補償 offset 轉給「新 take」
 local function az_restore_edges_and_shift_new_take(it, info)
-  if not info then return end
-  if not it or not R.ValidatePtr(it,"MediaItem*") then return end
-
+  if not info or not it or not R.ValidatePtr(it,"MediaItem*") then return end
   R.BR_SetItemEdges(it, info.orig_pos, info.orig_end)
 
   if info.need_fix then
-    local tk_old = get_active_take(it)  -- 注意：Xenakios 會把「新 take」設為 active；因此還原 offset 要對「上一個 take」進行？
-    -- 我們保守做法：把「目前 active take」當成新 take，先把舊 take offset 還原，再把新 take 設負移量
-    -- 1) 取得新 take（active）
-    local tk_new = tk_old
-    -- 2) 尋找舊 take：通常是上一個（index-1），找不到就跳過還原（不致重掛）
-    local tk_prev = nil
+    local tk_new = get_active_take(it) -- after Xenakios, new take should be active
     local take_cnt = R.CountTakes(it)
-    if take_cnt >= 2 then
-      tk_prev = R.GetTake(it, take_cnt-2)
-    end
+    local tk_prev = (take_cnt >= 2) and R.GetTake(it, take_cnt-2) or nil
     if tk_prev and R.ValidatePtr(tk_prev,"MediaItem_Take*") then
       R.SetMediaItemTakeInfo_Value(tk_prev, "D_STARTOFFS", info.off_backup)
     end
@@ -153,47 +153,37 @@ local function az_restore_edges_and_shift_new_take(it, info)
   end
 end
 
--- 計算此 item 左/右 handle 的上限（以可視長度與起點限制）
-local function compute_handle_caps(it)
-  local pos, ed, len = get_bounds(it)
-  local left_cap  = math.min(HANDLE_SEC, len, pos) -- 左側受 start 限制
-  local right_cap = math.min(HANDLE_SEC, len)
-  return left_cap, right_cap
-end
-
 -------------------------------------------------
--- Single-item path (AZ handles + Xenakios bake item volume)
+-- Single-item path (unchanged from 0.1.1)
 -------------------------------------------------
 local function do_single_item(it)
   if not it or not R.ValidatePtr(it,"MediaItem*") then return end
-  local tk = get_active_take(it); if not tk then return end
+  local tk_before = get_active_take(it); if not tk_before then return end
 
+  -- keep 0.1.1 caps (visual length + start) for single item as previously approved
   local pos, ed, len = get_bounds(it)
-  local wantL, wantR = compute_handle_caps(it)
+  local left_cap  = math.min(HANDLE_SEC, pos)
+  local right_cap = math.min(HANDLE_SEC, len)
 
-  -- AZ：暫時擴邊（含左側越界 offset 補償）
-  local info = az_expand_item_edges(it, wantL, wantR)
+  local info = az_expand_item_edges(it, left_cap, right_cap)
 
-  -- Bypass all track FX → Xenakios（產生新 take 並把 item volume 烘進新音檔）→ Unbypass
   R.Main_OnCommand(CMD_BYPASS_ALL, 0)
   R.Main_OnCommand(CMD_XEN_MONO_RESET, 0)
   R.Main_OnCommand(CMD_UNBYPASS_ALL, 0)
 
-  -- 還原邊界＆把左補償 offset 轉給新 take（保持可視位置不變，但新 take 內含 handles）
   az_restore_edges_and_shift_new_take(it, info)
 
-  -- 保持只選該 item（防呆）
   R.SelectAllMediaItems(0,false)
   if R.ValidatePtr(it,"MediaItem*") then R.SetMediaItemSelected(it,true) end
 end
 
 -------------------------------------------------
--- Multi-items path (group glue; L only left handle, R only right handle)
+-- Multi-items path (glue; use SOURCE headroom, no visible-length cap)
 -------------------------------------------------
 local function do_multi_items(items)
   if #items == 0 then return end
 
-  -- 找最左/最右 item 與群組範圍
+  -- find outer items and group span
   local L, Rr = nil, nil
   local L_start, R_end = math.huge, -math.huge
   for _,it in ipairs(items) do
@@ -205,33 +195,45 @@ local function do_multi_items(items)
   end
   if not L or not Rr then return end
 
-  -- 左 item 只加左 handle；右 item 只加右 handle
-  local L_left, _ = compute_handle_caps(L)
-  local _, R_right = compute_handle_caps(Rr)
+  -- compute handles from SOURCE headroom (cap only by HANDLE_SEC and project 0s)
+  local tkL = get_active_take(L)
+  local tkR = get_active_take(Rr)
+  if not tkL or not tkR then return end
 
-  -- 暫時擴邊（AZ 方式；UI 隱藏）
+  -- temporarily disable Loop source on outer items to avoid loop “fake” headroom
+  local loopL = R.GetMediaItemInfo_Value(L, "B_LOOPSRC")
+  local loopR = R.GetMediaItemInfo_Value(Rr,"B_LOOPSRC")
+  if loopL ~= 0 then R.SetMediaItemInfo_Value(L, "B_LOOPSRC", 0) end
+  if loopR ~= 0 then R.SetMediaItemInfo_Value(Rr,"B_LOOPSRC", 0) end
+
+  local left_room  = headroom_left_sec(tkL)
+  local right_room = headroom_right_sec(Rr, tkR)  -- needs item len internally
+
+  local L_left  = math.min(HANDLE_SEC, left_room)
+  local R_right = math.min(HANDLE_SEC, right_room)
+
+  -- temporary edge expansion (AZ style)
   local infoL, infoR = nil, nil
-  if L_left > 0 then infoL = az_expand_item_edges(L, L_left, 0) end
+  if L_left  > 0 then infoL = az_expand_item_edges(L,  L_left, 0) end
   if R_right > 0 then infoR = az_expand_item_edges(Rr, 0, R_right) end
 
-  -- 全域 TS（含 handles，左界若 <0 以 0 取代）
+  -- global TS with handles (left clamped at project 0)
   local ts_a = math.max(0, L_start - L_left)
   local ts_b = R_end + R_right
   local tsa, tsb = save_ts()
   set_ts(ts_a, ts_b)
 
-  -- Glue 所有選取 item → 產生一顆 glued item（單軌假設；跨軌會各自一顆）
+  -- glue → single item (per track)
   R.SelectAllMediaItems(0,false)
   for _,it in ipairs(items) do if it and R.ValidatePtr(it,"MediaItem*") then R.SetMediaItemSelected(it,true) end end
   R.Main_OnCommand(CMD_GLUE_TS, 0)
 
-  -- Trim 回原群組可視範圍（handles 藏在 glued 檔裡）
+  -- trim back to original group span
   set_ts(L_start, R_end)
   R.Main_OnCommand(CMD_TRIM_TS, 0)
   restore_ts(tsa, tsb)
 
-  -- 注意：Glue 會用新 item 取代原 items；因此不需要再把 L/R 的原邊界還原
-  -- （就算要還原也已無對象；這也是為什麼 multi path 不必做 offset 還原）
+  -- no need to restore edges/loop flags: originals are replaced by glue
 end
 
 -------------------------------------------------
@@ -242,7 +244,6 @@ local function main()
   local n = R.CountSelectedMediaItems(0)
   if n == 0 then return end
 
-  -- 收集被選 items
   local items = {}
   for i=0,n-1 do items[#items+1] = R.GetSelectedMediaItem(0, i) end
 
@@ -257,7 +258,7 @@ local function main()
   end
 
   R.PreventUIRefresh(-1)
-  R.Undo_EndBlock("Render or Glue Items with Handles (AZ-style)", -1)
+  R.Undo_EndBlock("Render or Glue Items with Handles", -1)
   R.UpdateArrange()
 end
 
