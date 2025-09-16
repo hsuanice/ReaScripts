@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<index version="1" name="hsuanice Scripts" commit="64ed8f72ad372f1a1d39809494babb397cce7c03">
+<index version="1" name="hsuanice Scripts" commit="f1fd6872ce2bf9a6d762f44377f46600ffd18c30">
   <category name="Beta Testing">
     <reapack name="hsuanice_BWF TimeReference Embed Tool.lua" type="script" desc="Embed BWF TimeReference to Active take from Take 1 or Current Position TC">
       <version name="0.7.1" author="hsuanice" time="2025-08-14T17:52:57Z">
@@ -1189,16 +1189,18 @@ v0.2.0  Previous rename and future-proof notes.]]></changelog>
 {\colortbl;\red255\green0\blue0;\red0\green0\blue255;}
 \widowctrl\hyphauto
 
-{\pard \ql \f0 \sa180 \li0 \fi0 Render-or-glue WITH handles, and ALWAYS print TRACK FX to a new take. Fix: Multi-item path now preserves handles by printing FX BEFORE trimming back to the original visual span.\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Single item: AZ-style temporary expansion (handles) \u8594 ? apply track FX \u8594 ? restore visible edges (handles preserved in new take source).\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Multi items: extend outer edges from SOURCE headroom \u8594 ? glue within the extended time selection \u8594 ? apply track FX to the glued result (still extended) \u8594 ? trim back to original span \u8594 ? restore outer fades.\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab NEVER touches Ripple editing.\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Requires SWS (BR_SetItemEdges). Track-FX print uses SWS/Xenakios.\sa180\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 Render-or-glue WITH handles, and ALWAYS print TRACK FX to a new take. Safety additions in 0.1.7:\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab During handle extension only, temporarily DISABLE "Trim content behind items when editing" (41117), then restore user's original state afterward.\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Optional DEBUG logs to REAPER console.\sa180\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 Multi-item path stays: Extend \u8594 ? Glue (extended) \u8594 ? APPLY TRACK FX (while extended) \u8594 ? Trim back \u8594 ? Restore fades.\par}
 }
 ]]></description>
       </metadata>
       <version name="0.1.6 No Ripple" author="hsuanice" time="2025-09-16T16:11:18Z">
         <source main="main">https://github.com/hsuanice/ReaScripts/raw/64ed8f72ad372f1a1d39809494babb397cce7c03/Beta%20Testing/hsuanice_Render%20or%20Glue%20Items%20with%20Handles%20and%20FX.lua</source>
+      </version>
+      <version name="0.1.7 No Ripple" author="hsuanice" time="2025-09-16T16:57:23Z">
+        <source main="main">https://github.com/hsuanice/ReaScripts/raw/5838758ce0fe23e0a8f30678e4ec9f0974763298/Beta%20Testing/hsuanice_Render%20or%20Glue%20Items%20with%20Handles%20and%20FX.lua</source>
       </version>
     </reapack>
     <reapack name="hsuanice_Render or Glue Items with Handles.lua" type="script" desc="Render or Glue Items with Handles">
@@ -1207,26 +1209,9 @@ v0.2.0  Previous rename and future-proof notes.]]></changelog>
 {\colortbl;\red255\green0\blue0;\red0\green0\blue255;}
 \widowctrl\hyphauto
 
-{\pard \ql \f0 \sa180 \li0 \fi0 This build NEVER touches Ripple editing. All ripple-related reads/writes were removed.\par}
-{\pard \ql \f0 \sa180 \li0 \fi0 Single item:\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab AZ-style temporary edge expansion (with left-offset compensation).\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Bypass all track FX -> bake item volume (new take) -> unbypass.\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Restore visible edges and transfer left compensation to the NEW take.\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Right handle capped by SOURCE headroom (not by visible item length).\sa180\par}
-{\pard \ql \f0 \sa180 \li0 \fi0 Multiple items:\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Only leftmost gets left handle; rightmost gets right handle.\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Handle sizes capped by SOURCE headroom; loop source on outer items is disabled during calc.\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Glue within time selection, then trim back to the original group span.\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Re-apply left fade-in (from leftmost) and right fade-out (from rightmost).\sa180\par}
-{\pard \ql \f0 \sa180 \li0 \fi0 Safety:\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Temporarily disables ONLY "Trim content behind items when editing" during expansion, then restores it.\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Does NOT touch Ripple editing in any way.\sa180\par}
-{\pard \ql \f0 \sa180 \li0 \fi0 Requires SWS (BR_SetItemEdges). Single-item bake needs SWS/Xenakios.\par}
-{\pard \ql \f0 \sa180 \li0 \fi0 Notes:\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Fades are not baked by glue by default; this script re-applies edge fades after glue.\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Requires SWS (BR_SetItemEdges). SWS/Xenakios is needed for single-item volume bake. Reference:\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Technique inspired by: Script: az_Open item copy in primary external editor with handles.lua\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab The script internally uses SWS/Xenakios actions to apply item volume while keeping track FX out.\sa180\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 Original behavior preserved (no FX print on glue; single-item bypass-all \u8594 ? apply item volume \u8594 ? unbypass), plus a safety in 0.1.7:\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab During handle extension only, temporarily DISABLE "Trim content behind items when editing" (41117), then restore user's original state afterward.\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Optional DEBUG logs to REAPER console.\sa180\par}
 }
 ]]></description>
       </metadata>
@@ -1247,6 +1232,9 @@ v0.2.0  Previous rename and future-proof notes.]]></changelog>
       </version>
       <version name="0.1.6 No Ripple" author="hsuanice" time="2025-09-16T15:45:22Z">
         <source main="main">https://github.com/hsuanice/ReaScripts/raw/1b583aec2435e10db1dad676fc332ce713fe6224/Beta%20Testing/hsuanice_Render%20or%20Glue%20Items%20with%20Handles.lua</source>
+      </version>
+      <version name="0.1.7 No Ripple" author="hsuanice" time="2025-09-16T16:57:35Z">
+        <source main="main">https://github.com/hsuanice/ReaScripts/raw/f1fd6872ce2bf9a6d762f44377f46600ffd18c30/Beta%20Testing/hsuanice_Render%20or%20Glue%20Items%20with%20Handles.lua</source>
       </version>
     </reapack>
     <reapack name="hsuanice_Reorder or sort selected items vertically Monitor.lua" type="script" desc="Monitor - Reorder or sort selected items vertically">
