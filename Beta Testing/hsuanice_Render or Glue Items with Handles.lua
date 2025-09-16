@@ -1,6 +1,6 @@
 --[[
 @description Render or Glue Items with Handles
-@version 0.1.3 Glue fade fixed
+@version 0.1.4 fix right handle length
 @author hsuanice
 @about
   Single item:
@@ -16,17 +16,20 @@
     - Disables Loop source on the outer items during processing to avoid loop “fake” headroom.
     - Sets a global time selection that includes both handles, glues into a single item,
       then trims back to the original group span. (No takes are created in this mode.)
-    - NEW in v0.1.3: preserves fades — leftmost item's fade-in and rightmost item's fade-out
+    - Preserves fades — leftmost item's fade-in and rightmost item's fade-out
       are restored to the glued result (length, shape, curve).
 
   Notes:
     - Fades are not baked by glue by default; this script re-applies edge fades after glue.
-    - Requires SWS (BR_SetItemEdges).
+    - Requires SWS (BR_SetItemEdges). SWS/Xenakios is needed for single-item volume bake.
   Reference:
     - Technique inspired by: Script: az_Open item copy in primary external editor with handles.lua
     - The script internally uses SWS/Xenakios actions to apply item volume while keeping track FX out.  
 
 @changelog
+  v0.1.4
+    - Single item: Fix right handle length. Now capped by SOURCE headroom instead of visible item length,
+      so you can get the full requested handle when the source allows.
   v0.1.3
     - After multi-item glue, restore the leftmost fade-in and rightmost fade-out on the glued item(s),
       including length, shape and curve (clamped to the new item length).
@@ -146,7 +149,6 @@ local function apply_fades(it, cap)
     R.SetMediaItemInfo_Value(it, "D_FADEINDIR", cap.fin_dir or 0)
     R.SetMediaItemInfo_Value(it, "D_FADEINLEN_AUTO", cap.fin_auto or 0)
   else
-    -- keep zero if no fade
     R.SetMediaItemInfo_Value(it, "D_FADEINLEN", 0)
   end
 
@@ -204,15 +206,19 @@ local function az_restore_edges_and_shift_new_take(it, info)
 end
 
 -------------------------------------------------
--- Single-item path (unchanged from 0.1.1)
+-- Single-item path (RIGHT handle now uses source headroom)
 -------------------------------------------------
 local function do_single_item(it)
   if not it or not R.ValidatePtr(it,"MediaItem*") then return end
   local tk_before = get_active_take(it); if not tk_before then return end
 
   local pos, ed, len = get_bounds(it)
+
+  -- Left: still clamped by project start (visual position), as agreed previously.
   local left_cap  = math.min(HANDLE_SEC, pos)
-  local right_cap = math.min(HANDLE_SEC, len)
+
+  -- RIGHT: FIXED — use SOURCE HEADROOM instead of visible length
+  local right_cap = math.min(HANDLE_SEC, headroom_right_sec(it, tk_before))
 
   local info = az_expand_item_edges(it, left_cap, right_cap)
 
@@ -245,8 +251,8 @@ local function do_multi_items(items)
   if not L or not Rr then return end
 
   -- capture fades from outer items BEFORE glue
-  local capL = capture_fades(L)    -- we only need fade-in from L, but capturing both is fine
-  local capR = capture_fades(Rr)   -- we only need fade-out from R
+  local capL = capture_fades(L)
+  local capR = capture_fades(Rr)
 
   -- compute handles from SOURCE headroom
   local tkL = get_active_take(L)
@@ -290,7 +296,6 @@ local function do_multi_items(items)
   for i=0, sel-1 do
     local g = R.GetSelectedMediaItem(0, i)
     if g and R.ValidatePtr(g,"MediaItem*") then
-      -- apply left fade-in from L, right fade-out from R
       local cap = {
         fin_len=capL.fin_len, fin_shape=capL.fin_shape, fin_dir=capL.fin_dir, fin_auto=capL.fin_auto,
         fout_len=capR.fout_len, fout_shape=capR.fout_shape, fout_dir=capR.fout_dir, fout_auto=capR.fout_auto
