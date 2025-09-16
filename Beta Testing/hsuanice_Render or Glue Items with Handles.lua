@@ -1,6 +1,6 @@
 --[[
 @description Render or Glue Items with Handles
-@version 0.1.4 fix right handle length
+@version 0.1.5 Fix handle trim neighbor
 @author hsuanice
 @about
   Single item:
@@ -27,6 +27,11 @@
     - The script internally uses SWS/Xenakios actions to apply item volume while keeping track FX out.  
 
 @changelog
+  v0.1.5
+    - Safety: Temporarily disables "Trim content behind items when editing" and Ripple editing (all/per-track)
+      while expanding handles to prevent neighboring items from being trimmed or moved; restores user settings afterward.
+    - Keeps v0.1.4 behavior: single-item right handle uses source headroom; multi-item glue re-applies outer fades.
+    - File rename feature remains disabled.
   v0.1.4
     - Single item: Fix right handle length. Now capped by SOURCE headroom instead of visible item length,
       so you can get the full requested handle when the source allows.
@@ -60,6 +65,12 @@ local CMD_GLUE_TS        = 42432 -- Item: Glue items within time selection
 local CMD_TRIM_TS        = 40508 -- Item: Trim items to time selection
 local CMD_XEN_MONO_RESET = R.NamedCommandLookup("_XENAKIOS_APPLYTRACKFXMONORESETVOL")
 
+-- edit-mode toggles we will guard
+local CMD_TRIM_BEHIND    = 41117 -- Options: Trim content behind items when editing
+local CMD_RIPPLE_ALL     = 40309 -- Options: Toggle ripple editing all tracks
+local CMD_RIPPLE_PER     = 40310 -- Options: Toggle ripple editing per-track
+local CMD_RIPPLE_OFF     = 40311 -- Options: Ripple editing off
+
 -------------------------------------------------
 -- Guards
 -------------------------------------------------
@@ -77,6 +88,29 @@ local function require_xen()
     return false
   end
   return true
+end
+
+-- snapshot/restore edit modes that can damage neighbors during temporary expansion
+local function push_edit_guards()
+  local st = {
+    trim = R.GetToggleCommandState(CMD_TRIM_BEHIND),
+    ripple_all = R.GetToggleCommandState(CMD_RIPPLE_ALL),
+    ripple_per = R.GetToggleCommandState(CMD_RIPPLE_PER),
+  }
+  -- turn OFF trimming behind
+  if st.trim == 1 then R.Main_OnCommand(CMD_TRIM_BEHIND, 0) end
+  -- turn OFF ripple (no matter which mode was on)
+  if st.ripple_all == 1 or st.ripple_per == 1 then R.Main_OnCommand(CMD_RIPPLE_OFF, 0) end
+  return st
+end
+
+local function pop_edit_guards(st)
+  if not st then return end
+  -- restore ripple first
+  if st.ripple_all == 1 then R.Main_OnCommand(CMD_RIPPLE_ALL, 0) end
+  if st.ripple_per == 1 then R.Main_OnCommand(CMD_RIPPLE_PER, 0) end
+  -- restore trim-behind
+  if st.trim == 1 then R.Main_OnCommand(CMD_TRIM_BEHIND, 0) end
 end
 
 -------------------------------------------------
@@ -118,7 +152,7 @@ local function headroom_right_sec(it, take)
   return math.max(0, max_total - (off / pr + len))
 end
 
--- Capture fades of an item (for preserving after glue)
+-- Capture & apply fades (for multi-items glue path)
 local function capture_fades(it)
   local fin_len   = R.GetMediaItemInfo_Value(it, "D_FADEINLEN") or 0
   local fin_shape = R.GetMediaItemInfo_Value(it, "C_FADEINSHAPE") or 0
@@ -136,30 +170,21 @@ local function capture_fades(it)
   }
 end
 
--- Apply captured fades to a (new) item, clamped to its length
 local function apply_fades(it, cap)
   if not cap or not it or not R.ValidatePtr(it,"MediaItem*") then return end
   local _, _, ilen = get_bounds(it)
   local in_len  = math.max(0, math.min(cap.fin_len  or 0, ilen))
   local out_len = math.max(0, math.min(cap.fout_len or 0, ilen))
 
-  if in_len > 0 then
-    R.SetMediaItemInfo_Value(it, "D_FADEINLEN", in_len)
-    R.SetMediaItemInfo_Value(it, "C_FADEINSHAPE", cap.fin_shape or 0)
-    R.SetMediaItemInfo_Value(it, "D_FADEINDIR", cap.fin_dir or 0)
-    R.SetMediaItemInfo_Value(it, "D_FADEINLEN_AUTO", cap.fin_auto or 0)
-  else
-    R.SetMediaItemInfo_Value(it, "D_FADEINLEN", 0)
-  end
+  R.SetMediaItemInfo_Value(it, "D_FADEINLEN", in_len)
+  R.SetMediaItemInfo_Value(it, "C_FADEINSHAPE", cap.fin_shape or 0)
+  R.SetMediaItemInfo_Value(it, "D_FADEINDIR", cap.fin_dir or 0)
+  R.SetMediaItemInfo_Value(it, "D_FADEINLEN_AUTO", cap.fin_auto or 0)
 
-  if out_len > 0 then
-    R.SetMediaItemInfo_Value(it, "D_FADEOUTLEN", out_len)
-    R.SetMediaItemInfo_Value(it, "C_FADEOUTSHAPE", cap.fout_shape or 0)
-    R.SetMediaItemInfo_Value(it, "D_FADEOUTDIR", cap.fout_dir or 0)
-    R.SetMediaItemInfo_Value(it, "D_FADEOUTLEN_AUTO", cap.fout_auto or 0)
-  else
-    R.SetMediaItemInfo_Value(it, "D_FADEOUTLEN", 0)
-  end
+  R.SetMediaItemInfo_Value(it, "D_FADEOUTLEN", out_len)
+  R.SetMediaItemInfo_Value(it, "C_FADEOUTSHAPE", cap.fout_shape or 0)
+  R.SetMediaItemInfo_Value(it, "D_FADEOUTDIR", cap.fout_dir or 0)
+  R.SetMediaItemInfo_Value(it, "D_FADEOUTLEN_AUTO", cap.fout_auto or 0)
 end
 
 -- AZ-style: temporary edge expansion + left-offset compensation
@@ -206,19 +231,15 @@ local function az_restore_edges_and_shift_new_take(it, info)
 end
 
 -------------------------------------------------
--- Single-item path (RIGHT handle now uses source headroom)
+-- Single-item path
 -------------------------------------------------
 local function do_single_item(it)
   if not it or not R.ValidatePtr(it,"MediaItem*") then return end
   local tk_before = get_active_take(it); if not tk_before then return end
 
   local pos, ed, len = get_bounds(it)
-
-  -- Left: still clamped by project start (visual position), as agreed previously.
-  local left_cap  = math.min(HANDLE_SEC, pos)
-
-  -- RIGHT: FIXED — use SOURCE HEADROOM instead of visible length
-  local right_cap = math.min(HANDLE_SEC, headroom_right_sec(it, tk_before))
+  local left_cap  = math.min(HANDLE_SEC, pos)                              -- clamp by project start
+  local right_cap = math.min(HANDLE_SEC, headroom_right_sec(it, tk_before))-- use SOURCE headroom
 
   local info = az_expand_item_edges(it, left_cap, right_cap)
 
@@ -265,11 +286,8 @@ local function do_multi_items(items)
   if loopL ~= 0 then R.SetMediaItemInfo_Value(L, "B_LOOPSRC", 0) end
   if loopR ~= 0 then R.SetMediaItemInfo_Value(Rr,"B_LOOPSRC", 0) end
 
-  local left_room  = headroom_left_sec(tkL)
-  local right_room = headroom_right_sec(Rr, tkR)
-
-  local L_left  = math.min(HANDLE_SEC, left_room)
-  local R_right = math.min(HANDLE_SEC, right_room)
+  local L_left  = math.min(HANDLE_SEC, headroom_left_sec(tkL))
+  local R_right = math.min(HANDLE_SEC, headroom_right_sec(Rr, tkR))
 
   -- temporary edge expansion (AZ style)
   if L_left  > 0 then az_expand_item_edges(L,  L_left, 0) end
@@ -319,14 +337,21 @@ local function main()
   R.Undo_BeginBlock()
   R.PreventUIRefresh(1)
 
+  -- protect neighbors during temporary expansion
+  local guard_state = push_edit_guards()
+
   if #items == 1 then
     if not require_xen() then
+      pop_edit_guards(guard_state)
       R.PreventUIRefresh(-1); R.Undo_EndBlock("Render/Glue with Handles (abort)", -1); return
     end
     do_single_item(items[1])
   else
     do_multi_items(items)
   end
+
+  -- restore user's edit modes
+  pop_edit_guards(guard_state)
 
   R.PreventUIRefresh(-1)
   R.Undo_EndBlock("Render or Glue Items with Handles", -1)
