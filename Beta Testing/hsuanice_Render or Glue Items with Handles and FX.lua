@@ -1,32 +1,37 @@
 --[[
 @description Render or Glue Items with Handles and FX (No Ripple)
-@version 0.1.6 No Ripple
+@version 0.1.7 No Ripple
 @author hsuanice
 @about
   Render-or-glue WITH handles, and ALWAYS print TRACK FX to a new take.
-  Fix: Multi-item path now preserves handles by printing FX BEFORE trimming
-       back to the original visual span.
-  - Single item: AZ-style temporary expansion (handles) → apply track FX →
-                 restore visible edges (handles preserved in new take source).
-  - Multi items: extend outer edges from SOURCE headroom → glue within the
-                 extended time selection → apply track FX to the glued result
-                 (still extended) → trim back to original span → restore outer fades.
-  - NEVER touches Ripple editing.
-  - Requires SWS (BR_SetItemEdges). Track-FX print uses SWS/Xenakios.
+  Safety additions in 0.1.7:
+    - During handle extension only, temporarily DISABLE "Trim content behind items when editing" (41117),
+      then restore user's original state afterward.
+    - Optional DEBUG logs to REAPER console.
+
+  Multi-item path stays: Extend → Glue (extended) → APPLY TRACK FX (while extended) → Trim back → Restore fades.
 
 @changelog
+  v0.1.7
+    - Safety: ensure "Trim content behind items when editing" (41117) is OFF during handle extension,
+      then restore to user's original state. Added DEBUG console logs.
   v0.1.6
-    - Change (multi-item): Order = Extend → Glue (extended) → APPLY TRACK FX →
-      Trim back → Restore fades. Handles are now preserved on the printed take.
-    - Keep: Single-item prints FX with handles; No Ripple safety unchanged.
+    - Extend → Glue (extended) → APPLY TRACK FX → Trim back → Restore fades (preserve handles).
 --]]
 
 local R = reaper
 
 -------------------------------------------------
--- User option
+-- User options
 -------------------------------------------------
-local HANDLE_SEC = 5.0   -- default handle length in seconds
+local HANDLE_SEC = 3.0   -- default handle length in seconds
+local DEBUG = true       -- set true to print logs in REAPER console
+
+local function log(fmt, ...)
+  if not DEBUG then return end
+  local s = (select('#', ...) > 0) and string.format(fmt, ...) or tostring(fmt)
+  R.ShowConsoleMsg("[Handles+FX] "..s.."\n")
+end
 
 -------------------------------------------------
 -- Command IDs
@@ -34,6 +39,7 @@ local HANDLE_SEC = 5.0   -- default handle length in seconds
 local CMD_GLUE_TS        = 42432 -- Item: Glue items within time selection
 local CMD_TRIM_TS        = 40508 -- Item: Trim items to time selection
 local CMD_XEN_MONO_RESET = R.NamedCommandLookup("_XENAKIOS_APPLYTRACKFXMONORESETVOL")
+local CMD_TRIM_BEHIND    = 41117 -- Options: Trim content behind items when editing (toggle)
 
 -------------------------------------------------
 -- Guards
@@ -57,9 +63,7 @@ end
 -------------------------------------------------
 -- Helpers
 -------------------------------------------------
-local function save_ts()
-  local a,b = R.GetSet_LoopTimeRange(false,false,0,0,false); return a,b
-end
+local function save_ts() local a,b = R.GetSet_LoopTimeRange(false,false,0,0,false); return a,b end
 local function set_ts(a,b) R.GetSet_LoopTimeRange(true,false,a,b,false) end
 local function restore_ts(a,b) R.GetSet_LoopTimeRange(true,false,a or 0,b or 0,false) end
 
@@ -93,7 +97,7 @@ local function headroom_right_sec(it, take)
   return math.max(0, max_total - (off / pr + len))
 end
 
--- Capture/apply fades
+-- fades
 local function capture_fades(it)
   return {
     fin_len   = R.GetMediaItemInfo_Value(it, "D_FADEINLEN") or 0,
@@ -106,33 +110,46 @@ local function capture_fades(it)
     fout_auto  = R.GetMediaItemInfo_Value(it, "D_FADEOUTLEN_AUTO") or 0,
   }
 end
-
 local function apply_fades(it, cap)
   if not cap or not it or not R.ValidatePtr(it,"MediaItem*") then return end
   local _, _, ilen = get_bounds(it)
   local in_len  = math.max(0, math.min(cap.fin_len  or 0, ilen))
   local out_len = math.max(0, math.min(cap.fout_len or 0, ilen))
-
-  if in_len > 0 then
-    R.SetMediaItemInfo_Value(it, "D_FADEINLEN", in_len)
-    R.SetMediaItemInfo_Value(it, "C_FADEINSHAPE", cap.fin_shape or 0)
-    R.SetMediaItemInfo_Value(it, "D_FADEINDIR",  cap.fin_dir   or 0)
-    R.SetMediaItemInfo_Value(it, "D_FADEINLEN_AUTO", cap.fin_auto or 0)
-  else
-    R.SetMediaItemInfo_Value(it, "D_FADEINLEN", 0)
-  end
-
-  if out_len > 0 then
-    R.SetMediaItemInfo_Value(it, "D_FADEOUTLEN", out_len)
-    R.SetMediaItemInfo_Value(it, "C_FADEOUTSHAPE", cap.fout_shape or 0)
-    R.SetMediaItemInfo_Value(it, "D_FADEOUTDIR",  cap.fout_dir   or 0)
-    R.SetMediaItemInfo_Value(it, "D_FADEOUTLEN_AUTO", cap.fout_auto or 0)
-  else
-    R.SetMediaItemInfo_Value(it, "D_FADEOUTLEN", 0)
-  end
+  R.SetMediaItemInfo_Value(it, "D_FADEINLEN", in_len)
+  R.SetMediaItemInfo_Value(it, "C_FADEINSHAPE", cap.fin_shape or 0)
+  R.SetMediaItemInfo_Value(it, "D_FADEINDIR",  cap.fin_dir   or 0)
+  R.SetMediaItemInfo_Value(it, "D_FADEINLEN_AUTO", cap.fin_auto or 0)
+  R.SetMediaItemInfo_Value(it, "D_FADEOUTLEN", out_len)
+  R.SetMediaItemInfo_Value(it, "C_FADEOUTSHAPE", cap.fout_shape or 0)
+  R.SetMediaItemInfo_Value(it, "D_FADEOUTDIR",  cap.fout_dir   or 0)
+  R.SetMediaItemInfo_Value(it, "D_FADEOUTLEN_AUTO", cap.fout_auto or 0)
 end
 
--- AZ-style: temporary edge expansion + left-offset compensation
+-------------------------------------------------
+-- Trim-behind safety (41117)
+-------------------------------------------------
+local function get_trim_behind()
+  return (R.GetToggleCommandStateEx(0, CMD_TRIM_BEHIND) == 1)
+end
+local function set_trim_behind(desired_on)
+  local now_on = get_trim_behind()
+  if desired_on ~= now_on then
+    R.Main_OnCommand(CMD_TRIM_BEHIND, 0) -- toggle once
+  end
+end
+local function with_trim_behind_guard(fn, tag)
+  local was_on = get_trim_behind()
+  log("Guard(%s): trim-behind was %s → OFF for handle extension", tag or "?", was_on and "ON" or "OFF")
+  set_trim_behind(false)
+  local ok, err = pcall(fn)
+  set_trim_behind(was_on)
+  log("Guard(%s): trim-behind restored to %s", tag or "?", was_on and "ON" or "OFF")
+  if not ok then error(err) end
+end
+
+-------------------------------------------------
+-- AZ-style expansion + left-offset compensation
+-------------------------------------------------
 local function az_expand_item_edges(it, left_sec, right_sec)
   local pos, ed = get_bounds(it)
   local tk = get_active_take(it); if not tk then return nil end
@@ -149,28 +166,28 @@ local function az_expand_item_edges(it, left_sec, right_sec)
   end
 
   R.BR_SetItemEdges(it, (widePos < 0) and 0 or widePos, wideEnd)
+  log("Expand: pos=%.6f → [%.6f, %.6f] (L+=%.3fs, R+=%.3fs)%s",
+      pos, (widePos<0) and 0 or widePos, wideEnd, left_sec or 0, right_sec or 0, need_fix and " (left shift fix)" or "")
 
-  return {
-    orig_pos = pos, orig_end = ed,
-    need_fix = need_fix,
-    left_shift = widePos,
-    off_backup = off_backup,
-  }
+  return { orig_pos=pos, orig_end=ed, need_fix=need_fix, left_shift=widePos, off_backup=off_backup }
 end
 
 local function az_restore_edges_and_shift_new_take(it, info)
   if not info or not it or not R.ValidatePtr(it,"MediaItem*") then return end
   R.BR_SetItemEdges(it, info.orig_pos, info.orig_end)
+  log("Restore edges to [%.6f, %.6f]", info.orig_pos, info.orig_end)
 
   if info.need_fix then
     local tk_new  = get_active_take(it)
-    local tk_prev = (R.CountTakes(it) >= 2) and R.GetTake(it, R.CountTakes(it)-2) or nil
+    local take_cnt = R.CountTakes(it)
+    local tk_prev = (take_cnt >= 2) and R.GetTake(it, take_cnt-2) or nil
     if tk_prev and R.ValidatePtr(tk_prev,"MediaItem_Take*") then
       R.SetMediaItemTakeInfo_Value(tk_prev, "D_STARTOFFS", info.off_backup)
     end
     if tk_new and R.ValidatePtr(tk_new,"MediaItem_Take*") then
       R.SetMediaItemTakeInfo_Value(tk_new, "D_STARTOFFS", -math.min(0, info.left_shift or 0))
     end
+    log("Left-shift compensation applied to takes")
   end
 end
 
@@ -181,16 +198,18 @@ local function do_single_item(it)
   if not it or not R.ValidatePtr(it,"MediaItem*") then return end
   local tk_before = get_active_take(it); if not tk_before then return end
 
-  local pos, ed = get_bounds(it)
+  local pos, _ = get_bounds(it)
   local left_cap  = math.min(HANDLE_SEC, pos) -- clamp by project start
   local right_cap = math.min(HANDLE_SEC, headroom_right_sec(it, tk_before)) -- by SOURCE headroom
 
-  local info = az_expand_item_edges(it, left_cap, right_cap)
+  local info
+  with_trim_behind_guard(function()
+    info = az_expand_item_edges(it, left_cap, right_cap)
+  end, "single")
 
-  -- Print Track FX to new take (length = expanded)
-  R.Main_OnCommand(CMD_XEN_MONO_RESET, 0)
+  R.Main_OnCommand(CMD_XEN_MONO_RESET, 0) -- print Track FX (expanded)
+  log("Apply Track FX (Xenakios) on single-item (expanded)")
 
-  -- Restore visible edges; handles remain in the new take's source
   az_restore_edges_and_shift_new_take(it, info)
 
   R.SelectAllMediaItems(0,false)
@@ -214,6 +233,7 @@ local function do_multi_items(items)
     end
   end
   if not L or not Rr then return end
+  log("Multi: group span [%.6f, %.6f]", L_start, R_end)
 
   -- Save outer fades before glue
   local capL = capture_fades(L)
@@ -235,15 +255,17 @@ local function do_multi_items(items)
   local L_left  = math.min(HANDLE_SEC, left_room)
   local R_right = math.min(HANDLE_SEC, right_room)
 
-  -- Temporary edge expansion (outermost only)
-  if L_left  > 0 then az_expand_item_edges(L,  L_left, 0) end
-  if R_right > 0 then az_expand_item_edges(Rr, 0, R_right) end
+  with_trim_behind_guard(function()
+    if L_left  > 0 then az_expand_item_edges(L,  L_left, 0) end
+    if R_right > 0 then az_expand_item_edges(Rr, 0, R_right) end
+  end, "multi")
 
   -- Extended TS for glue (left clamped at 0)
   local tsa0, tsb0 = save_ts()
   local tsA = math.max(0, L_start - L_left)
   local tsB = R_end + R_right
   set_ts(tsA, tsB)
+  log("Set TS for GLUE (extended) = [%.6f, %.6f]", tsA, tsB)
 
   -- Glue to consolidate (result = extended-length item)
   R.SelectAllMediaItems(0,false)
@@ -251,17 +273,20 @@ local function do_multi_items(items)
     if it and R.ValidatePtr(it,"MediaItem*") then R.SetMediaItemSelected(it,true) end
   end
   R.Main_OnCommand(CMD_GLUE_TS, 0)
+  log("Glue within extended TS → consolidated item(s)")
 
-  -- IMPORTANT: Now print TRACK FX while item is still extended → new take source keeps handles
+  -- Print TRACK FX while extended
   if not require_xen() then restore_ts(tsa0, tsb0); return end
   R.Main_OnCommand(CMD_XEN_MONO_RESET, 0)
+  log("Apply Track FX (Xenakios) on glued (extended) item(s)")
 
-  -- Trim back to original visual group span (handles preserved in the printed take)
+  -- Trim back to original visual group span
   set_ts(L_start, R_end)
   R.Main_OnCommand(CMD_TRIM_TS, 0)
-
-  -- Restore TS and re-apply outer fades
   restore_ts(tsa0, tsb0)
+  log("Trim back to original span, restore TS")
+
+  -- Re-apply outer fades to glued results (still selected)
   local sel = R.CountSelectedMediaItems(0)
   for i=0, sel-1 do
     local g = R.GetSelectedMediaItem(0, i)
@@ -272,6 +297,7 @@ local function do_multi_items(items)
       })
     end
   end
+  log("Re-applied outer fades to glued result(s)")
 end
 
 -------------------------------------------------
@@ -280,11 +306,15 @@ end
 local function main()
   if not require_sws() then return end
 
+  if DEBUG then R.ShowConsoleMsg("") end
+  log("=== Start v0.1.7 (FX) ===")
+
   local n = R.CountSelectedMediaItems(0)
-  if n == 0 then return end
+  if n == 0 then log("No selected items. Abort."); return end
 
   local items = {}
   for i=0,n-1 do items[#items+1] = R.GetSelectedMediaItem(0, i) end
+  log("Selected items: %d", #items)
 
   R.Undo_BeginBlock()
   R.PreventUIRefresh(1)
@@ -301,6 +331,7 @@ local function main()
   R.PreventUIRefresh(-1)
   R.Undo_EndBlock("Render or Glue Items with Handles and FX (No Ripple)", -1)
   R.UpdateArrange()
+  log("=== Done v0.1.7 (FX) ===")
 end
 
 main()
