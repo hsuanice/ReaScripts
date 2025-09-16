@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<index version="1" name="hsuanice Scripts" commit="9b1b768da302a463c46c8c9a69bd7b0cac2358a9">
+<index version="1" name="hsuanice Scripts" commit="1b583aec2435e10db1dad676fc332ce713fe6224">
   <category name="Beta Testing">
     <reapack name="hsuanice_BWF TimeReference Embed Tool.lua" type="script" desc="Embed BWF TimeReference to Active take from Take 1 or Current Position TC">
       <version name="0.7.1" author="hsuanice" time="2025-08-14T17:52:57Z">
@@ -1189,16 +1189,21 @@ v0.2.0  Previous rename and future-proof notes.]]></changelog>
 {\colortbl;\red255\green0\blue0;\red0\green0\blue255;}
 \widowctrl\hyphauto
 
+{\pard \ql \f0 \sa180 \li0 \fi0 This build NEVER touches Ripple editing. All ripple-related reads/writes were removed.\par}
 {\pard \ql \f0 \sa180 \li0 \fi0 Single item:\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Temporarily expands item edges to include user handles (pre/post-roll) without visible jumps, using offset compensation when the left handle would cross project 0s.\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Temporarily bypasses all track FX, applies item volume to audio (creates a new take), then un-bypasses track FX.\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Restores the visible edges and transfers the left-compensation offset to the NEW take.\sa180\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab AZ-style temporary edge expansion (with left-offset compensation).\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Bypass all track FX -> bake item volume (new take) -> unbypass.\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Restore visible edges and transfer left compensation to the NEW take.\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Right handle capped by SOURCE headroom (not by visible item length).\sa180\par}
 {\pard \ql \f0 \sa180 \li0 \fi0 Multiple items:\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Only the leftmost item gets a left handle; only the rightmost item gets a right handle.\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Uses SOURCE headroom (not visible item length) to decide actual handle sizes.\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Disables Loop source on the outer items during processing to avoid loop \u8220"fake\u8221" headroom.\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Sets a global time selection that includes both handles, glues into a single item, then trims back to the original group span. (No takes are created in this mode.)\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Preserves fades \u8212- leftmost item's fade-in and rightmost item's fade-out are restored to the glued result (length, shape, curve).\sa180\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Only leftmost gets left handle; rightmost gets right handle.\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Handle sizes capped by SOURCE headroom; loop source on outer items is disabled during calc.\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Glue within time selection, then trim back to the original group span.\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Re-apply left fade-in (from leftmost) and right fade-out (from rightmost).\sa180\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 Safety:\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Temporarily disables ONLY "Trim content behind items when editing" during expansion, then restores it.\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Does NOT touch Ripple editing in any way.\sa180\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 Requires SWS (BR_SetItemEdges). Single-item bake needs SWS/Xenakios.\par}
 {\pard \ql \f0 \sa180 \li0 \fi0 Notes:\par}
 {\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Fades are not baked by glue by default; this script re-applies edge fades after glue.\par}
 {\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Requires SWS (BR_SetItemEdges). SWS/Xenakios is needed for single-item volume bake. Reference:\par}
@@ -1221,6 +1226,9 @@ v0.2.0  Previous rename and future-proof notes.]]></changelog>
       </version>
       <version name="0.1.5 Fix handle trim neighbor" author="hsuanice" time="2025-09-16T08:37:21Z">
         <source main="main">https://github.com/hsuanice/ReaScripts/raw/9b1b768da302a463c46c8c9a69bd7b0cac2358a9/Beta%20Testing/hsuanice_Render%20or%20Glue%20Items%20with%20Handles.lua</source>
+      </version>
+      <version name="0.1.6 No Ripple" author="hsuanice" time="2025-09-16T15:45:22Z">
+        <source main="main">https://github.com/hsuanice/ReaScripts/raw/1b583aec2435e10db1dad676fc332ce713fe6224/Beta%20Testing/hsuanice_Render%20or%20Glue%20Items%20with%20Handles.lua</source>
       </version>
     </reapack>
     <reapack name="hsuanice_Reorder or sort selected items vertically Monitor.lua" type="script" desc="Monitor - Reorder or sort selected items vertically">
