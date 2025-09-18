@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<index version="1" name="hsuanice Scripts" commit="30e1745393b4a565ba805401c3ae1cc266bd5815">
+<index version="1" name="hsuanice Scripts" commit="00c055ca70274aa2c81d7ff2e0b08fe4696d6dcc">
   <category name="Beta Testing">
     <reapack name="hsuanice_BWF TimeReference Embed Tool.lua" type="script" desc="Embed BWF TimeReference to Active take from Take 1 or Current Position TC">
       <version name="0.7.1" author="hsuanice" time="2025-08-14T17:52:57Z">
@@ -1192,7 +1192,8 @@ v0.2.0  Previous rename and future-proof notes.]]></changelog>
 {\colortbl;\red255\green0\blue0;\red0\green0\blue255;}
 \widowctrl\hyphauto
 
-{\pard \ql \f0 \sa180 \li0 \fi0 Render-or-glue WITH handles, and ALWAYS print TRACK FX to a new take. Safety additions in 0.1.7:\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 NEW (0.1.8) user option: if a single selected item has ONLY ONE take, use GLUE instead of "Apply Track FX as new take" (workaround for naming/TC embedding issues). If the item has 2+ takes, keep using Apply Track FX. Multi-item path unchanged.\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 Safety:\par}
 {\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab During handle extension only, temporarily DISABLE "Trim content behind items when editing" (41117), then restore user's original state afterward.\par}
 {\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Optional DEBUG logs to REAPER console.\sa180\par}
 {\pard \ql \f0 \sa180 \li0 \fi0 Multi-item path stays: Extend \u8594 ? Glue (extended) \u8594 ? APPLY TRACK FX (while extended) \u8594 ? Trim back \u8594 ? Restore fades.\par}
@@ -1205,6 +1206,9 @@ v0.2.0  Previous rename and future-proof notes.]]></changelog>
       <version name="0.1.7 No Ripple" author="hsuanice" time="2025-09-16T16:57:23Z">
         <source main="main">https://github.com/hsuanice/ReaScripts/raw/5838758ce0fe23e0a8f30678e4ec9f0974763298/Beta%20Testing/hsuanice_Render%20or%20Glue%20Items%20with%20Handles%20and%20FX.lua</source>
       </version>
+      <version name="0.1.8 No Ripple" author="hsuanice" time="2025-09-18T08:43:32Z">
+        <source main="main">https://github.com/hsuanice/ReaScripts/raw/7ceb828a4455bb613b8554d40694526f7fb1916b/Beta%20Testing/hsuanice_Render%20or%20Glue%20Items%20with%20Handles%20and%20FX.lua</source>
+      </version>
     </reapack>
     <reapack name="hsuanice_Render or Glue Items with Handles.lua" type="script" desc="Render or Glue Items with Handles">
       <metadata>
@@ -1212,7 +1216,8 @@ v0.2.0  Previous rename and future-proof notes.]]></changelog>
 {\colortbl;\red255\green0\blue0;\red0\green0\blue255;}
 \widowctrl\hyphauto
 
-{\pard \ql \f0 \sa180 \li0 \fi0 Original behavior preserved (no FX print on glue; single-item bypass-all \u8594 ? apply item volume \u8594 ? unbypass), plus a safety in 0.1.7:\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 NEW (0.1.8) user option: if a single selected item has ONLY ONE take, use GLUE instead of the bypass\u8594 ?apply item volume\u8594 ?unbypass path (so the glued file name/TC behave as desired). If the item has 2+ takes, keep the original single-item path. Multi-item path unchanged.\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 Safety:\par}
 {\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab During handle extension only, temporarily DISABLE "Trim content behind items when editing" (41117), then restore user's original state afterward.\par}
 {\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Optional DEBUG logs to REAPER console.\sa180\par}
 }
@@ -1238,6 +1243,9 @@ v0.2.0  Previous rename and future-proof notes.]]></changelog>
       </version>
       <version name="0.1.7 No Ripple" author="hsuanice" time="2025-09-16T16:57:35Z">
         <source main="main">https://github.com/hsuanice/ReaScripts/raw/f1fd6872ce2bf9a6d762f44377f46600ffd18c30/Beta%20Testing/hsuanice_Render%20or%20Glue%20Items%20with%20Handles.lua</source>
+      </version>
+      <version name="0.1.8 No Ripple" author="hsuanice" time="2025-09-18T08:43:45Z">
+        <source main="main">https://github.com/hsuanice/ReaScripts/raw/00c055ca70274aa2c81d7ff2e0b08fe4696d6dcc/Beta%20Testing/hsuanice_Render%20or%20Glue%20Items%20with%20Handles.lua</source>
       </version>
     </reapack>
     <reapack name="hsuanice_Reorder or sort selected items vertically Monitor.lua" type="script" desc="Monitor - Reorder or sort selected items vertically">
