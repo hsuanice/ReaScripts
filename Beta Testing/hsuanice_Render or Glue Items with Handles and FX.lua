@@ -1,10 +1,13 @@
 --[[
 @description Render or Glue Items with Handles and FX (No Ripple)
-@version 0.1.7 No Ripple
+@version 0.1.8 No Ripple
 @author hsuanice
 @about
-  Render-or-glue WITH handles, and ALWAYS print TRACK FX to a new take.
-  Safety additions in 0.1.7:
+  NEW (0.1.8) user option: if a single selected item has ONLY ONE take, use GLUE instead of
+  "Apply Track FX as new take" (workaround for naming/TC embedding issues). If the item has 2+ takes,
+  keep using Apply Track FX. Multi-item path unchanged.
+
+  Safety:
     - During handle extension only, temporarily DISABLE "Trim content behind items when editing" (41117),
       then restore user's original state afterward.
     - Optional DEBUG logs to REAPER console.
@@ -12,11 +15,12 @@
   Multi-item path stays: Extend → Glue (extended) → APPLY TRACK FX (while extended) → Trim back → Restore fades.
 
 @changelog
+  v0.1.8
+    - Add SINGLE_TAKE_USES_GLUE option: When true and selection is one item with exactly 1 take,
+      use GLUE path instead of Apply Track FX to New Take (keeps take-name & embeds TC).
   v0.1.7
-    - Safety: ensure "Trim content behind items when editing" (41117) is OFF during handle extension,
-      then restore to user's original state. Added DEBUG console logs.
-  v0.1.6
-    - Extend → Glue (extended) → APPLY TRACK FX → Trim back → Restore fades (preserve handles).
+    - Safety: ensure "Trim content behind items when editing" (41117) OFF during handle extension;
+      restore afterward. Added DEBUG logs.
 --]]
 
 local R = reaper
@@ -24,8 +28,9 @@ local R = reaper
 -------------------------------------------------
 -- User options
 -------------------------------------------------
-local HANDLE_SEC = 3.0   -- default handle length in seconds
-local DEBUG = true       -- set true to print logs in REAPER console
+local HANDLE_SEC = 5.0           -- default handle length in seconds
+local SINGLE_TAKE_USES_GLUE = true  -- NEW: single item with exactly 1 take → use GLUE path
+local DEBUG = true               -- set true to print logs in REAPER console
 
 local function log(fmt, ...)
   if not DEBUG then return end
@@ -171,7 +176,6 @@ local function az_expand_item_edges(it, left_sec, right_sec)
 
   return { orig_pos=pos, orig_end=ed, need_fix=need_fix, left_shift=widePos, off_backup=off_backup }
 end
-
 local function az_restore_edges_and_shift_new_take(it, info)
   if not info or not it or not R.ValidatePtr(it,"MediaItem*") then return end
   R.BR_SetItemEdges(it, info.orig_pos, info.orig_end)
@@ -192,7 +196,37 @@ local function az_restore_edges_and_shift_new_take(it, info)
 end
 
 -------------------------------------------------
--- Single-item path: PRINT track FX (no bypass)
+-- Single-item helpers (GLUE variant)
+-------------------------------------------------
+local function single_item_glue_path(it, left_cap, right_cap)
+  -- Extend just like normal, but GLUE instead of ApplyFX.
+  local pos, _ = get_bounds(it)
+  local info
+  with_trim_behind_guard(function()
+    info = az_expand_item_edges(it, left_cap, right_cap)
+  end, "single-GLUE")
+
+  -- Time selection to the extended window, glue, then restore edges
+  local tsa, tsb = save_ts()
+  local ext_start = math.max(0, info.orig_pos - left_cap)
+  local ext_end   = info.orig_end + right_cap
+  set_ts(ext_start, ext_end)
+  R.SelectAllMediaItems(0,false); if R.ValidatePtr(it,"MediaItem*") then R.SetMediaItemSelected(it,true) end
+  R.Main_OnCommand(CMD_GLUE_TS, 0)
+  log("Single(GLUE): glued in extended TS [%.6f, %.6f]", ext_start, ext_end)
+
+  -- After glue, visible edges are already consolidated to the ext window;
+  -- Trim back to original visible span (optional but keep parity with multi logic)
+  set_ts(info.orig_pos, info.orig_end)
+  R.Main_OnCommand(CMD_TRIM_TS, 0)
+  restore_ts(tsa, tsb)
+  log("Single(GLUE): trimmed back to [%.6f, %.6f]", info.orig_pos, info.orig_end)
+
+  -- No Apply Track FX in this GLUE path (by design for naming/TC reasons)
+end
+
+-------------------------------------------------
+-- Single-item path: APPLY FX (default) or GLUE (when SINGLE_TAKE_USES_GLUE and only 1 take)
 -------------------------------------------------
 local function do_single_item(it)
   if not it or not R.ValidatePtr(it,"MediaItem*") then return end
@@ -202,15 +236,25 @@ local function do_single_item(it)
   local left_cap  = math.min(HANDLE_SEC, pos) -- clamp by project start
   local right_cap = math.min(HANDLE_SEC, headroom_right_sec(it, tk_before)) -- by SOURCE headroom
 
-  local info
-  with_trim_behind_guard(function()
-    info = az_expand_item_edges(it, left_cap, right_cap)
-  end, "single")
+  local take_cnt = R.CountTakes(it)
+  log("Single: take-count=%d", take_cnt)
 
-  R.Main_OnCommand(CMD_XEN_MONO_RESET, 0) -- print Track FX (expanded)
-  log("Apply Track FX (Xenakios) on single-item (expanded)")
+  if SINGLE_TAKE_USES_GLUE and take_cnt == 1 then
+    -- Use GLUE path for single-take item
+    single_item_glue_path(it, left_cap, right_cap)
+  else
+    -- Default APPLY FX path (expanded → Apply Track FX → restore)
+    local info
+    with_trim_behind_guard(function()
+      info = az_expand_item_edges(it, left_cap, right_cap)
+    end, "single-APPLY")
 
-  az_restore_edges_and_shift_new_take(it, info)
+    if not require_xen() then return end
+    R.Main_OnCommand(CMD_XEN_MONO_RESET, 0) -- print Track FX (expanded)
+    log("Single(APPLY): Apply Track FX (Xenakios) on expanded item")
+
+    az_restore_edges_and_shift_new_take(it, info)
+  end
 
   R.SelectAllMediaItems(0,false)
   if R.ValidatePtr(it,"MediaItem*") then R.SetMediaItemSelected(it,true) end
@@ -307,7 +351,7 @@ local function main()
   if not require_sws() then return end
 
   if DEBUG then R.ShowConsoleMsg("") end
-  log("=== Start v0.1.7 (FX) ===")
+  log("=== Start v0.1.8 (FX) ===")
 
   local n = R.CountSelectedMediaItems(0)
   if n == 0 then log("No selected items. Abort."); return end
@@ -320,9 +364,6 @@ local function main()
   R.PreventUIRefresh(1)
 
   if #items == 1 then
-    if not require_xen() then
-      R.PreventUIRefresh(-1); R.Undo_EndBlock("Render/Glue with Handles (abort)", -1); return
-    end
     do_single_item(items[1])
   else
     do_multi_items(items)
@@ -331,7 +372,7 @@ local function main()
   R.PreventUIRefresh(-1)
   R.Undo_EndBlock("Render or Glue Items with Handles and FX (No Ripple)", -1)
   R.UpdateArrange()
-  log("=== Done v0.1.7 (FX) ===")
+  log("=== Done v0.1.8 (FX) ===")
 end
 
 main()
