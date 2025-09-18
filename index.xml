@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<index version="1" name="hsuanice Scripts" commit="00c055ca70274aa2c81d7ff2e0b08fe4696d6dcc">
+<index version="1" name="hsuanice Scripts" commit="b77a0887337ff2f78de639b5477cb022b883ce34">
   <category name="Beta Testing">
     <reapack name="hsuanice_BWF TimeReference Embed Tool.lua" type="script" desc="Embed BWF TimeReference to Active take from Take 1 or Current Position TC">
       <version name="0.7.1" author="hsuanice" time="2025-08-14T17:52:57Z">
@@ -1637,6 +1637,9 @@ v0.1.0
       </version>
       <version name="0.1.1" author="hsuanice" time="2025-09-13T16:55:12Z">
         <source main="main">https://github.com/hsuanice/ReaScripts/raw/c1b591904fb591e2af379083a2cc6bff463dfd0d/Beta%20Testing/hsuanice_Split%20Tracks%20by%20Item%20Channel.lua</source>
+      </version>
+      <version name="0.1.2 split improve but not perfect yet" author="hsuanice" time="2025-09-18T19:10:48Z">
+        <source main="main">https://github.com/hsuanice/ReaScripts/raw/b77a0887337ff2f78de639b5477cb022b883ce34/Beta%20Testing/hsuanice_Split%20Tracks%20by%20Item%20Channel.lua</source>
       </version>
     </reapack>
     <reapack name="hsuanice_Track and Razor Item Link like Pro Tools.lua" type="script" desc="Track and Razor Item Link like Pro Tools (performance edition)">
