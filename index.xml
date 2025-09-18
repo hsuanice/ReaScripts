@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<index version="1" name="hsuanice Scripts" commit="f1fd6872ce2bf9a6d762f44377f46600ffd18c30">
+<index version="1" name="hsuanice Scripts" commit="30e1745393b4a565ba805401c3ae1cc266bd5815">
   <category name="Beta Testing">
     <reapack name="hsuanice_BWF TimeReference Embed Tool.lua" type="script" desc="Embed BWF TimeReference to Active take from Take 1 or Current Position TC">
       <version name="0.7.1" author="hsuanice" time="2025-08-14T17:52:57Z">
@@ -436,6 +436,9 @@ v0.1.0 (2025-09-13)
       </metadata>
       <version name="0.4.0" author="hsuanice" time="2025-08-18T11:56:21Z">
         <source main="main">https://github.com/hsuanice/ReaScripts/raw/9bd44d37ac752e340415fe066b51142ea41c90b7/Beta%20Testing/hsuanice_Import%20audio%20files%20per%20folder%20into%20separate%20tracks%20Field%20Recorder.lua</source>
+      </version>
+      <version name="0.4.1" author="hsuanice" time="2025-09-18T05:54:03Z">
+        <source main="main">https://github.com/hsuanice/ReaScripts/raw/30e1745393b4a565ba805401c3ae1cc266bd5815/Beta%20Testing/hsuanice_Import%20audio%20files%20per%20folder%20into%20separate%20tracks%20Field%20Recorder.lua</source>
       </version>
     </reapack>
     <reapack name="hsuanice_Import audio files per folder into separate tracks Music Multitrack.lua" type="script" desc="Import audio files per folder into separate tracks Music Multitrack">
