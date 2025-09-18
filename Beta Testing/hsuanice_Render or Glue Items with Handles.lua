@@ -1,18 +1,22 @@
 --[[
 @description Render or Glue Items with Handles
-@version 0.1.7 No Ripple
+@version 0.1.8 No Ripple
 @author hsuanice
 @about
-  Original behavior preserved (no FX print on glue; single-item bypass-all → apply item volume → unbypass),
-  plus a safety in 0.1.7:
+  NEW (0.1.8) user option: if a single selected item has ONLY ONE take, use GLUE instead of the
+  bypass→apply item volume→unbypass path (so the glued file name/TC behave as desired). If the item
+  has 2+ takes, keep the original single-item path. Multi-item path unchanged.
+
+  Safety:
     - During handle extension only, temporarily DISABLE "Trim content behind items when editing" (41117),
       then restore user's original state afterward.
     - Optional DEBUG logs to REAPER console.
 
 @changelog
+  v0.1.8
+    - Add SINGLE_TAKE_USES_GLUE option for single-item with exactly 1 take.
   v0.1.7
-    - Safety: ensure "Trim content behind items when editing" (41117) is OFF during handle extension,
-      then restore to user's original state. Added DEBUG console logs.
+    - Safety: ensure 41117 OFF during handle extension; restore afterward. Added DEBUG logs.
 --]]
 
 local R = reaper
@@ -20,7 +24,8 @@ local R = reaper
 -------------------------------------------------
 -- User options
 -------------------------------------------------
-local HANDLE_SEC = 3.0
+local HANDLE_SEC = 5.0
+local SINGLE_TAKE_USES_GLUE = true  -- NEW: single item with exactly 1 take → use GLUE path
 local DEBUG = true
 
 local function log(fmt, ...)
@@ -30,7 +35,7 @@ local function log(fmt, ...)
 end
 
 -------------------------------------------------
--- Command IDs (same as 0.1.6)
+-- Command IDs (same as 0.1.7)
 -------------------------------------------------
 local CMD_BYPASS_ALL     = 40342 -- Track: Bypass FX on all tracks
 local CMD_UNBYPASS_ALL   = 40343 -- Track: Unbypass FX on all tracks
@@ -156,7 +161,31 @@ local function az_restore_edges_and_shift_new_take(it, info)
 end
 
 -------------------------------------------------
--- Single-item path (bypass all → apply item volume → unbypass)
+-- Single-item helpers (GLUE variant)
+-------------------------------------------------
+local function single_item_glue_path(it, left_cap, right_cap)
+  local pos, _ = get_bounds(it)
+  local info
+  with_trim_behind_guard(function()
+    info = az_expand_item_edges(it, left_cap, right_cap)
+  end, "single-GLUE")
+
+  local tsa, tsb = save_ts()
+  local ext_start = math.max(0, info.orig_pos - left_cap)
+  local ext_end   = info.orig_end + right_cap
+  set_ts(ext_start, ext_end)
+  R.SelectAllMediaItems(0,false); if R.ValidatePtr(it,"MediaItem*") then R.SetMediaItemSelected(it,true) end
+  R.Main_OnCommand(CMD_GLUE_TS, 0)
+  log("Single(GLUE): glued in extended TS [%.6f, %.6f]", ext_start, ext_end)
+
+  set_ts(info.orig_pos, info.orig_end)
+  R.Main_OnCommand(CMD_TRIM_TS, 0)
+  restore_ts(tsa, tsb)
+  log("Single(GLUE): trimmed back to [%.6f, %.6f]", info.orig_pos, info.orig_end)
+end
+
+-------------------------------------------------
+-- Single item (bypass→apply item vol→unbypass) OR GLUE (when SINGLE_TAKE_USES_GLUE and 1 take)
 -------------------------------------------------
 local function do_single_item(it)
   if not it or not R.ValidatePtr(it,"MediaItem*") then return end
@@ -166,24 +195,32 @@ local function do_single_item(it)
   local left_cap  = math.min(HANDLE_SEC, pos)
   local right_cap = math.min(HANDLE_SEC, headroom_right_sec(it, tk_before))
 
-  local info
-  with_trim_behind_guard(function()
-    info = az_expand_item_edges(it, left_cap, right_cap)
-  end, "single")
+  local take_cnt = R.CountTakes(it)
+  log("Single: take-count=%d", take_cnt)
 
-  R.Main_OnCommand(CMD_BYPASS_ALL, 0)
-  R.Main_OnCommand(CMD_XEN_MONO_RESET, 0)
-  R.Main_OnCommand(CMD_UNBYPASS_ALL, 0)
-  log("Single: bypass→apply item vol→unbypass")
+  if SINGLE_TAKE_USES_GLUE and take_cnt == 1 then
+    single_item_glue_path(it, left_cap, right_cap)
+  else
+    local info
+    with_trim_behind_guard(function()
+      info = az_expand_item_edges(it, left_cap, right_cap)
+    end, "single-APPLY")
 
-  az_restore_edges_and_shift_new_take(it, info)
+    if not require_xen() then return end
+    R.Main_OnCommand(CMD_BYPASS_ALL, 0)
+    R.Main_OnCommand(CMD_XEN_MONO_RESET, 0)
+    R.Main_OnCommand(CMD_UNBYPASS_ALL, 0)
+    log("Single(APPLY): bypass→apply item vol→unbypass")
+
+    az_restore_edges_and_shift_new_take(it, info)
+  end
 
   R.SelectAllMediaItems(0,false)
   if R.ValidatePtr(it,"MediaItem*") then R.SetMediaItemSelected(it,true) end
 end
 
 -------------------------------------------------
--- Multi-items path (glue; preserve outer fades)
+-- Multi items (glue; preserve outer fades)
 -------------------------------------------------
 local function capture_fades(it)
   return {
@@ -281,7 +318,7 @@ local function main()
   if not require_sws() then return end
 
   if DEBUG then R.ShowConsoleMsg("") end
-  log("=== Start v0.1.7 (no-FX glue) ===")
+  log("=== Start v0.1.8 (no-FX glue) ===")
 
   local n = R.CountSelectedMediaItems(0)
   if n == 0 then log("No selected items. Abort."); return end
@@ -294,9 +331,6 @@ local function main()
   R.PreventUIRefresh(1)
 
   if #items == 1 then
-    if not require_xen() then
-      R.PreventUIRefresh(-1); R.Undo_EndBlock("Render/Glue with Handles (abort)", -1); return
-    end
     do_single_item(items[1])
   else
     do_multi_items(items)
@@ -305,7 +339,7 @@ local function main()
   R.PreventUIRefresh(-1)
   R.Undo_EndBlock("Render or Glue Items with Handles", -1)
   R.UpdateArrange()
-  log("=== Done v0.1.7 (no-FX glue) ===")
+  log("=== Done v0.1.8 (no-FX glue) ===")
 end
 
 main()
