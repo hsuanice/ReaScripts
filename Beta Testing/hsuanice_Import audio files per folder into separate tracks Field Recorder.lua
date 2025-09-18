@@ -1,6 +1,6 @@
 --[[
 @description ReaImGui - Import audio: one folder per track; channel-split files go to child tracks. Sequence only.
-@version 0.4.0
+@version 0.4.1
 @author hsuanice
 @about
   - Pre-confirm dialog: shows total folders/files, lets you choose a channel naming pattern or a custom mask, then offers [Import] / [Cancel].
@@ -26,6 +26,22 @@
   hsuanice served as the workflow designer, tester, and integrator for this tool.
 
 @changelog
+  v0.4.1
+  - Add: Support for filenames ending with "-<number>" (e.g. File-3.wav). 
+         Auto mode now tries .A%, _%, and -% (chan_from_dash + Auto path).
+  - Fix: Custom Rule mask parsing for "%". Corrected gsub replacement rules so 
+         "%" is properly converted to (%d+), with support for literal "%%". 
+         Also trims leading/trailing spaces automatically.
+  - UI: Channel naming dialog always shows Custom input and P1–P3 preset buttons. 
+        In Auto mode, the help text now indicates it will attempt .A%, _%, and Presets. 
+        Clicking a preset button auto-focuses the input field.
+  - Add: Lowercase ".a<number>" is now recognized the same as ".A<number>" 
+         (improved chan_from_A).
+  - Add: Pre-scans each folder’s filenames to create the required "Ch XX" child tracks 
+         in advance, ensuring stable child track order.
+  - Misc: Minor stability and wording improvements for the import progress window 
+          and final summary dialog.
+
   v0.4.0 - Add: "Auto" channel naming (tries .A, then _, then Presets P1–P3; future-proof via MAX_MASK_PRESETS).
   v0.3.1 - Fix: ESC closes dialogs; remembers the last setting.
   v0.3.0 - Add Custom Mask Presets: 3 slots with clickable tokens; Save/Clear controls; focus returns to the custom input; presets persist via ExtState.
@@ -179,15 +195,25 @@ end
 
 
 
--- Convert the user-defined mask into a Lua pattern; “%” represents a numeric capture.
--- Example: “%_AAP” → “(%d+)_AAP”, or “[chan %]” → “%[chan (%d+)%]”.
+-- Convert user mask to Lua pattern; "%" means digits.
 local function mask_to_pattern(mask)
-  if not mask or mask == "" then return nil end
-  -- First escape Lua pattern special characters.
-  local esc = mask:gsub("([%%%^%$%(%)%.%[%]%*%+%-%?])", "%%%1")
-  -- Convert a single “%” into “(%d+)”.
-  esc = esc:gsub("%%%%", "%%")          -- Protect “%%” so it remains “%”.
-  esc = esc:gsub("%%", "(%%d+)")        -- A single “%” ⇒ “(%d+)”.
+  if not mask then return nil end
+  -- 先去頭尾空白，避免 " -%" / "-% " 之類踩雷
+  mask = mask:match("^%s*(.-)%s*$")
+  if mask == "" then return nil end
+
+  -- 先把字面上的 "%%" 暫存，避免被誤當數字佔位
+  local SENT = "\0PCT\0"
+  mask = mask:gsub("%%%%", SENT)
+
+  -- 跳脫 Lua pattern 特殊字元（保留 %）
+  local esc = mask:gsub("([%^%$%(%)%.%[%]%*%+%-%?])", "%%%1")
+
+  -- 將單一 % 轉成數字擷取 (%d+)
+  esc = esc:gsub("%%", "(%%d+)")
+
+  -- 還原字面上的 %
+  esc = esc:gsub(SENT, "%%")
   return esc
 end
 
@@ -202,11 +228,18 @@ local function chan_from_custom(fn, mask)
 end
 
 
--- Unified entry point: extract the channel number according to CHAN_MODE.
+-- 新增一個 dash 解析器
+local function chan_from_dash(fn)
+  local base = fn:match("([^/\\]+)$") or fn
+  local n = base:match("%-(%d+)%.[^%.]+$") or base:match("%-(%d+)$")
+  if n then return tonumber(n) end
+end
+
+-- Unified entry point
 local function chan_from_filename(fn)
   if CHAN_MODE == 0 then
-    -- Auto: try .A, then _, then all non-empty presets (future-proof via MAX_MASK_PRESETS)
-    local n = chan_from_A(fn) or chan_from_U(fn)
+    -- Auto: .A#, then _#, then -#, then presets
+    local n = chan_from_A(fn) or chan_from_U(fn) or chan_from_dash(fn)
     if n then return n end
     for i = 1, MAX_MASK_PRESETS do
       local m = mask_presets[i]
@@ -223,9 +256,10 @@ local function chan_from_filename(fn)
   elseif CHAN_MODE == 3 then
     return chan_from_custom(fn, CHAN_CUSTOM_MASK)
   else
-    return chan_from_A(fn) -- Safe default.
+    return chan_from_A(fn)
   end
 end
+
 
 
 
@@ -513,7 +547,9 @@ local function ui_choose_mode(on_done)
       if reaper.ImGui_RadioButton(ctx, 'Auto Mode', mode == 0) then mode = 0 end
       if reaper.ImGui_RadioButton(ctx, '".A%"  (e.g., File.A3.WAV)', mode == 1) then mode = 1 end
       if reaper.ImGui_RadioButton(ctx, '"_%"   (e.g., File_3.WAV)', mode == 2) then mode = 2 end
+      if reaper.ImGui_RadioButton(ctx, '"-%"   (e.g., File-3.WAV)', mode == 4) then mode = 4 end
       if reaper.ImGui_RadioButton(ctx, 'Custom Rule', mode == 3) then mode = 3 end
+
 
       -- Custom UI
       -- Always-visible Custom editor + presets
@@ -521,7 +557,7 @@ local function ui_choose_mode(on_done)
 
       -- Help text (extra explicit when Auto is selected)
       if mode == 0 then
-        reaper.ImGui_TextWrapped(ctx, 'Auto Mode tries ".A%", "_%", and Presets.')
+        reaper.ImGui_TextWrapped(ctx, 'Auto Mode tries ".A%", "_%", "-%" and Presets.')
       end
       reaper.ImGui_Text(ctx, 'use "%" for channel number')
 
