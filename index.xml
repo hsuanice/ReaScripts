@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<index version="1" name="hsuanice Scripts" commit="b77a0887337ff2f78de639b5477cb022b883ce34">
+<index version="1" name="hsuanice Scripts" commit="926ba342e714a572badd086386a1462a2bb2fdc6">
   <category name="Beta Testing">
     <reapack name="hsuanice_BWF TimeReference Embed Tool.lua" type="script" desc="Embed BWF TimeReference to Active take from Take 1 or Current Position TC">
       <version name="0.7.1" author="hsuanice" time="2025-08-14T17:52:57Z">
@@ -1586,6 +1586,31 @@ v0.2.0
 v0.1.0
 - Initial minimal HUD (no custom font/theme)]]></changelog>
         <source main="main">https://github.com/hsuanice/ReaScripts/raw/dd2002c71eec88af9bc56ba4892ffedcae32e622/Beta%20Testing/hsuanice_Show%20Frame%20Rate.lua</source>
+      </version>
+    </reapack>
+    <reapack name="hsuanice_Show Hide Tracks of Selected Parent or Childred Folder Tracks in TCP.lua" type="script" desc="Show/Hide TCP children of selected folder parents, or of the parent of selected children">
+      <metadata>
+        <description><![CDATA[{\rtf1\ansi\deff0{\fonttbl{\f0 \fswiss Helvetica;}{\f1 \fmodern Courier;}}
+{\colortbl;\red255\green0\blue0;\red0\green0\blue255;}
+\widowctrl\hyphauto
+
+{\pard \ql \f0 \sa180 \li0 \fi0 Toggle TCP folder children efficiently:\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab If a selected track is a folder parent, toggle its TCP children visibility.\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab If a selected track is a child, find its nearest folder parent and toggle that one.\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Multi-selection supported with de-duplication. No full-project scan. Designed for very large sessions.\sa180\par}
+}
+]]></description>
+      </metadata>
+      <version name="0.1.2" author="hsuanice" time="2025-09-19T02:48:45Z">
+        <changelog><![CDATA[v0.1.2
+- Fix: robust parent detection when no parent (avoid invalid MediaTrack errors).
+- Change: use I_FOLDERCOMPACT for TCP folding (0 normal, 1 collapsed, 2 fully collapsed).
+- Add: multi-select de-duplication, UI refresh guard, Undo block.
+v0.1.1
+- Options draft (not released): MODE/TOPMOST_ANCESTOR.
+v0.1.0
+- Initial minimal toggle from selected parent or parent-of-selected-child.]]></changelog>
+        <source main="main">https://github.com/hsuanice/ReaScripts/raw/926ba342e714a572badd086386a1462a2bb2fdc6/Beta%20Testing/hsuanice_Show%20Hide%20Tracks%20of%20Selected%20Parent%20or%20Childred%20Folder%20Tracks%20in%20TCP.lua</source>
       </version>
     </reapack>
     <reapack name="hsuanice_SMPTE UMID Generate and Embed Tool.lua" type="script" desc="SMPTE UMID Generate &amp; Embed Tool (bext:UMID only)">
