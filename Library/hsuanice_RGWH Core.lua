@@ -1,6 +1,6 @@
 --[[
 @description Render or Glue Items with Handles Core Library
-@version 250920_2049
+@version 250920_2207
 @author hsuanice
 @about
   Library for RGWH glue/render flows with handles, FX policies, rename, # markers, and optional take markers inside glued items.
@@ -109,6 +109,81 @@ local function add_take_marker_at(item, rel_pos_sec, label)
   local take = r.GetActiveTake(item)
   if not take then return end
   r.SetTakeMarker(take, -1, label or "", rel_pos_sec, 0) -- -1 append
+end
+
+
+-- 取 base/ext（若無副檔名則 ext=""）
+local function split_ext(s)
+  local base, ext = s:match("^(.*)(%.[^%./\\]+)$")
+  if not base then return s or "", "" end
+  return base, ext
+end
+
+-- 移除尾端標籤：-takefx / -trackfx / -renderedN（僅針對字尾，避免中段誤刪）
+local function strip_tail_tags(s)
+  s = s or ""
+  while true do
+    local before = s
+    s = s:gsub("%-takefx$", "")
+    s = s:gsub("%-trackfx$", "")
+    s = s:gsub("%-rendered%d+$", "")
+    s = s:gsub("%-$","")  -- 若剛好留下尾端 '-'，順手清掉
+    if s == before then break end
+  end
+  return s
+end
+
+-- 取名字中的 renderedN（僅字尾，允許後面跟 -takefx/-trackfx 再抽回去）
+local function extract_rendered_n(name)
+  local b = split_ext(name)
+  -- 先暫時移除尾端 -takefx/-trackfx，抓 renderedN
+  local t = b:gsub("%-takefx$",""):gsub("%-trackfx$","")
+  t = t:gsub("%-takefx$",""):gsub("%-trackfx$","")
+  local n = t:match("%-rendered(%d+)$")
+  return tonumber(n or 0) or 0
+end
+
+-- 掃「同一個 item 的所有 takes」找出已存在的最大 renderedN
+local function max_rendered_n_on_item(it)
+  local maxn = 0
+  local tc = reaper.CountTakes(it)
+  for i = 0, tc-1 do
+    local tk = reaper.GetTake(it, i)
+    local _, nm = reaper.GetSetMediaItemTakeInfo_String(tk, "P_NAME", "", false)
+    local n = extract_rendered_n(nm or "")
+    if n > maxn then maxn = n end
+  end
+  return maxn
+end
+
+-- 只改「新產生的 rendered take」的名稱；舊 take 不動
+-- base 用「render 前的舊 take 名稱（去掉既有 suffix）」；ext 用「新 take 現名的副檔名」
+local function rename_new_render_take(it, orig_take_name, want_takefx, want_trackfx, DBG)
+  if not it then return end
+  local tc = reaper.CountTakes(it)
+  if tc == 0 then return end
+
+  -- Reaper 會把新 take 加在最後一軌（也通常設為 Active），抓最後一個即可
+  local newtk = reaper.GetTake(it, tc-1)
+  if not newtk then return end
+
+  -- ext 用新 take 現名的副檔名，以符合「插在副檔名前」的規則
+  local _, curNewName = reaper.GetSetMediaItemTakeInfo_String(newtk, "P_NAME", "", false)
+  local _, extNew = split_ext(curNewName or "")
+
+  -- base 用舊 take 名（render 前抓到的那個），並去除尾端既有 suffix
+  local baseOld = strip_tail_tags(select(1, split_ext(orig_take_name or "")))
+
+  -- N = 目前 item 內最大值 + 1（僅掃本 item，成本極低）
+  local nextN = max_rendered_n_on_item(it) + 1
+
+  local newname = string.format("%s-rendered%d", baseOld, nextN)
+  if want_takefx  then newname = newname .. "-takefx"  end
+  if want_trackfx then newname = newname .. "-trackfx" end
+  newname = newname .. extNew
+
+  reaper.GetSetMediaItemTakeInfo_String(newtk, "P_NAME", newname, true)
+  dbg(DBG, 1, "[NAME] new take rename '%s' → '%s'", tostring(curNewName or ""), tostring(newname))
 end
 
 ------------------------------------------------------------
@@ -625,7 +700,15 @@ function M.render_selection()
   end
 
   local cmd = (cfg.APPLY_FX_MODE=="multi") and ACT_APPLY_MULTI or ACT_APPLY_MONO
+
   for _,it in ipairs(items) do
+    -- 0) 先記錄「render 前」的舊 take 名（每個 item 各自記）
+    local tk_before = reaper.GetActiveTake(it)
+    local orig_name = ""
+    if tk_before then
+      _, orig_name = reaper.GetSetMediaItemTakeInfo_String(tk_before, "P_NAME", "", false)
+    end
+
     local L0,R0 = item_span(it)
     local name0 = get_take_name(it) or ""
     local d = per_member_window_lr(it, L0, R0, HANDLE, HANDLE)
@@ -641,6 +724,7 @@ function M.render_selection()
       dbg(DBG,1,"[HASH] add #in @ %.3f  #out @ %.3f  ids=(%s,%s)", L0, R0, tostring(hash_ids[1]), tostring(hash_ids[2]))
     end
 
+    -- 調整到 want 窗
     r.SetMediaItemInfo_Value(it,"D_POSITION", d.gotL)
     r.SetMediaItemInfo_Value(it,"D_LENGTH",   d.gotR - d.gotL)
     if d.tk then
@@ -650,6 +734,7 @@ function M.render_selection()
     end
     r.UpdateItemInProject(it)
 
+    -- Apply FX（產生「新 take」）
     r.SelectAllMediaItems(0,false)
     r.SetMediaItemSelected(it,true)
     r.UpdateArrange()
@@ -660,6 +745,7 @@ function M.render_selection()
       dbg(DBG,1,"[HASH] removed ids: %s, %s", tostring(hash_ids[1]), tostring(hash_ids[2]))
     end
 
+    -- 還原 L0/R0 與 offset
     local left_total = L0 - d.gotL
     if left_total < 0 then left_total = 0 end
     r.SetMediaItemInfo_Value(it,"D_POSITION", L0)
@@ -668,9 +754,7 @@ function M.render_selection()
     if gtk then r.SetMediaItemTakeInfo_Value(gtk,"D_STARTOFFS", left_total) end
     r.UpdateItemInProject(it)
 
-    -- 減少重複增益：把 item volume 歸 1.0
-    -- [GAIN] Merge pre-render item volume into old takes so switching takes stays level-matched
-    -- Read the item volume *before* we neutralize it.
+    -- [GAIN] 把 pre item volume 併回舊 takes，並把 item/new take 歸一
     local pre_item_vol = r.GetMediaItemInfo_Value(it, "D_VOL") or 1.0
     local newtk = r.GetActiveTake(it)
     if pre_item_vol and math.abs(pre_item_vol - 1.0) > 1e-9 then
@@ -688,17 +772,22 @@ function M.render_selection()
         dbg(DBG,2,"[GAIN] merged pre itemVol=%.3f into %d older take(s)", pre_item_vol, merged)
       end
     end
-
-    -- 接著把 item 以及「新 render 出來的 take」都歸一，避免雙重套用
     r.SetMediaItemInfo_Value(it, "D_VOL", 1.0)
     if newtk then r.SetMediaItemTakeInfo_Value(newtk, "D_VOL", 1.0) end
 
-    local newname = compute_new_name("render", get_take_name(it), {
-      takePrinted  = cfg.RENDER_TAKE_FX,
-      trackPrinted = cfg.RENDER_TRACK_FX
-    })
-    set_take_name(it, newname)
-    dbg(DBG,1,"[NAME] '%s' → '%s'", name0, newname)
+    -- ✅ 只改「新 rendered take」，舊 take 不動
+    rename_new_render_take(
+      it,
+      orig_name,
+      cfg.RENDER_TAKE_FX == true,
+      cfg.RENDER_TRACK_FX == true,
+      DBG
+    )
+
+    -- （❌ 移除這段：compute_new_name + set_take_name，避免改到舊 take 或重複命名）
+    -- local newname = compute_new_name("render", get_take_name(it), {...})
+    -- set_take_name(it, newname)
+    -- dbg(DBG,1,"[NAME] '%s' → '%s'", name0, newname)
   end
 
   if need_disable_take then
@@ -715,6 +804,7 @@ function M.render_selection()
       for fx,was_on in pairs(rec.enabled) do r.TrackFX_SetEnabled(tr, fx, was_on and true or false) end
     end
   end
+
 
   r.PreventUIRefresh(-1)
   r.UpdateArrange()
