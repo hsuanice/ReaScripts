@@ -1,6 +1,6 @@
 --[[
 @description Render or Glue Items with Handles Core Library
-@version 250920_2207
+@version 250920_2358
 @author hsuanice
 @about
   Library for RGWH glue/render flows with handles, FX policies, rename, # markers, and optional take markers inside glued items.
@@ -184,6 +184,44 @@ local function rename_new_render_take(it, orig_take_name, want_takefx, want_trac
 
   reaper.GetSetMediaItemTakeInfo_String(newtk, "P_NAME", newname, true)
   dbg(DBG, 1, "[NAME] new take rename '%s' → '%s'", tostring(curNewName or ""), tostring(newname))
+end
+
+-- 只快照「offline」布林，不記 bypass
+local function snapshot_takefx_offline(tk)
+  local n = r.TakeFX_GetCount(tk) or 0
+  local snap = {}
+  for i = 0, n-1 do
+    snap[i] = r.TakeFX_GetOffline(tk, i) and true or false
+  end
+  return snap
+end
+
+-- 暫時把「原本不是 offline」的 FX 設為 offline（不動原本就 offline 的）
+local function temp_offline_nonoffline_fx(tk)
+  local n = r.TakeFX_GetCount(tk) or 0
+  local cnt = 0
+  for i = 0, n-1 do
+    if not r.TakeFX_GetOffline(tk, i) then
+      r.TakeFX_SetOffline(tk, i, true)
+      cnt = cnt + 1
+    end
+  end
+  return cnt
+end
+
+-- 依快照還原 offline 狀態
+local function restore_takefx_offline(tk, snap)
+  if not (tk and snap) then return 0 end
+  local n = r.TakeFX_GetCount(tk) or 0
+  local cnt = 0
+  for i = 0, n-1 do
+    local want = snap[i]
+    if want ~= nil then
+      r.TakeFX_SetOffline(tk, i, want and true or false)
+      cnt = cnt + 1
+    end
+  end
+  return cnt
 end
 
 ------------------------------------------------------------
@@ -642,78 +680,107 @@ function M.render_selection()
   local DBG = cfg.DEBUG_LEVEL or 1
   local items = get_sel_items()
   local nsel  = #items
+  local r = reaper
+
+  -- helpers (local to this function) -----------------------------------------
+  local function snapshot_takefx_offline(tk)
+    local n = r.TakeFX_GetCount(tk) or 0
+    local snap = {}
+    for i = 0, n-1 do snap[i] = r.TakeFX_GetOffline(tk, i) and true or false end
+    return snap
+  end
+
+  -- set offline only for FX that were online; leave originally-offline FX intact
+  local function temp_offline_nonoffline_fx(tk)
+    local n = r.TakeFX_GetCount(tk) or 0
+    local cnt = 0
+    for i = 0, n-1 do
+      if not r.TakeFX_GetOffline(tk, i) then
+        r.TakeFX_SetOffline(tk, i, true)
+        cnt = cnt + 1
+      end
+    end
+    return cnt
+  end
+
+  local function restore_takefx_offline(tk, snap)
+    if not (tk and snap) then return 0 end
+    local n = r.TakeFX_GetCount(tk) or 0
+    local cnt = 0
+    for i = 0, n-1 do
+      local want = snap[i]
+      if want ~= nil then
+        r.TakeFX_SetOffline(tk, i, want and true or false)
+        cnt = cnt + 1
+      end
+    end
+    return cnt
+  end
+  -----------------------------------------------------------------------------
 
   r.Undo_BeginBlock()
   r.PreventUIRefresh(1)
   r.ClearConsole()
 
-  if nsel==0 then
+  if nsel == 0 then
     dbg(DBG,1,"[RUN] No selected items.")
     r.PreventUIRefresh(-1); r.Undo_EndBlock("RGWH Core - Render (no selection)", -1); return
   end
 
-  local eps_s = (cfg.EPSILON_MODE=="frames") and frames_to_seconds(cfg.EPSILON_VALUE, get_sr(), nil) or (cfg.EPSILON_VALUE or 0.002)
+  local eps_s = (cfg.EPSILON_MODE=="frames")
+                  and frames_to_seconds(cfg.EPSILON_VALUE, get_sr(), nil)
+                  or (cfg.EPSILON_VALUE or 0.002)
   local HANDLE = (cfg.HANDLE_MODE=="seconds") and (cfg.HANDLE_SECONDS or 0.0) or 0.0
 
   dbg(DBG,1,"[RUN] Render start  mode=%s  TAKE=%s TRACK=%s  items=%d  handles=%.3fs  WRITE_MEDIA_CUES=%s",
-      cfg.APPLY_FX_MODE, tostring(cfg.RENDER_TAKE_FX), tostring(cfg.RENDER_TRACK_FX), nsel, HANDLE, tostring(cfg.WRITE_MEDIA_CUES))
+      cfg.APPLY_FX_MODE, tostring(cfg.RENDER_TAKE_FX), tostring(cfg.RENDER_TRACK_FX),
+      nsel, HANDLE, tostring(cfg.WRITE_MEDIA_CUES))
 
-  -- 快照每個 track 的 FX 啟用狀態
+  -- snapshot per-track FX enabled state (TRACK path has been stable)
   local tr_map = {}
-  for _,it in ipairs(items) do
+  for _, it in ipairs(items) do
     local tr = r.GetMediaItem_Track(it)
-    if not tr_map[tr] then
-      local fx_count = r.TrackFX_GetCount(tr) or 0
-      local map = { track=tr, enabled={} }
-      for fx=0,fx_count-1 do map.enabled[fx] = r.TrackFX_GetEnabled(tr, fx) end
-      tr_map[tr] = map
+    if tr and not tr_map[tr] then
+      local fxn = r.TrackFX_GetCount(tr) or 0
+      local rec = { track = tr, enabled = {} }
+      for i = 0, fxn-1 do rec.enabled[i] = r.TrackFX_GetEnabled(tr, i) end
+      tr_map[tr] = rec
     end
   end
 
   local need_disable_track = (not cfg.RENDER_TRACK_FX)
-  local need_disable_take  = (not cfg.RENDER_TAKE_FX)
-
   if need_disable_track then
-    for _,rec in pairs(tr_map) do
+    for _, rec in pairs(tr_map) do
       local tr = rec.track
-      local fx_count = r.TrackFX_GetCount(tr) or 0
-      for fx=0,fx_count-1 do r.TrackFX_SetEnabled(tr, fx, false) end
+      local fxn = r.TrackFX_GetCount(tr) or 0
+      for i = 0, fxn-1 do r.TrackFX_SetEnabled(tr, i, false) end
     end
     dbg(DBG,1,"[RUN] Temporarily disabled TRACK FX (policy TRACK=0).")
   end
 
-  local per_item_takefx_enabled = {}
-  if need_disable_take then
-    for _,it in ipairs(items) do
-      local tk = r.GetActiveTake(it)
-      per_item_takefx_enabled[it] = {}
-      if tk then
-        local fxn = r.TakeFX_GetCount(tk) or 0
-        for fx=0,fxn-1 do
-          local on = r.TakeFX_GetEnabled(tk, fx)
-          per_item_takefx_enabled[it][fx] = on
-          if on then r.TakeFX_SetEnabled(tk, fx, false) end
-        end
-      end
-    end
-    dbg(DBG,1,"[RUN] Temporarily disabled TAKE FX (policy TAKE=0).")
-  end
-
   local cmd = (cfg.APPLY_FX_MODE=="multi") and ACT_APPLY_MULTI or ACT_APPLY_MONO
 
-  for _,it in ipairs(items) do
-    -- 0) 先記錄「render 前」的舊 take 名（每個 item 各自記）
-    local tk_before = reaper.GetActiveTake(it)
+  for _, it in ipairs(items) do
+    -- keep a handle to the original active take (pre-render)
+    local tk_orig = r.GetActiveTake(it)
     local orig_name = ""
-    if tk_before then
-      _, orig_name = reaper.GetSetMediaItemTakeInfo_String(tk_before, "P_NAME", "", false)
+    if tk_orig then
+      _, orig_name = r.GetSetMediaItemTakeInfo_String(tk_orig, "P_NAME", "", false)
     end
 
-    local L0,R0 = item_span(it)
-    local name0 = get_take_name(it) or ""
-    local d = per_member_window_lr(it, L0, R0, HANDLE, HANDLE)
+    -- per-item: temporarily offline non-offline take FX when TAKE FX are excluded
+    local snap_off = nil
+    if tk_orig and not cfg.RENDER_TAKE_FX then
+      snap_off = snapshot_takefx_offline(tk_orig)
+      local n_off = temp_offline_nonoffline_fx(tk_orig)
+      if DBG >= 2 then dbg(DBG,2,"[TAKEFX] temp-offline %d FX on '%s'", n_off, orig_name) end
+    end
 
-    if DBG>=2 then
+    local L0, R0 = item_span(it)
+    local name0  = get_take_name(it) or ""
+    local d      = per_member_window_lr(it, L0, R0, HANDLE, HANDLE)
+
+    if DBG >= 2 then
       dbg(DBG,2,"[REN] item@%.3f..%.3f want=%.3f..%.3f -> got=%.3f..%.3f clampL=%s clampR=%s name=%s",
           L0, R0, d.wantL, d.wantR, d.gotL, d.gotR, tostring(d.clampL), tostring(d.clampR), name0)
     end
@@ -721,22 +788,22 @@ function M.render_selection()
     local hash_ids = nil
     if cfg.WRITE_MEDIA_CUES then
       hash_ids = add_hash_markers(L0, R0, 0)
-      dbg(DBG,1,"[HASH] add #in @ %.3f  #out @ %.3f  ids=(%s,%s)", L0, R0, tostring(hash_ids[1]), tostring(hash_ids[2]))
+      dbg(DBG,1,"[HASH] add #in @ %.3f  #out @ %.3f  ids=(%s,%s)", L0, R0, tostring(hash_ids and hash_ids[1]), tostring(hash_ids and hash_ids[2]))
     end
 
-    -- 調整到 want 窗
-    r.SetMediaItemInfo_Value(it,"D_POSITION", d.gotL)
-    r.SetMediaItemInfo_Value(it,"D_LENGTH",   d.gotR - d.gotL)
+    -- move to render window and align take offset
+    r.SetMediaItemInfo_Value(it, "D_POSITION", d.gotL)
+    r.SetMediaItemInfo_Value(it, "D_LENGTH",   d.gotR - d.gotL)
     if d.tk then
       local deltaL  = (L0 - d.gotL)
       local new_off = d.offs - (deltaL * d.rate)
-      r.SetMediaItemTakeInfo_Value(d.tk,"D_STARTOFFS", new_off)
+      r.SetMediaItemTakeInfo_Value(d.tk, "D_STARTOFFS", new_off)
     end
     r.UpdateItemInProject(it)
 
-    -- Apply FX（產生「新 take」）
-    r.SelectAllMediaItems(0,false)
-    r.SetMediaItemSelected(it,true)
+    -- render (Apply FX to item)
+    r.SelectAllMediaItems(0, false)
+    r.SetMediaItemSelected(it, true)
     r.UpdateArrange()
     r.Main_OnCommand(cmd, 0)
 
@@ -745,18 +812,17 @@ function M.render_selection()
       dbg(DBG,1,"[HASH] removed ids: %s, %s", tostring(hash_ids[1]), tostring(hash_ids[2]))
     end
 
-    -- 還原 L0/R0 與 offset
+    -- restore item window and offset
     local left_total = L0 - d.gotL
     if left_total < 0 then left_total = 0 end
-    r.SetMediaItemInfo_Value(it,"D_POSITION", L0)
-    r.SetMediaItemInfo_Value(it,"D_LENGTH",   R0 - L0)
-    local gtk = r.GetActiveTake(it)
-    if gtk then r.SetMediaItemTakeInfo_Value(gtk,"D_STARTOFFS", left_total) end
+    r.SetMediaItemInfo_Value(it, "D_POSITION", L0)
+    r.SetMediaItemInfo_Value(it, "D_LENGTH",   R0 - L0)
+    local newtk = r.GetActiveTake(it)  -- now the freshly rendered take
+    if newtk then r.SetMediaItemTakeInfo_Value(newtk, "D_STARTOFFS", left_total) end
     r.UpdateItemInProject(it)
 
-    -- [GAIN] 把 pre item volume 併回舊 takes，並把 item/new take 歸一
+    -- gain: merge pre-render item vol into all older takes; then normalize item & new take
     local pre_item_vol = r.GetMediaItemInfo_Value(it, "D_VOL") or 1.0
-    local newtk = r.GetActiveTake(it)
     if pre_item_vol and math.abs(pre_item_vol - 1.0) > 1e-9 then
       local nt = r.GetMediaItemNumTakes(it) or 0
       local merged = 0
@@ -768,14 +834,12 @@ function M.render_selection()
           merged = merged + 1
         end
       end
-      if DBG > 0 then
-        dbg(DBG,2,"[GAIN] merged pre itemVol=%.3f into %d older take(s)", pre_item_vol, merged)
-      end
+      if DBG >= 2 then dbg(DBG,2,"[GAIN] merged pre itemVol=%.3f into %d older take(s)", pre_item_vol, merged) end
     end
     r.SetMediaItemInfo_Value(it, "D_VOL", 1.0)
     if newtk then r.SetMediaItemTakeInfo_Value(newtk, "D_VOL", 1.0) end
 
-    -- ✅ 只改「新 rendered take」，舊 take 不動
+    -- rename only the new rendered take
     rename_new_render_take(
       it,
       orig_name,
@@ -784,31 +848,27 @@ function M.render_selection()
       DBG
     )
 
-    -- （❌ 移除這段：compute_new_name + set_take_name，避免改到舊 take 或重複命名）
-    -- local newname = compute_new_name("render", get_take_name(it), {...})
-    -- set_take_name(it, newname)
-    -- dbg(DBG,1,"[NAME] '%s' → '%s'", name0, newname)
+    -- restore the original take's offline snapshot (do not touch bypass/enabled)
+    if tk_orig and snap_off then
+      local n_rest = restore_takefx_offline(tk_orig, snap_off)
+      if DBG >= 2 then dbg(DBG,2,"[TAKEFX] restored %d FX on '%s'", n_rest, orig_name) end
+    end
   end
 
-  if need_disable_take then
-    for it, map in pairs(per_item_takefx_enabled) do
-      local tk = r.GetActiveTake(it)
-      if tk then
-        for fx, was_on in pairs(map) do r.TakeFX_SetEnabled(tk, fx, was_on and true or false) end
+  -- restore TRACK FX enabled states if we disabled them
+  if need_disable_track then
+    for _, rec in pairs(tr_map) do
+      local tr = rec.track
+      for fx, was_on in pairs(rec.enabled) do
+        r.TrackFX_SetEnabled(tr, fx, was_on and true or false)
       end
     end
   end
-  if need_disable_track then
-    for _,rec in pairs(tr_map) do
-      local tr = rec.track
-      for fx,was_on in pairs(rec.enabled) do r.TrackFX_SetEnabled(tr, fx, was_on and true or false) end
-    end
-  end
-
 
   r.PreventUIRefresh(-1)
   r.UpdateArrange()
   r.Undo_EndBlock("RGWH Core - Render (Apply FX per item w/ handles)", -1)
 end
+
 
 return M
