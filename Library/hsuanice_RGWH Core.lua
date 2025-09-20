@@ -1,6 +1,6 @@
 --[[
 @description Render or Glue Items with Handles Core Library
-@version 250921_0205 fix glue in track fx 1 mode fade issue
+@version 250921_0238 take fx chain clone ok
 @author hsuanice
 @about
   Library for RGWH glue/render flows with handles, FX policies, rename, # markers, and optional take markers inside glued items.
@@ -723,9 +723,9 @@ function M.render_selection()
   local DBG = cfg.DEBUG_LEVEL or 1
   local items = get_sel_items()
   local nsel  = #items
-  local r = reaper
+  local r     = reaper
 
-  -- helpers (local to this function) -----------------------------------------
+  -- local helpers -------------------------------------------------------------
   local function snapshot_takefx_offline(tk)
     local n = r.TakeFX_GetCount(tk) or 0
     local snap = {}
@@ -733,7 +733,7 @@ function M.render_selection()
     return snap
   end
 
-  -- set offline only for FX that were online; leave originally-offline FX intact
+  -- temporarily offline only FX that were online
   local function temp_offline_nonoffline_fx(tk)
     local n = r.TakeFX_GetCount(tk) or 0
     local cnt = 0
@@ -758,6 +758,24 @@ function M.render_selection()
       end
     end
     return cnt
+  end
+
+  local function clear_takefx_chain(tk)
+    if not tk then return end
+    local n = r.TakeFX_GetCount(tk) or 0
+    for i = n-1, 0, -1 do r.TakeFX_Delete(tk, i) end
+  end
+
+  local function clone_takefx_chain(src_tk, dst_tk)
+    if not (src_tk and dst_tk) then return 0 end
+    local n = r.TakeFX_GetCount(src_tk) or 0
+    local copied = 0
+    for i = 0, n-1 do
+      -- append copy of src FX i into dst (is_move=false)
+      r.TakeFX_CopyToTake(src_tk, i, dst_tk, -1, false)
+      copied = copied + 1
+    end
+    return copied
   end
   -----------------------------------------------------------------------------
 
@@ -801,20 +819,24 @@ function M.render_selection()
     dbg(DBG,1,"[RUN] Temporarily disabled TRACK FX (policy TRACK=0).")
   end
 
-  -- 40361/41993 = Item: Apply track/take FX to items (mono/multichannel) 會把 fades 一起烘進音檔
-  -- 40601       = Item: Render items to new take (preserve source type) 不會烘入 fades、也不會印 Track FX
-  local apply_cmd = get_apply_cmd(cfg)  -- 40361 or 41993（看 cfg.APPLY_FX_MODE）
-
+  -- Choose command:
+  -- 40361 / 41993 (Apply track/take FX to items) will bake fades → we zero/restore fades around it.
+  -- 40601 (Render items to new take) won't bake fades and won't print TRACK FX.
+  local function get_apply_cmd(mode) return (mode=="multi") and ACT_APPLY_MULTI or ACT_APPLY_MONO end
+  local apply_cmd = get_apply_cmd(cfg.APPLY_FX_MODE)
 
   for _, it in ipairs(items) do
-    -- keep a handle to the original active take (pre-render)
+    -- original take and its name
     local tk_orig = r.GetActiveTake(it)
     local orig_name = ""
     if tk_orig then
       _, orig_name = r.GetSetMediaItemTakeInfo_String(tk_orig, "P_NAME", "", false)
     end
 
-    -- per-item: temporarily offline non-offline take FX when TAKE FX are excluded
+    -- volume snapshot BEFORE any processing
+    local pre_item_vol = r.GetMediaItemInfo_Value(it, "D_VOL") or 1.0
+
+    -- when TAKE FX excluded: temporarily offline only the online ones
     local snap_off = nil
     if tk_orig and not cfg.RENDER_TAKE_FX then
       snap_off = snapshot_takefx_offline(tk_orig)
@@ -822,6 +844,7 @@ function M.render_selection()
       if DBG >= 2 then dbg(DBG,2,"[TAKEFX] temp-offline %d FX on '%s'", n_off, orig_name) end
     end
 
+    -- compute window (handles + clamp)
     local L0, R0 = item_span(it)
     local name0  = get_take_name(it) or ""
     local d      = per_member_window_lr(it, L0, R0, HANDLE, HANDLE)
@@ -831,6 +854,7 @@ function M.render_selection()
           L0, R0, d.wantL, d.wantR, d.gotL, d.gotR, tostring(d.clampL), tostring(d.clampR), name0)
     end
 
+    -- optional #in/#out
     local hash_ids = nil
     if cfg.WRITE_MEDIA_CUES then
       hash_ids = add_hash_markers(L0, R0, 0)
@@ -847,42 +871,46 @@ function M.render_selection()
     end
     r.UpdateItemInProject(it)
 
-    -- render:
-    -- 若需要印 TRACK FX -> 用 40361/41993（會把 fades 烘進音檔），所以先 snapshot/清零，再還原
-    -- 若不需要印 TRACK FX -> 用 40601（不會烘入 fades，且只印 Take FX），無須處理 fades
+    -- render
     r.SelectAllMediaItems(0, false)
     r.SetMediaItemSelected(it, true)
     r.UpdateArrange()
 
     if cfg.RENDER_TRACK_FX then
-      -- 使用 40361/41993：Apply track/take FX to items（mono/multi）→ 會把 fades 一併 render
+      -- zero fades → apply (40361/41993) → restore fades
       local f_snap = snapshot_fades(it)
       zero_fades(it)
-      r.Main_OnCommand(apply_cmd, 0)  -- ← 40361 或 41993
+      r.Main_OnCommand(apply_cmd, 0)
       restore_fades(it, f_snap)
     else
-      -- 使用 40601：Render items to new take (preserve source type)
-      -- 不會烘入 fades、也不會印 Track FX；若 TAKE FX=0，本函式已暫時 offline 掉 take FX
+      -- 40601: render to new take, no track FX, no fades baked
       r.Main_OnCommand(40601, 0)
     end
 
-
+    -- clean up markers
     if hash_ids then
       remove_markers_by_ids(hash_ids)
       dbg(DBG,1,"[HASH] removed ids: %s, %s", tostring(hash_ids[1]), tostring(hash_ids[2]))
     end
 
-    -- restore item window and offset
+    -- restore window & offset
     local left_total = L0 - d.gotL
     if left_total < 0 then left_total = 0 end
     r.SetMediaItemInfo_Value(it, "D_POSITION", L0)
     r.SetMediaItemInfo_Value(it, "D_LENGTH",   R0 - L0)
-    local newtk = r.GetActiveTake(it)  -- now the freshly rendered take
+    local newtk = r.GetActiveTake(it)  -- freshly rendered take
     if newtk then r.SetMediaItemTakeInfo_Value(newtk, "D_STARTOFFS", left_total) end
     r.UpdateItemInProject(it)
 
-    -- gain: merge pre-render item vol into all older takes; then normalize item & new take
-    local pre_item_vol = r.GetMediaItemInfo_Value(it, "D_VOL") or 1.0
+    --------------------------------------------------------------------------
+    -- LEVELING:
+    -- REAPER bakes TAKE volume into the new audio but NOT ITEM volume.
+    -- So set new take's TAKE volume = previous ITEM volume to keep perceived level.
+    -- Then set ITEM volume to 1.0, and merge the same ITEM volume into all older takes.
+    --------------------------------------------------------------------------
+    if newtk then r.SetMediaItemTakeInfo_Value(newtk, "D_VOL", pre_item_vol or 1.0) end
+
+    -- merge pre item vol into all older takes (excluding the freshly rendered one)
     if pre_item_vol and math.abs(pre_item_vol - 1.0) > 1e-9 then
       local nt = r.GetMediaItemNumTakes(it) or 0
       local merged = 0
@@ -896,8 +924,8 @@ function M.render_selection()
       end
       if DBG >= 2 then dbg(DBG,2,"[GAIN] merged pre itemVol=%.3f into %d older take(s)", pre_item_vol, merged) end
     end
+    -- finally normalize item volume
     r.SetMediaItemInfo_Value(it, "D_VOL", 1.0)
-    if newtk then r.SetMediaItemTakeInfo_Value(newtk, "D_VOL", 1.0) end
 
     -- rename only the new rendered take
     rename_new_render_take(
@@ -908,14 +936,22 @@ function M.render_selection()
       DBG
     )
 
-    -- restore the original take's offline snapshot (do not touch bypass/enabled)
+    -- restore original take's offline snapshot
     if tk_orig and snap_off then
       local n_rest = restore_takefx_offline(tk_orig, snap_off)
       if DBG >= 2 then dbg(DBG,2,"[TAKEFX] restored %d FX on '%s'", n_rest, orig_name) end
     end
+
+    -- If TAKE FX were excluded, clone the original take's FX chain onto the new take
+    -- so the audition stays identical (chain states, bypass, and offline preserved).
+    if newtk and tk_orig and not cfg.RENDER_TAKE_FX then
+      clear_takefx_chain(newtk)
+      local n = clone_takefx_chain(tk_orig, newtk)
+      if DBG >= 1 then dbg(DBG,1,"[TAKEFX] cloned %d FX from orig → new take", n) end
+    end
   end
 
-  -- restore TRACK FX enabled states if we disabled them
+  -- restore TRACK FX enabled states
   if need_disable_track then
     for _, rec in pairs(tr_map) do
       local tr = rec.track
