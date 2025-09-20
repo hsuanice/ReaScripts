@@ -1,6 +1,6 @@
 --[[
 @description Render or Glue Items with Handles Core Library
-@version 250920_2027
+@version 250920_2049
 @author hsuanice
 @about
   Library for RGWH glue/render flows with handles, FX policies, rename, # markers, and optional take markers inside glued items.
@@ -294,20 +294,54 @@ local function strip_suffixes(base)
   return base, n, false, false
 end
 
-local function compute_new_name(op_mode, old_name, flags)
-  local base = old_name or "Take"
-  local stem, n_prev = strip_suffixes(base)
-  local suffix_print = nil
-  if     flags.takePrinted and flags.trackPrinted then suffix_print = "TakeFX_TrackFX"
-  elseif flags.takePrinted and not flags.trackPrinted then suffix_print = "TakeFX"
-  elseif (not flags.takePrinted) and flags.trackPrinted then suffix_print = "TrackFX"
+-- 把 -takefx / -trackfx 插在真正的音訊副檔名（.wav/.aif/.aiff/...）之前
+-- 若找不到副檔名，就附加在字串尾端。已存在就不重複加（冪等）。
+local _KNOWN_EXTS = { ".wav", ".aif", ".aiff", ".flac", ".mp3", ".ogg", ".wv", ".caf", ".m4a" }
+
+local function _split_name_by_audio_ext(nm)
+  if not nm or nm == "" then return "", "", "" end
+  local lower = string.lower(nm)
+  local s_best, e_best = nil, nil
+  for _, ext in ipairs(_KNOWN_EXTS) do
+    local s, e = 1, 0
+    while true do
+      s, e = lower:find(ext, e + 1, true)
+      if not s then break end
+      s_best, e_best = s, e
+    end
   end
-  local cnt_tag = (op_mode=="glue") and "glued" or "rendered"
-  local nextN   = (n_prev or 0) + 1
-  local final   = stem .. "-" .. cnt_tag .. tostring(nextN)
-  if suffix_print then final = final .. "-" .. suffix_print end
-  return final
+  if s_best then
+    -- stem | .ext | tail（例如 "foo" | ".wav" | "-rendered1-TrackFX"）
+    return nm:sub(1, s_best - 1), nm:sub(s_best, e_best), nm:sub(e_best + 1)
+  else
+    return nm, "", ""
+  end
 end
+
+local function _has_tag_in_stem(stem, tag)
+  if not stem or stem == "" then return false end
+  return stem:lower():find("-" .. tag:lower(), 1, true) ~= nil
+end
+
+local function _add_tag_once_in_stem(stem, tag)
+  if _has_tag_in_stem(stem, tag) then return stem end
+  return (stem or "") .. "-" .. tag
+end
+
+-- op 參數保留相容性；實際不再分 glue/render 模式
+function compute_new_name(op, oldn, flags)
+  local stem, ext, tail = _split_name_by_audio_ext(oldn or "")
+
+  local want_take  = flags and flags.takePrinted  == true
+  local want_track = flags and flags.trackPrinted == true
+
+  -- 固定順序：takefx → trackfx
+  if want_take  then stem = _add_tag_once_in_stem(stem, "takefx")  end
+  if want_track then stem = _add_tag_once_in_stem(stem, "trackfx") end
+
+  return stem .. ext .. tail
+end
+
 
 ------------------------------------------------------------
 -- FX utilities
