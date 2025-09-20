@@ -1,6 +1,6 @@
 --[[
 @description Render or Glue Items with Handles Core Library
-@version 250920_2358
+@version 250921_0126 fix 40361/41993 print fade issue
 @author hsuanice
 @about
   Library for RGWH glue/render flows with handles, FX policies, rename, # markers, and optional take markers inside glued items.
@@ -222,6 +222,39 @@ local function restore_takefx_offline(tk, snap)
     end
   end
   return cnt
+end
+
+-- -- Fade snapshot helpers -----------------------------------------
+local function snapshot_fades(it)
+  return {
+    inLen   = r.GetMediaItemInfo_Value(it, "D_FADEINLEN") or 0.0,
+    outLen  = r.GetMediaItemInfo_Value(it, "D_FADEOUTLEN") or 0.0,
+    inAuto  = r.GetMediaItemInfo_Value(it, "D_FADEINLEN_AUTO") or 0.0,
+    outAuto = r.GetMediaItemInfo_Value(it, "D_FADEOUTLEN_AUTO") or 0.0,
+    inShape = r.GetMediaItemInfo_Value(it, "C_FADEINSHAPE") or 0,
+    outShape= r.GetMediaItemInfo_Value(it, "C_FADEOUTSHAPE") or 0,
+    inDir   = r.GetMediaItemInfo_Value(it, "C_FADEINDIR") or 0.0,
+    outDir  = r.GetMediaItemInfo_Value(it, "C_FADEOUTDIR") or 0.0,
+  }
+end
+
+local function zero_fades(it)
+  r.SetMediaItemInfo_Value(it, "D_FADEINLEN", 0.0)
+  r.SetMediaItemInfo_Value(it, "D_FADEOUTLEN", 0.0)
+  r.SetMediaItemInfo_Value(it, "D_FADEINLEN_AUTO", 0.0)
+  r.SetMediaItemInfo_Value(it, "D_FADEOUTLEN_AUTO", 0.0)
+end
+
+local function restore_fades(it, f)
+  if not f then return end
+  r.SetMediaItemInfo_Value(it, "D_FADEINLEN",        f.inLen)
+  r.SetMediaItemInfo_Value(it, "D_FADEOUTLEN",       f.outLen)
+  r.SetMediaItemInfo_Value(it, "D_FADEINLEN_AUTO",   f.inAuto)
+  r.SetMediaItemInfo_Value(it, "D_FADEOUTLEN_AUTO",  f.outAuto)
+  r.SetMediaItemInfo_Value(it, "C_FADEINSHAPE",      f.inShape)
+  r.SetMediaItemInfo_Value(it, "C_FADEOUTSHAPE",     f.outShape)
+  r.SetMediaItemInfo_Value(it, "C_FADEINDIR",        f.inDir)
+  r.SetMediaItemInfo_Value(it, "C_FADEOUTDIR",       f.outDir)
 end
 
 ------------------------------------------------------------
@@ -758,7 +791,10 @@ function M.render_selection()
     dbg(DBG,1,"[RUN] Temporarily disabled TRACK FX (policy TRACK=0).")
   end
 
-  local cmd = (cfg.APPLY_FX_MODE=="multi") and ACT_APPLY_MULTI or ACT_APPLY_MONO
+  -- 40361/41993 = Item: Apply track/take FX to items (mono/multichannel) 會把 fades 一起烘進音檔
+  -- 40601       = Item: Render items to new take (preserve source type) 不會烘入 fades、也不會印 Track FX
+  local apply_cmd = get_apply_cmd(cfg)  -- 40361 or 41993（看 cfg.APPLY_FX_MODE）
+
 
   for _, it in ipairs(items) do
     -- keep a handle to the original active take (pre-render)
@@ -801,11 +837,25 @@ function M.render_selection()
     end
     r.UpdateItemInProject(it)
 
-    -- render (Apply FX to item)
+    -- render:
+    -- 若需要印 TRACK FX -> 用 40361/41993（會把 fades 烘進音檔），所以先 snapshot/清零，再還原
+    -- 若不需要印 TRACK FX -> 用 40601（不會烘入 fades，且只印 Take FX），無須處理 fades
     r.SelectAllMediaItems(0, false)
     r.SetMediaItemSelected(it, true)
     r.UpdateArrange()
-    r.Main_OnCommand(cmd, 0)
+
+    if cfg.RENDER_TRACK_FX then
+      -- 使用 40361/41993：Apply track/take FX to items（mono/multi）→ 會把 fades 一併 render
+      local f_snap = snapshot_fades(it)
+      zero_fades(it)
+      r.Main_OnCommand(apply_cmd, 0)  -- ← 40361 或 41993
+      restore_fades(it, f_snap)
+    else
+      -- 使用 40601：Render items to new take (preserve source type)
+      -- 不會烘入 fades、也不會印 Track FX；若 TAKE FX=0，本函式已暫時 offline 掉 take FX
+      r.Main_OnCommand(40601, 0)
+    end
+
 
     if hash_ids then
       remove_markers_by_ids(hash_ids)
