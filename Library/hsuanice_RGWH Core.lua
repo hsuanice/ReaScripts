@@ -1,6 +1,6 @@
 --[[
 @description Render or Glue Items with Handles Core Library
-@version 250920_1950
+@version 250920_2027
 @author hsuanice
 @about
   Library for RGWH glue/render flows with handles, FX policies, rename, # markers, and optional take markers inside glued items.
@@ -635,7 +635,29 @@ function M.render_selection()
     r.UpdateItemInProject(it)
 
     -- 減少重複增益：把 item volume 歸 1.0
-    r.SetMediaItemInfo_Value(it,"D_VOL", 1.0)
+    -- [GAIN] Merge pre-render item volume into old takes so switching takes stays level-matched
+    -- Read the item volume *before* we neutralize it.
+    local pre_item_vol = r.GetMediaItemInfo_Value(it, "D_VOL") or 1.0
+    local newtk = r.GetActiveTake(it)
+    if pre_item_vol and math.abs(pre_item_vol - 1.0) > 1e-9 then
+      local nt = r.GetMediaItemNumTakes(it) or 0
+      local merged = 0
+      for ti = 0, nt-1 do
+        local tk = r.GetTake(it, ti)
+        if tk and tk ~= newtk then
+          local tkvol = r.GetMediaItemTakeInfo_Value(tk, "D_VOL") or 1.0
+          r.SetMediaItemTakeInfo_Value(tk, "D_VOL", tkvol * pre_item_vol)
+          merged = merged + 1
+        end
+      end
+      if DBG > 0 then
+        dbg(DBG,2,"[GAIN] merged pre itemVol=%.3f into %d older take(s)", pre_item_vol, merged)
+      end
+    end
+
+    -- 接著把 item 以及「新 render 出來的 take」都歸一，避免雙重套用
+    r.SetMediaItemInfo_Value(it, "D_VOL", 1.0)
+    if newtk then r.SetMediaItemTakeInfo_Value(newtk, "D_VOL", 1.0) end
 
     local newname = compute_new_name("render", get_take_name(it), {
       takePrinted  = cfg.RENDER_TAKE_FX,
