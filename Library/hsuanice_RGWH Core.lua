@@ -1,6 +1,6 @@
 --[[
 @description Render or Glue Items with Handles Core Library
-@version 250921_0126 fix 40361/41993 print fade issue
+@version 250921_0205 fix glue in track fx 1 mode fade issue
 @author hsuanice
 @about
   Library for RGWH glue/render flows with handles, FX policies, rename, # markers, and optional take markers inside glued items.
@@ -609,6 +609,16 @@ local function glue_unit(tr, u, cfg)
 
   local glued_pre = find_item_by_span_on_track(tr, UL, UR, 0.002)
   if cfg.RENDER_TRACK_FX and glued_pre then
+    -- NOTE: 40361/41993 will print fades into audio; clear them on the
+    -- intermediate glued item, then rebuild edge fades later on final 'glued'.
+    -- 40361 Item: Apply track/take FX to items (mono output)
+    -- 41993 Item: Apply track/take FX to items (multichannel output)
+    r.SetMediaItemInfo_Value(glued_pre, "D_FADEINLEN",       0)
+    r.SetMediaItemInfo_Value(glued_pre, "D_FADEINLEN_AUTO",  0)
+    r.SetMediaItemInfo_Value(glued_pre, "D_FADEOUTLEN",      0)
+    r.SetMediaItemInfo_Value(glued_pre, "D_FADEOUTLEN_AUTO", 0)
+    r.UpdateItemInProject(glued_pre)
+
     apply_track_take_fx_to_item(glued_pre, cfg.APPLY_FX_MODE, DBG)
   end
   r.Main_OnCommand(ACT_TRIM_TO_TS, 0)
