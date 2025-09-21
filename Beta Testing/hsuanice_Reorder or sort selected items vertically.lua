@@ -1,6 +1,6 @@
 --[[
 @description ReaImGui - Vertical Reorder and Sort (items)
-@version 0.6.0 Remember last-used UI settings
+@version 250921_1732 Improve Channel and TrackName copy to sort
 @author hsuanice
 @about
   Provides three vertical re-arrangement modes for selected items (stacked UI):
@@ -27,40 +27,20 @@
 
 
 
+
 @changelog
-  v0.6.0
-  - Preferences: Remember last-used UI settings via ExtState (persisted across sessions):
-    • Sort key (Take/File/Metadata)
-    • Ascending toggle
-    • Metadata sort key (Track Name / Channel)
-    • TCP naming (Track Name / Channel# / Channel# — Track Name)
-    • Group order (Track Name / Channel)
-  v0.5.7.1
-    - Copy-to-Sort: Keep the insertion behavior introduced in v0.5.7.
-      • New tracks are inserted immediately after the last selected track.
-      • Folder context is preserved: if the last selected track is a folder
-        parent, new tracks become its children; if it is inside a folder,
-        new tracks remain inside that folder.
-    - Note: Insertion point selection is deferred. There is currently no UI
-      to choose the insertion location (by design for this version).
-  v0.5.7
-    - Copy-to-Sort: New tracks are now inserted immediately after the last
-      selected track (instead of always at the project end).
-      • If the last selected track is a folder parent, new tracks become its child tracks.
-      • If the last selected track is inside a folder, new tracks remain in that folder.
-    - Note: Insertion point is not yet configurable. Currently, the only
-      supported behavior is "after last selected track".
-  v0.5.6.1
-    - UI: Simplified Copy-to-Sort "TCP naming" section.
-      • Removed the "(grouping)" suffix.
-      • Now offers three explicit choices:
-          1) Track Name
-          2) Channel#
-          3) Channel# — Track Name
-      • This replaces the previous "Append most-frequent Track Name" checkbox.
-    - Behavior: Selecting "Channel# — Track Name" automatically appends the most
-      common Track Name to each Channel# label (e.g., "Ch 03 — BOOM1").
-    - No change to insertion behavior yet (new tracks are still added at project end).
+  v250921_1732
+    - Copy-to-Sort: decoupled "TCP naming (grouping)" from "Group order".
+      • You can name new tracks by Track Name while ordering groups by Channel#, or vice versa.
+      • When naming by Channel#, the option is now "Append Track Name to TCP label".
+        Enabling it no longer just appends the most-frequent Track Name —
+        it **splits each Channel# into separate tracks by Track Name**,
+        e.g.:
+          Ch 09 — BASS
+          Ch 09 — PRODUCER
+    - UI: Added separate radio groups for TCP naming and Group order in Metadata section.
+    - Removed legacy two-arg signature; all callsites updated to the new 4-arg form.
+
   v0.5.6.0
     - Copy-to-Sort: decoupled "TCP naming (grouping)" from "Group order".
       • You can name new tracks by Track Name while ordering groups by Channel#, or vice versa.
@@ -282,23 +262,7 @@ end
 
 
 -- 記憶使用者偏好（你現有的 CAPTURE_ON / set_capture_enabled 保留）
--- === Preferences (ExtState) — persist UI choices ===
-local PREF_NS = "hsuanice_ReorderPrefs"
-local function pref_get_int(key, default)
-  local v = tonumber(reaper.GetExtState(PREF_NS, key))
-  if v == nil then return default end
-  return v
-end
-local function pref_get_bool(key, default)
-  local s = reaper.GetExtState(PREF_NS, key)
-  if s == "" then return default end
-  if s == "1" then return true elseif s == "0" then return false end
-  return default
-end
-local function pref_set(key, val)
-  reaper.SetExtState(PREF_NS, key, tostring(val), true) -- persistent
-end
-
+-- ...
 
 
 -- 複製單一 item 到指定軌道（保留位置/長度/靜音/顏色/音量/淡入淡出；複製「現用 take」的來源與參數）
@@ -673,10 +637,11 @@ local snapshot_rows_tsv
 -- Copy-to-New-Tracks：核心
 ---------------------------------------
 
--- name_mode  : 1=Track Name；2=Channel#；3=Channel# — Track Name（附最常見 Track Name）
--- order_mode : 1=Track Name；2=Channel#
--- asc        : true=升冪, false=降冪
-local function run_copy_to_new_tracks(name_mode, order_mode, asc)
+-- name_mode  : 1=Track Name（以 Track Name 命名新 TCP & 依此分組），2=Channel#
+-- order_mode : 1=Track Name（群組排序依名稱），2=Channel#
+-- asc        : true=Ascending, false=Descending
+-- append_secondary : 若 name_mode=2（Channel#命名），於 TCP 名稱後附加最常見 Track Name
+local function run_copy_to_new_tracks(name_mode, order_mode, asc, append_secondary)
   -- 1) 請 Monitor 先抓 BEFORE
   request_capture("before")
 
@@ -691,8 +656,15 @@ local function run_copy_to_new_tracks(name_mode, order_mode, asc)
     f.__chan_index = idx
     local name = tostring(META.expand("${trk}",   f, nil, false) or "")
     local ch   = tonumber(META.expand("${chnum}", f, nil, false) or idx) or idx
-    rows[#rows+1] = { it = it, name = name, ch = ch }
+    local tk   = take_of(it)
+    local tkn  = ""
+    if tk then
+      local _, nm = reaper.GetSetMediaItemTakeInfo_String(tk, "P_NAME", "", false)
+      tkn = nm or ""
+    end
+    rows[#rows+1] = { it = it, name = name, ch = ch, take = tkn }
   end
+
 
   -- 排序鍵工具
   local function natural_key(s)
@@ -735,7 +707,7 @@ local function run_copy_to_new_tracks(name_mode, order_mode, asc)
       glabel = channel_label(gkey)
     end
 
-    -- 群組排序鍵
+    -- 主軸的排序鍵
     local ord_key
     if order_mode == 1 then
       ord_key = "N|" .. natural_key(r.name ~= "" and r.name or "(unnamed)")
@@ -743,25 +715,32 @@ local function run_copy_to_new_tracks(name_mode, order_mode, asc)
       ord_key = string.format("C|%09d", tonumber(r.ch) or 999)
     end
 
-    local g = ensure_group(gkey, glabel, ord_key)
+    -- 副軸（隱式）：當以 Channel# 命名且勾選 Append Track Name → 依 Track Name 拆分
+    local skey, slabel = "", ""
+    if name_mode == 2 and append_secondary then
+      local sub = tostring(r.name or "")
+      skey   = "\0" .. sub
+      slabel = (sub ~= "" and (" — " .. sub) or " — (name)")
+      -- 同群之間的次序：主軸 ord_key 後再接自然鍵，維持嚴格弱序
+      ord_key = ord_key .. "|S|" .. natural_key(sub)
+    end
+
+    -- 組合群組鍵與標籤
+    local comb_key   = tostring(gkey) .. skey
+    local comb_label = tostring(glabel) .. slabel
+
+    local g = ensure_group(comb_key, comb_label, ord_key)
     g.items[#g.items+1] = r.it
     if r.name and r.name ~= "" then
       g.name_hist[r.name] = (g.name_hist[r.name] or 0) + 1
     end
+
   end
 
-  -- Mode 3 Channel# —— Track Name
-  if name_mode == 3 then
-    for _, g in ipairs(order) do
-      local top_name, top_cnt = nil, -1
-      for nm, cnt in pairs(g.name_hist) do
-        if cnt > top_cnt then top_cnt = cnt; top_name = nm end
-      end
-      if top_name and top_name ~= "" then
-        g.label = string.format("%s — %s", g.label, top_name)
-      end
-    end
-  end
+  -- 當以 Channel# 命名且勾選 Append Track Name 時，已依 Track Name 拆分到不同新軌，
+  -- 不需要再追加「最常見 Track Name」到標籤（避免重複/誤導）
+  -- [no-op]
+
 
   -- 4) 依 ord 排序群組（嚴格弱序）
   local function ord_lt(a, b)
@@ -775,42 +754,13 @@ local function run_copy_to_new_tracks(name_mode, order_mode, asc)
     table.sort(order, function(x, y) return ord_lt(y, x) end)
   end
 
-  -- 取得最後選取的軌（沒有選取軌就 fallback 到 items 所在軌）
-  local function last_selected_track_index(rows)
-    local _, order = get_selected_tracks_set()
-    if #order > 0 then
-      return track_index(order[#order])  -- 1-based
-    end
-    -- 沒選取任何軌，就從 rows 抓最高的那條軌當 fallback
-    local idx = 0
-    for _, r in ipairs(rows or {}) do
-      local tr = item_track(r.it)
-      if tr then idx = math.max(idx, track_index(tr)) end
-    end
-    return idx  -- 1-based；0 表示找不到
-  end
-
-  -- 設定插入基準 base（0-based）
-  local base
-  if ins_mode == 2 then
-    -- 2) At project end（舊行為）
-    base = reaper.CountTracks(0)
-  else
-    -- 1) After selected tracks（永遠接在最後選取軌後面）
-    local anchor_idx = last_selected_track_index(rows)  -- 1-based
-    if anchor_idx > 0 then
-      base = anchor_idx          -- 轉為 0-based 的「插在 anchor 後面」
-    else
-      base = reaper.CountTracks(0)  -- 沒有任何選取或 rows，退回專案尾端
-    end
-  end
-
-  -- === track allocator (create-once by label) ===
+  -- 5) 建新軌並複製
+  local base = reaper.CountTracks(0)
   local existing, created = {}, {}
   local function ensure_track(label)
     local tr = existing[label]
     if tr then return tr end
-    reaper.InsertTrackAtIndex(base + #created, true)    -- 以 base 為錨，連續插入
+    reaper.InsertTrackAtIndex(base + #created, true)
     tr = reaper.GetTrack(0, base + #created)
     set_track_name(tr, label)
     existing[label] = tr
@@ -853,15 +803,14 @@ end
 -- UI / Engine 狀態
 ---------------------------------------
 local STATE, MODE, EXIT = "confirm", nil, false
--- Persisted UI prefs
-local sort_key_idx  = pref_get_int("sort_key_idx", 1)           -- 1=Take name, 2=File name, 3=Metadata
-local sort_asc      = pref_get_bool("sort_asc", true)           -- true=Ascending
-local meta_sort_mode= pref_get_int("meta_sort_mode", 1)         -- 1=Track Name, 2=Channel Number
--- TCP naming / Group order
--- meta_name_mode: 1=Track Name, 2=Channel#, 3=Channel# — Track Name
-local meta_name_mode  = pref_get_int("meta_name_mode", 1)
--- meta_order_mode: 1=Track Name, 2=Channel#
-local meta_order_mode = pref_get_int("meta_order_mode", 1)
+local sort_key_idx, sort_asc = 1, true -- 預設 Take name
+local meta_sort_mode = 1 -- 1=Track Name, 2=Channel Number
+
+-- 🆕 Decouple naming vs ordering for "Copy to Sort"
+local meta_name_mode  = 1  -- 1=Track Name (TCP naming & grouping), 2=Channel#
+local meta_order_mode = 1  -- 1=Track Name (group order),           2=Channel#
+-- [removed] meta_sub_mode no longer used (implicit subgroup via checkbox)
+local meta_append_secondary = true  -- when naming by Channel#, split by Track Name (label "Ch NN — <TrackName>")
 
 
 local SELECTED_ITEMS, SELECTED_SET = {}, {}
@@ -1108,27 +1057,19 @@ local function draw_confirm()
   -- Sort key 選項
   local labels = { "Take name", "File name", "Metadata" }
   for i=1,3 do
-    if reaper.ImGui_RadioButton(ctx, labels[i], sort_key_idx==i) then
-      sort_key_idx = i
-      pref_set("sort_key_idx", i)
-    end
+    if reaper.ImGui_RadioButton(ctx, labels[i], sort_key_idx==i) then sort_key_idx=i end
     if i<3 then reaper.ImGui_SameLine(ctx) end
   end
-
-  local changed, asc_chk = reaper.ImGui_Checkbox(ctx, "Ascending", sort_asc)
-  if changed then
-    sort_asc = asc_chk
-    pref_set("sort_asc", asc_chk and "1" or "0")
-  end
+  local _, asc_chk = reaper.ImGui_Checkbox(ctx, "Ascending", sort_asc); sort_asc = asc_chk
 
   if sort_key_idx==3 then
     -- ---- Metadata 子選項（分離命名與排序）----
     reaper.ImGui_Spacing(ctx)
     reaper.ImGui_Text(ctx, "Sort by Metadata (engine key):")
     reaper.ImGui_SameLine(ctx)
-    if reaper.ImGui_RadioButton(ctx, "Track Name##key", meta_sort_mode==1) then meta_sort_mode=1; pref_set("meta_sort_mode", 1) end
+    if reaper.ImGui_RadioButton(ctx, "Track Name##key", meta_sort_mode==1) then meta_sort_mode=1 end
     reaper.ImGui_SameLine(ctx)
-    if reaper.ImGui_RadioButton(ctx, "Channel##key",   meta_sort_mode==2) then meta_sort_mode=2; pref_set("meta_sort_mode", 2) end
+    if reaper.ImGui_RadioButton(ctx, "Channel##key",   meta_sort_mode==2) then meta_sort_mode=2 end
 
     -- ★ 主按鈕放在這裡（Preview 上方）
     reaper.ImGui_Spacing(ctx)
@@ -1143,31 +1084,33 @@ local function draw_confirm()
       SUMMARY = ("Completed. Items=%d, Moved=%d, Skipped=%d."):format(TOTAL, MOVED, SKIPPED)
       WANT_POPUP = true
     end
-
-
-    -- Copy-to-Sort — TCP naming
-    reaper.ImGui_Text(ctx, "TCP naming:")
     reaper.ImGui_SameLine(ctx)
-    if reaper.ImGui_RadioButton(ctx, "Track Name##nm", meta_name_mode==1) then meta_name_mode=1; pref_set("meta_name_mode", 1) end
+
+    -- 🆕 Copy-to-Sort 的「TCP命名」與「群組排序」
+    reaper.ImGui_Spacing(ctx)
+    reaper.ImGui_Text(ctx, "Copy-to-Sort — TCP naming (grouping):")
     reaper.ImGui_SameLine(ctx)
-    if reaper.ImGui_RadioButton(ctx, "Channel##nm",    meta_name_mode==2) then meta_name_mode=2; pref_set("meta_name_mode", 2) end
+    if reaper.ImGui_RadioButton(ctx, "Track Name##nm", meta_name_mode==1) then meta_name_mode=1 end
     reaper.ImGui_SameLine(ctx)
-    if reaper.ImGui_RadioButton(ctx, "Channel# — Track Name##nm", meta_name_mode==3) then meta_name_mode=3; pref_set("meta_name_mode", 3) end
+    if reaper.ImGui_RadioButton(ctx, "Channel##nm",    meta_name_mode==2) then meta_name_mode=2 end
 
-    -- Group order
-    reaper.ImGui_Text(ctx, "Group order:")
+    reaper.ImGui_Text(ctx, "Copy-to-Sort — Group order:")
     reaper.ImGui_SameLine(ctx)
-    if reaper.ImGui_RadioButton(ctx, "Track Name##ord", meta_order_mode==1) then meta_order_mode=1; pref_set("meta_order_mode", 1) end
+    if reaper.ImGui_RadioButton(ctx, "Track Name##ord", meta_order_mode==1) then meta_order_mode=1 end
     reaper.ImGui_SameLine(ctx)
-    if reaper.ImGui_RadioButton(ctx, "Channel##ord",    meta_order_mode==2) then meta_order_mode=2; pref_set("meta_order_mode", 2) end
+    if reaper.ImGui_RadioButton(ctx, "Channel##ord",    meta_order_mode==2) then meta_order_mode=2 end
 
+    -- 🆕 當以 Channel# 命名新 TCP 時，附加最常見 Track Name
+    if meta_name_mode == 2 then
+      local chg, v = reaper.ImGui_Checkbox(ctx, "Append Track Name to TCP label (e.g., 'Ch 03 — BOOM1')", meta_append_secondary)
+      if chg then meta_append_secondary = v end
+    end
 
-
-
+    reaper.ImGui_Spacing(ctx)
 
     -- 🆕 Copy to Sort：帶入命名軸與排序軸
     if reaper.ImGui_Button(ctx, "Copy to Sort", 108, 26) then
-      local res = run_copy_to_new_tracks(meta_name_mode, meta_order_mode, sort_asc)
+      local res = run_copy_to_new_tracks(meta_name_mode, meta_order_mode, sort_asc, meta_append_secondary)
       if res then
         SUMMARY = string.format(
           "Copy to Sort — Done.\nTracks created: %d\nItems copied: %d\nOverlaps detected: %d",
