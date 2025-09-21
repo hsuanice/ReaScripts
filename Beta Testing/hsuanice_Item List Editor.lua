@@ -1,6 +1,6 @@
 --[[
 @description Item List Editor
-@version 250921_1229 fix reorder console output
+@version 250921_1413 try dixing reorder ID not ok yet
 @author hsuanice
 @about
   Shows a live, spreadsheet-style table of the currently selected items and all
@@ -1180,46 +1180,12 @@ local function get_cell_text(i, r, col, fmt)
   return ""
 end
 
--- 解析剪貼簿文字成 2D 陣列（TSV / 簡單 CSV）
-local function parse_clipboard_table(text)
-  text = tostring(text or "")
-  if text == "" then return {} end
-  local rows = {}
-  text = text:gsub("\r\n", "\n"):gsub("\r", "\n")
-  for line in (text.."\n"):gmatch("([^\n]*)\n") do
-    if line == "" then
-      rows[#rows+1] = {""}
-    else
-      local cols = {}
-      -- 先試 TSV
-      for c in (line.."\t"):gmatch("([^\t]*)\t") do cols[#cols+1] = c end
-      -- 若只有 1 欄且含逗號，視為簡單 CSV
-      if #cols == 1 and line:find(",") then
-        cols = {}
-        for c in (line..","):gmatch("([^,]*),") do cols[#cols+1] = (c or ""):gsub('^"(.*)"$','%1'):gsub('""','"') end
-      end
-      rows[#rows+1] = cols
-    end
-  end
-  return rows
-end
+
 
 -- Delegate to Library: return visible rows (honors Show muted items toggle)
 local function get_view_rows()
   return LT.filter_rows(ROWS, { show_muted = SHOW_MUTED_ITEMS })
 end
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 
@@ -1273,6 +1239,14 @@ local function current_start_label()
   else return "Start (s)" end
 end
 
+local function current_end_label()
+  if TIME_MODE == TFLib.MODE.MS      then return "End (m:s)"
+  elseif TIME_MODE == TFLib.MODE.TC  then return "End (TC)"
+  elseif TIME_MODE == TFLib.MODE.BEATS then return "End (Beats)"
+  elseif TIME_MODE == TFLib.MODE.CUSTOM then return ("End (%s)"):format(CUSTOM_PATTERN or "")
+  else return "End (s)" end
+end
+
 
 local function label_for_id(id)
   if id == 12 then return current_start_label()
@@ -1304,47 +1278,53 @@ end
 -- 讀取「顯示欄位順序」→ COL_ORDER / COL_POS
 -- COL_ORDER[display_pos] = logical_col_id
 -- COL_POS[logical_col_id] = display_pos
--- 這個函式放在 Editor 檔案頂層（有 ctx 與 _colid_from_label 可用的範圍）
-local function rebuild_display_mapping()
-  -- 用 Library 的：回傳顯示序 → 邏輯 id 映射 & 反向位置表
-  COL_ORDER, COL_POS = LT.rebuild_display_mapping(ctx, _colid_from_label)
+local __last_dump = nil
+local function orders_differ(a, b)
+  if not a or not b or #a ~= #b then return true end
+  for i=1,#a do if a[i] ~= b[i] then return true end end
+  return false
+end
 
-  -- 可選：Debug 輸出一次，確認真的會變
-  -- Debug：只在順序真正「變化」時輸出一次（避免每幀刷 Console）
-  if COL_ORDER and dump_order_once then
-    dump_order_once()
+local function dump_order_if_changed(tag)
+  local parts = {}
+  for i,id in ipairs(COL_ORDER or {}) do parts[#parts+1] = string.format("%d:%s", i, tostring(id)) end
+  local s = "["..(tag or "ORDER").."] "..table.concat(parts, ", ")
+  if s ~= __last_dump then
+    reaper.ShowConsoleMsg(s.."\n")
+    __last_dump = s
   end
+end
 
+local function rebuild_display_mapping()
+  -- 先給個穩定長度
   local cnt = reaper.ImGui_TableGetColumnCount(ctx) or 0
+  local old = {}
+  for i=1,#(COL_ORDER or {}) do old[i] = COL_ORDER[i] end
+
+  COL_ORDER, COL_POS = {}, {}
   for display_pos = 0, cnt - 1 do
-    -- 先把「目前欄位」切到畫面上的第 display_pos 個
-    reaper.ImGui_TableSetColumnIndex(ctx, display_pos)
-    -- 直接用「當前欄」拿欄名（-1 表示 current column）
-    local label = reaper.ImGui_TableGetColumnName(ctx, -1) or ""
-    local id = _colid_from_label(label)
+    -- 直接用帶 index 的 API，避免切換 current column 造成讀值落在舊狀態
+    local label = reaper.ImGui_TableGetColumnName(ctx, display_pos) or ""
+    local id    = _colid_from_label(label)
     if id then
       COL_ORDER[display_pos + 1] = id
       COL_POS[id] = display_pos + 1
     end
   end
-  -- 萬一讀不到就回退固定順序
+
+  -- 讀不到就回退固定順序（保險）
   if #COL_ORDER == 0 then
-    COL_ORDER = {1,2,3,4,5,6,7,8,9,10,11,12,13}
-    COL_POS = {}
-    for i, id in ipairs(COL_ORDER) do COL_POS[id] = i end
+    COL_ORDER = {1,2,3,12,13,4,5,6,7,8,9,10,11}  -- 你的預設（與畫表頭一致）
+    COL_POS = {}; for i,id in ipairs(COL_ORDER) do COL_POS[id] = i end
+  end
+
+  if orders_differ(COL_ORDER, old) then
+    dump_order_if_changed("ORDER")
   end
 end
 
 
--- 來源 2D 形狀：回傳 rows, cols（以各列最大欄數為寬）
-local function src_shape_dims(tbl)
-  local rows = #tbl
-  local cols = 0
-  for i = 1, rows do
-    if #tbl[i] > cols then cols = #tbl[i] end
-  end
-  return rows, cols
-end
+
 
 -- 依「來源形狀」與「單一錨點（選到的一格）」產生展開後的目標格清單（行優先、左到右）
 local function build_dst_by_anchor_and_shape(rows, anchor_desc, src_rows, src_cols)
@@ -1401,17 +1381,7 @@ local function build_dst_spill_writable(rows, anchor_desc, src_rows, src_cols)
 end
 
 
--- 扁平化來源：把剪貼簿解析結果 (2D) 依「行優先、左到右」展開成一維
-local function flatten_tsv_to_list(tbl)
-  local list = {}
-  for i = 1, #tbl do
-    local row = tbl[i]
-    for j = 1, #row do
-      list[#list+1] = _trim(row[j] or "")
-    end
-  end
-  return list
-end
+
 
 -- === Undo/Redo 選取保護（以 GUID 快照） ===
 local function _snapshot_selected_item_guids()
@@ -1849,6 +1819,7 @@ local function draw_table(rows, height)
             | TF('ImGui_TableFlags_Resizable')  
             | TF('ImGui_TableFlags_Reorderable')   -- 允許拖曳重排欄位            
   -- 依目前 ACTIVE_PRESET 生成唯一表格 ID，避免 ImGui 重用舊排序
+  -- 原本：local table_id = "items_" . ((ACTIVE_PRESET and ACTIVE_PRESET ~= "" and ACTIVE_PRESET) or "default")
   local table_id = "items_" .. ((ACTIVE_PRESET and ACTIVE_PRESET ~= "" and ACTIVE_PRESET) or "default")
   if reaper.ImGui_BeginTable(ctx, table_id, 13, flags, -FLT_MIN, height or 360) then
     -- 先定義一個 helper（若檔案裡還沒有）
@@ -1869,12 +1840,7 @@ local function draw_table(rows, height)
     -- 表頭
     reaper.ImGui_TableHeadersRow(ctx)
 
-    -- 先重建一遍（需要先知道目前視覺→邏輯）
-    rebuild_display_mapping()
-
-
-
-    -- 這裡立刻重算顯示→邏輯的映射
+    -- 重建一次顯示→邏輯的映射
     rebuild_display_mapping()
 
 
