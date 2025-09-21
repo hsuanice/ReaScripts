@@ -1,6 +1,6 @@
 --[[
 @description Render or Glue Items with Handles Core Library
-@version 250921_1053 fixed trackfx = 0 render fade issue
+@version 250921_1237 fix rename code untidy
 @author hsuanice
 @about
   Library for RGWH glue/render flows with handles, FX policies, rename, # markers, and optional take markers inside glued items.
@@ -424,6 +424,7 @@ local function remove_markers_by_ids(ids)
   for _,id in ipairs(ids) do r.DeleteProjectMarker(proj, id, false) end
 end
 
+--[[
 ------------------------------------------------------------
 -- Rename helpers
 ------------------------------------------------------------
@@ -485,7 +486,7 @@ function compute_new_name(op, oldn, flags)
 
   return stem .. ext .. tail
 end
-
+]]--
 
 ------------------------------------------------------------
 -- FX utilities
@@ -654,15 +655,13 @@ local function glue_unit(tr, u, cfg)
       end
     end
 
-    -- 重新命名
-    local flags = { takePrinted=cfg.RENDER_TAKE_FX, trackPrinted=cfg.RENDER_TRACK_FX }
-    local oldn  = get_take_name(glued)
-    local op    = (cfg.RENAME_OP_MODE=="auto") and "glue" or cfg.RENAME_OP_MODE
-    local newn  = compute_new_name(op, oldn, flags)
-    set_take_name(glued, newn)
+    -- [GLUE NAME] Do not rename glued items; let REAPER auto-name (e.g. "...-glued-XX").
+    -- (Intentionally no-op here to preserve REAPER's default glued naming.)
+    -- dbg(DBG,2,"[NAME] Skip renaming glued item; keep REAPER's default.")
 
-    dbg(DBG,1,"       post-glue: trimmed to [%.3f..%.3f], offs=%.3f (L=%.3f R=%.3f)  name='%s' → '%s'",
-      u.start, u.finish, left_total, left_total, right_total, oldn or "", newn or "")
+
+    dbg(DBG,1,"       post-glue: trimmed to [%.3f..%.3f], offs=%.3f (L=%.3f R=%.3f)",
+      u.start, u.finish, left_total, left_total, right_total)
   else
     dbg(DBG,1,"       WARNING: glued item not found by span (UL=%.3f UR=%.3f)", UL, UR)
   end
