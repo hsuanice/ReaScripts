@@ -1,6 +1,6 @@
 --[[
 @description ReaImGui - Vertical Reorder and Sort (items)
-@version 250921_1732 Improve Channel and TrackName copy to sort
+@version 250921_1819 ExtState memory
 @author hsuanice
 @about
   Provides three vertical re-arrangement modes for selected items (stacked UI):
@@ -29,6 +29,18 @@
 
 
 @changelog
+  v250921_1819
+    - Preferences are now persisted via ExtState:
+      • Sort key (Take/File/Metadata) and Asc/Desc.
+      • Metadata sort key (Track Name / Channel#).
+      • Copy-to-Sort naming (Track Name / Channel#).
+      • Copy-to-Sort group order (Track Name / Channel#).
+      • Copy-to-Sort “Append Track Name” option.
+    - All changes in the UI are saved immediately with save_pref(),
+      and reloaded at startup with load_pref().
+    - Result: user selections are remembered across script restarts
+      and REAPER sessions, no need to reselect every time.
+
   v250921_1732
     - Copy-to-Sort: decoupled "TCP naming (grouping)" from "Group order".
       • You can name new tracks by Track Name while ordering groups by Channel#, or vice versa.
@@ -248,6 +260,22 @@ local function request_capture(tag, timeout_sec)
   return false  -- 超時也放行，不阻塞工作流
 end
 
+-- === Persist user preferences ===
+local PREF_NS = "hsuanice_ReorderSort_Prefs"
+
+local function save_pref(key, val)
+  reaper.SetExtState(PREF_NS, key, tostring(val or ""), true)
+end
+local function load_pref(key, default)
+  local v = reaper.GetExtState(PREF_NS, key)
+  if v == "" then return default end
+  if v == "true" then return true
+  elseif v == "false" then return false
+  else
+    local num = tonumber(v)
+    return num or v
+  end
+end
 
 -- === Monitor auto-capture preference ===
 local CAPTURE_ON = (reaper.GetExtState(SIG_NS, "enable") == "1")
@@ -803,14 +831,13 @@ end
 -- UI / Engine 狀態
 ---------------------------------------
 local STATE, MODE, EXIT = "confirm", nil, false
-local sort_key_idx, sort_asc = 1, true -- 預設 Take name
-local meta_sort_mode = 1 -- 1=Track Name, 2=Channel Number
+local sort_key_idx    = load_pref("sort_key_idx", 1)
+local sort_asc        = load_pref("sort_asc", true)
+local meta_sort_mode  = load_pref("meta_sort_mode", 1)
 
--- 🆕 Decouple naming vs ordering for "Copy to Sort"
-local meta_name_mode  = 1  -- 1=Track Name (TCP naming & grouping), 2=Channel#
-local meta_order_mode = 1  -- 1=Track Name (group order),           2=Channel#
--- [removed] meta_sub_mode no longer used (implicit subgroup via checkbox)
-local meta_append_secondary = true  -- when naming by Channel#, split by Track Name (label "Ch NN — <TrackName>")
+local meta_name_mode  = load_pref("meta_name_mode", 1)
+local meta_order_mode = load_pref("meta_order_mode", 1)
+local meta_append_secondary = load_pref("meta_append_secondary", true)
 
 
 local SELECTED_ITEMS, SELECTED_SET = {}, {}
@@ -1057,19 +1084,32 @@ local function draw_confirm()
   -- Sort key 選項
   local labels = { "Take name", "File name", "Metadata" }
   for i=1,3 do
-    if reaper.ImGui_RadioButton(ctx, labels[i], sort_key_idx==i) then sort_key_idx=i end
+    if reaper.ImGui_RadioButton(ctx, labels[i], sort_key_idx==i) then
+      sort_key_idx=i
+      save_pref("sort_key_idx", sort_key_idx)
+    end
     if i<3 then reaper.ImGui_SameLine(ctx) end
   end
-  local _, asc_chk = reaper.ImGui_Checkbox(ctx, "Ascending", sort_asc); sort_asc = asc_chk
+  local chg_asc, asc_chk = reaper.ImGui_Checkbox(ctx, "Ascending", sort_asc)
+  if chg_asc then
+    sort_asc = asc_chk
+    save_pref("sort_asc", sort_asc)
+  end
 
   if sort_key_idx==3 then
     -- ---- Metadata 子選項（分離命名與排序）----
     reaper.ImGui_Spacing(ctx)
     reaper.ImGui_Text(ctx, "Sort by Metadata (engine key):")
     reaper.ImGui_SameLine(ctx)
-    if reaper.ImGui_RadioButton(ctx, "Track Name##key", meta_sort_mode==1) then meta_sort_mode=1 end
+    if reaper.ImGui_RadioButton(ctx, "Track Name##key", meta_sort_mode==1) then
+      meta_sort_mode=1
+      save_pref("meta_sort_mode", meta_sort_mode)
+    end
     reaper.ImGui_SameLine(ctx)
-    if reaper.ImGui_RadioButton(ctx, "Channel##key",   meta_sort_mode==2) then meta_sort_mode=2 end
+    if reaper.ImGui_RadioButton(ctx, "Channel##key",   meta_sort_mode==2) then
+      meta_sort_mode=2
+      save_pref("meta_sort_mode", meta_sort_mode)
+    end
 
     -- ★ 主按鈕放在這裡（Preview 上方）
     reaper.ImGui_Spacing(ctx)
@@ -1090,20 +1130,36 @@ local function draw_confirm()
     reaper.ImGui_Spacing(ctx)
     reaper.ImGui_Text(ctx, "Copy-to-Sort — TCP naming (grouping):")
     reaper.ImGui_SameLine(ctx)
-    if reaper.ImGui_RadioButton(ctx, "Track Name##nm", meta_name_mode==1) then meta_name_mode=1 end
+    if reaper.ImGui_RadioButton(ctx, "Track Name##nm", meta_name_mode==1) then
+      meta_name_mode=1
+      save_pref("meta_name_mode", meta_name_mode)
+    end
     reaper.ImGui_SameLine(ctx)
-    if reaper.ImGui_RadioButton(ctx, "Channel##nm",    meta_name_mode==2) then meta_name_mode=2 end
+    if reaper.ImGui_RadioButton(ctx, "Channel##nm",    meta_name_mode==2) then
+      meta_name_mode=2
+      save_pref("meta_name_mode", meta_name_mode)
+    end
 
     reaper.ImGui_Text(ctx, "Copy-to-Sort — Group order:")
     reaper.ImGui_SameLine(ctx)
-    if reaper.ImGui_RadioButton(ctx, "Track Name##ord", meta_order_mode==1) then meta_order_mode=1 end
+    if reaper.ImGui_RadioButton(ctx, "Track Name##ord", meta_order_mode==1) then
+      meta_order_mode=1
+      save_pref("meta_order_mode", meta_order_mode)
+    end
     reaper.ImGui_SameLine(ctx)
-    if reaper.ImGui_RadioButton(ctx, "Channel##ord",    meta_order_mode==2) then meta_order_mode=2 end
+    if reaper.ImGui_RadioButton(ctx, "Channel##ord",    meta_order_mode==2) then
+      meta_order_mode=2
+      save_pref("meta_order_mode", meta_order_mode)
+    end
 
     -- 🆕 當以 Channel# 命名新 TCP 時，附加最常見 Track Name
     if meta_name_mode == 2 then
       local chg, v = reaper.ImGui_Checkbox(ctx, "Append Track Name to TCP label (e.g., 'Ch 03 — BOOM1')", meta_append_secondary)
-      if chg then meta_append_secondary = v end
+      if chg then
+        meta_append_secondary = v
+        save_pref("meta_append_secondary", meta_append_secondary)
+      end
+
     end
 
     reaper.ImGui_Spacing(ctx)
