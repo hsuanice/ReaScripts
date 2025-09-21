@@ -1,6 +1,6 @@
 --[[
 @description Render or Glue Items with Handles Core Library
-@version 250921_1400 reduce UpdateItemInProject
+@version 250921_1512 Dependent fx toggle for glue and render
 @author hsuanice
 @about
   Library for RGWH glue/render flows with handles, FX policies, rename, # markers, and optional take markers inside glued items.
@@ -30,10 +30,14 @@ local DEFAULTS = {
   EPSILON_MODE       = "frames",
   EPSILON_VALUE      = 0.5,
   DEBUG_LEVEL        = 1,
-  -- FX policies:
-  RENDER_TAKE_FX     = 0,      -- 1=保留/印入 take FX；0=Glue 前先移除 take FX
-  RENDER_TRACK_FX    = 0,      -- 1=Glue 後對成品套用 Track/Take FX（apply）
-  APPLY_FX_MODE      = "mono", -- mono | multi（render/apply 模式）
+  -- FX policies (separate for GLUE vs RENDER)
+  GLUE_TAKE_FX       = 1,      -- 1=Glue 之後的成品要印入 take FX；0=不印入
+  GLUE_TRACK_FX      = 0,      -- 1=Glue 成品再套用 Track/Take FX
+  GLUE_APPLY_MODE    = "mono", -- "mono" | "multi"（給 Glue 後的 apply 用）
+
+  RENDER_TAKE_FX     = 0,      -- 1=Render 直接印入 take FX；0=保留（偏向 non-destructive）
+  RENDER_TRACK_FX    = 0,      -- 1=Render 同時印入 Track FX
+  RENDER_APPLY_MODE  = "mono", -- "mono" | "multi"（Render 使用的 apply 模式）
   -- Rename policy:
   RENAME_OP_MODE     = "auto", -- glue | render | auto
   -- Hash markers（#in/#out 以供 Media Cues）
@@ -80,9 +84,13 @@ function M.read_settings()
     EPSILON_MODE       = get_ext("EPSILON_MODE",             DEFAULTS.EPSILON_MODE),
     EPSILON_VALUE      = get_ext_num("EPSILON_VALUE",        DEFAULTS.EPSILON_VALUE),
     DEBUG_LEVEL        = get_ext_num("DEBUG_LEVEL",          DEFAULTS.DEBUG_LEVEL),
-    RENDER_TAKE_FX     = (get_ext_bool("RENDER_TAKE_FX",     DEFAULTS.RENDER_TAKE_FX)==1),
-    RENDER_TRACK_FX    = (get_ext_bool("RENDER_TRACK_FX",    DEFAULTS.RENDER_TRACK_FX)==1),
-    APPLY_FX_MODE      = get_ext("APPLY_FX_MODE",            DEFAULTS.APPLY_FX_MODE),
+    GLUE_TAKE_FX       = (get_ext_bool("GLUE_TAKE_FX",      DEFAULTS.GLUE_TAKE_FX)==1),
+    GLUE_TRACK_FX      = (get_ext_bool("GLUE_TRACK_FX",     DEFAULTS.GLUE_TRACK_FX)==1),
+    GLUE_APPLY_MODE    =  get_ext("GLUE_APPLY_MODE",        DEFAULTS.GLUE_APPLY_MODE),
+
+    RENDER_TAKE_FX     = (get_ext_bool("RENDER_TAKE_FX",    DEFAULTS.RENDER_TAKE_FX)==1),
+    RENDER_TRACK_FX    = (get_ext_bool("RENDER_TRACK_FX",   DEFAULTS.RENDER_TRACK_FX)==1),
+    RENDER_APPLY_MODE  =  get_ext("RENDER_APPLY_MODE",      DEFAULTS.RENDER_APPLY_MODE),
     RENAME_OP_MODE     = get_ext("RENAME_OP_MODE",           DEFAULTS.RENAME_OP_MODE),
     WRITE_MEDIA_CUES   = (get_ext_bool("WRITE_MEDIA_CUES",   DEFAULTS.WRITE_MEDIA_CUES)==1),
     -- 🔧 修正：用 DEFAULTS，不是 dflt
@@ -567,7 +575,7 @@ local function glue_unit(tr, u, cfg)
   end
 
   -- RENDER_TAKE_FX=0 → 先清空成員的 take FX（避免被 Glue 印入）
-  if not cfg.RENDER_TAKE_FX then
+  if not cfg.GLUE_TAKE_FX then
     local items = {}
     for i,m in ipairs(members) do items[i]=m.it end
     clear_take_fx_for_items(items)
@@ -605,18 +613,16 @@ local function glue_unit(tr, u, cfg)
   r.Main_OnCommand(ACT_GLUE_TS, 0)
 
   local glued_pre = find_item_by_span_on_track(tr, UL, UR, 0.002)
-  if cfg.RENDER_TRACK_FX and glued_pre then
-    -- NOTE: 40361/41993 will print fades into audio; clear them on the
-    -- intermediate glued item, then rebuild edge fades later on final 'glued'.
-    -- 40361 Item: Apply track/take FX to items (mono output)
-    -- 41993 Item: Apply track/take FX to items (multichannel output)
+  if cfg.GLUE_TRACK_FX and glued_pre then
+    -- 清掉 fades（40361/41993 會把 fade 烘進音檔）
     r.SetMediaItemInfo_Value(glued_pre, "D_FADEINLEN",       0)
     r.SetMediaItemInfo_Value(glued_pre, "D_FADEINLEN_AUTO",  0)
     r.SetMediaItemInfo_Value(glued_pre, "D_FADEOUTLEN",      0)
     r.SetMediaItemInfo_Value(glued_pre, "D_FADEOUTLEN_AUTO", 0)
 
-    apply_track_take_fx_to_item(glued_pre, cfg.APPLY_FX_MODE, DBG)
+    apply_track_take_fx_to_item(glued_pre, cfg.GLUE_APPLY_MODE, DBG)
   end
+
   r.Main_OnCommand(ACT_TRIM_TO_TS, 0)
 
   -- 找到最後成品（UL..UR），移回 u.start..u.finish 並寫入 offset
@@ -689,9 +695,9 @@ function M.glue_selection()
   end
 
   local eps_s = (cfg.EPSILON_MODE=="frames") and frames_to_seconds(cfg.EPSILON_VALUE, get_sr(), nil) or (cfg.EPSILON_VALUE or 0.002)
-  dbg(DBG,1,"[RUN] Glue start  handles=%.3fs  epsilon=%.5fs  GLUE_SINGLE_ITEMS=%s  RENDER_TAKE_FX=%s  RENDER_TRACK_FX=%s  APPLY_FX_MODE=%s  WRITE_MEDIA_CUES=%s  WRITE_TAKE_MARKERS=%s",
-    cfg.HANDLE_SECONDS or 0, eps_s, tostring(cfg.GLUE_SINGLE_ITEMS), tostring(cfg.RENDER_TAKE_FX),
-    tostring(cfg.RENDER_TRACK_FX), cfg.APPLY_FX_MODE, tostring(cfg.WRITE_MEDIA_CUES), tostring(cfg.WRITE_TAKE_MARKERS))
+  dbg(DBG,1,"[RUN] Glue start  handles=%.3fs  epsilon=%.5fs  GLUE_SINGLE_ITEMS=%s  GLUE_TAKE_FX=%s  GLUE_TRACK_FX=%s  GLUE_APPLY_MODE=%s  WRITE_MEDIA_CUES=%s  WRITE_TAKE_MARKERS=%s",
+    cfg.HANDLE_SECONDS or 0, eps_s, tostring(cfg.GLUE_SINGLE_ITEMS), tostring(cfg.GLUE_TAKE_FX),
+    tostring(cfg.GLUE_TRACK_FX), cfg.GLUE_APPLY_MODE, tostring(cfg.WRITE_MEDIA_CUES), tostring(cfg.WRITE_TAKE_MARKERS))
 
   local by_tr, tr_list = collect_by_track_from_selection()
   for _,tr in ipairs(tr_list) do
@@ -784,7 +790,7 @@ function M.render_selection()
   local HANDLE = (cfg.HANDLE_MODE=="seconds") and (cfg.HANDLE_SECONDS or 0.0) or 0.0
 
   dbg(DBG,1,"[RUN] Render start  mode=%s  TAKE=%s TRACK=%s  items=%d  handles=%.3fs  WRITE_MEDIA_CUES=%s",
-      cfg.APPLY_FX_MODE, tostring(cfg.RENDER_TAKE_FX), tostring(cfg.RENDER_TRACK_FX),
+      cfg.RENDER_APPLY_MODE, tostring(cfg.RENDER_TAKE_FX), tostring(cfg.RENDER_TRACK_FX),
       nsel, HANDLE, tostring(cfg.WRITE_MEDIA_CUES))
 
   -- snapshot per-track FX enabled state (TRACK path has been stable)
@@ -815,7 +821,7 @@ function M.render_selection()
   local ACT_APPLY_MONO  = 40361 -- Apply track/take FX to items (mono)
   local ACT_APPLY_MULTI = 41993 -- Apply track/take FX to items (multichannel)
   local ACT_RENDER_PRES = 40601 -- Render items to new take (preserve source type)
-  local cmd_apply = (cfg.APPLY_FX_MODE=="multi") and ACT_APPLY_MULTI or ACT_APPLY_MONO
+  local cmd_apply = (cfg.RENDER_APPLY_MODE=="multi") and ACT_APPLY_MULTI or ACT_APPLY_MONO
 
   for _, it in ipairs(items) do
     local tk_orig = r.GetActiveTake(it)
