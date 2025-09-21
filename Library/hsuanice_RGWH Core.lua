@@ -1,6 +1,6 @@
 --[[
 @description Render or Glue Items with Handles Core Library
-@version 250921_0313 render volume fixed
+@version 250921_1053 fixed trackfx = 0 render fade issue
 @author hsuanice
 @about
   Library for RGWH glue/render flows with handles, FX policies, rename, # markers, and optional take markers inside glued items.
@@ -163,28 +163,26 @@ local function rename_new_render_take(it, orig_take_name, want_takefx, want_trac
   local tc = reaper.CountTakes(it)
   if tc == 0 then return end
 
-  -- Reaper 會把新 take 加在最後一軌（也通常設為 Active），抓最後一個即可
+  -- New take is appended last (usually becomes active)
   local newtk = reaper.GetTake(it, tc-1)
   if not newtk then return end
 
-  -- ext 用新 take 現名的副檔名，以符合「插在副檔名前」的規則
+  -- Current new-take name (only for logging)
   local _, curNewName = reaper.GetSetMediaItemTakeInfo_String(newtk, "P_NAME", "", false)
-  local _, extNew = split_ext(curNewName or "")
 
-  -- base 用舊 take 名（render 前抓到的那個），並去除尾端既有 suffix
+  -- Base = old take name without any tail tags and without extension
   local baseOld = strip_tail_tags(select(1, split_ext(orig_take_name or "")))
 
-  -- N = 目前 item 內最大值 + 1（僅掃本 item，成本極低）
+  -- N = max existing rendered index on this item + 1
   local nextN = max_rendered_n_on_item(it) + 1
 
+  -- Final rule: TakeName-renderedN  (no -takefx/-trackfx, no extension)
   local newname = string.format("%s-rendered%d", baseOld, nextN)
-  if want_takefx  then newname = newname .. "-takefx"  end
-  if want_trackfx then newname = newname .. "-trackfx" end
-  newname = newname .. extNew
 
   reaper.GetSetMediaItemTakeInfo_String(newtk, "P_NAME", newname, true)
   dbg(DBG, 1, "[NAME] new take rename '%s' → '%s'", tostring(curNewName or ""), tostring(newname))
 end
+
 
 -- 只快照「offline」布林，不記 bypass
 local function snapshot_takefx_offline(tk)
@@ -772,10 +770,10 @@ function M.render_selection()
     return n
   end
 
-  -- fade helpers (you已經放在 core 裡，這裡只呼叫)
-  -- snapshot_item_fades(it) -> table
-  -- clear_item_fades(it)
-  -- restore_item_fades(it, snap)
+  -- fade helpers (shared with GLUE)
+  -- snapshot_fades(it) -> table
+  -- zero_fades(it)
+  -- restore_fades(it, snap)
   -----------------------------------------------------------------------------
 
   r.Undo_BeginBlock()
@@ -888,9 +886,10 @@ function M.render_selection()
     local fade_snap = nil
     local use_apply = need_track == true
     if use_apply then
-      fade_snap = snapshot_item_fades(it)
-      clear_item_fades(it)
+      fade_snap = snapshot_fades(it)
+      zero_fades(it)
     end
+
 
     -- render
     r.SelectAllMediaItems(0, false)
@@ -906,8 +905,9 @@ function M.render_selection()
 
     -- restore fades if we cleared them for 40361/41993
     if use_apply and fade_snap then
-      restore_item_fades(it, fade_snap)
+      restore_fades(it, fade_snap)
     end
+
 
     -- restore item window and offset
     local left_total = L0 - d.gotL
