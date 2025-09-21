@@ -1,6 +1,6 @@
 --[[
 @description Render or Glue Items with Handles Core Library
-@version 250921_1237 fix rename code untidy
+@version 250921_1400 reduce UpdateItemInProject
 @author hsuanice
 @about
   Library for RGWH glue/render flows with handles, FX policies, rename, # markers, and optional take markers inside glued items.
@@ -31,7 +31,7 @@ local DEFAULTS = {
   EPSILON_VALUE      = 0.5,
   DEBUG_LEVEL        = 1,
   -- FX policies:
-  RENDER_TAKE_FX     = 1,      -- 1=保留/印入 take FX；0=Glue 前先移除 take FX
+  RENDER_TAKE_FX     = 0,      -- 1=保留/印入 take FX；0=Glue 前先移除 take FX
   RENDER_TRACK_FX    = 0,      -- 1=Glue 後對成品套用 Track/Take FX（apply）
   APPLY_FX_MODE      = "mono", -- mono | multi（render/apply 模式）
   -- Rename policy:
@@ -502,7 +502,6 @@ end
 local function apply_track_take_fx_to_item(it, apply_mode, dbg_level)
   r.SelectAllMediaItems(0,false)
   r.SetMediaItemSelected(it,true)
-  r.UpdateArrange()
   local cmd = get_apply_cmd(apply_mode)
   dbg(dbg_level,1,"[RUN] Apply Track/Take FX (%s) to 1 item.", apply_mode)
   r.Main_OnCommand(cmd, 0)
@@ -599,7 +598,6 @@ local function glue_unit(tr, u, cfg)
       local new_off = d.offs - (deltaL * d.rate)
       r.SetMediaItemTakeInfo_Value(d.tk,"D_STARTOFFS", new_off)
     end
-    r.UpdateItemInProject(it)
   end
 
   -- 時選=UL..UR → Glue → (必要時)對成品 Apply → Trim 回 UL..UR
@@ -616,7 +614,6 @@ local function glue_unit(tr, u, cfg)
     r.SetMediaItemInfo_Value(glued_pre, "D_FADEINLEN_AUTO",  0)
     r.SetMediaItemInfo_Value(glued_pre, "D_FADEOUTLEN",      0)
     r.SetMediaItemInfo_Value(glued_pre, "D_FADEOUTLEN_AUTO", 0)
-    r.UpdateItemInProject(glued_pre)
 
     apply_track_take_fx_to_item(glued_pre, cfg.APPLY_FX_MODE, DBG)
   end
@@ -878,7 +875,6 @@ function M.render_selection()
       local new_off = d.offs - (deltaL * d.rate)
       r.SetMediaItemTakeInfo_Value(d.tk, "D_STARTOFFS", new_off)
     end
-    r.UpdateItemInProject(it)
 
     -- If we are going to apply TRACK FX (01/11), clear fades (40361/41993 will bake them).
     -- If not (00/10 => 40601), we leave fades untouched.
@@ -893,7 +889,6 @@ function M.render_selection()
     -- render
     r.SelectAllMediaItems(0, false)
     r.SetMediaItemSelected(it, true)
-    r.UpdateArrange()
     r.Main_OnCommand(use_apply and cmd_apply or ACT_RENDER_PRES, 0)
 
     -- remove temporary # markers (if any)
