@@ -1,6 +1,6 @@
 --[[
 @description Render or Glue Items with Handles Core Library
-@version 250922_1732 change take marker to media cue and improve glue cue behavior
+@version 250922_1819 WriteGlueCues and WriteEdgeCues ok
 @author hsuanice
 @about
   Library for RGWH glue/render flows with handles, FX policies, rename, # markers, and optional take markers inside glued items.
@@ -535,8 +535,15 @@ local function glue_unit(tr, u, cfg)
       local src = reaper.GetMediaItemTake_Source(tk)
       if not src then return nil end
       local p   = reaper.GetMediaSourceFileName(src, "") or ""
-      p = p:gsub("\\","/"):gsub("^%s+",""):gsub("%s+$",""):lower()
+      p = p:gsub("\\","/"):gsub("^%s+",""):gsub("%s+$","")
       return (p ~= "") and p or nil
+    end
+
+    local function take_name_of(it)
+      local tk = reaper.GetActiveTake(it)
+      if not tk then return nil end
+      local ok, nm = reaper.GetSetMediaItemTakeInfo_String(tk, "P_NAME", "", false)
+      return (ok and nm ~= "" and nm) or reaper.GetTakeName(tk) or nil
     end
     local seq, uniq = {}, {}
     for _, m in ipairs(u.members or {}) do
@@ -549,17 +556,15 @@ local function glue_unit(tr, u, cfg)
 
     if unique_count >= 2 then
       marks_abs = {}
-      -- Head cue (unit head)
-      local head_path = seq[1].path
-      local head_stem = (head_path:match("([^/]+)$") or head_path):gsub("%.[^%.]+$","")
-      marks_abs[#marks_abs+1] = { abs = u.start, label = ("GlueCue: %s"):format(head_stem) }
+      -- Head cue uses TakeName (preserve original case)
+      local head_name = take_name_of(u.members[1].it) or ((seq[1].path or ""):match("([^/]+)$") or "")
+      marks_abs[#marks_abs+1] = { abs = u.start, name = head_name }
 
       -- Boundary cues where source changes
       for i = 1, (#seq - 1) do
         if seq[i].path ~= seq[i+1].path then
-          local next_path = seq[i+1].path
-          local stem = (next_path:match("([^/]+)$") or next_path):gsub("%.[^%.]+$","")
-          marks_abs[#marks_abs+1] = { abs = seq[i+1].L, label = ("GlueCue: %s"):format(stem) }
+          local next_name = take_name_of(u.members[i+1].it) or ((seq[i+1].path or ""):match("([^/]+)$") or "")
+          marks_abs[#marks_abs+1] = { abs = seq[i+1].L, name = next_name }
         end
       end
     end
@@ -623,16 +628,20 @@ local function glue_unit(tr, u, cfg)
 
   -- When enabled, pre-embed Glue Cues as project markers (with '#' prefix).
   -- They will be absorbed into the new media during glue.
+  -- Pre-embed Glue cues as project markers (with '#') so glue absorbs them into media
   local glue_ids = nil
   if cfg.WRITE_GLUE_CUES and u.kind ~= "SINGLE" and marks_abs and #marks_abs > 0 then
     glue_ids = {}
     for _, mk in ipairs(marks_abs) do
-      local label = ("#Glue: %s"):format(mk.stem or mk.label or "")
-      local id = r.AddProjectMarker2(0, false, mk.abs or u.start, 0, label, -1, 0)
+      local raw = mk.name or mk.stem or mk.label or ""
+      raw = raw:gsub("^%s*GlueCue:%s*", "")  -- strip legacy prefix if any
+      local label = ("#Glue: %s"):format(raw)
+      local id = reaper.AddProjectMarker2(0, false, mk.abs or u.start, 0, label, -1, 0)
       glue_ids[#glue_ids+1] = id
-      if DBG>=2 then dbg(DBG,2,"[GLUE-CUE] add @ %.3f  label=%s  id=%s", mk.abs or u.start, label, tostring(id)) end
+      if DBG >= 2 then dbg(DBG,2,"[GLUE-CUE] add @ %.3f  label=%s  id=%s", mk.abs or u.start, label, tostring(id)) end
     end
   end
+
 
 
 
