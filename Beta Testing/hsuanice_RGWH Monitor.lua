@@ -1,7 +1,21 @@
--- hsuanice_RGWH Monitor.lua
--- Console monitor for units (SINGLE/TOUCH/CROSSFADE/MIXED),
--- item details, FX states, and # markers.
--- 不使用 dB，僅輸出線性音量值。
+--[[
+@description hsuanice_RGWH Monitor
+@version 250922_2240
+@author hsuanice
+@note
+Console monitor for units (SINGLE/TOUCH/CROSSFADE/MIXED),
+item details, FX states, and # markers.
+不使用 dB，僅輸出線性音量值。
+
+@changelog
+  v250922_2240
+  - Added per-member channel info:
+    • src = media source channel count
+    • track = track channel count
+    • chanmode = take channel mode (integer)
+  - Output example: "channels: src=2  track=6  chanmode=0"
+  - Useful to distinguish mono/multi-channel material and routing.
+]]--
 
 local r = reaper
 
@@ -344,12 +358,21 @@ local function main()
         printf("    handles: maxL=%.3f maxR=%.3f  req=%.3f  clampL=%s clampR=%s",
           Hleft, Hright, S.HANDLE_SECONDS or 0, tostring(clampL), tostring(clampR))
 
+        do
+          local tr_ch    = (r.GetMediaTrackInfo_Value(tr, "I_NCHAN") or 2)
+          local chanmode = tk and (r.GetMediaItemTakeInfo_Value(tk, "I_CHANMODE") or 0) or 0
+          local src      = tk and r.GetMediaItemTake_Source(tk) or nil
+          local src_ch   = (src and r.GetMediaSourceNumChannels and r.GetMediaSourceNumChannels(src)) or 0
+          printf("    channels: src=%d  track=%d  chanmode=%d", src_ch, tr_ch, chanmode)
+        end
+
         for _, line in ipairs(list_take_fx_lines(tk)) do
           printf("    %s", line)
         end
         for _, line in ipairs(list_track_fx_lines(tr)) do
           printf("    %s", line)
         end
+
 
         local cues = project_hash_markers_in_span(L, R)
         if #cues == 0 then
