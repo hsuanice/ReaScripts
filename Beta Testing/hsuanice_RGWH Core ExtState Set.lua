@@ -10,27 +10,33 @@ local NS = "RGWH" -- namespace
 
 -- 想改什麼就改這裡
 local CFG = {
-  GLUE_SINGLE_ITEMS  = 1,
-  HANDLE_MODE        = "seconds",
-  HANDLE_SECONDS     = 5,
-  EPSILON_MODE       = "frames",
-  EPSILON_VALUE      = 0.5,
-  DEBUG_LEVEL        = 2,
+  GLUE_SINGLE_ITEMS = 1,
 
-  -- GLUE 專屬
-  GLUE_TAKE_FX       = 1,
-  GLUE_TRACK_FX      = 0,
-  GLUE_APPLY_MODE    = "mono",   -- "mono" | "multi"
+  HANDLE_MODE       = "seconds",
+  HANDLE_SECONDS    = 5,
 
-  -- RENDER 專屬
-  RENDER_TAKE_FX     = 0,
-  RENDER_TRACK_FX    = 0,
-  RENDER_APPLY_MODE  = "mono",   -- "mono" | "multi"
+  EPSILON_MODE      = "frames",
+  EPSILON_VALUE     = 0.5,
 
-  RENAME_OP_MODE     = "auto",
-  WRITE_EDGE_CUES    = 1,
-  WRITE_GLUE_CUES    = 1,
+  DEBUG_LEVEL       = 2,
+
+  -- GLUE
+  GLUE_TAKE_FX      = 1,
+  GLUE_TRACK_FX     = 0,
+  GLUE_APPLY_MODE   = "mono",   -- "mono" | "multi"
+
+  -- RENDER
+  RENDER_TAKE_FX    = 0,
+  RENDER_TRACK_FX   = 0,
+  RENDER_APPLY_MODE = "mono",   -- "mono" | "multi"
+
+  RENAME_OP_MODE    = "auto",
+
+  -- CUE switches
+  WRITE_EDGE_CUES   = 1,
+  WRITE_GLUE_CUES   = 1,
 }
+
 
 local function set(k, v) r.SetProjExtState(0, NS, k, tostring(v)) end
 
