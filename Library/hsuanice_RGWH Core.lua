@@ -1,23 +1,29 @@
 --[[
 @description Render or Glue Items with Handles Core Library
-@version 250922_2103 WIP multi mode
+@version 250922_2257 Multi-mode  OK
 @author hsuanice
 @about
   Library for RGWH glue/render flows with handles, FX policies, rename, # markers, and optional take markers inside glued items.
 
 @changelog
-v250921_1512
-  - Initial stable Core snapshot (handles, epsilon, glue/render pipeline, hash markers)
+v250922_2257
+  - Multi-mode policies finalized:
+    • GLUE_OUTPUT_POLICY_WHEN_NO_TRACKFX = "preserve" | "force-multi"
+    • RENDER_OUTPUT_POLICY_WHEN_NO_TRACKFX = "preserve" | "force-multi"
+  - When APPLY_MODE="multi" and policy="force-multi" with no Track FX printing:
+    • Glue: run 41993 in a no-track-FX path; preserves take-FX per setting; fades snapshot/restore
+    • Render: choose apply path and run 41993; fades snapshot/restore
+  - New helper: apply_multichannel_no_fx_preserve_take(it, keep_take_fx, dbg_level)
+    • Temporarily disables track FX (snapshot), optionally offlines take FX, zeroes fades, runs 41993, restores everything
+  - Render path: add use_apply decision (need_track OR force-multi) with clear fades only when applying
+  - Console messages:
+    • "[APPLY] force multi (no track FX path)"
+    • "[RUN] Temporarily disabled TRACK FX (policy TRACK=0)."
+  - Minor: ensure "[EDGE-CUE]" tag consistent across add/remove logs
 
-v250921_1647
-  - First experiment: replace take markers with media cues (#in/#out written as project markers)
-  - Console shows [HASH] add/remove; cues absorbed into glued media
-
-v250921_1732
-  - Implement Glue Cues: add cues at unit head + where adjacent sources differ
-  - Glue Cues written as project markers with '#' prefix → embedded into glued media
-  - Edge Cues (#in/#out) and Glue Cues temporarily added then cleaned up
-  - Console output: [HASH] for edge cues, [GLUE-CUE] for glue cues
+v250922_1954
+  - Prep multi-channel flow: utilities and structure for using 41993 (Apply track/take FX to items – multichannel output)
+  - Separated paths for GLUE vs RENDER to allow later policy injection without changing call sites
 
 v250922_1819
   - Rename WRITE_MEDIA_CUES → WRITE_EDGE_CUES
@@ -27,6 +33,19 @@ v250922_1819
   - Glue Cue labels simplified: "#Glue: <TakeName>" (remove redundant "GlueCue:" prefix)
   - TakeName preserved with original case (no forced lowercase)
   - Final: Edge Cues (#in/#out) and Glue Cues (#Glue: <TakeName>) both embedded as media cues
+
+v250921_1732
+  - Implement Glue Cues: add cues at unit head + where adjacent sources differ
+  - Glue Cues written as project markers with '#' prefix → embedded into glued media
+  - Edge Cues (#in/#out) and Glue Cues temporarily added then cleaned up
+  - Console output: [HASH] for edge cues, [GLUE-CUE] for glue cues
+
+v250921_1647
+  - First experiment: replace take markers with media cues (#in/#out written as project markers)
+  - Console shows [HASH] add/remove; cues absorbed into glued media
+
+v250921_1512
+  - Initial stable Core snapshot (handles, epsilon, glue/render pipeline, hash markers)
 
 ]]--
 local r = reaper
@@ -698,7 +717,7 @@ local function glue_unit(tr, u, cfg)
   local edge_ids = nil
   if cfg.WRITE_EDGE_CUES then
     edge_ids = add_edge_cues(u.start, u.finish, 0)
-    dbg(DBG,1,"[EDGE-CUE]] add #in @ %.3f  #out @ %.3f  ids=(%s,%s)", u.start, u.finish, tostring(edge_ids[1]), tostring(edge_ids[2]))
+    dbg(DBG,1,"[EDGE-CUE] add #in @ %.3f  #out @ %.3f  ids=(%s,%s)", u.start, u.finish, tostring(edge_ids[1]), tostring(edge_ids[2]))
   end
 
   -- When enabled, pre-embed Glue Cues as project markers (with '#' prefix).
@@ -805,7 +824,7 @@ local function glue_unit(tr, u, cfg)
   r.GetSet_LoopTimeRange(true, false, 0, 0, false)
   if edge_ids then
     remove_markers_by_ids(edge_ids)
-    dbg(DBG,1,"[EDGE-CUE]] removed ids: %s, %s", tostring(edge_ids[1]), tostring(edge_ids[2]))
+    dbg(DBG,1,"[EDGE-CUE] removed ids: %s, %s", tostring(edge_ids[1]), tostring(edge_ids[2]))
   end
   if glue_ids and #glue_ids>0 then
     remove_markers_by_ids(glue_ids)
@@ -1013,7 +1032,7 @@ function M.render_selection()
     if cfg.WRITE_EDGE_CUES then
       -- Keep #in/#out (unit span) for downstream media-cue workflows.
       edge_ids = add_edge_cues(L0, R0, 0)
-      dbg(DBG,1,"[EDGE-CUE]] add #in @ %.3f  #out @ %.3f  ids=(%s,%s)", L0, R0, tostring(edge_ids and edge_ids[1]), tostring(edge_ids and edge_ids[2]))
+      dbg(DBG,1,"[EDGE-CUE] add #in @ %.3f  #out @ %.3f  ids=(%s,%s)", L0, R0, tostring(edge_ids and edge_ids[1]), tostring(edge_ids and edge_ids[2]))
     end
 
 
@@ -1051,7 +1070,7 @@ function M.render_selection()
     -- remove temporary # markers (if any)
     if edge_ids then
       remove_markers_by_ids(edge_ids)
-      dbg(DBG,1,"[EDGE-CUE]] removed ids: %s, %s", tostring(edge_ids[1]), tostring(edge_ids[2]))
+      dbg(DBG,1,"[EDGE-CUE] removed ids: %s, %s", tostring(edge_ids[1]), tostring(edge_ids[2]))
     end
 
     -- restore fades if we cleared them for 40361/41993
