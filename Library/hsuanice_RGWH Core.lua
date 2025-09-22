@@ -1,6 +1,6 @@
 --[[
 @description Render or Glue Items with Handles Core Library
-@version 250922_1954 Update changelog
+@version 250922_2103 WIP multi mode
 @author hsuanice
 @about
   Library for RGWH glue/render flows with handles, FX policies, rename, # markers, and optional take markers inside glued items.
@@ -68,6 +68,10 @@ local DEFAULTS = {
   WRITE_EDGE_CUES   = 1,
   -- ✅ 新增：Glue 成品 take 內是否加 take markers（非 SINGLE 才加）
   WRITE_GLUE_CUES = 1,
+
+  -- Policies when TRACK FX are NOT being printed:
+  GLUE_OUTPUT_POLICY_WHEN_NO_TRACKFX   = "preserve",   -- "preserve" | "force-multi"
+  RENDER_OUTPUT_POLICY_WHEN_NO_TRACKFX = "preserve",   -- "preserve" | "force-multi"
 }
 
 ------------------------------------------------------------
@@ -119,7 +123,11 @@ function M.read_settings()
     WRITE_EDGE_CUES   = (get_ext_bool("WRITE_EDGE_CUES",   DEFAULTS.WRITE_EDGE_CUES)==1),
     -- 🔧 修正：用 DEFAULTS，不是 dflt
     WRITE_GLUE_CUES = (get_ext_bool("WRITE_GLUE_CUES", DEFAULTS.WRITE_GLUE_CUES)==1),
+
+    GLUE_OUTPUT_POLICY_WHEN_NO_TRACKFX   = get_ext("GLUE_OUTPUT_POLICY_WHEN_NO_TRACKFX",   DEFAULTS.GLUE_OUTPUT_POLICY_WHEN_NO_TRACKFX),
+    RENDER_OUTPUT_POLICY_WHEN_NO_TRACKFX = get_ext("RENDER_OUTPUT_POLICY_WHEN_NO_TRACKFX", DEFAULTS.RENDER_OUTPUT_POLICY_WHEN_NO_TRACKFX),
   }
+
 end
 
 ------------------------------------------------------------
@@ -539,6 +547,49 @@ local function apply_track_take_fx_to_item(it, apply_mode, dbg_level)
   r.Main_OnCommand(cmd, 0)
 end
 
+-- Disable all TRACK FX on a track and return a snapshot of enabled states
+local function disable_trackfx_with_snapshot(tr)
+  if not tr then return nil end
+  local n = r.TrackFX_GetCount(tr) or 0
+  local snap = {}
+  for i = 0, n-1 do
+    local on = r.TrackFX_GetEnabled(tr, i)
+    snap[i] = on and true or false
+    if on then r.TrackFX_SetEnabled(tr, i, false) end
+  end
+  return snap
+end
+
+local function restore_trackfx_from_snapshot(tr, snap)
+  if not (tr and snap) then return end
+  for i, on in pairs(snap) do r.TrackFX_SetEnabled(tr, i, on and true or false) end
+end
+
+-- Apply multichannel (41993) WITHOUT baking any TRACK FX, and only bake TAKE FX when keep_take_fx=true
+local function apply_multichannel_no_fx_preserve_take(it, keep_take_fx, dbg_level)
+  if not it then return end
+  local tr = r.GetMediaItem_Track(it)
+  local tk = r.GetActiveTake(it)
+
+  local tr_snap = disable_trackfx_with_snapshot(tr)
+  local tk_snap = snapshot_takefx_offline(tk)
+  if tk and (not keep_take_fx) then
+    temp_offline_nonoffline_fx(tk)
+  end
+
+  local fade_snap = snapshot_fades(it)
+  zero_fades(it)
+
+  r.SelectAllMediaItems(0,false)
+  r.SetMediaItemSelected(it,true)
+  dbg(dbg_level,1,"[APPLY] multi(no-FX) via 41993 (keep_take_fx=%s)", tostring(keep_take_fx))
+  r.Main_OnCommand(ACT_APPLY_MULTI, 0)
+
+  -- restore states
+  restore_trackfx_from_snapshot(tr, tr_snap)
+  restore_takefx_offline(tk, tk_snap)
+  restore_fades(it, fade_snap)
+end
 ------------------------------------------------------------
 -- GLUE FLOW (per unit)
 ------------------------------------------------------------
@@ -701,6 +752,12 @@ local function glue_unit(tr, u, cfg)
     r.SetMediaItemInfo_Value(glued_pre, "D_FADEOUTLEN_AUTO", 0)
 
     apply_track_take_fx_to_item(glued_pre, cfg.GLUE_APPLY_MODE, DBG)
+
+  elseif glued_pre
+     and (cfg.GLUE_APPLY_MODE == "multi")
+     and (cfg.GLUE_OUTPUT_POLICY_WHEN_NO_TRACKFX == "force-multi") then
+    -- TRACK FX 未印，但需要強制 multi：以「無 FX」方式套 41993
+    apply_multichannel_no_fx_preserve_take(glued_pre, (cfg.GLUE_TAKE_FX == true), DBG)
   end
 
   r.Main_OnCommand(ACT_TRIM_TO_TS, 0)
@@ -969,11 +1026,18 @@ function M.render_selection()
       r.SetMediaItemTakeInfo_Value(d.tk, "D_STARTOFFS", new_off)
     end
 
-    -- If we are going to apply TRACK FX (01/11), clear fades (40361/41993 will bake them).
-    -- If not (00/10 => 40601), we leave fades untouched.
+    -- If we are going to apply TRACK FX (01/11), or we are forcing multi without TRACK FX,
+    -- clear fades (40361/41993 will bake them). Otherwise (00/10 => 40601) keep fades.
     local fade_snap = nil
-    local use_apply = need_track == true
+    local force_multi = (not need_track)
+                    and (cfg.RENDER_APPLY_MODE == "multi")
+                    and (cfg.RENDER_OUTPUT_POLICY_WHEN_NO_TRACKFX == "force-multi")
+
+    local use_apply = (need_track == true) or (force_multi == true)
     if use_apply then
+      if force_multi then
+        dbg(DBG,1,"[APPLY] force multi (no track FX path)")
+      end
       fade_snap = snapshot_fades(it)
       zero_fades(it)
     end
