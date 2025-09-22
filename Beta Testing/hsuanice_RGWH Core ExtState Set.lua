@@ -1,6 +1,6 @@
 --[[
 @description RGWH Core ExtState Set (project-scope)
-@version 250922_1750 update renamed functino glue and edge cues
+@version 250922_2103 WIP multi mode
 @author hsuanice
 @about
   快速設定 RGWH Core 用到的 ExtState（寫在當前專案）。
@@ -22,12 +22,12 @@ local CFG = {
 
   -- GLUE
   GLUE_TAKE_FX      = 1,
-  GLUE_TRACK_FX     = 0,
+  GLUE_TRACK_FX     = 1,
   GLUE_APPLY_MODE   = "mono",   -- "mono" | "multi"
 
   -- RENDER
   RENDER_TAKE_FX    = 0,
-  RENDER_TRACK_FX   = 0,
+  RENDER_TRACK_FX   = 1,
   RENDER_APPLY_MODE = "mono",   -- "mono" | "multi"
 
   RENAME_OP_MODE    = "auto",
@@ -35,7 +35,12 @@ local CFG = {
   -- CUE switches
   WRITE_EDGE_CUES   = 1,
   WRITE_GLUE_CUES   = 1,
+
+  -- Output policy when NOT printing Track FX
+  GLUE_OUTPUT_POLICY_WHEN_NO_TRACKFX   = "preserve",   -- "preserve" | "force-multi"
+  RENDER_OUTPUT_POLICY_WHEN_NO_TRACKFX = "preserve",   -- "preserve" | "force-multi"
 }
+
 
 
 local function set(k, v) r.SetProjExtState(0, NS, k, tostring(v)) end
@@ -51,11 +56,14 @@ r.ShowConsoleMsg(string.format(
   "EPSILON_MODE=%s\nEPSILON_VALUE=%s\nDEBUG_LEVEL=%s\n"..
   "GLUE_TAKE_FX=%s\nGLUE_TRACK_FX=%s\nGLUE_APPLY_MODE=%s\n"..
   "RENDER_TAKE_FX=%s\nRENDER_TRACK_FX=%s\nRENDER_APPLY_MODE=%s\n"..
-  "RENAME_OP_MODE=%s\nWRITE_EDGE_CUES=%s\nWRITE_GLUE_CUES=%s\n",
+  "RENAME_OP_MODE=%s\nWRITE_EDGE_CUES=%s\nWRITE_GLUE_CUES=%s\n"..
+  "GLUE_OUTPUT_POLICY_WHEN_NO_TRACKFX=%s\nRENDER_OUTPUT_POLICY_WHEN_NO_TRACKFX=%s\n",
   NS,
   CFG.GLUE_SINGLE_ITEMS, CFG.HANDLE_MODE, CFG.HANDLE_SECONDS,
   CFG.EPSILON_MODE, CFG.EPSILON_VALUE, CFG.DEBUG_LEVEL,
   CFG.GLUE_TAKE_FX, CFG.GLUE_TRACK_FX, CFG.GLUE_APPLY_MODE,
   CFG.RENDER_TAKE_FX, CFG.RENDER_TRACK_FX, CFG.RENDER_APPLY_MODE,
-  CFG.RENAME_OP_MODE, CFG.WRITE_EDGE_CUES, CFG.WRITE_GLUE_CUES
+  CFG.RENAME_OP_MODE, CFG.WRITE_EDGE_CUES, CFG.WRITE_GLUE_CUES,
+  CFG.GLUE_OUTPUT_POLICY_WHEN_NO_TRACKFX, CFG.RENDER_OUTPUT_POLICY_WHEN_NO_TRACKFX
 ))
+
