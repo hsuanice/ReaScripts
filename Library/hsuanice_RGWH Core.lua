@@ -1,6 +1,6 @@
 --[[
 @description Render or Glue Items with Handles Core Library
-@version 250921_1512 Dependent fx toggle for glue and render
+@version 250921_1732 change take marker to media cue and improve glue cue behavior
 @author hsuanice
 @about
   Library for RGWH glue/render flows with handles, FX policies, rename, # markers, and optional take markers inside glued items.
@@ -41,9 +41,9 @@ local DEFAULTS = {
   -- Rename policy:
   RENAME_OP_MODE     = "auto", -- glue | render | auto
   -- Hash markers（#in/#out 以供 Media Cues）
-  WRITE_MEDIA_CUES   = 1,
+  WRITE_EDGE_CUES   = 1,
   -- ✅ 新增：Glue 成品 take 內是否加 take markers（非 SINGLE 才加）
-  WRITE_TAKE_MARKERS = 1,
+  WRITE_GLUE_CUES = 1,
 }
 
 ------------------------------------------------------------
@@ -92,9 +92,9 @@ function M.read_settings()
     RENDER_TRACK_FX    = (get_ext_bool("RENDER_TRACK_FX",   DEFAULTS.RENDER_TRACK_FX)==1),
     RENDER_APPLY_MODE  =  get_ext("RENDER_APPLY_MODE",      DEFAULTS.RENDER_APPLY_MODE),
     RENAME_OP_MODE     = get_ext("RENAME_OP_MODE",           DEFAULTS.RENAME_OP_MODE),
-    WRITE_MEDIA_CUES   = (get_ext_bool("WRITE_MEDIA_CUES",   DEFAULTS.WRITE_MEDIA_CUES)==1),
+    WRITE_EDGE_CUES   = (get_ext_bool("WRITE_EDGE_CUES",   DEFAULTS.WRITE_EDGE_CUES)==1),
     -- 🔧 修正：用 DEFAULTS，不是 dflt
-    WRITE_TAKE_MARKERS = (get_ext_bool("WRITE_TAKE_MARKERS", DEFAULTS.WRITE_TAKE_MARKERS)==1),
+    WRITE_GLUE_CUES = (get_ext_bool("WRITE_GLUE_CUES", DEFAULTS.WRITE_GLUE_CUES)==1),
   }
 end
 
@@ -416,7 +416,7 @@ local function per_member_window_lr(it, L, R, H_left, H_right)
 end
 
 ------------------------------------------------------------
--- #in/#out project markers
+-- #in/#out project markers (kept for media-cue workflows)
 ------------------------------------------------------------
 local function add_hash_markers(UL, UR, color)
   local proj = 0
@@ -523,13 +523,45 @@ local function glue_unit(tr, u, cfg)
   local HANDLE = (cfg.HANDLE_MODE=="seconds") and (cfg.HANDLE_SECONDS or 0.0) or 0.0
   local eps_s  = (cfg.EPSILON_MODE=="frames") and frames_to_seconds(cfg.EPSILON_VALUE, get_sr(), nil) or (cfg.EPSILON_VALUE or 0.002)
 
-  -- 📝 先蒐集 take-marker（存「絕對位置」），之後 Glue 完再換算成相對 UL
+  -- Prepare Glue Cues plan (absolute project times).
+  -- Rule: write a cue only when adjacent items switch to a different file source.
+  -- If the whole unit uses a single source, write none (including the head).
   local marks_abs = nil
-  if cfg.WRITE_TAKE_MARKERS and u.kind ~= "SINGLE" then
-    marks_abs = {}
+  if u.kind ~= "SINGLE" then
+    -- Build ordered source sequence for this unit
+    local function src_path_of(it)
+      local tk  = reaper.GetActiveTake(it)
+      if not tk then return nil end
+      local src = reaper.GetMediaItemTake_Source(tk)
+      if not src then return nil end
+      local p   = reaper.GetMediaSourceFileName(src, "") or ""
+      p = p:gsub("\\","/"):gsub("^%s+",""):gsub("%s+$",""):lower()
+      return (p ~= "") and p or nil
+    end
+    local seq, uniq = {}, {}
     for _, m in ipairs(u.members or {}) do
-      local tname = get_take_name(m.it) or ""
-      marks_abs[#marks_abs+1] = { abs = m.L, label = ("Glue: %s"):format(tname) }
+      local p = src_path_of(m.it) or ("<no-src>")
+      seq[#seq+1] = { L = m.L, path = p }
+      uniq[p] = true
+    end
+    local unique_count = 0
+    for _ in pairs(uniq) do unique_count = unique_count + 1 end
+
+    if unique_count >= 2 then
+      marks_abs = {}
+      -- Head cue (unit head)
+      local head_path = seq[1].path
+      local head_stem = (head_path:match("([^/]+)$") or head_path):gsub("%.[^%.]+$","")
+      marks_abs[#marks_abs+1] = { abs = u.start, label = ("GlueCue: %s"):format(head_stem) }
+
+      -- Boundary cues where source changes
+      for i = 1, (#seq - 1) do
+        if seq[i].path ~= seq[i+1].path then
+          local next_path = seq[i+1].path
+          local stem = (next_path:match("([^/]+)$") or next_path):gsub("%.[^%.]+$","")
+          marks_abs[#marks_abs+1] = { abs = seq[i+1].L, label = ("GlueCue: %s"):format(stem) }
+        end
+      end
     end
   end
 
@@ -582,12 +614,27 @@ local function glue_unit(tr, u, cfg)
     dbg(DBG,1,"[TAKE-FX] cleared (policy=OFF) for this unit.")
   end
 
-  -- 寫 #in/#out（以 unit 實際 span）
+  -- Write #in/#out (unit span) as media cues when enabled
   local hash_ids = nil
-  if cfg.WRITE_MEDIA_CUES then
+  if cfg.WRITE_EDGE_CUES then
     hash_ids = add_hash_markers(u.start, u.finish, 0)
     dbg(DBG,1,"[HASH] add #in @ %.3f  #out @ %.3f  ids=(%s,%s)", u.start, u.finish, tostring(hash_ids[1]), tostring(hash_ids[2]))
   end
+
+  -- When enabled, pre-embed Glue Cues as project markers (with '#' prefix).
+  -- They will be absorbed into the new media during glue.
+  local glue_ids = nil
+  if cfg.WRITE_GLUE_CUES and u.kind ~= "SINGLE" and marks_abs and #marks_abs > 0 then
+    glue_ids = {}
+    for _, mk in ipairs(marks_abs) do
+      local label = ("#Glue: %s"):format(mk.stem or mk.label or "")
+      local id = r.AddProjectMarker2(0, false, mk.abs or u.start, 0, label, -1, 0)
+      glue_ids[#glue_ids+1] = id
+      if DBG>=2 then dbg(DBG,2,"[GLUE-CUE] add @ %.3f  label=%s  id=%s", mk.abs or u.start, label, tostring(id)) end
+    end
+  end
+
+
 
   -- 選取並暫時把左右最外側 item 撐到 UL/UR 以吃到 handles
   local items_sel = {}
@@ -650,13 +697,8 @@ local function glue_unit(tr, u, cfg)
     r.SetMediaItemInfo_Value(glued,"D_FADEOUTLEN_AUTO", fout_auto)
     r.UpdateItemInProject(glued)
 
-    -- ✅ 在「插入位置 B」：Glue 後、已拿到 UL 與 glued
-    if cfg.WRITE_TAKE_MARKERS and u.kind ~= "SINGLE" and marks_abs and #marks_abs>0 then
-      for _, mk in ipairs(marks_abs) do
-        local rel = (mk.abs or u.start) - UL   -- UL 為 take 的 0 秒
-        add_take_marker_at(glued, rel, mk.label)
-      end
-    end
+    -- (Removed legacy take-marker emission. Glue cues are now pre-written as project markers with '#'.)
+
 
     -- [GLUE NAME] Do not rename glued items; let REAPER auto-name (e.g. "...-glued-XX").
     -- (Intentionally no-op here to preserve REAPER's default glued naming.)
@@ -669,12 +711,20 @@ local function glue_unit(tr, u, cfg)
     dbg(DBG,1,"       WARNING: glued item not found by span (UL=%.3f UR=%.3f)", UL, UR)
   end
 
-  -- 清掉時選與 # 標記
+  -- Clear time selection and temporary project markers
   r.GetSet_LoopTimeRange(true, false, 0, 0, false)
   if hash_ids then
     remove_markers_by_ids(hash_ids)
     dbg(DBG,1,"[HASH] removed ids: %s, %s", tostring(hash_ids[1]), tostring(hash_ids[2]))
   end
+  if glue_ids and #glue_ids>0 then
+    remove_markers_by_ids(glue_ids)
+    dbg(DBG,1,"[GLUE-CUE] removed %d temp markers.", #glue_ids)
+  end
+
+
+
+
 end
 
 ------------------------------------------------------------
@@ -695,9 +745,11 @@ function M.glue_selection()
   end
 
   local eps_s = (cfg.EPSILON_MODE=="frames") and frames_to_seconds(cfg.EPSILON_VALUE, get_sr(), nil) or (cfg.EPSILON_VALUE or 0.002)
-  dbg(DBG,1,"[RUN] Glue start  handles=%.3fs  epsilon=%.5fs  GLUE_SINGLE_ITEMS=%s  GLUE_TAKE_FX=%s  GLUE_TRACK_FX=%s  GLUE_APPLY_MODE=%s  WRITE_MEDIA_CUES=%s  WRITE_TAKE_MARKERS=%s",
+  dbg(DBG,1,"[RUN] Glue start  handles=%.3fs  epsilon=%.5fs  GLUE_SINGLE_ITEMS=%s  GLUE_TAKE_FX=%s  GLUE_TRACK_FX=%s  GLUE_APPLY_MODE=%s  WRITE_EDGE_CUES=%s  WRITE_GLUE_CUES=%s  GLUE_CUE_POLICY=%s",
     cfg.HANDLE_SECONDS or 0, eps_s, tostring(cfg.GLUE_SINGLE_ITEMS), tostring(cfg.GLUE_TAKE_FX),
-    tostring(cfg.GLUE_TRACK_FX), cfg.GLUE_APPLY_MODE, tostring(cfg.WRITE_MEDIA_CUES), tostring(cfg.WRITE_TAKE_MARKERS))
+    tostring(cfg.GLUE_TRACK_FX), cfg.GLUE_APPLY_MODE, tostring(cfg.WRITE_EDGE_CUES), tostring(cfg.WRITE_GLUE_CUES),
+    "adjacent-different-source")
+
 
   local by_tr, tr_list = collect_by_track_from_selection()
   for _,tr in ipairs(tr_list) do
@@ -789,9 +841,9 @@ function M.render_selection()
 
   local HANDLE = (cfg.HANDLE_MODE=="seconds") and (cfg.HANDLE_SECONDS or 0.0) or 0.0
 
-  dbg(DBG,1,"[RUN] Render start  mode=%s  TAKE=%s TRACK=%s  items=%d  handles=%.3fs  WRITE_MEDIA_CUES=%s",
+  dbg(DBG,1,"[RUN] Render start  mode=%s  TAKE=%s TRACK=%s  items=%d  handles=%.3fs  WRITE_EDGE_CUES=%s  GLUE_CUE_POLICY=%s",
       cfg.RENDER_APPLY_MODE, tostring(cfg.RENDER_TAKE_FX), tostring(cfg.RENDER_TRACK_FX),
-      nsel, HANDLE, tostring(cfg.WRITE_MEDIA_CUES))
+      nsel, HANDLE, tostring(cfg.WRITE_EDGE_CUES), "adjacent-different-source")
 
   -- snapshot per-track FX enabled state (TRACK path has been stable)
   local tr_map = {}
@@ -868,10 +920,12 @@ function M.render_selection()
     end
 
     local hash_ids = nil
-    if cfg.WRITE_MEDIA_CUES then
+    if cfg.WRITE_EDGE_CUES then
+      -- Keep #in/#out (unit span) for downstream media-cue workflows.
       hash_ids = add_hash_markers(L0, R0, 0)
       dbg(DBG,1,"[HASH] add #in @ %.3f  #out @ %.3f  ids=(%s,%s)", L0, R0, tostring(hash_ids and hash_ids[1]), tostring(hash_ids and hash_ids[2]))
     end
+
 
     -- move to render window and align take offset
     r.SetMediaItemInfo_Value(it, "D_POSITION", d.gotL)
