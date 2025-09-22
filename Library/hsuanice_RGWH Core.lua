@@ -1,6 +1,6 @@
 --[[
 @description Render or Glue Items with Handles Core Library
-@version 250922_1819 WriteGlueCues and WriteEdgeCues ok
+@version 250922_1838 edit: change HUSH to EDGE-CUE
 @author hsuanice
 @about
   Library for RGWH glue/render flows with handles, FX policies, rename, # markers, and optional take markers inside glued items.
@@ -416,9 +416,9 @@ local function per_member_window_lr(it, L, R, H_left, H_right)
 end
 
 ------------------------------------------------------------
--- #in/#out project markers (kept for media-cue workflows)
+-- #in/#out edge cues (kept for media-cue workflows)
 ------------------------------------------------------------
-local function add_hash_markers(UL, UR, color)
+local function add_edge_cues(UL, UR, color)
   local proj = 0
   color = color or 0
   local in_id  = r.AddProjectMarker2(proj, false, UL, 0, "#in",  -1, color)
@@ -620,10 +620,10 @@ local function glue_unit(tr, u, cfg)
   end
 
   -- Write #in/#out (unit span) as media cues when enabled
-  local hash_ids = nil
+  local edge_ids = nil
   if cfg.WRITE_EDGE_CUES then
-    hash_ids = add_hash_markers(u.start, u.finish, 0)
-    dbg(DBG,1,"[HASH] add #in @ %.3f  #out @ %.3f  ids=(%s,%s)", u.start, u.finish, tostring(hash_ids[1]), tostring(hash_ids[2]))
+    edge_ids = add_edge_cues(u.start, u.finish, 0)
+    dbg(DBG,1,"[EDGE-CUE]] add #in @ %.3f  #out @ %.3f  ids=(%s,%s)", u.start, u.finish, tostring(edge_ids[1]), tostring(edge_ids[2]))
   end
 
   -- When enabled, pre-embed Glue Cues as project markers (with '#' prefix).
@@ -722,9 +722,9 @@ local function glue_unit(tr, u, cfg)
 
   -- Clear time selection and temporary project markers
   r.GetSet_LoopTimeRange(true, false, 0, 0, false)
-  if hash_ids then
-    remove_markers_by_ids(hash_ids)
-    dbg(DBG,1,"[HASH] removed ids: %s, %s", tostring(hash_ids[1]), tostring(hash_ids[2]))
+  if edge_ids then
+    remove_markers_by_ids(edge_ids)
+    dbg(DBG,1,"[EDGE-CUE]] removed ids: %s, %s", tostring(edge_ids[1]), tostring(edge_ids[2]))
   end
   if glue_ids and #glue_ids>0 then
     remove_markers_by_ids(glue_ids)
@@ -928,11 +928,11 @@ function M.render_selection()
           L0, R0, d.wantL, d.wantR, d.gotL, d.gotR, tostring(d.clampL), tostring(d.clampR), name0)
     end
 
-    local hash_ids = nil
+    local edge_ids = nil
     if cfg.WRITE_EDGE_CUES then
       -- Keep #in/#out (unit span) for downstream media-cue workflows.
-      hash_ids = add_hash_markers(L0, R0, 0)
-      dbg(DBG,1,"[HASH] add #in @ %.3f  #out @ %.3f  ids=(%s,%s)", L0, R0, tostring(hash_ids and hash_ids[1]), tostring(hash_ids and hash_ids[2]))
+      edge_ids = add_edge_cues(L0, R0, 0)
+      dbg(DBG,1,"[EDGE-CUE]] add #in @ %.3f  #out @ %.3f  ids=(%s,%s)", L0, R0, tostring(edge_ids and edge_ids[1]), tostring(edge_ids and edge_ids[2]))
     end
 
 
@@ -961,9 +961,9 @@ function M.render_selection()
     r.Main_OnCommand(use_apply and cmd_apply or ACT_RENDER_PRES, 0)
 
     -- remove temporary # markers (if any)
-    if hash_ids then
-      remove_markers_by_ids(hash_ids)
-      dbg(DBG,1,"[HASH] removed ids: %s, %s", tostring(hash_ids[1]), tostring(hash_ids[2]))
+    if edge_ids then
+      remove_markers_by_ids(edge_ids)
+      dbg(DBG,1,"[EDGE-CUE]] removed ids: %s, %s", tostring(edge_ids[1]), tostring(edge_ids[2]))
     end
 
     -- restore fades if we cleared them for 40361/41993
