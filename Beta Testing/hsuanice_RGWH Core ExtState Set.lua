@@ -1,10 +1,24 @@
 --[[
 @description RGWH Core ExtState Set (project-scope)
-@version 250922_2103 WIP multi mode
+@version 250922_2257 Multi-mode OK
 @author hsuanice
 @about
-  快速設定 RGWH Core 用到的 ExtState（寫在當前專案）。
+  Quick setup for RGWH Core ExtStates (written into current project).
+  Includes defaults for handles, epsilon, FX print policies, cue writing,
+  rename options, and new multi-mode output policy switches.
+
+@changelog
+v250922_2257
+  - Added: GLUE_OUTPUT_POLICY_WHEN_NO_TRACKFX and RENDER_OUTPUT_POLICY_WHEN_NO_TRACKFX
+    • Options: "preserve" (keep source mono/stereo) or "force-multi" (always run 41993 multichannel path)
+  - Updated: Console display shows both policies explicitly when ExtState is written
+  - Synced with Core v250922_2257 (multi-mode OK)
+
+v250922_1750
+  - Previous stable ExtState writer
+  - Sets HANDLE, EPSILON, DEBUG_LEVEL, FX modes, cue writing options
 ]]--
+
 local r = reaper
 local NS = "RGWH" -- namespace
 
@@ -23,12 +37,12 @@ local CFG = {
   -- GLUE
   GLUE_TAKE_FX      = 1,
   GLUE_TRACK_FX     = 1,
-  GLUE_APPLY_MODE   = "mono",   -- "mono" | "multi"
+  GLUE_APPLY_MODE   = "multi",   -- "mono" | "multi"
 
   -- RENDER
   RENDER_TAKE_FX    = 0,
   RENDER_TRACK_FX   = 1,
-  RENDER_APPLY_MODE = "mono",   -- "mono" | "multi"
+  RENDER_APPLY_MODE = "multi",   -- "mono" | "multi"
 
   RENAME_OP_MODE    = "auto",
 
