@@ -1,9 +1,33 @@
 --[[
 @description Render or Glue Items with Handles Core Library
-@version 250922_1838 edit: change HUSH to EDGE-CUE
+@version 250922_1954 Update changelog
 @author hsuanice
 @about
   Library for RGWH glue/render flows with handles, FX policies, rename, # markers, and optional take markers inside glued items.
+
+@changelog
+v250921_1512
+  - Initial stable Core snapshot (handles, epsilon, glue/render pipeline, hash markers)
+
+v250921_1647
+  - First experiment: replace take markers with media cues (#in/#out written as project markers)
+  - Console shows [HASH] add/remove; cues absorbed into glued media
+
+v250921_1732
+  - Implement Glue Cues: add cues at unit head + where adjacent sources differ
+  - Glue Cues written as project markers with '#' prefix → embedded into glued media
+  - Edge Cues (#in/#out) and Glue Cues temporarily added then cleaned up
+  - Console output: [HASH] for edge cues, [GLUE-CUE] for glue cues
+
+v250922_1819
+  - Rename WRITE_MEDIA_CUES → WRITE_EDGE_CUES
+  - Rename WRITE_TAKE_MARKERS → WRITE_GLUE_CUES
+  - Standardize: hash_ids → edge_ids; function add_hash_markers → add_edge_cues
+  - Console tag "[HASH]" → "[EDGE-CUE]"
+  - Glue Cue labels simplified: "#Glue: <TakeName>" (remove redundant "GlueCue:" prefix)
+  - TakeName preserved with original case (no forced lowercase)
+  - Final: Edge Cues (#in/#out) and Glue Cues (#Glue: <TakeName>) both embedded as media cues
+
 ]]--
 local r = reaper
 local M = {}
