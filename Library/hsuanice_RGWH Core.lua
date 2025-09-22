@@ -1,6 +1,6 @@
 --[[
 @description Render or Glue Items with Handles Core Library
-@version 250921_1732 change take marker to media cue and improve glue cue behavior
+@version 250922_1732 change take marker to media cue and improve glue cue behavior
 @author hsuanice
 @about
   Library for RGWH glue/render flows with handles, FX policies, rename, # markers, and optional take markers inside glued items.
