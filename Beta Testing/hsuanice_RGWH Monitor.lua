@@ -1,13 +1,18 @@
 --[[
 @description hsuanice_RGWH Monitor
-@version 250922_2240
+@version 250923_1331 add TimeReference and StartInSource read OK
 @author hsuanice
 @note
 Console monitor for units (SINGLE/TOUCH/CROSSFADE/MIXED),
 item details, FX states, and # markers.
-不使用 dB，僅輸出線性音量值。
+Linear volume only (no dB).
 
 @changelog
+  v250923_1331
+  - Added: Read and display BWF:TimeReference (TR), Start-in-Source (SIS), and computed ABS time (TR+SIS).
+  - Integrated hsuanice_Metadata Read.lua for robust metadata parsing (preferred over legacy GetMediaFileMetadata).
+  - Output example: "sourceTC: TR=19459.708333(s) [934066000 smp @ 48000 Hz]  SIS=5.583333(s)  ABS=19465.291667(s)"
+
   v250922_2240
   - Added per-member channel info:
     • src = media source channel count
@@ -17,7 +22,21 @@ item details, FX states, and # markers.
   - Useful to distinguish mono/multi-channel material and routing.
 ]]--
 
+
 local r = reaper
+
+-- Load metadata helper library (no external tools required)
+local META = nil
+do
+  local meta_path = r.GetResourcePath() .. "/Scripts/hsuanice Scripts/Library/hsuanice_Metadata Read.lua"
+  local ok, ret = pcall(dofile, meta_path)
+  if ok and type(ret) == "table" then
+    META = ret
+  else
+    META = nil -- fallback will be used if not available
+  end
+end
+
 
 ------------------------------------------------------------
 -- action IDs (Main section)
@@ -214,6 +233,87 @@ local function compute_extend_headroom_seconds(it)
 end
 
 ------------------------------------------------------------
+-- BWF TimeReference (TR) + Start-in-Source (SIS) helpers
+-- Prefer library (META.collect_item_fields) → fallback to old native read
+------------------------------------------------------------
+
+-- Legacy low-level reader (kept as fallback)
+local function _legacy_try_read_tr_samples(src)
+  if not src then return nil end
+  -- primary: native metadata (use "BWF:TimeReference" is more robust than bext:)
+  local ok, val = r.GetMediaFileMetadata(src, "BWF:TimeReference")
+  if ok and val and val ~= "" and val ~= "[Binary data]" then
+    val = val:gsub(",", ""):gsub("%s+", "")
+    local n = tonumber(val) or (val:match("^0[xX]%x+$") and tonumber(val))
+    if n then return n end
+  end
+  -- optional SWS/GUtilities fallback if present
+  if r.CF_GetMediaSourceMetadata then
+    local out = ""
+    for _, k in ipairs({ "TimeReference", "TIMEREFERENCE", "ORIGREF" }) do
+      local ok2, v = r.CF_GetMediaSourceMetadata(src, k, out)
+      if ok2 and v and v ~= "" then
+        v = v:gsub(",", ""):gsub("%s+", "")
+        local n = tonumber(v) or (v:match("^0[xX]%x+$") and tonumber(v))
+        if n then return n end
+      end
+    end
+  end
+  return nil
+end
+
+local function _legacy_get_tr_sec(src)
+  local sr  = (src and r.GetMediaSourceSampleRate(src)) or 0
+  local smp = _legacy_try_read_tr_samples(src)
+  if not smp or smp <= 0 or sr <= 0 then return 0, sr, smp or 0 end
+  return smp / sr, sr, smp
+end
+
+-- Unified reader:
+-- returns tr_sec, tr_samples, sr, sis_sec, abs_sec
+local function rgwh_read_TR_SIS(item, take)
+  take = take or (item and r.GetActiveTake(item)) or take
+  if not take then return 0,0,0,0,0 end
+
+  local src = r.GetMediaItemTake_Source(take)
+  local sr  = (src and r.GetMediaSourceSampleRate(src)) or 0
+  local sis = r.GetMediaItemTakeInfo_Value(take, "D_STARTOFFS") or 0
+
+  -- 1) Prefer library (if loaded)
+  if META and item then
+    local f = META.collect_item_fields(item)   -- provides: f.timereference, f.samplerate, srcpath, etc.
+    local tr_smp = 0
+
+    -- Safely parse timereference (samples)
+    if f and f.timereference and f.timereference ~= "" then
+      local s = (f.timereference or "")
+      -- keep only the first return of gsub; remove commas and spaces
+      local cleaned = (s:gsub(",", "")):gsub("%s+", "")
+      -- support hex like "0x1A2B" if any tool writes it that way
+      if cleaned:match("^0[xX]%x+$") then
+        tr_smp = tonumber(cleaned) or tonumber(cleaned:sub(3), 16) or 0
+      else
+        tr_smp = tonumber(cleaned) or 0
+      end
+    end
+
+    -- Sample rate fallback from library (if REAPER SR unreadable)
+    if (not sr or sr <= 0) and f and f.samplerate then
+      local n = tonumber(tostring(f.samplerate):gsub("%s+", "")) or 0
+      if n > 0 then sr = n end
+    end
+
+    local tr_sec = (sr and sr > 0 and tr_smp and tr_smp > 0) and (tr_smp / sr) or 0
+    return tr_sec, tr_smp, sr or 0, sis, tr_sec + (sis or 0)
+  end
+
+  -- 2) Fallback: legacy native reader
+  local tr_sec, sr2, tr_smp = _legacy_get_tr_sec(src)
+  return tr_sec, tr_smp, (sr>0 and sr or sr2), sis, tr_sec + sis
+end
+
+
+------------------------------------------------------------
 -- unit detection on a single track
 -- Merge adjacent/touching/overlapping items into a single unit.
 ------------------------------------------------------------
@@ -365,6 +465,13 @@ local function main()
           local src_ch   = (src and r.GetMediaSourceNumChannels and r.GetMediaSourceNumChannels(src)) or 0
           printf("    channels: src=%d  track=%d  chanmode=%d", src_ch, tr_ch, chanmode)
         end
+
+        do
+          local tr_sec, tr_smp, sr, sis, abs = rgwh_read_TR_SIS(it, tk)
+          printf("    sourceTC: TR=%.6f(s) [%s smp @ %d Hz]  SIS=%.6f(s)  ABS=%.6f(s)",
+                tr_sec, tostring(tr_smp), sr, sis, abs)
+        end
+
 
         for _, line in ipairs(list_take_fx_lines(tk)) do
           printf("    %s", line)
