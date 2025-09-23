@@ -1,6 +1,6 @@
 --[[
 @description Embed BWF TimeReference to Active take from Take 1 or Current Position TC
-@version 0.7.4
+@version 250924_0257 ok
 @author hsuanice
 
 @about
@@ -27,6 +27,13 @@
   ReaImGui: https://github.com/cfillion/reaper-imgui
 
 @changelog
+  v250924_0257
+    - Fix: Align calculation now robust against item position moves.
+    - Always compute TimeReference as: TR(src) + StartOffset(src) = edgeTC,
+      then convert to dst using (edgeTC - StartOffset(dst)) * dstSR.
+    - Correctly handles handles and non-zero offsets.
+    - Console output shows raw vs calc offsets, project pivot, and final dstTR.
+    - Ensures embedded TR stays sync between original take and rendered/glued take.
   v0.7.4
     - Option 2: refine the "Yes to All" flow — after the first "Yes", ask once whether to apply to all remaining items.
       If "No", do not ask again for the rest of this run; if "Yes", overwrite all remaining without further prompts.
@@ -328,21 +335,62 @@ local function perform_embed(mode)
             else
               local tr, rc = read_TR(cli, src_path)
               msg(("    READ take1 TR : %s  (code=%s)"):format(tostring(tr), tostring(rc)))
-              if tr then target_tr = tr else
+              if tr then
+                -- Convert via project-time to handle different start offsets and/or sample rates:
+                -- ProjPos(sec) = srcTR(samples)/srcSR + SrcStart_src(sec)
+                -- dstTR(samples) = (ProjPos - SrcStart_dst) * dstSR
+                local src_sr = (function()
+                  local s = R.GetMediaItemTake_Source(take1)
+                  local v = s and select(2, R.GetMediaSourceSampleRate(s)) or 0
+                  if not v or v <= 0 then v = R.GetSetProjectInfo(0, "PROJECT_SRATE", 0, false) or 48000 end
+                  return math.floor(v + 0.5)
+                end)()
+                local dst_sr = (function()
+                  local s = R.GetMediaItemTake_Source(takeA)
+                  local v = s and select(2, R.GetMediaSourceSampleRate(s)) or 0
+                  if not v or v <= 0 then v = R.GetSetProjectInfo(0, "PROJECT_SRATE", 0, false) or 48000 end
+                  return math.floor(v + 0.5)
+                end)()
+
+                -- read raw offsets
+                local pos          = R.GetMediaItemInfo_Value(it, "D_POSITION") or 0.0
+                local src_offs_raw = R.GetMediaItemTakeInfo_Value(take1, "D_STARTOFFS") or 0.0
+                local dst_offs     = R.GetMediaItemTakeInfo_Value(takeA,  "D_STARTOFFS") or 0.0
+
+                -- cross-check: TR/src_sr + src_offs should equal item start (pos)
+                local src_offs_calc = pos - (tr / src_sr)
+                local use_calc = math.abs(((tr / src_sr) + src_offs_raw) - pos) > 0.001
+                local src_offs = use_calc and src_offs_calc or src_offs_raw
+                if use_calc then
+                  msg(("    NOTE: srcOffs mismatch raw=%.6fs vs calc=%.6fs (from item pos); using calc")
+                    :format(src_offs_raw, src_offs_calc))
+                end
+
+                -- project-time pivot via source TC + source start-in-source (stable even if item moved)
+                -- ProjPos(sec) = srcTR(samples)/srcSR + SrcStart_src(sec)
+                -- dstTR(samples) = (ProjPos - SrcStart_dst) * dstSR
+                local proj_pos = (tr / src_sr) + src_offs
+                target_tr = math.floor((proj_pos - dst_offs) * dst_sr + 0.5)
+                if target_tr < 0 then target_tr = 0 end
+                msg(("    ALIGN via time: srcTR=%d @%dHz, srcOffs=%.6fs -> ProjPos=%.6fs | dstOffs=%.6fs @%dHz -> dstTR=%d")
+                  :format(tr, src_sr, src_offs, proj_pos, dst_offs, dst_sr, target_tr))
+              else
                 fail_cnt = fail_cnt + 1
                 msg("    [FAIL] failed to read take1 TR")
               end
             end
           else
-            local sr  = (function()
+            local dst_sr  = (function()
               local s = R.GetMediaItemTake_Source(takeA)
               local v  = s and select(2, R.GetMediaSourceSampleRate(s)) or 0
               if not v or v <= 0 then v = R.GetSetProjectInfo(0, "PROJECT_SRATE", 0, false) or 48000 end
               return math.floor(v + 0.5)
             end)()
-            local pos = R.GetMediaItemInfo_Value(it, "D_POSITION") or 0.0
-            target_tr = math.floor(pos * sr + 0.5)
-            msg(("    itemStart=%.6fs, SR=%d -> TR=%d"):format(pos, sr, target_tr))
+            local dst_offs = R.GetMediaItemTakeInfo_Value(takeA, "D_STARTOFFS") or 0.0
+            local pos      = R.GetMediaItemInfo_Value(it, "D_POSITION") or 0.0
+            target_tr = math.floor((pos - dst_offs) * dst_sr + 0.5)
+            if target_tr < 0 then target_tr = 0 end
+            msg(("    itemStart=%.6fs, dstOffs=%.6fs, dstSR=%d -> TR=%d"):format(pos, dst_offs, dst_sr, target_tr))
           end
 
           if target_tr then
