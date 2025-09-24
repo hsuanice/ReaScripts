@@ -1,6 +1,6 @@
 --[[
 @description ReaImGui - Import audio: one folder per track; channel-split files go to child tracks. Sequence only.
-@version 0.4.1
+@version 0.4.1.1 fix channel naming rule window size
 @author hsuanice
 @about
   - Pre-confirm dialog: shows total folders/files, lets you choose a channel naming pattern or a custom mask, then offers [Import] / [Cancel].
@@ -26,6 +26,7 @@
   hsuanice served as the workflow designer, tester, and integrator for this tool.
 
 @changelog
+  v0.4.1.1 fix channel naming rule window size
   v0.4.1
   - Add: Support for filenames ending with "-<number>" (e.g. File-3.wav). 
          Auto mode now tries .A%, _%, and -% (chan_from_dash + Auto path).
@@ -538,7 +539,7 @@ local function ui_choose_mode(on_done)
 
   local function loop()
     if not ctx then return end
-    reaper.ImGui_SetNextWindowSize(ctx, 320, 300, reaper.ImGui_Cond_Once())
+    reaper.ImGui_SetNextWindowSize(ctx, 320, 330, reaper.ImGui_Cond_Once())
     local vis, open = reaper.ImGui_Begin(ctx, 'Channel naming rule', true)
     if vis then
       reaper.ImGui_Text(ctx, 'Select split-channel naming:')
