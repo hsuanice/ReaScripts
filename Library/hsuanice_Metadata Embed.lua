@@ -23,7 +23,8 @@
     - Added: Refresh_Items() — batch offline→online→rebuild peaks for items/takes.
     - Kept: write_bext_umid(), refresh_media_item_take(), shell helpers (unchanged).
     - Notes: TC/TimeReference math here is the single source of truth; RGWH and tools
-      should call this library. Backward-compatible insertion; existing UMID workflows unaffected.
+      should call this library. Backward-compatible insertion; UMID workflows unaffected.
+
 
   v0.2.4 (2025-09-12)
     - Changed: E.write_bext_umid() now returns the actual command string
