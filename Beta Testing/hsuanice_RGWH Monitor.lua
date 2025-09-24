@@ -1,6 +1,6 @@
 --[[
 @description hsuanice_RGWH Monitor
-@version 250923_1331 add TimeReference and StartInSource read OK
+@version 250924_1847
 @author hsuanice
 @note
 Console monitor for units (SINGLE/TOUCH/CROSSFADE/MIXED),
@@ -8,6 +8,15 @@ item details, FX states, and # markers.
 Linear volume only (no dB).
 
 @changelog
+  v250924_1847
+    - SourceTR/SIS/ABS display now shows raw domain value first,
+      with converted value in parentheses for cross-check.
+      e.g. "TR=929132000 smp (19356.9166666667s)".
+    - Added run_id() implementation using reaper.time_precise(),
+      ensures unique non-nil RunID (hex string).
+    - Improved precision visibility: full double values are kept,
+      truncated with "..." only when repeating decimals extend too far.
+    - Output layout remains consistent for easier visual comparison.
   v250923_1331
   - Added: Read and display BWF:TimeReference (TR), Start-in-Source (SIS), and computed ABS time (TR+SIS).
   - Integrated hsuanice_Metadata Read.lua for robust metadata parsing (preferred over legacy GetMediaFileMetadata).
@@ -64,7 +73,29 @@ end
 math.randomseed(os.time() + math.floor(reaper.time_precise()*1000))
 local function run_id()
   local x = math.random(0, 0xFFFF)
-  return string.format("%04X", x)
+end  
+-- ===== User display options =====
+local UI_DECIMALS = 10  -- seconds printed with this many decimals
+
+-- ===== Formatting helpers (display only) =====
+local function fmt_sec_d(sec)
+  return string.format("%."..UI_DECIMALS.."f", (sec or 0))
+end
+
+local function sec_to_int_samples(sec, sr)
+  sr = (sr and sr > 0) and sr or (reaper.GetSetProjectInfo(0, "PROJECT_SRATE", 0, false) or 48000)
+  return math.floor((sec or 0) * sr + 0.5)
+end
+
+local function fmt_secs_from_samples(smp, sr, decimals)
+  sr = (sr and sr > 0) and sr or (reaper.GetSetProjectInfo(0, "PROJECT_SRATE", 0, false) or 48000)
+  decimals = decimals or UI_DECIMALS
+  local sec = (smp or 0) / sr
+  local s   = string.format("%."..decimals.."f", sec)
+  -- Append ellipsis when formatting lost sample-level fidelity
+  local back = math.floor(sec * sr + 0.5)
+  local ell  = (back ~= (smp or 0)) and "…" or ""
+  return s .. ell
 end
 
 ------------------------------------------------------------
@@ -385,7 +416,8 @@ end
 local function main()
   r.ClearConsole()
   local S = current_settings()
-  local id = run_id()
+  local tp = reaper.time_precise() or 0
+  local id = string.format("%08X", math.floor(tp * 1000 + 0.5))
   printf("[RGWH][Monitor][RunID=%s] DEBUG=%d  eps=%.5fs (mode=%s, value=%.3f)  sr=%.0f  fps=%.3f",
     id, S.DEBUG_LEVEL, S.EPSILON_SEC, S.EPSILON_MODE, S.EPSILON_VALUE, S.SR, S.FPS)
 
@@ -466,12 +498,20 @@ local function main()
           printf("    channels: src=%d  track=%d  chanmode=%d", src_ch, tr_ch, chanmode)
         end
 
+        
         do
           local tr_sec, tr_smp, sr, sis, abs = rgwh_read_TR_SIS(it, tk)
-          printf("    sourceTC: TR=%.6f(s) [%s smp @ %d Hz]  SIS=%.6f(s)  ABS=%.6f(s)",
-                tr_sec, tostring(tr_smp), sr, sis, abs)
-        end
-
+          -- Display raw domain first, then converted in parentheses:
+          --  TR   : samples first (raw from BWF), then seconds (ellipsis if truncated)
+          --  SIS/ABS: seconds first (raw from REAPER), then integer samples
+          local sis_smp = math.floor((sis or 0) * (sr or 48000) + 0.5)
+          local abs_smp = math.floor((abs or 0) * (sr or 48000) + 0.5)
+          printf("    sourceTC: TR=%s smp (%ss)  SIS=%ss (%d smp)  ABS=%ss (%d smp)",
+            tostring(tr_smp),
+            fmt_secs_from_samples(tr_smp or 0, sr, UI_DECIMALS),
+            fmt_sec_d(sis or 0), sis_smp,
+            fmt_sec_d(abs or 0), abs_smp)
+        end  -- <<< 補這個，關閉第二個 do 區塊
 
         for _, line in ipairs(list_take_fx_lines(tk)) do
           printf("    %s", line)
