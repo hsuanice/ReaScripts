@@ -1,6 +1,6 @@
 --[[
 @description Embed BWF TimeReference to Active take from Take 1 or Current Position TC
-@version 250924_1930 WIP sample not accurate about 1
+@version 250924_1930 ok
 @author hsuanice
 
 @about
@@ -26,37 +26,40 @@
   Homebrew formula: https://formulae.brew.sh/formula/bwfmetaedit
   ReaImGui: https://github.com/cfillion/reaper-imgui
 
-@changelog
+  v250924_1930
+    - Fix: always read TimeReference from Take 1’s media file (no boundary mix-ups).
+    - Unify math in double-precision seconds; quantize to integer samples only at the final step (floor),
+      keeping REAPER render parity and removing prior ~16-sample drift.
+    - Option 1 (Take1→Active) and Option 2 (ItemStart→Active) now both handle integer and non-integer
+      boundaries consistently; when Take 1 StartInSource is correct, phase-invert null tests pass.
+    - Console diagnostics expanded: show SR, TR(src) in samples+seconds, Src/Dst StartInSource in
+      seconds+samples, edge preview (sec), and final dstTR (samples).
+    - UI: window stays open after running an option; supports “Yes to All” overwrite in Option 2.
+
   v250924_1419
-    - Both Option 1 (Take1→Active) and Option 2 (ItemStart→Active) now compute TimeReference fully in samples.
-    - Changed rounding to truncation (floor) so values always align to REAPER’s render logic (sample-boundary consistent).
-    - Fixed the ~16 sample drift caused by rounding 1/3 ms positions.
-    - UI improvement: after running Option 1 or Option 2, the script window now stays open until the user explicitly closes it.
-    - Console debug unified: all positions, offsets, and TR values reported in pure samples (no seconds).
+    - Both Option 1 and Option 2 compute TimeReference in the sample domain, with truncation to
+      match REAPER’s sample-boundary logic.
+    - Fixed ~16-sample drift on 1/3 ms positions; unified sample-only console reporting.
+    - Window no longer auto-closes after a run.
 
   v250924_0257
-    - Fix: Align calculation now robust against item position moves.
-    - Always compute TimeReference as: TR(src) + StartOffset(src) = edgeTC,
-      then convert to dst using (edgeTC - StartOffset(dst)) * dstSR.
-    - Correctly handles handles and non-zero offsets.
-    - Console output shows raw vs calc offsets, project pivot, and final dstTR.
-    - Ensures embedded TR stays sync between original take and rendered/glued take.
+    - Align math robust to item moves: TR(src) + StartOffset(src) → edgeTC; then (edgeTC − StartOffset(dst))
+      × dstSR for dstTR. Correctly handles handles and non-zero offsets.
+    - Console shows raw vs calc offsets, project pivot, and final dstTR.
+
   v0.7.4
-    - Option 2: refine the "Yes to All" flow — after the first "Yes", ask once whether to apply to all remaining items.
-      If "No", do not ask again for the rest of this run; if "Yes", overwrite all remaining without further prompts.
-    - Batch flags are reset per run; no duplicate "apply to all" prompts.
-    - Minor copy and doc cleanups.
+    - Option 2: “Yes to All” flow refined; batch flags reset per run; minor copy/doc cleanups.
 
   v0.7.3
-    - Option 2: add "Yes to All" choice to overwrite remaining items without per-item prompts.
+    - Option 2: add “Yes to All” for overwriting remaining items.
 
   v0.7.2
-    - Option 2: overwrite warning now shows Track name and Item start position in the project's time display.
-    - Add safety prompt before overwriting a non-zero TimeReference.
+    - Option 2: overwrite warning shows Track name and item start (project time); safety prompt before
+      overwriting non-zero TR.
 
   v0.7.1
-    - UI: ESC to close; add "Cancel" button.
-    - Remove ImGui_DestroyContext usage; clean UI shutdown.
+    - UI: ESC to close; remove ImGui_DestroyContext; clean shutdown.
+
 ]]
 
 local R = reaper
