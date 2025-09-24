@@ -1,6 +1,6 @@
 --[[
 @description Embed BWF TimeReference to Active take from Take 1 or Current Position TC
-@version 250924_0257 ok
+@version 250924_1349 option 1&2 TC embed ok but has 16 samples difference
 @author hsuanice
 
 @about
@@ -65,6 +65,10 @@ local EXT_NS, EXT_KEY = "hsuanice_TCTools", "BWFMetaEditPath"
 local function msg(s) R.ShowConsoleMsg(tostring(s).."\n") end
 local function base(p) return (p and p:match("([^/\\]+)$")) or tostring(p) end
 local function is_wav(p) return p and p:lower():sub(-4)==".wav" end
+
+-- integer rounding helper (for stable sample-domain math)
+local function round(x) return math.floor((x or 0) + 0.5) end
+
 
 -- Shell wrapper for ExecProcess (handles spaces/quotes)
 local function sh_wrap(cmd)
@@ -333,12 +337,20 @@ local function perform_embed(mode)
               skip_cnt = skip_cnt + 1
               msg("  [SKIP] take1 missing or not WAV")
             else
-              local tr, rc = read_TR(cli, src_path)
+              -- Ensure we truly read TR from take1's underlying media file
+              local tr, rc, raw_xml = read_TR(cli, src_path)
               msg(("    READ take1 TR : %s  (code=%s)"):format(tostring(tr), tostring(rc)))
               if tr then
-                -- Convert via project-time to handle different start offsets and/or sample rates:
-                -- ProjPos(sec) = srcTR(samples)/srcSR + SrcStart_src(sec)
-                -- dstTR(samples) = (ProjPos - SrcStart_dst) * dstSR
+                --（接著銜接「修改A」的 sample-domain 計算段落）
+                -- Pure sample-domain mapping (no seconds):
+                --   Source edge (samples in src rate):
+                --     edge_src_smp = TR_file + srcSIS_smp
+                --   Map edge to dst rate (only if SR differs):
+                --     edge_dst_smp = (src_sr == dst_sr) and edge_src_smp
+                --                                   or math.floor(edge_src_smp * dst_sr / src_sr + 0.5)
+                --   Target TR for dst file:
+                --     dstTR_smp    = edge_dst_smp - dstSIS_smp
+
                 local src_sr = (function()
                   local s = R.GetMediaItemTake_Source(take1)
                   local v = s and select(2, R.GetMediaSourceSampleRate(s)) or 0
@@ -352,45 +364,59 @@ local function perform_embed(mode)
                   return math.floor(v + 0.5)
                 end)()
 
-                -- read raw offsets
-                local pos          = R.GetMediaItemInfo_Value(it, "D_POSITION") or 0.0
-                local src_offs_raw = R.GetMediaItemTakeInfo_Value(take1, "D_STARTOFFS") or 0.0
-                local dst_offs     = R.GetMediaItemTakeInfo_Value(takeA,  "D_STARTOFFS") or 0.0
+                -- Start-in-source in seconds → samples (each in its own rate)
+                local srcSIS_sec = R.GetMediaItemTakeInfo_Value(take1, "D_STARTOFFS") or 0.0
+                local dstSIS_sec = R.GetMediaItemTakeInfo_Value(takeA,  "D_STARTOFFS") or 0.0
+                local srcSIS_smp = math.floor(srcSIS_sec * src_sr + 0.5)
+                local dstSIS_smp = math.floor(dstSIS_sec * dst_sr + 0.5)
 
-                -- cross-check: TR/src_sr + src_offs should equal item start (pos)
-                local src_offs_calc = pos - (tr / src_sr)
-                local use_calc = math.abs(((tr / src_sr) + src_offs_raw) - pos) > 0.001
-                local src_offs = use_calc and src_offs_calc or src_offs_raw
-                if use_calc then
-                  msg(("    NOTE: srcOffs mismatch raw=%.6fs vs calc=%.6fs (from item pos); using calc")
-                    :format(src_offs_raw, src_offs_calc))
-                end
+                -- TimeReference from BWF is already samples
+                local TR_file = tonumber(tr) or 0
 
-                -- project-time pivot via source TC + source start-in-source (stable even if item moved)
-                -- ProjPos(sec) = srcTR(samples)/srcSR + SrcStart_src(sec)
-                -- dstTR(samples) = (ProjPos - SrcStart_dst) * dstSR
-                local proj_pos = (tr / src_sr) + src_offs
-                target_tr = math.floor((proj_pos - dst_offs) * dst_sr + 0.5)
+                local edge_src_smp = TR_file + srcSIS_smp
+                local edge_dst_smp = (src_sr == dst_sr)
+                                      and edge_src_smp
+                                       or math.floor(edge_src_smp * dst_sr / src_sr + 0.5)
+
+                target_tr = edge_dst_smp - dstSIS_smp
                 if target_tr < 0 then target_tr = 0 end
-                msg(("    ALIGN via time: srcTR=%d @%dHz, srcOffs=%.6fs -> ProjPos=%.6fs | dstOffs=%.6fs @%dHz -> dstTR=%d")
-                  :format(tr, src_sr, src_offs, proj_pos, dst_offs, dst_sr, target_tr))
+
+                -- Sample-only console
+                msg(("    SR: src=%dHz  dst=%dHz"):format(src_sr, dst_sr))
+                msg(("    TR(src): %d  SrcStartInSource: %d  DstStartInSource: %d")
+                  :format(TR_file, srcSIS_smp, dstSIS_smp))
+                msg(("    Edge: src=%d  ->  dst=%d"):format(edge_src_smp, edge_dst_smp))
+                msg(("    RESULT dstTR=%d (samples)"):format(target_tr))
               else
                 fail_cnt = fail_cnt + 1
                 msg("    [FAIL] failed to read take1 TR")
               end
             end
           else
-            local dst_sr  = (function()
+            -- Option 2: Current project position → Active take TR (pure samples)
+            --   curPos_smp   = round(pos * dst_sr)
+            --   dstSIS_smp   = round(dstOffs * dst_sr)
+            --   dstTR_smp    = curPos_smp - dstSIS_smp
+
+            local dst_sr = (function()
               local s = R.GetMediaItemTake_Source(takeA)
-              local v  = s and select(2, R.GetMediaSourceSampleRate(s)) or 0
+              local v = s and select(2, R.GetMediaSourceSampleRate(s)) or 0
               if not v or v <= 0 then v = R.GetSetProjectInfo(0, "PROJECT_SRATE", 0, false) or 48000 end
               return math.floor(v + 0.5)
             end)()
-            local dst_offs = R.GetMediaItemTakeInfo_Value(takeA, "D_STARTOFFS") or 0.0
-            local pos      = R.GetMediaItemInfo_Value(it, "D_POSITION") or 0.0
-            target_tr = math.floor((pos - dst_offs) * dst_sr + 0.5)
+            local dst_offs_sec = R.GetMediaItemTakeInfo_Value(takeA, "D_STARTOFFS") or 0.0
+            local pos_sec      = R.GetMediaItemInfo_Value(it, "D_POSITION") or 0.0
+
+            local curPos_smp = math.floor(pos_sec      * dst_sr + 0.5)
+            local dstSIS_smp = math.floor(dst_offs_sec * dst_sr + 0.5)
+
+            target_tr = curPos_smp - dstSIS_smp
             if target_tr < 0 then target_tr = 0 end
-            msg(("    itemStart=%.6fs, dstOffs=%.6fs, dstSR=%d -> TR=%d"):format(pos, dst_offs, dst_sr, target_tr))
+
+            -- Sample-only console（同時把目前 position 以 samples 顯示）
+            msg(("    CurrentPos: %d smp  StartInSource(dst): %d smp  SR(dst): %dHz")
+              :format(curPos_smp, dstSIS_smp, dst_sr))
+            msg(("    RESULT dstTR=%d (samples)"):format(target_tr))
           end
 
           if target_tr then
