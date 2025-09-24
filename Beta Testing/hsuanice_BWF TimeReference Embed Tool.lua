@@ -1,6 +1,6 @@
 --[[
 @description Embed BWF TimeReference to Active take from Take 1 or Current Position TC
-@version 250924_1349 option 1&2 TC embed ok but has 16 samples difference
+@version 250924_1930 WIP sample not accurate about 1
 @author hsuanice
 
 @about
@@ -27,6 +27,13 @@
   ReaImGui: https://github.com/cfillion/reaper-imgui
 
 @changelog
+  v250924_1419
+    - Both Option 1 (Take1→Active) and Option 2 (ItemStart→Active) now compute TimeReference fully in samples.
+    - Changed rounding to truncation (floor) so values always align to REAPER’s render logic (sample-boundary consistent).
+    - Fixed the ~16 sample drift caused by rounding 1/3 ms positions.
+    - UI improvement: after running Option 1 or Option 2, the script window now stays open until the user explicitly closes it.
+    - Console debug unified: all positions, offsets, and TR values reported in pure samples (no seconds).
+
   v250924_0257
     - Fix: Align calculation now robust against item position moves.
     - Always compute TimeReference as: TR(src) + StartOffset(src) = edgeTC,
@@ -140,6 +147,21 @@ local function write_TR(cli, wav_path, tr)
   local code, out = exec_shell(cmd, 20000)
   return code, out
 end
+
+-- Quantize seconds to integer samples by truncating toward -inf (tiny epsilon to avoid +1)
+local QUANT_EPS = 1e-12
+local function quantize_samples_floor(sr, sec)
+  return math.floor((sec or 0) * (sr or 48000) + QUANT_EPS)
+end
+
+-- Helper: 判斷一段秒數在該 SR 下是否「落在整數 sample 邊界」
+local function is_on_sample_boundary(sr, sec)
+  if not sr then return false end
+  local smp = (sec or 0) * sr
+  local smp_floor = math.floor(smp + QUANT_EPS)
+  return math.abs(smp - smp_floor) < 1e-9
+end
+
 
 -- Track label: "Track <index>: <name>"
 local function item_track_label(it)
@@ -341,16 +363,10 @@ local function perform_embed(mode)
               local tr, rc, raw_xml = read_TR(cli, src_path)
               msg(("    READ take1 TR : %s  (code=%s)"):format(tostring(tr), tostring(rc)))
               if tr then
-                --（接著銜接「修改A」的 sample-domain 計算段落）
-                -- Pure sample-domain mapping (no seconds):
-                --   Source edge (samples in src rate):
-                --     edge_src_smp = TR_file + srcSIS_smp
-                --   Map edge to dst rate (only if SR differs):
-                --     edge_dst_smp = (src_sr == dst_sr) and edge_src_smp
-                --                                   or math.floor(edge_src_smp * dst_sr / src_sr + 0.5)
-                --   Target TR for dst file:
-                --     dstTR_smp    = edge_dst_smp - dstSIS_smp
-
+                -- Double-seconds domain (REAPER precision) → quantize at the very end:
+                --   edge_sec  = (TR_file / srcSR) + SrcStart_src(sec)
+                --   dstTR_sec = edge_sec - SrcStart_dst(sec)
+                --   dstTR_smp = floor(dstTR_sec * dstSR)  -- quantize-to-sample (truncate)
                 local src_sr = (function()
                   local s = R.GetMediaItemTake_Source(take1)
                   local v = s and select(2, R.GetMediaSourceSampleRate(s)) or 0
@@ -364,28 +380,25 @@ local function perform_embed(mode)
                   return math.floor(v + 0.5)
                 end)()
 
-                -- Start-in-source in seconds → samples (each in its own rate)
                 local srcSIS_sec = R.GetMediaItemTakeInfo_Value(take1, "D_STARTOFFS") or 0.0
                 local dstSIS_sec = R.GetMediaItemTakeInfo_Value(takeA,  "D_STARTOFFS") or 0.0
-                local srcSIS_smp = math.floor(srcSIS_sec * src_sr + 0.5)
-                local dstSIS_smp = math.floor(dstSIS_sec * dst_sr + 0.5)
 
-                -- TimeReference from BWF is already samples
-                local TR_file = tonumber(tr) or 0
+                local TR_file_smp = math.floor(tonumber(tr) or 0)
+                local edge_sec    = (TR_file_smp / src_sr) + srcSIS_sec
+                local dstTR_sec   = edge_sec - dstSIS_sec
+                local dstTR_smp   = quantize_samples_floor(dst_sr, dstTR_sec)
+                if dstTR_smp < 0 then dstTR_smp = 0 end
+                target_tr = dstTR_smp
 
-                local edge_src_smp = TR_file + srcSIS_smp
-                local edge_dst_smp = (src_sr == dst_sr)
-                                      and edge_src_smp
-                                       or math.floor(edge_src_smp * dst_sr / src_sr + 0.5)
-
-                target_tr = edge_dst_smp - dstSIS_smp
-                if target_tr < 0 then target_tr = 0 end
-
-                -- Sample-only console
                 msg(("    SR: src=%dHz  dst=%dHz"):format(src_sr, dst_sr))
-                msg(("    TR(src): %d  SrcStartInSource: %d  DstStartInSource: %d")
-                  :format(TR_file, srcSIS_smp, dstSIS_smp))
-                msg(("    Edge: src=%d  ->  dst=%d"):format(edge_src_smp, edge_dst_smp))
+                msg(("    TR(src): %d smp (%.15fs)"):format(TR_file_smp, TR_file_smp / src_sr))
+                msg(("    SrcStartInSource: %.15fs (%d smp)  DstStartInSource: %.15fs (%d smp)")
+                  :format(
+                    srcSIS_sec, quantize_samples_floor(src_sr, srcSIS_sec),
+                    dstSIS_sec, quantize_samples_floor(dst_sr, dstSIS_sec)
+                  ))
+                msg(("    Edge: %.15fs (src)  ->  %.15fs (dst-rate preview)")
+                  :format(edge_sec, (quantize_samples_floor(dst_sr, edge_sec) / dst_sr)))
                 msg(("    RESULT dstTR=%d (samples)"):format(target_tr))
               else
                 fail_cnt = fail_cnt + 1
@@ -393,29 +406,28 @@ local function perform_embed(mode)
               end
             end
           else
-            -- Option 2: Current project position → Active take TR (pure samples)
-            --   curPos_smp   = round(pos * dst_sr)
-            --   dstSIS_smp   = round(dstOffs * dst_sr)
-            --   dstTR_smp    = curPos_smp - dstSIS_smp
-
+            -- Double-seconds domain → quantize-to-sample at the very end.
             local dst_sr = (function()
               local s = R.GetMediaItemTake_Source(takeA)
               local v = s and select(2, R.GetMediaSourceSampleRate(s)) or 0
               if not v or v <= 0 then v = R.GetSetProjectInfo(0, "PROJECT_SRATE", 0, false) or 48000 end
               return math.floor(v + 0.5)
             end)()
-            local dst_offs_sec = R.GetMediaItemTakeInfo_Value(takeA, "D_STARTOFFS") or 0.0
+
             local pos_sec      = R.GetMediaItemInfo_Value(it, "D_POSITION") or 0.0
+            local dst_offs_sec = R.GetMediaItemTakeInfo_Value(takeA, "D_STARTOFFS") or 0.0
 
-            local curPos_smp = math.floor(pos_sec      * dst_sr + 0.5)
-            local dstSIS_smp = math.floor(dst_offs_sec * dst_sr + 0.5)
+            local dstTR_sec = pos_sec - dst_offs_sec
+            local dstTR_smp = quantize_samples_floor(dst_sr, dstTR_sec)
+            if dstTR_smp < 0 then dstTR_smp = 0 end
+            target_tr = dstTR_smp
 
-            target_tr = curPos_smp - dstSIS_smp
-            if target_tr < 0 then target_tr = 0 end
-
-            -- Sample-only console（同時把目前 position 以 samples 顯示）
-            msg(("    CurrentPos: %d smp  StartInSource(dst): %d smp  SR(dst): %dHz")
-              :format(curPos_smp, dstSIS_smp, dst_sr))
+            msg(("    CurrentPos: %.15fs (%d smp)  StartInSource(dst): %.15fs (%d smp)  SR(dst): %dHz")
+              :format(
+                pos_sec,       quantize_samples_floor(dst_sr, pos_sec),
+                dst_offs_sec,  quantize_samples_floor(dst_sr, dst_offs_sec),
+                dst_sr
+              ))
             msg(("    RESULT dstTR=%d (samples)"):format(target_tr))
           end
 
@@ -532,8 +544,13 @@ local function loop()
   end
 
   if not open or should_close then return end
-  if chosen_mode then perform_embed(chosen_mode); return end
+  if chosen_mode then
+    -- Run but keep window open for subsequent runs
+    perform_embed(chosen_mode)
+    chosen_mode = nil
+  end
   R.defer(loop)
+
 end
 
 loop()
