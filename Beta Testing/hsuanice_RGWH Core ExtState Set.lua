@@ -1,6 +1,6 @@
 --[[
 @description RGWH Core ExtState Set (project-scope)
-@version 250925_1101 change "force_multi" to "force_multi"
+@version 250925_1101 change "force-multi" to "force_multi"
 @author hsuanice
 @about
   Quick setup for RGWH Core ExtStates (written into current project).
@@ -8,7 +8,7 @@
   rename options, and new multi-mode output policy switches.
 
 @changelog
-v250925_1101 change "force_multi" to "force_multi"
+v250925_1101 change "force-multi" to "force_multi"
 v250925_1042
   - Added: RENDER_TC_EMBED = "previous" | "current"
     • "previous" (default): embed TimeReference from the previous/original take
