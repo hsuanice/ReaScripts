@@ -1,6 +1,6 @@
 --[[
 @description Cycle items to NEXT take and fix SrcStart by DesTC (TimeRef + SrcStart)
-@version 250923_2250 OK
+@version 250925_1935 Non-loop: preserve position on short sources.
 @author hsuanice
 @about
   Pre-aligns the target take's SrcStart so its Destination Timecode (DesTC = TimeRef + SrcStart)
@@ -10,6 +10,17 @@
   Optionally uses:  Scripts/hsuanice Scripts/Library/hsuanice_Metadata Read.lua
 
 @changelog
+  v250925_1846
+  - Update: Added dual-anchor (left/right) alignment logic in library.
+    • Prefers left-edge when both valid.
+    • Falls back to right-edge when left is invalid.
+    • Fallback overlap detection when both anchors invalid, clamps gracefully.
+  - Fix: Corrected behavior when active take’s edge extends beyond target take’s source length.
+    • Prevents target take from snapping to 0 start when shorter than reference.
+    • Maintains sync for trim/extend operations.
+  - Keep: Looping takes remain naturally aligned (no special handling required).
+  - Update: Next/Previous scripts now compute both DesTC_refL and DesTC_refR and pass to library.
+  - Verified: Works correctly for trim, extend, long vs. short takes, looped/non-looped modes.
   v250923_2250
   - Migrate to shared library (Cycle Take SrcStart) with DesTC alignment (DesTC = TimeRef + SrcStart).
   - Fix: Correct TimeRef resolution per target take; eliminates the 2.583333 clamping bug when switching between takes with different TimeRef.
@@ -54,21 +65,23 @@ for i = 0, N-1 do
     log("[item %d] skip: no active take", i+1)
   else
     -- DesTC of active take = TimeRef + SrcStart
-    local DesTC_ref = Lib.read_DesTC(it, tka)  -- returns desTC, tr, sis, sr, src
-    DesTC_ref = DesTC_ref or 0
+    local desL, trA, sisA = Lib.read_DesTC(it, tka)
+    local rateA  = reaper.GetMediaItemTakeInfo_Value(tka, "D_PLAYRATE") or 1
+    local iLen   = reaper.GetMediaItemInfo_Value(it, "D_LENGTH") or 0
+    local usedA  = iLen * rateA
+    local desR   = (desL or 0) + usedA
 
     local tgt = Lib.next_take(it, tka)
     if not tgt then
       log("[item %d] skip: no next take", i+1)
     else
-      local changed, info = Lib.fix_Take_To_DesTC(it, tgt, DesTC_ref, HONOR_BOUNDS)
+      local changed, info = Lib.fix_Take_To_DesTC(it, tgt, desL or 0, HONOR_BOUNDS, desR)
       if changed then
-        log(("[item %d] fix->next: TimeRef=%.6f  SrcStart %.6f -> %.6f  DesTC_ref=%.6f  loop=%s src_len=%.6f item_len=%.6f rate=%.6f"):
-            format(i+1, info.TimeRef, info.SrcStart_old, info.SrcStart_new, info.DesTC_ref,
-                   tostring(info.loop), (info.src_len or 0), (info.item_len or 0), (info.rate or 1)))
-        r.UpdateItemInProject(it)
+        log(("[item %d] fix->next: TimeRef=%.6f  SrcStart %.6f -> %.6f  DesTC_refL=%.6f  DesTC_refR=%.6f  loop=%s src_len=%.6f item_len=%.6f rate=%.6f"):
+            format(i+1, info.TimeRef, info.SrcStart_old, info.SrcStart_new, info.DesTC_ref or 0, info.DesTC_ref_right or 0,
+                  tostring(info.loop), (info.src_len or 0), (info.item_len or 0), (info.rate or 1)))
+        reaper.UpdateItemInProject(it)
       else
-        -- consider already aligned if within EPS
         local delta = math.abs((info.DesTC_now or 0) - (info.DesTC_ref or 0))
         if delta <= EPS then
           log(("[item %d] next: already aligned (ΔDesTC=%.6f)  TimeRef=%.6f  SrcStart=%.6f"):
