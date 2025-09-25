@@ -1,21 +1,35 @@
 --[[
 @description Render or Glue Items with Handles Core Library
-@version 250922_2257 Multi-mode  OK
+@version 250925_1546 REBDER_TC_EMBED OK
 @author hsuanice
 @about
   Library for RGWH glue/render flows with handles, FX policies, rename, # markers, and optional take markers inside glued items.
 
 @changelog
+v250925_1546 REBDER_TC_EMBED OK
+  - Added: ExtState key `RENDER_TC_EMBED` ("previous" | "current" | "off") to control
+    TimeReference embedding policy during render.
+      • "previous" (default): embed TimeReference from the original take (handle-aware).
+      • "current": embed TimeReference from current project position (item start).
+      • "off": disable TimeReference embedding (skip write).
+  - Fixed: initialization order — `DEFAULTS.RENDER_TC_EMBED` is now a static value
+    ("previous"); actual project-scope ExtState is read inside `read_settings()`.
+  - Updated: `render_selection()` now calls Metadata Embed library functions
+    (`TR_PrevToActive`, `TR_FromItemStart`, `TR_Write`) according to mode.
+  - Behavior: batch refresh of items after TR write remains intact.
+
+v250925_1101 change "force-multi" to "force_multi"
 v250922_2257
   - Multi-mode policies finalized:
-    • GLUE_OUTPUT_POLICY_WHEN_NO_TRACKFX = "preserve" | "force-multi"
-    • RENDER_OUTPUT_POLICY_WHEN_NO_TRACKFX = "preserve" | "force-multi"
-  - When APPLY_MODE="multi" and policy="force-multi" with no Track FX printing:
+    • GLUE_OUTPUT_POLICY_WHEN_NO_TRACKFX = "preserve" | "force_multi"
+    • RENDER_OUTPUT_POLICY_WHEN_NO_TRACKFX = "preserve" | "force_multi"
+  - When APPLY_MODE="multi"-
+   and policy="force_multi" with no Track FX printing:
     • Glue: run 41993 in a no-track-FX path; preserves take-FX per setting; fades snapshot/restore
     • Render: choose apply path and run 41993; fades snapshot/restore
   - New helper: apply_multichannel_no_fx_preserve_take(it, keep_take_fx, dbg_level)
     • Temporarily disables track FX (snapshot), optionally offlines take FX, zeroes fades, runs 41993, restores everything
-  - Render path: add use_apply decision (need_track OR force-multi) with clear fades only when applying
+  - Render path: add use_apply decision (need_track OR force_multi) with clear fades only when applying
   - Console messages:
     • "[APPLY] force multi (no track FX path)"
     • "[RUN] Temporarily disabled TRACK FX (policy TRACK=0)."
@@ -51,6 +65,10 @@ v250921_1512
 local r = reaper
 local M = {}
 
+-- Load Metadata Embed Library (single source of truth for TR math)
+local RES_PATH = r.GetResourcePath()
+local E = dofile(RES_PATH .. '/Scripts/hsuanice Scripts/Library/hsuanice_Metadata Embed.lua')
+
 ------------------------------------------------------------
 -- Constants / Commands
 ------------------------------------------------------------
@@ -74,23 +92,24 @@ local DEFAULTS = {
   EPSILON_VALUE      = 0.5,
   DEBUG_LEVEL        = 1,
   -- FX policies (separate for GLUE vs RENDER)
-  GLUE_TAKE_FX       = 1,      -- 1=Glue 之後的成品要印入 take FX；0=不印入
-  GLUE_TRACK_FX      = 0,      -- 1=Glue 成品再套用 Track/Take FX
-  GLUE_APPLY_MODE    = "mono", -- "mono" | "multi"（給 Glue 後的 apply 用）
+  GLUE_TAKE_FX       = 1,             -- 1=Glue 之後的成品要印入 take FX；0=不印入
+  GLUE_TRACK_FX      = 0,             -- 1=Glue 成品再套用 Track/Take FX
+  GLUE_APPLY_MODE    = "mono",        -- "mono" | "multi"（給 Glue 後的 apply 用）
 
-  RENDER_TAKE_FX     = 0,      -- 1=Render 直接印入 take FX；0=保留（偏向 non-destructive）
-  RENDER_TRACK_FX    = 0,      -- 1=Render 同時印入 Track FX
-  RENDER_APPLY_MODE  = "mono", -- "mono" | "multi"（Render 使用的 apply 模式）
+  RENDER_TAKE_FX     = 0,             -- 1=Render 直接印入 take FX；0=保留（偏向 non-destructive）
+  RENDER_TRACK_FX    = 0,             -- 1=Render 同時印入 Track FX
+  RENDER_APPLY_MODE  = "mono",        -- "mono" | "multi"（Render 使用的 apply 模式）
+  RENDER_TC_EMBED    = "previous",    -- TR embed mode for render: "previous" | "current" | "off"
   -- Rename policy:
-  RENAME_OP_MODE     = "auto", -- glue | render | auto
+  RENAME_OP_MODE     = "auto",        -- glue | render | auto
   -- Hash markers（#in/#out 以供 Media Cues）
   WRITE_EDGE_CUES   = 1,
   -- ✅ 新增：Glue 成品 take 內是否加 take markers（非 SINGLE 才加）
   WRITE_GLUE_CUES = 1,
 
   -- Policies when TRACK FX are NOT being printed:
-  GLUE_OUTPUT_POLICY_WHEN_NO_TRACKFX   = "preserve",   -- "preserve" | "force-multi"
-  RENDER_OUTPUT_POLICY_WHEN_NO_TRACKFX = "preserve",   -- "preserve" | "force-multi"
+  GLUE_OUTPUT_POLICY_WHEN_NO_TRACKFX   = "preserve",   -- "preserve" | "force_multi"
+  RENDER_OUTPUT_POLICY_WHEN_NO_TRACKFX = "preserve",   -- "preserve" | "force_multi"
 }
 
 ------------------------------------------------------------
@@ -138,10 +157,12 @@ function M.read_settings()
     RENDER_TAKE_FX     = (get_ext_bool("RENDER_TAKE_FX",    DEFAULTS.RENDER_TAKE_FX)==1),
     RENDER_TRACK_FX    = (get_ext_bool("RENDER_TRACK_FX",   DEFAULTS.RENDER_TRACK_FX)==1),
     RENDER_APPLY_MODE  =  get_ext("RENDER_APPLY_MODE",      DEFAULTS.RENDER_APPLY_MODE),
+    -- TR embed mode for Render: "previous" | "current" | "off"
+    RENDER_TC_EMBED    = get_ext("RENDER_TC_EMBED", "previous"),
     RENAME_OP_MODE     = get_ext("RENAME_OP_MODE",           DEFAULTS.RENAME_OP_MODE),
-    WRITE_EDGE_CUES   = (get_ext_bool("WRITE_EDGE_CUES",   DEFAULTS.WRITE_EDGE_CUES)==1),
+    WRITE_EDGE_CUES    = (get_ext_bool("WRITE_EDGE_CUES",   DEFAULTS.WRITE_EDGE_CUES)==1),
     -- 🔧 修正：用 DEFAULTS，不是 dflt
-    WRITE_GLUE_CUES = (get_ext_bool("WRITE_GLUE_CUES", DEFAULTS.WRITE_GLUE_CUES)==1),
+    WRITE_GLUE_CUES    = (get_ext_bool("WRITE_GLUE_CUES", DEFAULTS.WRITE_GLUE_CUES)==1),
 
     GLUE_OUTPUT_POLICY_WHEN_NO_TRACKFX   = get_ext("GLUE_OUTPUT_POLICY_WHEN_NO_TRACKFX",   DEFAULTS.GLUE_OUTPUT_POLICY_WHEN_NO_TRACKFX),
     RENDER_OUTPUT_POLICY_WHEN_NO_TRACKFX = get_ext("RENDER_OUTPUT_POLICY_WHEN_NO_TRACKFX", DEFAULTS.RENDER_OUTPUT_POLICY_WHEN_NO_TRACKFX),
@@ -774,7 +795,7 @@ local function glue_unit(tr, u, cfg)
 
   elseif glued_pre
      and (cfg.GLUE_APPLY_MODE == "multi")
-     and (cfg.GLUE_OUTPUT_POLICY_WHEN_NO_TRACKFX == "force-multi") then
+     and (cfg.GLUE_OUTPUT_POLICY_WHEN_NO_TRACKFX == "force_multi") then
     -- TRACK FX 未印，但需要強制 multi：以「無 FX」方式套 41993
     apply_multichannel_no_fx_preserve_take(glued_pre, (cfg.GLUE_TAKE_FX == true), DBG)
   end
@@ -990,6 +1011,8 @@ function M.render_selection()
     if tk_orig then
       _, orig_name = r.GetSetMediaItemTakeInfo_String(tk_orig, "P_NAME", "", false)
     end
+    -- snapshot original StartInSource (seconds) before we stretch window
+    local orig_startoffs_sec = tk_orig and (r.GetMediaItemTakeInfo_Value(tk_orig, "D_STARTOFFS") or 0.0) or nil
 
     -- When TAKE FX are excluded, temporarily offline only those that were online.
     local snap_off = nil
@@ -1050,7 +1073,7 @@ function M.render_selection()
     local fade_snap = nil
     local force_multi = (not need_track)
                     and (cfg.RENDER_APPLY_MODE == "multi")
-                    and (cfg.RENDER_OUTPUT_POLICY_WHEN_NO_TRACKFX == "force-multi")
+                    and (cfg.RENDER_OUTPUT_POLICY_WHEN_NO_TRACKFX == "force_multi")
 
     local use_apply = (need_track == true) or (force_multi == true)
     if use_apply then
@@ -1110,8 +1133,49 @@ function M.render_selection()
       local ncl = clone_takefx_chain(tk_orig, newtk)
       if DBG >= 2 then dbg(DBG,2,"[TAKEFX] cloned %d FX from old→new on '%s'", ncl, orig_name) end
     end
-  end
 
+    -- === TimeReference embed (via Library) =========================
+    -- ExtState: RENDER_TC_EMBED = "previous" | "current" | "off"
+    do
+      local mode = cfg.RENDER_TC_EMBED or "previous"
+      if newtk and mode ~= "off" then
+        local ok_write = false
+
+        -- 1) 保證 prev_take 的 D_STARTOFFS 回到「渲染前」的值
+        if tk_orig and orig_startoffs_sec ~= nil then
+          r.SetMediaItemTakeInfo_Value(tk_orig, "D_STARTOFFS", orig_startoffs_sec)
+        end
+
+        if mode == "previous" and tk_orig then
+          -- Embed TR from previous (original) take, handle-aware and cross-SR safe
+          local smp = E.TR_PrevToActive(tk_orig, newtk)
+          local src = r.GetMediaItemTake_Source(newtk)
+          local path = src and r.GetMediaSourceFileName(src, "") or ""
+          if path ~= "" and path:lower():sub(-4) == ".wav" then
+            ok_write = (select(1, E.TR_Write(E.CLI_Resolve(), path, smp)) == true)
+            if DBG >= 2 then dbg(DBG,2,"[RGWH-TR] mode=previous  write=%s  samples=%d  path=%s", tostring(ok_write), smp, path) end
+          end
+
+        elseif mode == "current" then
+          -- Embed TR from current project position (item start → active)
+          local smp = E.TR_FromItemStart(newtk, L0)
+          local src = r.GetMediaItemTake_Source(newtk)
+          local path = src and r.GetMediaSourceFileName(src, "") or ""
+          if path ~= "" and path:lower():sub(-4) == ".wav" then
+            ok_write = (select(1, E.TR_Write(E.CLI_Resolve(), path, smp)) == true)
+            if DBG >= 2 then dbg(DBG,2,"[RGWH-TR] mode=current   write=%s  samples=%d  path=%s", tostring(ok_write), smp, path) end
+          end
+        end
+
+        -- collect for batch refresh if TR was written
+        if ok_write then
+          collected_new_takes = collected_new_takes or {}
+          collected_new_takes[#collected_new_takes+1] = newtk
+        end
+      end
+    end
+    -- ==============================================================
+  end
   -- restore TRACK FX enabled states if we disabled them
   if not need_track then
     for _, rec in pairs(tr_map) do
@@ -1124,6 +1188,12 @@ function M.render_selection()
 
   r.PreventUIRefresh(-1)
   r.UpdateArrange()
+
+  -- refresh items that had TR written (batch)
+  if collected_new_takes and #collected_new_takes > 0 then
+    E.Refresh_Items(collected_new_takes)
+  end
+
   r.Undo_EndBlock("RGWH Core - Render (Apply FX per item w/ handles)", -1)
 end
 
