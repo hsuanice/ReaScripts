@@ -143,7 +143,7 @@ local ENABLE_B = true
 -- C) Track selection changed + REAL TS → build/clear Razor + sync items (Overlap)
 local ENABLE_C = true
 -- D) Razor/Track changed → sync items under ACTIVE range (only on changed tracks)
-local ENABLE_D = false
+local ENABLE_D = true
 
 -- (Quick preset to disable Arrange→TCP fully)
 -- ENABLE_A = false; ENABLE_B = false
