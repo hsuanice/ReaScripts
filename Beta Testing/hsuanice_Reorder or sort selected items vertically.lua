@@ -1,6 +1,6 @@
 --[[
 @description ReaImGui - Vertical Reorder and Sort (items)
-@version 250921_1819 ExtState memory
+@version 250925_1038 change UI namming display
 @author hsuanice
 @about
   Provides three vertical re-arrangement modes for selected items (stacked UI):
@@ -29,6 +29,7 @@
 
 
 @changelog
+  v250925_1038 change UI namming display
   v250921_1819
     - Preferences are now persisted via ExtState:
       • Sort key (Take/File/Metadata) and Asc/Desc.
@@ -1128,7 +1129,7 @@ local function draw_confirm()
 
     -- 🆕 Copy-to-Sort 的「TCP命名」與「群組排序」
     reaper.ImGui_Spacing(ctx)
-    reaper.ImGui_Text(ctx, "Copy-to-Sort — TCP naming (grouping):")
+    reaper.ImGui_Text(ctx, "Copy-to-Sort — TCP naming:")
     reaper.ImGui_SameLine(ctx)
     if reaper.ImGui_RadioButton(ctx, "Track Name##nm", meta_name_mode==1) then
       meta_name_mode=1
@@ -1140,7 +1141,7 @@ local function draw_confirm()
       save_pref("meta_name_mode", meta_name_mode)
     end
 
-    reaper.ImGui_Text(ctx, "Copy-to-Sort — Group order:")
+    reaper.ImGui_Text(ctx, "Copy-to-Sort — order:")
     reaper.ImGui_SameLine(ctx)
     if reaper.ImGui_RadioButton(ctx, "Track Name##ord", meta_order_mode==1) then
       meta_order_mode=1
@@ -1154,7 +1155,7 @@ local function draw_confirm()
 
     -- 🆕 當以 Channel# 命名新 TCP 時，附加最常見 Track Name
     if meta_name_mode == 2 then
-      local chg, v = reaper.ImGui_Checkbox(ctx, "Append Track Name to TCP label (e.g., 'Ch 03 — BOOM1')", meta_append_secondary)
+      local chg, v = reaper.ImGui_Checkbox(ctx, "Append Track Name label (e.g., 'Ch 03 — BOOM1')", meta_append_secondary)
       if chg then
         meta_append_secondary = v
         save_pref("meta_append_secondary", meta_append_secondary)
