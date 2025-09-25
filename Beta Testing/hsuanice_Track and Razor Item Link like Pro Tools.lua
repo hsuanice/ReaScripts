@@ -1,6 +1,6 @@
 --[[
-@description Track and Razor Item Link like Pro Tools (performance edition)
-@version 0.13.1 Menu OK
+@description Track↔Edit link (Pro Tools style). Performance edition; focuses on Razor & item virtual ranges. This build removes menu guards for snappier click-select.
+@version 250925_2241 remove menu guard
 @author hsuanice
 @about
   Pro Tools-style "Link Track and Edit Selection".
@@ -31,6 +31,11 @@
     hsuanice served as the workflow designer, tester, and integrator for this tool.
 
 @changelog
+  v250925_2241
+    - Revert: removed all context-menu click-through mitigations (popup/menu guards, RMB sessions, soft latch, stability gate).
+    - Change: removed mouse-up delay guards to restore immediate, reliable selection.
+    - Cleanup: deleted related options/helpers (e.g., CLICK_SUPPRESS_RBUTTON_MENU, CLICK_MENU_CLOSE_GRACE_SEC, CLICK_MENU_SOFT_LATCH_SEC, Click_IsPopupMenuOpen, stability tracking).
+    - Note: kept focus-return grace (prevents ghost clicks when returning focus); ABCD linking logic unchanged.
   v0.13.0 — Gesture FSM Click Module
     - New: Rewrote the click handler as a finite-state machine (FSM).
       States: IDLE, LMB_GESTURE, RMB_SESSION, MENU_COOLDOWN, FOCUS_COOLDOWN.
@@ -99,7 +104,7 @@
     v0.8.2 - perf          - Suppress relatch shrink after script-driven item changes.
     v0.8.1 - perf-hotfix   - Restore set_track_level_ranges().
     v0.8.0 - perf          - Major perf pass.
-]]
+]]--
 
 -------------------------
 -- === USER OPTIONS === --
@@ -111,18 +116,10 @@ local CLICK_SELECT_ON_MOUSE_UP         = true   -- 建議用 mouse-up
 local CLICK_ENABLE_ITEM_UPPER_HALF     = false  -- 點 item 上半部不選軌
 local CLICK_TOLERANCE_PX               = 3      -- 點擊移動容差(px)
 
--- 防穿透／穩定性
-local CLICK_SUPPRESS_RBUTTON_MENU      = false   -- 必開
-local CLICK_RBUTTON_COOLDOWN_SEC       = 0.18   -- 右鍵冷卻
-local CLICK_MENU_CLOSE_GRACE_SEC       = 0.25   -- 菜單關閉保護窗
 local CLICK_FOCUS_RETURN_GRACE_SEC     = 0.20   -- 焦點回來保護窗
--- 反穿透加強
-local CLICK_REQUIRE_FRESH_LMB          = true   -- 寬限期後，必須「重新武裝」的第一次 LMB 才會生效
-local CLICK_POST_GUARD_IDLE_SEC        = 0.12   -- 兩鍵皆彈起且無變化多久，才視為已重新武裝
-local CLICK_DEBUG_VERBOSE_HOLD         = false  -- 關掉每幀的 rbutton_session_hold spam
 
 -- 除錯
-local CLICK_WANT_DEBUG                 = true  -- 需要時再開
+local CLICK_WANT_DEBUG                 = false  -- 需要時再開
 
 
 -- === CLICK-SELECT hook phase ===
@@ -189,14 +186,6 @@ local function Click_Log(msg)
   if CLICK_WANT_DEBUG then reaper.ShowConsoleMsg(("[Click] %s\n"):format(tostring(msg))) end
 end
 
-local function Click_IsPopupMenuOpen()
-  if not reaper.APIExists("JS_Window_Find") then return false end
-  local h1 = reaper.JS_Window_Find("#32768", true) -- Windows context menu
-  if h1 and h1 ~= 0 then return true end
-  local h2 = reaper.JS_Window_Find("NSMenu", true) -- macOS menu
-  if h2 and h2 ~= 0 then return true end
-  return false
-end
 
 -- Parse "P_UI_RECT:tcp.size" to x,y,w,h
 local function Click_GetTrackTCPRect(tr)
@@ -249,13 +238,8 @@ local CLICK_STATE = "IDLE"   -- "IDLE","LMB_GESTURE","RMB_SESSION","MENU_COOLDOW
 -- edges / gesture tracking
 local CLICK_prev_lmb, CLICK_prev_rmb = false, false
 local CLICK_down_x, CLICK_down_y, CLICK_down_t = nil, nil, -1
-local CLICK_lmb_armed = true
-local CLICK_last_btn_change_t = -1
 
--- popup / rbutton / focus trackers
-local CLICK_menu_open          = false
-local CLICK_menu_closed_time   = -1
-local CLICK_rbtn_up_time       = -1
+-- focus trackers
 local CLICK_focus_was_main     = true
 local CLICK_focus_return_time  = -1
 
@@ -293,30 +277,6 @@ local function Click_TickMaybeSelectTrack()
     end
   end
 
-  -- === Popup（模態）守門：開→關→寬限 ===
-  if Click_IsPopupMenuOpen() then
-    CLICK_menu_open = true
-    CLICK_STATE = "RMB_SESSION"             -- 菜單期間視同右鍵 session
-    Click_Log("guard: popup_open")
-    return false
-  elseif CLICK_menu_open then
-    CLICK_menu_open = false
-    CLICK_menu_closed_time = now
-    CLICK_STATE = "MENU_COOLDOWN"
-    Click_Log("guard: menu_closed_latch")
-    return false
-  end
-
-  if CLICK_STATE == "MENU_COOLDOWN" then
-    local dt = now - (CLICK_menu_closed_time >= 0 and CLICK_menu_closed_time or now)
-    if dt < (CLICK_MENU_CLOSE_GRACE_SEC or 0) then
-      Click_Log(("guard: menu_close_grace dt=%.3f"):format(dt))
-      return false
-    else
-      CLICK_STATE = "IDLE"
-    end
-  end
-
   -- 讀滑鼠狀態＋邊緣
   local mstate = reaper.JS_Mouse_GetState(1 + 2)   -- LMB|RMB
   local x, y   = reaper.GetMousePosition()
@@ -327,62 +287,10 @@ local function Click_TickMaybeSelectTrack()
   local r_down = ( rmb and not CLICK_prev_rmb)
   local r_up   = ((not rmb) and CLICK_prev_rmb)
 
-  if (lmb ~= CLICK_prev_lmb) or (rmb ~= CLICK_prev_rmb) then
-    CLICK_last_btn_change_t = now
-  end
-
-
-  -- === 右鍵 session / 冷卻（避免 rmb→lmb 交界殘留） ===
-  if CLICK_SUPPRESS_RBUTTON_MENU then
-    if r_down then
-      CLICK_STATE        = "RMB_SESSION"
-      CLICK_rbtn_up_time = -1
-      Click_Log("guard: rbutton_session_start")
-      CLICK_prev_lmb, CLICK_prev_rmb = lmb, rmb
-      return false
-    end
-
-    if CLICK_STATE == "RMB_SESSION" then
-      if rmb then
-        if CLICK_DEBUG_VERBOSE_HOLD then Click_Log("guard: rbutton_session_hold") end
-        CLICK_prev_lmb, CLICK_prev_rmb = lmb, rmb
-        return false
-      end
-      if r_up and CLICK_rbtn_up_time < 0 then
-        CLICK_rbtn_up_time = now
-      end
-      if CLICK_rbtn_up_time >= 0 then
-        local rem = (CLICK_RBUTTON_COOLDOWN_SEC or 0) - (now - CLICK_rbtn_up_time)
-        if rem > 0 then
-          Click_Log(("guard: rbutton_cooldown rem=%.3f"):format(rem))
-          CLICK_prev_lmb, CLICK_prev_rmb = lmb, rmb
-          return false
-        else
-          CLICK_STATE        = "IDLE"
-          CLICK_rbtn_up_time = -1
-          Click_Log("guard: rbutton_session_clear")
-        end
-      end
-    end
-  end
-
   -- === 左鍵手勢（一次點擊 = down→up 的完整手勢） ===
   local did = false
 
   if CLICK_STATE == "IDLE" then
-    -- 需要重新武裝：兩鍵都已彈起並經過一小段 idle，再遇到「新的 l_down」才解鎖
-    if CLICK_REQUIRE_FRESH_LMB and not CLICK_lmb_armed then
-      local idle_ok = (CLICK_last_btn_change_t >= 0)
-                      and ((now - CLICK_last_btn_change_t) >= (CLICK_POST_GUARD_IDLE_SEC or 0))
-      if l_down and idle_ok then
-        CLICK_lmb_armed = true   -- 這一下視為「新手勢」的開始
-      else
-        CLICK_prev_lmb, CLICK_prev_rmb = lmb, rmb
-        return false             -- 還沒重新武裝好，吞掉
-      end
-    end
-
-
     if l_down then
       CLICK_down_x, CLICK_down_y, CLICK_down_t = x, y, now
       if not CLICK_SELECT_ON_MOUSE_UP then
@@ -404,8 +312,8 @@ local function Click_TickMaybeSelectTrack()
     end
 
   elseif CLICK_STATE == "LMB_GESTURE" then
-    -- 任何干擾（右鍵/菜單）都取消手勢
-    if r_down or Click_IsPopupMenuOpen() then
+    -- 任何干擾（右鍵）都取消手勢
+    if r_down then
       CLICK_STATE = "IDLE"
       CLICK_prev_lmb, CLICK_prev_rmb = lmb, rmb
       return false
