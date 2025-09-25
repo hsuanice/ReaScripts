@@ -1,6 +1,6 @@
 --[[
 @description Cycle Take SrcStart calculator
-@version 250923_2250 OK
+@version 250925_1935 Non-loop: preserve position on short sources.
 @author hsuanice
 @about
   Utility helpers for aligning takes by Destination Timecode (DesTC = TimeRef + SrcStart).
@@ -9,6 +9,17 @@
   No external CLI. Optionally uses: Scripts/hsuanice Scripts/Library/hsuanice_Metadata Read.lua
 
 @changelog
+  v250925_1846
+  - Update: Added dual-anchor (left/right) alignment logic in library.
+    • Prefers left-edge when both valid.
+    • Falls back to right-edge when left is invalid.
+    • Fallback overlap detection when both anchors invalid, clamps gracefully.
+  - Fix: Corrected behavior when active take’s edge extends beyond target take’s source length.
+    • Prevents target take from snapping to 0 start when shorter than reference.
+    • Maintains sync for trim/extend operations.
+  - Keep: Looping takes remain naturally aligned (no special handling required).
+  - Update: Next/Previous scripts now compute both DesTC_refL and DesTC_refR and pass to library.
+  - Verified: Works correctly for trim, extend, long vs. short takes, looped/non-looped modes.
   v250923_2250
   - Fix: TimeRef is now read from the target take's source (BWF:TimeReference), not item-level metadata; prevents misalignment when the active take differs.
   - Add: SrcStart normalization (non-loop clamp, loop wrap) to keep offsets in valid bounds and avoid empty content.
@@ -122,17 +133,25 @@ function M.normalize_SrcStart(item, take, src, sis_new, honor_bounds)
   local src_len  = select(1, r.GetMediaSourceLength(src)) or 0
   local used     = item_len * rate
 
-  if src_len <= 0 then return math.max(0, sis_new) end
+  if src_len <= 0 then return sis_new end
+
   if loop then
+    -- loop: wrap into [0, src_len)
     local m = sis_new % src_len
     if m < 0 then m = m + src_len end
     return m
   else
-    local max_start = math.max(0, src_len - used)
-    return clamp(sis_new, 0, max_start)
+    -- non-loop:
+    -- When used <= src_len we can safely clamp; when used > src_len we must allow
+    -- negative/positive offsets so that silence can appear on either side.
+    if used <= src_len then
+      local max_start = math.max(0, src_len - used)
+      return clamp(sis_new, 0, max_start)
+    else
+      return sis_new
+    end
   end
 end
-
 ----------------------------------------------------------------
 -- Compute target SrcStart so that its DesTC equals a reference value.
 -- Params:
@@ -141,29 +160,60 @@ end
 --   changed(bool), info(table)
 --     info = { TimeRef=..., SrcStart_old=..., SrcStart_new=..., DesTC_now=..., DesTC_ref=..., SR=..., src_len=..., loop=..., item_len=..., rate=... }
 ----------------------------------------------------------------
-function M.fix_Take_To_DesTC(item, target_take, desTC_ref, honor_bounds)
+function M.fix_Take_To_DesTC(item, target_take, desTC_ref_left, honor_bounds, desTC_ref_right)
+  -- Align target take so its DesTC matches the reference.
+  -- desTC_ref_left  : left-edge DesTC from ACTIVE take (TimeRef_a + SrcStart_a)
+  -- desTC_ref_right : right-edge DesTC from ACTIVE take (desTC_ref_left + used_active)
   if not target_take then return false, {} end
+
   local des_now, tr_sec, sis_old, sr, src = M.read_DesTC(item, target_take)
   local item_len = r.GetMediaItemInfo_Value(item, "D_LENGTH") or 0
-  local rate     = r.GetMediaItemTakeInfo_Value(target_take, "D_PLAYRATE") or 1
+  local rate_t   = r.GetMediaItemTakeInfo_Value(target_take, "D_PLAYRATE") or 1
+  local used_t   = item_len * rate_t
   local src_len  = select(1, r.GetMediaSourceLength(src)) or 0
   local loop     = (r.GetMediaItemInfo_Value(item, "B_LOOPSRC") or 0) == 1
 
-  if math.abs(des_now - desTC_ref) < 1e-4 then
-    return false, { TimeRef=tr_sec, SrcStart_old=sis_old, DesTC_now=des_now, DesTC_ref=desTC_ref, SR=sr, src_len=src_len, loop=loop, item_len=item_len, rate=rate }
+  if math.abs(des_now - desTC_ref_left) < 1e-4 then
+    return false, {
+      TimeRef=tr_sec, SrcStart_old=sis_old, DesTC_now=des_now, DesTC_ref=desTC_ref_left,
+      SR=sr, src_len=src_len, loop=loop, item_len=item_len, rate=rate_t
+    }
   end
 
-  local sis_new = desTC_ref - tr_sec
+  -- Candidate anchors (seconds)
+  local S_left  = (desTC_ref_left  or 0) - tr_sec                        -- keep left edge
+  local S_right = ((desTC_ref_right or 0) - tr_sec) - used_t             -- keep right edge (with used length)
+
+  local max_start = math.max(0, src_len - used_t)
+  local function in_bounds(x) return x >= 0 and x <= max_start end
+
+  local sis_new = S_left
+  if not loop then
+    if in_bounds(S_left) and in_bounds(S_right) then
+      sis_new = S_left
+    elseif in_bounds(S_left) then
+      sis_new = S_left
+    elseif in_bounds(S_right) then
+      sis_new = S_right
+    else
+      -- Both invalid (used_t > src_len). Keep the RIGHT content in place by using the right anchor
+      -- computed with USED LENGTH (not src_len). This ensures the end of actual content lands at desTC_ref_right.
+      sis_new = S_right
+    end
+  else
+    -- loop=true → left anchor; wrapping is handled in normalize_SrcStart
+    sis_new = S_left
+  end
+
   sis_new = M.normalize_SrcStart(item, target_take, src, sis_new, honor_bounds ~= false)
   M.set_sis(target_take, sis_new)
 
   return true, {
     TimeRef=tr_sec, SrcStart_old=sis_old, SrcStart_new=sis_new,
-    DesTC_now=des_now, DesTC_ref=desTC_ref, SR=sr, src_len=src_len, loop=loop,
-    item_len=item_len, rate=rate
+    DesTC_now=des_now, DesTC_ref=desTC_ref_left, DesTC_ref_right=desTC_ref_right,
+    SR=sr, src_len=src_len, loop=loop, item_len=item_len, rate=rate_t
   }
 end
-
 ----------------------------------------------------------------
 -- Take navigation helpers
 ----------------------------------------------------------------
