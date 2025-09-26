@@ -1,6 +1,6 @@
 --[[
 @description hsuanice Hover Library (Shared helpers for Hover Mode editing tools)
-@version 0.2.0
+@version 250926_1610 update start in source to all takes
 @author hsuanice
 @about
   Common utilities for Hover Mode scripts (Split / Trim / Extend).
@@ -15,6 +15,8 @@
 
   Path: REAPER/Scripts/hsuanice Scripts/Library/hsuanice_Hover.lua
 @changelog
+  v250926_1610
+    • Left-edge edits propagate SrcStart (D_STARTOFFS) delta to all takes (matches REAPER prefs behavior).
   v0.2.0
     HIGH ROI
       • selection_sync_enabled(is_true_hover, min)  → bool, sel_count
@@ -46,7 +48,7 @@ local M = {}
 ----------------------------------------
 M.EXT_NS        = "hsuanice_TrimTools"
 M.EXT_HOVER_KEY = "HoverMode"
-M.DEBUG         = false
+M.DEBUG         = true
 
 function M.set_debug(on) M.DEBUG = not not on end
 local function LOG(s)  if M.DEBUG then reaper.ShowConsoleMsg(tostring(s).."\n") end end
@@ -312,6 +314,35 @@ function M.clamp_right_extend_no_overlap(it, new_en, eps)
 end
 
 ----------------------------------------
+-- Start-offset sync across takes (HIGH ROI)
+----------------------------------------
+
+-- Shift D_STARTOFFS for all non-MIDI takes in an item by delta timeline seconds.
+-- Each take uses its own playrate for correct conversion.
+local function _shift_all_takes_start_offset(item, delta_pos)
+  if not item or delta_pos == 0 then return end
+  local nt = reaper.CountTakes(item)
+  local guid = reaper.BR_GetMediaItemGUID and reaper.BR_GetMediaItemGUID(item) or tostring(item)
+  LOGF("[HoverLib] shift_all_takes: item=%s  delta_pos=%.9f  takes=%d", guid, delta_pos, nt)
+  for i = 0, nt - 1 do
+    local tk = reaper.GetTake(item, i)
+    if tk and not reaper.TakeIsMIDI(tk) then
+      local rate = reaper.GetMediaItemTakeInfo_Value(tk, "D_PLAYRATE") or 1.0
+      if rate <= 0 then rate = 1.0 end
+      local offs = reaper.GetMediaItemTakeInfo_Value(tk, "D_STARTOFFS") or 0.0
+      local src  = reaper.GetMediaItemTake_Source(tk)
+      local src_len, isQN = reaper.GetMediaSourceLength(src)
+      if isQN then src_len = reaper.TimeMap_QNToTime(src_len) end
+      local new_offs = offs + delta_pos * rate
+      if new_offs < 0 then new_offs = 0 end
+      if src_len and src_len > 0 and new_offs > src_len then new_offs = src_len end
+      LOGF("[HoverLib]   take#%d rate=%.6f offs_old=%.9f -> offs_new=%.9f src_len=%.9f", i+1, rate, offs, new_offs, src_len or -1)
+      reaper.SetMediaItemTakeInfo_Value(tk, "D_STARTOFFS", new_offs)
+    end
+  end
+end
+
+----------------------------------------
 -- No-flicker edge apply (HIGH ROI)
 ----------------------------------------
 
@@ -354,6 +385,7 @@ function M.apply_left_edge_no_flicker(it, target_pos)
     if new_st < min_st then new_st = min_st end
   end
 
+  LOGF("[HoverLib] left-edge: st=%.9f target=%.9f -> new_st=%.9f", st, target_pos, new_st)
   if math.abs(new_st - st) < 1e-12 then return end
   local new_ln = en - new_st
 
@@ -362,17 +394,15 @@ function M.apply_left_edge_no_flicker(it, target_pos)
   local new_fi  = (old_fi > 0) and math.max(0, fade_end - new_st) or 0
 
   reaper.SetMediaItemInfo_Value(it, "D_FADEINLEN_AUTO", 0)
-  if is_audio then
-    local offs = reaper.GetMediaItemTakeInfo_Value(take, "D_STARTOFFS") or 0
-    local rate = reaper.GetMediaItemTakeInfo_Value(take, "D_PLAYRATE") or 1.0
-    if rate <= 0 then rate = 1.0 end
-    local new_offs = offs + (new_st - st) * rate
-    if new_offs < 0 then new_offs = 0 end
-    reaper.SetMediaItemTakeInfo_Value(take, "D_STARTOFFS", new_offs)
+  local delta_pos = new_st - st
+  LOGF("[HoverLib] left-edge: delta_pos=%.9f (seconds)", delta_pos)
+  if delta_pos ~= 0 then
+    _shift_all_takes_start_offset(it, delta_pos)
   end
   reaper.SetMediaItemInfo_Value(it, "D_POSITION",  new_st)
   reaper.SetMediaItemInfo_Value(it, "D_LENGTH",    new_ln)
   reaper.SetMediaItemInfo_Value(it, "D_FADEINLEN", new_fi)
+  LOGF("[HoverLib] left-edge: applied pos=%.9f len=%.9f fade_in=%.9f", new_st, new_ln, new_fi)
 end
 
 -- Right edge: preserve fade-out START; clamp no-overlap & audio tail; no flicker
