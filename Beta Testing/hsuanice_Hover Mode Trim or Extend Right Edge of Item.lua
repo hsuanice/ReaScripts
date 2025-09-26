@@ -1,6 +1,6 @@
 --[[
 @description Hover_Mode_-_Trim_or_Extend_Right_Edge_of_Item (Preserve Fade Start, No Flicker)
-@version 0.3.2
+@version 250926_1810 Read Hover library and print loaded path in console.
 @author hsuanice
 @about
   Right-edge trim/extend that preserves the FADE-OUT START time (not the length), using the shared
@@ -28,6 +28,12 @@
     REAPER/Scripts/hsuanice Scripts/Library/hsuanice_Hover.lua
 
 @changelog
+  v250926_1810
+    - Read Hover library and print loaded path in console.
+    - Delegate right-edge handling to shared no-flicker logic.
+    - Add detailed [HoverLib] right-edge logs (st/en/target, new_en, delta_len, applied).
+  v250926_1610
+    - reading Hover library; added debug path output and delegated right-edge handling to shared library.
   v0.3.2
     - Selection-sync in True Hover now requires ≥2 selected items. With a single selected item, behave like no-selection.
     - Passed `prefer_selection` into the library, gated the rightmost-per-track filter with this flag,
@@ -39,8 +45,8 @@
 ----------------------------------------
 -- USER OPTIONS
 ----------------------------------------
-local DEBUG              = false  -- set true to print debug logs
-local CLEAR_ON_RUN       = false  -- set true to clear console on each run when DEBUG=true
+local DEBUG              = true  -- set true to print debug logs
+local CLEAR_ON_RUN       = true  -- set true to clear console on each run when DEBUG=true
 local SYNC_SELECTION_MIN = 2      -- selection-sync threshold in True Hover (default: 2)
 
 ----------------------------------------
@@ -61,7 +67,9 @@ local function log(s)       if DEBUG then reaper.ShowConsoleMsg(tostring(s).."\n
 local function logf(f, ...) if DEBUG then reaper.ShowConsoleMsg(string.format(f, ...).."\n") end end
 if DEBUG and CLEAR_ON_RUN then reaper.ShowConsoleMsg("") end
 log("[RightEdge] --- run ---")
-
+logf("[RightEdge] Hover lib: %s", LIB_PATH)
+-- Ensure Hover library debug is enabled so its internal logs (if any) are visible.
+if hover.set_debug then hover.set_debug(true) end
 ----------------------------------------
 -- Helpers
 ----------------------------------------
@@ -205,61 +213,9 @@ local function apply_right_edge(entry, target_pos)
     log("[RightEdge] skip: item not visible"); return
   end
 
-  local st  = reaper.GetMediaItemInfo_Value(it, "D_POSITION")
-  local ln  = reaper.GetMediaItemInfo_Value(it, "D_LENGTH")
-  local en0 = st + ln
-  local eps = hover.half_pixel_sec()
-
-  local take = reaper.GetActiveTake(it)
-  local is_midi  = (take and reaper.TakeIsMIDI(take)) or false
-  local is_audio = (take and (not is_midi)) or false
-  local loopsrc  = (reaper.GetMediaItemInfo_Value(it, "B_LOOPSRC") == 1)
-
-  -- Desired new end per mode
-  local desired_en
-  if entry.mode == "trim" then
-    desired_en = math.max(st + 1e-9, target_pos)
-  else -- "extend"
-    desired_en = target_pos
-  end
-
-  -- Clamp 1: avoid overlapping NEXT item on same track
-  local next_start = next_item_start_on_track(it)
-  if next_start < math.huge then
-    local max_no_overlap = next_start - eps
-    if entry.mode == "extend" then
-      -- never reduce length when extending
-      if desired_en > max_no_overlap then desired_en = max_no_overlap end
-      if desired_en < en0 then desired_en = en0 end
-    end
-  end
-
-  -- Clamp 2: audio source tail (non-loop only)
-  if is_audio and (not loopsrc) then
-    local max_tail = max_right_end_audio(it, take)
-    if desired_en > max_tail then desired_en = max_tail end
-  end
-
-  -- Final guard
-  if desired_en <= st + 1e-9 then desired_en = st + 1e-9 end
-  if math.abs(desired_en - en0) < 1e-9 then
-    log("[RightEdge] no-op: end unchanged"); return
-  end
-
-  local new_ln = desired_en - st
-
-  -- Preserve FADE-OUT START
-  local old_fo = reaper.GetMediaItemInfo_Value(it, "D_FADEOUTLEN") or 0
-  local fade_start = en0 - math.max(0, old_fo)   -- absolute time
-  local new_fo = (old_fo > 0) and math.max(0, desired_en - fade_start) or 0
-
-  -- No-flicker write order
-  reaper.SetMediaItemInfo_Value(it, "D_FADEOUTLEN_AUTO", 0) -- avoid transient auto-fade drawing
-  reaper.SetMediaItemInfo_Value(it, "D_LENGTH", new_ln)
-  reaper.SetMediaItemInfo_Value(it, "D_FADEOUTLEN", new_fo)
-
-  logf("[RightEdge] %s  en:%.6f→%.6f  len:%.6f→%.6f  fo:%.6f→%.6f",
-       entry.mode, en0, desired_en, ln, new_ln, old_fo, new_fo)
+  -- Delegate to shared library: handles clamp/overlap, preserves fade start,
+  -- and uses no-flicker write order (SrcStart is not changed on right edge).
+  hover.apply_right_edge_no_flicker(it, target_pos, entry.mode)
 end
 
 ----------------------------------------
