@@ -1,11 +1,15 @@
 --[[
 @description Render or Glue Items with Handles Core Library
-@version 250925_1546 REBDER_TC_EMBED OK
+@version 250926_1819 default setting update
 @author hsuanice
 @about
   Library for RGWH glue/render flows with handles, FX policies, rename, # markers, and optional take markers inside glued items.
 
 @changelog
+  v250926_2010
+    - Default: RENDER_TC_EMBED = "current" (embed BWF TimeReference from item start).
+    - Rationale: take switching no longer relies on previous-take TR; Hover trim/extend keeps SrcStart in sync.
+    - Note: "previous" and "off" are still available via ExtState if needed.
 v250925_1546 REBDER_TC_EMBED OK
   - Added: ExtState key `RENDER_TC_EMBED` ("previous" | "current" | "off") to control
     TimeReference embedding policy during render.
@@ -99,7 +103,7 @@ local DEFAULTS = {
   RENDER_TAKE_FX     = 0,             -- 1=Render 直接印入 take FX；0=保留（偏向 non-destructive）
   RENDER_TRACK_FX    = 0,             -- 1=Render 同時印入 Track FX
   RENDER_APPLY_MODE  = "mono",        -- "mono" | "multi"（Render 使用的 apply 模式）
-  RENDER_TC_EMBED    = "previous",    -- TR embed mode for render: "previous" | "current" | "off"
+  RENDER_TC_EMBED    = "current",    -- TR embed mode for render: "previous" | "current" | "off"
   -- Rename policy:
   RENAME_OP_MODE     = "auto",        -- glue | render | auto
   -- Hash markers（#in/#out 以供 Media Cues）
