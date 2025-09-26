@@ -45,8 +45,8 @@
 ----------------------------------------
 -- USER OPTIONS
 ----------------------------------------
-local DEBUG              = true  -- set true to print debug logs
-local CLEAR_ON_RUN       = true  -- set true to clear console on each run when DEBUG=true
+local DEBUG              = false  -- set true to print debug logs
+local CLEAR_ON_RUN       = false  -- set true to clear console on each run when DEBUG=true
 local SYNC_SELECTION_MIN = 2      -- selection-sync threshold in True Hover (default: 2)
 
 ----------------------------------------
@@ -68,8 +68,7 @@ local function logf(f, ...) if DEBUG then reaper.ShowConsoleMsg(string.format(f,
 if DEBUG and CLEAR_ON_RUN then reaper.ShowConsoleMsg("") end
 log("[RightEdge] --- run ---")
 logf("[RightEdge] Hover lib: %s", LIB_PATH)
--- Ensure Hover library debug is enabled so its internal logs (if any) are visible.
-if hover.set_debug then hover.set_debug(true) end
+
 ----------------------------------------
 -- Helpers
 ----------------------------------------
