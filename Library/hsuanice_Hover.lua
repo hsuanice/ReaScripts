@@ -1,6 +1,6 @@
 --[[
 @description hsuanice Hover Library (Shared helpers for Hover Mode editing tools)
-@version 250926_1610 update start in source to all takes
+@version 250926_1808 Add right-edge debug logs to match left-edge style.
 @author hsuanice
 @about
   Common utilities for Hover Mode scripts (Split / Trim / Extend).
@@ -15,6 +15,10 @@
 
   Path: REAPER/Scripts/hsuanice Scripts/Library/hsuanice_Hover.lua
 @changelog
+  v250926_1810
+    - Add right-edge debug logs to match left-edge style.
+    - Log initial state (st/en/target), clamped end (new_en), delta_len, and applied result.
+    - No behavioral change: right-edge still preserves fade-out start and does not alter SrcStart.
   v250926_1610
     • Left-edge edits propagate SrcStart (D_STARTOFFS) delta to all takes (matches REAPER prefs behavior).
   v0.2.0
@@ -413,6 +417,9 @@ function M.apply_right_edge_no_flicker(it, target_pos)
   local en0 = st + ln
   local e   = M.eps()
 
+  -- Initial right-edge debug log
+  LOGF("[HoverLib] right-edge: st=%.9f en=%.9f target=%.9f", st, en0, target_pos)
+
   local take = reaper.GetActiveTake(it)
   local is_midi  = (take and reaper.TakeIsMIDI(take)) or false
   local is_audio = (take and (not is_midi)) or false
@@ -427,6 +434,11 @@ function M.apply_right_edge_no_flicker(it, target_pos)
     if desired > max_tail then desired = max_tail end
   end
 
+  -- Log clamped end and delta vs original end
+  LOGF("[HoverLib] right-edge: new_en=%.9f", desired)
+  local delta_len = desired - en0
+  LOGF("[HoverLib] right-edge: delta_len=%.9f (seconds)", delta_len)
+
   if desired <= st + 1e-9 then desired = st + 1e-9 end
   if math.abs(desired - en0) < 1e-9 then return end
   local new_ln = desired - st
@@ -438,6 +450,7 @@ function M.apply_right_edge_no_flicker(it, target_pos)
   reaper.SetMediaItemInfo_Value(it, "D_FADEOUTLEN_AUTO", 0)
   reaper.SetMediaItemInfo_Value(it, "D_LENGTH", new_ln)
   reaper.SetMediaItemInfo_Value(it, "D_FADEOUTLEN", new_fo)
+  LOGF("[HoverLib] right-edge: applied pos=%.9f len=%.9f fade_out=%.9f", st, new_ln, new_fo)
 end
 
 ----------------------------------------
