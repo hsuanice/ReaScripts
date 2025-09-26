@@ -1,16 +1,21 @@
 --[[
 @description hsuanice Metadata Embed (BWF MetaEdit helpers)
-@version 0.3.0 ok
+@version 250926_2018 Change: Refresh_Items
 @author hsuanice
 @noindex
 @about
   Helpers to call BWF MetaEdit safely:
   - Shell quoting
   - Normalize iXML sidecar newline
-  - Copy iXML/core, read/write TimeReference
+  - Copy iXML/core, 
+  read/write TimeReference
   - Post-embed refresh (offline->online, rebuild peaks)
 
 @changelog
+  v250926_2018 (2025-09-26)
+    - Change: Refresh_Items now uses 42356 (Toggle force media offline) twice (offline→online), then 40441 (Rebuild peaks), to force immediate BWF header (TimeReference) reload.
+    - Rationale: 40440/40439 were insufficient in some cases after render with newly embedded TC.
+
   v0.3.0 (2025-09-25)
     - Added: CLI_Resolve() — resolve & persist BWF MetaEdit path
       (ExtState: hsuanice_TCTools/BWFMetaEditPath; Apple Silicon default
@@ -275,9 +280,9 @@ function E.Refresh_Items(t)
   R.SelectAllMediaItems(0, false)
   for _,it in ipairs(items) do R.SetMediaItemSelected(it, true) end
   R.UpdateArrange()
-  R.Main_OnCommand(40440, 0) -- offline
-  R.Main_OnCommand(40439, 0) -- online
-  R.Main_OnCommand(40441, 0) -- rebuild peaks
+  R.Main_OnCommand(42356, 0) -- Toggle force media offline (go offline)
+  R.Main_OnCommand(42356, 0) -- Toggle force media offline (back online)
+  R.Main_OnCommand(40441, 0) -- Rebuild peaks
 end
 
 
