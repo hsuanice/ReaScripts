@@ -1,6 +1,6 @@
 --[[
 @description hsuanice_Review_Edges_Off_Grid
-@version 250929_0536
+@version 250928_0329
 @author hsuanice
 @about
   Scan all items in the project. If an item's left/right edge is not aligned to the chosen grid
@@ -12,7 +12,7 @@
   - Scope: all items in project (no selection required).
   - Console: summary + per-issue lines; uses ShowConsoleMsg (clears at start).
 @changelog
-  v250929_0536
+  v250929_0329
   - Fixed-markers now placed slightly INSIDE the item edges using project-time inset (MARKER_EDGE_INSET_PROJ_SEC) so they remain visible even when the edge sits on the item boundary.
   - Keeps existing source-boundary inset (MARKER_INSET_SEC) as a secondary safeguard.
   v250929_0508
