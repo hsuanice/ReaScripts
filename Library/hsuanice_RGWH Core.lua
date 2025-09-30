@@ -1,75 +1,70 @@
 --[[
 @description Render or Glue Items with Handles Core Library
-@version 250930_1308 Add AudioSweet bridge
+@version 250930_1700 Add AudioSweet bridge
 @author hsuanice
 @about
   Library for RGWH glue/render flows with handles, FX policies, rename, # markers, and optional take markers inside glued items.
 
 @changelog
-  v250930_1308
-    - Add `M.apply(args)` bridge for AudioSweet (`mode="render_item_focused_fx"`), supporting `apply_fx_mode = auto|mono|multi`.
-    - Auto mode resolves by the active take’s source channels (1 → mono, else multi).
-    - Bridge preserves project ExtState by snapshot/restore (RENDER_APPLY_MODE/TRACK_FX/TAKE_FX) around `render_selection()`.
-    - Keep AudioSweet responsibilities: item already moved to focused-FX track; only focused FX enabled.
-    - No behavioral changes for standalone Glue/Render flows.
-    v250926_2010
-      - Default: RENDER_TC_EMBED = "current" (embed BWF TimeReference from item start).
-      - Rationale: take switching no longer relies on previous-take TR; Hover trim/extend keeps SrcStart in sync.
-      - Note: "previous" and "off" are still available via ExtState if needed.
-  v250925_1546 REBDER_TC_EMBED OK
-    - Added: ExtState key `RENDER_TC_EMBED` ("previous" | "current" | "off") to control
-      TimeReference embedding policy during render.
-        • "previous" (default): embed TimeReference from the original take (handle-aware).
-        • "current": embed TimeReference from current project position (item start).
-        • "off": disable TimeReference embedding (skip write).
-    - Fixed: initialization order — `DEFAULTS.RENDER_TC_EMBED` is now a static value
-      ("previous"); actual project-scope ExtState is read inside `read_settings()`.
-    - Updated: `render_selection()` now calls Metadata Embed library functions
-      (`TR_PrevToActive`, `TR_FromItemStart`, `TR_Write`) according to mode.
-    - Behavior: batch refresh of items after TR write remains intact.
+  250930_1700 Add AudioSweet bridge
+  v250926_2010
+    - Default: RENDER_TC_EMBED = "current" (embed BWF TimeReference from item start).
+    - Rationale: take switching no longer relies on previous-take TR; Hover trim/extend keeps SrcStart in sync.
+    - Note: "previous" and "off" are still available via ExtState if needed.
+v250925_1546 REBDER_TC_EMBED OK
+  - Added: ExtState key `RENDER_TC_EMBED` ("previous" | "current" | "off") to control
+    TimeReference embedding policy during render.
+      • "previous" (default): embed TimeReference from the original take (handle-aware).
+      • "current": embed TimeReference from current project position (item start).
+      • "off": disable TimeReference embedding (skip write).
+  - Fixed: initialization order — `DEFAULTS.RENDER_TC_EMBED` is now a static value
+    ("previous"); actual project-scope ExtState is read inside `read_settings()`.
+  - Updated: `render_selection()` now calls Metadata Embed library functions
+    (`TR_PrevToActive`, `TR_FromItemStart`, `TR_Write`) according to mode.
+  - Behavior: batch refresh of items after TR write remains intact.
 
-  v250925_1101 change "force-multi" to "force_multi"
-  v250922_2257
-    - Multi-mode policies finalized:
-      • GLUE_OUTPUT_POLICY_WHEN_NO_TRACKFX = "preserve" | "force_multi"
-      • RENDER_OUTPUT_POLICY_WHEN_NO_TRACKFX = "preserve" | "force_multi"
-    - When APPLY_MODE="multi"-
-    and policy="force_multi" with no Track FX printing:
-      • Glue: run 41993 in a no-track-FX path; preserves take-FX per setting; fades snapshot/restore
-      • Render: choose apply path and run 41993; fades snapshot/restore
-    - New helper: apply_multichannel_no_fx_preserve_take(it, keep_take_fx, dbg_level)
-      • Temporarily disables track FX (snapshot), optionally offlines take FX, zeroes fades, runs 41993, restores everything
-    - Render path: add use_apply decision (need_track OR force_multi) with clear fades only when applying
-    - Console messages:
-      • "[APPLY] force multi (no track FX path)"
-      • "[RUN] Temporarily disabled TRACK FX (policy TRACK=0)."
-    - Minor: ensure "[EDGE-CUE]" tag consistent across add/remove logs
+v250925_1101 change "force-multi" to "force_multi"
+v250922_2257
+  - Multi-mode policies finalized:
+    • GLUE_OUTPUT_POLICY_WHEN_NO_TRACKFX = "preserve" | "force_multi"
+    • RENDER_OUTPUT_POLICY_WHEN_NO_TRACKFX = "preserve" | "force_multi"
+  - When APPLY_MODE="multi"-
+   and policy="force_multi" with no Track FX printing:
+    • Glue: run 41993 in a no-track-FX path; preserves take-FX per setting; fades snapshot/restore
+    • Render: choose apply path and run 41993; fades snapshot/restore
+  - New helper: apply_multichannel_no_fx_preserve_take(it, keep_take_fx, dbg_level)
+    • Temporarily disables track FX (snapshot), optionally offlines take FX, zeroes fades, runs 41993, restores everything
+  - Render path: add use_apply decision (need_track OR force_multi) with clear fades only when applying
+  - Console messages:
+    • "[APPLY] force multi (no track FX path)"
+    • "[RUN] Temporarily disabled TRACK FX (policy TRACK=0)."
+  - Minor: ensure "[EDGE-CUE]" tag consistent across add/remove logs
 
-  v250922_1954
-    - Prep multi-channel flow: utilities and structure for using 41993 (Apply track/take FX to items – multichannel output)
-    - Separated paths for GLUE vs RENDER to allow later policy injection without changing call sites
+v250922_1954
+  - Prep multi-channel flow: utilities and structure for using 41993 (Apply track/take FX to items – multichannel output)
+  - Separated paths for GLUE vs RENDER to allow later policy injection without changing call sites
 
-  v250922_1819
-    - Rename WRITE_MEDIA_CUES → WRITE_EDGE_CUES
-    - Rename WRITE_TAKE_MARKERS → WRITE_GLUE_CUES
-    - Standardize: hash_ids → edge_ids; function add_hash_markers → add_edge_cues
-    - Console tag "[HASH]" → "[EDGE-CUE]"
-    - Glue Cue labels simplified: "#Glue: <TakeName>" (remove redundant "GlueCue:" prefix)
-    - TakeName preserved with original case (no forced lowercase)
-    - Final: Edge Cues (#in/#out) and Glue Cues (#Glue: <TakeName>) both embedded as media cues
+v250922_1819
+  - Rename WRITE_MEDIA_CUES → WRITE_EDGE_CUES
+  - Rename WRITE_TAKE_MARKERS → WRITE_GLUE_CUES
+  - Standardize: hash_ids → edge_ids; function add_hash_markers → add_edge_cues
+  - Console tag "[HASH]" → "[EDGE-CUE]"
+  - Glue Cue labels simplified: "#Glue: <TakeName>" (remove redundant "GlueCue:" prefix)
+  - TakeName preserved with original case (no forced lowercase)
+  - Final: Edge Cues (#in/#out) and Glue Cues (#Glue: <TakeName>) both embedded as media cues
 
-  v250921_1732
-    - Implement Glue Cues: add cues at unit head + where adjacent sources differ
-    - Glue Cues written as project markers with '#' prefix → embedded into glued media
-    - Edge Cues (#in/#out) and Glue Cues temporarily added then cleaned up
-    - Console output: [HASH] for edge cues, [GLUE-CUE] for glue cues
+v250921_1732
+  - Implement Glue Cues: add cues at unit head + where adjacent sources differ
+  - Glue Cues written as project markers with '#' prefix → embedded into glued media
+  - Edge Cues (#in/#out) and Glue Cues temporarily added then cleaned up
+  - Console output: [HASH] for edge cues, [GLUE-CUE] for glue cues
 
-  v250921_1647
-    - First experiment: replace take markers with media cues (#in/#out written as project markers)
-    - Console shows [HASH] add/remove; cues absorbed into glued media
+v250921_1647
+  - First experiment: replace take markers with media cues (#in/#out written as project markers)
+  - Console shows [HASH] add/remove; cues absorbed into glued media
 
-  v250921_1512
-    - Initial stable Core snapshot (handles, epsilon, glue/render pipeline, hash markers)
+v250921_1512
+  - Initial stable Core snapshot (handles, epsilon, glue/render pipeline, hash markers)
 
 ]]--
 local r = reaper
@@ -1208,33 +1203,13 @@ function M.render_selection()
 end
 
 ----------------------------------------------------------------
--- AudioSweet bridge: apply() with auto/mono/multi
--- 位置：檔尾、return M 之前
+-- AudioSweet bridge: apply() - supports render/glue, auto/mono/multi, handles by Core
 ----------------------------------------------------------------
-local function __as_select_only_item(it)
-  reaper.Main_OnCommand(40289, 0)           -- Unselect all items
-  reaper.SetMediaItemSelected(it, true)     -- Select only target item
-end
-
-local function __as_detect_apply_mode_auto(it, fallback)
-  local tk = reaper.GetActiveTake(it)
-  if not tk then return fallback or "multi" end
-  local src = reaper.GetMediaItemTake_Source(tk)
-  if not src then return fallback or "multi" end
-  local ch  = reaper.GetMediaSourceNumChannels(src) or 2
-  return (ch == 1) and "mono" or "multi"
-end
-
---- args:
----   mode                = "render_item_focused_fx"
----   item                = MediaItem*
----   apply_fx_mode       = "auto" | "mono" | "multi"
----   focused_track       = MediaTrack*   (AudioSweet 端已把 item 移到該軌，且只啟用焦點 FX)
----   focused_fxindex     = integer
----   policy_only_focused = true
 function M.apply(args)
-  -- 1) 僅接受 AudioSweet 的模式
-  if type(args) ~= "table" or args.mode ~= "render_item_focused_fx" then
+  -- 只接受 AudioSweet 這個模式
+  if type(args) ~= "table" then return false, "bad_args" end
+  local mode = args.mode
+  if mode ~= "render_item_focused_fx" and mode ~= "glue_item_focused_fx" then
     return false, "unsupported_mode"
   end
   local it = args.item
@@ -1242,39 +1217,49 @@ function M.apply(args)
     return false, "invalid_item"
   end
 
-  -- 2) 解析 apply 模式（支援 auto）
-  local req_mode = tostring(args.apply_fx_mode or ""):lower()
-  local apply_fx_mode
-  if req_mode == "mono" or req_mode == "multi" then
-    apply_fx_mode = req_mode
-  else
-    -- auto 或未知值 → 依來源聲道數決定
-    apply_fx_mode = __as_detect_apply_mode_auto(it, "multi")
+  -- 解析 auto/mono/multi（auto 依來源聲道）
+  local req = tostring(args.apply_fx_mode or "auto")
+  local tk = reaper.GetActiveTake(it)
+  local ch = 2
+  if tk then
+    local src = reaper.GetMediaItemTake_Source(tk)
+    ch = src and (reaper.GetMediaSourceNumChannels(src) or 2) or 2
+  end
+  local apply_fx_mode = (req == "mono" or req == "multi")
+                        and req
+                        or ((ch == 1) and "mono" or "multi")
+
+  -- 快照 & 覆寫 Core 的 ExtState（讓 Core 走你想要的策略）
+  local function getx(k, def) local v = reaper.GetExtState("hsuanice_AS", k); return (v ~= "" and v) or def end
+  local prev_track_fx   = getx("RENDER_TRACK_FX",   "1")
+  local prev_take_fx    = getx("RENDER_TAKE_FX",    "1")
+  local prev_apply_mode = getx("RENDER_APPLY_MODE", "auto")
+
+  -- 預設符合你要的「像 Pro Tools」：Glue，TAKE FX=1，TRACK FX=1，Handles 由 Core 自己處理
+  reaper.SetExtState("hsuanice_AS", "RENDER_TRACK_FX",   "1",               true)
+  reaper.SetExtState("hsuanice_AS", "RENDER_TAKE_FX",    "1",               true)
+  reaper.SetExtState("hsuanice_AS", "RENDER_APPLY_MODE", apply_fx_mode,     true)
+
+  --（可選）如果 Core 以 ExtState 讀 handle 秒數，這裡也能先設：
+  -- reaper.SetExtState("hsuanice_AS", "HANDLE_SEC_L", "5.0", true)
+  -- reaper.SetExtState("hsuanice_AS", "HANDLE_SEC_R", "5.0", true)
+
+  -- 只選這顆 item，避免波及其他
+  reaper.Main_OnCommand(40289, 0)           -- Unselect all
+  reaper.SetMediaItemSelected(it, true)
+
+  -- 執行你的核心流程：render 或 glue（**這兩個函式要已存在於 Core**）
+  local ok, err
+  if mode == "render_item_focused_fx" then
+    ok, err = pcall(M.render_selection)
+  else -- "glue_item_focused_fx"
+    ok, err = pcall(M.glue_selection)
   end
 
-  -- 3) 快照目前 ExtState（專案層）
-  local prev_apply_mode = get_ext("RENDER_APPLY_MODE", DEFAULTS.RENDER_APPLY_MODE)
-  local prev_track_fx   = get_ext("RENDER_TRACK_FX",   DEFAULTS.RENDER_TRACK_FX and "1" or "0")
-  local prev_take_fx    = get_ext("RENDER_TAKE_FX",    DEFAULTS.RENDER_TAKE_FX  and "1" or "0")
-
-  -- 4) 覆寫成 AudioSweet 需要的設定
-  --    - APPLY_MODE：auto 解析後的 "mono"/"multi"
-  --    - 只印 TRACK FX（前端已確保只有焦點 FX 開著）
-  --    - 不印 TAKE FX（render 後 Core 會把原 take FX 複回新 take）
-  set_ext("RENDER_APPLY_MODE", apply_fx_mode)
-  set_ext("RENDER_TRACK_FX",   "1")
-  set_ext("RENDER_TAKE_FX",    "0")
-
-  -- 5) 僅選該 item，避免 render_selection() 誤處理其它項目
-  __as_select_only_item(it)
-
-  -- 6) 執行 Core 既有流程（handles / epsilon / 命名 / TR embed 都沿用）
-  local ok, err = pcall(M.render_selection)
-
-  -- 7) 還原 ExtState
-  set_ext("RENDER_APPLY_MODE", prev_apply_mode)
-  set_ext("RENDER_TRACK_FX",   prev_track_fx)
-  set_ext("RENDER_TAKE_FX",    prev_take_fx)
+  -- 還原 ExtState
+  reaper.SetExtState("hsuanice_AS", "RENDER_TRACK_FX",   prev_track_fx,   true)
+  reaper.SetExtState("hsuanice_AS", "RENDER_TAKE_FX",    prev_take_fx,    true)
+  reaper.SetExtState("hsuanice_AS", "RENDER_APPLY_MODE", prev_apply_mode, true)
 
   if not ok then return false, tostring(err) end
   return true
