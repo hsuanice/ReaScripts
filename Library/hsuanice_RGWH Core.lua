@@ -1,70 +1,78 @@
 --[[
 @description Render or Glue Items with Handles Core Library
-@version 250930_1700 Add AudioSweet bridge
+@version 250930_1813 Fix “Glue with Track FX” StartInSource
 @author hsuanice
 @about
   Library for RGWH glue/render flows with handles, FX policies, rename, # markers, and optional take markers inside glued items.
 
 @changelog
+  v250930_1813 — Fix “Glue with Track FX” StartInSource
+    - Fixed: After GLUE_TS + Track/Take FX apply, all takes on the glued item now have synchronized StartInSource (D_STARTOFFS) to the computed left handle (left_total). Prevents phase mismatches and take-switch offsets when a new take is created by applying FX post-glue.
+    - Improved: Render path preserves the original take’s StartInSource snapshot while expanding the window, then restores it before TimeReference calculations (“previous” mode), ensuring handle-aware math remains exact.
+    - Behaviour unchanged: Render naming rule (TakeName-renderedN), item/take volume pre-merge, edge/glue cue handling, and multichannel “force_multi” policy continue to work as before.
+    - Compatibility: No changes to ExtState schema. Keys used by this build:
+      • RENDER_TC_EMBED = "previous" | "current" | "off"  (read at runtime)
+      • GLUE/RENDER_* switches (apply modes, policies) unchanged.
+    - Notes: Default TimeReference mode remains “current” (per v250926_2010). “previous” and “off” remain available via ExtState.
   250930_1700 Add AudioSweet bridge
   v250926_2010
     - Default: RENDER_TC_EMBED = "current" (embed BWF TimeReference from item start).
     - Rationale: take switching no longer relies on previous-take TR; Hover trim/extend keeps SrcStart in sync.
     - Note: "previous" and "off" are still available via ExtState if needed.
-v250925_1546 REBDER_TC_EMBED OK
-  - Added: ExtState key `RENDER_TC_EMBED` ("previous" | "current" | "off") to control
-    TimeReference embedding policy during render.
-      • "previous" (default): embed TimeReference from the original take (handle-aware).
-      • "current": embed TimeReference from current project position (item start).
-      • "off": disable TimeReference embedding (skip write).
-  - Fixed: initialization order — `DEFAULTS.RENDER_TC_EMBED` is now a static value
-    ("previous"); actual project-scope ExtState is read inside `read_settings()`.
-  - Updated: `render_selection()` now calls Metadata Embed library functions
-    (`TR_PrevToActive`, `TR_FromItemStart`, `TR_Write`) according to mode.
-  - Behavior: batch refresh of items after TR write remains intact.
+  v250925_1546 REBDER_TC_EMBED OK
+    - Added: ExtState key `RENDER_TC_EMBED` ("previous" | "current" | "off") to control
+      TimeReference embedding policy during render.
+        • "previous" (default): embed TimeReference from the original take (handle-aware).
+        • "current": embed TimeReference from current project position (item start).
+        • "off": disable TimeReference embedding (skip write).
+    - Fixed: initialization order — `DEFAULTS.RENDER_TC_EMBED` is now a static value
+      ("previous"); actual project-scope ExtState is read inside `read_settings()`.
+    - Updated: `render_selection()` now calls Metadata Embed library functions
+      (`TR_PrevToActive`, `TR_FromItemStart`, `TR_Write`) according to mode.
+    - Behavior: batch refresh of items after TR write remains intact.
 
-v250925_1101 change "force-multi" to "force_multi"
-v250922_2257
-  - Multi-mode policies finalized:
-    • GLUE_OUTPUT_POLICY_WHEN_NO_TRACKFX = "preserve" | "force_multi"
-    • RENDER_OUTPUT_POLICY_WHEN_NO_TRACKFX = "preserve" | "force_multi"
-  - When APPLY_MODE="multi"-
-   and policy="force_multi" with no Track FX printing:
-    • Glue: run 41993 in a no-track-FX path; preserves take-FX per setting; fades snapshot/restore
-    • Render: choose apply path and run 41993; fades snapshot/restore
-  - New helper: apply_multichannel_no_fx_preserve_take(it, keep_take_fx, dbg_level)
-    • Temporarily disables track FX (snapshot), optionally offlines take FX, zeroes fades, runs 41993, restores everything
-  - Render path: add use_apply decision (need_track OR force_multi) with clear fades only when applying
-  - Console messages:
-    • "[APPLY] force multi (no track FX path)"
-    • "[RUN] Temporarily disabled TRACK FX (policy TRACK=0)."
-  - Minor: ensure "[EDGE-CUE]" tag consistent across add/remove logs
+  v250925_1101 change "force-multi" to "force_multi"
+  v250922_2257
+    - Multi-mode policies finalized:
+      • GLUE_OUTPUT_POLICY_WHEN_NO_TRACKFX = "preserve" | "force_multi"
+      • RENDER_OUTPUT_POLICY_WHEN_NO_TRACKFX = "preserve" | "force_multi"
+    - When APPLY_MODE="multi"-
+    and policy="force_multi" with no Track FX printing:
+      • Glue: run 41993 in a no-track-FX path; preserves take-FX per setting; fades snapshot/restore
+      • Render: choose apply path and run 41993; fades snapshot/restore
+    - New helper: apply_multichannel_no_fx_preserve_take(it, keep_take_fx, dbg_level)
+      • Temporarily disables track FX (snapshot), optionally offlines take FX, zeroes fades, runs 41993, restores everything
+    - Render path: add use_apply decision (need_track OR force_multi) with clear fades only when applying
+    - Console messages:
+      • "[APPLY] force multi (no track FX path)"
+      • "[RUN] Temporarily disabled TRACK FX (policy TRACK=0)."
+    - Minor: ensure "[EDGE-CUE]" tag consistent across add/remove logs
 
-v250922_1954
-  - Prep multi-channel flow: utilities and structure for using 41993 (Apply track/take FX to items – multichannel output)
-  - Separated paths for GLUE vs RENDER to allow later policy injection without changing call sites
+  v250922_1954
+    - Prep multi-channel flow: utilities and structure for using 41993 (Apply track/take FX to items – multichannel output)
+    - Separated paths for GLUE vs RENDER to allow later policy injection without changing call sites
 
-v250922_1819
-  - Rename WRITE_MEDIA_CUES → WRITE_EDGE_CUES
-  - Rename WRITE_TAKE_MARKERS → WRITE_GLUE_CUES
-  - Standardize: hash_ids → edge_ids; function add_hash_markers → add_edge_cues
-  - Console tag "[HASH]" → "[EDGE-CUE]"
-  - Glue Cue labels simplified: "#Glue: <TakeName>" (remove redundant "GlueCue:" prefix)
-  - TakeName preserved with original case (no forced lowercase)
-  - Final: Edge Cues (#in/#out) and Glue Cues (#Glue: <TakeName>) both embedded as media cues
+  v250922_1819
+    - Rename WRITE_MEDIA_CUES → WRITE_EDGE_CUES
+    - Rename WRITE_TAKE_MARKERS → WRITE_GLUE_CUES
+    - Standardize: hash_ids → edge_ids; function add_hash_markers → add_edge_cues
+    - Console tag "[HASH]" → "[EDGE-CUE]"
+    - Glue Cue labels simplified: "#Glue: <TakeName>" (remove redundant "GlueCue:" prefix)
+    - TakeName preserved with original case (no forced lowercase)
+    - Final: Edge Cues (#in/#out) and Glue Cues (#Glue: <TakeName>) both embedded as media cues
 
-v250921_1732
-  - Implement Glue Cues: add cues at unit head + where adjacent sources differ
-  - Glue Cues written as project markers with '#' prefix → embedded into glued media
-  - Edge Cues (#in/#out) and Glue Cues temporarily added then cleaned up
-  - Console output: [HASH] for edge cues, [GLUE-CUE] for glue cues
+  v250921_1732
+    - Implement Glue Cues: add cues at unit head + where adjacent sources differ
+    - Glue Cues written as project markers with '#' prefix → embedded into glued media
+    - Edge Cues (#in/#out) and Glue Cues temporarily added then cleaned up
+    - Console output: [HASH] for edge cues, [GLUE-CUE] for glue cues
 
-v250921_1647
-  - First experiment: replace take markers with media cues (#in/#out written as project markers)
-  - Console shows [HASH] add/remove; cues absorbed into glued media
+  v250921_1647
+    - First experiment: replace take markers with media cues (#in/#out written as project markers)
+    - Console shows [HASH] add/remove; cues absorbed into glued media
 
-v250921_1512
-  - Initial stable Core snapshot (handles, epsilon, glue/render pipeline, hash markers)
+  v250921_1512
+    - Initial stable Core snapshot (handles, epsilon, glue/render pipeline, hash markers)
 
 ]]--
 local r = reaper
@@ -820,6 +828,17 @@ local function glue_unit(tr, u, cfg)
     local gtk = r.GetActiveTake(glued)
     if gtk then r.SetMediaItemTakeInfo_Value(gtk,"D_STARTOFFS", left_total) end
     r.UpdateItemInProject(glued)
+
+    -- NEW: keep StartInSource consistent across ALL takes on the glued item
+    do
+      local tc = reaper.CountTakes(glued) or 0
+      for ti = 0, tc-1 do
+        local tk = reaper.GetTake(glued, ti)
+        if tk then
+          reaper.SetMediaItemTakeInfo_Value(tk, "D_STARTOFFS", left_total)
+        end
+      end
+    end
 
     -- 還原邊界淡入淡出
     r.SetMediaItemInfo_Value(glued,"D_FADEINLEN",      fin_len)
