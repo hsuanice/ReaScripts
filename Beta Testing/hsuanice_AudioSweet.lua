@@ -1,6 +1,6 @@
 --[[
 @description AudioSweet (hsuanice) — Focused Track FX render via RGWH Core, append FX name, rebuild peaks (selected items)
-@version 250930_1754
+@version 251001_0330 Auto channel mode
 @author Tim Chimes (original), adapted by hsuanice
 @notes
   Reference:
@@ -18,6 +18,15 @@ This version:
   • Track FX only (Take FX not supported)
   • Mono/Stereo merged: APPLY_FX_MODE from ExtState (auto/mono/multi); Auto resolves by source channels
 @changelog
+  v20251001_0330
+    - Auto channel mode: resolve "auto" by source channels before calling Core (1ch→mono, ≥2ch→multi); prevents unintended mono downmix in GLUE.
+    - Core integration: write RGWH *project* ExtState for GLUE/RENDER (…_TAKE_FX, …_TRACK_FX, …_APPLY_MODE), with snapshot/restore around apply.
+    - Focused FX targeting: normalize index (strip 0x1000000 floating-window flag); Track FX only.
+    - Post-Core handoff: reacquire processed item, rename in place with " - <FX raw name>", then move back to original track.
+    - Refresh: replace nudge with `Peaks: Rebuild peaks for selected items` (40441) on the processed item.
+    - Error handling: modal alerts for Core load/apply failures; abort without fallback.
+    - Cleanup: removed crop-to-new-take path; reduced global variable leakage; loop hygiene & minor logging polish.
+
   v20250930_1754
   - Switched render engine to RGWH Core: call `RGWH.apply()` instead of native 40361.
   - Pro Tools–like default: GLUE mode with TAKE FX=1 and TRACK FX=1; handles fully managed by Core.
@@ -227,7 +236,7 @@ function main() --main part of the script
         if not ok_mod or not mod then
           reaper.MB("RGWH Core not found or failed to load:\n" .. CORE_PATH, "AudioSweet — Core load failed", 0)
           -- 還原並中止（避免繼續跑 204+）
-          bypassUnfocusedFX(FXmediaTrack, fxnumber_Out, true)
+          bypassUnfocusedFX(FXmediaTrack, fxIndex, true)
           reaper.MoveMediaItemToTrack(mediaItem, selTrack)
           reaper.Undo_EndBlock("Audiosweet (Core load failed)", -1)
           return
@@ -239,7 +248,7 @@ function main() --main part of the script
         if not apply then
           reaper.MB("RGWH Core loaded, but RGWH.apply(...) not found.\nPlease expose RGWH.apply(args).",
                     "AudioSweet — Core apply missing", 0)
-          bypassUnfocusedFX(FXmediaTrack, fxnumber_Out, true)
+          bypassUnfocusedFX(FXmediaTrack, fxIndex, true)
           reaper.MoveMediaItemToTrack(mediaItem, selTrack)
           reaper.Undo_EndBlock("Audiosweet (Core apply missing)", -1)
           return
@@ -260,16 +269,48 @@ function main() --main part of the script
         local take_fx_s = reaper.GetExtState(NS, "AS_TAKE_FX");   if take_fx_s == "" then take_fx_s = "1" end
         local track_fx_s= reaper.GetExtState(NS, "AS_TRACK_FX");  if track_fx_s== "" then track_fx_s= "1" end
         local apply_fx_mode = reaper.GetExtState(NS, "AS_APPLY_FX_MODE"); if apply_fx_mode == "" then apply_fx_mode = "auto" end
+        -- If caller requested "auto", resolve it now by source channels
+        if apply_fx_mode == "auto" then
+          local tk = reaper.GetActiveTake(mediaItem)
+          local ch = 2
+          if tk then
+            local src = reaper.GetMediaItemTake_Source(tk)
+            if src then ch = reaper.GetMediaSourceNumChannels(src) or 2 end
+          end
+          apply_fx_mode = (ch == 1) and "mono" or "multi"
+        end
+        -- 4) Snapshot & override Core's **project** ExtState (namespace=RGWH)
+        --    GLUE 模式 → 設 GLUE_*；RENDER 模式 → 設 RENDER_*
+        local function proj_get(ns, key, def)
+          local _, val = reaper.GetProjExtState(0, ns, key)
+          if val == nil or val == "" then return def else return val end
+        end
+        local function proj_set(ns, key, val)
+          reaper.SetProjExtState(0, ns, key, tostring(val or ""))
+        end
 
-        -- 4) 快照 Core 會讀的 ExtState，呼叫前覆寫，呼叫後還原
-        local function _get(k, def) local v = reaper.GetExtState(NS, k); return v ~= "" and v or def end
-        local prev_track_fx   = _get("RENDER_TRACK_FX",   track_fx_s) -- 以當前預設為 def，避免空值
-        local prev_take_fx    = _get("RENDER_TAKE_FX",    take_fx_s)
-        local prev_apply_mode = _get("RENDER_APPLY_MODE", apply_fx_mode)
+        -- 先快照（兩組都快照，呼叫後會全部還原）
+        local snap = {
+          GLUE_TAKE_FX      = proj_get("RGWH", "GLUE_TAKE_FX",      ""),
+          GLUE_TRACK_FX     = proj_get("RGWH", "GLUE_TRACK_FX",     ""),
+          GLUE_APPLY_MODE   = proj_get("RGWH", "GLUE_APPLY_MODE",   ""),
+          RENDER_TAKE_FX    = proj_get("RGWH", "RENDER_TAKE_FX",    ""),
+          RENDER_TRACK_FX   = proj_get("RGWH", "RENDER_TRACK_FX",   ""),
+          RENDER_APPLY_MODE = proj_get("RGWH", "RENDER_APPLY_MODE", "")
+        }
 
-        reaper.SetExtState(NS, "RENDER_TRACK_FX",   track_fx_s,  true)
-        reaper.SetExtState(NS, "RENDER_TAKE_FX",    take_fx_s,   true)
-        reaper.SetExtState(NS, "RENDER_APPLY_MODE", apply_fx_mode, true)
+        -- Pro Tools-like 預設：TAKE FX=1, TRACK FX=1；APPLY_FX_MODE 走你上面解析的 apply_fx_mode（auto/mono/multi）
+        local want_take, want_track = true, true
+
+        if mode == "glue_item_focused_fx" then
+          proj_set("RGWH", "GLUE_TAKE_FX",     want_take  and "1" or "0")
+          proj_set("RGWH", "GLUE_TRACK_FX",    want_track and "1" or "0")
+          proj_set("RGWH", "GLUE_APPLY_MODE",  apply_fx_mode)   -- auto / mono / multi
+        else
+          proj_set("RGWH", "RENDER_TAKE_FX",    want_take  and "1" or "0")
+          proj_set("RGWH", "RENDER_TRACK_FX",   want_track and "1" or "0")
+          proj_set("RGWH", "RENDER_APPLY_MODE", apply_fx_mode)  -- auto / mono / multi
+        end
 
         -- 5) 呼叫 Core（AudioSweet 已把 item 移到 FX 軌並只留焦點 FX；這裡仍保險帶參數）
         local ok_apply, err = apply({
@@ -277,19 +318,22 @@ function main() --main part of the script
           item                = mediaItem,
           apply_fx_mode       = apply_fx_mode, -- 預設 auto：交由 Core 依來源聲道決定 mono/multi
           focused_track       = FXmediaTrack,
-          focused_fxindex     = fxnumber_Out,
+          focused_fxindex     = fxIndex,
           policy_only_focused = true,          -- 只印焦點 FX（Core 端還會再保險一次）
         })
 
-        -- 6) 還原 ExtState
-        reaper.SetExtState(NS, "RENDER_TRACK_FX",   prev_track_fx,   true)
-        reaper.SetExtState(NS, "RENDER_TAKE_FX",    prev_take_fx,    true)
-        reaper.SetExtState(NS, "RENDER_APPLY_MODE", prev_apply_mode, true)
+        -- 6) Restore project ExtState (RGWH)
+        proj_set("RGWH", "GLUE_TAKE_FX",      snap.GLUE_TAKE_FX)
+        proj_set("RGWH", "GLUE_TRACK_FX",     snap.GLUE_TRACK_FX)
+        proj_set("RGWH", "GLUE_APPLY_MODE",   snap.GLUE_APPLY_MODE)
+        proj_set("RGWH", "RENDER_TAKE_FX",    snap.RENDER_TAKE_FX)
+        proj_set("RGWH", "RENDER_TRACK_FX",   snap.RENDER_TRACK_FX)
+        proj_set("RGWH", "RENDER_APPLY_MODE", snap.RENDER_APPLY_MODE)
 
         -- 7) 失敗就終止（不 fallback）
         if not ok_apply then
           reaper.MB("RGWH Core apply() error:\n" .. tostring(err), "AudioSweet — Core apply error", 0)
-          bypassUnfocusedFX(FXmediaTrack, fxnumber_Out, true)
+          bypassUnfocusedFX(FXmediaTrack, fxIndex, true)
           reaper.MoveMediaItemToTrack(mediaItem, selTrack)
           reaper.Undo_EndBlock("Audiosweet (Core apply error)", -1)
           return
