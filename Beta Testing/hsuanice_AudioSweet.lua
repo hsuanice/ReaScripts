@@ -1,6 +1,6 @@
 --[[
 @description AudioSweet (hsuanice) — Focused Track FX render via RGWH Core, append FX name, rebuild peaks (selected items)
-@version 251001_1312 glue fx with time selection
+@version 20251001_1336  TS-Window mode with mono/multi auto-detect
 @author Tim Chimes (original), adapted by hsuanice
 @notes
   Reference:
@@ -16,8 +16,20 @@ This version:
   • Append the focused Track FX full name to the take name after render
   • Use Peaks: Rebuild peaks for selected items (40441) instead of the nudge trick
   • Track FX only (Take FX not supported)
-  • Mono/Stereo merged: APPLY_FX_MODE from ExtState (auto/mono/multi); Auto resolves by source channels
 @changelog
+  v20251001_1336  (TS-Window mode with mono/multi auto-detect)
+    - TS-Window mode: when Time Selection ≠ RGWH “item unit”, run 42432 (Glue within TS, silent padding, no handles),
+      then print only the focused Track FX via 40361 as a new take, append FX full name, move back, and rebuild peaks.
+    - Auto channel for TS-Window: before 40361, auto-resolve desired track channels by source take channels
+      (1ch→set track to 2ch; ≥2ch→set track to nearest even ≥ source ch), restore track channel count afterwards.
+    - Unit-matched path unchanged: when TS == unit, keep RGWH Core path (GLUE; handles managed by Core; auto channel via Core).
+    - Focused FX handling: normalized focused index (strip 0x1000000 floating-window flag) and isolate only the focused Track FX.
+    - Post-op flow: reacquire processed item, in-place rename (“ - <FX raw name>”), return to original track, 40441 peaks.
+    - Failure handling: clear modal alerts and early aborts (no fallback) on Core load/apply or TS glue failure.
+
+    Known notes
+    - Multichannel routing that relies on >2-out utility FX (mappers/routers) remains bypassed in focused-only mode;
+      if a plugin is limited to e.g. 5.0 I/O, extra channels may need routing/pin adjustments (to be addressed separately).
   v20251001_1312  (glue fx with time selection)
     - Added TS-Window mode (Pro Tools-like): when Time Selection doesn’t match the RGWH “item unit”, the script now
       1) runs native 42432 “Glue items within time selection” (silent padding, no handles), then
@@ -250,8 +262,40 @@ function main() --main part of the script
           reaper.MoveMediaItemToTrack(tsItem, FXmediaTrack)
           bypassUnfocusedFX(FXmediaTrack, fxIndex, render)
 
+          -- Ensure only the TS item is selected for apply
+          reaper.Main_OnCommand(40289, 0) -- Unselect all
+          reaper.SetMediaItemSelected(tsItem, true)
+
+          -- Resolve desired track channel count by source channels (auto: 1ch->mono, >=2ch->multi)
+          local desired_nchan = 2
+          do
+            local tk = reaper.GetActiveTake(tsItem)
+            local ch = 2
+            if tk then
+              local src = reaper.GetMediaItemTake_Source(tk)
+              if src then ch = reaper.GetMediaSourceNumChannels(src) or 2 end
+            end
+            -- REAPER track channels are even (2,4,6,...). Map 1ch->2; >=2ch->nearest even >= ch
+            if ch <= 1 then
+              desired_nchan = 2
+            else
+              desired_nchan = (ch % 2 == 0) and ch or (ch + 1)
+            end
+          end
+
+          -- Snapshot and set the FX track channel count for printing
+          local prev_nchan = reaper.GetMediaTrackInfo_Value(FXmediaTrack, "I_NCHAN")
+          if prev_nchan ~= desired_nchan then
+            reaper.SetMediaTrackInfo_Value(FXmediaTrack, "I_NCHAN", desired_nchan)
+          end          
+
           -- 4) Print focused Track FX to the item (as new take)
           reaper.Main_OnCommand(40361, 0) -- Apply track FX to items as new take
+
+          -- Restore FX track channel count if it was changed
+          if prev_nchan and prev_nchan ~= desired_nchan then
+            reaper.SetMediaTrackInfo_Value(FXmediaTrack, "I_NCHAN", prev_nchan)
+          end
 
           -- 5) Rename in place: append raw FX label
           do
