@@ -1,6 +1,6 @@
 --[[
 @description AudioSweet (hsuanice) — Focused Track FX render via RGWH Core, append FX name, rebuild peaks (selected items)
-@version 251001_0330 Auto channel mode
+@version 251001_1312 glue fx with time selection
 @author Tim Chimes (original), adapted by hsuanice
 @notes
   Reference:
@@ -18,6 +18,20 @@ This version:
   • Track FX only (Take FX not supported)
   • Mono/Stereo merged: APPLY_FX_MODE from ExtState (auto/mono/multi); Auto resolves by source channels
 @changelog
+  v20251001_1312  (glue fx with time selection)
+    - Added TS-Window mode (Pro Tools-like): when Time Selection doesn’t match the RGWH “item unit”, the script now
+      1) runs native 42432 “Glue items within time selection” (silent padding, no handles), then
+      2) prints only the focused Track FX via 40361 as a new take, appends FX full name, moves back, and rebuilds peaks.
+    - Kept unit-matched path unchanged: when TS == unit, continue using RGWH Core (GLUE with handles by Core).
+    - Hardened focused FX isolation and consistent index normalization (strip 0x1000000).
+    - Robust post-op selection flow: reacquire the processed item, in-place rename, return to original track, 40441 peaks.
+    - Clear aborts with message boxes on failure; no fallback.
+
+    Known issue
+    - In TS-Window mode, printing with 40361 follows the track’s channel layout and focused FX I/O. This can result in mono/stereo-only output and ignore source channel count (“auto” detection not applied here). Workarounds for now:
+      • Ensure the track channel count matches the source channels before 40361, or
+      • Keep routing utilities (>2-out channel mappers) enabled, or
+      • Use the Core path (TS == unit) where auto channel mode is respected.
   v20251001_0330
     - Auto channel mode: resolve "auto" by source channels before calling Core (1ch→mono, ≥2ch→multi); prevents unintended mono downmix in GLUE.
     - Core integration: write RGWH *project* ExtState for GLUE/RENDER (…_TAKE_FX, …_TRACK_FX, …_APPLY_MODE), with snapshot/restore around apply.
@@ -212,21 +226,63 @@ function main() --main part of the script
       FXName, FXmediaTrack = getFXname(tracknumber_Out, fxIndex)--Get FX name, and FX Track
       
       loopPoints, startLoop, endLoop = getLoopSelection()
-        if loopPoints then
-          test = mediaItemInLoop(mediaItem, startLoop, endLoop)
-          if test then
-            reaper.Main_OnCommand(41385, 0)--Fit items to time selection, padding with silence
-          else debug ("Loop is not equal to MediaItem Length")
-          end        
-        else 
+      if loopPoints then
+        test = mediaItemInLoop(mediaItem, startLoop, endLoop)
+        if test then
+          -- TS equals unit: keep existing behavior (optional padding)
+          reaper.Main_OnCommand(41385, 0) -- Fit items to time selection, padding with silence
+        else
+          -- === TS-Window mode (Pro Tools-like): glue within TS, then print focused Track FX; no handles ===
+
+          -- 1) Glue items within time selection (silent padding in gaps)
+          reaper.Main_OnCommand(42432, 0) -- Item: Glue items within time selection
+
+          -- 2) Re-acquire the glued (TS-length) item
+          local tsItem = reaper.GetSelectedMediaItem(0, 0)
+          if not (tsItem and reaper.ValidatePtr2(0, tsItem, "MediaItem*")) then
+            reaper.MB("TS-Window glue failed: no item selected after 42432.", "AudioSweet", 0)
+            reaper.Undo_EndBlock("Audiosweet (TS glue failed)", -1)
+            return
+          end
+
+          -- 3) Move to focused FX track and isolate the focused FX
+          local tsOrigTrack = reaper.GetMediaItem_Track(tsItem)
+          reaper.MoveMediaItemToTrack(tsItem, FXmediaTrack)
+          bypassUnfocusedFX(FXmediaTrack, fxIndex, render)
+
+          -- 4) Print focused Track FX to the item (as new take)
+          reaper.Main_OnCommand(40361, 0) -- Apply track FX to items as new take
+
+          -- 5) Rename in place: append raw FX label
+          do
+            local tidx = reaper.GetMediaItemInfo_Value(tsItem, "I_CURTAKE")
+            local tk   = reaper.GetMediaItemTake(tsItem, tidx)
+            local _, takeName = reaper.GetSetMediaItemTakeInfo_String(tk, "P_NAME", "", false)
+            if FXName and FXName ~= "" then
+              reaper.GetSetMediaItemTakeInfo_String(tk, "P_NAME", takeName .. " - " .. FXName, true)
+            end
+          end
+
+          -- 6) Move back to original track and restore FX enables
+          reaper.MoveMediaItemToTrack(tsItem, tsOrigTrack)
+          bypassUnfocusedFX(FXmediaTrack, fxIndex, true)
+
+          -- 7) Rebuild peaks for the processed item
+          reaper.Main_OnCommand(40289, 0) -- Unselect all
+          reaper.SetMediaItemSelected(tsItem, true)
+          reaper.Main_OnCommand(40441, 0) -- Peaks: Rebuild peaks for selected items
+
+          -- 8) Finish TS-Window flow (skip Core path)
+          reaper.Undo_EndBlock("Audiosweet TS-Window Glue+Print", 0)
+          return
         end
-      
+      end
+
+      -- === Normal (unit) path: proceed with Core ===
       selTrack = reaper.GetMediaItem_Track(mediaItem)
-     
-      moveBool = reaper.MoveMediaItemToTrack(mediaItem, FXmediaTrack)--move item to FX track
-     
-      bypassUnfocusedFX(FXmediaTrack, fxIndex, render)--Bypass all FX except desired FX
-     
+      moveBool = reaper.MoveMediaItemToTrack(mediaItem, FXmediaTrack) -- move item to FX track
+      bypassUnfocusedFX(FXmediaTrack, fxIndex, render) -- Bypass all FX except desired FX
+
       -- BEGIN: RGWH Core call (Pro Tools-like default: GLUE + TAKE FX=1 + TRACK FX=1; handles by Core)
       do
         local CORE_PATH = reaper.GetResourcePath() .. "/Scripts/hsuanice Scripts/Library/hsuanice_RGWH Core.lua"
