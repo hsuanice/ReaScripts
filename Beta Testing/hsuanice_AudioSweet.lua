@@ -1,6 +1,6 @@
 --[[
 @description AudioSweet (hsuanice) — Focused Track FX render via RGWH Core, append FX name, rebuild peaks (selected items)
-@version 20251001_1336  TS-Window mode with mono/multi auto-detect
+@version 20251001_1351  TS-Window mode with mono/multi auto-detect
 @author Tim Chimes (original), adapted by hsuanice
 @notes
   Reference:
@@ -17,6 +17,18 @@ This version:
   • Use Peaks: Rebuild peaks for selected items (40441) instead of the nudge trick
   • Track FX only (Take FX not supported)
 @changelog
+  v20251001_1351  (TS-Window mode with mono/multi auto-detect)
+    - TS-Window behavior refined: strictly treat Time Selection ≠ unit as “window” — no handle content is included.
+    - Strict unit match: replaced loose check with sample-accurate (epsilon = 1 sample) start/end equality.
+    - When TS == unit: removed 41385 padding step; defer entirely to RGWH Core (handles managed by Core).
+    - TS-Window path: keeps 42432 (Glue within TS, silent padding, no handles) → 40361 (print only focused Track FX).
+    - Mono/Multi auto in TS-Window: set FX-track channel count by source take channels before 40361, then restore.
+    - Post-op flow unchanged: in-place rename with “ - <FX raw name>”, move back to original track, 40441 peaks.
+    - Focused FX index handling and isolation maintained (strip 0x1000000; bypass non-focused FX).
+    - Stability: clearer failure messages and early aborts; no fallback paths.
+
+Known notes
+- If the focused plugin does not support all source channels (e.g., 5.0 only), unaffected channels may need routing/pins.
   v20251001_1336  (TS-Window mode with mono/multi auto-detect)
     - TS-Window mode: when Time Selection ≠ RGWH “item unit”, run 42432 (Glue within TS, silent padding, no handles),
       then print only the focused Track FX via 40361 as a new take, append FX full name, move back, and rebuild peaks.
@@ -54,21 +66,21 @@ This version:
     - Cleanup: removed crop-to-new-take path; reduced global variable leakage; loop hygiene & minor logging polish.
 
   v20250930_1754
-  - Switched render engine to RGWH Core: call `RGWH.apply()` instead of native 40361.
-  - Pro Tools–like default: GLUE mode with TAKE FX=1 and TRACK FX=1; handles fully managed by Core.
-  - Focused FX targeting hardened: mask floating-window flag (0x1000000); Track FX only.
-  - Post-Core handoff: re-acquire processed item from current selection; rename in place; move back to original track.
-  - Naming: append raw focused FX label to take name (" - <FX raw name>"); avoids trailing dash when FX name is empty.
-  - Refresh: replaced nudge trick with `Peaks: Rebuild peaks for selected items` (40441).
-  - Error handling: message boxes for Core load/apply failures; no fallback path (explicit abort).
-  - Cleanups: removed crop-to-new-take step; reduced global variable leakage; minor loop hygiene.
-  - Config via ExtState (hsuanice_AS): `AS_MODE` (glue|render), `AS_TAKE_FX`, `AS_TRACK_FX`, `AS_APPLY_FX_MODE` (auto|mono|multi).
+    - Switched render engine to RGWH Core: call `RGWH.apply()` instead of native 40361.
+    - Pro Tools–like default: GLUE mode with TAKE FX=1 and TRACK FX=1; handles fully managed by Core.
+    - Focused FX targeting hardened: mask floating-window flag (0x1000000); Track FX only.
+    - Post-Core handoff: re-acquire processed item from current selection; rename in place; move back to original track.
+    - Naming: append raw focused FX label to take name (" - <FX raw name>"); avoids trailing dash when FX name is empty.
+    - Refresh: replaced nudge trick with `Peaks: Rebuild peaks for selected items` (40441).
+    - Error handling: message boxes for Core load/apply failures; no fallback path (explicit abort).
+    - Cleanups: removed crop-to-new-take step; reduced global variable leakage; minor loop hygiene.
+    - Config via ExtState (hsuanice_AS): `AS_MODE` (glue|render), `AS_TAKE_FX`, `AS_TRACK_FX`, `AS_APPLY_FX_MODE` (auto|mono|multi).
 
   v20250929
-  - Initial integration with RGWH Core
-  - FX focus: robust (mask floating flag), Track FX only
-  - Refresh: Peaks → Rebuild peaks for selected items (40441)
-  - Naming: append " - <FX raw name>" after Core’s render naming
+    - Initial integration with RGWH Core
+    - FX focus: robust (mask floating flag), Track FX only
+    - Refresh: Peaks → Rebuild peaks for selected items (40441)
+    - Naming: append " - <FX raw name>" after Core’s render naming
 ]]--
 
 function debug(message) --logging
@@ -173,15 +185,17 @@ function getLoopSelection()--Checks to see if there is a loop selection
 end
 
 function mediaItemInLoop(mediaItem, startLoop, endLoop)
-  mposition = reaper.GetMediaItemInfo_Value(mediaItem, "D_POSITION")
-  mlength = reaper.GetMediaItemInfo_Value (mediaItem, "D_LENGTH")
-  mend = mposition + mlength
+  local mpos = reaper.GetMediaItemInfo_Value(mediaItem, "D_POSITION")
+  local mlen = reaper.GetMediaItemInfo_Value(mediaItem, "D_LENGTH")
+  local mend = mpos + mlen
+  -- use 1 sample as epsilon
+  local sr = reaper.GetSetProjectInfo(0, "PROJECT_SRATE", 0, false)
+  local eps = (sr and sr > 0) and (1.0 / sr) or 1e-6
 
-  if mposition == startLoop and mend <= endLoop then
-    test = true
-  else test = false
-  end
-  return test
+  local function approx_eq(a, b) return math.abs(a - b) <= eps end
+
+  -- TS equals unit ONLY when both edges match (within epsilon)
+  return approx_eq(mpos, startLoop) and approx_eq(mend, endLoop)
 end
 
 function cropNewTake(mediaItem, tracknumber_Out, FXname)--Crop to new take and change name to add FXname
@@ -241,10 +255,8 @@ function main() --main part of the script
       if loopPoints then
         test = mediaItemInLoop(mediaItem, startLoop, endLoop)
         if test then
-          -- TS equals unit: keep existing behavior (optional padding)
-          reaper.Main_OnCommand(41385, 0) -- Fit items to time selection, padding with silence
-        else
-          -- === TS-Window mode (Pro Tools-like): glue within TS, then print focused Track FX; no handles ===
+          -- TS equals unit: do nothing here; proceed to Core path (handles by Core)
+        else          -- === TS-Window mode (Pro Tools-like): glue within TS, then print focused Track FX; no handles ===
 
           -- 1) Glue items within time selection (silent padding in gaps)
           reaper.Main_OnCommand(42432, 0) -- Item: Glue items within time selection
