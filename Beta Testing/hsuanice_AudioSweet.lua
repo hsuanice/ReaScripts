@@ -1,6 +1,6 @@
 --[[
 @description AudioSweet (hsuanice) — Focused Track FX render via RGWH Core, append FX name, rebuild peaks (selected items)
-@version 2510041339 (fix misuse of glue_single_items argument)
+@version 2510041421 (drop buffered debug; direct console logging)
 @author Tim Chimes (original), adapted by hsuanice
 @notes
   Reference:
@@ -18,11 +18,16 @@ This version:
   • Track FX only (Take FX not supported)
 
 @changelog
+  v2510041421 (drop buffered debug; direct console logging)
+    - Removed LOG_BUF/buf_push/buf_dump/buf_step; all debug now prints directly via log_step/dbg_* helpers.
+    - Switched post-move range dump to dbg_track_items_in_range(); removed re-dump step (Core no longer clears console).
+    - Kept all existing debug granularity; behavior unchanged.
+    
   v2510041339 (fix misuse of glue_single_items argument)
     - Corrected the `glue_single_items` argument in the Core call to `false` for multi-item glue scenarios.
     - Ensures that when multiple items are selected and glued, they are treated as a single unit rather than individually.
     - No other changes to functionality or behavior.
-    
+
   v2510041145  (fix item unit selection after move to FX track)
     - Non–TS-Window path: preserve full unit selection after moving items to FX track (no longer anchor-only).
     - Core handoff: keep GLUE_SINGLE_ITEMS=1（unit glue even for single-item）；do not pass glue_single_items in args（avoid ambiguity）.
@@ -140,33 +145,7 @@ local function log_step(tag, fmt, ...)
   reaper.ShowConsoleMsg(string.format("[AS][STEP] %s %s\n", tostring(tag or ""), msg))
 end
 
--- ==== buffered debug (survives Core's ClearConsole) ====
-local LOG_BUF = {}
 
-local function buf_push(line)
-  if not debug_enabled() then return end
-  LOG_BUF[#LOG_BUF+1] = line
-end
-
-local function buf_dump(title)
-  if not debug_enabled() then return end
-  if title and title ~= "" then
-    reaper.ShowConsoleMsg(string.format("\n[AS][STEP] %s\n", title))
-  end
-  for i=1, #LOG_BUF do
-    reaper.ShowConsoleMsg(LOG_BUF[i] .. "\n")
-  end
-end
-
--- 同時「列印」＋「寫入緩衝」；用在呼叫 Core 前的重要訊息
-local function buf_step(tag, fmt, ...)
-  if not debug_enabled() then return end
-  local line = string.format("[AS][STEP] %s %s", tostring(tag or ""),
-                             fmt and string.format(fmt, ...) or "")
-  reaper.ShowConsoleMsg(line .. "\n")
-  buf_push(line)
-end
--- ================================================
 
 -- ==== debug helpers ====
 local function dbg_item_brief(it, tag)
@@ -731,45 +710,22 @@ function main() -- main part of the script
             moved = moved + 1
           end
         end
-        buf_step("CORE", "post-move: on-FX=%d / unit=%d", moved, #u.items)
+        log_step("CORE", "post-move: on-FX=%d / unit=%d", moved, #u.items)
 
-        -- 也把 FX 軌上落在 unit 範圍內的 item 寫進緩衝（避免被 Core 清掉）
         if debug_enabled() then
           local L = u.UL - project_epsilon()
           local R = u.UR + project_epsilon()
-          local n = reaper.CountTrackMediaItems(FXmediaTrack)
-          buf_push(string.format("[AS][STEP] TRACK SCAN in [%.3f..%.3f]", L, R))
-          for i=0,n-1 do
-            local it = reaper.GetTrackMediaItem(FXmediaTrack, i)
-            if it then
-              local p   = reaper.GetMediaItemInfo_Value(it, "D_POSITION")
-              local len = reaper.GetMediaItemInfo_Value(it, "D_LENGTH")
-              local q   = (p or 0) + (len or 0)
-              if p and len and not (q < L or p > R) then
-                local _, g = reaper.GetSetMediaItemInfo_String(it, "GUID", "", false)
-                buf_push(string.format("[AS][STEP]   tr-hit pos=%.3f len=%.3f guid=%s", p or -1, len or -1, g))
-              end
-            end
-          end
+          dbg_track_items_in_range(FXmediaTrack, L, R)
         end
       end
+
 
       -- [DBG] selection should equal the full unit at this point
       do
         local selN = reaper.CountSelectedMediaItems(0)
-        buf_step("CORE", "pre-apply selection count=%d (expect=%d)", selN, #u.items)
-
-        if debug_enabled() then
-          buf_push(string.format("[AS][STEP] CORE pre-apply selection selected_items=%d", selN))
-          for i=0, selN-1 do
-            local it = reaper.GetSelectedMediaItem(0, i)
-            local p  = it and reaper.GetMediaItemInfo_Value(it, "D_POSITION") or -1
-            local l  = it and reaper.GetMediaItemInfo_Value(it, "D_LENGTH") or -1
-            local _, g = reaper.GetSetMediaItemInfo_String(it, "GUID", "", false)
-            buf_push(string.format("[AS][STEP]   • item pos=%.3f len=%.3f guid=%s", p, l, g))
-          end
-        end
-      end   
+        log_step("CORE", "pre-apply selection count=%d (expect=%d)", selN, #u.items)
+        dbg_dump_selection("CORE pre-apply selection")
+      end  
 
       -- Load Core (no goto; use failed flag to reach cleanup safely)
       local failed = false
@@ -871,20 +827,10 @@ function main() -- main part of the script
         }
         if debug_enabled() then
           local c = reaper.CountSelectedMediaItems(0)
-          buf_step("CORE", "apply args: mode=%s apply_fx_mode=%s focus_idx=%d sel_scope=%s single=%s unit_members=%d",
-            tostring(args.mode), tostring(args.apply_fx_mode), fxIndex, tostring(args.selection_scope),
-            tostring(args.glue_single_items), #u.items)
-          buf_step("CORE", "pre-apply FINAL selected_items=%d", c)
-
-          -- FINAL dump 也寫入緩衝（避免被 Core 清掉）
-          buf_push(string.format("[AS][STEP] CORE pre-apply FINAL dump selected_items=%d", c))
-          for i=0, c-1 do
-            local it = reaper.GetSelectedMediaItem(0, i)
-            local p  = it and reaper.GetMediaItemInfo_Value(it, "D_POSITION") or -1
-            local l  = it and reaper.GetMediaItemInfo_Value(it, "D_LENGTH") or -1
-            local _, g = reaper.GetSetMediaItemInfo_String(it, "GUID", "", false)
-            buf_push(string.format("[AS][STEP]   • item pos=%.3f len=%.3f guid=%s", p, l, g))
-          end
+          log_step("CORE", "apply args: mode=%s apply_fx_mode=%s focus_idx=%d sel_scope=%s unit_members=%d",
+            tostring(args.mode), tostring(args.apply_fx_mode), fxIndex, tostring(args.selection_scope), #u.items)
+          log_step("CORE", "pre-apply FINAL selected_items=%d", c)
+          dbg_dump_selection("CORE pre-apply FINAL")
         end
 
         -- (F) 呼叫 Core（pcall 包起來，抓 runtime error）
@@ -902,9 +848,6 @@ function main() -- main part of the script
             failed = true
           end
         end
-
-        -- 將被 Core 清掉的「呼叫前偵錯」重新吐出（只在 DEBUG=1）
-        buf_dump("RE-DUMP (pre-apply logs that Core cleared)")
 
       end
       -- (G) Restore flags immediately
