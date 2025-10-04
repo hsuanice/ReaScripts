@@ -1,6 +1,6 @@
 --[[
 @description AudioSweet (hsuanice) — Focused Track FX render via RGWH Core, append FX name, rebuild peaks (selected items)
-@version 2510041455 (fix item selection before send to Core)
+@version 2510041808 (unit-wide auto channel for Core glue; fix TS-Window unit n-chan set)
 @author Tim Chimes (original), adapted by hsuanice
 @notes
   Reference:
@@ -18,6 +18,11 @@ This version:
   • Track FX only (Take FX not supported)
 
 @changelog
+  v2510041808 (unit-wide auto channel for Core glue; fix TS-Window unit n-chan set)
+    - Core/GLUE: Auto channel detection now scans the entire unit and uses the maximum channel count to decide mono/multi; no longer depends on an anchor item.
+    - TS-Window (UNIT): Before 40361, set the FX track I_NCHAN to the desired_nchan derived from the glued source; restore prev_nchan afterwards.
+    - All other behavior and debug output remain unchanged.
+    
   v2510041421 (drop buffered debug; direct console logging)
     - Removed LOG_BUF/buf_push/buf_dump/buf_step; all debug now prints directly via log_step/dbg_* helpers.
     - Switched post-move range dump to dbg_track_items_in_range(); removed re-dump step (Core no longer clears console).
@@ -200,7 +205,27 @@ local function dbg_track_items_in_range(tr, L, R)
   end
 end
 -- =======================
+-- ==== channel helpers ====
+local function get_item_channels(it)
+  if not it then return 2 end
+  local tk = reaper.GetActiveTake(it)
+  if not tk then return 2 end
+  local src = reaper.GetMediaItemTake_Source(tk)
+  if not src then return 2 end
+  local ch = reaper.GetMediaSourceNumChannels(src) or 2
+  return ch
+end
 
+local function unit_max_channels(u)
+  if not u or not u.items or #u.items == 0 then return 2 end
+  local maxch = 1
+  for _,it in ipairs(u.items) do
+    local ch = get_item_channels(it)
+    if ch > maxch then maxch = ch end
+  end
+  return maxch
+end
+-- =========================
 function getSelectedMedia() --Get value of Media Item that is selected
   selitem = 0
   MediaItem = reaper.GetSelectedMediaItem(0, selitem)
@@ -748,19 +773,13 @@ function main() -- main part of the script
         end
       end
 
-      -- Resolve auto apply_fx_mode by source channels of first item
+      -- Resolve auto apply_fx_mode by MAX channels across the entire unit
       local apply_fx_mode = nil
       if not failed then
         apply_fx_mode = reaper.GetExtState("hsuanice_AS","AS_APPLY_FX_MODE")
         if apply_fx_mode == "" or apply_fx_mode == "auto" then
-          local first = u.items[1]
-          local tk = first and reaper.GetActiveTake(first)
-          local ch = 2
-          if tk then
-            local src = reaper.GetMediaItemTake_Source(tk)
-            if src then ch = reaper.GetMediaSourceNumChannels(src) or 2 end
-          end
-          apply_fx_mode = (ch == 1) and "mono" or "multi"
+          local ch = unit_max_channels(u)
+          apply_fx_mode = (ch <= 1) and "mono" or "multi"
         end
       end
 
