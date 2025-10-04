@@ -1,6 +1,6 @@
 --[[
 @description AudioSweet (hsuanice) — Focused Track FX render via RGWH Core, append FX name, rebuild peaks (selected items)
-@version 251002_2223 (stabilize multi-item in TS-Window; single-item in non-TS)
+@version 2510041339 (fix misuse of glue_single_items argument)
 @author Tim Chimes (original), adapted by hsuanice
 @notes
   Reference:
@@ -16,7 +16,23 @@ This version:
   • Append the focused Track FX full name to the take name after render
   • Use Peaks: Rebuild peaks for selected items (40441) instead of the nudge trick
   • Track FX only (Take FX not supported)
+
 @changelog
+  v2510041339 (fix misuse of glue_single_items argument)
+    - Corrected the `glue_single_items` argument in the Core call to `false` for multi-item glue scenarios.
+    - Ensures that when multiple items are selected and glued, they are treated as a single unit rather than individually.
+    - No other changes to functionality or behavior.
+    
+  v2510041145  (fix item unit selection after move to FX track)
+    - Non–TS-Window path: preserve full unit selection after moving items to FX track (no longer anchor-only).
+    - Core handoff: keep GLUE_SINGLE_ITEMS=1（unit glue even for single-item）；do not pass glue_single_items in args（avoid ambiguity）.
+    - Logging: clearer unit dumps and pre-apply selection counts to verify unit integrity before Core apply.
+    - Stability: ensure FX-track bypass restore and item return-to-original-track even on partial failures.
+
+  Known limitation
+    - Non–TS-Window mode still processes only the **first** unit per run (guarded by processed_core_once).
+      To process all units, remove the guard that skips subsequent units and the assignment that sets it to true.
+
   v251002_2223  (stabilize multi-item in TS-Window; single-item in non-TS)
     - TS-Window (GLOBAL/UNIT) path: added detailed console tracing (pre/post 42432, post 40361, item moves).
     - Per-unit (Core) path: when not in TS-Window, now processes only the first item (anchor) as single-item glue.
@@ -123,6 +139,34 @@ local function log_step(tag, fmt, ...)
   local msg = fmt and string.format(fmt, ...) or ""
   reaper.ShowConsoleMsg(string.format("[AS][STEP] %s %s\n", tostring(tag or ""), msg))
 end
+
+-- ==== buffered debug (survives Core's ClearConsole) ====
+local LOG_BUF = {}
+
+local function buf_push(line)
+  if not debug_enabled() then return end
+  LOG_BUF[#LOG_BUF+1] = line
+end
+
+local function buf_dump(title)
+  if not debug_enabled() then return end
+  if title and title ~= "" then
+    reaper.ShowConsoleMsg(string.format("\n[AS][STEP] %s\n", title))
+  end
+  for i=1, #LOG_BUF do
+    reaper.ShowConsoleMsg(LOG_BUF[i] .. "\n")
+  end
+end
+
+-- 同時「列印」＋「寫入緩衝」；用在呼叫 Core 前的重要訊息
+local function buf_step(tag, fmt, ...)
+  if not debug_enabled() then return end
+  local line = string.format("[AS][STEP] %s %s", tostring(tag or ""),
+                             fmt and string.format(fmt, ...) or "")
+  reaper.ShowConsoleMsg(line .. "\n")
+  buf_push(line)
+end
+-- ================================================
 
 -- ==== debug helpers ====
 local function dbg_item_brief(it, tag)
@@ -671,16 +715,61 @@ function main() -- main part of the script
       --------------------------------------------------------------
       -- Core/GLUE（含 handles）：無 TS 或 TS==unit
       --------------------------------------------------------------
-      -- Non–TS-Window path: handle only one item via Core per run
-      if processed_core_once then
-        goto continue_unit
-      end
+
       -- Move all unit items to FX track (keep as-is), but select only the anchor for Core.
       move_items_to_track(u.items, FXmediaTrack)
       isolate_focused_fx(FXmediaTrack, fxIndex)
-      -- Select only the first item (anchor) to keep non-TS paths as single-item behavior
-      local anchor = u.items[1]
-      select_only_items({ anchor })
+      -- Select the entire unit (non-TS path should preserve full unit selection)
+      local anchor = u.items[1]  -- still used for channel auto and safety
+      select_only_items_checked(u.items)
+
+      -- [DBG] after move: how many unit items are actually on the FX track?
+      do
+        local moved = 0
+        for _,it in ipairs(u.items) do
+          if it and reaper.GetMediaItem_Track(it) == FXmediaTrack then
+            moved = moved + 1
+          end
+        end
+        buf_step("CORE", "post-move: on-FX=%d / unit=%d", moved, #u.items)
+
+        -- 也把 FX 軌上落在 unit 範圍內的 item 寫進緩衝（避免被 Core 清掉）
+        if debug_enabled() then
+          local L = u.UL - project_epsilon()
+          local R = u.UR + project_epsilon()
+          local n = reaper.CountTrackMediaItems(FXmediaTrack)
+          buf_push(string.format("[AS][STEP] TRACK SCAN in [%.3f..%.3f]", L, R))
+          for i=0,n-1 do
+            local it = reaper.GetTrackMediaItem(FXmediaTrack, i)
+            if it then
+              local p   = reaper.GetMediaItemInfo_Value(it, "D_POSITION")
+              local len = reaper.GetMediaItemInfo_Value(it, "D_LENGTH")
+              local q   = (p or 0) + (len or 0)
+              if p and len and not (q < L or p > R) then
+                local _, g = reaper.GetSetMediaItemInfo_String(it, "GUID", "", false)
+                buf_push(string.format("[AS][STEP]   tr-hit pos=%.3f len=%.3f guid=%s", p or -1, len or -1, g))
+              end
+            end
+          end
+        end
+      end
+
+      -- [DBG] selection should equal the full unit at this point
+      do
+        local selN = reaper.CountSelectedMediaItems(0)
+        buf_step("CORE", "pre-apply selection count=%d (expect=%d)", selN, #u.items)
+
+        if debug_enabled() then
+          buf_push(string.format("[AS][STEP] CORE pre-apply selection selected_items=%d", selN))
+          for i=0, selN-1 do
+            local it = reaper.GetSelectedMediaItem(0, i)
+            local p  = it and reaper.GetMediaItemInfo_Value(it, "D_POSITION") or -1
+            local l  = it and reaper.GetMediaItemInfo_Value(it, "D_LENGTH") or -1
+            local _, g = reaper.GetSetMediaItemInfo_String(it, "GUID", "", false)
+            buf_push(string.format("[AS][STEP]   • item pos=%.3f len=%.3f guid=%s", p, l, g))
+          end
+        end
+      end   
 
       -- Load Core (no goto; use failed flag to reach cleanup safely)
       local failed = false
@@ -756,7 +845,12 @@ function main() -- main part of the script
       proj_set("RGWH","GLUE_TAKE_FX","1")
       proj_set("RGWH","GLUE_TRACK_FX","1")
       proj_set("RGWH","GLUE_APPLY_MODE",apply_fx_mode)
-      proj_set("RGWH","GLUE_SINGLE_ITEMS","1")
+      proj_set("RGWH","GLUE_SINGLE_ITEMS","1")  -- 正確語意：就算 unit 只有 1 顆 item 也走 glue
+
+      if debug_enabled() then
+        local _, gsi = reaper.GetProjExtState(0, "RGWH", "GLUE_SINGLE_ITEMS")
+        log_step("CORE", "flag GLUE_SINGLE_ITEMS=%s (expected=1 for unit-glue)", (gsi == "" and "(empty)") or gsi)
+      end
 
       -- (E) 準備參數，並完整印出（單一 item）
       if not (anchor and (reaper.ValidatePtr2 == nil or reaper.ValidatePtr2(0, anchor, "MediaItem*"))) then
@@ -764,20 +858,33 @@ function main() -- main part of the script
         reaper.MB("Internal error: unit anchor item is invalid.", "AudioSweet", 0)
         failed = true
       else
+        -- （保持你現有的 args 組裝…）
         local args = {
           mode                = "glue_item_focused_fx",
-          item                = anchor,          -- 單一錨點
+          item                = anchor,
           apply_fx_mode       = apply_fx_mode,
           focused_track       = FXmediaTrack,
           focused_fxindex     = fxIndex,
           policy_only_focused = true,
-          selection_scope     = "single",        -- 單一 item
-          glue_single_items   = true,            -- 告知 Core 走單顆
+          selection_scope     = "unit",
+          -- glue_single_items  不再由前端傳入，統一交由 RGWH 專案旗標（GLUE_SINGLE_ITEMS）決定
         }
         if debug_enabled() then
-          log_step("CORE", "apply args: mode=%s apply_fx_mode=%s focus_idx=%d sel_scope=%s single=%s unit_members=%d",
+          local c = reaper.CountSelectedMediaItems(0)
+          buf_step("CORE", "apply args: mode=%s apply_fx_mode=%s focus_idx=%d sel_scope=%s single=%s unit_members=%d",
             tostring(args.mode), tostring(args.apply_fx_mode), fxIndex, tostring(args.selection_scope),
             tostring(args.glue_single_items), #u.items)
+          buf_step("CORE", "pre-apply FINAL selected_items=%d", c)
+
+          -- FINAL dump 也寫入緩衝（避免被 Core 清掉）
+          buf_push(string.format("[AS][STEP] CORE pre-apply FINAL dump selected_items=%d", c))
+          for i=0, c-1 do
+            local it = reaper.GetSelectedMediaItem(0, i)
+            local p  = it and reaper.GetMediaItemInfo_Value(it, "D_POSITION") or -1
+            local l  = it and reaper.GetMediaItemInfo_Value(it, "D_LENGTH") or -1
+            local _, g = reaper.GetSetMediaItemInfo_String(it, "GUID", "", false)
+            buf_push(string.format("[AS][STEP]   • item pos=%.3f len=%.3f guid=%s", p, l, g))
+          end
         end
 
         -- (F) 呼叫 Core（pcall 包起來，抓 runtime error）
@@ -795,6 +902,10 @@ function main() -- main part of the script
             failed = true
           end
         end
+
+        -- 將被 Core 清掉的「呼叫前偵錯」重新吐出（只在 DEBUG=1）
+        buf_dump("RE-DUMP (pre-apply logs that Core cleared)")
+
       end
       -- (G) Restore flags immediately
       proj_set("RGWH","GLUE_TAKE_FX",      snap.GLUE_TAKE_FX)
@@ -814,8 +925,17 @@ function main() -- main part of the script
           reaper.MoveMediaItemToTrack(postItem, origTR)
           table.insert(outputs, postItem)
           -- Mark Core done once to keep non–TS-Window behavior single-item
-          processed_core_once = true
+
         end
+
+        -- [DBG] after Core: what is selected and which item will be picked?
+        if debug_enabled() then
+          dbg_dump_selection("CORE post-apply selection")
+          if postItem then
+            dbg_item_brief(postItem, "CORE picked postItem")
+          end
+        end        
+
       end
       -- Ensure any remaining original items (if any) go back
       move_items_to_track(u.items, u.track)
