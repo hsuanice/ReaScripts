@@ -1,11 +1,16 @@
 --[[
 @description Render or Glue Items with Handles Core Library
-@version 2510041327 Add option to not clear console on run
+@version 2510041655 Add AudioSweet bridge multi item selection support 
 @author hsuanice
 @about
   Library for RGWH glue/render flows with handles, FX policies, rename, # markers, and optional take markers inside glued items.
 
 @changelog
+  2510041655 Add AudioSweet bridge multi item selection support 
+    - In AudioSweet.lua, changed selection_scope from "unit" to "selection" when calling RGWH Core for focused FX render.
+    - This allows processing all selected items together, rather than per detected unit.
+    - No changes to RGWH Core itself; only the argument passed from AudioSweet script was modified.
+    
   2510041327 Add option to not clear console on run
     - New ExtState key `DEBUG_NO_CLEAR` (boolean, default false) to control whether console is cleared at start of Glue/Render operations.
     - When true, console retains previous logs for easier debugging across multiple runs.
@@ -1234,60 +1239,155 @@ end
 -- AudioSweet bridge: apply() - supports render/glue, auto/mono/multi, handles by Core
 ----------------------------------------------------------------
 function M.apply(args)
-  -- 只接受 AudioSweet 這個模式
+  ------------------------------------------------------------------
+  -- AudioSweet bridge — selection-aware, multi-item safe.
+  -- Supports:
+  --   mode: "render_item_focused_fx" | "glue_item_focused_fx"
+  --   selection_scope: "selection" | "items" | "item" (default: "item")
+  --   items: {MediaItem, ...}  -- when selection_scope == "items"
+  --   item:  MediaItem         -- when selection_scope == "item"
+  --   apply_fx_mode: "auto" | "mono" | "multi" (auto -> infer from selection max channels)
+  -- Behavior:
+  --   • Does NOT clear the console (honors DEBUG_NO_CLEAR in project ExtState).
+  --   • Writes temporary overrides into project ExtState namespace RGWH,
+  --     snapshots previous values and restores them after the operation.
+  --   • When selection_scope="selection", preserves current REAPER selection verbatim.
+  --   • Otherwise selects exactly the provided items / item.
+  ------------------------------------------------------------------  
   if type(args) ~= "table" then return false, "bad_args" end
+
   local mode = args.mode
   if mode ~= "render_item_focused_fx" and mode ~= "glue_item_focused_fx" then
     return false, "unsupported_mode"
   end
-  local it = args.item
-  if not (it and reaper.ValidatePtr2(0, it, "MediaItem*")) then
-    return false, "invalid_item"
+
+  -- Decide selection scope
+  local scope = tostring(args.selection_scope or "item")  -- "selection" | "items" | "item"
+  local items = {}
+  if scope == "items" and type(args.items) == "table" then
+    for i = 1, #args.items do
+      local it = args.items[i]
+      if reaper.ValidatePtr2(0, it, "MediaItem*") then items[#items+1] = it end
+    end
+    if #items == 0 then return false, "no_valid_items" end
+  elseif scope == "item" then
+    local it = args.item
+    if not (it and reaper.ValidatePtr2(0, it, "MediaItem*")) then
+      return false, "invalid_item"
+    end
+    items[1] = it
+  elseif scope ~= "selection" then
+    -- Fallback: if nothing valid was provided, treat as error
+    return false, "bad_selection_scope"
   end
 
-  -- 解析 auto/mono/multi（auto 依來源聲道）
-  local req = tostring(args.apply_fx_mode or "auto")
-  local tk = reaper.GetActiveTake(it)
-  local ch = 2
-  if tk then
-    local src = reaper.GetMediaItemTake_Source(tk)
-    ch = src and (reaper.GetMediaSourceNumChannels(src) or 2) or 2
+  -- Helper: (re)select only given items
+  local function select_only(items_)
+    reaper.SelectAllMediaItems(0, false)
+    for _, it in ipairs(items_) do
+      if reaper.ValidatePtr2(0, it, "MediaItem*") then
+        reaper.SetMediaItemSelected(it, true)
+      end
+    end
+    reaper.UpdateArrange()
   end
-  local apply_fx_mode = (req == "mono" or req == "multi")
-                        and req
-                        or ((ch == 1) and "mono" or "multi")
 
-  -- 快照 & 覆寫 Core 的 ExtState（讓 Core 走你想要的策略）
-  local function getx(k, def) local v = reaper.GetExtState("hsuanice_AS", k); return (v ~= "" and v) or def end
-  local prev_track_fx   = getx("RENDER_TRACK_FX",   "1")
-  local prev_take_fx    = getx("RENDER_TAKE_FX",    "1")
-  local prev_apply_mode = getx("RENDER_APPLY_MODE", "auto")
+  -- Infer apply_fx_mode if needed (auto = use max channels among selected)
+  local req_mode = tostring(args.apply_fx_mode or "auto")
+  local function max_channels_over(items_)
+    local maxch = 1
+    for _, it in ipairs(items_) do
+      local tk = reaper.GetActiveTake(it)
+      if tk then
+        local src = reaper.GetMediaItemTake_Source(tk)
+        local ch  = src and (reaper.GetMediaSourceNumChannels(src) or 1) or 1
+        if ch > maxch then maxch = ch end
+      end
+    end
+    return maxch
+  end
+  local apply_fx_mode
+  if req_mode == "mono" or req_mode == "multi" then
+    -- Explicit override from caller
+    apply_fx_mode = req_mode
+  else
+    -- Auto: infer from max source channels over the intended scope
+    local items_for_mode = {}
+    if scope == "selection" then
+      local n = reaper.CountSelectedMediaItems(0)
+      for i = 0, n - 1 do
+        items_for_mode[#items_for_mode+1] = reaper.GetSelectedMediaItem(0, i)
+      end
+    else
+      items_for_mode = items
+    end
+    apply_fx_mode = (max_channels_over(items_for_mode) >= 2) and "multi" or "mono"
+  end
 
-  -- 預設符合你要的「像 Pro Tools」：Glue，TAKE FX=1，TRACK FX=1，Handles 由 Core 自己處理
-  reaper.SetExtState("hsuanice_AS", "RENDER_TRACK_FX",   "1",               true)
-  reaper.SetExtState("hsuanice_AS", "RENDER_TAKE_FX",    "1",               true)
-  reaper.SetExtState("hsuanice_AS", "RENDER_APPLY_MODE", apply_fx_mode,     true)
+  -- Project ExtState (namespace RGWH) snapshot/override/restore
+  local NS = "RGWH"
+  local function proj_get(k, fallback)
+    local _, v = reaper.GetProjExtState(0, NS, k); return (v ~= nil and v ~= "") and v or fallback
+  end
+  local function proj_set(k, v) reaper.SetProjExtState(0, NS, k, tostring(v)) end
 
-  --（可選）如果 Core 以 ExtState 讀 handle 秒數，這裡也能先設：
-  -- reaper.SetExtState("hsuanice_AS", "HANDLE_SEC_L", "5.0", true)
-  -- reaper.SetExtState("hsuanice_AS", "HANDLE_SEC_R", "5.0", true)
+  local prev = {
+    RENDER_TRACK_FX   = proj_get("RENDER_TRACK_FX",   ""),
+    RENDER_TAKE_FX    = proj_get("RENDER_TAKE_FX",    ""),
+    RENDER_APPLY_MODE = proj_get("RENDER_APPLY_MODE", ""),
+    GLUE_TRACK_FX     = proj_get("GLUE_TRACK_FX",     ""),
+    GLUE_TAKE_FX      = proj_get("GLUE_TAKE_FX",      ""),
+    GLUE_APPLY_MODE   = proj_get("GLUE_APPLY_MODE",   ""),
+  }
 
-  -- 只選這顆 item，避免波及其他
-  reaper.Main_OnCommand(40289, 0)           -- Unselect all
-  reaper.SetMediaItemSelected(it, true)
+  -- For both glue/render in AudioSweet, we want: TrackFX=1, TakeFX=1, apply mode decided above.
+  if mode == "render_item_focused_fx" then
+    proj_set("RENDER_TRACK_FX",   "1")
+    proj_set("RENDER_TAKE_FX",    "1")
+    proj_set("RENDER_APPLY_MODE", apply_fx_mode)
+  else -- glue
+    proj_set("GLUE_TRACK_FX",     "1")
+    proj_set("GLUE_TAKE_FX",      "1")
+    proj_set("GLUE_APPLY_MODE",   apply_fx_mode)
+  end
 
-  -- 執行你的核心流程：render 或 glue（**這兩個函式要已存在於 Core**）
+  -- Prepare selection only when scope != "selection"
+  local sel_backup = {}
+  if scope ~= "selection" then
+    -- backup current selection to restore later
+    for i = 0, reaper.CountSelectedMediaItems(0)-1 do
+      sel_backup[#sel_backup+1] = reaper.GetSelectedMediaItem(0,i)
+    end
+    select_only(items)
+  end
+
+  -- Run  
   local ok, err
   if mode == "render_item_focused_fx" then
     ok, err = pcall(M.render_selection)
-  else -- "glue_item_focused_fx"
+  else
     ok, err = pcall(M.glue_selection)
   end
 
-  -- 還原 ExtState
-  reaper.SetExtState("hsuanice_AS", "RENDER_TRACK_FX",   prev_track_fx,   true)
-  reaper.SetExtState("hsuanice_AS", "RENDER_TAKE_FX",    prev_take_fx,    true)
-  reaper.SetExtState("hsuanice_AS", "RENDER_APPLY_MODE", prev_apply_mode, true)
+  -- Restore selection if we changed it
+  if scope ~= "selection" then
+    select_only(sel_backup)
+  end
+
+  -- Restore ExtState snapshot
+  local function restore_if_set(k, v)
+    if v == nil then return end
+    proj_set(k, v)
+  end
+  if mode == "render_item_focused_fx" then
+    restore_if_set("RENDER_TRACK_FX",   prev.RENDER_TRACK_FX)
+    restore_if_set("RENDER_TAKE_FX",    prev.RENDER_TAKE_FX)
+    restore_if_set("RENDER_APPLY_MODE", prev.RENDER_APPLY_MODE)
+  else
+    restore_if_set("GLUE_TRACK_FX",     prev.GLUE_TRACK_FX)
+    restore_if_set("GLUE_TAKE_FX",      prev.GLUE_TAKE_FX)
+    restore_if_set("GLUE_APPLY_MODE",   prev.GLUE_APPLY_MODE)
+  end
 
   if not ok then return false, tostring(err) end
   return true
