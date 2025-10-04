@@ -1,6 +1,6 @@
 --[[
 @description AudioSweet (hsuanice) — Focused Track FX render via RGWH Core, append FX name, rebuild peaks (selected items)
-@version 2510041957 (TS-Window mono path → 40361 as new take)
+@version 2510041957 TS-Window channel-aware apply; mono/stereo logic fixed
 @author Tim Chimes (original), adapted by hsuanice
 @notes
   Reference:
@@ -951,3 +951,4 @@ end
 reaper.PreventUIRefresh(1)
 main()
 reaper.PreventUIRefresh(-1)
+
