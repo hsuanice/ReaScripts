@@ -1,11 +1,18 @@
 --[[
 @description Render or Glue Items with Handles Core Library
-@version 250930_1813 Fix “Glue with Track FX” StartInSource
+@version 2510041327 Add option to not clear console on run
 @author hsuanice
 @about
   Library for RGWH glue/render flows with handles, FX policies, rename, # markers, and optional take markers inside glued items.
 
 @changelog
+  2510041327 Add option to not clear console on run
+    - New ExtState key `DEBUG_NO_CLEAR` (boolean, default false) to control whether console is cleared at start of Glue/Render operations.
+    - When true, console retains previous logs for easier debugging across multiple runs.
+    - When false (default), console is cleared as before.
+    - No changes to other functionalities or settings.
+    - Note: This setting is independent of DEBUG_LEVEL and only affects console clearing behavior.
+
   v250930_1813 — Fix “Glue with Track FX” StartInSource
     - Fixed: After GLUE_TS + Track/Take FX apply, all takes on the glued item now have synchronized StartInSource (D_STARTOFFS) to the computed left handle (left_total). Prevents phase mismatches and take-switch offsets when a new take is created by applying FX post-glue.
     - Improved: Render path preserves the original take’s StartInSource snapshot while expanding the window, then restores it before TimeReference calculations (“previous” mode), ensuring handle-aware math remains exact.
@@ -179,6 +186,8 @@ function M.read_settings()
 
     GLUE_OUTPUT_POLICY_WHEN_NO_TRACKFX   = get_ext("GLUE_OUTPUT_POLICY_WHEN_NO_TRACKFX",   DEFAULTS.GLUE_OUTPUT_POLICY_WHEN_NO_TRACKFX),
     RENDER_OUTPUT_POLICY_WHEN_NO_TRACKFX = get_ext("RENDER_OUTPUT_POLICY_WHEN_NO_TRACKFX", DEFAULTS.RENDER_OUTPUT_POLICY_WHEN_NO_TRACKFX),
+
+    DEBUG_NO_CLEAR = (get_ext_bool("DEBUG_NO_CLEAR", false) == 1),
   }
 
 end
@@ -890,7 +899,7 @@ function M.glue_selection()
 
   r.Undo_BeginBlock()
   r.PreventUIRefresh(1)
-  r.ClearConsole()
+  if not cfg.DEBUG_NO_CLEAR then r.ClearConsole() end
 
   local nsel = count_selected_items()
   if nsel==0 then
@@ -986,7 +995,7 @@ function M.render_selection()
 
   r.Undo_BeginBlock()
   r.PreventUIRefresh(1)
-  r.ClearConsole()
+  if not cfg.DEBUG_NO_CLEAR then r.ClearConsole() end
 
   if nsel == 0 then
     dbg(DBG,1,"[RUN] No selected items.")
