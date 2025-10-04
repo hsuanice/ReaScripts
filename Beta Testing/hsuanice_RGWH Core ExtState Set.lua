@@ -1,14 +1,26 @@
 --[[
 @description RGWH Core ExtState Set (project-scope)
-@version 250925_1101 change "force-multi" to "force_multi"
+@version 2510041439 Add CFG.DEBUG_NO_CLEAR (default false) to control console clearing
 @author hsuanice
 @about
   Quick setup for RGWH Core ExtStates (written into current project).
   Includes defaults for handles, epsilon, FX print policies, cue writing,
-  rename options, and new multi-mode output policy switches.
+  rename options, multi-mode output policy switches, and TC embed mode.
 
 @changelog
-v250925_1101 change "force-multi" to "force_multi"
+  v2510041439 Add CFG.DEBUG_NO_CLEAR (default false) to control console clearing
+    - New ExtState key `DEBUG_NO_CLEAR` (boolean, default false) to control whether console is cleared at start of Glue/Render operations.
+    - When true, console retains previous logs for easier debugging across multiple runs.
+    - When false (default), console is cleared as before.
+    - No changes to other functionalities or settings.
+    - Note: This setting is independent of DEBUG_LEVEL and only affects console clearing behavior.
+
+  v250925_1130
+    - Added: RENDER_TC_EMBED ("previous" | "current" | "off"), default "previous".
+             Controls TimeReference embedding behavior in Core after Render/Apply FX.
+    - Renamed: output policy token "force-multi" -> "force_multi" for consistency.
+    - Console: now prints RENDER_TC_EMBED along with other settings.
+v250925_1101 change "force_multi" to "force_multi"
 v250925_1042
   - Added: RENDER_TC_EMBED = "previous" | "current"
     • "previous" (default): embed TimeReference from the previous/original take
@@ -41,6 +53,9 @@ local CFG = {
 
   DEBUG_LEVEL       = 2,
 
+  -- Console: do not ClearConsole() inside Core when set to 1
+  DEBUG_NO_CLEAR    = 1,
+
   -- GLUE
   GLUE_TAKE_FX      = 1,
   GLUE_TRACK_FX     = 0,
@@ -49,12 +64,12 @@ local CFG = {
   -- RENDER
   RENDER_TAKE_FX    = 0,
   RENDER_TRACK_FX   = 0,
-  RENDER_APPLY_MODE = "mono",   -- "mono" | "multi"
+  RENDER_APPLY_MODE = "mono",   -- "mono" | "multi" | "off"
 
   -- New: Render TC embed mode (2-choice)
   --   "previous" (default): embed TimeReference from previous/original take
   --   "current"           : embed TimeReference from current item start position
-  RENDER_TC_EMBED   = "previous", -- "previous" | "current"
+  RENDER_TC_EMBED = "current", -- "previous" | "current" | "off"
 
   RENAME_OP_MODE    = "auto",
 
@@ -78,6 +93,7 @@ r.ShowConsoleMsg(string.format(
   "[RGWH] ExtState updated (project) — namespace=%s\n"..
   "GLUE_SINGLE_ITEMS=%s\nHANDLE_MODE=%s\nHANDLE_SECONDS=%s\n"..
   "EPSILON_MODE=%s\nEPSILON_VALUE=%s\nDEBUG_LEVEL=%s\n"..
+  "DEBUG_NO_CLEAR=%s\n"..
   "GLUE_TAKE_FX=%s\nGLUE_TRACK_FX=%s\nGLUE_APPLY_MODE=%s\n"..
   "RENDER_TAKE_FX=%s\nRENDER_TRACK_FX=%s\nRENDER_APPLY_MODE=%s\n"..
   "RENDER_TC_EMBED=%s\n"..
@@ -86,6 +102,7 @@ r.ShowConsoleMsg(string.format(
   NS,
   CFG.GLUE_SINGLE_ITEMS, CFG.HANDLE_MODE, CFG.HANDLE_SECONDS,
   CFG.EPSILON_MODE, CFG.EPSILON_VALUE, CFG.DEBUG_LEVEL,
+  CFG.DEBUG_NO_CLEAR,
   CFG.GLUE_TAKE_FX, CFG.GLUE_TRACK_FX, CFG.GLUE_APPLY_MODE,
   CFG.RENDER_TAKE_FX, CFG.RENDER_TRACK_FX, CFG.RENDER_APPLY_MODE,
   CFG.RENDER_TC_EMBED,
