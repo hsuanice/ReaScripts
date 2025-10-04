@@ -1,6 +1,6 @@
 --[[
 @description AudioSweet (hsuanice) — Focused Track FX render via RGWH Core, append FX name, rebuild peaks (selected items)
-@version 2510041421 (drop buffered debug; direct console logging)
+@version 2510041455 (fix item selection before send to Core)
 @author Tim Chimes (original), adapted by hsuanice
 @notes
   Reference:
@@ -22,7 +22,7 @@ This version:
     - Removed LOG_BUF/buf_push/buf_dump/buf_step; all debug now prints directly via log_step/dbg_* helpers.
     - Switched post-move range dump to dbg_track_items_in_range(); removed re-dump step (Core no longer clears console).
     - Kept all existing debug granularity; behavior unchanged.
-    
+
   v2510041339 (fix misuse of glue_single_items argument)
     - Corrected the `glue_single_items` argument in the Core call to `false` for multi-item glue scenarios.
     - Ensures that when multiple items are selected and glued, they are treated as a single unit rather than individually.
@@ -125,7 +125,7 @@ This version:
 ]]--
 
 -- Debug toggle: set ExtState "hsuanice_AS"/"DEBUG" to "1" to enable, "0" (or empty) to disable
-reaper.ClearConsole()
+
 reaper.SetExtState("hsuanice_AS","DEBUG","1", false)
 
 local function debug_enabled()
@@ -816,13 +816,13 @@ function main() -- main part of the script
       else
         -- （保持你現有的 args 組裝…）
         local args = {
-          mode                = "glue_item_focused_fx",
+          mode                = "glue_item_focused_fx",  -- ★ 改這行：讓 Core 以「整個 selection」為主體
           item                = anchor,
           apply_fx_mode       = apply_fx_mode,
           focused_track       = FXmediaTrack,
           focused_fxindex     = fxIndex,
           policy_only_focused = true,
-          selection_scope     = "unit",
+          selection_scope     = "selection",
           -- glue_single_items  不再由前端傳入，統一交由 RGWH 專案旗標（GLUE_SINGLE_ITEMS）決定
         }
         if debug_enabled() then
@@ -831,6 +831,10 @@ function main() -- main part of the script
             tostring(args.mode), tostring(args.apply_fx_mode), fxIndex, tostring(args.selection_scope), #u.items)
           log_step("CORE", "pre-apply FINAL selected_items=%d", c)
           dbg_dump_selection("CORE pre-apply FINAL")
+        end
+
+        if debug_enabled() then
+          log_step("CORE", "apply args: scope=%s members=%d", tostring(args.selection_scope), #u.items)
         end
 
         -- (F) 呼叫 Core（pcall 包起來，抓 runtime error）
