@@ -1,6 +1,6 @@
 --[[
 @description AudioSweet (hsuanice) — Focused Track FX render via RGWH Core, append FX name, rebuild peaks (selected items)
-@version 2510042113 TS-Window cross-track print; forward-declare fix
+@version 2510042157 — TS-Window cross-track print + selection restore
 @author Tim Chimes (original), adapted by hsuanice
 @notes
   Reference:
@@ -18,8 +18,18 @@ This version:
   • Track FX only (Take FX not supported)
 
 
-
 @changelog
+  v2510042157 — TS-Window cross-track print + selection restore
+    - TS-Window (GLOBAL): After 42432, now iterates each glued item **across tracks** and prints the focused FX per-item.
+    - Channel-aware apply: per item chooses 40361 (mono, new take) or 41993 (multichannel); temporarily sets FX track I_NCHAN for ≥2ch and restores afterward.
+    - Name handling: appends the focused FX name to the printed take (forward-declared helper to avoid nil-call errors).
+    - Selection UX: snapshots your original selection at start and restores it at the very end, so you retain what you picked.
+    - Logging: clearer TS-APPLY traces (moved→FX / applied cmd / post-apply selection) and extra dumps around 42432.
+
+    Known issues
+    - Razor selection: not supported yet (planned precedence Razor > Time Selection).
+    - Non–TS-Window path still relies on RGWH Core; plugins with unusual I/O layouts (>2 outs, e.g., 5.0-only) may require manual pin routing.
+
   v2510042113 — TS-Window cross-track print; forward-declare fix
     - TS-Window (GLOBAL): After 42432, iterate each glued item across tracks and print the focused FX per-item
       (handles channel-aware 40361/41993, restores I_NCHAN, renames, and moves back).
@@ -239,6 +249,47 @@ local function dbg_track_items_in_range(tr, L, R)
   end
 end
 -- =======================
+-- =======================
+-- ==== selection snapshot helpers ====
+local function snapshot_selection()
+  local list = {}
+  local n = reaper.CountSelectedMediaItems(0)
+  for i = 0, n - 1 do
+    local it = reaper.GetSelectedMediaItem(0, i)
+    if it then
+      local tr = reaper.GetMediaItem_Track(it)
+      local p  = reaper.GetMediaItemInfo_Value(it, "D_POSITION")
+      local l  = reaper.GetMediaItemInfo_Value(it, "D_LENGTH")
+      table.insert(list, { tr = tr, L = p, R = p + l })
+    end
+  end
+  return list
+end
+
+local function restore_selection(snap)
+  if not snap then return end
+  reaper.Main_OnCommand(40289, 0) -- 清空
+  local eps = project_epsilon()
+  for _, rec in ipairs(snap) do
+    local tr = rec.tr
+    if tr then
+      local n = reaper.CountTrackMediaItems(tr)
+      for j = 0, n - 1 do
+        local it = reaper.GetTrackMediaItem(tr, j)
+        if it then
+          local p  = reaper.GetMediaItemInfo_Value(it, "D_POSITION")
+          local l  = reaper.GetMediaItemInfo_Value(it, "D_LENGTH")
+          local q  = p + l
+          -- 只要這顆 item 覆蓋原來的選取範圍就認定是對應項（TS-Window 會生成貼齊的 glued 片段）
+          if p <= rec.L + eps and q >= rec.R - eps then
+            reaper.SetMediaItemSelected(it, true)
+            break
+          end
+        end
+      end
+    end
+  end
+end
 -- ==== channel helpers ====
 local function get_item_channels(it)
   if not it then return 2 end
@@ -616,6 +667,8 @@ function main() -- main part of the script
     reaper.ShowConsoleMsg("\n=== AudioSweet (hsuanice) run ===\n")
   end
   log_step("BEGIN", "selected_items=%d", reaper.CountSelectedMediaItems(0))
+  -- snapshot original selection so we can restore it at the very end
+  local sel_snapshot = snapshot_selection()
 
   -- Focused FX check
   local ret_val, tracknumber_Out, itemnumber_Out, fxnumber_Out, window = checkSelectedFX()
@@ -711,6 +764,11 @@ function main() -- main part of the script
       end
 
       log_step("TS-WINDOW[GLOBAL]", "done, outputs=%d", #outputs)
+
+      -- 還原執行前的選取（會挑回同軌同範圍的新 glued/printed 片段）
+      restore_selection(sel_snapshot)
+      if debug_enabled() then dbg_dump_selection("RESTORE selection") end
+
       reaper.PreventUIRefresh(-1)
       reaper.Undo_EndBlock("AudioSweet TS-Window (global) glue+print", 0)
       return
@@ -952,6 +1010,11 @@ function main() -- main part of the script
   end
 
   log_step("END", "outputs=%d", #outputs)
+
+  -- 還原執行前的選取
+  restore_selection(sel_snapshot)
+  if debug_enabled() then dbg_dump_selection("RESTORE selection") end
+
   reaper.PreventUIRefresh(-1)
   reaper.Undo_EndBlock("AudioSweet multi-item glue", 0)
 end
