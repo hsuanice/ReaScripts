@@ -1,6 +1,6 @@
 --[[
 @description AudioSweet (hsuanice) — Focused Track FX render via RGWH Core, append FX name, rebuild peaks (selected items)
-@version 2510041808 (unit-wide auto channel for Core glue; fix TS-Window unit n-chan set)
+@version 2510041957 (TS-Window mono path → 40361 as new take)
 @author Tim Chimes (original), adapted by hsuanice
 @notes
   Reference:
@@ -18,11 +18,27 @@ This version:
   • Track FX only (Take FX not supported)
 
 @changelog
+  v2510041957 — TS-Window channel-aware apply; mono/stereo logic fixed
+    •	TS-Window (GLOBAL/UNIT): Per-item channel detection now works for both single-track and mixed material on the same track.
+    •	Mono (1ch) sources use 40361 “Apply track FX to items as new take” to ensure a new take is created; no track channel change.
+    •	≥2-channel sources set the FX track I_NCHAN to the nearest even ≥ source channels, then use 41993 (multichannel output).
+    •	Restores the FX track channel count after apply and appends the focused FX name to the new take.
+    •	Stability: guards to avoid nil/number comparison when resolving channel or track fields; clearer step logs after 42432/print.
+
+  Known issues
+    •	TS-Window cross-track printing: Printing the focused FX across multiple tracks is not yet supported. Current build can glue across tracks, but the focused-FX print step only runs when the window resolves to a single unit on one track.
+    •	Non–TS-Window path still processes only the first unit per run (documented limitation).
+    
+  v2510041931 (TS-Window mono path → 40361 as new take)
+    - TS-Window (GLOBAL/UNIT): For mono (1ch) sources, use 40361 “Apply track FX to items as new take” so a new take is created; do not touch I_NCHAN.
+    - TS-Window (GLOBAL/UNIT): For ≥2ch sources, set FX track I_NCHAN to the nearest even ≥ source channels and use 41993 (multichannel output).
+    - Fixes the issue where mono path used 40631 and did not create a new take (name postfix appeared on take #1).
+
   v2510041808 (unit-wide auto channel for Core glue; fix TS-Window unit n-chan set)
     - Core/GLUE: Auto channel detection now scans the entire unit and uses the maximum channel count to decide mono/multi; no longer depends on an anchor item.
     - TS-Window (UNIT): Before 40361, set the FX track I_NCHAN to the desired_nchan derived from the glued source; restore prev_nchan afterwards.
     - All other behavior and debug output remain unchanged.
-    
+
   v2510041421 (drop buffered debug; direct console logging)
     - Removed LOG_BUF/buf_push/buf_dump/buf_step; all debug now prints directly via log_step/dbg_* helpers.
     - Switched post-move range dump to dbg_track_items_in_range(); removed re-dump step (Core no longer clears console).
@@ -610,32 +626,40 @@ function main() -- main part of the script
       for i=0, glued_cnt-1 do
         local it = reaper.GetSelectedMediaItem(0, i)
         if it then
-          local origTR = reaper.GetMediaItem_Track(it)          local origTR = reaper.GetMediaItem_Track(it)
+          local origTR = reaper.GetMediaItem_Track(it)
           reaper.MoveMediaItemToTrack(it, FXmediaTrack)
-          dbg_item_brief(it, "TSW[GLOBAL] moved→FX")   -- ★ 新增
+          dbg_item_brief(it, "TSW[GLOBAL] moved→FX")
           isolate_focused_fx(FXmediaTrack, fxIndex)
-          -- Auto I_NCHAN for apply (1ch→2ch; ≥2→nearest even >= src)
-          local desired_nchan, prev_nchan = 2, reaper.GetMediaTrackInfo_Value(FXmediaTrack, "I_NCHAN")
-          do
-            local tk = reaper.GetActiveTake(it)
-            local ch = 2
-            if tk then
-              local src = reaper.GetMediaItemTake_Source(tk)
-              if src then ch = reaper.GetMediaSourceNumChannels(src) or 2 end
+
+          -- ★ NEW: resolve source channels & current track channels
+          local ch         = get_item_channels(it)                                  -- 由當前 glued item 取聲道數
+          local prev_nchan = reaper.GetMediaTrackInfo_Value(FXmediaTrack, "I_NCHAN") or 2
+
+          -- Auto channel policy (TS-Window GLOBAL):
+          --   mono(1ch)  → keep track nchan as-is; use 40361 (as NEW TAKE)
+          --   stereo+(≥2)→ set FX track I_NCHAN to nearest even ≥ src; use 41993 (multichannel)
+          local cmd_apply = 41993
+          local did_set_nchan = false
+
+          if ch <= 1 then
+            cmd_apply = 40361
+          else
+            local desired_nchan = (ch % 2 == 0) and ch or (ch + 1)
+            if prev_nchan ~= desired_nchan then
+              log_step("TS-WINDOW[GLOBAL]", "I_NCHAN %d → %d (pre-apply)", prev_nchan, desired_nchan)
+              reaper.SetMediaTrackInfo_Value(FXmediaTrack, "I_NCHAN", desired_nchan)
+              did_set_nchan = true
             end
-            if ch <= 1 then desired_nchan = 2 else desired_nchan = (ch % 2 == 0) and ch or (ch + 1) end
-          end
-          if prev_nchan ~= desired_nchan then
-            reaper.SetMediaTrackInfo_Value(FXmediaTrack, "I_NCHAN", desired_nchan)
           end
 
           reaper.Main_OnCommand(40289, 0)
           reaper.SetMediaItemSelected(it, true)
-          reaper.Main_OnCommand(40361, 0) -- Apply track FX to items as new take
-          log_step("TS-WINDOW[GLOBAL]", "apply 40361 to glued #%d", i+1)
-          dbg_dump_selection("TSW[GLOBAL] post-40361")  -- ★ 新增
+          reaper.Main_OnCommand(cmd_apply, 0)
+          log_step("TS-WINDOW[GLOBAL]", "apply %d to glued #%d", cmd_apply, i+1)
+          dbg_dump_selection("TSW[GLOBAL] post-apply")
 
-          if prev_nchan ~= desired_nchan then
+          if did_set_nchan then
+            log_step("TS-WINDOW[GLOBAL]", "I_NCHAN restore %d → %d", reaper.GetMediaTrackInfo_Value(FXmediaTrack, "I_NCHAN"), prev_nchan)
             reaper.SetMediaTrackInfo_Value(FXmediaTrack, "I_NCHAN", prev_nchan)
           end
 
@@ -684,31 +708,38 @@ function main() -- main part of the script
 
       local origTR = reaper.GetMediaItem_Track(glued)
       reaper.MoveMediaItemToTrack(glued, FXmediaTrack)
-      dbg_item_brief(glued, "TSW[UNIT] moved→FX")      -- ★ 新增
+      dbg_item_brief(glued, "TSW[UNIT] moved→FX")
       isolate_focused_fx(FXmediaTrack, fxIndex)
 
-      -- Auto I_NCHAN per glued source
-      local desired_nchan, prev_nchan = 2, reaper.GetMediaTrackInfo_Value(FXmediaTrack, "I_NCHAN")
-      do
-        local tk = reaper.GetActiveTake(glued)
-        local ch = 2
-        if tk then
-          local src = reaper.GetMediaItemTake_Source(tk)
-          if src then ch = reaper.GetMediaSourceNumChannels(src) or 2 end
+      -- ★ NEW: resolve source channels & current track channels
+      local ch         = get_item_channels(glued)                                -- 由當前 glued item 取聲道數
+      local prev_nchan = reaper.GetMediaTrackInfo_Value(FXmediaTrack, "I_NCHAN") or 2
+
+      -- Auto channel policy (TS-Window UNIT):
+      --   mono(1ch)  → keep track nchan as-is; use 40361 (as NEW TAKE)
+      --   stereo+(≥2)→ set FX track I_NCHAN to nearest even ≥ src; use 41993 (multichannel)
+      local cmd_apply = 41993
+      local did_set_nchan = false
+
+      if ch <= 1 then
+        cmd_apply = 40361
+      else
+        local desired_nchan = (ch % 2 == 0) and ch or (ch + 1)
+        if prev_nchan ~= desired_nchan then
+          log_step("TS-WINDOW[UNIT]", "I_NCHAN %d → %d (pre-apply)", prev_nchan, desired_nchan)
+          reaper.SetMediaTrackInfo_Value(FXmediaTrack, "I_NCHAN", desired_nchan)
+          did_set_nchan = true
         end
-        if ch <= 1 then desired_nchan = 2 else desired_nchan = (ch % 2 == 0) and ch or (ch + 1) end
-      end
-      if prev_nchan ~= desired_nchan then
-        reaper.SetMediaTrackInfo_Value(FXmediaTrack, "I_NCHAN", prev_nchan)
       end
 
       reaper.Main_OnCommand(40289, 0)
       reaper.SetMediaItemSelected(glued, true)
-      reaper.Main_OnCommand(40361, 0)
-      log_step("TS-WINDOW[UNIT]", "applied 40361")
-      dbg_dump_selection("TSW[UNIT] post-40361")       -- ★ 新增
+      reaper.Main_OnCommand(cmd_apply, 0)
+      log_step("TS-WINDOW[UNIT]", "applied %d", cmd_apply)
+      dbg_dump_selection("TSW[UNIT] post-apply")
 
-      if prev_nchan ~= desired_nchan then
+      if did_set_nchan then
+        log_step("TS-WINDOW[UNIT]", "I_NCHAN restore %d → %d", reaper.GetMediaTrackInfo_Value(FXmediaTrack, "I_NCHAN"), prev_nchan)
         reaper.SetMediaTrackInfo_Value(FXmediaTrack, "I_NCHAN", prev_nchan)
       end
 
