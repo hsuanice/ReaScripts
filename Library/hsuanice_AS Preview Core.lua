@@ -1,10 +1,27 @@
 --[[
 @description AudioSweet Preview Core
 @author Hsuanice
-@version 2510052021 Fix no item selection warning
+@version 2510052318 fix ranges_touch_or_overlap()
 
 @about Minimal, self-contained preview runtime. Later we can extract helpers to "hsuanice_AS Core.lua".
 @changelog
+  v2510052318 — Fix ranges_touch_or_overlap() nil on re-entry
+    - Moved forward declarations (project_epsilon, ranges_touch_or_overlap) to the top so any caller can resolve them.
+    - Removed the later duplicate forward-decl block to prevent late-binding/globals turning nil at runtime.
+    - Behavior unchanged otherwise: placeholder on source track, re-entry bootstrap, mode switch, and cleanup all intact.
+    - Debug stream unchanged (no auto-clear).
+
+  Known issues
+    - Razor selection not implemented yet (current order: Time Selection > items span).
+    - Cross-wrapper toggle still relies on wrappers updating ExtState hsuanice_AS:PREVIEW_MODE before calling Core.
+    - If the placeholder is manually moved/deleted during playback, next run will rebuild by design.
+  v2510052130 WIP — Preview Core: Solo scope via ExtState; item-solo uses 41558
+    - Options: Core reads ExtState hsuanice_AS:SOLO_SCOPE = "track" (default) | "item".
+    - Solo(track): clears item-solo (41185) & track-solo (40340), then forces FX track solo (I_SOLO=1).
+    - Solo(item): selects moved items and uses 41558 “Item: Solo exclusive” (no prior unsolo needed).
+    - Normal/cleanup: always clear both item-solo (41185) and track-solo (40340) to avoid leftover states.
+    - Logs: switch/apply path now prints which scope was applied (TRACK/ITEM).
+
   v2510052021 Fix no item selection warning
     - Guard: Core now aborts early (no state changes) when there are no selected items.
     - Guard: If a Time Selection exists but none of the selected items intersect it, show a warning and abort.
@@ -92,6 +109,10 @@ local ASP = {}
 local ASP = _G.ASP or {}
 _G.ASP = ASP
 
+-- ===== Forward declarations (must appear before any use) =====
+local project_epsilon
+local ranges_touch_or_overlap
+
 -- ExtState keys
 ASP.ES_NS         = "hsuanice_AS"
 ASP.ES_STATE      = "PREVIEW_STATE"     -- json: {running=true/false, mode="solo"/"normal"}
@@ -103,6 +124,13 @@ local function read_mode(default_mode)
   local m = reaper.GetExtState(ASP.ES_NS, ASP.ES_MODE)
   if m == "solo" or m == "normal" then return m end
   return default_mode or "solo"
+end
+
+-- Solo scope from ExtState: "track" (default) | "item"
+local function read_solo_scope()
+  local s = reaper.GetExtState(ASP.ES_NS, "SOLO_SCOPE")
+  if s == "item" then return "item" end
+  return "track"
 end
 
 -- FX enable snapshot/restore on a track
@@ -288,22 +316,33 @@ function ASP._switch_mode(newmode)
   ASP.log("switch mode: %s -> %s", tostring(ASP._state.mode), newmode)
   if newmode == ASP._state.mode then return end
 
-  -- 不重建、不搬移；只在 FX 軌的預覽 items 上「確保」solo/normal 狀態
+  local scope = read_solo_scope()
+  local FXtr  = ASP._state.fx_track
+
+  -- 切換前，先清兩種 solo，確保狀態乾淨
+  reaper.Main_OnCommand(41185, 0) -- Item: Unsolo all
+  reaper.Main_OnCommand(40340, 0) -- Track: Unsolo all tracks
+
   if ASP._state.moved_items and #ASP._state.moved_items > 0 then
     ASP._select_items(ASP._state.moved_items, true)
+
     if newmode == "solo" then
-      reaper.Main_OnCommand(41185, 0) -- Unsolo all（保險清一次）
-      reaper.Main_OnCommand(41561, 0) -- 開 item-solo-exclusive
-      ASP.log("switch→solo: item-solo ON")
+      if scope == "track" then
+        if FXtr then reaper.SetMediaTrackInfo_Value(FXtr, "I_SOLO", 1) end
+        ASP.log("switch→solo TRACK: FX track solo ON")
+      else
+        reaper.Main_OnCommand(41558, 0) -- Item: Solo exclusive（排他）
+        ASP.log("switch→solo ITEM: item-solo-exclusive ON")
+      end
     else
-      reaper.Main_OnCommand(41185, 0) -- 確保 OFF
-      ASP.log("switch→normal: item-solo OFF")
+      -- normal：保持非獨奏（上面已清）
+      ASP.log("switch→normal: solo cleared (items & tracks)")
     end
   end
 
   ASP._state.mode = newmode
   write_state({running=true, mode=newmode})
-  ASP.log("switch done: now=%s", newmode)
+  ASP.log("switch done: now=%s (scope=%s)", newmode, scope)
 end
 
 
@@ -323,12 +362,12 @@ end
 -- (B) 基本工具（epsilon / selection / units / items / fx）
 --   先複製最少需要的，之後再抽到 AS Core
 ----------------------------------------------------------------
-local function project_epsilon()
+project_epsilon = function()
   local sr = reaper.GetSetProjectInfo(0, "PROJECT_SRATE", 0, false)
   return (sr and sr > 0) and (1.0 / sr) or 1e-6
 end
 local function approx_eq(a,b,eps) eps = eps or project_epsilon(); return math.abs(a-b) <= eps end
-local function ranges_touch_or_overlap(a0,a1,b0,b1,eps)
+ranges_touch_or_overlap = function(a0,a1,b0,b1,eps)
   eps = eps or project_epsilon()
   return not (a1 < b0 - eps or b1 < a0 - eps)
 end
@@ -611,8 +650,9 @@ function ASP.cleanup_if_any()
   if not ASP._state.running then return end
   ASP.log("cleanup begin")
 
-  -- 保險：關閉所有 item-solo
-  reaper.Main_OnCommand(41185, 0)
+  -- 保險：清 item-solo + 清 track-solo
+  reaper.Main_OnCommand(41185, 0) -- Item: Unsolo all
+  reaper.Main_OnCommand(40340, 0) -- Track: Unsolo all tracks
 
   -- 還原 FX enable 狀態
   if ASP._state.fx_track and ASP._state.fx_enable_shot then
@@ -815,18 +855,35 @@ function ASP._select_items(list, exclusive)
 end
 
 function ASP._apply_mode_flags(mode)
-  -- 在 FX 軌上選取搬移後的 items
-  ASP._select_items(ASP._state.moved_items, true)
+  local scope = read_solo_scope()
+  local FXtr  = ASP._state.fx_track
 
-  -- 先清掉所有 item-solo，避免殘留狀態
-  reaper.Main_OnCommand(41185, 0) -- Item properties: Unsolo all
+  -- 統一先清：item-solo 與 track-solo 都歸零
+  reaper.Main_OnCommand(41185, 0) -- Item: Unsolo all
+  reaper.Main_OnCommand(40340, 0) -- Track: Unsolo all tracks
 
   if mode == "solo" then
-    reaper.Main_OnCommand(41561, 0) -- Item properties: Toggle solo exclusive（此刻會變 ON）
-    ASP.log("solo-exclusive ON on moved items")
+    if scope == "track" then
+      -- 獨奏「FX 目標軌」
+      if FXtr then
+        -- 直接設 I_SOLO=1（強制 ON，比 toggle 穩）
+        reaper.SetMediaTrackInfo_Value(FXtr, "I_SOLO", 1)
+        ASP.log("solo TRACK scope: FX track solo ON")
+      end
+      -- moved_items 僅用於播放與選取，不做 item-solo
+      ASP._select_items(ASP._state.moved_items, true)
+
+    else -- scope == "item"
+      -- 只獨奏搬移後 items（獨奏項目＝排他）
+      ASP._select_items(ASP._state.moved_items, true)
+      reaper.Main_OnCommand(41558, 0) -- Item: Solo exclusive（會自動 unsolo 其他 item）
+      ASP.log("solo ITEM scope: item-solo-exclusive ON")
+    end
+
   else
-    -- normal：維持非 solo（剛剛 41185 已清空）
-    ASP.log("normal mode: keep non-solo on moved items")
+    -- normal：保持非獨奏（已經 41185 + 40340 歸零）
+    ASP._select_items(ASP._state.moved_items, true)
+    ASP.log("normal mode: solo cleared (items & tracks)")
   end
 
   reaper.Main_OnCommand(1007, 0) -- Transport: Play
