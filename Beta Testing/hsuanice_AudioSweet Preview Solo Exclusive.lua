@@ -1,9 +1,15 @@
 --[[
 @description AudioSweet Preview (loop play; solo scope via ExtState)  -- solo scope: track|item (default=track)
 @author Hsuanice
-@version 2510052300 OK Fix ExtState (solo wrapper → Core)
+@version 2510060048 OK Unified wrapper debug format
 @about Toggle-style preview using hsuanice_AS Preview Core.lua (solo exclusive)
 @changelog
+  v2510060048 OK Unified wrapper debug format
+    - Changed Solo wrapper header print to match Normal wrapper:
+        → `[AS][PREVIEW][time] [wrapper-solo] SOLO_SCOPE=track, PREVIEW_MODE=solo`
+    - Removed redundant `[wrapper] SOLO_SCOPE=track` line.
+    - Now both wrappers show a single-line, consistent debug entry for clarity.
+
   v2510052300 OK Fix ExtState (solo wrapper → Core)
     - Unified ExtState namespace to `hsuanice_AS` (was `hsuanice_AS_PREVIEW`).
     - Switched key to `PREVIEW_MODE` (was `MODE`); wrapper now sets `PREVIEW_MODE=solo` and delegates logic to Core.
@@ -136,10 +142,11 @@ local function get_focused_track_fx()
   return tr, fxNum
 end
 
--- Debug console：只在 DEBUG=1 時持續輸出
-if reaper.GetExtState("hsuanice_AS", "DEBUG") == "1" then
-  -- 不清空，累積看比較容易追
-  reaper.ShowConsoleMsg("[AS][PREVIEW] --- Solo Exclusive entry ---\n")
+-- Debug header：改用 Core 的 logger（dlog 只在 DEBUG=1 時輸出）
+local DEBUG_ON = (reaper.GetExtState(NS, "DEBUG") == "1")
+if ASP and ASP._state then ASP._state.DEBUG = DEBUG_ON end
+if ASP and type(ASP.dlog) == "function" and DEBUG_ON then
+  ASP.dlog("--- Solo Exclusive entry ---")
 end
 
 local FXtrack, fxIndex = get_focused_track_fx()
@@ -155,7 +162,6 @@ if not current_scope or current_scope == "" then
   set_solo_scope_to_extstate("track")
   current_scope = "track"
 end
-ASP.log(("[wrapper] SOLO_SCOPE=%s"):format(current_scope))
 
 -- ★ Solo wrapper 只宣告 PREVIEW_MODE=solo，並交給 Core（Core 會讀 PREVIEW_MODE＋placeholder 判斷切換/重建）
 reaper.SetExtState(NS, "PREVIEW_MODE", "solo", false)
