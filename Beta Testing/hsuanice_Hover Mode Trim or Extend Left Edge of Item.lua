@@ -1,6 +1,6 @@
 --[[
 @description Hover_Mode_-_Trim_or_Extend_Left_Edge_of_Item (Preserve Fade End, No Flicker)
-@version 250926_1610 update start in source to all takes
+@version 2510051925 Fix Pin Track issue
 @about
   Left-edge trim/extend that preserves the fade-in END (not the length), using a shared Hover library
   for position & target selection. No-flicker write order and no-overlap extends.
@@ -24,6 +24,16 @@
     REAPER/Scripts/hsuanice Scripts/Library/hsuanice_Hover.lua
 
 @changelog
+  v2510051925
+    - Pin Track compatibility: switched hover hit-testing to prefer REAPER native APIs
+      (GetItemFromPoint / GetTrackFromPoint) with SWS as fallback.
+    - Left: gap→extend now uses library’s pin-safe mouse-track resolver; removed local
+      “visible-only” gate to avoid false skips. Delegates to apply_left_edge_no_flicker.
+    - Right: (no logic change required if already using library picks) — ensure gap→extend
+      uses hover.pick_on_gap("right", pos) and delegates to apply_right_edge_no_flicker.
+    - Monitor: added native vs SWS diagnostics to help verify mis-hits under pinned tracks.
+    - Behavior unchanged otherwise (no flicker; preserves fade endpoints; no-overlap extends).
+
   v250926_1610
     - Update: Sync Start in Source offset across all takes when trimming/extending left edge.
   v0.3.4
@@ -47,7 +57,7 @@
 -- USER OPTIONS
 ----------------------------------------
 local DEBUG        = true  -- ← set true to print debug logs to ReaScript console
-local CLEAR_ON_RUN = true  -- ← set true to clear console on each run when DEBUG=true
+local CLEAR_ON_RUN = false  -- ← set true to clear console on each run when DEBUG=true
 local SYNC_SELECTION_MIN = 2  -- selection-sync threshold in True Hover (default: 2)
 
 ----------------------------------------
@@ -117,26 +127,11 @@ end
 -- When true hover & NO selection & library returned nothing (likely on a GAP),
 -- extend the next item on the mouse TRACK.
 local function picks_extend_from_gap_on_mouse_track(pos)
-  local picks = {}
-  if not reaper.BR_GetMouseCursorContext then return picks end
-  local window = reaper.BR_GetMouseCursorContext()
-  if window ~= "arrange" then return picks end
-  local tr = reaper.BR_GetMouseCursorContext_Track()
-  if not tr then return picks end
-
-  local eps = hover.half_pixel_sec()
-  local target, best_st = nil, math.huge
-  local n = reaper.CountTrackMediaItems(tr)
-  for i = 0, n - 1 do
-    local it = reaper.GetTrackMediaItem(tr, i)
-    local st = reaper.GetMediaItemInfo_Value(it, "D_POSITION")
-    if st >= pos - eps and st < best_st then
-      target, best_st = it, st
-    end
-  end
-  if target then
-    table.insert(picks, { item = target, mode = "extend" })
-    logf("[LeftEdge] gap→extend on mouse track: pick start=%.6f", best_st)
+  -- Use library's Pin-safe gap picker (native-first hover track)
+  local picks = hover.pick_on_gap("left", pos)
+  if #picks > 0 then
+    local st = reaper.GetMediaItemInfo_Value(picks[1].item, "D_POSITION")
+    logf("[LeftEdge] gap→extend on mouse track: pick start=%.6f", st)
   else
     log("[LeftEdge] gap→extend on mouse track: no item to the right")
   end
@@ -203,14 +198,9 @@ end
 
 -- Apply left-edge trim/extend preserving fade-in END, with no flicker & no overlap.
 local function apply_left_edge(entry, target_pos)
-  local it = entry.item
-  if not hover.is_item_visible(it) then
-    log("[LeftEdge] skip: item not visible"); return
-  end
-
-  -- Delegate to Hover library: clamp/overlap, preserve fade end,
-  -- no-flicker write order, and SrcStart sync across ALL takes.
-  hover.apply_left_edge_no_flicker(it, target_pos, entry.mode)end
+  -- Delegate to Hover library: clamp/overlap, preserve fade end, no-flicker order
+  hover.apply_left_edge_no_flicker(entry.item, target_pos, entry.mode)
+end
 
 ----------------------------------------
 -- Main
