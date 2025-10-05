@@ -1,9 +1,14 @@
 --[[
 @description AudioSweet Preview (loop play, no solo)
 @author Hsuanice
-@version 2510052130 OK Solo scope via ExtState (track|item)
+@version 2510060008 Fix debug switch
 @about Toggle-style preview using hsuanice_AS Preview Core.lua
 @changelog
+  v2510060008 — Fix debug switch
+    - Removed leftover debug output from wrapper ("[wrapper-normal] SOLO_SCOPE=track, PREVIEW_MODE=normal").
+    - Wrapper now respects Core’s internal debug toggle only.
+    - Ensured no redundant ExtState or print() calls remain in wrapper.
+    
   v2510052130 — OK Solo scope via ExtState (track|item)
     - ExtState namespace unified to `hsuanice_AS` (no legacy keys).
     - Wrapper now only sets `PREVIEW_MODE="normal"` and (if empty) `SOLO_SCOPE`, then calls Core.
@@ -87,8 +92,6 @@ es_set("PREVIEW_MODE", TARGET_MODE, false)
 -- SOLO_SCOPE 已在上面確保預設，如需在此覆寫也可：
 -- es_set("SOLO_SCOPE", "track", true) -- 或 "item"
 
--- 記錄 wrapper 狀態（除錯用）
-reaper.ShowConsoleMsg(("[wrapper-normal] SOLO_SCOPE=%s, PREVIEW_MODE=%s\n"):format(solo_scope, TARGET_MODE))
 
 -- 直接交 Core 執行（不再傳 mode，讓 Core 從 ExtState 讀）
 ASP.run{ focus_track = FXtrack, focus_fxindex = fxIndex }
