@@ -1,10 +1,13 @@
 --[[
 @description AudioSweet Preview Core
 @author Hsuanice
-@version 2510052349 Core-only user options for SOLO_SCOPE/DEBUG
+@version 2510060105 Change to no undo
 
 @about Minimal, self-contained preview runtime. Later we can extract helpers to "hsuanice_AS Core.lua".
 @changelog
+  v2510060105 Change to no undo
+    - Wrap mutating ops in undo_begin()/undo_end_no_undo() to avoid creating undo points.
+    - Cleanup and mode switch now do not create undo points.
   v2510052349 — Core-only user options for SOLO_SCOPE/DEBUG
     - Moved user-configurable options into Core: 
       - USER_SOLO_SCOPE = "track" | "item" (default "track")
@@ -121,7 +124,7 @@
 -- Solo scope for preview isolation: "track" or "item"
 local USER_SOLO_SCOPE = "track"
 -- Enable Core debug logs (printed via ASP.log / ASP.dlog)
-local USER_DEBUG = false
+local USER_DEBUG = true
 -- =========================================================================
 
 local ASP = {}
@@ -360,6 +363,13 @@ local function log_step(tag, fmt, ...)
   reaper.ShowConsoleMsg(string.format("[AS][PREVIEW] %s %s\n", tostring(tag or ""), msg))
 end
 
+-- === Undo helpers: wrap mutating ops but do NOT create undo points ===
+local function undo_begin()  reaper.Undo_BeginBlock2(0) end
+local function undo_end_no_undo(desc)
+  -- desc 只作除錯閱讀；-1 代表**不**建立 Undo 點
+  reaper.Undo_EndBlock2(0, desc or "AS Preview (no undo)", -1)
+end
+
 ----------------------------------------------------------------
 -- (B) 基本工具（epsilon / selection / units / items / fx）
 --   先複製最少需要的，之後再抽到 AS Core
@@ -578,8 +588,10 @@ function ASP.run(opts)
     ASP._state.mode          = (mode == "solo") and "normal" or "solo"  -- 讓下一步 _switch_mode(mode) 一定會生效
     ASP.log("detected existing placeholder on source track; bootstrap (items=%d)", #ASP._state.moved_items)
 
-    -- 只做「模式切換」，避免任何 rebuild
+    -- 只做「模式切換」，避免任何 rebuild（也不記 Undo）
+    undo_begin()
     ASP._switch_mode(mode)
+    undo_end_no_undo("AS Preview: switch mode (no undo)")
     return
   end
 
@@ -588,7 +600,8 @@ function ASP.run(opts)
     ASP.log("run: state.running=true but placeholder missing; rebuilding preview")
   end
 
-  -- start preview
+  -- start preview (no-undo wrapper)
+  undo_begin()
   ASP._state.running       = true
   ASP._state.mode          = mode
   ASP._state.fx_track      = FXtrack
@@ -609,6 +622,7 @@ function ASP.run(opts)
 
   write_state({running=true, mode=mode})
   ASP.log("preview started: mode=%s", mode)
+  undo_end_no_undo("AS Preview: start (no undo)")
 
   if not ASP._state.stop_watcher then
     ASP._state.stop_watcher = true
@@ -681,6 +695,7 @@ function ASP.cleanup_if_any()
 
   write_state({running=false, mode=""})
   ASP.log("cleanup done")
+  undo_end_no_undo("AS Preview: cleanup (no undo)")
 end
 
 function ASP._watch_stop_and_cleanup()
