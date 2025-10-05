@@ -1,10 +1,15 @@
 --[[
 @description AudioSweet Preview Core
 @author Hsuanice
-@version 2510052318 fix ranges_touch_or_overlap()
+@version 2510052343
 
 @about Minimal, self-contained preview runtime. Later we can extract helpers to "hsuanice_AS Core.lua".
 @changelog
+  v2510052343 — Clarify item tint constant
+    - Documentation: explained that `0x1000000` sets the high bit of the color integer, which tells REAPER the custom color is *active*.
+    - The color field `I_CUSTOMCOLOR` is stored as `RGB | 0x1000000` where the high bit (0x1000000) enables the tint.
+    - Functionally unchanged: placeholder items still tinted bright red for visibility.
+    
   v2510052318 — Fix ranges_touch_or_overlap() nil on re-entry
     - Moved forward declarations (project_epsilon, ranges_touch_or_overlap) to the top so any caller can resolve them.
     - Removed the later duplicate forward-decl block to prevent late-binding/globals turning nil at runtime.
@@ -177,7 +182,7 @@ local function compute_preview_span()
   return UL, UR
 end
 
--- Placeholder: one white empty item with note = PREVIEWING @ Track <n> - <FXName>
+-- Placeholder: one red empty item with note = PREVIEWING @ Track <n> - <FXName>
 local function make_placeholder(track, UL, UR, note)
   local it = reaper.AddMediaItemToTrack(track)
   reaper.SetMediaItemInfo_Value(it, "D_POSITION", UL or 0)
@@ -186,7 +191,7 @@ local function make_placeholder(track, UL, UR, note)
   reaper.GetSetMediaItemTakeInfo_String(tk, "P_NAME", "", true) -- keep empty name
   reaper.ULT_SetMediaItemNote(it, note or "")
   -- set white tint for clarity
-  reaper.SetMediaItemInfo_Value(it, "I_CUSTOMCOLOR", reaper.ColorToNative(255,255,255)|0x1000000)
+  reaper.SetMediaItemInfo_Value(it, "I_CUSTOMCOLOR", reaper.ColorToNative(255,0,0)|0x1000000)
   reaper.UpdateItemInProject(it)
   return it
 end
@@ -196,7 +201,7 @@ local function remove_placeholder(it)
   reaper.DeleteTrackMediaItem(reaper.GetMediaItem_Track(it), it)
 end
 
--- 尋找 FX 軌上的佔位 item（以註記開頭 "PREVIEWING @" 判定）
+-- 尋找「原始軌」上的佔位 item（以註記開頭 "PREVIEWING @" 判定）
 local function find_placeholder_on_track(track)
   if not track then return nil end
   local ic = reaper.CountTrackMediaItems(track)
@@ -212,24 +217,7 @@ local function find_placeholder_on_track(track)
   return nil
 end
 
--- 全專案找 placeholder（現在規格：placeholder 建在「原始軌」）
-local function find_placeholder_anywhere()
-  local tr_cnt = reaper.CountTracks(0)
-  for ti=0, tr_cnt-1 do
-    local tr = reaper.GetTrack(0, ti)
-    local ic = reaper.CountTrackMediaItems(tr)
-    for i=0, ic-1 do
-      local it = reaper.GetTrackMediaItem(tr, i)
-      local _, note = reaper.GetSetMediaItemInfo_String(it, "P_NOTES", "", false)
-      if note and note:find("^PREVIEWING @") then
-        local UL  = reaper.GetMediaItemInfo_Value(it, "D_POSITION")
-        local LEN = reaper.GetMediaItemInfo_Value(it, "D_LENGTH")
-        return it, UL, UL + LEN
-      end
-    end
-  end
-  return nil
-end
+
 
 -- 依據佔位範圍，抓取 FX 軌上屬於「被搬來預覽」的 items（排除佔位本身）
 local function collect_preview_items_on_fx_track(track, ph_item, UL, UR)
