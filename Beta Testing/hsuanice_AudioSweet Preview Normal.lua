@@ -1,9 +1,14 @@
 --[[
 @description AudioSweet Preview (loop play, no solo)
 @author Hsuanice
-@version 2510051520 WIP
+@version 2510052130 OK Solo scope via ExtState (track|item)
 @about Toggle-style preview using hsuanice_AS Preview Core.lua
 @changelog
+  v2510052130 — OK Solo scope via ExtState (track|item)
+    - ExtState namespace unified to `hsuanice_AS` (no legacy keys).
+    - Wrapper now only sets `PREVIEW_MODE="normal"` and (if empty) `SOLO_SCOPE`, then calls Core.
+    - Toggle/switch/stop logic is handled entirely by Core using placeholder + PREVIEW_MODE.
+
   v2510051520 WIP — Normal wrapper aligned (no mute)
     - Normal vs Solo difference is now **only** whether Core runs 41561 (Item: Solo exclusive) on the moved preview items.
     - Removed any mention/plan of “mute originals” – no longer needed (both modes always move items off the source track).
@@ -59,54 +64,31 @@ local function get_focused_track_fx()
   return tr, fxNum
 end
 
--- 共享 ExtState：兩支腳本共用，以支持「自切換 + 互切換」
-local ES_NS = "hsuanice_AS_PREVIEW"
+-- 共享 ExtState（與 Core 統一）：只用新 NS
+local ES_NS = "hsuanice_AS"
 
-local function get_state()
-  local run = reaper.GetExtState(ES_NS, "RUN") == "1"
-  local mode = reaper.GetExtState(ES_NS, "MODE")
-  return run, mode
-end
+-- ExtState helpers (generic)
+local function es_get(key) return reaper.GetExtState(ES_NS, key) end
+local function es_set(key, val, persist) reaper.SetExtState(ES_NS, key, tostring(val or ""), persist == true) end
 
-local function set_state(run, mode)
-  reaper.SetExtState(ES_NS, "RUN", run and "1" or "0", false)
-  if mode then reaper.SetExtState(ES_NS, "MODE", mode, false) end
-end
-
-local function is_playing()
-  -- bit1 表示正在播放
-  return (reaper.GetPlayState() & 1) == 1
+-- Ensure a default SOLO_SCOPE for Core (track|item). Default = track.
+local solo_scope = es_get("SOLO_SCOPE")
+if solo_scope == nil or solo_scope == "" then
+  es_set("SOLO_SCOPE", "track", true) -- persist user's default choice
+  solo_scope = "track"
 end
 
 -- 取得目前 Focused FX
 local FXtrack, fxIndex = get_focused_track_fx()
 if not FXtrack or not fxIndex then return end
 
+-- ★ 統一寫入新鍵值給 Core：只負責宣告目標模式與 solo 範圍，其餘交給 Core 判斷
+es_set("PREVIEW_MODE", TARGET_MODE, false)
+-- SOLO_SCOPE 已在上面確保預設，如需在此覆寫也可：
+-- es_set("SOLO_SCOPE", "track", true) -- 或 "item"
 
-local running, curmode = get_state()
+-- 記錄 wrapper 狀態（除錯用）
+reaper.ShowConsoleMsg(("[wrapper-normal] SOLO_SCOPE=%s, PREVIEW_MODE=%s\n"):format(solo_scope, TARGET_MODE))
 
--- 規則（不再依賴「當下是否播放」）：
--- - 若已有 session：
---     * 同模式 → 停止（toggle off）
---     * 不同模式 → 熱切換（不中斷播放）
--- - 若沒有 session → 以目標模式啟動
-if running then
-  if curmode == TARGET_MODE then
-    -- 同模式 → 停止
-    set_state(false, curmode)  -- 先寫狀態，避免第二次執行讀到舊值
-    ASP.cleanup_if_any({ restore_playstate = true })
-  else
-    -- 不同模式 → 切換（不中斷播放）
-    set_state(true, TARGET_MODE) -- 先寫 MODE，避免「要按兩次」
-    if ASP.switch_mode then
-      ASP.switch_mode{ mode = TARGET_MODE, focus_track = FXtrack, focus_fxindex = fxIndex }
-    else
-      -- 向後相容：沒有 switch_mode 時，直接 run 相同會覆寫模式
-      ASP.run{ mode = TARGET_MODE, focus_track = FXtrack, focus_fxindex = fxIndex }
-    end
-  end
-else
-  -- 尚未運行 → 啟動指定模式
-  set_state(true, TARGET_MODE) -- 先寫 MODE，再啟動
-  ASP.run{ mode = TARGET_MODE, focus_track = FXtrack, focus_fxindex = fxIndex }
-end
+-- 直接交 Core 執行（不再傳 mode，讓 Core 從 ExtState 讀）
+ASP.run{ focus_track = FXtrack, focus_fxindex = fxIndex }
