@@ -62,19 +62,7 @@ local function set_solo_scope_to_extstate(scope)
   reaper.SetExtState(NS, "SOLO_SCOPE", scope, true) -- persist=true
 end
 
--- 掃描 FX 軌是否存在 placeholder（以 item note 前綴識別）
-local function has_placeholder_on_fx_track(FXtrack)
-  if not FXtrack then return false end
-  local item_cnt = reaper.CountTrackMediaItems(FXtrack)
-  for i = 0, item_cnt-1 do
-    local it = reaper.GetTrackMediaItem(FXtrack, i)
-    local ok, note = reaper.GetSetMediaItemInfo_String(it, "P_NOTES", "", false)
-    if ok and note and note:find(NOTE_PREFIX, 1, true) == 1 then
-      return true
-    end
-  end
-  return false
-end
+
 
 -- （可選）若要保留 API 外型：鍵改成 PREVIEW_MODE
 local function set_preview_mode_to_extstate(mode)
