@@ -1,9 +1,17 @@
 --[[
 @description AudioSweet Preview (loop play; solo scope via ExtState)  -- solo scope: track|item (default=track)
 @author Hsuanice
-@version 2510060048 OK Unified wrapper debug format
+@version 2510060104 OK Align Solo warning UX with Normal wrapper
 @about Toggle-style preview using hsuanice_AS Preview Core.lua (solo exclusive)
 @changelog
+  v2510060104 OK Align Solo warning UX with Normal wrapper
+    - Added visual message box (`reaper.MB`) when no Track FX is focused.
+      * Previously, only console debug text appeared (and disappeared if DEBUG was off).
+      * Now the user receives the same popup warning as the Normal wrapper:
+        “Focused FX is not a Track FX (or no FX focused).”
+    - This ensures consistent user feedback regardless of DEBUG state.
+    - Verified both wrappers share identical focus check logic (`get_focused_track_fx`).
+
   v2510060048 OK Unified wrapper debug format
     - Changed Solo wrapper header print to match Normal wrapper:
         → `[AS][PREVIEW][time] [wrapper-solo] SOLO_SCOPE=track, PREVIEW_MODE=solo`
@@ -93,19 +101,7 @@ local function set_solo_scope_to_extstate(scope)
   reaper.SetExtState(NS, "SOLO_SCOPE", scope, true) -- persist=true
 end
 
--- 掃描 FX 軌是否存在 placeholder（以 item note 前綴識別）
-local function has_placeholder_on_fx_track(FXtrack)
-  if not FXtrack then return false end
-  local item_cnt = reaper.CountTrackMediaItems(FXtrack)
-  for i = 0, item_cnt-1 do
-    local it = reaper.GetTrackMediaItem(FXtrack, i)
-    local ok, note = reaper.GetSetMediaItemInfo_String(it, "P_NOTES", "", false)
-    if ok and note and note:find(NOTE_PREFIX, 1, true) == 1 then
-      return true
-    end
-  end
-  return false
-end
+
 
 -- （可選）若要保留 API 外型：鍵改成 PREVIEW_MODE
 local function set_preview_mode_to_extstate(mode)
