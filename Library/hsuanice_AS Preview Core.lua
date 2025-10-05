@@ -1,10 +1,24 @@
 --[[
 @description AudioSweet Preview Core
 @author Hsuanice
-@version 2510051403 WIP 目前Solo功能都正常，但還無法toggle
+@version 2510051520 WIP
 
 @about Minimal, self-contained preview runtime. Later we can extract helpers to "hsuanice_AS Core.lua".
 @changelog
+  v2510051520 WIP — Placeholder-guarded reentry; no rebuild; true single-tap toggle
+    - Core now treats the "PREVIEWING @ …" placeholder on the focused FX track as the ground-truth running flag.
+    - On every run() call:
+      - If a placeholder is found, Core bootstraps its runtime state (collects current preview items by the placeholder’s time span) and ONLY switches mode (solo↔normal). No re-glue, no re-move, no new placeholder.
+      - If no placeholder is found, Core builds a fresh preview as before.
+    - Mode switching in _switch_mode() now safely re-selects the moved items before toggling Item-Solo-Exclusive.
+    - (Optional) You can pin the placeholder to the FX track (Hunk C) for simpler detection; or skip Hunk C to keep placeholders on source tracks.
+    - Keeps your continuous debug stream intact; no console clearing.
+
+    Known notes
+    - Normal wrapper should mirror the same ExtState flip to allow cross-wrapper toggling.
+    - If the user deletes/moves the placeholder during playback, Core will rebuild on next run (by design).
+    - Razor selection still pending; current logic follows Time Selection > item span.
+    
   v2510051403 WIP — Preview Core: ExtState-driven mode, move-based preview, placeholder lifecycle
     - ExtState mode: Core reads hsuanice_AS:PREVIEW_MODE ("solo"/"normal"); wrappers only flip this ExtState then call Core (fallback to opts.default_mode if empty).
     - Focused-FX isolation: snapshots per-FX enable mask on the focused track, enables only the focused FX during preview, restores the mask on cleanup.
@@ -135,6 +149,40 @@ local function remove_placeholder(it)
   reaper.DeleteTrackMediaItem(reaper.GetMediaItem_Track(it), it)
 end
 
+-- 尋找 FX 軌上的佔位 item（以註記開頭 "PREVIEWING @" 判定）
+local function find_placeholder_on_track(track)
+  if not track then return nil end
+  local ic = reaper.CountTrackMediaItems(track)
+  for i=0, ic-1 do
+    local it = reaper.GetTrackMediaItem(track, i)
+    local _, note = reaper.GetSetMediaItemInfo_String(it, "P_NOTES", "", false)
+    if note and note:find("^PREVIEWING @") then
+      local UL  = reaper.GetMediaItemInfo_Value(it, "D_POSITION")
+      local LEN = reaper.GetMediaItemInfo_Value(it, "D_LENGTH")
+      return it, UL, UL + LEN
+    end
+  end
+  return nil
+end
+
+-- 依據佔位範圍，抓取 FX 軌上屬於「被搬來預覽」的 items（排除佔位本身）
+local function collect_preview_items_on_fx_track(track, ph_item, UL, UR)
+  local items = {}
+  if not track then return items end
+  local ic = reaper.CountTrackMediaItems(track)
+  for i=0, ic-1 do
+    local it = reaper.GetTrackMediaItem(track, i)
+    if it ~= ph_item then
+      local L = reaper.GetMediaItemInfo_Value(it, "D_POSITION")
+      local R = L + reaper.GetMediaItemInfo_Value(it, "D_LENGTH")
+      if ranges_touch_or_overlap(L, R, UL, UR) then
+        table.insert(items, it)
+      end
+    end
+  end
+  return items
+end
+
 -- Debug helpers
 local function now_ts()
   return os.date("%H:%M:%S")
@@ -168,25 +216,18 @@ local function write_state(t)
   reaper.SetExtState(ASP.ES_NS, ASP.ES_STATE, tbl2json(t), false)
 end
 
--- Internal runtime state
-ASP._state = {
+-- Internal runtime state (persist across re-loads)
+ASP._state = ASP._state or {
   running         = false,
-  mode            = nil,    -- "solo" | "normal"
+  mode            = nil,
   play_was_on     = nil,
   repeat_was_on   = nil,
-  selection_cache = nil,    -- {itemGUID=true,...}
+  selection_cache = nil,
   fx_track        = nil,
   fx_index        = nil,
-
-  -- 改為搬移：本次被搬到 FX 軌的 items
   moved_items     = {},
-
-  -- 單一佔位（空白）item，位在原 track/原區間
   placeholder     = nil,
-
-  -- FX enable 快照（隔離 focused FX 之後要還原）
   fx_enable_shot  = nil,
-
   stop_watcher    = false,
 }
 
@@ -210,7 +251,7 @@ function ASP._switch_mode(newmode)
   if newmode == ASP._state.mode then return end
 
   -- 不重建預覽 item；僅切換旗標（solo/normal）與原件靜音狀態
-  ASP._select_items(ASP._state.preview_items, true)
+  ASP._select_items(ASP._state.moved_items, true)
   if newmode == "solo" then
     -- 關原件靜音、對複本打開 item-solo
     if ASP._state.mute_shot then
@@ -218,12 +259,19 @@ function ASP._switch_mode(newmode)
       ASP._state.mute_shot = nil
       ASP.log("switch→solo: restored original mutes")
     end
-    reaper.Main_OnCommand(41561, 0) -- solo-exclusive ON（若已是 ON 就維持）
+    if ASP._state.moved_items and #ASP._state.moved_items > 0 then
+      ASP._select_items(ASP._state.moved_items, true)
+      reaper.Main_OnCommand(41561, 0) -- solo-exclusive ON（若已是 ON 就維持）
+    end
     ASP.log("switch→solo: ensure item-solo ON on preview items")
   else
     -- normal：關複本 item-solo、靜音原件
-    reaper.Main_OnCommand(41561, 0) -- solo-exclusive OFF（若是 ON 則關）
+    if ASP._state.moved_items and #ASP._state.moved_items > 0 then
+      ASP._select_items(ASP._state.moved_items, true)
+      reaper.Main_OnCommand(41561, 0) -- solo-exclusive OFF（若是 ON 則關）
+    end
     ASP.log("switch→normal: ensure item-solo OFF on preview items")
+
     if ASP._state.orig_items and #ASP._state.orig_items > 0 then
       ASP._state.mute_shot = snapshot_and_mute(ASP._state.orig_items)
       ASP.log("switch→normal: originals muted")
@@ -409,18 +457,32 @@ function ASP.run(opts)
   if not (mode == "solo" or mode == "normal") then
     reaper.MB("ASP.run: invalid mode", "AudioSweet Preview", 0); return
   end
-
   if not FXtrack or not FXindex then
     reaper.MB("ASP.run: focus track/fx missing", "AudioSweet Preview", 0); return
   end
 
   ASP.log("run called, mode=%s", mode)
 
-  if ASP._state.running then
-    -- 已在跑：若目標 == 目前 → 自動翻面；否則切到指名的 mode
-    local target = (ASP._state.mode == mode) and ((mode=="solo") and "normal" or "solo") or mode
-    ASP._switch_mode(target)
+  -- ① 先用「佔位 item」偵測是否已在預覽（即使是新的腳本實例也能判斷）
+  local ph, UL, UR = find_placeholder_on_track(FXtrack)
+  if ph then
+    -- runtime bootstrap（不重建、不再搬移）
+    ASP._state.running       = true
+    ASP._state.fx_track      = FXtrack
+    ASP._state.fx_index      = FXindex
+    ASP._state.placeholder   = ph
+    ASP._state.moved_items   = collect_preview_items_on_fx_track(FXtrack, ph, UL, UR)
+    ASP._state.mode          = (mode == "solo") and "normal" or "solo"  -- 讓下一步 _switch_mode(mode) 一定會生效
+    ASP.log("detected existing placeholder; bootstrap running state (items=%d)", #ASP._state.moved_items)
+
+    -- 只做「模式切換」，避免任何 rebuild
+    ASP._switch_mode(mode)
     return
+  end
+
+  -- ② 舊路徑：若為同一實例且 state.running=true（但沒找到佔位），才允許重建（極少見）
+  if ASP._state.running then
+    ASP.log("run: state.running=true but placeholder missing; rebuilding preview")
   end
 
   -- start preview
