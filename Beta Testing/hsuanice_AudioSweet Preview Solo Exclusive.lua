@@ -1,16 +1,28 @@
 --[[
 @description AudioSweet Preview (loop play; solo scope via ExtState)  -- solo scope: track|item (default=track)
 @author Hsuanice
-@version 2510052130 OK Solo scope via ExtState (track|item)
+@version 2510052300 OK Fix ExtState (solo wrapper → Core)
 @about Toggle-style preview using hsuanice_AS Preview Core.lua (solo exclusive)
 @changelog
+  v2510052300 OK Fix ExtState (solo wrapper → Core)
+    - Unified ExtState namespace to `hsuanice_AS` (was `hsuanice_AS_PREVIEW`).
+    - Switched key to `PREVIEW_MODE` (was `MODE`); wrapper now sets `PREVIEW_MODE=solo` and delegates logic to Core.
+    - Removed wrapper-side placeholder/run-state detection; Core is the single source of truth.
+    - Preserved `SOLO_SCOPE` user option in `hsuanice_AS / SOLO_SCOPE` (`track`|`item`, default `track`).
+    - Improved entry logs: wrapper prints current scope & mode; no console clearing.
+    - Compatibility: requires Core ≥ v2510051520.
+
+    Known
+    - Live mode switching mid-loop still handled by Core (wrapper only updates ExtState).
+    - Razor selection not implemented yet (follows Core behavior).
+
   v2510052130 — Solo scope via ExtState (track|item)
-    - Added user-selectable solo scope stored in ExtState `hsuanice_AS_PREVIEW / SOLO_SCOPE`.
+    - Added user-selectable solo scope stored in ExtState `hsuanice_AS / SOLO_SCOPE`.
     - `SOLO_SCOPE` can be either `"track"` or `"item"` (default=`track`).
     - Preview Core now reads this ExtState to decide whether to apply exclusive solo at the **track** level or **item** level.
     - Wrapper preserves user choice between sessions (persistent ExtState = true).
     - Added detailed logging to show SOLO_SCOPE on entry (`[wrapper] SOLO_SCOPE=...`).
-    - Maintains previous behavior of toggling preview mode via ExtState `MODE` and placeholder detection.
+    - Wrapper only sets `PREVIEW_MODE=solo`; Core reads `hsuanice_AS / PREVIEW_MODE` + placeholder to decide build/switch/stop.
     - Compatible with Core v2510051520 and later.
 
     Known notes
@@ -58,7 +70,8 @@ local lib_rel = "Library/hsuanice_AS Preview Core.lua"
 local ASP, p1 = try_dofile(SCRIPT_DIR .. lib_rel)
 
 -- === Solo wrapper helpers (project-scoped) ===
-local NS = "hsuanice_AS_PREVIEW"
+-- 統一與 Core 相同命名空間
+local NS = "hsuanice_AS"
 local NOTE_PREFIX = "PREVIEWING @ "  -- placeholder item note 前綴
 
 -- Solo 範圍：'track' 或 'item'，由 ExtState 控制
@@ -88,15 +101,9 @@ local function has_placeholder_on_fx_track(FXtrack)
   return false
 end
 
--- 讀/寫 ExtState 的目前模式（core 亦會使用）
-local function get_mode_from_extstate(default_mode)
-  local m = reaper.GetExtState(NS, "MODE")
-  if m == nil or m == "" then return default_mode end
-  return m
-end
-
-local function set_mode_to_extstate(mode)
-  reaper.SetExtState(NS, "MODE", mode, true) -- persist = true
+-- （可選）若要保留 API 外型：鍵改成 PREVIEW_MODE
+local function set_preview_mode_to_extstate(mode)
+  reaper.SetExtState(NS, "PREVIEW_MODE", mode or "", false) -- 不需 persist
 end
 
 if not ASP then
@@ -150,20 +157,11 @@ if not current_scope or current_scope == "" then
 end
 ASP.log(("[wrapper] SOLO_SCOPE=%s"):format(current_scope))
 
--- 讀目前 ExtState 的模式（若未設，預設以 'solo' 起手）
-local current_mode = get_mode_from_extstate("solo")
+-- ★ Solo wrapper 只宣告 PREVIEW_MODE=solo，並交給 Core（Core 會讀 PREVIEW_MODE＋placeholder 判斷切換/重建）
+reaper.SetExtState(NS, "PREVIEW_MODE", "solo", false)
 
--- 用「FX 軌是否存在 placeholder」判斷 Core 是否在跑
-if has_placeholder_on_fx_track(FXtrack) then
-  -- Core 正在跑 ➜ 單次觸發只切 MODE（solo↔normal），不重建、不搬移、不改 SOLO_SCOPE
-  -- SOLO_SCOPE 由使用者另行設定（或由另一 wrapper 設定）；Core watcher 會讀 ExtState 變更。
-  local new_mode = (current_mode == "solo") and "normal" or "solo"
-  set_mode_to_extstate(new_mode)
-  ASP.log(("entry(solo): running -> toggle %s → %s"):format(current_mode, new_mode))
-  return
-end
+-- 顯示目前 SOLO_SCOPE 與 PREVIEW_MODE（便於除錯）
+ASP.log(("[wrapper-solo] SOLO_SCOPE=%s, PREVIEW_MODE=%s"):format(current_scope, "solo"))
 
--- Core 未在跑 ➜ 設定為 solo 並啟動一次
-set_mode_to_extstate("solo")
-ASP.log("entry(solo): start")
-ASP.run{ mode = "solo", focus_track = FXtrack, focus_fxindex = fxIndex }
+-- 交由 Core 處理（不要傳 mode，讓 Core 完全以 ExtState 做決策）
+ASP.run{ focus_track = FXtrack, focus_fxindex = fxIndex }
