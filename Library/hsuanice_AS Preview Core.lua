@@ -1,15 +1,23 @@
 --[[
 @description AudioSweet Preview Core
 @author Hsuanice
-@version 2510052343
+@version 2510052349 Core-only user options for SOLO_SCOPE/DEBUG
 
 @about Minimal, self-contained preview runtime. Later we can extract helpers to "hsuanice_AS Core.lua".
 @changelog
+  v2510052349 — Core-only user options for SOLO_SCOPE/DEBUG
+    - Moved user-configurable options into Core: 
+      - USER_SOLO_SCOPE = "track" | "item" (default "track")
+      - USER_DEBUG = false (enable Core logs when true)
+    - Core no longer reads/writes ExtState for SOLO_SCOPE/DEBUG. Wrappers do not need to set these anymore.
+    - PREVIEW_MODE still comes from ExtState so wrappers can choose solo vs normal.
+    - Added a startup log line to print the current SOLO_SCOPE and DEBUG states.
+
   v2510052343 — Clarify item tint constant
     - Documentation: explained that `0x1000000` sets the high bit of the color integer, which tells REAPER the custom color is *active*.
     - The color field `I_CUSTOMCOLOR` is stored as `RGB | 0x1000000` where the high bit (0x1000000) enables the tint.
     - Functionally unchanged: placeholder items still tinted bright red for visibility.
-    
+
   v2510052318 — Fix ranges_touch_or_overlap() nil on re-entry
     - Moved forward declarations (project_epsilon, ranges_touch_or_overlap) to the top so any caller can resolve them.
     - Removed the later duplicate forward-decl block to prevent late-binding/globals turning nil at runtime.
@@ -108,6 +116,14 @@
 
   2510042327 Initial version.
 ]]--
+
+-- ===== User Options (edit here) ==========================================
+-- Solo scope for preview isolation: "track" or "item"
+local USER_SOLO_SCOPE = "track"
+-- Enable Core debug logs (printed via ASP.log / ASP.dlog)
+local USER_DEBUG = false
+-- =========================================================================
+
 local ASP = {}
 
 -- === [AS PREVIEW CORE · Debug / State] ======================================
@@ -131,11 +147,9 @@ local function read_mode(default_mode)
   return default_mode or "solo"
 end
 
--- Solo scope from ExtState: "track" (default) | "item"
+-- Solo scope from Core user option only
 local function read_solo_scope()
-  local s = reaper.GetExtState(ASP.ES_NS, "SOLO_SCOPE")
-  if s == "item" then return "item" end
-  return "track"
+  return (USER_SOLO_SCOPE == "item") and "item" or "track"
 end
 
 -- FX enable snapshot/restore on a track
@@ -190,7 +204,7 @@ local function make_placeholder(track, UL, UR, note)
   local tk = reaper.AddTakeToMediaItem(it) -- just to satisfy note storage
   reaper.GetSetMediaItemTakeInfo_String(tk, "P_NAME", "", true) -- keep empty name
   reaper.ULT_SetMediaItemNote(it, note or "")
-  -- set white tint for clarity
+  -- set red tint for clarity (RGB | 0x1000000 enables the tint)
   reaper.SetMediaItemInfo_Value(it, "I_CUSTOMCOLOR", reaper.ColorToNative(255,0,0)|0x1000000)
   reaper.UpdateItemInProject(it)
   return it
@@ -243,7 +257,7 @@ local function now_ts()
 end
 
 function ASP._dbg_enabled()
-  return (reaper.GetExtState(ASP.ES_NS, ASP.ES_DEBUG) == "1")
+  return USER_DEBUG
 end
 
 function ASP.log(fmt, ...)
@@ -338,7 +352,7 @@ end
 -- (A) Debug / log (先內建；未來可移到 AS Core)
 ----------------------------------------------------------------
 local function debug_enabled()
-  return reaper.GetExtState("hsuanice_AS","DEBUG") == "1"
+  return USER_DEBUG
 end
 local function log_step(tag, fmt, ...)
   if not debug_enabled() then return end
@@ -512,7 +526,7 @@ function ASP.run(opts)
   end
 
   ASP.log("run called, mode=%s", mode)
-
+  ASP.log("Core options: SOLO_SCOPE=%s DEBUG=%s", read_solo_scope(), tostring(USER_DEBUG))
   -- Guard A: require at least one selected item (and if TS exists, require intersection)
   do
     local sel_cnt = reaper.CountSelectedMediaItems(0)
