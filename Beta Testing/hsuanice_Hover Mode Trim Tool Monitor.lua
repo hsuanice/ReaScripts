@@ -1,6 +1,6 @@
 --[[
 @description Hover Mode Trim Tool Monitor — Live HUD + A/S Snapshot & Diff
-@version 0.1.0
+@version 2510051919 WIP fix pin track issue
 @author hsuanice
 @about
   Live monitor for Hover Mode trim tools. Shows mouse/track context and triplet (Prev/Under/Next),
@@ -13,7 +13,12 @@
     This script was generated using ChatGPT based on design concepts and iterative testing by hsuanice.
     hsuanice served as the workflow designer, tester, and integrator for this tool.
 
-@changelog
+
+@changelog (monitor)
+  v2510051919
+    - Pin diagnostics: logs native vs SWS hover hits side-by-side.
+      · Shows: Track native=… vs sws=… | Item native=… vs sws=…
+      · Helps confirm SWS mis-hit when tracks are pinned.
   v0.1.0
     - Baseline release (equivalent to internal v1.8):
       ring-buffer TRUE BEFORE for undo-triggered events; edge-aware Under;
@@ -48,7 +53,7 @@ local SNAPSHOT_ITEM_INTERVAL = 0.20   -- ring buffer refresh for items/tracks (s
 local MAX_LOG_LINES   = 2400
 local EPS             = 1e-9
 local VK_A, VK_S      = 0x41, 0x53
-
+local PREFER_NATIVE_MOUSE_HITS = true   -- Pin-safe: 先用原生 API 取滑鼠命中
 -------------------------------------------------
 -- Capability checks / utils
 -------------------------------------------------
@@ -60,7 +65,23 @@ local function msg(s) reaper.ShowConsoleMsg(tostring(s).."\n") end
 local function now() return reaper.time_precise() end
 local function fmtsec(s) return s and reaper.format_timestr_pos(s, "", 0) or "N/A" end
 local function approx(a,b,eps) eps=eps or EPS return math.abs((a or 0)-(b or 0))<=eps end
-
+local function hover_item_native()
+  local x,y = reaper.GetMousePosition()
+  return reaper.GetItemFromPoint(x,y,false)
+end
+local function hover_item_sws()
+  if not has_sws() then return nil end
+  return reaper.BR_ItemAtMouseCursor and reaper.BR_ItemAtMouseCursor() or nil
+end
+local function mouse_track_native()
+  local x,y = reaper.GetMousePosition()
+  return reaper.GetTrackFromPoint(x,y)
+end
+local function mouse_track_sws()
+  if not has_sws() then return nil end
+  reaper.BR_GetMouseCursorContext()
+  return reaper.BR_GetMouseCursorContext_Track()
+end
 -------------------------------------------------
 -- Names/ids/snap/hover/view
 -------------------------------------------------
@@ -382,6 +403,10 @@ local function env_snapshot(edge_pref_for_live)
   local mt  = current_mouse_tl()
   local vstart, vend = get_arrange_view()
   local tr, prevG, underG, nextG = find_triplet_on_mouse_track(mt, vstart, vend, edge_pref_for_live or EDGE_PREF_FOR_LIVE)
+  local tr_native = mouse_track_native()
+  local tr_sws    = mouse_track_sws()
+  local it_native = hover_item_native()
+  local it_sws    = hover_item_sws()  
   local over_ruler=false
   if has_js() then local isr,_=mouse_class_is_ruler(x,y); over_ruler=isr end
   local snap_on = snap_enabled()
@@ -391,7 +416,11 @@ local function env_snapshot(edge_pref_for_live)
     x=x,y=y, mouse_tl=mt, track=tr, track_name=get_track_name(tr),
     over_ruler=over_ruler, snap=snap_on, hover=hover_on, hover_raw=hover_raw,
     edit=edit_pos, vstart=vstart, vend=vend,
-    prev=prevG, under=underG, next=nextG
+    prev=prevG, under=underG, next=nextG,
+    tr_native = tr_native,
+    tr_sws    = tr_sws,
+    it_native = it_native,
+    it_sws    = it_sws,
   }
 end
 
@@ -437,6 +466,16 @@ local function redraw_live()
     get_track_name(e.track), fmtsec(e.vstart), fmtsec(e.vend),
     (e.hover and not e.over_ruler and e.mouse_tl and (e.snap and fmtsec(reaper.SnapToGrid(0,e.mouse_tl)).." (Mouse snapped)" or fmtsec(e.mouse_tl).." (Mouse)")) or "Edit Cursor"))
   msg("Triplet")
+  -- Pin diagnostics: compare native vs SWS hover hits
+  local function _item_info(it)
+    if not it then return "(none)" end
+    local st = reaper.GetMediaItemInfo_Value(it,"D_POSITION")
+    local en = st + reaper.GetMediaItemInfo_Value(it,"D_LENGTH")
+    return string.format("%s..%s", fmtsec(st), fmtsec(en))
+  end
+  msg(string.format("MouseHit (Pin test) | Track native=%s vs sws=%s | Item native=%s vs sws=%s",
+    get_track_name(last_env.tr_native), get_track_name(last_env.tr_sws),
+    _item_info(last_env.it_native), _item_info(last_env.it_sws)))
   print_triplet_block("Prev ", e.prev)
   print_triplet_block("Under", e.under)
   print_triplet_block("Next ", e.next)
