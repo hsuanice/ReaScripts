@@ -1,10 +1,23 @@
 --[[
 @description AudioSweet Preview Core
 @author Hsuanice
-@version 2510060105 Change to no undo
+@version 2510060105 WIP — No-undo scaffolding landed (partial)
 
 @about Minimal, self-contained preview runtime. Later we can extract helpers to "hsuanice_AS Core.lua".
 @changelog
+  v2510060105 WIP — No-undo scaffolding landed (partial)
+    - Added undo_begin()/undo_end_no_undo() around preview start, mode switch, and cleanup paths.
+    - Core debug/user options kept as-is; wrappers unchanged.
+
+    Still creates undo points (TO-DO)
+    - Moving selected items to the FX track (preview enter).
+    - Isolating/restoring focused FX enable mask.
+    - Moving items back to source track & removing the placeholder (preview exit).
+
+    Notes
+    - Console debug stream unchanged (no auto-clear).
+    - Behavior/functionality unaffected; only undo suppression is in progress.
+
   v2510060105 Change to no undo
     - Wrap mutating ops in undo_begin()/undo_end_no_undo() to avoid creating undo points.
     - Cleanup and mode switch now do not create undo points.
@@ -126,8 +139,6 @@ local USER_SOLO_SCOPE = "track"
 -- Enable Core debug logs (printed via ASP.log / ASP.dlog)
 local USER_DEBUG = true
 -- =========================================================================
-
-local ASP = {}
 
 -- === [AS PREVIEW CORE · Debug / State] ======================================
 local ASP = _G.ASP or {}
@@ -424,9 +435,7 @@ local function getLoopSelection()
   return has, L, R
 end
 
-local function move_items_to_track(items, tr)
-  for _,it in ipairs(items) do if it then reaper.MoveMediaItemToTrack(it, tr) end end
-end
+
 
 local function items_all_on_track(items, tr)
   for _,it in ipairs(items) do if reaper.GetMediaItem_Track(it) ~= tr then return false end end
@@ -468,10 +477,7 @@ local function restore_selection(selmap)
   end
 end
 
-local function isolate_focused_fx(FXtrack, focusedIndex)
-  local cnt = reaper.TrackFX_GetCount(FXtrack)
-  for i=0,cnt-1 do reaper.TrackFX_SetEnabled(FXtrack, i, i==focusedIndex) end
-end
+
 
 ----------------------------------------------------------------
 -- (C) Transport / mute 快照與還原
@@ -664,6 +670,7 @@ end
 
 function ASP.cleanup_if_any()
   if not ASP._state.running then return end
+  undo_begin()  -- ← 補上：與結尾的 undo_end_no_undo 成對
   ASP.log("cleanup begin")
 
   -- 保險：清 item-solo + 清 track-solo
