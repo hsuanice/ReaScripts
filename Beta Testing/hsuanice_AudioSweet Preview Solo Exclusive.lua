@@ -1,9 +1,22 @@
 --[[
-@description AudioSweet Preview (loop play, item solo exclusive)
+@description AudioSweet Preview (loop play; solo scope via ExtState)  -- solo scope: track|item (default=track)
 @author Hsuanice
-@version 2510051520 WIP 修toggle
+@version 2510052130 OK Solo scope via ExtState (track|item)
 @about Toggle-style preview using hsuanice_AS Preview Core.lua (solo exclusive)
 @changelog
+  v2510052130 — Solo scope via ExtState (track|item)
+    - Added user-selectable solo scope stored in ExtState `hsuanice_AS_PREVIEW / SOLO_SCOPE`.
+    - `SOLO_SCOPE` can be either `"track"` or `"item"` (default=`track`).
+    - Preview Core now reads this ExtState to decide whether to apply exclusive solo at the **track** level or **item** level.
+    - Wrapper preserves user choice between sessions (persistent ExtState = true).
+    - Added detailed logging to show SOLO_SCOPE on entry (`[wrapper] SOLO_SCOPE=...`).
+    - Maintains previous behavior of toggling preview mode via ExtState `MODE` and placeholder detection.
+    - Compatible with Core v2510051520 and later.
+
+    Known notes
+    - Solo-exclusive scope toggle still requires playback restart to take effect mid-loop (live switching planned for later phase).
+    - Razor selection not supported yet.
+
   v2510051520 WIP — Toggle via ExtState + placeholder guard (Solo wrapper)
     - Wrapper no longer relies on in-memory is_running(); it now detects “preview running” by scanning the focused FX track for the placeholder item note prefix ("PREVIEWING @ ...").
     - Uses project ExtState (hsuanice_AS_PREVIEW / MODE) to store current preview mode.
@@ -47,6 +60,19 @@ local ASP, p1 = try_dofile(SCRIPT_DIR .. lib_rel)
 -- === Solo wrapper helpers (project-scoped) ===
 local NS = "hsuanice_AS_PREVIEW"
 local NOTE_PREFIX = "PREVIEWING @ "  -- placeholder item note 前綴
+
+-- Solo 範圍：'track' 或 'item'，由 ExtState 控制
+local function get_solo_scope_from_extstate(default_scope)
+  local s = reaper.GetExtState(NS, "SOLO_SCOPE")
+  if not s or s == "" then return default_scope end
+  return s
+end
+
+local function set_solo_scope_to_extstate(scope)
+  -- 僅接受 'track' | 'item'
+  if scope ~= "track" and scope ~= "item" then return end
+  reaper.SetExtState(NS, "SOLO_SCOPE", scope, true) -- persist=true
+end
 
 -- 掃描 FX 軌是否存在 placeholder（以 item note 前綴識別）
 local function has_placeholder_on_fx_track(FXtrack)
@@ -116,16 +142,24 @@ if not FXtrack or not fxIndex then return end
 ASP._state.fx_track = FXtrack
 ASP._state.fx_index = fxIndex
 
+-- 初始化 SOLO_SCOPE（若未設，預設 'track'；若已設，不覆蓋）
+local current_scope = get_solo_scope_from_extstate("track")
+if not current_scope or current_scope == "" then
+  set_solo_scope_to_extstate("track")
+  current_scope = "track"
+end
+ASP.log(("[wrapper] SOLO_SCOPE=%s"):format(current_scope))
+
 -- 讀目前 ExtState 的模式（若未設，預設以 'solo' 起手）
 local current_mode = get_mode_from_extstate("solo")
 
 -- 用「FX 軌是否存在 placeholder」判斷 Core 是否在跑
 if has_placeholder_on_fx_track(FXtrack) then
-  -- Core 正在跑 ➜ 單次觸發就直接切到相反模式（不重建、不搬移）
+  -- Core 正在跑 ➜ 單次觸發只切 MODE（solo↔normal），不重建、不搬移、不改 SOLO_SCOPE
+  -- SOLO_SCOPE 由使用者另行設定（或由另一 wrapper 設定）；Core watcher 會讀 ExtState 變更。
   local new_mode = (current_mode == "solo") and "normal" or "solo"
   set_mode_to_extstate(new_mode)
   ASP.log(("entry(solo): running -> toggle %s → %s"):format(current_mode, new_mode))
-  -- 交給 Core 的 watcher 讀取 ExtState 後切換（不會新增 placeholder）
   return
 end
 
