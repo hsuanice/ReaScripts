@@ -1,6 +1,6 @@
 --[[
 @description AudioSweet (hsuanice) — Focused Track FX render via RGWH Core, append FX name, rebuild peaks (selected items)
-@version 2510042157 — TS-Window cross-track print + selection restore
+@version 2510060238 — FX name scheme (type/vendor toggle, strip symbols)
 @author Tim Chimes (original), adapted by hsuanice
 @notes
   Reference:
@@ -19,6 +19,14 @@ This version:
 
 
 @changelog
+  v2510060238 — FX name scheme (type/vendor toggle, strip symbols)
+    - Added user options (via ExtState) for FX take-name postfix:
+      • FXNAME_SHOW_TYPE=1 → include type prefix (e.g., “CLAP:” / “VST3:”).
+      • FXNAME_SHOW_VENDOR=1 → include vendor in parentheses.
+      • FXNAME_STRIP_SYMBOL=1 → remove spaces and non-alphanumeric symbols from the final label.
+    - Introduced robust parser for REAPER FX labels (“TYPE: Name (Vendor)”), then recomposed per options.
+    - Main now formats the focused FX label once (keeps raw in logs), downstream naming unchanged.
+
   v2510042157 — TS-Window cross-track print + selection restore
     - TS-Window (GLOBAL): After 42432, now iterates each glued item **across tracks** and prints the focused FX per-item.
     - Channel-aware apply: per item chooses 40361 (mono, new take) or 41993 (multichannel); temporarily sets FX track I_NCHAN for ≥2ch and restores afterward.
@@ -249,7 +257,64 @@ local function dbg_track_items_in_range(tr, L, R)
   end
 end
 -- =======================
--- =======================
+-- ==== FX name formatting options & helper ====
+-- ExtState 開關（若沒設定則讀 default）
+local FXNAME_DEFAULT_SHOW_TYPE    = false  -- 是否包含 type（如 "VST3:" / "CLAP:"）
+local FXNAME_DEFAULT_SHOW_VENDOR  = false  -- 是否包含廠牌（括號內）
+local FXNAME_DEFAULT_STRIP_SYMBOL = true  -- 是否移除空格與符號（僅保留字母數字）
+
+local function fxname_opts()
+  local function flag(key, default)
+    local v = reaper.GetExtState("hsuanice_AS", key)
+    if v == "1" then return true end
+    if v == "0" then return false end
+    return default
+  end
+  return {
+    show_type    = flag("FXNAME_SHOW_TYPE",   FXNAME_DEFAULT_SHOW_TYPE),
+    show_vendor  = flag("FXNAME_SHOW_VENDOR", FXNAME_DEFAULT_SHOW_VENDOR),
+    strip_symbol = flag("FXNAME_STRIP_SYMBOL",FXNAME_DEFAULT_STRIP_SYMBOL),
+  }
+end
+
+local function trim(s) return (s and s:gsub("^%s+",""):gsub("%s+$","")) or "" end
+
+-- 解析 REAPER FX 顯示名稱：
+--  例： "CLAP: Pro-Q 4 (FabFilter)" → type="CLAP", core="Pro-Q 4", vendor="FabFilter"
+local function parse_fx_label(raw)
+  raw = tostring(raw or "")
+  local typ, rest = raw:match("^([%w%+%._-]+):%s*(.+)$")
+  rest = rest or raw
+  local core, vendor = rest, nil
+  local core_only, v = rest:match("^(.-)%s*%(([^%(%)]+)%)%s*$")
+  if core_only then
+    core, vendor = core_only, v
+  end
+  return trim(typ), trim(core), trim(vendor)
+end
+
+local function format_fx_label(raw)
+  local opt = fxname_opts()
+  local typ, core, vendor = parse_fx_label(raw)
+
+  -- 組裝：依選項決定是否包含 type / vendor
+  local base
+  if opt.show_type and typ ~= "" then
+    base = typ .. ": " .. core
+  else
+    base = core
+  end
+  if opt.show_vendor and vendor ~= "" then
+    base = base .. " (" .. vendor .. ")"
+  end
+
+  if opt.strip_symbol then
+    -- 僅保留 [A-Za-z0-9]，其他（空白、連字號、符號等）移除
+    base = base:gsub("[^%w]+","")
+  end
+  return base
+end
+-- =============================================
 -- ==== selection snapshot helpers ====
 local function snapshot_selection()
   local list = {}
@@ -683,8 +748,10 @@ function main() -- main part of the script
   -- Normalize focused FX index & resolve name/track
   local fxIndex = fxnumber_Out
   if fxIndex >= 0x1000000 then fxIndex = fxIndex - 0x1000000 end
-  local FXName, FXmediaTrack = getFXname(tracknumber_Out, fxIndex)
-  log_step("FOCUSED-FX", "index(norm)=%d  name='%s'  FXtrack=%s", fxIndex, tostring(FXName or ""), tostring(FXmediaTrack))
+  local FXNameRaw, FXmediaTrack = getFXname(tracknumber_Out, fxIndex)
+  local FXName = format_fx_label(FXNameRaw)
+  log_step("FOCUSED-FX", "index(norm)=%d  name='%s' (raw='%s')  FXtrack=%s",
+           fxIndex, tostring(FXName or ""), tostring(FXNameRaw or ""), tostring(FXmediaTrack))
 
   -- Build units from current selection
   local units = build_units_from_selection()
