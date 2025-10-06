@@ -1,10 +1,15 @@
 --[[
 @description AudioSweet Preview Core
 @author Hsuanice
-@version 2510060105 WIP — No-undo scaffolding landed (partial)
+@version 2510061248 WIP — No-undo hardening (switch/apply paths)
 
 @about Minimal, self-contained preview runtime. Later we can extract helpers to "hsuanice_AS Core.lua".
 @changelog
+  v2510061248 WIP — No-undo hardening (switch/apply paths)
+    - _switch_mode(): wrapped entire body in Undo_BeginBlock2/EndBlock2(...,-1) to suppress all undo points when toggling solo/normal.
+    - _apply_mode_flags(): added a protective no-undo block around solo clear/apply + Transport:Play.
+    - Rationale: many native actions create undo points unless executed inside a -1 end block; this guarantees Preview Core leaves no undo traces.
+
   v2510060105 WIP — No-undo scaffolding landed (partial)
     - Added undo_begin()/undo_end_no_undo() around preview start, mode switch, and cleanup paths.
     - Core debug/user options kept as-is; wrappers unchanged.
@@ -153,6 +158,13 @@ ASP.ES_NS         = "hsuanice_AS"
 ASP.ES_STATE      = "PREVIEW_STATE"     -- json: {running=true/false, mode="solo"/"normal"}
 ASP.ES_DEBUG      = "DEBUG"             -- "1" to enable logs
 ASP.ES_MODE       = "PREVIEW_MODE"      -- "solo" | "normal" ; wrappers 會寫入，Core 只讀取
+
+-- NEW: simple run-flag for cross-script handshake
+ASP.ES_RUN        = "PREVIEW_RUN"       -- "1" while preview is running, else "0"
+
+local function _set_run_flag(on)
+  reaper.SetExtState(ASP.ES_NS, ASP.ES_RUN, on and "1" or "0", false)
+end
 
 -- Mode from ExtState (fallback to opts.default_mode or "solo")
 local function read_mode(default_mode)
@@ -332,6 +344,9 @@ function ASP._switch_mode(newmode)
   ASP.log("switch mode: %s -> %s", tostring(ASP._state.mode), newmode)
   if newmode == ASP._state.mode then return end
 
+  -- ==== NO-UNDO GUARD (entire mode switch) ====
+  undo_begin()  -- <— 確保下面所有 Main_OnCommand / I_SOLO 不會留下 Undo
+
   local scope = read_solo_scope()
   local FXtr  = ASP._state.fx_track
 
@@ -359,6 +374,9 @@ function ASP._switch_mode(newmode)
   ASP._state.mode = newmode
   write_state({running=true, mode=newmode})
   ASP.log("switch done: now=%s (scope=%s)", newmode, scope)
+
+  undo_end_no_undo("AS Preview: switch mode (no undo)")  -- <— 不留 Undo
+  -- ==== END NO-UNDO GUARD ====
 end
 
 
@@ -584,17 +602,17 @@ function ASP.run(opts)
   end
 
   if ph then
-    -- runtime bootstrap（不重建、不再搬移）
     ASP._state.running       = true
     ASP._state.fx_track      = FXtrack
     ASP._state.fx_index      = FXindex
     ASP._state.placeholder   = ph
     ASP._state.src_track     = src_tr
     ASP._state.moved_items   = collect_preview_items_on_fx_track(FXtrack, ph, UL, UR)
-    ASP._state.mode          = (mode == "solo") and "normal" or "solo"  -- 讓下一步 _switch_mode(mode) 一定會生效
+    ASP._state.mode          = (mode == "solo") and "normal" or "solo"
     ASP.log("detected existing placeholder on source track; bootstrap (items=%d)", #ASP._state.moved_items)
 
-    -- 只做「模式切換」，避免任何 rebuild（也不記 Undo）
+    _set_run_flag(true)  -- NEW: handshake ON
+
     undo_begin()
     ASP._switch_mode(mode)
     undo_end_no_undo("AS Preview: switch mode (no undo)")
@@ -608,6 +626,7 @@ function ASP.run(opts)
 
   -- start preview (no-undo wrapper)
   undo_begin()
+  _set_run_flag(true)  -- NEW: handshake ON
   ASP._state.running       = true
   ASP._state.mode          = mode
   ASP._state.fx_track      = FXtrack
@@ -701,6 +720,7 @@ function ASP.cleanup_if_any()
   ASP._state.stop_watcher  = false
 
   write_state({running=false, mode=""})
+  _set_run_flag(false)  -- NEW: handshake OFF
   ASP.log("cleanup done")
   undo_end_no_undo("AS Preview: cleanup (no undo)")
 end
@@ -879,6 +899,9 @@ function ASP._select_items(list, exclusive)
 end
 
 function ASP._apply_mode_flags(mode)
+  -- 整段也包起來，避免分散的 Undo
+  undo_begin()
+
   local scope = read_solo_scope()
   local FXtr  = ASP._state.fx_track
 
@@ -888,29 +911,24 @@ function ASP._apply_mode_flags(mode)
 
   if mode == "solo" then
     if scope == "track" then
-      -- 獨奏「FX 目標軌」
       if FXtr then
-        -- 直接設 I_SOLO=1（強制 ON，比 toggle 穩）
         reaper.SetMediaTrackInfo_Value(FXtr, "I_SOLO", 1)
         ASP.log("solo TRACK scope: FX track solo ON")
       end
-      -- moved_items 僅用於播放與選取，不做 item-solo
       ASP._select_items(ASP._state.moved_items, true)
-
-    else -- scope == "item"
-      -- 只獨奏搬移後 items（獨奏項目＝排他）
+    else
       ASP._select_items(ASP._state.moved_items, true)
-      reaper.Main_OnCommand(41558, 0) -- Item: Solo exclusive（會自動 unsolo 其他 item）
+      reaper.Main_OnCommand(41558, 0) -- Item: Solo exclusive
       ASP.log("solo ITEM scope: item-solo-exclusive ON")
     end
-
   else
-    -- normal：保持非獨奏（已經 41185 + 40340 歸零）
     ASP._select_items(ASP._state.moved_items, true)
     ASP.log("normal mode: solo cleared (items & tracks)")
   end
 
   reaper.Main_OnCommand(1007, 0) -- Transport: Play
+
+  undo_end_no_undo("AS Preview: apply mode flags (no undo)")
 end
 
 return ASP
