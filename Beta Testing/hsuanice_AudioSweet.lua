@@ -1,6 +1,6 @@
 --[[
 @description AudioSweet (hsuanice) — Focused Track FX render via RGWH Core, append FX name, rebuild peaks (selected items)
-@version 2510060238 — FX name scheme (type/vendor toggle, strip symbols)
+@version 2510062341 AudioSweet concise AS naming (iteration-safe)
 @author Tim Chimes (original), adapted by hsuanice
 @notes
   Reference:
@@ -18,7 +18,29 @@ This version:
   • Track FX only (Take FX not supported)
 
 
+
+@version 2510062341
 @changelog
+  v2510062341 — AudioSweet concise AS naming (iteration-safe)
+    - Simplified take-name scheme:
+        BaseName-AS{n}-{FX1}_{FX2}_...
+      (removed redundant “glued/render” suffixes and file extensions)
+    - Automatically increments {n} when re-applying AudioSweet to the same take.
+    - Merges previously appended FX names to avoid duplicate “-ASx-FX...” chains.
+    - Removes legacy “glued-XX” / “render XXX/edX” fragments before composing.
+    - Example:
+        1st pass → TakeName-AS1-ProR2
+        2nd pass → TakeName-AS2-ProR2_Saturn2
+    - Refactored parser to detect and merge nested AS tags (“-ASx-...-ASy-...”)
+      ensuring clean sequential numbering and deduplicated FX tokens.
+    - Fix: strip glue/render artifacts when re-parsing existing AS tags
+        (filters tokens: "glued", "render", pure numbers, "ed###", "dup###").  
+  v2510062315 — AudioSweet take-naming (AS scheme)
+    - Replace long “...glued... render...” suffix with concise scheme:
+      BaseName-AS{n}-{FX1}_{FX2}_...
+    - If the take already has AS-form, increment n and append the new FX.
+    - Strip file extensions and any trailing " - Something".
+    - Remove legacy “glued-XX” / “render XXX/edX” fragments before composing.
   v2510060238 — FX name scheme (type/vendor toggle, strip symbols)
     - Added user options (via ExtState) for FX take-name postfix:
       • FXNAME_SHOW_TYPE=1 → include type prefix (e.g., “CLAP:” / “VST3:”).
@@ -611,6 +633,56 @@ end
 
 -- Forward declare helpers used below
 local append_fx_to_take_name
+
+-- === Take name normalization helpers (for AS naming) ===
+local function strip_extension(name)
+  return (name or ""):gsub("%.[A-Za-z0-9]+$", "")
+end
+
+-- remove "glued-XX", "render XXX/edX" and any trailing " - Something"
+local function strip_glue_render_and_trailing_label(name)
+  local s = name or ""
+  s = s:gsub("[_%-%s]*glue[dD]?[%s_%-%d]*", "")
+  s = s:gsub("[_%-%s]*render[eE]?[dD]?[%s_%-%d]*", "")
+  s = s:gsub("%s+%-[%s%-].*$", "") -- remove trailing " - Something"
+  s = s:gsub("%s+$","")
+  s = s:gsub("[_%-%s]+$","")
+  return s
+end
+
+-- tokens like "glued", "render", pure numbers, or "ed123"/"dup3" should be ignored
+local function is_noise_token(tok)
+  local t = tostring(tok or ""):lower()
+  if t == "" then return true end
+  if t == "glue" or t == "glued" or t == "render" or t == "rendered" then return true end
+  if t:match("^ed%d*$")  then return true end  -- e.g. "ed1", "ed23"
+  if t:match("^dup%d*$") then return true end  -- e.g. "dup1"
+  if t:match("^%d+$")    then return true end  -- pure numbers like "001"
+  return false
+end
+-- Try parse "Base-AS{n}-FX1_FX2" and tolerate extra tails like "-ASx-YYY"
+-- Return: base (string), n (number), fx_tokens (table)
+local function parse_as_tag(full)
+  local s = tostring(full or "")
+  local base, n, tail = s:match("^(.-)[-_]AS(%d+)[-_](.+)$")
+  if not base or not n then
+    return nil, nil, nil
+  end
+  base = base:gsub("%s+$", "")
+
+  -- If tail contains another "-ASx-" (e.g., "Saturn2-AS1-ProQ4"), only keep the part **before** the next AS tag.
+  local first_tail = tail:match("^(.-)[-_]AS%d+[-_].*$") or tail
+
+  -- Tokenize FX names (alnum only), keep order, drop glue/render noise
+  local fx_tokens = {}
+  for tok in first_tail:gmatch("([%w]+)") do
+    if tok ~= "" and not tok:match("^AS%d+$") and not is_noise_token(tok) then
+      fx_tokens[#fx_tokens+1] = tok
+    end
+  end
+
+  return base, tonumber(n), fx_tokens
+end
 -- 共用：把單一 item 搬到 FX 軌並列印「只有聚焦 FX」
 local function apply_focused_fx_to_item(item, FXmediaTrack, fxIndex, FXName)
   if not item then return false, -1 end
@@ -659,14 +731,37 @@ local function apply_focused_fx_to_item(item, FXmediaTrack, fxIndex, FXName)
 end
 
 function append_fx_to_take_name(item, fxName)
-  if not item then return end
+  if not item or not fxName or fxName == "" then return end
   local takeIndex = reaper.GetMediaItemInfo_Value(item, "I_CURTAKE")
   local take      = reaper.GetMediaItemTake(item, takeIndex)
   if not take then return end
-  local _, tn = reaper.GetSetMediaItemTakeInfo_String(take, "P_NAME", "", false)
-  if fxName and fxName ~= "" then
-    reaper.GetSetMediaItemTakeInfo_String(take, "P_NAME", tn .. " - " .. fxName, true)
+
+  local _, tn0 = reaper.GetSetMediaItemTakeInfo_String(take, "P_NAME", "", false)
+  local tn_noext = strip_extension(tn0 or "")
+
+  local baseAS, nAS, fx_tokens = parse_as_tag(tn_noext)
+
+  local base, n, tokens
+  if baseAS and nAS then
+    base   = strip_glue_render_and_trailing_label(baseAS)
+    n      = nAS + 1
+    tokens = fx_tokens or {}
+  else
+    base   = strip_glue_render_and_trailing_label(tn_noext)
+    n      = 1
+    tokens = {}
   end
+
+  -- append new FX if not already present
+  local exists = false
+  for _, t in ipairs(tokens) do
+    if t == fxName then exists = true; break end
+  end
+  if not exists then table.insert(tokens, fxName) end
+
+  local fx_concat = table.concat(tokens, "_")
+  local new_name = string.format("%s-AS%d-%s", base, n, fx_concat)
+  reaper.GetSetMediaItemTakeInfo_String(take, "P_NAME", new_name, true)
 end
 
 function mediaItemInLoop(mediaItem, startLoop, endLoop)
