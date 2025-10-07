@@ -1,6 +1,6 @@
 --[[
 @description AudioSweet (hsuanice) — Focused Track FX render via RGWH Core, append FX name, rebuild peaks (selected items)
-@version 2510062341 AudioSweet concise AS naming (iteration-safe)
+@version 2510071407 AS naming: user-capped FX list (FIFO)
 @author Tim Chimes (original), adapted by hsuanice
 @notes
   Reference:
@@ -19,8 +19,18 @@ This version:
 
 
 
-@version 2510062341
+
 @changelog
+  v2510071407 — AS naming: user-capped FX list (FIFO)
+    - New user option at top of script: AS_MAX_FX_TOKENS
+      * 0 or nil → unlimited (default)
+      * N>0     → keep only the last N FX names in the “-ASn-...” suffix
+    - Behavior: each run appends the new FX; if over the cap, drop the oldest tokens (FIFO).
+    - Examples (cap=3):
+        Take-AS4-Saturn2_ProQ4_ProR2
+        + ProQ4   → Take-AS5-ProQ4_ProR2_ProQ4
+        + Saturn2 → Take-AS6-ProR2_ProQ4_Saturn2
+
   v2510062341 — AudioSweet concise AS naming (iteration-safe)
     - Simplified take-name scheme:
         BaseName-AS{n}-{FX1}_{FX2}_...
@@ -206,6 +216,11 @@ This version:
 -- Debug toggle: set ExtState "hsuanice_AS"/"DEBUG" to "1" to enable, "0" (or empty) to disable
 
 reaper.SetExtState("hsuanice_AS","DEBUG","1", false)
+
+-- === User options ===
+-- How many FX names to keep in the “-ASn-...” suffix.
+-- 0 or nil = unlimited; N>0 = keep last N tokens (FIFO).
+local AS_MAX_FX_TOKENS = 3
 
 local function debug_enabled()
   return reaper.GetExtState("hsuanice_AS", "DEBUG") == "1"
@@ -634,6 +649,15 @@ end
 -- Forward declare helpers used below
 local append_fx_to_take_name
 
+-- Max FX tokens cap (via user option AS_MAX_FX_TOKENS)
+local function max_fx_tokens()
+  local n = tonumber(AS_MAX_FX_TOKENS)
+  if not n or n < 1 then
+    return math.huge -- unlimited
+  end
+  return math.floor(n)
+end
+
 -- === Take name normalization helpers (for AS naming) ===
 local function strip_extension(name)
   return (name or ""):gsub("%.[A-Za-z0-9]+$", "")
@@ -758,6 +782,19 @@ function append_fx_to_take_name(item, fxName)
     if t == fxName then exists = true; break end
   end
   if not exists then table.insert(tokens, fxName) end
+
+  -- Apply user cap (FIFO): keep only the last N tokens
+  do
+    local cap = max_fx_tokens()
+    if cap ~= math.huge and #tokens > cap then
+      local start = #tokens - cap + 1
+      local trimmed = {}
+      for i = start, #tokens do
+        trimmed[#trimmed+1] = tokens[i]
+      end
+      tokens = trimmed
+    end
+  end
 
   local fx_concat = table.concat(tokens, "_")
   local new_name = string.format("%s-AS%d-%s", base, n, fx_concat)
