@@ -1,6 +1,6 @@
 --[[
 @description AudioSweet (hsuanice) — Focused Track FX render via RGWH Core, append FX name, rebuild peaks (selected items)
-@version 2510071407 AS naming: user-capped FX list (FIFO)
+@version 2510071447 — AS naming: allow duplicates, keep order (FIFO cap)
 @author Tim Chimes (original), adapted by hsuanice
 @notes
   Reference:
@@ -21,6 +21,14 @@ This version:
 
 
 @changelog
+  v2510071447 — AS naming: allow duplicates, keep order (FIFO cap)
+    - Stop de-duplicating FX tokens; every run appends the new FX to the end.
+    - The AS_MAX_FX_TOKENS cap (user option) still trims from the oldest (FIFO).
+    - Examples (cap=3):
+        CHOU...-AS5-Volcano3_dxRevivePro_Saturn2
+        + Volcano3 → CHOU...-AS6-dxRevivePro_Saturn2_Volcano3
+        + Saturn2  → CHOU...-AS7-ProQ4_Volcano3_Saturn2   (if cap=3)
+
   v2510071407 — AS naming: user-capped FX list (FIFO)
     - New user option at top of script: AS_MAX_FX_TOKENS
       * 0 or nil → unlimited (default)
@@ -776,12 +784,8 @@ function append_fx_to_take_name(item, fxName)
     tokens = {}
   end
 
-  -- append new FX if not already present
-  local exists = false
-  for _, t in ipairs(tokens) do
-    if t == fxName then exists = true; break end
-  end
-  if not exists then table.insert(tokens, fxName) end
+  -- always append new FX (allow duplicates; preserve chronological order)
+  table.insert(tokens, fxName)
 
   -- Apply user cap (FIFO): keep only the last N tokens
   do
