@@ -1,10 +1,30 @@
 --[[
 @description AudioSweet Preview Core
 @author Hsuanice
-@version 2510061248 WIP — No-undo hardening (switch/apply paths)
+@version 2510082330 Fix: Forward-declare `undo_begin` / `undo_end_no_undo` and bind locals so early callers never hit nil.
 
 @about Minimal, self-contained preview runtime. Later we can extract helpers to "hsuanice_AS Core.lua".
 @changelog
+  v2510082330
+    - Fix: Forward-declare `undo_begin` / `undo_end_no_undo` and bind locals so early callers never hit nil.
+    - Change: Consolidated no-undo guards (start, mode switch, cleanup) to suppress all undo points.
+    - Added: `USER_RESTORE_MODE` option ("guid" | "timesel") with overlap preflight and clear warning dialog.
+    - Added: Source-track placeholder detection and re-entry bootstrap; time-selection windowing in timesel restore.
+    - Improved: Debug logs (counts, chosen restore mode, FX isolation) for easier tracing.
+    - Behavior: Audio path unchanged; solo scope still via `USER_SOLO_SCOPE` ("track" | "item"); wrappers unchanged.
+
+  v2510082151
+    - Added: USER_RESTORE_MODE user option ("guid" | "timesel") to control move-back behavior on cleanup.
+      * "guid": only move back items that were explicitly moved during this preview session.
+      * "timesel": move back all FX-track items overlapping the placeholder or time selection.
+    - Added: Overlap-check safeguard before moving items back to source track.
+      * If overlap is detected, a warning dialog appears:
+        "Move-back aborted: one or more items would overlap existing items on the source track."
+        The move-back process aborts safely to prevent collisions.
+    - Implemented: Helper functions item_bounds() and track_has_overlap() for robust span checks.
+    - Improved: Cleanup flow now logs which restore mode was used and how many items were restored.
+    - Behavior: Maintains no-undo protection; integrates seamlessly with existing Preview Core state machine.
+    - Note: USER_RESTORE_MODE is a Core-only option; wrappers do not need to set this.
   v2510061248 WIP — No-undo hardening (switch/apply paths)
     - _switch_mode(): wrapped entire body in Undo_BeginBlock2/EndBlock2(...,-1) to suppress all undo points when toggling solo/normal.
     - _apply_mode_flags(): added a protective no-undo block around solo clear/apply + Transport:Play.
@@ -138,11 +158,15 @@
   2510042327 Initial version.
 ]]--
 
--- ===== User Options (edit here) ==========================================
 -- Solo scope for preview isolation: "track" or "item"
 local USER_SOLO_SCOPE = "track"
 -- Enable Core debug logs (printed via ASP.log / ASP.dlog)
 local USER_DEBUG = true
+-- Move-back strategy on cleanup:
+--   "guid"     → move back only the items this preview moved (by GUID)
+--   "timesel"  → move back ALL items on the FX track that overlap the placeholder/time selection
+-- If overlap with destination (source track) is detected, a warning dialog is shown and the move-back is aborted.
+local USER_RESTORE_MODE = "guid"  -- "guid" | "timesel"
 -- =========================================================================
 
 -- === [AS PREVIEW CORE · Debug / State] ======================================
@@ -152,6 +176,8 @@ _G.ASP = ASP
 -- ===== Forward declarations (must appear before any use) =====
 local project_epsilon
 local ranges_touch_or_overlap
+local undo_begin
+local undo_end_no_undo
 
 -- ExtState keys
 ASP.ES_NS         = "hsuanice_AS"
@@ -239,6 +265,34 @@ end
 local function remove_placeholder(it)
   if not it then return end
   reaper.DeleteTrackMediaItem(reaper.GetMediaItem_Track(it), it)
+end
+
+-- get item bounds [L, R]
+local function item_bounds(it)
+  local L = reaper.GetMediaItemInfo_Value(it, "D_POSITION")
+  local R = L + reaper.GetMediaItemInfo_Value(it, "D_LENGTH")
+  return L, R
+end
+
+-- check if moving an interval [UL,UR] into target track would overlap any existing item (excluding a given set and excluding a placeholder)
+local function track_has_overlap(tr, UL, UR, exclude_set, placeholder_it)
+  if not tr then return false end
+  local ic = reaper.CountTrackMediaItems(tr)
+  for i=0, ic-1 do
+    local it = reaper.GetTrackMediaItem(tr, i)
+    if it ~= placeholder_it then
+      local skip = false
+      if exclude_set and it and exclude_set[it] then skip = true end
+      if not skip then
+        local L = reaper.GetMediaItemInfo_Value(it, "D_POSITION")
+        local R = L + reaper.GetMediaItemInfo_Value(it, "D_LENGTH")
+        if ranges_touch_or_overlap(L, R, UL, UR) then
+          return true
+        end
+      end
+    end
+  end
+  return false
 end
 
 -- 尋找「原始軌」上的佔位 item（以註記開頭 "PREVIEWING @" 判定）
@@ -393,8 +447,11 @@ local function log_step(tag, fmt, ...)
 end
 
 -- === Undo helpers: wrap mutating ops but do NOT create undo points ===
-local function undo_begin()  reaper.Undo_BeginBlock2(0) end
-local function undo_end_no_undo(desc)
+undo_begin = function()
+  reaper.Undo_BeginBlock2(0)
+end
+
+undo_end_no_undo = function(desc)
   -- desc 只作除錯閱讀；-1 代表**不**建立 Undo 點
   reaper.Undo_EndBlock2(0, desc or "AS Preview (no undo)", -1)
 end
@@ -875,17 +932,64 @@ local function move_items_to_track(items, tr)
 end
 
 function ASP._move_back_and_remove_placeholder()
-  -- 把 items 搬回「佔位 item 的 track」
-  if ASP._state.placeholder then
-    local ph_tr = reaper.GetMediaItem_Track(ASP._state.placeholder)
-    move_items_to_track(ASP._state.moved_items, ph_tr)
-    remove_placeholder(ASP._state.placeholder)
-    ASP._state.placeholder = nil
-    ASP.log("moved items back & removed placeholder")
-  else
+  -- Decide which items to move back based on USER_RESTORE_MODE.
+  local move_list = {}
+
+  if not ASP._state.placeholder then
     ASP.log("no placeholder; skip move-back")
+    ASP._state.moved_items = {}
+    return
   end
+
+  local ph_it = ASP._state.placeholder
+  local ph_tr = reaper.GetMediaItem_Track(ph_it)
+  local UL    = reaper.GetMediaItemInfo_Value(ph_it, "D_POSITION")
+  local UR    = UL + reaper.GetMediaItemInfo_Value(ph_it, "D_LENGTH")
+
+  if USER_RESTORE_MODE == "timesel" then
+    -- Collect all items on FX track that overlap the placeholder span
+    move_list = collect_preview_items_on_fx_track(ASP._state.fx_track, ph_it, UL, UR)
+    ASP.log("restore-mode=timesel: collected %d item(s) on FX track by placeholder span", #move_list)
+  else
+    -- Default: only the ones we moved during this preview session
+    move_list = {}
+    for i=1, #(ASP._state.moved_items or {}) do
+      local it = ASP._state.moved_items[i]
+      if reaper.ValidatePtr2(0, it, "MediaItem*") then
+        table.insert(move_list, it)
+      end
+    end
+    ASP.log("restore-mode=guid: prepared %d item(s) to move back", #move_list)
+  end
+
+  -- Overlap preflight: if any incoming item would overlap existing items on the destination (source) track (other than the placeholder),
+  -- warn and abort the move-back to avoid unexpected collisions.
+  local exclude = {}
+  -- exclude set usually empty (items are on FX track), but we keep the hook for safety
+  for _, it in ipairs(move_list) do exclude[it] = true end
+
+  -- Check each item’s interval against the destination track
+  for _, it in ipairs(move_list) do
+    local L, R = item_bounds(it)
+    if track_has_overlap(ph_tr, L, R, exclude, ph_it) then
+      reaper.MB(
+        "Move-back aborted: one or more items would overlap existing items on the source track.\n\n" ..
+        "Tip: clear space on the source track or disable overlap checks, then try again.",
+        "AudioSweet Preview — Overlap detected", 0
+      )
+      ASP.log("move-back aborted due to overlap on source track")
+      return
+    end
+  end
+
+  -- Perform the move-back
+  for _, it in ipairs(move_list) do
+    reaper.MoveMediaItemToTrack(it, ph_tr)
+  end
+  remove_placeholder(ph_it)
+  ASP._state.placeholder = nil
   ASP._state.moved_items = {}
+  ASP.log("moved %d item(s) back & removed placeholder", #move_list)
 end
 
 function ASP._select_items(list, exclusive)
