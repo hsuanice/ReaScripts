@@ -1,6 +1,6 @@
 --[[
 @description AudioSweet (hsuanice) — Focused Track FX render via RGWH Core, append FX name, rebuild peaks (selected items)
-@version 2510081815 — FX alias integration (JSON-driven short names)
+@version 251008_1837 — FX alias integration (JSON-driven short names)
 @author Tim Chimes (original), adapted by hsuanice
 @notes
   Reference:
@@ -21,6 +21,26 @@ This version:
 
 
 @changelog
+  v251008_1838 (2025-10-08, GMT+8)
+    - Added: Full FX alias integration with TSV fallback when JSON decoder is missing.
+    - Fixed: Numeric-only FX aliases (e.g., “1176”, “1073”) are now correctly preserved.
+    - Fixed: Sequential same-FX renders now append properly and respect FIFO cap,
+             removing old tokens like “glued-xx” or “render-001”.
+    - Improved: parse_as_tag() now pre-cleans legacy artifacts before tokenization,
+                preventing ghost tokens such as “02” or “001”.
+    - Result: Repeated FX passes stack correctly, e.g.
+              “...-AS3-1073_1073_1073” and mixed passes as
+              “...-AS4-1073_1073_VOXBOX”.
+  v251008_1837 — FX alias integration (JSON-driven short names)
+    - Added: Full FX alias integration via TSV fallback when JSON decoder missing.
+    - Fixed: Numeric-only FX aliases (e.g., “1176”, “1073”) are now preserved.
+    - Fixed: Repeated same-FX passes now correctly append without residual tokens
+             from “glued-xx” or “render-001” suffixes.
+    - Improved: parse_as_tag() pre-cleans legacy artifacts before tokenizing,
+                preventing ghost tokens like “02” or “001”.
+    - Result: Sequential renders correctly stack as “...-AS3-1073_1073_1073” and
+              mixed renders as “...-AS4-1073_1073_VOXBOX”.
+
   v2510081815 — FX alias integration (JSON-driven short names)
     - Added: automatic FX short-name alias lookup for take naming.
     - Source: Settings/fx_alias.json (preferred) or fallback to fx_alias.tsv.
@@ -30,7 +50,7 @@ This version:
     - Added: alias log tracing (AS_DEBUG_ALIAS) and TSV loader (_alias_map_from_tsv).
     - Improvement: alias normalization removes non-alphanumeric symbols.
     - Safety: fails gracefully with clear [ALIAS] console messages; never halts render.
-    
+
   v2510072312 — FX alias integration (JSON-driven short names)
     - New: AudioSweet now consults Settings/fx_alias.json for FX short names when composing the “-ASn-...” suffix.
     - Resolution order: "type|core|vendor" → "type|core|" → "|core|".
@@ -988,14 +1008,14 @@ local function strip_glue_render_and_trailing_label(name)
   return s
 end
 
--- tokens like "glued", "render", pure numbers, or "ed123"/"dup3" should be ignored
+-- tokens like "glued", "render", or "ed123"/"dup3" should be ignored
+-- NOTE: do NOT drop pure-numeric tokens (e.g., "1073", "1176"), since some FX aliases are numeric.
 local function is_noise_token(tok)
   local t = tostring(tok or ""):lower()
   if t == "" then return true end
   if t == "glue" or t == "glued" or t == "render" or t == "rendered" then return true end
   if t:match("^ed%d*$")  then return true end  -- e.g. "ed1", "ed23"
   if t:match("^dup%d*$") then return true end  -- e.g. "dup1"
-  if t:match("^%d+$")    then return true end  -- pure numbers like "001"
   return false
 end
 -- Try parse "Base-AS{n}-FX1_FX2" and tolerate extra tails like "-ASx-YYY"
@@ -1011,9 +1031,22 @@ local function parse_as_tag(full)
   -- If tail contains another "-ASx-" (e.g., "Saturn2-AS1-ProQ4"), only keep the part **before** the next AS tag.
   local first_tail = tail:match("^(.-)[-_]AS%d+[-_].*$") or tail
 
-  -- Tokenize FX names (alnum only), keep order, drop glue/render noise
+  -- PRE-CLEAN: strip legacy artifacts BEFORE tokenizing
+  -- Remove whole "glued-XX", "render 001"/"rendered-03", and "ed###"/"dup###" sequences.
+  local cleaned = first_tail
+  cleaned = cleaned
+              :gsub("[_%-%s]*glue[dD]?[%s_%-%d]*", "")     -- remove "glued" plus any digits/underscores/hyphens/spaces after it
+              :gsub("[_%-%s]*render[eE]?[dD]?[%s_%-%d]*", "") -- remove "render"/"rendered" plus trailing digits etc.
+              :gsub("ed%d+", "")                            -- remove "ed###"
+              :gsub("dup%d+", "")                           -- remove "dup###"
+              :gsub("%s+%-[%s%-].*$", "")                   -- trailing " - Something"
+              :gsub("^[_%-%s]+", "")                        -- leading separators
+              :gsub("[_%-%s]+$", "")                        -- trailing separators
+
+  -- Tokenize FX names (alnum only), keep order.
+  -- NOTE: pure numeric tokens are allowed (e.g., "1073"), since some aliases are numeric by design.
   local fx_tokens = {}
-  for tok in first_tail:gmatch("([%w]+)") do
+  for tok in cleaned:gmatch("([%w]+)") do
     if tok ~= "" and not tok:match("^AS%d+$") and not is_noise_token(tok) then
       fx_tokens[#fx_tokens+1] = tok
     end
