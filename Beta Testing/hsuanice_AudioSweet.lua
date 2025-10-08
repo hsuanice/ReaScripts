@@ -1,6 +1,6 @@
 --[[
 @description AudioSweet (hsuanice) — Focused Track FX render via RGWH Core, append FX name, rebuild peaks (selected items)
-@version 2510071447 — AS naming: allow duplicates, keep order (FIFO cap)
+@version 2510081815 — FX alias integration (JSON-driven short names)
 @author Tim Chimes (original), adapted by hsuanice
 @notes
   Reference:
@@ -21,6 +21,25 @@ This version:
 
 
 @changelog
+  v2510081815 — FX alias integration (JSON-driven short names)
+    - Added: automatic FX short-name alias lookup for take naming.
+    - Source: Settings/fx_alias.json (preferred) or fallback to fx_alias.tsv.
+    - Supports both JSON object ({ fingerprint=alias }) and array forms.
+    - Fallback: if JSON decoder is unavailable or file missing, loads TSV.
+    - Detection: normalized keys "type|core|vendor", "type|core|", "|core|", etc.
+    - Added: alias log tracing (AS_DEBUG_ALIAS) and TSV loader (_alias_map_from_tsv).
+    - Improvement: alias normalization removes non-alphanumeric symbols.
+    - Safety: fails gracefully with clear [ALIAS] console messages; never halts render.
+    
+  v2510072312 — FX alias integration (JSON-driven short names)
+    - New: AudioSweet now consults Settings/fx_alias.json for FX short names when composing the “-ASn-...” suffix.
+    - Resolution order: "type|core|vendor" → "type|core|" → "|core|".
+    - Fallback: if no alias is found (or JSON missing/invalid), revert to the existing formatter/options.
+    - Toggle: set AS_USE_ALIAS at the top of the script (true/false).
+    - Behavior: keeps FIFO cap (AS_MAX_FX_TOKENS), preserves order, allows duplicates by design.
+    - Safety: lazy JSON load; gracefully tolerates absent/invalid file; no modal errors.
+    - Logging: keeps [AS][NAME] before/after when AS_DEBUG_NAMING=true; no change to render pipeline.
+
   v2510071447 — AS naming: allow duplicates, keep order (FIFO cap)
     - Stop de-duplicating FX tokens; every run appends the new FX to the end.
     - The AS_MAX_FX_TOKENS cap (user option) still trims from the oldest (FIFO).
@@ -222,13 +241,17 @@ This version:
 ]]--
 
 -- Debug toggle: set ExtState "hsuanice_AS"/"DEBUG" to "1" to enable, "0" (or empty) to disable
-
-reaper.SetExtState("hsuanice_AS","DEBUG","1", false)
+-- reaper.SetExtState("hsuanice_AS","DEBUG","1", false)  -- (disabled: don't force-on DEBUG by default)
 
 -- === User options ===
 -- How many FX names to keep in the “-ASn-...” suffix.
 -- 0 or nil = unlimited; N>0 = keep last N tokens (FIFO).
 local AS_MAX_FX_TOKENS = 3
+
+-- Naming-only debug (console print before/after renaming).
+-- Toggle directly in this script (no ExtState).
+local AS_DEBUG_NAMING = true
+local function debug_naming_enabled() return AS_DEBUG_NAMING == true end
 
 local function debug_enabled()
   return reaper.GetExtState("hsuanice_AS", "DEBUG") == "1"
@@ -338,11 +361,20 @@ local function parse_fx_label(raw)
   return trim(typ), trim(core), trim(vendor)
 end
 
+-- forward declare for alias lookup used by format_fx_label
+local fx_alias_for_raw_label
+
 local function format_fx_label(raw)
+  -- NEW: 先查 alias；若有就直接用
+  local alias = fx_alias_for_raw_label(raw)
+  if type(alias) == "string" and alias ~= "" then
+    return alias
+  end
+
+  -- 以下保留你原本的行為
   local opt = fxname_opts()
   local typ, core, vendor = parse_fx_label(raw)
 
-  -- 組裝：依選項決定是否包含 type / vendor
   local base
   if opt.show_type and typ ~= "" then
     base = typ .. ": " .. core
@@ -354,10 +386,284 @@ local function format_fx_label(raw)
   end
 
   if opt.strip_symbol then
-    -- 僅保留 [A-Za-z0-9]，其他（空白、連字號、符號等）移除
     base = base:gsub("[^%w]+","")
   end
   return base
+end
+
+-- ==== FX alias lookup (from Settings/fx_alias.json / .tsv) ====
+-- User options
+local AS_ALIAS_JSON_PATH = reaper.GetResourcePath() ..
+  "/Scripts/hsuanice Scripts/Settings/fx_alias.json"
+local AS_ALIAS_TSV_PATH = reaper.GetResourcePath() ..
+  "/Scripts/hsuanice Scripts/Settings/fx_alias.tsv"
+local AS_USE_ALIAS   = true   -- 設為 false 可暫時停用別名
+local AS_DEBUG_ALIAS = true   -- 印出 alias 查找細節（Console）
+
+-- 簡單正規化：全小寫、移除非英數
+local function _norm(s) return (tostring(s or ""):lower():gsub("[^%w]+","")) end
+
+-- 懶載入 JSON（需系統已有 dkjson 或同等 json.decode）
+-- Forward declare TSV helper so _alias_map() can call it before definition.
+local _alias_map_from_tsv
+
+local _FX_ALIAS_CACHE = nil
+local function _alias_map()
+  if _FX_ALIAS_CACHE ~= nil then return _FX_ALIAS_CACHE end
+  _FX_ALIAS_CACHE = {}
+  if not AS_USE_ALIAS then return _FX_ALIAS_CACHE end
+
+  local f = io.open(AS_ALIAS_JSON_PATH, "rb")
+  if not f then
+    if AS_DEBUG_ALIAS then
+      reaper.ShowConsoleMsg(("[ALIAS][LOAD] JSON not found: %s\n"):format(AS_ALIAS_JSON_PATH))
+    end
+    -- JSON 檔不存在 → 試 TSV 後援
+    _FX_ALIAS_CACHE = _alias_map_from_tsv(AS_ALIAS_TSV_PATH)
+    return _FX_ALIAS_CACHE
+  end
+  local blob = f:read("*a"); f:close()
+
+  -- 探測/載入 JSON 解碼器
+  local JSON = _G.json or _G.dkjson
+  if not JSON or not (JSON.decode or JSON.Decode or JSON.parse) then
+    pcall(function()
+      local lib = reaper.GetResourcePath() .. "/Scripts/hsuanice Scripts/Library/dkjson.lua"
+      local ok, mod = pcall(dofile, lib)
+      if ok and mod then JSON = mod end
+    end)
+  end
+  local decode = (JSON and (JSON.decode or JSON.Decode or JSON.parse)) or nil
+  if not decode then
+    if AS_DEBUG_ALIAS then
+      reaper.ShowConsoleMsg("[ALIAS][LOAD] No JSON decoder found\n")
+    end
+    -- 沒有解碼器 → 試 TSV 後援
+    _FX_ALIAS_CACHE = _alias_map_from_tsv(AS_ALIAS_TSV_PATH)
+    return _FX_ALIAS_CACHE
+  end
+
+  local ok, data = pcall(decode, blob)
+  if not ok or type(data) ~= "table" then
+    if AS_DEBUG_ALIAS then
+      reaper.ShowConsoleMsg("[ALIAS][LOAD] JSON decode failed or not a table\n")
+    end
+    -- JSON 解析失敗 → 試 TSV 後援
+    _FX_ALIAS_CACHE = _alias_map_from_tsv(AS_ALIAS_TSV_PATH)
+    return _FX_ALIAS_CACHE
+  end
+
+  -- 支援兩種形態：
+  -- (A) 物件： { ["vst3|core|vendor"] = { alias="FOO", ... }, ... }
+  -- (B) 陣列： [ { fingerprint="vst3|core|vendor", alias="FOO", ... }, ... ]
+  local count = 0
+
+  local is_array = (data[1] ~= nil) and true or false
+  if is_array then
+    for i = 1, #data do
+      local rec = data[i]
+      if type(rec) == "table" then
+        local fp = rec.fingerprint
+        local al = rec.alias
+        if type(fp) == "string" and fp ~= "" and type(al) == "string" and al ~= "" then
+          _FX_ALIAS_CACHE[fp] = al
+          count = count + 1
+        end
+      end
+    end
+  else
+    for k, v in pairs(data) do
+      if type(k) == "string" and k ~= "" then
+        if type(v) == "table" then
+          local al = v.alias
+          if type(al) == "string" and al ~= "" then
+            _FX_ALIAS_CACHE[k] = al
+            count = count + 1
+          end
+        elseif type(v) == "string" then
+          _FX_ALIAS_CACHE[k] = v
+          count = count + 1
+        end
+      end
+    end
+  end
+
+  if AS_DEBUG_ALIAS then
+    reaper.ShowConsoleMsg(("[ALIAS][LOAD] entries=%d  from=%s\n")
+      :format(count, AS_ALIAS_JSON_PATH))
+  end
+
+  return _FX_ALIAS_CACHE
+end
+-- TSV small helper: build alias map from a TSV with headers:
+--   fingerprint <TAB> alias  (其他欄位可有可無)
+function _alias_map_from_tsv(tsv_path)
+  local map = {}
+  local f = io.open(tsv_path, "rb")
+  if not f then
+    if AS_DEBUG_ALIAS then
+      reaper.ShowConsoleMsg(("[ALIAS][LOAD] TSV not found: %s\n"):format(tsv_path))
+    end
+    return map
+  end
+
+  local header = f:read("*l")
+  if not header then
+    f:close()
+    if AS_DEBUG_ALIAS then
+      reaper.ShowConsoleMsg("[ALIAS][LOAD] TSV empty header\n")
+    end
+    return map
+  end
+
+  -- 找欄位索引
+  local cols = {}
+  local idx = 1
+  for h in tostring(header):gmatch("([^\t]+)") do
+    cols[h] = idx
+    idx = idx + 1
+  end
+  local fp_i  = cols["fingerprint"]
+  local al_i  = cols["alias"]
+
+  if not fp_i or not al_i then
+    f:close()
+    if AS_DEBUG_ALIAS then
+      reaper.ShowConsoleMsg("[ALIAS][LOAD] TSV missing 'fingerprint' or 'alias' header\n")
+    end
+    return map
+  end
+
+  local added = 0
+  while true do
+    local line = f:read("*l")
+    if not line then break end
+    if line ~= "" then
+      local fields = {}
+      local i = 1
+      for seg in line:gmatch("([^\t]*)\t?") do
+        fields[i] = seg
+        i = i + 1
+        if (#fields >= idx-1) then break end
+      end
+      local fp = fields[fp_i]
+      local al = fields[al_i]
+      if type(fp) == "string" and fp ~= "" and type(al) == "string" and al ~= "" then
+        map[fp] = al
+        added = added + 1
+      end
+    end
+  end
+  f:close()
+
+  if AS_DEBUG_ALIAS then
+    reaper.ShowConsoleMsg(("[ALIAS][LOAD] TSV entries=%d  from=%s\n"):format(added, tsv_path))
+  end
+  return map
+end
+-- 更強的 raw 解析：抓 host/type、去除括號後的 core、以及最外層括號當 vendor
+-- 例： "VST3: UADx Manley VOXBOX Channel Strip (Universal Audio (UADx))"
+--  => host="vst3", core="uadxmanleyvoxboxchannelstrip", vendor="universalaudiouadx"
+local function _parse_raw_label_host_core_vendor(raw)
+  raw = tostring(raw or "")
+
+  -- host/type
+  local host = raw:match("^%s*([%w_]+)%s*:") or ""
+  host = host:lower()
+
+  -- core：取冒號後整段，再去除所有括號內容與非英數
+  local core = raw:match(":%s*(.+)$") or ""
+  core = core:gsub("%b()", "")            -- 去掉所有括號段
+               :gsub("%s+%-[%s%-].*$", "")-- 去掉 " - Something" 類尾巴（防萬一）
+               :gsub("%W", "")            -- 非英數去掉
+               :lower()
+
+  -- vendor：用 %b() 擷取「每一段平衡括號」，取最後一段
+  local last = nil
+  for seg in raw:gmatch("%b()") do
+    last = seg
+  end
+  local vendor = ""
+  if last and #last >= 2 then
+    vendor = last:sub(2, -2)              -- 去掉首尾括號
+    vendor = vendor:gsub("%W", ""):lower()
+  end
+
+  return host, core, vendor
+end
+-- 回傳別名或 nil（強化：支援 vendor 併入 core 的鍵、加掃描 fallback 與除錯輸出）
+function fx_alias_for_raw_label(raw_label)
+  if not AS_USE_ALIAS then return nil end
+  local m = _alias_map()
+  if not m then return nil end
+
+  -- 主解析
+  local host, core, vendor = _parse_raw_label_host_core_vendor(raw_label)
+
+  -- 舊解析一次（兼容老鍵）
+  local typ2, core2, vendor2 = parse_fx_label(raw_label)
+  local t2 = _norm(typ2)
+  local c2 = _norm(core2)
+  local v2 = _norm(vendor2)
+
+  local t = host
+  local c = core
+  local v = vendor
+
+  -- 組各種候選鍵
+  local key1  = string.format("%s|%s|%s", t,  c,  v)
+  local key2  = string.format("%s|%s|",    t,  c)
+  local key2b = (v ~= "" and string.format("%s|%s%s|", t, c, v)) or nil
+  local key3  = string.format("|%s|",      c)
+
+  local key1b = string.format("%s|%s|%s", t2, c2, v2)
+  local key2c = string.format("%s|%s|",    t2, c2)
+  local key2d = (v2 ~= "" and string.format("%s|%s%s|", t2, c2, v2)) or nil
+  local key3b = string.format("|%s|",      c2)
+
+  local hit, from
+
+  -- 直接命中
+  if type(m[key1]) == "string" and m[key1] ~= "" then hit, from = m[key1], "exact" end
+  if not hit and type(m[key2]) == "string" and m[key2] ~= "" then hit, from = m[key2], "empty-vendor" end
+  if not hit and key2b and type(m[key2b]) == "string" and m[key2b] ~= "" then hit, from = m[key2b], "core+vendor-as-core" end
+  if not hit and type(m[key3]) == "string" and m[key3] ~= "" then hit, from = m[key3], "cross-type" end
+
+  -- 兼容舊鍵
+  if not hit and type(m[key1b]) == "string" and m[key1b] ~= "" then hit, from = m[key1b], "exact(legacy)" end
+  if not hit and type(m[key2c]) == "string" and m[key2c] ~= "" then hit, from = m[key2c], "empty-vendor(legacy)" end
+  if not hit and key2d and type(m[key2d]) == "string" and m[key2d] ~= "" then hit, from = m[key2d], "core+vendor-as-core(legacy)" end
+  if not hit and type(m[key3b]) == "string" and m[key3b] ~= "" then hit, from = m[key3b], "cross-type(legacy)" end
+
+  -- 兜底掃描
+  if not hit then
+    local core_pat1 = "|" .. c  .. "|"
+    local core_pat2 = (v ~= "" and ("|" .. c .. v .. "|")) or nil
+    for k, rec in pairs(m) do
+      if type(rec) == "string" and rec ~= "" then
+        if k:find(core_pat1, 1, true) or (core_pat2 and k:find(core_pat2, 1, true)) then
+          hit, from = rec, "scan"
+          break
+        end
+      end
+    end
+  end
+
+  if AS_DEBUG_ALIAS then
+    local size = 0
+    for _ in pairs(m) do size = size + 1 end
+    reaper.ShowConsoleMsg(("[ALIAS][LOOKUP]\n  raw   = %s\n  host  = %s\n  core  = %s\n  vendor= %s\n  try   = %s | %s | %s | %s\n  legacy= %s | %s | %s | %s\n  alias = %s (from=%s)\n  map   = %d entries\n\n")
+      :format(
+        tostring(raw_label or ""),
+        t, c, v,
+        key1, key2, tostring(key2b or "(nil)"), key3,
+        key1b, key2c, tostring(key2d or "(nil)"), key3b,
+        tostring(hit or ""), tostring(from or "miss"),
+        size
+      ))
+  end
+
+  return hit
 end
 -- =============================================
 -- ==== selection snapshot helpers ====
@@ -771,6 +1077,11 @@ function append_fx_to_take_name(item, fxName)
   local _, tn0 = reaper.GetSetMediaItemTakeInfo_String(take, "P_NAME", "", false)
   local tn_noext = strip_extension(tn0 or "")
 
+  -- naming debug: before
+  if debug_naming_enabled() then
+    reaper.ShowConsoleMsg(("[AS][NAME] before='%s'\n"):format(tn0 or ""))
+  end
+
   local baseAS, nAS, fx_tokens = parse_as_tag(tn_noext)
 
   local base, n, tokens
@@ -802,6 +1113,12 @@ function append_fx_to_take_name(item, fxName)
 
   local fx_concat = table.concat(tokens, "_")
   local new_name = string.format("%s-AS%d-%s", base, n, fx_concat)
+
+  -- naming debug: after
+  if debug_naming_enabled() then
+    reaper.ShowConsoleMsg(("[AS][NAME] after ='%s'\n"):format(new_name))
+  end
+
   reaper.GetSetMediaItemTakeInfo_String(take, "P_NAME", new_name, true)
 end
 
