@@ -1,11 +1,20 @@
 --[[
 @description Render or Glue Items with Handles Core Library
-@version 2510041655 Add AudioSweet bridge multi item selection support 
+@version 251009_1839  -- updated render_selection() with optional overrides
 @author hsuanice
 @about
   Library for RGWH glue/render flows with handles, FX policies, rename, # markers, and optional take markers inside glued items.
 
 @changelog
+  251009_1839
+    - New: `M.render_selection(take_fx, track_fx, mode, tc_mode)` now accepts call-site overrides (integers/booleans for TAKE/ TRACK FX, `"mono"|"multi"|"auto"` for apply mode, `"previous"|"current"|"off"` for TC embed).
+    - New: Apply-mode `"auto"` — infers mono/multi by scanning the max source channel count across the current selection.
+    - Change: Overrides are applied in-memory for this run only; project ExtState defaults are left untouched (backward compatible if you keep calling with no args).
+    - Change: Selection handling & UI/Undo wrappers tightened around render path to match glue path robustness.
+    - Keep: When TRACK FX are not printed and mode resolves to `multi` with policy `RENDER_OUTPUT_POLICY_WHEN_NO_TRACKFX="force_multi"`, continue using the 41993 “no-FX” apply path (unchanged behavior).
+    - Fix: Minor logging consistency and safer nil guards in the render pipeline.
+    - Note: Zero-arg `M.render_selection()` behaves exactly as previous builds; only the optional parameters are new.
+
   2510041655 Add AudioSweet bridge multi item selection support 
     - In AudioSweet.lua, changed selection_scope from "unit" to "selection" when calling RGWH Core for focused FX render.
     - This allows processing all selected items together, rather than per detected unit.
@@ -938,12 +947,44 @@ function M.glue_selection()
   r.Undo_EndBlock("RGWH Core - Glue selection", -1)
 end
 
-function M.render_selection()
+function M.render_selection(take_fx, track_fx, mode, tc_mode)
   local cfg = M.read_settings()
   local DBG = cfg.DEBUG_LEVEL or 1
   local items = get_sel_items()
   local nsel  = #items
   local r = reaper
+
+  -- Optional parameter overrides (enable call-site control)
+  if take_fx ~= nil then
+    cfg.RENDER_TAKE_FX = (take_fx == 1 or take_fx == true)
+  end
+  if track_fx ~= nil then
+    cfg.RENDER_TRACK_FX = (track_fx == 1 or track_fx == true)
+  end
+  if mode ~= nil then
+    cfg.RENDER_APPLY_MODE = tostring(mode)
+  end
+  if tc_mode ~= nil then
+    cfg.RENDER_TC_EMBED = tostring(tc_mode)
+  end
+
+  -- Auto mode: infer mono/multi from max source channels over current selection
+  if cfg.RENDER_APPLY_MODE == "auto" then
+    local function max_channels_over(items_)
+      local maxch = 1
+      for _, it in ipairs(items_) do
+        local tk = reaper.GetActiveTake(it)
+        if tk then
+          local src = reaper.GetMediaItemTake_Source(tk)
+          local ch  = src and (reaper.GetMediaSourceNumChannels(src) or 1) or 1
+          if ch > maxch then maxch = ch end
+        end
+      end
+      return maxch
+    end
+    local maxch = max_channels_over(items)
+    cfg.RENDER_APPLY_MODE = (maxch >= 2) and "multi" or "mono"
+  end
 
   -- helpers (local to this function) -----------------------------------------
   local function snapshot_takefx_offline(tk)
