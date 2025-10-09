@@ -1,6 +1,6 @@
 --[[
 @description AudioSweet (hsuanice) — Focused Track FX render via RGWH Core, append FX name, rebuild peaks (selected items)
-@version 251009_2215 Single-item path now calls M.render_selection(1, 1, "auto", "current") to print both Take FX and Track FX into a NEW take (keeps previous takes).
+@version 251009_2249   Fixed: Single-item (non TS-Window) path no longer forces all FX enabled after render.
 @author Tim Chimes (original), adapted by hsuanice
 @notes
   Reference:
@@ -17,9 +17,17 @@ This version:
   • Use Peaks: Rebuild peaks for selected items (40441) instead of the nudge trick
   • Track FX only (Take FX not supported)
 
-
-
 @changelog
+  251009_2249
+    - Fixed: Single-item (non TS-Window) path no longer forces all FX enabled after render.
+      It now relies solely on snapshot/restore so original bypass/offline states are preserved.
+    - Note: TS-Window paths already used helper-level snapshot/restore and needed no changes.
+
+  251009_2238
+    - Fixed: Restore original Track FX enable/bypass states after both single-item RGWH render and multi-item Core/GLUE paths (snapshot → restore).
+    - Changed: Replaced “enable all FX on exit” with precise state restore to preserve user’s original bypass/offline setup.
+    - Note: No peaks rebuild calls remain in this script (faster post-render).
+
   251009_2215
     - Changed: Single-item path now calls RGWH Core via positional API:
                M.render_selection(1, 1, "auto", "current") to print both Take FX
@@ -363,6 +371,26 @@ local function dbg_track_items_in_range(tr, L, R)
   end
 end
 -- =======================
+-- ==== FX enable snapshot/restore (preserve original bypass states) ====
+local function snapshot_fx_enables(tr)
+  if not tr then return nil end
+  local snap = {}
+  local cnt = reaper.TrackFX_GetCount(tr) or 0
+  for i = 0, cnt-1 do
+    snap[i] = reaper.TrackFX_GetEnabled(tr, i) and true or false
+  end
+  return snap
+end
+
+local function restore_fx_enables(tr, snap)
+  if not tr or not snap then return end
+  local cnt = reaper.TrackFX_GetCount(tr) or 0
+  for i = 0, cnt-1 do
+    local en = snap[i]
+    if en ~= nil then reaper.TrackFX_SetEnabled(tr, i, en) end
+  end
+end
+-- =====================================================================
 -- ==== FX name formatting options & helper ====
 -- ExtState 開關（若沒設定則讀 default）
 local FXNAME_DEFAULT_SHOW_TYPE    = false  -- 是否包含 type（如 "VST3:" / "CLAP:"）
@@ -1077,6 +1105,9 @@ local function apply_focused_fx_to_item(item, FXmediaTrack, fxIndex, FXName)
   if not item then return false, -1 end
   local origTR = reaper.GetMediaItem_Track(item)
 
+  -- ★ 新增：快照 FX 啟用狀態（保留原本 bypass/enable）
+  local fx_enable_snap = snapshot_fx_enables(FXmediaTrack)
+
   -- 移到 FX 軌並 isolate
   reaper.MoveMediaItemToTrack(item, FXmediaTrack)
   dbg_item_brief(item, "TS-APPLY moved→FX")
@@ -1116,6 +1147,10 @@ local function apply_focused_fx_to_item(item, FXmediaTrack, fxIndex, FXName)
   local out = reaper.GetSelectedMediaItem(0, 0) or item
   append_fx_to_take_name(out, FXName)
   reaper.MoveMediaItemToTrack(out, origTR)
+
+  -- ★ 新增：還原 FX 啟用狀態（回到原本 bypass/enable）
+  restore_fx_enables(FXmediaTrack, fx_enable_snap)
+
   return true, cmd_apply
 end
 
@@ -1123,6 +1158,9 @@ end
 local function apply_focused_via_rgwh_render_new_take(item, FXmediaTrack, fxIndex, FXName)
   if not item then return false end
   local origTR = reaper.GetMediaItem_Track(item)
+
+  -- ★ 新增：快照 FX 啟用狀態（保留原本 bypass/enable）
+  local fx_enable_snap = snapshot_fx_enables(FXmediaTrack)
 
   -- 移到 FX 軌 + isolate 只留聚焦 FX（Track FX 原始啟用/停用狀態保持；此處僅確保非聚焦者被 bypass）
   reaper.MoveMediaItemToTrack(item, FXmediaTrack)
@@ -1137,6 +1175,8 @@ local function apply_focused_via_rgwh_render_new_take(item, FXmediaTrack, fxInde
   local CORE_PATH = reaper.GetResourcePath() .. "/Scripts/hsuanice Scripts/Library/hsuanice_RGWH Core.lua"
   local ok_mod, M = pcall(dofile, CORE_PATH)
   if not ok_mod or not M or type(M.render_selection) ~= "function" then
+    -- ★ 還原 FX 啟用狀態後再返回
+    restore_fx_enables(FXmediaTrack, fx_enable_snap)
     log_step("ERROR", "render_selection not available in RGWH Core")
     return false
   end
@@ -1154,6 +1194,10 @@ local function apply_focused_via_rgwh_render_new_take(item, FXmediaTrack, fxInde
   local out = reaper.GetSelectedMediaItem(0, 0) or item
   append_fx_to_take_name(out, FXName)
   reaper.MoveMediaItemToTrack(out, origTR)
+
+  -- ★ 新增：還原 FX 啟用狀態（回到原本 bypass/enable）
+  restore_fx_enables(FXmediaTrack, fx_enable_snap)
+
   return true
 end
 
@@ -1437,16 +1481,18 @@ function main() -- main part of the script
         else
           log_step("ERROR", "single-item RGWH render failed")
         end
-
-        -- Un-bypass everything on FX track（恢復原狀）
-        local cnt = reaper.TrackFX_GetCount(FXmediaTrack)
-        for i=0, cnt-1 do reaper.TrackFX_SetEnabled(FXmediaTrack, i, true) end
       else
         -- === 多 item：維持 Core/GLUE（含 handles） ===
 
         -- Move all unit items to FX track (keep as-is), but select only the anchor for Core.
         move_items_to_track(u.items, FXmediaTrack)
+
+        -- ★ 新增：快照 FX 啟用狀態（保留原本 bypass/enable）
+        local fx_enable_snap_core = snapshot_fx_enables(FXmediaTrack)
+
+        -- 只啟用聚焦 FX，其他暫時 bypass
         isolate_focused_fx(FXmediaTrack, fxIndex)
+
         -- Select the entire unit (non-TS path should preserve full unit selection)
         local anchor = u.items[1]  -- still used for channel auto and safety
         select_only_items_checked(u.items)
@@ -1614,10 +1660,11 @@ function main() -- main part of the script
           end
         end
 
-        -- 將 unit 內其餘（若有）搬回原軌；解除 bypass
+        -- 將 unit 內其餘（若有）搬回原軌；還原 FX 啟用狀態
         move_items_to_track(u.items, u.track)
-        local cnt = reaper.TrackFX_GetCount(FXmediaTrack)
-        for i=0, cnt-1 do reaper.TrackFX_SetEnabled(FXmediaTrack, i, true) end
+
+        -- ★ 新增：還原 FX 啟用狀態（回到原本 bypass/enable）
+        restore_fx_enables(FXmediaTrack, fx_enable_snap_core)
       end
     end
     ::continue_unit::
