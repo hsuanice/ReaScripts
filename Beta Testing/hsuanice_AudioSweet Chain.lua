@@ -1,6 +1,6 @@
 --[[
 @description AudioSweet Chain (hsuanice) — Print full Track FX chain via RGWH Core-style flow (selected items); alias-ready naming; TS-window aware
-@version 251009_1530 Added: User option `TRACKNAME_STRIP_SYMBOLS` for FX-style short track name tokens.
+@version 251009_1912 Change single item to M.render_selection(arg)
 @author Hsuanice
 @notes
   What this does
@@ -22,12 +22,7 @@
 
   Dependencies
   • REAPER 6+.
-  • No JSON required (we don’t need alias lookup to render full chain).
-  • Uses native actions: 42432, 40361, 41993, 40441.
 
-  Limitations
-  • Take FX are ignored (we render **Track FX chain** only).
-  • Mixed and multichannel edge-cases follow the same auto-channel logic as AudioSweet: mono → 40361; ≥2ch → 41993 with a temporary I_NCHAN.
 
   Reference:
   Tim Chimes
@@ -46,6 +41,37 @@
 
 
 @changelog
+  v251009_1912
+    - Changed: Default `AS_MAX_FX_TOKENS` from 3 → 2 (now keeps only last 2 chain tokens in take name).
+    - Changed: Default `AS_CHAIN_TOKEN_SOURCE` from "track" → "aliases"
+      → naming now uses FX aliases joined by `AS_CHAIN_ALIAS_JOINER="+"`.
+    - Updated: `apply_chain_via_rgwh_render()` now calls the new
+      RGWH Core API `render_selection(args)` instead of the legacy
+      `apply{mode="render_item_trackfx_newtake"}`.
+      * Uses args:
+          `{scope="exact-item", take_fx=true, track_fx=true,
+            apply_mode="auto", tc_embed="current",
+            focused_track=FXtrack, selection="selected"}`
+      * Preserves handles, embeds current TC, and stacks the new rendered take over the old one.
+    - Added: Debug log line
+      `"CORE single-item RGWH render → new take (auto mode)"`
+      after successful single-item render.
+    - Commented: Single-item fast path now explicitly references
+      the new Core entry point
+      `M.render_selection(1,1,"auto","current")`
+      replacing the old `apply{mode="render_item_trackfx_newtake"}`.
+
+  v251009_1600
+    - Added: Single-item fast path — if a unit contains only one item (and no TS-Window),
+      the script now applies Track FX via native "Apply FX as new take" instead of RGWH glue,
+      preserving the original take.
+    - Changed: Added condition block under Core/GLUE branch to detect single-item units.
+      Uses helper `apply_focused_fx_to_item()` for direct render + rename + move-back flow.
+    - Behavior: Multi-item or TS-Window units still follow RGWH Core glue pipeline;
+      single-item units follow fast path for speed and take preservation.
+    - Internal: Restores all FX enabled after each fast-path apply to avoid residual bypass states.
+    - Logging: Added `[CORE] single-item fast path apply failed` debug output for trace clarity.
+
   v251009_1530
     - Added: User option `TRACKNAME_STRIP_SYMBOLS` for FX-style short track name tokens.
     - Changed: `track_name_token()` now supports two modes:
@@ -986,6 +1012,54 @@ local function apply_focused_fx_to_item(item, FXmediaTrack, fxIndex, FXName)
   return true, cmd_apply
 end
 
+-- 共用：把單一 item 搬到 FX 軌，保持「整條 Track FX Chain 原狀」（不 isolate / 不改 bypass/offline），
+-- 交給 RGWH Core（新版 API：render_selection）以「Track FX Render → New Take（含 handles/TC）」完成列印，
+-- 然後改名、搬回。會保留舊 take（新 take 疊上舊 take）。
+local function apply_chain_via_rgwh_render(item, FXtrack, chainToken)
+  if not item or not FXtrack then return false, "bad-args" end
+
+  -- 1) 移到 FX 軌（不 isolate、不改動 FX 狀態）
+  local origTR = reaper.GetMediaItem_Track(item)
+  reaper.MoveMediaItemToTrack(item, FXtrack)
+  dbg_item_brief(item, "RGWH-RENDER moved→FX")
+
+  -- 2) 依素材聲道決定 mono / multi 的渲染模式（auto）
+  local ch = get_item_channels(item)
+  local apply_fx_mode = (ch <= 1) and "mono" or "multi"
+
+  -- 3) 載入 Core（新版介面：render_selection）
+  local CORE_PATH = reaper.GetResourcePath() .. "/Scripts/hsuanice Scripts/Library/hsuanice_RGWH Core.lua"
+  local ok_mod, M = pcall(dofile, CORE_PATH)
+  if not ok_mod or not M or type(M.render_selection) ~= "function" then
+    log_step("ERROR", "Core load or API missing: %s (need M.render_selection)", CORE_PATH)
+    return false, "core-load-or-api-missing"
+  end
+
+  -- 4) 只選這顆 item，交給 Core 走「Track FX Render 成新 take（保留舊 take）」；嵌入目前 TC、保留 handles
+  reaper.Main_OnCommand(40289, 0)          -- Unselect all
+  reaper.SetMediaItemSelected(item, true)  -- Select one
+
+  -- ★ 重要修正：改用 RGWH Core 的「位置參數」呼叫版本，確保 TAKE/TRACK 旗標 = true
+  --   M.render_selection(take_fx, track_fx, apply_mode, tc_embed)
+  --   其中 apply_mode="auto" 會由 Core 依素材聲道決定 mono/multi
+  local ok_call, ret_or_err = pcall(M.render_selection, 1, 1, "auto", "current")
+  if not ok_call then
+    log_step("ERROR", "render_selection() runtime error: %s", tostring(ret_or_err))
+    -- 照樣往下嘗試拾取新輸出，避免 Core 雖報錯但其實已產生新 take 的情況漏處理
+  end
+
+  -- 5) 命名（在新 take 上），然後搬回原軌
+  --    Core 完成後會把新 take 所在的 item 保持為選取狀態；若沒有就 fallback 用原 item
+  local out = reaper.GetSelectedMediaItem(0, 0) or item
+  if not out then
+    log_step("ERROR", "render_selection finished but no item picked; fallback to original")
+    out = item
+  end
+  append_fx_to_take_name(out, chainToken)
+  reaper.MoveMediaItemToTrack(out, origTR)
+  return true, "ok"
+end
+
 function append_fx_to_take_name(item, fxName)
   if not item or not fxName or fxName == "" then return end
   local takeIndex = reaper.GetMediaItemInfo_Value(item, "I_CURTAKE")
@@ -1193,14 +1267,13 @@ function main() -- main part of the script
       end
 
       for idx, it in ipairs(glued_items) do
-        local ok, used_cmd = apply_focused_fx_to_item(it, FXmediaTrack, fxIndex, CHAIN_TOKEN)
+        local ok, why = apply_chain_via_rgwh_render(it, FXmediaTrack, CHAIN_TOKEN)
         if ok then
-          log_step("TS-WINDOW[GLOBAL]", "applied %d to glued #%d", used_cmd or -1, idx)
-          -- 取真正列印完的那顆（函式內會把選取變成這顆）
+          log_step("TS-WINDOW[GLOBAL]", "rendered (RGWH) glued #%d", idx)
           local out_item = reaper.GetSelectedMediaItem(0, 0)
           if out_item then table.insert(outputs, out_item) end
         else
-          log_step("TS-WINDOW[GLOBAL]", "apply failed on glued #%d", idx)
+          log_step("TS-WINDOW[GLOBAL]", "render failed on glued #%d (%s)", idx, tostring(why))
         end
       end
 
@@ -1246,21 +1319,35 @@ function main() -- main part of the script
         goto continue_unit
       end
 
-      local ok, used_cmd = apply_focused_fx_to_item(glued, FXmediaTrack, fxIndex, CHAIN_TOKEN)
+      local ok, why = apply_chain_via_rgwh_render(glued, FXmediaTrack, CHAIN_TOKEN)
       if ok then
-        log_step("TS-WINDOW[UNIT]", "applied %d", used_cmd or -1)
-        table.insert(outputs, glued)  -- out item已被移回原軌
+        log_step("TS-WINDOW[UNIT]", "rendered (RGWH)")
+        table.insert(outputs, glued)
       else
-        log_step("TS-WINDOW[UNIT]", "apply failed")
+        log_step("TS-WINDOW[UNIT]", "render failed (%s)", tostring(why))
       end
     else
       --------------------------------------------------------------
       -- Core/GLUE（含 handles）：無 TS 或 TS==unit
       --------------------------------------------------------------
 
+      -- ★★ 單一 item 快速路徑：RGWH 渲染「整條 Track FX Chain → 新 take」（含 handles/TC），保留舊 take ★★
+      -- 條件：沒有 TS，或 TS == unit；且 unit 只有 1 顆 item
+      if (not hasTS or ts_equals_unit(u, tsL, tsR)) and #u.items == 1 then
+        local single = u.items[1]
+        local ok, why = apply_chain_via_rgwh_render(single, FXmediaTrack, CHAIN_TOKEN)
+        if ok then
+          local out_item = reaper.GetSelectedMediaItem(0, 0) or single
+          if out_item then table.insert(outputs, out_item) end
+        else
+          log_step("CORE", "single-item RGWH render failed (%s)", tostring(why))
+        end
+        goto continue_unit
+      end
+
       -- Move all unit items to FX track (keep as-is), but select only the anchor for Core.
       move_items_to_track(u.items, FXmediaTrack)
-      isolate_focused_fx(FXmediaTrack, fxIndex)
+      -- (chain) do NOT isolate focused FX; we render the full existing chain as-is
       -- Select the entire unit (non-TS path should preserve full unit selection)
       local anchor = u.items[1]  -- still used for channel auto and safety
       select_only_items_checked(u.items)
@@ -1373,14 +1460,13 @@ function main() -- main part of the script
       else
         -- （保持你現有的 args 組裝…）
         local args = {
-          mode                = "glue_item_focused_fx",  -- ★ 改這行：讓 Core 以「整個 selection」為主體
+          mode                = "glue_item_focused_fx",
           item                = anchor,
           apply_fx_mode       = apply_fx_mode,
           focused_track       = FXmediaTrack,
-          focused_fxindex     = fxIndex,
-          policy_only_focused = true,
+          focused_fxindex     = fxIndex,      -- 仍傳，但不 isolate；Core 以整條 chain 參與（見下一行）
+          policy_only_focused = false,        -- ★ Chain：不要只針對 focused FX
           selection_scope     = "selection",
-          -- glue_single_items  不再由前端傳入，統一交由 RGWH 專案旗標（GLUE_SINGLE_ITEMS）決定
         }
         if debug_enabled() then
           local c = reaper.CountSelectedMediaItems(0)
