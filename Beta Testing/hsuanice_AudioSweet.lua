@@ -1,6 +1,6 @@
 --[[
 @description AudioSweet (hsuanice) — Focused Track FX render via RGWH Core, append FX name, rebuild peaks (selected items)
-@version 251008_1837 — FX alias integration (JSON-driven short names)
+@version 251009_2215 Single-item path now calls M.render_selection(1, 1, "auto", "current") to print both Take FX and Track FX into a NEW take (keeps previous takes).
 @author Tim Chimes (original), adapted by hsuanice
 @notes
   Reference:
@@ -19,8 +19,26 @@ This version:
 
 
 
-
 @changelog
+  251009_2215
+    - Changed: Single-item path now calls RGWH Core via positional API:
+               M.render_selection(1, 1, "auto", "current") to print both Take FX
+               and Track FX into a NEW take (keeps previous takes).
+    - Tech: Module variable renamed to `M` (from `RGWH`) to match Core return value.
+
+  v251009_2000
+    - Changed: In non–TS-Window path, single-item units now use RGWH Render
+               to create a NEW take (keeping previous takes), while multi-item
+               units still use Core/GLUE with handles.
+    - Added: Helper apply_focused_via_rgwh_render_new_take() to move the item
+             to the FX track, isolate the focused FX, call RGWH.render_selection
+             (TAKE_FX=1, TRACK_FX=1, APPLY_MODE=auto, TC=current),
+             rename with AS token, and move back.
+    - Unchanged: TS-Window (GLOBAL/UNIT) keeps the 42432→40361/41993 path
+                 (no handles), preserving the previous UX and behavior.
+    - Notes: Naming, alias, and FIFO token cap remain intact; selection is
+             restored at the end as before.
+
   v251008_1838 (2025-10-08, GMT+8)
     - Added: Full FX alias integration with TSV fallback when JSON decoder is missing.
     - Fixed: Numeric-only FX aliases (e.g., “1176”, “1073”) are now correctly preserved.
@@ -1101,6 +1119,44 @@ local function apply_focused_fx_to_item(item, FXmediaTrack, fxIndex, FXName)
   return true, cmd_apply
 end
 
+-- 單一 item：改用 RGWH Core 的 Render（新 take；保留舊 take；同時印 Take FX 與 Track FX）
+local function apply_focused_via_rgwh_render_new_take(item, FXmediaTrack, fxIndex, FXName)
+  if not item then return false end
+  local origTR = reaper.GetMediaItem_Track(item)
+
+  -- 移到 FX 軌 + isolate 只留聚焦 FX（Track FX 原始啟用/停用狀態保持；此處僅確保非聚焦者被 bypass）
+  reaper.MoveMediaItemToTrack(item, FXmediaTrack)
+  dbg_item_brief(item, "RGWH-RENDER moved→FX")
+  isolate_focused_fx(FXmediaTrack, fxIndex)
+
+  -- 單選這顆 item 作為 render 的 selection
+  reaper.Main_OnCommand(40289, 0)
+  reaper.SetMediaItemSelected(item, true)
+
+  -- 載入 RGWH Core
+  local CORE_PATH = reaper.GetResourcePath() .. "/Scripts/hsuanice Scripts/Library/hsuanice_RGWH Core.lua"
+  local ok_mod, M = pcall(dofile, CORE_PATH)
+  if not ok_mod or not M or type(M.render_selection) ~= "function" then
+    log_step("ERROR", "render_selection not available in RGWH Core")
+    return false
+  end
+
+  -- ★ 重要修正：改用 RGWH Core 的「位置參數」呼叫版本，確保 TAKE/TRACK 旗標 = true
+  --   M.render_selection(take_fx, track_fx, apply_mode, tc_embed)
+  --   其中 apply_mode="auto" 會由 Core 依素材聲道決定 mono/multi
+  local ok_call, ret_or_err = pcall(M.render_selection, 1, 1, "auto", "current")
+  if not ok_call then
+    log_step("ERROR", "render_selection() runtime error: %s", tostring(ret_or_err))
+    -- 照樣往下嘗試拾取新輸出，避免 Core 雖報錯但其實已產生新 take 的情況漏處理
+  end
+
+  -- 取回新 take 所在 item（仍在選取中），改名後搬回原軌
+  local out = reaper.GetSelectedMediaItem(0, 0) or item
+  append_fx_to_take_name(out, FXName)
+  reaper.MoveMediaItemToTrack(out, origTR)
+  return true
+end
+
 function append_fx_to_take_name(item, fxName)
   if not item or not fxName or fxName == "" then return end
   local takeIndex = reaper.GetMediaItemInfo_Value(item, "I_CURTAKE")
@@ -1367,197 +1423,202 @@ function main() -- main part of the script
       end
     else
       --------------------------------------------------------------
-      -- Core/GLUE（含 handles）：無 TS 或 TS==unit
+      -- Core/GLUE 或 RGWH Render：
+      --   無 TS 或 TS==unit：
+      --     • 當 unit 只有 1 顆 item → 走 RGWH Render（新 take；保留舊 take）
+      --     • 當 unit ≥2 顆 item   → 維持 Core/GLUE（含 handles）
       --------------------------------------------------------------
+      if #u.items == 1 then
+        -- === 單一 item：使用 RGWH Render（同時印 Take FX 與 Track FX；保留舊 take） ===
+        local the_item = u.items[1]
+        local ok = apply_focused_via_rgwh_render_new_take(the_item, FXmediaTrack, fxIndex, FXName)
+        if ok then
+          table.insert(outputs, the_item) -- 已搬回原軌且命名完成
+        else
+          log_step("ERROR", "single-item RGWH render failed")
+        end
 
-      -- Move all unit items to FX track (keep as-is), but select only the anchor for Core.
-      move_items_to_track(u.items, FXmediaTrack)
-      isolate_focused_fx(FXmediaTrack, fxIndex)
-      -- Select the entire unit (non-TS path should preserve full unit selection)
-      local anchor = u.items[1]  -- still used for channel auto and safety
-      select_only_items_checked(u.items)
+        -- Un-bypass everything on FX track（恢復原狀）
+        local cnt = reaper.TrackFX_GetCount(FXmediaTrack)
+        for i=0, cnt-1 do reaper.TrackFX_SetEnabled(FXmediaTrack, i, true) end
+      else
+        -- === 多 item：維持 Core/GLUE（含 handles） ===
 
-      -- [DBG] after move: how many unit items are actually on the FX track?
-      do
-        local moved = 0
-        for _,it in ipairs(u.items) do
-          if it and reaper.GetMediaItem_Track(it) == FXmediaTrack then
-            moved = moved + 1
+        -- Move all unit items to FX track (keep as-is), but select only the anchor for Core.
+        move_items_to_track(u.items, FXmediaTrack)
+        isolate_focused_fx(FXmediaTrack, fxIndex)
+        -- Select the entire unit (non-TS path should preserve full unit selection)
+        local anchor = u.items[1]  -- still used for channel auto and safety
+        select_only_items_checked(u.items)
+
+        -- [DBG] after move
+        do
+          local moved = 0
+          for _,it in ipairs(u.items) do
+            if it and reaper.GetMediaItem_Track(it) == FXmediaTrack then
+              moved = moved + 1
+            end
+          end
+          log_step("CORE", "post-move: on-FX=%d / unit=%d", moved, #u.items)
+
+          if debug_enabled() then
+            local L = u.UL - project_epsilon()
+            local R = u.UR + project_epsilon()
+            dbg_track_items_in_range(FXmediaTrack, L, R)
           end
         end
-        log_step("CORE", "post-move: on-FX=%d / unit=%d", moved, #u.items)
 
-        if debug_enabled() then
-          local L = u.UL - project_epsilon()
-          local R = u.UR + project_epsilon()
-          dbg_track_items_in_range(FXmediaTrack, L, R)
+        -- [DBG] selection should equal the full unit at this point
+        do
+          local selN = reaper.CountSelectedMediaItems(0)
+          log_step("CORE", "pre-apply selection count=%d (expect=%d)", selN, #u.items)
+          dbg_dump_selection("CORE pre-apply selection")
         end
-      end
 
-
-      -- [DBG] selection should equal the full unit at this point
-      do
-        local selN = reaper.CountSelectedMediaItems(0)
-        log_step("CORE", "pre-apply selection count=%d (expect=%d)", selN, #u.items)
-        dbg_dump_selection("CORE pre-apply selection")
-      end  
-
-      -- Load Core (no goto; use failed flag to reach cleanup safely)
-      local failed = false
-      local CORE_PATH = reaper.GetResourcePath() .. "/Scripts/hsuanice Scripts/Library/hsuanice_RGWH Core.lua"
-      local ok_mod, mod = pcall(dofile, CORE_PATH)
-      if not ok_mod or not mod then
-        log_step("ERROR", "Core load failed: %s", CORE_PATH)
-        reaper.MB("RGWH Core not found or failed to load:\n" .. CORE_PATH, "AudioSweet — Core load failed", 0)
-        failed = true
-      end
-
-      local apply = nil
-      if not failed then
-        apply = (type(mod)=="table" and type(mod.apply)=="function") and mod.apply
-                 or (_G.RGWH and type(_G.RGWH.apply)=="function" and _G.RGWH.apply)
-        if not apply then
-          log_step("ERROR", "RGWH.apply not found in module")
-          reaper.MB("RGWH Core loaded, but RGWH.apply(...) not found.", "AudioSweet — Core apply missing", 0)
+        -- Load Core
+        local failed = false
+        local CORE_PATH = reaper.GetResourcePath() .. "/Scripts/hsuanice Scripts/Library/hsuanice_RGWH Core.lua"
+        local ok_mod, mod = pcall(dofile, CORE_PATH)
+        if not ok_mod or not mod then
+          log_step("ERROR", "Core load failed: %s", CORE_PATH)
+          reaper.MB("RGWH Core not found or failed to load:\n" .. CORE_PATH, "AudioSweet — Core load failed", 0)
           failed = true
         end
-      end
 
-      -- Resolve auto apply_fx_mode by MAX channels across the entire unit
-      local apply_fx_mode = nil
-      if not failed then
-        apply_fx_mode = reaper.GetExtState("hsuanice_AS","AS_APPLY_FX_MODE")
-        if apply_fx_mode == "" or apply_fx_mode == "auto" then
-          local ch = unit_max_channels(u)
-          apply_fx_mode = (ch <= 1) and "mono" or "multi"
-        end
-      end
-
-      if debug_enabled() then
-        local c = reaper.CountSelectedMediaItems(0)
-        log_step("CORE", "pre-apply selected_items=%d (expect = unit members=%d)", c, #u.items)
-      end
-
-      -- Snapshot & set project flags
-      local snap = {}
-
-      local function proj_get(ns, key, def)
-        local _, val = reaper.GetProjExtState(0, ns, key)
-        return (val == "" and def) or val
-      end
-      local function proj_set(ns, key, val)
-        reaper.SetProjExtState(0, ns, key, tostring(val or ""))
-      end
-
-      -- (A) 檢查：unit 的所有 items 是否已經搬到 FX 軌
-      if not items_all_on_track(u.items, FXmediaTrack) then
-        log_step("ERROR", "unit members not on FX track; fixing...")
-        move_items_to_track(u.items, FXmediaTrack)
-      end
-      -- (B) 檢查：selection 是否等於整個 unit
-      select_only_items_checked(u.items)
-      if debug_enabled() then
-        log_step("CORE", "pre-apply selected_items=%d (expect=%d)", reaper.CountSelectedMediaItems(0), #u.items)
-      end
-
-      -- (C) Snapshot
-      snap.GLUE_TAKE_FX      = proj_get("RGWH","GLUE_TAKE_FX","")
-      snap.GLUE_TRACK_FX     = proj_get("RGWH","GLUE_TRACK_FX","")
-      snap.GLUE_APPLY_MODE   = proj_get("RGWH","GLUE_APPLY_MODE","")
-      snap.GLUE_SINGLE_ITEMS = proj_get("RGWH","GLUE_SINGLE_ITEMS","")
-
-      -- (D) Set desired flags
-      proj_set("RGWH","GLUE_TAKE_FX","1")
-      proj_set("RGWH","GLUE_TRACK_FX","1")
-      proj_set("RGWH","GLUE_APPLY_MODE",apply_fx_mode)
-      proj_set("RGWH","GLUE_SINGLE_ITEMS","1")  -- 正確語意：就算 unit 只有 1 顆 item 也走 glue
-
-      if debug_enabled() then
-        local _, gsi = reaper.GetProjExtState(0, "RGWH", "GLUE_SINGLE_ITEMS")
-        log_step("CORE", "flag GLUE_SINGLE_ITEMS=%s (expected=1 for unit-glue)", (gsi == "" and "(empty)") or gsi)
-      end
-
-      -- (E) 準備參數，並完整印出（單一 item）
-      if not (anchor and (reaper.ValidatePtr2 == nil or reaper.ValidatePtr2(0, anchor, "MediaItem*"))) then
-        log_step("ERROR", "anchor item invalid (u.items[1]=%s)", tostring(anchor))
-        reaper.MB("Internal error: unit anchor item is invalid.", "AudioSweet", 0)
-        failed = true
-      else
-        -- （保持你現有的 args 組裝…）
-        local args = {
-          mode                = "glue_item_focused_fx",  -- ★ 改這行：讓 Core 以「整個 selection」為主體
-          item                = anchor,
-          apply_fx_mode       = apply_fx_mode,
-          focused_track       = FXmediaTrack,
-          focused_fxindex     = fxIndex,
-          policy_only_focused = true,
-          selection_scope     = "selection",
-          -- glue_single_items  不再由前端傳入，統一交由 RGWH 專案旗標（GLUE_SINGLE_ITEMS）決定
-        }
-        if debug_enabled() then
-          local c = reaper.CountSelectedMediaItems(0)
-          log_step("CORE", "apply args: mode=%s apply_fx_mode=%s focus_idx=%d sel_scope=%s unit_members=%d",
-            tostring(args.mode), tostring(args.apply_fx_mode), fxIndex, tostring(args.selection_scope), #u.items)
-          log_step("CORE", "pre-apply FINAL selected_items=%d", c)
-          dbg_dump_selection("CORE pre-apply FINAL")
-        end
-
-        if debug_enabled() then
-          log_step("CORE", "apply args: scope=%s members=%d", tostring(args.selection_scope), #u.items)
-        end
-
-        -- (F) 呼叫 Core（pcall 包起來，抓 runtime error）
-        local ok_call, ok_apply, err = pcall(apply, args)
-        if not ok_call then
-          log_step("ERROR", "apply() runtime error: %s", tostring(ok_apply))
-          reaper.MB("RGWH Core apply() runtime error:\n" .. tostring(ok_apply), "AudioSweet — Core apply error", 0)
-          failed = true
-        else
-          if not ok_apply then
-            if debug_enabled() then
-              log_step("ERROR", "apply() returned false; err=%s", tostring(err))
-            end
-            reaper.MB("RGWH Core apply() error:\n" .. tostring(err or "(nil)"), "AudioSweet — Core apply error", 0)
+        local apply = nil
+        if not failed then
+          apply = (type(mod)=="table" and type(mod.apply)=="function") and mod.apply
+                   or (_G.RGWH and type(_G.RGWH.apply)=="function" and _G.RGWH.apply)
+          if not apply then
+            log_step("ERROR", "RGWH.apply not found in module")
+            reaper.MB("RGWH Core loaded, but RGWH.apply(...) not found.", "AudioSweet — Core apply missing", 0)
             failed = true
           end
         end
 
-      end
-      -- (G) Restore flags immediately
-      proj_set("RGWH","GLUE_TAKE_FX",      snap.GLUE_TAKE_FX)
-      proj_set("RGWH","GLUE_TRACK_FX",     snap.GLUE_TRACK_FX)
-      proj_set("RGWH","GLUE_APPLY_MODE",   snap.GLUE_APPLY_MODE)
-      proj_set("RGWH","GLUE_SINGLE_ITEMS", snap.GLUE_SINGLE_ITEMS)
-
-      -- Pick output, rename, move back
-      if not failed then
-        local postItem = reaper.GetSelectedMediaItem(0, 0)
-        if not postItem then
-          reaper.MB("Core finished, but no item is selected.", "AudioSweet", 0)
-          failed = true
-        else
-          append_fx_to_take_name(postItem, FXName)
-          local origTR = u.track
-          reaper.MoveMediaItemToTrack(postItem, origTR)
-          table.insert(outputs, postItem)
-          -- Mark Core done once to keep non–TS-Window behavior single-item
-
+        -- Resolve auto apply_fx_mode by MAX channels across the entire unit
+        local apply_fx_mode = nil
+        if not failed then
+          apply_fx_mode = reaper.GetExtState("hsuanice_AS","AS_APPLY_FX_MODE")
+          if apply_fx_mode == "" or apply_fx_mode == "auto" then
+            local ch = unit_max_channels(u)
+            apply_fx_mode = (ch <= 1) and "mono" or "multi"
+          end
         end
 
-        -- [DBG] after Core: what is selected and which item will be picked?
         if debug_enabled() then
-          dbg_dump_selection("CORE post-apply selection")
-          if postItem then
-            dbg_item_brief(postItem, "CORE picked postItem")
-          end
-        end        
+          local c = reaper.CountSelectedMediaItems(0)
+          log_step("CORE", "pre-apply selected_items=%d (expect = unit members=%d)", c, #u.items)
+        end
 
+        -- Snapshot & set project flags
+        local snap = {}
+        local function proj_get(ns, key, def)
+          local _, val = reaper.GetProjExtState(0, ns, key); return (val == "" and def) or val
+        end
+        local function proj_set(ns, key, val)
+          reaper.SetProjExtState(0, ns, key, tostring(val or ""))
+        end
+
+        -- 檢查：unit 的所有 items 是否已在 FX 軌
+        if not items_all_on_track(u.items, FXmediaTrack) then
+          log_step("ERROR", "unit members not on FX track; fixing...")
+          move_items_to_track(u.items, FXmediaTrack)
+        end
+        -- 檢查：selection 是否等於整個 unit
+        select_only_items_checked(u.items)
+        if debug_enabled() then
+          log_step("CORE", "pre-apply selected_items=%d (expect=%d)", reaper.CountSelectedMediaItems(0), #u.items)
+        end
+
+        -- Snapshot
+        snap.GLUE_TAKE_FX      = proj_get("RGWH","GLUE_TAKE_FX","")
+        snap.GLUE_TRACK_FX     = proj_get("RGWH","GLUE_TRACK_FX","")
+        snap.GLUE_APPLY_MODE   = proj_get("RGWH","GLUE_APPLY_MODE","")
+        snap.GLUE_SINGLE_ITEMS = proj_get("RGWH","GLUE_SINGLE_ITEMS","")
+
+        -- Set desired flags
+        proj_set("RGWH","GLUE_TAKE_FX","1")
+        proj_set("RGWH","GLUE_TRACK_FX","1")
+        proj_set("RGWH","GLUE_APPLY_MODE",apply_fx_mode)
+        proj_set("RGWH","GLUE_SINGLE_ITEMS","1")
+
+        if debug_enabled() then
+          local _, gsi = reaper.GetProjExtState(0, "RGWH", "GLUE_SINGLE_ITEMS")
+          log_step("CORE", "flag GLUE_SINGLE_ITEMS=%s (expected=1 for unit-glue)", (gsi == "" and "(empty)") or gsi)
+        end
+
+        -- 準備參數並呼叫 Core
+        if not (anchor and (reaper.ValidatePtr2 == nil or reaper.ValidatePtr2(0, anchor, "MediaItem*"))) then
+          log_step("ERROR", "anchor item invalid (u.items[1]=%s)", tostring(anchor))
+          reaper.MB("Internal error: unit anchor item is invalid.", "AudioSweet", 0)
+          failed = true
+        else
+          local args = {
+            mode                = "glue_item_focused_fx",
+            item                = anchor,
+            apply_fx_mode       = apply_fx_mode,
+            focused_track       = FXmediaTrack,
+            focused_fxindex     = fxIndex,
+            policy_only_focused = true,
+            selection_scope     = "selection",
+          }
+          if debug_enabled() then
+            local c = reaper.CountSelectedMediaItems(0)
+            log_step("CORE", "apply args: mode=%s apply_fx_mode=%s focus_idx=%d sel_scope=%s unit_members=%d",
+              tostring(args.mode), tostring(args.apply_fx_mode), fxIndex, tostring(args.selection_scope), #u.items)
+            log_step("CORE", "pre-apply FINAL selected_items=%d", c)
+            dbg_dump_selection("CORE pre-apply FINAL")
+          end
+
+          local ok_call, ok_apply, err = pcall(apply, args)
+          if not ok_call then
+            log_step("ERROR", "apply() runtime error: %s", tostring(ok_apply))
+            reaper.MB("RGWH Core apply() runtime error:\n" .. tostring(ok_apply), "AudioSweet — Core apply error", 0)
+            failed = true
+          else
+            if not ok_apply then
+              if debug_enabled() then
+                log_step("ERROR", "apply() returned false; err=%s", tostring(err))
+              end
+              reaper.MB("RGWH Core apply() error:\n" .. tostring(err or "(nil)"), "AudioSweet — Core apply error", 0)
+              failed = true
+            end
+          end
+        end
+
+        -- 還原旗標
+        proj_set("RGWH","GLUE_TAKE_FX",      snap.GLUE_TAKE_FX)
+        proj_set("RGWH","GLUE_TRACK_FX",     snap.GLUE_TRACK_FX)
+        proj_set("RGWH","GLUE_APPLY_MODE",   snap.GLUE_APPLY_MODE)
+        proj_set("RGWH","GLUE_SINGLE_ITEMS", snap.GLUE_SINGLE_ITEMS)
+
+        -- Pick output, rename, move back
+        if not failed then
+          local postItem = reaper.GetSelectedMediaItem(0, 0)
+          if not postItem then
+            reaper.MB("Core finished, but no item is selected.", "AudioSweet", 0)
+            failed = true
+          else
+            append_fx_to_take_name(postItem, FXName)
+            local origTR = u.track
+            reaper.MoveMediaItemToTrack(postItem, origTR)
+            table.insert(outputs, postItem)
+          end
+
+          if debug_enabled() then
+            dbg_dump_selection("CORE post-apply selection")
+            if postItem then
+              dbg_item_brief(postItem, "CORE picked postItem")
+            end
+          end
+        end
+
+        -- 將 unit 內其餘（若有）搬回原軌；解除 bypass
+        move_items_to_track(u.items, u.track)
+        local cnt = reaper.TrackFX_GetCount(FXmediaTrack)
+        for i=0, cnt-1 do reaper.TrackFX_SetEnabled(FXmediaTrack, i, true) end
       end
-      -- Ensure any remaining original items (if any) go back
-      move_items_to_track(u.items, u.track)
-      -- Un-bypass everything on FX track
-      local cnt = reaper.TrackFX_GetCount(FXmediaTrack)
-      for i=0, cnt-1 do reaper.TrackFX_SetEnabled(FXmediaTrack, i, true) end
     end
     ::continue_unit::
   end
