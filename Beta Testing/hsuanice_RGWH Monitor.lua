@@ -1,6 +1,6 @@
 --[[
 @description hsuanice_RGWH Monitor
-@version 250924_1847
+@version 251009_2349 Removed ClearConsole() to preserve previous runs in console log
 @author hsuanice
 @note
 Console monitor for units (SINGLE/TOUCH/CROSSFADE/MIXED),
@@ -414,7 +414,7 @@ end
 -- main
 ------------------------------------------------------------
 local function main()
-  r.ClearConsole()
+
   local S = current_settings()
   local tp = reaper.time_precise() or 0
   local id = string.format("%08X", math.floor(tp * 1000 + 0.5))
