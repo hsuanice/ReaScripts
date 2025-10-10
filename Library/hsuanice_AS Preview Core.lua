@@ -1,10 +1,18 @@
 --[[
 @description AudioSweet Preview Core
 @author Hsuanice
-@version 2510082330 Fix: Forward-declare `undo_begin` / `undo_end_no_undo` and bind locals so early callers never hit nil.
+@version 251010_2152 Added: Convenience arg `target_track_name` for ASP.preview(); equivalent to `target={by="name", value="<name>"}`.
+
 
 @about Minimal, self-contained preview runtime. Later we can extract helpers to "hsuanice_AS Core.lua".
 @changelog
+  v251010_2152
+    - Added: Convenience arg `target_track_name` for ASP.preview(); equivalent to `target={by="name", value="<name>"}`.
+    - Added: Default target fallback to `"AudioSweet"` when neither `target` nor `target_track_name` is provided.
+    - Improved: Argument docs for ASP.preview() to include `target_track_name`.
+    - Behavior: Non-breaking — sugar only applies when `args.target` is nil; existing wrappers continue to work.
+    - Notes: Chain vs Focused behavior unchanged; placeholder label logic unchanged (FX name in focused mode, track name in chain mode).
+
   v2510082330
     - Fix: Forward-declare `undo_begin` / `undo_end_no_undo` and bind locals so early callers never hit nil.
     - Change: Consolidated no-undo guards (start, mode switch, cleanup) to suppress all undo points.
@@ -346,6 +354,80 @@ function ASP.log(fmt, ...)
   reaper.ShowConsoleMsg(msg .. "\n")
 end
 
+-- Resolve different "target" specs into (track, fxindex, kind)
+-- target 支援：
+--   "focused" | "name:<TrackName>" | "guid:{...}" | { by="name"/"guid"/"index"/"focused", value=... } | MediaTrack*
+-- 回傳：
+--   FXtrack :: MediaTrack*
+--   FXindex :: integer or nil  （Chain 模式會傳回 nil；Focused 模式是 0-based index）
+--   kind    :: "trackfx" | "takefx" | "none"
+function ASP._resolve_target(target)
+  -- 1) 直接給 MediaTrack*
+  if type(target) == "userdata" then
+    return target, nil, "trackfx"
+  end
+
+  -- 2) focused
+  local function read_focused()
+    local rv, trNum, itNum, fxNum = reaper.GetFocusedFX()
+    -- rv: 0 none, 1 trackfx, 2 takefx
+    if rv == 1 then
+      local tr = reaper.GetTrack(0, trNum-1)
+      return tr, fxNum, "trackfx"
+    elseif rv == 2 then
+      -- Take FX 也回到該 item 的 track，Chain 預覽會用整條 track FX
+      local it = reaper.GetMediaItem(0, itNum)
+      if it then
+        local tr = reaper.GetMediaItem_Track(it)
+        return tr, fxNum, "takefx"
+      end
+    end
+    return nil, nil, "none"
+  end
+
+  if target == "focused" or (type(target)=="table" and target.by=="focused") then
+    return read_focused()
+  end
+
+  -- 3) "name:XXX"
+  if type(target) == "string" then
+    local name = target:match("^name:(.+)$")
+    if name then
+      local tc = reaper.CountTracks(0)
+      for i=0, tc-1 do
+        local tr = reaper.GetTrack(0, i)
+        local _, tn = reaper.GetSetMediaTrackInfo_String(tr, "P_NAME", "", false)
+        if (tn or "") == name then return tr, nil, "trackfx" end
+      end
+      return nil, nil, "none"
+    end
+  end
+
+  -- 4) { by="name"/"guid"/"index", value=... }
+  if type(target) == "table" then
+    if target.by == "name" then
+      local want = tostring(target.value or "")
+      local tc = reaper.CountTracks(0)
+      for i=0, tc-1 do
+        local tr = reaper.GetTrack(0, i)
+        local _, tn = reaper.GetSetMediaTrackInfo_String(tr, "P_NAME", "", false)
+        if (tn or "") == want then return tr, nil, "trackfx" end
+      end
+      return nil,nil,"none"
+    elseif target.by == "guid" then
+      -- 逐軌逐 item 搜尋 GUID 太重，通常不建議；若你有自己的 GUID→Track 對照可掛進來
+      -- 這裡先回傳 none
+      return nil,nil,"none"
+    elseif target.by == "index" then
+      local idx = tonumber(target.value or 1)
+      local tr = reaper.GetTrack(0, (idx or 1)-1)
+      return tr, nil, tr and "trackfx" or "none"
+    end
+  end
+
+  return nil, nil, "none"
+end
+
 -- Minimal JSON encode for small tables (no nested tables needed here)
 local function tbl2json(t)
   local parts = {"{"}
@@ -362,6 +444,66 @@ end
 
 local function write_state(t)
   reaper.SetExtState(ASP.ES_NS, ASP.ES_STATE, tbl2json(t), false)
+end
+
+-- args = {
+--   mode        = "solo"|"normal",         -- 預設 "solo"
+--   target      = "focused"|"name:AudioSweet"|MediaTrack*|{by=...,value=...},
+--   target_track_name = "MyChain",         -- convenience: same as target={by="name", value="MyChain"}
+--   chain_mode  = true|false,               -- true=整條 Track FX Chain（不 isolate，不動 FX enable/offline）
+--   isolate_focused = true|false,           -- 只在 chain_mode=false 時有意義；預設 true
+--   solo_scope  = "track"|"item",           -- 覆寫 USER_SOLO_SCOPE（選擇性）
+--   restore_mode= "guid"|"timesel",         -- 覆寫 USER_RESTORE_MODE（選擇性）
+--   debug       = true|false,               -- 覆寫 USER_DEBUG（選擇性）
+-- }
+function ASP.preview(args)
+  args = args or {}
+  -- Convenience: allow plain track name via args.target_track_name
+  if args.target == nil and args.target_track_name ~= nil then
+    args.target = { by = "name", value = tostring(args.target_track_name) }
+  end
+  local mode       = (args.mode == "normal") and "normal" or "solo"
+  local chain_mode = args.chain_mode == true
+
+  -- 覆寫 Core 的 user options（選擇性）
+  if args.debug ~= nil then USER_DEBUG = args.debug and true or false end
+  if args.solo_scope == "item" then USER_SOLO_SCOPE = "item" else USER_SOLO_SCOPE = "track" end
+  if args.restore_mode == "timesel" then USER_RESTORE_MODE = "timesel" else USER_RESTORE_MODE = "guid" end
+
+  -- 解析 target
+  local FXtrack, FXindex, kind = ASP._resolve_target(args.target or "focused")
+
+  -- === SUGAR: allow target_track_name for wrappers ===
+  if args.target_track_name and not args.target then
+    args.target = { by = "name", value = args.target_track_name }
+  end
+
+  -- Default fallback: if still no target, use 'AudioSweet' track
+  if args.target == nil then
+    args.target = { by = "name", value = "AudioSweet" }
+  end
+
+  -- Re-resolve target after sugar/default fallback
+  FXtrack, FXindex, kind = ASP._resolve_target(args.target or "focused")
+
+  -- 若 focused 找不到軌，fallback 到 name:AudioSweet
+  if not FXtrack then
+    FXtrack, FXindex, kind = ASP._resolve_target("name:AudioSweet")
+  end
+
+  -- 對 Chain 模式：不 isolate，所以把 FXindex 丟掉（不需要）
+  local focus_index = chain_mode and nil or FXindex
+
+  -- 告訴 wrapper / Core 當前預覽模式（沿用 ExtState）
+  reaper.SetExtState(ASP.ES_NS, ASP.ES_MODE, mode, false)
+
+  -- 呼叫現有 run()；加上 no_isolate 旗標給 Core 判斷
+  return ASP.run{
+    mode          = mode,
+    focus_track   = FXtrack,
+    focus_fxindex = focus_index,   -- Chain 模式會是 nil
+    no_isolate    = chain_mode,    -- ✅ Chain 模式：不 isolate，不碰 FX enable/offline
+  }
 end
 
 -- Internal runtime state (persist across re-loads)
@@ -608,12 +750,16 @@ function ASP.run(opts)
   opts = opts or {}
   local FXtrack, FXindex = opts.focus_track, opts.focus_fxindex
   local mode = read_mode(opts.default_mode or "solo")  -- ← 以 ExtState 為主
+  local no_isolate = opts.no_isolate and true or false
 
   if not (mode == "solo" or mode == "normal") then
     reaper.MB("ASP.run: invalid mode", "AudioSweet Preview", 0); return
   end
-  if not FXtrack or not FXindex then
-    reaper.MB("ASP.run: focus track/fx missing", "AudioSweet Preview", 0); return
+  if not FXtrack then
+    reaper.MB("ASP.run: focus track missing", "AudioSweet Preview", 0); return
+  end
+  if (not no_isolate) and (FXindex == nil) then
+    reaper.MB("ASP.run: focus FX index missing (focused-FX preview requires a valid FX index)", "AudioSweet Preview", 0); return
   end
 
   ASP.log("run called, mode=%s", mode)
@@ -661,7 +807,7 @@ function ASP.run(opts)
   if ph then
     ASP._state.running       = true
     ASP._state.fx_track      = FXtrack
-    ASP._state.fx_index      = FXindex
+    ASP._state.fx_index      = FXindex   -- 允許 nil（Chain）
     ASP._state.placeholder   = ph
     ASP._state.src_track     = src_tr
     ASP._state.moved_items   = collect_preview_items_on_fx_track(FXtrack, ph, UL, UR)
@@ -687,7 +833,7 @@ function ASP.run(opts)
   ASP._state.running       = true
   ASP._state.mode          = mode
   ASP._state.fx_track      = FXtrack
-  ASP._state.fx_index      = FXindex
+  ASP._state.fx_index      = FXindex     -- 允許 nil（Chain）
   ASP._state.selection_cache = ASP._snapshot_item_selection()
   ASP._state.play_was_on   = (reaper.GetPlayState() & 1) == 1
   ASP._state.repeat_was_on = reaper.GetToggleCommandState(1068) == 1
@@ -695,9 +841,14 @@ function ASP.run(opts)
   ASP._arm_loop_region_or_unit()
   ASP._ensure_repeat_on()
 
-  -- 隔離 focused FX（並保留快照，結束時還原）
-  ASP._state.fx_enable_shot = isolate_only_focused_fx(FXtrack, FXindex)
-  ASP.log("focused FX isolated (index=%d)", FXindex or -1)
+  -- 隔離 focused FX（Chain 模式：不 isolate）
+  if (not no_isolate) and (FXindex ~= nil) then
+    ASP._state.fx_enable_shot = isolate_only_focused_fx(FXtrack, FXindex)
+    ASP.log("focused FX isolated (index=%d)", FXindex or -1)
+  else
+    ASP._state.fx_enable_shot = nil
+    ASP.log("chain-mode: no isolate; keep track FX enables as-is")
+  end
 
   ASP._prepare_preview_items_on_fx_track(mode)
   ASP._apply_mode_flags(mode)
@@ -753,8 +904,8 @@ function ASP.cleanup_if_any()
   reaper.Main_OnCommand(41185, 0) -- Item: Unsolo all
   reaper.Main_OnCommand(40340, 0) -- Track: Unsolo all tracks
 
-  -- 還原 FX enable 狀態
-  if ASP._state.fx_track and ASP._state.fx_enable_shot then
+  -- 還原 FX enable 狀態（只有 Focused 模式 isolate 過才還原）
+  if ASP._state.fx_track and ASP._state.fx_enable_shot ~= nil then
     restore_fx_enabled(ASP._state.fx_track, ASP._state.fx_enable_shot)
     ASP._state.fx_enable_shot = nil
     ASP.log("FX enables restored")
@@ -892,8 +1043,16 @@ function ASP._prepare_preview_items_on_fx_track(mode)
   local UL, UR = compute_preview_span()
   local tridx  = reaper.GetMediaTrackInfo_Value(ASP._state.fx_track, "IP_TRACKNUMBER")
   tridx = (tridx and tridx > 0) and math.floor(tridx) or 0
-  local _, fxname = reaper.TrackFX_GetFXName(ASP._state.fx_track, ASP._state.fx_index, "")
-  local note = string.format("PREVIEWING @ Track %d - %s", tridx, fxname or "Focused FX")
+
+  local label
+  if ASP._state.fx_index ~= nil then
+    local _, fxname = reaper.TrackFX_GetFXName(ASP._state.fx_track, ASP._state.fx_index, "")
+    label = fxname or "Focused FX"
+  else
+    local _, tn = reaper.GetSetMediaTrackInfo_String(ASP._state.fx_track, "P_NAME", "", false)
+    label = tn and (#tn>0 and tn or "FX Track") or "FX Track"
+  end
+  local note = string.format("PREVIEWING @ Track %d - %s", tridx, label)
 
   -- 放在「原始軌」：以第一個選取 item 的軌為準
   local first_sel = reaper.GetSelectedMediaItem(0, 0)
@@ -1034,5 +1193,6 @@ function ASP._apply_mode_flags(mode)
 
   undo_end_no_undo("AS Preview: apply mode flags (no undo)")
 end
+
 
 return ASP
