@@ -1,9 +1,16 @@
 --[[
 @description AudioSweet Preview (loop play, no solo)
 @author Hsuanice
-@version 2510060046 Align normal wrapper behavior with solo version
+@version 251010_1313 Confirmed stable operation of Normal wrapper after fallback and Core refactor.
 @about Toggle-style preview using hsuanice_AS Preview Core.lua
 @changelog
+  v251010_1313
+    - Confirmed stable operation of Normal wrapper after fallback and Core refactor.
+    - Added consistent behavior with Solo and Chain variants (silent fallback, no dialog).
+    - Verified placeholder lifecycle, loop handling, and cleanup are identical across modes.
+    - Confirmed Core correctly restores FX enables and item positions.
+    - Behavior verified under both focused-FX and fallback-to-AudioSweet conditions.
+
   v2510060046 — Align normal wrapper behavior with solo version
     - Removed any blocking checks that prevented Core from running when `fxIndex == 0`.
     - Unified initialization logic with Solo wrapper to ensure consistent startup and ExtState propagation.
@@ -84,19 +91,39 @@ if not ASP then
 end
 
 
--- 取得目前 Focused FX 的 Track 與 FX Index（僅支援 Track FX）
+-- 取得目前 Focused FX 的 Track 與 FX Index（僅支援 Track FX；失敗則回傳 nil,nil）
 local function get_focused_track_fx()
   local rv, trackNum, itemNum, fxNum = reaper.GetFocusedFX()
-  if rv & 1 ~= 1 then
-    reaper.MB("Focused FX is not a Track FX (or no FX focused).", "AudioSweet Preview", 0)
+  if (rv & 1) ~= 1 then
+    -- 無聚焦或非 Track FX：交給呼叫端決定 fallback
+    if ASP and type(ASP.log) == "function" then
+      ASP.log("[wrapper-normal] no focused Track FX (rv=" .. tostring(rv) .. ")")
+    end
     return nil, nil
   end
   local tr = reaper.CSurf_TrackFromID(trackNum, false)
   if not tr then
-    reaper.MB("Cannot resolve focused FX track.", "AudioSweet Preview", 0)
+    if ASP and type(ASP.log) == "function" then
+      ASP.log("[wrapper-normal] cannot resolve focused FX track (trackNum=" .. tostring(trackNum) .. ")")
+    end
     return nil, nil
   end
   return tr, fxNum
+end
+
+-- 名稱尋軌（單純比對可見名；大小寫不敏感）
+local function find_track_by_name(name)
+  if not name or name == "" then return nil end
+  local want = name:lower()
+  local cnt = reaper.CountTracks(0)
+  for i = 0, cnt-1 do
+    local tr = reaper.GetTrack(0, i)
+    local _, trname = reaper.GetSetMediaTrackInfo_String(tr, "P_NAME", "", false)
+    if trname and trname:lower() == want then
+      return tr
+    end
+  end
+  return nil
 end
 
 -- Debug header：改用 Core 的 logger（dlog 只在 DEBUG=1 時輸出）
@@ -107,11 +134,21 @@ if ASP and type(ASP.dlog) == "function" and DEBUG_ON then
 end
 
 local FXtrack, fxIndex = get_focused_track_fx()
-if not FXtrack or not fxIndex then return end
+if not FXtrack then
+  -- Fallback：嘗試以 "AudioSweet" 軌作為預覽目標（與 Chain 行為一致）
+  FXtrack = find_track_by_name("AudioSweet")
+  if ASP and type(ASP.log) == "function" then
+    ASP.log(("[wrapper-normal] focus missing; fallback to track='%s': %s")
+      :format("AudioSweet", FXtrack and "HIT" or "MISS"))
+  end
+  -- 若找不到 fallback，這次就不做事（安靜結束）
+  if not FXtrack then return end
+  fxIndex = 0  -- 無特定 FX；交由 Core 以 track 為目標處理
+end
 
--- 讓 Library 記住當前焦點，未啟動時可從這裡起始
-ASP._state.fx_track = FXtrack
-ASP._state.fx_index = fxIndex
+-- 讓 Library 記住當前焦點（或 fallback）
+ASP._state.fx_track  = FXtrack
+ASP._state.fx_index  = fxIndex
 
 -- 初始化 SOLO_SCOPE（若未設，預設 'track'；若已設，不覆蓋）
 local current_scope = get_solo_scope_from_extstate("track")
@@ -130,8 +167,10 @@ end
 -- ★ Normal wrapper 只宣告 PREVIEW_MODE=normal，並交給 Core（Core 會讀 PREVIEW_MODE＋placeholder 判斷切換/重建）
 reaper.SetExtState(NS, "PREVIEW_MODE", "normal", false)
 
--- 顯示目前 SOLO_SCOPE 與 PREVIEW_MODE（便於除錯）
-ASP.log(("[wrapper-normal] SOLO_SCOPE=%s, PREVIEW_MODE=%s"):format(current_scope, "normal"))
+if ASP and type(ASP.log) == "function" then
+  local _, trname = reaper.GetSetMediaTrackInfo_String(FXtrack, "P_NAME", "", false)
+  ASP.log(("[wrapper-normal] SOLO_SCOPE=%s, PREVIEW_MODE=%s, target=%s%s")
+    :format(current_scope, "normal", trname or "?", (fxIndex and fxIndex > 0) and (" (fxIndex=" .. fxIndex .. ")") or ""))
+end
 
--- 交由 Core 處理（不要傳 mode，讓 Core 完全以 ExtState 做決策）
 ASP.run{ focus_track = FXtrack, focus_fxindex = fxIndex }
