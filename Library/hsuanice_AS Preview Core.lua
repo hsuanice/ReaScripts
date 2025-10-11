@@ -1,11 +1,21 @@
 --[[
 @description AudioSweet Preview Core
 @author Hsuanice
-@version 251010_2152 Added: Convenience arg `target_track_name` for ASP.preview(); equivalent to `target={by="name", value="<name>"}`.
+@version 251012_0010 Added: Support for `target = "TARGET_TRACK_NAME"` sugar.
 
 
 @about Minimal, self-contained preview runtime. Later we can extract helpers to "hsuanice_AS Core.lua".
 @changelog
+  v251012_0010
+    - Added: Support for `target = "TARGET_TRACK_NAME"` sugar.
+      * When this is used and `_G.TARGET_TRACK_NAME` is defined,
+        the Core will resolve it as a track name target automatically.
+      * Internally converts it to `args.target_track_name = _G.TARGET_TRACK_NAME`
+        and clears `args.target` to reuse existing name-based logic.
+    - Purpose: Simplify Template usage — no need for `target_track_name = TARGET_TRACK_NAME`.
+      The user now only sets `local TARGET_TRACK_NAME = "YourTrack"`
+      and switches mode with `target = "TARGET_TRACK_NAME"`.
+
   v251010_2152
     - Added: Convenience arg `target_track_name` for ASP.preview(); equivalent to `target={by="name", value="<name>"}`.
     - Added: Default target fallback to `"AudioSweet"` when neither `target` nor `target_track_name` is provided.
@@ -462,6 +472,15 @@ function ASP.preview(args)
   if args.target == nil and args.target_track_name ~= nil then
     args.target = { by = "name", value = tostring(args.target_track_name) }
   end
+
+  -- Convenience: allow target = "TARGET_TRACK_NAME" to use the wrapper-defined name
+  if args.target == "TARGET_TRACK_NAME"
+    and type(_G.TARGET_TRACK_NAME) == "string"
+    and _G.TARGET_TRACK_NAME ~= "" then
+    args.target_track_name = _G.TARGET_TRACK_NAME
+    args.target = nil  -- let existing sugar resolve by name
+  end  
+
   local mode       = (args.mode == "normal") and "normal" or "solo"
   local chain_mode = args.chain_mode == true
 
