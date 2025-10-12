@@ -1,11 +1,17 @@
 --[[
 @description AudioSweet Preview Core
 @author Hsuanice
-@version 251012_1615 Change: Removed support for the literal mode `target = "track"`.
+@version 251012_2008  - Change: Focused preview (chain_mode=false) now forces target="focused".
 
 
 @about Minimal, self-contained preview runtime. Later we can extract helpers to "hsuanice_AS Core.lua".
 @changelog
+  v251012_2008
+    - Change: Focused preview (chain_mode=false) now forces target="focused".
+      * Any name-based target (including `target="TARGET_TRACK_NAME"` or `target_track_name`) is ignored in focused mode.
+      * This makes switching between chain and focused modes trivial from the template: just flip `chain_mode`.
+    - Docs: Updated ASP.preview() arg comments to clarify forced-focused behavior when chain_mode=false.
+
   v251012_1615
     - Change: Removed support for the literal mode `target = "track"`.
       * Core now only exposes two target forms: "focused" and name-based targets
@@ -487,6 +493,8 @@ end
 --   target      = "focused"|"name:<TrackName>"|{by="name", value="<TrackName>"},
 --   target_track_name = "MyChain",         -- convenience: same as target={by="name", value="MyChain"}
 --   chain_mode  = true|false,              -- true = Track FX Chain preview (no isolate)
+--                                          -- false = Focused preview; Core will FORCE target to "focused"
+--                                          --          (ignores any name-based target or TARGET_TRACK_NAME)
 --   isolate_focused = true|false,          -- only meaningful when chain_mode=false; default true
 --   solo_scope  = "track"|"item",          -- override USER_SOLO_SCOPE (optional)
 --   restore_mode= "guid"|"timesel",        -- override USER_RESTORE_MODE (optional)
@@ -536,7 +544,8 @@ function ASP.preview(args)
   USER_RESTORE_MODE = (args.restore_mode == "timesel") and "timesel" or "guid"
 
   -- Resolve target once
-  local target_spec = normalize_target(args)
+  -- Focused preview (chain_mode=false) always uses "focused", ignoring any name-based targets.
+  local target_spec = chain_mode and normalize_target(args) or "focused"
   local FXtrack, FXindex, kind = ASP._resolve_target(target_spec)
 
   -- Fallback: if resolution failed, try name:AudioSweet
