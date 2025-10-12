@@ -1,11 +1,37 @@
 --[[
 @description AudioSweet Preview Core
 @author Hsuanice
-@version 251012_0010 Added: Support for `target = "TARGET_TRACK_NAME"` sugar.
+@version 251012_1615 Change: Removed support for the literal mode `target = "track"`.
 
 
 @about Minimal, self-contained preview runtime. Later we can extract helpers to "hsuanice_AS Core.lua".
 @changelog
+  v251012_1615
+    - Change: Removed support for the literal mode `target = "track"`.
+      * Core now only exposes two target forms: "focused" and name-based targets
+        (via `target_track_name`, `target = "name:<TrackName>"`, or the sentinel `target = "TARGET_TRACK_NAME"`).
+      * The normalization path no longer accepts `"track"`; any previous wrapper relying on
+        `target="track"` must switch to name-based or focused mode.
+    - Docs: Updated comments in `_resolve_target` and `ASP.preview` to reflect supported forms.
+    - Behavior: No change to focused/name-based flows; fallbacks and logs unchanged.
+
+  v251012_0030
+    - Change: Single-pass target normalization in ASP.preview(); no mutation of args.
+      * All accepted forms now normalize to a single target spec before resolution:
+        - target = "focused"
+        - target = "name:<TrackName>"
+        - target = MediaTrack*
+        - target = { by="name"|"guid"|"index"|"focused", value=... }
+        - target_track_name = "<TrackName>"
+        - target = "TARGET_TRACK_NAME"  (reads _G.TARGET_TRACK_NAME)
+      * Only one call to _resolve_target() is made after normalization.
+    - Added: Convenience support for `target = "TARGET_TRACK_NAME"` (reads `_G.TARGET_TRACK_NAME`).
+    - Behavior: Unchanged audio path and fallbacks:
+      * Default target when nothing specified → {by="name", value="AudioSweet"}.
+      * If resolution fails, fallback to "name:AudioSweet".
+      * Chain mode still ignores FX index; focused mode still requires a valid FX index.
+    - Dev Notes: Clearer, faster code path; logs and loop behavior unchanged.
+
   v251012_0010
     - Added: Support for `target = "TARGET_TRACK_NAME"` sugar.
       * When this is used and `_G.TARGET_TRACK_NAME` is defined,
@@ -365,8 +391,8 @@ function ASP.log(fmt, ...)
 end
 
 -- Resolve different "target" specs into (track, fxindex, kind)
--- target 支援：
---   "focused" | "name:<TrackName>" | "guid:{...}" | { by="name"/"guid"/"index"/"focused", value=... } | MediaTrack*
+-- target supports:
+--   "focused" | "name:<TrackName>" | { by="name", value="<TrackName>" }
 -- 回傳：
 --   FXtrack :: MediaTrack*
 --   FXindex :: integer or nil  （Chain 模式會傳回 nil；Focused 模式是 0-based index）
@@ -457,71 +483,78 @@ local function write_state(t)
 end
 
 -- args = {
---   mode        = "solo"|"normal",         -- 預設 "solo"
---   target      = "focused"|"name:AudioSweet"|MediaTrack*|{by=...,value=...},
+--   mode        = "solo"|"normal",         -- default "solo"
+--   target      = "focused"|"name:<TrackName>"|{by="name", value="<TrackName>"},
 --   target_track_name = "MyChain",         -- convenience: same as target={by="name", value="MyChain"}
---   chain_mode  = true|false,               -- true=整條 Track FX Chain（不 isolate，不動 FX enable/offline）
---   isolate_focused = true|false,           -- 只在 chain_mode=false 時有意義；預設 true
---   solo_scope  = "track"|"item",           -- 覆寫 USER_SOLO_SCOPE（選擇性）
---   restore_mode= "guid"|"timesel",         -- 覆寫 USER_RESTORE_MODE（選擇性）
---   debug       = true|false,               -- 覆寫 USER_DEBUG（選擇性）
+--   chain_mode  = true|false,              -- true = Track FX Chain preview (no isolate)
+--   isolate_focused = true|false,          -- only meaningful when chain_mode=false; default true
+--   solo_scope  = "track"|"item",          -- override USER_SOLO_SCOPE (optional)
+--   restore_mode= "guid"|"timesel",        -- override USER_RESTORE_MODE (optional)
+--   debug       = true|false,              -- override USER_DEBUG (optional)
 -- }
 function ASP.preview(args)
   args = args or {}
-  -- Convenience: allow plain track name via args.target_track_name
-  if args.target == nil and args.target_track_name ~= nil then
-    args.target = { by = "name", value = tostring(args.target_track_name) }
-  end
 
-  -- Convenience: allow target = "TARGET_TRACK_NAME" to use the wrapper-defined name
-  if args.target == "TARGET_TRACK_NAME"
-    and type(_G.TARGET_TRACK_NAME) == "string"
-    and _G.TARGET_TRACK_NAME ~= "" then
-    args.target_track_name = _G.TARGET_TRACK_NAME
-    args.target = nil  -- let existing sugar resolve by name
-  end  
+  -- Read-only normalization: produce a single target_spec without mutating args
+  -- inside ASP.preview(args)
+  local function normalize_target(a)
+    -- A) explicit mode: focused / pass-through
+    if a.target == "focused" then
+      return "focused"                       -- ignore target_track_name
+    end
+    if a.target ~= nil and a.target ~= "TARGET_TRACK_NAME" then
+      return a.target                        -- pass-through ("name:<X>" or table spec)
+    end
+
+    -- B) sentinel: target = "TARGET_TRACK_NAME"
+    if a.target == "TARGET_TRACK_NAME" then
+      local name = a.target_track_name
+      if type(name) ~= "string" or name == "" then
+        name = _G.TARGET_TRACK_NAME
+      end
+      if type(name) == "string" and name ~= "" then
+        return { by = "name", value = name } -- use provided name
+      end
+      return { by = "name", value = "AudioSweet" } -- last-resort fallback
+    end
+
+    -- C) no explicit target: allow direct name when target is nil
+    if a.target == nil and type(a.target_track_name) == "string" and a.target_track_name ~= "" then
+      return { by = "name", value = a.target_track_name }
+    end
+
+    -- D) default when nothing specified
+    return "focused"
+  end
 
   local mode       = (args.mode == "normal") and "normal" or "solo"
   local chain_mode = args.chain_mode == true
 
-  -- 覆寫 Core 的 user options（選擇性）
+  -- Override Core user options (optional)
   if args.debug ~= nil then USER_DEBUG = args.debug and true or false end
-  if args.solo_scope == "item" then USER_SOLO_SCOPE = "item" else USER_SOLO_SCOPE = "track" end
-  if args.restore_mode == "timesel" then USER_RESTORE_MODE = "timesel" else USER_RESTORE_MODE = "guid" end
+  USER_SOLO_SCOPE = (args.solo_scope == "item") and "item" or "track"
+  USER_RESTORE_MODE = (args.restore_mode == "timesel") and "timesel" or "guid"
 
-  -- 解析 target
-  local FXtrack, FXindex, kind = ASP._resolve_target(args.target or "focused")
+  -- Resolve target once
+  local target_spec = normalize_target(args)
+  local FXtrack, FXindex, kind = ASP._resolve_target(target_spec)
 
-  -- === SUGAR: allow target_track_name for wrappers ===
-  if args.target_track_name and not args.target then
-    args.target = { by = "name", value = args.target_track_name }
-  end
-
-  -- Default fallback: if still no target, use 'AudioSweet' track
-  if args.target == nil then
-    args.target = { by = "name", value = "AudioSweet" }
-  end
-
-  -- Re-resolve target after sugar/default fallback
-  FXtrack, FXindex, kind = ASP._resolve_target(args.target or "focused")
-
-  -- 若 focused 找不到軌，fallback 到 name:AudioSweet
+  -- Fallback: if resolution failed, try name:AudioSweet
   if not FXtrack then
     FXtrack, FXindex, kind = ASP._resolve_target("name:AudioSweet")
   end
 
-  -- 對 Chain 模式：不 isolate，所以把 FXindex 丟掉（不需要）
+  -- Chain mode does not need an FX index
   local focus_index = chain_mode and nil or FXindex
 
-  -- 告訴 wrapper / Core 當前預覽模式（沿用 ExtState）
+  -- Mirror the chosen mode into ExtState (for cross-wrapper toggle)
   reaper.SetExtState(ASP.ES_NS, ASP.ES_MODE, mode, false)
 
-  -- 呼叫現有 run()；加上 no_isolate 旗標給 Core 判斷
   return ASP.run{
     mode          = mode,
     focus_track   = FXtrack,
-    focus_fxindex = focus_index,   -- Chain 模式會是 nil
-    no_isolate    = chain_mode,    -- ✅ Chain 模式：不 isolate，不碰 FX enable/offline
+    focus_fxindex = focus_index,
+    no_isolate    = chain_mode,
   }
 end
 
