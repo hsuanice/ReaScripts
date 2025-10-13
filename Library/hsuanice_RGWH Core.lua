@@ -1,11 +1,90 @@
 --[[
-@description Render or Glue Items with Handles Core Library
-@version 251009_1839  -- updated render_selection() with optional overrides
+@description RGWH Core (Render/Glue with Handles) — Public Beta
+@version 251013_2350 - Fixed TS-Window glue with Track FX and improved logging
 @author hsuanice
 @about
-  Library for RGWH glue/render flows with handles, FX policies, rename, # markers, and optional take markers inside glued items.
+  Core library for handle-aware Render/Glue workflows with clear, single-entry API.
+  Features:
+    • Handle-aware windows with clamp-to-source.
+    • Glue by Item Units (same-track grouping), with optional Glue Cues.
+    • Render single items with apply policies and BWF TimeReference embed.
+    • One-run overrides via ExtState snapshot/restore (non-destructive defaults).
+    • Edge Cues (#in/#out) and Glue Cues (#Glue: <TakeName>) for media cue workflows.
+
+@api
+  -- Primary:
+  RGWH.core(args) -> (ok:boolean, err?:string)
+    args = {
+      op = "render" | "glue" | "auto",     -- render = single item only; glue supports scope (see below)
+      selection_scope = "auto" | "units" | "ts" | "item",  -- glue/auto only; render ignores it
+      item  = MediaItem*,                  -- optional single-item provider (render or glue/item)
+      items = { MediaItem*, ... },         -- optional items provider for glue/units
+
+      -- Channel mode (maps to GLUE/RENDER_APPLY_MODE):
+      channel_mode = "auto" | "mono" | "multi",
+
+      -- Render-specific toggles:
+      take_fx  = true|false,               -- bake take FX (nil = keep ExtState)
+      track_fx = true|false,               -- bake track FX (nil = keep ExtState)
+      tc_mode  = "previous" | "current" | "off", -- TimeReference embed policy (render only)
+
+      -- One-run overrides (fallback: ExtState -> DEFAULTS):
+      handle  = { mode="seconds", seconds=5.0 } | "ext" | nil,
+      epsilon = { mode="frames", value=0.5 }     | "ext" | nil,
+      cues    = { write_edge=true/false, write_glue=true/false },
+      policies = {
+        glue_single_items = true/false,
+        glue_no_trackfx_output_policy   = "preserve"|"force_multi",
+        render_no_trackfx_output_policy = "preserve"|"force_multi",
+        rename_mode = "auto"|"glue"|"render",
+      },
+      debug = { level=1..N, no_clear=true/false },
+    }
+
+  -- Legacy (kept for compatibility):
+  RGWH.glue_selection()
+  RGWH.render_selection(take_fx?, track_fx?, mode?, tc_mode?)
+  RGWH.apply(args)  -- AudioSweet bridge (unchanged)
+  
+@notes
+  • "render" always processes a single item (selected or provided); selection_scope is ignored.
+  • "glue" supports Item Units / TS-Window / single item. 
+  • "auto": single item and GLUE_SINGLE_ITEMS=false → render; otherwise glue with auto-scope (TS≈selection span → Units; else TS).
+  • All overrides are one-run only: ExtState is snapshotted and restored after operation.
 
 @changelog
+  251013_2350
+    - Fixed: TS-Window path now respects take_fx=false by clearing all take FX
+              before glue, ensuring non-baked output when policy disabled.
+    - Added: Debug print in TS-Window now includes GLUE_TAKE_FX state and
+              reports when FX are cleared (e.g. “[TS-GLUE] cleared TAKE FX …”).
+    - Behavior: Core automatically keeps WRITE_GLUE_CUES active but disables
+                WRITE_EDGE_CUES for all TS-Window operations (no handle mode).
+    - Internal: glue_by_ts_window_on_track() updated to handle selective
+                pre-glue cleanup via clear_take_fx_for_items().
+                  
+  251013_2324
+    - Fix: Replace C-style comment in TS-Window force-multi apply path with Lua comment to prevent syntax error.
+    - Note: Decision splitter in RGWH.core(args) is already present in this build; no additional merge needed.
+
+  251013_2009
+    - TS-Window glue now ignores handles (AudioSweet parity)
+    - In TS-Window path, removed handle extension and boundary stretching.
+    - Glue strictly within the current TS, then apply FX per policy.
+
+  v251013_1930
+    - Change: Always restore previous take's StartInSource (D_STARTOFFS) after render,
+              regardless of RENDER_TC_EMBED mode ("previous" | "current" | "off").
+              This ensures all legacy takes stay aligned even when tc_mode="off".
+    - Removed: redundant SIS restoration inside TimeReference embed block
+              (logic now executed unconditionally before TR writing).
+
+  251013_1200 (Public Beta)
+    - Added: TS-Window glue path and auto-scope detection (TS vs Item Units).
+    - Added: Single-entry `RGWH.core(args)` (render/glue/auto).
+    - Clean: English-only comments, consistent section headers, stable API doc in header.
+    - Kept: Backward compat for `glue_selection()`, `render_selection()`, and `apply()`.
+
   251009_1839
     - New: `M.render_selection(take_fx, track_fx, mode, tc_mode)` now accepts call-site overrides (integers/booleans for TAKE/ TRACK FX, `"mono"|"multi"|"auto"` for apply mode, `"previous"|"current"|"off"` for TC embed).
     - New: Apply-mode `"auto"` — infers mono/multi by scanning the max source channel count across the current selection.
@@ -490,6 +569,52 @@ local function collect_by_track_from_selection()
   return by_tr, tracks
 end
 
+-- Time Selection helpers --------------------------------------------
+local function get_current_ts()
+  local L, R = r.GetSet_LoopTimeRange(false, false, 0, 0, false)
+  local has = (R - L) > 1e-9
+  return L, R, has
+end
+
+local function span_of_selected_items()
+  local items = get_sel_items()
+  if #items == 0 then return nil, nil, 0 end
+  local L, R = math.huge, -math.huge
+  for _, it in ipairs(items) do
+    local iL, iR = item_span(it)
+    if iL < L then L = iL end
+    if iR > R then R = iR end
+  end
+  if L == math.huge then return nil, nil, 0 end
+  return L, R, #items
+end
+
+local function approximately_equal_span(aL, aR, bL, bR, tol)
+  tol = tol or 0.002
+  return (math.abs((aL or 0) - (bL or 0)) <= tol)
+     and (math.abs((aR or 0) - (bR or 0)) <= tol)
+end
+
+local function item_intersects_ts(it, L, R)
+  local iL, iR = item_span(it)
+  return (iR > L) and (iL < R)
+end
+
+local function collect_items_intersect_ts_by_track(tsL, tsR)
+  local by_tr, tracks = {}, {}
+  local sel = get_sel_items()
+  for _, it in ipairs(sel) do
+    if item_intersects_ts(it, tsL, tsR) then
+      local tr = r.GetMediaItem_Track(it)
+      if not by_tr[tr] then by_tr[tr] = {}; tracks[#tracks+1] = tr end
+      by_tr[tr][#by_tr[tr]+1] = it
+    end
+  end
+  table.sort(tracks, function(a,b)
+    return (r.GetMediaTrackInfo_Value(a,"IP_TRACKNUMBER") or 0) < (r.GetMediaTrackInfo_Value(b,"IP_TRACKNUMBER") or 0)
+  end)
+  return by_tr, tracks
+end
 ------------------------------------------------------------
 -- Handle window / clamp
 ------------------------------------------------------------
@@ -904,9 +1029,150 @@ local function glue_unit(tr, u, cfg)
 
 end
 
+-- GLUE by explicit Time Selection window for a single track (NO handles; TS-Window parity with AudioSweet)
+local function glue_by_ts_window_on_track(tr, tsL, tsR, cfg)
+  local DBG = cfg.DEBUG_LEVEL or 1
+  -- TS-Window rules:
+  --   • No handles
+  --   • Never write EDGE_CUES
+  --   • WRITE_GLUE_CUES allowed (adjacent-different-source within TS)
+  --   • If GLUE_TAKE_FX==false → clear take FX before glue (do not bake take-FX)
+  --   • If GLUE_TRACK_FX==1    → Apply after glue (mono/multi/auto); else skip
+
+  dbg(DBG,1,"[TS-GLUE] track#%d  GLUE_TAKE_FX=%s  GLUE_TRACK_FX=%s  apply_mode=%s  write_glue_cues=%s",
+      r.GetMediaTrackInfo_Value(tr,"IP_TRACKNUMBER") or -1,
+      tostring(cfg.GLUE_TAKE_FX), tostring(cfg.GLUE_TRACK_FX),
+      tostring(cfg.GLUE_APPLY_MODE), tostring(cfg.WRITE_GLUE_CUES))
+
+  -- collect selected members on this track that intersect TS
+  local members = {}
+  local n = r.CountTrackMediaItems(tr) or 0
+  for i = 0, n-1 do
+    local it = r.GetTrackMediaItem(tr, i)
+    if r.IsMediaItemSelected(it) and item_intersects_ts(it, tsL, tsR) then
+      local L, R = item_span(it)
+      -- clamp intersection to TS for boundary labeling
+      local iL = (L < tsL) and tsL or L
+      local iR = (R > tsR) and tsR or R
+      members[#members+1] = { it = it, L = L, R = R, iL = iL, iR = iR }
+    end
+  end
+  if #members == 0 then
+    dbg(DBG,1,"[RUN] TS glue: no members on this track.")
+    return
+  end
+  table.sort(members, function(a,b) return a.iL < b.iL end)
+
+  -- Optional: WRITE_GLUE_CUES inside TS when sources switch
+  local glue_ids = nil
+  if cfg.WRITE_GLUE_CUES and #members >= 2 then
+    -- build per-member source id and label
+    local function src_key_and_name(it)
+      local tk  = r.GetActiveTake(it)
+      if not tk then return "<no-src>", (r.GetTakeName and r.GetTakeName(tk)) or "" end
+      local src = r.GetMediaItemTake_Source(tk)
+      local p   = src and r.GetMediaSourceFileName(src, "") or ""
+      p = p:gsub("\\","/"):gsub("^%s+",""):gsub("%s+$","")
+      local key = (p ~= "" and p) or "<no-src>"
+      local ok, nm = r.GetSetMediaItemTakeInfo_String(tk, "P_NAME", "", false)
+      local lbl = (ok and nm ~= "" and nm) or (p:match("([^/]+)$") or "")
+      return key, lbl
+    end
+
+    local seq = {}
+    for _,m in ipairs(members) do
+      local key, lbl = src_key_and_name(m.it)
+      seq[#seq+1] = { L = m.iL, key = key, label = lbl }
+    end
+
+    -- write head + boundaries where source changes
+    glue_ids = {}
+    if seq[1] then
+      local id = r.AddProjectMarker2(0, false, tsL, 0, ("#Glue: %s"):format(seq[1].label or ""), -1, 0)
+      glue_ids[#glue_ids+1] = id
+    end
+    for i=1,(#seq-1) do
+      if seq[i].key ~= seq[i+1].key then
+        local id = r.AddProjectMarker2(0, false, seq[i+1].L, 0, ("#Glue: %s"):format(seq[i+1].label or ""), -1, 0)
+        glue_ids[#glue_ids+1] = id
+      end
+    end
+    if DBG>=2 then dbg(DBG,2,"[GLUE-CUE][TS] wrote %d markers (track #%d)", #glue_ids, r.GetMediaTrackInfo_Value(tr,"IP_TRACKNUMBER") or -1) end
+  end
+
+  -- select only intersecting members for this track
+  local items_sel = {}
+  for i, m in ipairs(members) do items_sel[i] = m.it end
+  select_only_items(items_sel)
+
+  -- If policy says "do NOT bake take FX", clear take FX before glue
+  if not cfg.GLUE_TAKE_FX then
+    clear_take_fx_for_items(items_sel)
+    dbg(DBG,1,"[TS-GLUE] cleared TAKE FX on %d item(s) (policy off)", #items_sel)
+  end
+
+  -- Glue strictly within TS (no handle extension)
+  r.GetSet_LoopTimeRange(true, false, tsL, tsR, false)
+  r.Main_OnCommand(ACT_GLUE_TS, 0)
+
+  -- Apply (Track/Take) per policy: TS-Window treats GLUE_TAKE_FX as ON by design.
+  local glued_pre = find_item_by_span_on_track(tr, tsL, tsR, 0.002)
+  if cfg.GLUE_TRACK_FX and glued_pre then
+    -- clear fades to avoid baking during apply
+    r.SetMediaItemInfo_Value(glued_pre, "D_FADEINLEN",       0)
+    r.SetMediaItemInfo_Value(glued_pre, "D_FADEINLEN_AUTO",  0)
+    r.SetMediaItemInfo_Value(glued_pre, "D_FADEOUTLEN",      0)
+    r.SetMediaItemInfo_Value(glued_pre, "D_FADEOUTLEN_AUTO", 0)
+    apply_track_take_fx_to_item(glued_pre, cfg.GLUE_APPLY_MODE, DBG)
+  elseif glued_pre
+     and (cfg.GLUE_APPLY_MODE == "multi")
+     and (cfg.GLUE_OUTPUT_POLICY_WHEN_NO_TRACKFX == "force_multi") then
+    apply_multichannel_no_fx_preserve_take(glued_pre, true, DBG)  -- keep take FX
+  end
+
+  -- Ensure exact TS window
+  r.GetSet_LoopTimeRange(true, false, tsL, tsR, false)
+  r.Main_OnCommand(ACT_TRIM_TO_TS, 0)
+
+  local glued = find_item_by_span_on_track(tr, tsL, tsR, 0.002)
+  if glued then
+    r.SetMediaItemInfo_Value(glued, "D_POSITION", tsL)
+    r.SetMediaItemInfo_Value(glued, "D_LENGTH",   tsR - tsL)
+    r.UpdateItemInProject(glued)
+  else
+    dbg(DBG,1,"[WARN] TS glue: glued item not found by span.")
+  end
+
+  -- clear TS and temporary markers
+  r.GetSet_LoopTimeRange(true, false, 0, 0, false)
+  if glue_ids and #glue_ids>0 then remove_markers_by_ids(glue_ids) end
+end
 ------------------------------------------------------------
 -- PUBLIC API
 ------------------------------------------------------------
+-- Auto-scope glue: Units vs TS-Window
+local function glue_auto_scope(cfg)
+  local DBG = cfg.DEBUG_LEVEL or 1
+  local tsL, tsR, hasTS = get_current_ts()
+  local selL, selR, nsel = span_of_selected_items()
+
+  if not hasTS then
+    dbg(DBG,1,"[SCOPE] TS empty → Units glue.")
+    return "units"
+  end
+  if nsel == 0 then
+    dbg(DBG,1,"[SCOPE] No selection but TS present → TS glue.")
+    return "ts", tsL, tsR
+  end
+  if approximately_equal_span(tsL, tsR, selL, selR, 0.002) then
+    dbg(DBG,1,"[SCOPE] TS ≈ selection span → Units glue.")
+    return "units"
+  else
+    dbg(DBG,1,"[SCOPE] TS differs from selection → TS glue.")
+    return "ts", tsL, tsR
+  end
+end
+
 function M.glue_selection()
   local cfg = M.read_settings()
   local DBG = cfg.DEBUG_LEVEL or 1
@@ -1213,17 +1479,20 @@ function M.render_selection(take_fx, track_fx, mode, tc_mode)
       if DBG >= 2 then dbg(DBG,2,"[TAKEFX] cloned %d FX from old→new on '%s'", ncl, orig_name) end
     end
 
+    ----------------------------------------------------------------
+    -- Always restore previous take's StartInSource (SIS),
+    -- regardless of tc_mode ("previous" | "current" | "off").
+    ----------------------------------------------------------------
+    if tk_orig and orig_startoffs_sec ~= nil then
+      r.SetMediaItemTakeInfo_Value(tk_orig, "D_STARTOFFS", orig_startoffs_sec)
+    end
+
     -- === TimeReference embed (via Library) =========================
     -- ExtState: RENDER_TC_EMBED = "previous" | "current" | "off"
     do
       local mode = cfg.RENDER_TC_EMBED or "previous"
       if newtk and mode ~= "off" then
         local ok_write = false
-
-        -- 1) 保證 prev_take 的 D_STARTOFFS 回到「渲染前」的值
-        if tk_orig and orig_startoffs_sec ~= nil then
-          r.SetMediaItemTakeInfo_Value(tk_orig, "D_STARTOFFS", orig_startoffs_sec)
-        end
 
         if mode == "previous" and tk_orig then
           -- Embed TR from previous (original) take, handle-aware and cross-SR safe
@@ -1276,160 +1545,159 @@ function M.render_selection(take_fx, track_fx, mode, tc_mode)
   r.Undo_EndBlock("RGWH Core - Render (Apply FX per item w/ handles)", -1)
 end
 
-----------------------------------------------------------------
--- AudioSweet bridge: apply() - supports render/glue, auto/mono/multi, handles by Core
-----------------------------------------------------------------
-function M.apply(args)
-  ------------------------------------------------------------------
-  -- AudioSweet bridge — selection-aware, multi-item safe.
-  -- Supports:
-  --   mode: "render_item_focused_fx" | "glue_item_focused_fx"
-  --   selection_scope: "selection" | "items" | "item" (default: "item")
-  --   items: {MediaItem, ...}  -- when selection_scope == "items"
-  --   item:  MediaItem         -- when selection_scope == "item"
-  --   apply_fx_mode: "auto" | "mono" | "multi" (auto -> infer from selection max channels)
-  -- Behavior:
-  --   • Does NOT clear the console (honors DEBUG_NO_CLEAR in project ExtState).
-  --   • Writes temporary overrides into project ExtState namespace RGWH,
-  --     snapshots previous values and restores them after the operation.
-  --   • When selection_scope="selection", preserves current REAPER selection verbatim.
-  --   • Otherwise selects exactly the provided items / item.
-  ------------------------------------------------------------------  
+------------------------------------------------------------
+-- PUBLIC ENTRY (single callsite)
+------------------------------------------------------------
+function M.core(args)
   if type(args) ~= "table" then return false, "bad_args" end
+  local op = tostring(args.op or "auto")  -- "render" | "glue" | "auto"
 
-  local mode = args.mode
-  if mode ~= "render_item_focused_fx" and mode ~= "glue_item_focused_fx" then
-    return false, "unsupported_mode"
-  end
-
-  -- Decide selection scope
-  local scope = tostring(args.selection_scope or "item")  -- "selection" | "items" | "item"
-  local items = {}
-  if scope == "items" and type(args.items) == "table" then
-    for i = 1, #args.items do
-      local it = args.items[i]
-      if reaper.ValidatePtr2(0, it, "MediaItem*") then items[#items+1] = it end
-    end
-    if #items == 0 then return false, "no_valid_items" end
-  elseif scope == "item" then
-    local it = args.item
-    if not (it and reaper.ValidatePtr2(0, it, "MediaItem*")) then
-      return false, "invalid_item"
-    end
-    items[1] = it
-  elseif scope ~= "selection" then
-    -- Fallback: if nothing valid was provided, treat as error
-    return false, "bad_selection_scope"
-  end
-
-  -- Helper: (re)select only given items
-  local function select_only(items_)
-    reaper.SelectAllMediaItems(0, false)
-    for _, it in ipairs(items_) do
-      if reaper.ValidatePtr2(0, it, "MediaItem*") then
-        reaper.SetMediaItemSelected(it, true)
-      end
-    end
-    reaper.UpdateArrange()
-  end
-
-  -- Infer apply_fx_mode if needed (auto = use max channels among selected)
-  local req_mode = tostring(args.apply_fx_mode or "auto")
-  local function max_channels_over(items_)
-    local maxch = 1
-    for _, it in ipairs(items_) do
-      local tk = reaper.GetActiveTake(it)
-      if tk then
-        local src = reaper.GetMediaItemTake_Source(tk)
-        local ch  = src and (reaper.GetMediaSourceNumChannels(src) or 1) or 1
-        if ch > maxch then maxch = ch end
-      end
-    end
-    return maxch
-  end
-  local apply_fx_mode
-  if req_mode == "mono" or req_mode == "multi" then
-    -- Explicit override from caller
-    apply_fx_mode = req_mode
-  else
-    -- Auto: infer from max source channels over the intended scope
-    local items_for_mode = {}
-    if scope == "selection" then
-      local n = reaper.CountSelectedMediaItems(0)
-      for i = 0, n - 1 do
-        items_for_mode[#items_for_mode+1] = reaper.GetSelectedMediaItem(0, i)
-      end
-    else
-      items_for_mode = items
-    end
-    apply_fx_mode = (max_channels_over(items_for_mode) >= 2) and "multi" or "mono"
-  end
-
-  -- Project ExtState (namespace RGWH) snapshot/override/restore
-  local NS = "RGWH"
-  local function proj_get(k, fallback)
-    local _, v = reaper.GetProjExtState(0, NS, k); return (v ~= nil and v ~= "") and v or fallback
-  end
-  local function proj_set(k, v) reaper.SetProjExtState(0, NS, k, tostring(v)) end
-
+  -- Snapshot keys we may override (one-run)
   local prev = {
-    RENDER_TRACK_FX   = proj_get("RENDER_TRACK_FX",   ""),
-    RENDER_TAKE_FX    = proj_get("RENDER_TAKE_FX",    ""),
-    RENDER_APPLY_MODE = proj_get("RENDER_APPLY_MODE", ""),
-    GLUE_TRACK_FX     = proj_get("GLUE_TRACK_FX",     ""),
-    GLUE_TAKE_FX      = proj_get("GLUE_TAKE_FX",      ""),
-    GLUE_APPLY_MODE   = proj_get("GLUE_APPLY_MODE",   ""),
+    HANDLE_MODE     = get_ext("HANDLE_MODE",     ""),
+    HANDLE_SECONDS  = get_ext("HANDLE_SECONDS",  ""),
+    EPSILON_MODE    = get_ext("EPSILON_MODE",    ""),
+    EPSILON_VALUE   = get_ext("EPSILON_VALUE",   ""),
+    WRITE_EDGE_CUES = get_ext("WRITE_EDGE_CUES", ""),
+    WRITE_GLUE_CUES = get_ext("WRITE_GLUE_CUES", ""),
+    DEBUG_LEVEL     = get_ext("DEBUG_LEVEL",     ""),
+    DEBUG_NO_CLEAR  = get_ext("DEBUG_NO_CLEAR",  ""),
+
+    GLUE_SINGLE_ITEMS  = get_ext("GLUE_SINGLE_ITEMS",  ""),
+    GLUE_TAKE_FX       = get_ext("GLUE_TAKE_FX",       ""),
+    GLUE_TRACK_FX      = get_ext("GLUE_TRACK_FX",      ""),
+    GLUE_APPLY_MODE    = get_ext("GLUE_APPLY_MODE",    ""),
+    GLUE_OUT_NO_TRFX   = get_ext("GLUE_OUTPUT_POLICY_WHEN_NO_TRACKFX", ""),
+
+    RENDER_TAKE_FX     = get_ext("RENDER_TAKE_FX",     ""),
+    RENDER_TRACK_FX    = get_ext("RENDER_TRACK_FX",    ""),
+    RENDER_APPLY_MODE  = get_ext("RENDER_APPLY_MODE",  ""),
+    RENDER_OUT_NO_TRFX = get_ext("RENDER_OUTPUT_POLICY_WHEN_NO_TRACKFX", ""),
+    RENDER_TC_EMBED    = get_ext("RENDER_TC_EMBED",    ""),
   }
+  local function set_opt(k, v) if v ~= nil then set_ext(k, v) end end
 
-  -- For both glue/render in AudioSweet, we want: TrackFX=1, TakeFX=1, apply mode decided above.
-  if mode == "render_item_focused_fx" then
-    proj_set("RENDER_TRACK_FX",   "1")
-    proj_set("RENDER_TAKE_FX",    "1")
-    proj_set("RENDER_APPLY_MODE", apply_fx_mode)
-  else -- glue
-    proj_set("GLUE_TRACK_FX",     "1")
-    proj_set("GLUE_TAKE_FX",      "1")
-    proj_set("GLUE_APPLY_MODE",   apply_fx_mode)
+  -- One-run overrides ------------------------------------------------
+  -- handle / epsilon
+  if args.handle and args.handle ~= "ext" then
+    set_opt("HANDLE_MODE",    args.handle.mode or DEFAULTS.HANDLE_MODE)
+    set_opt("HANDLE_SECONDS", tostring(args.handle.seconds or DEFAULTS.HANDLE_SECONDS))
+  end
+  if args.epsilon and args.epsilon ~= "ext" then
+    set_opt("EPSILON_MODE",   args.epsilon.mode or DEFAULTS.EPSILON_MODE)
+    set_opt("EPSILON_VALUE",  tostring(args.epsilon.value or DEFAULTS.EPSILON_VALUE))
   end
 
-  -- Prepare selection only when scope != "selection"
-  local sel_backup = {}
-  if scope ~= "selection" then
-    -- backup current selection to restore later
-    for i = 0, reaper.CountSelectedMediaItems(0)-1 do
-      sel_backup[#sel_backup+1] = reaper.GetSelectedMediaItem(0,i)
+  -- cues
+  if args.cues then
+    if args.cues.write_edge ~= nil then set_opt("WRITE_EDGE_CUES", args.cues.write_edge and "1" or "0") end
+    if args.cues.write_glue ~= nil then set_opt("WRITE_GLUE_CUES", args.cues.write_glue and "1" or "0") end
+  end
+
+  -- debug
+  if args.debug then
+    if args.debug.level ~= nil then set_opt("DEBUG_LEVEL", tostring(args.debug.level)) end
+    if args.debug.no_clear ~= nil then set_opt("DEBUG_NO_CLEAR", args.debug.no_clear and "1" or "0") end
+  end
+
+  -- channel mode (maps to GLUE/RENDER_APPLY_MODE)
+  local ch = args.channel_mode
+  if ch == "auto" or ch == "mono" or ch == "multi" then
+    set_opt("GLUE_APPLY_MODE",   ch)
+    set_opt("RENDER_APPLY_MODE", ch)
+  end
+
+  -- toggles (apply to BOTH render & glue; TS-Window needs GLUE_* too)
+  if args.take_fx  ~= nil then
+    set_opt("RENDER_TAKE_FX", args.take_fx and "1" or "0")
+    set_opt("GLUE_TAKE_FX",   args.take_fx and "1" or "0")
+  end
+  if args.track_fx ~= nil then
+    set_opt("RENDER_TRACK_FX", args.track_fx and "1" or "0")
+    set_opt("GLUE_TRACK_FX",   args.track_fx and "1" or "0")
+  end
+  if args.tc_mode  ~= nil then
+    set_opt("RENDER_TC_EMBED", tostring(args.tc_mode))
+  end
+
+  -- policies
+  if args.policies then
+    if args.policies.glue_single_items ~= nil then
+      set_opt("GLUE_SINGLE_ITEMS", args.policies.glue_single_items and "1" or "0")
     end
-    select_only(items)
+    if args.policies.glue_no_trackfx_output_policy then
+      set_opt("GLUE_OUTPUT_POLICY_WHEN_NO_TRACKFX", args.policies.glue_no_trackfx_output_policy)
+    end
+    if args.policies.render_no_trackfx_output_policy then
+      set_opt("RENDER_OUTPUT_POLICY_WHEN_NO_TRACKFX", args.policies.render_no_trackfx_output_policy)
+    end
+    if args.policies.rename_mode then
+      set_opt("RENAME_OP_MODE", args.policies.rename_mode)
+    end
   end
 
-  -- Run  
+  -- Run --------------------------------------------------------------
   local ok, err
-  if mode == "render_item_focused_fx" then
-    ok, err = pcall(M.render_selection)
+  if op == "render" then
+    ok, err = pcall(M.render_selection)      -- always single-item; ignores selection_scope
+
+  elseif op == "glue" or op == "auto" then
+    local cfg = M.read_settings()
+
+    -- auto: single item & not allowed to glue single → render; else glue(auto scope)
+    if op == "auto" then
+      local _, _, nsel = span_of_selected_items()
+      local glue_single = (cfg.GLUE_SINGLE_ITEMS == true)
+      if nsel <= 1 and not glue_single then
+        ok, err = pcall(M.render_selection)
+      else
+        op = "glue"
+      end
+    end
+
+    if op == "glue" then
+      local scope = tostring(args.selection_scope or "auto")  -- "auto"|"units"|"ts"|"item"
+      if scope == "units" then
+        ok, err = pcall(M.glue_selection)
+
+      elseif scope == "ts" then
+        local tsL, tsR, hasTS = get_current_ts()
+        if not hasTS then ok, err = false, "no_time_selection" else
+          local by_tr, tracks = collect_items_intersect_ts_by_track(tsL, tsR)
+          r.Undo_BeginBlock(); r.PreventUIRefresh(1)
+          if not cfg.DEBUG_NO_CLEAR then r.ClearConsole() end
+          for _, tr in ipairs(tracks) do
+            glue_by_ts_window_on_track(tr, tsL, tsR, cfg)
+          end
+          r.PreventUIRefresh(-1); r.UpdateArrange(); r.Undo_EndBlock("RGWH Core - Glue TS", -1)
+          ok, err = true, nil
+        end
+
+      elseif scope == "item" then
+        ok, err = pcall(M.glue_selection)
+
+      else -- "auto"
+        local which, tsL, tsR = glue_auto_scope(cfg)
+        if which == "units" then
+          ok, err = pcall(M.glue_selection)
+        else
+          local by_tr, tracks = collect_items_intersect_ts_by_track(tsL, tsR)
+          r.Undo_BeginBlock(); r.PreventUIRefresh(1)
+          if not cfg.DEBUG_NO_CLEAR then r.ClearConsole() end
+          for _, tr in ipairs(tracks) do
+            glue_by_ts_window_on_track(tr, tsL, tsR, cfg)
+          end
+          r.PreventUIRefresh(-1); r.UpdateArrange(); r.Undo_EndBlock("RGWH Core - Glue TS(auto)", -1)
+          ok, err = true, nil
+        end
+      end
+    end
   else
-    ok, err = pcall(M.glue_selection)
+    ok, err = false, "unsupported_op"
   end
 
-  -- Restore selection if we changed it
-  if scope ~= "selection" then
-    select_only(sel_backup)
-  end
-
-  -- Restore ExtState snapshot
-  local function restore_if_set(k, v)
-    if v == nil then return end
-    proj_set(k, v)
-  end
-  if mode == "render_item_focused_fx" then
-    restore_if_set("RENDER_TRACK_FX",   prev.RENDER_TRACK_FX)
-    restore_if_set("RENDER_TAKE_FX",    prev.RENDER_TAKE_FX)
-    restore_if_set("RENDER_APPLY_MODE", prev.RENDER_APPLY_MODE)
-  else
-    restore_if_set("GLUE_TRACK_FX",     prev.GLUE_TRACK_FX)
-    restore_if_set("GLUE_TAKE_FX",      prev.GLUE_TAKE_FX)
-    restore_if_set("GLUE_APPLY_MODE",   prev.GLUE_APPLY_MODE)
-  end
-
+  -- restore snapshot
+  for k, v in pairs(prev) do set_opt(k, v) end
   if not ok then return false, tostring(err) end
   return true
 end
