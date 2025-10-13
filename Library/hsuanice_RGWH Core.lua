@@ -1,6 +1,6 @@
---[[
+--[[]
 @description RGWH Core (Render/Glue with Handles) — Public Beta
-@version 251013_2350 - Fixed TS-Window glue with Track FX and improved logging
+@version 251014_0021
 @author hsuanice
 @about
   Core library for handle-aware Render/Glue workflows with clear, single-entry API.
@@ -53,6 +53,19 @@
   • All overrides are one-run only: ExtState is snapshotted and restored after operation.
 
 @changelog
+  251014_0021
+    - Change: embed_current_tc_for_item() now calls E.Refresh_Items({take}) after
+              a successful TR write, forcing REAPER to reload updated metadata.
+    - Effect: Glue+Apply paths (Units and TS-Window) now immediately reflect
+              embedded TimeReference without manual refresh.
+
+  251014_0011
+    - Change: Centralized CURRENT TimeReference embed after GLUE+APPLY via
+              `embed_current_tc_for_item(item, ref_pos, DBG)`.
+              • Used in Units-Glue (ref_pos = u.start) and TS-Window (ref_pos = tsL).
+              • Triggers whenever GLUE_TRACK_FX=1 or the force-multi no-track-FX path runs.
+    - Benefit: One canonical place for Glue+Apply TC behavior; removed duplicated
+               inline TR writing from individual code paths.
   251013_2350
     - Fixed: TS-Window path now respects take_fx=false by clearing all take FX
               before glue, ensuring non-baked output when policy disabled.
@@ -791,6 +804,26 @@ local function apply_multichannel_no_fx_preserve_take(it, keep_take_fx, dbg_leve
   restore_takefx_offline(tk, tk_snap)
   restore_fades(it, fade_snap)
 end
+
+-- Central helper: embed CURRENT BWF TimeReference for a given item/take
+-- Used after GLUE + Apply (40361/41993) to emulate native Glue behavior.
+local function embed_current_tc_for_item(item, ref_pos, DBG)
+  if not (item and ref_pos) then return end
+  local tk = r.GetActiveTake(item)
+  if not tk then return end
+  local smp = E.TR_FromItemStart(tk, ref_pos)
+  local src = r.GetMediaItemTake_Source(tk)
+  local path = src and r.GetMediaSourceFileName(src, "") or ""
+  if path ~= "" and path:lower():sub(-4) == ".wav" then
+    local ok = (select(1, E.TR_Write(E.CLI_Resolve(), path, smp)) == true)
+    if DBG and DBG >= 2 then dbg(DBG, 2, "[TR][EMBED] current write=%s  samples=%d  path=%s", tostring(ok), smp, path) end
+    -- Force REAPER to reload newly embedded metadata (offline -> online)
+    if ok then
+      E.Refresh_Items({ tk })
+      if DBG and DBG >= 2 then dbg(DBG, 2, "[TR][REFRESH] toggled offline/online for 1 take") end
+    end
+  end
+end
 ------------------------------------------------------------
 -- GLUE FLOW (per unit)
 ------------------------------------------------------------
@@ -953,12 +986,16 @@ local function glue_unit(tr, u, cfg)
     r.SetMediaItemInfo_Value(glued_pre, "D_FADEOUTLEN_AUTO", 0)
 
     apply_track_take_fx_to_item(glued_pre, cfg.GLUE_APPLY_MODE, DBG)
+    -- Emulate Glue’s TC when GLUE+APPLY: embed CURRENT TC at unit start
+    embed_current_tc_for_item(glued_pre, u.start, DBG)
 
   elseif glued_pre
      and (cfg.GLUE_APPLY_MODE == "multi")
      and (cfg.GLUE_OUTPUT_POLICY_WHEN_NO_TRACKFX == "force_multi") then
     -- TRACK FX 未印，但需要強制 multi：以「無 FX」方式套 41993
     apply_multichannel_no_fx_preserve_take(glued_pre, (cfg.GLUE_TAKE_FX == true), DBG)
+    -- Emulate Glue’s TC in force-multi no-track-FX path as well
+    embed_current_tc_for_item(glued_pre, u.start, DBG)
   end
 
   r.Main_OnCommand(ACT_TRIM_TO_TS, 0)
@@ -1124,10 +1161,14 @@ local function glue_by_ts_window_on_track(tr, tsL, tsR, cfg)
     r.SetMediaItemInfo_Value(glued_pre, "D_FADEOUTLEN",      0)
     r.SetMediaItemInfo_Value(glued_pre, "D_FADEOUTLEN_AUTO", 0)
     apply_track_take_fx_to_item(glued_pre, cfg.GLUE_APPLY_MODE, DBG)
+    -- Emulate Glue’s TC when GLUE+APPLY (TS-Window): embed CURRENT TC at tsL
+    embed_current_tc_for_item(glued_pre, tsL, DBG)
   elseif glued_pre
      and (cfg.GLUE_APPLY_MODE == "multi")
      and (cfg.GLUE_OUTPUT_POLICY_WHEN_NO_TRACKFX == "force_multi") then
     apply_multichannel_no_fx_preserve_take(glued_pre, true, DBG)  -- keep take FX
+    -- Emulate Glue’s TC in force-multi no-track-FX path as well (TS-Window)
+    embed_current_tc_for_item(glued_pre, tsL, DBG)
   end
 
   -- Ensure exact TS window
