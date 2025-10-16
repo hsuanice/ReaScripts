@@ -1,7 +1,7 @@
 --[[
 @description AudioSweet Preview Core
 @author Hsuanice
-@version 251016_2305
+@version 251016_2355
 
 
 @about Minimal, self-contained preview runtime. Later we can extract helpers to "hsuanice_AS Core.lua".
@@ -397,7 +397,8 @@ end
 
 
 
--- Collect items on the FX track that belong to the "previewed" set within the placeholder span (excluding the placeholder itself)local function collect_preview_items_on_fx_track(track, ph_item, UL, UR)
+-- Collect items on the FX track that belong to the "previewed" set within the placeholder span (excluding the placeholder itself)
+local function collect_preview_items_on_fx_track(track, ph_item, UL, UR)
   local items = {}
   if not track then return items end
   local ic = reaper.CountTrackMediaItems(track)
