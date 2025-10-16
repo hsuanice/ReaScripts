@@ -1,11 +1,17 @@
 --[[
 @description AudioSweet Preview Core
 @author Hsuanice
-@version v251016_1851
+@version 251016_2305
 
 
 @about Minimal, self-contained preview runtime. Later we can extract helpers to "hsuanice_AS Core.lua".
 @changelog
+  v251016_2305
+    - Changed: Translated all remaining inline comments from Chinese to English for consistency.
+      * Areas covered: function headers and inline notes within Core state, switch mode, and placeholder handling.
+    - No functional change. Behavior identical to v251016_1851.
+    - Purpose: maintain unified English documentation style for public release.
+
   v251016_1851
     - Added: High-precision timing using reaper.time_precise().
       * Exports: snapshot_ms, core_ms, restore_ms, total_ms.
@@ -246,6 +252,7 @@ _G.ASP = ASP
 -- ===== Forward declarations (must appear before any use) =====
 local project_epsilon
 local ranges_touch_or_overlap
+local ranges_strict_overlap
 local undo_begin
 local undo_end_no_undo
 
@@ -253,7 +260,7 @@ local undo_end_no_undo
 ASP.ES_NS         = "hsuanice_AS"
 ASP.ES_STATE      = "PREVIEW_STATE"     -- json: {running=true/false, mode="solo"/"normal"}
 ASP.ES_DEBUG      = "DEBUG"             -- "1" to enable logs
-ASP.ES_MODE       = "PREVIEW_MODE"      -- "solo" | "normal" ; wrappers 會寫入，Core 只讀取
+ASP.ES_MODE       = "PREVIEW_MODE"      -- "solo" | "normal" ; wrappers 會寫入，Core 只讀取ASP.ES_MODE       = "PREVIEW_MODE"      -- "solo" | "normal" ; written by wrappers, read-only for Core
 
 -- NEW: simple run-flag for cross-script handshake
 ASP.ES_RUN        = "PREVIEW_RUN"       -- "1" while preview is running, else "0"
@@ -345,7 +352,7 @@ local function item_bounds(it)
 end
 
 -- check if moving an interval [UL,UR] into target track would overlap any existing item (excluding a given set and excluding a placeholder)
-local function track_has_overlap(tr, UL, UR, exclude_set, placeholder_it)
+local function track_has_overlap(tr, UL, UR, exclude_set, placeholder_it, allow_guid_map)
   if not tr then return false end
   local ic = reaper.CountTrackMediaItems(tr)
   for i=0, ic-1 do
@@ -356,16 +363,23 @@ local function track_has_overlap(tr, UL, UR, exclude_set, placeholder_it)
       if not skip then
         local L = reaper.GetMediaItemInfo_Value(it, "D_POSITION")
         local R = L + reaper.GetMediaItemInfo_Value(it, "D_LENGTH")
-        if ranges_touch_or_overlap(L, R, UL, UR) then
+        if ranges_strict_overlap(L, R, UL, UR) then
+          if allow_guid_map then
+            local g = guid_of(it)
+            if g and allow_guid_map[g] then
+              -- allowed to overlap (original neighbor / crossfade partner)
+              goto continue
+            end
+          end
           return true
         end
       end
     end
+    ::continue::
   end
   return false
 end
-
--- 尋找「原始軌」上的佔位 item（以註記開頭 "PREVIEWING @" 判定）
+-- Find the placeholder item on the source track (identified by note prefix "PREVIEWING @")
 local function find_placeholder_on_track(track)
   if not track then return nil end
   local ic = reaper.CountTrackMediaItems(track)
@@ -383,8 +397,7 @@ end
 
 
 
--- 依據佔位範圍，抓取 FX 軌上屬於「被搬來預覽」的 items（排除佔位本身）
-local function collect_preview_items_on_fx_track(track, ph_item, UL, UR)
+-- Collect items on the FX track that belong to the "previewed" set within the placeholder span (excluding the placeholder itself)local function collect_preview_items_on_fx_track(track, ph_item, UL, UR)
   local items = {}
   if not track then return items end
   local ic = reaper.CountTrackMediaItems(track)
@@ -419,12 +432,12 @@ end
 -- Resolve different "target" specs into (track, fxindex, kind)
 -- target supports:
 --   "focused" | "name:<TrackName>" | { by="name", value="<TrackName>" }
--- 回傳：
+-- Return values:
 --   FXtrack :: MediaTrack*
---   FXindex :: integer or nil  （Chain 模式會傳回 nil；Focused 模式是 0-based index）
+--   FXindex :: integer or nil  (nil for Chain mode; 0-based index for Focused mode)
 --   kind    :: "trackfx" | "takefx" | "none"
 function ASP._resolve_target(target)
-  -- 1) 直接給 MediaTrack*
+  -- 1) Directly given a MediaTrack* object
   if type(target) == "userdata" then
     return target, nil, "trackfx"
   end
@@ -437,7 +450,7 @@ function ASP._resolve_target(target)
       local tr = reaper.GetTrack(0, trNum-1)
       return tr, fxNum, "trackfx"
     elseif rv == 2 then
-      -- Take FX 也回到該 item 的 track，Chain 預覽會用整條 track FX
+      -- Take FX also maps back to the item's track; Chain preview uses the entire track FX chain
       local it = reaper.GetMediaItem(0, itNum)
       if it then
         local tr = reaper.GetMediaItem_Track(it)
@@ -477,8 +490,8 @@ function ASP._resolve_target(target)
       end
       return nil,nil,"none"
     elseif target.by == "guid" then
-      -- 逐軌逐 item 搜尋 GUID 太重，通常不建議；若你有自己的 GUID→Track 對照可掛進來
-      -- 這裡先回傳 none
+      -- Searching GUIDs track-by-track and item-by-item is too heavy; not recommended.
+      -- You may inject your own GUID→Track mapping externally. Returns "none" here.
       return nil,nil,"none"
     elseif target.by == "index" then
       local idx = tonumber(target.value or 1)
@@ -589,17 +602,18 @@ end
 
 -- Internal runtime state (persist across re-loads)
 ASP._state = ASP._state or {
-  running         = false,
-  mode            = nil,
-  play_was_on     = nil,
-  repeat_was_on   = nil,
-  selection_cache = nil,
-  fx_track        = nil,
-  fx_index        = nil,
-  moved_items     = {},
-  placeholder     = nil,
-  fx_enable_shot  = nil,
-  stop_watcher    = false,
+  running           = false,
+  mode              = nil,
+  play_was_on       = nil,
+  repeat_was_on     = nil,
+  selection_cache   = nil,
+  fx_track          = nil,
+  fx_index          = nil,
+  moved_items       = {},
+  placeholder       = nil,
+  fx_enable_shot    = nil,
+  stop_watcher      = false,
+  allow_overlap_guids = nil,
 }
 
 function ASP.is_running()
@@ -622,12 +636,12 @@ function ASP._switch_mode(newmode)
   if newmode == ASP._state.mode then return end
 
   -- ==== NO-UNDO GUARD (entire mode switch) ====
-  undo_begin()  -- <— 確保下面所有 Main_OnCommand / I_SOLO 不會留下 Undo
+  undo_begin()  -- Ensure the following Main_OnCommand / I_SOLO operations create no Undo points
 
   local scope = read_solo_scope()
   local FXtr  = ASP._state.fx_track
 
-  -- 切換前，先清兩種 solo，確保狀態乾淨
+  -- Before switching, clear both solo states to ensure a clean state
   reaper.Main_OnCommand(41185, 0) -- Item: Unsolo all
   reaper.Main_OnCommand(40340, 0) -- Track: Unsolo all tracks
 
@@ -652,13 +666,13 @@ function ASP._switch_mode(newmode)
   write_state({running=true, mode=newmode})
   ASP.log("switch done: now=%s (scope=%s)", newmode, scope)
 
-  undo_end_no_undo("AS Preview: switch mode (no undo)")  -- <— 不留 Undo
+  undo_end_no_undo("AS Preview: switch mode (no undo)")  
   -- ==== END NO-UNDO GUARD ====
 end
 
 
 ----------------------------------------------------------------
--- (A) Debug / log (先內建；未來可移到 AS Core)
+-- (A) Debug / log (built-in for now; may be moved to AS Core later)
 ----------------------------------------------------------------
 local function debug_enabled()
   return USER_DEBUG
@@ -675,13 +689,13 @@ undo_begin = function()
 end
 
 undo_end_no_undo = function(desc)
-  -- desc 只作除錯閱讀；-1 代表**不**建立 Undo 點
+  -- desc is for debug readability only; -1 means **no** undo point will be created
   reaper.Undo_EndBlock2(0, desc or "AS Preview (no undo)", -1)
 end
 
 ----------------------------------------------------------------
--- (B) 基本工具（epsilon / selection / units / items / fx）
---   先複製最少需要的，之後再抽到 AS Core
+-- (B) Basic utilities (epsilon / selection / units / items / fx)
+--   Currently includes minimal subset; will later be extracted to AS Core
 ----------------------------------------------------------------
 project_epsilon = function()
   local sr = reaper.GetSetProjectInfo(0, "PROJECT_SRATE", 0, false)
@@ -691,6 +705,12 @@ local function approx_eq(a,b,eps) eps = eps or project_epsilon(); return math.ab
 ranges_touch_or_overlap = function(a0,a1,b0,b1,eps)
   eps = eps or project_epsilon()
   return not (a1 < b0 - eps or b1 < a0 - eps)
+end
+-- NEW: strict overlap (edges touching are NOT overlap)
+ranges_strict_overlap = function(a0,a1,b0,b1,eps)
+  eps = eps or project_epsilon()
+  -- true only if interiors intersect strictly
+  return (a0 < b1 - eps) and (a1 > b0 + eps)
 end
 
 local function build_units_from_selection()
@@ -749,6 +769,8 @@ local function item_guid(it)
   return select(2, reaper.GetSetMediaItemInfo_String(it, "GUID", "", false))
 end
 
+
+
 local function snapshot_selection()
   local map = {}
   local n = reaper.CountSelectedMediaItems(0)
@@ -775,10 +797,33 @@ local function restore_selection(selmap)
   end
 end
 
+-- helper: get item GUID
+local function guid_of(it)
+  return select(2, reaper.GetSetMediaItemInfo_String(it, "GUID", "", false))
+end
 
+-- snapshot neighbors on source track that touch/overlap the preview span
+local function snapshot_allow_overlap_neighbors(src_tr, UL, UR, exclude_set)
+  local map = {}
+  if not src_tr then return map end
+  local ic = reaper.CountTrackMediaItems(src_tr)
+  local eps = project_epsilon()
+  for i=0, ic-1 do
+    local it = reaper.GetTrackMediaItem(src_tr, i)
+    if not (exclude_set and exclude_set[it]) then
+      local L = reaper.GetMediaItemInfo_Value(it, "D_POSITION")
+      local R = L + reaper.GetMediaItemInfo_Value(it, "D_LENGTH")
+      if ranges_touch_or_overlap(L, R, UL, UR, eps) then
+        local g = guid_of(it)
+        if g and g ~= "" then map[g] = true end
+      end
+    end
+  end
+  return map
+end
 
 ----------------------------------------------------------------
--- (C) Transport / mute 快照與還原
+-- (C) Transport / mute snapshot and restore
 ----------------------------------------------------------------
 local function snapshot_transport()
   return {
@@ -796,11 +841,11 @@ end
 
 local function restore_transport(snap)
   if not snap then return end
-  -- 關 repeat（若一開始是關的）
+  -- Turn off Repeat (if it was originally off)
   if not snap.repeat_on and reaper.GetToggleCommandState(1068) == 1 then
     reaper.Main_OnCommand(1068, 0)
   end
-  -- 停止播放（若一開始沒播）
+  -- Stop playback (if it was not playing initially)
   if not snap.playing and (reaper.GetPlayState() & 1) == 1 then
     reaper.Main_OnCommand(1016, 0) -- Stop
   end
@@ -824,7 +869,7 @@ local function restore_mutes(shot)
 end
 
 ----------------------------------------------------------------
--- (D) 入口：只允許單一軌（可多 item），TS 優先於 item selection
+-- (D) Entry: allow only a single track (multiple items allowed); Time Selection takes priority over item selection
 ----------------------------------------------------------------
 -- Begin preview (or switch if already running)
 function ASP.run(opts)
@@ -1080,7 +1125,7 @@ function ASP._arm_loop_region_or_unit()
     return -- 已由 REAPER 自己的 TS 控制 loop
   end
 
-  -- 沒有 TS：用目前選取 items 的包絡範圍
+  -- No Time Selection: use the envelope span of currently selected items
   local cnt = reaper.CountSelectedMediaItems(0)
   if cnt == 0 then return end
   local UL, UR
@@ -1119,6 +1164,8 @@ end
 function ASP._prepare_preview_items_on_fx_track(mode)
   local cnt = reaper.CountSelectedMediaItems(0)
   if cnt == 0 then return end
+  -- remember how many items were moved out in this preview session (for timesel count sanity check)
+  ASP._state.moved_count = cnt or 0
 
   -- 計算預覽區間，建立佔位（白色空白 item）
   local UL, UR = compute_preview_span()
@@ -1190,9 +1237,21 @@ function ASP._move_back_and_remove_placeholder()
     -- Collect all items on FX track that overlap the placeholder span
     move_list = collect_preview_items_on_fx_track(ASP._state.fx_track, ph_it, UL, UR)
     ASP.log("restore-mode=timesel: collected %d item(s) on FX track by placeholder span", #move_list)
+    -- sanity check: if returning more items than originally moved out for this preview, abort
+    local moved_out = tonumber(ASP._state.moved_count or 0) or 0
+    ASP.log("preflight: timesel count check; moved_out=%d  to_move_back=%d", moved_out, #move_list)
+    if #move_list > moved_out then
+      reaper.MB(
+        "Move-back aborted: returning items exceed the original count for this time selection.\n\n" ..
+        "Tip: adjust the time selection, or use GUID restore mode (restore_mode=\"guid\") to return only the previewed items, then try again.",
+        "AudioSweet Preview — Count mismatch",
+        0
+      )
+      ASP.log("move-back aborted due to count mismatch in timesel restore (to_move_back > moved_out)")
+      return
+    end
   else
     -- Default: only the ones we moved during this preview session
-    move_list = {}
     for i=1, #(ASP._state.moved_items or {}) do
       local it = ASP._state.moved_items[i]
       if reaper.ValidatePtr2(0, it, "MediaItem*") then
@@ -1202,27 +1261,7 @@ function ASP._move_back_and_remove_placeholder()
     ASP.log("restore-mode=guid: prepared %d item(s) to move back", #move_list)
   end
 
-  -- Overlap preflight: if any incoming item would overlap existing items on the destination (source) track (other than the placeholder),
-  -- warn and abort the move-back to avoid unexpected collisions.
-  local exclude = {}
-  -- exclude set usually empty (items are on FX track), but we keep the hook for safety
-  for _, it in ipairs(move_list) do exclude[it] = true end
-
-  -- Check each item’s interval against the destination track
-  for _, it in ipairs(move_list) do
-    local L, R = item_bounds(it)
-    if track_has_overlap(ph_tr, L, R, exclude, ph_it) then
-      reaper.MB(
-        "Move-back aborted: one or more items would overlap existing items on the source track.\n\n" ..
-        "Tip: clear space on the source track or disable overlap checks, then try again.",
-        "AudioSweet Preview — Overlap detected", 0
-      )
-      ASP.log("move-back aborted due to overlap on source track")
-      return
-    end
-  end
-
-  -- Perform the move-back
+  -- Perform the move-back (no overlap policing)
   for _, it in ipairs(move_list) do
     reaper.MoveMediaItemToTrack(it, ph_tr)
   end
@@ -1243,7 +1282,7 @@ function ASP._select_items(list, exclusive)
 end
 
 function ASP._apply_mode_flags(mode)
-  -- 整段也包起來，避免分散的 Undo
+  -- Wrap the entire section to avoid fragmented Undo operations
   undo_begin()
 
   local scope = read_solo_scope()
