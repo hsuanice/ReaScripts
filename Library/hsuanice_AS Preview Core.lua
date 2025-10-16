@@ -1,11 +1,31 @@
 --[[
 @description AudioSweet Preview Core
 @author Hsuanice
-@version 251012_2008  - Change: Focused preview (chain_mode=false) now forces target="focused".
+@version v251016_1851
 
 
 @about Minimal, self-contained preview runtime. Later we can extract helpers to "hsuanice_AS Core.lua".
 @changelog
+  v251016_1851
+    - Added: High-precision timing using reaper.time_precise().
+      * Exports: snapshot_ms, core_ms, restore_ms, total_ms.
+      * Printed via "[WRAPPER][Perf] snapshot=... core=... restore=... total=...".
+    - Added: Compact one-line "Selection Debug/Perf" summary for large-scale sessions.
+    - Changed: Wrapper overhead minimized (≈1–5 ms typical); Core remains the only heavy stage.
+    - Changed: Edge/Glue cue policy aligned with Core.
+      * WRITE_EDGE_CUES=true, WRITE_GLUE_CUES=true.
+      * GLUE_CUE_POLICY="adjacent-different-source".
+    - Fixed: Selection restore now verified only once after Core cleanup (no redundant selection updates).
+    - Fixed: Error guards — Core error messages (e.g. "focus track missing") are passed through as summaries only.
+    - Removed: Dependency on SWS extension (BR_GetMediaItemGUID).
+      * Before: reaper.BR_GetMediaItemGUID(item)
+      * After:  local ok, guid = reaper.GetSetMediaItemInfo_String(item, "GUID", "", false)
+      * Validation: Native and SWS GUIDs identical ("Equal? true").
+    - Dev: DEBUG flag affects verbosity only; functional behavior unchanged.
+    - Dev: Legacy target="track" removed.
+      * chain_mode=true  → target="name:<TrackName>" or target_track_name.
+      * chain_mode=false → forced target="focused".
+
   v251012_2008
     - Change: Focused preview (chain_mode=false) now forces target="focused".
       * Any name-based target (including `target="TARGET_TRACK_NAME"` or `target_track_name`) is ignored in focused mode.
@@ -305,7 +325,7 @@ local function make_placeholder(track, UL, UR, note)
   reaper.SetMediaItemInfo_Value(it, "D_LENGTH",  (UR and UL) and (UR-UL) or 1.0)
   local tk = reaper.AddTakeToMediaItem(it) -- just to satisfy note storage
   reaper.GetSetMediaItemTakeInfo_String(tk, "P_NAME", "", true) -- keep empty name
-  reaper.ULT_SetMediaItemNote(it, note or "")
+  reaper.GetSetMediaItemInfo_String(it, "P_NOTES", note or "", true)
   -- set red tint for clarity (RGB | 0x1000000 enables the tint)
   reaper.SetMediaItemInfo_Value(it, "I_CUSTOMCOLOR", reaper.ColorToNative(255,0,0)|0x1000000)
   reaper.UpdateItemInProject(it)
@@ -726,7 +746,7 @@ local function select_only_items(items)
 end
 
 local function item_guid(it)
-  return reaper.BR_GetMediaItemGUID(it)
+  return select(2, reaper.GetSetMediaItemInfo_String(it, "GUID", "", false))
 end
 
 local function snapshot_selection()
@@ -1011,7 +1031,7 @@ function ASP._snapshot_item_selection()
   local cnt = reaper.CountSelectedMediaItems(0)
   for i=0, cnt-1 do
     local it = reaper.GetSelectedMediaItem(0, i)
-    local guid = reaper.BR_GetMediaItemGUID(it)
+    local _, guid = reaper.GetSetMediaItemInfo_String(it, "GUID", "", false)
     t[guid] = true
   end
   ASP.log("snapshot selection: %d items", cnt)
@@ -1026,7 +1046,7 @@ function ASP._restore_item_selection()
   local tot = reaper.CountMediaItems(0)
   for i=0, tot-1 do
     local it = reaper.GetMediaItem(0, i)
-    local guid = reaper.BR_GetMediaItemGUID(it)
+    local guid = select(2, reaper.GetSetMediaItemInfo_String(it, "GUID", "", false))
     if ASP._state.selection_cache[guid] then
       reaper.SetMediaItemSelected(it, true)
     end
