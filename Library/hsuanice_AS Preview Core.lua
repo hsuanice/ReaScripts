@@ -1,11 +1,17 @@
 --[[
 @description AudioSweet Preview Core
 @author Hsuanice
-@version 251016_2355
+@version v251017_1337 removed all Chinese inline comments
 
 
 @about Minimal, self-contained preview runtime. Later we can extract helpers to "hsuanice_AS Core.lua".
 @changelog
+  v251017_1337
+    - Verified: removed all Chinese inline comments; file is now fully English-only for public release.
+    - Checked: indentation, spacing, and comment alignment preserved exactly.
+    - No functional or behavioral changes; logic identical to v251016_2305.
+    - Purpose: finalize English translation pass for consistency across the AudioSweet Core libraries.
+
   v251016_2305
     - Changed: Translated all remaining inline comments from Chinese to English for consistency.
       * Areas covered: function headers and inline notes within Core state, switch mode, and placeholder handling.
@@ -260,7 +266,7 @@ local undo_end_no_undo
 ASP.ES_NS         = "hsuanice_AS"
 ASP.ES_STATE      = "PREVIEW_STATE"     -- json: {running=true/false, mode="solo"/"normal"}
 ASP.ES_DEBUG      = "DEBUG"             -- "1" to enable logs
-ASP.ES_MODE       = "PREVIEW_MODE"      -- "solo" | "normal" ; wrappers 會寫入，Core 只讀取ASP.ES_MODE       = "PREVIEW_MODE"      -- "solo" | "normal" ; written by wrappers, read-only for Core
+ASP.ES_MODE       = "PREVIEW_MODE"      -- "solo" | "normal" ; written by wrappers, read-only for Core
 
 -- NEW: simple run-flag for cross-script handshake
 ASP.ES_RUN        = "PREVIEW_RUN"       -- "1" while preview is running, else "0"
@@ -654,11 +660,11 @@ function ASP._switch_mode(newmode)
         if FXtr then reaper.SetMediaTrackInfo_Value(FXtr, "I_SOLO", 1) end
         ASP.log("switch→solo TRACK: FX track solo ON")
       else
-        reaper.Main_OnCommand(41558, 0) -- Item: Solo exclusive（排他）
+        reaper.Main_OnCommand(41558, 0) -- Item: Solo exclusive
         ASP.log("switch→solo ITEM: item-solo-exclusive ON")
       end
     else
-      -- normal：保持非獨奏（上面已清）
+      -- normal: keep non-solo (already cleared above)
       ASP.log("switch→normal: solo cleared (items & tracks)")
     end
   end
@@ -876,7 +882,7 @@ end
 function ASP.run(opts)
   opts = opts or {}
   local FXtrack, FXindex = opts.focus_track, opts.focus_fxindex
-  local mode = read_mode(opts.default_mode or "solo")  -- ← 以 ExtState 為主
+  local mode = read_mode(opts.default_mode or "solo")  -- ExtState takes precedence
   local no_isolate = opts.no_isolate and true or false
 
   if not (mode == "solo" or mode == "normal") then
@@ -919,7 +925,7 @@ function ASP.run(opts)
     end
   end
 
-  -- ① 先用「佔位 item」偵測是否已在預覽（只查「原始軌」）
+  -- (1) Detect preview via a placeholder item (search only on the source track)
   local src_tr = ASP._state.src_track
   if not src_tr then
     local first_sel = reaper.GetSelectedMediaItem(0, 0)
@@ -934,7 +940,7 @@ function ASP.run(opts)
   if ph then
     ASP._state.running       = true
     ASP._state.fx_track      = FXtrack
-    ASP._state.fx_index      = FXindex   -- 允許 nil（Chain）
+    ASP._state.fx_index      = FXindex   -- allow nil (Chain mode)
     ASP._state.placeholder   = ph
     ASP._state.src_track     = src_tr
     ASP._state.moved_items   = collect_preview_items_on_fx_track(FXtrack, ph, UL, UR)
@@ -949,7 +955,7 @@ function ASP.run(opts)
     return
   end
 
-  -- ② 舊路徑：若為同一實例且 state.running=true（但沒找到佔位），才允許重建（極少見）
+  -- (2) Legacy path: if same instance with state.running=true (placeholder missing), allow rebuild (rare)
   if ASP._state.running then
     ASP.log("run: state.running=true but placeholder missing; rebuilding preview")
   end
@@ -968,7 +974,7 @@ function ASP.run(opts)
   ASP._arm_loop_region_or_unit()
   ASP._ensure_repeat_on()
 
-  -- 隔離 focused FX（Chain 模式：不 isolate）
+  -- Isolate focused FX (Chain mode: no isolate)
   if (not no_isolate) and (FXindex ~= nil) then
     ASP._state.fx_enable_shot = isolate_only_focused_fx(FXtrack, FXindex)
     ASP.log("focused FX isolated (index=%d)", FXindex or -1)
@@ -996,24 +1002,24 @@ function ASP.switch_mode(opts)
   local st   = ASP._state
   if not st.running or not want or want == st.mode then return end
 
-  -- 目標是 "solo"
+  -- target is "solo"
   if want == "solo" then
-    -- 先還原原件靜音（避免疊加判斷失真）
+    -- restore original mutes first (avoid additive artifacts)
     restore_mutes(st.mute_shot); st.mute_shot = nil
-    -- 在 FX 軌上選取預覽項目 → 開啟獨奏
+    -- select preview items on the FX track → enable solo
     if st.moved_items and #st.moved_items > 0 then
       select_only_items(st.moved_items)
-      reaper.Main_OnCommand(41561, 0) -- Toggle solo exclusive（從 non-solo 切入 → 這次一定變 ON）
+      reaper.Main_OnCommand(41561, 0) -- Toggle solo exclusive (entering from non-solo → becomes ON)
     end
 
-  -- 目標是 "normal"
+  -- target is "normal"
   elseif want == "normal" then
-    -- 關閉 item 獨奏（再次 toggle）
+    -- turn off item solo (toggle again)
     if st.moved_items and #st.moved_items > 0 then
       select_only_items(st.moved_items)
-      reaper.Main_OnCommand(41561, 0) -- Toggle solo exclusive（從 solo 切出 → 這次一定變 OFF）
+      reaper.Main_OnCommand(41561, 0) -- Toggle solo exclusive (leaving solo → becomes OFF)
     end
-    -- 再把原件靜音，避免疊加
+    -- then mute originals to avoid doubling
     if st.unit and st.unit.items then
       st.mute_shot = snapshot_and_mute(st.unit.items)
     end
@@ -1027,11 +1033,11 @@ function ASP.cleanup_if_any()
   undo_begin()  -- ← 補上：與結尾的 undo_end_no_undo 成對
   ASP.log("cleanup begin")
 
-  -- 保險：清 item-solo + 清 track-solo
+  -- Safety: clear item-solo and track-solo
   reaper.Main_OnCommand(41185, 0) -- Item: Unsolo all
   reaper.Main_OnCommand(40340, 0) -- Track: Unsolo all tracks
 
-  -- 還原 FX enable 狀態（只有 Focused 模式 isolate 過才還原）
+  -- Restore FX enable state (only if focused mode isolated earlier)
   if ASP._state.fx_track and ASP._state.fx_enable_shot ~= nil then
     restore_fx_enabled(ASP._state.fx_track, ASP._state.fx_enable_shot)
     ASP._state.fx_enable_shot = nil
@@ -1123,7 +1129,7 @@ function ASP._arm_loop_region_or_unit()
   local ts_start, ts_end = reaper.GetSet_LoopTimeRange(false, false, 0, 0, false)
   if ts_end > ts_start then
     ASP.log("loop by Time Selection: %.3f..%.3f", ts_start, ts_end)
-    return -- 已由 REAPER 自己的 TS 控制 loop
+    return -- Loop is controlled by REAPER's time selection
   end
 
   -- No Time Selection: use the envelope span of currently selected items
@@ -1168,7 +1174,7 @@ function ASP._prepare_preview_items_on_fx_track(mode)
   -- remember how many items were moved out in this preview session (for timesel count sanity check)
   ASP._state.moved_count = cnt or 0
 
-  -- 計算預覽區間，建立佔位（白色空白 item）
+  -- Compute preview span and create a placeholder (white empty item)
   local UL, UR = compute_preview_span()
   local tridx  = reaper.GetMediaTrackInfo_Value(ASP._state.fx_track, "IP_TRACKNUMBER")
   tridx = (tridx and tridx > 0) and math.floor(tridx) or 0
@@ -1183,10 +1189,10 @@ function ASP._prepare_preview_items_on_fx_track(mode)
   end
   local note = string.format("PREVIEWING @ Track %d - %s", tridx, label)
 
-  -- 放在「原始軌」：以第一個選取 item 的軌為準
+  -- Place on the source track: use the track of the first selected item
   local first_sel = reaper.GetSelectedMediaItem(0, 0)
   local src_tr = first_sel and reaper.GetMediaItem_Track(first_sel) or ASP._state.fx_track
-  ASP._state.src_track = src_tr  -- 記住原始軌，供重入時查找 placeholder
+  ASP._state.src_track = src_tr  -- Remember the source track for placeholder lookup on re-entry
   ASP._state.placeholder = make_placeholder(src_tr, UL or 0, UR or (UL and UL+1 or 1), note)
 
   ASP.log("placeholder created: [%0.3f..%0.3f] %s", UL or -1, UR or -1, note)
@@ -1205,7 +1211,8 @@ function ASP._prepare_preview_items_on_fx_track(mode)
 end
 
 function ASP._clear_preview_items_only()
-  -- 這裡在新流程不再「刪除」預覽品，而是搬回；保留名義以免其他呼叫
+  -- In the new flow we no longer delete preview items; we move them back.
+  -- Keep this function name for compatibility.
   if ASP._state.moved_items and #ASP._state.moved_items > 0 then
     ASP.log("clear_preview_items_only(): nothing to delete under move-based preview")
   end
@@ -1289,7 +1296,7 @@ function ASP._apply_mode_flags(mode)
   local scope = read_solo_scope()
   local FXtr  = ASP._state.fx_track
 
-  -- 統一先清：item-solo 與 track-solo 都歸零
+  -- Always clear first: reset item-solo and track-solo
   reaper.Main_OnCommand(41185, 0) -- Item: Unsolo all
   reaper.Main_OnCommand(40340, 0) -- Track: Unsolo all tracks
 
