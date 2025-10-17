@@ -1,6 +1,6 @@
 --[[
 @description AudioSweet Template (hsuanice) — Focused/Chain × Apply/Copy
-@version 251017_1700
+@version v251018_0200
 @author hsuanice
 @about
   Minimal, clean template for AudioSweet-style scripts:
@@ -16,6 +16,14 @@ Usage (example wrappers set before running this script):
   reaper.SetExtState("hsuanice_AS","AS_ACTION","copy",false)
 
 @changelog
+  v251018_0200
+    • Update: chain-mode confirmation dialog now shows full track info and FX chain.
+      - Added helper `get_track_number_and_name()` to correctly retrieve track name and index.
+      - Dialog displays format: “#<TrackNumber> - <TrackName>”.
+      - FX Chain section lists all FX on the source track (up to 40 entries).
+    • Console: detailed item list printed via `[AS][INFO]` for readability.
+    • Clean-up: removed item-unit statistics from copy mode (copy operates at item level only).
+
   v251017_1700
     • Initial release of AudioSweet Template.
       - Clean base structure for AudioSweet-style scripts (no SWS dependency).
@@ -69,7 +77,7 @@ local function AS_merge_args_with_extstate(args)
     local v = reaper.GetExtState(ns, key)
     if v == "" then return def else return v end
   end
-  args.mode        = args.mode        or get_ns("hsuanice_AS","AS_MODE","focused")     -- focused | chain
+  args.mode        = args.mode        or get_ns("hsuanice_AS","AS_MODE","chain")     -- focused | chain
   args.action      = args.action      or get_ns("hsuanice_AS","AS_ACTION","copy")      -- apply   | copy
   args.scope       = args.scope       or get_ns("hsuanice_AS","AS_COPY_SCOPE","active") -- active  | all_takes
   args.append_pos  = args.append_pos  or get_ns("hsuanice_AS","AS_COPY_POS","tail")     -- tail    | head
@@ -180,6 +188,40 @@ local function build_selected_items_list(snap, max_lines)
 
   return table.concat(lines, "\n")
 end
+
+---------------------------------------------------------
+-- Build track info and FX chain list (for chain mode dialog)
+---------------------------------------------------------
+local function get_track_number_and_name(tr)
+  -- Returns track index (1-based) and track name (empty if unavailable)
+  local num = tr and (reaper.GetMediaTrackInfo_Value(tr, "IP_TRACKNUMBER") or 0) or 0
+  local name = ""
+  if tr then
+    local ok, nm = reaper.GetTrackName(tr, "")
+    if ok then name = nm or "" end
+  end
+  return num, name
+end
+
+local function build_fx_chain_list(track, max_fx)
+  -- Returns a multi-line string of the track's FX chain
+  max_fx = max_fx or 40
+  if not track then return "(no track)" end
+  local total = reaper.TrackFX_GetCount(track) or 0
+  local count = math.min(total, max_fx)
+  if count == 0 then return "(empty chain)" end
+
+  local lines = {}
+  for i = 0, count - 1 do
+    local _, fxname = reaper.TrackFX_GetFXName(track, i, "")
+    lines[#lines+1] = string.format("%02d) %s", i+1, fxname or "(unknown FX)")
+  end
+  if total > count then
+    lines[#lines+1] = string.format("... and %d more", total - count)
+  end
+  return table.concat(lines, "\n")
+end
+
 ---------------------------------------------------------
 -- Focused Track FX resolver (Track FX only)
 ---------------------------------------------------------
@@ -231,32 +273,27 @@ end
 
 local function copy_focused_fx_to_selected_items(src_track, fx_index, args)
   -- ops: number of takes affected
-  -- units: number of items that received at least one operation
-  local selN, ops, units = reaper.CountSelectedMediaItems(0), 0, 0
+  local selN, ops = reaper.CountSelectedMediaItems(0), 0
   for i = 0, selN-1 do
     local it = reaper.GetSelectedMediaItem(0, i)
     if it then
-      local before = ops
       for_each_dest_take(it, args.scope, function(tk)
         local dest = (args.append_pos == "head") and 0 or (reaper.TakeFX_GetCount(tk) or 0)
         reaper.TrackFX_CopyToTake(src_track, fx_index, tk, dest, false)
         ops = ops + 1
       end)
-      if ops > before then units = units + 1 end
     end
   end
-  return ops, units
+  return ops
 end
 
 local function copy_chain_to_selected_items(src_track, args)
   -- ops: number of takes affected
-  -- units: number of items that received at least one operation
   local chainN = reaper.TrackFX_GetCount(src_track) or 0
-  local selN, ops, units = reaper.CountSelectedMediaItems(0), 0, 0
+  local selN, ops = reaper.CountSelectedMediaItems(0), 0
   for i = 0, selN-1 do
     local it = reaper.GetSelectedMediaItem(0, i)
     if it then
-      local before = ops
       for_each_dest_take(it, args.scope, function(tk)
         if args.append_pos == "head" then
           for fx = chainN-1, 0, -1 do
@@ -269,10 +306,9 @@ local function copy_chain_to_selected_items(src_track, args)
           end
         end
       end)
-      if ops > before then units = units + 1 end
     end
   end
-  return ops, units
+  return ops
 end
 
 ---------------------------------------------------------
@@ -315,14 +351,36 @@ local function main()
 -- Early branch: COPY (non-destructive)
 if args.action == "copy" then
   -- Build confirmation dialog body
-  local what = (args.mode == "focused") and "Focused FX" or "FX Chain"
-  local item_list = build_selected_items_list(sel_snap, 20)
-  local confirm_body = (
-    "Copy\n\n" ..
-    string.format("FX: %s\n\n", raw_name or "(unknown)") ..
-    "to\n" ..
-    "Items:\n" .. item_list
-  )
+  local confirm_body
+  if args.mode == "focused" then
+    -- Focused mode: keep FX + items list in dialog
+    local item_list = build_selected_items_list(sel_snap, 20)
+    confirm_body = (
+      "Copy\n\n" ..
+      string.format("FX: %s\n\n", raw_name or "(unknown)") ..
+      "to\n" ..
+      "Items:\n" .. item_list
+    )
+  else
+    -- Chain mode: show Track #/Name + FX chain list + selected item count
+    local tr_num, tr_name = get_track_number_and_name(src_track)
+    local fx_chain_list   = build_fx_chain_list(src_track, 40)
+    local selected_items  = (type(sel_snap)=="table" and #sel_snap or 0)
+
+    -- Print detailed item list to console (not in dialog)
+    local item_list_for_console = build_selected_items_list(sel_snap, 200)
+    reaper.ShowConsoleMsg(
+      string.format("[AS][INFO] Chain copy target items (%d):\n%s\n\n",
+                    selected_items, item_list_for_console)
+    )
+
+    confirm_body = (
+      "Copy\n\n" ..
+      string.format("#%d - %s\n\n", tr_num, tr_name) ..
+      "FX Chain:\n" .. fx_chain_list .. "\n\n" ..
+      string.format("Selected items: %d", selected_items)
+    )
+  end
 
   -- OK/Cancel dialog (type=1 -> MB_OKCANCEL)
   local resp = reaper.MB(confirm_body, "AudioSweet — Confirm Copy", 1)
@@ -335,16 +393,15 @@ if args.action == "copy" then
   end
 
   -- Proceed with copy
-  -- ops: takes affected; units: items affected (items that received at least one op)
-  local ops, units = (args.mode == "focused")
+  -- ops: number of takes affected
+  local ops = (args.mode == "focused")
     and copy_focused_fx_to_selected_items(src_track, fx_index, args)
     or  copy_chain_to_selected_items(src_track, args)
 
-  -- Console summary (dialog no longer shows ops/scope/pos)
-  log_step("COPY", "mode=%s scope=%s pos=%s ops=%s units=%s",
-           tostring(args.mode), tostring(args.scope), tostring(args.append_pos),
-           tostring(ops or 0), tostring(units or 0))
-
+  -- Console summary
+  log_step("COPY", "mode=%s scope=%s pos=%s ops=%s",
+          tostring(args.mode), tostring(args.scope), tostring(args.append_pos),
+          tostring(ops or 0))
   reaper.UpdateArrange()
   restore_selection(sel_snap)
   reaper.PreventUIRefresh(-1)
