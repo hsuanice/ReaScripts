@@ -1,6 +1,6 @@
 --[[
 @description AudioSweet (hsuanice) — Focused Track FX render via RGWH Core, append FX name, rebuild peaks (selected items)
-@version 251009_2249   Fixed: Single-item (non TS-Window) path no longer forces all FX enabled after render.
+@version 251021_2145   Fixed: Multi-item glue now uses new RGWH Core M.core() API instead of deprecated apply().
 @author Tim Chimes (original), adapted by hsuanice
 @notes
   Reference:
@@ -18,6 +18,29 @@ This version:
   • Track FX only (Take FX not supported)
 
 @changelog
+  251021_2145
+    - Fixed: Multi-item glue path now uses new RGWH Core M.core() API instead of deprecated apply()
+    - Changed: Core API detection now looks for M.core() or M.glue_selection() instead of old M.apply()
+    - Changed: Multi-item glue args updated to new API format: {op="glue", channel_mode=..., take_fx=true, track_fx=true}
+    - Tech: Resolves "RGWH.apply not found" error when processing multi-item units (touching/overlapping items)
+    - Note: Single-item path already used M.render_selection() and is unaffected
+
+  251021_2130
+    - Added: Chain mode naming support - take names now reflect the full FX chain or track name.
+    - Added: New user options for chain token generation:
+        • AS_CHAIN_TOKEN_SOURCE: "track" (use track name), "aliases" (list FX aliases), or "fxchain" (literal "FXChain")
+        • AS_CHAIN_ALIAS_JOINER: separator when using aliases mode (default: empty string)
+        • TRACKNAME_STRIP_SYMBOLS: strip non-alphanumeric chars from track names (FX-style short name)
+        • SANITIZE_TOKEN_FOR_FILENAME: sanitize tokens for safe filenames
+    - Added: Helper functions: sanitize_token(), track_name_token(), build_chain_token()
+    - Changed: Main function now determines naming token based on AS_MODE:
+        • Focused mode: uses focused FX name (e.g., "-AS1-ProR2")
+        • Chain mode: uses chain token (e.g., "-AS1-AudioSweet" or "-AS1-ProR2ProQ4ProR2ProQ4")
+    - Changed: All append_fx_to_take_name() calls now use dynamic naming_token instead of static FXName
+    - Tech: Integrated chain token logic from AudioSweet Chain script into Core for unified behavior
+    - Example: Chain mode with track "AudioSweet" → "TakeName-AS1-AudioSweet"
+    - Example: Chain mode with aliases (no joiner) → "TakeName-AS1-ProR2ProQ4ProR2ProQ4"
+
   251009_2249
     - Fixed: Single-item (non TS-Window) path no longer forces all FX enabled after render.
       It now relies solely on snapshot/restore so original bypass/offline states are preserved.
@@ -290,9 +313,25 @@ This version:
 -- reaper.SetExtState("hsuanice_AS","DEBUG","1", false)  -- (disabled: don't force-on DEBUG by default)
 
 -- === User options ===
--- How many FX names to keep in the “-ASn-...” suffix.
+-- How many FX names to keep in the "-ASn-..." suffix.
 -- 0 or nil = unlimited; N>0 = keep last N tokens (FIFO).
 local AS_MAX_FX_TOKENS = 3
+
+-- Chain token source (for chain mode):
+--   "aliases" -> use enabled Track FX aliases in order (joined by AS_CHAIN_ALIAS_JOINER)
+--   "fxchain" -> literal token "FXChain"
+--   "track"   -> use the FX track's name (sanitized)
+local AS_CHAIN_TOKEN_SOURCE = "track"
+
+-- When AS_CHAIN_TOKEN_SOURCE="aliases", use this joiner to connect alias tokens
+local AS_CHAIN_ALIAS_JOINER = ""
+
+-- If true, strip unsafe filename characters from chain tokens (for "track" mode & others)
+local SANITIZE_TOKEN_FOR_FILENAME = false
+
+-- Track name token style: when true, strip ALL non-alphanumeric (FX-like short name).
+-- When false, fall back to sanitize_token (underscores etc.).
+local TRACKNAME_STRIP_SYMBOLS = true
 
 -- Naming-only debug (console print before/after renaming).
 -- Toggle directly in this script (no ExtState).
@@ -452,6 +491,49 @@ local function AS_copy_chain_to_items(src_track, args)
   return total
 end
 -- ================================================
+-- ==== Chain token helpers (for chain mode naming) ====
+local function sanitize_token(s)
+  s = tostring(s or "")
+  if SANITIZE_TOKEN_FOR_FILENAME then
+    s = s:gsub("[^%w]+", "_"):gsub("^_+", ""):gsub("_+$", "")
+  end
+  return s
+end
+
+local function track_name_token(FXtrack)
+  if not FXtrack then return "" end
+  local _, tn = reaper.GetTrackName(FXtrack)
+  tn = tn or ""
+  if TRACKNAME_STRIP_SYMBOLS then
+    tn = tn:gsub("%b()", "")
+           :gsub("[^%w]+","")
+  else
+    tn = sanitize_token(tn)
+  end
+  return tn
+end
+
+local function build_chain_token(FXtrack)
+  if AS_CHAIN_TOKEN_SOURCE == "fxchain" then
+    return "FXChain"
+  elseif AS_CHAIN_TOKEN_SOURCE == "track" then
+    return track_name_token(FXtrack)
+  end
+
+  -- default: "aliases"
+  local list = {}
+  if not FXtrack then return "" end
+  local cnt = reaper.TrackFX_GetCount(FXtrack) or 0
+  for i = 0, cnt-1 do
+    local enabled = reaper.TrackFX_GetEnabled(FXtrack, i)
+    if enabled then
+      local _, raw = reaper.TrackFX_GetFXName(FXtrack, i, "")
+      local name  = format_fx_label(raw)
+      if name and name ~= "" then list[#list+1] = name end
+    end
+  end
+  return table.concat(list, AS_CHAIN_ALIAS_JOINER)
+end
 -- =======================
 -- ==== FX enable snapshot/restore (preserve original bypass states) ====
 local function snapshot_fx_enables(tr)
@@ -1412,6 +1494,17 @@ function main() -- main part of the script
   local FXName = format_fx_label(FXNameRaw)
   log_step("FOCUSED-FX", "index(norm)=%d  name='%s' (raw='%s')  FXtrack=%s",
            fxIndex, tostring(FXName or ""), tostring(FXNameRaw or ""), tostring(FXmediaTrack))
+
+  -- Determine naming token based on mode (focused vs chain)
+  local AS_args = AS_merge_args_with_extstate({})
+  local naming_token = FXName
+  if AS_args.mode == "chain" then
+    naming_token = build_chain_token(FXmediaTrack)
+    if naming_token == "" then naming_token = FXName end
+    log_step("CHAIN-TOKEN", "mode=chain  token='%s' (source=%s)",
+             tostring(naming_token), tostring(AS_CHAIN_TOKEN_SOURCE))
+  end
+
   -- === Early branch: COPY mode (non-destructive; no rename) ===
   do
     local AS = AS_merge_args_with_extstate({})
@@ -1501,7 +1594,7 @@ function main() -- main part of the script
       end
 
       for idx, it in ipairs(glued_items) do
-        local ok, used_cmd = apply_focused_fx_to_item(it, FXmediaTrack, fxIndex, FXName)
+        local ok, used_cmd = apply_focused_fx_to_item(it, FXmediaTrack, fxIndex, naming_token)
         if ok then
           log_step("TS-WINDOW[GLOBAL]", "applied %d to glued #%d", used_cmd or -1, idx)
           -- 取真正列印完的那顆（函式內會把選取變成這顆）
@@ -1554,7 +1647,7 @@ function main() -- main part of the script
         goto continue_unit
       end
 
-      local ok, used_cmd = apply_focused_fx_to_item(glued, FXmediaTrack, fxIndex, FXName)
+      local ok, used_cmd = apply_focused_fx_to_item(glued, FXmediaTrack, fxIndex, naming_token)
       if ok then
         log_step("TS-WINDOW[UNIT]", "applied %d", used_cmd or -1)
         table.insert(outputs, glued)  -- out item已被移回原軌
@@ -1571,7 +1664,7 @@ function main() -- main part of the script
       if #u.items == 1 then
         -- === 單一 item：使用 RGWH Render（同時印 Take FX 與 Track FX；保留舊 take） ===
         local the_item = u.items[1]
-        local ok = apply_focused_via_rgwh_render_new_take(the_item, FXmediaTrack, fxIndex, FXName)
+        local ok = apply_focused_via_rgwh_render_new_take(the_item, FXmediaTrack, fxIndex, naming_token)
         if ok then
           table.insert(outputs, the_item) -- 已搬回原軌且命名完成
         else
@@ -1632,13 +1725,13 @@ function main() -- main part of the script
           failed = true
         end
 
-        local apply = nil
+        local core_api = nil
         if not failed then
-          apply = (type(mod)=="table" and type(mod.apply)=="function") and mod.apply
-                   or (_G.RGWH and type(_G.RGWH.apply)=="function" and _G.RGWH.apply)
-          if not apply then
-            log_step("ERROR", "RGWH.apply not found in module")
-            reaper.MB("RGWH Core loaded, but RGWH.apply(...) not found.", "AudioSweet — Core apply missing", 0)
+          core_api = (type(mod)=="table" and type(mod.core)=="function") and mod.core
+                     or (type(mod)=="table" and type(mod.glue_selection)=="function") and mod.glue_selection
+          if not core_api then
+            log_step("ERROR", "RGWH.core or RGWH.glue_selection not found in module")
+            reaper.MB("RGWH Core loaded, but M.core() or M.glue_selection() not found.", "AudioSweet — Core API missing", 0)
             failed = true
           end
         end
@@ -1701,34 +1794,33 @@ function main() -- main part of the script
           reaper.MB("Internal error: unit anchor item is invalid.", "AudioSweet", 0)
           failed = true
         else
+          -- Use new M.core() API
+          local is_chain_mode = (AS_merge_args_with_extstate({}).mode == "chain")
           local args = {
-            mode                = "glue_item_focused_fx",
-            item                = anchor,
-            apply_fx_mode       = apply_fx_mode,
-            focused_track       = FXmediaTrack,
-            focused_fxindex     = fxIndex,
-            policy_only_focused = (AS_merge_args_with_extstate({}).mode == "focused"),
-            selection_scope     = "selection",
+            op = "glue",
+            channel_mode = apply_fx_mode,
+            take_fx = true,
+            track_fx = true,
           }
           if debug_enabled() then
             local c = reaper.CountSelectedMediaItems(0)
-            log_step("CORE", "apply args: mode=%s apply_fx_mode=%s focus_idx=%d sel_scope=%s unit_members=%d",
-              tostring(args.mode), tostring(args.apply_fx_mode), fxIndex, tostring(args.selection_scope), #u.items)
+            log_step("CORE", "call M.core: op=%s channel_mode=%s take_fx=true track_fx=true unit_members=%d",
+              tostring(args.op), tostring(args.channel_mode), #u.items)
             log_step("CORE", "pre-apply FINAL selected_items=%d", c)
             dbg_dump_selection("CORE pre-apply FINAL")
           end
 
-          local ok_call, ok_apply, err = pcall(apply, args)
+          local ok_call, ok_apply, err = pcall(core_api, args)
           if not ok_call then
-            log_step("ERROR", "apply() runtime error: %s", tostring(ok_apply))
-            reaper.MB("RGWH Core apply() runtime error:\n" .. tostring(ok_apply), "AudioSweet — Core apply error", 0)
+            log_step("ERROR", "M.core() runtime error: %s", tostring(ok_apply))
+            reaper.MB("RGWH Core M.core() runtime error:\n" .. tostring(ok_apply), "AudioSweet — Core error", 0)
             failed = true
           else
             if not ok_apply then
               if debug_enabled() then
-                log_step("ERROR", "apply() returned false; err=%s", tostring(err))
+                log_step("ERROR", "M.core() returned false; err=%s", tostring(err))
               end
-              reaper.MB("RGWH Core apply() error:\n" .. tostring(err or "(nil)"), "AudioSweet — Core apply error", 0)
+              reaper.MB("RGWH Core M.core() error:\n" .. tostring(err or "(nil)"), "AudioSweet — Core error", 0)
               failed = true
             end
           end
@@ -1747,7 +1839,7 @@ function main() -- main part of the script
             reaper.MB("Core finished, but no item is selected.", "AudioSweet", 0)
             failed = true
           else
-            append_fx_to_take_name(postItem, FXName)
+            append_fx_to_take_name(postItem, naming_token)
             local origTR = u.track
             reaper.MoveMediaItemToTrack(postItem, origTR)
             table.insert(outputs, postItem)
