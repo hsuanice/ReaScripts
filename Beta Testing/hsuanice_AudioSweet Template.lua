@@ -1,6 +1,6 @@
 --[[
 @description AudioSweet Template (hsuanice) — Focused/Chain × Apply/Copy
-@version v251018_0200
+@version v251022_1617
 @author hsuanice
 @about
   Minimal, clean template for AudioSweet-style scripts:
@@ -16,6 +16,15 @@ Usage (example wrappers set before running this script):
   reaper.SetExtState("hsuanice_AS","AS_ACTION","copy",false)
 
 @changelog
+  v251022_1617
+    • Added: User-configurable handle length setting (AS_HANDLE_SECONDS).
+      - New user setting at top of script: AS_HANDLE_SECONDS (default: 5.0 seconds).
+      - Template now forwards handle length to RGWH Core via ProjExtState before execution.
+      - Allows per-script handle customization without modifying RGWH Core defaults.
+    • Fixed: Handle length now correctly uses SetProjExtState instead of SetExtState.
+      - RGWH Core reads from ProjExtState, not global ExtState.
+      - Added debug log: "[AS][STEP] HANDLE set HANDLE_SECONDS=X.X (ProjExtState)".
+
   v251018_0200
     • Update: chain-mode confirmation dialog now shows full track info and FX chain.
       - Added helper `get_track_number_and_name()` to correctly retrieve track name and index.
@@ -59,6 +68,7 @@ local function log_step(tag, fmt, ...)
   reaper.ShowConsoleMsg(string.format("[AS][STEP] %s %s\n", tostring(tag or ""), msg))
 end
 
+
 ---------------------------------------------------------
 -- Summary dialog toggle (ExtState: hsuanice_AS/AS_SHOW_SUMMARY)
 --   "0" → do NOT show summary dialog
@@ -69,6 +79,11 @@ local function show_summary_enabled()
 end
 
 ---------------------------------------------------------
+-- User settings (can be overridden via ExtState)
+---------------------------------------------------------
+local AS_HANDLE_SECONDS = 1.5  -- Handle length in seconds (default: 5.0)
+
+---------------------------------------------------------
 -- Args: merge from ExtState (with sensible defaults)
 ---------------------------------------------------------
 local function AS_merge_args_with_extstate(args)
@@ -77,11 +92,12 @@ local function AS_merge_args_with_extstate(args)
     local v = reaper.GetExtState(ns, key)
     if v == "" then return def else return v end
   end
-  args.mode        = args.mode        or get_ns("hsuanice_AS","AS_MODE","chain")     -- focused | chain
-  args.action      = args.action      or get_ns("hsuanice_AS","AS_ACTION","copy")      -- apply   | copy
-  args.scope       = args.scope       or get_ns("hsuanice_AS","AS_COPY_SCOPE","active") -- active  | all_takes
-  args.append_pos  = args.append_pos  or get_ns("hsuanice_AS","AS_COPY_POS","tail")     -- tail    | head
-  args.warn_takefx = (args.warn_takefx ~= false)  -- default true
+  args.mode         = args.mode         or get_ns("hsuanice_AS","AS_MODE","focused")     -- focused | chain
+  args.action       = args.action       or get_ns("hsuanice_AS","AS_ACTION","apply")     -- apply   | copy
+  args.scope        = args.scope        or get_ns("hsuanice_AS","AS_COPY_SCOPE","active")-- active  | all_takes
+  args.append_pos   = args.append_pos   or get_ns("hsuanice_AS","AS_COPY_POS","tail")    -- tail    | head
+  args.apply_method = args.apply_method or get_ns("hsuanice_AS","AS_APPLY","auto")       -- auto | render | glue
+  args.warn_takefx  = (args.warn_takefx ~= false)  -- default true
   return args
 end
 
@@ -221,7 +237,72 @@ local function build_fx_chain_list(track, max_fx)
   end
   return table.concat(lines, "\n")
 end
+---------------------------------------------------------
+-- AudioSweet Core bridge
+-- Sets ExtState for AudioSweet Core and executes it.
+-- AudioSweet Core will then invoke RGWH Core internally (TS-Window & item-unit).
+---------------------------------------------------------
+local function run_as_core(mode, apply_method, src_track, fx_index, fx_name)
+  -- normalize
+  mode = (mode == "chain") and "chain" or "focused"
+  -- allow auto passthrough; default to render if unknown
+  if apply_method == "auto" or apply_method == "glue" or apply_method == "render" then
+    -- keep as-is
+  else
+    apply_method = "render"
+  end
 
+  -- derive identifiers for source track
+  local tr_num = 0
+  local tr_guid = ""
+  if src_track then
+    tr_num  = tonumber(reaper.GetMediaTrackInfo_Value(src_track, "IP_TRACKNUMBER")) or 0 -- 1-based
+    tr_guid = reaper.GetTrackGUID(src_track) or ""
+  end
+
+  -- pass control flags + source context for AudioSweet Core (which calls RGWH Core)
+  reaper.SetExtState("hsuanice_AS","AS_MODE",            mode,          false)   -- focused | chain
+  reaper.SetExtState("hsuanice_AS","AS_ACTION",          "apply",       false)   -- always apply
+  reaper.SetExtState("hsuanice_AS","AS_APPLY",           apply_method,  false)   -- auto | render | glue
+  reaper.SetExtState("hsuanice_AS","AS_IS_CHAIN",        (mode=="chain") and "1" or "0", false)
+
+  -- source context (focused FX & track)
+  reaper.SetExtState("hsuanice_AS","AS_SRC_TRACK_GUID",  tr_guid,       false)
+  reaper.SetExtState("hsuanice_AS","AS_SRC_TRACKNUM_1",  tostring(tr_num),        false) -- 1-based
+  reaper.SetExtState("hsuanice_AS","AS_SRC_TRACKNUM_0",  tostring(math.max(0,tr_num-1)), false) -- 0-based
+  reaper.SetExtState("hsuanice_AS","AS_FX_INDEX",        tostring(fx_index or -1), false)
+  reaper.SetExtState("hsuanice_AS","AS_FX_NAME",         tostring(fx_name or ""),  false)
+
+  -- Handle length setting (forward to RGWH Core via ProjExtState)
+  reaper.SetProjExtState(0, "RGWH", "HANDLE_SECONDS", tostring(AS_HANDLE_SECONDS))
+  log_step("HANDLE", "set HANDLE_SECONDS=%s (ProjExtState)", tostring(AS_HANDLE_SECONDS))
+
+  -- Optional: forward TS/UNIT knobs if your Core expects them
+  -- reaper.SetExtState("hsuanice_AS","AS_TS_POLICY",  "GLOBAL", false)
+  -- reaper.SetExtState("hsuanice_AS","AS_UNIT",       "ITEM",   false)
+
+  -- run AudioSweet Core (it will pull ExtStates and run RGWH Core)
+  local core_path = reaper.GetResourcePath() ..
+                    "/Scripts/hsuanice Scripts/Library/hsuanice_AudioSweet Core.lua"
+
+  log_step("APPLY", "invoke AudioSweet Core @ %s (mode=%s, apply=%s, tr#=%s, fx=%s)",
+           core_path, mode, apply_method, tostring(tr_num), tostring(fx_index))
+
+  local ok, ret_or_err = pcall(dofile, core_path)
+  if not ok then
+    reaper.ShowConsoleMsg("[AS][ERROR] AudioSweet Core failed: "..tostring(ret_or_err).."\n")
+    return
+  end
+
+  -- If Core returns a callable table (optional), try to run it.
+  if type(ret_or_err) == "table" and type(ret_or_err.run) == "function" then
+    local ok2, err2 = pcall(ret_or_err.run, { mode = mode, apply = apply_method })
+    if not ok2 then
+      reaper.ShowConsoleMsg("[AS][ERROR] AudioSweet Core run() failed: "..tostring(err2).."\n")
+      return
+    end
+  end
+end
 ---------------------------------------------------------
 -- Focused Track FX resolver (Track FX only)
 ---------------------------------------------------------
@@ -312,21 +393,21 @@ local function copy_chain_to_selected_items(src_track, args)
 end
 
 ---------------------------------------------------------
--- APPLY stubs (hook your engine here)
--- - Focused: apply only the focused FX
--- - Chain:   apply the whole Track FX chain
+-- APPLY core entrypoints (no dialogs)
+-- Plug your old AudioSweet / Chain logic here.
+-- Expected behavior:
+--   - Focused: isolate to the focused FX and apply
+--   - Chain:   apply the whole track FX chain (no isolation)
+-- Use args.apply_method: "render" | "glue"
 ---------------------------------------------------------
-local function apply_focused_stub(src_track, fx_index, focused_fx_name)
-  -- ⬇️ 這裡接你要的引擎（例如 RGWH Core 或 40361/41993）
-  -- 目前先示意：只顯示訊息，不做任何變更。
-  reaper.MB(("Apply Focused FX (stub)\n\nFX: %s"):format(focused_fx_name or "(unknown)"),
-            "AudioSweet Template — APPLY", 0)
+local function apply_focused_core(src_track, fx_index, focused_fx_name, args)
+  -- Delegate to AudioSweet Core (which calls RGWH Core internally)
+  run_as_core("focused", args.apply_method, src_track, fx_index, focused_fx_name)
 end
 
-local function apply_chain_stub(src_track, focused_fx_name)
-  reaper.MB(("Apply FULL CHAIN (stub)\n\nFocused FX for reference: %s")
-              :format(focused_fx_name or "(unknown)"),
-            "AudioSweet Template — APPLY", 0)
+local function apply_chain_core(src_track, focused_fx_name, args)
+  -- Delegate to AudioSweet Core (which calls RGWH Core internally)
+  run_as_core("chain", args.apply_method, src_track, nil, focused_fx_name)
 end
 
 ---------------------------------------------------------
@@ -338,7 +419,8 @@ local function main()
   reaper.Undo_BeginBlock()
   reaper.PreventUIRefresh(1)
 
-  local sel_snap = snapshot_selection()
+  local sel_snap = (reaper.GetExtState("hsuanice_AS","AS_ACTION") == "copy")
+                 and snapshot_selection() or nil
 
   local ok, src_track, fx_index, raw_name = get_focused_track_fx_or_warn(args)
   if not ok then
@@ -409,18 +491,23 @@ if args.action == "copy" then
                         (args.mode=="focused" and "focused FX" or "FX chain"),
                         tonumber(ops) or 0), 0)
   return
-end
+end  -- ← closes: if args.action == "copy" then
 
-  -- APPLY flow (stub)
+  -- APPLY flow (no dialogs)
+  -- Debug: entering apply flow
+  log_step("APPLY", "mode=%s apply=%s", tostring(args.mode), tostring(args.apply_method))
+
+  local undo_msg
   if args.mode == "focused" then
-    apply_focused_stub(src_track, fx_index, raw_name)
+    apply_focused_core(src_track, fx_index, raw_name, args)
+    undo_msg = string.format("AudioSweet Template: Apply Focused (%s)", args.apply_method)
   else
-    apply_chain_stub(src_track, raw_name)
+    apply_chain_core(src_track, raw_name, args)
+    undo_msg = string.format("AudioSweet Template: Apply Chain (%s)", args.apply_method)
   end
 
-  restore_selection(sel_snap)
   reaper.PreventUIRefresh(-1)
-  reaper.Undo_EndBlock("AudioSweet Template: Apply (stub)", 0)
-end
+  reaper.Undo_EndBlock(undo_msg, 0)
+end  -- ← closes: function main()
 
 main()
