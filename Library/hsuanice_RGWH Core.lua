@@ -1,6 +1,6 @@
 --[[]
 @description RGWH Core (Render/Glue with Handles) — Public Beta
-@version 251022_1745
+@version 251022_2200
 @author hsuanice
 @about
   Core library for handle-aware Render/Glue workflows with clear, single-entry API.
@@ -55,6 +55,13 @@
   • All overrides are one-run only: ExtState is snapshotted and restored after operation.
 
 @changelog
+  251022_2200
+    - Changed: merge_volumes now affects ALL takes (not just active take) to ensure consistent output
+    - Rationale: When merge_volumes=true, item volume is reset to 0dB; if only active take was merged,
+                 switching to other takes would cause unexpected volume jumps. By merging all takes,
+                 the actual audio output remains consistent regardless of which take is active.
+    - Added: English comments explaining the merge-all-takes behavior and design rationale
+
   251022_1745
     - Added: Volume control for Render operations via two new toggles:
         • merge_volumes (default: true) - merge item volume into take volume before render
@@ -1436,8 +1443,8 @@ function M.render_selection(take_fx, track_fx, mode, tc_mode, merge_volumes, pri
       if DBG >= 2 then dbg(DBG,2,"[TAKEFX] temp-offline %d FX on '%s'", n_off, orig_name) end
     end
 
-    -- >>>> Volume handling: snapshot and optional merge <<<<
-    local volume_snap = { item_vol = 0.0, take_vols = {} }
+    -- >>>> Volume handling: snapshot, optional merge, optional reset <<<<
+    local volume_snap = { item_vol = 0.0, take_vols = {}, merged_vol = 1.0 }
     do
       -- Always snapshot current volumes
       local item_vol = r.GetMediaItemInfo_Value(it, "D_VOL") or 1.0
@@ -1451,24 +1458,54 @@ function M.render_selection(take_fx, track_fx, mode, tc_mode, merge_volumes, pri
         end
       end
 
-      -- Conditional merge: pre-merge item volume into ALL takes' take volume
-      -- so the render bakes the correct gain (when merge_volumes=true)
-      if cfg.RENDER_MERGE_VOLUMES then
+      -- Conditional merge: pre-merge item volume into ALL takes (not just active)
+      -- Rationale: When merge_volumes=true, the goal is to move all volume control from
+      -- item level to take level. If we only merge the active take, switching to other
+      -- takes will cause unexpected volume jumps (because item volume is reset to 0dB).
+      -- By merging ALL takes, we ensure consistent output regardless of which take is active.
+      if cfg.RENDER_MERGE_VOLUMES and tk_orig then
         if math.abs(item_vol - 1.0) > 1e-9 then
-          local merged = 0
+          -- Multiply item volume into EVERY take's volume
+          local nt = r.GetMediaItemNumTakes(it) or 0
           for ti = 0, nt-1 do
             local tk = r.GetTake(it, ti)
             if tk then
-              local tv = volume_snap.take_vols[ti] or 1.0
-              r.SetMediaItemTakeInfo_Value(tk, "D_VOL", tv * item_vol)
-              merged = merged + 1
+              local tv = r.GetMediaItemTakeInfo_Value(tk, "D_VOL") or 1.0
+              local merged_tv = tv * item_vol
+              r.SetMediaItemTakeInfo_Value(tk, "D_VOL", merged_tv)
             end
           end
+          -- Remember the merged value for the active take specifically (for restoration)
+          local tv_orig = volume_snap.take_vols[tk_orig_idx] or 1.0
+          volume_snap.merged_vol = tv_orig * item_vol
           r.SetMediaItemInfo_Value(it, "D_VOL", 1.0)
-          if DBG >= 2 then dbg(DBG,2,"[GAIN] pre-merged itemVol=%.3f into %d take(s)", item_vol, merged) end
+          if DBG >= 2 then dbg(DBG,2,"[GAIN] pre-merged itemVol=%.3f into ALL takes; active take (%.3f → %.3f)", item_vol, tv_orig, volume_snap.merged_vol) end
+        else
+          -- Item already at 1.0, just store active take volume as merged_vol
+          local tv_orig = r.GetMediaItemTakeInfo_Value(tk_orig, "D_VOL") or 1.0
+          volume_snap.merged_vol = tv_orig
+        end
+
+        -- If print_volumes=false, reset active take volume to 0dB before render
+        -- (so rendered audio doesn't bake in the volume)
+        if not cfg.RENDER_PRINT_VOLUMES and tk_orig then
+          local current_tv = r.GetMediaItemTakeInfo_Value(tk_orig, "D_VOL") or 1.0
+          volume_snap.merged_vol = current_tv
+          r.SetMediaItemTakeInfo_Value(tk_orig, "D_VOL", 1.0)
+          if DBG >= 2 then dbg(DBG,2,"[GAIN] print_volumes=false; reset active take %.3f→1.0 before render", current_tv) end
         end
       else
-        if DBG >= 2 then dbg(DBG,2,"[GAIN] merge_volumes=false; keeping item=%.3f, takes separate", item_vol) end
+        -- merge_volumes=false: don't merge, remember original values
+        -- Keep item volume and take volumes separate (no modification to inactive takes)
+        local tv_orig = tk_orig and (r.GetMediaItemTakeInfo_Value(tk_orig, "D_VOL") or 1.0) or 1.0
+        volume_snap.merged_vol = tv_orig
+        if DBG >= 2 then dbg(DBG,2,"[GAIN] merge_volumes=false; keeping item=%.3f, take=%.3f separate", item_vol, tv_orig) end
+
+        -- If print_volumes=false, reset active take to 0dB before render
+        if not cfg.RENDER_PRINT_VOLUMES and tk_orig then
+          r.SetMediaItemTakeInfo_Value(tk_orig, "D_VOL", 1.0)
+          if DBG >= 2 then dbg(DBG,2,"[GAIN] print_volumes=false; reset active take %.3f→1.0 before render", tv_orig) end
+        end
       end
     end
 
@@ -1543,19 +1580,34 @@ function M.render_selection(take_fx, track_fx, mode, tc_mode, merge_volumes, pri
 
     -- Volume handling after render: print or restore
     if cfg.RENDER_PRINT_VOLUMES then
-      -- Print mode: volumes are baked, set to neutral (1.0 = 0dB)
-      r.SetMediaItemInfo_Value(it, "D_VOL", 1.0)
-      if newtk then r.SetMediaItemTakeInfo_Value(newtk, "D_VOL", 1.0) end
-      if DBG >= 2 then dbg(DBG,2,"[GAIN] print_volumes=true; set item & new take to 1.0") end
+      -- Print mode: volumes are baked into audio
+      if cfg.RENDER_MERGE_VOLUMES then
+        -- Merged: item=0dB, new take=0dB, old take=merged_vol
+        r.SetMediaItemInfo_Value(it, "D_VOL", 1.0)
+        if newtk then r.SetMediaItemTakeInfo_Value(newtk, "D_VOL", 1.0) end
+        if tk_orig then r.SetMediaItemTakeInfo_Value(tk_orig, "D_VOL", volume_snap.merged_vol) end
+        if DBG >= 2 then dbg(DBG,2,"[GAIN] print_volumes=true; item=1.0, new take=1.0, old active take=%.3f", volume_snap.merged_vol) end
+      else
+        -- Not merged: restore original item & take volumes
+        r.SetMediaItemInfo_Value(it, "D_VOL", volume_snap.item_vol)
+        if newtk then r.SetMediaItemTakeInfo_Value(newtk, "D_VOL", 1.0) end
+        if tk_orig then r.SetMediaItemTakeInfo_Value(tk_orig, "D_VOL", volume_snap.merged_vol) end
+        if DBG >= 2 then dbg(DBG,2,"[GAIN] print_volumes=true; item=%.3f, new take=1.0, old active take=%.3f", volume_snap.item_vol, volume_snap.merged_vol) end
+      end
     else
-      -- Non-print mode: restore original volumes
-      r.SetMediaItemInfo_Value(it, "D_VOL", volume_snap.item_vol)
-      if newtk then
-        -- Restore the new take to the original active take's volume
-        local orig_take_idx = r.GetMediaItemInfo_Value(it, "I_CURTAKE")
-        local orig_vol = volume_snap.take_vols[orig_take_idx] or 1.0
-        r.SetMediaItemTakeInfo_Value(newtk, "D_VOL", orig_vol)
-        if DBG >= 2 then dbg(DBG,2,"[GAIN] print_volumes=false; restored item=%.3f, new take=%.3f", volume_snap.item_vol, orig_vol) end
+      -- Non-print mode: restore volumes (non-destructive)
+      if cfg.RENDER_MERGE_VOLUMES then
+        -- Merged: item=0dB, all takes=merged_vol
+        r.SetMediaItemInfo_Value(it, "D_VOL", 1.0)
+        if newtk then r.SetMediaItemTakeInfo_Value(newtk, "D_VOL", volume_snap.merged_vol) end
+        if tk_orig then r.SetMediaItemTakeInfo_Value(tk_orig, "D_VOL", volume_snap.merged_vol) end
+        if DBG >= 2 then dbg(DBG,2,"[GAIN] print_volumes=false; item=1.0, new & old active takes=%.3f", volume_snap.merged_vol) end
+      else
+        -- Not merged: restore original item & take volumes
+        r.SetMediaItemInfo_Value(it, "D_VOL", volume_snap.item_vol)
+        if newtk then r.SetMediaItemTakeInfo_Value(newtk, "D_VOL", volume_snap.merged_vol) end
+        if tk_orig then r.SetMediaItemTakeInfo_Value(tk_orig, "D_VOL", volume_snap.merged_vol) end
+        if DBG >= 2 then dbg(DBG,2,"[GAIN] print_volumes=false; item=%.3f, new & old active takes=%.3f", volume_snap.item_vol, volume_snap.merged_vol) end
       end
     end
 
