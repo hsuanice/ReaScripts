@@ -1,6 +1,6 @@
 --[[]
 @description RGWH Core (Render/Glue with Handles) — Public Beta
-@version 251014_0021
+@version 251022_1745
 @author hsuanice
 @about
   Core library for handle-aware Render/Glue workflows with clear, single-entry API.
@@ -27,6 +27,8 @@
       take_fx  = true|false,               -- bake take FX (nil = keep ExtState)
       track_fx = true|false,               -- bake track FX (nil = keep ExtState)
       tc_mode  = "previous" | "current" | "off", -- TimeReference embed policy (render only)
+      merge_volumes = true|false,          -- merge item volume into take volume before render (default: true)
+      print_volumes = true|false,          -- bake volumes into rendered audio; false = restore original (default: true)
 
       -- One-run overrides (fallback: ExtState -> DEFAULTS):
       handle  = { mode="seconds", seconds=5.0 } | "ext" | nil,
@@ -43,7 +45,7 @@
 
   -- Legacy (kept for compatibility):
   RGWH.glue_selection()
-  RGWH.render_selection(take_fx?, track_fx?, mode?, tc_mode?)
+  RGWH.render_selection(take_fx?, track_fx?, mode?, tc_mode?, merge_volumes?, print_volumes?)
   RGWH.apply(args)  -- AudioSweet bridge (unchanged)
   
 @notes
@@ -53,6 +55,25 @@
   • All overrides are one-run only: ExtState is snapshotted and restored after operation.
 
 @changelog
+  251022_1745
+    - Added: Volume control for Render operations via two new toggles:
+        • merge_volumes (default: true) - merge item volume into take volume before render
+        • print_volumes (default: true) - bake volumes into rendered audio; false = restore original volumes after render
+    - Changed: M.render_selection() now accepts merge_volumes and print_volumes parameters (5th and 6th args)
+    - Changed: M.core(args) now accepts args.merge_volumes and args.print_volumes for render operations
+    - Behavior: When print_volumes=false, original item and take volumes are restored after render (non-destructive)
+    - Tech: Volume snapshot/restore logic added to render path; conditional merge based on merge_volumes flag
+    - Note: These options only affect render operations; glue operations unchanged
+
+  251014_2246
+    - Fix: TS-Window multi-track pass now uses a snapshot of the original selection.
+           Per-track processing no longer depends on the live selection, so subsequent
+           tracks won't show "TS glue: no members on this track" after the first pass.
+    - Change: glue_by_ts_window_on_track(tr, tsL, tsR, cfg) →
+              glue_by_ts_window_on_track(tr, tsL, tsR, cfg, members_snapshot).
+              Call sites pass the pre-collected members list for each track.
+    - Note: Behavior unchanged for single-track; this only affects multi-track TS glue.
+
   251014_0021
     - Change: embed_current_tc_for_item() now calls E.Refresh_Items({take}) after
               a successful TR write, forcing REAPER to reload updated metadata.
@@ -1066,8 +1087,8 @@ local function glue_unit(tr, u, cfg)
 
 end
 
--- GLUE by explicit Time Selection window for a single track (NO handles; TS-Window parity with AudioSweet)
-local function glue_by_ts_window_on_track(tr, tsL, tsR, cfg)
+-- GLUE by explicit Time Selection window for a single track (NO handles; TS-Window parity with AudioSweet). Uses members_snapshot (original selection) to avoid selection churn.
+local function glue_by_ts_window_on_track(tr, tsL, tsR, cfg, members_snapshot)
   local DBG = cfg.DEBUG_LEVEL or 1
   -- TS-Window rules:
   --   • No handles
@@ -1081,17 +1102,19 @@ local function glue_by_ts_window_on_track(tr, tsL, tsR, cfg)
       tostring(cfg.GLUE_TAKE_FX), tostring(cfg.GLUE_TRACK_FX),
       tostring(cfg.GLUE_APPLY_MODE), tostring(cfg.WRITE_GLUE_CUES))
 
-  -- collect selected members on this track that intersect TS
+  -- use the original selection snapshot for this track (do NOT depend on live selection)
   local members = {}
-  local n = r.CountTrackMediaItems(tr) or 0
-  for i = 0, n-1 do
-    local it = r.GetTrackMediaItem(tr, i)
-    if r.IsMediaItemSelected(it) and item_intersects_ts(it, tsL, tsR) then
-      local L, R = item_span(it)
-      -- clamp intersection to TS for boundary labeling
-      local iL = (L < tsL) and tsL or L
-      local iR = (R > tsR) and tsR or R
-      members[#members+1] = { it = it, L = L, R = R, iL = iL, iR = iR }
+  if type(members_snapshot) == "table" then
+    for _, it in ipairs(members_snapshot) do
+      if reaper.ValidatePtr2(0, it, "MediaItem*") then
+        -- intersect with TS; keep original item span (L/R) and clamped span (iL/iR)
+        local L, R = item_span(it)
+        if item_intersects_ts(it, tsL, tsR) then
+          local iL = (L < tsL) and tsL or L
+          local iR = (R > tsR) and tsR or R
+          members[#members+1] = { it = it, L = L, R = R, iL = iL, iR = iR }
+        end
+      end
     end
   end
   if #members == 0 then
@@ -1254,7 +1277,7 @@ function M.glue_selection()
   r.Undo_EndBlock("RGWH Core - Glue selection", -1)
 end
 
-function M.render_selection(take_fx, track_fx, mode, tc_mode)
+function M.render_selection(take_fx, track_fx, mode, tc_mode, merge_volumes, print_volumes)
   local cfg = M.read_settings()
   local DBG = cfg.DEBUG_LEVEL or 1
   local items = get_sel_items()
@@ -1274,6 +1297,11 @@ function M.render_selection(take_fx, track_fx, mode, tc_mode)
   if tc_mode ~= nil then
     cfg.RENDER_TC_EMBED = tostring(tc_mode)
   end
+  -- NEW: Volume control overrides (default: merge=true, print=true)
+  if merge_volumes == nil then merge_volumes = true end
+  if print_volumes == nil then print_volumes = true end
+  cfg.RENDER_MERGE_VOLUMES = (merge_volumes == true)
+  cfg.RENDER_PRINT_VOLUMES = (print_volumes == true)
 
   -- Auto mode: infer mono/multi from max source channels over current selection
   if cfg.RENDER_APPLY_MODE == "auto" then
@@ -1408,23 +1436,39 @@ function M.render_selection(take_fx, track_fx, mode, tc_mode)
       if DBG >= 2 then dbg(DBG,2,"[TAKEFX] temp-offline %d FX on '%s'", n_off, orig_name) end
     end
 
-    -- >>>> NEW: pre-merge item volume into ALL takes' take volume (one-time) <<<<
-    -- so the render bakes the correct gain and both item & new take end up at 0 dB.
+    -- >>>> Volume handling: snapshot and optional merge <<<<
+    local volume_snap = { item_vol = 0.0, take_vols = {} }
     do
+      -- Always snapshot current volumes
       local item_vol = r.GetMediaItemInfo_Value(it, "D_VOL") or 1.0
-      if math.abs(item_vol - 1.0) > 1e-9 then
-        local nt = r.GetMediaItemNumTakes(it) or 0
-        local merged = 0
-        for ti = 0, nt-1 do
-          local tk = r.GetTake(it, ti)
-          if tk then
-            local tv = r.GetMediaItemTakeInfo_Value(tk, "D_VOL") or 1.0
-            r.SetMediaItemTakeInfo_Value(tk, "D_VOL", tv * item_vol)
-            merged = merged + 1
-          end
+      volume_snap.item_vol = item_vol
+      local nt = r.GetMediaItemNumTakes(it) or 0
+      for ti = 0, nt-1 do
+        local tk = r.GetTake(it, ti)
+        if tk then
+          local tv = r.GetMediaItemTakeInfo_Value(tk, "D_VOL") or 1.0
+          volume_snap.take_vols[ti] = tv
         end
-        r.SetMediaItemInfo_Value(it, "D_VOL", 1.0)
-        if DBG >= 2 then dbg(DBG,2,"[GAIN] pre-merged itemVol=%.3f into %d take(s)", item_vol, merged) end
+      end
+
+      -- Conditional merge: pre-merge item volume into ALL takes' take volume
+      -- so the render bakes the correct gain (when merge_volumes=true)
+      if cfg.RENDER_MERGE_VOLUMES then
+        if math.abs(item_vol - 1.0) > 1e-9 then
+          local merged = 0
+          for ti = 0, nt-1 do
+            local tk = r.GetTake(it, ti)
+            if tk then
+              local tv = volume_snap.take_vols[ti] or 1.0
+              r.SetMediaItemTakeInfo_Value(tk, "D_VOL", tv * item_vol)
+              merged = merged + 1
+            end
+          end
+          r.SetMediaItemInfo_Value(it, "D_VOL", 1.0)
+          if DBG >= 2 then dbg(DBG,2,"[GAIN] pre-merged itemVol=%.3f into %d take(s)", item_vol, merged) end
+        end
+      else
+        if DBG >= 2 then dbg(DBG,2,"[GAIN] merge_volumes=false; keeping item=%.3f, takes separate", item_vol) end
       end
     end
 
@@ -1497,9 +1541,23 @@ function M.render_selection(take_fx, track_fx, mode, tc_mode)
     if newtk then r.SetMediaItemTakeInfo_Value(newtk, "D_STARTOFFS", left_total) end
     r.UpdateItemInProject(it)
 
-    -- Ensure volumes are neutral after render (we already pre-merged itemVol, so no extra math now).
-    r.SetMediaItemInfo_Value(it, "D_VOL", 1.0)
-    if newtk then r.SetMediaItemTakeInfo_Value(newtk, "D_VOL", 1.0) end
+    -- Volume handling after render: print or restore
+    if cfg.RENDER_PRINT_VOLUMES then
+      -- Print mode: volumes are baked, set to neutral (1.0 = 0dB)
+      r.SetMediaItemInfo_Value(it, "D_VOL", 1.0)
+      if newtk then r.SetMediaItemTakeInfo_Value(newtk, "D_VOL", 1.0) end
+      if DBG >= 2 then dbg(DBG,2,"[GAIN] print_volumes=true; set item & new take to 1.0") end
+    else
+      -- Non-print mode: restore original volumes
+      r.SetMediaItemInfo_Value(it, "D_VOL", volume_snap.item_vol)
+      if newtk then
+        -- Restore the new take to the original active take's volume
+        local orig_take_idx = r.GetMediaItemInfo_Value(it, "I_CURTAKE")
+        local orig_vol = volume_snap.take_vols[orig_take_idx] or 1.0
+        r.SetMediaItemTakeInfo_Value(newtk, "D_VOL", orig_vol)
+        if DBG >= 2 then dbg(DBG,2,"[GAIN] print_volumes=false; restored item=%.3f, new take=%.3f", volume_snap.item_vol, orig_vol) end
+      end
+    end
 
     -- Rename only the new rendered take
     rename_new_render_take(
@@ -1680,7 +1738,11 @@ function M.core(args)
   -- Run --------------------------------------------------------------
   local ok, err
   if op == "render" then
-    ok, err = pcall(M.render_selection)      -- always single-item; ignores selection_scope
+    -- Extract volume control params from args (defaults: merge=true, print=true)
+    local merge_vols = (args.merge_volumes == nil) and true or (args.merge_volumes == true)
+    local print_vols = (args.print_volumes == nil) and true or (args.print_volumes == true)
+    -- Pass volume params as positional args: (take_fx, track_fx, mode, tc_mode, merge_volumes, print_volumes)
+    ok, err = pcall(M.render_selection, nil, nil, nil, nil, merge_vols, print_vols)
 
   elseif op == "glue" or op == "auto" then
     local cfg = M.read_settings()
@@ -1690,7 +1752,10 @@ function M.core(args)
       local _, _, nsel = span_of_selected_items()
       local glue_single = (cfg.GLUE_SINGLE_ITEMS == true)
       if nsel <= 1 and not glue_single then
-        ok, err = pcall(M.render_selection)
+        -- Extract volume control params (defaults: merge=true, print=true)
+        local merge_vols = (args.merge_volumes == nil) and true or (args.merge_volumes == true)
+        local print_vols = (args.print_volumes == nil) and true or (args.print_volumes == true)
+        ok, err = pcall(M.render_selection, nil, nil, nil, nil, merge_vols, print_vols)
       else
         op = "glue"
       end
@@ -1708,7 +1773,7 @@ function M.core(args)
           r.Undo_BeginBlock(); r.PreventUIRefresh(1)
           if not cfg.DEBUG_NO_CLEAR then r.ClearConsole() end
           for _, tr in ipairs(tracks) do
-            glue_by_ts_window_on_track(tr, tsL, tsR, cfg)
+            glue_by_ts_window_on_track(tr, tsL, tsR, cfg, by_tr[tr])
           end
           r.PreventUIRefresh(-1); r.UpdateArrange(); r.Undo_EndBlock("RGWH Core - Glue TS", -1)
           ok, err = true, nil
@@ -1726,7 +1791,7 @@ function M.core(args)
           r.Undo_BeginBlock(); r.PreventUIRefresh(1)
           if not cfg.DEBUG_NO_CLEAR then r.ClearConsole() end
           for _, tr in ipairs(tracks) do
-            glue_by_ts_window_on_track(tr, tsL, tsR, cfg)
+            glue_by_ts_window_on_track(tr, tsL, tsR, cfg, by_tr[tr])
           end
           r.PreventUIRefresh(-1); r.UpdateArrange(); r.Undo_EndBlock("RGWH Core - Glue TS(auto)", -1)
           ok, err = true, nil
