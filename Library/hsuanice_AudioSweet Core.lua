@@ -1,6 +1,6 @@
 --[[
 @description AudioSweet (hsuanice) — Focused Track FX render via RGWH Core, append FX name, rebuild peaks (selected items)
-@version 251021_2145   Fixed: Multi-item glue now uses new RGWH Core M.core() API instead of deprecated apply().
+@version 251022_1638
 @author Tim Chimes (original), adapted by hsuanice
 @notes
   Reference:
@@ -18,6 +18,16 @@ This version:
   • Track FX only (Take FX not supported)
 
 @changelog
+  251022_1638
+    • Fixed: Function definition order for build_chain_token().
+      - Moved build_chain_token() after format_fx_label() and fx_alias_for_raw_label() definitions.
+      - Resolves "attempt to call a nil value (global 'format_fx_label')" error when using AS_CHAIN_TOKEN_SOURCE = "aliases".
+      - Now all three chain token modes work correctly: "track", "aliases", "fxchain".
+    • Tech: Chain token modes verified with comprehensive testing:
+      - "track" mode: uses track name (e.g., "-AS1-AudioSweet")
+      - "aliases" mode: uses FX alias list (e.g., "-AS1-ProR2ProQ4")
+      - "fxchain" mode: uses literal "FXChain" (e.g., "-AS1-FXChain")
+
   251021_2145
     - Fixed: Multi-item glue path now uses new RGWH Core M.core() API instead of deprecated apply()
     - Changed: Core API detection now looks for M.core() or M.glue_selection() instead of old M.apply()
@@ -513,27 +523,7 @@ local function track_name_token(FXtrack)
   return tn
 end
 
-local function build_chain_token(FXtrack)
-  if AS_CHAIN_TOKEN_SOURCE == "fxchain" then
-    return "FXChain"
-  elseif AS_CHAIN_TOKEN_SOURCE == "track" then
-    return track_name_token(FXtrack)
-  end
-
-  -- default: "aliases"
-  local list = {}
-  if not FXtrack then return "" end
-  local cnt = reaper.TrackFX_GetCount(FXtrack) or 0
-  for i = 0, cnt-1 do
-    local enabled = reaper.TrackFX_GetEnabled(FXtrack, i)
-    if enabled then
-      local _, raw = reaper.TrackFX_GetFXName(FXtrack, i, "")
-      local name  = format_fx_label(raw)
-      if name and name ~= "" then list[#list+1] = name end
-    end
-  end
-  return table.concat(list, AS_CHAIN_ALIAS_JOINER)
-end
+-- build_chain_token moved after format_fx_label and fx_alias_for_raw_label definitions (see line ~900)
 -- =======================
 -- ==== FX enable snapshot/restore (preserve original bypass states) ====
 local function snapshot_fx_enables(tr)
@@ -895,6 +885,31 @@ function fx_alias_for_raw_label(raw_label)
 
   return hit
 end
+
+-- =============================================
+-- ==== Chain token builder (moved here after format_fx_label is defined) ====
+local function build_chain_token(FXtrack)
+  if AS_CHAIN_TOKEN_SOURCE == "fxchain" then
+    return "FXChain"
+  elseif AS_CHAIN_TOKEN_SOURCE == "track" then
+    return track_name_token(FXtrack)
+  end
+
+  -- default: "aliases"
+  local list = {}
+  if not FXtrack then return "" end
+  local cnt = reaper.TrackFX_GetCount(FXtrack) or 0
+  for i = 0, cnt-1 do
+    local enabled = reaper.TrackFX_GetEnabled(FXtrack, i)
+    if enabled then
+      local _, raw = reaper.TrackFX_GetFXName(FXtrack, i, "")
+      local name  = format_fx_label(raw)
+      if name and name ~= "" then list[#list+1] = name end
+    end
+  end
+  return table.concat(list, AS_CHAIN_ALIAS_JOINER)
+end
+
 -- =============================================
 -- ==== selection snapshot helpers ====
 local function snapshot_selection()
