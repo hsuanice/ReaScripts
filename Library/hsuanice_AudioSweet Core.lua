@@ -1,6 +1,6 @@
 --[[
 @description AudioSweet (hsuanice) — Focused Track FX render via RGWH Core, append FX name, rebuild peaks (selected items)
-@version 251022_1638
+@version 251022_1716
 @author Tim Chimes (original), adapted by hsuanice
 @notes
   Reference:
@@ -18,6 +18,12 @@ This version:
   • Track FX only (Take FX not supported)
 
 @changelog
+  251022_1716
+    • Changed: All Chinese comments replaced with English for public beta release.
+      - Replaced ~70 lines of Chinese inline comments after line 320.
+      - Covers: alias system, FX parsing, main flow, TS-Window, Core/GLUE, RGWH Render logic.
+    • Tech: Ready for public beta distribution with full English documentation.
+
   251022_1638
     • Fixed: Function definition order for build_chain_token().
       - Moved build_chain_token() after format_fx_label() and fx_alias_for_raw_label() definitions.
@@ -546,10 +552,10 @@ local function restore_fx_enables(tr, snap)
 end
 -- =====================================================================
 -- ==== FX name formatting options & helper ====
--- ExtState 開關（若沒設定則讀 default）
-local FXNAME_DEFAULT_SHOW_TYPE    = false  -- 是否包含 type（如 "VST3:" / "CLAP:"）
-local FXNAME_DEFAULT_SHOW_VENDOR  = false  -- 是否包含廠牌（括號內）
-local FXNAME_DEFAULT_STRIP_SYMBOL = true  -- 是否移除空格與符號（僅保留字母數字）
+-- ExtState flags (if not set, reads defaults)
+local FXNAME_DEFAULT_SHOW_TYPE    = false  -- include type prefix (e.g., "VST3:" / "CLAP:")
+local FXNAME_DEFAULT_SHOW_VENDOR  = false  -- include vendor name (in parentheses)
+local FXNAME_DEFAULT_STRIP_SYMBOL = true  -- strip spaces and symbols (keep alphanumeric only)
 
 local function fxname_opts()
   local function flag(key, default)
@@ -567,8 +573,8 @@ end
 
 local function trim(s) return (s and s:gsub("^%s+",""):gsub("%s+$","")) or "" end
 
--- 解析 REAPER FX 顯示名稱：
---  例： "CLAP: Pro-Q 4 (FabFilter)" → type="CLAP", core="Pro-Q 4", vendor="FabFilter"
+-- Parse REAPER FX display name:
+--  Example: "CLAP: Pro-Q 4 (FabFilter)" → type="CLAP", core="Pro-Q 4", vendor="FabFilter"
 local function parse_fx_label(raw)
   raw = tostring(raw or "")
   local typ, rest = raw:match("^([%w%+%._-]+):%s*(.+)$")
@@ -585,13 +591,13 @@ end
 local fx_alias_for_raw_label
 
 local function format_fx_label(raw)
-  -- NEW: 先查 alias；若有就直接用
+  -- NEW: check alias first; use it if found
   local alias = fx_alias_for_raw_label(raw)
   if type(alias) == "string" and alias ~= "" then
     return alias
   end
 
-  -- 以下保留你原本的行為
+  -- Fallback to original formatting behavior
   local opt = fxname_opts()
   local typ, core, vendor = parse_fx_label(raw)
 
@@ -617,13 +623,13 @@ local AS_ALIAS_JSON_PATH = reaper.GetResourcePath() ..
   "/Scripts/hsuanice Scripts/Settings/fx_alias.json"
 local AS_ALIAS_TSV_PATH = reaper.GetResourcePath() ..
   "/Scripts/hsuanice Scripts/Settings/fx_alias.tsv"
-local AS_USE_ALIAS   = true   -- 設為 false 可暫時停用別名
+local AS_USE_ALIAS   = true   -- set to false to temporarily disable alias
 local AS_DEBUG_ALIAS = (reaper.GetExtState("hsuanice_AS","AS_DEBUG_ALIAS") == "1")
 
--- 簡單正規化：全小寫、移除非英數
+-- Simple normalization: lowercase, remove non-alphanumeric
 local function _norm(s) return (tostring(s or ""):lower():gsub("[^%w]+","")) end
 
--- 懶載入 JSON（需系統已有 dkjson 或同等 json.decode）
+-- Lazy-load JSON (requires dkjson or equivalent json.decode in system)
 -- Forward declare TSV helper so _alias_map() can call it before definition.
 local _alias_map_from_tsv
 
@@ -638,13 +644,13 @@ local function _alias_map()
     if AS_DEBUG_ALIAS then
       reaper.ShowConsoleMsg(("[ALIAS][LOAD] JSON not found: %s\n"):format(AS_ALIAS_JSON_PATH))
     end
-    -- JSON 檔不存在 → 試 TSV 後援
+    -- JSON file not found → try TSV fallback
     _FX_ALIAS_CACHE = _alias_map_from_tsv(AS_ALIAS_TSV_PATH)
     return _FX_ALIAS_CACHE
   end
   local blob = f:read("*a"); f:close()
 
-  -- 探測/載入 JSON 解碼器
+  -- Detect/load JSON decoder
   local JSON = _G.json or _G.dkjson
   if not JSON or not (JSON.decode or JSON.Decode or JSON.parse) then
     pcall(function()
@@ -658,7 +664,7 @@ local function _alias_map()
     if AS_DEBUG_ALIAS then
       reaper.ShowConsoleMsg("[ALIAS][LOAD] No JSON decoder found\n")
     end
-    -- 沒有解碼器 → 試 TSV 後援
+    -- No decoder → try TSV fallback
     _FX_ALIAS_CACHE = _alias_map_from_tsv(AS_ALIAS_TSV_PATH)
     return _FX_ALIAS_CACHE
   end
@@ -668,14 +674,14 @@ local function _alias_map()
     if AS_DEBUG_ALIAS then
       reaper.ShowConsoleMsg("[ALIAS][LOAD] JSON decode failed or not a table\n")
     end
-    -- JSON 解析失敗 → 試 TSV 後援
+    -- JSON parse failed → try TSV fallback
     _FX_ALIAS_CACHE = _alias_map_from_tsv(AS_ALIAS_TSV_PATH)
     return _FX_ALIAS_CACHE
   end
 
-  -- 支援兩種形態：
-  -- (A) 物件： { ["vst3|core|vendor"] = { alias="FOO", ... }, ... }
-  -- (B) 陣列： [ { fingerprint="vst3|core|vendor", alias="FOO", ... }, ... ]
+  -- Support two formats:
+  -- (A) object: { ["vst3|core|vendor"] = { alias="FOO", ... }, ... }
+  -- (B) array:  [ { fingerprint="vst3|core|vendor", alias="FOO", ... }, ... ]
   local count = 0
 
   local is_array = (data[1] ~= nil) and true or false
@@ -716,7 +722,7 @@ local function _alias_map()
   return _FX_ALIAS_CACHE
 end
 -- TSV small helper: build alias map from a TSV with headers:
---   fingerprint <TAB> alias  (其他欄位可有可無)
+--   fingerprint <TAB> alias  (other columns optional)
 function _alias_map_from_tsv(tsv_path)
   local map = {}
   local f = io.open(tsv_path, "rb")
@@ -736,7 +742,7 @@ function _alias_map_from_tsv(tsv_path)
     return map
   end
 
-  -- 找欄位索引
+  -- Find column indices
   local cols = {}
   local idx = 1
   for h in tostring(header):gmatch("([^\t]+)") do
@@ -781,8 +787,8 @@ function _alias_map_from_tsv(tsv_path)
   end
   return map
 end
--- 更強的 raw 解析：抓 host/type、去除括號後的 core、以及最外層括號當 vendor
--- 例： "VST3: UADx Manley VOXBOX Channel Strip (Universal Audio (UADx))"
+-- Stronger raw parsing: extract host/type, core without parens, outermost paren as vendor
+-- Example: "VST3: UADx Manley VOXBOX Channel Strip (Universal Audio (UADx))"
 --  => host="vst3", core="uadxmanleyvoxboxchannelstrip", vendor="universalaudiouadx"
 local function _parse_raw_label_host_core_vendor(raw)
   raw = tostring(raw or "")
@@ -791,36 +797,36 @@ local function _parse_raw_label_host_core_vendor(raw)
   local host = raw:match("^%s*([%w_]+)%s*:") or ""
   host = host:lower()
 
-  -- core：取冒號後整段，再去除所有括號內容與非英數
+  -- core: take everything after colon, remove all parens and non-alphanumeric
   local core = raw:match(":%s*(.+)$") or ""
-  core = core:gsub("%b()", "")            -- 去掉所有括號段
-               :gsub("%s+%-[%s%-].*$", "")-- 去掉 " - Something" 類尾巴（防萬一）
-               :gsub("%W", "")            -- 非英數去掉
+  core = core:gsub("%b()", "")            -- remove all paren segments
+               :gsub("%s+%-[%s%-].*$", "")-- remove " - Something" tail (just in case)
+               :gsub("%W", "")            -- remove non-alphanumeric
                :lower()
 
-  -- vendor：用 %b() 擷取「每一段平衡括號」，取最後一段
+  -- vendor: extract each balanced paren segment, take the last one
   local last = nil
   for seg in raw:gmatch("%b()") do
     last = seg
   end
   local vendor = ""
   if last and #last >= 2 then
-    vendor = last:sub(2, -2)              -- 去掉首尾括號
+    vendor = last:sub(2, -2)              -- remove leading/trailing parens
     vendor = vendor:gsub("%W", ""):lower()
   end
 
   return host, core, vendor
 end
--- 回傳別名或 nil（強化：支援 vendor 併入 core 的鍵、加掃描 fallback 與除錯輸出）
+-- Return alias or nil (enhanced: support vendor+core keys, scan fallback, debug output)
 function fx_alias_for_raw_label(raw_label)
   if not AS_USE_ALIAS then return nil end
   local m = _alias_map()
   if not m then return nil end
 
-  -- 主解析
+  -- Main parsing
   local host, core, vendor = _parse_raw_label_host_core_vendor(raw_label)
 
-  -- 舊解析一次（兼容老鍵）
+  -- Legacy parsing once (compatible with old keys)
   local typ2, core2, vendor2 = parse_fx_label(raw_label)
   local t2 = _norm(typ2)
   local c2 = _norm(core2)
@@ -830,7 +836,7 @@ function fx_alias_for_raw_label(raw_label)
   local c = core
   local v = vendor
 
-  -- 組各種候選鍵
+  -- Build various candidate keys
   local key1  = string.format("%s|%s|%s", t,  c,  v)
   local key2  = string.format("%s|%s|",    t,  c)
   local key2b = (v ~= "" and string.format("%s|%s%s|", t, c, v)) or nil
@@ -843,19 +849,19 @@ function fx_alias_for_raw_label(raw_label)
 
   local hit, from
 
-  -- 直接命中
+  -- Direct match
   if type(m[key1]) == "string" and m[key1] ~= "" then hit, from = m[key1], "exact" end
   if not hit and type(m[key2]) == "string" and m[key2] ~= "" then hit, from = m[key2], "empty-vendor" end
   if not hit and key2b and type(m[key2b]) == "string" and m[key2b] ~= "" then hit, from = m[key2b], "core+vendor-as-core" end
   if not hit and type(m[key3]) == "string" and m[key3] ~= "" then hit, from = m[key3], "cross-type" end
 
-  -- 兼容舊鍵
+  -- Legacy key compatibility
   if not hit and type(m[key1b]) == "string" and m[key1b] ~= "" then hit, from = m[key1b], "exact(legacy)" end
   if not hit and type(m[key2c]) == "string" and m[key2c] ~= "" then hit, from = m[key2c], "empty-vendor(legacy)" end
   if not hit and key2d and type(m[key2d]) == "string" and m[key2d] ~= "" then hit, from = m[key2d], "core+vendor-as-core(legacy)" end
   if not hit and type(m[key3b]) == "string" and m[key3b] ~= "" then hit, from = m[key3b], "cross-type(legacy)" end
 
-  -- 兜底掃描
+  -- Fallback scan
   if not hit then
     local core_pat1 = "|" .. c  .. "|"
     local core_pat2 = (v ~= "" and ("|" .. c .. v .. "|")) or nil
@@ -929,7 +935,7 @@ end
 
 local function restore_selection(snap)
   if not snap then return end
-  reaper.Main_OnCommand(40289, 0) -- 清空
+  reaper.Main_OnCommand(40289, 0) -- clear selection
   local eps = project_epsilon()
   for _, rec in ipairs(snap) do
     local tr = rec.tr
@@ -941,7 +947,7 @@ local function restore_selection(snap)
           local p  = reaper.GetMediaItemInfo_Value(it, "D_POSITION")
           local l  = reaper.GetMediaItemInfo_Value(it, "D_LENGTH")
           local q  = p + l
-          -- 只要這顆 item 覆蓋原來的選取範圍就認定是對應項（TS-Window 會生成貼齊的 glued 片段）
+          -- If this item covers the original selection range, consider it a match (TS-Window generates aligned glued clips)
           if p <= rec.L + eps and q >= rec.R - eps then
             reaper.SetMediaItemSelected(it, true)
             break
@@ -1165,7 +1171,7 @@ end
 
 local function move_items_to_track(items, destTrack)
   for _, it in ipairs(items) do
-    -- 強化防呆：只搬 MediaItem*
+    -- Enhanced safety check: only move MediaItem*
     if it and (reaper.ValidatePtr2 == nil or reaper.ValidatePtr2(0, it, "MediaItem*")) then
       reaper.MoveMediaItemToTrack(it, destTrack)
     else
@@ -1174,7 +1180,7 @@ local function move_items_to_track(items, destTrack)
   end
 end
 
--- 所有 items 都在某 track 上？
+-- Are all items on a certain track?
 local function items_all_on_track(items, tr)
   for _,it in ipairs(items) do
     if not it then return false end
@@ -1184,7 +1190,7 @@ local function items_all_on_track(items, tr)
   return true
 end
 
--- 只選取指定 items（保證 selection 與 unit 一致）
+-- Select only specified items (ensure selection matches unit)
 local function select_only_items_checked(items)
   reaper.Main_OnCommand(40289, 0)
   for _,it in ipairs(items) do
@@ -1276,15 +1282,15 @@ local function parse_as_tag(full)
 
   return base, tonumber(n), fx_tokens
 end
--- 共用：把單一 item 搬到 FX 軌並列印「只有聚焦 FX」
+-- Shared: move single item to FX track and apply "focused FX only"
 local function apply_focused_fx_to_item(item, FXmediaTrack, fxIndex, FXName)
   if not item then return false, -1 end
   local origTR = reaper.GetMediaItem_Track(item)
 
-  -- ★ 新增：快照 FX 啟用狀態（保留原本 bypass/enable）
+  -- ★ NEW: snapshot FX enable state (preserve original bypass/enable)
   local fx_enable_snap = snapshot_fx_enables(FXmediaTrack)
 
-  -- 移到 FX 軌並 isolate
+  -- Move to FX track and isolate
   reaper.MoveMediaItemToTrack(item, FXmediaTrack)
   dbg_item_brief(item, "TS-APPLY moved→FX")
   local __AS = AS_merge_args_with_extstate({})
@@ -1294,7 +1300,7 @@ local function apply_focused_fx_to_item(item, FXmediaTrack, fxIndex, FXName)
     -- chain mode: do NOT isolate; apply entire track FX chain
   end
 
-  -- 依素材聲道決定 40361 / 41993；並視需要暫調 I_NCHAN
+  -- Choose 40361/41993 based on item channels; temporarily adjust I_NCHAN if needed
   local ch         = get_item_channels(item)
   local prev_nchan = tonumber(reaper.GetMediaTrackInfo_Value(FXmediaTrack, "I_NCHAN")) or 2
   local cmd_apply  = 41993
@@ -1311,39 +1317,39 @@ local function apply_focused_fx_to_item(item, FXmediaTrack, fxIndex, FXName)
     end
   end
 
-  -- 只選該 item 後執行 apply
+  -- Select only that item then execute apply
   reaper.Main_OnCommand(40289, 0)
   reaper.SetMediaItemSelected(item, true)
   reaper.Main_OnCommand(cmd_apply, 0)
   log_step("TS-APPLY", "applied %d", cmd_apply)
   dbg_dump_selection("TS-APPLY post-apply")
 
-  -- 還原 I_NCHAN（若有改）
+  -- Restore I_NCHAN (if changed)
   if did_set then
     log_step("TS-APPLY", "I_NCHAN restore %d → %d", reaper.GetMediaTrackInfo_Value(FXmediaTrack, "I_NCHAN"), prev_nchan)
     reaper.SetMediaTrackInfo_Value(FXmediaTrack, "I_NCHAN", prev_nchan)
   end
 
-  -- 取回列印出的那顆（仍是選取中的單一 item），改名、搬回
+  -- Retrieve the applied item (still the single selected item), rename, move back
   local out = reaper.GetSelectedMediaItem(0, 0) or item
   append_fx_to_take_name(out, FXName)
   reaper.MoveMediaItemToTrack(out, origTR)
 
-  -- ★ 新增：還原 FX 啟用狀態（回到原本 bypass/enable）
+  -- ★ NEW: restore FX enable state (back to original bypass/enable)
   restore_fx_enables(FXmediaTrack, fx_enable_snap)
 
   return true, cmd_apply
 end
 
--- 單一 item：改用 RGWH Core 的 Render（新 take；保留舊 take；同時印 Take FX 與 Track FX）
+-- Single item: use RGWH Core Render (new take; keep old take; render both Take FX and Track FX)
 local function apply_focused_via_rgwh_render_new_take(item, FXmediaTrack, fxIndex, FXName)
   if not item then return false end
   local origTR = reaper.GetMediaItem_Track(item)
 
-  -- ★ 新增：快照 FX 啟用狀態（保留原本 bypass/enable）
+  -- ★ NEW: snapshot FX enable state (preserve original bypass/enable)
   local fx_enable_snap = snapshot_fx_enables(FXmediaTrack)
 
-  -- 移到 FX 軌 + isolate 只留聚焦 FX（Track FX 原始啟用/停用狀態保持；此處僅確保非聚焦者被 bypass）
+  -- Move to FX track + isolate focused FX only (Track FX original enable/bypass state preserved; here just bypass non-focused)
   reaper.MoveMediaItemToTrack(item, FXmediaTrack)
   dbg_item_brief(item, "RGWH-RENDER moved→FX")
   local __AS = AS_merge_args_with_extstate({})
@@ -1353,35 +1359,35 @@ local function apply_focused_via_rgwh_render_new_take(item, FXmediaTrack, fxInde
     -- chain mode: do NOT isolate; render full chain
   end
 
-  -- 單選這顆 item 作為 render 的 selection
+  -- Select only this item as the render selection
   reaper.Main_OnCommand(40289, 0)
   reaper.SetMediaItemSelected(item, true)
 
-  -- 載入 RGWH Core
+  -- Load RGWH Core
   local CORE_PATH = reaper.GetResourcePath() .. "/Scripts/hsuanice Scripts/Library/hsuanice_RGWH Core.lua"
   local ok_mod, M = pcall(dofile, CORE_PATH)
   if not ok_mod or not M or type(M.render_selection) ~= "function" then
-    -- ★ 還原 FX 啟用狀態後再返回
+    -- ★ Restore FX enable state before returning
     restore_fx_enables(FXmediaTrack, fx_enable_snap)
     log_step("ERROR", "render_selection not available in RGWH Core")
     return false
   end
 
-  -- ★ 重要修正：改用 RGWH Core 的「位置參數」呼叫版本，確保 TAKE/TRACK 旗標 = true
+  -- ★ Important fix: use RGWH Core's "positional parameter" call version, ensure TAKE/TRACK flags = true
   --   M.render_selection(take_fx, track_fx, apply_mode, tc_embed)
-  --   其中 apply_mode="auto" 會由 Core 依素材聲道決定 mono/multi
+  --   where apply_mode="auto" lets Core decide mono/multi based on item channels
   local ok_call, ret_or_err = pcall(M.render_selection, 1, 1, "auto", "current")
   if not ok_call then
     log_step("ERROR", "render_selection() runtime error: %s", tostring(ret_or_err))
-    -- 照樣往下嘗試拾取新輸出，避免 Core 雖報錯但其實已產生新 take 的情況漏處理
+    -- Still attempt to retrieve new output below, in case Core errored but actually produced a new take
   end
 
-  -- 取回新 take 所在 item（仍在選取中），改名後搬回原軌
+  -- Retrieve item with new take (still selected), rename and move back to original track
   local out = reaper.GetSelectedMediaItem(0, 0) or item
   append_fx_to_take_name(out, FXName)
   reaper.MoveMediaItemToTrack(out, origTR)
 
-  -- ★ 新增：還原 FX 啟用狀態（回到原本 bypass/enable）
+  -- ★ NEW: restore FX enable state (back to original bypass/enable)
   restore_fx_enables(FXmediaTrack, fx_enable_snap)
 
   return true
@@ -1582,7 +1588,7 @@ function main() -- main part of the script
     end    
     if #hit >= 2 then
       ------------------------------------------------------------------
-      -- TS-Window (GLOBAL): Pro Tools 行為（無 handles）
+      -- TS-Window (GLOBAL): Pro Tools behavior (no handles)
       ------------------------------------------------------------------
       log_step("TS-WINDOW[GLOBAL]", "begin TS=[%.3f..%.3f] units_hit=%d", tsL, tsR, #hit)
       log_step("PATH", "ENTER TS-WINDOW[GLOBAL]")
@@ -1593,12 +1599,12 @@ function main() -- main part of the script
         for _,it in ipairs(u.items) do reaper.SetMediaItemSelected(it, true) end
       end
       log_step("TS-WINDOW[GLOBAL]", "pre-42432 selected_items=%d", reaper.CountSelectedMediaItems(0))
-      dbg_dump_selection("TSW[GLOBAL] pre-42432")      -- ★ 新增
+      dbg_dump_selection("TSW[GLOBAL] pre-42432")      -- ★ NEW
       reaper.Main_OnCommand(42432, 0) -- Glue items within time selection (no handles)
       log_step("TS-WINDOW[GLOBAL]", "post-42432 selected_items=%d", reaper.CountSelectedMediaItems(0))
-      dbg_dump_selection("TSW[GLOBAL] post-42432")     -- ★ 新增
+      dbg_dump_selection("TSW[GLOBAL] post-42432")     -- ★ NEW
 
-      -- Each glued result: 先把當前選取複製成穩定清單，再逐一列印
+      -- Each glued result: first copy current selection to stable list, then apply one by one
       local glued_items = {}
       do
         local n = reaper.CountSelectedMediaItems(0)
@@ -1612,7 +1618,7 @@ function main() -- main part of the script
         local ok, used_cmd = apply_focused_fx_to_item(it, FXmediaTrack, fxIndex, naming_token)
         if ok then
           log_step("TS-WINDOW[GLOBAL]", "applied %d to glued #%d", used_cmd or -1, idx)
-          -- 取真正列印完的那顆（函式內會把選取變成這顆）
+          -- Get the actually applied item (function sets selection to this item)
           local out_item = reaper.GetSelectedMediaItem(0, 0)
           if out_item then table.insert(outputs, out_item) end
         else
@@ -1622,7 +1628,7 @@ function main() -- main part of the script
 
       log_step("TS-WINDOW[GLOBAL]", "done, outputs=%d", #outputs)
 
-      -- 還原執行前的選取（會挑回同軌同範圍的新 glued/printed 片段）
+      -- Restore pre-execution selection (picks new glued/printed clips on same track and range)
       restore_selection(sel_snapshot)
       if debug_enabled() then dbg_dump_selection("RESTORE selection") end
 
@@ -1630,14 +1636,14 @@ function main() -- main part of the script
       reaper.Undo_EndBlock("AudioSweet TS-Window (global) glue+print", 0)
       return
     end
-    -- else: TS 命中 0 或 1 個 unit → 落到下面 per-unit 分支
+    -- else: TS hits 0 or 1 unit → fall through to per-unit branch below
   end
 
   ----------------------------------------------------------------------
   -- Per-unit path:
-  --   - 無 TS：Core/GLUE（含 handles）
-  --   - 有 TS 且 TS==unit：Core/GLUE（含 handles）
-  --   - 有 TS 且 TS≠unit：TS-Window（UNIT；無 handles）→ 42432 → 40361
+  --   - No TS: Core/GLUE (with handles)
+  --   - Has TS and TS==unit: Core/GLUE (with handles)
+  --   - Has TS and TS≠unit: TS-Window (UNIT; no handles) → 42432 → 40361
   ----------------------------------------------------------------------
   for _,u in ipairs(units) do
     log_step("UNIT", "enter UL=%.3f UR=%.3f members=%d", u.UL, u.UR, #u.items)
@@ -1645,16 +1651,16 @@ function main() -- main part of the script
     if hasTS and not ts_equals_unit(u, tsL, tsR) then
       log_step("PATH", "TS-WINDOW[UNIT] UL=%.3f UR=%.3f", u.UL, u.UR)
       --------------------------------------------------------------
-      -- TS-Window (UNIT) 無 handles：42432 → 40361
+      -- TS-Window (UNIT) no handles: 42432 → 40361
       --------------------------------------------------------------
       -- select only this unit's items and glue within TS
       reaper.Main_OnCommand(40289, 0)
       for _,it in ipairs(u.items) do reaper.SetMediaItemSelected(it, true) end
       log_step("TS-WINDOW[UNIT]", "pre-42432 selected_items=%d", reaper.CountSelectedMediaItems(0))
-      dbg_dump_selection("TSW[UNIT] pre-42432")        -- ★ 新增
+      dbg_dump_selection("TSW[UNIT] pre-42432")        -- ★ NEW
       reaper.Main_OnCommand(42432, 0)
       log_step("TS-WINDOW[UNIT]", "post-42432 selected_items=%d", reaper.CountSelectedMediaItems(0))
-      dbg_dump_selection("TSW[UNIT] post-42432")       -- ★ 新增
+      dbg_dump_selection("TSW[UNIT] post-42432")       -- ★ NEW
 
       local glued = reaper.GetSelectedMediaItem(0, 0)
       if not glued then
@@ -1665,36 +1671,36 @@ function main() -- main part of the script
       local ok, used_cmd = apply_focused_fx_to_item(glued, FXmediaTrack, fxIndex, naming_token)
       if ok then
         log_step("TS-WINDOW[UNIT]", "applied %d", used_cmd or -1)
-        table.insert(outputs, glued)  -- out item已被移回原軌
+        table.insert(outputs, glued)  -- out item already moved back to original track
       else
         log_step("TS-WINDOW[UNIT]", "apply failed")
       end
     else
       --------------------------------------------------------------
-      -- Core/GLUE 或 RGWH Render：
-      --   無 TS 或 TS==unit：
-      --     • 當 unit 只有 1 顆 item → 走 RGWH Render（新 take；保留舊 take）
-      --     • 當 unit ≥2 顆 item   → 維持 Core/GLUE（含 handles）
+      -- Core/GLUE or RGWH Render:
+      --   No TS or TS==unit:
+      --     • When unit has only 1 item → use RGWH Render (new take; keep old take)
+      --     • When unit has ≥2 items   → use Core/GLUE (with handles)
       --------------------------------------------------------------
       if #u.items == 1 then
-        -- === 單一 item：使用 RGWH Render（同時印 Take FX 與 Track FX；保留舊 take） ===
+        -- === Single item: use RGWH Render (render both Take FX and Track FX; keep old take) ===
         local the_item = u.items[1]
         local ok = apply_focused_via_rgwh_render_new_take(the_item, FXmediaTrack, fxIndex, naming_token)
         if ok then
-          table.insert(outputs, the_item) -- 已搬回原軌且命名完成
+          table.insert(outputs, the_item) -- already moved back to original track and renamed
         else
           log_step("ERROR", "single-item RGWH render failed")
         end
       else
-        -- === 多 item：維持 Core/GLUE（含 handles） ===
+        -- === Multiple items: use Core/GLUE (with handles) ===
 
         -- Move all unit items to FX track (keep as-is), but select only the anchor for Core.
         move_items_to_track(u.items, FXmediaTrack)
 
-        -- ★ 新增：快照 FX 啟用狀態（保留原本 bypass/enable）
+        -- ★ NEW: snapshot FX enable state (preserve original bypass/enable)
         local fx_enable_snap_core = snapshot_fx_enables(FXmediaTrack)
 
-        -- 只啟用聚焦 FX，其他暫時 bypass
+        -- Enable only focused FX, temporarily bypass others
         local __AS = AS_merge_args_with_extstate({})
         if __AS.mode == "focused" then
           isolate_focused_fx(FXmediaTrack, fxIndex)
@@ -1775,12 +1781,12 @@ function main() -- main part of the script
           reaper.SetProjExtState(0, ns, key, tostring(val or ""))
         end
 
-        -- 檢查：unit 的所有 items 是否已在 FX 軌
+        -- Check: are all unit items already on FX track
         if not items_all_on_track(u.items, FXmediaTrack) then
           log_step("ERROR", "unit members not on FX track; fixing...")
           move_items_to_track(u.items, FXmediaTrack)
         end
-        -- 檢查：selection 是否等於整個 unit
+        -- Check: does selection equal the entire unit
         select_only_items_checked(u.items)
         if debug_enabled() then
           log_step("CORE", "pre-apply selected_items=%d (expect=%d)", reaper.CountSelectedMediaItems(0), #u.items)
@@ -1803,7 +1809,7 @@ function main() -- main part of the script
           log_step("CORE", "flag GLUE_SINGLE_ITEMS=%s (expected=1 for unit-glue)", (gsi == "" and "(empty)") or gsi)
         end
 
-        -- 準備參數並呼叫 Core
+        -- Prepare arguments and call Core
         if not (anchor and (reaper.ValidatePtr2 == nil or reaper.ValidatePtr2(0, anchor, "MediaItem*"))) then
           log_step("ERROR", "anchor item invalid (u.items[1]=%s)", tostring(anchor))
           reaper.MB("Internal error: unit anchor item is invalid.", "AudioSweet", 0)
@@ -1841,7 +1847,7 @@ function main() -- main part of the script
           end
         end
 
-        -- 還原旗標
+        -- Restore flags
         proj_set("RGWH","GLUE_TAKE_FX",      snap.GLUE_TAKE_FX)
         proj_set("RGWH","GLUE_TRACK_FX",     snap.GLUE_TRACK_FX)
         proj_set("RGWH","GLUE_APPLY_MODE",   snap.GLUE_APPLY_MODE)
@@ -1868,10 +1874,10 @@ function main() -- main part of the script
           end
         end
 
-        -- 將 unit 內其餘（若有）搬回原軌；還原 FX 啟用狀態
+        -- Move remaining items (if any) in unit back to original track; restore FX enable state
         move_items_to_track(u.items, u.track)
 
-        -- ★ 新增：還原 FX 啟用狀態（回到原本 bypass/enable）
+        -- ★ NEW: restore FX enable state (back to original bypass/enable)
         restore_fx_enables(FXmediaTrack, fx_enable_snap_core)
       end
     end
@@ -1880,7 +1886,7 @@ function main() -- main part of the script
 
   log_step("END", "outputs=%d", #outputs)
 
-  -- 還原執行前的選取
+  -- Restore pre-execution selection
   restore_selection(sel_snapshot)
   if debug_enabled() then dbg_dump_selection("RESTORE selection") end
 
