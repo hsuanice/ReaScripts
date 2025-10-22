@@ -1,7 +1,7 @@
 --[[
-@description RGWH Wrapper Template
+@description RGWH Wrapper Template (Public Beta)
 @author hsuanice
-@version v251022_1745
+@version v251022_2200
 @about
   Thin wrapper for calling RGWH Core via a single entry `RGWH.core(args)`.
   Use this as a starting point to test and ship wrappers that render/glue with handles.
@@ -25,6 +25,10 @@
   - handle/epsilon/cues/policies/debug: one-run overrides; omit or use "ext" to read ExtState as-is.
 
 @changelog
+  v251022_2200
+    - Changed: merge_volumes now affects ALL takes (not just active take) in RGWH Core
+    - Rationale: Ensures consistent audio output when switching between takes after merge
+
   v251022_1745
     - Added: Volume control options for Render operations:
         • merge_volumes (default: true) - merge item volume into take volume before render
@@ -102,18 +106,18 @@ local SELECTION_POLICY = "restore"
 -- If you didn’t choose a preset, configure manually here:
 local args = (_PRESET) or {
   -- Core operation
-  op              = "auto",        -- "auto" | "render" | "glue"
+  op              = "render",        -- "auto" | "render" | "glue"
   selection_scope = "auto",          -- "auto" | "units" | "ts" | "item"  (ignored when op="render")
   channel_mode    = "auto",        -- "auto" | "mono" | "multi"
 
   -- Render toggles (only effective when op resolves to render)
-  take_fx  = false,                 -- bake take FX on render
+  take_fx  = true,                 -- bake take FX on render
   track_fx = false,                 -- bake track FX on render
   tc_mode  = "current",           -- "previous" | "current" | "off" (BWF TimeReference embed)
 
   -- Volume handling (only effective when op resolves to render)
   merge_volumes = true,             -- merge item volume into take volume before render
-  print_volumes = true,             -- bake volumes into rendered audio (false = restore original volumes)
+  print_volumes = false,            -- bake volumes into rendered audio (false = restore original volumes)
 
   -- One-run overrides (simple knobs)
   -- Handle: choose how to interpret length; wrapper will convert to Core format
