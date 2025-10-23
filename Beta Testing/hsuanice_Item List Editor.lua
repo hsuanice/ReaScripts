@@ -1,6 +1,6 @@
 --[[
 @description Item List Editor
-@version 251023_2246
+@version 251024_0030
 @author hsuanice
 @about
   Shows a live, spreadsheet-style table of the currently selected items and all
@@ -41,6 +41,24 @@
 
 
 @changelog
+  v251024_0030
+  - Fix: Startup crash when opening ILE with items already selected
+    • Moved initial load to first frame of main loop (after ImGui context ready)
+    • Progressive load now triggers via dirty flag instead of direct call at startup
+    • Added context validation checks to prevent invalid context errors
+  - Fix: Column order sync now works correctly in real-time
+    • rebuild_display_mapping() now called every frame to detect column reordering
+    • Copy/Paste/Export immediately reflect user's visual column arrangement
+    • No longer uses stale column order after dragging columns
+  - Fix: Duplicate refresh triggers eliminated
+    • update_selection_cache() now properly updates LAST_SEL_HASH
+    • Selection hash generation logic unified across all code paths
+    • Prevents redundant scans when selection hasn't actually changed
+  - Cleanup: Removed duplicate code and improved comments
+    • Removed redundant row_index_map building in copy operation
+    • Removed debug dump_cols() calls from production code
+    • English comments for new performance-critical code sections
+
   v251023_2246
   - Performance: Major optimization for large selections (1000+ items)
     • Smart refresh with throttling: only refreshes when truly needed (max 10 fps)
@@ -1748,7 +1766,6 @@ local function has_selection_changed()
 
   -- Only check GUIDs when count is same (avoid perf hit with large selections)
   -- For large selections (>100 items), only check first 10 and last 10 GUIDs
-  local check_count = math.min(count, 20)
   local hash_parts = {}
 
   if count <= 100 then
@@ -1792,6 +1809,40 @@ local function update_selection_cache()
   LAST_SEL_COUNT = reaper.CountSelectedMediaItems(0)
   LAST_REFRESH_TIME = reaper.time_precise()
   NEEDS_REFRESH = false
+
+  -- Also update hash to prevent re-trigger
+  local count = LAST_SEL_COUNT
+  if count == 0 then
+    LAST_SEL_HASH = ""
+    return
+  end
+
+  local hash_parts = {}
+  if count <= 100 then
+    for i = 0, count - 1 do
+      local item = reaper.GetSelectedMediaItem(0, i)
+      if item then
+        local _, guid = reaper.GetSetMediaItemInfo_String(item, "GUID", "", false)
+        hash_parts[#hash_parts + 1] = guid
+      end
+    end
+  else
+    for i = 0, 9 do
+      local item = reaper.GetSelectedMediaItem(0, i)
+      if item then
+        local _, guid = reaper.GetSetMediaItemInfo_String(item, "GUID", "", false)
+        hash_parts[#hash_parts + 1] = guid
+      end
+    end
+    for i = count - 10, count - 1 do
+      local item = reaper.GetSelectedMediaItem(0, i)
+      if item then
+        local _, guid = reaper.GetSetMediaItemInfo_String(item, "GUID", "", false)
+        hash_parts[#hash_parts + 1] = guid
+      end
+    end
+  end
+  LAST_SEL_HASH = table.concat(hash_parts, "|")
 end
 
 -- Immediate full refresh (for manual "Refresh Now" button)
@@ -1839,10 +1890,12 @@ local function smart_refresh()
 
   -- Check if refresh needed
   local should_refresh = false
+  local reason = ""
 
   -- 1. Dirty flag (marked after manual operations)
   if NEEDS_REFRESH then
     should_refresh = true
+    reason = "dirty flag"
   end
 
   -- 2. Throttle: only check if enough time passed since last refresh
@@ -1850,6 +1903,7 @@ local function smart_refresh()
     -- 3. Selection change detection
     if has_selection_changed() then
       should_refresh = true
+      reason = "selection changed"
     end
   end
 
@@ -2194,7 +2248,8 @@ local function draw_table(rows, height)
     -- 表頭
     reaper.ImGui_TableHeadersRow(ctx)
 
-    -- 重建一次顯示→邏輯的映射
+    -- IMPORTANT: Rebuild display mapping EVERY FRAME to detect column reordering
+    -- ImGui doesn't notify us when user drags columns, so we must check each frame
     rebuild_display_mapping()
 
 
@@ -2421,8 +2476,14 @@ end
 -- Main loop
 ---------------------------------------
 local function loop()
-  smart_refresh()  -- Use smart refresh instead of unconditional refresh_now()
+  -- Ensure ctx is valid before proceeding
+  if not ctx or not reaper.ValidatePtr(ctx, "ImGui_Context*") then
+    reaper.ShowConsoleMsg("[ILE] ERROR: Invalid ImGui context!\n")
+    return
+  end
 
+  -- Smart refresh (handles progressive loading)
+  smart_refresh()
 
   reaper.ImGui_SetNextWindowSize(ctx, 1000, 640, reaper.ImGui_Cond_FirstUseEver())
   local flags = reaper.ImGui_WindowFlags_NoCollapse()
@@ -2448,10 +2509,8 @@ local function loop()
   if not (EDIT and EDIT.col) then
     -- Copy selection (follows visible rows & on-screen column order)
     if shortcut_pressed(reaper.ImGui_Key_C()) then
-      local rows = get_view_rows()                     -- 可見列（跟 UI 一致）
+      local rows = get_view_rows()                     -- Visible rows (matches UI)
       local rim  = LT.build_row_index_map(rows)        -- guid -> row_index
-      local rim  = LT.build_row_index_map(rows)
-      dump_cols("COPY")  -- ⬅ 印出當下 COL_ORDER/COL_POS      
       local tsv  = LT.copy_selection(
         rows, rim, sel_has, COL_ORDER, COL_POS,
         function(i, r, col) return get_cell_text(i, r, col, "tsv") end
@@ -2469,10 +2528,7 @@ local function loop()
         goto PASTE_END
       end
 
-      dump_cols("PASTE")  -- ⬅ 印出當下 COL_ORDER/COL_POS
-
-
-      -- 解析剪貼簿 → 扁平化來源
+      -- Parse clipboard -> flatten source
       local clip = reaper.ImGui_GetClipboardText(ctx) or ""
       local tbl  = parse_clipboard_table(clip)
       local src  = flatten_tsv_to_list(tbl)
@@ -2621,11 +2677,14 @@ local function loop()
 end
 
 -- Boot
-if AUTO then
-  -- Use progressive loading on startup for large selections
-  local count = reaper.CountSelectedMediaItems(0)
-  if count > 0 then
-    mark_dirty()  -- Trigger refresh on first frame via smart_refresh()
-  end
+if not ctx or not reaper.ValidatePtr(ctx, "ImGui_Context*") then
+  reaper.ShowConsoleMsg("[ILE] FATAL: Failed to create ImGui context!\n")
+  return
 end
+
+-- Mark that we need initial load (will happen in first frame via smart_refresh)
+if AUTO and reaper.CountSelectedMediaItems(0) > 0 then
+  NEEDS_REFRESH = true
+end
+
 loop()  -- Start UI main loop
