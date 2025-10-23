@@ -1,6 +1,6 @@
 --[[
 @description Item List Editor
-@version 251024_0110
+@version 251024_0115
 @author hsuanice
 @about
   Shows a live, spreadsheet-style table of the currently selected items and all
@@ -41,6 +41,13 @@
 
 
 @changelog
+  v251024_0115
+  - Fix: Crash when editing cells (Track Name, Take Name, Item Note)
+    • Root cause: mark_dirty() was defined after _commit_if_changed() but called inside it
+    • Fixed function definition order - mark_dirty() now defined before first use
+    • Prevents "attempt to call a nil value (global 'mark_dirty')" error
+    • Prevents "Missing EndTable()" ImGui error that crashed the script
+
   v251024_0110
   - NEW: Cache debug mode for testing cache invalidation
     • Right-click "Clear Cache" button to toggle debug mode
@@ -2097,6 +2104,11 @@ function _trim(s)
   return (s:gsub("^%s+", ""):gsub("%s+$", ""))
 end
 
+-- Mark as needing refresh (must be defined before _commit_if_changed uses it)
+local function mark_dirty()
+  NEEDS_REFRESH = true
+end
+
 local function _commit_if_changed(label, oldv, newv, fn_apply)
   newv = _trim(newv or "")
   oldv = tostring(oldv or "")
@@ -2308,11 +2320,6 @@ local function smart_refresh()
   if should_refresh then
     refresh_progressive()  -- Use progressive refresh instead of immediate
   end
-end
-
--- Mark as needing refresh (call after edit/paste/etc operations)
-local function mark_dirty()
-  NEEDS_REFRESH = true
 end
 
 -- 啟動時讀回上次的模式與 pattern，並重建 FORMAT
