@@ -1,6 +1,6 @@
 --[[
 @description Item List Editor
-@version 251024_2105
+@version 251024_2345
 @author hsuanice
 @about
   Shows a live, spreadsheet-style table of the currently selected items and all
@@ -41,6 +41,40 @@
 
 
 @changelog
+  v251024_2345
+  - Enhancement: Preset Editor improvements
+    • Added "Reset to Default" button to restore default column order (all visible)
+    • Disabled manual column drag-reorder in table (TableFlags_Reorderable removed)
+    • All column management now done through Preset Editor for consistency
+  - Next planned features:
+    • Table sorting (click column header to sort)
+    • Filter functionality (search/filter rows)
+
+  v251024_2120
+  - Feature: Column Preset Editor with visual column arrangement
+    • New "Edit..." button opens Preset Editor dialog
+    • Show/hide columns with checkboxes
+    • Reorder columns with ↑/↓ buttons
+    • "Apply" button applies changes to current session (unsaved)
+    • "Save & Apply" button saves to preset and applies
+    • Works with existing preset system (select/save/delete)
+    • Column order/visibility now managed through presets, not drag-and-drop
+    • Copy/Export always follow the preset-defined order
+  - Removed: Broken auto-detection logic for drag-reorder
+    • ImGui doesn't expose display order after user drags columns
+    • New preset editor provides reliable column management
+
+  v251024_2115
+  - Attempted: Auto-detect column display order after drag-reorder
+    • Used TableNextColumn() + TableGetColumnIndex() to detect order
+    • Failed: Only detected 10/13 columns, detection was unreliable
+    • Rolled back this approach in v251024_2120
+
+  v251024_2110
+  - Attempted: Column order persistence with auto-detection
+    • Tried to save column order to ExtState when changed
+    • Failed: Could not reliably detect display order from ImGui
+
   v251024_2105
   - Fix: Clipboard paste now fully functional for all scenarios
     • Updated Library v0.2.6: Complete rewrite of copy/paste logic
@@ -1127,6 +1161,7 @@ local PRESETS, PRESET_SET = {}, {}     -- list + set of names
 local ACTIVE_PRESET = nil              -- string or nil
 local PRESET_STATUS = "No preset"
 local PRESET_NAME_BUF = ""             -- popup input buffer
+local PRESET_EDITOR_STATE = nil        -- preset editor state {columns, dirty}
 
 local function _csv_from_order(order)
   local t = {}
@@ -1281,12 +1316,26 @@ local function load_prefs()
     FORMAT = TFLib.make_formatter(TIME_MODE)
   end
 
-  -- restpre auto-refresh state
+  -- restore auto-refresh state
   local a = reaper.GetExtState(EXT_NS, "auto_refresh")
   if a ~= "" then AUTO = (a ~= "0") end
 
   -- Column presets (named) — initialize index and optionally recall last active
   presets_init()
+
+  -- Restore last column order (if no preset is active)
+  if not ACTIVE_PRESET or ACTIVE_PRESET == "" then
+    local csv = reaper.GetExtState(EXT_NS, "col_order_current")
+    if csv and csv ~= "" then
+      local ord = _order_from_csv(csv)
+      if ord and #ord > 0 then
+        ord = _normalize_full_order(ord)
+        COL_ORDER = ord
+        COL_POS = {}
+        for vis, id in ipairs(ord) do if id then COL_POS[id] = vis end end
+      end
+    end
+  end
 end
 
 
@@ -2067,33 +2116,8 @@ local function dump_order_if_changed(tag)
   end
 end
 
-local function rebuild_display_mapping()
-  -- 先給個穩定長度
-  local cnt = reaper.ImGui_TableGetColumnCount(ctx) or 0
-  local old = {}
-  for i=1,#(COL_ORDER or {}) do old[i] = COL_ORDER[i] end
-
-  COL_ORDER, COL_POS = {}, {}
-  for display_pos = 0, cnt - 1 do
-    -- 直接用帶 index 的 API，避免切換 current column 造成讀值落在舊狀態
-    local label = reaper.ImGui_TableGetColumnName(ctx, display_pos) or ""
-    local id    = _colid_from_label(label)
-    if id then
-      COL_ORDER[display_pos + 1] = id
-      COL_POS[id] = display_pos + 1
-    end
-  end
-
-  -- 讀不到就回退固定順序（保險）
-  if #COL_ORDER == 0 then
-    COL_ORDER = {1,2,3,12,13,4,5,6,7,8,9,10,11}  -- 你的預設（與畫表頭一致）
-    COL_POS = {}; for i,id in ipairs(COL_ORDER) do COL_POS[id] = i end
-  end
-
-  if orders_differ(COL_ORDER, old) then
-    dump_order_if_changed("ORDER")
-  end
-end
+-- Column order is now managed through Preset system
+-- Users edit column order/visibility in Preset Editor, not by dragging in table
 
 
 
@@ -2778,6 +2802,12 @@ do
   end
 end
 
+-- 「Edit...」：打開 Preset Editor
+reaper.ImGui_SameLine(ctx)
+if reaper.ImGui_Button(ctx, "Edit...", 68, 24) then
+  reaper.ImGui_OpenPopup(ctx, "Column Preset Editor")
+end
+
 -- 「Save as…」：用使用者自訂名稱另存
 reaper.ImGui_SameLine(ctx)
 if reaper.ImGui_Button(ctx, "Save as…", 88, 24) then
@@ -2817,6 +2847,134 @@ if reaper.ImGui_BeginPopupModal(ctx, "Save preset as", true, TF('ImGui_WindowFla
   end
   reaper.ImGui_EndPopup(ctx)
 end
+
+-- Column Preset Editor modal
+if reaper.ImGui_BeginPopupModal(ctx, "Column Preset Editor", true, TF('ImGui_WindowFlags_AlwaysAutoResize')) then
+  reaper.ImGui_Text(ctx, "Arrange columns for preset: " .. (ACTIVE_PRESET or "(unsaved)"))
+  reaper.ImGui_Separator(ctx)
+
+  -- Initialize editor state if needed
+  if not PRESET_EDITOR_STATE then
+    PRESET_EDITOR_STATE = {
+      columns = {},  -- {col_id, visible, label}
+      dirty = false
+    }
+    -- Copy current COL_ORDER
+    for _, col_id in ipairs(COL_ORDER or {1,2,3,12,13,4,5,6,7,8,9,10,11}) do
+      table.insert(PRESET_EDITOR_STATE.columns, {
+        id = col_id,
+        visible = true,
+        label = header_label_from_id(col_id) or tostring(col_id)
+      })
+    end
+  end
+
+  -- Column list with checkboxes and up/down buttons
+  for i, col in ipairs(PRESET_EDITOR_STATE.columns) do
+    reaper.ImGui_PushID(ctx, i)
+
+    -- Checkbox for visibility
+    local changed, checked = reaper.ImGui_Checkbox(ctx, "##vis", col.visible)
+    if changed then
+      col.visible = checked
+      PRESET_EDITOR_STATE.dirty = true
+    end
+
+    reaper.ImGui_SameLine(ctx)
+    reaper.ImGui_Text(ctx, col.label)
+
+    -- Up button
+    reaper.ImGui_SameLine(ctx, 280)
+    if reaper.ImGui_BeginDisabled(ctx, i == 1) then end
+    if reaper.ImGui_Button(ctx, "↑", 30, 20) and i > 1 then
+      -- Swap with previous
+      PRESET_EDITOR_STATE.columns[i], PRESET_EDITOR_STATE.columns[i-1] =
+        PRESET_EDITOR_STATE.columns[i-1], PRESET_EDITOR_STATE.columns[i]
+      PRESET_EDITOR_STATE.dirty = true
+    end
+    if reaper.ImGui_EndDisabled then reaper.ImGui_EndDisabled(ctx) end
+
+    -- Down button
+    reaper.ImGui_SameLine(ctx)
+    if reaper.ImGui_BeginDisabled(ctx, i == #PRESET_EDITOR_STATE.columns) then end
+    if reaper.ImGui_Button(ctx, "↓", 30, 20) and i < #PRESET_EDITOR_STATE.columns then
+      -- Swap with next
+      PRESET_EDITOR_STATE.columns[i], PRESET_EDITOR_STATE.columns[i+1] =
+        PRESET_EDITOR_STATE.columns[i+1], PRESET_EDITOR_STATE.columns[i]
+      PRESET_EDITOR_STATE.dirty = true
+    end
+    if reaper.ImGui_EndDisabled then reaper.ImGui_EndDisabled(ctx) end
+
+    reaper.ImGui_PopID(ctx)
+  end
+
+  reaper.ImGui_Separator(ctx)
+
+  -- Reset to default button
+  if reaper.ImGui_Button(ctx, "Reset to Default", 140, 24) then
+    -- Reset to default column order
+    local DEFAULT_COL_ORDER = { 1, 2, 3, 12, 13, 4, 5, 6, 7, 8, 9, 10, 11 }
+    PRESET_EDITOR_STATE.columns = {}
+    for _, col_id in ipairs(DEFAULT_COL_ORDER) do
+      table.insert(PRESET_EDITOR_STATE.columns, {
+        id = col_id,
+        visible = true,
+        label = header_label_from_id(col_id) or tostring(col_id)
+      })
+    end
+    PRESET_EDITOR_STATE.dirty = true
+  end
+
+  reaper.ImGui_Separator(ctx)
+
+  -- Bottom buttons
+  if reaper.ImGui_Button(ctx, "Apply", 82, 24) then
+    -- Apply to current session (update COL_ORDER)
+    COL_ORDER = {}
+    COL_POS = {}
+    for i, col in ipairs(PRESET_EDITOR_STATE.columns) do
+      if col.visible then
+        table.insert(COL_ORDER, col.id)
+        COL_POS[col.id] = #COL_ORDER
+      end
+    end
+    PRESET_EDITOR_STATE.dirty = false
+    PRESET_STATUS = "Applied (unsaved)"
+  end
+
+  reaper.ImGui_SameLine(ctx)
+  if reaper.ImGui_Button(ctx, "Save & Apply", 120, 24) then
+    -- Save to active preset and apply
+    COL_ORDER = {}
+    COL_POS = {}
+    for i, col in ipairs(PRESET_EDITOR_STATE.columns) do
+      if col.visible then
+        table.insert(COL_ORDER, col.id)
+        COL_POS[col.id] = #COL_ORDER
+      end
+    end
+
+    if ACTIVE_PRESET and ACTIVE_PRESET ~= "" then
+      -- Update existing preset
+      preset_save_as(ACTIVE_PRESET, COL_ORDER)
+    else
+      -- Need to create a new preset
+      PRESET_NAME_BUF = "New Preset"
+      reaper.ImGui_OpenPopup(ctx, "Save preset as")
+    end
+
+    PRESET_EDITOR_STATE = nil
+    reaper.ImGui_CloseCurrentPopup(ctx)
+  end
+
+  reaper.ImGui_SameLine(ctx)
+  if reaper.ImGui_Button(ctx, "Cancel", 82, 24) then
+    PRESET_EDITOR_STATE = nil
+    reaper.ImGui_CloseCurrentPopup(ctx)
+  end
+
+  reaper.ImGui_EndPopup(ctx)
+end
 -----------------------
 
 reaper.ImGui_SameLine(ctx)
@@ -2832,8 +2990,8 @@ local function draw_table(rows, height)
             | TF('ImGui_TableFlags_RowBg')
             | TF('ImGui_TableFlags_SizingFixedFit')
             | TF('ImGui_TableFlags_ScrollX')
-            | TF('ImGui_TableFlags_Resizable')  
-            | TF('ImGui_TableFlags_Reorderable')   -- 允許拖曳重排欄位            
+            | TF('ImGui_TableFlags_Resizable')
+            -- Removed: TableFlags_Reorderable - column order managed through Preset Editor            
   -- 依目前 ACTIVE_PRESET 生成唯一表格 ID，避免 ImGui 重用舊排序
   -- 原本：local table_id = "items_" . ((ACTIVE_PRESET and ACTIVE_PRESET ~= "" and ACTIVE_PRESET) or "default")
   local table_id = "items_" .. ((ACTIVE_PRESET and ACTIVE_PRESET ~= "" and ACTIVE_PRESET) or "default")
@@ -2848,6 +3006,8 @@ local function draw_table(rows, height)
     -- 依現有 COL_ORDER 來畫表頭；若還沒任何順序則用預設
     local DEFAULT_COL_ORDER = { 1, 2, 3, 12, 13, 4, 5, 6, 7, 8, 9, 10, 11 }
     local initial_order = (COL_ORDER and #COL_ORDER > 0) and COL_ORDER or DEFAULT_COL_ORDER
+
+    -- Setup columns based on current order
     for i = 1, #initial_order do
       _setup_column_by_id(initial_order[i])
     end
@@ -2855,10 +3015,6 @@ local function draw_table(rows, height)
 
     -- 表頭
     reaper.ImGui_TableHeadersRow(ctx)
-
-    -- IMPORTANT: Rebuild display mapping EVERY FRAME to detect column reordering
-    -- ImGui doesn't notify us when user drags columns, so we must check each frame
-    rebuild_display_mapping()
 
 
     -- 建 row_index_map（給 Shift-矩形選取等）
