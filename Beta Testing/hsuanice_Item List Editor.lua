@@ -1,6 +1,6 @@
 --[[
 @description Item List Editor
-@version 251024_2050
+@version 251024_2105
 @author hsuanice
 @about
   Shows a live, spreadsheet-style table of the currently selected items and all
@@ -41,6 +41,32 @@
 
 
 @changelog
+  v251024_2105
+  - Fix: Clipboard paste now fully functional for all scenarios
+    • Updated Library v0.2.6: Complete rewrite of copy/paste logic
+    • COPY behavior:
+      - Single column: pure text format (no tabs)
+      - Multiple columns: TSV format (tab-separated)
+    • PASTE behavior:
+      - Content with tabs: parsed as TSV (multi-column)
+      - Content without tabs: each line as single cell (preserves all characters)
+    • Fixed issues:
+      ✓ External text with commas: "Come on, come on" → single cell (not split)
+      ✓ External text with spaces: "MEDIA_START:123 MEDIA_DURATION:456" → preserved
+      ✓ ILE internal single-column copy: no extra empty column on paste
+      ✓ ILE internal multi-column copy: correctly pastes all columns
+      ✓ Google Sheets paste: works correctly with/without empty cells
+    • Removed problematic CSV parsing mode entirely (was incorrectly splitting on commas)
+    • Both internal (ILE→ILE) and external (text→ILE) paste work correctly
+
+  v251024_2100
+  - Partial fix: Removed CSV parsing mode (Library v0.2.5)
+    • Fixed external paste but broke internal single-column copy
+
+  v251024_2055
+  - Attempted fix: Added trailing tabs to single-column copy (Library v0.2.4)
+    • Incomplete solution - caused unwanted empty column on paste
+
   v251024_2050
   - Fix: Complete solution for "Missing End()" and ImGui context errors
     • Skip ALL ImGui content drawing on first frame (not just keyboard checks)
