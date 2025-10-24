@@ -1,6 +1,6 @@
 --[[
 @description Item List Editor
-@version 251024_2030
+@version 251024_2050
 @author hsuanice
 @about
   Shows a live, spreadsheet-style table of the currently selected items and all
@@ -41,6 +41,28 @@
 
 
 @changelog
+  v251024_2050
+  - Fix: Complete solution for "Missing End()" and ImGui context errors
+    • Skip ALL ImGui content drawing on first frame (not just keyboard checks)
+    • Fixed code structure: all content now properly inside FRAME_COUNT > 1 guard
+    • Prevents draw_toolbar(), draw_table(), and all ImGui calls before context is stable
+    • Resolves "expected a valid ImGui_Context*" errors when opening with items selected
+
+  v251024_2045
+  - Revert: Progressive loading threshold back to 100 items (from 500)
+    • User feedback: 500 threshold felt slower in practice
+    • 100 items provides better balance between immediate response and smooth loading
+  - Fix: Removed spurious cache directory warning
+    • RecursiveCreateDirectory returns 0 when directory already exists (not an error)
+    • Removed confusing warning message - actual save/load errors will still be reported
+
+  v251024_2040
+  - Fix: ImGui context validation errors when opening with items selected
+    • Added frame counter to skip keyboard checks on first frame
+    • Fixed cache directory creation (REAPER API requires trailing slash)
+    • Added pcall protection to esc_pressed() function
+    • Prevents "expected a valid ImGui_Context*" errors during initialization
+
   v251024_2030
   - Fix: "Show muted items" toggle now works with instant response
     • Table rendering now correctly uses get_view_rows() instead of raw ROWS
@@ -622,11 +644,10 @@ local CACHE_VERSION = "1.0"  -- Bump this to invalidate all caches when metadata
 local function get_cache_dir()
   local resource_path = reaper.GetResourcePath()
   local cache_dir = resource_path .. "/ItemListEditor_cache"
-  -- Ensure directory exists
-  local ok = reaper.RecursiveCreateDirectory(cache_dir, 0)
-  if ok == 0 then
-    reaper.ShowConsoleMsg("[ILE Cache] Warning: Failed to create cache directory\n")
-  end
+  -- Ensure directory exists (note: need trailing slash for REAPER API)
+  -- RecursiveCreateDirectory returns 0 if dir already exists or on error
+  -- We'll just call it and not warn - if save/load fails, that will warn instead
+  reaper.RecursiveCreateDirectory(cache_dir .. "/", 0)
   return cache_dir
 end
 
@@ -1016,8 +1037,10 @@ local LIBVER = (META and META.VERSION) and (' | Metadata Read v'..tostring(META.
 local FLT_MIN = 1.175494e-38
 local function TF(name) local f = reaper[name]; return f and f() or 0 end
 local function esc_pressed()
+  if not ctx then return false end
   if reaper.ImGui_Key_Escape and reaper.ImGui_IsKeyPressed then
-    return reaper.ImGui_IsKeyPressed(ctx, reaper.ImGui_Key_Escape(), false)
+    local ok, result = pcall(reaper.ImGui_IsKeyPressed, ctx, reaper.ImGui_Key_Escape(), false)
+    return ok and result or false
   end
   return false
 end
@@ -1798,6 +1821,7 @@ end
 -- State (UI)
 ---------------------------------------
 AUTO = (AUTO == nil) and true or AUTO
+local FRAME_COUNT = 0  -- Track frame count to skip operations on first frame
 
 TABLE_SOURCE = "live"   -- "live"
 
@@ -2388,7 +2412,7 @@ local function refresh_progressive()
     return
   end
 
-  -- For large selections, use progressive loading
+  -- For large selections (100+), use progressive loading
   start_progressive_load()
   update_selection_cache()
 end
@@ -3040,48 +3064,53 @@ local function loop()
     return
   end
 
+  -- Increment frame counter
+  FRAME_COUNT = FRAME_COUNT + 1
+
   reaper.ImGui_SetNextWindowSize(ctx, 1000, 640, reaper.ImGui_Cond_FirstUseEver())
   local flags = reaper.ImGui_WindowFlags_NoCollapse()
   local visible, open = reaper.ImGui_Begin(ctx, "Item List Editor"..LIBVER, true, flags)
 
   if visible then
-    -- Smart refresh (after ImGui window is created)
-    smart_refresh()
+    -- Skip all content on first frame to avoid ImGui context initialization issues
+    if FRAME_COUNT > 1 then
+      -- Smart refresh (after ImGui window is created)
+      smart_refresh()
 
 
-    -- ESC 關閉整個視窗（若 Summary modal 開著，先只關 modal）
-    if esc_pressed() and not reaper.ImGui_IsPopupOpen(ctx, POPUP_TITLE) then
-      open = false
-    end
-
-
-
-
-    -- Top bar + Summary popup
-    draw_toolbar()
-    draw_summary_popup()   -- ← 要保留這行
-
-    -- Use get_view_rows() to respect "Show muted items" toggle
-    local rows_to_show = get_view_rows()
-    draw_table(rows_to_show, 360)
-
-  -- Clipboard shortcuts (when NOT in InputText editing)
-  if not (EDIT and EDIT.col) then
-    -- Copy selection (follows visible rows & on-screen column order)
-    if shortcut_pressed(reaper.ImGui_Key_C()) then
-      local rows = get_view_rows()                     -- Visible rows (matches UI)
-      local rim  = LT.build_row_index_map(rows)        -- guid -> row_index
-      local tsv  = LT.copy_selection(
-        rows, rim, sel_has, COL_ORDER, COL_POS,
-        function(i, r, col) return get_cell_text(i, r, col, "tsv") end
-      )
-      if tsv and tsv ~= "" then
-        reaper.ImGui_SetClipboardText(ctx, tsv)
+      -- ESC 關閉整個視窗（若 Summary modal 開著，先只關 modal）
+      if esc_pressed() and not reaper.ImGui_IsPopupOpen(ctx, POPUP_TITLE) then
+        open = false
       end
-    end
 
-    -- Paste（Live only，Excel 風規則）
-    if shortcut_pressed(reaper.ImGui_Key_V()) then
+
+
+
+      -- Top bar + Summary popup
+      draw_toolbar()
+      draw_summary_popup()   -- ← 要保留這行
+
+      -- Use get_view_rows() to respect "Show muted items" toggle
+      local rows_to_show = get_view_rows()
+      draw_table(rows_to_show, 360)
+
+      -- Clipboard shortcuts (when NOT in InputText editing)
+      if not (EDIT and EDIT.col) then
+        -- Copy selection (follows visible rows & on-screen column order)
+        if shortcut_pressed(reaper.ImGui_Key_C()) then
+          local rows = get_view_rows()                     -- Visible rows (matches UI)
+          local rim  = LT.build_row_index_map(rows)        -- guid -> row_index
+          local tsv  = LT.copy_selection(
+            rows, rim, sel_has, COL_ORDER, COL_POS,
+            function(i, r, col) return get_cell_text(i, r, col, "tsv") end
+          )
+          if tsv and tsv ~= "" then
+            reaper.ImGui_SetClipboardText(ctx, tsv)
+          end
+        end
+
+        -- Paste（Live only，Excel 風規則）
+        if shortcut_pressed(reaper.ImGui_Key_V()) then
       -- 檢查是否有選取      
       if not SEL or not SEL.cells or next(SEL.cells) == nil then
         reaper.ShowMessageBox("No cells selected. Please select target cells before pasting.", "Pasting", 0)
@@ -3201,51 +3230,53 @@ local function loop()
       -- status(string.format("Paste: trk=%d, take=%d (+%d), note=%d, skipped=%d",
       --   tracks_renamed, takes_named, takes_created, notes_set, skipped))
 
-      ::PASTE_END::
-    end
-
-    -- Delete（Live only）：Delete 或 Backspace 皆可
-    if TABLE_SOURCE == "live" then
-      local del_pressed = reaper.ImGui_IsKeyPressed(ctx, reaper.ImGui_Key_Delete(), false)
-                       or reaper.ImGui_IsKeyPressed(ctx, reaper.ImGui_Key_Backspace(), false)
-      if del_pressed then
-        delete_selected_cells()
-      end
-    end
-  end
-
-    -- Undo / Redo（專案層級；保護 item 選取）- MOVED OUTSIDE editing check
-    -- Only process when ILE window is focused or hovered (to capture keyboard input)
-    if reaper.ImGui_IsWindowFocused(ctx, reaper.ImGui_FocusedFlags_RootAndChildWindows())
-       or reaper.ImGui_IsWindowHovered(ctx, reaper.ImGui_HoveredFlags_RootAndChildWindows()) then
-      local m = _mods()
-      if m.shortcut then
-        -- 先快照目前選取（以 GUID）
-        local sel_snapshot = _snapshot_selected_item_guids()
-
-        -- 先判斷 Redo：Cmd/Ctrl+Shift+Z 或 Cmd/Ctrl+Y
-        local redo_combo = (m.shift and reaper.ImGui_IsKeyPressed(ctx, reaper.ImGui_Key_Z(), false))
-                        or reaper.ImGui_IsKeyPressed(ctx, reaper.ImGui_Key_Y(), false)
-        if redo_combo then
-          reaper.ShowConsoleMsg("[ILE] Redo triggered\n")
-          reaper.Undo_DoRedo2(0)
-          _restore_item_selection_by_guids(sel_snapshot)
-
-          -- Immediately refresh all rows after redo
-          ROWS = scan_selection_rows()
-          reaper.ShowConsoleMsg("[ILE] Refreshed after redo\n")
-        elseif reaper.ImGui_IsKeyPressed(ctx, reaper.ImGui_Key_Z(), false) then
-          -- Undo: Cmd/Ctrl+Z
-          reaper.ShowConsoleMsg("[ILE] Undo triggered\n")
-          reaper.Undo_DoUndo2(0)
-          _restore_item_selection_by_guids(sel_snapshot)
-
-          -- Immediately refresh all rows after undo
-          ROWS = scan_selection_rows()
-          reaper.ShowConsoleMsg("[ILE] Refreshed after undo\n")
+          ::PASTE_END::
         end
-      end
-    end
+
+        -- Delete（Live only）：Delete 或 Backspace 皆可
+        if TABLE_SOURCE == "live" then
+          local del_pressed = reaper.ImGui_IsKeyPressed(ctx, reaper.ImGui_Key_Delete(), false)
+                           or reaper.ImGui_IsKeyPressed(ctx, reaper.ImGui_Key_Backspace(), false)
+          if del_pressed then
+            delete_selected_cells()
+          end
+        end
+      end  -- End of: if not (EDIT and EDIT.col)
+
+      -- Undo / Redo（專案層級；保護 item 選取）- MOVED OUTSIDE editing check
+      -- Only process when ILE window is focused or hovered (to capture keyboard input)
+      if reaper.ImGui_IsWindowFocused(ctx, reaper.ImGui_FocusedFlags_RootAndChildWindows())
+         or reaper.ImGui_IsWindowHovered(ctx, reaper.ImGui_HoveredFlags_RootAndChildWindows()) then
+        local m = _mods()
+        if m.shortcut then
+          -- 先快照目前選取（以 GUID）
+          local sel_snapshot = _snapshot_selected_item_guids()
+
+          -- 先判斷 Redo：Cmd/Ctrl+Shift+Z 或 Cmd/Ctrl+Y
+          local redo_combo = (m.shift and reaper.ImGui_IsKeyPressed(ctx, reaper.ImGui_Key_Z(), false))
+                          or reaper.ImGui_IsKeyPressed(ctx, reaper.ImGui_Key_Y(), false)
+          if redo_combo then
+            reaper.ShowConsoleMsg("[ILE] Redo triggered\n")
+            reaper.Undo_DoRedo2(0)
+            _restore_item_selection_by_guids(sel_snapshot)
+
+            -- Immediately refresh all rows after redo
+            ROWS = scan_selection_rows()
+            reaper.ShowConsoleMsg("[ILE] Refreshed after redo\n")
+          elseif reaper.ImGui_IsKeyPressed(ctx, reaper.ImGui_Key_Z(), false) then
+            -- Undo: Cmd/Ctrl+Z
+            reaper.ShowConsoleMsg("[ILE] Undo triggered\n")
+            reaper.Undo_DoUndo2(0)
+            _restore_item_selection_by_guids(sel_snapshot)
+
+            -- Immediately refresh all rows after undo
+            ROWS = scan_selection_rows()
+            reaper.ShowConsoleMsg("[ILE] Refreshed after undo\n")
+          end
+        end
+      end  -- End of: if window focused/hovered
+
+    end  -- End of: if FRAME_COUNT > 1
   end  -- End of: if visible then
 
   reaper.ImGui_End(ctx)
