@@ -3,7 +3,7 @@ hsuanice_List Table.lua
 Minimal helper library for Item List Editor
 (No UI. Pure helpers for columns/selection/clipboard/paste/export.)
 Exports a single table: LT = { ... }
-@version 0.2.3
+@version 0.2.6
 @about
   hsuanice_List Table.lua — Minimal helper library for Item List Editor.
   Provides pure, side-effect-free utilities (no UI, no REAPER writes).
@@ -25,6 +25,34 @@ Exports a single table: LT = { ... }
     focused on UI and REAPER state changes only.
 
 @changelog
+  v0.2.6（251024）
+    - Fix: Complete rewrite of clipboard copy/paste logic
+      • copy_selection():
+        - Single column: pure text format (no tabs) → treated as plain text on paste
+        - Multiple columns: TSV format (tab-separated) → parsed as multi-column on paste
+      • parse_clipboard_table():
+        - Content with tabs: parsed as TSV (multi-column table)
+        - Content without tabs: each line becomes single cell (preserves all characters)
+        - Removed CSV parsing mode entirely (was incorrectly splitting on commas)
+      • Fixes all clipboard issues:
+        ✓ External text with commas: preserved as single cell
+        ✓ External text with spaces: preserved completely
+        ✓ ILE single-column copy: no unwanted empty column on paste
+        ✓ ILE multi-column copy: correctly pastes all columns
+        ✓ Google Sheets paste: works correctly in all cases
+
+  v0.2.5
+    - Partial fix: Removed CSV parsing mode
+      • When no tabs found, treat each line as single cell
+      • Fixed external paste but broke internal single-column copy
+      • Internal single-column copies still had trailing tabs → created empty columns
+
+  v0.2.4
+    - Attempted fix: Single-column copy forces TSV format with trailing tabs
+      • Added trailing tabs to force TSV detection
+      • Incomplete solution - caused unwanted empty column on paste
+      • Only worked for preventing CSV parsing, but created new problems
+
   v0.2.2
     - Paste spill now honors VISUAL column order:
       • LT.build_dst_spill_writable(): expands to the right by on-screen order,
@@ -61,7 +89,7 @@ Exports a single table: LT = { ... }
 
 
 local LT = {}
-LT.VERSION = "0.2.3"
+LT.VERSION = "0.2.4"
 ------------------------------------------------------------
 -- Columns: visual <-> logical mapping
 ------------------------------------------------------------
@@ -186,7 +214,15 @@ function LT.copy_selection(rows, row_index_map, sel_has, COL_ORDER, COL_POS, get
       local val = (col and sel_has(row.__item_guid, col)) and (get_cell_text(i, row, col, "tsv") or "") or ""
       line[#line+1] = val
     end
-    out[#out+1] = table.concat(line, "\t")
+    -- For single column: don't add tab separator (will be treated as single cell on paste)
+    -- For multiple columns: use tab separator (TSV format)
+    if pmax - pmin == 0 then
+      -- Single column: just the value, no tabs
+      out[#out+1] = line[1] or ""
+    else
+      -- Multiple columns: tab-separated
+      out[#out+1] = table.concat(line, "\t")
+    end
   end
   return table.concat(out, "\n")
 end
@@ -212,36 +248,17 @@ function LT.parse_clipboard_table(text)
 
   local tbl = {}
   if use_tsv then
+    -- TSV mode: split by tabs
     for i, ln in ipairs(lines) do
       local row = {}
       for cell in (ln.."\t"):gmatch("([^\t]*)\t") do row[#row+1] = cell end
       tbl[#tbl+1] = row
     end
   else
-    -- simple CSV parser with quotes
+    -- No tabs found: treat each line as a single cell
+    -- This preserves commas, spaces, and special characters in plain text
     for _, ln in ipairs(lines) do
-      local row = {}
-      local i, n = 1, #ln
-      while i <= n do
-        if ln:sub(i,i) == '"' then
-          local j = i+1; local buf = {}
-          while j <= n do
-            local c = ln:sub(j,j)
-            if c == '"' then
-              if ln:sub(j+1,j+1) == '"' then buf[#buf+1] = '"' ; j = j + 2
-              else j = j + 1; break end
-            else buf[#buf+1] = c ; j = j + 1 end
-          end
-          row[#row+1] = table.concat(buf)
-          if ln:sub(j,j) == "," then j = j + 1 end
-          i = j
-        else
-          local j = ln:find(",", i, true) or (n+1)
-          row[#row+1] = ln:sub(i, j-1)
-          i = j + 1
-        end
-      end
-      tbl[#tbl+1] = row
+      tbl[#tbl+1] = {ln}
     end
   end
   return tbl
