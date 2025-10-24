@@ -1,6 +1,6 @@
 --[[
 @description Item List Editor
-@version 251024_0115
+@version 251024_2016
 @author hsuanice
 @about
   Shows a live, spreadsheet-style table of the currently selected items and all
@@ -41,6 +41,30 @@
 
 
 @changelog
+  v251024_2016
+  - Fix: Undo/Redo functionality now works correctly
+    • Changed undo flags from -1 (no undo) to 4|1 (UNDO_STATE_ITEMS | UNDO_STATE_TRACKCFG)
+    • Paste, Delete, and Inline editing operations now create proper undo points
+    • Undo/Redo immediately refreshes display - no need to manually refresh
+    • Added window focus check to ensure shortcuts are captured by ILE
+  - Fix: Instant visual feedback after edits (combines cache speed with live responsiveness)
+    • NEW: refresh_rows_by_guids() - instantly reloads only edited rows
+    • Paste/Delete/Edit operations now invalidate cache AND immediately refresh affected rows
+    • No more "cached old data" after edits - changes appear instantly
+    • Preserves cache performance for unedited rows (best of both worlds)
+  - Fix: ImGui context errors when opening with items selected
+    • Moved smart_refresh() after ImGui_Begin() to ensure context is initialized
+    • Added "if visible then" guard to only execute window content when visible
+    • Proper Begin/End pairing maintained (End always called regardless of visibility)
+    • Fixed "Missing End()" errors that prevented script from starting
+  - Fix: mark_dirty() definition order corrected (again)
+    • Moved mark_dirty() to very top of code to prevent any "nil value" errors
+    • Now defined before ALL functions that use it (delete, paste, edit, undo, redo)
+  - Debug: Added context creation logging
+    • Console shows context address and type on creation
+    • Helps diagnose any future ImGui initialization issues
+  - Performance: Tested with 190 items - loads in 0.16s with full metadata
+
   v251024_0115
   - Fix: Crash when editing cells (Track Name, Take Name, Item Note)
     • Root cause: mark_dirty() was defined after _commit_if_changed() but called inside it
@@ -906,6 +930,24 @@ local function cache_flush()
   end
 end
 
+-- Invalidate cache for specific items by GUID
+local function cache_invalidate_items(item_guids)
+  if not CACHE.data or not CACHE.data.items then return end
+
+  local count = 0
+  for _, guid in ipairs(item_guids) do
+    if CACHE.data.items[guid] then
+      CACHE.data.items[guid] = nil
+      CACHE.dirty = true
+      count = count + 1
+    end
+  end
+
+  if count > 0 and CACHE.debug then
+    reaper.ShowConsoleMsg(string.format("[ILE Cache] Invalidated %d items\n", count))
+  end
+end
+
 -- Clear cache (for manual refresh or troubleshooting)
 local function cache_clear()
   CACHE.data = {
@@ -955,6 +997,15 @@ end
 ---------------------------------------
 -- ImGui setup (唯一的一組，請勿重複建立)
 local ctx = reaper.ImGui_CreateContext('Item List Editor')
+
+-- Debug: Check context creation
+if ctx then
+  reaper.ShowConsoleMsg(string.format("[ILE] ImGui context created: %s (type: %s)\n",
+    tostring(ctx), type(ctx)))
+else
+  reaper.ShowConsoleMsg("[ILE] ERROR: Failed to create ImGui context!\n")
+end
+
 local LIBVER = (META and META.VERSION) and (' | Metadata Read v'..tostring(META.VERSION)) or ''
 local FLT_MIN = 1.175494e-38
 local function TF(name) local f = reaper[name]; return f and f() or 0 end
@@ -1522,6 +1573,45 @@ local function load_metadata_for_row(row)
   })
 end
 
+-- Immediately refresh specific rows by item GUIDs (for instant feedback after edits)
+local function refresh_rows_by_guids(item_guids)
+  if not ROWS or #ROWS == 0 then return end
+
+  -- Build GUID to row mapping
+  local guid_to_row = {}
+  for _, row in ipairs(ROWS) do
+    if row.__item_guid then
+      guid_to_row[row.__item_guid] = row
+    end
+  end
+
+  -- Reload data for affected rows
+  for _, guid in ipairs(item_guids) do
+    local row = guid_to_row[guid]
+    if row and row.__item then
+      local item = row.__item
+      if reaper.ValidatePtr(item, "MediaItem*") then
+        -- Reload basic fields
+        local _, track_name = reaper.GetTrackName(row.__track or item_track(item), "")
+        row.track_name = track_name
+
+        local take = reaper.GetActiveTake(item)
+        if take then
+          local _, take_name = reaper.GetSetMediaItemTakeInfo_String(take, "P_NAME", "", false)
+          row.take_name = take_name
+        end
+
+        local _, note = reaper.GetSetMediaItemInfo_String(item, "P_NOTES", "", false)
+        row.item_note = note
+
+        -- Force reload metadata (cache already invalidated)
+        row.__metadata_loaded = false
+        load_metadata_for_row(row)
+      end
+    end
+  end
+end
+
 -- Full load (for compatibility, used when immediate load needed)
 local function collect_fields_for_item(item)
   local row = collect_basic_fields(item)
@@ -2041,6 +2131,11 @@ end
 
 
 
+-- Mark as needing refresh (must be defined early - used by multiple functions)
+local function mark_dirty()
+  NEEDS_REFRESH = true
+end
+
 -- Bulk-commit（一次 Undo、最後再 UpdateArrange/Refresh）
 local BULK = false
 local function bulk_begin() BULK = true end
@@ -2062,6 +2157,7 @@ local function delete_selected_cells()
   if #dst == 0 then return end
 
   reaper.Undo_BeginBlock2(0)
+  local affected_guids = {}
   for i = 1, #dst do
     local d = dst[i]
     local r = rows[d.row_index]             -- ★ 用 row_index 取 row
@@ -2086,10 +2182,19 @@ local function delete_selected_cells()
         r.item_note = ""
       end
     end
+    -- Collect affected item GUIDs
+    if r and r.__item_guid then
+      affected_guids[#affected_guids+1] = r.__item_guid
+    end
   end
-  reaper.Undo_EndBlock2(0, "[Editor] Clear selected cells", -1)
+  reaper.Undo_EndBlock2(0, "[ILE] Clear selected cells", 4|1)  -- UNDO_STATE_ITEMS | UNDO_STATE_TRACKCFG
+
+  -- Invalidate cache and immediately refresh affected rows
+  cache_invalidate_items(affected_guids)
+  refresh_rows_by_guids(affected_guids)  -- Immediate visual feedback
+
   reaper.UpdateArrange()
-  mark_dirty()  -- Mark for refresh in next frame
+  -- No need for mark_dirty() - rows already refreshed
 end
 
 
@@ -2104,11 +2209,6 @@ function _trim(s)
   return (s:gsub("^%s+", ""):gsub("%s+$", ""))
 end
 
--- Mark as needing refresh (must be defined before _commit_if_changed uses it)
-local function mark_dirty()
-  NEEDS_REFRESH = true
-end
-
 local function _commit_if_changed(label, oldv, newv, fn_apply)
   newv = _trim(newv or "")
   oldv = tostring(oldv or "")
@@ -2118,7 +2218,7 @@ local function _commit_if_changed(label, oldv, newv, fn_apply)
   else
     reaper.Undo_BeginBlock2(0)
     fn_apply(newv)
-    reaper.Undo_EndBlock2(0, "[Monitor] "..label, -1)
+    reaper.Undo_EndBlock2(0, "[ILE] "..label, 4|1)  -- UNDO_STATE_ITEMS | UNDO_STATE_TRACKCFG
     reaper.UpdateArrange()
   end
   mark_dirty()  -- Mark refresh needed after edit
@@ -2139,17 +2239,27 @@ end
 
 local function apply_take_name(tk, newname, row)
   if not tk then return end
-  _commit_if_changed("Rename Take", row.take_name, newname, function(v)
+  local changed = _commit_if_changed("Rename Take", row.take_name, newname, function(v)
     reaper.GetSetMediaItemTakeInfo_String(tk, "P_NAME", v, true)
     row.take_name = v
   end)
+  -- Invalidate cache and immediately refresh if changed
+  if changed and row.__item_guid then
+    cache_invalidate_items({row.__item_guid})
+    refresh_rows_by_guids({row.__item_guid})  -- Immediate visual feedback
+  end
 end
 
 local function apply_item_note(it, newnote, row)
-  _commit_if_changed("Edit Item Note", row.item_note, newnote, function(v)
+  local changed = _commit_if_changed("Edit Item Note", row.item_note, newnote, function(v)
     reaper.GetSetMediaItemInfo_String(it, "P_NOTES", v, true)
     row.item_note = v
   end)
+  -- Invalidate cache and immediately refresh if changed
+  if changed and row.__item_guid then
+    cache_invalidate_items({row.__item_guid})
+    refresh_rows_by_guids({row.__item_guid})  -- Immediate visual feedback
+  end
 end
 
 
@@ -2918,34 +3028,35 @@ end
 -- Main loop
 ---------------------------------------
 local function loop()
-  -- Ensure ctx is valid before proceeding
-  if not ctx or not reaper.ValidatePtr(ctx, "ImGui_Context*") then
-    reaper.ShowConsoleMsg("[ILE] ERROR: Invalid ImGui context!\n")
+  -- Ensure ctx exists
+  if not ctx then
+    reaper.ShowConsoleMsg("[ILE] ERROR: ImGui context is nil!\n")
     return
   end
-
-  -- Smart refresh (handles progressive loading)
-  smart_refresh()
 
   reaper.ImGui_SetNextWindowSize(ctx, 1000, 640, reaper.ImGui_Cond_FirstUseEver())
   local flags = reaper.ImGui_WindowFlags_NoCollapse()
   local visible, open = reaper.ImGui_Begin(ctx, "Item List Editor"..LIBVER, true, flags)
 
-
-  -- ESC 關閉整個視窗（若 Summary modal 開著，先只關 modal）
-  if esc_pressed() and not reaper.ImGui_IsPopupOpen(ctx, POPUP_TITLE) then
-    open = false
-  end
+  if visible then
+    -- Smart refresh (after ImGui window is created)
+    smart_refresh()
 
 
+    -- ESC 關閉整個視窗（若 Summary modal 開著，先只關 modal）
+    if esc_pressed() and not reaper.ImGui_IsPopupOpen(ctx, POPUP_TITLE) then
+      open = false
+    end
 
 
-  -- Top bar + Summary popup
-  draw_toolbar()
-  draw_summary_popup()   -- ← 要保留這行
 
-  local rows_to_show = ROWS
-  draw_table(rows_to_show, 360)
+
+    -- Top bar + Summary popup
+    draw_toolbar()
+    draw_summary_popup()   -- ← 要保留這行
+
+    local rows_to_show = ROWS
+    draw_table(rows_to_show, 360)
 
   -- Clipboard shortcuts (when NOT in InputText editing)
   if not (EDIT and EDIT.col) then
@@ -3063,10 +3174,21 @@ local function loop()
       -- 一次 Undo：交給 Library 做分流
       reaper.Undo_BeginBlock2(0)
       LT.apply_paste(rows, dst, tbl, COL_ORDER, COL_POS, apply_cell)
-      reaper.Undo_EndBlock2(0, "[Editor] Paste", -1)
+      reaper.Undo_EndBlock2(0, "[ILE] Paste", 4|1)  -- UNDO_STATE_ITEMS | UNDO_STATE_TRACKCFG
+
+      -- Invalidate cache and immediately refresh affected rows
+      local affected_guids = {}
+      for _, d in ipairs(dst) do
+        local r = rows[d.row_index]
+        if r and r.__item_guid then
+          affected_guids[#affected_guids+1] = r.__item_guid
+        end
+      end
+      cache_invalidate_items(affected_guids)
+      refresh_rows_by_guids(affected_guids)  -- Immediate visual feedback
 
       reaper.UpdateArrange()
-      mark_dirty()  -- Mark for refresh after paste
+      -- No need for mark_dirty() - rows already refreshed
 
       --（可選）你若有狀態列，可顯示摘要；沒有就略過
       -- status(string.format("Paste: trk=%d, take=%d (+%d), note=%d, skipped=%d",
@@ -3083,9 +3205,12 @@ local function loop()
         delete_selected_cells()
       end
     end
+  end
 
-    -- Undo / Redo（專案層級；保護 item 選取）
-    do
+    -- Undo / Redo（專案層級；保護 item 選取）- MOVED OUTSIDE editing check
+    -- Only process when ILE window is focused or hovered (to capture keyboard input)
+    if reaper.ImGui_IsWindowFocused(ctx, reaper.ImGui_FocusedFlags_RootAndChildWindows())
+       or reaper.ImGui_IsWindowHovered(ctx, reaper.ImGui_HoveredFlags_RootAndChildWindows()) then
       local m = _mods()
       if m.shortcut then
         -- 先快照目前選取（以 GUID）
@@ -3095,18 +3220,26 @@ local function loop()
         local redo_combo = (m.shift and reaper.ImGui_IsKeyPressed(ctx, reaper.ImGui_Key_Z(), false))
                         or reaper.ImGui_IsKeyPressed(ctx, reaper.ImGui_Key_Y(), false)
         if redo_combo then
+          reaper.ShowConsoleMsg("[ILE] Redo triggered\n")
           reaper.Undo_DoRedo2(0)
           _restore_item_selection_by_guids(sel_snapshot)
-          mark_dirty()  -- Mark for refresh after redo
+
+          -- Immediately refresh all rows after redo
+          ROWS = scan_selection_rows()
+          reaper.ShowConsoleMsg("[ILE] Refreshed after redo\n")
         elseif reaper.ImGui_IsKeyPressed(ctx, reaper.ImGui_Key_Z(), false) then
           -- Undo: Cmd/Ctrl+Z
+          reaper.ShowConsoleMsg("[ILE] Undo triggered\n")
           reaper.Undo_DoUndo2(0)
           _restore_item_selection_by_guids(sel_snapshot)
-          mark_dirty()  -- Mark for refresh after undo
+
+          -- Immediately refresh all rows after undo
+          ROWS = scan_selection_rows()
+          reaper.ShowConsoleMsg("[ILE] Refreshed after undo\n")
         end
       end
     end
-  end
+  end  -- End of: if visible then
 
   reaper.ImGui_End(ctx)
 
@@ -3121,7 +3254,7 @@ local function loop()
 end
 
 -- Boot
-if not ctx or not reaper.ValidatePtr(ctx, "ImGui_Context*") then
+if not ctx then
   reaper.ShowConsoleMsg("[ILE] FATAL: Failed to create ImGui context!\n")
   return
 end
