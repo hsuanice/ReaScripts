@@ -1,6 +1,6 @@
 --[[
 @description Item List Editor
-@version 251024_2345
+@version 251025_0005
 @author hsuanice
 @about
   Shows a live, spreadsheet-style table of the currently selected items and all
@@ -41,6 +41,14 @@
 
 
 @changelog
+  v251025_0005
+  - Fix: Column visibility (show/hide) now properly saved and restored in presets
+    • Preset storage format updated to include visibility flags (format: "1:1,2:1,3:0,...")
+    • When saving/loading presets, hidden columns are now remembered correctly
+    • Preset Editor now shows all 13 columns with correct visibility state
+    • Backward compatible with old preset format (columns in list are visible, rest hidden)
+    • New global COL_VISIBILITY table tracks visibility state for Preset Editor
+
   v251024_2345
   - Enhancement: Preset Editor improvements
     • Added "Reset to Default" button to restore default column order (all visible)
@@ -1136,6 +1144,7 @@ end
 
 -- Column order mapping (single source of truth)
 local COL_ORDER, COL_POS = {}, {}   -- visual→logical / logical→visual
+local COL_VISIBILITY = {}           -- col_id → true/false (for all 13 columns)
 
 
 
@@ -1162,13 +1171,80 @@ local ACTIVE_PRESET = nil              -- string or nil
 local PRESET_STATUS = "No preset"
 local PRESET_NAME_BUF = ""             -- popup input buffer
 local PRESET_EDITOR_STATE = nil        -- preset editor state {columns, dirty}
+local PENDING_VISIBILITY_MAP = nil     -- temp storage for visibility when saving from editor
 
+-- New format: "1:1,2:1,3:1,4:0,5:1,..." where format is columnID:visibleFlag
+-- visibleFlag: 1=visible, 0=hidden
+local function _csv_from_order_and_visibility(order, visibility_map)
+  local t = {}
+  -- Create a set of visible column IDs
+  local visible_set = {}
+  for _, col_id in ipairs(order or {}) do
+    visible_set[col_id] = true
+  end
+
+  -- Store all 13 columns with their visibility flags
+  for col_id = 1, 13 do
+    local visible_flag = visible_set[col_id] and "1" or "0"
+    t[#t+1] = tostring(col_id) .. ":" .. visible_flag
+  end
+
+  return table.concat(t, ",")
+end
+
+-- Parse format: "1:1,2:1,3:1,4:0,..." returns order (visible columns) and visibility map
+local function _order_and_visibility_from_csv(s)
+  s = tostring(s or "")
+
+  -- Check if this is the new format (contains colons)
+  if s:find(":") then
+    -- New format: "1:1,2:1,3:1,4:0,..."
+    local order = {}
+    local visibility_map = {}
+
+    for pair in s:gmatch("([^,]+)") do
+      local col_id, visible_flag = pair:match("(%d+):(%d+)")
+      if col_id and visible_flag then
+        col_id = tonumber(col_id)
+        visible_flag = tonumber(visible_flag)
+        visibility_map[col_id] = (visible_flag == 1)
+        if visible_flag == 1 then
+          order[#order+1] = col_id
+        end
+      end
+    end
+
+    return (#order > 0) and order or nil, visibility_map
+  else
+    -- Old format (backward compatibility): "1,2,3,..." - all listed columns are visible
+    local order = {}
+    for num in s:gmatch("([^,]+)") do
+      local v = tonumber(num)
+      if v then order[#order+1] = v end
+    end
+
+    -- Build visibility map - all columns in order are visible, rest are hidden
+    local visibility_map = {}
+    local visible_set = {}
+    for _, col_id in ipairs(order) do
+      visible_set[col_id] = true
+    end
+    for col_id = 1, 13 do
+      visibility_map[col_id] = visible_set[col_id] or false
+    end
+
+    return (#order > 0) and order or nil, visibility_map
+  end
+end
+
+-- Legacy function for backward compatibility (not used in new code)
 local function _csv_from_order(order)
   local t = {}
   for i=1,#(order or {}) do t[i] = tostring(order[i]) end
   return table.concat(t, ",")
 end
 
+-- Legacy function for backward compatibility (not used in new code)
 local function _order_from_csv(s)
   local out = {}
   for num in tostring(s or ""):gmatch("([^,]+)") do
@@ -1213,11 +1289,22 @@ local function _preset_save_index()
   reaper.SetExtState(EXT_NS, "col_presets", table.concat(PRESETS, "|"), true)
 end
 
-local function preset_save_as(name, order)
+-- Updated to accept both order and visibility map
+local function preset_save_as(name, order, visibility_map)
   name = _sanitize_name(name)
   if name == "" then PRESET_STATUS = "Name required"; return false end
-  order = _normalize_full_order(order or COL_ORDER)
-  reaper.SetExtState(EXT_NS, _key_for(name), _csv_from_order(order), true)
+
+  -- If visibility_map is provided, use new format; otherwise use legacy format
+  local payload
+  if visibility_map then
+    payload = _csv_from_order_and_visibility(order or COL_ORDER, visibility_map)
+  else
+    -- Legacy: assume all columns in order are visible, rest hidden
+    order = _normalize_full_order(order or COL_ORDER)
+    payload = _csv_from_order(order)
+  end
+
+  reaper.SetExtState(EXT_NS, _key_for(name), payload, true)
   if not PRESET_SET[name] then
     PRESET_SET[name]=true; PRESETS[#PRESETS+1]=name; table.sort(PRESETS, function(a,b) return a:lower()<b:lower() end)
     _preset_save_index()
@@ -1232,17 +1319,27 @@ local function preset_recall(name)
   name = _sanitize_name(name)
   if name == "" then PRESET_STATUS = "No preset selected"; return false end
   local payload = reaper.GetExtState(EXT_NS, _key_for(name))
-  local ord = _order_from_csv(payload)
-  if ord and #ord>0 then
-    ord = _normalize_full_order(ord)
+
+  -- Try to parse with new format (returns order and visibility_map)
+  local ord, visibility_map = _order_and_visibility_from_csv(payload)
+
+  if ord and #ord > 0 then
+    -- Set COL_ORDER to only visible columns in the correct order
     COL_ORDER = ord
     COL_POS = {}
-    for vis,id in ipairs(ord) do if id then COL_POS[id]=vis end end
+    for vis_pos, col_id in ipairs(ord) do
+      COL_POS[col_id] = vis_pos
+    end
+
+    -- Store visibility map globally for Preset Editor
+    COL_VISIBILITY = visibility_map or {}
+
     ACTIVE_PRESET = name
     reaper.SetExtState(EXT_NS, "col_preset_active", name, true)
     PRESET_STATUS = "Preset: "..name
     return true
   end
+
   PRESET_STATUS = "Preset not found"
   return false
 end
@@ -1333,7 +1430,21 @@ local function load_prefs()
         COL_ORDER = ord
         COL_POS = {}
         for vis, id in ipairs(ord) do if id then COL_POS[id] = vis end end
+
+        -- Initialize COL_VISIBILITY - all columns in ord are visible
+        COL_VISIBILITY = {}
+        for col_id = 1, 13 do
+          COL_VISIBILITY[col_id] = (COL_POS[col_id] ~= nil)
+        end
       end
+    end
+  end
+
+  -- Ensure COL_VISIBILITY is initialized even if no preset/order was loaded
+  if not COL_VISIBILITY or not next(COL_VISIBILITY) then
+    COL_VISIBILITY = {}
+    for col_id = 1, 13 do
+      COL_VISIBILITY[col_id] = true  -- default: all visible
     end
   end
 end
@@ -2837,12 +2948,15 @@ if reaper.ImGui_BeginPopupModal(ctx, "Save preset as", true, TF('ImGui_WindowFla
   if changed then PRESET_NAME_BUF = txt end
 
   if reaper.ImGui_Button(ctx, "Save", 82, 24) then
-    if preset_save_as(PRESET_NAME_BUF, COL_ORDER) then
+    -- Use pending visibility map if available (from Preset Editor), otherwise nil (legacy mode)
+    if preset_save_as(PRESET_NAME_BUF, COL_ORDER, PENDING_VISIBILITY_MAP) then
+      PENDING_VISIBILITY_MAP = nil  -- Clear after use
       reaper.ImGui_CloseCurrentPopup(ctx)
     end
   end
   reaper.ImGui_SameLine(ctx)
   if reaper.ImGui_Button(ctx, "Cancel", 82, 24) then
+    PENDING_VISIBILITY_MAP = nil  -- Clear on cancel
     reaper.ImGui_CloseCurrentPopup(ctx)
   end
   reaper.ImGui_EndPopup(ctx)
@@ -2859,13 +2973,29 @@ if reaper.ImGui_BeginPopupModal(ctx, "Column Preset Editor", true, TF('ImGui_Win
       columns = {},  -- {col_id, visible, label}
       dirty = false
     }
-    -- Copy current COL_ORDER
-    for _, col_id in ipairs(COL_ORDER or {1,2,3,12,13,4,5,6,7,8,9,10,11}) do
+
+    -- Build complete list of all 13 columns with proper visibility
+    -- First add visible columns in their current order
+    local added = {}
+    for _, col_id in ipairs(COL_ORDER or {}) do
       table.insert(PRESET_EDITOR_STATE.columns, {
         id = col_id,
         visible = true,
         label = header_label_from_id(col_id) or tostring(col_id)
       })
+      added[col_id] = true
+    end
+
+    -- Then add hidden columns (those not in COL_ORDER) at the end
+    for col_id = 1, 13 do
+      if not added[col_id] then
+        local is_visible = COL_VISIBILITY[col_id] or false
+        table.insert(PRESET_EDITOR_STATE.columns, {
+          id = col_id,
+          visible = is_visible,
+          label = header_label_from_id(col_id) or tostring(col_id)
+        })
+      end
     end
   end
 
@@ -2929,10 +3059,12 @@ if reaper.ImGui_BeginPopupModal(ctx, "Column Preset Editor", true, TF('ImGui_Win
 
   -- Bottom buttons
   if reaper.ImGui_Button(ctx, "Apply", 82, 24) then
-    -- Apply to current session (update COL_ORDER)
+    -- Apply to current session (update COL_ORDER and COL_VISIBILITY)
     COL_ORDER = {}
     COL_POS = {}
+    COL_VISIBILITY = {}
     for i, col in ipairs(PRESET_EDITOR_STATE.columns) do
+      COL_VISIBILITY[col.id] = col.visible
       if col.visible then
         table.insert(COL_ORDER, col.id)
         COL_POS[col.id] = #COL_ORDER
@@ -2947,7 +3079,11 @@ if reaper.ImGui_BeginPopupModal(ctx, "Column Preset Editor", true, TF('ImGui_Win
     -- Save to active preset and apply
     COL_ORDER = {}
     COL_POS = {}
+    COL_VISIBILITY = {}
+
+    -- Build COL_ORDER (visible columns only) and visibility map (all columns)
     for i, col in ipairs(PRESET_EDITOR_STATE.columns) do
+      COL_VISIBILITY[col.id] = col.visible
       if col.visible then
         table.insert(COL_ORDER, col.id)
         COL_POS[col.id] = #COL_ORDER
@@ -2955,16 +3091,18 @@ if reaper.ImGui_BeginPopupModal(ctx, "Column Preset Editor", true, TF('ImGui_Win
     end
 
     if ACTIVE_PRESET and ACTIVE_PRESET ~= "" then
-      -- Update existing preset
-      preset_save_as(ACTIVE_PRESET, COL_ORDER)
+      -- Update existing preset with visibility data
+      preset_save_as(ACTIVE_PRESET, COL_ORDER, COL_VISIBILITY)
+      PRESET_EDITOR_STATE = nil
+      reaper.ImGui_CloseCurrentPopup(ctx)
     else
-      -- Need to create a new preset
+      -- Need to create a new preset - store visibility map and open save dialog
+      PENDING_VISIBILITY_MAP = COL_VISIBILITY
       PRESET_NAME_BUF = "New Preset"
+      PRESET_EDITOR_STATE = nil
+      reaper.ImGui_CloseCurrentPopup(ctx)
       reaper.ImGui_OpenPopup(ctx, "Save preset as")
     end
-
-    PRESET_EDITOR_STATE = nil
-    reaper.ImGui_CloseCurrentPopup(ctx)
   end
 
   reaper.ImGui_SameLine(ctx)
