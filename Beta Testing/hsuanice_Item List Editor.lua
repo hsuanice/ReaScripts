@@ -1,6 +1,6 @@
 --[[
 @description Item List Editor
-@version 251024_2016
+@version 251024_2030
 @author hsuanice
 @about
   Shows a live, spreadsheet-style table of the currently selected items and all
@@ -41,6 +41,12 @@
 
 
 @changelog
+  v251024_2030
+  - Fix: "Show muted items" toggle now works with instant response
+    • Table rendering now correctly uses get_view_rows() instead of raw ROWS
+    • Toggle immediately filters/shows muted items without refresh delay
+    • No unnecessary data rescanning - pure UI filtering for instant feedback
+
   v251024_2016
   - Fix: Undo/Redo functionality now works correctly
     • Changed undo flags from -1 (no undo) to 4|1 (UNDO_STATE_ITEMS | UNDO_STATE_TRACKCFG)
@@ -2525,7 +2531,7 @@ if changed then
   SHOW_MUTED_ITEMS = nv
   EDIT = nil
   sel_clear()
-  mark_dirty()  -- Mark for refresh after toggling visibility
+  -- No need for mark_dirty() - get_view_rows() filters instantly
 end
 
   
@@ -3055,7 +3061,8 @@ local function loop()
     draw_toolbar()
     draw_summary_popup()   -- ← 要保留這行
 
-    local rows_to_show = ROWS
+    -- Use get_view_rows() to respect "Show muted items" toggle
+    local rows_to_show = get_view_rows()
     draw_table(rows_to_show, 360)
 
   -- Clipboard shortcuts (when NOT in InputText editing)
