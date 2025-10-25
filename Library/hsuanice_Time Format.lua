@@ -218,9 +218,9 @@ function M.headers(mode, opts)
   elseif m == M.MODE.BEATS then return "Start (Beats)","End (Beats)"
   elseif m == M.MODE.SEC   then return "Start (s)","End (s)"
   elseif m == M.MODE.MS    then return "Start (m:s)","End (m:s)"
+  elseif m == M.MODE.CUSTOM then return "Start (Custom)","End (Custom)"
   else
-    local pat = (opts and opts.pattern) or "custom"
-    return "Start ("..pat..")","End ("..pat..")"
+    return "Start (Custom)","End (Custom)"
   end
 end
 
