@@ -1,6 +1,6 @@
 --[[
 @description Item List Editor
-@version 251025_2245
+@version 251025_2313
 @author hsuanice
 @about
   Shows a live, spreadsheet-style table of the currently selected items and all
@@ -41,6 +41,14 @@
 
 
 @changelog
+  v251025_2313
+  - Fix: Display issue with multiline item notes
+    • Problem: Item Note column showed only first line with "..." suffix
+    • Root cause: Original design truncated at first newline for table view
+    • Fix: Now shows full multiline content with auto-wrap in Selectable
+    • Ensures all note content visible without editing
+    • Edit mode unchanged - still shows full content in InputTextMultiline
+    
   v251025_2245
   - UI: Toolbar reorganization for cleaner layout
     • Removed standalone "Cache Test" button from toolbar
@@ -4069,7 +4077,7 @@ local function draw_table(rows, height)
           if reaper.ImGui_IsItemClicked(ctx) then handle_cell_click(r.__item_guid, 2) end
 
         elseif col == 3 then
-          -- Track Name（維持你原本的可編輯行為）
+          -- Track Name (editable - click elsewhere or ESC to finish)
           local track_txt = tostring(r.track_name or "")
           local editing = (EDIT and EDIT.row == r and EDIT.col == 3)
           local sel = sel_has(r.__item_guid, 3)
@@ -4082,13 +4090,19 @@ local function draw_table(rows, height)
           else
             reaper.ImGui_SetNextItemWidth(ctx, -1)
             if EDIT.want_focus then reaper.ImGui_SetKeyboardFocusHere(ctx); EDIT.want_focus=false end
-            local flags = reaper.ImGui_InputTextFlags_AutoSelectAll() | reaper.ImGui_InputTextFlags_EnterReturnsTrue()
+            local flags = reaper.ImGui_InputTextFlags_AutoSelectAll()
             local changed, newv = reaper.ImGui_InputText(ctx, "##trk", EDIT.buf, flags)
             if changed then EDIT.buf = newv end
-            local submit = reaper.ImGui_IsKeyPressed(ctx, reaper.ImGui_Key_Enter()) or reaper.ImGui_IsItemDeactivated(ctx)
+            -- Submit on: Enter, click elsewhere (deactivated), or ESC (cancel without saving)
+            local deactivated = reaper.ImGui_IsItemDeactivated(ctx)
+            local enter_pressed = reaper.ImGui_IsKeyPressed(ctx, reaper.ImGui_Key_Enter())
             local cancel = reaper.ImGui_IsKeyPressed(ctx, reaper.ImGui_Key_Escape())
-            if submit then if r.__track then apply_track_name(r.__track, EDIT.buf, rows) end; EDIT=nil
-            elseif cancel then EDIT=nil end
+            if enter_pressed or (deactivated and not cancel) then
+              if r.__track then apply_track_name(r.__track, EDIT.buf, rows) end
+              EDIT=nil
+            elseif cancel then
+              EDIT=nil  -- Cancel without saving
+            end
           end
 
         elseif col == 12 then
@@ -4102,7 +4116,7 @@ local function draw_table(rows, height)
           if reaper.ImGui_IsItemClicked(ctx) then handle_cell_click(r.__item_guid, 13) end
 
         elseif col == 4 then
-          -- Take Name（維持原本可編輯）
+          -- Take Name (editable - click elsewhere or ESC to finish)
           local take_txt = tostring(r.take_name or "")
           local editing = (EDIT and EDIT.row == r and EDIT.col == 4)
           local sel = sel_has(r.__item_guid, 4)
@@ -4115,36 +4129,53 @@ local function draw_table(rows, height)
           else
             reaper.ImGui_SetNextItemWidth(ctx, -1)
             if EDIT.want_focus then reaper.ImGui_SetKeyboardFocusHere(ctx); EDIT.want_focus=false end
-            local flags = reaper.ImGui_InputTextFlags_AutoSelectAll() | reaper.ImGui_InputTextFlags_EnterReturnsTrue()
+            local flags = reaper.ImGui_InputTextFlags_AutoSelectAll()
             local changed, newv = reaper.ImGui_InputText(ctx, "##take", EDIT.buf, flags)
             if changed then EDIT.buf = newv end
-            local submit = reaper.ImGui_IsKeyPressed(ctx, reaper.ImGui_Key_Enter()) or reaper.ImGui_IsItemDeactivated(ctx)
+            -- Submit on: Enter, click elsewhere (deactivated), or ESC (cancel without saving)
+            local deactivated = reaper.ImGui_IsItemDeactivated(ctx)
+            local enter_pressed = reaper.ImGui_IsKeyPressed(ctx, reaper.ImGui_Key_Enter())
             local cancel = reaper.ImGui_IsKeyPressed(ctx, reaper.ImGui_Key_Escape())
-            if submit then apply_take_name(r.__take, EDIT.buf, r); EDIT=nil
-            elseif cancel then EDIT=nil end
+            if enter_pressed or (deactivated and not cancel) then
+              apply_take_name(r.__take, EDIT.buf, r)
+              EDIT=nil
+            elseif cancel then
+              EDIT=nil  -- Cancel without saving
+            end
           end
 
         elseif col == 5 then
-          -- Item Note（維持原本可編輯）
+          -- Item Note (multiline editor - click elsewhere or ESC to finish)
           local note_txt = tostring(r.item_note or "")
           local editing = (EDIT and EDIT.row == r and EDIT.col == 5)
           local sel = sel_has(r.__item_guid, 5)
           if not editing then
-            reaper.ImGui_Selectable(ctx, (note_txt ~= "" and note_txt or " ").."##note", sel)
+            -- Show full multiline content (auto-wrap like Description)
+            local display_txt = note_txt
+            if display_txt == "" then display_txt = " " end
+            reaper.ImGui_Selectable(ctx, display_txt.."##note", sel, reaper.ImGui_SelectableFlags_AllowOverlap())
             if reaper.ImGui_IsItemClicked(ctx) then handle_cell_click(r.__item_guid, 5) end
             if reaper.ImGui_IsItemHovered(ctx) and reaper.ImGui_IsMouseDoubleClicked(ctx, 0) and TABLE_SOURCE=="live" then
               EDIT = { row = r, col = 5, buf = note_txt, want_focus = true }
             end
           else
+            -- Multiline editor with proper size (expand vertically)
             reaper.ImGui_SetNextItemWidth(ctx, -1)
             if EDIT.want_focus then reaper.ImGui_SetKeyboardFocusHere(ctx); EDIT.want_focus=false end
-            local flags = reaper.ImGui_InputTextFlags_AutoSelectAll() | reaper.ImGui_InputTextFlags_EnterReturnsTrue()
-            local changed, newv = reaper.ImGui_InputText(ctx, "##note", EDIT.buf, flags)
+            -- Remove AutoSelectAll for multiline, add Multiline flag
+            local flags = reaper.ImGui_InputTextFlags_None()
+            local changed, newv = reaper.ImGui_InputTextMultiline(ctx, "##note", EDIT.buf, -1, 100, flags)
             if changed then EDIT.buf = newv end
-            local submit = reaper.ImGui_IsKeyPressed(ctx, reaper.ImGui_Key_Enter()) or reaper.ImGui_IsItemDeactivated(ctx)
+            -- Submit on: click elsewhere (deactivated), or ESC (cancel without saving)
+            -- Note: Enter creates new line in multiline mode, so don't submit on Enter
+            local deactivated = reaper.ImGui_IsItemDeactivated(ctx)
             local cancel = reaper.ImGui_IsKeyPressed(ctx, reaper.ImGui_Key_Escape())
-            if submit then apply_item_note(r.__item, EDIT.buf, r); EDIT=nil
-            elseif cancel then EDIT=nil end
+            if deactivated and not cancel then
+              apply_item_note(r.__item, EDIT.buf, r)
+              EDIT=nil
+            elseif cancel then
+              EDIT=nil  -- Cancel without saving
+            end
           end
 
         elseif col == 6 then
