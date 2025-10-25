@@ -1,9 +1,16 @@
 --[[
 hsuanice_Time Format.lua
-v0.3.0
+v0.3.1
 Future-proof time format/parse helpers for REAPER scripts.
 
 Changelog
+v0.3.1 (2025-10-25)
+- Enhancement: Custom mode headers now display "(Custom)" instead of pattern string
+  • headers(MODE.CUSTOM, opts) now returns "Start (Custom)", "End (Custom)"
+  • Previous behavior showed pattern (e.g., "Start (hh:mm:ss)") which was too verbose for UI
+  • Improves readability in table headers while pattern still used for actual time formatting
+  • Maintains consistency with other mode displays: (TC), (Beats), (m:s), (s)
+
 v0.3.0 (2025-09-03)
 - New: Custom display mode (MODE.CUSTOM) with user-defined patterns.
   • Supported tokens: h / hh (hours), m / mm (minutes), s / ss (seconds), S… (fractional seconds; count = digits, e.g., SSS = .mmm).
@@ -37,7 +44,7 @@ v0.1.0 (2025-09-02)
 --]]
 
 local M = {}
-M.VERSION = "0.3.0"
+M.VERSION = "0.3.1"
 
 -- Canonical modes
 M.MODE = { SEC="sec", MS="ms", TC="tc", BEATS="beats", CUSTOM="custom" }
