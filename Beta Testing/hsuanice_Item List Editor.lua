@@ -1,6 +1,6 @@
 --[[
 @description Item List Editor
-@version 251025_2147
+@version 251025_2245
 @author hsuanice
 @about
   Shows a live, spreadsheet-style table of the currently selected items and all
@@ -41,6 +41,29 @@
 
 
 @changelog
+  v251025_2245
+  - UI: Toolbar reorganization for cleaner layout
+    • Removed standalone "Cache Test" button from toolbar
+    • Moved "Scan Project Items" and "Clear Cache" buttons to first row (after Custom Pattern input)
+    • Second row now contains only: Refresh Now, Reset Widths, Copy (TSV), Save.tsv, Save.csv, Summary
+    • Added confirmation dialog to "Clear Cache" (shows cached item count before clearing)
+    • Cache Test functionality moved to right-click context menu on "Clear Cache" button
+    • Right-click "Clear Cache" now shows menu with two options:
+      - Toggle Debug Mode (with checkmark when active)
+      - Cache Test Report... (generates diagnostic report to console)
+    • Cleaner UI: cache management buttons grouped on first row, export buttons on second row
+
+  - Fix: TSV export trailing newline issue (requires List Table v0.2.7+)
+    • Problem: Multiline fields (Description) had closing quote on new line instead of after last character
+    • Root cause: BWF Description field includes trailing newline (per BWF spec)
+    • Impact: Google Sheets and other tools showed extra blank line in quoted fields
+    • Fix: Strip trailing newlines from field content before quoting in build_table_text()
+    • Example fixed:
+      Before: "...sTRK7=LINE\n"  (quote on new line)
+      After:  "...sTRK7=LINE"    (quote immediately after last character)
+    • Internal newlines are preserved, only trailing newlines removed
+    • Applies to all fields (TSV and CSV), ensures proper RFC 4180 compliance
+
   v251025_2147
   - Fix: Critical cache serialization bug - multiline Description fields corrupting cache
     • Problem: Description field (BWF metadata) contains newlines, breaking cache file format
@@ -3364,30 +3387,7 @@ if reaper.ImGui_IsItemHovered(ctx) then
   reaper.ImGui_EndTooltip(ctx)
 end
 
-
-
-if reaper.ImGui_Button(ctx, "Refresh Now", 110, 24) then
-  TABLE_SOURCE = "live"
-  refresh_now()  -- Force immediate full refresh (bypasses progressive loading)
-end
--- Show hint if progressive loading is active
-if PROGRESSIVE.active then
-  reaper.ImGui_SameLine(ctx)
-  reaper.ImGui_TextDisabled(ctx, "(loading in background...)")
-end
-
--- Reset Column Widths button
-reaper.ImGui_SameLine(ctx)
-if reaper.ImGui_Button(ctx, "Reset Widths", 100, 24) then
-  RESET_COLUMN_WIDTHS = true  -- Flag to reset column widths on next frame
-end
-if reaper.ImGui_IsItemHovered(ctx) then
-  reaper.ImGui_BeginTooltip(ctx)
-  reaper.ImGui_Text(ctx, "Reset all column widths to default sizes")
-  reaper.ImGui_EndTooltip(ctx)
-end
-
--- Scan Project Items button (build complete cache)
+-- Scan Project Items button (moved to first row)
 reaper.ImGui_SameLine(ctx)
 if reaper.ImGui_Button(ctx, "Scan Project Items", 130, 24) then
   -- Show confirmation dialog
@@ -3427,105 +3427,187 @@ if PROJECT_SCAN.active then
   reaper.ImGui_TextDisabled(ctx, string.format("Scanning: %d%%", percent))
 end
 
--- Cache Test Report button
+-- Cache management button (moved to first row)
 reaper.ImGui_SameLine(ctx)
-if reaper.ImGui_Button(ctx, "Cache Test", 90, 24) then
-  -- Generate cache test report
-  local report = {}
-  report[#report + 1] = "=== CACHE SYSTEM TEST REPORT ==="
-  report[#report + 1] = ""
-
-  -- 1. Cache file location
-  local cache_path = get_cache_path()
-  report[#report + 1] = "1. CACHE FILE LOCATION:"
-  report[#report + 1] = "   " .. cache_path
-
-  -- Check if file exists
-  local file = io.open(cache_path, "r")
-  if file then
-    file:close()
-    report[#report + 1] = "   ✓ Cache file exists"
-  else
-    report[#report + 1] = "   ✗ Cache file NOT found"
+if reaper.ImGui_Button(ctx, "Clear Cache", 100, 24) then
+  -- Show confirmation dialog
+  local cached_count = 0
+  if CACHE.data and CACHE.data.items then
+    for _ in pairs(CACHE.data.items) do cached_count = cached_count + 1 end
   end
-  report[#report + 1] = ""
 
-  -- 2. Cache statistics
-  report[#report + 1] = "2. CACHE STATISTICS:"
-  if CACHE.data then
-    report[#report + 1] = string.format("   Cached items: %d", CACHE.data.item_count or 0)
-    report[#report + 1] = string.format("   Cache version: %s", CACHE_VERSION)
-    report[#report + 1] = string.format("   Cache hits: %d", CACHE.hits)
-    report[#report + 1] = string.format("   Cache misses: %d", CACHE.misses)
-    local total = CACHE.hits + CACHE.misses
-    if total > 0 then
-      local hit_rate = math.floor((CACHE.hits / total) * 100)
-      report[#report + 1] = string.format("   Hit rate: %d%%", hit_rate)
-    end
-  else
-    report[#report + 1] = "   ✗ No cache data loaded"
+  local msg = string.format(
+    "Clear metadata cache?\n\n" ..
+    "Current cache:\n" ..
+    "• %d items cached\n\n" ..
+    "This will:\n" ..
+    "• Delete all cached metadata\n" ..
+    "• Metadata will be re-read from files on next selection\n\n" ..
+    "Continue?",
+    cached_count
+  )
+
+  local result = reaper.ShowMessageBox(msg, "Clear Cache", 1)  -- 1 = OK/Cancel
+  if result == 1 then  -- OK
+    cache_clear()
+    mark_dirty()  -- Trigger refresh to rebuild cache
   end
-  report[#report + 1] = ""
-
-  -- 3. Current selection
-  local sel_count = reaper.CountSelectedMediaItems(0)
-  report[#report + 1] = "3. CURRENT SELECTION:"
-  report[#report + 1] = string.format("   Selected items: %d", sel_count)
-  report[#report + 1] = string.format("   Displayed rows: %d", #ROWS)
-  report[#report + 1] = ""
-
-  -- 4. Sample metadata check (first selected item)
-  if sel_count > 0 then
-    local item = reaper.GetSelectedMediaItem(0, 0)
-    local _, item_guid = reaper.GetSetMediaItemInfo_String(item, "GUID", "", false)
-
-    report[#report + 1] = "4. SAMPLE ITEM METADATA CHECK:"
-    report[#report + 1] = "   Item GUID: " .. (item_guid or "unknown")
-
-    -- Check if in cache
-    if CACHE.data and CACHE.data.items and CACHE.data.items[item_guid] then
-      local cached = CACHE.data.items[item_guid]
-      report[#report + 1] = "   ✓ Item found in cache"
-      report[#report + 1] = "   Cached fields:"
-      report[#report + 1] = "     - file_name: " .. (cached.file_name or "(empty)")
-      report[#report + 1] = "     - meta_trk_name: " .. (cached.meta_trk_name or "(empty)")
-      report[#report + 1] = "     - umid: " .. ((cached.umid and cached.umid ~= "") and "✓ present" or "✗ empty")
-      report[#report + 1] = "     - origination_date: " .. ((cached.origination_date and cached.origination_date ~= "") and cached.origination_date or "✗ empty")
-      report[#report + 1] = "     - project: " .. ((cached.project and cached.project ~= "") and cached.project or "✗ empty")
-      report[#report + 1] = "     - scene: " .. ((cached.scene and cached.scene ~= "") and cached.scene or "✗ empty")
+end
+-- Show cache stats on hover
+if reaper.ImGui_IsItemHovered(ctx) then
+  reaper.ImGui_BeginTooltip(ctx)
+  local total = CACHE.hits + CACHE.misses
+  local hit_rate = (total > 0) and math.floor((CACHE.hits / total) * 100) or 0
+  local cached_count = 0
+  local invalidated_count = 0
+  if CACHE.data and CACHE.data.items then
+    for _ in pairs(CACHE.data.items) do cached_count = cached_count + 1 end
+  end
+  for _ in pairs(CACHE.invalidated or {}) do invalidated_count = invalidated_count + 1 end
+  reaper.ImGui_Text(ctx, string.format("Cached: %d items", cached_count))
+  reaper.ImGui_Text(ctx, string.format("Hit rate: %d%% (%d/%d)", hit_rate, CACHE.hits, total))
+  if invalidated_count > 0 then
+    reaper.ImGui_TextColored(ctx, 0xFF6666FF, string.format("Invalidated: %d items", invalidated_count))
+  end
+  reaper.ImGui_Separator(ctx)
+  reaper.ImGui_TextDisabled(ctx, "Right-click for options")
+  reaper.ImGui_EndTooltip(ctx)
+end
+-- Right-click to show context menu
+if reaper.ImGui_IsItemClicked(ctx, reaper.ImGui_MouseButton_Right()) then
+  reaper.ImGui_OpenPopup(ctx, "##cache_context_menu")
+end
+-- Cache context menu
+if reaper.ImGui_BeginPopup(ctx, "##cache_context_menu") then
+  -- Toggle debug mode option
+  local debug_label = CACHE.debug and "✓ Debug Mode" or "  Debug Mode"
+  if reaper.ImGui_Selectable(ctx, debug_label) then
+    CACHE.debug = not CACHE.debug
+    if CACHE.debug then
+      reaper.ShowConsoleMsg("\n[ILE Cache] Debug mode ENABLED - watch console for detailed cache behavior\n")
+      reaper.ShowConsoleMsg("[ILE Cache] Will show: HIT (first 5), MISS (new), MISS (changed), STORE (updated)\n\n")
     else
-      report[#report + 1] = "   ✗ Item NOT in cache"
+      reaper.ShowConsoleMsg("[ILE Cache] Debug mode DISABLED\n")
     end
-  else
-    report[#report + 1] = "4. SAMPLE ITEM METADATA CHECK:"
-    report[#report + 1] = "   (No items selected - select an item to test)"
   end
-  report[#report + 1] = ""
 
-  -- 5. Test recommendations
-  report[#report + 1] = "5. RECOMMENDED TESTS:"
-  report[#report + 1] = "   A. Delete cache file and restart ILE (cold start test)"
-  report[#report + 1] = "   B. Select 1 random item - check load time & metadata"
-  report[#report + 1] = "   C. Deselect all, reselect same item - should be instant (cache hit)"
-  report[#report + 1] = "   D. Select 100+ items - check progressive loading"
-  report[#report + 1] = "   E. Close and reopen ILE - check startup time with cache"
-  report[#report + 1] = "   F. Use 'Scan Project Items' to build complete cache"
-  report[#report + 1] = ""
-  report[#report + 1] = "==================================="
+  -- Cache Test Report option
+  if reaper.ImGui_Selectable(ctx, "  Cache Test Report...") then
+    -- Generate cache test report
+    local report = {}
+    report[#report + 1] = "=== CACHE SYSTEM TEST REPORT ==="
+    report[#report + 1] = ""
 
-  -- Print to console
-  local report_text = table.concat(report, "\n")
-  reaper.ShowConsoleMsg("\n" .. report_text .. "\n\n")
+    -- 1. Cache file location
+    local cache_path = get_cache_path()
+    report[#report + 1] = "1. CACHE FILE LOCATION:"
+    report[#report + 1] = "   " .. cache_path
 
-  -- Show message box
-  reaper.ShowMessageBox("Cache test report printed to console.\n\nCheck the REAPER console for detailed results.", "Cache Test Report", 0)
+    -- Check if file exists
+    local file = io.open(cache_path, "r")
+    if file then
+      file:close()
+      report[#report + 1] = "   ✓ Cache file exists"
+    else
+      report[#report + 1] = "   ✗ Cache file NOT found"
+    end
+    report[#report + 1] = ""
+
+    -- 2. Cache statistics
+    report[#report + 1] = "2. CACHE STATISTICS:"
+    if CACHE.data then
+      report[#report + 1] = string.format("   Cached items: %d", CACHE.data.item_count or 0)
+      report[#report + 1] = string.format("   Cache version: %s", CACHE_VERSION)
+      report[#report + 1] = string.format("   Cache hits: %d", CACHE.hits)
+      report[#report + 1] = string.format("   Cache misses: %d", CACHE.misses)
+      local total = CACHE.hits + CACHE.misses
+      if total > 0 then
+        local hit_rate = math.floor((CACHE.hits / total) * 100)
+        report[#report + 1] = string.format("   Hit rate: %d%%", hit_rate)
+      end
+    else
+      report[#report + 1] = "   ✗ No cache data loaded"
+    end
+    report[#report + 1] = ""
+
+    -- 3. Current selection
+    local sel_count = reaper.CountSelectedMediaItems(0)
+    report[#report + 1] = "3. CURRENT SELECTION:"
+    report[#report + 1] = string.format("   Selected items: %d", sel_count)
+    report[#report + 1] = string.format("   Displayed rows: %d", #ROWS)
+    report[#report + 1] = ""
+
+    -- 4. Sample metadata check (first selected item)
+    if sel_count > 0 then
+      local item = reaper.GetSelectedMediaItem(0, 0)
+      local _, item_guid = reaper.GetSetMediaItemInfo_String(item, "GUID", "", false)
+
+      report[#report + 1] = "4. SAMPLE ITEM METADATA CHECK:"
+      report[#report + 1] = "   Item GUID: " .. (item_guid or "unknown")
+
+      -- Check if in cache
+      if CACHE.data and CACHE.data.items and CACHE.data.items[item_guid] then
+        local cached = CACHE.data.items[item_guid]
+        report[#report + 1] = "   ✓ Item found in cache"
+        report[#report + 1] = "   Cached fields:"
+        report[#report + 1] = "     - file_name: " .. (cached.file_name or "(empty)")
+        report[#report + 1] = "     - meta_trk_name: " .. (cached.meta_trk_name or "(empty)")
+        report[#report + 1] = "     - umid: " .. ((cached.umid and cached.umid ~= "") and "✓ present" or "✗ empty")
+        report[#report + 1] = "     - origination_date: " .. ((cached.origination_date and cached.origination_date ~= "") and cached.origination_date or "✗ empty")
+        report[#report + 1] = "     - project: " .. ((cached.project and cached.project ~= "") and cached.project or "✗ empty")
+        report[#report + 1] = "     - scene: " .. ((cached.scene and cached.scene ~= "") and cached.scene or "✗ empty")
+      else
+        report[#report + 1] = "   ✗ Item NOT in cache"
+      end
+    else
+      report[#report + 1] = "4. SAMPLE ITEM METADATA CHECK:"
+      report[#report + 1] = "   (No items selected - select an item to test)"
+    end
+    report[#report + 1] = ""
+
+    -- 5. Test recommendations
+    report[#report + 1] = "5. RECOMMENDED TESTS:"
+    report[#report + 1] = "   A. Delete cache file and restart ILE (cold start test)"
+    report[#report + 1] = "   B. Select 1 random item - check load time & metadata"
+    report[#report + 1] = "   C. Deselect all, reselect same item - should be instant (cache hit)"
+    report[#report + 1] = "   D. Select 100+ items - check progressive loading"
+    report[#report + 1] = "   E. Close and reopen ILE - check startup time with cache"
+    report[#report + 1] = "   F. Use 'Scan Project Items' to build complete cache"
+    report[#report + 1] = ""
+    report[#report + 1] = "==================================="
+
+    -- Print to console
+    local report_text = table.concat(report, "\n")
+    reaper.ShowConsoleMsg("\n" .. report_text .. "\n\n")
+
+    -- Show message box
+    reaper.ShowMessageBox("Cache test report printed to console.\n\nCheck the REAPER console for detailed results.", "Cache Test Report", 0)
+  end
+
+  reaper.ImGui_EndPopup(ctx)
+end
+
+-- Second row starts here
+if reaper.ImGui_Button(ctx, "Refresh Now", 110, 24) then
+  TABLE_SOURCE = "live"
+  refresh_now()  -- Force immediate full refresh (bypasses progressive loading)
+end
+-- Show hint if progressive loading is active
+if PROGRESSIVE.active then
+  reaper.ImGui_SameLine(ctx)
+  reaper.ImGui_TextDisabled(ctx, "(loading in background...)")
+end
+
+-- Reset Column Widths button
+reaper.ImGui_SameLine(ctx)
+if reaper.ImGui_Button(ctx, "Reset Widths", 100, 24) then
+  RESET_COLUMN_WIDTHS = true  -- Flag to reset column widths on next frame
 end
 if reaper.ImGui_IsItemHovered(ctx) then
   reaper.ImGui_BeginTooltip(ctx)
-  reaper.ImGui_Text(ctx, "Generate cache system test report (console)")
+  reaper.ImGui_Text(ctx, "Reset all column widths to default sizes")
   reaper.ImGui_EndTooltip(ctx)
 end
-
 
 reaper.ImGui_SameLine(ctx)
 if reaper.ImGui_Button(ctx, "Copy (TSV)", 110, 24) then
@@ -3586,48 +3668,10 @@ if reaper.ImGui_Button(ctx, "Save .csv", 100, 24) then
   end
 end
 
-reaper.ImGui_SameLine(ctx)
 -- [ANCHOR] Summary button cluster (REPLACED)
 reaper.ImGui_SameLine(ctx)
 if reaper.ImGui_Button(ctx, POPUP_TITLE, 100, 24) then
   reaper.ImGui_OpenPopup(ctx, POPUP_TITLE)
-end
-
--- Cache management button
-reaper.ImGui_SameLine(ctx)
-if reaper.ImGui_Button(ctx, "Clear Cache", 100, 24) then
-  cache_clear()
-  mark_dirty()  -- Trigger refresh to rebuild cache
-end
--- Show cache stats on hover
-if reaper.ImGui_IsItemHovered(ctx) then
-  reaper.ImGui_BeginTooltip(ctx)
-  local total = CACHE.hits + CACHE.misses
-  local hit_rate = (total > 0) and math.floor((CACHE.hits / total) * 100) or 0
-  local cached_count = 0
-  local invalidated_count = 0
-  if CACHE.data and CACHE.data.items then
-    for _ in pairs(CACHE.data.items) do cached_count = cached_count + 1 end
-  end
-  for _ in pairs(CACHE.invalidated or {}) do invalidated_count = invalidated_count + 1 end
-  reaper.ImGui_Text(ctx, string.format("Cached: %d items", cached_count))
-  reaper.ImGui_Text(ctx, string.format("Hit rate: %d%% (%d/%d)", hit_rate, CACHE.hits, total))
-  if invalidated_count > 0 then
-    reaper.ImGui_TextColored(ctx, 0xFF6666FF, string.format("Invalidated: %d items", invalidated_count))
-  end
-  reaper.ImGui_Separator(ctx)
-  reaper.ImGui_TextDisabled(ctx, "Right-click for debug mode")
-  reaper.ImGui_EndTooltip(ctx)
-end
--- Right-click to toggle debug mode
-if reaper.ImGui_IsItemClicked(ctx, reaper.ImGui_MouseButton_Right()) then
-  CACHE.debug = not CACHE.debug
-  if CACHE.debug then
-    reaper.ShowConsoleMsg("\n[ILE Cache] Debug mode ENABLED - watch console for detailed cache behavior\n")
-    reaper.ShowConsoleMsg("[ILE Cache] Will show: HIT (first 5), MISS (new), MISS (changed), STORE (updated)\n\n")
-  else
-    reaper.ShowConsoleMsg("[ILE Cache] Debug mode DISABLED\n")
-  end
 end
 
 -- === Column Presets UI (right of Summary) ===
