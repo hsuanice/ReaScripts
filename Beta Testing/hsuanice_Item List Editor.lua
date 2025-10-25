@@ -1,6 +1,6 @@
 --[[
 @description Item List Editor
-@version 251025_0005
+@version 251025_1320
 @author hsuanice
 @about
   Shows a live, spreadsheet-style table of the currently selected items and all
@@ -41,7 +41,52 @@
 
 
 @changelog
-  v251025_0005
+  v251025_1320
+  - Enhancement: Improved column width management with user customization
+    • Changed to SizingFixedFit mode - all columns manually resizable by dragging dividers
+    • Resizing columns now extends table width (columns don't shrink behind)
+    • New "Reset Widths" button restores all columns to default sizes defined in COL_WIDTH
+    • Right-click context menu on table area provides quick access to:
+      - Reset Column Widths
+      - Edit Columns (opens Preset Editor)
+      - Toggle Show/Hide Muted Items
+    • COL_WIDTH table controls default width for each column (editable in script)
+    • Auto-stretch columns (-1 value) converted to 150px default for consistent behavior
+
+  v251025_0015
+  - Feature: Added 15 new metadata columns from BWF/iXML (total: 13→28 columns)
+    • BWF metadata columns (14-21):
+      - UMID: SMPTE Unique Material Identifier (64-char hex)
+      - UMID (PT): Pro Tools format UMID
+      - Origination Date: Recording date (YYYY-MM-DD)
+      - Origination Time: Recording time (HH:MM:SS)
+      - Originator: Person/organization who created the file
+      - Originator Ref: Unique identifier reference
+      - Time Reference: Sample count since midnight
+      - Description: Free text description
+    • iXML metadata columns (22-28):
+      - PROJECT: Production project name
+      - SCENE: Scene identifier
+      - TAKE: Take number/identifier
+      - TAPE: Tape/card identifier
+      - UBITS: User bits data
+      - FRAMERATE: Timecode frame rate
+      - SPEED: Recording speed
+    • All metadata columns are read-only, populated from embedded file metadata
+    • Metadata sourced from hsuanice_Metadata Read.lua v0.3.0 library
+    • Smart width configuration: fixed widths for structured data (UMID, dates, times), auto-stretch for text fields
+    • Preset Editor updated to support all 28 columns
+    • Default column order groups: Basic fields (1-13) → UMID (14-15) → BWF (16-21) → iXML (22-28)
+
+  v251025_0010
+  - Enhancement: Smart column width management
+    • Fixed-width columns for fields with predictable sizes: #(50px), TrkID(60px), Chan#(60px), Interleave(80px), Mute(50px), Color(80px), Start(140px), End(140px)
+    • Auto-stretch columns for variable content: Track Name, Take Name, Item Note, Source File, Meta Trk Name
+    • Changed table sizing mode to SizingStretchProp to support mixed fixed/stretch columns
+    • New "Column Info" button shows current width configuration
+    • All columns remain manually resizable by dragging column dividers
+
+  v251024_2350
   - Fix: Column visibility (show/hide) now properly saved and restored in presets
     • Preset storage format updated to include visibility flags (format: "1:1,2:1,3:0,...")
     • When saving/loading presets, hidden columns are now remembered correctly
@@ -1144,7 +1189,7 @@ end
 
 -- Column order mapping (single source of truth)
 local COL_ORDER, COL_POS = {}, {}   -- visual→logical / logical→visual
-local COL_VISIBILITY = {}           -- col_id → true/false (for all 13 columns)
+local COL_VISIBILITY = {}           -- col_id → true/false (for all 28 columns)
 
 
 
@@ -1164,7 +1209,7 @@ end
 -- Keys:
 --   col_presets             = "name1|name2|..."
 --   col_preset_active       = last selected name (optional)
---   col_preset.<sanitized>  = "1,2,3,...,13" (logical column IDs)
+--   col_preset.<sanitized>  = "1,2,3,...,28" (logical column IDs)
 
 local PRESETS, PRESET_SET = {}, {}     -- list + set of names
 local ACTIVE_PRESET = nil              -- string or nil
@@ -1183,8 +1228,8 @@ local function _csv_from_order_and_visibility(order, visibility_map)
     visible_set[col_id] = true
   end
 
-  -- Store all 13 columns with their visibility flags
-  for col_id = 1, 13 do
+  -- Store all 28 columns with their visibility flags
+  for col_id = 1, 28 do
     local visible_flag = visible_set[col_id] and "1" or "0"
     t[#t+1] = tostring(col_id) .. ":" .. visible_flag
   end
@@ -1229,7 +1274,7 @@ local function _order_and_visibility_from_csv(s)
     for _, col_id in ipairs(order) do
       visible_set[col_id] = true
     end
-    for col_id = 1, 13 do
+    for col_id = 1, 28 do
       visibility_map[col_id] = visible_set[col_id] or false
     end
 
@@ -1258,7 +1303,7 @@ local function _normalize_full_order(order)
   for i=1,#(order or {}) do
     local v = tonumber(order[i]); if v and not seen[v] then seen[v]=true; out[#out+1]=v end
   end
-  for id=1,13 do if not seen[id] then out[#out+1]=id end end
+  for id=1,28 do if not seen[id] then out[#out+1]=id end end
   return out
 end
 
@@ -1433,7 +1478,7 @@ local function load_prefs()
 
         -- Initialize COL_VISIBILITY - all columns in ord are visible
         COL_VISIBILITY = {}
-        for col_id = 1, 13 do
+        for col_id = 1, 28 do
           COL_VISIBILITY[col_id] = (COL_POS[col_id] ~= nil)
         end
       end
@@ -1443,7 +1488,7 @@ local function load_prefs()
   -- Ensure COL_VISIBILITY is initialized even if no preset/order was loaded
   if not COL_VISIBILITY or not next(COL_VISIBILITY) then
     COL_VISIBILITY = {}
-    for col_id = 1, 13 do
+    for col_id = 1, 28 do
       COL_VISIBILITY[col_id] = true  -- default: all visible
     end
   end
@@ -1478,12 +1523,12 @@ local function _order_equal(a,b)
 end
 
 local function _normalize_full_order(order)
-  -- 確保包含 1..13 全部欄位，缺的補上（避免舊版本或不完整資料）
+  -- 確保包含 1..28 全部欄位，缺的補上（避免舊版本或不完整資料）
   local seen, out = {}, {}
   for i=1,#(order or {}) do
     local v = tonumber(order[i]); if v and not seen[v] then seen[v]=true; out[#out+1]=v end
   end
-  for id=1,13 do if not seen[id] then out[#out+1]=id end end
+  for id=1,28 do if not seen[id] then out[#out+1]=id end end
   return out
 end
 
@@ -1734,6 +1779,24 @@ local function collect_basic_fields(item)
   row.interleave = 0
   row.meta_trk_name = ""
   row.channel_num = 0
+
+  -- Placeholder for new metadata columns
+  row.umid = ""
+  row.umid_pt = ""
+  row.origination_date = ""
+  row.origination_time = ""
+  row.originator = ""
+  row.originator_ref = ""
+  row.time_reference = ""
+  row.description = ""
+  row.project = ""
+  row.scene = ""
+  row.take_meta = ""
+  row.tape = ""
+  row.ubits = ""
+  row.framerate = ""
+  row.speed = ""
+
   row.__metadata_loaded = false  -- Flag for lazy loading
 
   return row
@@ -1776,6 +1839,24 @@ local function load_metadata_for_row(row)
   row.interleave    = idx
   row.meta_trk_name = name or ""
   row.channel_num   = ch
+
+  -- New metadata fields (from META.collect_item_fields)
+  row.umid = f.umid or f.UMID or ""
+  row.umid_pt = f.umid_pt or ""
+  row.origination_date = f.originationdate or f.OriginationDate or ""
+  row.origination_time = f.originationtime or f.OriginationTime or ""
+  row.originator = f.originator or f.Originator or ""
+  row.originator_ref = f.originatorreference or f.OriginatorReference or ""
+  row.time_reference = f.timereference or f.TimeReference or ""
+  row.description = f.description or f.Description or ""
+  row.project = f.project or f.PROJECT or ""
+  row.scene = f.scene or f.SCENE or ""
+  row.take_meta = f.take or f.TAKE or ""
+  row.tape = f.tape or f.TAPE or ""
+  row.ubits = f.ubits or f.UBITS or ""
+  row.framerate = f.framerate or f.FRAMERATE or ""
+  row.speed = f.speed or f.SPEED or ""
+
   row.__fields      = f
   row.__metadata_loaded = true
 
@@ -2108,6 +2189,22 @@ local function get_cell_text(i, r, col, fmt)
   elseif col == 11 then return tostring(r.color_hex or "")
   elseif col == 12 then return FORMAT(r.start_time)
   elseif col == 13 then return FORMAT(r.end_time)
+  -- New metadata columns
+  elseif col == 14 then return tostring(r.umid or "")
+  elseif col == 15 then return tostring(r.umid_pt or "")
+  elseif col == 16 then return tostring(r.origination_date or "")
+  elseif col == 17 then return tostring(r.origination_time or "")
+  elseif col == 18 then return tostring(r.originator or "")
+  elseif col == 19 then return tostring(r.originator_ref or "")
+  elseif col == 20 then return tostring(r.time_reference or "")
+  elseif col == 21 then return tostring(r.description or "")
+  elseif col == 22 then return tostring(r.project or "")
+  elseif col == 23 then return tostring(r.scene or "")
+  elseif col == 24 then return tostring(r.take_meta or "")
+  elseif col == 25 then return tostring(r.tape or "")
+  elseif col == 26 then return tostring(r.ubits or "")
+  elseif col == 27 then return tostring(r.framerate or "")
+  elseif col == 28 then return tostring(r.speed or "")
   end
   return ""
 end
@@ -2141,6 +2238,22 @@ local function header_label_from_id(col_id)
     local sh, eh = TFLib.headers(TIME_MODE, {pattern=CUSTOM_PATTERN})
     return (col_id == 12) and sh or eh
   end
+  -- New metadata columns
+  if col_id == 14 then return "UMID" end
+  if col_id == 15 then return "UMID (PT)" end
+  if col_id == 16 then return "Origination Date" end
+  if col_id == 17 then return "Origination Time" end
+  if col_id == 18 then return "Originator" end
+  if col_id == 19 then return "Originator Ref" end
+  if col_id == 20 then return "Time Reference" end
+  if col_id == 21 then return "Description" end
+  if col_id == 22 then return "PROJECT" end
+  if col_id == 23 then return "SCENE" end
+  if col_id == 24 then return "TAKE" end
+  if col_id == 25 then return "TAPE" end
+  if col_id == 26 then return "UBITS" end
+  if col_id == 27 then return "FRAMERATE" end
+  if col_id == 28 then return "SPEED" end
   return tostring(col_id)
 end
 
@@ -2779,6 +2892,17 @@ if PROGRESSIVE.active then
   reaper.ImGui_TextDisabled(ctx, "(loading in background...)")
 end
 
+-- Reset Column Widths button
+reaper.ImGui_SameLine(ctx)
+if reaper.ImGui_Button(ctx, "Reset Widths", 100, 24) then
+  RESET_COLUMN_WIDTHS = true  -- Flag to reset column widths on next frame
+end
+if reaper.ImGui_IsItemHovered(ctx) then
+  reaper.ImGui_BeginTooltip(ctx)
+  reaper.ImGui_Text(ctx, "Reset all column widths to default sizes")
+  reaper.ImGui_EndTooltip(ctx)
+end
+
 
 reaper.ImGui_SameLine(ctx)
 if reaper.ImGui_Button(ctx, "Copy (TSV)", 110, 24) then
@@ -2974,7 +3098,7 @@ if reaper.ImGui_BeginPopupModal(ctx, "Column Preset Editor", true, TF('ImGui_Win
       dirty = false
     }
 
-    -- Build complete list of all 13 columns with proper visibility
+    -- Build complete list of all 28 columns with proper visibility
     -- First add visible columns in their current order
     local added = {}
     for _, col_id in ipairs(COL_ORDER or {}) do
@@ -2987,7 +3111,7 @@ if reaper.ImGui_BeginPopupModal(ctx, "Column Preset Editor", true, TF('ImGui_Win
     end
 
     -- Then add hidden columns (those not in COL_ORDER) at the end
-    for col_id = 1, 13 do
+    for col_id = 1, 28 do
       if not added[col_id] then
         local is_visible = COL_VISIBILITY[col_id] or false
         table.insert(PRESET_EDITOR_STATE.columns, {
@@ -3042,10 +3166,15 @@ if reaper.ImGui_BeginPopupModal(ctx, "Column Preset Editor", true, TF('ImGui_Win
 
   -- Reset to default button
   if reaper.ImGui_Button(ctx, "Reset to Default", 140, 24) then
-    -- Reset to default column order
-    local DEFAULT_COL_ORDER = { 1, 2, 3, 12, 13, 4, 5, 6, 7, 8, 9, 10, 11 }
+    -- Reset to default column order (all 28 columns)
+    local reset_order = {
+      1, 2, 3, 12, 13, 4, 5, 6, 7, 8, 9, 10, 11,  -- Basic + Time + Status
+      14, 15,  -- UMID
+      16, 17, 18, 19, 20, 21,  -- BWF metadata
+      22, 23, 24, 25, 26, 27, 28  -- iXML metadata
+    }
     PRESET_EDITOR_STATE.columns = {}
-    for _, col_id in ipairs(DEFAULT_COL_ORDER) do
+    for _, col_id in ipairs(reset_order) do
       table.insert(PRESET_EDITOR_STATE.columns, {
         id = col_id,
         visible = true,
@@ -3123,26 +3252,85 @@ reaper.ImGui_TextDisabled(ctx, col_preset_status_text())
 
 end
 
+-- Column width configuration (customizable)
+-- Edit these values to change default column widths
+-- Positive number = width in pixels (e.g., 100)
+-- -1 = auto-width (converted to 150px default)
+-- Use "Reset Widths" button to restore these defaults after manual resizing
+local COL_WIDTH = {
+  [1]  = 50,   -- # (item index)
+  [2]  = 60,   -- TrkID (track number)
+  [3]  = 150,  -- Track Name (was -1, now 150px)
+  [4]  = 150,  -- Take Name (was -1, now 150px)
+  [5]  = 150,  -- Item Note (was -1, now 150px)
+  [6]  = 200,  -- Source File (was -1, now 200px for longer paths)
+  [7]  = 150,  -- Meta Trk Name (was -1, now 150px)
+  [8]  = 60,   -- Chan# (channel number)
+  [9]  = 80,   -- Interleave (mono-of-N)
+  [10] = 50,   -- Mute (M/-)
+  [11] = 80,   -- Color
+  [12] = 140,  -- Start (fits "hh:mm:ss.SSS")
+  [13] = 140,  -- End (fits "hh:mm:ss.SSS")
+  -- BWF metadata columns
+  [14] = 200,  -- UMID (64 hex chars)
+  [15] = 250,  -- UMID_PT (Pro Tools format)
+  [16] = 100,  -- OriginationDate (YYYY-MM-DD)
+  [17] = 100,  -- OriginationTime (HH:MM:SS)
+  [18] = 150,  -- Originator (was -1, now 150px)
+  [19] = 150,  -- OriginatorReference (was -1, now 150px)
+  [20] = 120,  -- TimeReference (sample count)
+  [21] = 200,  -- Description (was -1, now 200px for longer text)
+  -- iXML metadata columns
+  [22] = 150,  -- PROJECT (was -1, now 150px)
+  [23] = 150,  -- SCENE (was -1, now 150px)
+  [24] = 100,  -- TAKE
+  [25] = 100,  -- TAPE
+  [26] = 80,   -- UBITS
+  [27] = 100,  -- FRAMERATE
+  [28] = 80,   -- SPEED
+}
+
+-- Track if user requested column width reset
+local RESET_COLUMN_WIDTHS = false
+
 local function draw_table(rows, height)
+  -- Use SizingFixedFit so all columns are manually resizable and extending (not shrinking)
   local flags = TF('ImGui_TableFlags_Borders')
             | TF('ImGui_TableFlags_RowBg')
-            | TF('ImGui_TableFlags_SizingFixedFit')
+            | TF('ImGui_TableFlags_SizingFixedFit')  -- All columns manually resizable with extension
             | TF('ImGui_TableFlags_ScrollX')
             | TF('ImGui_TableFlags_Resizable')
-            -- Removed: TableFlags_Reorderable - column order managed through Preset Editor            
-  -- 依目前 ACTIVE_PRESET 生成唯一表格 ID，避免 ImGui 重用舊排序
-  -- 原本：local table_id = "items_" . ((ACTIVE_PRESET and ACTIVE_PRESET ~= "" and ACTIVE_PRESET) or "default")
-  local table_id = "items_" .. ((ACTIVE_PRESET and ACTIVE_PRESET ~= "" and ACTIVE_PRESET) or "default")
-  if reaper.ImGui_BeginTable(ctx, table_id, 13, flags, -FLT_MIN, height or 360) then
-    -- 先定義一個 helper（若檔案裡還沒有）
+            -- Removed: TableFlags_Reorderable - column order managed through Preset Editor
+
+  -- Generate unique table ID based on active preset + reset counter
+  -- This forces ImGui to reset column widths when RESET_COLUMN_WIDTHS is true
+  local reset_suffix = RESET_COLUMN_WIDTHS and ("_reset" .. os.time()) or ""
+  local table_id = "items_" .. ((ACTIVE_PRESET and ACTIVE_PRESET ~= "" and ACTIVE_PRESET) or "default") .. reset_suffix
+
+  if RESET_COLUMN_WIDTHS then
+    RESET_COLUMN_WIDTHS = false  -- Clear flag after use
+  end
+
+  if reaper.ImGui_BeginTable(ctx, table_id, 28, flags, -FLT_MIN, height or 360) then
+    -- Setup column with default width from COL_WIDTH
     local function _setup_column_by_id(id)
       local label = header_label_from_id(id) or tostring(id)
-      -- 如需寬度/旗標可在這裡加第三參數
-      reaper.ImGui_TableSetupColumn(ctx, label, reaper.ImGui_TableColumnFlags_None())
+      local width = COL_WIDTH[id] or 100  -- Default to 100px if not specified
+
+      -- All columns use WidthFixed for manual resizing with extension behavior
+      if width < 0 then width = 150 end  -- Convert auto-stretch (-1) to reasonable default
+      local col_flags = reaper.ImGui_TableColumnFlags_WidthFixed()
+      reaper.ImGui_TableSetupColumn(ctx, label, col_flags, width)
     end
 
     -- 依現有 COL_ORDER 來畫表頭；若還沒任何順序則用預設
-    local DEFAULT_COL_ORDER = { 1, 2, 3, 12, 13, 4, 5, 6, 7, 8, 9, 10, 11 }
+    -- Default order: Basic info, Time, Metadata (BWF), Metadata (iXML), Status
+    local DEFAULT_COL_ORDER = {
+      1, 2, 3, 12, 13, 4, 5, 6, 7, 8, 9, 10, 11,  -- Basic + Time + Status
+      14, 15,  -- UMID
+      16, 17, 18, 19, 20, 21,  -- BWF metadata
+      22, 23, 24, 25, 26, 27, 28  -- iXML metadata
+    }
     local initial_order = (COL_ORDER and #COL_ORDER > 0) and COL_ORDER or DEFAULT_COL_ORDER
 
     -- Setup columns based on current order
@@ -3358,6 +3546,82 @@ local function draw_table(rows, height)
           local t = tostring(r.color_hex or ""); local sel = sel_has(r.__item_guid, 11)
           reaper.ImGui_Selectable(ctx, (t ~= "" and t or " ").."##c11", sel)
           if reaper.ImGui_IsItemClicked(ctx) then handle_cell_click(r.__item_guid, 11) end
+
+        -- New metadata columns (14-28) - Read-only
+        elseif col == 14 then
+          local t = tostring(r.umid or ""); local sel = sel_has(r.__item_guid, 14)
+          reaper.ImGui_Selectable(ctx, (t ~= "" and t or " ").."##c14", sel)
+          if reaper.ImGui_IsItemClicked(ctx) then handle_cell_click(r.__item_guid, 14) end
+
+        elseif col == 15 then
+          local t = tostring(r.umid_pt or ""); local sel = sel_has(r.__item_guid, 15)
+          reaper.ImGui_Selectable(ctx, (t ~= "" and t or " ").."##c15", sel)
+          if reaper.ImGui_IsItemClicked(ctx) then handle_cell_click(r.__item_guid, 15) end
+
+        elseif col == 16 then
+          local t = tostring(r.origination_date or ""); local sel = sel_has(r.__item_guid, 16)
+          reaper.ImGui_Selectable(ctx, (t ~= "" and t or " ").."##c16", sel)
+          if reaper.ImGui_IsItemClicked(ctx) then handle_cell_click(r.__item_guid, 16) end
+
+        elseif col == 17 then
+          local t = tostring(r.origination_time or ""); local sel = sel_has(r.__item_guid, 17)
+          reaper.ImGui_Selectable(ctx, (t ~= "" and t or " ").."##c17", sel)
+          if reaper.ImGui_IsItemClicked(ctx) then handle_cell_click(r.__item_guid, 17) end
+
+        elseif col == 18 then
+          local t = tostring(r.originator or ""); local sel = sel_has(r.__item_guid, 18)
+          reaper.ImGui_Selectable(ctx, (t ~= "" and t or " ").."##c18", sel)
+          if reaper.ImGui_IsItemClicked(ctx) then handle_cell_click(r.__item_guid, 18) end
+
+        elseif col == 19 then
+          local t = tostring(r.originator_ref or ""); local sel = sel_has(r.__item_guid, 19)
+          reaper.ImGui_Selectable(ctx, (t ~= "" and t or " ").."##c19", sel)
+          if reaper.ImGui_IsItemClicked(ctx) then handle_cell_click(r.__item_guid, 19) end
+
+        elseif col == 20 then
+          local t = tostring(r.time_reference or ""); local sel = sel_has(r.__item_guid, 20)
+          reaper.ImGui_Selectable(ctx, (t ~= "" and t or " ").."##c20", sel)
+          if reaper.ImGui_IsItemClicked(ctx) then handle_cell_click(r.__item_guid, 20) end
+
+        elseif col == 21 then
+          local t = tostring(r.description or ""); local sel = sel_has(r.__item_guid, 21)
+          reaper.ImGui_Selectable(ctx, (t ~= "" and t or " ").."##c21", sel)
+          if reaper.ImGui_IsItemClicked(ctx) then handle_cell_click(r.__item_guid, 21) end
+
+        elseif col == 22 then
+          local t = tostring(r.project or ""); local sel = sel_has(r.__item_guid, 22)
+          reaper.ImGui_Selectable(ctx, (t ~= "" and t or " ").."##c22", sel)
+          if reaper.ImGui_IsItemClicked(ctx) then handle_cell_click(r.__item_guid, 22) end
+
+        elseif col == 23 then
+          local t = tostring(r.scene or ""); local sel = sel_has(r.__item_guid, 23)
+          reaper.ImGui_Selectable(ctx, (t ~= "" and t or " ").."##c23", sel)
+          if reaper.ImGui_IsItemClicked(ctx) then handle_cell_click(r.__item_guid, 23) end
+
+        elseif col == 24 then
+          local t = tostring(r.take_meta or ""); local sel = sel_has(r.__item_guid, 24)
+          reaper.ImGui_Selectable(ctx, (t ~= "" and t or " ").."##c24", sel)
+          if reaper.ImGui_IsItemClicked(ctx) then handle_cell_click(r.__item_guid, 24) end
+
+        elseif col == 25 then
+          local t = tostring(r.tape or ""); local sel = sel_has(r.__item_guid, 25)
+          reaper.ImGui_Selectable(ctx, (t ~= "" and t or " ").."##c25", sel)
+          if reaper.ImGui_IsItemClicked(ctx) then handle_cell_click(r.__item_guid, 25) end
+
+        elseif col == 26 then
+          local t = tostring(r.ubits or ""); local sel = sel_has(r.__item_guid, 26)
+          reaper.ImGui_Selectable(ctx, (t ~= "" and t or " ").."##c26", sel)
+          if reaper.ImGui_IsItemClicked(ctx) then handle_cell_click(r.__item_guid, 26) end
+
+        elseif col == 27 then
+          local t = tostring(r.framerate or ""); local sel = sel_has(r.__item_guid, 27)
+          reaper.ImGui_Selectable(ctx, (t ~= "" and t or " ").."##c27", sel)
+          if reaper.ImGui_IsItemClicked(ctx) then handle_cell_click(r.__item_guid, 27) end
+
+        elseif col == 28 then
+          local t = tostring(r.speed or ""); local sel = sel_has(r.__item_guid, 28)
+          reaper.ImGui_Selectable(ctx, (t ~= "" and t or " ").."##c28", sel)
+          if reaper.ImGui_IsItemClicked(ctx) then handle_cell_click(r.__item_guid, 28) end
         end
       end
 
@@ -3366,6 +3630,37 @@ local function draw_table(rows, height)
 
     reaper.ImGui_EndTable(ctx)
 
+    -- Right-click context menu on table area
+    if reaper.ImGui_BeginPopupContextItem(ctx, "table_context_menu") then
+      if reaper.ImGui_MenuItem(ctx, "Reset Column Widths") then
+        RESET_COLUMN_WIDTHS = true
+      end
+      if reaper.ImGui_IsItemHovered(ctx) then
+        reaper.ImGui_BeginTooltip(ctx)
+        reaper.ImGui_Text(ctx, "Reset all column widths to default sizes")
+        reaper.ImGui_EndTooltip(ctx)
+      end
+
+      reaper.ImGui_Separator(ctx)
+
+      if reaper.ImGui_MenuItem(ctx, "Edit Columns...") then
+        reaper.ImGui_OpenPopup(ctx, "Column Preset Editor")
+      end
+      if reaper.ImGui_IsItemHovered(ctx) then
+        reaper.ImGui_BeginTooltip(ctx)
+        reaper.ImGui_Text(ctx, "Open column preset editor")
+        reaper.ImGui_EndTooltip(ctx)
+      end
+
+      reaper.ImGui_Separator(ctx)
+
+      local show_muted_label = SHOW_MUTED and "Hide Muted Items" or "Show Muted Items"
+      if reaper.ImGui_MenuItem(ctx, show_muted_label) then
+        SHOW_MUTED = not SHOW_MUTED
+      end
+
+      reaper.ImGui_EndPopup(ctx)
+    end
 
   end
 end
