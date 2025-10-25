@@ -1,6 +1,6 @@
 --[[
 @description Item List Editor
-@version 251025_1400
+@version 251025_1500
 @author hsuanice
 @about
   Shows a live, spreadsheet-style table of the currently selected items and all
@@ -41,6 +41,47 @@
 
 
 @changelog
+  v251025_1500
+  - Enhancement: Custom time format headers now display "(Custom)" instead of full pattern
+    • Start/End column headers show "Start (Custom)" and "End (Custom)" when custom time format is selected
+    • Updated both Item List Editor fallback and Time Format library (hsuanice_Time Format.lua)
+    • Improves readability - full pattern still used for actual time formatting
+
+  - Enhancement: Complete metadata caching to eliminate repeated file reads
+    • Cache now stores ALL metadata fields (4 basic + 15 BWF/iXML = 19 fields total)
+    • Cache version bumped to 2.0 (old caches automatically invalidated)
+    • Significantly improves performance when re-opening projects with many items
+    • Cache fields: file_name, interleave, meta_trk_name, channel_num, UMID, UMID_PT, origination_date, origination_time, originator, originator_ref, time_reference, description, PROJECT, SCENE, TAKE, TAPE, UBITS, FRAMERATE, SPEED
+    • Old cache format (v1.0, 6 fields) automatically upgraded on first load
+
+  - Feature: Added Source Start/Source End columns (total: 28→30 columns)
+    • New columns 29-30 display source file position in timecode format
+    • Calculated from BWF TimeReference (sample count since midnight) + take offset
+    • Shows actual position in original source file, accounting for:
+      - TimeReference from BWF metadata
+      - Take start offset (D_STARTOFFS)
+      - Item length and playback rate
+    • Always displayed in Timecode format for consistency
+    • Useful for dialogue editing and conforming to match original recordings
+    • Read-only columns (calculated, not editable)
+    • Column width: 100px (customizable via COL_WIDTH[29] and COL_WIDTH[30])
+
+  - Technical: Updated all column-related loops and arrays from 28 to 30 columns
+    • BeginTable column count: 28 → 30
+    • DEFAULT_COL_ORDER includes columns 29-30
+    • COL_VISIBILITY supports all 30 columns
+    • Preset Editor handles all 30 columns
+    • Show Widths button displays all 30 columns
+
+  v251025_1420
+  - Fix: Incomplete metadata after cache location change
+    • Fixed bug where BWF/iXML metadata fields (15 columns) were not loaded when cache hit occurred
+    • Root cause: Early return in load_metadata_for_row() skipped metadata parsing when basic fields were cached
+    • Solution: Always parse full metadata via META.collect_item_fields() regardless of cache status
+    • Cache now only stores 4 basic fields (file_name, interleave, meta_trk_name, channel_num)
+    • BWF/iXML fields (UMID, origination_date, PROJECT, SCENE, etc.) are always loaded fresh from files
+    • Added diagnostic logging to get_cache_path() for troubleshooting cache location issues
+
   v251025_1400
   - Enhancement: Improved column width management with user customization
     • Changed to SizingFixedFit mode - all columns manually resizable by dragging dividers
@@ -770,7 +811,7 @@
 -- Cache metadata (file_name, interleave, meta_trk_name, channel_num) per project
 -- to avoid re-scanning unchanged items on subsequent launches
 
-local CACHE_VERSION = "1.0"  -- Bump this to invalidate all caches when metadata logic changes
+local CACHE_VERSION = "2.0"  -- Bump this to invalidate all caches when metadata logic changes (v2.0: added BWF/iXML fields)
 
 -- Get cache directory path
 local function get_cache_dir()
@@ -805,7 +846,9 @@ local function get_cache_path()
     -- Unsaved project: fallback to REAPER resource path
     local cache_dir = get_cache_dir()
     local key = get_project_cache_key()
-    return cache_dir .. "/" .. key .. ".cache"
+    local path = cache_dir .. "/" .. key .. ".cache"
+    reaper.ShowConsoleMsg("[ILE Cache] Path (unsaved): " .. path .. "\n")
+    return path
   end
 
   -- Get project directory (folder containing the .RPP file)
@@ -814,11 +857,17 @@ local function get_cache_path()
     -- Fallback if can't extract directory
     local cache_dir = get_cache_dir()
     local key = get_project_cache_key()
-    return cache_dir .. "/" .. key .. ".cache"
+    local path = cache_dir .. "/" .. key .. ".cache"
+    reaper.ShowConsoleMsg("[ILE Cache] Path (fallback): " .. path .. "\n")
+    return path
   end
 
   -- Use fixed cache filename in project directory
-  return proj_dir .. "ItemListEditor.cache"
+  local path = proj_dir .. "ItemListEditor.cache"
+  reaper.ShowConsoleMsg("[ILE Cache] Path: " .. path .. "\n")
+  reaper.ShowConsoleMsg("[ILE Cache] Project dir: " .. proj_dir .. "\n")
+  reaper.ShowConsoleMsg("[ILE Cache] Project file: " .. projfn .. "\n")
+  return path
 end
 
 -- Serialize cache data to string
@@ -832,16 +881,32 @@ local function serialize_cache(cache_data)
   }
 
   for guid, meta in pairs(cache_data.items or {}) do
-    -- Format: GUID|mod_time|file_name|interleave|meta_trk_name|channel_num
+    -- Format: GUID|mod_time|file_name|interleave|meta_trk_name|channel_num|umid|umid_pt|origination_date|origination_time|originator|originator_ref|time_reference|description|project|scene|take_meta|tape|ubits|framerate|speed
     local parts = {
       guid,
       tostring(meta.mod_time or 0),
       meta.file_name or "",
       tostring(meta.interleave or 0),
       meta.meta_trk_name or "",
-      tostring(meta.channel_num or 0)
+      tostring(meta.channel_num or 0),
+      -- BWF/iXML metadata (15 fields)
+      meta.umid or "",
+      meta.umid_pt or "",
+      meta.origination_date or "",
+      meta.origination_time or "",
+      meta.originator or "",
+      meta.originator_ref or "",
+      meta.time_reference or "",
+      meta.description or "",
+      meta.project or "",
+      meta.scene or "",
+      meta.take_meta or "",
+      meta.tape or "",
+      meta.ubits or "",
+      meta.framerate or "",
+      meta.speed or ""
     }
-    -- Escape pipes in data
+    -- Escape pipes in data (skip GUID and mod_time)
     for i = 3, #parts do
       parts[i] = parts[i]:gsub("|", "\\|")
     end
@@ -873,7 +938,7 @@ local function deserialize_cache(content)
         cache_data.item_count = tonumber(val) or 0
       end
     else
-      -- Parse data line: GUID|mod_time|file_name|interleave|meta_trk_name|channel_num
+      -- Parse data line: GUID|mod_time|file_name|interleave|meta_trk_name|channel_num|umid|umid_pt|origination_date|origination_time|originator|originator_ref|time_reference|description|project|scene|take_meta|tape|ubits|framerate|speed
       local parts = {}
       for part in line:gmatch("([^|]+)") do
         parts[#parts + 1] = part:gsub("\\|", "|")  -- Unescape pipes
@@ -883,10 +948,26 @@ local function deserialize_cache(content)
         local guid = parts[1]
         cache_data.items[guid] = {
           mod_time = tonumber(parts[2]) or 0,
-          file_name = parts[3],
+          file_name = parts[3] or "",
           interleave = tonumber(parts[4]) or 0,
-          meta_trk_name = parts[5],
-          channel_num = tonumber(parts[6]) or 0
+          meta_trk_name = parts[5] or "",
+          channel_num = tonumber(parts[6]) or 0,
+          -- BWF/iXML metadata (15 fields) - handle both old and new cache formats
+          umid = parts[7] or "",
+          umid_pt = parts[8] or "",
+          origination_date = parts[9] or "",
+          origination_time = parts[10] or "",
+          originator = parts[11] or "",
+          originator_ref = parts[12] or "",
+          time_reference = parts[13] or "",
+          description = parts[14] or "",
+          project = parts[15] or "",
+          scene = parts[16] or "",
+          take_meta = parts[17] or "",
+          tape = parts[18] or "",
+          ubits = parts[19] or "",
+          framerate = parts[20] or "",
+          speed = parts[21] or ""
         }
       end
     end
@@ -1225,43 +1306,46 @@ end
 
 -- Column order mapping (single source of truth)
 local COL_ORDER, COL_POS = {}, {}   -- visual→logical / logical→visual
-local COL_VISIBILITY = {}           -- col_id → true/false (for all 28 columns)
+local COL_VISIBILITY = {}           -- col_id → true/false (for all 30 columns)
 
 -- Column width configuration (customizable)
 -- Edit these values to change default column widths
 -- Positive number = width in pixels (e.g., 100)
 -- Use "Reset Widths" button to restore these defaults after manual resizing
 local COL_WIDTH = {
-  [1]  = 50,   -- # (item index)
-  [2]  = 60,   -- TrkID (track number)
-  [3]  = 150,  -- Track Name
-  [4]  = 150,  -- Take Name
-  [5]  = 150,  -- Item Note
-  [6]  = 200,  -- Source File (longer paths)
-  [7]  = 150,  -- Meta Trk Name
-  [8]  = 60,   -- Chan# (channel number)
-  [9]  = 80,   -- Interleave (mono-of-N)
-  [10] = 50,   -- Mute (M/-)
-  [11] = 80,   -- Color
-  [12] = 140,  -- Start (fits "hh:mm:ss.SSS")
-  [13] = 140,  -- End (fits "hh:mm:ss.SSS")
+  [1]  = 30,   -- # (item index)
+  [2]  = 30,   -- TrkID (track number)
+  [3]  = 100,  -- Track Name
+  [4]  = 300,  -- Take Name
+  [5]  = 300,  -- Item Note
+  [6]  = 300,  -- Source File (longer paths)
+  [7]  = 100,  -- Meta Trk Name
+  [8]  = 30,   -- Chan# (channel number)
+  [9]  = 30,   -- Interleave (mono-of-N)
+  [10] = 30,   -- Mute (M/-)
+  [11] = 70,   -- Color
+  [12] = 80,  -- Start (fits "hh:mm:ss.SSS")
+  [13] = 80,  -- End (fits "hh:mm:ss.SSS")
   -- BWF metadata columns
-  [14] = 200,  -- UMID (64 hex chars)
-  [15] = 250,  -- UMID_PT (Pro Tools format)
-  [16] = 100,  -- OriginationDate (YYYY-MM-DD)
-  [17] = 100,  -- OriginationTime (HH:MM:SS)
-  [18] = 150,  -- Originator
-  [19] = 150,  -- OriginatorReference
-  [20] = 120,  -- TimeReference (sample count)
-  [21] = 200,  -- Description (longer text)
+  [14] = 450,  -- UMID (64 hex chars)
+  [15] = 450,  -- UMID_PT (Pro Tools format)
+  [16] = 60,  -- OriginationDate (YYYY-MM-DD)
+  [17] = 60,  -- OriginationTime (HH:MM:SS)
+  [18] = 300,  -- Originator
+  [19] = 300,  -- OriginatorReference
+  [20] = 80,  -- TimeReference (sample count)
+  [21] = 300,  -- Description (longer text)
   -- iXML metadata columns
-  [22] = 150,  -- PROJECT
-  [23] = 150,  -- SCENE
-  [24] = 100,  -- TAKE
-  [25] = 100,  -- TAPE
+  [22] = 80,  -- PROJECT
+  [23] = 50,  -- SCENE
+  [24] = 30,  -- TAKE
+  [25] = 50,  -- TAPE
   [26] = 80,   -- UBITS
-  [27] = 100,  -- FRAMERATE
+  [27] = 80,  -- FRAMERATE
   [28] = 80,   -- SPEED
+  -- Source position columns (calculated from TimeReference)
+  [29] = 100,  -- Source Start (TC)
+  [30] = 100,  -- Source End (TC)
 }
 
 -- Track if user requested column width reset
@@ -1305,8 +1389,8 @@ local function _csv_from_order_and_visibility(order, visibility_map)
     visible_set[col_id] = true
   end
 
-  -- Store all 28 columns with their visibility flags
-  for col_id = 1, 28 do
+  -- Store all 30 columns with their visibility flags
+  for col_id = 1, 30 do
     local visible_flag = visible_set[col_id] and "1" or "0"
     t[#t+1] = tostring(col_id) .. ":" .. visible_flag
   end
@@ -1351,7 +1435,7 @@ local function _order_and_visibility_from_csv(s)
     for _, col_id in ipairs(order) do
       visible_set[col_id] = true
     end
-    for col_id = 1, 28 do
+    for col_id = 1, 30 do
       visibility_map[col_id] = visible_set[col_id] or false
     end
 
@@ -1380,7 +1464,7 @@ local function _normalize_full_order(order)
   for i=1,#(order or {}) do
     local v = tonumber(order[i]); if v and not seen[v] then seen[v]=true; out[#out+1]=v end
   end
-  for id=1,28 do if not seen[id] then out[#out+1]=id end end
+  for id=1,30 do if not seen[id] then out[#out+1]=id end end
   return out
 end
 
@@ -1555,7 +1639,7 @@ local function load_prefs()
 
         -- Initialize COL_VISIBILITY - all columns in ord are visible
         COL_VISIBILITY = {}
-        for col_id = 1, 28 do
+        for col_id = 1, 30 do
           COL_VISIBILITY[col_id] = (COL_POS[col_id] ~= nil)
         end
       end
@@ -1565,7 +1649,7 @@ local function load_prefs()
   -- Ensure COL_VISIBILITY is initialized even if no preset/order was loaded
   if not COL_VISIBILITY or not next(COL_VISIBILITY) then
     COL_VISIBILITY = {}
-    for col_id = 1, 28 do
+    for col_id = 1, 30 do
       COL_VISIBILITY[col_id] = true  -- default: all visible
     end
   end
@@ -1605,7 +1689,7 @@ local function _normalize_full_order(order)
   for i=1,#(order or {}) do
     local v = tonumber(order[i]); if v and not seen[v] then seen[v]=true; out[#out+1]=v end
   end
-  for id=1,28 do if not seen[id] then out[#out+1]=id end end
+  for id=1,30 do if not seen[id] then out[#out+1]=id end end
   return out
 end
 
@@ -1677,10 +1761,11 @@ if not ok or not TFLib or not TFLib.make_formatter then
       local dec=(opts and opts.decimals) or 3
       return function(sec) return _fmt_ms(sec or 0, dec) end
     end,
-    headers=function(mode)
+    headers=function(mode, opts)
       if mode=="tc" then return "Start (TC)","End (TC)" end
       if mode=="beats" then return "Start (Beats)","End (Beats)" end
       if mode=="sec" then return "Start (s)","End (s)" end
+      if mode=="custom" then return "Start (Custom)","End (Custom)" end
       return "Start (m:s)","End (m:s)"
     end,
     format=function(sec, mode, opts)
@@ -1874,9 +1959,72 @@ local function collect_basic_fields(item)
   row.framerate = ""
   row.speed = ""
 
+  -- Source position columns (calculated from TimeReference)
+  row.source_start = ""
+  row.source_end = ""
+
   row.__metadata_loaded = false  -- Flag for lazy loading
 
   return row
+end
+
+-- Calculate source position from TimeReference (BWF sample count since midnight)
+-- Returns source_start_tc, source_end_tc as formatted timecode strings
+local function calculate_source_position(item, time_reference_str, fields)
+  if not item or not time_reference_str or time_reference_str == "" then
+    return "", ""
+  end
+
+  -- Parse TimeReference (sample count since midnight)
+  local time_ref_samples = tonumber(time_reference_str)
+  if not time_ref_samples then
+    return "", ""
+  end
+
+  -- Get sample rate from fields or source
+  local sample_rate = 48000  -- Default sample rate
+  if fields and fields.samplerate then
+    sample_rate = tonumber(fields.samplerate) or 48000
+  else
+    local take = reaper.GetActiveTake(item)
+    if take then
+      local source = reaper.GetMediaItemTake_Source(take)
+      if source then
+        sample_rate = reaper.GetMediaSourceSampleRate(source)
+        if not sample_rate or sample_rate <= 0 then
+          sample_rate = 48000
+        end
+      end
+    end
+  end
+
+  -- Convert TimeReference from samples to seconds
+  local time_ref_seconds = time_ref_samples / sample_rate
+
+  -- Get take start offset (where in the source file the take starts)
+  local take = reaper.GetActiveTake(item)
+  if not take then
+    return "", ""
+  end
+
+  local take_offset = reaper.GetMediaItemTakeInfo_Value(take, "D_STARTOFFS") or 0
+
+  -- Calculate source positions
+  -- source_start = time_reference + take_offset
+  local source_start_sec = time_ref_seconds + take_offset
+
+  -- Get item length to calculate source end
+  local item_len = reaper.GetMediaItemInfo_Value(item, "D_LENGTH") or 0
+  local playrate = reaper.GetMediaItemTakeInfo_Value(take, "D_PLAYRATE") or 1.0
+  local source_len = item_len * playrate  -- Account for playback rate
+
+  local source_end_sec = source_start_sec + source_len
+
+  -- Format as timecode (using REAPER's TC formatter)
+  local source_start_tc = reaper.format_timestr_pos(source_start_sec, "", 5)  -- 5 = TC format
+  local source_end_tc = reaper.format_timestr_pos(source_end_sec, "", 5)
+
+  return source_start_tc, source_end_tc
 end
 
 -- Slow: load full metadata for a row (called on demand or in background)
@@ -1889,14 +2037,34 @@ local function load_metadata_for_row(row)
 
   local item_guid = row.__item_guid
 
-  -- Try cache first
+  -- Try cache first for ALL metadata fields
   local cached = cache_lookup(item_guid, item)
   if cached then
-    -- Cache hit! Use cached metadata
-    row.file_name = cached.file_name
-    row.interleave = cached.interleave
-    row.meta_trk_name = cached.meta_trk_name
-    row.channel_num = cached.channel_num
+    -- Cache hit! Use all cached metadata
+    row.file_name = cached.file_name or ""
+    row.interleave = cached.interleave or 0
+    row.meta_trk_name = cached.meta_trk_name or ""
+    row.channel_num = cached.channel_num or 0
+    -- BWF/iXML metadata from cache
+    row.umid = cached.umid or ""
+    row.umid_pt = cached.umid_pt or ""
+    row.origination_date = cached.origination_date or ""
+    row.origination_time = cached.origination_time or ""
+    row.originator = cached.originator or ""
+    row.originator_ref = cached.originator_ref or ""
+    row.time_reference = cached.time_reference or ""
+    row.description = cached.description or ""
+    row.project = cached.project or ""
+    row.scene = cached.scene or ""
+    row.take_meta = cached.take_meta or ""
+    row.tape = cached.tape or ""
+    row.ubits = cached.ubits or ""
+    row.framerate = cached.framerate or ""
+    row.speed = cached.speed or ""
+
+    -- Calculate source position from TimeReference (not cached, always calculated)
+    row.source_start, row.source_end = calculate_source_position(item, row.time_reference, nil)
+
     row.__metadata_loaded = true
     return
   end
@@ -1917,7 +2085,7 @@ local function load_metadata_for_row(row)
   row.meta_trk_name = name or ""
   row.channel_num   = ch
 
-  -- New metadata fields (from META.collect_item_fields)
+  -- BWF/iXML metadata fields
   row.umid = f.umid or f.UMID or ""
   row.umid_pt = f.umid_pt or ""
   row.origination_date = f.originationdate or f.OriginationDate or ""
@@ -1934,15 +2102,34 @@ local function load_metadata_for_row(row)
   row.framerate = f.framerate or f.FRAMERATE or ""
   row.speed = f.speed or f.SPEED or ""
 
+  -- Calculate source position from TimeReference (not cached, always calculated)
+  row.source_start, row.source_end = calculate_source_position(item, row.time_reference, f)
+
   row.__fields      = f
   row.__metadata_loaded = true
 
-  -- Store in cache for next time
+  -- Store ALL metadata in cache for next time
   cache_store(item_guid, item, {
     file_name = row.file_name,
     interleave = row.interleave,
     meta_trk_name = row.meta_trk_name,
-    channel_num = row.channel_num
+    channel_num = row.channel_num,
+    -- BWF/iXML metadata
+    umid = row.umid,
+    umid_pt = row.umid_pt,
+    origination_date = row.origination_date,
+    origination_time = row.origination_time,
+    originator = row.originator,
+    originator_ref = row.originator_ref,
+    time_reference = row.time_reference,
+    description = row.description,
+    project = row.project,
+    scene = row.scene,
+    take_meta = row.take_meta,
+    tape = row.tape,
+    ubits = row.ubits,
+    framerate = row.framerate,
+    speed = row.speed
   })
 end
 
@@ -2282,6 +2469,9 @@ local function get_cell_text(i, r, col, fmt)
   elseif col == 26 then return tostring(r.ubits or "")
   elseif col == 27 then return tostring(r.framerate or "")
   elseif col == 28 then return tostring(r.speed or "")
+  -- Source position columns (from TimeReference)
+  elseif col == 29 then return tostring(r.source_start or "")
+  elseif col == 30 then return tostring(r.source_end or "")
   end
   return ""
 end
@@ -2308,7 +2498,7 @@ local function header_label_from_id(col_id)
   if col_id == 6  then return "Source File" end
   if col_id == 7  then return "Meta Trk Name" end
   if col_id == 8  then return "Chan#" end
-  if col_id == 9  then return "Interleave" end
+  if col_id == 9  then return "Int#" end
   if col_id == 10 then return "Mute" end
   if col_id == 11 then return "Color" end
   if col_id == 12 or col_id == 13 then
@@ -2331,6 +2521,9 @@ local function header_label_from_id(col_id)
   if col_id == 26 then return "UBITS" end
   if col_id == 27 then return "FRAMERATE" end
   if col_id == 28 then return "SPEED" end
+  -- Source position columns (TC format, from TimeReference)
+  if col_id == 29 then return "Source Start (TC)" end
+  if col_id == 30 then return "Source End (TC)" end
   return tostring(col_id)
 end
 
@@ -2345,7 +2538,7 @@ local HEADER_BY_ID = {
   [6]  = "Source File",
   [7]  = "Meta Trk Name",
   [8]  = "Chan#",
-  [9]  = "Interleave",
+  [9]  = "Int#",
   [10] = "Mute",
   [11] = "Color",
   [12] = nil,  -- Start (動態)
@@ -2991,7 +3184,8 @@ if reaper.ImGui_Button(ctx, "Show Widths", 100, 24) then
   local order = (COL_ORDER and #COL_ORDER > 0) and COL_ORDER or {
     1, 2, 3, 12, 13, 4, 5, 6, 7, 8, 9, 10, 11,
     14, 15, 16, 17, 18, 19, 20, 21,
-    22, 23, 24, 25, 26, 27, 28
+    22, 23, 24, 25, 26, 27, 28,
+    29, 30
   }
 
   for i, col_id in ipairs(order) do
@@ -3217,7 +3411,7 @@ if reaper.ImGui_BeginPopupModal(ctx, "Column Preset Editor", true, TF('ImGui_Win
     end
 
     -- Then add hidden columns (those not in COL_ORDER) at the end
-    for col_id = 1, 28 do
+    for col_id = 1, 30 do
       if not added[col_id] then
         local is_visible = COL_VISIBILITY[col_id] or false
         table.insert(PRESET_EDITOR_STATE.columns, {
@@ -3277,7 +3471,8 @@ if reaper.ImGui_BeginPopupModal(ctx, "Column Preset Editor", true, TF('ImGui_Win
       1, 2, 3, 12, 13, 4, 5, 6, 7, 8, 9, 10, 11,  -- Basic + Time + Status
       14, 15,  -- UMID
       16, 17, 18, 19, 20, 21,  -- BWF metadata
-      22, 23, 24, 25, 26, 27, 28  -- iXML metadata
+      22, 23, 24, 25, 26, 27, 28,  -- iXML metadata
+      29, 30  -- Source position (from TimeReference)
     }
     PRESET_EDITOR_STATE.columns = {}
     for _, col_id in ipairs(reset_order) do
@@ -3382,7 +3577,7 @@ local function draw_table(rows, height)
 
   -- Use specific height for ScrollY to work properly
   local outer_height = height or 360
-  if reaper.ImGui_BeginTable(ctx, table_id, 28, flags, 0, outer_height) then
+  if reaper.ImGui_BeginTable(ctx, table_id, 30, flags, 0, outer_height) then
     -- Setup column with default width from COL_WIDTH
     local function _setup_column_by_id(id)
       local label = header_label_from_id(id) or tostring(id)
@@ -3400,7 +3595,8 @@ local function draw_table(rows, height)
       1, 2, 3, 12, 13, 4, 5, 6, 7, 8, 9, 10, 11,  -- Basic + Time + Status
       14, 15,  -- UMID
       16, 17, 18, 19, 20, 21,  -- BWF metadata
-      22, 23, 24, 25, 26, 27, 28  -- iXML metadata
+      22, 23, 24, 25, 26, 27, 28,  -- iXML metadata
+      29, 30  -- Source position (from TimeReference)
     }
     local initial_order = (COL_ORDER and #COL_ORDER > 0) and COL_ORDER or DEFAULT_COL_ORDER
 
@@ -3695,6 +3891,17 @@ local function draw_table(rows, height)
           local t = tostring(r.speed or ""); local sel = sel_has(r.__item_guid, 28)
           reaper.ImGui_Selectable(ctx, (t ~= "" and t or " ").."##c28", sel)
           if reaper.ImGui_IsItemClicked(ctx) then handle_cell_click(r.__item_guid, 28) end
+
+        -- Source position columns (read-only, from TimeReference)
+        elseif col == 29 then
+          local t = tostring(r.source_start or ""); local sel = sel_has(r.__item_guid, 29)
+          reaper.ImGui_Selectable(ctx, (t ~= "" and t or " ").."##c29", sel)
+          if reaper.ImGui_IsItemClicked(ctx) then handle_cell_click(r.__item_guid, 29) end
+
+        elseif col == 30 then
+          local t = tostring(r.source_end or ""); local sel = sel_has(r.__item_guid, 30)
+          reaper.ImGui_Selectable(ctx, (t ~= "" and t or " ").."##c30", sel)
+          if reaper.ImGui_IsItemClicked(ctx) then handle_cell_click(r.__item_guid, 30) end
         end
       end
 
@@ -3717,7 +3924,8 @@ local function draw_table(rows, height)
         local order = (COL_ORDER and #COL_ORDER > 0) and COL_ORDER or {
           1, 2, 3, 12, 13, 4, 5, 6, 7, 8, 9, 10, 11,
           14, 15, 16, 17, 18, 19, 20, 21,
-          22, 23, 24, 25, 26, 27, 28
+          22, 23, 24, 25, 26, 27, 28,
+          29, 30
         }
 
         for i, col_id in ipairs(order) do
