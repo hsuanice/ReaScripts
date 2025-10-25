@@ -1,6 +1,6 @@
 --[[
 @description Item List Editor
-@version 251025_2313
+@version 251026_0037
 @author hsuanice
 @about
   Shows a live, spreadsheet-style table of the currently selected items and all
@@ -41,6 +41,12 @@
 
 
 @changelog
+  v251026_0037
+  - Fix: Column presets now preserve both column order and visibility state
+    • ExtState payload now uses `ord=...;vis=...`, writing the visible-order list alongside flags
+    • Loading restores COL_ORDER and COL_VISIBILITY in saved sequence so drag or editor changes persist
+    • Legacy payloads remain readable; when no order is present, the previous fallback order is used
+
   v251025_2313
   - Fix: Display issue with multiline item notes
     • Problem: Item Note column showed only first line with "..." suffix
@@ -1526,30 +1532,105 @@ local PRESET_NAME_BUF = ""             -- popup input buffer
 local PRESET_EDITOR_STATE = nil        -- preset editor state {columns, dirty}
 local PENDING_VISIBILITY_MAP = nil     -- temp storage for visibility when saving from editor
 
--- New format: "1:1,2:1,3:1,4:0,5:1,..." where format is columnID:visibleFlag
--- visibleFlag: 1=visible, 0=hidden
+-- New format:
+--   ord=[display-order joined by "|"];vis=col_id:visible_flag,...
+--   Example: ord=5|2|1;vis=1:1,2:1,3:0,...
+--   Backward compatible with earlier "id:flag" or legacy "1,2,3" payloads.
 local function _csv_from_order_and_visibility(order, visibility_map)
-  local t = {}
-  -- Create a set of visible column IDs
-  local visible_set = {}
-  for _, col_id in ipairs(order or {}) do
-    visible_set[col_id] = true
+  order = order or {}
+
+  -- Build a normalized visibility table (even when caller沒有提供 visibility_map)
+  local vis_map = {}
+  if visibility_map then
+    for col_id = 1, 30 do
+      local flag = visibility_map[col_id]
+      if flag == nil then
+        vis_map[col_id] = false
+      else
+        vis_map[col_id] = not not flag
+      end
+    end
+  else
+    local visible_set = {}
+    for _, col_id in ipairs(order) do
+      visible_set[col_id] = true
+    end
+    for col_id = 1, 30 do
+      vis_map[col_id] = visible_set[col_id] or false
+    end
   end
 
-  -- Store all 30 columns with their visibility flags
+  -- Serialize顯示順序（只記錄目前顯示的欄位）
+  local ord_parts, seen = {}, {}
+  for _, col_id in ipairs(order) do
+    if not seen[col_id] and vis_map[col_id] then
+      ord_parts[#ord_parts+1] = tostring(col_id)
+      seen[col_id] = true
+    end
+  end
+
+  -- 假如 order 為空，但 visibility_map 有顯示欄位，補上一份順序（以欄位 ID 排序）
+  if #ord_parts == 0 then
+    for col_id = 1, 30 do
+      if vis_map[col_id] then
+        ord_parts[#ord_parts+1] = tostring(col_id)
+      end
+    end
+  end
+
+  -- Serialize 全欄位 visibility
+  local vis_parts = {}
   for col_id = 1, 30 do
-    local visible_flag = visible_set[col_id] and "1" or "0"
-    t[#t+1] = tostring(col_id) .. ":" .. visible_flag
+    local flag = vis_map[col_id] and "1" or "0"
+    vis_parts[#vis_parts+1] = string.format("%d:%s", col_id, flag)
   end
 
-  return table.concat(t, ",")
+  return string.format("ord=%s;vis=%s", table.concat(ord_parts, "|"), table.concat(vis_parts, ","))
 end
 
 -- Parse format: "1:1,2:1,3:1,4:0,..." returns order (visible columns) and visibility map
 local function _order_and_visibility_from_csv(s)
   s = tostring(s or "")
 
-  -- Check if this is the new format (contains colons)
+  -- 首先嘗試新格式 ord=...;vis=...
+  local ord_section, vis_section = s:match("^ord=([^;]*);vis=(.+)$")
+  if ord_section then
+    local order = {}
+    for token in ord_section:gmatch("([^|]+)") do
+      local col_id = tonumber(token)
+      if col_id then order[#order+1] = col_id end
+    end
+
+    local visibility_map = {}
+    if vis_section and vis_section ~= "" then
+      for pair in vis_section:gmatch("([^,]+)") do
+        local col_id, visible_flag = pair:match("(%d+):(%d+)")
+        if col_id and visible_flag then
+          col_id = tonumber(col_id)
+          visibility_map[col_id] = (tonumber(visible_flag) == 1)
+        end
+      end
+    end
+
+    for col_id = 1, 30 do
+      if visibility_map[col_id] == nil then visibility_map[col_id] = false end
+    end
+
+    -- 有些舊資料可能 visibility_map 裡有 true 但 ord_section 沒列到，補進順序。
+    if visibility_map then
+      local seen = {}
+      for _, col_id in ipairs(order) do seen[col_id] = true end
+      for col_id = 1, 30 do
+        if visibility_map[col_id] and not seen[col_id] then
+          order[#order+1] = col_id
+        end
+      end
+    end
+
+    return (#order > 0) and order or nil, visibility_map
+  end
+
+  -- 其次處理舊版「id:flag」格式
   if s:find(":") then
     -- New format: "1:1,2:1,3:1,4:0,..."
     local order = {}
