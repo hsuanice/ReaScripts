@@ -1,6 +1,6 @@
 --[[
 @description Item List Editor
-@version 251025_1640
+@version 251025_2147
 @author hsuanice
 @about
   Shows a live, spreadsheet-style table of the currently selected items and all
@@ -41,6 +41,26 @@
 
 
 @changelog
+  v251025_2147
+  - Fix: Critical cache serialization bug - multiline Description fields corrupting cache
+    • Problem: Description field (BWF metadata) contains newlines, breaking cache file format
+    • Root cause: Cache serialization didn't escape newlines/tabs in metadata fields
+    • Impact: Cache file became corrupt after first save, metadata lost on reload
+    • Fix: Added proper escaping for all special characters in cache serialize/deserialize
+      - Newlines (\n, \r\n, \r) → literal "\n"
+      - Tabs (\t) → literal "\t"
+      - Pipes (|) → literal "\|"
+      - Backslashes (\) → literal "\\"
+    • Deserializer now correctly handles escaped pipes and restores special characters
+    • IMPORTANT: Delete old cache files and rescan to rebuild with correct format
+
+  - Enhancement: TSV export now preserves multiline content (requires List Table v0.2.7)
+    • TSV fields containing newlines/tabs are now quoted (RFC 4180 style)
+    • Description field exports with actual newlines preserved (not escaped to \n)
+    • Compatible with Excel, Google Sheets, and standard TSV parsers
+    • Backwards compatible - simple fields remain unquoted
+    • CSV export behavior unchanged (already used quotes)
+
   v251025_1640
   - Feature: Cache diagnostic testing tool
     • New "Cache Test" button generates comprehensive diagnostic report
@@ -946,9 +966,14 @@ local function serialize_cache(cache_data)
       meta.framerate or "",
       meta.speed or ""
     }
-    -- Escape pipes in data (skip GUID and mod_time)
+    -- Escape special characters in data (skip GUID and mod_time)
     for i = 3, #parts do
-      parts[i] = parts[i]:gsub("|", "\\|")
+      parts[i] = parts[i]:gsub("\\", "\\\\")  -- Escape backslashes first
+      parts[i] = parts[i]:gsub("|", "\\|")    -- Escape pipes
+      parts[i] = parts[i]:gsub("\r\n", "\\n") -- Windows line endings
+      parts[i] = parts[i]:gsub("\n", "\\n")   -- Unix line endings
+      parts[i] = parts[i]:gsub("\r", "\\n")   -- Old Mac line endings
+      parts[i] = parts[i]:gsub("\t", "\\t")   -- Tab characters
     end
     lines[#lines + 1] = table.concat(parts, "|")
   end
@@ -980,8 +1005,43 @@ local function deserialize_cache(content)
     else
       -- Parse data line: GUID|mod_time|file_name|interleave|meta_trk_name|channel_num|umid|umid_pt|origination_date|origination_time|originator|originator_ref|time_reference|description|project|scene|take_meta|tape|ubits|framerate|speed
       local parts = {}
-      for part in line:gmatch("([^|]+)") do
-        parts[#parts + 1] = part:gsub("\\|", "|")  -- Unescape pipes
+      -- Split by unescaped pipes (not preceded by backslash)
+      local pos = 1
+      while pos <= #line do
+        local pipe_pos = line:find("|", pos, true)
+        if not pipe_pos then
+          -- Last field
+          local field = line:sub(pos)
+          parts[#parts + 1] = field
+          break
+        end
+
+        -- Check if pipe is escaped
+        local before_pipe = pipe_pos - 1
+        local num_backslashes = 0
+        while before_pipe > 0 and line:sub(before_pipe, before_pipe) == "\\" do
+          num_backslashes = num_backslashes + 1
+          before_pipe = before_pipe - 1
+        end
+
+        -- If odd number of backslashes, the pipe is escaped
+        if num_backslashes % 2 == 1 then
+          -- Skip this pipe, continue searching
+          pos = pipe_pos + 1
+        else
+          -- Unescaped pipe - this is a field separator
+          local field = line:sub(pos, pipe_pos - 1)
+          parts[#parts + 1] = field
+          pos = pipe_pos + 1
+        end
+      end
+
+      -- Unescape all special characters in fields
+      for i = 1, #parts do
+        parts[i] = parts[i]:gsub("\\t", "\t")    -- Unescape tabs
+        parts[i] = parts[i]:gsub("\\n", "\n")    -- Unescape newlines
+        parts[i] = parts[i]:gsub("\\|", "|")     -- Unescape pipes
+        parts[i] = parts[i]:gsub("\\\\", "\\")   -- Unescape backslashes (must be last)
       end
 
       if #parts >= 6 then
@@ -2573,42 +2633,61 @@ local function sel_rect_apply(rows, row_index_map, cur_guid, cur_col)
   end
 end  -- ★★★ 補這個 end，結束 sel_rect_apply() 函式
 
+-- Helper function to escape special characters for TSV format
+-- Note: TSV fields with newlines/tabs will be quoted by build_table_text()
+-- We don't need to escape newlines - they'll be preserved in quoted fields
+local function escape_for_tsv(text)
+  if not text or text == "" then return "" end
+  text = tostring(text)
+  -- No escaping needed - build_table_text() will quote fields with special chars
+  -- Just return the original text (newlines, tabs preserved)
+  return text
+end
+
 -- 取得某格「顯示用文字」（複製用；與 UI 呈現一致）
 local function get_cell_text(i, r, col, fmt)
-  if     col == 1  then return tostring(i)
-  elseif col == 2  then return tostring(r.track_idx or "")
-  elseif col == 3  then return tostring(r.track_name or "")
-  elseif col == 4  then return tostring(r.take_name or "")
-  elseif col == 5  then return tostring(r.item_note or "")
-  elseif col == 6  then return tostring(r.file_name or "")
-  elseif col == 7  then return tostring(r.meta_trk_name or "")
-  elseif col == 8  then return tostring(r.channel_num or "")
-  elseif col == 9  then return tostring(r.interleave or "")
-  elseif col == 10 then return r.muted and "M" or ""
-  elseif col == 11 then return tostring(r.color_hex or "")
-  elseif col == 12 then return FORMAT(r.start_time)
-  elseif col == 13 then return FORMAT(r.end_time)
+  local text = ""
+
+  if     col == 1  then text = tostring(i)
+  elseif col == 2  then text = tostring(r.track_idx or "")
+  elseif col == 3  then text = tostring(r.track_name or "")
+  elseif col == 4  then text = tostring(r.take_name or "")
+  elseif col == 5  then text = tostring(r.item_note or "")
+  elseif col == 6  then text = tostring(r.file_name or "")
+  elseif col == 7  then text = tostring(r.meta_trk_name or "")
+  elseif col == 8  then text = tostring(r.channel_num or "")
+  elseif col == 9  then text = tostring(r.interleave or "")
+  elseif col == 10 then text = r.muted and "M" or ""
+  elseif col == 11 then text = tostring(r.color_hex or "")
+  elseif col == 12 then text = FORMAT(r.start_time)
+  elseif col == 13 then text = FORMAT(r.end_time)
   -- New metadata columns
-  elseif col == 14 then return tostring(r.umid or "")
-  elseif col == 15 then return tostring(r.umid_pt or "")
-  elseif col == 16 then return tostring(r.origination_date or "")
-  elseif col == 17 then return tostring(r.origination_time or "")
-  elseif col == 18 then return tostring(r.originator or "")
-  elseif col == 19 then return tostring(r.originator_ref or "")
-  elseif col == 20 then return tostring(r.time_reference or "")
-  elseif col == 21 then return tostring(r.description or "")
-  elseif col == 22 then return tostring(r.project or "")
-  elseif col == 23 then return tostring(r.scene or "")
-  elseif col == 24 then return tostring(r.take_meta or "")
-  elseif col == 25 then return tostring(r.tape or "")
-  elseif col == 26 then return tostring(r.ubits or "")
-  elseif col == 27 then return tostring(r.framerate or "")
-  elseif col == 28 then return tostring(r.speed or "")
+  elseif col == 14 then text = tostring(r.umid or "")
+  elseif col == 15 then text = tostring(r.umid_pt or "")
+  elseif col == 16 then text = tostring(r.origination_date or "")
+  elseif col == 17 then text = tostring(r.origination_time or "")
+  elseif col == 18 then text = tostring(r.originator or "")
+  elseif col == 19 then text = tostring(r.originator_ref or "")
+  elseif col == 20 then text = tostring(r.time_reference or "")
+  elseif col == 21 then text = tostring(r.description or "")
+  elseif col == 22 then text = tostring(r.project or "")
+  elseif col == 23 then text = tostring(r.scene or "")
+  elseif col == 24 then text = tostring(r.take_meta or "")
+  elseif col == 25 then text = tostring(r.tape or "")
+  elseif col == 26 then text = tostring(r.ubits or "")
+  elseif col == 27 then text = tostring(r.framerate or "")
+  elseif col == 28 then text = tostring(r.speed or "")
   -- Source position columns (from TimeReference)
-  elseif col == 29 then return tostring(r.source_start or "")
-  elseif col == 30 then return tostring(r.source_end or "")
+  elseif col == 29 then text = tostring(r.source_start or "")
+  elseif col == 30 then text = tostring(r.source_end or "")
   end
-  return ""
+
+  -- For TSV format, escape special characters to prevent format corruption
+  if fmt == "tsv" then
+    return escape_for_tsv(text)
+  end
+
+  return text
 end
 
 
