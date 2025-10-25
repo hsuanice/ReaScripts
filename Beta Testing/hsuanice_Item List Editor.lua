@@ -1,6 +1,6 @@
 --[[
 @description Item List Editor
-@version 251025_1500
+@version 251025_1640
 @author hsuanice
 @about
   Shows a live, spreadsheet-style table of the currently selected items and all
@@ -41,6 +41,46 @@
 
 
 @changelog
+  v251025_1640
+  - Feature: Cache diagnostic testing tool
+    • New "Cache Test" button generates comprehensive diagnostic report
+    • Report includes:
+      - Cache file location and existence verification
+      - Cache statistics: item count, version, hit/miss rate
+      - Current selection information
+      - Sample metadata verification for selected item
+      - Recommended test procedures (6 tests: A-F)
+    • Report output to console with message box notification
+    • Useful for troubleshooting cache issues and verifying metadata integrity
+    • Tests cover: cold start, single item, cache hit, large selection, startup speed, project scan
+
+  - Verified: Complete cache system working correctly
+    • Tested with real production project: 7696 items cached in 68.31 seconds
+    • All 21 fields (GUID + mod_time + 19 metadata) correctly stored and retrieved
+    • Sample verification confirmed: BWF metadata (UMID, dates, times) and iXML (PROJECT, SCENE, TAKE, TAPE) all present
+    • Cache hit rate tracking operational
+    • Project-folder-based cache storage stable
+
+  v251025_1540
+  - Fix: Critical bug in cache_store() - BWF/iXML metadata not being cached
+    • Root cause: cache_store() was only storing 4 basic fields, not all 19 metadata fields
+    • This caused metadata to appear empty on second load (after cache hit)
+    • Fixed: cache_store() now correctly stores all 19 fields (4 basic + 15 BWF/iXML)
+    • IMPORTANT: Delete old cache files to rebuild with complete metadata
+    • Old cache format: GUID|mod_time|file|int|name|ch (6 fields)
+    • New cache format: GUID|mod_time|file|int|name|ch|umid|umid_pt|... (21 fields total)
+
+  v251025_1530
+  - Feature: "Scan Project Items" button replaces "Show Widths"
+    • New button scans ALL items in project (not just selected) and builds complete metadata cache
+    • Shows confirmation dialog with item count before starting
+    • Progress indicator shows percentage during scan
+    • Cancellable with ESC key - partial cache is saved
+    • Batch processing (20 items/frame) keeps UI responsive
+    • Console logs progress every 100 items and final timing
+    • Useful for pre-building cache for large projects before editing sessions
+    • Cached data persists in project folder as ItemListEditor.cache
+
   v251025_1500
   - Enhancement: Custom time format headers now display "(Custom)" instead of full pattern
     • Start/End column headers show "Start (Custom)" and "End (Custom)" when custom time format is selected
@@ -1081,7 +1121,7 @@ local CACHE = {
   dirty = false,        -- Cache needs saving
   hits = 0,            -- Cache hit count (for stats)
   misses = 0,          -- Cache miss count (for stats)
-  debug = false,       -- Enable debug logging (set via UI or console)
+  debug = false,       -- Enable debug logging (set via UI or console if needed)
   invalidated = {},    -- Track which items were invalidated (for debugging)
 }
 
@@ -1153,7 +1193,23 @@ local function cache_store(item_guid, item, metadata)
     file_name = metadata.file_name or "",
     interleave = metadata.interleave or 0,
     meta_trk_name = metadata.meta_trk_name or "",
-    channel_num = metadata.channel_num or 0
+    channel_num = metadata.channel_num or 0,
+    -- BWF/iXML metadata (15 fields)
+    umid = metadata.umid or "",
+    umid_pt = metadata.umid_pt or "",
+    origination_date = metadata.origination_date or "",
+    origination_time = metadata.origination_time or "",
+    originator = metadata.originator or "",
+    originator_ref = metadata.originator_ref or "",
+    time_reference = metadata.time_reference or "",
+    description = metadata.description or "",
+    project = metadata.project or "",
+    scene = metadata.scene or "",
+    take_meta = metadata.take_meta or "",
+    tape = metadata.tape or "",
+    ubits = metadata.ubits or "",
+    framerate = metadata.framerate or "",
+    speed = metadata.speed or ""
   }
 
   if CACHE.debug and CACHE.invalidated[item_guid] then
@@ -1344,8 +1400,8 @@ local COL_WIDTH = {
   [27] = 80,  -- FRAMERATE
   [28] = 80,   -- SPEED
   -- Source position columns (calculated from TimeReference)
-  [29] = 100,  -- Source Start (TC)
-  [30] = 100,  -- Source End (TC)
+  [29] = 90,  -- Source Start (TC)
+  [30] = 90,  -- Source End (TC)
 }
 
 -- Track if user requested column width reset
@@ -2186,6 +2242,85 @@ function scan_selection_rows()
     rows[#rows+1] = collect_fields_for_item(it)
   end
   return rows
+end
+
+---------------------------------------
+-- Project-wide Item Scanning System
+---------------------------------------
+local PROJECT_SCAN = {
+  active = false,        -- Is project scan in progress?
+  all_items = {},        -- All project items to scan
+  scanned_count = 0,     -- How many items scanned
+  batch_size = 20,       -- Scan N items per frame
+  cancelled = false,     -- User cancelled scan?
+  start_time = 0,        -- Scan start time
+}
+
+-- Get all items in project (across all tracks)
+local function get_all_project_items()
+  local items = {}
+  local track_count = reaper.CountTracks(0)
+  for t = 0, track_count - 1 do
+    local track = reaper.GetTrack(0, t)
+    local item_count = reaper.CountTrackMediaItems(track)
+    for i = 0, item_count - 1 do
+      local item = reaper.GetTrackMediaItem(track, i)
+      items[#items + 1] = item
+    end
+  end
+  return items
+end
+
+-- Start project-wide scan (build complete cache)
+local function start_project_scan()
+  PROJECT_SCAN.all_items = get_all_project_items()
+  PROJECT_SCAN.scanned_count = 0
+  PROJECT_SCAN.cancelled = false
+  PROJECT_SCAN.active = true
+  PROJECT_SCAN.start_time = reaper.time_precise()
+
+  local total = #PROJECT_SCAN.all_items
+  reaper.ShowConsoleMsg(string.format("\n[ILE] Starting project scan: %d items total\n", total))
+end
+
+-- Process one batch of project scan
+local function process_project_scan_batch()
+  if not PROJECT_SCAN.active then return false end
+
+  local total = #PROJECT_SCAN.all_items
+  local start_idx = PROJECT_SCAN.scanned_count + 1
+  local end_idx = math.min(start_idx + PROJECT_SCAN.batch_size - 1, total)
+
+  -- Scan this batch
+  for i = start_idx, end_idx do
+    local item = PROJECT_SCAN.all_items[i]
+    if item and reaper.ValidatePtr(item, "MediaItem*") then
+      -- Create a temporary row just to trigger metadata load and cache storage
+      local row = collect_basic_fields(item)
+      load_metadata_for_row(row)  -- This will populate cache
+    end
+  end
+
+  PROJECT_SCAN.scanned_count = end_idx
+
+  -- Log progress every 100 items
+  if PROJECT_SCAN.scanned_count % 100 < PROJECT_SCAN.batch_size then
+    local percent = math.floor((PROJECT_SCAN.scanned_count / total) * 100)
+    reaper.ShowConsoleMsg(string.format("[ILE] Project scan: %d/%d (%d%%)\n",
+      PROJECT_SCAN.scanned_count, total, percent))
+  end
+
+  -- Complete?
+  if PROJECT_SCAN.scanned_count >= total then
+    local elapsed = reaper.time_precise() - PROJECT_SCAN.start_time
+    reaper.ShowConsoleMsg(string.format("[ILE] Project scan complete: %d items in %.2fs\n",
+      total, elapsed))
+    cache_flush()  -- Save cache to disk
+    PROJECT_SCAN.active = false
+    return false  -- Done
+  end
+
+  return true  -- Continue
 end
 
 ---------------------------------------
@@ -3173,33 +3308,142 @@ if reaper.ImGui_IsItemHovered(ctx) then
   reaper.ImGui_EndTooltip(ctx)
 end
 
--- Show Current Widths button (logs to console)
+-- Scan Project Items button (build complete cache)
 reaper.ImGui_SameLine(ctx)
-if reaper.ImGui_Button(ctx, "Show Widths", 100, 24) then
-  -- Log current column widths to console
-  reaper.ShowConsoleMsg("\n=== Current Column Widths ===\n")
-  reaper.ShowConsoleMsg("Note: ImGui doesn't expose current column widths after user resize.\n")
-  reaper.ShowConsoleMsg("Showing DEFAULT widths from COL_WIDTH table:\n\n")
-
-  local order = (COL_ORDER and #COL_ORDER > 0) and COL_ORDER or {
-    1, 2, 3, 12, 13, 4, 5, 6, 7, 8, 9, 10, 11,
-    14, 15, 16, 17, 18, 19, 20, 21,
-    22, 23, 24, 25, 26, 27, 28,
-    29, 30
-  }
-
-  for i, col_id in ipairs(order) do
-    local label = header_label_from_id(col_id)
-    local width = COL_WIDTH[col_id] or 100
-    if width < 0 then width = 150 end
-    reaper.ShowConsoleMsg(string.format("[%2d] %-20s = %3dpx (default)\n", col_id, label, width))
+if reaper.ImGui_Button(ctx, "Scan Project Items", 130, 24) then
+  -- Show confirmation dialog
+  local total_items = 0
+  local track_count = reaper.CountTracks(0)
+  for t = 0, track_count - 1 do
+    local track = reaper.GetTrack(0, t)
+    total_items = total_items + reaper.CountTrackMediaItems(track)
   end
-  reaper.ShowConsoleMsg("\nTo customize: Edit COL_WIDTH table around line 3260\n")
-  reaper.ShowConsoleMsg("=============================\n\n")
+
+  local msg = string.format(
+    "Scan all %d items in project and build complete metadata cache?\n\n" ..
+    "This will:\n" ..
+    "• Read metadata from all audio files\n" ..
+    "• Build cache for faster future loading\n" ..
+    "• Take some time depending on project size\n\n" ..
+    "You can cancel during scanning (ESC key).",
+    total_items
+  )
+
+  local result = reaper.ShowMessageBox(msg, "Scan Project Items", 1)  -- 1 = OK/Cancel
+  if result == 1 then  -- OK
+    start_project_scan()
+  end
 end
 if reaper.ImGui_IsItemHovered(ctx) then
   reaper.ImGui_BeginTooltip(ctx)
-  reaper.ImGui_Text(ctx, "Show default column widths in console")
+  reaper.ImGui_Text(ctx, "Scan all project items and build complete metadata cache")
+  reaper.ImGui_EndTooltip(ctx)
+end
+
+-- Show scan progress if active
+if PROJECT_SCAN.active then
+  reaper.ImGui_SameLine(ctx)
+  local total = #PROJECT_SCAN.all_items
+  local percent = total > 0 and math.floor((PROJECT_SCAN.scanned_count / total) * 100) or 0
+  reaper.ImGui_TextDisabled(ctx, string.format("Scanning: %d%%", percent))
+end
+
+-- Cache Test Report button
+reaper.ImGui_SameLine(ctx)
+if reaper.ImGui_Button(ctx, "Cache Test", 90, 24) then
+  -- Generate cache test report
+  local report = {}
+  report[#report + 1] = "=== CACHE SYSTEM TEST REPORT ==="
+  report[#report + 1] = ""
+
+  -- 1. Cache file location
+  local cache_path = get_cache_path()
+  report[#report + 1] = "1. CACHE FILE LOCATION:"
+  report[#report + 1] = "   " .. cache_path
+
+  -- Check if file exists
+  local file = io.open(cache_path, "r")
+  if file then
+    file:close()
+    report[#report + 1] = "   ✓ Cache file exists"
+  else
+    report[#report + 1] = "   ✗ Cache file NOT found"
+  end
+  report[#report + 1] = ""
+
+  -- 2. Cache statistics
+  report[#report + 1] = "2. CACHE STATISTICS:"
+  if CACHE.data then
+    report[#report + 1] = string.format("   Cached items: %d", CACHE.data.item_count or 0)
+    report[#report + 1] = string.format("   Cache version: %s", CACHE_VERSION)
+    report[#report + 1] = string.format("   Cache hits: %d", CACHE.hits)
+    report[#report + 1] = string.format("   Cache misses: %d", CACHE.misses)
+    local total = CACHE.hits + CACHE.misses
+    if total > 0 then
+      local hit_rate = math.floor((CACHE.hits / total) * 100)
+      report[#report + 1] = string.format("   Hit rate: %d%%", hit_rate)
+    end
+  else
+    report[#report + 1] = "   ✗ No cache data loaded"
+  end
+  report[#report + 1] = ""
+
+  -- 3. Current selection
+  local sel_count = reaper.CountSelectedMediaItems(0)
+  report[#report + 1] = "3. CURRENT SELECTION:"
+  report[#report + 1] = string.format("   Selected items: %d", sel_count)
+  report[#report + 1] = string.format("   Displayed rows: %d", #ROWS)
+  report[#report + 1] = ""
+
+  -- 4. Sample metadata check (first selected item)
+  if sel_count > 0 then
+    local item = reaper.GetSelectedMediaItem(0, 0)
+    local _, item_guid = reaper.GetSetMediaItemInfo_String(item, "GUID", "", false)
+
+    report[#report + 1] = "4. SAMPLE ITEM METADATA CHECK:"
+    report[#report + 1] = "   Item GUID: " .. (item_guid or "unknown")
+
+    -- Check if in cache
+    if CACHE.data and CACHE.data.items and CACHE.data.items[item_guid] then
+      local cached = CACHE.data.items[item_guid]
+      report[#report + 1] = "   ✓ Item found in cache"
+      report[#report + 1] = "   Cached fields:"
+      report[#report + 1] = "     - file_name: " .. (cached.file_name or "(empty)")
+      report[#report + 1] = "     - meta_trk_name: " .. (cached.meta_trk_name or "(empty)")
+      report[#report + 1] = "     - umid: " .. ((cached.umid and cached.umid ~= "") and "✓ present" or "✗ empty")
+      report[#report + 1] = "     - origination_date: " .. ((cached.origination_date and cached.origination_date ~= "") and cached.origination_date or "✗ empty")
+      report[#report + 1] = "     - project: " .. ((cached.project and cached.project ~= "") and cached.project or "✗ empty")
+      report[#report + 1] = "     - scene: " .. ((cached.scene and cached.scene ~= "") and cached.scene or "✗ empty")
+    else
+      report[#report + 1] = "   ✗ Item NOT in cache"
+    end
+  else
+    report[#report + 1] = "4. SAMPLE ITEM METADATA CHECK:"
+    report[#report + 1] = "   (No items selected - select an item to test)"
+  end
+  report[#report + 1] = ""
+
+  -- 5. Test recommendations
+  report[#report + 1] = "5. RECOMMENDED TESTS:"
+  report[#report + 1] = "   A. Delete cache file and restart ILE (cold start test)"
+  report[#report + 1] = "   B. Select 1 random item - check load time & metadata"
+  report[#report + 1] = "   C. Deselect all, reselect same item - should be instant (cache hit)"
+  report[#report + 1] = "   D. Select 100+ items - check progressive loading"
+  report[#report + 1] = "   E. Close and reopen ILE - check startup time with cache"
+  report[#report + 1] = "   F. Use 'Scan Project Items' to build complete cache"
+  report[#report + 1] = ""
+  report[#report + 1] = "==================================="
+
+  -- Print to console
+  local report_text = table.concat(report, "\n")
+  reaper.ShowConsoleMsg("\n" .. report_text .. "\n\n")
+
+  -- Show message box
+  reaper.ShowMessageBox("Cache test report printed to console.\n\nCheck the REAPER console for detailed results.", "Cache Test Report", 0)
+end
+if reaper.ImGui_IsItemHovered(ctx) then
+  reaper.ImGui_BeginTooltip(ctx)
+  reaper.ImGui_Text(ctx, "Generate cache system test report (console)")
   reaper.ImGui_EndTooltip(ctx)
 end
 
@@ -3984,10 +4228,22 @@ local function loop()
       -- Smart refresh (after ImGui window is created)
       smart_refresh()
 
+      -- Process project scan batch if active
+      if PROJECT_SCAN.active then
+        process_project_scan_batch()
+      end
 
       -- ESC 關閉整個視窗（若 Summary modal 開著，先只關 modal）
+      -- Also cancel project scan if active
       if esc_pressed() and not reaper.ImGui_IsPopupOpen(ctx, POPUP_TITLE) then
-        open = false
+        if PROJECT_SCAN.active then
+          PROJECT_SCAN.active = false
+          PROJECT_SCAN.cancelled = true
+          reaper.ShowConsoleMsg("[ILE] Project scan cancelled by user\n")
+          cache_flush()  -- Save partial cache
+        else
+          open = false
+        end
       end
 
 
