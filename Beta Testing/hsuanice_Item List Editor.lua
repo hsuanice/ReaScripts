@@ -1,6 +1,6 @@
 --[[
 @description Item List Editor
-@version 251025_1320
+@version 251025_1400
 @author hsuanice
 @about
   Shows a live, spreadsheet-style table of the currently selected items and all
@@ -41,17 +41,36 @@
 
 
 @changelog
-  v251025_1320
+  v251025_1400
   - Enhancement: Improved column width management with user customization
     • Changed to SizingFixedFit mode - all columns manually resizable by dragging dividers
     • Resizing columns now extends table width (columns don't shrink behind)
-    • New "Reset Widths" button restores all columns to default sizes defined in COL_WIDTH
+    • Added TableSetupScrollFreeze(0, 1) - header row now properly frozen during vertical scrolling
+    • Added ScrollY flag with proper outer_size for vertical scrolling support
+    • New "Reset Widths" button restores all columns to default sizes
+    • New "Show Widths" button displays default column widths in console
     • Right-click context menu on table area provides quick access to:
       - Reset Column Widths
+      - Show Column Widths (Console)
       - Edit Columns (opens Preset Editor)
       - Toggle Show/Hide Muted Items
-    • COL_WIDTH table controls default width for each column (editable in script)
-    • Auto-stretch columns (-1 value) converted to 150px default for consistent behavior
+    • COL_WIDTH table controls default width for each column (editable in script around line 1200)
+    • All default column widths now use explicit pixel values (150-200px for text fields)
+
+  - Fix: Resolved COL_WIDTH nil error
+    • Moved COL_WIDTH and RESET_COLUMN_WIDTHS declarations to global scope (before first use)
+    • Fixed "attempt to index a nil value (global 'COL_WIDTH')" error
+
+  - Fix: Reset Width now works correctly
+    • Added TableFlags_NoSavedSettings to prevent ImGui from persisting column widths
+    • Uses incrementing counter to generate truly unique table IDs on each reset
+    • Column widths now properly reset to COL_WIDTH defaults when button clicked
+
+  - Enhancement: Cache now stored in project folder
+    • Cache file saved as "ItemListEditor.cache" in project directory (same folder as .RPP file)
+    • Multiple project versions in same folder now share the same cache (e.g., YYYY-MM-DD--ProjectName-v1.RPP, YYYY-MM-DD--ProjectName-v2.RPP)
+    • Unsaved projects still use fallback cache in REAPER resource path
+    • Improves workflow for projects with multiple editing versions in same folder
 
   v251025_0015
   - Feature: Added 15 new metadata columns from BWF/iXML (total: 13→28 columns)
@@ -780,9 +799,26 @@ end
 
 -- Get cache file path for current project
 local function get_cache_path()
-  local cache_dir = get_cache_dir()
-  local key = get_project_cache_key()
-  return cache_dir .. "/" .. key .. ".cache"
+  local proj, projfn = reaper.EnumProjects(-1, "")
+
+  if not projfn or projfn == "" then
+    -- Unsaved project: fallback to REAPER resource path
+    local cache_dir = get_cache_dir()
+    local key = get_project_cache_key()
+    return cache_dir .. "/" .. key .. ".cache"
+  end
+
+  -- Get project directory (folder containing the .RPP file)
+  local proj_dir = projfn:match("^(.*[/\\])[^/\\]+$") or ""
+  if proj_dir == "" then
+    -- Fallback if can't extract directory
+    local cache_dir = get_cache_dir()
+    local key = get_project_cache_key()
+    return cache_dir .. "/" .. key .. ".cache"
+  end
+
+  -- Use fixed cache filename in project directory
+  return proj_dir .. "ItemListEditor.cache"
 end
 
 -- Serialize cache data to string
@@ -1190,6 +1226,47 @@ end
 -- Column order mapping (single source of truth)
 local COL_ORDER, COL_POS = {}, {}   -- visual→logical / logical→visual
 local COL_VISIBILITY = {}           -- col_id → true/false (for all 28 columns)
+
+-- Column width configuration (customizable)
+-- Edit these values to change default column widths
+-- Positive number = width in pixels (e.g., 100)
+-- Use "Reset Widths" button to restore these defaults after manual resizing
+local COL_WIDTH = {
+  [1]  = 50,   -- # (item index)
+  [2]  = 60,   -- TrkID (track number)
+  [3]  = 150,  -- Track Name
+  [4]  = 150,  -- Take Name
+  [5]  = 150,  -- Item Note
+  [6]  = 200,  -- Source File (longer paths)
+  [7]  = 150,  -- Meta Trk Name
+  [8]  = 60,   -- Chan# (channel number)
+  [9]  = 80,   -- Interleave (mono-of-N)
+  [10] = 50,   -- Mute (M/-)
+  [11] = 80,   -- Color
+  [12] = 140,  -- Start (fits "hh:mm:ss.SSS")
+  [13] = 140,  -- End (fits "hh:mm:ss.SSS")
+  -- BWF metadata columns
+  [14] = 200,  -- UMID (64 hex chars)
+  [15] = 250,  -- UMID_PT (Pro Tools format)
+  [16] = 100,  -- OriginationDate (YYYY-MM-DD)
+  [17] = 100,  -- OriginationTime (HH:MM:SS)
+  [18] = 150,  -- Originator
+  [19] = 150,  -- OriginatorReference
+  [20] = 120,  -- TimeReference (sample count)
+  [21] = 200,  -- Description (longer text)
+  -- iXML metadata columns
+  [22] = 150,  -- PROJECT
+  [23] = 150,  -- SCENE
+  [24] = 100,  -- TAKE
+  [25] = 100,  -- TAPE
+  [26] = 80,   -- UBITS
+  [27] = 100,  -- FRAMERATE
+  [28] = 80,   -- SPEED
+}
+
+-- Track if user requested column width reset
+local RESET_COLUMN_WIDTHS = false
+local RESET_COUNTER = 0  -- Counter to generate unique table IDs for width reset
 
 
 
@@ -2903,6 +2980,35 @@ if reaper.ImGui_IsItemHovered(ctx) then
   reaper.ImGui_EndTooltip(ctx)
 end
 
+-- Show Current Widths button (logs to console)
+reaper.ImGui_SameLine(ctx)
+if reaper.ImGui_Button(ctx, "Show Widths", 100, 24) then
+  -- Log current column widths to console
+  reaper.ShowConsoleMsg("\n=== Current Column Widths ===\n")
+  reaper.ShowConsoleMsg("Note: ImGui doesn't expose current column widths after user resize.\n")
+  reaper.ShowConsoleMsg("Showing DEFAULT widths from COL_WIDTH table:\n\n")
+
+  local order = (COL_ORDER and #COL_ORDER > 0) and COL_ORDER or {
+    1, 2, 3, 12, 13, 4, 5, 6, 7, 8, 9, 10, 11,
+    14, 15, 16, 17, 18, 19, 20, 21,
+    22, 23, 24, 25, 26, 27, 28
+  }
+
+  for i, col_id in ipairs(order) do
+    local label = header_label_from_id(col_id)
+    local width = COL_WIDTH[col_id] or 100
+    if width < 0 then width = 150 end
+    reaper.ShowConsoleMsg(string.format("[%2d] %-20s = %3dpx (default)\n", col_id, label, width))
+  end
+  reaper.ShowConsoleMsg("\nTo customize: Edit COL_WIDTH table around line 3260\n")
+  reaper.ShowConsoleMsg("=============================\n\n")
+end
+if reaper.ImGui_IsItemHovered(ctx) then
+  reaper.ImGui_BeginTooltip(ctx)
+  reaper.ImGui_Text(ctx, "Show default column widths in console")
+  reaper.ImGui_EndTooltip(ctx)
+end
+
 
 reaper.ImGui_SameLine(ctx)
 if reaper.ImGui_Button(ctx, "Copy (TSV)", 110, 24) then
@@ -3252,66 +3358,31 @@ reaper.ImGui_TextDisabled(ctx, col_preset_status_text())
 
 end
 
--- Column width configuration (customizable)
--- Edit these values to change default column widths
--- Positive number = width in pixels (e.g., 100)
--- -1 = auto-width (converted to 150px default)
--- Use "Reset Widths" button to restore these defaults after manual resizing
-local COL_WIDTH = {
-  [1]  = 50,   -- # (item index)
-  [2]  = 60,   -- TrkID (track number)
-  [3]  = 150,  -- Track Name (was -1, now 150px)
-  [4]  = 150,  -- Take Name (was -1, now 150px)
-  [5]  = 150,  -- Item Note (was -1, now 150px)
-  [6]  = 200,  -- Source File (was -1, now 200px for longer paths)
-  [7]  = 150,  -- Meta Trk Name (was -1, now 150px)
-  [8]  = 60,   -- Chan# (channel number)
-  [9]  = 80,   -- Interleave (mono-of-N)
-  [10] = 50,   -- Mute (M/-)
-  [11] = 80,   -- Color
-  [12] = 140,  -- Start (fits "hh:mm:ss.SSS")
-  [13] = 140,  -- End (fits "hh:mm:ss.SSS")
-  -- BWF metadata columns
-  [14] = 200,  -- UMID (64 hex chars)
-  [15] = 250,  -- UMID_PT (Pro Tools format)
-  [16] = 100,  -- OriginationDate (YYYY-MM-DD)
-  [17] = 100,  -- OriginationTime (HH:MM:SS)
-  [18] = 150,  -- Originator (was -1, now 150px)
-  [19] = 150,  -- OriginatorReference (was -1, now 150px)
-  [20] = 120,  -- TimeReference (sample count)
-  [21] = 200,  -- Description (was -1, now 200px for longer text)
-  -- iXML metadata columns
-  [22] = 150,  -- PROJECT (was -1, now 150px)
-  [23] = 150,  -- SCENE (was -1, now 150px)
-  [24] = 100,  -- TAKE
-  [25] = 100,  -- TAPE
-  [26] = 80,   -- UBITS
-  [27] = 100,  -- FRAMERATE
-  [28] = 80,   -- SPEED
-}
-
--- Track if user requested column width reset
-local RESET_COLUMN_WIDTHS = false
-
 local function draw_table(rows, height)
   -- Use SizingFixedFit so all columns are manually resizable and extending (not shrinking)
   local flags = TF('ImGui_TableFlags_Borders')
             | TF('ImGui_TableFlags_RowBg')
             | TF('ImGui_TableFlags_SizingFixedFit')  -- All columns manually resizable with extension
             | TF('ImGui_TableFlags_ScrollX')
+            | TF('ImGui_TableFlags_ScrollY')         -- Enable vertical scrolling with frozen header
             | TF('ImGui_TableFlags_Resizable')
+            | TF('ImGui_TableFlags_NoSavedSettings') -- Don't persist table settings (prevents width memory)
             -- Removed: TableFlags_Reorderable - column order managed through Preset Editor
 
-  -- Generate unique table ID based on active preset + reset counter
-  -- This forces ImGui to reset column widths when RESET_COLUMN_WIDTHS is true
-  local reset_suffix = RESET_COLUMN_WIDTHS and ("_reset" .. os.time()) or ""
-  local table_id = "items_" .. ((ACTIVE_PRESET and ACTIVE_PRESET ~= "" and ACTIVE_PRESET) or "default") .. reset_suffix
+  -- Generate table ID - use counter to ensure truly unique IDs when resetting
+  local base_id = "items_" .. ((ACTIVE_PRESET and ACTIVE_PRESET ~= "" and ACTIVE_PRESET) or "default")
+  local table_id = base_id .. "_" .. tostring(RESET_COUNTER)
 
   if RESET_COLUMN_WIDTHS then
-    RESET_COLUMN_WIDTHS = false  -- Clear flag after use
+    RESET_COUNTER = RESET_COUNTER + 1
+    table_id = base_id .. "_" .. tostring(RESET_COUNTER)
+    reaper.ShowConsoleMsg("[ILE] Resetting column widths (counter: " .. RESET_COUNTER .. ")\n")
+    RESET_COLUMN_WIDTHS = false  -- Clear immediately before creating table
   end
 
-  if reaper.ImGui_BeginTable(ctx, table_id, 28, flags, -FLT_MIN, height or 360) then
+  -- Use specific height for ScrollY to work properly
+  local outer_height = height or 360
+  if reaper.ImGui_BeginTable(ctx, table_id, 28, flags, 0, outer_height) then
     -- Setup column with default width from COL_WIDTH
     local function _setup_column_by_id(id)
       local label = header_label_from_id(id) or tostring(id)
@@ -3338,6 +3409,8 @@ local function draw_table(rows, height)
       _setup_column_by_id(initial_order[i])
     end
 
+    -- Freeze header row (0 columns, 1 row frozen)
+    reaper.ImGui_TableSetupScrollFreeze(ctx, 0, 1)
 
     -- 表頭
     reaper.ImGui_TableHeadersRow(ctx)
@@ -3635,21 +3708,32 @@ local function draw_table(rows, height)
       if reaper.ImGui_MenuItem(ctx, "Reset Column Widths") then
         RESET_COLUMN_WIDTHS = true
       end
-      if reaper.ImGui_IsItemHovered(ctx) then
-        reaper.ImGui_BeginTooltip(ctx)
-        reaper.ImGui_Text(ctx, "Reset all column widths to default sizes")
-        reaper.ImGui_EndTooltip(ctx)
+
+      if reaper.ImGui_MenuItem(ctx, "Show Column Widths (Console)") then
+        -- Log current column widths to console
+        reaper.ShowConsoleMsg("\n=== Current Column Widths ===\n")
+        reaper.ShowConsoleMsg("Showing DEFAULT widths from COL_WIDTH table:\n\n")
+
+        local order = (COL_ORDER and #COL_ORDER > 0) and COL_ORDER or {
+          1, 2, 3, 12, 13, 4, 5, 6, 7, 8, 9, 10, 11,
+          14, 15, 16, 17, 18, 19, 20, 21,
+          22, 23, 24, 25, 26, 27, 28
+        }
+
+        for i, col_id in ipairs(order) do
+          local label = header_label_from_id(col_id)
+          local width = COL_WIDTH[col_id] or 100
+          if width < 0 then width = 150 end
+          reaper.ShowConsoleMsg(string.format("[%2d] %-20s = %3dpx\n", col_id, label, width))
+        end
+        reaper.ShowConsoleMsg("\nEdit COL_WIDTH table (line ~3260) to customize defaults\n")
+        reaper.ShowConsoleMsg("=============================\n\n")
       end
 
       reaper.ImGui_Separator(ctx)
 
       if reaper.ImGui_MenuItem(ctx, "Edit Columns...") then
         reaper.ImGui_OpenPopup(ctx, "Column Preset Editor")
-      end
-      if reaper.ImGui_IsItemHovered(ctx) then
-        reaper.ImGui_BeginTooltip(ctx)
-        reaper.ImGui_Text(ctx, "Open column preset editor")
-        reaper.ImGui_EndTooltip(ctx)
       end
 
       reaper.ImGui_Separator(ctx)
