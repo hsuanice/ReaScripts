@@ -1,6 +1,6 @@
 --[[
 @description Item List Editor
-@version 251026_0037
+@version 251026_0054
 @author hsuanice
 @about
   Shows a live, spreadsheet-style table of the currently selected items and all
@@ -41,6 +41,16 @@
 
 
 @changelog
+  v251026_0054
+  - Fix: Restored “#” header text in preset editor drag handles
+    • Column labels now render correctly even for symbols when drag-reordering
+    • Drag source preview maintains readable names after the change
+
+  v251026_0040
+  - UX: Column preset editor now supports drag-and-drop reordering
+    • Drag any column label to reposition instantly; drop below the list to append
+    • Up/Down buttons remain for incremental moves when fine tuning
+
   v251026_0037
   - Fix: Column presets now preserve both column order and visibility state
     • ExtState payload now uses `ord=...;vis=...`, writing the visible-order list alongside flags
@@ -3879,8 +3889,10 @@ if reaper.ImGui_BeginPopupModal(ctx, "Column Preset Editor", true, TF('ImGui_Win
     end
   end
 
-  -- Column list with checkboxes and up/down buttons
-  for i, col in ipairs(PRESET_EDITOR_STATE.columns) do
+  -- Column list with checkboxes, drag handles, and move buttons
+  local drag_src_idx, drag_dst_idx = nil, nil
+  for i = 1, #PRESET_EDITOR_STATE.columns do
+    local col = PRESET_EDITOR_STATE.columns[i]
     reaper.ImGui_PushID(ctx, i)
 
     -- Checkbox for visibility
@@ -3890,14 +3902,34 @@ if reaper.ImGui_BeginPopupModal(ctx, "Column Preset Editor", true, TF('ImGui_Win
       PRESET_EDITOR_STATE.dirty = true
     end
 
+    -- Drag handle (Selectable)
     reaper.ImGui_SameLine(ctx)
-    reaper.ImGui_Text(ctx, col.label)
+    local display_label = col.label
+    if not display_label or display_label == "" then
+      display_label = string.format("Column %d", col.id)
+    end
+    reaper.ImGui_Selectable(ctx, display_label, false, 0, 220, 20)
+    if reaper.ImGui_IsItemHovered(ctx) then
+      reaper.ImGui_SetTooltip(ctx, "Drag to reorder")
+    end
+    if reaper.ImGui_BeginDragDropSource(ctx, TF('ImGui_DragDropFlags_SourceNoPreviewTooltip')) then
+      reaper.ImGui_SetDragDropPayload(ctx, "ILE_COL_REORDER", tostring(i))
+      reaper.ImGui_Text(ctx, display_label)
+      reaper.ImGui_EndDragDropSource(ctx)
+    end
+    if reaper.ImGui_BeginDragDropTarget(ctx) then
+      local accepted, payload = reaper.ImGui_AcceptDragDropPayload(ctx, "ILE_COL_REORDER")
+      if accepted then
+        drag_src_idx = tonumber(payload)
+        drag_dst_idx = i
+      end
+      reaper.ImGui_EndDragDropTarget(ctx)
+    end
 
     -- Up button
-    reaper.ImGui_SameLine(ctx, 280)
+    reaper.ImGui_SameLine(ctx, 300)
     if reaper.ImGui_BeginDisabled(ctx, i == 1) then end
     if reaper.ImGui_Button(ctx, "↑", 30, 20) and i > 1 then
-      -- Swap with previous
       PRESET_EDITOR_STATE.columns[i], PRESET_EDITOR_STATE.columns[i-1] =
         PRESET_EDITOR_STATE.columns[i-1], PRESET_EDITOR_STATE.columns[i]
       PRESET_EDITOR_STATE.dirty = true
@@ -3908,7 +3940,6 @@ if reaper.ImGui_BeginPopupModal(ctx, "Column Preset Editor", true, TF('ImGui_Win
     reaper.ImGui_SameLine(ctx)
     if reaper.ImGui_BeginDisabled(ctx, i == #PRESET_EDITOR_STATE.columns) then end
     if reaper.ImGui_Button(ctx, "↓", 30, 20) and i < #PRESET_EDITOR_STATE.columns then
-      -- Swap with next
       PRESET_EDITOR_STATE.columns[i], PRESET_EDITOR_STATE.columns[i+1] =
         PRESET_EDITOR_STATE.columns[i+1], PRESET_EDITOR_STATE.columns[i]
       PRESET_EDITOR_STATE.dirty = true
@@ -3916,6 +3947,33 @@ if reaper.ImGui_BeginPopupModal(ctx, "Column Preset Editor", true, TF('ImGui_Win
     if reaper.ImGui_EndDisabled then reaper.ImGui_EndDisabled(ctx) end
 
     reaper.ImGui_PopID(ctx)
+  end
+
+  -- Drop zone to append to the end of the list
+  reaper.ImGui_Dummy(ctx, 1, 4)
+  if reaper.ImGui_BeginDragDropTarget(ctx) then
+    local accepted, payload = reaper.ImGui_AcceptDragDropPayload(ctx, "ILE_COL_REORDER")
+    if accepted then
+      drag_src_idx = tonumber(payload)
+      drag_dst_idx = (#PRESET_EDITOR_STATE.columns + 1)
+    end
+    reaper.ImGui_EndDragDropTarget(ctx)
+  end
+
+  if drag_src_idx and drag_dst_idx and drag_src_idx ~= drag_dst_idx then
+    local entry = table.remove(PRESET_EDITOR_STATE.columns, drag_src_idx)
+    if entry then
+      if drag_dst_idx > (#PRESET_EDITOR_STATE.columns + 1) then
+        drag_dst_idx = #PRESET_EDITOR_STATE.columns + 1
+      elseif drag_dst_idx < 1 then
+        drag_dst_idx = 1
+      end
+      if drag_src_idx < drag_dst_idx then
+        drag_dst_idx = drag_dst_idx - 1
+      end
+      table.insert(PRESET_EDITOR_STATE.columns, drag_dst_idx, entry)
+      PRESET_EDITOR_STATE.dirty = true
+    end
   end
 
   reaper.ImGui_Separator(ctx)
