@@ -1,6 +1,6 @@
 --[[
 @description Item List Editor
-@version 251026_0054
+@version 251027_2130
 @author hsuanice
 @about
   Shows a live, spreadsheet-style table of the currently selected items and all
@@ -41,6 +41,13 @@
 
 
 @changelog
+  v251027_2130
+  - Feature: Console output can now be toggled from Clear Cache menu (persists via ExtState)
+    • Replaces direct console writes with a guarded wrapper; scanning progress still forces output
+    • Adds preference storage and restore for console state
+  - UX: Scan Project Items tooltip now shows current cached item count (and live scan progress)
+    • Tooltip updates while scanning to display batch progress alongside instructions
+
   v251026_0054
   - Fix: Restored “#” header text in preset editor drag handles
     • Column labels now render correctly even for symbols when drag-reordering
@@ -918,6 +925,33 @@
 -- Cache metadata (file_name, interleave, meta_trk_name, channel_num) per project
 -- to avoid re-scanning unchanged items on subsequent launches
 
+---------------------------------------
+-- Console output control
+---------------------------------------
+local EXT_NS = "hsuanice_ItemListEditor"
+local original_ShowConsoleMsg = reaper.ShowConsoleMsg
+local console_pref = (reaper.GetExtState and reaper.GetExtState(EXT_NS, "console_output")) or ""
+local CONSOLE = { enabled = (console_pref ~= "0") }
+
+local function console_write(text, force)
+  if text and (force or CONSOLE.enabled) then
+    original_ShowConsoleMsg(text)
+  end
+end
+
+local function console_force(text)
+  console_write(text, true)
+end
+
+local function console_forcef(fmt, ...)
+  console_force(string.format(fmt, ...))
+end
+
+reaper.ShowConsoleMsg = function(text)
+  console_write(text, false)
+end
+
+---------------------------------------
 local CACHE_VERSION = "2.0"  -- Bump this to invalidate all caches when metadata logic changes (v2.0: added BWF/iXML fields)
 
 -- Get cache directory path
@@ -1412,7 +1446,6 @@ if not reaper or not reaper.ImGui_CreateContext then
   return
 end
 
----------------------------------------
 -- ImGui setup
 ---------------------------------------
 -- ImGui setup (唯一的一組，請勿重複建立)
@@ -1486,7 +1519,7 @@ local COL_WIDTH = {
   [8]  = 30,   -- Chan# (channel number)
   [9]  = 30,   -- Interleave (mono-of-N)
   [10] = 30,   -- Mute (M/-)
-  [11] = 70,   -- Color
+  [11] = 10,   -- Color
   [12] = 80,  -- Start (fits "hh:mm:ss.SSS")
   [13] = 80,  -- End (fits "hh:mm:ss.SSS")
   -- BWF metadata columns
@@ -1520,12 +1553,11 @@ local RESET_COUNTER = 0  -- Counter to generate unique table IDs for width reset
 
 
 -- === Preferences (persist across runs) ===
-local EXT_NS = "hsuanice_ItemListEditor"
-
 local function save_prefs()
   reaper.SetExtState(EXT_NS, "time_mode", TIME_MODE or "", true)
   reaper.SetExtState(EXT_NS, "custom_pattern", CUSTOM_PATTERN or "", true)
   reaper.SetExtState(EXT_NS, "auto_refresh", AUTO and "1" or "0", true)
+  reaper.SetExtState(EXT_NS, "console_output", CONSOLE.enabled and "1" or "0", true)
 end
 
 -- ===== BEGIN Column Presets (named) =====
@@ -1860,6 +1892,14 @@ local function load_prefs()
   -- restore auto-refresh state
   local a = reaper.GetExtState(EXT_NS, "auto_refresh")
   if a ~= "" then AUTO = (a ~= "0") end
+
+  -- restore console output preference
+  local c = reaper.GetExtState(EXT_NS, "console_output")
+  if c == "0" then
+    CONSOLE.enabled = false
+  elseif c == "1" then
+    CONSOLE.enabled = true
+  end
 
   -- Column presets (named) — initialize index and optionally recall last active
   presets_init()
@@ -2462,7 +2502,7 @@ local function start_project_scan()
   PROJECT_SCAN.start_time = reaper.time_precise()
 
   local total = #PROJECT_SCAN.all_items
-  reaper.ShowConsoleMsg(string.format("\n[ILE] Starting project scan: %d items total\n", total))
+  console_forcef("\n[ILE] Starting project scan: %d items total\n", total)
 end
 
 -- Process one batch of project scan
@@ -2488,15 +2528,15 @@ local function process_project_scan_batch()
   -- Log progress every 100 items
   if PROJECT_SCAN.scanned_count % 100 < PROJECT_SCAN.batch_size then
     local percent = math.floor((PROJECT_SCAN.scanned_count / total) * 100)
-    reaper.ShowConsoleMsg(string.format("[ILE] Project scan: %d/%d (%d%%)\n",
-      PROJECT_SCAN.scanned_count, total, percent))
+    console_forcef("[ILE] Project scan: %d/%d (%d%%)\n",
+      PROJECT_SCAN.scanned_count, total, percent)
   end
 
   -- Complete?
   if PROJECT_SCAN.scanned_count >= total then
     local elapsed = reaper.time_precise() - PROJECT_SCAN.start_time
-    reaper.ShowConsoleMsg(string.format("[ILE] Project scan complete: %d items in %.2fs\n",
-      total, elapsed))
+    console_forcef("[ILE] Project scan complete: %d items in %.2fs\n",
+      total, elapsed)
     cache_flush()  -- Save cache to disk
     PROJECT_SCAN.active = false
     return false  -- Done
@@ -3514,7 +3554,24 @@ if reaper.ImGui_Button(ctx, "Scan Project Items", 130, 24) then
 end
 if reaper.ImGui_IsItemHovered(ctx) then
   reaper.ImGui_BeginTooltip(ctx)
+  local cached_count = 0
+  if CACHE.data then
+    if CACHE.data.item_count and CACHE.data.item_count > 0 then
+      cached_count = CACHE.data.item_count
+    elseif CACHE.data.items then
+      for _ in pairs(CACHE.data.items) do
+        cached_count = cached_count + 1
+      end
+    end
+  end
+
   reaper.ImGui_Text(ctx, "Scan all project items and build complete metadata cache")
+  reaper.ImGui_Separator(ctx)
+  reaper.ImGui_Text(ctx, string.format("Cached items: %d", cached_count))
+  if PROJECT_SCAN.active then
+    local total = #PROJECT_SCAN.all_items
+    reaper.ImGui_Text(ctx, string.format("Scanning progress: %d/%d", PROJECT_SCAN.scanned_count, total))
+  end
   reaper.ImGui_EndTooltip(ctx)
 end
 
@@ -3578,6 +3635,13 @@ if reaper.ImGui_IsItemClicked(ctx, reaper.ImGui_MouseButton_Right()) then
 end
 -- Cache context menu
 if reaper.ImGui_BeginPopup(ctx, "##cache_context_menu") then
+  -- Toggle console output option
+  local console_label = CONSOLE.enabled and "✓ Console Output" or "  Console Output"
+  if reaper.ImGui_Selectable(ctx, console_label) then
+    CONSOLE.enabled = not CONSOLE.enabled
+    save_prefs()
+  end
+
   -- Toggle debug mode option
   local debug_label = CACHE.debug and "✓ Debug Mode" or "  Debug Mode"
   if reaper.ImGui_Selectable(ctx, debug_label) then
@@ -4532,7 +4596,7 @@ local function loop()
         if PROJECT_SCAN.active then
           PROJECT_SCAN.active = false
           PROJECT_SCAN.cancelled = true
-          reaper.ShowConsoleMsg("[ILE] Project scan cancelled by user\n")
+          console_force("[ILE] Project scan cancelled by user\n")
           cache_flush()  -- Save partial cache
         else
           open = false
