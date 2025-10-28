@@ -1,6 +1,6 @@
 --[[
 @description AudioSweet (hsuanice) — Focused Track FX render via RGWH Core, append FX name, rebuild peaks (selected items)
-@version 251028_2011
+@version 251028_2300
 @author Tim Chimes (original), adapted by hsuanice
 @notes
   Reference:
@@ -18,6 +18,36 @@ This version:
   • Track FX only (Take FX not supported)
 
 @changelog
+  251028_2300
+    • Verified: FX name formatting with alias functionality working correctly.
+      - Test results confirm proper ExtState integration:
+        • All options ON: "AU: Pro-Q 4 (FabFilter)" → "AUProQ4FabFilter"
+        • Strip symbol OFF: "AU: Pro-Q 4 (FabFilter)" → "AU: ProQ4"
+        • Console output shows correct formatting in both [AS][STEP] FOCUSED-FX name and [AS][NAME] after
+      - Real-world validation:
+        • First test: name='AUProQ4FabFilter', after='...-AS1-AUProQ4FabFilter' ✓
+        • Second test: name='AU: ProQ4', after='...-AS1-AU: ProQ4' ✓
+      - Confirms that format_fx_label() correctly applies ExtState options even when fx_alias exists.
+    • Status: Ready for production use with AudioSweet GUI v251028_2245.
+
+  251028_2250
+    • Fixed: FX name formatting options now apply even when fx_alias is used.
+      - Previous: If fx_alias.json contained an alias (e.g., "ProQ4" for "Pro-Q 4"),
+        format_fx_label() would return the alias immediately, ignoring ExtState settings
+        for show_type/show_vendor/strip_symbol.
+      - Now: format_fx_label() always respects ExtState formatting options:
+        • FXNAME_SHOW_TYPE=1 → adds plugin type prefix (AU:, CLAP:, VST3:, VST:)
+        • FXNAME_SHOW_VENDOR=1 → adds vendor name in parentheses
+        • FXNAME_STRIP_SYMBOL=1 → removes spaces and symbols
+      - Implementation: Lines 606-635
+        • Gets formatting options first (line 608)
+        • Checks for alias (line 611-612)
+        • Uses alias as base_name if exists, otherwise uses parsed core (line 618)
+        • Applies formatting options to final result (lines 622-633)
+      - Result: With all options enabled, "AU: Pro-Q 4 (FabFilter)" → "AU:ProQ4FabFilter"
+        instead of just "ProQ4"
+    • Integration: Works with AudioSweet GUI → Settings → FX Name Formatting...
+
   251028_2011
     • Changed: Naming debug output now controlled by ExtState instead of hardcoded constant.
       - Removed hardcoded `AS_DEBUG_NAMING = true` (line 354).
@@ -604,21 +634,25 @@ end
 local fx_alias_for_raw_label
 
 local function format_fx_label(raw)
-  -- NEW: check alias first; use it if found
-  local alias = fx_alias_for_raw_label(raw)
-  if type(alias) == "string" and alias ~= "" then
-    return alias
-  end
-
-  -- Fallback to original formatting behavior
+  -- Get formatting options from ExtState
   local opt = fxname_opts()
+
+  -- Check if alias exists
+  local alias = fx_alias_for_raw_label(raw)
+  local use_alias = (type(alias) == "string" and alias ~= "")
+
+  -- Parse the raw FX label to get type and vendor
   local typ, core, vendor = parse_fx_label(raw)
 
+  -- If alias exists, use it as the core name; otherwise use parsed core
+  local base_name = use_alias and alias or core
+
+  -- Apply formatting options (even if using alias)
   local base
   if opt.show_type and typ ~= "" then
-    base = typ .. ": " .. core
+    base = typ .. ": " .. base_name
   else
-    base = core
+    base = base_name
   end
   if opt.show_vendor and vendor ~= "" then
     base = base .. " (" .. vendor .. ")"
