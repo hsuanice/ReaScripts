@@ -1,7 +1,7 @@
 --[[
 @description AudioSweet GUI - ImGui Interface for AudioSweet
 @author hsuanice
-@version 251028_2030
+@version 251028_2045
 @about
   Complete AudioSweet control center with:
   - Focused/Chain modes with FX chain display
@@ -9,11 +9,20 @@
   - Saved Chains (memory-based, no focus required)
   - History tracking (auto-record recent operations)
   - Compact, intuitive UI with radio buttons
+  - Persistent settings (remembers all settings between sessions)
 
 @usage
   Run this script in REAPER to open the AudioSweet GUI window.
 
 @changelog
+  251028_2045
+    - Added: GUI settings persistence - all settings now saved and restored between sessions.
+      - Settings saved: mode, action, copy_scope, copy_pos, apply_method, handle_seconds, debug
+      - Uses ExtState (hsuanice_AS_GUI namespace) for persistent storage
+      - Auto-saves whenever any setting is changed
+      - Auto-loads on startup (line 819)
+      - Functions: save_gui_settings() / load_gui_settings() (lines 99-137)
+
   251028_2030
     - Fixed: Handle seconds setting now works correctly in Focused mode.
       - Root cause: AudioSweet Template v251022_1617 was using hardcoded 5.0s default
@@ -90,6 +99,51 @@ local gui = {
   new_chain_name = "",
   show_save_popup = false,
 }
+
+------------------------------------------------------------
+-- GUI Settings Persistence
+------------------------------------------------------------
+local SETTINGS_NAMESPACE = "hsuanice_AS_GUI"
+
+local function save_gui_settings()
+  r.SetExtState(SETTINGS_NAMESPACE, "mode", tostring(gui.mode), true)
+  r.SetExtState(SETTINGS_NAMESPACE, "action", tostring(gui.action), true)
+  r.SetExtState(SETTINGS_NAMESPACE, "copy_scope", tostring(gui.copy_scope), true)
+  r.SetExtState(SETTINGS_NAMESPACE, "copy_pos", tostring(gui.copy_pos), true)
+  r.SetExtState(SETTINGS_NAMESPACE, "apply_method", tostring(gui.apply_method), true)
+  r.SetExtState(SETTINGS_NAMESPACE, "handle_seconds", tostring(gui.handle_seconds), true)
+  r.SetExtState(SETTINGS_NAMESPACE, "debug", gui.debug and "1" or "0", true)
+  r.SetExtState(SETTINGS_NAMESPACE, "show_summary", gui.show_summary and "1" or "0", true)
+  r.SetExtState(SETTINGS_NAMESPACE, "warn_takefx", gui.warn_takefx and "1" or "0", true)
+end
+
+local function load_gui_settings()
+  local function get_int(key, default)
+    local val = r.GetExtState(SETTINGS_NAMESPACE, key)
+    return (val ~= "") and tonumber(val) or default
+  end
+
+  local function get_bool(key, default)
+    local val = r.GetExtState(SETTINGS_NAMESPACE, key)
+    if val == "" then return default end
+    return val == "1"
+  end
+
+  local function get_float(key, default)
+    local val = r.GetExtState(SETTINGS_NAMESPACE, key)
+    return (val ~= "") and tonumber(val) or default
+  end
+
+  gui.mode = get_int("mode", 0)
+  gui.action = get_int("action", 0)
+  gui.copy_scope = get_int("copy_scope", 0)
+  gui.copy_pos = get_int("copy_pos", 0)
+  gui.apply_method = get_int("apply_method", 0)
+  gui.handle_seconds = get_float("handle_seconds", 5.0)
+  gui.debug = get_bool("debug", false)
+  gui.show_summary = get_bool("show_summary", true)
+  gui.warn_takefx = get_bool("warn_takefx", true)
+end
 
 ------------------------------------------------------------
 -- Track FX Chain Helpers
@@ -551,31 +605,38 @@ local function draw_gui()
     if ImGui.BeginMenu(ctx, 'Presets') then
       if ImGui.MenuItem(ctx, 'Focused Apply (Auto)', nil, false, true) then
         gui.mode = 0; gui.action = 0; gui.apply_method = 0
+        save_gui_settings()
       end
       if ImGui.MenuItem(ctx, 'Focused Copy', nil, false, true) then
         gui.mode = 0; gui.action = 1; gui.copy_scope = 0; gui.copy_pos = 0
+        save_gui_settings()
       end
       ImGui.Separator(ctx)
       if ImGui.MenuItem(ctx, 'Chain Apply (Render)', nil, false, true) then
         gui.mode = 1; gui.action = 0; gui.apply_method = 1
+        save_gui_settings()
       end
       if ImGui.MenuItem(ctx, 'Chain Copy', nil, false, true) then
         gui.mode = 1; gui.action = 1; gui.copy_scope = 0; gui.copy_pos = 0
+        save_gui_settings()
       end
       ImGui.EndMenu(ctx)
     end
 
     if ImGui.BeginMenu(ctx, 'Debug') then
       local rv, new_val = ImGui.MenuItem(ctx, 'Enable Debug Mode', nil, gui.debug, true)
-      if rv then gui.debug = new_val end
+      if rv then
+        gui.debug = new_val
+        save_gui_settings()
+      end
       ImGui.EndMenu(ctx)
     end
 
     if ImGui.BeginMenu(ctx, 'Help') then
       if ImGui.MenuItem(ctx, 'About', nil, false, true) then
-        r.ShowConsoleMsg("[AudioSweet GUI] Version v251028_0003\n" ..
+        r.ShowConsoleMsg("[AudioSweet GUI] Version v251028_2100\n" ..
           "Complete AudioSweet control center\n" ..
-          "Features: Saved Chains, History tracking, Compact UI\n")
+          "Features: Saved Chains, History tracking, Persistent settings, Compact UI\n")
       end
       ImGui.EndMenu(ctx)
     end
@@ -624,40 +685,76 @@ local function draw_gui()
   -- === MODE & ACTION (Radio buttons, horizontal) ===
   ImGui.Text(ctx, "Mode:")
   ImGui.SameLine(ctx)
-  if ImGui.RadioButton(ctx, "Focused", gui.mode == 0) then gui.mode = 0 end
+  if ImGui.RadioButton(ctx, "Focused", gui.mode == 0) then
+    gui.mode = 0
+    save_gui_settings()
+  end
   ImGui.SameLine(ctx)
-  if ImGui.RadioButton(ctx, "Chain", gui.mode == 1) then gui.mode = 1 end
+  if ImGui.RadioButton(ctx, "Chain", gui.mode == 1) then
+    gui.mode = 1
+    save_gui_settings()
+  end
 
   ImGui.SameLine(ctx, 0, 30)
   ImGui.Text(ctx, "Action:")
   ImGui.SameLine(ctx)
-  if ImGui.RadioButton(ctx, "Apply", gui.action == 0) then gui.action = 0 end
+  if ImGui.RadioButton(ctx, "Apply", gui.action == 0) then
+    gui.action = 0
+    save_gui_settings()
+  end
   ImGui.SameLine(ctx)
-  if ImGui.RadioButton(ctx, "Copy", gui.action == 1) then gui.action = 1 end
+  if ImGui.RadioButton(ctx, "Copy", gui.action == 1) then
+    gui.action = 1
+    save_gui_settings()
+  end
 
   -- === COPY/APPLY SETTINGS (Compact horizontal) ===
   if gui.action == 1 then
     ImGui.Text(ctx, "Copy:")
     ImGui.SameLine(ctx)
-    if ImGui.RadioButton(ctx, "Active##scope", gui.copy_scope == 0) then gui.copy_scope = 0 end
+    if ImGui.RadioButton(ctx, "Active##scope", gui.copy_scope == 0) then
+      gui.copy_scope = 0
+      save_gui_settings()
+    end
     ImGui.SameLine(ctx)
-    if ImGui.RadioButton(ctx, "All Takes##scope", gui.copy_scope == 1) then gui.copy_scope = 1 end
+    if ImGui.RadioButton(ctx, "All Takes##scope", gui.copy_scope == 1) then
+      gui.copy_scope = 1
+      save_gui_settings()
+    end
     ImGui.SameLine(ctx, 0, 20)
-    if ImGui.RadioButton(ctx, "Tail##pos", gui.copy_pos == 0) then gui.copy_pos = 0 end
+    if ImGui.RadioButton(ctx, "Tail##pos", gui.copy_pos == 0) then
+      gui.copy_pos = 0
+      save_gui_settings()
+    end
     ImGui.SameLine(ctx)
-    if ImGui.RadioButton(ctx, "Head##pos", gui.copy_pos == 1) then gui.copy_pos = 1 end
+    if ImGui.RadioButton(ctx, "Head##pos", gui.copy_pos == 1) then
+      gui.copy_pos = 1
+      save_gui_settings()
+    end
   else
     ImGui.Text(ctx, "Apply:")
     ImGui.SameLine(ctx)
-    if ImGui.RadioButton(ctx, "Auto##method", gui.apply_method == 0) then gui.apply_method = 0 end
+    if ImGui.RadioButton(ctx, "Auto##method", gui.apply_method == 0) then
+      gui.apply_method = 0
+      save_gui_settings()
+    end
     ImGui.SameLine(ctx)
-    if ImGui.RadioButton(ctx, "Render##method", gui.apply_method == 1) then gui.apply_method = 1 end
+    if ImGui.RadioButton(ctx, "Render##method", gui.apply_method == 1) then
+      gui.apply_method = 1
+      save_gui_settings()
+    end
     ImGui.SameLine(ctx)
-    if ImGui.RadioButton(ctx, "Glue##method", gui.apply_method == 2) then gui.apply_method = 2 end
+    if ImGui.RadioButton(ctx, "Glue##method", gui.apply_method == 2) then
+      gui.apply_method = 2
+      save_gui_settings()
+    end
     ImGui.SameLine(ctx, 0, 20)
     ImGui.SetNextItemWidth(ctx, 80)
     local rv, new_val = ImGui.InputDouble(ctx, "Handle(s)", gui.handle_seconds, 0, 0, "%.1f")
-    if rv then gui.handle_seconds = math.max(0, new_val) end
+    if rv then
+      gui.handle_seconds = math.max(0, new_val)
+      save_gui_settings()
+    end
   end
 
   ImGui.Separator(ctx)
@@ -771,6 +868,7 @@ end
 ------------------------------------------------------------
 -- Entry Point
 ------------------------------------------------------------
+load_gui_settings()  -- Load saved GUI settings first
 load_saved_chains()
 load_history()
 r.defer(loop)
