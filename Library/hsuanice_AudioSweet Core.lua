@@ -1,6 +1,6 @@
 --[[
 @description AudioSweet (hsuanice) — Focused Track FX render via RGWH Core, append FX name, rebuild peaks (selected items)
-@version 251022_1716
+@version 251028_2011
 @author Tim Chimes (original), adapted by hsuanice
 @notes
   Reference:
@@ -18,6 +18,18 @@ This version:
   • Track FX only (Take FX not supported)
 
 @changelog
+  251028_2011
+    • Changed: Naming debug output now controlled by ExtState instead of hardcoded constant.
+      - Removed hardcoded `AS_DEBUG_NAMING = true` (line 354).
+      - `debug_naming_enabled()` now reads from ExtState: `hsuanice_AS/DEBUG`.
+      - When DEBUG="0" or empty: No console output, no window popup.
+      - When DEBUG="1": Shows [AS][NAME] before/after renaming messages.
+    • Integration: Fully compatible with AudioSweet GUI debug toggle.
+    • Impact: Users can now control all console output via single debug switch.
+      - GUI Menu: Debug → Enable Debug Mode
+      - ExtState: `reaper.SetExtState("hsuanice_AS", "DEBUG", "1", false)`
+    • Tech: Lines 352-356 modified for ExtState integration.
+
   251022_1716
     • Changed: All Chinese comments replaced with English for public beta release.
       - Replaced ~70 lines of Chinese inline comments after line 320.
@@ -350,9 +362,10 @@ local SANITIZE_TOKEN_FOR_FILENAME = false
 local TRACKNAME_STRIP_SYMBOLS = true
 
 -- Naming-only debug (console print before/after renaming).
--- Toggle directly in this script (no ExtState).
-local AS_DEBUG_NAMING = true
-local function debug_naming_enabled() return AS_DEBUG_NAMING == true end
+-- Now controlled by ExtState: hsuanice_AS/DEBUG
+local function debug_naming_enabled()
+  return reaper.GetExtState("hsuanice_AS", "DEBUG") == "1"
+end
 
 local function debug_enabled()
   return reaper.GetExtState("hsuanice_AS", "DEBUG") == "1"
