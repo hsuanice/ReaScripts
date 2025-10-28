@@ -1,7 +1,7 @@
 --[[
 @description AudioSweet GUI - ImGui Interface for AudioSweet
 @author hsuanice
-@version 251028_2015
+@version 251028_2030
 @about
   Complete AudioSweet control center with:
   - Focused/Chain modes with FX chain display
@@ -14,6 +14,13 @@
   Run this script in REAPER to open the AudioSweet GUI window.
 
 @changelog
+  251028_2030
+    - Fixed: Handle seconds setting now works correctly in Focused mode.
+      - Root cause: AudioSweet Template v251022_1617 was using hardcoded 5.0s default
+      - Solution: Updated Template to v251028_2050 (reads from ProjExtState first)
+      - GUI already correctly sets ProjExtState before execution (line 302)
+      - Requires: AudioSweet Template v251028_2050 or later
+
   251028_2015
     - Changed: Status display moved to below RUN button (above Saved Chains/History).
       - Previous: Status appeared at bottom of window
