@@ -1,7 +1,7 @@
 --[[
 @description AudioSweet GUI - ImGui Interface for AudioSweet
 @author hsuanice
-@version 251028_2045
+@version 251028_2245
 @about
   Complete AudioSweet control center with:
   - Focused/Chain modes with FX chain display
@@ -10,11 +10,101 @@
   - History tracking (auto-record recent operations)
   - Compact, intuitive UI with radio buttons
   - Persistent settings (remembers all settings between sessions)
+  - Configurable history size via Settings menu
+  - Improved auto-focus FX with CLAP plugin support
+  - Clear History button for quick cleanup
+  - Debug mode with detailed console logging
 
 @usage
   Run this script in REAPER to open the AudioSweet GUI window.
 
 @changelog
+  251028_2245
+    - Added: FX Name Formatting UI in Settings menu.
+      - New menu item: Settings → FX Name Formatting... (line 961-963)
+      - Popup modal with three checkboxes and examples (lines 1010-1045)
+      - Show Plugin Type: Adds format prefix (CLAP:, VST3:, AU:, VST:) to file names
+      - Show Vendor Name: Includes vendor in parentheses (FabFilter)
+      - Strip Spaces & Symbols: Removes spaces/symbols for cleaner names (ProQ4 vs Pro-Q 4)
+      - Changes auto-save to ExtState and propagate to AudioSweet Core
+      - Solves issue where code default changes didn't apply due to ExtState caching
+      - Example display shows different combinations: 'AS1-CLAP: Pro-Q 4 (FabFilter)' vs 'AS1-CLAP:ProQ4'
+
+  251028_2240
+    - Added: FX name formatting control via ExtState.
+      - New GUI state variables: fxname_show_type (true), fxname_show_vendor (false), fxname_strip_symbol (true)
+      - GUI sets ExtState keys: FXNAME_SHOW_TYPE, FXNAME_SHOW_VENDOR, FXNAME_STRIP_SYMBOL
+      - AudioSweet Core reads these ExtState values to format FX names in rendered file names
+      - Show Type = true → includes plugin format prefix (CLAP:, VST3:, AU:, VST:)
+      - Show Vendor = true → includes vendor name in parentheses (FabFilter)
+      - Strip Symbol = true → removes spaces and symbols from names
+      - Lines: 161-163, 193-195, 225-227, 444-446
+
+  251028_2235
+    - Fixed: History button now calls run_history_item() instead of run_saved_chain_apply_mode().
+      - Previous: History buttons were hardcoded to always use chain mode
+      - Now: History buttons respect the original mode (focused/chain)
+      - Line 1155: Changed from run_saved_chain_apply_mode() to run_history_item()
+
+  251028_2230
+    - Fixed: History items from Focused mode now correctly execute in focused mode.
+      - Previous: All history items executed as chain mode (processed entire FX chain)
+      - Now: Focused history items find and focus the specific FX by name
+      - New function: run_history_focused_apply() searches FX by name, focuses it, runs Template in focused mode
+      - Chain mode history items continue to use chain mode (correct behavior)
+      - Lines: 733-824, 851-857
+    - Improved: FX name matching for history replay (supports partial matching)
+
+  251028_2215
+    - Added: Debug console logging with [AS GUI] prefix.
+      - Shows saved chain execution details (name, items, FX count)
+      - Reports FX focus attempts and timing
+      - Displays execution parameters (mode, action, handle)
+      - Logs success/error results
+      - Lines: 587-589, 599-601, 620-621, 627-629, 637-647, 663-680
+
+  251028_2210
+    - Added: Clear History button in History panel.
+      - Small button positioned at top-right of History section
+      - Clears all history items from memory and ProjExtState
+      - Lines 991-1000
+
+  251028_2200
+    - Improved: Enhanced FX focus mechanism for better CLAP plugin compatibility.
+      - Extended timeout from 500ms to 1 second
+      - Multiple focus attempts with different methods:
+        1. Show FX chain window (TrackFX_Show flag 3)
+        2. Show floating FX window (TrackFX_Show flag 1)
+        3. Retry FX chain window
+      - Better error message: "CLAP plugins may need manual focus"
+      - Chain mode: Lines 452-483
+      - Saved chain apply: Lines 561-592
+    - Fixed: History items now properly execute with their original mode (focused/chain).
+      - run_history_item() rewritten to respect stored mode
+      - Lines 644-690
+
+  251028_2145
+    - Fixed: Saved Chains and History now auto-focus FX before execution.
+      - Previous: Failed when all FX windows were closed (GetFocusedFX returned 0)
+      - Now: Automatically shows and focuses track FX, waits up to 500ms for focus
+      - Displays clear error if FX cannot be focused
+      - Chain mode: Lines 442-460
+      - Saved chain apply: Lines 534-552
+    - Fixed: load_history() error - changed MAX_HISTORY to gui.max_history (line 266)
+
+  251028_2130
+    - Added: Settings menu with configurable History size (1-50 items, default 10).
+      - Menu: Settings → History Settings...
+      - Setting saved persistently in ExtState
+      - History auto-trims when size is reduced
+      - Functions: Lines 91, 120, 149, 638-685
+    - Fixed: Saved Chains and History now properly use AudioSweet/RGWH pipeline.
+      - Previous: Used native REAPER command 40361 (direct render, no naming/handle)
+      - Now: Focus track FX and execute via AudioSweet Template
+      - Properly applies AudioSweet naming conventions and RGWH handle settings
+      - Chain mode execution: Lines 420-451
+      - Saved chain apply: Lines 520-556
+
   251028_2045
     - Added: GUI settings persistence - all settings now saved and restored between sessions.
       - Settings saved: mode, action, copy_scope, copy_pos, apply_method, handle_seconds, debug
@@ -88,6 +178,10 @@ local gui = {
   debug = false,
   show_summary = true,
   warn_takefx = true,
+  max_history = 10,      -- Maximum number of history items to keep
+  fxname_show_type = true,     -- Show FX type prefix (CLAP:, VST3:, etc.)
+  fxname_show_vendor = true,  -- Show vendor name in parentheses
+  fxname_strip_symbol = true,  -- Strip spaces and symbols
   is_running = false,
   last_result = "",
   focused_fx_name = "",
@@ -98,6 +192,8 @@ local gui = {
   history = {},
   new_chain_name = "",
   show_save_popup = false,
+  show_settings_popup = false,
+  show_fxname_popup = false,
 }
 
 ------------------------------------------------------------
@@ -115,6 +211,10 @@ local function save_gui_settings()
   r.SetExtState(SETTINGS_NAMESPACE, "debug", gui.debug and "1" or "0", true)
   r.SetExtState(SETTINGS_NAMESPACE, "show_summary", gui.show_summary and "1" or "0", true)
   r.SetExtState(SETTINGS_NAMESPACE, "warn_takefx", gui.warn_takefx and "1" or "0", true)
+  r.SetExtState(SETTINGS_NAMESPACE, "max_history", tostring(gui.max_history), true)
+  r.SetExtState(SETTINGS_NAMESPACE, "fxname_show_type", gui.fxname_show_type and "1" or "0", true)
+  r.SetExtState(SETTINGS_NAMESPACE, "fxname_show_vendor", gui.fxname_show_vendor and "1" or "0", true)
+  r.SetExtState(SETTINGS_NAMESPACE, "fxname_strip_symbol", gui.fxname_strip_symbol and "1" or "0", true)
 end
 
 local function load_gui_settings()
@@ -143,6 +243,10 @@ local function load_gui_settings()
   gui.debug = get_bool("debug", false)
   gui.show_summary = get_bool("show_summary", true)
   gui.warn_takefx = get_bool("warn_takefx", true)
+  gui.max_history = get_int("max_history", 10)
+  gui.fxname_show_type = get_bool("fxname_show_type", true)
+  gui.fxname_show_vendor = get_bool("fxname_show_vendor", false)
+  gui.fxname_strip_symbol = get_bool("fxname_strip_symbol", true)
 end
 
 ------------------------------------------------------------
@@ -181,7 +285,6 @@ end
 ------------------------------------------------------------
 local CHAIN_NAMESPACE = "hsuanice_AS_SavedChains"
 local HISTORY_NAMESPACE = "hsuanice_AS_History"
-local MAX_HISTORY = 10
 
 local function load_saved_chains()
   gui.saved_chains = {}
@@ -246,7 +349,7 @@ end
 local function load_history()
   gui.history = {}
   local idx = 0
-  while idx < MAX_HISTORY do
+  while idx < gui.max_history do
     local ok, data = r.GetProjExtState(0, HISTORY_NAMESPACE, "hist_" .. idx)
     if ok == 0 or data == "" then break end
     local name, guid, track_name, mode = data:match("^([^|]*)|([^|]*)|([^|]*)|(.*)$")
@@ -278,13 +381,13 @@ local function add_to_history(name, track_guid, track_name, mode)
     mode = mode,
   })
 
-  -- Trim to MAX_HISTORY
-  while #gui.history > MAX_HISTORY do
+  -- Trim to max_history
+  while #gui.history > gui.max_history do
     table.remove(gui.history)
   end
 
   -- Save to ExtState
-  for i = 0, MAX_HISTORY - 1 do
+  for i = 0, gui.max_history - 1 do
     r.SetProjExtState(0, HISTORY_NAMESPACE, "hist_" .. i, "")
   end
   for i, item in ipairs(gui.history) do
@@ -364,6 +467,11 @@ local function set_extstate_from_gui()
 
   -- Set RGWH Core debug level (0 = silent, no console output)
   r.SetProjExtState(0, "RGWH", "DEBUG_LEVEL", gui.debug and "2" or "0")
+
+  -- Set FX name formatting options
+  r.SetExtState("hsuanice_AS", "FXNAME_SHOW_TYPE", gui.fxname_show_type and "1" or "0", false)
+  r.SetExtState("hsuanice_AS", "FXNAME_SHOW_VENDOR", gui.fxname_show_vendor and "1" or "0", false)
+  r.SetExtState("hsuanice_AS", "FXNAME_STRIP_SYMBOL", gui.fxname_strip_symbol and "1" or "0", false)
 end
 
 local function run_audiosweet(override_track)
@@ -414,46 +522,67 @@ local function run_audiosweet(override_track)
       gui.last_result = "Error: " .. tostring(err)
     end
   else
-    -- For chain mode or saved chains, use native REAPER command
-    -- This avoids all AudioSweet console output
-    local orig_selected_tracks = {}
-    for i = 0, r.CountTracks(0) - 1 do
-      local track = r.GetTrack(0, i)
-      if r.IsTrackSelected(track) then
-        orig_selected_tracks[#orig_selected_tracks + 1] = track
+    -- For chain mode, focus first FX and use AudioSweet Template
+    local fx_count = r.TrackFX_GetCount(target_track)
+    if fx_count == 0 then
+      gui.last_result = "Error: No FX on target track"
+      gui.is_running = false
+      return
+    end
+
+    -- Show and focus the first FX on target track
+    -- Try method 1: Show FX chain window (3 = show chain + focus)
+    r.TrackFX_Show(target_track, 0, 3)
+
+    -- Wait and check if focused (up to 1 second)
+    local start_time = r.time_precise()
+    local focused = false
+    local attempts = 0
+    while r.time_precise() - start_time < 1.0 do
+      local retval, trackidx, itemidx, fxidx = r.GetFocusedFX()
+      if retval > 0 then
+        focused = true
+        break
+      end
+
+      -- Try alternative methods every 250ms
+      if attempts == 0 and r.time_precise() - start_time > 0.25 then
+        -- Method 2: Show individual FX window
+        r.TrackFX_Show(target_track, 0, 1)  -- 1 = show floating window
+        attempts = attempts + 1
+      elseif attempts == 1 and r.time_precise() - start_time > 0.5 then
+        -- Method 3: Try showing chain again
+        r.TrackFX_Show(target_track, 0, 3)
+        attempts = attempts + 1
       end
     end
 
-    for i = 0, r.CountTracks(0) - 1 do
-      r.SetTrackSelected(r.GetTrack(0, i), false)
+    if not focused then
+      gui.last_result = "Error: Could not focus FX (CLAP plugins may need manual focus)"
+      gui.is_running = false
+      return
     end
 
-    r.SetTrackSelected(target_track, true)
+    -- Set ExtState for AudioSweet (chain mode)
+    set_extstate_from_gui()
+    r.SetExtState("hsuanice_AS", "AS_MODE", "chain", false)
 
-    -- Set handle before running
-    r.SetProjExtState(0, "RGWH", "HANDLE_SECONDS", tostring(gui.handle_seconds))
-
-    -- Use native REAPER command
-    r.Main_OnCommand(40361, 0)  -- Apply track FX to items as new take
-
-    for i = 0, r.CountTracks(0) - 1 do
-      r.SetTrackSelected(r.GetTrack(0, i), false)
-    end
-    for _, track in ipairs(orig_selected_tracks) do
-      if r.ValidatePtr2(0, track, "MediaTrack*") then
-        r.SetTrackSelected(track, true)
-      end
-    end
-
+    -- Run AudioSweet Template
+    local ok, err = pcall(dofile, TEMPLATE_PATH)
     r.UpdateArrange()
-    gui.last_result = string.format("Success! (%d items)", item_count)
 
-    -- Add to history
-    if target_track then
-      local track_guid = get_track_guid(target_track)
-      local track_name, track_num = get_track_name_and_number(target_track)
-      local name = string.format("#%d - %s", track_num, track_name)
-      add_to_history(name, track_guid, name, "chain")
+    if ok then
+      gui.last_result = string.format("Success! (%d items)", item_count)
+
+      -- Add to history
+      if target_track then
+        local track_guid = get_track_guid(target_track)
+        local track_name, track_num = get_track_name_and_number(target_track)
+        local name = string.format("#%d - %s", track_num, track_name)
+        add_to_history(name, track_guid, name, "chain")
+      end
+    else
+      gui.last_result = "Error: " .. tostring(err)
     end
   end
 
@@ -515,35 +644,103 @@ local function run_saved_chain_copy_mode(tr, chain_name, item_count)
 end
 
 local function run_saved_chain_apply_mode(tr, chain_name, item_count)
-  -- Set handle before running
+  if gui.debug then
+    r.ShowConsoleMsg(string.format("[AS GUI] Saved chain apply: '%s' (items=%d)\n", chain_name, item_count))
+  end
+
+  -- Focus first FX on the track to allow AudioSweet Template to work
+  local fx_count = r.TrackFX_GetCount(tr)
+  if fx_count == 0 then
+    gui.last_result = "Error: No FX on track"
+    gui.is_running = false
+    return
+  end
+
+  if gui.debug then
+    r.ShowConsoleMsg(string.format("[AS GUI] Track has %d FX, attempting to focus...\n", fx_count))
+  end
+
+  -- Show and focus the first FX
+  -- Try method 1: Show FX chain window (3 = show chain + focus)
+  r.TrackFX_Show(tr, 0, 3)
+
+  -- Wait and check if focused (up to 1 second, check every 50ms)
+  local start_time = r.time_precise()
+  local focused = false
+  local attempts = 0
+  while r.time_precise() - start_time < 1.0 do
+    local retval, trackidx, itemidx, fxidx = r.GetFocusedFX()
+    if retval > 0 then
+      focused = true
+      break
+    end
+
+    -- Try alternative methods every 250ms
+    if attempts == 0 and r.time_precise() - start_time > 0.25 then
+      if gui.debug then
+        r.ShowConsoleMsg("[AS GUI] Focus method 1 failed, trying floating window...\n")
+      end
+      -- Method 2: Show individual FX window
+      r.TrackFX_Show(tr, 0, 1)  -- 1 = show floating window
+      attempts = attempts + 1
+    elseif attempts == 1 and r.time_precise() - start_time > 0.5 then
+      if gui.debug then
+        r.ShowConsoleMsg("[AS GUI] Focus method 2 failed, retrying chain window...\n")
+      end
+      -- Method 3: Try showing chain again
+      r.TrackFX_Show(tr, 0, 3)
+      attempts = attempts + 1
+    end
+  end
+
+  if not focused then
+    if gui.debug then
+      r.ShowConsoleMsg("[AS GUI] ERROR: Could not focus FX after all attempts\n")
+    end
+    gui.last_result = "Error: Could not focus FX (CLAP plugins may need manual focus)"
+    gui.is_running = false
+    return
+  end
+
+  if gui.debug then
+    local elapsed = r.time_precise() - start_time
+    r.ShowConsoleMsg(string.format("[AS GUI] FX focused successfully (%.3fs, %d attempts)\n", elapsed, attempts + 1))
+  end
+
+  -- Set ExtState for AudioSweet (chain mode)
+  local mode_names = { "focused", "chain" }
+  local action_names = { "apply", "copy" }
+  local method_names = { "auto", "render", "glue" }
+
+  r.SetExtState("hsuanice_AS", "AS_MODE", "chain", false)
+  r.SetExtState("hsuanice_AS", "AS_ACTION", action_names[gui.action + 1], false)
+  r.SetExtState("hsuanice_AS", "AS_APPLY", method_names[gui.apply_method + 1], false)
+  r.SetExtState("hsuanice_AS", "DEBUG", gui.debug and "1" or "0", false)
+  r.SetExtState("hsuanice_AS", "AS_SHOW_SUMMARY", "0", false)
   r.SetProjExtState(0, "RGWH", "HANDLE_SECONDS", tostring(gui.handle_seconds))
+  r.SetProjExtState(0, "RGWH", "DEBUG_LEVEL", gui.debug and "2" or "0")
 
-  local orig_selected_tracks = {}
-  for i = 0, r.CountTracks(0) - 1 do
-    local track = r.GetTrack(0, i)
-    if r.IsTrackSelected(track) then
-      orig_selected_tracks[#orig_selected_tracks + 1] = track
-    end
+  if gui.debug then
+    r.ShowConsoleMsg(string.format("[AS GUI] Executing AudioSweet Template (mode=chain, action=%s, handle=%.1fs)\n",
+      gui.action == 0 and "apply" or "copy", gui.handle_seconds))
   end
 
-  for i = 0, r.CountTracks(0) - 1 do
-    r.SetTrackSelected(r.GetTrack(0, i), false)
-  end
-
-  r.SetTrackSelected(tr, true)
-  r.Main_OnCommand(40361, 0)
-
-  for i = 0, r.CountTracks(0) - 1 do
-    r.SetTrackSelected(r.GetTrack(0, i), false)
-  end
-  for _, track in ipairs(orig_selected_tracks) do
-    if r.ValidatePtr2(0, track, "MediaTrack*") then
-      r.SetTrackSelected(track, true)
-    end
-  end
-
+  -- Run AudioSweet Template (it will use the focused track's FX chain)
+  local ok, err = pcall(dofile, TEMPLATE_PATH)
   r.UpdateArrange()
-  gui.last_result = string.format("Success! [%s] Apply (%d items)", chain_name, item_count)
+
+  if ok then
+    if gui.debug then
+      r.ShowConsoleMsg(string.format("[AS GUI] Execution completed successfully\n"))
+    end
+    gui.last_result = string.format("Success! [%s] Apply (%d items)", chain_name, item_count)
+  else
+    if gui.debug then
+      r.ShowConsoleMsg(string.format("[AS GUI] ERROR: %s\n", tostring(err)))
+    end
+    gui.last_result = "Error: " .. tostring(err)
+  end
+
   gui.is_running = false
 end
 
@@ -584,8 +781,144 @@ local function run_saved_chain(chain_idx)
   r.Undo_EndBlock(string.format("AudioSweet GUI: %s [%s]", gui.action == 1 and "Copy" or "Apply", chain.name), -1)
 end
 
+local function run_history_focused_apply(tr, fx_name, item_count)
+  if gui.debug then
+    r.ShowConsoleMsg(string.format("[AS GUI] History focused apply: '%s' (items=%d)\n", fx_name, item_count))
+  end
+
+  -- Find FX by name
+  local fx_count = r.TrackFX_GetCount(tr)
+  local fx_idx = nil
+  for i = 0, fx_count - 1 do
+    local _, name = r.TrackFX_GetFXName(tr, i, "")
+    -- Extract short name (after colon and space)
+    local short_name = name:match(": (.+) %(") or name:match(": (.+)") or name
+    if fx_name:find(short_name, 1, true) or short_name:find(fx_name, 1, true) then
+      fx_idx = i
+      break
+    end
+  end
+
+  if not fx_idx then
+    gui.last_result = string.format("Error: FX '%s' not found on track", fx_name)
+    gui.is_running = false
+    return
+  end
+
+  if gui.debug then
+    r.ShowConsoleMsg(string.format("[AS GUI] Found FX at index %d, attempting to focus...\n", fx_idx))
+  end
+
+  -- Show and focus the specific FX
+  r.TrackFX_Show(tr, fx_idx, 3)
+
+  -- Wait for focus
+  local start_time = r.time_precise()
+  local focused = false
+  local attempts = 0
+  while r.time_precise() - start_time < 1.0 do
+    local retval, trackidx, itemidx, fxidx = r.GetFocusedFX()
+    if retval > 0 and fxidx == fx_idx then
+      focused = true
+      break
+    end
+
+    if attempts == 0 and r.time_precise() - start_time > 0.25 then
+      r.TrackFX_Show(tr, fx_idx, 1)  -- Try floating window
+      attempts = attempts + 1
+    elseif attempts == 1 and r.time_precise() - start_time > 0.5 then
+      r.TrackFX_Show(tr, fx_idx, 3)  -- Retry chain
+      attempts = attempts + 1
+    end
+  end
+
+  if not focused then
+    if gui.debug then
+      r.ShowConsoleMsg("[AS GUI] ERROR: Could not focus FX\n")
+    end
+    gui.last_result = "Error: Could not focus FX"
+    gui.is_running = false
+    return
+  end
+
+  if gui.debug then
+    local elapsed = r.time_precise() - start_time
+    r.ShowConsoleMsg(string.format("[AS GUI] FX focused successfully (%.3fs)\n", elapsed))
+  end
+
+  -- Set ExtState for AudioSweet (focused mode)
+  set_extstate_from_gui()
+  r.SetExtState("hsuanice_AS", "AS_MODE", "focused", false)
+
+  if gui.debug then
+    r.ShowConsoleMsg(string.format("[AS GUI] Executing AudioSweet Template (mode=focused, action=%s, handle=%.1fs)\n",
+      gui.action == 0 and "apply" or "copy", gui.handle_seconds))
+  end
+
+  -- Run AudioSweet Template
+  local ok, err = pcall(dofile, TEMPLATE_PATH)
+  r.UpdateArrange()
+
+  if ok then
+    if gui.debug then
+      r.ShowConsoleMsg("[AS GUI] Execution completed successfully\n")
+    end
+    gui.last_result = string.format("Success! [%s] Apply (%d items)", fx_name, item_count)
+  else
+    if gui.debug then
+      r.ShowConsoleMsg(string.format("[AS GUI] ERROR: %s\n", tostring(err)))
+    end
+    gui.last_result = "Error: " .. tostring(err)
+  end
+
+  gui.is_running = false
+end
+
 local function run_history_item(hist_idx)
-  run_saved_chain(hist_idx)  -- Same execution as saved chain
+  local hist_item = gui.history[hist_idx]
+  if not hist_item then return end
+
+  local tr = find_track_by_guid(hist_item.track_guid)
+  if not tr then
+    gui.last_result = string.format("Error: Track '%s' not found", hist_item.track_name)
+    return
+  end
+
+  local item_count = r.CountSelectedMediaItems(0)
+  if item_count == 0 then
+    gui.last_result = "Error: No items selected"
+    return
+  end
+
+  if gui.is_running then return end
+
+  gui.is_running = true
+  gui.last_result = "Running..."
+
+  r.Undo_BeginBlock()
+  r.PreventUIRefresh(1)
+
+  -- Check if this was originally a focused FX or chain
+  if hist_item.mode == "focused" then
+    -- For focused mode, find and focus the specific FX
+    if gui.action == 1 then
+      run_saved_chain_copy_mode(tr, hist_item.name, item_count)
+    else
+      run_history_focused_apply(tr, hist_item.name, item_count)
+    end
+  else
+    -- Chain mode - use saved chain execution
+    if gui.action == 1 then
+      run_saved_chain_copy_mode(tr, hist_item.name, item_count)
+    else
+      run_saved_chain_apply_mode(tr, hist_item.name, item_count)
+    end
+  end
+
+  -- Note: History doesn't re-add to history to avoid duplication
+
+  r.PreventUIRefresh(-1)
+  r.Undo_EndBlock(string.format("AudioSweet GUI: %s [%s]", gui.action == 1 and "Copy" or "Apply", hist_item.name), -1)
 end
 
 ------------------------------------------------------------
@@ -632,16 +965,94 @@ local function draw_gui()
       ImGui.EndMenu(ctx)
     end
 
+    if ImGui.BeginMenu(ctx, 'Settings') then
+      if ImGui.MenuItem(ctx, 'History Settings...', nil, false, true) then
+        gui.show_settings_popup = true
+      end
+      ImGui.Separator(ctx)
+      if ImGui.MenuItem(ctx, 'FX Name Formatting...', nil, false, true) then
+        gui.show_fxname_popup = true
+      end
+      ImGui.EndMenu(ctx)
+    end
+
     if ImGui.BeginMenu(ctx, 'Help') then
       if ImGui.MenuItem(ctx, 'About', nil, false, true) then
-        r.ShowConsoleMsg("[AudioSweet GUI] Version v251028_2100\n" ..
+        r.ShowConsoleMsg("[AudioSweet GUI] Version v251028_2130\n" ..
           "Complete AudioSweet control center\n" ..
-          "Features: Saved Chains, History tracking, Persistent settings, Compact UI\n")
+          "Features: Saved Chains, History tracking, Persistent settings, Configurable history, Compact UI\n")
       end
       ImGui.EndMenu(ctx)
     end
 
     ImGui.EndMenuBar(ctx)
+  end
+
+  -- Settings Popup
+  if gui.show_settings_popup then
+    ImGui.OpenPopup(ctx, 'History Settings')
+    gui.show_settings_popup = false
+  end
+
+  if ImGui.BeginPopupModal(ctx, 'History Settings', true, ImGui.WindowFlags_AlwaysAutoResize) then
+    ImGui.Text(ctx, "Maximum History Items:")
+    ImGui.SetNextItemWidth(ctx, 120)
+    local rv, new_val = ImGui.InputInt(ctx, "##max_history", gui.max_history)
+    if rv then
+      gui.max_history = math.max(1, math.min(50, new_val))  -- Limit 1-50
+      save_gui_settings()
+      -- Trim history if needed
+      while #gui.history > gui.max_history do
+        table.remove(gui.history)
+      end
+    end
+
+    ImGui.Separator(ctx)
+    ImGui.Text(ctx, "Range: 1-50 items")
+
+    ImGui.Separator(ctx)
+    if ImGui.Button(ctx, 'Close', 120, 0) then
+      ImGui.CloseCurrentPopup(ctx)
+    end
+
+    ImGui.EndPopup(ctx)
+  end
+
+  -- FX Name Formatting Popup
+  if gui.show_fxname_popup then
+    ImGui.OpenPopup(ctx, 'FX Name Formatting')
+    gui.show_fxname_popup = false
+  end
+
+  if ImGui.BeginPopupModal(ctx, 'FX Name Formatting', true, ImGui.WindowFlags_AlwaysAutoResize) then
+    ImGui.Text(ctx, "Control how FX names appear in rendered file names:")
+    ImGui.Separator(ctx)
+
+    local changed = false
+    local rv
+
+    rv, gui.fxname_show_type = ImGui.Checkbox(ctx, "Show Plugin Type (CLAP:, VST3:, AU:, VST:)", gui.fxname_show_type)
+    if rv then changed = true end
+
+    rv, gui.fxname_show_vendor = ImGui.Checkbox(ctx, "Show Vendor Name (FabFilter)", gui.fxname_show_vendor)
+    if rv then changed = true end
+
+    rv, gui.fxname_strip_symbol = ImGui.Checkbox(ctx, "Strip Spaces & Symbols (ProQ4 vs Pro-Q 4)", gui.fxname_strip_symbol)
+    if rv then changed = true end
+
+    if changed then
+      save_gui_settings()
+    end
+
+    ImGui.Separator(ctx)
+    ImGui.TextWrapped(ctx, "Example:\nType=ON, Vendor=ON, Strip=OFF → 'AS1-CLAP: Pro-Q 4 (FabFilter)'\nType=ON, Vendor=OFF, Strip=ON → 'AS1-CLAP:ProQ4'")
+
+    ImGui.Separator(ctx)
+    if ImGui.Button(ctx, 'Close', 120, 0) then
+      ImGui.CloseCurrentPopup(ctx)
+    end
+
+    ImGui.EndPopup(ctx)
   end
 
   -- Main content with compact layout
@@ -811,14 +1222,20 @@ local function draw_gui()
     -- Right: History
     ImGui.BeginChild(ctx, "HistoryCol", 0, 150, ImGui.WindowFlags_None)
     ImGui.Text(ctx, "HISTORY")
+    ImGui.SameLine(ctx)
+    ImGui.SetCursorPosX(ctx, ImGui.GetCursorPosX(ctx) + ImGui.GetContentRegionAvail(ctx) - 45)
+    if ImGui.SmallButton(ctx, "Clear") then
+      gui.history = {}
+      -- Clear from ProjExtState
+      for i = 0, gui.max_history - 1 do
+        r.SetProjExtState(0, HISTORY_NAMESPACE, "hist_" .. i, "")
+      end
+    end
     ImGui.Separator(ctx)
     for i, item in ipairs(gui.history) do
       ImGui.PushID(ctx, 1000 + i)
       if ImGui.Button(ctx, item.name, -1, 0) then
-        local tr = find_track_by_guid(item.track_guid)
-        if tr then
-          run_saved_chain_apply_mode(tr, item.name, r.CountSelectedMediaItems(0))
-        end
+        run_history_item(i)
       end
       ImGui.PopID(ctx)
     end
