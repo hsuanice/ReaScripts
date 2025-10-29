@@ -1,6 +1,6 @@
 --[[
 @description AudioSweet (hsuanice) — Focused Track FX render via RGWH Core, append FX name, rebuild peaks (selected items)
-@version 251029_1330
+@version 251029_1930
 @author Tim Chimes (original), adapted by hsuanice
 @notes
   Reference:
@@ -18,6 +18,16 @@ This version:
   • Track FX only (Take FX not supported)
 
 @changelog
+  251029_1930
+    • CRITICAL FIX: Changed all chanmode reads to use GetMediaItemTakeInfo_Value() instead of GetMediaItemInfo_Value()!
+      - Root cause: Channel mode is stored on the TAKE, not the ITEM
+      - Wrong API: GetMediaItemInfo_Value(item, "I_CHANMODE") always returns 0
+      - Correct API: GetMediaItemTakeInfo_Value(take, "I_CHANMODE") returns actual channel mode
+      - This explains why auto mode was always detecting as multi (chanmode was always read as 0=normal)
+    • Updated: get_item_channels() now gets take first, then reads chanmode from take
+    • Updated: All snapshot/debug code now reads from take instead of item
+    • Verified: Now matches RGWH Monitor's channel mode detection logic
+
   251029_1330
     • Fixed: Auto channel mode now correctly preserves item's original chanmode before moving to FX track.
       - Critical fix: MoveMediaItemToTrack() resets I_CHANMODE to 0 (normal)!
@@ -1044,14 +1054,17 @@ local function get_source_channels(it)
   return ch
 end
 
--- Get item's actual playback channel count (respects item channel mode setting)
--- This considers whether the item is set to mono, stereo, or multichannel
+-- Get item's actual playback channel count (respects take channel mode setting)
+-- This considers whether the take is set to mono, stereo, or multichannel
 local function get_item_channels(it)
   if not it then return 2 end
 
-  -- Get item's channel mode setting
-  -- C_CHANMODE: 0=normal, 1=reverse stereo, 2=downmix to mono, 3=left only, 4=right only, 5+=multichannel
-  local chanmode = reaper.GetMediaItemInfo_Value(it, "I_CHANMODE")
+  local tk = reaper.GetActiveTake(it)
+  if not tk then return 2 end
+
+  -- Get take's channel mode setting (IMPORTANT: use GetMediaItemTakeInfo_Value, not GetMediaItemInfo_Value!)
+  -- I_CHANMODE: 0=normal, 1=reverse stereo, 2=downmix to mono, 3=left only, 4=right only, 5+=multichannel
+  local chanmode = reaper.GetMediaItemTakeInfo_Value(tk, "I_CHANMODE")
 
   -- If set to mono (modes 2, 3, or 4), return 1
   if chanmode == 2 or chanmode == 3 or chanmode == 4 then
@@ -1381,8 +1394,9 @@ local function apply_focused_fx_to_item(item, FXmediaTrack, fxIndex, FXName)
   if not item then return false, -1 end
   local origTR = reaper.GetMediaItem_Track(item)
 
-  -- ★ Snapshot item's channel info BEFORE moving (MoveMediaItemToTrack resets chanmode!)
-  local orig_chanmode = reaper.GetMediaItemInfo_Value(item, "I_CHANMODE")
+  -- ★ Snapshot take's channel info BEFORE moving (MoveMediaItemToTrack might affect it!)
+  local tk = reaper.GetActiveTake(item)
+  local orig_chanmode = tk and reaper.GetMediaItemTakeInfo_Value(tk, "I_CHANMODE") or 0
   local orig_src_ch = get_source_channels(item)
 
   -- ★ NEW: snapshot FX enable state (preserve original bypass/enable)
@@ -1472,8 +1486,9 @@ local function apply_focused_via_rgwh_render_new_take(item, FXmediaTrack, fxInde
   if not item then return false end
   local origTR = reaper.GetMediaItem_Track(item)
 
-  -- ★ Snapshot item's channel mode BEFORE moving (MoveMediaItemToTrack resets it!)
-  local orig_chanmode = reaper.GetMediaItemInfo_Value(item, "I_CHANMODE")
+  -- ★ Snapshot take's channel mode BEFORE moving (MoveMediaItemToTrack might affect it!)
+  local tk = reaper.GetActiveTake(item)
+  local orig_chanmode = tk and reaper.GetMediaItemTakeInfo_Value(tk, "I_CHANMODE") or 0
   local orig_src_ch = get_source_channels(item)
 
   -- ★ NEW: snapshot FX enable state (preserve original bypass/enable)
@@ -1840,11 +1855,12 @@ function main() -- main part of the script
       if #u.items == 1 then
         -- === Single item: use RGWH Render (render both Take FX and Track FX; keep old take) ===
         local the_item = u.items[1]
-        -- Debug: check item chanmode BEFORE calling render function
+        -- Debug: check take chanmode BEFORE calling render function
         if debug_enabled() then
-          local pre_chanmode = reaper.GetMediaItemInfo_Value(the_item, "I_CHANMODE")
+          local tk = reaper.GetActiveTake(the_item)
+          local pre_chanmode = tk and reaper.GetMediaItemTakeInfo_Value(tk, "I_CHANMODE") or 0
           local pre_src_ch = get_source_channels(the_item)
-          log_step("UNIT", "pre-render: item chanmode=%d, source_ch=%d", pre_chanmode, pre_src_ch)
+          log_step("UNIT", "pre-render: take chanmode=%d, source_ch=%d", pre_chanmode, pre_src_ch)
         end
         local ok = apply_focused_via_rgwh_render_new_take(the_item, FXmediaTrack, fxIndex, naming_token)
         if ok then
