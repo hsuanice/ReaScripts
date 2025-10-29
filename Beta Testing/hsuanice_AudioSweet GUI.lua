@@ -1,7 +1,7 @@
 --[[
 @description AudioSweet GUI - ImGui Interface for AudioSweet
 @author hsuanice
-@version 251029.2020
+@version 251029.2050
 @about
   Complete AudioSweet control center with:
   - Focused/Chain modes with FX chain display
@@ -11,6 +11,7 @@
   - Persistent settings (remembers all settings between sessions)
   - Improved auto-focus FX with CLAP plugin support
   - Debug mode with detailed console logging
+  - Built-in keyboard shortcuts (Space = Play/Stop, S = Solo toggle)
 
   Note: Saved Chains and History features are currently disabled (under development).
 
@@ -18,6 +19,29 @@
   Run this script in REAPER to open the AudioSweet GUI window.
 
 @changelog
+  251029.2050
+    - Fixed: ImGui_PopStyleColor error when clicking PREVIEW button
+      - Snapshot gui.is_previewing state before rendering to avoid push/pop mismatch
+      - Ensures PushStyleColor and PopStyleColor are always paired correctly (line 1447)
+
+  251029.2045
+    - Added: Built-in keyboard shortcuts that work regardless of focus
+      - Space key = Play/Stop (REAPER command 40044)
+      - S key = Solo toggle (40281 for Track Solo, 41561 for Item Solo based on solo_scope setting)
+      - Shortcuts work even when GUI is not focused (lines 1071-1082)
+    - Improved: PREVIEW button is now a toggle (PREVIEW/STOP)
+      - Click once to start preview, click again to stop
+      - Button turns orange when previewing
+      - Button label changes to "STOP" during preview (lines 1436-1453)
+    - Added: Warning message for Item Solo lag in Preview Settings
+      - Orange text appears when Item Solo is selected
+      - Warns that Item Solo may have slight lag compared to Track Solo (lines 1250-1255)
+    - Changed: Renamed run_preview() to toggle_preview() for clarity (line 575)
+
+  251029.2030
+    - Attempted: ConfigVar_NavCaptureKeyboard (not working in ImGui v0.10)
+      - Built-in keyboard shortcuts implemented instead as workaround
+
   251029.2020
     - Added: AudioSweet Preview integration with full control via GUI
       - New three-button layout: [PREVIEW] [SOLO] [AUDIOSWEET]
@@ -249,6 +273,7 @@ local gui = {
   preview_target_track = "AudioSweet",
   preview_solo_scope = 0,     -- 0=track, 1=item
   preview_restore_mode = 0,   -- 0=timesel, 1=guid
+  is_previewing = false,      -- Track if preview is currently playing
   -- Feature flags
   enable_saved_chains = false,  -- Developing: not functioning properly
   enable_history = false,       -- Developing: not functioning properly
@@ -561,7 +586,16 @@ end
 ------------------------------------------------------------
 -- Preview & Solo Functions
 ------------------------------------------------------------
-local function run_preview()
+local function toggle_preview()
+  -- If already previewing, stop transport
+  if gui.is_previewing then
+    r.Main_OnCommand(40044, 0)  -- Transport: Play/stop
+    gui.is_previewing = false
+    gui.last_result = "Preview stopped"
+    return
+  end
+
+  -- Otherwise, start preview
   if gui.is_running then return end
 
   -- Load AS Preview Core
@@ -593,8 +627,10 @@ local function run_preview()
 
   if preview_ok then
     gui.last_result = "Preview: Success"
+    gui.is_previewing = true
   else
     gui.last_result = "Preview Error: " .. tostring(preview_err)
+    gui.is_previewing = false
   end
 
   gui.is_running = false
@@ -1056,6 +1092,21 @@ end
 -- GUI Rendering
 ------------------------------------------------------------
 local function draw_gui()
+  -- Keyboard shortcuts (work even when GUI is not focused)
+  -- Space = Play/Stop (40044)
+  if ImGui.IsKeyPressed(ctx, ImGui.Key_Space, false) then
+    r.Main_OnCommand(40044, 0)  -- Transport: Play/stop
+  end
+
+  -- S = Solo toggle (depends on solo_scope setting)
+  if ImGui.IsKeyPressed(ctx, ImGui.Key_S, false) then
+    if gui.preview_solo_scope == 0 then
+      r.Main_OnCommand(40281, 0)  -- Track: Solo/unsolo tracks
+    else
+      r.Main_OnCommand(41561, 0)  -- Item properties: Toggle solo exclusive
+    end
+  end
+
   local window_flags = ImGui.WindowFlags_MenuBar
 
   local visible, open = ImGui.Begin(ctx, 'AudioSweet Control Panel', true, window_flags)
@@ -1220,6 +1271,13 @@ local function draw_gui()
     end
     if changed_scope then
       save_gui_settings()
+    end
+
+    -- Warning for Item Solo lag
+    if gui.preview_solo_scope == 1 then
+      ImGui.PushStyleColor(ctx, ImGui.Col_Text, 0xFFAA00FF)  -- Orange color
+      ImGui.TextWrapped(ctx, "Note: Item Solo may have a slight lag when toggling, not as responsive as Track Solo.")
+      ImGui.PopStyleColor(ctx)
     end
 
     ImGui.Separator(ctx)
@@ -1389,12 +1447,27 @@ local function draw_gui()
   local spacing = ImGui.GetStyleVar(ctx, ImGui.StyleVar_ItemSpacing)
   local button_width = (avail_width - spacing * 2) / 3
 
-  -- PREVIEW button
-  if not can_run then ImGui.BeginDisabled(ctx) end
-  if ImGui.Button(ctx, "PREVIEW", button_width, 35) then
-    run_preview()
+  -- PREVIEW button (toggle: preview/stop)
+  -- Snapshot the state before rendering to avoid push/pop mismatch
+  local is_previewing_now = gui.is_previewing
+  local preview_can_run = (has_valid_fx and item_count > 0 and not gui.is_running) or is_previewing_now
+
+  if not preview_can_run then ImGui.BeginDisabled(ctx) end
+
+  -- Change button color if previewing
+  if is_previewing_now then
+    ImGui.PushStyleColor(ctx, ImGui.Col_Button, 0xFF6600FF)  -- Orange when previewing
   end
-  if not can_run then ImGui.EndDisabled(ctx) end
+
+  local button_label = is_previewing_now and "STOP" or "PREVIEW"
+  if ImGui.Button(ctx, button_label, button_width, 35) then
+    toggle_preview()
+  end
+
+  if is_previewing_now then
+    ImGui.PopStyleColor(ctx)
+  end
+  if not preview_can_run then ImGui.EndDisabled(ctx) end
 
   ImGui.SameLine(ctx)
 
