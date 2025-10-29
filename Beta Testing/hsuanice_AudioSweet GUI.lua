@@ -1,7 +1,7 @@
 --[[
 @description AudioSweet GUI - ImGui Interface for AudioSweet
 @author hsuanice
-@version 251029.2050
+@version 251029.2105
 @about
   Complete AudioSweet control center with:
   - Focused/Chain modes with FX chain display
@@ -19,6 +19,17 @@
   Run this script in REAPER to open the AudioSweet GUI window.
 
 @changelog
+  251029.2105
+    - Improved: PREVIEW button auto-resets when transport stops
+      - Detects when REAPER stops playing and automatically resets button state (lines 1095-1104)
+      - Works when stopping via Space key, toolbar, or any other method
+      - Button automatically changes from "STOP" back to "PREVIEW"
+    - Improved: Chain mode can now preview without focused FX
+      - Focused mode: requires valid focused FX to preview (as before)
+      - Chain mode: only requires items, uses target track from settings (lines 1465-1478)
+      - If FX is focused in chain mode, preview will use that FX chain (priority)
+      - Allows previewing target track (e.g., "TEST") without opening any FX window
+
   251029.2050
     - Fixed: ImGui_PopStyleColor error when clicking PREVIEW button
       - Snapshot gui.is_previewing state before rendering to avoid push/pop mismatch
@@ -1092,6 +1103,17 @@ end
 -- GUI Rendering
 ------------------------------------------------------------
 local function draw_gui()
+  -- Auto-reset is_previewing when transport stops
+  if gui.is_previewing then
+    local play_state = r.GetPlayState()
+    if play_state == 0 then  -- 0 = stopped
+      gui.is_previewing = false
+      if gui.last_result == "Preview: Success" or gui.last_result == "Preview stopped" then
+        gui.last_result = "Preview stopped (auto-detected)"
+      end
+    end
+  end
+
   -- Keyboard shortcuts (work even when GUI is not focused)
   -- Space = Play/Stop (40044)
   if ImGui.IsKeyPressed(ctx, ImGui.Key_Space, false) then
@@ -1450,7 +1472,21 @@ local function draw_gui()
   -- PREVIEW button (toggle: preview/stop)
   -- Snapshot the state before rendering to avoid push/pop mismatch
   local is_previewing_now = gui.is_previewing
-  local preview_can_run = (has_valid_fx and item_count > 0 and not gui.is_running) or is_previewing_now
+
+  -- Preview can run if:
+  -- - Focused mode: has valid focused FX + has items + not running
+  -- - Chain mode: has items + not running (no focused FX required, uses target track)
+  -- - Already previewing: always enabled to allow stopping
+  local preview_can_run
+  if is_previewing_now then
+    preview_can_run = true  -- Always allow stopping
+  elseif gui.mode == 0 then
+    -- Focused mode: requires valid FX
+    preview_can_run = has_valid_fx and item_count > 0 and not gui.is_running
+  else
+    -- Chain mode: only requires items (uses target track)
+    preview_can_run = item_count > 0 and not gui.is_running
+  end
 
   if not preview_can_run then ImGui.BeginDisabled(ctx) end
 
