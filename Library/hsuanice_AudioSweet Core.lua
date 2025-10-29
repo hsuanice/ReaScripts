@@ -1,6 +1,6 @@
 --[[
 @description AudioSweet (hsuanice) — Focused Track FX render via RGWH Core, append FX name, rebuild peaks (selected items)
-@version 251029_1300
+@version 251029_1330
 @author Tim Chimes (original), adapted by hsuanice
 @notes
   Reference:
@@ -18,6 +18,14 @@ This version:
   • Track FX only (Take FX not supported)
 
 @changelog
+  251029_1330
+    • Fixed: Auto channel mode now correctly preserves item's original chanmode before moving to FX track.
+      - Critical fix: MoveMediaItemToTrack() resets I_CHANMODE to 0 (normal)!
+      - Solution: Snapshot orig_chanmode BEFORE moving, then use it for auto detection
+      - Affects: apply_focused_via_rgwh_render_new_take() and apply_focused_fx_to_item()
+    • Changed: Debug output now shows "orig_chanmode" to clarify it's the pre-move value
+    • Verified: Now correctly detects chanmode=2/3/4 items as mono even after track move
+
   251029_1300
     • Changed: Auto channel mode now uses item's playback channel count instead of source channel count.
       - Respects item's channel mode setting (mono/stereo/multichannel)
@@ -1373,6 +1381,10 @@ local function apply_focused_fx_to_item(item, FXmediaTrack, fxIndex, FXName)
   if not item then return false, -1 end
   local origTR = reaper.GetMediaItem_Track(item)
 
+  -- ★ Snapshot item's channel info BEFORE moving (MoveMediaItemToTrack resets chanmode!)
+  local orig_chanmode = reaper.GetMediaItemInfo_Value(item, "I_CHANMODE")
+  local orig_src_ch = get_source_channels(item)
+
   -- ★ NEW: snapshot FX enable state (preserve original bypass/enable)
   local fx_enable_snap = snapshot_fx_enables(FXmediaTrack)
 
@@ -1388,7 +1400,13 @@ local function apply_focused_fx_to_item(item, FXmediaTrack, fxIndex, FXName)
 
   -- Choose 40361/41993 based on ExtState channel mode (or auto-detect from item channels)
   local apply_fx_mode = reaper.GetExtState("hsuanice_AS","AS_APPLY_FX_MODE")
-  local ch         = get_item_channels(item)  -- respects item channel mode
+  -- Calculate item_ch from ORIGINAL chanmode (current chanmode was reset to 0 by move)
+  local ch
+  if orig_chanmode == 2 or orig_chanmode == 3 or orig_chanmode == 4 then
+    ch = 1  -- mono modes
+  else
+    ch = orig_src_ch  -- use source channels
+  end
   local prev_nchan = tonumber(reaper.GetMediaTrackInfo_Value(FXmediaTrack, "I_NCHAN")) or 2
   local cmd_apply  = 41993
   local did_set    = false
@@ -1409,10 +1427,8 @@ local function apply_focused_fx_to_item(item, FXmediaTrack, fxIndex, FXName)
     -- auto or empty: detect from item playback channels (respects item channel mode)
     use_mono = (ch <= 1)
     if debug_enabled() then
-      local src_ch = get_source_channels(item)
-      local chanmode = reaper.GetMediaItemInfo_Value(item, "I_CHANMODE")
-      log_step("TS-APPLY", "AS_APPLY_FX_MODE='%s' → auto: source_ch=%d, item_ch=%d (chanmode=%d) → use %d",
-        apply_fx_mode, src_ch, ch, chanmode, use_mono and 40361 or 41993)
+      log_step("TS-APPLY", "AS_APPLY_FX_MODE='%s' → auto: source_ch=%d, item_ch=%d (orig_chanmode=%d) → use %d",
+        apply_fx_mode, orig_src_ch, ch, orig_chanmode, use_mono and 40361 or 41993)
     end
   end
 
@@ -1456,6 +1472,10 @@ local function apply_focused_via_rgwh_render_new_take(item, FXmediaTrack, fxInde
   if not item then return false end
   local origTR = reaper.GetMediaItem_Track(item)
 
+  -- ★ Snapshot item's channel mode BEFORE moving (MoveMediaItemToTrack resets it!)
+  local orig_chanmode = reaper.GetMediaItemInfo_Value(item, "I_CHANMODE")
+  local orig_src_ch = get_source_channels(item)
+
   -- ★ NEW: snapshot FX enable state (preserve original bypass/enable)
   local fx_enable_snap = snapshot_fx_enables(FXmediaTrack)
 
@@ -1489,17 +1509,21 @@ local function apply_focused_via_rgwh_render_new_take(item, FXmediaTrack, fxInde
   local apply_fx_mode = reaper.GetExtState("hsuanice_AS","AS_APPLY_FX_MODE")
   if apply_fx_mode == "" then apply_fx_mode = "auto" end
 
-  -- Resolve "auto" mode to "mono" or "multi" based on item's actual playback channels
-  -- (not source channels, because item might use channel mode to limit playback)
+  -- Resolve "auto" mode to "mono" or "multi" based on item's ORIGINAL playback channels
+  -- (use orig_chanmode because MoveMediaItemToTrack resets chanmode to 0!)
   if apply_fx_mode == "auto" then
-    local item_ch = get_item_channels(item)
+    -- Calculate item_ch from original chanmode
+    local item_ch
+    if orig_chanmode == 2 or orig_chanmode == 3 or orig_chanmode == 4 then
+      item_ch = 1  -- mono modes
+    else
+      item_ch = orig_src_ch  -- use source channels
+    end
     apply_fx_mode = (item_ch >= 2) and "multi" or "mono"
 
     if debug_enabled() then
-      local src_ch = get_source_channels(item)
-      local chanmode = reaper.GetMediaItemInfo_Value(item, "I_CHANMODE")
-      log_step("RGWH-RENDER", "auto mode: source_ch=%d, item_ch=%d (chanmode=%d) → resolved to '%s'",
-        src_ch, item_ch, chanmode, apply_fx_mode)
+      log_step("RGWH-RENDER", "auto mode: source_ch=%d, item_ch=%d (orig_chanmode=%d) → resolved to '%s'",
+        orig_src_ch, item_ch, orig_chanmode, apply_fx_mode)
     end
   else
     if debug_enabled() then
@@ -1816,6 +1840,12 @@ function main() -- main part of the script
       if #u.items == 1 then
         -- === Single item: use RGWH Render (render both Take FX and Track FX; keep old take) ===
         local the_item = u.items[1]
+        -- Debug: check item chanmode BEFORE calling render function
+        if debug_enabled() then
+          local pre_chanmode = reaper.GetMediaItemInfo_Value(the_item, "I_CHANMODE")
+          local pre_src_ch = get_source_channels(the_item)
+          log_step("UNIT", "pre-render: item chanmode=%d, source_ch=%d", pre_chanmode, pre_src_ch)
+        end
         local ok = apply_focused_via_rgwh_render_new_take(the_item, FXmediaTrack, fxIndex, naming_token)
         if ok then
           table.insert(outputs, the_item) -- already moved back to original track and renamed
