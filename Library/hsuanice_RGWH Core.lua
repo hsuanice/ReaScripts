@@ -1,6 +1,6 @@
 --[[]
 @description RGWH Core (Render/Glue with Handles) — Public Beta
-@version 251022_2200
+@version 251029_1315
 @author hsuanice
 @about
   Core library for handle-aware Render/Glue workflows with clear, single-entry API.
@@ -55,6 +55,18 @@
   • All overrides are one-run only: ExtState is snapshotted and restored after operation.
 
 @changelog
+  251029_1315
+    - Changed: Auto channel mode now respects item's channel mode setting for both Render and Glue.
+      • Checks I_CHANMODE: modes 2/3/4 (downmix/left/right) are treated as mono
+      • Examples:
+        - 8ch source + "Left only" item → auto = mono
+        - 2ch source + "Mono (mix L+R)" item → auto = mono
+        - 8ch source + "Normal" item → auto = multi
+      • Applies to: render_selection(), glue_selection(), and core() API
+    - Technical: Added get_item_playback_channels() helper function in both render and glue paths
+    - Rationale: Users often work with multichannel sources but set items to mono playback mode;
+                 auto detection should respect the item's actual playback configuration, not just source channels
+
   251022_2200
     - Changed: merge_volumes now affects ALL takes (not just active take) to ensure consistent output
     - Rationale: When merge_volumes=true, item volume is reset to 0dB; if only active take was merged,
@@ -1259,6 +1271,29 @@ function M.glue_selection()
   end
 
   local eps_s = (cfg.EPSILON_MODE=="frames") and frames_to_seconds(cfg.EPSILON_VALUE, get_sr(), nil) or (cfg.EPSILON_VALUE or 0.002)
+
+  -- Auto mode for glue: infer mono/multi from max item playback channels over current selection
+  if cfg.GLUE_APPLY_MODE == "auto" then
+    local function get_item_playback_channels(it)
+      if not it then return 2 end
+      local chanmode = reaper.GetMediaItemInfo_Value(it, "I_CHANMODE")
+      if chanmode == 2 or chanmode == 3 or chanmode == 4 then return 1 end
+      local tk = reaper.GetActiveTake(it)
+      if tk then
+        local src = reaper.GetMediaItemTake_Source(tk)
+        return src and (reaper.GetMediaSourceNumChannels(src) or 2) or 2
+      end
+      return 2
+    end
+    local maxch = 1
+    for i = 0, reaper.CountSelectedMediaItems(0) - 1 do
+      local it = reaper.GetSelectedMediaItem(0, i)
+      local ch = get_item_playback_channels(it)
+      if ch > maxch then maxch = ch end
+    end
+    cfg.GLUE_APPLY_MODE = (maxch >= 2) and "multi" or "mono"
+  end
+
   dbg(DBG,1,"[RUN] Glue start  handles=%.3fs  epsilon=%.5fs  GLUE_SINGLE_ITEMS=%s  GLUE_TAKE_FX=%s  GLUE_TRACK_FX=%s  GLUE_APPLY_MODE=%s  WRITE_EDGE_CUES=%s  WRITE_GLUE_CUES=%s  GLUE_CUE_POLICY=%s",
     cfg.HANDLE_SECONDS or 0, eps_s, tostring(cfg.GLUE_SINGLE_ITEMS), tostring(cfg.GLUE_TAKE_FX),
     tostring(cfg.GLUE_TRACK_FX), cfg.GLUE_APPLY_MODE, tostring(cfg.WRITE_EDGE_CUES), tostring(cfg.WRITE_GLUE_CUES),
@@ -1310,17 +1345,31 @@ function M.render_selection(take_fx, track_fx, mode, tc_mode, merge_volumes, pri
   cfg.RENDER_MERGE_VOLUMES = (merge_volumes == true)
   cfg.RENDER_PRINT_VOLUMES = (print_volumes == true)
 
-  -- Auto mode: infer mono/multi from max source channels over current selection
+  -- Auto mode: infer mono/multi from max item playback channels over current selection
+  -- Respects item channel mode (mono downmix/left/right should be treated as mono)
   if cfg.RENDER_APPLY_MODE == "auto" then
+    local function get_item_playback_channels(it)
+      if not it then return 2 end
+      -- Check item's channel mode setting
+      local chanmode = reaper.GetMediaItemInfo_Value(it, "I_CHANMODE")
+      -- chanmode 2=downmix, 3=left only, 4=right only → mono
+      if chanmode == 2 or chanmode == 3 or chanmode == 4 then
+        return 1
+      end
+      -- Otherwise use source channels
+      local tk = reaper.GetActiveTake(it)
+      if tk then
+        local src = reaper.GetMediaItemTake_Source(tk)
+        return src and (reaper.GetMediaSourceNumChannels(src) or 2) or 2
+      end
+      return 2
+    end
+
     local function max_channels_over(items_)
       local maxch = 1
       for _, it in ipairs(items_) do
-        local tk = reaper.GetActiveTake(it)
-        if tk then
-          local src = reaper.GetMediaItemTake_Source(tk)
-          local ch  = src and (reaper.GetMediaSourceNumChannels(src) or 1) or 1
-          if ch > maxch then maxch = ch end
-        end
+        local ch = get_item_playback_channels(it)
+        if ch > maxch then maxch = ch end
       end
       return maxch
     end
