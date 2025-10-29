@@ -1,6 +1,6 @@
 --[[]
 @description RGWH Core (Render/Glue with Handles) — Public Beta
-@version 251029_1315
+@version 251029_1930
 @author hsuanice
 @about
   Core library for handle-aware Render/Glue workflows with clear, single-entry API.
@@ -55,6 +55,14 @@
   • All overrides are one-run only: ExtState is snapshotted and restored after operation.
 
 @changelog
+  251029_1930
+    - CRITICAL FIX: Changed all chanmode reads to use GetMediaItemTakeInfo_Value() instead of GetMediaItemInfo_Value()!
+      • Root cause: Channel mode is stored on the TAKE, not the ITEM
+      • Wrong API: GetMediaItemInfo_Value(item, "I_CHANMODE") always returns 0
+      • Correct API: GetMediaItemTakeInfo_Value(take, "I_CHANMODE") returns actual channel mode
+      • Affects: render_selection() and glue_selection() auto mode detection
+    - Updated: get_item_playback_channels() helper in both paths now reads from take
+
   251029_1315
     - Changed: Auto channel mode now respects item's channel mode setting for both Render and Glue.
       • Checks I_CHANMODE: modes 2/3/4 (downmix/left/right) are treated as mono
@@ -1276,14 +1284,15 @@ function M.glue_selection()
   if cfg.GLUE_APPLY_MODE == "auto" then
     local function get_item_playback_channels(it)
       if not it then return 2 end
-      local chanmode = reaper.GetMediaItemInfo_Value(it, "I_CHANMODE")
-      if chanmode == 2 or chanmode == 3 or chanmode == 4 then return 1 end
       local tk = reaper.GetActiveTake(it)
-      if tk then
-        local src = reaper.GetMediaItemTake_Source(tk)
-        return src and (reaper.GetMediaSourceNumChannels(src) or 2) or 2
-      end
-      return 2
+      if not tk then return 2 end
+
+      -- Check take's channel mode setting (IMPORTANT: use GetMediaItemTakeInfo_Value!)
+      local chanmode = reaper.GetMediaItemTakeInfo_Value(tk, "I_CHANMODE")
+      if chanmode == 2 or chanmode == 3 or chanmode == 4 then return 1 end
+
+      local src = reaper.GetMediaItemTake_Source(tk)
+      return src and (reaper.GetMediaSourceNumChannels(src) or 2) or 2
     end
     local maxch = 1
     for i = 0, reaper.CountSelectedMediaItems(0) - 1 do
@@ -1350,19 +1359,18 @@ function M.render_selection(take_fx, track_fx, mode, tc_mode, merge_volumes, pri
   if cfg.RENDER_APPLY_MODE == "auto" then
     local function get_item_playback_channels(it)
       if not it then return 2 end
-      -- Check item's channel mode setting
-      local chanmode = reaper.GetMediaItemInfo_Value(it, "I_CHANMODE")
+      local tk = reaper.GetActiveTake(it)
+      if not tk then return 2 end
+
+      -- Check take's channel mode setting (IMPORTANT: use GetMediaItemTakeInfo_Value, not GetMediaItemInfo_Value!)
+      local chanmode = reaper.GetMediaItemTakeInfo_Value(tk, "I_CHANMODE")
       -- chanmode 2=downmix, 3=left only, 4=right only → mono
       if chanmode == 2 or chanmode == 3 or chanmode == 4 then
         return 1
       end
       -- Otherwise use source channels
-      local tk = reaper.GetActiveTake(it)
-      if tk then
-        local src = reaper.GetMediaItemTake_Source(tk)
-        return src and (reaper.GetMediaSourceNumChannels(src) or 2) or 2
-      end
-      return 2
+      local src = reaper.GetMediaItemTake_Source(tk)
+      return src and (reaper.GetMediaSourceNumChannels(src) or 2) or 2
     end
 
     local function max_channels_over(items_)
