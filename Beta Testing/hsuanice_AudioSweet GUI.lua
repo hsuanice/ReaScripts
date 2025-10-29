@@ -1,24 +1,40 @@
 --[[
 @description AudioSweet GUI - ImGui Interface for AudioSweet
 @author hsuanice
-@version 251029.1934
+@version 251029.2020
 @about
   Complete AudioSweet control center with:
   - Focused/Chain modes with FX chain display
   - Apply/Copy actions
-  - Saved Chains (memory-based, no focus required)
-  - History tracking (auto-record recent operations)
+  - AudioSweet Preview integration with configurable target track
   - Compact, intuitive UI with radio buttons
   - Persistent settings (remembers all settings between sessions)
-  - Configurable history size via Settings menu
   - Improved auto-focus FX with CLAP plugin support
-  - Clear History button for quick cleanup
   - Debug mode with detailed console logging
+
+  Note: Saved Chains and History features are currently disabled (under development).
 
 @usage
   Run this script in REAPER to open the AudioSweet GUI window.
 
 @changelog
+  251029.2020
+    - Added: AudioSweet Preview integration with full control via GUI
+      - New three-button layout: [PREVIEW] [SOLO] [AUDIOSWEET]
+      - Preview Settings menu (Settings → Preview Settings...)
+      - Configurable target track name (default "AudioSweet")
+      - Solo scope selection (Track Solo / Item Solo)
+      - Restore mode selection (Time Selection / GUID)
+      - Debug and chain_mode settings shared with main AudioSweet
+      - SOLO button toggles based on solo_scope: Track (40281) or Item (41561)
+    - Changed: Disabled Saved Chains and History features (feature flags: enable_saved_chains, enable_history)
+      - GUI shows "under development" message when both features disabled
+      - "Save This Chain" button hidden when enable_saved_chains = false
+      - "History Settings..." menu disabled when enable_history = false
+      - Features can be re-enabled by setting flags to true (lines 253-254)
+    - Technical: run_preview() loads AS Preview Core and passes GUI settings as args
+    - Technical: toggle_solo() uses REAPER commands 40281 (track) or 41561 (item)
+
   251029.1934
     - Verified: Channel Mode (Auto/Mono/Multi) now working correctly with AudioSweet Core v251029.1400.
       - Auto mode now correctly detects mono items (e.g., chanmode=2/3/4) and renders as mono
@@ -190,6 +206,7 @@ local ImGui = require 'imgui' '0.10'
 local RES_PATH = r.GetResourcePath()
 local TEMPLATE_PATH = RES_PATH .. '/Scripts/hsuanice Scripts/Beta Testing/hsuanice_AudioSweet Template.lua'
 local CORE_PATH = RES_PATH .. '/Scripts/hsuanice Scripts/Library/hsuanice_AudioSweet Core.lua'
+local PREVIEW_CORE_PATH = RES_PATH .. '/Scripts/hsuanice Scripts/Library/hsuanice_AS Preview Core.lua'
 
 ------------------------------------------------------------
 -- ImGui Context
@@ -227,6 +244,14 @@ local gui = {
   show_save_popup = false,
   show_settings_popup = false,
   show_fxname_popup = false,
+  show_preview_settings = false,
+  -- Preview settings
+  preview_target_track = "AudioSweet",
+  preview_solo_scope = 0,     -- 0=track, 1=item
+  preview_restore_mode = 0,   -- 0=timesel, 1=guid
+  -- Feature flags
+  enable_saved_chains = false,  -- Developing: not functioning properly
+  enable_history = false,       -- Developing: not functioning properly
 }
 
 ------------------------------------------------------------
@@ -249,6 +274,10 @@ local function save_gui_settings()
   r.SetExtState(SETTINGS_NAMESPACE, "fxname_show_type", gui.fxname_show_type and "1" or "0", true)
   r.SetExtState(SETTINGS_NAMESPACE, "fxname_show_vendor", gui.fxname_show_vendor and "1" or "0", true)
   r.SetExtState(SETTINGS_NAMESPACE, "fxname_strip_symbol", gui.fxname_strip_symbol and "1" or "0", true)
+  -- Preview settings
+  r.SetExtState(SETTINGS_NAMESPACE, "preview_target_track", gui.preview_target_track, true)
+  r.SetExtState(SETTINGS_NAMESPACE, "preview_solo_scope", tostring(gui.preview_solo_scope), true)
+  r.SetExtState(SETTINGS_NAMESPACE, "preview_restore_mode", tostring(gui.preview_restore_mode), true)
 end
 
 local function load_gui_settings()
@@ -282,6 +311,14 @@ local function load_gui_settings()
   gui.fxname_show_type = get_bool("fxname_show_type", true)
   gui.fxname_show_vendor = get_bool("fxname_show_vendor", false)
   gui.fxname_strip_symbol = get_bool("fxname_strip_symbol", true)
+  -- Preview settings
+  local function get_string(key, default)
+    local val = r.GetExtState(SETTINGS_NAMESPACE, key)
+    return (val ~= "") and val or default
+  end
+  gui.preview_target_track = get_string("preview_target_track", "AudioSweet")
+  gui.preview_solo_scope = get_int("preview_solo_scope", 0)
+  gui.preview_restore_mode = get_int("preview_restore_mode", 0)
 end
 
 ------------------------------------------------------------
@@ -521,6 +558,62 @@ local function set_extstate_from_gui()
   r.SetExtState("hsuanice_AS", "FXNAME_STRIP_SYMBOL", gui.fxname_strip_symbol and "1" or "0", false)
 end
 
+------------------------------------------------------------
+-- Preview & Solo Functions
+------------------------------------------------------------
+local function run_preview()
+  if gui.is_running then return end
+
+  -- Load AS Preview Core
+  local ok, ASP = pcall(dofile, PREVIEW_CORE_PATH)
+  if not ok or type(ASP) ~= "table" or type(ASP.preview) ~= "function" then
+    gui.last_result = "Error: Preview Core not found"
+    return
+  end
+
+  gui.is_running = true
+  gui.last_result = "Running Preview..."
+
+  -- Prepare arguments
+  local solo_scope_names = { "track", "item" }
+  local restore_mode_names = { "timesel", "guid" }
+
+  local args = {
+    debug = gui.debug,
+    chain_mode = (gui.mode == 1),  -- 0=focused, 1=chain
+    mode = "solo",
+    target = "TARGET_TRACK_NAME",
+    target_track_name = gui.preview_target_track,
+    solo_scope = solo_scope_names[gui.preview_solo_scope + 1],
+    restore_mode = restore_mode_names[gui.preview_restore_mode + 1],
+  }
+
+  -- Run preview
+  local preview_ok, preview_err = pcall(ASP.preview, args)
+
+  if preview_ok then
+    gui.last_result = "Preview: Success"
+  else
+    gui.last_result = "Preview Error: " .. tostring(preview_err)
+  end
+
+  gui.is_running = false
+end
+
+local function toggle_solo()
+  -- Toggle solo based on solo_scope setting
+  if gui.preview_solo_scope == 0 then
+    -- Track solo (40281)
+    r.Main_OnCommand(40281, 0)
+  else
+    -- Item solo (41561)
+    r.Main_OnCommand(41561, 0)
+  end
+end
+
+------------------------------------------------------------
+-- AudioSweet Run Function
+------------------------------------------------------------
 local function run_audiosweet(override_track)
   if gui.is_running then return end
 
@@ -1004,7 +1097,11 @@ local function draw_gui()
     end
 
     if ImGui.BeginMenu(ctx, 'Settings') then
-      if ImGui.MenuItem(ctx, 'History Settings...', nil, false, true) then
+      if ImGui.MenuItem(ctx, 'Preview Settings...', nil, false, true) then
+        gui.show_preview_settings = true
+      end
+      ImGui.Separator(ctx)
+      if ImGui.MenuItem(ctx, 'History Settings...', nil, false, gui.enable_history) then
         gui.show_settings_popup = true
       end
       ImGui.Separator(ctx)
@@ -1093,6 +1190,62 @@ local function draw_gui()
     ImGui.EndPopup(ctx)
   end
 
+  -- Preview Settings Popup
+  if gui.show_preview_settings then
+    ImGui.OpenPopup(ctx, 'Preview Settings')
+    gui.show_preview_settings = false
+  end
+
+  if ImGui.BeginPopupModal(ctx, 'Preview Settings', true, ImGui.WindowFlags_AlwaysAutoResize) then
+    ImGui.Text(ctx, "Target Track Name:")
+    ImGui.SetNextItemWidth(ctx, 200)
+    local rv, new_name = ImGui.InputText(ctx, "##preview_target", gui.preview_target_track)
+    if rv then
+      gui.preview_target_track = new_name
+      save_gui_settings()
+    end
+    ImGui.TextWrapped(ctx, "The track where preview will be applied")
+
+    ImGui.Separator(ctx)
+    ImGui.Text(ctx, "Solo Scope:")
+    local changed_scope = false
+    if ImGui.RadioButton(ctx, "Track Solo (40281)", gui.preview_solo_scope == 0) then
+      gui.preview_solo_scope = 0
+      changed_scope = true
+    end
+    ImGui.SameLine(ctx)
+    if ImGui.RadioButton(ctx, "Item Solo (41561)", gui.preview_solo_scope == 1) then
+      gui.preview_solo_scope = 1
+      changed_scope = true
+    end
+    if changed_scope then
+      save_gui_settings()
+    end
+
+    ImGui.Separator(ctx)
+    ImGui.Text(ctx, "Restore Mode:")
+    local changed_restore = false
+    if ImGui.RadioButton(ctx, "Time Selection", gui.preview_restore_mode == 0) then
+      gui.preview_restore_mode = 0
+      changed_restore = true
+    end
+    ImGui.SameLine(ctx)
+    if ImGui.RadioButton(ctx, "GUID", gui.preview_restore_mode == 1) then
+      gui.preview_restore_mode = 1
+      changed_restore = true
+    end
+    if changed_restore then
+      save_gui_settings()
+    end
+
+    ImGui.Separator(ctx)
+    if ImGui.Button(ctx, 'Close', 120, 0) then
+      ImGui.CloseCurrentPopup(ctx)
+    end
+
+    ImGui.EndPopup(ctx)
+  end
+
   -- Main content with compact layout
   local has_valid_fx = update_focused_fx_display()
   local item_count = r.CountSelectedMediaItems(0)
@@ -1123,9 +1276,11 @@ local function draw_gui()
     end
     ImGui.EndChild(ctx)
 
-    if has_valid_fx and ImGui.Button(ctx, "Save This Chain", -1, 0) then
-      gui.show_save_popup = true
-      gui.new_chain_name = gui.focused_track_name
+    if gui.enable_saved_chains then
+      if has_valid_fx and ImGui.Button(ctx, "Save This Chain", -1, 0) then
+        gui.show_save_popup = true
+        gui.new_chain_name = gui.focused_track_name
+      end
     end
   end
 
@@ -1226,10 +1381,33 @@ local function draw_gui()
 
   ImGui.Separator(ctx)
 
-  -- === RUN BUTTON (moved before Quick Process) ===
+  -- === RUN BUTTONS: PREVIEW / SOLO / AUDIOSWEET ===
   local can_run = has_valid_fx and item_count > 0 and not gui.is_running
+
+  -- Calculate button widths (3 buttons with spacing)
+  local avail_width = ImGui.GetContentRegionAvail(ctx)
+  local spacing = ImGui.GetStyleVar(ctx, ImGui.StyleVar_ItemSpacing)
+  local button_width = (avail_width - spacing * 2) / 3
+
+  -- PREVIEW button
   if not can_run then ImGui.BeginDisabled(ctx) end
-  if ImGui.Button(ctx, "RUN AUDIOSWEET", -1, 35) then
+  if ImGui.Button(ctx, "PREVIEW", button_width, 35) then
+    run_preview()
+  end
+  if not can_run then ImGui.EndDisabled(ctx) end
+
+  ImGui.SameLine(ctx)
+
+  -- SOLO button (always enabled)
+  if ImGui.Button(ctx, "SOLO", button_width, 35) then
+    toggle_solo()
+  end
+
+  ImGui.SameLine(ctx)
+
+  -- AUDIOSWEET button
+  if not can_run then ImGui.BeginDisabled(ctx) end
+  if ImGui.Button(ctx, "AUDIOSWEET", button_width, 35) then
     run_audiosweet(nil)
   end
   if not can_run then ImGui.EndDisabled(ctx) end
@@ -1250,52 +1428,63 @@ local function draw_gui()
   ImGui.Separator(ctx)
 
   -- === QUICK PROCESS (Saved + History, side by side) ===
-  if #gui.saved_chains > 0 or #gui.history > 0 then
-    local avail_w = ImGui.GetContentRegionAvail(ctx)
-    local col1_w = avail_w * 0.5 - 5
+  if gui.enable_saved_chains or gui.enable_history then
+    -- Only show if at least one feature is enabled and has content
+    if (gui.enable_saved_chains and #gui.saved_chains > 0) or (gui.enable_history and #gui.history > 0) then
+      local avail_w = ImGui.GetContentRegionAvail(ctx)
+      local col1_w = avail_w * 0.5 - 5
 
-    -- Left: Saved Chains
-    ImGui.BeginChild(ctx, "SavedCol", col1_w, 150, ImGui.WindowFlags_None)
-    ImGui.Text(ctx, "SAVED CHAINS")
-    ImGui.Separator(ctx)
-    local to_delete = nil
-    for i, chain in ipairs(gui.saved_chains) do
-      ImGui.PushID(ctx, i)
-      if ImGui.Button(ctx, chain.name, col1_w - 25, 0) then
-        run_saved_chain(i)
-      end
-      ImGui.SameLine(ctx)
-      if ImGui.Button(ctx, "X", 20, 0) then
-        to_delete = i
-      end
-      ImGui.PopID(ctx)
-    end
-    if to_delete then delete_saved_chain(to_delete) end
-    ImGui.EndChild(ctx)
+      -- Left: Saved Chains
+      if gui.enable_saved_chains then
+        ImGui.BeginChild(ctx, "SavedCol", col1_w, 150, ImGui.WindowFlags_None)
+        ImGui.Text(ctx, "SAVED CHAINS")
+        ImGui.Separator(ctx)
+        local to_delete = nil
+        for i, chain in ipairs(gui.saved_chains) do
+          ImGui.PushID(ctx, i)
+          if ImGui.Button(ctx, chain.name, col1_w - 25, 0) then
+            run_saved_chain(i)
+          end
+          ImGui.SameLine(ctx)
+          if ImGui.Button(ctx, "X", 20, 0) then
+            to_delete = i
+          end
+          ImGui.PopID(ctx)
+        end
+        if to_delete then delete_saved_chain(to_delete) end
+        ImGui.EndChild(ctx)
 
-    ImGui.SameLine(ctx)
+        ImGui.SameLine(ctx)
+      end
 
-    -- Right: History
-    ImGui.BeginChild(ctx, "HistoryCol", 0, 150, ImGui.WindowFlags_None)
-    ImGui.Text(ctx, "HISTORY")
-    ImGui.SameLine(ctx)
-    ImGui.SetCursorPosX(ctx, ImGui.GetCursorPosX(ctx) + ImGui.GetContentRegionAvail(ctx) - 45)
-    if ImGui.SmallButton(ctx, "Clear") then
-      gui.history = {}
-      -- Clear from ProjExtState
-      for i = 0, gui.max_history - 1 do
-        r.SetProjExtState(0, HISTORY_NAMESPACE, "hist_" .. i, "")
+      -- Right: History
+      if gui.enable_history then
+        ImGui.BeginChild(ctx, "HistoryCol", 0, 150, ImGui.WindowFlags_None)
+        ImGui.Text(ctx, "HISTORY")
+        ImGui.SameLine(ctx)
+        ImGui.SetCursorPosX(ctx, ImGui.GetCursorPosX(ctx) + ImGui.GetContentRegionAvail(ctx) - 45)
+        if ImGui.SmallButton(ctx, "Clear") then
+          gui.history = {}
+          -- Clear from ProjExtState
+          for i = 0, gui.max_history - 1 do
+            r.SetProjExtState(0, HISTORY_NAMESPACE, "hist_" .. i, "")
+          end
+        end
+        ImGui.Separator(ctx)
+        for i, item in ipairs(gui.history) do
+          ImGui.PushID(ctx, 1000 + i)
+          if ImGui.Button(ctx, item.name, -1, 0) then
+            run_history_item(i)
+          end
+          ImGui.PopID(ctx)
+        end
+        ImGui.EndChild(ctx)
       end
     end
-    ImGui.Separator(ctx)
-    for i, item in ipairs(gui.history) do
-      ImGui.PushID(ctx, 1000 + i)
-      if ImGui.Button(ctx, item.name, -1, 0) then
-        run_history_item(i)
-      end
-      ImGui.PopID(ctx)
-    end
-    ImGui.EndChild(ctx)
+  else
+    -- Show "Developing" message when both features are disabled
+    ImGui.TextWrapped(ctx, "SAVED CHAINS and HISTORY features are currently under development.")
+    ImGui.TextWrapped(ctx, "These features are not functioning properly and will be available in a future update.")
   end
 
   ImGui.End(ctx)
