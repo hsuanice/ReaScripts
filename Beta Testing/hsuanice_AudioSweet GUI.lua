@@ -1,7 +1,7 @@
 --[[
 @description AudioSweet GUI - ImGui Interface for AudioSweet
 @author hsuanice
-@version 251029.2105
+@version 251029.2110
 @about
   Complete AudioSweet control center with:
   - Focused/Chain modes with FX chain display
@@ -19,7 +19,15 @@
   Run this script in REAPER to open the AudioSweet GUI window.
 
 @changelog
-  251029.2105
+  251029.2110
+    - Improved: Preview Target Track Name moved to main GUI
+      - Appears automatically when Chain mode is selected (lines 1395-1407)
+      - Input field shows directly in main interface (more intuitive)
+      - Setting persists when script is closed (auto-saved to ExtState)
+      - Helper text: "(for preview without focused FX)"
+      - No need to open Settings menu to change target track
+
+  251029.2055
     - Improved: PREVIEW button auto-resets when transport stops
       - Detects when REAPER stops playing and automatically resets button state (lines 1095-1104)
       - Works when stopping via Space key, toolbar, or any other method
@@ -1390,6 +1398,20 @@ local function draw_gui()
   if ImGui.RadioButton(ctx, "Copy", gui.action == 1) then
     gui.action = 1
     save_gui_settings()
+  end
+
+  -- === TARGET TRACK NAME (Chain mode only) ===
+  if gui.mode == 1 then
+    ImGui.Text(ctx, "Preview Target:")
+    ImGui.SameLine(ctx)
+    ImGui.SetNextItemWidth(ctx, 150)
+    local rv, new_target = ImGui.InputText(ctx, "##preview_target_main", gui.preview_target_track)
+    if rv then
+      gui.preview_target_track = new_target
+      save_gui_settings()
+    end
+    ImGui.SameLine(ctx)
+    ImGui.TextDisabled(ctx, "(for preview without focused FX)")
   end
 
   -- === COPY/APPLY SETTINGS (Compact horizontal) ===
