@@ -1,6 +1,6 @@
 --[[
 @description AudioSweet (hsuanice) — Focused Track FX render via RGWH Core, append FX name, rebuild peaks (selected items)
-@version 251028_2300
+@version 251029_1300
 @author Tim Chimes (original), adapted by hsuanice
 @notes
   Reference:
@@ -18,6 +18,26 @@ This version:
   • Track FX only (Take FX not supported)
 
 @changelog
+  251029_1300
+    • Changed: Auto channel mode now uses item's playback channel count instead of source channel count.
+      - Respects item's channel mode setting (mono/stereo/multichannel)
+      - Handles cases where source is 8ch but item plays only 1ch or 2ch
+      - Example: 8ch source with "left only" item mode → auto detects as mono
+    • Added: get_item_channels() now checks I_CHANMODE to determine actual playback channels
+      - chanmode 2/3/4 (downmix/left/right) → returns 1 (mono)
+      - chanmode 0/1/5+ (normal/reverse/multi) → returns source channels
+    • Added: Detailed debug logging showing source_ch, item_ch, and chanmode for troubleshooting
+    • All paths (RGWH Render, TS-Window, Core/GLUE) now use consistent item-based channel detection
+
+  251029_1245
+    • Fixed: Channel Mode (mono/multi/auto) from GUI now works correctly across ALL execution paths.
+      - RGWH Render path (single items): Now reads AS_APPLY_FX_MODE ExtState instead of hardcoded "auto"
+      - TS-Window path (TS glue): Now reads AS_APPLY_FX_MODE ExtState to override item channel auto-detection
+      - Core/GLUE path (multiple items): Already working (verified)
+    • Added debug logging to show which channel mode is being used and why
+    • Root cause: apply_focused_via_rgwh_render_new_take() and apply_focused_fx_to_item()
+      were not reading the GUI's AS_APPLY_FX_MODE ExtState setting
+
   251028_2300
     • Verified: FX name formatting with alias functionality working correctly.
       - Test results confirm proper ExtState integration:
@@ -1005,7 +1025,8 @@ local function restore_selection(snap)
   end
 end
 -- ==== channel helpers ====
-local function get_item_channels(it)
+-- Get source channel count (ignores item channel mode)
+local function get_source_channels(it)
   if not it then return 2 end
   local tk = reaper.GetActiveTake(it)
   if not tk then return 2 end
@@ -1013,6 +1034,24 @@ local function get_item_channels(it)
   if not src then return 2 end
   local ch = reaper.GetMediaSourceNumChannels(src) or 2
   return ch
+end
+
+-- Get item's actual playback channel count (respects item channel mode setting)
+-- This considers whether the item is set to mono, stereo, or multichannel
+local function get_item_channels(it)
+  if not it then return 2 end
+
+  -- Get item's channel mode setting
+  -- C_CHANMODE: 0=normal, 1=reverse stereo, 2=downmix to mono, 3=left only, 4=right only, 5+=multichannel
+  local chanmode = reaper.GetMediaItemInfo_Value(it, "I_CHANMODE")
+
+  -- If set to mono (modes 2, 3, or 4), return 1
+  if chanmode == 2 or chanmode == 3 or chanmode == 4 then
+    return 1
+  end
+
+  -- Otherwise, use source channels
+  return get_source_channels(it)
 end
 
 local function unit_max_channels(u)
@@ -1347,13 +1386,37 @@ local function apply_focused_fx_to_item(item, FXmediaTrack, fxIndex, FXName)
     -- chain mode: do NOT isolate; apply entire track FX chain
   end
 
-  -- Choose 40361/41993 based on item channels; temporarily adjust I_NCHAN if needed
-  local ch         = get_item_channels(item)
+  -- Choose 40361/41993 based on ExtState channel mode (or auto-detect from item channels)
+  local apply_fx_mode = reaper.GetExtState("hsuanice_AS","AS_APPLY_FX_MODE")
+  local ch         = get_item_channels(item)  -- respects item channel mode
   local prev_nchan = tonumber(reaper.GetMediaTrackInfo_Value(FXmediaTrack, "I_NCHAN")) or 2
   local cmd_apply  = 41993
   local did_set    = false
 
-  if ch <= 1 then
+  -- Resolve channel mode: explicit setting from GUI or auto-detect
+  local use_mono = false
+  if apply_fx_mode == "mono" then
+    use_mono = true
+    if debug_enabled() then
+      log_step("TS-APPLY", "AS_APPLY_FX_MODE='mono' (explicit) → use 40361")
+    end
+  elseif apply_fx_mode == "multi" then
+    use_mono = false
+    if debug_enabled() then
+      log_step("TS-APPLY", "AS_APPLY_FX_MODE='multi' (explicit) → use 41993")
+    end
+  else
+    -- auto or empty: detect from item playback channels (respects item channel mode)
+    use_mono = (ch <= 1)
+    if debug_enabled() then
+      local src_ch = get_source_channels(item)
+      local chanmode = reaper.GetMediaItemInfo_Value(item, "I_CHANMODE")
+      log_step("TS-APPLY", "AS_APPLY_FX_MODE='%s' → auto: source_ch=%d, item_ch=%d (chanmode=%d) → use %d",
+        apply_fx_mode, src_ch, ch, chanmode, use_mono and 40361 or 41993)
+    end
+  end
+
+  if use_mono then
     cmd_apply = 40361
   else
     local desired = (ch % 2 == 0) and ch or (ch + 1)
@@ -1422,8 +1485,29 @@ local function apply_focused_via_rgwh_render_new_take(item, FXmediaTrack, fxInde
 
   -- ★ Important fix: use RGWH Core's "positional parameter" call version, ensure TAKE/TRACK flags = true
   --   M.render_selection(take_fx, track_fx, apply_mode, tc_embed)
-  --   where apply_mode="auto" lets Core decide mono/multi based on item channels
-  local ok_call, ret_or_err = pcall(M.render_selection, 1, 1, "auto", "current")
+  --   Read apply_mode from ExtState (set by GUI), fallback to "auto"
+  local apply_fx_mode = reaper.GetExtState("hsuanice_AS","AS_APPLY_FX_MODE")
+  if apply_fx_mode == "" then apply_fx_mode = "auto" end
+
+  -- Resolve "auto" mode to "mono" or "multi" based on item's actual playback channels
+  -- (not source channels, because item might use channel mode to limit playback)
+  if apply_fx_mode == "auto" then
+    local item_ch = get_item_channels(item)
+    apply_fx_mode = (item_ch >= 2) and "multi" or "mono"
+
+    if debug_enabled() then
+      local src_ch = get_source_channels(item)
+      local chanmode = reaper.GetMediaItemInfo_Value(item, "I_CHANMODE")
+      log_step("RGWH-RENDER", "auto mode: source_ch=%d, item_ch=%d (chanmode=%d) → resolved to '%s'",
+        src_ch, item_ch, chanmode, apply_fx_mode)
+    end
+  else
+    if debug_enabled() then
+      log_step("RGWH-RENDER", "AS_APPLY_FX_MODE from ExtState: '%s' (explicit)", apply_fx_mode)
+    end
+  end
+
+  local ok_call, ret_or_err = pcall(M.render_selection, 1, 1, apply_fx_mode, "current")
   if not ok_call then
     log_step("ERROR", "render_selection() runtime error: %s", tostring(ret_or_err))
     -- Still attempt to retrieve new output below, in case Core errored but actually produced a new take
@@ -1805,12 +1889,21 @@ function main() -- main part of the script
         end
 
         -- Resolve auto apply_fx_mode by MAX channels across the entire unit
+        -- Use item's actual playback channels (respects item channel mode), not source channels
         local apply_fx_mode = nil
         if not failed then
           apply_fx_mode = reaper.GetExtState("hsuanice_AS","AS_APPLY_FX_MODE")
           if apply_fx_mode == "" or apply_fx_mode == "auto" then
             local ch = unit_max_channels(u)
             apply_fx_mode = (ch <= 1) and "mono" or "multi"
+            if debug_enabled() then
+              log_step("CORE", "AS_APPLY_FX_MODE='%s' → auto-detect: unit_max_ch=%d → resolved to '%s'",
+                (apply_fx_mode == "" and "empty" or "auto"), ch, apply_fx_mode)
+            end
+          else
+            if debug_enabled() then
+              log_step("CORE", "AS_APPLY_FX_MODE from ExtState: '%s' (explicit)", apply_fx_mode)
+            end
           end
         end
 
