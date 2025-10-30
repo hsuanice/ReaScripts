@@ -1,6 +1,6 @@
 --[[
 @description AudioSweet — Focused Track FX render via RGWH Core, append FX name, rebuild peaks (selected items)
-@version 0.1.0-beta (251030.1600)
+@version 0.1.0-beta (251030.1630)
 @author Tim Chimes (original), adapted by hsuanice
 @notes
   Reference:
@@ -18,6 +18,20 @@
     - Integration with AudioSweet ReaImGui v0.1.0-beta
     - File naming with FX Alias support
     - Handle-aware rendering via RGWH Core
+
+  Internal Build 251030.1630 - CRITICAL FIX
+    • FIXED: checkSelectedFX() now supports OVERRIDE ExtState mechanism.
+      - Issue: SAVED CHAINS/HISTORY execution showed "Please focus a Track FX" warning
+      - Root cause: checkSelectedFX() only used GetFocusedFX(), which fails for CLAP and unfocused windows
+      - Solution: Check OVERRIDE_TRACK_IDX and OVERRIDE_FX_IDX ExtState before GetFocusedFX()
+      - Location: lines 1172-1191 (checkSelectedFX function)
+      - OVERRIDE values are 0-based, converted to 1-based for internal use
+      - OVERRIDE values cleared after use (single-use mechanism)
+      - Falls back to GetFocusedFX() when OVERRIDE not set
+    • Integration: Required by AudioSweet ReaImGui v251030.1630+ for reliable SAVED CHAINS/HISTORY execution.
+      - GUI sets OVERRIDE ExtState → Core checks OVERRIDE → bypasses focus detection
+      - Enables execution without requiring actual FX window focus
+      - Works with all plugin formats (CLAP, VST3, VST, AU)
 
   Internal Build 251030.1600
     • Fixed: Chain mode now works without focused FX (CLAP plugin support).
@@ -1168,9 +1182,27 @@ function checkSelectedFX() --Determines if a TrackFX is selected, and which FX i
   local itemnumberOut = 0
   local fxnumberOut = 0
   local window = false
-  
-  retval, tracknumberOut, itemnumberOut, fxnumberOut = reaper.GetFocusedFX()
-  debug ("\n"..retval..tracknumberOut..itemnumberOut..fxnumberOut)
+
+  -- Check for OVERRIDE ExtState first (set by GUI for SAVED CHAIN/HISTORY execution)
+  local override_track_idx = reaper.GetExtState("hsuanice_AS", "OVERRIDE_TRACK_IDX")
+  local override_fx_idx = reaper.GetExtState("hsuanice_AS", "OVERRIDE_FX_IDX")
+
+  if override_track_idx ~= "" and override_fx_idx ~= "" then
+    -- Use override values from GUI
+    tracknumberOut = tonumber(override_track_idx) + 1  -- Convert 0-based to 1-based
+    fxnumberOut = tonumber(override_fx_idx)
+    retval = 1  -- Success
+
+    debug(string.format("\n[OVERRIDE] Using track=%d, fx=%d", tracknumberOut, fxnumberOut))
+
+    -- Clear override for next run
+    reaper.SetExtState("hsuanice_AS", "OVERRIDE_TRACK_IDX", "", false)
+    reaper.SetExtState("hsuanice_AS", "OVERRIDE_FX_IDX", "", false)
+  else
+    -- Fall back to GetFocusedFX
+    retval, tracknumberOut, itemnumberOut, fxnumberOut = reaper.GetFocusedFX()
+    debug ("\n"..retval..tracknumberOut..itemnumberOut..fxnumberOut)
+  end
 
   -- Normalize FX index: strip container (0x2000000) and input/floating (0x1000000) flags
   local raw_fx = fxnumberOut or 0
