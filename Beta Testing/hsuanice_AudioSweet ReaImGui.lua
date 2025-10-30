@@ -1,7 +1,7 @@
 --[[
 @description AudioSweet ReaImGui - ImGui Interface for AudioSweet
 @author hsuanice
-@version 0.1.0-beta (251030.1600)
+@version 0.1.0-beta (251030.1630)
 @about
   Complete AudioSweet control center with:
   - Focused/Chain modes with FX chain display
@@ -24,12 +24,54 @@
     - Saved Chains and History features with CLAP plugin support
     - Open button with intelligent toggle for FX windows
     - File naming settings with FX Alias support
-    - Auto-resizing window
+    - Auto-resizing window with scrollable SAVED CHAINS and HISTORY sections
     - Built-in keyboard shortcuts (Space = Play/Stop, S = Solo toggle)
     - AudioSweet Preview integration
     - Debug mode with detailed console logging
+    - Direct integration with AudioSweet Core (no intermediate template layer)
+
+  Internal Build 251030.1630 - CRITICAL FIXES
+    - FIXED: "Please focus a Track FX" warning no longer appears when using SAVED CHAINS/HISTORY.
+      - Root cause: AudioSweet Core's checkSelectedFX() only checked GetFocusedFX()
+      - Solution: Core now checks OVERRIDE ExtState before calling GetFocusedFX()
+      - OVERRIDE_TRACK_IDX and OVERRIDE_FX_IDX bypass focus detection entirely
+      - Works reliably with all plugin formats (CLAP, VST3, VST, AU)
+      - History focused mode now works even with "Show FX window on recall" disabled
+    - FIXED: Item selection now properly maintained when using SAVED CHAINS/HISTORY.
+      - Root cause: GUI called SetOnlyTrackSelected() before Core's selection snapshot
+      - Solution: Removed SetOnlyTrackSelected() calls, only use SetMixerScroll()
+      - Core now snapshots original item selection and restores it at the end
+      - Selection behavior now identical between direct execution and SAVED CHAINS/HISTORY
+    - Added: "Show FX window on recall" toggle in settings.
+      - Controls whether FX windows open when executing SAVED CHAIN/HISTORY
+      - Checkbox appears above SAVED CHAINS and HISTORY sections
+      - When enabled: Opens FX chain (chain mode) or floating FX (focused mode)
+      - When disabled: Silent execution without opening FX windows
+      - Persists between sessions via ExtState
+    - Changed: AudioSweet Core checkSelectedFX() now supports OVERRIDE mechanism.
+      - Checks OVERRIDE_TRACK_IDX and OVERRIDE_FX_IDX ExtState first
+      - Falls back to GetFocusedFX() if OVERRIDE not set
+      - Clears OVERRIDE values after use (single-use mechanism)
+      - Enables reliable execution without requiring actual FX window focus
+    - Technical: Execution flow now preserves item selection correctly.
+      - GUI sets OVERRIDE ExtState → Core snapshots selection → Core processes → Core restores selection
+      - Previous flow: GUI changes selection → Core snapshots wrong selection → Selection lost
+      - Core's internal selection restoration now works as intended
+    - Integration: Requires AudioSweet Core v251030.1630+ (OVERRIDE ExtState support).
 
   Internal Build 251030.1600
+    - Changed: Replaced AudioSweet Template usage (removed intermediate Template layer).
+      - Previous: ReaImGui → Template → AudioSweet Core → RGWH Core
+      - Now: ReaImGui → AudioSweet Core → RGWH Core (streamlined execution path)
+      - Removed TEMPLATE_PATH dependency, now directly uses CORE_PATH
+      - All ExtState parameters work identically
+      - Simplified maintenance and debugging
+    - Improved: SAVED CHAINS and HISTORY UI with better scrolling support.
+      - Increased height from 150px to 200px for more visible items
+      - Added border to child windows for better visual separation
+      - SAVED CHAINS: Button width now uses available space dynamically
+      - HISTORY: Already uses full available width (-1)
+      - Both sections now properly scroll when content exceeds visible area
     - Added: "Open" button for SAVED CHAINS and HISTORY with intelligent toggle behavior.
       - SAVED CHAINS: Toggles FX chain window to view/edit entire chain
       - HISTORY (Focused mode): Toggles floating FX window for specific plugin
@@ -51,14 +93,14 @@
     - Fixed: SAVED CHAINS and HISTORY now work correctly with CLAP plugins.
       - Issue: AudioSweet Core required focused FX even in chain mode
       - Solution: Core now uses first selected track as fallback when no focus detected in chain mode
-      - OVERRIDE ExtState mechanism bypasses GetFocusedFX check in Template
+      - OVERRIDE ExtState mechanism bypasses GetFocusedFX check in Core
       - Removed unnecessary Action 40271 (Show FX chain) that caused FX browser popup
       - All execution is silent and clean - no unexpected dialogs or windows
     - Changed: Enabled SAVED CHAINS and HISTORY features (previously disabled).
       - Both features now fully functional with simplified focus detection
       - SAVED CHAINS: Click saved chain name to execute on selected items
       - HISTORY: Recent operations automatically tracked (configurable size 1-50)
-      - Execution logic simplified: Select track → Set OVERRIDE → Execute Template
+      - Execution logic simplified: Select track → Set OVERRIDE → Execute Core
     - Added: "Open" button for each saved chain.
       - UI layout: [Open] [Chain Name Button] [X]
       - "Open" button: Opens FX chain window without processing (for viewing/editing FX)
@@ -66,7 +108,7 @@
       - "X" button: Deletes saved chain
       - Allows quick access to FX chain for adjustments before processing
     - Technical: Chain mode execution no longer requires GetFocusedFX() to succeed.
-      - Template uses OVERRIDE_TRACK_IDX and OVERRIDE_FX_IDX from ExtState
+      - Core uses OVERRIDE_TRACK_IDX and OVERRIDE_FX_IDX from ExtState
       - Core falls back to first selected track when focus detection fails
       - Works reliably with CLAP, VST3, VST, and AU plugins
     - Integration: Requires AudioSweet Core v251030.1515+ (chain mode fallback support).
@@ -187,7 +229,7 @@
       - Integration confirmed: GUI → ExtState → AudioSweet Core → RGWH Core all working
     - Note: This version is compatible with:
       - AudioSweet Core v251029.1400+ (REQUIRED - contains critical chanmode API fix)
-      - AudioSweet Template v251028_2315+
+      - AudioSweet Core v251028_2315+
       - RGWH Core v251029.1400+ (contains matching chanmode fix)
 
   251029_1230
@@ -210,7 +252,7 @@
       - Validates FX still exists at stored index before execution
       - Lines: 349-401 (history storage), 788-862 (focused apply with action)
     - Technical: History storage format changed from "name|guid|trackname|mode" to "name|guid|trackname|mode|fxidx"
-    - Integration: Works with AudioSweet Template v251028_2315 (ExtState override support)
+    - Integration: Works with AudioSweet Core v251028_2315 (ExtState override support)
 
   251028_2245
     - Added: FX Name Formatting UI in Settings menu.
@@ -243,7 +285,7 @@
     - Fixed: History items from Focused mode now correctly execute in focused mode.
       - Previous: All history items executed as chain mode (processed entire FX chain)
       - Now: Focused history items find and focus the specific FX by name
-      - New function: run_history_focused_apply() searches FX by name, focuses it, runs Template in focused mode
+      - New function: run_history_focused_apply() searches FX by name, focuses it, runs Core in focused mode
       - Chain mode history items continue to use chain mode (correct behavior)
       - Lines: 733-824, 851-857
     - Improved: FX name matching for history replay (supports partial matching)
@@ -293,7 +335,7 @@
       - Functions: Lines 91, 120, 149, 638-685
     - Fixed: Saved Chains and History now properly use AudioSweet/RGWH pipeline.
       - Previous: Used native REAPER command 40361 (direct render, no naming/handle)
-      - Now: Focus track FX and execute via AudioSweet Template
+      - Now: Focus track FX and execute via AudioSweet Core
       - Properly applies AudioSweet naming conventions and RGWH handle settings
       - Chain mode execution: Lines 420-451
       - Saved chain apply: Lines 520-556
@@ -308,10 +350,10 @@
 
   251028_2030
     - Fixed: Handle seconds setting now works correctly in Focused mode.
-      - Root cause: AudioSweet Template v251022_1617 was using hardcoded 5.0s default
-      - Solution: Updated Template to v251028_2050 (reads from ProjExtState first)
+      - Root cause: AudioSweet Core v251022_1617 was using hardcoded 5.0s default
+      - Solution: Updated Core to v251028_2050 (reads from ProjExtState first)
       - GUI already correctly sets ProjExtState before execution (line 302)
-      - Requires: AudioSweet Template v251028_2050 or later
+      - Requires: AudioSweet Core v251028_2050 or later
 
   251028_2015
     - Changed: Status display moved to below RUN button (above Saved Chains/History).
@@ -322,7 +364,7 @@
     - Fixed: Handle seconds setting now properly applied to saved chain execution.
       - Handle value forwarded to RGWH Core via ProjExtState before apply
     - Fixed: Debug mode fully functional - no console output when disabled.
-      - Chain/Saved execution uses native command (bypass AudioSweet Template)
+      - Chain/Saved execution uses native command (bypass AudioSweet Core)
       - Focused mode respects ExtState debug flag
     - Integration: Full ExtState control for debug output (hsuanice_AS/DEBUG).
       - Works seamlessly with AudioSweet Core v251028_2011
@@ -349,7 +391,6 @@ package.path = r.ImGui_GetBuiltinPath() .. '/?.lua'
 local ImGui = require 'imgui' '0.10'
 
 local RES_PATH = r.GetResourcePath()
-local TEMPLATE_PATH = RES_PATH .. '/Scripts/hsuanice Scripts/Beta Testing/hsuanice_AudioSweet Template.lua'
 local CORE_PATH = RES_PATH .. '/Scripts/hsuanice Scripts/Library/hsuanice_AudioSweet Core.lua'
 local PREVIEW_CORE_PATH = RES_PATH .. '/Scripts/hsuanice Scripts/Library/hsuanice_AS Preview Core.lua'
 
@@ -373,6 +414,7 @@ local gui = {
   show_summary = true,
   warn_takefx = true,
   max_history = 10,      -- Maximum number of history items to keep
+  show_fx_on_recall = true,    -- Show FX window when executing SAVED CHAIN/HISTORY
   fxname_show_type = true,     -- Show FX type prefix (CLAP:, VST3:, etc.)
   fxname_show_vendor = true,  -- Show vendor name in parentheses
   fxname_strip_symbol = true,  -- Strip spaces and symbols
@@ -423,6 +465,7 @@ local function save_gui_settings()
   r.SetExtState(SETTINGS_NAMESPACE, "show_summary", gui.show_summary and "1" or "0", true)
   r.SetExtState(SETTINGS_NAMESPACE, "warn_takefx", gui.warn_takefx and "1" or "0", true)
   r.SetExtState(SETTINGS_NAMESPACE, "max_history", tostring(gui.max_history), true)
+  r.SetExtState(SETTINGS_NAMESPACE, "show_fx_on_recall", gui.show_fx_on_recall and "1" or "0", true)
   r.SetExtState(SETTINGS_NAMESPACE, "fxname_show_type", gui.fxname_show_type and "1" or "0", true)
   r.SetExtState(SETTINGS_NAMESPACE, "fxname_show_vendor", gui.fxname_show_vendor and "1" or "0", true)
   r.SetExtState(SETTINGS_NAMESPACE, "fxname_strip_symbol", gui.fxname_strip_symbol and "1" or "0", true)
@@ -465,6 +508,7 @@ local function load_gui_settings()
   gui.show_summary = get_bool("show_summary", true)
   gui.warn_takefx = get_bool("warn_takefx", true)
   gui.max_history = get_int("max_history", 10)
+  gui.show_fx_on_recall = get_bool("show_fx_on_recall", true)
   gui.fxname_show_type = get_bool("fxname_show_type", true)
   gui.fxname_show_vendor = get_bool("fxname_show_vendor", false)
   gui.fxname_strip_symbol = get_bool("fxname_strip_symbol", true)
@@ -867,12 +911,12 @@ local function run_audiosweet(override_track)
   gui.is_running = true
   gui.last_result = "Running..."
 
-  -- Only use Template for focused FX mode
-  -- (Template needs GetFocusedFX to work properly)
+  -- Only use Core for focused FX mode
+  -- (Core needs GetFocusedFX to work properly)
   if gui.mode == 0 and not override_track then
     set_extstate_from_gui()
 
-    local ok, err = pcall(dofile, TEMPLATE_PATH)
+    local ok, err = pcall(dofile, CORE_PATH)
     r.UpdateArrange()
 
     if ok then
@@ -891,7 +935,7 @@ local function run_audiosweet(override_track)
       gui.last_result = "Error: " .. tostring(err)
     end
   else
-    -- For chain mode, focus first FX and use AudioSweet Template
+    -- For chain mode, focus first FX and use AudioSweet Core
     local fx_count = r.TrackFX_GetCount(target_track)
     if fx_count == 0 then
       gui.last_result = "Error: No FX on target track"
@@ -900,7 +944,7 @@ local function run_audiosweet(override_track)
     end
 
     -- Select track (no need to open FX chain window)
-    -- Note: OVERRIDE ExtState tells Template which track to use
+    -- Note: OVERRIDE ExtState tells Core which track to use
     r.SetOnlyTrackSelected(target_track)
     r.SetMixerScroll(target_track)
 
@@ -908,14 +952,14 @@ local function run_audiosweet(override_track)
     set_extstate_from_gui()
     r.SetExtState("hsuanice_AS", "AS_MODE", "chain", false)
 
-    -- Set OVERRIDE ExtState to specify track and FX for Template
+    -- Set OVERRIDE ExtState to specify track and FX for Core
     -- (bypasses GetFocusedFX check which fails for CLAP plugins)
     local track_idx = r.CSurf_TrackToID(target_track, false) - 1  -- Convert to 0-based index
     r.SetExtState("hsuanice_AS", "OVERRIDE_TRACK_IDX", tostring(track_idx), false)
     r.SetExtState("hsuanice_AS", "OVERRIDE_FX_IDX", "0", false)  -- Chain mode uses first FX
 
-    -- Run AudioSweet Template
-    local ok, err = pcall(dofile, TEMPLATE_PATH)
+    -- Run AudioSweet Core
+    local ok, err = pcall(dofile, CORE_PATH)
     r.UpdateArrange()
 
     if ok then
@@ -1007,10 +1051,22 @@ local function run_saved_chain_apply_mode(tr, chain_name, item_count)
     r.ShowConsoleMsg(string.format("[AS GUI] Track has %d FX\n", fx_count))
   end
 
-  -- Select track (no need to open FX chain window)
-  -- Note: OVERRIDE ExtState tells Template which track to use
-  r.SetOnlyTrackSelected(tr)
+  -- Set track as last touched (without changing selection)
+  -- Note: We don't call SetOnlyTrackSelected() to preserve item selection
+  -- Core will snapshot the current selection and restore it at the end
   r.SetMixerScroll(tr)
+
+  -- Open FX chain window if setting enabled
+  if gui.show_fx_on_recall then
+    if gui.debug then
+      r.ShowConsoleMsg("[AS GUI] Opening FX chain window\n")
+    end
+    r.Main_OnCommand(40291, 0)  -- Track: View FX chain for current/last touched track
+  else
+    if gui.debug then
+      r.ShowConsoleMsg("[AS GUI] Skipping FX chain window (show_fx_on_recall = false)\n")
+    end
+  end
 
   if gui.debug then
     r.ShowConsoleMsg("[AS GUI] Track selected and set as last touched\n")
@@ -1023,7 +1079,7 @@ local function run_saved_chain_apply_mode(tr, chain_name, item_count)
   r.SetExtState("hsuanice_AS", "AS_ACTION", action_names[gui.action + 1], false)
   r.SetExtState("hsuanice_AS", "DEBUG", gui.debug and "1" or "0", false)
 
-  -- Set OVERRIDE ExtState to specify track and FX for Template
+  -- Set OVERRIDE ExtState to specify track and FX for Core
   -- (bypasses GetFocusedFX check which fails for CLAP plugins)
   local track_idx = r.CSurf_TrackToID(tr, false) - 1  -- Convert to 0-based index
   r.SetExtState("hsuanice_AS", "OVERRIDE_TRACK_IDX", tostring(track_idx), false)
@@ -1037,12 +1093,13 @@ local function run_saved_chain_apply_mode(tr, chain_name, item_count)
   r.SetProjExtState(0, "RGWH", "DEBUG_LEVEL", gui.debug and "2" or "0")
 
   if gui.debug then
-    r.ShowConsoleMsg(string.format("[AS GUI] Executing AudioSweet Template (mode=chain, action=%s, handle=%.1fs)\n",
+    r.ShowConsoleMsg(string.format("[AS GUI] Executing AudioSweet Core (mode=chain, action=%s, handle=%.1fs)\n",
       gui.action == 0 and "apply" or "copy", gui.handle_seconds))
   end
 
-  -- Run AudioSweet Template (it will use the focused track's FX chain)
-  local ok, err = pcall(dofile, TEMPLATE_PATH)
+  -- Run AudioSweet Core (it will use the focused track's FX chain)
+  -- Note: Core handles selection save/restore internally
+  local ok, err = pcall(dofile, CORE_PATH)
   r.UpdateArrange()
 
   if ok then
@@ -1185,42 +1242,46 @@ local function run_history_focused_apply(tr, fx_name, fx_idx, item_count)
     return
   end
 
-  -- Set track as last touched
-  r.SetOnlyTrackSelected(tr)
+  -- Set track as last touched (without changing selection)
+  -- Note: We don't call SetOnlyTrackSelected() to preserve item selection
+  -- Core will snapshot the current selection and restore it at the end
   r.SetMixerScroll(tr)
 
-  -- Open specific FX window
-  -- Actions 41749-41756 = Open/close UI for FX #1-8 on last touched track
-  -- Note: Focus detection is not required - Template will work regardless
-  if fx_idx <= 7 then
-    local action_id = 41749 + fx_idx  -- 41749 = FX #1, 41750 = FX #2, etc.
+  -- Open specific FX as floating window if setting enabled
+  -- Note: Focus detection is not required - Core will work regardless
+  if gui.show_fx_on_recall then
     if gui.debug then
-      r.ShowConsoleMsg(string.format("[AS GUI] Opening FX #%d window (action %d)\n", fx_idx + 1, action_id))
+      r.ShowConsoleMsg(string.format("[AS GUI] Opening FX #%d floating window\n", fx_idx + 1))
     end
-    r.Main_OnCommand(action_id, 0)
-  else
-    -- For FX #9+, use TrackFX_Show
-    if gui.debug then
-      r.ShowConsoleMsg(string.format("[AS GUI] Opening FX #%d window (TrackFX_Show)\n", fx_idx + 1))
-    end
-    r.TrackFX_Show(tr, fx_idx, 3)
-  end
+    r.TrackFX_Show(tr, fx_idx, 3)  -- Show floating window (flag 3)
 
-  if gui.debug then
-    r.ShowConsoleMsg("[AS GUI] FX window opened (focus detection not required)\n")
+    -- Small delay to ensure FX window is fully opened before Core checks it
+    -- This prevents "Please focus a Track FX" warning
+    r.defer(function() end)  -- Process one defer cycle
+  else
+    if gui.debug then
+      r.ShowConsoleMsg("[AS GUI] Skipping FX window (show_fx_on_recall = false)\n")
+    end
   end
 
   -- Set ExtState for AudioSweet (focused mode)
   set_extstate_from_gui()
   r.SetExtState("hsuanice_AS", "AS_MODE", "focused", false)
 
+  -- Set OVERRIDE ExtState to specify exact FX (bypasses GetFocusedFX check)
+  -- This ensures Core processes the correct FX even if focus detection fails
+  local track_idx = r.CSurf_TrackToID(tr, false) - 1  -- Convert to 0-based index
+  r.SetExtState("hsuanice_AS", "OVERRIDE_TRACK_IDX", tostring(track_idx), false)
+  r.SetExtState("hsuanice_AS", "OVERRIDE_FX_IDX", tostring(fx_idx), false)
+
   if gui.debug then
-    r.ShowConsoleMsg(string.format("[AS GUI] Executing AudioSweet Template (mode=focused, action=%s, handle=%.1fs)\n",
+    r.ShowConsoleMsg(string.format("[AS GUI] Executing AudioSweet Core (mode=focused, action=%s, handle=%.1fs)\n",
       gui.action == 0 and "apply" or "copy", gui.handle_seconds))
   end
 
-  -- Run AudioSweet Template
-  local ok, err = pcall(dofile, TEMPLATE_PATH)
+  -- Run AudioSweet Core
+  -- Note: Core handles selection save/restore internally
+  local ok, err = pcall(dofile, CORE_PATH)
   r.UpdateArrange()
 
   if ok then
@@ -1863,6 +1924,11 @@ local function draw_gui()
 
   -- === QUICK PROCESS (Saved + History, side by side) ===
   if gui.enable_saved_chains or gui.enable_history then
+    -- Show FX on recall checkbox
+    local changed
+    changed, gui.show_fx_on_recall = ImGui.Checkbox(ctx, "Show FX window on recall", gui.show_fx_on_recall)
+    if changed then save_gui_settings() end
+
     -- Only show if at least one feature is enabled and has content
     if (gui.enable_saved_chains and #gui.saved_chains > 0) or (gui.enable_history and #gui.history > 0) then
       local avail_w = ImGui.GetContentRegionAvail(ctx)
@@ -1870,7 +1936,7 @@ local function draw_gui()
 
       -- Left: Saved Chains
       if gui.enable_saved_chains then
-        ImGui.BeginChild(ctx, "SavedCol", col1_w, 150, ImGui.WindowFlags_None)
+        ImGui.BeginChild(ctx, "SavedCol", col1_w, 200, ImGui.WindowFlags_None)
         ImGui.Text(ctx, "SAVED CHAINS")
         ImGui.Separator(ctx)
         local to_delete = nil
@@ -1881,8 +1947,9 @@ local function draw_gui()
             open_saved_chain_fx(i)
           end
           ImGui.SameLine(ctx)
-          -- Chain name button (executes AudioSweet)
-          if ImGui.Button(ctx, chain.name, col1_w - 75, 0) then
+          -- Chain name button (executes AudioSweet) - use available width minus Delete button
+          local avail_width = ImGui.GetContentRegionAvail(ctx) - 25  -- Space for "X" button
+          if ImGui.Button(ctx, chain.name, avail_width, 0) then
             run_saved_chain(i)
           end
           ImGui.SameLine(ctx)
@@ -1900,7 +1967,7 @@ local function draw_gui()
 
       -- Right: History
       if gui.enable_history then
-        ImGui.BeginChild(ctx, "HistoryCol", 0, 150, ImGui.WindowFlags_None)
+        ImGui.BeginChild(ctx, "HistoryCol", 0, 0, ImGui.WindowFlags_None)
         ImGui.Text(ctx, "HISTORY")
         ImGui.SameLine(ctx)
         ImGui.SetCursorPosX(ctx, ImGui.GetCursorPosX(ctx) + ImGui.GetContentRegionAvail(ctx) - 45)
