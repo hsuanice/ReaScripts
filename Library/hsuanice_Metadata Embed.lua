@@ -1,6 +1,6 @@
 --[[
 @description hsuanice Metadata Embed (BWF MetaEdit helpers)
-@version 251010_0037 Remove R.Main_OnCommand(40441, 0) -- Rebuild peaks
+@version 0.1.0-beta (251030.1600)
 @author hsuanice
 @noindex
 @about
@@ -12,7 +12,15 @@
   - Post-embed refresh (offline->online, rebuild peaks)
 
 @changelog
-  v251010_0037 Remove R.Main_OnCommand(40441, 0) -- Rebuild peaks
+  0.1.0-beta (2025-10-30) - Initial Public Beta Release
+    BWF MetaEdit helpers library featuring:
+    - Shell quoting for safe CLI execution
+    - iXML sidecar normalization
+    - TimeReference read/write operations
+    - Post-embed refresh (offline->online, rebuild peaks)
+    - Integration with RGWH Core for BWF TimeReference embed
+
+  Internal Build v251010_0037
     - Rationale: Refresh_Items already does offline->online->rebuild peaks.
     - Prevent redundant peak rebuild (40441) after every single item refresh.
 
