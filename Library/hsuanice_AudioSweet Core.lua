@@ -1,6 +1,6 @@
 --[[
 @description AudioSweet (hsuanice) — Focused Track FX render via RGWH Core, append FX name, rebuild peaks (selected items)
-@version 251030.0845
+@version 251030.1530
 @author Tim Chimes (original), adapted by hsuanice
 @notes
   Reference:
@@ -18,6 +18,15 @@ This version:
   • Track FX only (Take FX not supported)
 
 @changelog
+  251030.1530
+    • Fixed: Chain mode now works without focused FX (CLAP plugin support).
+      - Issue: Core required GetFocusedFX() to return 1 even in chain mode
+      - Solution: Added fallback to first selected track when focus detection fails in chain mode
+      - Logic: if ret_val ~= 1 AND mode == "chain" then use GetSelectedTrack(0, 0)
+      - Location: lines 1725-1734 (main function)
+      - Works with CLAP, VST3, VST, AU plugins
+    • Integration: Works with AudioSweet GUI v251030.1515 (OVERRIDE ExtState mechanism).
+
   251030.0845
     • Changed: All file naming options now read from ExtState instead of hardcoded values.
       - AS_USE_ALIAS: Now reads from ExtState "hsuanice_AS/USE_ALIAS" (line 711)
@@ -1719,7 +1728,20 @@ function main() -- main part of the script
   local sel_snapshot = snapshot_selection()
 
   -- Focused FX check
+  local AS_args = AS_merge_args_with_extstate({})
   local ret_val, tracknumber_Out, itemnumber_Out, fxnumber_Out, window = checkSelectedFX()
+
+  -- In chain mode, if no focused FX, use first selected track as fallback
+  if ret_val ~= 1 and AS_args.mode == "chain" then
+    local first_track = reaper.GetSelectedTrack(0, 0)
+    if first_track then
+      tracknumber_Out = reaper.CSurf_TrackToID(first_track, false)
+      fxnumber_Out = 0
+      ret_val = 1  -- Pretend focus check passed
+      log_step("CHAIN-FALLBACK", "No focused FX, using first selected track (tr#=%d)", tracknumber_Out)
+    end
+  end
+
   if ret_val ~= 1 then
     reaper.MB("Please focus a Track FX (not a Take FX).", "AudioSweet", 0)
     reaper.PreventUIRefresh(-1)
@@ -1737,7 +1759,6 @@ function main() -- main part of the script
            fxIndex, tostring(FXName or ""), tostring(FXNameRaw or ""), tostring(FXmediaTrack))
 
   -- Determine naming token based on mode (focused vs chain)
-  local AS_args = AS_merge_args_with_extstate({})
   local naming_token = FXName
   if AS_args.mode == "chain" then
     naming_token = build_chain_token(FXmediaTrack)
