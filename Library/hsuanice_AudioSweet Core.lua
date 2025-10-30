@@ -1,6 +1,6 @@
 --[[
-@description AudioSweet (hsuanice) — Focused Track FX render via RGWH Core, append FX name, rebuild peaks (selected items)
-@version 251030.1530
+@description AudioSweet — Focused Track FX render via RGWH Core, append FX name, rebuild peaks (selected items)
+@version 0.1.0-beta (251030.1600)
 @author Tim Chimes (original), adapted by hsuanice
 @notes
   Reference:
@@ -10,15 +10,16 @@
   Written by Tim Chimes
   http://chimesaudio.com
 
-This version:
-  • Keep original flow/UX
-  • Replace the render step with hsuanice_RGWH Core
-  • Append the focused Track FX full name to the take name after render
-  • Use Peaks: Rebuild peaks for selected items (40441) instead of the nudge trick
-  • Track FX only (Take FX not supported)
-
 @changelog
-  251030.1530
+  0.1.0-beta (2025-10-30) - Initial Public Beta Release
+    AudioSuite-like workflow with RGWH Core integration featuring:
+    - Focused/Chain modes for Track FX processing
+    - CLAP plugin support with fallback mechanism
+    - Integration with AudioSweet ReaImGui v0.1.0-beta
+    - File naming with FX Alias support
+    - Handle-aware rendering via RGWH Core
+
+  Internal Build 251030.1600
     • Fixed: Chain mode now works without focused FX (CLAP plugin support).
       - Issue: Core required GetFocusedFX() to return 1 even in chain mode
       - Solution: Added fallback to first selected track when focus detection fails in chain mode
