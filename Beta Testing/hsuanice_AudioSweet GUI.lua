@@ -1,7 +1,7 @@
 --[[
 @description AudioSweet GUI - ImGui Interface for AudioSweet
 @author hsuanice
-@version 251030.0910
+@version 251030.1515
 @about
   Complete AudioSweet control center with:
   - Focused/Chain modes with FX chain display
@@ -13,13 +13,36 @@
   - Debug mode with detailed console logging
   - Built-in keyboard shortcuts (Space = Play/Stop, S = Solo toggle)
   - Comprehensive file naming settings with FX Alias support
-
-  Note: Saved Chains and History features are currently disabled (under development).
+  - Saved Chains and History features with CLAP plugin support
 
 @usage
   Run this script in REAPER to open the AudioSweet GUI window.
 
 @changelog
+  251030.1515
+    - Fixed: SAVED CHAINS and HISTORY now work correctly with CLAP plugins.
+      - Issue: AudioSweet Core required focused FX even in chain mode
+      - Solution: Core now uses first selected track as fallback when no focus detected in chain mode
+      - OVERRIDE ExtState mechanism bypasses GetFocusedFX check in Template
+      - Removed unnecessary Action 40271 (Show FX chain) that caused FX browser popup
+      - All execution is silent and clean - no unexpected dialogs or windows
+    - Changed: Enabled SAVED CHAINS and HISTORY features (previously disabled).
+      - Both features now fully functional with simplified focus detection
+      - SAVED CHAINS: Click saved chain name to execute on selected items
+      - HISTORY: Recent operations automatically tracked (configurable size 1-50)
+      - Execution logic simplified: Select track → Set OVERRIDE → Execute Template
+    - Added: "Open" button for each saved chain.
+      - UI layout: [Open] [Chain Name Button] [X]
+      - "Open" button: Opens FX chain window without processing (for viewing/editing FX)
+      - Chain Name button: Executes AudioSweet processing on selected items
+      - "X" button: Deletes saved chain
+      - Allows quick access to FX chain for adjustments before processing
+    - Technical: Chain mode execution no longer requires GetFocusedFX() to succeed.
+      - Template uses OVERRIDE_TRACK_IDX and OVERRIDE_FX_IDX from ExtState
+      - Core falls back to first selected track when focus detection fails
+      - Works reliably with CLAP, VST3, VST, and AU plugins
+    - Integration: Requires AudioSweet Core v251030.1515+ (chain mode fallback support).
+
   251030.0910
     - Changed: Redesigned File Naming Settings UI for better logic and intuitiveness.
       - Removed: "Use FX Alias for file naming" checkbox from global settings
@@ -352,8 +375,8 @@ local gui = {
   preview_restore_mode = 0,   -- 0=timesel, 1=guid
   is_previewing = false,      -- Track if preview is currently playing
   -- Feature flags
-  enable_saved_chains = false,  -- Developing: not functioning properly
-  enable_history = false,       -- Developing: not functioning properly
+  enable_saved_chains = true,   -- Now working with OVERRIDE ExtState mechanism
+  enable_history = true,        -- Now working with OVERRIDE ExtState mechanism
 }
 
 ------------------------------------------------------------
@@ -848,42 +871,20 @@ local function run_audiosweet(override_track)
       return
     end
 
-    -- Show and focus the first FX on target track
-    -- Try method 1: Show FX chain window (3 = show chain + focus)
-    r.TrackFX_Show(target_track, 0, 3)
-
-    -- Wait and check if focused (up to 1 second)
-    local start_time = r.time_precise()
-    local focused = false
-    local attempts = 0
-    while r.time_precise() - start_time < 1.0 do
-      local retval, trackidx, itemidx, fxidx = r.GetFocusedFX()
-      if retval > 0 then
-        focused = true
-        break
-      end
-
-      -- Try alternative methods every 250ms
-      if attempts == 0 and r.time_precise() - start_time > 0.25 then
-        -- Method 2: Show individual FX window
-        r.TrackFX_Show(target_track, 0, 1)  -- 1 = show floating window
-        attempts = attempts + 1
-      elseif attempts == 1 and r.time_precise() - start_time > 0.5 then
-        -- Method 3: Try showing chain again
-        r.TrackFX_Show(target_track, 0, 3)
-        attempts = attempts + 1
-      end
-    end
-
-    if not focused then
-      gui.last_result = "Error: Could not focus FX (CLAP plugins may need manual focus)"
-      gui.is_running = false
-      return
-    end
+    -- Select track (no need to open FX chain window)
+    -- Note: OVERRIDE ExtState tells Template which track to use
+    r.SetOnlyTrackSelected(target_track)
+    r.SetMixerScroll(target_track)
 
     -- Set ExtState for AudioSweet (chain mode)
     set_extstate_from_gui()
     r.SetExtState("hsuanice_AS", "AS_MODE", "chain", false)
+
+    -- Set OVERRIDE ExtState to specify track and FX for Template
+    -- (bypasses GetFocusedFX check which fails for CLAP plugins)
+    local track_idx = r.CSurf_TrackToID(target_track, false) - 1  -- Convert to 0-based index
+    r.SetExtState("hsuanice_AS", "OVERRIDE_TRACK_IDX", tostring(track_idx), false)
+    r.SetExtState("hsuanice_AS", "OVERRIDE_FX_IDX", "0", false)  -- Chain mode uses first FX
 
     -- Run AudioSweet Template
     local ok, err = pcall(dofile, TEMPLATE_PATH)
@@ -966,7 +967,7 @@ local function run_saved_chain_apply_mode(tr, chain_name, item_count)
     r.ShowConsoleMsg(string.format("[AS GUI] Saved chain apply: '%s' (items=%d)\n", chain_name, item_count))
   end
 
-  -- Focus first FX on the track to allow AudioSweet Template to work
+  -- Check if track has FX
   local fx_count = r.TrackFX_GetCount(tr)
   if fx_count == 0 then
     gui.last_result = "Error: No FX on track"
@@ -975,54 +976,16 @@ local function run_saved_chain_apply_mode(tr, chain_name, item_count)
   end
 
   if gui.debug then
-    r.ShowConsoleMsg(string.format("[AS GUI] Track has %d FX, attempting to focus...\n", fx_count))
+    r.ShowConsoleMsg(string.format("[AS GUI] Track has %d FX\n", fx_count))
   end
 
-  -- Show and focus the first FX
-  -- Try method 1: Show FX chain window (3 = show chain + focus)
-  r.TrackFX_Show(tr, 0, 3)
-
-  -- Wait and check if focused (up to 1 second, check every 50ms)
-  local start_time = r.time_precise()
-  local focused = false
-  local attempts = 0
-  while r.time_precise() - start_time < 1.0 do
-    local retval, trackidx, itemidx, fxidx = r.GetFocusedFX()
-    if retval > 0 then
-      focused = true
-      break
-    end
-
-    -- Try alternative methods every 250ms
-    if attempts == 0 and r.time_precise() - start_time > 0.25 then
-      if gui.debug then
-        r.ShowConsoleMsg("[AS GUI] Focus method 1 failed, trying floating window...\n")
-      end
-      -- Method 2: Show individual FX window
-      r.TrackFX_Show(tr, 0, 1)  -- 1 = show floating window
-      attempts = attempts + 1
-    elseif attempts == 1 and r.time_precise() - start_time > 0.5 then
-      if gui.debug then
-        r.ShowConsoleMsg("[AS GUI] Focus method 2 failed, retrying chain window...\n")
-      end
-      -- Method 3: Try showing chain again
-      r.TrackFX_Show(tr, 0, 3)
-      attempts = attempts + 1
-    end
-  end
-
-  if not focused then
-    if gui.debug then
-      r.ShowConsoleMsg("[AS GUI] ERROR: Could not focus FX after all attempts\n")
-    end
-    gui.last_result = "Error: Could not focus FX (CLAP plugins may need manual focus)"
-    gui.is_running = false
-    return
-  end
+  -- Select track (no need to open FX chain window)
+  -- Note: OVERRIDE ExtState tells Template which track to use
+  r.SetOnlyTrackSelected(tr)
+  r.SetMixerScroll(tr)
 
   if gui.debug then
-    local elapsed = r.time_precise() - start_time
-    r.ShowConsoleMsg(string.format("[AS GUI] FX focused successfully (%.3fs, %d attempts)\n", elapsed, attempts + 1))
+    r.ShowConsoleMsg("[AS GUI] Track selected and set as last touched\n")
   end
 
   -- Set ExtState for AudioSweet (chain mode)
@@ -1031,6 +994,16 @@ local function run_saved_chain_apply_mode(tr, chain_name, item_count)
   r.SetExtState("hsuanice_AS", "AS_MODE", "chain", false)
   r.SetExtState("hsuanice_AS", "AS_ACTION", action_names[gui.action + 1], false)
   r.SetExtState("hsuanice_AS", "DEBUG", gui.debug and "1" or "0", false)
+
+  -- Set OVERRIDE ExtState to specify track and FX for Template
+  -- (bypasses GetFocusedFX check which fails for CLAP plugins)
+  local track_idx = r.CSurf_TrackToID(tr, false) - 1  -- Convert to 0-based index
+  r.SetExtState("hsuanice_AS", "OVERRIDE_TRACK_IDX", tostring(track_idx), false)
+  r.SetExtState("hsuanice_AS", "OVERRIDE_FX_IDX", "0", false)  -- Chain mode uses first FX
+
+  if gui.debug then
+    r.ShowConsoleMsg(string.format("[AS GUI] OVERRIDE set: track_idx=%d fx_idx=0\n", track_idx))
+  end
   r.SetExtState("hsuanice_AS", "AS_SHOW_SUMMARY", "0", false)
   r.SetProjExtState(0, "RGWH", "HANDLE_SECONDS", tostring(gui.handle_seconds))
   r.SetProjExtState(0, "RGWH", "DEBUG_LEVEL", gui.debug and "2" or "0")
@@ -1057,6 +1030,24 @@ local function run_saved_chain_apply_mode(tr, chain_name, item_count)
   end
 
   gui.is_running = false
+end
+
+local function open_saved_chain_fx(chain_idx)
+  local chain = gui.saved_chains[chain_idx]
+  if not chain then return end
+
+  local tr = find_track_by_guid(chain.track_guid)
+  if not tr then
+    gui.last_result = string.format("Error: Track '%s' not found", chain.track_name)
+    return
+  end
+
+  -- Select track and open FX chain window
+  r.SetOnlyTrackSelected(tr)
+  r.SetMixerScroll(tr)
+  r.Main_OnCommand(40271, 0)  -- View: Show FX chain for current/last touched track
+
+  gui.last_result = string.format("Opened FX chain: %s", chain.name)
 end
 
 local function run_saved_chain(chain_idx)
@@ -1113,40 +1104,25 @@ local function run_history_focused_apply(tr, fx_name, fx_idx, item_count)
   r.SetOnlyTrackSelected(tr)
   r.SetMixerScroll(tr)
 
-  -- Use REAPER action to open/focus specific FX
+  -- Open specific FX window
   -- Actions 41749-41756 = Open/close UI for FX #1-8 on last touched track
+  -- Note: Focus detection is not required - Template will work regardless
   if fx_idx <= 7 then
     local action_id = 41749 + fx_idx  -- 41749 = FX #1, 41750 = FX #2, etc.
     if gui.debug then
-      r.ShowConsoleMsg(string.format("[AS GUI] Using REAPER action %d to focus FX #%d\n", action_id, fx_idx + 1))
+      r.ShowConsoleMsg(string.format("[AS GUI] Opening FX #%d window (action %d)\n", fx_idx + 1, action_id))
     end
     r.Main_OnCommand(action_id, 0)
   else
     -- For FX #9+, use TrackFX_Show
     if gui.debug then
-      r.ShowConsoleMsg(string.format("[AS GUI] Using TrackFX_Show for FX #%d (beyond action range)\n", fx_idx + 1))
+      r.ShowConsoleMsg(string.format("[AS GUI] Opening FX #%d window (TrackFX_Show)\n", fx_idx + 1))
     end
     r.TrackFX_Show(tr, fx_idx, 3)
   end
 
-  -- Wait for FX to be focused (up to 500ms)
-  local start_time = r.time_precise()
-  local focused = false
-  while r.time_precise() - start_time < 0.5 do
-    local retval, trackOut, itemOut, fxOut = r.GetFocusedFX()
-    if retval == 1 and normalize_focused_fx_index(fxOut) == fx_idx then
-      focused = true
-      if gui.debug then
-        r.ShowConsoleMsg(string.format("[AS GUI] FX focused successfully after %.3fs\n", r.time_precise() - start_time))
-      end
-      break
-    end
-  end
-
-  if not focused then
-    if gui.debug then
-      r.ShowConsoleMsg("[AS GUI] WARNING: FX focus timeout, proceeding anyway\n")
-    end
+  if gui.debug then
+    r.ShowConsoleMsg("[AS GUI] FX window opened (focus detection not required)\n")
   end
 
   -- Set ExtState for AudioSweet (focused mode)
@@ -1786,10 +1762,17 @@ local function draw_gui()
         local to_delete = nil
         for i, chain in ipairs(gui.saved_chains) do
           ImGui.PushID(ctx, i)
-          if ImGui.Button(ctx, chain.name, col1_w - 25, 0) then
+          -- "Open" button (small, on the left)
+          if ImGui.SmallButton(ctx, "Open") then
+            open_saved_chain_fx(i)
+          end
+          ImGui.SameLine(ctx)
+          -- Chain name button (executes AudioSweet)
+          if ImGui.Button(ctx, chain.name, col1_w - 75, 0) then
             run_saved_chain(i)
           end
           ImGui.SameLine(ctx)
+          -- Delete button
           if ImGui.Button(ctx, "X", 20, 0) then
             to_delete = i
           end
