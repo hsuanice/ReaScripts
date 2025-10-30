@@ -1,12 +1,19 @@
 --[[
 @description AudioSweet Preview Core
-@author Hsuanice
-@version v251017_1337 removed all Chinese inline comments
-
+@author hsuanice
+@version 0.1.0-beta (251030.1600)
 
 @about Minimal, self-contained preview runtime. Later we can extract helpers to "hsuanice_AS Core.lua".
+
 @changelog
-  v251017_1337
+  0.1.0-beta (2025-10-30) - Initial Public Beta Release
+    Minimal preview runtime for AudioSweet with:
+    - High-precision timing using reaper.time_precise()
+    - Handle-aware edge/glue cue policies
+    - Selection restore with verification
+    - Integration with AudioSweet ReaImGui and RGWH Core
+
+  Internal Build v251017_1337
     - Verified: removed all Chinese inline comments; file is now fully English-only for public release.
     - Checked: indentation, spacing, and comment alignment preserved exactly.
     - No functional or behavioral changes; logic identical to v251016_2305.
