@@ -1,6 +1,6 @@
 --[[
 @description AudioSweet (hsuanice) — Focused Track FX render via RGWH Core, append FX name, rebuild peaks (selected items)
-@version 251029_1930
+@version 251030.0845
 @author Tim Chimes (original), adapted by hsuanice
 @notes
   Reference:
@@ -18,6 +18,36 @@ This version:
   • Track FX only (Take FX not supported)
 
 @changelog
+  251030.0845
+    • Changed: All file naming options now read from ExtState instead of hardcoded values.
+      - AS_USE_ALIAS: Now reads from ExtState "hsuanice_AS/USE_ALIAS" (line 711)
+        • Allows GUI to dynamically toggle FX alias usage
+        • Default: false (disabled)
+      - AS_MAX_FX_TOKENS: Now reads from ExtState "hsuanice_AS/AS_MAX_FX_TOKENS" (lines 415-419)
+        • Controls FIFO cap for FX tokens in file names
+        • Default: 3 tokens
+      - AS_CHAIN_TOKEN_SOURCE: Now reads from ExtState "hsuanice_AS/AS_CHAIN_TOKEN_SOURCE" (lines 426-429)
+        • Options: "track" (use track name), "aliases" (use FX aliases), "fxchain" (literal "FXChain")
+        • Default: "track"
+      - AS_CHAIN_ALIAS_JOINER: Now reads from ExtState "hsuanice_AS/AS_CHAIN_ALIAS_JOINER" (lines 433-435)
+        • Separator when using aliases mode
+        • Default: "" (empty, no separator)
+      - SANITIZE_TOKEN_FOR_FILENAME: Now reads from ExtState "hsuanice_AS/SANITIZE_TOKEN_FOR_FILENAME" (lines 439-441)
+        • Strip unsafe filename characters from tokens
+        • Default: false
+      - TRACKNAME_STRIP_SYMBOLS: Now reads from ExtState "hsuanice_AS/TRACKNAME_STRIP_SYMBOLS" (lines 446-449)
+        • Strip all non-alphanumeric chars from track names (FX-like short name)
+        • Default: true
+    • Updated: All functions now call getter functions instead of using global constants.
+      - sanitize_token() uses get_sanitize_token_for_filename() (line 613)
+      - track_name_token() uses get_trackname_strip_symbols() (line 623)
+      - build_chain_token() uses get_chain_token_source() and get_chain_alias_joiner() (lines 1002, 1021)
+      - max_fx_tokens() uses get_max_fx_tokens() (line 1343)
+    • Integration: AudioSweet GUI v251030.0845+ required for new naming settings.
+      - GUI's "File Naming Settings" menu controls all these options
+      - Settings automatically sync between GUI and Core via ExtState
+      - Ensures consistent file naming behavior across all workflows
+
   251029_1930
     • CRITICAL FIX: Changed all chanmode reads to use GetMediaItemTakeInfo_Value() instead of GetMediaItemInfo_Value()!
       - Root cause: Channel mode is stored on the TAKE, not the ITEM
@@ -411,23 +441,42 @@ This version:
 -- === User options ===
 -- How many FX names to keep in the "-ASn-..." suffix.
 -- 0 or nil = unlimited; N>0 = keep last N tokens (FIFO).
-local AS_MAX_FX_TOKENS = 3
+-- Now reads from ExtState: hsuanice_AS/AS_MAX_FX_TOKENS
+local function get_max_fx_tokens()
+  local val = reaper.GetExtState("hsuanice_AS", "AS_MAX_FX_TOKENS")
+  local n = tonumber(val)
+  return (n and n > 0) and n or 3  -- default: 3
+end
 
 -- Chain token source (for chain mode):
 --   "aliases" -> use enabled Track FX aliases in order (joined by AS_CHAIN_ALIAS_JOINER)
 --   "fxchain" -> literal token "FXChain"
 --   "track"   -> use the FX track's name (sanitized)
-local AS_CHAIN_TOKEN_SOURCE = "track"
+-- Now reads from ExtState: hsuanice_AS/AS_CHAIN_TOKEN_SOURCE
+local function get_chain_token_source()
+  local val = reaper.GetExtState("hsuanice_AS", "AS_CHAIN_TOKEN_SOURCE")
+  return (val ~= "") and val or "track"  -- default: "track"
+end
 
 -- When AS_CHAIN_TOKEN_SOURCE="aliases", use this joiner to connect alias tokens
-local AS_CHAIN_ALIAS_JOINER = ""
+-- Now reads from ExtState: hsuanice_AS/AS_CHAIN_ALIAS_JOINER
+local function get_chain_alias_joiner()
+  return reaper.GetExtState("hsuanice_AS", "AS_CHAIN_ALIAS_JOINER")  -- default: "" (empty)
+end
 
 -- If true, strip unsafe filename characters from chain tokens (for "track" mode & others)
-local SANITIZE_TOKEN_FOR_FILENAME = false
+-- Now reads from ExtState: hsuanice_AS/SANITIZE_TOKEN_FOR_FILENAME
+local function get_sanitize_token_for_filename()
+  return reaper.GetExtState("hsuanice_AS", "SANITIZE_TOKEN_FOR_FILENAME") == "1"  -- default: false
+end
 
 -- Track name token style: when true, strip ALL non-alphanumeric (FX-like short name).
 -- When false, fall back to sanitize_token (underscores etc.).
-local TRACKNAME_STRIP_SYMBOLS = true
+-- Now reads from ExtState: hsuanice_AS/TRACKNAME_STRIP_SYMBOLS
+local function get_trackname_strip_symbols()
+  local val = reaper.GetExtState("hsuanice_AS", "TRACKNAME_STRIP_SYMBOLS")
+  return (val == "") and true or (val == "1")  -- default: true
+end
 
 -- Naming-only debug (console print before/after renaming).
 -- Now controlled by ExtState: hsuanice_AS/DEBUG
@@ -591,7 +640,7 @@ end
 -- ==== Chain token helpers (for chain mode naming) ====
 local function sanitize_token(s)
   s = tostring(s or "")
-  if SANITIZE_TOKEN_FOR_FILENAME then
+  if get_sanitize_token_for_filename() then
     s = s:gsub("[^%w]+", "_"):gsub("^_+", ""):gsub("_+$", "")
   end
   return s
@@ -601,7 +650,7 @@ local function track_name_token(FXtrack)
   if not FXtrack then return "" end
   local _, tn = reaper.GetTrackName(FXtrack)
   tn = tn or ""
-  if TRACKNAME_STRIP_SYMBOLS then
+  if get_trackname_strip_symbols() then
     tn = tn:gsub("%b()", "")
            :gsub("[^%w]+","")
   else
@@ -708,7 +757,7 @@ local AS_ALIAS_JSON_PATH = reaper.GetResourcePath() ..
   "/Scripts/hsuanice Scripts/Settings/fx_alias.json"
 local AS_ALIAS_TSV_PATH = reaper.GetResourcePath() ..
   "/Scripts/hsuanice Scripts/Settings/fx_alias.tsv"
-local AS_USE_ALIAS   = true   -- set to false to temporarily disable alias
+local AS_USE_ALIAS   = (reaper.GetExtState("hsuanice_AS","USE_ALIAS") == "1")
 local AS_DEBUG_ALIAS = (reaper.GetExtState("hsuanice_AS","AS_DEBUG_ALIAS") == "1")
 
 -- Simple normalization: lowercase, remove non-alphanumeric
@@ -980,9 +1029,10 @@ end
 -- =============================================
 -- ==== Chain token builder (moved here after format_fx_label is defined) ====
 local function build_chain_token(FXtrack)
-  if AS_CHAIN_TOKEN_SOURCE == "fxchain" then
+  local source = get_chain_token_source()
+  if source == "fxchain" then
     return "FXChain"
-  elseif AS_CHAIN_TOKEN_SOURCE == "track" then
+  elseif source == "track" then
     return track_name_token(FXtrack)
   end
 
@@ -998,7 +1048,7 @@ local function build_chain_token(FXtrack)
       if name and name ~= "" then list[#list+1] = name end
     end
   end
-  return table.concat(list, AS_CHAIN_ALIAS_JOINER)
+  return table.concat(list, get_chain_alias_joiner())
 end
 
 -- =============================================
@@ -1320,7 +1370,7 @@ local append_fx_to_take_name
 
 -- Max FX tokens cap (via user option AS_MAX_FX_TOKENS)
 local function max_fx_tokens()
-  local n = tonumber(AS_MAX_FX_TOKENS)
+  local n = get_max_fx_tokens()
   if not n or n < 1 then
     return math.huge -- unlimited
   end
@@ -1693,7 +1743,7 @@ function main() -- main part of the script
     naming_token = build_chain_token(FXmediaTrack)
     if naming_token == "" then naming_token = FXName end
     log_step("CHAIN-TOKEN", "mode=chain  token='%s' (source=%s)",
-             tostring(naming_token), tostring(AS_CHAIN_TOKEN_SOURCE))
+             tostring(naming_token), tostring(get_chain_token_source()))
   end
 
   -- === Early branch: COPY mode (non-destructive; no rename) ===
