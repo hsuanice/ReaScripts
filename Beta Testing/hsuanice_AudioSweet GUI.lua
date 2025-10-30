@@ -1,7 +1,7 @@
 --[[
 @description AudioSweet GUI - ImGui Interface for AudioSweet
 @author hsuanice
-@version 251030.0845
+@version 251030.0910
 @about
   Complete AudioSweet control center with:
   - Focused/Chain modes with FX chain display
@@ -20,6 +20,28 @@
   Run this script in REAPER to open the AudioSweet GUI window.
 
 @changelog
+  251030.0910
+    - Changed: Redesigned File Naming Settings UI for better logic and intuitiveness.
+      - Removed: "Use FX Alias for file naming" checkbox from global settings
+      - Changed: FX Alias usage now controlled by "Chain Token Source" selection
+      - New structure:
+        1. Global FX Name Settings (applies to Focused & Chain modes)
+           - Show Plugin Type, Show Vendor Name, Strip Spaces & Symbols, Max FX Tokens
+        2. Chain Mode Specific Settings
+           - Chain Token Source: Track Name / FX Aliases / FXChain
+           - When "FX Aliases" is selected, alias database is automatically used
+           - Alias Joiner (only shown when FX Aliases is selected)
+           - Strip Symbols from Track Names
+        3. File Name Safety
+           - Sanitize tokens for safe filenames
+      - Improved: Clear cyan help text appears when "FX Aliases" is selected
+      - Logic: Chain Token Source = "FX Aliases" forces USE_ALIAS=1 regardless of other settings
+      - More intuitive: No need to toggle multiple switches to enable alias mode
+    - Updated: Debug output now shows Chain Token Source instead of Use FX Alias
+      - Shows "Chain Token Source: Track Name/FX Aliases/FXChain"
+      - Shows "Chain Alias Joiner" value when FX Aliases mode is active
+      - Clearer indication of current naming mode
+
   251030.0845
     - Changed: File naming settings consolidated into single Settings menu.
       - Removed: "FX Name Formatting..." menu (replaced with comprehensive settings)
@@ -429,7 +451,14 @@ local function load_gui_settings()
     r.ShowConsoleMsg(string.format("  FX Name - Show Type: %s\n", gui.fxname_show_type and "ON" or "OFF"))
     r.ShowConsoleMsg(string.format("  FX Name - Show Vendor: %s\n", gui.fxname_show_vendor and "ON" or "OFF"))
     r.ShowConsoleMsg(string.format("  FX Name - Strip Symbol: %s\n", gui.fxname_strip_symbol and "ON" or "OFF"))
-    r.ShowConsoleMsg(string.format("  Use FX Alias: %s\n", gui.use_alias and "ON" or "OFF"))
+    r.ShowConsoleMsg(string.format("  FX Name - Use Alias: %s\n", gui.use_alias and "ON" or "OFF"))
+    r.ShowConsoleMsg(string.format("  Max FX Tokens: %d\n", gui.max_fx_tokens))
+    local chain_token_source_names = {"Track Name", "FX Aliases", "FXChain"}
+    r.ShowConsoleMsg(string.format("  Chain Token Source: %s\n", chain_token_source_names[gui.chain_token_source + 1]))
+    if gui.chain_token_source == 1 then
+      r.ShowConsoleMsg(string.format("  Chain Alias Joiner: '%s'\n", gui.chain_alias_joiner))
+    end
+    r.ShowConsoleMsg(string.format("  Track Name Strip Symbols: %s\n", gui.trackname_strip_symbols and "ON" or "OFF"))
     r.ShowConsoleMsg(string.format("  Preview Target Track: %s\n", gui.preview_target_track))
     local solo_scope_names = {"Track Solo", "Item Solo"}
     r.ShowConsoleMsg(string.format("  Preview Solo Scope: %s\n", solo_scope_names[gui.preview_solo_scope + 1]))
@@ -1321,7 +1350,7 @@ local function draw_gui()
 
     if ImGui.BeginMenu(ctx, 'Help') then
       if ImGui.MenuItem(ctx, 'About', nil, false, true) then
-        r.ShowConsoleMsg("[AudioSweet GUI] Version v251030.0845\n" ..
+        r.ShowConsoleMsg("[AudioSweet GUI] Version v251030.0910\n" ..
           "Complete AudioSweet control center\n" ..
           "Features: File Naming Settings, FX Alias Tools, Debug Logging, Preview Integration, Persistent Settings\n")
       end
@@ -1372,8 +1401,9 @@ local function draw_gui()
     local changed = false
     local rv
 
-    -- === FX Name Formatting Section ===
-    ImGui.Text(ctx, "FX Name Formatting:")
+    -- === Global FX Name Settings (applies to Focused & Chain modes) ===
+    ImGui.Text(ctx, "Global FX Name Settings:")
+    ImGui.TextDisabled(ctx, "(applies to both Focused and Chain modes)")
     ImGui.Separator(ctx)
 
     rv, gui.fxname_show_type = ImGui.Checkbox(ctx, "Show Plugin Type (CLAP:, VST3:, AU:, VST:)", gui.fxname_show_type)
@@ -1388,12 +1418,23 @@ local function draw_gui()
     rv, gui.use_alias = ImGui.Checkbox(ctx, "Use FX Alias for file naming", gui.use_alias)
     if rv then changed = true end
 
+    ImGui.Text(ctx, "Max FX Tokens:")
+    ImGui.SameLine(ctx)
+    ImGui.SetNextItemWidth(ctx, 80)
+    rv, gui.max_fx_tokens = ImGui.InputInt(ctx, "##max_tokens", gui.max_fx_tokens)
+    if rv then
+      gui.max_fx_tokens = math.max(1, math.min(10, gui.max_fx_tokens))
+      changed = true
+    end
+    ImGui.SameLine(ctx)
+    ImGui.TextDisabled(ctx, "(FIFO limit, 1-10)")
+
     ImGui.Spacing(ctx)
     ImGui.Separator(ctx)
     ImGui.Spacing(ctx)
 
-    -- === Chain Mode Naming Section ===
-    ImGui.Text(ctx, "Chain Mode Naming:")
+    -- === Chain Mode Specific Settings ===
+    ImGui.Text(ctx, "Chain Mode Specific Settings:")
     ImGui.Separator(ctx)
 
     ImGui.Text(ctx, "Chain Token Source:")
@@ -1422,17 +1463,6 @@ local function draw_gui()
       ImGui.SameLine(ctx)
       ImGui.TextDisabled(ctx, "(separator between aliases)")
     end
-
-    ImGui.Text(ctx, "Max FX Tokens:")
-    ImGui.SameLine(ctx)
-    ImGui.SetNextItemWidth(ctx, 80)
-    rv, gui.max_fx_tokens = ImGui.InputInt(ctx, "##max_tokens", gui.max_fx_tokens)
-    if rv then
-      gui.max_fx_tokens = math.max(1, math.min(10, gui.max_fx_tokens))
-      changed = true
-    end
-    ImGui.SameLine(ctx)
-    ImGui.TextDisabled(ctx, "(FIFO limit, 1-10)")
 
     rv, gui.trackname_strip_symbols = ImGui.Checkbox(ctx, "Strip Symbols from Track Names", gui.trackname_strip_symbols)
     if rv then changed = true end
@@ -1860,7 +1890,14 @@ local function loop()
       r.ShowConsoleMsg(string.format("  FX Name - Show Type: %s\n", gui.fxname_show_type and "ON" or "OFF"))
       r.ShowConsoleMsg(string.format("  FX Name - Show Vendor: %s\n", gui.fxname_show_vendor and "ON" or "OFF"))
       r.ShowConsoleMsg(string.format("  FX Name - Strip Symbol: %s\n", gui.fxname_strip_symbol and "ON" or "OFF"))
-      r.ShowConsoleMsg(string.format("  Use FX Alias: %s\n", gui.use_alias and "ON" or "OFF"))
+      r.ShowConsoleMsg(string.format("  FX Name - Use Alias: %s\n", gui.use_alias and "ON" or "OFF"))
+      r.ShowConsoleMsg(string.format("  Max FX Tokens: %d\n", gui.max_fx_tokens))
+      local chain_token_source_names = {"Track Name", "FX Aliases", "FXChain"}
+      r.ShowConsoleMsg(string.format("  Chain Token Source: %s\n", chain_token_source_names[gui.chain_token_source + 1]))
+      if gui.chain_token_source == 1 then
+        r.ShowConsoleMsg(string.format("  Chain Alias Joiner: '%s'\n", gui.chain_alias_joiner))
+      end
+      r.ShowConsoleMsg(string.format("  Track Name Strip Symbols: %s\n", gui.trackname_strip_symbols and "ON" or "OFF"))
       r.ShowConsoleMsg(string.format("  Preview Target Track: %s\n", gui.preview_target_track))
       local solo_scope_names = {"Track Solo", "Item Solo"}
       r.ShowConsoleMsg(string.format("  Preview Solo Scope: %s\n", solo_scope_names[gui.preview_solo_scope + 1]))
