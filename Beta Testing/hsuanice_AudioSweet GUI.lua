@@ -1,7 +1,7 @@
 --[[
 @description AudioSweet GUI - ImGui Interface for AudioSweet
 @author hsuanice
-@version 251029.2110
+@version 251030.0845
 @about
   Complete AudioSweet control center with:
   - Focused/Chain modes with FX chain display
@@ -12,6 +12,7 @@
   - Improved auto-focus FX with CLAP plugin support
   - Debug mode with detailed console logging
   - Built-in keyboard shortcuts (Space = Play/Stop, S = Solo toggle)
+  - Comprehensive file naming settings with FX Alias support
 
   Note: Saved Chains and History features are currently disabled (under development).
 
@@ -19,6 +20,34 @@
   Run this script in REAPER to open the AudioSweet GUI window.
 
 @changelog
+  251030.0845
+    - Changed: File naming settings consolidated into single Settings menu.
+      - Removed: "FX Name Formatting..." menu (replaced with comprehensive settings)
+      - Added: "File Naming Settings..." menu consolidating all naming options
+      - FX Name Formatting: Show Type/Vendor, Strip Symbols, Use FX Alias
+      - Chain Mode Naming: Token Source (Track Name/FX Aliases/FXChain), Alias Joiner, Max FX Tokens, Track Name Strip Symbols
+      - File Name Safety: Sanitize tokens for safe filenames
+      - All settings persist between sessions and pass to AudioSweet Core via ExtState
+    - Removed: Apply Method (Auto/Render/Glue) option from GUI.
+      - AudioSweet Core now uses default behavior: Single item → Render, Multiple items → Glue
+      - Simplified UI by removing unnecessary option (Auto mode works well for most cases)
+    - Fixed: USE_ALIAS setting now correctly toggles FX Alias usage.
+      - AudioSweet Core now reads USE_ALIAS from ExtState instead of hardcoded value
+      - GUI setting "Use FX Alias for file naming" now properly controls alias behavior
+    - Added: Comprehensive debug logging for all user interactions.
+      - Script startup: Outputs all current settings when debug mode is enabled
+      - Script close: Outputs final settings when closing
+      - SOLO button: Shows scope (Track/Item Solo) and command ID
+      - Keyboard shortcuts: Shows Space (Play/Stop) and S (Solo) key presses
+    - Added: FX Alias Tools submenu in Settings menu.
+      - Build FX Alias Database: Scans all plugins and creates/updates alias database
+      - Export JSON to TSV: Converts JSON database to TSV for manual editing
+      - Update TSV to JSON: Imports edited TSV back to JSON database
+      - All tools accessible from GUI without needing to run separate scripts
+    - Integration: AudioSweet Core v251030.0845+ required for new naming settings.
+      - Core now reads all naming options from ExtState (chain token source, alias joiner, max tokens, etc.)
+      - Ensures GUI and Core are always in sync for file naming behavior
+
   251029.2110
     - Improved: Preview Target Track Name moved to main GUI
       - Appears automatically when Chain mode is selected (lines 1395-1407)
@@ -265,7 +294,6 @@ local gui = {
   action = 0,            -- 0=apply, 1=copy
   copy_scope = 0,
   copy_pos = 0,
-  apply_method = 0,
   channel_mode = 0,      -- 0=auto, 1=mono, 2=multi
   handle_seconds = 5.0,
   debug = false,
@@ -275,6 +303,13 @@ local gui = {
   fxname_show_type = true,     -- Show FX type prefix (CLAP:, VST3:, etc.)
   fxname_show_vendor = true,  -- Show vendor name in parentheses
   fxname_strip_symbol = true,  -- Strip spaces and symbols
+  use_alias = false,           -- Use FX Alias for file naming
+  -- Chain mode naming
+  chain_token_source = 0,      -- 0=track, 1=aliases, 2=fxchain
+  chain_alias_joiner = "",     -- Joiner for aliases mode
+  max_fx_tokens = 3,           -- FIFO limit for FX tokens
+  trackname_strip_symbols = true,  -- Strip symbols from track names
+  sanitize_token = false,      -- Sanitize tokens for safe filenames
   is_running = false,
   last_result = "",
   focused_fx_name = "",
@@ -288,6 +323,7 @@ local gui = {
   show_settings_popup = false,
   show_fxname_popup = false,
   show_preview_settings = false,
+  show_naming_popup = false,
   -- Preview settings
   preview_target_track = "AudioSweet",
   preview_solo_scope = 0,     -- 0=track, 1=item
@@ -308,7 +344,6 @@ local function save_gui_settings()
   r.SetExtState(SETTINGS_NAMESPACE, "action", tostring(gui.action), true)
   r.SetExtState(SETTINGS_NAMESPACE, "copy_scope", tostring(gui.copy_scope), true)
   r.SetExtState(SETTINGS_NAMESPACE, "copy_pos", tostring(gui.copy_pos), true)
-  r.SetExtState(SETTINGS_NAMESPACE, "apply_method", tostring(gui.apply_method), true)
   r.SetExtState(SETTINGS_NAMESPACE, "channel_mode", tostring(gui.channel_mode), true)
   r.SetExtState(SETTINGS_NAMESPACE, "handle_seconds", tostring(gui.handle_seconds), true)
   r.SetExtState(SETTINGS_NAMESPACE, "debug", gui.debug and "1" or "0", true)
@@ -318,6 +353,12 @@ local function save_gui_settings()
   r.SetExtState(SETTINGS_NAMESPACE, "fxname_show_type", gui.fxname_show_type and "1" or "0", true)
   r.SetExtState(SETTINGS_NAMESPACE, "fxname_show_vendor", gui.fxname_show_vendor and "1" or "0", true)
   r.SetExtState(SETTINGS_NAMESPACE, "fxname_strip_symbol", gui.fxname_strip_symbol and "1" or "0", true)
+  r.SetExtState(SETTINGS_NAMESPACE, "use_alias", gui.use_alias and "1" or "0", true)
+  r.SetExtState(SETTINGS_NAMESPACE, "chain_token_source", tostring(gui.chain_token_source), true)
+  r.SetExtState(SETTINGS_NAMESPACE, "chain_alias_joiner", gui.chain_alias_joiner, true)
+  r.SetExtState(SETTINGS_NAMESPACE, "max_fx_tokens", tostring(gui.max_fx_tokens), true)
+  r.SetExtState(SETTINGS_NAMESPACE, "trackname_strip_symbols", gui.trackname_strip_symbols and "1" or "0", true)
+  r.SetExtState(SETTINGS_NAMESPACE, "sanitize_token", gui.sanitize_token and "1" or "0", true)
   -- Preview settings
   r.SetExtState(SETTINGS_NAMESPACE, "preview_target_track", gui.preview_target_track, true)
   r.SetExtState(SETTINGS_NAMESPACE, "preview_solo_scope", tostring(gui.preview_solo_scope), true)
@@ -345,7 +386,6 @@ local function load_gui_settings()
   gui.action = get_int("action", 0)
   gui.copy_scope = get_int("copy_scope", 0)
   gui.copy_pos = get_int("copy_pos", 0)
-  gui.apply_method = get_int("apply_method", 0)
   gui.channel_mode = get_int("channel_mode", 0)
   gui.handle_seconds = get_float("handle_seconds", 5.0)
   gui.debug = get_bool("debug", false)
@@ -355,14 +395,48 @@ local function load_gui_settings()
   gui.fxname_show_type = get_bool("fxname_show_type", true)
   gui.fxname_show_vendor = get_bool("fxname_show_vendor", false)
   gui.fxname_strip_symbol = get_bool("fxname_strip_symbol", true)
+  gui.use_alias = get_bool("use_alias", false)
+  gui.chain_token_source = get_int("chain_token_source", 0)
+  gui.max_fx_tokens = get_int("max_fx_tokens", 3)
+  gui.trackname_strip_symbols = get_bool("trackname_strip_symbols", true)
+  gui.sanitize_token = get_bool("sanitize_token", false)
   -- Preview settings
   local function get_string(key, default)
     local val = r.GetExtState(SETTINGS_NAMESPACE, key)
     return (val ~= "") and val or default
   end
+  gui.chain_alias_joiner = get_string("chain_alias_joiner", "")
   gui.preview_target_track = get_string("preview_target_track", "AudioSweet")
   gui.preview_solo_scope = get_int("preview_solo_scope", 0)
   gui.preview_restore_mode = get_int("preview_restore_mode", 0)
+
+  -- Debug output on startup
+  if gui.debug then
+    r.ShowConsoleMsg("========================================\n")
+    r.ShowConsoleMsg("[AS GUI] Script startup - Current settings:\n")
+    r.ShowConsoleMsg("========================================\n")
+    r.ShowConsoleMsg(string.format("  Mode: %s\n", gui.mode == 0 and "Focused" or "Chain"))
+    r.ShowConsoleMsg(string.format("  Action: %s\n", gui.action == 0 and "Apply" or "Copy"))
+    r.ShowConsoleMsg(string.format("  Copy Scope: %s\n", gui.copy_scope == 0 and "Active" or "All"))
+    r.ShowConsoleMsg(string.format("  Copy Position: %s\n", gui.copy_pos == 0 and "Last" or "Replace"))
+    local channel_mode_names = {"Auto", "Mono", "Multi"}
+    r.ShowConsoleMsg(string.format("  Channel Mode: %s\n", channel_mode_names[gui.channel_mode + 1]))
+    r.ShowConsoleMsg(string.format("  Handle Seconds: %.2f\n", gui.handle_seconds))
+    r.ShowConsoleMsg(string.format("  Debug Mode: %s\n", gui.debug and "ON" or "OFF"))
+    r.ShowConsoleMsg(string.format("  Show Summary: %s\n", gui.show_summary and "ON" or "OFF"))
+    r.ShowConsoleMsg(string.format("  Warn TakeFX: %s\n", gui.warn_takefx and "ON" or "OFF"))
+    r.ShowConsoleMsg(string.format("  Max History: %d\n", gui.max_history))
+    r.ShowConsoleMsg(string.format("  FX Name - Show Type: %s\n", gui.fxname_show_type and "ON" or "OFF"))
+    r.ShowConsoleMsg(string.format("  FX Name - Show Vendor: %s\n", gui.fxname_show_vendor and "ON" or "OFF"))
+    r.ShowConsoleMsg(string.format("  FX Name - Strip Symbol: %s\n", gui.fxname_strip_symbol and "ON" or "OFF"))
+    r.ShowConsoleMsg(string.format("  Use FX Alias: %s\n", gui.use_alias and "ON" or "OFF"))
+    r.ShowConsoleMsg(string.format("  Preview Target Track: %s\n", gui.preview_target_track))
+    local solo_scope_names = {"Track Solo", "Item Solo"}
+    r.ShowConsoleMsg(string.format("  Preview Solo Scope: %s\n", solo_scope_names[gui.preview_solo_scope + 1]))
+    local restore_mode_names = {"Keep", "Restore"}
+    r.ShowConsoleMsg(string.format("  Preview Restore Mode: %s\n", restore_mode_names[gui.preview_restore_mode + 1]))
+    r.ShowConsoleMsg("========================================\n")
+  end
 end
 
 ------------------------------------------------------------
@@ -574,16 +648,26 @@ local function set_extstate_from_gui()
   local action_names = { "apply", "copy" }
   local scope_names = { "active", "all_takes" }
   local pos_names = { "tail", "head" }
-  local method_names = { "auto", "render", "glue" }
   local channel_names = { "auto", "mono", "multi" }
 
   r.SetExtState("hsuanice_AS", "AS_MODE", mode_names[gui.mode + 1], false)
   r.SetExtState("hsuanice_AS", "AS_ACTION", action_names[gui.action + 1], false)
   r.SetExtState("hsuanice_AS", "AS_COPY_SCOPE", scope_names[gui.copy_scope + 1], false)
   r.SetExtState("hsuanice_AS", "AS_COPY_POS", pos_names[gui.copy_pos + 1], false)
-  r.SetExtState("hsuanice_AS", "AS_APPLY", method_names[gui.apply_method + 1], false)
   r.SetExtState("hsuanice_AS", "AS_APPLY_FX_MODE", channel_names[gui.channel_mode + 1], false)
   r.SetExtState("hsuanice_AS", "DEBUG", gui.debug and "1" or "0", false)
+
+  -- File Naming ExtStates
+  r.SetExtState("hsuanice_AS", "USE_ALIAS", gui.use_alias and "1" or "0", false)
+  r.SetExtState("hsuanice_AS", "FXNAME_SHOW_TYPE", gui.fxname_show_type and "1" or "0", false)
+  r.SetExtState("hsuanice_AS", "FXNAME_SHOW_VENDOR", gui.fxname_show_vendor and "1" or "0", false)
+  r.SetExtState("hsuanice_AS", "FXNAME_STRIP_SYMBOL", gui.fxname_strip_symbol and "1" or "0", false)
+  local chain_token_names = {"track", "aliases", "fxchain"}
+  r.SetExtState("hsuanice_AS", "AS_CHAIN_TOKEN_SOURCE", chain_token_names[gui.chain_token_source + 1], false)
+  r.SetExtState("hsuanice_AS", "AS_CHAIN_ALIAS_JOINER", gui.chain_alias_joiner, false)
+  r.SetExtState("hsuanice_AS", "AS_MAX_FX_TOKENS", tostring(gui.max_fx_tokens), false)
+  r.SetExtState("hsuanice_AS", "TRACKNAME_STRIP_SYMBOLS", gui.trackname_strip_symbols and "1" or "0", false)
+  r.SetExtState("hsuanice_AS", "SANITIZE_TOKEN_FOR_FILENAME", gui.sanitize_token and "1" or "0", false)
 
   -- Debug output
   if gui.debug then
@@ -656,6 +740,13 @@ local function toggle_preview()
 end
 
 local function toggle_solo()
+  -- Debug logging
+  if gui.debug then
+    local scope_name = (gui.preview_solo_scope == 0) and "Track Solo" or "Item Solo"
+    local command_id = (gui.preview_solo_scope == 0) and 40281 or 41561
+    r.ShowConsoleMsg(string.format("[AS GUI] SOLO button clicked (scope=%s, command=%d)\n", scope_name, command_id))
+  end
+
   -- Toggle solo based on solo_scope setting
   if gui.preview_solo_scope == 0 then
     -- Track solo (40281)
@@ -906,13 +997,10 @@ local function run_saved_chain_apply_mode(tr, chain_name, item_count)
   end
 
   -- Set ExtState for AudioSweet (chain mode)
-  local mode_names = { "focused", "chain" }
   local action_names = { "apply", "copy" }
-  local method_names = { "auto", "render", "glue" }
 
   r.SetExtState("hsuanice_AS", "AS_MODE", "chain", false)
   r.SetExtState("hsuanice_AS", "AS_ACTION", action_names[gui.action + 1], false)
-  r.SetExtState("hsuanice_AS", "AS_APPLY", method_names[gui.apply_method + 1], false)
   r.SetExtState("hsuanice_AS", "DEBUG", gui.debug and "1" or "0", false)
   r.SetExtState("hsuanice_AS", "AS_SHOW_SUMMARY", "0", false)
   r.SetProjExtState(0, "RGWH", "HANDLE_SECONDS", tostring(gui.handle_seconds))
@@ -1125,11 +1213,19 @@ local function draw_gui()
   -- Keyboard shortcuts (work even when GUI is not focused)
   -- Space = Play/Stop (40044)
   if ImGui.IsKeyPressed(ctx, ImGui.Key_Space, false) then
+    if gui.debug then
+      r.ShowConsoleMsg("[AS GUI] Keyboard shortcut: Space pressed (Transport Play/Stop, command=40044)\n")
+    end
     r.Main_OnCommand(40044, 0)  -- Transport: Play/stop
   end
 
   -- S = Solo toggle (depends on solo_scope setting)
   if ImGui.IsKeyPressed(ctx, ImGui.Key_S, false) then
+    if gui.debug then
+      local scope_name = (gui.preview_solo_scope == 0) and "Track Solo" or "Item Solo"
+      local command_id = (gui.preview_solo_scope == 0) and 40281 or 41561
+      r.ShowConsoleMsg(string.format("[AS GUI] Keyboard shortcut: S pressed (scope=%s, command=%d)\n", scope_name, command_id))
+    end
     if gui.preview_solo_scope == 0 then
       r.Main_OnCommand(40281, 0)  -- Track: Solo/unsolo tracks
     else
@@ -1148,8 +1244,8 @@ local function draw_gui()
   -- Menu Bar
   if ImGui.BeginMenuBar(ctx) then
     if ImGui.BeginMenu(ctx, 'Presets') then
-      if ImGui.MenuItem(ctx, 'Focused Apply (Auto)', nil, false, true) then
-        gui.mode = 0; gui.action = 0; gui.apply_method = 0
+      if ImGui.MenuItem(ctx, 'Focused Apply', nil, false, true) then
+        gui.mode = 0; gui.action = 0
         save_gui_settings()
       end
       if ImGui.MenuItem(ctx, 'Focused Copy', nil, false, true) then
@@ -1157,8 +1253,8 @@ local function draw_gui()
         save_gui_settings()
       end
       ImGui.Separator(ctx)
-      if ImGui.MenuItem(ctx, 'Chain Apply (Render)', nil, false, true) then
-        gui.mode = 1; gui.action = 0; gui.apply_method = 1
+      if ImGui.MenuItem(ctx, 'Chain Apply', nil, false, true) then
+        gui.mode = 1; gui.action = 0
         save_gui_settings()
       end
       if ImGui.MenuItem(ctx, 'Chain Copy', nil, false, true) then
@@ -1186,17 +1282,48 @@ local function draw_gui()
         gui.show_settings_popup = true
       end
       ImGui.Separator(ctx)
-      if ImGui.MenuItem(ctx, 'FX Name Formatting...', nil, false, true) then
-        gui.show_fxname_popup = true
+      if ImGui.MenuItem(ctx, 'File Naming Settings...', nil, false, true) then
+        gui.show_naming_popup = true
+      end
+      ImGui.Separator(ctx)
+      if ImGui.BeginMenu(ctx, 'FX Alias Tools') then
+        if ImGui.MenuItem(ctx, 'Build FX Alias Database', nil, false, true) then
+          local script_path = r.GetResourcePath() .. "/Scripts/hsuanice Scripts/Beta Testing/hsuanice_FX Alias Build.lua"
+          local success, err = pcall(dofile, script_path)
+          if success then
+            r.ShowConsoleMsg("[AS GUI] FX Alias Build completed\n")
+          else
+            r.ShowConsoleMsg("[AS GUI] Error running FX Alias Build: " .. tostring(err) .. "\n")
+          end
+        end
+        if ImGui.MenuItem(ctx, 'Export JSON to TSV', nil, false, true) then
+          local script_path = r.GetResourcePath() .. "/Scripts/hsuanice Scripts/Beta Testing/hsuanice_FX Alias Export JSON to TSV.lua"
+          local success, err = pcall(dofile, script_path)
+          if success then
+            r.ShowConsoleMsg("[AS GUI] FX Alias Export completed\n")
+          else
+            r.ShowConsoleMsg("[AS GUI] Error running FX Alias Export: " .. tostring(err) .. "\n")
+          end
+        end
+        if ImGui.MenuItem(ctx, 'Update TSV to JSON', nil, false, true) then
+          local script_path = r.GetResourcePath() .. "/Scripts/hsuanice Scripts/Beta Testing/hsuanice_FX Alias Update TSV to JSON.lua"
+          local success, err = pcall(dofile, script_path)
+          if success then
+            r.ShowConsoleMsg("[AS GUI] FX Alias Update completed\n")
+          else
+            r.ShowConsoleMsg("[AS GUI] Error running FX Alias Update: " .. tostring(err) .. "\n")
+          end
+        end
+        ImGui.EndMenu(ctx)
       end
       ImGui.EndMenu(ctx)
     end
 
     if ImGui.BeginMenu(ctx, 'Help') then
       if ImGui.MenuItem(ctx, 'About', nil, false, true) then
-        r.ShowConsoleMsg("[AudioSweet GUI] Version v251028_2130\n" ..
+        r.ShowConsoleMsg("[AudioSweet GUI] Version v251030.0845\n" ..
           "Complete AudioSweet control center\n" ..
-          "Features: Saved Chains, History tracking, Persistent settings, Configurable history, Compact UI\n")
+          "Features: File Naming Settings, FX Alias Tools, Debug Logging, Preview Integration, Persistent Settings\n")
       end
       ImGui.EndMenu(ctx)
     end
@@ -1235,17 +1362,19 @@ local function draw_gui()
   end
 
   -- FX Name Formatting Popup
-  if gui.show_fxname_popup then
-    ImGui.OpenPopup(ctx, 'FX Name Formatting')
-    gui.show_fxname_popup = false
+  -- File Naming Settings Popup
+  if gui.show_naming_popup then
+    ImGui.OpenPopup(ctx, 'File Naming Settings')
+    gui.show_naming_popup = false
   end
 
-  if ImGui.BeginPopupModal(ctx, 'FX Name Formatting', true, ImGui.WindowFlags_AlwaysAutoResize) then
-    ImGui.Text(ctx, "Control how FX names appear in rendered file names:")
-    ImGui.Separator(ctx)
-
+  if ImGui.BeginPopupModal(ctx, 'File Naming Settings', true, ImGui.WindowFlags_AlwaysAutoResize) then
     local changed = false
     local rv
+
+    -- === FX Name Formatting Section ===
+    ImGui.Text(ctx, "FX Name Formatting:")
+    ImGui.Separator(ctx)
 
     rv, gui.fxname_show_type = ImGui.Checkbox(ctx, "Show Plugin Type (CLAP:, VST3:, AU:, VST:)", gui.fxname_show_type)
     if rv then changed = true end
@@ -1256,13 +1385,79 @@ local function draw_gui()
     rv, gui.fxname_strip_symbol = ImGui.Checkbox(ctx, "Strip Spaces & Symbols (ProQ4 vs Pro-Q 4)", gui.fxname_strip_symbol)
     if rv then changed = true end
 
+    rv, gui.use_alias = ImGui.Checkbox(ctx, "Use FX Alias for file naming", gui.use_alias)
+    if rv then changed = true end
+
+    ImGui.Spacing(ctx)
+    ImGui.Separator(ctx)
+    ImGui.Spacing(ctx)
+
+    -- === Chain Mode Naming Section ===
+    ImGui.Text(ctx, "Chain Mode Naming:")
+    ImGui.Separator(ctx)
+
+    ImGui.Text(ctx, "Chain Token Source:")
+    if ImGui.RadioButton(ctx, "Track Name", gui.chain_token_source == 0) then
+      gui.chain_token_source = 0
+      changed = true
+    end
+    ImGui.SameLine(ctx)
+    if ImGui.RadioButton(ctx, "FX Aliases", gui.chain_token_source == 1) then
+      gui.chain_token_source = 1
+      changed = true
+    end
+    ImGui.SameLine(ctx)
+    if ImGui.RadioButton(ctx, "FXChain", gui.chain_token_source == 2) then
+      gui.chain_token_source = 2
+      changed = true
+    end
+
+    -- Chain Alias Joiner (only when using aliases)
+    if gui.chain_token_source == 1 then
+      ImGui.Text(ctx, "Alias Joiner:")
+      ImGui.SameLine(ctx)
+      ImGui.SetNextItemWidth(ctx, 100)
+      rv, gui.chain_alias_joiner = ImGui.InputText(ctx, "##chain_joiner", gui.chain_alias_joiner)
+      if rv then changed = true end
+      ImGui.SameLine(ctx)
+      ImGui.TextDisabled(ctx, "(separator between aliases)")
+    end
+
+    ImGui.Text(ctx, "Max FX Tokens:")
+    ImGui.SameLine(ctx)
+    ImGui.SetNextItemWidth(ctx, 80)
+    rv, gui.max_fx_tokens = ImGui.InputInt(ctx, "##max_tokens", gui.max_fx_tokens)
+    if rv then
+      gui.max_fx_tokens = math.max(1, math.min(10, gui.max_fx_tokens))
+      changed = true
+    end
+    ImGui.SameLine(ctx)
+    ImGui.TextDisabled(ctx, "(FIFO limit, 1-10)")
+
+    rv, gui.trackname_strip_symbols = ImGui.Checkbox(ctx, "Strip Symbols from Track Names", gui.trackname_strip_symbols)
+    if rv then changed = true end
+
+    ImGui.Spacing(ctx)
+    ImGui.Separator(ctx)
+    ImGui.Spacing(ctx)
+
+    -- === File Safety Section ===
+    ImGui.Text(ctx, "File Name Safety:")
+    ImGui.Separator(ctx)
+
+    rv, gui.sanitize_token = ImGui.Checkbox(ctx, "Sanitize tokens for safe filenames", gui.sanitize_token)
+    if rv then changed = true end
+    ImGui.SameLine(ctx)
+    ImGui.TextDisabled(ctx, "(?)")
+    if ImGui.IsItemHovered(ctx) then
+      ImGui.SetTooltip(ctx, "Replace unsafe characters with underscores")
+    end
+
     if changed then
       save_gui_settings()
     end
 
-    ImGui.Separator(ctx)
-    ImGui.TextWrapped(ctx, "Example:\nType=ON, Vendor=ON, Strip=OFF → 'AS1-CLAP: Pro-Q 4 (FabFilter)'\nType=ON, Vendor=OFF, Strip=ON → 'AS1-CLAP:ProQ4'")
-
+    ImGui.Spacing(ctx)
     ImGui.Separator(ctx)
     if ImGui.Button(ctx, 'Close', 120, 0) then
       ImGui.CloseCurrentPopup(ctx)
@@ -1438,31 +1633,19 @@ local function draw_gui()
       save_gui_settings()
     end
   else
-    ImGui.Text(ctx, "Apply:")
+    -- Handle seconds
+    ImGui.Text(ctx, "Handle:")
     ImGui.SameLine(ctx)
-    if ImGui.RadioButton(ctx, "Auto##method", gui.apply_method == 0) then
-      gui.apply_method = 0
-      save_gui_settings()
-    end
-    ImGui.SameLine(ctx)
-    if ImGui.RadioButton(ctx, "Render##method", gui.apply_method == 1) then
-      gui.apply_method = 1
-      save_gui_settings()
-    end
-    ImGui.SameLine(ctx)
-    if ImGui.RadioButton(ctx, "Glue##method", gui.apply_method == 2) then
-      gui.apply_method = 2
-      save_gui_settings()
-    end
-    ImGui.SameLine(ctx, 0, 20)
     ImGui.SetNextItemWidth(ctx, 80)
-    local rv, new_val = ImGui.InputDouble(ctx, "Handle(s)", gui.handle_seconds, 0, 0, "%.1f")
+    local rv, new_val = ImGui.InputDouble(ctx, "##handle_seconds", gui.handle_seconds, 0, 0, "%.1f")
     if rv then
       gui.handle_seconds = math.max(0, new_val)
       save_gui_settings()
     end
+    ImGui.SameLine(ctx)
+    ImGui.Text(ctx, "seconds")
 
-    -- Channel Mode (second line under Apply)
+    -- Channel Mode
     ImGui.Text(ctx, "Channel:")
     ImGui.SameLine(ctx)
     if ImGui.RadioButton(ctx, "Auto##channel", gui.channel_mode == 0) then
@@ -1655,7 +1838,37 @@ end
 ------------------------------------------------------------
 local function loop()
   gui.open = draw_gui()
-  if gui.open then r.defer(loop) end
+  if gui.open then
+    r.defer(loop)
+  else
+    -- Script is closing - output final settings if debug mode is on
+    if gui.debug then
+      r.ShowConsoleMsg("========================================\n")
+      r.ShowConsoleMsg("[AS GUI] Script closing - Final settings:\n")
+      r.ShowConsoleMsg("========================================\n")
+      r.ShowConsoleMsg(string.format("  Mode: %s\n", gui.mode == 0 and "Focused" or "Chain"))
+      r.ShowConsoleMsg(string.format("  Action: %s\n", gui.action == 0 and "Apply" or "Copy"))
+      r.ShowConsoleMsg(string.format("  Copy Scope: %s\n", gui.copy_scope == 0 and "Active" or "All"))
+      r.ShowConsoleMsg(string.format("  Copy Position: %s\n", gui.copy_pos == 0 and "Last" or "Replace"))
+      local channel_mode_names = {"Auto", "Mono", "Multi"}
+      r.ShowConsoleMsg(string.format("  Channel Mode: %s\n", channel_mode_names[gui.channel_mode + 1]))
+      r.ShowConsoleMsg(string.format("  Handle Seconds: %.2f\n", gui.handle_seconds))
+      r.ShowConsoleMsg(string.format("  Debug Mode: %s\n", gui.debug and "ON" or "OFF"))
+      r.ShowConsoleMsg(string.format("  Show Summary: %s\n", gui.show_summary and "ON" or "OFF"))
+      r.ShowConsoleMsg(string.format("  Warn TakeFX: %s\n", gui.warn_takefx and "ON" or "OFF"))
+      r.ShowConsoleMsg(string.format("  Max History: %d\n", gui.max_history))
+      r.ShowConsoleMsg(string.format("  FX Name - Show Type: %s\n", gui.fxname_show_type and "ON" or "OFF"))
+      r.ShowConsoleMsg(string.format("  FX Name - Show Vendor: %s\n", gui.fxname_show_vendor and "ON" or "OFF"))
+      r.ShowConsoleMsg(string.format("  FX Name - Strip Symbol: %s\n", gui.fxname_strip_symbol and "ON" or "OFF"))
+      r.ShowConsoleMsg(string.format("  Use FX Alias: %s\n", gui.use_alias and "ON" or "OFF"))
+      r.ShowConsoleMsg(string.format("  Preview Target Track: %s\n", gui.preview_target_track))
+      local solo_scope_names = {"Track Solo", "Item Solo"}
+      r.ShowConsoleMsg(string.format("  Preview Solo Scope: %s\n", solo_scope_names[gui.preview_solo_scope + 1]))
+      local restore_mode_names = {"Keep", "Restore"}
+      r.ShowConsoleMsg(string.format("  Preview Restore Mode: %s\n", restore_mode_names[gui.preview_restore_mode + 1]))
+      r.ShowConsoleMsg("========================================\n")
+    end
+  end
 end
 
 ------------------------------------------------------------
