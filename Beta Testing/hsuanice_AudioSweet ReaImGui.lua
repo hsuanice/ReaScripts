@@ -1,7 +1,7 @@
 --[[
-@description AudioSweet GUI - ImGui Interface for AudioSweet
+@description AudioSweet ReaImGui - ImGui Interface for AudioSweet
 @author hsuanice
-@version 251030.1530
+@version 0.1.0-beta (251030.1600)
 @about
   Complete AudioSweet control center with:
   - Focused/Chain modes with FX chain display
@@ -16,21 +16,36 @@
   - Saved Chains and History features with CLAP plugin support
   - Auto-resizing window that prevents accidental resize/close
 
-@usage
-  Run this script in REAPER to open the AudioSweet GUI window.
 
 @changelog
-  251030.1530
+  0.1.0-beta (2025-10-30) - Initial Public Beta Release
+    Complete AudioSweet control center with GUI interface featuring:
+    - Focused/Chain modes with Apply/Copy actions
+    - Saved Chains and History features with CLAP plugin support
+    - Open button with intelligent toggle for FX windows
+    - File naming settings with FX Alias support
+    - Auto-resizing window
+    - Built-in keyboard shortcuts (Space = Play/Stop, S = Solo toggle)
+    - AudioSweet Preview integration
+    - Debug mode with detailed console logging
+
+  Internal Build 251030.1600
+    - Added: "Open" button for SAVED CHAINS and HISTORY with intelligent toggle behavior.
+      - SAVED CHAINS: Toggles FX chain window to view/edit entire chain
+      - HISTORY (Focused mode): Toggles floating FX window for specific plugin
+      - HISTORY (Chain mode): Toggles FX chain window to view/edit entire chain
+      - Smart toggle implementation:
+        * FX chain: Uses TrackFX_GetChainVisible() + TrackFX_Show() with flag 0/1
+        * Floating FX: Uses TrackFX_GetOpen() + TrackFX_Show() with flag 2/3
+      - UI layout: [Open] [Chain/History Name Button] [X (for saved chains only)]
+      - Provides quick access for viewing/editing FX without executing AudioSweet
+      - Improves workflow: adjust settings → save chain → process items
     - Changed: GUI window now auto-resizes based on content.
       - Added: ImGui.WindowFlags_AlwaysAutoResize flag
       - Added: ImGui.WindowFlags_NoResize flag (prevents manual resizing)
       - Window automatically adjusts size when content changes
       - Users cannot accidentally resize window (prevents UI errors)
       - Window can still be moved and closed normally
-    - Fixed: "Open" button for saved chains now uses correct action.
-      - Changed: Action 40271 → 40291 (Track: View FX chain)
-      - No longer triggers "Add FX" browser dialog
-      - Correctly opens FX chain window for viewing/editing
 
   251030.1515
     - Fixed: SAVED CHAINS and HISTORY now work correctly with CLAP plugins.
@@ -1055,12 +1070,69 @@ local function open_saved_chain_fx(chain_idx)
     return
   end
 
-  -- Select track and open FX chain window
+  -- Select track and toggle FX chain window (chain mode uses entire FX chain)
   r.SetOnlyTrackSelected(tr)
   r.SetMixerScroll(tr)
-  r.Main_OnCommand(40291, 0)  -- Track: View FX chain for current/last touched track
 
-  gui.last_result = string.format("Opened FX chain: %s", chain.name)
+  -- Check if FX chain window is visible and toggle it
+  local chain_visible = r.TrackFX_GetChainVisible(tr)
+  if chain_visible == -1 then
+    -- Chain window is closed, open it
+    r.TrackFX_Show(tr, 0, 1)  -- Show chain window
+  else
+    -- Chain window is open, close it
+    r.TrackFX_Show(tr, 0, 0)  -- Hide chain window
+  end
+
+  gui.last_result = string.format("Toggled FX chain: %s", chain.name)
+end
+
+local function open_history_fx(hist_idx)
+  local hist_item = gui.history[hist_idx]
+  if not hist_item then return end
+
+  local tr = find_track_by_guid(hist_item.track_guid)
+  if not tr then
+    gui.last_result = string.format("Error: Track '%s' not found", hist_item.track_name)
+    return
+  end
+
+  -- Select track and set as last touched
+  r.SetOnlyTrackSelected(tr)
+  r.SetMixerScroll(tr)
+
+  -- Toggle FX window based on history mode
+  if hist_item.mode == "focused" then
+    -- For focused mode, toggle the specific FX floating window
+    local fx_idx = hist_item.fx_index or 0
+    local fx_count = r.TrackFX_GetCount(tr)
+
+    if fx_idx >= fx_count then
+      gui.last_result = string.format("Error: FX #%d not found (track has %d FX)", fx_idx + 1, fx_count)
+      return
+    end
+
+    -- Toggle specific FX floating window
+    -- Check if FX is open using TrackFX_GetOpen
+    local is_open = r.TrackFX_GetOpen(tr, fx_idx)
+    if is_open then
+      r.TrackFX_Show(tr, fx_idx, 2)  -- Hide floating window
+    else
+      r.TrackFX_Show(tr, fx_idx, 3)  -- Show floating window
+    end
+    gui.last_result = string.format("Toggled FX: %s (FX #%d)", hist_item.name, fx_idx + 1)
+  else
+    -- For chain mode, toggle FX chain window (chain mode uses entire FX chain)
+    local chain_visible = r.TrackFX_GetChainVisible(tr)
+    if chain_visible == -1 then
+      -- Chain window is closed, open it
+      r.TrackFX_Show(tr, 0, 1)  -- Show chain window
+    else
+      -- Chain window is open, close it
+      r.TrackFX_Show(tr, 0, 0)  -- Hide chain window
+    end
+    gui.last_result = string.format("Toggled FX chain: %s", hist_item.name)
+  end
 end
 
 local function run_saved_chain(chain_idx)
@@ -1341,9 +1413,36 @@ local function draw_gui()
 
     if ImGui.BeginMenu(ctx, 'Help') then
       if ImGui.MenuItem(ctx, 'About', nil, false, true) then
-        r.ShowConsoleMsg("[AudioSweet GUI] Version v251030.0910\n" ..
-          "Complete AudioSweet control center\n" ..
-          "Features: File Naming Settings, FX Alias Tools, Debug Logging, Preview Integration, Persistent Settings\n")
+        r.ShowConsoleMsg(
+          "=================================================\n" ..
+          "AudioSweet ReaImGui - ImGui Interface for AudioSweet\n" ..
+          "=================================================\n" ..
+          "Version: 0.1.0-beta (251030.1600)\n" ..
+          "Author: hsuanice\n\n" ..
+
+          "Description:\n" ..
+          "  Complete AudioSweet control center with:\n" ..
+          "  - Focused/Chain modes with FX chain display\n" ..
+          "  - Apply/Copy actions for flexible workflow\n" ..
+          "  - AudioSweet Preview integration with configurable target track\n" ..
+          "  - Saved Chains and History features with CLAP plugin support\n" ..
+          "  - Comprehensive file naming settings with FX Alias support\n" ..
+          "  - Debug mode with detailed console logging\n" ..
+          "  - Built-in keyboard shortcuts (Space = Play/Stop, S = Solo toggle)\n" ..
+          "  - Auto-resizing window that prevents accidental resize\n\n" ..
+
+          "Reference:\n" ..
+          "  Based on AudioSuite-like Script by Tim Chimes\n" ..
+          "  Original: Renders selected plugin to selected media item\n" ..
+          "  Written for REAPER 5.1 with Lua\n" ..
+          "  v1.1 12/22/2015 - Added PreventUIRefresh\n" ..
+          "  http://chimesaudio.com\n\n" ..
+
+          "Development:\n" ..
+          "  This script was developed with the assistance of AI tools\n" ..
+          "  including ChatGPT and Claude AI.\n" ..
+          "=================================================\n"
+        )
       end
       ImGui.EndMenu(ctx)
     end
@@ -1815,6 +1914,12 @@ local function draw_gui()
         ImGui.Separator(ctx)
         for i, item in ipairs(gui.history) do
           ImGui.PushID(ctx, 1000 + i)
+          -- "Open" button (small, on the left)
+          if ImGui.SmallButton(ctx, "Open") then
+            open_history_fx(i)
+          end
+          ImGui.SameLine(ctx)
+          -- History item name button (executes AudioSweet)
           if ImGui.Button(ctx, item.name, -1, 0) then
             run_history_item(i)
           end
