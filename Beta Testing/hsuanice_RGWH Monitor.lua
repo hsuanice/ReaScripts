@@ -1,6 +1,6 @@
 --[[
 @description hsuanice_RGWH Monitor
-@version 251009_2349 Removed ClearConsole() to preserve previous runs in console log
+@version 0.1.0-beta (251009.2349)
 @author hsuanice
 @note
 Console monitor for units (SINGLE/TOUCH/CROSSFADE/MIXED),
