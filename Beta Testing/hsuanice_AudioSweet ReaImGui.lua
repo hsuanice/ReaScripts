@@ -1,7 +1,7 @@
 --[[
 @description AudioSweet ReaImGui - ImGui Interface for AudioSweet
 @author hsuanice
-@version 0.1.0-beta (251030.2345)
+@version 0.1.0-beta (251030.2350)
 @about
   Complete AudioSweet control center with:
   - Focused/Chain modes with FX chain display
@@ -29,6 +29,14 @@
     - AudioSweet Preview integration
     - Debug mode with detailed console logging
     - Direct integration with AudioSweet Core (no intermediate template layer)
+
+  Internal Build 251030.2350 - FIXED PREVIEW STOP BUTTON
+    - FIXED: STOP button now correctly stops preview started by Tools scripts.
+      - Issue: toggle_preview() only checked gui.is_previewing (false when started by Tools scripts)
+      - Result: Clicking STOP would trigger another preview instead of stopping
+      - Solution: Check actual transport play state in addition to gui.is_previewing
+      - Now detects and stops previews regardless of how they were started
+    - Technical: toggle_preview() now uses GetPlayState() to detect actual playback state.
 
   Internal Build 251030.2345 - FINALIZED KEYBOARD SHORTCUTS SYSTEM
     - Added back: Space = Stop, S = Solo (simple shortcuts without modifiers work reliably).
@@ -886,9 +894,13 @@ end
 -- Preview & Solo Functions
 ------------------------------------------------------------
 local function toggle_preview()
-  -- If already previewing, stop transport
-  if gui.is_previewing then
-    r.Main_OnCommand(40044, 0)  -- Transport: Play/stop
+  -- Check if transport is playing (includes previews started by Tools scripts)
+  local play_state = r.GetPlayState()
+  local is_playing = (play_state & 1 ~= 0)
+
+  -- If transport is playing (GUI preview or Tools script preview), stop it
+  if gui.is_previewing or is_playing then
+    r.Main_OnCommand(40044, 0)  -- Transport: Stop
     gui.is_previewing = false
     gui.last_result = "Preview stopped"
     return
