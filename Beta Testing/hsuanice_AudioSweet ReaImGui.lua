@@ -1380,7 +1380,7 @@ local function draw_gui()
       ImGui.Separator(ctx)
       if ImGui.BeginMenu(ctx, 'FX Alias Tools') then
         if ImGui.MenuItem(ctx, 'Build FX Alias Database', nil, false, true) then
-          local script_path = r.GetResourcePath() .. "/Scripts/hsuanice Scripts/Beta Testing/hsuanice_FX Alias Build.lua"
+          local script_path = r.GetResourcePath() .. "/Scripts/hsuanice Scripts/Tools/hsuanice_FX Alias Build.lua"
           local success, err = pcall(dofile, script_path)
           if success then
             r.ShowConsoleMsg("[AS GUI] FX Alias Build completed\n")
@@ -1389,7 +1389,7 @@ local function draw_gui()
           end
         end
         if ImGui.MenuItem(ctx, 'Export JSON to TSV', nil, false, true) then
-          local script_path = r.GetResourcePath() .. "/Scripts/hsuanice Scripts/Beta Testing/hsuanice_FX Alias Export JSON to TSV.lua"
+          local script_path = r.GetResourcePath() .. "/Scripts/hsuanice Scripts/Tools/hsuanice_FX Alias Export JSON to TSV.lua"
           local success, err = pcall(dofile, script_path)
           if success then
             r.ShowConsoleMsg("[AS GUI] FX Alias Export completed\n")
@@ -1398,7 +1398,7 @@ local function draw_gui()
           end
         end
         if ImGui.MenuItem(ctx, 'Update TSV to JSON', nil, false, true) then
-          local script_path = r.GetResourcePath() .. "/Scripts/hsuanice Scripts/Beta Testing/hsuanice_FX Alias Update TSV to JSON.lua"
+          local script_path = r.GetResourcePath() .. "/Scripts/hsuanice Scripts/Tools/hsuanice_FX Alias Update TSV to JSON.lua"
           local success, err = pcall(dofile, script_path)
           if success then
             r.ShowConsoleMsg("[AS GUI] FX Alias Update completed\n")
