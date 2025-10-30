@@ -1,7 +1,7 @@
 --[[
 @description AudioSweet Preview Core
 @author hsuanice
-@version 0.1.0-beta (251030.1600)
+@version 0.1.0-beta (251030.1630)
 
 @about Minimal, self-contained preview runtime. Later we can extract helpers to "hsuanice_AS Core.lua".
 
