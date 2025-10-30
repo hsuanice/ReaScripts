@@ -1,6 +1,6 @@
 --[[]
-@description RGWH Core (Render/Glue with Handles) — Public Beta
-@version 251029_1930
+@description RGWH Core - Render or Glue with Handles 
+@version 0.1.0-beta (251030.1600)
 @author hsuanice
 @about
   Core library for handle-aware Render/Glue workflows with clear, single-entry API.
@@ -55,7 +55,16 @@
   • All overrides are one-run only: ExtState is snapshotted and restored after operation.
 
 @changelog
-  251029_1930
+  0.1.0-beta (2025-10-30) - Initial Public Beta Release
+    Core library for handle-aware Render/Glue workflows featuring:
+    - Handle-aware windows with clamp-to-source
+    - Glue by Item Units (same-track grouping) with optional Glue Cues
+    - Render single items with BWF TimeReference embed
+    - One-run overrides via ExtState snapshot/restore
+    - Edge Cues (#in/#out) and Glue Cues for media cue workflows
+    - Integration with AudioSweet Core and Preview Core
+
+  Internal Build 251029_1930
     - CRITICAL FIX: Changed all chanmode reads to use GetMediaItemTakeInfo_Value() instead of GetMediaItemInfo_Value()!
       • Root cause: Channel mode is stored on the TAKE, not the ITEM
       • Wrong API: GetMediaItemInfo_Value(item, "I_CHANMODE") always returns 0
