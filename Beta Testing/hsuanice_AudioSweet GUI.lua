@@ -1,7 +1,7 @@
 --[[
 @description AudioSweet GUI - ImGui Interface for AudioSweet
 @author hsuanice
-@version 251030.1515
+@version 251030.1530
 @about
   Complete AudioSweet control center with:
   - Focused/Chain modes with FX chain display
@@ -14,11 +14,24 @@
   - Built-in keyboard shortcuts (Space = Play/Stop, S = Solo toggle)
   - Comprehensive file naming settings with FX Alias support
   - Saved Chains and History features with CLAP plugin support
+  - Auto-resizing window that prevents accidental resize/close
 
 @usage
   Run this script in REAPER to open the AudioSweet GUI window.
 
 @changelog
+  251030.1530
+    - Changed: GUI window now auto-resizes based on content.
+      - Added: ImGui.WindowFlags_AlwaysAutoResize flag
+      - Added: ImGui.WindowFlags_NoResize flag (prevents manual resizing)
+      - Window automatically adjusts size when content changes
+      - Users cannot accidentally resize window (prevents UI errors)
+      - Window can still be moved and closed normally
+    - Fixed: "Open" button for saved chains now uses correct action.
+      - Changed: Action 40271 → 40291 (Track: View FX chain)
+      - No longer triggers "Add FX" browser dialog
+      - Correctly opens FX chain window for viewing/editing
+
   251030.1515
     - Fixed: SAVED CHAINS and HISTORY now work correctly with CLAP plugins.
       - Issue: AudioSweet Core required focused FX even in chain mode
@@ -1045,7 +1058,7 @@ local function open_saved_chain_fx(chain_idx)
   -- Select track and open FX chain window
   r.SetOnlyTrackSelected(tr)
   r.SetMixerScroll(tr)
-  r.Main_OnCommand(40271, 0)  -- View: Show FX chain for current/last touched track
+  r.Main_OnCommand(40291, 0)  -- Track: View FX chain for current/last touched track
 
   gui.last_result = string.format("Opened FX chain: %s", chain.name)
 end
@@ -1238,7 +1251,9 @@ local function draw_gui()
     end
   end
 
-  local window_flags = ImGui.WindowFlags_MenuBar
+  local window_flags = ImGui.WindowFlags_MenuBar |
+                       ImGui.WindowFlags_AlwaysAutoResize |
+                       ImGui.WindowFlags_NoResize
 
   local visible, open = ImGui.Begin(ctx, 'AudioSweet Control Panel', true, window_flags)
   if not visible then
