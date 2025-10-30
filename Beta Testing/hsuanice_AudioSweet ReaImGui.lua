@@ -1,7 +1,7 @@
 --[[
 @description AudioSweet ReaImGui - ImGui Interface for AudioSweet
 @author hsuanice
-@version 0.1.0-beta (251030.1630)
+@version 0.1.0-beta (251030.2345)
 @about
   Complete AudioSweet control center with:
   - Focused/Chain modes with FX chain display
@@ -29,6 +29,85 @@
     - AudioSweet Preview integration
     - Debug mode with detailed console logging
     - Direct integration with AudioSweet Core (no intermediate template layer)
+
+  Internal Build 251030.2345 - FINALIZED KEYBOARD SHORTCUTS SYSTEM
+    - Added back: Space = Stop, S = Solo (simple shortcuts without modifiers work reliably).
+    - Fixed: PREVIEW button now detects transport play state (shows STOP when playing).
+      - Detects previews started by Tools scripts via transport play state
+      - Button turns orange and shows "STOP" when transport is playing
+      - Works regardless of whether preview started from GUI or keyboard shortcut
+    - Updated: Shortcut info shows "Space = Stop, S = Solo" and Tips for binding Tools scripts.
+    - Result: Complete keyboard shortcut system
+      - In-GUI: Space (Stop), S (Solo)
+      - Tools scripts: User-defined shortcuts for Chain/Focused Preview with modifier keys
+      - All preview settings read from GUI ExtState (single source of truth)
+
+  Internal Build 251030.2335 - PREVIEW SHORTCUTS VIA TOOLS SCRIPTS
+    - Changed: Removed in-GUI keyboard shortcuts for Preview (modifier key detection unreliable).
+    - NEW: Preview shortcuts now use Tools folder scripts that read GUI settings.
+      - Bind "hsuanice_AudioSweet Chain Preview Solo Exclusive" for Chain Preview
+      - Bind "hsuanice_AudioSweet Preview Solo Exclusive" for Focused Preview
+      - Scripts automatically read preview_target_track, solo_scope, restore_mode from GUI ExtState
+      - Single source of truth: change settings in GUI, all scripts use same settings
+    - Updated: Shortcut info now guides users to bind Tools scripts in Action List.
+    - Benefit: Reliable keyboard shortcuts with full modifier key support (Ctrl, Shift, etc.)
+    - Compatible: Tools scripts v251030.2335 or newer required
+
+  Internal Build 251030.2300 - ENHANCED KEYBOARD SHORTCUTS (deprecated)
+    - Note: This approach had modifier key detection issues and was replaced by Tools scripts approach
+
+  Internal Build 251030.2130 - KEYBOARD SHORTCUTS FIX
+    - FIXED: Keyboard shortcuts no longer trigger while typing in text inputs.
+      - Uses ImGui.IsAnyItemActive() to detect if user is typing
+      - Shortcuts only work when NOT in text input fields
+      - Fixes issue where typing "S" or Space in popups would trigger shortcuts
+      - Applies to all text inputs: Preview Target, Save Chain name, etc.
+    - Changed: Keyboard shortcut "S" restored (no longer requires Shift).
+      - Space = Play/Stop transport
+      - S = Solo toggle (Track Solo / Item Solo based on settings)
+      - Safe to use now that text input detection is fixed
+    - Added: Keyboard shortcuts info displayed on main GUI.
+      - Gray text below action buttons: "Shortcuts: Space = Play/Stop, S = Solo"
+      - Helps users discover keyboard shortcuts
+      - Always visible for quick reference
+
+  Internal Build 251030.2115 - UI/UX IMPROVEMENTS
+    - Improved: Preview Target now shows on main GUI as clickable button.
+      - Displays current target track name in Chain mode
+      - Click to open simple popup input dialog
+      - Handles empty string case (shows "(not set)")
+      - Setting persists between sessions
+      - More intuitive: can see current value at a glance
+    - Note: Preview Target also remains accessible in Settings → Preview Settings...
+
+  Internal Build 251030.2100 - UI/UX IMPROVEMENTS
+    - FIXED: Show FX window on recall now opens correct track's FX chain.
+      - Issue: Command 40291 opens "last touched track" FX chain, which was wrong after removing SetOnlyTrackSelected()
+      - Root cause: After removing SetOnlyTrackSelected(), last touched track became item selection track instead of target track
+      - Solution: Use TrackFX_Show(tr, 0, 1) to directly open target track's FX chain
+      - Now correctly opens saved chain's track FX window, not item's track
+    - Changed: Keyboard shortcut "S" changed to "Shift+S" for Solo toggle.
+      - Prevents accidental solo toggle when typing "S" in text inputs
+      - Space = Play/Stop (unchanged)
+      - Shift+S = Solo toggle (Track Solo / Item Solo based on settings)
+    - Changed: Preview Target input moved to Preview Settings popup.
+      - Removed from main GUI to prevent keyboard shortcut conflicts
+      - Avoids triggering Shift+S when typing uppercase "S" in track name
+      - Access via Settings → Preview Settings...
+      - Setting still persists between sessions
+
+  Internal Build 251030.1645 - CODE CLEANUP
+    - FIXED: Selection now properly maintained when using AUDIOSWEET button in chain mode.
+      - Root cause: Line 948 had SetOnlyTrackSelected() that changed selection before Core execution
+      - Solution: Removed SetOnlyTrackSelected(), only use SetMixerScroll()
+      - Now all execution paths (AUDIOSWEET button, SAVED CHAIN, HISTORY) preserve selection consistently
+    - Removed: Unused variables show_summary and warn_takefx.
+      - These variables were saved/loaded but had no actual functionality
+      - Cleaned up from gui state, save/load functions, and debug output
+      - Reduces code complexity and memory usage
+    - Updated: AS Preview Core version to 251030.1630 for consistency.
+      - All AudioSweet components now use matching version numbers
+      - Ensures compatibility across all modules
 
   Internal Build 251030.1630 - CRITICAL FIXES
     - FIXED: "Please focus a Track FX" warning no longer appears when using SAVED CHAINS/HISTORY.
@@ -411,8 +490,6 @@ local gui = {
   channel_mode = 0,      -- 0=auto, 1=mono, 2=multi
   handle_seconds = 5.0,
   debug = false,
-  show_summary = true,
-  warn_takefx = true,
   max_history = 10,      -- Maximum number of history items to keep
   show_fx_on_recall = true,    -- Show FX window when executing SAVED CHAIN/HISTORY
   fxname_show_type = true,     -- Show FX type prefix (CLAP:, VST3:, etc.)
@@ -439,6 +516,7 @@ local gui = {
   show_fxname_popup = false,
   show_preview_settings = false,
   show_naming_popup = false,
+  show_target_track_popup = false,
   -- Preview settings
   preview_target_track = "AudioSweet",
   preview_solo_scope = 0,     -- 0=track, 1=item
@@ -462,8 +540,6 @@ local function save_gui_settings()
   r.SetExtState(SETTINGS_NAMESPACE, "channel_mode", tostring(gui.channel_mode), true)
   r.SetExtState(SETTINGS_NAMESPACE, "handle_seconds", tostring(gui.handle_seconds), true)
   r.SetExtState(SETTINGS_NAMESPACE, "debug", gui.debug and "1" or "0", true)
-  r.SetExtState(SETTINGS_NAMESPACE, "show_summary", gui.show_summary and "1" or "0", true)
-  r.SetExtState(SETTINGS_NAMESPACE, "warn_takefx", gui.warn_takefx and "1" or "0", true)
   r.SetExtState(SETTINGS_NAMESPACE, "max_history", tostring(gui.max_history), true)
   r.SetExtState(SETTINGS_NAMESPACE, "show_fx_on_recall", gui.show_fx_on_recall and "1" or "0", true)
   r.SetExtState(SETTINGS_NAMESPACE, "fxname_show_type", gui.fxname_show_type and "1" or "0", true)
@@ -505,8 +581,6 @@ local function load_gui_settings()
   gui.channel_mode = get_int("channel_mode", 0)
   gui.handle_seconds = get_float("handle_seconds", 5.0)
   gui.debug = get_bool("debug", false)
-  gui.show_summary = get_bool("show_summary", true)
-  gui.warn_takefx = get_bool("warn_takefx", true)
   gui.max_history = get_int("max_history", 10)
   gui.show_fx_on_recall = get_bool("show_fx_on_recall", true)
   gui.fxname_show_type = get_bool("fxname_show_type", true)
@@ -540,8 +614,6 @@ local function load_gui_settings()
     r.ShowConsoleMsg(string.format("  Channel Mode: %s\n", channel_mode_names[gui.channel_mode + 1]))
     r.ShowConsoleMsg(string.format("  Handle Seconds: %.2f\n", gui.handle_seconds))
     r.ShowConsoleMsg(string.format("  Debug Mode: %s\n", gui.debug and "ON" or "OFF"))
-    r.ShowConsoleMsg(string.format("  Show Summary: %s\n", gui.show_summary and "ON" or "OFF"))
-    r.ShowConsoleMsg(string.format("  Warn TakeFX: %s\n", gui.warn_takefx and "ON" or "OFF"))
     r.ShowConsoleMsg(string.format("  Max History: %d\n", gui.max_history))
     r.ShowConsoleMsg(string.format("  FX Name - Show Type: %s\n", gui.fxname_show_type and "ON" or "OFF"))
     r.ShowConsoleMsg(string.format("  FX Name - Show Vendor: %s\n", gui.fxname_show_vendor and "ON" or "OFF"))
@@ -943,9 +1015,9 @@ local function run_audiosweet(override_track)
       return
     end
 
-    -- Select track (no need to open FX chain window)
+    -- Set track as last touched (without changing selection)
     -- Note: OVERRIDE ExtState tells Core which track to use
-    r.SetOnlyTrackSelected(target_track)
+    -- We don't call SetOnlyTrackSelected() to preserve item selection
     r.SetMixerScroll(target_track)
 
     -- Set ExtState for AudioSweet (chain mode)
@@ -1059,9 +1131,11 @@ local function run_saved_chain_apply_mode(tr, chain_name, item_count)
   -- Open FX chain window if setting enabled
   if gui.show_fx_on_recall then
     if gui.debug then
-      r.ShowConsoleMsg("[AS GUI] Opening FX chain window\n")
+      r.ShowConsoleMsg("[AS GUI] Opening FX chain window for target track\n")
     end
-    r.Main_OnCommand(40291, 0)  -- Track: View FX chain for current/last touched track
+    -- Use TrackFX_Show to open the specific track's FX chain
+    -- Flag 1 = show FX chain window
+    r.TrackFX_Show(tr, 0, 1)
   else
     if gui.debug then
       r.ShowConsoleMsg("[AS GUI] Skipping FX chain window (show_fx_on_recall = false)\n")
@@ -1069,7 +1143,7 @@ local function run_saved_chain_apply_mode(tr, chain_name, item_count)
   end
 
   if gui.debug then
-    r.ShowConsoleMsg("[AS GUI] Track selected and set as last touched\n")
+    r.ShowConsoleMsg("[AS GUI] Track set as last touched\n")
   end
 
   -- Set ExtState for AudioSweet (chain mode)
@@ -1361,28 +1435,34 @@ local function draw_gui()
     end
   end
 
-  -- Keyboard shortcuts (work even when GUI is not focused)
-  -- Space = Play/Stop (40044)
-  if ImGui.IsKeyPressed(ctx, ImGui.Key_Space, false) then
-    if gui.debug then
-      r.ShowConsoleMsg("[AS GUI] Keyboard shortcut: Space pressed (Transport Play/Stop, command=40044)\n")
+  -- Keyboard shortcuts (only work when NOT typing in text inputs)
+  local is_typing = ImGui.IsAnyItemActive(ctx)
+
+  if not is_typing then
+    -- Space = Stop transport (simple, no modifiers needed)
+    if ImGui.IsKeyPressed(ctx, ImGui.Key_Space, false) then
+      if gui.debug then
+        r.ShowConsoleMsg("[AS GUI] Keyboard shortcut: Space (Stop transport, command=40044)\n")
+      end
+      r.Main_OnCommand(40044, 0)  -- Transport: Stop
     end
-    r.Main_OnCommand(40044, 0)  -- Transport: Play/stop
+
+    -- S = Solo toggle (depends on solo_scope setting)
+    if ImGui.IsKeyPressed(ctx, ImGui.Key_S, false) then
+      if gui.debug then
+        local scope_name = (gui.preview_solo_scope == 0) and "Track Solo" or "Item Solo"
+        local command_id = (gui.preview_solo_scope == 0) and 40281 or 41561
+        r.ShowConsoleMsg(string.format("[AS GUI] Keyboard shortcut: S pressed (scope=%s, command=%d)\n", scope_name, command_id))
+      end
+      toggle_solo()
+    end
   end
 
-  -- S = Solo toggle (depends on solo_scope setting)
-  if ImGui.IsKeyPressed(ctx, ImGui.Key_S, false) then
-    if gui.debug then
-      local scope_name = (gui.preview_solo_scope == 0) and "Track Solo" or "Item Solo"
-      local command_id = (gui.preview_solo_scope == 0) and 40281 or 41561
-      r.ShowConsoleMsg(string.format("[AS GUI] Keyboard shortcut: S pressed (scope=%s, command=%d)\n", scope_name, command_id))
-    end
-    if gui.preview_solo_scope == 0 then
-      r.Main_OnCommand(40281, 0)  -- Track: Solo/unsolo tracks
-    else
-      r.Main_OnCommand(41561, 0)  -- Item properties: Toggle solo exclusive
-    end
-  end
+  -- Note: Preview shortcuts with modifiers (Ctrl+Space, etc.) should use Tools scripts
+  -- Users should bind keyboard shortcuts to:
+  --   - "hsuanice_AudioSweet Chain Preview Solo Exclusive" (for Chain mode)
+  --   - "hsuanice_AudioSweet Preview Solo Exclusive" (for Focused mode)
+  -- These scripts read settings from GUI ExtState automatically
 
   local window_flags = ImGui.WindowFlags_MenuBar |
                        ImGui.WindowFlags_AlwaysAutoResize |
@@ -1647,6 +1727,33 @@ local function draw_gui()
     ImGui.EndPopup(ctx)
   end
 
+  -- Target Track Name Popup (simple input)
+  if gui.show_target_track_popup then
+    ImGui.OpenPopup(ctx, 'Edit Preview Target Track')
+    gui.show_target_track_popup = false
+  end
+
+  if ImGui.BeginPopupModal(ctx, 'Edit Preview Target Track', true, ImGui.WindowFlags_AlwaysAutoResize) then
+    ImGui.Text(ctx, "Enter target track name for preview:")
+    ImGui.SetNextItemWidth(ctx, 250)
+    local rv, new_target = ImGui.InputText(ctx, "##target_track_input", gui.preview_target_track)
+    if rv then
+      gui.preview_target_track = new_target
+      save_gui_settings()
+    end
+
+    ImGui.Separator(ctx)
+    if ImGui.Button(ctx, 'OK', 100, 0) then
+      ImGui.CloseCurrentPopup(ctx)
+    end
+    ImGui.SameLine(ctx)
+    if ImGui.Button(ctx, 'Cancel', 100, 0) then
+      ImGui.CloseCurrentPopup(ctx)
+    end
+
+    ImGui.EndPopup(ctx)
+  end
+
   -- Preview Settings Popup
   if gui.show_preview_settings then
     ImGui.OpenPopup(ctx, 'Preview Settings')
@@ -1780,14 +1887,14 @@ local function draw_gui()
   if gui.mode == 1 then
     ImGui.Text(ctx, "Preview Target:")
     ImGui.SameLine(ctx)
-    ImGui.SetNextItemWidth(ctx, 150)
-    local rv, new_target = ImGui.InputText(ctx, "##preview_target_main", gui.preview_target_track)
-    if rv then
-      gui.preview_target_track = new_target
-      save_gui_settings()
+    -- Display current target track name as a button
+    -- Use ## ID to handle empty string case
+    local display_name = (gui.preview_target_track ~= "") and gui.preview_target_track or "(not set)"
+    if ImGui.Button(ctx, display_name .. "##target_track_btn", 150, 0) then
+      gui.show_target_track_popup = true
     end
     ImGui.SameLine(ctx)
-    ImGui.TextDisabled(ctx, "(for preview without focused FX)")
+    ImGui.TextDisabled(ctx, "(click to edit)")
   end
 
   -- === COPY/APPLY SETTINGS (Compact horizontal) ===
@@ -1856,13 +1963,15 @@ local function draw_gui()
   local button_width = (avail_width - spacing * 2) / 3
 
   -- PREVIEW button (toggle: preview/stop)
-  -- Snapshot the state before rendering to avoid push/pop mismatch
-  local is_previewing_now = gui.is_previewing
+  -- Check if transport is playing (includes previews started by Tools scripts)
+  local play_state = r.GetPlayState()
+  local is_playing = (play_state & 1 ~= 0)  -- bit 1 = playing
+  local is_previewing_now = gui.is_previewing or is_playing
 
   -- Preview can run if:
   -- - Focused mode: has valid focused FX + has items + not running
   -- - Chain mode: has items + not running (no focused FX required, uses target track)
-  -- - Already previewing: always enabled to allow stopping
+  -- - Already previewing/playing: always enabled to allow stopping
   local preview_can_run
   if is_previewing_now then
     preview_can_run = true  -- Always allow stopping
@@ -1906,6 +2015,13 @@ local function draw_gui()
     run_audiosweet(nil)
   end
   if not can_run then ImGui.EndDisabled(ctx) end
+
+  -- === KEYBOARD SHORTCUTS INFO ===
+  ImGui.PushStyleColor(ctx, ImGui.Col_Text, 0x808080FF)  -- Gray color
+  ImGui.Text(ctx, "Shortcuts: Space = Stop, S = Solo")
+  ImGui.Text(ctx, "Tip: Bind 'AudioSweet Chain/Focused Preview' actions to shortcuts")
+  ImGui.Text(ctx, "     in REAPER Action List for Ctrl+Space preview")
+  ImGui.PopStyleColor(ctx)
 
   -- === STATUS (below RUN button) ===
   if gui.last_result ~= "" then
@@ -2054,8 +2170,6 @@ local function loop()
       r.ShowConsoleMsg(string.format("  Channel Mode: %s\n", channel_mode_names[gui.channel_mode + 1]))
       r.ShowConsoleMsg(string.format("  Handle Seconds: %.2f\n", gui.handle_seconds))
       r.ShowConsoleMsg(string.format("  Debug Mode: %s\n", gui.debug and "ON" or "OFF"))
-      r.ShowConsoleMsg(string.format("  Show Summary: %s\n", gui.show_summary and "ON" or "OFF"))
-      r.ShowConsoleMsg(string.format("  Warn TakeFX: %s\n", gui.warn_takefx and "ON" or "OFF"))
       r.ShowConsoleMsg(string.format("  Max History: %d\n", gui.max_history))
       r.ShowConsoleMsg(string.format("  FX Name - Show Type: %s\n", gui.fxname_show_type and "ON" or "OFF"))
       r.ShowConsoleMsg(string.format("  FX Name - Show Vendor: %s\n", gui.fxname_show_vendor and "ON" or "OFF"))
