@@ -1,6 +1,6 @@
 --[[
 @description Item List Editor
-@version 251101.0340
+@version 251101.0350
 @author hsuanice
 @about
   Shows a live, spreadsheet-style table of the currently selected items and all
@@ -42,6 +42,12 @@
 
 
 @changelog
+  v251101_0350
+  - UX: Swapped "Fit Content Widths" and "Reset Widths" button behavior
+    • Primary button (left-click): "Fit Content Widths" - auto-adjusts columns based on content
+    • Right-click menu: "Reset to Default Widths" - restores original default sizes
+    • Updated tooltips to reflect new behavior
+
   v251101_0340
   - Enhancement: Advanced Sort dialog improvements
     • New dropdown + "+" button to add sort columns directly in dialog
@@ -49,11 +55,19 @@
     • Dropdown shows all available columns in current column order
     • Prevents duplicate columns (checks if already in sort list)
   - Enhancement: Auto-width adjustment for sort indicators
-    • Columns automatically expand when sort indicators are added
+    • Columns automatically expand when sort indicators are added (immediate effect)
     • Single sort: +20px for " ▲" or " ▼"
     • Multi-level sort: +50px for " [N] ▲" or " [N] ▼"
     • Ensures sort level numbers are always visible
+    • Width adjustment happens immediately on sort (no need to click Reset Widths)
+  - Feature: Fit Content Width functionality
+    • Right-click "Reset Widths" button for width options menu
+    • "Reset to Default Widths" - restores original default sizes
+    • "Fit Content Width" - auto-adjusts columns based on actual content
+    • Skips fixed-content columns (#, TrkID, Chan#, Int#, Mute, Color, Start, End, UMID, UMID PT, Time Reference, Source Start/End)
+    • Preserves default width values (won't be modified by Fit Content)
   - Technical: Pre-calculates sort levels before column setup for accurate width calculation
+  - Technical: Separated DEFAULT_COL_WIDTH (immutable defaults) from COL_WIDTH (current widths)
 
   v251031.1700
   - Feature: Excel-like sorting functionality
@@ -4012,10 +4026,10 @@ if PROGRESSIVE.active then
   reaper.ImGui_TextDisabled(ctx, "(loading in background...)")
 end
 
--- Reset Column Widths button
+-- Fit Content Widths button
 reaper.ImGui_SameLine(ctx)
-if reaper.ImGui_Button(ctx, "Reset Widths", 100, 24) then
-  RESET_COLUMN_WIDTHS = true  -- Flag to reset column widths on next frame
+if reaper.ImGui_Button(ctx, "Fit Content Widths", 130, 24) then
+  FIT_CONTENT_WIDTH = true  -- Flag to fit content widths on next frame
 end
 -- Right-click for width options menu
 if reaper.ImGui_IsItemClicked(ctx, reaper.ImGui_MouseButton_Right()) then
@@ -4023,8 +4037,8 @@ if reaper.ImGui_IsItemClicked(ctx, reaper.ImGui_MouseButton_Right()) then
 end
 if reaper.ImGui_IsItemHovered(ctx) then
   reaper.ImGui_BeginTooltip(ctx)
-  reaper.ImGui_Text(ctx, "Left-click: Reset to default sizes")
-  reaper.ImGui_Text(ctx, "Right-click: More options")
+  reaper.ImGui_Text(ctx, "Left-click: Auto-adjust columns based on content")
+  reaper.ImGui_Text(ctx, "Right-click: Reset to default widths")
   reaper.ImGui_EndTooltip(ctx)
 end
 
@@ -4032,9 +4046,6 @@ end
 if reaper.ImGui_BeginPopup(ctx, "Width Options") then
   if reaper.ImGui_MenuItem(ctx, "Reset to Default Widths") then
     RESET_COLUMN_WIDTHS = true
-  end
-  if reaper.ImGui_MenuItem(ctx, "Fit Content Width") then
-    FIT_CONTENT_WIDTH = true
   end
   reaper.ImGui_EndPopup(ctx)
 end
@@ -4444,8 +4455,30 @@ local function draw_table(rows, height)
       14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30
     }
 
+    -- Columns to skip (fixed content, keep default width)
+    local skip_columns = {
+      [1] = true,   -- #
+      [2] = true,   -- TrkID
+      [8] = true,   -- Chan#
+      [9] = true,   -- Int#
+      [10] = true,  -- Mute
+      [11] = true,  -- Color
+      [12] = true,  -- Start
+      [13] = true,  -- End
+      [14] = true,  -- UMID
+      [15] = true,  -- UMID (PT)
+      [20] = true,  -- Time Reference
+      [29] = true,  -- Source Start (TC)
+      [30] = true,  -- Source End (TC)
+    }
+
     -- Calculate max width for each column
     for _, col_id in ipairs(initial_order) do
+      -- Skip columns with fixed content
+      if skip_columns[col_id] then
+        goto continue
+      end
+
       local max_width = 0
 
       -- Measure header text (with sort indicator if present)
@@ -4477,6 +4510,8 @@ local function draw_table(rows, height)
 
       -- Add padding: 16px for internal padding + 16px for border, margins, and safety
       COL_WIDTH[col_id] = math.max(50, math.ceil(max_width + 32))
+
+      ::continue::
     end
 
     -- Reset table to apply new widths
