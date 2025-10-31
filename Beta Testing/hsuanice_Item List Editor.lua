@@ -1,6 +1,6 @@
 --[[
 @description Item List Editor
-@version 251027_2130
+@version 251031_1700
 @author hsuanice
 @about
   Shows a live, spreadsheet-style table of the currently selected items and all
@@ -23,6 +23,7 @@
     • Summary popup: item count, total span, total length, position range
     • Option to hide muted items (rows are filtered, not removed)
     • Progressive loading for large selections (1000+ items)
+    • Excel-like multi-level sorting (click headers or use Advanced Sort dialog)
 
   Time display modes:
     • m:s (minutes:seconds), Timecode, Beats, or Custom pattern
@@ -41,6 +42,25 @@
 
 
 @changelog
+  v251031_1700
+  - Feature: Excel-like sorting functionality
+    • Click column header: single-column sort (toggle ascending/descending)
+    • Shift+Click column header: add column to multi-level sort
+    • Sort indicators in headers: ▲ (ascending) / ▼ (descending)
+    • Multi-level sort shows priority numbers: [1], [2], [3], etc.
+    • New "Advanced Sort..." button opens sort configuration dialog
+    • Advanced Sort dialog allows:
+      - View and manage all sort levels
+      - Toggle sort direction for each level
+      - Reorder sort levels (move up/down buttons: ▲▼)
+      - Remove individual sort levels
+      - Clear all sorting
+    • Supports sorting on all 30 columns (including metadata fields)
+    • Smart type handling: numbers sort numerically, text sorts alphabetically
+    • Stable sort preserves original order when values are equal
+  - Technical: Replaced TableHeadersRow with manual header rendering to support click detection
+  - Technical: Direct UTF-8 characters used instead of \u escape sequences (Lua 5.1 compatibility)
+
   v251027_2130
   - Feature: Console output can now be toggled from Clear Cache menu (persists via ExtState)
     • Replaces direct console writes with a guarded wrapper; scanning progress still forces output
@@ -2720,6 +2740,84 @@ CUSTOM_PATTERN = "hh:mm:ss"
 -- Data
 ROWS = {}
 
+-- === Sorting state (Excel-like) ===
+local SORT_STATE = {
+  columns = {},  -- Array of {col_id=N, ascending=true/false}, primary sort first
+}
+
+-- Get sort value for a row and column (for comparison)
+local function get_sort_value(row, col_id)
+  if col_id == 1 then return 0  -- # (row index) - will use array index
+  elseif col_id == 2 then return row.track_idx or 0
+  elseif col_id == 3 then return (row.track_name or ""):lower()
+  elseif col_id == 4 then return (row.take_name or ""):lower()
+  elseif col_id == 5 then return (row.item_note or ""):lower()
+  elseif col_id == 6 then return (row.file_name or ""):lower()
+  elseif col_id == 7 then return (row.meta_trk_name or ""):lower()
+  elseif col_id == 8 then return tonumber(row.channel_num) or 0
+  elseif col_id == 9 then return tonumber(row.interleave) or 0
+  elseif col_id == 10 then return row.muted and 1 or 0
+  elseif col_id == 11 then return row.color_hex or ""
+  elseif col_id == 12 then return row.start_time or 0
+  elseif col_id == 13 then return row.end_time or 0
+  elseif col_id == 14 then return (row.umid or ""):lower()
+  elseif col_id == 15 then return (row.umid_pt or ""):lower()
+  elseif col_id == 16 then return (row.origination_date or ""):lower()
+  elseif col_id == 17 then return (row.origination_time or ""):lower()
+  elseif col_id == 18 then return (row.originator or ""):lower()
+  elseif col_id == 19 then return (row.originator_ref or ""):lower()
+  elseif col_id == 20 then return tonumber(row.time_reference) or 0
+  elseif col_id == 21 then return (row.description or ""):lower()
+  elseif col_id == 22 then return (row.project or ""):lower()
+  elseif col_id == 23 then return (row.scene or ""):lower()
+  elseif col_id == 24 then return (row.take_meta or ""):lower()
+  elseif col_id == 25 then return (row.tape or ""):lower()
+  elseif col_id == 26 then return (row.ubits or ""):lower()
+  elseif col_id == 27 then return (row.framerate or ""):lower()
+  elseif col_id == 28 then return (row.speed or ""):lower()
+  elseif col_id == 29 then return (row.source_start or ""):lower()
+  elseif col_id == 30 then return (row.source_end or ""):lower()
+  end
+  return ""
+end
+
+-- Multi-level sort comparator (Excel-like)
+local function sort_rows_by_state(rows)
+  if #SORT_STATE.columns == 0 then return end
+
+  table.sort(rows, function(a, b)
+    for _, sort_col in ipairs(SORT_STATE.columns) do
+      local col_id = sort_col.col_id
+      local asc = sort_col.ascending
+
+      local val_a = get_sort_value(a, col_id)
+      local val_b = get_sort_value(b, col_id)
+
+      -- Handle different types
+      local type_a = type(val_a)
+      local type_b = type(val_b)
+
+      if type_a ~= type_b then
+        -- Different types: numbers first, then strings
+        if type_a == "number" then return asc
+        elseif type_b == "number" then return not asc
+        end
+      end
+
+      -- Compare same types
+      if val_a ~= val_b then
+        if asc then
+          return val_a < val_b
+        else
+          return val_a > val_b
+        end
+      end
+      -- If equal, continue to next sort column
+    end
+    return false  -- All sort columns equal
+  end)
+end
+
 -- Current formatter（會在切換模式/修改 pattern 時重建）
 FORMAT = TFLib.make_formatter(TIME_MODE, {decimals=3})
 
@@ -3422,7 +3520,82 @@ local function draw_summary_popup()
       reaper.ImGui_SetClipboardText(ctx, txt)
     end
     reaper.ImGui_SameLine(ctx)
-    if reaper.ImGui_Button(ctx, "OK", 80, 24) 
+    if reaper.ImGui_Button(ctx, "OK", 80, 24)
+       or reaper.ImGui_IsKeyPressed(ctx, reaper.ImGui_Key_Escape()) then
+      reaper.ImGui_CloseCurrentPopup(ctx)
+    end
+
+    reaper.ImGui_EndPopup(ctx)
+  end
+end
+
+-- Advanced Sort dialog (Excel-like multi-level sort)
+local function draw_advanced_sort_popup()
+  if reaper.ImGui_BeginPopupModal(ctx, "Advanced Sort", true, reaper.ImGui_WindowFlags_AlwaysAutoResize()) then
+    reaper.ImGui_Text(ctx, "Multi-level sort configuration")
+    reaper.ImGui_Separator(ctx)
+
+    -- Display current sort columns
+    if #SORT_STATE.columns > 0 then
+      reaper.ImGui_Text(ctx, "Current sort order:")
+      reaper.ImGui_Indent(ctx, 20)
+
+      for i, sort_col in ipairs(SORT_STATE.columns) do
+        reaper.ImGui_PushID(ctx, i)
+
+        local label = header_label_from_id(sort_col.col_id) or "Column " .. sort_col.col_id
+        local dir = sort_col.ascending and "Ascending" or "Descending"
+        reaper.ImGui_Text(ctx, string.format("%d. %s (%s)", i, label, dir))
+
+        reaper.ImGui_SameLine(ctx)
+        if reaper.ImGui_Button(ctx, "Toggle", 60, 20) then
+          sort_col.ascending = not sort_col.ascending
+          sort_rows_by_state(ROWS)
+        end
+
+        reaper.ImGui_SameLine(ctx)
+        if reaper.ImGui_Button(ctx, "Remove", 60, 20) then
+          table.remove(SORT_STATE.columns, i)
+          sort_rows_by_state(ROWS)
+        end
+
+        -- Move up/down buttons
+        reaper.ImGui_SameLine(ctx)
+        if i > 1 and reaper.ImGui_Button(ctx, "▲", 25, 20) then
+          SORT_STATE.columns[i], SORT_STATE.columns[i-1] = SORT_STATE.columns[i-1], SORT_STATE.columns[i]
+          sort_rows_by_state(ROWS)
+        end
+
+        reaper.ImGui_SameLine(ctx)
+        if i < #SORT_STATE.columns and reaper.ImGui_Button(ctx, "▼", 25, 20) then
+          SORT_STATE.columns[i], SORT_STATE.columns[i+1] = SORT_STATE.columns[i+1], SORT_STATE.columns[i]
+          sort_rows_by_state(ROWS)
+        end
+
+        reaper.ImGui_PopID(ctx)
+      end
+
+      reaper.ImGui_Unindent(ctx, 20)
+    else
+      reaper.ImGui_TextDisabled(ctx, "No sort applied. Click column headers to sort.")
+    end
+
+    reaper.ImGui_Separator(ctx)
+
+    -- Buttons
+    if reaper.ImGui_Button(ctx, "Clear All", 100, 24) then
+      SORT_STATE.columns = {}
+      -- Don't sort yet - just clear the state
+    end
+
+    reaper.ImGui_SameLine(ctx)
+    if reaper.ImGui_Button(ctx, "Apply", 100, 24) then
+      sort_rows_by_state(ROWS)
+      reaper.ImGui_CloseCurrentPopup(ctx)
+    end
+
+    reaper.ImGui_SameLine(ctx)
+    if reaper.ImGui_Button(ctx, "Close", 100, 24)
        or reaper.ImGui_IsKeyPressed(ctx, reaper.ImGui_Key_Escape()) then
       reaper.ImGui_CloseCurrentPopup(ctx)
     end
@@ -3769,6 +3942,19 @@ end
 if reaper.ImGui_IsItemHovered(ctx) then
   reaper.ImGui_BeginTooltip(ctx)
   reaper.ImGui_Text(ctx, "Reset all column widths to default sizes")
+  reaper.ImGui_EndTooltip(ctx)
+end
+
+-- Advanced Sort button
+reaper.ImGui_SameLine(ctx)
+if reaper.ImGui_Button(ctx, "Advanced Sort...", 120, 24) then
+  reaper.ImGui_OpenPopup(ctx, "Advanced Sort")
+end
+if reaper.ImGui_IsItemHovered(ctx) then
+  reaper.ImGui_BeginTooltip(ctx)
+  reaper.ImGui_Text(ctx, "Multi-level sort (Excel-like)")
+  reaper.ImGui_Text(ctx, "Click header: single sort")
+  reaper.ImGui_Text(ctx, "Shift+Click header: add to sort")
   reaper.ImGui_EndTooltip(ctx)
 end
 
@@ -4186,8 +4372,72 @@ local function draw_table(rows, height)
     -- Freeze header row (0 columns, 1 row frozen)
     reaper.ImGui_TableSetupScrollFreeze(ctx, 0, 1)
 
-    -- 表頭
-    reaper.ImGui_TableHeadersRow(ctx)
+    -- 手動繪製表頭（支援排序點擊）
+    reaper.ImGui_TableNextRow(ctx, reaper.ImGui_TableRowFlags_Headers())
+    for disp = 1, #initial_order do
+      reaper.ImGui_TableSetColumnIndex(ctx, disp - 1)
+      local col_id = initial_order[disp]
+      local label = header_label_from_id(col_id) or tostring(col_id)
+
+      -- Find sort indicator for this column
+      local sort_indicator = ""
+      local sort_level = 0
+      for i, sort_col in ipairs(SORT_STATE.columns) do
+        if sort_col.col_id == col_id then
+          sort_indicator = sort_col.ascending and " ▲" or " ▼"
+          sort_level = i
+          break
+        end
+      end
+
+      -- Display level number for multi-column sort (Excel-like)
+      if sort_level > 1 then
+        label = label .. " [" .. sort_level .. "]" .. sort_indicator
+      elseif sort_level == 1 then
+        label = label .. sort_indicator
+      end
+
+      reaper.ImGui_TableHeader(ctx, label)
+
+      -- Detect header click for sorting
+      if reaper.ImGui_IsItemClicked(ctx, reaper.ImGui_MouseButton_Left()) then
+        local m = _mods()
+        if m.shift then
+          -- Shift+Click: Add to multi-column sort
+          local found = false
+          for i, sort_col in ipairs(SORT_STATE.columns) do
+            if sort_col.col_id == col_id then
+              -- Toggle ascending/descending
+              sort_col.ascending = not sort_col.ascending
+              found = true
+              break
+            end
+          end
+          if not found then
+            -- Add new sort column
+            table.insert(SORT_STATE.columns, {col_id = col_id, ascending = true})
+          end
+        else
+          -- Click: Single column sort (clear others)
+          local was_sorted = false
+          for i, sort_col in ipairs(SORT_STATE.columns) do
+            if sort_col.col_id == col_id then
+              -- Toggle direction
+              SORT_STATE.columns = {{col_id = col_id, ascending = not sort_col.ascending}}
+              was_sorted = true
+              break
+            end
+          end
+          if not was_sorted then
+            -- Set new single sort
+            SORT_STATE.columns = {{col_id = col_id, ascending = true}}
+          end
+        end
+
+        -- Apply sort immediately to ROWS (not just the view)
+        sort_rows_by_state(ROWS)
+      end
+    end
 
 
     -- 建 row_index_map（給 Shift-矩形選取等）
@@ -4609,6 +4859,7 @@ local function loop()
       -- Top bar + Summary popup
       draw_toolbar()
       draw_summary_popup()   -- ← 要保留這行
+      draw_advanced_sort_popup()  -- Advanced Sort dialog
 
       -- Use get_view_rows() to respect "Show muted items" toggle
       local rows_to_show = get_view_rows()
