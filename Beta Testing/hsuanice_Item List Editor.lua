@@ -1,6 +1,6 @@
 --[[
 @description Item List Editor
-@version 251101_0300
+@version 251101.0340
 @author hsuanice
 @about
   Shows a live, spreadsheet-style table of the currently selected items and all
@@ -42,7 +42,7 @@
 
 
 @changelog
-  v251101_0300
+  v251101_0340
   - Enhancement: Advanced Sort dialog improvements
     • New dropdown + "+" button to add sort columns directly in dialog
     • No longer need to Shift+Click headers first - can manage everything in dialog
@@ -55,7 +55,7 @@
     • Ensures sort level numbers are always visible
   - Technical: Pre-calculates sort levels before column setup for accurate width calculation
 
-  v251031_1700
+  v251031.1700
   - Feature: Excel-like sorting functionality
     • Click column header: single-column sort (toggle ascending/descending)
     • Shift+Click column header: add column to multi-level sort
@@ -1541,7 +1541,7 @@ local COL_VISIBILITY = {}           -- col_id → true/false (for all 30 columns
 -- Edit these values to change default column widths
 -- Positive number = width in pixels (e.g., 100)
 -- Use "Reset Widths" button to restore these defaults after manual resizing
-local COL_WIDTH = {
+local DEFAULT_COL_WIDTH = {
   [1]  = 30,   -- # (item index)
   [2]  = 30,   -- TrkID (track number)
   [3]  = 100,  -- Track Name
@@ -1576,6 +1576,12 @@ local COL_WIDTH = {
   [29] = 90,  -- Source Start (TC)
   [30] = 90,  -- Source End (TC)
 }
+
+-- Current column widths (may be modified by user or Fit Content Width)
+local COL_WIDTH = {}
+for k, v in pairs(DEFAULT_COL_WIDTH) do
+  COL_WIDTH[k] = v
+end
 
 -- Track if user requested column width reset
 local RESET_COLUMN_WIDTHS = false
@@ -4011,10 +4017,26 @@ reaper.ImGui_SameLine(ctx)
 if reaper.ImGui_Button(ctx, "Reset Widths", 100, 24) then
   RESET_COLUMN_WIDTHS = true  -- Flag to reset column widths on next frame
 end
+-- Right-click for width options menu
+if reaper.ImGui_IsItemClicked(ctx, reaper.ImGui_MouseButton_Right()) then
+  reaper.ImGui_OpenPopup(ctx, "Width Options")
+end
 if reaper.ImGui_IsItemHovered(ctx) then
   reaper.ImGui_BeginTooltip(ctx)
-  reaper.ImGui_Text(ctx, "Reset all column widths to default sizes")
+  reaper.ImGui_Text(ctx, "Left-click: Reset to default sizes")
+  reaper.ImGui_Text(ctx, "Right-click: More options")
   reaper.ImGui_EndTooltip(ctx)
+end
+
+-- Width Options popup menu
+if reaper.ImGui_BeginPopup(ctx, "Width Options") then
+  if reaper.ImGui_MenuItem(ctx, "Reset to Default Widths") then
+    RESET_COLUMN_WIDTHS = true
+  end
+  if reaper.ImGui_MenuItem(ctx, "Fit Content Width") then
+    FIT_CONTENT_WIDTH = true
+  end
+  reaper.ImGui_EndPopup(ctx)
 end
 
 -- Advanced Sort button
@@ -4405,16 +4427,69 @@ local function draw_table(rows, height)
   local table_id = base_id .. "_" .. tostring(RESET_COUNTER)
 
   if RESET_COLUMN_WIDTHS then
+    -- Restore default widths
+    for k, v in pairs(DEFAULT_COL_WIDTH) do
+      COL_WIDTH[k] = v
+    end
     RESET_COUNTER = RESET_COUNTER + 1
     table_id = base_id .. "_" .. tostring(RESET_COUNTER)
     reaper.ShowConsoleMsg("[ILE] Resetting column widths (counter: " .. RESET_COUNTER .. ")\n")
     RESET_COLUMN_WIDTHS = false  -- Clear immediately before creating table
   end
 
+  -- Fit content width: Calculate actual text widths for all columns
+  if FIT_CONTENT_WIDTH then
+    local initial_order = (COL_ORDER and #COL_ORDER > 0) and COL_ORDER or {
+      1, 2, 3, 12, 13, 4, 5, 6, 7, 8, 9, 10, 11,
+      14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30
+    }
+
+    -- Calculate max width for each column
+    for _, col_id in ipairs(initial_order) do
+      local max_width = 0
+
+      -- Measure header text (with sort indicator if present)
+      local header_text = header_label_from_id(col_id) or tostring(col_id)
+      for i, sort_col in ipairs(SORT_STATE.columns) do
+        if sort_col.col_id == col_id then
+          local sort_indicator = sort_col.ascending and " ▲" or " ▼"
+          if i > 1 then
+            header_text = header_text .. " [" .. i .. "]" .. sort_indicator
+          else
+            header_text = header_text .. sort_indicator
+          end
+          break
+        end
+      end
+      local header_width = reaper.ImGui_CalcTextSize(ctx, header_text)
+      max_width = math.max(max_width, header_width)
+
+      -- Measure content for all visible rows (no sampling limit for accurate measurement)
+      for i = 1, #rows do
+        local row = rows[i]
+        -- Use existing get_cell_text function for consistency
+        local cell_text = get_cell_text(i, row, col_id, FORMAT) or ""
+
+        -- CalcTextSize returns width, height - we only need width
+        local cell_width = reaper.ImGui_CalcTextSize(ctx, tostring(cell_text))
+        max_width = math.max(max_width, cell_width)
+      end
+
+      -- Add padding: 16px for internal padding + 16px for border, margins, and safety
+      COL_WIDTH[col_id] = math.max(50, math.ceil(max_width + 32))
+    end
+
+    -- Reset table to apply new widths
+    RESET_COUNTER = RESET_COUNTER + 1
+    table_id = base_id .. "_" .. tostring(RESET_COUNTER)
+    FIT_CONTENT_WIDTH = false
+    reaper.ShowConsoleMsg("[ILE] Fitted content widths (counter: " .. RESET_COUNTER .. ")\n")
+  end
+
   -- Use specific height for ScrollY to work properly
   local outer_height = height or 360
   if reaper.ImGui_BeginTable(ctx, table_id, 30, flags, 0, outer_height) then
-    -- 依現有 COL_ORDER 來畫表頭；若還沒任何順序則用預設
+    -- Use existing COL_ORDER for header rendering; use default if not set yet
     -- Default order: Basic info, Time, Metadata (BWF), Metadata (iXML), Status
     local DEFAULT_COL_ORDER = {
       1, 2, 3, 12, 13, 4, 5, 6, 7, 8, 9, 10, 11,  -- Basic + Time + Status
@@ -4434,7 +4509,7 @@ local function draw_table(rows, height)
     -- Setup column with default width from COL_WIDTH (adjusted for sort indicators)
     local function _setup_column_by_id(id)
       local label = header_label_from_id(id) or tostring(id)
-      local width = COL_WIDTH[id] or 100  -- Default to 100px if not specified
+      local width = COL_WIDTH[id] or DEFAULT_COL_WIDTH[id] or 100  -- Fallback to default or 100px
 
       -- All columns use WidthFixed for manual resizing with extension behavior
       if width < 0 then width = 150 end  -- Convert auto-stretch (-1) to reasonable default
@@ -4463,7 +4538,7 @@ local function draw_table(rows, height)
     -- Freeze header row (0 columns, 1 row frozen)
     reaper.ImGui_TableSetupScrollFreeze(ctx, 0, 1)
 
-    -- 手動繪製表頭（支援排序點擊）
+    -- Manual header rendering (with sort click detection)
     reaper.ImGui_TableNextRow(ctx, reaper.ImGui_TableRowFlags_Headers())
     for disp = 1, #initial_order do
       reaper.ImGui_TableSetColumnIndex(ctx, disp - 1)
@@ -4527,21 +4602,24 @@ local function draw_table(rows, height)
 
         -- Apply sort immediately to ROWS (not just the view)
         sort_rows_by_state(ROWS)
+
+        -- Force table width recalculation by resetting table ID
+        RESET_COUNTER = RESET_COUNTER + 1
       end
     end
 
 
-    -- 建 row_index_map（給 Shift-矩形選取等）
+    -- Build row_index_map (for Shift-rectangle selection etc.)
     local row_index_map = LT.build_row_index_map(rows)
 
 
 
     
-    -- 點擊單一格的統一處理：單擊＝選取；Shift＝矩形；Cmd/Ctrl＝增減
+    -- Unified cell click handling: Click = select; Shift = rectangle; Cmd/Ctrl = toggle
     local function handle_cell_click(guid, col)
       local m = _mods()
       if m.shift and SEL.anchor then
-        -- 用 Library 內建：視覺欄序（COL_ORDER/COL_POS）版本的矩形選取
+        -- Use Library built-in: visual column order (COL_ORDER/COL_POS) rectangle selection
         LT.sel_rect_apply(
           rows,
           row_index_map,
