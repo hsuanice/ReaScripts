@@ -1,6 +1,6 @@
 --[[
 @description Item List Editor
-@version 251031_1700
+@version 251101_0300
 @author hsuanice
 @about
   Shows a live, spreadsheet-style table of the currently selected items and all
@@ -42,6 +42,19 @@
 
 
 @changelog
+  v251101_0300
+  - Enhancement: Advanced Sort dialog improvements
+    • New dropdown + "+" button to add sort columns directly in dialog
+    • No longer need to Shift+Click headers first - can manage everything in dialog
+    • Dropdown shows all available columns in current column order
+    • Prevents duplicate columns (checks if already in sort list)
+  - Enhancement: Auto-width adjustment for sort indicators
+    • Columns automatically expand when sort indicators are added
+    • Single sort: +20px for " ▲" or " ▼"
+    • Multi-level sort: +50px for " [N] ▲" or " [N] ▼"
+    • Ensures sort level numbers are always visible
+  - Technical: Pre-calculates sort levels before column setup for accurate width calculation
+
   v251031_1700
   - Feature: Excel-like sorting functionality
     • Click column header: single-column sort (toggle ascending/descending)
@@ -3530,9 +3543,68 @@ local function draw_summary_popup()
 end
 
 -- Advanced Sort dialog (Excel-like multi-level sort)
+-- State for add column combo box
+local ADVANCED_SORT_STATE = ADVANCED_SORT_STATE or {
+  selected_col_id = 1,  -- Currently selected column in combo
+  combo_preview = ""
+}
+
 local function draw_advanced_sort_popup()
   if reaper.ImGui_BeginPopupModal(ctx, "Advanced Sort", true, reaper.ImGui_WindowFlags_AlwaysAutoResize()) then
     reaper.ImGui_Text(ctx, "Multi-level sort configuration")
+    reaper.ImGui_Separator(ctx)
+
+    -- Add column section
+    reaper.ImGui_Text(ctx, "Add sort column:")
+    reaper.ImGui_SameLine(ctx)
+
+    -- Build list of available columns (following COL_ORDER)
+    local available_cols = COL_ORDER and #COL_ORDER > 0 and COL_ORDER or {
+      1, 2, 3, 12, 13, 4, 5, 6, 7, 8, 9, 10, 11,
+      14, 15, 16, 17, 18, 19, 20, 21,
+      22, 23, 24, 25, 26, 27, 28, 29, 30
+    }
+
+    -- Update combo preview
+    ADVANCED_SORT_STATE.combo_preview = header_label_from_id(ADVANCED_SORT_STATE.selected_col_id) or "Column " .. ADVANCED_SORT_STATE.selected_col_id
+
+    -- Combo box
+    reaper.ImGui_SetNextItemWidth(ctx, 200)
+    if reaper.ImGui_BeginCombo(ctx, "##add_col_combo", ADVANCED_SORT_STATE.combo_preview) then
+      for _, col_id in ipairs(available_cols) do
+        local label = header_label_from_id(col_id) or "Column " .. col_id
+        local is_selected = (ADVANCED_SORT_STATE.selected_col_id == col_id)
+        if reaper.ImGui_Selectable(ctx, label, is_selected) then
+          ADVANCED_SORT_STATE.selected_col_id = col_id
+        end
+        if is_selected then
+          reaper.ImGui_SetItemDefaultFocus(ctx)
+        end
+      end
+      reaper.ImGui_EndCombo(ctx)
+    end
+
+    -- Add button
+    reaper.ImGui_SameLine(ctx)
+    if reaper.ImGui_Button(ctx, "+ Add", 60, 24) then
+      -- Check if column already exists in sort
+      local already_exists = false
+      for _, sort_col in ipairs(SORT_STATE.columns) do
+        if sort_col.col_id == ADVANCED_SORT_STATE.selected_col_id then
+          already_exists = true
+          break
+        end
+      end
+
+      if not already_exists then
+        table.insert(SORT_STATE.columns, {
+          col_id = ADVANCED_SORT_STATE.selected_col_id,
+          ascending = true
+        })
+        sort_rows_by_state(ROWS)
+      end
+    end
+
     reaper.ImGui_Separator(ctx)
 
     -- Display current sort columns
@@ -4342,17 +4414,6 @@ local function draw_table(rows, height)
   -- Use specific height for ScrollY to work properly
   local outer_height = height or 360
   if reaper.ImGui_BeginTable(ctx, table_id, 30, flags, 0, outer_height) then
-    -- Setup column with default width from COL_WIDTH
-    local function _setup_column_by_id(id)
-      local label = header_label_from_id(id) or tostring(id)
-      local width = COL_WIDTH[id] or 100  -- Default to 100px if not specified
-
-      -- All columns use WidthFixed for manual resizing with extension behavior
-      if width < 0 then width = 150 end  -- Convert auto-stretch (-1) to reasonable default
-      local col_flags = reaper.ImGui_TableColumnFlags_WidthFixed()
-      reaper.ImGui_TableSetupColumn(ctx, label, col_flags, width)
-    end
-
     -- 依現有 COL_ORDER 來畫表頭；若還沒任何順序則用預設
     -- Default order: Basic info, Time, Metadata (BWF), Metadata (iXML), Status
     local DEFAULT_COL_ORDER = {
@@ -4363,6 +4424,36 @@ local function draw_table(rows, height)
       29, 30  -- Source position (from TimeReference)
     }
     local initial_order = (COL_ORDER and #COL_ORDER > 0) and COL_ORDER or DEFAULT_COL_ORDER
+
+    -- Pre-calculate sort level for each column (for width adjustment)
+    local col_sort_level = {}
+    for i, sort_col in ipairs(SORT_STATE.columns) do
+      col_sort_level[sort_col.col_id] = i
+    end
+
+    -- Setup column with default width from COL_WIDTH (adjusted for sort indicators)
+    local function _setup_column_by_id(id)
+      local label = header_label_from_id(id) or tostring(id)
+      local width = COL_WIDTH[id] or 100  -- Default to 100px if not specified
+
+      -- All columns use WidthFixed for manual resizing with extension behavior
+      if width < 0 then width = 150 end  -- Convert auto-stretch (-1) to reasonable default
+
+      -- Add extra width for sort indicators
+      local sort_level = col_sort_level[id]
+      if sort_level then
+        if sort_level > 1 then
+          -- Multi-level sort: " [N] ▲" or " [N] ▼" (approx 40-50 pixels)
+          width = width + 50
+        else
+          -- Single sort: " ▲" or " ▼" (approx 20 pixels)
+          width = width + 20
+        end
+      end
+
+      local col_flags = reaper.ImGui_TableColumnFlags_WidthFixed()
+      reaper.ImGui_TableSetupColumn(ctx, label, col_flags, width)
+    end
 
     -- Setup columns based on current order
     for i = 1, #initial_order do
