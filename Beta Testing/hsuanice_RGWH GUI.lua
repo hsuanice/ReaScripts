@@ -1,16 +1,50 @@
 --[[
 @description RGWH GUI - ImGui Interface for RGWH Core
 @author hsuanice
-@version v251028_1900
+@version 0.1.0-beta (251102.0700)
 @about
   ImGui-based GUI for configuring and running RGWH Core operations.
   Provides visual controls for all RGWH Wrapper Template parameters.
 
 @usage
   Run this script in REAPER to open the RGWH GUI window.
-  Adjust parameters using the visual controls and click "Run RGWH" to execute.
+  Adjust parameters using the visual controls and click operation buttons to execute.
 
 @changelog
+  v251102.0700 (0.1.0-beta)
+    - Changed: Renamed "RENDER SETTINGS" to "PRINTING" for consistency
+    - Changed: Reorganized printing options into two-column layout:
+        • Left column: FX Processing (Print Take FX, Print Track FX)
+        • Right column: Volume Handling (Merge Volumes, Print Volumes)
+    - Changed: Updated terminology from "Bake" to "Print" for REAPER standard compliance
+    - Improved: More compact layout with parallel columns
+
+  v251102.0015 (0.1.0-beta)
+    - Changed: Converted Selection Scope to radio button format for direct visibility
+        • Auto / Units / Time Selection / Per Item
+    - Changed: Converted Channel Mode to radio button format for direct visibility
+        • Auto / Mono / Multi
+    - Improved: All options now visible at once without dropdown menus
+
+  v251102.0000 (0.1.0-beta)
+    - Changed: Removed Operation mode radio button selection
+    - Changed: Replaced single RUN RGWH button with three operation buttons:
+        • AUTO (blue) - Smart auto-detection based on selection
+        • RENDER (green) - Force single-item render
+        • GLUE (orange) - Force multi-item glue
+    - Added: Settings window (View > Settings) containing:
+        • Timecode Mode
+        • Epsilon settings
+        • Cue write options
+        • Policies (glue single items, no-trackfx policies, rename mode)
+        • Debug level and console options
+        • Selection Policy
+    - Changed: Main GUI now shows only frequently-used parameters:
+        • Selection Scope, Channel Mode, Handle
+        • Render settings (FX processing, volume handling)
+    - Improved: One-click workflow - directly execute operation without mode switching
+    - Improved: Color-coded buttons for quick visual identification
+
   v251028_1900
     - Initial GUI implementation
     - All core parameters exposed as visual controls
@@ -48,6 +82,7 @@ local font = nil
 local gui = {
   -- Window state
   open = true,
+  show_settings = false,
 
   -- Operation settings
   op = 0,                    -- 0=auto, 1=render, 2=glue
@@ -329,13 +364,24 @@ local function build_args_from_gui()
   return args
 end
 
-local function run_rgwh()
+local function run_rgwh(operation)
   if gui.is_running then return end
 
   gui.is_running = true
   gui.last_result = "Running..."
 
+  -- Temporarily override operation mode
+  local original_op = gui.op
+  if operation == "auto" then
+    gui.op = 0
+  elseif operation == "render" then
+    gui.op = 1
+  elseif operation == "glue" then
+    gui.op = 2
+  end
+
   local args = build_args_from_gui()
+  gui.op = original_op  -- Restore original
 
   -- Selection policy handling (wrapper logic)
   local policy_names = { "progress", "restore", "none" }
@@ -396,6 +442,85 @@ local function draw_help_marker(desc)
   end
 end
 
+local function draw_settings_popup()
+  if not gui.show_settings then return end
+
+  ImGui.SetNextWindowSize(ctx, 500, 600, ImGui.Cond_FirstUseEver)
+  local visible, open = ImGui.Begin(ctx, 'Settings', true)
+  if not visible then
+    ImGui.End(ctx)
+    gui.show_settings = open
+    return
+  end
+
+  ImGui.PushItemWidth(ctx, 200)
+  local rv, new_val
+
+  -- === TIMECODE MODE ===
+  draw_section_header("TIMECODE MODE")
+  rv, new_val = ImGui.Combo(ctx, "Timecode Mode", gui.tc_mode, "Previous\0Current\0Off\0")
+  if rv then gui.tc_mode = new_val end
+  draw_help_marker("BWF TimeReference embed mode")
+
+  -- === EPSILON ===
+  draw_section_header("EPSILON (Tolerance)")
+  rv, new_val = ImGui.Combo(ctx, "Epsilon Mode", gui.epsilon_mode, "Use ExtState\0Frames\0Seconds\0")
+  if rv then gui.epsilon_mode = new_val end
+
+  if gui.epsilon_mode > 0 then
+    rv, new_val = ImGui.InputDouble(ctx, "Epsilon Value", gui.epsilon_value, 0.01, 0.1, "%.3f")
+    if rv then gui.epsilon_value = math.max(0, new_val) end
+
+    local unit = gui.epsilon_mode == 1 and "frames" or "seconds"
+    ImGui.SameLine(ctx)
+    ImGui.TextDisabled(ctx, unit)
+  end
+
+  -- === CUES ===
+  draw_section_header("CUES")
+  rv, new_val = ImGui.Checkbox(ctx, "Write Edge Cues", gui.cue_write_edge)
+  if rv then gui.cue_write_edge = new_val end
+  draw_help_marker("#in/#out edge cues as media cues")
+
+  rv, new_val = ImGui.Checkbox(ctx, "Write Glue Cues", gui.cue_write_glue)
+  if rv then gui.cue_write_glue = new_val end
+  draw_help_marker("#Glue: <TakeName> cues when sources change")
+
+  -- === POLICIES ===
+  draw_section_header("POLICIES")
+  rv, new_val = ImGui.Checkbox(ctx, "Glue Single Items", gui.glue_single_items)
+  if rv then gui.glue_single_items = new_val end
+  draw_help_marker("In auto mode: single item => render (if false)")
+
+  rv, new_val = ImGui.Combo(ctx, "Glue No-TrackFX Policy", gui.glue_no_trackfx_policy, "Preserve\0Force Multi\0")
+  if rv then gui.glue_no_trackfx_policy = new_val end
+
+  rv, new_val = ImGui.Combo(ctx, "Render No-TrackFX Policy", gui.render_no_trackfx_policy, "Preserve\0Force Multi\0")
+  if rv then gui.render_no_trackfx_policy = new_val end
+
+  rv, new_val = ImGui.Combo(ctx, "Rename Mode", gui.rename_mode, "Auto\0Glue\0Render\0")
+  if rv then gui.rename_mode = new_val end
+
+  -- === DEBUG ===
+  draw_section_header("DEBUG")
+  rv, new_val = ImGui.SliderInt(ctx, "Debug Level", gui.debug_level, 0, 2,
+    gui.debug_level == 0 and "Silent" or (gui.debug_level == 1 and "Normal" or "Verbose"))
+  if rv then gui.debug_level = new_val end
+
+  rv, new_val = ImGui.Checkbox(ctx, "No Clear Console", gui.debug_no_clear)
+  if rv then gui.debug_no_clear = new_val end
+
+  -- === SELECTION POLICY ===
+  draw_section_header("SELECTION POLICY")
+  rv, new_val = ImGui.Combo(ctx, "Selection Policy", gui.selection_policy, "Progress\0Restore\0None\0")
+  if rv then gui.selection_policy = new_val end
+  draw_help_marker("progress: keep in-run selections\nrestore: restore original selection\nnone: clear all")
+
+  ImGui.PopItemWidth(ctx)
+  ImGui.End(ctx)
+  gui.show_settings = open
+end
+
 local function draw_gui()
   local window_flags = ImGui.WindowFlags_MenuBar
 
@@ -417,9 +542,16 @@ local function draw_gui()
       ImGui.EndMenu(ctx)
     end
 
+    if ImGui.BeginMenu(ctx, 'View') then
+      if ImGui.MenuItem(ctx, 'Settings...', nil, false, true) then
+        gui.show_settings = true
+      end
+      ImGui.EndMenu(ctx)
+    end
+
     if ImGui.BeginMenu(ctx, 'Help') then
       if ImGui.MenuItem(ctx, 'About', nil, false, true) then
-        r.ShowConsoleMsg("[RGWH GUI] Version v251028_0001\nImGui interface for RGWH Core\n")
+        r.ShowConsoleMsg("[RGWH GUI] Version 0.1.0-beta (251102.0030)\nImGui interface for RGWH Core\n")
       end
       ImGui.EndMenu(ctx)
     end
@@ -433,29 +565,69 @@ local function draw_gui()
   -- === OPERATION SECTION ===
   draw_section_header("OPERATION")
 
-  local rv, new_val = ImGui.Combo(ctx, "Operation", gui.op, "Auto\0Render\0Glue\0")
-  if rv then gui.op = new_val end
-  draw_help_marker("auto: decide based on selection\nrender: single-item render\nglue: multi-item glue")
+  -- Selection Scope (checkboxes)
+  ImGui.Text(ctx, "Selection Scope:")
+  if ImGui.RadioButton(ctx, "Auto##scope", gui.selection_scope == 0) then
+    gui.selection_scope = 0
+  end
+  draw_help_marker("Auto: decide based on time selection")
 
-  rv, new_val = ImGui.Combo(ctx, "Selection Scope", gui.selection_scope, "Auto\0Units\0Time Selection\0Per Item\0")
-  if rv then gui.selection_scope = new_val end
-  draw_help_marker("How to group items for glue operation\n(ignored when op=render)")
+  if ImGui.RadioButton(ctx, "Units##scope", gui.selection_scope == 1) then
+    gui.selection_scope = 1
+  end
+  draw_help_marker("Group items by same-track units")
 
-  rv, new_val = ImGui.Combo(ctx, "Channel Mode", gui.channel_mode, "Auto\0Mono\0Multi\0")
-  if rv then gui.channel_mode = new_val end
-  draw_help_marker("Output channel routing mode")
+  if ImGui.RadioButton(ctx, "Time Selection##scope", gui.selection_scope == 2) then
+    gui.selection_scope = 2
+  end
+  draw_help_marker("Glue strictly within time selection window")
 
-  -- === RENDER SETTINGS ===
-  draw_section_header("RENDER SETTINGS")
-
-  ImGui.Text(ctx, "FX Processing:")
-  rv, new_val = ImGui.Checkbox(ctx, "Bake Take FX", gui.take_fx)
-  if rv then gui.take_fx = new_val end
-
-  rv, new_val = ImGui.Checkbox(ctx, "Bake Track FX", gui.track_fx)
-  if rv then gui.track_fx = new_val end
+  if ImGui.RadioButton(ctx, "Per Item##scope", gui.selection_scope == 3) then
+    gui.selection_scope = 3
+  end
+  draw_help_marker("Process each item individually")
 
   ImGui.Spacing(ctx)
+
+  -- Channel Mode (checkboxes)
+  ImGui.Text(ctx, "Channel Mode:")
+  if ImGui.RadioButton(ctx, "Auto##channel", gui.channel_mode == 0) then
+    gui.channel_mode = 0
+  end
+  draw_help_marker("Auto: decide based on source material")
+
+  if ImGui.RadioButton(ctx, "Mono##channel", gui.channel_mode == 1) then
+    gui.channel_mode = 1
+  end
+  draw_help_marker("Force mono output")
+
+  if ImGui.RadioButton(ctx, "Multi##channel", gui.channel_mode == 2) then
+    gui.channel_mode = 2
+  end
+  draw_help_marker("Force multi-channel output")
+
+  -- === PRINTING ===
+  draw_section_header("PRINTING")
+
+  -- Two-column layout
+  local col_width = ImGui.GetContentRegionAvail(ctx) / 2 - 10
+
+  -- Left column: FX Processing
+  ImGui.BeginGroup(ctx)
+  ImGui.Text(ctx, "FX Processing:")
+  rv, new_val = ImGui.Checkbox(ctx, "Print Take FX", gui.take_fx)
+  if rv then gui.take_fx = new_val end
+  draw_help_marker("Print take FX into rendered audio")
+
+  rv, new_val = ImGui.Checkbox(ctx, "Print Track FX", gui.track_fx)
+  if rv then gui.track_fx = new_val end
+  draw_help_marker("Print track FX into rendered audio")
+  ImGui.EndGroup(ctx)
+
+  ImGui.SameLine(ctx, col_width + 20)
+
+  -- Right column: Volume Handling
+  ImGui.BeginGroup(ctx)
   ImGui.Text(ctx, "Volume Handling:")
   rv, new_val = ImGui.Checkbox(ctx, "Merge Volumes", gui.merge_volumes)
   if rv then gui.merge_volumes = new_val end
@@ -463,12 +635,8 @@ local function draw_gui()
 
   rv, new_val = ImGui.Checkbox(ctx, "Print Volumes", gui.print_volumes)
   if rv then gui.print_volumes = new_val end
-  draw_help_marker("Bake volumes into rendered audio\n(false = restore original volumes)")
-
-  ImGui.Spacing(ctx)
-  rv, new_val = ImGui.Combo(ctx, "Timecode Mode", gui.tc_mode, "Previous\0Current\0Off\0")
-  if rv then gui.tc_mode = new_val end
-  draw_help_marker("BWF TimeReference embed mode")
+  draw_help_marker("Print volumes into rendered audio\n(false = restore original volumes)")
+  ImGui.EndGroup(ctx)
 
   -- === HANDLE SETTINGS ===
   draw_section_header("HANDLE (Pre/Post Roll)")
@@ -485,63 +653,7 @@ local function draw_gui()
     ImGui.TextDisabled(ctx, unit)
   end
 
-  -- === EPSILON SETTINGS ===
-  draw_section_header("EPSILON (Tolerance)")
-
-  rv, new_val = ImGui.Combo(ctx, "Epsilon Mode", gui.epsilon_mode, "Use ExtState\0Frames\0Seconds\0")
-  if rv then gui.epsilon_mode = new_val end
-
-  if gui.epsilon_mode > 0 then
-    rv, new_val = ImGui.InputDouble(ctx, "Epsilon Value", gui.epsilon_value, 0.01, 0.1, "%.3f")
-    if rv then gui.epsilon_value = math.max(0, new_val) end
-
-    local unit = gui.epsilon_mode == 1 and "frames" or "seconds"
-    ImGui.SameLine(ctx)
-    ImGui.TextDisabled(ctx, unit)
-  end
-
-  -- === CUES ===
-  draw_section_header("CUES")
-
-  rv, new_val = ImGui.Checkbox(ctx, "Write Edge Cues", gui.cue_write_edge)
-  if rv then gui.cue_write_edge = new_val end
-  draw_help_marker("#in/#out edge cues as media cues")
-
-  rv, new_val = ImGui.Checkbox(ctx, "Write Glue Cues", gui.cue_write_glue)
-  if rv then gui.cue_write_glue = new_val end
-  draw_help_marker("#Glue: <TakeName> cues when sources change")
-
-  -- === POLICIES ===
-  draw_section_header("POLICIES")
-
-  rv, new_val = ImGui.Checkbox(ctx, "Glue Single Items", gui.glue_single_items)
-  if rv then gui.glue_single_items = new_val end
-  draw_help_marker("In auto mode: single item => render (if false)")
-
-  rv, new_val = ImGui.Combo(ctx, "Glue No-TrackFX Policy", gui.glue_no_trackfx_policy, "Preserve\0Force Multi\0")
-  if rv then gui.glue_no_trackfx_policy = new_val end
-
-  rv, new_val = ImGui.Combo(ctx, "Render No-TrackFX Policy", gui.render_no_trackfx_policy, "Preserve\0Force Multi\0")
-  if rv then gui.render_no_trackfx_policy = new_val end
-
-  rv, new_val = ImGui.Combo(ctx, "Rename Mode", gui.rename_mode, "Auto\0Glue\0Render\0")
-  if rv then gui.rename_mode = new_val end
-
-  -- === DEBUG & SELECTION ===
-  draw_section_header("DEBUG & SELECTION")
-
-  rv, new_val = ImGui.SliderInt(ctx, "Debug Level", gui.debug_level, 0, 2,
-    gui.debug_level == 0 and "Silent" or (gui.debug_level == 1 and "Normal" or "Verbose"))
-  if rv then gui.debug_level = new_val end
-
-  rv, new_val = ImGui.Checkbox(ctx, "No Clear Console", gui.debug_no_clear)
-  if rv then gui.debug_no_clear = new_val end
-
-  rv, new_val = ImGui.Combo(ctx, "Selection Policy", gui.selection_policy, "Progress\0Restore\0None\0")
-  if rv then gui.selection_policy = new_val end
-  draw_help_marker("progress: keep in-run selections\nrestore: restore original selection\nnone: clear all")
-
-  -- === RUN BUTTON ===
+  -- === OPERATION BUTTONS ===
   ImGui.Spacing(ctx)
   ImGui.Spacing(ctx)
   ImGui.Separator(ctx)
@@ -551,9 +663,40 @@ local function draw_gui()
     ImGui.BeginDisabled(ctx)
   end
 
-  if ImGui.Button(ctx, "RUN RGWH", -1, 40) then
-    run_rgwh()
+  -- Calculate button width (3 buttons with spacing)
+  local avail_width = ImGui.GetContentRegionAvail(ctx)
+  local button_width = (avail_width - 2 * ImGui.GetStyleVar(ctx, ImGui.StyleVar_ItemSpacing)) / 3
+
+  -- AUTO button (Blue)
+  ImGui.PushStyleColor(ctx, ImGui.Col_Button, 0xFF8B4500)  -- Dark blue
+  ImGui.PushStyleColor(ctx, ImGui.Col_ButtonHovered, 0xFFB36500)
+  ImGui.PushStyleColor(ctx, ImGui.Col_ButtonActive, 0xFFD77D00)
+  if ImGui.Button(ctx, "AUTO", button_width, 40) then
+    run_rgwh("auto")
   end
+  ImGui.PopStyleColor(ctx, 3)
+
+  ImGui.SameLine(ctx)
+
+  -- RENDER button (Green)
+  ImGui.PushStyleColor(ctx, ImGui.Col_Button, 0xFF008B45)  -- Dark green
+  ImGui.PushStyleColor(ctx, ImGui.Col_ButtonHovered, 0xFF00B355)
+  ImGui.PushStyleColor(ctx, ImGui.Col_ButtonActive, 0xFF00D765)
+  if ImGui.Button(ctx, "RENDER", button_width, 40) then
+    run_rgwh("render")
+  end
+  ImGui.PopStyleColor(ctx, 3)
+
+  ImGui.SameLine(ctx)
+
+  -- GLUE button (Orange)
+  ImGui.PushStyleColor(ctx, ImGui.Col_Button, 0xFF0066FF)  -- Orange
+  ImGui.PushStyleColor(ctx, ImGui.Col_ButtonHovered, 0xFF0088FF)
+  ImGui.PushStyleColor(ctx, ImGui.Col_ButtonActive, 0xFF00AAFF)
+  if ImGui.Button(ctx, "GLUE", button_width, 40) then
+    run_rgwh("glue")
+  end
+  ImGui.PopStyleColor(ctx, 3)
 
   if gui.is_running then
     ImGui.EndDisabled(ctx)
@@ -576,6 +719,7 @@ end
 ------------------------------------------------------------
 local function loop()
   gui.open = draw_gui()
+  draw_settings_popup()
 
   if gui.open then
     r.defer(loop)
