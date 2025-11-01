@@ -1,7 +1,7 @@
 --[[
 @description RGWH GUI - ImGui Interface for RGWH Core
 @author hsuanice
-@version 0.1.0-beta (251102.0700)
+@version 0.1.0-beta (251102.0730)
 @about
   ImGui-based GUI for configuring and running RGWH Core operations.
   Provides visual controls for all RGWH Wrapper Template parameters.
@@ -11,7 +11,13 @@
   Adjust parameters using the visual controls and click operation buttons to execute.
 
 @changelog
-  v251102.0700 (0.1.0-beta)
+  v251102.0730 (0.1.0-beta)
+    - Change: Move Channel Mode to the right of Selection Scope and use a two-column layout so Channel Mode takes the right column.
+    - Change: Replace the 'View' menu in the menu bar with a direct 'Settings...' menu item for quicker access.
+    - Change: Reorder the bottom operation buttons to [RENDER] [AUTO] [GLUE]. Buttons use the default colors but their hover color becomes red (0xFFCC3333).
+    - Improve: Persist GUI settings across runs (save/load via ExtState so user choices are remembered between sessions).
+
+  v251102.0030 (0.1.0-beta)
     - Changed: Renamed "RENDER SETTINGS" to "PRINTING" for consistency
     - Changed: Reorganized printing options into two-column layout:
         • Left column: FX Processing (Print Take FX, Print Track FX)
@@ -127,6 +133,58 @@ local gui = {
   is_running = false,
   last_result = "",
 }
+
+-- Persistence namespace and helpers (save/load GUI state)
+local P_NS = "hsuanice_RGWH_GUI_state_v1"
+
+local persist_keys = {
+  'op','selection_scope','channel_mode',
+  'take_fx','track_fx','tc_mode',
+  'merge_volumes','print_volumes',
+  'handle_mode','handle_length',
+  'epsilon_mode','epsilon_value',
+  'cue_write_edge','cue_write_glue',
+  'glue_single_items','glue_no_trackfx_policy','render_no_trackfx_policy','rename_mode',
+  'debug_level','debug_no_clear','selection_policy'
+}
+
+local function serialize_gui_state(tbl)
+  local parts = {}
+  for _,k in ipairs(persist_keys) do
+    local v = tbl[k]
+    if v == nil then v = '' end
+    parts[#parts+1] = k .. '=' .. tostring(v)
+  end
+  return table.concat(parts, ';')
+end
+
+local function deserialize_into_gui(s, tbl)
+  if not s or s == '' then return end
+  for kv in s:gmatch('[^;]+') do
+    local k, v = kv:match('([^=]+)=(.*)')
+    if k and v and tbl[k] ~= nil then
+      -- try to coerce numeric
+      local n = tonumber(v)
+      if n then tbl[k] = n
+      elseif v == 'true' then tbl[k] = true
+      elseif v == 'false' then tbl[k] = false
+      else tbl[k] = v end
+    end
+  end
+end
+
+local function save_persist()
+  local s = serialize_gui_state(gui)
+  reaper.SetExtState(P_NS, 'state', s, true)
+end
+
+local function load_persist()
+  local s = reaper.GetExtState(P_NS, 'state') or ''
+  deserialize_into_gui(s, gui)
+end
+
+-- call load immediately so gui gets initial persisted values
+load_persist()
 
 ------------------------------------------------------------
 -- Preset System
@@ -522,7 +580,8 @@ local function draw_settings_popup()
 end
 
 local function draw_gui()
-  local window_flags = ImGui.WindowFlags_MenuBar
+  local before_state = serialize_gui_state(gui)
+  local window_flags = ImGui.WindowFlags_MenuBar | ImGui.WindowFlags_AlwaysAutoResize | ImGui.WindowFlags_NoResize
 
   local visible, open = ImGui.Begin(ctx, 'RGWH Control Panel', true, window_flags)
   if not visible then
@@ -542,11 +601,8 @@ local function draw_gui()
       ImGui.EndMenu(ctx)
     end
 
-    if ImGui.BeginMenu(ctx, 'View') then
-      if ImGui.MenuItem(ctx, 'Settings...', nil, false, true) then
-        gui.show_settings = true
-      end
-      ImGui.EndMenu(ctx)
+    if ImGui.MenuItem(ctx, 'Settings...', nil, false, true) then
+      gui.show_settings = true
     end
 
     if ImGui.BeginMenu(ctx, 'Help') then
@@ -565,46 +621,38 @@ local function draw_gui()
   -- === OPERATION SECTION ===
   draw_section_header("OPERATION")
 
-  -- Selection Scope (checkboxes)
+  -- Selection Scope (left) and Channel Mode (right) in two-column layout
+  local col_width = ImGui.GetContentRegionAvail(ctx) / 2 - 10
+
+  -- Left column: Selection Scope
+  ImGui.BeginGroup(ctx)
   ImGui.Text(ctx, "Selection Scope:")
-  if ImGui.RadioButton(ctx, "Auto##scope", gui.selection_scope == 0) then
-    gui.selection_scope = 0
-  end
+  if ImGui.RadioButton(ctx, "Auto##scope", gui.selection_scope == 0) then gui.selection_scope = 0 end
   draw_help_marker("Auto: decide based on time selection")
 
-  if ImGui.RadioButton(ctx, "Units##scope", gui.selection_scope == 1) then
-    gui.selection_scope = 1
-  end
+  if ImGui.RadioButton(ctx, "Units##scope", gui.selection_scope == 1) then gui.selection_scope = 1 end
   draw_help_marker("Group items by same-track units")
 
-  if ImGui.RadioButton(ctx, "Time Selection##scope", gui.selection_scope == 2) then
-    gui.selection_scope = 2
-  end
+  if ImGui.RadioButton(ctx, "Time Selection##scope", gui.selection_scope == 2) then gui.selection_scope = 2 end
   draw_help_marker("Glue strictly within time selection window")
 
-  if ImGui.RadioButton(ctx, "Per Item##scope", gui.selection_scope == 3) then
-    gui.selection_scope = 3
-  end
+  if ImGui.RadioButton(ctx, "Per Item##scope", gui.selection_scope == 3) then gui.selection_scope = 3 end
   draw_help_marker("Process each item individually")
+  ImGui.EndGroup(ctx)
 
-  ImGui.Spacing(ctx)
-
-  -- Channel Mode (checkboxes)
+  -- Right column: Channel Mode
+  ImGui.SameLine(ctx, col_width + 20)
+  ImGui.BeginGroup(ctx)
   ImGui.Text(ctx, "Channel Mode:")
-  if ImGui.RadioButton(ctx, "Auto##channel", gui.channel_mode == 0) then
-    gui.channel_mode = 0
-  end
+  if ImGui.RadioButton(ctx, "Auto##channel", gui.channel_mode == 0) then gui.channel_mode = 0 end
   draw_help_marker("Auto: decide based on source material")
 
-  if ImGui.RadioButton(ctx, "Mono##channel", gui.channel_mode == 1) then
-    gui.channel_mode = 1
-  end
+  if ImGui.RadioButton(ctx, "Mono##channel", gui.channel_mode == 1) then gui.channel_mode = 1 end
   draw_help_marker("Force mono output")
 
-  if ImGui.RadioButton(ctx, "Multi##channel", gui.channel_mode == 2) then
-    gui.channel_mode = 2
-  end
+  if ImGui.RadioButton(ctx, "Multi##channel", gui.channel_mode == 2) then gui.channel_mode = 2 end
   draw_help_marker("Force multi-channel output")
+  ImGui.EndGroup(ctx)
 
   -- === PRINTING ===
   draw_section_header("PRINTING")
@@ -667,36 +715,33 @@ local function draw_gui()
   local avail_width = ImGui.GetContentRegionAvail(ctx)
   local button_width = (avail_width - 2 * ImGui.GetStyleVar(ctx, ImGui.StyleVar_ItemSpacing)) / 3
 
-  -- AUTO button (Blue)
-  ImGui.PushStyleColor(ctx, ImGui.Col_Button, 0xFF8B4500)  -- Dark blue
-  ImGui.PushStyleColor(ctx, ImGui.Col_ButtonHovered, 0xFFB36500)
-  ImGui.PushStyleColor(ctx, ImGui.Col_ButtonActive, 0xFFD77D00)
-  if ImGui.Button(ctx, "AUTO", button_width, 40) then
-    run_rgwh("auto")
-  end
-  ImGui.PopStyleColor(ctx, 3)
-
-  ImGui.SameLine(ctx)
-
-  -- RENDER button (Green)
-  ImGui.PushStyleColor(ctx, ImGui.Col_Button, 0xFF008B45)  -- Dark green
-  ImGui.PushStyleColor(ctx, ImGui.Col_ButtonHovered, 0xFF00B355)
-  ImGui.PushStyleColor(ctx, ImGui.Col_ButtonActive, 0xFF00D765)
+  -- RENDER button (default color, high-contrast red on hover/active)
+  ImGui.PushStyleColor(ctx, ImGui.Col_ButtonHovered, 0xFFFF3333)
+  ImGui.PushStyleColor(ctx, ImGui.Col_ButtonActive, 0xFFCC0000)
   if ImGui.Button(ctx, "RENDER", button_width, 40) then
     run_rgwh("render")
   end
-  ImGui.PopStyleColor(ctx, 3)
+  ImGui.PopStyleColor(ctx, 2)
 
   ImGui.SameLine(ctx)
 
-  -- GLUE button (Orange)
-  ImGui.PushStyleColor(ctx, ImGui.Col_Button, 0xFF0066FF)  -- Orange
-  ImGui.PushStyleColor(ctx, ImGui.Col_ButtonHovered, 0xFF0088FF)
-  ImGui.PushStyleColor(ctx, ImGui.Col_ButtonActive, 0xFF00AAFF)
+  -- AUTO button (default color, high-contrast red on hover/active)
+  ImGui.PushStyleColor(ctx, ImGui.Col_ButtonHovered, 0xFFFF3333)
+  ImGui.PushStyleColor(ctx, ImGui.Col_ButtonActive, 0xFFCC0000)
+  if ImGui.Button(ctx, "AUTO", button_width, 40) then
+    run_rgwh("auto")
+  end
+  ImGui.PopStyleColor(ctx, 2)
+
+  ImGui.SameLine(ctx)
+
+  -- GLUE button (default color, high-contrast red on hover/active)
+  ImGui.PushStyleColor(ctx, ImGui.Col_ButtonHovered, 0xFFFF3333)
+  ImGui.PushStyleColor(ctx, ImGui.Col_ButtonActive, 0xFFCC0000)
   if ImGui.Button(ctx, "GLUE", button_width, 40) then
     run_rgwh("glue")
   end
-  ImGui.PopStyleColor(ctx, 3)
+  ImGui.PopStyleColor(ctx, 2)
 
   if gui.is_running then
     ImGui.EndDisabled(ctx)
@@ -707,6 +752,10 @@ local function draw_gui()
     ImGui.Spacing(ctx)
     ImGui.Text(ctx, "Status: " .. gui.last_result)
   end
+
+  -- persist if changed
+  local after_state = serialize_gui_state(gui)
+  if after_state ~= before_state then save_persist() end
 
   ImGui.PopItemWidth(ctx)
   ImGui.End(ctx)
