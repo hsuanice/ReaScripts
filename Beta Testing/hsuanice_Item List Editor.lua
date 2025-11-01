@@ -1,6 +1,6 @@
 --[[
 @description Item List Editor
-@version 251101.0350
+@version 251101.2230
 @author hsuanice
 @about
   Shows a live, spreadsheet-style table of the currently selected items and all
@@ -42,13 +42,21 @@
 
 
 @changelog
-  v251101_0350
+  v251101.2230
+  - UX: Separated Clear Cache options into dedicated "Options" button
+    • New standalone "Options" button added next to "Clear Cache"
+    • Moved all debug/diagnostic options from Clear Cache right-click menu to Options button
+    • Options menu includes: Console Output toggle, Debug Mode toggle, Cache Test Report
+    • Clearer UI organization - users can find diagnostic options more easily
+    • Clear Cache button now only shows cache statistics on hover
+
+  v251101.0350
   - UX: Swapped "Fit Content Widths" and "Reset Widths" button behavior
     • Primary button (left-click): "Fit Content Widths" - auto-adjusts columns based on content
     • Right-click menu: "Reset to Default Widths" - restores original default sizes
     • Updated tooltips to reflect new behavior
 
-  v251101_0340
+  v251101.0340
   - Enhancement: Advanced Sort dialog improvements
     • New dropdown + "+" button to add sort columns directly in dialog
     • No longer need to Shift+Click headers first - can manage everything in dialog
@@ -119,7 +127,7 @@
     • Ensures all note content visible without editing
     • Edit mode unchanged - still shows full content in InputTextMultiline
     
-  v251025_2245
+  v251025.2245
   - UI: Toolbar reorganization for cleaner layout
     • Removed standalone "Cache Test" button from toolbar
     • Moved "Scan Project Items" and "Clear Cache" buttons to first row (after Custom Pattern input)
@@ -142,7 +150,7 @@
     • Internal newlines are preserved, only trailing newlines removed
     • Applies to all fields (TSV and CSV), ensures proper RFC 4180 compliance
 
-  v251025_2147
+  v251025.2147
   - Fix: Critical cache serialization bug - multiline Description fields corrupting cache
     • Problem: Description field (BWF metadata) contains newlines, breaking cache file format
     • Root cause: Cache serialization didn't escape newlines/tabs in metadata fields
@@ -162,7 +170,7 @@
     • Backwards compatible - simple fields remain unquoted
     • CSV export behavior unchanged (already used quotes)
 
-  v251025_1640
+  v251025.1640
   - Feature: Cache diagnostic testing tool
     • New "Cache Test" button generates comprehensive diagnostic report
     • Report includes:
@@ -3890,16 +3898,22 @@ if reaper.ImGui_IsItemHovered(ctx) then
   if invalidated_count > 0 then
     reaper.ImGui_TextColored(ctx, 0xFF6666FF, string.format("Invalidated: %d items", invalidated_count))
   end
-  reaper.ImGui_Separator(ctx)
-  reaper.ImGui_TextDisabled(ctx, "Right-click for options")
   reaper.ImGui_EndTooltip(ctx)
 end
--- Right-click to show context menu
-if reaper.ImGui_IsItemClicked(ctx, reaper.ImGui_MouseButton_Right()) then
-  reaper.ImGui_OpenPopup(ctx, "##cache_context_menu")
+
+-- Options button (moved from Clear Cache right-click menu)
+reaper.ImGui_SameLine(ctx)
+if reaper.ImGui_Button(ctx, "Options", 70, 24) then
+  reaper.ImGui_OpenPopup(ctx, "##options_menu")
 end
--- Cache context menu
-if reaper.ImGui_BeginPopup(ctx, "##cache_context_menu") then
+if reaper.ImGui_IsItemHovered(ctx) then
+  reaper.ImGui_BeginTooltip(ctx)
+  reaper.ImGui_Text(ctx, "Debug and diagnostic options")
+  reaper.ImGui_EndTooltip(ctx)
+end
+
+-- Options menu (previously cache_context_menu)
+if reaper.ImGui_BeginPopup(ctx, "##options_menu") then
   -- Toggle console output option
   local console_label = CONSOLE.enabled and "✓ Console Output" or "  Console Output"
   if reaper.ImGui_Selectable(ctx, console_label) then
