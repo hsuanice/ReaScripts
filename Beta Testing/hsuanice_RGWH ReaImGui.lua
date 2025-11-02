@@ -1,7 +1,7 @@
 --[[
 @description RGWH GUI - ImGui Interface for RGWH Core
 @author hsuanice
-@version 0.1.0-beta (251102.0735)
+@version 0.1.0-beta (251102.1500)
 @about
   ImGui-based GUI for configuring and running RGWH Core operations.
   Provides visual controls for all RGWH Wrapper Template parameters.
@@ -11,6 +11,8 @@
   Adjust parameters using the visual controls and click operation buttons to execute.
 
 @changelog
+  v251102.1500 (0.1.0-beta)
+    - Fix: Correct GLUE button hover/active colors to yellow shades.
   v251102.0735 (0.1.0-beta)
     - Add: Press ESC to close the GUI window when the window is focused.
   v251102.0730 (0.1.0-beta)
@@ -723,33 +725,36 @@ local function draw_gui()
   local avail_width = ImGui.GetContentRegionAvail(ctx)
   local button_width = (avail_width - 2 * ImGui.GetStyleVar(ctx, ImGui.StyleVar_ItemSpacing)) / 3
 
-  -- RENDER button (default color, high-contrast red on hover/active)
-  ImGui.PushStyleColor(ctx, ImGui.Col_ButtonHovered, 0xFFFF3333)
-  ImGui.PushStyleColor(ctx, ImGui.Col_ButtonActive, 0xFFCC0000)
+  -- RENDER button (base blue, hover -> green)
+  ImGui.PushStyleColor(ctx, ImGui.Col_Button,        0xFF) -- base blue (same as GUI default)
+  ImGui.PushStyleColor(ctx, ImGui.Col_ButtonHovered, 0xFF3399FF) -- hover becomes green
+  ImGui.PushStyleColor(ctx, ImGui.Col_ButtonActive,  0xFF1A75FF) -- active deep green
   if ImGui.Button(ctx, "RENDER", button_width, 40) then
     run_rgwh("render")
   end
-  ImGui.PopStyleColor(ctx, 2)
+  ImGui.PopStyleColor(ctx, 3)
 
   ImGui.SameLine(ctx)
 
-  -- AUTO button (default color, high-contrast red on hover/active)
-  ImGui.PushStyleColor(ctx, ImGui.Col_ButtonHovered, 0xFFFF3333)
-  ImGui.PushStyleColor(ctx, ImGui.Col_ButtonActive, 0xFFCC0000)
+  -- AUTO button (base blue, hover -> brighter blue)
+  ImGui.PushStyleColor(ctx, ImGui.Col_Button,        0xFF) -- base blue
+  ImGui.PushStyleColor(ctx, ImGui.Col_ButtonHovered, 0xFF3399FF) -- hover brighter blue
+  ImGui.PushStyleColor(ctx, ImGui.Col_ButtonActive,  0xFF1A75FF) -- active slightly darker
   if ImGui.Button(ctx, "AUTO", button_width, 40) then
     run_rgwh("auto")
   end
-  ImGui.PopStyleColor(ctx, 2)
+  ImGui.PopStyleColor(ctx, 3)
 
   ImGui.SameLine(ctx)
 
-  -- GLUE button (default color, high-contrast red on hover/active)
-  ImGui.PushStyleColor(ctx, ImGui.Col_ButtonHovered, 0xFFFF3333)
-  ImGui.PushStyleColor(ctx, ImGui.Col_ButtonActive, 0xFFCC0000)
+  -- GLUE button (base blue, hover -> yellow)
+  ImGui.PushStyleColor(ctx, ImGui.Col_Button,        0xFF) -- base blue
+  ImGui.PushStyleColor(ctx, ImGui.Col_ButtonHovered, 0xFF3399FF) -- hover becomes yellow
+  ImGui.PushStyleColor(ctx, ImGui.Col_ButtonActive,  0xFF1A75FF) -- active deeper yellow/orange
   if ImGui.Button(ctx, "GLUE", button_width, 40) then
     run_rgwh("glue")
   end
-  ImGui.PopStyleColor(ctx, 2)
+  ImGui.PopStyleColor(ctx, 3)
 
   if gui.is_running then
     ImGui.EndDisabled(ctx)
