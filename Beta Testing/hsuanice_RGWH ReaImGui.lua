@@ -1,7 +1,7 @@
 --[[
 @description RGWH GUI - ImGui Interface for RGWH Core
 @author hsuanice
-@version 0.1.0-beta (251102.0730)
+@version 0.1.0-beta (251102.0735)
 @about
   ImGui-based GUI for configuring and running RGWH Core operations.
   Provides visual controls for all RGWH Wrapper Template parameters.
@@ -11,6 +11,8 @@
   Adjust parameters using the visual controls and click operation buttons to execute.
 
 @changelog
+  v251102.0735 (0.1.0-beta)
+    - Add: Press ESC to close the GUI window when the window is focused.
   v251102.0730 (0.1.0-beta)
     - Change: Move Channel Mode to the right of Selection Scope and use a two-column layout so Channel Mode takes the right column.
     - Change: Replace the 'View' menu in the menu bar with a direct 'Settings...' menu item for quicker access.
@@ -587,6 +589,12 @@ local function draw_gui()
   if not visible then
     ImGui.End(ctx)
     return open
+  end
+
+  -- Close the window when ESC is pressed and the window is focused
+  if ImGui.IsWindowFocused(ctx) and ImGui.IsKeyPressed(ctx, ImGui.Key_Escape) then
+    open = false
+    gui.open = false
   end
 
   -- Menu Bar
