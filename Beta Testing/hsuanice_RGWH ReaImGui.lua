@@ -1,7 +1,7 @@
 --[[
 @description RGWH GUI - ImGui Interface for RGWH Core
 @author hsuanice
-@version 0.1.0-beta (251106.2230)
+@version 0.1.0-beta (251107.0100)
 @about
   ImGui-based GUI for configuring and running RGWH Core operations.
   Provides visual controls for all RGWH Wrapper Template parameters.
@@ -11,6 +11,29 @@
   Adjust parameters using the visual controls and click operation buttons to execute.
 
 @changelog
+  v251107.0100 (0.1.0-beta) - FIXED AUTO MODE LOGIC (CORE MODIFICATION)
+    - Fixed: AUTO mode now correctly processes units based on their composition (not total selection count)
+      • Single-item units → RENDER (per-item)
+      • Multi-item units (TOUCH/CROSSFADE) → GLUE
+      • Works correctly even when selecting mixed unit types
+    - Added: New auto_selection() function in RGWH Core
+      • Analyzes each unit individually
+      • Separates single-item units (for render) and multi-item units (for glue)
+      • Processes them in appropriate batches
+    - Changed: core() function now calls auto_selection() for op="auto"
+    - Improved: AUTO mode description updated to reflect unit-based logic
+    - Technical: RGWH Core line 1340-1428 (new auto_selection function)
+    - Technical: RGWH Core line 1955-1959 (modified core function)
+
+  v251106.2250 (0.1.0-beta) - CLARIFIED AUTO VS GLUE BEHAVIOR
+    - Changed: Removed "Glue Single Items" checkbox from GUI for clarity
+    - Changed: AUTO mode behavior clarified (awaiting Core fix)
+    - Changed: GLUE mode now has clear, fixed behavior (always glue including single items)
+    - Changed: RENDER mode (unchanged - always per-item render)
+    - Improved: Mode descriptions now clearly explain the difference between AUTO and GLUE
+    - Technical: glue_single_items default changed to false (AUTO mode behavior)
+    - Technical: GLUE mode now uses selection_scope="auto" instead of "ts" for proper scope detection
+
   v251106.2230 (0.1.0-beta) - COMPLETE UI REDESIGN & COMPACT LAYOUT
     - Changed: Completely reorganized GUI layout for better clarity and compactness
       • Common settings (Channel Mode, Printing, Handle) moved to top
@@ -145,7 +168,7 @@ local gui = {
   cue_write_glue = true,
 
   -- Policies
-  glue_single_items = true,
+  glue_single_items = false,  -- AUTO mode: false=single→render, true=single→glue
   glue_no_trackfx_policy = 0,    -- 0=preserve, 1=force_multi
   render_no_trackfx_policy = 0,  -- 0=preserve, 1=force_multi
   rename_mode = 0,               -- 0=auto, 1=glue, 2=render
@@ -448,16 +471,19 @@ local function build_args_from_gui(operation)
   local rename_names = { "auto", "glue", "render" }
 
   -- Determine op and selection_scope based on button clicked
-  local op, selection_scope
+  local op, selection_scope, glue_single_items
   if operation == "render" then
     op = "render"
     selection_scope = "item"  -- Always per-item
+    glue_single_items = false  -- Not applicable for render
   elseif operation == "auto" then
     op = "auto"
-    selection_scope = "auto"  -- Let Core auto-detect units vs ts
+    selection_scope = "auto"  -- Let Core auto-detect units vs ts (single→render, multi→glue)
+    glue_single_items = false  -- AUTO mode: single item → render
   elseif operation == "glue" then
     op = "glue"
-    selection_scope = "ts"    -- Always time selection
+    selection_scope = "auto"  -- Let Core auto-detect units vs ts (always glue, including single)
+    glue_single_items = true   -- GLUE mode: always glue (including single items)
   end
 
   local args = {
@@ -478,7 +504,7 @@ local function build_args_from_gui(operation)
     },
 
     policies = {
-      glue_single_items = gui.glue_single_items,
+      glue_single_items = glue_single_items,  -- Use the mode-specific value
       glue_no_trackfx_output_policy = policy_names[gui.glue_no_trackfx_policy + 1],
       render_no_trackfx_output_policy = policy_names[gui.render_no_trackfx_policy + 1],
       rename_mode = rename_names[gui.rename_mode + 1],
@@ -553,7 +579,13 @@ local function run_rgwh(operation)
   if ok then
     gui.last_result = "Success!"
   else
-    gui.last_result = "Error: " .. tostring(err)
+    local err_msg = "Error: " .. tostring(err)
+    gui.last_result = err_msg
+    -- Also print error to console so user can copy it
+    r.ShowConsoleMsg("\n" .. string.rep("=", 60) .. "\n")
+    r.ShowConsoleMsg("[RGWH GUI] ERROR:\n")
+    r.ShowConsoleMsg(err_msg .. "\n")
+    r.ShowConsoleMsg(string.rep("=", 60) .. "\n")
   end
 
   gui.is_running = false
@@ -629,9 +661,6 @@ local function draw_settings_popup()
 
   -- === POLICIES ===
   draw_section_header("POLICIES")
-  rv, new_val = ImGui.Checkbox(ctx, "Glue Single Items", gui.glue_single_items)
-  if rv then gui.glue_single_items = new_val end
-  draw_help_marker("In auto mode: single item => render (if false)")
 
   rv, new_val = ImGui.Combo(ctx, "Glue No-TrackFX Policy", gui.glue_no_trackfx_policy, "Preserve\0Force Multi\0")
   if rv then gui.glue_no_trackfx_policy = new_val end
@@ -700,7 +729,7 @@ local function draw_gui()
 
     if ImGui.BeginMenu(ctx, 'Help') then
       if ImGui.MenuItem(ctx, 'About', nil, false, true) then
-        r.ShowConsoleMsg("[RGWH GUI] Version 0.1.0-beta (251106.2230)\nImGui interface for RGWH Core\n")
+        r.ShowConsoleMsg("[RGWH GUI] Version 0.1.0-beta (251107.0100)\nImGui interface for RGWH Core\n")
       end
       ImGui.EndMenu(ctx)
     end
@@ -773,19 +802,6 @@ local function draw_gui()
     ImGui.TextDisabled(ctx, unit)
   end
 
-  -- === MODE-SPECIFIC SETTINGS ===
-  ImGui.Spacing(ctx)
-  ImGui.Separator(ctx)
-  ImGui.Spacing(ctx)
-
-  -- AUTO Settings
-  ImGui.Text(ctx, "Auto Mode:")
-  ImGui.SameLine(ctx)
-  rv, new_val = ImGui.Checkbox(ctx, "Glue Single Items", gui.glue_single_items)
-  if rv then gui.glue_single_items = new_val end
-  ImGui.SameLine(ctx)
-  draw_help_marker("When only one item selected: ON=glue, OFF=render")
-
   -- === OPERATION BUTTONS & INFO ===
   ImGui.Spacing(ctx)
   ImGui.Spacing(ctx)
@@ -844,11 +860,11 @@ local function draw_gui()
   -- Mode info display (compact)
   ImGui.Spacing(ctx)
   if hovered_mode == "render" then
-    ImGui.TextWrapped(ctx, "RENDER: Process each item independently (per-item render)")
+    ImGui.TextWrapped(ctx, "RENDER: Process each item independently (per-item render, no grouping)")
   elseif hovered_mode == "auto" then
-    ImGui.TextWrapped(ctx, "AUTO: Auto-detect scope • No TS→Units • TS=span→Units • TS≠span→TS • Single item behavior controlled by 'Glue Single Items'")
+    ImGui.TextWrapped(ctx, "AUTO: Single-item units→RENDER, Multi-item units(TOUCH/CROSSFADE)→GLUE • Scope: No TS→Units, TS=span→Units, TS≠span→TS")
   elseif hovered_mode == "glue" then
-    ImGui.TextWrapped(ctx, "GLUE: Use Time Selection window to glue all items (always glue, no per-item)")
+    ImGui.TextWrapped(ctx, "GLUE: Always glue all items (including single items) • Scope: Has TS→TS, No TS→Units (like REAPER native)")
   else
     ImGui.TextDisabled(ctx, "Hover over a button to see its description")
   end
