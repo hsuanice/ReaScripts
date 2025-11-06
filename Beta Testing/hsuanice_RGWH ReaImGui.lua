@@ -1,7 +1,7 @@
 --[[
 @description RGWH GUI - ImGui Interface for RGWH Core
 @author hsuanice
-@version 0.1.0-beta (251106.1800)
+@version 0.1.0-beta (251106.2230)
 @about
   ImGui-based GUI for configuring and running RGWH Core operations.
   Provides visual controls for all RGWH Wrapper Template parameters.
@@ -11,6 +11,23 @@
   Adjust parameters using the visual controls and click operation buttons to execute.
 
 @changelog
+  v251106.2230 (0.1.0-beta) - COMPLETE UI REDESIGN & COMPACT LAYOUT
+    - Changed: Completely reorganized GUI layout for better clarity and compactness
+      • Common settings (Channel Mode, Printing, Handle) moved to top
+      • Channel Mode now displays in single horizontal row with label
+      • Auto Mode settings in single horizontal row (label + checkbox + help)
+    - Changed: AUTO mode simplified
+      • Single checkbox: "Glue Single Items" (single item → glue or render)
+      • Auto scope detection is always on (Units vs TS detection is automatic)
+    - Changed: GLUE mode uses Time Selection (always glue, no settings)
+    - Changed: RENDER mode has no settings (always per-item render)
+    - Added: Dynamic mode info display
+      • Hover over RENDER/AUTO/GLUE buttons to see detailed description
+      • Unified info area below buttons (much more compact than separate sections)
+      • Shows relevant scope detection logic and behavior for each mode
+    - Improved: Much shorter GUI window (removed redundant section headers and text blocks)
+    - Technical: Removed selected_mode and use_units state variables (no longer needed)
+
   v251106.1800 (0.1.0-beta)
     - Add: Complete settings persistence - all GUI settings are now automatically saved and restored between sessions
     - Add: Debug mode console output - when debug level >= 1:
@@ -422,18 +439,30 @@ local function apply_preset(idx)
   if p.tc_mode then gui.tc_mode = p.tc_mode end
 end
 
-local function build_args_from_gui()
+local function build_args_from_gui(operation)
   -- Map GUI state to RGWH Core args format
-  local op_names = { "auto", "render", "glue" }
-  local scope_names = { "auto", "units", "ts", "item" }
+  -- operation: "render", "auto", or "glue"
   local channel_names = { "auto", "mono", "multi" }
   local tc_names = { "previous", "current", "off" }
   local policy_names = { "preserve", "force_multi" }
   local rename_names = { "auto", "glue", "render" }
 
+  -- Determine op and selection_scope based on button clicked
+  local op, selection_scope
+  if operation == "render" then
+    op = "render"
+    selection_scope = "item"  -- Always per-item
+  elseif operation == "auto" then
+    op = "auto"
+    selection_scope = "auto"  -- Let Core auto-detect units vs ts
+  elseif operation == "glue" then
+    op = "glue"
+    selection_scope = "ts"    -- Always time selection
+  end
+
   local args = {
-    op = op_names[gui.op + 1],
-    selection_scope = scope_names[gui.selection_scope + 1],
+    op = op,
+    selection_scope = selection_scope,
     channel_mode = channel_names[gui.channel_mode + 1],
 
     take_fx = gui.take_fx,
@@ -490,18 +519,8 @@ local function run_rgwh(operation)
   gui.is_running = true
   gui.last_result = "Running..."
 
-  -- Temporarily override operation mode
-  local original_op = gui.op
-  if operation == "auto" then
-    gui.op = 0
-  elseif operation == "render" then
-    gui.op = 1
-  elseif operation == "glue" then
-    gui.op = 2
-  end
-
-  local args = build_args_from_gui()
-  gui.op = original_op  -- Restore original
+  -- Build args based on which button was clicked
+  local args = build_args_from_gui(operation)
 
   -- Selection policy handling (wrapper logic)
   local policy_names = { "progress", "restore", "none" }
@@ -681,7 +700,7 @@ local function draw_gui()
 
     if ImGui.BeginMenu(ctx, 'Help') then
       if ImGui.MenuItem(ctx, 'About', nil, false, true) then
-        r.ShowConsoleMsg("[RGWH GUI] Version 0.1.0-beta (251102.1500)\nImGui interface for RGWH Core\n")
+        r.ShowConsoleMsg("[RGWH GUI] Version 0.1.0-beta (251106.2230)\nImGui interface for RGWH Core\n")
       end
       ImGui.EndMenu(ctx)
     end
@@ -692,41 +711,20 @@ local function draw_gui()
   -- Main content
   ImGui.PushItemWidth(ctx, 200)
 
-  -- === OPERATION SECTION ===
-  draw_section_header("OPERATION")
+  -- === COMMON SETTINGS ===
 
-  -- Selection Scope (left) and Channel Mode (right) in two-column layout
-  local col_width = ImGui.GetContentRegionAvail(ctx) / 2 - 10
-
-  -- Left column: Selection Scope
-  ImGui.BeginGroup(ctx)
-  ImGui.Text(ctx, "Selection Scope:")
-  if ImGui.RadioButton(ctx, "Auto##scope", gui.selection_scope == 0) then gui.selection_scope = 0 end
-  draw_help_marker("Auto: decide based on time selection")
-
-  if ImGui.RadioButton(ctx, "Units##scope", gui.selection_scope == 1) then gui.selection_scope = 1 end
-  draw_help_marker("Group items by same-track units")
-
-  if ImGui.RadioButton(ctx, "Time Selection##scope", gui.selection_scope == 2) then gui.selection_scope = 2 end
-  draw_help_marker("Glue strictly within time selection window")
-
-  if ImGui.RadioButton(ctx, "Per Item##scope", gui.selection_scope == 3) then gui.selection_scope = 3 end
-  draw_help_marker("Process each item individually")
-  ImGui.EndGroup(ctx)
-
-  -- Right column: Channel Mode
-  ImGui.SameLine(ctx, col_width + 20)
-  ImGui.BeginGroup(ctx)
+  -- === CHANNEL MODE ===
   ImGui.Text(ctx, "Channel Mode:")
+  ImGui.SameLine(ctx)
   if ImGui.RadioButton(ctx, "Auto##channel", gui.channel_mode == 0) then gui.channel_mode = 0 end
-  draw_help_marker("Auto: decide based on source material")
-
+  ImGui.SameLine(ctx)
   if ImGui.RadioButton(ctx, "Mono##channel", gui.channel_mode == 1) then gui.channel_mode = 1 end
-  draw_help_marker("Force mono output")
-
+  ImGui.SameLine(ctx)
   if ImGui.RadioButton(ctx, "Multi##channel", gui.channel_mode == 2) then gui.channel_mode = 2 end
-  draw_help_marker("Force multi-channel output")
-  ImGui.EndGroup(ctx)
+  ImGui.SameLine(ctx)
+  draw_help_marker("Auto: decide based on source material | Mono: force mono | Multi: force multi-channel")
+
+  ImGui.Spacing(ctx)
 
   -- === PRINTING ===
   draw_section_header("PRINTING")
@@ -775,7 +773,20 @@ local function draw_gui()
     ImGui.TextDisabled(ctx, unit)
   end
 
-  -- === OPERATION BUTTONS ===
+  -- === MODE-SPECIFIC SETTINGS ===
+  ImGui.Spacing(ctx)
+  ImGui.Separator(ctx)
+  ImGui.Spacing(ctx)
+
+  -- AUTO Settings
+  ImGui.Text(ctx, "Auto Mode:")
+  ImGui.SameLine(ctx)
+  rv, new_val = ImGui.Checkbox(ctx, "Glue Single Items", gui.glue_single_items)
+  if rv then gui.glue_single_items = new_val end
+  ImGui.SameLine(ctx)
+  draw_help_marker("When only one item selected: ON=glue, OFF=render")
+
+  -- === OPERATION BUTTONS & INFO ===
   ImGui.Spacing(ctx)
   ImGui.Spacing(ctx)
   ImGui.Separator(ctx)
@@ -784,6 +795,9 @@ local function draw_gui()
   if gui.is_running then
     ImGui.BeginDisabled(ctx)
   end
+
+  -- Track which button is hovered for info display
+  local hovered_mode = nil
 
   -- Calculate button width (3 buttons with spacing)
   local avail_width = ImGui.GetContentRegionAvail(ctx)
@@ -796,6 +810,7 @@ local function draw_gui()
   if ImGui.Button(ctx, "RENDER", button_width, 40) then
     run_rgwh("render")
   end
+  if ImGui.IsItemHovered(ctx) then hovered_mode = "render" end
   ImGui.PopStyleColor(ctx, 3)
 
   ImGui.SameLine(ctx)
@@ -807,6 +822,7 @@ local function draw_gui()
   if ImGui.Button(ctx, "AUTO", button_width, 40) then
     run_rgwh("auto")
   end
+  if ImGui.IsItemHovered(ctx) then hovered_mode = "auto" end
   ImGui.PopStyleColor(ctx, 3)
 
   ImGui.SameLine(ctx)
@@ -818,10 +834,23 @@ local function draw_gui()
   if ImGui.Button(ctx, "GLUE", button_width, 40) then
     run_rgwh("glue")
   end
+  if ImGui.IsItemHovered(ctx) then hovered_mode = "glue" end
   ImGui.PopStyleColor(ctx, 3)
 
   if gui.is_running then
     ImGui.EndDisabled(ctx)
+  end
+
+  -- Mode info display (compact)
+  ImGui.Spacing(ctx)
+  if hovered_mode == "render" then
+    ImGui.TextWrapped(ctx, "RENDER: Process each item independently (per-item render)")
+  elseif hovered_mode == "auto" then
+    ImGui.TextWrapped(ctx, "AUTO: Auto-detect scope • No TS→Units • TS=span→Units • TS≠span→TS • Single item behavior controlled by 'Glue Single Items'")
+  elseif hovered_mode == "glue" then
+    ImGui.TextWrapped(ctx, "GLUE: Use Time Selection window to glue all items (always glue, no per-item)")
+  else
+    ImGui.TextDisabled(ctx, "Hover over a button to see its description")
   end
 
   -- Status display
