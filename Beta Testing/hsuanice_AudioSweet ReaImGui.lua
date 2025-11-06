@@ -1,7 +1,7 @@
 --[[
 @description AudioSweet ReaImGui - ImGui Interface for AudioSweet
 @author hsuanice
-@version 0.1.0-beta (251030.2350)
+@version 0.1.0-beta (251106.1530)
 @about
   Complete AudioSweet control center with:
   - Focused/Chain modes with FX chain display
@@ -18,7 +18,7 @@
 
 
 @changelog
-  0.1.0-beta (2025-10-30) - Initial Public Beta Release
+  0.1.0-beta (2025-11-06) - Initial Public Beta Release
     Complete AudioSweet control center with GUI interface featuring:
     - Focused/Chain modes with Apply/Copy actions
     - Saved Chains and History features with CLAP plugin support
@@ -29,6 +29,14 @@
     - AudioSweet Preview integration
     - Debug mode with detailed console logging
     - Direct integration with AudioSweet Core (no intermediate template layer)
+
+  Internal Build 251106.1530 - FIXED SOLO TOGGLE TO TARGET FOCUSED TRACK
+    - FIXED: Solo toggle now operates on gui.focused_track (FX chain track) instead of selected tracks.
+      - Issue: toggle_solo() used command 40281 which operates on selected tracks
+      - Problem: During Preview, the target track (gui.focused_track) may not be selected
+      - Solution: Directly toggle solo state on gui.focused_track using r.SetMediaTrackInfo_Value()
+      - Result: Solo toggle now correctly targets the track with focused FX chain
+    - Technical: toggle_solo() now checks if gui.focused_track exists and directly sets its solo state.
 
   Internal Build 251030.2350 - FIXED PREVIEW STOP BUTTON
     - FIXED: STOP button now correctly stops preview started by Tools scripts.
@@ -951,16 +959,30 @@ local function toggle_solo()
   -- Debug logging
   if gui.debug then
     local scope_name = (gui.preview_solo_scope == 0) and "Track Solo" or "Item Solo"
-    local command_id = (gui.preview_solo_scope == 0) and 40281 or 41561
-    r.ShowConsoleMsg(string.format("[AS GUI] SOLO button clicked (scope=%s, command=%d)\n", scope_name, command_id))
+    r.ShowConsoleMsg(string.format("[AS GUI] SOLO button clicked (scope=%s)\n", scope_name))
   end
 
   -- Toggle solo based on solo_scope setting
   if gui.preview_solo_scope == 0 then
-    -- Track solo (40281)
-    r.Main_OnCommand(40281, 0)
+    -- Track solo: toggle solo on focused track (not selected tracks)
+    if gui.focused_track then
+      local current_solo = r.GetMediaTrackInfo_Value(gui.focused_track, "I_SOLO")
+      -- Toggle: 0=unsolo, 1=solo, 2=solo in place
+      -- Simple toggle: if any solo state, set to 0; if 0, set to 1
+      local new_solo = (current_solo == 0) and 1 or 0
+      r.SetMediaTrackInfo_Value(gui.focused_track, "I_SOLO", new_solo)
+
+      if gui.debug then
+        r.ShowConsoleMsg(string.format("[AS GUI] Toggled track solo: %s -> %s (Track: %s)\n",
+          current_solo, new_solo, gui.focused_track_name))
+      end
+    else
+      if gui.debug then
+        r.ShowConsoleMsg("[AS GUI] No focused track to solo\n")
+      end
+    end
   else
-    -- Item solo (41561)
+    -- Item solo (41561): operate on selected items
     r.Main_OnCommand(41561, 0)
   end
 end
@@ -1463,8 +1485,7 @@ local function draw_gui()
     if ImGui.IsKeyPressed(ctx, ImGui.Key_S, false) then
       if gui.debug then
         local scope_name = (gui.preview_solo_scope == 0) and "Track Solo" or "Item Solo"
-        local command_id = (gui.preview_solo_scope == 0) and 40281 or 41561
-        r.ShowConsoleMsg(string.format("[AS GUI] Keyboard shortcut: S pressed (scope=%s, command=%d)\n", scope_name, command_id))
+        r.ShowConsoleMsg(string.format("[AS GUI] Keyboard shortcut: S pressed (scope=%s)\n", scope_name))
       end
       toggle_solo()
     end
