@@ -1,7 +1,7 @@
 --[[
 @description RGWH GUI - ImGui Interface for RGWH Core
 @author hsuanice
-@version 0.1.0-beta (251102.1500)
+@version 0.1.0-beta (251106.1800)
 @about
   ImGui-based GUI for configuring and running RGWH Core operations.
   Provides visual controls for all RGWH Wrapper Template parameters.
@@ -11,6 +11,13 @@
   Adjust parameters using the visual controls and click operation buttons to execute.
 
 @changelog
+  v251106.1800 (0.1.0-beta)
+    - Add: Complete settings persistence - all GUI settings are now automatically saved and restored between sessions
+    - Add: Debug mode console output - when debug level >= 1:
+      • Print all settings on startup with prefix "[RGWH GUI - STARTUP]"
+      • Print all settings on close with prefix "[RGWH GUI - CLOSING]"
+    - Improve: Settings are automatically saved whenever any parameter is changed
+    - Technical: Added print_all_settings() function to display all current settings in organized format
   v251102.1500 (0.1.0-beta)
     - Fix: Correct GLUE button hover/active colors to yellow shades.
   v251102.0735 (0.1.0-beta)
@@ -187,8 +194,59 @@ local function load_persist()
   deserialize_into_gui(s, gui)
 end
 
+-- Helper function to print all current settings to console
+local function print_all_settings(prefix)
+  prefix = prefix or "[RGWH GUI]"
+
+  local function bool_str(v) return v and "ON" or "OFF" end
+
+  local op_names = {"Auto", "Render", "Glue"}
+  local scope_names = {"Auto", "Units", "Time Selection", "Per Item"}
+  local channel_names = {"Auto", "Mono", "Multi"}
+  local tc_names = {"Previous", "Current", "Off"}
+  local handle_names = {"Use ExtState", "Seconds", "Frames"}
+  local epsilon_names = {"Use ExtState", "Frames", "Seconds"}
+  local policy_names = {"Preserve", "Force Multi"}
+  local rename_names = {"Auto", "Glue", "Render"}
+  local debug_names = {"Silent", "Normal", "Verbose"}
+  local selection_policy_names = {"Progress", "Restore", "None"}
+
+  r.ShowConsoleMsg("========================================\n")
+  r.ShowConsoleMsg(string.format("%s settings:\n", prefix))
+  r.ShowConsoleMsg("========================================\n")
+
+  r.ShowConsoleMsg(string.format("  Operation: %s\n", op_names[gui.op + 1] or "Unknown"))
+  r.ShowConsoleMsg(string.format("  Selection Scope: %s\n", scope_names[gui.selection_scope + 1] or "Unknown"))
+  r.ShowConsoleMsg(string.format("  Channel Mode: %s\n", channel_names[gui.channel_mode + 1] or "Unknown"))
+  r.ShowConsoleMsg(string.format("  Take FX: %s\n", bool_str(gui.take_fx)))
+  r.ShowConsoleMsg(string.format("  Track FX: %s\n", bool_str(gui.track_fx)))
+  r.ShowConsoleMsg(string.format("  TC Mode: %s\n", tc_names[gui.tc_mode + 1] or "Unknown"))
+  r.ShowConsoleMsg(string.format("  Merge Volumes: %s\n", bool_str(gui.merge_volumes)))
+  r.ShowConsoleMsg(string.format("  Print Volumes: %s\n", bool_str(gui.print_volumes)))
+  r.ShowConsoleMsg(string.format("  Handle Mode: %s\n", handle_names[gui.handle_mode + 1] or "Unknown"))
+  r.ShowConsoleMsg(string.format("  Handle Length: %.2f\n", gui.handle_length))
+  r.ShowConsoleMsg(string.format("  Epsilon Mode: %s\n", epsilon_names[gui.epsilon_mode + 1] or "Unknown"))
+  r.ShowConsoleMsg(string.format("  Epsilon Value: %.5f\n", gui.epsilon_value))
+  r.ShowConsoleMsg(string.format("  Write Edge Cues: %s\n", bool_str(gui.cue_write_edge)))
+  r.ShowConsoleMsg(string.format("  Write Glue Cues: %s\n", bool_str(gui.cue_write_glue)))
+  r.ShowConsoleMsg(string.format("  Glue Single Items: %s\n", bool_str(gui.glue_single_items)))
+  r.ShowConsoleMsg(string.format("  Glue No-TrackFX Policy: %s\n", policy_names[gui.glue_no_trackfx_policy + 1] or "Unknown"))
+  r.ShowConsoleMsg(string.format("  Render No-TrackFX Policy: %s\n", policy_names[gui.render_no_trackfx_policy + 1] or "Unknown"))
+  r.ShowConsoleMsg(string.format("  Rename Mode: %s\n", rename_names[gui.rename_mode + 1] or "Unknown"))
+  r.ShowConsoleMsg(string.format("  Debug Level: %s\n", debug_names[gui.debug_level + 1] or "Unknown"))
+  r.ShowConsoleMsg(string.format("  Debug No Clear: %s\n", bool_str(gui.debug_no_clear)))
+  r.ShowConsoleMsg(string.format("  Selection Policy: %s\n", selection_policy_names[gui.selection_policy + 1] or "Unknown"))
+
+  r.ShowConsoleMsg("========================================\n")
+end
+
 -- call load immediately so gui gets initial persisted values
 load_persist()
+
+-- If debug level >= 1, print settings on startup
+if gui.debug_level >= 1 then
+  print_all_settings("[RGWH GUI - STARTUP]")
+end
 
 ------------------------------------------------------------
 -- Preset System
@@ -507,6 +565,8 @@ end
 local function draw_settings_popup()
   if not gui.show_settings then return end
 
+  local before_state = serialize_gui_state(gui)
+
   ImGui.SetNextWindowSize(ctx, 500, 600, ImGui.Cond_FirstUseEver)
   local visible, open = ImGui.Begin(ctx, 'Settings', true)
   if not visible then
@@ -578,6 +638,10 @@ local function draw_settings_popup()
   if rv then gui.selection_policy = new_val end
   draw_help_marker("progress: keep in-run selections\nrestore: restore original selection\nnone: clear all")
 
+  -- persist if changed
+  local after_state = serialize_gui_state(gui)
+  if after_state ~= before_state then save_persist() end
+
   ImGui.PopItemWidth(ctx)
   ImGui.End(ctx)
   gui.show_settings = open
@@ -617,7 +681,7 @@ local function draw_gui()
 
     if ImGui.BeginMenu(ctx, 'Help') then
       if ImGui.MenuItem(ctx, 'About', nil, false, true) then
-        r.ShowConsoleMsg("[RGWH GUI] Version 0.1.0-beta (251102.0030)\nImGui interface for RGWH Core\n")
+        r.ShowConsoleMsg("[RGWH GUI] Version 0.1.0-beta (251102.1500)\nImGui interface for RGWH Core\n")
       end
       ImGui.EndMenu(ctx)
     end
@@ -785,6 +849,11 @@ local function loop()
 
   if gui.open then
     r.defer(loop)
+  else
+    -- Window is closing - print settings if debug level >= 1
+    if gui.debug_level >= 1 then
+      print_all_settings("[RGWH GUI - CLOSING]")
+    end
   end
 end
 
