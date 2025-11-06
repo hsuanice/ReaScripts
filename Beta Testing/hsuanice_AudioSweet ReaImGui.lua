@@ -1,7 +1,7 @@
 --[[
 @description AudioSweet ReaImGui - ImGui Interface for AudioSweet
 @author hsuanice
-@version 0.1.0-beta (251106.1530)
+@version 0.1.0-beta (251106.1600)
 @about
   Complete AudioSweet control center with:
   - Focused/Chain modes with FX chain display
@@ -29,6 +29,11 @@
     - AudioSweet Preview integration
     - Debug mode with detailed console logging
     - Direct integration with AudioSweet Core (no intermediate template layer)
+
+  Internal Build 251106.1600 - ADDED ESC TO CLOSE WINDOW
+    - Added: ESC key now closes the AudioSweet GUI window
+    - Keyboard shortcut: ESC = Close window
+    - Works when not typing in text inputs (same condition as Space/S shortcuts)
 
   Internal Build 251106.1530 - FIXED SOLO TOGGLE TO TARGET FOCUSED TRACK
     - FIXED: Solo toggle now operates on gui.focused_track (FX chain track) instead of selected tracks.
@@ -1473,6 +1478,14 @@ local function draw_gui()
   local is_typing = ImGui.IsAnyItemActive(ctx)
 
   if not is_typing then
+    -- ESC = Close window
+    if ImGui.IsKeyPressed(ctx, ImGui.Key_Escape, false) then
+      if gui.debug then
+        r.ShowConsoleMsg("[AS GUI] Keyboard shortcut: ESC pressed (Close window)\n")
+      end
+      return false  -- Close the window
+    end
+
     -- Space = Stop transport (simple, no modifiers needed)
     if ImGui.IsKeyPressed(ctx, ImGui.Key_Space, false) then
       if gui.debug then
@@ -2051,7 +2064,7 @@ local function draw_gui()
 
   -- === KEYBOARD SHORTCUTS INFO ===
   ImGui.PushStyleColor(ctx, ImGui.Col_Text, 0x808080FF)  -- Gray color
-  ImGui.Text(ctx, "Shortcuts: Space = Stop, S = Solo")
+  ImGui.Text(ctx, "Shortcuts: ESC = Close, Space = Stop, S = Solo")
   ImGui.Text(ctx, "Tip: Bind 'AudioSweet Chain/Focused Preview' actions to shortcuts")
   ImGui.Text(ctx, "     in REAPER Action List for Ctrl+Space preview")
   ImGui.PopStyleColor(ctx)
