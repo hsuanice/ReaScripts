@@ -1,6 +1,6 @@
 --[[]
-@description RGWH Core - Render or Glue with Handles 
-@version 0.1.0-beta (251030.1600)
+@description RGWH Core - Render or Glue with Handles
+@version 0.1.0-beta (251107.0100)
 @author hsuanice
 @about
   Core library for handle-aware Render/Glue workflows with clear, single-entry API.
@@ -50,12 +50,32 @@
   
 @notes
   • "render" always processes a single item (selected or provided); selection_scope is ignored.
-  • "glue" supports Item Units / TS-Window / single item. 
-  • "auto": single item and GLUE_SINGLE_ITEMS=false → render; otherwise glue with auto-scope (TS≈selection span → Units; else TS).
+  • "glue" supports Item Units / TS-Window / single item.
+  • "auto": NEW (v251107.0100) - analyzes each unit individually:
+      - Single-item units → render
+      - Multi-item units (TOUCH/CROSSFADE) → glue
+      - Works with mixed unit types in single execution
   • All overrides are one-run only: ExtState is snapshotted and restored after operation.
 
 @changelog
-  0.1.0-beta (2025-10-30) - Initial Public Beta Release
+  0.1.0-beta (251107.0100) - FIXED AUTO MODE LOGIC
+    - Fixed: AUTO mode now correctly processes units based on their composition (not total selection count)
+      • Single-item units → RENDER (per-item)
+      • Multi-item units (TOUCH/CROSSFADE) → GLUE
+      • Works correctly even when selecting mixed unit types
+    - Added: New auto_selection() function (line 1340-1445)
+      • Analyzes each unit individually based on its composition
+      • Separates single-item units (for render) and multi-item units (for glue)
+      • Processes render phase first, then glue phase
+      • Handles undo blocks correctly between phases
+    - Changed: core() function now calls auto_selection() for op="auto" (line 1955-1959)
+      • Removed old logic that only checked total selection count
+      • New logic respects unit composition regardless of how many items are selected
+    - Technical: Unit members structure is {it=item, L=pos, R=pos}, not direct item array
+    - Rationale: Users expect AUTO to intelligently handle mixed selections where some units
+                 need render (single items) and others need glue (multi-item groups)
+
+  0.1.0-beta (251030.1600) - Initial Public Beta Release
     Core library for handle-aware Render/Glue workflows featuring:
     - Handle-aware windows with clamp-to-source
     - Glue by Item Units (same-track grouping) with optional Glue Cues
@@ -1337,6 +1357,113 @@ function M.glue_selection()
   r.Undo_EndBlock("RGWH Core - Glue selection", -1)
 end
 
+function M.auto_selection(merge_volumes, print_volumes)
+  -- AUTO mode: Render single-item units, Glue multi-item units
+  local cfg = M.read_settings()
+  local DBG = cfg.DEBUG_LEVEL or 1
+
+  r.Undo_BeginBlock()
+  r.PreventUIRefresh(1)
+  if not cfg.DEBUG_NO_CLEAR then r.ClearConsole() end
+
+  local nsel = count_selected_items()
+  if nsel==0 then
+    dbg(DBG,1,"[RUN] No selected items.")
+    r.PreventUIRefresh(-1); r.Undo_EndBlock("RGWH Core - Auto (no selection)", -1); return
+  end
+
+  local eps_s = (cfg.EPSILON_MODE=="frames") and frames_to_seconds(cfg.EPSILON_VALUE, get_sr(), nil) or (cfg.EPSILON_VALUE or 0.002)
+
+  dbg(DBG,1,"[RUN] Auto start  handles=%.3fs  epsilon=%.5fs", cfg.HANDLE_SECONDS or 0, eps_s)
+
+  -- Collect all items by track and detect units
+  local by_tr, tr_list = collect_by_track_from_selection()
+  local multi_units = {}   -- Multi-item units (to glue)
+  local has_single = false -- Flag to check if there are single-item units
+
+  for _,tr in ipairs(tr_list) do
+    local list  = by_tr[tr]
+    local units = detect_units_same_track(list, eps_s)
+    dbg(DBG,1,"[RUN] Track #%d: units=%d", r.GetMediaTrackInfo_Value(tr,"IP_TRACKNUMBER") or -1, #units)
+
+    for ui,u in ipairs(units) do
+      if u.kind == "SINGLE" then
+        dbg(DBG,2,"[TRACE] unit#%d SINGLE → keep selected for render", ui)
+        has_single = true
+        -- Keep single items selected (don't deselect them)
+      else
+        dbg(DBG,2,"[TRACE] unit#%d %s → will glue", ui, u.kind)
+        table.insert(multi_units, {track=tr, unit=u})
+        -- Deselect items in multi-item units (will be glued)
+        for _, member in ipairs(u.members) do
+          r.SetMediaItemSelected(member.it, false)
+        end
+      end
+    end
+  end
+
+  -- First: Render single-item units (they are still selected)
+  if has_single then
+    local single_count = r.CountSelectedMediaItems(0)
+    dbg(DBG,1,"[RUN] Rendering %d single items...", single_count)
+
+    -- Call render_selection for currently selected items (single units)
+    local merge_vols = (merge_volumes == nil) and true or (merge_volumes == true)
+    local print_vols = (print_volumes == nil) and true or (print_volumes == true)
+
+    -- render_selection has its own undo block, so we need to end ours first
+    r.PreventUIRefresh(-1)
+    r.Undo_EndBlock("RGWH Core - Auto (render phase)", -1)
+
+    M.render_selection(nil, nil, nil, nil, merge_vols, print_vols)
+
+    -- Start new undo block for glue phase
+    r.Undo_BeginBlock()
+    r.PreventUIRefresh(1)
+  end
+
+  -- Second: Glue all multi-item units
+  if #multi_units > 0 then
+    dbg(DBG,1,"[RUN] Gluing %d multi-item units...", #multi_units)
+
+    -- Reselect multi-item units for gluing
+    r.SelectAllMediaItems(0, false)
+    for _, mu in ipairs(multi_units) do
+      for _, member in ipairs(mu.unit.members) do
+        r.SetMediaItemSelected(member.it, true)
+      end
+    end
+
+    -- Auto mode for glue: infer mono/multi from max item playback channels
+    if cfg.GLUE_APPLY_MODE == "auto" then
+      local function get_item_playback_channels(it)
+        if not it then return 2 end
+        local tk = reaper.GetActiveTake(it)
+        if not tk then return 2 end
+        local chanmode = reaper.GetMediaItemTakeInfo_Value(tk, "I_CHANMODE")
+        if chanmode == 2 or chanmode == 3 or chanmode == 4 then return 1 end
+        local src = reaper.GetMediaItemTake_Source(tk)
+        return src and (reaper.GetMediaSourceNumChannels(src) or 2) or 2
+      end
+      local maxch = 1
+      for i = 0, reaper.CountSelectedMediaItems(0) - 1 do
+        local it = reaper.GetSelectedMediaItem(0, i)
+        local ch = get_item_playback_channels(it)
+        if ch > maxch then maxch = ch end
+      end
+      cfg.GLUE_APPLY_MODE = (maxch >= 2) and "multi" or "mono"
+    end
+
+    for _, mu in ipairs(multi_units) do
+      glue_unit(mu.track, mu.unit, cfg)
+    end
+  end
+
+  r.PreventUIRefresh(-1)
+  r.UpdateArrange()
+  r.Undo_EndBlock("RGWH Core - Auto selection", -1)
+end
+
 function M.render_selection(take_fx, track_fx, mode, tc_mode, merge_volumes, print_volumes)
   local cfg = M.read_settings()
   local DBG = cfg.DEBUG_LEVEL or 1
@@ -1862,22 +1989,14 @@ function M.core(args)
     -- Pass volume params as positional args: (take_fx, track_fx, mode, tc_mode, merge_volumes, print_volumes)
     ok, err = pcall(M.render_selection, nil, nil, nil, nil, merge_vols, print_vols)
 
-  elseif op == "glue" or op == "auto" then
-    local cfg = M.read_settings()
+  elseif op == "auto" then
+    -- NEW AUTO MODE: Render single-item units, Glue multi-item units
+    local merge_vols = (args.merge_volumes == nil) and true or (args.merge_volumes == true)
+    local print_vols = (args.print_volumes == nil) and true or (args.print_volumes == true)
+    ok, err = pcall(M.auto_selection, merge_vols, print_vols)
 
-    -- auto: single item & not allowed to glue single → render; else glue(auto scope)
-    if op == "auto" then
-      local _, _, nsel = span_of_selected_items()
-      local glue_single = (cfg.GLUE_SINGLE_ITEMS == true)
-      if nsel <= 1 and not glue_single then
-        -- Extract volume control params (defaults: merge=true, print=true)
-        local merge_vols = (args.merge_volumes == nil) and true or (args.merge_volumes == true)
-        local print_vols = (args.print_volumes == nil) and true or (args.print_volumes == true)
-        ok, err = pcall(M.render_selection, nil, nil, nil, nil, merge_vols, print_vols)
-      else
-        op = "glue"
-      end
-    end
+  elseif op == "glue" then
+    local cfg = M.read_settings()
 
     if op == "glue" then
       local scope = tostring(args.selection_scope or "auto")  -- "auto"|"units"|"ts"|"item"
