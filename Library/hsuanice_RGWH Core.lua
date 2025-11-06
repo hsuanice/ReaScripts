@@ -1,6 +1,6 @@
 --[[]
 @description RGWH Core - Render or Glue with Handles
-@version 0.1.0-beta (251107.0100)
+@version 0.1.0-beta (251107.0240)
 @author hsuanice
 @about
   Core library for handle-aware Render/Glue workflows with clear, single-entry API.
@@ -58,6 +58,29 @@
   • All overrides are one-run only: ExtState is snapshotted and restored after operation.
 
 @changelog
+  0.1.0-beta (251107.0240) - MAJOR: GLUE MODE NOW PRIORITIZES TS-WINDOW (NO HANDLES)
+    - Changed: glue_selection() now auto-detects TS and uses TS-Window glue when TS exists
+      • When TS exists: Uses TS-Window glue (NO handles, splits at boundaries, non-destructive)
+      • When NO TS: Uses Units glue (with handles as configured)
+      • Take/Track FX and other settings are respected in both paths
+    - Changed: glue_auto_scope() now accepts mode parameter ("glue" vs "auto")
+      • "glue" mode: Always use TS-Window when TS exists (for glue_selection)
+      • "auto" mode: Use original logic (TS≈selection → units glue with handles)
+    - Changed: AUTO mode (auto_selection, core API op="auto") maintains original behavior
+      • Still uses units glue with handles when TS≈selection span
+      • This is intentional: AUTO mode is for intelligent unit processing
+    - Added: glue_selection() accepts force_units parameter
+      • core() API with scope="units" can force units glue even when TS exists
+      • Ensures explicit scope specification is honored
+    - Added: Pre-glue boundary splitting in TS-Window path (line 1182-1255)
+      • Splits items at tsL/tsR boundaries before gluing
+      • Preserves portions outside TS as separate items (non-destructive)
+      • Example: Item 0-2s with TS 1-1.5s → [0-1s], [1-1.5s glued], [1.5-2s]
+    - Removed: Handle extension logic from TS-Window glue path
+      • TS-Window glue never uses handles (matches native REAPER behavior)
+      • Handles only apply in Units glue path
+    - Rationale: Users expect GLUE button to use TS range when TS is set, without handles
+
   0.1.0-beta (251107.0100) - FIXED AUTO MODE LOGIC
     - Fixed: AUTO mode now correctly processes units based on their composition (not total selection count)
       • Single-item units → RENDER (per-item)
@@ -1179,6 +1202,81 @@ local function glue_by_ts_window_on_track(tr, tsL, tsR, cfg, members_snapshot)
   end
   table.sort(members, function(a,b) return a.iL < b.iL end)
 
+  -- SPLIT items at TS boundaries if edges cut through item interior (non-destructive behavior like native glue)
+  -- This ensures items outside TS remain intact after glue operation
+  local split_threshold = 0.002 -- tolerance for edge detection (2ms)
+  for _, m in ipairs(members) do
+    local it = m.it
+    local L, R = m.L, m.R  -- original item span
+
+    -- Check if tsL cuts through item interior (not at edge)
+    if tsL > (L + split_threshold) and tsL < (R - split_threshold) then
+      local new_item = r.SplitMediaItem(it, tsL)
+      if new_item and DBG >= 2 then
+        dbg(DBG, 2, "[TS-SPLIT] Split item at tsL=%.3f (track #%d)", tsL, r.GetMediaTrackInfo_Value(tr,"IP_TRACKNUMBER") or -1)
+      end
+    end
+
+    -- Check if tsR cuts through item interior (not at edge)
+    -- Note: After splitting at tsL, we need to find the correct item piece that contains tsR
+    if tsR > (L + split_threshold) and tsR < (R - split_threshold) then
+      -- Find the item at tsR position (might be the original or the right piece after tsL split)
+      local item_at_tsR = nil
+      local track_item_count = r.CountTrackMediaItems(tr)
+      for i = 0, track_item_count - 1 do
+        local candidate = r.GetTrackMediaItem(tr, i)
+        local cL, cR = item_span(candidate)
+        if cL <= tsR and cR >= tsR then
+          item_at_tsR = candidate
+          break
+        end
+      end
+
+      if item_at_tsR then
+        local new_item = r.SplitMediaItem(item_at_tsR, tsR)
+        if new_item and DBG >= 2 then
+          dbg(DBG, 2, "[TS-SPLIT] Split item at tsR=%.3f (track #%d)", tsR, r.GetMediaTrackInfo_Value(tr,"IP_TRACKNUMBER") or -1)
+        end
+      end
+    end
+  end
+
+  -- After splitting, rebuild members list to include new split items within TS
+  members = {}
+  if type(members_snapshot) == "table" then
+    for _, orig_it in ipairs(members_snapshot) do
+      -- Check all items on track (original + splits) that intersect with TS
+      local track_item_count = r.CountTrackMediaItems(tr)
+      for i = 0, track_item_count - 1 do
+        local it = r.GetTrackMediaItem(tr, i)
+        if reaper.ValidatePtr2(0, it, "MediaItem*") then
+          local L, R = item_span(it)
+          if item_intersects_ts(it, tsL, tsR) then
+            -- Check if this item is within TS range (fully or partially)
+            local iL = (L < tsL) and tsL or L
+            local iR = (R > tsR) and tsR or R
+            -- Only add if not already in members list
+            local already_added = false
+            for _, existing in ipairs(members) do
+              if existing.it == it then
+                already_added = true
+                break
+              end
+            end
+            if not already_added then
+              members[#members+1] = { it = it, L = L, R = R, iL = iL, iR = iR }
+            end
+          end
+        end
+      end
+    end
+  end
+  table.sort(members, function(a,b) return a.iL < b.iL end)
+
+  if DBG >= 1 then
+    dbg(DBG, 1, "[TS-GLUE] After boundary splits: %d items to glue within TS [%.3f, %.3f]", #members, tsL, tsR)
+  end
+
   -- Optional: WRITE_GLUE_CUES inside TS when sources switch
   local glue_ids = nil
   if cfg.WRITE_GLUE_CUES and #members >= 2 then
@@ -1271,7 +1369,8 @@ end
 -- PUBLIC API
 ------------------------------------------------------------
 -- Auto-scope glue: Units vs TS-Window
-local function glue_auto_scope(cfg)
+-- mode: "glue" = always use TS when present (no handles); "auto" = use original logic (units with handles)
+local function glue_auto_scope(cfg, mode)
   local DBG = cfg.DEBUG_LEVEL or 1
   local tsL, tsR, hasTS = get_current_ts()
   local selL, selR, nsel = span_of_selected_items()
@@ -1284,6 +1383,14 @@ local function glue_auto_scope(cfg)
     dbg(DBG,1,"[SCOPE] No selection but TS present → TS glue.")
     return "ts", tsL, tsR
   end
+
+  -- GLUE mode: if TS exists, always use TS-Window glue (no handles)
+  if mode == "glue" then
+    dbg(DBG,1,"[SCOPE] GLUE mode with TS present → TS glue (no handles).")
+    return "ts", tsL, tsR
+  end
+
+  -- AUTO mode: use original logic (units with handles if TS ≈ selection)
   if approximately_equal_span(tsL, tsR, selL, selR, 0.002) then
     dbg(DBG,1,"[SCOPE] TS ≈ selection span → Units glue.")
     return "units"
@@ -1293,7 +1400,7 @@ local function glue_auto_scope(cfg)
   end
 end
 
-function M.glue_selection()
+function M.glue_selection(force_units)
   local cfg = M.read_settings()
   local DBG = cfg.DEBUG_LEVEL or 1
 
@@ -1337,17 +1444,39 @@ function M.glue_selection()
     tostring(cfg.GLUE_TRACK_FX), cfg.GLUE_APPLY_MODE, tostring(cfg.WRITE_EDGE_CUES), tostring(cfg.WRITE_GLUE_CUES),
     "adjacent-different-source")
 
+  -- Auto-detect scope: TS-Window vs Units glue
+  -- If force_units=true, always use units glue (for core() API scope="units")
+  -- Otherwise pass "glue" mode to use TS-Window when TS exists (no handles)
+  local scope, tsL, tsR
+  if force_units then
+    scope = "units"
+    dbg(DBG,1,"[SCOPE] Forced Units glue (via parameter)")
+  else
+    scope, tsL, tsR = glue_auto_scope(cfg, "glue")
+  end
 
-  local by_tr, tr_list = collect_by_track_from_selection()
-  for _,tr in ipairs(tr_list) do
-    local list  = by_tr[tr]
-    local units = detect_units_same_track(list, eps_s)
-    dbg(DBG,1,"[RUN] Track #%d: units=%d", r.GetMediaTrackInfo_Value(tr,"IP_TRACKNUMBER") or -1, #units)
-    for ui,u in ipairs(units) do
-      if u.kind=="SINGLE" and (not cfg.GLUE_SINGLE_ITEMS) then
-        dbg(DBG,2,"[TRACE] unit#%d SINGLE skipped (option off).", ui)
-      else
-        glue_unit(tr, u, cfg)
+  if scope == "ts" then
+    -- TS-Window glue path
+    dbg(DBG,1,"[RUN] Using TS-Window glue: [%.3f, %.3f]", tsL, tsR)
+    local by_tr, tracks = collect_items_intersect_ts_by_track(tsL, tsR)
+    for _, tr in ipairs(tracks) do
+      local snapshot = by_tr[tr]
+      glue_by_ts_window_on_track(tr, tsL, tsR, cfg, snapshot)
+    end
+  else
+    -- Units glue path
+    dbg(DBG,1,"[RUN] Using Units glue")
+    local by_tr, tr_list = collect_by_track_from_selection()
+    for _,tr in ipairs(tr_list) do
+      local list  = by_tr[tr]
+      local units = detect_units_same_track(list, eps_s)
+      dbg(DBG,1,"[RUN] Track #%d: units=%d", r.GetMediaTrackInfo_Value(tr,"IP_TRACKNUMBER") or -1, #units)
+      for ui,u in ipairs(units) do
+        if u.kind=="SINGLE" and (not cfg.GLUE_SINGLE_ITEMS) then
+          dbg(DBG,2,"[TRACE] unit#%d SINGLE skipped (option off).", ui)
+        else
+          glue_unit(tr, u, cfg)
+        end
       end
     end
   end
@@ -2001,7 +2130,7 @@ function M.core(args)
     if op == "glue" then
       local scope = tostring(args.selection_scope or "auto")  -- "auto"|"units"|"ts"|"item"
       if scope == "units" then
-        ok, err = pcall(M.glue_selection)
+        ok, err = pcall(M.glue_selection, true)  -- force_units=true
 
       elseif scope == "ts" then
         local tsL, tsR, hasTS = get_current_ts()
@@ -2020,7 +2149,7 @@ function M.core(args)
         ok, err = pcall(M.glue_selection)
 
       else -- "auto"
-        local which, tsL, tsR = glue_auto_scope(cfg)
+        local which, tsL, tsR = glue_auto_scope(cfg, "auto")
         if which == "units" then
           ok, err = pcall(M.glue_selection)
         else
