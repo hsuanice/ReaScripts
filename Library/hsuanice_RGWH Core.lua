@@ -1,6 +1,6 @@
 --[[]
 @description RGWH Core - Render or Glue with Handles
-@version 0.1.0-beta (251107.0240)
+@version 0.1.0-beta (251107.1530)
 @author hsuanice
 @about
   Core library for handle-aware Render/Glue workflows with clear, single-entry API.
@@ -58,6 +58,16 @@
   • All overrides are one-run only: ExtState is snapshotted and restored after operation.
 
 @changelog
+  0.1.0-beta (251107.1530) - CRITICAL FIX: Units glue handle content shift
+    - Fixed: Units glue with handles no longer causes content shift
+    - Root cause: Pre-glue D_STARTOFFS adjustment (line 1070-1072) was being overwritten by glue operation
+    - Solution: Removed pre-glue offset adjustment; post-glue offset calculation (line 1114) is sufficient
+    - Technical: When extending item left with handle (newL < m.L), we were adjusting D_STARTOFFS before glue,
+                 but glue creates a new take and overwrites this value. The post-glue calculation
+                 `left_total = u.start - UL` already produces the correct offset.
+    - Impact: All Units glue operations (with or without TS) now preserve audio alignment correctly
+    - Tested: Both item-selection-only and TS≈selection scenarios work without content shift
+
   0.1.0-beta (251107.0240) - MAJOR: GLUE MODE NOW PRIORITIZES TS-WINDOW (NO HANDLES)
     - Changed: glue_selection() now auto-detects TS and uses TS-Window glue when TS exists
       • When TS exists: Uses TS-Window glue (NO handles, splits at boundaries, non-destructive)
@@ -1066,11 +1076,8 @@ local function glue_unit(tr, u, cfg)
     local newR = (idx==#members) and d.gotR or m.R
     r.SetMediaItemInfo_Value(it,"D_POSITION", newL)
     r.SetMediaItemInfo_Value(it,"D_LENGTH",   newR - newL)
-    if d.tk then
-      local deltaL  = (m.L - newL)
-      local new_off = d.offs - (deltaL * d.rate)
-      r.SetMediaItemTakeInfo_Value(d.tk,"D_STARTOFFS", new_off)
-    end
+    -- NOTE: DO NOT adjust D_STARTOFFS here - it will be overwritten by glue!
+    -- The correct offset will be calculated after glue based on UL/UR trim.
   end
 
   -- 時選=UL..UR → Glue → (必要時)對成品 Apply → Trim 回 UL..UR
