@@ -1,7 +1,7 @@
 --[[
 @description RGWH GUI - ImGui Interface for RGWH Core
 @author hsuanice
-@version 0.1.0-beta (251107.0100)
+@version 0.1.0-beta (251107.1530)
 @about
   ImGui-based GUI for configuring and running RGWH Core operations.
   Provides visual controls for all RGWH Wrapper Template parameters.
@@ -11,6 +11,12 @@
   Adjust parameters using the visual controls and click operation buttons to execute.
 
 @changelog
+  v251107.1530 (0.1.0-beta) - CRITICAL FIX: Units glue handle content shift (CORE FIX)
+    - Fixed: Units glue with handles no longer causes content shift
+    - Core change: Removed incorrect pre-glue D_STARTOFFS adjustment that was being overwritten
+    - Impact: All glue operations now preserve audio alignment correctly
+    - Requires: RGWH Core v251107.1530 or later
+
   v251107.0100 (0.1.0-beta) - FIXED AUTO MODE LOGIC (CORE MODIFICATION)
     - Fixed: AUTO mode now correctly processes units based on their composition (not total selection count)
       • Single-item units → RENDER (per-item)
