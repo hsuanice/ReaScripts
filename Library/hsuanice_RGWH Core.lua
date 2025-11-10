@@ -1,6 +1,6 @@
 --[[]
 @description RGWH Core - Render or Glue with Handles
-@version 0.1.0-beta (251110.2250)
+@version 0.1.0-beta (251110.2315)
 @author hsuanice
 @about
   Core library for handle-aware Render/Glue workflows with clear, single-entry API.
@@ -58,6 +58,26 @@
   • All overrides are one-run only: ExtState is snapshotted and restored after operation.
 
 @changelog
+  0.1.0-beta (251110.2315) - Verified: Volume handling working correctly across all modes
+    - Confirmed merge+print fix (v2300) resolves volume preservation issues
+    - All volume modes tested and verified:
+      • merge=off, print=off → preserves original item/take volumes ✓
+      • merge=on,  print=off → merged volumes preserved non-destructively ✓
+      • merge=off, print=on  → original structure, new take baked ✓
+      • merge=on,  print=on  → merged volumes, new take baked ✓
+    - Ready for comprehensive testing
+
+  0.1.0-beta (251110.2300) - CRITICAL FIX: Render volume handling for merge+print mode
+    - Fixed: Old takes now keep merged volume in merge+print mode (was: incorrectly reset)
+    - Fixed: Undefined variable tk_orig_idx causing potential errors
+    - Root cause: Line 2177 was overwriting merged volume that was already set at line 2064
+    - Solution: In merge+print mode, don't touch old take volumes (already merged at line 2073)
+    - Test case verified:
+      • Original: item=-6.3dB, take=+21.0dB
+      • After merge+print render: item=0dB, old take=+14.7dB, new take=0dB ✓
+    - Modified lines 2056-2085: Added tk_orig_idx lookup, fixed merge logic
+    - Modified lines 2173-2182: Removed incorrect volume restore for old take
+
   0.1.0-beta (251110.2250) - STABLE: Handle logic and scope detection finalized
     - Verified: Item Selection (IS) only → Units glue with handles ✓
     - Verified: Time Selection (TS) exists → TS-Window glue (handles only if TS=unit) ✓
@@ -2053,9 +2073,18 @@ function M.render_selection(take_fx, track_fx, mode, tc_mode, merge_volumes, pri
       -- takes will cause unexpected volume jumps (because item volume is reset to 0dB).
       -- By merging ALL takes, we ensure consistent output regardless of which take is active.
       if cfg.RENDER_MERGE_VOLUMES and tk_orig then
+        -- Get active take index before merging
+        local tk_orig_idx = nil
+        local nt = r.GetMediaItemNumTakes(it) or 0
+        for ti = 0, nt-1 do
+          if r.GetTake(it, ti) == tk_orig then
+            tk_orig_idx = ti
+            break
+          end
+        end
+
         if math.abs(item_vol - 1.0) > 1e-9 then
           -- Multiply item volume into EVERY take's volume
-          local nt = r.GetMediaItemNumTakes(it) or 0
           for ti = 0, nt-1 do
             local tk = r.GetTake(it, ti)
             if tk then
@@ -2171,11 +2200,15 @@ function M.render_selection(take_fx, track_fx, mode, tc_mode, merge_volumes, pri
     if cfg.RENDER_PRINT_VOLUMES then
       -- Print mode: volumes are baked into audio
       if cfg.RENDER_MERGE_VOLUMES then
-        -- Merged: item=0dB, new take=0dB, old take=merged_vol
+        -- Merged+Print: item=0dB, new take=0dB, old take keeps merged volume (already set at line 2064)
+        -- All takes already have merged volume (item_vol * take_vol) from pre-merge phase
         r.SetMediaItemInfo_Value(it, "D_VOL", 1.0)
         if newtk then r.SetMediaItemTakeInfo_Value(newtk, "D_VOL", 1.0) end
-        if tk_orig then r.SetMediaItemTakeInfo_Value(tk_orig, "D_VOL", volume_snap.merged_vol) end
-        if DBG >= 2 then dbg(DBG,2,"[GAIN] print_volumes=true; item=1.0, new take=1.0, old active take=%.3f", volume_snap.merged_vol) end
+        -- tk_orig already has merged volume from line 2064, don't touch it
+        if DBG >= 2 then
+          local current_old_vol = tk_orig and r.GetMediaItemTakeInfo_Value(tk_orig, "D_VOL") or 0
+          dbg(DBG,2,"[GAIN] print_volumes=true+merge; item=1.0, new take=1.0, old active take=%.3f (kept merged)", current_old_vol)
+        end
       else
         -- Not merged: restore original item & take volumes
         r.SetMediaItemInfo_Value(it, "D_VOL", volume_snap.item_vol)
