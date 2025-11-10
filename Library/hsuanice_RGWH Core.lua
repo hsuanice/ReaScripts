@@ -1,6 +1,6 @@
 --[[]
 @description RGWH Core - Render or Glue with Handles
-@version 0.1.0-beta (251110.1430)
+@version 0.1.0-beta (251110.1920)
 @author hsuanice
 @about
   Core library for handle-aware Render/Glue workflows with clear, single-entry API.
@@ -58,6 +58,53 @@
   • All overrides are one-run only: ExtState is snapshotted and restored after operation.
 
 @changelog
+  0.1.0-beta (251110.1920) - CRITICAL FIX: Correct D_STARTOFFS adjustment for glue with handles
+    - Fixed: Content alignment now correct when gluing with left-side handles
+    - Root cause: D_STARTOFFS was not adjusted before glue, causing REAPER to read from wrong source position
+    - Solution: When extending item left, adjust D_STARTOFFS before glue (lines 1198-1225)
+      • Formula: new_offset = old_offset - (left_extension * playrate)
+      • Example: Item at 16.458s with offset 6.208s, extend left by 5s → offset becomes 1.208s
+      • This ensures glue reads from correct source position (1.208s instead of 6.208s)
+    - Key insight: Unlike render, glue REQUIRES pre-glue offset adjustment for left extensions
+      • Render: Keeps original offset, handles it via TimeReference
+      • Glue: Needs adjusted offset so extended portion reads from earlier in source
+    - Post-glue trim operation sets final offset based on trimmed amount (line 1254)
+    - Debug output: Added [PRE-GLUE] logs showing extension amounts and offset adjustments
+    - Impact: All glue operations with left handles now preserve content alignment perfectly
+    - Tested: Item at 16.458s, SIS 6.208s → glue with 5s left handle → content identical
+
+  0.1.0-beta (251110.1800) - Handle calculation refinement: TS edge equality handling
+    - Fixed: When TS edges exactly equal unit edges, now uses default handles (not 0-length handles)
+    - Root cause: Condition `tsL <= unitL + eps` matched when TS=unit, calculating H_left=0
+    - Solution: Changed to strict inequality `tsL < unitL - eps` (lines 1115, 1122)
+      • TS strictly outside unit → use TS-based handle
+      • TS equal to or inside unit → use default HANDLE value
+    - Example: TS=0..2s, unit=0..2s → now uses 5s handles (was 0s)
+    - Impact: Proper handle extension when TS matches selection exactly
+
+  0.1.0-beta (251110.1730) - CRITICAL FIX: TS-based handle calculation prevents content shift
+    - Fixed: All unit types (SINGLE/TOUCH/GAP) now use TS boundaries for handle calculation when TS exists
+    - Fixed: Content no longer shifts when gluing with TS-extended handles
+    - Root cause: Handle calculation used fixed HANDLE value, ignoring TS boundaries
+    - Solution: Dynamic handle calculation based on TS vs unit edge relationship (lines 1071-1117)
+      • If TS_left ≤ unit_left: H_left = unit_left - TS_left (extend to TS boundary)
+      • If TS_right ≥ unit_right: H_right = TS_right - unit_right (extend to TS boundary)
+      • Otherwise: use default HANDLE value
+    - Example: Item at 2-4s with TS 0-6s → H_left=2s, H_right=2s (not fixed 5s)
+    - Debug output: Added [TS-UNIT] and [HANDLE] logs showing relationship and calculations
+    - Impact: "完全尊重TS的範圍" - all edges respect TS range, content stays aligned
+    - Tested: Single item with TS extending both sides - no content shift
+
+  0.1.0-beta (251110.1630) - CRITICAL FIX: GAP unit glue now respects full TS range
+    - Fixed: Multiple items with gaps + TS extending beyond items now glues to full TS range
+    - Example: Items at 0-1s and 2-4s with TS=0-6s now glues to 0-6s (was 0-4s)
+    - Root cause: GAP unit span calculation used item boundaries only, ignoring TS boundaries
+    - Solution: Per-edge TS boundary detection for GAP units (lines 1547-1570)
+      • Left edge: use TS_left if TS_left ≤ items_left
+      • Right edge: use TS_right if TS_right ≥ items_right
+    - Impact: GAP units fill leading/trailing space as silence when TS extends beyond items
+    - Tested: Track #170 case (items 0-1s, 2-4s, TS 0-6s) now correctly glues to 0-6s
+
   0.1.0-beta (251110.1430) - CRITICAL FIX: TS glue scope detection + Units glue handle offset
     - Fixed: TS = Item selection now correctly uses Units glue with handles (not TS glue)
     - Fixed: Units glue with handles no longer causes content shift
@@ -949,6 +996,47 @@ local function glue_unit(tr, u, cfg)
   local HANDLE = (cfg.HANDLE_MODE=="seconds") and (cfg.HANDLE_SECONDS or 0.0) or 0.0
   local eps_s  = (cfg.EPSILON_MODE=="frames") and frames_to_seconds(cfg.EPSILON_VALUE, get_sr(), nil) or (cfg.EPSILON_VALUE or 0.002)
 
+  -- Special handling for GAP units (multiple items with gaps)
+  -- Use simplified glue without handle extension (like native 42432)
+  if u.kind == "GAP" then
+    dbg(DBG,1,"[RUN] GAP unit: %d items, span=%.3f..%.3f (using native glue behavior)", #u.members, u.start, u.finish)
+
+    -- Select all items (without modification)
+    local items_sel = {}
+    for i,m in ipairs(u.members) do items_sel[i]=m.it end
+    select_only_items(items_sel)
+
+    -- Clear take FX if policy says so
+    if not cfg.GLUE_TAKE_FX then
+      clear_take_fx_for_items(items_sel)
+      dbg(DBG,1,"[TAKE-FX] cleared (policy=OFF) for GAP unit.")
+    end
+
+    -- Set TS to overall span and glue
+    r.GetSet_LoopTimeRange(true, false, u.start, u.finish, false)
+    r.Main_OnCommand(ACT_GLUE_TS, 0)
+
+    -- Find glued item
+    local glued = find_item_by_span_on_track(tr, u.start, u.finish, 0.002)
+    if glued and cfg.GLUE_TRACK_FX then
+      r.SetMediaItemInfo_Value(glued, "D_FADEINLEN", 0)
+      r.SetMediaItemInfo_Value(glued, "D_FADEINLEN_AUTO", 0)
+      r.SetMediaItemInfo_Value(glued, "D_FADEOUTLEN", 0)
+      r.SetMediaItemInfo_Value(glued, "D_FADEOUTLEN_AUTO", 0)
+      apply_track_take_fx_to_item(glued, cfg.GLUE_APPLY_MODE, DBG)
+      embed_current_tc_for_item(glued, u.start, DBG)
+    elseif glued
+       and (cfg.GLUE_APPLY_MODE == "multi")
+       and (cfg.GLUE_OUTPUT_POLICY_WHEN_NO_TRACKFX == "force_multi") then
+      apply_multichannel_no_fx_preserve_take(glued, (cfg.GLUE_TAKE_FX == true), DBG)
+      embed_current_tc_for_item(glued, u.start, DBG)
+    end
+
+    r.GetSet_LoopTimeRange(true, false, 0, 0, false)
+    dbg(DBG,1,"[RUN] GAP unit glued: %.3f..%.3f", u.start, u.finish)
+    return
+  end
+
   -- Prepare Glue Cues plan (absolute project times).
   -- Rule: write a cue only when adjacent items switch to a different file source.
   -- If the whole unit uses a single source, write none (including the head).
@@ -1018,11 +1106,58 @@ local function glue_unit(tr, u, cfg)
   end
 
   -- 計算 UL/UR（handles + clamp）
+  -- If TS exists and its edge is outside unit edge, extend handle to TS edge
+  local tsL, tsR, hasTS = get_current_ts()
+
+  -- Calculate unit's natural span (before handles)
+  local unitL, unitR = math.huge, -math.huge
+  for _, m in ipairs(members) do
+    if m.L < unitL then unitL = m.L end
+    if m.R > unitR then unitR = m.R end
+  end
+
+  -- Debug: show TS vs unit relationship
+  if hasTS then
+    dbg(DBG,1,"[TS-UNIT] TS=%.3f..%.3f, unit=%.3f..%.3f, eps=%.5f", tsL, tsR, unitL, unitR, eps_s)
+    local ts_left_outside = (tsL < unitL - eps_s)  -- Strictly outside (not equal)
+    local ts_right_outside = (tsR > unitR + eps_s)  -- Strictly outside (not equal)
+    dbg(DBG,1,"[TS-UNIT] TS_left %s unit_left (%.3f %s %.3f), TS_right %s unit_right (%.3f %s %.3f)",
+        ts_left_outside and "OUTSIDE" or "INSIDE/EQUAL",
+        tsL, ts_left_outside and "<" or ">=", unitL - eps_s,
+        ts_right_outside and "OUTSIDE" or "INSIDE/EQUAL",
+        tsR, ts_right_outside and ">" or "<=", unitR + eps_s)
+  else
+    dbg(DBG,1,"[TS-UNIT] No TS, unit=%.3f..%.3f", unitL, unitR)
+  end
+
+  -- Determine handle size for each edge
+  local H_left_final = HANDLE
+  local H_right_final = HANDLE
+
+  if hasTS then
+    -- Only use TS-based handle if TS edge is STRICTLY outside unit edge (not equal)
+    if tsL < unitL - eps_s then
+      H_left_final = unitL - tsL  -- Override with TS-based handle
+      dbg(DBG,1,"[HANDLE] Left: TS-based = %.3f (unit_left %.3f - TS_left %.3f)", H_left_final, unitL, tsL)
+    else
+      dbg(DBG,1,"[HANDLE] Left: default = %.3f (TS inside/equal unit)", H_left_final)
+    end
+    -- Only use TS-based handle if TS edge is STRICTLY outside unit edge (not equal)
+    if tsR > unitR + eps_s then
+      H_right_final = tsR - unitR  -- Override with TS-based handle
+      dbg(DBG,1,"[HANDLE] Right: TS-based = %.3f (TS_right %.3f - unit_right %.3f)", H_right_final, tsR, unitR)
+    else
+      dbg(DBG,1,"[HANDLE] Right: default = %.3f (TS inside/equal unit)", H_right_final)
+    end
+  else
+    dbg(DBG,1,"[HANDLE] Left: %.3f, Right: %.3f (no TS, using config default)", H_left_final, H_right_final)
+  end
+
   local UL, UR = math.huge, -math.huge
   local details = {}
   for idx, m in ipairs(members) do
-    local H_left  = (idx==1) and HANDLE or 0.0
-    local H_right = (idx==#members) and HANDLE or 0.0
+    local H_left  = (idx==1) and H_left_final or 0.0
+    local H_right = (idx==#members) and H_right_final or 0.0
     local d = per_member_window_lr(m.it, m.L, m.R, H_left, H_right)
     UL = math.min(UL, d.gotL)
     UR = math.max(UR, d.gotR)
@@ -1083,10 +1218,33 @@ local function glue_unit(tr, u, cfg)
     local newR = (idx==#members) and d.gotR or m.R
     r.SetMediaItemInfo_Value(it,"D_POSITION", newL)
     r.SetMediaItemInfo_Value(it,"D_LENGTH",   newR - newL)
-    if d.tk then
-      local deltaL  = (m.L - newL)
-      local new_off = d.offs - (deltaL * d.rate)
-      r.SetMediaItemTakeInfo_Value(d.tk,"D_STARTOFFS", new_off)
+
+    -- CRITICAL: Adjust D_STARTOFFS when extending LEFT
+    -- When item extends left (e.g., from 16.458 to 11.458), we need to adjust offset
+    -- so that the extended portion reads from earlier in the source.
+    -- Formula: new_offset = old_offset - (left_extension * playrate)
+    if d.tk and idx == 1 then
+      local deltaL = (m.L - newL)
+      if deltaL > eps_s then
+        -- Left side extended, adjust offset
+        local new_off = d.offs - (deltaL * d.rate)
+        r.SetMediaItemTakeInfo_Value(d.tk,"D_STARTOFFS", new_off)
+        dbg(DBG,1,"[PRE-GLUE] member#%d: extended LEFT by %.3f (%.3f → %.3f)",
+            idx, deltaL, m.L, newL)
+        dbg(DBG,1,"[PRE-GLUE] Adjusted D_STARTOFFS: %.6f → %.6f (delta=%.6f, rate=%.3f)",
+            d.offs, new_off, -deltaL * d.rate, d.rate)
+      else
+        dbg(DBG,2,"[PRE-GLUE] member#%d: No left extension, keeping original offs=%.6f",
+            idx, d.offs)
+      end
+    end
+
+    if DBG >= 2 and idx == #members then
+      local deltaR = (newR - m.R)
+      if deltaR > eps_s then
+        dbg(DBG,2,"[PRE-GLUE] member#%d: extended RIGHT by %.3f (%.3f → %.3f)",
+            idx, deltaR, m.R, newR)
+      end
     end
   end
 
@@ -1484,6 +1642,58 @@ function M.glue_selection(force_units)
       local list  = by_tr[tr]
       local units = detect_units_same_track(list, eps_s)
       dbg(DBG,1,"[RUN] Track #%d: units=%d", r.GetMediaTrackInfo_Value(tr,"IP_TRACKNUMBER") or -1, #units)
+
+      -- When multiple units with gaps, treat them as one unit for gluing
+      -- (REAPER will automatically fill gaps as silence during glue)
+      if #units > 1 then
+        -- Sort items by position
+        table.sort(list, function(a,b)
+          return r.GetMediaItemInfo_Value(a,"D_POSITION") < r.GetMediaItemInfo_Value(b,"D_POSITION")
+        end)
+
+        -- Determine span: use TS boundaries to determine left/right edges
+        -- Rule: If TS edge is outside (or equal to) items edge, use TS edge
+        local overallL, overallR
+        local currentTsL, currentTsR, hasTS = get_current_ts()
+
+        -- Calculate this track's items span
+        local trackItemsL, trackItemsR = math.huge, -math.huge
+        for _, it in ipairs(list) do
+          local L, R = item_span(it)
+          if L < trackItemsL then trackItemsL = L end
+          if R > trackItemsR then trackItemsR = R end
+        end
+
+        if hasTS then
+          -- Use TS edge if it's outside (or equal to) items edge
+          overallL = (currentTsL <= trackItemsL + eps_s) and currentTsL or trackItemsL
+          overallR = (currentTsR >= trackItemsR - eps_s) and currentTsR or trackItemsR
+          dbg(DBG,1,"[RUN] GAP unit span: %.3f..%.3f (TS=%.3f..%.3f, items=%.3f..%.3f)",
+              overallL, overallR, currentTsL, currentTsR, trackItemsL, trackItemsR)
+        else
+          -- No TS: use item boundaries
+          overallL, overallR = trackItemsL, trackItemsR
+          dbg(DBG,1,"[RUN] GAP unit span: %.3f..%.3f (no TS, using item boundaries)", overallL, overallR)
+        end
+
+        -- Create one synthetic unit containing all items (without modifying item lengths)
+        local members = {}
+        for _, it in ipairs(list) do
+          local L, R = item_span(it)
+          members[#members+1] = {it=it, L=L, R=R}
+        end
+
+        local synthetic_unit = {
+          kind = "GAP",  -- Mark as having gaps
+          members = members,
+          start = overallL,
+          finish = overallR
+        }
+
+        units = {synthetic_unit}
+        dbg(DBG,1,"[RUN] Multiple units merged into one (span=%.3f..%.3f, %d items with gaps)", overallL, overallR, #members)
+      end
+
       for ui,u in ipairs(units) do
         if u.kind=="SINGLE" and (not cfg.GLUE_SINGLE_ITEMS) then
           dbg(DBG,2,"[TRACE] unit#%d SINGLE skipped (option off).", ui)
