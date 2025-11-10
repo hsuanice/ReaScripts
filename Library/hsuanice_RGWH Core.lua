@@ -1,6 +1,6 @@
 --[[]
 @description RGWH Core - Render or Glue with Handles
-@version 0.1.0-beta (251110.1920)
+@version 0.1.0-beta (251110.2250)
 @author hsuanice
 @about
   Core library for handle-aware Render/Glue workflows with clear, single-entry API.
@@ -58,6 +58,50 @@
   • All overrides are one-run only: ExtState is snapshotted and restored after operation.
 
 @changelog
+  0.1.0-beta (251110.2250) - STABLE: Handle logic and scope detection finalized
+    - Verified: Item Selection (IS) only → Units glue with handles ✓
+    - Verified: Time Selection (TS) exists → TS-Window glue (handles only if TS=unit) ✓
+    - Core logic summary:
+      • TS exists → TS-Window mode (per-track glue within TS bounds)
+      • No TS → Units mode (per-unit glue with handle extension)
+      • Handles: Only when TS exactly equals unit (both edges aligned within epsilon)
+      • Multi-track: Supported in both modes
+    - Ready for comprehensive testing across all scenarios
+
+  0.1.0-beta (251110.2130) - Fixed: Units glue works without TS (Item Selection only)
+    - Fixed: Multiple units without TS now process individually with handles (was: merged into GAP unit)
+    - Removed: Multi-track TS-Window enforcement (was incorrect)
+    - Behavior: Item Selection (IS) only → Units glue with handles, supports multi-track ✓
+    - Behavior: Time Selection (TS) exists → TS-Window glue, no handles (unless TS=unit) ✓
+    - Modified lines 1703-1746: GAP unit merge only when TS exists
+    - Modified lines 1649-1658: Removed multi-track scope override
+    - Example: 2 SINGLE units, no TS → each glued individually with 5s handles ✓
+
+  0.1.0-beta (251110.2100) - Handle logic: Strict TS=Unit requirement + multi-track TS-Window enforcement
+    - Changed: Handles ONLY applied when TS exactly equals unit edges (both left AND right aligned)
+    - Logic: If TS ≠ Unit → no handles (0.0), regardless of partial overlap
+    - Multi-track: If selection spans >1 track → force TS-Window mode (no handles)
+      • Each track glued independently within TS bounds
+      • Respects FX/cue settings per track
+      • No handle extension even if TS=unit on some tracks
+    - Modified lines 1145-1170: Simplified handle logic to TS=Unit check only
+    - Modified lines 1634-1669: Multi-track detection and TS-Window enforcement
+    - Example cases:
+      • TS=0..2s, unit=0..2s → handles (5s default) ✓
+      • TS=0..3s, unit=0..2s → no handles (partial overlap) ✗
+      • TS=0..2s, unit=1..2s → no handles (left misaligned) ✗
+      • Multi-track selection → always TS-Window mode, no handles ✓
+
+  0.1.0-beta (251110.2000) - Handle logic: Apply handles when TS is at unit edge OR outside (inclusive)
+    - Changed: Handle calculation now uses inclusive conditions for left/right independently
+    - Left: If TS_left <= unit_left + eps → apply default HANDLE (was: strict < for outside only)
+    - Right: If TS_right >= unit_right - eps → apply default HANDLE (was: strict > for outside only)
+    - Logic: "只要TS edge有在units的edge or inside 就要有handle 而且左右分開處理"
+    - Impact: Handles now apply when TS is at edge OR outside, not just strictly outside
+    - Modified lines 1122-1152: Updated conditions and debug messages
+    - Example: TS=0..2s, unit=0..2s → uses 5s default handles (edge-aligned case)
+    - Example: TS=0..2s, unit=1..2s → left gets 5s handle (TS at/outside left edge)
+
   0.1.0-beta (251110.1920) - CRITICAL FIX: Correct D_STARTOFFS adjustment for glue with handles
     - Fixed: Content alignment now correct when gluing with left-side handles
     - Root cause: D_STARTOFFS was not adjusted before glue, causing REAPER to read from wrong source position
@@ -1119,38 +1163,44 @@ local function glue_unit(tr, u, cfg)
   -- Debug: show TS vs unit relationship
   if hasTS then
     dbg(DBG,1,"[TS-UNIT] TS=%.3f..%.3f, unit=%.3f..%.3f, eps=%.5f", tsL, tsR, unitL, unitR, eps_s)
-    local ts_left_outside = (tsL < unitL - eps_s)  -- Strictly outside (not equal)
-    local ts_right_outside = (tsR > unitR + eps_s)  -- Strictly outside (not equal)
+    local ts_left_at_or_outside = (tsL <= unitL + eps_s)  -- At edge or outside
+    local ts_right_at_or_outside = (tsR >= unitR - eps_s)  -- At edge or outside
     dbg(DBG,1,"[TS-UNIT] TS_left %s unit_left (%.3f %s %.3f), TS_right %s unit_right (%.3f %s %.3f)",
-        ts_left_outside and "OUTSIDE" or "INSIDE/EQUAL",
-        tsL, ts_left_outside and "<" or ">=", unitL - eps_s,
-        ts_right_outside and "OUTSIDE" or "INSIDE/EQUAL",
-        tsR, ts_right_outside and ">" or "<=", unitR + eps_s)
+        ts_left_at_or_outside and "AT/OUTSIDE" or "INSIDE",
+        tsL, ts_left_at_or_outside and "<=" or ">", unitL + eps_s,
+        ts_right_at_or_outside and "AT/OUTSIDE" or "INSIDE",
+        tsR, ts_right_at_or_outside and ">=" or "<", unitR - eps_s)
   else
     dbg(DBG,1,"[TS-UNIT] No TS, unit=%.3f..%.3f", unitL, unitR)
   end
 
   -- Determine handle size for each edge
-  local H_left_final = HANDLE
-  local H_right_final = HANDLE
+  -- NEW LOGIC: Only apply handles when TS exactly equals unit edges (both sides aligned)
+  local H_left_final = 0.0
+  local H_right_final = 0.0
 
   if hasTS then
-    -- Only use TS-based handle if TS edge is STRICTLY outside unit edge (not equal)
-    if tsL < unitL - eps_s then
-      H_left_final = unitL - tsL  -- Override with TS-based handle
-      dbg(DBG,1,"[HANDLE] Left: TS-based = %.3f (unit_left %.3f - TS_left %.3f)", H_left_final, unitL, tsL)
+    -- Check if TS equals unit on both sides (within epsilon)
+    local ts_equals_unit_left  = math.abs(tsL - unitL) <= eps_s
+    local ts_equals_unit_right = math.abs(tsR - unitR) <= eps_s
+    local ts_equals_unit = ts_equals_unit_left and ts_equals_unit_right
+
+    if ts_equals_unit then
+      -- TS exactly matches unit → apply default handles
+      H_left_final = HANDLE
+      H_right_final = HANDLE
+      dbg(DBG,1,"[HANDLE] TS=Unit (%.3f..%.3f ≈ %.3f..%.3f) → Left: %.3f, Right: %.3f",
+          tsL, tsR, unitL, unitR, H_left_final, H_right_final)
     else
-      dbg(DBG,1,"[HANDLE] Left: default = %.3f (TS inside/equal unit)", H_left_final)
-    end
-    -- Only use TS-based handle if TS edge is STRICTLY outside unit edge (not equal)
-    if tsR > unitR + eps_s then
-      H_right_final = tsR - unitR  -- Override with TS-based handle
-      dbg(DBG,1,"[HANDLE] Right: TS-based = %.3f (TS_right %.3f - unit_right %.3f)", H_right_final, tsR, unitR)
-    else
-      dbg(DBG,1,"[HANDLE] Right: default = %.3f (TS inside/equal unit)", H_right_final)
+      -- TS doesn't match unit → no handles
+      dbg(DBG,1,"[HANDLE] TS≠Unit (TS=%.3f..%.3f, unit=%.3f..%.3f) → No handles (0.0)",
+          tsL, tsR, unitL, unitR)
     end
   else
-    dbg(DBG,1,"[HANDLE] Left: %.3f, Right: %.3f (no TS, using config default)", H_left_final, H_right_final)
+    -- No TS → use default handles
+    H_left_final = HANDLE
+    H_right_final = HANDLE
+    dbg(DBG,1,"[HANDLE] No TS → Left: %.3f, Right: %.3f (config default)", H_left_final, H_right_final)
   end
 
   local UL, UR = math.huge, -math.huge
@@ -1617,7 +1667,7 @@ function M.glue_selection(force_units)
 
   -- Auto-detect scope: TS-Window vs Units glue
   -- If force_units=true, always use units glue (for core() API scope="units")
-  -- Otherwise pass "glue" mode to use TS-Window when TS exists (no handles)
+  -- Otherwise use auto-scope logic (TS exists → TS-Window, no TS → Units)
   local scope, tsL, tsR
   if force_units then
     scope = "units"
@@ -1643,18 +1693,15 @@ function M.glue_selection(force_units)
       local units = detect_units_same_track(list, eps_s)
       dbg(DBG,1,"[RUN] Track #%d: units=%d", r.GetMediaTrackInfo_Value(tr,"IP_TRACKNUMBER") or -1, #units)
 
-      -- When multiple units with gaps, treat them as one unit for gluing
-      -- (REAPER will automatically fill gaps as silence during glue)
-      if #units > 1 then
+      -- When multiple units with gaps AND TS exists, treat them as one GAP unit
+      -- Without TS: keep units separate for individual handle-aware processing
+      local currentTsL, currentTsR, hasTS = get_current_ts()
+
+      if #units > 1 and hasTS then
         -- Sort items by position
         table.sort(list, function(a,b)
           return r.GetMediaItemInfo_Value(a,"D_POSITION") < r.GetMediaItemInfo_Value(b,"D_POSITION")
         end)
-
-        -- Determine span: use TS boundaries to determine left/right edges
-        -- Rule: If TS edge is outside (or equal to) items edge, use TS edge
-        local overallL, overallR
-        local currentTsL, currentTsR, hasTS = get_current_ts()
 
         -- Calculate this track's items span
         local trackItemsL, trackItemsR = math.huge, -math.huge
@@ -1664,17 +1711,11 @@ function M.glue_selection(force_units)
           if R > trackItemsR then trackItemsR = R end
         end
 
-        if hasTS then
-          -- Use TS edge if it's outside (or equal to) items edge
-          overallL = (currentTsL <= trackItemsL + eps_s) and currentTsL or trackItemsL
-          overallR = (currentTsR >= trackItemsR - eps_s) and currentTsR or trackItemsR
-          dbg(DBG,1,"[RUN] GAP unit span: %.3f..%.3f (TS=%.3f..%.3f, items=%.3f..%.3f)",
-              overallL, overallR, currentTsL, currentTsR, trackItemsL, trackItemsR)
-        else
-          -- No TS: use item boundaries
-          overallL, overallR = trackItemsL, trackItemsR
-          dbg(DBG,1,"[RUN] GAP unit span: %.3f..%.3f (no TS, using item boundaries)", overallL, overallR)
-        end
+        -- Use TS edge if it's outside (or equal to) items edge
+        local overallL = (currentTsL <= trackItemsL + eps_s) and currentTsL or trackItemsL
+        local overallR = (currentTsR >= trackItemsR - eps_s) and currentTsR or trackItemsR
+        dbg(DBG,1,"[RUN] GAP unit span: %.3f..%.3f (TS=%.3f..%.3f, items=%.3f..%.3f)",
+            overallL, overallR, currentTsL, currentTsR, trackItemsL, trackItemsR)
 
         -- Create one synthetic unit containing all items (without modifying item lengths)
         local members = {}
@@ -1691,7 +1732,10 @@ function M.glue_selection(force_units)
         }
 
         units = {synthetic_unit}
-        dbg(DBG,1,"[RUN] Multiple units merged into one (span=%.3f..%.3f, %d items with gaps)", overallL, overallR, #members)
+        dbg(DBG,1,"[RUN] Multiple units merged into GAP unit (span=%.3f..%.3f, %d items with gaps, TS exists)", overallL, overallR, #members)
+      elseif #units > 1 then
+        -- Multiple units but no TS: process each unit individually with handles
+        dbg(DBG,1,"[RUN] Multiple units (%d) without TS → processing individually with handles", #units)
       end
 
       for ui,u in ipairs(units) do
