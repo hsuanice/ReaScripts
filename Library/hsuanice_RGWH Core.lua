@@ -1,6 +1,6 @@
 --[[]
 @description RGWH Core - Render or Glue with Handles
-@version 0.1.0-beta (251107.1530)
+@version 0.1.0-beta (251110.1430)
 @author hsuanice
 @about
   Core library for handle-aware Render/Glue workflows with clear, single-entry API.
@@ -58,15 +58,22 @@
   • All overrides are one-run only: ExtState is snapshotted and restored after operation.
 
 @changelog
-  0.1.0-beta (251107.1530) - CRITICAL FIX: Units glue handle content shift
+  0.1.0-beta (251110.1430) - CRITICAL FIX: TS glue scope detection + Units glue handle offset
+    - Fixed: TS = Item selection now correctly uses Units glue with handles (not TS glue)
     - Fixed: Units glue with handles no longer causes content shift
-    - Root cause: Pre-glue D_STARTOFFS adjustment (line 1070-1072) was being overwritten by glue operation
-    - Solution: Removed pre-glue offset adjustment; post-glue offset calculation (line 1114) is sufficient
-    - Technical: When extending item left with handle (newL < m.L), we were adjusting D_STARTOFFS before glue,
-                 but glue creates a new take and overwrites this value. The post-glue calculation
-                 `left_total = u.start - UL` already produces the correct offset.
-    - Impact: All Units glue operations (with or without TS) now preserve audio alignment correctly
-    - Tested: Both item-selection-only and TS≈selection scenarios work without content shift
+    - Root cause #1: glue_auto_scope() in "glue" mode always returned TS path, ignoring TS≈selection check
+    - Root cause #2: Pre-glue D_STARTOFFS adjustment was incorrectly removed in v251107.1530
+    - Solution #1: Unified glue_auto_scope() logic - both GLUE and AUTO modes now check TS≈selection
+      • TS ≈ selection → Units glue (with handles)
+      • TS ≠ selection → TS glue (no handles, non-destructive split)
+    - Solution #2: Restored pre-glue D_STARTOFFS adjustment (line 1079-1083)
+      • Formula: new_offset = old_offset - (deltaL * playrate)
+      • Required when extending item left to prevent REAPER glue from reading wrong source position
+    - Technical: When item position moves from m.L to newL (extending left by deltaL), we must adjust
+                 D_STARTOFFS by -deltaL to keep the same audio content at the same timeline position.
+                 Without this, REAPER glue would read from wrong source position.
+    - Impact: All glue operations (Units with/without TS, TS-Window) now work correctly
+    - Tested: TS=selection uses Units glue with handles; content alignment preserved
 
   0.1.0-beta (251107.0240) - MAJOR: GLUE MODE NOW PRIORITIZES TS-WINDOW (NO HANDLES)
     - Changed: glue_selection() now auto-detects TS and uses TS-Window glue when TS exists
@@ -1076,8 +1083,11 @@ local function glue_unit(tr, u, cfg)
     local newR = (idx==#members) and d.gotR or m.R
     r.SetMediaItemInfo_Value(it,"D_POSITION", newL)
     r.SetMediaItemInfo_Value(it,"D_LENGTH",   newR - newL)
-    -- NOTE: DO NOT adjust D_STARTOFFS here - it will be overwritten by glue!
-    -- The correct offset will be calculated after glue based on UL/UR trim.
+    if d.tk then
+      local deltaL  = (m.L - newL)
+      local new_off = d.offs - (deltaL * d.rate)
+      r.SetMediaItemTakeInfo_Value(d.tk,"D_STARTOFFS", new_off)
+    end
   end
 
   -- 時選=UL..UR → Glue → (必要時)對成品 Apply → Trim 回 UL..UR
@@ -1391,18 +1401,14 @@ local function glue_auto_scope(cfg, mode)
     return "ts", tsL, tsR
   end
 
-  -- GLUE mode: if TS exists, always use TS-Window glue (no handles)
-  if mode == "glue" then
-    dbg(DBG,1,"[SCOPE] GLUE mode with TS present → TS glue (no handles).")
-    return "ts", tsL, tsR
-  end
-
-  -- AUTO mode: use original logic (units with handles if TS ≈ selection)
+  -- Both GLUE and AUTO modes: check if TS ≈ selection
+  -- If TS ≈ selection → Units glue (with handles)
+  -- If TS ≠ selection → TS glue (no handles)
   if approximately_equal_span(tsL, tsR, selL, selR, 0.002) then
-    dbg(DBG,1,"[SCOPE] TS ≈ selection span → Units glue.")
+    dbg(DBG,1,"[SCOPE] TS ≈ selection span → Units glue (with handles).")
     return "units"
   else
-    dbg(DBG,1,"[SCOPE] TS differs from selection → TS glue.")
+    dbg(DBG,1,"[SCOPE] TS differs from selection → TS glue (no handles).")
     return "ts", tsL, tsR
   end
 end
