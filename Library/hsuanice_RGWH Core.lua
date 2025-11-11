@@ -1,6 +1,6 @@
 --[[]
 @description RGWH Core - Render or Glue with Handles
-@version 0.1.0-beta (251110.2315)
+@version 0.1.0-beta (251111.1550)
 @author hsuanice
 @about
   Core library for handle-aware Render/Glue workflows with clear, single-entry API.
@@ -58,6 +58,30 @@
   • All overrides are one-run only: ExtState is snapshotted and restored after operation.
 
 @changelog
+  0.1.0-beta (251111.1550) - CRITICAL FIX: TS-Window glue selection restore + auto-detect TS=unit after split
+    - Fixed: Selection restore after TS-Window glue now correctly selects glued item (not leftover split)
+    - Fixed: When TS causes item split and result equals unit edges → auto-switch to Units glue with handles
+    - Core changes (line 1525-1545):
+      • After split, check if TS=unit edges (single member, edges match within 2ms epsilon)
+      • If true: delegate to glue_unit() for handle-aware processing instead of TS-Window glue
+      • Result: Split-then-glue scenarios now get handles when TS perfectly matches unit ✓
+    - Core changes (line 1605-1607):
+      • Re-select glued item after TS glue to ensure correct selection state
+    - Wrapper/GUI selection restore logic (Glue.lua line 272-343, ReaImGui.lua line 415-483):
+      • Smart TS-aware restore: When TS exists, verify item position/length still matches before using cached pointer
+      • If position changed (due to split): fall through to TS-overlap-based restore
+      • Select item with maximum TS overlap (not first overlap) when multiple candidates exist
+      • Use snapshot TS (not current TS) to avoid issues when Core clears TS after glue
+    - Test results:
+      • P0-1 (RENDER single item, no TS): ✓ Volume handling correct, handles working
+      • P0-2 (GLUE multiple units, no TS): ✓ Independent glue with handles per unit
+      • P0-3 (GLUE with TS, various scenarios): ✓ All 4 scenarios pass:
+        - TS L+R > unit: TS-Window glue, no handles ✓
+        - TS L=unit, R>unit: TS-Window glue, no handles ✓
+        - TS R=unit, L>unit: TS-Window glue, no handles ✓
+        - TS inside item: Split → auto-detect TS=unit → Units glue WITH handles ✓
+    - Ready for continued comprehensive testing
+
   0.1.0-beta (251110.2315) - Verified: Volume handling working correctly across all modes
     - Confirmed merge+print fix (v2300) resolves volume preservation issues
     - All volume modes tested and verified:
@@ -1522,6 +1546,28 @@ local function glue_by_ts_window_on_track(tr, tsL, tsR, cfg, members_snapshot)
     dbg(DBG, 1, "[TS-GLUE] After boundary splits: %d items to glue within TS [%.3f, %.3f]", #members, tsL, tsR)
   end
 
+  -- Check if TS exactly equals unit edges after split → use Units glue with handles instead
+  if #members == 1 then
+    local m = members[1]
+    local eps_ts = 0.002  -- epsilon for TS=unit comparison
+    if math.abs(m.L - tsL) < eps_ts and math.abs(m.R - tsR) < eps_ts then
+      -- TS = unit edges after split → delegate to Units glue with handles
+      dbg(DBG, 1, "[TS-GLUE] TS matches unit edges after split → delegating to Units glue with handles")
+      -- Clear TS to trigger Units mode
+      r.GetSet_LoopTimeRange(true, false, 0, 0, false)
+      -- Build unit object for glue_unit
+      local unit = {
+        kind = "SINGLE",
+        members = { { it = m.it, L = m.L, R = m.R } },
+        start = m.L,
+        finish = m.R
+      }
+      -- Call glue_unit (which will add handles)
+      glue_unit(tr, unit, cfg)
+      return
+    end
+  end
+
   -- Optional: WRITE_GLUE_CUES inside TS when sources switch
   local glue_ids = nil
   if cfg.WRITE_GLUE_CUES and #members >= 2 then
@@ -1602,6 +1648,9 @@ local function glue_by_ts_window_on_track(tr, tsL, tsR, cfg, members_snapshot)
     r.SetMediaItemInfo_Value(glued, "D_POSITION", tsL)
     r.SetMediaItemInfo_Value(glued, "D_LENGTH",   tsR - tsL)
     r.UpdateItemInProject(glued)
+    -- Re-select the glued item to ensure correct selection state
+    r.SelectAllMediaItems(0, false)
+    r.SetMediaItemSelected(glued, true)
   else
     dbg(DBG,1,"[WARN] TS glue: glued item not found by span.")
   end
