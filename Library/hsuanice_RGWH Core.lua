@@ -1,6 +1,6 @@
 --[[]
 @description RGWH Core - Render or Glue with Handles
-@version 0.1.0-beta (251112.1430)
+@version 0.1.0-beta (251112.2220)
 @author hsuanice
 @about
   Core library for handle-aware Render/Glue workflows with clear, single-entry API.
@@ -58,6 +58,30 @@
   • All overrides are one-run only: ExtState is snapshotted and restored after operation.
 
 @changelog
+  0.1.0-beta (251112.2220) - VERIFIED: Per-item/per-unit channel detection working correctly
+    - Verified: All test cases pass with new per-item/per-unit channel detection
+    - Test results with channel_mode="auto":
+      • 3 mono items (src=1) → rendered as mono (src=1) ✓
+      • 1 MIXED unit with mono sources (src=1) → glued as mono (src=1) ✓
+      • 1 multichannel item (src=5) → rendered as multi (src=6) ✓
+    - Previous behavior would have rendered all items as multichannel (src=6)
+    - New behavior correctly matches each item/unit's actual channel requirements
+    - Production ready for mixed mono/multi workflows
+
+  0.1.0-beta (251112.2030) - CRITICAL: Channel mode "auto" now per-item/per-unit detection
+    - Changed: channel_mode="auto" behavior is now per-item for RENDER and per-unit for GLUE/AUTO
+    - Previous behavior: Scanned ALL selected items, used max channel count for entire operation
+    - New behavior (per-item/per-unit):
+      • RENDER mode: Each item independently determines mono/multi based on its source channels
+      • GLUE mode: Each unit independently determines mono/multi based on max channels across its members
+      • AUTO mode: RENDER phase uses per-item, GLUE phase uses per-unit detection
+    - Example: If you have 3 mono items and 1 multichannel (5ch) item:
+      • Old: All 4 items rendered as multichannel (src=6)
+      • New: 3 mono items render as mono (src=1), 1 multichannel renders as multi (src=6)
+    - Technical: Removed global auto detection in render_selection() and glue_selection()
+    - Technical: Added per-item detection in render loop, per-unit detection in glue_unit()
+    - Impact: More accurate channel handling, matches user intent for mixed mono/multi workflows
+
   0.1.0-beta (251112.1430) - STABLE: Core P0 testing complete, all scenarios pass
     - Comprehensive P0 test suite completed (RENDER, GLUE, AUTO modes with various TS/unit combinations)
     - All test results: ✓
@@ -1112,6 +1136,35 @@ local function glue_unit(tr, u, cfg)
   local HANDLE = (cfg.HANDLE_MODE=="seconds") and (cfg.HANDLE_SECONDS or 0.0) or 0.0
   local eps_s  = (cfg.EPSILON_MODE=="frames") and frames_to_seconds(cfg.EPSILON_VALUE, get_sr(), nil) or (cfg.EPSILON_VALUE or 0.002)
 
+  -- Per-unit channel mode detection when GLUE_APPLY_MODE=="auto"
+  local unit_apply_mode = cfg.GLUE_APPLY_MODE
+  if cfg.GLUE_APPLY_MODE == "auto" then
+    -- Determine mono/multi based on max channels across all members in this unit
+    local function get_item_playback_channels(it)
+      if not it then return 2 end
+      local tk = reaper.GetActiveTake(it)
+      if not tk then return 2 end
+
+      -- Check take's channel mode setting
+      local chanmode = reaper.GetMediaItemTakeInfo_Value(tk, "I_CHANMODE")
+      -- chanmode 2=downmix, 3=left only, 4=right only → mono
+      if chanmode == 2 or chanmode == 3 or chanmode == 4 then
+        return 1
+      end
+
+      -- Otherwise use source channels
+      local src = reaper.GetMediaItemTake_Source(tk)
+      return src and (reaper.GetMediaSourceNumChannels(src) or 2) or 2
+    end
+
+    local maxch = 1
+    for _, m in ipairs(u.members or {}) do
+      local ch = get_item_playback_channels(m.it)
+      if ch > maxch then maxch = ch end
+    end
+    unit_apply_mode = (maxch >= 2) and "multi" or "mono"
+  end
+
   -- Special handling for GAP units (multiple items with gaps)
   -- Use simplified glue without handle extension (like native 42432)
   if u.kind == "GAP" then
@@ -1139,10 +1192,10 @@ local function glue_unit(tr, u, cfg)
       r.SetMediaItemInfo_Value(glued, "D_FADEINLEN_AUTO", 0)
       r.SetMediaItemInfo_Value(glued, "D_FADEOUTLEN", 0)
       r.SetMediaItemInfo_Value(glued, "D_FADEOUTLEN_AUTO", 0)
-      apply_track_take_fx_to_item(glued, cfg.GLUE_APPLY_MODE, DBG)
+      apply_track_take_fx_to_item(glued, unit_apply_mode, DBG)
       embed_current_tc_for_item(glued, u.start, DBG)
     elseif glued
-       and (cfg.GLUE_APPLY_MODE == "multi")
+       and (unit_apply_mode == "multi")
        and (cfg.GLUE_OUTPUT_POLICY_WHEN_NO_TRACKFX == "force_multi") then
       apply_multichannel_no_fx_preserve_take(glued, (cfg.GLUE_TAKE_FX == true), DBG)
       embed_current_tc_for_item(glued, u.start, DBG)
@@ -1382,12 +1435,12 @@ local function glue_unit(tr, u, cfg)
     r.SetMediaItemInfo_Value(glued_pre, "D_FADEOUTLEN",      0)
     r.SetMediaItemInfo_Value(glued_pre, "D_FADEOUTLEN_AUTO", 0)
 
-    apply_track_take_fx_to_item(glued_pre, cfg.GLUE_APPLY_MODE, DBG)
-    -- Emulate Glue’s TC when GLUE+APPLY: embed CURRENT TC at unit start
+    apply_track_take_fx_to_item(glued_pre, unit_apply_mode, DBG)
+    -- Emulate Glue's TC when GLUE+APPLY: embed CURRENT TC at unit start
     embed_current_tc_for_item(glued_pre, u.start, DBG)
 
   elseif glued_pre
-     and (cfg.GLUE_APPLY_MODE == "multi")
+     and (unit_apply_mode == "multi")
      and (cfg.GLUE_OUTPUT_POLICY_WHEN_NO_TRACKFX == "force_multi") then
     -- TRACK FX 未印，但需要強制 multi：以「無 FX」方式套 41993
     apply_multichannel_no_fx_preserve_take(glued_pre, (cfg.GLUE_TAKE_FX == true), DBG)
@@ -1656,11 +1709,11 @@ local function glue_by_ts_window_on_track(tr, tsL, tsR, cfg, members_snapshot)
     r.SetMediaItemInfo_Value(glued_pre, "D_FADEINLEN_AUTO",  0)
     r.SetMediaItemInfo_Value(glued_pre, "D_FADEOUTLEN",      0)
     r.SetMediaItemInfo_Value(glued_pre, "D_FADEOUTLEN_AUTO", 0)
-    apply_track_take_fx_to_item(glued_pre, cfg.GLUE_APPLY_MODE, DBG)
-    -- Emulate Glue’s TC when GLUE+APPLY (TS-Window): embed CURRENT TC at tsL
+    apply_track_take_fx_to_item(glued_pre, unit_apply_mode, DBG)
+    -- Emulate Glue's TC when GLUE+APPLY (TS-Window): embed CURRENT TC at tsL
     embed_current_tc_for_item(glued_pre, tsL, DBG)
   elseif glued_pre
-     and (cfg.GLUE_APPLY_MODE == "multi")
+     and (unit_apply_mode == "multi")
      and (cfg.GLUE_OUTPUT_POLICY_WHEN_NO_TRACKFX == "force_multi") then
     apply_multichannel_no_fx_preserve_take(glued_pre, true, DBG)  -- keep take FX
     -- Emulate Glue’s TC in force-multi no-track-FX path as well (TS-Window)
@@ -1734,28 +1787,7 @@ function M.glue_selection(force_units)
 
   local eps_s = (cfg.EPSILON_MODE=="frames") and frames_to_seconds(cfg.EPSILON_VALUE, get_sr(), nil) or (cfg.EPSILON_VALUE or 0.002)
 
-  -- Auto mode for glue: infer mono/multi from max item playback channels over current selection
-  if cfg.GLUE_APPLY_MODE == "auto" then
-    local function get_item_playback_channels(it)
-      if not it then return 2 end
-      local tk = reaper.GetActiveTake(it)
-      if not tk then return 2 end
-
-      -- Check take's channel mode setting (IMPORTANT: use GetMediaItemTakeInfo_Value!)
-      local chanmode = reaper.GetMediaItemTakeInfo_Value(tk, "I_CHANMODE")
-      if chanmode == 2 or chanmode == 3 or chanmode == 4 then return 1 end
-
-      local src = reaper.GetMediaItemTake_Source(tk)
-      return src and (reaper.GetMediaSourceNumChannels(src) or 2) or 2
-    end
-    local maxch = 1
-    for i = 0, reaper.CountSelectedMediaItems(0) - 1 do
-      local it = reaper.GetSelectedMediaItem(0, i)
-      local ch = get_item_playback_channels(it)
-      if ch > maxch then maxch = ch end
-    end
-    cfg.GLUE_APPLY_MODE = (maxch >= 2) and "multi" or "mono"
-  end
+  -- Note: When GLUE_APPLY_MODE=="auto", channel mode is now determined per-unit in glue_unit()
 
   dbg(DBG,1,"[RUN] Glue start  handles=%.3fs  epsilon=%.5fs  GLUE_SINGLE_ITEMS=%s  GLUE_TAKE_FX=%s  GLUE_TRACK_FX=%s  GLUE_APPLY_MODE=%s  WRITE_EDGE_CUES=%s  WRITE_GLUE_CUES=%s  GLUE_CUE_POLICY=%s",
     cfg.HANDLE_SECONDS or 0, eps_s, tostring(cfg.GLUE_SINGLE_ITEMS), tostring(cfg.GLUE_TAKE_FX),
@@ -1931,25 +1963,7 @@ function M.auto_selection(merge_volumes, print_volumes)
       end
     end
 
-    -- Auto mode for glue: infer mono/multi from max item playback channels
-    if cfg.GLUE_APPLY_MODE == "auto" then
-      local function get_item_playback_channels(it)
-        if not it then return 2 end
-        local tk = reaper.GetActiveTake(it)
-        if not tk then return 2 end
-        local chanmode = reaper.GetMediaItemTakeInfo_Value(tk, "I_CHANMODE")
-        if chanmode == 2 or chanmode == 3 or chanmode == 4 then return 1 end
-        local src = reaper.GetMediaItemTake_Source(tk)
-        return src and (reaper.GetMediaSourceNumChannels(src) or 2) or 2
-      end
-      local maxch = 1
-      for i = 0, reaper.CountSelectedMediaItems(0) - 1 do
-        local it = reaper.GetSelectedMediaItem(0, i)
-        local ch = get_item_playback_channels(it)
-        if ch > maxch then maxch = ch end
-      end
-      cfg.GLUE_APPLY_MODE = (maxch >= 2) and "multi" or "mono"
-    end
+    -- Note: When GLUE_APPLY_MODE=="auto", channel mode is now determined per-unit in glue_unit()
 
     for _, mu in ipairs(multi_units) do
       glue_unit(mu.track, mu.unit, cfg)
@@ -1987,36 +2001,7 @@ function M.render_selection(take_fx, track_fx, mode, tc_mode, merge_volumes, pri
   cfg.RENDER_MERGE_VOLUMES = (merge_volumes == true)
   cfg.RENDER_PRINT_VOLUMES = (print_volumes == true)
 
-  -- Auto mode: infer mono/multi from max item playback channels over current selection
-  -- Respects item channel mode (mono downmix/left/right should be treated as mono)
-  if cfg.RENDER_APPLY_MODE == "auto" then
-    local function get_item_playback_channels(it)
-      if not it then return 2 end
-      local tk = reaper.GetActiveTake(it)
-      if not tk then return 2 end
-
-      -- Check take's channel mode setting (IMPORTANT: use GetMediaItemTakeInfo_Value, not GetMediaItemInfo_Value!)
-      local chanmode = reaper.GetMediaItemTakeInfo_Value(tk, "I_CHANMODE")
-      -- chanmode 2=downmix, 3=left only, 4=right only → mono
-      if chanmode == 2 or chanmode == 3 or chanmode == 4 then
-        return 1
-      end
-      -- Otherwise use source channels
-      local src = reaper.GetMediaItemTake_Source(tk)
-      return src and (reaper.GetMediaSourceNumChannels(src) or 2) or 2
-    end
-
-    local function max_channels_over(items_)
-      local maxch = 1
-      for _, it in ipairs(items_) do
-        local ch = get_item_playback_channels(it)
-        if ch > maxch then maxch = ch end
-      end
-      return maxch
-    end
-    local maxch = max_channels_over(items)
-    cfg.RENDER_APPLY_MODE = (maxch >= 2) and "multi" or "mono"
-  end
+  -- Note: When RENDER_APPLY_MODE=="auto", channel mode is now determined per-item in the render loop
 
   -- helpers (local to this function) -----------------------------------------
   local function snapshot_takefx_offline(tk)
@@ -2114,7 +2099,25 @@ function M.render_selection(take_fx, track_fx, mode, tc_mode, merge_volumes, pri
   local ACT_APPLY_MONO  = 40361 -- Apply track/take FX to items (mono)
   local ACT_APPLY_MULTI = 41993 -- Apply track/take FX to items (multichannel)
   local ACT_RENDER_PRES = 40601 -- Render items to new take (preserve source type)
-  local cmd_apply = (cfg.RENDER_APPLY_MODE=="multi") and ACT_APPLY_MULTI or ACT_APPLY_MONO
+
+  -- Helper function: determine mono/multi for a single item (used when RENDER_APPLY_MODE=="auto")
+  local function get_item_apply_mode(it)
+    if not it then return "mono" end
+    local tk = reaper.GetActiveTake(it)
+    if not tk then return "mono" end
+
+    -- Check take's channel mode setting
+    local chanmode = reaper.GetMediaItemTakeInfo_Value(tk, "I_CHANMODE")
+    -- chanmode 2=downmix, 3=left only, 4=right only → mono
+    if chanmode == 2 or chanmode == 3 or chanmode == 4 then
+      return "mono"
+    end
+
+    -- Otherwise use source channels
+    local src = reaper.GetMediaItemTake_Source(tk)
+    local ch = src and (reaper.GetMediaSourceNumChannels(src) or 2) or 2
+    return (ch >= 2) and "multi" or "mono"
+  end
 
   for _, it in ipairs(items) do
     local tk_orig = r.GetActiveTake(it)
@@ -2237,8 +2240,15 @@ function M.render_selection(take_fx, track_fx, mode, tc_mode, merge_volumes, pri
     -- If we are going to apply TRACK FX (01/11), or we are forcing multi without TRACK FX,
     -- clear fades (40361/41993 will bake them). Otherwise (00/10 => 40601) keep fades.
     local fade_snap = nil
+
+    -- Per-item channel mode detection when RENDER_APPLY_MODE=="auto"
+    local item_apply_mode = cfg.RENDER_APPLY_MODE
+    if cfg.RENDER_APPLY_MODE == "auto" then
+      item_apply_mode = get_item_apply_mode(it)
+    end
+
     local force_multi = (not need_track)
-                    and (cfg.RENDER_APPLY_MODE == "multi")
+                    and (item_apply_mode == "multi")
                     and (cfg.RENDER_OUTPUT_POLICY_WHEN_NO_TRACKFX == "force_multi")
 
     local use_apply = (need_track == true) or (force_multi == true)
@@ -2250,6 +2260,8 @@ function M.render_selection(take_fx, track_fx, mode, tc_mode, merge_volumes, pri
       zero_fades(it)
     end
 
+    -- Determine command for this specific item
+    local cmd_apply = (item_apply_mode == "multi") and ACT_APPLY_MULTI or ACT_APPLY_MONO
 
     -- render
     r.SelectAllMediaItems(0, false)
