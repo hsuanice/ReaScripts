@@ -1,7 +1,7 @@
 --[[
 @description RGWH GUI - ImGui Interface for RGWH Core
 @author hsuanice
-@version 0.1.0-beta (251112.1500)
+@version 0.1.0-beta (251112.1600)
 @about
   ImGui-based GUI for configuring and running RGWH Core operations.
   Provides visual controls for all RGWH Wrapper Template parameters.
@@ -11,6 +11,12 @@
   Adjust parameters using the visual controls and click operation buttons to execute.
 
 @changelog
+  v251112.1600 (0.1.0-beta) - Auto version extraction from @version tag
+    - Improved: VERSION constant now auto-extracts from @version tag in file header
+    - Technical: Uses debug.getinfo() and file parsing to read @version tag at runtime
+    - Result: Only need to update @version tag once, Help > About automatically syncs
+    - No more manual version string updates required
+
   v251112.1500 (0.1.0-beta) - Settings window ESC key support + Auto version sync
     - Added: ESC key now closes Settings window (without closing main GUI)
     - Behavior: Press ESC when Settings window is focused to close only the Settings window
@@ -141,9 +147,28 @@ if not ok_load or type(RGWH) ~= "table" or type(RGWH.core) ~= "function" then
 end
 
 ------------------------------------------------------------
--- Version Info (sync with @version tag in header)
+-- Version Info (auto-extracted from @version tag in header)
 ------------------------------------------------------------
-local VERSION = "0.1.0-beta (251112.1500)"
+local VERSION = "unknown"
+do
+  local info = debug.getinfo(1, "S")
+  local script_path = info.source:match("^@(.+)$")
+  if script_path then
+    local f = io.open(script_path, "r")
+    if f then
+      for line in f:lines() do
+        local ver = line:match("^@version%s+(.+)$")
+        if ver then
+          VERSION = ver
+          break
+        end
+        -- Stop searching after changelog section starts
+        if line:match("^@changelog") then break end
+      end
+      f:close()
+    end
+  end
+end
 
 ------------------------------------------------------------
 -- ImGui Context
