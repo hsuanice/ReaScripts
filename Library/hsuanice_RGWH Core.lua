@@ -1,6 +1,6 @@
 --[[]
 @description RGWH Core - Render or Glue with Handles
-@version 0.1.0-beta (251111.1550)
+@version 0.1.0-beta (251112.1430)
 @author hsuanice
 @about
   Core library for handle-aware Render/Glue workflows with clear, single-entry API.
@@ -58,6 +58,34 @@
   • All overrides are one-run only: ExtState is snapshotted and restored after operation.
 
 @changelog
+  0.1.0-beta (251112.1430) - STABLE: Core P0 testing complete, all scenarios pass
+    - Comprehensive P0 test suite completed (RENDER, GLUE, AUTO modes with various TS/unit combinations)
+    - All test results: ✓
+      • P0-1: RENDER single item, no TS → handles, volume merge+print, take FX clone ✓
+      • P0-2: GLUE multiple SINGLE units, no TS → independent glue with handles per unit ✓
+      • P0-3: GLUE with TS (4 scenarios) → correct TS-Window / Units mode switching:
+        - TS L+R > unit: TS-Window glue, no handles ✓
+        - TS L=unit, R>unit: TS-Window glue, no handles ✓
+        - TS R=unit, L>unit: TS-Window glue, no handles ✓
+        - TS inside item: Split → auto-detect TS=unit → Units glue WITH handles ✓
+      • P0-4: GLUE MIXED unit (overlapping), no TS → glue with handles ✓
+      • P0-5: AUTO mode (SINGLE+MIXED units) → RENDER singles with handles, GLUE mixed with handles ✓
+    - Core stability verified across:
+      • Volume handling (merge/print combinations)
+      • Handle extension (Units mode vs TS-Window mode)
+      • Selection restore (TS-aware smart restore)
+      • Auto-detect TS=unit after split
+      • AUTO mode TS independence
+    - Ready for production use
+
+  0.1.0-beta (251111.1615) - CRITICAL FIX: AUTO mode now ignores TS for glue operations (always uses handles)
+    - Fixed: AUTO mode glue phase now clears TS before processing multi-item units
+    - Issue: AUTO mode was detecting existing TS (from render phase or previous ops) and incorrectly applying TS-Window logic (no handles)
+    - Solution: Clear TS at line 1896 before gluing multi-item units in AUTO mode
+    - Result: AUTO mode now consistently applies handles to all glue operations (SINGLE and MIXED units) ✓
+    - Rationale: AUTO mode operates on units basis, each unit should have handles regardless of TS state
+    - Test: P0-5 (AUTO with mixed SINGLE+MIXED units) now shows handles on all glued items ✓
+
   0.1.0-beta (251111.1550) - CRITICAL FIX: TS-Window glue selection restore + auto-detect TS=unit after split
     - Fixed: Selection restore after TS-Window glue now correctly selects glued item (not leftover split)
     - Fixed: When TS causes item split and result equals unit edges → auto-switch to Units glue with handles
@@ -1890,6 +1918,10 @@ function M.auto_selection(merge_volumes, print_volumes)
   -- Second: Glue all multi-item units
   if #multi_units > 0 then
     dbg(DBG,1,"[RUN] Gluing %d multi-item units...", #multi_units)
+
+    -- AUTO mode: clear any existing TS to ensure Units glue with handles
+    -- (TS may have been set by render phase or left over from previous operations)
+    r.GetSet_LoopTimeRange(true, false, 0, 0, false)
 
     -- Reselect multi-item units for gluing
     r.SelectAllMediaItems(0, false)
