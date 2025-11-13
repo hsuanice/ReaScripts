@@ -1,6 +1,6 @@
 --[[]
 @description RGWH Core - Render or Glue with Handles
-@version 0.1.0-beta (251113.2230)
+@version 0.1.0-beta (251114.0045)
 @author hsuanice
 @about
   Core library for handle-aware Render/Glue workflows with clear, single-entry API.
@@ -56,8 +56,46 @@
       - Multi-item units (TOUCH/CROSSFADE) → glue
       - Works with mixed unit types in single execution
   • All overrides are one-run only: ExtState is snapshotted and restored after operation.
+  • For detailed operation modes guide, see RGWH GUI: Help > Manual (Operation Modes)
 
 @changelog
+  0.1.0-beta (251114.0045) - DOCUMENTATION: Removed detailed manual from Core, moved to GUI
+    - Removed: Detailed @manual section with operation modes guide (was lines 60-370)
+      • Detailed documentation now available in RGWH GUI: Help > Manual (Operation Modes)
+      • Core file reduced by ~310 lines for better maintainability
+    - Updated: @notes section now references GUI manual for detailed guide
+      • Added note: "For detailed operation modes guide, see RGWH GUI: Help > Manual"
+    - Reasoning: Keep Core library focused on API documentation, detailed user guides in GUI
+    - Related: RGWH GUI v251114.0100 includes comprehensive operation modes manual window
+
+  0.1.0-beta (251113.2350) - CRITICAL FIX: Track channel auto-expansion by Action 42432 (Glue)
+    - Fixed: Track channel count auto-expands during Glue operations
+      • Root cause: Action 42432 (Glue items) auto-expands track channels when source > track
+      • Example: 5ch source on 2ch track → Glue expands track to 6ch → subsequent apply outputs 6ch
+      • Impact: force_multi policy didn't prevent track expansion by Glue
+    - Verified through testing:
+      • Action 41993 (Apply multichannel) does NOT change track channels (test script confirms)
+      • Action 42432 (Glue items) DOES change track channels to accommodate widest source
+      • This is REAPER's native Glue behavior, not a bug
+    - Solution: Lock and restore track channel count around both Glue and Apply
+      • For Glue (42432): Snapshot before, restore after (line 2115-2127)
+      • For Apply (41993): Snapshot before, restore after (line 1495-1519)
+    - Implementation:
+      • Modified: glue_unit() multi/auto path (line 2115-2127)
+        - Added track channel snapshot before 42432
+        - Added track channel restore after 42432
+        - Debug log: "[GLUE] Track channel auto-expanded 2→6 by 42432, restored to 2"
+      • Modified: apply_multichannel_no_fx_preserve_take() (line 1495-1519)
+        - Added track channel snapshot/restore for 41993
+        - Debug log: "[APPLY] Track channel auto-expanded 2→6, restored to 2"
+    - Test scenario that triggered the issue:
+      • Track #170: 2 units, track_channels=2
+      • Unit #1: 1ch source → Glue → track stays 2ch → Apply → output 2ch ✓
+      • Unit #2: 5ch source → Glue → track expands to 6ch → Apply → output 6ch ✗
+      • After fix: Both units keep track at 2ch, outputs correctly match track channel
+    - Impact: force_multi now truly enforces original track channel limit for both Glue and Apply
+    - Test tool: Created Test_42432_Track_Channel_Behavior.lua to verify Glue behavior
+
   0.1.0-beta (251113.2230) - VERIFIED: Multi channel mode tested and working correctly
     - Tested: channel_mode="multi" working correctly across all operation modes
     - Test environment: 5-channel source on 6-channel track
@@ -1492,6 +1530,10 @@ local function apply_multichannel_no_fx_preserve_take(it, keep_take_fx, dbg_leve
   local tr = r.GetMediaItem_Track(it)
   local tk = r.GetActiveTake(it)
 
+  -- Snapshot original track channel count
+  -- Issue: Track FX may auto-expand when processing multichannel sources
+  local orig_track_ch = tr and (r.GetMediaTrackInfo_Value(tr, "I_NCHAN") or 2) or 2
+
   local tr_snap = disable_trackfx_with_snapshot(tr)
   local tk_snap = snapshot_takefx_offline(tk)
   if tk and (not keep_take_fx) then
@@ -1505,6 +1547,14 @@ local function apply_multichannel_no_fx_preserve_take(it, keep_take_fx, dbg_leve
   r.SetMediaItemSelected(it,true)
   dbg(dbg_level,1,"[APPLY] multi(no-FX) via 41993 (keep_take_fx=%s)", tostring(keep_take_fx))
   r.Main_OnCommand(ACT_APPLY_MULTI, 0)
+
+  -- Restore original track channel count if it was auto-expanded
+  -- This can happen when Track FX expand to accommodate wider source
+  local new_track_ch = tr and (r.GetMediaTrackInfo_Value(tr, "I_NCHAN") or 2) or 2
+  if tr and new_track_ch ~= orig_track_ch then
+    r.SetMediaTrackInfo_Value(tr, "I_NCHAN", orig_track_ch)
+    dbg(dbg_level,1,"[APPLY] Track channel auto-expanded %d→%d, restored to %d (force_multi policy)", orig_track_ch, new_track_ch, orig_track_ch)
+  end
 
   -- restore states
   restore_trackfx_from_snapshot(tr, tr_snap)
@@ -2077,8 +2127,19 @@ local function glue_unit(tr, u, cfg)
       first_item_vol_snap = preprocess_item_volumes(first_it, merge_volumes, print_volumes, DBG)
     end
 
+    -- Snapshot track channel count before Glue
+    -- Issue: Action 42432 (Glue) can auto-expand track channels when source > track channels
+    local orig_track_ch = tr and (r.GetMediaTrackInfo_Value(tr, "I_NCHAN") or 2) or 2
+
     r.GetSet_LoopTimeRange(true, false, UL, UR, false)
     r.Main_OnCommand(ACT_GLUE_TS, 0)
+
+    -- Restore track channel count if Glue auto-expanded it
+    local new_track_ch = tr and (r.GetMediaTrackInfo_Value(tr, "I_NCHAN") or 2) or 2
+    if tr and new_track_ch ~= orig_track_ch then
+      r.SetMediaTrackInfo_Value(tr, "I_NCHAN", orig_track_ch)
+      dbg(DBG,1,"[GLUE] Track channel auto-expanded %d→%d by 42432, restored to %d", orig_track_ch, new_track_ch, orig_track_ch)
+    end
 
     local glued_pre = find_item_by_span_on_track(tr, UL, UR, 0.002)
     if cfg.GLUE_TRACK_FX and glued_pre then
