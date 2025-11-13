@@ -1,6 +1,6 @@
 --[[]
 @description RGWH Core - Render or Glue with Handles
-@version 0.1.0-beta (251113.1820)
+@version 0.1.0-beta (251113.2230)
 @author hsuanice
 @about
   Core library for handle-aware Render/Glue workflows with clear, single-entry API.
@@ -58,6 +58,27 @@
   • All overrides are one-run only: ExtState is snapshotted and restored after operation.
 
 @changelog
+  0.1.0-beta (251113.2230) - VERIFIED: Multi channel mode tested and working correctly
+    - Tested: channel_mode="multi" working correctly across all operation modes
+    - Test environment: 5-channel source on 6-channel track
+    - RENDER mode (Track FX=OFF, Force Multi policy):
+      • Correctly uses Action 41993 (Apply multichannel)
+      • Output channels follow track channel count (5ch source → 6ch output)
+      • Track FX properly disabled during apply (not baked)
+      • Handles, volumes, TimeReference all working correctly
+    - GLUE mode (Track FX=OFF, Force Multi policy):
+      • Correctly uses native Glue (42432) → then Apply multichannel (41993)
+      • Output channels follow track channel count (5ch source → 6ch output)
+      • Handles extended correctly, volumes handled properly
+      • TimeReference embedded correctly at unit start
+    - Channel behavior confirmed:
+      • RENDER/APPLY modes: Output = track channel count (by REAPER design)
+      • Matches "What You Hear Is What You Get" principle
+      • Consistent with actual monitoring/playback routing
+    - Impact: Multi mode now fully functional and matches mono mode behavior
+    - Previous tests: Mono mode already verified working (v251113.1820)
+    - Ready for: AUTO mode testing (per-item/per-unit channel detection)
+
   0.1.0-beta (251113.1820) - STABLE: Volume handling fully tested and working
     - Verified: All volume handling working correctly with proper settings
     - Tested: Merge volumes + Print volumes in mono apply + glue workflow
