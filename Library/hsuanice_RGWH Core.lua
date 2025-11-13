@@ -1,6 +1,6 @@
 --[[]
 @description RGWH Core - Render or Glue with Handles
-@version 0.1.0-beta (251113.1650)
+@version 0.1.0-beta (251113.1820)
 @author hsuanice
 @about
   Core library for handle-aware Render/Glue workflows with clear, single-entry API.
@@ -58,6 +58,88 @@
   • All overrides are one-run only: ExtState is snapshotted and restored after operation.
 
 @changelog
+  0.1.0-beta (251113.1820) - STABLE: Volume handling fully tested and working
+    - Verified: All volume handling working correctly with proper settings
+    - Tested: Merge volumes + Print volumes in mono apply + glue workflow
+    - Confirmed: Settings now properly read from GUI and applied
+    - Result: itemVol=1.0, takeVol=1.0 after merge+print (volumes baked into audio)
+    - This version is stable and ready for production use
+
+  0.1.0-beta (251113.1810) - CRITICAL FIX: Volume settings not being read from ExtState
+    - Fixed: MERGE_VOLUMES and PRINT_VOLUMES settings were not being read from ExtState
+      • Previous behavior: Settings always defaulted to false (nil), ignoring GUI settings
+      • Root cause: read_settings() function was missing these 4 keys
+      • Impact: Volume handling code was correct but settings were never passed in
+    - Added: Volume settings to DEFAULTS (line 645-649)
+      • RENDER_MERGE_VOLUMES = 1 (default ON)
+      • RENDER_PRINT_VOLUMES = 1 (default ON)
+      • GLUE_MERGE_VOLUMES = 1 (default ON)
+      • GLUE_PRINT_VOLUMES = 1 (default ON)
+    - Added: Volume settings to read_settings() function (line 712-716)
+      • Now properly reads from ExtState with fallback to DEFAULTS
+      • Uses get_ext_bool() to convert to boolean
+    - This fixes the reported volume issues - settings are now properly applied
+
+  0.1.0-beta (251113.1800) - MAJOR REFACTOR: Unified volume/FX handling with helper functions
+    - Added: Centralized helper functions for volume and FX handling (line 848-1080)
+      • snapshot_item_volumes() - Snapshot item and all takes' volumes
+      • preprocess_item_volumes() - Handle merge_volumes and print_volumes before render/apply
+      • postprocess_item_volumes() - Restore/set volumes after render/apply based on settings
+      • snapshot_track_fx() / restore_track_fx() / disable_all_track_fx() - Track FX handling
+      • snapshot_take_fx_offline() / restore_take_fx_offline() / offline_all_online_take_fx() - Take FX handling
+    - Refactored: RENDER mode to use new helper functions
+      • Removed ~70 lines of duplicated volume handling code
+      • Now uses preprocess_item_volumes() and postprocess_item_volumes()
+      • Behavior unchanged, just cleaner and more maintainable
+    - Refactored: GLUE mono apply mode to use new helper functions
+      • Removed ~60 lines of duplicated volume handling code
+      • Now uses same helpers as RENDER mode
+      • Ensures consistent volume behavior across all modes
+    - Fixed: GLUE multi/auto mode now has volume handling
+      • Previous behavior: Volumes were baked by Glue (42432) but never restored
+      • New behavior: Snapshots first item's volumes, preprocesses them, then restores after glue
+      • Now respects GLUE_MERGE_VOLUMES and GLUE_PRINT_VOLUMES settings
+      • Uses same helper functions as RENDER and mono apply modes
+    - Benefits:
+      • Single source of truth for volume/FX logic (no more copy-paste bugs)
+      • Easier to maintain and test
+      • Consistent behavior across RENDER, GLUE mono, and GLUE multi modes
+      • Future changes only need to be made in one place
+    - Technical: All volume handling now follows the same pattern:
+      1. Snapshot volumes (item + all takes)
+      2. If merge=ON: multiply item vol into all take vols, set item=1.0
+      3. If print=OFF: reset active take to 1.0 (non-destructive)
+      4. Execute REAPER action (bakes current volumes)
+      5. Restore volumes based on merge×print combination (4 cases)
+    - Impact: Volume handling now works consistently across all workflows
+    - This refactor should fix the reported volume issues in mono apply mode
+
+  0.1.0-beta (251113.1700) - CRITICAL FIX: Volume handling in mono apply workflow
+    - Fixed: Mono apply workflow now properly handles volume merge/print settings
+      • Previous behavior: Volumes reset to 1.0 after mono apply + glue (volumes lost)
+      • New behavior: Full volume snapshot/merge/restore logic matching RENDER mode
+      • Affects: channel_mode="mono" or "auto" (when unit is detected as mono)
+      • Only affected mono source items; multi-channel items were not affected
+    - Implementation: Volume handling in mono apply path (glue_unit function, line 1542-1782)
+      • Before Apply: Snapshot all volumes (item + all takes)
+        - If merge_volumes=ON: merge item volume into ALL takes, set item=1.0
+        - If print_volumes=OFF: reset active take to 1.0 (non-destructive mode)
+      • After Apply (each item): Restore volumes based on merge/print settings
+        - print+merge: item=1.0, new take=1.0, old takes keep merged volume
+        - print only: item=original, new take=1.0, old take=original
+        - non-print+merge: item=1.0, all takes=merged volume
+        - non-print only: item=original, all takes=original take volume
+      • After Glue (if gluing): Set glued item volumes from first item's snapshot
+        - Glue action (42432) bakes all volumes → restore based on merge/print
+        - Uses first item's volume_snap for consistent behavior
+    - Technical: Follows RENDER mode volume handling pattern (line 2414-2607)
+      • Same merge logic: multiply item volume into ALL takes (not just active)
+      • Same restore logic: different handling for 4 combinations of merge×print
+      • Saves volume_snap in applied_items table for glue restoration
+    - Settings: Uses cfg.GLUE_MERGE_VOLUMES and cfg.GLUE_PRINT_VOLUMES
+    - Impact: Volume control now works correctly in mono channel mode for both apply-only and apply+glue paths
+    - Test case: itemVol=4.169 × takeVol=0.631 → correctly preserved/restored instead of reset to 1.0
+
   0.1.0-beta (251113.1650) - CRITICAL FIX: Mono channel mode FX control + RENDER mode support
     - Fixed: Mono apply workflow now respects TAKE_FX and TRACK_FX settings
       • Previous behavior: 40361 (Apply mono) always printed all FX regardless of settings
@@ -581,6 +663,13 @@ local DEFAULTS = {
   RENDER_TRACK_FX    = 0,             -- 1=Render 同時印入 Track FX
   RENDER_APPLY_MODE  = "mono",        -- "mono" | "multi"（Render 使用的 apply 模式）
   RENDER_TC_EMBED    = "current",    -- TR embed mode for render: "previous" | "current" | "off"
+
+  -- Volume handling policies
+  RENDER_MERGE_VOLUMES = 1,           -- 1=Merge item volume into take volume before render
+  RENDER_PRINT_VOLUMES = 1,           -- 1=Bake volumes into rendered audio; 0=restore (non-destructive)
+  GLUE_MERGE_VOLUMES   = 1,           -- 1=Merge item volume into take volume before glue
+  GLUE_PRINT_VOLUMES   = 1,           -- 1=Bake volumes into glued audio; 0=restore (non-destructive)
+
   -- Rename policy:
   RENAME_OP_MODE     = "auto",        -- glue | render | auto
   -- Hash markers（#in/#out 以供 Media Cues）
@@ -641,6 +730,13 @@ function M.read_settings()
     RENDER_APPLY_MODE  =  get_ext("RENDER_APPLY_MODE",      DEFAULTS.RENDER_APPLY_MODE),
     -- TR embed mode for Render: "previous" | "current" | "off"
     RENDER_TC_EMBED    = get_ext("RENDER_TC_EMBED", "previous"),
+
+    -- Volume handling policies
+    RENDER_MERGE_VOLUMES = (get_ext_bool("RENDER_MERGE_VOLUMES", DEFAULTS.RENDER_MERGE_VOLUMES)==1),
+    RENDER_PRINT_VOLUMES = (get_ext_bool("RENDER_PRINT_VOLUMES", DEFAULTS.RENDER_PRINT_VOLUMES)==1),
+    GLUE_MERGE_VOLUMES   = (get_ext_bool("GLUE_MERGE_VOLUMES",   DEFAULTS.GLUE_MERGE_VOLUMES)==1),
+    GLUE_PRINT_VOLUMES   = (get_ext_bool("GLUE_PRINT_VOLUMES",   DEFAULTS.GLUE_PRINT_VOLUMES)==1),
+
     RENAME_OP_MODE     = get_ext("RENAME_OP_MODE",           DEFAULTS.RENAME_OP_MODE),
     WRITE_EDGE_CUES    = (get_ext_bool("WRITE_EDGE_CUES",   DEFAULTS.WRITE_EDGE_CUES)==1),
     -- 🔧 修正：用 DEFAULTS，不是 dflt
@@ -817,6 +913,240 @@ local function restore_fades(it, f)
   r.SetMediaItemInfo_Value(it, "C_FADEOUTSHAPE",     f.outShape)
   r.SetMediaItemInfo_Value(it, "C_FADEINDIR",        f.inDir)
   r.SetMediaItemInfo_Value(it, "C_FADEOUTDIR",       f.outDir)
+end
+
+------------------------------------------------------------
+-- Volume handling helpers
+------------------------------------------------------------
+-- Snapshot item and all takes' volumes
+-- Returns: { item_vol, take_vols={}, merged_vol }
+local function snapshot_item_volumes(item)
+  local snap = {
+    item_vol = r.GetMediaItemInfo_Value(item, "D_VOL") or 1.0,
+    take_vols = {},
+    merged_vol = 1.0
+  }
+
+  local nt = r.GetMediaItemNumTakes(item) or 0
+  for ti = 0, nt-1 do
+    local tk = r.GetTake(item, ti)
+    if tk then
+      snap.take_vols[ti] = r.GetMediaItemTakeInfo_Value(tk, "D_VOL") or 1.0
+    end
+  end
+
+  return snap
+end
+
+-- Pre-process volumes before render/apply
+-- Handles merge_volumes and print_volumes logic
+-- Modifies item/take volumes in-place
+-- Returns: volume_snap with merged_vol calculated
+local function preprocess_item_volumes(item, merge_volumes, print_volumes, DBG)
+  local volume_snap = snapshot_item_volumes(item)
+  local tk_orig = r.GetActiveTake(item)
+
+  if not tk_orig then
+    return volume_snap
+  end
+
+  local item_vol = volume_snap.item_vol
+  local nt = r.GetMediaItemNumTakes(item) or 0
+
+  -- Get active take index
+  local tk_orig_idx = nil
+  for ti = 0, nt-1 do
+    if r.GetTake(item, ti) == tk_orig then
+      tk_orig_idx = ti
+      break
+    end
+  end
+
+  -- Conditional merge: pre-merge item volume into ALL takes
+  if merge_volumes then
+    if math.abs(item_vol - 1.0) > 1e-9 then
+      -- Multiply item volume into EVERY take's volume
+      for ti = 0, nt-1 do
+        local tk = r.GetTake(item, ti)
+        if tk then
+          local tv = r.GetMediaItemTakeInfo_Value(tk, "D_VOL") or 1.0
+          local merged_tv = tv * item_vol
+          r.SetMediaItemTakeInfo_Value(tk, "D_VOL", merged_tv)
+        end
+      end
+
+      -- Remember merged value for active take
+      local tv_orig = volume_snap.take_vols[tk_orig_idx] or 1.0
+      volume_snap.merged_vol = tv_orig * item_vol
+      r.SetMediaItemInfo_Value(item, "D_VOL", 1.0)
+
+      if DBG and DBG >= 2 then
+        dbg(DBG,2,"[GAIN] pre-merged itemVol=%.3f into ALL takes; active take (%.3f → %.3f)",
+            item_vol, tv_orig, volume_snap.merged_vol)
+      end
+    else
+      -- Item already at 1.0
+      volume_snap.merged_vol = r.GetMediaItemTakeInfo_Value(tk_orig, "D_VOL") or 1.0
+    end
+
+    -- If print_volumes=false, reset active take to 1.0 before render/apply
+    if not print_volumes then
+      local current_tv = r.GetMediaItemTakeInfo_Value(tk_orig, "D_VOL") or 1.0
+      volume_snap.merged_vol = current_tv
+      r.SetMediaItemTakeInfo_Value(tk_orig, "D_VOL", 1.0)
+      if DBG and DBG >= 2 then
+        dbg(DBG,2,"[GAIN] print_volumes=false; reset active take %.3f→1.0", current_tv)
+      end
+    end
+  else
+    -- merge_volumes=false: don't merge, remember original values
+    volume_snap.merged_vol = r.GetMediaItemTakeInfo_Value(tk_orig, "D_VOL") or 1.0
+    if DBG and DBG >= 2 then
+      dbg(DBG,2,"[GAIN] merge_volumes=false; keeping item=%.3f, take=%.3f separate",
+          item_vol, volume_snap.merged_vol)
+    end
+
+    -- If print_volumes=false, reset active take to 1.0
+    if not print_volumes then
+      r.SetMediaItemTakeInfo_Value(tk_orig, "D_VOL", 1.0)
+      if DBG and DBG >= 2 then
+        dbg(DBG,2,"[GAIN] print_volumes=false; reset active take %.3f→1.0", volume_snap.merged_vol)
+      end
+    end
+  end
+
+  return volume_snap
+end
+
+-- Restore/set volumes after render/apply
+-- item: the processed item
+-- volume_snap: snapshot from preprocess_item_volumes
+-- new_take: the newly created take (from render/apply) - may be nil
+-- old_take: the original take - may be nil
+-- merge_volumes, print_volumes: settings
+local function postprocess_item_volumes(item, volume_snap, new_take, old_take, merge_volumes, print_volumes, DBG)
+  if print_volumes then
+    -- Print mode: volumes are baked into audio
+    if merge_volumes then
+      -- Merged+Print: item=1.0, new take=1.0, old takes keep merged
+      r.SetMediaItemInfo_Value(item, "D_VOL", 1.0)
+      if new_take then
+        r.SetMediaItemTakeInfo_Value(new_take, "D_VOL", 1.0)
+      end
+      -- old_take already has merged volume from pre-merge phase
+      if DBG and DBG >= 2 then
+        local old_vol = old_take and r.GetMediaItemTakeInfo_Value(old_take, "D_VOL") or 0
+        dbg(DBG,2,"[GAIN] print+merge; item=1.0, new=1.0, old=%.3f (kept)", old_vol)
+      end
+    else
+      -- Not merged: restore original item volume
+      r.SetMediaItemInfo_Value(item, "D_VOL", volume_snap.item_vol)
+      if new_take then
+        r.SetMediaItemTakeInfo_Value(new_take, "D_VOL", 1.0)
+      end
+      if old_take then
+        r.SetMediaItemTakeInfo_Value(old_take, "D_VOL", volume_snap.merged_vol)
+      end
+      if DBG and DBG >= 2 then
+        dbg(DBG,2,"[GAIN] print; item=%.3f, new=1.0, old=%.3f",
+            volume_snap.item_vol, volume_snap.merged_vol)
+      end
+    end
+  else
+    -- Non-print mode: restore volumes (non-destructive)
+    if merge_volumes then
+      -- Merged: item=1.0, all takes=merged_vol
+      r.SetMediaItemInfo_Value(item, "D_VOL", 1.0)
+      if new_take then
+        r.SetMediaItemTakeInfo_Value(new_take, "D_VOL", volume_snap.merged_vol)
+      end
+      if old_take then
+        r.SetMediaItemTakeInfo_Value(old_take, "D_VOL", volume_snap.merged_vol)
+      end
+      if DBG and DBG >= 2 then
+        dbg(DBG,2,"[GAIN] non-print+merge; item=1.0, takes=%.3f", volume_snap.merged_vol)
+      end
+    else
+      -- Not merged: restore original volumes
+      r.SetMediaItemInfo_Value(item, "D_VOL", volume_snap.item_vol)
+      if new_take then
+        r.SetMediaItemTakeInfo_Value(new_take, "D_VOL", volume_snap.merged_vol)
+      end
+      if old_take then
+        r.SetMediaItemTakeInfo_Value(old_take, "D_VOL", volume_snap.merged_vol)
+      end
+      if DBG and DBG >= 2 then
+        dbg(DBG,2,"[GAIN] non-print; item=%.3f, takes=%.3f",
+            volume_snap.item_vol, volume_snap.merged_vol)
+      end
+    end
+  end
+end
+
+------------------------------------------------------------
+-- FX handling helpers
+------------------------------------------------------------
+-- Snapshot track FX enabled states
+-- Returns: array of enabled states indexed by FX number
+local function snapshot_track_fx(track)
+  local snap = {}
+  local fxn = r.TrackFX_GetCount(track) or 0
+  for i = 0, fxn-1 do
+    snap[i] = r.TrackFX_GetEnabled(track, i)
+  end
+  return snap
+end
+
+-- Restore track FX enabled states from snapshot
+local function restore_track_fx(track, snap)
+  if not snap then return end
+  for i, enabled in pairs(snap) do
+    r.TrackFX_SetEnabled(track, i, enabled)
+  end
+end
+
+-- Disable all track FX
+local function disable_all_track_fx(track)
+  local fxn = r.TrackFX_GetCount(track) or 0
+  for i = 0, fxn-1 do
+    r.TrackFX_SetEnabled(track, i, false)
+  end
+  return fxn
+end
+
+-- Snapshot take FX offline states
+-- Returns: array of offline states indexed by FX number
+local function snapshot_take_fx_offline(take)
+  if not take then return nil end
+  local snap = {}
+  local n = r.TakeFX_GetCount(take) or 0
+  for i = 0, n-1 do
+    snap[i] = r.TakeFX_GetOffline(take, i)
+  end
+  return snap
+end
+
+-- Restore take FX offline states from snapshot
+local function restore_take_fx_offline(take, snap)
+  if not (take and snap) then return end
+  for i, offline in pairs(snap) do
+    r.TakeFX_SetOffline(take, i, offline)
+  end
+end
+
+-- Offline all non-offline take FX
+-- Returns: count of FX that were offlined
+local function offline_all_online_take_fx(take)
+  if not take then return 0 end
+  local n = r.TakeFX_GetCount(take) or 0
+  local count = 0
+  for i = 0, n-1 do
+    if not r.TakeFX_GetOffline(take, i) then
+      r.TakeFX_SetOffline(take, i, true)
+      count = count + 1
+    end
+  end
+  return count
 end
 
 ------------------------------------------------------------
@@ -1479,6 +1809,10 @@ local function glue_unit(tr, u, cfg)
   if unit_apply_mode == "mono" then
     dbg(DBG,1,"[MONO-APPLY] Applying mono (40361) to each item in unit...")
 
+    -- Get volume settings
+    local merge_volumes = (cfg.GLUE_MERGE_VOLUMES == true)
+    local print_volumes = (cfg.GLUE_PRINT_VOLUMES == true)
+
     -- Step 0: Snapshot and control Track FX
     local track_fx_snapshot = {}
     local need_track_fx = (cfg.GLUE_TRACK_FX == true)
@@ -1535,6 +1869,9 @@ local function glue_unit(tr, u, cfg)
         dbg(DBG,2,"[MONO-APPLY] item#%d: Temp-offline %d TAKE FX (policy TAKE=OFF)", idx, n)
       end
 
+      -- >>>> Volume handling: snapshot, optional merge, optional reset <<<<
+      local volume_snap = preprocess_item_volumes(it, merge_volumes, print_volumes, DBG)
+
       dbg(DBG,2,"[MONO-APPLY] item#%d: Applying 40361 (mono)", idx)
 
       -- Apply mono (40361)
@@ -1558,12 +1895,16 @@ local function glue_unit(tr, u, cfg)
           dbg(DBG,2,"[MONO-APPLY] item#%d: Restored %d TAKE FX offline states", idx, n)
         end
 
+        -- Volume handling after apply: print or restore
+        postprocess_item_volumes(applied, volume_snap, new_tk, tk, merge_volumes, print_volumes, DBG)
+
         applied_items[#applied_items+1] = {
           it = applied,
           idx = idx,
           fade_in = {len=fade_in_len, dir=fade_in_dir, shape=fade_in_shape, auto=fade_in_auto},
           fade_out = {len=fade_out_len, dir=fade_out_dir, shape=fade_out_shape, auto=fade_out_auto},
-          orig_tk = tk  -- Save original take for potential FX cloning
+          orig_tk = tk,  -- Save original take for potential FX cloning
+          volume_snap = volume_snap  -- Save volume snapshot for potential glue restoration
         }
         dbg(DBG,2,"[MONO-APPLY] item#%d: Applied, result is mono", idx)
       end
@@ -1634,6 +1975,15 @@ local function glue_unit(tr, u, cfg)
           r.UpdateItemInProject(glued)
         end
 
+        -- Volume handling for glued item
+        -- Note: Glue action (42432) bakes all item/take volumes into the audio
+        -- Use first item's volume snapshot for consistent behavior
+        if #applied_items > 0 then
+          local first_vol_snap = applied_items[1].volume_snap
+          local gtk_final = r.GetActiveTake(glued)
+          postprocess_item_volumes(glued, first_vol_snap, gtk_final, nil, merge_volumes, print_volumes, DBG)
+        end
+
         dbg(DBG,1,"       post-glue: trimmed to [%.3f..%.3f], offs=%.3f (L=%.3f R=%.3f)",
           u.start, u.finish, left_total, left_total, right_total)
       end
@@ -1694,6 +2044,18 @@ local function glue_unit(tr, u, cfg)
   else
     -- Original logic for multi/auto modes: native glue → optional apply
     -- 時選=UL..UR → Glue → (必要時)對成品 Apply → Trim 回 UL..UR
+
+    -- Get volume settings (use GLUE settings for this mode)
+    local merge_volumes = (cfg.GLUE_MERGE_VOLUMES == true)
+    local print_volumes = (cfg.GLUE_PRINT_VOLUMES == true)
+
+    -- Snapshot volumes from first item (for later restoration)
+    -- Note: Glue (42432) will bake all volumes, we need first item's snapshot for restoration
+    local first_item_vol_snap = nil
+    if first_it then
+      first_item_vol_snap = preprocess_item_volumes(first_it, merge_volumes, print_volumes, DBG)
+    end
+
     r.GetSet_LoopTimeRange(true, false, UL, UR, false)
     r.Main_OnCommand(ACT_GLUE_TS, 0)
 
@@ -1755,6 +2117,13 @@ local function glue_unit(tr, u, cfg)
       r.SetMediaItemInfo_Value(glued,"C_FADEOUTSHAPE",    fout_shape)
       r.SetMediaItemInfo_Value(glued,"D_FADEOUTLEN_AUTO", fout_auto)
       r.UpdateItemInProject(glued)
+
+      -- Volume handling for glued item
+      -- Note: Glue (42432) bakes all volumes, restore based on first item's snapshot
+      if first_item_vol_snap then
+        local gtk_final = r.GetActiveTake(glued)
+        postprocess_item_volumes(glued, first_item_vol_snap, gtk_final, nil, merge_volumes, print_volumes, DBG)
+      end
 
       -- (Removed legacy take-marker emission. Glue cues are now pre-written as project markers with '#'.)
 
@@ -2412,79 +2781,7 @@ function M.render_selection(take_fx, track_fx, mode, tc_mode, merge_volumes, pri
     end
 
     -- >>>> Volume handling: snapshot, optional merge, optional reset <<<<
-    local volume_snap = { item_vol = 0.0, take_vols = {}, merged_vol = 1.0 }
-    do
-      -- Always snapshot current volumes
-      local item_vol = r.GetMediaItemInfo_Value(it, "D_VOL") or 1.0
-      volume_snap.item_vol = item_vol
-      local nt = r.GetMediaItemNumTakes(it) or 0
-      for ti = 0, nt-1 do
-        local tk = r.GetTake(it, ti)
-        if tk then
-          local tv = r.GetMediaItemTakeInfo_Value(tk, "D_VOL") or 1.0
-          volume_snap.take_vols[ti] = tv
-        end
-      end
-
-      -- Conditional merge: pre-merge item volume into ALL takes (not just active)
-      -- Rationale: When merge_volumes=true, the goal is to move all volume control from
-      -- item level to take level. If we only merge the active take, switching to other
-      -- takes will cause unexpected volume jumps (because item volume is reset to 0dB).
-      -- By merging ALL takes, we ensure consistent output regardless of which take is active.
-      if cfg.RENDER_MERGE_VOLUMES and tk_orig then
-        -- Get active take index before merging
-        local tk_orig_idx = nil
-        local nt = r.GetMediaItemNumTakes(it) or 0
-        for ti = 0, nt-1 do
-          if r.GetTake(it, ti) == tk_orig then
-            tk_orig_idx = ti
-            break
-          end
-        end
-
-        if math.abs(item_vol - 1.0) > 1e-9 then
-          -- Multiply item volume into EVERY take's volume
-          for ti = 0, nt-1 do
-            local tk = r.GetTake(it, ti)
-            if tk then
-              local tv = r.GetMediaItemTakeInfo_Value(tk, "D_VOL") or 1.0
-              local merged_tv = tv * item_vol
-              r.SetMediaItemTakeInfo_Value(tk, "D_VOL", merged_tv)
-            end
-          end
-          -- Remember the merged value for the active take specifically (for restoration)
-          local tv_orig = volume_snap.take_vols[tk_orig_idx] or 1.0
-          volume_snap.merged_vol = tv_orig * item_vol
-          r.SetMediaItemInfo_Value(it, "D_VOL", 1.0)
-          if DBG >= 2 then dbg(DBG,2,"[GAIN] pre-merged itemVol=%.3f into ALL takes; active take (%.3f → %.3f)", item_vol, tv_orig, volume_snap.merged_vol) end
-        else
-          -- Item already at 1.0, just store active take volume as merged_vol
-          local tv_orig = r.GetMediaItemTakeInfo_Value(tk_orig, "D_VOL") or 1.0
-          volume_snap.merged_vol = tv_orig
-        end
-
-        -- If print_volumes=false, reset active take volume to 0dB before render
-        -- (so rendered audio doesn't bake in the volume)
-        if not cfg.RENDER_PRINT_VOLUMES and tk_orig then
-          local current_tv = r.GetMediaItemTakeInfo_Value(tk_orig, "D_VOL") or 1.0
-          volume_snap.merged_vol = current_tv
-          r.SetMediaItemTakeInfo_Value(tk_orig, "D_VOL", 1.0)
-          if DBG >= 2 then dbg(DBG,2,"[GAIN] print_volumes=false; reset active take %.3f→1.0 before render", current_tv) end
-        end
-      else
-        -- merge_volumes=false: don't merge, remember original values
-        -- Keep item volume and take volumes separate (no modification to inactive takes)
-        local tv_orig = tk_orig and (r.GetMediaItemTakeInfo_Value(tk_orig, "D_VOL") or 1.0) or 1.0
-        volume_snap.merged_vol = tv_orig
-        if DBG >= 2 then dbg(DBG,2,"[GAIN] merge_volumes=false; keeping item=%.3f, take=%.3f separate", item_vol, tv_orig) end
-
-        -- If print_volumes=false, reset active take to 0dB before render
-        if not cfg.RENDER_PRINT_VOLUMES and tk_orig then
-          r.SetMediaItemTakeInfo_Value(tk_orig, "D_VOL", 1.0)
-          if DBG >= 2 then dbg(DBG,2,"[GAIN] print_volumes=false; reset active take %.3f→1.0 before render", tv_orig) end
-        end
-      end
-    end
+    local volume_snap = preprocess_item_volumes(it, cfg.RENDER_MERGE_VOLUMES, cfg.RENDER_PRINT_VOLUMES, DBG)
 
     local L0, R0 = item_span(it)
     local name0  = get_take_name(it) or ""
@@ -2570,41 +2867,7 @@ function M.render_selection(take_fx, track_fx, mode, tc_mode, merge_volumes, pri
     r.UpdateItemInProject(it)
 
     -- Volume handling after render: print or restore
-    if cfg.RENDER_PRINT_VOLUMES then
-      -- Print mode: volumes are baked into audio
-      if cfg.RENDER_MERGE_VOLUMES then
-        -- Merged+Print: item=0dB, new take=0dB, old take keeps merged volume (already set at line 2064)
-        -- All takes already have merged volume (item_vol * take_vol) from pre-merge phase
-        r.SetMediaItemInfo_Value(it, "D_VOL", 1.0)
-        if newtk then r.SetMediaItemTakeInfo_Value(newtk, "D_VOL", 1.0) end
-        -- tk_orig already has merged volume from line 2064, don't touch it
-        if DBG >= 2 then
-          local current_old_vol = tk_orig and r.GetMediaItemTakeInfo_Value(tk_orig, "D_VOL") or 0
-          dbg(DBG,2,"[GAIN] print_volumes=true+merge; item=1.0, new take=1.0, old active take=%.3f (kept merged)", current_old_vol)
-        end
-      else
-        -- Not merged: restore original item & take volumes
-        r.SetMediaItemInfo_Value(it, "D_VOL", volume_snap.item_vol)
-        if newtk then r.SetMediaItemTakeInfo_Value(newtk, "D_VOL", 1.0) end
-        if tk_orig then r.SetMediaItemTakeInfo_Value(tk_orig, "D_VOL", volume_snap.merged_vol) end
-        if DBG >= 2 then dbg(DBG,2,"[GAIN] print_volumes=true; item=%.3f, new take=1.0, old active take=%.3f", volume_snap.item_vol, volume_snap.merged_vol) end
-      end
-    else
-      -- Non-print mode: restore volumes (non-destructive)
-      if cfg.RENDER_MERGE_VOLUMES then
-        -- Merged: item=0dB, all takes=merged_vol
-        r.SetMediaItemInfo_Value(it, "D_VOL", 1.0)
-        if newtk then r.SetMediaItemTakeInfo_Value(newtk, "D_VOL", volume_snap.merged_vol) end
-        if tk_orig then r.SetMediaItemTakeInfo_Value(tk_orig, "D_VOL", volume_snap.merged_vol) end
-        if DBG >= 2 then dbg(DBG,2,"[GAIN] print_volumes=false; item=1.0, new & old active takes=%.3f", volume_snap.merged_vol) end
-      else
-        -- Not merged: restore original item & take volumes
-        r.SetMediaItemInfo_Value(it, "D_VOL", volume_snap.item_vol)
-        if newtk then r.SetMediaItemTakeInfo_Value(newtk, "D_VOL", volume_snap.merged_vol) end
-        if tk_orig then r.SetMediaItemTakeInfo_Value(tk_orig, "D_VOL", volume_snap.merged_vol) end
-        if DBG >= 2 then dbg(DBG,2,"[GAIN] print_volumes=false; item=%.3f, new & old active takes=%.3f", volume_snap.item_vol, volume_snap.merged_vol) end
-      end
-    end
+    postprocess_item_volumes(it, volume_snap, newtk, tk_orig, cfg.RENDER_MERGE_VOLUMES, cfg.RENDER_PRINT_VOLUMES, DBG)
 
     -- Rename only the new rendered take
     rename_new_render_take(
