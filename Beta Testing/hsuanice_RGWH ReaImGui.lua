@@ -1,7 +1,7 @@
 --[[
 @description RGWH GUI - ImGui Interface for RGWH Core
 @author hsuanice
-@version 0.1.0-beta (251113.1820)
+@version 0.1.0-beta (251114.0045)
 @about
   ImGui-based GUI for configuring and running RGWH Core operations.
   Provides visual controls for all RGWH Wrapper Template parameters.
@@ -11,6 +11,27 @@
   Adjust parameters using the visual controls and click operation buttons to execute.
 
 @changelog
+  v251114.0045 (0.1.0-beta) - NEW FEATURE: Operation Modes Manual Window
+    - Added: Manual window (Help > Manual) with comprehensive operation modes guide
+      • Overview tab: Quick comparison table of RENDER/GLUE/AUTO modes
+      • RENDER Mode tab: Detailed explanation of single-item processing
+      • GLUE Mode tab: Detailed explanation of multi-item merging workflow
+      • AUTO Mode tab: Detailed explanation of intelligent mode selection
+      • All tabs include: Purpose, Process Flow, Best Use Cases, Channel Mode Behavior, Key Features
+    - Added: Manual window state management (show_manual flag, line 240)
+    - Added: ESC key closes Manual window (without closing main GUI)
+    - Technical: draw_manual_window() function (lines 861-1129)
+    - Technical: Help menu item "Manual (Operation Modes)" opens manual window (lines 891-893)
+    - Technical: Main loop calls draw_manual_window() (line 1344)
+    - Window size: 900x700 pixels, resizable with tabs for easy navigation
+    - Color-coded content: cyan for headings, green for features, red for limitations, yellow for notes
+    - Includes important design notes about GLUE multi mode creating 2 takes for efficiency
+    - Explains track channel count protection mechanism for force_multi policy
+    - Fixed: Comparison table corrections
+      • Take Name→Filename: RENDER=No (correct), GLUE=Yes, AUTO=Yes
+      • BWF TimeReference: RENDER=Cur/Prev/Off (3 options), GLUE=Current (only), AUTO=RENDER units
+      • Mixed unit types: GLUE=Yes(No TS) - supports mixed units without Time Selection
+
   v251113.1820 (0.1.0-beta) - STABLE: Fully tested and verified
     - No GUI changes in this release
     - Requires: RGWH Core v251113.1820
@@ -237,6 +258,7 @@ local gui = {
   -- Window state
   open = true,
   show_settings = false,
+  show_manual = false,
 
   -- Operation settings
   op = 0,                    -- 0=auto, 1=render, 2=glue
@@ -854,6 +876,279 @@ local function draw_settings_popup()
   gui.show_settings = open
 end
 
+------------------------------------------------------------
+-- Manual Window (Operation Modes Guide)
+------------------------------------------------------------
+local function draw_manual_window()
+  if not gui.show_manual then return end
+
+  ImGui.SetNextWindowSize(ctx, 900, 700, ImGui.Cond_FirstUseEver)
+  local visible, open = ImGui.Begin(ctx, 'RGWH Manual - Operation Modes', true)
+  if not visible then
+    ImGui.End(ctx)
+    gui.show_manual = open
+    return
+  end
+
+  -- Close manual window with ESC (only if focused, don't close main GUI)
+  if ImGui.IsWindowFocused(ctx) and ImGui.IsKeyPressed(ctx, ImGui.Key_Escape) then
+    open = false
+  end
+
+  -- Title
+  ImGui.TextColored(ctx, 0x00AAFFFF, "RGWH Core - Operation Modes Guide")
+  ImGui.Separator(ctx)
+  ImGui.Spacing(ctx)
+
+  -- Tab bar for different sections
+  if ImGui.BeginTabBar(ctx, 'ManualTabs') then
+
+    -- === OVERVIEW TAB ===
+    if ImGui.BeginTabItem(ctx, 'Overview') then
+      ImGui.TextWrapped(ctx,
+        "RGWH Core provides three operation modes, each optimized for different workflows:\n\n" ..
+        "• RENDER: Process SINGLE items with precision and efficiency\n" ..
+        "• GLUE: Merge multiple items into single items with handle-aware processing\n" ..
+        "• AUTO: Intelligently choose RENDER or GLUE for each unit automatically\n\n" ..
+        "Each mode has different behavior for channel modes (Auto/Mono/Multi) and different use cases."
+      )
+      ImGui.Spacing(ctx)
+      ImGui.Separator(ctx)
+      ImGui.Spacing(ctx)
+
+      -- Quick comparison table
+      ImGui.TextColored(ctx, 0xFFFF00FF, "Quick Comparison:")
+      ImGui.Spacing(ctx)
+
+      if ImGui.BeginTable(ctx, 'ComparisonTable', 4, ImGui.TableFlags_Borders | ImGui.TableFlags_RowBg) then
+        -- Header
+        ImGui.TableSetupColumn(ctx, 'Feature')
+        ImGui.TableSetupColumn(ctx, 'RENDER')
+        ImGui.TableSetupColumn(ctx, 'GLUE')
+        ImGui.TableSetupColumn(ctx, 'AUTO')
+        ImGui.TableHeadersRow(ctx)
+
+        -- Row 1
+        ImGui.TableNextRow(ctx)
+        ImGui.TableNextColumn(ctx); ImGui.Text(ctx, 'Single items')
+        ImGui.TableNextColumn(ctx); ImGui.TextColored(ctx, 0x00FF00FF, '✓ Best')
+        ImGui.TableNextColumn(ctx); ImGui.Text(ctx, '○ OK')
+        ImGui.TableNextColumn(ctx); ImGui.TextColored(ctx, 0x00FF00FF, '✓ Yes (RENDER)')
+
+        -- Row 2
+        ImGui.TableNextRow(ctx)
+        ImGui.TableNextColumn(ctx); ImGui.Text(ctx, 'Merge multiple')
+        ImGui.TableNextColumn(ctx); ImGui.TextColored(ctx, 0xFF0000FF, '✗ No')
+        ImGui.TableNextColumn(ctx); ImGui.TextColored(ctx, 0x00FF00FF, '✓ Best')
+        ImGui.TableNextColumn(ctx); ImGui.TextColored(ctx, 0x00FF00FF, '✓ Yes (GLUE)')
+
+        -- Row 3
+        ImGui.TableNextRow(ctx)
+        ImGui.TableNextColumn(ctx); ImGui.Text(ctx, 'Take Name → Filename')
+        ImGui.TableNextColumn(ctx); ImGui.TextColored(ctx, 0xFF0000FF, '✗ No')
+        ImGui.TableNextColumn(ctx); ImGui.TextColored(ctx, 0x00FF00FF, '✓ Yes')
+        ImGui.TableNextColumn(ctx); ImGui.TextColored(ctx, 0x00FF00FF, '✓ Yes')
+
+        -- Row 4
+        ImGui.TableNextRow(ctx)
+        ImGui.TableNextColumn(ctx); ImGui.Text(ctx, 'BWF TimeReference')
+        ImGui.TableNextColumn(ctx); ImGui.TextColored(ctx, 0x00FF00FF, '✓ Cur/Prev/Off')
+        ImGui.TableNextColumn(ctx); ImGui.TextColored(ctx, 0xFFFF00FF, '○ Current')
+        ImGui.TableNextColumn(ctx); ImGui.TextColored(ctx, 0x00FF00FF, '✓ RENDER units')
+
+        -- Row 5
+        ImGui.TableNextRow(ctx)
+        ImGui.TableNextColumn(ctx); ImGui.Text(ctx, 'Efficiency')
+        ImGui.TableNextColumn(ctx); ImGui.TextColored(ctx, 0x00FF00FF, '✓✓ High')
+        ImGui.TableNextColumn(ctx); ImGui.TextColored(ctx, 0xFFFF00FF, '✓ Good')
+        ImGui.TableNextColumn(ctx); ImGui.TextColored(ctx, 0x00FF00FF, '✓✓ Adaptive')
+
+        -- Row 6
+        ImGui.TableNextRow(ctx)
+        ImGui.TableNextColumn(ctx); ImGui.Text(ctx, 'Mixed unit types')
+        ImGui.TableNextColumn(ctx); ImGui.TextColored(ctx, 0xFF0000FF, '✗ No')
+        ImGui.TableNextColumn(ctx); ImGui.TextColored(ctx, 0x00FF00FF, '✓ Yes (No TS)')
+        ImGui.TableNextColumn(ctx); ImGui.TextColored(ctx, 0x00FF00FF, '✓✓ Best')
+
+        ImGui.EndTable(ctx)
+      end
+
+      ImGui.EndTabItem(ctx)
+    end
+
+    -- === RENDER TAB ===
+    if ImGui.BeginTabItem(ctx, 'RENDER Mode') then
+      ImGui.TextColored(ctx, 0x00AAFFFF, "Purpose:")
+      ImGui.TextWrapped(ctx, "Process SINGLE items with precision and efficiency")
+      ImGui.Spacing(ctx)
+
+      ImGui.TextColored(ctx, 0x00AAFFFF, "Process Flow:")
+      ImGui.BulletText(ctx, "1. Extends item by handle amount (with clamp-to-source protection)")
+      ImGui.BulletText(ctx, "2. Applies Track/Take FX based on channel mode")
+      ImGui.BulletText(ctx, "3. Embeds BWF TimeReference (previous/current/off)")
+      ImGui.BulletText(ctx, "4. Restores item to original position with handle as offset")
+      ImGui.BulletText(ctx, "5. Creates rendered file with handle-aware naming")
+      ImGui.Spacing(ctx)
+
+      ImGui.TextColored(ctx, 0x00AAFFFF, "Best Use Cases:")
+      ImGui.BulletText(ctx, "Single items that need precise handle control")
+      ImGui.BulletText(ctx, "Items requiring BWF TimeReference embedding")
+      ImGui.BulletText(ctx, "Workflows where file naming must reflect take names")
+      ImGui.BulletText(ctx, "When you need maximum control over individual item processing")
+      ImGui.Spacing(ctx)
+
+      ImGui.TextColored(ctx, 0x00AAFFFF, "Channel Mode Behavior:")
+      ImGui.BulletText(ctx, "auto: Per-item channel detection (mono source → mono, multi → multi)")
+      ImGui.BulletText(ctx, "mono: Forces mono output using Action 40361 (Apply mono)")
+      ImGui.BulletText(ctx, "multi: Forces multichannel output using Action 41993")
+      ImGui.Indent(ctx)
+      ImGui.TextWrapped(ctx, "      Output channels = track channel count (force_multi policy enforced)")
+      ImGui.Unindent(ctx)
+      ImGui.Spacing(ctx)
+
+      ImGui.TextColored(ctx, 0x00FF00FF, "Key Features:")
+      ImGui.BulletText(ctx, "✓ Handle-aware window extension")
+      ImGui.BulletText(ctx, "✓ Clamp-to-source protection")
+      ImGui.BulletText(ctx, "✓ Volume handling (merge/print options)")
+      ImGui.BulletText(ctx, "✓ BWF TimeReference embedding")
+      ImGui.BulletText(ctx, "✓ Optional Edge Cues (#in/#out)")
+      ImGui.BulletText(ctx, "✓ Efficient for large projects")
+      ImGui.Spacing(ctx)
+
+      ImGui.TextColored(ctx, 0xFF0000FF, "Limitations:")
+      ImGui.BulletText(ctx, "✗ Does NOT merge multiple items (use GLUE for that)")
+      ImGui.BulletText(ctx, "✗ selection_scope is ignored (always single item)")
+
+      ImGui.EndTabItem(ctx)
+    end
+
+    -- === GLUE TAB ===
+    if ImGui.BeginTabItem(ctx, 'GLUE Mode') then
+      ImGui.TextColored(ctx, 0x00AAFFFF, "Purpose:")
+      ImGui.TextWrapped(ctx, "Merge multiple items into single items with handle-aware processing")
+      ImGui.Spacing(ctx)
+
+      ImGui.TextColored(ctx, 0x00AAFFFF, "Process Flow (non-mono):")
+      ImGui.BulletText(ctx, "1. Groups items into 'units' (same-track, touching/overlapping items)")
+      ImGui.BulletText(ctx, "2. Extends unit window by handle amount")
+      ImGui.BulletText(ctx, "3. Executes Action 42432 (Glue items) → merges items")
+      ImGui.BulletText(ctx, "4. Applies Track/Take FX based on channel mode (if needed)")
+      ImGui.BulletText(ctx, "5. Trims result back to original unit boundaries")
+      ImGui.BulletText(ctx, "6. Creates glued file with take name as filename")
+      ImGui.Spacing(ctx)
+
+      ImGui.TextColored(ctx, 0x00AAFFFF, "Process Flow (mono mode):")
+      ImGui.BulletText(ctx, "1. Groups items into units")
+      ImGui.BulletText(ctx, "2. Applies mono FX to each item individually first")
+      ImGui.BulletText(ctx, "3. Then merges all mono items with Glue (if multiple items)")
+      ImGui.Spacing(ctx)
+
+      ImGui.TextColored(ctx, 0x00AAFFFF, "Best Use Cases:")
+      ImGui.BulletText(ctx, "Multiple items that need to be merged into one")
+      ImGui.BulletText(ctx, "Workflow requires take names to become filenames")
+      ImGui.BulletText(ctx, "Consolidating dialogue clips, sound effects, or music stems")
+      ImGui.BulletText(ctx, "When efficiency matters: process once after merging (not N times before)")
+      ImGui.Spacing(ctx)
+
+      ImGui.TextColored(ctx, 0x00AAFFFF, "Channel Mode Behavior:")
+      ImGui.BulletText(ctx, "auto: Per-unit channel detection (analyzes all items in unit)")
+      ImGui.BulletText(ctx, "mono: Apply mono (40361) to each item first → then Glue")
+      ImGui.BulletText(ctx, "multi: Glue first → then Apply multichannel (41993)")
+      ImGui.Indent(ctx)
+      ImGui.TextWrapped(ctx, "      Track channel count is locked/restored to prevent auto-expansion")
+      ImGui.TextWrapped(ctx, "      Output channels = track channel count (force_multi policy enforced)")
+      ImGui.Unindent(ctx)
+      ImGui.Spacing(ctx)
+
+      ImGui.TextColored(ctx, 0x00FF00FF, "Key Features:")
+      ImGui.BulletText(ctx, "✓ Item Unit grouping (same-track touching/overlapping items)")
+      ImGui.BulletText(ctx, "✓ Handle-aware window extension for entire unit")
+      ImGui.BulletText(ctx, "✓ Take name → filename conversion (REAPER native Glue feature)")
+      ImGui.BulletText(ctx, "✓ Optional Glue Cues (#Glue: <TakeName>)")
+      ImGui.BulletText(ctx, "✓ Volume handling (merge/print options)")
+      ImGui.BulletText(ctx, "✓ Efficient for multi-item units (merge first, process once)")
+      ImGui.BulletText(ctx, "✓ Track channel count protection (prevents auto-expansion by Action 42432)")
+      ImGui.Spacing(ctx)
+
+      ImGui.TextColored(ctx, 0xFFFF00FF, "Important Notes:")
+      ImGui.BulletText(ctx, "For multi channel mode: Output will have 2 takes (glued + applied)")
+      ImGui.Indent(ctx)
+      ImGui.TextWrapped(ctx, "- First take: Original glued result")
+      ImGui.TextWrapped(ctx, "- Second take: Applied with multichannel FX (active take)")
+      ImGui.TextWrapped(ctx, "- This is by design for efficiency (glue multiple items once, apply once)")
+      ImGui.TextWrapped(ctx, "- If you prefer 1 take: manually execute Apply (41993) then Glue (42432)")
+      ImGui.Unindent(ctx)
+      ImGui.BulletText(ctx, "Action 42432 (Glue) natively auto-expands track channels when source > track")
+      ImGui.Indent(ctx)
+      ImGui.TextWrapped(ctx, "- RGWH prevents this by locking/restoring track channel count")
+      ImGui.TextWrapped(ctx, "- Ensures force_multi policy works correctly")
+      ImGui.Unindent(ctx)
+
+      ImGui.EndTabItem(ctx)
+    end
+
+    -- === AUTO TAB ===
+    if ImGui.BeginTabItem(ctx, 'AUTO Mode') then
+      ImGui.TextColored(ctx, 0x00AAFFFF, "Purpose:")
+      ImGui.TextWrapped(ctx, "Intelligently choose RENDER or GLUE for each unit automatically")
+      ImGui.Spacing(ctx)
+
+      ImGui.TextColored(ctx, 0x00AAFFFF, "Decision Logic:")
+      ImGui.BulletText(ctx, "Single-item units → RENDER mode (efficient, precise)")
+      ImGui.BulletText(ctx, "Multi-item units → GLUE mode (merge, then process)")
+      ImGui.BulletText(ctx, "Mixed units in one execution? No problem! Each unit is analyzed individually.")
+      ImGui.Spacing(ctx)
+
+      ImGui.TextColored(ctx, 0x00AAFFFF, "Process Flow:")
+      ImGui.BulletText(ctx, "1. Analyzes selection and groups into Item Units")
+      ImGui.BulletText(ctx, "2. For each unit:")
+      ImGui.Indent(ctx)
+      ImGui.BulletText(ctx, "If unit has 1 item → use RENDER workflow")
+      ImGui.BulletText(ctx, "If unit has 2+ items (touching/overlapping) → use GLUE workflow")
+      ImGui.Unindent(ctx)
+      ImGui.BulletText(ctx, "3. Each unit processed with appropriate mode")
+      ImGui.Spacing(ctx)
+
+      ImGui.TextColored(ctx, 0x00AAFFFF, "Best Use Cases:")
+      ImGui.BulletText(ctx, "Mixed selections (some single items, some multi-item groups)")
+      ImGui.BulletText(ctx, "When you want optimal processing without manual mode selection")
+      ImGui.BulletText(ctx, "Large projects with varying item arrangements")
+      ImGui.BulletText(ctx, "Batch processing with different unit types")
+      ImGui.Spacing(ctx)
+
+      ImGui.TextColored(ctx, 0x00AAFFFF, "Channel Mode Behavior:")
+      ImGui.BulletText(ctx, "auto: Per-item detection for RENDER units, per-unit for GLUE units")
+      ImGui.BulletText(ctx, "mono: Forces mono for all units (applies appropriate workflow per unit)")
+      ImGui.BulletText(ctx, "multi: Forces multichannel for all units (applies appropriate workflow per unit)")
+      ImGui.Spacing(ctx)
+
+      ImGui.TextColored(ctx, 0x00FF00FF, "Key Features:")
+      ImGui.BulletText(ctx, "✓ Smart per-unit mode selection")
+      ImGui.BulletText(ctx, "✓ Handles mixed unit types in single execution")
+      ImGui.BulletText(ctx, "✓ Combines benefits of both RENDER and GLUE modes")
+      ImGui.BulletText(ctx, "✓ All RENDER features for single-item units")
+      ImGui.BulletText(ctx, "✓ All GLUE features for multi-item units")
+      ImGui.Spacing(ctx)
+
+      ImGui.TextColored(ctx, 0xFFFF00FF, "Example Scenario:")
+      ImGui.TextWrapped(ctx, "Track has 5 units:")
+      ImGui.BulletText(ctx, "Unit 1: Single item (1ch source) → RENDER with mono")
+      ImGui.BulletText(ctx, "Unit 2: 3 touching items (5ch sources) → GLUE into one, apply multi")
+      ImGui.BulletText(ctx, "Unit 3: Single item (6ch source) → RENDER with multi")
+      ImGui.BulletText(ctx, "Unit 4: 2 overlapping items (2ch sources) → GLUE into one")
+      ImGui.BulletText(ctx, "Unit 5: Single item (1ch source) → RENDER with mono")
+      ImGui.TextWrapped(ctx, "\nAUTO mode processes each optimally in one execution!")
+
+      ImGui.EndTabItem(ctx)
+    end
+
+    ImGui.EndTabBar(ctx)
+  end
+
+  ImGui.End(ctx)
+  gui.show_manual = open
+end
+
 local function draw_gui()
   local before_state = serialize_gui_state(gui)
   local window_flags = ImGui.WindowFlags_MenuBar | ImGui.WindowFlags_AlwaysAutoResize | ImGui.WindowFlags_NoResize
@@ -887,6 +1182,9 @@ local function draw_gui()
     end
 
     if ImGui.BeginMenu(ctx, 'Help') then
+      if ImGui.MenuItem(ctx, 'Manual (Operation Modes)', nil, false, true) then
+        gui.show_manual = true
+      end
       if ImGui.MenuItem(ctx, 'About', nil, false, true) then
         r.ShowConsoleMsg(("[RGWH GUI] Version %s\nImGui interface for RGWH Core\n"):format(VERSION))
       end
@@ -1064,6 +1362,7 @@ end
 local function loop()
   gui.open = draw_gui()
   draw_settings_popup()
+  draw_manual_window()
 
   if gui.open then
     r.defer(loop)
