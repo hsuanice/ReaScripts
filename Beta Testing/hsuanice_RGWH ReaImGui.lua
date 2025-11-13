@@ -1,7 +1,7 @@
 --[[
 @description RGWH GUI - ImGui Interface for RGWH Core
 @author hsuanice
-@version 0.1.0-beta (251113.1650)
+@version 0.1.0-beta (251113.1820)
 @about
   ImGui-based GUI for configuring and running RGWH Core operations.
   Provides visual controls for all RGWH Wrapper Template parameters.
@@ -11,6 +11,38 @@
   Adjust parameters using the visual controls and click operation buttons to execute.
 
 @changelog
+  v251113.1820 (0.1.0-beta) - STABLE: Fully tested and verified
+    - No GUI changes in this release
+    - Requires: RGWH Core v251113.1820
+    - Status: Volume handling fully tested and working correctly
+    - All features verified working in production testing
+    - Recommended stable version for production use
+
+  v251113.1810 (0.1.0-beta) - Version sync with Core critical volume settings fix
+    - No GUI changes in this release
+    - Requires: RGWH Core v251113.1810 for proper volume settings support
+      • CRITICAL: Fixed volume settings not being read from ExtState
+      • GUI "Merge Volumes" and "Print Volumes" checkboxes now work correctly
+      • Previous versions ignored these settings (always used false/nil)
+    - Note: All GUI features remain unchanged and functional
+
+  v251113.1800 (0.1.0-beta) - Version sync with Core major refactor
+    - No GUI changes in this release
+    - Requires: RGWH Core v251113.1800 for unified volume/FX handling
+      • Major refactor: All volume and FX handling now uses centralized helper functions
+      • Fixed: GLUE multi/auto mode now properly handles volumes (was missing entirely)
+      • Improved: Single source of truth for volume logic across all modes
+      • More maintainable and less prone to bugs
+    - Note: All GUI features remain unchanged and functional
+
+  v251113.1700 (0.1.0-beta) - Version sync with Core volume handling fix
+    - No GUI changes in this release
+    - Requires: RGWH Core v251113.1700 for complete mono channel mode functionality
+      • Volume handling (merge_volumes/print_volumes) now working correctly in mono apply workflow
+      • Fixes volume reset to 1.0 issue when using mono channel mode
+      • Volumes now properly snapshot/merge/restore like RENDER mode
+    - Note: All GUI features from previous versions remain unchanged and functional
+
   v251113.1650 (0.1.0-beta) - Version sync with Core FX control fixes
     - No GUI changes in this release
     - Requires: RGWH Core v251113.1650 for complete mono channel mode functionality
