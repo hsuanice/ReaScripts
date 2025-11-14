@@ -1,6 +1,6 @@
 --[[
 @description Item List Editor
-@version 251101.2230
+@version 251114.2130
 @author hsuanice
 @about
   Shows a live, spreadsheet-style table of the currently selected items and all
@@ -12,7 +12,7 @@
     • Metadata Track Name (resolved by Interleave, Wave Agent–style)
     • Channel Number (recorder channel, TRK#)
     • Interleave (1..N from REAPER take channel mode: Mono-of-N)
-    • Item Start / End (toggle display format)
+    • Item Start / End / Length (toggle display format)
 
   Features:
     • Inline editing of Track Name, Take Name, and Item Note
@@ -42,6 +42,23 @@
 
 
 @changelog
+  v251114.2130
+  - Feature: Added Length column (total: 30→31 columns)
+    • New column 31 displays item length in current time format
+    • Positioned after Start/End columns in default order
+    • Supports all time display modes (m:s, Timecode, Beats, Custom pattern)
+    • Read-only column (calculated from D_LENGTH)
+    • Sortable by length (numeric sort)
+    • Column width: 80px (customizable via COL_WIDTH[31])
+    • Included in Copy/Export operations (TSV/CSV)
+  - Technical: Updated all column-related loops and arrays from 30 to 31 columns
+    • BeginTable column count: 30 → 31
+    • DEFAULT_COL_ORDER includes column 31
+    • COL_VISIBILITY supports all 31 columns
+    • Preset Editor handles all 31 columns
+    • Reset to Default includes Length column
+    • Show Widths button displays all 31 columns
+
   v251101.2230
   - UX: Separated Clear Cache options into dedicated "Options" button
     • New standalone "Options" button added next to "Clear Cache"
@@ -1557,7 +1574,7 @@ end
 
 -- Column order mapping (single source of truth)
 local COL_ORDER, COL_POS = {}, {}   -- visual→logical / logical→visual
-local COL_VISIBILITY = {}           -- col_id → true/false (for all 30 columns)
+local COL_VISIBILITY = {}           -- col_id → true/false (for all 31 columns)
 
 -- Column width configuration (customizable)
 -- Edit these values to change default column widths
@@ -1597,6 +1614,8 @@ local DEFAULT_COL_WIDTH = {
   -- Source position columns (calculated from TimeReference)
   [29] = 90,  -- Source Start (TC)
   [30] = 90,  -- Source End (TC)
+  -- Length column
+  [31] = 80,  -- Length (fits "hh:mm:ss.SSS")
 }
 
 -- Current column widths (may be modified by user or Fit Content Width)
@@ -1645,7 +1664,7 @@ local function _csv_from_order_and_visibility(order, visibility_map)
   -- Build a normalized visibility table (even when caller沒有提供 visibility_map)
   local vis_map = {}
   if visibility_map then
-    for col_id = 1, 30 do
+    for col_id = 1, 31 do
       local flag = visibility_map[col_id]
       if flag == nil then
         vis_map[col_id] = false
@@ -1658,7 +1677,7 @@ local function _csv_from_order_and_visibility(order, visibility_map)
     for _, col_id in ipairs(order) do
       visible_set[col_id] = true
     end
-    for col_id = 1, 30 do
+    for col_id = 1, 31 do
       vis_map[col_id] = visible_set[col_id] or false
     end
   end
@@ -1674,7 +1693,7 @@ local function _csv_from_order_and_visibility(order, visibility_map)
 
   -- 假如 order 為空，但 visibility_map 有顯示欄位，補上一份順序（以欄位 ID 排序）
   if #ord_parts == 0 then
-    for col_id = 1, 30 do
+    for col_id = 1, 31 do
       if vis_map[col_id] then
         ord_parts[#ord_parts+1] = tostring(col_id)
       end
@@ -1683,7 +1702,7 @@ local function _csv_from_order_and_visibility(order, visibility_map)
 
   -- Serialize 全欄位 visibility
   local vis_parts = {}
-  for col_id = 1, 30 do
+  for col_id = 1, 31 do
     local flag = vis_map[col_id] and "1" or "0"
     vis_parts[#vis_parts+1] = string.format("%d:%s", col_id, flag)
   end
@@ -1715,7 +1734,7 @@ local function _order_and_visibility_from_csv(s)
       end
     end
 
-    for col_id = 1, 30 do
+    for col_id = 1, 31 do
       if visibility_map[col_id] == nil then visibility_map[col_id] = false end
     end
 
@@ -1723,7 +1742,7 @@ local function _order_and_visibility_from_csv(s)
     if visibility_map then
       local seen = {}
       for _, col_id in ipairs(order) do seen[col_id] = true end
-      for col_id = 1, 30 do
+      for col_id = 1, 31 do
         if visibility_map[col_id] and not seen[col_id] then
           order[#order+1] = col_id
         end
@@ -1766,7 +1785,7 @@ local function _order_and_visibility_from_csv(s)
     for _, col_id in ipairs(order) do
       visible_set[col_id] = true
     end
-    for col_id = 1, 30 do
+    for col_id = 1, 31 do
       visibility_map[col_id] = visible_set[col_id] or false
     end
 
@@ -1978,7 +1997,7 @@ local function load_prefs()
 
         -- Initialize COL_VISIBILITY - all columns in ord are visible
         COL_VISIBILITY = {}
-        for col_id = 1, 30 do
+        for col_id = 1, 31 do
           COL_VISIBILITY[col_id] = (COL_POS[col_id] ~= nil)
         end
       end
@@ -1988,7 +2007,7 @@ local function load_prefs()
   -- Ensure COL_VISIBILITY is initialized even if no preset/order was loaded
   if not COL_VISIBILITY or not next(COL_VISIBILITY) then
     COL_VISIBILITY = {}
-    for col_id = 1, 30 do
+    for col_id = 1, 31 do
       COL_VISIBILITY[col_id] = true  -- default: all visible
     end
   end
@@ -2257,6 +2276,7 @@ local function collect_basic_fields(item)
   local len = reaper.GetMediaItemInfo_Value(item, "D_LENGTH") or 0
   row.start_time = pos
   row.end_time   = pos + len
+  row.length     = len
 
   -- Mute state (fast)
   row.muted = (reaper.GetMediaItemInfo_Value(item, "B_MUTE") or 0) > 0.5
@@ -2818,6 +2838,7 @@ local function get_sort_value(row, col_id)
   elseif col_id == 28 then return (row.speed or ""):lower()
   elseif col_id == 29 then return (row.source_start or ""):lower()
   elseif col_id == 30 then return (row.source_end or ""):lower()
+  elseif col_id == 31 then return row.length or 0
   end
   return ""
 end
@@ -2981,6 +3002,8 @@ local function get_cell_text(i, r, col, fmt)
   -- Source position columns (from TimeReference)
   elseif col == 29 then text = tostring(r.source_start or "")
   elseif col == 30 then text = tostring(r.source_end or "")
+  -- Length column
+  elseif col == 31 then text = FORMAT(r.length)
   end
 
   -- For TSV format, escape special characters to prevent format corruption
@@ -3039,6 +3062,8 @@ local function header_label_from_id(col_id)
   -- Source position columns (TC format, from TimeReference)
   if col_id == 29 then return "Source Start (TC)" end
   if col_id == 30 then return "Source End (TC)" end
+  -- Length column
+  if col_id == 31 then return "Length" end
   return tostring(col_id)
 end
 
@@ -3588,7 +3613,7 @@ local function draw_advanced_sort_popup()
 
     -- Build list of available columns (following COL_ORDER)
     local available_cols = COL_ORDER and #COL_ORDER > 0 and COL_ORDER or {
-      1, 2, 3, 12, 13, 4, 5, 6, 7, 8, 9, 10, 11,
+      1, 2, 3, 12, 13, 31, 4, 5, 6, 7, 8, 9, 10, 11,
       14, 15, 16, 17, 18, 19, 20, 21,
       22, 23, 24, 25, 26, 27, 28, 29, 30
     }
@@ -4246,7 +4271,7 @@ if reaper.ImGui_BeginPopupModal(ctx, "Column Preset Editor", true, TF('ImGui_Win
     end
 
     -- Then add hidden columns (those not in COL_ORDER) at the end
-    for col_id = 1, 30 do
+    for col_id = 1, 31 do
       if not added[col_id] then
         local is_visible = COL_VISIBILITY[col_id] or false
         table.insert(PRESET_EDITOR_STATE.columns, {
@@ -4349,9 +4374,9 @@ if reaper.ImGui_BeginPopupModal(ctx, "Column Preset Editor", true, TF('ImGui_Win
 
   -- Reset to default button
   if reaper.ImGui_Button(ctx, "Reset to Default", 140, 24) then
-    -- Reset to default column order (all 28 columns)
+    -- Reset to default column order (all 31 columns)
     local reset_order = {
-      1, 2, 3, 12, 13, 4, 5, 6, 7, 8, 9, 10, 11,  -- Basic + Time + Status
+      1, 2, 3, 12, 13, 31, 4, 5, 6, 7, 8, 9, 10, 11,  -- Basic + Time + Length + Status
       14, 15,  -- UMID
       16, 17, 18, 19, 20, 21,  -- BWF metadata
       22, 23, 24, 25, 26, 27, 28,  -- iXML metadata
@@ -4465,7 +4490,7 @@ local function draw_table(rows, height)
   -- Fit content width: Calculate actual text widths for all columns
   if FIT_CONTENT_WIDTH then
     local initial_order = (COL_ORDER and #COL_ORDER > 0) and COL_ORDER or {
-      1, 2, 3, 12, 13, 4, 5, 6, 7, 8, 9, 10, 11,
+      1, 2, 3, 12, 13, 31, 4, 5, 6, 7, 8, 9, 10, 11,
       14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30
     }
 
@@ -4484,6 +4509,7 @@ local function draw_table(rows, height)
       [20] = true,  -- Time Reference
       [29] = true,  -- Source Start (TC)
       [30] = true,  -- Source End (TC)
+      [31] = true,  -- Length (fits "hh:mm:ss.SSS")
     }
 
     -- Calculate max width for each column
@@ -4537,11 +4563,11 @@ local function draw_table(rows, height)
 
   -- Use specific height for ScrollY to work properly
   local outer_height = height or 360
-  if reaper.ImGui_BeginTable(ctx, table_id, 30, flags, 0, outer_height) then
+  if reaper.ImGui_BeginTable(ctx, table_id, 31, flags, 0, outer_height) then
     -- Use existing COL_ORDER for header rendering; use default if not set yet
     -- Default order: Basic info, Time, Metadata (BWF), Metadata (iXML), Status
     local DEFAULT_COL_ORDER = {
-      1, 2, 3, 12, 13, 4, 5, 6, 7, 8, 9, 10, 11,  -- Basic + Time + Status
+      1, 2, 3, 12, 13, 31, 4, 5, 6, 7, 8, 9, 10, 11,  -- Basic + Time + Length + Status
       14, 15,  -- UMID
       16, 17, 18, 19, 20, 21,  -- BWF metadata
       22, 23, 24, 25, 26, 27, 28,  -- iXML metadata
@@ -4971,6 +4997,11 @@ local function draw_table(rows, height)
           local t = tostring(r.source_end or ""); local sel = sel_has(r.__item_guid, 30)
           reaper.ImGui_Selectable(ctx, (t ~= "" and t or " ").."##c30", sel)
           if reaper.ImGui_IsItemClicked(ctx) then handle_cell_click(r.__item_guid, 30) end
+
+        elseif col == 31 then
+          local t = format_time(r.length); local sel = sel_has(r.__item_guid, 31)
+          reaper.ImGui_Selectable(ctx, (t ~= "" and t or " ").."##c31", sel)
+          if reaper.ImGui_IsItemClicked(ctx) then handle_cell_click(r.__item_guid, 31) end
         end
       end
 
@@ -4991,7 +5022,7 @@ local function draw_table(rows, height)
         reaper.ShowConsoleMsg("Showing DEFAULT widths from COL_WIDTH table:\n\n")
 
         local order = (COL_ORDER and #COL_ORDER > 0) and COL_ORDER or {
-          1, 2, 3, 12, 13, 4, 5, 6, 7, 8, 9, 10, 11,
+          1, 2, 3, 12, 13, 31, 4, 5, 6, 7, 8, 9, 10, 11,
           14, 15, 16, 17, 18, 19, 20, 21,
           22, 23, 24, 25, 26, 27, 28,
           29, 30
