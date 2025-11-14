@@ -1,7 +1,7 @@
 --[[
 @description RGWH GUI - ImGui Interface for RGWH Core
 @author hsuanice
-@version 0.1.0-beta (251114.0045)
+@version 0.1.0-beta (251114.1920)
 @about
   ImGui-based GUI for configuring and running RGWH Core operations.
   Provides visual controls for all RGWH Wrapper Template parameters.
@@ -11,13 +11,50 @@
   Adjust parameters using the visual controls and click operation buttons to execute.
 
 @changelog
-  v251114.0045 (0.1.0-beta) - NEW FEATURE: Operation Modes Manual Window
+  v251114.1920 (0.1.0-beta) - Manual Window: Process Flow Updates (DOCUMENTATION REFINEMENT)
+    - Updated: RENDER Mode process flow table (now 14 steps, was 10)
+      • Added: Snapshot Take FX (step 1), Add/Remove Cue Markers (steps 4,8), Clone Take FX (step 13)
+      • Complete flow: Take FX snapshot → Volume Pre → Extend → Add Markers → Snapshot/Zero Fades → Apply/Render → Remove Markers → Restore Fades → Trim → Volume Post → Rename → Clone Take FX → Embed TC
+      • All steps now accurately reflect actual code execution order in RGWH Core
+    - Updated: GLUE Mode process flow table (now 12 steps, was 10)
+      • Added: Add Cue Markers (step 1), Snapshot/Restore Track Ch (steps 4,6), Remove Cue Markers (step 12)
+      • Complete flow: Add Markers → Extend → Volume Pre → Snapshot Track Ch → Glue → Restore Track Ch → Zero Fades → Apply → Embed TC → Trim → Volume Post → Remove Markers
+      • Clarifies that Glue cues are pre-embedded before Glue action (absorbed into media)
+    - Fixed: Multi-channel mode execution order description in GLUE technical notes
+      • Corrected: "Glue FIRST (42432) → Restore Track Ch → Apply (41993)" (was incorrectly reversed)
+      • Reason: Action 42432 auto-expands track channel count, so must snapshot/restore
+      • Technical notes now accurately describe the code implementation
+    - Fixed: Fade handling explanation for Apply actions (40361/41993)
+      • Changed: "print fades causing DUPLICATE fades" (was "bake fades")
+      • Clarified: Apply actions print fades into audio while keeping item fade settings
+      • Result: Both item fade property AND printed fade exist, doubling the fade effect
+      • Accurate description of the actual behavior and why snapshot/zero/restore is needed
+    - Improved: Terminology consistency across tabs
+      • Unified: "Add/Remove Cue Markers" (was mixed: "Edge Cues"/"Glue Cues"/"Clean Markers")
+      • Action descriptions now consistent between RENDER and GLUE tabs
+    - Removed: Line number column from process flow tables
+      • Reason: Simplifies maintenance, no need to update line numbers when code changes
+      • Tables now have 3 columns: Step, Function, Action (was 4 with Line column)
+    - Technical: Manual window remains fully functional with ESC key support
+
+  v251114.0045 (0.1.0-beta) - NEW FEATURE: Operation Modes Manual Window (MAJOR UPDATE)
     - Added: Manual window (Help > Manual) with comprehensive operation modes guide
-      • Overview tab: Quick comparison table of RENDER/GLUE/AUTO modes
-      • RENDER Mode tab: Detailed explanation of single-item processing
-      • GLUE Mode tab: Detailed explanation of multi-item merging workflow
-      • AUTO Mode tab: Detailed explanation of intelligent mode selection
-      • All tabs include: Purpose, Process Flow, Best Use Cases, Channel Mode Behavior, Key Features
+      • Overview tab: Feature reference tables (Channel/FX/Volume/Handle/Cues/Actions)
+        - Lists all features with implementation details (API functions, Action IDs)
+        - 6 major feature categories with complete technical specifications
+      • RENDER Mode tab: Function-based process flow explanation
+        - Entry point: M.render_selection()
+        - 10-step process table with function names and actions
+        - Functions: snapshot_fades, preprocess_item_volumes, per_member_window_lr, etc.
+      • GLUE Mode tab: Function-based process flow for multi/auto and mono modes
+        - Entry point: M.glue_selection() → glue_auto_scope()
+        - 10-step process table for multi/auto mode
+        - 3-step simplified flow for mono mode
+        - Functions: detect_units_same_track, glue_unit, apply_multichannel_no_fx_preserve_take
+      • AUTO Mode tab: Decision logic with function flow
+        - Entry point: M.core(args) with op='auto' → auto_selection()
+        - 6-step intelligent batching process
+        - Shows how units are separated and batched by type
     - Added: Manual window state management (show_manual flag, line 240)
     - Added: ESC key closes Manual window (without closing main GUI)
     - Technical: draw_manual_window() function (lines 861-1129)
@@ -31,6 +68,10 @@
       • Take Name→Filename: RENDER=No (correct), GLUE=Yes, AUTO=Yes
       • BWF TimeReference: RENDER=Cur/Prev/Off (3 options), GLUE=Current (only), AUTO=RENDER units
       • Mixed unit types: GLUE=Yes(No TS) - supports mixed units without Time Selection
+      • Efficiency (multi-item): RENDER=Slow(N×), GLUE=Best(1×) - GLUE significantly faster for multiple items
+    - Added: Efficiency Advantage section in GLUE Mode tab
+      • Explains why GLUE is faster: merge first (1× operation) vs RENDER each (N× operations)
+      • Example: 10 items → GLUE processes 1 time vs RENDER processes 10 times
 
   v251113.1820 (0.1.0-beta) - STABLE: Fully tested and verified
     - No GUI changes in this release
@@ -906,182 +947,447 @@ local function draw_manual_window()
     -- === OVERVIEW TAB ===
     if ImGui.BeginTabItem(ctx, 'Overview') then
       ImGui.TextWrapped(ctx,
-        "RGWH Core provides three operation modes, each optimized for different workflows:\n\n" ..
-        "• RENDER: Process SINGLE items with precision and efficiency\n" ..
-        "• GLUE: Merge multiple items into single items with handle-aware processing\n" ..
-        "• AUTO: Intelligently choose RENDER or GLUE for each unit automatically\n\n" ..
-        "Each mode has different behavior for channel modes (Auto/Mono/Multi) and different use cases."
+        "RGWH Core provides comprehensive audio processing with handle-aware workflows.\n" ..
+        "This overview covers all features and their implementations."
       )
       ImGui.Spacing(ctx)
       ImGui.Separator(ctx)
       ImGui.Spacing(ctx)
 
-      -- Quick comparison table
-      ImGui.TextColored(ctx, 0xFFFF00FF, "Quick Comparison:")
+      -- === CHANNEL MODE ===
+      ImGui.TextColored(ctx, 0x00AAFFFF, "1. CHANNEL MODE")
       ImGui.Spacing(ctx)
-
-      if ImGui.BeginTable(ctx, 'ComparisonTable', 4, ImGui.TableFlags_Borders | ImGui.TableFlags_RowBg) then
-        -- Header
-        ImGui.TableSetupColumn(ctx, 'Feature')
-        ImGui.TableSetupColumn(ctx, 'RENDER')
-        ImGui.TableSetupColumn(ctx, 'GLUE')
-        ImGui.TableSetupColumn(ctx, 'AUTO')
+      if ImGui.BeginTable(ctx, 'ChannelTable', 3, ImGui.TableFlags_Borders | ImGui.TableFlags_RowBg) then
+        ImGui.TableSetupColumn(ctx, 'Mode')
+        ImGui.TableSetupColumn(ctx, 'Implementation')
+        ImGui.TableSetupColumn(ctx, 'Behavior')
         ImGui.TableHeadersRow(ctx)
 
-        -- Row 1
         ImGui.TableNextRow(ctx)
-        ImGui.TableNextColumn(ctx); ImGui.Text(ctx, 'Single items')
-        ImGui.TableNextColumn(ctx); ImGui.TextColored(ctx, 0x00FF00FF, '✓ Best')
-        ImGui.TableNextColumn(ctx); ImGui.Text(ctx, '○ OK')
-        ImGui.TableNextColumn(ctx); ImGui.TextColored(ctx, 0x00FF00FF, '✓ Yes (RENDER)')
+        ImGui.TableNextColumn(ctx); ImGui.TextColored(ctx, 0xFFFF00FF, 'Auto')
+        ImGui.TableNextColumn(ctx); ImGui.Text(ctx, 'Per-item/unit detection')
+        ImGui.TableNextColumn(ctx); ImGui.Text(ctx, 'Mono source → mono, Multi → multi')
 
-        -- Row 2
         ImGui.TableNextRow(ctx)
-        ImGui.TableNextColumn(ctx); ImGui.Text(ctx, 'Merge multiple')
-        ImGui.TableNextColumn(ctx); ImGui.TextColored(ctx, 0xFF0000FF, '✗ No')
-        ImGui.TableNextColumn(ctx); ImGui.TextColored(ctx, 0x00FF00FF, '✓ Best')
-        ImGui.TableNextColumn(ctx); ImGui.TextColored(ctx, 0x00FF00FF, '✓ Yes (GLUE)')
+        ImGui.TableNextColumn(ctx); ImGui.TextColored(ctx, 0xFFFF00FF, 'Mono')
+        ImGui.TableNextColumn(ctx); ImGui.Text(ctx, 'Action 40361')
+        ImGui.TableNextColumn(ctx); ImGui.Text(ctx, 'Item: Apply track/take FX to items (mono output)')
 
-        -- Row 3
         ImGui.TableNextRow(ctx)
-        ImGui.TableNextColumn(ctx); ImGui.Text(ctx, 'Take Name → Filename')
-        ImGui.TableNextColumn(ctx); ImGui.TextColored(ctx, 0xFF0000FF, '✗ No')
-        ImGui.TableNextColumn(ctx); ImGui.TextColored(ctx, 0x00FF00FF, '✓ Yes')
-        ImGui.TableNextColumn(ctx); ImGui.TextColored(ctx, 0x00FF00FF, '✓ Yes')
-
-        -- Row 4
-        ImGui.TableNextRow(ctx)
-        ImGui.TableNextColumn(ctx); ImGui.Text(ctx, 'BWF TimeReference')
-        ImGui.TableNextColumn(ctx); ImGui.TextColored(ctx, 0x00FF00FF, '✓ Cur/Prev/Off')
-        ImGui.TableNextColumn(ctx); ImGui.TextColored(ctx, 0xFFFF00FF, '○ Current')
-        ImGui.TableNextColumn(ctx); ImGui.TextColored(ctx, 0x00FF00FF, '✓ RENDER units')
-
-        -- Row 5
-        ImGui.TableNextRow(ctx)
-        ImGui.TableNextColumn(ctx); ImGui.Text(ctx, 'Efficiency')
-        ImGui.TableNextColumn(ctx); ImGui.TextColored(ctx, 0x00FF00FF, '✓✓ High')
-        ImGui.TableNextColumn(ctx); ImGui.TextColored(ctx, 0xFFFF00FF, '✓ Good')
-        ImGui.TableNextColumn(ctx); ImGui.TextColored(ctx, 0x00FF00FF, '✓✓ Adaptive')
-
-        -- Row 6
-        ImGui.TableNextRow(ctx)
-        ImGui.TableNextColumn(ctx); ImGui.Text(ctx, 'Mixed unit types')
-        ImGui.TableNextColumn(ctx); ImGui.TextColored(ctx, 0xFF0000FF, '✗ No')
-        ImGui.TableNextColumn(ctx); ImGui.TextColored(ctx, 0x00FF00FF, '✓ Yes (No TS)')
-        ImGui.TableNextColumn(ctx); ImGui.TextColored(ctx, 0x00FF00FF, '✓✓ Best')
+        ImGui.TableNextColumn(ctx); ImGui.TextColored(ctx, 0xFFFF00FF, 'Multi')
+        ImGui.TableNextColumn(ctx); ImGui.Text(ctx, 'Action 41993')
+        ImGui.TableNextColumn(ctx); ImGui.Text(ctx, 'Item: Apply track/take FX (multichannel output)')
 
         ImGui.EndTable(ctx)
       end
+      ImGui.Spacing(ctx)
+      ImGui.Separator(ctx)
+      ImGui.Spacing(ctx)
+
+      -- === FX PROCESSING ===
+      ImGui.TextColored(ctx, 0x00AAFFFF, "2. FX PROCESSING")
+      ImGui.Spacing(ctx)
+      if ImGui.BeginTable(ctx, 'FXTable', 3, ImGui.TableFlags_Borders | ImGui.TableFlags_RowBg) then
+        ImGui.TableSetupColumn(ctx, 'FX Type')
+        ImGui.TableSetupColumn(ctx, 'Control')
+        ImGui.TableSetupColumn(ctx, 'Notes')
+        ImGui.TableHeadersRow(ctx)
+
+        ImGui.TableNextRow(ctx)
+        ImGui.TableNextColumn(ctx); ImGui.TextColored(ctx, 0xFFFF00FF, 'Track FX')
+        ImGui.TableNextColumn(ctx); ImGui.Text(ctx, 'TrackFX_SetEnabled()')
+        ImGui.TableNextColumn(ctx); ImGui.Text(ctx, 'Enable/disable before apply, restore after')
+
+        ImGui.TableNextRow(ctx)
+        ImGui.TableNextColumn(ctx); ImGui.TextColored(ctx, 0xFFFF00FF, 'Take FX')
+        ImGui.TableNextColumn(ctx); ImGui.Text(ctx, 'TakeFX_SetEnabled()')
+        ImGui.TableNextColumn(ctx); ImGui.Text(ctx, 'Enable/disable before apply, restore after')
+
+        ImGui.TableNextRow(ctx)
+        ImGui.TableNextColumn(ctx); ImGui.TextColored(ctx, 0xFFFF00FF, 'Apply Actions')
+        ImGui.TableNextColumn(ctx); ImGui.Text(ctx, '40361 (mono) / 41993 (multi)')
+        ImGui.TableNextColumn(ctx); ImGui.Text(ctx, 'Bakes FX into audio file')
+
+        ImGui.EndTable(ctx)
+      end
+      ImGui.Spacing(ctx)
+      ImGui.Separator(ctx)
+      ImGui.Spacing(ctx)
+
+      -- === VOLUME HANDLING ===
+      ImGui.TextColored(ctx, 0x00AAFFFF, "3. VOLUME HANDLING")
+      ImGui.Spacing(ctx)
+      if ImGui.BeginTable(ctx, 'VolumeTable', 3, ImGui.TableFlags_Borders | ImGui.TableFlags_RowBg) then
+        ImGui.TableSetupColumn(ctx, 'Feature')
+        ImGui.TableSetupColumn(ctx, 'Implementation')
+        ImGui.TableSetupColumn(ctx, 'Behavior')
+        ImGui.TableHeadersRow(ctx)
+
+        ImGui.TableNextRow(ctx)
+        ImGui.TableNextColumn(ctx); ImGui.TextColored(ctx, 0xFFFF00FF, 'Merge Volumes')
+        ImGui.TableNextColumn(ctx); ImGui.Text(ctx, 'D_VOL + D_TAKEVOL')
+        ImGui.TableNextColumn(ctx); ImGui.Text(ctx, 'Merge item vol into take vol before render')
+
+        ImGui.TableNextRow(ctx)
+        ImGui.TableNextColumn(ctx); ImGui.TextColored(ctx, 0xFFFF00FF, 'Print Volumes')
+        ImGui.TableNextColumn(ctx); ImGui.Text(ctx, 'Keep/restore volume values')
+        ImGui.TableNextColumn(ctx); ImGui.Text(ctx, 'ON: bake into audio | OFF: restore original')
+
+        ImGui.TableNextRow(ctx)
+        ImGui.TableNextColumn(ctx); ImGui.TextColored(ctx, 0xFFFF00FF, 'Volume Snapshot')
+        ImGui.TableNextColumn(ctx); ImGui.Text(ctx, 'GetMediaItemInfo_Value()')
+        ImGui.TableNextColumn(ctx); ImGui.Text(ctx, 'Snapshot before, restore after if needed')
+
+        ImGui.EndTable(ctx)
+      end
+      ImGui.Spacing(ctx)
+      ImGui.Separator(ctx)
+      ImGui.Spacing(ctx)
+
+      -- === HANDLE PROCESSING ===
+      ImGui.TextColored(ctx, 0x00AAFFFF, "4. HANDLE PROCESSING")
+      ImGui.Spacing(ctx)
+      if ImGui.BeginTable(ctx, 'HandleTable', 3, ImGui.TableFlags_Borders | ImGui.TableFlags_RowBg) then
+        ImGui.TableSetupColumn(ctx, 'Feature')
+        ImGui.TableSetupColumn(ctx, 'Implementation')
+        ImGui.TableSetupColumn(ctx, 'Behavior')
+        ImGui.TableHeadersRow(ctx)
+
+        ImGui.TableNextRow(ctx)
+        ImGui.TableNextColumn(ctx); ImGui.TextColored(ctx, 0xFFFF00FF, 'Handle Extension')
+        ImGui.TableNextColumn(ctx); ImGui.Text(ctx, 'D_POSITION, D_LENGTH')
+        ImGui.TableNextColumn(ctx); ImGui.Text(ctx, 'Extend item/unit by handle amount (seconds/frames)')
+
+        ImGui.TableNextRow(ctx)
+        ImGui.TableNextColumn(ctx); ImGui.TextColored(ctx, 0xFFFF00FF, 'Clamp-to-Source')
+        ImGui.TableNextColumn(ctx); ImGui.Text(ctx, 'GetMediaSourceLength()')
+        ImGui.TableNextColumn(ctx); ImGui.Text(ctx, 'Prevent extending beyond source boundaries')
+
+        ImGui.TableNextRow(ctx)
+        ImGui.TableNextColumn(ctx); ImGui.TextColored(ctx, 0xFFFF00FF, 'Handle as Offset')
+        ImGui.TableNextColumn(ctx); ImGui.Text(ctx, 'D_STARTOFFS')
+        ImGui.TableNextColumn(ctx); ImGui.Text(ctx, 'Store handle in take offset after processing')
+
+        ImGui.EndTable(ctx)
+      end
+      ImGui.Spacing(ctx)
+      ImGui.Separator(ctx)
+      ImGui.Spacing(ctx)
+
+      -- === MEDIA CUES ===
+      ImGui.TextColored(ctx, 0x00AAFFFF, "5. MEDIA CUES")
+      ImGui.Spacing(ctx)
+      if ImGui.BeginTable(ctx, 'CueTable', 3, ImGui.TableFlags_Borders | ImGui.TableFlags_RowBg) then
+        ImGui.TableSetupColumn(ctx, 'Cue Type')
+        ImGui.TableSetupColumn(ctx, 'Implementation')
+        ImGui.TableSetupColumn(ctx, 'Format')
+        ImGui.TableHeadersRow(ctx)
+
+        ImGui.TableNextRow(ctx)
+        ImGui.TableNextColumn(ctx); ImGui.TextColored(ctx, 0xFFFF00FF, 'Edge Cues')
+        ImGui.TableNextColumn(ctx); ImGui.Text(ctx, 'AddProjectMarker2()')
+        ImGui.TableNextColumn(ctx); ImGui.Text(ctx, '#in / #out at item boundaries')
+
+        ImGui.TableNextRow(ctx)
+        ImGui.TableNextColumn(ctx); ImGui.TextColored(ctx, 0xFFFF00FF, 'Glue Cues')
+        ImGui.TableNextColumn(ctx); ImGui.Text(ctx, 'AddProjectMarker2()')
+        ImGui.TableNextColumn(ctx); ImGui.Text(ctx, '#Glue: <TakeName> when sources change')
+
+        ImGui.TableNextRow(ctx)
+        ImGui.TableNextColumn(ctx); ImGui.TextColored(ctx, 0xFFFF00FF, 'BWF TimeReference')
+        ImGui.TableNextColumn(ctx); ImGui.Text(ctx, 'SetMediaItemTakeInfo()')
+        ImGui.TableNextColumn(ctx); ImGui.Text(ctx, 'P_TRACK:BWF_TIMEREF (embed TC in file)')
+
+        ImGui.EndTable(ctx)
+      end
+      ImGui.Spacing(ctx)
+      ImGui.Separator(ctx)
+      ImGui.Spacing(ctx)
+
+      -- === KEY ACTIONS ===
+      ImGui.TextColored(ctx, 0x00AAFFFF, "6. KEY REAPER ACTIONS")
+      ImGui.Spacing(ctx)
+      if ImGui.BeginTable(ctx, 'ActionTable', 3, ImGui.TableFlags_Borders | ImGui.TableFlags_RowBg) then
+        ImGui.TableSetupColumn(ctx, 'Action ID')
+        ImGui.TableSetupColumn(ctx, 'Name')
+        ImGui.TableSetupColumn(ctx, 'Usage')
+        ImGui.TableHeadersRow(ctx)
+
+        ImGui.TableNextRow(ctx)
+        ImGui.TableNextColumn(ctx); ImGui.TextColored(ctx, 0xFFFF00FF, '40361')
+        ImGui.TableNextColumn(ctx); ImGui.Text(ctx, 'Apply track/take FX (mono)')
+        ImGui.TableNextColumn(ctx); ImGui.Text(ctx, 'Channel mode: Mono')
+
+        ImGui.TableNextRow(ctx)
+        ImGui.TableNextColumn(ctx); ImGui.TextColored(ctx, 0xFFFF00FF, '41993')
+        ImGui.TableNextColumn(ctx); ImGui.Text(ctx, 'Apply track/take FX (multi)')
+        ImGui.TableNextColumn(ctx); ImGui.Text(ctx, 'Channel mode: Multi')
+
+        ImGui.TableNextRow(ctx)
+        ImGui.TableNextColumn(ctx); ImGui.TextColored(ctx, 0xFFFF00FF, '42432')
+        ImGui.TableNextColumn(ctx); ImGui.Text(ctx, 'Glue items within time selection')
+        ImGui.TableNextColumn(ctx); ImGui.Text(ctx, 'GLUE mode: merge items')
+
+        ImGui.TableNextRow(ctx)
+        ImGui.TableNextColumn(ctx); ImGui.TextColored(ctx, 0xFFFF00FF, '40640')
+        ImGui.TableNextColumn(ctx); ImGui.Text(ctx, 'Remove FX for item take')
+        ImGui.TableNextColumn(ctx); ImGui.Text(ctx, 'Clean up after apply (preserve)')
+
+        ImGui.TableNextRow(ctx)
+        ImGui.TableNextColumn(ctx); ImGui.TextColored(ctx, 0xFFFF00FF, '41121')
+        ImGui.TableNextColumn(ctx); ImGui.Text(ctx, 'Trim items to time selection')
+        ImGui.TableNextColumn(ctx); ImGui.Text(ctx, 'Trim back to original boundaries')
+
+        ImGui.EndTable(ctx)
+      end
+      ImGui.Spacing(ctx)
 
       ImGui.EndTabItem(ctx)
     end
 
     -- === RENDER TAB ===
     if ImGui.BeginTabItem(ctx, 'RENDER Mode') then
-      ImGui.TextColored(ctx, 0x00AAFFFF, "Purpose:")
-      ImGui.TextWrapped(ctx, "Process SINGLE items with precision and efficiency")
+      ImGui.TextColored(ctx, 0x00AAFFFF, "Entry Point:")
+      ImGui.BulletText(ctx, "M.render_selection(take_fx, track_fx, mode, tc_mode, merge_volumes, print_volumes)")
       ImGui.Spacing(ctx)
 
-      ImGui.TextColored(ctx, 0x00AAFFFF, "Process Flow:")
-      ImGui.BulletText(ctx, "1. Extends item by handle amount (with clamp-to-source protection)")
-      ImGui.BulletText(ctx, "2. Applies Track/Take FX based on channel mode")
-      ImGui.BulletText(ctx, "3. Embeds BWF TimeReference (previous/current/off)")
-      ImGui.BulletText(ctx, "4. Restores item to original position with handle as offset")
-      ImGui.BulletText(ctx, "5. Creates rendered file with handle-aware naming")
+      ImGui.TextColored(ctx, 0x00AAFFFF, "Process Flow (Function Calls):")
       ImGui.Spacing(ctx)
 
-      ImGui.TextColored(ctx, 0x00AAFFFF, "Best Use Cases:")
-      ImGui.BulletText(ctx, "Single items that need precise handle control")
-      ImGui.BulletText(ctx, "Items requiring BWF TimeReference embedding")
-      ImGui.BulletText(ctx, "Workflows where file naming must reflect take names")
-      ImGui.BulletText(ctx, "When you need maximum control over individual item processing")
+      if ImGui.BeginTable(ctx, 'RenderFlowTable', 3, ImGui.TableFlags_Borders | ImGui.TableFlags_RowBg) then
+        ImGui.TableSetupColumn(ctx, 'Step')
+        ImGui.TableSetupColumn(ctx, 'Function')
+        ImGui.TableSetupColumn(ctx, 'Action')
+        ImGui.TableHeadersRow(ctx)
+
+        ImGui.TableNextRow(ctx)
+        ImGui.TableNextColumn(ctx); ImGui.Text(ctx, '1. Snapshot Take FX')
+        ImGui.TableNextColumn(ctx); ImGui.Text(ctx, 'snapshot_takefx_offline()')
+        ImGui.TableNextColumn(ctx); ImGui.Text(ctx, 'Save take FX offline states')
+
+        ImGui.TableNextRow(ctx)
+        ImGui.TableNextColumn(ctx); ImGui.Text(ctx, '2. Volume Pre')
+        ImGui.TableNextColumn(ctx); ImGui.Text(ctx, 'preprocess_item_volumes()')
+        ImGui.TableNextColumn(ctx); ImGui.Text(ctx, 'Merge/snapshot volumes')
+
+        ImGui.TableNextRow(ctx)
+        ImGui.TableNextColumn(ctx); ImGui.Text(ctx, '3. Extend Window')
+        ImGui.TableNextColumn(ctx); ImGui.Text(ctx, 'per_member_window_lr()')
+        ImGui.TableNextColumn(ctx); ImGui.Text(ctx, 'Extend by handle, clamp to source')
+
+        ImGui.TableNextRow(ctx)
+        ImGui.TableNextColumn(ctx); ImGui.Text(ctx, '4. Add Cue Markers')
+        ImGui.TableNextColumn(ctx); ImGui.Text(ctx, 'add_edge_cues()')
+        ImGui.TableNextColumn(ctx); ImGui.Text(ctx, 'Add #in/#out markers')
+
+        ImGui.TableNextRow(ctx)
+        ImGui.TableNextColumn(ctx); ImGui.Text(ctx, '5. Snapshot Fades')
+        ImGui.TableNextColumn(ctx); ImGui.Text(ctx, 'snapshot_fades()')
+        ImGui.TableNextColumn(ctx); ImGui.Text(ctx, 'Save fade settings (if Apply)')
+
+        ImGui.TableNextRow(ctx)
+        ImGui.TableNextColumn(ctx); ImGui.Text(ctx, '6. Zero Fades')
+        ImGui.TableNextColumn(ctx); ImGui.Text(ctx, 'zero_fades()')
+        ImGui.TableNextColumn(ctx); ImGui.Text(ctx, 'Clear fades (if Apply)')
+
+        ImGui.TableNextRow(ctx)
+        ImGui.TableNextColumn(ctx); ImGui.Text(ctx, '7. Apply/Render')
+        ImGui.TableNextColumn(ctx); ImGui.Text(ctx, 'Main_OnCommand()')
+        ImGui.TableNextColumn(ctx); ImGui.Text(ctx, 'Action 40361/41993/40601')
+
+        ImGui.TableNextRow(ctx)
+        ImGui.TableNextColumn(ctx); ImGui.Text(ctx, '8. Remove Cue Markers')
+        ImGui.TableNextColumn(ctx); ImGui.Text(ctx, 'remove_markers_by_ids()')
+        ImGui.TableNextColumn(ctx); ImGui.Text(ctx, 'Remove temporary markers')
+
+        ImGui.TableNextRow(ctx)
+        ImGui.TableNextColumn(ctx); ImGui.Text(ctx, '9. Restore Fades')
+        ImGui.TableNextColumn(ctx); ImGui.Text(ctx, 'restore_fades()')
+        ImGui.TableNextColumn(ctx); ImGui.Text(ctx, 'Restore fade settings')
+
+        ImGui.TableNextRow(ctx)
+        ImGui.TableNextColumn(ctx); ImGui.Text(ctx, '10. Trim Back')
+        ImGui.TableNextColumn(ctx); ImGui.Text(ctx, 'SetMediaItemInfo_Value()')
+        ImGui.TableNextColumn(ctx); ImGui.Text(ctx, 'Restore position + D_STARTOFFS')
+
+        ImGui.TableNextRow(ctx)
+        ImGui.TableNextColumn(ctx); ImGui.Text(ctx, '11. Volume Post')
+        ImGui.TableNextColumn(ctx); ImGui.Text(ctx, 'postprocess_item_volumes()')
+        ImGui.TableNextColumn(ctx); ImGui.Text(ctx, 'Restore volumes if print=false')
+
+        ImGui.TableNextRow(ctx)
+        ImGui.TableNextColumn(ctx); ImGui.Text(ctx, '12. Rename')
+        ImGui.TableNextColumn(ctx); ImGui.Text(ctx, 'rename_new_render_take()')
+        ImGui.TableNextColumn(ctx); ImGui.Text(ctx, 'Apply naming convention')
+
+        ImGui.TableNextRow(ctx)
+        ImGui.TableNextColumn(ctx); ImGui.Text(ctx, '13. Clone Take FX')
+        ImGui.TableNextColumn(ctx); ImGui.Text(ctx, 'clone_takefx_chain()')
+        ImGui.TableNextColumn(ctx); ImGui.Text(ctx, 'Clone FX to new take (if excluded)')
+
+        ImGui.TableNextRow(ctx)
+        ImGui.TableNextColumn(ctx); ImGui.Text(ctx, '14. Embed TC')
+        ImGui.TableNextColumn(ctx); ImGui.Text(ctx, 'embed_current_tc_for_item()')
+        ImGui.TableNextColumn(ctx); ImGui.Text(ctx, 'Embed BWF TimeReference')
+
+        ImGui.EndTable(ctx)
+      end
       ImGui.Spacing(ctx)
 
-      ImGui.TextColored(ctx, 0x00AAFFFF, "Channel Mode Behavior:")
-      ImGui.BulletText(ctx, "auto: Per-item channel detection (mono source → mono, multi → multi)")
-      ImGui.BulletText(ctx, "mono: Forces mono output using Action 40361 (Apply mono)")
-      ImGui.BulletText(ctx, "multi: Forces multichannel output using Action 41993")
+      ImGui.TextColored(ctx, 0xFFFF00FF, "Use Cases:")
+      ImGui.BulletText(ctx, "Keep takes: Process single items, preserve original takes")
+      ImGui.BulletText(ctx, "Handle-aware: Extend items with handles for safety margin")
+      ImGui.BulletText(ctx, "BWF TimeReference: Embed timecode in rendered files")
+      ImGui.Spacing(ctx)
+
+      ImGui.TextColored(ctx, 0xFF0000FF, "Important Technical Notes:")
+      ImGui.BulletText(ctx, "Does NOT merge multiple items (use GLUE for that)")
+      ImGui.BulletText(ctx, "Fade handling issue with Actions 40361/41993:")
       ImGui.Indent(ctx)
-      ImGui.TextWrapped(ctx, "      Output channels = track channel count (force_multi policy enforced)")
+      ImGui.TextWrapped(ctx,
+        "• Problem: Apply actions (40361/41993) print fades into audio while keeping item fade settings, causing DUPLICATE fades\n" ..
+        "• Result: Both the item fade property AND the printed fade exist, doubling the fade effect\n" ..
+        "• Solution: snapshot_fades() before → zero_fades() → apply → restore_fades()\n" ..
+        "• Process: Save fade settings, remove fades from item, apply FX, restore fade settings\n" ..
+        "• This prevents duplicate fades in rendered audio")
       ImGui.Unindent(ctx)
-      ImGui.Spacing(ctx)
-
-      ImGui.TextColored(ctx, 0x00FF00FF, "Key Features:")
-      ImGui.BulletText(ctx, "✓ Handle-aware window extension")
-      ImGui.BulletText(ctx, "✓ Clamp-to-source protection")
-      ImGui.BulletText(ctx, "✓ Volume handling (merge/print options)")
-      ImGui.BulletText(ctx, "✓ BWF TimeReference embedding")
-      ImGui.BulletText(ctx, "✓ Optional Edge Cues (#in/#out)")
-      ImGui.BulletText(ctx, "✓ Efficient for large projects")
-      ImGui.Spacing(ctx)
-
-      ImGui.TextColored(ctx, 0xFF0000FF, "Limitations:")
-      ImGui.BulletText(ctx, "✗ Does NOT merge multiple items (use GLUE for that)")
-      ImGui.BulletText(ctx, "✗ selection_scope is ignored (always single item)")
 
       ImGui.EndTabItem(ctx)
     end
 
     -- === GLUE TAB ===
     if ImGui.BeginTabItem(ctx, 'GLUE Mode') then
-      ImGui.TextColored(ctx, 0x00AAFFFF, "Purpose:")
-      ImGui.TextWrapped(ctx, "Merge multiple items into single items with handle-aware processing")
+      ImGui.TextColored(ctx, 0x00AAFFFF, "Entry Point:")
+      ImGui.BulletText(ctx, "M.glue_selection(force_units) → glue_auto_scope()")
       ImGui.Spacing(ctx)
 
-      ImGui.TextColored(ctx, 0x00AAFFFF, "Process Flow (non-mono):")
-      ImGui.BulletText(ctx, "1. Groups items into 'units' (same-track, touching/overlapping items)")
-      ImGui.BulletText(ctx, "2. Extends unit window by handle amount")
-      ImGui.BulletText(ctx, "3. Executes Action 42432 (Glue items) → merges items")
-      ImGui.BulletText(ctx, "4. Applies Track/Take FX based on channel mode (if needed)")
-      ImGui.BulletText(ctx, "5. Trims result back to original unit boundaries")
-      ImGui.BulletText(ctx, "6. Creates glued file with take name as filename")
+      ImGui.TextColored(ctx, 0x00AAFFFF, "Process Flow - Multi/Auto Mode (Function Calls):")
       ImGui.Spacing(ctx)
 
-      ImGui.TextColored(ctx, 0x00AAFFFF, "Process Flow (mono mode):")
-      ImGui.BulletText(ctx, "1. Groups items into units")
-      ImGui.BulletText(ctx, "2. Applies mono FX to each item individually first")
-      ImGui.BulletText(ctx, "3. Then merges all mono items with Glue (if multiple items)")
+      if ImGui.BeginTable(ctx, 'GlueFlowTable', 3, ImGui.TableFlags_Borders | ImGui.TableFlags_RowBg) then
+        ImGui.TableSetupColumn(ctx, 'Step')
+        ImGui.TableSetupColumn(ctx, 'Function')
+        ImGui.TableSetupColumn(ctx, 'Action')
+        ImGui.TableHeadersRow(ctx)
+
+        ImGui.TableNextRow(ctx)
+        ImGui.TableNextColumn(ctx); ImGui.Text(ctx, '1. Add Cue Markers')
+        ImGui.TableNextColumn(ctx); ImGui.Text(ctx, 'AddProjectMarker2()')
+        ImGui.TableNextColumn(ctx); ImGui.Text(ctx, 'Add #Glue: markers (pre-embed)')
+
+        ImGui.TableNextRow(ctx)
+        ImGui.TableNextColumn(ctx); ImGui.Text(ctx, '2. Extend Window')
+        ImGui.TableNextColumn(ctx); ImGui.Text(ctx, 'per_member_window_lr()')
+        ImGui.TableNextColumn(ctx); ImGui.Text(ctx, 'Extend items by handle')
+
+        ImGui.TableNextRow(ctx)
+        ImGui.TableNextColumn(ctx); ImGui.Text(ctx, '3. Volume Pre')
+        ImGui.TableNextColumn(ctx); ImGui.Text(ctx, 'preprocess_item_volumes()')
+        ImGui.TableNextColumn(ctx); ImGui.Text(ctx, 'Merge/snapshot first item volumes')
+
+        ImGui.TableNextRow(ctx)
+        ImGui.TableNextColumn(ctx); ImGui.Text(ctx, '4. Snapshot Track Ch')
+        ImGui.TableNextColumn(ctx); ImGui.Text(ctx, 'GetMediaTrackInfo_Value(I_NCHAN)')
+        ImGui.TableNextColumn(ctx); ImGui.Text(ctx, 'Save track channel count')
+
+        ImGui.TableNextRow(ctx)
+        ImGui.TableNextColumn(ctx); ImGui.Text(ctx, '5. Glue')
+        ImGui.TableNextColumn(ctx); ImGui.Text(ctx, 'Main_OnCommand(42432)')
+        ImGui.TableNextColumn(ctx); ImGui.Text(ctx, 'Execute Glue (absorbs # markers)')
+
+        ImGui.TableNextRow(ctx)
+        ImGui.TableNextColumn(ctx); ImGui.Text(ctx, '6. Restore Track Ch')
+        ImGui.TableNextColumn(ctx); ImGui.Text(ctx, 'SetMediaTrackInfo_Value(I_NCHAN)')
+        ImGui.TableNextColumn(ctx); ImGui.Text(ctx, 'Restore track channel count')
+
+        ImGui.TableNextRow(ctx)
+        ImGui.TableNextColumn(ctx); ImGui.Text(ctx, '7. Zero Fades')
+        ImGui.TableNextColumn(ctx); ImGui.Text(ctx, 'SetMediaItemInfo_Value()')
+        ImGui.TableNextColumn(ctx); ImGui.Text(ctx, 'Clear fades (if Apply next)')
+
+        ImGui.TableNextRow(ctx)
+        ImGui.TableNextColumn(ctx); ImGui.Text(ctx, '8. Apply (optional)')
+        ImGui.TableNextColumn(ctx); ImGui.Text(ctx, 'apply_track_take_fx_to_item()')
+        ImGui.TableNextColumn(ctx); ImGui.Text(ctx, 'Action 40361/41993 (if Track FX)')
+
+        ImGui.TableNextRow(ctx)
+        ImGui.TableNextColumn(ctx); ImGui.Text(ctx, '9. Embed TC')
+        ImGui.TableNextColumn(ctx); ImGui.Text(ctx, 'embed_current_tc_for_item()')
+        ImGui.TableNextColumn(ctx); ImGui.Text(ctx, 'Embed BWF TimeReference')
+
+        ImGui.TableNextRow(ctx)
+        ImGui.TableNextColumn(ctx); ImGui.Text(ctx, '10. Trim Back')
+        ImGui.TableNextColumn(ctx); ImGui.Text(ctx, 'Main_OnCommand(41121)')
+        ImGui.TableNextColumn(ctx); ImGui.Text(ctx, 'Trim to boundaries + restore fades')
+
+        ImGui.TableNextRow(ctx)
+        ImGui.TableNextColumn(ctx); ImGui.Text(ctx, '11. Volume Post')
+        ImGui.TableNextColumn(ctx); ImGui.Text(ctx, 'postprocess_item_volumes()')
+        ImGui.TableNextColumn(ctx); ImGui.Text(ctx, 'Restore volumes if print=false')
+
+        ImGui.TableNextRow(ctx)
+        ImGui.TableNextColumn(ctx); ImGui.Text(ctx, '12. Remove Cue Markers')
+        ImGui.TableNextColumn(ctx); ImGui.Text(ctx, 'remove_markers_by_ids()')
+        ImGui.TableNextColumn(ctx); ImGui.Text(ctx, 'Remove temporary markers')
+
+        ImGui.EndTable(ctx)
+      end
       ImGui.Spacing(ctx)
 
-      ImGui.TextColored(ctx, 0x00AAFFFF, "Best Use Cases:")
-      ImGui.BulletText(ctx, "Multiple items that need to be merged into one")
-      ImGui.BulletText(ctx, "Workflow requires take names to become filenames")
-      ImGui.BulletText(ctx, "Consolidating dialogue clips, sound effects, or music stems")
-      ImGui.BulletText(ctx, "When efficiency matters: process once after merging (not N times before)")
+      ImGui.TextColored(ctx, 0x00AAFFFF, "Process Flow - Mono Mode:")
+      ImGui.BulletText(ctx, "1. detect_units_same_track() - Group items")
+      ImGui.BulletText(ctx, "2. apply_track_take_fx_to_item() - Apply mono (40361) to EACH item")
+      ImGui.BulletText(ctx, "3. Main_OnCommand(42432) - Glue all mono items if multiple")
       ImGui.Spacing(ctx)
 
-      ImGui.TextColored(ctx, 0x00AAFFFF, "Channel Mode Behavior:")
-      ImGui.BulletText(ctx, "auto: Per-unit channel detection (analyzes all items in unit)")
-      ImGui.BulletText(ctx, "mono: Apply mono (40361) to each item first → then Glue")
-      ImGui.BulletText(ctx, "multi: Glue first → then Apply multichannel (41993)")
+      ImGui.TextColored(ctx, 0xFFFF00FF, "Use Cases:")
+      ImGui.BulletText(ctx, "Merge multiple items: Consolidate dialogue, SFX, or music stems into single items")
+      ImGui.BulletText(ctx, "Handle-aware: Both Units and TS modes extend with handles for safety margin")
+      ImGui.BulletText(ctx, "Take name → filename: REAPER native Glue converts take names to filenames")
+      ImGui.Spacing(ctx)
+
+      ImGui.TextColored(ctx, 0xFFFF00FF, "Efficiency Advantage:")
       ImGui.Indent(ctx)
-      ImGui.TextWrapped(ctx, "      Track channel count is locked/restored to prevent auto-expansion")
-      ImGui.TextWrapped(ctx, "      Output channels = track channel count (force_multi policy enforced)")
+      ImGui.TextWrapped(ctx,
+        "For multiple items, GLUE is significantly faster than RENDER:\n" ..
+        "• GLUE: Merge N items → Process once (1× operation)\n" ..
+        "• RENDER: Process each item separately (N× operations)\n" ..
+        "Example: 10 items → GLUE processes 1 time vs RENDER processes 10 times")
       ImGui.Unindent(ctx)
       ImGui.Spacing(ctx)
 
-      ImGui.TextColored(ctx, 0x00FF00FF, "Key Features:")
-      ImGui.BulletText(ctx, "✓ Item Unit grouping (same-track touching/overlapping items)")
-      ImGui.BulletText(ctx, "✓ Handle-aware window extension for entire unit")
-      ImGui.BulletText(ctx, "✓ Take name → filename conversion (REAPER native Glue feature)")
-      ImGui.BulletText(ctx, "✓ Optional Glue Cues (#Glue: <TakeName>)")
-      ImGui.BulletText(ctx, "✓ Volume handling (merge/print options)")
-      ImGui.BulletText(ctx, "✓ Efficient for multi-item units (merge first, process once)")
-      ImGui.BulletText(ctx, "✓ Track channel count protection (prevents auto-expansion by Action 42432)")
+      ImGui.TextColored(ctx, 0xFFFF00FF, "Selection Scope Modes:")
+      ImGui.BulletText(ctx, "Units (default): Auto-detect touching/overlapping items, extend with handles")
+      ImGui.Indent(ctx)
+      ImGui.TextWrapped(ctx, "• Uses detect_units_same_track() to group items")
+      ImGui.TextWrapped(ctx, "• Handle extension via per_member_window_lr()")
+      ImGui.Unindent(ctx)
+      ImGui.BulletText(ctx, "Time Selection (TS): Use existing TS boundaries, NO handle extension")
+      ImGui.Indent(ctx)
+      ImGui.TextWrapped(ctx, "• glue_by_ts_window_on_track() uses TS as-is")
+      ImGui.TextWrapped(ctx, "• Useful when you manually set TS to exact boundaries")
+      ImGui.TextWrapped(ctx, "• Most TS operations do NOT use handles")
+      ImGui.Unindent(ctx)
       ImGui.Spacing(ctx)
 
-      ImGui.TextColored(ctx, 0xFFFF00FF, "Important Notes:")
-      ImGui.BulletText(ctx, "For multi channel mode: Output will have 2 takes (glued + applied)")
+      ImGui.TextColored(ctx, 0xFF0000FF, "Important Technical Notes:")
+      ImGui.BulletText(ctx, "Multi channel mode execution order (with Track FX enabled):")
       ImGui.Indent(ctx)
-      ImGui.TextWrapped(ctx, "- First take: Original glued result")
-      ImGui.TextWrapped(ctx, "- Second take: Applied with multichannel FX (active take)")
-      ImGui.TextWrapped(ctx, "- This is by design for efficiency (glue multiple items once, apply once)")
-      ImGui.TextWrapped(ctx, "- If you prefer 1 take: manually execute Apply (41993) then Glue (42432)")
+      ImGui.TextWrapped(ctx,
+        "• Process: Glue FIRST (42432) → then Apply multi (41993)\n" ..
+        "• Reason: Action 42432 auto-expands track channel count to match source channels\n" ..
+        "• Solution: Snapshot I_NCHAN before Glue → restore after Glue → then Apply\n" ..
+        "• Code: Lines 2130-2142 in glue_unit() function\n" ..
+        "• Result: First take = glued audio, Second take = applied (active)\n" ..
+        "• Fades: Cleared before Apply to prevent duplicate fades (same issue as RENDER)")
       ImGui.Unindent(ctx)
-      ImGui.BulletText(ctx, "Action 42432 (Glue) natively auto-expands track channels when source > track")
+      ImGui.BulletText(ctx, "Fade handling differences between RENDER and GLUE:")
       ImGui.Indent(ctx)
-      ImGui.TextWrapped(ctx, "- RGWH prevents this by locking/restoring track channel count")
-      ImGui.TextWrapped(ctx, "- Ensures force_multi policy works correctly")
+      ImGui.TextWrapped(ctx,
+        "• GLUE mode (42432 only): Preserves fade settings, NO duplicate fade issue\n" ..
+        "• GLUE+Apply mode (42432→41993): Fades cleared before Apply to prevent duplicates\n" ..
+        "• RENDER mode (40361/41993): Always requires fade snapshot/zero/restore workflow\n" ..
+        "• Key difference: Glue (42432) keeps fades as properties; Apply (40361/41993) prints them into audio")
       ImGui.Unindent(ctx)
 
       ImGui.EndTabItem(ctx)
@@ -1089,55 +1395,72 @@ local function draw_manual_window()
 
     -- === AUTO TAB ===
     if ImGui.BeginTabItem(ctx, 'AUTO Mode') then
-      ImGui.TextColored(ctx, 0x00AAFFFF, "Purpose:")
-      ImGui.TextWrapped(ctx, "Intelligently choose RENDER or GLUE for each unit automatically")
+      ImGui.TextColored(ctx, 0x00AAFFFF, "Entry Point:")
+      ImGui.BulletText(ctx, "M.core(args) with op='auto' → auto_selection()")
       ImGui.Spacing(ctx)
 
-      ImGui.TextColored(ctx, 0x00AAFFFF, "Decision Logic:")
-      ImGui.BulletText(ctx, "Single-item units → RENDER mode (efficient, precise)")
-      ImGui.BulletText(ctx, "Multi-item units → GLUE mode (merge, then process)")
-      ImGui.BulletText(ctx, "Mixed units in one execution? No problem! Each unit is analyzed individually.")
+      ImGui.TextColored(ctx, 0x00AAFFFF, "Decision Logic (Function Flow):")
       ImGui.Spacing(ctx)
 
-      ImGui.TextColored(ctx, 0x00AAFFFF, "Process Flow:")
-      ImGui.BulletText(ctx, "1. Analyzes selection and groups into Item Units")
-      ImGui.BulletText(ctx, "2. For each unit:")
+      if ImGui.BeginTable(ctx, 'AutoFlowTable', 3, ImGui.TableFlags_Borders | ImGui.TableFlags_RowBg) then
+        ImGui.TableSetupColumn(ctx, 'Step')
+        ImGui.TableSetupColumn(ctx, 'Function')
+        ImGui.TableSetupColumn(ctx, 'Action')
+        ImGui.TableHeadersRow(ctx)
+
+        ImGui.TableNextRow(ctx)
+        ImGui.TableNextColumn(ctx); ImGui.Text(ctx, '1. Analyze')
+        ImGui.TableNextColumn(ctx); ImGui.Text(ctx, 'auto_selection(cfg)')
+        ImGui.TableNextColumn(ctx); ImGui.Text(ctx, 'Determine mode per unit')
+
+        ImGui.TableNextRow(ctx)
+        ImGui.TableNextColumn(ctx); ImGui.Text(ctx, '2. Detect Units')
+        ImGui.TableNextColumn(ctx); ImGui.Text(ctx, 'detect_units_same_track()')
+        ImGui.TableNextColumn(ctx); ImGui.Text(ctx, 'Group items into units')
+
+        ImGui.TableNextRow(ctx)
+        ImGui.TableNextColumn(ctx); ImGui.Text(ctx, '3. Separate')
+        ImGui.TableNextColumn(ctx); ImGui.Text(ctx, 'if #unit.members == 1')
+        ImGui.TableNextColumn(ctx); ImGui.Text(ctx, 'Single → render_items[]')
+
+        ImGui.TableNextRow(ctx)
+        ImGui.TableNextColumn(ctx); ImGui.Text(ctx, '4. Separate')
+        ImGui.TableNextColumn(ctx); ImGui.Text(ctx, 'if #unit.members > 1')
+        ImGui.TableNextColumn(ctx); ImGui.Text(ctx, 'Multi → glue_units[]')
+
+        ImGui.TableNextRow(ctx)
+        ImGui.TableNextColumn(ctx); ImGui.Text(ctx, '5. Render Batch')
+        ImGui.TableNextColumn(ctx); ImGui.Text(ctx, 'M.render_selection()')
+        ImGui.TableNextColumn(ctx); ImGui.Text(ctx, 'Process all single-item units')
+
+        ImGui.TableNextRow(ctx)
+        ImGui.TableNextColumn(ctx); ImGui.Text(ctx, '6. Glue Batch')
+        ImGui.TableNextColumn(ctx); ImGui.Text(ctx, 'glue_auto_scope()')
+        ImGui.TableNextColumn(ctx); ImGui.Text(ctx, 'Process all multi-item units')
+
+        ImGui.EndTable(ctx)
+      end
+      ImGui.Spacing(ctx)
+
+      ImGui.TextColored(ctx, 0xFFFF00FF, "Key Advantage:")
       ImGui.Indent(ctx)
-      ImGui.BulletText(ctx, "If unit has 1 item → use RENDER workflow")
-      ImGui.BulletText(ctx, "If unit has 2+ items (touching/overlapping) → use GLUE workflow")
+      ImGui.TextWrapped(ctx,
+        "AUTO intelligently batches units by type:\n" ..
+        "• All single-item units → processed together with RENDER workflow\n" ..
+        "• All multi-item units → processed together with GLUE workflow\n" ..
+        "• Optimal efficiency: right tool for each job, batched execution")
       ImGui.Unindent(ctx)
-      ImGui.BulletText(ctx, "3. Each unit processed with appropriate mode")
-      ImGui.Spacing(ctx)
-
-      ImGui.TextColored(ctx, 0x00AAFFFF, "Best Use Cases:")
-      ImGui.BulletText(ctx, "Mixed selections (some single items, some multi-item groups)")
-      ImGui.BulletText(ctx, "When you want optimal processing without manual mode selection")
-      ImGui.BulletText(ctx, "Large projects with varying item arrangements")
-      ImGui.BulletText(ctx, "Batch processing with different unit types")
-      ImGui.Spacing(ctx)
-
-      ImGui.TextColored(ctx, 0x00AAFFFF, "Channel Mode Behavior:")
-      ImGui.BulletText(ctx, "auto: Per-item detection for RENDER units, per-unit for GLUE units")
-      ImGui.BulletText(ctx, "mono: Forces mono for all units (applies appropriate workflow per unit)")
-      ImGui.BulletText(ctx, "multi: Forces multichannel for all units (applies appropriate workflow per unit)")
-      ImGui.Spacing(ctx)
-
-      ImGui.TextColored(ctx, 0x00FF00FF, "Key Features:")
-      ImGui.BulletText(ctx, "✓ Smart per-unit mode selection")
-      ImGui.BulletText(ctx, "✓ Handles mixed unit types in single execution")
-      ImGui.BulletText(ctx, "✓ Combines benefits of both RENDER and GLUE modes")
-      ImGui.BulletText(ctx, "✓ All RENDER features for single-item units")
-      ImGui.BulletText(ctx, "✓ All GLUE features for multi-item units")
       ImGui.Spacing(ctx)
 
       ImGui.TextColored(ctx, 0xFFFF00FF, "Example Scenario:")
       ImGui.TextWrapped(ctx, "Track has 5 units:")
-      ImGui.BulletText(ctx, "Unit 1: Single item (1ch source) → RENDER with mono")
-      ImGui.BulletText(ctx, "Unit 2: 3 touching items (5ch sources) → GLUE into one, apply multi")
-      ImGui.BulletText(ctx, "Unit 3: Single item (6ch source) → RENDER with multi")
-      ImGui.BulletText(ctx, "Unit 4: 2 overlapping items (2ch sources) → GLUE into one")
-      ImGui.BulletText(ctx, "Unit 5: Single item (1ch source) → RENDER with mono")
-      ImGui.TextWrapped(ctx, "\nAUTO mode processes each optimally in one execution!")
+      ImGui.BulletText(ctx, "Unit 1: Single item (1ch) → RENDER batch")
+      ImGui.BulletText(ctx, "Unit 2: 3 touching items (5ch) → GLUE batch")
+      ImGui.BulletText(ctx, "Unit 3: Single item (6ch) → RENDER batch")
+      ImGui.BulletText(ctx, "Unit 4: 2 overlapping items (2ch) → GLUE batch")
+      ImGui.BulletText(ctx, "Unit 5: Single item (1ch) → RENDER batch")
+      ImGui.Spacing(ctx)
+      ImGui.TextWrapped(ctx, "Result: 3 units processed with RENDER, 2 units with GLUE, all in one execution!")
 
       ImGui.EndTabItem(ctx)
     end
