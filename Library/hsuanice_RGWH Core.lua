@@ -1,6 +1,6 @@
 --[[]
 @description RGWH Core - Render or Glue with Handles
-@version 0.1.0-beta (251114.0045)
+@version 0.1.0-beta (251115.2045)
 @author hsuanice
 @about
   Core library for handle-aware Render/Glue workflows with clear, single-entry API.
@@ -59,6 +59,36 @@
   • For detailed operation modes guide, see RGWH GUI: Help > Manual (Operation Modes)
 
 @changelog
+  0.1.0-beta (251115.2045) - MAJOR: Unified glue flow - Glue first, then conditionally Apply
+    - Fixed: Mono mode glue now preserves take name → filename behavior
+      • Previous issue: Apply (40361) first → creates "render 001.wav" → Glue → filename lost
+      • Root cause: Apply generates generic "render XXX" filenames, losing original take names
+      • Impact: Users had to manually rename files after glue operations
+    - Changed: Unified glue flow for ALL modes (mono/multi/auto): Glue → (conditional) Apply
+      • Removed: 233 lines of old mono-specific Apply-first logic (line 1879-2113)
+      • New approach: All modes use same flow - Glue (42432) first, then conditionally Apply
+      • Rationale: Native Glue already converts take name → filename, no renaming needed
+    - Performance: Massive speed improvement for mono mode without track FX
+      • Skip Apply when: GLUE_TRACK_FX=false AND (mode=mono OR not force_multi)
+      • Example: 4-item crossfade unit - OLD: 4× Apply + 1× Glue → NEW: 1× Glue only
+      • Debug log shows: "[SKIP APPLY] No need to Apply - Glue already preserves take name → filename"
+    - Implementation details:
+      • Line 1879-1942: Unified Glue → Apply logic for all modes
+      • Line 1909-1923: Conditional Apply logic - only when needed:
+        - If GLUE_TRACK_FX=true → Apply to print track FX
+        - If mode=multi AND force_multi policy → Apply to force multichannel
+        - Otherwise → Skip Apply entirely
+      • Line 1893-1905: Track channel count snapshot/restore (preserves from previous fix)
+    - Benefits:
+      • ✅ Take name → filename preserved automatically by Glue
+      • ✅ No post-render file renaming needed
+      • ✅ Faster execution (skip unnecessary Apply operations)
+      • ✅ Cleaner, more maintainable code (one unified path)
+      • ✅ Track channel count correctly restored after Glue
+    - Testing: Verified with 4-item crossfade unit in mono mode, GLUE_TRACK_FX=false
+      • Result: Direct glue without Apply, take names preserved in filenames
+      • Performance: Significantly faster (1 operation vs 5 operations)
+
   0.1.0-beta (251114.0045) - DOCUMENTATION: Removed detailed manual from Core, moved to GUI
     - Removed: Detailed @manual section with operation modes guide (was lines 60-370)
       • Detailed documentation now available in RGWH GUI: Help > Manual (Operation Modes)
@@ -1876,354 +1906,132 @@ local function glue_unit(tr, u, cfg)
     end
   end
 
-  -- Special handling for mono apply mode: Apply mono (40361) to each item, then optionally glue
-  if unit_apply_mode == "mono" then
-    dbg(DBG,1,"[MONO-APPLY] Applying mono (40361) to each item in unit...")
+  -- Unified logic for ALL modes (mono/multi/auto): Glue → (conditionally) Apply
+  -- 時選=UL..UR → Glue → (必要時)對成品 Apply → Trim 回 UL..UR
 
-    -- Get volume settings
-    local merge_volumes = (cfg.GLUE_MERGE_VOLUMES == true)
-    local print_volumes = (cfg.GLUE_PRINT_VOLUMES == true)
+  -- Get volume settings (use GLUE settings for this mode)
+  local merge_volumes = (cfg.GLUE_MERGE_VOLUMES == true)
+  local print_volumes = (cfg.GLUE_PRINT_VOLUMES == true)
 
-    -- Step 0: Snapshot and control Track FX
-    local track_fx_snapshot = {}
-    local need_track_fx = (cfg.GLUE_TRACK_FX == true)
-    if not need_track_fx then
-      -- Snapshot track FX enabled states
-      local fxn = r.TrackFX_GetCount(tr) or 0
-      for i = 0, fxn-1 do
-        track_fx_snapshot[i] = r.TrackFX_GetEnabled(tr, i)
-      end
-      -- Disable all track FX
-      for i = 0, fxn-1 do
-        r.TrackFX_SetEnabled(tr, i, false)
-      end
-      dbg(DBG,1,"[MONO-APPLY] Temporarily disabled %d TRACK FX (policy TRACK=OFF)", fxn)
-    end
+  -- Snapshot volumes from first item (for later restoration)
+  -- Note: Glue (42432) will bake all volumes, we need first item's snapshot for restoration
+  local first_item_vol_snap = nil
+  if first_it then
+    first_item_vol_snap = preprocess_item_volumes(first_it, merge_volumes, print_volumes, DBG)
+  end
 
-    -- Step 1: Apply mono to each extended item individually
-    local applied_items = {}
-    for idx, m in ipairs(members) do
-      local it = m.it
-      local d = details[idx]
+  -- Snapshot track channel count before Glue
+  -- Issue: Action 42432 (Glue) can auto-expand track channels when source > track channels
+  local orig_track_ch = tr and (r.GetMediaTrackInfo_Value(tr, "I_NCHAN") or 2) or 2
 
-      -- Select only this item
-      select_only_items({it})
+  r.GetSet_LoopTimeRange(true, false, UL, UR, false)
+  r.Main_OnCommand(ACT_GLUE_TS, 0)
 
-      -- Clear fades before apply (40361 will bake them in)
-      local fade_in_len = r.GetMediaItemInfo_Value(it, "D_FADEINLEN")
-      local fade_in_dir = r.GetMediaItemInfo_Value(it, "D_FADEINDIR")
-      local fade_in_shape = r.GetMediaItemInfo_Value(it, "C_FADEINSHAPE")
-      local fade_in_auto = r.GetMediaItemInfo_Value(it, "D_FADEINLEN_AUTO")
-      local fade_out_len = r.GetMediaItemInfo_Value(it, "D_FADEOUTLEN")
-      local fade_out_dir = r.GetMediaItemInfo_Value(it, "D_FADEOUTDIR")
-      local fade_out_shape = r.GetMediaItemInfo_Value(it, "C_FADEOUTSHAPE")
-      local fade_out_auto = r.GetMediaItemInfo_Value(it, "D_FADEOUTLEN_AUTO")
+  -- Restore track channel count if Glue auto-expanded it
+  local new_track_ch = tr and (r.GetMediaTrackInfo_Value(tr, "I_NCHAN") or 2) or 2
+  if tr and new_track_ch ~= orig_track_ch then
+    r.SetMediaTrackInfo_Value(tr, "I_NCHAN", orig_track_ch)
+    dbg(DBG,1,"[GLUE] Track channel auto-expanded %d→%d by 42432, restored to %d", orig_track_ch, new_track_ch, orig_track_ch)
+  end
 
-      r.SetMediaItemInfo_Value(it, "D_FADEINLEN", 0)
-      r.SetMediaItemInfo_Value(it, "D_FADEINLEN_AUTO", 0)
-      r.SetMediaItemInfo_Value(it, "D_FADEOUTLEN", 0)
-      r.SetMediaItemInfo_Value(it, "D_FADEOUTLEN_AUTO", 0)
+  local glued_pre = find_item_by_span_on_track(tr, UL, UR, 0.002)
 
-      -- Snapshot and offline Take FX if GLUE_TAKE_FX = false
-      local take_fx_snapshot = nil
-      local need_take_fx = (cfg.GLUE_TAKE_FX == true)
-      local tk = r.GetActiveTake(it)
-      if tk and not need_take_fx then
-        local n = r.TakeFX_GetCount(tk) or 0
-        take_fx_snapshot = {}
-        for i = 0, n-1 do
-          take_fx_snapshot[i] = r.TakeFX_GetOffline(tk, i)
-          if not take_fx_snapshot[i] then
-            r.TakeFX_SetOffline(tk, i, true)
-          end
-        end
-        dbg(DBG,2,"[MONO-APPLY] item#%d: Temp-offline %d TAKE FX (policy TAKE=OFF)", idx, n)
-      end
-
-      -- >>>> Volume handling: snapshot, optional merge, optional reset <<<<
-      local volume_snap = preprocess_item_volumes(it, merge_volumes, print_volumes, DBG)
-
-      dbg(DBG,2,"[MONO-APPLY] item#%d: Applying 40361 (mono)", idx)
-
-      -- Apply mono (40361)
-      r.Main_OnCommand(ACT_APPLY_MONO, 0)
-
-      -- Find the applied item (should be at same position)
-      local pos = r.GetMediaItemInfo_Value(it, "D_POSITION")
-      local len = r.GetMediaItemInfo_Value(it, "D_LENGTH")
-      local applied = find_item_by_span_on_track(tr, pos, pos + len, 0.002)
-
-      if applied then
-        -- Restore Take FX offline states to the NEW take
-        local new_tk = r.GetActiveTake(applied)
-        if new_tk and take_fx_snapshot then
-          local n = r.TakeFX_GetCount(new_tk) or 0
-          for i = 0, n-1 do
-            if take_fx_snapshot[i] ~= nil then
-              r.TakeFX_SetOffline(new_tk, i, take_fx_snapshot[i])
-            end
-          end
-          dbg(DBG,2,"[MONO-APPLY] item#%d: Restored %d TAKE FX offline states", idx, n)
-        end
-
-        -- Volume handling after apply: print or restore
-        postprocess_item_volumes(applied, volume_snap, new_tk, tk, merge_volumes, print_volumes, DBG)
-
-        applied_items[#applied_items+1] = {
-          it = applied,
-          idx = idx,
-          fade_in = {len=fade_in_len, dir=fade_in_dir, shape=fade_in_shape, auto=fade_in_auto},
-          fade_out = {len=fade_out_len, dir=fade_out_dir, shape=fade_out_shape, auto=fade_out_auto},
-          orig_tk = tk,  -- Save original take for potential FX cloning
-          volume_snap = volume_snap  -- Save volume snapshot for potential glue restoration
-        }
-        dbg(DBG,2,"[MONO-APPLY] item#%d: Applied, result is mono", idx)
-      end
-    end
-
-    -- Step 2: Determine if we should glue after mono apply
-    local should_glue = false
-    if cfg.OP == "glue" then
-      should_glue = true  -- GLUE mode: always glue
-      dbg(DBG,1,"[MONO-APPLY] GLUE mode: will glue after mono apply")
-    elseif cfg.OP == "auto" and cfg.GLUE_AFTER_MONO_APPLY then
-      should_glue = true  -- AUTO mode: depends on setting
-      dbg(DBG,1,"[MONO-APPLY] AUTO mode + GLUE_AFTER_MONO_APPLY=true: will glue after mono apply")
-    else
-      dbg(DBG,1,"[MONO-APPLY] Will NOT glue (mode=%s, setting=%s)", tostring(cfg.OP), tostring(cfg.GLUE_AFTER_MONO_APPLY))
-    end
-
-    -- Step 3: Optionally glue all mono items
-    if should_glue and #applied_items > 1 then
-      local items_to_glue = {}
-      for i, ai in ipairs(applied_items) do
-        items_to_glue[i] = ai.it
-      end
-
-      select_only_items(items_to_glue)
-      r.GetSet_LoopTimeRange(true, false, UL, UR, false)
-      dbg(DBG,1,"[MONO-APPLY] Gluing %d mono items...", #applied_items)
-      r.Main_OnCommand(ACT_GLUE_TS, 0)
-
-      -- Trim back to original span
-      r.Main_OnCommand(ACT_TRIM_TO_TS, 0)
-
-      local glued = find_item_by_span_on_track(tr, UL, UR, 0.002)
-      if glued then
-        local left_total  = u.start - UL
-        local right_total = UR - u.finish
-        if left_total  < 0 then left_total  = 0 end
-        if right_total < 0 then right_total = 0 end
-
-        r.SetMediaItemInfo_Value(glued,"D_POSITION", u.start)
-        r.SetMediaItemInfo_Value(glued,"D_LENGTH",   u.finish - u.start)
-        local gtk = r.GetActiveTake(glued)
-        if gtk then r.SetMediaItemTakeInfo_Value(gtk,"D_STARTOFFS", left_total) end
-        r.UpdateItemInProject(glued)
-
-        -- Keep StartInSource consistent across ALL takes
-        local tc = reaper.CountTakes(glued) or 0
-        for ti = 0, tc-1 do
-          local tk = reaper.GetTake(glued, ti)
-          if tk then
-            reaper.SetMediaItemTakeInfo_Value(tk, "D_STARTOFFS", left_total)
-          end
-        end
-
-        -- Restore boundary fades (first and last item's fades)
-        if #applied_items > 0 then
-          local first_fade = applied_items[1].fade_in
-          r.SetMediaItemInfo_Value(glued,"D_FADEINLEN",      first_fade.len)
-          r.SetMediaItemInfo_Value(glued,"D_FADEINDIR",      first_fade.dir)
-          r.SetMediaItemInfo_Value(glued,"C_FADEINSHAPE",    first_fade.shape)
-          r.SetMediaItemInfo_Value(glued,"D_FADEINLEN_AUTO", first_fade.auto)
-
-          local last_fade = applied_items[#applied_items].fade_out
-          r.SetMediaItemInfo_Value(glued,"D_FADEOUTLEN",      last_fade.len)
-          r.SetMediaItemInfo_Value(glued,"D_FADEOUTDIR",      last_fade.dir)
-          r.SetMediaItemInfo_Value(glued,"C_FADEOUTSHAPE",    last_fade.shape)
-          r.SetMediaItemInfo_Value(glued,"D_FADEOUTLEN_AUTO", last_fade.auto)
-          r.UpdateItemInProject(glued)
-        end
-
-        -- Volume handling for glued item
-        -- Note: Glue action (42432) bakes all item/take volumes into the audio
-        -- Use first item's volume snapshot for consistent behavior
-        if #applied_items > 0 then
-          local first_vol_snap = applied_items[1].volume_snap
-          local gtk_final = r.GetActiveTake(glued)
-          postprocess_item_volumes(glued, first_vol_snap, gtk_final, nil, merge_volumes, print_volumes, DBG)
-        end
-
-        dbg(DBG,1,"       post-glue: trimmed to [%.3f..%.3f], offs=%.3f (L=%.3f R=%.3f)",
-          u.start, u.finish, left_total, left_total, right_total)
-      end
-    else
-      -- Not gluing: trim each applied item back to original span
-      dbg(DBG,1,"[MONO-APPLY] NOT gluing, trimming each item back to original span")
-      for _, ai in ipairs(applied_items) do
-        local m = members[ai.idx]
-        local d = details[ai.idx]
-
-        r.SetMediaItemInfo_Value(ai.it, "D_POSITION", m.L)
-        r.SetMediaItemInfo_Value(ai.it, "D_LENGTH", m.R - m.L)
-        local tk = r.GetActiveTake(ai.it)
-        if tk and d then
-          -- Calculate correct offset: how much to skip from the rendered file
-          -- Rendered file includes the extended portion, so we need to skip the left extension
-          local correct_offs = m.L - d.gotL
-          if correct_offs < 0 then correct_offs = 0 end
-          r.SetMediaItemTakeInfo_Value(tk, "D_STARTOFFS", correct_offs)
-          dbg(DBG,2,"[MONO-APPLY] item#%d: Trimmed to [%.3f..%.3f], D_STARTOFFS=%.3f (m.L=%.3f, gotL=%.3f)",
-              ai.idx, m.L, m.R, correct_offs, m.L, d.gotL)
-        end
-        r.UpdateItemInProject(ai.it)
-
-        -- Restore fades for boundary items
-        if ai.idx == 1 then
-          r.SetMediaItemInfo_Value(ai.it,"D_FADEINLEN",      ai.fade_in.len)
-          r.SetMediaItemInfo_Value(ai.it,"D_FADEINDIR",      ai.fade_in.dir)
-          r.SetMediaItemInfo_Value(ai.it,"C_FADEINSHAPE",    ai.fade_in.shape)
-          r.SetMediaItemInfo_Value(ai.it,"D_FADEINLEN_AUTO", ai.fade_in.auto)
-        end
-        if ai.idx == #members then
-          r.SetMediaItemInfo_Value(ai.it,"D_FADEOUTLEN",      ai.fade_out.len)
-          r.SetMediaItemInfo_Value(ai.it,"D_FADEOUTDIR",      ai.fade_out.dir)
-          r.SetMediaItemInfo_Value(ai.it,"C_FADEOUTSHAPE",    ai.fade_out.shape)
-          r.SetMediaItemInfo_Value(ai.it,"D_FADEOUTLEN_AUTO", ai.fade_out.auto)
-        end
-        r.UpdateItemInProject(ai.it)
-      end
-
-      dbg(DBG,1,"       post-mono-apply: %d items, span [%.3f..%.3f]", #applied_items, u.start, u.finish)
-    end
-
-    -- Clear TS
-    r.GetSet_LoopTimeRange(true, false, 0, 0, false)
-
-    -- Step 4: Restore Track FX enabled states
-    if not need_track_fx then
-      local fxn = r.TrackFX_GetCount(tr) or 0
-      for i = 0, fxn-1 do
-        if track_fx_snapshot[i] ~= nil then
-          r.TrackFX_SetEnabled(tr, i, track_fx_snapshot[i])
-        end
-      end
-      dbg(DBG,1,"[MONO-APPLY] Restored %d TRACK FX enabled states", fxn)
-    end
-
+  -- Determine if we need Apply render
+  local need_apply = false
+  if cfg.GLUE_TRACK_FX and glued_pre then
+    -- Need to print track FX
+    need_apply = true
+    dbg(DBG,1,"[APPLY] Need Apply to print track FX (mode=%s)", unit_apply_mode)
+  elseif glued_pre
+     and (unit_apply_mode == "multi")
+     and (cfg.GLUE_OUTPUT_POLICY_WHEN_NO_TRACKFX == "force_multi") then
+    -- Need to force multi-channel output
+    need_apply = true
+    dbg(DBG,1,"[APPLY] Need Apply to force multi-channel output")
   else
-    -- Original logic for multi/auto modes: native glue → optional apply
-    -- 時選=UL..UR → Glue → (必要時)對成品 Apply → Trim 回 UL..UR
+    dbg(DBG,1,"[SKIP APPLY] No need to Apply - Glue already preserves take name → filename")
+  end
 
-    -- Get volume settings (use GLUE settings for this mode)
-    local merge_volumes = (cfg.GLUE_MERGE_VOLUMES == true)
-    local print_volumes = (cfg.GLUE_PRINT_VOLUMES == true)
+  if need_apply and glued_pre then
+    -- 清掉 fades（40361/41993 會把 fade 烘進音檔）
+    r.SetMediaItemInfo_Value(glued_pre, "D_FADEINLEN",       0)
+    r.SetMediaItemInfo_Value(glued_pre, "D_FADEINLEN_AUTO",  0)
+    r.SetMediaItemInfo_Value(glued_pre, "D_FADEOUTLEN",      0)
+    r.SetMediaItemInfo_Value(glued_pre, "D_FADEOUTLEN_AUTO", 0)
 
-    -- Snapshot volumes from first item (for later restoration)
-    -- Note: Glue (42432) will bake all volumes, we need first item's snapshot for restoration
-    local first_item_vol_snap = nil
-    if first_it then
-      first_item_vol_snap = preprocess_item_volumes(first_it, merge_volumes, print_volumes, DBG)
-    end
-
-    -- Snapshot track channel count before Glue
-    -- Issue: Action 42432 (Glue) can auto-expand track channels when source > track channels
-    local orig_track_ch = tr and (r.GetMediaTrackInfo_Value(tr, "I_NCHAN") or 2) or 2
-
-    r.GetSet_LoopTimeRange(true, false, UL, UR, false)
-    r.Main_OnCommand(ACT_GLUE_TS, 0)
-
-    -- Restore track channel count if Glue auto-expanded it
-    local new_track_ch = tr and (r.GetMediaTrackInfo_Value(tr, "I_NCHAN") or 2) or 2
-    if tr and new_track_ch ~= orig_track_ch then
-      r.SetMediaTrackInfo_Value(tr, "I_NCHAN", orig_track_ch)
-      dbg(DBG,1,"[GLUE] Track channel auto-expanded %d→%d by 42432, restored to %d", orig_track_ch, new_track_ch, orig_track_ch)
-    end
-
-    local glued_pre = find_item_by_span_on_track(tr, UL, UR, 0.002)
-    if cfg.GLUE_TRACK_FX and glued_pre then
-      -- 清掉 fades（40361/41993 會把 fade 烘進音檔）
-      r.SetMediaItemInfo_Value(glued_pre, "D_FADEINLEN",       0)
-      r.SetMediaItemInfo_Value(glued_pre, "D_FADEINLEN_AUTO",  0)
-      r.SetMediaItemInfo_Value(glued_pre, "D_FADEOUTLEN",      0)
-      r.SetMediaItemInfo_Value(glued_pre, "D_FADEOUTLEN_AUTO", 0)
-
+    if cfg.GLUE_TRACK_FX then
       apply_track_take_fx_to_item(glued_pre, unit_apply_mode, DBG)
       -- Emulate Glue's TC when GLUE+APPLY: embed CURRENT TC at unit start
       embed_current_tc_for_item(glued_pre, u.start, DBG)
-
-    elseif glued_pre
-       and (unit_apply_mode == "multi")
-       and (cfg.GLUE_OUTPUT_POLICY_WHEN_NO_TRACKFX == "force_multi") then
-      -- TRACK FX 未印，但需要強制 multi：以「無 FX」方式套 41993
+    else
+      -- force_multi without track FX
       apply_multichannel_no_fx_preserve_take(glued_pre, (cfg.GLUE_TAKE_FX == true), DBG)
       -- Emulate Glue's TC in force-multi no-track-FX path as well
       embed_current_tc_for_item(glued_pre, u.start, DBG)
     end
+  end
 
-    r.Main_OnCommand(ACT_TRIM_TO_TS, 0)
+  r.Main_OnCommand(ACT_TRIM_TO_TS, 0)
 
-    -- 找到最後成品（UL..UR），移回 u.start..u.finish 並寫入 offset
-    local glued = find_item_by_span_on_track(tr, UL, UR, 0.002)
-    if glued then
-      local left_total  = u.start - UL
-      local right_total = UR - u.finish
-      if left_total  < 0 then left_total  = 0 end
-      if right_total < 0 then right_total = 0 end
+  -- 找到最後成品（UL..UR），移回 u.start..u.finish 並寫入 offset
+  local glued = find_item_by_span_on_track(tr, UL, UR, 0.002)
+  if glued then
+    local left_total  = u.start - UL
+    local right_total = UR - u.finish
+    if left_total  < 0 then left_total  = 0 end
+    if right_total < 0 then right_total = 0 end
 
-      r.SetMediaItemInfo_Value(glued,"D_POSITION", u.start)
-      r.SetMediaItemInfo_Value(glued,"D_LENGTH",   u.finish - u.start)
-      local gtk = r.GetActiveTake(glued)
-      if gtk then r.SetMediaItemTakeInfo_Value(gtk,"D_STARTOFFS", left_total) end
-      r.UpdateItemInProject(glued)
+    r.SetMediaItemInfo_Value(glued,"D_POSITION", u.start)
+    r.SetMediaItemInfo_Value(glued,"D_LENGTH",   u.finish - u.start)
+    local gtk = r.GetActiveTake(glued)
+    if gtk then r.SetMediaItemTakeInfo_Value(gtk,"D_STARTOFFS", left_total) end
+    r.UpdateItemInProject(glued)
 
-      -- NEW: keep StartInSource consistent across ALL takes on the glued item
-      do
-        local tc = reaper.CountTakes(glued) or 0
-        for ti = 0, tc-1 do
-          local tk = reaper.GetTake(glued, ti)
-          if tk then
-            reaper.SetMediaItemTakeInfo_Value(tk, "D_STARTOFFS", left_total)
-          end
+    -- NEW: keep StartInSource consistent across ALL takes on the glued item
+    do
+      local tc = reaper.CountTakes(glued) or 0
+      for ti = 0, tc-1 do
+        local tk = reaper.GetTake(glued, ti)
+        if tk then
+          reaper.SetMediaItemTakeInfo_Value(tk, "D_STARTOFFS", left_total)
         end
       end
-
-      -- 還原邊界淡入淡出
-      r.SetMediaItemInfo_Value(glued,"D_FADEINLEN",      fin_len)
-      r.SetMediaItemInfo_Value(glued,"D_FADEINDIR",      fin_dir)
-      r.SetMediaItemInfo_Value(glued,"C_FADEINSHAPE",    fin_shape)
-      r.SetMediaItemInfo_Value(glued,"D_FADEINLEN_AUTO", fin_auto)
-      r.SetMediaItemInfo_Value(glued,"D_FADEOUTLEN",      fout_len)
-      r.SetMediaItemInfo_Value(glued,"D_FADEOUTDIR",      fout_dir)
-      r.SetMediaItemInfo_Value(glued,"C_FADEOUTSHAPE",    fout_shape)
-      r.SetMediaItemInfo_Value(glued,"D_FADEOUTLEN_AUTO", fout_auto)
-      r.UpdateItemInProject(glued)
-
-      -- Volume handling for glued item
-      -- Note: Glue (42432) bakes all volumes, restore based on first item's snapshot
-      if first_item_vol_snap then
-        local gtk_final = r.GetActiveTake(glued)
-        postprocess_item_volumes(glued, first_item_vol_snap, gtk_final, nil, merge_volumes, print_volumes, DBG)
-      end
-
-      -- (Removed legacy take-marker emission. Glue cues are now pre-written as project markers with '#'.)
-
-
-      -- [GLUE NAME] Do not rename glued items; let REAPER auto-name (e.g. "...-glued-XX").
-      -- (Intentionally no-op here to preserve REAPER's default glued naming.)
-      -- dbg(DBG,2,"[NAME] Skip renaming glued item; keep REAPER's default.")
-
-
-      dbg(DBG,1,"       post-glue: trimmed to [%.3f..%.3f], offs=%.3f (L=%.3f R=%.3f)",
-        u.start, u.finish, left_total, left_total, right_total)
-    else
-      dbg(DBG,1,"       WARNING: glued item not found by span (UL=%.3f UR=%.3f)", UL, UR)
     end
 
-    -- Clear time selection
-    r.GetSet_LoopTimeRange(true, false, 0, 0, false)
-  end  -- end of if unit_apply_mode == "mono"
+    -- 還原邊界淡入淡出
+    r.SetMediaItemInfo_Value(glued,"D_FADEINLEN",      fin_len)
+    r.SetMediaItemInfo_Value(glued,"D_FADEINDIR",      fin_dir)
+    r.SetMediaItemInfo_Value(glued,"C_FADEINSHAPE",    fin_shape)
+    r.SetMediaItemInfo_Value(glued,"D_FADEINLEN_AUTO", fin_auto)
+    r.SetMediaItemInfo_Value(glued,"D_FADEOUTLEN",      fout_len)
+    r.SetMediaItemInfo_Value(glued,"D_FADEOUTDIR",      fout_dir)
+    r.SetMediaItemInfo_Value(glued,"C_FADEOUTSHAPE",    fout_shape)
+    r.SetMediaItemInfo_Value(glued,"D_FADEOUTLEN_AUTO", fout_auto)
+    r.UpdateItemInProject(glued)
+
+    -- Volume handling for glued item
+    -- Note: Glue (42432) bakes all volumes, restore based on first item's snapshot
+    if first_item_vol_snap then
+      local gtk_final = r.GetActiveTake(glued)
+      postprocess_item_volumes(glued, first_item_vol_snap, gtk_final, nil, merge_volumes, print_volumes, DBG)
+    end
+
+    -- (Removed legacy take-marker emission. Glue cues are now pre-written as project markers with '#'.)
+
+
+    -- [GLUE NAME] Do not rename glued items; let REAPER auto-name (e.g. "...-glued-XX").
+    -- (Intentionally no-op here to preserve REAPER's default glued naming.)
+    -- dbg(DBG,2,"[NAME] Skip renaming glued item; keep REAPER's default.")
+
+
+    dbg(DBG,1,"       post-glue: trimmed to [%.3f..%.3f], offs=%.3f (L=%.3f R=%.3f)",
+      u.start, u.finish, left_total, left_total, right_total)
+  else
+    dbg(DBG,1,"       WARNING: glued item not found by span (UL=%.3f UR=%.3f)", UL, UR)
+  end
+
+  -- Clear time selection
+  r.GetSet_LoopTimeRange(true, false, 0, 0, false)
 
   -- Clean up temporary project markers (common for both mono and multi/auto paths)
   if edge_ids then
