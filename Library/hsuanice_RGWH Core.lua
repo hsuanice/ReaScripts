@@ -1,6 +1,6 @@
 --[[]
 @description RGWH Core - Render or Glue with Handles
-@version 0.1.0-beta (251115.2045)
+@version 0.1.0-beta (251121.1635)
 @author hsuanice
 @about
   Core library for handle-aware Render/Glue workflows with clear, single-entry API.
@@ -59,6 +59,12 @@
   • For detailed operation modes guide, see RGWH GUI: Help > Manual (Operation Modes)
 
 @changelog
+  0.1.0-beta (251121.1635) - FIX: GAP unit (TS Glue) now writes glue media cues
+    - Issue: When using TS Glue with gaps between items, #Glue: cues were not written
+    - Root cause: GAP unit block returned early before glue cue logic could execute
+    - Solution: Added glue cue logic inside GAP unit handling (lines 1667-1735)
+    - Now creates #Glue: <TakeName> markers when source files change within GAP units
+
   0.1.0-beta (251115.2045) - MAJOR: Unified glue flow - Glue first, then conditionally Apply
     - Fixed: Mono mode glue now preserves take name → filename behavior
       • Previous issue: Apply (40361) first → creates "render 001.wav" → Glue → filename lost
@@ -1664,9 +1670,75 @@ local function glue_unit(tr, u, cfg)
       dbg(DBG,1,"[TAKE-FX] cleared (policy=OFF) for GAP unit.")
     end
 
+    -- Prepare Glue Cues for GAP unit (same logic as TOUCH units)
+    local gap_marks_abs = nil
+    local gap_glue_ids = nil
+    if cfg.WRITE_GLUE_CUES and #u.members >= 2 then
+      local function src_path_of(it)
+        local tk  = reaper.GetActiveTake(it)
+        if not tk then return nil end
+        local src = reaper.GetMediaItemTake_Source(tk)
+        if not src then return nil end
+        local p   = reaper.GetMediaSourceFileName(src, "") or ""
+        p = p:gsub("\\","/"):gsub("^%s+",""):gsub("%s+$","")
+        return (p ~= "") and p or nil
+      end
+      local function take_name_of(it)
+        local tk = reaper.GetActiveTake(it)
+        if not tk then return nil end
+        local ok, nm = reaper.GetSetMediaItemTakeInfo_String(tk, "P_NAME", "", false)
+        return (ok and nm ~= "" and nm) or reaper.GetTakeName(tk) or nil
+      end
+      local seq, uniq = {}, {}
+      for _, m in ipairs(u.members or {}) do
+        local p = src_path_of(m.it) or ("<no-src>")
+        seq[#seq+1] = { L = m.L, path = p, it = m.it }
+        uniq[p] = true
+      end
+      local unique_count = 0
+      for _ in pairs(uniq) do unique_count = unique_count + 1 end
+
+      if unique_count >= 2 then
+        gap_marks_abs = {}
+        -- Head cue
+        local head_name = take_name_of(u.members[1].it) or ((seq[1].path or ""):match("([^/]+)$") or "")
+        gap_marks_abs[#gap_marks_abs+1] = { abs = u.start, name = head_name }
+        -- Boundary cues where source changes
+        for i = 1, (#seq - 1) do
+          if seq[i].path ~= seq[i+1].path then
+            local next_name = take_name_of(u.members[i+1].it) or ((seq[i+1].path or ""):match("([^/]+)$") or "")
+            gap_marks_abs[#gap_marks_abs+1] = { abs = seq[i+1].L, name = next_name }
+          end
+        end
+      end
+
+      -- Pre-embed as project markers (absorbed into media during glue)
+      if gap_marks_abs and #gap_marks_abs > 0 then
+        gap_glue_ids = {}
+        for _, mk in ipairs(gap_marks_abs) do
+          local raw = mk.name or ""
+          local label = ("#Glue: %s"):format(raw)
+          local id = reaper.AddProjectMarker2(0, false, mk.abs or u.start, 0, label, -1, 0)
+          gap_glue_ids[#gap_glue_ids+1] = id
+          if DBG >= 2 then dbg(DBG,2,"[GLUE-CUE] GAP add @ %.3f  label=%s  id=%s", mk.abs or u.start, label, tostring(id)) end
+        end
+      end
+    end
+
     -- Set TS to overall span and glue
     r.GetSet_LoopTimeRange(true, false, u.start, u.finish, false)
     r.Main_OnCommand(ACT_GLUE_TS, 0)
+
+    -- Clean up project markers (now embedded in media)
+    if gap_glue_ids then
+      for _, id in ipairs(gap_glue_ids) do
+        reaper.DeleteProjectMarkerByIndex(0, reaper.GetProjectMarkerByIndex(0, id, false, 0, 0, "") or -1)
+      end
+      -- Alternative cleanup: delete by ID directly
+      for _, id in ipairs(gap_glue_ids) do
+        reaper.DeleteProjectMarker(0, id, false)
+      end
+    end
 
     -- Find glued item
     local glued = find_item_by_span_on_track(tr, u.start, u.finish, 0.002)
