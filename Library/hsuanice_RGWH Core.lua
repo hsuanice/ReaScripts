@@ -1,6 +1,6 @@
 --[[]
 @description RGWH Core - Render or Glue with Handles
-@version 0.1.0-beta (251121.1635)
+@version 0.1.0-beta (251121.1850)
 @author hsuanice
 @about
   Core library for handle-aware Render/Glue workflows with clear, single-entry API.
@@ -59,6 +59,11 @@
   • For detailed operation modes guide, see RGWH GUI: Help > Manual (Operation Modes)
 
 @changelog
+  0.1.0-beta (251121.1850) - FIX: GAP unit glue cue marker cleanup
+    - Issue: Temporary project markers sometimes not removed after GAP unit glue
+    - Root cause: Used incorrect DeleteProjectMarkerByIndex API instead of remove_markers_by_ids()
+    - Solution: Use existing remove_markers_by_ids() function for consistent cleanup
+
   0.1.0-beta (251121.1635) - FIX: GAP unit (TS Glue) now writes glue media cues
     - Issue: When using TS Glue with gaps between items, #Glue: cues were not written
     - Root cause: GAP unit block returned early before glue cue logic could execute
@@ -1730,14 +1735,9 @@ local function glue_unit(tr, u, cfg)
     r.Main_OnCommand(ACT_GLUE_TS, 0)
 
     -- Clean up project markers (now embedded in media)
-    if gap_glue_ids then
-      for _, id in ipairs(gap_glue_ids) do
-        reaper.DeleteProjectMarkerByIndex(0, reaper.GetProjectMarkerByIndex(0, id, false, 0, 0, "") or -1)
-      end
-      -- Alternative cleanup: delete by ID directly
-      for _, id in ipairs(gap_glue_ids) do
-        reaper.DeleteProjectMarker(0, id, false)
-      end
+    if gap_glue_ids and #gap_glue_ids > 0 then
+      remove_markers_by_ids(gap_glue_ids)
+      if DBG >= 2 then dbg(DBG,2,"[GLUE-CUE] GAP removed %d temp markers.", #gap_glue_ids) end
     end
 
     -- Find glued item
