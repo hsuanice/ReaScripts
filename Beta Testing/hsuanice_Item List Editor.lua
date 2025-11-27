@@ -1,6 +1,6 @@
 --[[
 @description Item List Editor
-@version 251127.1630
+@version 251127.2100
 @author hsuanice
 @about
   Shows a live, spreadsheet-style table of the currently selected items and all
@@ -42,6 +42,21 @@
 
 
 @changelog
+  v251127.2100
+  - Feature: Font size adjustment with full UI scaling
+    • Added Font Size submenu in Options menu
+    • Adjustable from 50% to 300% (9 preset sizes)
+    • Current size marked with checkmark (✓)
+    • Preference persisted via ExtState (survives REAPER restart)
+    • Font changes apply immediately within same session
+    • Auto-scales ALL UI elements proportionally:
+      - Button widths and heights (24 buttons scaled)
+      - Table column widths (31 columns scaled)
+      - Input field widths and heights (7 fields scaled)
+      - Table height and padding/spacing
+    • Recommended range: 75% - 200% for optimal experience
+    • Makes text easier to read for users with vision difficulties
+
   v251127.1630
   - Feature: Added Cut shortcut (Cmd/Ctrl+X)
     • Works like Excel/Sheets: copies selection to clipboard, then deletes content
@@ -1539,6 +1554,25 @@ else
   reaper.ShowConsoleMsg("[ILE] ERROR: Failed to create ImGui context!\n")
 end
 
+-- Font size management (uses PushFont/PopFont in main loop)
+local current_font_size = 13  -- Default size
+local font_pushed_this_frame = false  -- Track if we pushed font this frame
+
+local function set_font_size(size)
+  current_font_size = size or 13
+  -- console_force(string.format("[ILE Font] Font size set to: %d\n", current_font_size))
+end
+
+-- Get the scale factor for UI elements (buttons, spacing, etc.)
+local function get_ui_scale()
+  return current_font_size / 13.0
+end
+
+-- Helper function to scale UI dimensions (width, height, etc.)
+local function scale(value)
+  return math.floor(value * get_ui_scale())
+end
+
 local LIBVER = (META and META.VERSION) and (' | Metadata Read v'..tostring(META.VERSION)) or ''
 local FLT_MIN = 1.175494e-38
 local function TF(name) local f = reaper[name]; return f and f() or 0 end
@@ -1563,7 +1597,7 @@ local POPUP_TITLE = "Summary"
 ---------------------------------------
 
 -- Forward declarations so load_prefs() updates the same locals (not globals)
-local TIME_MODE, CUSTOM_PATTERN, FORMAT, AUTO
+local TIME_MODE, CUSTOM_PATTERN, FORMAT, AUTO, FONT_SCALE
 local SHOW_MUTED_ITEMS      -- ← 新增：是否顯示「被靜音的列」
 local scan_selection_rows
 local refresh_now          -- ← 新增：先宣告 refresh_now，讓上面函式抓到 local
@@ -1646,6 +1680,7 @@ local function save_prefs()
   reaper.SetExtState(EXT_NS, "custom_pattern", CUSTOM_PATTERN or "", true)
   reaper.SetExtState(EXT_NS, "auto_refresh", AUTO and "1" or "0", true)
   reaper.SetExtState(EXT_NS, "console_output", CONSOLE.enabled and "1" or "0", true)
+  reaper.SetExtState(EXT_NS, "font_scale", tostring(FONT_SCALE or 1.0), true)
 end
 
 -- ===== BEGIN Column Presets (named) =====
@@ -1987,6 +2022,15 @@ local function load_prefs()
     CONSOLE.enabled = false
   elseif c == "1" then
     CONSOLE.enabled = true
+  end
+
+  -- restore font scale preference
+  local fs = reaper.GetExtState(EXT_NS, "font_scale")
+  if fs and fs ~= "" then
+    local scale = tonumber(fs)
+    if scale and scale >= 0.5 and scale <= 3.0 then
+      FONT_SCALE = scale
+    end
   end
 
   -- Column presets (named) — initialize index and optionally recall last active
@@ -2805,6 +2849,7 @@ TABLE_SOURCE = "live"   -- "live"
 -- Display mode state (persisted)
 TIME_MODE = TFLib.MODE.MS        -- Default m:s; load_prefs() will override
 CUSTOM_PATTERN = "hh:mm:ss"
+FONT_SCALE = 1.0                 -- Default 1.0 (100%); load_prefs() will override
 
 -- Data
 ROWS = {}
@@ -3557,6 +3602,11 @@ end
 -- 啟動時讀回上次的模式與 pattern，並重建 FORMAT
 if load_prefs then load_prefs() end
 
+-- Set font size after loading preferences
+if set_font_size and FONT_SCALE then
+  local size = math.floor(13 * FONT_SCALE)
+  set_font_size(size)
+end
 
 
 local function build_summary_text(rows)
@@ -3585,16 +3635,16 @@ local function draw_summary_popup()
     local txt = build_summary_text(rows)
 
     -- 可選可複製：用唯讀的多行輸入框
-    reaper.ImGui_SetNextItemWidth(ctx, 560)
-    reaper.ImGui_InputTextMultiline(ctx, "##summary_text", txt, 560, 200,
+    reaper.ImGui_SetNextItemWidth(ctx, scale(560))
+    reaper.ImGui_InputTextMultiline(ctx, "##summary_text", txt, scale(560), scale(200),
       reaper.ImGui_InputTextFlags_ReadOnly())
 
     -- Copy / OK
-    if reaper.ImGui_Button(ctx, "Copy", 80, 24) then
+    if reaper.ImGui_Button(ctx, "Copy", scale(80), scale(24)) then
       reaper.ImGui_SetClipboardText(ctx, txt)
     end
     reaper.ImGui_SameLine(ctx)
-    if reaper.ImGui_Button(ctx, "OK", 80, 24)
+    if reaper.ImGui_Button(ctx, "OK", scale(80), scale(24))
        or reaper.ImGui_IsKeyPressed(ctx, reaper.ImGui_Key_Escape()) then
       reaper.ImGui_CloseCurrentPopup(ctx)
     end
@@ -3630,7 +3680,7 @@ local function draw_advanced_sort_popup()
     ADVANCED_SORT_STATE.combo_preview = header_label_from_id(ADVANCED_SORT_STATE.selected_col_id) or "Column " .. ADVANCED_SORT_STATE.selected_col_id
 
     -- Combo box
-    reaper.ImGui_SetNextItemWidth(ctx, 200)
+    reaper.ImGui_SetNextItemWidth(ctx, scale(200))
     if reaper.ImGui_BeginCombo(ctx, "##add_col_combo", ADVANCED_SORT_STATE.combo_preview) then
       for _, col_id in ipairs(available_cols) do
         local label = header_label_from_id(col_id) or "Column " .. col_id
@@ -3647,7 +3697,7 @@ local function draw_advanced_sort_popup()
 
     -- Add button
     reaper.ImGui_SameLine(ctx)
-    if reaper.ImGui_Button(ctx, "+ Add", 60, 24) then
+    if reaper.ImGui_Button(ctx, "+ Add", scale(60), scale(24)) then
       -- Check if column already exists in sort
       local already_exists = false
       for _, sort_col in ipairs(SORT_STATE.columns) do
@@ -3716,19 +3766,19 @@ local function draw_advanced_sort_popup()
     reaper.ImGui_Separator(ctx)
 
     -- Buttons
-    if reaper.ImGui_Button(ctx, "Clear All", 100, 24) then
+    if reaper.ImGui_Button(ctx, "Clear All", scale(100), scale(24)) then
       SORT_STATE.columns = {}
       -- Don't sort yet - just clear the state
     end
 
     reaper.ImGui_SameLine(ctx)
-    if reaper.ImGui_Button(ctx, "Apply", 100, 24) then
+    if reaper.ImGui_Button(ctx, "Apply", scale(100), scale(24)) then
       sort_rows_by_state(ROWS)
       reaper.ImGui_CloseCurrentPopup(ctx)
     end
 
     reaper.ImGui_SameLine(ctx)
-    if reaper.ImGui_Button(ctx, "Close", 100, 24)
+    if reaper.ImGui_Button(ctx, "Close", scale(100), scale(24))
        or reaper.ImGui_IsKeyPressed(ctx, reaper.ImGui_Key_Escape()) then
       reaper.ImGui_CloseCurrentPopup(ctx)
     end
@@ -3814,7 +3864,7 @@ end
 reaper.ImGui_SameLine(ctx)
 reaper.ImGui_Text(ctx, "Pattern:")
 reaper.ImGui_SameLine(ctx)
-reaper.ImGui_SetNextItemWidth(ctx, 180)
+reaper.ImGui_SetNextItemWidth(ctx, scale(180))
 local changed, newpat = reaper.ImGui_InputText(ctx, "##custom_pattern", CUSTOM_PATTERN)
 if changed then
   CUSTOM_PATTERN = newpat
@@ -3834,7 +3884,7 @@ end
 
 -- Scan Project Items button (moved to first row)
 reaper.ImGui_SameLine(ctx)
-if reaper.ImGui_Button(ctx, "Scan Project Items", 130, 24) then
+if reaper.ImGui_Button(ctx, "Scan Project Items", scale(130), scale(24)) then
   -- Show confirmation dialog
   local total_items = 0
   local track_count = reaper.CountTracks(0)
@@ -3891,7 +3941,7 @@ end
 
 -- Cache management button (moved to first row)
 reaper.ImGui_SameLine(ctx)
-if reaper.ImGui_Button(ctx, "Clear Cache", 100, 24) then
+if reaper.ImGui_Button(ctx, "Clear Cache", scale(100), scale(24)) then
   -- Show confirmation dialog
   local cached_count = 0
   if CACHE.data and CACHE.data.items then
@@ -3936,7 +3986,7 @@ end
 
 -- Options button (moved from Clear Cache right-click menu)
 reaper.ImGui_SameLine(ctx)
-if reaper.ImGui_Button(ctx, "Options", 70, 24) then
+if reaper.ImGui_Button(ctx, "Options", scale(70), scale(24)) then
   reaper.ImGui_OpenPopup(ctx, "##options_menu")
 end
 if reaper.ImGui_IsItemHovered(ctx) then
@@ -4059,11 +4109,42 @@ if reaper.ImGui_BeginPopup(ctx, "##options_menu") then
     reaper.ShowMessageBox("Cache test report printed to console.\n\nCheck the REAPER console for detailed results.", "Cache Test Report", 0)
   end
 
+  -- Separator before font size
+  reaper.ImGui_Separator(ctx)
+
+  -- Font Size submenu
+  if reaper.ImGui_BeginMenu(ctx, "Font Size") then
+    local sizes = {
+      {label = "50%",  scale = 0.5},
+      {label = "75%",  scale = 0.75},
+      {label = "100% (Default)", scale = 1.0},
+      {label = "125%", scale = 1.25},
+      {label = "150%", scale = 1.5},
+      {label = "175%", scale = 1.75},
+      {label = "200%", scale = 2.0},
+      {label = "250%", scale = 2.5},
+      {label = "300%", scale = 3.0},
+    }
+
+    for _, size in ipairs(sizes) do
+      local is_current = (math.abs((FONT_SCALE or 1.0) - size.scale) < 0.01)
+      local label = is_current and ("✓ " .. size.label) or ("  " .. size.label)
+      if reaper.ImGui_Selectable(ctx, label) then
+        FONT_SCALE = size.scale
+        local font_size = math.floor(13 * FONT_SCALE)
+        save_prefs()
+        set_font_size(font_size)  -- Set new font size
+      end
+    end
+
+    reaper.ImGui_EndMenu(ctx)
+  end
+
   reaper.ImGui_EndPopup(ctx)
 end
 
 -- Second row starts here
-if reaper.ImGui_Button(ctx, "Refresh Now", 110, 24) then
+if reaper.ImGui_Button(ctx, "Refresh Now", scale(110), scale(24)) then
   TABLE_SOURCE = "live"
   refresh_now()  -- Force immediate full refresh (bypasses progressive loading)
 end
@@ -4075,7 +4156,7 @@ end
 
 -- Fit Content Widths button
 reaper.ImGui_SameLine(ctx)
-if reaper.ImGui_Button(ctx, "Fit Content Widths", 130, 24) then
+if reaper.ImGui_Button(ctx, "Fit Content Widths", scale(130), scale(24)) then
   FIT_CONTENT_WIDTH = true  -- Flag to fit content widths on next frame
 end
 -- Right-click for width options menu
@@ -4099,7 +4180,7 @@ end
 
 -- Advanced Sort button
 reaper.ImGui_SameLine(ctx)
-if reaper.ImGui_Button(ctx, "Advanced Sort...", 120, 24) then
+if reaper.ImGui_Button(ctx, "Advanced Sort...", scale(120), scale(24)) then
   reaper.ImGui_OpenPopup(ctx, "Advanced Sort")
 end
 if reaper.ImGui_IsItemHovered(ctx) then
@@ -4111,7 +4192,7 @@ if reaper.ImGui_IsItemHovered(ctx) then
 end
 
 reaper.ImGui_SameLine(ctx)
-if reaper.ImGui_Button(ctx, "Copy (TSV)", 110, 24) then
+if reaper.ImGui_Button(ctx, "Copy (TSV)", scale(110), scale(24)) then
   local rows = get_view_rows()
   local text = LT.build_table_text(
     "tsv",
@@ -4138,7 +4219,7 @@ end
 
 
 reaper.ImGui_SameLine(ctx)
-if reaper.ImGui_Button(ctx, "Save .tsv", 100, 24) then
+if reaper.ImGui_Button(ctx, "Save .tsv", scale(100), scale(24)) then
   local p = choose_save_path("Item List_"..timestamp()..".tsv","Tab-separated (*.tsv)\0*.tsv\0All (*.*)\0*.*\0")
   if p then
     local rows = get_view_rows()
@@ -4154,7 +4235,7 @@ if reaper.ImGui_Button(ctx, "Save .tsv", 100, 24) then
 
 end
 reaper.ImGui_SameLine(ctx)
-if reaper.ImGui_Button(ctx, "Save .csv", 100, 24) then
+if reaper.ImGui_Button(ctx, "Save .csv", scale(100), scale(24)) then
   local p = choose_save_path("Item List_"..timestamp()..".csv","CSV (*.csv)\0*.csv\0All (*.*)\0*.*\0")
   if p then
     local rows = get_view_rows()
@@ -4182,7 +4263,7 @@ reaper.ImGui_SameLine(ctx)
 do
   local current = ACTIVE_PRESET or "(none)"
   -- 固定預覽欄位寬度，避免太長
-  reaper.ImGui_SetNextItemWidth(ctx, 160)
+  reaper.ImGui_SetNextItemWidth(ctx, scale(160))
   -- 控制彈出高度不要過長（可捲動）
   if reaper.ImGui_BeginCombo(ctx, "##colpreset_combo", current, reaper.ImGui_ComboFlags_HeightRegular()) then
     -- "(none)"：清空預設，不套用任何儲存的順序
@@ -4207,13 +4288,13 @@ end
 
 -- 「Edit...」：打開 Preset Editor
 reaper.ImGui_SameLine(ctx)
-if reaper.ImGui_Button(ctx, "Edit...", 68, 24) then
+if reaper.ImGui_Button(ctx, "Edit...", scale(68), scale(24)) then
   reaper.ImGui_OpenPopup(ctx, "Column Preset Editor")
 end
 
 -- 「Save as…」：用使用者自訂名稱另存
 reaper.ImGui_SameLine(ctx)
-if reaper.ImGui_Button(ctx, "Save as…", 88, 24) then
+if reaper.ImGui_Button(ctx, "Save as…", scale(88), scale(24)) then
   PRESET_NAME_BUF = ACTIVE_PRESET or PRESET_NAME_BUF or ""
   reaper.ImGui_OpenPopup(ctx, "Save preset as")
 end
@@ -4222,7 +4303,7 @@ end
 reaper.ImGui_SameLine(ctx)
 local can_delete = (ACTIVE_PRESET and ACTIVE_PRESET~="")
 if reaper.ImGui_BeginDisabled(ctx, not can_delete) then end
-if reaper.ImGui_Button(ctx, "Delete", 68, 24) and can_delete then
+if reaper.ImGui_Button(ctx, "Delete", scale(68), scale(24)) and can_delete then
   preset_delete(ACTIVE_PRESET)
 end
 if reaper.ImGui_EndDisabled then reaper.ImGui_EndDisabled(ctx) end
@@ -4234,12 +4315,12 @@ reaper.ImGui_TextDisabled(ctx, PRESET_STATUS or "")
 -- Save-as modal
 if reaper.ImGui_BeginPopupModal(ctx, "Save preset as", true, TF('ImGui_WindowFlags_AlwaysAutoResize')) then
   reaper.ImGui_Text(ctx, "Preset name:")
-  reaper.ImGui_SetNextItemWidth(ctx, 220)
+  reaper.ImGui_SetNextItemWidth(ctx, scale(220))
   PRESET_NAME_BUF = PRESET_NAME_BUF or ""
   local changed, txt = reaper.ImGui_InputText(ctx, "##presetname", PRESET_NAME_BUF)
   if changed then PRESET_NAME_BUF = txt end
 
-  if reaper.ImGui_Button(ctx, "Save", 82, 24) then
+  if reaper.ImGui_Button(ctx, "Save", scale(82), scale(24)) then
     -- Use pending visibility map if available (from Preset Editor), otherwise nil (legacy mode)
     if preset_save_as(PRESET_NAME_BUF, COL_ORDER, PENDING_VISIBILITY_MAP) then
       PENDING_VISIBILITY_MAP = nil  -- Clear after use
@@ -4247,7 +4328,7 @@ if reaper.ImGui_BeginPopupModal(ctx, "Save preset as", true, TF('ImGui_WindowFla
     end
   end
   reaper.ImGui_SameLine(ctx)
-  if reaper.ImGui_Button(ctx, "Cancel", 82, 24) then
+  if reaper.ImGui_Button(ctx, "Cancel", scale(82), scale(24)) then
     PENDING_VISIBILITY_MAP = nil  -- Clear on cancel
     reaper.ImGui_CloseCurrentPopup(ctx)
   end
@@ -4381,7 +4462,7 @@ if reaper.ImGui_BeginPopupModal(ctx, "Column Preset Editor", true, TF('ImGui_Win
   reaper.ImGui_Separator(ctx)
 
   -- Reset to default button
-  if reaper.ImGui_Button(ctx, "Reset to Default", 140, 24) then
+  if reaper.ImGui_Button(ctx, "Reset to Default", scale(140), scale(24)) then
     -- Reset to default column order (all 31 columns)
     local reset_order = {
       1, 2, 3, 12, 13, 31, 4, 5, 6, 7, 8, 9, 10, 11,  -- Basic + Time + Length + Status
@@ -4404,7 +4485,7 @@ if reaper.ImGui_BeginPopupModal(ctx, "Column Preset Editor", true, TF('ImGui_Win
   reaper.ImGui_Separator(ctx)
 
   -- Bottom buttons
-  if reaper.ImGui_Button(ctx, "Apply", 82, 24) then
+  if reaper.ImGui_Button(ctx, "Apply", scale(82), scale(24)) then
     -- Apply to current session (update COL_ORDER and COL_VISIBILITY)
     COL_ORDER = {}
     COL_POS = {}
@@ -4421,7 +4502,7 @@ if reaper.ImGui_BeginPopupModal(ctx, "Column Preset Editor", true, TF('ImGui_Win
   end
 
   reaper.ImGui_SameLine(ctx)
-  if reaper.ImGui_Button(ctx, "Save & Apply", 120, 24) then
+  if reaper.ImGui_Button(ctx, "Save & Apply", scale(120), scale(24)) then
     -- Save to active preset and apply
     COL_ORDER = {}
     COL_POS = {}
@@ -4452,7 +4533,7 @@ if reaper.ImGui_BeginPopupModal(ctx, "Column Preset Editor", true, TF('ImGui_Win
   end
 
   reaper.ImGui_SameLine(ctx)
-  if reaper.ImGui_Button(ctx, "Cancel", 82, 24) then
+  if reaper.ImGui_Button(ctx, "Cancel", scale(82), scale(24)) then
     PRESET_EDITOR_STATE = nil
     reaper.ImGui_CloseCurrentPopup(ctx)
   end
@@ -4610,7 +4691,7 @@ local function draw_table(rows, height)
       end
 
       local col_flags = reaper.ImGui_TableColumnFlags_WidthFixed()
-      reaper.ImGui_TableSetupColumn(ctx, label, col_flags, width)
+      reaper.ImGui_TableSetupColumn(ctx, label, col_flags, scale(width))
     end
 
     -- Setup columns based on current order
@@ -5087,6 +5168,23 @@ local function loop()
   local visible, open = reaper.ImGui_Begin(ctx, "Item List Editor"..LIBVER, true, flags)
 
   if visible then
+    -- Push custom font size if not default (track this frame's state)
+    font_pushed_this_frame = false
+    local style_pushed = false
+    if current_font_size ~= 13 and reaper.ImGui_PushFont then
+      local scale = get_ui_scale()
+      reaper.ImGui_PushFont(ctx, nil, current_font_size)
+      font_pushed_this_frame = true
+
+      -- Also scale all UI elements proportionally
+      if reaper.ImGui_PushStyleVar and reaper.ImGui_StyleVar_FramePadding then
+        reaper.ImGui_PushStyleVar(ctx, reaper.ImGui_StyleVar_FramePadding(), 4.0 * scale, 3.0 * scale)
+        reaper.ImGui_PushStyleVar(ctx, reaper.ImGui_StyleVar_ItemSpacing(), 8.0 * scale, 4.0 * scale)
+        reaper.ImGui_PushStyleVar(ctx, reaper.ImGui_StyleVar_ItemInnerSpacing(), 4.0 * scale, 4.0 * scale)
+        style_pushed = true
+      end
+    end
+
     -- Skip all content on first frame to avoid ImGui context initialization issues
     if FRAME_COUNT > 1 then
       -- Smart refresh (after ImGui window is created)
@@ -5120,7 +5218,7 @@ local function loop()
 
       -- Use get_view_rows() to respect "Show muted items" toggle
       local rows_to_show = get_view_rows()
-      draw_table(rows_to_show, 360)
+      draw_table(rows_to_show, scale(360))
 
       -- Clipboard shortcuts (when NOT in InputText editing)
       if not (EDIT and EDIT.col) then
@@ -5321,6 +5419,16 @@ local function loop()
       end  -- End of: if window focused/hovered
 
     end  -- End of: if FRAME_COUNT > 1
+
+    -- Pop style vars if we pushed them
+    if style_pushed and reaper.ImGui_PopStyleVar then
+      reaper.ImGui_PopStyleVar(ctx, 3)  -- Pop 3 style vars
+    end
+
+    -- Pop font if we pushed one this frame
+    if font_pushed_this_frame and reaper.ImGui_PopFont then
+      reaper.ImGui_PopFont(ctx)
+    end
   end  -- End of: if visible then
 
   reaper.ImGui_End(ctx)
