@@ -1,6 +1,6 @@
 --[[
 @description Item List Editor
-@version 251127.2100
+@version 251127.2150
 @author hsuanice
 @about
   Shows a live, spreadsheet-style table of the currently selected items and all
@@ -42,6 +42,16 @@
 
 
 @changelog
+  v251127.2150
+  - Feature: Responsive window and table layout
+    • GUI window is now freely resizable by user
+    • Table automatically adjusts to fill available space
+    • Table height dynamically calculated using GetCursorPosY() for precise toolbar height
+    • Minimal bottom padding (8px) maximizes usable table space
+    • Both width and height scale with window size changes
+    • No wasted space at bottom of window
+    • Improves usability on different screen sizes and resolutions
+
   v251127.2100
   - Feature: Font size adjustment with full UI scaling
     • Added Font Size submenu in Options menu
@@ -4650,8 +4660,9 @@ local function draw_table(rows, height)
     reaper.ShowConsoleMsg("[ILE] Fitted content widths (counter: " .. RESET_COUNTER .. ")\n")
   end
 
-  -- Use specific height for ScrollY to work properly
-  local outer_height = height or 360
+  -- Use dynamic height (fills remaining space) or fallback to 360
+  -- If height is provided (not nil), use it; otherwise use -1 (fill available space)
+  local outer_height = height or -1
   if reaper.ImGui_BeginTable(ctx, table_id, 31, flags, 0, outer_height) then
     -- Use existing COL_ORDER for header rendering; use default if not set yet
     -- Default order: Basic info, Time, Metadata (BWF), Metadata (iXML), Status
@@ -5167,6 +5178,9 @@ local function loop()
   local flags = reaper.ImGui_WindowFlags_NoCollapse()
   local visible, open = reaper.ImGui_Begin(ctx, "Item List Editor"..LIBVER, true, flags)
 
+  -- Get current window size for responsive layout
+  local win_w, win_h = reaper.ImGui_GetWindowSize(ctx)
+
   if visible then
     -- Push custom font size if not default (track this frame's state)
     font_pushed_this_frame = false
@@ -5216,9 +5230,15 @@ local function loop()
       draw_summary_popup()   -- ← 要保留這行
       draw_advanced_sort_popup()  -- Advanced Sort dialog
 
+      -- Calculate table height: window height minus toolbar and minimal padding
+      -- Use GetCursorPosY to get actual toolbar height instead of estimating
+      local toolbar_end_y = reaper.ImGui_GetCursorPosY(ctx)
+      local bottom_padding = scale(8)  -- Minimal padding at bottom
+      local table_height = win_h - toolbar_end_y - bottom_padding
+
       -- Use get_view_rows() to respect "Show muted items" toggle
       local rows_to_show = get_view_rows()
-      draw_table(rows_to_show, scale(360))
+      draw_table(rows_to_show, table_height)
 
       -- Clipboard shortcuts (when NOT in InputText editing)
       if not (EDIT and EDIT.col) then
