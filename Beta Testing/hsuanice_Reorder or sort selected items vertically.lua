@@ -1,6 +1,6 @@
 --[[
 @description ReaImGui - Vertical Reorder and Sort (items)
-@version 250925_1038 change UI namming display
+@version 251127.1700
 @author hsuanice
 @about
   Provides three vertical re-arrangement modes for selected items (stacked UI):
@@ -29,6 +29,14 @@
 
 
 @changelog
+  v251127.1700
+  - Cleanup: Removed Monitor auto-capture feature
+    • Removed "Monitor auto-capture" checkbox from GUI
+    • Removed request_capture() function and all related handshake logic
+    • Removed CAPTURE_ON preference and set_capture_enabled() function
+    • Removed cross-script ExtState signaling (SIG_NS namespace)
+    • Simplified codebase - focus on core reorder/sort functionality
+
   v250925_1038 change UI namming display
   v250921_1819
     - Preferences are now persisted via ExtState:
@@ -237,30 +245,6 @@ local function path_basename(p) p=tostring(p or ""); return p:match("([^/\\]+)$"
 
 
 
--- === Cross-script signal for Monitor auto-capture ===
-local SIG_NS = "hsuanice_ReorderSort_Signal"
-
-local function request_capture(tag, timeout_sec)
-  if not CAPTURE_ON then return end
-  local req_key = (tag == "before") and "req_before" or "req_after"
-  local ack_key = (tag == "before") and "ack_before" or "ack_after"
-  local token = string.format("%.6f", reaper.time_precise())
-
-  -- 清掉上一筆 ACK，送出請求
-  reaper.DeleteExtState(SIG_NS, ack_key, true)
-  reaper.SetExtState(SIG_NS, req_key, token, false)
-
-  -- 等待 Monitor 回 ACK（最長 0.5 秒）
-  local deadline = reaper.time_precise() + (timeout_sec or 0.5)
-  while reaper.time_precise() < deadline do
-    if reaper.GetExtState(SIG_NS, ack_key) == token then
-      reaper.DeleteExtState(SIG_NS, ack_key, true)
-      return true
-    end
-  end
-  return false  -- 超時也放行，不阻塞工作流
-end
-
 -- === Persist user preferences ===
 local PREF_NS = "hsuanice_ReorderSort_Prefs"
 
@@ -277,21 +261,6 @@ local function load_pref(key, default)
     return num or v
   end
 end
-
--- === Monitor auto-capture preference ===
-local CAPTURE_ON = (reaper.GetExtState(SIG_NS, "enable") == "1")
-
-local function set_capture_enabled(on)
-  CAPTURE_ON = not not on
-  -- 持久化，重開 REAPER 仍保留
-  reaper.SetExtState(SIG_NS, "enable", CAPTURE_ON and "1" or "0", true)
-end
-
-
-
-
--- 記憶使用者偏好（你現有的 CAPTURE_ON / set_capture_enabled 保留）
--- ...
 
 
 -- 複製單一 item 到指定軌道（保留位置/長度/靜音/顏色/音量/淡入淡出；複製「現用 take」的來源與參數）
@@ -671,12 +640,9 @@ local snapshot_rows_tsv
 -- asc        : true=Ascending, false=Descending
 -- append_secondary : 若 name_mode=2（Channel#命名），於 TCP 名稱後附加最常見 Track Name
 local function run_copy_to_new_tracks(name_mode, order_mode, asc, append_secondary)
-  -- 1) 請 Monitor 先抓 BEFORE
-  request_capture("before")
-
   reaper.Undo_BeginBlock()
 
-  -- 2) 取目前選取 items，抽出 metadata（與 Monitor 一致）
+  -- 2) 取目前選取 items，抽出 metadata
   local items = get_selected_items()
   local rows = {}
   for _, it in ipairs(items) do
@@ -820,9 +786,6 @@ local function run_copy_to_new_tracks(name_mode, order_mode, asc, append_seconda
   reaper.Undo_EndBlock("Copy selected items to NEW tracks by metadata", -1)
   reaper.UpdateArrange()
 
-  -- 6) 請 Monitor 抓 AFTER
-  request_capture("after")
-
   return { tracks_created = #created, items_copied = copied, overlaps = overlaps }
 end
 
@@ -948,7 +911,7 @@ function snapshot_rows_tsv(items)
     return s
   end
 
-  -- header（與 Monitor 匯出一致）
+  -- TSV header
   out[#out+1] = table.concat({
     "#","TrackIdx","TrackName","TakeName","Source File",
     "MetaTrackName","Channel#","Interleave","Mute","ColorHex","StartTime","EndTime"
@@ -976,7 +939,7 @@ function snapshot_rows_tsv(items)
       hex = string.format("#%02X%02X%02X", r,g,b)
     end
 
-    -- 這兩個先留空或 1（Monitor 可顯示，但不影響）
+    -- Metadata fields
     local meta_trk = tname or ""
     local interleave = ""
     local chnum = 1
@@ -1004,7 +967,6 @@ end
 
 
 local function run_engine()
-  request_capture("before")          -- ★ 先請 Monitor 抓 BEFORE
   reaper.Undo_BeginBlock()
   apply_moves(MOVES)
   MOVED = #MOVES
@@ -1012,7 +974,6 @@ local function run_engine()
     "Reorder (fill upward) selected items" or
     "Sort selected items vertically", -1)
   reaper.UpdateArrange()
-  request_capture("after")           -- ★ 完成後請 Monitor 抓 AFTER
 end
 
 ---------------------------------------
@@ -1061,10 +1022,6 @@ local function draw_confirm()
   reaper.ImGui_Text(ctx, string.format("Selected: %d item(s) across %d track(s).", #SELECTED_ITEMS, #ACTIVE_TRACKS))
   reaper.ImGui_Spacing(ctx)
   reaper.ImGui_Spacing(ctx)
-
-  reaper.ImGui_SameLine(ctx)
-  local chg, v = reaper.ImGui_Checkbox(ctx, "Monitor auto-capture", CAPTURE_ON)
-  if chg then set_capture_enabled(v) end
 
   -- Draw result popup if needed
   draw_summary_popup()
