@@ -1,6 +1,6 @@
 --[[
 @description Item List Editor
-@version 251127.2315
+@version 251128.0110
 @author hsuanice
 @about
   Shows a live, spreadsheet-style table of the currently selected items and all
@@ -42,6 +42,14 @@
 
 
 @changelog
+  v251128.0110
+  - Enhancement: Auto-fit content width on preset change
+    • Preset dropdown automatically fits column widths when switching presets
+    • Preset Editor "Apply" button automatically fits column widths
+    • Preset Editor "Save & Apply" button automatically fits column widths
+    • Eliminates need to manually click "Fit Content Widths" after changing presets
+    • Ensures optimal column sizing for each preset's column configuration
+
   v251128.0100
   - Feature: User-configurable docking toggle in Options menu
     • Added "Allow Docking" option in Options menu (default: disabled)
@@ -4372,6 +4380,7 @@ do
       if reaper.ImGui_Selectable(ctx, name, selected) then
         ACTIVE_PRESET = name
         preset_recall(name)       -- ← 直接套用，不需要再按 Recall
+        FIT_CONTENT_WIDTH = true  -- 自動 fit content width
       end
     end
     reaper.ImGui_EndCombo(ctx)
@@ -4591,6 +4600,7 @@ if reaper.ImGui_BeginPopupModal(ctx, "Column Preset Editor", true, TF('ImGui_Win
     end
     PRESET_EDITOR_STATE.dirty = false
     PRESET_STATUS = "Applied (unsaved)"
+    FIT_CONTENT_WIDTH = true  -- 自動 fit content width
   end
 
   reaper.ImGui_SameLine(ctx)
@@ -4608,6 +4618,8 @@ if reaper.ImGui_BeginPopupModal(ctx, "Column Preset Editor", true, TF('ImGui_Win
         COL_POS[col.id] = #COL_ORDER
       end
     end
+
+    FIT_CONTENT_WIDTH = true  -- 自動 fit content width
 
     if ACTIVE_PRESET and ACTIVE_PRESET ~= "" then
       -- Update existing preset with visibility data
