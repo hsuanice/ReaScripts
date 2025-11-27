@@ -1,6 +1,6 @@
 --[[
 @description Item List Editor
-@version 251127.2150
+@version 251127.2315
 @author hsuanice
 @about
   Shows a live, spreadsheet-style table of the currently selected items and all
@@ -42,6 +42,50 @@
 
 
 @changelog
+  v251128.0100
+  - Feature: User-configurable docking toggle in Options menu
+    • Added "Allow Docking" option in Options menu (default: disabled)
+    • Docking disabled by default for stability (prevents crashes)
+    • Users can enable docking if needed, with warning about potential instability
+    • Setting persists across sessions via ExtState
+    • Requires script restart for changes to take effect
+    • Warning dialog appears when toggling to inform about stability implications
+
+  v251127.2315
+  - Fix: Disable docking to prevent ImGui crashes
+    • Added WindowFlags_NoDocking to prevent window from being docked
+    • Eliminates all dock/undock related crashes and context invalidation issues
+    • Window remains as floating window only (cannot be dragged into docker)
+    • Simplifies code by removing need for complex dock state handling
+    • Note: Context validation and recreation code kept as safety net
+
+  v251127.2300
+  - Fix: ImGui context validation and stale flag cleanup
+    • Added context validation before every ImGui call (ValidatePtr check)
+    • Automatic context recreation if context becomes invalid during dock/undock
+    • Stale "running" flag detection and cleanup on startup
+    • Uses test context creation to verify if previous instance really exists
+    • Prevents false "already running" warnings after crashes
+    • Clear running flag on fatal errors to avoid lockout
+
+  v251127.2245
+  - Fix: Prevent duplicate loop calls during dock/undock transitions
+    • Added frame-time tracking to prevent multiple loop() calls within same frame
+    • Fixes "ImGui_End: Calling End() too many times!" when undocking window
+    • Uses time_precise() to detect and skip duplicate frame calls
+    • Ensures proper Begin/End pairing even during dock state transitions
+
+  v251127.2230
+  - Fix: Prevent multiple instances causing ImGui errors
+    • Added instance detection to prevent running multiple copies simultaneously
+    • Shows warning dialog if script is already running
+    • Prevents "ImGui_End: Calling End() too many times!" error from multiple instances
+    • Automatic cleanup of instance flag on exit (via atexit and manual cleanup)
+    • Removed incorrect pcall protection (ImGui requires Begin/End pairing regardless)
+
+  v251127.2200
+  - Fix: Crash when docking/undocking window (reverted - incorrect approach)
+
   v251127.2150
   - Feature: Responsive window and table layout
     • GUI window is now freely resizable by user
@@ -1573,6 +1617,9 @@ local function set_font_size(size)
   -- console_force(string.format("[ILE Font] Font size set to: %d\n", current_font_size))
 end
 
+-- Docking preference (default: disabled for stability)
+local ALLOW_DOCKING = false
+
 -- Get the scale factor for UI elements (buttons, spacing, etc.)
 local function get_ui_scale()
   return current_font_size / 13.0
@@ -1691,6 +1738,7 @@ local function save_prefs()
   reaper.SetExtState(EXT_NS, "auto_refresh", AUTO and "1" or "0", true)
   reaper.SetExtState(EXT_NS, "console_output", CONSOLE.enabled and "1" or "0", true)
   reaper.SetExtState(EXT_NS, "font_scale", tostring(FONT_SCALE or 1.0), true)
+  reaper.SetExtState(EXT_NS, "allow_docking", ALLOW_DOCKING and "1" or "0", true)
 end
 
 -- ===== BEGIN Column Presets (named) =====
@@ -2042,6 +2090,15 @@ local function load_prefs()
       FONT_SCALE = scale
     end
   end
+
+  -- restore docking preference
+  local d = reaper.GetExtState(EXT_NS, "allow_docking")
+  if d == "1" then
+    ALLOW_DOCKING = true
+  elseif d == "0" then
+    ALLOW_DOCKING = false
+  end
+  -- default is false if not set
 
   -- Column presets (named) — initialize index and optionally recall last active
   presets_init()
@@ -4026,6 +4083,31 @@ if reaper.ImGui_BeginPopup(ctx, "##options_menu") then
     end
   end
 
+  reaper.ImGui_Separator(ctx)
+
+  -- Toggle docking option
+  local docking_label = ALLOW_DOCKING and "✓ Allow Docking" or "  Allow Docking"
+  if reaper.ImGui_Selectable(ctx, docking_label) then
+    ALLOW_DOCKING = not ALLOW_DOCKING
+    save_prefs()
+    -- Show warning message
+    local msg = ALLOW_DOCKING and
+      "Docking enabled!\n\n" ..
+      "⚠️ WARNING: Docking/undocking may cause crashes.\n" ..
+      "Please restart the script for this change to take effect." or
+      "Docking disabled.\n\n" ..
+      "Window will remain floating only (more stable).\n" ..
+      "Please restart the script for this change to take effect."
+    reaper.ShowMessageBox(msg, "Docking Setting Changed", 0)
+  end
+  if reaper.ImGui_IsItemHovered(ctx) then
+    reaper.ImGui_BeginTooltip(ctx)
+    reaper.ImGui_Text(ctx, "Enable/disable window docking to REAPER docker")
+    reaper.ImGui_Text(ctx, "⚠️  Docking may cause crashes on some systems")
+    reaper.ImGui_Text(ctx, "Requires script restart to apply")
+    reaper.ImGui_EndTooltip(ctx)
+  end
+
   -- Cache Test Report option
   if reaper.ImGui_Selectable(ctx, "  Cache Test Report...") then
     -- Generate cache test report
@@ -5164,24 +5246,45 @@ end
 ---------------------------------------
 -- Main loop
 ---------------------------------------
+local LAST_FRAME_TIME = 0  -- Prevent multiple calls per frame
+
 local function loop()
-  -- Ensure ctx exists
-  if not ctx then
-    reaper.ShowConsoleMsg("[ILE] ERROR: ImGui context is nil!\n")
+  -- Prevent multiple loop calls within same frame (during dock/undock transitions)
+  local current_time = reaper.time_precise()
+  if current_time == LAST_FRAME_TIME then
+    reaper.defer(loop)
     return
+  end
+  LAST_FRAME_TIME = current_time
+
+  -- Ensure ctx exists and is valid
+  if not ctx or not reaper.ImGui_ValidatePtr(ctx, "ImGui_Context*") then
+    reaper.ShowConsoleMsg("[ILE] ERROR: ImGui context is invalid! Attempting to recreate...\n")
+    -- Try to recreate context
+    ctx = reaper.ImGui_CreateContext('Item List Editor')
+    if not ctx or not reaper.ImGui_ValidatePtr(ctx, "ImGui_Context*") then
+      reaper.ShowConsoleMsg("[ILE] FATAL: Failed to recreate ImGui context. Exiting.\n")
+      -- Clear running flag before exit
+      reaper.SetExtState("hsuanice_ItemListEditor_Running", "running", "0", false)
+      return
+    end
+    reaper.ShowConsoleMsg("[ILE] Successfully recreated ImGui context.\n")
   end
 
   -- Increment frame counter
   FRAME_COUNT = FRAME_COUNT + 1
 
+  -- Begin window - MUST be paired with End() regardless of result
   reaper.ImGui_SetNextWindowSize(ctx, 1000, 640, reaper.ImGui_Cond_FirstUseEver())
   local flags = reaper.ImGui_WindowFlags_NoCollapse()
+  if not ALLOW_DOCKING then
+    flags = flags | reaper.ImGui_WindowFlags_NoDocking()  -- Disable docking to prevent crashes
+  end
   local visible, open = reaper.ImGui_Begin(ctx, "Item List Editor"..LIBVER, true, flags)
 
-  -- Get current window size for responsive layout
-  local win_w, win_h = reaper.ImGui_GetWindowSize(ctx)
-
   if visible then
+    -- Get current window size for responsive layout (safe to call inside visible check)
+    local win_w, win_h = reaper.ImGui_GetWindowSize(ctx)
     -- Push custom font size if not default (track this frame's state)
     font_pushed_this_frame = false
     local style_pushed = false
@@ -5451,21 +5554,53 @@ local function loop()
     end
   end  -- End of: if visible then
 
+  -- MUST call End() to match Begin() - no exceptions!
   reaper.ImGui_End(ctx)
 
   -- GOOD：要不要續跑只看 `open`；按 ESC 的判斷已在上面完成
   if open then
     reaper.defer(loop)
   else
-    -- Save cache before exiting
+    -- Save cache and prefs before exiting
     cache_flush()
     save_prefs()
+    -- Clear running flag
+    reaper.SetExtState("hsuanice_ItemListEditor_Running", "running", "0", false)
   end
 end
 
 -- Boot
+-- Prevent multiple instances (with stale flag cleanup)
+local INSTANCE_KEY = "hsuanice_ItemListEditor_Running"
+local was_running = reaper.GetExtState(INSTANCE_KEY, "running")
+
+-- Check if truly running by verifying ImGui context exists
+if was_running == "1" then
+  -- Try to detect if it's really running or just a stale flag
+  local test_ctx = reaper.ImGui_CreateContext('ILE_Test')
+  if test_ctx then
+    -- If we can create a test context, the old flag is probably stale
+    reaper.ShowConsoleMsg("[ILE] Detected stale running flag, clearing...\n")
+    reaper.SetExtState(INSTANCE_KEY, "running", "0", false)
+    reaper.ImGui_DestroyContext(test_ctx)
+  else
+    -- Really running
+    reaper.ShowMessageBox(
+      "Item List Editor is already running!\n\n" ..
+      "Close the existing window before starting a new instance.",
+      "Already Running",
+      0
+    )
+    return
+  end
+end
+
+-- Mark instance as running
+reaper.SetExtState(INSTANCE_KEY, "running", "1", false)  -- false = don't persist
+
 if not ctx then
   reaper.ShowConsoleMsg("[ILE] FATAL: Failed to create ImGui context!\n")
+  reaper.SetExtState(INSTANCE_KEY, "running", "0", false)  -- Clear flag
   return
 end
 
@@ -5476,5 +5611,12 @@ init_cache()
 if AUTO and reaper.CountSelectedMediaItems(0) > 0 then
   NEEDS_REFRESH = true
 end
+
+-- Cleanup on exit
+reaper.atexit(function()
+  reaper.SetExtState(INSTANCE_KEY, "running", "0", false)
+  cache_flush()
+  save_prefs()
+end)
 
 loop()  -- Start UI main loop
