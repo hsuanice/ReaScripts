@@ -1,6 +1,6 @@
 --[[
 @description Item List Editor
-@version 251114.2130
+@version 251127.1630
 @author hsuanice
 @about
   Shows a live, spreadsheet-style table of the currently selected items and all
@@ -42,6 +42,14 @@
 
 
 @changelog
+  v251127.1630
+  - Feature: Added Cut shortcut (Cmd/Ctrl+X)
+    • Works like Excel/Sheets: copies selection to clipboard, then deletes content
+    • Live view only (matches Paste and Delete behavior)
+    • Respects writable columns (Track Name, Take Name, Item Note)
+    • Creates single undo point for entire cut operation
+    • Completes clipboard workflow: Copy (Cmd+C), Cut (Cmd+X), Paste (Cmd+V)
+
   v251114.2130
   - Feature: Added Length column (total: 30→31 columns)
     • New column 31 displays item length in current time format
@@ -5126,6 +5134,22 @@ local function loop()
           )
           if tsv and tsv ~= "" then
             reaper.ImGui_SetClipboardText(ctx, tsv)
+          end
+        end
+
+        -- Cut selection (Copy + Delete, Live only)
+        if shortcut_pressed(reaper.ImGui_Key_X()) and TABLE_SOURCE == "live" then
+          -- First copy to clipboard
+          local rows = get_view_rows()
+          local rim  = LT.build_row_index_map(rows)
+          local tsv  = LT.copy_selection(
+            rows, rim, sel_has, COL_ORDER, COL_POS,
+            function(i, r, col) return get_cell_text(i, r, col, "tsv") end
+          )
+          if tsv and tsv ~= "" then
+            reaper.ImGui_SetClipboardText(ctx, tsv)
+            -- Then delete selected cells
+            delete_selected_cells()
           end
         end
 
