@@ -1,6 +1,6 @@
 --[[
 @description hsuanice_Review_Edges_Off_Grid
-@version 250928_0329
+@version 251203_1515
 @author hsuanice
 @about
   Scan all items in the project. If an item's left/right edge is not aligned to the chosen grid
@@ -12,6 +12,11 @@
   - Scope: all items in project (no selection required).
   - Console: summary + per-issue lines; uses ShowConsoleMsg (clears at start).
 @changelog
+  v251203_1515
+  - Crossfade protection: Skip edges with auto-crossfade (D_FADEINLEN_AUTO/D_FADEOUTLEN_AUTO) when items overlap on same track
+  - Fade endpoint preservation: All fade in/out points maintain their absolute timeline position when edges are adjusted
+  - Smart overlap detection: Only treats auto-fade as crossfade when items actually overlap; handles moved items correctly
+  - Content-locked strategy: When adjusting left edge, automatically compensates right edge position if it has auto-crossfade
   v250929_0329
   - Fixed-markers now placed slightly INSIDE the item edges using project-time inset (MARKER_EDGE_INSET_PROJ_SEC) so they remain visible even when the edge sits on the item boundary.
   - Keeps existing source-boundary inset (MARKER_INSET_SEC) as a secondary safeguard.
@@ -343,6 +348,137 @@ local function shift_all_takes_startoffs(item, delta_sec)
   end
 end
 
+-- Check if item has overlapping items on the same track (true crossfade situation)
+local function has_overlap_on_same_track(item)
+  local tr = r.GetMediaItem_Track(item)
+  if not tr then return false end
+
+  local pos = r.GetMediaItemInfo_Value(item, "D_POSITION") or 0
+  local len = r.GetMediaItemInfo_Value(item, "D_LENGTH") or 0
+  local item_end = pos + len
+
+  local n_items = r.CountTrackMediaItems(tr)
+  for i = 0, n_items - 1 do
+    local other = r.GetTrackMediaItem(tr, i)
+    if other and other ~= item then
+      local other_pos = r.GetMediaItemInfo_Value(other, "D_POSITION") or 0
+      local other_len = r.GetMediaItemInfo_Value(other, "D_LENGTH") or 0
+      local other_end = other_pos + other_len
+
+      -- Check if items overlap
+      if pos < other_end and item_end > other_pos then
+        return true
+      end
+    end
+  end
+  return false
+end
+
+-- Get fade endpoint in absolute project time (where fade in ends or fade out starts)
+-- Returns: endpoint time, or nil if no fade
+-- Checks BOTH manual fade and auto-crossfade
+local function get_fade_endpoint(item, is_left_edge)
+  local pos = r.GetMediaItemInfo_Value(item, "D_POSITION") or 0
+  local len = r.GetMediaItemInfo_Value(item, "D_LENGTH") or 0
+
+  if is_left_edge then
+    -- Fade-in: check both manual and auto-crossfade
+    local fadein_len = r.GetMediaItemInfo_Value(item, "D_FADEINLEN") or 0
+    local fadein_auto = r.GetMediaItemInfo_Value(item, "D_FADEINLEN_AUTO") or 0
+    local total_fadein = math.max(fadein_len, fadein_auto)
+    if total_fadein > 0 then
+      return pos + total_fadein
+    end
+  else
+    -- Fade-out: check both manual and auto-crossfade
+    local fadeout_len = r.GetMediaItemInfo_Value(item, "D_FADEOUTLEN") or 0
+    local fadeout_auto = r.GetMediaItemInfo_Value(item, "D_FADEOUTLEN_AUTO") or 0
+    local total_fadeout = math.max(fadeout_len, fadeout_auto)
+    if total_fadeout > 0 then
+      return pos + len - total_fadeout
+    end
+  end
+  return nil
+end
+
+-- Update fade length to preserve fade endpoint after edge adjustment
+-- Updates BOTH manual fade and auto-crossfade
+local function update_fade_to_preserve_endpoint(item, fade_endpoint, is_left_edge)
+  if not fade_endpoint then return end
+
+  local pos = r.GetMediaItemInfo_Value(item, "D_POSITION") or 0
+  local len = r.GetMediaItemInfo_Value(item, "D_LENGTH") or 0
+
+  if is_left_edge then
+    -- Get existing fade lengths
+    local fadein_len = r.GetMediaItemInfo_Value(item, "D_FADEINLEN") or 0
+    local fadein_auto = r.GetMediaItemInfo_Value(item, "D_FADEINLEN_AUTO") or 0
+
+    -- Recalculate fade-in length to keep endpoint at same position
+    local new_fadein_len = fade_endpoint - pos
+
+    if new_fadein_len > 0 and new_fadein_len <= len then
+      -- Update the fade that was originally active
+      if fadein_len > 0 then
+        r.SetMediaItemInfo_Value(item, "D_FADEINLEN", new_fadein_len)
+      end
+      if fadein_auto > 0 then
+        r.SetMediaItemInfo_Value(item, "D_FADEINLEN_AUTO", new_fadein_len)
+      end
+    elseif new_fadein_len > len then
+      -- Clamp to item length
+      if fadein_len > 0 then
+        r.SetMediaItemInfo_Value(item, "D_FADEINLEN", len)
+      end
+      if fadein_auto > 0 then
+        r.SetMediaItemInfo_Value(item, "D_FADEINLEN_AUTO", len)
+      end
+    else
+      -- Fade endpoint is now before item start, remove fade
+      if fadein_len > 0 then
+        r.SetMediaItemInfo_Value(item, "D_FADEINLEN", 0)
+      end
+      if fadein_auto > 0 then
+        r.SetMediaItemInfo_Value(item, "D_FADEINLEN_AUTO", 0)
+      end
+    end
+  else
+    -- Get existing fade lengths
+    local fadeout_len = r.GetMediaItemInfo_Value(item, "D_FADEOUTLEN") or 0
+    local fadeout_auto = r.GetMediaItemInfo_Value(item, "D_FADEOUTLEN_AUTO") or 0
+
+    -- Recalculate fade-out length to keep startpoint at same position
+    local item_end = pos + len
+    local new_fadeout_len = item_end - fade_endpoint
+
+    if new_fadeout_len > 0 and new_fadeout_len <= len then
+      -- Update the fade that was originally active
+      if fadeout_len > 0 then
+        r.SetMediaItemInfo_Value(item, "D_FADEOUTLEN", new_fadeout_len)
+      end
+      if fadeout_auto > 0 then
+        r.SetMediaItemInfo_Value(item, "D_FADEOUTLEN_AUTO", new_fadeout_len)
+      end
+    elseif new_fadeout_len > len then
+      -- Clamp to item length
+      if fadeout_len > 0 then
+        r.SetMediaItemInfo_Value(item, "D_FADEOUTLEN", len)
+      end
+      if fadeout_auto > 0 then
+        r.SetMediaItemInfo_Value(item, "D_FADEOUTLEN_AUTO", len)
+      end
+    else
+      -- Fade startpoint is now after item end, remove fade
+      if fadeout_len > 0 then
+        r.SetMediaItemInfo_Value(item, "D_FADEOUTLEN", 0)
+      end
+      if fadeout_auto > 0 then
+        r.SetMediaItemInfo_Value(item, "D_FADEOUTLEN_AUTO", 0)
+      end
+    end
+  end
+end
+
 -- Left-edge change with CONTENT LOCK: move item position and shift all takes' start offset by -Δ×rate; keep length unchanged.
 -- Positive delta → move start later (trim), Negative delta → move start earlier (extend).
 local function apply_left_delta_content_locked(item, take_hint, delta_sec)
@@ -493,15 +629,26 @@ local function check_item_edges_and_log(it, mode_title, added_counter)
   local tr_name = safe_trackname(tr)
   local tk_name = safe_takename(tk)
 
+  -- Save fade endpoints BEFORE any adjustment
+  local fadein_endpoint = get_fade_endpoint(it, true)
+  local fadeout_startpoint = get_fade_endpoint(it, false)
+
   local appliedL, appliedR = 0, 0
   if do_fix then
     if offL and targetL then
-      local deltaL = targetL - left_t
-      if trimmed_only and deltaL < 0 then
-        -- would extend; cancel in trim-only mode
-        deltaL = 0
-      end
-      if deltaL ~= 0 then
+      -- Check if left edge has auto-crossfade AND item actually overlaps (true crossfade)
+      local fadein_auto = r.GetMediaItemInfo_Value(it, "D_FADEINLEN_AUTO") or 0
+      local has_overlap = has_overlap_on_same_track(it)
+      if fadein_auto > 0 and has_overlap then
+        log(string.format("Skipped: %s [%s] Left edge has auto-crossfade (%.6f sec)",
+                          tr_name, tk_name, fadein_auto))
+      else
+        local deltaL = targetL - left_t
+        if trimmed_only and deltaL < 0 then
+          -- would extend; cancel in trim-only mode
+          deltaL = 0
+        end
+        if deltaL ~= 0 then
         if LEFT_EDGE_STRATEGY == "content_locked" then
           local applied = apply_left_delta_content_locked(it, tk, deltaL)
           appliedL = applied
@@ -511,6 +658,21 @@ local function check_item_edges_and_log(it, mode_title, added_counter)
         end
         local applied = appliedL
         if math.abs(applied) > 0 then
+          -- Check if right edge has auto-crossfade that needs protection
+          local fadeout_auto = r.GetMediaItemInfo_Value(it, "D_FADEOUTLEN_AUTO") or 0
+          if fadeout_auto > 0 and LEFT_EDGE_STRATEGY == "content_locked" then
+            -- When using content_locked, moving left edge also moves right edge
+            -- Need to adjust length to keep right edge at original position
+            local new_pos = r.GetMediaItemInfo_Value(it, "D_POSITION") or 0
+            local original_right = left_t + len  -- original right edge position
+            local new_len = original_right - new_pos
+            r.SetMediaItemInfo_Value(it, "D_LENGTH", new_len)
+          end
+
+          -- Update BOTH fades to preserve their endpoints
+          update_fade_to_preserve_endpoint(it, fadein_endpoint, true)
+          update_fade_to_preserve_endpoint(it, fadeout_startpoint, false)
+
           if ADD_FIXED_MARKER then
             local pos_now = r.GetMediaItemInfo_Value(it, "D_POSITION") or 0
             local len_now = r.GetMediaItemInfo_Value(it, "D_LENGTH") or 0
@@ -527,6 +689,7 @@ local function check_item_edges_and_log(it, mode_title, added_counter)
                             (r.GetMediaItemInfo_Value(it, "D_POSITION") or 0)))
         end
       end
+      end
     end
     -- Refresh times after left-edge edits (content_locked may have moved item position)
     pos = r.GetMediaItemInfo_Value(it, "D_POSITION") or pos
@@ -537,14 +700,26 @@ local function check_item_edges_and_log(it, mode_title, added_counter)
     devR_sec, devR_units = grid_deviation(right_t)
     offR = is_off_grid(devR_units)
     if offR and targetR then
-      local deltaR = targetR - right_t
-      if trimmed_only and deltaR > 0 then
-        -- would extend; cancel in trim-only mode
-        deltaR = 0
-      end
-      if deltaR ~= 0 then
+      -- Check if right edge has auto-crossfade AND item actually overlaps (true crossfade)
+      local fadeout_auto = r.GetMediaItemInfo_Value(it, "D_FADEOUTLEN_AUTO") or 0
+      local has_overlap = has_overlap_on_same_track(it)
+      if fadeout_auto > 0 and has_overlap then
+        log(string.format("Skipped: %s [%s] Right edge has auto-crossfade (%.6f sec)",
+                          tr_name, tk_name, fadeout_auto))
+      else
+        local deltaR = targetR - right_t
+        if trimmed_only and deltaR > 0 then
+          -- would extend; cancel in trim-only mode
+          deltaR = 0
+        end
+        if deltaR ~= 0 then
         local applied = apply_right_delta_keep_pos(it, tk, deltaR)
         appliedR = applied
+
+        -- Update BOTH fades to preserve their endpoints
+        update_fade_to_preserve_endpoint(it, fadein_endpoint, true)
+        update_fade_to_preserve_endpoint(it, fadeout_startpoint, false)
+
         if ADD_FIXED_MARKER then
           local pos_now = r.GetMediaItemInfo_Value(it, "D_POSITION") or 0
           local len_now = r.GetMediaItemInfo_Value(it, "D_LENGTH") or 0
@@ -561,6 +736,7 @@ local function check_item_edges_and_log(it, mode_title, added_counter)
                           (applied < 0 and "trim" or "extend"),
                           math.abs(applied), math.abs(applied)*1000.0,
                           right_after))
+      end
       end
     end
   end
