@@ -1,6 +1,6 @@
 --[[
 @description ReaImGui - Rename Active Take from Metadata (caret insert + cached preview + copy/export)
-@version 251209.2150
+@version 251210.0145
 @author hsuanice
 @about
   Rename active takes and/or item notes from BWF/iXML and true source metadata using a fast ReaImGui UI.
@@ -35,6 +35,23 @@
   hsuanice served as the workflow designer, tester, and integrator for this tool.
 
 @changelog
+  v251210.0145 (2024-12-10)
+    - Fixed: BWF Description parsing now handles newline-separated key=value pairs
+      • Previously only supported semicolon separators (key=val; key=val)
+      • Now supports both newline and semicolon separators (common in Sound Devices recorders)
+      • Fixes $trk token expansion when using cached metadata
+      • Pattern: desc:gmatch("([^\r\n;]+)") instead of desc:gmatch("[^;]+")
+    - Fixed: Cache-to-fields reconstruction now properly handles all TRK# variants
+      • Correctly parses sTRK#, dTRK#, and TRK# from description
+      • Properly builds __trk_table with sparse indices (e.g., [3]="BOOM", [9]="LAVA")
+      • Sets __trk_name from __trk_table[__chan_index] for preview display
+    - Improved: Description field parsing now handles sPROJECT, sSCENE, sTAKE, sTAPE variants
+      • Maps both uppercase variants (sPROJECT → PROJECT) and lowercase (sproject → project)
+    - Debug: Added comprehensive debug logging (disabled by default, set DEBUG=true to enable)
+      • Shows cache lookup details, TRK parsing results, interleave resolution
+      • Helps troubleshoot metadata issues without modifying cache library
+    - Technical: All changes in cache_to_fields() function - no cache format changes required
+
   v251209.1954 (2024-12-09)
     - Performance: Integrated shared metadata cache system (hsuanice_Metadata Cache.lua v251209.1954)
       • Dramatically faster metadata loading on repeated operations (cache hit ~100x faster)
@@ -44,14 +61,12 @@
       • Caches 21 metadata fields: all BWF/iXML data (15 fields) + file info (6 fields)
       • Fast TRK# reconstruction from cached description field (no file I/O)
       • Cache flushed automatically on script exit (atexit handler)
-      • Debug logging enabled by default (check REAPER console for cache hit/miss stats)
     - Implementation details:
       • cache_to_fields() reconstructs full metadata from cache (TRK table, interleave, source info)
       • fields_to_cache() extracts cacheable fields from full metadata
       • First "Get Metadata" is normal speed (cache miss), subsequent calls are instant (cache hit)
     - No UI changes - all improvements are under the hood
     - Backward compatible with existing workflows
-    - Future: Item List Editor will also use this shared cache for full cross-script acceleration
 
   v0.12.5 (2025-09-13)
     - Fixed: UMID rows were shown twice in Detected fields. Removed the
@@ -294,13 +309,12 @@ local CACHE = dofile(
 assert(CACHE and CACHE.VERSION, "Failed to load 'hsuanice Metadata Cache'")
 
 -- Debug flag for troubleshooting
-local DEBUG = true  -- Set to false to disable debug output
+local DEBUG = false  -- Set to true to enable debug output for troubleshooting
 
 -- Initialize cache on startup
 CACHE.init()
--- Enable debug logging to see cache hits/misses
-CACHE.set_debug(true)
-reaper.ShowConsoleMsg("[Rename] Cache initialized. Path: " .. CACHE.get_cache_path() .. "\n")
+-- Enable debug logging to see cache hits/misses (set to false in production)
+CACHE.set_debug(false)
 
 
 
