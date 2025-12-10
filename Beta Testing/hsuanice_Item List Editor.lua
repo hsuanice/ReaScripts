@@ -1,6 +1,6 @@
 --[[
 @description Item List Editor
-@version 251128.0110
+@version 251210.2210
 @author hsuanice
 @about
   Shows a live, spreadsheet-style table of the currently selected items and all
@@ -42,6 +42,32 @@
 
 
 @changelog
+  v251210.2210 (2024-12-10)
+  - Feature: Persistent Debug Mode with UI toggle
+    • Debug Mode setting now persists across sessions via ExtState
+    • Toggle via Options menu → Debug Mode (shows ✓ when enabled)
+    • Controls both ILE console output and Cache Library debug logging
+    • When enabled, shows: ILE initialization messages, cache behavior (HIT/MISS/STORE)
+    • Setting automatically restored when reopening script
+  - UX: Cleaner console output by default
+    • Initialization messages ("[ILE] Loaded Metadata Cache library", "[ILE] Cache initialized")
+      now only shown in Debug Mode
+    • Reduces console clutter during normal usage
+    • Enable Debug Mode when troubleshooting performance or cache issues
+
+  v251209.1954 (2024-12-09)
+  - Performance: Migrated to shared Metadata Cache library (hsuanice_Metadata Cache.lua v251209.1954)
+    • Dramatically faster metadata loading through shared cache system
+    • Cache now shared with Rename Active Take and future scripts
+    • Cache stored as "Metadata.cache" in project directory (renamed from "ItemListEditor.cache")
+    • Automatic cache invalidation when items are modified (hash-based detection)
+    • Full cross-script cache acceleration - metadata loaded by Item List Editor can be instantly reused by Rename
+    • Removed internal cache system (~450 lines) in favor of shared 9-method library API
+    • All cache operations now use CACHE_LIB.* methods (init, lookup, store, flush, invalidate_items, clear)
+  - Architecture: Cleaner code with standardized cache interface
+  - Backward compatible: Existing workflows unchanged
+  - Note: Old "ItemListEditor.cache" files will be ignored; new "Metadata.cache" will be created
+
   v251128.0110
   - Enhancement: Auto-fit content width on preset change
     • Preset dropdown automatically fits column widths when switching presets
@@ -1596,6 +1622,23 @@ local flatten_tsv_to_list   = LT.flatten_tsv_to_list
 local src_shape_dims        = LT.src_shape_dims
 
 ---------------------------------------
+-- Load Metadata Cache library (shared with Rename and other scripts)
+---------------------------------------
+local CACHE_LIB = dofile(
+  reaper.GetResourcePath() ..
+  "/Scripts/hsuanice Scripts/Library/hsuanice_Metadata Cache.lua"
+)
+assert(CACHE_LIB and CACHE_LIB.VERSION, "Failed to load 'hsuanice Metadata Cache'")
+
+-- Debug flag for troubleshooting (persisted via ExtState, global for access in save_prefs)
+DEBUG = (reaper.GetExtState("hsuanice_ItemListEditor", "debug_mode") == "1")
+
+-- Use original ShowConsoleMsg to bypass console filter
+if DEBUG then
+  original_ShowConsoleMsg(string.format("[ILE] Loaded Metadata Cache library v%s\n", CACHE_LIB.VERSION))
+end
+
+---------------------------------------
 -- Dependency check for ImGui
 ---------------------------------------
 if not reaper or not reaper.ImGui_CreateContext then
@@ -1747,6 +1790,7 @@ local function save_prefs()
   reaper.SetExtState(EXT_NS, "console_output", CONSOLE.enabled and "1" or "0", true)
   reaper.SetExtState(EXT_NS, "font_scale", tostring(FONT_SCALE or 1.0), true)
   reaper.SetExtState(EXT_NS, "allow_docking", ALLOW_DOCKING and "1" or "0", true)
+  reaper.SetExtState(EXT_NS, "debug_mode", DEBUG and "1" or "0", true)
 end
 
 -- ===== BEGIN Column Presets (named) =====
@@ -2523,8 +2567,8 @@ local function load_metadata_for_row(row)
 
   local item_guid = row.__item_guid
 
-  -- Try cache first for ALL metadata fields
-  local cached = cache_lookup(item_guid, item)
+  -- Try cache first for ALL metadata fields (using shared library)
+  local cached = CACHE_LIB.lookup(item_guid, item)
   if cached then
     -- Cache hit! Use all cached metadata
     row.file_name = cached.file_name or ""
@@ -2594,8 +2638,8 @@ local function load_metadata_for_row(row)
   row.__fields      = f
   row.__metadata_loaded = true
 
-  -- Store ALL metadata in cache for next time
-  cache_store(item_guid, item, {
+  -- Store ALL metadata in cache for next time (using shared library)
+  CACHE_LIB.store(item_guid, item, {
     file_name = row.file_name,
     interleave = row.interleave,
     meta_trk_name = row.meta_trk_name,
@@ -2745,7 +2789,7 @@ local function process_project_scan_batch()
     local elapsed = reaper.time_precise() - PROJECT_SCAN.start_time
     console_forcef("[ILE] Project scan complete: %d items in %.2fs\n",
       total, elapsed)
-    cache_flush()  -- Save cache to disk
+    CACHE_LIB.flush()  -- Save cache to disk (shared library)
     PROJECT_SCAN.active = false
     return false  -- Done
   end
@@ -3432,7 +3476,7 @@ local function delete_selected_cells()
   reaper.Undo_EndBlock2(0, "[ILE] Clear selected cells", 4|1)  -- UNDO_STATE_ITEMS | UNDO_STATE_TRACKCFG
 
   -- Invalidate cache and immediately refresh affected rows
-  cache_invalidate_items(affected_guids)
+  CACHE_LIB.invalidate_items(affected_guids)
   refresh_rows_by_guids(affected_guids)  -- Immediate visual feedback
 
   reaper.UpdateArrange()
@@ -3487,7 +3531,7 @@ local function apply_take_name(tk, newname, row)
   end)
   -- Invalidate cache and immediately refresh if changed
   if changed and row.__item_guid then
-    cache_invalidate_items({row.__item_guid})
+    CACHE_LIB.invalidate_items({row.__item_guid})
     refresh_rows_by_guids({row.__item_guid})  -- Immediate visual feedback
   end
 end
@@ -3499,7 +3543,7 @@ local function apply_item_note(it, newnote, row)
   end)
   -- Invalidate cache and immediately refresh if changed
   if changed and row.__item_guid then
-    cache_invalidate_items({row.__item_guid})
+    CACHE_LIB.invalidate_items({row.__item_guid})
     refresh_rows_by_guids({row.__item_guid})  -- Immediate visual feedback
   end
 end
@@ -4018,10 +4062,8 @@ end
 reaper.ImGui_SameLine(ctx)
 if reaper.ImGui_Button(ctx, "Clear Cache", scale(100), scale(24)) then
   -- Show confirmation dialog
-  local cached_count = 0
-  if CACHE.data and CACHE.data.items then
-    for _ in pairs(CACHE.data.items) do cached_count = cached_count + 1 end
-  end
+  local cache_stats = CACHE_LIB.get_stats()
+  local cached_count = cache_stats.item_count or 0
 
   local msg = string.format(
     "Clear metadata cache?\n\n" ..
@@ -4036,7 +4078,7 @@ if reaper.ImGui_Button(ctx, "Clear Cache", scale(100), scale(24)) then
 
   local result = reaper.ShowMessageBox(msg, "Clear Cache", 1)  -- 1 = OK/Cancel
   if result == 1 then  -- OK
-    cache_clear()
+    CACHE_LIB.clear()
     mark_dirty()  -- Trigger refresh to rebuild cache
   end
 end
@@ -4045,11 +4087,9 @@ if reaper.ImGui_IsItemHovered(ctx) then
   reaper.ImGui_BeginTooltip(ctx)
   local total = CACHE.hits + CACHE.misses
   local hit_rate = (total > 0) and math.floor((CACHE.hits / total) * 100) or 0
-  local cached_count = 0
+  local cache_stats = CACHE_LIB.get_stats()
+  local cached_count = cache_stats.item_count or 0
   local invalidated_count = 0
-  if CACHE.data and CACHE.data.items then
-    for _ in pairs(CACHE.data.items) do cached_count = cached_count + 1 end
-  end
   for _ in pairs(CACHE.invalidated or {}) do invalidated_count = invalidated_count + 1 end
   reaper.ImGui_Text(ctx, string.format("Cached: %d items", cached_count))
   reaper.ImGui_Text(ctx, string.format("Hit rate: %d%% (%d/%d)", hit_rate, CACHE.hits, total))
@@ -4080,14 +4120,18 @@ if reaper.ImGui_BeginPopup(ctx, "##options_menu") then
   end
 
   -- Toggle debug mode option
-  local debug_label = CACHE.debug and "✓ Debug Mode" or "  Debug Mode"
+  local debug_label = DEBUG and "✓ Debug Mode" or "  Debug Mode"
   if reaper.ImGui_Selectable(ctx, debug_label) then
-    CACHE.debug = not CACHE.debug
-    if CACHE.debug then
-      reaper.ShowConsoleMsg("\n[ILE Cache] Debug mode ENABLED - watch console for detailed cache behavior\n")
-      reaper.ShowConsoleMsg("[ILE Cache] Will show: HIT (first 5), MISS (new), MISS (changed), STORE (updated)\n\n")
+    DEBUG = not DEBUG
+    -- Also control Cache Library debug mode
+    CACHE_LIB.set_debug(DEBUG)
+    -- Save preference
+    save_prefs()
+    if DEBUG then
+      reaper.ShowConsoleMsg("\n[ILE] Debug mode ENABLED\n")
+      reaper.ShowConsoleMsg("[ILE] Will show: ILE initialization messages, cache behavior (HIT/MISS/STORE)\n\n")
     else
-      reaper.ShowConsoleMsg("[ILE Cache] Debug mode DISABLED\n")
+      reaper.ShowConsoleMsg("[ILE] Debug mode DISABLED\n")
     end
   end
 
@@ -5331,7 +5375,7 @@ local function loop()
           PROJECT_SCAN.active = false
           PROJECT_SCAN.cancelled = true
           console_force("[ILE] Project scan cancelled by user\n")
-          cache_flush()  -- Save partial cache
+          CACHE_LIB.flush()  -- Save partial cache (shared library)
         else
           open = false
         end
@@ -5497,7 +5541,7 @@ local function loop()
           affected_guids[#affected_guids+1] = r.__item_guid
         end
       end
-      cache_invalidate_items(affected_guids)
+      CACHE_LIB.invalidate_items(affected_guids)
       refresh_rows_by_guids(affected_guids)  -- Immediate visual feedback
 
       reaper.UpdateArrange()
@@ -5574,7 +5618,7 @@ local function loop()
     reaper.defer(loop)
   else
     -- Save cache and prefs before exiting
-    cache_flush()
+    CACHE_LIB.flush()
     save_prefs()
     -- Clear running flag
     reaper.SetExtState("hsuanice_ItemListEditor_Running", "running", "0", false)
@@ -5616,8 +5660,12 @@ if not ctx then
   return
 end
 
--- Initialize cache system
-init_cache()
+-- Initialize cache system (using shared Metadata Cache library)
+CACHE_LIB.init()
+CACHE_LIB.set_debug(DEBUG)  -- Set cache debug mode from saved preference
+if DEBUG then
+  original_ShowConsoleMsg("[ILE] Cache initialized (shared library)\n")
+end
 
 -- Mark that we need initial load (will happen in first frame via smart_refresh)
 if AUTO and reaper.CountSelectedMediaItems(0) > 0 then
@@ -5627,7 +5675,7 @@ end
 -- Cleanup on exit
 reaper.atexit(function()
   reaper.SetExtState(INSTANCE_KEY, "running", "0", false)
-  cache_flush()
+  CACHE_LIB.flush()
   save_prefs()
 end)
 
