@@ -1,7 +1,7 @@
 --[[
 @description AudioSweet ReaImGui - ImGui Interface for AudioSweet
 @author hsuanice
-@version 0.1.0-beta (251211.2130)
+@version 0.1.0-beta (251211.2150)
 @about
   Complete AudioSweet control center with:
   - Focused/Chain modes with FX chain display
@@ -18,6 +18,19 @@
 
 
 @changelog
+  Internal Build 251211.2150 - FIXED HISTORY COPY MODE AND ADDED DEBUG LOGGING
+    - FIXED: History focused FX in Copy mode now correctly copies single FX instead of entire chain.
+      - Issue: Clicking history item for focused FX in copy mode would copy entire track FX chain
+      - Root cause: run_history_item() called run_saved_chain_copy_mode() for both focused and chain modes
+      - Solution: Created new run_focused_fx_copy_mode() function (lines 1095-1149)
+      - Result: Focused FX history copies only the specific FX, chain history copies entire chain
+      - Modified: run_history_item() now uses run_focused_fx_copy_mode() for focused mode copy (line 1487)
+    - Added: Debug console logging for all Copy mode operations.
+      - run_focused_fx_copy_mode(): Shows FX name, index, items, scope, position, and operation count
+      - run_saved_chain_copy_mode(): Shows chain name, FX count, scope, position, and operation count
+      - Helps diagnose copy operations and verify correct behavior
+      - Lines: 1096-1098, 1112-1114, 1143-1145, 1152-1154, 1163-1165, 1172-1174, 1214-1216
+
   Internal Build 251211.2130 - FIXED IMGUI CHILD WINDOW ASSERTIONS AND DYNAMIC FX LIST HEIGHT
     - FIXED: ImGui_EndChild assertion errors when switching options or launching in clean REAPER.
       - Issue: BeginChild was called when gui.enable_saved_chains/enable_history was true but arrays were empty
@@ -1092,10 +1105,14 @@ local function run_audiosweet(override_track)
   gui.is_running = false
 end
 
-local function run_saved_chain_copy_mode(tr, chain_name, item_count)
+local function run_focused_fx_copy_mode(tr, fx_name, fx_idx, item_count)
+  if gui.debug then
+    r.ShowConsoleMsg(string.format("[AS GUI] Focused FX copy: '%s' (fx_idx=%d, items=%d)\n", fx_name, fx_idx, item_count))
+  end
+
   local fx_count = r.TrackFX_GetCount(tr)
-  if fx_count == 0 then
-    gui.last_result = "Error: No FX on track"
+  if fx_idx >= fx_count then
+    gui.last_result = string.format("Error: FX #%d not found", fx_idx + 1)
     gui.is_running = false
     return
   end
@@ -1104,6 +1121,70 @@ local function run_saved_chain_copy_mode(tr, chain_name, item_count)
   local pos_names = { "tail", "head" }
   local scope = scope_names[gui.copy_scope + 1]
   local pos = pos_names[gui.copy_pos + 1]
+
+  if gui.debug then
+    r.ShowConsoleMsg(string.format("[AS GUI] Copy settings: scope=%s, position=%s\n", scope, pos))
+  end
+
+  local ops = 0
+  for i = 0, item_count - 1 do
+    local it = r.GetSelectedMediaItem(0, i)
+    if it then
+      if scope == "all_takes" then
+        local take_count = r.CountTakes(it)
+        for t = 0, take_count - 1 do
+          local tk = r.GetTake(it, t)
+          if tk then
+            local dest_idx = (pos == "head") and 0 or r.TakeFX_GetCount(tk)
+            r.TrackFX_CopyToTake(tr, fx_idx, tk, dest_idx, false)
+            ops = ops + 1
+          end
+        end
+      else
+        local tk = r.GetActiveTake(it)
+        if tk then
+          local dest_idx = (pos == "head") and 0 or r.TakeFX_GetCount(tk)
+          r.TrackFX_CopyToTake(tr, fx_idx, tk, dest_idx, false)
+          ops = ops + 1
+        end
+      end
+    end
+  end
+
+  r.UpdateArrange()
+
+  if gui.debug then
+    r.ShowConsoleMsg(string.format("[AS GUI] Focused FX copy completed: %d operations\n", ops))
+  end
+
+  gui.last_result = string.format("Success! [%s] Copy (%d ops)", fx_name, ops)
+  gui.is_running = false
+end
+
+local function run_saved_chain_copy_mode(tr, chain_name, item_count)
+  if gui.debug then
+    r.ShowConsoleMsg(string.format("[AS GUI] Chain copy: '%s' (items=%d)\n", chain_name, item_count))
+  end
+
+  local fx_count = r.TrackFX_GetCount(tr)
+  if fx_count == 0 then
+    gui.last_result = "Error: No FX on track"
+    gui.is_running = false
+    return
+  end
+
+  if gui.debug then
+    r.ShowConsoleMsg(string.format("[AS GUI] Track has %d FX to copy\n", fx_count))
+  end
+
+  local scope_names = { "active", "all_takes" }
+  local pos_names = { "tail", "head" }
+  local scope = scope_names[gui.copy_scope + 1]
+  local pos = pos_names[gui.copy_pos + 1]
+
+  if gui.debug then
+    r.ShowConsoleMsg(string.format("[AS GUI] Copy settings: scope=%s, position=%s\n", scope, pos))
+  end
 
   local ops = 0
   for i = 0, item_count - 1 do
@@ -1142,6 +1223,11 @@ local function run_saved_chain_copy_mode(tr, chain_name, item_count)
   end
 
   r.UpdateArrange()
+
+  if gui.debug then
+    r.ShowConsoleMsg(string.format("[AS GUI] Chain copy completed: %d operations\n", ops))
+  end
+
   gui.last_result = string.format("Success! [%s] Copy (%d ops)", chain_name, ops)
   gui.is_running = false
 end
@@ -1441,7 +1527,7 @@ local function run_history_item(hist_idx)
   if hist_item.mode == "focused" then
     -- For focused mode, use stored FX index
     if gui.action == 1 then
-      run_saved_chain_copy_mode(tr, hist_item.name, item_count)
+      run_focused_fx_copy_mode(tr, hist_item.name, hist_item.fx_index or 0, item_count)
     else
       run_history_focused_apply(tr, hist_item.name, hist_item.fx_index or 0, item_count)
     end
