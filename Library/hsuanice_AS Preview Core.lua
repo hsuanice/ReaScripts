@@ -1,12 +1,13 @@
 --[[
 @description AudioSweet Preview Core
+@version 0.1.0
 @author hsuanice
-@version 0.1.0-beta (251030.1630)
+@noindex
 
 @about Minimal, self-contained preview runtime. Later we can extract helpers to "hsuanice_AS Core.lua".
 
 @changelog
-  0.1.0-beta (2025-10-30) - Initial Public Beta Release
+  0.1.0 (2025-10-30) - Initial Public Beta Release
     Minimal preview runtime for AudioSweet with:
     - High-precision timing using reaper.time_precise()
     - Handle-aware edge/glue cue policies
