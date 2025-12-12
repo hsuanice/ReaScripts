@@ -1,7 +1,11 @@
 --[[
-@description RGWH Wrapper Template (Public Beta)
+@description RGWH Glue - Glue with Handles
 @author hsuanice
-@version 0.1.0-beta (251022.2200)
+@version 0.1.0
+@provides
+  [main] hsuanice Scripts/Beta Testing/hsuanice_RGWH Glue.lua
+  hsuanice Scripts/Library/hsuanice_RGWH Core.lua
+  hsuanice Scripts/Library/hsuanice_Metadata Embed.lua
 @about
   Thin wrapper for calling RGWH Core via a single entry `RGWH.core(args)`.
   Use this as a starting point to test and ship wrappers that render/glue with handles.
@@ -25,28 +29,23 @@
   - handle/epsilon/cues/policies/debug: one-run overrides; omit or use "ext" to read ExtState as-is.
 
 @changelog
-  v251022_2200
+  0.1.0 (2025-12-12) [internal: v251022_2200]
     - Changed: merge_volumes now affects ALL takes (not just active take) in RGWH Core
     - Rationale: Ensures consistent audio output when switching between takes after merge
-
-  v251022_1745
-    - Added: Volume control options for Render operations:
+    - Added: Volume control options for Render operations [internal: v251022_1745]
         • merge_volumes (default: true) - merge item volume into take volume before render
         • print_volumes (default: true) - bake volumes into rendered audio; false = restore original volumes
     - Changed: args table now includes merge_volumes and print_volumes toggles in Render section
     - Note: These options only affect render operations; glue operations unchanged
-
-  v251016_1357
-    - Initial public template for RGWH Wrapper.
-    - Provides unified entry for calling `RGWH.core(args)`.
-    - Includes per-run overrides for handle/epsilon/debug/cues/policies.
-    - Adds `QUICK_DEBUG` one-line toggle ("silent", "normal", "verbose", "use-detailed").
-    - Adds wrapper-only `SELECTION_POLICY` ("progress", "restore", "none") with snapshot/restore logic.
-    - Adds performance measurement (snapshot/core/restore/total) using `reaper.time_precise()`.
-    - Supports auto conversion between frames and seconds for handle and epsilon.
-    - Implements robust selection restore via track GUID and time overlap matching.
-    - Console summary includes selection debug and timing results.
-  v251013_1200  Initial public template wrapper.
+    - Initial public template for RGWH Wrapper [internal: v251016_1357]
+    - Provides unified entry for calling `RGWH.core(args)`
+    - Includes per-run overrides for handle/epsilon/debug/cues/policies
+    - Adds `QUICK_DEBUG` one-line toggle ("silent", "normal", "verbose", "use-detailed")
+    - Adds wrapper-only `SELECTION_POLICY` ("progress", "restore", "none") with snapshot/restore logic
+    - Adds performance measurement (snapshot/core/restore/total) using `reaper.time_precise()`
+    - Supports auto conversion between frames and seconds for handle and epsilon
+    - Implements robust selection restore via track GUID and time overlap matching
+    - Console summary includes selection debug and timing results
 ]]--
 
 ------------------------------------------------------------
@@ -262,31 +261,81 @@ local function restore_selection(s)
   r.SelectAllMediaItems(0, false)
   if s.items then
     local eps = seconds_epsilon_from_args(args)
+    -- Check if TS exists for smart TS-aware restore (use snapshot TS, not current TS)
+    local tsL, tsR = s.ts_start, s.ts_end
+    local has_ts = (tsL and tsR and tsR > tsL)
+
     for _, desc in ipairs(s.items) do
       local selected = false
-      -- 1) try original pointer
-      if desc.ptr and r.ValidatePtr2(0, desc.ptr, "MediaItem*") then
+
+      -- When TS exists and may have caused splits, verify pointer still matches original position
+      if has_ts and desc.ptr and r.ValidatePtr2(0, desc.ptr, "MediaItem*") then
+        local p = r.GetMediaItemInfo_Value(desc.ptr, "D_POSITION")
+        local l = r.GetMediaItemInfo_Value(desc.ptr, "D_LENGTH")
+        -- Check if position/length still matches original (within epsilon)
+        if math.abs(p - desc.start) < eps and math.abs((p + l) - desc.finish) < eps then
+          r.SetMediaItemSelected(desc.ptr, true)
+          selected = true
+        end
+        -- If position changed (due to split), fall through to TS-aware restore
+      elseif desc.ptr and r.ValidatePtr2(0, desc.ptr, "MediaItem*") then
+        -- No TS: simple pointer restore
         r.SetMediaItemSelected(desc.ptr, true)
         selected = true
-      else
-        -- 2) fallback: match by same-track + time overlap
+      end
+
+      if not selected then
+        -- fallback: match by same-track + time overlap
         local tr = desc.tr
         if (not tr or not r.ValidatePtr2(0, tr, "MediaTrack*")) and desc.tr_guid then
           tr = find_track_by_guid(desc.tr_guid)
         end
         if tr and desc.start and desc.finish then
           local N = r.CountTrackMediaItems(tr)
-          for i = 0, N - 1 do
-            local it2 = r.GetTrackMediaItem(tr, i)
-            local p   = r.GetMediaItemInfo_Value(it2, "D_POSITION")
-            local l   = r.GetMediaItemInfo_Value(it2, "D_LENGTH")
-            local q1, q2 = p, p + l
-            local a1, a2 = desc.start - eps, desc.finish + eps
-            -- Overlap test
-            if (q1 < a2) and (q2 > a1) then
-              r.SetMediaItemSelected(it2, true)
+          local best_item = nil
+          local best_overlap = 0
+
+          -- When TS exists, prefer items that overlap with TS (smart TS-aware restore)
+          if has_ts then
+            for i = 0, N - 1 do
+              local it2 = r.GetTrackMediaItem(tr, i)
+              local p   = r.GetMediaItemInfo_Value(it2, "D_POSITION")
+              local l   = r.GetMediaItemInfo_Value(it2, "D_LENGTH")
+              local q1, q2 = p, p + l
+              local a1, a2 = desc.start - eps, desc.finish + eps
+
+              -- Check overlap with original item
+              if (q1 < a2) and (q2 > a1) then
+                -- Calculate overlap with TS
+                local ts_overlap_start = math.max(q1, tsL)
+                local ts_overlap_end = math.min(q2, tsR)
+                local ts_overlap = math.max(0, ts_overlap_end - ts_overlap_start)
+
+                -- Prefer items with maximum TS overlap
+                if ts_overlap > best_overlap then
+                  best_item = it2
+                  best_overlap = ts_overlap
+                end
+              end
+            end
+            if best_item then
+              r.SetMediaItemSelected(best_item, true)
               selected = true
-              break
+            end
+          else
+            -- No TS: use original logic (first overlap)
+            for i = 0, N - 1 do
+              local it2 = r.GetTrackMediaItem(tr, i)
+              local p   = r.GetMediaItemInfo_Value(it2, "D_POSITION")
+              local l   = r.GetMediaItemInfo_Value(it2, "D_LENGTH")
+              local q1, q2 = p, p + l
+              local a1, a2 = desc.start - eps, desc.finish + eps
+              -- Overlap test
+              if (q1 < a2) and (q2 > a1) then
+                r.SetMediaItemSelected(it2, true)
+                selected = true
+                break
+              end
             end
           end
         end
