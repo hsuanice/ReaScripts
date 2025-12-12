@@ -14,7 +14,16 @@
   Adjust parameters using the visual controls and click operation buttons to execute.
 
 @changelog
-  0.1.0 [v251215.2300] - CLEANUP: Removed unused settings + Documentation improvements
+  0.1.0 [v251213.0023] - ADDED DOCKING TOGGLE OPTION
+    - Added: Window docking toggle option in Settings menu.
+      - New location: Menu Bar → Settings → "Enable Window Docking" (checkbox)
+      - When disabled: window cannot be docked into REAPER's dock system (WindowFlags_NoDocking)
+      - When enabled: window can be docked like any other ImGui window
+      - Setting persists between sessions via ExtState
+      - Lines: 396 (setting definition), 415 (persist_keys), 1604-1606 (window flags), 1634-1638 (Settings menu)
+    - Purpose: Prevents accidental docking for users who prefer floating windows, while allowing flexibility for those who want docking.
+
+  [v251215.2300] - CLEANUP: Removed unused settings + Documentation improvements
     - Removed: Rename Mode setting (was never implemented, no functional change)
     - Removed: Glue After Mono Apply setting (was never implemented, no functional change)
       • Removed from GUI state variables (line 377-379)
@@ -392,6 +401,9 @@ local gui = {
   -- Selection policy (wrapper-only)
   selection_policy = 1,      -- 0=progress, 1=restore, 2=none
 
+  -- UI settings
+  enable_docking = false,    -- Allow window docking
+
   -- Status
   is_running = false,
   last_result = "",
@@ -408,7 +420,8 @@ local persist_keys = {
   'epsilon_mode','epsilon_value',
   'cue_write_edge','cue_write_glue',
   'glue_single_items','glue_no_trackfx_policy','render_no_trackfx_policy',
-  'debug_level','debug_no_clear','selection_policy'
+  'debug_level','debug_no_clear','selection_policy',
+  'enable_docking'
 }
 
 local function serialize_gui_state(tbl)
@@ -1596,6 +1609,11 @@ local function draw_gui()
   local before_state = serialize_gui_state(gui)
   local window_flags = ImGui.WindowFlags_MenuBar | ImGui.WindowFlags_AlwaysAutoResize | ImGui.WindowFlags_NoResize
 
+  -- Add NoDocking flag if docking is disabled
+  if not gui.enable_docking then
+    window_flags = window_flags | ImGui.WindowFlags_NoDocking
+  end
+
   local visible, open = ImGui.Begin(ctx, 'RGWH Control Panel', true, window_flags)
   if not visible then
     ImGui.End(ctx)
@@ -1620,8 +1638,19 @@ local function draw_gui()
       ImGui.EndMenu(ctx)
     end
 
-    if ImGui.MenuItem(ctx, 'Settings...', nil, false, true) then
-      gui.show_settings = true
+    if ImGui.BeginMenu(ctx, 'Settings') then
+      -- UI Settings
+      local rv_dock, new_dock = ImGui.MenuItem(ctx, 'Enable Window Docking', nil, gui.enable_docking, true)
+      if rv_dock then
+        gui.enable_docking = new_dock
+        save_persist()
+      end
+      ImGui.Separator(ctx)
+
+      if ImGui.MenuItem(ctx, 'All Settings...', nil, false, true) then
+        gui.show_settings = true
+      end
+      ImGui.EndMenu(ctx)
     end
 
     if ImGui.BeginMenu(ctx, 'Help') then
