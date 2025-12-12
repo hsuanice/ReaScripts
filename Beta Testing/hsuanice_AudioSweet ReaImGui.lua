@@ -24,7 +24,7 @@
 
 
 @changelog
-  Internal Build 251212.1230 - IMPROVED UNDO BEHAVIOR FOR SINGLE-STEP UNDO
+  0.1.0 [Internal Build 251212.1230] - IMPROVED UNDO BEHAVIOR FOR SINGLE-STEP UNDO
     - Improved: Main AUDIOSWEET button execution now uses single undo block.
       - Issue: Executing AudioSweet required multiple undo steps to fully revert (render, glue, print FX, etc.)
       - Solution: Wrapped run_audiosweet() execution with Undo_BeginBlock/EndBlock (lines 1039-1040, 1110-1113)
