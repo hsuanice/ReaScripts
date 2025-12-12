@@ -2,8 +2,11 @@
 @description RGWH Core - Render or Glue with Handles
 @version 0.1.0
 @author hsuanice
-@noindex
-@about
+
+@provides
+  [main] .
+
+  @about
   Core library for handle-aware Render/Glue workflows with clear, single-entry API.
   Features:
     • Handle-aware windows with clamp-to-source.
@@ -39,7 +42,6 @@
         glue_single_items = true/false,
         glue_no_trackfx_output_policy   = "preserve"|"force_multi",
         render_no_trackfx_output_policy = "preserve"|"force_multi",
-        rename_mode = "auto"|"glue"|"render",
       },
       debug = { level=1..N, no_clear=true/false },
     }
@@ -60,7 +62,21 @@
   • For detailed operation modes guide, see RGWH GUI: Help > Manual (Operation Modes)
 
 @changelog
-   0.1.0 (251121.1700) - REFACTOR: Unified glue cue logic with shared add_glue_cues() function
+   0.1.0 (251215.2300) - CLEANUP: Removed unused RENAME_OP_MODE setting
+    - Removed: RENAME_OP_MODE setting (was never implemented, no functional change)
+      • Removed from API documentation args.policies.rename_mode (line 38-42)
+      • Removed from DEFAULTS (was line 787)
+      • Removed from read_settings() (was line 851)
+      • Removed from args.policies processing (was lines 2970-2972)
+      • Actual naming behavior unchanged: RENDER still uses rename_new_render_take() to create "TakeName-renderedN"
+      • GLUE still uses REAPER native "TakeName-glued-XX.wav" naming
+    - Technical: This setting was defined in v251115.2045 but never actually used in the code
+      • rename_new_render_take() function (lines 935-958) always executed regardless of setting
+      • GLUE mode (line 2088-2090) intentionally does not rename (preserves REAPER native behavior)
+      • Removing the unused setting has no impact on actual operation
+    - Requires: RGWH GUI v251215.2300 (Rename Mode setting removed from GUI)
+
+   (251121.1700) - REFACTOR: Unified glue cue logic with shared add_glue_cues() function
     - Created: Shared add_glue_cues() function (lines 1471-1542) for all glue cue operations
     - Replaced: Three separate implementations with single shared function
       • GAP unit glue cues (was lines 1761-1814, now 1762-1765)
@@ -784,8 +800,6 @@ local DEFAULTS = {
   GLUE_MERGE_VOLUMES   = 1,           -- 1=Merge item volume into take volume before glue
   GLUE_PRINT_VOLUMES   = 1,           -- 1=Bake volumes into glued audio; 0=restore (non-destructive)
 
-  -- Rename policy:
-  RENAME_OP_MODE     = "auto",        -- glue | render | auto
   -- Hash markers（#in/#out 以供 Media Cues）
   WRITE_EDGE_CUES   = 1,
   -- ✅ 新增：Glue 成品 take 內是否加 take markers（非 SINGLE 才加）
@@ -851,7 +865,6 @@ function M.read_settings()
     GLUE_MERGE_VOLUMES   = (get_ext_bool("GLUE_MERGE_VOLUMES",   DEFAULTS.GLUE_MERGE_VOLUMES)==1),
     GLUE_PRINT_VOLUMES   = (get_ext_bool("GLUE_PRINT_VOLUMES",   DEFAULTS.GLUE_PRINT_VOLUMES)==1),
 
-    RENAME_OP_MODE     = get_ext("RENAME_OP_MODE",           DEFAULTS.RENAME_OP_MODE),
     WRITE_EDGE_CUES    = (get_ext_bool("WRITE_EDGE_CUES",   DEFAULTS.WRITE_EDGE_CUES)==1),
     -- 🔧 修正：用 DEFAULTS，不是 dflt
     WRITE_GLUE_CUES    = (get_ext_bool("WRITE_GLUE_CUES", DEFAULTS.WRITE_GLUE_CUES)==1),
@@ -2970,9 +2983,6 @@ function M.core(args)
     end
     if args.policies.render_no_trackfx_output_policy then
       set_opt("RENDER_OUTPUT_POLICY_WHEN_NO_TRACKFX", args.policies.render_no_trackfx_output_policy)
-    end
-    if args.policies.rename_mode then
-      set_opt("RENAME_OP_MODE", args.policies.rename_mode)
     end
   end
 
