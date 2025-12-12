@@ -3,11 +3,7 @@
 @author hsuanice
 @version 0.1.0
 @provides
-  [main] hsuanice Scripts/Beta Testing/hsuanice_AudioSweet ReaImGui.lua
-  hsuanice Scripts/Library/hsuanice_AudioSweet Core.lua
-  hsuanice Scripts/Library/hsuanice_AS Preview Core.lua
-  hsuanice Scripts/Library/hsuanice_RGWH Core.lua
-  hsuanice Scripts/Library/hsuanice_Metadata Embed.lua
+  [main] .
 @about
   Complete AudioSweet control center with:
   - Focused/Chain modes with FX chain display
@@ -24,7 +20,23 @@
 
 
 @changelog
-  0.1.0 [Internal Build 251212.1230] - IMPROVED UNDO BEHAVIOR FOR SINGLE-STEP UNDO
+  0.1.0 [Internal Build 251213.0018] - IMPROVED DOCKING SETTING DISCOVERABILITY
+    - Improved: Moved window docking toggle from History Settings to main Settings menu.
+      - New location: Menu Bar → Settings → "Enable Window Docking" (checkbox)
+      - Previous location: History Settings popup (removed)
+      - Rationale: Docking is a UI-level setting unrelated to history; placing it in Settings menu is more intuitive and discoverable
+      - Lines: 1689-1693 (Settings menu checkbox), removed lines 1802-1813 (old History Settings UI section)
+
+  Internal Build 251213.0008 - ADDED DOCKING TOGGLE OPTION
+    - Added: Window docking toggle option.
+      - New setting: "Enable Window Docking" checkbox (default: OFF)
+      - When disabled: window cannot be docked into REAPER's dock system (WindowFlags_NoDocking)
+      - When enabled: window can be docked like any other ImGui window
+      - Setting persists between sessions via ExtState
+      - Lines: 579 (setting definition), 610-611 (save), 657-658 (load), 1645-1647 (window flags)
+    - Purpose: Prevents accidental docking for users who prefer floating windows, while allowing flexibility for those who want docking.
+
+  Internal Build 251212.1230 - IMPROVED UNDO BEHAVIOR FOR SINGLE-STEP UNDO
     - Improved: Main AUDIOSWEET button execution now uses single undo block.
       - Issue: Executing AudioSweet required multiple undo steps to fully revert (render, glue, print FX, etc.)
       - Solution: Wrapped run_audiosweet() execution with Undo_BeginBlock/EndBlock (lines 1039-1040, 1110-1113)
@@ -579,6 +591,8 @@ local gui = {
   -- Feature flags
   enable_saved_chains = true,   -- Now working with OVERRIDE ExtState mechanism
   enable_history = true,        -- Now working with OVERRIDE ExtState mechanism
+  -- UI settings
+  enable_docking = false,       -- Allow window docking
 }
 
 ------------------------------------------------------------
@@ -609,6 +623,8 @@ local function save_gui_settings()
   r.SetExtState(SETTINGS_NAMESPACE, "preview_target_track", gui.preview_target_track, true)
   r.SetExtState(SETTINGS_NAMESPACE, "preview_solo_scope", tostring(gui.preview_solo_scope), true)
   r.SetExtState(SETTINGS_NAMESPACE, "preview_restore_mode", tostring(gui.preview_restore_mode), true)
+  -- UI settings
+  r.SetExtState(SETTINGS_NAMESPACE, "enable_docking", gui.enable_docking and "1" or "0", true)
 end
 
 local function load_gui_settings()
@@ -654,6 +670,8 @@ local function load_gui_settings()
   gui.preview_target_track = get_string("preview_target_track", "AudioSweet")
   gui.preview_solo_scope = get_int("preview_solo_scope", 0)
   gui.preview_restore_mode = get_int("preview_restore_mode", 0)
+  -- UI settings
+  gui.enable_docking = get_bool("enable_docking", false)
 
   -- Debug output on startup
   if gui.debug then
@@ -1630,6 +1648,11 @@ local function draw_gui()
                        ImGui.WindowFlags_AlwaysAutoResize |
                        ImGui.WindowFlags_NoResize
 
+  -- Add NoDocking flag if docking is disabled
+  if not gui.enable_docking then
+    window_flags = window_flags | ImGui.WindowFlags_NoDocking
+  end
+
   local visible, open = ImGui.Begin(ctx, 'AudioSweet Control Panel', true, window_flags)
   if not visible then
     ImGui.End(ctx)
@@ -1669,6 +1692,14 @@ local function draw_gui()
     end
 
     if ImGui.BeginMenu(ctx, 'Settings') then
+      -- UI Settings
+      local rv_dock, new_dock = ImGui.MenuItem(ctx, 'Enable Window Docking', nil, gui.enable_docking, true)
+      if rv_dock then
+        gui.enable_docking = new_dock
+        save_gui_settings()
+      end
+      ImGui.Separator(ctx)
+
       if ImGui.MenuItem(ctx, 'Preview Settings...', nil, false, true) then
         gui.show_preview_settings = true
       end
