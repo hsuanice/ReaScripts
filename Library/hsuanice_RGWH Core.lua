@@ -1,7 +1,8 @@
---[[]
+--[[
 @description RGWH Core - Render or Glue with Handles
-@version 0.1.0-beta (251121.1850)
+@version 0.1.0
 @author hsuanice
+@noindex
 @about
   Core library for handle-aware Render/Glue workflows with clear, single-entry API.
   Features:
@@ -59,18 +60,31 @@
   • For detailed operation modes guide, see RGWH GUI: Help > Manual (Operation Modes)
 
 @changelog
-  0.1.0-beta (251121.1850) - FIX: GAP unit glue cue marker cleanup
+   0.1.0 (251121.1700) - REFACTOR: Unified glue cue logic with shared add_glue_cues() function
+    - Created: Shared add_glue_cues() function (lines 1471-1542) for all glue cue operations
+    - Replaced: Three separate implementations with single shared function
+      • GAP unit glue cues (was lines 1761-1814, now 1762-1765)
+      • Regular unit glue cues (was lines 1798-1843, now 1910-1914)
+      • TS-Window glue cues (was lines 2236-2271, now 2236-2246)
+    - Benefits:
+      • Single source of truth for glue cue logic
+      • Consistent behavior across all glue modes (GAP, TOUCH, TS-Window)
+      • Easier maintenance (one place to update)
+      • Reduced code duplication (~150 lines removed)
+    - Technical: TS-Window remaps members to use clamped positions (iL) for correct marker placement
+
+   (251121.1645) - FIX: GAP unit glue cue marker cleanup
     - Issue: Temporary project markers sometimes not removed after GAP unit glue
     - Root cause: Used incorrect DeleteProjectMarkerByIndex API instead of remove_markers_by_ids()
     - Solution: Use existing remove_markers_by_ids() function for consistent cleanup
 
-  0.1.0-beta (251121.1635) - FIX: GAP unit (TS Glue) now writes glue media cues
+   (251121.1635) - FIX: GAP unit (TS Glue) now writes glue media cues
     - Issue: When using TS Glue with gaps between items, #Glue: cues were not written
     - Root cause: GAP unit block returned early before glue cue logic could execute
     - Solution: Added glue cue logic inside GAP unit handling (lines 1667-1735)
     - Now creates #Glue: <TakeName> markers when source files change within GAP units
 
-  0.1.0-beta (251115.2045) - MAJOR: Unified glue flow - Glue first, then conditionally Apply
+   (251115.2045) - MAJOR: Unified glue flow - Glue first, then conditionally Apply
     - Fixed: Mono mode glue now preserves take name → filename behavior
       • Previous issue: Apply (40361) first → creates "render 001.wav" → Glue → filename lost
       • Root cause: Apply generates generic "render XXX" filenames, losing original take names
@@ -100,7 +114,7 @@
       • Result: Direct glue without Apply, take names preserved in filenames
       • Performance: Significantly faster (1 operation vs 5 operations)
 
-  0.1.0-beta (251114.0045) - DOCUMENTATION: Removed detailed manual from Core, moved to GUI
+   (251114.0045) - DOCUMENTATION: Removed detailed manual from Core, moved to GUI
     - Removed: Detailed @manual section with operation modes guide (was lines 60-370)
       • Detailed documentation now available in RGWH GUI: Help > Manual (Operation Modes)
       • Core file reduced by ~310 lines for better maintainability
@@ -109,7 +123,7 @@
     - Reasoning: Keep Core library focused on API documentation, detailed user guides in GUI
     - Related: RGWH GUI v251114.0100 includes comprehensive operation modes manual window
 
-  0.1.0-beta (251113.2350) - CRITICAL FIX: Track channel auto-expansion by Action 42432 (Glue)
+   (251113.2350) - CRITICAL FIX: Track channel auto-expansion by Action 42432 (Glue)
     - Fixed: Track channel count auto-expands during Glue operations
       • Root cause: Action 42432 (Glue items) auto-expands track channels when source > track
       • Example: 5ch source on 2ch track → Glue expands track to 6ch → subsequent apply outputs 6ch
@@ -137,7 +151,7 @@
     - Impact: force_multi now truly enforces original track channel limit for both Glue and Apply
     - Test tool: Created Test_42432_Track_Channel_Behavior.lua to verify Glue behavior
 
-  0.1.0-beta (251113.2230) - VERIFIED: Multi channel mode tested and working correctly
+   (251113.2230) - VERIFIED: Multi channel mode tested and working correctly
     - Tested: channel_mode="multi" working correctly across all operation modes
     - Test environment: 5-channel source on 6-channel track
     - RENDER mode (Track FX=OFF, Force Multi policy):
@@ -158,14 +172,14 @@
     - Previous tests: Mono mode already verified working (v251113.1820)
     - Ready for: AUTO mode testing (per-item/per-unit channel detection)
 
-  0.1.0-beta (251113.1820) - STABLE: Volume handling fully tested and working
+   (251113.1820) - STABLE: Volume handling fully tested and working
     - Verified: All volume handling working correctly with proper settings
     - Tested: Merge volumes + Print volumes in mono apply + glue workflow
     - Confirmed: Settings now properly read from GUI and applied
     - Result: itemVol=1.0, takeVol=1.0 after merge+print (volumes baked into audio)
     - This version is stable and ready for production use
 
-  0.1.0-beta (251113.1810) - CRITICAL FIX: Volume settings not being read from ExtState
+   (251113.1810) - CRITICAL FIX: Volume settings not being read from ExtState
     - Fixed: MERGE_VOLUMES and PRINT_VOLUMES settings were not being read from ExtState
       • Previous behavior: Settings always defaulted to false (nil), ignoring GUI settings
       • Root cause: read_settings() function was missing these 4 keys
@@ -180,7 +194,7 @@
       • Uses get_ext_bool() to convert to boolean
     - This fixes the reported volume issues - settings are now properly applied
 
-  0.1.0-beta (251113.1800) - MAJOR REFACTOR: Unified volume/FX handling with helper functions
+   (251113.1800) - MAJOR REFACTOR: Unified volume/FX handling with helper functions
     - Added: Centralized helper functions for volume and FX handling (line 848-1080)
       • snapshot_item_volumes() - Snapshot item and all takes' volumes
       • preprocess_item_volumes() - Handle merge_volumes and print_volumes before render/apply
@@ -214,7 +228,7 @@
     - Impact: Volume handling now works consistently across all workflows
     - This refactor should fix the reported volume issues in mono apply mode
 
-  0.1.0-beta (251113.1700) - CRITICAL FIX: Volume handling in mono apply workflow
+   (251113.1700) - CRITICAL FIX: Volume handling in mono apply workflow
     - Fixed: Mono apply workflow now properly handles volume merge/print settings
       • Previous behavior: Volumes reset to 1.0 after mono apply + glue (volumes lost)
       • New behavior: Full volume snapshot/merge/restore logic matching RENDER mode
@@ -240,7 +254,7 @@
     - Impact: Volume control now works correctly in mono channel mode for both apply-only and apply+glue paths
     - Test case: itemVol=4.169 × takeVol=0.631 → correctly preserved/restored instead of reset to 1.0
 
-  0.1.0-beta (251113.1650) - CRITICAL FIX: Mono channel mode FX control + RENDER mode support
+   (251113.1650) - CRITICAL FIX: Mono channel mode FX control + RENDER mode support
     - Fixed: Mono apply workflow now respects TAKE_FX and TRACK_FX settings
       • Previous behavior: 40361 (Apply mono) always printed all FX regardless of settings
       • New behavior: Snapshot/disable Track FX and offline Take FX before apply when FX=OFF
@@ -267,7 +281,7 @@
     - Impact: Mono channel mode now fully functional with correct FX control in all modes
     - Requires: GUI v251113.1540 for GLUE_AFTER_MONO_APPLY setting
 
-  0.1.0-beta (251113.1540) - MAJOR: Explicit mono/multi channel mode enforcement with conditional glue
+   (251113.1540) - MAJOR: Explicit mono/multi channel mode enforcement with conditional glue
     - Added: GLUE_AFTER_MONO_APPLY setting for AUTO mode behavior control
       • ON (default): Apply mono (40361) to each item, then glue the unit
       • OFF: Apply mono (40361) to each item, keep as separate items
@@ -290,7 +304,7 @@
     - Impact: channel_mode="auto" unchanged (per-item/per-unit detection still works as before)
     - Note: RENDER mode not affected (continues using 41993 for multi, or native render for mono detection)
 
-  0.1.0-beta (251112.2220) - VERIFIED: Per-item/per-unit channel detection working correctly
+   (251112.2220) - VERIFIED: Per-item/per-unit channel detection working correctly
     - Verified: All test cases pass with new per-item/per-unit channel detection
     - Test results with channel_mode="auto":
       • 3 mono items (src=1) → rendered as mono (src=1) ✓
@@ -300,7 +314,7 @@
     - New behavior correctly matches each item/unit's actual channel requirements
     - Production ready for mixed mono/multi workflows
 
-  0.1.0-beta (251112.2030) - CRITICAL: Channel mode "auto" now per-item/per-unit detection
+   (251112.2030) - CRITICAL: Channel mode "auto" now per-item/per-unit detection
     - Changed: channel_mode="auto" behavior is now per-item for RENDER and per-unit for GLUE/AUTO
     - Previous behavior: Scanned ALL selected items, used max channel count for entire operation
     - New behavior (per-item/per-unit):
@@ -314,7 +328,7 @@
     - Technical: Added per-item detection in render loop, per-unit detection in glue_unit()
     - Impact: More accurate channel handling, matches user intent for mixed mono/multi workflows
 
-  0.1.0-beta (251112.1430) - STABLE: Core P0 testing complete, all scenarios pass
+   (251112.1430) - STABLE: Core P0 testing complete, all scenarios pass
     - Comprehensive P0 test suite completed (RENDER, GLUE, AUTO modes with various TS/unit combinations)
     - All test results: ✓
       • P0-1: RENDER single item, no TS → handles, volume merge+print, take FX clone ✓
@@ -334,7 +348,7 @@
       • AUTO mode TS independence
     - Ready for production use
 
-  0.1.0-beta (251111.1615) - CRITICAL FIX: AUTO mode now ignores TS for glue operations (always uses handles)
+   (251111.1615) - CRITICAL FIX: AUTO mode now ignores TS for glue operations (always uses handles)
     - Fixed: AUTO mode glue phase now clears TS before processing multi-item units
     - Issue: AUTO mode was detecting existing TS (from render phase or previous ops) and incorrectly applying TS-Window logic (no handles)
     - Solution: Clear TS at line 1896 before gluing multi-item units in AUTO mode
@@ -342,7 +356,7 @@
     - Rationale: AUTO mode operates on units basis, each unit should have handles regardless of TS state
     - Test: P0-5 (AUTO with mixed SINGLE+MIXED units) now shows handles on all glued items ✓
 
-  0.1.0-beta (251111.1550) - CRITICAL FIX: TS-Window glue selection restore + auto-detect TS=unit after split
+   (251111.1550) - CRITICAL FIX: TS-Window glue selection restore + auto-detect TS=unit after split
     - Fixed: Selection restore after TS-Window glue now correctly selects glued item (not leftover split)
     - Fixed: When TS causes item split and result equals unit edges → auto-switch to Units glue with handles
     - Core changes (line 1525-1545):
@@ -366,7 +380,7 @@
         - TS inside item: Split → auto-detect TS=unit → Units glue WITH handles ✓
     - Ready for continued comprehensive testing
 
-  0.1.0-beta (251110.2315) - Verified: Volume handling working correctly across all modes
+   (251110.2315) - Verified: Volume handling working correctly across all modes
     - Confirmed merge+print fix (v2300) resolves volume preservation issues
     - All volume modes tested and verified:
       • merge=off, print=off → preserves original item/take volumes ✓
@@ -375,7 +389,7 @@
       • merge=on,  print=on  → merged volumes, new take baked ✓
     - Ready for comprehensive testing
 
-  0.1.0-beta (251110.2300) - CRITICAL FIX: Render volume handling for merge+print mode
+   (251110.2300) - CRITICAL FIX: Render volume handling for merge+print mode
     - Fixed: Old takes now keep merged volume in merge+print mode (was: incorrectly reset)
     - Fixed: Undefined variable tk_orig_idx causing potential errors
     - Root cause: Line 2177 was overwriting merged volume that was already set at line 2064
@@ -386,7 +400,7 @@
     - Modified lines 2056-2085: Added tk_orig_idx lookup, fixed merge logic
     - Modified lines 2173-2182: Removed incorrect volume restore for old take
 
-  0.1.0-beta (251110.2250) - STABLE: Handle logic and scope detection finalized
+   (251110.2250) - STABLE: Handle logic and scope detection finalized
     - Verified: Item Selection (IS) only → Units glue with handles ✓
     - Verified: Time Selection (TS) exists → TS-Window glue (handles only if TS=unit) ✓
     - Core logic summary:
@@ -396,7 +410,7 @@
       • Multi-track: Supported in both modes
     - Ready for comprehensive testing across all scenarios
 
-  0.1.0-beta (251110.2130) - Fixed: Units glue works without TS (Item Selection only)
+   (251110.2130) - Fixed: Units glue works without TS (Item Selection only)
     - Fixed: Multiple units without TS now process individually with handles (was: merged into GAP unit)
     - Removed: Multi-track TS-Window enforcement (was incorrect)
     - Behavior: Item Selection (IS) only → Units glue with handles, supports multi-track ✓
@@ -405,7 +419,7 @@
     - Modified lines 1649-1658: Removed multi-track scope override
     - Example: 2 SINGLE units, no TS → each glued individually with 5s handles ✓
 
-  0.1.0-beta (251110.2100) - Handle logic: Strict TS=Unit requirement + multi-track TS-Window enforcement
+   (251110.2100) - Handle logic: Strict TS=Unit requirement + multi-track TS-Window enforcement
     - Changed: Handles ONLY applied when TS exactly equals unit edges (both left AND right aligned)
     - Logic: If TS ≠ Unit → no handles (0.0), regardless of partial overlap
     - Multi-track: If selection spans >1 track → force TS-Window mode (no handles)
@@ -420,7 +434,7 @@
       • TS=0..2s, unit=1..2s → no handles (left misaligned) ✗
       • Multi-track selection → always TS-Window mode, no handles ✓
 
-  0.1.0-beta (251110.2000) - Handle logic: Apply handles when TS is at unit edge OR outside (inclusive)
+   (251110.2000) - Handle logic: Apply handles when TS is at unit edge OR outside (inclusive)
     - Changed: Handle calculation now uses inclusive conditions for left/right independently
     - Left: If TS_left <= unit_left + eps → apply default HANDLE (was: strict < for outside only)
     - Right: If TS_right >= unit_right - eps → apply default HANDLE (was: strict > for outside only)
@@ -430,7 +444,7 @@
     - Example: TS=0..2s, unit=0..2s → uses 5s default handles (edge-aligned case)
     - Example: TS=0..2s, unit=1..2s → left gets 5s handle (TS at/outside left edge)
 
-  0.1.0-beta (251110.1920) - CRITICAL FIX: Correct D_STARTOFFS adjustment for glue with handles
+   (251110.1920) - CRITICAL FIX: Correct D_STARTOFFS adjustment for glue with handles
     - Fixed: Content alignment now correct when gluing with left-side handles
     - Root cause: D_STARTOFFS was not adjusted before glue, causing REAPER to read from wrong source position
     - Solution: When extending item left, adjust D_STARTOFFS before glue (lines 1198-1225)
@@ -445,7 +459,7 @@
     - Impact: All glue operations with left handles now preserve content alignment perfectly
     - Tested: Item at 16.458s, SIS 6.208s → glue with 5s left handle → content identical
 
-  0.1.0-beta (251110.1800) - Handle calculation refinement: TS edge equality handling
+   (251110.1800) - Handle calculation refinement: TS edge equality handling
     - Fixed: When TS edges exactly equal unit edges, now uses default handles (not 0-length handles)
     - Root cause: Condition `tsL <= unitL + eps` matched when TS=unit, calculating H_left=0
     - Solution: Changed to strict inequality `tsL < unitL - eps` (lines 1115, 1122)
@@ -454,7 +468,7 @@
     - Example: TS=0..2s, unit=0..2s → now uses 5s handles (was 0s)
     - Impact: Proper handle extension when TS matches selection exactly
 
-  0.1.0-beta (251110.1730) - CRITICAL FIX: TS-based handle calculation prevents content shift
+   (251110.1730) - CRITICAL FIX: TS-based handle calculation prevents content shift
     - Fixed: All unit types (SINGLE/TOUCH/GAP) now use TS boundaries for handle calculation when TS exists
     - Fixed: Content no longer shifts when gluing with TS-extended handles
     - Root cause: Handle calculation used fixed HANDLE value, ignoring TS boundaries
@@ -467,7 +481,7 @@
     - Impact: "完全尊重TS的範圍" - all edges respect TS range, content stays aligned
     - Tested: Single item with TS extending both sides - no content shift
 
-  0.1.0-beta (251110.1630) - CRITICAL FIX: GAP unit glue now respects full TS range
+   (251110.1630) - CRITICAL FIX: GAP unit glue now respects full TS range
     - Fixed: Multiple items with gaps + TS extending beyond items now glues to full TS range
     - Example: Items at 0-1s and 2-4s with TS=0-6s now glues to 0-6s (was 0-4s)
     - Root cause: GAP unit span calculation used item boundaries only, ignoring TS boundaries
@@ -477,7 +491,7 @@
     - Impact: GAP units fill leading/trailing space as silence when TS extends beyond items
     - Tested: Track #170 case (items 0-1s, 2-4s, TS 0-6s) now correctly glues to 0-6s
 
-  0.1.0-beta (251110.1430) - CRITICAL FIX: TS glue scope detection + Units glue handle offset
+   (251110.1430) - CRITICAL FIX: TS glue scope detection + Units glue handle offset
     - Fixed: TS = Item selection now correctly uses Units glue with handles (not TS glue)
     - Fixed: Units glue with handles no longer causes content shift
     - Root cause #1: glue_auto_scope() in "glue" mode always returned TS path, ignoring TS≈selection check
@@ -494,7 +508,7 @@
     - Impact: All glue operations (Units with/without TS, TS-Window) now work correctly
     - Tested: TS=selection uses Units glue with handles; content alignment preserved
 
-  0.1.0-beta (251107.0240) - MAJOR: GLUE MODE NOW PRIORITIZES TS-WINDOW (NO HANDLES)
+   (251107.0240) - MAJOR: GLUE MODE NOW PRIORITIZES TS-WINDOW (NO HANDLES)
     - Changed: glue_selection() now auto-detects TS and uses TS-Window glue when TS exists
       • When TS exists: Uses TS-Window glue (NO handles, splits at boundaries, non-destructive)
       • When NO TS: Uses Units glue (with handles as configured)
@@ -517,7 +531,7 @@
       • Handles only apply in Units glue path
     - Rationale: Users expect GLUE button to use TS range when TS is set, without handles
 
-  0.1.0-beta (251107.0100) - FIXED AUTO MODE LOGIC
+   (251107.0100) - FIXED AUTO MODE LOGIC
     - Fixed: AUTO mode now correctly processes units based on their composition (not total selection count)
       • Single-item units → RENDER (per-item)
       • Multi-item units (TOUCH/CROSSFADE) → GLUE
@@ -534,7 +548,7 @@
     - Rationale: Users expect AUTO to intelligently handle mixed selections where some units
                  need render (single items) and others need glue (multi-item groups)
 
-  0.1.0-beta (251030.1600) - Initial Public Beta Release
+   (251030.1600) - Initial Public Beta Release
     Core library for handle-aware Render/Glue workflows featuring:
     - Handle-aware windows with clamp-to-source
     - Glue by Item Units (same-track grouping) with optional Glue Cues
@@ -1458,6 +1472,89 @@ local function add_edge_cues(UL, UR, color)
   return {in_id, out_id}
 end
 
+------------------------------------------------------------
+-- Glue Cues: #Glue: <TakeName> markers (shared function)
+------------------------------------------------------------
+-- Analyzes members, builds source sequence, writes project markers
+-- Returns: array of marker IDs (or nil if no markers written)
+-- Parameters:
+--   members: array of {it=MediaItem*, L=pos, ...}
+--   unit_start: unit start position (for head cue if needed)
+--   DBG: debug level
+--   tag: optional debug tag (e.g., "GAP", "TS")
+local function add_glue_cues(members, unit_start, DBG, tag)
+  if not members or #members < 2 then return nil end
+
+  tag = tag or ""
+
+  -- Helper: get source file path
+  local function src_path_of(it)
+    local tk  = reaper.GetActiveTake(it)
+    if not tk then return nil end
+    local src = reaper.GetMediaItemTake_Source(tk)
+    if not src then return nil end
+    local p   = reaper.GetMediaSourceFileName(src, "") or ""
+    p = p:gsub("\\","/"):gsub("^%s+",""):gsub("%s+$","")
+    return (p ~= "") and p or nil
+  end
+
+  -- Helper: get take name
+  local function take_name_of(it)
+    local tk = reaper.GetActiveTake(it)
+    if not tk then return nil end
+    local ok, nm = reaper.GetSetMediaItemTakeInfo_String(tk, "P_NAME", "", false)
+    return (ok and nm ~= "" and nm) or reaper.GetTakeName(tk) or nil
+  end
+
+  -- Build source sequence
+  local seq, uniq = {}, {}
+  for _, m in ipairs(members) do
+    local p = src_path_of(m.it) or ("<no-src>")
+    seq[#seq+1] = { L = m.L, path = p, it = m.it }
+    uniq[p] = true
+  end
+
+  -- Count unique sources
+  local unique_count = 0
+  for _ in pairs(uniq) do unique_count = unique_count + 1 end
+
+  -- Only write cues if there are 2+ different sources
+  if unique_count < 2 then return nil end
+
+  -- Build marks_abs array
+  local marks_abs = {}
+
+  -- Head cue (at unit start)
+  local head_name = take_name_of(members[1].it) or ((seq[1].path or ""):match("([^/]+)$") or "")
+  marks_abs[#marks_abs+1] = { abs = unit_start, name = head_name }
+
+  -- Boundary cues where source changes
+  for i = 1, (#seq - 1) do
+    if seq[i].path ~= seq[i+1].path then
+      local next_name = take_name_of(members[i+1].it) or ((seq[i+1].path or ""):match("([^/]+)$") or "")
+      marks_abs[#marks_abs+1] = { abs = seq[i+1].L, name = next_name }
+    end
+  end
+
+  -- Write project markers
+  if #marks_abs == 0 then return nil end
+
+  local glue_ids = {}
+  for _, mk in ipairs(marks_abs) do
+    local raw = mk.name or ""
+    raw = raw:gsub("^%s*GlueCue:%s*", "")  -- strip legacy prefix if any
+    local label = ("#Glue: %s"):format(raw)
+    local id = reaper.AddProjectMarker2(0, false, mk.abs or unit_start, 0, label, -1, 0)
+    glue_ids[#glue_ids+1] = id
+    if DBG >= 2 then
+      local debug_tag = (tag ~= "") and ("[GLUE-CUE][" .. tag .. "]") or "[GLUE-CUE]"
+      dbg(DBG, 2, "%s add @ %.3f  label=%s  id=%s", debug_tag, mk.abs or unit_start, label, tostring(id))
+    end
+  end
+
+  return glue_ids
+end
+
 local function remove_markers_by_ids(ids)
   if not ids then return end
   local proj = 0
@@ -1675,59 +1772,10 @@ local function glue_unit(tr, u, cfg)
       dbg(DBG,1,"[TAKE-FX] cleared (policy=OFF) for GAP unit.")
     end
 
-    -- Prepare Glue Cues for GAP unit (same logic as TOUCH units)
-    local gap_marks_abs = nil
+    -- Prepare Glue Cues for GAP unit using shared function
     local gap_glue_ids = nil
-    if cfg.WRITE_GLUE_CUES and #u.members >= 2 then
-      local function src_path_of(it)
-        local tk  = reaper.GetActiveTake(it)
-        if not tk then return nil end
-        local src = reaper.GetMediaItemTake_Source(tk)
-        if not src then return nil end
-        local p   = reaper.GetMediaSourceFileName(src, "") or ""
-        p = p:gsub("\\","/"):gsub("^%s+",""):gsub("%s+$","")
-        return (p ~= "") and p or nil
-      end
-      local function take_name_of(it)
-        local tk = reaper.GetActiveTake(it)
-        if not tk then return nil end
-        local ok, nm = reaper.GetSetMediaItemTakeInfo_String(tk, "P_NAME", "", false)
-        return (ok and nm ~= "" and nm) or reaper.GetTakeName(tk) or nil
-      end
-      local seq, uniq = {}, {}
-      for _, m in ipairs(u.members or {}) do
-        local p = src_path_of(m.it) or ("<no-src>")
-        seq[#seq+1] = { L = m.L, path = p, it = m.it }
-        uniq[p] = true
-      end
-      local unique_count = 0
-      for _ in pairs(uniq) do unique_count = unique_count + 1 end
-
-      if unique_count >= 2 then
-        gap_marks_abs = {}
-        -- Head cue
-        local head_name = take_name_of(u.members[1].it) or ((seq[1].path or ""):match("([^/]+)$") or "")
-        gap_marks_abs[#gap_marks_abs+1] = { abs = u.start, name = head_name }
-        -- Boundary cues where source changes
-        for i = 1, (#seq - 1) do
-          if seq[i].path ~= seq[i+1].path then
-            local next_name = take_name_of(u.members[i+1].it) or ((seq[i+1].path or ""):match("([^/]+)$") or "")
-            gap_marks_abs[#gap_marks_abs+1] = { abs = seq[i+1].L, name = next_name }
-          end
-        end
-      end
-
-      -- Pre-embed as project markers (absorbed into media during glue)
-      if gap_marks_abs and #gap_marks_abs > 0 then
-        gap_glue_ids = {}
-        for _, mk in ipairs(gap_marks_abs) do
-          local raw = mk.name or ""
-          local label = ("#Glue: %s"):format(raw)
-          local id = reaper.AddProjectMarker2(0, false, mk.abs or u.start, 0, label, -1, 0)
-          gap_glue_ids[#gap_glue_ids+1] = id
-          if DBG >= 2 then dbg(DBG,2,"[GLUE-CUE] GAP add @ %.3f  label=%s  id=%s", mk.abs or u.start, label, tostring(id)) end
-        end
-      end
+    if cfg.WRITE_GLUE_CUES then
+      gap_glue_ids = add_glue_cues(u.members, u.start, DBG, "GAP")
     end
 
     -- Set TS to overall span and glue
@@ -1761,52 +1809,8 @@ local function glue_unit(tr, u, cfg)
     return
   end
 
-  -- Prepare Glue Cues plan (absolute project times).
+  -- Prepare Glue Cues using shared function (skipped for SINGLE units)
   -- Rule: write a cue only when adjacent items switch to a different file source.
-  -- If the whole unit uses a single source, write none (including the head).
-  local marks_abs = nil
-  if u.kind ~= "SINGLE" then
-    -- Build ordered source sequence for this unit
-    local function src_path_of(it)
-      local tk  = reaper.GetActiveTake(it)
-      if not tk then return nil end
-      local src = reaper.GetMediaItemTake_Source(tk)
-      if not src then return nil end
-      local p   = reaper.GetMediaSourceFileName(src, "") or ""
-      p = p:gsub("\\","/"):gsub("^%s+",""):gsub("%s+$","")
-      return (p ~= "") and p or nil
-    end
-
-    local function take_name_of(it)
-      local tk = reaper.GetActiveTake(it)
-      if not tk then return nil end
-      local ok, nm = reaper.GetSetMediaItemTakeInfo_String(tk, "P_NAME", "", false)
-      return (ok and nm ~= "" and nm) or reaper.GetTakeName(tk) or nil
-    end
-    local seq, uniq = {}, {}
-    for _, m in ipairs(u.members or {}) do
-      local p = src_path_of(m.it) or ("<no-src>")
-      seq[#seq+1] = { L = m.L, path = p }
-      uniq[p] = true
-    end
-    local unique_count = 0
-    for _ in pairs(uniq) do unique_count = unique_count + 1 end
-
-    if unique_count >= 2 then
-      marks_abs = {}
-      -- Head cue uses TakeName (preserve original case)
-      local head_name = take_name_of(u.members[1].it) or ((seq[1].path or ""):match("([^/]+)$") or "")
-      marks_abs[#marks_abs+1] = { abs = u.start, name = head_name }
-
-      -- Boundary cues where source changes
-      for i = 1, (#seq - 1) do
-        if seq[i].path ~= seq[i+1].path then
-          local next_name = take_name_of(u.members[i+1].it) or ((seq[i+1].path or ""):match("([^/]+)$") or "")
-          marks_abs[#marks_abs+1] = { abs = seq[i+1].L, name = next_name }
-        end
-      end
-    end
-  end
 
   -- 保存左右邊界淡入淡出（之後還原）
   local members = {}
@@ -1917,20 +1921,10 @@ local function glue_unit(tr, u, cfg)
     dbg(DBG,1,"[EDGE-CUE] add #in @ %.3f  #out @ %.3f  ids=(%s,%s)", u.start, u.finish, tostring(edge_ids[1]), tostring(edge_ids[2]))
   end
 
-  -- When enabled, pre-embed Glue Cues as project markers (with '#' prefix).
-  -- They will be absorbed into the new media during glue.
-  -- Pre-embed Glue cues as project markers (with '#') so glue absorbs them into media
+  -- Pre-embed Glue Cues using shared function
   local glue_ids = nil
-  if cfg.WRITE_GLUE_CUES and u.kind ~= "SINGLE" and marks_abs and #marks_abs > 0 then
-    glue_ids = {}
-    for _, mk in ipairs(marks_abs) do
-      local raw = mk.name or mk.stem or mk.label or ""
-      raw = raw:gsub("^%s*GlueCue:%s*", "")  -- strip legacy prefix if any
-      local label = ("#Glue: %s"):format(raw)
-      local id = reaper.AddProjectMarker2(0, false, mk.abs or u.start, 0, label, -1, 0)
-      glue_ids[#glue_ids+1] = id
-      if DBG >= 2 then dbg(DBG,2,"[GLUE-CUE] add @ %.3f  label=%s  id=%s", mk.abs or u.start, label, tostring(id)) end
-    end
+  if cfg.WRITE_GLUE_CUES and u.kind ~= "SINGLE" then
+    glue_ids = add_glue_cues(members, u.start, DBG)
   end
 
 
@@ -2254,40 +2248,15 @@ local function glue_by_ts_window_on_track(tr, tsL, tsR, cfg, members_snapshot)
   end
 
   -- Optional: WRITE_GLUE_CUES inside TS when sources switch
+  -- Note: TS-Window uses clamped positions (iL) instead of original positions (L)
+  -- We need to remap members for add_glue_cues() to use iL as L
   local glue_ids = nil
   if cfg.WRITE_GLUE_CUES and #members >= 2 then
-    -- build per-member source id and label
-    local function src_key_and_name(it)
-      local tk  = r.GetActiveTake(it)
-      if not tk then return "<no-src>", (r.GetTakeName and r.GetTakeName(tk)) or "" end
-      local src = r.GetMediaItemTake_Source(tk)
-      local p   = src and r.GetMediaSourceFileName(src, "") or ""
-      p = p:gsub("\\","/"):gsub("^%s+",""):gsub("%s+$","")
-      local key = (p ~= "" and p) or "<no-src>"
-      local ok, nm = r.GetSetMediaItemTakeInfo_String(tk, "P_NAME", "", false)
-      local lbl = (ok and nm ~= "" and nm) or (p:match("([^/]+)$") or "")
-      return key, lbl
+    local remapped_members = {}
+    for _, m in ipairs(members) do
+      remapped_members[#remapped_members+1] = { it = m.it, L = m.iL }
     end
-
-    local seq = {}
-    for _,m in ipairs(members) do
-      local key, lbl = src_key_and_name(m.it)
-      seq[#seq+1] = { L = m.iL, key = key, label = lbl }
-    end
-
-    -- write head + boundaries where source changes
-    glue_ids = {}
-    if seq[1] then
-      local id = r.AddProjectMarker2(0, false, tsL, 0, ("#Glue: %s"):format(seq[1].label or ""), -1, 0)
-      glue_ids[#glue_ids+1] = id
-    end
-    for i=1,(#seq-1) do
-      if seq[i].key ~= seq[i+1].key then
-        local id = r.AddProjectMarker2(0, false, seq[i+1].L, 0, ("#Glue: %s"):format(seq[i+1].label or ""), -1, 0)
-        glue_ids[#glue_ids+1] = id
-      end
-    end
-    if DBG>=2 then dbg(DBG,2,"[GLUE-CUE][TS] wrote %d markers (track #%d)", #glue_ids, r.GetMediaTrackInfo_Value(tr,"IP_TRACKNUMBER") or -1) end
+    glue_ids = add_glue_cues(remapped_members, tsL, DBG, "TS")
   end
 
   -- select only intersecting members for this track
