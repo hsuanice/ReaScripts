@@ -2,17 +2,29 @@
 @description AudioSweet Preview Core
 @version 0.1.0
 @author hsuanice
-@noindex
+
+@provides
+  [main] .
 
 @about Minimal, self-contained preview runtime. Later we can extract helpers to "hsuanice_AS Core.lua".
 
 @changelog
-  0.1.0 (2025-10-30) - Initial Public Beta Release
+  0.1.0 (2025-12-13) - Initial Public Beta Release
     Minimal preview runtime for AudioSweet with:
     - High-precision timing using reaper.time_precise()
     - Handle-aware edge/glue cue policies
     - Selection restore with verification
     - Integration with AudioSweet ReaImGui and RGWH Core
+    - Fixed: Preview item move bug when FX track is below source track (collect-then-move pattern)
+    - Enhanced debug logging for item move verification
+
+  Internal Build v251213.0008
+    - Fixed: Preview item move bug when FX track is below source track.
+      * Previously: moving items during iteration caused selection index shift, resulting in even-indexed items being skipped.
+      * Now: collect all items first, then move them in a separate loop to avoid index invalidation.
+      * Affected scenario: when preview target track has a higher track number than the source track.
+    - Added: Enhanced debug logging for item move verification (shows item count and positions before/after move).
+    - Behavior: No change to audio path or preview workflow; only fixes the move operation reliability.
 
   Internal Build v251017_1337
     - Verified: removed all Chinese inline comments; file is now fully English-only for public release.
@@ -1178,6 +1190,19 @@ end
 
 function ASP._prepare_preview_items_on_fx_track(mode)
   local cnt = reaper.CountSelectedMediaItems(0)
+  ASP.log("_prepare_preview: counted %d selected items in REAPER", cnt)
+
+  -- Debug: print each selected item
+  for i=0, cnt-1 do
+    local it = reaper.GetSelectedMediaItem(0, i)
+    if it then
+      local pos = reaper.GetMediaItemInfo_Value(it, "D_POSITION")
+      local tr = reaper.GetMediaItem_Track(it)
+      local tr_num = reaper.GetMediaTrackInfo_Value(tr, "IP_TRACKNUMBER")
+      ASP.log("  [%d] item pos=%.3f track=#%d", i, pos, tr_num or -1)
+    end
+  end
+
   if cnt == 0 then return end
   -- remember how many items were moved out in this preview session (for timesel count sanity check)
   ASP._state.moved_count = cnt or 0
@@ -1206,16 +1231,34 @@ function ASP._prepare_preview_items_on_fx_track(mode)
   ASP.log("placeholder created: [%0.3f..%0.3f] %s", UL or -1, UR or -1, note)
 
   -- 搬移所選 item 到 FX 軌
+  -- IMPORTANT: Collect all items FIRST, then move them.
+  -- If we move items during iteration, the selection indices shift when FX track is below the source track.
   ASP._state.moved_items = {}
   for i=0, cnt-1 do
     local it = reaper.GetSelectedMediaItem(0, i)
     if it then
       table.insert(ASP._state.moved_items, it)
-      reaper.MoveMediaItemToTrack(it, ASP._state.fx_track)
     end
+  end
+
+  -- Now move all collected items
+  for _, it in ipairs(ASP._state.moved_items) do
+    reaper.MoveMediaItemToTrack(it, ASP._state.fx_track)
   end
   reaper.UpdateArrange()
   ASP.log("moved %d items -> FX track", #ASP._state.moved_items)
+
+  -- Debug: verify items are on FX track after move
+  local fx_track_num = reaper.GetMediaTrackInfo_Value(ASP._state.fx_track, "IP_TRACKNUMBER")
+  ASP.log("Verification: FX track #%d now has %d items total",
+    fx_track_num or -1,
+    reaper.CountTrackMediaItems(ASP._state.fx_track))
+  for i, it in ipairs(ASP._state.moved_items) do
+    local now_tr = reaper.GetMediaItem_Track(it)
+    local now_tr_num = reaper.GetMediaTrackInfo_Value(now_tr, "IP_TRACKNUMBER")
+    local pos = reaper.GetMediaItemInfo_Value(it, "D_POSITION")
+    ASP.log("  moved_items[%d]: now on track #%d, pos=%.3f", i, now_tr_num or -1, pos)
+  end
 end
 
 function ASP._clear_preview_items_only()
