@@ -1,6 +1,31 @@
 <?xml version="1.0" encoding="utf-8"?>
-<index version="1" name="hsuanice Scripts" commit="6361353d1b04a964093c121c94a1f4dd5bf740ea">
+<index version="1" name="hsuanice Scripts" commit="358c3aee8b0b41d18274d69489025d7d80683ca4">
   <category name="Beta Testing">
+    <reapack name="hsuanice_AudioSweet ReaImGui.lua" type="script" desc="AudioSweet ReaImGui - ImGui Interface for AudioSweet">
+      <metadata>
+        <description><![CDATA[{\rtf1\ansi\deff0{\fonttbl{\f0 \fswiss Helvetica;}{\f1 \fmodern Courier;}}
+{\colortbl;\red255\green0\blue0;\red0\green0\blue255;}
+\widowctrl\hyphauto
+
+{\pard \ql \f0 \sa180 \li0 \fi0 Complete AudioSweet control center with:\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Focused/Chain modes with FX chain display\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Apply/Copy actions\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab AudioSweet Preview integration with configurable target track\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Compact, intuitive UI with radio buttons\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Persistent settings (remembers all settings between sessions)\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Improved auto-focus FX with CLAP plugin support\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Debug mode with detailed console logging\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Built-in keyboard shortcuts (Space = Play/Stop, S = Solo toggle)\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Comprehensive file naming settings with FX Alias support\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Saved Chains and History features with CLAP plugin support\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Auto-resizing window that prevents accidental resize/close\sa180\par}
+}
+]]></description>
+      </metadata>
+      <version name="0.1.0" author="hsuanice" time="2025-12-12T16:21:49Z">
+        <source main="main">https://github.com/hsuanice/ReaScripts/raw/358c3aee8b0b41d18274d69489025d7d80683ca4/Beta%20Testing/hsuanice_AudioSweet%20ReaImGui.lua</source>
+      </version>
+    </reapack>
     <reapack name="hsuanice_BWF TimeReference Embed Tool.lua" type="script" desc="Embed BWF TimeReference to Active take from Take 1 or Current Position TC">
       <version name="0.7.1" author="hsuanice" time="2025-08-14T17:52:57Z">
         <source main="main">https://github.com/hsuanice/ReaScripts/raw/48f0d28a1b28dd3f74ec9ce2bab97bc0b30a84e8/Beta%20Testing/hsuanice_BWF%20TimeReference%20Embed%20Tool.lua</source>
