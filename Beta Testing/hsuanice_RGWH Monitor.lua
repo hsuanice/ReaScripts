@@ -1,34 +1,36 @@
 --[[
-@description hsuanice_RGWH Monitor
-@version 0.1.0-beta (251009.2349)
+@description RGWH Monitor - Console Monitor for Items and Units
+@version 0.1.0
 @author hsuanice
+@provides
+  [main] hsuanice Scripts/Beta Testing/hsuanice_RGWH Monitor.lua
+  hsuanice Scripts/Library/hsuanice_Metadata Read.lua
 @note
 Console monitor for units (SINGLE/TOUCH/CROSSFADE/MIXED),
 item details, FX states, and # markers.
 Linear volume only (no dB).
 
 @changelog
-  v250924_1847
-    - SourceTR/SIS/ABS display now shows raw domain value first,
-      with converted value in parentheses for cross-check.
-      e.g. "TR=929132000 smp (19356.9166666667s)".
-    - Added run_id() implementation using reaper.time_precise(),
-      ensures unique non-nil RunID (hex string).
-    - Improved precision visibility: full double values are kept,
-      truncated with "..." only when repeating decimals extend too far.
-    - Output layout remains consistent for easier visual comparison.
-  v250923_1331
-  - Added: Read and display BWF:TimeReference (TR), Start-in-Source (SIS), and computed ABS time (TR+SIS).
-  - Integrated hsuanice_Metadata Read.lua for robust metadata parsing (preferred over legacy GetMediaFileMetadata).
-  - Output example: "sourceTC: TR=19459.708333(s) [934066000 smp @ 48000 Hz]  SIS=5.583333(s)  ABS=19465.291667(s)"
-
-  v250922_2240
-  - Added per-member channel info:
-    • src = media source channel count
-    • track = track channel count
-    • chanmode = take channel mode (integer)
-  - Output example: "channels: src=2  track=6  chanmode=0"
-  - Useful to distinguish mono/multi-channel material and routing.
+  0.1.0 (2025-12-12) [internal: v251113.2345]
+    - Added: Track channel count display in track summary line
+      • Output example: "Track #170: items=2 units=2 track_channels=2"
+      • Helps debug channel count changes during operations
+      • Uses I_NCHAN property (defaults to 2 if not available)
+    - Purpose: Track channel count debugging for multi-channel workflows
+    - SourceTR/SIS/ABS display now shows raw domain value first [internal: v250924_1847]
+      • With converted value in parentheses for cross-check
+      • e.g. "TR=929132000 smp (19356.9166666667s)"
+    - Added run_id() implementation using reaper.time_precise()
+    - Improved precision visibility: full double values are kept
+    - Added: Read and display BWF:TimeReference (TR), Start-in-Source (SIS), and computed ABS time [internal: v250923_1331]
+    - Integrated hsuanice_Metadata Read.lua for robust metadata parsing
+    - Output example: "sourceTC: TR=19459.708333(s) [934066000 smp @ 48000 Hz]  SIS=5.583333(s)  ABS=19465.291667(s)"
+    - Added per-member channel info [internal: v250922_2240]
+      • src = media source channel count
+      • track = track channel count
+      • chanmode = take channel mode (integer)
+    - Output example: "channels: src=2  track=6  chanmode=0"
+    - Useful to distinguish mono/multi-channel material and routing
 ]]--
 
 
@@ -451,8 +453,9 @@ local function main()
   for _, tr in ipairs(tr_list) do
     local items = by_tr[tr]
     local tnum = r.GetMediaTrackInfo_Value(tr, "IP_TRACKNUMBER") or -1
+    local track_channels = r.GetMediaTrackInfo_Value(tr, "I_NCHAN") or 2
     local units = detect_units_on_track(items, S.EPSILON_SEC)
-    printf("[RGWH][Monitor] Track #%d: items=%d units=%d", tnum, #items, #units)
+    printf("[RGWH][Monitor] Track #%d: items=%d units=%d track_channels=%d", tnum, #items, #units, track_channels)
     sum_tracks = sum_tracks + 1
     sum_items  = sum_items + #items
     sum_units  = sum_units + #units
