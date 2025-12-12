@@ -1,7 +1,15 @@
 --[[
 @description RGWH GUI - ImGui Interface for RGWH Core
 @author hsuanice
-@version 0.1.0-beta (251212.1230)
+@version 0.1.0
+@provides
+  [main] hsuanice Scripts/Beta Testing/hsuanice_RGWH ReaImGui.lua
+  hsuanice Scripts/Library/hsuanice_RGWH Core.lua
+  hsuanice Scripts/Library/hsuanice_Metadata Embed.lua
+  hsuanice Scripts/Tools/hsuanice_FX Alias Build.lua
+  hsuanice Scripts/Tools/hsuanice_FX Alias Export JSON to TSV.lua
+  hsuanice Scripts/Tools/hsuanice_FX Alias Update TSV to JSON.lua
+
 @about
   ImGui-based GUI for configuring and running RGWH Core operations.
   Provides visual controls for all RGWH Wrapper Template parameters.
@@ -11,7 +19,7 @@
   Adjust parameters using the visual controls and click operation buttons to execute.
 
 @changelog
-  v251212.1230 (0.1.0-beta) - IMPROVED UNDO BEHAVIOR FOR SINGLE-STEP UNDO
+  0.1.0 [v251212.1230] - IMPROVED UNDO BEHAVIOR FOR SINGLE-STEP UNDO
     - Improved: All RGWH operations now use single undo block.
       - Issue: Executing RGWH operations required multiple undo steps to fully revert
       - Solution: Wrapped run_rgwh() execution with Undo_BeginBlock/EndBlock (lines 761-762, 807-815)
@@ -23,7 +31,7 @@
       - GUI undo block wraps RGWH Core's internal undo blocks (if any)
       - Outer block takes precedence, creating single undo point for user
 
-  v251114.1920 (0.1.0-beta) - Manual Window: Process Flow Updates (DOCUMENTATION REFINEMENT)
+  v251114.1920 - Manual Window: Process Flow Updates (DOCUMENTATION REFINEMENT)
     - Updated: RENDER Mode process flow table (now 14 steps, was 10)
       • Added: Snapshot Take FX (step 1), Add/Remove Cue Markers (steps 4,8), Clone Take FX (step 13)
       • Complete flow: Take FX snapshot → Volume Pre → Extend → Add Markers → Snapshot/Zero Fades → Apply/Render → Remove Markers → Restore Fades → Trim → Volume Post → Rename → Clone Take FX → Embed TC
@@ -49,7 +57,7 @@
       • Tables now have 3 columns: Step, Function, Action (was 4 with Line column)
     - Technical: Manual window remains fully functional with ESC key support
 
-  v251114.0045 (0.1.0-beta) - NEW FEATURE: Operation Modes Manual Window (MAJOR UPDATE)
+  v251114.0045 - NEW FEATURE: Operation Modes Manual Window (MAJOR UPDATE)
     - Added: Manual window (Help > Manual) with comprehensive operation modes guide
       • Overview tab: Feature reference tables (Channel/FX/Volume/Handle/Cues/Actions)
         - Lists all features with implementation details (API functions, Action IDs)
@@ -85,14 +93,14 @@
       • Explains why GLUE is faster: merge first (1× operation) vs RENDER each (N× operations)
       • Example: 10 items → GLUE processes 1 time vs RENDER processes 10 times
 
-  v251113.1820 (0.1.0-beta) - STABLE: Fully tested and verified
+  v251113.1820 - STABLE: Fully tested and verified
     - No GUI changes in this release
     - Requires: RGWH Core v251113.1820
     - Status: Volume handling fully tested and working correctly
     - All features verified working in production testing
     - Recommended stable version for production use
 
-  v251113.1810 (0.1.0-beta) - Version sync with Core critical volume settings fix
+  v251113.1810 - Version sync with Core critical volume settings fix
     - No GUI changes in this release
     - Requires: RGWH Core v251113.1810 for proper volume settings support
       • CRITICAL: Fixed volume settings not being read from ExtState
@@ -100,7 +108,7 @@
       • Previous versions ignored these settings (always used false/nil)
     - Note: All GUI features remain unchanged and functional
 
-  v251113.1800 (0.1.0-beta) - Version sync with Core major refactor
+  v251113.1800 - Version sync with Core major refactor
     - No GUI changes in this release
     - Requires: RGWH Core v251113.1800 for unified volume/FX handling
       • Major refactor: All volume and FX handling now uses centralized helper functions
@@ -109,7 +117,7 @@
       • More maintainable and less prone to bugs
     - Note: All GUI features remain unchanged and functional
 
-  v251113.1700 (0.1.0-beta) - Version sync with Core volume handling fix
+  v251113.1700 - Version sync with Core volume handling fix
     - No GUI changes in this release
     - Requires: RGWH Core v251113.1700 for complete mono channel mode functionality
       • Volume handling (merge_volumes/print_volumes) now working correctly in mono apply workflow
@@ -117,14 +125,14 @@
       • Volumes now properly snapshot/merge/restore like RENDER mode
     - Note: All GUI features from previous versions remain unchanged and functional
 
-  v251113.1650 (0.1.0-beta) - Version sync with Core FX control fixes
+  v251113.1650 - Version sync with Core FX control fixes
     - No GUI changes in this release
     - Requires: RGWH Core v251113.1650 for complete mono channel mode functionality
       • FX control (TAKE_FX/TRACK_FX settings) now working correctly
       • RENDER mode mono enforcement now functional
     - Note: All GUI features from v251113.1540 remain unchanged and functional
 
-  v251113.1540 (0.1.0-beta) - GUI support for mono apply + conditional glue feature
+  v251113.1540 - GUI support for mono apply + conditional glue feature
     - Added: "Glue After Mono Apply (AUTO mode)" checkbox in Settings > Policies
       • Tooltip explains: ON=apply mono then glue, OFF=apply mono keep separate
       • Notes that GLUE mode always glues (ignores this setting)
@@ -139,26 +147,26 @@
     - Technical: Mono channel mode hover tooltip (lines 856-869)
     - Requires: RGWH Core v251113.1540 for mono apply workflow
 
-  v251112.1600 (0.1.0-beta) - Auto version extraction from @version tag
+  v251112.1600 - Auto version extraction from @version tag
     - Improved: VERSION constant now auto-extracts from @version tag in file header
     - Technical: Uses debug.getinfo() and file parsing to read @version tag at runtime
     - Result: Only need to update @version tag once, Help > About automatically syncs
     - No more manual version string updates required
 
-  v251112.1500 (0.1.0-beta) - Settings window ESC key support + Auto version sync
+  v251112.1500 - Settings window ESC key support + Auto version sync
     - Added: ESC key now closes Settings window (without closing main GUI)
     - Behavior: Press ESC when Settings window is focused to close only the Settings window
     - Main GUI remains open and functional after Settings window is closed with ESC
     - Improved: Help > About now automatically displays current version from VERSION constant
     - Technical: Version string centralized at line 144, Help menu uses string.format() for auto-sync
 
-  v251107.1530 (0.1.0-beta) - CRITICAL FIX: Units glue handle content shift (CORE FIX)
+  v251107.1530 - CRITICAL FIX: Units glue handle content shift (CORE FIX)
     - Fixed: Units glue with handles no longer causes content shift
     - Core change: Removed incorrect pre-glue D_STARTOFFS adjustment that was being overwritten
     - Impact: All glue operations now preserve audio alignment correctly
     - Requires: RGWH Core v251107.1530 or later
 
-  v251107.0100 (0.1.0-beta) - FIXED AUTO MODE LOGIC (CORE MODIFICATION)
+  v251107.0100 - FIXED AUTO MODE LOGIC (CORE MODIFICATION)
     - Fixed: AUTO mode now correctly processes units based on their composition (not total selection count)
       • Single-item units → RENDER (per-item)
       • Multi-item units (TOUCH/CROSSFADE) → GLUE
@@ -172,7 +180,7 @@
     - Technical: RGWH Core line 1340-1428 (new auto_selection function)
     - Technical: RGWH Core line 1955-1959 (modified core function)
 
-  v251106.2250 (0.1.0-beta) - CLARIFIED AUTO VS GLUE BEHAVIOR
+  v251106.2250 - CLARIFIED AUTO VS GLUE BEHAVIOR
     - Changed: Removed "Glue Single Items" checkbox from GUI for clarity
     - Changed: AUTO mode behavior clarified (awaiting Core fix)
     - Changed: GLUE mode now has clear, fixed behavior (always glue including single items)
@@ -181,7 +189,7 @@
     - Technical: glue_single_items default changed to false (AUTO mode behavior)
     - Technical: GLUE mode now uses selection_scope="auto" instead of "ts" for proper scope detection
 
-  v251106.2230 (0.1.0-beta) - COMPLETE UI REDESIGN & COMPACT LAYOUT
+  v251106.2230 - COMPLETE UI REDESIGN & COMPACT LAYOUT
     - Changed: Completely reorganized GUI layout for better clarity and compactness
       • Common settings (Channel Mode, Printing, Handle) moved to top
       • Channel Mode now displays in single horizontal row with label
@@ -198,24 +206,24 @@
     - Improved: Much shorter GUI window (removed redundant section headers and text blocks)
     - Technical: Removed selected_mode and use_units state variables (no longer needed)
 
-  v251106.1800 (0.1.0-beta)
+  v251106.1800
     - Add: Complete settings persistence - all GUI settings are now automatically saved and restored between sessions
     - Add: Debug mode console output - when debug level >= 1:
       • Print all settings on startup with prefix "[RGWH GUI - STARTUP]"
       • Print all settings on close with prefix "[RGWH GUI - CLOSING]"
     - Improve: Settings are automatically saved whenever any parameter is changed
     - Technical: Added print_all_settings() function to display all current settings in organized format
-  v251102.1500 (0.1.0-beta)
+  v251102.1500
     - Fix: Correct GLUE button hover/active colors to yellow shades.
-  v251102.0735 (0.1.0-beta)
+  v251102.0735
     - Add: Press ESC to close the GUI window when the window is focused.
-  v251102.0730 (0.1.0-beta)
+  v251102.0730
     - Change: Move Channel Mode to the right of Selection Scope and use a two-column layout so Channel Mode takes the right column.
     - Change: Replace the 'View' menu in the menu bar with a direct 'Settings...' menu item for quicker access.
     - Change: Reorder the bottom operation buttons to [RENDER] [AUTO] [GLUE]. Buttons use the default colors but their hover color becomes red (0xFFCC3333).
     - Improve: Persist GUI settings across runs (save/load via ExtState so user choices are remembered between sessions).
 
-  v251102.0030 (0.1.0-beta)
+  v251102.0030
     - Changed: Renamed "RENDER SETTINGS" to "PRINTING" for consistency
     - Changed: Reorganized printing options into two-column layout:
         • Left column: FX Processing (Print Take FX, Print Track FX)
@@ -223,14 +231,14 @@
     - Changed: Updated terminology from "Bake" to "Print" for REAPER standard compliance
     - Improved: More compact layout with parallel columns
 
-  v251102.0015 (0.1.0-beta)
+  v251102.0015
     - Changed: Converted Selection Scope to radio button format for direct visibility
         • Auto / Units / Time Selection / Per Item
     - Changed: Converted Channel Mode to radio button format for direct visibility
         • Auto / Mono / Multi
     - Improved: All options now visible at once without dropdown menus
 
-  v251102.0000 (0.1.0-beta)
+  v251102.0000
     - Changed: Removed Operation mode radio button selection
     - Changed: Replaced single RUN RGWH button with three operation buttons:
         • AUTO (blue) - Smart auto-detection based on selection
