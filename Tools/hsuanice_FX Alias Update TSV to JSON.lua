@@ -1,7 +1,9 @@
 --[[
-@description Update FX Alias JSON from TSV (hsuanice)
-@version 0.1.0-beta (251030.1600)
+@description FX Alias Update - Update FX Alias JSON from TSV
+@version 0.1.0
 @author hsuanice
+@provides
+  [main] hsuanice Scripts/Tools/hsuanice_FX Alias Update TSV to JSON.lua
 @about
   Read Settings/fx_alias.tsv and update Settings/fx_alias.json.
   Only rows that exist in TSV will be updated/added. Others are kept.
@@ -9,18 +11,15 @@
   Part of AudioSweet ReaImGui Tools suite.
 
 @changelog
-  0.1.0-beta (2025-10-30) - Initial Public Beta Release
-    FX Alias TSV to JSON updater tool featuring:
-    - Reads edited fx_alias.tsv and updates fx_alias.json
-    - Preserves existing entries not in TSV
-    - Accessible from AudioSweet ReaImGui: Settings → FX Alias Tools → Update TSV to JSON
-    - Completes FX Alias workflow: Build → Export → Edit → Update
-
-  Internal Build v251007.1
-    - Fix JSON decode (duplicate assignment), stable object-key ordering in encoder, safer TSV splitting/unescape.
-
-  Internal Build v251007
-    - Initial release
+  0.1.0 (2025-12-12) [internal: v251030.1600]
+    - Initial Public Beta Release
+    - FX Alias TSV to JSON updater tool featuring:
+      • Reads edited fx_alias.tsv and updates fx_alias.json
+      • Preserves existing entries not in TSV
+      • Accessible from AudioSweet ReaImGui: Settings → FX Alias Tools → Update TSV to JSON
+      • Completes FX Alias workflow: Build → Export → Edit → Update
+    - Fix JSON decode, stable object-key ordering in encoder [internal: v251007.1]
+    - Initial release [internal: v251007]
 ]]--
 
 -- ========== Minimal JSON (dkjson subset) ==========
