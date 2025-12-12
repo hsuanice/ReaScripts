@@ -1,6 +1,6 @@
 --[[
-@description hsuanice Metadata Embed (BWF MetaEdit helpers)
-@version 0.1.0-beta (251030.1600)
+@description Metadata Embed - BWF MetaEdit helpers
+@version 0.3.0
 @author hsuanice
 @noindex
 @about
@@ -12,7 +12,7 @@
   - Post-embed refresh (offline->online, rebuild peaks)
 
 @changelog
-  0.1.0-beta (2025-10-30) - Initial Public Beta Release
+  0.3.0 (2025-10-30) - Initial Public Beta Release
     BWF MetaEdit helpers library featuring:
     - Shell quoting for safe CLI execution
     - iXML sidecar normalization
