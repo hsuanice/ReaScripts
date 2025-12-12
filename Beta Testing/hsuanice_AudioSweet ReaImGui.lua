@@ -20,7 +20,35 @@
 
 
 @changelog
-  0.1.0 [Internal Build 251213.0026] - IMPROVED CHAIN PREVIEW TARGET SELECTION AND SOLO TARGETING
+  0.1.0 [Internal Build 251213.0253] - IMPROVED SAVED CHAINS WITH DYNAMIC TRACK NAME AND FX INFO
+    - Improved: Saved Chains now support custom names and dynamic track name updates.
+      - Added: Optional custom name field when saving a chain
+      - If custom name is provided: Display remains fixed (custom name)
+      - If no custom name: Display auto-updates with current track name when track is renamed
+      - Hover tooltip: Shows current track name + current FX chain (always up-to-date)
+      - Lines: 766-789 (load with custom_name), 791-807 (save with custom_name), 809-817 (add_saved_chain)
+    - Added: Smart display logic for Saved Chains presets.
+      - New helper function: get_chain_display_info() (lines 835-886)
+      - Resolves track by GUID to get current track name and FX list
+      - Display priority: custom_name > current_track_name > saved_track_name
+      - Hover tooltip format: "Track: [name]\n1. [Type]: FX\n2. [Type]: FX..."
+      - FX list shows full plugin info including type (VST3, CLAP, JS, AU, etc.)
+      - Lines: 2382-2424 (display logic with tooltip)
+    - Improved: Save Chain dialog now has two input fields.
+      - Custom Name (optional): User-defined name that won't change
+      - Internal ID (auto-generated): Technical identifier
+      - Clear instructions: "Leave empty to use track name (will auto-update when track is renamed)"
+      - Lines: 2405-2436 (Save Chain popup)
+    - Improved: Hover tooltip FX list format.
+      - Changed from horizontal (FX1 → FX2 → FX3) to vertical list (like FX insert)
+      - Shows plugin type prefix (VST3:, CLAP:, JS:, AU:, VST:)
+      - Format: "1. VST3: Pro-Q 4 (FabFilter)" (full plugin info with vendor)
+      - More readable and consistent with REAPER's FX chain display
+      - Lines: 869-883 (FX list building)
+    - Technical: Backward compatible with existing saved chains (custom_name field is optional).
+    - Purpose: Solves the problem of identifying saved chains when track names change.
+
+  Internal Build 251213.0026 - IMPROVED CHAIN PREVIEW TARGET SELECTION AND SOLO TARGETING
     - Improved: Chain preview now intelligently selects target track.
       - If FX chain is focused: Uses the focused FX chain track for preview
       - If no FX chain is focused: Falls back to settings target track name
@@ -769,12 +797,19 @@ local function load_saved_chains()
   while true do
     local ok, data = r.GetProjExtState(0, CHAIN_NAMESPACE, "chain_" .. idx)
     if ok == 0 or data == "" then break end
-    local name, guid, track_name = data:match("^([^|]*)|([^|]*)|(.*)$")
+    -- Format: name|guid|track_name|custom_name
+    -- For backward compatibility: if no custom_name, it will be nil
+    local parts = {}
+    for part in (data .. "|"):gmatch("([^|]*)|") do
+      table.insert(parts, part)
+    end
+    local name, guid, track_name, custom_name = parts[1], parts[2], parts[3], parts[4]
     if name and guid then
       gui.saved_chains[#gui.saved_chains + 1] = {
         name = name,
         track_guid = guid,
         track_name = track_name or "",
+        custom_name = (custom_name and custom_name ~= "") and custom_name or nil,
       }
     end
     idx = idx + 1
@@ -790,16 +825,21 @@ local function save_chains_to_extstate()
     idx = idx + 1
   end
   for i, chain in ipairs(gui.saved_chains) do
-    local data = string.format("%s|%s|%s", chain.name, chain.track_guid, chain.track_name)
+    local data = string.format("%s|%s|%s|%s",
+      chain.name,
+      chain.track_guid,
+      chain.track_name,
+      chain.custom_name or "")
     r.SetProjExtState(0, CHAIN_NAMESPACE, "chain_" .. (i - 1), data)
   end
 end
 
-local function add_saved_chain(name, track_guid, track_name)
+local function add_saved_chain(name, track_guid, track_name, custom_name)
   gui.saved_chains[#gui.saved_chains + 1] = {
     name = name,
     track_guid = track_guid,
     track_name = track_name,
+    custom_name = custom_name,
   }
   save_chains_to_extstate()
 end
@@ -818,6 +858,50 @@ local function find_track_by_guid(guid)
     end
   end
   return nil
+end
+
+-- Get display name and current info for a saved chain
+local function get_chain_display_info(chain)
+  local display_name = chain.name  -- fallback
+  local current_track_name = nil
+  local fx_info = ""
+
+  -- Try to find the track by GUID
+  local tr = find_track_by_guid(chain.track_guid)
+  if tr and r.ValidatePtr2(0, tr, "MediaTrack*") then
+    -- Get current track name
+    local _, track_name = r.GetSetMediaTrackInfo_String(tr, "P_NAME", "", false)
+    current_track_name = track_name
+
+    -- Build FX list (vertical, like FX insert)
+    local fx_count = r.TrackFX_GetCount(tr)
+    if fx_count > 0 then
+      local fx_lines = {}
+      for i = 0, fx_count - 1 do
+        local _, fx_name = r.TrackFX_GetFXName(tr, i, "")
+        -- fx_name format: "VST3: Pro-Q 4 (FabFilter)" or "JS: ReaEQ"
+        -- Keep the full name including plugin type
+        -- Format: "1. [Plugin Type]: FX Name"
+        table.insert(fx_lines, string.format("%d. %s", i + 1, fx_name))
+      end
+      fx_info = table.concat(fx_lines, "\n")
+    else
+      fx_info = "No FX"
+    end
+  else
+    fx_info = "Track not found"
+  end
+
+  -- Determine display name: custom name OR current track name OR saved track name
+  if chain.custom_name and chain.custom_name ~= "" then
+    display_name = chain.custom_name
+  elseif current_track_name then
+    display_name = current_track_name
+  else
+    display_name = chain.track_name  -- fallback to saved name
+  end
+
+  return display_name, current_track_name, fx_info
 end
 
 ------------------------------------------------------------
@@ -2323,16 +2407,29 @@ local function draw_gui()
         local to_delete = nil
         for i, chain in ipairs(gui.saved_chains) do
           ImGui.PushID(ctx, i)
+
+          -- Get display info
+          local display_name, current_track_name, fx_info = get_chain_display_info(chain)
+
           -- "Open" button (small, on the left)
           if ImGui.SmallButton(ctx, "Open") then
             open_saved_chain_fx(i)
           end
           ImGui.SameLine(ctx)
+
           -- Chain name button (executes AudioSweet) - use available width minus Delete button
           local avail_width = ImGui.GetContentRegionAvail(ctx) - 25  -- Space for "X" button
-          if ImGui.Button(ctx, chain.name, avail_width, 0) then
+          if ImGui.Button(ctx, display_name, avail_width, 0) then
             run_saved_chain(i)
           end
+
+          -- Hover tooltip showing current FX chain info
+          if ImGui.IsItemHovered(ctx) then
+            ImGui.SetTooltip(ctx, string.format("%s\n%s",
+              current_track_name and ("Track: " .. current_track_name) or "Track not found",
+              fx_info))
+          end
+
           ImGui.SameLine(ctx)
           -- Delete button
           if ImGui.Button(ctx, "X", 20, 0) then
@@ -2391,21 +2488,33 @@ local function draw_gui()
   end
 
   if ImGui.BeginPopupModal(ctx, "Save Chain", true, ImGui.WindowFlags_AlwaysAutoResize) then
-    ImGui.Text(ctx, "Enter a name for this FX chain:")
+    ImGui.TextWrapped(ctx, "Custom Name (optional):")
+    ImGui.TextWrapped(ctx, "Leave empty to use track name (will auto-update when track is renamed)")
+    local rv_custom, new_custom_name = ImGui.InputText(ctx, "##customname", gui.new_custom_name or "", 256)
+    if rv_custom then gui.new_custom_name = new_custom_name end
+
+    ImGui.Spacing(ctx)
+    ImGui.Separator(ctx)
+    ImGui.Spacing(ctx)
+    ImGui.Text(ctx, "Internal ID (auto-generated):")
     local rv, new_name = ImGui.InputText(ctx, "##chainname", gui.new_chain_name, 256)
     if rv then gui.new_chain_name = new_name end
 
+    ImGui.Spacing(ctx)
     if ImGui.Button(ctx, "Save", 100, 0) then
       if gui.new_chain_name ~= "" and gui.focused_track then
         local track_guid = get_track_guid(gui.focused_track)
-        add_saved_chain(gui.new_chain_name, track_guid, gui.focused_track_name)
+        local custom_name = (gui.new_custom_name and gui.new_custom_name ~= "") and gui.new_custom_name or nil
+        add_saved_chain(gui.new_chain_name, track_guid, gui.focused_track_name, custom_name)
         gui.new_chain_name = ""
+        gui.new_custom_name = ""
         ImGui.CloseCurrentPopup(ctx)
       end
     end
     ImGui.SameLine(ctx)
     if ImGui.Button(ctx, "Cancel", 100, 0) then
       gui.new_chain_name = ""
+      gui.new_custom_name = ""
       ImGui.CloseCurrentPopup(ctx)
     end
     ImGui.EndPopup(ctx)
