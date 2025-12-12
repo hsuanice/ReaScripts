@@ -1,7 +1,13 @@
 --[[
 @description AudioSweet ReaImGui - ImGui Interface for AudioSweet
 @author hsuanice
-@version 0.1.0-beta (251212.1230)
+@version 0.1.0
+@provides
+  [main] hsuanice Scripts/Beta Testing/hsuanice_AudioSweet ReaImGui.lua
+  hsuanice Scripts/Library/hsuanice_AudioSweet Core.lua
+  hsuanice Scripts/Library/hsuanice_AS Preview Core.lua
+  hsuanice Scripts/Library/hsuanice_RGWH Core.lua
+  hsuanice Scripts/Library/hsuanice_Metadata Embed.lua
 @about
   Complete AudioSweet control center with:
   - Focused/Chain modes with FX chain display
