@@ -3,12 +3,7 @@
 @author hsuanice
 @version 0.1.0
 @provides
-  [main] hsuanice Scripts/Beta Testing/hsuanice_RGWH ReaImGui.lua
-  hsuanice Scripts/Library/hsuanice_RGWH Core.lua
-  hsuanice Scripts/Library/hsuanice_Metadata Embed.lua
-  hsuanice Scripts/Tools/hsuanice_FX Alias Build.lua
-  hsuanice Scripts/Tools/hsuanice_FX Alias Export JSON to TSV.lua
-  hsuanice Scripts/Tools/hsuanice_FX Alias Update TSV to JSON.lua
+  [main] .
 
 @about
   ImGui-based GUI for configuring and running RGWH Core operations.
@@ -19,7 +14,38 @@
   Adjust parameters using the visual controls and click operation buttons to execute.
 
 @changelog
-  0.1.0 [v251212.1230] - IMPROVED UNDO BEHAVIOR FOR SINGLE-STEP UNDO
+  0.1.0 [v251215.2300] - CLEANUP: Removed unused Rename Mode setting + Documentation improvements
+    - Removed: Rename Mode setting (was never implemented, no functional change)
+      • Removed from GUI state variables (line 350-354)
+      • Removed from persist_keys array (line 372-380)
+      • Removed from print_all_settings() output (line 454-458)
+      • Removed from build_args_from_gui() function (line 697-743)
+      • Removed combo box from Settings window (was line 917-918)
+      • Actual naming behavior unchanged: RENDER still uses "TakeName-renderedN", GLUE still uses "TakeName-glued-XX.wav"
+    - Improved: TIMECODE MODE section clarity in Settings
+      • Title changed: "TIMECODE MODE" → "TIMECODE MODE (RENDER only)" (line 884)
+      • Help marker updated to clarify GLUE mode always uses 'Current' (line 887)
+      • Prevents user confusion about TC mode applicability
+    - Improved: Volume Rendering terminology consistency
+      • Changed: "Volume Handling" → "Volume Rendering" throughout GUI (line 1607)
+      • Help markers now explain GLUE mode always forces merge and print (lines 1610, 1614)
+      • Manual updated with technical explanation of why GLUE requires this (lines 1077-1084, 1407-1414)
+    - Added: Comprehensive naming convention documentation in Manual
+      • New section 7 "NAMING CONVENTIONS" in Overview tab (lines 1181-1207)
+        - Table showing RENDER vs GLUE naming formats with examples
+        - Explains N and XX increment logic
+      • RENDER Mode tab: Detailed naming explanation (lines 1279-1287)
+        - Format: TakeName-renderedN (N = incremental 1,2,3...)
+        - Purpose: Distinguish original take from render iterations
+        - Fixed behavior, cannot be changed
+      • GLUE Mode tab: REAPER native naming explanation (lines 1392-1400)
+        - Format: TakeName-glued-XX.wav (XX = REAPER auto-increment 01,02,03...)
+        - Take name automatically becomes filename
+        - Preserves take names in final output
+    - Technical: All changes are documentation/UI cleanup, no Core logic modified
+    - Requires: RGWH Core v251215.2300 (Rename Mode setting removed from Core API)
+
+  [v251212.1230] - IMPROVED UNDO BEHAVIOR FOR SINGLE-STEP UNDO
     - Improved: All RGWH operations now use single undo block.
       - Issue: Executing RGWH operations required multiple undo steps to fully revert
       - Solution: Wrapped run_rgwh() execution with Undo_BeginBlock/EndBlock (lines 761-762, 807-815)
@@ -352,7 +378,6 @@ local gui = {
   glue_after_mono_apply = true,  -- AUTO mode: when channel_mode=mono, glue after applying mono to each item
   glue_no_trackfx_policy = 0,    -- 0=preserve, 1=force_multi
   render_no_trackfx_policy = 0,  -- 0=preserve, 1=force_multi
-  rename_mode = 0,               -- 0=auto, 1=glue, 2=render
 
   -- Debug
   debug_level = 2,           -- 0=silent, 1=normal, 2=verbose
@@ -376,7 +401,7 @@ local persist_keys = {
   'handle_mode','handle_length',
   'epsilon_mode','epsilon_value',
   'cue_write_edge','cue_write_glue',
-  'glue_single_items','glue_after_mono_apply','glue_no_trackfx_policy','render_no_trackfx_policy','rename_mode',
+  'glue_single_items','glue_after_mono_apply','glue_no_trackfx_policy','render_no_trackfx_policy',
   'debug_level','debug_no_clear','selection_policy'
 }
 
@@ -428,7 +453,6 @@ local function print_all_settings(prefix)
   local handle_names = {"Use ExtState", "Seconds", "Frames"}
   local epsilon_names = {"Use ExtState", "Frames", "Seconds"}
   local policy_names = {"Preserve", "Force Multi"}
-  local rename_names = {"Auto", "Glue", "Render"}
   local debug_names = {"Silent", "Normal", "Verbose"}
   local selection_policy_names = {"Progress", "Restore", "None"}
 
@@ -453,7 +477,6 @@ local function print_all_settings(prefix)
   r.ShowConsoleMsg(string.format("  Glue Single Items: %s\n", bool_str(gui.glue_single_items)))
   r.ShowConsoleMsg(string.format("  Glue No-TrackFX Policy: %s\n", policy_names[gui.glue_no_trackfx_policy + 1] or "Unknown"))
   r.ShowConsoleMsg(string.format("  Render No-TrackFX Policy: %s\n", policy_names[gui.render_no_trackfx_policy + 1] or "Unknown"))
-  r.ShowConsoleMsg(string.format("  Rename Mode: %s\n", rename_names[gui.rename_mode + 1] or "Unknown"))
   r.ShowConsoleMsg(string.format("  Debug Level: %s\n", debug_names[gui.debug_level + 1] or "Unknown"))
   r.ShowConsoleMsg(string.format("  Debug No Clear: %s\n", bool_str(gui.debug_no_clear)))
   r.ShowConsoleMsg(string.format("  Selection Policy: %s\n", selection_policy_names[gui.selection_policy + 1] or "Unknown"))
@@ -700,7 +723,6 @@ local function build_args_from_gui(operation)
   local channel_names = { "auto", "mono", "multi" }
   local tc_names = { "previous", "current", "off" }
   local policy_names = { "preserve", "force_multi" }
-  local rename_names = { "auto", "glue", "render" }
 
   -- Determine op and selection_scope based on button clicked
   local op, selection_scope, glue_single_items
@@ -740,7 +762,6 @@ local function build_args_from_gui(operation)
       glue_after_mono_apply = gui.glue_after_mono_apply,
       glue_no_trackfx_output_policy = policy_names[gui.glue_no_trackfx_policy + 1],
       render_no_trackfx_output_policy = policy_names[gui.render_no_trackfx_policy + 1],
-      rename_mode = rename_names[gui.rename_mode + 1],
     },
   }
 
@@ -880,11 +901,11 @@ local function draw_settings_popup()
   ImGui.PushItemWidth(ctx, 200)
   local rv, new_val
 
-  -- === TIMECODE MODE ===
-  draw_section_header("TIMECODE MODE")
+  -- === TIMECODE MODE (RENDER ONLY) ===
+  draw_section_header("TIMECODE MODE (RENDER only)")
   rv, new_val = ImGui.Combo(ctx, "Timecode Mode", gui.tc_mode, "Previous\0Current\0Off\0")
   if rv then gui.tc_mode = new_val end
-  draw_help_marker("BWF TimeReference embed mode")
+  draw_help_marker("BWF TimeReference embed mode for RENDER operations\n\nNote: GLUE mode always uses 'Current' (technical requirement)")
 
   -- === EPSILON ===
   draw_section_header("EPSILON (Tolerance)")
@@ -918,9 +939,6 @@ local function draw_settings_popup()
 
   rv, new_val = ImGui.Combo(ctx, "Render No-TrackFX Policy", gui.render_no_trackfx_policy, "Preserve\0Force Multi\0")
   if rv then gui.render_no_trackfx_policy = new_val end
-
-  rv, new_val = ImGui.Combo(ctx, "Rename Mode", gui.rename_mode, "Auto\0Glue\0Render\0")
-  if rv then gui.rename_mode = new_val end
 
   rv, new_val = ImGui.Checkbox(ctx, "Glue After Mono Apply (AUTO mode)", gui.glue_after_mono_apply)
   if rv then gui.glue_after_mono_apply = new_val end
@@ -1047,8 +1065,8 @@ local function draw_manual_window()
       ImGui.Separator(ctx)
       ImGui.Spacing(ctx)
 
-      -- === VOLUME HANDLING ===
-      ImGui.TextColored(ctx, 0x00AAFFFF, "3. VOLUME HANDLING")
+      -- === VOLUME RENDERING ===
+      ImGui.TextColored(ctx, 0x00AAFFFF, "3. VOLUME RENDERING")
       ImGui.Spacing(ctx)
       if ImGui.BeginTable(ctx, 'VolumeTable', 3, ImGui.TableFlags_Borders | ImGui.TableFlags_RowBg) then
         ImGui.TableSetupColumn(ctx, 'Feature')
@@ -1073,6 +1091,15 @@ local function draw_manual_window()
 
         ImGui.EndTable(ctx)
       end
+      ImGui.Spacing(ctx)
+      ImGui.TextColored(ctx, 0xFF0000FF, "Important Note:")
+      ImGui.BulletText(ctx, "GLUE mode always forces merge and print volumes (technical requirement)")
+      ImGui.Indent(ctx)
+      ImGui.TextWrapped(ctx,
+        "• Reason: When merging multiple items into one, volume relationships must be preserved\n" ..
+        "• RENDER mode respects your Merge/Print settings\n" ..
+        "• GLUE mode ignores these settings and always merges item volume into take volume")
+      ImGui.Unindent(ctx)
       ImGui.Spacing(ctx)
       ImGui.Separator(ctx)
       ImGui.Spacing(ctx)
@@ -1173,6 +1200,36 @@ local function draw_manual_window()
 
         ImGui.EndTable(ctx)
       end
+      ImGui.Spacing(ctx)
+      ImGui.Separator(ctx)
+      ImGui.Spacing(ctx)
+
+      -- === NAMING CONVENTIONS ===
+      ImGui.TextColored(ctx, 0x00AAFFFF, "7. NAMING CONVENTIONS")
+      ImGui.Spacing(ctx)
+      if ImGui.BeginTable(ctx, 'NamingTable', 3, ImGui.TableFlags_Borders | ImGui.TableFlags_RowBg) then
+        ImGui.TableSetupColumn(ctx, 'Mode')
+        ImGui.TableSetupColumn(ctx, 'Format')
+        ImGui.TableSetupColumn(ctx, 'Example')
+        ImGui.TableHeadersRow(ctx)
+
+        ImGui.TableNextRow(ctx)
+        ImGui.TableNextColumn(ctx); ImGui.TextColored(ctx, 0xFFFF00FF, 'RENDER')
+        ImGui.TableNextColumn(ctx); ImGui.Text(ctx, 'TakeName-renderedN')
+        ImGui.TableNextColumn(ctx); ImGui.Text(ctx, 'Dialogue-rendered1')
+
+        ImGui.TableNextRow(ctx)
+        ImGui.TableNextColumn(ctx); ImGui.TextColored(ctx, 0xFFFF00FF, 'GLUE')
+        ImGui.TableNextColumn(ctx); ImGui.Text(ctx, 'TakeName-glued-XX.wav')
+        ImGui.TableNextColumn(ctx); ImGui.Text(ctx, 'Dialogue-glued-01.wav')
+
+        ImGui.EndTable(ctx)
+      end
+      ImGui.Spacing(ctx)
+      ImGui.TextColored(ctx, 0xFF0000FF, "Important:")
+      ImGui.BulletText(ctx, "RENDER: N = incremental based on existing rendered takes (1,2,3...)")
+      ImGui.BulletText(ctx, "GLUE: XX = REAPER native auto-increment (01,02,03...)")
+      ImGui.BulletText(ctx, "Both modes preserve original take names in the final output")
       ImGui.Spacing(ctx)
 
       ImGui.EndTabItem(ctx)
@@ -1275,6 +1332,15 @@ local function draw_manual_window()
 
       ImGui.TextColored(ctx, 0xFF0000FF, "Important Technical Notes:")
       ImGui.BulletText(ctx, "Does NOT merge multiple items (use GLUE for that)")
+      ImGui.BulletText(ctx, "Take naming convention:")
+      ImGui.Indent(ctx)
+      ImGui.TextWrapped(ctx,
+        "• RENDER always renames new takes to 'TakeName-renderedN' format\n" ..
+        "• N = incremental number (1, 2, 3...) based on existing rendered takes on the item\n" ..
+        "• Purpose: Distinguish between original take and multiple render iterations\n" ..
+        "• Example: 'Dialogue-rendered1', 'Dialogue-rendered2'\n" ..
+        "• This is a fixed behavior and cannot be changed")
+      ImGui.Unindent(ctx)
       ImGui.BulletText(ctx, "Fade handling issue with Actions 40361/41993:")
       ImGui.Indent(ctx)
       ImGui.TextWrapped(ctx,
@@ -1379,6 +1445,17 @@ local function draw_manual_window()
       ImGui.BulletText(ctx, "Take name → filename: REAPER native Glue converts take names to filenames")
       ImGui.Spacing(ctx)
 
+      ImGui.TextColored(ctx, 0xFFFF00FF, "Naming Convention:")
+      ImGui.Indent(ctx)
+      ImGui.TextWrapped(ctx,
+        "• GLUE uses REAPER's native naming: 'TakeName-glued-XX.wav'\n" ..
+        "• XX = auto-incremented number by REAPER (01, 02, 03...)\n" ..
+        "• The original take name becomes the filename automatically\n" ..
+        "• Example: Take 'Dialogue' → File 'Dialogue-glued-01.wav'\n" ..
+        "• This preserves your take names in the final filenames")
+      ImGui.Unindent(ctx)
+      ImGui.Spacing(ctx)
+
       ImGui.TextColored(ctx, 0xFFFF00FF, "Efficiency Advantage:")
       ImGui.Indent(ctx)
       ImGui.TextWrapped(ctx,
@@ -1404,6 +1481,15 @@ local function draw_manual_window()
       ImGui.Spacing(ctx)
 
       ImGui.TextColored(ctx, 0xFF0000FF, "Important Technical Notes:")
+      ImGui.BulletText(ctx, "Volume Rendering in GLUE mode:")
+      ImGui.Indent(ctx)
+      ImGui.TextWrapped(ctx,
+        "• GLUE mode ALWAYS forces merge and print volumes (ignores GUI settings)\n" ..
+        "• Reason: When merging multiple items into one, volume relationships must be preserved\n" ..
+        "• Step 3 (Volume Pre): Merges item volume into ALL takes before Glue\n" ..
+        "• Step 11 (Volume Post): Always keeps merged volumes (print=true behavior)\n" ..
+        "• This is a technical requirement, not a bug")
+      ImGui.Unindent(ctx)
       ImGui.BulletText(ctx, "Multi channel mode execution order (with Track FX enabled):")
       ImGui.Indent(ctx)
       ImGui.TextWrapped(ctx,
@@ -1602,16 +1688,16 @@ local function draw_gui()
 
   ImGui.SameLine(ctx, col_width + 20)
 
-  -- Right column: Volume Handling
+  -- Right column: Volume Rendering
   ImGui.BeginGroup(ctx)
-  ImGui.Text(ctx, "Volume Handling:")
+  ImGui.Text(ctx, "Volume Rendering:")
   rv, new_val = ImGui.Checkbox(ctx, "Merge Volumes", gui.merge_volumes)
   if rv then gui.merge_volumes = new_val end
-  draw_help_marker("Merge item volume into take volume before render")
+  draw_help_marker("Merge item volume into take volume before render\n\nNote: GLUE mode always forces merge and print (technical requirement)")
 
   rv, new_val = ImGui.Checkbox(ctx, "Print Volumes", gui.print_volumes)
   if rv then gui.print_volumes = new_val end
-  draw_help_marker("Print volumes into rendered audio\n(false = restore original volumes)")
+  draw_help_marker("Print volumes into rendered audio\n(false = restore original volumes)\n\nNote: GLUE mode always forces merge and print (technical requirement)")
   ImGui.EndGroup(ctx)
 
   -- === HANDLE SETTINGS ===
