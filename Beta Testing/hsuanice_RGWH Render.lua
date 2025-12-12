@@ -1,7 +1,11 @@
 --[[
-@description RGWH Wrapper Template (Public Beta)
+@description RGWH Render - Render with Handles
 @author hsuanice
-@version 0.1.0-beta (251022.2200)
+@version 0.1.0
+@provides
+  [main] hsuanice Scripts/Beta Testing/hsuanice_RGWH Render.lua
+  hsuanice Scripts/Library/hsuanice_RGWH Core.lua
+  hsuanice Scripts/Library/hsuanice_Metadata Embed.lua
 @about
   Thin wrapper for calling RGWH Core via a single entry `RGWH.core(args)`.
   Use this as a starting point to test and ship wrappers that render/glue with handles.
@@ -25,28 +29,23 @@
   - handle/epsilon/cues/policies/debug: one-run overrides; omit or use "ext" to read ExtState as-is.
 
 @changelog
-  v251022_2200
+  0.1.0 (2025-12-12) [internal: v251022_2200]
     - Changed: merge_volumes now affects ALL takes (not just active take) in RGWH Core
     - Rationale: Ensures consistent audio output when switching between takes after merge
-
-  v251022_1745
-    - Added: Volume control options for Render operations:
+    - Added: Volume control options for Render operations [internal: v251022_1745]
         • merge_volumes (default: true) - merge item volume into take volume before render
         • print_volumes (default: true) - bake volumes into rendered audio; false = restore original volumes
     - Changed: args table now includes merge_volumes and print_volumes toggles in Render section
     - Note: These options only affect render operations; glue operations unchanged
-
-  v251016_1357
-    - Initial public template for RGWH Wrapper.
-    - Provides unified entry for calling `RGWH.core(args)`.
-    - Includes per-run overrides for handle/epsilon/debug/cues/policies.
-    - Adds `QUICK_DEBUG` one-line toggle ("silent", "normal", "verbose", "use-detailed").
-    - Adds wrapper-only `SELECTION_POLICY` ("progress", "restore", "none") with snapshot/restore logic.
-    - Adds performance measurement (snapshot/core/restore/total) using `reaper.time_precise()`.
-    - Supports auto conversion between frames and seconds for handle and epsilon.
-    - Implements robust selection restore via track GUID and time overlap matching.
-    - Console summary includes selection debug and timing results.
-  v251013_1200  Initial public template wrapper.
+    - Initial public template for RGWH Wrapper [internal: v251016_1357]
+    - Provides unified entry for calling `RGWH.core(args)`
+    - Includes per-run overrides for handle/epsilon/debug/cues/policies
+    - Adds `QUICK_DEBUG` one-line toggle ("silent", "normal", "verbose", "use-detailed")
+    - Adds wrapper-only `SELECTION_POLICY` ("progress", "restore", "none") with snapshot/restore logic
+    - Adds performance measurement (snapshot/core/restore/total) using `reaper.time_precise()`
+    - Supports auto conversion between frames and seconds for handle and epsilon
+    - Implements robust selection restore via track GUID and time overlap matching
+    - Console summary includes selection debug and timing results
 ]]--
 
 ------------------------------------------------------------
