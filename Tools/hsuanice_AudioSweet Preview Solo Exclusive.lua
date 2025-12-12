@@ -1,38 +1,27 @@
 --[[
 @description AudioSweet Focused Preview - Reads GUI Settings
-@version 251030.2335
+@version 0.1.0
 @author Hsuanice
+@provides
+  [main] hsuanice Scripts/Tools/hsuanice_AudioSweet Preview Solo Exclusive.lua
+  hsuanice Scripts/Library/hsuanice_AS Preview Core.lua
 @changelog
-  v251030.2335
+  0.1.0 (2025-12-12) [internal: v251030.2335]
     - Changed: Now reads all preview settings from AudioSweet GUI ExtState
     - Reads: preview_target_track, preview_solo_scope, preview_restore_mode, debug
     - Benefit: Single source of truth - change settings in GUI, all preview scripts use same settings
     - Compatible: Works with AudioSweet ReaImGui v251030.2300 or newer
     - Usage: Bind to keyboard shortcut for Focused Preview with GUI settings
-
-  v251012_2025
-    - Reordered: `chain_mode` moved to top of Core Behavior section for priority control.
-    - Updated: `mode` now follows `chain_mode` to reflect most-used toggles order.
-    - Grouped: `target` and `target_track_name` remain together for clarity.
-    - Note: `solo_scope` and `restore_mode` kept at bottom since they are rarely changed.
-    - No logic change; purely visual reorganization for user convenience.
-
-  v251012_1320
-    - Clean: Simplified to match latest ASP Core (focused + target_track_name only).
-    - Removed: Deprecated `target="track"` support.
-    - Added: Clear inline comments describing each target mode.
-    - Behavior: Fully compatible with Core v251012_1302 or newer.
-
-  v251010_2152 (Core: hsuanice_AS Preview Core.lua)
-    - Added: Convenience arg `target_track_name` for ASP.preview(); equivalent to `target={by="name", value="<name>"}`.
-    - Added: Default target fallback "AudioSweet" when neither `target` nor `target_track_name` is provided.
-    - Docs: Updated args comment to include `target_track_name`.
-    - Behavior: Non-breaking; sugar only applies when `args.target` is nil.
-
-  v251010_1800 (Template: hsuanice_AudioSweet Preview Template.lua)
-    - Clean: Reorganized into clear sections (Load Core / Utility / Target / Params / Run).
-    - Option: Console logging now guarded by `args.debug` (no output when false).
-    - Note: Current template still uses manual name lookup and `focus_track`; can migrate to `target_track_name` sugar later.
+    - Reordered: `chain_mode` moved to top of Core Behavior section [internal: v251012_2025]
+    - Updated: `mode` now follows `chain_mode` to reflect most-used toggles order
+    - Grouped: `target` and `target_track_name` remain together for clarity
+    - Clean: Simplified to match latest ASP Core [internal: v251012_1320]
+    - Removed: Deprecated `target="track"` support
+    - Added: Clear inline comments describing each target mode
+    - Added: Convenience arg `target_track_name` for ASP.preview() [internal: v251010_2152]
+    - Added: Default target fallback "AudioSweet"
+    - Clean: Reorganized into clear sections [internal: v251010_1800]
+    - Option: Console logging now guarded by `args.debug`
 ]]--
 
 
