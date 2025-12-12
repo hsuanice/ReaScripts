@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<index version="1" name="hsuanice Scripts" commit="ffc9e1722e0c8ed8fa999c66ecea934d773747c0">
+<index version="1" name="hsuanice Scripts" commit="ab379fe4e55a89b1fe4b0e33d92c4ff0f468e81f">
   <category name="Beta Testing">
     <reapack name="hsuanice_BWF TimeReference Embed Tool.lua" type="script" desc="Embed BWF TimeReference to Active take from Take 1 or Current Position TC">
       <version name="0.7.1" author="hsuanice" time="2025-08-14T17:52:57Z">
@@ -1841,6 +1841,11 @@ v0.9.0 - Added Shared Link State section from Project ExtState "hsuanice_Link".]
       </version>
       <version name="0.4.3" author="hsuanice" time="2025-09-14T12:25:51Z">
         <source main="main">https://github.com/hsuanice/ReaScripts/raw/a861d984e68b39b43d64090e351a3a559f4c5e33/Library/hsuanice_ReaImGui%20Theme%20Color.lua</source>
+      </version>
+    </reapack>
+    <reapack name="hsuanice_RGWH Core.lua" type="script" desc="RGWH Core - Render or Glue with Handles">
+      <version name="0.1.0" author="hsuanice" time="2025-12-12T15:14:01Z">
+        <source main="main">https://github.com/hsuanice/ReaScripts/raw/ab379fe4e55a89b1fe4b0e33d92c4ff0f468e81f/Library/hsuanice_RGWH%20Core.lua</source>
       </version>
     </reapack>
   </category>
