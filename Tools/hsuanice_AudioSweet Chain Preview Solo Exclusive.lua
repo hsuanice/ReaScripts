@@ -3,11 +3,14 @@
 @version 0.1.0
 @author Hsuanice
 @provides
-  [main] hsuanice Scripts/Tools/hsuanice_AudioSweet Chain Preview Solo Exclusive.lua
-  hsuanice Scripts/Library/hsuanice_AS Preview Core.lua
+  [main] Tools/hsuanice_AudioSweet Chain Preview Solo Exclusive.lua
+  Library/hsuanice_AS Preview Core.lua
 @changelog
-  0.1.0 (2025-12-12) [internal: v251030.2335]
-    - Changed: Now reads all preview settings from AudioSweet GUI ExtState
+  0.1.0 (2025-12-13) [internal: v251213.0336]
+    - Enhanced: Smart chain preview target selection
+    - New: Prioritizes focused FX chain track if available, falls back to GUI settings
+    - Fixed: Extracts pure track name from focused track using P_NAME (without track number prefix)
+    - Previous: Now reads all preview settings from AudioSweet GUI ExtState [internal: v251030.2335]
     - Reads: preview_target_track, preview_solo_scope, preview_restore_mode, debug
     - Benefit: Single source of truth - change settings in GUI, all preview scripts use same settings
     - Compatible: Works with AudioSweet ReaImGui v251030.2300 or newer
@@ -73,9 +76,35 @@ local solo_scope_str = (preview_solo_scope == 0) and "track" or "item"
 local restore_mode_str = (preview_restore_mode == 0) and "timesel" or "guid"
 
 ------------------------------------------------------------
--- 3) Define Target Track Name (expose for Core sugar)
+-- 3) Determine Target Track Name (Smart Selection)
 ------------------------------------------------------------
-_G.TARGET_TRACK_NAME = preview_target_track
+-- Chain mode: prioritize focused FX chain track if available, otherwise use GUI settings
+local target_track_name = preview_target_track  -- Default to GUI settings
+
+-- Check if there's a focused FX with a track
+local focused_track = reaper.GetFocusedFX()
+if focused_track > 0 then
+  -- Extract track from focused FX
+  local track_number = (focused_track & 0xFFFF) - 1
+  local tr = reaper.GetTrack(0, track_number)
+
+  if tr and reaper.ValidatePtr2(0, tr, "MediaTrack*") then
+    -- Get pure track name from track object (P_NAME doesn't include track number prefix)
+    local _, pure_name = reaper.GetSetMediaTrackInfo_String(tr, "P_NAME", "", false)
+    target_track_name = pure_name
+
+    if debug_mode then
+      reaper.ShowConsoleMsg("[AudioSweet Chain Preview] Using focused FX chain track: " .. pure_name .. "\n")
+    end
+  end
+else
+  if debug_mode then
+    reaper.ShowConsoleMsg("[AudioSweet Chain Preview] Using GUI settings target track: " .. target_track_name .. "\n")
+  end
+end
+
+-- Expose for Core sugar
+_G.TARGET_TRACK_NAME = target_track_name
 
 ------------------------------------------------------------
 -- 4) Define Parameters
@@ -90,10 +119,8 @@ local args = {
   chain_mode        = true,              -- true  = Chain preview (no FX isolation)
                                          -- false = Focused preview (isolate active FX)
   mode              = "solo",            -- "solo" or "normal"
-  target            = "TARGET_TRACK_NAME", -- "TARGET_TRACK_NAME" → resolve by name via target_track_name or _G.TARGET_TRACK_NAME
-                                           -- "focused"           → isolate currently focused FX (ignores target_track_name)
-                                           -- (If omitted, Core defaults to "focused".)
-  target_track_name = preview_target_track,      -- Read from GUI ExtState
+  -- Don't set target explicitly; let Preview Core use target_track_name directly
+  target_track_name = target_track_name, -- Smart selection: focused FX track or GUI settings
 
   ----------------------------------------------------------
   -- Behavior Options (Read from GUI ExtState)
