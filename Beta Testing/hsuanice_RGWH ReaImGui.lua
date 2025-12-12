@@ -1,7 +1,7 @@
 --[[
 @description RGWH GUI - ImGui Interface for RGWH Core
 @author hsuanice
-@version 0.1.0-beta (251114.1920)
+@version 0.1.0-beta (251212.1230)
 @about
   ImGui-based GUI for configuring and running RGWH Core operations.
   Provides visual controls for all RGWH Wrapper Template parameters.
@@ -11,6 +11,18 @@
   Adjust parameters using the visual controls and click operation buttons to execute.
 
 @changelog
+  v251212.1230 (0.1.0-beta) - IMPROVED UNDO BEHAVIOR FOR SINGLE-STEP UNDO
+    - Improved: All RGWH operations now use single undo block.
+      - Issue: Executing RGWH operations required multiple undo steps to fully revert
+      - Solution: Wrapped run_rgwh() execution with Undo_BeginBlock/EndBlock (lines 761-762, 807-815)
+      - Added PreventUIRefresh to improve performance during execution
+      - Result: One Undo operation reverts entire RGWH execution back to pre-execution state
+      - Undo label format: "RGWH GUI: Glue/Render/Window/Handle"
+      - All operation modes (Glue, Render, Window, Handle) now have consistent undo behavior
+    - Technical: Nested undo blocks are supported by REAPER and merge correctly.
+      - GUI undo block wraps RGWH Core's internal undo blocks (if any)
+      - Outer block takes precedence, creating single undo point for user
+
   v251114.1920 (0.1.0-beta) - Manual Window: Process Flow Updates (DOCUMENTATION REFINEMENT)
     - Updated: RENDER Mode process flow table (now 14 steps, was 10)
       • Added: Snapshot Take FX (step 1), Add/Remove Cue Markers (steps 4,8), Clone Take FX (step 13)
@@ -758,6 +770,9 @@ local function run_rgwh(operation)
   gui.is_running = true
   gui.last_result = "Running..."
 
+  r.Undo_BeginBlock()
+  r.PreventUIRefresh(1)
+
   -- Build args based on which button was clicked
   local args = build_args_from_gui(operation)
 
@@ -800,6 +815,16 @@ local function run_rgwh(operation)
     r.ShowConsoleMsg(err_msg .. "\n")
     r.ShowConsoleMsg(string.rep("=", 60) .. "\n")
   end
+
+  r.PreventUIRefresh(-1)
+  local operation_names = {
+    glue = "Glue",
+    render = "Render",
+    window = "Window",
+    handle = "Handle"
+  }
+  local op_label = operation_names[operation] or operation
+  r.Undo_EndBlock(string.format("RGWH GUI: %s", op_label), -1)
 
   gui.is_running = false
 end
