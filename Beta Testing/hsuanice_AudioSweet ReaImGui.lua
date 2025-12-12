@@ -1,7 +1,7 @@
 --[[
 @description AudioSweet ReaImGui - ImGui Interface for AudioSweet
 @author hsuanice
-@version 0.1.0-beta (251211.2150)
+@version 0.1.0-beta (251212.1230)
 @about
   Complete AudioSweet control center with:
   - Focused/Chain modes with FX chain display
@@ -18,6 +18,19 @@
 
 
 @changelog
+  Internal Build 251212.1230 - IMPROVED UNDO BEHAVIOR FOR SINGLE-STEP UNDO
+    - Improved: Main AUDIOSWEET button execution now uses single undo block.
+      - Issue: Executing AudioSweet required multiple undo steps to fully revert (render, glue, print FX, etc.)
+      - Solution: Wrapped run_audiosweet() execution with Undo_BeginBlock/EndBlock (lines 1039-1040, 1110-1113)
+      - Added PreventUIRefresh to improve performance during execution
+      - Result: One Undo operation reverts entire AudioSweet execution back to pre-execution state
+      - Undo label format: "AudioSweet GUI: Focused/Chain Apply/Copy"
+      - Behavior now consistent with History and Saved Chains (which already had undo blocks)
+    - Technical: Nested undo blocks are supported by REAPER and merge correctly.
+      - GUI undo block wraps AudioSweet Core's internal undo blocks
+      - Core already has undo blocks (AudioSweet Core line 1754)
+      - Outer block takes precedence, creating single undo point for user
+
   Internal Build 251211.2150 - FIXED HISTORY COPY MODE AND ADDED DEBUG LOGGING
     - FIXED: History focused FX in Copy mode now correctly copies single FX instead of entire chain.
       - Issue: Clicking history item for focused FX in copy mode would copy entire track FX chain
@@ -1036,6 +1049,9 @@ local function run_audiosweet(override_track)
   gui.is_running = true
   gui.last_result = "Running..."
 
+  r.Undo_BeginBlock()
+  r.PreventUIRefresh(1)
+
   -- Only use Core for focused FX mode
   -- (Core needs GetFocusedFX to work properly)
   if gui.mode == 0 and not override_track then
@@ -1064,6 +1080,8 @@ local function run_audiosweet(override_track)
     local fx_count = r.TrackFX_GetCount(target_track)
     if fx_count == 0 then
       gui.last_result = "Error: No FX on target track"
+      r.PreventUIRefresh(-1)
+      r.Undo_EndBlock("AudioSweet GUI (error)", -1)
       gui.is_running = false
       return
     end
@@ -1101,6 +1119,11 @@ local function run_audiosweet(override_track)
       gui.last_result = "Error: " .. tostring(err)
     end
   end
+
+  r.PreventUIRefresh(-1)
+  local mode_name = (gui.mode == 0) and "Focused" or "Chain"
+  local action_name = (gui.action == 0) and "Apply" or "Copy"
+  r.Undo_EndBlock(string.format("AudioSweet GUI: %s %s", mode_name, action_name), -1)
 
   gui.is_running = false
 end
