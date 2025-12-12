@@ -1,22 +1,23 @@
 --[[
-@description Convert FX Alias JSON to TSV (hsuanice)
-@version 0.1.0-beta (251030.1600)
+@description FX Alias Export - Convert FX Alias JSON to TSV
+@version 0.1.0
 @author hsuanice
+@provides
+  [main] hsuanice Scripts/Tools/hsuanice_FX Alias Export JSON to TSV.lua
 @about
   Export Settings/fx_alias.json to Settings/fx_alias.tsv for easy editing in Excel/Numbers/Sheets.
 
   Part of AudioSweet ReaImGui Tools suite.
 
 @changelog
-  0.1.0-beta (2025-10-30) - Initial Public Beta Release
-    FX Alias JSON to TSV exporter tool featuring:
-    - Converts fx_alias.json to fx_alias.tsv format
-    - Enables easy editing in Excel/Numbers/Google Sheets
-    - Accessible from AudioSweet ReaImGui: Settings → FX Alias Tools → Export JSON to TSV
-    - Part of FX Alias workflow: Build → Export → Edit → Update
-
-  Internal Build v251007
-    - Initial release
+  0.1.0 (2025-12-12) [internal: v251030.1600]
+    - Initial Public Beta Release
+    - FX Alias JSON to TSV exporter tool featuring:
+      • Converts fx_alias.json to fx_alias.tsv format
+      • Enables easy editing in Excel/Numbers/Google Sheets
+      • Accessible from AudioSweet ReaImGui: Settings → FX Alias Tools → Export JSON to TSV
+      • Part of FX Alias workflow: Build → Export → Edit → Update
+    - Initial release [internal: v251007]
 ]]--
 
 -- ========== Minimal JSON (dkjson subset) ==========
