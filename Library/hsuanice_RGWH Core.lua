@@ -62,8 +62,14 @@
   • For detailed operation modes guide, see RGWH GUI: Help > Manual (Operation Modes)
 
 @changelog
-   0.1.0 (251215.2300) - CLEANUP: Removed unused RENAME_OP_MODE setting
+   0.1.0 (251215.2300) - CLEANUP: Removed unused settings
     - Removed: RENAME_OP_MODE setting (was never implemented, no functional change)
+    - Removed: GLUE_AFTER_MONO_APPLY setting (was never implemented, no functional change)
+      • Removed from DEFAULTS (was line 781)
+      • Removed from read_settings() (was line 846)
+      • Defined in v251113.1540 but never checked in actual code
+      • Actual behavior unchanged: Mono mode in AUTO/GLUE always glues multi-item units after mono apply
+    - Removed: RENAME_OP_MODE setting (complete removal details)
       • Removed from API documentation args.policies.rename_mode (line 38-42)
       • Removed from DEFAULTS (was line 787)
       • Removed from read_settings() (was line 851)
@@ -778,7 +784,6 @@ local ACT_REMOVE_TAKE_FX = 40640   -- Item: Remove FX for item take
 ------------------------------------------------------------
 local DEFAULTS = {
   GLUE_SINGLE_ITEMS  = true,
-  GLUE_AFTER_MONO_APPLY = true,      -- When channel_mode=mono in AUTO mode: glue after applying mono to each item
   HANDLE_MODE        = "seconds",
   HANDLE_SECONDS     = 5.0,
   EPSILON_MODE       = "frames",
@@ -843,7 +848,6 @@ end
 function M.read_settings()
   return {
     GLUE_SINGLE_ITEMS  = (get_ext_bool("GLUE_SINGLE_ITEMS",  DEFAULTS.GLUE_SINGLE_ITEMS)==1),
-    GLUE_AFTER_MONO_APPLY = (get_ext_bool("GLUE_AFTER_MONO_APPLY", DEFAULTS.GLUE_AFTER_MONO_APPLY)==1),
     HANDLE_MODE        = get_ext("HANDLE_MODE",              DEFAULTS.HANDLE_MODE),
     HANDLE_SECONDS     = get_ext_num("HANDLE_SECONDS",       DEFAULTS.HANDLE_SECONDS),
     EPSILON_MODE       = get_ext("EPSILON_MODE",             DEFAULTS.EPSILON_MODE),
