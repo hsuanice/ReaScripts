@@ -20,7 +20,17 @@
 
 
 @changelog
-  0.1.0 [Internal Build 251213.0253] - IMPROVED SAVED CHAINS WITH DYNAMIC TRACK NAME AND FX INFO
+  0.1.0 [Internal Build 251213.0342] - SYNCED CHAIN PREVIEW LOGIC WITH TOOLS SCRIPT
+    - Updated: Chain preview logic now synchronized between GUI and Tools script.
+      - Tools script (hsuanice_AudioSweet Chain Preview Solo Exclusive.lua) updated to v251213.0336
+      - Both GUI and Tools script now use identical smart target selection logic:
+        * If focused FX chain exists → preview that track (using pure P_NAME)
+        * If no focused FX chain → use preview_target_track from GUI settings
+      - Ensures consistent behavior whether previewing from GUI or keyboard shortcut
+      - Tools script reads all settings from GUI ExtState (single source of truth)
+    - Purpose: Unified preview experience across all AudioSweet interfaces.
+
+  Internal Build 251213.0253 - IMPROVED SAVED CHAINS WITH DYNAMIC TRACK NAME AND FX INFO
     - Improved: Saved Chains now support custom names and dynamic track name updates.
       - Added: Optional custom name field when saving a chain
       - If custom name is provided: Display remains fixed (custom name)
