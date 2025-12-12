@@ -1,7 +1,8 @@
 --[[
-@description AudioSweet — Focused Track FX render via RGWH Core, append FX name, rebuild peaks (selected items)
-@version 0.1.0-beta (251030.1630)
+@description AudioSweet Core - Focused Track FX render via RGWH Core
+@version 0.1.0
 @author Tim Chimes (original), adapted by hsuanice
+@noindex
 @notes
   Reference:
   AudioSuite-like Script. Renders the selected plugin to the selected media item.
@@ -11,7 +12,7 @@
   http://chimesaudio.com
 
 @changelog
-  0.1.0-beta (2025-10-30) - Initial Public Beta Release
+  0.1.0 (2025-10-30) - Initial Public Beta Release
     AudioSuite-like workflow with RGWH Core integration featuring:
     - Focused/Chain modes for Track FX processing
     - CLAP plugin support with fallback mechanism
