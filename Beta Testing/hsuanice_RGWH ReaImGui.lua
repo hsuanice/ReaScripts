@@ -1,7 +1,7 @@
 --[[
 @description RGWH GUI - ImGui Interface for RGWH Core
 @author hsuanice
-@version 0.1.0
+@version v251214.0025
 @provides
   [main] .
 
@@ -14,7 +14,10 @@
   Adjust parameters using the visual controls and click operation buttons to execute.
 
 @changelog
-  0.1.0 [v251214.0020] - BIDIRECTIONAL VOLUME MERGE SUPPORT
+  0.1.0 [v251214.0025] - UI IMPROVEMENTS
+    - Improved: Channel Mode help marker now clarifies Multi mode behavior
+      • Updated tooltip: "Multi: force item output to match track channel count"
+      • Makes it clear that Multi mode forces item to match the track's channel count (line 1764)
     - Fixed: Print Volumes checkbox now auto-unchecks when both merge options are disabled
       • Prevents misleading "checked but disabled" state
       • When merge options are disabled, print is unchecked and grayed out (line 1806-1808)
@@ -1761,7 +1764,7 @@ local function draw_gui()
   ImGui.SameLine(ctx)
   if ImGui.RadioButton(ctx, "Multi##channel", gui.channel_mode == 2) then gui.channel_mode = 2 end
   ImGui.SameLine(ctx)
-  draw_help_marker("Auto: decide based on source material | Mono: force mono | Multi: force multi-channel")
+  draw_help_marker("Auto: decide based on source material | Mono: force mono | Multi: force item output to match track channel count")
 
   ImGui.Spacing(ctx)
 
