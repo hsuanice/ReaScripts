@@ -14,7 +14,40 @@
   Adjust parameters using the visual controls and click operation buttons to execute.
 
 @changelog
-  0.1.0 [v251213.1430] - DISABLED MANUAL WINDOW DOCKING
+  0.1.0 [v251213.2347] - BIDIRECTIONAL VOLUME MERGE SUPPORT
+    - Updated: Manual documentation for bidirectional volume merge (lines 1124-1171)
+      • New table showing all merge/print combinations and their results
+      • Added technical details: REAPER renders with item×take, both must be 1.0 for Print OFF
+      • Clearer explanation of volume flow in each mode
+    - Tested: All four combinations verified working correctly
+      • Merge to Item + Print OFF: item=combined, take=1.0, audio at original level ✓
+      • Merge to Item + Print ON: item=1.0, take=1.0, audio with gain ✓
+      • Merge to Take + Print OFF: item=1.0, take=combined, audio at original level ✓
+      • Merge to Take + Print ON: item=1.0, take=1.0, audio with gain ✓
+    - Fixed: Merge to Item + Print OFF - BOTH item AND take set to 1.0 during render
+    - Critical: REAPER renders with item×take volume (not just take!)
+    - Logic: Preprocess sets item=1.0, take=1.0; Postprocess restores item=combined
+    - Added: Bidirectional volume merge support (merge to item OR merge to take).
+      - New checkbox: "Merge to Item" - merges take volume into item volume
+      - Existing checkbox: "Merge to Take" - merges item volume into take volume (original behavior)
+      - Checkboxes are mutually exclusive (radio button behavior)
+      - Print checkbox now disabled when neither merge option is selected
+      - Merge modes:
+        * Merge to Item: Consolidates volume at item level, all takes at 1.0 (0 dB)
+        * Merge to Take: Consolidates volume at take level (original behavior)
+        * OFF (neither checked): No volume merging, REAPER native behavior
+      - Print behavior:
+        * Print ON + Merge to Item: Transfers item volume to takes, then prints (all volumes → 0dB)
+        * Print ON + Merge to Take: Prints merged take volumes (all volumes → 0dB)
+        * Print OFF + Merge to Item: Preserves volume in item
+        * Print OFF + Merge to Take: Preserves volume in takes
+        * Print disabled when Merge = OFF (no effect in native mode)
+      - GUI state: merge_to_item (boolean), merge_to_take (boolean, replaces merge_volumes)
+      - Migration: Old merge_volumes boolean auto-converts to merge_to_take on load
+      - Lines: 384-385 (state vars), 425 (persist keys), 491-498 (migration), 817-820 (args), 1818-1848 (UI)
+    - Purpose: Supports both item-centric and take-centric volume workflows, with flexible print options.
+
+  [v251213.1430] - DISABLED MANUAL WINDOW DOCKING
     - Fixed: Manual window now always has docking disabled (WindowFlags_NoDocking).
       - Prevents ImGui_End assertion errors when manual window is docked
       - Manual window should remain floating for better readability
@@ -381,7 +414,8 @@ local gui = {
   tc_mode = 1,              -- 0=previous, 1=current, 2=off
 
   -- Volume handling
-  merge_volumes = true,
+  merge_to_item = false,
+  merge_to_take = true,
   print_volumes = false,
 
   -- Handle settings
@@ -422,7 +456,7 @@ local P_NS = "hsuanice_RGWH_GUI_state_v1"
 local persist_keys = {
   'op','selection_scope','channel_mode',
   'take_fx','track_fx','tc_mode',
-  'merge_volumes','print_volumes',
+  'merge_to_item','merge_to_take','print_volumes',
   'handle_mode','handle_length',
   'epsilon_mode','epsilon_value',
   'cue_write_edge','cue_write_glue',
@@ -464,6 +498,13 @@ end
 local function load_persist()
   local s = reaper.GetExtState(P_NS, 'state') or ''
   deserialize_into_gui(s, gui)
+
+  -- Migration: Convert old merge_volumes to merge_to_take
+  if gui.merge_volumes ~= nil then
+    gui.merge_to_take = gui.merge_volumes
+    gui.merge_to_item = false
+    gui.merge_volumes = nil
+  end
 end
 
 -- Helper function to print all current settings to console
@@ -775,7 +816,8 @@ local function build_args_from_gui(operation)
     track_fx = gui.track_fx,
     tc_mode = tc_names[gui.tc_mode + 1],
 
-    merge_volumes = gui.merge_volumes,
+    merge_volumes = gui.merge_to_take,  -- Core still uses merge_volumes for merge to take
+    merge_to_item = gui.merge_to_item,
     print_volumes = gui.print_volumes,
 
     cues = {
@@ -1089,34 +1131,47 @@ local function draw_manual_window()
       ImGui.Spacing(ctx)
 
       -- === VOLUME RENDERING ===
-      ImGui.TextColored(ctx, 0x00AAFFFF, "3. VOLUME RENDERING")
+      ImGui.TextColored(ctx, 0x00AAFFFF, "3. VOLUME RENDERING (Bidirectional)")
       ImGui.Spacing(ctx)
+      ImGui.TextWrapped(ctx, "RGWH supports bidirectional volume merging - you can merge volumes to either item or take level:")
+      ImGui.Spacing(ctx)
+
       if ImGui.BeginTable(ctx, 'VolumeTable', 3, ImGui.TableFlags_Borders | ImGui.TableFlags_RowBg) then
-        ImGui.TableSetupColumn(ctx, 'Feature')
-        ImGui.TableSetupColumn(ctx, 'Implementation')
-        ImGui.TableSetupColumn(ctx, 'Behavior')
+        ImGui.TableSetupColumn(ctx, 'Merge Mode')
+        ImGui.TableSetupColumn(ctx, 'Print OFF')
+        ImGui.TableSetupColumn(ctx, 'Print ON')
         ImGui.TableHeadersRow(ctx)
 
         ImGui.TableNextRow(ctx)
-        ImGui.TableNextColumn(ctx); ImGui.TextColored(ctx, 0xFFFF00FF, 'Merge Volumes')
-        ImGui.TableNextColumn(ctx); ImGui.Text(ctx, 'D_VOL + D_TAKEVOL')
-        ImGui.TableNextColumn(ctx); ImGui.Text(ctx, 'Merge item vol into take vol before render')
+        ImGui.TableNextColumn(ctx); ImGui.TextColored(ctx, 0xFFFF00FF, 'Merge to Item')
+        ImGui.TableNextColumn(ctx); ImGui.Text(ctx, 'item=combined, take=1.0\nVolume stays at item level')
+        ImGui.TableNextColumn(ctx); ImGui.Text(ctx, 'item=1.0, take=1.0\nVolume baked into audio')
 
         ImGui.TableNextRow(ctx)
-        ImGui.TableNextColumn(ctx); ImGui.TextColored(ctx, 0xFFFF00FF, 'Print Volumes')
-        ImGui.TableNextColumn(ctx); ImGui.Text(ctx, 'Keep/restore volume values')
-        ImGui.TableNextColumn(ctx); ImGui.Text(ctx, 'ON: bake into audio | OFF: restore original')
+        ImGui.TableNextColumn(ctx); ImGui.TextColored(ctx, 0xFFFF00FF, 'Merge to Take')
+        ImGui.TableNextColumn(ctx); ImGui.Text(ctx, 'item=1.0, take=combined\nVolume stays at take level')
+        ImGui.TableNextColumn(ctx); ImGui.Text(ctx, 'item=1.0, take=1.0\nVolume baked into audio')
 
         ImGui.TableNextRow(ctx)
-        ImGui.TableNextColumn(ctx); ImGui.TextColored(ctx, 0xFFFF00FF, 'Volume Snapshot')
-        ImGui.TableNextColumn(ctx); ImGui.Text(ctx, 'GetMediaItemInfo_Value()')
-        ImGui.TableNextColumn(ctx); ImGui.Text(ctx, 'Snapshot before, restore after if needed')
+        ImGui.TableNextColumn(ctx); ImGui.TextColored(ctx, 0xFFFF00FF, 'OFF (neither)')
+        ImGui.TableNextColumn(ctx); ImGui.Text(ctx, 'REAPER native behavior\nPrint disabled')
+        ImGui.TableNextColumn(ctx); ImGui.Text(ctx, 'N/A\nPrint disabled')
 
         ImGui.EndTable(ctx)
       end
       ImGui.Spacing(ctx)
+
+      ImGui.TextColored(ctx, 0x00FF00FF, "Technical Details:")
+      ImGui.Indent(ctx)
+      ImGui.BulletText(ctx, "REAPER renders with item × take volume (not just take)")
+      ImGui.BulletText(ctx, "Print OFF: Both set to 1.0 during render to preserve original audio level")
+      ImGui.BulletText(ctx, "After render: Volume restored to target (item or take) based on merge mode")
+      ImGui.BulletText(ctx, "Merge modes are mutually exclusive (radio button behavior)")
+      ImGui.Unindent(ctx)
+      ImGui.Spacing(ctx)
+
       ImGui.TextColored(ctx, 0xFF0000FF, "Important Note:")
-      ImGui.BulletText(ctx, "GLUE mode always forces merge and print volumes (technical requirement)")
+      ImGui.BulletText(ctx, "GLUE mode always forces merge to take + print (technical requirement)")
       ImGui.Indent(ctx)
       ImGui.TextWrapped(ctx,
         "• Reason: When merging multiple items into one, volume relationships must be preserved\n" ..
@@ -1726,13 +1781,34 @@ local function draw_gui()
   -- Right column: Volume Rendering
   ImGui.BeginGroup(ctx)
   ImGui.Text(ctx, "Volume Rendering:")
-  rv, new_val = ImGui.Checkbox(ctx, "Merge Volumes", gui.merge_volumes)
-  if rv then gui.merge_volumes = new_val end
-  draw_help_marker("Merge item volume into take volume before render\n\nNote: GLUE mode always forces merge and print (technical requirement)")
 
-  rv, new_val = ImGui.Checkbox(ctx, "Print Volumes", gui.print_volumes)
+  -- Item checkbox (Merge to Item)
+  rv, new_val = ImGui.Checkbox(ctx, "Merge to Item##merge_item", gui.merge_to_item)
+  if rv then
+    gui.merge_to_item = new_val
+    if new_val then gui.merge_to_take = false end  -- Mutually exclusive
+  end
+  ImGui.SameLine(ctx)
+  draw_help_marker("Merge take volume INTO item volume\n• Consolidates volume at item level\n• Preserves relative take volumes across multiple takes\n• Print ON: transfers item vol back to takes, then prints (all → 0dB)\n• Print OFF: preserves volume in item")
+
+  -- Take checkbox (Merge to Take)
+  rv, new_val = ImGui.Checkbox(ctx, "Merge to Take##merge_take", gui.merge_to_take)
+  if rv then
+    gui.merge_to_take = new_val
+    if new_val then gui.merge_to_item = false end  -- Mutually exclusive
+  end
+  ImGui.SameLine(ctx)
+  draw_help_marker("Merge item volume INTO take volume (original behavior)\n• Consolidates volume at take level\n• Merges into ALL takes (preserves relative volumes)\n• Print ON: prints merged volumes (all → 0dB)\n• Print OFF: preserves volume in takes\n\nNote: GLUE mode always forces merge to take + print")
+
+  -- Print checkbox (disabled when no merge selected)
+  local has_merge = gui.merge_to_item or gui.merge_to_take
+  ImGui.BeginDisabled(ctx, not has_merge)
+  rv, new_val = ImGui.Checkbox(ctx, "Print Volumes##print_vol", gui.print_volumes)
   if rv then gui.print_volumes = new_val end
-  draw_help_marker("Print volumes into rendered audio\n(false = restore original volumes)\n\nNote: GLUE mode always forces merge and print (technical requirement)")
+  ImGui.EndDisabled(ctx)
+  ImGui.SameLine(ctx)
+  draw_help_marker("Print volumes into rendered audio (all volumes → 0dB)\n• Disabled when Merge = OFF (no effect in native mode)\n• Merge to Item + Print: transfers item to takes, then prints\n• Merge to Take + Print: prints merged take volumes\n\nNote: GLUE mode always forces print ON")
+
   ImGui.EndGroup(ctx)
 
   -- === HANDLE SETTINGS ===
