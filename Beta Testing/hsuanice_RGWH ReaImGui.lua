@@ -1,7 +1,7 @@
 --[[
 @description RGWH GUI - ImGui Interface for RGWH Core
 @author hsuanice
-@version v251214.0040
+@version v251214.0100
 @provides
   [main] .
 
@@ -14,20 +14,34 @@
   Adjust parameters using the visual controls and click operation buttons to execute.
 
 @changelog
+  0.1.0 [v251214.0100] - SIMPLIFIED VOLUME MERGE INTERACTION
+    - Simplified: Clean mutual exclusion + binding logic, removed all warning text (lines 1816-1856)
+      • Merge to Item ◄──mutually exclusive──► Merge to Take ◄──bound to──► Print Volumes
+      • 4 valid states: ❌❌❌ (native) | ✓❌❌ (Item) | ❌✓❌ (Take) | ❌✓✓ (Take+Print)
+    - Behavior: Merge to Item
+      • When checked: auto-disables Merge to Take + Print Volumes
+      • Mutually exclusive with opposite, no Print support (REAPER only prints take volume)
+    - Behavior: Merge to Take
+      • When checked: auto-disables Merge to Item
+      • When unchecked: auto-disables Print Volumes (binding relationship)
+    - Behavior: Print Volumes
+      • When checked: auto-enables Merge to Take + disables Merge to Item
+      • Fully bound to Merge to Take
+    - Removed: Orange warning text and auto_switched state variable
+      • Mutual exclusion + binding behavior is intuitive enough, no extra prompts needed
+      • Avoids window resize issues
+    - Updated: Help markers clarify mutual exclusion and binding relationships
   0.1.0 [v251214.0040] - SIMPLIFIED VOLUME MERGE UI
     - Added: Auto-switch from Merge to Item to Merge to Take when Print ON is enabled
       • Rationale: REAPER can only print take volume, not item volume
       • When user enables Print with Merge to Item selected, auto-switches to Merge to Take
-      • Shows orange notification: "(Auto-switched to Merge to Take)" (lines 1820-1848)
+      • Shows orange notification: "(Auto-switched to Merge to Take)"
       • Updated Print Volumes help marker to explain this behavior
       • Valid combinations: OFF | Merge to Item | Merge to Take + Print OFF | Merge to Take + Print ON
     - Improved: Channel Mode help marker now clarifies Multi mode behavior
       • Updated tooltip: "Multi: force item output to match track channel count"
-      • Makes it clear that Multi mode forces item to match the track's channel count (line 1764)
-    - Fixed: Print Volumes checkbox now auto-unchecks when both merge options are disabled
-      • Prevents misleading "checked but disabled" state
-      • When merge options are disabled, print is unchecked and grayed out (line 1806-1808)
-    - Improved: Simplified Manual documentation for Volume Rendering (lines 1141-1168)
+      • Makes it clear that Multi mode forces item to match the track's channel count
+    - Improved: Simplified Manual documentation for Volume Rendering
       • Restored 3-column table format (Print OFF / Print ON) for consistency
       • Direct language: "Combine take vol to item vol" instead of technical jargon
       • Shows result, compensation behavior, and print options for each mode
@@ -1802,56 +1816,42 @@ local function draw_gui()
   rv, new_val = ImGui.Checkbox(ctx, "Merge to Item##merge_item", gui.merge_to_item)
   if rv then
     gui.merge_to_item = new_val
-    if new_val then gui.merge_to_take = false end  -- Mutually exclusive
+    if new_val then
+      -- Mutually exclusive: disable Merge to Take + Print
+      gui.merge_to_take = false
+      gui.print_volumes = false
+    end
   end
   ImGui.SameLine(ctx)
-  draw_help_marker("Merge take volume INTO item volume\n• Consolidates volume at item level\n• Preserves relative take volumes across multiple takes\n• Print ON: transfers item vol back to takes, then prints (all → 0dB)\n• Print OFF: preserves volume in item")
+  draw_help_marker("Merge take volume INTO item volume\n• Consolidates volume at item level\n• Preserves relative take volumes across multiple takes\n• Print OFF only (REAPER can only print take volume)\n• Mutually exclusive with Merge to Take + Print Volumes")
 
   -- Take checkbox (Merge to Take)
   rv, new_val = ImGui.Checkbox(ctx, "Merge to Take##merge_take", gui.merge_to_take)
   if rv then
     gui.merge_to_take = new_val
-    if new_val then gui.merge_to_item = false end  -- Mutually exclusive
+    if new_val then
+      -- Mutually exclusive: disable Merge to Item
+      gui.merge_to_item = false
+    else
+      -- Unchecking Merge to Take: auto-disable Print (binding)
+      gui.print_volumes = false
+    end
   end
   ImGui.SameLine(ctx)
-  draw_help_marker("Merge item volume INTO take volume (original behavior)\n• Consolidates volume at take level\n• Merges into ALL takes (preserves relative volumes)\n• Print ON: prints merged volumes (all → 0dB)\n• Print OFF: preserves volume in takes\n\nNote: GLUE mode always forces merge to take + print")
+  draw_help_marker("Merge item volume INTO take volume (original behavior)\n• Consolidates volume at take level\n• Merges into ALL takes (preserves relative volumes)\n• Supports Print ON/OFF\n• Mutually exclusive with Merge to Item\n\nNote: GLUE mode always forces merge to take + print")
 
-  -- Print checkbox (disabled when no merge selected)
-  local has_merge = gui.merge_to_item or gui.merge_to_take
-  -- Auto-uncheck print_volumes when both merge options are disabled
-  if not has_merge and gui.print_volumes then
-    gui.print_volumes = false
-  end
-
-  -- Auto-switch: Print ON with Merge to Item → force Merge to Take
-  -- (REAPER can only print take volume, not item volume)
-  local auto_switched = false
-  if gui.merge_to_item and gui.print_volumes then
-    gui.merge_to_item = false
-    gui.merge_to_take = true
-    auto_switched = true
-  end
-
-  ImGui.BeginDisabled(ctx, not has_merge)
+  -- Print checkbox (always enabled)
   rv, new_val = ImGui.Checkbox(ctx, "Print Volumes##print_vol", gui.print_volumes)
   if rv then
     gui.print_volumes = new_val
-    -- If turning ON print while merge_to_item is selected, auto-switch to merge_to_take
-    if new_val and gui.merge_to_item then
+    if new_val then
+      -- Print ON: auto-enable Merge to Take (binding)
       gui.merge_to_item = false
       gui.merge_to_take = true
-      auto_switched = true
     end
   end
-  ImGui.EndDisabled(ctx)
   ImGui.SameLine(ctx)
-  draw_help_marker("Print volumes into rendered audio (all volumes → 0dB)\n• Disabled when Merge = OFF (no effect in native mode)\n• IMPORTANT: Print requires Merge to Take (REAPER only prints take volume)\n• If Merge to Item + Print ON: auto-switches to Merge to Take\n• Merge to Take + Print: prints merged take volumes\n\nNote: GLUE mode always forces print ON")
-
-  -- Show notification when auto-switched
-  if auto_switched then
-    ImGui.SameLine(ctx)
-    ImGui.TextColored(ctx, 0xFFAA00FF, "(Auto-switched to Merge to Take)")
-  end
+  draw_help_marker("Print volumes into rendered audio (all volumes → 0dB)\n• Requires Merge to Take (REAPER only prints take volume)\n• Checking this auto-enables Merge to Take\n• Unchecking Merge to Take auto-disables Print\n• Mutually exclusive with Merge to Item\n\nNote: GLUE mode always forces print ON")
 
   ImGui.EndGroup(ctx)
 
