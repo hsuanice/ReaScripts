@@ -29,10 +29,15 @@
   - handle/epsilon/cues/policies/debug: one-run overrides; omit or use "ext" to read ExtState as-is.
 
 @changelog
-  0.1.0 (2025-12-14) [internal: v251214.0037]
+  0.1.0 (2025-12-14) [internal: v251214.0040]
+    - Simplified: Volume merge logic (matches RGWH Core v251214.0040)
+        • Valid combinations: OFF | merge_to_item | merge_to_take + print OFF | merge_to_take + print ON
+        • merge_to_item + print_volumes=true is NOT supported (GUI auto-switches to merge_to_take)
+        • Rationale: REAPER can only print take volume, not item volume
+        • When using GUI: auto-switches to merge_to_take if you try to enable print with merge_to_item
     - Updated: Bidirectional volume merge support
         • Changed: merge_volumes → merge_to_item + merge_to_take (mutually exclusive)
-        • merge_to_item: merge take volume INTO item volume (all takes → 1.0)
+        • merge_to_item: merge take volume INTO item volume (all takes → 1.0, print OFF only)
         • merge_to_take: merge item volume INTO take volume (item → 1.0, consolidates all takes)
         • print_volumes: bake volumes into rendered audio (false = restore original volumes)
         • Default: merge_to_item=false, merge_to_take=true (preserves original behavior)
@@ -120,9 +125,11 @@ local args = (_PRESET) or {
   tc_mode  = "current",           -- "previous" | "current" | "off" (BWF TimeReference embed)
 
   -- Volume handling (only effective when op resolves to render)
-  merge_to_item = false,            -- merge take volume into item volume (mutually exclusive with merge_to_take)
-  merge_to_take = true,             -- merge item volume into take volume (mutually exclusive with merge_to_item)
-  print_volumes = false,            -- bake volumes into rendered audio (false = restore original volumes)
+  -- NOTE: merge_to_item + print_volumes=true is NOT supported (REAPER can only print take volume)
+  -- Valid: OFF | merge_to_item (print OFF) | merge_to_take + print OFF/ON
+  merge_to_item = false,            -- merge take volume into item volume (print OFF only; mutually exclusive with merge_to_take)
+  merge_to_take = true,             -- merge item volume into take volume (supports both print OFF/ON; mutually exclusive with merge_to_item)
+  print_volumes = false,            -- bake volumes into rendered audio (false = restore original volumes; requires merge_to_take if enabled)
 
   -- One-run overrides (simple knobs)
   -- Handle: choose how to interpret length; wrapper will convert to Core format
