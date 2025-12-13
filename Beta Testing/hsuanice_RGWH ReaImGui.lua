@@ -14,8 +14,17 @@
   Adjust parameters using the visual controls and click operation buttons to execute.
 
 @changelog
-  0.1.0 [v251213.2347] - BIDIRECTIONAL VOLUME MERGE SUPPORT
-    - Updated: Manual documentation for bidirectional volume merge (lines 1124-1171)
+  0.1.0 [v251214.0020] - BIDIRECTIONAL VOLUME MERGE SUPPORT
+    - Fixed: Print Volumes checkbox now auto-unchecks when both merge options are disabled
+      • Prevents misleading "checked but disabled" state
+      • When merge options are disabled, print is unchecked and grayed out (line 1806-1808)
+    - Improved: Simplified Manual documentation for Volume Rendering (lines 1141-1168)
+      • Restored 3-column table format (Print OFF / Print ON) for consistency
+      • Direct language: "Combine take vol to item vol" instead of technical jargon
+      • Shows result, compensation behavior, and print options for each mode
+      • OFF mode now clearly explains REAPER native behavior
+      • Changed: "Bake" → "Print" for consistent terminology
+    - Updated: Manual documentation for bidirectional volume merge
       • New table showing all merge/print combinations and their results
       • Added technical details: REAPER renders with item×take, both must be 1.0 for Print OFF
       • Clearer explanation of volume flow in each mode
@@ -1133,8 +1142,6 @@ local function draw_manual_window()
       -- === VOLUME RENDERING ===
       ImGui.TextColored(ctx, 0x00AAFFFF, "3. VOLUME RENDERING (Bidirectional)")
       ImGui.Spacing(ctx)
-      ImGui.TextWrapped(ctx, "RGWH supports bidirectional volume merging - you can merge volumes to either item or take level:")
-      ImGui.Spacing(ctx)
 
       if ImGui.BeginTable(ctx, 'VolumeTable', 3, ImGui.TableFlags_Borders | ImGui.TableFlags_RowBg) then
         ImGui.TableSetupColumn(ctx, 'Merge Mode')
@@ -1144,17 +1151,17 @@ local function draw_manual_window()
 
         ImGui.TableNextRow(ctx)
         ImGui.TableNextColumn(ctx); ImGui.TextColored(ctx, 0xFFFF00FF, 'Merge to Item')
-        ImGui.TableNextColumn(ctx); ImGui.Text(ctx, 'item=combined, take=1.0\nVolume stays at item level')
-        ImGui.TableNextColumn(ctx); ImGui.Text(ctx, 'item=1.0, take=1.0\nVolume baked into audio')
+        ImGui.TableNextColumn(ctx); ImGui.Text(ctx, 'Combine take vol to item vol\n• Result: Same final volume\n• Compensates other takes\n• Volume stays at item level')
+        ImGui.TableNextColumn(ctx); ImGui.Text(ctx, 'Combine take vol to item vol\n• Result: Same final volume\n• Compensates other takes\n• Prints into audio (all → 0dB)')
 
         ImGui.TableNextRow(ctx)
         ImGui.TableNextColumn(ctx); ImGui.TextColored(ctx, 0xFFFF00FF, 'Merge to Take')
-        ImGui.TableNextColumn(ctx); ImGui.Text(ctx, 'item=1.0, take=combined\nVolume stays at take level')
-        ImGui.TableNextColumn(ctx); ImGui.Text(ctx, 'item=1.0, take=1.0\nVolume baked into audio')
+        ImGui.TableNextColumn(ctx); ImGui.Text(ctx, 'Combine item vol to take vol\n• Result: Same final volume\n• Merges ALL takes\n• Volume stays at take level')
+        ImGui.TableNextColumn(ctx); ImGui.Text(ctx, 'Combine item vol to take vol\n• Result: Same final volume\n• Merges ALL takes\n• Prints into audio (all → 0dB)')
 
         ImGui.TableNextRow(ctx)
         ImGui.TableNextColumn(ctx); ImGui.TextColored(ctx, 0xFFFF00FF, 'OFF (neither)')
-        ImGui.TableNextColumn(ctx); ImGui.Text(ctx, 'REAPER native behavior\nPrint disabled')
+        ImGui.TableNextColumn(ctx); ImGui.Text(ctx, 'REAPER native behavior\n• Item/take vols unchanged\n• Take vol printed to audio\n• Item vol preserved')
         ImGui.TableNextColumn(ctx); ImGui.Text(ctx, 'N/A\nPrint disabled')
 
         ImGui.EndTable(ctx)
@@ -1802,6 +1809,10 @@ local function draw_gui()
 
   -- Print checkbox (disabled when no merge selected)
   local has_merge = gui.merge_to_item or gui.merge_to_take
+  -- Auto-uncheck print_volumes when both merge options are disabled
+  if not has_merge and gui.print_volumes then
+    gui.print_volumes = false
+  end
   ImGui.BeginDisabled(ctx, not has_merge)
   rv, new_val = ImGui.Checkbox(ctx, "Print Volumes##print_vol", gui.print_volumes)
   if rv then gui.print_volumes = new_val end
