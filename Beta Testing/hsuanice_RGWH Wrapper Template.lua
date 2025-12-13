@@ -29,13 +29,16 @@
   - handle/epsilon/cues/policies/debug: one-run overrides; omit or use "ext" to read ExtState as-is.
 
 @changelog
-  0.1.0 (2025-12-14) [internal: v251214.0025]
+  0.1.0 (2025-12-14) [internal: v251214.0037]
     - Updated: Bidirectional volume merge support
         • Changed: merge_volumes → merge_to_item + merge_to_take (mutually exclusive)
         • merge_to_item: merge take volume INTO item volume (all takes → 1.0)
         • merge_to_take: merge item volume INTO take volume (item → 1.0, consolidates all takes)
         • print_volumes: bake volumes into rendered audio (false = restore original volumes)
         • Default: merge_to_item=false, merge_to_take=true (preserves original behavior)
+    - Cleanup: Removed deprecated policies to match RGWH Core v251212.2300
+        • Removed: rename_mode (was never implemented, no functional change)
+        • Kept: glue_single_items, glue_no_trackfx_output_policy, render_no_trackfx_output_policy
     - Note: These options only affect render operations; glue operations unchanged
     - Previous: merge_volumes now affects ALL takes (not just active take) in RGWH Core [v251022_2200]
         • Rationale: Ensures consistent audio output when switching between takes after merge
@@ -136,10 +139,9 @@ local args = (_PRESET) or {
   },
 
   policies = {
-    glue_single_items = true,     -- in op="auto": single item => render (if false)
+    glue_single_items = true,                       -- in op="auto": single item => render (if false)
     glue_no_trackfx_output_policy   = "preserve",   -- "preserve" | "force_multi"
     render_no_trackfx_output_policy = "preserve",   -- "preserve" | "force_multi"
-    rename_mode = "auto",          -- "auto" | "glue" | "render" (kept for compatibility)
   },
 
 }
