@@ -20,7 +20,38 @@
 
 
 @changelog
-  0.1.0 [Internal Build 251213.0342] - SYNCED CHAIN PREVIEW LOGIC WITH TOOLS SCRIPT
+  0.1.0 [Internal Build 251213.1330] - FIXED DUPLICATE TRACK NAME ISSUE BY PASSING TRACK OBJECT
+    - Fixed: Preview now correctly targets the right track when multiple tracks have identical names.
+      - Critical fix: Pass MediaTrack* object directly to Preview Core instead of just track name
+      - Previous issue: When GUID found the correct track, only track name was passed to Preview Core
+      - Preview Core behavior: Searches all tracks by name and uses FIRST match (wrong for duplicates)
+      - Solution: When GUID resolves to a track, pass the track object directly (lines 1161, 1195-1196)
+      - Result: Preview Core uses the exact track object, bypassing name search entirely
+    - Enhanced: Comprehensive debug logging for preview target selection.
+      - Shows decision tree: focused FX → GUID lookup → name fallback
+      - Displays GUID, track name, and whether MediaTrack* object is passed
+      - Helps diagnose duplicate name scenarios
+      - Lines: 1129-1186 (debug logging throughout selection process)
+    - Technical: Smart args construction for Preview Core.
+      - If track object available: `target = MediaTrack*`, `target_track_name = nil`
+      - If only name available: `target = nil`, `target_track_name = "name"`
+      - Ensures Preview Core uses most reliable target method available
+
+  Internal Build 251213.0352 - IMPROVED PREVIEW TARGET WITH GUID-BASED TRACK IDENTIFICATION
+    - Enhanced: Preview target now uses GUID for unique track identification.
+      - Added: preview_target_track_guid field to store track GUID
+      - Stores both track name AND GUID for reliable identification
+      - Fallback: If GUID not found (track deleted/project changed), falls back to track name search
+      - Lines: 658 (field definition), 695/743 (save/load), 1155-1179 (GUID resolution)
+    - Added: "Set First Selected Track" button in Preview Target edit popup.
+      - Quick-select: Click button to instantly set first selected track as preview target
+      - Stores both track name AND GUID simultaneously
+      - Auto-saves settings immediately
+      - Works when multiple tracks selected (uses first track only)
+      - Lines: 2119-2136 (Set First Selected Track button with GUID)
+    - Purpose: Robust preview targeting that survives track renaming and handles duplicate names.
+
+  Internal Build 251213.0342 - SYNCED CHAIN PREVIEW LOGIC WITH TOOLS SCRIPT
     - Updated: Chain preview logic now synchronized between GUI and Tools script.
       - Tools script (hsuanice_AudioSweet Chain Preview Solo Exclusive.lua) updated to v251213.0336
       - Both GUI and Tools script now use identical smart target selection logic:
@@ -642,6 +673,7 @@ local gui = {
   show_target_track_popup = false,
   -- Preview settings
   preview_target_track = "AudioSweet",
+  preview_target_track_guid = "",  -- Track GUID for unique identification
   preview_solo_scope = 0,     -- 0=track, 1=item
   preview_restore_mode = 0,   -- 0=timesel, 1=guid
   is_previewing = false,      -- Track if preview is currently playing
@@ -678,6 +710,7 @@ local function save_gui_settings()
   r.SetExtState(SETTINGS_NAMESPACE, "sanitize_token", gui.sanitize_token and "1" or "0", true)
   -- Preview settings
   r.SetExtState(SETTINGS_NAMESPACE, "preview_target_track", gui.preview_target_track, true)
+  r.SetExtState(SETTINGS_NAMESPACE, "preview_target_track_guid", gui.preview_target_track_guid, true)
   r.SetExtState(SETTINGS_NAMESPACE, "preview_solo_scope", tostring(gui.preview_solo_scope), true)
   r.SetExtState(SETTINGS_NAMESPACE, "preview_restore_mode", tostring(gui.preview_restore_mode), true)
   -- UI settings
@@ -725,6 +758,7 @@ local function load_gui_settings()
   end
   gui.chain_alias_joiner = get_string("chain_alias_joiner", "")
   gui.preview_target_track = get_string("preview_target_track", "AudioSweet")
+  gui.preview_target_track_guid = get_string("preview_target_track_guid", "")
   gui.preview_solo_scope = get_int("preview_solo_scope", 0)
   gui.preview_restore_mode = get_int("preview_restore_mode", 0)
   -- UI settings
@@ -1102,28 +1136,76 @@ local function toggle_preview()
 
   -- Determine target track for chain mode
   local target_track_name = gui.preview_target_track  -- Default to settings
+  local target_track_obj = nil  -- Store the actual track object to pass directly
+
+  if gui.debug then
+    r.ShowConsoleMsg(string.format("\n[AudioSweet] === PREVIEW TARGET SELECTION DEBUG ===\n"))
+    r.ShowConsoleMsg(string.format("  Mode: %s\n", gui.mode == 1 and "Chain" or "Focused"))
+    r.ShowConsoleMsg(string.format("  Settings preview_target_track: %s\n", gui.preview_target_track))
+    r.ShowConsoleMsg(string.format("  Settings preview_target_track_guid: %s\n", gui.preview_target_track_guid or "(empty)"))
+    r.ShowConsoleMsg(string.format("  Has focused_track: %s\n", gui.focused_track and "YES" or "NO"))
+  end
+
   if gui.mode == 1 then
     -- Chain mode: prioritize focused FX chain track if available
     if gui.focused_track and r.ValidatePtr2(0, gui.focused_track, "MediaTrack*") then
       -- Get pure track name from track object (P_NAME doesn't include track number)
       local _, pure_name = r.GetSetMediaTrackInfo_String(gui.focused_track, "P_NAME", "", false)
+      local focused_guid = get_track_guid(gui.focused_track)
       target_track_name = pure_name
+      target_track_obj = gui.focused_track
       if gui.debug then
-        r.ShowConsoleMsg("[AudioSweet] Chain preview using focused FX chain track: " .. (gui.focused_track_name or pure_name) .. "\n")
+        r.ShowConsoleMsg(string.format("  DECISION: Using focused FX chain track\n"))
+        r.ShowConsoleMsg(string.format("  → Track: %s (GUID: %s)\n", pure_name, focused_guid))
       end
     else
+      -- No focused FX: use settings target track
       if gui.debug then
-        r.ShowConsoleMsg("[AudioSweet] Chain preview using settings target track: " .. target_track_name .. "\n")
+        r.ShowConsoleMsg(string.format("  DECISION: No focused FX, using settings\n"))
+      end
+      -- Try to find track by GUID first (more reliable for duplicate names)
+      if gui.preview_target_track_guid and gui.preview_target_track_guid ~= "" then
+        local target_track = find_track_by_guid(gui.preview_target_track_guid)
+        if target_track and r.ValidatePtr2(0, target_track, "MediaTrack*") then
+          -- Found by GUID: get current track name and store track object
+          local _, current_name = r.GetSetMediaTrackInfo_String(target_track, "P_NAME", "", false)
+          target_track_name = current_name
+          target_track_obj = target_track  -- IMPORTANT: Pass track object directly to avoid duplicate name issues
+          if gui.debug then
+            r.ShowConsoleMsg(string.format("  → Found by GUID: %s\n", gui.preview_target_track_guid))
+            r.ShowConsoleMsg(string.format("  → Track name: %s\n", current_name))
+            r.ShowConsoleMsg(string.format("  → Will pass MediaTrack* directly to Preview Core\n"))
+          end
+        else
+          -- GUID not found: fallback to name
+          if gui.debug then
+            r.ShowConsoleMsg(string.format("  → GUID not found: %s\n", gui.preview_target_track_guid))
+            r.ShowConsoleMsg(string.format("  → Fallback to track name search: %s\n", target_track_name))
+          end
+        end
+      else
+        -- No GUID: use track name directly
+        if gui.debug then
+          r.ShowConsoleMsg(string.format("  → No GUID stored, using track name: %s\n", target_track_name))
+        end
       end
     end
+  end
+
+  if gui.debug then
+    r.ShowConsoleMsg(string.format("  FINAL target_track_name: %s\n", target_track_name))
+    r.ShowConsoleMsg(string.format("  FINAL target_track_obj: %s\n", target_track_obj and "MediaTrack*" or "nil (will use name search)"))
+    r.ShowConsoleMsg("[AudioSweet] =====================================\n\n")
   end
 
   local args = {
     debug = gui.debug,
     chain_mode = (gui.mode == 1),  -- 0=focused, 1=chain
     mode = "solo",
-    -- Don't set target explicitly; let Preview Core use target_track_name directly
-    target_track_name = target_track_name,
+    -- Pass track object directly if available (avoids duplicate name issues)
+    -- Otherwise fall back to track name search
+    target = target_track_obj or nil,
+    target_track_name = target_track_obj and nil or target_track_name,
     solo_scope = solo_scope_names[gui.preview_solo_scope + 1],
     restore_mode = restore_mode_names[gui.preview_restore_mode + 1],
   }
@@ -1167,15 +1249,25 @@ local function toggle_solo()
         target_track = gui.focused_track
         track_name = gui.focused_track_name
       else
-        -- Otherwise find track by preview_target_track name
-        local tc = r.CountTracks(0)
-        for i = 0, tc - 1 do
-          local tr = r.GetTrack(0, i)
-          local _, tn = r.GetSetMediaTrackInfo_String(tr, "P_NAME", "", false)
-          if tn == gui.preview_target_track then
-            target_track = tr
-            track_name = gui.preview_target_track
-            break
+        -- No focused FX: find track by GUID first, then by name
+        if gui.preview_target_track_guid and gui.preview_target_track_guid ~= "" then
+          target_track = find_track_by_guid(gui.preview_target_track_guid)
+          if target_track and r.ValidatePtr2(0, target_track, "MediaTrack*") then
+            local _, tn = r.GetSetMediaTrackInfo_String(target_track, "P_NAME", "", false)
+            track_name = tn
+          end
+        end
+        -- Fallback to name search if GUID not found
+        if not target_track then
+          local tc = r.CountTracks(0)
+          for i = 0, tc - 1 do
+            local tr = r.GetTrack(0, i)
+            local _, tn = r.GetSetMediaTrackInfo_String(tr, "P_NAME", "", false)
+            if tn == gui.preview_target_track then
+              target_track = tr
+              track_name = gui.preview_target_track
+              break
+            end
           end
         end
       end
@@ -2095,6 +2187,31 @@ local function draw_gui()
       save_gui_settings()
     end
 
+    ImGui.Spacing(ctx)
+    ImGui.Separator(ctx)
+    ImGui.Spacing(ctx)
+
+    -- "Set First Selected Track" button
+    if ImGui.Button(ctx, 'Set First Selected Track', 250, 0) then
+      local first_track = r.GetSelectedTrack(0, 0)  -- Get first selected track (index 0)
+      if first_track then
+        local _, track_name = r.GetSetMediaTrackInfo_String(first_track, "P_NAME", "", false)
+        local track_guid = get_track_guid(first_track)
+        gui.preview_target_track = track_name
+        gui.preview_target_track_guid = track_guid
+        save_gui_settings()
+        if gui.debug then
+          r.ShowConsoleMsg(string.format("[AudioSweet] Preview target set to first selected track: %s (GUID: %s)\n",
+            track_name, track_guid))
+        end
+      else
+        if gui.debug then
+          r.ShowConsoleMsg("[AudioSweet] No track selected\n")
+        end
+      end
+    end
+
+    ImGui.Spacing(ctx)
     ImGui.Separator(ctx)
     if ImGui.Button(ctx, 'OK', 100, 0) then
       ImGui.CloseCurrentPopup(ctx)
