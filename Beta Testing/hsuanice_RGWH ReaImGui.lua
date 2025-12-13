@@ -14,13 +14,20 @@
   Adjust parameters using the visual controls and click operation buttons to execute.
 
 @changelog
-  0.1.0 [v251213.0023] - ADDED DOCKING TOGGLE OPTION
+  0.1.0 [v251213.1430] - DISABLED MANUAL WINDOW DOCKING
+    - Fixed: Manual window now always has docking disabled (WindowFlags_NoDocking).
+      - Prevents ImGui_End assertion errors when manual window is docked
+      - Manual window should remain floating for better readability
+      - Line: 993 (manual window flags)
+    - Purpose: Improve stability and prevent docking-related errors for manual window.
+
+  [v251213.0023] - ADDED DOCKING TOGGLE OPTION
     - Added: Window docking toggle option in Settings menu.
       - New location: Menu Bar → Settings → "Enable Window Docking" (checkbox)
       - When disabled: window cannot be docked into REAPER's dock system (WindowFlags_NoDocking)
       - When enabled: window can be docked like any other ImGui window
       - Setting persists between sessions via ExtState
-      - Lines: 396 (setting definition), 415 (persist_keys), 1604-1606 (window flags), 1634-1638 (Settings menu)
+      - Lines: 396 (setting definition), 415 (persist_keys), 1610-1614 (window flags), 1643-1647 (Settings menu)
     - Purpose: Prevents accidental docking for users who prefer floating windows, while allowing flexibility for those who want docking.
 
   [v251215.2300] - CLEANUP: Removed unused settings + Documentation improvements
@@ -989,7 +996,9 @@ local function draw_manual_window()
   if not gui.show_manual then return end
 
   ImGui.SetNextWindowSize(ctx, 900, 700, ImGui.Cond_FirstUseEver)
-  local visible, open = ImGui.Begin(ctx, 'RGWH Manual - Operation Modes', true)
+  -- Disable docking for manual window
+  local manual_flags = ImGui.WindowFlags_NoDocking
+  local visible, open = ImGui.Begin(ctx, 'RGWH Manual - Operation Modes', true, manual_flags)
   if not visible then
     ImGui.End(ctx)
     gui.show_manual = open
