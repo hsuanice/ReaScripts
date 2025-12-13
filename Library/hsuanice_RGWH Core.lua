@@ -63,22 +63,21 @@
   • For detailed operation modes guide, see RGWH GUI: Help > Manual (Operation Modes)
 
 @changelog
+  0.1.0 [v251214.0040] - SIMPLIFIED VOLUME MERGE LOGIC
+    - Simplified: Removed "Merge to Item + Print ON" support (GUI auto-switches to Merge to Take)
+      • Rationale: REAPER can only print take volume, not item volume
+      • GUI now auto-switches to Merge to Take when Print ON is enabled with Merge to Item
+      • This simplifies Core logic and prevents confusing/impossible combinations
+      • Valid combinations: OFF | Merge to Item | Merge to Take + Print OFF | Merge to Take + Print ON
+    - Removed: "merge to item + print ON" branch from preprocess/postprocess (lines 1121-1144, 1208-1213)
+    - Simplified: Merge to Item now only handles Print OFF case
+    - Note: This change has no functional impact - GUI prevents the removed combination from being used
+
   0.1.0 [v251213.2347] - BIDIRECTIONAL VOLUME MERGE SUPPORT
     - Tested: All four merge/print combinations verified working correctly
-      • Merge to Item + Print OFF: item=combined, take=1.0, audio at original level ✓
-      • Merge to Item + Print ON: item=1.0, take=1.0, audio with gain ✓
-      • Merge to Take + Print OFF: item=1.0, take=combined, audio at original level ✓
-      • Merge to Take + Print ON: item=1.0, take=1.0, audio with gain ✓
     - Fixed: Merge to Item + Print OFF - BOTH item AND take must be 1.0 during render
     - Critical: REAPER renders with item×take volume (not just take!)
-    - Logic: Preprocess sets item=1.0, take=1.0; Postprocess restores item=combined
-    - This ensures rendered audio is at original level (1.0×1.0), then volume moved to item
     - Added: merge_to_item parameter for bidirectional volume merge support
-    - Merge to Item: Merges take volume into item volume, all takes at 1.0 (0 dB)
-    - Merge to Take: Original behavior (merge item into take)
-    - Print behavior works with both merge directions
-    - Updated: preprocess_item_volumes() and postprocess_item_volumes() functions
-    - Updated: All function signatures in call chain (render_selection, auto_selection, core)
 
    (251212.2300) - CLEANUP: Removed unused settings
     - Removed: RENAME_OP_MODE setting (was never implemented, no functional change)
@@ -1113,54 +1112,29 @@ local function preprocess_item_volumes(item, merge_volumes, print_volumes, merge
   end
 
   -- === MERGE TO ITEM ===
+  -- NOTE: Print ON is NOT supported with merge_to_item (GUI auto-switches to merge_to_take)
+  -- REAPER can only print take volume, not item volume
   if merge_to_item then
     local tv_orig = volume_snap.take_vols[tk_orig_idx] or 1.0
     local combined = item_vol * tv_orig
     volume_snap.merged_vol = combined
 
-    if print_volumes then
-      -- PRINT ON: Merge everything into active take, so REAPER can print it
-      -- Step 1: Set active take to combined volume
-      r.SetMediaItemTakeInfo_Value(tk_orig, "D_VOL", combined)
+    -- PRINT OFF ONLY: Set both item and take to 1.0 for render, restore item volume in postprocess
+    -- REAPER renders with item×take volume, so both must be 1.0 to preserve original audio
+    -- Step 1: Set item to 1.0 temporarily
+    r.SetMediaItemInfo_Value(item, "D_VOL", 1.0)
 
-      -- Step 2: Set item to 1.0
-      r.SetMediaItemInfo_Value(item, "D_VOL", 1.0)
-
-      -- Step 3: Calculate compensation for other takes (preserve relative volumes)
-      for ti = 0, nt-1 do
-        local tk = r.GetTake(item, ti)
-        if tk and tk ~= tk_orig then
-          local old_tv = volume_snap.take_vols[ti] or 1.0
-          local old_combined = item_vol * old_tv
-          -- Relative to new active take volume (combined)
-          local new_tv = old_combined / combined
-          r.SetMediaItemTakeInfo_Value(tk, "D_VOL", new_tv)
-        end
+    -- Step 2: Set ALL takes to 1.0
+    for ti = 0, nt-1 do
+      local tk = r.GetTake(item, ti)
+      if tk then
+        r.SetMediaItemTakeInfo_Value(tk, "D_VOL", 1.0)
       end
+    end
 
-      if DBG and DBG >= 2 then
-        dbg(DBG,2,"[GAIN] merge_to_item+print: active take=%.3f, item=1.0, other takes compensated for print",
-            combined)
-      end
-
-    else
-      -- PRINT OFF: Set both item and take to 1.0 for render, restore item volume in postprocess
-      -- REAPER renders with item×take volume, so both must be 1.0 to preserve original audio
-      -- Step 1: Set item to 1.0 temporarily
-      r.SetMediaItemInfo_Value(item, "D_VOL", 1.0)
-
-      -- Step 2: Set ALL takes to 1.0
-      for ti = 0, nt-1 do
-        local tk = r.GetTake(item, ti)
-        if tk then
-          r.SetMediaItemTakeInfo_Value(tk, "D_VOL", 1.0)
-        end
-      end
-
-      if DBG and DBG >= 2 then
-        dbg(DBG,2,"[GAIN] merge_to_item non-print: item=1.0 (temp), all takes=1.0, will restore item=%.3f in postprocess",
-            combined)
-      end
+    if DBG and DBG >= 2 then
+      dbg(DBG,2,"[GAIN] merge_to_item: item=1.0 (temp), all takes=1.0, will restore item=%.3f in postprocess",
+          combined)
     end
 
   -- === MERGE TO TAKE (ORIGINAL) ===
@@ -1230,21 +1204,14 @@ local function postprocess_item_volumes(item, volume_snap, new_take, old_take, m
 
   if merge_to_item then
     -- === MERGE TO ITEM POSTPROCESS ===
-    if print_volumes then
-      -- Print: all volumes already at correct state (item=1.0, takes have full volumes)
-      -- New take will be 1.0 (REAPER printed it), old takes keep compensation values
-      if DBG and DBG >= 2 then
-        dbg(DBG,2,"[GAIN] merge_to_item+print: item=1.0, new=1.0, old takes keep compensation")
-      end
-    else
-      -- Non-print: Restore item volume (was set to 1.0 in preprocess)
-      -- REAPER rendered with item×take = 1.0×1.0, audio is at original level
-      -- Now restore item to combined, keep all takes at 1.0
-      r.SetMediaItemInfo_Value(item, "D_VOL", volume_snap.merged_vol)
-      -- Takes already at 1.0, no need to change
-      if DBG and DBG >= 2 then
-        dbg(DBG,2,"[GAIN] merge_to_item non-print: restored item=%.3f, all takes=1.0", volume_snap.merged_vol)
-      end
+    -- NOTE: Print ON is NOT supported with merge_to_item (GUI auto-switches to merge_to_take)
+    -- PRINT OFF ONLY: Restore item volume (was set to 1.0 in preprocess)
+    -- REAPER rendered with item×take = 1.0×1.0, audio is at original level
+    -- Now restore item to combined, keep all takes at 1.0
+    r.SetMediaItemInfo_Value(item, "D_VOL", volume_snap.merged_vol)
+    -- Takes already at 1.0, no need to change
+    if DBG and DBG >= 2 then
+      dbg(DBG,2,"[GAIN] merge_to_item: restored item=%.3f, all takes=1.0", volume_snap.merged_vol)
     end
 
   elseif merge_volumes then
