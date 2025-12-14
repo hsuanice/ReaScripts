@@ -5,22 +5,212 @@
 @provides
   [main] .
 @about
-  Complete AudioSweet control center with:
-  - Focused/Chain modes with FX chain display
-  - Apply/Copy actions
-  - AudioSweet Preview integration with configurable target track
-  - Compact, intuitive UI with radio buttons
-  - Persistent settings (remembers all settings between sessions)
-  - Improved auto-focus FX with CLAP plugin support
-  - Debug mode with detailed console logging
-  - Built-in keyboard shortcuts (Space = Play/Stop, S = Solo toggle)
-  - Comprehensive file naming settings with FX Alias support
-  - Saved Chains and History features with CLAP plugin support
-  - Auto-resizing window that prevents accidental resize/close
+  # AudioSweet ReaImGui - User Manual
+
+  ## Overview
+  Complete AudioSweet control center with ImGui interface for managing FX chains and presets.
+
+  ## Core Features
+  - Two operation modes: Focused FX and Full Chain
+  - Apply/Copy FX chains to AudioSweet Preview track
+  - Save and manage FX presets with custom naming
+  - Automatic operation history tracking
+  - Real-time FX chain visualization
+  - Built-in keyboard shortcuts
+  - Persistent settings across sessions
+
+  ---
+
+  ## Operation Modes
+
+  ### Focused Mode (Single FX)
+  - Works with the currently focused FX window
+  - Click on any FX window to focus it
+  - Saves/applies only the selected FX
+  - Display shows: FX name only (e.g., "VST3: Pro-Q 4")
+  - Supports CLAP and VST3 plugins
+
+  ### Chain Mode (Full FX Chain)
+  - Works with the entire FX chain of selected track
+  - Saves/applies all FX on the track
+  - Display shows: "#N Track Name" format
+  - Shows complete FX list in tooltips
+
+  ---
+
+  ## Main Actions
+
+  ### Apply
+  - Copies FX to Preview track AND enables it
+  - Removes all existing FX on Preview track first
+  - Use when you want to audition the FX immediately
+
+  ### Copy
+  - Copies FX to Preview track but keeps it bypassed
+  - Removes all existing FX on Preview track first
+  - Use when you want to prepare FX without hearing it yet
+
+  ### Open
+  - Opens the saved FX window(s)
+  - Focused mode: Opens the specific FX window
+  - Chain mode: Opens all FX windows in the chain
+
+  ---
+
+  ## Preset System
+
+  ### Saving Presets
+  1. Click the "Save" button (in main controls or history section)
+  2. Enter a custom name, or leave empty to use default:
+     - Focused mode default: FX name
+     - Chain mode default: Track name
+  3. Preset is saved and appears in the "Saved" section
+
+  ### Managing Presets
+  - **Open**: Opens the FX window(s) without applying
+  - **Name**: Rename the preset (custom name or revert to default)
+  - **Save**: Save current FX as a new preset
+  - **Delete** (X button): Remove the preset permanently
+
+  ### Preset Display Names
+  - Custom name: Shows your custom name
+  - Default name (Focused): Shows current FX name from track
+  - Default name (Chain): Shows "#N Current Track Name"
+  - Hover tooltip: Shows full FX chain with track info
+
+  ---
+
+  ## History System
+
+  ### Automatic Tracking
+  - Every Apply/Copy operation is automatically logged
+  - History stores up to 50 recent operations
+  - Newest operations appear at the top
+  - Duplicates are automatically removed
+
+  ### History Actions
+  - **Open**: Opens the FX window(s) from this history entry
+  - **Name**: Rename this history entry (becomes a custom name)
+  - **Save**: Convert this history entry into a saved preset
+
+  ### History Display Names
+  - Inherits custom name from preset (if executed from a saved preset)
+  - Shows default name if executed directly
+  - Updates automatically when you rename the matching preset
+
+  ---
+
+  ## Keyboard Shortcuts
+  - **Space**: Play/Stop transport
+  - **S**: Toggle solo on Preview track
+  - **Esc**: Close dialogs
+
+  ---
+
+  ## Settings Panel
+
+  ### Target Track
+  - Select which track to use as AudioSweet Preview target
+  - Default: First track matching "AudioSweet Preview" in name
+  - Can manually override with any track
+
+  ### Auto-Actions
+  - **Auto Open FX**: Automatically opens FX window after Apply/Copy
+  - **Auto Solo**: Automatically solos Preview track after Apply/Copy
+
+  ### File Naming
+  Configure how bounced audio files are named:
+  - **Include Elements**: Track#, Track Name, FX Name, Timestamp, Item Name
+  - **Show Type**: Display plugin type prefix (VST3:, CLAP:, JS:)
+  - **Separators**: Customize separators between name elements
+  - **FX Alias**: Replace long FX names with short aliases
+
+  ### Chain Visibility
+  - **Show Chain in Focused Mode**: Display full FX chain even in Focused mode
+  - Useful for context when working with multiple FX
+
+  ### Debug Mode
+  - Enable console logging for troubleshooting
+  - Shows: Save/Rename/Open/Run operations with indices and modes
+
+  ---
+
+  ## Tips & Tricks
+
+  ### Workflow Example 1: Quick FX Auditioning
+  1. Select track with FX chain
+  2. Switch to Chain mode
+  3. Click "Apply" to audition the full chain
+  4. Click "Save" if you like it
+
+  ### Workflow Example 2: Building FX Library
+  1. Focus on individual FX window
+  2. Switch to Focused mode
+  3. Click "Save" and name it (e.g., "Vocal EQ Bright")
+  4. Repeat for different FX
+  5. Access your library from "Saved" section anytime
+
+  ### Workflow Example 3: Using History
+  1. Experiment with different FX chains using Apply
+  2. All attempts are logged in History
+  3. Go back to History and click "Open" on any entry to review
+  4. Click "Save" on the one you like to make it permanent
+
+  ### Name Management
+  - Leave name empty when saving = dynamic name (updates with track/FX renames)
+  - Enter custom name = static name (never changes)
+  - You can always rename later using the "Name" button
+  - Renaming a preset automatically updates all matching history entries
+
+  ### FX Chain Tooltips
+  - Hover over any preset/history item to see full FX chain
+  - Focused mode: Saved FX is highlighted in GREEN
+  - Shows track number and current track name
+
+  ---
+
+  ## Troubleshooting
+
+  ### "No focused FX" in Focused Mode
+  - Click on any FX window to focus it
+  - Make sure the FX window is open (not just in FX chain list)
+
+  ### Preset Opens Wrong FX
+  - This can happen if you reordered FX after saving
+  - The script tries to match by name as fallback
+  - Enable Debug mode to see index matching details
+
+  ### History Not Showing Custom Names
+  - Make sure you're using version 251215.0025 or later
+  - Old history entries won't have custom names (only new ones)
+
+  ### Window Too Wide/Narrow
+  - Edit line 2482: ImGui.SetNextWindowSizeConstraints(ctx, 450, ...)
+  - Change the first number (450) to your preferred width
+
+  ---
+
+  ## Technical Notes
+  - All presets saved in REAPER project ExtState (persistent per project)
+  - History limited to 50 entries (configurable in gui.max_history)
+  - Supports CLAP, VST3, VST2, AU, and JS plugins
+  - FX matching uses both index and name for reliability
+  - Track identification uses GUID (survives track reordering)
 
 
 @changelog
-  0.1.0 [Internal Build 251215.0030] - PRESET RENAME SYNC TO HISTORY
+  0.1.0 [Internal Build 251215.0045] - COMPREHENSIVE USER MANUAL
+    - ADDED: Complete user manual in @about section.
+      • Comprehensive guide covering all features and workflows
+      • Sections: Overview, Operation Modes, Main Actions, Preset System, History System
+      • Keyboard shortcuts, Settings panel, Tips & Tricks, Troubleshooting
+      • Three workflow examples for common use cases
+      • Technical notes for advanced users
+      • Lines: 8-198 (user manual in @about section)
+    - PURPOSE: Improve user onboarding and feature discoverability
+    - IMPACT: Users can now understand all features without external documentation
+
+  [Internal Build 251215.0030] - PRESET RENAME SYNC TO HISTORY
     - FIXED: Renaming a preset now immediately syncs to matching history items.
       • Problem: When renaming a saved preset, history items didn't update to show the new custom name
       • Root cause: rename_saved_chain() only updated saved_chains array, not history array
