@@ -20,6 +20,28 @@
 
 
 @changelog
+  0.2.0 [Internal Build 251214.1100] - IMPROVED CHAIN/PRESET WORKFLOW
+    - Improved: Chain mode now shows FX chain preview without requiring focused FX window.
+      • If no FX window is focused: automatically uses first selected track with FX
+      • If FX window is focused: prioritizes focused FX track (existing behavior)
+      • Allows quick preview of track FX chains without opening FX window
+      • Lines: 1036-1047 (auto-detect selected track logic in update_focused_fx_display)
+    - Improved: "Save This Chain" button now available whenever FX chain is visible.
+      • Previous: Required focused FX window (has_valid_fx check)
+      • New: Available in Chain mode as long as track has FX (focused or selected)
+      • More convenient workflow: select track → see FX chain → save directly
+      • Lines: 2341-2348 (removed has_valid_fx requirement)
+    - Added: "Save This FX" button in Focused mode for saving single FX presets.
+      • New button appears below FX chain display when valid FX is focused
+      • Opens preset save dialog with FX name as default
+      • Saves single FX as a chain preset with custom name
+      • Hover tooltip shows current FX name for confirmation
+      • Lines: 2350-2359 (Save This FX button), 2679-2718 (Save FX Preset popup)
+    - Technical: New GUI state variables for FX preset saving.
+      • Added: show_save_fx_popup, new_fx_preset_name (line 668, 670)
+      • Reuses existing saved_chains system (single FX saved as chain)
+    - Purpose: Streamlined workflow for saving both chains and individual FX presets without requiring FX windows to be open.
+
   0.1.0 [Internal Build 251213.1330] - FIXED DUPLICATE TRACK NAME ISSUE BY PASSING TRACK OBJECT
     - Fixed: Preview now correctly targets the right track when multiple tracks have identical names.
       - Critical fix: Pass MediaTrack* object directly to Preview Core instead of just track name
@@ -665,7 +687,9 @@ local gui = {
   saved_chains = {},
   history = {},
   new_chain_name = "",
+  new_fx_preset_name = "",
   show_save_popup = false,
+  show_save_fx_popup = false,
   show_settings_popup = false,
   show_fxname_popup = false,
   show_preview_settings = false,
@@ -1031,6 +1055,21 @@ end
 
 local function update_focused_fx_display()
   local found, fx_type, fx_name, tr = get_focused_fx_info()
+
+  -- In Chain mode: if no focused FX, try to use first selected track with FX
+  if gui.mode == 1 and not found then
+    local sel_track = r.GetSelectedTrack(0, 0)  -- Get first selected track
+    if sel_track and r.TrackFX_GetCount(sel_track) > 0 then
+      tr = sel_track
+      local track_name, track_num = get_track_name_and_number(tr)
+      gui.focused_track = tr
+      gui.focused_track_name = string.format("#%d - %s", track_num, track_name)
+      gui.focused_track_fx_list = get_track_fx_chain(tr)
+      gui.focused_fx_name = "Track: " .. track_name
+      return false  -- Not a "valid focused FX" but we have a track with FX chain
+    end
+  end
+
   gui.focused_track = tr
   if found then
     if fx_type == "Track FX" then
@@ -2323,11 +2362,23 @@ local function draw_gui()
     end
     ImGui.EndChild(ctx)
 
+    -- In Chain mode: show "Save This Chain" as long as there's an FX chain (focused or selected track)
     if gui.enable_saved_chains then
-      if has_valid_fx and ImGui.Button(ctx, "Save This Chain", -1, 0) then
+      if ImGui.Button(ctx, "Save This Chain", -1, 0) then
         gui.show_save_popup = true
         gui.new_chain_name = gui.focused_track_name
       end
+    end
+  end
+
+  -- Show "Save This FX" in Focused mode when there's a valid focused FX
+  if gui.mode == 0 and has_valid_fx and gui.enable_saved_chains then
+    if ImGui.Button(ctx, "Save This FX", -1, 0) then
+      gui.show_save_fx_popup = true
+      gui.new_fx_preset_name = gui.focused_fx_name  -- Default to FX name
+    end
+    if ImGui.IsItemHovered(ctx) then
+      ImGui.SetTooltip(ctx, "FX: " .. gui.focused_fx_name)
     end
   end
 
@@ -2642,6 +2693,47 @@ local function draw_gui()
     if ImGui.Button(ctx, "Cancel", 100, 0) then
       gui.new_chain_name = ""
       gui.new_custom_name = ""
+      ImGui.CloseCurrentPopup(ctx)
+    end
+    ImGui.EndPopup(ctx)
+  end
+
+  -- === SAVE FX POPUP (Focused mode only) ===
+  if gui.show_save_fx_popup then
+    ImGui.OpenPopup(ctx, "Save FX Preset")
+    gui.show_save_fx_popup = false
+  end
+
+  if ImGui.BeginPopupModal(ctx, "Save FX Preset", true, ImGui.WindowFlags_AlwaysAutoResize) then
+    ImGui.TextWrapped(ctx, "Save this FX as a preset:")
+    ImGui.Spacing(ctx)
+
+    -- Show current FX name
+    ImGui.TextDisabled(ctx, "Current FX:")
+    ImGui.SameLine(ctx)
+    ImGui.Text(ctx, gui.focused_fx_name)
+
+    ImGui.Spacing(ctx)
+    ImGui.Separator(ctx)
+    ImGui.Spacing(ctx)
+
+    ImGui.Text(ctx, "Preset Name:")
+    local rv, new_name = ImGui.InputText(ctx, "##fxpresetname", gui.new_fx_preset_name, 256)
+    if rv then gui.new_fx_preset_name = new_name end
+
+    ImGui.Spacing(ctx)
+    if ImGui.Button(ctx, "Save", 100, 0) then
+      if gui.new_fx_preset_name ~= "" and gui.focused_track then
+        local track_guid = get_track_guid(gui.focused_track)
+        -- Save as a chain with single FX (use preset name as custom name)
+        add_saved_chain(gui.new_fx_preset_name, track_guid, gui.focused_track_name, gui.new_fx_preset_name)
+        gui.new_fx_preset_name = ""
+        ImGui.CloseCurrentPopup(ctx)
+      end
+    end
+    ImGui.SameLine(ctx)
+    if ImGui.Button(ctx, "Cancel", 100, 0) then
+      gui.new_fx_preset_name = ""
       ImGui.CloseCurrentPopup(ctx)
     end
     ImGui.EndPopup(ctx)
