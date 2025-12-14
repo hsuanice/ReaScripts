@@ -20,7 +20,26 @@
 
 
 @changelog
-  0.1.0 [Internal Build 251214.2200] - FX INDEX TRACKING & ENHANCED TOOLTIPS
+  0.1.0 [Internal Build 251214.2325] - CHAIN DUPLICATE PREVENTION & UI IMPROVEMENTS
+    - NEW: Chain mode duplicate prevention.
+      • Previously: Only focused FX had duplicate prevention
+      • Now: Chain mode blocks saving identical FX chains with different names
+      • Check method: Compare full FX chain content (all FX names in order)
+      • Impact: Prevents accidental duplicate chain saves
+      • Lines: 3149-3186 (chain duplicate check by FX content comparison)
+    - ENHANCED: Debug messages for chain open toggle operations.
+      • Previously: Only focused FX open had debug output
+      • Now: Chain mode open also shows debug info (name, mode, chain_visible status)
+      • Both saved chains and history chains show debug output
+      • Lines: 2037-2040 (saved chain debug), 2091-2094 (history chain debug)
+    - IMPROVED: Rename dialog now shows current default name in hint text.
+      • Chain mode: Shows "(default: #N - track_name)" with actual track# and name
+      • Focused mode: Shows "(default: FX_name)" with processed FX name
+      • Previously: Generic "(leave empty to use track name)" text
+      • Helps users understand what the default name will be before confirming
+      • Lines: 3234-3259 (dynamic hint text based on mode and current track info)
+
+  [Internal Build 251214.2200] - FX INDEX TRACKING & ENHANCED TOOLTIPS
     - NEW: Store FX index for focused presets to prevent wrong FX loading.
       • Problem: When saving same FX with different names, both presets would load the same FX
       • Solution: Save and track fx_index alongside FX name
@@ -2033,6 +2052,12 @@ local function open_saved_chain_fx(chain_idx)
   else
     -- Chain preset: toggle FX chain window
     local chain_visible = r.TrackFX_GetChainVisible(tr)
+
+    if gui.debug then
+      r.ShowConsoleMsg(string.format("[AudioSweet] Open chain: name='%s', mode='%s', chain_visible=%d\n",
+        chain.name or "nil", chain.mode or "chain", chain_visible))
+    end
+
     if chain_visible == -1 then
       -- Chain window is closed, open it
       r.TrackFX_Show(tr, 0, 1)  -- Show chain window
@@ -2081,6 +2106,12 @@ local function open_history_fx(hist_idx)
   else
     -- For chain mode, toggle FX chain window (chain mode uses entire FX chain)
     local chain_visible = r.TrackFX_GetChainVisible(tr)
+
+    if gui.debug then
+      r.ShowConsoleMsg(string.format("[AudioSweet] Open history chain: name='%s', mode='%s', chain_visible=%d\n",
+        hist_item.name or "nil", hist_item.mode or "chain", chain_visible))
+    end
+
     if chain_visible == -1 then
       -- Chain window is closed, open it
       r.TrackFX_Show(tr, 0, 1)  -- Show chain window
@@ -3146,18 +3177,41 @@ local function draw_gui()
           original_fx_name = raw_fx_name
         end
 
+        -- For chain mode: get current FX chain content for comparison
+        local current_fx_list = nil
+        if mode == "chain" then
+          current_fx_list = get_track_fx_chain(gui.focused_track)
+        end
+
         for _, chain in ipairs(gui.saved_chains) do
           -- For focused mode: check by track_guid + fx_index (same FX)
-          -- For chain mode: check by track_guid + name (same track with same name)
+          -- For chain mode: check by track_guid + FX chain content (same chain regardless of name)
           if mode == "focused" and chain.mode == "focused" then
             if chain.track_guid == track_guid and chain.fx_index == fx_index then
               duplicate_found = true
               break
             end
-          else
-            if chain.name == final_name and chain.track_guid == track_guid then
-              duplicate_found = true
-              break
+          elseif mode == "chain" and chain.mode == "chain" then
+            -- Compare FX chain content instead of name
+            if chain.track_guid == track_guid then
+              local saved_track = find_track_by_guid(chain.track_guid)
+              if saved_track then
+                local saved_fx_list = get_track_fx_chain(saved_track)
+                -- Compare FX counts first
+                if #saved_fx_list == #current_fx_list then
+                  local chains_match = true
+                  for i = 1, #saved_fx_list do
+                    if saved_fx_list[i].name ~= current_fx_list[i].name then
+                      chains_match = false
+                      break
+                    end
+                  end
+                  if chains_match then
+                    duplicate_found = true
+                    break
+                  end
+                end
+              end
             end
           end
         end
@@ -3196,6 +3250,7 @@ local function draw_gui()
 
   if ImGui.BeginPopupModal(ctx, "Rename Preset", true, ImGui.WindowFlags_AlwaysAutoResize) then
     -- Show track# prefix for chain mode (outside input field)
+    local hint_text = "(leave empty to use default)"
     if gui.rename_chain_idx and gui.saved_chains[gui.rename_chain_idx] then
       local chain = gui.saved_chains[gui.rename_chain_idx]
       if chain.mode == "chain" then
@@ -3203,16 +3258,24 @@ local function draw_gui()
         if tr then
           local track_number = r.GetMediaTrackInfo_Value(tr, "IP_TRACKNUMBER")
           ImGui.Text(ctx, string.format("Track #%d - Preset Name:", track_number))
+          -- Show current track name in hint
+          local current_track_name, _ = get_track_name_and_number(tr)
+          hint_text = string.format("(default: #%.0f - %s)", track_number, current_track_name)
         else
           ImGui.Text(ctx, "Preset Name:")
         end
       else
+        -- Focused mode: show FX name in hint
         ImGui.Text(ctx, "Preset Name:")
+        if chain.name then
+          local fx_display_name = process_fx_name(chain.name)
+          hint_text = string.format("(default: %s)", fx_display_name)
+        end
       end
     else
       ImGui.Text(ctx, "Preset Name:")
     end
-    ImGui.TextDisabled(ctx, "(leave empty to use track name)")
+    ImGui.TextDisabled(ctx, hint_text)
     ImGui.Spacing(ctx)
 
     local rv, new_name = ImGui.InputText(ctx, "##renamefield", gui.rename_chain_name, 256)
