@@ -20,7 +20,24 @@
 
 
 @changelog
-  0.1.0 [Internal Build 251215.0020] - FUNCTION ORDERING FIX
+  0.1.0 [Internal Build 251215.0025] - HISTORY CUSTOM NAMES & UI WIDTH IMPROVEMENTS
+    - FIXED: History items now display renamed custom names.
+      • Problem: History list only showed default names, ignoring renamed custom names
+      • Root cause: History data structure didn't store custom_name field
+      • Solution: Added custom_name field to history storage and display logic
+      • Impact: Renamed presets now show their custom names in history list
+      • Lines: 1403-1427 (load_history with custom_name), 1429-1462 (add_to_history with custom_name)
+      • Lines: 1330-1366 (get_history_display_name with custom_name support)
+    - IMPROVED: Increased minimum window width to improve button text readability.
+      • Problem: Six buttons per row (Open/Name/Save for preset+history) caused text truncation
+      • Solution: Set minimum window width to 700px using SetNextWindowSizeConstraints
+      • Impact: Button text now more readable, less truncation
+      • Line: 2482 (window size constraints)
+    - IMPROVED: History now preserves custom_name when adding from saved presets.
+      • When executing a renamed saved preset, the custom name is now preserved in history
+      • Line: 2368 (pass custom_name to add_to_history)
+
+  [Internal Build 251215.0020] - FUNCTION ORDERING FIX
     - FIXED: Saved focused FX presets now execute without errors.
       • Problem: Clicking saved focused FX preset crashed with "attempt to call a nil value (global 'run_history_focused_apply')"
       • Root cause: run_saved_chain() called run_history_focused_apply() which was defined AFTER it (forward reference error in Lua)
@@ -1337,11 +1354,29 @@ local function get_history_display_name(hist_item)
     local track_number = r.GetMediaTrackInfo_Value(tr, "IP_TRACKNUMBER")  -- 1-based
     local _, track_name = r.GetSetMediaTrackInfo_String(tr, "P_NAME", "", false)
 
-    -- For chain mode: show track# + track name
-    if hist_item.mode == "chain" and track_number then
-      display_name = string.format("#%d %s", track_number, track_name)
+    if hist_item.mode == "focused" then
+      -- Focused mode: use custom name OR FX name (no track# prefix)
+      if hist_item.custom_name and hist_item.custom_name ~= "" then
+        display_name = hist_item.custom_name
+      else
+        -- Use the saved FX name (hist_item.name already contains full FX name)
+        display_name = hist_item.name
+      end
+    else
+      -- Chain mode: use custom name OR current track name
+      if hist_item.custom_name and hist_item.custom_name ~= "" then
+        display_name = hist_item.custom_name
+        -- Add track# prefix for custom names
+        if track_number then
+          display_name = string.format("#%d %s", track_number, display_name)
+        end
+      elseif track_number then
+        -- Use current track name with track# prefix
+        display_name = string.format("#%d %s", track_number, track_name)
+      else
+        display_name = track_name
+      end
     end
-    -- For focused mode: just use the FX name (no track# prefix)
   end
 
   return display_name
@@ -1406,7 +1441,12 @@ local function load_history()
   while idx < gui.max_history do
     local ok, data = r.GetProjExtState(0, HISTORY_NAMESPACE, "hist_" .. idx)
     if ok == 0 or data == "" then break end
-    local name, guid, track_name, mode, fx_idx_str = data:match("^([^|]*)|([^|]*)|([^|]*)|([^|]*)|(.*)$")
+    -- Format: name|guid|track_name|mode|fx_index|custom_name
+    local parts = {}
+    for part in (data .. "|"):gmatch("([^|]*)|") do
+      table.insert(parts, part)
+    end
+    local name, guid, track_name, mode, fx_idx_str, custom_name = parts[1], parts[2], parts[3], parts[4], parts[5], parts[6]
     if name and guid then
       gui.history[#gui.history + 1] = {
         name = name,
@@ -1414,13 +1454,14 @@ local function load_history()
         track_name = track_name or "",
         mode = mode or "chain",
         fx_index = tonumber(fx_idx_str) or 0,
+        custom_name = (custom_name and custom_name ~= "") and custom_name or nil,
       }
     end
     idx = idx + 1
   end
 end
 
-local function add_to_history(name, track_guid, track_name, mode, fx_index)
+local function add_to_history(name, track_guid, track_name, mode, fx_index, custom_name)
   fx_index = fx_index or 0
 
   -- Remove if already exists
@@ -1437,6 +1478,7 @@ local function add_to_history(name, track_guid, track_name, mode, fx_index)
     track_name = track_name,
     mode = mode,
     fx_index = fx_index,
+    custom_name = custom_name,
   })
 
   -- Trim to max_history
@@ -1449,7 +1491,7 @@ local function add_to_history(name, track_guid, track_name, mode, fx_index)
     r.SetProjExtState(0, HISTORY_NAMESPACE, "hist_" .. i, "")
   end
   for i, item in ipairs(gui.history) do
-    local data = string.format("%s|%s|%s|%s|%d", item.name, item.track_guid, item.track_name, item.mode, item.fx_index)
+    local data = string.format("%s|%s|%s|%s|%d|%s", item.name, item.track_guid, item.track_name, item.mode, item.fx_index, item.custom_name or "")
     r.SetProjExtState(0, HISTORY_NAMESPACE, "hist_" .. (i - 1), data)
   end
 end
@@ -1813,7 +1855,7 @@ local function run_audiosweet(override_track)
         -- Get FX index from GetFocusedFX
         local retval, trackidx, itemidx, fxidx = r.GetFocusedFX()
         local fx_index = (retval == 1) and normalize_focused_fx_index(fxidx or 0) or 0
-        add_to_history(name, track_guid, gui.focused_track_name, "focused", fx_index)
+        add_to_history(name, track_guid, gui.focused_track_name, "focused", fx_index, nil)  -- No custom name from direct execution
       end
     else
       gui.last_result = "Error: " .. tostring(err)
@@ -1856,7 +1898,7 @@ local function run_audiosweet(override_track)
         local track_guid = get_track_guid(target_track)
         local track_name, track_num = get_track_name_and_number(target_track)
         local name = string.format("#%d - %s", track_num, track_name)
-        add_to_history(name, track_guid, name, "chain", 0)  -- chain mode uses index 0
+        add_to_history(name, track_guid, name, "chain", 0, nil)  -- chain mode uses index 0, no custom name from direct execution
       end
     else
       gui.last_result = "Error: " .. tostring(err)
@@ -2339,8 +2381,8 @@ local function run_saved_chain(chain_idx)
     end
   end
 
-  -- Add to history with correct mode and fx_index
-  add_to_history(chain.name, chain.track_guid, chain.track_name, chain.mode or "chain", chain.fx_index or 0)
+  -- Add to history with correct mode, fx_index, and custom_name
+  add_to_history(chain.name, chain.track_guid, chain.track_name, chain.mode or "chain", chain.fx_index or 0, chain.custom_name)
 
   r.PreventUIRefresh(-1)
   r.Undo_EndBlock(string.format("AudioSweet GUI: %s [%s]", gui.action == 1 and "Copy" or "Apply", chain.name), -1)
@@ -2452,6 +2494,9 @@ local function draw_gui()
   if not gui.enable_docking then
     window_flags = window_flags | ImGui.WindowFlags_NoDocking
   end
+
+  -- Set minimum window size to make buttons more readable (min width: 700px)
+  ImGui.SetNextWindowSizeConstraints(ctx, 700, 0, 99999, 99999)
 
   local visible, open = ImGui.Begin(ctx, 'AudioSweet Control Panel', true, window_flags)
   if not visible then
