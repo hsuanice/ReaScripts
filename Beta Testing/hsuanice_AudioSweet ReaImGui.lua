@@ -20,7 +20,15 @@
 
 
 @changelog
-  0.1.0 [Internal Build 251214.1530] - UI POLISH AND SAVE IMPROVEMENTS
+  0.1.0 [Internal Build 251214.1835] - SAVE DIALOG INPUT FIX
+    - Fixed: Save dialog input field now shows only track name (without "#N - " prefix).
+      • Previous: Input field showed "#1 - test" when saving chain preset
+      • New: Input field shows only "test" (clean track name)
+      • Reason: Dialog header already displays "Track #1 - Preset Name:"
+      • Line: 2663-2665 (extract track name using get_track_name_and_number)
+    - Purpose: Remove redundant track number prefix from input field for cleaner UX.
+
+  [Internal Build 251214.1530] - UI POLISH AND SAVE IMPROVEMENTS
     - Fixed: Status message moved above FX info area to prevent Saved/History buttons from jumping.
       • Previous: Yellow status text appeared between Save button and Saved/History section
       • New: Status appears above FX info at bottom of window
@@ -38,7 +46,7 @@
       • Lines: 2836-2843 (duplicate check)
     - Purpose: Cleaner UI with better feedback and duplicate prevention.
 
-  0.1.0 [Internal Build 251214.1500] - MAJOR UI RESTRUCTURE FOR BETTER WORKFLOW
+  [Internal Build 251214.1500] - MAJOR UI RESTRUCTURE FOR BETTER WORKFLOW
     - Restructured: Complete UI layout reorganization for stability and better UX.
       • FX info area moved to bottom (after Saved/History) with dynamic height
       • Save button merged and positioned above Saved/History section
@@ -74,7 +82,7 @@
       • Lines: 2775-2778 (Save popup position), 2814-2817 (Rename popup position)
     - Purpose: Stable UI with controls in predictable positions - FX info changes don't affect button locations.
 
-  0.1.0 [Internal Build 251214.1420] - UI/UX IMPROVEMENTS
+  [Internal Build 251214.1420] - UI/UX IMPROVEMENTS
     - Fixed: FX chain preview area now uses fixed height to prevent button layout jumping.
       • Previous: Dynamic height based on FX count caused buttons below to move up/down
       • New: Fixed 150px height with scrollbar when needed (allows ~7 FX visible)
@@ -93,7 +101,7 @@
       • Lines: 2761-2786 (simplified Save FX Preset popup)
     - Purpose: Better workflow for managing saved presets with stable UI layout.
 
-  0.1.0 [Internal Build 251214.1400] - MODE-BASED FX WINDOW TOGGLE + UI FIX
+  [Internal Build 251214.1400] - MODE-BASED FX WINDOW TOGGLE + UI FIX
     - Fixed: Chain mode status bar text "No track focused" → "No Track FX" (line 2373)
     - Improved: Saved presets now remember whether they were saved as chain or focused FX.
       • Added mode field to saved_chains data structure ("chain" or "focused")
@@ -131,7 +139,7 @@
       • Reuses existing saved_chains system (single FX saved as chain)
     - Purpose: Streamlined workflow for saving both chains and individual FX presets without requiring FX windows to be open.
 
-  0.1.0 [Internal Build 251213.1330] - FIXED DUPLICATE TRACK NAME ISSUE BY PASSING TRACK OBJECT
+  [Internal Build 251213.1330] - FIXED DUPLICATE TRACK NAME ISSUE BY PASSING TRACK OBJECT
     - Fixed: Preview now correctly targets the right track when multiple tracks have identical names.
       - Critical fix: Pass MediaTrack* object directly to Preview Core instead of just track name
       - Previous issue: When GUID found the correct track, only track name was passed to Preview Core
@@ -2660,7 +2668,9 @@ local function draw_gui()
       -- Unified save popup - we'll use one popup for both
       gui.show_save_popup = true
       if gui.mode == 1 then
-        gui.new_chain_name = gui.focused_track_name
+        -- Extract only track name without "#N - " prefix
+        local track_name, _ = get_track_name_and_number(gui.focused_track)
+        gui.new_chain_name = track_name
       else
         gui.new_chain_name = gui.focused_fx_name
       end
