@@ -20,6 +20,24 @@
 
 
 @changelog
+  0.1.0 [Internal Build 251214.1530] - UI POLISH AND SAVE IMPROVEMENTS
+    - Fixed: Status message moved above FX info area to prevent Saved/History buttons from jumping.
+      • Previous: Yellow status text appeared between Save button and Saved/History section
+      • New: Status appears above FX info at bottom of window
+      • Result: Saved/History buttons stay in fixed position regardless of status messages
+      • Line: 2761-2772 (status above FX info)
+    - Improved: Save/Rename dialogs now show track# prefix outside input field for chains.
+      • Chain presets: "Track #3 - Preset Name: [input field]"
+      • Focused presets: "Preset Name: [input field]"
+      • Track number is fixed, only preset name can be edited
+      • Lines: 2820-2826 (Save dialog), 2879-2896 (Rename dialog)
+    - Added: Duplicate preset name detection when saving.
+      • Checks for existing preset with same name and track GUID
+      • Shows error message if duplicate found
+      • Prevents accidental overwrites
+      • Lines: 2836-2843 (duplicate check)
+    - Purpose: Cleaner UI with better feedback and duplicate prevention.
+
   0.1.0 [Internal Build 251214.1500] - MAJOR UI RESTRUCTURE FOR BETTER WORKFLOW
     - Restructured: Complete UI layout reorganization for stability and better UX.
       • FX info area moved to bottom (after Saved/History) with dynamic height
@@ -2629,19 +2647,6 @@ local function draw_gui()
   ImGui.Text(ctx, "     in REAPER Action List for Ctrl+Space preview")
   ImGui.PopStyleColor(ctx)
 
-  -- === STATUS (below RUN button) ===
-  if gui.last_result ~= "" then
-    if gui.last_result:match("^Success") then
-      ImGui.PushStyleColor(ctx, ImGui.Col_Text, 0x00FF00FF)
-    elseif gui.last_result:match("^Error") then
-      ImGui.PushStyleColor(ctx, ImGui.Col_Text, 0xFF0000FF)
-    else
-      ImGui.PushStyleColor(ctx, ImGui.Col_Text, 0xFFFF00FF)
-    end
-    ImGui.Text(ctx, gui.last_result)
-    ImGui.PopStyleColor(ctx)
-  end
-
   ImGui.Separator(ctx)
 
   -- === SAVE BUTTON (above Saved/History) ===
@@ -2771,6 +2776,19 @@ local function draw_gui()
   -- === FX INFO (at bottom, auto-resizes) ===
   ImGui.Separator(ctx)
 
+  -- === STATUS (above FX info) ===
+  if gui.last_result ~= "" then
+    if gui.last_result:match("^Success") then
+      ImGui.PushStyleColor(ctx, ImGui.Col_Text, 0x00FF00FF)
+    elseif gui.last_result:match("^Error") then
+      ImGui.PushStyleColor(ctx, ImGui.Col_Text, 0xFF0000FF)
+    else
+      ImGui.PushStyleColor(ctx, ImGui.Col_Text, 0xFFFF00FF)
+    end
+    ImGui.Text(ctx, gui.last_result)
+    ImGui.PopStyleColor(ctx)
+  end
+
   -- STATUS BAR
   if has_valid_fx then
     ImGui.PushStyleColor(ctx, ImGui.Col_Text, 0x00FF00FF)
@@ -2817,7 +2835,13 @@ local function draw_gui()
   end
 
   if ImGui.BeginPopupModal(ctx, "Save FX Preset", true, ImGui.WindowFlags_AlwaysAutoResize) then
-    ImGui.TextWrapped(ctx, "Preset Name:")
+    -- Show track# prefix for chain mode (outside input field)
+    if gui.mode == 1 and gui.focused_track then
+      local track_number = r.GetMediaTrackInfo_Value(gui.focused_track, "IP_TRACKNUMBER")
+      ImGui.Text(ctx, string.format("Track #%d - Preset Name:", track_number))
+    else
+      ImGui.Text(ctx, "Preset Name:")
+    end
     ImGui.Spacing(ctx)
 
     local rv, new_name = ImGui.InputText(ctx, "##presetname", gui.new_chain_name, 256)
@@ -2827,14 +2851,28 @@ local function draw_gui()
     if ImGui.Button(ctx, "Save", 100, 0) or ImGui.IsKeyPressed(ctx, ImGui.Key_Enter) then
       local final_name = gui.new_chain_name
       if final_name ~= "" and gui.focused_track then
-        local track_guid = get_track_guid(gui.focused_track)
-        local mode = (gui.mode == 1) and "chain" or "focused"
-        -- For chain mode: no custom name (use dynamic track name)
-        -- For focused mode: use FX name as custom name
-        local custom_name = (mode == "focused") and final_name or nil
-        add_saved_chain(final_name, track_guid, gui.focused_track_name, custom_name, mode)
-        gui.new_chain_name = ""
-        ImGui.CloseCurrentPopup(ctx)
+        -- Check for duplicates
+        local duplicate_found = false
+        for _, chain in ipairs(gui.saved_chains) do
+          if chain.name == final_name and chain.track_guid == get_track_guid(gui.focused_track) then
+            duplicate_found = true
+            break
+          end
+        end
+
+        if duplicate_found then
+          gui.last_result = "Error: Preset with this name already exists"
+        else
+          local track_guid = get_track_guid(gui.focused_track)
+          local mode = (gui.mode == 1) and "chain" or "focused"
+          -- For chain mode: no custom name (use dynamic track name)
+          -- For focused mode: use FX name as custom name
+          local custom_name = (mode == "focused") and final_name or nil
+          add_saved_chain(final_name, track_guid, gui.focused_track_name, custom_name, mode)
+          gui.last_result = "Success: Preset saved"
+          gui.new_chain_name = ""
+          ImGui.CloseCurrentPopup(ctx)
+        end
       end
     end
     ImGui.SameLine(ctx)
@@ -2856,7 +2894,24 @@ local function draw_gui()
   end
 
   if ImGui.BeginPopupModal(ctx, "Rename Preset", true, ImGui.WindowFlags_AlwaysAutoResize) then
-    ImGui.TextWrapped(ctx, "Custom Name (leave empty to use track name):")
+    -- Show track# prefix for chain mode (outside input field)
+    if gui.rename_chain_idx and gui.saved_chains[gui.rename_chain_idx] then
+      local chain = gui.saved_chains[gui.rename_chain_idx]
+      if chain.mode == "chain" then
+        local tr = find_track_by_guid(chain.track_guid)
+        if tr then
+          local track_number = r.GetMediaTrackInfo_Value(tr, "IP_TRACKNUMBER")
+          ImGui.Text(ctx, string.format("Track #%d - Preset Name:", track_number))
+        else
+          ImGui.Text(ctx, "Preset Name:")
+        end
+      else
+        ImGui.Text(ctx, "Preset Name:")
+      end
+    else
+      ImGui.Text(ctx, "Preset Name:")
+    end
+    ImGui.TextDisabled(ctx, "(leave empty to use track name)")
     ImGui.Spacing(ctx)
 
     local rv, new_name = ImGui.InputText(ctx, "##renamefield", gui.rename_chain_name, 256)
