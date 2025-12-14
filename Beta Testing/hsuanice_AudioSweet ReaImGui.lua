@@ -20,7 +20,7 @@
 
 
 @changelog
-  0.1.0 [Internal Build 251214.2325] - CHAIN DUPLICATE PREVENTION & UI IMPROVEMENTS
+  0.1.0 [Internal Build 251214.2340] - CHAIN DUPLICATE PREVENTION & UI IMPROVEMENTS
     - NEW: Chain mode duplicate prevention.
       • Previously: Only focused FX had duplicate prevention
       • Now: Chain mode blocks saving identical FX chains with different names
@@ -34,10 +34,15 @@
       • Lines: 2037-2040 (saved chain debug), 2091-2094 (history chain debug)
     - IMPROVED: Rename dialog now shows current default name in hint text.
       • Chain mode: Shows "(default: #N - track_name)" with actual track# and name
-      • Focused mode: Shows "(default: FX_name)" with processed FX name
+      • Focused mode: Shows "(default: FX_name)" with full FX name (VST3:/CLAP: prefix)
       • Previously: Generic "(leave empty to use track name)" text
       • Helps users understand what the default name will be before confirming
-      • Lines: 3234-3259 (dynamic hint text based on mode and current track info)
+      • Lines: 3253-3277 (dynamic hint text based on mode and current track info)
+    - FIXED: Removed non-existent process_fx_name() function call.
+      • Problem: Rename dialog crashed when renaming focused FX presets
+      • Error: "attempt to call a nil value (global 'process_fx_name')"
+      • Solution: Use chain.name directly (already contains full FX name)
+      • Line: 3271
 
   [Internal Build 251214.2200] - FX INDEX TRACKING & ENHANCED TOOLTIPS
     - NEW: Store FX index for focused presets to prevent wrong FX loading.
@@ -3268,8 +3273,7 @@ local function draw_gui()
         -- Focused mode: show FX name in hint
         ImGui.Text(ctx, "Preset Name:")
         if chain.name then
-          local fx_display_name = process_fx_name(chain.name)
-          hint_text = string.format("(default: %s)", fx_display_name)
+          hint_text = string.format("(default: %s)", chain.name)
         end
       end
     else
