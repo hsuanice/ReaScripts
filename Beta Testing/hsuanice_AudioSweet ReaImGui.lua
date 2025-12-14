@@ -199,7 +199,16 @@
 
 
 @changelog
-  0.1.0 [Internal Build 251215.0045] - COMPREHENSIVE USER MANUAL
+  0.1.0 [Internal Build 251215.0050] - VERSION NUMBER CLEANUP
+    - CHANGED: Simplified version number format.
+      • @version: 0.1.0 (for ReaPack compatibility)
+      • Help > About: Version 0.1.0 (251215)
+      • Removed "-beta" suffix for cleaner version display
+      • Internal build number preserved in Help > About for tracking
+      • Line: 4 (@version), 2825 (About dialog version)
+    - PURPOSE: Cleaner version display while maintaining build tracking
+
+  [Internal Build 251215.0045] - COMPREHENSIVE USER MANUAL
     - ADDED: Complete user manual in @about section.
       • Comprehensive guide covering all features and workflows
       • Sections: Overview, Operation Modes, Main Actions, Preset System, History System
@@ -2822,19 +2831,33 @@ local function draw_gui()
           "=================================================\n" ..
           "AudioSweet ReaImGui - ImGui Interface for AudioSweet\n" ..
           "=================================================\n" ..
-          "Version: 0.1.0-beta (251030.1600)\n" ..
+          "Version: 0.1.0 (251215)\n" ..
           "Author: hsuanice\n\n" ..
 
-          "Description:\n" ..
-          "  Complete AudioSweet control center with:\n" ..
-          "  - Focused/Chain modes with FX chain display\n" ..
-          "  - Apply/Copy actions for flexible workflow\n" ..
-          "  - AudioSweet Preview integration with configurable target track\n" ..
-          "  - Saved Chains and History features with CLAP plugin support\n" ..
-          "  - Comprehensive file naming settings with FX Alias support\n" ..
-          "  - Debug mode with detailed console logging\n" ..
-          "  - Built-in keyboard shortcuts (Space = Play/Stop, S = Solo toggle)\n" ..
-          "  - Auto-resizing window that prevents accidental resize\n\n" ..
+          "Quick Start:\n" ..
+          "  1. Select a track with FX or focus an FX window\n" ..
+          "  2. Choose mode: Focused (single FX) or Chain (full track)\n" ..
+          "  3. Click Apply to audition or Copy to prepare\n" ..
+          "  4. Click Save to store presets for later use\n\n" ..
+
+          "Key Features:\n" ..
+          "  - Focused/Chain modes with real-time FX display\n" ..
+          "  - Preset library with custom naming and rename sync\n" ..
+          "  - Auto-tracked history (up to 50 operations)\n" ..
+          "  - Keyboard shortcuts (Space=Play/Stop, S=Solo)\n" ..
+          "  - Comprehensive file naming settings with FX Alias\n" ..
+          "  - CLAP, VST3, VST2, AU, and JS plugin support\n" ..
+          "  - Debug mode with detailed console logging\n\n" ..
+
+          "Documentation:\n" ..
+          "  Full user manual available in script header @about section\n" ..
+          "  View in ReaPack browser or open script file directly\n\n" ..
+
+          "Recent Updates (251215.0045):\n" ..
+          "  - Added comprehensive user manual\n" ..
+          "  - Preset rename now syncs to all matching history items\n" ..
+          "  - History displays custom names from renamed presets\n" ..
+          "  - Adjustable window width (default: 450px)\n\n" ..
 
           "Reference:\n" ..
           "  Based on AudioSuite-like Script by Tim Chimes\n" ..
