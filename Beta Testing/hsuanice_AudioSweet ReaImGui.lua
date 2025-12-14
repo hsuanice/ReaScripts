@@ -20,7 +20,40 @@
 
 
 @changelog
-  0.1.0 [Internal Build 251214.2340] - CHAIN DUPLICATE PREVENTION & UI IMPROVEMENTS
+  0.1.0 [Internal Build 251215.0005] - CODE REFACTORING & UI CONSISTENCY
+    - REFACTORED: Unified tooltip display for saved presets and history.
+      • Created shared show_preset_tooltip() function
+      • Eliminated duplicate code (~50 lines reduced to 3 lines per usage)
+      • Both saved presets and history now use identical tooltip logic
+      • Easier to maintain and update tooltip behavior
+      • Lines: 1329-1377 (shared tooltip function), 3050, 3121 (usage)
+    - PURPOSE: Code consolidation and consistency between saved presets and history features
+
+  [Internal Build 251214.2355] - SAVED/HISTORY EXECUTION FIX & TOOLTIP ENHANCEMENTS
+    - FIXED: Saved focused FX presets now execute correctly in focused mode.
+      • Problem: Saved focused FX would execute as chain mode (entire FX chain)
+      • Root cause: run_saved_chain() always used chain execution regardless of saved mode
+      • Solution: Check chain.mode and route to appropriate execution function
+      • Impact: Focused FX presets now correctly process only the specific FX
+      • Lines: 2160-2181 (mode-based execution routing in run_saved_chain)
+    - ENHANCED: History items now show hover tooltips with track and FX info.
+      • Previously: History had no tooltips
+      • Now: Shows track #, name, and complete FX chain with saved FX highlighted in GREEN
+      • Focused mode: Highlights the specific FX in green within the chain
+      • Chain mode: Shows entire FX chain list
+      • Lines: 3092-3143 (history hover tooltip with FX chain display)
+    - NEW: History items now have "Save" button to save as preset.
+      • UI layout: [Open] [Name Button] [Save] (matching saved presets layout)
+      • Click "Save" to add history item to Saved FX Preset list
+      • Duplicate check: Shows info message if preset already exists
+      • Preserves original mode (focused/chain) and fx_index
+      • Lines: 3145-3175 (Save button with duplicate check)
+    - IMPROVED: History now records correct mode and fx_index from saved chains.
+      • Previously: Always added to history as "chain" mode with fx_index=0
+      • Now: Preserves original mode (focused/chain) and fx_index from saved preset
+      • Line: 2178 (correct mode and fx_index in add_to_history)
+
+  [Internal Build 251214.2340] - CHAIN DUPLICATE PREVENTION & UI IMPROVEMENTS
     - NEW: Chain mode duplicate prevention.
       • Previously: Only focused FX had duplicate prevention
       • Now: Chain mode blocks saving identical FX chains with different names
@@ -1302,6 +1335,56 @@ local function get_history_display_name(hist_item)
   return display_name
 end
 
+-- Show hover tooltip for preset/history item (shared function)
+-- item: saved chain or history item
+local function show_preset_tooltip(item)
+  local tr = find_track_by_guid(item.track_guid)
+  if not tr or not r.ValidatePtr2(0, tr, "MediaTrack*") then
+    ImGui.SetTooltip(ctx, "Track not found")
+    return
+  end
+
+  local track_number = r.GetMediaTrackInfo_Value(tr, "IP_TRACKNUMBER")
+  local _, track_name = r.GetSetMediaTrackInfo_String(tr, "P_NAME", "", false)
+  local track_info_line = string.format("#%d: %s", track_number, track_name)
+
+  local fx_count = r.TrackFX_GetCount(tr)
+  if fx_count == 0 then
+    ImGui.SetTooltip(ctx, track_info_line .. "\nNo FX")
+    return
+  end
+
+  if item.mode == "focused" then
+    -- For focused mode: show entire FX chain, mark the saved FX in GREEN
+    ImGui.BeginTooltip(ctx)
+    ImGui.Text(ctx, track_info_line)
+    for fx_idx = 0, fx_count - 1 do
+      local _, fx_name = r.TrackFX_GetFXName(tr, fx_idx, "")
+      if fx_idx == (item.fx_index or 0) then
+        -- This is the saved FX - color it green
+        ImGui.PushStyleColor(ctx, ImGui.Col_Text, 0x00FF00FF)
+        ImGui.Text(ctx, string.format("%d. %s", fx_idx + 1, fx_name))
+        ImGui.PopStyleColor(ctx)
+      else
+        ImGui.Text(ctx, string.format("%d. %s", fx_idx + 1, fx_name))
+      end
+    end
+    ImGui.EndTooltip(ctx)
+  else
+    -- For chain mode: show entire FX chain
+    local fx_lines = {}
+    for fx_idx = 0, fx_count - 1 do
+      local _, fx_name = r.TrackFX_GetFXName(tr, fx_idx, "")
+      table.insert(fx_lines, string.format("%d. %s", fx_idx + 1, fx_name))
+    end
+    local fx_info = table.concat(fx_lines, "\n")
+    ImGui.BeginTooltip(ctx)
+    ImGui.Text(ctx, track_info_line)
+    ImGui.Text(ctx, fx_info)
+    ImGui.EndTooltip(ctx)
+  end
+end
+
 ------------------------------------------------------------
 -- History Management
 ------------------------------------------------------------
@@ -2157,14 +2240,25 @@ local function run_saved_chain(chain_idx)
   r.Undo_BeginBlock()
   r.PreventUIRefresh(1)
 
-  if gui.action == 1 then
-    run_saved_chain_copy_mode(tr, chain.name, item_count)
+  -- Execute based on saved mode (chain or focused)
+  if chain.mode == "focused" then
+    -- For focused mode, use stored FX index
+    if gui.action == 1 then
+      run_focused_fx_copy_mode(tr, chain.name, chain.fx_index or 0, item_count)
+    else
+      run_history_focused_apply(tr, chain.name, chain.fx_index or 0, item_count)
+    end
   else
-    run_saved_chain_apply_mode(tr, chain.name, item_count)
+    -- Chain mode - use chain execution
+    if gui.action == 1 then
+      run_saved_chain_copy_mode(tr, chain.name, item_count)
+    else
+      run_saved_chain_apply_mode(tr, chain.name, item_count)
+    end
   end
 
-  -- Add to history
-  add_to_history(chain.name, chain.track_guid, chain.track_name, "chain", 0)
+  -- Add to history with correct mode and fx_index
+  add_to_history(chain.name, chain.track_guid, chain.track_name, chain.mode or "chain", chain.fx_index or 0)
 
   r.PreventUIRefresh(-1)
   r.Undo_EndBlock(string.format("AudioSweet GUI: %s [%s]", gui.action == 1 and "Copy" or "Apply", chain.name), -1)
@@ -2962,35 +3056,7 @@ local function draw_gui()
 
             -- Hover tooltip showing track and FX info
             if ImGui.IsItemHovered(ctx) then
-              if fx_info ~= "" then
-                ImGui.BeginTooltip(ctx)
-                ImGui.Text(ctx, track_info_line)
-
-                -- For focused mode with saved_fx_index, color the saved FX line green
-                if chain.mode == "focused" and saved_fx_index ~= nil then
-                  local fx_lines = {}
-                  for line in fx_info:gmatch("[^\n]+") do
-                    table.insert(fx_lines, line)
-                  end
-                  for idx, line in ipairs(fx_lines) do
-                    if idx - 1 == saved_fx_index then
-                      -- This is the saved FX - color it green
-                      ImGui.PushStyleColor(ctx, ImGui.Col_Text, 0x00FF00FF)  -- Green
-                      ImGui.Text(ctx, line)
-                      ImGui.PopStyleColor(ctx)
-                    else
-                      ImGui.Text(ctx, line)
-                    end
-                  end
-                else
-                  -- Chain mode or no saved_fx_index - just display normally
-                  ImGui.Text(ctx, fx_info)
-                end
-
-                ImGui.EndTooltip(ctx)
-              else
-                ImGui.SetTooltip(ctx, track_info_line)
-              end
+              show_preset_tooltip(chain)
             end
 
             -- Right-click context menu for renaming
@@ -3052,11 +3118,50 @@ local function draw_gui()
               open_history_fx(i)
             end
             ImGui.SameLine(ctx)
-            -- History item name button (executes AudioSweet) - use dynamic name
+            -- History item name button (executes AudioSweet) - use available width minus Save button
+            local avail_width = ImGui.GetContentRegionAvail(ctx) - 45  -- Space for "Save" button
             local display_name = get_history_display_name(item)
-            if ImGui.Button(ctx, display_name, -1, 0) then
+            if ImGui.Button(ctx, display_name, avail_width, 0) then
               run_history_item(i)
             end
+
+            -- Hover tooltip showing track and FX info
+            if ImGui.IsItemHovered(ctx) then
+              show_preset_tooltip(item)
+            end
+
+            ImGui.SameLine(ctx)
+            -- "Save" button to save this history item as a saved preset
+            if ImGui.Button(ctx, "Save", 40, 0) then
+              -- Check if this exact preset already exists in saved_chains
+              local already_saved = false
+              for _, chain in ipairs(gui.saved_chains) do
+                if chain.track_guid == item.track_guid and chain.mode == item.mode then
+                  if item.mode == "focused" then
+                    -- For focused mode: check fx_index
+                    if chain.fx_index == item.fx_index then
+                      already_saved = true
+                      break
+                    end
+                  else
+                    -- For chain mode: check if same chain (by name)
+                    if chain.name == item.name then
+                      already_saved = true
+                      break
+                    end
+                  end
+                end
+              end
+
+              if already_saved then
+                gui.last_result = "Info: This preset is already saved"
+              else
+                -- Add to saved_chains
+                add_saved_chain(item.name, item.track_guid, item.track_name, nil, item.mode, item.fx_index)
+                gui.last_result = "Success: History item saved to presets"
+              end
+            end
+
             ImGui.PopID(ctx)
           end
           ImGui.EndChild(ctx)
