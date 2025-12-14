@@ -2849,15 +2849,6 @@ local function draw_gui()
           "  - CLAP, VST3, VST2, AU, and JS plugin support\n" ..
           "  - Debug mode with detailed console logging\n\n" ..
 
-          "Documentation:\n" ..
-          "  Full user manual available in script header @about section\n" ..
-          "  View in ReaPack browser or open script file directly\n\n" ..
-
-          "Recent Updates (251215.0045):\n" ..
-          "  - Added comprehensive user manual\n" ..
-          "  - Preset rename now syncs to all matching history items\n" ..
-          "  - History displays custom names from renamed presets\n" ..
-          "  - Adjustable window width (default: 450px)\n\n" ..
 
           "Reference:\n" ..
           "  Based on AudioSuite-like Script by Tim Chimes\n" ..
