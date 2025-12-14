@@ -20,7 +20,16 @@
 
 
 @changelog
-  0.1.0 [Internal Build 251215.0025] - HISTORY CUSTOM NAMES & UI WIDTH IMPROVEMENTS
+  0.1.0 [Internal Build 251215.0030] - PRESET RENAME SYNC TO HISTORY
+    - FIXED: Renaming a preset now immediately syncs to matching history items.
+      • Problem: When renaming a saved preset, history items didn't update to show the new custom name
+      • Root cause: rename_saved_chain() only updated saved_chains array, not history array
+      • Solution: Modified rename_saved_chain() to iterate through history and update matching items
+      • Matching criteria: track_guid + mode + (fx_index for focused, name for chain)
+      • Impact: History list now reflects renamed preset names in real-time
+      • Lines: 1203-1240 (rename_saved_chain with history sync)
+
+  [Internal Build 251215.0025] - HISTORY CUSTOM NAMES & UI WIDTH IMPROVEMENTS
     - FIXED: History items now display renamed custom names.
       • Problem: History list only showed default names, ignoring renamed custom names
       • Root cause: History data structure didn't store custom_name field
@@ -1209,6 +1218,33 @@ local function rename_saved_chain(idx, new_custom_name)
         idx, tostring(chain.custom_name or "nil"), chain.mode or "chain"))
     end
     save_chains_to_extstate()
+
+    -- Sync rename to history items that match this preset
+    -- Match by: track_guid + mode + (fx_index for focused, name for chain)
+    for _, hist_item in ipairs(gui.history) do
+      if hist_item.track_guid == chain.track_guid and hist_item.mode == chain.mode then
+        if chain.mode == "focused" then
+          -- For focused mode: match by fx_index
+          if hist_item.fx_index == chain.fx_index then
+            hist_item.custom_name = chain.custom_name
+          end
+        else
+          -- For chain mode: match by name (original internal name)
+          if hist_item.name == chain.name then
+            hist_item.custom_name = chain.custom_name
+          end
+        end
+      end
+    end
+
+    -- Save updated history to ExtState
+    for i = 0, gui.max_history - 1 do
+      r.SetProjExtState(0, HISTORY_NAMESPACE, "hist_" .. i, "")
+    end
+    for i, item in ipairs(gui.history) do
+      local data = string.format("%s|%s|%s|%s|%d|%s", item.name, item.track_guid, item.track_name, item.mode, item.fx_index, item.custom_name or "")
+      r.SetProjExtState(0, HISTORY_NAMESPACE, "hist_" .. (i - 1), data)
+    end
   end
 end
 
@@ -2496,7 +2532,7 @@ local function draw_gui()
   end
 
   -- Set minimum window size to make buttons more readable (min width: 700px)
-  ImGui.SetNextWindowSizeConstraints(ctx, 700, 0, 99999, 99999)
+  ImGui.SetNextWindowSizeConstraints(ctx, 450, 0, 99999, 99999)
 
   local visible, open = ImGui.Begin(ctx, 'AudioSweet Control Panel', true, window_flags)
   if not visible then
