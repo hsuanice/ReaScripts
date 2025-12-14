@@ -20,7 +20,78 @@
 
 
 @changelog
-  0.2.0 [Internal Build 251214.1100] - IMPROVED CHAIN/PRESET WORKFLOW
+  0.1.0 [Internal Build 251214.1500] - MAJOR UI RESTRUCTURE FOR BETTER WORKFLOW
+    - Restructured: Complete UI layout reorganization for stability and better UX.
+      • FX info area moved to bottom (after Saved/History) with dynamic height
+      • Save button merged and positioned above Saved/History section
+      • Stable layout: Main controls stay in fixed positions
+      • Lines: 2611-2628 (unified Save button), 2735-2769 (FX info at bottom)
+    - Improved: Unified "Save" button that changes label based on mode.
+      • Chain mode: "Save This Chain" | Focused mode: "Save This FX"
+      • Single button eliminates layout jumping when switching modes
+      • Always visible above Saved/History for quick access
+      • Lines: 2611-2628 (unified Save button logic)
+    - Improved: Simplified save dialog with single input field.
+      • Previous: Two separate popups with multiple fields
+      • New: One unified popup with preset name input
+      • Pre-filled with FX name or track name based on mode
+      • Support Enter to save, Escape to cancel
+      • Lines: 2773-2810 (unified Save FX Preset popup)
+    - Improved: Saved FX Preset and History display real-time track info.
+      • Chain presets show "#track_number track_name" format
+      • Track number/name updates automatically when track changes
+      • Focused FX presets show FX name only (no track# prefix)
+      • Lines: 979-1032 (get_chain_display_info with track#), 1034-1052 (get_history_display_name)
+    - Improved: History column now auto-resizes based on content.
+      • Dynamic height calculation: items * 25px + header (max 200px)
+      • Reduces wasted space when few history items
+      • Scrollbar appears when needed
+      • Lines: 2696-2727 (History with auto-resize)
+    - Changed: Section title "SAVED CHAINS" → "SAVED FX PRESET".
+      • More accurate description of functionality
+      • Line: 2645
+    - Fixed: Popup dialogs now appear near main GUI window.
+      • Positioned at center-top of main window
+      • No more popups appearing off-screen
+      • Lines: 2775-2778 (Save popup position), 2814-2817 (Rename popup position)
+    - Purpose: Stable UI with controls in predictable positions - FX info changes don't affect button locations.
+
+  0.1.0 [Internal Build 251214.1420] - UI/UX IMPROVEMENTS
+    - Fixed: FX chain preview area now uses fixed height to prevent button layout jumping.
+      • Previous: Dynamic height based on FX count caused buttons below to move up/down
+      • New: Fixed 150px height with scrollbar when needed (allows ~7 FX visible)
+      • Result: Stable button positions - easier to quickly toggle Open/Save buttons
+      • Lines: 2387-2397 (fixed height for FXChainList BeginChild)
+    - Added: Right-click to rename saved FX/chains.
+      • Right-click any saved preset → "Rename" menu item
+      • Opens rename dialog with current custom name (or empty if using track name)
+      • Leave empty to use dynamic track name, or enter custom name
+      • Lines: 2655-2663 (context menu), 2796-2825 (rename popup), 942-947 (rename function)
+      • GUI state: show_rename_popup, rename_chain_idx, rename_chain_name (lines 709-711)
+    - Fixed: Save FX Preset dialog now correctly uses default FX name when unchanged.
+      • Previous issue: Pressing OK without editing resulted in empty preset name
+      • New: Simplified dialog - just one input field with FX name as default
+      • User can modify or press OK/Enter to save with default name
+      • Lines: 2761-2786 (simplified Save FX Preset popup)
+    - Purpose: Better workflow for managing saved presets with stable UI layout.
+
+  0.1.0 [Internal Build 251214.1400] - MODE-BASED FX WINDOW TOGGLE + UI FIX
+    - Fixed: Chain mode status bar text "No track focused" → "No Track FX" (line 2373)
+    - Improved: Saved presets now remember whether they were saved as chain or focused FX.
+      • Added mode field to saved_chains data structure ("chain" or "focused")
+      • Data format: "name|guid|track_name|custom_name|mode" (backward compatible)
+      • Chain presets: always open FX chain window (even if only 1 FX)
+      • Focused presets: always open floating FX window (for single FX)
+      • Lines: 874-898 (load with mode), 909-916 (save with mode), 919-928 (add_saved_chain)
+    - Improved: Window toggle behavior determined by how preset was saved, not FX count.
+      • Previous issue: Chain with 1 FX would open floating window (incorrect)
+      • User feedback: "chain有可能雖然有時候只有一個 但可能會需要新增修改之類的"
+      • Solution: Track mode when saving, use mode to determine window type
+      • Lines: 1693-1715 (open_saved_chain_fx using mode field)
+      • Lines: 2718 (Save This Chain → mode="chain"), 2761 (Save This FX → mode="focused")
+    - Purpose: Correct window type for saved presets - chains can be modified, focused FX are standalone.
+
+  0.1.0 [Internal Build 251214.1100] - IMPROVED CHAIN/PRESET WORKFLOW
     - Improved: Chain mode now shows FX chain preview without requiring focused FX window.
       • If no FX window is focused: automatically uses first selected track with FX
       • If FX window is focused: prioritizes focused FX track (existing behavior)
@@ -690,6 +761,9 @@ local gui = {
   new_fx_preset_name = "",
   show_save_popup = false,
   show_save_fx_popup = false,
+  show_rename_popup = false,
+  rename_chain_idx = nil,
+  rename_chain_name = "",
   show_settings_popup = false,
   show_fxname_popup = false,
   show_preview_settings = false,
@@ -865,19 +939,20 @@ local function load_saved_chains()
   while true do
     local ok, data = r.GetProjExtState(0, CHAIN_NAMESPACE, "chain_" .. idx)
     if ok == 0 or data == "" then break end
-    -- Format: name|guid|track_name|custom_name
-    -- For backward compatibility: if no custom_name, it will be nil
+    -- Format: name|guid|track_name|custom_name|mode
+    -- For backward compatibility: if no custom_name or mode, they will be nil/"chain"
     local parts = {}
     for part in (data .. "|"):gmatch("([^|]*)|") do
       table.insert(parts, part)
     end
-    local name, guid, track_name, custom_name = parts[1], parts[2], parts[3], parts[4]
+    local name, guid, track_name, custom_name, mode = parts[1], parts[2], parts[3], parts[4], parts[5]
     if name and guid then
       gui.saved_chains[#gui.saved_chains + 1] = {
         name = name,
         track_guid = guid,
         track_name = track_name or "",
         custom_name = (custom_name and custom_name ~= "") and custom_name or nil,
+        mode = (mode and mode ~= "") and mode or "chain",  -- Default to "chain" for backward compatibility
       }
     end
     idx = idx + 1
@@ -893,21 +968,23 @@ local function save_chains_to_extstate()
     idx = idx + 1
   end
   for i, chain in ipairs(gui.saved_chains) do
-    local data = string.format("%s|%s|%s|%s",
+    local data = string.format("%s|%s|%s|%s|%s",
       chain.name,
       chain.track_guid,
       chain.track_name,
-      chain.custom_name or "")
+      chain.custom_name or "",
+      chain.mode or "chain")
     r.SetProjExtState(0, CHAIN_NAMESPACE, "chain_" .. (i - 1), data)
   end
 end
 
-local function add_saved_chain(name, track_guid, track_name, custom_name)
+local function add_saved_chain(name, track_guid, track_name, custom_name, mode)
   gui.saved_chains[#gui.saved_chains + 1] = {
     name = name,
     track_guid = track_guid,
     track_name = track_name,
     custom_name = custom_name,
+    mode = mode or "chain",
   }
   save_chains_to_extstate()
 end
@@ -915,6 +992,13 @@ end
 local function delete_saved_chain(idx)
   table.remove(gui.saved_chains, idx)
   save_chains_to_extstate()
+end
+
+local function rename_saved_chain(idx, new_custom_name)
+  if gui.saved_chains[idx] then
+    gui.saved_chains[idx].custom_name = (new_custom_name and new_custom_name ~= "") and new_custom_name or nil
+    save_chains_to_extstate()
+  end
 end
 
 local function find_track_by_guid(guid)
@@ -933,13 +1017,15 @@ local function get_chain_display_info(chain)
   local display_name = chain.name  -- fallback
   local current_track_name = nil
   local fx_info = ""
+  local track_number = nil
 
   -- Try to find the track by GUID
   local tr = find_track_by_guid(chain.track_guid)
   if tr and r.ValidatePtr2(0, tr, "MediaTrack*") then
-    -- Get current track name
+    -- Get current track name and number
     local _, track_name = r.GetSetMediaTrackInfo_String(tr, "P_NAME", "", false)
     current_track_name = track_name
+    track_number = r.GetMediaTrackInfo_Value(tr, "IP_TRACKNUMBER")  -- 1-based
 
     -- Build FX list (vertical, like FX insert)
     local fx_count = r.TrackFX_GetCount(tr)
@@ -963,13 +1049,42 @@ local function get_chain_display_info(chain)
   -- Determine display name: custom name OR current track name OR saved track name
   if chain.custom_name and chain.custom_name ~= "" then
     display_name = chain.custom_name
+    -- Add track# prefix for custom names only if it's a chain
+    if chain.mode == "chain" and track_number then
+      display_name = string.format("#%d %s", track_number, display_name)
+    end
   elseif current_track_name then
-    display_name = current_track_name
+    -- Add track# prefix for dynamic track names
+    if track_number then
+      display_name = string.format("#%d %s", track_number, current_track_name)
+    else
+      display_name = current_track_name
+    end
   else
     display_name = chain.track_name  -- fallback to saved name
   end
 
   return display_name, current_track_name, fx_info
+end
+
+-- Get display name for a history item with current track info
+local function get_history_display_name(hist_item)
+  local display_name = hist_item.name  -- fallback
+
+  -- Try to find the track by GUID to get current track number
+  local tr = find_track_by_guid(hist_item.track_guid)
+  if tr and r.ValidatePtr2(0, tr, "MediaTrack*") then
+    local track_number = r.GetMediaTrackInfo_Value(tr, "IP_TRACKNUMBER")  -- 1-based
+    local _, track_name = r.GetSetMediaTrackInfo_String(tr, "P_NAME", "", false)
+
+    -- For chain mode: show track# + track name
+    if hist_item.mode == "chain" and track_number then
+      display_name = string.format("#%d %s", track_number, track_name)
+    end
+    -- For focused mode: just use the FX name (no track# prefix)
+  end
+
+  return display_name
 end
 
 ------------------------------------------------------------
@@ -1665,21 +1780,39 @@ local function open_saved_chain_fx(chain_idx)
     return
   end
 
-  -- Select track and toggle FX chain window (chain mode uses entire FX chain)
+  -- Select track and set as last touched
   r.SetOnlyTrackSelected(tr)
   r.SetMixerScroll(tr)
 
-  -- Check if FX chain window is visible and toggle it
-  local chain_visible = r.TrackFX_GetChainVisible(tr)
-  if chain_visible == -1 then
-    -- Chain window is closed, open it
-    r.TrackFX_Show(tr, 0, 1)  -- Show chain window
-  else
-    -- Chain window is open, close it
-    r.TrackFX_Show(tr, 0, 0)  -- Hide chain window
+  local fx_count = r.TrackFX_GetCount(tr)
+  if fx_count == 0 then
+    gui.last_result = string.format("Error: No FX on track '%s'", chain.track_name)
+    return
   end
 
-  gui.last_result = string.format("Toggled FX chain: %s", chain.name)
+  -- Determine window type based on how it was saved
+  if chain.mode == "focused" then
+    -- Focused FX preset: toggle floating window for first FX
+    local fx_idx = 0
+    local is_open = r.TrackFX_GetOpen(tr, fx_idx)
+    if is_open then
+      r.TrackFX_Show(tr, fx_idx, 2)  -- Hide floating window
+    else
+      r.TrackFX_Show(tr, fx_idx, 3)  -- Show floating window
+    end
+    gui.last_result = string.format("Toggled FX: %s", chain.name)
+  else
+    -- Chain preset: toggle FX chain window
+    local chain_visible = r.TrackFX_GetChainVisible(tr)
+    if chain_visible == -1 then
+      -- Chain window is closed, open it
+      r.TrackFX_Show(tr, 0, 1)  -- Show chain window
+    else
+      -- Chain window is open, close it
+      r.TrackFX_Show(tr, 0, 0)  -- Hide chain window
+    end
+    gui.last_result = string.format("Toggled FX chain: %s", chain.name)
+  end
 end
 
 local function open_history_fx(hist_idx)
@@ -2330,60 +2463,6 @@ local function draw_gui()
   local has_valid_fx = update_focused_fx_display()
   local item_count = r.CountSelectedMediaItems(0)
 
-  -- === STATUS BAR ===
-  if has_valid_fx then
-    ImGui.PushStyleColor(ctx, ImGui.Col_Text, 0x00FF00FF)
-  else
-    ImGui.PushStyleColor(ctx, ImGui.Col_Text, 0xFF0000FF)
-  end
-
-  if gui.mode == 0 then
-    ImGui.Text(ctx, gui.focused_fx_name)
-  else
-    ImGui.Text(ctx, gui.focused_track_name ~= "" and ("Track: " .. gui.focused_track_name) or "No track focused")
-  end
-  ImGui.PopStyleColor(ctx)
-
-  ImGui.SameLine(ctx)
-  ImGui.Text(ctx, string.format(" | Items: %d", item_count))
-
-  -- Show FX chain in Chain mode
-  if gui.mode == 1 and #gui.focused_track_fx_list > 0 then
-    -- Dynamic height: each FX line is ~20px, max 150px (allows ~7 FX visible)
-    local line_height = 20
-    local max_height = 150
-    local fx_count = #gui.focused_track_fx_list
-    local calculated_height = math.min(fx_count * line_height, max_height)
-
-    ImGui.BeginChild(ctx, "FXChainList", 0, calculated_height, ImGui.WindowFlags_None)
-    for _, fx in ipairs(gui.focused_track_fx_list) do
-      local status = fx.offline and "[offline]" or (fx.enabled and "[on]" or "[byp]")
-      ImGui.Text(ctx, string.format("%02d) %s %s", fx.index + 1, fx.name, status))
-    end
-    ImGui.EndChild(ctx)
-
-    -- In Chain mode: show "Save This Chain" as long as there's an FX chain (focused or selected track)
-    if gui.enable_saved_chains then
-      if ImGui.Button(ctx, "Save This Chain", -1, 0) then
-        gui.show_save_popup = true
-        gui.new_chain_name = gui.focused_track_name
-      end
-    end
-  end
-
-  -- Show "Save This FX" in Focused mode when there's a valid focused FX
-  if gui.mode == 0 and has_valid_fx and gui.enable_saved_chains then
-    if ImGui.Button(ctx, "Save This FX", -1, 0) then
-      gui.show_save_fx_popup = true
-      gui.new_fx_preset_name = gui.focused_fx_name  -- Default to FX name
-    end
-    if ImGui.IsItemHovered(ctx) then
-      ImGui.SetTooltip(ctx, "FX: " .. gui.focused_fx_name)
-    end
-  end
-
-  ImGui.Separator(ctx)
-
   -- === MODE & ACTION (Radio buttons, horizontal) ===
   ImGui.Text(ctx, "Mode:")
   ImGui.SameLine(ctx)
@@ -2565,6 +2644,25 @@ local function draw_gui()
 
   ImGui.Separator(ctx)
 
+  -- === SAVE BUTTON (above Saved/History) ===
+  if gui.enable_saved_chains then
+    -- Unified Save button that changes text based on mode
+    local save_button_label = (gui.mode == 1) and "Save This Chain" or "Save This FX"
+    local save_button_enabled = (gui.mode == 1 and #gui.focused_track_fx_list > 0) or (gui.mode == 0 and has_valid_fx)
+
+    if not save_button_enabled then ImGui.BeginDisabled(ctx) end
+    if ImGui.Button(ctx, save_button_label, -1, 0) then
+      -- Unified save popup - we'll use one popup for both
+      gui.show_save_popup = true
+      if gui.mode == 1 then
+        gui.new_chain_name = gui.focused_track_name
+      else
+        gui.new_chain_name = gui.focused_fx_name
+      end
+    end
+    if not save_button_enabled then ImGui.EndDisabled(ctx) end
+  end
+
   -- === QUICK PROCESS (Saved + History, side by side) ===
   if gui.enable_saved_chains or gui.enable_history then
     -- Show FX on recall checkbox
@@ -2577,10 +2675,10 @@ local function draw_gui()
       local avail_w = ImGui.GetContentRegionAvail(ctx)
       local col1_w = avail_w * 0.5 - 5
 
-      -- Left: Saved Chains
+      -- Left: Saved FX Preset
       if gui.enable_saved_chains and #gui.saved_chains > 0 then
         ImGui.BeginChild(ctx, "SavedCol", col1_w, 200, ImGui.WindowFlags_None)
-        ImGui.Text(ctx, "SAVED CHAINS")
+        ImGui.Text(ctx, "SAVED FX PRESET")
         ImGui.Separator(ctx)
         local to_delete = nil
         for i, chain in ipairs(gui.saved_chains) do
@@ -2608,6 +2706,16 @@ local function draw_gui()
               fx_info))
           end
 
+          -- Right-click context menu for renaming
+          if ImGui.BeginPopupContextItem(ctx, "chain_context_" .. i) then
+            if ImGui.MenuItem(ctx, "Rename") then
+              gui.show_rename_popup = true
+              gui.rename_chain_idx = i
+              gui.rename_chain_name = chain.custom_name or ""
+            end
+            ImGui.EndPopup(ctx)
+          end
+
           ImGui.SameLine(ctx)
           -- Delete button
           if ImGui.Button(ctx, "X", 20, 0) then
@@ -2621,9 +2729,11 @@ local function draw_gui()
         ImGui.SameLine(ctx)
       end
 
-      -- Right: History
+      -- Right: History (auto-resizes based on content)
       if gui.enable_history and #gui.history > 0 then
-        ImGui.BeginChild(ctx, "HistoryCol", 0, 0, ImGui.WindowFlags_None)
+        -- Calculate height based on number of history items (each item ~25px, header ~40px)
+        local history_height = math.min(#gui.history * 25 + 40, 200)  -- Max 200px
+        ImGui.BeginChild(ctx, "HistoryCol", 0, history_height, ImGui.WindowFlags_None)
         ImGui.Text(ctx, "HISTORY")
         ImGui.SameLine(ctx)
         ImGui.SetCursorPosX(ctx, ImGui.GetCursorPosX(ctx) + ImGui.GetContentRegionAvail(ctx) - 45)
@@ -2642,8 +2752,9 @@ local function draw_gui()
             open_history_fx(i)
           end
           ImGui.SameLine(ctx)
-          -- History item name button (executes AudioSweet)
-          if ImGui.Button(ctx, item.name, -1, 0) then
+          -- History item name button (executes AudioSweet) - use dynamic name
+          local display_name = get_history_display_name(item)
+          if ImGui.Button(ctx, display_name, -1, 0) then
             run_history_item(i)
           end
           ImGui.PopID(ctx)
@@ -2653,87 +2764,117 @@ local function draw_gui()
     end
   else
     -- Show "Developing" message when both features are disabled
-    ImGui.TextWrapped(ctx, "SAVED CHAINS and HISTORY features are currently under development.")
+    ImGui.TextWrapped(ctx, "SAVED FX PRESET and HISTORY features are currently under development.")
     ImGui.TextWrapped(ctx, "These features are not functioning properly and will be available in a future update.")
+  end
+
+  -- === FX INFO (at bottom, auto-resizes) ===
+  ImGui.Separator(ctx)
+
+  -- STATUS BAR
+  if has_valid_fx then
+    ImGui.PushStyleColor(ctx, ImGui.Col_Text, 0x00FF00FF)
+  else
+    ImGui.PushStyleColor(ctx, ImGui.Col_Text, 0xFF0000FF)
+  end
+
+  if gui.mode == 0 then
+    ImGui.Text(ctx, gui.focused_fx_name)
+  else
+    ImGui.Text(ctx, gui.focused_track_name ~= "" and ("Track: " .. gui.focused_track_name) or "No Track FX")
+  end
+  ImGui.PopStyleColor(ctx)
+
+  ImGui.SameLine(ctx)
+  ImGui.Text(ctx, string.format(" | Items: %d", item_count))
+
+  -- Show FX chain in Chain mode (dynamic height, auto-resizes based on content)
+  if gui.mode == 1 and #gui.focused_track_fx_list > 0 then
+    -- Dynamic height based on FX count (each FX line ~20px), max 150px
+    local line_height = 20
+    local max_height = 150
+    local fx_count = #gui.focused_track_fx_list
+    local calculated_height = math.min(fx_count * line_height, max_height)
+
+    ImGui.BeginChild(ctx, "FXChainList", 0, calculated_height, ImGui.WindowFlags_None)
+    for _, fx in ipairs(gui.focused_track_fx_list) do
+      local status = fx.offline and "[offline]" or (fx.enabled and "[on]" or "[byp]")
+      ImGui.Text(ctx, string.format("%02d) %s %s", fx.index + 1, fx.name, status))
+    end
+    ImGui.EndChild(ctx)
   end
 
   ImGui.End(ctx)
 
-  -- === SAVE CHAIN POPUP ===
+  -- === SAVE PRESET POPUP (Unified for both Chain and Focused modes) ===
   if gui.show_save_popup then
-    ImGui.OpenPopup(ctx, "Save Chain")
+    -- Position popup near main window
+    local main_x, main_y = ImGui.GetWindowPos(ctx)
+    local main_w, main_h = ImGui.GetWindowSize(ctx)
+    ImGui.SetNextWindowPos(ctx, main_x + main_w / 2, main_y + 50, ImGui.Cond_Appearing, 0.5, 0)
+    ImGui.OpenPopup(ctx, "Save FX Preset")
     gui.show_save_popup = false
   end
 
-  if ImGui.BeginPopupModal(ctx, "Save Chain", true, ImGui.WindowFlags_AlwaysAutoResize) then
-    ImGui.TextWrapped(ctx, "Custom Name (optional):")
-    ImGui.TextWrapped(ctx, "Leave empty to use track name (will auto-update when track is renamed)")
-    local rv_custom, new_custom_name = ImGui.InputText(ctx, "##customname", gui.new_custom_name or "", 256)
-    if rv_custom then gui.new_custom_name = new_custom_name end
+  if ImGui.BeginPopupModal(ctx, "Save FX Preset", true, ImGui.WindowFlags_AlwaysAutoResize) then
+    ImGui.TextWrapped(ctx, "Preset Name:")
+    ImGui.Spacing(ctx)
 
-    ImGui.Spacing(ctx)
-    ImGui.Separator(ctx)
-    ImGui.Spacing(ctx)
-    ImGui.Text(ctx, "Internal ID (auto-generated):")
-    local rv, new_name = ImGui.InputText(ctx, "##chainname", gui.new_chain_name, 256)
+    local rv, new_name = ImGui.InputText(ctx, "##presetname", gui.new_chain_name, 256)
     if rv then gui.new_chain_name = new_name end
 
     ImGui.Spacing(ctx)
-    if ImGui.Button(ctx, "Save", 100, 0) then
-      if gui.new_chain_name ~= "" and gui.focused_track then
+    if ImGui.Button(ctx, "Save", 100, 0) or ImGui.IsKeyPressed(ctx, ImGui.Key_Enter) then
+      local final_name = gui.new_chain_name
+      if final_name ~= "" and gui.focused_track then
         local track_guid = get_track_guid(gui.focused_track)
-        local custom_name = (gui.new_custom_name and gui.new_custom_name ~= "") and gui.new_custom_name or nil
-        add_saved_chain(gui.new_chain_name, track_guid, gui.focused_track_name, custom_name)
+        local mode = (gui.mode == 1) and "chain" or "focused"
+        -- For chain mode: no custom name (use dynamic track name)
+        -- For focused mode: use FX name as custom name
+        local custom_name = (mode == "focused") and final_name or nil
+        add_saved_chain(final_name, track_guid, gui.focused_track_name, custom_name, mode)
         gui.new_chain_name = ""
-        gui.new_custom_name = ""
         ImGui.CloseCurrentPopup(ctx)
       end
     end
     ImGui.SameLine(ctx)
-    if ImGui.Button(ctx, "Cancel", 100, 0) then
+    if ImGui.Button(ctx, "Cancel", 100, 0) or ImGui.IsKeyPressed(ctx, ImGui.Key_Escape) then
       gui.new_chain_name = ""
-      gui.new_custom_name = ""
       ImGui.CloseCurrentPopup(ctx)
     end
     ImGui.EndPopup(ctx)
   end
 
-  -- === SAVE FX POPUP (Focused mode only) ===
-  if gui.show_save_fx_popup then
-    ImGui.OpenPopup(ctx, "Save FX Preset")
-    gui.show_save_fx_popup = false
+  -- === RENAME CHAIN POPUP ===
+  if gui.show_rename_popup then
+    -- Position popup near main window
+    local main_x, main_y = ImGui.GetWindowPos(ctx)
+    local main_w, main_h = ImGui.GetWindowSize(ctx)
+    ImGui.SetNextWindowPos(ctx, main_x + main_w / 2, main_y + 50, ImGui.Cond_Appearing, 0.5, 0)
+    ImGui.OpenPopup(ctx, "Rename Preset")
+    gui.show_rename_popup = false
   end
 
-  if ImGui.BeginPopupModal(ctx, "Save FX Preset", true, ImGui.WindowFlags_AlwaysAutoResize) then
-    ImGui.TextWrapped(ctx, "Save this FX as a preset:")
+  if ImGui.BeginPopupModal(ctx, "Rename Preset", true, ImGui.WindowFlags_AlwaysAutoResize) then
+    ImGui.TextWrapped(ctx, "Custom Name (leave empty to use track name):")
     ImGui.Spacing(ctx)
 
-    -- Show current FX name
-    ImGui.TextDisabled(ctx, "Current FX:")
-    ImGui.SameLine(ctx)
-    ImGui.Text(ctx, gui.focused_fx_name)
+    local rv, new_name = ImGui.InputText(ctx, "##renamefield", gui.rename_chain_name, 256)
+    if rv then gui.rename_chain_name = new_name end
 
     ImGui.Spacing(ctx)
-    ImGui.Separator(ctx)
-    ImGui.Spacing(ctx)
-
-    ImGui.Text(ctx, "Preset Name:")
-    local rv, new_name = ImGui.InputText(ctx, "##fxpresetname", gui.new_fx_preset_name, 256)
-    if rv then gui.new_fx_preset_name = new_name end
-
-    ImGui.Spacing(ctx)
-    if ImGui.Button(ctx, "Save", 100, 0) then
-      if gui.new_fx_preset_name ~= "" and gui.focused_track then
-        local track_guid = get_track_guid(gui.focused_track)
-        -- Save as a chain with single FX (use preset name as custom name)
-        add_saved_chain(gui.new_fx_preset_name, track_guid, gui.focused_track_name, gui.new_fx_preset_name)
-        gui.new_fx_preset_name = ""
+    if ImGui.Button(ctx, "OK", 100, 0) then
+      if gui.rename_chain_idx then
+        rename_saved_chain(gui.rename_chain_idx, gui.rename_chain_name)
+        gui.rename_chain_idx = nil
+        gui.rename_chain_name = ""
         ImGui.CloseCurrentPopup(ctx)
       end
     end
     ImGui.SameLine(ctx)
     if ImGui.Button(ctx, "Cancel", 100, 0) then
-      gui.new_fx_preset_name = ""
+      gui.rename_chain_idx = nil
+      gui.rename_chain_name = ""
       ImGui.CloseCurrentPopup(ctx)
     end
     ImGui.EndPopup(ctx)
