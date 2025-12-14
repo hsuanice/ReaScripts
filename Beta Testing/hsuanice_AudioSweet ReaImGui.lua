@@ -20,7 +20,45 @@
 
 
 @changelog
-  0.1.0 [Internal Build 251214.2030] - SAVE DIALOG DEFAULT VALUE FIX
+  0.1.0 [Internal Build 251214.2200] - FX INDEX TRACKING & ENHANCED TOOLTIPS
+    - NEW: Store FX index for focused presets to prevent wrong FX loading.
+      • Problem: When saving same FX with different names, both presets would load the same FX
+      • Solution: Save and track fx_index alongside FX name
+      • Impact: Open button now always opens the correct FX window
+      • Lines: 1052-1065 (add_saved_chain), 1007-1036 (load/save extstate)
+    - NEW: Duplicate prevention for focused FX presets.
+      • Now blocks saving the same FX twice, even with different names
+      • Check by track_guid + fx_index for focused mode
+      • Check by track_guid + name for chain mode
+      • Line: 3040-3054 (duplicate check logic)
+    - ENHANCED: Focused FX preset tooltips now show full FX chain.
+      • Previously: Only showed the saved FX name
+      • Now: Shows entire FX chain with saved FX highlighted in GREEN
+      • Helps identify which preset is which when saving multiple instances of same FX
+      • Lines: 1124-1168 (build full chain for focused mode), 2869-2897 (colored tooltip)
+    - Improved: Better FX matching with fallback logic.
+      • Method 1: Use saved fx_index (fast, accurate)
+      • Method 2: Exact name match (fallback if index invalid)
+      • Removed fuzzy matching to prevent wrong FX selection
+      • Lines: 1129-1154 (FX matching logic)
+    - Added: Debug messages for save/rename/open/run operations.
+      • Console output when debug mode is ON
+      • Shows fx_index, mode, and operation details
+      • Open operation now shows: saved_index vs actual_index (detects order changes)
+      • Removed noisy per-frame debug messages
+      • Lines: 1094-1097, 1077-1080, 2010-2013, 2027-2030
+    - FIXED: Store original FX name (with VST3:/CLAP: prefix) instead of processed name.
+      • Problem: FX Name settings (Show Type: OFF) would strip prefixes before saving
+      • Result: Name matching failed after FX order changes
+      • Solution: Read raw FX name directly from track when saving
+      • Line: 3109-3113, 3136 (get original_fx_name and use for storage)
+    - IMPROVED: Open button now adapts to FX order changes.
+      • Method 1: Try saved fx_index with name verification
+      • Method 2: Search by name if index position changed
+      • Debug output shows both saved and actual positions
+      • Lines: 1982-2021 (smart FX matching in open_saved_chain_fx)
+
+  [Internal Build 251214.2030] - PRESET SAVE AND DISPLAY FIXES
     - Fixed: Save dialog input field now pre-filled with default value.
       • Chain mode: Pre-filled with track name (e.g., "test" not "#1 - test")
       • Focused mode: Pre-filled with FX name
@@ -44,6 +82,31 @@
       • New: Only call EndChild if BeginChild returns true (successful)
       • Prevents "child_window->Flags & ImGuiWindowFlags_ChildWindow" assertion failures
       • Lines: 2712, 2769, 2844 (BeginChild return value checks)
+    - Fixed: Focused FX preset hover tooltip now shows FX name instead of chain info.
+      • Previous: Hovering over focused FX preset showed entire track FX chain
+      • New: Shows only the saved FX name (e.g., "VST3: Pro-Q 4 (FabFilter)")
+      • Lines: 1075-1077 (focused mode FX info)
+    - Fixed: Focused FX preset rename now uses FX name as default, not track name.
+      • Previous: Empty rename input defaulted to track name (chain behavior)
+      • New: Focused FX uses saved FX name, Chain uses track name
+      • Lines: 1100-1106 (focused mode display name logic)
+    - Fixed: Rename dialog now pre-fills with current preset name.
+      • Previous: Rename input field was empty, requiring full re-type
+      • New: Pre-filled with current name (custom name or default name)
+      • Allows quick edits like adding numbers or removing words
+      • Lines: 2797-2809 (rename dialog pre-fill logic)
+    - Fixed: Save dialog now correctly saves user input as custom name.
+      • Previous: Chain mode always ignored user input, saved as dynamic track name
+      • Previous: Focused mode saved input field value even if unmodified (wrong default)
+      • New: Compares user input with initial default value
+      • If unchanged or empty → saves as nil (uses dynamic name)
+      • If modified → saves as custom name
+      • Lines: 2718-2726 (store default), 2926-2969 (custom name logic)
+    - Fixed: Hover tooltip now shows real-time track info for both chain and focused FX.
+      • First line: #track_number: track_name (updates dynamically)
+      • Chain mode: Shows numbered FX list (1. Plugin Name, 2. Plugin Name...)
+      • Focused FX mode: Shows only the current full FX name from track (not saved name)
+      • Lines: 1079-1157 (get_chain_display_info updates)
     - Purpose: Better UX - users can see and modify the default value directly.
 
   [Internal Build 251214.1530] - UI POLISH AND SAVE IMPROVEMENTS
@@ -796,12 +859,14 @@ local gui = {
   is_running = false,
   last_result = "",
   focused_fx_name = "",
+  focused_fx_index = nil,  -- Store FX index for focused mode
   focused_track = nil,
   focused_track_name = "",
   focused_track_fx_list = {},
   saved_chains = {},
   history = {},
   new_chain_name = "",
+  new_chain_name_default = "",  -- Store initial default value to detect if user modified
   new_fx_preset_name = "",
   show_save_popup = false,
   show_save_fx_popup = false,
@@ -983,20 +1048,25 @@ local function load_saved_chains()
   while true do
     local ok, data = r.GetProjExtState(0, CHAIN_NAMESPACE, "chain_" .. idx)
     if ok == 0 or data == "" then break end
-    -- Format: name|guid|track_name|custom_name|mode
-    -- For backward compatibility: if no custom_name or mode, they will be nil/"chain"
+    -- Format: name|guid|track_name|custom_name|mode|fx_index
+    -- For backward compatibility: if no custom_name, mode, or fx_index, they will be nil/"chain"/nil
     local parts = {}
     for part in (data .. "|"):gmatch("([^|]*)|") do
       table.insert(parts, part)
     end
-    local name, guid, track_name, custom_name, mode = parts[1], parts[2], parts[3], parts[4], parts[5]
+    local name, guid, track_name, custom_name, mode, fx_index_str = parts[1], parts[2], parts[3], parts[4], parts[5], parts[6]
     if name and guid then
+      local fx_index = nil
+      if fx_index_str and fx_index_str ~= "" then
+        fx_index = tonumber(fx_index_str)
+      end
       gui.saved_chains[#gui.saved_chains + 1] = {
         name = name,
         track_guid = guid,
         track_name = track_name or "",
         custom_name = (custom_name and custom_name ~= "") and custom_name or nil,
         mode = (mode and mode ~= "") and mode or "chain",  -- Default to "chain" for backward compatibility
+        fx_index = fx_index,  -- Load fx_index
       }
     end
     idx = idx + 1
@@ -1012,24 +1082,30 @@ local function save_chains_to_extstate()
     idx = idx + 1
   end
   for i, chain in ipairs(gui.saved_chains) do
-    local data = string.format("%s|%s|%s|%s|%s",
+    local data = string.format("%s|%s|%s|%s|%s|%s",
       chain.name,
       chain.track_guid,
       chain.track_name,
       chain.custom_name or "",
-      chain.mode or "chain")
+      chain.mode or "chain",
+      tostring(chain.fx_index or ""))  -- Add fx_index field
     r.SetProjExtState(0, CHAIN_NAMESPACE, "chain_" .. (i - 1), data)
   end
 end
 
-local function add_saved_chain(name, track_guid, track_name, custom_name, mode)
+local function add_saved_chain(name, track_guid, track_name, custom_name, mode, fx_index)
   gui.saved_chains[#gui.saved_chains + 1] = {
     name = name,
     track_guid = track_guid,
     track_name = track_name,
     custom_name = custom_name,
     mode = mode or "chain",
+    fx_index = fx_index,  -- Store FX index for focused mode
   }
+  if gui.debug then
+    r.ShowConsoleMsg(string.format("[AudioSweet] Save preset: name='%s', mode='%s', fx_index=%s\n",
+      name or "nil", mode or "chain", tostring(fx_index or "nil")))
+  end
   save_chains_to_extstate()
 end
 
@@ -1040,7 +1116,12 @@ end
 
 local function rename_saved_chain(idx, new_custom_name)
   if gui.saved_chains[idx] then
-    gui.saved_chains[idx].custom_name = (new_custom_name and new_custom_name ~= "") and new_custom_name or nil
+    local chain = gui.saved_chains[idx]
+    chain.custom_name = (new_custom_name and new_custom_name ~= "") and new_custom_name or nil
+    if gui.debug then
+      r.ShowConsoleMsg(string.format("[AudioSweet] Rename preset #%d: custom_name='%s', mode='%s'\n",
+        idx, tostring(chain.custom_name or "nil"), chain.mode or "chain"))
+    end
     save_chains_to_extstate()
   end
 end
@@ -1057,11 +1138,15 @@ local function find_track_by_guid(guid)
 end
 
 -- Get display name and current info for a saved chain
+-- Returns: display_name, track_info_line, fx_info, saved_fx_index
 local function get_chain_display_info(chain)
   local display_name = chain.name  -- fallback
   local current_track_name = nil
   local fx_info = ""
   local track_number = nil
+  local track_info_line = ""  -- First line for tooltip: #track_number: track_name
+  local saved_fx_index = nil  -- For focused mode: which FX is the saved one
+  local found_fx_name = nil  -- For focused mode: current FX name from track
 
   -- Try to find the track by GUID
   local tr = find_track_by_guid(chain.track_guid)
@@ -1071,44 +1156,106 @@ local function get_chain_display_info(chain)
     current_track_name = track_name
     track_number = r.GetMediaTrackInfo_Value(tr, "IP_TRACKNUMBER")  -- 1-based
 
-    -- Build FX list (vertical, like FX insert)
-    local fx_count = r.TrackFX_GetCount(tr)
-    if fx_count > 0 then
-      local fx_lines = {}
-      for i = 0, fx_count - 1 do
-        local _, fx_name = r.TrackFX_GetFXName(tr, i, "")
-        -- fx_name format: "VST3: Pro-Q 4 (FabFilter)" or "JS: ReaEQ"
-        -- Keep the full name including plugin type
-        -- Format: "1. [Plugin Type]: FX Name"
-        table.insert(fx_lines, string.format("%d. %s", i + 1, fx_name))
+    -- Build track info line for tooltip (always show #number: name)
+    track_info_line = string.format("#%d: %s", track_number, track_name)
+
+    -- Build FX info based on mode
+    if chain.mode == "focused" then
+      -- For focused FX: show entire FX chain, mark the saved FX
+      local found_fx_idx = nil
+
+      -- Method 1: Try to use saved fx_index if available
+      if chain.fx_index then
+        local fx_count = r.TrackFX_GetCount(tr)
+        if chain.fx_index < fx_count then
+          local _, fx_name = r.TrackFX_GetFXName(tr, chain.fx_index, "")
+          -- Verify this is still the same FX (name should match or contain saved name)
+          if fx_name and (fx_name == chain.name or fx_name:find(chain.name, 1, true)) then
+            found_fx_name = fx_name
+            found_fx_idx = chain.fx_index
+          end
+        end
       end
-      fx_info = table.concat(fx_lines, "\n")
+
+      -- Method 2: If index didn't work, search by exact name match
+      if not found_fx_name then
+        local fx_count = r.TrackFX_GetCount(tr)
+        for i = 0, fx_count - 1 do
+          local _, fx_name = r.TrackFX_GetFXName(tr, i, "")
+          -- Only exact match to avoid matching wrong FX
+          if fx_name == chain.name then
+            found_fx_name = fx_name
+            found_fx_idx = i
+            break
+          end
+        end
+      end
+
+      -- Build full FX chain list, same as chain mode
+      saved_fx_index = found_fx_idx  -- Store for tooltip coloring
+      local fx_count = r.TrackFX_GetCount(tr)
+      if fx_count > 0 then
+        local fx_lines = {}
+        for i = 0, fx_count - 1 do
+          local _, fx_name = r.TrackFX_GetFXName(tr, i, "")
+          table.insert(fx_lines, string.format("%d. %s", i + 1, fx_name))
+        end
+        fx_info = table.concat(fx_lines, "\n")
+      else
+        fx_info = "No FX"
+      end
     else
-      fx_info = "No FX"
+      -- For chain mode: show entire FX chain list
+      local fx_count = r.TrackFX_GetCount(tr)
+      if fx_count > 0 then
+        local fx_lines = {}
+        for i = 0, fx_count - 1 do
+          local _, fx_name = r.TrackFX_GetFXName(tr, i, "")
+          -- fx_name format: "VST3: Pro-Q 4 (FabFilter)" or "JS: ReaEQ"
+          -- Keep the full name including plugin type
+          -- Format: "1. [Plugin Type]: FX Name"
+          table.insert(fx_lines, string.format("%d. %s", i + 1, fx_name))
+        end
+        fx_info = table.concat(fx_lines, "\n")
+      else
+        fx_info = "No FX"
+      end
     end
   else
-    fx_info = "Track not found"
+    track_info_line = "Track not found"
+    fx_info = ""
   end
 
-  -- Determine display name: custom name OR current track name OR saved track name
-  if chain.custom_name and chain.custom_name ~= "" then
-    display_name = chain.custom_name
-    -- Add track# prefix for custom names only if it's a chain
-    if chain.mode == "chain" and track_number then
-      display_name = string.format("#%d %s", track_number, display_name)
-    end
-  elseif current_track_name then
-    -- Add track# prefix only for chain mode (not for focused mode)
-    if chain.mode == "chain" and track_number then
-      display_name = string.format("#%d %s", track_number, current_track_name)
+  -- Determine display name based on mode
+  if chain.mode == "focused" then
+    -- Focused FX mode: use custom name OR current FX name from track (real-time)
+    if chain.custom_name and chain.custom_name ~= "" then
+      display_name = chain.custom_name
     else
-      display_name = current_track_name
+      -- Use current FX name from track, fallback to saved name
+      display_name = found_fx_name or chain.name
     end
   else
-    display_name = chain.track_name  -- fallback to saved name
+    -- Chain mode: use custom name OR current track name OR saved track name
+    if chain.custom_name and chain.custom_name ~= "" then
+      display_name = chain.custom_name
+      -- Add track# prefix for custom names
+      if track_number then
+        display_name = string.format("#%d %s", track_number, display_name)
+      end
+    elseif current_track_name then
+      -- Add track# prefix for dynamic track names
+      if track_number then
+        display_name = string.format("#%d %s", track_number, current_track_name)
+      else
+        display_name = current_track_name
+      end
+    else
+      display_name = chain.track_name  -- fallback to saved name
+    end
   end
 
-  return display_name, current_track_name, fx_info
+  return display_name, track_info_line, fx_info, saved_fx_index
 end
 
 -- Get display name for a history item with current track info
@@ -1204,16 +1351,16 @@ local function get_focused_fx_info()
     if tr then
       local fx_index = normalize_focused_fx_index(fxOut or 0)
       local _, name = r.TrackFX_GetFXName(tr, fx_index, "")
-      return true, "Track FX", name or "(unknown)", tr
+      return true, "Track FX", name or "(unknown)", tr, fx_index
     end
   elseif retval == 2 then
-    return true, "Take FX", "(Take FX not supported)", nil
+    return true, "Take FX", "(Take FX not supported)", nil, nil
   end
-  return false, "None", "No focused FX", nil
+  return false, "None", "No focused FX", nil, nil
 end
 
 local function update_focused_fx_display()
-  local found, fx_type, fx_name, tr = get_focused_fx_info()
+  local found, fx_type, fx_name, tr, fx_index = get_focused_fx_info()
 
   -- In Chain mode: if no focused FX, try to use first selected track with FX
   if gui.mode == 1 and not found then
@@ -1233,6 +1380,7 @@ local function update_focused_fx_display()
   if found then
     if fx_type == "Track FX" then
       gui.focused_fx_name = fx_name
+      gui.focused_fx_index = fx_index  -- Store FX index
       if tr then
         local track_name, track_num = get_track_name_and_number(tr)
         gui.focused_track_name = string.format("#%d - %s", track_num, track_name)
@@ -1241,12 +1389,14 @@ local function update_focused_fx_display()
       return true
     else
       gui.focused_fx_name = fx_name .. " (WARNING)"
+      gui.focused_fx_index = nil
       gui.focused_track_name = ""
       gui.focused_track_fx_list = {}
       return false
     end
   else
     gui.focused_fx_name = "No focused FX"
+    gui.focused_fx_index = nil
     gui.focused_track_name = ""
     gui.focused_track_fx_list = {}
     return false
@@ -1836,15 +1986,50 @@ local function open_saved_chain_fx(chain_idx)
 
   -- Determine window type based on how it was saved
   if chain.mode == "focused" then
-    -- Focused FX preset: toggle floating window for first FX
-    local fx_idx = 0
+    -- Focused FX preset: toggle floating window for the specific FX
+    local fx_idx = nil
+    local found_fx_name = nil
+
+    -- Method 1: Try saved fx_index first
+    if chain.fx_index and chain.fx_index < fx_count then
+      local _, fx_name = r.TrackFX_GetFXName(tr, chain.fx_index, "")
+      -- Verify this is still the same FX
+      if fx_name == chain.name then
+        fx_idx = chain.fx_index
+        found_fx_name = fx_name
+      end
+    end
+
+    -- Method 2: If index didn't match, search by name
+    if not fx_idx then
+      for i = 0, fx_count - 1 do
+        local _, fx_name = r.TrackFX_GetFXName(tr, i, "")
+        if fx_name == chain.name then
+          fx_idx = i
+          found_fx_name = fx_name
+          break
+        end
+      end
+    end
+
+    -- Check if FX was found
+    if not fx_idx then
+      gui.last_result = string.format("Error: FX '%s' not found on track", chain.name)
+      return
+    end
+
+    if gui.debug then
+      r.ShowConsoleMsg(string.format("[AudioSweet] Open preset: saved_name='%s', saved_index=%s, actual_index=%d, actual_name='%s'\n",
+        chain.name, tostring(chain.fx_index or "nil"), fx_idx, found_fx_name))
+    end
+
     local is_open = r.TrackFX_GetOpen(tr, fx_idx)
     if is_open then
       r.TrackFX_Show(tr, fx_idx, 2)  -- Hide floating window
     else
       r.TrackFX_Show(tr, fx_idx, 3)  -- Show floating window
     end
-    gui.last_result = string.format("Toggled FX: %s", chain.name)
+    gui.last_result = string.format("Toggled FX #%d: %s", fx_idx + 1, found_fx_name)
   else
     -- Chain preset: toggle FX chain window
     local chain_visible = r.TrackFX_GetChainVisible(tr)
@@ -1910,6 +2095,11 @@ end
 local function run_saved_chain(chain_idx)
   local chain = gui.saved_chains[chain_idx]
   if not chain then return end
+
+  if gui.debug then
+    r.ShowConsoleMsg(string.format("[AudioSweet] Run preset #%d: name='%s', mode='%s', fx_index=%s\n",
+      chain_idx, chain.name, chain.mode or "chain", tostring(chain.fx_index or "nil")))
+  end
 
   local tr = find_track_by_guid(chain.track_guid)
   if not tr then
@@ -2689,8 +2879,10 @@ local function draw_gui()
         -- Extract only track name without "#N - " prefix
         local track_name, _ = get_track_name_and_number(gui.focused_track)
         gui.new_chain_name = track_name
+        gui.new_chain_name_default = track_name  -- Store default
       else
         gui.new_chain_name = gui.focused_fx_name
+        gui.new_chain_name_default = gui.focused_fx_name  -- Store default
       end
     end
     if not save_button_enabled then ImGui.EndDisabled(ctx) end
@@ -2718,7 +2910,7 @@ local function draw_gui()
             ImGui.PushID(ctx, i)
 
             -- Get display info
-            local display_name, current_track_name, fx_info = get_chain_display_info(chain)
+            local display_name, track_info_line, fx_info, saved_fx_index = get_chain_display_info(chain)
 
             -- "Open" button (small, on the left)
             if ImGui.SmallButton(ctx, "Open") then
@@ -2732,11 +2924,37 @@ local function draw_gui()
               run_saved_chain(i)
             end
 
-            -- Hover tooltip showing current FX chain info
+            -- Hover tooltip showing track and FX info
             if ImGui.IsItemHovered(ctx) then
-              ImGui.SetTooltip(ctx, string.format("%s\n%s",
-                current_track_name and ("Track: " .. current_track_name) or "Track not found",
-                fx_info))
+              if fx_info ~= "" then
+                ImGui.BeginTooltip(ctx)
+                ImGui.Text(ctx, track_info_line)
+
+                -- For focused mode with saved_fx_index, color the saved FX line green
+                if chain.mode == "focused" and saved_fx_index ~= nil then
+                  local fx_lines = {}
+                  for line in fx_info:gmatch("[^\n]+") do
+                    table.insert(fx_lines, line)
+                  end
+                  for idx, line in ipairs(fx_lines) do
+                    if idx - 1 == saved_fx_index then
+                      -- This is the saved FX - color it green
+                      ImGui.PushStyleColor(ctx, ImGui.Col_Text, 0x00FF00FF)  -- Green
+                      ImGui.Text(ctx, line)
+                      ImGui.PopStyleColor(ctx)
+                    else
+                      ImGui.Text(ctx, line)
+                    end
+                  end
+                else
+                  -- Chain mode or no saved_fx_index - just display normally
+                  ImGui.Text(ctx, fx_info)
+                end
+
+                ImGui.EndTooltip(ctx)
+              else
+                ImGui.SetTooltip(ctx, track_info_line)
+              end
             end
 
             -- Right-click context menu for renaming
@@ -2744,7 +2962,19 @@ local function draw_gui()
               if ImGui.MenuItem(ctx, "Rename") then
                 gui.show_rename_popup = true
                 gui.rename_chain_idx = i
-                gui.rename_chain_name = chain.custom_name or ""
+                -- Pre-fill with current custom name, or use display name (without track# prefix for chains)
+                if chain.custom_name and chain.custom_name ~= "" then
+                  gui.rename_chain_name = chain.custom_name
+                else
+                  -- Use the base name without track# prefix
+                  if chain.mode == "focused" then
+                    gui.rename_chain_name = chain.name  -- FX name for focused mode
+                  else
+                    -- For chain mode, extract track name from track_info_line (#N: name)
+                    local extracted_name = track_info_line:match("^#%d+: (.+)$")
+                    gui.rename_chain_name = extracted_name or chain.track_name or ""
+                  end
+                end
               end
               ImGui.EndPopup(ctx)
             end
@@ -2882,39 +3112,66 @@ local function draw_gui()
     ImGui.Spacing(ctx)
     if ImGui.Button(ctx, "Save", 100, 0) or ImGui.IsKeyPressed(ctx, ImGui.Key_Enter) then
       if gui.focused_track then
-        local final_name = gui.new_chain_name
-        -- Use default name if empty
-        if final_name == "" then
-          if gui.mode == 1 then
-            -- Chain mode: use track name as default
-            local track_name, _ = get_track_name_and_number(gui.focused_track)
-            final_name = track_name
-          else
-            -- Focused mode: use FX name as default
-            final_name = gui.focused_fx_name
-          end
+        local user_input = gui.new_chain_name
+        local default_value = gui.new_chain_name_default
+
+        -- Determine final_name and custom_name
+        local final_name
+        local custom_name = nil
+
+        if user_input == "" then
+          -- User cleared the field → use default name, no custom name
+          final_name = default_value
+          custom_name = nil
+        elseif user_input == default_value then
+          -- User kept default value → use default name, no custom name
+          final_name = default_value
+          custom_name = nil
+        else
+          -- User modified the name → use user's input as both final_name and custom_name
+          final_name = user_input
+          custom_name = user_input
         end
 
         -- Check for duplicates
         local duplicate_found = false
+        local track_guid = get_track_guid(gui.focused_track)
+        local mode = (gui.mode == 1) and "chain" or "focused"
+        local fx_index = (mode == "focused") and gui.focused_fx_index or nil
+
+        -- For focused mode: get the ORIGINAL FX name from track (not processed by FX name settings)
+        local original_fx_name = nil
+        if mode == "focused" and fx_index ~= nil then
+          local _, raw_fx_name = r.TrackFX_GetFXName(gui.focused_track, fx_index, "")
+          original_fx_name = raw_fx_name
+        end
+
         for _, chain in ipairs(gui.saved_chains) do
-          if chain.name == final_name and chain.track_guid == get_track_guid(gui.focused_track) then
-            duplicate_found = true
-            break
+          -- For focused mode: check by track_guid + fx_index (same FX)
+          -- For chain mode: check by track_guid + name (same track with same name)
+          if mode == "focused" and chain.mode == "focused" then
+            if chain.track_guid == track_guid and chain.fx_index == fx_index then
+              duplicate_found = true
+              break
+            end
+          else
+            if chain.name == final_name and chain.track_guid == track_guid then
+              duplicate_found = true
+              break
+            end
           end
         end
 
         if duplicate_found then
-          gui.last_result = "Error: Preset with this name already exists"
+          gui.last_result = "Error: This FX preset already exists"
         else
-          local track_guid = get_track_guid(gui.focused_track)
-          local mode = (gui.mode == 1) and "chain" or "focused"
-          -- For chain mode: no custom name (use dynamic track name)
-          -- For focused mode: use custom name only if user modified it
-          local custom_name = (mode == "focused" and gui.new_chain_name ~= "") and gui.new_chain_name or nil
-          add_saved_chain(final_name, track_guid, gui.focused_track_name, custom_name, mode)
+          -- For focused mode: use original FX name (with VST3:/CLAP: prefix) for internal storage
+          -- For chain mode: use final_name (track name)
+          local storage_name = (mode == "focused" and original_fx_name) or final_name
+          add_saved_chain(storage_name, track_guid, gui.focused_track_name, custom_name, mode, fx_index)
           gui.last_result = "Success: Preset saved"
           gui.new_chain_name = ""
+          gui.new_chain_name_default = ""
           ImGui.CloseCurrentPopup(ctx)
         end
       end
