@@ -20,13 +20,31 @@
 
 
 @changelog
-  0.1.0 [Internal Build 251214.1835] - SAVE DIALOG INPUT FIX
-    - Fixed: Save dialog input field now shows only track name (without "#N - " prefix).
-      • Previous: Input field showed "#1 - test" when saving chain preset
-      • New: Input field shows only "test" (clean track name)
-      • Reason: Dialog header already displays "Track #1 - Preset Name:"
-      • Line: 2663-2665 (extract track name using get_track_name_and_number)
-    - Purpose: Remove redundant track number prefix from input field for cleaner UX.
+  0.1.0 [Internal Build 251214.2030] - SAVE DIALOG DEFAULT VALUE FIX
+    - Fixed: Save dialog input field now pre-filled with default value.
+      • Chain mode: Pre-filled with track name (e.g., "test" not "#1 - test")
+      • Focused mode: Pre-filled with FX name
+      • Previous: Input field was empty, confusing what the default would be
+      • New: Shows the actual default value user can edit or clear
+      • Line: 2671-2673 (extract track name using get_track_name_and_number)
+    - Improved: Save dialog now shows hint text "(leave empty to use default)".
+      • Consistent with Rename dialog behavior
+      • Clarifies that empty input will use default naming
+      • Line: 2864 (hint text)
+    - Fixed: Save dialog now properly handles empty input (uses default name).
+      • Chain mode empty → uses track name as preset name
+      • Focused mode empty → uses FX name as preset name
+      • Lines: 2875-2884 (default name handling)
+    - Fixed: Focused FX presets no longer show "#N" prefix when using default name.
+      • Previous: Focused FX with empty/default name showed "#1 track_name"
+      • New: Only chain mode shows "#N" prefix, focused mode shows clean name
+      • Lines: 1092-1097 (mode-based track# prefix logic)
+    - Fixed: ImGui.BeginChild() assertion errors by checking return value.
+      • Previous: BeginChild could fail but EndChild still executed → assertion error
+      • New: Only call EndChild if BeginChild returns true (successful)
+      • Prevents "child_window->Flags & ImGuiWindowFlags_ChildWindow" assertion failures
+      • Lines: 2712, 2769, 2844 (BeginChild return value checks)
+    - Purpose: Better UX - users can see and modify the default value directly.
 
   [Internal Build 251214.1530] - UI POLISH AND SAVE IMPROVEMENTS
     - Fixed: Status message moved above FX info area to prevent Saved/History buttons from jumping.
@@ -1080,8 +1098,8 @@ local function get_chain_display_info(chain)
       display_name = string.format("#%d %s", track_number, display_name)
     end
   elseif current_track_name then
-    -- Add track# prefix for dynamic track names
-    if track_number then
+    -- Add track# prefix only for chain mode (not for focused mode)
+    if chain.mode == "chain" and track_number then
       display_name = string.format("#%d %s", track_number, current_track_name)
     else
       display_name = current_track_name
@@ -2692,54 +2710,55 @@ local function draw_gui()
 
       -- Left: Saved FX Preset
       if gui.enable_saved_chains and #gui.saved_chains > 0 then
-        ImGui.BeginChild(ctx, "SavedCol", col1_w, 200, ImGui.WindowFlags_None)
-        ImGui.Text(ctx, "SAVED FX PRESET")
-        ImGui.Separator(ctx)
-        local to_delete = nil
-        for i, chain in ipairs(gui.saved_chains) do
-          ImGui.PushID(ctx, i)
+        if ImGui.BeginChild(ctx, "SavedCol", col1_w, 200) then
+          ImGui.Text(ctx, "SAVED FX PRESET")
+          ImGui.Separator(ctx)
+          local to_delete = nil
+          for i, chain in ipairs(gui.saved_chains) do
+            ImGui.PushID(ctx, i)
 
-          -- Get display info
-          local display_name, current_track_name, fx_info = get_chain_display_info(chain)
+            -- Get display info
+            local display_name, current_track_name, fx_info = get_chain_display_info(chain)
 
-          -- "Open" button (small, on the left)
-          if ImGui.SmallButton(ctx, "Open") then
-            open_saved_chain_fx(i)
-          end
-          ImGui.SameLine(ctx)
-
-          -- Chain name button (executes AudioSweet) - use available width minus Delete button
-          local avail_width = ImGui.GetContentRegionAvail(ctx) - 25  -- Space for "X" button
-          if ImGui.Button(ctx, display_name, avail_width, 0) then
-            run_saved_chain(i)
-          end
-
-          -- Hover tooltip showing current FX chain info
-          if ImGui.IsItemHovered(ctx) then
-            ImGui.SetTooltip(ctx, string.format("%s\n%s",
-              current_track_name and ("Track: " .. current_track_name) or "Track not found",
-              fx_info))
-          end
-
-          -- Right-click context menu for renaming
-          if ImGui.BeginPopupContextItem(ctx, "chain_context_" .. i) then
-            if ImGui.MenuItem(ctx, "Rename") then
-              gui.show_rename_popup = true
-              gui.rename_chain_idx = i
-              gui.rename_chain_name = chain.custom_name or ""
+            -- "Open" button (small, on the left)
+            if ImGui.SmallButton(ctx, "Open") then
+              open_saved_chain_fx(i)
             end
-            ImGui.EndPopup(ctx)
-          end
+            ImGui.SameLine(ctx)
 
-          ImGui.SameLine(ctx)
-          -- Delete button
-          if ImGui.Button(ctx, "X", 20, 0) then
-            to_delete = i
+            -- Chain name button (executes AudioSweet) - use available width minus Delete button
+            local avail_width = ImGui.GetContentRegionAvail(ctx) - 25  -- Space for "X" button
+            if ImGui.Button(ctx, display_name, avail_width, 0) then
+              run_saved_chain(i)
+            end
+
+            -- Hover tooltip showing current FX chain info
+            if ImGui.IsItemHovered(ctx) then
+              ImGui.SetTooltip(ctx, string.format("%s\n%s",
+                current_track_name and ("Track: " .. current_track_name) or "Track not found",
+                fx_info))
+            end
+
+            -- Right-click context menu for renaming
+            if ImGui.BeginPopupContextItem(ctx, "chain_context_" .. i) then
+              if ImGui.MenuItem(ctx, "Rename") then
+                gui.show_rename_popup = true
+                gui.rename_chain_idx = i
+                gui.rename_chain_name = chain.custom_name or ""
+              end
+              ImGui.EndPopup(ctx)
+            end
+
+            ImGui.SameLine(ctx)
+            -- Delete button
+            if ImGui.Button(ctx, "X", 20, 0) then
+              to_delete = i
+            end
+            ImGui.PopID(ctx)
           end
-          ImGui.PopID(ctx)
+          if to_delete then delete_saved_chain(to_delete) end
+          ImGui.EndChild(ctx)
         end
-        if to_delete then delete_saved_chain(to_delete) end
-        ImGui.EndChild(ctx)
 
         ImGui.SameLine(ctx)
       end
@@ -2748,33 +2767,34 @@ local function draw_gui()
       if gui.enable_history and #gui.history > 0 then
         -- Calculate height based on number of history items (each item ~25px, header ~40px)
         local history_height = math.min(#gui.history * 25 + 40, 200)  -- Max 200px
-        ImGui.BeginChild(ctx, "HistoryCol", 0, history_height, ImGui.WindowFlags_None)
-        ImGui.Text(ctx, "HISTORY")
-        ImGui.SameLine(ctx)
-        ImGui.SetCursorPosX(ctx, ImGui.GetCursorPosX(ctx) + ImGui.GetContentRegionAvail(ctx) - 45)
-        if ImGui.SmallButton(ctx, "Clear") then
-          gui.history = {}
-          -- Clear from ProjExtState
-          for i = 0, gui.max_history - 1 do
-            r.SetProjExtState(0, HISTORY_NAMESPACE, "hist_" .. i, "")
-          end
-        end
-        ImGui.Separator(ctx)
-        for i, item in ipairs(gui.history) do
-          ImGui.PushID(ctx, 1000 + i)
-          -- "Open" button (small, on the left)
-          if ImGui.SmallButton(ctx, "Open") then
-            open_history_fx(i)
-          end
+        if ImGui.BeginChild(ctx, "HistoryCol", 0, history_height) then
+          ImGui.Text(ctx, "HISTORY")
           ImGui.SameLine(ctx)
-          -- History item name button (executes AudioSweet) - use dynamic name
-          local display_name = get_history_display_name(item)
-          if ImGui.Button(ctx, display_name, -1, 0) then
-            run_history_item(i)
+          ImGui.SetCursorPosX(ctx, ImGui.GetCursorPosX(ctx) + ImGui.GetContentRegionAvail(ctx) - 45)
+          if ImGui.SmallButton(ctx, "Clear") then
+            gui.history = {}
+            -- Clear from ProjExtState
+            for i = 0, gui.max_history - 1 do
+              r.SetProjExtState(0, HISTORY_NAMESPACE, "hist_" .. i, "")
+            end
           end
-          ImGui.PopID(ctx)
+          ImGui.Separator(ctx)
+          for i, item in ipairs(gui.history) do
+            ImGui.PushID(ctx, 1000 + i)
+            -- "Open" button (small, on the left)
+            if ImGui.SmallButton(ctx, "Open") then
+              open_history_fx(i)
+            end
+            ImGui.SameLine(ctx)
+            -- History item name button (executes AudioSweet) - use dynamic name
+            local display_name = get_history_display_name(item)
+            if ImGui.Button(ctx, display_name, -1, 0) then
+              run_history_item(i)
+            end
+            ImGui.PopID(ctx)
+          end
+          ImGui.EndChild(ctx)
         end
-        ImGui.EndChild(ctx)
       end
     end
   else
@@ -2824,12 +2844,13 @@ local function draw_gui()
     local fx_count = #gui.focused_track_fx_list
     local calculated_height = math.min(fx_count * line_height, max_height)
 
-    ImGui.BeginChild(ctx, "FXChainList", 0, calculated_height, ImGui.WindowFlags_None)
-    for _, fx in ipairs(gui.focused_track_fx_list) do
-      local status = fx.offline and "[offline]" or (fx.enabled and "[on]" or "[byp]")
-      ImGui.Text(ctx, string.format("%02d) %s %s", fx.index + 1, fx.name, status))
+    if ImGui.BeginChild(ctx, "FXChainList", 0, calculated_height) then
+      for _, fx in ipairs(gui.focused_track_fx_list) do
+        local status = fx.offline and "[offline]" or (fx.enabled and "[on]" or "[byp]")
+        ImGui.Text(ctx, string.format("%02d) %s %s", fx.index + 1, fx.name, status))
+      end
+      ImGui.EndChild(ctx)
     end
-    ImGui.EndChild(ctx)
   end
 
   ImGui.End(ctx)
@@ -2852,6 +2873,7 @@ local function draw_gui()
     else
       ImGui.Text(ctx, "Preset Name:")
     end
+    ImGui.TextDisabled(ctx, "(leave empty to use default)")
     ImGui.Spacing(ctx)
 
     local rv, new_name = ImGui.InputText(ctx, "##presetname", gui.new_chain_name, 256)
@@ -2859,8 +2881,20 @@ local function draw_gui()
 
     ImGui.Spacing(ctx)
     if ImGui.Button(ctx, "Save", 100, 0) or ImGui.IsKeyPressed(ctx, ImGui.Key_Enter) then
-      local final_name = gui.new_chain_name
-      if final_name ~= "" and gui.focused_track then
+      if gui.focused_track then
+        local final_name = gui.new_chain_name
+        -- Use default name if empty
+        if final_name == "" then
+          if gui.mode == 1 then
+            -- Chain mode: use track name as default
+            local track_name, _ = get_track_name_and_number(gui.focused_track)
+            final_name = track_name
+          else
+            -- Focused mode: use FX name as default
+            final_name = gui.focused_fx_name
+          end
+        end
+
         -- Check for duplicates
         local duplicate_found = false
         for _, chain in ipairs(gui.saved_chains) do
@@ -2876,8 +2910,8 @@ local function draw_gui()
           local track_guid = get_track_guid(gui.focused_track)
           local mode = (gui.mode == 1) and "chain" or "focused"
           -- For chain mode: no custom name (use dynamic track name)
-          -- For focused mode: use FX name as custom name
-          local custom_name = (mode == "focused") and final_name or nil
+          -- For focused mode: use custom name only if user modified it
+          local custom_name = (mode == "focused" and gui.new_chain_name ~= "") and gui.new_chain_name or nil
           add_saved_chain(final_name, track_guid, gui.focused_track_name, custom_name, mode)
           gui.last_result = "Success: Preset saved"
           gui.new_chain_name = ""
