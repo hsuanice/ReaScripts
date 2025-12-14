@@ -20,7 +20,19 @@
 
 
 @changelog
-  0.1.0 [Internal Build 251215.0005] - CODE REFACTORING & UI CONSISTENCY
+  0.1.0 [Internal Build 251215.0020] - FUNCTION ORDERING FIX
+    - FIXED: Saved focused FX presets now execute without errors.
+      • Problem: Clicking saved focused FX preset crashed with "attempt to call a nil value (global 'run_history_focused_apply')"
+      • Root cause: run_saved_chain() called run_history_focused_apply() which was defined AFTER it (forward reference error in Lua)
+      • Solution: Moved run_history_focused_apply() definition before run_saved_chain()
+      • Impact: All saved focused FX presets now work correctly
+      • Lines: 2214-2282 (run_history_focused_apply), 2284-2335 (run_saved_chain)
+    - EXPLANATION: Why history worked but saved presets didn't.
+      • History calls run_history_item() → run_history_focused_apply() (both in correct order)
+      • Saved presets call run_saved_chain() → run_history_focused_apply() (was in wrong order)
+      • Fixed by reordering function definitions to eliminate forward reference
+
+  [Internal Build 251215.0005] - CODE REFACTORING & UI CONSISTENCY
     - REFACTORED: Unified tooltip display for saved presets and history.
       • Created shared show_preset_tooltip() function
       • Eliminated duplicate code (~50 lines reduced to 3 lines per usage)
@@ -2211,59 +2223,6 @@ local function open_history_fx(hist_idx)
   end
 end
 
-local function run_saved_chain(chain_idx)
-  local chain = gui.saved_chains[chain_idx]
-  if not chain then return end
-
-  if gui.debug then
-    r.ShowConsoleMsg(string.format("[AudioSweet] Run preset #%d: name='%s', mode='%s', fx_index=%s\n",
-      chain_idx, chain.name, chain.mode or "chain", tostring(chain.fx_index or "nil")))
-  end
-
-  local tr = find_track_by_guid(chain.track_guid)
-  if not tr then
-    gui.last_result = string.format("Error: Track '%s' not found", chain.track_name)
-    return
-  end
-
-  local item_count = r.CountSelectedMediaItems(0)
-  if item_count == 0 then
-    gui.last_result = "Error: No items selected"
-    return
-  end
-
-  if gui.is_running then return end
-
-  gui.is_running = true
-  gui.last_result = "Running..."
-
-  r.Undo_BeginBlock()
-  r.PreventUIRefresh(1)
-
-  -- Execute based on saved mode (chain or focused)
-  if chain.mode == "focused" then
-    -- For focused mode, use stored FX index
-    if gui.action == 1 then
-      run_focused_fx_copy_mode(tr, chain.name, chain.fx_index or 0, item_count)
-    else
-      run_history_focused_apply(tr, chain.name, chain.fx_index or 0, item_count)
-    end
-  else
-    -- Chain mode - use chain execution
-    if gui.action == 1 then
-      run_saved_chain_copy_mode(tr, chain.name, item_count)
-    else
-      run_saved_chain_apply_mode(tr, chain.name, item_count)
-    end
-  end
-
-  -- Add to history with correct mode and fx_index
-  add_to_history(chain.name, chain.track_guid, chain.track_name, chain.mode or "chain", chain.fx_index or 0)
-
-  r.PreventUIRefresh(-1)
-  r.Undo_EndBlock(string.format("AudioSweet GUI: %s [%s]", gui.action == 1 and "Copy" or "Apply", chain.name), -1)
-end
-
 local function run_history_focused_apply(tr, fx_name, fx_idx, item_count)
   if gui.debug then
     r.ShowConsoleMsg(string.format("[AS GUI] History focused apply: '%s' (fx_idx=%d, items=%d)\n", fx_name, fx_idx, item_count))
@@ -2332,6 +2291,59 @@ local function run_history_focused_apply(tr, fx_name, fx_idx, item_count)
   end
 
   gui.is_running = false
+end
+
+local function run_saved_chain(chain_idx)
+  local chain = gui.saved_chains[chain_idx]
+  if not chain then return end
+
+  if gui.debug then
+    r.ShowConsoleMsg(string.format("[AudioSweet] Run preset #%d: name='%s', mode='%s', fx_index=%s\n",
+      chain_idx, chain.name, chain.mode or "chain", tostring(chain.fx_index or "nil")))
+  end
+
+  local tr = find_track_by_guid(chain.track_guid)
+  if not tr then
+    gui.last_result = string.format("Error: Track '%s' not found", chain.track_name)
+    return
+  end
+
+  local item_count = r.CountSelectedMediaItems(0)
+  if item_count == 0 then
+    gui.last_result = "Error: No items selected"
+    return
+  end
+
+  if gui.is_running then return end
+
+  gui.is_running = true
+  gui.last_result = "Running..."
+
+  r.Undo_BeginBlock()
+  r.PreventUIRefresh(1)
+
+  -- Execute based on saved mode (chain or focused)
+  if chain.mode == "focused" then
+    -- For focused mode, use stored FX index
+    if gui.action == 1 then
+      run_focused_fx_copy_mode(tr, chain.name, chain.fx_index or 0, item_count)
+    else
+      run_history_focused_apply(tr, chain.name, chain.fx_index or 0, item_count)
+    end
+  else
+    -- Chain mode - use chain execution
+    if gui.action == 1 then
+      run_saved_chain_copy_mode(tr, chain.name, item_count)
+    else
+      run_saved_chain_apply_mode(tr, chain.name, item_count)
+    end
+  end
+
+  -- Add to history with correct mode and fx_index
+  add_to_history(chain.name, chain.track_guid, chain.track_name, chain.mode or "chain", chain.fx_index or 0)
+
+  r.PreventUIRefresh(-1)
+  r.Undo_EndBlock(string.format("AudioSweet GUI: %s [%s]", gui.action == 1 and "Copy" or "Apply", chain.name), -1)
 end
 
 local function run_history_item(hist_idx)
