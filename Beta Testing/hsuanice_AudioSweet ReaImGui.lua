@@ -199,7 +199,14 @@
 
 
 @changelog
-  0.1.0 [Internal Build 251215.0050] - VERSION NUMBER CLEANUP
+  0.1.0 [Internal Build 251215.1225] - UI TEXT IMPROVEMENT
+    - IMPROVED: Copy settings label clarity.
+      • Changed "Copy:" to "Copy to:" for better readability
+      • More accurately describes the action (copying FX TO items)
+      • Line: 3169 (Copy settings label)
+    - PURPOSE: Clearer UI labeling for better user understanding
+
+  [Internal Build 251215.0050] - VERSION NUMBER CLEANUP
     - CHANGED: Simplified version number format.
       • @version: 0.1.0 (for ReaPack compatibility)
       • Help > About: Version 0.1.0 (251215)
@@ -3166,7 +3173,7 @@ local function draw_gui()
 
   -- === COPY/APPLY SETTINGS (Compact horizontal) ===
   if gui.action == 1 then
-    ImGui.Text(ctx, "Copy:")
+    ImGui.Text(ctx, "Copy to:")
     ImGui.SameLine(ctx)
     if ImGui.RadioButton(ctx, "Active##scope", gui.copy_scope == 0) then
       gui.copy_scope = 0
