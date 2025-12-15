@@ -199,7 +199,27 @@
 
 
 @changelog
-  0.1.0 [Internal Build 251215.1250] - KEYBOARD SHORTCUTS HELP TEXT IMPROVEMENT
+  0.1.0 [Internal Build 251215.1330] - ESC KEY FIX & WINDOW POSITION IMPROVEMENTS
+    - FIXED: ESC key now correctly closes main window and popups.
+      • Problem 1: ESC in Settings popups closed main window instead of popup
+      • Problem 2: ESC couldn't close main window when controls were active
+      • Root cause: ESC handler was in wrong location and missing IsWindowFocused() check
+      • Solution: Moved main window ESC handler to immediately after ImGui.Begin() (line 2774)
+      • Solution: Use IsWindowFocused() for all ESC handlers (main: 2774, popups: 2914, 2953, 3118)
+      • Impact: ESC closes focused window correctly, matching RGWH GUI behavior
+      • Reference: RGWH GUI ESC handler at line 1726 (immediately after Begin)
+    - FIXED: Main window position now remembered across sessions.
+      • Problem: Window always opened at default position, ignoring previous placement
+      • Root cause: SetNextWindowPos() overrode ImGui's automatic position memory
+      • Solution: Removed SetNextWindowPos() for main window, let ImGui handle position persistence
+      • Impact: Main window reopens where user last placed it
+    - ATTEMPTED: Settings popups open near mouse cursor (partial implementation).
+      • Implementation: Use GetMousePosition() + SetNextWindowPos() with Cond_Appearing
+      • Note: Popup modals may have limitations with position override in ReaImGui
+      • Affected popups: History Settings (2906-2907), File Naming (2945-2946), Preview (3110-3111)
+    - PURPOSE: Better UX - consistent window management matching RGWH GUI behavior
+
+  [Internal Build 251215.1250] - KEYBOARD SHORTCUTS HELP TEXT IMPROVEMENT
     - IMPROVED: Keyboard shortcuts help text now shows mode-specific instructions.
       • Previous: Both Chain and Focused mode hints shown simultaneously (text too long)
       • Now: Dynamic help text that changes based on current mode
@@ -2705,14 +2725,6 @@ local function draw_gui()
   local is_typing = ImGui.IsAnyItemActive(ctx)
 
   if not is_typing then
-    -- ESC = Close window
-    if ImGui.IsKeyPressed(ctx, ImGui.Key_Escape, false) then
-      if gui.debug then
-        r.ShowConsoleMsg("[AS GUI] Keyboard shortcut: ESC pressed (Close window)\n")
-      end
-      return false  -- Close the window
-    end
-
     -- Space = Stop transport (simple, no modifiers needed)
     if ImGui.IsKeyPressed(ctx, ImGui.Key_Space, false) then
       if gui.debug then
@@ -2753,6 +2765,14 @@ local function draw_gui()
   if not visible then
     ImGui.End(ctx)
     return open
+  end
+
+  -- Close the window when ESC is pressed and the window is focused
+  if ImGui.IsWindowFocused(ctx) and ImGui.IsKeyPressed(ctx, ImGui.Key_Escape) then
+    open = false
+    if gui.debug then
+      r.ShowConsoleMsg("[AS GUI] Keyboard shortcut: ESC pressed (Close window)\n")
+    end
   end
 
   -- Menu Bar
@@ -2887,11 +2907,19 @@ local function draw_gui()
 
   -- Settings Popup
   if gui.show_settings_popup then
+    -- Position popup near mouse cursor
+    local mouse_x, mouse_y = r.GetMousePosition()
+    ImGui.SetNextWindowPos(ctx, mouse_x, mouse_y, ImGui.Cond_Appearing)
     ImGui.OpenPopup(ctx, 'History Settings')
     gui.show_settings_popup = false
   end
 
   if ImGui.BeginPopupModal(ctx, 'History Settings', true, ImGui.WindowFlags_AlwaysAutoResize) then
+    -- ESC key handling for popup (only when popup is focused)
+    if ImGui.IsWindowFocused(ctx) and ImGui.IsKeyPressed(ctx, ImGui.Key_Escape, false) then
+      ImGui.CloseCurrentPopup(ctx)
+    end
+
     ImGui.Text(ctx, "Maximum History Items:")
     ImGui.SetNextItemWidth(ctx, 120)
     local rv, new_val = ImGui.InputInt(ctx, "##max_history", gui.max_history)
@@ -2918,11 +2946,19 @@ local function draw_gui()
   -- FX Name Formatting Popup
   -- File Naming Settings Popup
   if gui.show_naming_popup then
+    -- Position popup near mouse cursor
+    local mouse_x, mouse_y = r.GetMousePosition()
+    ImGui.SetNextWindowPos(ctx, mouse_x, mouse_y, ImGui.Cond_Appearing)
     ImGui.OpenPopup(ctx, 'File Naming Settings')
     gui.show_naming_popup = false
   end
 
   if ImGui.BeginPopupModal(ctx, 'File Naming Settings', true, ImGui.WindowFlags_AlwaysAutoResize) then
+    -- ESC key handling for popup (only when popup is focused)
+    if ImGui.IsWindowFocused(ctx) and ImGui.IsKeyPressed(ctx, ImGui.Key_Escape, false) then
+      ImGui.CloseCurrentPopup(ctx)
+    end
+
     local changed = false
     local rv
 
@@ -3075,11 +3111,19 @@ local function draw_gui()
 
   -- Preview Settings Popup
   if gui.show_preview_settings then
+    -- Position popup near mouse cursor
+    local mouse_x, mouse_y = r.GetMousePosition()
+    ImGui.SetNextWindowPos(ctx, mouse_x, mouse_y, ImGui.Cond_Appearing)
     ImGui.OpenPopup(ctx, 'Preview Settings')
     gui.show_preview_settings = false
   end
 
   if ImGui.BeginPopupModal(ctx, 'Preview Settings', true, ImGui.WindowFlags_AlwaysAutoResize) then
+    -- ESC key handling for popup (only when popup is focused)
+    if ImGui.IsWindowFocused(ctx) and ImGui.IsKeyPressed(ctx, ImGui.Key_Escape, false) then
+      ImGui.CloseCurrentPopup(ctx)
+    end
+
     ImGui.Text(ctx, "Target Track Name:")
     ImGui.SetNextItemWidth(ctx, 200)
     local rv, new_name = ImGui.InputText(ctx, "##preview_target", gui.preview_target_track)
