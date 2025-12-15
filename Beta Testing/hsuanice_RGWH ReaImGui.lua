@@ -14,7 +14,15 @@
   Adjust parameters using the visual controls and click operation buttons to execute.
 
 @changelog
-  0.1.0 [v251215.1507] - REMOVED REDUNDANT CHANNEL MODE HELP MARKER
+  0.1.0 [v251215.1730] - DISABLED SETTINGS WINDOW DOCKING
+    - FIXED: Settings window now always has docking disabled (WindowFlags_NoDocking).
+      • Prevents Settings window from being docked into REAPER's dock system
+      • Settings window should remain floating for better usability
+      • Line: 985 (settings window flags)
+    - PURPOSE: Match Manual window behavior - both popup windows now always float
+    - IMPACT: Improved stability and consistent UX for popup windows
+
+  [v251215.1507] - REMOVED REDUNDANT CHANNEL MODE HELP MARKER
     - REMOVED: Help marker (?) after Channel Mode radio buttons (line 1793-1794).
       • Reason: Each radio button now has detailed hover tooltip
       • Auto/Mono/Multi modes all provide comprehensive explanations on hover
@@ -981,7 +989,9 @@ local function draw_settings_popup()
   local before_state = serialize_gui_state(gui)
 
   ImGui.SetNextWindowSize(ctx, 500, 600, ImGui.Cond_FirstUseEver)
-  local visible, open = ImGui.Begin(ctx, 'Settings', true)
+  -- Disable docking for settings window
+  local settings_flags = ImGui.WindowFlags_NoDocking
+  local visible, open = ImGui.Begin(ctx, 'Settings', true, settings_flags)
   if not visible then
     ImGui.End(ctx)
     gui.show_settings = open
