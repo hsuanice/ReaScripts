@@ -14,7 +14,14 @@
   Adjust parameters using the visual controls and click operation buttons to execute.
 
 @changelog
-  0.1.0 [v251215.1500] - REMOVED PRESET MENU
+  0.1.0 [v251215.1507] - REMOVED REDUNDANT CHANNEL MODE HELP MARKER
+    - REMOVED: Help marker (?) after Channel Mode radio buttons (line 1793-1794).
+      • Reason: Each radio button now has detailed hover tooltip
+      • Auto/Mono/Multi modes all provide comprehensive explanations on hover
+      • Redundant summary help marker no longer needed
+    - IMPACT: Cleaner UI, less visual clutter
+
+  [v251215.1500] - REMOVED PRESET MENU
     - REMOVED: Preset menu and preset system completely removed from GUI.
       • Removed preset data definitions (previously lines 622-653)
       • Removed apply_preset() function (previously lines 834-844)
@@ -1790,8 +1797,6 @@ local function draw_gui()
       "  • Item's own channel count is ignored"
     )
   end
-  ImGui.SameLine(ctx)
-  draw_help_marker("Auto: decide based on source material | Mono: force mono | Multi: force item output to match track channel count")
 
   ImGui.Spacing(ctx)
 
