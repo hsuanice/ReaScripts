@@ -14,6 +14,41 @@
   Adjust parameters using the visual controls and click operation buttons to execute.
 
 @changelog
+  0.1.0 [v251215.1500] - REMOVED PRESET MENU
+    - REMOVED: Preset menu and preset system completely removed from GUI.
+      • Removed preset data definitions (previously lines 622-653)
+      • Removed apply_preset() function (previously lines 834-844)
+      • Removed Presets menu from menu bar (previously lines 1752-1760)
+    - REASON: Preset system not needed - users prefer direct control
+    - IMPACT: Cleaner, simpler GUI interface
+
+  [v251215.1450] - IMPROVED CHANNEL MODE TOOLTIPS CLARITY
+    - IMPROVED: Channel Mode tooltips clarified to prevent item vs track channel count confusion (lines 1797-1837).
+      • Problem: Users might confuse item's own channel count with track channel count
+      • Solution: Added explicit warnings and reminders in tooltips
+    - Auto mode tooltip (lines 1797-1809):
+      • Added Note section warning about item vs track channel count distinction
+      • "Item channel count may differ from track channel count"
+      • "Use Multi mode to force output to match track channels"
+    - Mono mode tooltip (lines 1812-1821):
+      • REMOVED: Operation mode (AUTO/RENDER/GLUE) explanations - irrelevant to channel mode
+      • Simplified to focus only on mono channel behavior
+      • "All items converted to mono output"
+    - Multi mode tooltip (lines 1825-1837):
+      • Added Important section emphasizing output follows TRACK channel count
+      • "Output always follows TRACK channel count"
+      • "Item's own channel count is ignored"
+    - PURPOSE: Prevent user confusion between item channels vs track channels
+    - NOTE: All tooltips exclude command IDs (kept in manual only)
+
+  [v251214.0920] - CLARIFIED OPERATION MODE SCOPE
+    - Fixed: AUTO mode hover info no longer mentions TS scope logic (line 1933)
+      • Previous: "Scope: No TS→Units, TS=span→Units, TS≠span→TS" (incorrect)
+      • Corrected: "Always uses Units scope" (accurate)
+      • Rationale: AUTO mode always uses Units detection, TS logic only applies to GLUE mode
+    - Clarified: GLUE mode hover info clearly shows TS scope behavior (line 1935)
+      • "Scope: Has TS→TS, No TS→Units (like REAPER native)"
+      • TS scope logic is GLUE-specific feature, not AUTO feature
   0.1.0 [v251214.0100] - SIMPLIFIED VOLUME MERGE INTERACTION
     - Simplified: Clean mutual exclusion + binding logic, removed all warning text (lines 1816-1856)
       • Merge to Item ◄──mutually exclusive──► Merge to Take ◄──bound to──► Print Volumes
@@ -592,40 +627,6 @@ if gui.debug_level >= 1 then
 end
 
 ------------------------------------------------------------
--- Preset System
-------------------------------------------------------------
-local presets = {
-  {
-    name = "Auto (ExtState defaults)",
-    op = 0,
-    selection_scope = 0,
-    channel_mode = 0,
-  },
-  {
-    name = "Force Units Glue",
-    op = 2,
-    selection_scope = 1,
-    channel_mode = 0,
-  },
-  {
-    name = "Force TS-Window Glue",
-    op = 2,
-    selection_scope = 2,
-    channel_mode = 0,
-  },
-  {
-    name = "Single-Item Render",
-    op = 1,
-    channel_mode = 0,
-    take_fx = true,
-    track_fx = false,
-    tc_mode = 0,
-  },
-}
-
-local selected_preset = -1
-
-------------------------------------------------------------
 -- Helper Functions
 ------------------------------------------------------------
 
@@ -802,18 +803,6 @@ local function restore_selection(s, args)
   if s.edit_pos then
     r.SetEditCurPos(s.edit_pos, false, false)
   end
-end
-
-local function apply_preset(idx)
-  if idx < 0 or idx >= #presets then return end
-  local p = presets[idx + 1]
-
-  if p.op then gui.op = p.op end
-  if p.selection_scope then gui.selection_scope = p.selection_scope end
-  if p.channel_mode then gui.channel_mode = p.channel_mode end
-  if p.take_fx ~= nil then gui.take_fx = p.take_fx end
-  if p.track_fx ~= nil then gui.track_fx = p.track_fx end
-  if p.tc_mode then gui.tc_mode = p.tc_mode end
 end
 
 local function build_args_from_gui(operation)
@@ -1722,16 +1711,6 @@ local function draw_gui()
 
   -- Menu Bar
   if ImGui.BeginMenuBar(ctx) then
-    if ImGui.BeginMenu(ctx, 'Presets') then
-      for i, preset in ipairs(presets) do
-        if ImGui.MenuItem(ctx, preset.name, nil, false, true) then
-          apply_preset(i - 1)
-          selected_preset = i - 1
-        end
-      end
-      ImGui.EndMenu(ctx)
-    end
-
     if ImGui.BeginMenu(ctx, 'Settings') then
       -- UI Settings
       local rv_dock, new_dock = ImGui.MenuItem(ctx, 'Enable Window Docking', nil, gui.enable_docking, true)
@@ -1769,20 +1748,48 @@ local function draw_gui()
   ImGui.Text(ctx, "Channel Mode:")
   ImGui.SameLine(ctx)
   if ImGui.RadioButton(ctx, "Auto##channel", gui.channel_mode == 0) then gui.channel_mode = 0 end
-  ImGui.SameLine(ctx)
-  if ImGui.RadioButton(ctx, "Mono##channel", gui.channel_mode == 1) then gui.channel_mode = 1 end
-  -- Mono mode tooltip (show current glue_after_mono_apply setting)
+  -- Auto mode tooltip
   if ImGui.IsItemHovered(ctx) then
     ImGui.SetTooltip(ctx,
-      "Mono mode: Apply mono (40361) to each item\n\n" ..
-      "Behavior by operation mode:\n" ..
-      "  • RENDER mode: Never glues (processes items individually)\n" ..
-      "  • AUTO mode: Multi-item units are glued after mono apply\n" ..
-      "  • GLUE mode: Always glues after mono apply"
+      "Auto mode: Decide channel output based on source material\n\n" ..
+      "Behavior:\n" ..
+      "  • Mono source → Mono output\n" ..
+      "  • Multi-channel source → Multi-channel output\n" ..
+      "  • Automatically detects source channel count\n" ..
+      "  • Most flexible option for mixed projects\n\n" ..
+      "Note:\n" ..
+      "  • Item channel count may differ from track channel count\n" ..
+      "  • Use Multi mode to force output to match track channels"
+    )
+  end
+  ImGui.SameLine(ctx)
+  if ImGui.RadioButton(ctx, "Mono##channel", gui.channel_mode == 1) then gui.channel_mode = 1 end
+  -- Mono mode tooltip
+  if ImGui.IsItemHovered(ctx) then
+    ImGui.SetTooltip(ctx,
+      "Mono mode: Force mono output for all items\n\n" ..
+      "Behavior:\n" ..
+      "  • All items converted to mono output\n" ..
+      "  • Multi-channel sources summed to mono\n" ..
+      "  • Consistent mono workflow"
     )
   end
   ImGui.SameLine(ctx)
   if ImGui.RadioButton(ctx, "Multi##channel", gui.channel_mode == 2) then gui.channel_mode = 2 end
+  -- Multi mode tooltip
+  if ImGui.IsItemHovered(ctx) then
+    ImGui.SetTooltip(ctx,
+      "Multi mode: Force output to match track channel count\n\n" ..
+      "Behavior:\n" ..
+      "  • Output channels = Track channel count (NOT item channels)\n" ..
+      "  • Mono item on stereo track → Stereo output\n" ..
+      "  • Forces channel expansion to match track\n" ..
+      "  • Useful for ensuring consistent channel count\n\n" ..
+      "Important:\n" ..
+      "  • Output always follows TRACK channel count\n" ..
+      "  • Item's own channel count is ignored"
+    )
+  end
   ImGui.SameLine(ctx)
   draw_help_marker("Auto: decide based on source material | Mono: force mono | Multi: force item output to match track channel count")
 
@@ -1930,7 +1937,7 @@ local function draw_gui()
   if hovered_mode == "render" then
     ImGui.TextWrapped(ctx, "RENDER: Process each item independently (per-item render, no grouping)")
   elseif hovered_mode == "auto" then
-    ImGui.TextWrapped(ctx, "AUTO: Single-item units→RENDER, Multi-item units(TOUCH/CROSSFADE)→GLUE • Scope: No TS→Units, TS=span→Units, TS≠span→TS")
+    ImGui.TextWrapped(ctx, "AUTO: Single-item units→RENDER, Multi-item units(TOUCH/CROSSFADE)→GLUE • Always uses Units scope")
   elseif hovered_mode == "glue" then
     ImGui.TextWrapped(ctx, "GLUE: Always glue all items (including single items) • Scope: Has TS→TS, No TS→Units (like REAPER native)")
   else
