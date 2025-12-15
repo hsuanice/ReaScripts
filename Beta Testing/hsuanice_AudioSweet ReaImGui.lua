@@ -199,7 +199,16 @@
 
 
 @changelog
-  0.1.0 [Internal Build 251215.1225] - UI TEXT IMPROVEMENT
+  0.1.0 [Internal Build 251215.1250] - KEYBOARD SHORTCUTS HELP TEXT IMPROVEMENT
+    - IMPROVED: Keyboard shortcuts help text now shows mode-specific instructions.
+      • Previous: Both Chain and Focused mode hints shown simultaneously (text too long)
+      • Now: Dynamic help text that changes based on current mode
+      • Chain Mode shows: "Script: hsuanice_AudioSweet Chain Preview..." (Ctrl+Space)
+      • Focused Mode shows: "Script: hsuanice_AudioSweet Preview..." (Ctrl+Shift+Space)
+      • Lines: 3305-3311 (mode-specific keyboard shortcuts help)
+    - PURPOSE: Cleaner UI with relevant hint for current mode only
+
+  [Internal Build 251215.1225] - UI TEXT IMPROVEMENT
     - IMPROVED: Copy settings label clarity.
       • Changed "Copy:" to "Copy to:" for better readability
       • More accurately describes the action (copying FX TO items)
@@ -3293,8 +3302,13 @@ local function draw_gui()
   -- === KEYBOARD SHORTCUTS INFO ===
   ImGui.PushStyleColor(ctx, ImGui.Col_Text, 0x808080FF)  -- Gray color
   ImGui.Text(ctx, "Shortcuts: ESC = Close, Space = Stop, S = Solo")
-  ImGui.Text(ctx, "Tip: Bind 'AudioSweet Chain/Focused Preview' actions to shortcuts")
-  ImGui.Text(ctx, "     in REAPER Action List for Ctrl+Space preview")
+  if gui.mode == 1 then
+    -- Chain mode
+    ImGui.Text(ctx, "Tip: Set shortcut 'Script: hsuanice_AudioSweet Chain Preview...' (Ctrl+Space)")
+  else
+    -- Focused mode
+    ImGui.Text(ctx, "Tip: Set shortcut 'Script: hsuanice_AudioSweet Preview...' (Ctrl+Shift+Space)")
+  end
   ImGui.PopStyleColor(ctx)
 
   ImGui.Separator(ctx)
