@@ -6,29 +6,16 @@
   [main] Tools/hsuanice_AudioSweet Chain Preview Solo Exclusive.lua
   Library/hsuanice_AS Preview Core.lua
 @changelog
-  0.1.0 (2025-12-13) [internal: v251213.1330]
-    - Fixed: Now correctly handles duplicate track names by passing track object to Preview Core
-    - Enhanced: Reads preview_target_track_guid from GUI settings for reliable track identification
-    - Critical: Passes MediaTrack* object directly when GUID resolves to a track (avoids name search)
-    - Solves: Duplicate track name issue - GUID ensures correct track even with identical names
-    - Previous: Smart chain preview target selection [internal: v251213.0336]
-    - Previous: Prioritizes focused FX chain track if available, falls back to GUI settings
-    - Previous: Extracts pure track name from focused track using P_NAME (without track number prefix)
-    - Integration: Now reads all preview settings from AudioSweet GUI ExtState [internal: v251030.2335]
-    - Reads: preview_target_track, preview_solo_scope, preview_restore_mode, debug
-    - Benefit: Single source of truth - change settings in GUI, all preview scripts use same settings
-    - Compatible: Works with AudioSweet ReaImGui v251030.2300 or newer
-    - Usage: Bind to keyboard shortcut for Chain Preview with GUI settings
-    - Reordered: `chain_mode` moved to top of Core Behavior section [internal: v251012_2025]
-    - Updated: `mode` now follows `chain_mode` to reflect most-used toggles order
-    - Grouped: `target` and `target_track_name` remain together for clarity
-    - Clean: Simplified to match latest ASP Core [internal: v251012_1320]
-    - Removed: Deprecated `target="track"` support
-    - Added: Clear inline comments describing each target mode
-    - Added: Convenience arg `target_track_name` for ASP.preview() [internal: v251010_2152]
-    - Added: Default target fallback "AudioSweet"
-    - Clean: Reorganized into clear sections [internal: v251010_1800]
-    - Option: Console logging now guarded by `args.debug`
+  0.1.0 (2025-12-15) [internal: v251215.1220]
+    - FIXED: GetFocusedFX() now correctly detects focused FX chain track.
+      • Problem: Script used wrong API call format, always fell back to settings target track
+      • Root cause: Used `local focused_track = reaper.GetFocusedFX()` (wrong - only gets first return value)
+      • Solution: Use correct format `local retval, trackOut, itemOut, fxOut = reaper.GetFocusedFX()`
+      • Impact: Now matches GUI behavior - prioritizes focused FX track over settings
+      • Lines: 112-115 (correct GetFocusedFX usage with retval check)
+    - Previous: [internal: v251213.1330] Duplicate track name handling with GUID support
+    - Previous: [internal: v251213.0336] Smart chain preview target selection
+    - Previous: [internal: v251030.2335] Integration with AudioSweet GUI ExtState settings
 ]]--
 
 
@@ -109,11 +96,10 @@ if debug_mode then
 end
 
 -- Check if there's a focused FX with a track
-local focused_track = reaper.GetFocusedFX()
-if focused_track > 0 then
-  -- Extract track from focused FX
-  local track_number = (focused_track & 0xFFFF) - 1
-  local tr = reaper.GetTrack(0, track_number)
+local retval, trackOut, itemOut, fxOut = reaper.GetFocusedFX()
+if retval == 1 then
+  -- Track FX is focused
+  local tr = reaper.GetTrack(0, math.max(0, (trackOut or 1) - 1))
 
   if tr and reaper.ValidatePtr2(0, tr, "MediaTrack*") then
     -- Get pure track name from track object (P_NAME doesn't include track number prefix)
