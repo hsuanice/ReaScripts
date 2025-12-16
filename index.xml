@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<index version="1" name="hsuanice Scripts" commit="869ec21020ca9e22eb1f8dc224e73c82aa6b635c">
+<index version="1" name="hsuanice Scripts" commit="ca108a2eb94594de9fc806de1c5e0bd7523b5d09">
   <category name="Beta Testing">
     <reapack name="hsuanice_AudioSweet ReaImGui.lua" type="script" desc="AudioSweet ReaImGui - ImGui Interface for AudioSweet">
       <metadata>
@@ -2010,6 +2010,23 @@ v0.9.0 - Added Shared Link State section from Project ExtState "hsuanice_Link".]
     <reapack name="hsuanice_RGWH Core.lua" type="script" desc="RGWH Core - Render or Glue with Handles">
       <version name="0.1.0" author="hsuanice" time="2025-12-12T15:14:01Z">
         <source main="main">https://github.com/hsuanice/ReaScripts/raw/ab379fe4e55a89b1fe4b0e33d92c4ff0f468e81f/Library/hsuanice_RGWH%20Core.lua</source>
+      </version>
+    </reapack>
+  </category>
+  <category name="Tools">
+    <reapack name="hsuanice_FX Alias Build.lua" type="script" desc="FX Alias Build - Build FX Alias JSON from Current Project">
+      <metadata>
+        <description><![CDATA[{\rtf1\ansi\deff0{\fonttbl{\f0 \fswiss Helvetica;}{\f1 \fmodern Courier;}}
+{\colortbl;\red255\green0\blue0;\red0\green0\blue255;}
+\widowctrl\hyphauto
+
+{\pard \ql \f0 \sa180 \li0 \fi0 Scan all tracks' Track FX in the current project and populate/merge Settings/fx_alias.json. Then you can export to TSV and edit aliases comfortably.\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 Part of AudioSweet ReaImGui Tools suite.\par}
+}
+]]></description>
+      </metadata>
+      <version name="0.1.0" author="hsuanice" time="2025-12-16T10:27:03Z">
+        <source main="main">https://github.com/hsuanice/ReaScripts/raw/ca108a2eb94594de9fc806de1c5e0bd7523b5d09/Tools/hsuanice_FX%20Alias%20Build.lua</source>
       </version>
     </reapack>
   </category>
