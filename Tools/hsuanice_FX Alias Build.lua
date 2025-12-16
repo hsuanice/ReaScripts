@@ -3,7 +3,7 @@
 @version 0.1.0
 @author hsuanice
 @provides
-  [main] hsuanice Scripts/Tools/hsuanice_FX Alias Build.lua
+  [main] .
 @about
   Scan all tracks' Track FX in the current project and populate/merge Settings/fx_alias.json.
   Then you can export to TSV and edit aliases comfortably.
@@ -11,7 +11,10 @@
   Part of AudioSweet ReaImGui Tools suite.
 
 @changelog
-  0.1.0 (2025-12-12) [internal: v251030.1600]
+  0.1.0 [Internal Build 251216.1820] - Settings Directory Safeguard
+    - ADDED: Automatically create the Settings folder before writing fx_alias.json to avoid write errors.
+    - ADDED: Clear warning dialog if the folder cannot be created so the user knows why the build stops.
+  [internal: v251030.1600]
     - Initial Public Beta Release
     - FX Alias database builder tool featuring:
       • Scans all Track FX in current project
@@ -36,6 +39,11 @@ j.encode=enc;return j end)()
 
 local function resource_path() return reaper.GetResourcePath() end
 local function settings_dir()  return resource_path().."/Scripts/hsuanice Scripts/Settings" end
+local function ensure_settings_dir()
+  local dir = settings_dir()
+  local ok = reaper.RecursiveCreateDirectory(dir, 0)
+  return (ok == 1 or ok == true) and dir or nil
+end
 local function read_file(p) local f=io.open(p,"rb");if not f then return nil end;local s=f:read("*a");f:close();return s end
 local function write_file(p,t) local f=io.open(p,"wb");if not f then return false end;f:write(t or "");f:close();return true end
 
@@ -75,7 +83,11 @@ local function now_iso()
 end
 
 local function main()
-  local dir = settings_dir()
+  local dir = ensure_settings_dir()
+  if not dir then
+    reaper.MB("Failed to create Settings folder:\n"..settings_dir(), "Build FX Alias JSON", 0)
+    return
+  end
   local json_path = dir.."/fx_alias.json"
 
   local obj = {}
