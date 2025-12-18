@@ -1,7 +1,7 @@
 --[[
 @description RGWH GUI - ImGui Interface for RGWH Core
 @author hsuanice
-@version 0.1.0
+@version 0.1.1
 @provides
   [main] .
 
@@ -14,6 +14,11 @@
   Adjust parameters using the visual controls and click operation buttons to execute.
 
 @changelog
+  0.1.1 [v251218.1800] - BWF MetaEdit reminder + install guide
+    - Added: CLI detection flow that checks PATH/custom paths on startup, shows alert + guide when missing
+    - Added: Settings > Timecode section shows CLI status, allows custom path input and re-check action
+    - Added: Homebrew install modal with copy buttons for each step to simplify CLI installation
+
   0.1.0 [v251215.1730] - DISABLED SETTINGS WINDOW DOCKING
     - FIXED: Settings window now always has docking disabled (WindowFlags_NoDocking).
       • Prevents Settings window from being docked into REAPER's dock system
@@ -435,6 +440,11 @@ local r = reaper
 package.path = r.ImGui_GetBuiltinPath() .. '/?.lua'
 local ImGui = require 'imgui' '0.10'
 
+local OS_NAME = r.GetOS()
+local IS_WINDOWS = OS_NAME:match("Win") ~= nil
+local PATH_SEPARATOR = IS_WINDOWS and ';' or ':'
+local DIR_SEPARATOR = package.config:sub(1,1) or '/'
+
 -- Load RGWH Core
 local RES_PATH = r.GetResourcePath()
 local CORE_PATH = RES_PATH .. '/Scripts/hsuanice Scripts/Library/hsuanice_RGWH Core.lua'
@@ -527,6 +537,10 @@ local gui = {
   -- UI settings
   enable_docking = false,    -- Allow window docking
 
+  -- Dependencies
+  bwfmetaedit_custom_path = "",
+  open_bwf_install_popup = false,
+
   -- Status
   is_running = false,
   last_result = "",
@@ -544,7 +558,7 @@ local persist_keys = {
   'cue_write_edge','cue_write_glue',
   'glue_single_items','glue_no_trackfx_policy','render_no_trackfx_policy',
   'debug_level','debug_no_clear','selection_policy',
-  'enable_docking'
+  'enable_docking','bwfmetaedit_custom_path'
 }
 
 local function serialize_gui_state(tbl)
@@ -586,6 +600,135 @@ local function load_persist()
     gui.merge_to_take = gui.merge_volumes
     gui.merge_to_item = false
     gui.merge_volumes = nil
+  end
+end
+
+------------------------------------------------------------
+-- BWF MetaEdit CLI Detection
+------------------------------------------------------------
+local bwf_cli = {
+  checked = false,
+  available = false,
+  resolved_path = "",
+  message = "",
+  last_source = "",
+  attempts = {},
+  warning_dismissed = false,
+}
+
+local function trim(s)
+  if not s then return "" end
+  return s:match("^%s*(.-)%s*$") or ""
+end
+
+local function sanitize_bwf_custom_path(path)
+  local v = trim(path or "")
+  v = v:gsub('^"(.*)"$', '%1')
+  v = v:gsub("^'(.*)'$", "%1")
+  return v
+end
+
+local function file_exists(path)
+  if not path or path == "" then return false end
+  local f = io.open(path, "rb")
+  if f then f:close() return true end
+  return false
+end
+
+local function join_path(base, fragment)
+  if base == "" then return fragment end
+  local last = base:sub(-1)
+  if last == '/' or last == '\\' then
+    return base .. fragment
+  end
+  local sep = DIR_SEPARATOR == "\\" and "\\" or "/"
+  return base .. sep .. fragment
+end
+
+local function check_bwfmetaedit(force)
+  if bwf_cli.checked and not force then return end
+  bwf_cli.checked = true
+  if force then bwf_cli.warning_dismissed = false end
+
+  local custom = sanitize_bwf_custom_path(gui.bwfmetaedit_custom_path or "")
+  gui.bwfmetaedit_custom_path = custom
+
+  local attempted = {}
+  local found_path, source_label
+  local binary_names = IS_WINDOWS and { "bwfmetaedit.exe", "bwfmetaedit" } or { "bwfmetaedit" }
+
+  local function register_attempt(path)
+    if path and path ~= "" then
+      attempted[#attempted+1] = path
+    end
+  end
+
+  local function try_candidate(path, label)
+    if found_path or not path or path == "" then return false end
+    register_attempt(path)
+    if file_exists(path) then
+      found_path = path
+      source_label = label or path
+      return true
+    end
+    return false
+  end
+
+  if custom ~= "" then
+    try_candidate(custom, "自訂路徑")
+    if IS_WINDOWS and not found_path and not custom:lower():match("%.exe$") then
+      try_candidate(custom .. ".exe", "自訂路徑 (.exe)")
+    end
+  end
+
+  local path_env = os.getenv(IS_WINDOWS and "Path" or "PATH") or ""
+  if not found_path and path_env ~= "" then
+    local pattern = string.format("([^%s]+)", PATH_SEPARATOR)
+    for dir in path_env:gmatch(pattern) do
+      dir = trim(dir:gsub('"', ''))
+      if dir ~= "" then
+        for _, name in ipairs(binary_names) do
+          try_candidate(join_path(dir, name), "PATH: " .. dir)
+          if found_path then break end
+        end
+      end
+      if found_path then break end
+    end
+  end
+
+  local fallback_dirs = {}
+  if IS_WINDOWS then
+    local pf = os.getenv("ProgramFiles")
+    local pf86 = os.getenv("ProgramFiles(x86)")
+    if pf then fallback_dirs[#fallback_dirs+1] = join_path(pf, "BWF MetaEdit") end
+    if pf86 then fallback_dirs[#fallback_dirs+1] = join_path(pf86, "BWF MetaEdit") end
+  else
+    fallback_dirs = { "/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/opt/local/bin" }
+  end
+  if not found_path then
+    for _, dir in ipairs(fallback_dirs) do
+      for _, name in ipairs(binary_names) do
+        try_candidate(join_path(dir, name), dir)
+        if found_path then break end
+      end
+      if found_path then break end
+    end
+  end
+
+  bwf_cli.attempts = attempted
+  if found_path then
+    bwf_cli.available = true
+    bwf_cli.resolved_path = found_path
+    bwf_cli.last_source = source_label or ""
+    bwf_cli.message = string.format("BWF MetaEdit CLI ready (%s)", source_label or found_path)
+  else
+    bwf_cli.available = false
+    bwf_cli.resolved_path = ""
+    if custom ~= "" then
+      bwf_cli.message = "Custom BWF MetaEdit CLI path not found. Please verify the file exists."
+    else
+      bwf_cli.message = "No 'bwfmetaedit' binary detected. BWF TimeReference embedding is currently disabled."
+    end
   end
 end
 
@@ -635,6 +778,7 @@ end
 
 -- call load immediately so gui gets initial persisted values
 load_persist()
+check_bwfmetaedit(true)
 
 -- If debug level >= 1, print settings on startup
 if gui.debug_level >= 1 then
@@ -983,6 +1127,103 @@ local function draw_help_marker(desc)
   end
 end
 
+local BWF_INSTALL_POPUP_ID = 'BWF MetaEdit CLI Install Guide'
+local BREW_INSTALL_CMD = '/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"'
+local BREW_BWF_CMD = 'brew install bwfmetaedit'
+local BWF_VERIFY_CMD = 'bwfmetaedit --version'
+
+local function draw_bwfmetaedit_warning_banner()
+  if bwf_cli.available or bwf_cli.warning_dismissed then return end
+
+  ImGui.PushStyleColor(ctx, ImGui.Col_Text, 0xFF6666FF)
+  ImGui.Text(ctx, "BWF MetaEdit CLI missing – Timecode embedding is disabled.")
+  ImGui.PopStyleColor(ctx)
+
+  ImGui.TextWrapped(ctx,
+    "RGWH relies on the bwfmetaedit CLI to embed BWF TimeReference (timecode).\n" ..
+    "All other features stay available, but TC embedding remains off until the CLI is installed.")
+  if bwf_cli.message ~= "" then
+    ImGui.TextDisabled(ctx, bwf_cli.message)
+  end
+
+  if ImGui.Button(ctx, "Install Guide##warn") then
+    gui.open_bwf_install_popup = true
+  end
+  ImGui.SameLine(ctx)
+  if ImGui.Button(ctx, "Re-check##warn") then
+    check_bwfmetaedit(true)
+  end
+  ImGui.SameLine(ctx)
+  if ImGui.Button(ctx, "Remind Me Later##warn") then
+    bwf_cli.warning_dismissed = true
+  end
+  ImGui.Spacing(ctx)
+end
+
+local function draw_bwfmetaedit_install_modal()
+  if gui.open_bwf_install_popup then
+    ImGui.SetNextWindowSize(ctx, 520, 0, ImGui.Cond_Appearing)
+    ImGui.OpenPopup(ctx, BWF_INSTALL_POPUP_ID)
+    gui.open_bwf_install_popup = false
+  end
+
+  if ImGui.BeginPopupModal(ctx, BWF_INSTALL_POPUP_ID, true, ImGui.WindowFlags_AlwaysAutoResize) then
+    if ImGui.IsWindowFocused(ctx) and ImGui.IsKeyPressed(ctx, ImGui.Key_Escape, false) then
+      ImGui.CloseCurrentPopup(ctx)
+    end
+
+    ImGui.TextColored(ctx, 0x00AAFFFF, "Why is this required?")
+    ImGui.TextWrapped(ctx,
+      "AudioSweet / RGWH calls the BWF MetaEdit CLI to write BWF TimeReference (timecode) back into media files.\n" ..
+      "Without the CLI, timecode embedding stays disabled. The steps below cover a Homebrew-based installation on macOS:")
+    ImGui.Spacing(ctx)
+
+    ImGui.TextColored(ctx, 0xFFFFAAFF, "Step 1: Install Homebrew (if missing)")
+    ImGui.TextWrapped(ctx, "Open Terminal, run the command below, and follow the on-screen instructions to complete the Homebrew install:")
+    ImGui.SetNextItemWidth(ctx, 460)
+    ImGui.InputText(ctx, "##brew_install_cmd", BREW_INSTALL_CMD, ImGui.InputTextFlags_ReadOnly)
+    if ImGui.Button(ctx, "Copy Command##copy_brew_install") then
+      r.ImGui_SetClipboardText(ctx, BREW_INSTALL_CMD)
+    end
+    ImGui.SameLine(ctx)
+    ImGui.TextDisabled(ctx, "Reference: https://brew.sh")
+    ImGui.Separator(ctx)
+
+    ImGui.TextColored(ctx, 0xFFFFAAFF, "Step 2: Install BWF MetaEdit CLI")
+    ImGui.TextWrapped(ctx, "After Homebrew completes, install the CLI by running:")
+    ImGui.SetNextItemWidth(ctx, 460)
+    ImGui.InputText(ctx, "##brew_bwf_cmd", BREW_BWF_CMD, ImGui.InputTextFlags_ReadOnly)
+    if ImGui.Button(ctx, "Copy Command##copy_bwf") then
+      r.ImGui_SetClipboardText(ctx, BREW_BWF_CMD)
+    end
+    ImGui.SameLine(ctx)
+    ImGui.TextDisabled(ctx, "Binary will normally be placed in /opt/homebrew/bin")
+    ImGui.Separator(ctx)
+
+    ImGui.TextColored(ctx, 0xFFFFAAFF, "Step 3: Verify the CLI")
+    ImGui.TextWrapped(ctx, "Run the following to confirm it responds with a version string:")
+    ImGui.SetNextItemWidth(ctx, 460)
+    ImGui.InputText(ctx, "##brew_verify_cmd", BWF_VERIFY_CMD, ImGui.InputTextFlags_ReadOnly)
+    if ImGui.Button(ctx, "Copy Command##copy_verify") then
+      r.ImGui_SetClipboardText(ctx, BWF_VERIFY_CMD)
+    end
+    ImGui.SameLine(ctx)
+    ImGui.TextDisabled(ctx, "Version output confirms success")
+    ImGui.Spacing(ctx)
+
+    ImGui.TextWrapped(ctx,
+      "Once installed, return to the RGWH / AudioSweet settings panel and click \"Re-check CLI\" to re-enable TC embedding.\n" ..
+      "Windows users (or anyone not using Homebrew) can download installers from MediaArea: https://mediaarea.net/BWFMetaEdit")
+
+    ImGui.Separator(ctx)
+    if ImGui.Button(ctx, "Close", 120, 0) then
+      ImGui.CloseCurrentPopup(ctx)
+    end
+
+    ImGui.EndPopup(ctx)
+  end
+end
+
 local function draw_settings_popup()
   if not gui.show_settings then return end
 
@@ -1011,6 +1252,32 @@ local function draw_settings_popup()
   rv, new_val = ImGui.Combo(ctx, "Timecode Mode", gui.tc_mode, "Previous\0Current\0Off\0")
   if rv then gui.tc_mode = new_val end
   draw_help_marker("BWF TimeReference embed mode for RENDER operations\n\nNote: GLUE mode always uses 'Current' (technical requirement)")
+
+  -- === BWF METAEDIT CLI ===
+  draw_section_header("BWF METAEDIT CLI (Timecode Embed)")
+  if bwf_cli.available then
+    ImGui.TextColored(ctx, 0x55FF55FF, ("CLI detected: %s"):format(bwf_cli.resolved_path))
+    if bwf_cli.last_source ~= "" then
+      ImGui.TextDisabled(ctx, ("Source: %s"):format(bwf_cli.last_source))
+    end
+  else
+    ImGui.TextColored(ctx, 0xFF6666FF, "bwfmetaedit CLI not detected – embedding stays disabled.")
+    if bwf_cli.message ~= "" then
+      ImGui.TextWrapped(ctx, bwf_cli.message)
+    end
+  end
+
+  local rv_path, new_path = ImGui.InputText(ctx, "Custom CLI Path (optional)", gui.bwfmetaedit_custom_path)
+  if rv_path then gui.bwfmetaedit_custom_path = new_path end
+  draw_help_marker("Leave blank to use PATH. Otherwise provide the full bwfmetaedit binary path (include .exe on Windows).")
+
+  if ImGui.Button(ctx, "Re-check CLI##settings") then
+    check_bwfmetaedit(true)
+  end
+  ImGui.SameLine(ctx)
+  if ImGui.Button(ctx, "Install Guide##settings") then
+    gui.open_bwf_install_popup = true
+  end
 
   -- === EPSILON ===
   draw_section_header("EPSILON (Tolerance)")
@@ -1759,6 +2026,8 @@ local function draw_gui()
   -- Main content
   ImGui.PushItemWidth(ctx, 200)
 
+  draw_bwfmetaedit_warning_banner()
+
   -- === COMMON SETTINGS ===
 
   -- === CHANNEL MODE ===
@@ -1982,6 +2251,7 @@ local function loop()
   gui.open = draw_gui()
   draw_settings_popup()
   draw_manual_window()
+  draw_bwfmetaedit_install_modal()
 
   if gui.open then
     r.defer(loop)
