@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<index version="1" name="hsuanice Scripts" commit="431217bbb679aa9fa61cf80da48cf262ddf2e160">
+<index version="1" name="hsuanice Scripts" commit="831a7c8490f8493b1b7b1bcedc3285a1b43490d1">
   <category name="Beta Testing">
     <reapack name="hsuanice_AudioSweet ReaImGui.lua" type="script" desc="AudioSweet ReaImGui - ImGui Interface for AudioSweet">
       <metadata>
@@ -1604,6 +1604,9 @@ v0.2.0  Previous rename and future-proof notes.]]></changelog>
       </version>
       <version name="0.1.1" author="hsuanice" time="2025-12-18T13:52:48Z">
         <source main="main">https://github.com/hsuanice/ReaScripts/raw/ef82f9ba729f98b8a76f690ef103ea08a38044d1/Beta%20Testing/hsuanice_RGWH%20ReaImGui.lua</source>
+      </version>
+      <version name="0.1.2" author="hsuanice" time="2025-12-18T14:48:07Z">
+        <source main="main">https://github.com/hsuanice/ReaScripts/raw/831a7c8490f8493b1b7b1bcedc3285a1b43490d1/Beta%20Testing/hsuanice_RGWH%20ReaImGui.lua</source>
       </version>
     </reapack>
     <reapack name="hsuanice_Set Time to Item Selection Mouse Right-Drag Release.lua" type="script" desc="Set Time to Item on Right-Drag Release (Toggle, One-Pass Perf)">
