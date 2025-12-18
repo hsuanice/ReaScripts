@@ -1,7 +1,7 @@
 --[[
 @description AudioSweet ReaImGui - ImGui Interface for AudioSweet
 @author hsuanice
-@version 0.1.1
+@version 0.1.2
 @provides
   [main] .
 @about
@@ -199,6 +199,9 @@
 
 
 @changelog
+  0.1.2 [Internal Build 251218.2240] - Disabled collapse arrow
+    - Added: Main GUI window now has collapse controls disabled (WindowFlags_NoCollapse) to prevent accidental collapse errors reported by users
+
   0.1.1 [Internal Build 251218.2150] - BWF MetaEdit reminder + install guide
     - Added: CLI detection at startup with warning banner so users know TC embedding requires bwfmetaedit
     - Added: Settings > Timecode Embed modal showing status, custom path input, and re-check/install buttons
@@ -3049,7 +3052,8 @@ local function draw_gui()
 
   local window_flags = ImGui.WindowFlags_MenuBar |
                        ImGui.WindowFlags_AlwaysAutoResize |
-                       ImGui.WindowFlags_NoResize
+                       ImGui.WindowFlags_NoResize |
+                       ImGui.WindowFlags_NoCollapse
 
   -- Add NoDocking flag if docking is disabled
   if not gui.enable_docking then
