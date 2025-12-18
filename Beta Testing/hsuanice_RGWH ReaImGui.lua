@@ -1,7 +1,7 @@
 --[[
 @description RGWH GUI - ImGui Interface for RGWH Core
 @author hsuanice
-@version 0.1.1
+@version 0.1.2
 @provides
   [main] .
 
@@ -14,6 +14,9 @@
   Adjust parameters using the visual controls and click operation buttons to execute.
 
 @changelog
+  0.1.2 [v251218.2240] - Disabled collapse arrow
+    - Added: Main GUI window now uses WindowFlags_NoCollapse so users cannot collapse it accidentally
+
   0.1.1 [v251218.1800] - BWF MetaEdit reminder + install guide
     - Added: CLI detection flow that checks PATH/custom paths on startup, shows alert + guide when missing
     - Added: Settings > Timecode section shows CLI status, allows custom path input and re-check action
@@ -1974,7 +1977,7 @@ end
 
 local function draw_gui()
   local before_state = serialize_gui_state(gui)
-  local window_flags = ImGui.WindowFlags_MenuBar | ImGui.WindowFlags_AlwaysAutoResize | ImGui.WindowFlags_NoResize
+  local window_flags = ImGui.WindowFlags_MenuBar | ImGui.WindowFlags_AlwaysAutoResize | ImGui.WindowFlags_NoResize | ImGui.WindowFlags_NoCollapse
 
   -- Add NoDocking flag if docking is disabled
   if not gui.enable_docking then
