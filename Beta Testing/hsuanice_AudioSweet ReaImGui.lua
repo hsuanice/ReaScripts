@@ -1,7 +1,7 @@
 --[[
 @description AudioSweet ReaImGui - ImGui Interface for AudioSweet
 @author hsuanice
-@version 0.1.2
+@version 0.1.3
 @provides
   [main] .
 @about
@@ -199,6 +199,9 @@
 
 
 @changelog
+  0.1.3 [Internal Build 251219.1730] - Dynamic list height refinement
+    - Improved: Saved presets and History lists now auto-fit content height with no extra blank row
+
   0.1.2 [Internal Build 251218.2240] - Disabled collapse arrow
     - Added: Main GUI window now has collapse controls disabled (WindowFlags_NoCollapse) to prevent accidental collapse errors reported by users
 
@@ -3173,7 +3176,7 @@ local function draw_gui()
           "=================================================\n" ..
           "AudioSweet ReaImGui - ImGui Interface for AudioSweet\n" ..
           "=================================================\n" ..
-          "Version: 0.1.1 (251218)\n" ..
+          "Version: 0.1.3 (251219.1730)\n" ..
           "Author: hsuanice\n\n" ..
 
           "Quick Start:\n" ..
@@ -3704,9 +3707,21 @@ end
       local avail_w = ImGui.GetContentRegionAvail(ctx)
       local col1_w = avail_w * 0.5 - 5
 
+      local function calc_list_height(item_count)
+        local _, spacing_y = ImGui.GetStyleVar(ctx, ImGui.StyleVar_ItemSpacing)
+        local frame_h = ImGui.GetFrameHeight(ctx)
+        local text_h = ImGui.GetTextLineHeight(ctx)
+        local header_line_h = math.max(frame_h, text_h)
+        local separator_h = 1
+        local header_height = header_line_h + spacing_y + separator_h + spacing_y
+        local items_height = item_count * frame_h + math.max(0, item_count - 1) * spacing_y
+        return math.min(header_height + items_height, 200)
+      end
+
       -- Left: Saved FX Preset
       if gui.enable_saved_chains and #gui.saved_chains > 0 then
-        if ImGui.BeginChild(ctx, "SavedCol", col1_w, 200) then
+        local saved_height = calc_list_height(#gui.saved_chains)
+        if ImGui.BeginChild(ctx, "SavedCol", col1_w, saved_height) then
           ImGui.Text(ctx, "SAVED FX PRESET")
           ImGui.Separator(ctx)
           local to_delete = nil
@@ -3772,7 +3787,7 @@ end
       -- Right: History (auto-resizes based on content)
       if gui.enable_history and #gui.history > 0 then
         -- Calculate height based on number of history items (each item ~25px, header ~40px)
-        local history_height = math.min(#gui.history * 25 + 40, 200)  -- Max 200px
+        local history_height = calc_list_height(#gui.history)
         if ImGui.BeginChild(ctx, "HistoryCol", 0, history_height) then
           ImGui.Text(ctx, "HISTORY")
           ImGui.SameLine(ctx)
