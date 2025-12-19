@@ -1,7 +1,7 @@
 --[[
 @description AudioSweet ReaImGui - ImGui Interface for AudioSweet
 @author hsuanice
-@version 0.1.5
+@version 0.1.6
 @provides
   [main] .
 @about
@@ -199,6 +199,9 @@
 
 
 @changelog
+  0.1.6 [Internal Build 251219.1800] - Apply layout compact
+    - Changed: Moved Handle control to the Channel row for a two-line top layout
+
   0.1.5 [Internal Build 251219.1754] - Preset/History show toggle
     - Added: Toggle to show/hide Presets/History block with persistent setting
 
@@ -3164,7 +3167,7 @@ local function draw_gui()
           "=================================================\n" ..
           "AudioSweet ReaImGui - ImGui Interface for AudioSweet\n" ..
           "=================================================\n" ..
-          "Version: 0.1.5 (251219.1754)\n" ..
+          "Version: 0.1.6 (251219.1800)\n" ..
           "Author: hsuanice\n\n" ..
 
           "Quick Start:\n" ..
@@ -3551,18 +3554,6 @@ end
       save_gui_settings()
     end
   else
-    -- Handle seconds
-    ImGui.Text(ctx, "Handle:")
-    ImGui.SameLine(ctx)
-    ImGui.SetNextItemWidth(ctx, 80)
-    local rv, new_val = ImGui.InputDouble(ctx, "##handle_seconds", gui.handle_seconds, 0, 0, "%.1f")
-    if rv then
-      gui.handle_seconds = math.max(0, new_val)
-      save_gui_settings()
-    end
-    ImGui.SameLine(ctx)
-    ImGui.Text(ctx, "seconds")
-
     -- Channel Mode
     ImGui.Text(ctx, "Channel:")
     ImGui.SameLine(ctx)
@@ -3580,6 +3571,19 @@ end
       gui.channel_mode = 2
       save_gui_settings()
     end
+
+    ImGui.SameLine(ctx, 0, 20)
+    -- Handle seconds
+    ImGui.Text(ctx, "Handle:")
+    ImGui.SameLine(ctx)
+    ImGui.SetNextItemWidth(ctx, 80)
+    local rv, new_val = ImGui.InputDouble(ctx, "##handle_seconds", gui.handle_seconds, 0, 0, "%.1f")
+    if rv then
+      gui.handle_seconds = math.max(0, new_val)
+      save_gui_settings()
+    end
+    ImGui.SameLine(ctx)
+    ImGui.Text(ctx, "seconds")
   end
 
   ImGui.Separator(ctx)
