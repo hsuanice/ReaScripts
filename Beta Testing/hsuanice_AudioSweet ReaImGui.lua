@@ -1,204 +1,62 @@
 --[[
 @description AudioSweet ReaImGui - ImGui Interface for AudioSweet
 @author hsuanice
-@version 0.1.12
+@version 0.1.13
 @provides
   [main] .
 @about
-  # AudioSweet ReaImGui - User Manual
+  # AudioSweet ReaImGui
 
-  ## Overview
   Complete AudioSweet control center with ImGui interface for managing FX chains and presets.
 
-  ## Core Features
-  - Two operation modes: Focused FX and Full Chain
-  - Apply/Copy FX chains to AudioSweet Preview track
-  - Save and manage FX presets with custom naming
-  - Automatic operation history tracking
-  - Real-time FX chain visualization
-  - Built-in keyboard shortcuts
-  - Persistent settings across sessions
+  ## Quick Start
+  - Help → User Manual: Full documentation with workflows and tips
+  - Help → About: Reference and credits
 
-  ---
+  ## Reference
+  Inspired by AudioSuite-like Script by Tim Chimes
+  'AudioSweet' is a name originally given by Tim Chimes.
+  This project continues to use the name in reference to his original work.
 
-  ## Operation Modes
+  Original: Renders selected plugin to selected media item
+  Written for REAPER 5.1 with Lua
+  v1.1 12/22/2015 - Added PreventUIRefresh
+  http://timchimes.com/scripting-with-reaper-audiosuite/
 
-  ### Focused Mode (Single FX)
-  - Works with the currently focused FX window
-  - Click on any FX window to focus it
-  - Saves/applies only the selected FX
-  - Display shows: FX name only (e.g., "VST3: Pro-Q 4")
-  - Supports CLAP and VST3 plugins
-
-  ### Chain Mode (Full FX Chain)
-  - Works with the entire FX chain of selected track
-  - Saves/applies all FX on the track
-  - Display shows: "#N Track Name" format
-  - Shows complete FX list in tooltips
-
-  ---
-
-  ## Main Actions
-
-  ### Apply
-  - Copies FX to Preview track AND enables it
-  - Removes all existing FX on Preview track first
-  - Use when you want to audition the FX immediately
-
-  ### Copy
-  - Copies FX to Preview track but keeps it bypassed
-  - Removes all existing FX on Preview track first
-  - Use when you want to prepare FX without hearing it yet
-
-  ### Open
-  - Opens the saved FX window(s)
-  - Focused mode: Opens the specific FX window
-  - Chain mode: Opens all FX windows in the chain
-
-  ---
-
-  ## Preset System
-
-  ### Saving Presets
-  1. Click the "Save" button (in main controls or history section)
-  2. Enter a custom name, or leave empty to use default:
-     - Focused mode default: FX name
-     - Chain mode default: Track name
-  3. Preset is saved and appears in the "Saved" section
-
-  ### Managing Presets
-  - **Open**: Opens the FX window(s) without applying
-  - **Name**: Rename the preset (custom name or revert to default)
-  - **Save**: Save current FX as a new preset
-  - **Delete** (X button): Remove the preset permanently
-
-  ### Preset Display Names
-  - Custom name: Shows your custom name
-  - Default name (Focused): Shows current FX name from track
-  - Default name (Chain): Shows "#N Current Track Name"
-  - Hover tooltip: Shows full FX chain with track info
-
-  ---
-
-  ## History System
-
-  ### Automatic Tracking
-  - Every Apply/Copy operation is automatically logged
-  - History stores up to 50 recent operations
-  - Newest operations appear at the top
-  - Duplicates are automatically removed
-
-  ### History Actions
-  - **Open**: Opens the FX window(s) from this history entry
-  - **Name**: Rename this history entry (becomes a custom name)
-  - **Save**: Convert this history entry into a saved preset
-
-  ### History Display Names
-  - Inherits custom name from preset (if executed from a saved preset)
-  - Shows default name if executed directly
-  - Updates automatically when you rename the matching preset
-
-  ---
-
-  ## Keyboard Shortcuts
-  - **Space**: Play/Stop transport
-  - **S**: Toggle solo on Preview track
-  - **Esc**: Close dialogs
-
-  ---
-
-  ## Settings Panel
-
-  ### Target Track
-  - Select which track to use as AudioSweet Preview target
-  - Default: First track matching "AudioSweet Preview" in name
-  - Can manually override with any track
-
-  ### Auto-Actions
-  - **Auto Open FX**: Automatically opens FX window after Apply/Copy
-  - **Auto Solo**: Automatically solos Preview track after Apply/Copy
-
-  ### File Naming
-  Configure how bounced audio files are named:
-  - **Include Elements**: Track#, Track Name, FX Name, Timestamp, Item Name
-  - **Show Type**: Display plugin type prefix (VST3:, CLAP:, JS:)
-  - **Separators**: Customize separators between name elements
-  - **FX Alias**: Replace long FX names with short aliases
-
-  ### Chain Visibility
-  - **Show Chain in Focused Mode**: Display full FX chain even in Focused mode
-  - Useful for context when working with multiple FX
-
-  ### Debug Mode
-  - Enable console logging for troubleshooting
-  - Shows: Save/Rename/Open/Run operations with indices and modes
-
-  ---
-
-  ## Tips & Tricks
-
-  ### Workflow Example 1: Quick FX Auditioning
-  1. Select track with FX chain
-  2. Switch to Chain mode
-  3. Click "Apply" to audition the full chain
-  4. Click "Save" if you like it
-
-  ### Workflow Example 2: Building FX Library
-  1. Focus on individual FX window
-  2. Switch to Focused mode
-  3. Click "Save" and name it (e.g., "Vocal EQ Bright")
-  4. Repeat for different FX
-  5. Access your library from "Saved" section anytime
-
-  ### Workflow Example 3: Using History
-  1. Experiment with different FX chains using Apply
-  2. All attempts are logged in History
-  3. Go back to History and click "Open" on any entry to review
-  4. Click "Save" on the one you like to make it permanent
-
-  ### Name Management
-  - Leave name empty when saving = dynamic name (updates with track/FX renames)
-  - Enter custom name = static name (never changes)
-  - You can always rename later using the "Name" button
-  - Renaming a preset automatically updates all matching history entries
-
-  ### FX Chain Tooltips
-  - Hover over any preset/history item to see full FX chain
-  - Focused mode: Saved FX is highlighted in GREEN
-  - Shows track number and current track name
-
-  ---
-
-  ## Troubleshooting
-
-  ### "No focused FX" in Focused Mode
-  - Click on any FX window to focus it
-  - Make sure the FX window is open (not just in FX chain list)
-
-  ### Preset Opens Wrong FX
-  - This can happen if you reordered FX after saving
-  - The script tries to match by name as fallback
-  - Enable Debug mode to see index matching details
-
-  ### History Not Showing Custom Names
-  - Make sure you're using version 251215.0025 or later
-  - Old history entries won't have custom names (only new ones)
-
-  ### Window Too Wide/Narrow
-  - Edit line 2482: ImGui.SetNextWindowSizeConstraints(ctx, 450, ...)
-  - Change the first number (450) to your preferred width
-
-  ---
-
-  ## Technical Notes
-  - All presets saved in REAPER project ExtState (persistent per project)
-  - History limited to 50 entries (configurable in gui.max_history)
-  - Supports CLAP, VST3, VST2, AU, and JS plugins
-  - FX matching uses both index and name for reliability
-  - Track identification uses GUID (survives track reordering)
+  ## Development
+  This script was developed with the assistance of AI tools
+  including ChatGPT and Claude AI.
 
 
 @changelog
+  0.1.13 [Internal Build 251220.0750] - Help System Refactoring
+    - ADDED: In-app User Manual window (Help → User Manual)
+      • New tabbed GUI window with 4 sections
+      • Tab 1: Getting Started (Overview, Core Features, Operation Modes)
+      • Tab 2: Actions & Presets (Main Actions, Preset System)
+      • Tab 3: History & Workflows (History System, Workflow Examples)
+      • Tab 4: Tips & Troubleshooting (Tips, Keyboard Shortcuts, Troubleshooting)
+      • Window size: 700x600, scrollable content
+      • Lines: 4186-4441 (help window implementation)
+    - SIMPLIFIED: @about section (lines 7-28)
+      • Removed all manual content (moved to GUI)
+      • Now only contains: Quick Start, Reference, Development credits
+      • Much cleaner ReaPack package description
+      • Users directed to Help → User Manual for full docs
+    - IMPROVED: Help menu structure
+      • Help → User Manual (opens GUI window)
+      • Help → About (prints reference to console)
+      • Clear separation between documentation and credits
+      • Lines: 3657-3685 (updated Help menu)
+    - ADDED: GUI state variable
+      • gui.show_help_window flag (line 1399)
+      • Controls help window visibility
+    - UX: Better documentation access
+      • No need to read @about in ReaPack or text editor
+      • Interactive, searchable (via tabs) manual
+      • Always available in Help menu
+      • Consistent with Settings window design
+
   0.1.12 [Internal Build 251220.0744] - FX Index Tracking Fix
     - FIXED: Critical bug where presets/history execute wrong FX after reordering
       • Problem: Stored fx_index becomes invalid when FX order changes on track
@@ -1396,6 +1254,7 @@ local gui = {
   rename_chain_name = "",
   rename_is_history = false,  -- Track whether renaming a history item or preset
   show_unified_settings = false,  -- Unified settings window with tabs
+  show_help_window = false,  -- Help/Manual window
   show_settings_popup = false,
   show_fxname_popup = false,
   show_preview_settings = false,
@@ -3654,32 +3513,20 @@ local function draw_gui()
     end
 
     if ImGui.BeginMenu(ctx, 'Help') then
+      if ImGui.MenuItem(ctx, 'User Manual', nil, false, true) then
+        gui.show_help_window = true
+      end
       if ImGui.MenuItem(ctx, 'About', nil, false, true) then
         r.ShowConsoleMsg(
           "=================================================\n" ..
           "AudioSweet ReaImGui - ImGui Interface for AudioSweet\n" ..
           "=================================================\n" ..
-          "Version: 0.1.12 (251220.0744)\n" ..
+          "Version: 0.1.13 (251220.0750)\n" ..
           "Author: hsuanice\n\n" ..
-
-          "Quick Start:\n" ..
-          "  1. Select a track with FX or focus an FX window\n" ..
-          "  2. Choose mode: Focused (single FX) or Chain (full track)\n" ..
-          "  3. Click Apply to audition or Copy to prepare\n" ..
-          "  4. Click Save to store presets for later use\n\n" ..
-
-          "Key Features:\n" ..
-          "  - Focused/Chain modes with real-time FX display\n" ..
-          "  - Preset library with custom naming and rename sync\n" ..
-          "  - Auto-tracked history (up to 50 operations)\n" ..
-          "  - Keyboard shortcuts (Space=Play/Stop, S=Solo)\n" ..
-          "  - Comprehensive file naming settings with FX Alias\n" ..
-          "  - Debug mode with detailed console logging\n\n" ..
-
 
           "Reference:\n" ..
           "  Inspired by AudioSuite-like Script by Tim Chimes\n" ..
-          "  'AudioSweet' is a name originally given by Tim Chimes.  \n" ..
+          "  'AudioSweet' is a name originally given by Tim Chimes.\n" ..
           "  This project continues to use the name in reference to his original work.\n\n" ..
           "  Original: Renders selected plugin to selected media item\n" ..
           "  Written for REAPER 5.1 with Lua\n" ..
@@ -4186,6 +4033,263 @@ end
     end
 
     ImGui.Spacing(ctx)
+    ImGui.Separator(ctx)
+    if ImGui.Button(ctx, 'Close', 120, 0) then
+      ImGui.CloseCurrentPopup(ctx)
+    end
+
+    ImGui.EndPopup(ctx)
+  end
+
+  -- ====================================================================
+  -- Help / User Manual Window
+  -- ====================================================================
+  if gui.show_help_window then
+    ImGui.SetNextWindowSize(ctx, 700, 600, ImGui.Cond_Appearing)
+    ImGui.OpenPopup(ctx, 'AudioSweet User Manual')
+    gui.show_help_window = false
+  end
+
+  if ImGui.BeginPopupModal(ctx, 'AudioSweet User Manual', true, ImGui.WindowFlags_None) then
+    -- ESC key handling
+    if ImGui.IsWindowFocused(ctx) and ImGui.IsKeyPressed(ctx, ImGui.Key_Escape, false) then
+      ImGui.CloseCurrentPopup(ctx)
+    end
+
+    -- Tab Bar for different manual sections
+    if ImGui.BeginTabBar(ctx, 'HelpTabs', ImGui.TabBarFlags_None) then
+
+      -- ============================================================
+      -- Tab 1: Getting Started
+      -- ============================================================
+      if ImGui.BeginTabItem(ctx, 'Getting Started') then
+        ImGui.TextColored(ctx, 0xFFAA55FF, "Overview")
+        ImGui.Separator(ctx)
+        ImGui.TextWrapped(ctx, "Complete AudioSweet control center with ImGui interface for managing FX chains and presets.")
+        ImGui.Spacing(ctx)
+
+        ImGui.TextColored(ctx, 0xFFAA55FF, "Core Features")
+        ImGui.Separator(ctx)
+        ImGui.BulletText(ctx, "Two operation modes: Focused FX and Full Chain")
+        ImGui.BulletText(ctx, "Apply/Copy FX chains to AudioSweet Preview track")
+        ImGui.BulletText(ctx, "Save and manage FX presets with custom naming")
+        ImGui.BulletText(ctx, "Automatic operation history tracking")
+        ImGui.BulletText(ctx, "Real-time FX chain visualization")
+        ImGui.BulletText(ctx, "Built-in keyboard shortcuts")
+        ImGui.BulletText(ctx, "Persistent settings across sessions")
+        ImGui.Spacing(ctx)
+
+        ImGui.TextColored(ctx, 0xFFAA55FF, "Operation Modes")
+        ImGui.Separator(ctx)
+        ImGui.Text(ctx, "Focused Mode (Single FX)")
+        ImGui.Indent(ctx)
+        ImGui.BulletText(ctx, "Works with the currently focused FX window")
+        ImGui.BulletText(ctx, "Click on any FX window to focus it")
+        ImGui.BulletText(ctx, "Saves/applies only the selected FX")
+        ImGui.BulletText(ctx, "Display shows: FX name only (e.g., 'VST3: Pro-Q 4')")
+        ImGui.BulletText(ctx, "Supports CLAP and VST3 plugins")
+        ImGui.Unindent(ctx)
+        ImGui.Spacing(ctx)
+
+        ImGui.Text(ctx, "Chain Mode (Full FX Chain)")
+        ImGui.Indent(ctx)
+        ImGui.BulletText(ctx, "Works with the entire FX chain of selected track")
+        ImGui.BulletText(ctx, "Saves/applies all FX on the track")
+        ImGui.BulletText(ctx, "Display shows: '#N Track Name' format")
+        ImGui.BulletText(ctx, "Shows complete FX list in tooltips")
+        ImGui.Unindent(ctx)
+
+        ImGui.EndTabItem(ctx)
+      end
+
+      -- ============================================================
+      -- Tab 2: Actions & Presets
+      -- ============================================================
+      if ImGui.BeginTabItem(ctx, 'Actions & Presets') then
+        ImGui.TextColored(ctx, 0xFFAA55FF, "Main Actions")
+        ImGui.Separator(ctx)
+
+        ImGui.Text(ctx, "Apply")
+        ImGui.Indent(ctx)
+        ImGui.BulletText(ctx, "Copies FX to Preview track AND enables it")
+        ImGui.BulletText(ctx, "Removes all existing FX on Preview track first")
+        ImGui.BulletText(ctx, "Use when you want to audition the FX immediately")
+        ImGui.Unindent(ctx)
+        ImGui.Spacing(ctx)
+
+        ImGui.Text(ctx, "Copy")
+        ImGui.Indent(ctx)
+        ImGui.BulletText(ctx, "Copies FX to Preview track but keeps it bypassed")
+        ImGui.BulletText(ctx, "Removes all existing FX on Preview track first")
+        ImGui.BulletText(ctx, "Use when you want to prepare FX without hearing it yet")
+        ImGui.Unindent(ctx)
+        ImGui.Spacing(ctx)
+
+        ImGui.Text(ctx, "Open")
+        ImGui.Indent(ctx)
+        ImGui.BulletText(ctx, "Opens the saved FX window(s)")
+        ImGui.BulletText(ctx, "Focused mode: Opens the specific FX window")
+        ImGui.BulletText(ctx, "Chain mode: Opens all FX windows in the chain")
+        ImGui.Unindent(ctx)
+        ImGui.Spacing(ctx)
+
+        ImGui.TextColored(ctx, 0xFFAA55FF, "Preset System")
+        ImGui.Separator(ctx)
+
+        ImGui.Text(ctx, "Saving Presets")
+        ImGui.Indent(ctx)
+        ImGui.BulletText(ctx, "1. Click the 'Save' button (in main controls or history section)")
+        ImGui.BulletText(ctx, "2. Enter a custom name, or leave empty to use default:")
+        ImGui.Indent(ctx)
+        ImGui.BulletText(ctx, "Focused mode default: FX name")
+        ImGui.BulletText(ctx, "Chain mode default: Track name")
+        ImGui.Unindent(ctx)
+        ImGui.BulletText(ctx, "3. Preset is saved and appears in the 'Saved' section")
+        ImGui.Unindent(ctx)
+        ImGui.Spacing(ctx)
+
+        ImGui.Text(ctx, "Managing Presets")
+        ImGui.Indent(ctx)
+        ImGui.BulletText(ctx, "Open: Opens the FX window(s) without applying")
+        ImGui.BulletText(ctx, "Name: Rename the preset (custom name or revert to default)")
+        ImGui.BulletText(ctx, "Save: Save current FX as a new preset")
+        ImGui.BulletText(ctx, "Delete (X button): Remove the preset permanently")
+        ImGui.Unindent(ctx)
+        ImGui.Spacing(ctx)
+
+        ImGui.Text(ctx, "Preset Display Names")
+        ImGui.Indent(ctx)
+        ImGui.BulletText(ctx, "Custom name: Shows your custom name")
+        ImGui.BulletText(ctx, "Default name (Focused): Shows current FX name from track")
+        ImGui.BulletText(ctx, "Default name (Chain): Shows '#N Current Track Name'")
+        ImGui.BulletText(ctx, "Hover tooltip: Shows full FX chain with track info")
+        ImGui.Unindent(ctx)
+
+        ImGui.EndTabItem(ctx)
+      end
+
+      -- ============================================================
+      -- Tab 3: History & Workflows
+      -- ============================================================
+      if ImGui.BeginTabItem(ctx, 'History & Workflows') then
+        ImGui.TextColored(ctx, 0xFFAA55FF, "History System")
+        ImGui.Separator(ctx)
+
+        ImGui.Text(ctx, "Automatic Tracking")
+        ImGui.Indent(ctx)
+        ImGui.BulletText(ctx, "Every Apply/Copy operation is automatically logged")
+        ImGui.BulletText(ctx, "History stores up to 50 recent operations")
+        ImGui.BulletText(ctx, "Newest operations appear at the top")
+        ImGui.BulletText(ctx, "Duplicates are automatically removed")
+        ImGui.Unindent(ctx)
+        ImGui.Spacing(ctx)
+
+        ImGui.Text(ctx, "History Actions")
+        ImGui.Indent(ctx)
+        ImGui.BulletText(ctx, "Open: Opens the FX window(s) from this history entry")
+        ImGui.BulletText(ctx, "Name: Rename this history entry (becomes a custom name)")
+        ImGui.BulletText(ctx, "Save: Convert this history entry into a saved preset")
+        ImGui.Unindent(ctx)
+        ImGui.Spacing(ctx)
+
+        ImGui.TextColored(ctx, 0xFFAA55FF, "Workflow Examples")
+        ImGui.Separator(ctx)
+
+        ImGui.Text(ctx, "Workflow 1: Quick FX Auditioning")
+        ImGui.Indent(ctx)
+        ImGui.BulletText(ctx, "1. Select track with FX chain")
+        ImGui.BulletText(ctx, "2. Switch to Chain mode")
+        ImGui.BulletText(ctx, "3. Click 'Apply' to audition the full chain")
+        ImGui.BulletText(ctx, "4. Click 'Save' if you like it")
+        ImGui.Unindent(ctx)
+        ImGui.Spacing(ctx)
+
+        ImGui.Text(ctx, "Workflow 2: Building FX Library")
+        ImGui.Indent(ctx)
+        ImGui.BulletText(ctx, "1. Focus on individual FX window")
+        ImGui.BulletText(ctx, "2. Switch to Focused mode")
+        ImGui.BulletText(ctx, "3. Click 'Save' and name it (e.g., 'Vocal EQ Bright')")
+        ImGui.BulletText(ctx, "4. Repeat for different FX")
+        ImGui.BulletText(ctx, "5. Access your library from 'Saved' section anytime")
+        ImGui.Unindent(ctx)
+        ImGui.Spacing(ctx)
+
+        ImGui.Text(ctx, "Workflow 3: Using History")
+        ImGui.Indent(ctx)
+        ImGui.BulletText(ctx, "1. Experiment with different FX chains using Apply")
+        ImGui.BulletText(ctx, "2. All attempts are logged in History")
+        ImGui.BulletText(ctx, "3. Go back to History and click 'Open' on any entry to review")
+        ImGui.BulletText(ctx, "4. Click 'Save' on the one you like to make it permanent")
+        ImGui.Unindent(ctx)
+
+        ImGui.EndTabItem(ctx)
+      end
+
+      -- ============================================================
+      -- Tab 4: Tips & Troubleshooting
+      -- ============================================================
+      if ImGui.BeginTabItem(ctx, 'Tips & Troubleshooting') then
+        ImGui.TextColored(ctx, 0xFFAA55FF, "Tips & Tricks")
+        ImGui.Separator(ctx)
+
+        ImGui.Text(ctx, "Name Management")
+        ImGui.Indent(ctx)
+        ImGui.BulletText(ctx, "Leave name empty when saving = dynamic name (updates with track/FX renames)")
+        ImGui.BulletText(ctx, "Enter custom name = static name (never changes)")
+        ImGui.BulletText(ctx, "You can always rename later using the 'Name' button")
+        ImGui.BulletText(ctx, "Renaming a preset automatically updates all matching history entries")
+        ImGui.Unindent(ctx)
+        ImGui.Spacing(ctx)
+
+        ImGui.Text(ctx, "FX Chain Tooltips")
+        ImGui.Indent(ctx)
+        ImGui.BulletText(ctx, "Hover over any preset/history item to see full FX chain")
+        ImGui.BulletText(ctx, "Focused mode: Saved FX is highlighted in GREEN")
+        ImGui.BulletText(ctx, "Shows track number and current track name")
+        ImGui.Unindent(ctx)
+        ImGui.Spacing(ctx)
+
+        ImGui.Text(ctx, "Keyboard Shortcuts")
+        ImGui.Indent(ctx)
+        ImGui.BulletText(ctx, "Space: Play/Stop transport")
+        ImGui.BulletText(ctx, "S: Toggle solo on Preview track")
+        ImGui.BulletText(ctx, "Esc: Close dialogs")
+        ImGui.Unindent(ctx)
+        ImGui.Spacing(ctx)
+
+        ImGui.TextColored(ctx, 0xFFAA55FF, "Troubleshooting")
+        ImGui.Separator(ctx)
+
+        ImGui.Text(ctx, "'No focused FX' in Focused Mode")
+        ImGui.Indent(ctx)
+        ImGui.BulletText(ctx, "Click on any FX window to focus it")
+        ImGui.BulletText(ctx, "Make sure the FX window is open (not just in FX chain list)")
+        ImGui.Unindent(ctx)
+        ImGui.Spacing(ctx)
+
+        ImGui.Text(ctx, "Preset Opens Wrong FX")
+        ImGui.Indent(ctx)
+        ImGui.BulletText(ctx, "This can happen if you reordered FX after saving")
+        ImGui.BulletText(ctx, "The script tries to match by name as fallback")
+        ImGui.BulletText(ctx, "Enable Debug mode to see index matching details")
+        ImGui.Unindent(ctx)
+        ImGui.Spacing(ctx)
+
+        ImGui.TextColored(ctx, 0xFFAA55FF, "Technical Notes")
+        ImGui.Separator(ctx)
+        ImGui.BulletText(ctx, "All presets saved in REAPER project ExtState (persistent per project)")
+        ImGui.BulletText(ctx, "History limited to 50 entries (configurable in Settings)")
+        ImGui.BulletText(ctx, "Supports CLAP, VST3, VST2, AU, and JS plugins")
+        ImGui.BulletText(ctx, "FX matching uses both index and name for reliability")
+        ImGui.BulletText(ctx, "Track identification uses GUID (survives track reordering)")
+
+        ImGui.EndTabItem(ctx)
+      end
+
+      ImGui.EndTabBar(ctx)
+    end
+
+    -- Close Button
     ImGui.Separator(ctx)
     if ImGui.Button(ctx, 'Close', 120, 0) then
       ImGui.CloseCurrentPopup(ctx)
