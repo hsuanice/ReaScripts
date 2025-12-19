@@ -1,7 +1,7 @@
 --[[
 @description AudioSweet ReaImGui - ImGui Interface for AudioSweet
 @author hsuanice
-@version 0.1.6
+@version 0.1.7
 @provides
   [main] .
 @about
@@ -199,6 +199,9 @@
 
 
 @changelog
+  0.1.7 [Internal Build 251219.1915] - Preset/History display alias mapping
+    - Added: Preset/History display formatting now reads type/vendor/name from fx_alias.json when alias mode is enabled
+
   0.1.6 [Internal Build 251219.1800] - Apply layout compact
     - Changed: Moved Handle control to the Channel row for a two-line top layout
 
@@ -1204,6 +1207,9 @@ local gui = {
   fxname_show_vendor = true,  -- Show vendor name in parentheses
   fxname_strip_symbol = true,  -- Strip spaces and symbols
   use_alias = false,           -- Use FX Alias for file naming
+  preset_display_show_type = true,    -- Preset/History display: show FX type
+  preset_display_show_vendor = true,  -- Preset/History display: show vendor
+  preset_display_use_alias = false,   -- Preset/History display: use FX alias
   -- Chain mode naming
   chain_token_source = 0,      -- 0=track, 1=aliases, 2=fxchain
   chain_alias_joiner = "",     -- Joiner for aliases mode
@@ -1231,6 +1237,7 @@ local gui = {
   show_fxname_popup = false,
   show_preview_settings = false,
   show_naming_popup = false,
+  show_preset_display_popup = false,
   show_target_track_popup = false,
   show_tc_embed_popup = false,
   -- Preview settings
@@ -1268,6 +1275,9 @@ local function save_gui_settings()
   r.SetExtState(SETTINGS_NAMESPACE, "fxname_show_vendor", gui.fxname_show_vendor and "1" or "0", true)
   r.SetExtState(SETTINGS_NAMESPACE, "fxname_strip_symbol", gui.fxname_strip_symbol and "1" or "0", true)
   r.SetExtState(SETTINGS_NAMESPACE, "use_alias", gui.use_alias and "1" or "0", true)
+  r.SetExtState(SETTINGS_NAMESPACE, "preset_display_show_type", gui.preset_display_show_type and "1" or "0", true)
+  r.SetExtState(SETTINGS_NAMESPACE, "preset_display_show_vendor", gui.preset_display_show_vendor and "1" or "0", true)
+  r.SetExtState(SETTINGS_NAMESPACE, "preset_display_use_alias", gui.preset_display_use_alias and "1" or "0", true)
   r.SetExtState(SETTINGS_NAMESPACE, "chain_token_source", tostring(gui.chain_token_source), true)
   r.SetExtState(SETTINGS_NAMESPACE, "chain_alias_joiner", gui.chain_alias_joiner, true)
   r.SetExtState(SETTINGS_NAMESPACE, "max_fx_tokens", tostring(gui.max_fx_tokens), true)
@@ -1314,6 +1324,9 @@ local function load_gui_settings()
   gui.fxname_show_vendor = get_bool("fxname_show_vendor", false)
   gui.fxname_strip_symbol = get_bool("fxname_strip_symbol", true)
   gui.use_alias = get_bool("use_alias", false)
+  gui.preset_display_show_type = get_bool("preset_display_show_type", true)
+  gui.preset_display_show_vendor = get_bool("preset_display_show_vendor", true)
+  gui.preset_display_use_alias = get_bool("preset_display_use_alias", false)
   gui.chain_token_source = get_int("chain_token_source", 0)
   gui.max_fx_tokens = get_int("max_fx_tokens", 3)
   gui.trackname_strip_symbols = get_bool("trackname_strip_symbols", true)
@@ -1351,6 +1364,9 @@ local function load_gui_settings()
     r.ShowConsoleMsg(string.format("  FX Name - Show Vendor: %s\n", gui.fxname_show_vendor and "ON" or "OFF"))
     r.ShowConsoleMsg(string.format("  FX Name - Strip Symbol: %s\n", gui.fxname_strip_symbol and "ON" or "OFF"))
     r.ShowConsoleMsg(string.format("  FX Name - Use Alias: %s\n", gui.use_alias and "ON" or "OFF"))
+    r.ShowConsoleMsg(string.format("  Preset Display - Show Type: %s\n", gui.preset_display_show_type and "ON" or "OFF"))
+    r.ShowConsoleMsg(string.format("  Preset Display - Show Vendor: %s\n", gui.preset_display_show_vendor and "ON" or "OFF"))
+    r.ShowConsoleMsg(string.format("  Preset Display - Use Alias: %s\n", gui.preset_display_use_alias and "ON" or "OFF"))
     r.ShowConsoleMsg(string.format("  Max FX Tokens: %d\n", gui.max_fx_tokens))
     local chain_token_source_names = {"Track Name", "FX Aliases", "FXChain"}
     r.ShowConsoleMsg(string.format("  Chain Token Source: %s\n", chain_token_source_names[gui.chain_token_source + 1]))
@@ -1407,6 +1423,199 @@ local function join_path(base, fragment)
   end
   local sep = DIR_SEPARATOR == "\\" and "\\" or "/"
   return base .. sep .. fragment
+end
+
+------------------------------------------------------------
+-- Preset/History Display Helpers
+------------------------------------------------------------
+local json = (function()
+  local j = {}
+  local function skip_ws(s, i)
+    local _, j = s:find("^[ \n\r\t]*", i)
+    return (j or i - 1) + 1
+  end
+  local function parse_value(s, i)
+    i = skip_ws(s, i)
+    local c = s:sub(i, i)
+    if c == "{" then
+      local obj = {}
+      i = i + 1
+      i = skip_ws(s, i)
+      if s:sub(i, i) == "}" then return obj, i + 1 end
+      while true do
+        local k
+        k, i = parse_value(s, i)
+        if type(k) ~= "string" then error("JSON key error") end
+        i = skip_ws(s, i)
+        if s:sub(i, i) ~= ":" then error("JSON :") end
+        i = i + 1
+        local v
+        v, i = parse_value(s, i)
+        obj[k] = v
+        i = skip_ws(s, i)
+        local ch = s:sub(i, i)
+        if ch == "}" then return obj, i + 1 end
+        if ch ~= "," then error("JSON ,}") end
+        i = i + 1
+      end
+    elseif c == "[" then
+      local arr = {}
+      i = i + 1
+      i = skip_ws(s, i)
+      if s:sub(i, i) == "]" then return arr, i + 1 end
+      while true do
+        local v
+        v, i = parse_value(s, i)
+        arr[#arr + 1] = v
+        i = skip_ws(s, i)
+        local ch = s:sub(i, i)
+        if ch == "]" then return arr, i + 1 end
+        if ch ~= "," then error("JSON ,]") end
+        i = i + 1
+      end
+    elseif c == '"' then
+      local j1 = i + 1
+      local out = {}
+      while true do
+        local ch = s:sub(j1, j1)
+        if ch == "" then error("JSON string") end
+        if ch == '"' then return table.concat(out), j1 + 1 end
+        if ch == "\\" then
+          local e = s:sub(j1 + 1, j1 + 1)
+          if e == "u" then
+            local hex = s:sub(j1 + 2, j1 + 5)
+            out[#out + 1] = utf8.char(tonumber(hex, 16))
+            j1 = j1 + 6
+          else
+            local m = { b = "\b", f = "\f", n = "\n", r = "\r", t = "\t", ['"'] = '"', ['\\'] = "\\", ['/'] = "/" }
+            out[#out + 1] = m[e] or e
+            j1 = j1 + 2
+          end
+        else
+          out[#out + 1] = ch
+          j1 = j1 + 1
+        end
+      end
+    else
+      local lit = s:match("^true", i)
+      if lit then return true, i + 4 end
+      lit = s:match("^false", i)
+      if lit then return false, i + 5 end
+      lit = s:match("^null", i)
+      if lit then return nil, i + 4 end
+      local num = s:match("^%-?%d+%.?%d*[eE]?[%+%-]?%d*", i)
+      if num and #num > 0 then return tonumber(num), i + #num end
+      error("JSON unexpected")
+    end
+  end
+  function j.decode(s)
+    local ok, res = pcall(function()
+      local v = select(1, parse_value(s, 1))
+      return v
+    end)
+    return ok and res or nil
+  end
+  return j
+end)()
+
+local function read_file(path)
+  local f = io.open(path, "rb")
+  if not f then return nil end
+  local s = f:read("*a")
+  f:close()
+  return s
+end
+
+local fx_alias_cache = {
+  loaded = false,
+  data = {},
+  path = "",
+}
+
+local function parse_fx_label(raw)
+  raw = tostring(raw or "")
+  local typ, rest = raw:match("^([%w%+%._-]+):%s*(.+)$")
+  rest = rest or raw
+  local core, vendor = rest, ""
+  local core_only, v = rest:match("^(.-)%s*%(([^%(%)]+)%)%s*$")
+  if core_only then
+    core = core_only
+    vendor = v or ""
+  end
+  return trim(typ), trim(core), trim(vendor)
+end
+
+local function normalize_token(s)
+  return (tostring(s or ""):gsub("[^%w]+", "")):lower()
+end
+
+local function make_fingerprint(raw_label)
+  local typ, core, vendor = parse_fx_label(raw_label)
+  local t = normalize_token(typ)
+  local c = normalize_token(core)
+  local v = normalize_token(vendor)
+  return table.concat({ t, c, v }, "|")
+end
+
+local function get_fx_alias_db()
+  if fx_alias_cache.loaded then return fx_alias_cache.data end
+  fx_alias_cache.path = RES_PATH .. "/Scripts/hsuanice Scripts/Settings/fx_alias.json"
+  local raw = read_file(fx_alias_cache.path)
+  local decoded = raw and raw ~= "" and json.decode(raw) or nil
+  if type(decoded) == "table" then
+    fx_alias_cache.data = decoded
+  else
+    fx_alias_cache.data = {}
+  end
+  fx_alias_cache.loaded = true
+  return fx_alias_cache.data
+end
+
+local function get_fx_alias_record(raw_label)
+  if not gui.preset_display_use_alias then return nil end
+  local db = get_fx_alias_db()
+  local fp = make_fingerprint(raw_label)
+  local rec = db and db[fp]
+  return rec
+end
+
+local function pick_alias_type(parsed_type, seen_types)
+  if type(seen_types) == "table" then
+    if parsed_type and parsed_type ~= "" then
+      for _, t in ipairs(seen_types) do
+        if t == parsed_type then
+          return parsed_type
+        end
+      end
+    end
+    return seen_types[1] or ""
+  end
+  return parsed_type or ""
+end
+
+local function format_fx_label_for_preset(raw_label)
+  local typ, core, vendor = parse_fx_label(raw_label)
+  if core == "" then return raw_label end
+
+  local display_type = typ
+  local display_vendor = vendor
+  local display_core = core
+
+  local rec = get_fx_alias_record(raw_label)
+  if rec then
+    display_type = pick_alias_type(typ, rec.seen_types)
+    display_vendor = rec.normalized_vendor or ""
+    display_core = (rec.alias and rec.alias ~= "") and rec.alias or (rec.normalized_core or display_core)
+  end
+
+  local name = display_core
+  if gui.preset_display_show_vendor and display_vendor ~= "" then
+    name = string.format("%s (%s)", display_core, display_vendor)
+  end
+  if gui.preset_display_show_type and display_type ~= "" then
+    name = string.format("%s: %s", display_type, name)
+  end
+  return name
 end
 
 local function check_bwfmetaedit(force)
@@ -1871,7 +2080,7 @@ local function get_chain_display_info(chain)
         local fx_lines = {}
         for i = 0, fx_count - 1 do
           local _, fx_name = r.TrackFX_GetFXName(tr, i, "")
-          table.insert(fx_lines, string.format("%d. %s", i + 1, fx_name))
+          table.insert(fx_lines, string.format("%d. %s", i + 1, format_fx_label_for_preset(fx_name)))
         end
         fx_info = table.concat(fx_lines, "\n")
       else
@@ -1887,7 +2096,7 @@ local function get_chain_display_info(chain)
           -- fx_name format: "VST3: Pro-Q 4 (FabFilter)" or "JS: ReaEQ"
           -- Keep the full name including plugin type
           -- Format: "1. [Plugin Type]: FX Name"
-          table.insert(fx_lines, string.format("%d. %s", i + 1, fx_name))
+          table.insert(fx_lines, string.format("%d. %s", i + 1, format_fx_label_for_preset(fx_name)))
         end
         fx_info = table.concat(fx_lines, "\n")
       else
@@ -1906,7 +2115,7 @@ local function get_chain_display_info(chain)
       display_name = chain.custom_name
     else
       -- Use current FX name from track, fallback to saved name
-      display_name = found_fx_name or chain.name
+      display_name = format_fx_label_for_preset(found_fx_name or chain.name)
     end
   else
     -- Chain mode: use custom name OR current track name OR saved track name
@@ -1947,7 +2156,7 @@ local function get_history_display_name(hist_item)
         display_name = hist_item.custom_name
       else
         -- Use the saved FX name (hist_item.name already contains full FX name)
-        display_name = hist_item.name
+        display_name = format_fx_label_for_preset(hist_item.name)
       end
     else
       -- Chain mode: use custom name OR current track name
@@ -1994,13 +2203,14 @@ local function show_preset_tooltip(item)
     ImGui.Text(ctx, track_info_line)
     for fx_idx = 0, fx_count - 1 do
       local _, fx_name = r.TrackFX_GetFXName(tr, fx_idx, "")
+      local display_name = format_fx_label_for_preset(fx_name)
       if fx_idx == (item.fx_index or 0) then
         -- This is the saved FX - color it green
         ImGui.PushStyleColor(ctx, ImGui.Col_Text, 0x00FF00FF)
-        ImGui.Text(ctx, string.format("%d. %s", fx_idx + 1, fx_name))
+        ImGui.Text(ctx, string.format("%d. %s", fx_idx + 1, display_name))
         ImGui.PopStyleColor(ctx)
       else
-        ImGui.Text(ctx, string.format("%d. %s", fx_idx + 1, fx_name))
+        ImGui.Text(ctx, string.format("%d. %s", fx_idx + 1, display_name))
       end
     end
     ImGui.EndTooltip(ctx)
@@ -2009,7 +2219,7 @@ local function show_preset_tooltip(item)
     local fx_lines = {}
     for fx_idx = 0, fx_count - 1 do
       local _, fx_name = r.TrackFX_GetFXName(tr, fx_idx, "")
-      table.insert(fx_lines, string.format("%d. %s", fx_idx + 1, fx_name))
+      table.insert(fx_lines, string.format("%d. %s", fx_idx + 1, format_fx_label_for_preset(fx_name)))
     end
     local fx_info = table.concat(fx_lines, "\n")
     ImGui.BeginTooltip(ctx)
@@ -3124,6 +3334,10 @@ local function draw_gui()
         gui.show_naming_popup = true
       end
       ImGui.Separator(ctx)
+      if ImGui.MenuItem(ctx, 'Preset/History Display...', nil, false, true) then
+        gui.show_preset_display_popup = true
+      end
+      ImGui.Separator(ctx)
       if ImGui.MenuItem(ctx, 'Timecode Embed Settings...', nil, false, true) then
         gui.show_tc_embed_popup = true
       end
@@ -3167,7 +3381,7 @@ local function draw_gui()
           "=================================================\n" ..
           "AudioSweet ReaImGui - ImGui Interface for AudioSweet\n" ..
           "=================================================\n" ..
-          "Version: 0.1.6 (251219.1800)\n" ..
+          "Version: 0.1.7 (251219.1915)\n" ..
           "Author: hsuanice\n\n" ..
 
           "Quick Start:\n" ..
@@ -3352,6 +3566,56 @@ end
     end
 
     ImGui.Spacing(ctx)
+    ImGui.Separator(ctx)
+    if ImGui.Button(ctx, 'Close', 120, 0) then
+      ImGui.CloseCurrentPopup(ctx)
+    end
+
+    ImGui.EndPopup(ctx)
+  end
+
+  -- Preset/History Display Settings Popup
+  if gui.show_preset_display_popup then
+    local mouse_x, mouse_y = r.GetMousePosition()
+    ImGui.SetNextWindowPos(ctx, mouse_x, mouse_y, ImGui.Cond_Appearing)
+    ImGui.OpenPopup(ctx, 'Preset/History Display')
+    gui.show_preset_display_popup = false
+  end
+
+  if ImGui.BeginPopupModal(ctx, 'Preset/History Display', true, ImGui.WindowFlags_AlwaysAutoResize) then
+    if ImGui.IsWindowFocused(ctx) and ImGui.IsKeyPressed(ctx, ImGui.Key_Escape, false) then
+      ImGui.CloseCurrentPopup(ctx)
+    end
+
+    local changed = false
+    local rv
+
+    ImGui.Text(ctx, "FX Name Display:")
+    ImGui.Separator(ctx)
+
+    rv, gui.preset_display_show_type = ImGui.Checkbox(ctx, "Show Plugin Type (CLAP:, VST3:, AU:, VST:)", gui.preset_display_show_type)
+    if rv then changed = true end
+
+    rv, gui.preset_display_show_vendor = ImGui.Checkbox(ctx, "Show Vendor Name (FabFilter)", gui.preset_display_show_vendor)
+    if rv then changed = true end
+
+    rv, gui.preset_display_use_alias = ImGui.Checkbox(ctx, "Use FX Alias for display", gui.preset_display_use_alias)
+    if rv then
+      fx_alias_cache.loaded = false
+      changed = true
+    end
+
+    local alias_path = RES_PATH .. "/Scripts/hsuanice Scripts/Settings/fx_alias.json"
+    if gui.preset_display_use_alias and not file_exists(alias_path) then
+      ImGui.PushStyleColor(ctx, ImGui.Col_Text, 0xFFAA00FF)
+      ImGui.TextWrapped(ctx, "FX Alias database not found. Build it via Settings -> FX Alias Tools.")
+      ImGui.PopStyleColor(ctx)
+    end
+
+    if changed then
+      save_gui_settings()
+    end
+
     ImGui.Separator(ctx)
     if ImGui.Button(ctx, 'Close', 120, 0) then
       ImGui.CloseCurrentPopup(ctx)
@@ -4123,6 +4387,9 @@ local function loop()
       r.ShowConsoleMsg(string.format("  FX Name - Show Vendor: %s\n", gui.fxname_show_vendor and "ON" or "OFF"))
       r.ShowConsoleMsg(string.format("  FX Name - Strip Symbol: %s\n", gui.fxname_strip_symbol and "ON" or "OFF"))
       r.ShowConsoleMsg(string.format("  FX Name - Use Alias: %s\n", gui.use_alias and "ON" or "OFF"))
+      r.ShowConsoleMsg(string.format("  Preset Display - Show Type: %s\n", gui.preset_display_show_type and "ON" or "OFF"))
+      r.ShowConsoleMsg(string.format("  Preset Display - Show Vendor: %s\n", gui.preset_display_show_vendor and "ON" or "OFF"))
+      r.ShowConsoleMsg(string.format("  Preset Display - Use Alias: %s\n", gui.preset_display_use_alias and "ON" or "OFF"))
       r.ShowConsoleMsg(string.format("  Max FX Tokens: %d\n", gui.max_fx_tokens))
       local chain_token_source_names = {"Track Name", "FX Aliases", "FXChain"}
       r.ShowConsoleMsg(string.format("  Chain Token Source: %s\n", chain_token_source_names[gui.chain_token_source + 1]))
