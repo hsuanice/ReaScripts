@@ -1,7 +1,7 @@
 --[[
 @description AudioSweet ReaImGui - ImGui Interface for AudioSweet
 @author hsuanice
-@version 0.1.4
+@version 0.1.5
 @provides
   [main] .
 @about
@@ -199,6 +199,9 @@
 
 
 @changelog
+  0.1.5 [Internal Build 251219.1754] - Preset/History show toggle
+    - Added: Toggle to show/hide Presets/History block with persistent setting
+
   0.1.4 [Internal Build 251219.1745] - Removed Presets menu tab
     - Removed: Presets menu from the top menu bar (use main controls instead)
 
@@ -1236,6 +1239,7 @@ local gui = {
   -- Feature flags
   enable_saved_chains = true,   -- Now working with OVERRIDE ExtState mechanism
   enable_history = true,        -- Now working with OVERRIDE ExtState mechanism
+  show_presets_history = true,  -- Show/Hide Saved Preset + History block
   -- UI settings
   enable_docking = false,       -- Allow window docking
   bwfmetaedit_custom_path = "",
@@ -1273,6 +1277,7 @@ local function save_gui_settings()
   r.SetExtState(SETTINGS_NAMESPACE, "preview_restore_mode", tostring(gui.preview_restore_mode), true)
   -- UI settings
   r.SetExtState(SETTINGS_NAMESPACE, "enable_docking", gui.enable_docking and "1" or "0", true)
+  r.SetExtState(SETTINGS_NAMESPACE, "show_presets_history", gui.show_presets_history and "1" or "0", true)
   r.SetExtState(SETTINGS_NAMESPACE, "bwfmetaedit_custom_path", gui.bwfmetaedit_custom_path or "", true)
 end
 
@@ -1323,6 +1328,7 @@ local function load_gui_settings()
   gui.bwfmetaedit_custom_path = get_string("bwfmetaedit_custom_path", "")
   -- UI settings
   gui.enable_docking = get_bool("enable_docking", false)
+  gui.show_presets_history = get_bool("show_presets_history", true)
 
   -- Debug output on startup
   if gui.debug then
@@ -3158,7 +3164,7 @@ local function draw_gui()
           "=================================================\n" ..
           "AudioSweet ReaImGui - ImGui Interface for AudioSweet\n" ..
           "=================================================\n" ..
-          "Version: 0.1.4 (251219.1745)\n" ..
+          "Version: 0.1.5 (251219.1754)\n" ..
           "Author: hsuanice\n\n" ..
 
           "Quick Start:\n" ..
@@ -3679,163 +3685,168 @@ end
 
   -- === QUICK PROCESS (Saved + History, side by side) ===
   if gui.enable_saved_chains or gui.enable_history then
-    -- Show FX on recall checkbox
     local changed
-    changed, gui.show_fx_on_recall = ImGui.Checkbox(ctx, "Show FX window on recall", gui.show_fx_on_recall)
+    changed, gui.show_presets_history = ImGui.Checkbox(ctx, "Show Presets/History", gui.show_presets_history)
     if changed then save_gui_settings() end
 
-    -- Only show if at least one feature is enabled and has content
-    if (gui.enable_saved_chains and #gui.saved_chains > 0) or (gui.enable_history and #gui.history > 0) then
-      local avail_w = ImGui.GetContentRegionAvail(ctx)
-      local col1_w = avail_w * 0.5 - 5
+    if gui.show_presets_history then
+      -- Show FX on recall checkbox
+      changed, gui.show_fx_on_recall = ImGui.Checkbox(ctx, "Show FX window on recall", gui.show_fx_on_recall)
+      if changed then save_gui_settings() end
 
-      local function calc_list_height(item_count)
-        local _, spacing_y = ImGui.GetStyleVar(ctx, ImGui.StyleVar_ItemSpacing)
-        local frame_h = ImGui.GetFrameHeight(ctx)
-        local text_h = ImGui.GetTextLineHeight(ctx)
-        local header_line_h = math.max(frame_h, text_h)
-        local separator_h = 1
-        local header_height = header_line_h + spacing_y + separator_h + spacing_y
-        local items_height = item_count * frame_h + math.max(0, item_count - 1) * spacing_y
-        return math.min(header_height + items_height, 200)
-      end
+      -- Only show if at least one feature is enabled and has content
+      if (gui.enable_saved_chains and #gui.saved_chains > 0) or (gui.enable_history and #gui.history > 0) then
+        local avail_w = ImGui.GetContentRegionAvail(ctx)
+        local col1_w = avail_w * 0.5 - 5
 
-      -- Left: Saved FX Preset
-      if gui.enable_saved_chains and #gui.saved_chains > 0 then
-        local saved_height = calc_list_height(#gui.saved_chains)
-        if ImGui.BeginChild(ctx, "SavedCol", col1_w, saved_height) then
-          ImGui.Text(ctx, "SAVED FX PRESET")
-          ImGui.Separator(ctx)
-          local to_delete = nil
-          for i, chain in ipairs(gui.saved_chains) do
-            ImGui.PushID(ctx, i)
-
-            -- Get display info
-            local display_name, track_info_line, fx_info, saved_fx_index = get_chain_display_info(chain)
-
-            -- "Open" button (small, on the left)
-            if ImGui.SmallButton(ctx, "Open") then
-              open_saved_chain_fx(i)
-            end
-            ImGui.SameLine(ctx)
-
-            -- Chain name button (executes AudioSweet) - use available width minus Delete button
-            local avail_width = ImGui.GetContentRegionAvail(ctx) - 25  -- Space for "X" button
-            if ImGui.Button(ctx, display_name, avail_width, 0) then
-              run_saved_chain(i)
-            end
-
-            -- Hover tooltip showing track and FX info
-            if ImGui.IsItemHovered(ctx) then
-              show_preset_tooltip(chain)
-            end
-
-            -- Right-click context menu for renaming
-            if ImGui.BeginPopupContextItem(ctx, "chain_context_" .. i) then
-              if ImGui.MenuItem(ctx, "Rename") then
-                gui.show_rename_popup = true
-                gui.rename_chain_idx = i
-                -- Pre-fill with current custom name, or use display name (without track# prefix for chains)
-                if chain.custom_name and chain.custom_name ~= "" then
-                  gui.rename_chain_name = chain.custom_name
-                else
-                  -- Use the base name without track# prefix
-                  if chain.mode == "focused" then
-                    gui.rename_chain_name = chain.name  -- FX name for focused mode
-                  else
-                    -- For chain mode, extract track name from track_info_line (#N: name)
-                    local extracted_name = track_info_line:match("^#%d+: (.+)$")
-                    gui.rename_chain_name = extracted_name or chain.track_name or ""
-                  end
-                end
-              end
-              ImGui.EndPopup(ctx)
-            end
-
-            ImGui.SameLine(ctx)
-            -- Delete button
-            if ImGui.Button(ctx, "X", 20, 0) then
-              to_delete = i
-            end
-            ImGui.PopID(ctx)
-          end
-          if to_delete then delete_saved_chain(to_delete) end
-          ImGui.EndChild(ctx)
+        local function calc_list_height(item_count)
+          local _, spacing_y = ImGui.GetStyleVar(ctx, ImGui.StyleVar_ItemSpacing)
+          local frame_h = ImGui.GetFrameHeight(ctx)
+          local text_h = ImGui.GetTextLineHeight(ctx)
+          local header_line_h = math.max(frame_h, text_h)
+          local separator_h = 1
+          local header_height = header_line_h + spacing_y + separator_h + spacing_y
+          local items_height = item_count * frame_h + math.max(0, item_count - 1) * spacing_y
+          return math.min(header_height + items_height, 200)
         end
 
-        ImGui.SameLine(ctx)
-      end
+        -- Left: Saved FX Preset
+        if gui.enable_saved_chains and #gui.saved_chains > 0 then
+          local saved_height = calc_list_height(#gui.saved_chains)
+          if ImGui.BeginChild(ctx, "SavedCol", col1_w, saved_height) then
+            ImGui.Text(ctx, "SAVED FX PRESET")
+            ImGui.Separator(ctx)
+            local to_delete = nil
+            for i, chain in ipairs(gui.saved_chains) do
+              ImGui.PushID(ctx, i)
 
-      -- Right: History (auto-resizes based on content)
-      if gui.enable_history and #gui.history > 0 then
-        -- Calculate height based on number of history items (each item ~25px, header ~40px)
-        local history_height = calc_list_height(#gui.history)
-        if ImGui.BeginChild(ctx, "HistoryCol", 0, history_height) then
-          ImGui.Text(ctx, "HISTORY")
-          ImGui.SameLine(ctx)
-          ImGui.SetCursorPosX(ctx, ImGui.GetCursorPosX(ctx) + ImGui.GetContentRegionAvail(ctx) - 45)
-          if ImGui.SmallButton(ctx, "Clear") then
-            gui.history = {}
-            -- Clear from ProjExtState
-            for i = 0, gui.max_history - 1 do
-              r.SetProjExtState(0, HISTORY_NAMESPACE, "hist_" .. i, "")
-            end
-          end
-          ImGui.Separator(ctx)
-          for i, item in ipairs(gui.history) do
-            ImGui.PushID(ctx, 1000 + i)
-            -- "Open" button (small, on the left)
-            if ImGui.SmallButton(ctx, "Open") then
-              open_history_fx(i)
-            end
-            ImGui.SameLine(ctx)
-            -- History item name button (executes AudioSweet) - use available width minus Save button
-            local avail_width = ImGui.GetContentRegionAvail(ctx) - 45  -- Space for "Save" button
-            local display_name = get_history_display_name(item)
-            if ImGui.Button(ctx, display_name, avail_width, 0) then
-              run_history_item(i)
-            end
+              -- Get display info
+              local display_name, track_info_line, fx_info, saved_fx_index = get_chain_display_info(chain)
 
-            -- Hover tooltip showing track and FX info
-            if ImGui.IsItemHovered(ctx) then
-              show_preset_tooltip(item)
-            end
+              -- "Open" button (small, on the left)
+              if ImGui.SmallButton(ctx, "Open") then
+                open_saved_chain_fx(i)
+              end
+              ImGui.SameLine(ctx)
 
-            ImGui.SameLine(ctx)
-            -- "Save" button to save this history item as a saved preset
-            if ImGui.Button(ctx, "Save", 40, 0) then
-              -- Check if this exact preset already exists in saved_chains
-              local already_saved = false
-              for _, chain in ipairs(gui.saved_chains) do
-                if chain.track_guid == item.track_guid and chain.mode == item.mode then
-                  if item.mode == "focused" then
-                    -- For focused mode: check fx_index
-                    if chain.fx_index == item.fx_index then
-                      already_saved = true
-                      break
-                    end
+              -- Chain name button (executes AudioSweet) - use available width minus Delete button
+              local avail_width = ImGui.GetContentRegionAvail(ctx) - 25  -- Space for "X" button
+              if ImGui.Button(ctx, display_name, avail_width, 0) then
+                run_saved_chain(i)
+              end
+
+              -- Hover tooltip showing track and FX info
+              if ImGui.IsItemHovered(ctx) then
+                show_preset_tooltip(chain)
+              end
+
+              -- Right-click context menu for renaming
+              if ImGui.BeginPopupContextItem(ctx, "chain_context_" .. i) then
+                if ImGui.MenuItem(ctx, "Rename") then
+                  gui.show_rename_popup = true
+                  gui.rename_chain_idx = i
+                  -- Pre-fill with current custom name, or use display name (without track# prefix for chains)
+                  if chain.custom_name and chain.custom_name ~= "" then
+                    gui.rename_chain_name = chain.custom_name
                   else
-                    -- For chain mode: check if same chain (by name)
-                    if chain.name == item.name then
-                      already_saved = true
-                      break
+                    -- Use the base name without track# prefix
+                    if chain.mode == "focused" then
+                      gui.rename_chain_name = chain.name  -- FX name for focused mode
+                    else
+                      -- For chain mode, extract track name from track_info_line (#N: name)
+                      local extracted_name = track_info_line:match("^#%d+: (.+)$")
+                      gui.rename_chain_name = extracted_name or chain.track_name or ""
                     end
                   end
                 end
+                ImGui.EndPopup(ctx)
               end
 
-              if already_saved then
-                gui.last_result = "Info: This preset is already saved"
-              else
-                -- Add to saved_chains
-                add_saved_chain(item.name, item.track_guid, item.track_name, nil, item.mode, item.fx_index)
-                gui.last_result = "Success: History item saved to presets"
+              ImGui.SameLine(ctx)
+              -- Delete button
+              if ImGui.Button(ctx, "X", 20, 0) then
+                to_delete = i
+              end
+              ImGui.PopID(ctx)
+            end
+            if to_delete then delete_saved_chain(to_delete) end
+            ImGui.EndChild(ctx)
+          end
+
+          ImGui.SameLine(ctx)
+        end
+
+        -- Right: History (auto-resizes based on content)
+        if gui.enable_history and #gui.history > 0 then
+          -- Calculate height based on number of history items (each item ~25px, header ~40px)
+          local history_height = calc_list_height(#gui.history)
+          if ImGui.BeginChild(ctx, "HistoryCol", 0, history_height) then
+            ImGui.Text(ctx, "HISTORY")
+            ImGui.SameLine(ctx)
+            ImGui.SetCursorPosX(ctx, ImGui.GetCursorPosX(ctx) + ImGui.GetContentRegionAvail(ctx) - 45)
+            if ImGui.SmallButton(ctx, "Clear") then
+              gui.history = {}
+              -- Clear from ProjExtState
+              for i = 0, gui.max_history - 1 do
+                r.SetProjExtState(0, HISTORY_NAMESPACE, "hist_" .. i, "")
               end
             end
+            ImGui.Separator(ctx)
+            for i, item in ipairs(gui.history) do
+              ImGui.PushID(ctx, 1000 + i)
+              -- "Open" button (small, on the left)
+              if ImGui.SmallButton(ctx, "Open") then
+                open_history_fx(i)
+              end
+              ImGui.SameLine(ctx)
+              -- History item name button (executes AudioSweet) - use available width minus Save button
+              local avail_width = ImGui.GetContentRegionAvail(ctx) - 45  -- Space for "Save" button
+              local display_name = get_history_display_name(item)
+              if ImGui.Button(ctx, display_name, avail_width, 0) then
+                run_history_item(i)
+              end
 
-            ImGui.PopID(ctx)
+              -- Hover tooltip showing track and FX info
+              if ImGui.IsItemHovered(ctx) then
+                show_preset_tooltip(item)
+              end
+
+              ImGui.SameLine(ctx)
+              -- "Save" button to save this history item as a saved preset
+              if ImGui.Button(ctx, "Save", 40, 0) then
+                -- Check if this exact preset already exists in saved_chains
+                local already_saved = false
+                for _, chain in ipairs(gui.saved_chains) do
+                  if chain.track_guid == item.track_guid and chain.mode == item.mode then
+                    if item.mode == "focused" then
+                      -- For focused mode: check fx_index
+                      if chain.fx_index == item.fx_index then
+                        already_saved = true
+                        break
+                      end
+                    else
+                      -- For chain mode: check if same chain (by name)
+                      if chain.name == item.name then
+                        already_saved = true
+                        break
+                      end
+                    end
+                  end
+                end
+
+                if already_saved then
+                  gui.last_result = "Info: This preset is already saved"
+                else
+                  -- Add to saved_chains
+                  add_saved_chain(item.name, item.track_guid, item.track_name, nil, item.mode, item.fx_index)
+                  gui.last_result = "Success: History item saved to presets"
+                end
+              end
+
+              ImGui.PopID(ctx)
+            end
+            ImGui.EndChild(ctx)
           end
-          ImGui.EndChild(ctx)
         end
       end
     end
