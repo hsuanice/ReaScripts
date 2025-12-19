@@ -1,7 +1,7 @@
 --[[
 @description AudioSweet ReaImGui - ImGui Interface for AudioSweet
 @author hsuanice
-@version 0.1.11
+@version 0.1.12
 @provides
   [main] .
 @about
@@ -199,6 +199,49 @@
 
 
 @changelog
+  0.1.12 [Internal Build 251220.0744] - FX Index Tracking Fix
+    - FIXED: Critical bug where presets/history execute wrong FX after reordering
+      • Problem: Stored fx_index becomes invalid when FX order changes on track
+      • Impact: Open and Execute buttons would process incorrect FX
+      • Root cause: Only index validation without name verification
+      • Lines affected: run_history_focused_apply (3277+), run_focused_fx_copy_mode (2947+)
+    - ADDED: Unified FX resolution function for consistent lookup
+      • New function: find_fx_on_track(track, saved_fx_index, saved_fx_name)
+      • Method 1: Try saved index with name verification (fast path)
+      • Method 2: Search by exact name if index invalid (fallback)
+      • Returns: actual_fx_idx, actual_fx_name, status
+      • Status values: "found_by_index", "found_by_name", "invalid_track", "no_fx", "not_found"
+      • Lines: 2244-2274 (unified FX resolution function)
+    - REFACTORED: All FX lookup operations now use unified function
+      • get_chain_display_info(): Lines 2359+ (display name generation)
+      • get_history_display_name(): Lines 2444+ (history display names)
+      • show_preset_tooltip(): Lines 2507+ (tooltip hover highlighting)
+      • open_saved_chain_fx(): Lines 3265+ (Open button)
+      • run_history_focused_apply(): Lines 3283+ (Execute/Apply)
+      • run_focused_fx_copy_mode(): Lines 2953+ (Copy mode)
+      • Eliminated ~70 lines of duplicate FX lookup code
+    - ADDED: Smart debug logging with anti-spam cache
+      • Tooltip hover: Shows when FX moved (line 2477-2487)
+      • Open button: Shows saved vs actual index (line 3272-3277)
+      • Execute operations: Already had debug logs
+      • Cache mechanism: Only logs each FX movement ONCE per session
+      • Cache key: "track_guid|fx_name|saved_idx|actual_idx"
+      • Cache storage: gui.fx_move_logged table (line 1388)
+      • Result: Clean, readable debug output without repetition
+    - TECHNICAL: DRY principle applied to FX resolution
+      • Single source of truth for FX lookup logic
+      • Easier to maintain and extend (e.g., fuzzy matching)
+      • Consistent behavior across all operations
+    - BEHAVIOR: Graceful fallback when FX order changes
+      • Index mismatch: Falls back to name search automatically
+      • FX not found: Clear error message with FX name
+      • Backward compatible: Existing presets work without migration
+    - EDGE CASES: Handled edge cases
+      • Invalid track pointer: Returns "invalid_track" status
+      • Empty FX chain: Returns "no_fx" status
+      • FX deleted: Returns "not_found" with clear error message
+      • Duplicate FX names: Matches first occurrence (same as before)
+
   0.1.11 [Internal Build 251219.2245] - Unified Settings Window
     - REDESIGNED: Unified Settings window with tabbed interface
       • New: Settings → Settings... opens unified window
@@ -1344,6 +1387,7 @@ local gui = {
   history = {},
   new_chain_name = "",
   new_chain_name_default = "",  -- Store initial default value to detect if user modified
+  fx_move_logged = {},  -- Cache for logged FX movements (key: "track_guid|fx_name|saved_idx|actual_idx")
   new_fx_preset_name = "",
   show_save_popup = false,
   show_save_fx_popup = false,
@@ -2241,6 +2285,38 @@ local function find_track_by_guid(guid)
   return nil
 end
 
+-- Find FX on track by index (with verification) or name (fallback)
+-- Returns: fx_index (number or nil), fx_name (string or nil), status (string)
+-- Status: "found_by_index", "found_by_name", "invalid_track", "no_fx", "not_found"
+local function find_fx_on_track(track, saved_fx_index, saved_fx_name)
+  if not track or not r.ValidatePtr2(0, track, "MediaTrack*") then
+    return nil, nil, "invalid_track"
+  end
+
+  local fx_count = r.TrackFX_GetCount(track)
+  if fx_count == 0 then
+    return nil, nil, "no_fx"
+  end
+
+  -- Method 1: Try saved index first (with name verification)
+  if saved_fx_index and saved_fx_index < fx_count then
+    local _, fx_name = r.TrackFX_GetFXName(track, saved_fx_index, "")
+    if fx_name == saved_fx_name then
+      return saved_fx_index, fx_name, "found_by_index"
+    end
+  end
+
+  -- Method 2: Search by exact name
+  for i = 0, fx_count - 1 do
+    local _, fx_name = r.TrackFX_GetFXName(track, i, "")
+    if fx_name == saved_fx_name then
+      return i, fx_name, "found_by_name"
+    end
+  end
+
+  return nil, nil, "not_found"
+end
+
 -- Get display name and current info for a saved chain
 -- Returns: display_name, track_info_line, fx_info, saved_fx_index
 local function get_chain_display_info(chain)
@@ -2266,34 +2342,7 @@ local function get_chain_display_info(chain)
     -- Build FX info based on mode
     if chain.mode == "focused" then
       -- For focused FX: show entire FX chain, mark the saved FX
-      local found_fx_idx = nil
-
-      -- Method 1: Try to use saved fx_index if available
-      if chain.fx_index then
-        local fx_count = r.TrackFX_GetCount(tr)
-        if chain.fx_index < fx_count then
-          local _, fx_name = r.TrackFX_GetFXName(tr, chain.fx_index, "")
-          -- Verify this is still the same FX (name should match or contain saved name)
-          if fx_name and (fx_name == chain.name or fx_name:find(chain.name, 1, true)) then
-            found_fx_name = fx_name
-            found_fx_idx = chain.fx_index
-          end
-        end
-      end
-
-      -- Method 2: If index didn't work, search by exact name match
-      if not found_fx_name then
-        local fx_count = r.TrackFX_GetCount(tr)
-        for i = 0, fx_count - 1 do
-          local _, fx_name = r.TrackFX_GetFXName(tr, i, "")
-          -- Only exact match to avoid matching wrong FX
-          if fx_name == chain.name then
-            found_fx_name = fx_name
-            found_fx_idx = i
-            break
-          end
-        end
-      end
+      local found_fx_idx, found_fx_name, status = find_fx_on_track(tr, chain.fx_index, chain.name)
 
       -- Build full FX chain list, same as chain mode
       saved_fx_index = found_fx_idx  -- Store for tooltip coloring
@@ -2373,12 +2422,15 @@ local function get_history_display_name(hist_item)
     local _, track_name = r.GetSetMediaTrackInfo_String(tr, "P_NAME", "", false)
 
     if hist_item.mode == "focused" then
-      -- Focused mode: use custom name OR FX name (no track# prefix)
+      -- Focused mode: use custom name OR current FX name from track (real-time)
       if hist_item.custom_name and hist_item.custom_name ~= "" then
         display_name = hist_item.custom_name
       else
-        -- Use the saved FX name (hist_item.name already contains full FX name)
-        display_name = format_fx_label_for_preset(hist_item.name)
+        -- Find FX on track to get CURRENT name (handles FX reordering)
+        local found_fx_idx, found_fx_name, status = find_fx_on_track(tr, hist_item.fx_index, hist_item.name)
+
+        -- Use current FX name from track, fallback to saved name
+        display_name = format_fx_label_for_preset(found_fx_name or hist_item.name)
       end
     else
       -- Chain mode: use custom name OR current track name
@@ -2421,13 +2473,28 @@ local function show_preset_tooltip(item)
 
   if item.mode == "focused" then
     -- For focused mode: show entire FX chain, mark the saved FX in GREEN
+    -- Find actual FX position (handles FX reordering)
+    local actual_fx_idx, actual_fx_name, status = find_fx_on_track(tr, item.fx_index, item.name)
+
+    -- Log FX movement only once (cache key: track_guid|fx_name|saved_idx|actual_idx)
+    if gui.debug and actual_fx_idx and status == "found_by_name" then
+      local log_key = string.format("%s|%s|%d|%d", item.track_guid, item.name, item.fx_index or -1, actual_fx_idx)
+      if not gui.fx_move_logged[log_key] then
+        r.ShowConsoleMsg(string.format(
+          "[AudioSweet] Tooltip: FX '%s' moved from saved_index=%d to actual_index=%d\n",
+          item.name, item.fx_index or -1, actual_fx_idx
+        ))
+        gui.fx_move_logged[log_key] = true
+      end
+    end
+
     ImGui.BeginTooltip(ctx)
     ImGui.Text(ctx, track_info_line)
     for fx_idx = 0, fx_count - 1 do
       local _, fx_name = r.TrackFX_GetFXName(tr, fx_idx, "")
       local display_name = format_fx_label(fx_name, "tooltip")
-      if fx_idx == (item.fx_index or 0) then
-        -- This is the saved FX - color it green
+      if fx_idx == actual_fx_idx then
+        -- This is the actual FX - color it green
         ImGui.PushStyleColor(ctx, ImGui.Col_Text, 0x00FF00FF)
         ImGui.Text(ctx, string.format("%d. %s", fx_idx + 1, display_name))
         ImGui.PopStyleColor(ctx)
@@ -2934,15 +3001,28 @@ end
 
 local function run_focused_fx_copy_mode(tr, fx_name, fx_idx, item_count)
   if gui.debug then
-    r.ShowConsoleMsg(string.format("[AS GUI] Focused FX copy: '%s' (fx_idx=%d, items=%d)\n", fx_name, fx_idx, item_count))
+    r.ShowConsoleMsg(string.format("[AS GUI] Focused FX copy: '%s' (saved_fx_idx=%d, items=%d)\n", fx_name, fx_idx, item_count))
   end
 
-  local fx_count = r.TrackFX_GetCount(tr)
-  if fx_idx >= fx_count then
-    gui.last_result = string.format("Error: FX #%d not found", fx_idx + 1)
+  -- Find FX on track (handles FX reordering)
+  local actual_fx_idx, actual_fx_name, status = find_fx_on_track(tr, fx_idx, fx_name)
+
+  if not actual_fx_idx then
+    gui.last_result = string.format("Error: FX '%s' not found on track", fx_name)
     gui.is_running = false
     return
   end
+
+  if gui.debug and status == "found_by_name" then
+    r.ShowConsoleMsg(string.format(
+      "[AS GUI] Focused FX copy: FX moved from index %d to %d\n",
+      fx_idx, actual_fx_idx
+    ))
+  end
+
+  -- Use actual index and name for all subsequent operations
+  fx_idx = actual_fx_idx
+  fx_name = actual_fx_name
 
   local scope_names = { "active", "all_takes" }
   local pos_names = { "tail", "head" }
@@ -3167,40 +3247,18 @@ local function open_saved_chain_fx(chain_idx)
   -- Determine window type based on how it was saved
   if chain.mode == "focused" then
     -- Focused FX preset: toggle floating window for the specific FX
-    local fx_idx = nil
-    local found_fx_name = nil
+    local fx_idx, found_fx_name, status = find_fx_on_track(tr, chain.fx_index, chain.name)
 
-    -- Method 1: Try saved fx_index first
-    if chain.fx_index and chain.fx_index < fx_count then
-      local _, fx_name = r.TrackFX_GetFXName(tr, chain.fx_index, "")
-      -- Verify this is still the same FX
-      if fx_name == chain.name then
-        fx_idx = chain.fx_index
-        found_fx_name = fx_name
-      end
-    end
-
-    -- Method 2: If index didn't match, search by name
-    if not fx_idx then
-      for i = 0, fx_count - 1 do
-        local _, fx_name = r.TrackFX_GetFXName(tr, i, "")
-        if fx_name == chain.name then
-          fx_idx = i
-          found_fx_name = fx_name
-          break
-        end
-      end
-    end
-
-    -- Check if FX was found
     if not fx_idx then
       gui.last_result = string.format("Error: FX '%s' not found on track", chain.name)
       return
     end
 
     if gui.debug then
-      r.ShowConsoleMsg(string.format("[AudioSweet] Open preset: saved_name='%s', saved_index=%s, actual_index=%d, actual_name='%s'\n",
-        chain.name, tostring(chain.fx_index or "nil"), fx_idx, found_fx_name))
+      r.ShowConsoleMsg(string.format(
+        "[AudioSweet] Open preset: saved_name='%s', saved_index=%s, actual_index=%d, status=%s\n",
+        chain.name, tostring(chain.fx_index or "nil"), fx_idx, status
+      ))
     end
 
     local is_open = r.TrackFX_GetOpen(tr, fx_idx)
@@ -3286,16 +3344,28 @@ end
 
 local function run_history_focused_apply(tr, fx_name, fx_idx, item_count)
   if gui.debug then
-    r.ShowConsoleMsg(string.format("[AS GUI] History focused apply: '%s' (fx_idx=%d, items=%d)\n", fx_name, fx_idx, item_count))
+    r.ShowConsoleMsg(string.format("[AS GUI] History focused apply: '%s' (saved_fx_idx=%d, items=%d)\n", fx_name, fx_idx, item_count))
   end
 
-  -- Validate FX still exists at this index
-  local fx_count = r.TrackFX_GetCount(tr)
-  if fx_idx >= fx_count then
-    gui.last_result = string.format("Error: FX #%d not found (track only has %d FX)", fx_idx + 1, fx_count)
+  -- Find FX on track (handles FX reordering)
+  local actual_fx_idx, actual_fx_name, status = find_fx_on_track(tr, fx_idx, fx_name)
+
+  if not actual_fx_idx then
+    gui.last_result = string.format("Error: FX '%s' not found on track", fx_name)
     gui.is_running = false
     return
   end
+
+  if gui.debug and status == "found_by_name" then
+    r.ShowConsoleMsg(string.format(
+      "[AS GUI] History focused apply: FX moved from index %d to %d\n",
+      fx_idx, actual_fx_idx
+    ))
+  end
+
+  -- Use actual index and name for all subsequent operations
+  fx_idx = actual_fx_idx
+  fx_name = actual_fx_name
 
   -- Set track as last touched (without changing selection)
   -- Note: We don't call SetOnlyTrackSelected() to preserve item selection
@@ -3589,7 +3659,7 @@ local function draw_gui()
           "=================================================\n" ..
           "AudioSweet ReaImGui - ImGui Interface for AudioSweet\n" ..
           "=================================================\n" ..
-          "Version: 0.1.11 (251219.2245)\n" ..
+          "Version: 0.1.12 (251220.0744)\n" ..
           "Author: hsuanice\n\n" ..
 
           "Quick Start:\n" ..
