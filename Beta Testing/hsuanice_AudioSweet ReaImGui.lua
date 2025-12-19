@@ -1,7 +1,7 @@
 --[[
 @description AudioSweet ReaImGui - ImGui Interface for AudioSweet
 @author hsuanice
-@version 0.1.9
+@version 0.1.10
 @provides
   [main] .
 @about
@@ -199,6 +199,50 @@
 
 
 @changelog
+  0.1.10 [Internal Build 251219.2230] - FX Display Settings Refactoring
+    - REFACTORED: Unified FX label formatting with context-based settings
+      • New: format_fx_label(raw_label, context) function supports 4 contexts
+      • Contexts: "button", "tooltip", "status", "fxlist"
+      • Lines: 1669-1721 (unified formatting function)
+      • Legacy functions preserved for backward compatibility (1723-1730)
+    - ADDED: Individual display settings for 4 different contexts
+      • Button Display: Controls Preset/History button names
+      • Tooltip Display: Controls hover info formatting
+      • Status Display: Controls bottom status bar FX name
+      • FX List Display: Controls Chain mode FX list formatting
+      • Each context has 3 settings: show_type, show_vendor, use_alias
+      • Total: 12 new settings variables (lines 1243-1259)
+    - IMPROVED: Settings UI redesigned with 4 sections
+      • Menu: Settings → Preset/History Display...
+      • Section 1: Button Display (Preset/History Buttons)
+      • Section 2: Tooltip Display (Hover Info)
+      • Section 3: Status Display (Bottom Bar)
+      • Section 4: FX Chain List Display (Chain Mode)
+      • Lines: 3737-3837 (new settings popup)
+    - FIXED: Status bar now supports show_type and show_vendor settings
+      • Previous: Only formatted when use_alias = true
+      • Now: Respects all 3 settings independently
+      • Line: 1729 (uses unified format_fx_label function)
+    - FIXED: FX Chain List now applies formatting
+      • Previous: Displayed raw fx.name without formatting
+      • Now: Uses format_fx_label(fx.name, "fxlist")
+      • Line: 4382 (format FX names in chain list)
+    - IMPROVED: Tooltip formatting now uses dedicated settings
+      • Previous: Shared settings with buttons
+      • Now: Independent tooltip_show_type, tooltip_show_vendor, tooltip_use_alias
+      • Lines: 2358, 2374 (tooltip uses "tooltip" context)
+    - REMOVED: Old preset_display_* settings (backward incompatible)
+      • Replaced with new 4-context system
+      • Settings reset to defaults on first run with new version
+    - TECHNICAL: Updated save/load settings functions
+      • Save: Lines 1328-1341 (12 new ExtState keys)
+      • Load: Lines 1389-1402 (12 new settings with defaults)
+    - EXAMPLE: Flexible display configuration
+      • Button: Type=ON, Vendor=OFF, Alias=ON → "VST3: ProQ4"
+      • Tooltip: Type=ON, Vendor=ON, Alias=ON → "VST3: ProQ4 (FabFilter)"
+      • Status: Type=ON, Vendor=ON, Alias=OFF → "VST3: Pro-Q 4 (FabFilter)"
+      • FX List: Type=OFF, Vendor=OFF, Alias=OFF → "Pro-Q 4"
+
   0.1.9 [Internal Build 251219.2216] - Rename preset/history improvements
     - IMPROVED: Preset rename now pre-fills with formatted FX name (matches button display)
       • Previous: Focused mode showed raw FX name (e.g., "VST3: Pro-Q 4 (FabFilter)")
@@ -1239,9 +1283,25 @@ local gui = {
   fxname_show_vendor = true,  -- Show vendor name in parentheses
   fxname_strip_symbol = true,  -- Strip spaces and symbols
   use_alias = false,           -- Use FX Alias for file naming
-  preset_display_show_type = true,    -- Preset/History display: show FX type
-  preset_display_show_vendor = true,  -- Preset/History display: show vendor
-  preset_display_use_alias = false,   -- Preset/History display: use FX alias
+
+  -- FX Display Settings (4 contexts: button, tooltip, status, fxlist)
+  -- Button Display (Preset/History buttons)
+  button_show_type = true,
+  button_show_vendor = false,
+  button_use_alias = false,
+  -- Tooltip Display (Hover info)
+  tooltip_show_type = true,
+  tooltip_show_vendor = true,
+  tooltip_use_alias = false,
+  -- Status Display (Bottom status bar)
+  status_show_type = true,
+  status_show_vendor = true,
+  status_use_alias = false,
+  -- FX Chain List Display (Chain mode FX list)
+  fxlist_show_type = true,
+  fxlist_show_vendor = true,
+  fxlist_use_alias = false,
+
   -- Chain mode naming
   chain_token_source = 0,      -- 0=track, 1=aliases, 2=fxchain
   chain_alias_joiner = "",     -- Joiner for aliases mode
@@ -1308,9 +1368,21 @@ local function save_gui_settings()
   r.SetExtState(SETTINGS_NAMESPACE, "fxname_show_vendor", gui.fxname_show_vendor and "1" or "0", true)
   r.SetExtState(SETTINGS_NAMESPACE, "fxname_strip_symbol", gui.fxname_strip_symbol and "1" or "0", true)
   r.SetExtState(SETTINGS_NAMESPACE, "use_alias", gui.use_alias and "1" or "0", true)
-  r.SetExtState(SETTINGS_NAMESPACE, "preset_display_show_type", gui.preset_display_show_type and "1" or "0", true)
-  r.SetExtState(SETTINGS_NAMESPACE, "preset_display_show_vendor", gui.preset_display_show_vendor and "1" or "0", true)
-  r.SetExtState(SETTINGS_NAMESPACE, "preset_display_use_alias", gui.preset_display_use_alias and "1" or "0", true)
+
+  -- FX Display Settings (4 contexts)
+  r.SetExtState(SETTINGS_NAMESPACE, "button_show_type", gui.button_show_type and "1" or "0", true)
+  r.SetExtState(SETTINGS_NAMESPACE, "button_show_vendor", gui.button_show_vendor and "1" or "0", true)
+  r.SetExtState(SETTINGS_NAMESPACE, "button_use_alias", gui.button_use_alias and "1" or "0", true)
+  r.SetExtState(SETTINGS_NAMESPACE, "tooltip_show_type", gui.tooltip_show_type and "1" or "0", true)
+  r.SetExtState(SETTINGS_NAMESPACE, "tooltip_show_vendor", gui.tooltip_show_vendor and "1" or "0", true)
+  r.SetExtState(SETTINGS_NAMESPACE, "tooltip_use_alias", gui.tooltip_use_alias and "1" or "0", true)
+  r.SetExtState(SETTINGS_NAMESPACE, "status_show_type", gui.status_show_type and "1" or "0", true)
+  r.SetExtState(SETTINGS_NAMESPACE, "status_show_vendor", gui.status_show_vendor and "1" or "0", true)
+  r.SetExtState(SETTINGS_NAMESPACE, "status_use_alias", gui.status_use_alias and "1" or "0", true)
+  r.SetExtState(SETTINGS_NAMESPACE, "fxlist_show_type", gui.fxlist_show_type and "1" or "0", true)
+  r.SetExtState(SETTINGS_NAMESPACE, "fxlist_show_vendor", gui.fxlist_show_vendor and "1" or "0", true)
+  r.SetExtState(SETTINGS_NAMESPACE, "fxlist_use_alias", gui.fxlist_use_alias and "1" or "0", true)
+
   r.SetExtState(SETTINGS_NAMESPACE, "chain_token_source", tostring(gui.chain_token_source), true)
   r.SetExtState(SETTINGS_NAMESPACE, "chain_alias_joiner", gui.chain_alias_joiner, true)
   r.SetExtState(SETTINGS_NAMESPACE, "max_fx_tokens", tostring(gui.max_fx_tokens), true)
@@ -1357,9 +1429,21 @@ local function load_gui_settings()
   gui.fxname_show_vendor = get_bool("fxname_show_vendor", false)
   gui.fxname_strip_symbol = get_bool("fxname_strip_symbol", true)
   gui.use_alias = get_bool("use_alias", false)
-  gui.preset_display_show_type = get_bool("preset_display_show_type", true)
-  gui.preset_display_show_vendor = get_bool("preset_display_show_vendor", true)
-  gui.preset_display_use_alias = get_bool("preset_display_use_alias", false)
+
+  -- FX Display Settings (4 contexts) - reset to defaults
+  gui.button_show_type = get_bool("button_show_type", true)
+  gui.button_show_vendor = get_bool("button_show_vendor", false)
+  gui.button_use_alias = get_bool("button_use_alias", false)
+  gui.tooltip_show_type = get_bool("tooltip_show_type", true)
+  gui.tooltip_show_vendor = get_bool("tooltip_show_vendor", true)
+  gui.tooltip_use_alias = get_bool("tooltip_use_alias", false)
+  gui.status_show_type = get_bool("status_show_type", true)
+  gui.status_show_vendor = get_bool("status_show_vendor", true)
+  gui.status_use_alias = get_bool("status_use_alias", false)
+  gui.fxlist_show_type = get_bool("fxlist_show_type", true)
+  gui.fxlist_show_vendor = get_bool("fxlist_show_vendor", true)
+  gui.fxlist_use_alias = get_bool("fxlist_use_alias", false)
+
   gui.chain_token_source = get_int("chain_token_source", 0)
   gui.max_fx_tokens = get_int("max_fx_tokens", 3)
   gui.trackname_strip_symbols = get_bool("trackname_strip_symbols", true)
@@ -1604,8 +1688,8 @@ local function get_fx_alias_db()
   return fx_alias_cache.data
 end
 
-local function get_fx_alias_record(raw_label)
-  if not gui.preset_display_use_alias then return nil end
+local function get_fx_alias_record(raw_label, use_alias)
+  if not use_alias then return nil end
   local db = get_fx_alias_db()
   local fp = make_fingerprint(raw_label)
   local rec = db and db[fp]
@@ -1626,55 +1710,67 @@ local function pick_alias_type(parsed_type, seen_types)
   return parsed_type or ""
 end
 
-local function format_fx_label_for_preset(raw_label)
+-- Unified FX label formatting function
+-- context: "button", "tooltip", "status", "fxlist"
+local function format_fx_label(raw_label, context)
   local typ, core, vendor = parse_fx_label(raw_label)
   if core == "" then return raw_label end
+
+  -- Get settings based on context
+  local show_type, show_vendor, use_alias
+  if context == "button" then
+    show_type = gui.button_show_type
+    show_vendor = gui.button_show_vendor
+    use_alias = gui.button_use_alias
+  elseif context == "tooltip" then
+    show_type = gui.tooltip_show_type
+    show_vendor = gui.tooltip_show_vendor
+    use_alias = gui.tooltip_use_alias
+  elseif context == "status" then
+    show_type = gui.status_show_type
+    show_vendor = gui.status_show_vendor
+    use_alias = gui.status_use_alias
+  elseif context == "fxlist" then
+    show_type = gui.fxlist_show_type
+    show_vendor = gui.fxlist_show_vendor
+    use_alias = gui.fxlist_use_alias
+  else
+    -- Fallback to button settings
+    show_type = gui.button_show_type
+    show_vendor = gui.button_show_vendor
+    use_alias = gui.button_use_alias
+  end
 
   local display_type = typ
   local display_vendor = vendor
   local display_core = core
 
-  local rec = get_fx_alias_record(raw_label)
+  -- Apply alias if enabled
+  local rec = get_fx_alias_record(raw_label, use_alias)
   if rec then
     display_type = pick_alias_type(typ, rec.seen_types)
     display_vendor = rec.normalized_vendor or ""
     display_core = (rec.alias and rec.alias ~= "") and rec.alias or (rec.normalized_core or display_core)
   end
 
+  -- Build display name
   local name = display_core
-  if gui.preset_display_show_vendor and display_vendor ~= "" then
+  if show_vendor and display_vendor ~= "" then
     name = string.format("%s (%s)", display_core, display_vendor)
   end
-  if gui.preset_display_show_type and display_type ~= "" then
+  if show_type and display_type ~= "" then
     name = string.format("%s: %s", display_type, name)
   end
   return name
 end
 
+-- Legacy functions for backward compatibility
+local function format_fx_label_for_preset(raw_label)
+  return format_fx_label(raw_label, "button")
+end
+
 local function format_fx_label_for_status(raw_label)
-  if not gui.preset_display_use_alias then return raw_label end
-  local typ, core, vendor = parse_fx_label(raw_label)
-  if core == "" then return raw_label end
-
-  local display_type = typ
-  local display_vendor = vendor
-  local display_core = core
-
-  local rec = get_fx_alias_record(raw_label)
-  if rec then
-    display_type = pick_alias_type(typ, rec.seen_types)
-    display_vendor = rec.normalized_vendor or ""
-    display_core = (rec.alias and rec.alias ~= "") and rec.alias or (rec.normalized_core or display_core)
-  end
-
-  local name = display_core
-  if display_vendor ~= "" then
-    name = string.format("%s (%s)", display_core, display_vendor)
-  end
-  if display_type ~= "" then
-    name = string.format("%s: %s", display_type, name)
-  end
-  return name
+  return format_fx_label(raw_label, "status")
 end
 
 local function check_bwfmetaedit(force)
@@ -2303,7 +2399,7 @@ local function show_preset_tooltip(item)
     ImGui.Text(ctx, track_info_line)
     for fx_idx = 0, fx_count - 1 do
       local _, fx_name = r.TrackFX_GetFXName(tr, fx_idx, "")
-      local display_name = format_fx_label_for_preset(fx_name)
+      local display_name = format_fx_label(fx_name, "tooltip")
       if fx_idx == (item.fx_index or 0) then
         -- This is the saved FX - color it green
         ImGui.PushStyleColor(ctx, ImGui.Col_Text, 0x00FF00FF)
@@ -2319,7 +2415,7 @@ local function show_preset_tooltip(item)
     local fx_lines = {}
     for fx_idx = 0, fx_count - 1 do
       local _, fx_name = r.TrackFX_GetFXName(tr, fx_idx, "")
-      table.insert(fx_lines, string.format("%d. %s", fx_idx + 1, format_fx_label_for_preset(fx_name)))
+      table.insert(fx_lines, string.format("%d. %s", fx_idx + 1, format_fx_label(fx_name, "tooltip")))
     end
     local fx_info = table.concat(fx_lines, "\n")
     ImGui.BeginTooltip(ctx)
@@ -3690,23 +3786,82 @@ end
     local changed = false
     local rv
 
-    ImGui.Text(ctx, "FX Name Display:")
+    ImGui.Text(ctx, "FX Display Settings")
+    ImGui.TextDisabled(ctx, "Configure how FX names appear in different contexts")
     ImGui.Separator(ctx)
+    ImGui.Spacing(ctx)
 
-    rv, gui.preset_display_show_type = ImGui.Checkbox(ctx, "Show Plugin Type (CLAP:, VST3:, AU:, VST:)", gui.preset_display_show_type)
+    -- Button Display Section
+    ImGui.Text(ctx, "1. Button Display (Preset/History Buttons)")
+    ImGui.Indent(ctx)
+    rv, gui.button_show_type = ImGui.Checkbox(ctx, "Show Type##button", gui.button_show_type)
     if rv then changed = true end
-
-    rv, gui.preset_display_show_vendor = ImGui.Checkbox(ctx, "Show Vendor Name (FabFilter)", gui.preset_display_show_vendor)
+    ImGui.SameLine(ctx)
+    rv, gui.button_show_vendor = ImGui.Checkbox(ctx, "Show Vendor##button", gui.button_show_vendor)
     if rv then changed = true end
-
-    rv, gui.preset_display_use_alias = ImGui.Checkbox(ctx, "Use FX Alias for display", gui.preset_display_use_alias)
+    ImGui.SameLine(ctx)
+    rv, gui.button_use_alias = ImGui.Checkbox(ctx, "Use Alias##button", gui.button_use_alias)
     if rv then
       fx_alias_cache.loaded = false
       changed = true
     end
+    ImGui.Unindent(ctx)
+    ImGui.Spacing(ctx)
 
+    -- Tooltip Display Section
+    ImGui.Text(ctx, "2. Tooltip Display (Hover Info)")
+    ImGui.Indent(ctx)
+    rv, gui.tooltip_show_type = ImGui.Checkbox(ctx, "Show Type##tooltip", gui.tooltip_show_type)
+    if rv then changed = true end
+    ImGui.SameLine(ctx)
+    rv, gui.tooltip_show_vendor = ImGui.Checkbox(ctx, "Show Vendor##tooltip", gui.tooltip_show_vendor)
+    if rv then changed = true end
+    ImGui.SameLine(ctx)
+    rv, gui.tooltip_use_alias = ImGui.Checkbox(ctx, "Use Alias##tooltip", gui.tooltip_use_alias)
+    if rv then
+      fx_alias_cache.loaded = false
+      changed = true
+    end
+    ImGui.Unindent(ctx)
+    ImGui.Spacing(ctx)
+
+    -- Status Display Section
+    ImGui.Text(ctx, "3. Status Display (Bottom Bar)")
+    ImGui.Indent(ctx)
+    rv, gui.status_show_type = ImGui.Checkbox(ctx, "Show Type##status", gui.status_show_type)
+    if rv then changed = true end
+    ImGui.SameLine(ctx)
+    rv, gui.status_show_vendor = ImGui.Checkbox(ctx, "Show Vendor##status", gui.status_show_vendor)
+    if rv then changed = true end
+    ImGui.SameLine(ctx)
+    rv, gui.status_use_alias = ImGui.Checkbox(ctx, "Use Alias##status", gui.status_use_alias)
+    if rv then
+      fx_alias_cache.loaded = false
+      changed = true
+    end
+    ImGui.Unindent(ctx)
+    ImGui.Spacing(ctx)
+
+    -- FX List Display Section
+    ImGui.Text(ctx, "4. FX Chain List Display (Chain Mode)")
+    ImGui.Indent(ctx)
+    rv, gui.fxlist_show_type = ImGui.Checkbox(ctx, "Show Type##fxlist", gui.fxlist_show_type)
+    if rv then changed = true end
+    ImGui.SameLine(ctx)
+    rv, gui.fxlist_show_vendor = ImGui.Checkbox(ctx, "Show Vendor##fxlist", gui.fxlist_show_vendor)
+    if rv then changed = true end
+    ImGui.SameLine(ctx)
+    rv, gui.fxlist_use_alias = ImGui.Checkbox(ctx, "Use Alias##fxlist", gui.fxlist_use_alias)
+    if rv then
+      fx_alias_cache.loaded = false
+      changed = true
+    end
+    ImGui.Unindent(ctx)
+
+    -- Alias warning
     local alias_path = RES_PATH .. "/Scripts/hsuanice Scripts/Settings/fx_alias.json"
-    if gui.preset_display_use_alias and not file_exists(alias_path) then
+    if (gui.button_use_alias or gui.tooltip_use_alias or gui.status_use_alias or gui.fxlist_use_alias) and not file_exists(alias_path) then
+      ImGui.Spacing(ctx)
       ImGui.PushStyleColor(ctx, ImGui.Col_Text, 0xFFAA00FF)
       ImGui.TextWrapped(ctx, "FX Alias database not found. Build it via Settings -> FX Alias Tools.")
       ImGui.PopStyleColor(ctx)
@@ -3716,6 +3871,7 @@ end
       save_gui_settings()
     end
 
+    ImGui.Spacing(ctx)
     ImGui.Separator(ctx)
     if ImGui.Button(ctx, 'Close', 120, 0) then
       ImGui.CloseCurrentPopup(ctx)
@@ -4327,7 +4483,8 @@ end
     if ImGui.BeginChild(ctx, "FXChainList", 0, calculated_height) then
       for _, fx in ipairs(gui.focused_track_fx_list) do
         local status = fx.offline and "[offline]" or (fx.enabled and "[on]" or "[byp]")
-        ImGui.Text(ctx, string.format("%02d) %s %s", fx.index + 1, fx.name, status))
+        local formatted_name = format_fx_label(fx.name, "fxlist")
+        ImGui.Text(ctx, string.format("%02d) %s %s", fx.index + 1, formatted_name, status))
       end
       ImGui.EndChild(ctx)
     end
