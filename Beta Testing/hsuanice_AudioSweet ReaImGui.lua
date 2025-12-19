@@ -1,7 +1,7 @@
 --[[
 @description AudioSweet ReaImGui - ImGui Interface for AudioSweet
 @author hsuanice
-@version 0.1.7
+@version 0.1.8
 @provides
   [main] .
 @about
@@ -199,6 +199,9 @@
 
 
 @changelog
+  0.1.8 [Internal Build 251219.1935] - Preset/History display alignment fix
+    - Fixed: Preset/History header toggles align without stretching window width
+
   0.1.7 [Internal Build 251219.1915] - Preset/History display alias mapping
     - Added: Preset/History display formatting now reads type/vendor/name from fx_alias.json when alias mode is enabled
 
@@ -3381,7 +3384,7 @@ local function draw_gui()
           "=================================================\n" ..
           "AudioSweet ReaImGui - ImGui Interface for AudioSweet\n" ..
           "=================================================\n" ..
-          "Version: 0.1.7 (251219.1915)\n" ..
+          "Version: 0.1.8 (251219.1935)\n" ..
           "Author: hsuanice\n\n" ..
 
           "Quick Start:\n" ..
@@ -3954,13 +3957,27 @@ end
   -- === QUICK PROCESS (Saved + History, side by side) ===
   if gui.enable_saved_chains or gui.enable_history then
     local changed
+    local line_y = ImGui.GetCursorPosY(ctx)
     changed, gui.show_presets_history = ImGui.Checkbox(ctx, "Show Presets/History", gui.show_presets_history)
     if changed then save_gui_settings() end
 
+    local recall_label = "Show FX window on recall"
+    local label_w = ImGui.CalcTextSize(ctx, recall_label)
+    local inner_x = ImGui.GetStyleVar(ctx, ImGui.StyleVar_ItemInnerSpacing)
+    local inner_spacing_x = inner_x
+    if type(inner_x) == "number" then
+      inner_spacing_x = inner_x
+    elseif type(inner_x) == "table" then
+      inner_spacing_x = inner_x[1] or 0
+    end
+    local checkbox_w = ImGui.GetFrameHeight(ctx) + inner_spacing_x + label_w
+    local right_edge = ImGui.GetCursorPosX(ctx) + ImGui.GetContentRegionAvail(ctx)
+    ImGui.SetCursorPosY(ctx, line_y)
+    ImGui.SetCursorPosX(ctx, right_edge - checkbox_w)
+    changed, gui.show_fx_on_recall = ImGui.Checkbox(ctx, recall_label, gui.show_fx_on_recall)
+    if changed then save_gui_settings() end
+
     if gui.show_presets_history then
-      -- Show FX on recall checkbox
-      changed, gui.show_fx_on_recall = ImGui.Checkbox(ctx, "Show FX window on recall", gui.show_fx_on_recall)
-      if changed then save_gui_settings() end
 
       -- Only show if at least one feature is enabled and has content
       if (gui.enable_saved_chains and #gui.saved_chains > 0) or (gui.enable_history and #gui.history > 0) then
