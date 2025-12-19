@@ -1,7 +1,7 @@
 --[[
 @description AudioSweet ReaImGui - ImGui Interface for AudioSweet
 @author hsuanice
-@version 0.1.10
+@version 0.1.11
 @provides
   [main] .
 @about
@@ -199,6 +199,31 @@
 
 
 @changelog
+  0.1.11 [Internal Build 251219.2245] - Unified Settings Window
+    - REDESIGNED: Unified Settings window with tabbed interface
+      • New: Settings → Settings... opens unified window
+      • Previous: 5 separate settings popups (History, File Naming, Preset/History Display, Preview, Timecode)
+      • Now: Single window with 5 tabs (FX Display, File Naming, Preview, History, Timecode)
+      • Lines: 3608-3945 (unified settings window implementation)
+    - IMPROVED: Settings menu reorganization
+      • Kept: Settings → Enable Window Docking (independent checkbox in menu)
+      • Removed: Individual setting menu items
+      • Added: Settings → Settings... (opens unified tabbed window)
+      • Lines: 3512-3526 (simplified settings menu)
+    - RENAMED: "Preset/History Display" → "FX Display"
+      • More accurate name covering all contexts: Button, Tooltip, Status, FX List
+      • Now appears as first tab in unified Settings window
+    - TECHNICAL: New GUI state variable
+      • Added: gui.show_unified_settings flag (line 1329)
+      • Controls unified settings window visibility
+    - IMPROVED: Better user experience with organized settings
+      • All settings in one place with clear categorization
+      • Easy navigation between different setting categories
+      • Consistent UI with tabbed interface
+    - LEGACY: Old popup code kept for backward compatibility
+      • Lines: 3947+ (legacy individual popups)
+      • Can be safely removed in future versions
+
   0.1.10 [Internal Build 251219.2230] - FX Display Settings Refactoring
     - REFACTORED: Unified FX label formatting with context-based settings
       • New: format_fx_label(raw_label, context) function supports 4 contexts
@@ -1326,6 +1351,7 @@ local gui = {
   rename_chain_idx = nil,
   rename_chain_name = "",
   rename_is_history = false,  -- Track whether renaming a history item or preset
+  show_unified_settings = false,  -- Unified settings window with tabs
   show_settings_popup = false,
   show_fxname_popup = false,
   show_preview_settings = false,
@@ -3518,26 +3544,12 @@ local function draw_gui()
       end
       ImGui.Separator(ctx)
 
-      if ImGui.MenuItem(ctx, 'Preview Settings...', nil, false, true) then
-        gui.show_preview_settings = true
+      -- Unified Settings Window
+      if ImGui.MenuItem(ctx, 'Settings...', nil, false, true) then
+        gui.show_unified_settings = true
       end
       ImGui.Separator(ctx)
-      if ImGui.MenuItem(ctx, 'History Settings...', nil, false, gui.enable_history) then
-        gui.show_settings_popup = true
-      end
-      ImGui.Separator(ctx)
-      if ImGui.MenuItem(ctx, 'File Naming Settings...', nil, false, true) then
-        gui.show_naming_popup = true
-      end
-      ImGui.Separator(ctx)
-      if ImGui.MenuItem(ctx, 'Preset/History Display...', nil, false, true) then
-        gui.show_preset_display_popup = true
-      end
-      ImGui.Separator(ctx)
-      if ImGui.MenuItem(ctx, 'Timecode Embed Settings...', nil, false, true) then
-        gui.show_tc_embed_popup = true
-      end
-      ImGui.Separator(ctx)
+
       if ImGui.BeginMenu(ctx, 'FX Alias Tools') then
         if ImGui.MenuItem(ctx, 'Build FX Alias Database', nil, false, true) then
           local script_path = r.GetResourcePath() .. "/Scripts/hsuanice Scripts/Tools/hsuanice_FX Alias Build.lua"
@@ -3577,7 +3589,7 @@ local function draw_gui()
           "=================================================\n" ..
           "AudioSweet ReaImGui - ImGui Interface for AudioSweet\n" ..
           "=================================================\n" ..
-          "Version: 0.1.8 (251219.1935)\n" ..
+          "Version: 0.1.11 (251219.2245)\n" ..
           "Author: hsuanice\n\n" ..
 
           "Quick Start:\n" ..
@@ -3618,6 +3630,348 @@ end
 
   draw_bwfmetaedit_warning_banner()
 
+  -- ====================================================================
+  -- Unified Settings Window with Tabs
+  -- ====================================================================
+  if gui.show_unified_settings then
+    local mouse_x, mouse_y = r.GetMousePosition()
+    ImGui.SetNextWindowPos(ctx, mouse_x, mouse_y, ImGui.Cond_Appearing)
+    ImGui.SetNextWindowSize(ctx, 600, 500, ImGui.Cond_Appearing)
+    ImGui.OpenPopup(ctx, 'AudioSweet Settings')
+    gui.show_unified_settings = false
+  end
+
+  if ImGui.BeginPopupModal(ctx, 'AudioSweet Settings', true, ImGui.WindowFlags_None) then
+    -- ESC key handling
+    if ImGui.IsWindowFocused(ctx) and ImGui.IsKeyPressed(ctx, ImGui.Key_Escape, false) then
+      ImGui.CloseCurrentPopup(ctx)
+    end
+
+    -- Tab Bar
+    if ImGui.BeginTabBar(ctx, 'SettingsTabs', ImGui.TabBarFlags_None) then
+
+      -- ============================================================
+      -- Tab 1: FX Display Settings
+      -- ============================================================
+      if ImGui.BeginTabItem(ctx, 'FX Display') then
+        local changed = false
+        local rv
+
+        ImGui.Text(ctx, "FX Display Settings")
+        ImGui.TextDisabled(ctx, "Configure how FX names appear in different contexts")
+        ImGui.Separator(ctx)
+        ImGui.Spacing(ctx)
+
+        -- Button Display Section
+        ImGui.Text(ctx, "1. Button Display (Preset/History Buttons)")
+        ImGui.Indent(ctx)
+        rv, gui.button_show_type = ImGui.Checkbox(ctx, "Show Type##button", gui.button_show_type)
+        if rv then changed = true end
+        ImGui.SameLine(ctx)
+        rv, gui.button_show_vendor = ImGui.Checkbox(ctx, "Show Vendor##button", gui.button_show_vendor)
+        if rv then changed = true end
+        ImGui.SameLine(ctx)
+        rv, gui.button_use_alias = ImGui.Checkbox(ctx, "Use Alias##button", gui.button_use_alias)
+        if rv then
+          fx_alias_cache.loaded = false
+          changed = true
+        end
+        ImGui.Unindent(ctx)
+        ImGui.Spacing(ctx)
+
+        -- Tooltip Display Section
+        ImGui.Text(ctx, "2. Tooltip Display (Hover Info)")
+        ImGui.Indent(ctx)
+        rv, gui.tooltip_show_type = ImGui.Checkbox(ctx, "Show Type##tooltip", gui.tooltip_show_type)
+        if rv then changed = true end
+        ImGui.SameLine(ctx)
+        rv, gui.tooltip_show_vendor = ImGui.Checkbox(ctx, "Show Vendor##tooltip", gui.tooltip_show_vendor)
+        if rv then changed = true end
+        ImGui.SameLine(ctx)
+        rv, gui.tooltip_use_alias = ImGui.Checkbox(ctx, "Use Alias##tooltip", gui.tooltip_use_alias)
+        if rv then
+          fx_alias_cache.loaded = false
+          changed = true
+        end
+        ImGui.Unindent(ctx)
+        ImGui.Spacing(ctx)
+
+        -- Status Display Section
+        ImGui.Text(ctx, "3. Status Display (Bottom Bar)")
+        ImGui.Indent(ctx)
+        rv, gui.status_show_type = ImGui.Checkbox(ctx, "Show Type##status", gui.status_show_type)
+        if rv then changed = true end
+        ImGui.SameLine(ctx)
+        rv, gui.status_show_vendor = ImGui.Checkbox(ctx, "Show Vendor##status", gui.status_show_vendor)
+        if rv then changed = true end
+        ImGui.SameLine(ctx)
+        rv, gui.status_use_alias = ImGui.Checkbox(ctx, "Use Alias##status", gui.status_use_alias)
+        if rv then
+          fx_alias_cache.loaded = false
+          changed = true
+        end
+        ImGui.Unindent(ctx)
+        ImGui.Spacing(ctx)
+
+        -- FX List Display Section
+        ImGui.Text(ctx, "4. FX Chain List Display (Chain Mode)")
+        ImGui.Indent(ctx)
+        rv, gui.fxlist_show_type = ImGui.Checkbox(ctx, "Show Type##fxlist", gui.fxlist_show_type)
+        if rv then changed = true end
+        ImGui.SameLine(ctx)
+        rv, gui.fxlist_show_vendor = ImGui.Checkbox(ctx, "Show Vendor##fxlist", gui.fxlist_show_vendor)
+        if rv then changed = true end
+        ImGui.SameLine(ctx)
+        rv, gui.fxlist_use_alias = ImGui.Checkbox(ctx, "Use Alias##fxlist", gui.fxlist_use_alias)
+        if rv then
+          fx_alias_cache.loaded = false
+          changed = true
+        end
+        ImGui.Unindent(ctx)
+
+        if changed then
+          save_gui_settings()
+        end
+
+        ImGui.EndTabItem(ctx)
+      end
+
+      -- ============================================================
+      -- Tab 2: File Naming Settings
+      -- ============================================================
+      if ImGui.BeginTabItem(ctx, 'File Naming') then
+        local changed = false
+        local rv
+
+        -- === Global FX Name Settings (applies to Focused & Chain modes) ===
+        ImGui.Text(ctx, "Global FX Name Settings:")
+        ImGui.TextDisabled(ctx, "(applies to both Focused and Chain modes)")
+        ImGui.Separator(ctx)
+
+        rv, gui.fxname_show_type = ImGui.Checkbox(ctx, "Show Plugin Type (CLAP:, VST3:, AU:, VST:)", gui.fxname_show_type)
+        if rv then changed = true end
+
+        rv, gui.fxname_show_vendor = ImGui.Checkbox(ctx, "Show Vendor Name (FabFilter)", gui.fxname_show_vendor)
+        if rv then changed = true end
+
+        rv, gui.fxname_strip_symbol = ImGui.Checkbox(ctx, "Strip Spaces & Symbols (ProQ4 vs Pro-Q 4)", gui.fxname_strip_symbol)
+        if rv then changed = true end
+
+        rv, gui.use_alias = ImGui.Checkbox(ctx, "Use FX Alias for file naming", gui.use_alias)
+        if rv then changed = true end
+
+        ImGui.Text(ctx, "Max FX Tokens:")
+        ImGui.SameLine(ctx)
+        ImGui.SetNextItemWidth(ctx, 80)
+        rv, gui.max_fx_tokens = ImGui.InputInt(ctx, "##max_tokens", gui.max_fx_tokens)
+        if rv then
+          gui.max_fx_tokens = math.max(1, math.min(10, gui.max_fx_tokens))
+          changed = true
+        end
+        ImGui.SameLine(ctx)
+        ImGui.TextDisabled(ctx, "(FIFO limit, 1-10)")
+
+        ImGui.Spacing(ctx)
+        ImGui.Separator(ctx)
+        ImGui.Spacing(ctx)
+
+        -- === Chain Mode Specific Settings ===
+        ImGui.Text(ctx, "Chain Mode Specific Settings:")
+        ImGui.Separator(ctx)
+
+        ImGui.Text(ctx, "Chain Token Source:")
+        if ImGui.RadioButton(ctx, "Track Name", gui.chain_token_source == 0) then
+          gui.chain_token_source = 0
+          changed = true
+        end
+        ImGui.SameLine(ctx)
+        if ImGui.RadioButton(ctx, "FX Aliases", gui.chain_token_source == 1) then
+          gui.chain_token_source = 1
+          changed = true
+        end
+        ImGui.SameLine(ctx)
+        if ImGui.RadioButton(ctx, "FXChain", gui.chain_token_source == 2) then
+          gui.chain_token_source = 2
+          changed = true
+        end
+
+        -- Chain Alias Joiner (only when using aliases)
+        if gui.chain_token_source == 1 then
+          ImGui.Text(ctx, "Alias Joiner:")
+          ImGui.SameLine(ctx)
+          ImGui.SetNextItemWidth(ctx, 100)
+          rv, gui.chain_alias_joiner = ImGui.InputText(ctx, "##chain_joiner", gui.chain_alias_joiner)
+          if rv then changed = true end
+          ImGui.SameLine(ctx)
+          ImGui.TextDisabled(ctx, "(separator between aliases)")
+        end
+
+        rv, gui.trackname_strip_symbols = ImGui.Checkbox(ctx, "Strip Symbols from Track Names", gui.trackname_strip_symbols)
+        if rv then changed = true end
+
+        ImGui.Spacing(ctx)
+        ImGui.Separator(ctx)
+        ImGui.Spacing(ctx)
+
+        -- === File Safety Section ===
+        ImGui.Text(ctx, "File Name Safety:")
+        ImGui.Separator(ctx)
+
+        rv, gui.sanitize_token = ImGui.Checkbox(ctx, "Sanitize tokens for safe filenames", gui.sanitize_token)
+        if rv then changed = true end
+        ImGui.SameLine(ctx)
+        ImGui.TextDisabled(ctx, "(?)")
+        if ImGui.IsItemHovered(ctx) then
+          ImGui.SetTooltip(ctx, "Replace unsafe characters with underscores")
+        end
+
+        if changed then
+          save_gui_settings()
+        end
+
+        ImGui.EndTabItem(ctx)
+      end
+
+      -- ============================================================
+      -- Tab 3: Preview Settings
+      -- ============================================================
+      if ImGui.BeginTabItem(ctx, 'Preview') then
+        ImGui.Text(ctx, "Target Track Name:")
+        ImGui.SetNextItemWidth(ctx, 200)
+        local rv, new_name = ImGui.InputText(ctx, "##preview_target", gui.preview_target_track)
+        if rv then
+          gui.preview_target_track = new_name
+          save_gui_settings()
+        end
+        ImGui.TextWrapped(ctx, "The track where preview will be applied")
+
+        ImGui.Separator(ctx)
+        ImGui.Text(ctx, "Solo Scope:")
+        local changed_scope = false
+        if ImGui.RadioButton(ctx, "Track Solo (40281)", gui.preview_solo_scope == 0) then
+          gui.preview_solo_scope = 0
+          changed_scope = true
+        end
+        ImGui.SameLine(ctx)
+        if ImGui.RadioButton(ctx, "Item Solo (41561)", gui.preview_solo_scope == 1) then
+          gui.preview_solo_scope = 1
+          changed_scope = true
+        end
+        if changed_scope then
+          save_gui_settings()
+        end
+
+        -- Warning for Item Solo lag
+        if gui.preview_solo_scope == 1 then
+          ImGui.PushStyleColor(ctx, ImGui.Col_Text, 0xFFAA00FF)  -- Orange color
+          ImGui.TextWrapped(ctx, "Note: Item Solo may have a slight lag when toggling, not as responsive as Track Solo.")
+          ImGui.PopStyleColor(ctx)
+        end
+
+        ImGui.Separator(ctx)
+        ImGui.Text(ctx, "Restore Mode:")
+        local changed_restore = false
+        if ImGui.RadioButton(ctx, "Time Selection", gui.preview_restore_mode == 0) then
+          gui.preview_restore_mode = 0
+          changed_restore = true
+        end
+        ImGui.SameLine(ctx)
+        if ImGui.RadioButton(ctx, "GUID", gui.preview_restore_mode == 1) then
+          gui.preview_restore_mode = 1
+          changed_restore = true
+        end
+        if changed_restore then
+          save_gui_settings()
+        end
+
+        ImGui.Separator(ctx)
+        ImGui.TextWrapped(ctx,
+          "Time Selection: Restores original FX state when leaving time selection.\n" ..
+          "GUID: Restores FX state when the preview track GUID changes (switching projects).")
+
+        ImGui.EndTabItem(ctx)
+      end
+
+      -- ============================================================
+      -- Tab 4: History Settings
+      -- ============================================================
+      if ImGui.BeginTabItem(ctx, 'History') then
+        ImGui.Text(ctx, "Maximum History Items:")
+        ImGui.SetNextItemWidth(ctx, 120)
+        local rv, new_val = ImGui.InputInt(ctx, "##max_history", gui.max_history)
+        if rv then
+          gui.max_history = math.max(1, math.min(50, new_val))  -- Limit 1-50
+          save_gui_settings()
+          -- Trim history if needed
+          while #gui.history > gui.max_history do
+            table.remove(gui.history)
+          end
+        end
+
+        ImGui.Separator(ctx)
+        ImGui.Text(ctx, "Range: 1-50 items")
+
+        ImGui.EndTabItem(ctx)
+      end
+
+      -- ============================================================
+      -- Tab 5: Timecode Embed Settings
+      -- ============================================================
+      if ImGui.BeginTabItem(ctx, 'Timecode') then
+        if bwf_cli.available then
+          ImGui.TextColored(ctx, 0x55FF55FF, ("CLI detected: %s"):format(bwf_cli.resolved_path))
+          if bwf_cli.last_source ~= "" then
+            ImGui.TextDisabled(ctx, ("Source: %s"):format(bwf_cli.last_source))
+          end
+        else
+          ImGui.TextColored(ctx, 0xFF6666FF, "bwfmetaedit CLI not detected – Timecode embedding stays disabled.")
+          if bwf_cli.message ~= "" then
+            ImGui.TextWrapped(ctx, bwf_cli.message)
+          end
+        end
+
+        ImGui.Separator(ctx)
+        ImGui.Text(ctx, "Custom CLI Path (optional):")
+        ImGui.SetNextItemWidth(ctx, 360)
+        local rv_path, new_path = ImGui.InputText(ctx, "##as_bwf_path", gui.bwfmetaedit_custom_path or "")
+        if rv_path then
+          gui.bwfmetaedit_custom_path = new_path
+          save_gui_settings()
+        end
+        ImGui.TextDisabled(ctx, "Leave blank to search PATH. Provide full path incl. .exe on Windows.")
+
+        ImGui.Separator(ctx)
+        if ImGui.Button(ctx, "Re-check CLI##as_settings") then
+          check_bwfmetaedit(true)
+        end
+        ImGui.SameLine(ctx)
+        if ImGui.Button(ctx, "Install Guide##as_settings") then
+          gui.open_bwf_install_popup = true
+        end
+
+        ImGui.Spacing(ctx)
+        ImGui.TextWrapped(ctx,
+          "AudioSweet uses bwfmetaedit after renders to embed BWF TimeReference so downstream apps read the correct TC.\n" ..
+          "If you skip installation, rendering still works but the embed step is skipped.")
+
+        ImGui.EndTabItem(ctx)
+      end
+
+      ImGui.EndTabBar(ctx)
+    end
+
+    -- Close Button
+    ImGui.Separator(ctx)
+    if ImGui.Button(ctx, 'Close', 120, 0) then
+      ImGui.CloseCurrentPopup(ctx)
+    end
+
+    ImGui.EndPopup(ctx)
+  end
+
+  -- ====================================================================
+  -- Legacy Individual Settings Popups (kept for backward compatibility)
+  -- ====================================================================
   -- Settings Popup
   if gui.show_settings_popup then
     -- Position popup near mouse cursor
