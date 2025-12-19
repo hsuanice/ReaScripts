@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<index version="1" name="hsuanice Scripts" commit="98cc57374a677d8645d5a1713079b909b1dc17ff">
+<index version="1" name="hsuanice Scripts" commit="715cfd8643c7a5cf062079cccee1ed14a0b62fe0">
   <category name="Beta Testing">
     <reapack name="hsuanice_AudioSweet ReaImGui.lua" type="script" desc="AudioSweet ReaImGui - ImGui Interface for AudioSweet">
       <metadata>
@@ -7,152 +7,16 @@
 {\colortbl;\red255\green0\blue0;\red0\green0\blue255;}
 \widowctrl\hyphauto
 
-{\pard \ql \f0 \sa180 \li0 \fi0 \outlinelevel0 \b \fs36 AudioSweet ReaImGui - User Manual\par}
-{\pard \ql \f0 \sa180 \li0 \fi0 \outlinelevel1 \b \fs32 Overview\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 \outlinelevel0 \b \fs36 AudioSweet ReaImGui\par}
 {\pard \ql \f0 \sa180 \li0 \fi0 Complete AudioSweet control center with ImGui interface for managing FX chains and presets.\par}
-{\pard \ql \f0 \sa180 \li0 \fi0 \outlinelevel1 \b \fs32 Core Features\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Two operation modes: Focused FX and Full Chain\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Apply/Copy FX chains to AudioSweet Preview track\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Save and manage FX presets with custom naming\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Automatic operation history tracking\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Real-time FX chain visualization\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Built-in keyboard shortcuts\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Persistent settings across sessions\sa180\par}
-{\pard \qc \f0 \sa180 \li0 \fi0 \emdash\emdash\emdash\emdash\emdash\par}
-{\pard \ql \f0 \sa180 \li0 \fi0 \outlinelevel1 \b \fs32 Operation Modes\par}
-{\pard \ql \f0 \sa180 \li0 \fi0 \outlinelevel2 \b \fs28 Focused Mode (Single FX)\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Works with the currently focused FX window\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Click on any FX window to focus it\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Saves/applies only the selected FX\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Display shows: FX name only (e.g., "VST3: Pro-Q 4")\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Supports CLAP and VST3 plugins\sa180\par}
-{\pard \ql \f0 \sa180 \li0 \fi0 \outlinelevel2 \b \fs28 Chain Mode (Full FX Chain)\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Works with the entire FX chain of selected track\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Saves/applies all FX on the track\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Display shows: "#N Track Name" format\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Shows complete FX list in tooltips\sa180\par}
-{\pard \qc \f0 \sa180 \li0 \fi0 \emdash\emdash\emdash\emdash\emdash\par}
-{\pard \ql \f0 \sa180 \li0 \fi0 \outlinelevel1 \b \fs32 Main Actions\par}
-{\pard \ql \f0 \sa180 \li0 \fi0 \outlinelevel2 \b \fs28 Apply\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Copies FX to Preview track AND enables it\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Removes all existing FX on Preview track first\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Use when you want to audition the FX immediately\sa180\par}
-{\pard \ql \f0 \sa180 \li0 \fi0 \outlinelevel2 \b \fs28 Copy\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Copies FX to Preview track but keeps it bypassed\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Removes all existing FX on Preview track first\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Use when you want to prepare FX without hearing it yet\sa180\par}
-{\pard \ql \f0 \sa180 \li0 \fi0 \outlinelevel2 \b \fs28 Open\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Opens the saved FX window(s)\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Focused mode: Opens the specific FX window\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Chain mode: Opens all FX windows in the chain\sa180\par}
-{\pard \qc \f0 \sa180 \li0 \fi0 \emdash\emdash\emdash\emdash\emdash\par}
-{\pard \ql \f0 \sa180 \li0 \fi0 \outlinelevel1 \b \fs32 Preset System\par}
-{\pard \ql \f0 \sa180 \li0 \fi0 \outlinelevel2 \b \fs28 Saving Presets\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 1.\tx360\tab Click the "Save" button (in main controls or history section)\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 2.\tx360\tab Enter a custom name, or leave empty to use default:\par}
-{\pard \ql \f0 \sa0 \li720 \fi-360 \endash \tx360\tab Focused mode default: FX name\par}
-{\pard \ql \f0 \sa0 \li720 \fi-360 \endash \tx360\tab Chain mode default: Track name\sa180\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 3.\tx360\tab Preset is saved and appears in the "Saved" section\sa180\par}
-{\pard \ql \f0 \sa180 \li0 \fi0 \outlinelevel2 \b \fs28 Managing Presets\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab {\b Open}: Opens the FX window(s) without applying\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab {\b Name}: Rename the preset (custom name or revert to default)\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab {\b Save}: Save current FX as a new preset\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab {\b Delete} (X button): Remove the preset permanently\sa180\par}
-{\pard \ql \f0 \sa180 \li0 \fi0 \outlinelevel2 \b \fs28 Preset Display Names\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Custom name: Shows your custom name\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Default name (Focused): Shows current FX name from track\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Default name (Chain): Shows "#N Current Track Name"\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Hover tooltip: Shows full FX chain with track info\sa180\par}
-{\pard \qc \f0 \sa180 \li0 \fi0 \emdash\emdash\emdash\emdash\emdash\par}
-{\pard \ql \f0 \sa180 \li0 \fi0 \outlinelevel1 \b \fs32 History System\par}
-{\pard \ql \f0 \sa180 \li0 \fi0 \outlinelevel2 \b \fs28 Automatic Tracking\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Every Apply/Copy operation is automatically logged\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab History stores up to 50 recent operations\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Newest operations appear at the top\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Duplicates are automatically removed\sa180\par}
-{\pard \ql \f0 \sa180 \li0 \fi0 \outlinelevel2 \b \fs28 History Actions\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab {\b Open}: Opens the FX window(s) from this history entry\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab {\b Name}: Rename this history entry (becomes a custom name)\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab {\b Save}: Convert this history entry into a saved preset\sa180\par}
-{\pard \ql \f0 \sa180 \li0 \fi0 \outlinelevel2 \b \fs28 History Display Names\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Inherits custom name from preset (if executed from a saved preset)\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Shows default name if executed directly\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Updates automatically when you rename the matching preset\sa180\par}
-{\pard \qc \f0 \sa180 \li0 \fi0 \emdash\emdash\emdash\emdash\emdash\par}
-{\pard \ql \f0 \sa180 \li0 \fi0 \outlinelevel1 \b \fs32 Keyboard Shortcuts\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab {\b Space}: Play/Stop transport\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab {\b S}: Toggle solo on Preview track\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab {\b Esc}: Close dialogs\sa180\par}
-{\pard \qc \f0 \sa180 \li0 \fi0 \emdash\emdash\emdash\emdash\emdash\par}
-{\pard \ql \f0 \sa180 \li0 \fi0 \outlinelevel1 \b \fs32 Settings Panel\par}
-{\pard \ql \f0 \sa180 \li0 \fi0 \outlinelevel2 \b \fs28 Target Track\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Select which track to use as AudioSweet Preview target\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Default: First track matching "AudioSweet Preview" in name\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Can manually override with any track\sa180\par}
-{\pard \ql \f0 \sa180 \li0 \fi0 \outlinelevel2 \b \fs28 Auto-Actions\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab {\b Auto Open FX}: Automatically opens FX window after Apply/Copy\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab {\b Auto Solo}: Automatically solos Preview track after Apply/Copy\sa180\par}
-{\pard \ql \f0 \sa180 \li0 \fi0 \outlinelevel2 \b \fs28 File Naming\par}
-{\pard \ql \f0 \sa180 \li0 \fi0 Configure how bounced audio files are named:\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab {\b Include Elements}: Track#, Track Name, FX Name, Timestamp, Item Name\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab {\b Show Type}: Display plugin type prefix (VST3:, CLAP:, JS:)\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab {\b Separators}: Customize separators between name elements\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab {\b FX Alias}: Replace long FX names with short aliases\sa180\par}
-{\pard \ql \f0 \sa180 \li0 \fi0 \outlinelevel2 \b \fs28 Chain Visibility\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab {\b Show Chain in Focused Mode}: Display full FX chain even in Focused mode\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Useful for context when working with multiple FX\sa180\par}
-{\pard \ql \f0 \sa180 \li0 \fi0 \outlinelevel2 \b \fs28 Debug Mode\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Enable console logging for troubleshooting\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Shows: Save/Rename/Open/Run operations with indices and modes\sa180\par}
-{\pard \qc \f0 \sa180 \li0 \fi0 \emdash\emdash\emdash\emdash\emdash\par}
-{\pard \ql \f0 \sa180 \li0 \fi0 \outlinelevel1 \b \fs32 Tips & Tricks\par}
-{\pard \ql \f0 \sa180 \li0 \fi0 \outlinelevel2 \b \fs28 Workflow Example 1: Quick FX Auditioning\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 1.\tx360\tab Select track with FX chain\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 2.\tx360\tab Switch to Chain mode\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 3.\tx360\tab Click "Apply" to audition the full chain\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 4.\tx360\tab Click "Save" if you like it\sa180\par}
-{\pard \ql \f0 \sa180 \li0 \fi0 \outlinelevel2 \b \fs28 Workflow Example 2: Building FX Library\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 1.\tx360\tab Focus on individual FX window\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 2.\tx360\tab Switch to Focused mode\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 3.\tx360\tab Click "Save" and name it (e.g., "Vocal EQ Bright")\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 4.\tx360\tab Repeat for different FX\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 5.\tx360\tab Access your library from "Saved" section anytime\sa180\par}
-{\pard \ql \f0 \sa180 \li0 \fi0 \outlinelevel2 \b \fs28 Workflow Example 3: Using History\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 1.\tx360\tab Experiment with different FX chains using Apply\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 2.\tx360\tab All attempts are logged in History\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 3.\tx360\tab Go back to History and click "Open" on any entry to review\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 4.\tx360\tab Click "Save" on the one you like to make it permanent\sa180\par}
-{\pard \ql \f0 \sa180 \li0 \fi0 \outlinelevel2 \b \fs28 Name Management\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Leave name empty when saving = dynamic name (updates with track/FX renames)\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Enter custom name = static name (never changes)\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab You can always rename later using the "Name" button\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Renaming a preset automatically updates all matching history entries\sa180\par}
-{\pard \ql \f0 \sa180 \li0 \fi0 \outlinelevel2 \b \fs28 FX Chain Tooltips\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Hover over any preset/history item to see full FX chain\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Focused mode: Saved FX is highlighted in GREEN\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Shows track number and current track name\sa180\par}
-{\pard \qc \f0 \sa180 \li0 \fi0 \emdash\emdash\emdash\emdash\emdash\par}
-{\pard \ql \f0 \sa180 \li0 \fi0 \outlinelevel1 \b \fs32 Troubleshooting\par}
-{\pard \ql \f0 \sa180 \li0 \fi0 \outlinelevel2 \b \fs28 "No focused FX" in Focused Mode\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Click on any FX window to focus it\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Make sure the FX window is open (not just in FX chain list)\sa180\par}
-{\pard \ql \f0 \sa180 \li0 \fi0 \outlinelevel2 \b \fs28 Preset Opens Wrong FX\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab This can happen if you reordered FX after saving\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab The script tries to match by name as fallback\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Enable Debug mode to see index matching details\sa180\par}
-{\pard \ql \f0 \sa180 \li0 \fi0 \outlinelevel2 \b \fs28 History Not Showing Custom Names\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Make sure you're using version 251215.0025 or later\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Old history entries won't have custom names (only new ones)\sa180\par}
-{\pard \ql \f0 \sa180 \li0 \fi0 \outlinelevel2 \b \fs28 Window Too Wide/Narrow\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Edit line 2482: ImGui.SetNextWindowSizeConstraints(ctx, 450, ...)\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Change the first number (450) to your preferred width\sa180\par}
-{\pard \qc \f0 \sa180 \li0 \fi0 \emdash\emdash\emdash\emdash\emdash\par}
-{\pard \ql \f0 \sa180 \li0 \fi0 \outlinelevel1 \b \fs32 Technical Notes\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab All presets saved in REAPER project ExtState (persistent per project)\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab History limited to 50 entries (configurable in gui.max_history)\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Supports CLAP, VST3, VST2, AU, and JS plugins\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab FX matching uses both index and name for reliability\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Track identification uses GUID (survives track reordering)\sa180\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 \outlinelevel1 \b \fs32 Quick Start\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Help \u8594 ? User Manual: Full documentation with workflows and tips\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Help \u8594 ? About: Reference and credits\sa180\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 \outlinelevel1 \b \fs32 Reference\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 Inspired by AudioSuite-like Script by Tim Chimes 'AudioSweet' is a name originally given by Tim Chimes. This project continues to use the name in reference to his original work.\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 Original: Renders selected plugin to selected media item Written for REAPER 5.1 with Lua v1.1 12/22/2015 - Added PreventUIRefresh http://timchimes.com/scripting-with-reaper-audiosuite/\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 \outlinelevel1 \b \fs32 Development\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 This script was developed with the assistance of AI tools including ChatGPT and Claude AI.\par}
 }
 ]]></description>
       </metadata>
@@ -194,6 +58,9 @@
       </version>
       <version name="0.1.12" author="hsuanice" time="2025-12-19T23:45:58Z">
         <source main="main">https://github.com/hsuanice/ReaScripts/raw/98cc57374a677d8645d5a1713079b909b1dc17ff/Beta%20Testing/hsuanice_AudioSweet%20ReaImGui.lua</source>
+      </version>
+      <version name="0.1.13" author="hsuanice" time="2025-12-19T23:51:41Z">
+        <source main="main">https://github.com/hsuanice/ReaScripts/raw/715cfd8643c7a5cf062079cccee1ed14a0b62fe0/Beta%20Testing/hsuanice_AudioSweet%20ReaImGui.lua</source>
       </version>
     </reapack>
     <reapack name="hsuanice_BWF TimeReference Embed Tool.lua" type="script" desc="Embed BWF TimeReference to Active take from Take 1 or Current Position TC">
