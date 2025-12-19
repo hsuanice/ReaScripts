@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<index version="1" name="hsuanice Scripts" commit="93f277bc1a9a8ce9161597de19fa8b332dd3d215">
+<index version="1" name="hsuanice Scripts" commit="3eb93b715387d3efc54d6bdc9b3f42685d6ef78b">
   <category name="Beta Testing">
     <reapack name="hsuanice_AudioSweet ReaImGui.lua" type="script" desc="AudioSweet ReaImGui - ImGui Interface for AudioSweet">
       <metadata>
@@ -182,6 +182,9 @@
       </version>
       <version name="0.1.8" author="hsuanice" time="2025-12-19T11:37:07Z">
         <source main="main">https://github.com/hsuanice/ReaScripts/raw/93f277bc1a9a8ce9161597de19fa8b332dd3d215/Beta%20Testing/hsuanice_AudioSweet%20ReaImGui.lua</source>
+      </version>
+      <version name="0.1.9" author="hsuanice" time="2025-12-19T14:20:40Z">
+        <source main="main">https://github.com/hsuanice/ReaScripts/raw/3eb93b715387d3efc54d6bdc9b3f42685d6ef78b/Beta%20Testing/hsuanice_AudioSweet%20ReaImGui.lua</source>
       </version>
     </reapack>
     <reapack name="hsuanice_BWF TimeReference Embed Tool.lua" type="script" desc="Embed BWF TimeReference to Active take from Take 1 or Current Position TC">
