@@ -1,7 +1,7 @@
 --[[
 @description AudioSweet ReaImGui - ImGui Interface for AudioSweet
 @author hsuanice
-@version 0.1.3
+@version 0.1.4
 @provides
   [main] .
 @about
@@ -199,6 +199,9 @@
 
 
 @changelog
+  0.1.4 [Internal Build 251219.1745] - Removed Presets menu tab
+    - Removed: Presets menu from the top menu bar (use main controls instead)
+
   0.1.3 [Internal Build 251219.1730] - Dynamic list height refinement
     - Improved: Saved presets and History lists now auto-fit content height with no extra blank row
 
@@ -3082,27 +3085,6 @@ local function draw_gui()
 
   -- Menu Bar
   if ImGui.BeginMenuBar(ctx) then
-    if ImGui.BeginMenu(ctx, 'Presets') then
-      if ImGui.MenuItem(ctx, 'Focused Apply', nil, false, true) then
-        gui.mode = 0; gui.action = 0
-        save_gui_settings()
-      end
-      if ImGui.MenuItem(ctx, 'Focused Copy', nil, false, true) then
-        gui.mode = 0; gui.action = 1; gui.copy_scope = 0; gui.copy_pos = 0
-        save_gui_settings()
-      end
-      ImGui.Separator(ctx)
-      if ImGui.MenuItem(ctx, 'Chain Apply', nil, false, true) then
-        gui.mode = 1; gui.action = 0
-        save_gui_settings()
-      end
-      if ImGui.MenuItem(ctx, 'Chain Copy', nil, false, true) then
-        gui.mode = 1; gui.action = 1; gui.copy_scope = 0; gui.copy_pos = 0
-        save_gui_settings()
-      end
-      ImGui.EndMenu(ctx)
-    end
-
     if ImGui.BeginMenu(ctx, 'Debug') then
       local rv, new_val = ImGui.MenuItem(ctx, 'Enable Debug Mode', nil, gui.debug, true)
       if rv then
@@ -3176,7 +3158,7 @@ local function draw_gui()
           "=================================================\n" ..
           "AudioSweet ReaImGui - ImGui Interface for AudioSweet\n" ..
           "=================================================\n" ..
-          "Version: 0.1.3 (251219.1730)\n" ..
+          "Version: 0.1.4 (251219.1745)\n" ..
           "Author: hsuanice\n\n" ..
 
           "Quick Start:\n" ..
