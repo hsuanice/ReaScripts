@@ -1,7 +1,7 @@
 --[[
 @description AudioSweet ReaImGui - ImGui Interface for AudioSweet
 @author hsuanice
-@version 0.1.8
+@version 0.1.9
 @provides
   [main] .
 @about
@@ -199,6 +199,35 @@
 
 
 @changelog
+  0.1.9 [Internal Build 251219.2216] - Rename preset/history improvements
+    - IMPROVED: Preset rename now pre-fills with formatted FX name (matches button display)
+      • Previous: Focused mode showed raw FX name (e.g., "VST3: Pro-Q 4 (FabFilter)")
+      • Now: Shows formatted name respecting Display Settings (e.g., "ProQ4" if using alias)
+      • Lines: 4065-4080 (get current FX and apply format_fx_label_for_preset)
+    - IMPROVED: Rename popup hint text now shows formatted FX name (consistent with button)
+      • Previous: Hint showed raw FX name regardless of display settings
+      • Now: Hint uses format_fx_label_for_preset() to match current display format
+      • Line: 4464 (use formatted_name for hint text)
+    - ADDED: History items now support right-click rename (same as presets)
+      • New: Right-click context menu on history items with "Rename" option
+      • Lines: 4140-4166 (history context menu implementation)
+      • Pre-fills with formatted name for focused mode, track name for chain mode
+    - ADDED: New rename_history_item() function for renaming history entries
+      • Function: rename_history_item(idx, new_custom_name)
+      • Lines: 2041-2080 (bidirectional sync between history and presets)
+      • Syncs custom_name to matching saved presets automatically
+    - ADDED: Bidirectional rename sync between presets and history
+      • Rename preset → updates matching history items
+      • Rename history → updates matching saved presets
+      • Match criteria: track_guid + mode + (fx_index for focused, name for chain)
+    - IMPROVED: Rename popup now dynamically shows "Preset Name" or "History Name"
+      • Lines: 4441-4499 (unified popup for both preset and history)
+      • Uses gui.rename_is_history flag to determine source and target
+    - TECHNICAL: Added gui.rename_is_history flag to track rename source
+      • Line: 1239 (initialization)
+      • Set to false for preset rename (line 4101)
+      • Set to true for history rename (line 4187)
+
   0.1.8 [Internal Build 251219.1935] - Preset/History display alignment fix
     - Fixed: Preset/History header toggles align without stretching window width
 
@@ -1236,6 +1265,7 @@ local gui = {
   show_rename_popup = false,
   rename_chain_idx = nil,
   rename_chain_name = "",
+  rename_is_history = false,  -- Track whether renaming a history item or preset
   show_settings_popup = false,
   show_fxname_popup = false,
   show_preview_settings = false,
@@ -1616,6 +1646,32 @@ local function format_fx_label_for_preset(raw_label)
     name = string.format("%s (%s)", display_core, display_vendor)
   end
   if gui.preset_display_show_type and display_type ~= "" then
+    name = string.format("%s: %s", display_type, name)
+  end
+  return name
+end
+
+local function format_fx_label_for_status(raw_label)
+  if not gui.preset_display_use_alias then return raw_label end
+  local typ, core, vendor = parse_fx_label(raw_label)
+  if core == "" then return raw_label end
+
+  local display_type = typ
+  local display_vendor = vendor
+  local display_core = core
+
+  local rec = get_fx_alias_record(raw_label)
+  if rec then
+    display_type = pick_alias_type(typ, rec.seen_types)
+    display_vendor = rec.normalized_vendor or ""
+    display_core = (rec.alias and rec.alias ~= "") and rec.alias or (rec.normalized_core or display_core)
+  end
+
+  local name = display_core
+  if display_vendor ~= "" then
+    name = string.format("%s (%s)", display_core, display_vendor)
+  end
+  if display_type ~= "" then
     name = string.format("%s: %s", display_type, name)
   end
   return name
@@ -2008,6 +2064,47 @@ local function rename_saved_chain(idx, new_custom_name)
       local data = string.format("%s|%s|%s|%s|%d|%s", item.name, item.track_guid, item.track_name, item.mode, item.fx_index, item.custom_name or "")
       r.SetProjExtState(0, HISTORY_NAMESPACE, "hist_" .. (i - 1), data)
     end
+  end
+end
+
+local function rename_history_item(idx, new_custom_name)
+  if gui.history[idx] then
+    local item = gui.history[idx]
+    item.custom_name = (new_custom_name and new_custom_name ~= "") and new_custom_name or nil
+    if gui.debug then
+      r.ShowConsoleMsg(string.format("[AudioSweet] Rename history #%d: custom_name='%s', mode='%s'\n",
+        idx, tostring(item.custom_name or "nil"), item.mode or "chain"))
+    end
+
+    -- Sync rename to saved presets that match this history item
+    -- Match by: track_guid + mode + (fx_index for focused, name for chain)
+    for _, chain in ipairs(gui.saved_chains) do
+      if chain.track_guid == item.track_guid and chain.mode == item.mode then
+        if item.mode == "focused" then
+          -- For focused mode: match by fx_index
+          if chain.fx_index == item.fx_index then
+            chain.custom_name = item.custom_name
+          end
+        else
+          -- For chain mode: match by name (original internal name)
+          if chain.name == item.name then
+            chain.custom_name = item.custom_name
+          end
+        end
+      end
+    end
+
+    -- Save updated history to ExtState
+    for i = 0, gui.max_history - 1 do
+      r.SetProjExtState(0, HISTORY_NAMESPACE, "hist_" .. i, "")
+    end
+    for i, hist in ipairs(gui.history) do
+      local data = string.format("%s|%s|%s|%s|%d|%s", hist.name, hist.track_guid, hist.track_name, hist.mode, hist.fx_index, hist.custom_name or "")
+      r.SetProjExtState(0, HISTORY_NAMESPACE, "hist_" .. (i - 1), data)
+    end
+
+    -- Save updated presets
+    save_chains_to_extstate()
   end
 end
 
@@ -2765,7 +2862,7 @@ local function run_focused_fx_copy_mode(tr, fx_name, fx_idx, item_count)
     r.ShowConsoleMsg(string.format("[AS GUI] Focused FX copy completed: %d operations\n", ops))
   end
 
-  gui.last_result = string.format("Success! [%s] Copy (%d ops)", fx_name, ops)
+  gui.last_result = string.format("Success! [%s] Copy (%d ops)", format_fx_label_for_status(fx_name), ops)
   gui.is_running = false
 end
 
@@ -2990,7 +3087,7 @@ local function open_saved_chain_fx(chain_idx)
     else
       r.TrackFX_Show(tr, fx_idx, 3)  -- Show floating window
     end
-    gui.last_result = string.format("Toggled FX #%d: %s", fx_idx + 1, found_fx_name)
+    gui.last_result = string.format("Toggled FX #%d: %s", fx_idx + 1, format_fx_label_for_status(found_fx_name))
   else
     -- Chain preset: toggle FX chain window
     local chain_visible = r.TrackFX_GetChainVisible(tr)
@@ -3044,7 +3141,7 @@ local function open_history_fx(hist_idx)
     else
       r.TrackFX_Show(tr, fx_idx, 3)  -- Show floating window
     end
-    gui.last_result = string.format("Toggled FX: %s (FX #%d)", hist_item.name, fx_idx + 1)
+    gui.last_result = string.format("Toggled FX: %s (FX #%d)", format_fx_label_for_status(hist_item.name), fx_idx + 1)
   else
     -- For chain mode, toggle FX chain window (chain mode uses entire FX chain)
     local chain_visible = r.TrackFX_GetChainVisible(tr)
@@ -3124,7 +3221,7 @@ local function run_history_focused_apply(tr, fx_name, fx_idx, item_count)
     if gui.debug then
       r.ShowConsoleMsg("[AS GUI] Execution completed successfully\n")
     end
-    gui.last_result = string.format("Success! [%s] Apply (%d items)", fx_name, item_count)
+    gui.last_result = string.format("Success! [%s] Apply (%d items)", format_fx_label_for_status(fx_name), item_count)
   else
     if gui.debug then
       r.ShowConsoleMsg(string.format("[AS GUI] ERROR: %s\n", tostring(err)))
@@ -4030,13 +4127,28 @@ end
                 if ImGui.MenuItem(ctx, "Rename") then
                   gui.show_rename_popup = true
                   gui.rename_chain_idx = i
+                  gui.rename_is_history = false  -- Mark as preset rename
                   -- Pre-fill with current custom name, or use display name (without track# prefix for chains)
                   if chain.custom_name and chain.custom_name ~= "" then
                     gui.rename_chain_name = chain.custom_name
                   else
                     -- Use the base name without track# prefix
                     if chain.mode == "focused" then
-                      gui.rename_chain_name = chain.name  -- FX name for focused mode
+                      -- For focused mode: use formatted FX name (same as button display)
+                      local tr = find_track_by_guid(chain.track_guid)
+                      local found_fx_name = nil
+                      if tr and r.ValidatePtr2(0, tr, "MediaTrack*") then
+                        if chain.fx_index then
+                          local fx_count = r.TrackFX_GetCount(tr)
+                          if chain.fx_index < fx_count then
+                            local _, fx_name = r.TrackFX_GetFXName(tr, chain.fx_index, "")
+                            if fx_name and (fx_name == chain.name or fx_name:find(chain.name, 1, true)) then
+                              found_fx_name = fx_name
+                            end
+                          end
+                        end
+                      end
+                      gui.rename_chain_name = format_fx_label_for_preset(found_fx_name or chain.name)
                     else
                       -- For chain mode, extract track name from track_info_line (#N: name)
                       local extracted_name = track_info_line:match("^#%d+: (.+)$")
@@ -4096,6 +4208,34 @@ end
                 show_preset_tooltip(item)
               end
 
+              -- Right-click context menu for renaming
+              if ImGui.BeginPopupContextItem(ctx, "history_context_" .. i) then
+                if ImGui.MenuItem(ctx, "Rename") then
+                  gui.show_rename_popup = true
+                  gui.rename_chain_idx = i
+                  gui.rename_is_history = true  -- Mark as history rename
+                  -- Pre-fill with current custom name, or use display name
+                  if item.custom_name and item.custom_name ~= "" then
+                    gui.rename_chain_name = item.custom_name
+                  else
+                    -- Use formatted name (same as button display, without track# prefix)
+                    if item.mode == "focused" then
+                      gui.rename_chain_name = format_fx_label_for_preset(item.name)
+                    else
+                      -- For chain mode, extract track name
+                      local tr = find_track_by_guid(item.track_guid)
+                      if tr and r.ValidatePtr2(0, tr, "MediaTrack*") then
+                        local _, track_name = r.GetSetMediaTrackInfo_String(tr, "P_NAME", "", false)
+                        gui.rename_chain_name = track_name
+                      else
+                        gui.rename_chain_name = item.track_name or ""
+                      end
+                    end
+                  end
+                end
+                ImGui.EndPopup(ctx)
+              end
+
               ImGui.SameLine(ctx)
               -- "Save" button to save this history item as a saved preset
               if ImGui.Button(ctx, "Save", 40, 0) then
@@ -4153,7 +4293,7 @@ end
     else
       ImGui.PushStyleColor(ctx, ImGui.Col_Text, 0xFFFF00FF)
     end
-    ImGui.Text(ctx, gui.last_result)
+    ImGui.TextWrapped(ctx, gui.last_result)
     ImGui.PopStyleColor(ctx)
   end
 
@@ -4165,14 +4305,16 @@ end
   end
 
   if gui.mode == 0 then
-    ImGui.Text(ctx, gui.focused_fx_name)
+    if has_valid_fx then
+      ImGui.Text(ctx, format_fx_label_for_status(gui.focused_fx_name))
+    else
+      ImGui.Text(ctx, gui.focused_fx_name)
+    end
   else
     ImGui.Text(ctx, gui.focused_track_name ~= "" and ("Track: " .. gui.focused_track_name) or "No Track FX")
   end
   ImGui.PopStyleColor(ctx)
-
-  ImGui.SameLine(ctx)
-  ImGui.Text(ctx, string.format(" | Items: %d", item_count))
+  ImGui.Text(ctx, string.format("Items: %d", item_count))
 
   -- Show FX chain in Chain mode (dynamic height, auto-resizes based on content)
   if gui.mode == 1 and #gui.focused_track_fx_list > 0 then
@@ -4328,28 +4470,32 @@ end
   if ImGui.BeginPopupModal(ctx, "Rename Preset", true, ImGui.WindowFlags_AlwaysAutoResize) then
     -- Show track# prefix for chain mode (outside input field)
     local hint_text = "(leave empty to use default)"
-    if gui.rename_chain_idx and gui.saved_chains[gui.rename_chain_idx] then
-      local chain = gui.saved_chains[gui.rename_chain_idx]
-      if chain.mode == "chain" then
-        local tr = find_track_by_guid(chain.track_guid)
+    local item_source = gui.rename_is_history and gui.history or gui.saved_chains
+
+    if gui.rename_chain_idx and item_source[gui.rename_chain_idx] then
+      local item = item_source[gui.rename_chain_idx]
+      if item.mode == "chain" then
+        local tr = find_track_by_guid(item.track_guid)
         if tr then
           local track_number = r.GetMediaTrackInfo_Value(tr, "IP_TRACKNUMBER")
-          ImGui.Text(ctx, string.format("Track #%d - Preset Name:", track_number))
+          ImGui.Text(ctx, string.format("Track #%d - %s Name:", track_number, gui.rename_is_history and "History" or "Preset"))
           -- Show current track name in hint
           local current_track_name, _ = get_track_name_and_number(tr)
           hint_text = string.format("(default: #%.0f - %s)", track_number, current_track_name)
         else
-          ImGui.Text(ctx, "Preset Name:")
+          ImGui.Text(ctx, string.format("%s Name:", gui.rename_is_history and "History" or "Preset"))
         end
       else
-        -- Focused mode: show FX name in hint
-        ImGui.Text(ctx, "Preset Name:")
-        if chain.name then
-          hint_text = string.format("(default: %s)", chain.name)
+        -- Focused mode: show formatted FX name in hint
+        ImGui.Text(ctx, string.format("%s Name:", gui.rename_is_history and "History" or "Preset"))
+        if item.name then
+          -- Use formatted name for hint (consistent with button display)
+          local formatted_name = format_fx_label_for_preset(item.name)
+          hint_text = string.format("(default: %s)", formatted_name)
         end
       end
     else
-      ImGui.Text(ctx, "Preset Name:")
+      ImGui.Text(ctx, string.format("%s Name:", gui.rename_is_history and "History" or "Preset"))
     end
     ImGui.TextDisabled(ctx, hint_text)
     ImGui.Spacing(ctx)
@@ -4360,9 +4506,14 @@ end
     ImGui.Spacing(ctx)
     if ImGui.Button(ctx, "OK", 100, 0) then
       if gui.rename_chain_idx then
-        rename_saved_chain(gui.rename_chain_idx, gui.rename_chain_name)
+        if gui.rename_is_history then
+          rename_history_item(gui.rename_chain_idx, gui.rename_chain_name)
+        else
+          rename_saved_chain(gui.rename_chain_idx, gui.rename_chain_name)
+        end
         gui.rename_chain_idx = nil
         gui.rename_chain_name = ""
+        gui.rename_is_history = false
         ImGui.CloseCurrentPopup(ctx)
       end
     end
@@ -4370,6 +4521,7 @@ end
     if ImGui.Button(ctx, "Cancel", 100, 0) then
       gui.rename_chain_idx = nil
       gui.rename_chain_name = ""
+      gui.rename_is_history = false
       ImGui.CloseCurrentPopup(ctx)
     end
     ImGui.EndPopup(ctx)
