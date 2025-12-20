@@ -11,19 +11,9 @@
   Part of AudioSweet ReaImGui Tools suite.
 
 @changelog
-  0.1.1 [Internal Build 251220.0830] - RecursiveCreateDirectory Return Value Fix
-    - FIXED: False error "Failed to create Settings folder" when folder already exists
-      • Problem: RecursiveCreateDirectory() returns different values (0 or 1) when folder exists
-      • Previous: Strict check (ok == 1 or ok == true) rejected valid scenarios
-      • Root cause: macOS quarantine attributes and existing folders can return 0
-      • Solution: Remove strict return value check, let write_file() catch real errors
-      • Behavior now consistent with Export and Update tools
-    - IMPROVED: Error handling strategy
-      • ensure_settings_dir() always returns directory path
-      • Actual write errors caught by write_file() at line 160
-      • More robust against platform-specific RecursiveCreateDirectory() behavior
-    - Lines modified: 42-47 (ensure_settings_dir), 86-88 (main)
-
+  + FIXED: False error "Failed to create Settings folder" when folder already exists
+  + IMPROVED: Error handling now consistent with Export and Update tools
+  + RecursiveCreateDirectory() behavior more robust across platforms
   0.1.0 [Internal Build 251216.1820] - Settings Directory Safeguard
     - ADDED: Automatically create the Settings folder before writing fx_alias.json to avoid write errors.
     - ADDED: Clear warning dialog if the folder cannot be created so the user knows why the build stops.
