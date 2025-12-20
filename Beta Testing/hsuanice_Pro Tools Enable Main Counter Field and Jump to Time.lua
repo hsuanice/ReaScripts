@@ -31,10 +31,16 @@
   3. Press Enter to navigate
   4. Press + for relative forward offset (e.g., +01000000 = +1 hour from current)
   5. Press - for relative backward offset (e.g., -00300000 = -30 minutes from current)
-  6. Press Delete to reset to current timeline position
-  7. Press Escape or Backspace to clear input
+  6. Press ⌫ (Backspace) or ⌦ (Delete) to clear input
+  7. Press / or numpad Clear to reset to zero (00:00:00:00)
+  8. Press = to reset to current timeline position
 
 @changelog
+  [Internal Build 251220.1340]
+    + FIXED: = key now works correctly (macOS key code: 108)
+    + ADDED: Numpad Clear key also resets to zero
+    + CHANGED: ⌫/⌦ clear input, /C reset to zero, = reset to current
+    + IMPROVED: Footer shows: "+/- Rel • ⌫⌦ Clear • /C Zero • = Current"
   [Internal Build 251220.1317]
     + IMPROVED: +/- symbols now display immediately when entering relative mode
     + IMPROVED: Relative mode shows colored prefix even before typing numbers
@@ -93,6 +99,9 @@ local KEY_ESC = 27
 local KEY_DELETE = 6579564
 local KEY_MINUS = 45
 local KEY_PLUS = 43
+local KEY_SLASH = 47           -- "/" key - reset to zero
+local KEY_EQUALS = 108         -- "=" key - reset to current (macOS: 108)
+local KEY_NUMPAD_CLEAR = 144   -- Numpad Clear key
 
 -- ============================================================================
 -- GLOBAL STATE
@@ -426,6 +435,11 @@ function clear_input()
   state.cursor_pos = 0
 end
 
+function reset_to_zero()
+  clear_input()
+  position_to_input(0)
+end
+
 function reset_to_current()
   local current_pos = r.GetCursorPosition()
   clear_input()
@@ -508,7 +522,7 @@ function draw_gui()
   -- Footer: Help text (compact)
   gfx.setfont(1, font_name, font_size_small)
   gfx.set(0.4, 0.4, 0.4, 1)
-  local help_text = "+/- Rel • Del Reset • Esc Clear"
+  local help_text = "+/- Rel • ⌫⌦ Clear • /C Zero • = Current"
   local help_w = gfx.measurestr(help_text)
   gfx.x = (window_w - help_w) / 2
   gfx.y = window_h - 19
@@ -536,9 +550,11 @@ function main()
   end
 
   -- Handle special keys
-  if char == KEY_BACKSPACE then
+  if char == KEY_BACKSPACE or char == KEY_DELETE then
     clear_input()
-  elseif char == KEY_DELETE then
+  elseif char == KEY_SLASH or char == KEY_NUMPAD_CLEAR then
+    reset_to_zero()
+  elseif char == KEY_EQUALS then
     reset_to_current()
   elseif char == KEY_PLUS then
     handle_relative_input("+")
