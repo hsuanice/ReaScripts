@@ -1,5 +1,5 @@
 --[[
-@description AudioSweet ReaImGui - ImGui Interface for AudioSweet
+@description AudioSweet ReaImGui - AudioSuite Workflow (Pro Tools–Style)
 @author hsuanice
 @version 0.1.14
 @provides
@@ -29,74 +29,10 @@
 
 
 @changelog
-  0.1.14 [Internal Build 251220.0802] - Rename System Refactoring
-    - FIXED: Custom names now fully support type/vendor display toggles
-      • Problem: After renaming, Show Type/Vendor settings had no effect
-      • Root cause: custom_name was displayed as-is without original type/vendor info
-      • Impact: Users lost ability to toggle display format after renaming
-      • Solution: Custom names now preserve original FX type/vendor metadata
-
-    - CHANGED: Rename dialog behavior for focused FX
-      • Input field now shows CORE NAME ONLY (no type, no vendor)
-      • Respects Button "Use Alias" setting:
-        - Alias ON: shows alias (e.g., "ProQ4")
-        - Alias OFF: shows core name (e.g., "FabFilter Pro-Q 4")
-      • Consistent with button display (what you see = what you edit)
-      • Lines: 4893, 4966 (preset and history rename pre-fill)
-
-    - ADDED: Smart helper functions
-      • get_fx_core_name() - Lines 1743-1761
-        - Extracts core FX name for rename input
-        - Respects gui.button_use_alias setting
-        - Returns alias if available, else parsed core name
-      • format_fx_label_with_custom_name() - Lines 1763-1804
-        - Formats custom name WITH original type/vendor preserved
-        - Extracts type/vendor from original chain.name
-        - Replaces only core portion with custom_name
-        - Respects context-specific display settings (button/tooltip/status/fxlist)
-
-    - UPDATED: Display logic to use new formatting function
-      • get_chain_display_info(): Line 2347 (preset button display)
-      • get_history_display_name(): Line 2389 (history button display)
-      • Custom names now dynamically formatted based on display settings
-
-    - BEHAVIOR: Data structure preserves original metadata
-      • Storage: chain.name = "VST3: VOXBOX (Universal Audio)" (unchanged)
-      • Storage: chain.custom_name = "VB" (only core name)
-      • Display logic extracts type/vendor from chain.name, replaces core with custom_name
-      • Result: Full toggle support for type/vendor display
-
-    - EXAMPLE 1 - Standard Rename:
-      • Original FX: "VST3: UADx Manley VOXBOX Channel Strip (Universal Audio (UADx))"
-      • Button "Use Alias": OFF
-      • Rename dialog shows: "UADx Manley VOXBOX Channel Strip"
-      • User renames to: "VOXBOX"
-      • Saved: custom_name = "VOXBOX"
-      • Display results:
-        - Show Type OFF, Vendor OFF → "VOXBOX"
-        - Show Type ON, Vendor OFF → "VST3: VOXBOX"
-        - Show Type OFF, Vendor ON → "VOXBOX (Universal Audio (UADx))"
-        - Show Type ON, Vendor ON → "VST3: VOXBOX (Universal Audio (UADx))"
-
-    - EXAMPLE 2 - Rename with Alias:
-      • Original FX: "VST3: FabFilter Pro-Q 4 (FabFilter)"
-      • Alias database: "ProQ4"
-      • Button "Use Alias": ON
-      • Button displays: "VST3: ProQ4 (FabFilter)" (if type/vendor ON)
-      • Rename dialog shows: "ProQ4" (matches button core)
-      • User renames to: "EQ"
-      • Saved: custom_name = "EQ"
-      • Display results (type/vendor from original):
-        - Show Type OFF, Vendor OFF → "EQ"
-        - Show Type ON, Vendor OFF → "VST3: EQ"
-        - Show Type OFF, Vendor ON → "EQ (FabFilter)"
-        - Show Type ON, Vendor ON → "VST3: EQ (FabFilter)"
-
-    - TECHNICAL: Complete separation of concerns
-      • Rename input: Only deals with core name (optionally alias)
-      • Storage: Keeps original full name + custom core name separately
-      • Display: Dynamically combines based on user settings
-      • Benefit: Maximum flexibility, no data loss
+  + FIXED: Custom names now fully support type/vendor display toggles
+  + CHANGED: Rename dialog shows core name only, respects alias settings
+  + ADDED: Smart helper functions for custom name handling (get_fx_core_name, format_fx_label_with_custom_name)
+  + UPDATED: Display logic preserves original FX metadata while using custom names
 
   0.1.13 [Internal Build 251220.0750] - Help System Refactoring
     - ADDED: In-app User Manual window (Help → User Manual)
