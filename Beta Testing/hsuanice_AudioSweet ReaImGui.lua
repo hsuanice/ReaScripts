@@ -1,7 +1,7 @@
 --[[
 @description AudioSweet ReaImGui - ImGui Interface for AudioSweet
 @author hsuanice
-@version 0.1.13
+@version 0.1.14
 @provides
   [main] .
 @about
@@ -29,6 +29,75 @@
 
 
 @changelog
+  0.1.14 [Internal Build 251220.0802] - Rename System Refactoring
+    - FIXED: Custom names now fully support type/vendor display toggles
+      • Problem: After renaming, Show Type/Vendor settings had no effect
+      • Root cause: custom_name was displayed as-is without original type/vendor info
+      • Impact: Users lost ability to toggle display format after renaming
+      • Solution: Custom names now preserve original FX type/vendor metadata
+
+    - CHANGED: Rename dialog behavior for focused FX
+      • Input field now shows CORE NAME ONLY (no type, no vendor)
+      • Respects Button "Use Alias" setting:
+        - Alias ON: shows alias (e.g., "ProQ4")
+        - Alias OFF: shows core name (e.g., "FabFilter Pro-Q 4")
+      • Consistent with button display (what you see = what you edit)
+      • Lines: 4893, 4966 (preset and history rename pre-fill)
+
+    - ADDED: Smart helper functions
+      • get_fx_core_name() - Lines 1743-1761
+        - Extracts core FX name for rename input
+        - Respects gui.button_use_alias setting
+        - Returns alias if available, else parsed core name
+      • format_fx_label_with_custom_name() - Lines 1763-1804
+        - Formats custom name WITH original type/vendor preserved
+        - Extracts type/vendor from original chain.name
+        - Replaces only core portion with custom_name
+        - Respects context-specific display settings (button/tooltip/status/fxlist)
+
+    - UPDATED: Display logic to use new formatting function
+      • get_chain_display_info(): Line 2347 (preset button display)
+      • get_history_display_name(): Line 2389 (history button display)
+      • Custom names now dynamically formatted based on display settings
+
+    - BEHAVIOR: Data structure preserves original metadata
+      • Storage: chain.name = "VST3: VOXBOX (Universal Audio)" (unchanged)
+      • Storage: chain.custom_name = "VB" (only core name)
+      • Display logic extracts type/vendor from chain.name, replaces core with custom_name
+      • Result: Full toggle support for type/vendor display
+
+    - EXAMPLE 1 - Standard Rename:
+      • Original FX: "VST3: UADx Manley VOXBOX Channel Strip (Universal Audio (UADx))"
+      • Button "Use Alias": OFF
+      • Rename dialog shows: "UADx Manley VOXBOX Channel Strip"
+      • User renames to: "VOXBOX"
+      • Saved: custom_name = "VOXBOX"
+      • Display results:
+        - Show Type OFF, Vendor OFF → "VOXBOX"
+        - Show Type ON, Vendor OFF → "VST3: VOXBOX"
+        - Show Type OFF, Vendor ON → "VOXBOX (Universal Audio (UADx))"
+        - Show Type ON, Vendor ON → "VST3: VOXBOX (Universal Audio (UADx))"
+
+    - EXAMPLE 2 - Rename with Alias:
+      • Original FX: "VST3: FabFilter Pro-Q 4 (FabFilter)"
+      • Alias database: "ProQ4"
+      • Button "Use Alias": ON
+      • Button displays: "VST3: ProQ4 (FabFilter)" (if type/vendor ON)
+      • Rename dialog shows: "ProQ4" (matches button core)
+      • User renames to: "EQ"
+      • Saved: custom_name = "EQ"
+      • Display results (type/vendor from original):
+        - Show Type OFF, Vendor OFF → "EQ"
+        - Show Type ON, Vendor OFF → "VST3: EQ"
+        - Show Type OFF, Vendor ON → "EQ (FabFilter)"
+        - Show Type ON, Vendor ON → "VST3: EQ (FabFilter)"
+
+    - TECHNICAL: Complete separation of concerns
+      • Rename input: Only deals with core name (optionally alias)
+      • Storage: Keeps original full name + custom core name separately
+      • Display: Dynamically combines based on user settings
+      • Benefit: Maximum flexibility, no data loss
+
   0.1.13 [Internal Build 251220.0750] - Help System Refactoring
     - ADDED: In-app User Manual window (Help → User Manual)
       • New tabbed GUI window with 4 sections
@@ -1702,6 +1771,69 @@ local function format_fx_label_for_status(raw_label)
   return format_fx_label(raw_label, "status")
 end
 
+-- Extract core FX name only (no type, no vendor) for rename dialog
+-- If button uses alias, return alias; otherwise return core name
+local function get_fx_core_name(raw_label)
+  -- Check if button display uses alias
+  if gui.button_use_alias then
+    local rec = get_fx_alias_record(raw_label, true)
+    if rec and rec.alias and rec.alias ~= "" then
+      return rec.alias  -- Return alias if available
+    end
+    -- Fallback to normalized_core if alias is empty
+    if rec and rec.normalized_core and rec.normalized_core ~= "" then
+      return rec.normalized_core
+    end
+  end
+
+  -- Default: return parsed core name
+  local _, core, _ = parse_fx_label(raw_label)
+  return core
+end
+
+-- Format FX label using custom name but preserving type/vendor from original
+-- Used for displaying custom-named presets with type/vendor toggle support
+local function format_fx_label_with_custom_name(original_fx_name, custom_name, context)
+  -- Parse original FX name to extract type and vendor
+  local typ, _, vendor = parse_fx_label(original_fx_name)
+
+  -- Get display settings based on context
+  local show_type, show_vendor, use_alias
+  if context == "button" then
+    show_type = gui.button_show_type
+    show_vendor = gui.button_show_vendor
+    use_alias = gui.button_use_alias
+  elseif context == "tooltip" then
+    show_type = gui.tooltip_show_type
+    show_vendor = gui.tooltip_show_vendor
+    use_alias = gui.tooltip_use_alias
+  elseif context == "status" then
+    show_type = gui.status_show_type
+    show_vendor = gui.status_show_vendor
+    use_alias = gui.status_use_alias
+  elseif context == "fxlist" then
+    show_type = gui.fxlist_show_type
+    show_vendor = gui.fxlist_show_vendor
+    use_alias = gui.fxlist_use_alias
+  else
+    -- Fallback to button settings
+    show_type = gui.button_show_type
+    show_vendor = gui.button_show_vendor
+    use_alias = gui.button_use_alias
+  end
+
+  -- Build display name with custom core but original type/vendor
+  local display_name = custom_name
+  if show_vendor and vendor ~= "" then
+    display_name = string.format("%s (%s)", custom_name, vendor)
+  end
+  if show_type and typ ~= "" then
+    display_name = string.format("%s: %s", typ, display_name)
+  end
+
+  return display_name
+end
+
 local function check_bwfmetaedit(force)
   if bwf_cli.checked and not force then return end
   bwf_cli.checked = true
@@ -2242,7 +2374,8 @@ local function get_chain_display_info(chain)
   if chain.mode == "focused" then
     -- Focused FX mode: use custom name OR current FX name from track (real-time)
     if chain.custom_name and chain.custom_name ~= "" then
-      display_name = chain.custom_name
+      -- Use custom name but preserve type/vendor from original FX
+      display_name = format_fx_label_with_custom_name(chain.name, chain.custom_name, "button")
     else
       -- Use current FX name from track, fallback to saved name
       display_name = format_fx_label_for_preset(found_fx_name or chain.name)
@@ -2283,7 +2416,8 @@ local function get_history_display_name(hist_item)
     if hist_item.mode == "focused" then
       -- Focused mode: use custom name OR current FX name from track (real-time)
       if hist_item.custom_name and hist_item.custom_name ~= "" then
-        display_name = hist_item.custom_name
+        -- Use custom name but preserve type/vendor from original FX
+        display_name = format_fx_label_with_custom_name(hist_item.name, hist_item.custom_name, "button")
       else
         -- Find FX on track to get CURRENT name (handles FX reordering)
         local found_fx_idx, found_fx_name, status = find_fx_on_track(tr, hist_item.fx_index, hist_item.name)
@@ -3521,7 +3655,7 @@ local function draw_gui()
           "=================================================\n" ..
           "AudioSweet ReaImGui - ImGui Interface for AudioSweet\n" ..
           "=================================================\n" ..
-          "Version: 0.1.13 (251220.0750)\n" ..
+          "Version: 0.1.14 (251220.0802)\n" ..
           "Author: hsuanice\n\n" ..
 
           "Reference:\n" ..
@@ -4812,13 +4946,14 @@ end
                   gui.show_rename_popup = true
                   gui.rename_chain_idx = i
                   gui.rename_is_history = false  -- Mark as preset rename
-                  -- Pre-fill with current custom name, or use display name (without track# prefix for chains)
+                  -- Pre-fill with current custom name, or use core name only (for focused mode)
                   if chain.custom_name and chain.custom_name ~= "" then
                     gui.rename_chain_name = chain.custom_name
                   else
                     -- Use the base name without track# prefix
                     if chain.mode == "focused" then
-                      -- For focused mode: use formatted FX name (same as button display)
+                      -- For focused mode: use CORE name only (no type/vendor)
+                      -- This preserves type and vendor info in the original chain.name
                       local tr = find_track_by_guid(chain.track_guid)
                       local found_fx_name = nil
                       if tr and r.ValidatePtr2(0, tr, "MediaTrack*") then
@@ -4832,7 +4967,8 @@ end
                           end
                         end
                       end
-                      gui.rename_chain_name = format_fx_label_for_preset(found_fx_name or chain.name)
+                      -- Extract only core name (no type, no vendor)
+                      gui.rename_chain_name = get_fx_core_name(found_fx_name or chain.name)
                     else
                       -- For chain mode, extract track name from track_info_line (#N: name)
                       local extracted_name = track_info_line:match("^#%d+: (.+)$")
@@ -4898,13 +5034,14 @@ end
                   gui.show_rename_popup = true
                   gui.rename_chain_idx = i
                   gui.rename_is_history = true  -- Mark as history rename
-                  -- Pre-fill with current custom name, or use display name
+                  -- Pre-fill with current custom name, or use core name only (for focused mode)
                   if item.custom_name and item.custom_name ~= "" then
                     gui.rename_chain_name = item.custom_name
                   else
-                    -- Use formatted name (same as button display, without track# prefix)
+                    -- Use core name only (for focused mode, without track# prefix)
                     if item.mode == "focused" then
-                      gui.rename_chain_name = format_fx_label_for_preset(item.name)
+                      -- Extract only core name (no type, no vendor)
+                      gui.rename_chain_name = get_fx_core_name(item.name)
                     else
                       -- For chain mode, extract track name
                       local tr = find_track_by_guid(item.track_guid)
