@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<index version="1" name="hsuanice Scripts" commit="24064f0f50adba5738602d8825069fb2ad92fea4">
+<index version="1" name="hsuanice Scripts" commit="89d164534f8764149304017990ebfa3ce3bac554">
   <category name="Beta Testing">
     <reapack name="hsuanice_AudioSweet ReaImGui.lua" type="script" desc="AudioSweet ReaImGui - AudioSuite Workflow (Pro Tools–Style)">
       <metadata>
@@ -64,6 +64,9 @@
       </version>
       <version name="0.1.14" author="hsuanice" time="2025-12-20T00:15:32Z">
         <source main="main">https://github.com/hsuanice/ReaScripts/raw/298c4203ad52896e3ec033fb7cb6a68a3ade96c8/Beta%20Testing/hsuanice_AudioSweet%20ReaImGui.lua</source>
+      </version>
+      <version name="0.1.15" author="hsuanice" time="2025-12-20T15:54:58Z">
+        <source main="main">https://github.com/hsuanice/ReaScripts/raw/89d164534f8764149304017990ebfa3ce3bac554/Beta%20Testing/hsuanice_AudioSweet%20ReaImGui.lua</source>
       </version>
     </reapack>
     <reapack name="hsuanice_BWF TimeReference Embed Tool.lua" type="script" desc="Embed BWF TimeReference to Active take from Take 1 or Current Position TC">
