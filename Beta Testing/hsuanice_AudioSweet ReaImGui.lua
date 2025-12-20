@@ -1,7 +1,7 @@
 --[[
 @description AudioSweet ReaImGui - AudioSuite Workflow (Pro Tools–Style)
 @author hsuanice
-@version 0.1.14
+@version 0.1.15
 @provides
   [main] .
 @about
@@ -29,11 +29,28 @@
 
 
 @changelog
-  + FIXED: Custom names now fully support type/vendor display toggles
-  + CHANGED: Rename dialog shows core name only, respects alias settings
-  + ADDED: Smart helper functions for custom name handling (get_fx_core_name, format_fx_label_with_custom_name)
-  + UPDATED: Display logic preserves original FX metadata while using custom names
-
+  v0.1.15 [Internal Build 251220.2350] - Whole File Handle Option
+    - ADDED: "Whole File" toggle option for rendering/gluing entire file length
+      • New GUI element: Checkbox next to handle seconds input
+      • When enabled, processes entire media item source length instead of handles
+      • Implementation: Sets HANDLE_SECONDS to 999999, RGWH Core auto-clamps to available length
+      • Handle seconds input becomes disabled (grayed out) when Whole File is checked
+      • Setting persisted in GUI state (saved/loaded between sessions)
+      • Lines: gui init (1210), save (1299), load (1361), GUI layout (4714-4735)
+    - CHANGED: GUI layout for handles section
+      • Removed "Handle:" and "seconds" text labels for cleaner layout
+      • Layout: Channel options → [65px spacing] → Whole File checkbox → handle input
+      • Handle input width: 80px (unchanged)
+    - FIXED: Whole file logic implementation
+      • Focused mode: Sets handle value before execution (lines 2631-2633)
+      • Chain mode: Sets handle value before execution (lines 3144-3146)
+      • Debug messages: Display "whole file" instead of seconds when enabled (lines 1425, 3151, 3351, 5348)
+      • Settings display: Shows "Whole File" in status output when enabled
+  v0.1.14
+    + FIXED: Custom names now fully support type/vendor display toggles
+    + CHANGED: Rename dialog shows core name only, respects alias settings
+    + ADDED: Smart helper functions for custom name handling
+    + UPDATED: Display logic preserves original FX metadata while using custom names
   0.1.13 [Internal Build 251220.0750] - Help System Refactoring
     - ADDED: In-app User Manual window (Help → User Manual)
       • New tabbed GUI window with 4 sections
@@ -1207,6 +1224,7 @@ local gui = {
   copy_pos = 0,
   channel_mode = 0,      -- 0=auto, 1=mono, 2=multi
   handle_seconds = 5.0,
+  use_whole_file = false, -- Use whole file length instead of handles
   debug = false,
   max_history = 10,      -- Maximum number of history items to keep
   show_fx_on_recall = true,    -- Show FX window when executing SAVED CHAIN/HISTORY
@@ -1295,6 +1313,7 @@ local function save_gui_settings()
   r.SetExtState(SETTINGS_NAMESPACE, "copy_pos", tostring(gui.copy_pos), true)
   r.SetExtState(SETTINGS_NAMESPACE, "channel_mode", tostring(gui.channel_mode), true)
   r.SetExtState(SETTINGS_NAMESPACE, "handle_seconds", tostring(gui.handle_seconds), true)
+  r.SetExtState(SETTINGS_NAMESPACE, "use_whole_file", gui.use_whole_file and "1" or "0", true)
   r.SetExtState(SETTINGS_NAMESPACE, "debug", gui.debug and "1" or "0", true)
   r.SetExtState(SETTINGS_NAMESPACE, "max_history", tostring(gui.max_history), true)
   r.SetExtState(SETTINGS_NAMESPACE, "show_fx_on_recall", gui.show_fx_on_recall and "1" or "0", true)
@@ -1356,6 +1375,7 @@ local function load_gui_settings()
   gui.copy_pos = get_int("copy_pos", 0)
   gui.channel_mode = get_int("channel_mode", 0)
   gui.handle_seconds = get_float("handle_seconds", 5.0)
+  gui.use_whole_file = get_bool("use_whole_file", false)
   gui.debug = get_bool("debug", false)
   gui.max_history = get_int("max_history", 10)
   gui.show_fx_on_recall = get_bool("show_fx_on_recall", true)
@@ -1408,7 +1428,8 @@ local function load_gui_settings()
     r.ShowConsoleMsg(string.format("  Copy Position: %s\n", gui.copy_pos == 0 and "Last" or "Replace"))
     local channel_mode_names = {"Auto", "Mono", "Multi"}
     r.ShowConsoleMsg(string.format("  Channel Mode: %s\n", channel_mode_names[gui.channel_mode + 1]))
-    r.ShowConsoleMsg(string.format("  Handle Seconds: %.2f\n", gui.handle_seconds))
+    local handle_display = gui.use_whole_file and "Whole File" or string.format("%.2f", gui.handle_seconds)
+    r.ShowConsoleMsg(string.format("  Handle Seconds: %s\n", handle_display))
     r.ShowConsoleMsg(string.format("  Debug Mode: %s\n", gui.debug and "ON" or "OFF"))
     r.ShowConsoleMsg(string.format("  Max History: %d\n", gui.max_history))
     r.ShowConsoleMsg(string.format("  FX Name - Show Type: %s\n", gui.fxname_show_type and "ON" or "OFF"))
@@ -2614,7 +2635,9 @@ local function set_extstate_from_gui()
       channel_names[gui.channel_mode + 1], gui.channel_mode))
   end
   r.SetExtState("hsuanice_AS", "AS_SHOW_SUMMARY", "0", false)  -- Always disable summary dialog
-  r.SetProjExtState(0, "RGWH", "HANDLE_SECONDS", tostring(gui.handle_seconds))
+  -- Use whole file length if enabled, otherwise use configured handle seconds
+  local handle_value = gui.use_whole_file and 999999 or gui.handle_seconds
+  r.SetProjExtState(0, "RGWH", "HANDLE_SECONDS", tostring(handle_value))
 
   -- Set RGWH Core debug level (0 = silent, no console output)
   r.SetProjExtState(0, "RGWH", "DEBUG_LEVEL", gui.debug and "2" or "0")
@@ -3125,12 +3148,15 @@ local function run_saved_chain_apply_mode(tr, chain_name, item_count)
     r.ShowConsoleMsg(string.format("[AS GUI] OVERRIDE set: track_idx=%d fx_idx=0\n", track_idx))
   end
   r.SetExtState("hsuanice_AS", "AS_SHOW_SUMMARY", "0", false)
-  r.SetProjExtState(0, "RGWH", "HANDLE_SECONDS", tostring(gui.handle_seconds))
+  -- Use whole file length if enabled, otherwise use configured handle seconds
+  local handle_value = gui.use_whole_file and 999999 or gui.handle_seconds
+  r.SetProjExtState(0, "RGWH", "HANDLE_SECONDS", tostring(handle_value))
   r.SetProjExtState(0, "RGWH", "DEBUG_LEVEL", gui.debug and "2" or "0")
 
   if gui.debug then
-    r.ShowConsoleMsg(string.format("[AS GUI] Executing AudioSweet Core (mode=chain, action=%s, handle=%.1fs)\n",
-      gui.action == 0 and "apply" or "copy", gui.handle_seconds))
+    local handle_display = gui.use_whole_file and "whole file" or string.format("%.1fs", gui.handle_seconds)
+    r.ShowConsoleMsg(string.format("[AS GUI] Executing AudioSweet Core (mode=chain, action=%s, handle=%s)\n",
+      gui.action == 0 and "apply" or "copy", handle_display))
   end
 
   -- Run AudioSweet Core (it will use the focused track's FX chain)
@@ -3329,8 +3355,9 @@ local function run_history_focused_apply(tr, fx_name, fx_idx, item_count)
   r.SetExtState("hsuanice_AS", "OVERRIDE_FX_IDX", tostring(fx_idx), false)
 
   if gui.debug then
-    r.ShowConsoleMsg(string.format("[AS GUI] Executing AudioSweet Core (mode=focused, action=%s, handle=%.1fs)\n",
-      gui.action == 0 and "apply" or "copy", gui.handle_seconds))
+    local handle_display = gui.use_whole_file and "whole file" or string.format("%.1fs", gui.handle_seconds)
+    r.ShowConsoleMsg(string.format("[AS GUI] Executing AudioSweet Core (mode=focused, action=%s, handle=%s)\n",
+      gui.action == 0 and "apply" or "copy", handle_display))
   end
 
   -- Run AudioSweet Core
@@ -4690,18 +4717,28 @@ end
       save_gui_settings()
     end
 
-    ImGui.SameLine(ctx, 0, 20)
-    -- Handle seconds
-    ImGui.Text(ctx, "Handle:")
+    -- Whole File section
+    ImGui.SameLine(ctx, 0, 65)
+    local rv_whole = ImGui.Checkbox(ctx, "Whole File", gui.use_whole_file)
+    if rv_whole then
+      gui.use_whole_file = not gui.use_whole_file
+      save_gui_settings()
+    end
+
     ImGui.SameLine(ctx)
+    -- Handle seconds input (disabled when Whole File is checked)
+    if gui.use_whole_file then
+      ImGui.BeginDisabled(ctx)
+    end
     ImGui.SetNextItemWidth(ctx, 80)
     local rv, new_val = ImGui.InputDouble(ctx, "##handle_seconds", gui.handle_seconds, 0, 0, "%.1f")
     if rv then
       gui.handle_seconds = math.max(0, new_val)
       save_gui_settings()
     end
-    ImGui.SameLine(ctx)
-    ImGui.Text(ctx, "seconds")
+    if gui.use_whole_file then
+      ImGui.EndDisabled(ctx)
+    end
   end
 
   ImGui.Separator(ctx)
@@ -5307,7 +5344,8 @@ local function loop()
       r.ShowConsoleMsg(string.format("  Copy Position: %s\n", gui.copy_pos == 0 and "Last" or "Replace"))
       local channel_mode_names = {"Auto", "Mono", "Multi"}
       r.ShowConsoleMsg(string.format("  Channel Mode: %s\n", channel_mode_names[gui.channel_mode + 1]))
-      r.ShowConsoleMsg(string.format("  Handle Seconds: %.2f\n", gui.handle_seconds))
+      local handle_display = gui.use_whole_file and "Whole File" or string.format("%.2f", gui.handle_seconds)
+      r.ShowConsoleMsg(string.format("  Handle Seconds: %s\n", handle_display))
       r.ShowConsoleMsg(string.format("  Debug Mode: %s\n", gui.debug and "ON" or "OFF"))
       r.ShowConsoleMsg(string.format("  Max History: %d\n", gui.max_history))
       r.ShowConsoleMsg(string.format("  FX Name - Show Type: %s\n", gui.fxname_show_type and "ON" or "OFF"))
