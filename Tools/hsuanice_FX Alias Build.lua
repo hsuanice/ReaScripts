@@ -1,6 +1,6 @@
 --[[
 @description FX Alias Build - Build FX Alias JSON from Current Project
-@version 0.1.0
+@version 0.1.1
 @author hsuanice
 @provides
   [main] .
@@ -11,6 +11,19 @@
   Part of AudioSweet ReaImGui Tools suite.
 
 @changelog
+  0.1.1 [Internal Build 251220.0830] - RecursiveCreateDirectory Return Value Fix
+    - FIXED: False error "Failed to create Settings folder" when folder already exists
+      • Problem: RecursiveCreateDirectory() returns different values (0 or 1) when folder exists
+      • Previous: Strict check (ok == 1 or ok == true) rejected valid scenarios
+      • Root cause: macOS quarantine attributes and existing folders can return 0
+      • Solution: Remove strict return value check, let write_file() catch real errors
+      • Behavior now consistent with Export and Update tools
+    - IMPROVED: Error handling strategy
+      • ensure_settings_dir() always returns directory path
+      • Actual write errors caught by write_file() at line 160
+      • More robust against platform-specific RecursiveCreateDirectory() behavior
+    - Lines modified: 42-47 (ensure_settings_dir), 86-88 (main)
+
   0.1.0 [Internal Build 251216.1820] - Settings Directory Safeguard
     - ADDED: Automatically create the Settings folder before writing fx_alias.json to avoid write errors.
     - ADDED: Clear warning dialog if the folder cannot be created so the user knows why the build stops.
@@ -41,8 +54,9 @@ local function resource_path() return reaper.GetResourcePath() end
 local function settings_dir()  return resource_path().."/Scripts/hsuanice Scripts/Settings" end
 local function ensure_settings_dir()
   local dir = settings_dir()
-  local ok = reaper.RecursiveCreateDirectory(dir, 0)
-  return (ok == 1 or ok == true) and dir or nil
+  reaper.RecursiveCreateDirectory(dir, 0)
+  -- Always return dir; if folder creation fails, write_file will catch it
+  return dir
 end
 local function read_file(p) local f=io.open(p,"rb");if not f then return nil end;local s=f:read("*a");f:close();return s end
 local function write_file(p,t) local f=io.open(p,"wb");if not f then return false end;f:write(t or "");f:close();return true end
@@ -84,10 +98,6 @@ end
 
 local function main()
   local dir = ensure_settings_dir()
-  if not dir then
-    reaper.MB("Failed to create Settings folder:\n"..settings_dir(), "Build FX Alias JSON", 0)
-    return
-  end
   local json_path = dir.."/fx_alias.json"
 
   local obj = {}
