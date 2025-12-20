@@ -1,7 +1,7 @@
 --[[
 @description Pro Tools Enable Main Counter Field and Jump to Time
 @author hsuanice
-@version 1.0.0
+@version 0.1.0
 @provides
   [main] .
 @about
@@ -17,10 +17,13 @@
   - Supports multiple time formats based on project settings
 
   ## Supported Formats
-  - Timecode (HH:MM:SS:FF) - 8 digits
-  - Time (HH:MM:SS.mmm) - 9 digits
+  - Hours:Minutes:Seconds:Frames (HH:MM:SS:FF) - 8 digits
+  - Minutes:Seconds (MM:SS.mmm) - 7 digits
+  - Measures.Beats.Hundredths (MMM.BB.hh) - 7 digits
+  - Measures.Beats (MMM.BB) - 5 digits
+  - Seconds (sss.mmm) - variable length
   - Samples - variable length
-  - Beat (BBB.BB.hundredths) - 7 digits
+  - Absolute Frames - variable length
 
   ## Usage
   1. Run script to open the Counter window
@@ -32,7 +35,30 @@
   7. Press Escape or Backspace to clear input
 
 @changelog
+  [Internal Build 251220.1317]
+    + IMPROVED: +/- symbols now display immediately when entering relative mode
+    + IMPROVED: Relative mode shows colored prefix even before typing numbers
+  [Internal Build 251220.1310]
+    + IMPROVED: +/- prefix now directly attached to numbers (no space) for clarity
+    + IMPROVED: Window opens with current cursor position pre-loaded
+    + IMPROVED: Initial display shows actual timecode instead of zeros
+  [Internal Build 251220.1300]
+    + CHANGED: Input direction now right-to-left (like calculator/Pro Tools)
+    + CHANGED: Window title changed to "Jump to Time"
+    + IMPROVED: Measures/Beats formats now use TimeFormat library for accuracy
+    + FIXED: Measures.Beats parsing and formatting now match REAPER exactly
+  [Internal Build 251220.1245]
+    + FIXED: Format detection now uses pattern matching instead of toggle states
+    + FIXED: All REAPER time formats now correctly detected and mapped
+    + IMPROVED: Format detection handles minimal variants correctly
   [Internal Build 251220.1230]
+    + ADDED: Support for all REAPER time formats
+    + ADDED: Minutes:Seconds format (MM:SS.mmm) - 7 digits
+    + ADDED: Measures.Beats format (MMM.BB) - 5 digits
+    + ADDED: Seconds format (sssss.mmm) - 9 digits
+    + ADDED: Absolute Frames format - variable length
+    + IMPROVED: Time format names now match REAPER exactly
+  [Internal Build 251220.1200]
     + IMPROVED: Adjusted window size to 320x105 (compact but clear)
     + IMPROVED: Increased main font to 28pt for better visibility on macOS
     + IMPROVED: Cycling input now replaces digit-by-digit (true Pro Tools behavior)
@@ -45,6 +71,14 @@
   [Internal Build 251220.0100]
     + Initial release with ReaImGui
 --]]
+
+-- ============================================================================
+-- LOAD LIBRARY
+-- ============================================================================
+
+local script_path = debug.getinfo(1, 'S').source:match("^@?(.*/)")
+package.path = package.path .. ";" .. script_path .. "../Library/?.lua"
+local TimeFormat = require("hsuanice_Time Format")
 
 -- ============================================================================
 -- CONSTANTS
@@ -94,27 +128,60 @@ function update_project_settings()
 end
 
 function get_format_info()
-  local format_name = "Timecode"
+  local format_name = "Hours:Minutes:Seconds:Frames"
   local format_pattern = "HH:MM:SS:FF"
   local max_digits = 8
 
-  -- Detect current time mode from toggle states
-  if r.GetToggleCommandState(40365) == 1 then -- Time
-    format_name = "Time"
-    format_pattern = "HH:MM:SS.mmm"
-    max_digits = 9
-  elseif r.GetToggleCommandState(41973) == 1 then -- SMPTE
-    format_name = "Timecode"
+  -- Get current time format by checking format string pattern
+  local test_time = 3661.5 -- 1 hour, 1 minute, 1.5 seconds
+  local format_str = r.format_timestr_pos(test_time, "", -1)
+
+  -- Detect format based on the formatted string pattern
+  if format_str:match("%d+:%d+:%d+:%d+") then
+    -- Hours:Minutes:Seconds:Frames (e.g., "01:01:01:15")
+    format_name = "Hours:Minutes:Seconds:Frames"
     format_pattern = "HH:MM:SS:FF"
     max_digits = 8
-  elseif r.GetToggleCommandState(40368) == 1 then -- Samples
-    format_name = "Samples"
-    format_pattern = "samples"
-    max_digits = 12
-  elseif r.GetToggleCommandState(40364) == 1 then -- Measures
-    format_name = "Beat"
-    format_pattern = "BBB.BB.hh"
+  elseif format_str:match("%d+:%d+%.%d+") then
+    -- Minutes:Seconds (e.g., "61:01.500")
+    format_name = "Minutes:Seconds"
+    format_pattern = "MM:SS.mmm"
     max_digits = 7
+  elseif format_str:match("%d+%.%d+%.%d+") then
+    -- Measures.Beats.Hundredths (e.g., "001.01.50")
+    format_name = "Measures.Beats.Hundredths"
+    format_pattern = "MMM.BB.hh"
+    max_digits = 7
+  elseif format_str:match("%d+%.%d+") and not format_str:match(":") then
+    -- Could be Measures.Beats or Seconds
+    if tonumber(format_str:match("^(%d+)")) > 999 then
+      -- Seconds (large number before decimal)
+      format_name = "Seconds"
+      format_pattern = "sssss.mmm"
+      max_digits = 9
+    else
+      -- Measures.Beats (e.g., "001.01")
+      format_name = "Measures.Beats"
+      format_pattern = "MMM.BB"
+      max_digits = 5
+    end
+  elseif not format_str:match("[:%.]") then
+    -- No separators - Samples or Absolute Frames
+    local sample_rate = r.GetSetProjectInfo(0, "PROJECT_SRATE", 0, false)
+    local expected_samples = math.floor(test_time * sample_rate)
+    local actual_value = tonumber(format_str)
+
+    if actual_value and math.abs(actual_value - expected_samples) < 10 then
+      -- Samples
+      format_name = "Samples"
+      format_pattern = "samples"
+      max_digits = 12
+    else
+      -- Absolute Frames
+      format_name = "Absolute Frames"
+      format_pattern = "frames"
+      max_digits = 12
+    end
   end
 
   state.max_digits = max_digits
@@ -124,12 +191,19 @@ end
 function format_display()
   local input = state.input_buffer
   local len = #input
+  local format_name, _ = get_format_info()
 
+  -- If no input, still show format with +/- if in relative mode
   if len == 0 then
-    return "", 0 -- Return empty string and cursor position
+    if state.is_relative then
+      local _, pattern = get_format_info()
+      local empty_display = pattern:gsub("[A-Z]", "0"):gsub("[a-z]", "0")
+      return state.relative_sign .. empty_display, 1
+    else
+      return "", 0
+    end
   end
 
-  local format_name, _ = get_format_info()
   local padded = input .. string.rep("0", state.max_digits - len)
   padded = padded:sub(1, state.max_digits)
 
@@ -139,7 +213,7 @@ function format_display()
   -- Use actual cursor position for display (for cycling mode)
   local display_cursor = len < state.max_digits and len or state.cursor_pos
 
-  if format_name == "Timecode" then
+  if format_name == "Hours:Minutes:Seconds:Frames" then
     local hh = padded:sub(1, 2)
     local mm = padded:sub(3, 4)
     local ss = padded:sub(5, 6)
@@ -152,33 +226,53 @@ function format_display()
     elseif display_cursor <= 6 then cursor_display_pos = display_cursor + 2 -- After second ":"
     else cursor_display_pos = display_cursor + 3 end -- After third ":"
 
-  elseif format_name == "Time" then
-    local hh = padded:sub(1, 2)
-    local mm = padded:sub(3, 4)
-    local ss = padded:sub(5, 6)
-    local mmm = padded:sub(7, 9)
-    formatted = string.format("%s:%s:%s.%s", hh, mm, ss, mmm)
+  elseif format_name == "Minutes:Seconds" then
+    local mm = padded:sub(1, 2)
+    local ss = padded:sub(3, 4)
+    local mmm = padded:sub(5, 7)
+    formatted = string.format("%s:%s.%s", mm, ss, mmm)
 
-    -- Calculate cursor position (account for colons and dot)
+    -- Calculate cursor position (account for colon and dot)
     if display_cursor <= 2 then cursor_display_pos = display_cursor
-    elseif display_cursor <= 4 then cursor_display_pos = display_cursor + 1
-    elseif display_cursor <= 6 then cursor_display_pos = display_cursor + 2
-    else cursor_display_pos = display_cursor + 3 end
+    elseif display_cursor <= 4 then cursor_display_pos = display_cursor + 1 -- After ":"
+    else cursor_display_pos = display_cursor + 2 end -- After "."
 
-  elseif format_name == "Samples" then
-    formatted = input
-    cursor_display_pos = display_cursor
+  elseif format_name == "Measures.Beats" then
+    local mmm = padded:sub(1, 3)
+    local bb = padded:sub(4, 5)
+    formatted = string.format("%s.%s", mmm, bb)
 
-  elseif format_name == "Beat" then
-    local bbb = padded:sub(1, 3)
+    -- Calculate cursor position (account for dot)
+    if display_cursor <= 3 then cursor_display_pos = display_cursor
+    else cursor_display_pos = display_cursor + 1 end
+
+  elseif format_name == "Measures.Beats.Hundredths" then
+    local mmm = padded:sub(1, 3)
     local bb = padded:sub(4, 5)
     local hh = padded:sub(6, 7)
-    formatted = string.format("%s.%s.%s", bbb, bb, hh)
+    formatted = string.format("%s.%s.%s", mmm, bb, hh)
 
     -- Calculate cursor position (account for dots)
     if display_cursor <= 3 then cursor_display_pos = display_cursor
     elseif display_cursor <= 5 then cursor_display_pos = display_cursor + 1
     else cursor_display_pos = display_cursor + 2 end
+
+  elseif format_name == "Seconds" then
+    local sss = padded:sub(1, 5)
+    local mmm = padded:sub(6, 8)
+    formatted = string.format("%s.%s", sss, mmm)
+
+    -- Calculate cursor position (account for dot)
+    if display_cursor <= 5 then cursor_display_pos = display_cursor
+    else cursor_display_pos = display_cursor + 1 end
+
+  elseif format_name == "Samples" then
+    formatted = input
+    cursor_display_pos = display_cursor
+
+  elseif format_name == "Absolute Frames" then
+    formatted = input
+    cursor_display_pos = display_cursor
 
   else
     formatted = input
@@ -186,8 +280,8 @@ function format_display()
   end
 
   if state.is_relative then
-    formatted = state.relative_sign .. " " .. formatted
-    cursor_display_pos = cursor_display_pos + 2 -- Account for "+ " or "- "
+    formatted = state.relative_sign .. formatted
+    cursor_display_pos = cursor_display_pos + 1 -- Account for "+" or "-"
   end
 
   return formatted, cursor_display_pos
@@ -205,27 +299,40 @@ function input_to_position()
   padded = padded:sub(1, state.max_digits)
   local offset_time = 0
 
-  if format_name == "Timecode" then
+  if format_name == "Hours:Minutes:Seconds:Frames" then
     local hh = tonumber(padded:sub(1, 2)) or 0
     local mm = tonumber(padded:sub(3, 4)) or 0
     local ss = tonumber(padded:sub(5, 6)) or 0
     local ff = tonumber(padded:sub(7, 8)) or 0
     offset_time = hh * 3600 + mm * 60 + ss + (ff / state.frame_rate)
-  elseif format_name == "Time" then
-    local hh = tonumber(padded:sub(1, 2)) or 0
-    local mm = tonumber(padded:sub(3, 4)) or 0
-    local ss = tonumber(padded:sub(5, 6)) or 0
-    local mmm = tonumber(padded:sub(7, 9)) or 0
-    offset_time = hh * 3600 + mm * 60 + ss + (mmm / 1000)
+  elseif format_name == "Minutes:Seconds" then
+    local mm = tonumber(padded:sub(1, 2)) or 0
+    local ss = tonumber(padded:sub(3, 4)) or 0
+    local mmm = tonumber(padded:sub(5, 7)) or 0
+    offset_time = mm * 60 + ss + (mmm / 1000)
+  elseif format_name == "Measures.Beats" then
+    local mmm = tonumber(padded:sub(1, 3)) or 1
+    local bb = tonumber(padded:sub(4, 5)) or 1
+    -- Use TimeFormat library for accurate parsing
+    local beats_str = string.format("%03d.%02d", mmm, bb)
+    offset_time = TimeFormat.parse(beats_str, TimeFormat.MODE.BEATS) or 0
+  elseif format_name == "Measures.Beats.Hundredths" then
+    local mmm = tonumber(padded:sub(1, 3)) or 1
+    local bb = tonumber(padded:sub(4, 5)) or 1
+    local hh = tonumber(padded:sub(6, 7)) or 0
+    -- Use TimeFormat library for accurate parsing
+    local beats_str = string.format("%03d.%02d.%02d", mmm, bb, hh)
+    offset_time = TimeFormat.parse(beats_str, TimeFormat.MODE.BEATS) or 0
+  elseif format_name == "Seconds" then
+    local sss = tonumber(padded:sub(1, 5)) or 0
+    local mmm = tonumber(padded:sub(6, 8)) or 0
+    offset_time = sss + (mmm / 1000)
   elseif format_name == "Samples" then
     local samples = tonumber(input) or 0
     offset_time = samples / state.sample_rate
-  elseif format_name == "Beat" then
-    local bbb = tonumber(padded:sub(1, 3)) or 1
-    local bb = tonumber(padded:sub(4, 5)) or 1
-    local hh = tonumber(padded:sub(6, 7)) or 0
-    local measure_pos = (bbb - 1) + ((bb - 1) / 4) + (hh / 400)
-    offset_time = r.TimeMap2_beatsToTime(0, measure_pos * 4)
+  elseif format_name == "Absolute Frames" then
+    local frames = tonumber(input) or 0
+    offset_time = frames / state.frame_rate
   end
 
   if state.is_relative then
@@ -243,7 +350,7 @@ end
 function position_to_input(pos_seconds)
   local format_name = get_format_info()
 
-  if format_name == "Timecode" then
+  if format_name == "Hours:Minutes:Seconds:Frames" then
     local total_frames = math.floor(pos_seconds * state.frame_rate)
     local ff = total_frames % math.floor(state.frame_rate)
     local total_secs = math.floor(total_frames / state.frame_rate)
@@ -252,22 +359,38 @@ function position_to_input(pos_seconds)
     local mm = total_mins % 60
     local hh = math.floor(total_mins / 60)
     state.input_buffer = string.format("%02d%02d%02d%02d", hh, mm, ss, ff)
-  elseif format_name == "Time" then
-    local hh = math.floor(pos_seconds / 3600)
-    local mm = math.floor((pos_seconds % 3600) / 60)
-    local ss = math.floor(pos_seconds % 60)
+  elseif format_name == "Minutes:Seconds" then
+    local total_secs = math.floor(pos_seconds)
+    local mm = math.floor(total_secs / 60)
+    local ss = total_secs % 60
     local mmm = math.floor((pos_seconds % 1) * 1000)
-    state.input_buffer = string.format("%02d%02d%02d%03d", hh, mm, ss, mmm)
+    state.input_buffer = string.format("%02d%02d%03d", mm, ss, mmm)
+  elseif format_name == "Measures.Beats" then
+    -- Use TimeFormat library for accurate beats formatting
+    local beats_str = TimeFormat.format(pos_seconds, TimeFormat.MODE.BEATS)
+    -- Extract measure and beat from format like "001.01.00" or "001.01"
+    local mmm, bb = beats_str:match("(%d+)%.(%d+)")
+    if mmm and bb then
+      state.input_buffer = string.format("%03d%02d", tonumber(mmm), tonumber(bb))
+    end
+  elseif format_name == "Measures.Beats.Hundredths" then
+    -- Use TimeFormat library for accurate beats formatting
+    local beats_str = TimeFormat.format(pos_seconds, TimeFormat.MODE.BEATS)
+    -- Extract measure, beat, and hundredths from format like "001.01.50"
+    local mmm, bb, hh = beats_str:match("(%d+)%.(%d+)%.(%d+)")
+    if mmm and bb and hh then
+      state.input_buffer = string.format("%03d%02d%02d", tonumber(mmm), tonumber(bb), tonumber(hh))
+    end
+  elseif format_name == "Seconds" then
+    local sss = math.floor(pos_seconds)
+    local mmm = math.floor((pos_seconds % 1) * 1000)
+    state.input_buffer = string.format("%05d%03d", sss, mmm)
   elseif format_name == "Samples" then
     local samples = math.floor(pos_seconds * state.sample_rate)
     state.input_buffer = tostring(samples)
-  elseif format_name == "Beat" then
-    local beats = r.TimeMap2_timeToBeats(0, pos_seconds)
-    local measures = math.floor(beats / 4)
-    local beat_fraction = (beats % 4)
-    local beat_num = math.floor(beat_fraction) + 1
-    local hundredths = math.floor((beat_fraction % 1) * 100)
-    state.input_buffer = string.format("%03d%02d%02d", measures + 1, beat_num, hundredths)
+  elseif format_name == "Absolute Frames" then
+    local frames = math.floor(pos_seconds * state.frame_rate)
+    state.input_buffer = tostring(frames)
   end
 end
 
@@ -279,25 +402,13 @@ function handle_numeric_input(digit)
   local len = #state.input_buffer
 
   if len < state.max_digits then
-    -- Still have space, append
+    -- Right-to-left input: shift left and append
     state.input_buffer = state.input_buffer .. digit
     state.cursor_pos = #state.input_buffer
   else
-    -- Buffer full, cycle: replace digit at cursor position
-    -- Convert to character array for easier replacement
-    local chars = {}
-    for i = 1, #state.input_buffer do
-      chars[i] = state.input_buffer:sub(i, i)
-    end
-
-    -- Replace character at cursor position
-    chars[state.cursor_pos + 1] = digit
-
-    -- Rebuild string
-    state.input_buffer = table.concat(chars)
-
-    -- Move cursor to next position (wrap around)
-    state.cursor_pos = (state.cursor_pos + 1) % state.max_digits
+    -- Buffer full, cycle: shift left and replace last digit
+    state.input_buffer = state.input_buffer:sub(2) .. digit
+    state.cursor_pos = state.max_digits
   end
 end
 
@@ -453,11 +564,16 @@ function init_window()
   local x = (screen_w - window_w) / 2
   local y = (screen_h - window_h) / 2
 
-  gfx.init("Pro Tools Counter Field", window_w, window_h, 0, x, y)
+  gfx.init("Jump to Time", window_w, window_h, 0, x, y)
   gfx.clear = 0x262626 -- Dark background
 end
 
 -- Start
 update_project_settings()
 init_window()
+
+-- Initialize with current cursor position
+local current_pos = r.GetCursorPosition()
+position_to_input(current_pos)
+
 main()
