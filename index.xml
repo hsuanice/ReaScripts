@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<index version="1" name="hsuanice Scripts" commit="fcb02aeeb65748c545af81c191945b2db993fefa">
+<index version="1" name="hsuanice Scripts" commit="9cdee3d48d8da46e262accf27bd4b88f271604dd">
   <category name="Beta Testing">
     <reapack name="hsuanice_AudioSweet ReaImGui.lua" type="script" desc="AudioSweet ReaImGui - AudioSuite Workflow (Pro Tools–Style)">
       <metadata>
@@ -743,6 +743,40 @@ v0.1.0 (2025-09-13)
       </version>
       <version name="0.2" author="hsuanice" time="2025-08-18T04:36:47Z">
         <source main="main">https://github.com/hsuanice/ReaScripts/raw/6960f510f173ad6e3085e74c59a64a390781d434/Beta%20Testing/hsuanice_Pro%20Tools%20Display%20Timeline%20Selection%20Start.lua</source>
+      </version>
+    </reapack>
+    <reapack name="hsuanice_Pro Tools Enable Main Counter Field and Jump to Time.lua" type="script" desc="Pro Tools Enable Main Counter Field and Jump to Time">
+      <metadata>
+        <description><![CDATA[{\rtf1\ansi\deff0{\fonttbl{\f0 \fswiss Helvetica;}{\f1 \fmodern Courier;}}
+{\colortbl;\red255\green0\blue0;\red0\green0\blue255;}
+\widowctrl\hyphauto
+
+{\pard \ql \f0 \sa180 \li0 \fi0 \outlinelevel0 \b \fs36 Pro Tools-Style Counter Field and Jump to Time\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 Mimics Pro Tools' Main Counter Field behavior with cycling numeric input.\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 \outlinelevel1 \b \fs32 Features\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Auto-detects project time format (Timecode/Time/Samples/Beat)\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Cycling input: when digits exceed max length, automatically wraps to first position\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Auto-formats as you type (e.g., 00595800 \u8594 ? 00:59:58:00)\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab No need to type separators (: or .)\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Supports multiple time formats based on project settings\sa180\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 \outlinelevel1 \b \fs32 Supported Formats\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Timecode (HH:MM:SS:FF) - 8 digits\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Time (HH:MM:SS.mmm) - 9 digits\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Samples - variable length\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Beat (BBB.BB.hundredths) - 7 digits\sa180\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 \outlinelevel1 \b \fs32 Usage\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 1.\tx360\tab Run script to open the Counter window\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 2.\tx360\tab Type numbers continuously (no separators needed)\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 3.\tx360\tab Press Enter to navigate\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 4.\tx360\tab Press + for relative forward offset (e.g., +01000000 = +1 hour from current)\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 5.\tx360\tab Press - for relative backward offset (e.g., -00300000 = -30 minutes from current)\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 6.\tx360\tab Press Delete to reset to current timeline position\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 7.\tx360\tab Press Escape or Backspace to clear input\sa180\par}
+}
+]]></description>
+      </metadata>
+      <version name="1.0.0" author="hsuanice" time="2025-12-20T04:34:49Z">
+        <source main="main">https://github.com/hsuanice/ReaScripts/raw/9cdee3d48d8da46e262accf27bd4b88f271604dd/Beta%20Testing/hsuanice_Pro%20Tools%20Enable%20Main%20Counter%20Field%20and%20Jump%20to%20Time.lua</source>
       </version>
     </reapack>
     <reapack name="hsuanice_Pro Tools Mute Unmute Clip.lua" type="script" desc="Pro Tools-style Item Mute/Unmute Toggle (uniformize mixed -&gt; unmute)">
