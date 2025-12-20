@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<index version="1" name="hsuanice Scripts" commit="a78dd7da09574d059ac247077a54c2423e27a7e4">
+<index version="1" name="hsuanice Scripts" commit="24064f0f50adba5738602d8825069fb2ad92fea4">
   <category name="Beta Testing">
     <reapack name="hsuanice_AudioSweet ReaImGui.lua" type="script" desc="AudioSweet ReaImGui - AudioSuite Workflow (Pro Tools–Style)">
       <metadata>
@@ -773,8 +773,9 @@ v0.1.0 (2025-09-13)
 {\pard \ql \f0 \sa0 \li360 \fi-360 3.\tx360\tab Press Enter to navigate\par}
 {\pard \ql \f0 \sa0 \li360 \fi-360 4.\tx360\tab Press + for relative forward offset (e.g., +01000000 = +1 hour from current)\par}
 {\pard \ql \f0 \sa0 \li360 \fi-360 5.\tx360\tab Press - for relative backward offset (e.g., -00300000 = -30 minutes from current)\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 6.\tx360\tab Press Delete to reset to current timeline position\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 7.\tx360\tab Press Escape or Backspace to clear input\sa180\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 6.\tx360\tab Press \u9003 ? (Backspace) or \u8998 ? (Delete) to clear input\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 7.\tx360\tab Press / or numpad Clear to reset to zero (00:00:00:00)\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 8.\tx360\tab Press = to reset to current timeline position\sa180\par}
 }
 ]]></description>
       </metadata>
