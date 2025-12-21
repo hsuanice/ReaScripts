@@ -48,7 +48,19 @@
   - Works independently - can be assigned to keyboard shortcuts
 
 @changelog
-  v0.1.0 (2025-12-21) [internal: v251221.1644]
+  v0.1.0 (2025-12-21) [internal: v251221.1652]
+    - REFACTOR: Unified terminology throughout codebase for clarity
+      • Renamed: "focused mode" → "single FX mode" (clearer intent)
+      • Renamed: focused_fx_floating → single_fx_floating (variable names)
+      • Updated: All comments, debug messages, and documentation
+      • NOTE: ExtState still uses "focused"|"chain" for backward compatibility with AudioSweet Core
+      • Impact: Code is now self-documenting and consistent with user-facing terminology
+    - Terminology mapping (for maintainers):
+      • "single FX mode" (internal) = "focused" (ExtState value for AudioSweet Core)
+      • "chain mode" (internal) = "chain" (ExtState value)
+    - No functional changes - purely documentation and variable naming improvements
+
+  v251221.1644]
     - COMPLETE: Unified AudioSweet execution script with automatic mode detection
     - Normal Mode: Intelligent window detection system
       • Chain FX window focused → Chain mode (full FX chain processing)
@@ -207,17 +219,17 @@ local function execute_normal_mode()
     r.ShowConsoleMsg("========================================\n")
   end
 
-  -- Determine mode: focused vs chain
-  -- Priority (REVISED):
-  --   1. Has FX chain window open → chain mode (regardless of FX selection inside)
-  --   2. Has focused FX (floating window) → focused mode
+  -- Determine execution mode: single FX vs chain
+  -- Priority:
+  --   1. Has FX chain window open → chain mode (process full FX chain)
+  --   2. Has single FX floating window → single FX mode (process one FX)
   --   3. Neither → default to chain mode on preview target track
 
-  local mode_to_use = 1  -- Default: chain mode
+  local mode_to_use = 1  -- Default: chain mode (0 = single FX mode, 1 = chain mode)
   local override_track_idx = nil
   local override_fx_idx = nil
 
-  -- First, check for focused FX to get potential track info
+  -- First, check GetFocusedFX to get potential track/FX info
   local retval, trackidx, itemidx, fxidx = r.GetFocusedFX()
 
   if DEBUG then
@@ -225,10 +237,10 @@ local function execute_normal_mode()
       retval, trackidx or -1, itemidx or -1, fxidx or -1))
   end
 
-  -- Priority 1: Check if FX chain window is open (overrides focused FX inside chain)
+  -- Window detection: Determine if chain window or single FX window is open
   local chain_window_track = nil
   local chain_window_open = false
-  local focused_fx_floating = false
+  local single_fx_floating = false
 
   -- If GetFocusedFX detected a track FX, check window type
   if retval == 1 and trackidx then
@@ -253,10 +265,10 @@ local function execute_normal_mode()
       -- TrackFX_GetOpen returns: true if floating window is open, false otherwise
       -- TrackFX_GetChainVisible returns: -1 if closed, >= 0 if open
       if fx_window_open and chain_visible == -1 then
-        -- FX has floating window AND chain is closed → focused mode
-        focused_fx_floating = true
+        -- FX has floating window AND chain is closed → single FX mode
+        single_fx_floating = true
         if DEBUG then
-          r.ShowConsoleMsg(string.format("  → Decision: FOCUSED mode (floating window open, chain closed)\n"))
+          r.ShowConsoleMsg(string.format("  → Decision: SINGLE FX mode (floating window open, chain closed)\n"))
         end
       elseif chain_visible ~= -1 then
         -- Chain window is open → chain mode (regardless of FX floating window)
@@ -318,7 +330,7 @@ local function execute_normal_mode()
     end
   end
 
-  -- Decision logic
+  -- Decision logic: Select execution mode based on window state
   if chain_window_open and chain_window_track then
     -- Priority 1: FX chain window is open → use chain mode
     mode_to_use = 1  -- chain mode
@@ -328,7 +340,7 @@ local function execute_normal_mode()
     if DEBUG then
       local _, track_name = r.GetSetMediaTrackInfo_String(chain_window_track, "P_NAME", "", false)
       local debug_msg = string.format(
-        "[AudioSweet Run v251221.1556]\n\n" ..
+        "[AudioSweet Run v251221.1652]\n\n" ..
         "[Priority 1] FX CHAIN WINDOW detected\n" ..
         "→ Track: %s\n" ..
         "→ Using CHAIN mode\n",
@@ -346,20 +358,20 @@ local function execute_normal_mode()
       r.ShowConsoleMsg("\n" .. debug_msg .. "\n")
       r.MB(debug_msg, "AudioSweet Run - Debug", 0)
     end
-  elseif focused_fx_floating and retval == 1 then
-    -- Priority 2: Focused FX with floating window (NOT chain window)
-    mode_to_use = 0  -- focused mode
+  elseif single_fx_floating and retval == 1 then
+    -- Priority 2: Single FX floating window (NOT chain window)
+    mode_to_use = 0  -- single FX mode
 
     if DEBUG then
       local fx_track = r.GetTrack(0, trackidx - 1)
       local _, fx_name = r.TrackFX_GetFXName(fx_track, fxidx, "")
       local _, track_name = r.GetSetMediaTrackInfo_String(fx_track, "P_NAME", "", false)
       local debug_msg = string.format(
-        "[AudioSweet Run v251221.1556]\n\n" ..
-        "[Priority 2] FOCUSED FX FLOATING WINDOW detected\n" ..
+        "[AudioSweet Run v251221.1652]\n\n" ..
+        "[Priority 2] SINGLE FX FLOATING WINDOW detected\n" ..
         "→ Track: %s\n" ..
         "→ FX: #%d - %s\n" ..
-        "→ Using FOCUSED mode",
+        "→ Using SINGLE FX mode",
         track_name, fxidx, fx_name
       )
       r.ShowConsoleMsg("\n" .. debug_msg .. "\n")
@@ -417,8 +429,10 @@ local function execute_normal_mode()
   end
 
   -- Set mode in ExtState for AudioSweet Core to read
-  -- AudioSweet Core reads from "hsuanice_AS" namespace with key "AS_MODE"
-  -- Mode values: "focused" (0) or "chain" (1)
+  -- NOTE: AudioSweet Core reads from "hsuanice_AS" namespace with key "AS_MODE"
+  -- Terminology mapping for backward compatibility:
+  --   mode_to_use = 0 (single FX mode internally) → ExtState = "focused" (for AudioSweet Core)
+  --   mode_to_use = 1 (chain mode internally)     → ExtState = "chain" (for AudioSweet Core)
   local mode_str = (mode_to_use == 0) and "focused" or "chain"
   r.SetExtState("hsuanice_AS", "AS_MODE", mode_str, false)
 
@@ -433,7 +447,8 @@ local function execute_normal_mode()
   end
 
   if DEBUG then
-    r.ShowConsoleMsg(string.format("\n[Normal Mode] Final mode: %s\n", mode_to_use == 0 and "FOCUSED" or "CHAIN"))
+    r.ShowConsoleMsg(string.format("\n[Normal Mode] Final mode: %s (ExtState: \"%s\")\n",
+      mode_to_use == 0 and "SINGLE FX" or "CHAIN", mode_str))
     r.ShowConsoleMsg("[Normal Mode] Calling AudioSweet Core...\n\n")
   end
 
@@ -445,7 +460,8 @@ local function execute_normal_mode()
 
   if DEBUG then
     r.ShowConsoleMsg(string.format("\n[AudioSweet Run] AudioSweet Core execution completed\n"))
-    r.ShowConsoleMsg(string.format("[AudioSweet Run] Mode used: %s\n", mode_to_use == 0 and "FOCUSED" or "CHAIN"))
+    r.ShowConsoleMsg(string.format("[AudioSweet Run] Mode used: %s\n",
+      mode_to_use == 0 and "SINGLE FX" or "CHAIN"))
   end
 end
 
@@ -644,7 +660,7 @@ local function main()
     r.ShowConsoleMsg("\n" .. string.rep("=", 60) .. "\n")
     r.ShowConsoleMsg("[AudioSweet Run] Script Started (DEBUG=true)\n")
     r.ShowConsoleMsg(string.rep("=", 60) .. "\n")
-    r.ShowConsoleMsg("[AudioSweet Run] Version: 251221.1556\n")
+    r.ShowConsoleMsg("[AudioSweet Run] Version: v0.1.1 (251221.1652)\n")
   end
 
   r.Undo_BeginBlock()
