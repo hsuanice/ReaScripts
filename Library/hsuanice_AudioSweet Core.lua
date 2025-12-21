@@ -1,17 +1,24 @@
 --[[
 @description AudioSweet Core - Focused Track FX render via RGWH Core
-@version 0.1.0
-@author Tim Chimes (original), adapted by hsuanice
+@version 0.1.1
+@author hsuanice
 @noindex
 @notes
+
+Tim Chimes (original), adapted by hsuanice for AudioSweet Core integration.
   Reference:
-  AudioSuite-like Script. Renders the selected plugin to the selected media item.
-  Written for REAPER 5.1 with Lua
-  v1.1 12/22/2015 — Added PreventUIRefresh
-  Written by Tim Chimes
-  http://chimesaudio.com
+  Inspired and named by Tim Chimes
+  Original: Renders selected plugin to selected media item
+  http://timchimes.com/scripting-with-reaper-audiosuite/
 
 @changelog
+  0.1.1 (2025-12-21) [internal: v251221.2141]
+    - ADDED: Track channel count restoration after execution
+      • Snapshots track I_NCHAN at execution start (after FXmediaTrack is known)
+      • Restores original channel count at all exit points (copy/apply/TS-window paths)
+      • Prevents REAPER auto-expansion from persisting after processing
+      • Works in both focused and chain modes
+      • Helper function restore_track_nchan() for consistent restoration
   0.1.0 (2025-10-30) - Initial Public Beta Release
     AudioSuite-like workflow with RGWH Core integration featuring:
     - Focused/Chain modes for Track FX processing
@@ -1761,6 +1768,9 @@ function main() -- main part of the script
   -- snapshot original selection so we can restore it at the very end
   local sel_snapshot = snapshot_selection()
 
+  -- Snapshot track channel count (will be set after we know FXmediaTrack)
+  local track_nchan_snapshot = nil
+
   -- Focused FX check
   local AS_args = AS_merge_args_with_extstate({})
   local ret_val, tracknumber_Out, itemnumber_Out, fxnumber_Out, window = checkSelectedFX()
@@ -1792,6 +1802,20 @@ function main() -- main part of the script
   log_step("FOCUSED-FX", "index(norm)=%d  name='%s' (raw='%s')  FXtrack=%s",
            fxIndex, tostring(FXName or ""), tostring(FXNameRaw or ""), tostring(FXmediaTrack))
 
+  -- Snapshot track channel count now that we have FXmediaTrack
+  if FXmediaTrack then
+    track_nchan_snapshot = reaper.GetMediaTrackInfo_Value(FXmediaTrack, "I_NCHAN")
+    log_step("SNAPSHOT", "track channel count = %d", track_nchan_snapshot or -1)
+  end
+
+  -- Helper function to restore track channel count
+  local function restore_track_nchan()
+    if FXmediaTrack and track_nchan_snapshot then
+      reaper.SetMediaTrackInfo_Value(FXmediaTrack, "I_NCHAN", track_nchan_snapshot)
+      log_step("RESTORE", "track channel count = %d", track_nchan_snapshot)
+    end
+  end
+
   -- Determine naming token based on mode (focused vs chain)
   local naming_token = FXName
   if AS_args.mode == "chain" then
@@ -1817,6 +1841,7 @@ function main() -- main part of the script
       end
       reaper.UpdateArrange()
       restore_selection(sel_snapshot)
+      restore_track_nchan()
       reaper.PreventUIRefresh(-1)
       return
     end
@@ -1906,6 +1931,7 @@ function main() -- main part of the script
       -- Restore pre-execution selection (picks new glued/printed clips on same track and range)
       restore_selection(sel_snapshot)
       if debug_enabled() then dbg_dump_selection("RESTORE selection") end
+      restore_track_nchan()
 
       reaper.PreventUIRefresh(-1)
       reaper.Undo_EndBlock("AudioSweet TS-Window (global) glue+print", 0)
@@ -2180,6 +2206,7 @@ function main() -- main part of the script
   -- Restore pre-execution selection
   restore_selection(sel_snapshot)
   if debug_enabled() then dbg_dump_selection("RESTORE selection") end
+  restore_track_nchan()
 
   reaper.PreventUIRefresh(-1)
   reaper.Undo_EndBlock("AudioSweet multi-item glue", 0)
