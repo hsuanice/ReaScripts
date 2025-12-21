@@ -1,7 +1,7 @@
 --[[
 @description AudioSweet ReaImGui - AudioSuite Workflow (Pro Tools–Style)
 @author hsuanice
-@version 0.1.15
+@version 0.1.16
 @provides
   [main] .
 @about
@@ -27,8 +27,48 @@
   This script was developed with the assistance of AI tools
   including ChatGPT and Claude AI.
 
+  ## Future Development
+  Planned features and experimental ideas for future implementation:
+
+  ### Approved for Implementation
+  - **Independent AudioSweet Run Scripts**: Create standalone action list scripts
+    • Run (Stop mode): Standard execution reading all GUI ExtState settings
+    • Run (Preview mode): Process items in item/time selection during preview
+      - Stop preview, preserve FX state/bypass
+      - Execute RGWH Core print/render with current FX configuration
+      - Return processed items to original track positions
+      - Resume preview workflow
+
+  - **Independent Solo Script**: Unified solo logic extractable to action list
+    • Priority: Focused FX/chain track → Default chain track
+    • Can be assigned to keyboard shortcuts independently
+
+  - **Right Handle Only Mode**: Extends existing audio content (different from tail)
+    • Processes additional duration on right side only
+    • Handle extends content that already exists in source
+
+  - **Fixed-Length Tail Mode**: FX tail from non-handle content processing
+    • Important: RIGHT HANDLE ≠ TAIL MODE
+    • Tail = reverb/delay tail printed from non-handle processed content
+    • Fixed parameter: user-defined length (e.g., 3s, 5s)
+    • Tail processes decay/reverb after main content, not extended source
+
+  ### Deferred Ideas for Research
+  - **Live FX Switching During Preview**: Dynamic FX parameter changes
+    • Challenge: Requires real-time FX state synchronization
+    • Needs investigation of REAPER API capabilities
+
+  - **Auto Tail Detection**: Intelligent tail length via audio analysis
+    • Analyze processed audio amplitude/RMS to detect natural decay
+    • Auto-determine tail length based on reverb/delay characteristics
+    • Advanced feature requiring signal processing research
+
 
 @changelog
+  v0.1.16 [Internal Build 251221.1722] - Debug ExtState Logging
+    - ADDED: Console logging when GUI debug is enabled
+      • save_gui_settings() now prints a timestamped ExtState update header
+      • Logs key settings after each change (channel mode, handles, preview target, etc.)
   v0.1.15 [Internal Build 251220.2350] - Whole File Handle Option
     - ADDED: "Whole File" toggle option for rendering/gluing entire file length
       • New GUI element: Checkbox next to handle seconds input
@@ -1307,6 +1347,13 @@ local gui = {
 local SETTINGS_NAMESPACE = "hsuanice_AS_GUI"
 
 local function save_gui_settings()
+  -- Debug: Log ExtState update when debug mode is enabled
+  if gui.debug then
+    local timestamp = os.date("%H:%M:%S")
+    r.ShowConsoleMsg(string.format("\n[%s] [AS GUI] ExtState Update (save_gui_settings called)\n", timestamp))
+    r.ShowConsoleMsg("---------------------------------------------------------\n")
+  end
+
   r.SetExtState(SETTINGS_NAMESPACE, "mode", tostring(gui.mode), true)
   r.SetExtState(SETTINGS_NAMESPACE, "action", tostring(gui.action), true)
   r.SetExtState(SETTINGS_NAMESPACE, "copy_scope", tostring(gui.copy_scope), true)
@@ -1350,6 +1397,25 @@ local function save_gui_settings()
   r.SetExtState(SETTINGS_NAMESPACE, "enable_docking", gui.enable_docking and "1" or "0", true)
   r.SetExtState(SETTINGS_NAMESPACE, "show_presets_history", gui.show_presets_history and "1" or "0", true)
   r.SetExtState(SETTINGS_NAMESPACE, "bwfmetaedit_custom_path", gui.bwfmetaedit_custom_path or "", true)
+
+  -- Debug: Log key settings that were updated
+  if gui.debug then
+    local channel_names = {"Auto", "Mono", "Multi"}
+    local solo_scope_names = {"Track Solo", "Item Solo"}
+    local restore_mode_names = {"Time Selection", "GUID"}
+
+    r.ShowConsoleMsg("Key Settings Updated:\n")
+    r.ShowConsoleMsg(string.format("  * channel_mode: %s (%d)\n", channel_names[gui.channel_mode + 1], gui.channel_mode))
+    r.ShowConsoleMsg(string.format("  * handle_seconds: %.1f\n", gui.handle_seconds))
+    r.ShowConsoleMsg(string.format("  * use_whole_file: %s\n", gui.use_whole_file and "Yes" or "No"))
+    r.ShowConsoleMsg(string.format("  * preview_target_track: %s\n", gui.preview_target_track))
+    if gui.preview_target_track_guid ~= "" then
+      r.ShowConsoleMsg(string.format("  * preview_target_track_guid: %s\n", gui.preview_target_track_guid))
+    end
+    r.ShowConsoleMsg(string.format("  * preview_solo_scope: %s (%d)\n", solo_scope_names[gui.preview_solo_scope + 1], gui.preview_solo_scope))
+    r.ShowConsoleMsg(string.format("  * preview_restore_mode: %s (%d)\n", restore_mode_names[gui.preview_restore_mode + 1], gui.preview_restore_mode))
+    r.ShowConsoleMsg("---------------------------------------------------------\n")
+  end
 end
 
 local function load_gui_settings()
