@@ -48,19 +48,13 @@
   - Works independently - can be assigned to keyboard shortcuts
 
 @changelog
-  v0.1.0 (2025-12-21) [internal: v251221.1652]
-    - REFACTOR: Unified terminology throughout codebase for clarity
-      • Renamed: "focused mode" → "single FX mode" (clearer intent)
-      • Renamed: focused_fx_floating → single_fx_floating (variable names)
-      • Updated: All comments, debug messages, and documentation
-      • NOTE: ExtState still uses "focused"|"chain" for backward compatibility with AudioSweet Core
-      • Impact: Code is now self-documenting and consistent with user-facing terminology
-    - Terminology mapping (for maintainers):
-      • "single FX mode" (internal) = "focused" (ExtState value for AudioSweet Core)
-      • "chain mode" (internal) = "chain" (ExtState value)
-    - No functional changes - purely documentation and variable naming improvements
-
-  v251221.1644]
+  v0.1.0 (2025-12-21) [internal: v251221.1803]
+    - ADDED: Sync GUI settings to AudioSweet Core + RGWH Core before execution
+      • Apply/Copy action, copy scope/pos now set in hsuanice_AS ExtState
+      • File naming settings now set in hsuanice_AS ExtState
+      • Channel mode now set in hsuanice_AS (AS_APPLY_FX_MODE)
+      • Handle seconds now set in RGWH project ExtState
+    - ADDED: Optional debug file log on Desktop (Console + file)
     - COMPLETE: Unified AudioSweet execution script with automatic mode detection
     - Normal Mode: Intelligent window detection system
       • Chain FX window focused → Chain mode (full FX chain processing)
@@ -103,13 +97,30 @@ local r = reaper
 ------------------------------------------------------------
 -- User Settings
 ------------------------------------------------------------
-local DEBUG = false  -- Set to true for detailed console logging
+local DEBUG = true  -- Set to true for detailed console logging
+local DEBUG_LOG_PATH = (os.getenv("HOME") or "") .. "/Desktop/AudioSweet Run Debug.log"
 
 ------------------------------------------------------------
 -- Constants
 ------------------------------------------------------------
 local SETTINGS_NAMESPACE = "hsuanice_AS_GUI"
 local SCRIPT_DIR = debug.getinfo(1, "S").source:match("@(.*/)")
+
+local function debug_log(msg)
+  if not DEBUG then
+    return
+  end
+
+  r.ShowConsoleMsg(msg)
+
+  if DEBUG_LOG_PATH ~= "/Desktop/AudioSweet Run Debug.log" then
+    local f = io.open(DEBUG_LOG_PATH, "a")
+    if f then
+      f:write(msg)
+      f:close()
+    end
+  end
+end
 
 ------------------------------------------------------------
 -- Helper Functions: ExtState Readers
@@ -134,6 +145,83 @@ local function get_bool(key, default)
   local val = r.GetExtState(SETTINGS_NAMESPACE, key)
   if val == "" then return default end
   return val == "1"
+end
+
+local function sync_gui_settings_to_core()
+  local action = get_int("action", 0)
+  local copy_scope = get_int("copy_scope", 0)
+  local copy_pos = get_int("copy_pos", 0)
+  local channel_mode = get_int("channel_mode", 0)
+  local channel_mode_str = (channel_mode == 1) and "mono" or (channel_mode == 2) and "multi" or "auto"
+  local handle_seconds_str = get_string("handle_seconds", "0")
+  local handle_seconds = tonumber(handle_seconds_str) or 0
+  local use_whole_file = get_bool("use_whole_file", false)
+  local debug_enabled = get_bool("debug", false)
+  local use_alias = get_bool("use_alias", false)
+  local fxname_show_type = get_bool("fxname_show_type", true)
+  local fxname_show_vendor = get_bool("fxname_show_vendor", false)
+  local fxname_strip_symbol = get_bool("fxname_strip_symbol", true)
+  local chain_token_source = get_int("chain_token_source", 0)
+  local chain_alias_joiner = get_string("chain_alias_joiner", "")
+  local max_fx_tokens = get_int("max_fx_tokens", 3)
+  local trackname_strip_symbols = get_bool("trackname_strip_symbols", true)
+  local sanitize_token = get_bool("sanitize_token", false)
+  local handle_to_set = use_whole_file and 999999 or handle_seconds
+
+  -- AudioSweet Core reads from "hsuanice_AS"
+  local action_names = { "apply", "copy" }
+  local scope_names = { "active", "all_takes" }
+  local pos_names = { "tail", "head" }
+  local chain_token_names = { "track", "aliases", "fxchain" }
+
+  r.SetExtState("hsuanice_AS", "AS_ACTION", action_names[action + 1], false)
+  r.SetExtState("hsuanice_AS", "AS_COPY_SCOPE", scope_names[copy_scope + 1], false)
+  r.SetExtState("hsuanice_AS", "AS_COPY_POS", pos_names[copy_pos + 1], false)
+  r.SetExtState("hsuanice_AS", "AS_APPLY_FX_MODE", channel_mode_str, false)
+  r.SetExtState("hsuanice_AS", "DEBUG", debug_enabled and "1" or "0", false)
+  r.SetExtState("hsuanice_AS", "AS_SHOW_SUMMARY", "0", false)
+
+  -- File naming settings
+  r.SetExtState("hsuanice_AS", "USE_ALIAS", use_alias and "1" or "0", false)
+  r.SetExtState("hsuanice_AS", "FXNAME_SHOW_TYPE", fxname_show_type and "1" or "0", false)
+  r.SetExtState("hsuanice_AS", "FXNAME_SHOW_VENDOR", fxname_show_vendor and "1" or "0", false)
+  r.SetExtState("hsuanice_AS", "FXNAME_STRIP_SYMBOL", fxname_strip_symbol and "1" or "0", false)
+  r.SetExtState("hsuanice_AS", "AS_CHAIN_TOKEN_SOURCE", chain_token_names[chain_token_source + 1], false)
+  r.SetExtState("hsuanice_AS", "AS_CHAIN_ALIAS_JOINER", chain_alias_joiner, false)
+  r.SetExtState("hsuanice_AS", "AS_MAX_FX_TOKENS", tostring(max_fx_tokens), false)
+  r.SetExtState("hsuanice_AS", "TRACKNAME_STRIP_SYMBOLS", trackname_strip_symbols and "1" or "0", false)
+  r.SetExtState("hsuanice_AS", "SANITIZE_TOKEN_FOR_FILENAME", sanitize_token and "1" or "0", false)
+
+  -- RGWH Core reads handle settings from project ExtState "RGWH"
+  r.SetProjExtState(0, "RGWH", "HANDLE_MODE", "seconds")
+  r.SetProjExtState(0, "RGWH", "HANDLE_SECONDS", tostring(handle_to_set))
+  r.SetProjExtState(0, "RGWH", "DEBUG_LEVEL", debug_enabled and "2" or "0")
+
+  return {
+    action = action,
+    copy_scope = copy_scope,
+    copy_pos = copy_pos,
+    channel_mode = channel_mode,
+    channel_mode_str = channel_mode_str,
+    handle_seconds_str = handle_seconds_str,
+    handle_seconds = handle_seconds,
+    use_whole_file = use_whole_file,
+    debug_enabled = debug_enabled,
+    use_alias = use_alias,
+    fxname_show_type = fxname_show_type,
+    fxname_show_vendor = fxname_show_vendor,
+    fxname_strip_symbol = fxname_strip_symbol,
+    chain_token_source = chain_token_source,
+    chain_alias_joiner = chain_alias_joiner,
+    max_fx_tokens = max_fx_tokens,
+    trackname_strip_symbols = trackname_strip_symbols,
+    sanitize_token = sanitize_token,
+    action_str = action_names[action + 1],
+    copy_scope_str = scope_names[copy_scope + 1],
+    copy_pos_str = pos_names[copy_pos + 1],
+    chain_token_str = chain_token_names[chain_token_source + 1],
+    handle_to_set = handle_to_set,
+  }
 end
 
 ------------------------------------------------------------
@@ -214,9 +302,9 @@ end
 
 local function execute_normal_mode()
   if DEBUG then
-    r.ShowConsoleMsg("\n========================================\n")
-    r.ShowConsoleMsg("[AudioSweet Run] NORMAL MODE\n")
-    r.ShowConsoleMsg("========================================\n")
+    debug_log("\n========================================\n")
+    debug_log("[AudioSweet Run] NORMAL MODE\n")
+    debug_log("========================================\n")
   end
 
   -- Determine execution mode: single FX vs chain
@@ -233,7 +321,7 @@ local function execute_normal_mode()
   local retval, trackidx, itemidx, fxidx = r.GetFocusedFX()
 
   if DEBUG then
-    r.ShowConsoleMsg(string.format("[Normal Mode] GetFocusedFX: retval=%d, track=%d, item=%d, fx=%d\n",
+    debug_log(string.format("[Normal Mode] GetFocusedFX: retval=%d, track=%d, item=%d, fx=%d\n",
       retval, trackidx or -1, itemidx or -1, fxidx or -1))
   end
 
@@ -255,10 +343,10 @@ local function execute_normal_mode()
       if DEBUG then
         local _, fx_name = r.TrackFX_GetFXName(focused_track, fxidx, "")
         local _, track_name = r.GetSetMediaTrackInfo_String(focused_track, "P_NAME", "", false)
-        r.ShowConsoleMsg(string.format("  • Track: %s\n", track_name))
-        r.ShowConsoleMsg(string.format("  • FX: #%d - %s\n", fxidx, fx_name))
-        r.ShowConsoleMsg(string.format("  • FX floating window open: %s\n", tostring(fx_window_open)))
-        r.ShowConsoleMsg(string.format("  • FX chain window visible: %d\n", chain_visible))
+        debug_log(string.format("  • Track: %s\n", track_name))
+        debug_log(string.format("  • FX: #%d - %s\n", fxidx, fx_name))
+        debug_log(string.format("  • FX floating window open: %s\n", tostring(fx_window_open)))
+        debug_log(string.format("  • FX chain window visible: %d\n", chain_visible))
       end
 
       -- Determine window type
@@ -268,19 +356,19 @@ local function execute_normal_mode()
         -- FX has floating window AND chain is closed → single FX mode
         single_fx_floating = true
         if DEBUG then
-          r.ShowConsoleMsg(string.format("  → Decision: SINGLE FX mode (floating window open, chain closed)\n"))
+          debug_log(string.format("  → Decision: SINGLE FX mode (floating window open, chain closed)\n"))
         end
       elseif chain_visible ~= -1 then
         -- Chain window is open → chain mode (regardless of FX floating window)
         chain_window_track = focused_track
         chain_window_open = true
         if DEBUG then
-          r.ShowConsoleMsg(string.format("  → Decision: CHAIN mode (chain window open)\n"))
+          debug_log(string.format("  → Decision: CHAIN mode (chain window open)\n"))
         end
       else
         -- FX is selected but no window is open
         if DEBUG then
-          r.ShowConsoleMsg(string.format("  → Decision: No visible window (will check other tracks)\n"))
+          debug_log(string.format("  → Decision: No visible window (will check other tracks)\n"))
         end
       end
     end
@@ -340,7 +428,7 @@ local function execute_normal_mode()
     if DEBUG then
       local _, track_name = r.GetSetMediaTrackInfo_String(chain_window_track, "P_NAME", "", false)
       local debug_msg = string.format(
-        "[AudioSweet Run v251221.1652]\n\n" ..
+        "[AudioSweet Run v251221.1803]\n\n" ..
         "[Priority 1] FX CHAIN WINDOW detected\n" ..
         "→ Track: %s\n" ..
         "→ Using CHAIN mode\n",
@@ -355,8 +443,7 @@ local function execute_normal_mode()
           fxidx, fx_name)
       end
 
-      r.ShowConsoleMsg("\n" .. debug_msg .. "\n")
-      r.MB(debug_msg, "AudioSweet Run - Debug", 0)
+      debug_log("\n" .. debug_msg .. "\n")
     end
   elseif single_fx_floating and retval == 1 then
     -- Priority 2: Single FX floating window (NOT chain window)
@@ -367,15 +454,14 @@ local function execute_normal_mode()
       local _, fx_name = r.TrackFX_GetFXName(fx_track, fxidx, "")
       local _, track_name = r.GetSetMediaTrackInfo_String(fx_track, "P_NAME", "", false)
       local debug_msg = string.format(
-        "[AudioSweet Run v251221.1652]\n\n" ..
+        "[AudioSweet Run v251221.1803]\n\n" ..
         "[Priority 2] SINGLE FX FLOATING WINDOW detected\n" ..
         "→ Track: %s\n" ..
         "→ FX: #%d - %s\n" ..
         "→ Using SINGLE FX mode",
         track_name, fxidx, fx_name
       )
-      r.ShowConsoleMsg("\n" .. debug_msg .. "\n")
-      r.MB(debug_msg, "AudioSweet Run - Debug", 0)
+      debug_log("\n" .. debug_msg .. "\n")
     end
   else
     -- Priority 3: No FX activity → default to chain mode on preview target track
@@ -414,15 +500,14 @@ local function execute_normal_mode()
           "→ Using CHAIN mode (default)",
           track_name
         )
-        r.ShowConsoleMsg("\n" .. debug_msg .. "\n")
-        r.MB(debug_msg, "AudioSweet Run - Debug", 0)
+        debug_log("\n" .. debug_msg .. "\n")
       end
     else
       -- No target track found → error
       r.MB("Cannot find preview target track for Normal Mode execution.", "AudioSweet Run - Normal Mode", 0)
       if DEBUG then
-        r.ShowConsoleMsg("\n[ERROR] No target track found\n")
-        r.ShowConsoleMsg("========================================\n")
+        debug_log("\n[ERROR] No target track found\n")
+        debug_log("========================================\n")
       end
       return
     end
@@ -442,14 +527,14 @@ local function execute_normal_mode()
     r.SetExtState("hsuanice_AS", "OVERRIDE_FX_IDX", tostring(override_fx_idx), false)
 
     if DEBUG then
-      r.ShowConsoleMsg(string.format("  → Setting OVERRIDE: track_idx=%d, fx_idx=%d\n", override_track_idx, override_fx_idx))
+      debug_log(string.format("  → Setting OVERRIDE: track_idx=%d, fx_idx=%d\n", override_track_idx, override_fx_idx))
     end
   end
 
   if DEBUG then
-    r.ShowConsoleMsg(string.format("\n[Normal Mode] Final mode: %s (ExtState: \"%s\")\n",
+    debug_log(string.format("\n[Normal Mode] Final mode: %s (ExtState: \"%s\")\n",
       mode_to_use == 0 and "SINGLE FX" or "CHAIN", mode_str))
-    r.ShowConsoleMsg("[Normal Mode] Calling AudioSweet Core...\n\n")
+    debug_log("[Normal Mode] Calling AudioSweet Core...\n\n")
   end
 
   -- Load and execute AudioSweet Core
@@ -459,8 +544,8 @@ local function execute_normal_mode()
   -- It will read the mode from ExtState and execute accordingly
 
   if DEBUG then
-    r.ShowConsoleMsg(string.format("\n[AudioSweet Run] AudioSweet Core execution completed\n"))
-    r.ShowConsoleMsg(string.format("[AudioSweet Run] Mode used: %s\n",
+    debug_log(string.format("\n[AudioSweet Run] AudioSweet Core execution completed\n"))
+    debug_log(string.format("[AudioSweet Run] Mode used: %s\n",
       mode_to_use == 0 and "SINGLE FX" or "CHAIN"))
   end
 end
@@ -471,11 +556,11 @@ end
 
 local function execute_preview_mode(preview_info)
   if DEBUG then
-    r.ShowConsoleMsg("\n========================================\n")
-    r.ShowConsoleMsg("[AudioSweet Run] PREVIEW MODE\n")
-    r.ShowConsoleMsg("========================================\n")
-    r.ShowConsoleMsg(string.format("  Source track: #%d\n", preview_info.source_track_num))
-    r.ShowConsoleMsg(string.format("  Placeholder found: %s\n", preview_info.placeholder and "yes" or "no"))
+    debug_log("\n========================================\n")
+    debug_log("[AudioSweet Run] PREVIEW MODE\n")
+    debug_log("========================================\n")
+    debug_log(string.format("  Source track: #%d\n", preview_info.source_track_num))
+    debug_log(string.format("  Placeholder found: %s\n", preview_info.placeholder and "yes" or "no"))
   end
 
   -- 1. Validate item selection
@@ -483,14 +568,14 @@ local function execute_preview_mode(preview_info)
   if sel_item_count == 0 then
     r.MB("Preview Mode requires item selection.\n\nPlease select items on the preview target track.", "AudioSweet Run - Preview Mode", 0)
     if DEBUG then
-      r.ShowConsoleMsg("[Preview Mode] ERROR: No item selection\n")
-      r.ShowConsoleMsg("========================================\n")
+      debug_log("[Preview Mode] ERROR: No item selection\n")
+      debug_log("========================================\n")
     end
     return
   end
 
   if DEBUG then
-    r.ShowConsoleMsg(string.format("  Selected items: %d\n", sel_item_count))
+    debug_log(string.format("  Selected items: %d\n", sel_item_count))
   end
 
   -- 2. Get preview target track (where items currently are)
@@ -519,15 +604,15 @@ local function execute_preview_mode(preview_info)
   if not preview_target_track then
     r.MB(string.format("Cannot find preview target track: %s", preview_target_track_name), "AudioSweet Run - Preview Mode", 0)
     if DEBUG then
-      r.ShowConsoleMsg(string.format("[Preview Mode] ERROR: Preview target track not found: %s\n", preview_target_track_name))
-      r.ShowConsoleMsg("========================================\n")
+      debug_log(string.format("[Preview Mode] ERROR: Preview target track not found: %s\n", preview_target_track_name))
+      debug_log("========================================\n")
     end
     return
   end
 
   if DEBUG then
     local _, track_name = r.GetSetMediaTrackInfo_String(preview_target_track, "P_NAME", "", false)
-    r.ShowConsoleMsg(string.format("  Preview target track: %s\n", track_name))
+    debug_log(string.format("  Preview target track: %s\n", track_name))
   end
 
   -- 3. Verify all selected items are on preview target track
@@ -537,8 +622,8 @@ local function execute_preview_mode(preview_info)
     if item_track ~= preview_target_track then
       r.MB("All selected items must be on the preview target track.", "AudioSweet Run - Preview Mode", 0)
       if DEBUG then
-        r.ShowConsoleMsg("[Preview Mode] ERROR: Selected items not all on preview target track\n")
-        r.ShowConsoleMsg("========================================\n")
+        debug_log("[Preview Mode] ERROR: Selected items not all on preview target track\n")
+        debug_log("========================================\n")
       end
       return
     end
@@ -546,20 +631,20 @@ local function execute_preview_mode(preview_info)
 
   -- 4. Stop preview: Delete placeholder and unsolo
   if DEBUG then
-    r.ShowConsoleMsg("\n[Preview Mode] Step 1: Stop preview\n")
+    debug_log("\n[Preview Mode] Step 1: Stop preview\n")
   end
 
   -- Delete placeholder
   r.DeleteTrackMediaItem(r.GetMediaItemTrack(preview_info.placeholder), preview_info.placeholder)
   if DEBUG then
-    r.ShowConsoleMsg("  • Placeholder deleted\n")
+    debug_log("  • Placeholder deleted\n")
   end
 
   -- Unsolo all
   r.Main_OnCommand(41185, 0) -- Item: Unsolo all
   r.Main_OnCommand(40340, 0) -- Track: Unsolo all tracks
   if DEBUG then
-    r.ShowConsoleMsg("  • Unsolo all (items + tracks)\n")
+    debug_log("  • Unsolo all (items + tracks)\n")
   end
 
   -- 5. Check for time selection
@@ -567,16 +652,16 @@ local function execute_preview_mode(preview_info)
   local has_time_selection = (end_time - start_time) > 0.0001
 
   if DEBUG then
-    r.ShowConsoleMsg(string.format("\n[Preview Mode] Step 2: Time selection check\n"))
-    r.ShowConsoleMsg(string.format("  • Has time selection: %s\n", has_time_selection and "yes" or "no"))
+    debug_log(string.format("\n[Preview Mode] Step 2: Time selection check\n"))
+    debug_log(string.format("  • Has time selection: %s\n", has_time_selection and "yes" or "no"))
     if has_time_selection then
-      r.ShowConsoleMsg(string.format("  • Time range: %.3f - %.3f\n", start_time, end_time))
+      debug_log(string.format("  • Time range: %.3f - %.3f\n", start_time, end_time))
     end
   end
 
   -- 6. Load RGWH Core
   if DEBUG then
-    r.ShowConsoleMsg("\n[Preview Mode] Step 3: Load RGWH Core\n")
+    debug_log("\n[Preview Mode] Step 3: Load RGWH Core\n")
   end
 
   local RGWH = dofile(SCRIPT_DIR .. "../Library/hsuanice_RGWH Core.lua")
@@ -592,14 +677,14 @@ local function execute_preview_mode(preview_info)
   local selection_scope = "auto"  -- Let RGWH determine
 
   if DEBUG then
-    r.ShowConsoleMsg(string.format("  • channel_mode: %s\n", channel_mode_str))
-    r.ShowConsoleMsg(string.format("  • op: %s\n", op_str))
-    r.ShowConsoleMsg(string.format("  • selection_scope: %s (RGWH will determine)\n", selection_scope))
+    debug_log(string.format("  • channel_mode: %s\n", channel_mode_str))
+    debug_log(string.format("  • op: %s\n", op_str))
+    debug_log(string.format("  • selection_scope: %s (RGWH will determine)\n", selection_scope))
   end
 
   -- 8. Execute RGWH Core
   if DEBUG then
-    r.ShowConsoleMsg("\n[Preview Mode] Step 4: Execute RGWH Core\n")
+    debug_log("\n[Preview Mode] Step 4: Execute RGWH Core\n")
   end
 
   local ok, err = RGWH.core({
@@ -611,19 +696,19 @@ local function execute_preview_mode(preview_info)
   if not ok then
     r.MB(string.format("RGWH Core error: %s", err or "unknown"), "AudioSweet Run - Preview Mode", 0)
     if DEBUG then
-      r.ShowConsoleMsg(string.format("[Preview Mode] ERROR: RGWH Core failed: %s\n", err or "unknown"))
-      r.ShowConsoleMsg("========================================\n")
+      debug_log(string.format("[Preview Mode] ERROR: RGWH Core failed: %s\n", err or "unknown"))
+      debug_log("========================================\n")
     end
     return
   end
 
   if DEBUG then
-    r.ShowConsoleMsg("  • RGWH Core execution completed\n")
+    debug_log("  • RGWH Core execution completed\n")
   end
 
   -- 9. Move rendered items back to source track
   if DEBUG then
-    r.ShowConsoleMsg(string.format("\n[Preview Mode] Step 5: Move items back to source track #%d\n", preview_info.source_track_num))
+    debug_log(string.format("\n[Preview Mode] Step 5: Move items back to source track #%d\n", preview_info.source_track_num))
   end
 
   -- Collect all items on preview target track (these are the rendered results)
@@ -635,7 +720,7 @@ local function execute_preview_mode(preview_info)
   end
 
   if DEBUG then
-    r.ShowConsoleMsg(string.format("  • Items to move: %d\n", #items_to_move))
+    debug_log(string.format("  • Items to move: %d\n", #items_to_move))
   end
 
   -- Move items to source track
@@ -644,9 +729,9 @@ local function execute_preview_mode(preview_info)
   end
 
   if DEBUG then
-    r.ShowConsoleMsg(string.format("  • Moved %d items to source track\n", #items_to_move))
-    r.ShowConsoleMsg("\n[Preview Mode] Complete - Staying in normal state\n")
-    r.ShowConsoleMsg("========================================\n")
+    debug_log(string.format("  • Moved %d items to source track\n", #items_to_move))
+    debug_log("\n[Preview Mode] Complete - Staying in normal state\n")
+    debug_log("========================================\n")
   end
 end
 
@@ -657,10 +742,60 @@ end
 local function main()
   -- CRITICAL: Output debug message BEFORE anything else
   if DEBUG then
-    r.ShowConsoleMsg("\n" .. string.rep("=", 60) .. "\n")
-    r.ShowConsoleMsg("[AudioSweet Run] Script Started (DEBUG=true)\n")
-    r.ShowConsoleMsg(string.rep("=", 60) .. "\n")
-    r.ShowConsoleMsg("[AudioSweet Run] Version: v0.1.1 (251221.1652)\n")
+    debug_log("\n" .. string.rep("=", 60) .. "\n")
+    debug_log("[AudioSweet Run] Script Started (DEBUG=true)\n")
+    debug_log(string.rep("=", 60) .. "\n")
+    debug_log("[AudioSweet Run] Version: v0.1.0 (251221.1803)\n")
+    debug_log(string.format("[AudioSweet Run] Debug log file: %s\n", DEBUG_LOG_PATH))
+
+    -- Log GUI ExtState values as read by this script
+    local action = get_int("action", 0)
+    local action_str = (action == 1) and "render" or (action == 2) and "auto" or "glue"
+    local preview_target_track_name = get_string("preview_target_track", "AudioSweet")
+    local preview_target_track_guid = get_string("preview_target_track_guid", "")
+    local sync = sync_gui_settings_to_core()
+
+    debug_log("[AudioSweet Run] GUI ExtState read:\n")
+    debug_log(string.format("  * channel_mode: %s (%d)\n", sync.channel_mode_str, sync.channel_mode))
+    debug_log(string.format("  * action: %s (%d)\n", action_str, action))
+    debug_log(string.format("  * copy_scope: %s (%d)\n", sync.copy_scope_str, sync.copy_scope))
+    debug_log(string.format("  * copy_pos: %s (%d)\n", sync.copy_pos_str, sync.copy_pos))
+    debug_log(string.format("  * handle_seconds: %s (parsed=%.3f)\n", sync.handle_seconds_str, sync.handle_seconds))
+    debug_log(string.format("  * use_whole_file: %s\n", sync.use_whole_file and "true" or "false"))
+    debug_log(string.format("  * preview_target_track: %s\n", preview_target_track_name))
+    if preview_target_track_guid ~= "" then
+      debug_log(string.format("  * preview_target_track_guid: %s\n", preview_target_track_guid))
+    end
+    debug_log(string.format("  * use_alias: %s\n", sync.use_alias and "true" or "false"))
+    debug_log(string.format("  * fxname_show_type: %s\n", sync.fxname_show_type and "true" or "false"))
+    debug_log(string.format("  * fxname_show_vendor: %s\n", sync.fxname_show_vendor and "true" or "false"))
+    debug_log(string.format("  * fxname_strip_symbol: %s\n", sync.fxname_strip_symbol and "true" or "false"))
+    debug_log(string.format("  * chain_token_source: %s (%d)\n", sync.chain_token_str, sync.chain_token_source))
+    debug_log(string.format("  * chain_alias_joiner: %s\n", sync.chain_alias_joiner))
+    debug_log(string.format("  * max_fx_tokens: %d\n", sync.max_fx_tokens))
+    debug_log(string.format("  * trackname_strip_symbols: %s\n", sync.trackname_strip_symbols and "true" or "false"))
+    debug_log(string.format("  * sanitize_token: %s\n", sync.sanitize_token and "true" or "false"))
+    debug_log(string.rep("-", 60) .. "\n")
+
+    debug_log("[AudioSweet Run] Synced ExtState:\n")
+    debug_log(string.format("  * hsuanice_AS/AS_ACTION: %s\n", sync.action_str))
+    debug_log(string.format("  * hsuanice_AS/AS_COPY_SCOPE: %s\n", sync.copy_scope_str))
+    debug_log(string.format("  * hsuanice_AS/AS_COPY_POS: %s\n", sync.copy_pos_str))
+    debug_log(string.format("  * hsuanice_AS/AS_APPLY_FX_MODE: %s\n", sync.channel_mode_str))
+    debug_log(string.format("  * hsuanice_AS/USE_ALIAS: %s\n", sync.use_alias and "1" or "0"))
+    debug_log(string.format("  * hsuanice_AS/FXNAME_SHOW_TYPE: %s\n", sync.fxname_show_type and "1" or "0"))
+    debug_log(string.format("  * hsuanice_AS/FXNAME_SHOW_VENDOR: %s\n", sync.fxname_show_vendor and "1" or "0"))
+    debug_log(string.format("  * hsuanice_AS/FXNAME_STRIP_SYMBOL: %s\n", sync.fxname_strip_symbol and "1" or "0"))
+    debug_log(string.format("  * hsuanice_AS/AS_CHAIN_TOKEN_SOURCE: %s\n", sync.chain_token_str))
+    debug_log(string.format("  * hsuanice_AS/AS_CHAIN_ALIAS_JOINER: %s\n", sync.chain_alias_joiner))
+    debug_log(string.format("  * hsuanice_AS/AS_MAX_FX_TOKENS: %d\n", sync.max_fx_tokens))
+    debug_log(string.format("  * hsuanice_AS/TRACKNAME_STRIP_SYMBOLS: %s\n", sync.trackname_strip_symbols and "1" or "0"))
+    debug_log(string.format("  * hsuanice_AS/SANITIZE_TOKEN_FOR_FILENAME: %s\n", sync.sanitize_token and "1" or "0"))
+    debug_log(string.format("  * RGWH/HANDLE_SECONDS: %.3f%s\n", sync.handle_to_set,
+      sync.use_whole_file and " (whole file)" or ""))
+    debug_log(string.rep("-", 60) .. "\n")
+  else
+    sync_gui_settings_to_core()
   end
 
   r.Undo_BeginBlock()
@@ -669,7 +804,7 @@ local function main()
   local mode, info = detect_mode()
 
   if DEBUG then
-    r.ShowConsoleMsg(string.format("\n[AudioSweet Run] Detected mode: %s\n", mode:upper()))
+    debug_log(string.format("\n[AudioSweet Run] Detected mode: %s\n", mode:upper()))
   end
 
   if mode == "normal" then
