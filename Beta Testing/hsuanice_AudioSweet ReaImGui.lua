@@ -1,7 +1,7 @@
 --[[
 @description AudioSweet ReaImGui - AudioSuite Workflow (Pro Tools–Style)
 @author hsuanice
-@version 0.1.18
+@version 0.1.18.1
 @provides
   [main] .
 @about
@@ -65,6 +65,14 @@
 
 
 @changelog
+  v0.1.18.1 [Internal Build 251221.2133] - Multi-Channel Policy UI
+    - ADDED: Multi-channel policy setting with Shift modifier toggle
+      • SOURCE (blue): Match source item channels (original behavior)
+      • TRACK (green): Respect target track channels (new behavior)
+    - ADDED: Color-coded radio button for Multi mode (blue/green)
+    - ADDED: Enhanced tooltip showing both policy options
+    - ADDED: ExtState save/load for multi_channel_policy
+    - UI: Shift+Click Multi button to toggle between policies
   v0.1.18 [Internal Build 251221.1937] - Auto Mode + Single Rename
     - ADDED: Auto mode for window-based focused/chain detection
     - CHANGED: "Focused" label renamed to "Single"
@@ -1271,6 +1279,7 @@ local gui = {
   copy_scope = 0,
   copy_pos = 0,
   channel_mode = 0,      -- 0=auto, 1=mono, 2=multi
+  multi_channel_policy = "source",  -- "source" | "track" (for multi mode only)
   handle_seconds = 5.0,
   use_whole_file = false, -- Use whole file length instead of handles
   debug = false,
@@ -1367,6 +1376,7 @@ local function save_gui_settings()
   r.SetExtState(SETTINGS_NAMESPACE, "copy_scope", tostring(gui.copy_scope), true)
   r.SetExtState(SETTINGS_NAMESPACE, "copy_pos", tostring(gui.copy_pos), true)
   r.SetExtState(SETTINGS_NAMESPACE, "channel_mode", tostring(gui.channel_mode), true)
+  r.SetExtState(SETTINGS_NAMESPACE, "multi_channel_policy", gui.multi_channel_policy, true)
   r.SetExtState(SETTINGS_NAMESPACE, "handle_seconds", tostring(gui.handle_seconds), true)
   r.SetExtState(SETTINGS_NAMESPACE, "use_whole_file", gui.use_whole_file and "1" or "0", true)
   r.SetExtState(SETTINGS_NAMESPACE, "debug", gui.debug and "1" or "0", true)
@@ -1414,6 +1424,9 @@ local function save_gui_settings()
 
     r.ShowConsoleMsg("Key Settings Updated:\n")
     r.ShowConsoleMsg(string.format("  * channel_mode: %s (%d)\n", channel_names[gui.channel_mode + 1], gui.channel_mode))
+    if gui.channel_mode == 2 then
+      r.ShowConsoleMsg(string.format("  * multi_channel_policy: %s\n", gui.multi_channel_policy))
+    end
     r.ShowConsoleMsg(string.format("  * handle_seconds: %.1f\n", gui.handle_seconds))
     r.ShowConsoleMsg(string.format("  * use_whole_file: %s\n", gui.use_whole_file and "Yes" or "No"))
     r.ShowConsoleMsg(string.format("  * preview_target_track: %s\n", gui.preview_target_track))
@@ -1443,11 +1456,17 @@ local function load_gui_settings()
     return (val ~= "") and tonumber(val) or default
   end
 
+  local function get_string(key, default)
+    local val = r.GetExtState(SETTINGS_NAMESPACE, key)
+    return (val ~= "") and val or default
+  end
+
   gui.mode = get_int("mode", 0)
   gui.action = get_int("action", 0)
   gui.copy_scope = get_int("copy_scope", 0)
   gui.copy_pos = get_int("copy_pos", 0)
   gui.channel_mode = get_int("channel_mode", 0)
+  gui.multi_channel_policy = get_string("multi_channel_policy", "source")
   gui.handle_seconds = get_float("handle_seconds", 5.0)
   gui.use_whole_file = get_bool("use_whole_file", false)
   gui.debug = get_bool("debug", false)
@@ -3755,7 +3774,7 @@ local function draw_gui()
           "=================================================\n" ..
           "AudioSweet ReaImGui - ImGui Interface for AudioSweet\n" ..
           "=================================================\n" ..
-          "Version: 0.1.14 (251220.0802)\n" ..
+          "Version: 0.1.18.1 (251221.2133)\n" ..
           "Author: hsuanice\n\n" ..
 
           "Reference:\n" ..
@@ -4864,9 +4883,48 @@ end
       save_gui_settings()
     end
     ImGui.SameLine(ctx)
+
+    -- Multi channel mode with Shift modifier for policy switching
+    -- Apply color based on current policy when Multi is selected
+    if gui.channel_mode == 2 then
+      if gui.multi_channel_policy == "source" then
+        -- Blue color for source policy
+        ImGui.PushStyleColor(ctx, ImGui.Col_CheckMark, 0x4A9EFFFF)
+      else
+        -- Green color for track policy
+        ImGui.PushStyleColor(ctx, ImGui.Col_CheckMark, 0x4AFF9EFF)
+      end
+    end
+
+    local shift_down = ImGui.IsKeyDown(ctx, ImGui.Mod_Shift)
     if ImGui.RadioButton(ctx, "Multi##channel", gui.channel_mode == 2) then
       gui.channel_mode = 2
+      -- Toggle policy if Shift is held
+      if shift_down then
+        gui.multi_channel_policy = (gui.multi_channel_policy == "source") and "track" or "source"
+      end
       save_gui_settings()
+    end
+
+    -- Tooltip
+    if ImGui.IsItemHovered(ctx) then
+      local tooltip_text = "Multi-channel mode\n\nOptions:\n"
+      if gui.channel_mode == 2 and gui.multi_channel_policy == "source" then
+        tooltip_text = tooltip_text .. "● SOURCE channels (blue) ← CURRENT\n"
+      else
+        tooltip_text = tooltip_text .. "○ SOURCE channels (blue)\n"
+      end
+      if gui.channel_mode == 2 and gui.multi_channel_policy == "track" then
+        tooltip_text = tooltip_text .. "● TRACK channels (green) ← CURRENT\n"
+      else
+        tooltip_text = tooltip_text .. "○ TRACK channels (green)\n"
+      end
+      tooltip_text = tooltip_text .. "\n• Shift+Click: Toggle policy"
+      ImGui.SetTooltip(ctx, tooltip_text)
+    end
+
+    if gui.channel_mode == 2 then
+      ImGui.PopStyleColor(ctx)
     end
 
     -- Whole File section
