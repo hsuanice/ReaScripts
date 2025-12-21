@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<index version="1" name="hsuanice Scripts" commit="373ad6d84aaf42b5f715f47763ef4f258a63367d">
+<index version="1" name="hsuanice Scripts" commit="34b1ed74e50fee74bafd3ab6ee548de9db40c573">
   <category name="Beta Testing">
     <reapack name="hsuanice_AudioSweet ReaImGui.lua" type="script" desc="AudioSweet ReaImGui - AudioSuite Workflow (Pro Tools–Style)">
       <metadata>
@@ -1970,6 +1970,45 @@ v0.9.0 - Added Shared Link State section from Project ExtState "hsuanice_Link".]
     </reapack>
   </category>
   <category name="Tools">
+    <reapack name="hsuanice_AudioSweet Run.lua" type="script" desc="AudioSweet Run">
+      <metadata>
+        <description><![CDATA[{\rtf1\ansi\deff0{\fonttbl{\f0 \fswiss Helvetica;}{\f1 \fmodern Courier;}}
+{\colortbl;\red255\green0\blue0;\red0\green0\blue255;}
+\widowctrl\hyphauto
+
+{\pard \ql \f0 \sa180 \li0 \fi0 \outlinelevel0 \b \fs36 AudioSweet Run\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 Intelligent AudioSweet execution with automatic mode detection.\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 \outlinelevel1 \b \fs32 Behavior\par}
+{\pard \ql \f0 \sa180 \li360 \fi-360 \bullet \tx360\tab {\b Normal Mode} (no placeholder found): \u8226 ? Intelligent window detection:\par}
+{\pard \ql \f0 \sa0 \li720 \fi-360 \endash \tx360\tab Priority 1: Chain FX window open \u8594 ? Chain mode (process full FX chain)\par}
+{\pard \ql \f0 \sa0 \li720 \fi-360 \endash \tx360\tab Priority 2: Single FX floating window \u8594 ? Single FX mode (process one FX)\par}
+{\pard \ql \f0 \sa0 \li720 \fi-360 \endash \tx360\tab Priority 3: No FX window \u8594 ? Chain mode on preview target track (default) \u8226 ? Executes AudioSweet Core with auto-detected mode \u8226 ? Window state always overrides GUI settings \u8226 ? Reads all settings from GUI ExtState\sa180\par}
+{\pard \ql \f0 \sa180 \li360 \fi-360 \bullet \tx360\tab {\b Preview Mode} (placeholder found): \u8226 ? Validates item selection on preview target track \u8226 ? Stops current preview (removes placeholder, unsolo) \u8226 ? Executes RGWH Core on selected items \u8226 ? Moves rendered results back to original source track \u8226 ? Stays in normal state (does not restore preview)\sa180\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 \outlinelevel1 \b \fs32 Preview Mode Requirements\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Must have item selection (otherwise shows warning)\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Items must be on the preview target track\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Respects current FX state (does not modify FX chain)\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Time selection: if present, RGWH determines scope automatically\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab No time selection: uses item units mode\sa180\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 \outlinelevel1 \b \fs32 Debug Mode\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 Set DEBUG = true in script to enable detailed console logging:\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Mode detection (Normal vs Preview)\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Window state detection (chain/single/none)\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab ExtState settings loaded\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Preview cleanup steps\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Item move operations\sa180\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 \outlinelevel1 \b \fs32 Requirements\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab AudioSweet ReaImGui GUI for ExtState configuration\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab AudioSweet Core library\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab RGWH Core library (for Preview Mode)\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Works independently - can be assigned to keyboard shortcuts\sa180\par}
+}
+]]></description>
+      </metadata>
+      <version name="0.1.0" author="hsuanice" time="2025-12-21T08:47:45Z">
+        <source main="main">https://github.com/hsuanice/ReaScripts/raw/34b1ed74e50fee74bafd3ab6ee548de9db40c573/Tools/hsuanice_AudioSweet%20Run.lua</source>
+      </version>
+    </reapack>
     <reapack name="hsuanice_AudioSweet Solo Toggle.lua" type="script" desc="AudioSweet Solo Toggle">
       <metadata>
         <description><![CDATA[{\rtf1\ansi\deff0{\fonttbl{\f0 \fswiss Helvetica;}{\f1 \fmodern Courier;}}
