@@ -1,7 +1,7 @@
 --[[
 @description AudioSweet ReaImGui - AudioSuite Workflow (Pro Tools–Style)
 @author hsuanice
-@version 0.1.16
+@version 0.1.17
 @provides
   [main] .
 @about
@@ -65,6 +65,10 @@
 
 
 @changelog
+  v0.1.17 [Internal Build 251221.1822] - Chain Run Without Focus + Button Enable
+    - FIXED: Chain mode run now works without focused FX window
+      • Falls back to preview target track when no focused FX is available
+    - FIXED: AUDIOSWEET button now enabled in chain mode without focused FX
   v0.1.16 [Internal Build 251221.1722] - Debug ExtState Logging
     - ADDED: Console logging when GUI debug is enabled
       • save_gui_settings() now prints a timestamped ExtState update header
@@ -2924,9 +2928,34 @@ local function run_audiosweet(override_track)
 
   if not override_track then
     local has_valid_fx = update_focused_fx_display()
-    if not has_valid_fx then
+    if gui.mode == 0 and not has_valid_fx then
       gui.last_result = "Error: No valid Track FX focused"
       return
+    end
+
+    if gui.mode == 1 then
+      -- Chain mode: allow default target track when no focused FX
+      if not (gui.focused_track and r.ValidatePtr2(0, gui.focused_track, "MediaTrack*")) then
+        local fallback_track = nil
+        if gui.preview_target_track_guid and gui.preview_target_track_guid ~= "" then
+          fallback_track = find_track_by_guid(gui.preview_target_track_guid)
+        end
+        if not fallback_track then
+          for i = 0, r.CountTracks(0) - 1 do
+            local tr = r.GetTrack(0, i)
+            local _, tn = r.GetSetMediaTrackInfo_String(tr, "P_NAME", "", false)
+            if tn == gui.preview_target_track then
+              fallback_track = tr
+              break
+            end
+          end
+        end
+        if fallback_track then
+          target_track = fallback_track
+        end
+      else
+        target_track = gui.focused_track
+      end
     end
   end
 
@@ -4810,7 +4839,12 @@ end
   ImGui.Separator(ctx)
 
   -- === RUN BUTTONS: PREVIEW / SOLO / AUDIOSWEET ===
-  local can_run = has_valid_fx and item_count > 0 and not gui.is_running
+  local can_run
+  if gui.mode == 0 then
+    can_run = has_valid_fx and item_count > 0 and not gui.is_running
+  else
+    can_run = item_count > 0 and not gui.is_running
+  end
 
   -- Calculate button widths (3 buttons with spacing)
   local avail_width = ImGui.GetContentRegionAvail(ctx)
