@@ -1,7 +1,7 @@
 --[[
 @description AudioSweet ReaImGui - AudioSuite Workflow (Pro Tools–Style)
 @author hsuanice
-@version 0.1.17
+@version 0.1.18
 @provides
   [main] .
 @about
@@ -65,6 +65,10 @@
 
 
 @changelog
+  v0.1.18 [Internal Build 251221.1937] - Auto Mode + Single Rename
+    - ADDED: Auto mode for window-based focused/chain detection
+    - CHANGED: "Focused" label renamed to "Single"
+    - UI: Auto moved to first position with hover tooltips
   v0.1.17 [Internal Build 251221.1822] - Chain Run Without Focus + Button Enable
     - FIXED: Chain mode run now works without focused FX window
       • Falls back to preview target track when no focused FX is available
@@ -1262,7 +1266,7 @@ local ctx = ImGui.CreateContext('AudioSweet GUI')
 ------------------------------------------------------------
 local gui = {
   open = true,
-  mode = 0,              -- 0=focused, 1=chain
+  mode = 0,              -- 0=focused, 1=chain, 2=auto
   action = 0,            -- 0=apply, 1=copy
   copy_scope = 0,
   copy_pos = 0,
@@ -1492,7 +1496,8 @@ local function load_gui_settings()
     r.ShowConsoleMsg("========================================\n")
     r.ShowConsoleMsg("[AS GUI] Script startup - Current settings:\n")
     r.ShowConsoleMsg("========================================\n")
-    r.ShowConsoleMsg(string.format("  Mode: %s\n", gui.mode == 0 and "Focused" or "Chain"))
+    local mode_names = {"Single", "Chain", "Auto"}
+    r.ShowConsoleMsg(string.format("  Mode: %s\n", mode_names[gui.mode + 1] or "Focused"))
     r.ShowConsoleMsg(string.format("  Action: %s\n", gui.action == 0 and "Apply" or "Copy"))
     r.ShowConsoleMsg(string.format("  Copy Scope: %s\n", gui.copy_scope == 0 and "Active" or "All"))
     r.ShowConsoleMsg(string.format("  Copy Position: %s\n", gui.copy_pos == 0 and "Last" or "Replace"))
@@ -2626,11 +2631,40 @@ local function get_focused_fx_info()
   return false, "None", "No focused FX", nil, nil
 end
 
+local function detect_window_mode()
+  local retval, trackOut, _, fxOut = r.GetFocusedFX()
+  if retval == 1 and trackOut then
+    local tr = r.GetTrack(0, math.max(0, (trackOut or 1) - 1))
+    if tr then
+      local chain_visible = r.TrackFX_GetChainVisible(tr)
+      local fx_open = r.TrackFX_GetOpen(tr, fxOut or 0)
+      if chain_visible ~= -1 then
+        return "chain", tr, fxOut or 0
+      end
+      if fx_open and chain_visible == -1 then
+        return "focused", tr, fxOut or 0
+      end
+    end
+  end
+  return "chain", nil, nil
+end
+
+local function get_effective_mode()
+  if gui.mode == 0 then
+    return "focused"
+  elseif gui.mode == 1 then
+    return "chain"
+  end
+  local mode_str = detect_window_mode()
+  return mode_str or "chain"
+end
+
 local function update_focused_fx_display()
+  local effective_mode = get_effective_mode()
   local found, fx_type, fx_name, tr, fx_index = get_focused_fx_info()
 
   -- In Chain mode: if no focused FX, try to use first selected track with FX
-  if gui.mode == 1 and not found then
+  if effective_mode == "chain" and not found then
     local sel_track = r.GetSelectedTrack(0, 0)  -- Get first selected track
     if sel_track and r.TrackFX_GetCount(sel_track) > 0 then
       tr = sel_track
@@ -2673,14 +2707,18 @@ end
 ------------------------------------------------------------
 -- AudioSweet Execution
 ------------------------------------------------------------
-local function set_extstate_from_gui()
-  local mode_names = { "focused", "chain" }
+local function set_extstate_from_gui(mode_override)
+  local mode_names = { "focused", "chain", "auto" }
   local action_names = { "apply", "copy" }
   local scope_names = { "active", "all_takes" }
   local pos_names = { "tail", "head" }
   local channel_names = { "auto", "mono", "multi" }
 
-  r.SetExtState("hsuanice_AS", "AS_MODE", mode_names[gui.mode + 1], false)
+  local mode_str = mode_override or mode_names[gui.mode + 1] or "focused"
+  if mode_str == "auto" then
+    mode_str = "chain"
+  end
+  r.SetExtState("hsuanice_AS", "AS_MODE", mode_str, false)
   r.SetExtState("hsuanice_AS", "AS_ACTION", action_names[gui.action + 1], false)
   r.SetExtState("hsuanice_AS", "AS_COPY_SCOPE", scope_names[gui.copy_scope + 1], false)
   r.SetExtState("hsuanice_AS", "AS_COPY_POS", pos_names[gui.copy_pos + 1], false)
@@ -2757,13 +2795,15 @@ local function toggle_preview()
 
   if gui.debug then
     r.ShowConsoleMsg(string.format("\n[AudioSweet] === PREVIEW TARGET SELECTION DEBUG ===\n"))
-    r.ShowConsoleMsg(string.format("  Mode: %s\n", gui.mode == 1 and "Chain" or "Focused"))
+    r.ShowConsoleMsg(string.format("  Mode: %s\n", effective_mode == "chain" and "Chain" or "Focused"))
     r.ShowConsoleMsg(string.format("  Settings preview_target_track: %s\n", gui.preview_target_track))
     r.ShowConsoleMsg(string.format("  Settings preview_target_track_guid: %s\n", gui.preview_target_track_guid or "(empty)"))
     r.ShowConsoleMsg(string.format("  Has focused_track: %s\n", gui.focused_track and "YES" or "NO"))
   end
 
-  if gui.mode == 1 then
+  local effective_mode = get_effective_mode()
+
+  if effective_mode == "chain" then
     -- Chain mode: prioritize focused FX chain track if available
     if gui.focused_track and r.ValidatePtr2(0, gui.focused_track, "MediaTrack*") then
       -- Get pure track name from track object (P_NAME doesn't include track number)
@@ -2817,7 +2857,7 @@ local function toggle_preview()
 
   local args = {
     debug = gui.debug,
-    chain_mode = (gui.mode == 1),  -- 0=focused, 1=chain
+    chain_mode = (effective_mode == "chain"),
     mode = "solo",
     -- Pass track object directly if available (avoids duplicate name issues)
     -- Otherwise fall back to track name search
@@ -2846,7 +2886,7 @@ local function toggle_solo()
   if gui.debug then
     local scope_name = (gui.preview_solo_scope == 0) and "Track Solo" or "Item Solo"
     r.ShowConsoleMsg(string.format("[AS GUI] SOLO button clicked (scope=%s, mode=%s)\n",
-      scope_name, gui.mode == 0 and "Focused" or "Chain"))
+      scope_name, get_effective_mode() == "focused" and "Focused" or "Chain"))
   end
 
   -- Toggle solo based on solo_scope setting
@@ -2854,8 +2894,8 @@ local function toggle_solo()
     -- Track solo: determine target track based on mode
     local target_track = nil
     local track_name = ""
-
-    if gui.mode == 0 then
+    local effective_mode = get_effective_mode()
+    if effective_mode == "focused" then
       -- Focused mode: use focused track
       target_track = gui.focused_track
       track_name = gui.focused_track_name
@@ -2928,14 +2968,16 @@ local function run_audiosweet(override_track)
 
   if not override_track then
     local has_valid_fx = update_focused_fx_display()
-    if gui.mode == 0 and not has_valid_fx then
-      gui.last_result = "Error: No valid Track FX focused"
-      return
-    end
+  local effective_mode = get_effective_mode()
 
-    if gui.mode == 1 then
-      -- Chain mode: allow default target track when no focused FX
-      if not (gui.focused_track and r.ValidatePtr2(0, gui.focused_track, "MediaTrack*")) then
+  if effective_mode == "focused" and not has_valid_fx then
+    gui.last_result = "Error: No valid Track FX focused"
+    return
+  end
+
+  if effective_mode == "chain" then
+    -- Chain mode: allow default target track when no focused FX
+    if not (gui.focused_track and r.ValidatePtr2(0, gui.focused_track, "MediaTrack*")) then
         local fallback_track = nil
         if gui.preview_target_track_guid and gui.preview_target_track_guid ~= "" then
           fallback_track = find_track_by_guid(gui.preview_target_track_guid)
@@ -2972,8 +3014,8 @@ local function run_audiosweet(override_track)
 
   -- Only use Core for focused FX mode
   -- (Core needs GetFocusedFX to work properly)
-  if gui.mode == 0 and not override_track then
-    set_extstate_from_gui()
+  if effective_mode == "focused" and not override_track then
+    set_extstate_from_gui("focused")
 
     local ok, err = pcall(dofile, CORE_PATH)
     r.UpdateArrange()
@@ -3010,7 +3052,7 @@ local function run_audiosweet(override_track)
     r.SetMixerScroll(target_track)
 
     -- Set ExtState for AudioSweet (chain mode)
-    set_extstate_from_gui()
+    set_extstate_from_gui("chain")
     r.SetExtState("hsuanice_AS", "AS_MODE", "chain", false)
 
     -- Set OVERRIDE ExtState to specify track and FX for Core
@@ -3039,7 +3081,7 @@ local function run_audiosweet(override_track)
   end
 
   r.PreventUIRefresh(-1)
-  local mode_name = (gui.mode == 0) and "Focused" or "Chain"
+  local mode_name = (effective_mode == "focused") and "Focused" or "Chain"
   local action_name = (gui.action == 0) and "Apply" or "Copy"
   r.Undo_EndBlock(string.format("AudioSweet GUI: %s %s", mode_name, action_name), -1)
 
@@ -4728,22 +4770,37 @@ end
 
   -- Main content with compact layout
   local has_valid_fx = update_focused_fx_display()
+  local effective_mode = get_effective_mode()
   local item_count = r.CountSelectedMediaItems(0)
 
   -- === MODE & ACTION (Radio buttons, horizontal) ===
   ImGui.Text(ctx, "Mode:")
   ImGui.SameLine(ctx)
-  if ImGui.RadioButton(ctx, "Focused", gui.mode == 0) then
+  if ImGui.RadioButton(ctx, "Auto", gui.mode == 2) then
+    gui.mode = 2
+    save_gui_settings()
+  end
+  if ImGui.IsItemHovered(ctx) then
+    ImGui.SetTooltip(ctx, "Auto: Detect chain vs single FX by window state")
+  end
+  ImGui.SameLine(ctx)
+  if ImGui.RadioButton(ctx, "Single", gui.mode == 0) then
     gui.mode = 0
     save_gui_settings()
+  end
+  if ImGui.IsItemHovered(ctx) then
+    ImGui.SetTooltip(ctx, "Single: Process the focused FX only (floating window)")
   end
   ImGui.SameLine(ctx)
   if ImGui.RadioButton(ctx, "Chain", gui.mode == 1) then
     gui.mode = 1
     save_gui_settings()
   end
+  if ImGui.IsItemHovered(ctx) then
+    ImGui.SetTooltip(ctx, "Chain: Process the entire FX chain")
+  end
 
-  ImGui.SameLine(ctx, 0, 30)
+  ImGui.SameLine(ctx, 0, 75)
   ImGui.Text(ctx, "Action:")
   ImGui.SameLine(ctx)
   if ImGui.RadioButton(ctx, "Apply", gui.action == 0) then
@@ -4757,7 +4814,7 @@ end
   end
 
   -- === TARGET TRACK NAME (Chain mode only) ===
-  if gui.mode == 1 then
+  if gui.mode ~= 0 then
     ImGui.Text(ctx, "Preview Target:")
     ImGui.SameLine(ctx)
     -- Display current target track name as a button
@@ -4840,7 +4897,7 @@ end
 
   -- === RUN BUTTONS: PREVIEW / SOLO / AUDIOSWEET ===
   local can_run
-  if gui.mode == 0 then
+  if effective_mode == "focused" then
     can_run = has_valid_fx and item_count > 0 and not gui.is_running
   else
     can_run = item_count > 0 and not gui.is_running
@@ -4864,7 +4921,7 @@ end
   local preview_can_run
   if is_previewing_now then
     preview_can_run = true  -- Always allow stopping
-  elseif gui.mode == 0 then
+  elseif effective_mode == "focused" then
     -- Focused mode: requires valid FX
     preview_can_run = has_valid_fx and item_count > 0 and not gui.is_running
   else
@@ -4908,7 +4965,7 @@ end
   -- === KEYBOARD SHORTCUTS INFO ===
   ImGui.PushStyleColor(ctx, ImGui.Col_Text, 0x808080FF)  -- Gray color
   ImGui.Text(ctx, "Shortcuts: ESC = Close, Space = Stop, S = Solo")
-  if gui.mode == 1 then
+  if effective_mode == "chain" then
     -- Chain mode
     ImGui.Text(ctx, "Tip: Set shortcut 'Script: hsuanice_AudioSweet Chain Preview...' (Ctrl+Space)")
   else
@@ -4922,14 +4979,14 @@ end
   -- === SAVE BUTTON (above Saved/History) ===
   if gui.enable_saved_chains then
     -- Unified Save button that changes text based on mode
-    local save_button_label = (gui.mode == 1) and "Save This Chain" or "Save This FX"
-    local save_button_enabled = (gui.mode == 1 and #gui.focused_track_fx_list > 0) or (gui.mode == 0 and has_valid_fx)
+    local save_button_label = (effective_mode == "chain") and "Save This Chain" or "Save This FX"
+    local save_button_enabled = (effective_mode == "chain" and #gui.focused_track_fx_list > 0) or (effective_mode == "focused" and has_valid_fx)
 
     if not save_button_enabled then ImGui.BeginDisabled(ctx) end
     if ImGui.Button(ctx, save_button_label, -1, 0) then
       -- Unified save popup - we'll use one popup for both
       gui.show_save_popup = true
-      if gui.mode == 1 then
+      if effective_mode == "chain" then
         -- Extract only track name without "#N - " prefix
         local track_name, _ = get_track_name_and_number(gui.focused_track)
         gui.new_chain_name = track_name
@@ -5198,7 +5255,7 @@ end
     ImGui.PushStyleColor(ctx, ImGui.Col_Text, 0xFF0000FF)
   end
 
-  if gui.mode == 0 then
+  if effective_mode == "focused" then
     if has_valid_fx then
       ImGui.Text(ctx, format_fx_label_for_status(gui.focused_fx_name))
     else
@@ -5211,7 +5268,7 @@ end
   ImGui.Text(ctx, string.format("Items: %d", item_count))
 
   -- Show FX chain in Chain mode (dynamic height, auto-resizes based on content)
-  if gui.mode == 1 and #gui.focused_track_fx_list > 0 then
+  if effective_mode == "chain" and #gui.focused_track_fx_list > 0 then
     -- Dynamic height based on FX count (each FX line ~20px), max 150px
     local line_height = 20
     local max_height = 150
@@ -5242,7 +5299,7 @@ end
 
   if ImGui.BeginPopupModal(ctx, "Save FX Preset", true, ImGui.WindowFlags_AlwaysAutoResize) then
     -- Show track# prefix for chain mode (outside input field)
-    if gui.mode == 1 and gui.focused_track then
+    if effective_mode == "chain" and gui.focused_track then
       local track_number = r.GetMediaTrackInfo_Value(gui.focused_track, "IP_TRACKNUMBER")
       ImGui.Text(ctx, string.format("Track #%d - Preset Name:", track_number))
     else
@@ -5281,7 +5338,7 @@ end
         -- Check for duplicates
         local duplicate_found = false
         local track_guid = get_track_guid(gui.focused_track)
-        local mode = (gui.mode == 1) and "chain" or "focused"
+        local mode = (effective_mode == "chain") and "chain" or "focused"
         local fx_index = (mode == "focused") and gui.focused_fx_index or nil
 
         -- For focused mode: get the ORIGINAL FX name from track (not processed by FX name settings)
@@ -5438,7 +5495,8 @@ local function loop()
       r.ShowConsoleMsg("========================================\n")
       r.ShowConsoleMsg("[AS GUI] Script closing - Final settings:\n")
       r.ShowConsoleMsg("========================================\n")
-      r.ShowConsoleMsg(string.format("  Mode: %s\n", gui.mode == 0 and "Focused" or "Chain"))
+      local mode_names = {"Single", "Chain", "Auto"}
+      r.ShowConsoleMsg(string.format("  Mode: %s\n", mode_names[gui.mode + 1] or "Focused"))
       r.ShowConsoleMsg(string.format("  Action: %s\n", gui.action == 0 and "Apply" or "Copy"))
       r.ShowConsoleMsg(string.format("  Copy Scope: %s\n", gui.copy_scope == 0 and "Active" or "All"))
       r.ShowConsoleMsg(string.format("  Copy Position: %s\n", gui.copy_pos == 0 and "Last" or "Replace"))
