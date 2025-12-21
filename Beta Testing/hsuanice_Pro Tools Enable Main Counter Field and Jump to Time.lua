@@ -1,7 +1,7 @@
 --[[
 @description Pro Tools Enable Main Counter Field and Jump to Time
 @author hsuanice
-@version 0.1.0
+@version 251221.1520
 @provides
   [main] .
 @about
@@ -36,6 +36,9 @@
   8. Press = to reset to current timeline position
 
 @changelog
+  [Internal Build 251221.1520]
+    + CHANGED: Cursor stays at right edge in normal and relative modes
+    + CHANGED: Relative input now fills from right to left
   [Internal Build 251220.1340]
     + FIXED: = key now works correctly (macOS key code: 108)
     + ADDED: Numpad Clear key also resets to zero
@@ -213,14 +216,14 @@ function format_display()
     end
   end
 
-  local padded = input .. string.rep("0", state.max_digits - len)
-  padded = padded:sub(1, state.max_digits)
+  local padded = string.rep("0", state.max_digits - len) .. input
+  padded = padded:sub(-state.max_digits)
 
   local formatted = ""
   local cursor_display_pos = 0 -- Position in formatted string where cursor should appear
 
-  -- Use actual cursor position for display (for cycling mode)
-  local display_cursor = len < state.max_digits and len or state.cursor_pos
+  -- Keep cursor at the right edge for fixed-length formats
+  local display_cursor = state.max_digits
 
   if format_name == "Hours:Minutes:Seconds:Frames" then
     local hh = padded:sub(1, 2)
@@ -277,11 +280,11 @@ function format_display()
 
   elseif format_name == "Samples" then
     formatted = input
-    cursor_display_pos = display_cursor
+    cursor_display_pos = len
 
   elseif format_name == "Absolute Frames" then
     formatted = input
-    cursor_display_pos = display_cursor
+    cursor_display_pos = len
 
   else
     formatted = input
@@ -304,8 +307,8 @@ function input_to_position()
     return nil
   end
 
-  local padded = input .. string.rep("0", state.max_digits - #input)
-  padded = padded:sub(1, state.max_digits)
+  local padded = string.rep("0", state.max_digits - #input) .. input
+  padded = padded:sub(-state.max_digits)
   local offset_time = 0
 
   if format_name == "Hours:Minutes:Seconds:Frames" then
