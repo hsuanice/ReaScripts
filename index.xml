@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<index version="1" name="hsuanice Scripts" commit="89d164534f8764149304017990ebfa3ce3bac554">
+<index version="1" name="hsuanice Scripts" commit="373ad6d84aaf42b5f715f47763ef4f258a63367d">
   <category name="Beta Testing">
     <reapack name="hsuanice_AudioSweet ReaImGui.lua" type="script" desc="AudioSweet ReaImGui - AudioSuite Workflow (Pro Tools–Style)">
       <metadata>
@@ -1970,6 +1970,34 @@ v0.9.0 - Added Shared Link State section from Project ExtState "hsuanice_Link".]
     </reapack>
   </category>
   <category name="Tools">
+    <reapack name="hsuanice_AudioSweet Solo Toggle.lua" type="script" desc="AudioSweet Solo Toggle">
+      <metadata>
+        <description><![CDATA[{\rtf1\ansi\deff0{\fonttbl{\f0 \fswiss Helvetica;}{\f1 \fmodern Courier;}}
+{\colortbl;\red255\green0\blue0;\red0\green0\blue255;}
+\widowctrl\hyphauto
+
+{\pard \ql \f0 \sa180 \li0 \fi0 \outlinelevel0 \b \fs36 AudioSweet Solo Toggle\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 Toggles solo state for the AudioSweet target track.\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 \outlinelevel1 \b \fs32 Behavior\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab {\b Track Solo Mode (preview_solo_scope = 0)}: \u8226 ? Priority 1: If AudioSweet Preview is active (placeholder found) \u8594 ? Toggle the preview target track \u8226 ? Priority 2: If any track is currently soloed \u8594 ? Toggle that track's solo \u8226 ? Priority 3: No preview/solo \u8594 ? Toggle preview target track solo (from GUI settings)\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab {\b Item Solo Mode (preview_solo_scope = 1)}: \u8226 ? Toggle solo for selected items (REAPER command 41561)\sa180\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 Note: Detects active preview via placeholder item, stays locked to preview target track\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 \outlinelevel1 \b \fs32 Debug Mode\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 Set DEBUG = true in script to enable detailed console logging:\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab ExtState settings loaded\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Soloed track detection\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Target track resolution steps\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Final solo toggle action\sa180\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 \outlinelevel1 \b \fs32 Requirements\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab AudioSweet ReaImGui GUI for ExtState configuration\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Works independently - can be assigned to keyboard shortcuts in action list\sa180\par}
+}
+]]></description>
+      </metadata>
+      <version name="0.1.0" author="hsuanice" time="2025-12-21T03:25:37Z">
+        <source main="main">https://github.com/hsuanice/ReaScripts/raw/373ad6d84aaf42b5f715f47763ef4f258a63367d/Tools/hsuanice_AudioSweet%20Solo%20Toggle.lua</source>
+      </version>
+    </reapack>
     <reapack name="hsuanice_FX Alias Build.lua" type="script" desc="FX Alias Build - Build FX Alias JSON from Current Project">
       <metadata>
         <description><![CDATA[{\rtf1\ansi\deff0{\fonttbl{\f0 \fswiss Helvetica;}{\f1 \fmodern Courier;}}
