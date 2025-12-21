@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<index version="1" name="hsuanice Scripts" commit="34b1ed74e50fee74bafd3ab6ee548de9db40c573">
+<index version="1" name="hsuanice Scripts" commit="1051861401df5ffb83e7e86cc48acb2e62ffb511">
   <category name="Beta Testing">
     <reapack name="hsuanice_AudioSweet ReaImGui.lua" type="script" desc="AudioSweet ReaImGui - AudioSuite Workflow (Pro Tools–Style)">
       <metadata>
@@ -17,6 +17,20 @@
 {\pard \ql \f0 \sa180 \li0 \fi0 Original: Renders selected plugin to selected media item Written for REAPER 5.1 with Lua v1.1 12/22/2015 - Added PreventUIRefresh http://timchimes.com/scripting-with-reaper-audiosuite/\par}
 {\pard \ql \f0 \sa180 \li0 \fi0 \outlinelevel1 \b \fs32 Development\par}
 {\pard \ql \f0 \sa180 \li0 \fi0 This script was developed with the assistance of AI tools including ChatGPT and Claude AI.\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 \outlinelevel1 \b \fs32 Future Development\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 Planned features and experimental ideas for future implementation:\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 \outlinelevel2 \b \fs28 Approved for Implementation\par}
+{\pard \ql \f0 \sa180 \li360 \fi-360 \bullet \tx360\tab {\b Independent AudioSweet Run Scripts}: Create standalone action list scripts \u8226 ? Run (Stop mode): Standard execution reading all GUI ExtState settings \u8226 ? Run (Preview mode): Process items in item/time selection during preview\par}
+{\pard \ql \f0 \sa0 \li720 \fi-360 \endash \tx360\tab Stop preview, preserve FX state/bypass\par}
+{\pard \ql \f0 \sa0 \li720 \fi-360 \endash \tx360\tab Execute RGWH Core print/render with current FX configuration\par}
+{\pard \ql \f0 \sa0 \li720 \fi-360 \endash \tx360\tab Return processed items to original track positions\par}
+{\pard \ql \f0 \sa0 \li720 \fi-360 \endash \tx360\tab Resume preview workflow\sa180\par}
+{\pard \ql \f0 \sa180 \li360 \fi-360 \bullet \tx360\tab {\b Independent Solo Script}: Unified solo logic extractable to action list \u8226 ? Priority: Focused FX/chain track \u8594 ? Default chain track \u8226 ? Can be assigned to keyboard shortcuts independently\par}
+{\pard \ql \f0 \sa180 \li360 \fi-360 \bullet \tx360\tab {\b Right Handle Only Mode}: Extends existing audio content (different from tail) \u8226 ? Processes additional duration on right side only \u8226 ? Handle extends content that already exists in source\par}
+{\pard \ql \f0 \sa180 \li360 \fi-360 \bullet \tx360\tab {\b Fixed-Length Tail Mode}: FX tail from non-handle content processing \u8226 ? Important: RIGHT HANDLE \u8800 ? TAIL MODE \u8226 ? Tail = reverb/delay tail printed from non-handle processed content \u8226 ? Fixed parameter: user-defined length (e.g., 3s, 5s) \u8226 ? Tail processes decay/reverb after main content, not extended source\sa180\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 \outlinelevel2 \b \fs28 Deferred Ideas for Research\par}
+{\pard \ql \f0 \sa180 \li360 \fi-360 \bullet \tx360\tab {\b Live FX Switching During Preview}: Dynamic FX parameter changes \u8226 ? Challenge: Requires real-time FX state synchronization \u8226 ? Needs investigation of REAPER API capabilities\par}
+{\pard \ql \f0 \sa180 \li360 \fi-360 \bullet \tx360\tab {\b Auto Tail Detection}: Intelligent tail length via audio analysis \u8226 ? Analyze processed audio amplitude/RMS to detect natural decay \u8226 ? Auto-determine tail length based on reverb/delay characteristics \u8226 ? Advanced feature requiring signal processing research\sa180\par}
 }
 ]]></description>
       </metadata>
@@ -67,6 +81,9 @@
       </version>
       <version name="0.1.15" author="hsuanice" time="2025-12-20T15:54:58Z">
         <source main="main">https://github.com/hsuanice/ReaScripts/raw/89d164534f8764149304017990ebfa3ce3bac554/Beta%20Testing/hsuanice_AudioSweet%20ReaImGui.lua</source>
+      </version>
+      <version name="0.1.16" author="hsuanice" time="2025-12-21T09:23:23Z">
+        <source main="main">https://github.com/hsuanice/ReaScripts/raw/1051861401df5ffb83e7e86cc48acb2e62ffb511/Beta%20Testing/hsuanice_AudioSweet%20ReaImGui.lua</source>
       </version>
     </reapack>
     <reapack name="hsuanice_BWF TimeReference Embed Tool.lua" type="script" desc="Embed BWF TimeReference to Active take from Take 1 or Current Position TC">
