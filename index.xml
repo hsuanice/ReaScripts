@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<index version="1" name="hsuanice Scripts" commit="11e1cbbd1ca7aa609cf5aa4b36b3bb6092517c10">
+<index version="1" name="hsuanice Scripts" commit="38698461c79351d96a3a4e96c02426e7dd286345">
   <category name="Beta Testing">
     <reapack name="hsuanice_AudioSweet ReaImGui.lua" type="script" desc="AudioSweet ReaImGui - AudioSuite Workflow (Pro Tools–Style)">
       <metadata>
@@ -96,6 +96,9 @@
       </version>
       <version name="0.1.19" author="hsuanice" time="2025-12-22T02:40:38Z">
         <source main="main">https://github.com/hsuanice/ReaScripts/raw/d52f70722a718c3f9fd2bcd9935296388a234e36/Beta%20Testing/hsuanice_AudioSweet%20ReaImGui.lua</source>
+      </version>
+      <version name="0.1.23" author="hsuanice" time="2025-12-22T08:55:26Z">
+        <source main="main">https://github.com/hsuanice/ReaScripts/raw/ec646fae0bc4ee98f4acbb1cdd812c3728324cfd/Beta%20Testing/hsuanice_AudioSweet%20ReaImGui.lua</source>
       </version>
     </reapack>
     <reapack name="hsuanice_BWF TimeReference Embed Tool.lua" type="script" desc="Embed BWF TimeReference to Active take from Take 1 or Current Position TC">
@@ -1998,6 +2001,9 @@ v0.9.0 - Added Shared Link State section from Project ExtState "hsuanice_Link".]
     <reapack name="hsuanice_RGWH Core.lua" type="script" desc="RGWH Core - Render or Glue with Handles">
       <version name="0.1.0" author="hsuanice" time="2025-12-12T15:14:01Z">
         <source main="main">https://github.com/hsuanice/ReaScripts/raw/ab379fe4e55a89b1fe4b0e33d92c4ff0f468e81f/Library/hsuanice_RGWH%20Core.lua</source>
+      </version>
+      <version name="0.1.1" author="hsuanice" time="2025-12-22T08:56:57Z">
+        <source main="main">https://github.com/hsuanice/ReaScripts/raw/38698461c79351d96a3a4e96c02426e7dd286345/Library/hsuanice_RGWH%20Core.lua</source>
       </version>
     </reapack>
   </category>
