@@ -1,7 +1,7 @@
 --[[
 @description AudioSweet ReaImGui - AudioSuite Workflow (Pro Tools–Style)
 @author hsuanice
-@version 0.1.19
+@version 0.1.23
 @provides
   [main] .
 @about
@@ -65,6 +65,51 @@
 
 
 @changelog
+  v0.1.23 [Internal Build 251222.1651] - Unified GLUE Path for All Processing
+    - CHANGED: All units now use Core/GLUE path (RGWH Render path eliminated)
+      • AudioSweet Core v0.1.6: Single-item units now use Core/GLUE instead of RGWH Render
+      • GLUE mode produces single take (no old take preserved)
+      • Fixes position issues that occurred with RGWH Render path
+      • Multi-Channel Policy already implemented in Core/GLUE path (works immediately)
+      • Consistent behavior across all unit sizes (single/multi-item)
+    - BENEFIT: All processing paths now behave identically
+      • Single-item: Core/GLUE
+      • Multi-item: Core/GLUE
+      • TS-WINDOW: Core/GLUE (already working)
+      • Simpler codebase, more predictable results
+
+  v0.1.22 [Internal Build 251222.1622] - RGWH & AudioSweet Multi-Channel Policy Integration
+    - ADDED: Complete Multi-Channel Policy support across ALL execution paths
+      • RGWH Core v0.1.1: Added preserve_track_ch parameter + ExtState control (RGWH_PRESERVE_TRACK_CH)
+      • AudioSweet Core v0.1.5: All paths now correctly implement Multi-Channel Policy
+      • Single-item units (RGWH Render): Policy now works correctly (was overridden by RGWH Core)
+      • Multi-item units (Core/GLUE): Policy now fully implemented (was missing)
+      • TS-WINDOW paths: Continue to work correctly (no changes needed)
+    - FIXED: Single-item and multi-item units now produce consistent results
+      • SOURCE-PLAYBACK: Matches item/unit playback channels
+      • SOURCE-TRACK: Matches source track channel count
+      • TARGET-TRACK: Respects FX track channel count (passive mode)
+    - TECHNICAL: ExtState-based communication between AudioSweet and RGWH Core
+      • AudioSweet sets RGWH_PRESERVE_TRACK_CH before calling RGWH Core
+      • RGWH Core respects this setting (backward compatible, defaults to preserve=true)
+      • Enables both tools to work independently with their own policies
+
+  v0.1.21 [Internal Build 251222.1122] - Core/GLUE Source Track Protection
+    - FIXED: Multi-item unit processing source track protection
+      • AudioSweet Core v0.1.4: Core/GLUE path now protects source track channel count
+      • Previously: processing 3-member unit changed source track from 4ch to 6ch (incorrect)
+      • Now: source track channel count preserved at original value (correct)
+      • Affects per-unit path when unit has ≥2 items without Time Selection
+      • Completes source track protection coverage for all execution paths
+
+  v0.1.20 [Internal Build 251222.1103] - Multi-Unit Multi-Channel Policy Fix
+    - FIXED: Multi-unit processing across tracks with SOURCE-TRACK policy
+      • When processing multiple units across different tracks simultaneously, second unit now reads correct source track channel count
+      • AudioSweet Core v0.1.3: TS-WINDOW[GLOBAL] path now snapshots ALL source track channel counts BEFORE glue operation
+      • Previously: glue operation modified track channel counts before second unit snapshot (incorrect)
+      • Now: all units use pre-glue snapshot values (correct)
+      • Ensures consistent behavior when processing single vs multiple units
+
   v0.1.19 [Internal Build 251222.1035] - Multi-Channel Policy System
     - ADDED: Complete Multi-Channel Policy system with 3 options (Settings → Channel Mode)
       • SOURCE playback: Match item's actual playback channels (default, current behavior)
