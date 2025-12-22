@@ -1,6 +1,6 @@
 --[[
 @description RGWH Core - Render or Glue with Handles
-@version 0.1.0
+@version 0.1.1
 @author hsuanice
 
 @provides
@@ -63,6 +63,15 @@
   • For detailed operation modes guide, see RGWH GUI: Help > Manual (Operation Modes)
 
 @changelog
+  0.1.1 [v251222.1145] - AUDIOSWEET MULTI-CHANNEL POLICY SUPPORT
+    - ADDED: preserve_track_ch parameter to apply_multichannel_no_fx_preserve_take()
+      • preserve_track_ch=true: restore track channel count after apply (default, RGWH standalone behavior)
+      • preserve_track_ch=false: allow track channel count to change (for AudioSweet Multi-Channel Policy)
+      • Default true for backward compatibility - existing RGWH Core calls unchanged
+      • AudioSweet can now control whether FX track channel count should be preserved
+      • Enables AudioSweet's SOURCE-TRACK and SOURCE-PLAYBACK policies to work correctly
+    - Debug log updated: shows preserve_track_ch value in apply log
+
   0.1.0 [v251214.0040] - SIMPLIFIED VOLUME MERGE LOGIC
     - Simplified: Removed "Merge to Item + Print ON" support (GUI auto-switches to Merge to Take)
       • Rationale: REAPER can only print take volume, not item volume
@@ -1739,10 +1748,23 @@ local function restore_trackfx_from_snapshot(tr, snap)
 end
 
 -- Apply multichannel (41993) WITHOUT baking any TRACK FX, and only bake TAKE FX when keep_take_fx=true
-local function apply_multichannel_no_fx_preserve_take(it, keep_take_fx, dbg_level)
+-- preserve_track_ch: if true, restore track channel count after apply (default: true for backward compatibility)
+--                    if false, allow track channel count to change (for AudioSweet Multi-Channel Policy)
+--                    Can also be controlled via ExtState: RGWH_PRESERVE_TRACK_CH = "0" (disable) or "1" (enable, default)
+local function apply_multichannel_no_fx_preserve_take(it, keep_take_fx, dbg_level, preserve_track_ch)
   if not it then return end
   local tr = r.GetMediaItem_Track(it)
   local tk = r.GetActiveTake(it)
+
+  -- Check ExtState first (allows AudioSweet to control without API change)
+  if preserve_track_ch == nil then
+    local ext_preserve = r.GetExtState("hsuanice_AS", "RGWH_PRESERVE_TRACK_CH")
+    if ext_preserve == "0" then
+      preserve_track_ch = false
+    else
+      preserve_track_ch = true  -- Default true for backward compatibility
+    end
+  end
 
   -- Snapshot original track channel count
   -- Issue: Track FX may auto-expand when processing multichannel sources
@@ -1759,15 +1781,22 @@ local function apply_multichannel_no_fx_preserve_take(it, keep_take_fx, dbg_leve
 
   r.SelectAllMediaItems(0,false)
   r.SetMediaItemSelected(it,true)
-  dbg(dbg_level,1,"[APPLY] multi(no-FX) via 41993 (keep_take_fx=%s)", tostring(keep_take_fx))
+  dbg(dbg_level,1,"[APPLY] multi(no-FX) via 41993 (keep_take_fx=%s, preserve_track_ch=%s)", tostring(keep_take_fx), tostring(preserve_track_ch))
   r.Main_OnCommand(ACT_APPLY_MULTI, 0)
 
-  -- Restore original track channel count if it was auto-expanded
+  -- Restore original track channel count if it was auto-expanded (only if preserve_track_ch is true)
   -- This can happen when Track FX expand to accommodate wider source
-  local new_track_ch = tr and (r.GetMediaTrackInfo_Value(tr, "I_NCHAN") or 2) or 2
-  if tr and new_track_ch ~= orig_track_ch then
-    r.SetMediaTrackInfo_Value(tr, "I_NCHAN", orig_track_ch)
-    dbg(dbg_level,1,"[APPLY] Track channel auto-expanded %d→%d, restored to %d (force_multi policy)", orig_track_ch, new_track_ch, orig_track_ch)
+  if preserve_track_ch then
+    local new_track_ch = tr and (r.GetMediaTrackInfo_Value(tr, "I_NCHAN") or 2) or 2
+    if tr and new_track_ch ~= orig_track_ch then
+      r.SetMediaTrackInfo_Value(tr, "I_NCHAN", orig_track_ch)
+      dbg(dbg_level,1,"[APPLY] Track channel auto-expanded %d→%d, restored to %d (preserve policy)", orig_track_ch, new_track_ch, orig_track_ch)
+    end
+  else
+    local new_track_ch = tr and (r.GetMediaTrackInfo_Value(tr, "I_NCHAN") or 2) or 2
+    if new_track_ch ~= orig_track_ch then
+      dbg(dbg_level,1,"[APPLY] Track channel changed %d→%d (preserve disabled for AudioSweet)", orig_track_ch, new_track_ch)
+    end
   end
 
   -- restore states
