@@ -1,6 +1,6 @@
 --[[
 @description AudioSweet Core - Focused Track FX render via RGWH Core
-@version 0.1.6
+@version 0.1.7
 @author hsuanice
 @noindex
 @notes
@@ -12,7 +12,13 @@ Tim Chimes (original), adapted by hsuanice for AudioSweet Core integration.
   http://timchimes.com/scripting-with-reaper-audiosuite/
 
 @changelog
-  0.1.6 (2025-12-22) [internal: v251222.1651]
+  0.1.7 (2025-12-22) [internal: v251222.1706]
+    - ADDED: External undo control support for single undo operation
+      • External callers (GUI/standalone scripts) can set EXTERNAL_UNDO_CONTROL="1" ExtState
+      • When enabled, Core skips its internal Undo_BeginBlock/EndBlock
+      • Allows GUI and standalone scripts to manage undo as single operation
+      • Default: false (Core manages undo internally for backward compatibility)
+      • Integration: AudioSweet GUI v0.1.24 and Run v0.1.1 both enable external undo control
     - CHANGED: Unified all processing to use Core/GLUE path (eliminates RGWH Render path)
       • Single-item units now use Core/GLUE instead of RGWH Render
       • GLUE mode produces single take (no old take preserved)
@@ -1967,12 +1973,18 @@ function setNudge()
 end
 
 function main() -- main part of the script
-  reaper.Undo_BeginBlock()
+  -- Check if external caller wants to manage undo (for single undo in GUI/standalone scripts)
+  -- Set ExtState "hsuanice_AS/EXTERNAL_UNDO_CONTROL" = "1" to disable Core's internal undo block
+  local external_undo = (reaper.GetExtState("hsuanice_AS", "EXTERNAL_UNDO_CONTROL") == "1")
+
+  if not external_undo then
+    reaper.Undo_BeginBlock()
+  end
   reaper.PreventUIRefresh(1)
   if debug_enabled() then
     reaper.ShowConsoleMsg("\n=== AudioSweet (hsuanice) run ===\n")
   end
-  log_step("BEGIN", "selected_items=%d", reaper.CountSelectedMediaItems(0))
+  log_step("BEGIN", "selected_items=%d (external_undo=%s)", reaper.CountSelectedMediaItems(0), tostring(external_undo))
   -- snapshot original selection so we can restore it at the very end
   local sel_snapshot = snapshot_selection()
 
@@ -1997,7 +2009,9 @@ function main() -- main part of the script
   if ret_val ~= 1 then
     reaper.MB("Please focus a Track FX (not a Take FX).", "AudioSweet", 0)
     reaper.PreventUIRefresh(-1)
-    reaper.Undo_EndBlock("AudioSweet (no focused Track FX)", -1)
+    if not external_undo then
+      reaper.Undo_EndBlock("AudioSweet (no focused Track FX)", -1)
+    end
     return
   end
   log_step("FOCUSED-FX", "trackOut=%d  itemOut=%d  fxOut=%d  window=%s", tracknumber_Out, itemnumber_Out, fxnumber_Out, tostring(window))
@@ -2041,11 +2055,15 @@ function main() -- main part of the script
       if AS.mode == "focused" then
         ops = AS_copy_focused_fx_to_items(FXmediaTrack, fxIndex, AS)
         log_step("COPY", "focused FX → items  scope=%s pos=%s  ops=%d", tostring(AS.scope), tostring(AS.append_pos), ops)
-        reaper.Undo_EndBlock(string.format("AudioSweet: Copy focused FX to items (%d op)", ops), 0)
+        if not external_undo then
+          reaper.Undo_EndBlock(string.format("AudioSweet: Copy focused FX to items (%d op)", ops), 0)
+        end
       else
         ops = AS_copy_chain_to_items(FXmediaTrack, AS)
         log_step("COPY", "FX CHAIN → items  scope=%s pos=%s  ops=%d", tostring(AS.scope), tostring(AS.append_pos), ops)
-        reaper.Undo_EndBlock(string.format("AudioSweet: Copy FX chain to items (%d op)", ops), 0)
+        if not external_undo then
+          reaper.Undo_EndBlock(string.format("AudioSweet: Copy FX chain to items (%d op)", ops), 0)
+        end
       end
       reaper.UpdateArrange()
       restore_selection(sel_snapshot)
@@ -2062,7 +2080,9 @@ function main() -- main part of the script
   if #units == 0 then
     reaper.MB("No media items selected.", "AudioSweet", 0)
     reaper.PreventUIRefresh(-1)
-    reaper.Undo_EndBlock("AudioSweet (no items)", -1)
+    if not external_undo then
+      reaper.Undo_EndBlock("AudioSweet (no items)", -1)
+    end
     return
   end
 
@@ -2168,7 +2188,9 @@ function main() -- main part of the script
       restore_track_nchan()
 
       reaper.PreventUIRefresh(-1)
-      reaper.Undo_EndBlock("AudioSweet TS-Window (global) glue+print", 0)
+      if not external_undo then
+        reaper.Undo_EndBlock("AudioSweet TS-Window (global) glue+print", 0)
+      end
       return
     end
     -- else: TS hits 0 or 1 unit → fall through to per-unit branch below
@@ -2491,7 +2513,9 @@ function main() -- main part of the script
   restore_track_nchan()
 
   reaper.PreventUIRefresh(-1)
-  reaper.Undo_EndBlock("AudioSweet multi-item glue", 0)
+  if not external_undo then
+    reaper.Undo_EndBlock("AudioSweet multi-item glue", 0)
+  end
 end
 
 reaper.PreventUIRefresh(1)
