@@ -1,7 +1,7 @@
 --[[
 @description AudioSweet Run
 @author hsuanice
-@version 0.1.0
+@version 0.1.1
 @provides
   [main] .
 @about
@@ -48,6 +48,13 @@
   - Works independently - can be assigned to keyboard shortcuts
 
 @changelog
+  v0.1.1 (2025-12-22) [internal: v251222.1706]
+    - CHANGED: All executions now produce single undo operation
+      • External undo control enabled before calling AudioSweet Core
+      • AudioSweet Core v0.1.7: Skips internal undo when EXTERNAL_UNDO_CONTROL="1"
+      • Cleaner undo stack (one "AudioSweet Run (Normal/Preview)" entry)
+      • Matches GUI v0.1.24 behavior for consistent user experience
+
   v0.1.0 (2025-12-21) [internal: v251221.1803]
     - ADDED: Sync GUI settings to AudioSweet Core + RGWH Core before execution
       • Apply/Copy action, copy scope/pos now set in hsuanice_AS ExtState
@@ -97,7 +104,7 @@ local r = reaper
 ------------------------------------------------------------
 -- User Settings
 ------------------------------------------------------------
-local DEBUG = true  -- Set to true for detailed console logging
+local DEBUG = false  -- Set to true for detailed console logging
 local DEBUG_LOG_PATH = (os.getenv("HOME") or "") .. "/Desktop/AudioSweet Run Debug.log"
 
 ------------------------------------------------------------
@@ -153,6 +160,7 @@ local function sync_gui_settings_to_core()
   local copy_pos = get_int("copy_pos", 0)
   local channel_mode = get_int("channel_mode", 0)
   local channel_mode_str = (channel_mode == 1) and "mono" or (channel_mode == 2) and "multi" or "auto"
+  local multi_channel_policy = get_string("multi_channel_policy", "source_playback")
   local handle_seconds_str = get_string("handle_seconds", "0")
   local handle_seconds = tonumber(handle_seconds_str) or 0
   local use_whole_file = get_bool("use_whole_file", false)
@@ -178,6 +186,7 @@ local function sync_gui_settings_to_core()
   r.SetExtState("hsuanice_AS", "AS_COPY_SCOPE", scope_names[copy_scope + 1], false)
   r.SetExtState("hsuanice_AS", "AS_COPY_POS", pos_names[copy_pos + 1], false)
   r.SetExtState("hsuanice_AS", "AS_APPLY_FX_MODE", channel_mode_str, false)
+  r.SetExtState("hsuanice_AS", "AS_MULTI_CHANNEL_POLICY", multi_channel_policy, false)
   r.SetExtState("hsuanice_AS", "DEBUG", debug_enabled and "1" or "0", false)
   r.SetExtState("hsuanice_AS", "AS_SHOW_SUMMARY", "0", false)
 
@@ -203,6 +212,7 @@ local function sync_gui_settings_to_core()
     copy_pos = copy_pos,
     channel_mode = channel_mode,
     channel_mode_str = channel_mode_str,
+    multi_channel_policy = multi_channel_policy,
     handle_seconds_str = handle_seconds_str,
     handle_seconds = handle_seconds,
     use_whole_file = use_whole_file,
@@ -615,39 +625,7 @@ local function execute_preview_mode(preview_info)
     debug_log(string.format("  Preview target track: %s\n", track_name))
   end
 
-  -- 3. Verify all selected items are on preview target track
-  for i = 0, sel_item_count - 1 do
-    local item = r.GetSelectedMediaItem(0, i)
-    local item_track = r.GetMediaItemTrack(item)
-    if item_track ~= preview_target_track then
-      r.MB("All selected items must be on the preview target track.", "AudioSweet Run - Preview Mode", 0)
-      if DEBUG then
-        debug_log("[Preview Mode] ERROR: Selected items not all on preview target track\n")
-        debug_log("========================================\n")
-      end
-      return
-    end
-  end
-
-  -- 4. Stop preview: Delete placeholder and unsolo
-  if DEBUG then
-    debug_log("\n[Preview Mode] Step 1: Stop preview\n")
-  end
-
-  -- Delete placeholder
-  r.DeleteTrackMediaItem(r.GetMediaItemTrack(preview_info.placeholder), preview_info.placeholder)
-  if DEBUG then
-    debug_log("  • Placeholder deleted\n")
-  end
-
-  -- Unsolo all
-  r.Main_OnCommand(41185, 0) -- Item: Unsolo all
-  r.Main_OnCommand(40340, 0) -- Track: Unsolo all tracks
-  if DEBUG then
-    debug_log("  • Unsolo all (items + tracks)\n")
-  end
-
-  -- 5. Check for time selection
+  -- 3. Check for time selection
   local start_time, end_time = r.GetSet_LoopTimeRange2(0, false, false, 0, 0, false)
   local has_time_selection = (end_time - start_time) > 0.0001
 
@@ -659,54 +637,64 @@ local function execute_preview_mode(preview_info)
     end
   end
 
-  -- 6. Load RGWH Core
+  -- 6. Load AudioSweet Core
   if DEBUG then
-    debug_log("\n[Preview Mode] Step 3: Load RGWH Core\n")
+    debug_log("\n[Preview Mode] Step 3: Load AudioSweet Core\n")
   end
 
-  local RGWH = dofile(SCRIPT_DIR .. "../Library/hsuanice_RGWH Core.lua")
+  -- Sync GUI settings to Core before execution
+  sync_gui_settings_to_core()
 
-  -- 7. Prepare RGWH arguments
-  local channel_mode = get_int("channel_mode", 0)  -- 0=auto, 1=mono, 2=multi
-  local channel_mode_str = (channel_mode == 1) and "mono" or (channel_mode == 2) and "multi" or "auto"
+  -- Use GUI mode in preview (focused/chain), fallback to chain on preview target track
+  local gui_mode = get_int("mode", 0) -- 0=focused, 1=chain
+  local mode_str = "chain"
+  local override_track_idx = r.CSurf_TrackToID(preview_target_track, false) - 1
+  local override_fx_idx = 0
 
-  local action = get_int("action", 0)  -- 0=glue, 1=render, 2=auto
-  local op_str = (action == 1) and "render" or (action == 2) and "auto" or "glue"
-
-  -- Determine selection_scope based on time selection
-  local selection_scope = "auto"  -- Let RGWH determine
-
-  if DEBUG then
-    debug_log(string.format("  • channel_mode: %s\n", channel_mode_str))
-    debug_log(string.format("  • op: %s\n", op_str))
-    debug_log(string.format("  • selection_scope: %s (RGWH will determine)\n", selection_scope))
+  if gui_mode == 0 then
+    local retval, trackidx, _, fxidx = r.GetFocusedFX()
+    if retval == 1 and trackidx then
+      local focused_track = r.GetTrack(0, trackidx - 1)
+      if focused_track then
+        mode_str = "focused"
+        override_track_idx = r.CSurf_TrackToID(focused_track, false) - 1
+        override_fx_idx = fxidx or 0
+      end
+    end
   end
 
-  -- 8. Execute RGWH Core
+  r.SetExtState("hsuanice_AS", "AS_MODE", mode_str, false)
+  r.SetExtState("hsuanice_AS", "OVERRIDE_TRACK_IDX", tostring(override_track_idx), false)
+  r.SetExtState("hsuanice_AS", "OVERRIDE_FX_IDX", tostring(override_fx_idx), false)
+
   if DEBUG then
-    debug_log("\n[Preview Mode] Step 4: Execute RGWH Core\n")
+    debug_log(string.format("  • GUI mode: %s\n", gui_mode == 0 and "focused" or "chain"))
+    debug_log(string.format("  • AS_MODE: %s\n", mode_str))
+    debug_log(string.format("  • OVERRIDE_TRACK_IDX: %d\n", override_track_idx))
+    debug_log(string.format("  • OVERRIDE_FX_IDX: %d\n", override_fx_idx))
   end
 
-  local ok, err = RGWH.core({
-    op = op_str,
-    selection_scope = selection_scope,
-    channel_mode = channel_mode_str,
-  })
+  -- 7. Execute AudioSweet Core
+  if DEBUG then
+    debug_log("\n[Preview Mode] Step 4: Execute AudioSweet Core\n")
+  end
+
+  local ok, err = pcall(dofile, SCRIPT_DIR .. "../Library/hsuanice_AudioSweet Core.lua")
 
   if not ok then
-    r.MB(string.format("RGWH Core error: %s", err or "unknown"), "AudioSweet Run - Preview Mode", 0)
+    r.MB(string.format("AudioSweet Core error: %s", err or "unknown"), "AudioSweet Run - Preview Mode", 0)
     if DEBUG then
-      debug_log(string.format("[Preview Mode] ERROR: RGWH Core failed: %s\n", err or "unknown"))
+      debug_log(string.format("[Preview Mode] ERROR: AudioSweet Core failed: %s\n", err or "unknown"))
       debug_log("========================================\n")
     end
     return
   end
 
   if DEBUG then
-    debug_log("  • RGWH Core execution completed\n")
+    debug_log("  • AudioSweet Core execution completed\n")
   end
 
-  -- 9. Move rendered items back to source track
+  -- 8. Move rendered items back to source track
   if DEBUG then
     debug_log(string.format("\n[Preview Mode] Step 5: Move items back to source track #%d\n", preview_info.source_track_num))
   end
@@ -800,6 +788,9 @@ local function main()
 
   r.Undo_BeginBlock()
 
+  -- Tell AudioSweet Core to NOT create its own undo block (we're managing it here for single undo)
+  r.SetExtState("hsuanice_AS", "EXTERNAL_UNDO_CONTROL", "1", false)
+
   -- Detect mode
   local mode, info = detect_mode()
 
@@ -811,9 +802,13 @@ local function main()
     execute_normal_mode()
     r.Undo_EndBlock("AudioSweet Run (Normal)", -1)
   elseif mode == "preview" then
-    execute_preview_mode(info)
+    -- Temporary: Use normal execution flow during preview for observation
+    execute_normal_mode()
     r.Undo_EndBlock("AudioSweet Run (Preview)", -1)
   end
+
+  -- Clear external undo control flag after execution
+  r.SetExtState("hsuanice_AS", "EXTERNAL_UNDO_CONTROL", "", false)
 end
 
 ------------------------------------------------------------
