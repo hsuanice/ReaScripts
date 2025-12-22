@@ -1,7 +1,7 @@
 --[[
 @description AudioSweet ReaImGui - AudioSuite Workflow (Pro Tools–Style)
 @author hsuanice
-@version 0.1.18.1
+@version 0.1.19
 @provides
   [main] .
 @about
@@ -65,14 +65,32 @@
 
 
 @changelog
-  v0.1.18.1 [Internal Build 251221.2133] - Multi-Channel Policy UI
-    - ADDED: Multi-channel policy setting with Shift modifier toggle
-      • SOURCE (blue): Match source item channels (original behavior)
-      • TRACK (green): Respect target track channels (new behavior)
-    - ADDED: Color-coded radio button for Multi mode (blue/green)
-    - ADDED: Enhanced tooltip showing both policy options
-    - ADDED: ExtState save/load for multi_channel_policy
-    - UI: Shift+Click Multi button to toggle between policies
+  v0.1.19 [Internal Build 251222.1035] - Multi-Channel Policy System
+    - ADDED: Complete Multi-Channel Policy system with 3 options (Settings → Channel Mode)
+      • SOURCE playback: Match item's actual playback channels (default, current behavior)
+      • SOURCE track: Match source track channel count (RGWH/Pro Tools style)
+      • TARGET track: Respect FX track's current channel count (passive mode)
+      • Policy only applies when Channel Mode is explicitly set to "Multi"
+      • Auto/Mono modes use default behavior (not affected by policy)
+    - ADDED: Settings → Channel Mode tab with 3 RadioButton options
+      • Each option has description and example usage
+      • Orange warning when Channel Mode is not "Multi"
+      • Settings saved to ExtState: multi_channel_policy (source_playback/source_track/target_track)
+    - ADDED: Multi RadioButton tooltip update
+      • Shows current policy name
+      • Hints user to configure in Settings → Channel Mode
+      • Removed Shift+Click toggle (moved to Settings)
+    - ADDED: ExtState synchronization to Core namespace
+      • save_gui_settings() now syncs AS_MULTI_CHANNEL_POLICY to hsuanice_AS
+      • set_extstate_from_gui() syncs policy when running from GUI button
+      • Ensures policy works for both GUI button and Run.lua execution
+    - ADDED: Multi-Channel Policy display in startup debug log
+      • Shows policy when Channel Mode is Multi
+      • Format: "Multi-Channel Policy: SOURCE playback/track or TARGET track"
+    - CHANGED: Tab numbering updated (Channel Mode is Tab 4, Timecode is Tab 6)
+
+  v0.1.18.1 [Internal Build 251221.2133] - Multi-Channel Policy UI (deprecated)
+    - NOTE: This version was experimental; v0.1.19 is the complete implementation
   v0.1.18 [Internal Build 251221.1937] - Auto Mode + Single Rename
     - ADDED: Auto mode for window-based focused/chain detection
     - CHANGED: "Focused" label renamed to "Single"
@@ -1279,7 +1297,7 @@ local gui = {
   copy_scope = 0,
   copy_pos = 0,
   channel_mode = 0,      -- 0=auto, 1=mono, 2=multi
-  multi_channel_policy = "source",  -- "source" | "track" (for multi mode only)
+  multi_channel_policy = "source_playback",  -- "source_playback" | "source_track" | "target_track"
   handle_seconds = 5.0,
   use_whole_file = false, -- Use whole file length instead of handles
   debug = false,
@@ -1377,6 +1395,10 @@ local function save_gui_settings()
   r.SetExtState(SETTINGS_NAMESPACE, "copy_pos", tostring(gui.copy_pos), true)
   r.SetExtState(SETTINGS_NAMESPACE, "channel_mode", tostring(gui.channel_mode), true)
   r.SetExtState(SETTINGS_NAMESPACE, "multi_channel_policy", gui.multi_channel_policy, true)
+
+  -- Sync multi_channel_policy to Core namespace (for direct GUI execution without Run script)
+  r.SetExtState("hsuanice_AS", "AS_MULTI_CHANNEL_POLICY", gui.multi_channel_policy, false)
+
   r.SetExtState(SETTINGS_NAMESPACE, "handle_seconds", tostring(gui.handle_seconds), true)
   r.SetExtState(SETTINGS_NAMESPACE, "use_whole_file", gui.use_whole_file and "1" or "0", true)
   r.SetExtState(SETTINGS_NAMESPACE, "debug", gui.debug and "1" or "0", true)
@@ -1466,7 +1488,7 @@ local function load_gui_settings()
   gui.copy_scope = get_int("copy_scope", 0)
   gui.copy_pos = get_int("copy_pos", 0)
   gui.channel_mode = get_int("channel_mode", 0)
-  gui.multi_channel_policy = get_string("multi_channel_policy", "source")
+  gui.multi_channel_policy = get_string("multi_channel_policy", "source_playback")
   gui.handle_seconds = get_float("handle_seconds", 5.0)
   gui.use_whole_file = get_bool("use_whole_file", false)
   gui.debug = get_bool("debug", false)
@@ -1522,6 +1544,12 @@ local function load_gui_settings()
     r.ShowConsoleMsg(string.format("  Copy Position: %s\n", gui.copy_pos == 0 and "Last" or "Replace"))
     local channel_mode_names = {"Auto", "Mono", "Multi"}
     r.ShowConsoleMsg(string.format("  Channel Mode: %s\n", channel_mode_names[gui.channel_mode + 1]))
+    if gui.channel_mode == 2 then
+      local policy_display = gui.multi_channel_policy == "source_track" and "SOURCE track" or
+                             gui.multi_channel_policy == "target_track" and "TARGET track" or
+                             "SOURCE playback"
+      r.ShowConsoleMsg(string.format("  Multi-Channel Policy: %s\n", policy_display))
+    end
     local handle_display = gui.use_whole_file and "Whole File" or string.format("%.2f", gui.handle_seconds)
     r.ShowConsoleMsg(string.format("  Handle Seconds: %s\n", handle_display))
     r.ShowConsoleMsg(string.format("  Debug Mode: %s\n", gui.debug and "ON" or "OFF"))
@@ -2742,6 +2770,7 @@ local function set_extstate_from_gui(mode_override)
   r.SetExtState("hsuanice_AS", "AS_COPY_SCOPE", scope_names[gui.copy_scope + 1], false)
   r.SetExtState("hsuanice_AS", "AS_COPY_POS", pos_names[gui.copy_pos + 1], false)
   r.SetExtState("hsuanice_AS", "AS_APPLY_FX_MODE", channel_names[gui.channel_mode + 1], false)
+  r.SetExtState("hsuanice_AS", "AS_MULTI_CHANNEL_POLICY", gui.multi_channel_policy, false)
   r.SetExtState("hsuanice_AS", "DEBUG", gui.debug and "1" or "0", false)
 
   -- File Naming ExtStates
@@ -3774,7 +3803,7 @@ local function draw_gui()
           "=================================================\n" ..
           "AudioSweet ReaImGui - ImGui Interface for AudioSweet\n" ..
           "=================================================\n" ..
-          "Version: 0.1.18.1 (251221.2133)\n" ..
+          "Version: 0.1.19 (251222.1035)\n" ..
           "Author: hsuanice\n\n" ..
 
           "Reference:\n" ..
@@ -4063,7 +4092,64 @@ end
       end
 
       -- ============================================================
-      -- Tab 4: History Settings
+      -- Tab 4: Channel Mode Settings
+      -- ============================================================
+      if ImGui.BeginTabItem(ctx, 'Channel Mode') then
+        ImGui.Text(ctx, "Multi-Channel Policy")
+        ImGui.TextDisabled(ctx, "Configure how multi-channel rendering determines track channel count")
+        ImGui.Separator(ctx)
+        ImGui.Spacing(ctx)
+
+        -- Note: This setting only applies when Channel Mode is set to "Multi"
+        local is_multi_mode = (gui.channel_mode == 2)
+        if not is_multi_mode then
+          ImGui.PushStyleColor(ctx, ImGui.Col_Text, 0xFFAA00FF)  -- Orange color
+          ImGui.TextWrapped(ctx, "Note: Multi-channel policy only applies when Channel Mode is set to 'Multi'.")
+          ImGui.PopStyleColor(ctx)
+          ImGui.Separator(ctx)
+        end
+
+        -- Three RadioButton options
+        local changed = false
+
+        if ImGui.RadioButton(ctx, "SOURCE playback channels##policy", gui.multi_channel_policy == "source_playback") then
+          gui.multi_channel_policy = "source_playback"
+          changed = true
+        end
+        ImGui.Indent(ctx)
+        ImGui.TextWrapped(ctx, "Match the actual playback channel count of the source item (respects item channel mode settings).")
+        ImGui.TextDisabled(ctx, "Example: 8ch file playing as 4ch → uses 4ch")
+        ImGui.Unindent(ctx)
+        ImGui.Spacing(ctx)
+
+        if ImGui.RadioButton(ctx, "SOURCE track channels##policy", gui.multi_channel_policy == "source_track") then
+          gui.multi_channel_policy = "source_track"
+          changed = true
+        end
+        ImGui.Indent(ctx)
+        ImGui.TextWrapped(ctx, "Match the channel count of the source item's track (RGWH/Pro Tools style).")
+        ImGui.TextDisabled(ctx, "Example: Item on 8ch track → uses 8ch (regardless of item settings)")
+        ImGui.Unindent(ctx)
+        ImGui.Spacing(ctx)
+
+        if ImGui.RadioButton(ctx, "TARGET track channels##policy", gui.multi_channel_policy == "target_track") then
+          gui.multi_channel_policy = "target_track"
+          changed = true
+        end
+        ImGui.Indent(ctx)
+        ImGui.TextWrapped(ctx, "Respect the FX/chain track's current channel count (passive mode).")
+        ImGui.TextDisabled(ctx, "Example: FX track is 16ch → keeps 16ch (no modification)")
+        ImGui.Unindent(ctx)
+
+        if changed then
+          save_gui_settings()
+        end
+
+        ImGui.EndTabItem(ctx)
+      end
+
+      -- ============================================================
+      -- Tab 5: History Settings
       -- ============================================================
       if ImGui.BeginTabItem(ctx, 'History') then
         ImGui.Text(ctx, "Maximum History Items:")
@@ -4085,7 +4171,7 @@ end
       end
 
       -- ============================================================
-      -- Tab 5: Timecode Embed Settings
+      -- Tab 6: Timecode Embed Settings
       -- ============================================================
       if ImGui.BeginTabItem(ctx, 'Timecode') then
         if bwf_cli.available then
@@ -4884,47 +4970,25 @@ end
     end
     ImGui.SameLine(ctx)
 
-    -- Multi channel mode with Shift modifier for policy switching
-    -- Apply color based on current policy when Multi is selected
-    if gui.channel_mode == 2 then
-      if gui.multi_channel_policy == "source" then
-        -- Blue color for source policy
-        ImGui.PushStyleColor(ctx, ImGui.Col_CheckMark, 0x4A9EFFFF)
-      else
-        -- Green color for track policy
-        ImGui.PushStyleColor(ctx, ImGui.Col_CheckMark, 0x4AFF9EFF)
-      end
-    end
-
-    local shift_down = ImGui.IsKeyDown(ctx, ImGui.Mod_Shift)
+    -- Multi channel mode radio button
     if ImGui.RadioButton(ctx, "Multi##channel", gui.channel_mode == 2) then
       gui.channel_mode = 2
-      -- Toggle policy if Shift is held
-      if shift_down then
-        gui.multi_channel_policy = (gui.multi_channel_policy == "source") and "track" or "source"
-      end
       save_gui_settings()
     end
 
-    -- Tooltip
+    -- Tooltip showing current policy and hint to Settings
     if ImGui.IsItemHovered(ctx) then
-      local tooltip_text = "Multi-channel mode\n\nOptions:\n"
-      if gui.channel_mode == 2 and gui.multi_channel_policy == "source" then
-        tooltip_text = tooltip_text .. "● SOURCE channels (blue) ← CURRENT\n"
-      else
-        tooltip_text = tooltip_text .. "○ SOURCE channels (blue)\n"
+      local policy_name = "SOURCE playback"
+      if gui.multi_channel_policy == "source_track" then
+        policy_name = "SOURCE track"
+      elseif gui.multi_channel_policy == "target_track" then
+        policy_name = "TARGET track"
       end
-      if gui.channel_mode == 2 and gui.multi_channel_policy == "track" then
-        tooltip_text = tooltip_text .. "● TRACK channels (green) ← CURRENT\n"
-      else
-        tooltip_text = tooltip_text .. "○ TRACK channels (green)\n"
-      end
-      tooltip_text = tooltip_text .. "\n• Shift+Click: Toggle policy"
-      ImGui.SetTooltip(ctx, tooltip_text)
-    end
 
-    if gui.channel_mode == 2 then
-      ImGui.PopStyleColor(ctx)
+      local tooltip_text = "Multi-channel mode\n\n"
+      tooltip_text = tooltip_text .. "Current policy: " .. policy_name .. "\n\n"
+      tooltip_text = tooltip_text .. "• Configure policy in Settings → Channel Mode"
+      ImGui.SetTooltip(ctx, tooltip_text)
     end
 
     -- Whole File section
