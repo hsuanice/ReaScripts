@@ -1,6 +1,6 @@
 --[[
 @description AudioSweet Preview Core
-@version 0.1.1
+@version 0.1.2
 @author hsuanice
 
 @provides
@@ -9,6 +9,15 @@
 @about Minimal, self-contained preview runtime. Later we can extract helpers to "hsuanice_AS Core.lua".
 
 @changelog
+  0.1.2 (2025-12-22) [internal: v251222.1035]
+    - ADDED: Source track channel count protection
+      • Snapshots source track I_NCHAN before moving items to FX track
+      • Restores source track channel count after moving items back
+      • Prevents REAPER auto-adjust from changing source track when items return
+      • Essential for post-production workflows and project interchange (Pro Tools/Nuendo)
+      • Stored in ASP._state.src_track_nchan
+      • Restored in _move_back_and_remove_placeholder()
+
   0.1.1 (2025-12-21) [internal: v251221.2141]
     - ADDED: Track channel count restoration after preview
       • Snapshots track I_NCHAN before preview starts
@@ -645,7 +654,8 @@ ASP._state = ASP._state or {
   moved_items       = {},
   placeholder       = nil,
   fx_enable_shot    = nil,
-  track_nchan       = nil,  -- Snapshot of track channel count
+  track_nchan       = nil,  -- Snapshot of FX track channel count
+  src_track_nchan   = nil,  -- Snapshot of source track channel count
   stop_watcher      = false,
   allow_overlap_guids = nil,
 }
@@ -1244,6 +1254,11 @@ function ASP._prepare_preview_items_on_fx_track(mode)
   local first_sel = reaper.GetSelectedMediaItem(0, 0)
   local src_tr = first_sel and reaper.GetMediaItem_Track(first_sel) or ASP._state.fx_track
   ASP._state.src_track = src_tr  -- Remember the source track for placeholder lookup on re-entry
+
+  -- ★ Snapshot source track channel count (protect from REAPER auto-adjust on move back)
+  ASP._state.src_track_nchan = tonumber(reaper.GetMediaTrackInfo_Value(src_tr, "I_NCHAN")) or 2
+  ASP.log("snapshot: source track channel count = %d", ASP._state.src_track_nchan)
+
   ASP._state.placeholder = make_placeholder(src_tr, UL or 0, UR or (UL and UL+1 or 1), note)
 
   ASP.log("placeholder created: [%0.3f..%0.3f] %s", UL or -1, UR or -1, note)
@@ -1342,6 +1357,14 @@ function ASP._move_back_and_remove_placeholder()
   for _, it in ipairs(move_list) do
     reaper.MoveMediaItemToTrack(it, ph_tr)
   end
+
+  -- ★ Restore source track channel count (protect from REAPER auto-adjust)
+  if ASP._state.src_track_nchan and ph_tr then
+    reaper.SetMediaTrackInfo_Value(ph_tr, "I_NCHAN", ASP._state.src_track_nchan)
+    ASP.log("restored source track I_NCHAN to %d", ASP._state.src_track_nchan)
+    ASP._state.src_track_nchan = nil
+  end
+
   remove_placeholder(ph_it)
   ASP._state.placeholder = nil
   ASP._state.moved_items = {}
