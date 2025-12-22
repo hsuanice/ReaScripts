@@ -1,6 +1,6 @@
 --[[
 @description AudioSweet Core - Focused Track FX render via RGWH Core
-@version 0.1.1
+@version 0.1.2
 @author hsuanice
 @noindex
 @notes
@@ -12,6 +12,27 @@ Tim Chimes (original), adapted by hsuanice for AudioSweet Core integration.
   http://timchimes.com/scripting-with-reaper-audiosuite/
 
 @changelog
+  0.1.2 (2025-12-22) [internal: v251222.1035]
+    - ADDED: Multi-Channel Policy system with 3 options (Settings → Channel Mode)
+      • SOURCE-PLAYBACK: Match item's actual playback channels (default, current behavior)
+      • SOURCE-TRACK: Match source track channel count (RGWH/Pro Tools style)
+      • TARGET-TRACK: Respect FX track's current channel count (passive mode)
+      • Policy only applies when Channel Mode is explicitly set to "Multi"
+      • Auto/Mono modes use SOURCE-PLAYBACK logic (default behavior)
+      • Implemented in both TS-Window and RGWH Render paths
+      • Reads policy from ExtState: AS_MULTI_CHANNEL_POLICY
+      • Debug logging shows policy selection and resulting channel count
+    - ADDED: Source track channel count protection
+      • Snapshots source track I_NCHAN before moving items to FX track
+      • Restores source track channel count after processing complete
+      • Prevents REAPER auto-adjust from changing source track channel count
+      • Essential for post-production workflows and project interchange (Pro Tools/Nuendo)
+      • Implemented in both TS-Window and RGWH Render paths
+    - ADDED: Debug file logging
+      • All debug output now writes to ~/Desktop/AudioSweet_Core_Debug.log
+      • Prevents console messages from being washed away by RGWH Core output
+      • Helps troubleshooting when multiple cores are running
+
   0.1.1 (2025-12-21) [internal: v251221.2141]
     - ADDED: Track channel count restoration after execution
       • Snapshots track I_NCHAN at execution start (after FXmediaTrack is known)
@@ -527,10 +548,19 @@ function debug(message)
 end
 
 -- Step logger: always prints when DEBUG=1; use for deterministic tracing
+local DEBUG_FILE_PATH = (os.getenv("HOME") or "") .. "/Desktop/AudioSweet_Core_Debug.log"
 local function log_step(tag, fmt, ...)
   if not debug_enabled() then return end
   local msg = fmt and string.format(fmt, ...) or ""
-  reaper.ShowConsoleMsg(string.format("[AS][STEP] %s %s\n", tostring(tag or ""), msg))
+  local output = string.format("[AS][STEP] %s %s\n", tostring(tag or ""), msg)
+  reaper.ShowConsoleMsg(output)
+
+  -- Also write to file
+  local f = io.open(DEBUG_FILE_PATH, "a")
+  if f then
+    f:write(output)
+    f:close()
+  end
 end
 
 
@@ -1499,6 +1529,9 @@ local function apply_focused_fx_to_item(item, FXmediaTrack, fxIndex, FXName)
   local orig_chanmode = tk and reaper.GetMediaItemTakeInfo_Value(tk, "I_CHANMODE") or 0
   local orig_src_ch = get_source_channels(item)
 
+  -- ★ Snapshot source track channel count (protect from REAPER auto-adjust on move back)
+  local orig_track_nchan = tonumber(reaper.GetMediaTrackInfo_Value(origTR, "I_NCHAN")) or 2
+
   -- ★ NEW: snapshot FX enable state (preserve original bypass/enable)
   local fx_enable_snap = snapshot_fx_enables(FXmediaTrack)
 
@@ -1549,8 +1582,40 @@ local function apply_focused_fx_to_item(item, FXmediaTrack, fxIndex, FXName)
   if use_mono then
     cmd_apply = 40361
   else
-    local desired = (ch % 2 == 0) and ch or (ch + 1)
-    if prev_nchan ~= desired then
+    -- Multi-channel mode: apply policy (only when explicitly set to "multi")
+    local multi_policy = reaper.GetExtState("hsuanice_AS", "AS_MULTI_CHANNEL_POLICY")
+    if multi_policy == "" then multi_policy = "source_playback" end  -- default
+
+    local desired = nil
+
+    if apply_fx_mode == "multi" then
+      -- Explicit Multi mode: apply policy
+      if multi_policy == "source_playback" then
+        -- Option 1: Match source item playback channels
+        desired = (ch % 2 == 0) and ch or (ch + 1)
+        if debug_enabled() then
+          log_step("TS-APPLY", "Multi policy: SOURCE-PLAYBACK (item_ch=%d → desired=%d)", ch, desired)
+        end
+      elseif multi_policy == "source_track" then
+        -- Option 2: Match source track channel count
+        local src_track_ch = tonumber(reaper.GetMediaTrackInfo_Value(origTR, "I_NCHAN")) or 2
+        desired = (src_track_ch % 2 == 0) and src_track_ch or (src_track_ch + 1)
+        if debug_enabled() then
+          log_step("TS-APPLY", "Multi policy: SOURCE-TRACK (track_ch=%d → desired=%d)", src_track_ch, desired)
+        end
+      elseif multi_policy == "target_track" then
+        -- Option 3: Respect FX track's current channel count (no change)
+        desired = nil  -- Do not modify I_NCHAN
+        if debug_enabled() then
+          log_step("TS-APPLY", "Multi policy: TARGET-TRACK (keep I_NCHAN=%d)", prev_nchan)
+        end
+      end
+    else
+      -- Auto mode: use SOURCE-PLAYBACK logic (default behavior)
+      desired = (ch % 2 == 0) and ch or (ch + 1)
+    end
+
+    if desired and prev_nchan ~= desired then
       log_step("TS-APPLY", "I_NCHAN %d → %d (pre-apply)", prev_nchan, desired)
       reaper.SetMediaTrackInfo_Value(FXmediaTrack, "I_NCHAN", desired)
       did_set = true
@@ -1575,6 +1640,12 @@ local function apply_focused_fx_to_item(item, FXmediaTrack, fxIndex, FXName)
   append_fx_to_take_name(out, FXName)
   reaper.MoveMediaItemToTrack(out, origTR)
 
+  -- ★ Restore source track channel count (protect from REAPER auto-adjust)
+  reaper.SetMediaTrackInfo_Value(origTR, "I_NCHAN", orig_track_nchan)
+  if debug_enabled() then
+    log_step("TS-APPLY", "Restored source track I_NCHAN to %d", orig_track_nchan)
+  end
+
   -- ★ NEW: restore FX enable state (back to original bypass/enable)
   restore_fx_enables(FXmediaTrack, fx_enable_snap)
 
@@ -1590,6 +1661,9 @@ local function apply_focused_via_rgwh_render_new_take(item, FXmediaTrack, fxInde
   local tk = reaper.GetActiveTake(item)
   local orig_chanmode = tk and reaper.GetMediaItemTakeInfo_Value(tk, "I_CHANMODE") or 0
   local orig_src_ch = get_source_channels(item)
+
+  -- ★ Snapshot source track channel count (protect from REAPER auto-adjust on move back)
+  local orig_track_nchan = tonumber(reaper.GetMediaTrackInfo_Value(origTR, "I_NCHAN")) or 2
 
   -- ★ NEW: snapshot FX enable state (preserve original bypass/enable)
   local fx_enable_snap = snapshot_fx_enables(FXmediaTrack)
@@ -1646,6 +1720,57 @@ local function apply_focused_via_rgwh_render_new_take(item, FXmediaTrack, fxInde
     end
   end
 
+  -- Apply Multi-Channel Policy if in explicit "multi" mode
+  if debug_enabled() then
+    log_step("RGWH-RENDER", "apply_fx_mode='%s' (checking if == 'multi')", apply_fx_mode)
+  end
+
+  if apply_fx_mode == "multi" then
+    local multi_policy = reaper.GetExtState("hsuanice_AS", "AS_MULTI_CHANNEL_POLICY")
+    if multi_policy == "" then multi_policy = "source_playback" end
+    if debug_enabled() then
+      log_step("RGWH-RENDER", "Entering Multi-Channel Policy logic; policy='%s'", multi_policy)
+    end
+
+    local desired = nil
+
+    if multi_policy == "source_playback" then
+      -- Option 1: Match source item playback channels
+      local item_ch
+      if orig_chanmode == 2 or orig_chanmode == 3 or orig_chanmode == 4 then
+        item_ch = 1  -- mono modes
+      else
+        item_ch = orig_src_ch  -- use source channels
+      end
+      desired = (item_ch % 2 == 0) and item_ch or (item_ch + 1)
+      if debug_enabled() then
+        log_step("RGWH-RENDER", "Multi policy: SOURCE-PLAYBACK (item_ch=%d → desired=%d)", item_ch, desired)
+      end
+    elseif multi_policy == "source_track" then
+      -- Option 2: Match source track channel count
+      local src_track_ch = tonumber(reaper.GetMediaTrackInfo_Value(origTR, "I_NCHAN")) or 2
+      desired = (src_track_ch % 2 == 0) and src_track_ch or (src_track_ch + 1)
+      if debug_enabled() then
+        log_step("RGWH-RENDER", "Multi policy: SOURCE-TRACK (track_ch=%d → desired=%d)", src_track_ch, desired)
+      end
+    elseif multi_policy == "target_track" then
+      -- Option 3: Respect FX track's current channel count (no change)
+      desired = nil  -- Do not modify I_NCHAN
+      if debug_enabled() then
+        local fx_track_ch = tonumber(reaper.GetMediaTrackInfo_Value(FXmediaTrack, "I_NCHAN")) or 2
+        log_step("RGWH-RENDER", "Multi policy: TARGET-TRACK (keep I_NCHAN=%d)", fx_track_ch)
+      end
+    end
+
+    -- Set FX track channel count before calling RGWH Core (RGWH will handle restoration)
+    if desired then
+      reaper.SetMediaTrackInfo_Value(FXmediaTrack, "I_NCHAN", desired)
+      if debug_enabled() then
+        log_step("RGWH-RENDER", "Set FX track I_NCHAN to %d before render", desired)
+      end
+    end
+  end
+
   local ok_call, ret_or_err = pcall(M.render_selection, 1, 1, apply_fx_mode, "current")
   if not ok_call then
     log_step("ERROR", "render_selection() runtime error: %s", tostring(ret_or_err))
@@ -1656,6 +1781,12 @@ local function apply_focused_via_rgwh_render_new_take(item, FXmediaTrack, fxInde
   local out = reaper.GetSelectedMediaItem(0, 0) or item
   append_fx_to_take_name(out, FXName)
   reaper.MoveMediaItemToTrack(out, origTR)
+
+  -- ★ Restore source track channel count (protect from REAPER auto-adjust)
+  reaper.SetMediaTrackInfo_Value(origTR, "I_NCHAN", orig_track_nchan)
+  if debug_enabled() then
+    log_step("RGWH-RENDER", "Restored source track I_NCHAN to %d", orig_track_nchan)
+  end
 
   -- ★ NEW: restore FX enable state (back to original bypass/enable)
   restore_fx_enables(FXmediaTrack, fx_enable_snap)
