@@ -1,7 +1,7 @@
 --[[
 @description AudioSweet ReaImGui - AudioSuite Workflow (Pro Tools–Style)
 @author hsuanice
-@version 0.1.23
+@version 0.1.24
 @provides
   [main] .
 @about
@@ -65,6 +65,24 @@
 
 
 @changelog
+  v0.1.24 [Internal Build 251222.1706] - Single Undo for All Executions
+    - CHANGED: All GUI Run executions now produce single undo operation
+      • Main Run button: External undo control enabled
+      • Saved Chains execution: External undo control enabled
+      • History execution: External undo control enabled
+      • AudioSweet Core v0.1.7: Skips internal undo when EXTERNAL_UNDO_CONTROL="1"
+      • Cleaner undo stack (one entry instead of nested blocks)
+    - BENEFIT: Simplified undo experience
+      • GUI Run → Single "AudioSweet GUI: Focused/Chain Apply/Copy" undo
+      • Saved Chain → Single "AudioSweet GUI: Apply/Copy [Chain Name]" undo
+      • History → Single "AudioSweet GUI: Apply/Copy [History Name]" undo
+    - CHANGED: Unified all processing to use Core/GLUE path (RGWH Render path eliminated)
+      • AudioSweet Core v0.1.7: Single-item units now use Core/GLUE instead of RGWH Render
+      • GLUE mode produces single take (no old take preserved)
+      • Fixes position issues that occurred with RGWH Render path
+      • Multi-Channel Policy already implemented in Core/GLUE path (works immediately)
+      • Consistent behavior across all unit sizes (single/multi-item)
+
   v0.1.23 [Internal Build 251222.1651] - Unified GLUE Path for All Processing
     - CHANGED: All units now use Core/GLUE path (RGWH Render path eliminated)
       • AudioSweet Core v0.1.6: Single-item units now use Core/GLUE instead of RGWH Render
@@ -3105,6 +3123,9 @@ local function run_audiosweet(override_track)
   r.Undo_BeginBlock()
   r.PreventUIRefresh(1)
 
+  -- Tell AudioSweet Core to NOT create its own undo block (we're managing it here for single undo)
+  r.SetExtState("hsuanice_AS", "EXTERNAL_UNDO_CONTROL", "1", false)
+
   -- Only use Core for focused FX mode
   -- (Core needs GetFocusedFX to work properly)
   if effective_mode == "focused" and not override_track then
@@ -3177,6 +3198,9 @@ local function run_audiosweet(override_track)
   local mode_name = (effective_mode == "focused") and "Focused" or "Chain"
   local action_name = (gui.action == 0) and "Apply" or "Copy"
   r.Undo_EndBlock(string.format("AudioSweet GUI: %s %s", mode_name, action_name), -1)
+
+  -- Clear external undo control flag after execution
+  r.SetExtState("hsuanice_AS", "EXTERNAL_UNDO_CONTROL", "", false)
 
   gui.is_running = false
 end
@@ -3639,6 +3663,9 @@ local function run_saved_chain(chain_idx)
   r.Undo_BeginBlock()
   r.PreventUIRefresh(1)
 
+  -- Tell AudioSweet Core to NOT create its own undo block (we're managing it here for single undo)
+  r.SetExtState("hsuanice_AS", "EXTERNAL_UNDO_CONTROL", "1", false)
+
   -- Execute based on saved mode (chain or focused)
   if chain.mode == "focused" then
     -- For focused mode, use stored FX index
@@ -3661,6 +3688,9 @@ local function run_saved_chain(chain_idx)
 
   r.PreventUIRefresh(-1)
   r.Undo_EndBlock(string.format("AudioSweet GUI: %s [%s]", gui.action == 1 and "Copy" or "Apply", chain.name), -1)
+
+  -- Clear external undo control flag after execution
+  r.SetExtState("hsuanice_AS", "EXTERNAL_UNDO_CONTROL", "", false)
 end
 
 local function run_history_item(hist_idx)
@@ -3687,6 +3717,9 @@ local function run_history_item(hist_idx)
   r.Undo_BeginBlock()
   r.PreventUIRefresh(1)
 
+  -- Tell AudioSweet Core to NOT create its own undo block (we're managing it here for single undo)
+  r.SetExtState("hsuanice_AS", "EXTERNAL_UNDO_CONTROL", "1", false)
+
   -- Check if this was originally a focused FX or chain
   if hist_item.mode == "focused" then
     -- For focused mode, use stored FX index
@@ -3708,6 +3741,9 @@ local function run_history_item(hist_idx)
 
   r.PreventUIRefresh(-1)
   r.Undo_EndBlock(string.format("AudioSweet GUI: %s [%s]", gui.action == 1 and "Copy" or "Apply", hist_item.name), -1)
+
+  -- Clear external undo control flag after execution
+  r.SetExtState("hsuanice_AS", "EXTERNAL_UNDO_CONTROL", "", false)
 end
 
 ------------------------------------------------------------
