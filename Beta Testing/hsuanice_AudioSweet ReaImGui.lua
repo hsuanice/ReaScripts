@@ -1,7 +1,7 @@
 --[[
 @description AudioSweet ReaImGui - AudioSuite Workflow (Pro Tools–Style)
 @author hsuanice
-@version 0.1.24
+@version 0.1.25
 @provides
   [main] .
 @about
@@ -65,6 +65,12 @@
 
 
 @changelog
+  v0.1.25 [Internal Build 251222.2009] - Keyboard Shortcut Input Detection
+    - ADDED: Shortcut handling before ImGui.Begin()
+      • Space = Stop transport (command 40044)
+      • S = Solo toggle (respects Preview Solo Scope)
+    - SAFETY: Ignores shortcuts while typing in inputs (IsAnyItemActive)
+
   v0.1.24 [Internal Build 251222.1706] - Single Undo for All Executions
     - CHANGED: All GUI Run executions now produce single undo operation
       • Main Run button: External undo control enabled
@@ -3783,12 +3789,6 @@ local function draw_gui()
     end
   end
 
-  -- Note: Preview shortcuts with modifiers (Ctrl+Space, etc.) should use Tools scripts
-  -- Users should bind keyboard shortcuts to:
-  --   - "hsuanice_AudioSweet Chain Preview Solo Exclusive" (for Chain mode)
-  --   - "hsuanice_AudioSweet Preview Solo Exclusive" (for Focused mode)
-  -- These scripts read settings from GUI ExtState automatically
-
   local window_flags = ImGui.WindowFlags_MenuBar |
                        ImGui.WindowFlags_AlwaysAutoResize |
                        ImGui.WindowFlags_NoResize |
@@ -3884,7 +3884,7 @@ local function draw_gui()
           "=================================================\n" ..
           "AudioSweet ReaImGui - ImGui Interface for AudioSweet\n" ..
           "=================================================\n" ..
-          "Version: 0.1.19 (251222.1035)\n" ..
+          "Version: 0.1.25 (251222.2009)\n" ..
           "Author: hsuanice\n\n" ..
 
           "Reference:\n" ..
@@ -4290,6 +4290,112 @@ end
         ImGui.TextWrapped(ctx,
           "AudioSweet uses bwfmetaedit after renders to embed BWF TimeReference so downstream apps read the correct TC.\n" ..
           "If you skip installation, rendering still works but the embed step is skipped.")
+
+        ImGui.EndTabItem(ctx)
+      end
+
+      -- Keyboard Shortcuts Tab
+      if ImGui.BeginTabItem(ctx, 'Keyboard Shortcuts') then
+        ImGui.Spacing(ctx)
+        ImGui.TextWrapped(ctx, "AudioSweet keyboard shortcuts require setting up Tools scripts in REAPER's Action List.")
+        ImGui.Spacing(ctx)
+        ImGui.Separator(ctx)
+        ImGui.Spacing(ctx)
+
+        -- Action List Scripts Section
+        ImGui.TextColored(ctx, 0x4DA6FFFF, "Required Action List Scripts:")
+        ImGui.Spacing(ctx)
+        ImGui.TextWrapped(ctx,
+          "To use keyboard shortcuts, assign these AudioSweet Tools scripts in REAPER's Action List:")
+
+        ImGui.Spacing(ctx)
+        ImGui.Indent(ctx)
+
+        -- Script 1: Run
+        local script_run = "hsuanice_AudioSweet Run"
+        ImGui.BulletText(ctx, "Script: " .. script_run)
+        ImGui.SameLine(ctx)
+        if ImGui.SmallButton(ctx, "Copy##run") then
+          r.ImGui_SetClipboardText(ctx, script_run)
+        end
+        if ImGui.IsItemHovered(ctx) then
+          ImGui.SetTooltip(ctx, "Copy script name to clipboard for searching in Action List")
+        end
+        ImGui.Indent(ctx)
+        ImGui.TextColored(ctx, 0xAAAAAAFF, "Recommended shortcut: Ctrl+Enter")
+        ImGui.Unindent(ctx)
+        ImGui.Spacing(ctx)
+
+        -- Script 2: Solo Toggle
+        local script_solo = "hsuanice_AudioSweet Solo Toggle"
+        ImGui.BulletText(ctx, "Script: " .. script_solo)
+        ImGui.SameLine(ctx)
+        if ImGui.SmallButton(ctx, "Copy##solo") then
+          r.ImGui_SetClipboardText(ctx, script_solo)
+        end
+        if ImGui.IsItemHovered(ctx) then
+          ImGui.SetTooltip(ctx, "Copy script name to clipboard for searching in Action List")
+        end
+        ImGui.Indent(ctx)
+        ImGui.TextColored(ctx, 0xAAAAAAFF, "Recommended shortcut: Ctrl+S")
+        ImGui.Unindent(ctx)
+        ImGui.Spacing(ctx)
+
+        -- Script 3: Preview Toggle
+        local script_preview = "hsuanice_AudioSweet Preview Toggle"
+        ImGui.BulletText(ctx, "Script: " .. script_preview)
+        ImGui.SameLine(ctx)
+        if ImGui.SmallButton(ctx, "Copy##preview") then
+          r.ImGui_SetClipboardText(ctx, script_preview)
+        end
+        if ImGui.IsItemHovered(ctx) then
+          ImGui.SetTooltip(ctx, "Copy script name to clipboard for searching in Action List")
+        end
+        ImGui.Indent(ctx)
+        ImGui.TextColored(ctx, 0xAAAAAAFF, "Recommended shortcut: Ctrl+Space")
+        ImGui.Unindent(ctx)
+
+        ImGui.Unindent(ctx)
+        ImGui.Spacing(ctx)
+        ImGui.Separator(ctx)
+        ImGui.Spacing(ctx)
+
+        -- How to Set Shortcuts Tutorial
+        ImGui.TextColored(ctx, 0x4DA6FFFF, "How to set up keyboard shortcuts:")
+        ImGui.Spacing(ctx)
+        ImGui.TextWrapped(ctx, "1. Open REAPER's Actions window (? → Actions → Show action list)")
+        ImGui.TextWrapped(ctx, "2. Search for the script name using the 'Copy' buttons above")
+        ImGui.TextWrapped(ctx, "3. Select the script in the list")
+        ImGui.TextWrapped(ctx, "4. Click 'Add' button at the bottom to open the shortcut assignment window")
+        ImGui.TextWrapped(ctx, "5. In the Add window: Set 'Scope' dropdown to 'Global' (IMPORTANT!)")
+        ImGui.TextWrapped(ctx, "6. Press your desired key combination (e.g., Ctrl+Enter)")
+        ImGui.TextWrapped(ctx, "7. Click 'OK' to save")
+        ImGui.Spacing(ctx)
+        ImGui.TextWrapped(ctx, "Repeat for each script. Global scope ensures shortcuts work everywhere in REAPER, including when GUI is focused.")
+
+        ImGui.Spacing(ctx)
+        ImGui.Separator(ctx)
+        ImGui.Spacing(ctx)
+
+        -- Important Notes
+        ImGui.TextColored(ctx, 0x4DA6FFFF, "Important:")
+        ImGui.Spacing(ctx)
+        ImGui.BulletText(ctx, "Shortcuts must be set to 'Global' scope to work when GUI window is focused")
+        ImGui.BulletText(ctx, "All REAPER keyboard shortcuts work normally when GUI is open")
+        ImGui.BulletText(ctx, "ESC key closes the GUI window")
+        ImGui.BulletText(ctx, "Text input fields capture keyboard input normally for editing")
+
+        ImGui.Spacing(ctx)
+        ImGui.Separator(ctx)
+        ImGui.Spacing(ctx)
+
+        -- Benefits Section
+        ImGui.TextColored(ctx, 0x4DA6FFFF, "Why use Action List shortcuts?")
+        ImGui.Spacing(ctx)
+        ImGui.BulletText(ctx, "Work globally throughout REAPER (not just in GUI)")
+        ImGui.BulletText(ctx, "Single configuration applies everywhere")
+        ImGui.BulletText(ctx, "Can be used in custom actions and macros")
+        ImGui.BulletText(ctx, "Faster execution with direct script calls")
 
         ImGui.EndTabItem(ctx)
       end
@@ -5141,7 +5247,16 @@ end
 
   local button_label = is_previewing_now and "STOP" or "PREVIEW"
   if ImGui.Button(ctx, button_label, button_width, 35) then
-    toggle_preview()
+    if is_previewing_now then
+      -- Use OnStopButton instead of Main_OnCommand for better compatibility
+      r.OnStopButton()
+      gui.is_previewing = false
+      if gui.debug then
+        r.ShowConsoleMsg("[AS GUI] STOP button pressed (OnStopButton)\n")
+      end
+    else
+      toggle_preview()
+    end
   end
 
   if is_previewing_now then
@@ -5164,18 +5279,6 @@ end
     run_audiosweet(nil)
   end
   if not can_run then ImGui.EndDisabled(ctx) end
-
-  -- === KEYBOARD SHORTCUTS INFO ===
-  ImGui.PushStyleColor(ctx, ImGui.Col_Text, 0x808080FF)  -- Gray color
-  ImGui.Text(ctx, "Shortcuts: ESC = Close, Space = Stop, S = Solo")
-  if effective_mode == "chain" then
-    -- Chain mode
-    ImGui.Text(ctx, "Tip: Set shortcut 'Script: hsuanice_AudioSweet Chain Preview...' (Ctrl+Space)")
-  else
-    -- Focused mode
-    ImGui.Text(ctx, "Tip: Set shortcut 'Script: hsuanice_AudioSweet Preview...' (Ctrl+Shift+Space)")
-  end
-  ImGui.PopStyleColor(ctx)
 
   ImGui.Separator(ctx)
 
