@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<index version="1" name="hsuanice Scripts" commit="4000e63f0a9f23bc718018527db6764d9a5f7bbd">
+<index version="1" name="hsuanice Scripts" commit="134c5ce00fa050df9f18b5de9691be87c639b23b">
   <category name="Beta Testing">
     <reapack name="hsuanice_AudioSweet ReaImGui.lua" type="script" desc="AudioSweet ReaImGui - AudioSuite Workflow (Pro Tools–Style)">
       <metadata>
@@ -105,6 +105,9 @@
       </version>
       <version name="0.1.25" author="hsuanice" time="2025-12-22T12:11:12Z">
         <source main="main">https://github.com/hsuanice/ReaScripts/raw/4000e63f0a9f23bc718018527db6764d9a5f7bbd/Beta%20Testing/hsuanice_AudioSweet%20ReaImGui.lua</source>
+      </version>
+      <version name="0.1.26" author="hsuanice" time="2025-12-23T11:29:34Z">
+        <source main="main">https://github.com/hsuanice/ReaScripts/raw/5b874e2d8293194f713e990ddf5b28abdb17cbb6/Beta%20Testing/hsuanice_AudioSweet%20ReaImGui.lua</source>
       </version>
     </reapack>
     <reapack name="hsuanice_BWF TimeReference Embed Tool.lua" type="script" desc="Embed BWF TimeReference to Active take from Take 1 or Current Position TC">
@@ -2064,6 +2067,9 @@ v0.9.0 - Added Shared Link State section from Project ExtState "hsuanice_Link".]
       </version>
       <version name="0.1.1" author="hsuanice" time="2025-12-22T09:10:55Z">
         <source main="main">https://github.com/hsuanice/ReaScripts/raw/69377dbec21ac7ea205742c0dc0a27d74c6c598e/Tools/hsuanice_AudioSweet%20Run.lua</source>
+      </version>
+      <version name="0.1.2" author="hsuanice" time="2025-12-23T11:30:31Z">
+        <source main="main">https://github.com/hsuanice/ReaScripts/raw/134c5ce00fa050df9f18b5de9691be87c639b23b/Tools/hsuanice_AudioSweet%20Run.lua</source>
       </version>
     </reapack>
     <reapack name="hsuanice_AudioSweet Solo Toggle.lua" type="script" desc="AudioSweet Solo Toggle">
