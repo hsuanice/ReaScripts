@@ -1,6 +1,6 @@
 --[[
 @description AudioSweet Core - Focused Track FX render via RGWH Core
-@version 0.1.8
+@version 0.1.9
 @author hsuanice
 @noindex
 @notes
@@ -12,6 +12,16 @@ Tim Chimes (original), adapted by hsuanice for AudioSweet Core integration.
   http://timchimes.com/scripting-with-reaper-audiosuite/
 
 @changelog
+  0.1.9 (2025-12-23) [internal: v251223.2236]
+    - CHANGED: Copy+Apply now reuses Apply flow, then copies target FX to non-active takes
+      • Single/multi items share the same glue/apply path for stability
+      • Copy+Apply no longer uses a separate glue→copy→render path
+    - CHANGED: Copy+Apply FX copy targets the processed take channel count (min 2)
+    - FIXED: TC embed offset by handle length in Apply flow
+      • Use item-start-based TC (matches RGWH current mode)
+    - DEBUG: Added TC embed logging for current/previous sources
+    - NOTE: Do not override RGWH TC embed mode in Core/GLUE path
+
   0.1.8 (2025-12-23) [internal: v251223.1924]
     - ADDED: Copy+Apply flow (copy FX then render) with multi-item glue support
       • Copy step now enforces identity pin mappings for stable multichannel IO
@@ -807,12 +817,137 @@ local function AS_copy_to_selected_items(src_track, fx_index, args)
   return AS_copy_chain_to_items(src_track, args)
 end
 
+local function copy_trackfx_to_take(src_track, fx_index, tk, dest)
+  reaper.TrackFX_CopyToTake(src_track, fx_index, tk, dest, false)
+  local in_ch, out_ch = reaper.TrackFX_GetIOSize(src_track, fx_index)
+  if in_ch and out_ch then
+    for pin = 0, in_ch - 1 do
+      local lo, hi = reaper.TrackFX_GetPinMappings(src_track, fx_index, 0, pin)
+      if lo then reaper.TakeFX_SetPinMappings(tk, dest, 0, pin, lo, hi) end
+    end
+    for pin = 0, out_ch - 1 do
+      local lo, hi = reaper.TrackFX_GetPinMappings(src_track, fx_index, 1, pin)
+      if lo then reaper.TakeFX_SetPinMappings(tk, dest, 1, pin, lo, hi) end
+    end
+  end
+end
+
+local function copy_focused_fx_to_take(src_track, fx_index, tk, append_pos)
+  local dest = (append_pos == "head") and 0 or (reaper.TakeFX_GetCount(tk) or 0)
+  copy_trackfx_to_take(src_track, fx_index, tk, dest)
+  return 1
+end
+
+local function copy_chain_fx_to_take(src_track, tk, append_pos)
+  local chainN = reaper.TrackFX_GetCount(src_track) or 0
+  local total = 0
+  if append_pos == "head" then
+    for fx = chainN - 1, 0, -1 do
+      copy_trackfx_to_take(src_track, fx, tk, 0)
+      total = total + 1
+    end
+  else
+    for fx = 0, chainN - 1 do
+      local dest = reaper.TakeFX_GetCount(tk) or 0
+      copy_trackfx_to_take(src_track, fx, tk, dest)
+      total = total + 1
+    end
+  end
+  return total
+end
+
+local get_item_channels
+local clear_take_fx
+local snapshot_trackfx_pins
+local restore_trackfx_pins
+local set_trackfx_identity_pins
+
+local function resolve_apply_fx_mode_for_item(item)
+  local mode = reaper.GetExtState("hsuanice_AS", "AS_APPLY_FX_MODE")
+  if mode == "" or mode == "auto" then
+    return (get_item_channels(item) <= 1) and "mono" or "multi"
+  end
+  return mode
+end
+
+local function compute_desired_nchan_for_copy(item, FXmediaTrack, apply_fx_mode, source_track_nchan)
+  if apply_fx_mode ~= "multi" then return nil end
+  local multi_policy = reaper.GetExtState("hsuanice_AS", "AS_MULTI_CHANNEL_POLICY")
+  if multi_policy == "" then multi_policy = "source_playback" end
+
+  if multi_policy == "source_playback" then
+    local ch = get_item_channels(item)
+    if ch <= 1 then return nil end
+    return (ch % 2 == 0) and ch or (ch + 1)
+  elseif multi_policy == "source_track" then
+    local tr_ch = source_track_nchan or 2
+    return (tr_ch % 2 == 0) and tr_ch or (tr_ch + 1)
+  elseif multi_policy == "target_track" then
+    return tonumber(reaper.GetMediaTrackInfo_Value(FXmediaTrack, "I_NCHAN")) or 2
+  end
+  return nil
+end
+
+local function copy_fx_to_non_active_takes(item, FXmediaTrack, fxIndex, source_track_nchan)
+  if not item then return 0 end
+  local take_count = reaper.CountTakes(item) or 0
+  if take_count <= 1 then return 0 end
+  local active = reaper.GetActiveTake(item)
+
+  local apply_fx_mode = resolve_apply_fx_mode_for_item(item)
+  local desired_nchan = nil
+  if apply_fx_mode == "multi" then
+    local ch = get_item_channels(item)
+    if ch and ch > 0 then
+      desired_nchan = (ch < 2) and 2 or ch
+    end
+  end
+  local prev_nchan = tonumber(reaper.GetMediaTrackInfo_Value(FXmediaTrack, "I_NCHAN")) or 2
+  local did_set = false
+  if apply_fx_mode == "multi" and desired_nchan then
+    reaper.SetMediaTrackInfo_Value(FXmediaTrack, "I_NCHAN", desired_nchan)
+    did_set = true
+  end
+
+  local total = 0
+  local copy_mode = (AS and AS.mode) or AS_merge_args_with_extstate({}).mode
+  for t = 0, take_count - 1 do
+    local tk = reaper.GetMediaItemTake(item, t)
+    if tk and tk ~= active then
+      clear_take_fx(tk)
+      if copy_mode == "focused" then
+        total = total + copy_focused_fx_to_take(FXmediaTrack, fxIndex, tk, "tail")
+      else
+        total = total + copy_chain_fx_to_take(FXmediaTrack, tk, "tail")
+      end
+    end
+  end
+
+  if did_set then
+    reaper.SetMediaTrackInfo_Value(FXmediaTrack, "I_NCHAN", prev_nchan)
+  end
+
+  return total
+end
+
+local function is_valid_item(it)
+  if not it then return false end
+  if reaper.ValidatePtr2 then
+    return reaper.ValidatePtr2(0, it, "MediaItem*")
+  end
+  if reaper.ValidatePtr then
+    return reaper.ValidatePtr(it, "MediaItem*")
+  end
+  return true
+end
+
 local function dbg_take_fx_io(label, items)
   if not debug_enabled() then return end
   local list = items or {}
   for _, it in ipairs(list) do
-    if it and (reaper.ValidatePtr2 == nil or reaper.ValidatePtr2(0, it, "MediaItem*")) then
-      local tk = reaper.GetActiveTake(it)
+    if is_valid_item(it) then
+      local ok, tk = pcall(reaper.GetActiveTake, it)
+      if not ok then tk = nil end
       if tk then
         local chanmode = reaper.GetMediaItemTakeInfo_Value(tk, "I_CHANMODE") or 0
         local fxn = reaper.TakeFX_GetCount(tk) or 0
@@ -838,11 +973,40 @@ local function dbg_take_fx_io(label, items)
   end
 end
 
-local function clear_take_fx(tk)
+clear_take_fx = function(tk)
   if not tk then return end
   local n = reaper.TakeFX_GetCount(tk) or 0
   for i = n - 1, 0, -1 do
     reaper.TakeFX_Delete(tk, i)
+  end
+end
+
+local function snapshot_takefx_enabled(tk)
+  if not tk then return nil end
+  local n = reaper.TakeFX_GetCount(tk) or 0
+  local snap = {}
+  for i = 0, n - 1 do
+    snap[i] = reaper.TakeFX_GetEnabled(tk, i)
+  end
+  return snap
+end
+
+local function set_takefx_enabled(tk, enabled)
+  if not tk then return end
+  local n = reaper.TakeFX_GetCount(tk) or 0
+  for i = 0, n - 1 do
+    reaper.TakeFX_SetEnabled(tk, i, enabled)
+  end
+end
+
+local function restore_takefx_enabled(tk, snap)
+  if not tk or not snap then return end
+  local n = reaper.TakeFX_GetCount(tk) or 0
+  for i = 0, n - 1 do
+    local state = snap[i]
+    if state ~= nil then
+      reaper.TakeFX_SetEnabled(tk, i, state)
+    end
   end
 end
 -- ================================================
@@ -897,7 +1061,7 @@ local function pin_mask_for_channel(ch)
   return 0, 2 ^ (ch - 32)
 end
 
-local function snapshot_trackfx_pins(tr, fx)
+snapshot_trackfx_pins = function(tr, fx)
   if not tr then return nil end
   local in_ch, out_ch = reaper.TrackFX_GetIOSize(tr, fx)
   if not in_ch or not out_ch then return nil end
@@ -913,7 +1077,7 @@ local function snapshot_trackfx_pins(tr, fx)
   return snap
 end
 
-local function restore_trackfx_pins(tr, fx, snap)
+restore_trackfx_pins = function(tr, fx, snap)
   if not tr or not snap then return end
   for pin = 0, (snap.in_ch or 0) - 1 do
     local m = snap.in_map[pin]
@@ -925,7 +1089,7 @@ local function restore_trackfx_pins(tr, fx, snap)
   end
 end
 
-local function set_trackfx_identity_pins(tr, fx, nch)
+set_trackfx_identity_pins = function(tr, fx, nch)
   if not tr or not nch then return end
   local in_ch, out_ch = reaper.TrackFX_GetIOSize(tr, fx)
   if not in_ch or not out_ch then return end
@@ -1366,7 +1530,7 @@ end
 
 -- Get item's actual playback channel count (respects take channel mode setting)
 -- This considers whether the take is set to mono, stereo, or multichannel
-local function get_item_channels(it)
+get_item_channels = function(it)
   if not it then return 2 end
 
   local tk = reaper.GetActiveTake(it)
@@ -1607,7 +1771,7 @@ end
 local function move_items_to_track(items, destTrack)
   for _, it in ipairs(items) do
     -- Enhanced safety check: only move MediaItem*
-    if it and (reaper.ValidatePtr2 == nil or reaper.ValidatePtr2(0, it, "MediaItem*")) then
+    if is_valid_item(it) then
       reaper.MoveMediaItemToTrack(it, destTrack)
     else
       log_step("WARN", "move_items_to_track: skipped non-item entry=%s", tostring(it))
@@ -1629,7 +1793,7 @@ end
 local function select_only_items_checked(items)
   reaper.Main_OnCommand(40289, 0)
   for _,it in ipairs(items) do
-    if it and (reaper.ValidatePtr2 == nil or reaper.ValidatePtr2(0, it, "MediaItem*")) then
+    if is_valid_item(it) then
       reaper.SetMediaItemSelected(it, true)
     end
   end
@@ -1724,11 +1888,95 @@ local function parse_as_tag(full)
 
   return base, tonumber(n), fx_tokens
 end
+local function embed_previous_tc_for_item(item)
+  if not item then return end
+  local tk = reaper.GetActiveTake(item)
+  if not tk then return end
+  local prev_tk = nil
+  local tc = reaper.CountTakes(item) or 0
+  local active_idx = -1
+  for i = 0, tc - 1 do
+    local t = reaper.GetMediaItemTake(item, i)
+    if t and t ~= tk then
+      prev_tk = t
+      if active_idx < 0 then active_idx = i end
+      break
+    elseif t == tk then
+      active_idx = i
+    end
+  end
+  if not prev_tk then return end
+  local meta_path = reaper.GetResourcePath() .. "/Scripts/hsuanice Scripts/Library/hsuanice_Metadata Embed.lua"
+  local ok_mod, E = pcall(dofile, meta_path)
+  if not ok_mod or type(E) ~= "table" then return end
+  if debug_enabled() then
+    local pos = reaper.GetMediaItemInfo_Value(item, "D_POSITION") or 0
+    local len = reaper.GetMediaItemInfo_Value(item, "D_LENGTH") or 0
+    local offs_active = reaper.GetMediaItemTakeInfo_Value(tk, "D_STARTOFFS") or 0
+    local offs_prev = reaper.GetMediaItemTakeInfo_Value(prev_tk, "D_STARTOFFS") or 0
+    log_step("TC", "embed prev→active item=%s pos=%.6f len=%.6f takes=%d active_idx=%d offs_active=%.6f offs_prev=%.6f",
+      tostring(item), pos, len, tc, active_idx, offs_active, offs_prev)
+  end
+  local smp = E.TR_PrevToActive(prev_tk, tk)
+  local src = reaper.GetMediaItemTake_Source(tk)
+  local path = src and reaper.GetMediaSourceFileName(src, "") or ""
+  if path ~= "" and path:lower():sub(-4) == ".wav" then
+    local cli = E.CLI_Resolve()
+    if debug_enabled() and E.TR_Read then
+      local ok_read, smp_prev = pcall(E.TR_Read, cli, path)
+      log_step("TC", "embed tc: prev_read_ok=%s prev_smp=%s next_smp=%s path='%s'",
+        tostring(ok_read), tostring(smp_prev), tostring(smp), path)
+    end
+    local ok = (select(1, E.TR_Write(cli, path, smp)) == true)
+    if ok then
+      E.Refresh_Items({ tk })
+      if debug_enabled() then
+        log_step("TC", "embed tc: write ok path='%s' smp=%s", path, tostring(smp))
+      end
+    elseif debug_enabled() then
+      log_step("TC", "embed tc: write failed path='%s' smp=%s", path, tostring(smp))
+    end
+  elseif debug_enabled() then
+    log_step("TC", "embed tc: skip non-wav path='%s'", path)
+  end
+end
+local function embed_current_tc_from_item_start(item)
+  if not item then return end
+  local tk = reaper.GetActiveTake(item)
+  if not tk then return end
+  local pos = reaper.GetMediaItemInfo_Value(item, "D_POSITION") or 0
+  local offs = reaper.GetMediaItemTakeInfo_Value(tk, "D_STARTOFFS") or 0
+  local meta_path = reaper.GetResourcePath() .. "/Scripts/hsuanice Scripts/Library/hsuanice_Metadata Embed.lua"
+  local ok_mod, E = pcall(dofile, meta_path)
+  if not ok_mod or type(E) ~= "table" then return end
+  -- TR_FromItemStart already subtracts D_STARTOFFS internally
+  local smp = E.TR_FromItemStart(tk, pos)
+  local src = reaper.GetMediaItemTake_Source(tk)
+  local path = src and reaper.GetMediaSourceFileName(src, "") or ""
+  if debug_enabled() then
+    log_step("TC", "embed current(from item) pos=%.6f offs=%.6f smp=%s path='%s'",
+      pos, offs, tostring(smp), path)
+  end
+  if path ~= "" and path:lower():sub(-4) == ".wav" then
+    local cli = E.CLI_Resolve()
+    local ok = (select(1, E.TR_Write(cli, path, smp)) == true)
+    if ok then
+      E.Refresh_Items({ tk })
+    end
+    if debug_enabled() then
+      log_step("TC", "embed current(from item) write=%s path='%s'", tostring(ok), path)
+    end
+  end
+end
 -- Shared: move single item to FX track and apply "focused FX only"
 -- source_track_nchan_snapshot: optional table[source_track] = nchan for TS-WINDOW[GLOBAL] path (pre-glue snapshot of SOURCE tracks)
 local function apply_focused_fx_to_item(item, FXmediaTrack, fxIndex, FXName, source_track_nchan_snapshot)
   if not item then return false, -1 end
   local origTR = reaper.GetMediaItem_Track(item)
+
+  -- Ensure TC embed uses current timecode during Apply flow
+  local _, tc_embed_snap = reaper.GetProjExtState(0, "RGWH", "RENDER_TC_EMBED")
+  reaper.SetProjExtState(0, "RGWH", "RENDER_TC_EMBED", "current")
 
   -- ★ Snapshot take's channel info BEFORE moving (MoveMediaItemToTrack might affect it!)
   local tk = reaper.GetActiveTake(item)
@@ -1757,9 +2005,7 @@ local function apply_focused_fx_to_item(item, FXmediaTrack, fxIndex, FXName, sou
   reaper.MoveMediaItemToTrack(item, FXmediaTrack)
   dbg_item_brief(item, "TS-APPLY moved→FX")
   local __AS = AS_merge_args_with_extstate({})
-  if __AS.action == "apply_after_copy" then
-    disable_all_fx(FXmediaTrack)
-  elseif __AS.mode == "focused" then
+  if __AS.mode == "focused" then
     isolate_focused_fx(FXmediaTrack, fxIndex)
   else
     -- chain mode: do NOT isolate; apply entire track FX chain
@@ -1863,6 +2109,10 @@ local function apply_focused_fx_to_item(item, FXmediaTrack, fxIndex, FXName, sou
   local out = reaper.GetSelectedMediaItem(0, 0) or item
   append_fx_to_take_name(out, FXName)
   reaper.MoveMediaItemToTrack(out, origTR)
+  if debug_enabled() then
+    log_step("TC", "embed tc on output item=%s", tostring(out))
+  end
+  embed_previous_tc_for_item(out)
 
   -- ★ Restore source track channel count (protect from REAPER auto-adjust)
   -- Skip individual restore if called from TS-WINDOW[GLOBAL] (will be restored in batch at end)
@@ -1879,6 +2129,13 @@ local function apply_focused_fx_to_item(item, FXmediaTrack, fxIndex, FXName, sou
 
   -- ★ NEW: restore FX enable state (back to original bypass/enable)
   restore_fx_enables(FXmediaTrack, fx_enable_snap)
+
+  -- Restore TC embed setting
+  if tc_embed_snap ~= "" then
+    reaper.SetProjExtState(0, "RGWH", "RENDER_TC_EMBED", tc_embed_snap)
+  else
+    reaper.SetProjExtState(0, "RGWH", "RENDER_TC_EMBED", "")
+  end
 
   return true, cmd_apply
 end
@@ -2338,18 +2595,20 @@ function main() -- main part of the script
       end
 
       for idx, it in ipairs(glued_items) do
-        if is_apply_after_copy then
-          reaper.Main_OnCommand(40289, 0)
-          reaper.SetMediaItemSelected(it, true)
-          local ops = AS_copy_to_selected_items(FXmediaTrack, fxIndex, AS)
-          log_step("COPY", "apply_after_copy: glued #%d ops=%d", idx, ops)
-        end
         local ok, used_cmd = apply_focused_fx_to_item(it, FXmediaTrack, fxIndex, naming_token, source_track_nchan_snapshot)
         if ok then
           log_step("TS-WINDOW[GLOBAL]", "applied %d to glued #%d", used_cmd or -1, idx)
           -- Get the actually applied item (function sets selection to this item)
           local out_item = reaper.GetSelectedMediaItem(0, 0)
-          if out_item then table.insert(outputs, out_item) end
+          if out_item then
+            if is_apply_after_copy then
+              local tr = reaper.GetMediaItem_Track(out_item)
+              local src_nchan = source_track_nchan_snapshot[tr]
+              local copied = copy_fx_to_non_active_takes(out_item, FXmediaTrack, fxIndex, src_nchan)
+              log_step("COPY", "apply_after_copy: copied FX to %d take(s)", copied)
+            end
+            table.insert(outputs, out_item)
+          end
         else
           log_step("TS-WINDOW[GLOBAL]", "apply failed on glued #%d", idx)
         end
@@ -2409,16 +2668,14 @@ function main() -- main part of the script
         goto continue_unit
       end
 
-      if is_apply_after_copy then
-        reaper.Main_OnCommand(40289, 0)
-        reaper.SetMediaItemSelected(glued, true)
-        local ops = AS_copy_to_selected_items(FXmediaTrack, fxIndex, AS)
-        log_step("COPY", "apply_after_copy: unit ops=%d", ops)
-      end
-
       local ok, used_cmd = apply_focused_fx_to_item(glued, FXmediaTrack, fxIndex, naming_token)
       if ok then
         log_step("TS-WINDOW[UNIT]", "applied %d", used_cmd or -1)
+        if is_apply_after_copy then
+          local src_nchan = tonumber(reaper.GetMediaTrackInfo_Value(u.track, "I_NCHAN")) or 2
+          local copied = copy_fx_to_non_active_takes(glued, FXmediaTrack, fxIndex, src_nchan)
+          log_step("COPY", "apply_after_copy: copied FX to %d take(s)", copied)
+        end
         table.insert(outputs, glued)  -- out item already moved back to original track
       else
         log_step("TS-WINDOW[UNIT]", "apply failed")
@@ -2558,7 +2815,7 @@ function main() -- main part of the script
         proj_set("RGWH","GLUE_TRACK_FX","1")
         proj_set("RGWH","GLUE_APPLY_MODE",apply_fx_mode)
         proj_set("RGWH","GLUE_SINGLE_ITEMS","1")
-        proj_set("RGWH","RENDER_TC_EMBED","current")
+        -- Do not override RGWH TC embed mode; preserve its own setting
 
         if debug_enabled() then
           local _, gsi = reaper.GetProjExtState(0, "RGWH", "GLUE_SINGLE_ITEMS")
@@ -2622,147 +2879,8 @@ function main() -- main part of the script
           reaper.SetExtState("hsuanice_AS", "RGWH_PRESERVE_TRACK_CH", "1", false)
         end
 
-        -- Apply After Copy: glue (if needed) → copy FX to take → render (take FX only)
-        if is_apply_after_copy then
-          dbg_take_fx_io("pre-copy", u.items)
-          local ok_apply = true
-          local need_glue = (#u.items > 1)
-          local force_multi = (apply_fx_mode == "multi")
-          local glue_succeeded = false
-          if type(mod) ~= "table" or type(mod.core) ~= "function" then
-            log_step("ERROR", "RGWH core() not available for apply_after_copy")
-            reaper.MB("RGWH Core core() not available for apply_after_copy.", "AudioSweet — Core error", 0)
-            failed = true
-            ok_apply = false
-          end
-
-          if ok_apply then
-            if need_glue then
-              local ok_call, ok_glue, err = pcall(mod.core, {
-                op = "glue",
-                channel_mode = apply_fx_mode,
-                take_fx = true,
-                track_fx = false,
-                selection_scope = "units",
-                policies = {
-                  glue_single_items = true,
-                  glue_no_trackfx_output_policy = "preserve",
-                },
-              })
-              if not ok_call or not ok_glue then
-                log_step("ERROR", "apply_after_copy glue failed: %s", tostring(err or ok_glue))
-                reaper.MB("RGWH Core glue error:\n" .. tostring(err or "(nil)"), "AudioSweet — Core error", 0)
-                failed = true
-                ok_apply = false
-              else
-                glue_succeeded = true
-              end
-            end
-          end
-
-          if ok_apply then
-            if apply_fx_mode == "multi" and desired_nchan_for_copy then
-              reaper.SetMediaTrackInfo_Value(FXmediaTrack, "I_NCHAN", desired_nchan_for_copy)
-              if debug_enabled() then
-                log_step("CORE", "Set FX track I_NCHAN to %d before copy", desired_nchan_for_copy)
-              end
-            end
-            local pin_snaps = nil
-            if apply_fx_mode == "multi" and desired_nchan_for_copy then
-              local copy_mode = (AS and AS.mode) or AS_merge_args_with_extstate({}).mode
-              local fx_list = {}
-              if copy_mode == "focused" then
-                fx_list = { fxIndex }
-              else
-                local fxn = reaper.TrackFX_GetCount(FXmediaTrack) or 0
-                for i = 0, fxn - 1 do fx_list[#fx_list + 1] = i end
-              end
-              pin_snaps = {}
-              for _, fx in ipairs(fx_list) do
-                pin_snaps[fx] = snapshot_trackfx_pins(FXmediaTrack, fx)
-                set_trackfx_identity_pins(FXmediaTrack, fx, desired_nchan_for_copy)
-              end
-              if debug_enabled() then
-                log_step("CORE", "Set FX pin mappings to identity for copy (nchan=%d, fx_count=%d)", desired_nchan_for_copy, #fx_list)
-              end
-            end
-            local copy_args = {
-              mode = AS.mode,
-              scope = "active",
-              append_pos = "tail",
-            }
-            local ops = AS_copy_to_selected_items(FXmediaTrack, fxIndex, copy_args)
-            log_step("COPY", "apply_after_copy: unit ops=%d", ops)
-            dbg_take_fx_io("post-copy", u.items)
-            if pin_snaps then
-              for fx, snap in pairs(pin_snaps) do
-                restore_trackfx_pins(FXmediaTrack, fx, snap)
-              end
-            end
-
-            local ok_call, ok_render, err = pcall(mod.core, {
-              op = "render",
-              channel_mode = apply_fx_mode,
-              take_fx = false,
-              track_fx = true,
-              policies = {
-                render_no_trackfx_output_policy = force_multi and "force_multi" or nil,
-              },
-            })
-            if not ok_call or not ok_render then
-              log_step("ERROR", "apply_after_copy render failed: %s", tostring(err or ok_render))
-              reaper.MB("RGWH Core render error:\n" .. tostring(err or "(nil)"), "AudioSweet — Core error", 0)
-              failed = true
-            end
-            dbg_take_fx_io("post-render", u.items)
-          end
-
-          -- Clear ExtState after RGWH Core execution
-          reaper.SetExtState("hsuanice_AS", "RGWH_PRESERVE_TRACK_CH", "", false)
-
-          -- Pick output, rename, move back
-          if not failed then
-            if need_glue then
-              local postItem = reaper.GetSelectedMediaItem(0, 0)
-              if not postItem then
-                reaper.MB("Core finished, but no item is selected.", "AudioSweet", 0)
-                failed = true
-              else
-                local postTk = reaper.GetActiveTake(postItem)
-                clear_take_fx(postTk)
-                append_fx_to_take_name(postItem, naming_token)
-                local origTR = u.track
-                reaper.MoveMediaItemToTrack(postItem, origTR)
-                table.insert(outputs, postItem)
-              end
-            else
-              for _, it in ipairs(u.items) do
-                local tk = reaper.GetActiveTake(it)
-                clear_take_fx(tk)
-                append_fx_to_take_name(it, naming_token)
-                table.insert(outputs, it)
-              end
-            end
-          end
-
-          -- Ensure originals return to source track (position safety when FX track is below)
-          if not need_glue or (need_glue and not glue_succeeded) then
-            move_items_to_track(u.items, u.track)
-          end
-
-          -- Restore FX enable state and source track channel count
-          restore_fx_enables(FXmediaTrack, fx_enable_snap_core)
-          reaper.SetMediaTrackInfo_Value(u.track, "I_NCHAN", orig_track_nchan_core)
-          if debug_enabled() then
-            local tr_num = reaper.GetMediaTrackInfo_Value(u.track, "IP_TRACKNUMBER")
-            log_step("CORE", "restored SOURCE track #%d I_NCHAN=%d (post-apply_after_copy)", tr_num, orig_track_nchan_core)
-          end
-
-          goto continue_unit
-        end
-
         -- Prepare arguments and call Core
-        if not (anchor and (reaper.ValidatePtr2 == nil or reaper.ValidatePtr2(0, anchor, "MediaItem*"))) then
+        if not is_valid_item(anchor) then
           log_step("ERROR", "anchor item invalid (u.items[1]=%s)", tostring(anchor))
           reaper.MB("Internal error: unit anchor item is invalid.", "AudioSweet", 0)
           failed = true
@@ -2820,6 +2938,12 @@ function main() -- main part of the script
             append_fx_to_take_name(postItem, naming_token)
             local origTR = u.track
             reaper.MoveMediaItemToTrack(postItem, origTR)
+            -- Fix TC after RGWH glue/apply; use item start minus handle (D_STARTOFFS)
+            embed_current_tc_from_item_start(postItem)
+            if is_apply_after_copy then
+              local copied = copy_fx_to_non_active_takes(postItem, FXmediaTrack, fxIndex, orig_track_nchan_core)
+              log_step("COPY", "apply_after_copy: copied FX to %d take(s)", copied)
+            end
             table.insert(outputs, postItem)
           end
 
@@ -2861,5 +2985,13 @@ function main() -- main part of the script
 end
 
 reaper.PreventUIRefresh(1)
-main()
+local function as_err_handler(err)
+  return tostring(err)
+end
+local ok, err = xpcall(main, as_err_handler)
+if not ok then
+  local msg = "[AS][ERROR] " .. tostring(err)
+  reaper.ShowConsoleMsg(msg .. "\n")
+  reaper.MB("AudioSweet Core error:\n" .. tostring(err), "AudioSweet — Core error", 0)
+end
 reaper.PreventUIRefresh(-1)
