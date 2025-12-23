@@ -1,7 +1,7 @@
 --[[
 @description AudioSweet Solo Toggle
 @author hsuanice
-@version 0.1.0
+@version 0.2.0
 @provides
   [main] .
 @about
@@ -31,6 +31,9 @@
   - Works independently - can be assigned to keyboard shortcuts in action list
 
 @changelog
+  v0.2.0 [Internal Build 251223.2256] - Public Beta Release
+    - CHANGED: Version bump to 0.2.0 (public beta)
+
   v0.1.0 [Internal Build 251221.1123] - Public Beta Release
     - Intelligent solo toggle for AudioSweet Preview workflow
     - 3-priority target detection:
