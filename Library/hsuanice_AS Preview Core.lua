@@ -1,6 +1,6 @@
 --[[
 @description AudioSweet Preview Core
-@version 0.2.0
+@version 0.2.0.0.1
 @author hsuanice
 
 @provides
@@ -9,6 +9,10 @@
 @about Minimal, self-contained preview runtime. Later we can extract helpers to "hsuanice_AS Core.lua".
 
 @changelog
+  v0.2.0.0.1 (2025-12-23) [internal: v251223.2328]
+    - CHANGED: Version bump to 0.2.0.0.1
+    - CHANGED: Default debug disabled
+
   v0.2.0 (2025-12-23) [internal: v251223.2256]
     - CHANGED: Version bump to 0.2.0 (public beta)
 
@@ -281,7 +285,7 @@
 -- Solo scope for preview isolation: "track" or "item"
 local USER_SOLO_SCOPE = "track"
 -- Enable Core debug logs (printed via ASP.log / ASP.dlog)
-local USER_DEBUG = true
+local USER_DEBUG = false
 -- Move-back strategy on cleanup:
 --   "guid"     → move back only the items this preview moved (by GUID)
 --   "timesel"  → move back ALL items on the FX track that overlap the placeholder/time selection
