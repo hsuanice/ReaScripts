@@ -1,7 +1,7 @@
 --[[
 @description AudioSweet Run
 @author hsuanice
-@version 0.1.1
+@version 0.1.2
 @provides
   [main] .
 @about
@@ -48,6 +48,9 @@
   - Works independently - can be assigned to keyboard shortcuts
 
 @changelog
+  v0.1.2 (2025-12-23) [internal: v251223.1924]
+    - CHANGED: Added Copy+Apply action name support for GUI/Core integration
+
   v0.1.1 (2025-12-22) [internal: v251222.1706]
     - CHANGED: All executions now produce single undo operation
       • External undo control enabled before calling AudioSweet Core
@@ -177,7 +180,7 @@ local function sync_gui_settings_to_core()
   local handle_to_set = use_whole_file and 999999 or handle_seconds
 
   -- AudioSweet Core reads from "hsuanice_AS"
-  local action_names = { "apply", "copy" }
+  local action_names = { "apply", "copy", "apply_after_copy" }
   local scope_names = { "active", "all_takes" }
   local pos_names = { "tail", "head" }
   local chain_token_names = { "track", "aliases", "fxchain" }
@@ -738,7 +741,8 @@ local function main()
 
     -- Log GUI ExtState values as read by this script
     local action = get_int("action", 0)
-    local action_str = (action == 1) and "render" or (action == 2) and "auto" or "glue"
+    local action_names = { "apply", "copy", "apply_after_copy" }
+    local action_str = action_names[action + 1] or "apply"
     local preview_target_track_name = get_string("preview_target_track", "AudioSweet")
     local preview_target_track_guid = get_string("preview_target_track_guid", "")
     local sync = sync_gui_settings_to_core()
