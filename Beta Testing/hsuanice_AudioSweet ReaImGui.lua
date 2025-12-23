@@ -1,7 +1,7 @@
 --[[
 @description AudioSweet ReaImGui - AudioSuite Workflow (Pro Tools–Style)
 @author hsuanice
-@version 0.2.0
+@version 0.2.0.0.1
 @provides
   [main] .
 @about
@@ -65,6 +65,9 @@
 
 
 @changelog
+  v0.2.0.0.1 [Internal Build 251223.2328] - Version Sync
+    - CHANGED: Version bump to 0.2.0.0.1
+
   v0.2.0 [Internal Build 251223.2256] - Public Beta Release
     - ADDED: Copy+Apply mode (GUI + Core) with consistent undo + stable multichannel IO
     - ADDED: AudioSweet Run/Solo/Preview Toggle tools (Action List workflow)
@@ -3879,7 +3882,7 @@ local function draw_gui()
           "=================================================\n" ..
           "AudioSweet ReaImGui - ImGui Interface for AudioSweet\n" ..
           "=================================================\n" ..
-          "Version: 0.2.0 (251223.2256)\n" ..
+          "Version: 0.2.0.0.1 (251223.2328)\n" ..
           "Author: hsuanice\n\n" ..
 
           "Reference:\n" ..
