@@ -1,7 +1,7 @@
 --[[
 @description AudioSweet ReaImGui - AudioSuite Workflow (Pro Tools–Style)
 @author hsuanice
-@version 0.1.26
+@version 0.1.27
 @provides
   [main] .
 @about
@@ -65,6 +65,9 @@
 
 
 @changelog
+  v0.1.27 [Internal Build 251223.2236] - Version Sync
+    - CHANGED: Version bump to align with Core changes (no UI behavior change)
+
   v0.1.26 [Internal Build 251223.1924] - Copy+Apply UI + Settings Logs
     - CHANGED: Copy+Apply label + hover note about IO mapping limitations
     - CHANGED: Copy settings now show only for Copy (not Copy+Apply)
