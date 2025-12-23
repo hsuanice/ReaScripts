@@ -1,6 +1,6 @@
 --[[
 @description AudioSweet Preview Core
-@version 0.1.2
+@version 0.2.0
 @author hsuanice
 
 @provides
@@ -9,6 +9,9 @@
 @about Minimal, self-contained preview runtime. Later we can extract helpers to "hsuanice_AS Core.lua".
 
 @changelog
+  0.2.0 (2025-12-23) [internal: v251223.2256]
+    - CHANGED: Version bump to 0.2.0 (public beta)
+
   0.1.2 (2025-12-22) [internal: v251222.1035]
     - ADDED: Source track channel count protection
       • Snapshots source track I_NCHAN before moving items to FX track
