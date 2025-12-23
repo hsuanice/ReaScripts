@@ -12,10 +12,10 @@ Tim Chimes (original), adapted by hsuanice for AudioSweet Core integration.
   http://timchimes.com/scripting-with-reaper-audiosuite/
 
 @changelog
-  0.2.0 (2025-12-23) [internal: v251223.2256]
+  v0.2.0 (2025-12-23) [internal: v251223.2256]
     - CHANGED: Version bump to 0.2.0 (public beta)
 
-  0.1.9 (2025-12-23) [internal: v251223.2236]
+  0v.1.9 (2025-12-23) [internal: v251223.2236]
     - CHANGED: Copy+Apply now reuses Apply flow, then copies target FX to non-active takes
       • Single/multi items share the same glue/apply path for stability
       • Copy+Apply no longer uses a separate glue→copy→render path
@@ -25,7 +25,7 @@ Tim Chimes (original), adapted by hsuanice for AudioSweet Core integration.
     - DEBUG: Added TC embed logging for current/previous sources
     - NOTE: Do not override RGWH TC embed mode in Core/GLUE path
 
-  0.1.8 (2025-12-23) [internal: v251223.1924]
+  v0.1.8 (2025-12-23) [internal: v251223.1924]
     - ADDED: Copy+Apply flow (copy FX then render) with multi-item glue support
       • Copy step now enforces identity pin mappings for stable multichannel IO
       • Render uses track FX to match Apply results, then clears take FX on output
@@ -33,7 +33,7 @@ Tim Chimes (original), adapted by hsuanice for AudioSweet Core integration.
     - CHANGED: RGWH TimeReference embed forced to "current" during runs
     - DEBUG: Added take FX IO tracing and safe handling for invalid item pointers
 
-  0.1.7 (2025-12-22) [internal: v251222.1706]
+  v0.1.7 (2025-12-22) [internal: v251222.1706]
     - ADDED: External undo control support for single undo operation
       • External callers (GUI/standalone scripts) can set EXTERNAL_UNDO_CONTROL="1" ExtState
       • When enabled, Core skips its internal Undo_BeginBlock/EndBlock
@@ -48,7 +48,7 @@ Tim Chimes (original), adapted by hsuanice for AudioSweet Core integration.
       • Consistent behavior across all unit sizes (single/multi-item)
       • RGWH Core's GLUE_SINGLE_ITEMS flag handles single-item glue correctly
 
-  0.1.5 (2025-12-22) [internal: v251222.1622]
+  v0.1.5 (2025-12-22) [internal: v251222.1622]
     - ADDED: Multi-Channel Policy support for Core/GLUE path (multi-item units)
       • Core/GLUE path now implements all three Multi-Channel Policy options
       • SOURCE-PLAYBACK: Match unit's max playback channels
@@ -65,7 +65,7 @@ Tim Chimes (original), adapted by hsuanice for AudioSweet Core integration.
       • Now: Uses ExtState to tell RGWH Core not to restore when policy is active
       • Fixes single-item units producing incorrect channel counts
 
-  0.1.4 (2025-12-22) [internal: v251222.1122]
+  v0.1.4 (2025-12-22) [internal: v251222.1122]
     - FIXED: Core/GLUE path (multi-item units) source track protection
       • Added source track channel count snapshot BEFORE move to FX track
       • Added source track restore AFTER move back from FX track
@@ -75,7 +75,7 @@ Tim Chimes (original), adapted by hsuanice for AudioSweet Core integration.
       • Debug log: "restored SOURCE track #N I_NCHAN=X (post-move)"
       • Completes source track protection coverage for all execution paths
 
-  0.1.3 (2025-12-22) [internal: v251222.1103]
+  v0.1.3 (2025-12-22) [internal: v251222.1103]
     - FIXED: Multi-unit processing across tracks - SOURCE-TRACK policy now works correctly
       • TS-WINDOW[GLOBAL] path now snapshots ALL source track channel counts BEFORE glue operation
       • Previously: second unit read post-glue channel count (incorrect)
@@ -87,7 +87,7 @@ Tim Chimes (original), adapted by hsuanice for AudioSweet Core integration.
       • Added detailed debug logging: "snapshot SOURCE track" vs "SNAPSHOT track" (FX track)
       • Debug logs now clearly distinguish SOURCE track operations from FX track operations
 
-  0.1.2 (2025-12-22) [internal: v251222.1035]
+  v0.1.2 (2025-12-22) [internal: v251222.1035]
     - ADDED: Multi-Channel Policy system with 3 options (Settings → Channel Mode)
       • SOURCE-PLAYBACK: Match item's actual playback channels (default, current behavior)
       • SOURCE-TRACK: Match source track channel count (RGWH/Pro Tools style)
@@ -108,14 +108,14 @@ Tim Chimes (original), adapted by hsuanice for AudioSweet Core integration.
       • Prevents console messages from being washed away by RGWH Core output
       • Helps troubleshooting when multiple cores are running
 
-  0.1.1 (2025-12-21) [internal: v251221.2141]
+  v0.1.1 (2025-12-21) [internal: v251221.2141]
     - ADDED: Track channel count restoration after execution
       • Snapshots track I_NCHAN at execution start (after FXmediaTrack is known)
       • Restores original channel count at all exit points (copy/apply/TS-window paths)
       • Prevents REAPER auto-expansion from persisting after processing
       • Works in both focused and chain modes
       • Helper function restore_track_nchan() for consistent restoration
-  0.1.0 (2025-10-30) - Initial Public Beta Release
+  v0.1.0 (2025-10-30) - Initial Public Beta Release
     AudioSuite-like workflow with RGWH Core integration featuring:
     - Focused/Chain modes for Track FX processing
     - CLAP plugin support with fallback mechanism
