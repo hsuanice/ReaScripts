@@ -9,10 +9,10 @@
 @about Minimal, self-contained preview runtime. Later we can extract helpers to "hsuanice_AS Core.lua".
 
 @changelog
-  0.2.0 (2025-12-23) [internal: v251223.2256]
+  v0.2.0 (2025-12-23) [internal: v251223.2256]
     - CHANGED: Version bump to 0.2.0 (public beta)
 
-  0.1.2 (2025-12-22) [internal: v251222.1035]
+  v0.1.2 (2025-12-22) [internal: v251222.1035]
     - ADDED: Source track channel count protection
       • Snapshots source track I_NCHAN before moving items to FX track
       • Restores source track channel count after moving items back
@@ -21,13 +21,13 @@
       • Stored in ASP._state.src_track_nchan
       • Restored in _move_back_and_remove_placeholder()
 
-  0.1.1 (2025-12-21) [internal: v251221.2141]
+  v0.1.1 (2025-12-21) [internal: v251221.2141]
     - ADDED: Track channel count restoration after preview
       • Snapshots track I_NCHAN before preview starts
       • Restores original channel count in cleanup_if_any()
       • Prevents REAPER auto-expansion from persisting after preview
       • Works in both focused and chain preview modes
-  0.1.0 (2025-12-13) - Initial Public Beta Release
+  v0.1.0 (2025-12-13) - Initial Public Beta Release
     Minimal preview runtime for AudioSweet with:
     - High-precision timing using reaper.time_precise()
     - Handle-aware edge/glue cue policies
