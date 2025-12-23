@@ -1,7 +1,7 @@
 --[[
 @description AudioSweet Run
 @author hsuanice
-@version 0.1.2
+@version 0.2.0
 @provides
   [main] .
 @about
@@ -48,6 +48,9 @@
   - Works independently - can be assigned to keyboard shortcuts
 
 @changelog
+  v0.2.0 (2025-12-23) [internal: v251223.2256]
+    - CHANGED: Version bump to 0.2.0 (public beta)
+
   v0.1.2 (2025-12-23) [internal: v251223.1924]
     - CHANGED: Added Copy+Apply action name support for GUI/Core integration
 
@@ -736,7 +739,7 @@ local function main()
     debug_log("\n" .. string.rep("=", 60) .. "\n")
     debug_log("[AudioSweet Run] Script Started (DEBUG=true)\n")
     debug_log(string.rep("=", 60) .. "\n")
-    debug_log("[AudioSweet Run] Version: v0.1.0 (251221.1803)\n")
+    debug_log("[AudioSweet Run] Version: v0.2.0 (251223.2256)\n")
     debug_log(string.format("[AudioSweet Run] Debug log file: %s\n", DEBUG_LOG_PATH))
 
     -- Log GUI ExtState values as read by this script
