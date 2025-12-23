@@ -1,6 +1,6 @@
 --[[
 @description RGWH Core - Render or Glue with Handles
-@version 0.2.0
+@version 0.2.0.0.1
 @author hsuanice
 
 @provides
@@ -63,6 +63,9 @@
   • For detailed operation modes guide, see RGWH GUI: Help > Manual (Operation Modes)
 
 @changelog
+  0.2.0.0.1 [v251223.2328] - VERSION SYNC
+    - CHANGED: Version bump to 0.2.0.0.1
+
   0.2.0 [v251223.2256] - PUBLIC BETA ALIGNMENT
     - CHANGED: Version bump to 0.2.0 (public beta)
     - ADDED: Multi-Channel Policy support hook for AudioSweet integration
