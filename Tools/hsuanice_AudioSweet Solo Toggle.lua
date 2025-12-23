@@ -1,7 +1,7 @@
 --[[
 @description AudioSweet Solo Toggle
 @author hsuanice
-@version 0.2.0
+@version 0.2.0.0.1
 @provides
   [main] .
 @about
@@ -31,6 +31,9 @@
   - Works independently - can be assigned to keyboard shortcuts in action list
 
 @changelog
+  v0.2.0.0.1 [Internal Build 251223.2328] - Version Sync
+    - CHANGED: Version bump to 0.2.0.0.1
+
   v0.2.0 [Internal Build 251223.2256] - Public Beta Release
     - CHANGED: Version bump to 0.2.0 (public beta)
 
