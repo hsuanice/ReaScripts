@@ -1,7 +1,7 @@
 --[[
 @description AudioSweet ReaImGui - AudioSuite Workflow (Pro Tools–Style)
 @author hsuanice
-@version 0.1.27
+@version 0.2.0
 @provides
   [main] .
 @about
@@ -65,6 +65,18 @@
 
 
 @changelog
+  v0.2.0 [Internal Build 251223.2256] - Public Beta Release
+    - ADDED: Copy+Apply mode (GUI + Core) with consistent undo + stable multichannel IO
+    - ADDED: AudioSweet Run/Solo/Preview Toggle tools (Action List workflow)
+    - ADDED: Multi-Channel Policy system + Channel Mode settings
+    - ADDED: Whole File handle option + BWF MetaEdit detection/install guide
+    - ADDED: Unified Settings window + in-app User Manual
+    - FIXED: Unified Core/GLUE path for all processing (removes RGWH Render path)
+    - FIXED: Single undo behavior across GUI/Run/Saved/History
+    - FIXED: FX index tracking + name fallback after reorder
+    - FIXED: Preview target GUID handling + duplicate track name targeting
+    - REMOVED: Legacy Preview Solo Exclusive tools (replaced by Preview Toggle)
+
   v0.1.27 [Internal Build 251223.2236] - Version Sync
     - CHANGED: Version bump to align with Core changes (no UI behavior change)
 
@@ -781,7 +793,7 @@
 
   Internal Build 251213.0342 - SYNCED CHAIN PREVIEW LOGIC WITH TOOLS SCRIPT
     - Updated: Chain preview logic now synchronized between GUI and Tools script.
-      - Tools script (hsuanice_AudioSweet Chain Preview Solo Exclusive.lua) updated to v251213.0336
+      - Tools script (hsuanice_AudioSweet Preview Toggle.lua) updated to v251213.0336
       - Both GUI and Tools script now use identical smart target selection logic:
         * If focused FX chain exists → preview that track (using pure P_NAME)
         * If no focused FX chain → use preview_target_track from GUI settings
@@ -927,8 +939,7 @@
   Internal Build 251030.2335 - PREVIEW SHORTCUTS VIA TOOLS SCRIPTS
     - Changed: Removed in-GUI keyboard shortcuts for Preview (modifier key detection unreliable).
     - NEW: Preview shortcuts now use Tools folder scripts that read GUI settings.
-      - Bind "hsuanice_AudioSweet Chain Preview Solo Exclusive" for Chain Preview
-      - Bind "hsuanice_AudioSweet Preview Solo Exclusive" for Focused Preview
+      - Bind "hsuanice_AudioSweet Preview Toggle" for Preview (auto-detects Chain/Focused)
       - Scripts automatically read preview_target_track, solo_scope, restore_mode from GUI ExtState
       - Single source of truth: change settings in GUI, all scripts use same settings
     - Updated: Shortcut info now guides users to bind Tools scripts in Action List.
@@ -3868,7 +3879,7 @@ local function draw_gui()
           "=================================================\n" ..
           "AudioSweet ReaImGui - ImGui Interface for AudioSweet\n" ..
           "=================================================\n" ..
-          "Version: 0.1.25 (251222.2009)\n" ..
+          "Version: 0.2.0 (251223.2256)\n" ..
           "Author: hsuanice\n\n" ..
 
           "Reference:\n" ..
