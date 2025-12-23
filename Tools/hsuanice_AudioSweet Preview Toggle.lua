@@ -1,10 +1,13 @@
 --[[
 @description AudioSweet Preview Toggle - Auto Detect Focused/Chain
-@version 0.2.0
+@version 0.2.0.0.1
 @author Hsuanice
 @provides
   [main] .
 @changelog
+  0.2.0.0.1 (2025-12-23) [internal: v251223.2328]
+    - CHANGED: Version bump to 0.2.0.0.1
+
   0.2.0 (2025-12-23) [internal: v251223.2256]
     - CHANGED: Version bump to 0.2.0 (public beta)
 
