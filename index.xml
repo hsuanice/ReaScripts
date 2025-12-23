@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<index version="1" name="hsuanice Scripts" commit="b9102b37a6961a2a0ed5911530af28b0a9b2b1d6">
+<index version="1" name="hsuanice Scripts" commit="4e2046d63a54ee718f51afa3db4fd5145ab10a9c">
   <category name="Beta Testing">
     <reapack name="hsuanice_AudioSweet ReaImGui.lua" type="script" desc="AudioSweet ReaImGui - AudioSuite Workflow (Pro Tools–Style)">
       <metadata>
@@ -114,6 +114,9 @@
       </version>
       <version name="0.2.0" author="hsuanice" time="2025-12-23T15:01:50Z">
         <source main="main">https://github.com/hsuanice/ReaScripts/raw/93a932b4494457690c18ec5d59762073924acec6/Beta%20Testing/hsuanice_AudioSweet%20ReaImGui.lua</source>
+      </version>
+      <version name="0.2.0.0.1" author="hsuanice" time="2025-12-23T15:36:07Z">
+        <source main="main">https://github.com/hsuanice/ReaScripts/raw/918a3ffccf7e28b62fbaa8a09a70ac9c4e103d2e/Beta%20Testing/hsuanice_AudioSweet%20ReaImGui.lua</source>
       </version>
     </reapack>
     <reapack name="hsuanice_BWF TimeReference Embed Tool.lua" type="script" desc="Embed BWF TimeReference to Active take from Take 1 or Current Position TC">
@@ -1918,6 +1921,9 @@ v0.9.0 - Added Shared Link State section from Project ExtState "hsuanice_Link".]
       <version name="0.2.0" author="hsuanice" time="2025-12-23T15:02:47Z">
         <source main="main">https://github.com/hsuanice/ReaScripts/raw/a2e53debdf4dace58ceb1a63c9ebf53b450fb860/Library/hsuanice_AS%20Preview%20Core.lua</source>
       </version>
+      <version name="0.2.0.0.1" author="hsuanice" time="2025-12-23T15:36:47Z">
+        <source main="main">https://github.com/hsuanice/ReaScripts/raw/4cbf236d213831788bdfd78095ae612ef88bb30f/Library/hsuanice_AS%20Preview%20Core.lua</source>
+      </version>
     </reapack>
     <reapack name="hsuanice_Hover.lua" type="script" desc="hsuanice Hover Library (Shared helpers for Hover Mode editing tools)">
       <metadata>
@@ -2026,6 +2032,9 @@ v0.9.0 - Added Shared Link State section from Project ExtState "hsuanice_Link".]
       <version name="0.2.0" author="hsuanice" time="2025-12-23T15:23:35Z">
         <source main="main">https://github.com/hsuanice/ReaScripts/raw/b9102b37a6961a2a0ed5911530af28b0a9b2b1d6/Library/hsuanice_RGWH%20Core.lua</source>
       </version>
+      <version name="0.2.0.0.1" author="hsuanice" time="2025-12-23T15:38:11Z">
+        <source main="main">https://github.com/hsuanice/ReaScripts/raw/795cf8f1c3f261bb7e573656572b0125bc166022/Library/hsuanice_RGWH%20Core.lua</source>
+      </version>
     </reapack>
   </category>
   <category name="Tools">
@@ -2048,6 +2057,20 @@ v0.9.0 - Added Shared Link State section from Project ExtState "hsuanice_Link".]
   - Fallback: No FX window → chain preview on preview target track
   - Reads preview settings from AudioSweet GUI ExtState]]></changelog>
         <source main="main">https://github.com/hsuanice/ReaScripts/raw/6ac60c372ea028ba823a778efbc2692965768145/Tools/hsuanice_AudioSweet%20Preview%20Toggle.lua</source>
+      </version>
+      <version name="0.2.0.0.1" author="Hsuanice" time="2025-12-23T15:38:49Z">
+        <changelog><![CDATA[0.2.0.0.1 (2025-12-23) [internal: v251223.2328]
+  - CHANGED: Version bump to 0.2.0.0.1
+
+0.2.0 (2025-12-23) [internal: v251223.2256]
+  - CHANGED: Version bump to 0.2.0 (public beta)
+
+0.1.0 (2025-12-21) [internal: v251221.1915]
+  - NEW: Unified preview script that auto-detects focused vs chain window
+  - Priority: Chain FX window → chain preview, Single FX floating → focused preview
+  - Fallback: No FX window → chain preview on preview target track
+  - Reads preview settings from AudioSweet GUI ExtState]]></changelog>
+        <source main="main">https://github.com/hsuanice/ReaScripts/raw/65bd35e847ab8ef8e7b8fecd6dd8299b2a282cc3/Tools/hsuanice_AudioSweet%20Preview%20Toggle.lua</source>
       </version>
     </reapack>
     <reapack name="hsuanice_AudioSweet Run.lua" type="script" desc="AudioSweet Run">
@@ -2097,6 +2120,9 @@ v0.9.0 - Added Shared Link State section from Project ExtState "hsuanice_Link".]
       <version name="0.2.0" author="hsuanice" time="2025-12-23T15:04:56Z">
         <source main="main">https://github.com/hsuanice/ReaScripts/raw/a3dee7d59a3437fefc4c04b626eaf84b608784ff/Tools/hsuanice_AudioSweet%20Run.lua</source>
       </version>
+      <version name="0.2.0.0.1" author="hsuanice" time="2025-12-23T15:39:30Z">
+        <source main="main">https://github.com/hsuanice/ReaScripts/raw/aacd6eb0d00a8ba1f6edde2318d31d3d031bcd24/Tools/hsuanice_AudioSweet%20Run.lua</source>
+      </version>
     </reapack>
     <reapack name="hsuanice_AudioSweet Solo Toggle.lua" type="script" desc="AudioSweet Solo Toggle">
       <metadata>
@@ -2127,6 +2153,9 @@ v0.9.0 - Added Shared Link State section from Project ExtState "hsuanice_Link".]
       </version>
       <version name="0.2.0" author="hsuanice" time="2025-12-23T15:05:29Z">
         <source main="main">https://github.com/hsuanice/ReaScripts/raw/57bd41bc8f2cfe86b47d88f38f04f32435e75e09/Tools/hsuanice_AudioSweet%20Solo%20Toggle.lua</source>
+      </version>
+      <version name="0.2.0.0.1" author="hsuanice" time="2025-12-23T15:39:56Z">
+        <source main="main">https://github.com/hsuanice/ReaScripts/raw/4e2046d63a54ee718f51afa3db4fd5145ab10a9c/Tools/hsuanice_AudioSweet%20Solo%20Toggle.lua</source>
       </version>
     </reapack>
     <reapack name="hsuanice_FX Alias Build.lua" type="script" desc="FX Alias Build - Build FX Alias JSON from Current Project">
