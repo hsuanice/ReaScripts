@@ -1,6 +1,6 @@
 --[[
 @description Metadata Read (reader / normalizer / tokens)
-@version 0.2.1
+@version 0.3.0
 @author hsuanice
 @noindex
 @about
@@ -12,6 +12,17 @@
   - Token expansion for rename/export ($trk/$trkN/$trkall, ${interleave}, ${chnum}, ...)
 
 @changelog
+  v0.3.0 (2025-09-12)
+    - Added: UMID (SMPTE ID) ingestion from BWF metadata.
+      * Reads BWF:UMID (or UMID) via REAPER GetMediaFileMetadata.
+      * Normalizes to strict 64-hex uppercase.
+    - Added tokens: ${umid} (64-hex uppercase) and ${umid_pt}
+      (Pro Tools style 26-6-16-12-4, lowercase with dashes).
+    - UI/Fields: UMID values are included in the normalized field map
+      returned by collect_item_fields(), so they are available to all
+      rename/monitor/sort consumers without additional wiring.
+    - Notes: No CLI dependency; if REAPER does not expose BWF:UMID on a
+      given build, tokens will be empty (future optional CLI fallback planned).
   v0.2.1 (2025-09-01)
     - Quality & robustness (no breaking changes from 0.2.0):
       * Token engine polish: consistent handling for ${trk}/${trkN}/${trkall},
@@ -55,7 +66,7 @@
 
 
 local M = {}
-M.VERSION = "0.2.0"
+M.VERSION = "0.3.0"
 
 -- ====== Source / file helpers ======
 local function stype(src) local ok,t=pcall(reaper.GetMediaSourceType,src,""); return ok and (t or "") or "" end
@@ -76,6 +87,36 @@ function M.source_file_path(src)
   local ok, p = pcall(reaper.GetMediaSourceFileName, src, "")
   return (ok and p) or ""
 end
+
+-- PT 風格（26-6-16-12-4，小寫＋破折號）
+local function umid_to_pt(hex64)
+  local h = (hex64 or ""):gsub("%s+", ""):lower()
+  if #h ~= 64 then return nil end
+  return table.concat({
+    h:sub(1,26), h:sub(27,32), h:sub(33,48), h:sub(49,60), h:sub(61,64)
+  }, "-")
+end
+
+-- 讀不到 BWF:UMID 時的 CLI fallback（bwfmetaedit --out-xml）
+local function read_umid_via_cli_abs(path_to_cli, wav_path)
+  local cli = path_to_cli or "/opt/homebrew/bin/bwfmetaedit"
+  local cmd = string.format('"%s" --out-xml=- "%s"', cli, wav_path)
+  local ok, out = reaper.ExecProcess and reaper.ExecProcess(cmd, 10000) or nil, nil
+  if type(ok) == "number" then out = select(2, reaper.ExecProcess(cmd, 10000)) end
+  if not out or out == "" then
+    local fh = io.popen(cmd); out = fh and fh:read("*a") or ""; if fh then fh:close() end
+  end
+  if not out or out == "" then return nil end
+  -- 找 <UMID>…</UMID>（bext 區段）
+  local hex = out:match("<UMID>([%x%s]+)</UMID>")
+  if not hex then return nil end
+  hex = hex:gsub("%s+", ""):upper()
+  if #hex ~= 64 then return nil end
+  return hex
+end
+
+
+
 
 -- ====== cached metadata reads ======
 local CACHE = {}
@@ -270,7 +311,32 @@ function M.collect_item_fields(item)
     local org  = meta(src, "BWF:Originator"); if org then t.Originator=org; t.originator=org end
     local orgr = meta(src, "BWF:OriginatorReference"); if orgr then t.OriginatorReference=orgr; t.originatorreference=orgr end
     local tr   = meta(src, "BWF:TimeReference"); if tr then t.TimeReference=tr; t.timereference=tr end
+    
     if desc then parse_description_pairs(desc, t) end
+
+    -- ====== BWF:UMID（SMPTE ID）======
+    local function set_umid_fields(hex)
+      t.UMID = hex
+      t.umid = hex
+      local pt = umid_to_pt(hex)
+      if pt then t.umid_pt = pt end
+    end
+
+    -- 1) 先嘗試 REAPER API（有些版本讀不到）
+    do
+      local um = meta(src, "BWF:UMID") or meta(src, "UMID")
+      if um and um ~= "" then
+        local hex = um:gsub("[^0-9A-Fa-f]", ""):upper()
+        if #hex == 64 then set_umid_fields(hex) end
+      end
+    end
+
+    -- 2) 讀不到就走 CLI fallback（bwfmetaedit --out-xml）
+    if not t.umid and t.srcpath and t.srcpath ~= "" then
+      local hex = read_umid_via_cli_abs(nil, t.srcpath)  -- nil=預設 /opt/homebrew/bin/bwfmetaedit
+      if hex then set_umid_fields(hex) end
+    end
+
 
     -- iXML common
     local proj = meta(src, "IXML:PROJECT"); if proj then t.PROJECT=proj; t.project=proj end
@@ -368,6 +434,8 @@ local function normalize_tokens(s)
     "samplerate","channels","length","project","scene","take","tape","trk","trkall",
     "ubits","framerate","speed","date","time","year","originationdate","originationtime","startoffset",
     "filepath","originator","originatorreference","timereference","description","interleave","interum","chnum","channelnum",
+    -- 新增 UMID tokens
+    "umid","umid_pt",
   }
   table.sort(known, function(a,b) return #a > #b end)
   for _,k in ipairs(known) do s = s:gsub("%$"..k, "${"..k.."}") end
