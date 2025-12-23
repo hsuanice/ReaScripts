@@ -1,10 +1,13 @@
 --[[
 @description AudioSweet Preview Toggle - Auto Detect Focused/Chain
-@version 0.1.0
+@version 0.2.0
 @author Hsuanice
 @provides
   [main] .
 @changelog
+  0.2.0 (2025-12-23) [internal: v251223.2256]
+    - CHANGED: Version bump to 0.2.0 (public beta)
+
   0.1.0 (2025-12-21) [internal: v251221.1915]
     - NEW: Unified preview script that auto-detects focused vs chain window
     - Priority: Chain FX window → chain preview, Single FX floating → focused preview
