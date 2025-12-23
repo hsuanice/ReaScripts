@@ -1,6 +1,6 @@
 --[[
 @description AudioSweet Core - Focused Track FX render via RGWH Core
-@version 0.2.0
+@version 0.2.0.0.1
 @author hsuanice
 @noindex
 @notes
@@ -12,6 +12,9 @@ Tim Chimes (original), adapted by hsuanice for AudioSweet Core integration.
   http://timchimes.com/scripting-with-reaper-audiosuite/
 
 @changelog
+  v0.2.0.0.1 (2025-12-23) [internal: v251223.2328]
+    - CHANGED: Version bump to 0.2.0.0.1
+
   v0.2.0 (2025-12-23) [internal: v251223.2256]
     - CHANGED: Version bump to 0.2.0 (public beta)
 
