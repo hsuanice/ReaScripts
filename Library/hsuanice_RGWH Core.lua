@@ -1,6 +1,6 @@
 --[[
 @description RGWH Core - Render or Glue with Handles
-@version 0.1.1
+@version 0.2.0
 @author hsuanice
 
 @provides
@@ -63,6 +63,10 @@
   • For detailed operation modes guide, see RGWH GUI: Help > Manual (Operation Modes)
 
 @changelog
+  0.2.0 [v251223.2256] - PUBLIC BETA ALIGNMENT
+    - CHANGED: Version bump to 0.2.0 (public beta)
+    - ADDED: Multi-Channel Policy support hook for AudioSweet integration
+
   0.1.1 [v251222.1145] - AUDIOSWEET MULTI-CHANNEL POLICY SUPPORT
     - ADDED: preserve_track_ch parameter to apply_multichannel_no_fx_preserve_take()
       • preserve_track_ch=true: restore track channel count after apply (default, RGWH standalone behavior)
