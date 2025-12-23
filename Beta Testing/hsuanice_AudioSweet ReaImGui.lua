@@ -1,7 +1,7 @@
 --[[
 @description AudioSweet ReaImGui - AudioSuite Workflow (Pro Tools–Style)
 @author hsuanice
-@version 0.1.25
+@version 0.1.26
 @provides
   [main] .
 @about
@@ -65,6 +65,11 @@
 
 
 @changelog
+  v0.1.26 [Internal Build 251223.1924] - Copy+Apply UI + Settings Logs
+    - CHANGED: Copy+Apply label + hover note about IO mapping limitations
+    - CHANGED: Copy settings now show only for Copy (not Copy+Apply)
+    - FIXED: GUI startup logging duplication; include Channel Policy in settings log
+
   v0.1.25 [Internal Build 251222.2009] - Keyboard Shortcut Input Detection
     - ADDED: Shortcut handling before ImGui.Begin()
       • Space = Stop transport (command 40044)
@@ -1362,7 +1367,7 @@ local ctx = ImGui.CreateContext('AudioSweet GUI')
 local gui = {
   open = true,
   mode = 0,              -- 0=focused, 1=chain, 2=auto
-  action = 0,            -- 0=apply, 1=copy
+  action = 0,            -- 0=apply, 1=copy, 2=apply_after_copy
   copy_scope = 0,
   copy_pos = 0,
   channel_mode = 0,      -- 0=auto, 1=mono, 2=multi
@@ -1444,6 +1449,24 @@ local gui = {
   bwfmetaedit_custom_path = "",
   open_bwf_install_popup = false,
 }
+
+local function get_action_label(action)
+  if action == 0 then
+    return "Apply"
+  elseif action == 1 then
+    return "Copy"
+  end
+  return "Copy+Apply"
+end
+
+local function get_action_key(action)
+  if action == 0 then
+    return "apply"
+  elseif action == 1 then
+    return "copy"
+  end
+  return "apply_after_copy"
+end
 
 ------------------------------------------------------------
 -- GUI Settings Persistence
@@ -1601,49 +1624,7 @@ local function load_gui_settings()
   gui.enable_docking = get_bool("enable_docking", false)
   gui.show_presets_history = get_bool("show_presets_history", true)
 
-  -- Debug output on startup
-  if gui.debug then
-    r.ShowConsoleMsg("========================================\n")
-    r.ShowConsoleMsg("[AS GUI] Script startup - Current settings:\n")
-    r.ShowConsoleMsg("========================================\n")
-    local mode_names = {"Single", "Chain", "Auto"}
-    r.ShowConsoleMsg(string.format("  Mode: %s\n", mode_names[gui.mode + 1] or "Focused"))
-    r.ShowConsoleMsg(string.format("  Action: %s\n", gui.action == 0 and "Apply" or "Copy"))
-    r.ShowConsoleMsg(string.format("  Copy Scope: %s\n", gui.copy_scope == 0 and "Active" or "All"))
-    r.ShowConsoleMsg(string.format("  Copy Position: %s\n", gui.copy_pos == 0 and "Last" or "Replace"))
-    local channel_mode_names = {"Auto", "Mono", "Multi"}
-    r.ShowConsoleMsg(string.format("  Channel Mode: %s\n", channel_mode_names[gui.channel_mode + 1]))
-    if gui.channel_mode == 2 then
-      local policy_display = gui.multi_channel_policy == "source_track" and "SOURCE track" or
-                             gui.multi_channel_policy == "target_track" and "TARGET track" or
-                             "SOURCE playback"
-      r.ShowConsoleMsg(string.format("  Multi-Channel Policy: %s\n", policy_display))
-    end
-    local handle_display = gui.use_whole_file and "Whole File" or string.format("%.2f", gui.handle_seconds)
-    r.ShowConsoleMsg(string.format("  Handle Seconds: %s\n", handle_display))
-    r.ShowConsoleMsg(string.format("  Debug Mode: %s\n", gui.debug and "ON" or "OFF"))
-    r.ShowConsoleMsg(string.format("  Max History: %d\n", gui.max_history))
-    r.ShowConsoleMsg(string.format("  FX Name - Show Type: %s\n", gui.fxname_show_type and "ON" or "OFF"))
-    r.ShowConsoleMsg(string.format("  FX Name - Show Vendor: %s\n", gui.fxname_show_vendor and "ON" or "OFF"))
-    r.ShowConsoleMsg(string.format("  FX Name - Strip Symbol: %s\n", gui.fxname_strip_symbol and "ON" or "OFF"))
-    r.ShowConsoleMsg(string.format("  FX Name - Use Alias: %s\n", gui.use_alias and "ON" or "OFF"))
-    r.ShowConsoleMsg(string.format("  Preset Display - Show Type: %s\n", gui.preset_display_show_type and "ON" or "OFF"))
-    r.ShowConsoleMsg(string.format("  Preset Display - Show Vendor: %s\n", gui.preset_display_show_vendor and "ON" or "OFF"))
-    r.ShowConsoleMsg(string.format("  Preset Display - Use Alias: %s\n", gui.preset_display_use_alias and "ON" or "OFF"))
-    r.ShowConsoleMsg(string.format("  Max FX Tokens: %d\n", gui.max_fx_tokens))
-    local chain_token_source_names = {"Track Name", "FX Aliases", "FXChain"}
-    r.ShowConsoleMsg(string.format("  Chain Token Source: %s\n", chain_token_source_names[gui.chain_token_source + 1]))
-    if gui.chain_token_source == 1 then
-      r.ShowConsoleMsg(string.format("  Chain Alias Joiner: '%s'\n", gui.chain_alias_joiner))
-    end
-    r.ShowConsoleMsg(string.format("  Track Name Strip Symbols: %s\n", gui.trackname_strip_symbols and "ON" or "OFF"))
-    r.ShowConsoleMsg(string.format("  Preview Target Track: %s\n", gui.preview_target_track))
-    local solo_scope_names = {"Track Solo", "Item Solo"}
-    r.ShowConsoleMsg(string.format("  Preview Solo Scope: %s\n", solo_scope_names[gui.preview_solo_scope + 1]))
-    local restore_mode_names = {"Keep", "Restore"}
-    r.ShowConsoleMsg(string.format("  Preview Restore Mode: %s\n", restore_mode_names[gui.preview_restore_mode + 1]))
-    r.ShowConsoleMsg("========================================\n")
-  end
+  -- Debug output on startup now handled by log_gui_settings() at entry point.
 end
 
 ------------------------------------------------------------
@@ -2825,7 +2806,6 @@ end
 ------------------------------------------------------------
 local function set_extstate_from_gui(mode_override)
   local mode_names = { "focused", "chain", "auto" }
-  local action_names = { "apply", "copy" }
   local scope_names = { "active", "all_takes" }
   local pos_names = { "tail", "head" }
   local channel_names = { "auto", "mono", "multi" }
@@ -2835,7 +2815,7 @@ local function set_extstate_from_gui(mode_override)
     mode_str = "chain"
   end
   r.SetExtState("hsuanice_AS", "AS_MODE", mode_str, false)
-  r.SetExtState("hsuanice_AS", "AS_ACTION", action_names[gui.action + 1], false)
+  r.SetExtState("hsuanice_AS", "AS_ACTION", get_action_key(gui.action), false)
   r.SetExtState("hsuanice_AS", "AS_COPY_SCOPE", scope_names[gui.copy_scope + 1], false)
   r.SetExtState("hsuanice_AS", "AS_COPY_POS", pos_names[gui.copy_pos + 1], false)
   r.SetExtState("hsuanice_AS", "AS_APPLY_FX_MODE", channel_names[gui.channel_mode + 1], false)
@@ -3081,41 +3061,44 @@ local function run_audiosweet(override_track)
     return
   end
 
+  local effective_mode = get_effective_mode()
   local target_track = override_track or gui.focused_track
 
   if not override_track then
     local has_valid_fx = update_focused_fx_display()
-  local effective_mode = get_effective_mode()
 
-  if effective_mode == "focused" and not has_valid_fx then
-    gui.last_result = "Error: No valid Track FX focused"
-    return
-  end
+    if effective_mode == "focused" and not has_valid_fx then
+      gui.last_result = "Error: No valid Track FX focused"
+      return
+    end
 
-  if effective_mode == "chain" then
-    -- Chain mode: allow default target track when no focused FX
-    if not (gui.focused_track and r.ValidatePtr2(0, gui.focused_track, "MediaTrack*")) then
-        local fallback_track = nil
-        if gui.preview_target_track_guid and gui.preview_target_track_guid ~= "" then
-          fallback_track = find_track_by_guid(gui.preview_target_track_guid)
-        end
-        if not fallback_track then
-          for i = 0, r.CountTracks(0) - 1 do
-            local tr = r.GetTrack(0, i)
-            local _, tn = r.GetSetMediaTrackInfo_String(tr, "P_NAME", "", false)
-            if tn == gui.preview_target_track then
-              fallback_track = tr
-              break
+    if effective_mode == "chain" then
+      -- Chain mode: allow default target track when no focused FX
+      if not (gui.focused_track and r.ValidatePtr2(0, gui.focused_track, "MediaTrack*")) then
+          local fallback_track = nil
+          if gui.preview_target_track_guid and gui.preview_target_track_guid ~= "" then
+            fallback_track = find_track_by_guid(gui.preview_target_track_guid)
+          end
+          if not fallback_track then
+            for i = 0, r.CountTracks(0) - 1 do
+              local tr = r.GetTrack(0, i)
+              local _, tn = r.GetSetMediaTrackInfo_String(tr, "P_NAME", "", false)
+              if tn == gui.preview_target_track then
+                fallback_track = tr
+                break
+              end
             end
           end
+          if fallback_track then
+            target_track = fallback_track
+          end
+        else
+          target_track = gui.focused_track
         end
-        if fallback_track then
-          target_track = fallback_track
-        end
-      else
-        target_track = gui.focused_track
       end
-    end
+  else
+    -- Explicit override implies chain execution on target track
+    effective_mode = "chain"
   end
 
   if not target_track then
@@ -3202,7 +3185,7 @@ local function run_audiosweet(override_track)
 
   r.PreventUIRefresh(-1)
   local mode_name = (effective_mode == "focused") and "Focused" or "Chain"
-  local action_name = (gui.action == 0) and "Apply" or "Copy"
+  local action_name = get_action_label(gui.action)
   r.Undo_EndBlock(string.format("AudioSweet GUI: %s %s", mode_name, action_name), -1)
 
   -- Clear external undo control flag after execution
@@ -3392,10 +3375,8 @@ local function run_saved_chain_apply_mode(tr, chain_name, item_count)
   end
 
   -- Set ExtState for AudioSweet (chain mode)
-  local action_names = { "apply", "copy" }
-
   r.SetExtState("hsuanice_AS", "AS_MODE", "chain", false)
-  r.SetExtState("hsuanice_AS", "AS_ACTION", action_names[gui.action + 1], false)
+  r.SetExtState("hsuanice_AS", "AS_ACTION", get_action_key(gui.action), false)
   r.SetExtState("hsuanice_AS", "DEBUG", gui.debug and "1" or "0", false)
 
   -- Set OVERRIDE ExtState to specify track and FX for Core
@@ -3416,7 +3397,7 @@ local function run_saved_chain_apply_mode(tr, chain_name, item_count)
   if gui.debug then
     local handle_display = gui.use_whole_file and "whole file" or string.format("%.1fs", gui.handle_seconds)
     r.ShowConsoleMsg(string.format("[AS GUI] Executing AudioSweet Core (mode=chain, action=%s, handle=%s)\n",
-      gui.action == 0 and "apply" or "copy", handle_display))
+      get_action_key(gui.action), handle_display))
   end
 
   -- Run AudioSweet Core (it will use the focused track's FX chain)
@@ -3428,7 +3409,7 @@ local function run_saved_chain_apply_mode(tr, chain_name, item_count)
     if gui.debug then
       r.ShowConsoleMsg(string.format("[AS GUI] Execution completed successfully\n"))
     end
-    gui.last_result = string.format("Success! [%s] Apply (%d items)", chain_name, item_count)
+    gui.last_result = string.format("Success! [%s] %s (%d items)", chain_name, get_action_label(gui.action), item_count)
   else
     if gui.debug then
       r.ShowConsoleMsg(string.format("[AS GUI] ERROR: %s\n", tostring(err)))
@@ -3617,7 +3598,7 @@ local function run_history_focused_apply(tr, fx_name, fx_idx, item_count)
   if gui.debug then
     local handle_display = gui.use_whole_file and "whole file" or string.format("%.1fs", gui.handle_seconds)
     r.ShowConsoleMsg(string.format("[AS GUI] Executing AudioSweet Core (mode=focused, action=%s, handle=%s)\n",
-      gui.action == 0 and "apply" or "copy", handle_display))
+      get_action_key(gui.action), handle_display))
   end
 
   -- Run AudioSweet Core
@@ -3629,7 +3610,7 @@ local function run_history_focused_apply(tr, fx_name, fx_idx, item_count)
     if gui.debug then
       r.ShowConsoleMsg("[AS GUI] Execution completed successfully\n")
     end
-    gui.last_result = string.format("Success! [%s] Apply (%d items)", format_fx_label_for_status(fx_name), item_count)
+    gui.last_result = string.format("Success! [%s] %s (%d items)", format_fx_label_for_status(fx_name), get_action_label(gui.action), item_count)
   else
     if gui.debug then
       r.ShowConsoleMsg(string.format("[AS GUI] ERROR: %s\n", tostring(err)))
@@ -3693,7 +3674,7 @@ local function run_saved_chain(chain_idx)
   add_to_history(chain.name, chain.track_guid, chain.track_name, chain.mode or "chain", chain.fx_index or 0, chain.custom_name)
 
   r.PreventUIRefresh(-1)
-  r.Undo_EndBlock(string.format("AudioSweet GUI: %s [%s]", gui.action == 1 and "Copy" or "Apply", chain.name), -1)
+  r.Undo_EndBlock(string.format("AudioSweet GUI: %s [%s]", get_action_label(gui.action), chain.name), -1)
 
   -- Clear external undo control flag after execution
   r.SetExtState("hsuanice_AS", "EXTERNAL_UNDO_CONTROL", "", false)
@@ -3746,7 +3727,7 @@ local function run_history_item(hist_idx)
   -- Note: History doesn't re-add to history to avoid duplication
 
   r.PreventUIRefresh(-1)
-  r.Undo_EndBlock(string.format("AudioSweet GUI: %s [%s]", gui.action == 1 and "Copy" or "Apply", hist_item.name), -1)
+  r.Undo_EndBlock(string.format("AudioSweet GUI: %s [%s]", get_action_label(gui.action), hist_item.name), -1)
 
   -- Clear external undo control flag after execution
   r.SetExtState("hsuanice_AS", "EXTERNAL_UNDO_CONTROL", "", false)
@@ -5092,7 +5073,7 @@ end
     ImGui.SetTooltip(ctx, "Chain: Process the entire FX chain")
   end
 
-  ImGui.SameLine(ctx, 0, 75)
+  ImGui.SameLine(ctx, 0, 50)
   ImGui.Text(ctx, "Action:")
   ImGui.SameLine(ctx)
   if ImGui.RadioButton(ctx, "Apply", gui.action == 0) then
@@ -5103,6 +5084,14 @@ end
   if ImGui.RadioButton(ctx, "Copy", gui.action == 1) then
     gui.action = 1
     save_gui_settings()
+  end
+  ImGui.SameLine(ctx)
+  if ImGui.RadioButton(ctx, "Copy+Apply", gui.action == 2) then
+    gui.action = 2
+    save_gui_settings()
+  end
+  if ImGui.IsItemHovered(ctx) then
+    ImGui.SetTooltip(ctx, "Copy FX to active take, then render (keeps old take FX)\nNote: copied FX IO mapping may be incorrect; use FX parameters for sound. TODO: improve IO mapping.")
   end
 
   -- === TARGET TRACK NAME (Chain mode only) ===
@@ -5119,7 +5108,7 @@ end
     ImGui.TextDisabled(ctx, "(click to edit)")
   end
 
-  -- === COPY/APPLY SETTINGS (Compact horizontal) ===
+  -- === COPY SETTINGS (Compact horizontal) ===
   if gui.action == 1 then
     ImGui.Text(ctx, "Copy to:")
     ImGui.SameLine(ctx)
@@ -5142,7 +5131,8 @@ end
       gui.copy_pos = 1
       save_gui_settings()
     end
-  else
+  end
+  if gui.action == 0 or gui.action == 2 then
     -- Channel Mode
     ImGui.Text(ctx, "Channel:")
     ImGui.SameLine(ctx)
@@ -5791,6 +5781,44 @@ end
 ------------------------------------------------------------
 -- Main Loop
 ------------------------------------------------------------
+local function log_gui_settings(context)
+  r.ShowConsoleMsg("========================================\n")
+  r.ShowConsoleMsg(string.format("[AS GUI] %s - Current settings:\n", context))
+  r.ShowConsoleMsg("========================================\n")
+  local mode_names = {"Single", "Chain", "Auto"}
+  r.ShowConsoleMsg(string.format("  Mode: %s\n", mode_names[gui.mode + 1] or "Focused"))
+  r.ShowConsoleMsg(string.format("  Action: %s\n", get_action_label(gui.action)))
+  r.ShowConsoleMsg(string.format("  Copy Scope: %s\n", gui.copy_scope == 0 and "Active" or "All"))
+  r.ShowConsoleMsg(string.format("  Copy Position: %s\n", gui.copy_pos == 0 and "Last" or "Replace"))
+  local channel_mode_names = {"Auto", "Mono", "Multi"}
+  r.ShowConsoleMsg(string.format("  Channel Mode: %s\n", channel_mode_names[gui.channel_mode + 1]))
+  r.ShowConsoleMsg(string.format("  Channel Policy: %s\n", gui.multi_channel_policy))
+  local handle_display = gui.use_whole_file and "Whole File" or string.format("%.2f", gui.handle_seconds)
+  r.ShowConsoleMsg(string.format("  Handle Seconds: %s\n", handle_display))
+  r.ShowConsoleMsg(string.format("  Debug Mode: %s\n", gui.debug and "ON" or "OFF"))
+  r.ShowConsoleMsg(string.format("  Max History: %d\n", gui.max_history))
+  r.ShowConsoleMsg(string.format("  FX Name - Show Type: %s\n", gui.fxname_show_type and "ON" or "OFF"))
+  r.ShowConsoleMsg(string.format("  FX Name - Show Vendor: %s\n", gui.fxname_show_vendor and "ON" or "OFF"))
+  r.ShowConsoleMsg(string.format("  FX Name - Strip Symbol: %s\n", gui.fxname_strip_symbol and "ON" or "OFF"))
+  r.ShowConsoleMsg(string.format("  FX Name - Use Alias: %s\n", gui.use_alias and "ON" or "OFF"))
+  r.ShowConsoleMsg(string.format("  Preset Display - Show Type: %s\n", gui.preset_display_show_type and "ON" or "OFF"))
+  r.ShowConsoleMsg(string.format("  Preset Display - Show Vendor: %s\n", gui.preset_display_show_vendor and "ON" or "OFF"))
+  r.ShowConsoleMsg(string.format("  Preset Display - Use Alias: %s\n", gui.preset_display_use_alias and "ON" or "OFF"))
+  r.ShowConsoleMsg(string.format("  Max FX Tokens: %d\n", gui.max_fx_tokens))
+  local chain_token_source_names = {"Track Name", "FX Aliases", "FXChain"}
+  r.ShowConsoleMsg(string.format("  Chain Token Source: %s\n", chain_token_source_names[gui.chain_token_source + 1]))
+  if gui.chain_token_source == 1 then
+    r.ShowConsoleMsg(string.format("  Chain Alias Joiner: '%s'\n", gui.chain_alias_joiner))
+  end
+  r.ShowConsoleMsg(string.format("  Track Name Strip Symbols: %s\n", gui.trackname_strip_symbols and "ON" or "OFF"))
+  r.ShowConsoleMsg(string.format("  Preview Target Track: %s\n", gui.preview_target_track))
+  local solo_scope_names = {"Track Solo", "Item Solo"}
+  r.ShowConsoleMsg(string.format("  Preview Solo Scope: %s\n", solo_scope_names[gui.preview_solo_scope + 1]))
+  local restore_mode_names = {"Keep", "Restore"}
+  r.ShowConsoleMsg(string.format("  Preview Restore Mode: %s\n", restore_mode_names[gui.preview_restore_mode + 1]))
+  r.ShowConsoleMsg("========================================\n")
+end
+
 local function loop()
   gui.open = draw_gui()
   if gui.open then
@@ -5798,40 +5826,7 @@ local function loop()
   else
     -- Script is closing - output final settings if debug mode is on
     if gui.debug then
-      r.ShowConsoleMsg("========================================\n")
-      r.ShowConsoleMsg("[AS GUI] Script closing - Final settings:\n")
-      r.ShowConsoleMsg("========================================\n")
-      local mode_names = {"Single", "Chain", "Auto"}
-      r.ShowConsoleMsg(string.format("  Mode: %s\n", mode_names[gui.mode + 1] or "Focused"))
-      r.ShowConsoleMsg(string.format("  Action: %s\n", gui.action == 0 and "Apply" or "Copy"))
-      r.ShowConsoleMsg(string.format("  Copy Scope: %s\n", gui.copy_scope == 0 and "Active" or "All"))
-      r.ShowConsoleMsg(string.format("  Copy Position: %s\n", gui.copy_pos == 0 and "Last" or "Replace"))
-      local channel_mode_names = {"Auto", "Mono", "Multi"}
-      r.ShowConsoleMsg(string.format("  Channel Mode: %s\n", channel_mode_names[gui.channel_mode + 1]))
-      local handle_display = gui.use_whole_file and "Whole File" or string.format("%.2f", gui.handle_seconds)
-      r.ShowConsoleMsg(string.format("  Handle Seconds: %s\n", handle_display))
-      r.ShowConsoleMsg(string.format("  Debug Mode: %s\n", gui.debug and "ON" or "OFF"))
-      r.ShowConsoleMsg(string.format("  Max History: %d\n", gui.max_history))
-      r.ShowConsoleMsg(string.format("  FX Name - Show Type: %s\n", gui.fxname_show_type and "ON" or "OFF"))
-      r.ShowConsoleMsg(string.format("  FX Name - Show Vendor: %s\n", gui.fxname_show_vendor and "ON" or "OFF"))
-      r.ShowConsoleMsg(string.format("  FX Name - Strip Symbol: %s\n", gui.fxname_strip_symbol and "ON" or "OFF"))
-      r.ShowConsoleMsg(string.format("  FX Name - Use Alias: %s\n", gui.use_alias and "ON" or "OFF"))
-      r.ShowConsoleMsg(string.format("  Preset Display - Show Type: %s\n", gui.preset_display_show_type and "ON" or "OFF"))
-      r.ShowConsoleMsg(string.format("  Preset Display - Show Vendor: %s\n", gui.preset_display_show_vendor and "ON" or "OFF"))
-      r.ShowConsoleMsg(string.format("  Preset Display - Use Alias: %s\n", gui.preset_display_use_alias and "ON" or "OFF"))
-      r.ShowConsoleMsg(string.format("  Max FX Tokens: %d\n", gui.max_fx_tokens))
-      local chain_token_source_names = {"Track Name", "FX Aliases", "FXChain"}
-      r.ShowConsoleMsg(string.format("  Chain Token Source: %s\n", chain_token_source_names[gui.chain_token_source + 1]))
-      if gui.chain_token_source == 1 then
-        r.ShowConsoleMsg(string.format("  Chain Alias Joiner: '%s'\n", gui.chain_alias_joiner))
-      end
-      r.ShowConsoleMsg(string.format("  Track Name Strip Symbols: %s\n", gui.trackname_strip_symbols and "ON" or "OFF"))
-      r.ShowConsoleMsg(string.format("  Preview Target Track: %s\n", gui.preview_target_track))
-      local solo_scope_names = {"Track Solo", "Item Solo"}
-      r.ShowConsoleMsg(string.format("  Preview Solo Scope: %s\n", solo_scope_names[gui.preview_solo_scope + 1]))
-      local restore_mode_names = {"Keep", "Restore"}
-      r.ShowConsoleMsg(string.format("  Preview Restore Mode: %s\n", restore_mode_names[gui.preview_restore_mode + 1]))
-      r.ShowConsoleMsg("========================================\n")
+      log_gui_settings("Script closing")
     end
   end
 end
@@ -5840,6 +5835,9 @@ end
 -- Entry Point
 ------------------------------------------------------------
 load_gui_settings()  -- Load saved GUI settings first
+if gui.debug then
+  log_gui_settings("Script opening")
+end
 check_bwfmetaedit(true)
 load_saved_chains()
 load_history()
