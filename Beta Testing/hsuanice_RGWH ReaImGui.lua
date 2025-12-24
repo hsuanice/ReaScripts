@@ -1,7 +1,7 @@
 --[[
 @description RGWH GUI - ImGui Interface for RGWH Core
 @author hsuanice
-@version 0.1.2
+@version 0.1.3
 @provides
   [main] .
 
@@ -14,6 +14,10 @@
   Adjust parameters using the visual controls and click operation buttons to execute.
 
 @changelog
+  0.1.3 [v251224.1135] - Live ExtState Sync + Debug Setting Logs
+    - ADDED: Any setting change now updates RGWH ExtState immediately
+    - ADDED: Debug mode prints setting changes on every toggle/update
+
   0.1.2 [v251218.2240] - Disabled collapse arrow
     - Added: Main GUI window now uses WindowFlags_NoCollapse so users cannot collapse it accidentally
 
@@ -606,6 +610,183 @@ local function load_persist()
   end
 end
 
+local function sync_rgwh_extstate_from_gui()
+  local channel_names = { "auto", "mono", "multi" }
+  local tc_names = { "previous", "current", "off" }
+  local policy_names = { "preserve", "force_multi" }
+
+  local function set_rgwh(key, val)
+    r.SetProjExtState(0, "RGWH", key, tostring(val))
+  end
+
+  -- Channel/apply mode
+  set_rgwh("GLUE_APPLY_MODE", channel_names[gui.channel_mode + 1])
+  set_rgwh("RENDER_APPLY_MODE", channel_names[gui.channel_mode + 1])
+
+  -- FX print toggles
+  set_rgwh("GLUE_TAKE_FX", gui.take_fx and "1" or "0")
+  set_rgwh("GLUE_TRACK_FX", gui.track_fx and "1" or "0")
+  set_rgwh("RENDER_TAKE_FX", gui.take_fx and "1" or "0")
+  set_rgwh("RENDER_TRACK_FX", gui.track_fx and "1" or "0")
+
+  -- Timecode embed mode (render)
+  set_rgwh("RENDER_TC_EMBED", tc_names[gui.tc_mode + 1])
+
+  -- Volume policies (ExtState only supports merge-to-take)
+  local merge_to_take = gui.merge_to_take and not gui.merge_to_item
+  set_rgwh("RENDER_MERGE_VOLUMES", merge_to_take and "1" or "0")
+  set_rgwh("GLUE_MERGE_VOLUMES", merge_to_take and "1" or "0")
+  set_rgwh("RENDER_PRINT_VOLUMES", gui.print_volumes and "1" or "0")
+  set_rgwh("GLUE_PRINT_VOLUMES", gui.print_volumes and "1" or "0")
+
+  -- Handle/epsilon
+  if gui.handle_mode == 1 then
+    set_rgwh("HANDLE_MODE", "seconds")
+    set_rgwh("HANDLE_SECONDS", gui.handle_length)
+  elseif gui.handle_mode == 2 then
+    set_rgwh("HANDLE_MODE", "frames")
+    set_rgwh("HANDLE_SECONDS", gui.handle_length)
+  end
+
+  if gui.epsilon_mode == 1 then
+    set_rgwh("EPSILON_MODE", "frames")
+    set_rgwh("EPSILON_VALUE", gui.epsilon_value)
+  elseif gui.epsilon_mode == 2 then
+    set_rgwh("EPSILON_MODE", "seconds")
+    set_rgwh("EPSILON_VALUE", gui.epsilon_value)
+  end
+
+  -- Cues
+  set_rgwh("WRITE_EDGE_CUES", gui.cue_write_edge and "1" or "0")
+  set_rgwh("WRITE_GLUE_CUES", gui.cue_write_glue and "1" or "0")
+
+  -- Policies
+  set_rgwh("GLUE_SINGLE_ITEMS", gui.glue_single_items and "1" or "0")
+  set_rgwh("GLUE_OUTPUT_POLICY_WHEN_NO_TRACKFX", policy_names[gui.glue_no_trackfx_policy + 1])
+  set_rgwh("RENDER_OUTPUT_POLICY_WHEN_NO_TRACKFX", policy_names[gui.render_no_trackfx_policy + 1])
+
+  -- Debug
+  set_rgwh("DEBUG_LEVEL", gui.debug_level)
+  set_rgwh("DEBUG_NO_CLEAR", gui.debug_no_clear and "1" or "0")
+end
+
+local function parse_state_to_table(s)
+  local t = {}
+  if not s or s == "" then return t end
+  for kv in s:gmatch("[^;]+") do
+    local k, v = kv:match("([^=]+)=(.*)")
+    if k then
+      local n = tonumber(v)
+      if n then
+        t[k] = n
+      elseif v == "true" then
+        t[k] = true
+      elseif v == "false" then
+        t[k] = false
+      else
+        t[k] = v
+      end
+    end
+  end
+  return t
+end
+
+local function format_setting_value(key, val)
+  if val == nil then return "nil" end
+
+  local bool_keys = {
+    take_fx = true, track_fx = true,
+    merge_to_item = true, merge_to_take = true, print_volumes = true,
+    cue_write_edge = true, cue_write_glue = true, glue_single_items = true,
+    debug_no_clear = true, enable_docking = true,
+  }
+
+  local op_names = {"Auto", "Render", "Glue"}
+  local scope_names = {"Auto", "Units", "Time Selection", "Per Item"}
+  local channel_names = {"Auto", "Mono", "Multi"}
+  local tc_names = {"Previous", "Current", "Off"}
+  local handle_names = {"Use ExtState", "Seconds", "Frames"}
+  local epsilon_names = {"Use ExtState", "Frames", "Seconds"}
+  local policy_names = {"Preserve", "Force Multi"}
+  local debug_names = {"Silent", "Normal", "Verbose"}
+  local selection_policy_names = {"Progress", "Restore", "None"}
+
+  if bool_keys[key] then
+    return val and "ON" or "OFF"
+  elseif key == "op" then
+    return op_names[val + 1] or tostring(val)
+  elseif key == "selection_scope" then
+    return scope_names[val + 1] or tostring(val)
+  elseif key == "channel_mode" then
+    return channel_names[val + 1] or tostring(val)
+  elseif key == "tc_mode" then
+    return tc_names[val + 1] or tostring(val)
+  elseif key == "handle_mode" then
+    return handle_names[val + 1] or tostring(val)
+  elseif key == "epsilon_mode" then
+    return epsilon_names[val + 1] or tostring(val)
+  elseif key == "glue_no_trackfx_policy" or key == "render_no_trackfx_policy" then
+    return policy_names[val + 1] or tostring(val)
+  elseif key == "debug_level" then
+    return debug_names[val + 1] or tostring(val)
+  elseif key == "selection_policy" then
+    return selection_policy_names[val + 1] or tostring(val)
+  elseif key == "handle_length" or key == "epsilon_value" then
+    return string.format("%.3f", tonumber(val) or 0)
+  end
+
+  return tostring(val)
+end
+
+local function log_setting_changes(before_state, after_state)
+  if gui.debug_level < 1 then return end
+
+  local before = parse_state_to_table(before_state)
+  local after = parse_state_to_table(after_state)
+
+  local labels = {
+    op = "Operation",
+    selection_scope = "Selection Scope",
+    channel_mode = "Channel Mode",
+    take_fx = "Print Take FX",
+    track_fx = "Print Track FX",
+    tc_mode = "Timecode Mode",
+    merge_to_item = "Merge to Item",
+    merge_to_take = "Merge to Take",
+    print_volumes = "Print Volumes",
+    handle_mode = "Handle Mode",
+    handle_length = "Handle Length",
+    epsilon_mode = "Epsilon Mode",
+    epsilon_value = "Epsilon Value",
+    cue_write_edge = "Write Edge Cues",
+    cue_write_glue = "Write Glue Cues",
+    glue_single_items = "Glue Single Items",
+    glue_no_trackfx_policy = "Glue No-TrackFX Policy",
+    render_no_trackfx_policy = "Render No-TrackFX Policy",
+    debug_level = "Debug Level",
+    debug_no_clear = "No Clear Console",
+    selection_policy = "Selection Policy",
+    enable_docking = "Enable Window Docking",
+    bwfmetaedit_custom_path = "BWF MetaEdit Custom Path",
+  }
+
+  for _, key in ipairs(persist_keys) do
+    if before[key] ~= after[key] then
+      local label = labels[key] or key
+      local before_val = format_setting_value(key, before[key])
+      local after_val = format_setting_value(key, after[key])
+      r.ShowConsoleMsg(string.format("[RGWH GUI] %s: %s -> %s\n", label, before_val, after_val))
+    end
+  end
+end
+
+local function handle_state_change(before_state, after_state)
+  if after_state == before_state then return end
+  save_persist()
+  sync_rgwh_extstate_from_gui()
+  log_setting_changes(before_state, after_state)
+end
+
 ------------------------------------------------------------
 -- BWF MetaEdit CLI Detection
 ------------------------------------------------------------
@@ -781,6 +962,7 @@ end
 
 -- call load immediately so gui gets initial persisted values
 load_persist()
+sync_rgwh_extstate_from_gui()
 check_bwfmetaedit(true)
 
 -- If debug level >= 1, print settings on startup
@@ -1332,7 +1514,7 @@ local function draw_settings_popup()
 
   -- persist if changed
   local after_state = serialize_gui_state(gui)
-  if after_state ~= before_state then save_persist() end
+  handle_state_change(before_state, after_state)
 
   ImGui.PopItemWidth(ctx)
   ImGui.End(ctx)
@@ -2239,7 +2421,7 @@ local function draw_gui()
 
   -- persist if changed
   local after_state = serialize_gui_state(gui)
-  if after_state ~= before_state then save_persist() end
+  handle_state_change(before_state, after_state)
 
   ImGui.PopItemWidth(ctx)
   ImGui.End(ctx)
