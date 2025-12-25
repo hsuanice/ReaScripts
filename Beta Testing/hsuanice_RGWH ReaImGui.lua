@@ -1,7 +1,7 @@
 --[[
 @description RGWH GUI - ImGui Interface for RGWH Core
 @author hsuanice
-@version 0.1.3
+@version 0.1.4
 @provides
   [main] .
 
@@ -14,6 +14,14 @@
   Adjust parameters using the visual controls and click operation buttons to execute.
 
 @changelog
+  0.1.4 [v251225.1835] - Epsilon Removal (Internal Constant)
+    - REMOVED: Epsilon Mode and Epsilon Value GUI controls (lines 1467-1479)
+    - REMOVED: epsilon_mode and epsilon_value from gui state (lines 525-526)
+    - REMOVED: epsilon ExtState synchronization (lines 651-657, 1211-1216)
+    - REMOVED: epsilon debug logging entry (line 760)
+    - REASON: Epsilon now internal constant (0.5 frames) in RGWH Core v0.2.2
+    - IMPACT: Simplified GUI, epsilon no longer user-configurable
+
   0.1.3 [v251224.1135] - Live ExtState Sync + Debug Setting Logs
     - ADDED: Any setting change now updates RGWH ExtState immediately
     - ADDED: Debug mode prints setting changes on every toggle/update
@@ -521,11 +529,7 @@ local gui = {
   handle_mode = 0,          -- 0=ext, 1=seconds, 2=frames
   handle_length = 5.0,
 
-  -- Epsilon settings
-  epsilon_mode = 0,         -- 0=ext, 1=frames, 2=seconds
-  epsilon_value = 0.5,
-
-  -- Cues
+  -- Cues (v0.1.4: epsilon removed - now internal constant in RGWH Core)
   cue_write_edge = true,
   cue_write_glue = true,
 
@@ -648,15 +652,7 @@ local function sync_rgwh_extstate_from_gui()
     set_rgwh("HANDLE_SECONDS", gui.handle_length)
   end
 
-  if gui.epsilon_mode == 1 then
-    set_rgwh("EPSILON_MODE", "frames")
-    set_rgwh("EPSILON_VALUE", gui.epsilon_value)
-  elseif gui.epsilon_mode == 2 then
-    set_rgwh("EPSILON_MODE", "seconds")
-    set_rgwh("EPSILON_VALUE", gui.epsilon_value)
-  end
-
-  -- Cues
+  -- Cues (v0.1.4: epsilon sync removed)
   set_rgwh("WRITE_EDGE_CUES", gui.cue_write_edge and "1" or "0")
   set_rgwh("WRITE_GLUE_CUES", gui.cue_write_glue and "1" or "0")
 
@@ -706,7 +702,7 @@ local function format_setting_value(key, val)
   local channel_names = {"Auto", "Mono", "Multi"}
   local tc_names = {"Previous", "Current", "Off"}
   local handle_names = {"Use ExtState", "Seconds", "Frames"}
-  local epsilon_names = {"Use ExtState", "Frames", "Seconds"}
+  -- v0.1.4: epsilon_names removed (epsilon is now internal constant)
   local policy_names = {"Preserve", "Force Multi"}
   local debug_names = {"Silent", "Normal", "Verbose"}
   local selection_policy_names = {"Progress", "Restore", "None"}
@@ -723,9 +719,7 @@ local function format_setting_value(key, val)
     return tc_names[val + 1] or tostring(val)
   elseif key == "handle_mode" then
     return handle_names[val + 1] or tostring(val)
-  elseif key == "epsilon_mode" then
-    return epsilon_names[val + 1] or tostring(val)
-  elseif key == "glue_no_trackfx_policy" or key == "render_no_trackfx_policy" then
+  elseif key == "glue_no_trackfx_policy" or key == "render_no_trackfx_policy" then  -- v0.1.4: epsilon_mode case removed
     return policy_names[val + 1] or tostring(val)
   elseif key == "debug_level" then
     return debug_names[val + 1] or tostring(val)
@@ -756,8 +750,6 @@ local function log_setting_changes(before_state, after_state)
     print_volumes = "Print Volumes",
     handle_mode = "Handle Mode",
     handle_length = "Handle Length",
-    epsilon_mode = "Epsilon Mode",
-    epsilon_value = "Epsilon Value",
     cue_write_edge = "Write Edge Cues",
     cue_write_glue = "Write Glue Cues",
     glue_single_items = "Glue Single Items",
@@ -927,7 +919,7 @@ local function print_all_settings(prefix)
   local channel_names = {"Auto", "Mono", "Multi"}
   local tc_names = {"Previous", "Current", "Off"}
   local handle_names = {"Use ExtState", "Seconds", "Frames"}
-  local epsilon_names = {"Use ExtState", "Frames", "Seconds"}
+  -- v0.1.4: epsilon_names removed (epsilon is now internal constant)
   local policy_names = {"Preserve", "Force Multi"}
   local debug_names = {"Silent", "Normal", "Verbose"}
   local selection_policy_names = {"Progress", "Restore", "None"}
@@ -946,8 +938,7 @@ local function print_all_settings(prefix)
   r.ShowConsoleMsg(string.format("  Print Volumes: %s\n", bool_str(gui.print_volumes)))
   r.ShowConsoleMsg(string.format("  Handle Mode: %s\n", handle_names[gui.handle_mode + 1] or "Unknown"))
   r.ShowConsoleMsg(string.format("  Handle Length: %.2f\n", gui.handle_length))
-  r.ShowConsoleMsg(string.format("  Epsilon Mode: %s\n", epsilon_names[gui.epsilon_mode + 1] or "Unknown"))
-  r.ShowConsoleMsg(string.format("  Epsilon Value: %.5f\n", gui.epsilon_value))
+  -- v0.1.4: Epsilon debug output removed (now internal constant: 0.1 frames)
   r.ShowConsoleMsg(string.format("  Write Edge Cues: %s\n", bool_str(gui.cue_write_edge)))
   r.ShowConsoleMsg(string.format("  Write Glue Cues: %s\n", bool_str(gui.cue_write_glue)))
   r.ShowConsoleMsg(string.format("  Glue Single Items: %s\n", bool_str(gui.glue_single_items)))
@@ -1207,16 +1198,7 @@ local function build_args_from_gui(operation)
     args.handle = { mode = "seconds", seconds = gui.handle_length / fps }
   end
 
-  -- Epsilon
-  if gui.epsilon_mode == 0 then
-    args.epsilon = "ext"
-  elseif gui.epsilon_mode == 1 then
-    args.epsilon = { mode = "frames", value = gui.epsilon_value }
-  else -- seconds
-    args.epsilon = { mode = "seconds", value = gui.epsilon_value }
-  end
-
-  -- Debug
+  -- Debug (v0.1.4: epsilon removed - now internal constant)
   args.debug = {
     level = gui.debug_level,
     no_clear = gui.debug_no_clear,
@@ -1464,21 +1446,7 @@ local function draw_settings_popup()
     gui.open_bwf_install_popup = true
   end
 
-  -- === EPSILON ===
-  draw_section_header("EPSILON (Tolerance)")
-  rv, new_val = ImGui.Combo(ctx, "Epsilon Mode", gui.epsilon_mode, "Use ExtState\0Frames\0Seconds\0")
-  if rv then gui.epsilon_mode = new_val end
-
-  if gui.epsilon_mode > 0 then
-    rv, new_val = ImGui.InputDouble(ctx, "Epsilon Value", gui.epsilon_value, 0.01, 0.1, "%.3f")
-    if rv then gui.epsilon_value = math.max(0, new_val) end
-
-    local unit = gui.epsilon_mode == 1 and "frames" or "seconds"
-    ImGui.SameLine(ctx)
-    ImGui.TextDisabled(ctx, unit)
-  end
-
-  -- === CUES ===
+  -- === CUES === (v0.1.4: epsilon section removed - now internal constant 0.5 frames)
   draw_section_header("CUES")
   rv, new_val = ImGui.Checkbox(ctx, "Write Edge Cues", gui.cue_write_edge)
   if rv then gui.cue_write_edge = new_val end
