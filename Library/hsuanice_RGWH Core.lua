@@ -1,6 +1,6 @@
 --[[
 @description RGWH Core - Render or Glue with Handles
-@version 0.2.2a
+@version 0.2.2b
 @author hsuanice
 
 @provides
@@ -62,6 +62,16 @@
   • For detailed operation modes guide, see RGWH GUI: Help > Manual (Operation Modes)
 
 @changelog
+  0.2.2b [v251226.0152] - CRITICAL BUG FIX: Cross-Track TS Processing
+    - FIXED: Multi-track Units glue with TS incorrectly processed only first track as GAP unit
+      • ROOT CAUSE: glue_unit() cleared TS at line 1947 after processing GAP unit
+      • BUG BEHAVIOR: Track #1 processed correctly (hasTS=true → GAP unit with TS range)
+                      Track #2+ processed incorrectly (hasTS=false → individual units with handles)
+      • FIX: Snapshot TS BEFORE per-track loop (line 2530) instead of inside loop (line 2536)
+      • IMPACT: All tracks now correctly use GAP unit mode when TS exists with multiple units
+    - CHANGED: M.glue_selection() now snapshots TS once before track iteration (line 2529-2530)
+    - TESTING: Verify multi-track glue with TS produces equal-length TS-range items on all tracks
+
   0.2.2a [v251225.1845] - EPSILON VALUE REFINEMENT + CRITICAL BUG FIX
     - CHANGED: Epsilon refined from 0.5 frames to 0.1 frames for better precision
     - FIXED: frames_to_seconds() was using video FPS instead of audio sample rate (line 941-950)
@@ -2525,6 +2535,10 @@ function M.glue_selection(force_units)
   else
     -- Units glue path
     dbg(DBG,1,"[RUN] Using Units glue")
+
+    -- ★ v0.2.2a: Snapshot TS BEFORE per-track processing (glue_unit clears TS at line 1947)
+    local currentTsL, currentTsR, hasTS = get_current_ts()
+
     local by_tr, tr_list = collect_by_track_from_selection()
     for _,tr in ipairs(tr_list) do
       local list  = by_tr[tr]
@@ -2533,7 +2547,7 @@ function M.glue_selection(force_units)
 
       -- When multiple units with gaps AND TS exists, treat them as one GAP unit
       -- Without TS: keep units separate for individual handle-aware processing
-      local currentTsL, currentTsR, hasTS = get_current_ts()
+      -- ★ v0.2.2a: Use snapshotted TS (not get_current_ts() which may be cleared by previous track)
 
       if #units > 1 and hasTS then
         -- Sort items by position
