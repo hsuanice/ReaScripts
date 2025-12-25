@@ -1,6 +1,6 @@
 --[[
 @description AudioSweet Core - Focused Track FX render via RGWH Core
-@version 0.2.0.0.1
+@version 0.2.2
 @author hsuanice
 @noindex
 @notes
@@ -12,6 +12,20 @@ Tim Chimes (original), adapted by hsuanice for AudioSweet Core integration.
   http://timchimes.com/scripting-with-reaper-audiosuite/
 
 @changelog
+  v0.2.2 (2025-12-25) [internal: v251225.2158]
+    - REFACTORED: Removed duplicated unit detection logic
+      • Removed build_units_from_selection() function (~47 lines of duplicated code)
+      • Now uses RGWH.utils.detect_units_from_selection() (single source of truth)
+      • Added format conversion: RGWH unit → AudioSweet unit (line 2516-2531)
+        RGWH: {kind, members=[{it,L,R},...], start, finish, track}
+        AS:   {track, items=[item,...], UL, UR}
+      • Helper functions (project_epsilon, approx_eq, ranges_touch_or_overlap) retained for AudioSweet-specific use
+    - CHANGED: Load RGWH Core early in main() to access utility functions
+      • RGWH loaded at script start (line 2401) instead of per-unit (line 2750+)
+      • Provides access to RGWH.utils API for unit detection
+    - IMPACT: Cleaner codebase, maintains DRY principle, no functionality change
+    - NOTE: Helper functions marked for future refactoring in v0.3.0
+
   v0.2.0.0.1 (2025-12-23) [internal: v251223.2328]
     - CHANGED: Version bump to 0.2.0.0.1
 
@@ -1677,9 +1691,12 @@ function getLoopSelection()--Checks to see if there is a loop selection
   return hasLoop, startOut, endOut
 end
 
--- Build processing units from current selection:
--- same track, position-sorted, merge items that touch/overlap into one unit.
--- ===== epsilon helpers (early shim for forward calls) =====
+-- ==========================================================
+-- v0.2.2: Unit detection delegated to RGWH.utils
+-- Note: Helper functions below still exist for AudioSweet-specific use
+-- TODO v0.3.0: Further refactor to use RGWH.utils directly throughout
+-- ==========================================================
+-- ===== epsilon helpers (still needed by AudioSweet-specific functions) =====
 if not project_epsilon then
   function project_epsilon()
     local sr = reaper.GetSetProjectInfo(0, "PROJECT_SRATE", 0, false)
@@ -1701,53 +1718,8 @@ if not ranges_touch_or_overlap then
   end
 end
 -- ==========================================================
-local function build_units_from_selection()
-  local n = reaper.CountSelectedMediaItems(0)
-  local by_track = {}
-  for i = 0, n-1 do
-    local it = reaper.GetSelectedMediaItem(0, i)
-    if it then
-      local tr  = reaper.GetMediaItem_Track(it)
-      local pos = reaper.GetMediaItemInfo_Value(it, "D_POSITION")
-      local len = reaper.GetMediaItemInfo_Value(it, "D_LENGTH")
-      local fin = pos + len
-      by_track[tr] = by_track[tr] or {}
-      table.insert(by_track[tr], { item=it, pos=pos, fin=fin })
-    end
-  end
-
-  local units = {}
-  local eps = project_epsilon()
-  for tr, arr in pairs(by_track) do
-    table.sort(arr, function(a,b) return a.pos < b.pos end)
-    local cur = nil
-    for _, e in ipairs(arr) do
-      if not cur then
-        cur = { track=tr, items={ e.item }, UL=e.pos, UR=e.fin }
-      else
-        if ranges_touch_or_overlap(cur.UL, cur.UR, e.pos, e.fin, eps) then
-          table.insert(cur.items, e.item)
-          if e.pos < cur.UL then cur.UL = e.pos end
-          if e.fin > cur.UR then cur.UR = e.fin end
-        else
-          table.insert(units, cur)
-          cur = { track=tr, items={ e.item }, UL=e.pos, UR=e.fin }
-        end
-      end
-    end
-    if cur then table.insert(units, cur) end
-  end
-
-  -- debug dump
-  log_step("UNITS", "count=%d", #units)
-  if debug_enabled() then
-    for i,u in ipairs(units) do
-      reaper.ShowConsoleMsg(string.format("  unit#%d  track=%s  members=%d  span=%.3f..%.3f\n",
-        i, tostring(u.track), #u.items, u.UL, u.UR))
-    end
-  end
-  return units
-end
+-- v0.2.2: build_units_from_selection() removed - now using RGWH.utils.detect_units_from_selection()
+-- ==========================================================
 
 -- Collect units intersecting a time selection
 local function collect_units_intersecting_ts(units, tsL, tsR)
@@ -2432,6 +2404,23 @@ function main() -- main part of the script
   -- Snapshot track channel count (will be set after we know FXmediaTrack)
   local track_nchan_snapshot = nil
 
+  -- v0.2.2: Load RGWH Core early to access utility functions
+  local RGWH = nil
+  local RGWH_PATH = reaper.GetResourcePath() .. "/Scripts/hsuanice Scripts/Library/hsuanice_RGWH Core.lua"
+  local ok_rgwh, rgwh_module = pcall(dofile, RGWH_PATH)
+  if ok_rgwh and rgwh_module and type(rgwh_module.utils) == "table" then
+    RGWH = rgwh_module
+    log_step("RGWH", "Core loaded successfully (for utils)")
+  else
+    log_step("ERROR", "Failed to load RGWH Core for utilities: %s", RGWH_PATH)
+    reaper.MB("RGWH Core required but not found:\n" .. RGWH_PATH, "AudioSweet — Core load failed", 0)
+    reaper.PreventUIRefresh(-1)
+    if not external_undo then
+      reaper.Undo_EndBlock("AudioSweet (RGWH Core missing)", -1)
+    end
+    return
+  end
+
   -- Focused FX check
   local AS_args = AS_merge_args_with_extstate({})
   local ret_val, tracknumber_Out, itemnumber_Out, fxnumber_Out, window = checkSelectedFX()
@@ -2516,9 +2505,9 @@ function main() -- main part of the script
   -- === End COPY branch; continue into APPLY flow ===
 
 
-  -- Build units from current selection
-  local units = build_units_from_selection()
-  if #units == 0 then
+  -- Build units from current selection (v0.2.2: using RGWH.utils)
+  local rgwh_units = RGWH.utils.detect_units_from_selection()
+  if #rgwh_units == 0 then
     reaper.MB("No media items selected.", "AudioSweet", 0)
     reaper.PreventUIRefresh(-1)
     if not external_undo then
@@ -2527,9 +2516,35 @@ function main() -- main part of the script
     return
   end
 
+  -- v0.2.2: Convert RGWH unit format to AudioSweet format
+  -- RGWH: {kind, members=[{it,L,R},...], start, finish, track}
+  -- AS:   {track, items=[item,...], UL, UR}
+  local units = {}
+  for _, ru in ipairs(rgwh_units) do
+    local as_unit = {
+      track = ru.track,
+      items = {},
+      UL = ru.start,
+      UR = ru.finish
+    }
+    for _, m in ipairs(ru.members) do
+      table.insert(as_unit.items, m.it)
+    end
+    table.insert(units, as_unit)
+  end
+
+  -- Log units
+  log_step("UNITS", "count=%d", #units)
+  if debug_enabled() then
+    for i,u in ipairs(units) do
+      reaper.ShowConsoleMsg(string.format("  unit#%d  track=%s  members=%d  span=%.3f..%.3f\n",
+        i, tostring(u.track), #u.items, u.UL, u.UR))
+    end
+  end
+
   if debug_enabled() then
     for i,u in ipairs(units) do dbg_dump_unit(u, i) end
-  end  
+  end
 
   -- Time selection state
   local hasTS, tsL, tsR = getLoopSelection()
