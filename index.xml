@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<index version="1" name="hsuanice Scripts" commit="bb56da37c82ad312ebb4aa9bf91d6a34295d4543">
+<index version="1" name="hsuanice Scripts" commit="0627eb07be6c4625d64500a8e4551404f0bdb524">
   <category name="Beta Testing">
     <reapack name="hsuanice_AudioSweet ReaImGui.lua" type="script" desc="AudioSweet ReaImGui - AudioSuite Workflow (Pro Tools–Style)">
       <metadata>
@@ -1929,6 +1929,9 @@ v0.9.0 - Added Shared Link State section from Project ExtState "hsuanice_Link".]
       </version>
       <version name="0.2.0.0.1" author="hsuanice" time="2025-12-23T15:36:47Z">
         <source main="main">https://github.com/hsuanice/ReaScripts/raw/4cbf236d213831788bdfd78095ae612ef88bb30f/Library/hsuanice_AS%20Preview%20Core.lua</source>
+      </version>
+      <version name="0.2.2" author="hsuanice" time="2025-12-25T16:11:03Z">
+        <source main="main">https://github.com/hsuanice/ReaScripts/raw/0627eb07be6c4625d64500a8e4551404f0bdb524/Library/hsuanice_AS%20Preview%20Core.lua</source>
       </version>
     </reapack>
     <reapack name="hsuanice_Hover.lua" type="script" desc="hsuanice Hover Library (Shared helpers for Hover Mode editing tools)">
