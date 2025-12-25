@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<index version="1" name="hsuanice Scripts" commit="eeddacb6e8ff0d90da797a4c22e3d90c68b8f5cc">
+<index version="1" name="hsuanice Scripts" commit="bb56da37c82ad312ebb4aa9bf91d6a34295d4543">
   <category name="Beta Testing">
     <reapack name="hsuanice_AudioSweet ReaImGui.lua" type="script" desc="AudioSweet ReaImGui - AudioSuite Workflow (Pro Tools–Style)">
       <metadata>
@@ -1605,6 +1605,9 @@ v0.2.0  Previous rename and future-proof notes.]]></changelog>
       <version name="0.1.3" author="hsuanice" time="2025-12-24T03:45:39Z">
         <source main="main">https://github.com/hsuanice/ReaScripts/raw/3f865823a28a8e31d24740d20f5bef050bbf8494/Beta%20Testing/hsuanice_RGWH%20ReaImGui.lua</source>
       </version>
+      <version name="0.1.4" author="hsuanice" time="2025-12-25T13:48:10Z">
+        <source main="main">https://github.com/hsuanice/ReaScripts/raw/dbecdc018aa38be8646e766090e10822baff7865/Beta%20Testing/hsuanice_RGWH%20ReaImGui.lua</source>
+      </version>
     </reapack>
     <reapack name="hsuanice_Set Time to Item Selection Mouse Right-Drag Release.lua" type="script" desc="Set Time to Item on Right-Drag Release (Toggle, One-Pass Perf)">
       <metadata>
@@ -2040,6 +2043,9 @@ v0.9.0 - Added Shared Link State section from Project ExtState "hsuanice_Link".]
       </version>
       <version name="0.2.1" author="hsuanice" time="2025-12-24T05:24:55Z">
         <source main="main">https://github.com/hsuanice/ReaScripts/raw/4ad95a8dc26add4bd280a5133997d5735e21a8b5/Library/hsuanice_RGWH%20Core.lua</source>
+      </version>
+      <version name="0.2.2a" author="hsuanice" time="2025-12-25T13:49:03Z">
+        <source main="main">https://github.com/hsuanice/ReaScripts/raw/bb56da37c82ad312ebb4aa9bf91d6a34295d4543/Library/hsuanice_RGWH%20Core.lua</source>
       </version>
     </reapack>
   </category>
