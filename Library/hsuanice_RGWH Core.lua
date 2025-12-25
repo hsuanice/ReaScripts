@@ -1,6 +1,6 @@
 --[[
 @description RGWH Core - Render or Glue with Handles
-@version 0.2.1
+@version 0.2.2a
 @author hsuanice
 
 @provides
@@ -37,7 +37,6 @@
 
       -- One-run overrides (fallback: ExtState -> DEFAULTS):
       handle  = { mode="seconds", seconds=5.0 } | "ext" | nil,
-      epsilon = { mode="frames", value=0.5 }     | "ext" | nil,
       cues    = { write_edge=true/false, write_glue=true/false },
       policies = {
         glue_single_items = true/false,
@@ -63,9 +62,30 @@
   • For detailed operation modes guide, see RGWH GUI: Help > Manual (Operation Modes)
 
 @changelog
-  0.2.1 [v251224.1318] - GLUE APPLY VOLUME HANDLING
-    - CHANGED: Glue-only path uses native volume behavior (item+take printed)
-    - CHANGED: Volume rendering options apply only when Apply is executed (render/apply)
+  0.2.2a [v251225.1845] - EPSILON VALUE REFINEMENT + CRITICAL BUG FIX
+    - CHANGED: Epsilon refined from 0.5 frames to 0.1 frames for better precision
+    - FIXED: frames_to_seconds() was using video FPS instead of audio sample rate (line 941-950)
+      • Bug: Used TimeMap_curFrameRate (24fps) instead of sr parameter → epsilon was 2000x too large!
+      • Fix: Now correctly uses sr (sample rate) when provided, falls back to video fps otherwise
+      • Impact: Epsilon now correctly 0.002ms @ 48kHz (was incorrectly 4.17ms)
+    - REASON: 0.1 frames (48kHz: 0.002ms) balances float precision handling with user intent
+    - IMPACT: More accurate touch/overlap detection, respects intentional micro-gaps
+
+  0.2.2 [v251225.1830] - EPSILON INTERNALIZED
+    - CHANGED: Epsilon is now internal constant (0.5 frames), no longer user-configurable
+    - REMOVED: EPSILON_MODE and EPSILON_VALUE from ExtState settings
+    - REMOVED: epsilon parameter from args (no longer accepts overrides)
+    - SIMPLIFIED: M.utils.project_epsilon() now returns hardcoded value
+    - REASON: Epsilon rarely needs adjustment, simplifies user experience
+    - IMPACT: GUI epsilon settings removed, epsilon always consistent
+
+  0.2.1 [v251225.1820] - PUBLIC UTILITY API
+    - ADDED: M.utils.detect_units_from_selection() - shared unit detection
+    - ADDED: M.utils.project_epsilon() - epsilon calculation
+    - ADDED: M.utils.ranges_touch_or_overlap() - range overlap detection
+    - ADDED: M.utils.select_only_items() - item selection utility
+    - PURPOSE: Enable code reuse across AudioSweet Core and AS Preview Core
+    - IMPACT: Single source of truth for unit detection logic
 
   0.2.0 [v251223.2256] - PUBLIC BETA ALIGNMENT
     - CHANGED: Version bump to 0.2.0 (public beta)
@@ -816,12 +836,15 @@ local ACT_REMOVE_TAKE_FX = 40640   -- Item: Remove FX for item take
 ------------------------------------------------------------
 -- Defaults (used if no ExtState present)
 ------------------------------------------------------------
+------------------------------------------------------------
+-- Internal Constants (v0.2.2: epsilon no longer configurable)
+------------------------------------------------------------
+local EPSILON_FRAMES = 0.1  -- Internal constant: 0.1 frames tolerance (balanced precision)
+
 local DEFAULTS = {
   GLUE_SINGLE_ITEMS  = true,
   HANDLE_MODE        = "seconds",
   HANDLE_SECONDS     = 5.0,
-  EPSILON_MODE       = "frames",
-  EPSILON_VALUE      = 0.5,
   DEBUG_LEVEL        = 0,
   -- FX policies (separate for GLUE vs RENDER)
   GLUE_TAKE_FX       = 1,             -- 1=Glue 之後的成品要印入 take FX；0=不印入
@@ -884,8 +907,6 @@ function M.read_settings()
     GLUE_SINGLE_ITEMS  = (get_ext_bool("GLUE_SINGLE_ITEMS",  DEFAULTS.GLUE_SINGLE_ITEMS)==1),
     HANDLE_MODE        = get_ext("HANDLE_MODE",              DEFAULTS.HANDLE_MODE),
     HANDLE_SECONDS     = get_ext_num("HANDLE_SECONDS",       DEFAULTS.HANDLE_SECONDS),
-    EPSILON_MODE       = get_ext("EPSILON_MODE",             DEFAULTS.EPSILON_MODE),
-    EPSILON_VALUE      = get_ext_num("EPSILON_VALUE",        DEFAULTS.EPSILON_VALUE),
     DEBUG_LEVEL        = get_ext_num("DEBUG_LEVEL",          DEFAULTS.DEBUG_LEVEL),
     GLUE_TAKE_FX       = (get_ext_bool("GLUE_TAKE_FX",      DEFAULTS.GLUE_TAKE_FX)==1),
     GLUE_TRACK_FX      = (get_ext_bool("GLUE_TRACK_FX",     DEFAULTS.GLUE_TRACK_FX)==1),
@@ -922,8 +943,14 @@ local function printf(fmt, ...) r.ShowConsoleMsg(string.format(fmt.."\n", ...)) 
 local function dbg(level, want, ...) if level>=want then printf(...) end end
 
 local function frames_to_seconds(frames, sr, fps)
-  local fr = (r.TimeMap_curFrameRate and r.TimeMap_curFrameRate(0) or 24.0)
-  return (frames or 1) / (fr>0 and fr or 24.0)
+  -- v0.2.2a fix: Use audio sample rate (sr), not video frame rate
+  -- If sr is provided, use it (audio frames). Otherwise fall back to video fps.
+  if sr and sr > 0 then
+    return (frames or 0) / sr
+  else
+    local fr = (r.TimeMap_curFrameRate and r.TimeMap_curFrameRate(0) or 24.0)
+    return (frames or 1) / (fr > 0 and fr or 24.0)
+  end
 end
 
 local function get_sr()
@@ -1838,7 +1865,7 @@ end
 local function glue_unit(tr, u, cfg)
   local DBG    = cfg.DEBUG_LEVEL or 1
   local HANDLE = (cfg.HANDLE_MODE=="seconds") and (cfg.HANDLE_SECONDS or 0.0) or 0.0
-  local eps_s  = (cfg.EPSILON_MODE=="frames") and frames_to_seconds(cfg.EPSILON_VALUE, get_sr(), nil) or (cfg.EPSILON_VALUE or 0.002)
+  local eps_s  = frames_to_seconds(EPSILON_FRAMES, get_sr(), nil)  -- v0.2.2: internal constant
 
   -- Per-unit channel mode detection when GLUE_APPLY_MODE=="auto"
   local unit_apply_mode = cfg.GLUE_APPLY_MODE
@@ -2467,7 +2494,7 @@ function M.glue_selection(force_units)
     r.PreventUIRefresh(-1); r.Undo_EndBlock("RGWH Core - Glue (no selection)", -1); return
   end
 
-  local eps_s = (cfg.EPSILON_MODE=="frames") and frames_to_seconds(cfg.EPSILON_VALUE, get_sr(), nil) or (cfg.EPSILON_VALUE or 0.002)
+  local eps_s = frames_to_seconds(EPSILON_FRAMES, get_sr(), nil)  -- v0.2.2: internal constant
 
   -- Note: When GLUE_APPLY_MODE=="auto", channel mode is now determined per-unit in glue_unit()
 
@@ -2580,7 +2607,7 @@ function M.auto_selection(merge_volumes, print_volumes, merge_to_item)
     r.PreventUIRefresh(-1); r.Undo_EndBlock("RGWH Core - Auto (no selection)", -1); return
   end
 
-  local eps_s = (cfg.EPSILON_MODE=="frames") and frames_to_seconds(cfg.EPSILON_VALUE, get_sr(), nil) or (cfg.EPSILON_VALUE or 0.002)
+  local eps_s = frames_to_seconds(EPSILON_FRAMES, get_sr(), nil)  -- v0.2.2: internal constant
 
   dbg(DBG,1,"[RUN] Auto start  handles=%.3fs  epsilon=%.5fs", cfg.HANDLE_SECONDS or 0, eps_s)
 
@@ -3007,8 +3034,6 @@ function M.core(args)
   local prev = {
     HANDLE_MODE     = get_ext("HANDLE_MODE",     ""),
     HANDLE_SECONDS  = get_ext("HANDLE_SECONDS",  ""),
-    EPSILON_MODE    = get_ext("EPSILON_MODE",    ""),
-    EPSILON_VALUE   = get_ext("EPSILON_VALUE",   ""),
     WRITE_EDGE_CUES = get_ext("WRITE_EDGE_CUES", ""),
     WRITE_GLUE_CUES = get_ext("WRITE_GLUE_CUES", ""),
     DEBUG_LEVEL     = get_ext("DEBUG_LEVEL",     ""),
@@ -3029,14 +3054,10 @@ function M.core(args)
   local function set_opt(k, v) if v ~= nil then set_ext(k, v) end end
 
   -- One-run overrides ------------------------------------------------
-  -- handle / epsilon
+  -- handle (v0.2.2: epsilon removed - now internal constant)
   if args.handle and args.handle ~= "ext" then
     set_opt("HANDLE_MODE",    args.handle.mode or DEFAULTS.HANDLE_MODE)
     set_opt("HANDLE_SECONDS", tostring(args.handle.seconds or DEFAULTS.HANDLE_SECONDS))
-  end
-  if args.epsilon and args.epsilon ~= "ext" then
-    set_opt("EPSILON_MODE",   args.epsilon.mode or DEFAULTS.EPSILON_MODE)
-    set_opt("EPSILON_VALUE",  tostring(args.epsilon.value or DEFAULTS.EPSILON_VALUE))
   end
 
   -- cues
@@ -3149,6 +3170,58 @@ function M.core(args)
   for k, v in pairs(prev) do set_opt(k, v) end
   if not ok then return false, tostring(err) end
   return true
+end
+
+------------------------------------------------------------
+-- === Public Utility Functions (v0.2.1) ===
+------------------------------------------------------------
+-- Utilities for shared use by AudioSweet Core and AS Preview Core
+
+M.utils = M.utils or {}
+
+-- Calculate project epsilon (used for touch/overlap detection)
+-- Returns epsilon in seconds (v0.2.2: now uses internal constant)
+function M.utils.project_epsilon()
+  local sr = get_sr()
+  local eps_s = frames_to_seconds(EPSILON_FRAMES, sr, nil)
+  return eps_s
+end
+
+-- Check if two time ranges touch or overlap
+-- Returns true if ranges touch or overlap within epsilon
+function M.utils.ranges_touch_or_overlap(a0, a1, b0, b1, eps)
+  eps = eps or M.utils.project_epsilon()
+  -- Check if gap between ranges is less than epsilon
+  local gap = math.max(a0, b0) - math.min(a1, b1)
+  return gap <= eps
+end
+
+-- Select only specified items (unselect all others first)
+function M.utils.select_only_items(items)
+  r.Main_OnCommand(40289, 0)  -- Unselect all items
+  for _, it in ipairs(items) do
+    r.SetMediaItemSelected(it, true)
+  end
+end
+
+-- Detect units from current selection
+-- Returns array of units: {kind, members, start, finish, track}
+-- Unit kinds: "SINGLE", "TOUCH", "CROSSFADE", "MIXED"
+function M.utils.detect_units_from_selection()
+  local eps_s = M.utils.project_epsilon()
+  local by_tr, tracks = collect_by_track_from_selection()
+
+  local all_units = {}
+  for _, tr in ipairs(tracks) do
+    local items = by_tr[tr]
+    local units = detect_units_same_track(items, eps_s)
+    for _, u in ipairs(units) do
+      u.track = tr  -- Add track reference
+      all_units[#all_units+1] = u
+    end
+  end
+
+  return all_units
 end
 
 return M
