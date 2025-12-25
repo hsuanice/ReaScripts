@@ -1,7 +1,7 @@
 --[[
 @description RGWH GUI - ImGui Interface for RGWH Core
 @author hsuanice
-@version 0.1.4
+@version 0.1.5
 @provides
   [main] .
 
@@ -14,6 +14,27 @@
   Adjust parameters using the visual controls and click operation buttons to execute.
 
 @changelog
+  0.1.5 [v251226.0310] - Multi-Channel Policy + Handle Improvements
+    - ADDED: Multi-Channel Policy setting in Settings > Policies
+      • Two options: "SOURCE playback channels" | "SOURCE track channels"
+      • Syncs to ExtState: MULTI_CHANNEL_POLICY (source_playback/source_track)
+      • Only applies when Channel Mode is set to "Multi"
+      • Orange warning displayed when Channel Mode is not Multi
+    - CHANGED: Handle settings simplified - fixed to "seconds" only
+      • REMOVED: Handle Mode dropdown (Use ExtState/Seconds/Frames)
+      • Handle now always uses seconds internally (no migration logic)
+      • Simplified GUI: one less control to configure
+      • Clean code: no handle_mode references in persist/args
+    - ADDED: "Whole File" toggle on same line as Handle input (matches AudioSweet)
+      • When enabled, sets HANDLE_SECONDS = 999999 (whole file mode)
+      • Handle Length input disabled when Whole File is active
+      • Single-line layout with 20px spacing: [✓] Whole File [5.0] seconds
+      • Tooltip explains whole file behavior
+      • Exact match with AudioSweet GUI implementation
+    - UPDATED: Debug logging shows "Handle: WHOLE FILE" or "Handle: X seconds"
+    - UPDATED: Debug logging shows Multi-Channel Policy value
+    - IMPACT: Cleaner Handle UI, Multi-Channel Policy support, v0.2.3-ready
+
   0.1.4 [v251225.1835] - Epsilon Removal (Internal Constant)
     - REMOVED: Epsilon Mode and Epsilon Value GUI controls (lines 1467-1479)
     - REMOVED: epsilon_mode and epsilon_value from gui state (lines 525-526)
@@ -525,9 +546,9 @@ local gui = {
   merge_to_take = true,
   print_volumes = false,
 
-  -- Handle settings
-  handle_mode = 0,          -- 0=ext, 1=seconds, 2=frames
-  handle_length = 5.0,
+  -- Handle settings (v0.1.5: fixed to seconds, added whole_file toggle)
+  handle_length = 5.0,      -- in seconds
+  handle_whole_file = false,  -- Use complete file length as handle
 
   -- Cues (v0.1.4: epsilon removed - now internal constant in RGWH Core)
   cue_write_edge = true,
@@ -537,6 +558,7 @@ local gui = {
   glue_single_items = false,  -- AUTO mode: false=single→render, true=single→glue
   glue_no_trackfx_policy = 0,    -- 0=preserve, 1=force_multi
   render_no_trackfx_policy = 0,  -- 0=preserve, 1=force_multi
+  multi_channel_policy = "source_playback",  -- "source_playback" | "source_track"
 
   -- Debug
   debug_level = 2,           -- 0=silent, 1=normal, 2=verbose
@@ -564,10 +586,11 @@ local persist_keys = {
   'op','selection_scope','channel_mode',
   'take_fx','track_fx','tc_mode',
   'merge_to_item','merge_to_take','print_volumes',
-  'handle_mode','handle_length',
+  'handle_length','handle_whole_file',  -- v0.1.5: removed handle_mode, added handle_whole_file
   'epsilon_mode','epsilon_value',
   'cue_write_edge','cue_write_glue',
   'glue_single_items','glue_no_trackfx_policy','render_no_trackfx_policy',
+  'multi_channel_policy',  -- v0.1.5: added Multi-Channel Policy
   'debug_level','debug_no_clear','selection_policy',
   'enable_docking','bwfmetaedit_custom_path'
 }
@@ -643,12 +666,11 @@ local function sync_rgwh_extstate_from_gui()
   set_rgwh("RENDER_PRINT_VOLUMES", gui.print_volumes and "1" or "0")
   set_rgwh("GLUE_PRINT_VOLUMES", gui.print_volumes and "1" or "0")
 
-  -- Handle/epsilon
-  if gui.handle_mode == 1 then
-    set_rgwh("HANDLE_MODE", "seconds")
-    set_rgwh("HANDLE_SECONDS", gui.handle_length)
-  elseif gui.handle_mode == 2 then
-    set_rgwh("HANDLE_MODE", "frames")
+  -- Handle (v0.1.5: fixed to seconds, whole_file toggle)
+  set_rgwh("HANDLE_MODE", "seconds")
+  if gui.handle_whole_file then
+    set_rgwh("HANDLE_SECONDS", "999999")  -- 999999 = whole file (same as AudioSweet)
+  else
     set_rgwh("HANDLE_SECONDS", gui.handle_length)
   end
 
@@ -660,6 +682,9 @@ local function sync_rgwh_extstate_from_gui()
   set_rgwh("GLUE_SINGLE_ITEMS", gui.glue_single_items and "1" or "0")
   set_rgwh("GLUE_OUTPUT_POLICY_WHEN_NO_TRACKFX", policy_names[gui.glue_no_trackfx_policy + 1])
   set_rgwh("RENDER_OUTPUT_POLICY_WHEN_NO_TRACKFX", policy_names[gui.render_no_trackfx_policy + 1])
+
+  -- Multi-Channel Policy (v0.1.5)
+  set_rgwh("MULTI_CHANNEL_POLICY", gui.multi_channel_policy)
 
   -- Debug
   set_rgwh("DEBUG_LEVEL", gui.debug_level)
@@ -701,7 +726,7 @@ local function format_setting_value(key, val)
   local scope_names = {"Auto", "Units", "Time Selection", "Per Item"}
   local channel_names = {"Auto", "Mono", "Multi"}
   local tc_names = {"Previous", "Current", "Off"}
-  local handle_names = {"Use ExtState", "Seconds", "Frames"}
+  -- v0.1.5: handle_names removed (fixed to seconds)
   -- v0.1.4: epsilon_names removed (epsilon is now internal constant)
   local policy_names = {"Preserve", "Force Multi"}
   local debug_names = {"Silent", "Normal", "Verbose"}
@@ -717,8 +742,10 @@ local function format_setting_value(key, val)
     return channel_names[val + 1] or tostring(val)
   elseif key == "tc_mode" then
     return tc_names[val + 1] or tostring(val)
-  elseif key == "handle_mode" then
-    return handle_names[val + 1] or tostring(val)
+  elseif key == "handle_whole_file" then
+    return val and "WHOLE FILE" or "OFF"
+  elseif key == "multi_channel_policy" then
+    return tostring(val)
   elseif key == "glue_no_trackfx_policy" or key == "render_no_trackfx_policy" then  -- v0.1.4: epsilon_mode case removed
     return policy_names[val + 1] or tostring(val)
   elseif key == "debug_level" then
@@ -748,8 +775,9 @@ local function log_setting_changes(before_state, after_state)
     merge_to_item = "Merge to Item",
     merge_to_take = "Merge to Take",
     print_volumes = "Print Volumes",
-    handle_mode = "Handle Mode",
     handle_length = "Handle Length",
+    handle_whole_file = "Handle: Whole File",
+    multi_channel_policy = "Multi-Channel Policy",
     cue_write_edge = "Write Edge Cues",
     cue_write_glue = "Write Glue Cues",
     glue_single_items = "Glue Single Items",
@@ -918,7 +946,7 @@ local function print_all_settings(prefix)
   local scope_names = {"Auto", "Units", "Time Selection", "Per Item"}
   local channel_names = {"Auto", "Mono", "Multi"}
   local tc_names = {"Previous", "Current", "Off"}
-  local handle_names = {"Use ExtState", "Seconds", "Frames"}
+  -- v0.1.5: handle_names removed (fixed to seconds)
   -- v0.1.4: epsilon_names removed (epsilon is now internal constant)
   local policy_names = {"Preserve", "Force Multi"}
   local debug_names = {"Silent", "Normal", "Verbose"}
@@ -936,9 +964,10 @@ local function print_all_settings(prefix)
   r.ShowConsoleMsg(string.format("  TC Mode: %s\n", tc_names[gui.tc_mode + 1] or "Unknown"))
   r.ShowConsoleMsg(string.format("  Merge Volumes: %s\n", bool_str(gui.merge_volumes)))
   r.ShowConsoleMsg(string.format("  Print Volumes: %s\n", bool_str(gui.print_volumes)))
-  r.ShowConsoleMsg(string.format("  Handle Mode: %s\n", handle_names[gui.handle_mode + 1] or "Unknown"))
-  r.ShowConsoleMsg(string.format("  Handle Length: %.2f\n", gui.handle_length))
-  -- v0.1.4: Epsilon debug output removed (now internal constant: 0.1 frames)
+  -- v0.1.5: Handle mode fixed to seconds, added whole_file toggle
+  r.ShowConsoleMsg(string.format("  Handle: %s\n", gui.handle_whole_file and "WHOLE FILE" or (gui.handle_length .. " seconds")))
+  r.ShowConsoleMsg(string.format("  Multi-Channel Policy: %s\n", gui.multi_channel_policy))
+  -- v0.1.4: Epsilon debug output removed (now internal constant: 0.5 frames)
   r.ShowConsoleMsg(string.format("  Write Edge Cues: %s\n", bool_str(gui.cue_write_edge)))
   r.ShowConsoleMsg(string.format("  Write Glue Cues: %s\n", bool_str(gui.cue_write_glue)))
   r.ShowConsoleMsg(string.format("  Glue Single Items: %s\n", bool_str(gui.glue_single_items)))
@@ -1188,14 +1217,11 @@ local function build_args_from_gui(operation)
     },
   }
 
-  -- Handle
-  if gui.handle_mode == 0 then
-    args.handle = "ext"
-  elseif gui.handle_mode == 1 then
+  -- Handle (v0.1.5: fixed to seconds, whole_file toggle)
+  if gui.handle_whole_file then
+    args.handle = { mode = "seconds", seconds = 999999 }  -- Whole file
+  else
     args.handle = { mode = "seconds", seconds = gui.handle_length }
-  else -- frames
-    local fps = r.TimeMap_curFrameRate(0) or 30
-    args.handle = { mode = "seconds", seconds = gui.handle_length / fps }
   end
 
   -- Debug (v0.1.4: epsilon removed - now internal constant)
@@ -1464,6 +1490,41 @@ local function draw_settings_popup()
 
   rv, new_val = ImGui.Combo(ctx, "Render No-TrackFX Policy", gui.render_no_trackfx_policy, "Preserve\0Force Multi\0")
   if rv then gui.render_no_trackfx_policy = new_val end
+
+  ImGui.Spacing(ctx)
+  ImGui.Separator(ctx)
+  ImGui.Spacing(ctx)
+
+  -- Multi-Channel Policy (v0.1.5)
+  ImGui.Text(ctx, "Multi-Channel Policy")
+  ImGui.TextDisabled(ctx, "Configure output channel count for Multi mode")
+  ImGui.Spacing(ctx)
+
+  -- Note: Only applies when Channel Mode is set to "Multi"
+  local is_multi_mode = (gui.channel_mode == 2)
+  if not is_multi_mode then
+    ImGui.PushStyleColor(ctx, ImGui.Col_Text, 0xFFAA00FF)  -- Orange
+    ImGui.TextWrapped(ctx, "Note: Multi-Channel Policy only applies when Channel Mode is set to 'Multi'.")
+    ImGui.PopStyleColor(ctx)
+    ImGui.Spacing(ctx)
+  end
+
+  if ImGui.RadioButton(ctx, "SOURCE playback channels##policy", gui.multi_channel_policy == "source_playback") then
+    gui.multi_channel_policy = "source_playback"
+  end
+  ImGui.Indent(ctx)
+  ImGui.TextWrapped(ctx, "Match actual playback channel count of source item (respects item channel mode).")
+  ImGui.TextDisabled(ctx, "Example: 8ch file playing as 4ch → uses 4ch")
+  ImGui.Unindent(ctx)
+  ImGui.Spacing(ctx)
+
+  if ImGui.RadioButton(ctx, "SOURCE track channels##policy", gui.multi_channel_policy == "source_track") then
+    gui.multi_channel_policy = "source_track"
+  end
+  ImGui.Indent(ctx)
+  ImGui.TextWrapped(ctx, "Match channel count of source item's track (RGWH/Pro Tools style).")
+  ImGui.TextDisabled(ctx, "Example: Item on 8ch track → uses 8ch (regardless of item settings)")
+  ImGui.Unindent(ctx)
 
   -- === DEBUG ===
   draw_section_header("DEBUG")
@@ -2302,17 +2363,31 @@ local function draw_gui()
   -- === HANDLE SETTINGS ===
   draw_section_header("HANDLE (Pre/Post Roll)")
 
-  rv, new_val = ImGui.Combo(ctx, "Handle Mode", gui.handle_mode, "Use ExtState\0Seconds\0Frames\0")
-  if rv then gui.handle_mode = new_val end
+  -- v0.1.5: Whole File toggle and Handle Length on same line (matches AudioSweet layout)
+  rv, new_val = ImGui.Checkbox(ctx, "Whole File", gui.handle_whole_file)
+  if rv then gui.handle_whole_file = new_val end
 
-  if gui.handle_mode > 0 then
-    rv, new_val = ImGui.InputDouble(ctx, "Handle Length", gui.handle_length, 0.1, 1.0, "%.3f")
-    if rv then gui.handle_length = math.max(0, new_val) end
-
-    local unit = gui.handle_mode == 1 and "seconds" or "frames"
-    ImGui.SameLine(ctx)
-    ImGui.TextDisabled(ctx, unit)
+  if ImGui.IsItemHovered(ctx) then
+    ImGui.SetTooltip(ctx, "When enabled, uses complete file length as handle (HANDLE_SECONDS = 999999)\nUseful for processing entire files regardless of item boundaries")
   end
+
+  -- Handle length input on same line (disabled when whole_file is on)
+  ImGui.SameLine(ctx, 0, 60)  -- Add 20px spacing between checkbox and input
+
+  if gui.handle_whole_file then
+    ImGui.BeginDisabled(ctx)
+  end
+
+  ImGui.SetNextItemWidth(ctx, 80)
+  rv, new_val = ImGui.InputDouble(ctx, "##handle_length", gui.handle_length, 0, 0, "%.1f")
+  if rv then gui.handle_length = math.max(0, new_val) end
+
+  if gui.handle_whole_file then
+    ImGui.EndDisabled(ctx)
+  end
+
+  ImGui.SameLine(ctx)
+  ImGui.TextDisabled(ctx, "secs")
 
   -- === OPERATION BUTTONS & INFO ===
   ImGui.Spacing(ctx)
