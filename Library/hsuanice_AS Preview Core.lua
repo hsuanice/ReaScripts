@@ -1,6 +1,6 @@
 --[[
 @description AudioSweet Preview Core
-@version 0.2.0.0.1
+@version 0.2.2
 @author hsuanice
 
 @provides
@@ -9,6 +9,14 @@
 @about Minimal, self-contained preview runtime. Later we can extract helpers to "hsuanice_AS Core.lua".
 
 @changelog
+  v0.2.2 (2025-12-25) [internal: v251225.2220]
+    - REFACTORED: Removed unused unit detection code
+      • Removed build_units_from_selection() function (~30 lines of dead code)
+      • Function was defined but never called in Preview Core
+      • Preview Core uses direct item manipulation, not unit-based workflow
+      • Helper functions (project_epsilon, approx_eq, ranges_touch_or_overlap) retained for Preview-specific use
+    - IMPACT: Cleaner codebase, no functionality change
+
   v0.2.0.0.1 (2025-12-23) [internal: v251223.2328]
     - CHANGED: Version bump to 0.2.0.0.1
     - CHANGED: Default debug disabled
@@ -764,37 +772,10 @@ ranges_strict_overlap = function(a0,a1,b0,b1,eps)
   return (a0 < b1 - eps) and (a1 > b0 + eps)
 end
 
-local function build_units_from_selection()
-  local n = reaper.CountSelectedMediaItems(0)
-  local by_track, units, eps = {}, {}, project_epsilon()
-  for i=0,n-1 do
-    local it = reaper.GetSelectedMediaItem(0,i)
-    if it then
-      local tr  = reaper.GetMediaItem_Track(it)
-      local pos = reaper.GetMediaItemInfo_Value(it, "D_POSITION")
-      local len = reaper.GetMediaItemInfo_Value(it, "D_LENGTH")
-      local fin = pos + len
-      by_track[tr] = by_track[tr] or {}
-      table.insert(by_track[tr], {item=it,pos=pos,fin=fin})
-    end
-  end
-  for tr, arr in pairs(by_track) do
-    table.sort(arr, function(a,b) return a.pos < b.pos end)
-    local cur
-    for _,e in ipairs(arr) do
-      if not cur then cur = {track=tr, items={e.item}, UL=e.pos, UR=e.fin}
-      else
-        if ranges_touch_or_overlap(cur.UL, cur.UR, e.pos, e.fin, eps) then
-          table.insert(cur.items, e.item); if e.pos<cur.UL then cur.UL=e.pos end; if e.fin>cur.UR then cur.UR=e.fin end
-        else
-          table.insert(units, cur); cur = {track=tr, items={e.item}, UL=e.pos, UR=e.fin}
-        end
-      end
-    end
-    if cur then table.insert(units, cur) end
-  end
-  return units
-end
+-- ==========================================================
+-- v0.2.2: build_units_from_selection() removed (dead code, never called)
+-- Note: Preview Core uses direct item manipulation, not unit-based workflow
+-- ==========================================================
 
 local function getLoopSelection()
   local isSet, isLoop = false, false
