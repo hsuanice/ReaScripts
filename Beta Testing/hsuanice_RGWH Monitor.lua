@@ -1,31 +1,42 @@
 --[[
 @description RGWH Monitor - Console Monitor for Items and Units
-@version 0.1.0
+@version 0.1.1
 @author hsuanice
 @provides
-  [main] hsuanice Scripts/Beta Testing/hsuanice_RGWH Monitor.lua
-  hsuanice Scripts/Library/hsuanice_Metadata Read.lua
+  [main] Beta Testing/hsuanice_RGWH Monitor.lua
+  Library/hsuanice_Metadata Read.lua
 @note
 Console monitor for units (SINGLE/TOUCH/CROSSFADE/MIXED),
 item details, FX states, and # markers.
 Linear volume only (no dB).
 
 @changelog
-  0.1.0 (2025-12-12) [internal: v251113.2345]
+  0.1.1 [v260107.1131] - FX Channel I/O Display
+    - ADDED: Take FX and Track FX now display input/output channel counts
+      • Format: "takeFX#1  FX Name  [on]  I/O: 2→4ch"
+      • Shows exact channel routing configuration for each FX
+      • Helps debug multi-channel FX processing workflows
+    - ADDED: Uses TakeFX_GetIOSize() and TrackFX_GetIOSize() API
+    - PURPOSE: Essential for testing how FX channel routing affects render/apply/glue commands
+    - EXAMPLE OUTPUT:
+      • "takeFX#1  CLAP: Pro-Q 4 (FabFilter)  [on]  I/O: 2→2ch"
+      • "trackFX#1  ReaEQ  [on]  I/O: 4→4ch"
+
+  0.1.0 [v251113.2345]
     - Added: Track channel count display in track summary line
       • Output example: "Track #170: items=2 units=2 track_channels=2"
       • Helps debug channel count changes during operations
       • Uses I_NCHAN property (defaults to 2 if not available)
     - Purpose: Track channel count debugging for multi-channel workflows
-    - SourceTR/SIS/ABS display now shows raw domain value first [internal: v250924_1847]
+    - SourceTR/SIS/ABS display now shows raw domain value first
       • With converted value in parentheses for cross-check
       • e.g. "TR=929132000 smp (19356.9166666667s)"
     - Added run_id() implementation using reaper.time_precise()
     - Improved precision visibility: full double values are kept
-    - Added: Read and display BWF:TimeReference (TR), Start-in-Source (SIS), and computed ABS time [internal: v250923_1331]
+    - Added: Read and display BWF:TimeReference (TR), Start-in-Source (SIS), and computed ABS time
     - Integrated hsuanice_Metadata Read.lua for robust metadata parsing
     - Output example: "sourceTC: TR=19459.708333(s) [934066000 smp @ 48000 Hz]  SIS=5.583333(s)  ABS=19465.291667(s)"
-    - Added per-member channel info [internal: v250922_2240]
+    - Added per-member channel info
       • src = media source channel count
       • track = track channel count
       • chanmode = take channel mode (integer)
@@ -185,7 +196,16 @@ local function list_take_fx_lines(tk)
     local enabled = r.TakeFX_GetEnabled(tk, i)     -- true = not bypassed
     local offline = r.TakeFX_GetOffline(tk, i)     -- true = offline
     local status  = offline and "offline" or (enabled and "on" or "byp")
-    lines[#lines+1] = string.format("takeFX#%d  %s  [%s]", i+1, name or "(unnamed FX)", status)
+
+    -- Get FX I/O channel count
+    local numInputs = r.TakeFX_GetNumParams and r.TakeFX_GetIOSize(tk, i) or nil
+    local numOutputs = numInputs and select(2, r.TakeFX_GetIOSize(tk, i)) or nil
+    local io_info = ""
+    if numInputs and numOutputs then
+      io_info = string.format("  I/O: %d→%dch", numInputs, numOutputs)
+    end
+
+    lines[#lines+1] = string.format("takeFX#%d  %s  [%s]%s", i+1, name or "(unnamed FX)", status, io_info)
   end
   return lines
 end
@@ -199,7 +219,16 @@ local function list_track_fx_lines(tr)
     local enabled = r.TrackFX_GetEnabled(tr, i)
     local offline = r.TrackFX_GetOffline(tr, i)
     local status  = offline and "offline" or (enabled and "on" or "byp")
-    lines[#lines+1] = string.format("trackFX#%d  %s  [%s]", i+1, name or "(unnamed FX)", status)
+
+    -- Get FX I/O channel count
+    local numInputs = r.TrackFX_GetNumParams and r.TrackFX_GetIOSize(tr, i) or nil
+    local numOutputs = numInputs and select(2, r.TrackFX_GetIOSize(tr, i)) or nil
+    local io_info = ""
+    if numInputs and numOutputs then
+      io_info = string.format("  I/O: %d→%dch", numInputs, numOutputs)
+    end
+
+    lines[#lines+1] = string.format("trackFX#%d  %s  [%s]%s", i+1, name or "(unnamed FX)", status, io_info)
   end
   return lines
 end
