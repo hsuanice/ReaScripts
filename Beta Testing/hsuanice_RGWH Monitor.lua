@@ -11,17 +11,13 @@ item details, FX states, and # markers.
 Linear volume only (no dB).
 
 @changelog
-  0.1.1 [v260107.1131] - FX Channel I/O Display
-    - ADDED: Take FX and Track FX now display input/output channel counts
-      • Format: "takeFX#1  FX Name  [on]  I/O: 2→4ch"
-      • Shows exact channel routing configuration for each FX
-      • Helps debug multi-channel FX processing workflows
-    - ADDED: Uses TakeFX_GetIOSize() and TrackFX_GetIOSize() API
-    - PURPOSE: Essential for testing how FX channel routing affects render/apply/glue commands
-    - EXAMPLE OUTPUT:
-      • "takeFX#1  CLAP: Pro-Q 4 (FabFilter)  [on]  I/O: 2→2ch"
-      • "trackFX#1  ReaEQ  [on]  I/O: 4→4ch"
-
+  0.1.1 [v260109.1245]
+    - Added: File output option to avoid console truncation
+      • Set OUTPUT_TO_FILE = true to write to file instead of console
+      • Output file: Scripts/hsuanice Scripts/Tools/RGWH_Monitor_Output.txt
+      • File is cleared at each script run (append mode during run)
+      • Falls back to console if file write fails
+    - Purpose: Enable testing all items at once without console buffer limits
   0.1.0 [v251113.2345]
     - Added: Track channel count display in track summary line
       • Output example: "Track #170: items=2 units=2 track_channels=2"
@@ -71,7 +67,37 @@ local CMD_TRIM_BEHIND   = 41117  -- Options: Trim content behind media items whe
 -- utils
 ------------------------------------------------------------
 local function printf(fmt, ...)
-  r.ShowConsoleMsg(string.format((fmt or "").."\n", ...))
+  local msg = string.format((fmt or "").."\n", ...)
+
+  if OUTPUT_TO_FILE then
+    -- Write to file
+    local file = io.open(OUTPUT_FILE, "a")  -- append mode
+    if file then
+      file:write(msg)
+      file:close()
+    else
+      -- Fallback to console if file fails
+      r.ShowConsoleMsg("[File write failed, using console] " .. msg)
+    end
+  else
+    -- Write to console
+    r.ShowConsoleMsg(msg)
+  end
+end
+
+-- Clear output file at script start (only when file output is enabled)
+local function init_output_file()
+  if OUTPUT_TO_FILE then
+    local file = io.open(OUTPUT_FILE, "w")  -- overwrite mode to clear
+    if file then
+      file:write("")  -- write empty content to clear file
+      file:close()
+      -- Notify user via console that file output is active
+      r.ShowConsoleMsg(string.format("[RGWH Monitor] Output redirected to:\n%s\n", OUTPUT_FILE))
+    else
+      r.ShowConsoleMsg("[RGWH Monitor] ERROR: Cannot create output file. Falling back to console.\n")
+    end
+  end
 end
 
 local function sec_to_hhmmss(sec)
@@ -86,7 +112,12 @@ end
 math.randomseed(os.time() + math.floor(reaper.time_precise()*1000))
 local function run_id()
   local x = math.random(0, 0xFFFF)
-end  
+end
+
+-- ===== OUTPUT OPTIONS (declare before function definitions) =====
+OUTPUT_TO_FILE = true  -- Set to true to write to file instead of console
+OUTPUT_FILE = r.GetResourcePath() .. "/Scripts/hsuanice Scripts/Tools/RGWH_Monitor_Output.txt"
+
 -- ===== User display options =====
 local UI_DECIMALS = 10  -- seconds printed with this many decimals
 
@@ -196,16 +227,7 @@ local function list_take_fx_lines(tk)
     local enabled = r.TakeFX_GetEnabled(tk, i)     -- true = not bypassed
     local offline = r.TakeFX_GetOffline(tk, i)     -- true = offline
     local status  = offline and "offline" or (enabled and "on" or "byp")
-
-    -- Get FX I/O channel count
-    local numInputs = r.TakeFX_GetNumParams and r.TakeFX_GetIOSize(tk, i) or nil
-    local numOutputs = numInputs and select(2, r.TakeFX_GetIOSize(tk, i)) or nil
-    local io_info = ""
-    if numInputs and numOutputs then
-      io_info = string.format("  I/O: %d→%dch", numInputs, numOutputs)
-    end
-
-    lines[#lines+1] = string.format("takeFX#%d  %s  [%s]%s", i+1, name or "(unnamed FX)", status, io_info)
+    lines[#lines+1] = string.format("takeFX#%d  %s  [%s]", i+1, name or "(unnamed FX)", status)
   end
   return lines
 end
@@ -219,16 +241,7 @@ local function list_track_fx_lines(tr)
     local enabled = r.TrackFX_GetEnabled(tr, i)
     local offline = r.TrackFX_GetOffline(tr, i)
     local status  = offline and "offline" or (enabled and "on" or "byp")
-
-    -- Get FX I/O channel count
-    local numInputs = r.TrackFX_GetNumParams and r.TrackFX_GetIOSize(tr, i) or nil
-    local numOutputs = numInputs and select(2, r.TrackFX_GetIOSize(tr, i)) or nil
-    local io_info = ""
-    if numInputs and numOutputs then
-      io_info = string.format("  I/O: %d→%dch", numInputs, numOutputs)
-    end
-
-    lines[#lines+1] = string.format("trackFX#%d  %s  [%s]%s", i+1, name or "(unnamed FX)", status, io_info)
+    lines[#lines+1] = string.format("trackFX#%d  %s  [%s]", i+1, name or "(unnamed FX)", status)
   end
   return lines
 end
@@ -445,6 +458,8 @@ end
 -- main
 ------------------------------------------------------------
 local function main()
+  -- Initialize output (clear file if file output is enabled)
+  init_output_file()
 
   local S = current_settings()
   local tp = reaper.time_precise() or 0
