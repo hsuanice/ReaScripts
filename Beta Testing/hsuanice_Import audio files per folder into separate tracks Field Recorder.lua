@@ -1,6 +1,6 @@
 --[[
 @description ReaImGui - Import audio: one folder per track; channel-split files go to child tracks. Sequence only.
-@version 0.4.1.1 fix channel naming rule window size
+@version 260119.2125 add comprehensive debug mode
 @author hsuanice
 @about
   - Pre-confirm dialog: shows total folders/files, lets you choose a channel naming pattern or a custom mask, then offers [Import] / [Cancel].
@@ -16,6 +16,7 @@
   - Built with ReaImGui for a compact, responsive UI.
   - Designed for fast, keyboard-light workflows.
   - Optionally leverages js_ReaScriptAPI for advanced interactions.
+  - DEBUG_MODE: Set to true to enable detailed console logging for troubleshooting.
 
   References:
   - REAPER ReaScript API (Lua)
@@ -26,6 +27,17 @@
   hsuanice served as the workflow designer, tester, and integrator for this tool.
 
 @changelog
+  v260119.2125
+  - Add: Comprehensive DEBUG_MODE with detailed logging:
+    * Channel parsing results for each file
+    * Track assignment decisions
+    * File insertion success/failure status
+    * Folder grouping information
+  - Add: File output for debug logs to avoid console truncation
+    * Set OUTPUT_TO_FILE = true to write to file (default: enabled)
+    * Output file: Scripts/hsuanice Scripts/Tools/Import_Debug_Output.txt
+    * File is cleared at each script run
+  - Set DEBUG_MODE = true at line 70 to enable debug output
   v0.4.1.1 fix channel naming rule window size
   v0.4.1
   - Add: Support for filenames ending with "-<number>" (e.g. File-3.wav). 
@@ -58,6 +70,9 @@
 -- Tunables
 ---------------------------------------
 local JOB_SIZE = 8          -- files per frame; raise for speed
+local DEBUG_MODE = true     -- Enable detailed debug logging
+local OUTPUT_TO_FILE = true -- Write debug output to file instead of console
+local OUTPUT_FILE = reaper.GetResourcePath() .. "/Scripts/hsuanice Scripts/Tools/Import_Debug_Output.txt"
 ---------------------------------------
 
 -- Channel parsing mode switches (for split-channel naming)
@@ -108,6 +123,37 @@ local focus_custom_mask = false  -- when true, focus goes back to the custom inp
 
 -- ========= helpers =========
 local function log(s) reaper.ShowConsoleMsg(tostring(s).."\n") end
+
+-- Clear output file at script start
+local function init_output_file()
+  if OUTPUT_TO_FILE then
+    local file = io.open(OUTPUT_FILE, "w")
+    if file then
+      file:write("")
+      file:close()
+      reaper.ShowConsoleMsg(string.format("[Import] Debug output redirected to:\n%s\n", OUTPUT_FILE))
+    else
+      reaper.ShowConsoleMsg("[Import] ERROR: Cannot create output file. Falling back to console.\n")
+    end
+  end
+end
+
+local function debug(s)
+  if DEBUG_MODE then
+    local msg = "[DEBUG] " .. tostring(s) .. "\n"
+    if OUTPUT_TO_FILE then
+      local file = io.open(OUTPUT_FILE, "a")
+      if file then
+        file:write(msg)
+        file:close()
+      else
+        reaper.ShowConsoleMsg("[File write failed] " .. msg)
+      end
+    else
+      reaper.ShowConsoleMsg(msg)
+    end
+  end
+end
 
 local AUDIO_EXTS = { wav=true, aif=true, aiff=true, flac=true, ogg=true, mp3=true, caf=true, m4a=true, bwf=true, ogm=true, opus=true }
 local function is_audio(fn)
@@ -174,6 +220,7 @@ end
 -- ===== Channel parsers =====
 local function chan_from_U(fn)  -- "_<number>.wav"
   local n = fn:match("_(%d+)%.[^%.]+$") or fn:match("_(%d+)$")
+  debug("chan_from_U: filename='"..fn.."' -> channel="..(n and tonumber(n) or "nil"))
   if n then return tonumber(n) end
 end
 
@@ -189,6 +236,7 @@ local function chan_from_A(fn)
         or base:match("%.A(%d+)$")           -- "Name.A7"
         or base:match("%.a(%d+)$")           -- "Name.a7"
 
+  debug("chan_from_A: basename='"..base.."' -> channel="..(n and tonumber(n) or "nil"))
   if n then return tonumber(n) end
 end
 
@@ -233,32 +281,55 @@ end
 local function chan_from_dash(fn)
   local base = fn:match("([^/\\]+)$") or fn
   local n = base:match("%-(%d+)%.[^%.]+$") or base:match("%-(%d+)$")
+  debug("chan_from_dash: basename='"..base.."' -> channel="..(n and tonumber(n) or "nil"))
   if n then return tonumber(n) end
 end
 
 -- Unified entry point
 local function chan_from_filename(fn)
+  debug("========================================")
+  debug("chan_from_filename: START - file='"..fn.."'")
+  debug("  CHAN_MODE="..tostring(CHAN_MODE).." (0=Auto, 1=.A%, 2=_%, 3=Custom, 4=-%)")
+
+  local result
   if CHAN_MODE == 0 then
     -- Auto: .A#, then _#, then -#, then presets
+    debug("  Trying Auto mode...")
     local n = chan_from_A(fn) or chan_from_U(fn) or chan_from_dash(fn)
-    if n then return n end
-    for i = 1, MAX_MASK_PRESETS do
-      local m = mask_presets[i]
-      if m and m ~= "" then
-        local c = chan_from_custom(fn, m)
-        if c then return c end
+    if n then
+      result = n
+      debug("  -> Found channel "..n.." from built-in patterns")
+    else
+      for i = 1, MAX_MASK_PRESETS do
+        local m = mask_presets[i]
+        if m and m ~= "" then
+          debug("  Trying preset #"..i..": '"..m.."'")
+          local c = chan_from_custom(fn, m)
+          if c then
+            result = c
+            debug("  -> Found channel "..c.." from preset #"..i)
+            break
+          end
+        end
       end
     end
-    return nil
   elseif CHAN_MODE == 1 then
-    return chan_from_A(fn)
+    debug("  Using .A% mode")
+    result = chan_from_A(fn)
   elseif CHAN_MODE == 2 then
-    return chan_from_U(fn)
+    debug("  Using _% mode")
+    result = chan_from_U(fn)
   elseif CHAN_MODE == 3 then
-    return chan_from_custom(fn, CHAN_CUSTOM_MASK)
+    debug("  Using Custom mode: mask='"..tostring(CHAN_CUSTOM_MASK).."'")
+    result = chan_from_custom(fn, CHAN_CUSTOM_MASK)
   else
-    return chan_from_A(fn)
+    debug("  Unknown mode, defaulting to .A%")
+    result = chan_from_A(fn)
   end
+
+  debug("chan_from_filename: RESULT -> "..(result and ("Ch "..result) or "PARENT (no channel)"))
+  debug("========================================")
+  return result
 end
 
 
@@ -750,21 +821,37 @@ local function run_after_confirm(base, list)
       local fn = f:match("([^/\\]+)$") or f
       local ch = chan_from_filename(fn)
 
+      debug(">>> Processing file: "..fn)
+      debug("    Folder key: '"..key.."'")
+
       local target_tr
       if ch and ch > 0 then
         -- channel-split -> child "Ch XX"
         local child_name = string.format("Ch %02d", ch)
+        debug("    -> Placing on CHILD track: '"..child_name.."'")
         target_tr = ensure_child_under(key, child_name)
       else
         -- non-channel-split -> place on the PARENT folder track itself
+        debug("    -> Placing on PARENT track (no channel detected)")
         local P = parents[key]
         if not P then P = ensure_parent(key, G.name) end
         target_tr = P.tr
       end
 
-      if target_tr and insert_sequence(target_tr, f) then
-        imported = imported + 1
-        UI_PROGRESS.done = UI_PROGRESS.done + 1
+      if target_tr then
+        local tr_name = ({reaper.GetSetMediaTrackInfo_String(target_tr, "P_NAME", "", false)})[2] or "?"
+        local tr_idx = track_index(target_tr)
+        debug("    Target track #"..tr_idx..": '"..tr_name.."'")
+
+        if insert_sequence(target_tr, f) then
+          imported = imported + 1
+          UI_PROGRESS.done = UI_PROGRESS.done + 1
+          debug("    ✓ Successfully inserted")
+        else
+          debug("    ✗ Failed to insert")
+        end
+      else
+        debug("    ✗ ERROR: target_tr is nil!")
       end
     end
 
@@ -777,26 +864,50 @@ local function run_after_confirm(base, list)
 end
 
 -- ========= entry =========
-reaper.ShowConsoleMsg("")
 local function main()
+  init_output_file()  -- Initialize file output if enabled
+  reaper.ShowConsoleMsg("")  -- Clear console at start
+  debug("======== SCRIPT START ========")
+  debug("DEBUG_MODE = "..tostring(DEBUG_MODE))
+  debug("OUTPUT_TO_FILE = "..tostring(OUTPUT_TO_FILE))
+
   local base = choose_base(); if not base then return end
-  local list = scan_all(base); if #list==0 then reaper.MB("No audio files found.","Import",0); return end
+  debug("Selected base folder: "..base)
+
+  local list = scan_all(base)
+  debug("Scanned "..#list.." audio files")
+
+  if #list==0 then
+    reaper.MB("No audio files found.","Import",0)
+    return
+  end
 
   -- Ask for the channel naming convention first
   ui_choose_mode(function(ok)
-    if not ok then return end
+    if not ok then
+      debug("User cancelled channel mode selection")
+      return
+    end
+
+    debug("Channel mode confirmed: CHAN_MODE="..tostring(CHAN_MODE))
+    if CHAN_MODE == 3 then
+      debug("  Custom mask: '"..tostring(CHAN_CUSTOM_MASK).."'")
+    end
 
     -- Pre-confirm counts
     local folders_set = {}
     for _,n in ipairs(list) do folders_set[n.rel or ""] = true end
     local folder_count = 0; for _ in pairs(folders_set) do folder_count=folder_count+1 end
 
+    debug("Found "..folder_count.." folders with audio files")
+
     -- Then show the original "Import / Cancel" dialog
     ui_pre_open(basename(base), folder_count, #list, function(choice)
       if choice == 'import' then
+        debug("User confirmed import - starting...")
         run_after_confirm(base, list)
       else
-        -- cancelled
+        debug("User cancelled import")
       end
     end)
   end)
