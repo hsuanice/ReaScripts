@@ -1,6 +1,6 @@
 --[[
 @description ReaImGui - Vertical Reorder and Sort (items)
-@version 251127.1700
+@version 260119.2125
 @author hsuanice
 @about
   Provides three vertical re-arrangement modes for selected items (stacked UI):
@@ -29,6 +29,17 @@
 
 
 @changelog
+  v260119.2125
+  - Add: Comprehensive DEBUG_MODE with detailed logging for Copy-to-Sort operations
+    * Shows metadata extraction (Track Name, Channel#) for each item
+    * Displays grouping decisions and track naming
+    * Logs track creation and item copying process
+    * Helps diagnose overlap issues
+  - Add: File output for debug logs to avoid console truncation
+    * Set OUTPUT_TO_FILE = true to write to file (default: enabled)
+    * Output file: Scripts/hsuanice Scripts/Tools/Reorder_Debug_Output.txt
+    * File is cleared at each operation
+  - Set DEBUG_MODE = true at line 214 to enable console output
   v251127.1700
   - Cleanup: Removed Monitor auto-capture feature
     • Removed "Monitor auto-capture" checkbox from GUI
@@ -200,6 +211,44 @@
     - Fix: Always call ImGui_End() to prevent "Missing End()" error.
     - Added Copy-to-New-Tracks-by-Metadata and metadata parsing improvements.
 ]]
+
+---------------------------------------
+-- Debug Mode
+---------------------------------------
+local DEBUG_MODE = true  -- Set to true to enable detailed console logging
+local OUTPUT_TO_FILE = true -- Write debug output to file instead of console
+local OUTPUT_FILE = reaper.GetResourcePath() .. "/Scripts/hsuanice Scripts/Tools/Reorder_Debug_Output.txt"
+
+-- Clear output file at script start
+local function init_output_file()
+  if OUTPUT_TO_FILE then
+    local file = io.open(OUTPUT_FILE, "w")
+    if file then
+      file:write("")
+      file:close()
+      reaper.ShowConsoleMsg(string.format("[Reorder] Debug output redirected to:\n%s\n", OUTPUT_FILE))
+    else
+      reaper.ShowConsoleMsg("[Reorder] ERROR: Cannot create output file. Falling back to console.\n")
+    end
+  end
+end
+
+local function debug(s)
+  if DEBUG_MODE then
+    local msg = "[DEBUG] " .. tostring(s) .. "\n"
+    if OUTPUT_TO_FILE then
+      local file = io.open(OUTPUT_FILE, "a")
+      if file then
+        file:write(msg)
+        file:close()
+      else
+        reaper.ShowConsoleMsg("[File write failed] " .. msg)
+      end
+    else
+      reaper.ShowConsoleMsg(msg)
+    end
+  end
+end
 
 -- ===== Integrate with hsuanice Metadata Read (>= 0.2.0) =====
 local META = dofile(
@@ -640,12 +689,23 @@ local snapshot_rows_tsv
 -- asc        : true=Ascending, false=Descending
 -- append_secondary : 若 name_mode=2（Channel#命名），於 TCP 名稱後附加最常見 Track Name
 local function run_copy_to_new_tracks(name_mode, order_mode, asc, append_secondary)
+  init_output_file()  -- Initialize file output if enabled
+  debug("======================================")
+  debug("=== COPY TO SORT - START ===")
+  debug("  name_mode=" .. (name_mode==1 and "Track Name" or "Channel#"))
+  debug("  order_mode=" .. (order_mode==1 and "Track Name" or "Channel#"))
+  debug("  asc=" .. tostring(asc))
+  debug("  append_secondary=" .. tostring(append_secondary))
+  debug("======================================")
+
   reaper.Undo_BeginBlock()
 
   -- 2) 取目前選取 items，抽出 metadata
   local items = get_selected_items()
+  debug("Total selected items: " .. #items)
+
   local rows = {}
-  for _, it in ipairs(items) do
+  for i, it in ipairs(items) do
     local f   = META.collect_item_fields(it)
     local idx = META.guess_interleave_index(it, f) or f.__chan_index or 1
     f.__chan_index = idx
@@ -657,6 +717,10 @@ local function run_copy_to_new_tracks(name_mode, order_mode, asc, append_seconda
       local _, nm = reaper.GetSetMediaItemTakeInfo_String(tk, "P_NAME", "", false)
       tkn = nm or ""
     end
+
+    debug(string.format("Item #%d: take='%s' | Track Name='%s' | Ch=%s | pos=%.3f",
+                        i, tkn, name, tostring(ch), item_start(it)))
+
     rows[#rows+1] = { it = it, name = name, ch = ch, take = tkn }
   end
 
@@ -691,7 +755,9 @@ local function run_copy_to_new_tracks(name_mode, order_mode, asc, append_seconda
     return g
   end
 
-  for _, r in ipairs(rows) do
+  debug("")
+  debug("--- Grouping items ---")
+  for idx, r in ipairs(rows) do
     -- 命名/分組 key 與初始 label
     local gkey, glabel
     if name_mode == 1 then
@@ -724,6 +790,9 @@ local function run_copy_to_new_tracks(name_mode, order_mode, asc, append_seconda
     local comb_key   = tostring(gkey) .. skey
     local comb_label = tostring(glabel) .. slabel
 
+    debug(string.format("  Item #%d -> group_key='%s' | label='%s' | ord_key='%s'",
+                        idx, tostring(comb_key), comb_label, ord_key))
+
     local g = ensure_group(comb_key, comb_label, ord_key)
     g.items[#g.items+1] = r.it
     if r.name and r.name ~= "" then
@@ -750,6 +819,10 @@ local function run_copy_to_new_tracks(name_mode, order_mode, asc, append_seconda
   end
 
   -- 5) 建新軌並複製
+  debug("")
+  debug("--- Creating tracks and copying items ---")
+  debug("Total groups: " .. #order)
+
   local base = reaper.CountTracks(0)
   local existing, created = {}, {}
   local function ensure_track(label)
@@ -760,28 +833,47 @@ local function run_copy_to_new_tracks(name_mode, order_mode, asc, append_seconda
     set_track_name(tr, label)
     existing[label] = tr
     created[#created+1] = tr
+    debug(string.format("  ✓ Created track #%d: '%s'", base + #created, label))
     return tr
   end
 
   local copied, overlaps = 0, 0
   local spans = {} -- label -> { {s,e}, ... }
 
-  for _, g in ipairs(order) do
+  for gidx, g in ipairs(order) do
     local label = g.label
+    debug(string.format("Group #%d: label='%s' | %d items", gidx, label, #g.items))
     local tr = ensure_track(label)
     local arr = spans[label] or {}
     spans[label] = arr
-    for _, it in ipairs(g.items) do
+    for iidx, it in ipairs(g.items) do
       local s = item_start(it) or 0
       local e = s + (item_len(it) or 0)
       local hit = false
-      for i = 1, #arr do local seg = arr[i]; if e > seg.s and seg.e > s then hit = true; break end end
+      for i = 1, #arr do
+        local seg = arr[i]
+        if e > seg.s and seg.e > s then
+          hit = true
+          debug(string.format("    ⚠️  OVERLAP detected! Item at %.3f-%.3f overlaps with %.3f-%.3f",
+                              s, e, seg.s, seg.e))
+          break
+        end
+      end
       if hit then overlaps = overlaps + 1 end
       arr[#arr+1] = { s = s, e = e }
       copy_item_to_track(it, tr)
       copied = copied + 1
+      if not hit then
+        debug(string.format("    → Item #%d copied to '%s' at %.3f", iidx, label, s))
+      end
     end
   end
+
+  debug("")
+  debug("=== COPY TO SORT - COMPLETE ===")
+  debug(string.format("Tracks created: %d | Items copied: %d | Overlaps: %d",
+                      #created, copied, overlaps))
+  debug("======================================")
 
   reaper.Undo_EndBlock("Copy selected items to NEW tracks by metadata", -1)
   reaper.UpdateArrange()
