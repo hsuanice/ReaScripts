@@ -1,6 +1,6 @@
 --[[
 @description ReaImGui - Vertical Reorder and Sort (items)
-@version 260119.2125
+@version 260119.2335
 @author hsuanice
 @about
   Provides three vertical re-arrangement modes for selected items (stacked UI):
@@ -29,6 +29,20 @@
 
 
 @changelog
+  v260119.2335
+  - Fix: Channel number now correctly extracted from BWF sTRK# metadata
+    * Searches TRK1..TRK64 fields to find which number matches the track name
+    * Fixes overlap issue where items from different recorder tracks were
+      incorrectly grouped together
+    * IMPORTANT: Interleave index (.A1, .A2, .A3) is just poly-split sequence,
+      NOT the recorder channel number. For example, an 8-channel poly file
+      split into .A1-.A8 might have sTRK3, sTRK4, sTRK6 etc. (not sequential)
+    * Example: "file.A1.WAV" with sTRK3=Vocal → Ch 3
+               "file.A2.WAV" with sTRK4=Guitar → Ch 4
+               "file.A3.WAV" with sTRK6=Bass → Ch 6
+    * Debug output shows: Ch (from sTRK#), interleave index, track name
+  v260119.2235
+  - Fix: Channel parsing prioritizes filename (INCORRECT - reverted in v260119.2335)
   v260119.2125
   - Add: Comprehensive DEBUG_MODE with detailed logging for Copy-to-Sort operations
     * Shows metadata extraction (Track Name, Channel#) for each item
@@ -39,7 +53,6 @@
     * Set OUTPUT_TO_FILE = true to write to file (default: enabled)
     * Output file: Scripts/hsuanice Scripts/Tools/Reorder_Debug_Output.txt
     * File is cleared at each operation
-  - Set DEBUG_MODE = true at line 214 to enable console output
   v251127.1700
   - Cleanup: Removed Monitor auto-capture feature
     • Removed "Monitor auto-capture" checkbox from GUI
@@ -681,6 +694,30 @@ local snapshot_rows_tsv
 
 
 ---------------------------------------
+-- Copy-to-New-Tracks：輔助函數
+---------------------------------------
+
+-- 從檔名解析 channel number (優先使用檔名,避免使用 metadata 中可能錯誤的 channel)
+local function parse_channel_from_filename(filename)
+  if not filename or filename == "" then return nil end
+
+  -- Pattern 1: .A<number> or .a<number> (e.g., "file.A3.wav", "file.a7.wav")
+  local ch = filename:match("%.A(%d+)%.[^%.]+$") or filename:match("%.a(%d+)%.[^%.]+$")
+             or filename:match("%.A(%d+)$") or filename:match("%.a(%d+)$")
+  if ch then return tonumber(ch) end
+
+  -- Pattern 2: _<number> (e.g., "file_3.wav")
+  ch = filename:match("_(%d+)%.[^%.]+$") or filename:match("_(%d+)$")
+  if ch then return tonumber(ch) end
+
+  -- Pattern 3: -<number> (e.g., "file-3.wav")
+  ch = filename:match("%-(%d+)%.[^%.]+$") or filename:match("%-(%d+)$")
+  if ch then return tonumber(ch) end
+
+  return nil
+end
+
+---------------------------------------
 -- Copy-to-New-Tracks：核心
 ---------------------------------------
 
@@ -709,8 +746,8 @@ local function run_copy_to_new_tracks(name_mode, order_mode, asc, append_seconda
     local f   = META.collect_item_fields(it)
     local idx = META.guess_interleave_index(it, f) or f.__chan_index or 1
     f.__chan_index = idx
-    local name = tostring(META.expand("${trk}",   f, nil, false) or "")
-    local ch   = tonumber(META.expand("${chnum}", f, nil, false) or idx) or idx
+
+    -- Get take name first for logging
     local tk   = take_of(it)
     local tkn  = ""
     if tk then
@@ -718,8 +755,25 @@ local function run_copy_to_new_tracks(name_mode, order_mode, asc, append_seconda
       tkn = nm or ""
     end
 
-    debug(string.format("Item #%d: take='%s' | Track Name='%s' | Ch=%s | pos=%.3f",
-                        i, tkn, name, tostring(ch), item_start(it)))
+    -- Get track name from metadata (from sTRK# field)
+    local name = tostring(META.expand("${trk}",   f, nil, false) or "")
+
+    -- CRITICAL: Extract recorder channel number from sTRK# field
+    -- The ${trk} expansion finds the track name, but we need the # from sTRK#
+    -- We need to find which TRK# field matched this item's interleave index
+    local ch = idx  -- fallback to interleave index
+
+    -- Search through TRK1..TRK64 fields to find which one has this track name
+    for trk_num = 1, 64 do
+      local trk_name = f["TRK"..trk_num] or f["trk"..trk_num]
+      if trk_name and trk_name ~= "" and trk_name == name then
+        ch = trk_num
+        break
+      end
+    end
+
+    debug(string.format("Item #%d: take='%s' | Track Name='%s' | Ch=%d (interleave=%d) | pos=%.3f",
+                        i, tkn, name, ch, idx, item_start(it)))
 
     rows[#rows+1] = { it = it, name = name, ch = ch, take = tkn }
   end
