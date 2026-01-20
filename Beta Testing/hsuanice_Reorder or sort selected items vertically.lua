@@ -1,6 +1,6 @@
 --[[
 @description ReaImGui - Vertical Reorder and Sort (items)
-@version 260119.2335
+@version 260120.1705
 @author hsuanice
 @about
   Provides three vertical re-arrangement modes for selected items (stacked UI):
@@ -29,18 +29,19 @@
 
 
 @changelog
+  v260120.1705
+  - Debug: Enhanced TRK# field inspection
+    * Now displays ALL non-empty TRK# fields for each item
+    * Format: "→ All TRK fields: TRK1=all_mix, TRK3=boom, TRK5=YO, ..."
+    * Helps diagnose why items are misclassified (e.g., wrong channel assignment)
+    * Reveals when I_CHANMODE (interleave) doesn't match actual TRK# fields
+    * Critical for understanding overlap and misclassification issues
   v260119.2335
   - Fix: Channel number now correctly extracted from BWF sTRK# metadata
     * Searches TRK1..TRK64 fields to find which number matches the track name
-    * Fixes overlap issue where items from different recorder tracks were
-      incorrectly grouped together
-    * IMPORTANT: Interleave index (.A1, .A2, .A3) is just poly-split sequence,
-      NOT the recorder channel number. For example, an 8-channel poly file
-      split into .A1-.A8 might have sTRK3, sTRK4, sTRK6 etc. (not sequential)
-    * Example: "file.A1.WAV" with sTRK3=Vocal → Ch 3
-               "file.A2.WAV" with sTRK4=Guitar → Ch 4
-               "file.A3.WAV" with sTRK6=Bass → Ch 6
-    * Debug output shows: Ch (from sTRK#), interleave index, track name
+    * KNOWN ISSUE: Current logic relies on I_CHANMODE which can be incorrect
+      if items have been moved between tracks in the timeline
+    * KNOWN ISSUE: May cause misclassification when multiple TRK# fields exist
   v260119.2235
   - Fix: Channel parsing prioritizes filename (INCORRECT - reverted in v260119.2335)
   v260119.2125
@@ -774,6 +775,20 @@ local function run_copy_to_new_tracks(name_mode, order_mode, asc, append_seconda
 
     debug(string.format("Item #%d: take='%s' | Track Name='%s' | Ch=%d (interleave=%d) | pos=%.3f",
                         i, tkn, name, ch, idx, item_start(it)))
+
+    -- DEBUG: List all non-empty TRK# fields for this item
+    local all_trks = {}
+    for ti = 1, 64 do
+      local tn = f["TRK"..ti] or f["trk"..ti]
+      if tn and tn ~= "" then
+        all_trks[#all_trks+1] = string.format("TRK%d=%s", ti, tn)
+      end
+    end
+    if #all_trks > 0 then
+      debug(string.format("    → All TRK fields: %s", table.concat(all_trks, ", ")))
+    else
+      debug("    → No TRK fields found")
+    end
 
     rows[#rows+1] = { it = it, name = name, ch = ch, take = tkn }
   end
