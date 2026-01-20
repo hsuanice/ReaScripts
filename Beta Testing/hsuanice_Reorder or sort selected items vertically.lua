@@ -1,6 +1,6 @@
 --[[
 @description ReaImGui - Vertical Reorder and Sort (items)
-@version 260120.1705
+@version 260120.1856
 @author hsuanice
 @about
   Provides three vertical re-arrangement modes for selected items (stacked UI):
@@ -29,6 +29,13 @@
 
 
 @changelog
+  v260120.1856
+  - Fix: Clear metadata cache at start of each Copy-to-Sort operation
+    * Prevents stale metadata from previous runs causing overlaps
+    * Calls META.begin_batch() to clear the global CACHE
+    * Fixes issue where running Copy-to-Sort multiple times without closing
+      the script window would cause overlaps due to cached I_CHANMODE values
+    * Each operation now starts with fresh metadata reads
   v260120.1705
   - Debug: Enhanced TRK# field inspection
     * Now displays ALL non-empty TRK# fields for each item
@@ -727,6 +734,11 @@ end
 -- asc        : true=Ascending, false=Descending
 -- append_secondary : 若 name_mode=2（Channel#命名），於 TCP 名稱後附加最常見 Track Name
 local function run_copy_to_new_tracks(name_mode, order_mode, asc, append_secondary)
+  -- Clear metadata cache to avoid stale data from previous runs
+  if META and META.begin_batch then
+    META.begin_batch()  -- Clears CACHE
+  end
+
   init_output_file()  -- Initialize file output if enabled
   debug("======================================")
   debug("=== COPY TO SORT - START ===")
