@@ -1,6 +1,6 @@
 --[[
 @description hsuanice_Review_Edges_Off_Grid
-@version 251203_1515
+@version 260128.1555
 @author hsuanice
 @about
   Scan all items in the project. If an item's left/right edge is not aligned to the chosen grid
@@ -12,6 +12,9 @@
   - Scope: all items in project (no selection required).
   - Console: summary + per-issue lines; uses ShowConsoleMsg (clears at start).
 @changelog
+  v260128.1555
+  - Improved logging: clamp messages now include track name, take name, and position
+  - Easier to identify which item has the issue when "left extend clamped" occurs
   v251203_1515
   - Crossfade protection: Skip edges with auto-crossfade (D_FADEINLEN_AUTO/D_FADEOUTLEN_AUTO) when items overlap on same track
   - Fade endpoint preservation: All fade in/out points maintain their absolute timeline position when edges are adjusted
@@ -481,23 +484,28 @@ end
 
 -- Left-edge change with CONTENT LOCK: move item position and shift all takes' start offset by -Δ×rate; keep length unchanged.
 -- Positive delta → move start later (trim), Negative delta → move start earlier (extend).
-local function apply_left_delta_content_locked(item, take_hint, delta_sec)
+-- item_info is optional table with {track_name, take_name, pos} for detailed logging
+local function apply_left_delta_content_locked(item, take_hint, delta_sec, item_info)
   if delta_sec == 0 then return 0, 0 end
   local pos  = r.GetMediaItemInfo_Value(item, "D_POSITION") or 0
   local len  = r.GetMediaItemInfo_Value(item, "D_LENGTH") or 0
   local applied = delta_sec
+  local info_str = ""
+  if item_info then
+    info_str = string.format(" [%s | %s @ %.3f]", item_info.track_name or "?", item_info.take_name or "?", item_info.pos or pos)
+  end
   -- Clamp when extending earlier than available media across ALL takes
   if delta_sec < 0 then
     local max_ext_all = calc_max_left_extend_all_takes(item)
     if -delta_sec > max_ext_all then
       applied = -max_ext_all
-      log(string.format("  (left extend clamped by ALL takes' start offset [content_locked]: %.6f → %.6f)", -delta_sec, -applied))
+      log(string.format("  (left extend clamped by ALL takes' start offset [content_locked]: %.6f → %.6f)%s", -delta_sec, -applied, info_str))
     end
   else
     -- trim: cannot trim more than length
     if delta_sec > len - 1e-9 then
       applied = len - 1e-9
-      log(string.format("  (left trim clamped by item length [content_locked]: %.6f → %.6f)", delta_sec, applied))
+      log(string.format("  (left trim clamped by item length [content_locked]: %.6f → %.6f)%s", delta_sec, applied, info_str))
     end
   end
   -- Move item position and shift all takes' start offset by -Δ×rate; keep length unchanged.
@@ -650,7 +658,8 @@ local function check_item_edges_and_log(it, mode_title, added_counter)
         end
         if deltaL ~= 0 then
         if LEFT_EDGE_STRATEGY == "content_locked" then
-          local applied = apply_left_delta_content_locked(it, tk, deltaL)
+          local item_info = {track_name = tr_name, take_name = tk_name, pos = pos}
+          local applied = apply_left_delta_content_locked(it, tk, deltaL, item_info)
           appliedL = applied
         else
           local applied = apply_left_delta_keep_pos(it, tk, deltaL)
