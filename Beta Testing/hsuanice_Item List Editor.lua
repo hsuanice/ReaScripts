@@ -1,6 +1,6 @@
 --[[
 @description Item List Editor
-@version 251210.2210
+@version 260129.1920
 @author hsuanice
 @about
   Shows a live, spreadsheet-style table of the currently selected items and all
@@ -9,6 +9,7 @@
     • Take Name
     • Item Note
     • Source File
+    • Sample Rate / Bit Depth / File Type
     • Metadata Track Name (resolved by Interleave, Wave Agent–style)
     • Channel Number (recorder channel, TRK#)
     • Interleave (1..N from REAPER take channel mode: Mono-of-N)
@@ -42,6 +43,19 @@
 
 
 @changelog
+  v260129.1920
+  - Fix: Bit Depth column not displaying for some items
+    • Fixed inconsistent Bit Depth reading from WAV file headers
+    • All valid WAV files now correctly show Bit Depth value
+
+  v260129.1600
+  - Feature: Added file info columns
+    • Sample Rate: from REAPER API (fast, no external tools)
+    • Bit Depth: read from WAV file header (bytes 34-35)
+    • File Type: from REAPER API (e.g. WAV, AIFF, MP3)
+    • Columns 32-34, positioned after Source File in default order
+    • Total column count: 31 → 34
+
   v251210.2210 (2024-12-10)
   - Feature: Persistent Debug Mode with UI toggle
     • Debug Mode setting now persists across sessions via ExtState
@@ -1724,7 +1738,7 @@ end
 
 -- Column order mapping (single source of truth)
 local COL_ORDER, COL_POS = {}, {}   -- visual→logical / logical→visual
-local COL_VISIBILITY = {}           -- col_id → true/false (for all 31 columns)
+local COL_VISIBILITY = {}           -- col_id → true/false (for all 34 columns)
 
 -- Column width configuration (customizable)
 -- Edit these values to change default column widths
@@ -1766,6 +1780,10 @@ local DEFAULT_COL_WIDTH = {
   [30] = 90,  -- Source End (TC)
   -- Length column
   [31] = 80,  -- Length (fits "hh:mm:ss.SSS")
+  -- File info columns
+  [32] = 60,   -- Sample Rate (e.g. "48000")
+  [33] = 40,   -- Bit Depth (e.g. "24")
+  [34] = 40,   -- File Type (e.g. "WAV")
 }
 
 -- Current column widths (may be modified by user or Fit Content Width)
@@ -1817,7 +1835,7 @@ local function _csv_from_order_and_visibility(order, visibility_map)
   -- Build a normalized visibility table (even when caller沒有提供 visibility_map)
   local vis_map = {}
   if visibility_map then
-    for col_id = 1, 31 do
+    for col_id = 1, 34 do
       local flag = visibility_map[col_id]
       if flag == nil then
         vis_map[col_id] = false
@@ -1830,7 +1848,7 @@ local function _csv_from_order_and_visibility(order, visibility_map)
     for _, col_id in ipairs(order) do
       visible_set[col_id] = true
     end
-    for col_id = 1, 31 do
+    for col_id = 1, 34 do
       vis_map[col_id] = visible_set[col_id] or false
     end
   end
@@ -1846,7 +1864,7 @@ local function _csv_from_order_and_visibility(order, visibility_map)
 
   -- 假如 order 為空，但 visibility_map 有顯示欄位，補上一份順序（以欄位 ID 排序）
   if #ord_parts == 0 then
-    for col_id = 1, 31 do
+    for col_id = 1, 34 do
       if vis_map[col_id] then
         ord_parts[#ord_parts+1] = tostring(col_id)
       end
@@ -1855,7 +1873,7 @@ local function _csv_from_order_and_visibility(order, visibility_map)
 
   -- Serialize 全欄位 visibility
   local vis_parts = {}
-  for col_id = 1, 31 do
+  for col_id = 1, 34 do
     local flag = vis_map[col_id] and "1" or "0"
     vis_parts[#vis_parts+1] = string.format("%d:%s", col_id, flag)
   end
@@ -1887,15 +1905,17 @@ local function _order_and_visibility_from_csv(s)
       end
     end
 
-    for col_id = 1, 31 do
-      if visibility_map[col_id] == nil then visibility_map[col_id] = false end
+    -- Columns not mentioned in the saved vis= section are new (added after preset was saved)
+    -- Default new columns to visible so they appear automatically
+    for col_id = 1, 34 do
+      if visibility_map[col_id] == nil then visibility_map[col_id] = true end
     end
 
     -- 有些舊資料可能 visibility_map 裡有 true 但 ord_section 沒列到，補進順序。
     if visibility_map then
       local seen = {}
       for _, col_id in ipairs(order) do seen[col_id] = true end
-      for col_id = 1, 31 do
+      for col_id = 1, 34 do
         if visibility_map[col_id] and not seen[col_id] then
           order[#order+1] = col_id
         end
@@ -1923,6 +1943,14 @@ local function _order_and_visibility_from_csv(s)
       end
     end
 
+    -- New columns not in saved data default to visible
+    for col_id = 1, 34 do
+      if visibility_map[col_id] == nil then
+        visibility_map[col_id] = true
+        order[#order+1] = col_id
+      end
+    end
+
     return (#order > 0) and order or nil, visibility_map
   else
     -- Old format (backward compatibility): "1,2,3,..." - all listed columns are visible
@@ -1938,7 +1966,7 @@ local function _order_and_visibility_from_csv(s)
     for _, col_id in ipairs(order) do
       visible_set[col_id] = true
     end
-    for col_id = 1, 31 do
+    for col_id = 1, 34 do
       visibility_map[col_id] = visible_set[col_id] or false
     end
 
@@ -1967,7 +1995,7 @@ local function _normalize_full_order(order)
   for i=1,#(order or {}) do
     local v = tonumber(order[i]); if v and not seen[v] then seen[v]=true; out[#out+1]=v end
   end
-  for id=1,30 do if not seen[id] then out[#out+1]=id end end
+  for id=1,34 do if not seen[id] then out[#out+1]=id end end
   return out
 end
 
@@ -2168,7 +2196,7 @@ local function load_prefs()
 
         -- Initialize COL_VISIBILITY - all columns in ord are visible
         COL_VISIBILITY = {}
-        for col_id = 1, 31 do
+        for col_id = 1, 34 do
           COL_VISIBILITY[col_id] = (COL_POS[col_id] ~= nil)
         end
       end
@@ -2178,7 +2206,7 @@ local function load_prefs()
   -- Ensure COL_VISIBILITY is initialized even if no preset/order was loaded
   if not COL_VISIBILITY or not next(COL_VISIBILITY) then
     COL_VISIBILITY = {}
-    for col_id = 1, 31 do
+    for col_id = 1, 34 do
       COL_VISIBILITY[col_id] = true  -- default: all visible
     end
   end
@@ -2213,12 +2241,12 @@ local function _order_equal(a,b)
 end
 
 local function _normalize_full_order(order)
-  -- 確保包含 1..28 全部欄位，缺的補上（避免舊版本或不完整資料）
+  -- 確保包含 1..34 全部欄位，缺的補上（避免舊版本或不完整資料）
   local seen, out = {}, {}
   for i=1,#(order or {}) do
     local v = tonumber(order[i]); if v and not seen[v] then seen[v]=true; out[#out+1]=v end
   end
-  for id=1,30 do if not seen[id] then out[#out+1]=id end end
+  for id=1,34 do if not seen[id] then out[#out+1]=id end end
   return out
 end
 
@@ -2460,6 +2488,58 @@ local function collect_basic_fields(item)
     row.color_hex = string.format("#%02X%02X%02X", r, g, b)
   else
     row.color_rgb, row.color_hex = nil, ""
+  end
+
+  -- File info (fast: directly from REAPER API, no external tools needed)
+  row.sample_rate = ""
+  row.bit_depth = ""
+  row.file_type = ""
+  if tk then
+    local source = reaper.GetMediaItemTake_Source(tk)
+    if source then
+      -- Sample rate
+      local sr = reaper.GetMediaSourceSampleRate(source)
+      if sr and sr > 0 then row.sample_rate = tostring(math.floor(sr)) end
+      -- File type (returns single string)
+      local ftype = reaper.GetMediaSourceType(source, "")
+      row.file_type = ftype or ""
+      -- Bit depth: parse RIFF chunks to find "fmt " (handles JUNK/ds64 before fmt)
+      local src_path = reaper.GetMediaSourceFileName(source, "")
+      if src_path and src_path ~= "" then
+        local fh = io.open(src_path, "rb")
+        if fh then
+          local riff = fh:read(4)
+          if riff == "RIFF" or riff == "RF64" then
+            fh:seek("cur", 4) -- skip file size
+            local wave = fh:read(4)
+            if wave == "WAVE" then
+              for _ = 1, 40 do -- safety limit on chunk iterations
+                local chunk_id = fh:read(4)
+                if not chunk_id or #chunk_id < 4 then break end
+                local sb = fh:read(4)
+                if not sb or #sb < 4 then break end
+                local chunk_sz = sb:byte(1) + sb:byte(2)*256 + sb:byte(3)*65536 + sb:byte(4)*16777216
+                if chunk_id == "fmt " then
+                  if chunk_sz >= 16 then
+                    local fmt = fh:read(16)
+                    if fmt and #fmt >= 16 then
+                      local bits = fmt:byte(15) + fmt:byte(16) * 256
+                      if bits > 0 and bits <= 64 then
+                        row.bit_depth = tostring(bits)
+                      end
+                    end
+                  end
+                  break
+                else
+                  fh:seek("cur", chunk_sz + (chunk_sz % 2)) -- skip chunk (pad to even)
+                end
+              end
+            end
+          end
+          fh:close()
+        end
+      end
+    end
   end
 
   -- Keep object references for editing
@@ -3176,6 +3256,10 @@ local function get_cell_text(i, r, col, fmt)
   elseif col == 30 then text = tostring(r.source_end or "")
   -- Length column
   elseif col == 31 then text = FORMAT(r.length)
+  -- File info columns
+  elseif col == 32 then text = tostring(r.sample_rate or "")
+  elseif col == 33 then text = tostring(r.bit_depth or "")
+  elseif col == 34 then text = tostring(r.file_type or "")
   end
 
   -- For TSV format, escape special characters to prevent format corruption
@@ -3236,6 +3320,10 @@ local function header_label_from_id(col_id)
   if col_id == 30 then return "Source End (TC)" end
   -- Length column
   if col_id == 31 then return "Length" end
+  -- File info columns
+  if col_id == 32 then return "Sample Rate" end
+  if col_id == 33 then return "Bit Depth" end
+  if col_id == 34 then return "File Type" end
   return tostring(col_id)
 end
 
@@ -4505,7 +4593,7 @@ if reaper.ImGui_BeginPopupModal(ctx, "Column Preset Editor", true, TF('ImGui_Win
     end
 
     -- Then add hidden columns (those not in COL_ORDER) at the end
-    for col_id = 1, 31 do
+    for col_id = 1, 34 do
       if not added[col_id] then
         local is_visible = COL_VISIBILITY[col_id] or false
         table.insert(PRESET_EDITOR_STATE.columns, {
@@ -4608,9 +4696,9 @@ if reaper.ImGui_BeginPopupModal(ctx, "Column Preset Editor", true, TF('ImGui_Win
 
   -- Reset to default button
   if reaper.ImGui_Button(ctx, "Reset to Default", scale(140), scale(24)) then
-    -- Reset to default column order (all 31 columns)
+    -- Reset to default column order (all 34 columns)
     local reset_order = {
-      1, 2, 3, 12, 13, 31, 4, 5, 6, 7, 8, 9, 10, 11,  -- Basic + Time + Length + Status
+      1, 2, 3, 12, 13, 31, 4, 5, 6, 32, 33, 34, 7, 8, 9, 10, 11,  -- Basic + Time + Length + File Info + Status
       14, 15,  -- UMID
       16, 17, 18, 19, 20, 21,  -- BWF metadata
       22, 23, 24, 25, 26, 27, 28,  -- iXML metadata
@@ -4727,7 +4815,7 @@ local function draw_table(rows, height)
   -- Fit content width: Calculate actual text widths for all columns
   if FIT_CONTENT_WIDTH then
     local initial_order = (COL_ORDER and #COL_ORDER > 0) and COL_ORDER or {
-      1, 2, 3, 12, 13, 31, 4, 5, 6, 7, 8, 9, 10, 11,
+      1, 2, 3, 12, 13, 31, 4, 5, 6, 32, 33, 34, 7, 8, 9, 10, 11,
       14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30
     }
 
@@ -4801,11 +4889,11 @@ local function draw_table(rows, height)
   -- Use dynamic height (fills remaining space) or fallback to 360
   -- If height is provided (not nil), use it; otherwise use -1 (fill available space)
   local outer_height = height or -1
-  if reaper.ImGui_BeginTable(ctx, table_id, 31, flags, 0, outer_height) then
+  if reaper.ImGui_BeginTable(ctx, table_id, 34, flags, 0, outer_height) then
     -- Use existing COL_ORDER for header rendering; use default if not set yet
     -- Default order: Basic info, Time, Metadata (BWF), Metadata (iXML), Status
     local DEFAULT_COL_ORDER = {
-      1, 2, 3, 12, 13, 31, 4, 5, 6, 7, 8, 9, 10, 11,  -- Basic + Time + Length + Status
+      1, 2, 3, 12, 13, 31, 4, 5, 6, 32, 33, 34, 7, 8, 9, 10, 11,  -- Basic + Time + Length + File Info + Status
       14, 15,  -- UMID
       16, 17, 18, 19, 20, 21,  -- BWF metadata
       22, 23, 24, 25, 26, 27, 28,  -- iXML metadata
@@ -5240,6 +5328,21 @@ local function draw_table(rows, height)
           local t = format_time(r.length); local sel = sel_has(r.__item_guid, 31)
           reaper.ImGui_Selectable(ctx, (t ~= "" and t or " ").."##c31", sel)
           if reaper.ImGui_IsItemClicked(ctx) then handle_cell_click(r.__item_guid, 31) end
+
+        elseif col == 32 then
+          local t = tostring(r.sample_rate or ""); local sel = sel_has(r.__item_guid, 32)
+          reaper.ImGui_Selectable(ctx, (t ~= "" and t or " ").."##c32", sel)
+          if reaper.ImGui_IsItemClicked(ctx) then handle_cell_click(r.__item_guid, 32) end
+
+        elseif col == 33 then
+          local t = tostring(r.bit_depth or ""); local sel = sel_has(r.__item_guid, 33)
+          reaper.ImGui_Selectable(ctx, (t ~= "" and t or " ").."##c33", sel)
+          if reaper.ImGui_IsItemClicked(ctx) then handle_cell_click(r.__item_guid, 33) end
+
+        elseif col == 34 then
+          local t = tostring(r.file_type or ""); local sel = sel_has(r.__item_guid, 34)
+          reaper.ImGui_Selectable(ctx, (t ~= "" and t or " ").."##c34", sel)
+          if reaper.ImGui_IsItemClicked(ctx) then handle_cell_click(r.__item_guid, 34) end
         end
       end
 
@@ -5260,7 +5363,7 @@ local function draw_table(rows, height)
         reaper.ShowConsoleMsg("Showing DEFAULT widths from COL_WIDTH table:\n\n")
 
         local order = (COL_ORDER and #COL_ORDER > 0) and COL_ORDER or {
-          1, 2, 3, 12, 13, 31, 4, 5, 6, 7, 8, 9, 10, 11,
+          1, 2, 3, 12, 13, 31, 4, 5, 6, 32, 33, 34, 7, 8, 9, 10, 11,
           14, 15, 16, 17, 18, 19, 20, 21,
           22, 23, 24, 25, 26, 27, 28,
           29, 30
