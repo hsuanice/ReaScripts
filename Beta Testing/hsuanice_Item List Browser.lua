@@ -1,6 +1,6 @@
 --[[
 @description Item List Browser
-@version 250130.1240
+@version 260130.1340
 @author hsuanice
 @about
   A project-wide media browser that shows ALL items in the project with full
@@ -54,6 +54,28 @@
 
 
 @changelog
+  v260130.1340
+  - Feature: Right-click cell filter context menu
+    • Right-click any cell in the table to open a filter menu
+    • "Show only matching": filter to show only rows where that column has the same value
+    • "Exclude matching": hide all rows where that column has the same value
+    • Filter indicator shown in toolbar (orange text) with X clear button
+    • "Clear filter" option also available in right-click menu when filter is active
+    • Works on all 34 columns (Track Name, Take Name, Source File, metadata, etc.)
+  - Feature: Auto-detect REAPER changes (replaces manual auto-refresh)
+    • Uses GetProjectStateChangeCount to detect any project state change every frame
+    • Track name changes, item position edits, mute toggle etc. auto-update in browser
+    • Light refresh for property changes (no full metadata rescan — fast)
+    • Full refresh triggered automatically when items are added/removed
+    • No more need for manual "Refresh Now" for track name changes
+  - Change: Removed Auto-refresh checkbox (always active)
+    • Auto-refresh is now always on via GetProjectStateChangeCount polling
+    • Removed checkbox from toolbar to simplify UI
+  - Change: Removed old right-click context menu on table area
+    • Old menu items (Reset Column Widths, Show Column Widths, Edit Columns, Show/Hide Muted)
+      already have dedicated toolbar buttons — no longer needed in context menu
+    • Right-click on table cells now exclusively opens the new cell filter menu
+
   v250130.1240
   - Fix: Follow Selection now uses native API only (no SWS dependency)
     • Horizontal scroll via GetSet_ArrangeView2 (centers item in arrange view)
@@ -1771,6 +1793,12 @@ local ILB = {
   follow = true,                -- auto-scroll arrange view to selected item
   scroll_to_row = nil,          -- row index to auto-scroll to
   last_reaper_sel_hash = "",    -- REAPER selection state hash
+  -- Cell filter (right-click context menu)
+  cell_filter = nil,            -- {col_id, value, mode="include"|"exclude"} or nil
+  _rc_info = nil,               -- right-click cell info for context menu
+  _rc_pending = false,          -- flag to open cell filter popup
+  -- Auto-refresh state detection
+  last_state_count = 0,         -- GetProjectStateChangeCount for auto-detect
   -- Project change detection
   last_project_count = 0,
   last_project_hash = "",
@@ -3463,6 +3491,14 @@ local function get_view_rows()
       if search_lower then
         if not (row.__search_text or ""):find(search_lower, 1, true) then return false end
       end
+      -- Filter: Cell filter (right-click context menu)
+      if ILB.cell_filter then
+        local cf = ILB.cell_filter
+        -- Use row index 0 as placeholder (row # not used for filtering comparison)
+        local cell_val = get_cell_text(0, row, cf.col_id) or ""
+        if cf.mode == "include" and cell_val ~= cf.value then return false end
+        if cf.mode == "exclude" and cell_val == cf.value then return false end
+      end
       return true
     end
   })
@@ -4078,6 +4114,57 @@ function refresh_now()
   PROGRESSIVE.active = false
 end
 
+-- Light refresh: re-read basic fields for existing rows without metadata rescan
+-- Used for auto-detecting REAPER changes (track renames, position changes, etc.)
+local function light_refresh()
+  for _, row in ipairs(ROWS) do
+    local item = row.__item
+    if item and reaper.ValidatePtr(item, "MediaItem*") then
+      local tr = reaper.GetMediaItemTrack(item)
+      if tr then
+        row.track_name = select(2, reaper.GetTrackName(tr, "")) or ""
+        row.__track = tr
+        row.track_idx = math.floor(reaper.GetMediaTrackInfo_Value(tr, "IP_TRACKNUMBER") or 0)
+      end
+      local tk = reaper.GetActiveTake(item)
+      if tk then
+        row.take_name = select(2, reaper.GetSetMediaItemTakeInfo_String(tk, "P_NAME", "", false)) or ""
+      end
+      local ok_note, note = reaper.GetSetMediaItemInfo_String(item, "P_NOTES", "", false)
+      row.item_note = (ok_note and note) or ""
+      local pos = reaper.GetMediaItemInfo_Value(item, "D_POSITION") or 0
+      local len = reaper.GetMediaItemInfo_Value(item, "D_LENGTH") or 0
+      row.start_time = pos
+      row.end_time = pos + len
+      row.length = len
+      row.muted = (reaper.GetMediaItemInfo_Value(item, "B_MUTE") or 0) > 0.5
+      -- Update color
+      local native = reaper.GetDisplayedMediaItemColor(item) or 0
+      if native ~= 0 then
+        local r, g, b = reaper.ColorFromNative(native)
+        row.color_rgb = { r, g, b }
+        row.color_hex = string.format("#%02X%02X%02X", r, g, b)
+      else
+        row.color_rgb, row.color_hex = nil, ""
+      end
+      -- Rebuild search text
+      row.__search_text = table.concat({
+        row.track_name or "", row.take_name or "", row.item_note or "",
+        row.file_name or "", row.meta_trk_name or "",
+        row.originator or "", row.description or "",
+        row.project or "", row.scene or "", row.take_meta or "", row.tape or "",
+        row.sample_rate or "", row.file_type or "",
+      }, " "):lower()
+    end
+  end
+  ILB.cached_rows_frame = -1  -- Invalidate filter cache
+  build_track_list()
+  -- Re-apply sort if active
+  if #SORT_STATE.columns > 0 then
+    sort_rows_by_state(ROWS)
+  end
+end
+
 -- Start progressive refresh for large projects
 local function refresh_progressive()
   -- Count all project items
@@ -4108,10 +4195,30 @@ local function smart_refresh()
     return
   end
 
-  -- Only refresh when explicitly requested (no periodic polling)
+  -- Full refresh when explicitly requested (boot, Refresh Now, edit/paste/delete, Clear Cache)
   if NEEDS_REFRESH then
     NEEDS_REFRESH = false
     refresh_progressive()
+    ILB.last_state_count = reaper.GetProjectStateChangeCount(0)
+    return
+  end
+
+  -- Auto-detect REAPER changes (track renames, item edits, add/remove, etc.)
+  local current_count = reaper.GetProjectStateChangeCount(0)
+  if current_count ~= ILB.last_state_count then
+    ILB.last_state_count = current_count
+    -- Count current project items to detect add/remove
+    local total_items = 0
+    for t = 0, reaper.CountTracks(0) - 1 do
+      total_items = total_items + reaper.CountTrackMediaItems(reaper.GetTrack(0, t))
+    end
+    if total_items ~= #ROWS then
+      -- Item count changed (add/remove/render): full refresh
+      refresh_progressive()
+    elseif #ROWS > 0 then
+      -- Same item count: light refresh (update track names, positions, etc.)
+      light_refresh()
+    end
   end
 end
 
@@ -4334,12 +4441,23 @@ local function draw_toolbar()
   end
   reaper.ImGui_Text(ctx, status_text)
   reaper.ImGui_SameLine(ctx)
-  local chg, v = reaper.ImGui_Checkbox(ctx, "Auto-refresh", AUTO)
-  if chg then
-    AUTO = v
-    reaper.SetExtState(EXT_NS, "auto_refresh", v and "1" or "0", true)
+
+-- Cell filter indicator (right-click filter active)
+if ILB.cell_filter then
+  local cf = ILB.cell_filter
+  local mode_text = cf.mode == "include" and "Only" or "Exclude"
+  local col_name = header_label_from_id(cf.col_id) or "?"
+  local disp_val = cf.value or ""
+  if #disp_val > 20 then disp_val = disp_val:sub(1, 20) .. "..." end
+  reaper.ImGui_TextColored(ctx, 0xFFAA44FF,
+    string.format("Filter: %s [%s]=\"%s\"", mode_text, col_name, disp_val))
+  reaper.ImGui_SameLine(ctx)
+  if reaper.ImGui_SmallButton(ctx, "X##clear_cf") then
+    ILB.cell_filter = nil
+    ILB.cached_rows = nil; ILB.cached_rows_frame = -1
   end
   reaper.ImGui_SameLine(ctx)
+end
 
 -- Show muted items (hides muted rows; affects current table and export)
 local changed, nv = reaper.ImGui_Checkbox(ctx, "Show muted items", SHOW_MUTED_ITEMS)
@@ -5674,6 +5792,12 @@ local function draw_table(rows, height)
           reaper.ImGui_Selectable(ctx, (t ~= "" and t or " ").."##c34", sel)
           if reaper.ImGui_IsItemClicked(ctx) then handle_cell_click(r.__item_guid, 34) end
         end
+
+        -- Right-click on any cell: open filter context menu
+        if reaper.ImGui_IsItemClicked(ctx, reaper.ImGui_MouseButton_Right()) then
+          ILB._rc_info = { col_id = col, value = get_cell_text(i, r, col) }
+          ILB._rc_pending = true
+        end
       end
 
       -- ILB: Move to View - double-click on non-editable cell scrolls arrange to item
@@ -5692,47 +5816,42 @@ local function draw_table(rows, height)
 
     reaper.ImGui_EndTable(ctx)
 
-    -- Right-click context menu on table area
-    if reaper.ImGui_BeginPopupContextItem(ctx, "table_context_menu") then
-      if reaper.ImGui_MenuItem(ctx, "Reset Column Widths") then
-        RESET_COLUMN_WIDTHS = true
-      end
+    -- Cell filter context menu (right-click on any cell)
+    if ILB._rc_pending then
+      reaper.ImGui_OpenPopup(ctx, "##cell_filter_popup")
+      ILB._rc_pending = false
+    end
 
-      if reaper.ImGui_MenuItem(ctx, "Show Column Widths (Console)") then
-        -- Log current column widths to console
-        reaper.ShowConsoleMsg("\n=== Current Column Widths ===\n")
-        reaper.ShowConsoleMsg("Showing DEFAULT widths from COL_WIDTH table:\n\n")
+    if reaper.ImGui_BeginPopup(ctx, "##cell_filter_popup") then
+      if ILB._rc_info then
+        local cf = ILB._rc_info
+        local col_name = header_label_from_id(cf.col_id) or "?"
+        local disp_val = cf.value or ""
+        if #disp_val > 40 then disp_val = disp_val:sub(1, 40) .. "..." end
 
-        local order = (COL_ORDER and #COL_ORDER > 0) and COL_ORDER or {
-          1, 2, 3, 12, 13, 31, 4, 5, 6, 32, 33, 34, 7, 8, 9, 10, 11,
-          14, 15, 16, 17, 18, 19, 20, 21,
-          22, 23, 24, 25, 26, 27, 28,
-          29, 30
-        }
+        reaper.ImGui_TextDisabled(ctx, string.format("[%s] = \"%s\"", col_name, disp_val))
+        reaper.ImGui_Separator(ctx)
 
-        for i, col_id in ipairs(order) do
-          local label = header_label_from_id(col_id)
-          local width = COL_WIDTH[col_id] or 100
-          if width < 0 then width = 150 end
-          reaper.ShowConsoleMsg(string.format("[%2d] %-20s = %3dpx\n", col_id, label, width))
+        if reaper.ImGui_MenuItem(ctx, "Show only matching") then
+          ILB.cell_filter = { col_id = cf.col_id, value = cf.value, mode = "include" }
+          ILB.cached_rows = nil; ILB.cached_rows_frame = -1
+          sel_clear()
         end
-        reaper.ShowConsoleMsg("\nEdit COL_WIDTH table (line ~3260) to customize defaults\n")
-        reaper.ShowConsoleMsg("=============================\n\n")
+
+        if reaper.ImGui_MenuItem(ctx, "Exclude matching") then
+          ILB.cell_filter = { col_id = cf.col_id, value = cf.value, mode = "exclude" }
+          ILB.cached_rows = nil; ILB.cached_rows_frame = -1
+          sel_clear()
+        end
+
+        if ILB.cell_filter then
+          reaper.ImGui_Separator(ctx)
+          if reaper.ImGui_MenuItem(ctx, "Clear filter") then
+            ILB.cell_filter = nil
+            ILB.cached_rows = nil; ILB.cached_rows_frame = -1
+          end
+        end
       end
-
-      reaper.ImGui_Separator(ctx)
-
-      if reaper.ImGui_MenuItem(ctx, "Edit Columns...") then
-        reaper.ImGui_OpenPopup(ctx, "Column Preset Editor")
-      end
-
-      reaper.ImGui_Separator(ctx)
-
-      local show_muted_label = SHOW_MUTED and "Hide Muted Items" or "Show Muted Items"
-      if reaper.ImGui_MenuItem(ctx, show_muted_label) then
-        SHOW_MUTED = not SHOW_MUTED
-      end
-
       reaper.ImGui_EndPopup(ctx)
     end
 
