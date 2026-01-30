@@ -1,6 +1,6 @@
 --[[
 @description Item List Browser
-@version 260130.1345
+@version 260131.0124
 @author hsuanice
 @about
   A project-wide media browser that shows ALL items in the project with full
@@ -54,6 +54,19 @@
 
 
 @changelog
+  v260131.0124
+  - Performance: ListClipper virtualization for table rendering
+    • Only renders visible rows (~30-50) instead of all project items every frame
+    • Reduces per-frame ImGui widget count from ~190,000 to ~1,500 for 5000+ item projects
+    • Clipper created once at startup, reused every frame (no per-frame resource allocation)
+    • Automatically bypassed for one frame when auto-scroll is needed (REAPER selection sync)
+  - Performance: Throttled light_refresh to max 2x per second (500ms interval)
+    • GetProjectStateChangeCount triggers on nearly every REAPER action (scroll, select, cursor move)
+    • Previously called light_refresh every frame, iterating all items + sorting + rebuilding filters
+    • Full refresh (item add/remove) remains un-throttled for responsiveness
+  - Fix: Resolved "excessive creation of short-lived resources" error from per-frame ListClipper creation
+  - Fix: Resolved "Missing EndTable()" cascade error caused by above resource creation failure
+
   v260130.1345
   - Change: Moved "Refresh Now" button to row 1, right of "Clear Cache" button
   - Change: Moved "Search" input field to row 2 start (more prominent position)
@@ -1727,6 +1740,9 @@ if ctx then
 else
   reaper.ShowConsoleMsg("[ILB] ERROR: Failed to create ImGui context!\n")
 end
+
+-- ListClipper: created once, reused every frame for table row virtualization
+local list_clipper = reaper.ImGui_CreateListClipper and reaper.ImGui_CreateListClipper(ctx) or nil
 
 -- Font size management (uses PushFont/PopFont in main loop)
 local current_font_size = 13  -- Default size
@@ -4189,6 +4205,10 @@ end
 -- ILB: No periodic polling. Refresh is triggered only by:
 --   1. NEEDS_REFRESH flag (boot, Refresh Now, mark_dirty after edit/paste/delete/clear cache)
 --   2. Progressive loading continuation (process remaining batches)
+--   3. Auto-detect via GetProjectStateChangeCount (throttled for performance)
+local _last_light_refresh = 0
+local LIGHT_REFRESH_INTERVAL = 0.5  -- Throttle: max 2 light refreshes per second
+
 local function smart_refresh()
   -- If progressive loading is active, continue processing batches
   if PROGRESSIVE.active then
@@ -4214,11 +4234,15 @@ local function smart_refresh()
       total_items = total_items + reaper.CountTrackMediaItems(reaper.GetTrack(0, t))
     end
     if total_items ~= #ROWS then
-      -- Item count changed (add/remove/render): full refresh
+      -- Item count changed (add/remove/render): full refresh (not throttled)
       refresh_progressive()
     elseif #ROWS > 0 then
-      -- Same item count: light refresh (update track names, positions, etc.)
-      light_refresh()
+      -- Throttle light refresh to avoid per-frame overhead with large projects
+      local now = reaper.time_precise()
+      if now - _last_light_refresh >= LIGHT_REFRESH_INTERVAL then
+        _last_light_refresh = now
+        light_refresh()
+      end
     end
   end
 end
@@ -5500,7 +5524,26 @@ local function draw_table(rows, height)
 
 
     -- === Render rows in visual column order (COL_ORDER) ===
-    for i, r in ipairs(rows or {}) do
+    -- ListClipper: only render visible rows (critical for 1000+ item projects)
+    local _rc = #(rows or {})
+    local _use_clipper = list_clipper and _rc > 100 and not ILB.scroll_to_row
+    if _use_clipper then
+      reaper.ImGui_ListClipper_Begin(list_clipper, _rc)
+    end
+    local _clp = true
+    while _clp do
+      local _cs, _ce
+      if _use_clipper then
+        if not reaper.ImGui_ListClipper_Step(list_clipper) then break end
+        local _ds, _de = reaper.ImGui_ListClipper_GetDisplayRange(list_clipper)
+        _cs, _ce = _ds + 1, _de
+      else
+        _cs, _ce = 1, _rc
+        _clp = false
+      end
+    for i = _cs, _ce do
+      local r = rows[i]
+      if not r then goto _skip_row end
       reaper.ImGui_TableNextRow(ctx)
       -- ILB: auto-scroll to target row (from REAPER selection sync)
       if ILB.scroll_to_row and ILB.scroll_to_row == i then
@@ -5791,7 +5834,9 @@ local function draw_table(rows, height)
       end
 
       reaper.ImGui_PopID(ctx)
-    end
+      ::_skip_row::
+    end -- for i
+    end -- while _clp
 
     reaper.ImGui_EndTable(ctx)
 
