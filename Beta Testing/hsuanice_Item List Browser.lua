@@ -1,6 +1,6 @@
 --[[
 @description Item List Browser
-@version 260130.1220
+@version 250130.1240
 @author hsuanice
 @about
   A project-wide media browser that shows ALL items in the project with full
@@ -54,6 +54,17 @@
 
 
 @changelog
+  v250130.1240
+  - Fix: Follow Selection now uses native API only (no SWS dependency)
+    • Horizontal scroll via GetSet_ArrangeView2 (centers item in arrange view)
+    • Vertical scroll via action 40913 (scrolls track into view)
+    • Removed _S&M_SCROLL_ITEM dependency
+  - Fix: Clicking rows in list no longer causes unwanted table auto-scroll
+    • sync_list_selection_to_reaper() now updates REAPER selection hash immediately
+    • Prevents sync_reaper_selection_to_list() from detecting false change after cooldown
+  - Fix: Unified GUID API to native GetSetMediaItemInfo_String (removed SWS BR_GetMediaItemGUID)
+  - Change: Follow Selection now defaults to ON (ILB.follow = true)
+
   v260130.1220
   - Fix: Removed auto-refresh polling that caused infinite reload loop
     • smart_refresh() no longer polls has_project_changed() every 100ms
@@ -1757,7 +1768,7 @@ local ILB = {
   sel_source = nil,             -- "list" | "reaper" | nil (feedback loop guard)
   sel_cooldown = 0,             -- timestamp of last list-to-REAPER sync
   sel_cooldown_ms = 0.3,        -- 300ms cooldown
-  follow = false,               -- auto-scroll arrange view to selected item
+  follow = true,                -- auto-scroll arrange view to selected item
   scroll_to_row = nil,          -- row index to auto-scroll to
   last_reaper_sel_hash = "",    -- REAPER selection state hash
   -- Project change detection
@@ -3491,10 +3502,42 @@ local function sync_list_selection_to_reaper()
 
   reaper.UpdateArrange()
 
-  -- Follow Selection: scroll arrange view to selected item
+  -- Follow Selection: scroll arrange view to selected item (native API, no SWS needed)
   if ILB.follow then
-    reaper.Main_OnCommand(40913, 0)  -- View: Scroll view to selected items
+    local item = reaper.GetSelectedMediaItem(0, 0)
+    if item and reaper.ValidatePtr(item, "MediaItem*") then
+      -- Horizontal scroll: center item position in arrange view
+      local item_pos = reaper.GetMediaItemInfo_Value(item, "D_POSITION")
+      local item_len = reaper.GetMediaItemInfo_Value(item, "D_LENGTH")
+      local item_mid = item_pos + item_len * 0.5
+      local arr_start, arr_end = reaper.GetSet_ArrangeView2(0, false, 0, 0)
+      local view_span = arr_end - arr_start
+      local new_start = item_mid - view_span * 0.5
+      reaper.GetSet_ArrangeView2(0, true, 0, 0, new_start, new_start + view_span)
+      -- Vertical scroll: bring selected track into view
+      reaper.Main_OnCommand(40913, 0)  -- Track: Vertical scroll selected tracks into view
+    end
   end
+
+  -- Update REAPER selection hash so sync_reaper_selection_to_list()
+  -- won't detect a false change and trigger unwanted table auto-scroll
+  local sel_count = reaper.CountSelectedMediaItems(0)
+  local hp = { tostring(sel_count) }
+  for s = 0, math.min(sel_count - 1, 9) do
+    local item = reaper.GetSelectedMediaItem(0, s)
+    if item then
+      local _, guid = reaper.GetSetMediaItemInfo_String(item, "GUID", "", false)
+      hp[#hp + 1] = guid
+    end
+  end
+  if sel_count > 10 then
+    local item = reaper.GetSelectedMediaItem(0, sel_count - 1)
+    if item then
+      local _, guid = reaper.GetSetMediaItemInfo_String(item, "GUID", "", false)
+      hp[#hp + 1] = guid
+    end
+  end
+  ILB.last_reaper_sel_hash = table.concat(hp, "|")
 end
 
 -- REAPER → List: sync REAPER selection to table highlight
@@ -3511,7 +3554,7 @@ local function sync_reaper_selection_to_list()
   for s = 0, math.min(sel_count - 1, 9) do  -- sample first 10 for speed
     local item = reaper.GetSelectedMediaItem(0, s)
     if item then
-      local guid = reaper.BR_GetMediaItemGUID(item)
+      local _, guid = reaper.GetSetMediaItemInfo_String(item, "GUID", "", false)
       hash_parts[#hash_parts + 1] = guid
     end
   end
@@ -3519,7 +3562,8 @@ local function sync_reaper_selection_to_list()
   if sel_count > 10 then
     local item = reaper.GetSelectedMediaItem(0, sel_count - 1)
     if item then
-      hash_parts[#hash_parts + 1] = reaper.BR_GetMediaItemGUID(item)
+      local _, guid = reaper.GetSetMediaItemInfo_String(item, "GUID", "", false)
+      hash_parts[#hash_parts + 1] = guid
     end
   end
   local hash = table.concat(hash_parts, "|")
@@ -3533,7 +3577,7 @@ local function sync_reaper_selection_to_list()
   for s = 0, sel_count - 1 do
     local item = reaper.GetSelectedMediaItem(0, s)
     if item then
-      local guid = reaper.BR_GetMediaItemGUID(item)
+      local _, guid = reaper.GetSetMediaItemInfo_String(item, "GUID", "", false)
       reaper_sel[guid] = true
     end
   end
