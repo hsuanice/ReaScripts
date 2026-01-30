@@ -1,6 +1,6 @@
 --[[
 @description Item List Browser
-@version 260130.1340
+@version 260130.1345
 @author hsuanice
 @about
   A project-wide media browser that shows ALL items in the project with full
@@ -54,6 +54,11 @@
 
 
 @changelog
+  v260130.1345
+  - Change: Moved "Refresh Now" button to row 1, right of "Clear Cache" button
+  - Change: Moved "Search" input field to row 2 start (more prominent position)
+  - Change: Removed "Track:" dropdown filter (replaced by right-click cell filter)
+
   v260130.1340
   - Feature: Right-click cell filter context menu
     • Right-click any cell in the table to open a filter menu
@@ -3483,10 +3488,6 @@ local function get_view_rows()
         if not item or not reaper.ValidatePtr(item, "MediaItem*") then return false end
         if not reaper.IsMediaItemSelected(item) then return false end
       end
-      -- Filter: Track
-      if ILB.track_index > 0 then
-        if (row.track_idx or 0) ~= ILB.track_index then return false end
-      end
       -- Filter: Text search
       if search_lower then
         if not (row.__search_text or ""):find(search_lower, 1, true) then return false end
@@ -4490,52 +4491,7 @@ do
   end
 end
 
--- ILB: Track filter dropdown
-do
-  reaper.ImGui_Text(ctx, "Track:")
-  reaper.ImGui_SameLine(ctx)
-  reaper.ImGui_SetNextItemWidth(ctx, scale(160))
-  local preview = ILB.track_index == 0 and "All Tracks" or
-    (ILB.track_list[ILB.track_index] and ILB.track_list[ILB.track_index].name or "Track " .. ILB.track_index)
-  if reaper.ImGui_BeginCombo(ctx, "##ilb_track_filter", preview) then
-    if reaper.ImGui_Selectable(ctx, "All Tracks", ILB.track_index == 0) then
-      ILB.track_index = 0
-      ILB.cached_rows = nil; ILB.cached_rows_frame = -1
-      sel_clear()
-    end
-    for _, trk in ipairs(ILB.track_list) do
-      local label = string.format("%d: %s", trk.index, trk.name)
-      if reaper.ImGui_Selectable(ctx, label, ILB.track_index == trk.index) then
-        ILB.track_index = trk.index
-        ILB.cached_rows = nil; ILB.cached_rows_frame = -1
-        sel_clear()
-      end
-    end
-    reaper.ImGui_EndCombo(ctx)
-  end
-  reaper.ImGui_SameLine(ctx)
-end
-
--- ILB: Search filter
-do
-  reaper.ImGui_Text(ctx, "Search:")
-  reaper.ImGui_SameLine(ctx)
-  reaper.ImGui_SetNextItemWidth(ctx, scale(160))
-  local chg_s, new_s = reaper.ImGui_InputText(ctx, "##ilb_search", ILB.search_text)
-  if chg_s then
-    ILB.search_text = new_s
-    ILB.cached_rows = nil; ILB.cached_rows_frame = -1
-    sel_clear()
-  end
-  reaper.ImGui_SameLine(ctx)
-  if ILB.search_text ~= "" then
-    if reaper.ImGui_Button(ctx, "X##ilb_clear_search", scale(20), scale(20)) then
-      ILB.search_text = ""
-      ILB.cached_rows = nil; ILB.cached_rows_frame = -1
-    end
-    reaper.ImGui_SameLine(ctx)
-  end
-end
+-- (Track dropdown and Search filter moved — see row 2 below)
 
 -- Four modes: m:s / TC / Beats / Custom (input field right after Custom)
 reaper.ImGui_SameLine(ctx)
@@ -4623,6 +4579,18 @@ if reaper.ImGui_IsItemHovered(ctx) then
     reaper.ImGui_TextColored(ctx, 0xFF6666FF, string.format("Invalidated: %d items", invalidated_count))
   end
   reaper.ImGui_EndTooltip(ctx)
+end
+
+-- Refresh Now button
+reaper.ImGui_SameLine(ctx)
+if reaper.ImGui_Button(ctx, "Refresh Now", scale(110), scale(24)) then
+  TABLE_SOURCE = "live"
+  refresh_now()
+end
+-- Show hint if progressive loading is active
+if PROGRESSIVE.active then
+  reaper.ImGui_SameLine(ctx)
+  reaper.ImGui_TextDisabled(ctx, "(loading in background...)")
 end
 
 -- Options button (moved from Clear Cache right-click menu)
@@ -4814,14 +4782,25 @@ if reaper.ImGui_BeginPopup(ctx, "##options_menu") then
 end
 
 -- Second row starts here
-if reaper.ImGui_Button(ctx, "Refresh Now", scale(110), scale(24)) then
-  TABLE_SOURCE = "live"
-  refresh_now()  -- Force immediate full refresh (bypasses progressive loading)
-end
--- Show hint if progressive loading is active
-if PROGRESSIVE.active then
+-- ILB: Search filter
+do
+  reaper.ImGui_Text(ctx, "Search:")
   reaper.ImGui_SameLine(ctx)
-  reaper.ImGui_TextDisabled(ctx, "(loading in background...)")
+  reaper.ImGui_SetNextItemWidth(ctx, scale(160))
+  local chg_s, new_s = reaper.ImGui_InputText(ctx, "##ilb_search", ILB.search_text)
+  if chg_s then
+    ILB.search_text = new_s
+    ILB.cached_rows = nil; ILB.cached_rows_frame = -1
+    sel_clear()
+  end
+  reaper.ImGui_SameLine(ctx)
+  if ILB.search_text ~= "" then
+    if reaper.ImGui_Button(ctx, "X##ilb_clear_search", scale(20), scale(20)) then
+      ILB.search_text = ""
+      ILB.cached_rows = nil; ILB.cached_rows_frame = -1
+    end
+    reaper.ImGui_SameLine(ctx)
+  end
 end
 
 -- Fit Content Widths button
