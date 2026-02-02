@@ -1,6 +1,6 @@
 --[[
 @description Item List Browser
-@version 260202.1845
+@version 260203.0140
 @author hsuanice
 @about
   A project-wide media browser that shows ALL items in the project with full
@@ -54,6 +54,13 @@
 
 
 @changelog
+  v260203.0140
+  - Fix: ListClipper pointer validation prevents crash and "Missing EndTable()" cascade
+    • ListClipper pointer can become stale after context state changes (dock/undock, GC)
+    • Added ImGui_ValidatePtr check before each ListClipper_Begin call
+    • Automatically recreates ListClipper if pointer is no longer valid
+    • Eliminates "expected a valid ImGui_ListClipper*" error and subsequent EndTable mismatch
+
   v260202.1845
   - UX: Selection sync no longer causes list flicker
     • Tracks visible row range each frame via ListClipper display range
@@ -5558,6 +5565,10 @@ local function draw_table(rows, height)
     -- === Render rows in visual column order (COL_ORDER) ===
     -- ListClipper: only render visible rows (critical for 1000+ item projects)
     local _rc = #(rows or {})
+    -- Validate clipper pointer before use; recreate if stale
+    if list_clipper and not reaper.ImGui_ValidatePtr(list_clipper, "ImGui_ListClipper*") then
+      list_clipper = reaper.ImGui_CreateListClipper and reaper.ImGui_CreateListClipper(ctx) or nil
+    end
     local _use_clipper = list_clipper and _rc > 100 and not ILB.scroll_to_row
     if _use_clipper then
       reaper.ImGui_ListClipper_Begin(list_clipper, _rc)
