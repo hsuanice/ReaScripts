@@ -1,6 +1,6 @@
 --[[
 @description Item List Browser
-@version 260202.1630
+@version 260202.1845
 @author hsuanice
 @about
   A project-wide media browser that shows ALL items in the project with full
@@ -54,6 +54,12 @@
 
 
 @changelog
+  v260202.1845
+  - UX: Selection sync no longer causes list flicker
+    • Tracks visible row range each frame via ListClipper display range
+    • Only auto-scrolls when selected item is outside visible area (with 1-row margin)
+    • Items already visible in the list are highlighted in place without any scroll jump
+
   v260202.1630
   - Fix: Move to View (double-click) scroll now reliably works
     • Deferred scroll execution to next frame to avoid conflict with Follow Selection scroll in same frame
@@ -1829,6 +1835,7 @@ local ILB = {
   sel_cooldown_ms = 0.3,        -- 300ms cooldown
   follow = true,                -- auto-scroll arrange view to selected item
   scroll_to_row = nil,          -- row index to auto-scroll to
+  visible_range = { first = 0, last = 0 },  -- clipper visible row range (updated each frame)
   last_reaper_sel_hash = "",    -- REAPER selection state hash
   -- Cell filter (right-click context menu)
   cell_filter = nil,            -- {col_id, value, mode="include"|"exclude"} or nil
@@ -3676,9 +3683,12 @@ local function sync_reaper_selection_to_list()
     end
   end
 
-  -- Auto-scroll to first matched row
+  -- Auto-scroll only if first matched row is NOT already visible in the table
   if first_match then
-    ILB.scroll_to_row = first_match
+    local vr = ILB.visible_range
+    if first_match < vr.first + 1 or first_match > vr.last - 1 then
+      ILB.scroll_to_row = first_match
+    end
   end
 end
 
@@ -5559,6 +5569,9 @@ local function draw_table(rows, height)
         if not reaper.ImGui_ListClipper_Step(list_clipper) then break end
         local _ds, _de = reaper.ImGui_ListClipper_GetDisplayRange(list_clipper)
         _cs, _ce = _ds + 1, _de
+        -- Track visible row range for scroll-only-if-needed logic
+        ILB.visible_range.first = _cs
+        ILB.visible_range.last = _ce
       else
         _cs, _ce = 1, _rc
         _clp = false
