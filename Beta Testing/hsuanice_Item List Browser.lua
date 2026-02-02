@@ -1,6 +1,6 @@
 --[[
 @description Item List Browser
-@version 260131.0124
+@version 260202.1630
 @author hsuanice
 @about
   A project-wide media browser that shows ALL items in the project with full
@@ -54,6 +54,22 @@
 
 
 @changelog
+  v260202.1630
+  - Fix: Move to View (double-click) scroll now reliably works
+    • Deferred scroll execution to next frame to avoid conflict with Follow Selection scroll in same frame
+    • Follow Selection scroll now also sets correct track (SetOnlyTrackSelected) before action 40913
+    • Skip Follow Selection scroll when Move to View is pending (prevents double-scroll interference)
+    • After scroll, updates selection hash + state count + cooldown to prevent sync/refresh from overriding
+  - Fix: Follow Selection vertical scroll now targets correct track
+    • Previously called action 40913 without selecting item's track first — scrolled to wrong track
+    • Now calls SetOnlyTrackSelected(item_track) before scrolling
+
+  v250202.1400
+  - Fix: Move to View (double-click) now scrolls to both item position and track
+    • Horizontal scroll: centers item in arrange view via GetSet_ArrangeView2
+    • Vertical scroll: selects item's track then scrolls it into view (action 40913)
+    • Previously only scrolled vertically and failed when items on different tracks shared the same timeline position
+
   v260131.0124
   - Performance: ListClipper virtualization for table rendering
     • Only renders visible rows (~30-50) instead of all project items every frame
@@ -1828,6 +1844,8 @@ local ILB = {
   cached_rows_frame = -1,
 }
 
+-- Deferred "Move to View" scroll (processed at start of next frame, before sync/refresh)
+local PENDING_MOVE_TO_VIEW = nil  -- { item = MediaItem*, track = MediaTrack* }
 
 -- log
 local function log(fmt, ...)
@@ -3556,7 +3574,7 @@ local function sync_list_selection_to_reaper()
   reaper.UpdateArrange()
 
   -- Follow Selection: scroll arrange view to selected item (native API, no SWS needed)
-  if ILB.follow then
+  if ILB.follow and not PENDING_MOVE_TO_VIEW then
     local item = reaper.GetSelectedMediaItem(0, 0)
     if item and reaper.ValidatePtr(item, "MediaItem*") then
       -- Horizontal scroll: center item position in arrange view
@@ -3567,7 +3585,11 @@ local function sync_list_selection_to_reaper()
       local view_span = arr_end - arr_start
       local new_start = item_mid - view_span * 0.5
       reaper.GetSet_ArrangeView2(0, true, 0, 0, new_start, new_start + view_span)
-      -- Vertical scroll: bring selected track into view
+      -- Vertical scroll: select item's track, then scroll into view
+      local follow_track = reaper.GetMediaItemTrack(item)
+      if follow_track then
+        reaper.SetOnlyTrackSelected(follow_track)
+      end
       reaper.Main_OnCommand(40913, 0)  -- Track: Vertical scroll selected tracks into view
     end
   end
@@ -5822,14 +5844,15 @@ local function draw_table(rows, height)
         end
       end
 
-      -- ILB: Move to View - double-click on non-editable cell scrolls arrange to item
+      -- ILB: Move to View - double-click on non-editable cell → defer scroll to next frame
+      -- Deferring avoids conflict with sync_list_selection_to_reaper() follow-scroll in same frame
       if ilb_dblclick_item then
         local item = ilb_dblclick_item.__item
         if item and reaper.ValidatePtr(item, "MediaItem*") then
-          reaper.Main_OnCommand(40289, 0)  -- Unselect all items
-          reaper.SetMediaItemSelected(item, true)
-          reaper.Main_OnCommand(40913, 0)  -- Scroll view to selected items
-          reaper.UpdateArrange()
+          PENDING_MOVE_TO_VIEW = {
+            item = item,
+            track = reaper.GetMediaItemTrack(item),
+          }
         end
       end
 
@@ -5947,6 +5970,50 @@ local function loop()
 
     -- Skip all content on first frame to avoid ImGui context initialization issues
     if FRAME_COUNT > 1 then
+      -- Process deferred Move to View scroll (from double-click in previous frame)
+      -- Runs BEFORE smart_refresh/sync to avoid interference from state change detection
+      if PENDING_MOVE_TO_VIEW then
+        local mtv = PENDING_MOVE_TO_VIEW
+        PENDING_MOVE_TO_VIEW = nil
+        local item = mtv.item
+        local track = mtv.track
+        if item and reaper.ValidatePtr(item, "MediaItem*") then
+          -- Select only this item in REAPER
+          reaper.Main_OnCommand(40289, 0)  -- Unselect all items
+          reaper.SetMediaItemSelected(item, true)
+          -- Horizontal scroll: center item in arrange view
+          local item_pos = reaper.GetMediaItemInfo_Value(item, "D_POSITION")
+          local item_len = reaper.GetMediaItemInfo_Value(item, "D_LENGTH")
+          local item_mid = item_pos + item_len * 0.5
+          local arr_start, arr_end = reaper.GetSet_ArrangeView2(0, false, 0, 0)
+          local view_span = arr_end - arr_start
+          local new_start = item_mid - view_span * 0.5
+          reaper.GetSet_ArrangeView2(0, true, 0, 0, new_start, new_start + view_span)
+          -- Vertical scroll: select item's track and scroll into view
+          if track and reaper.ValidatePtr(track, "MediaTrack*") then
+            reaper.SetOnlyTrackSelected(track)
+            reaper.UpdateArrange()
+            reaper.Main_OnCommand(40913, 0)  -- Track: Vertical scroll selected tracks into view
+          end
+          reaper.UpdateArrange()
+          -- Prevent sync/refresh from detecting this as an external change
+          ILB.sel_source = "list"
+          ILB.sel_cooldown = reaper.time_precise()
+          ILB.last_state_count = reaper.GetProjectStateChangeCount(0)
+          -- Update selection hash to match current REAPER state
+          local sel_count = reaper.CountSelectedMediaItems(0)
+          local hp = { tostring(sel_count) }
+          for s = 0, math.min(sel_count - 1, 9) do
+            local si = reaper.GetSelectedMediaItem(0, s)
+            if si then
+              local _, guid = reaper.GetSetMediaItemInfo_String(si, "GUID", "", false)
+              hp[#hp + 1] = guid
+            end
+          end
+          ILB.last_reaper_sel_hash = table.concat(hp, "|")
+        end
+      end
+
       -- Smart refresh (after ImGui window is created)
       smart_refresh()
 
