@@ -1,6 +1,6 @@
 --[[
 @description Conform List Browser
-@version 260203.1854
+@version 260203.2216
 @author hsuanice
 @about
   A REAPER script for browsing and editing EDL (Edit Decision List) data
@@ -36,6 +36,18 @@
   Requires: ReaImGui (install via ReaPack)
 
 @changelog
+  v260203.2216
+  - Feature: Multi-file EDL selection in file dialog
+    • Uses JS_Dialog_BrowseForOpenFiles for multi-select (shift/cmd-click)
+    • Handles macOS (full paths) and Windows (directory + filenames) return formats
+    • Falls back to single-file dialog if JS extension unavailable
+  - Feature: EDL Sources panel with visibility filtering
+    • "Sources >>" toggle button in toolbar shows/hides panel
+    • Each loaded EDL listed with filename, event count, and checkbox
+    • Show All / Hide All buttons for quick toggling
+    • Unchecked sources are filtered from table display
+  - Fix: Multi-file path parsing on macOS (was concatenating full paths as directory + filename)
+
   v260203.1854
   - Feature: Multiple EDL import support
     • Loading a second EDL when events already exist prompts Replace / Append / Cancel
@@ -98,7 +110,7 @@ end
 ---------------------------------------------------------------------------
 local SCRIPT_NAME = "Conform List Browser"
 local EXT_NS = "hsuanice_ConformListBrowser"
-local VERSION = "260203.1854"
+local VERSION = "260203.2216"
 
 -- Column definitions
 local COL = {
@@ -186,6 +198,9 @@ local CLB = {
   loaded_format = nil,
   parsed_data = nil,
 
+  -- EDL source tracking: { { name, path, event_count, visible }, ... }
+  edl_sources = {},
+
   -- Table state
   search_text = "",
   scroll_to_row = nil,
@@ -201,6 +216,7 @@ local CLB = {
 
   -- UI state
   frame_counter = 0,
+  show_sources_panel = false,
 }
 
 local ROWS = {}    -- Array of row tables
@@ -554,15 +570,35 @@ local function get_view_rows()
     return CLB.cached_rows
   end
 
+  -- Build hidden source index set
+  local hidden_src_idx = nil
+  for i, src in ipairs(CLB.edl_sources) do
+    if not src.visible then
+      hidden_src_idx = hidden_src_idx or {}
+      hidden_src_idx[i] = true
+    end
+  end
+
   local search = CLB.search_text:lower()
-  if search == "" then
+  local need_filter = search ~= "" or hidden_src_idx
+
+  if not need_filter then
     CLB.cached_rows = ROWS
   else
     local filtered = {}
     for _, row in ipairs(ROWS) do
-      if row.__search_text and row.__search_text:find(search, 1, true) then
-        filtered[#filtered + 1] = row
+      -- Source visibility filter
+      if hidden_src_idx and hidden_src_idx[row.__source_idx] then
+        goto skip
       end
+      -- Search filter
+      if search ~= "" then
+        if not (row.__search_text and row.__search_text:find(search, 1, true)) then
+          goto skip
+        end
+      end
+      filtered[#filtered + 1] = row
+      ::skip::
     end
     CLB.cached_rows = filtered
   end
@@ -577,13 +613,14 @@ end
 -- GUID counter for unique row IDs across multiple imports
 local _guid_counter = 0
 
-local function _make_rows_from_events(events, fps, is_drop)
+local function _make_rows_from_events(events, fps, is_drop, source_idx)
   local new_rows = {}
   for _, evt in ipairs(events) do
     _guid_counter = _guid_counter + 1
     local row = {
       __event_idx = _guid_counter,
       __guid = string.format("clb_%06d", _guid_counter),
+      __source_idx = source_idx or 0,
 
       event_num = evt.event_num or string.format("%03d", _guid_counter),
       reel = evt.reel or "",
@@ -614,16 +651,32 @@ local function _make_rows_from_events(events, fps, is_drop)
   return new_rows
 end
 
+--- Register an EDL source and return its index.
+local function _register_source(filepath, event_count)
+  local name = filepath:match("([^/\\]+)$") or filepath
+  local idx = #CLB.edl_sources + 1
+  CLB.edl_sources[idx] = {
+    name = name,
+    path = filepath,
+    event_count = event_count,
+    visible = true,
+  }
+  return idx
+end
+
 -- Replace all rows (fresh load)
-local function build_rows_from_parsed(parsed)
+local function build_rows_from_parsed(parsed, source_path)
   ROWS = {}
   _guid_counter = 0
+  CLB.edl_sources = {}
   if not parsed or not parsed.events then return end
 
   CLB.fps = parsed.fps or 25
   CLB.is_drop = parsed.is_drop or false
 
-  ROWS = _make_rows_from_events(parsed.events, CLB.fps, CLB.is_drop)
+  local src_idx = _register_source(
+    source_path or parsed.source_path or "?", #parsed.events)
+  ROWS = _make_rows_from_events(parsed.events, CLB.fps, CLB.is_drop, src_idx)
 
   sel_clear()
   EDIT = nil
@@ -633,14 +686,18 @@ local function build_rows_from_parsed(parsed)
   undo_snapshot()
   CLB.cached_rows = nil; CLB.cached_rows_frame = -1
 
-  console_msg(string.format("Loaded %d events from %s", #ROWS, CLB.loaded_file or "?"))
+  console_msg(string.format("Loaded %d events from %s",
+    #ROWS, CLB.edl_sources[src_idx].name))
 end
 
 -- Append rows from additional EDL (keeps existing rows)
-local function append_rows_from_parsed(parsed)
+local function append_rows_from_parsed(parsed, source_path)
   if not parsed or not parsed.events then return end
 
-  local new_rows = _make_rows_from_events(parsed.events, CLB.fps, CLB.is_drop)
+  local src_idx = _register_source(
+    source_path or parsed.source_path or "?", #parsed.events)
+  local new_rows = _make_rows_from_events(
+    parsed.events, CLB.fps, CLB.is_drop, src_idx)
   for _, row in ipairs(new_rows) do
     ROWS[#ROWS + 1] = row
   end
@@ -648,55 +705,130 @@ local function append_rows_from_parsed(parsed)
   undo_snapshot()
   CLB.cached_rows = nil; CLB.cached_rows_frame = -1
 
-  console_msg(string.format("Appended %d events (total: %d)", #new_rows, #ROWS))
+  console_msg(string.format("Appended %d events from %s (total: %d)",
+    #new_rows, CLB.edl_sources[src_idx].name, #ROWS))
 end
 
 local function load_edl_file()
-  local retval, filepath = reaper.GetUserFileNameForRead("", "Open EDL File", "*.edl")
-  if not retval or filepath == "" then return end
+  -- Collect file paths (multi-select via JS extension, fallback to single)
+  local filepaths = {}
 
-  local parsed, err = EDL.parse(filepath, { default_fps = CLB.fps })
-  if not parsed then
-    reaper.ShowMessageBox("Failed to parse EDL:\n\n" .. tostring(err), SCRIPT_NAME, 0)
-    return
+  if reaper.JS_Dialog_BrowseForOpenFiles then
+    -- JS extension available: multi-select file dialog
+    local rv, filestr = reaper.JS_Dialog_BrowseForOpenFiles(
+      "Open EDL Files", CLB.last_dir or "", "", "EDL files\0*.edl\0All files\0*.*\0", true)
+    if rv ~= 1 or not filestr or filestr == "" then return end
+
+    -- Parse null-separated result
+    local parts = {}
+    for part in (filestr .. "\0"):gmatch("([^\0]*)\0") do
+      if part ~= "" then parts[#parts + 1] = part end
+    end
+
+    if #parts == 1 then
+      -- Single file selected (full path returned directly)
+      filepaths[1] = parts[1]
+    elseif #parts > 1 then
+      -- macOS returns all full paths; Windows returns directory + filenames
+      -- Detect: if second part starts with "/" or drive letter, all are full paths
+      if parts[2]:match("^/") or parts[2]:match("^%a:\\") then
+        -- All full paths (macOS behavior)
+        for i = 1, #parts do
+          filepaths[#filepaths + 1] = parts[i]
+        end
+      else
+        -- First part is directory, rest are filenames (Windows behavior)
+        local dir = parts[1]
+        if not dir:match("[/\\]$") then dir = dir .. "/" end
+        for i = 2, #parts do
+          filepaths[#filepaths + 1] = dir .. parts[i]
+        end
+      end
+    end
+  else
+    -- Fallback: single file dialog
+    local retval, filepath = reaper.GetUserFileNameForRead("", "Open EDL File", "*.edl")
+    if not retval or filepath == "" then return end
+    filepaths[1] = filepath
   end
 
+  if #filepaths == 0 then return end
+
+  -- Parse all selected EDL files
+  local all_parsed = {}  -- { { parsed=..., path=... }, ... }
+  local errors = {}
+  for _, fp in ipairs(filepaths) do
+    local parsed, err = EDL.parse(fp, { default_fps = CLB.fps })
+    if parsed then
+      all_parsed[#all_parsed + 1] = { parsed = parsed, path = fp }
+    else
+      errors[#errors + 1] = (fp:match("([^/\\]+)$") or fp) .. ": " .. tostring(err)
+    end
+  end
+
+  -- Report any parse errors
+  if #errors > 0 then
+    reaper.ShowMessageBox(
+      "Failed to parse " .. #errors .. " file(s):\n\n" .. table.concat(errors, "\n"),
+      SCRIPT_NAME, 0)
+  end
+  if #all_parsed == 0 then return end
+
   -- Remember directory
-  CLB.last_dir = filepath:match("(.*[/\\])") or ""
+  CLB.last_dir = filepaths[1]:match("(.*[/\\])") or ""
   save_prefs()
+
+  -- Count total events
+  local total_events = 0
+  for _, ap in ipairs(all_parsed) do total_events = total_events + #ap.parsed.events end
 
   -- If rows already loaded, ask Replace or Append
   if #ROWS > 0 then
+    local file_desc = #filepaths == 1
+      and (filepaths[1]:match("([^/\\]+)$") or filepaths[1])
+      or (#filepaths .. " files")
+
     local choice = reaper.ShowMessageBox(
       string.format(
         "Current list has %d events.\n\n" ..
-        "New file: %s (%d events)\n\n" ..
+        "Loading: %s (%d events)\n\n" ..
         "Yes = Replace (clear current list)\n" ..
         "No = Append (add to current list)",
-        #ROWS,
-        filepath:match("([^/\\]+)$") or filepath,
-        #parsed.events),
+        #ROWS, file_desc, total_events),
       SCRIPT_NAME, 3)  -- 3 = Yes/No/Cancel
 
     if choice == 2 then return end  -- Cancel
 
     if choice == 6 then
       -- Yes = Replace
-      CLB.loaded_file = filepath
+      CLB.loaded_file = #filepaths == 1 and filepaths[1] or nil
       CLB.loaded_format = "EDL"
-      CLB.parsed_data = parsed
-      build_rows_from_parsed(parsed)
+      CLB.parsed_data = all_parsed[1].parsed
+      build_rows_from_parsed(all_parsed[1].parsed, all_parsed[1].path)
+      -- Append remaining files
+      for i = 2, #all_parsed do
+        append_rows_from_parsed(all_parsed[i].parsed, all_parsed[i].path)
+      end
     else
       -- No = Append
-      CLB.loaded_file = filepath  -- update to latest file
-      append_rows_from_parsed(parsed)
+      for _, ap in ipairs(all_parsed) do
+        append_rows_from_parsed(ap.parsed, ap.path)
+      end
     end
   else
-    -- First load: replace
-    CLB.loaded_file = filepath
+    -- First load: build from first, append rest
+    CLB.loaded_file = #filepaths == 1 and filepaths[1] or nil
     CLB.loaded_format = "EDL"
-    CLB.parsed_data = parsed
-    build_rows_from_parsed(parsed)
+    CLB.parsed_data = all_parsed[1].parsed
+    build_rows_from_parsed(all_parsed[1].parsed, all_parsed[1].path)
+    for i = 2, #all_parsed do
+      append_rows_from_parsed(all_parsed[i].parsed, all_parsed[i].path)
+    end
+  end
+
+  -- Summary message
+  if #all_parsed > 1 then
+    console_msg(string.format("Loaded %d EDL files (%d total events)", #all_parsed, #ROWS))
   end
 end
 
@@ -1010,7 +1142,15 @@ local function draw_toolbar()
   -- Status
   local view_rows = get_view_rows()
   local status
-  if CLB.loaded_file then
+  if #CLB.edl_sources > 0 then
+    if #CLB.edl_sources == 1 then
+      status = string.format("%s | Events: %d | Showing: %d",
+        CLB.edl_sources[1].name, #ROWS, #view_rows)
+    else
+      status = string.format("%d EDLs | Events: %d | Showing: %d",
+        #CLB.edl_sources, #ROWS, #view_rows)
+    end
+  elseif CLB.loaded_file then
     local filename = CLB.loaded_file:match("([^/\\]+)$") or CLB.loaded_file
     status = string.format("%s | Events: %d | Showing: %d",
       filename, #ROWS, #view_rows)
@@ -1019,6 +1159,15 @@ local function draw_toolbar()
   end
   reaper.ImGui_Text(ctx, status)
   reaper.ImGui_SameLine(ctx)
+
+  -- Sources toggle button (only show when files are loaded)
+  if #CLB.edl_sources > 0 then
+    local src_label = CLB.show_sources_panel and "Sources <<" or "Sources >>"
+    if reaper.ImGui_SmallButton(ctx, src_label .. "##clb_src_toggle") then
+      CLB.show_sources_panel = not CLB.show_sources_panel
+    end
+    reaper.ImGui_SameLine(ctx)
+  end
 
   -- Search
   reaper.ImGui_Text(ctx, "|")
@@ -1154,6 +1303,45 @@ local function draw_toolbar()
   -- Export EDL button
   if reaper.ImGui_Button(ctx, "Export EDL", scale(90), scale(24)) then
     export_edl()
+  end
+end
+
+---------------------------------------------------------------------------
+-- Draw: Sources Panel
+---------------------------------------------------------------------------
+local function draw_sources_panel()
+  if not CLB.show_sources_panel or #CLB.edl_sources == 0 then return end
+
+  reaper.ImGui_Separator(ctx)
+
+  -- Count visible/hidden
+  local visible_count = 0
+  for _, src in ipairs(CLB.edl_sources) do
+    if src.visible then visible_count = visible_count + 1 end
+  end
+
+  reaper.ImGui_Text(ctx, string.format("Loaded EDL Sources (%d):", #CLB.edl_sources))
+  reaper.ImGui_SameLine(ctx)
+
+  -- Show All / Hide All buttons (always rendered to keep stable layout)
+  if reaper.ImGui_SmallButton(ctx, "Show All##clb_src_all") then
+    for _, src in ipairs(CLB.edl_sources) do src.visible = true end
+    CLB.cached_rows = nil; CLB.cached_rows_frame = -1
+  end
+  reaper.ImGui_SameLine(ctx)
+  if reaper.ImGui_SmallButton(ctx, "Hide All##clb_src_none") then
+    for _, src in ipairs(CLB.edl_sources) do src.visible = false end
+    CLB.cached_rows = nil; CLB.cached_rows_frame = -1
+  end
+
+  -- List each source with checkbox
+  for i, src in ipairs(CLB.edl_sources) do
+    local label = string.format("%s (%d events)##clb_src_%d", src.name, src.event_count, i)
+    local changed, new_val = reaper.ImGui_Checkbox(ctx, label, src.visible)
+    if changed then
+      src.visible = new_val
+      CLB.cached_rows = nil; CLB.cached_rows_frame = -1
+    end
   end
 end
 
@@ -1376,6 +1564,10 @@ local function loop()
   if visible then
     -- Toolbar
     draw_toolbar()
+
+    -- Sources panel (collapsible, between toolbar and table)
+    draw_sources_panel()
+
     reaper.ImGui_Separator(ctx)
 
     -- Table
