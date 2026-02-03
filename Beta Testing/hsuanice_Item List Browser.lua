@@ -1,6 +1,6 @@
 --[[
 @description Item List Browser
-@version 260203.0140
+@version 260203.1230
 @author hsuanice
 @about
   A project-wide media browser that shows ALL items in the project with full
@@ -54,6 +54,15 @@
 
 
 @changelog
+  v260203.1230
+  - UX: Compact row display with "Expand Rows" toggle
+    • Affects multiline columns: Item Note (col 5) and Description (col 21)
+    • Default (OFF): shows only the first line, appends "..." if content is multiline
+    • Hover tooltip: always shows full content when hovering over truncated cells
+    • "Expand Rows" checkbox in toolbar restores full multiline display
+    • Setting persists across sessions via ExtState
+    • Double-click editing unchanged (always opens full multiline editor)
+
   v260203.0140
   - Fix: ListClipper pointer validation prevents crash and "Missing EndTable()" cascade
     • ListClipper pointer can become stale after context state changes (dock/undock, GC)
@@ -1821,6 +1830,7 @@ local POPUP_TITLE = "Summary"
 -- Forward declarations so load_prefs() updates the same locals (not globals)
 local TIME_MODE, CUSTOM_PATTERN, FORMAT, AUTO, FONT_SCALE
 local SHOW_MUTED_ITEMS      -- whether to show muted rows
+local EXPAND_ROWS = false  -- false = single-line truncated, true = full multiline
 local scan_selection_rows
 local scan_all_project_rows  -- ILB: forward decl, defined after get_all_project_items
 local refresh_now
@@ -1943,6 +1953,7 @@ local function save_prefs()
   reaper.SetExtState(EXT_NS, "debug_mode", DEBUG and "1" or "0", true)
   -- ILB prefs
   reaper.SetExtState(EXT_NS, "follow_selection", ILB.follow and "1" or "0", true)
+  reaper.SetExtState(EXT_NS, "expand_rows", EXPAND_ROWS and "1" or "0", true)
 end
 
 -- ===== BEGIN Column Presets (named) =====
@@ -2317,6 +2328,10 @@ local function load_prefs()
   -- restore follow selection preference (ILB)
   local fsel = reaper.GetExtState(EXT_NS, "follow_selection")
   if fsel == "1" then ILB.follow = true elseif fsel == "0" then ILB.follow = false end
+
+  -- restore expand notes preference (ILB)
+  local en = reaper.GetExtState(EXT_NS, "expand_rows")
+  if en == "1" then EXPAND_ROWS = true elseif en == "0" then EXPAND_ROWS = false end
 
   -- Column presets (named) — initialize index and optionally recall last active
   presets_init()
@@ -4533,6 +4548,16 @@ if changed then
   ILB.cached_rows = nil; ILB.cached_rows_frame = -1
 end
 
+-- Expand Notes (show full multiline Item Note vs single-line truncated)
+do
+  local chg_en, nv_en = reaper.ImGui_Checkbox(ctx, "Expand Rows", EXPAND_ROWS)
+  reaper.ImGui_SameLine(ctx)
+  if chg_en then
+    EXPAND_ROWS = nv_en
+    save_prefs()
+  end
+end
+
 -- ILB: Only Selected filter
 do
   local chg_os, nv_os = reaper.ImGui_Checkbox(ctx, "Only Selected", ILB.only_selected)
@@ -5689,10 +5714,21 @@ local function draw_table(rows, height)
           local editing = (EDIT and EDIT.row == r and EDIT.col == 5)
           local sel = sel_has(r.__item_guid, 5)
           if not editing then
-            -- Show full multiline content (auto-wrap like Description)
+            -- Display: truncated single-line (default) or full multiline (Expand Notes)
             local display_txt = note_txt
+            local is_multiline = note_txt:find("\n") ~= nil
+            if not EXPAND_ROWS and is_multiline then
+              display_txt = note_txt:match("^([^\n]*)") or ""
+              if display_txt ~= note_txt then display_txt = display_txt .. "..." end
+            end
             if display_txt == "" then display_txt = " " end
             reaper.ImGui_Selectable(ctx, display_txt.."##note", sel, reaper.ImGui_SelectableFlags_AllowOverlap())
+            -- Tooltip: always show full content on hover (when multiline or truncated)
+            if reaper.ImGui_IsItemHovered(ctx) and is_multiline and note_txt ~= "" then
+              reaper.ImGui_BeginTooltip(ctx)
+              reaper.ImGui_Text(ctx, note_txt)
+              reaper.ImGui_EndTooltip(ctx)
+            end
             if reaper.ImGui_IsItemClicked(ctx) then handle_cell_click(r.__item_guid, 5) end
             if reaper.ImGui_IsItemHovered(ctx) and reaper.ImGui_IsMouseDoubleClicked(ctx, 0) and TABLE_SOURCE=="live" then
               EDIT = { row = r, col = 5, buf = note_txt, want_focus = true }
@@ -5790,8 +5826,21 @@ local function draw_table(rows, height)
           if reaper.ImGui_IsItemClicked(ctx) then handle_cell_click(r.__item_guid, 20) end
 
         elseif col == 21 then
-          local t = tostring(r.description or ""); local sel = sel_has(r.__item_guid, 21)
-          reaper.ImGui_Selectable(ctx, (t ~= "" and t or " ").."##c21", sel)
+          local desc_txt = tostring(r.description or "")
+          local sel = sel_has(r.__item_guid, 21)
+          local desc_multiline = desc_txt:find("\n") ~= nil
+          local display_desc = desc_txt
+          if not EXPAND_ROWS and desc_multiline then
+            display_desc = desc_txt:match("^([^\n]*)") or ""
+            if display_desc ~= desc_txt then display_desc = display_desc .. "..." end
+          end
+          if display_desc == "" then display_desc = " " end
+          reaper.ImGui_Selectable(ctx, display_desc.."##c21", sel)
+          if reaper.ImGui_IsItemHovered(ctx) and desc_multiline and desc_txt ~= "" then
+            reaper.ImGui_BeginTooltip(ctx)
+            reaper.ImGui_Text(ctx, desc_txt)
+            reaper.ImGui_EndTooltip(ctx)
+          end
           if reaper.ImGui_IsItemClicked(ctx) then handle_cell_click(r.__item_guid, 21) end
 
         elseif col == 22 then
