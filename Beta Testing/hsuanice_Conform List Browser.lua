@@ -1,0 +1,1406 @@
+--[[
+@description Conform List Browser
+@version 260203.1845
+@author hsuanice
+@about
+  A REAPER script for browsing and editing EDL (Edit Decision List) data
+  with a spreadsheet-style table UI, based on the Item List Browser framework.
+
+  Reads CMX3600 EDL files, displays events in an editable table, and can
+  generate empty items with metadata on REAPER tracks for conform workflows.
+
+  Workflow:
+    1. Load EDL file -> events display in table
+    2. Browse, filter, sort, and edit metadata fields
+    3. Generate empty items on REAPER tracks at absolute TC positions
+    4. Use a separate reconform script to relink original audio files
+
+  Features:
+    - CMX3600 EDL parser (TITLE, FCM, events, comments)
+    - 13-column table: Event#, Reel, Track, Edit Type, Dissolve Len,
+      Source TC In/Out, Record TC In/Out, Duration, Clip Name, Source File, Notes
+    - All fields editable (except Event# and Duration)
+    - Excel-like selection (click, Shift+rectangle, Cmd/Ctrl multi-select)
+    - Copy/Paste with TSV clipboard support
+    - Multi-level sorting (click headers, Shift+click for secondary)
+    - Text search filter (case-insensitive across all fields)
+    - Generate empty items on REAPER tracks with P_EXT metadata
+    - Configurable track name format with token expansion
+    - Absolute timecode positioning on REAPER timeline
+    - Export edited EDL back to CMX3600 format
+    - Font size adjustment (50% - 300%)
+    - Column presets (save/load visible column configurations)
+
+  Future: XML format support (Premiere, FCPX, FCP7, Resolve, Nuendo)
+
+  Requires: ReaImGui (install via ReaPack)
+
+@changelog
+  v260203.1845
+  - Fix: Single vertical scrollbar (table only, no duplicate window scrollbar)
+    • Window now uses NoScrollbar + NoScrollWithMouse flags
+    • Table height correctly uses available height from GetContentRegionAvail
+  - Fix: Selection highlight uses ImGui_Selectable instead of DrawList
+    • Resolves ImGui_GetColumnWidth nil error and Missing EndTable cascade
+
+  v260203.1500
+  - Initial release: CMX3600 EDL parser, table UI, item generation, EDL export
+--]]
+
+---------------------------------------------------------------------------
+-- Library loading
+---------------------------------------------------------------------------
+local info = debug.getinfo(1, "S")
+local script_path = info.source:match("@?(.*[/\\])")
+local lib_path = script_path:gsub("[/\\]Beta Testing[/\\]$", "/Library/")
+
+-- EDL Parser
+local EDL_PARSER_PATH = lib_path .. "hsuanice_EDL Parser.lua"
+local ok_edl, EDL = pcall(dofile, EDL_PARSER_PATH)
+if not ok_edl then
+  reaper.ShowMessageBox(
+    "Cannot load EDL Parser library.\n\nExpected at:\n" .. EDL_PARSER_PATH ..
+    "\n\nError: " .. tostring(EDL),
+    "Conform List Browser", 0)
+  return
+end
+
+-- List Table (optional, for clipboard/export helpers)
+local LT_PATH = lib_path .. "hsuanice_List Table.lua"
+local ok_lt, LT = pcall(dofile, LT_PATH)
+if not ok_lt then LT = nil end
+
+-- Time Format (optional, for time display)
+local TF_PATH = lib_path .. "hsuanice_Time Format.lua"
+local ok_tf, TFLib = pcall(dofile, TF_PATH)
+if not ok_tf then TFLib = nil end
+
+---------------------------------------------------------------------------
+-- ReaImGui check
+---------------------------------------------------------------------------
+if not reaper.ImGui_CreateContext then
+  reaper.ShowMessageBox(
+    "This script requires ReaImGui.\nPlease install it via ReaPack.",
+    "Conform List Browser", 0)
+  return
+end
+
+---------------------------------------------------------------------------
+-- Constants
+---------------------------------------------------------------------------
+local SCRIPT_NAME = "Conform List Browser"
+local EXT_NS = "hsuanice_ConformListBrowser"
+local VERSION = "260203.1845"
+
+-- Column definitions
+local COL = {
+  EVENT     = 1,
+  REEL      = 2,
+  TRACK     = 3,
+  EDIT_TYPE = 4,
+  DISS_LEN  = 5,
+  SRC_IN    = 6,
+  SRC_OUT   = 7,
+  REC_IN    = 8,
+  REC_OUT   = 9,
+  DURATION  = 10,
+  CLIP_NAME = 11,
+  SRC_FILE  = 12,
+  NOTES     = 13,
+}
+
+local COL_COUNT = 13
+
+local HEADER_LABELS = {
+  [1]  = "#",
+  [2]  = "Reel",
+  [3]  = "Track",
+  [4]  = "Edit",
+  [5]  = "Diss",
+  [6]  = "Src TC In",
+  [7]  = "Src TC Out",
+  [8]  = "Rec TC In",
+  [9]  = "Rec TC Out",
+  [10] = "Duration",
+  [11] = "Clip Name",
+  [12] = "Source File",
+  [13] = "Notes",
+}
+
+local DEFAULT_COL_WIDTH = {
+  [1]  = 40,
+  [2]  = 100,
+  [3]  = 50,
+  [4]  = 45,
+  [5]  = 45,
+  [6]  = 100,
+  [7]  = 100,
+  [8]  = 100,
+  [9]  = 100,
+  [10] = 85,
+  [11] = 300,
+  [12] = 300,
+  [13] = 200,
+}
+
+-- Editable columns (all except Event# and Duration)
+local EDITABLE_COLS = {
+  [COL.REEL] = true,
+  [COL.TRACK] = true,
+  [COL.EDIT_TYPE] = true,
+  [COL.DISS_LEN] = true,
+  [COL.SRC_IN] = true,
+  [COL.SRC_OUT] = true,
+  [COL.REC_IN] = true,
+  [COL.REC_OUT] = true,
+  [COL.CLIP_NAME] = true,
+  [COL.SRC_FILE] = true,
+  [COL.NOTES] = true,
+}
+
+-- TC columns (need TC validation)
+local TC_COLS = {
+  [COL.SRC_IN] = true,
+  [COL.SRC_OUT] = true,
+  [COL.REC_IN] = true,
+  [COL.REC_OUT] = true,
+}
+
+---------------------------------------------------------------------------
+-- State
+---------------------------------------------------------------------------
+local ctx -- ImGui context
+local list_clipper
+
+local CLB = {
+  -- File state
+  loaded_file = nil,
+  loaded_format = nil,
+  parsed_data = nil,
+
+  -- Table state
+  search_text = "",
+  scroll_to_row = nil,
+  visible_range = { first = 0, last = 0 },
+  cached_rows = nil,
+  cached_rows_frame = -1,
+
+  -- Settings
+  fps = 25,
+  is_drop = false,
+  track_name_format = "${format} - ${track}",
+  last_dir = "",
+
+  -- UI state
+  frame_counter = 0,
+}
+
+local ROWS = {}    -- Array of row tables
+local EDIT = nil   -- { row_idx, col_id, buf, want_focus }
+
+-- Selection model
+local SEL = {
+  cells = {},             -- set: ["guid:col_id"] = true
+  anchor = nil,           -- { guid, col } or nil
+}
+
+-- Sort state
+local SORT_STATE = {
+  columns = {},           -- Array of { col_id, ascending }
+}
+
+-- Console
+local CONSOLE = { enabled = false }
+local DEBUG = false
+
+-- Undo stack (in-memory, for table edits)
+local UNDO_STACK = {}
+local UNDO_POS = 0
+local MAX_UNDO = 100
+
+-- Font
+local current_font_size = 13
+local font_pushed_this_frame = false
+local FONT_SCALE = 1.0
+local ALLOW_DOCKING = false
+
+---------------------------------------------------------------------------
+-- Font size
+---------------------------------------------------------------------------
+local function set_font_size(size)
+  current_font_size = size or 13
+end
+
+local function get_ui_scale()
+  return current_font_size / 13.0
+end
+
+local function scale(value)
+  return math.floor(value * get_ui_scale())
+end
+
+---------------------------------------------------------------------------
+-- Console helpers
+---------------------------------------------------------------------------
+local function console_msg(msg)
+  if CONSOLE.enabled then
+    reaper.ShowConsoleMsg("[CLB] " .. tostring(msg) .. "\n")
+  end
+end
+
+---------------------------------------------------------------------------
+-- Column widths
+---------------------------------------------------------------------------
+local COL_WIDTH = {}
+for k, v in pairs(DEFAULT_COL_WIDTH) do
+  COL_WIDTH[k] = v
+end
+
+---------------------------------------------------------------------------
+-- Preferences
+---------------------------------------------------------------------------
+local function save_prefs()
+  reaper.SetExtState(EXT_NS, "font_scale", tostring(FONT_SCALE or 1.0), true)
+  reaper.SetExtState(EXT_NS, "fps", tostring(CLB.fps or 25), true)
+  reaper.SetExtState(EXT_NS, "track_name_format", CLB.track_name_format or "${format} - ${track}", true)
+  reaper.SetExtState(EXT_NS, "last_dir", CLB.last_dir or "", true)
+  reaper.SetExtState(EXT_NS, "console_output", CONSOLE.enabled and "1" or "0", true)
+  reaper.SetExtState(EXT_NS, "debug_mode", DEBUG and "1" or "0", true)
+  reaper.SetExtState(EXT_NS, "allow_docking", ALLOW_DOCKING and "1" or "0", true)
+end
+
+local function load_prefs()
+  local function get(key, default)
+    if reaper.HasExtState(EXT_NS, key) then
+      return reaper.GetExtState(EXT_NS, key)
+    end
+    return default
+  end
+
+  FONT_SCALE = tonumber(get("font_scale", "1.0")) or 1.0
+  CLB.fps = tonumber(get("fps", "25")) or 25
+  CLB.track_name_format = get("track_name_format", "${format} - ${track}")
+  CLB.last_dir = get("last_dir", "")
+  CONSOLE.enabled = get("console_output", "0") == "1"
+  DEBUG = get("debug_mode", "0") == "1"
+  ALLOW_DOCKING = get("allow_docking", "0") == "1"
+
+  -- Apply font
+  set_font_size(math.floor(13 * FONT_SCALE))
+end
+
+---------------------------------------------------------------------------
+-- Selection helpers
+---------------------------------------------------------------------------
+local function sel_key(guid, col_id)
+  return guid .. ":" .. tostring(col_id)
+end
+
+local function sel_clear()
+  SEL.cells = {}
+  SEL.anchor = nil
+end
+
+local function sel_add(guid, col_id)
+  SEL.cells[sel_key(guid, col_id)] = true
+end
+
+local function sel_remove(guid, col_id)
+  SEL.cells[sel_key(guid, col_id)] = nil
+end
+
+local function sel_has(guid, col_id)
+  return SEL.cells[sel_key(guid, col_id)] == true
+end
+
+local function sel_toggle(guid, col_id)
+  local k = sel_key(guid, col_id)
+  if SEL.cells[k] then
+    SEL.cells[k] = nil
+  else
+    SEL.cells[k] = true
+  end
+end
+
+local function sel_set_single(guid, col_id)
+  sel_clear()
+  sel_add(guid, col_id)
+  SEL.anchor = { guid = guid, col = col_id }
+end
+
+-- Rectangle selection (Shift+Click)
+local function sel_rect(guid_from, col_from, guid_to, col_to)
+  -- Find row indices
+  local idx_from, idx_to
+  for i, row in ipairs(ROWS) do
+    if row.__guid == guid_from then idx_from = i end
+    if row.__guid == guid_to then idx_to = i end
+  end
+  if not idx_from or not idx_to then return end
+
+  local r1, r2 = math.min(idx_from, idx_to), math.max(idx_from, idx_to)
+  local c1, c2 = math.min(col_from, col_to), math.max(col_from, col_to)
+
+  sel_clear()
+  for i = r1, r2 do
+    for c = c1, c2 do
+      sel_add(ROWS[i].__guid, c)
+    end
+  end
+end
+
+---------------------------------------------------------------------------
+-- Undo stack (in-memory, for table edits)
+---------------------------------------------------------------------------
+local function undo_snapshot()
+  -- Deep copy current ROWS data (only editable fields)
+  local snapshot = {}
+  for i, row in ipairs(ROWS) do
+    snapshot[i] = {
+      reel = row.reel,
+      track = row.track,
+      edit_type = row.edit_type,
+      dissolve_len = row.dissolve_len,
+      src_tc_in = row.src_tc_in,
+      src_tc_out = row.src_tc_out,
+      rec_tc_in = row.rec_tc_in,
+      rec_tc_out = row.rec_tc_out,
+      clip_name = row.clip_name,
+      source_file = row.source_file,
+      notes = row.notes,
+    }
+  end
+
+  -- Trim redo history
+  while #UNDO_STACK > UNDO_POS do
+    table.remove(UNDO_STACK)
+  end
+
+  UNDO_STACK[#UNDO_STACK + 1] = snapshot
+  if #UNDO_STACK > MAX_UNDO then
+    table.remove(UNDO_STACK, 1)
+  end
+  UNDO_POS = #UNDO_STACK
+end
+
+local function undo_restore(snapshot)
+  for i, saved in ipairs(snapshot) do
+    if ROWS[i] then
+      for k, v in pairs(saved) do
+        ROWS[i][k] = v
+      end
+      -- Recompute duration
+      local ri_sec = EDL.tc_to_seconds(ROWS[i].rec_tc_in, CLB.fps, CLB.is_drop)
+      local ro_sec = EDL.tc_to_seconds(ROWS[i].rec_tc_out, CLB.fps, CLB.is_drop)
+      ROWS[i].duration = EDL.seconds_to_tc(ro_sec - ri_sec, CLB.fps, CLB.is_drop)
+      -- Rebuild search text
+      ROWS[i].__search_text = table.concat({
+        ROWS[i].event_num or "", ROWS[i].reel or "", ROWS[i].track or "",
+        ROWS[i].clip_name or "", ROWS[i].source_file or "", ROWS[i].notes or "",
+      }, " "):lower()
+    end
+  end
+end
+
+local function do_undo()
+  if UNDO_POS <= 1 then return end
+  UNDO_POS = UNDO_POS - 1
+  undo_restore(UNDO_STACK[UNDO_POS])
+  CLB.cached_rows = nil; CLB.cached_rows_frame = -1
+  console_msg("Undo")
+end
+
+local function do_redo()
+  if UNDO_POS >= #UNDO_STACK then return end
+  UNDO_POS = UNDO_POS + 1
+  undo_restore(UNDO_STACK[UNDO_POS])
+  CLB.cached_rows = nil; CLB.cached_rows_frame = -1
+  console_msg("Redo")
+end
+
+---------------------------------------------------------------------------
+-- Row data helpers
+---------------------------------------------------------------------------
+
+-- Get cell text for display
+local function get_cell_text(row, col_id)
+  if not row then return "" end
+  if col_id == COL.EVENT     then return row.event_num or "" end
+  if col_id == COL.REEL      then return row.reel or "" end
+  if col_id == COL.TRACK     then return row.track or "" end
+  if col_id == COL.EDIT_TYPE then return row.edit_type or "" end
+  if col_id == COL.DISS_LEN  then
+    return row.dissolve_len and tostring(row.dissolve_len) or ""
+  end
+  if col_id == COL.SRC_IN    then return row.src_tc_in or "" end
+  if col_id == COL.SRC_OUT   then return row.src_tc_out or "" end
+  if col_id == COL.REC_IN    then return row.rec_tc_in or "" end
+  if col_id == COL.REC_OUT   then return row.rec_tc_out or "" end
+  if col_id == COL.DURATION  then return row.duration or "" end
+  if col_id == COL.CLIP_NAME then return row.clip_name or "" end
+  if col_id == COL.SRC_FILE  then return row.source_file or "" end
+  if col_id == COL.NOTES     then return row.notes or "" end
+  return ""
+end
+
+-- Set cell value (with undo)
+local function set_cell_value(row, col_id, value)
+  if not row or not EDITABLE_COLS[col_id] then return false end
+
+  if col_id == COL.REEL      then row.reel = value
+  elseif col_id == COL.TRACK     then row.track = value
+  elseif col_id == COL.EDIT_TYPE then row.edit_type = value
+  elseif col_id == COL.DISS_LEN  then row.dissolve_len = tonumber(value)
+  elseif col_id == COL.SRC_IN    then row.src_tc_in = value
+  elseif col_id == COL.SRC_OUT   then row.src_tc_out = value
+  elseif col_id == COL.REC_IN    then row.rec_tc_in = value
+  elseif col_id == COL.REC_OUT   then row.rec_tc_out = value
+  elseif col_id == COL.CLIP_NAME then row.clip_name = value
+  elseif col_id == COL.SRC_FILE  then row.source_file = value
+  elseif col_id == COL.NOTES     then row.notes = value
+  else return false end
+
+  -- Recompute duration if TC changed
+  if TC_COLS[col_id] then
+    local ri_sec = EDL.tc_to_seconds(row.rec_tc_in, CLB.fps, CLB.is_drop)
+    local ro_sec = EDL.tc_to_seconds(row.rec_tc_out, CLB.fps, CLB.is_drop)
+    row.duration = EDL.seconds_to_tc(ro_sec - ri_sec, CLB.fps, CLB.is_drop)
+  end
+
+  -- Rebuild search text
+  row.__search_text = table.concat({
+    row.event_num or "", row.reel or "", row.track or "",
+    row.clip_name or "", row.source_file or "", row.notes or "",
+  }, " "):lower()
+
+  return true
+end
+
+-- Get sort value for sorting
+local function get_sort_value(row, col_id)
+  if not row then return "" end
+  local val = get_cell_text(row, col_id)
+  -- TC columns: convert to seconds for numeric sort
+  if TC_COLS[col_id] or col_id == COL.DURATION then
+    return EDL.tc_to_seconds(val, CLB.fps, CLB.is_drop)
+  end
+  -- Event#: numeric
+  if col_id == COL.EVENT then return tonumber(val) or 0 end
+  -- Dissolve len: numeric
+  if col_id == COL.DISS_LEN then return tonumber(val) or 0 end
+  return val:lower()
+end
+
+---------------------------------------------------------------------------
+-- Sorting
+---------------------------------------------------------------------------
+local function sort_rows()
+  if #SORT_STATE.columns == 0 then return end
+
+  table.sort(ROWS, function(a, b)
+    for _, sc in ipairs(SORT_STATE.columns) do
+      local va = get_sort_value(a, sc.col_id)
+      local vb = get_sort_value(b, sc.col_id)
+      if va ~= vb then
+        if sc.ascending then
+          return va < vb
+        else
+          return va > vb
+        end
+      end
+    end
+    return false
+  end)
+
+  CLB.cached_rows = nil; CLB.cached_rows_frame = -1
+end
+
+local function toggle_sort(col_id, add_level)
+  if add_level then
+    -- Shift+Click: add or toggle existing level
+    for _, sc in ipairs(SORT_STATE.columns) do
+      if sc.col_id == col_id then
+        sc.ascending = not sc.ascending
+        sort_rows()
+        return
+      end
+    end
+    SORT_STATE.columns[#SORT_STATE.columns + 1] = { col_id = col_id, ascending = true }
+  else
+    -- Click: replace sort
+    local was_asc = nil
+    if #SORT_STATE.columns == 1 and SORT_STATE.columns[1].col_id == col_id then
+      was_asc = SORT_STATE.columns[1].ascending
+    end
+    SORT_STATE.columns = { { col_id = col_id, ascending = was_asc == nil and true or not was_asc } }
+  end
+  sort_rows()
+end
+
+---------------------------------------------------------------------------
+-- Filtering
+---------------------------------------------------------------------------
+local function get_view_rows()
+  local frame = CLB.frame_counter
+  if CLB.cached_rows and CLB.cached_rows_frame == frame then
+    return CLB.cached_rows
+  end
+
+  local search = CLB.search_text:lower()
+  if search == "" then
+    CLB.cached_rows = ROWS
+  else
+    local filtered = {}
+    for _, row in ipairs(ROWS) do
+      if row.__search_text and row.__search_text:find(search, 1, true) then
+        filtered[#filtered + 1] = row
+      end
+    end
+    CLB.cached_rows = filtered
+  end
+
+  CLB.cached_rows_frame = frame
+  return CLB.cached_rows
+end
+
+---------------------------------------------------------------------------
+-- File loading
+---------------------------------------------------------------------------
+local function build_rows_from_parsed(parsed)
+  ROWS = {}
+  if not parsed or not parsed.events then return end
+
+  CLB.fps = parsed.fps or 25
+  CLB.is_drop = parsed.is_drop or false
+
+  for i, evt in ipairs(parsed.events) do
+    local row = {
+      __event_idx = i,
+      __guid = string.format("clb_%03d", i),
+
+      event_num = evt.event_num or string.format("%03d", i),
+      reel = evt.reel or "",
+      track = evt.track or "",
+      edit_type = evt.edit_type or "C",
+      dissolve_len = evt.dissolve_len,
+      src_tc_in = evt.src_tc_in or "00:00:00:00",
+      src_tc_out = evt.src_tc_out or "00:00:00:00",
+      rec_tc_in = evt.rec_tc_in or "00:00:00:00",
+      rec_tc_out = evt.rec_tc_out or "00:00:00:00",
+      clip_name = evt.clip_name or "",
+      source_file = evt.source_file or "",
+      notes = "",
+
+      duration = evt.duration_tc or "00:00:00:00",
+    }
+
+    -- Build search text
+    row.__search_text = table.concat({
+      row.event_num, row.reel, row.track,
+      row.clip_name, row.source_file, row.notes,
+    }, " "):lower()
+
+    ROWS[#ROWS + 1] = row
+  end
+
+  -- Reset state
+  sel_clear()
+  EDIT = nil
+  SORT_STATE.columns = {}
+  UNDO_STACK = {}
+  UNDO_POS = 0
+  undo_snapshot()  -- Initial state
+  CLB.cached_rows = nil; CLB.cached_rows_frame = -1
+
+  console_msg(string.format("Loaded %d events from %s", #ROWS, CLB.loaded_file or "?"))
+end
+
+local function load_edl_file()
+  local retval, filepath = reaper.GetUserFileNameForRead("", "Open EDL File", "*.edl")
+  if not retval or filepath == "" then return end
+
+  local parsed, err = EDL.parse(filepath, { default_fps = CLB.fps })
+  if not parsed then
+    reaper.ShowMessageBox("Failed to parse EDL:\n\n" .. tostring(err), SCRIPT_NAME, 0)
+    return
+  end
+
+  CLB.loaded_file = filepath
+  CLB.loaded_format = "EDL"
+  CLB.parsed_data = parsed
+
+  -- Remember directory
+  CLB.last_dir = filepath:match("(.*[/\\])") or ""
+  save_prefs()
+
+  build_rows_from_parsed(parsed)
+end
+
+---------------------------------------------------------------------------
+-- Generate Items
+---------------------------------------------------------------------------
+local function generate_items()
+  if #ROWS == 0 then
+    reaper.ShowMessageBox("No events loaded. Load an EDL file first.", SCRIPT_NAME, 0)
+    return
+  end
+
+  -- Collect unique tracks
+  local track_names = {}
+  local track_order = {}
+  for _, row in ipairs(ROWS) do
+    local t = row.track or "A1"
+    if not track_names[t] then
+      track_names[t] = true
+      track_order[#track_order + 1] = t
+    end
+  end
+
+  -- Confirmation
+  local msg = string.format(
+    "Generate %d empty items on %d track(s)?\n\n" ..
+    "Tracks: %s\n" ..
+    "FPS: %s%s\n\n" ..
+    "Items will be placed at absolute timecode positions.",
+    #ROWS, #track_order,
+    table.concat(track_order, ", "),
+    tostring(CLB.fps),
+    CLB.is_drop and " (Drop Frame)" or ""
+  )
+  if reaper.ShowMessageBox(msg, SCRIPT_NAME, 1) ~= 1 then return end
+
+  reaper.Undo_BeginBlock()
+  reaper.PreventUIRefresh(1)
+
+  -- Create or find tracks by name
+  local track_map = {}  -- track_field -> MediaTrack*
+  local existing_count = reaper.CountTracks(0)
+
+  for _, t in ipairs(track_order) do
+    local tokens = {
+      format = CLB.loaded_format or "EDL",
+      track = t,
+      title = (CLB.parsed_data and CLB.parsed_data.title) or "",
+    }
+    local name = EDL.expand_template(CLB.track_name_format, tokens)
+
+    -- Search existing tracks first
+    local found = nil
+    for ti = 0, reaper.CountTracks(0) - 1 do
+      local tr = reaper.GetTrack(0, ti)
+      local _, tr_name = reaper.GetTrackName(tr)
+      if tr_name == name then
+        found = tr
+        break
+      end
+    end
+
+    if not found then
+      -- Create new track
+      reaper.InsertTrackAtIndex(reaper.CountTracks(0), true)
+      found = reaper.GetTrack(0, reaper.CountTracks(0) - 1)
+      reaper.GetSetMediaTrackInfo_String(found, "P_NAME", name, true)
+    end
+
+    track_map[t] = found
+  end
+
+  -- Create items
+  local created = 0
+  for _, row in ipairs(ROWS) do
+    local tr = track_map[row.track or "A1"]
+    if not tr then tr = track_map[track_order[1]] end
+    if not tr then goto continue end
+
+    local pos = EDL.tc_to_seconds(row.rec_tc_in, CLB.fps, CLB.is_drop)
+    local pos_out = EDL.tc_to_seconds(row.rec_tc_out, CLB.fps, CLB.is_drop)
+    local length = pos_out - pos
+    if length <= 0 then length = 0.001 end  -- minimum length
+
+    local item = reaper.AddMediaItemToTrack(tr)
+    reaper.SetMediaItemInfo_Value(item, "D_POSITION", pos)
+    reaper.SetMediaItemInfo_Value(item, "D_LENGTH", length)
+
+    local take = reaper.AddTakeToMediaItem(item)
+    if take then
+      -- Take name = clip name
+      reaper.GetSetMediaItemTakeInfo_String(take, "P_NAME", row.clip_name or "", true)
+
+      -- Store all metadata as P_EXT fields
+      reaper.GetSetMediaItemTakeInfo_String(take, "P_EXT:CLB_EVENT", row.event_num or "", true)
+      reaper.GetSetMediaItemTakeInfo_String(take, "P_EXT:CLB_REEL", row.reel or "", true)
+      reaper.GetSetMediaItemTakeInfo_String(take, "P_EXT:CLB_TRACK", row.track or "", true)
+      reaper.GetSetMediaItemTakeInfo_String(take, "P_EXT:CLB_EDIT_TYPE", row.edit_type or "", true)
+      reaper.GetSetMediaItemTakeInfo_String(take, "P_EXT:CLB_SRC_TC_IN", row.src_tc_in or "", true)
+      reaper.GetSetMediaItemTakeInfo_String(take, "P_EXT:CLB_SRC_TC_OUT", row.src_tc_out or "", true)
+      reaper.GetSetMediaItemTakeInfo_String(take, "P_EXT:CLB_REC_TC_IN", row.rec_tc_in or "", true)
+      reaper.GetSetMediaItemTakeInfo_String(take, "P_EXT:CLB_REC_TC_OUT", row.rec_tc_out or "", true)
+      reaper.GetSetMediaItemTakeInfo_String(take, "P_EXT:CLB_SOURCE_FILE", row.source_file or "", true)
+      if row.notes and row.notes ~= "" then
+        reaper.GetSetMediaItemTakeInfo_String(take, "P_EXT:CLB_NOTES", row.notes, true)
+      end
+    end
+
+    created = created + 1
+    ::continue::
+  end
+
+  reaper.PreventUIRefresh(-1)
+  reaper.UpdateArrange()
+  reaper.Undo_EndBlock("CLB: Generate " .. created .. " conform items", -1)
+
+  reaper.ShowMessageBox(
+    string.format("Generated %d empty items on %d track(s).", created, #track_order),
+    SCRIPT_NAME, 0)
+end
+
+---------------------------------------------------------------------------
+-- Export EDL
+---------------------------------------------------------------------------
+local function export_edl()
+  if #ROWS == 0 then
+    reaper.ShowMessageBox("No events to export.", SCRIPT_NAME, 0)
+    return
+  end
+
+  local retval, filepath
+  if reaper.JS_Dialog_BrowseForSaveFile then
+    retval, filepath = reaper.JS_Dialog_BrowseForSaveFile(
+      "Export EDL", CLB.last_dir or "", "export.edl", "EDL Files\0*.edl\0\0")
+    if not retval or retval == 0 or not filepath or filepath == "" then return end
+  else
+    -- Fallback if JS extension not available
+    retval, filepath = reaper.GetUserFileNameForRead("", "Export EDL (choose or type filename)", "*.edl")
+    if not retval or not filepath or filepath == "" then return end
+  end
+
+  -- Build export data structure
+  local export_data = {
+    title = (CLB.parsed_data and CLB.parsed_data.title) or "Untitled",
+    fcm = (CLB.parsed_data and CLB.parsed_data.fcm) or "NON-DROP FRAME",
+    events = {},
+  }
+
+  for _, row in ipairs(ROWS) do
+    export_data.events[#export_data.events + 1] = {
+      event_num = row.event_num,
+      reel = row.reel,
+      track = row.track,
+      edit_type = row.edit_type,
+      dissolve_len = row.dissolve_len,
+      src_tc_in = row.src_tc_in,
+      src_tc_out = row.src_tc_out,
+      rec_tc_in = row.rec_tc_in,
+      rec_tc_out = row.rec_tc_out,
+      clip_name = row.clip_name,
+      source_file = row.source_file,
+      comments = {},
+    }
+  end
+
+  local ok, err = EDL.write(filepath, export_data)
+  if ok then
+    reaper.ShowMessageBox(
+      string.format("Exported %d events to:\n%s", #export_data.events, filepath),
+      SCRIPT_NAME, 0)
+  else
+    reaper.ShowMessageBox("Export failed:\n\n" .. tostring(err), SCRIPT_NAME, 0)
+  end
+end
+
+---------------------------------------------------------------------------
+-- Copy / Paste
+---------------------------------------------------------------------------
+local function copy_selection()
+  -- Build TSV from selected cells
+  local lines = {}
+  local view_rows = get_view_rows()
+
+  for _, row in ipairs(view_rows) do
+    local cols = {}
+    local has_sel = false
+    for c = 1, COL_COUNT do
+      if sel_has(row.__guid, c) then
+        cols[#cols + 1] = get_cell_text(row, c)
+        has_sel = true
+      end
+    end
+    if has_sel then
+      lines[#lines + 1] = table.concat(cols, "\t")
+    end
+  end
+
+  if #lines > 0 then
+    reaper.CF_SetClipboard(table.concat(lines, "\n"))
+    console_msg("Copied " .. #lines .. " rows")
+  end
+end
+
+local function paste_selection()
+  local clip = reaper.CF_GetClipboard and reaper.CF_GetClipboard("") or ""
+  if clip == "" then return end
+
+  undo_snapshot()
+
+  -- Parse TSV
+  local clip_rows = {}
+  for line in (clip .. "\n"):gmatch("(.-)\n") do
+    if line ~= "" then
+      local cells = {}
+      for cell in (line .. "\t"):gmatch("(.-)\t") do
+        cells[#cells + 1] = cell
+      end
+      clip_rows[#clip_rows + 1] = cells
+    end
+  end
+
+  if #clip_rows == 0 then return end
+
+  -- Find anchor (top-left of selection)
+  local anchor_row_idx, anchor_col
+  local view_rows = get_view_rows()
+  for i, row in ipairs(view_rows) do
+    for c = 1, COL_COUNT do
+      if sel_has(row.__guid, c) then
+        if not anchor_row_idx or i < anchor_row_idx or (i == anchor_row_idx and c < anchor_col) then
+          anchor_row_idx = i
+          anchor_col = c
+        end
+      end
+    end
+  end
+
+  if not anchor_row_idx then
+    anchor_row_idx = 1
+    anchor_col = 2  -- First editable column
+  end
+
+  -- Apply paste
+  for ri, clip_row in ipairs(clip_rows) do
+    local target_row_idx = anchor_row_idx + ri - 1
+    if target_row_idx > #view_rows then break end
+    local target_row = view_rows[target_row_idx]
+
+    for ci, val in ipairs(clip_row) do
+      local target_col = anchor_col + ci - 1
+      if target_col <= COL_COUNT and EDITABLE_COLS[target_col] then
+        set_cell_value(target_row, target_col, val)
+      end
+    end
+  end
+
+  CLB.cached_rows = nil; CLB.cached_rows_frame = -1
+  console_msg("Pasted " .. #clip_rows .. " rows")
+end
+
+---------------------------------------------------------------------------
+-- Modifier key helpers
+---------------------------------------------------------------------------
+local function _mods()
+  local shift = reaper.ImGui_IsKeyDown(ctx, reaper.ImGui_Mod_Shift())
+  local ctrl_cmd
+  -- macOS: use Cmd (Super), Windows/Linux: use Ctrl
+  if reaper.GetOS():find("OSX") or reaper.GetOS():find("macOS") then
+    ctrl_cmd = reaper.ImGui_IsKeyDown(ctx, reaper.ImGui_Mod_Super())
+  else
+    ctrl_cmd = reaper.ImGui_IsKeyDown(ctx, reaper.ImGui_Mod_Ctrl())
+  end
+  return shift, ctrl_cmd
+end
+
+---------------------------------------------------------------------------
+-- Draw: Toolbar
+---------------------------------------------------------------------------
+local function draw_toolbar()
+  -- Load buttons
+  if reaper.ImGui_Button(ctx, "Load EDL...", scale(90), scale(24)) then
+    load_edl_file()
+  end
+  reaper.ImGui_SameLine(ctx)
+
+  -- Load XML placeholder
+  if reaper.ImGui_Button(ctx, "Load XML...", scale(90), scale(24)) then
+    reaper.ShowMessageBox(
+      "XML support coming soon.\n\nCurrently supported: EDL (CMX3600).\n\n" ..
+      "Planned: Premiere XML, FCPX XML, FCP7 XML, Resolve XML, Steinberg XML",
+      SCRIPT_NAME, 0)
+  end
+  reaper.ImGui_SameLine(ctx)
+
+  -- Separator
+  reaper.ImGui_Text(ctx, "|")
+  reaper.ImGui_SameLine(ctx)
+
+  -- Status
+  local view_rows = get_view_rows()
+  local status
+  if CLB.loaded_file then
+    local filename = CLB.loaded_file:match("([^/\\]+)$") or CLB.loaded_file
+    status = string.format("%s | Events: %d | Showing: %d",
+      filename, #ROWS, #view_rows)
+  else
+    status = "No file loaded"
+  end
+  reaper.ImGui_Text(ctx, status)
+  reaper.ImGui_SameLine(ctx)
+
+  -- Search
+  reaper.ImGui_Text(ctx, "|")
+  reaper.ImGui_SameLine(ctx)
+  reaper.ImGui_Text(ctx, "Search:")
+  reaper.ImGui_SameLine(ctx)
+  reaper.ImGui_SetNextItemWidth(ctx, scale(160))
+  local chg_s, new_s = reaper.ImGui_InputText(ctx, "##clb_search", CLB.search_text)
+  if chg_s then
+    CLB.search_text = new_s
+    CLB.cached_rows = nil; CLB.cached_rows_frame = -1
+    sel_clear()
+  end
+  reaper.ImGui_SameLine(ctx)
+  if CLB.search_text ~= "" then
+    if reaper.ImGui_SmallButton(ctx, "X##clb_clear_search") then
+      CLB.search_text = ""
+      CLB.cached_rows = nil; CLB.cached_rows_frame = -1
+    end
+    reaper.ImGui_SameLine(ctx)
+  end
+
+  -- Options button
+  if reaper.ImGui_Button(ctx, "Options", scale(70), scale(24)) then
+    reaper.ImGui_OpenPopup(ctx, "##clb_options")
+  end
+
+  -- Options menu
+  if reaper.ImGui_BeginPopup(ctx, "##clb_options") then
+    -- Console output
+    local cl = CONSOLE.enabled and ">> Console Output" or "   Console Output"
+    if reaper.ImGui_Selectable(ctx, cl) then
+      CONSOLE.enabled = not CONSOLE.enabled
+      save_prefs()
+    end
+
+    -- Debug mode
+    local dl = DEBUG and ">> Debug Mode" or "   Debug Mode"
+    if reaper.ImGui_Selectable(ctx, dl) then
+      DEBUG = not DEBUG
+      save_prefs()
+    end
+
+    reaper.ImGui_Separator(ctx)
+
+    -- Docking
+    local dock_l = ALLOW_DOCKING and ">> Allow Docking" or "   Allow Docking"
+    if reaper.ImGui_Selectable(ctx, dock_l) then
+      ALLOW_DOCKING = not ALLOW_DOCKING
+      save_prefs()
+    end
+
+    reaper.ImGui_Separator(ctx)
+
+    -- Font Size submenu
+    if reaper.ImGui_BeginMenu(ctx, "Font Size") then
+      local sizes = {
+        { label = "50%",  s = 0.5 },
+        { label = "75%",  s = 0.75 },
+        { label = "100% (Default)", s = 1.0 },
+        { label = "125%", s = 1.25 },
+        { label = "150%", s = 1.5 },
+        { label = "175%", s = 1.75 },
+        { label = "200%", s = 2.0 },
+        { label = "250%", s = 2.5 },
+        { label = "300%", s = 3.0 },
+      }
+      for _, sz in ipairs(sizes) do
+        local is_cur = math.abs((FONT_SCALE or 1.0) - sz.s) < 0.01
+        local label = is_cur and (">> " .. sz.label) or ("   " .. sz.label)
+        if reaper.ImGui_Selectable(ctx, label) then
+          FONT_SCALE = sz.s
+          set_font_size(math.floor(13 * FONT_SCALE))
+          save_prefs()
+        end
+      end
+      reaper.ImGui_EndMenu(ctx)
+    end
+
+    reaper.ImGui_EndPopup(ctx)
+  end
+
+  -- Row 2
+  -- FPS selector
+  reaper.ImGui_Text(ctx, "FPS:")
+  reaper.ImGui_SameLine(ctx)
+  reaper.ImGui_SetNextItemWidth(ctx, scale(70))
+  local fps_str = tostring(CLB.fps)
+  local chg_fps, new_fps = reaper.ImGui_InputText(ctx, "##clb_fps", fps_str)
+  if chg_fps then
+    local n = tonumber(new_fps)
+    if n and n > 0 and n <= 120 then
+      CLB.fps = n
+      save_prefs()
+      -- Recompute durations
+      for _, row in ipairs(ROWS) do
+        local ri_sec = EDL.tc_to_seconds(row.rec_tc_in, CLB.fps, CLB.is_drop)
+        local ro_sec = EDL.tc_to_seconds(row.rec_tc_out, CLB.fps, CLB.is_drop)
+        row.duration = EDL.seconds_to_tc(ro_sec - ri_sec, CLB.fps, CLB.is_drop)
+      end
+    end
+  end
+  reaper.ImGui_SameLine(ctx)
+
+  -- Track name format
+  reaper.ImGui_Text(ctx, "Track Format:")
+  reaper.ImGui_SameLine(ctx)
+  reaper.ImGui_SetNextItemWidth(ctx, scale(250))
+  local chg_tf, new_tf = reaper.ImGui_InputText(ctx, "##clb_trk_fmt", CLB.track_name_format)
+  if chg_tf then
+    CLB.track_name_format = new_tf
+    save_prefs()
+  end
+  if reaper.ImGui_IsItemHovered(ctx) then
+    reaper.ImGui_BeginTooltip(ctx)
+    reaper.ImGui_Text(ctx, "Tokens: ${format} ${track} ${reel} ${event} ${clip} ${title}")
+    reaper.ImGui_EndTooltip(ctx)
+  end
+  reaper.ImGui_SameLine(ctx)
+
+  -- Generate Items button
+  if reaper.ImGui_Button(ctx, "Generate Items", scale(120), scale(24)) then
+    generate_items()
+  end
+  if reaper.ImGui_IsItemHovered(ctx) then
+    reaper.ImGui_BeginTooltip(ctx)
+    reaper.ImGui_Text(ctx, "Create empty items on REAPER tracks at absolute TC positions")
+    reaper.ImGui_Text(ctx, "Metadata stored as P_EXT fields on each take")
+    reaper.ImGui_EndTooltip(ctx)
+  end
+  reaper.ImGui_SameLine(ctx)
+
+  -- Export EDL button
+  if reaper.ImGui_Button(ctx, "Export EDL", scale(90), scale(24)) then
+    export_edl()
+  end
+end
+
+---------------------------------------------------------------------------
+-- Draw: Table
+---------------------------------------------------------------------------
+local function draw_table()
+  local view_rows = get_view_rows()
+  local row_count = #view_rows
+
+  if row_count == 0 and not CLB.loaded_file then
+    reaper.ImGui_TextDisabled(ctx, "Click 'Load EDL...' to open a CMX3600 EDL file.")
+    return
+  end
+
+  if row_count == 0 then
+    reaper.ImGui_TextDisabled(ctx, "No events match the current filter.")
+    return
+  end
+
+  -- Table flags
+  local flags = reaper.ImGui_TableFlags_Borders()
+    | reaper.ImGui_TableFlags_RowBg()
+    | reaper.ImGui_TableFlags_SizingFixedFit()
+    | reaper.ImGui_TableFlags_ScrollX()
+    | reaper.ImGui_TableFlags_ScrollY()
+    | reaper.ImGui_TableFlags_Resizable()
+    | reaper.ImGui_TableFlags_Reorderable()
+
+  -- Available height for table (GetContentRegionAvail returns width, height)
+  local _, avail_h = reaper.ImGui_GetContentRegionAvail(ctx)
+
+  if not reaper.ImGui_BeginTable(ctx, "clb_table", COL_COUNT, flags, 0, avail_h) then
+    return
+  end
+
+  -- Setup columns
+  for c = 1, COL_COUNT do
+    local w = scale(COL_WIDTH[c] or DEFAULT_COL_WIDTH[c] or 80)
+    reaper.ImGui_TableSetupColumn(ctx, HEADER_LABELS[c] or "",
+      reaper.ImGui_TableColumnFlags_WidthFixed(), w)
+  end
+
+  -- Headers (manual rendering for sort indicators + click handling)
+  reaper.ImGui_TableSetupScrollFreeze(ctx, 0, 1)
+  reaper.ImGui_TableNextRow(ctx)
+  for c = 1, COL_COUNT do
+    reaper.ImGui_TableSetColumnIndex(ctx, c - 1)
+
+    -- Sort indicator
+    local sort_indicator = ""
+    for si, sc in ipairs(SORT_STATE.columns) do
+      if sc.col_id == c then
+        local arrow = sc.ascending and " ^" or " v"
+        if #SORT_STATE.columns > 1 then
+          sort_indicator = string.format(" [%d]%s", si, arrow)
+        else
+          sort_indicator = arrow
+        end
+        break
+      end
+    end
+
+    local label = (HEADER_LABELS[c] or "") .. sort_indicator
+    reaper.ImGui_Text(ctx, label)
+
+    -- Click to sort
+    if reaper.ImGui_IsItemClicked(ctx, 0) then
+      local shift = reaper.ImGui_IsKeyDown(ctx, reaper.ImGui_Mod_Shift())
+      toggle_sort(c, shift)
+    end
+  end
+
+  -- ListClipper for virtualization
+  if list_clipper and not reaper.ImGui_ValidatePtr(list_clipper, "ImGui_ListClipper*") then
+    list_clipper = reaper.ImGui_CreateListClipper(ctx)
+  end
+
+  local use_clipper = list_clipper and row_count > 100
+  local cs, ce
+
+  if use_clipper then
+    reaper.ImGui_ListClipper_Begin(list_clipper, row_count)
+  end
+
+  local clp = true
+  while clp do
+    if use_clipper then
+      if not reaper.ImGui_ListClipper_Step(list_clipper) then break end
+      local ds, de = reaper.ImGui_ListClipper_GetDisplayRange(list_clipper)
+      cs, ce = ds + 1, de
+      CLB.visible_range.first = cs
+      CLB.visible_range.last = ce
+    else
+      cs, ce = 1, row_count
+      clp = false
+    end
+
+    for i = cs, ce do
+      local row = view_rows[i]
+      if not row then break end
+
+      reaper.ImGui_TableNextRow(ctx)
+
+      for c = 1, COL_COUNT do
+        reaper.ImGui_TableSetColumnIndex(ctx, c - 1)
+
+        local is_editing = EDIT and EDIT.row_idx == i and EDIT.col_id == c
+
+        if is_editing then
+          -- Editing mode
+          reaper.ImGui_SetNextItemWidth(ctx, -1)
+          if EDIT.want_focus then
+            reaper.ImGui_SetKeyboardFocusHere(ctx)
+            EDIT.want_focus = false
+          end
+
+          local chg, new_val = reaper.ImGui_InputText(ctx,
+            "##edit_" .. row.__guid .. "_" .. c,
+            EDIT.buf)
+
+          if chg then
+            EDIT.buf = new_val
+          end
+
+          -- Confirm: Enter or deactivated
+          local confirm = reaper.ImGui_IsItemDeactivatedAfterEdit(ctx)
+          -- Cancel: ESC
+          local cancel = reaper.ImGui_IsKeyPressed(ctx, reaper.ImGui_Key_Escape(), false)
+
+          if confirm then
+            local old_val = get_cell_text(row, c)
+            if EDIT.buf ~= old_val then
+              -- TC validation for TC columns
+              if TC_COLS[c] and not EDL.is_valid_tc(EDIT.buf) then
+                -- Invalid TC: reject
+                reaper.ShowMessageBox(
+                  "Invalid timecode format.\nExpected: HH:MM:SS:FF",
+                  SCRIPT_NAME, 0)
+              else
+                undo_snapshot()
+                set_cell_value(row, c, EDIT.buf)
+                CLB.cached_rows = nil; CLB.cached_rows_frame = -1
+              end
+            end
+            EDIT = nil
+          elseif cancel then
+            EDIT = nil
+          end
+        else
+          -- Display mode: use Selectable for highlight + click detection
+          local text = get_cell_text(row, c)
+          local selected = sel_has(row.__guid, c)
+          local display = (text ~= "" and text or " ") .. "##" .. row.__guid .. "_" .. c
+
+          reaper.ImGui_Selectable(ctx, display, selected)
+
+          -- Click handling
+          if reaper.ImGui_IsItemClicked(ctx, 0) then
+            local shift, cmd = _mods()
+            if shift and SEL.anchor then
+              sel_rect(SEL.anchor.guid, SEL.anchor.col, row.__guid, c)
+            elseif cmd then
+              sel_toggle(row.__guid, c)
+              if not SEL.anchor then
+                SEL.anchor = { guid = row.__guid, col = c }
+              end
+            else
+              sel_set_single(row.__guid, c)
+            end
+          end
+
+          -- Double-click to edit
+          if reaper.ImGui_IsItemHovered(ctx) and
+             reaper.ImGui_IsMouseDoubleClicked(ctx, 0) and
+             EDITABLE_COLS[c] then
+            EDIT = {
+              row_idx = i,
+              col_id = c,
+              buf = text,
+              want_focus = true,
+            }
+          end
+        end
+      end
+    end
+  end
+
+  reaper.ImGui_EndTable(ctx)
+end
+
+---------------------------------------------------------------------------
+-- Main loop
+---------------------------------------------------------------------------
+local function loop()
+  CLB.frame_counter = CLB.frame_counter + 1
+
+  -- Push font
+  font_pushed_this_frame = false
+  if current_font_size ~= 13 and reaper.ImGui_PushFont then
+    local ok_font = pcall(reaper.ImGui_PushFont, ctx, nil, current_font_size)
+    if ok_font then
+      font_pushed_this_frame = true
+    end
+  end
+
+  -- Window flags
+  local wnd_flags = reaper.ImGui_WindowFlags_NoCollapse()
+    | reaper.ImGui_WindowFlags_NoScrollbar()
+    | reaper.ImGui_WindowFlags_NoScrollWithMouse()
+  if not ALLOW_DOCKING then
+    wnd_flags = wnd_flags | reaper.ImGui_WindowFlags_NoDocking()
+  end
+
+  reaper.ImGui_SetNextWindowSize(ctx, 1200, 600, reaper.ImGui_Cond_FirstUseEver())
+
+  local visible, open = reaper.ImGui_Begin(ctx,
+    SCRIPT_NAME .. " v" .. VERSION .. "###clb_main", true, wnd_flags)
+
+  if visible then
+    -- Toolbar
+    draw_toolbar()
+    reaper.ImGui_Separator(ctx)
+
+    -- Table
+    draw_table()
+
+    -- Keyboard shortcuts
+    local focused = reaper.ImGui_IsWindowFocused(ctx, reaper.ImGui_FocusedFlags_RootAndChildWindows())
+    if focused and not EDIT then
+      local shift, cmd = _mods()
+
+      -- Cmd+Z = Undo
+      if cmd and reaper.ImGui_IsKeyPressed(ctx, reaper.ImGui_Key_Z(), false) then
+        if shift then
+          do_redo()
+        else
+          do_undo()
+        end
+      end
+
+      -- Cmd+Y = Redo
+      if cmd and reaper.ImGui_IsKeyPressed(ctx, reaper.ImGui_Key_Y(), false) then
+        do_redo()
+      end
+
+      -- Cmd+C = Copy
+      if cmd and reaper.ImGui_IsKeyPressed(ctx, reaper.ImGui_Key_C(), false) then
+        copy_selection()
+      end
+
+      -- Cmd+V = Paste
+      if cmd and reaper.ImGui_IsKeyPressed(ctx, reaper.ImGui_Key_V(), false) then
+        paste_selection()
+      end
+
+      -- Cmd+A = Select All
+      if cmd and reaper.ImGui_IsKeyPressed(ctx, reaper.ImGui_Key_A(), false) then
+        local vr = get_view_rows()
+        sel_clear()
+        for _, row in ipairs(vr) do
+          for c = 1, COL_COUNT do
+            sel_add(row.__guid, c)
+          end
+        end
+      end
+
+      -- Delete = Clear selected cells
+      if reaper.ImGui_IsKeyPressed(ctx, reaper.ImGui_Key_Delete(), false) or
+         reaper.ImGui_IsKeyPressed(ctx, reaper.ImGui_Key_Backspace(), false) then
+        local changed = false
+        local vr = get_view_rows()
+        for _, row in ipairs(vr) do
+          for c = 1, COL_COUNT do
+            if sel_has(row.__guid, c) and EDITABLE_COLS[c] then
+              if not changed then undo_snapshot(); changed = true end
+              set_cell_value(row, c, "")
+            end
+          end
+        end
+        if changed then
+          CLB.cached_rows = nil; CLB.cached_rows_frame = -1
+        end
+      end
+
+      -- ESC = Clear selection
+      if reaper.ImGui_IsKeyPressed(ctx, reaper.ImGui_Key_Escape(), false) then
+        sel_clear()
+      end
+    end
+
+    reaper.ImGui_End(ctx)
+  end
+
+  -- Pop font
+  if font_pushed_this_frame then
+    reaper.ImGui_PopFont(ctx)
+  end
+
+  if open then
+    reaper.defer(loop)
+  end
+end
+
+---------------------------------------------------------------------------
+-- Instance detection
+---------------------------------------------------------------------------
+local instance_key = EXT_NS .. "_instance"
+local prev = reaper.GetExtState(EXT_NS, "instance_id")
+local my_id = tostring(math.random(100000, 999999))
+reaper.SetExtState(EXT_NS, "instance_id", my_id, false)
+
+---------------------------------------------------------------------------
+-- Init
+---------------------------------------------------------------------------
+load_prefs()
+
+ctx = reaper.ImGui_CreateContext(SCRIPT_NAME)
+if reaper.ImGui_CreateListClipper then
+  list_clipper = reaper.ImGui_CreateListClipper(ctx)
+end
+
+console_msg("Conform List Browser v" .. VERSION .. " started")
+console_msg("EDL Parser v" .. (EDL.VERSION or "?"))
+
+reaper.defer(loop)
