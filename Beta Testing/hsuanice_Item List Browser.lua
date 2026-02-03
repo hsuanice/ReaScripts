@@ -1,6 +1,6 @@
 --[[
 @description Item List Browser
-@version 260203.1230
+@version 260203.1309
 @author hsuanice
 @about
   A project-wide media browser that shows ALL items in the project with full
@@ -54,6 +54,12 @@
 
 
 @changelog
+  v260203.1309
+  - Fix: Undo/Redo no longer causes list flash and scroll position loss
+    • Previously rebuilt entire ROWS array via scan_selection_rows() on every Cmd+Z / Cmd+Shift+Z
+    • Now uses light_refresh() to update row data in-place (preserves scroll position and table state)
+    • Also updates last_state_count to prevent smart_refresh() from triggering a redundant refresh
+
   v260203.1230
   - UX: Compact row display with "Expand Rows" toggle
     • Affects multiline columns: Item Note (col 5) and Description (col 21)
@@ -6311,8 +6317,9 @@ local function loop()
             reaper.Undo_DoRedo2(0)
             _restore_item_selection_by_guids(sel_snapshot)
 
-            -- Immediately refresh all rows after redo
-            ROWS = scan_selection_rows()
+            -- Light refresh: update row data in-place (preserves scroll position)
+            light_refresh()
+            ILB.last_state_count = reaper.GetProjectStateChangeCount(0)
             reaper.ShowConsoleMsg("[ILB] Refreshed after redo\n")
           elseif reaper.ImGui_IsKeyPressed(ctx, reaper.ImGui_Key_Z(), false) then
             -- Undo: Cmd/Ctrl+Z
@@ -6320,8 +6327,9 @@ local function loop()
             reaper.Undo_DoUndo2(0)
             _restore_item_selection_by_guids(sel_snapshot)
 
-            -- Immediately refresh all rows after undo
-            ROWS = scan_selection_rows()
+            -- Light refresh: update row data in-place (preserves scroll position)
+            light_refresh()
+            ILB.last_state_count = reaper.GetProjectStateChangeCount(0)
             reaper.ShowConsoleMsg("[ILB] Refreshed after undo\n")
           end
         end
