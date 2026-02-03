@@ -1,6 +1,6 @@
 --[[
 @description Conform List Browser
-@version 260203.2216
+@version 260203.2241
 @author hsuanice
 @about
   A REAPER script for browsing and editing EDL (Edit Decision List) data
@@ -36,6 +36,15 @@
   Requires: ReaImGui (install via ReaPack)
 
 @changelog
+  v260203.2241
+  - Feature: Remove Duplicates button in toolbar
+    • Detects duplicates by composite key (track + rec TC in/out + clip name + reel)
+    • Shows confirmation dialog with duplicate count before removing
+    • Updates per-source event counts after removal
+    • Supports undo/redo
+  - Fix: Sources panel now scrollable when many EDLs are loaded
+    • Wraps checkbox list in scrollable child region (max 6 visible rows)
+
   v260203.2216
   - Feature: Multi-file EDL selection in file dialog
     • Uses JS_Dialog_BrowseForOpenFiles for multi-select (shift/cmd-click)
@@ -110,7 +119,7 @@ end
 ---------------------------------------------------------------------------
 local SCRIPT_NAME = "Conform List Browser"
 local EXT_NS = "hsuanice_ConformListBrowser"
-local VERSION = "260203.2216"
+local VERSION = "260203.2241"
 
 -- Column definitions
 local COL = {
@@ -963,6 +972,77 @@ local function generate_items()
 end
 
 ---------------------------------------------------------------------------
+-- Remove Duplicates
+---------------------------------------------------------------------------
+local function remove_duplicates()
+  if #ROWS == 0 then
+    reaper.ShowMessageBox("No events loaded.", SCRIPT_NAME, 0)
+    return
+  end
+
+  -- Build duplicate key: track + rec_tc_in + rec_tc_out + clip_name + reel
+  local seen = {}
+  local keep = {}
+  local removed = 0
+
+  for _, row in ipairs(ROWS) do
+    local key = table.concat({
+      row.track or "",
+      row.rec_tc_in or "",
+      row.rec_tc_out or "",
+      row.clip_name or "",
+      row.reel or "",
+    }, "|")
+
+    if seen[key] then
+      removed = removed + 1
+    else
+      seen[key] = true
+      keep[#keep + 1] = row
+    end
+  end
+
+  if removed == 0 then
+    reaper.ShowMessageBox("No duplicate events found.", SCRIPT_NAME, 0)
+    return
+  end
+
+  -- Confirm
+  local choice = reaper.ShowMessageBox(
+    string.format("Found %d duplicate event(s) out of %d total.\n\n" ..
+      "Duplicates are identified by matching:\n" ..
+      "Track + Rec TC In + Rec TC Out + Clip Name + Reel\n\n" ..
+      "Remove them? (keeps first occurrence)",
+      removed, #ROWS),
+    SCRIPT_NAME, 1)  -- 1 = OK/Cancel
+
+  if choice ~= 1 then return end
+
+  undo_snapshot()
+  ROWS = keep
+
+  -- Update source event counts
+  local src_counts = {}
+  for _, row in ipairs(ROWS) do
+    local si = row.__source_idx or 0
+    src_counts[si] = (src_counts[si] or 0) + 1
+  end
+  for i, src in ipairs(CLB.edl_sources) do
+    src.event_count = src_counts[i] or 0
+  end
+
+  sel_clear()
+  EDIT = nil
+  undo_snapshot()
+  CLB.cached_rows = nil; CLB.cached_rows_frame = -1
+
+  console_msg(string.format("Removed %d duplicates (%d remaining)", removed, #ROWS))
+  reaper.ShowMessageBox(
+    string.format("Removed %d duplicate event(s).\n%d events remaining.", removed, #ROWS),
+    SCRIPT_NAME, 0)
+end
+
+---------------------------------------------------------------------------
 -- Export EDL
 ---------------------------------------------------------------------------
 local function export_edl()
@@ -1300,6 +1380,17 @@ local function draw_toolbar()
   end
   reaper.ImGui_SameLine(ctx)
 
+  -- Remove Duplicates button
+  if reaper.ImGui_Button(ctx, "Remove Dups", scale(100), scale(24)) then
+    remove_duplicates()
+  end
+  if reaper.ImGui_IsItemHovered(ctx) then
+    reaper.ImGui_BeginTooltip(ctx)
+    reaper.ImGui_Text(ctx, "Remove duplicate events (matching Track + Rec TC + Clip Name + Reel)")
+    reaper.ImGui_EndTooltip(ctx)
+  end
+  reaper.ImGui_SameLine(ctx)
+
   -- Export EDL button
   if reaper.ImGui_Button(ctx, "Export EDL", scale(90), scale(24)) then
     export_edl()
@@ -1334,14 +1425,20 @@ local function draw_sources_panel()
     CLB.cached_rows = nil; CLB.cached_rows_frame = -1
   end
 
-  -- List each source with checkbox
-  for i, src in ipairs(CLB.edl_sources) do
-    local label = string.format("%s (%d events)##clb_src_%d", src.name, src.event_count, i)
-    local changed, new_val = reaper.ImGui_Checkbox(ctx, label, src.visible)
-    if changed then
-      src.visible = new_val
-      CLB.cached_rows = nil; CLB.cached_rows_frame = -1
+  -- List each source with checkbox (scrollable region, max ~6 rows visible)
+  local line_h = reaper.ImGui_GetTextLineHeightWithSpacing(ctx)
+  local max_visible = 6
+  local list_h = math.min(#CLB.edl_sources, max_visible) * line_h + 4
+  if reaper.ImGui_BeginChild(ctx, "##clb_src_list", 0, list_h, reaper.ImGui_ChildFlags_Borders()) then
+    for i, src in ipairs(CLB.edl_sources) do
+      local label = string.format("%s (%d events)##clb_src_%d", src.name, src.event_count, i)
+      local changed, new_val = reaper.ImGui_Checkbox(ctx, label, src.visible)
+      if changed then
+        src.visible = new_val
+        CLB.cached_rows = nil; CLB.cached_rows_frame = -1
+      end
     end
+    reaper.ImGui_EndChild(ctx)
   end
 end
 
