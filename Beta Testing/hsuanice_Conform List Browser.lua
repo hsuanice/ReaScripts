@@ -1,6 +1,6 @@
 --[[
 @description Conform List Browser
-@version 260203.1845
+@version 260203.1854
 @author hsuanice
 @about
   A REAPER script for browsing and editing EDL (Edit Decision List) data
@@ -36,6 +36,14 @@
   Requires: ReaImGui (install via ReaPack)
 
 @changelog
+  v260203.1854
+  - Feature: Multiple EDL import support
+    • Loading a second EDL when events already exist prompts Replace / Append / Cancel
+    • Append adds new events to the existing list with unique GUIDs
+  - Feature: Generated items now write Reel and Source TC In/Out to item notes
+    • Human-readable format: "Reel: xxx / Src In: xx:xx:xx:xx / Src Out: xx:xx:xx:xx"
+    • P_EXT metadata fields retained for programmatic access
+
   v260203.1845
   - Fix: Single vertical scrollbar (table only, no duplicate window scrollbar)
     • Window now uses NoScrollbar + NoScrollWithMouse flags
@@ -90,7 +98,7 @@ end
 ---------------------------------------------------------------------------
 local SCRIPT_NAME = "Conform List Browser"
 local EXT_NS = "hsuanice_ConformListBrowser"
-local VERSION = "260203.1845"
+local VERSION = "260203.1854"
 
 -- Column definitions
 local COL = {
@@ -566,19 +574,18 @@ end
 ---------------------------------------------------------------------------
 -- File loading
 ---------------------------------------------------------------------------
-local function build_rows_from_parsed(parsed)
-  ROWS = {}
-  if not parsed or not parsed.events then return end
+-- GUID counter for unique row IDs across multiple imports
+local _guid_counter = 0
 
-  CLB.fps = parsed.fps or 25
-  CLB.is_drop = parsed.is_drop or false
-
-  for i, evt in ipairs(parsed.events) do
+local function _make_rows_from_events(events, fps, is_drop)
+  local new_rows = {}
+  for _, evt in ipairs(events) do
+    _guid_counter = _guid_counter + 1
     local row = {
-      __event_idx = i,
-      __guid = string.format("clb_%03d", i),
+      __event_idx = _guid_counter,
+      __guid = string.format("clb_%06d", _guid_counter),
 
-      event_num = evt.event_num or string.format("%03d", i),
+      event_num = evt.event_num or string.format("%03d", _guid_counter),
       reel = evt.reel or "",
       track = evt.track or "",
       edit_type = evt.edit_type or "C",
@@ -591,28 +598,57 @@ local function build_rows_from_parsed(parsed)
       source_file = evt.source_file or "",
       notes = "",
 
-      duration = evt.duration_tc or "00:00:00:00",
+      duration = evt.duration_tc or EDL.seconds_to_tc(
+        EDL.tc_to_seconds(evt.rec_tc_out or "00:00:00:00", fps, is_drop)
+        - EDL.tc_to_seconds(evt.rec_tc_in or "00:00:00:00", fps, is_drop),
+        fps, is_drop),
     }
 
-    -- Build search text
     row.__search_text = table.concat({
       row.event_num, row.reel, row.track,
       row.clip_name, row.source_file, row.notes,
     }, " "):lower()
 
-    ROWS[#ROWS + 1] = row
+    new_rows[#new_rows + 1] = row
   end
+  return new_rows
+end
 
-  -- Reset state
+-- Replace all rows (fresh load)
+local function build_rows_from_parsed(parsed)
+  ROWS = {}
+  _guid_counter = 0
+  if not parsed or not parsed.events then return end
+
+  CLB.fps = parsed.fps or 25
+  CLB.is_drop = parsed.is_drop or false
+
+  ROWS = _make_rows_from_events(parsed.events, CLB.fps, CLB.is_drop)
+
   sel_clear()
   EDIT = nil
   SORT_STATE.columns = {}
   UNDO_STACK = {}
   UNDO_POS = 0
-  undo_snapshot()  -- Initial state
+  undo_snapshot()
   CLB.cached_rows = nil; CLB.cached_rows_frame = -1
 
   console_msg(string.format("Loaded %d events from %s", #ROWS, CLB.loaded_file or "?"))
+end
+
+-- Append rows from additional EDL (keeps existing rows)
+local function append_rows_from_parsed(parsed)
+  if not parsed or not parsed.events then return end
+
+  local new_rows = _make_rows_from_events(parsed.events, CLB.fps, CLB.is_drop)
+  for _, row in ipairs(new_rows) do
+    ROWS[#ROWS + 1] = row
+  end
+
+  undo_snapshot()
+  CLB.cached_rows = nil; CLB.cached_rows_frame = -1
+
+  console_msg(string.format("Appended %d events (total: %d)", #new_rows, #ROWS))
 end
 
 local function load_edl_file()
@@ -625,15 +661,43 @@ local function load_edl_file()
     return
   end
 
-  CLB.loaded_file = filepath
-  CLB.loaded_format = "EDL"
-  CLB.parsed_data = parsed
-
   -- Remember directory
   CLB.last_dir = filepath:match("(.*[/\\])") or ""
   save_prefs()
 
-  build_rows_from_parsed(parsed)
+  -- If rows already loaded, ask Replace or Append
+  if #ROWS > 0 then
+    local choice = reaper.ShowMessageBox(
+      string.format(
+        "Current list has %d events.\n\n" ..
+        "New file: %s (%d events)\n\n" ..
+        "Yes = Replace (clear current list)\n" ..
+        "No = Append (add to current list)",
+        #ROWS,
+        filepath:match("([^/\\]+)$") or filepath,
+        #parsed.events),
+      SCRIPT_NAME, 3)  -- 3 = Yes/No/Cancel
+
+    if choice == 2 then return end  -- Cancel
+
+    if choice == 6 then
+      -- Yes = Replace
+      CLB.loaded_file = filepath
+      CLB.loaded_format = "EDL"
+      CLB.parsed_data = parsed
+      build_rows_from_parsed(parsed)
+    else
+      -- No = Append
+      CLB.loaded_file = filepath  -- update to latest file
+      append_rows_from_parsed(parsed)
+    end
+  else
+    -- First load: replace
+    CLB.loaded_file = filepath
+    CLB.loaded_format = "EDL"
+    CLB.parsed_data = parsed
+    build_rows_from_parsed(parsed)
+  end
 end
 
 ---------------------------------------------------------------------------
@@ -725,6 +789,18 @@ local function generate_items()
     if take then
       -- Take name = clip name
       reaper.GetSetMediaItemTakeInfo_String(take, "P_NAME", row.clip_name or "", true)
+
+      -- Item note: Source TC In/Out + Reel (human-readable)
+      local note_parts = {}
+      note_parts[#note_parts + 1] = "Reel: " .. (row.reel or "")
+      note_parts[#note_parts + 1] = "Src In: " .. (row.src_tc_in or "")
+      note_parts[#note_parts + 1] = "Src Out: " .. (row.src_tc_out or "")
+      if row.notes and row.notes ~= "" then
+        note_parts[#note_parts + 1] = ""
+        note_parts[#note_parts + 1] = row.notes
+      end
+      local note_text = table.concat(note_parts, "\n")
+      reaper.GetSetMediaItemInfo_String(item, "P_NOTES", note_text, true)
 
       -- Store all metadata as P_EXT fields
       reaper.GetSetMediaItemTakeInfo_String(take, "P_EXT:CLB_EVENT", row.event_num or "", true)
