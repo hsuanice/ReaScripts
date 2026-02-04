@@ -1,6 +1,6 @@
 --[[
 @description AudioSweet Core - Focused Track FX render via RGWH Core
-@version 0.2.3
+@version 0.3.0
 @author hsuanice
 @noindex
 @notes
@@ -12,7 +12,42 @@ Tim Chimes (original), adapted by hsuanice for AudioSweet Core integration.
   http://timchimes.com/scripting-with-reaper-audiosuite/
 
 @changelog
-  v0.2.3 (2025-12-26) [internal: v251226.0000]
+  v0.3.0 (2026-02-05) [internal: v260205.0433]
+    - BUGFIX: target_track ExtState handshake broken after RGWH Core force_multi removal
+      • BUG: Wrote empty MULTI_CHANNEL_POLICY → RGWH v0.3.0 defaults to preserve → adjusts FX track to item ch
+      • Expected: target_track should output FX track ch (not item ch)
+      • FIX: target_track now writes "source_track" to RGWH (on FX track, target ch = track ch)
+    - IMPROVED: source_playback explicit odd channel handling in FX track pre-adjustment
+      • Old: desired_apply_nchan = item_ch (REAPER silently rounds odd to even)
+      • New: Odd multi ch (3,5,7...) → explicitly set item_ch+1 (even ceiling, matches RGWH hybrid logic)
+    - REQUIRES: RGWH Core v0.3.0 [v260205.0409]+
+
+  v0.3.0 (2026-01-04) [internal: v260104.2143]
+    - CHANGED: Complete redesign of Multi-Channel Policy handling with SOURCE-target support
+    - ARCHITECTURE: Three policies with clear separation of concerns
+      • SOURCE-playback: Adjust FX track to item playback channels, write "source_playback" ExtState to RGWH
+      • SOURCE-track: Adjust FX track to source track channels, write "source_track" ExtState to RGWH
+      • SOURCE-target: Keep FX track channels as-is, DO NOT write ExtState (RGWH uses 41993 naturally)
+    - IMPLEMENTATION: FX track channel adjustment strategy
+      • Before RGWH.core() call: Snapshot FX track original channel count
+      • SOURCE-playback: Set FX track to max(2, item_playback_channels)
+      • SOURCE-track: Set FX track to source_track_channels
+      • SOURCE-target: No adjustment (keep FX track channels, e.g., 6ch for Atmos)
+      • After RGWH.core() call: Restore FX track to original channel count
+    - CHANGED: ExtState protocol updated for RGWH Core v0.3.0 compatibility
+      • Write "RGWH"/"MULTI_CHANNEL_POLICY" = "source_playback" | "source_track" | "" (empty for target)
+      • SOURCE-target mode: Explicitly clear ExtState (ensures RGWH uses default 41993 behavior)
+    - IMPACT: Cleaner architecture, SOURCE-target truly independent (no ExtState coupling)
+    - REQUIRES: RGWH Core v0.3.0+ for Multi-Channel Policy ExtState support
+    - BACKWARD COMPATIBLE: Existing behavior preserved when no policy set
+
+  v0.2.3 (2025-12-26) [internal: v251226.0356]
+    - CHANGED: Unified Multi-Channel Policy ExtState Protocol
+      • BEFORE: Used hsuanice_AS.RGWH_PRESERVE_TRACK_CH = "0"/"1" (boolean handshake)
+      • NOW: Uses RGWH.MULTI_CHANNEL_POLICY = "source_playback"/"source_track"/"target_track" (semantic protocol)
+      • IMPACT: Shares same ExtState protocol as RGWH GUI (single source of truth)
+      • Implementation: Lines 2094-2119, 2783-2796, 2822-2823 (unified SetProjExtState)
+      • Backward compatible: RGWH Core v0.2.2c+ reads both protocols with fallback
     - REFACTORED: AudioSweet Core is now a pure RGWH wrapper (Phase 4)
       • apply_focused_fx_to_item() simplified from ~170 to ~50 lines
       • apply_focused_via_rgwh_render_new_take() removed (merged into unified apply)
@@ -23,7 +58,7 @@ Tim Chimes (original), adapted by hsuanice for AudioSweet Core integration.
     - CHANGED: Unified apply flow
       • Single apply function handles both focused and chain modes
       • Channel mode detection moved to args preparation
-      • Multi-Channel Policy implemented via RGWH_PRESERVE_TRACK_CH handshake
+      • Multi-Channel Policy previously via RGWH_PRESERVE_TRACK_CH handshake (now unified protocol)
     - FIXED: Multi-Channel Policy now works correctly in all execution paths
       • ROOT CAUSE: Action 41993 (Apply multichannel) uses TRACK channel count, not item channel count
       • SOLUTION: Temporarily adjust FX track channel count based on Multi-Channel Policy BEFORE apply
@@ -2061,9 +2096,15 @@ local function apply_focused_fx_to_item(item, FXmediaTrack, fxIndex, FXName, sou
   local desired_apply_nchan = fx_track_orig_nchan  -- Default: keep FX track as-is
 
   if multi_policy == "source_playback" then
-    -- Use source item playback channels
+    -- Use source item playback channels (with explicit odd channel handling)
     local item_ch = get_item_channels(item)
-    desired_apply_nchan = (item_ch < 2) and 2 or item_ch
+    if item_ch < 2 then
+      desired_apply_nchan = 2  -- Mono → 2ch floor
+    elseif item_ch > 1 and item_ch % 2 == 1 then
+      desired_apply_nchan = item_ch + 1  -- Odd multi ch: even ceiling (RGWH hybrid uses 40209 with this ceiling)
+    else
+      desired_apply_nchan = item_ch  -- Even ch: direct
+    end
     if debug_enabled() then
       log_step("APPLY", "Multi-Channel Policy=source_playback: item_ch=%d → set FX track to %d ch (was %d)",
                item_ch, desired_apply_nchan, fx_track_orig_nchan)
@@ -2091,19 +2132,25 @@ local function apply_focused_fx_to_item(item, FXmediaTrack, fxIndex, FXName, sou
     end
   end
 
-  -- Set Multi-Channel Policy handshake for RGWH Core (preserve FX track channel after apply)
-  if multi_policy == "source_playback" or multi_policy == "source_track" then
-    -- We've already set the FX track to the desired channel count above,
-    -- so we want RGWH to preserve it (don't let it auto-expand)
-    reaper.SetExtState("hsuanice_AS", "RGWH_PRESERVE_TRACK_CH", "1", false)
+  -- Set Multi-Channel Policy handshake for RGWH Core
+  -- Write to unified RGWH ExtState (project-scoped, single-use)
+  -- NOTE: target_track writes "source_track" because on the FX track, target ch = track ch
+  if multi_policy == "target_track" then
+    -- SOURCE-target: On FX track, target ch = track ch → equivalent to source_track for RGWH
+    reaper.SetProjExtState(0, "RGWH", "MULTI_CHANNEL_POLICY", "source_track")
     if debug_enabled() then
-      log_step("APPLY", "Multi-Channel Policy: %s → RGWH_PRESERVE_TRACK_CH=1 (preserve our temporary setting)", multi_policy)
+      log_step("APPLY", "Multi-Channel Policy=target_track → RGWH source_track (FX track ch = target ch)")
     end
-  else  -- target_track
-    reaper.SetExtState("hsuanice_AS", "RGWH_PRESERVE_TRACK_CH", "1", false)
+  else
+    -- SOURCE-playback or SOURCE-track: Write policy to RGWH
+    reaper.SetProjExtState(0, "RGWH", "MULTI_CHANNEL_POLICY", multi_policy)
     if debug_enabled() then
-      log_step("APPLY", "Multi-Channel Policy: TARGET-TRACK → RGWH_PRESERVE_TRACK_CH=1 (preserve)")
+      log_step("APPLY", "Multi-Channel Policy: %s → RGWH.MULTI_CHANNEL_POLICY (unified protocol)", multi_policy)
     end
+  end
+  reaper.SetProjExtState(0, "RGWH", "SOURCE_TRACK_NCHAN", tostring(orig_track_nchan))
+  if debug_enabled() then
+    log_step("APPLY", "Source track snapshot: %d → RGWH.SOURCE_TRACK_NCHAN", orig_track_nchan)
   end
 
   -- Select only that item then call RGWH.core()
@@ -2113,7 +2160,7 @@ local function apply_focused_fx_to_item(item, FXmediaTrack, fxIndex, FXName, sou
   -- Prepare RGWH.core() args
   local rgwh_args = {
     op = "glue",
-    channel_mode = final_channel_mode,  -- ★ v0.2.3: Use pre-calculated mode (not auto)
+    channel_mode = "auto",  -- ★ v0.2.3: Let RGWH Core resolve via Multi-Channel Policy ExtState
     take_fx = true,
     track_fx = true,
     merge_volumes = true,
@@ -2123,8 +2170,9 @@ local function apply_focused_fx_to_item(item, FXmediaTrack, fxIndex, FXName, sou
   -- Call RGWH.core()
   local ok, err = RGWH.core(rgwh_args)
 
-  -- Clear handshake
-  reaper.SetExtState("hsuanice_AS", "RGWH_PRESERVE_TRACK_CH", "", false)
+  -- Clear handshake (v0.2.3: unified protocol)
+  reaper.SetProjExtState(0, "RGWH", "MULTI_CHANNEL_POLICY", "")
+  reaper.SetProjExtState(0, "RGWH", "SOURCE_TRACK_NCHAN", "")
 
   if not ok then
     log_step("ERROR", "RGWH.core() failed: %s", tostring(err))
@@ -2788,11 +2836,35 @@ function main() -- main part of the script
             end
           end
 
-          -- Tell RGWH Core to NOT restore FX track channel count (allows Multi-Channel Policy to work)
-          reaper.SetExtState("hsuanice_AS", "RGWH_PRESERVE_TRACK_CH", "0", false)
+          -- Set Multi-Channel Policy handshake for RGWH Core (v0.3.0: SOURCE-target doesn't write ExtState)
+          -- Write to unified RGWH ExtState (project-scoped, single-use)
+          -- CRITICAL: SOURCE-target mode should NOT write ExtState - let RGWH use its default behavior (41993)
+          if multi_policy == "target_track" then
+            -- SOURCE-target: Don't write policy ExtState (RGWH will use 41993 naturally based on FX track channels)
+            reaper.SetProjExtState(0, "RGWH", "MULTI_CHANNEL_POLICY", "")
+            if debug_enabled() then
+              log_step("CORE", "Multi-Channel Policy=target_track: No ExtState written (RGWH uses default 41993 behavior)")
+            end
+          else
+            -- SOURCE-playback or SOURCE-track: Write policy to RGWH
+            reaper.SetProjExtState(0, "RGWH", "MULTI_CHANNEL_POLICY", multi_policy)
+            if debug_enabled() then
+              log_step("CORE", "Multi-Channel Policy: %s → RGWH.MULTI_CHANNEL_POLICY (unified protocol)", multi_policy)
+            end
+          end
+          reaper.SetProjExtState(0, "RGWH", "SOURCE_TRACK_NCHAN", tostring(orig_track_nchan_core))
+          if debug_enabled() then
+            log_step("CORE", "Source track snapshot: %d → RGWH.SOURCE_TRACK_NCHAN", orig_track_nchan_core)
+          end
         else
-          -- When not in Multi mode, allow RGWH Core to restore (default behavior)
-          reaper.SetExtState("hsuanice_AS", "RGWH_PRESERVE_TRACK_CH", "1", false)
+          -- When not in Multi mode, preserve FX track channel count (v0.3.0: don't write ExtState)
+          -- RGWH Core will use its default AUTO mode behavior
+          reaper.SetProjExtState(0, "RGWH", "MULTI_CHANNEL_POLICY", "")
+          reaper.SetProjExtState(0, "RGWH", "SOURCE_TRACK_NCHAN", tostring(orig_track_nchan_core))
+          if debug_enabled() then
+            log_step("CORE", "Non-Multi mode → No policy ExtState (RGWH uses AUTO mode)")
+            log_step("CORE", "Source track snapshot: %d → RGWH.SOURCE_TRACK_NCHAN", orig_track_nchan_core)
+          end
         end
 
         -- Prepare arguments and call Core
@@ -2805,7 +2877,7 @@ function main() -- main part of the script
           local is_chain_mode = (AS_merge_args_with_extstate({}).mode == "chain")
           local args = {
             op = "glue",
-            channel_mode = apply_fx_mode,
+            channel_mode = "auto",  -- ★ v0.2.3: Let RGWH Core resolve via Multi-Channel Policy ExtState
             take_fx = true,
             track_fx = true,
           }
@@ -2819,8 +2891,9 @@ function main() -- main part of the script
 
           local ok_call, ok_apply, err = pcall(core_api, args)
 
-          -- Clear ExtState after RGWH Core execution
-          reaper.SetExtState("hsuanice_AS", "RGWH_PRESERVE_TRACK_CH", "", false)
+          -- Clear handshake (v0.2.3: unified protocol)
+          reaper.SetProjExtState(0, "RGWH", "MULTI_CHANNEL_POLICY", "")
+          reaper.SetProjExtState(0, "RGWH", "SOURCE_TRACK_NCHAN", "")
 
           if not ok_call then
             log_step("ERROR", "M.core() runtime error: %s", tostring(ok_apply))
