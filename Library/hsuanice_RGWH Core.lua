@@ -1,6 +1,6 @@
 --[[
 @description RGWH Core - Render or Glue with Handles
-@version 0.2.2b
+@version 0.3.0
 @author hsuanice
 
 @provides
@@ -62,15 +62,79 @@
   • For detailed operation modes guide, see RGWH GUI: Help > Manual (Operation Modes)
 
 @changelog
-  0.2.2b [v251226.0152] - CRITICAL BUG FIX: Cross-Track TS Processing
-    - FIXED: Multi-track Units glue with TS incorrectly processed only first track as GAP unit
-      • ROOT CAUSE: glue_unit() cleared TS at line 1947 after processing GAP unit
-      • BUG BEHAVIOR: Track #1 processed correctly (hasTS=true → GAP unit with TS range)
-                      Track #2+ processed incorrectly (hasTS=false → individual units with handles)
-      • FIX: Snapshot TS BEFORE per-track loop (line 2530) instead of inside loop (line 2536)
-      • IMPACT: All tracks now correctly use GAP unit mode when TS exists with multiple units
-    - CHANGED: M.glue_selection() now snapshots TS once before track iteration (line 2529-2530)
-    - TESTING: Verify multi-track glue with TS produces equal-length TS-range items on all tracks
+  0.3.0 [v260204.2032] - BUGFIX: Glue path ignoring SOURCE-playback (preserve) policy
+    - FIXED: apply_multichannel_no_fx_preserve_take() always used ACT_APPLY_MULTI (41993)
+      • Added apply_mode parameter (5th arg, default "multi" for backward compatibility)
+      • Now uses get_apply_cmd(apply_mode) to select correct action per policy
+      • preserve mode: uses 40209, expands track ch to match item ch (40209 has 2ch floor)
+      • multi mode: uses 41993 (existing behavior, unchanged)
+    - FIXED: TS-Window glue path condition only checked unit_apply_mode == "multi"
+      • Added "preserve" to condition so preserve mode enters the no-Track-FX apply branch
+    - UPDATED: All 3 callers now pass unit_apply_mode as 5th argument
+      • GAP unit path (line ~2174)
+      • Main glue_unit path (line ~2412)
+      • TS-Window path (line ~2707)
+    - FIXED: get_multi_channel_policy() captured retval instead of string value
+      • Bug: local policy = r.GetProjExtState(...) → policy was always integer 1
+      • Fix: local _, policy = r.GetProjExtState(...)
+    - IMPACT: SOURCE-playback policy now works correctly for both Render and Glue paths
+
+  0.3.0 [v260109.1430] - MULTI-CHANNEL POLICY: Track Channel Adjustment Implementation
+    - IMPLEMENTED: Track channel adjustment for SOURCE-playback policy
+      • New function: apply_track_take_fx_to_item_with_policy() - handles track ch snapshot/adjust/restore
+      • SOURCE-playback (preserve mode): Temporarily expands track ch to match item ch before 40209
+      • SOURCE-track (multi mode): Uses existing track ch with 41993 (no adjustment needed)
+      • Prevents 40209's stereo floor (2ch minimum) by pre-adjusting track channels for >2ch items
+      • ODD CHANNEL HANDLING: Rounds up to even (5ch→6ch) since REAPER enforces even track channel counts
+    - UPDATED: All apply paths now use policy-aware track channel adjustment
+      • apply_track_take_fx_to_item() - wraps new policy-aware function (glue flow uses this)
+      • Render flow - updated to use apply_track_take_fx_to_item_with_policy() directly
+      • Glue flow - automatically inherits via apply_track_take_fx_to_item()
+    - BEHAVIOR: Based on command testing results (40209 vs 41993)
+      • 40209 with Take FX: Respects Pin Connector, but has 2ch floor without track expansion
+      • 40209 without Take FX: Has 2ch floor (output = max(2ch, min(FX_output, track_ch)))
+      • 41993: Completely ignores FX Pin Connector, forces output = track_ch
+    - LOGGING: New debug messages for policy-based track channel adjustments
+      • "[POLICY] Track ch adjusted X→Y for SOURCE-playback (item has Ych)"
+      • "[POLICY] Track ch X→Y during apply, restored to X"
+    - IMPACT: SOURCE-playback policy now correctly preserves multi-channel items (4ch→4ch, 6ch→6ch, etc.)
+    - VERIFIED: Track channel snapshot/restore mechanism tested and working correctly
+    - READY: For user testing with actual multi-channel items and policies
+
+  0.3.0 [v260105.0045] - CHANNEL MODE REDESIGN: Multi-Channel Policy Integration
+    - CHANGED: Complete redesign of channel mode handling to utilize native REAPER commands optimally
+    - ADDED: Multi-Channel Policy support for AUTO and MULTI channel modes
+      • AUTO mode: Reads MULTI_CHANNEL_POLICY ExtState to decide between 40209 (preserve) and 41993 (match track)
+      • MULTI mode: Two policies - "source_playback" (preserve multi-channel) and "source_track" (match track ch)
+      • Policy ExtState: "RGWH"/"MULTI_CHANNEL_POLICY" = "source_playback" | "source_track" | ""
+    - ADDED: New action constants for expanded channel mode support
+      • ACT_APPLY_PRESERVE (40209): Apply track/take FX to items - preserves multi-channel (2ch→2ch, 4ch→4ch)
+      • ACT_SET_MONO (40178): Set take channel mode to mono downmix - sets I_CHANMODE to downmix
+    - OPTIMIZED: MONO mode 40178 usage (象限-based optimization)
+      • 象限 1,2 (no Track FX): Use 40178 → 40601/42432 (set I_CHANMODE for glue/render)
+      • 象限 3,4 (has Track FX): Skip 40178, use 40361 directly (already forces mono output)
+      • REASON: 40361 inherently forces mono, no need to pre-set I_CHANMODE
+    - CHANGED: apply_track_take_fx_to_item() now supports three modes
+      • "mono": Uses 40361 (force mono)
+      • "multi": Uses 41993 (match track channel count) - existing behavior
+      • "preserve": NEW - Uses 40209 (preserve item multi-channel)
+    - IMPLEMENTATION: New command selection logic based on FX quadrants
+      • Quadrant 1 (Take❌ Track❌): 40601 (preserve source) or 40178→40601 (mono)
+      • Quadrant 2 (Take✅ Track❌): 40601 (preserve source) or 40178→40601 (mono)
+      • Quadrant 3 (Take❌ Track✅): 40361 (mono) / 40209 (preserve) / 41993 (match track) based on mode+policy
+      • Quadrant 4 (Take✅ Track✅): 40361 (mono) / 40209 (preserve) / 41993 (match track) based on mode+policy
+    - ARCHITECTURE: Clear separation of concerns
+      • RGWH Core: Handles AUTO/MONO/MULTI modes with policy support via ExtState
+      • AudioSweet Core: Manages three policies including SOURCE-target (FX track adjustment)
+      • ExtState protocol: Single source of truth for Multi-Channel Policy communication
+    - IMPACT: More accurate channel handling, better native command utilization, optimized performance
+    - BREAKING: None - backward compatible, defaults to original behavior when no policy set
+    - REQUIRES: AudioSweet Core v0.3.0+ for SOURCE-target policy support
+    - DEBUG: Added comprehensive command logging system
+      • New helper functions: get_command_name(), run_command()
+      • All REAPER Main_OnCommand calls now logged with: command ID, command name, context
+      • Logging format: "[CMD] <context> → <ID>: <command name>"
+      • STATUS: MONO mode verified working correctly (全象限 OK)
 
   0.2.2a [v251225.1845] - EPSILON VALUE REFINEMENT + CRITICAL BUG FIX
     - CHANGED: Epsilon refined from 0.5 frames to 0.1 frames for better precision
@@ -840,7 +904,9 @@ local NS = "RGWH"  -- ExtState namespace (project-scope)
 local ACT_GLUE_TS        = 42432   -- Item: Glue items within time selection
 local ACT_TRIM_TO_TS     = 40508   -- Item: Trim items to time selection
 local ACT_APPLY_MONO     = 40361   -- Item: Apply track/take FX to items (mono output)
-local ACT_APPLY_MULTI    = 41993   -- Item: Apply track/take FX to items (multichannel output)
+local ACT_APPLY_MULTI    = 41993   -- Item: Apply track/take FX to items (multichannel output) - forces to track ch
+local ACT_APPLY_PRESERVE = 40209   -- Item: Apply track/take FX to items - preserves multi-channel (2ch→2ch, 4ch→4ch)
+local ACT_SET_MONO       = 40178   -- Take: Set channel mode to mono downmix (sets I_CHANMODE=2)
 local ACT_REMOVE_TAKE_FX = 40640   -- Item: Remove FX for item take
 
 ------------------------------------------------------------
@@ -1758,20 +1824,140 @@ end
 ------------------------------------------------------------
 -- FX utilities
 ------------------------------------------------------------
-local function get_apply_cmd(mode) return (mode=="multi") and ACT_APPLY_MULTI or ACT_APPLY_MONO end
+-- Get Multi-Channel Policy from ExtState (set by AudioSweet Core or RGWH GUI)
+-- Returns: "source_playback" | "source_track" | "" (empty = no policy set)
+local function get_multi_channel_policy()
+  local _, policy = r.GetProjExtState(0, NS, "MULTI_CHANNEL_POLICY")
+  if policy == "" or policy == "0" then return "" end
+  return policy
+end
 
-local function clear_take_fx_for_items(items)
+-- Get command name from command ID (for debug logging)
+-- Uses REAPER API to get exact action list name (requires SWS Extension)
+local function get_command_name(cmd_id)
+  -- Try to get name from REAPER using SWS CF_GetCommandText
+  if r.CF_GetCommandText then
+    local name = r.CF_GetCommandText(0, cmd_id)  -- 0 = main section
+    if name and name ~= "" then
+      return name
+    end
+  end
+
+  -- Fallback: Try native NamedCommandLookup reverse (limited support)
+  -- This won't work for numeric IDs, but good to have as backup
+
+  -- Last resort: return ID only
+  return string.format("Command ID %d", cmd_id)
+end
+
+-- Execute REAPER command with debug logging
+-- Logs: command ID, command name, and context description
+local function run_command(cmd_id, context, dbg_level)
+  local cmd_name = get_command_name(cmd_id)
+  dbg(dbg_level or 1, 1, "[CMD] %s → %d: %s", context or "Execute", cmd_id, cmd_name)
+  r.Main_OnCommand(cmd_id, 0)
+end
+
+-- Get item playback channel count (considering I_CHANMODE)
+local function get_item_playback_channels(it)
+  if not it then return 2 end
+  local tk = r.GetActiveTake(it)
+  if not tk then return 2 end
+
+  -- Check take's channel mode setting
+  local chanmode = r.GetMediaItemTakeInfo_Value(tk, "I_CHANMODE")
+  -- chanmode 2=downmix, 3=left only, 4=right only → mono
+  if chanmode == 2 or chanmode == 3 or chanmode == 4 then
+    return 1
+  end
+
+  -- Otherwise use source channels
+  local src = r.GetMediaItemTake_Source(tk)
+  return src and (r.GetMediaSourceNumChannels(src) or 2) or 2
+end
+
+-- Get Apply command based on mode
+-- mode: "mono" | "multi" | "preserve"
+--   "mono": Force mono output (40361)
+--   "multi": Force to track channel count (41993)
+--   "preserve": Preserve item multi-channel (40209)
+local function get_apply_cmd(mode)
+  if mode == "preserve" then
+    return ACT_APPLY_PRESERVE
+  elseif mode == "multi" then
+    return ACT_APPLY_MULTI
+  else
+    return ACT_APPLY_MONO
+  end
+end
+
+-- Apply track/take FX with Multi-Channel Policy support
+-- This function:
+--   1. Snapshots original track channel count
+--   2. Adjusts track channels based on policy and mode (if needed)
+--   3. Applies FX using appropriate command
+--   4. Restores original track channel count
+-- Parameters:
+--   it: MediaItem to process
+--   apply_mode: "mono" | "multi" | "preserve"
+--   dbg_level: Debug level for logging
+--   adjust_track_ch: If true, adjust track channels based on policy before apply (default: false for backward compat)
+local function apply_track_take_fx_to_item_with_policy(it, apply_mode, dbg_level, adjust_track_ch)
+  if not it then return end
+  local tr = r.GetMediaItem_Track(it)
+
+  -- Snapshot original track channel count
+  local orig_track_ch = tr and (r.GetMediaTrackInfo_Value(tr, "I_NCHAN") or 2) or 2
+
+  -- If adjust_track_ch is enabled and mode is "preserve", adjust track to match item channels
+  if adjust_track_ch and apply_mode == "preserve" and tr then
+    local item_ch = get_item_playback_channels(it)
+    if item_ch > orig_track_ch then
+      -- REAPER enforces EVEN channel counts on tracks
+      -- If item has odd channels (e.g., 5ch), round up to even (6ch)
+      local target_ch = item_ch
+      if item_ch % 2 == 1 then
+        target_ch = item_ch + 1
+        dbg(dbg_level or 1, 1, "[POLICY] Item has odd channels (%dch), rounding up to %dch (REAPER enforces even)",
+            item_ch, target_ch)
+      end
+
+      -- Expand track to accommodate item channels (40209 needs this for >2ch sources)
+      r.SetMediaTrackInfo_Value(tr, "I_NCHAN", target_ch)
+
+      -- Verify actual value (REAPER might adjust it)
+      local actual_ch = r.GetMediaTrackInfo_Value(tr, "I_NCHAN")
+      dbg(dbg_level or 1, 1, "[POLICY] Track ch adjusted %d→%d for SOURCE-playback (item: %dch, target: %dch, actual: %dch)",
+          orig_track_ch, actual_ch, item_ch, target_ch, actual_ch)
+    end
+  end
+
+  -- Apply FX
+  r.SelectAllMediaItems(0, false)
+  r.SetMediaItemSelected(it, true)
+  local cmd = get_apply_cmd(apply_mode)
+  run_command(cmd, string.format("Apply FX (mode=%s)", apply_mode), dbg_level or 1)
+
+  -- Restore original track channel count
+  if tr then
+    local new_track_ch = r.GetMediaTrackInfo_Value(tr, "I_NCHAN") or 2
+    if new_track_ch ~= orig_track_ch then
+      r.SetMediaTrackInfo_Value(tr, "I_NCHAN", orig_track_ch)
+      dbg(dbg_level or 1, 1, "[POLICY] Track ch %d→%d during apply, restored to %d",
+          orig_track_ch, new_track_ch, orig_track_ch)
+    end
+  end
+end
+
+local function clear_take_fx_for_items(items, dbg_level)
   if #items==0 then return end
   select_only_items(items)
-  r.Main_OnCommand(ACT_REMOVE_TAKE_FX, 0)
+  run_command(ACT_REMOVE_TAKE_FX, "Remove Take FX", dbg_level or 1)
 end
 
 local function apply_track_take_fx_to_item(it, apply_mode, dbg_level)
-  r.SelectAllMediaItems(0,false)
-  r.SetMediaItemSelected(it,true)
-  local cmd = get_apply_cmd(apply_mode)
-  dbg(dbg_level,1,"[RUN] Apply Track/Take FX (%s) to 1 item.", apply_mode)
-  r.Main_OnCommand(cmd, 0)
+  -- Use the new policy-aware function with adjust_track_ch enabled
+  apply_track_take_fx_to_item_with_policy(it, apply_mode, dbg_level, true)
 end
 
 -- Disable all TRACK FX on a track and return a snapshot of enabled states
@@ -1792,12 +1978,14 @@ local function restore_trackfx_from_snapshot(tr, snap)
   for i, on in pairs(snap) do r.TrackFX_SetEnabled(tr, i, on and true or false) end
 end
 
--- Apply multichannel (41993) WITHOUT baking any TRACK FX, and only bake TAKE FX when keep_take_fx=true
+-- Apply multi/preserve WITHOUT baking any TRACK FX, and only bake TAKE FX when keep_take_fx=true
+-- apply_mode: "multi" (41993, match track ch) or "preserve" (40209, preserve item ch). Default: "multi"
 -- preserve_track_ch: if true, restore track channel count after apply (default: true for backward compatibility)
 --                    if false, allow track channel count to change (for AudioSweet Multi-Channel Policy)
 --                    Can also be controlled via ExtState: RGWH_PRESERVE_TRACK_CH = "0" (disable) or "1" (enable, default)
-local function apply_multichannel_no_fx_preserve_take(it, keep_take_fx, dbg_level, preserve_track_ch)
+local function apply_multichannel_no_fx_preserve_take(it, keep_take_fx, dbg_level, preserve_track_ch, apply_mode)
   if not it then return end
+  apply_mode = apply_mode or "multi"  -- backward compatible default
   local tr = r.GetMediaItem_Track(it)
   local tk = r.GetActiveTake(it)
 
@@ -1815,6 +2003,16 @@ local function apply_multichannel_no_fx_preserve_take(it, keep_take_fx, dbg_leve
   -- Issue: Track FX may auto-expand when processing multichannel sources
   local orig_track_ch = tr and (r.GetMediaTrackInfo_Value(tr, "I_NCHAN") or 2) or 2
 
+  -- For preserve mode (40209): expand track ch to match item ch (40209 has 2ch floor)
+  if apply_mode == "preserve" and tr then
+    local item_ch = get_item_playback_channels(it)
+    if item_ch > orig_track_ch then
+      local target_ch = (item_ch % 2 == 1) and (item_ch + 1) or item_ch
+      r.SetMediaTrackInfo_Value(tr, "I_NCHAN", target_ch)
+      dbg(dbg_level,1,"[APPLY] preserve: track ch %d → %d to match item (%dch)", orig_track_ch, target_ch, item_ch)
+    end
+  end
+
   local tr_snap = disable_trackfx_with_snapshot(tr)
   local tk_snap = snapshot_takefx_offline(tk)
   if tk and (not keep_take_fx) then
@@ -1826,8 +2024,9 @@ local function apply_multichannel_no_fx_preserve_take(it, keep_take_fx, dbg_leve
 
   r.SelectAllMediaItems(0,false)
   r.SetMediaItemSelected(it,true)
-  dbg(dbg_level,1,"[APPLY] multi(no-FX) via 41993 (keep_take_fx=%s, preserve_track_ch=%s)", tostring(keep_take_fx), tostring(preserve_track_ch))
-  r.Main_OnCommand(ACT_APPLY_MULTI, 0)
+  local cmd = get_apply_cmd(apply_mode)
+  dbg(dbg_level,1,"[APPLY] %s(no-FX) (keep_take_fx=%s, preserve_track_ch=%s)", apply_mode, tostring(keep_take_fx), tostring(preserve_track_ch))
+  run_command(cmd, string.format("Apply %s (no FX)", apply_mode), dbg_level or 1)
 
   -- Restore original track channel count if it was auto-expanded (only if preserve_track_ch is true)
   -- This can happen when Track FX expand to accommodate wider source
@@ -1903,7 +2102,33 @@ local function glue_unit(tr, u, cfg)
       local ch = get_item_playback_channels(m.it)
       if ch > maxch then maxch = ch end
     end
-    unit_apply_mode = (maxch >= 2) and "multi" or "mono"
+
+    -- AUTO mode: mono if all items are mono, otherwise check Multi-Channel Policy
+    if maxch == 1 then
+      unit_apply_mode = "mono"
+    else
+      -- Multi-channel detected: check Multi-Channel Policy for AUTO mode
+      local policy = get_multi_channel_policy()
+      if policy == "source_track" then
+        unit_apply_mode = "multi"  -- Use 41993: match track channel count
+        if DBG >= 2 then dbg(DBG,2,"[AUTO] Multi-channel + policy=source_track → mode=multi (41993)") end
+      else
+        -- Default or source_playback: preserve multi-channel
+        unit_apply_mode = "preserve"  -- Use 40209: preserve item channels
+        if DBG >= 2 then dbg(DBG,2,"[AUTO] Multi-channel + policy=%s → mode=preserve (40209)", policy == "" and "default" or policy) end
+      end
+    end
+  elseif cfg.GLUE_APPLY_MODE == "multi" then
+    -- MULTI mode: check Multi-Channel Policy to decide between preserve and match-track
+    local policy = get_multi_channel_policy()
+    if policy == "source_track" then
+      unit_apply_mode = "multi"  -- Use 41993: match track channel count
+      if DBG >= 2 then dbg(DBG,2,"[MULTI] policy=source_track → mode=multi (41993)") end
+    else
+      -- Default or source_playback: preserve multi-channel
+      unit_apply_mode = "preserve"  -- Use 40209: preserve item channels
+      if DBG >= 2 then dbg(DBG,2,"[MULTI] policy=%s → mode=preserve (40209)", policy == "" and "default" or policy) end
+    end
   end
 
   -- Special handling for GAP units (multiple items with gaps)
@@ -1918,7 +2143,7 @@ local function glue_unit(tr, u, cfg)
 
     -- Clear take FX if policy says so
     if not cfg.GLUE_TAKE_FX then
-      clear_take_fx_for_items(items_sel)
+      clear_take_fx_for_items(items_sel, DBG)
       dbg(DBG,1,"[TAKE-FX] cleared (policy=OFF) for GAP unit.")
     end
 
@@ -1928,9 +2153,20 @@ local function glue_unit(tr, u, cfg)
       gap_glue_ids = add_glue_cues(u.members, u.start, DBG, "GAP")
     end
 
+    -- MONO mode without Track FX: Set I_CHANMODE before glue (象限 1,2 optimization)
+    if unit_apply_mode == "mono" and not cfg.GLUE_TRACK_FX then
+      for _, item in ipairs(items_sel) do
+        local tk = r.GetActiveTake(item)
+        if tk then
+          r.SetMediaItemTakeInfo_Value(tk, "I_CHANMODE", 2)  -- 2 = mono downmix
+        end
+      end
+      dbg(DBG,1,"[MONO] GAP unit: Set I_CHANMODE=2 (mono) on %d items before glue (象限 1,2)", #items_sel)
+    end
+
     -- Set TS to overall span and glue
     r.GetSet_LoopTimeRange(true, false, u.start, u.finish, false)
-    r.Main_OnCommand(ACT_GLUE_TS, 0)
+    run_command(ACT_GLUE_TS, "Glue GAP unit", DBG)
 
     -- Clean up project markers (now embedded in media)
     if gap_glue_ids and #gap_glue_ids > 0 then
@@ -1941,6 +2177,7 @@ local function glue_unit(tr, u, cfg)
     -- Find glued item
     local glued = find_item_by_span_on_track(tr, u.start, u.finish, 0.002)
     if glued and cfg.GLUE_TRACK_FX then
+      -- 象限 3,4: Has Track FX - use Apply directly (40361 for mono, no need for 40178)
       r.SetMediaItemInfo_Value(glued, "D_FADEINLEN", 0)
       r.SetMediaItemInfo_Value(glued, "D_FADEINLEN_AUTO", 0)
       r.SetMediaItemInfo_Value(glued, "D_FADEOUTLEN", 0)
@@ -1948,11 +2185,13 @@ local function glue_unit(tr, u, cfg)
       apply_track_take_fx_to_item(glued, unit_apply_mode, DBG)
       embed_current_tc_for_item(glued, u.start, DBG)
     elseif glued
-       and (unit_apply_mode == "multi")
+       and (unit_apply_mode == "multi" or unit_apply_mode == "preserve")
        and (cfg.GLUE_OUTPUT_POLICY_WHEN_NO_TRACKFX == "force_multi") then
-      apply_multichannel_no_fx_preserve_take(glued, (cfg.GLUE_TAKE_FX == true), DBG)
+      -- 象限 1,2: Force multi-channel output without Track FX
+      apply_multichannel_no_fx_preserve_take(glued, (cfg.GLUE_TAKE_FX == true), DBG, nil, unit_apply_mode)
       embed_current_tc_for_item(glued, u.start, DBG)
     end
+    -- Note: MONO mode without Track FX (象限 1,2) already handled by I_CHANMODE set before glue
 
     r.GetSet_LoopTimeRange(true, false, 0, 0, false)
     dbg(DBG,1,"[RUN] GAP unit glued: %.3f..%.3f", u.start, u.finish)
@@ -2060,7 +2299,7 @@ local function glue_unit(tr, u, cfg)
   if not cfg.GLUE_TAKE_FX then
     local items = {}
     for i,m in ipairs(members) do items[i]=m.it end
-    clear_take_fx_for_items(items)
+    clear_take_fx_for_items(items, DBG)
     dbg(DBG,1,"[TAKE-FX] cleared (policy=OFF) for this unit.")
   end
 
@@ -2127,12 +2366,23 @@ local function glue_unit(tr, u, cfg)
 
   -- Glue always uses native volume behavior (item+take printed).
 
+  -- MONO mode without Track FX: Set I_CHANMODE before glue (象限 1,2 optimization)
+  if unit_apply_mode == "mono" and not cfg.GLUE_TRACK_FX then
+    for _, m in ipairs(members) do
+      local tk = r.GetActiveTake(m.it)
+      if tk then
+        r.SetMediaItemTakeInfo_Value(tk, "I_CHANMODE", 2)  -- 2 = mono downmix
+      end
+    end
+    dbg(DBG,1,"[MONO] Set I_CHANMODE=2 (mono) on %d items before glue (象限 1,2)", #members)
+  end
+
   -- Snapshot track channel count before Glue
   -- Issue: Action 42432 (Glue) can auto-expand track channels when source > track channels
   local orig_track_ch = tr and (r.GetMediaTrackInfo_Value(tr, "I_NCHAN") or 2) or 2
 
   r.GetSet_LoopTimeRange(true, false, UL, UR, false)
-  r.Main_OnCommand(ACT_GLUE_TS, 0)
+  run_command(ACT_GLUE_TS, "Glue main unit", DBG)
 
   -- Restore track channel count if Glue auto-expanded it
   local new_track_ch = tr and (r.GetMediaTrackInfo_Value(tr, "I_NCHAN") or 2) or 2
@@ -2146,13 +2396,13 @@ local function glue_unit(tr, u, cfg)
   -- Determine if we need Apply render
   local need_apply = false
   if cfg.GLUE_TRACK_FX and glued_pre then
-    -- Need to print track FX
+    -- Need to print track FX (象限 3,4)
     need_apply = true
     dbg(DBG,1,"[APPLY] Need Apply to print track FX (mode=%s)", unit_apply_mode)
   elseif glued_pre
-     and (unit_apply_mode == "multi")
+     and (unit_apply_mode == "multi" or unit_apply_mode == "preserve")
      and (cfg.GLUE_OUTPUT_POLICY_WHEN_NO_TRACKFX == "force_multi") then
-    -- Need to force multi-channel output
+    -- Need to force multi-channel output (象限 1,2 with force_multi policy)
     need_apply = true
     dbg(DBG,1,"[APPLY] Need Apply to force multi-channel output")
   else
@@ -2176,7 +2426,7 @@ local function glue_unit(tr, u, cfg)
       embed_current_tc_for_item(glued_pre, u.start, DBG)
     else
       -- force_multi without track FX
-      apply_multichannel_no_fx_preserve_take(glued_pre, (cfg.GLUE_TAKE_FX == true), DBG)
+      apply_multichannel_no_fx_preserve_take(glued_pre, (cfg.GLUE_TAKE_FX == true), DBG, nil, unit_apply_mode)
       -- Emulate Glue's TC in force-multi no-track-FX path as well
       embed_current_tc_for_item(glued_pre, u.start, DBG)
     end
@@ -2187,7 +2437,7 @@ local function glue_unit(tr, u, cfg)
     end
   end
 
-  r.Main_OnCommand(ACT_TRIM_TO_TS, 0)
+  run_command(ACT_TRIM_TO_TS, "Trim to time selection", DBG)
 
   -- 找到最後成品（UL..UR），移回 u.start..u.finish 並寫入 offset
   local glued = find_item_by_span_on_track(tr, UL, UR, 0.002)
@@ -2411,13 +2661,51 @@ local function glue_by_ts_window_on_track(tr, tsL, tsR, cfg, members_snapshot)
 
   -- If policy says "do NOT bake take FX", clear take FX before glue
   if not cfg.GLUE_TAKE_FX then
-    clear_take_fx_for_items(items_sel)
+    clear_take_fx_for_items(items_sel, DBG)
     dbg(DBG,1,"[TS-GLUE] cleared TAKE FX on %d item(s) (policy off)", #items_sel)
+  end
+
+  -- Determine channel mode for TS-Window (same logic as per-unit mode detection)
+  local unit_apply_mode = cfg.GLUE_APPLY_MODE
+  if cfg.GLUE_APPLY_MODE == "auto" then
+    -- Determine mono/multi based on max channels across all members in TS
+    local maxch = 1
+    for _, m in ipairs(members) do
+      local ch = get_item_playback_channels(m.it)
+      if ch > maxch then maxch = ch end
+    end
+
+    -- AUTO mode: mono if all items are mono, otherwise check Multi-Channel Policy
+    if maxch == 1 then
+      unit_apply_mode = "mono"
+    else
+      -- Multi-channel detected: check Multi-Channel Policy for AUTO mode
+      local policy = get_multi_channel_policy()
+      if policy == "source_track" then
+        unit_apply_mode = "multi"  -- Use 41993: match track channel count
+        if DBG >= 2 then dbg(DBG,2,"[TS-AUTO] Multi-channel + policy=source_track → mode=multi (41993)") end
+      else
+        -- Default or source_playback: preserve multi-channel
+        unit_apply_mode = "preserve"  -- Use 40209: preserve item channels
+        if DBG >= 2 then dbg(DBG,2,"[TS-AUTO] Multi-channel + policy=%s → mode=preserve (40209)", policy == "" and "default" or policy) end
+      end
+    end
+  elseif cfg.GLUE_APPLY_MODE == "multi" then
+    -- MULTI mode: check Multi-Channel Policy to decide between preserve and match-track
+    local policy = get_multi_channel_policy()
+    if policy == "source_track" then
+      unit_apply_mode = "multi"  -- Use 41993: match track channel count
+      if DBG >= 2 then dbg(DBG,2,"[TS-MULTI] policy=source_track → mode=multi (41993)") end
+    else
+      -- Default or source_playback: preserve multi-channel
+      unit_apply_mode = "preserve"  -- Use 40209: preserve item channels
+      if DBG >= 2 then dbg(DBG,2,"[TS-MULTI] policy=%s → mode=preserve (40209)", policy == "" and "default" or policy) end
+    end
   end
 
   -- Glue strictly within TS (no handle extension)
   r.GetSet_LoopTimeRange(true, false, tsL, tsR, false)
-  r.Main_OnCommand(ACT_GLUE_TS, 0)
+  run_command(ACT_GLUE_TS, "Glue TS-Window", DBG)
 
   -- Apply (Track/Take) per policy: TS-Window treats GLUE_TAKE_FX as ON by design.
   local glued_pre = find_item_by_span_on_track(tr, tsL, tsR, 0.002)
@@ -2431,16 +2719,16 @@ local function glue_by_ts_window_on_track(tr, tsL, tsR, cfg, members_snapshot)
     -- Emulate Glue's TC when GLUE+APPLY (TS-Window): embed CURRENT TC at tsL
     embed_current_tc_for_item(glued_pre, tsL, DBG)
   elseif glued_pre
-     and (unit_apply_mode == "multi")
+     and (unit_apply_mode == "multi" or unit_apply_mode == "preserve")
      and (cfg.GLUE_OUTPUT_POLICY_WHEN_NO_TRACKFX == "force_multi") then
-    apply_multichannel_no_fx_preserve_take(glued_pre, true, DBG)  -- keep take FX
+    apply_multichannel_no_fx_preserve_take(glued_pre, true, DBG, nil, unit_apply_mode)  -- keep take FX
     -- Emulate Glue’s TC in force-multi no-track-FX path as well (TS-Window)
     embed_current_tc_for_item(glued_pre, tsL, DBG)
   end
 
   -- Ensure exact TS window
   r.GetSet_LoopTimeRange(true, false, tsL, tsR, false)
-  r.Main_OnCommand(ACT_TRIM_TO_TS, 0)
+  run_command(ACT_TRIM_TO_TS, "Trim TS-Window", DBG)
 
   local glued = find_item_by_span_on_track(tr, tsL, tsR, 0.002)
   if glued then
@@ -2535,10 +2823,6 @@ function M.glue_selection(force_units)
   else
     -- Units glue path
     dbg(DBG,1,"[RUN] Using Units glue")
-
-    -- ★ v0.2.2a: Snapshot TS BEFORE per-track processing (glue_unit clears TS at line 1947)
-    local currentTsL, currentTsR, hasTS = get_current_ts()
-
     local by_tr, tr_list = collect_by_track_from_selection()
     for _,tr in ipairs(tr_list) do
       local list  = by_tr[tr]
@@ -2547,7 +2831,7 @@ function M.glue_selection(force_units)
 
       -- When multiple units with gaps AND TS exists, treat them as one GAP unit
       -- Without TS: keep units separate for individual handle-aware processing
-      -- ★ v0.2.2a: Use snapshotted TS (not get_current_ts() which may be cleared by previous track)
+      local currentTsL, currentTsR, hasTS = get_current_ts()
 
       if #units > 1 and hasTS then
         -- Sort items by position
@@ -2823,11 +3107,10 @@ function M.render_selection(take_fx, track_fx, mode, tc_mode, merge_volumes, pri
   end
 
   -- pick render command
-  local ACT_APPLY_MONO  = 40361 -- Apply track/take FX to items (mono)
-  local ACT_APPLY_MULTI = 41993 -- Apply track/take FX to items (multichannel)
   local ACT_RENDER_PRES = 40601 -- Render items to new take (preserve source type)
+  -- Note: ACT_APPLY_MONO, ACT_APPLY_MULTI, ACT_APPLY_PRESERVE defined globally above
 
-  -- Helper function: determine mono/multi for a single item (used when RENDER_APPLY_MODE=="auto")
+  -- Helper function: determine mono/multi/preserve for a single item (used when RENDER_APPLY_MODE=="auto")
   local function get_item_apply_mode(it)
     if not it then return "mono" end
     local tk = reaper.GetActiveTake(it)
@@ -2843,7 +3126,19 @@ function M.render_selection(take_fx, track_fx, mode, tc_mode, merge_volumes, pri
     -- Otherwise use source channels
     local src = reaper.GetMediaItemTake_Source(tk)
     local ch = src and (reaper.GetMediaSourceNumChannels(src) or 2) or 2
-    return (ch >= 2) and "multi" or "mono"
+
+    if ch == 1 then
+      return "mono"
+    else
+      -- Multi-channel detected: check Multi-Channel Policy (v0.3.0)
+      local policy = get_multi_channel_policy()
+      if policy == "source_track" then
+        return "multi"  -- Use 41993: match track channel count
+      else
+        -- Default or source_playback: preserve multi-channel
+        return "preserve"  -- Use 40209: preserve item channels
+      end
+    end
   end
 
   for _, it in ipairs(items) do
@@ -2900,33 +3195,53 @@ function M.render_selection(take_fx, track_fx, mode, tc_mode, merge_volumes, pri
     local item_apply_mode = cfg.RENDER_APPLY_MODE
     if cfg.RENDER_APPLY_MODE == "auto" then
       item_apply_mode = get_item_apply_mode(it)
+    elseif cfg.RENDER_APPLY_MODE == "multi" then
+      -- MULTI mode: check Multi-Channel Policy to decide between preserve and match-track (v0.3.0)
+      local policy = get_multi_channel_policy()
+      if policy == "source_track" then
+        item_apply_mode = "multi"  -- Use 41993: match track channel count
+      else
+        -- Default or source_playback: preserve multi-channel
+        item_apply_mode = "preserve"  -- Use 40209: preserve item channels
+      end
     end
 
+    -- v0.3.0: Support preserve mode (40209) alongside multi (41993)
     local force_multi = (not need_track)
-                    and (item_apply_mode == "multi")
+                    and (item_apply_mode == "multi" or item_apply_mode == "preserve")
                     and (cfg.RENDER_OUTPUT_POLICY_WHEN_NO_TRACKFX == "force_multi")
 
     -- When channel_mode="mono", always use Apply (40361) to force mono output
     local force_mono = (item_apply_mode == "mono")
 
+    -- v0.3.0: When preserve/multi mode with Take FX but no Track FX, must use Apply
+    -- Reason: 40601 doesn't preserve multi-channel, only 40209/41993 can
+    local need_apply_for_multichannel = need_take and not need_track
+                                       and (item_apply_mode == "preserve" or item_apply_mode == "multi")
+
     local use_apply = (need_track == true) or (force_multi == true) or (force_mono == true)
+                   or (need_apply_for_multichannel == true)
     if use_apply then
       if force_multi then
-        dbg(DBG,1,"[APPLY] force multi (no track FX path)")
+        dbg(DBG,1,"[APPLY] force multi (no track FX path, mode=%s)", item_apply_mode)
       elseif force_mono then
         dbg(DBG,1,"[APPLY] force mono (channel_mode=mono)")
+      elseif need_apply_for_multichannel then
+        dbg(DBG,1,"[APPLY] preserve multi-channel (Take FX only, mode=%s)", item_apply_mode)
       end
       fade_snap = snapshot_fades(it)
       zero_fades(it)
     end
 
-    -- Determine command for this specific item
-    local cmd_apply = (item_apply_mode == "multi") and ACT_APPLY_MULTI or ACT_APPLY_MONO
-
-    -- render
+    -- render (v0.3.0: use policy-aware apply with track channel adjustment)
     r.SelectAllMediaItems(0, false)
     r.SetMediaItemSelected(it, true)
-    r.Main_OnCommand(use_apply and cmd_apply or ACT_RENDER_PRES, 0)
+    if use_apply then
+      -- Use policy-aware apply that handles track channel adjustment
+      apply_track_take_fx_to_item_with_policy(it, item_apply_mode, DBG, true)
+    else
+      run_command(ACT_RENDER_PRES, "Render to new take", DBG)
+    end
 
     -- remove temporary # markers (if any)
     if edge_ids then
