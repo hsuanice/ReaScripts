@@ -1,7 +1,7 @@
 --[[
 @description RGWH GUI - ImGui Interface for RGWH Core
 @author hsuanice
-@version 0.1.5
+@version 0.2.0
 @provides
   [main] .
 
@@ -14,26 +14,37 @@
   Adjust parameters using the visual controls and click operation buttons to execute.
 
 @changelog
-  0.1.5 [v251226.0310] - Multi-Channel Policy + Handle Improvements
-    - ADDED: Multi-Channel Policy setting in Settings > Policies
-      • Two options: "SOURCE playback channels" | "SOURCE track channels"
-      • Syncs to ExtState: MULTI_CHANNEL_POLICY (source_playback/source_track)
-      • Only applies when Channel Mode is set to "Multi"
-      • Orange warning displayed when Channel Mode is not Multi
-    - CHANGED: Handle settings simplified - fixed to "seconds" only
-      • REMOVED: Handle Mode dropdown (Use ExtState/Seconds/Frames)
-      • Handle now always uses seconds internally (no migration logic)
-      • Simplified GUI: one less control to configure
-      • Clean code: no handle_mode references in persist/args
-    - ADDED: "Whole File" toggle on same line as Handle input (matches AudioSweet)
-      • When enabled, sets HANDLE_SECONDS = 999999 (whole file mode)
-      • Handle Length input disabled when Whole File is active
-      • Single-line layout with 20px spacing: [✓] Whole File [5.0] seconds
-      • Tooltip explains whole file behavior
-      • Exact match with AudioSweet GUI implementation
-    - UPDATED: Debug logging shows "Handle: WHOLE FILE" or "Handle: X seconds"
-    - UPDATED: Debug logging shows Multi-Channel Policy value
-    - IMPACT: Cleaner Handle UI, Multi-Channel Policy support, v0.2.3-ready
+  0.2.0 [v260204.2352] - Multi mode hover info + Manual: mono 2ch floor documentation
+    - UPDATED: Multi channel mode tooltip
+      • Now explains Multi-Channel Policy (SOURCE-playback / SOURCE-track)
+      • Clarifies vs AUTO mode: MULTI does not detect mono items → 2ch minimum
+    - UPDATED: SOURCE-playback policy tooltip
+      • Separated mono handling by mode: AUTO → 1ch, MULTI → 2ch (40209 floor)
+      • Added note: "Use AUTO mode if mono should stay mono"
+    - UPDATED: Manual > Overview > Channel Mode table
+      • Multi row: now shows policy-based (40209/41993) instead of hardcoded 41993
+      • Auto row: clarified mono → 40361, multi → policy-based
+      • Apply Actions row: added 40209 (preserve)
+    - ADDED: Manual > Multi-Channel Policy section
+      • SOURCE-playback vs SOURCE-track explanation
+      • Mono items in MULTI mode: 40209 has 2ch floor
+      • Guidance: use AUTO mode for true 1ch mono preservation
+
+  0.2.0 [v260104.2344] - Multi-Channel Policy Support
+    - ADDED: Multi-Channel Policy control for AUTO and MULTI channel modes
+      • Two policies: SOURCE-playback (preserve item channels) and SOURCE-track (match track channels)
+      • UI: Appears as indented radio buttons below Channel Mode when AUTO or MULTI is selected
+      • Tooltips explain each policy's behavior and use cases
+    - ADDED: ExtState synchronization for MULTI_CHANNEL_POLICY
+      • Writes "source_playback" or "source_track" to RGWH ExtState
+      • Integrated into sync_rgwh_extstate_from_gui() function
+    - ADDED: Debug logging for Multi-Channel Policy setting
+      • Shows in console output when debug mode is enabled
+      • Format: "Multi-Channel Policy: SOURCE-playback" or "SOURCE-track"
+    - CHANGED: GUI state now includes multi_channel_policy field (0=source_playback, 1=source_track)
+    - REQUIRES: RGWH Core v0.3.0+ for Multi-Channel Policy support
+    - IMPACT: Users can now control multi-channel behavior for AUTO/MULTI modes
+    - NOTE: Policy only applies to multi-channel items; mono items always output mono
 
   0.1.4 [v251225.1835] - Epsilon Removal (Internal Constant)
     - REMOVED: Epsilon Mode and Epsilon Value GUI controls (lines 1467-1479)
@@ -535,6 +546,7 @@ local gui = {
   op = 0,                    -- 0=auto, 1=render, 2=glue
   selection_scope = 0,       -- 0=auto, 1=units, 2=ts, 3=item
   channel_mode = 0,          -- 0=auto, 1=mono, 2=multi
+  multi_channel_policy = 0,  -- 0=source_playback, 1=source_track (for AUTO/MULTI modes)
 
   -- Render toggles
   take_fx = true,
@@ -546,9 +558,9 @@ local gui = {
   merge_to_take = true,
   print_volumes = false,
 
-  -- Handle settings (v0.1.5: fixed to seconds, added whole_file toggle)
-  handle_length = 5.0,      -- in seconds
-  handle_whole_file = false,  -- Use complete file length as handle
+  -- Handle settings
+  handle_mode = 0,          -- 0=ext, 1=seconds, 2=frames
+  handle_length = 5.0,
 
   -- Cues (v0.1.4: epsilon removed - now internal constant in RGWH Core)
   cue_write_edge = true,
@@ -558,7 +570,6 @@ local gui = {
   glue_single_items = false,  -- AUTO mode: false=single→render, true=single→glue
   glue_no_trackfx_policy = 0,    -- 0=preserve, 1=force_multi
   render_no_trackfx_policy = 0,  -- 0=preserve, 1=force_multi
-  multi_channel_policy = "source_playback",  -- "source_playback" | "source_track"
 
   -- Debug
   debug_level = 2,           -- 0=silent, 1=normal, 2=verbose
@@ -583,14 +594,13 @@ local gui = {
 local P_NS = "hsuanice_RGWH_GUI_state_v1"
 
 local persist_keys = {
-  'op','selection_scope','channel_mode',
+  'op','selection_scope','channel_mode','multi_channel_policy',
   'take_fx','track_fx','tc_mode',
   'merge_to_item','merge_to_take','print_volumes',
-  'handle_length','handle_whole_file',  -- v0.1.5: removed handle_mode, added handle_whole_file
+  'handle_mode','handle_length',
   'epsilon_mode','epsilon_value',
   'cue_write_edge','cue_write_glue',
   'glue_single_items','glue_no_trackfx_policy','render_no_trackfx_policy',
-  'multi_channel_policy',  -- v0.1.5: added Multi-Channel Policy
   'debug_level','debug_no_clear','selection_policy',
   'enable_docking','bwfmetaedit_custom_path'
 }
@@ -641,6 +651,7 @@ local function sync_rgwh_extstate_from_gui()
   local channel_names = { "auto", "mono", "multi" }
   local tc_names = { "previous", "current", "off" }
   local policy_names = { "preserve", "force_multi" }
+  local multi_channel_policy_names = { "source_playback", "source_track" }
 
   local function set_rgwh(key, val)
     r.SetProjExtState(0, "RGWH", key, tostring(val))
@@ -649,6 +660,9 @@ local function sync_rgwh_extstate_from_gui()
   -- Channel/apply mode
   set_rgwh("GLUE_APPLY_MODE", channel_names[gui.channel_mode + 1])
   set_rgwh("RENDER_APPLY_MODE", channel_names[gui.channel_mode + 1])
+
+  -- Multi-Channel Policy (v0.3.0+)
+  set_rgwh("MULTI_CHANNEL_POLICY", multi_channel_policy_names[gui.multi_channel_policy + 1])
 
   -- FX print toggles
   set_rgwh("GLUE_TAKE_FX", gui.take_fx and "1" or "0")
@@ -666,11 +680,12 @@ local function sync_rgwh_extstate_from_gui()
   set_rgwh("RENDER_PRINT_VOLUMES", gui.print_volumes and "1" or "0")
   set_rgwh("GLUE_PRINT_VOLUMES", gui.print_volumes and "1" or "0")
 
-  -- Handle (v0.1.5: fixed to seconds, whole_file toggle)
-  set_rgwh("HANDLE_MODE", "seconds")
-  if gui.handle_whole_file then
-    set_rgwh("HANDLE_SECONDS", "999999")  -- 999999 = whole file (same as AudioSweet)
-  else
+  -- Handle/epsilon
+  if gui.handle_mode == 1 then
+    set_rgwh("HANDLE_MODE", "seconds")
+    set_rgwh("HANDLE_SECONDS", gui.handle_length)
+  elseif gui.handle_mode == 2 then
+    set_rgwh("HANDLE_MODE", "frames")
     set_rgwh("HANDLE_SECONDS", gui.handle_length)
   end
 
@@ -682,9 +697,6 @@ local function sync_rgwh_extstate_from_gui()
   set_rgwh("GLUE_SINGLE_ITEMS", gui.glue_single_items and "1" or "0")
   set_rgwh("GLUE_OUTPUT_POLICY_WHEN_NO_TRACKFX", policy_names[gui.glue_no_trackfx_policy + 1])
   set_rgwh("RENDER_OUTPUT_POLICY_WHEN_NO_TRACKFX", policy_names[gui.render_no_trackfx_policy + 1])
-
-  -- Multi-Channel Policy (v0.1.5)
-  set_rgwh("MULTI_CHANNEL_POLICY", gui.multi_channel_policy)
 
   -- Debug
   set_rgwh("DEBUG_LEVEL", gui.debug_level)
@@ -726,9 +738,10 @@ local function format_setting_value(key, val)
   local scope_names = {"Auto", "Units", "Time Selection", "Per Item"}
   local channel_names = {"Auto", "Mono", "Multi"}
   local tc_names = {"Previous", "Current", "Off"}
-  -- v0.1.5: handle_names removed (fixed to seconds)
+  local handle_names = {"Use ExtState", "Seconds", "Frames"}
   -- v0.1.4: epsilon_names removed (epsilon is now internal constant)
   local policy_names = {"Preserve", "Force Multi"}
+  local multi_channel_policy_names = {"SOURCE-playback", "SOURCE-track"}  -- v0.3.0
   local debug_names = {"Silent", "Normal", "Verbose"}
   local selection_policy_names = {"Progress", "Restore", "None"}
 
@@ -740,12 +753,12 @@ local function format_setting_value(key, val)
     return scope_names[val + 1] or tostring(val)
   elseif key == "channel_mode" then
     return channel_names[val + 1] or tostring(val)
+  elseif key == "multi_channel_policy" then  -- v0.3.0
+    return multi_channel_policy_names[val + 1] or tostring(val)
   elseif key == "tc_mode" then
     return tc_names[val + 1] or tostring(val)
-  elseif key == "handle_whole_file" then
-    return val and "WHOLE FILE" or "OFF"
-  elseif key == "multi_channel_policy" then
-    return tostring(val)
+  elseif key == "handle_mode" then
+    return handle_names[val + 1] or tostring(val)
   elseif key == "glue_no_trackfx_policy" or key == "render_no_trackfx_policy" then  -- v0.1.4: epsilon_mode case removed
     return policy_names[val + 1] or tostring(val)
   elseif key == "debug_level" then
@@ -775,9 +788,8 @@ local function log_setting_changes(before_state, after_state)
     merge_to_item = "Merge to Item",
     merge_to_take = "Merge to Take",
     print_volumes = "Print Volumes",
+    handle_mode = "Handle Mode",
     handle_length = "Handle Length",
-    handle_whole_file = "Handle: Whole File",
-    multi_channel_policy = "Multi-Channel Policy",
     cue_write_edge = "Write Edge Cues",
     cue_write_glue = "Write Glue Cues",
     glue_single_items = "Glue Single Items",
@@ -946,9 +958,10 @@ local function print_all_settings(prefix)
   local scope_names = {"Auto", "Units", "Time Selection", "Per Item"}
   local channel_names = {"Auto", "Mono", "Multi"}
   local tc_names = {"Previous", "Current", "Off"}
-  -- v0.1.5: handle_names removed (fixed to seconds)
+  local handle_names = {"Use ExtState", "Seconds", "Frames"}
   -- v0.1.4: epsilon_names removed (epsilon is now internal constant)
   local policy_names = {"Preserve", "Force Multi"}
+  local multi_channel_policy_names = {"SOURCE-playback", "SOURCE-track"}  -- v0.3.0
   local debug_names = {"Silent", "Normal", "Verbose"}
   local selection_policy_names = {"Progress", "Restore", "None"}
 
@@ -959,15 +972,15 @@ local function print_all_settings(prefix)
   r.ShowConsoleMsg(string.format("  Operation: %s\n", op_names[gui.op + 1] or "Unknown"))
   r.ShowConsoleMsg(string.format("  Selection Scope: %s\n", scope_names[gui.selection_scope + 1] or "Unknown"))
   r.ShowConsoleMsg(string.format("  Channel Mode: %s\n", channel_names[gui.channel_mode + 1] or "Unknown"))
+  r.ShowConsoleMsg(string.format("  Multi-Channel Policy: %s\n", multi_channel_policy_names[gui.multi_channel_policy + 1] or "Unknown"))
   r.ShowConsoleMsg(string.format("  Take FX: %s\n", bool_str(gui.take_fx)))
   r.ShowConsoleMsg(string.format("  Track FX: %s\n", bool_str(gui.track_fx)))
   r.ShowConsoleMsg(string.format("  TC Mode: %s\n", tc_names[gui.tc_mode + 1] or "Unknown"))
   r.ShowConsoleMsg(string.format("  Merge Volumes: %s\n", bool_str(gui.merge_volumes)))
   r.ShowConsoleMsg(string.format("  Print Volumes: %s\n", bool_str(gui.print_volumes)))
-  -- v0.1.5: Handle mode fixed to seconds, added whole_file toggle
-  r.ShowConsoleMsg(string.format("  Handle: %s\n", gui.handle_whole_file and "WHOLE FILE" or (gui.handle_length .. " seconds")))
-  r.ShowConsoleMsg(string.format("  Multi-Channel Policy: %s\n", gui.multi_channel_policy))
-  -- v0.1.4: Epsilon debug output removed (now internal constant: 0.5 frames)
+  r.ShowConsoleMsg(string.format("  Handle Mode: %s\n", handle_names[gui.handle_mode + 1] or "Unknown"))
+  r.ShowConsoleMsg(string.format("  Handle Length: %.2f\n", gui.handle_length))
+  -- v0.1.4: Epsilon debug output removed (now internal constant: 0.1 frames)
   r.ShowConsoleMsg(string.format("  Write Edge Cues: %s\n", bool_str(gui.cue_write_edge)))
   r.ShowConsoleMsg(string.format("  Write Glue Cues: %s\n", bool_str(gui.cue_write_glue)))
   r.ShowConsoleMsg(string.format("  Glue Single Items: %s\n", bool_str(gui.glue_single_items)))
@@ -1217,11 +1230,14 @@ local function build_args_from_gui(operation)
     },
   }
 
-  -- Handle (v0.1.5: fixed to seconds, whole_file toggle)
-  if gui.handle_whole_file then
-    args.handle = { mode = "seconds", seconds = 999999 }  -- Whole file
-  else
+  -- Handle
+  if gui.handle_mode == 0 then
+    args.handle = "ext"
+  elseif gui.handle_mode == 1 then
     args.handle = { mode = "seconds", seconds = gui.handle_length }
+  else -- frames
+    local fps = r.TimeMap_curFrameRate(0) or 30
+    args.handle = { mode = "seconds", seconds = gui.handle_length / fps }
   end
 
   -- Debug (v0.1.4: epsilon removed - now internal constant)
@@ -1491,41 +1507,6 @@ local function draw_settings_popup()
   rv, new_val = ImGui.Combo(ctx, "Render No-TrackFX Policy", gui.render_no_trackfx_policy, "Preserve\0Force Multi\0")
   if rv then gui.render_no_trackfx_policy = new_val end
 
-  ImGui.Spacing(ctx)
-  ImGui.Separator(ctx)
-  ImGui.Spacing(ctx)
-
-  -- Multi-Channel Policy (v0.1.5)
-  ImGui.Text(ctx, "Multi-Channel Policy")
-  ImGui.TextDisabled(ctx, "Configure output channel count for Multi mode")
-  ImGui.Spacing(ctx)
-
-  -- Note: Only applies when Channel Mode is set to "Multi"
-  local is_multi_mode = (gui.channel_mode == 2)
-  if not is_multi_mode then
-    ImGui.PushStyleColor(ctx, ImGui.Col_Text, 0xFFAA00FF)  -- Orange
-    ImGui.TextWrapped(ctx, "Note: Multi-Channel Policy only applies when Channel Mode is set to 'Multi'.")
-    ImGui.PopStyleColor(ctx)
-    ImGui.Spacing(ctx)
-  end
-
-  if ImGui.RadioButton(ctx, "SOURCE playback channels##policy", gui.multi_channel_policy == "source_playback") then
-    gui.multi_channel_policy = "source_playback"
-  end
-  ImGui.Indent(ctx)
-  ImGui.TextWrapped(ctx, "Match actual playback channel count of source item (respects item channel mode).")
-  ImGui.TextDisabled(ctx, "Example: 8ch file playing as 4ch → uses 4ch")
-  ImGui.Unindent(ctx)
-  ImGui.Spacing(ctx)
-
-  if ImGui.RadioButton(ctx, "SOURCE track channels##policy", gui.multi_channel_policy == "source_track") then
-    gui.multi_channel_policy = "source_track"
-  end
-  ImGui.Indent(ctx)
-  ImGui.TextWrapped(ctx, "Match channel count of source item's track (RGWH/Pro Tools style).")
-  ImGui.TextDisabled(ctx, "Example: Item on 8ch track → uses 8ch (regardless of item settings)")
-  ImGui.Unindent(ctx)
-
   -- === DEBUG ===
   draw_section_header("DEBUG")
   rv, new_val = ImGui.SliderInt(ctx, "Debug Level", gui.debug_level, 0, 2,
@@ -1601,20 +1582,33 @@ local function draw_manual_window()
         ImGui.TableNextRow(ctx)
         ImGui.TableNextColumn(ctx); ImGui.TextColored(ctx, 0xFFFF00FF, 'Auto')
         ImGui.TableNextColumn(ctx); ImGui.Text(ctx, 'Per-item/unit detection')
-        ImGui.TableNextColumn(ctx); ImGui.Text(ctx, 'Mono source → mono, Multi → multi')
+        ImGui.TableNextColumn(ctx); ImGui.Text(ctx, 'Mono source → mono (40361)\nMulti source → policy-based (40209/41993)')
 
         ImGui.TableNextRow(ctx)
         ImGui.TableNextColumn(ctx); ImGui.TextColored(ctx, 0xFFFF00FF, 'Mono')
         ImGui.TableNextColumn(ctx); ImGui.Text(ctx, 'Action 40361')
-        ImGui.TableNextColumn(ctx); ImGui.Text(ctx, 'Item: Apply track/take FX to items (mono output)')
+        ImGui.TableNextColumn(ctx); ImGui.Text(ctx, 'Force mono output for all items')
 
         ImGui.TableNextRow(ctx)
         ImGui.TableNextColumn(ctx); ImGui.TextColored(ctx, 0xFFFF00FF, 'Multi')
-        ImGui.TableNextColumn(ctx); ImGui.Text(ctx, 'Action 41993')
-        ImGui.TableNextColumn(ctx); ImGui.Text(ctx, 'Item: Apply track/take FX (multichannel output)')
+        ImGui.TableNextColumn(ctx); ImGui.Text(ctx, 'Policy-based')
+        ImGui.TableNextColumn(ctx); ImGui.Text(ctx, 'SOURCE-playback: 40209 (preserve ch, 2ch floor)\nSOURCE-track: 41993 (match track ch)')
 
         ImGui.EndTable(ctx)
       end
+
+      ImGui.Spacing(ctx)
+      ImGui.TextColored(ctx, 0xFF8800FF, "Multi-Channel Policy (AUTO / MULTI):")
+      ImGui.Indent(ctx)
+      ImGui.BulletText(ctx, "SOURCE-playback (40209): Preserves item playback channels (4ch→4ch, 6ch→6ch)")
+      ImGui.BulletText(ctx, "SOURCE-track (41993): Forces output to match track I_NCHAN")
+      ImGui.Spacing(ctx)
+      ImGui.TextColored(ctx, 0xFF0000FF, "Mono items in MULTI mode:")
+      ImGui.BulletText(ctx, "Action 40209 has a 2ch floor — mono items output stereo (2ch)")
+      ImGui.BulletText(ctx, "AUTO mode detects mono items and uses 40361 → true 1ch output")
+      ImGui.BulletText(ctx, "If you need mono items to stay mono, use AUTO mode instead")
+      ImGui.Unindent(ctx)
+
       ImGui.Spacing(ctx)
       ImGui.Separator(ctx)
       ImGui.Spacing(ctx)
@@ -1640,8 +1634,8 @@ local function draw_manual_window()
 
         ImGui.TableNextRow(ctx)
         ImGui.TableNextColumn(ctx); ImGui.TextColored(ctx, 0xFFFF00FF, 'Apply Actions')
-        ImGui.TableNextColumn(ctx); ImGui.Text(ctx, '40361 (mono) / 41993 (multi)')
-        ImGui.TableNextColumn(ctx); ImGui.Text(ctx, 'Bakes FX into audio file')
+        ImGui.TableNextColumn(ctx); ImGui.Text(ctx, '40361 / 40209 / 41993')
+        ImGui.TableNextColumn(ctx); ImGui.Text(ctx, 'Mono (40361) / Preserve (40209) / Track ch (41993)')
 
         ImGui.EndTable(ctx)
       end
@@ -2279,16 +2273,73 @@ local function draw_gui()
   -- Multi mode tooltip
   if ImGui.IsItemHovered(ctx) then
     ImGui.SetTooltip(ctx,
-      "Multi mode: Force output to match track channel count\n\n" ..
-      "Behavior:\n" ..
-      "  • Output channels = Track channel count (NOT item channels)\n" ..
-      "  • Mono item on stereo track → Stereo output\n" ..
-      "  • Forces channel expansion to match track\n" ..
-      "  • Useful for ensuring consistent channel count\n\n" ..
-      "Important:\n" ..
-      "  • Output always follows TRACK channel count\n" ..
-      "  • Item's own channel count is ignored"
+      "Multi mode: Multi-channel output via Multi-Channel Policy\n\n" ..
+      "Output depends on Multi-Channel Policy:\n\n" ..
+      "  SOURCE-playback (Action 40209):\n" ..
+      "    • Preserves item playback channel count\n" ..
+      "    • 4ch → 4ch, 6ch → 6ch\n" ..
+      "    • Mono → Stereo (2ch floor, REAPER limit)\n\n" ..
+      "  SOURCE-track (Action 41993):\n" ..
+      "    • Output = Track channel count (I_NCHAN)\n" ..
+      "    • All items forced to match track ch\n\n" ..
+      "vs AUTO mode:\n" ..
+      "  • AUTO detects mono items → mono output (1ch)\n" ..
+      "  • MULTI does not detect mono → always 2ch minimum\n" ..
+      "  • For mono preservation, use AUTO mode"
     )
+  end
+
+  -- Multi-Channel Policy (only shown for Auto and Multi modes)
+  if gui.channel_mode == 0 or gui.channel_mode == 2 then
+    ImGui.Text(ctx, "Multi-Channel Policy:")
+    ImGui.SameLine(ctx)
+    if ImGui.RadioButton(ctx, "SOURCE-playback##policy", gui.multi_channel_policy == 0) then
+      gui.multi_channel_policy = 0
+      sync_rgwh_extstate_from_gui()  -- Sync immediately when changed
+      if gui.debug_level >= 1 then
+        r.ShowConsoleMsg(string.format("[RGWH GUI] Multi-Channel Policy changed to: SOURCE-playback\n"))
+      end
+    end
+    if ImGui.IsItemHovered(ctx) then
+      ImGui.SetTooltip(ctx,
+        "SOURCE-playback: Preserve item playback channel count\n\n" ..
+        "Behavior:\n" ..
+        "  • Stereo item → Stereo output (2ch → 2ch)\n" ..
+        "  • 4-channel item → 4-channel output (4ch → 4ch)\n" ..
+        "  • Preserves original multi-channel layout\n\n" ..
+        "Mono item handling:\n" ..
+        "  • AUTO mode: Mono → Mono (1ch, uses 40361)\n" ..
+        "  • MULTI mode: Mono → Stereo (2ch floor)\n" ..
+        "    Action 40209 minimum output is 2ch (REAPER limit)\n" ..
+        "    Use AUTO mode if mono should stay mono\n\n" ..
+        "Use when:\n" ..
+        "  • Working with multi-channel audio (surround, Atmos)\n" ..
+        "  • Want to preserve original channel layout\n" ..
+        "  • Default behavior (recommended)"
+      )
+    end
+    ImGui.SameLine(ctx)
+    if ImGui.RadioButton(ctx, "SOURCE-track##policy", gui.multi_channel_policy == 1) then
+      gui.multi_channel_policy = 1
+      sync_rgwh_extstate_from_gui()  -- Sync immediately when changed
+      if gui.debug_level >= 1 then
+        r.ShowConsoleMsg(string.format("[RGWH GUI] Multi-Channel Policy changed to: SOURCE-track\n"))
+      end
+    end
+    if ImGui.IsItemHovered(ctx) then
+      ImGui.SetTooltip(ctx,
+        "SOURCE-track: Force output to match source track channels\n\n" ..
+        "Behavior:\n" ..
+        "  • Output always matches SOURCE track channel count\n" ..
+        "  • All items normalized to same channel count\n" ..
+        "  • Mono on stereo track → Stereo output\n" ..
+        "  • 4ch on stereo track → Stereo output (downmix)\n\n" ..
+        "Use when:\n" ..
+        "  • Need consistent channel count across all items\n" ..
+        "  • Want all outputs to match track routing\n" ..
+        "  • Working with standard stereo workflow"
+      )
+    end
   end
 
   ImGui.Spacing(ctx)
@@ -2363,31 +2414,17 @@ local function draw_gui()
   -- === HANDLE SETTINGS ===
   draw_section_header("HANDLE (Pre/Post Roll)")
 
-  -- v0.1.5: Whole File toggle and Handle Length on same line (matches AudioSweet layout)
-  rv, new_val = ImGui.Checkbox(ctx, "Whole File", gui.handle_whole_file)
-  if rv then gui.handle_whole_file = new_val end
+  rv, new_val = ImGui.Combo(ctx, "Handle Mode", gui.handle_mode, "Use ExtState\0Seconds\0Frames\0")
+  if rv then gui.handle_mode = new_val end
 
-  if ImGui.IsItemHovered(ctx) then
-    ImGui.SetTooltip(ctx, "When enabled, uses complete file length as handle (HANDLE_SECONDS = 999999)\nUseful for processing entire files regardless of item boundaries")
+  if gui.handle_mode > 0 then
+    rv, new_val = ImGui.InputDouble(ctx, "Handle Length", gui.handle_length, 0.1, 1.0, "%.3f")
+    if rv then gui.handle_length = math.max(0, new_val) end
+
+    local unit = gui.handle_mode == 1 and "seconds" or "frames"
+    ImGui.SameLine(ctx)
+    ImGui.TextDisabled(ctx, unit)
   end
-
-  -- Handle length input on same line (disabled when whole_file is on)
-  ImGui.SameLine(ctx, 0, 60)  -- Add 20px spacing between checkbox and input
-
-  if gui.handle_whole_file then
-    ImGui.BeginDisabled(ctx)
-  end
-
-  ImGui.SetNextItemWidth(ctx, 80)
-  rv, new_val = ImGui.InputDouble(ctx, "##handle_length", gui.handle_length, 0, 0, "%.1f")
-  if rv then gui.handle_length = math.max(0, new_val) end
-
-  if gui.handle_whole_file then
-    ImGui.EndDisabled(ctx)
-  end
-
-  ImGui.SameLine(ctx)
-  ImGui.TextDisabled(ctx, "secs")
 
   -- === OPERATION BUTTONS & INFO ===
   ImGui.Spacing(ctx)
