@@ -40,8 +40,6 @@
       cues    = { write_edge=true/false, write_glue=true/false },
       policies = {
         glue_single_items = true/false,
-        glue_no_trackfx_output_policy   = "preserve"|"force_multi",
-        render_no_trackfx_output_policy = "preserve"|"force_multi",
       },
       debug = { level=1..N, no_clear=true/false },
     }
@@ -62,6 +60,21 @@
   • For detailed operation modes guide, see RGWH GUI: Help > Manual (Operation Modes)
 
 @changelog
+  0.3.0 [v260205.0409] - REMOVE: force_multi / no_trackfx_output_policy settings (redundant with MULTI_CHANNEL_POLICY)
+    - REMOVED: GLUE_OUTPUT_POLICY_WHEN_NO_TRACKFX and RENDER_OUTPUT_POLICY_WHEN_NO_TRACKFX settings
+      • These settings ("preserve" | "force_multi") are now fully replaced by MULTI_CHANNEL_POLICY
+      • source_track = old force_multi (Apply after Glue to force track ch)
+      • source_playback = old preserve (Glue natively preserves playback ch, skip Apply)
+    - SIMPLIFIED: Glue path condition — 3 locations (GAP unit, main unit, TS-Window)
+      • Old: (multi or preserve) AND force_multi policy → Apply
+      • New: unit_apply_mode == "multi" → Apply (source_track needs it; source_playback skips)
+    - SIMPLIFIED: Render path — merged force_multi + need_apply_for_multichannel into need_multichannel
+      • Multi/preserve modes always use Apply for correct channel control (40601 can't preserve multi-ch)
+    - REMOVED: DEFAULTS, read_settings(), snapshot/restore, one-run overrides for the two policies
+    - REMOVED: API args.policies.glue_no_trackfx_output_policy / render_no_trackfx_output_policy
+    - GUI: Removed Glue/Render No-TrackFX Policy combos, persist keys, sync, labels, debug output
+    - REASON: Reduces UI complexity — one setting (MULTI_CHANNEL_POLICY) controls all channel behavior
+
   0.3.0 [v260205.0144] - REFACTOR: preserve mode hybrid command — 41993 default + 40209 for odd ch
     - CHANGE: SOURCE-playback (preserve) no longer uses 40209 exclusively
       • Even ch (2,4,6...) and mono: 41993 + set track ch = target (deterministic, no FX Pin interference)
@@ -968,9 +981,6 @@ local DEFAULTS = {
   -- ✅ 新增：Glue 成品 take 內是否加 take markers（非 SINGLE 才加）
   WRITE_GLUE_CUES = 1,
 
-  -- Policies when TRACK FX are NOT being printed:
-  GLUE_OUTPUT_POLICY_WHEN_NO_TRACKFX   = "preserve",   -- "preserve" | "force_multi"
-  RENDER_OUTPUT_POLICY_WHEN_NO_TRACKFX = "preserve",   -- "preserve" | "force_multi"
 }
 
 ------------------------------------------------------------
@@ -1028,9 +1038,6 @@ function M.read_settings()
     WRITE_EDGE_CUES    = (get_ext_bool("WRITE_EDGE_CUES",   DEFAULTS.WRITE_EDGE_CUES)==1),
     -- 🔧 修正：用 DEFAULTS，不是 dflt
     WRITE_GLUE_CUES    = (get_ext_bool("WRITE_GLUE_CUES", DEFAULTS.WRITE_GLUE_CUES)==1),
-
-    GLUE_OUTPUT_POLICY_WHEN_NO_TRACKFX   = get_ext("GLUE_OUTPUT_POLICY_WHEN_NO_TRACKFX",   DEFAULTS.GLUE_OUTPUT_POLICY_WHEN_NO_TRACKFX),
-    RENDER_OUTPUT_POLICY_WHEN_NO_TRACKFX = get_ext("RENDER_OUTPUT_POLICY_WHEN_NO_TRACKFX", DEFAULTS.RENDER_OUTPUT_POLICY_WHEN_NO_TRACKFX),
 
     DEBUG_NO_CLEAR = (get_ext_bool("DEBUG_NO_CLEAR", false) == 1),
   }
@@ -2235,10 +2242,8 @@ local function glue_unit(tr, u, cfg)
       r.SetMediaItemInfo_Value(glued, "D_FADEOUTLEN_AUTO", 0)
       apply_track_take_fx_to_item(glued, unit_apply_mode, DBG)
       embed_current_tc_for_item(glued, u.start, DBG)
-    elseif glued
-       and (unit_apply_mode == "multi" or unit_apply_mode == "preserve")
-       and (cfg.GLUE_OUTPUT_POLICY_WHEN_NO_TRACKFX == "force_multi") then
-      -- 象限 1,2: Force multi-channel output without Track FX
+    elseif glued and unit_apply_mode == "multi" then
+      -- 象限 1,2: source_track — force track ch output without Track FX
       apply_multichannel_no_fx_preserve_take(glued, (cfg.GLUE_TAKE_FX == true), DBG, nil, unit_apply_mode)
       embed_current_tc_for_item(glued, u.start, DBG)
     end
@@ -2450,12 +2455,10 @@ local function glue_unit(tr, u, cfg)
     -- Need to print track FX (象限 3,4)
     need_apply = true
     dbg(DBG,1,"[APPLY] Need Apply to print track FX (mode=%s)", unit_apply_mode)
-  elseif glued_pre
-     and (unit_apply_mode == "multi" or unit_apply_mode == "preserve")
-     and (cfg.GLUE_OUTPUT_POLICY_WHEN_NO_TRACKFX == "force_multi") then
-    -- Need to force multi-channel output (象限 1,2 with force_multi policy)
+  elseif glued_pre and unit_apply_mode == "multi" then
+    -- 象限 1,2: source_track — need Apply to force track ch output
     need_apply = true
-    dbg(DBG,1,"[APPLY] Need Apply to force multi-channel output")
+    dbg(DBG,1,"[APPLY] Need Apply for source_track channel control")
   else
     dbg(DBG,1,"[SKIP APPLY] No need to Apply - Glue already preserves take name → filename")
   end
@@ -2476,9 +2479,9 @@ local function glue_unit(tr, u, cfg)
       -- Emulate Glue's TC when GLUE+APPLY: embed CURRENT TC at unit start
       embed_current_tc_for_item(glued_pre, u.start, DBG)
     else
-      -- force_multi without track FX
+      -- source_track without Track FX — force track ch output
       apply_multichannel_no_fx_preserve_take(glued_pre, (cfg.GLUE_TAKE_FX == true), DBG, nil, unit_apply_mode)
-      -- Emulate Glue's TC in force-multi no-track-FX path as well
+      -- Emulate Glue's TC in source_track no-Track-FX path as well
       embed_current_tc_for_item(glued_pre, u.start, DBG)
     end
 
@@ -2769,11 +2772,9 @@ local function glue_by_ts_window_on_track(tr, tsL, tsR, cfg, members_snapshot)
     apply_track_take_fx_to_item(glued_pre, unit_apply_mode, DBG)
     -- Emulate Glue's TC when GLUE+APPLY (TS-Window): embed CURRENT TC at tsL
     embed_current_tc_for_item(glued_pre, tsL, DBG)
-  elseif glued_pre
-     and (unit_apply_mode == "multi" or unit_apply_mode == "preserve")
-     and (cfg.GLUE_OUTPUT_POLICY_WHEN_NO_TRACKFX == "force_multi") then
+  elseif glued_pre and unit_apply_mode == "multi" then
+    -- source_track without Track FX — force track ch output (TS-Window)
     apply_multichannel_no_fx_preserve_take(glued_pre, true, DBG, nil, unit_apply_mode)  -- keep take FX
-    -- Emulate Glue’s TC in force-multi no-track-FX path as well (TS-Window)
     embed_current_tc_for_item(glued_pre, tsL, DBG)
   end
 
@@ -3257,28 +3258,20 @@ function M.render_selection(take_fx, track_fx, mode, tc_mode, merge_volumes, pri
       end
     end
 
-    -- v0.3.0: Support preserve mode (40209) alongside multi (41993)
-    local force_multi = (not need_track)
-                    and (item_apply_mode == "multi" or item_apply_mode == "preserve")
-                    and (cfg.RENDER_OUTPUT_POLICY_WHEN_NO_TRACKFX == "force_multi")
-
     -- When channel_mode="mono", always use Apply (40361) to force mono output
     local force_mono = (item_apply_mode == "mono")
 
-    -- v0.3.0: When preserve/multi mode with Take FX but no Track FX, must use Apply
-    -- Reason: 40601 doesn't preserve multi-channel, only 40209/41993 can
-    local need_apply_for_multichannel = need_take and not need_track
-                                       and (item_apply_mode == "preserve" or item_apply_mode == "multi")
+    -- Multi/preserve modes always need Apply for correct channel control
+    -- (40601 doesn't preserve multi-channel, only 40209/41993 can)
+    local need_multichannel = (not need_track)
+                          and (item_apply_mode == "multi" or item_apply_mode == "preserve")
 
-    local use_apply = (need_track == true) or (force_multi == true) or (force_mono == true)
-                   or (need_apply_for_multichannel == true)
+    local use_apply = (need_track == true) or (force_mono == true) or (need_multichannel == true)
     if use_apply then
-      if force_multi then
-        dbg(DBG,1,"[APPLY] force multi (no track FX path, mode=%s)", item_apply_mode)
+      if need_multichannel then
+        dbg(DBG,1,"[APPLY] multi-channel output (mode=%s)", item_apply_mode)
       elseif force_mono then
         dbg(DBG,1,"[APPLY] force mono (channel_mode=mono)")
-      elseif need_apply_for_multichannel then
-        dbg(DBG,1,"[APPLY] preserve multi-channel (Take FX only, mode=%s)", item_apply_mode)
       end
       fade_snap = snapshot_fades(it)
       zero_fades(it)
@@ -3423,12 +3416,9 @@ function M.core(args)
     GLUE_TAKE_FX       = get_ext("GLUE_TAKE_FX",       ""),
     GLUE_TRACK_FX      = get_ext("GLUE_TRACK_FX",      ""),
     GLUE_APPLY_MODE    = get_ext("GLUE_APPLY_MODE",    ""),
-    GLUE_OUT_NO_TRFX   = get_ext("GLUE_OUTPUT_POLICY_WHEN_NO_TRACKFX", ""),
-
     RENDER_TAKE_FX     = get_ext("RENDER_TAKE_FX",     ""),
     RENDER_TRACK_FX    = get_ext("RENDER_TRACK_FX",    ""),
     RENDER_APPLY_MODE  = get_ext("RENDER_APPLY_MODE",  ""),
-    RENDER_OUT_NO_TRFX = get_ext("RENDER_OUTPUT_POLICY_WHEN_NO_TRACKFX", ""),
     RENDER_TC_EMBED    = get_ext("RENDER_TC_EMBED",    ""),
   }
   local function set_opt(k, v) if v ~= nil then set_ext(k, v) end end
@@ -3476,12 +3466,6 @@ function M.core(args)
   if args.policies then
     if args.policies.glue_single_items ~= nil then
       set_opt("GLUE_SINGLE_ITEMS", args.policies.glue_single_items and "1" or "0")
-    end
-    if args.policies.glue_no_trackfx_output_policy then
-      set_opt("GLUE_OUTPUT_POLICY_WHEN_NO_TRACKFX", args.policies.glue_no_trackfx_output_policy)
-    end
-    if args.policies.render_no_trackfx_output_policy then
-      set_opt("RENDER_OUTPUT_POLICY_WHEN_NO_TRACKFX", args.policies.render_no_trackfx_output_policy)
     end
   end
 
