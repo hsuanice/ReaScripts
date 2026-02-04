@@ -62,6 +62,31 @@
   • For detailed operation modes guide, see RGWH GUI: Help > Manual (Operation Modes)
 
 @changelog
+  0.3.0 [v260205.0144] - REFACTOR: preserve mode hybrid command — 41993 default + 40209 for odd ch
+    - CHANGE: SOURCE-playback (preserve) no longer uses 40209 exclusively
+      • Even ch (2,4,6...) and mono: 41993 + set track ch = target (deterministic, no FX Pin interference)
+      • Odd multi ch (3,5,7...): 40209 + set track ch = item_ch+1 as ceiling (preserves exact odd ch)
+    - REASON: 40209 is affected by Take FX Pin Connector (can expand output unpredictably)
+      • 41993 output = track ch (100% deterministic, ignores FX Pin)
+      • 40209 only needed for odd ch since REAPER track ch is always even
+    - UPDATED: apply_track_take_fx_to_item_with_policy() — hybrid preserve_cmd logic
+    - UPDATED: apply_multichannel_no_fx_preserve_take() — same hybrid logic
+    - UPDATED: get_apply_cmd() comments to note hybrid approach
+    - LOGGING: Now logs actual command ID in run_command for easier debugging
+    - IMPACT: All 4 FX quadrants × Render/Glue paths benefit from deterministic channel control
+
+  0.3.0 [v260205.0023] - BUGFIX: preserve mode track ch adjustment was expand-only (not bidirectional)
+    - BUG: apply_track_take_fx_to_item_with_policy() only expanded track ch when item_ch > track_ch
+      • 40209 uses track I_NCHAN as ceiling → items on wider tracks output at track ch, not item ch
+      • e.g., 2ch item on 4ch track → output 4ch (wrong), should be 2ch
+      • e.g., 4ch item on 6ch track → output 6ch (wrong), should be 4ch
+    - FIXED: Bidirectional track ch adjustment for preserve mode
+      • Now adjusts track ch to match item ch in BOTH directions (expand AND shrink)
+      • Enforces 2ch floor (40209 REAPER limit) and even channel count
+    - FIXED: Same bug in apply_multichannel_no_fx_preserve_take() (Glue no-FX path)
+      • Applied identical bidirectional adjustment logic
+    - IMPACT: SOURCE-playback now correctly preserves item ch on tracks wider than source
+
   0.3.0 [v260204.2032] - BUGFIX: Glue path ignoring SOURCE-playback (preserve) policy
     - FIXED: apply_multichannel_no_fx_preserve_take() always used ACT_APPLY_MULTI (41993)
       • Added apply_mode parameter (5th arg, default "multi" for backward compatibility)
@@ -1880,7 +1905,11 @@ end
 -- mode: "mono" | "multi" | "preserve"
 --   "mono": Force mono output (40361)
 --   "multi": Force to track channel count (41993)
---   "preserve": Preserve item multi-channel (40209)
+--   "preserve": Fallback only — actual preserve logic uses hybrid approach:
+--               Even ch → 41993 + track ch control  (deterministic)
+--               Odd multi ch → 40209 + ceiling       (preserves odd ch)
+--               See apply_track_take_fx_to_item_with_policy() and
+--               apply_multichannel_no_fx_preserve_take() for hybrid logic.
 local function get_apply_cmd(mode)
   if mode == "preserve" then
     return ACT_APPLY_PRESERVE
@@ -1909,34 +1938,41 @@ local function apply_track_take_fx_to_item_with_policy(it, apply_mode, dbg_level
   -- Snapshot original track channel count
   local orig_track_ch = tr and (r.GetMediaTrackInfo_Value(tr, "I_NCHAN") or 2) or 2
 
-  -- If adjust_track_ch is enabled and mode is "preserve", adjust track to match item channels
+  -- Preserve mode: hybrid command selection + bidirectional track ch adjustment
+  --   Even ch (incl mono→2ch): 41993 + set track ch = target (deterministic, no FX Pin interference)
+  --   Odd multi ch (3,5,7..):  40209 + set track ch = item_ch+1 as ceiling (preserves exact odd ch)
+  local preserve_cmd = nil  -- set inside preserve block, used at run_command
   if adjust_track_ch and apply_mode == "preserve" and tr then
     local item_ch = get_item_playback_channels(it)
-    if item_ch > orig_track_ch then
-      -- REAPER enforces EVEN channel counts on tracks
-      -- If item has odd channels (e.g., 5ch), round up to even (6ch)
-      local target_ch = item_ch
-      if item_ch % 2 == 1 then
-        target_ch = item_ch + 1
-        dbg(dbg_level or 1, 1, "[POLICY] Item has odd channels (%dch), rounding up to %dch (REAPER enforces even)",
-            item_ch, target_ch)
+    local is_odd_multi = (item_ch > 1 and item_ch % 2 == 1)
+
+    if is_odd_multi then
+      -- Odd multichannel (3,5,7...): use 40209 which preserves exact odd ch count
+      -- Set track ch = item_ch + 1 (even ceiling so 40209 has room)
+      local target_ch = item_ch + 1  -- always even: odd+1=even
+      preserve_cmd = ACT_APPLY_PRESERVE  -- 40209
+      if target_ch ~= orig_track_ch then
+        r.SetMediaTrackInfo_Value(tr, "I_NCHAN", target_ch)
       end
-
-      -- Expand track to accommodate item channels (40209 needs this for >2ch sources)
-      r.SetMediaTrackInfo_Value(tr, "I_NCHAN", target_ch)
-
-      -- Verify actual value (REAPER might adjust it)
-      local actual_ch = r.GetMediaTrackInfo_Value(tr, "I_NCHAN")
-      dbg(dbg_level or 1, 1, "[POLICY] Track ch adjusted %d→%d for SOURCE-playback (item: %dch, target: %dch, actual: %dch)",
-          orig_track_ch, actual_ch, item_ch, target_ch, actual_ch)
+      dbg(dbg_level or 1, 1, "[POLICY] preserve(odd %dch): 40209 + ceiling %dch (track was %dch)",
+          item_ch, target_ch, orig_track_ch)
+    else
+      -- Even ch or mono: use 41993 for deterministic output = track ch
+      local target_ch = (item_ch < 2) and 2 or item_ch  -- 2ch floor for mono
+      preserve_cmd = ACT_APPLY_MULTI  -- 41993
+      if target_ch ~= orig_track_ch then
+        r.SetMediaTrackInfo_Value(tr, "I_NCHAN", target_ch)
+      end
+      dbg(dbg_level or 1, 1, "[POLICY] preserve(even %dch): 41993 + track=%dch (was %dch)",
+          item_ch, target_ch, orig_track_ch)
     end
   end
 
   -- Apply FX
   r.SelectAllMediaItems(0, false)
   r.SetMediaItemSelected(it, true)
-  local cmd = get_apply_cmd(apply_mode)
-  run_command(cmd, string.format("Apply FX (mode=%s)", apply_mode), dbg_level or 1)
+  local cmd = preserve_cmd or get_apply_cmd(apply_mode)
+  run_command(cmd, string.format("Apply FX (mode=%s, cmd=%d)", apply_mode, cmd), dbg_level or 1)
 
   -- Restore original track channel count
   if tr then
@@ -2003,13 +2039,28 @@ local function apply_multichannel_no_fx_preserve_take(it, keep_take_fx, dbg_leve
   -- Issue: Track FX may auto-expand when processing multichannel sources
   local orig_track_ch = tr and (r.GetMediaTrackInfo_Value(tr, "I_NCHAN") or 2) or 2
 
-  -- For preserve mode (40209): expand track ch to match item ch (40209 has 2ch floor)
+  -- Preserve mode: hybrid command selection + bidirectional track ch adjustment
+  --   Even ch (incl mono→2ch): 41993 + set track ch = target (deterministic)
+  --   Odd multi ch (3,5,7..):  40209 + set track ch = item_ch+1 as ceiling (preserves odd ch)
+  local preserve_cmd = nil
   if apply_mode == "preserve" and tr then
     local item_ch = get_item_playback_channels(it)
-    if item_ch > orig_track_ch then
-      local target_ch = (item_ch % 2 == 1) and (item_ch + 1) or item_ch
-      r.SetMediaTrackInfo_Value(tr, "I_NCHAN", target_ch)
-      dbg(dbg_level,1,"[APPLY] preserve: track ch %d → %d to match item (%dch)", orig_track_ch, target_ch, item_ch)
+    local is_odd_multi = (item_ch > 1 and item_ch % 2 == 1)
+
+    if is_odd_multi then
+      local target_ch = item_ch + 1
+      preserve_cmd = ACT_APPLY_PRESERVE  -- 40209
+      if target_ch ~= orig_track_ch then
+        r.SetMediaTrackInfo_Value(tr, "I_NCHAN", target_ch)
+      end
+      dbg(dbg_level,1,"[APPLY] preserve(odd %dch): 40209 + ceiling %dch (track was %dch)", item_ch, target_ch, orig_track_ch)
+    else
+      local target_ch = (item_ch < 2) and 2 or item_ch
+      preserve_cmd = ACT_APPLY_MULTI  -- 41993
+      if target_ch ~= orig_track_ch then
+        r.SetMediaTrackInfo_Value(tr, "I_NCHAN", target_ch)
+      end
+      dbg(dbg_level,1,"[APPLY] preserve(even %dch): 41993 + track=%dch (was %dch)", item_ch, target_ch, orig_track_ch)
     end
   end
 
@@ -2024,8 +2075,8 @@ local function apply_multichannel_no_fx_preserve_take(it, keep_take_fx, dbg_leve
 
   r.SelectAllMediaItems(0,false)
   r.SetMediaItemSelected(it,true)
-  local cmd = get_apply_cmd(apply_mode)
-  dbg(dbg_level,1,"[APPLY] %s(no-FX) (keep_take_fx=%s, preserve_track_ch=%s)", apply_mode, tostring(keep_take_fx), tostring(preserve_track_ch))
+  local cmd = preserve_cmd or get_apply_cmd(apply_mode)
+  dbg(dbg_level,1,"[APPLY] %s(no-FX, cmd=%d) (keep_take_fx=%s, preserve_track_ch=%s)", apply_mode, cmd, tostring(keep_take_fx), tostring(preserve_track_ch))
   run_command(cmd, string.format("Apply %s (no FX)", apply_mode), dbg_level or 1)
 
   -- Restore original track channel count if it was auto-expanded (only if preserve_track_ch is true)
