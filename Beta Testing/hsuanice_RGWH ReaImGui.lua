@@ -14,6 +14,16 @@
   Adjust parameters using the visual controls and click operation buttons to execute.
 
 @changelog
+  0.2.0 [v260205.0418] - REMOVE: force_multi / No-TrackFX Policy settings (redundant with MULTI_CHANNEL_POLICY)
+    - REMOVED: "Glue No-TrackFX Policy" and "Render No-TrackFX Policy" combo controls from Settings tab
+    - REMOVED: GUI state fields glue_no_trackfx_policy / render_no_trackfx_policy
+    - REMOVED: persist keys, ExtState sync, labels, debug output, args pass-through for the two policies
+    - REASON: MULTI_CHANNEL_POLICY now fully controls channel behavior
+      • source_track = old force_multi (Apply after Glue to force track ch)
+      • source_playback = old preserve (Glue natively preserves playback ch → skip Apply → faster)
+    - PERFORMANCE: Glue with SOURCE-playback is significantly faster (skips unnecessary Apply step)
+    - REQUIRES: RGWH Core v0.3.0 [v260205.0409]+
+
   0.2.0 [v260204.2352] - Multi mode hover info + Manual: mono 2ch floor documentation
     - UPDATED: Multi channel mode tooltip
       • Now explains Multi-Channel Policy (SOURCE-playback / SOURCE-track)
@@ -568,8 +578,6 @@ local gui = {
 
   -- Policies
   glue_single_items = false,  -- AUTO mode: false=single→render, true=single→glue
-  glue_no_trackfx_policy = 0,    -- 0=preserve, 1=force_multi
-  render_no_trackfx_policy = 0,  -- 0=preserve, 1=force_multi
 
   -- Debug
   debug_level = 2,           -- 0=silent, 1=normal, 2=verbose
@@ -600,7 +608,7 @@ local persist_keys = {
   'handle_mode','handle_length',
   'epsilon_mode','epsilon_value',
   'cue_write_edge','cue_write_glue',
-  'glue_single_items','glue_no_trackfx_policy','render_no_trackfx_policy',
+  'glue_single_items',
   'debug_level','debug_no_clear','selection_policy',
   'enable_docking','bwfmetaedit_custom_path'
 }
@@ -650,7 +658,6 @@ end
 local function sync_rgwh_extstate_from_gui()
   local channel_names = { "auto", "mono", "multi" }
   local tc_names = { "previous", "current", "off" }
-  local policy_names = { "preserve", "force_multi" }
   local multi_channel_policy_names = { "source_playback", "source_track" }
 
   local function set_rgwh(key, val)
@@ -695,8 +702,6 @@ local function sync_rgwh_extstate_from_gui()
 
   -- Policies
   set_rgwh("GLUE_SINGLE_ITEMS", gui.glue_single_items and "1" or "0")
-  set_rgwh("GLUE_OUTPUT_POLICY_WHEN_NO_TRACKFX", policy_names[gui.glue_no_trackfx_policy + 1])
-  set_rgwh("RENDER_OUTPUT_POLICY_WHEN_NO_TRACKFX", policy_names[gui.render_no_trackfx_policy + 1])
 
   -- Debug
   set_rgwh("DEBUG_LEVEL", gui.debug_level)
@@ -740,7 +745,6 @@ local function format_setting_value(key, val)
   local tc_names = {"Previous", "Current", "Off"}
   local handle_names = {"Use ExtState", "Seconds", "Frames"}
   -- v0.1.4: epsilon_names removed (epsilon is now internal constant)
-  local policy_names = {"Preserve", "Force Multi"}
   local multi_channel_policy_names = {"SOURCE-playback", "SOURCE-track"}  -- v0.3.0
   local debug_names = {"Silent", "Normal", "Verbose"}
   local selection_policy_names = {"Progress", "Restore", "None"}
@@ -759,8 +763,6 @@ local function format_setting_value(key, val)
     return tc_names[val + 1] or tostring(val)
   elseif key == "handle_mode" then
     return handle_names[val + 1] or tostring(val)
-  elseif key == "glue_no_trackfx_policy" or key == "render_no_trackfx_policy" then  -- v0.1.4: epsilon_mode case removed
-    return policy_names[val + 1] or tostring(val)
   elseif key == "debug_level" then
     return debug_names[val + 1] or tostring(val)
   elseif key == "selection_policy" then
@@ -793,8 +795,6 @@ local function log_setting_changes(before_state, after_state)
     cue_write_edge = "Write Edge Cues",
     cue_write_glue = "Write Glue Cues",
     glue_single_items = "Glue Single Items",
-    glue_no_trackfx_policy = "Glue No-TrackFX Policy",
-    render_no_trackfx_policy = "Render No-TrackFX Policy",
     debug_level = "Debug Level",
     debug_no_clear = "No Clear Console",
     selection_policy = "Selection Policy",
@@ -960,7 +960,6 @@ local function print_all_settings(prefix)
   local tc_names = {"Previous", "Current", "Off"}
   local handle_names = {"Use ExtState", "Seconds", "Frames"}
   -- v0.1.4: epsilon_names removed (epsilon is now internal constant)
-  local policy_names = {"Preserve", "Force Multi"}
   local multi_channel_policy_names = {"SOURCE-playback", "SOURCE-track"}  -- v0.3.0
   local debug_names = {"Silent", "Normal", "Verbose"}
   local selection_policy_names = {"Progress", "Restore", "None"}
@@ -984,8 +983,6 @@ local function print_all_settings(prefix)
   r.ShowConsoleMsg(string.format("  Write Edge Cues: %s\n", bool_str(gui.cue_write_edge)))
   r.ShowConsoleMsg(string.format("  Write Glue Cues: %s\n", bool_str(gui.cue_write_glue)))
   r.ShowConsoleMsg(string.format("  Glue Single Items: %s\n", bool_str(gui.glue_single_items)))
-  r.ShowConsoleMsg(string.format("  Glue No-TrackFX Policy: %s\n", policy_names[gui.glue_no_trackfx_policy + 1] or "Unknown"))
-  r.ShowConsoleMsg(string.format("  Render No-TrackFX Policy: %s\n", policy_names[gui.render_no_trackfx_policy + 1] or "Unknown"))
   r.ShowConsoleMsg(string.format("  Debug Level: %s\n", debug_names[gui.debug_level + 1] or "Unknown"))
   r.ShowConsoleMsg(string.format("  Debug No Clear: %s\n", bool_str(gui.debug_no_clear)))
   r.ShowConsoleMsg(string.format("  Selection Policy: %s\n", selection_policy_names[gui.selection_policy + 1] or "Unknown"))
@@ -1187,7 +1184,6 @@ local function build_args_from_gui(operation)
   -- operation: "render", "auto", or "glue"
   local channel_names = { "auto", "mono", "multi" }
   local tc_names = { "previous", "current", "off" }
-  local policy_names = { "preserve", "force_multi" }
 
   -- Determine op and selection_scope based on button clicked
   local op, selection_scope, glue_single_items
@@ -1225,8 +1221,6 @@ local function build_args_from_gui(operation)
 
     policies = {
       glue_single_items = glue_single_items,  -- Use the mode-specific value
-      glue_no_trackfx_output_policy = policy_names[gui.glue_no_trackfx_policy + 1],
-      render_no_trackfx_output_policy = policy_names[gui.render_no_trackfx_policy + 1],
     },
   }
 
@@ -1497,15 +1491,6 @@ local function draw_settings_popup()
   rv, new_val = ImGui.Checkbox(ctx, "Write Glue Cues", gui.cue_write_glue)
   if rv then gui.cue_write_glue = new_val end
   draw_help_marker("#Glue: <TakeName> cues when sources change")
-
-  -- === POLICIES ===
-  draw_section_header("POLICIES")
-
-  rv, new_val = ImGui.Combo(ctx, "Glue No-TrackFX Policy", gui.glue_no_trackfx_policy, "Preserve\0Force Multi\0")
-  if rv then gui.glue_no_trackfx_policy = new_val end
-
-  rv, new_val = ImGui.Combo(ctx, "Render No-TrackFX Policy", gui.render_no_trackfx_policy, "Preserve\0Force Multi\0")
-  if rv then gui.render_no_trackfx_policy = new_val end
 
   -- === DEBUG ===
   draw_section_header("DEBUG")
