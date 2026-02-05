@@ -1,7 +1,7 @@
 --[[
 @description RGWH GUI - ImGui Interface for RGWH Core
 @author hsuanice
-@version 0.2.0
+@version 0.2.2
 @provides
   [main] .
 
@@ -14,7 +14,7 @@
   Adjust parameters using the visual controls and click operation buttons to execute.
 
 @changelog
-  0.2.0 [v260205.0418] - REMOVE: force_multi / No-TrackFX Policy settings (redundant with MULTI_CHANNEL_POLICY)
+  0.2.2 [260205.0418] - REMOVE: force_multi / No-TrackFX Policy settings (redundant with MULTI_CHANNEL_POLICY)
     - REMOVED: "Glue No-TrackFX Policy" and "Render No-TrackFX Policy" combo controls from Settings tab
     - REMOVED: GUI state fields glue_no_trackfx_policy / render_no_trackfx_policy
     - REMOVED: persist keys, ExtState sync, labels, debug output, args pass-through for the two policies
@@ -24,7 +24,7 @@
     - PERFORMANCE: Glue with SOURCE-playback is significantly faster (skips unnecessary Apply step)
     - REQUIRES: RGWH Core v0.3.0 [v260205.0409]+
 
-  0.2.0 [v260204.2352] - Multi mode hover info + Manual: mono 2ch floor documentation
+  0.2.1 [260204.2352] - Multi mode hover info + Manual: mono 2ch floor documentation
     - UPDATED: Multi channel mode tooltip
       • Now explains Multi-Channel Policy (SOURCE-playback / SOURCE-track)
       • Clarifies vs AUTO mode: MULTI does not detect mono items → 2ch minimum
@@ -40,7 +40,7 @@
       • Mono items in MULTI mode: 40209 has 2ch floor
       • Guidance: use AUTO mode for true 1ch mono preservation
 
-  0.2.0 [v260104.2344] - Multi-Channel Policy Support
+  0.2.0 [260104.2344] - Multi-Channel Policy Support
     - ADDED: Multi-Channel Policy control for AUTO and MULTI channel modes
       • Two policies: SOURCE-playback (preserve item channels) and SOURCE-track (match track channels)
       • UI: Appears as indented radio buttons below Channel Mode when AUTO or MULTI is selected
@@ -56,7 +56,7 @@
     - IMPACT: Users can now control multi-channel behavior for AUTO/MULTI modes
     - NOTE: Policy only applies to multi-channel items; mono items always output mono
 
-  0.1.4 [v251225.1835] - Epsilon Removal (Internal Constant)
+  0.1.4 [251225.1835] - Epsilon Removal (Internal Constant)
     - REMOVED: Epsilon Mode and Epsilon Value GUI controls (lines 1467-1479)
     - REMOVED: epsilon_mode and epsilon_value from gui state (lines 525-526)
     - REMOVED: epsilon ExtState synchronization (lines 651-657, 1211-1216)
