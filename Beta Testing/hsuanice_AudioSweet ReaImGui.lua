@@ -1,7 +1,7 @@
 --[[
 @description AudioSweet ReaImGui - AudioSuite Workflow (Pro Tools–Style)
 @author hsuanice
-@version 0.2.1.2
+@version 0.2.3
 @provides
   [main] .
 @about
@@ -65,10 +65,10 @@
 
 
 @changelog
-  v0.2.1.2 [Internal Build 260205.1040]
+  0.2.3 [260205.1040]
     - ADJUSTED: Main page layout alignment and spacing tweaks
 
-  v0.2.1 [Internal Build 260205.1027]
+  0.2.2 [260205.1027]
     - MOVED: Multi-Channel Policy from Settings tab to main page (two-row layout)
       • Row 1: Channel mode (left) + Preview Target (right)
       • Row 2: Policy radios — playback / track / target (left) + Whole File (right)
@@ -77,7 +77,7 @@
     - REMOVED: Settings → Channel Mode tab (redundant, now on main page)
     - UPDATED: Multi radio button tooltip simplified
 
-  v0.2.0.0.1 [Internal Build 251223.2328] - Version Sync
+  0.2.1 [251223.2328] - Version Sync
     - CHANGED: Version bump to 0.2.0.0.1
 
   v0.2.0 [Internal Build 251223.2256] - Public Beta Release
