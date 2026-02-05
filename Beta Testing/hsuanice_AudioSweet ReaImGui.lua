@@ -1,7 +1,7 @@
 --[[
 @description AudioSweet ReaImGui - AudioSuite Workflow (Pro Tools–Style)
 @author hsuanice
-@version 0.2.0.0.1
+@version 0.2.1.2
 @provides
   [main] .
 @about
@@ -65,6 +65,18 @@
 
 
 @changelog
+  v0.2.1.2 [Internal Build 260205.1040]
+    - ADJUSTED: Main page layout alignment and spacing tweaks
+
+  v0.2.1 [Internal Build 260205.1027]
+    - MOVED: Multi-Channel Policy from Settings tab to main page (two-row layout)
+      • Row 1: Channel mode (left) + Preview Target (right)
+      • Row 2: Policy radios — playback / track / target (left) + Whole File (right)
+      • Policy always visible (shows current selection even in Auto/Mono mode)
+      • Hover tooltips on each policy option
+    - REMOVED: Settings → Channel Mode tab (redundant, now on main page)
+    - UPDATED: Multi radio button tooltip simplified
+
   v0.2.0.0.1 [Internal Build 251223.2328] - Version Sync
     - CHANGED: Version bump to 0.2.0.0.1
 
@@ -4171,64 +4183,7 @@ end
       end
 
       -- ============================================================
-      -- Tab 4: Channel Mode Settings
-      -- ============================================================
-      if ImGui.BeginTabItem(ctx, 'Channel Mode') then
-        ImGui.Text(ctx, "Multi-Channel Policy")
-        ImGui.TextDisabled(ctx, "Configure how multi-channel rendering determines track channel count")
-        ImGui.Separator(ctx)
-        ImGui.Spacing(ctx)
-
-        -- Note: This setting only applies when Channel Mode is set to "Multi"
-        local is_multi_mode = (gui.channel_mode == 2)
-        if not is_multi_mode then
-          ImGui.PushStyleColor(ctx, ImGui.Col_Text, 0xFFAA00FF)  -- Orange color
-          ImGui.TextWrapped(ctx, "Note: Multi-channel policy only applies when Channel Mode is set to 'Multi'.")
-          ImGui.PopStyleColor(ctx)
-          ImGui.Separator(ctx)
-        end
-
-        -- Three RadioButton options
-        local changed = false
-
-        if ImGui.RadioButton(ctx, "SOURCE playback channels##policy", gui.multi_channel_policy == "source_playback") then
-          gui.multi_channel_policy = "source_playback"
-          changed = true
-        end
-        ImGui.Indent(ctx)
-        ImGui.TextWrapped(ctx, "Match the actual playback channel count of the source item (respects item channel mode settings).")
-        ImGui.TextDisabled(ctx, "Example: 8ch file playing as 4ch → uses 4ch")
-        ImGui.Unindent(ctx)
-        ImGui.Spacing(ctx)
-
-        if ImGui.RadioButton(ctx, "SOURCE track channels##policy", gui.multi_channel_policy == "source_track") then
-          gui.multi_channel_policy = "source_track"
-          changed = true
-        end
-        ImGui.Indent(ctx)
-        ImGui.TextWrapped(ctx, "Match the channel count of the source item's track (RGWH/Pro Tools style).")
-        ImGui.TextDisabled(ctx, "Example: Item on 8ch track → uses 8ch (regardless of item settings)")
-        ImGui.Unindent(ctx)
-        ImGui.Spacing(ctx)
-
-        if ImGui.RadioButton(ctx, "TARGET track channels##policy", gui.multi_channel_policy == "target_track") then
-          gui.multi_channel_policy = "target_track"
-          changed = true
-        end
-        ImGui.Indent(ctx)
-        ImGui.TextWrapped(ctx, "Respect the FX/chain track's current channel count (passive mode).")
-        ImGui.TextDisabled(ctx, "Example: FX track is 16ch → keeps 16ch (no modification)")
-        ImGui.Unindent(ctx)
-
-        if changed then
-          save_gui_settings()
-        end
-
-        ImGui.EndTabItem(ctx)
-      end
-
-      -- ============================================================
-      -- Tab 5: History Settings
+      -- Tab 4: History Settings
       -- ============================================================
       if ImGui.BeginTabItem(ctx, 'History') then
         ImGui.Text(ctx, "Maximum History Items:")
@@ -5111,20 +5066,6 @@ end
     ImGui.SetTooltip(ctx, "Copy FX to active take, then render (keeps old take FX)\nNote: copied FX IO mapping may be incorrect; use FX parameters for sound. TODO: improve IO mapping.")
   end
 
-  -- === TARGET TRACK NAME (Chain mode only) ===
-  if gui.mode ~= 0 then
-    ImGui.Text(ctx, "Preview Target:")
-    ImGui.SameLine(ctx)
-    -- Display current target track name as a button
-    -- Use ## ID to handle empty string case
-    local display_name = (gui.preview_target_track ~= "") and gui.preview_target_track or "(not set)"
-    if ImGui.Button(ctx, display_name .. "##target_track_btn", 150, 0) then
-      gui.show_target_track_popup = true
-    end
-    ImGui.SameLine(ctx)
-    ImGui.TextDisabled(ctx, "(click to edit)")
-  end
-
   -- === COPY SETTINGS (Compact horizontal) ===
   if gui.action == 1 then
     ImGui.Text(ctx, "Copy to:")
@@ -5150,7 +5091,7 @@ end
     end
   end
   if gui.action == 0 or gui.action == 2 then
-    -- Channel Mode
+    -- === ROW 1: Channel Mode (left) + Preview Target (right) ===
     ImGui.Text(ctx, "Channel:")
     ImGui.SameLine(ctx)
     if ImGui.RadioButton(ctx, "Auto##channel", gui.channel_mode == 0) then
@@ -5163,42 +5104,66 @@ end
       save_gui_settings()
     end
     ImGui.SameLine(ctx)
-
-    -- Multi channel mode radio button
     if ImGui.RadioButton(ctx, "Multi##channel", gui.channel_mode == 2) then
       gui.channel_mode = 2
       save_gui_settings()
     end
-
-    -- Tooltip showing current policy and hint to Settings
     if ImGui.IsItemHovered(ctx) then
-      local policy_name = "SOURCE playback"
-      if gui.multi_channel_policy == "source_track" then
-        policy_name = "SOURCE track"
-      elseif gui.multi_channel_policy == "target_track" then
-        policy_name = "TARGET track"
-      end
-
-      local tooltip_text = "Multi-channel mode\n\n"
-      tooltip_text = tooltip_text .. "Current policy: " .. policy_name .. "\n\n"
-      tooltip_text = tooltip_text .. "• Configure policy in Settings → Channel Mode"
-      ImGui.SetTooltip(ctx, tooltip_text)
+      local policy_names = {source_playback = "playback", source_track = "track", target_track = "target"}
+      local policy_name = policy_names[gui.multi_channel_policy] or gui.multi_channel_policy
+      ImGui.SetTooltip(ctx, "Multi-channel mode (policy: " .. policy_name .. ")")
     end
 
-    -- Whole File section
-    ImGui.SameLine(ctx, 0, 65)
+    -- Preview Target (right side of row 1)
+    if gui.mode ~= 0 then
+      ImGui.SameLine(ctx, 0, 120)
+      ImGui.Text(ctx, "Preview:")
+      ImGui.SameLine(ctx)
+      local display_name = (gui.preview_target_track ~= "") and gui.preview_target_track or "(not set)"
+      if ImGui.Button(ctx, display_name .. "##target_track_btn", 120, 0) then
+        gui.show_target_track_popup = true
+      end
+    end
+
+    -- === ROW 2: Policy (left) + Whole File (right) ===
+    ImGui.Text(ctx, "  ")
+    ImGui.SameLine(ctx)
+    if ImGui.RadioButton(ctx, "playback##policy", gui.multi_channel_policy == "source_playback") then
+      gui.multi_channel_policy = "source_playback"
+      save_gui_settings()
+    end
+    if ImGui.IsItemHovered(ctx) then
+      ImGui.SetTooltip(ctx, "Match item playback channels\nExample: 8ch file playing as 4ch \xe2\x86\x92 uses 4ch")
+    end
+    ImGui.SameLine(ctx)
+    if ImGui.RadioButton(ctx, "track##policy", gui.multi_channel_policy == "source_track") then
+      gui.multi_channel_policy = "source_track"
+      save_gui_settings()
+    end
+    if ImGui.IsItemHovered(ctx) then
+      ImGui.SetTooltip(ctx, "Match source track channels\nExample: Item on 8ch track \xe2\x86\x92 uses 8ch")
+    end
+    ImGui.SameLine(ctx)
+    if ImGui.RadioButton(ctx, "target##policy", gui.multi_channel_policy == "target_track") then
+      gui.multi_channel_policy = "target_track"
+      save_gui_settings()
+    end
+    if ImGui.IsItemHovered(ctx) then
+      ImGui.SetTooltip(ctx, "Keep FX track channels as-is\nExample: FX track is 16ch \xe2\x86\x92 keeps 16ch")
+    end
+
+    -- Whole File + handle input (right side of row 2)
+    ImGui.SameLine(ctx, 0, 130)
     local rv_whole = ImGui.Checkbox(ctx, "Whole File", gui.use_whole_file)
     if rv_whole then
       gui.use_whole_file = not gui.use_whole_file
       save_gui_settings()
     end
-
     ImGui.SameLine(ctx)
-    -- Handle seconds input (disabled when Whole File is checked)
     if gui.use_whole_file then
       ImGui.BeginDisabled(ctx)
     end
-    ImGui.SetNextItemWidth(ctx, 80)
+    ImGui.SetNextItemWidth(ctx, 93)
     local rv, new_val = ImGui.InputDouble(ctx, "##handle_seconds", gui.handle_seconds, 0, 0, "%.1f")
     if rv then
       gui.handle_seconds = math.max(0, new_val)
