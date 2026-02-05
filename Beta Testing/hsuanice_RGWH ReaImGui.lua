@@ -1,7 +1,7 @@
 --[[
 @description RGWH GUI - ImGui Interface for RGWH Core
 @author hsuanice
-@version 0.2.2
+@version 0.2.3
 @provides
   [main] .
 
@@ -14,6 +14,11 @@
   Adjust parameters using the visual controls and click operation buttons to execute.
 
 @changelog
+  0.2.3 [260205.1129] - RENAMED: Multi-Channel Policy labels simplified
+    - CHANGED: "SOURCE-playback" → "playback", "SOURCE-track" → "track"
+    - UPDATED: Radio buttons, tooltips, help text, console messages
+    - REASON: Consistency with AudioSweet GUI naming convention
+
   0.2.2 [260205.0418] - REMOVE: force_multi / No-TrackFX Policy settings (redundant with MULTI_CHANNEL_POLICY)
     - REMOVED: "Glue No-TrackFX Policy" and "Render No-TrackFX Policy" combo controls from Settings tab
     - REMOVED: GUI state fields glue_no_trackfx_policy / render_no_trackfx_policy
@@ -745,7 +750,7 @@ local function format_setting_value(key, val)
   local tc_names = {"Previous", "Current", "Off"}
   local handle_names = {"Use ExtState", "Seconds", "Frames"}
   -- v0.1.4: epsilon_names removed (epsilon is now internal constant)
-  local multi_channel_policy_names = {"SOURCE-playback", "SOURCE-track"}  -- v0.3.0
+  local multi_channel_policy_names = {"playback", "track"}  -- v0.3.0
   local debug_names = {"Silent", "Normal", "Verbose"}
   local selection_policy_names = {"Progress", "Restore", "None"}
 
@@ -960,7 +965,7 @@ local function print_all_settings(prefix)
   local tc_names = {"Previous", "Current", "Off"}
   local handle_names = {"Use ExtState", "Seconds", "Frames"}
   -- v0.1.4: epsilon_names removed (epsilon is now internal constant)
-  local multi_channel_policy_names = {"SOURCE-playback", "SOURCE-track"}  -- v0.3.0
+  local multi_channel_policy_names = {"playback", "track"}  -- v0.3.0
   local debug_names = {"Silent", "Normal", "Verbose"}
   local selection_policy_names = {"Progress", "Restore", "None"}
 
@@ -1577,7 +1582,7 @@ local function draw_manual_window()
         ImGui.TableNextRow(ctx)
         ImGui.TableNextColumn(ctx); ImGui.TextColored(ctx, 0xFFFF00FF, 'Multi')
         ImGui.TableNextColumn(ctx); ImGui.Text(ctx, 'Policy-based')
-        ImGui.TableNextColumn(ctx); ImGui.Text(ctx, 'SOURCE-playback: 40209 (preserve ch, 2ch floor)\nSOURCE-track: 41993 (match track ch)')
+        ImGui.TableNextColumn(ctx); ImGui.Text(ctx, 'playback: 40209 (preserve ch, 2ch floor)\ntrack: 41993 (match track ch)')
 
         ImGui.EndTable(ctx)
       end
@@ -1585,8 +1590,8 @@ local function draw_manual_window()
       ImGui.Spacing(ctx)
       ImGui.TextColored(ctx, 0xFF8800FF, "Multi-Channel Policy (AUTO / MULTI):")
       ImGui.Indent(ctx)
-      ImGui.BulletText(ctx, "SOURCE-playback (40209): Preserves item playback channels (4ch→4ch, 6ch→6ch)")
-      ImGui.BulletText(ctx, "SOURCE-track (41993): Forces output to match track I_NCHAN")
+      ImGui.BulletText(ctx, "playback (40209): Preserves item playback channels (4ch→4ch, 6ch→6ch)")
+      ImGui.BulletText(ctx, "track (41993): Forces output to match track I_NCHAN")
       ImGui.Spacing(ctx)
       ImGui.TextColored(ctx, 0xFF0000FF, "Mono items in MULTI mode:")
       ImGui.BulletText(ctx, "Action 40209 has a 2ch floor — mono items output stereo (2ch)")
@@ -2260,11 +2265,11 @@ local function draw_gui()
     ImGui.SetTooltip(ctx,
       "Multi mode: Multi-channel output via Multi-Channel Policy\n\n" ..
       "Output depends on Multi-Channel Policy:\n\n" ..
-      "  SOURCE-playback (Action 40209):\n" ..
+      "  playback (Action 40209):\n" ..
       "    • Preserves item playback channel count\n" ..
       "    • 4ch → 4ch, 6ch → 6ch\n" ..
       "    • Mono → Stereo (2ch floor, REAPER limit)\n\n" ..
-      "  SOURCE-track (Action 41993):\n" ..
+      "  track (Action 41993):\n" ..
       "    • Output = Track channel count (I_NCHAN)\n" ..
       "    • All items forced to match track ch\n\n" ..
       "vs AUTO mode:\n" ..
@@ -2278,16 +2283,16 @@ local function draw_gui()
   if gui.channel_mode == 0 or gui.channel_mode == 2 then
     ImGui.Text(ctx, "Multi-Channel Policy:")
     ImGui.SameLine(ctx)
-    if ImGui.RadioButton(ctx, "SOURCE-playback##policy", gui.multi_channel_policy == 0) then
+    if ImGui.RadioButton(ctx, "playback##policy", gui.multi_channel_policy == 0) then
       gui.multi_channel_policy = 0
       sync_rgwh_extstate_from_gui()  -- Sync immediately when changed
       if gui.debug_level >= 1 then
-        r.ShowConsoleMsg(string.format("[RGWH GUI] Multi-Channel Policy changed to: SOURCE-playback\n"))
+        r.ShowConsoleMsg(string.format("[RGWH GUI] Multi-Channel Policy changed to: playback\n"))
       end
     end
     if ImGui.IsItemHovered(ctx) then
       ImGui.SetTooltip(ctx,
-        "SOURCE-playback: Preserve item playback channel count\n\n" ..
+        "playback: Preserve item playback channel count\n\n" ..
         "Behavior:\n" ..
         "  • Stereo item → Stereo output (2ch → 2ch)\n" ..
         "  • 4-channel item → 4-channel output (4ch → 4ch)\n" ..
@@ -2304,18 +2309,18 @@ local function draw_gui()
       )
     end
     ImGui.SameLine(ctx)
-    if ImGui.RadioButton(ctx, "SOURCE-track##policy", gui.multi_channel_policy == 1) then
+    if ImGui.RadioButton(ctx, "track##policy", gui.multi_channel_policy == 1) then
       gui.multi_channel_policy = 1
       sync_rgwh_extstate_from_gui()  -- Sync immediately when changed
       if gui.debug_level >= 1 then
-        r.ShowConsoleMsg(string.format("[RGWH GUI] Multi-Channel Policy changed to: SOURCE-track\n"))
+        r.ShowConsoleMsg(string.format("[RGWH GUI] Multi-Channel Policy changed to: track\n"))
       end
     end
     if ImGui.IsItemHovered(ctx) then
       ImGui.SetTooltip(ctx,
-        "SOURCE-track: Force output to match source track channels\n\n" ..
+        "track: Force output to match source track channels\n\n" ..
         "Behavior:\n" ..
-        "  • Output always matches SOURCE track channel count\n" ..
+        "  • Output always matches source track channel count\n" ..
         "  • All items normalized to same channel count\n" ..
         "  • Mono on stereo track → Stereo output\n" ..
         "  • 4ch on stereo track → Stereo output (downmix)\n\n" ..
