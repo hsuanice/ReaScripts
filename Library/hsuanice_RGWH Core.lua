@@ -1,6 +1,6 @@
 --[[
 @description RGWH Core - Render or Glue with Handles
-@version 0.3.0
+@version 0.3.5
 @author hsuanice
 
 @provides
@@ -60,7 +60,7 @@
   • For detailed operation modes guide, see RGWH GUI: Help > Manual (Operation Modes)
 
 @changelog
-  0.3.0 [v260205.0409] - REMOVE: force_multi / no_trackfx_output_policy settings (redundant with MULTI_CHANNEL_POLICY)
+  0.3.5 [260205.0409] - REMOVE: force_multi / no_trackfx_output_policy settings (redundant with MULTI_CHANNEL_POLICY)
     - REMOVED: GLUE_OUTPUT_POLICY_WHEN_NO_TRACKFX and RENDER_OUTPUT_POLICY_WHEN_NO_TRACKFX settings
       • These settings ("preserve" | "force_multi") are now fully replaced by MULTI_CHANNEL_POLICY
       • source_track = old force_multi (Apply after Glue to force track ch)
@@ -75,7 +75,7 @@
     - GUI: Removed Glue/Render No-TrackFX Policy combos, persist keys, sync, labels, debug output
     - REASON: Reduces UI complexity — one setting (MULTI_CHANNEL_POLICY) controls all channel behavior
 
-  0.3.0 [v260205.0144] - REFACTOR: preserve mode hybrid command — 41993 default + 40209 for odd ch
+  0.3.4 [260205.0144] - REFACTOR: preserve mode hybrid command — 41993 default + 40209 for odd ch
     - CHANGE: SOURCE-playback (preserve) no longer uses 40209 exclusively
       • Even ch (2,4,6...) and mono: 41993 + set track ch = target (deterministic, no FX Pin interference)
       • Odd multi ch (3,5,7...): 40209 + set track ch = item_ch+1 as ceiling (preserves exact odd ch)
@@ -88,7 +88,7 @@
     - LOGGING: Now logs actual command ID in run_command for easier debugging
     - IMPACT: All 4 FX quadrants × Render/Glue paths benefit from deterministic channel control
 
-  0.3.0 [v260205.0023] - BUGFIX: preserve mode track ch adjustment was expand-only (not bidirectional)
+  0.3.3 [260205.0023] - BUGFIX: preserve mode track ch adjustment was expand-only (not bidirectional)
     - BUG: apply_track_take_fx_to_item_with_policy() only expanded track ch when item_ch > track_ch
       • 40209 uses track I_NCHAN as ceiling → items on wider tracks output at track ch, not item ch
       • e.g., 2ch item on 4ch track → output 4ch (wrong), should be 2ch
@@ -100,7 +100,7 @@
       • Applied identical bidirectional adjustment logic
     - IMPACT: SOURCE-playback now correctly preserves item ch on tracks wider than source
 
-  0.3.0 [v260204.2032] - BUGFIX: Glue path ignoring SOURCE-playback (preserve) policy
+  0.3.2 [260204.2032] - BUGFIX: Glue path ignoring SOURCE-playback (preserve) policy
     - FIXED: apply_multichannel_no_fx_preserve_take() always used ACT_APPLY_MULTI (41993)
       • Added apply_mode parameter (5th arg, default "multi" for backward compatibility)
       • Now uses get_apply_cmd(apply_mode) to select correct action per policy
@@ -117,7 +117,7 @@
       • Fix: local _, policy = r.GetProjExtState(...)
     - IMPACT: SOURCE-playback policy now works correctly for both Render and Glue paths
 
-  0.3.0 [v260109.1430] - MULTI-CHANNEL POLICY: Track Channel Adjustment Implementation
+  0.3.1 [260109.1430] - MULTI-CHANNEL POLICY: Track Channel Adjustment Implementation
     - IMPLEMENTED: Track channel adjustment for SOURCE-playback policy
       • New function: apply_track_take_fx_to_item_with_policy() - handles track ch snapshot/adjust/restore
       • SOURCE-playback (preserve mode): Temporarily expands track ch to match item ch before 40209
@@ -139,7 +139,7 @@
     - VERIFIED: Track channel snapshot/restore mechanism tested and working correctly
     - READY: For user testing with actual multi-channel items and policies
 
-  0.3.0 [v260105.0045] - CHANNEL MODE REDESIGN: Multi-Channel Policy Integration
+  0.3.0 [260105.0045] - CHANNEL MODE REDESIGN: Multi-Channel Policy Integration
     - CHANGED: Complete redesign of channel mode handling to utilize native REAPER commands optimally
     - ADDED: Multi-Channel Policy support for AUTO and MULTI channel modes
       • AUTO mode: Reads MULTI_CHANNEL_POLICY ExtState to decide between 40209 (preserve) and 41993 (match track)
@@ -174,7 +174,7 @@
       • Logging format: "[CMD] <context> → <ID>: <command name>"
       • STATUS: MONO mode verified working correctly (全象限 OK)
 
-  0.2.2a [v251225.1845] - EPSILON VALUE REFINEMENT + CRITICAL BUG FIX
+  0.2.3 [251225.1845] - EPSILON VALUE REFINEMENT + CRITICAL BUG FIX
     - CHANGED: Epsilon refined from 0.5 frames to 0.1 frames for better precision
     - FIXED: frames_to_seconds() was using video FPS instead of audio sample rate (line 941-950)
       • Bug: Used TimeMap_curFrameRate (24fps) instead of sr parameter → epsilon was 2000x too large!
@@ -183,7 +183,7 @@
     - REASON: 0.1 frames (48kHz: 0.002ms) balances float precision handling with user intent
     - IMPACT: More accurate touch/overlap detection, respects intentional micro-gaps
 
-  0.2.2 [v251225.1830] - EPSILON INTERNALIZED
+  0.2.2 [251225.1830] - EPSILON INTERNALIZED
     - CHANGED: Epsilon is now internal constant (0.5 frames), no longer user-configurable
     - REMOVED: EPSILON_MODE and EPSILON_VALUE from ExtState settings
     - REMOVED: epsilon parameter from args (no longer accepts overrides)
@@ -191,7 +191,7 @@
     - REASON: Epsilon rarely needs adjustment, simplifies user experience
     - IMPACT: GUI epsilon settings removed, epsilon always consistent
 
-  0.2.1 [v251225.1820] - PUBLIC UTILITY API
+  0.2.1 [251225.1820] - PUBLIC UTILITY API
     - ADDED: M.utils.detect_units_from_selection() - shared unit detection
     - ADDED: M.utils.project_epsilon() - epsilon calculation
     - ADDED: M.utils.ranges_touch_or_overlap() - range overlap detection
