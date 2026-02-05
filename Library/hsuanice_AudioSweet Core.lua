@@ -1,6 +1,6 @@
 --[[
 @description AudioSweet Core - Focused Track FX render via RGWH Core
-@version 0.3.1
+@version 0.3.2
 @author hsuanice
 @noindex
 @notes
@@ -12,7 +12,7 @@ Tim Chimes (original), adapted by hsuanice for AudioSweet Core integration.
   http://timchimes.com/scripting-with-reaper-audiosuite/
 
 @changelog
-  v0.3.1 (2026-02-05) [internal: v260205.0458]
+  0.3.2 [260205.0458]
     - BUGFIX: Mono mode completely broken — always passed channel_mode="auto" to RGWH.core()
       • BUG: Both APPLY and CORE paths hardcoded channel_mode="auto" in RGWH.core() args
       • When user selected Mono, RGWH received "auto" → detected multi-ch → used preserve → wrong output
@@ -25,7 +25,7 @@ Tim Chimes (original), adapted by hsuanice for AudioSweet Core integration.
       • Updated all comments, logs, and changelog display names
     - REQUIRES: RGWH Core v0.3.0 [v260205.0409]+
 
-  v0.3.0 (2026-02-05) [internal: v260205.0433]
+  0.3.1 [260205.0433]
     - BUGFIX: TARGET-track ExtState handshake broken after RGWH Core force_multi removal (APPLY path only)
       • BUG: Wrote empty MULTI_CHANNEL_POLICY → RGWH v0.3.0 defaults to preserve → adjusts FX track to item ch
       • Expected: TARGET-track should output FX track ch (not item ch)
@@ -35,7 +35,7 @@ Tim Chimes (original), adapted by hsuanice for AudioSweet Core integration.
       • New: Odd multi ch (3,5,7...) → explicitly set item_ch+1 (even ceiling, matches RGWH hybrid logic)
     - REQUIRES: RGWH Core v0.3.0 [v260205.0409]+
 
-  v0.3.0 (2026-01-04) [internal: v260104.2143]
+  0.3.0 [260104.2143]
     - CHANGED: Complete redesign of Multi-Channel Policy handling with TARGET-track support
     - ARCHITECTURE: Three policies with clear separation of concerns
       • SOURCE-playback: Adjust FX track to item playback channels, write "source_playback" ExtState to RGWH
@@ -54,7 +54,7 @@ Tim Chimes (original), adapted by hsuanice for AudioSweet Core integration.
     - REQUIRES: RGWH Core v0.3.0+ for Multi-Channel Policy ExtState support
     - BACKWARD COMPATIBLE: Existing behavior preserved when no policy set
 
-  v0.2.3 (2025-12-26) [internal: v251226.0356]
+  0.2.3 [251226.0356]
     - CHANGED: Unified Multi-Channel Policy ExtState Protocol
       • BEFORE: Used hsuanice_AS.RGWH_PRESERVE_TRACK_CH = "0"/"1" (boolean handshake)
       • NOW: Uses RGWH.MULTI_CHANNEL_POLICY = "source_playback"/"source_track"/"target_track" (semantic protocol)
@@ -86,7 +86,7 @@ Tim Chimes (original), adapted by hsuanice for AudioSweet Core integration.
     - IMPACT: ~200 lines removed, cleaner architecture, single source of truth
     - NOTE: All Apply functionality now uses RGWH.core() API
 
-  v0.2.2 (2025-12-25) [internal: v251225.2158]
+  0.2.2 [251225.2158]
     - REFACTORED: Removed duplicated unit detection logic
       • Removed build_units_from_selection() function (~47 lines of duplicated code)
       • Now uses RGWH.utils.detect_units_from_selection() (single source of truth)
