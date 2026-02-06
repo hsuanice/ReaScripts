@@ -1,6 +1,6 @@
 --[[
 @description Conform List Browser
-@version 260206.1300
+@version 260206.2152
 @author hsuanice
 @about
   A REAPER script for browsing and editing EDL (Edit Decision List) data
@@ -41,6 +41,48 @@
   Optional: js_ReaScriptAPI (for folder selection)
 
 @changelog
+  v260206.2152
+  - Feature: Reel filter sidebar
+    • Moved from horizontal bar to left sidebar panel
+    • Displays alongside EDL table for better space utilization
+    • Auto-width based on longest reel name
+    • Scrollable when many reels present
+  - Feature: Additional BWF Description parsing
+    • sPROJECT, sFRAMERATE, sSPEED, sTRKx (track names), sFiLENAME
+    • New audio table columns: Framerate, Speed, Orig Filename, Track Names
+  - Feature: Audio table sortable and reorderable
+    • Click headers to sort by column
+    • Drag headers to reorder columns
+  - Feature: FPS setting now remembered
+    • Saves both FPS value and drop-frame flag
+    • Persists across script restarts
+  - Fix: Generate Items / Conform All now respects filters
+    • Only processes visible events (filtered by Source/Track/Reel)
+    • Hidden events are skipped
+  - Fix: Track and Reel filters visible by default
+  - Fix: Cache format updated to support new metadata fields
+
+  v260206.1500
+  - Feature: Reel filter (similar to Sources/Tracks filter)
+    • "Reels >>" toggle button in toolbar shows/hides panel
+    • Each unique reel listed with event count and checkbox
+    • Show All / Hide All buttons for quick toggling
+    • Scrollable list for EDLs with many reels
+  - Feature: Audio metadata cache
+    • Caches metadata to disk after first scan
+    • Subsequent loads of same folder use cache (instant load)
+    • Cache invalidated if files no longer exist
+    • Cache file stored in audio folder as !CLB_Audio_Cache.clbcache
+  - Feature: FPS dropdown selector
+    • Common frame rates: 23.976, 24, 25, 29.97 DF, 30, 50, 59.94 DF, 60
+    • Automatically sets drop-frame mode for 29.97/59.94
+  - Feature: Enhanced Track Format tokens
+    • Supports: ${track} ${reel} ${clip} ${event} ${format} ${title} ${edit_type}
+    • Items grouped by expanded track name (e.g., "${reel} - ${track}")
+  - Fix: Audio panel toggle
+    • "Audio >>" toggle button in toolbar to show/hide audio panel
+    • Previously hidden panel could not be shown again
+
   v260206.1300
   - Feature: Conform Matched functionality
     • "Conform All" button: insert matched audio files as items
@@ -168,7 +210,7 @@ end
 ---------------------------------------------------------------------------
 local SCRIPT_NAME = "Conform List Browser"
 local EXT_NS = "hsuanice_ConformListBrowser"
-local VERSION = "260206.1300"
+local VERSION = "260206.2152"
 
 -- Column definitions (EDL Events table)
 local COL = {
@@ -203,9 +245,13 @@ local AUDIO_COL = {
   SAMPLERATE    = 8,
   CHANNELS      = 9,
   PROJECT       = 10,
-  DESCRIPTION   = 11,
+  FRAMERATE     = 11,  -- sFRAMERATE
+  SPEED         = 12,  -- sSPEED
+  ORIG_FILENAME = 13,  -- sFiLENAME
+  TRACK_NAMES   = 14,  -- sTRK1, sTRK2, etc.
+  DESCRIPTION   = 15,
 }
-local AUDIO_COL_COUNT = 11
+local AUDIO_COL_COUNT = 15
 
 local AUDIO_HEADER_LABELS = {
   [1]  = "Filename",
@@ -218,7 +264,11 @@ local AUDIO_HEADER_LABELS = {
   [8]  = "SR",
   [9]  = "Ch",
   [10] = "Project",
-  [11] = "Description",
+  [11] = "FPS",
+  [12] = "Speed",
+  [13] = "Orig File",
+  [14] = "Tracks",
+  [15] = "Description",
 }
 
 local AUDIO_COL_WIDTH = {
@@ -232,7 +282,11 @@ local AUDIO_COL_WIDTH = {
   [8]  = 50,   -- SR
   [9]  = 30,   -- Ch
   [10] = 100,  -- Project
-  [11] = 200,  -- Description
+  [11] = 80,   -- FPS
+  [12] = 80,   -- Speed
+  [13] = 150,  -- Orig File
+  [14] = 120,  -- Tracks
+  [15] = 200,  -- Description
 }
 
 -- Audio file extensions
@@ -332,8 +386,10 @@ local CLB = {
   -- UI state
   frame_counter = 0,
   show_sources_panel = false,
-  show_track_filter = false,
+  show_track_filter = true,
   track_filters = {},  -- { { name, count, visible }, ... }
+  show_reel_filter = true,
+  reel_filters = {},   -- { { name, count, visible }, ... }
 
   -- Audio file matching state
   audio_files = {},           -- { {path, filename, basename, folder, metadata={}}, ... }
@@ -344,6 +400,8 @@ local CLB = {
   audio_search = "",          -- Audio table search filter
   audio_cached = nil,         -- Cached filtered audio files
   audio_cached_frame = -1,    -- Frame number of cached audio files
+  audio_sort_col = nil,       -- Column to sort by (nil = no sort)
+  audio_sort_asc = true,      -- Sort ascending
 
   -- Loading state (for async loading with progress)
   loading_state = nil,        -- { phase, total, current, files }
@@ -445,6 +503,131 @@ local function join_path(dir, file)
   else
     return dir .. "/" .. file
   end
+end
+
+---------------------------------------------------------------------------
+-- Audio Metadata Cache (stored in audio folder)
+---------------------------------------------------------------------------
+
+--- Get cache file path for a given folder (stored inside the audio folder itself)
+local function get_cache_path(folder, recursive)
+  if not folder or folder == "" then return nil end
+  local suffix = recursive and "_R" or ""
+  return folder .. "/!CLB_Audio_Cache" .. suffix .. ".clbcache"
+end
+
+--- Save audio metadata cache to file
+local function save_audio_cache(folder, recursive, files)
+  local cache_path = get_cache_path(folder, recursive)
+  local f = io.open(cache_path, "w")
+  if not f then return false end
+
+  -- Header line: folder|recursive|timestamp|file_count
+  f:write(string.format("%s|%s|%d|%d\n",
+    folder,
+    recursive and "R" or "N",
+    os.time(),
+    #files))
+
+  -- File entries: path|filename|basename|folder|sr|ch|dur|scene|take|tape|reel|project|timeref|src_tc|desc|framerate|speed|orig_filename|track_names|ubits
+  for _, file in ipairs(files) do
+    local m = file.metadata or {}
+    local line = string.format("%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s\n",
+      file.path or "",
+      file.filename or "",
+      file.basename or "",
+      file.folder or "",
+      tostring(m.samplerate or 0),
+      tostring(m.channels or 0),
+      tostring(m.duration or 0),
+      (m.scene or ""):gsub("|", "_"),
+      (m.take or ""):gsub("|", "_"),
+      (m.tape or ""):gsub("|", "_"),
+      (m.reel or ""):gsub("|", "_"),
+      (m.project or ""):gsub("|", "_"),
+      (m.timereference or ""):gsub("|", "_"),
+      (m.src_tc or ""):gsub("|", "_"),
+      (m.description or ""):gsub("|", "_"):gsub("\n", " "),
+      (m.framerate or ""):gsub("|", "_"),
+      (m.speed or ""):gsub("|", "_"),
+      (m.orig_filename or ""):gsub("|", "_"),
+      (m.track_names or ""):gsub("|", "_"),
+      (m.ubits or ""):gsub("|", "_"))
+    f:write(line)
+  end
+
+  f:close()
+  console_msg("Saved audio cache: " .. cache_path)
+  return true
+end
+
+--- Load audio metadata cache from file
+--- Returns files array if cache valid, nil if cache invalid/missing
+local function load_audio_cache(folder, recursive)
+  local cache_path = get_cache_path(folder, recursive)
+  local f = io.open(cache_path, "r")
+  if not f then return nil end
+
+  -- Read header
+  local header = f:read("*l")
+  if not header then f:close(); return nil end
+
+  local h_folder, h_rec, _, h_count = header:match("^([^|]*)|([^|]*)|([^|]*)|([^|]*)$")
+  if not h_folder or h_folder ~= folder then
+    f:close()
+    return nil
+  end
+
+  local file_count = tonumber(h_count) or 0
+
+  -- Read file entries
+  local files = {}
+  for line in f:lines() do
+    local parts = {}
+    for part in (line .. "|"):gmatch("([^|]*)|") do
+      parts[#parts + 1] = part
+    end
+
+    if #parts >= 15 then
+      files[#files + 1] = {
+        path = parts[1],
+        filename = parts[2],
+        basename = parts[3],
+        folder = parts[4],
+        metadata = {
+          samplerate = tonumber(parts[5]) or 0,
+          channels = tonumber(parts[6]) or 0,
+          duration = tonumber(parts[7]) or 0,
+          scene = parts[8],
+          take = parts[9],
+          tape = parts[10],
+          reel = parts[11],
+          project = parts[12],
+          timereference = parts[13],
+          src_tc = parts[14],
+          description = parts[15],
+          -- New fields (v2 cache format, parts 16-20)
+          framerate = parts[16] or "",
+          speed = parts[17] or "",
+          orig_filename = parts[18] or "",
+          track_names = parts[19] or "",
+          ubits = parts[20] or "",
+          bwf_fields = {},
+        }
+      }
+    end
+  end
+
+  f:close()
+
+  -- Verify file count matches
+  if #files ~= file_count then
+    console_msg("Cache file count mismatch, will rescan")
+    return nil
+  end
+
+  console_msg(string.format("Loaded %d files from cache", #files))
+  return files
 end
 
 --- Scan audio folder and return list of audio files
@@ -562,6 +745,12 @@ local function read_audio_metadata(filepath)
     description = "",
     originator = "",
     bwf_fields = {},         -- parsed BWF Description fields
+    -- Additional fields from BWF Description
+    framerate = "",          -- sFRAMERATE
+    speed = "",              -- sSPEED
+    orig_filename = "",      -- sFiLENAME (original filename)
+    track_names = "",        -- sTRK1, sTRK2, etc. (comma-separated)
+    ubits = "",              -- sUBITS
   }
 
   if not filepath or filepath == "" then return meta end
@@ -607,17 +796,35 @@ local function read_audio_metadata(filepath)
     -- Parse BWF Description for key=value pairs
     if meta.description ~= "" then
       meta.bwf_fields = parse_bwf_description(meta.description)
+      local bf = meta.bwf_fields
 
       -- Extract reel from description (sTRK#/dREEL format)
-      meta.reel = meta.bwf_fields["REEL"]
-               or meta.bwf_fields["sREEL"]
-               or meta.bwf_fields["dREEL"]
-               or ""
+      meta.reel = bf["REEL"] or bf["sREEL"] or bf["dREEL"] or ""
 
       -- Also try SCENE, TAKE, TAPE from BWF if iXML was empty
-      if meta.scene == "" then meta.scene = meta.bwf_fields["SCENE"] or meta.bwf_fields["sSCENE"] or "" end
-      if meta.take == ""  then meta.take  = meta.bwf_fields["TAKE"]  or meta.bwf_fields["sTAKE"]  or "" end
-      if meta.tape == ""  then meta.tape  = meta.bwf_fields["TAPE"]  or meta.bwf_fields["sTAPE"]  or "" end
+      if meta.scene == "" then meta.scene = bf["SCENE"] or bf["sSCENE"] or "" end
+      if meta.take == ""  then meta.take  = bf["TAKE"]  or bf["sTAKE"]  or "" end
+      if meta.tape == ""  then meta.tape  = bf["TAPE"]  or bf["sTAPE"]  or "" end
+
+      -- Extract project from BWF if iXML was empty
+      if meta.project == "" then meta.project = bf["PROJECT"] or bf["sPROJECT"] or "" end
+
+      -- Extract additional fields
+      meta.framerate = bf["FRAMERATE"] or bf["sFRAMERATE"] or ""
+      meta.speed = bf["SPEED"] or bf["sSPEED"] or ""
+      meta.orig_filename = bf["FILENAME"] or bf["sFiLENAME"] or bf["sFILENAME"] or ""
+      meta.ubits = bf["UBITS"] or bf["sUBITS"] or ""
+
+      -- Collect track names (sTRK1, sTRK2, sTRK3, etc.)
+      local trk_names = {}
+      for i = 1, 32 do  -- Check up to 32 tracks
+        local key = "TRK" .. i
+        local val = bf[key] or bf["s" .. key] or bf["d" .. key]
+        if val and val ~= "" then
+          trk_names[#trk_names + 1] = string.format("%d:%s", i, val)
+        end
+      end
+      meta.track_names = table.concat(trk_names, ", ")
     end
 
     -- If no reel from description, try tape as reel
@@ -773,32 +980,80 @@ local function match_audio_files()
     found_count, multiple_count, not_found_count))
 end
 
---- Get filtered audio files for display
+--- Get value for audio file column (for sorting)
+local function get_audio_col_value(af, col)
+  local meta = af.metadata or {}
+  if col == AUDIO_COL.FILENAME then return af.filename or ""
+  elseif col == AUDIO_COL.SRC_TC then return meta.src_tc or ""
+  elseif col == AUDIO_COL.SCENE then return meta.scene or ""
+  elseif col == AUDIO_COL.TAKE then return meta.take or ""
+  elseif col == AUDIO_COL.TAPE then return meta.tape or meta.reel or ""
+  elseif col == AUDIO_COL.FOLDER then return af.folder or ""
+  elseif col == AUDIO_COL.DURATION then return meta.duration or 0
+  elseif col == AUDIO_COL.SAMPLERATE then return meta.samplerate or 0
+  elseif col == AUDIO_COL.CHANNELS then return meta.channels or 0
+  elseif col == AUDIO_COL.PROJECT then return meta.project or ""
+  elseif col == AUDIO_COL.FRAMERATE then return meta.framerate or ""
+  elseif col == AUDIO_COL.SPEED then return meta.speed or ""
+  elseif col == AUDIO_COL.ORIG_FILENAME then return meta.orig_filename or ""
+  elseif col == AUDIO_COL.TRACK_NAMES then return meta.track_names or ""
+  elseif col == AUDIO_COL.DESCRIPTION then return meta.description or ""
+  end
+  return ""
+end
+
+--- Get filtered and sorted audio files for display
 local function get_audio_view_rows()
   local frame = CLB.frame_counter
   if CLB.audio_cached and CLB.audio_cached_frame == frame then
     return CLB.audio_cached
   end
 
+  local result
   local search = (CLB.audio_search or ""):lower()
   if search == "" then
-    CLB.audio_cached = CLB.audio_files
+    -- Copy array for sorting (don't modify original)
+    result = {}
+    for i, af in ipairs(CLB.audio_files) do
+      result[i] = af
+    end
   else
-    local filtered = {}
+    result = {}
     for _, af in ipairs(CLB.audio_files) do
       -- Search in filename and metadata
+      local meta = af.metadata or {}
       local searchable = (af.filename or "") .. " " ..
         (af.folder or "") .. " " ..
-        (af.metadata and af.metadata.scene or "") .. " " ..
-        (af.metadata and af.metadata.take or "") .. " " ..
-        (af.metadata and af.metadata.tape or "")
+        (meta.scene or "") .. " " ..
+        (meta.take or "") .. " " ..
+        (meta.tape or "") .. " " ..
+        (meta.project or "") .. " " ..
+        (meta.orig_filename or "")
       if searchable:lower():find(search, 1, true) then
-        filtered[#filtered + 1] = af
+        result[#result + 1] = af
       end
     end
-    CLB.audio_cached = filtered
   end
 
+  -- Sort if sort column is set
+  if CLB.audio_sort_col and CLB.audio_sort_col >= 1 and CLB.audio_sort_col <= AUDIO_COL_COUNT then
+    local col = CLB.audio_sort_col
+    local asc = CLB.audio_sort_asc
+    table.sort(result, function(a, b)
+      local va = get_audio_col_value(a, col)
+      local vb = get_audio_col_value(b, col)
+      -- Handle numbers
+      if type(va) == "number" and type(vb) == "number" then
+        if asc then return va < vb else return va > vb end
+      end
+      -- Handle strings (case-insensitive)
+      va = tostring(va):lower()
+      vb = tostring(vb):lower()
+      if asc then return va < vb else return va > vb end
+    end)
+  end
+
+  CLB.audio_cached = result
   CLB.audio_cached_frame = frame
   return CLB.audio_cached
 end
@@ -817,6 +1072,7 @@ end
 local function save_prefs()
   reaper.SetExtState(EXT_NS, "font_scale", tostring(FONT_SCALE or 1.0), true)
   reaper.SetExtState(EXT_NS, "fps", tostring(CLB.fps or 25), true)
+  reaper.SetExtState(EXT_NS, "is_drop", CLB.is_drop and "1" or "0", true)
   reaper.SetExtState(EXT_NS, "track_name_format", CLB.track_name_format or "${format} - ${track}", true)
   reaper.SetExtState(EXT_NS, "last_dir", CLB.last_dir or "", true)
   reaper.SetExtState(EXT_NS, "last_audio_dir", CLB.last_audio_dir or "", true)
@@ -837,6 +1093,7 @@ local function load_prefs()
 
   FONT_SCALE = tonumber(get("font_scale", "1.0")) or 1.0
   CLB.fps = tonumber(get("fps", "25")) or 25
+  CLB.is_drop = get("is_drop", "0") == "1"
   CLB.track_name_format = get("track_name_format", "${format} - ${track}")
   CLB.last_dir = get("last_dir", "")
   CLB.last_audio_dir = get("last_audio_dir", "")
@@ -1133,8 +1390,17 @@ local function get_view_rows()
     end
   end
 
+  -- Build hidden reel set
+  local hidden_reels = nil
+  for _, rf in ipairs(CLB.reel_filters) do
+    if not rf.visible then
+      hidden_reels = hidden_reels or {}
+      hidden_reels[rf.name] = true
+    end
+  end
+
   local search = CLB.search_text:lower()
-  local need_filter = search ~= "" or hidden_src_idx or hidden_tracks
+  local need_filter = search ~= "" or hidden_src_idx or hidden_tracks or hidden_reels
 
   if not need_filter then
     CLB.cached_rows = ROWS
@@ -1147,6 +1413,10 @@ local function get_view_rows()
       end
       -- Track visibility filter
       if hidden_tracks and hidden_tracks[row.track or ""] then
+        goto skip
+      end
+      -- Reel visibility filter
+      if hidden_reels and hidden_reels[row.reel or ""] then
         goto skip
       end
       -- Search filter
@@ -1252,12 +1522,43 @@ local function _rebuild_track_filters()
   end
 end
 
+--- Rebuild reel filter list from current ROWS.
+local function _rebuild_reel_filters()
+  local reel_counts = {}
+  local reel_order = {}
+  for _, row in ipairs(ROWS) do
+    local r = row.reel or ""
+    if not reel_counts[r] then
+      reel_counts[r] = 0
+      reel_order[#reel_order + 1] = r
+    end
+    reel_counts[r] = reel_counts[r] + 1
+  end
+  table.sort(reel_order)
+
+  -- Preserve existing visibility
+  local old_vis = {}
+  for _, rf in ipairs(CLB.reel_filters) do
+    old_vis[rf.name] = rf.visible
+  end
+
+  CLB.reel_filters = {}
+  for _, name in ipairs(reel_order) do
+    CLB.reel_filters[#CLB.reel_filters + 1] = {
+      name = name,
+      count = reel_counts[name],
+      visible = old_vis[name] == nil or old_vis[name],
+    }
+  end
+end
+
 -- Replace all rows (fresh load)
 local function build_rows_from_parsed(parsed, source_path)
   ROWS = {}
   _guid_counter = 0
   CLB.edl_sources = {}
   CLB.track_filters = {}
+  CLB.reel_filters = {}
   if not parsed or not parsed.events then return end
 
   CLB.fps = parsed.fps or 25
@@ -1274,6 +1575,7 @@ local function build_rows_from_parsed(parsed, source_path)
   UNDO_POS = 0
   undo_snapshot()
   _rebuild_track_filters()
+  _rebuild_reel_filters()
   CLB.cached_rows = nil; CLB.cached_rows_frame = -1
 
   console_msg(string.format("Loaded %d events from %s",
@@ -1294,6 +1596,7 @@ local function append_rows_from_parsed(parsed, source_path)
 
   undo_snapshot()
   _rebuild_track_filters()
+  _rebuild_reel_filters()
   CLB.cached_rows = nil; CLB.cached_rows_frame = -1
 
   console_msg(string.format("Appended %d events from %s (total: %d)",
@@ -1450,6 +1753,38 @@ local function load_audio_folder()
 
   console_msg("Scanning audio folder: " .. folder)
 
+  -- Check for cached metadata
+  local cached_files = load_audio_cache(folder, CLB.audio_recursive)
+  if cached_files and #cached_files > 0 then
+    -- Verify cached files still exist (spot check first and last)
+    local valid = true
+    if #cached_files > 0 then
+      local first = cached_files[1]
+      local last = cached_files[#cached_files]
+      local f1 = io.open(first.path, "r")
+      local f2 = io.open(last.path, "r")
+      if not f1 or not f2 then valid = false end
+      if f1 then f1:close() end
+      if f2 then f2:close() end
+    end
+
+    if valid then
+      console_msg(string.format("Using cached metadata for %d files", #cached_files))
+      CLB.audio_files = cached_files
+      CLB.audio_cached = nil
+      CLB.audio_cached_frame = -1
+      CLB.show_audio_panel = true
+
+      -- Auto-match if EDL is loaded
+      if #ROWS > 0 then
+        match_audio_files()
+      end
+      return
+    else
+      console_msg("Cache invalid (files moved/deleted), rescanning...")
+    end
+  end
+
   -- Phase 1: Scan files (quick)
   local files = scan_audio_folder(folder, CLB.audio_recursive)
 
@@ -1469,6 +1804,8 @@ local function load_audio_folder()
     total = #files,
     current = 0,
     files = files,
+    folder = folder,           -- Save for cache
+    recursive = CLB.audio_recursive,
   }
 
   -- Show audio panel
@@ -1489,6 +1826,12 @@ local function process_audio_loading_batch()
     if idx > state.total then
       -- Loading complete
       CLB.audio_files = state.files
+
+      -- Save to cache for next time
+      if state.folder and state.folder ~= "" then
+        save_audio_cache(state.folder, state.recursive, state.files)
+      end
+
       CLB.loading_state = nil
       CLB.audio_cached = nil
       CLB.audio_cached_frame = -1
@@ -1525,31 +1868,64 @@ end
 ---------------------------------------------------------------------------
 -- Generate Items
 ---------------------------------------------------------------------------
+--- Build tokens table from a row for track name expansion
+local function build_row_tokens(row)
+  return {
+    format = CLB.loaded_format or "EDL",
+    track = row.track or "",
+    reel = row.reel or "",
+    clip = row.clip_name or "",
+    event = row.event_num or "",
+    title = (CLB.parsed_data and CLB.parsed_data.title) or "",
+    edit_type = row.edit_type or "",
+    -- Aliases
+    clip_name = row.clip_name or "",
+    source_file = row.source_file or "",
+  }
+end
+
 local function generate_items()
   if #ROWS == 0 then
     reaper.ShowMessageBox("No events loaded. Load an EDL file first.", SCRIPT_NAME, 0)
     return
   end
 
-  -- Collect unique tracks
-  local track_names = {}
-  local track_order = {}
-  for _, row in ipairs(ROWS) do
-    local t = row.track or "A1"
-    if not track_names[t] then
-      track_names[t] = true
-      track_order[#track_order + 1] = t
+  -- Use filtered rows only
+  local visible_rows = get_view_rows() or ROWS
+
+  -- Collect unique track names (based on expanded template)
+  local track_names_set = {}
+  local track_names_order = {}
+  local row_to_trackname = {}  -- row.__guid -> expanded track name
+
+  for _, row in ipairs(visible_rows) do
+    local tokens = build_row_tokens(row)
+    local expanded_name = EDL.expand_template(CLB.track_name_format, tokens)
+    row_to_trackname[row.__guid] = expanded_name
+
+    if not track_names_set[expanded_name] then
+      track_names_set[expanded_name] = true
+      track_names_order[#track_names_order + 1] = expanded_name
     end
   end
 
   -- Confirmation
+  local preview_tracks = {}
+  for i = 1, math.min(5, #track_names_order) do
+    preview_tracks[i] = track_names_order[i]
+  end
+  local tracks_preview = table.concat(preview_tracks, ", ")
+  if #track_names_order > 5 then
+    tracks_preview = tracks_preview .. string.format(" ... (+%d more)", #track_names_order - 5)
+  end
+
   local msg = string.format(
     "Generate %d empty items on %d track(s)?\n\n" ..
     "Tracks: %s\n" ..
     "FPS: %s%s\n\n" ..
     "Items will be placed at absolute timecode positions.",
-    #ROWS, #track_order,
-    table.concat(track_order, ", "),
+    #visible_rows, #track_names_order,
+    tracks_preview,
     tostring(CLB.fps),
     CLB.is_drop and " (Drop Frame)" or ""
   )
@@ -1558,18 +1934,10 @@ local function generate_items()
   reaper.Undo_BeginBlock()
   reaper.PreventUIRefresh(1)
 
-  -- Create or find tracks by name
-  local track_map = {}  -- track_field -> MediaTrack*
-  local existing_count = reaper.CountTracks(0)
+  -- Create or find tracks by expanded name
+  local track_map = {}  -- expanded_name -> MediaTrack*
 
-  for _, t in ipairs(track_order) do
-    local tokens = {
-      format = CLB.loaded_format or "EDL",
-      track = t,
-      title = (CLB.parsed_data and CLB.parsed_data.title) or "",
-    }
-    local name = EDL.expand_template(CLB.track_name_format, tokens)
-
+  for _, name in ipairs(track_names_order) do
     -- Search existing tracks first
     local found = nil
     for ti = 0, reaper.CountTracks(0) - 1 do
@@ -1588,14 +1956,15 @@ local function generate_items()
       reaper.GetSetMediaTrackInfo_String(found, "P_NAME", name, true)
     end
 
-    track_map[t] = found
+    track_map[name] = found
   end
 
   -- Create items
   local created = 0
-  for _, row in ipairs(ROWS) do
-    local tr = track_map[row.track or "A1"]
-    if not tr then tr = track_map[track_order[1]] end
+  for _, row in ipairs(visible_rows) do
+    local track_name = row_to_trackname[row.__guid]
+    local tr = track_map[track_name]
+    if not tr then tr = track_map[track_names_order[1]] end
     if not tr then goto continue end
 
     local pos = EDL.tc_to_seconds(row.rec_tc_in, CLB.fps, CLB.is_drop)
@@ -1648,7 +2017,7 @@ local function generate_items()
   reaper.Undo_EndBlock("CLB: Generate " .. created .. " conform items", -1)
 
   reaper.ShowMessageBox(
-    string.format("Generated %d empty items on %d track(s).", created, #track_order),
+    string.format("Generated %d empty items on %d track(s).", created, #track_names_order),
     SCRIPT_NAME, 0)
 end
 
@@ -1690,7 +2059,7 @@ local function conform_matched_items(selected_only)
       return
     end
   else
-    rows_to_process = ROWS
+    rows_to_process = get_view_rows() or ROWS  -- Only visible/filtered events
   end
 
   -- Filter to matched rows only
@@ -1716,18 +2085,32 @@ local function conform_matched_items(selected_only)
     return
   end
 
-  -- Collect unique tracks
-  local track_names = {}
-  local track_order = {}
+  -- Collect unique track names (based on expanded template)
+  local track_names_set = {}
+  local track_names_order = {}
+  local row_to_trackname = {}  -- row.__guid -> expanded track name
+
   for _, row in ipairs(matched_rows) do
-    local t = row.track or "A1"
-    if not track_names[t] then
-      track_names[t] = true
-      track_order[#track_order + 1] = t
+    local tokens = build_row_tokens(row)
+    local expanded_name = EDL.expand_template(CLB.track_name_format, tokens)
+    row_to_trackname[row.__guid] = expanded_name
+
+    if not track_names_set[expanded_name] then
+      track_names_set[expanded_name] = true
+      track_names_order[#track_names_order + 1] = expanded_name
     end
   end
 
   -- Confirmation
+  local preview_tracks = {}
+  for i = 1, math.min(5, #track_names_order) do
+    preview_tracks[i] = track_names_order[i]
+  end
+  local tracks_preview = table.concat(preview_tracks, ", ")
+  if #track_names_order > 5 then
+    tracks_preview = tracks_preview .. string.format(" ... (+%d more)", #track_names_order - 5)
+  end
+
   local msg = string.format(
     "Conform %d matched events?\n\n" ..
     "• %d single matches (1 take each)\n" ..
@@ -1736,7 +2119,7 @@ local function conform_matched_items(selected_only)
     "FPS: %s%s\n\n" ..
     "Audio files will be inserted at timeline positions.",
     #matched_rows, found_count, multi_count,
-    table.concat(track_order, ", "),
+    tracks_preview,
     tostring(CLB.fps),
     CLB.is_drop and " (Drop Frame)" or ""
   )
@@ -1745,17 +2128,10 @@ local function conform_matched_items(selected_only)
   reaper.Undo_BeginBlock()
   reaper.PreventUIRefresh(1)
 
-  -- Create or find tracks by name
-  local track_map = {}
+  -- Create or find tracks by expanded name
+  local track_map = {}  -- expanded_name -> MediaTrack*
 
-  for _, t in ipairs(track_order) do
-    local tokens = {
-      format = CLB.loaded_format or "EDL",
-      track = t,
-      title = (CLB.parsed_data and CLB.parsed_data.title) or "",
-    }
-    local name = EDL.expand_template(CLB.track_name_format, tokens)
-
+  for _, name in ipairs(track_names_order) do
     -- Search existing tracks first
     local found = nil
     for ti = 0, reaper.CountTracks(0) - 1 do
@@ -1773,7 +2149,7 @@ local function conform_matched_items(selected_only)
       reaper.GetSetMediaTrackInfo_String(found, "P_NAME", name, true)
     end
 
-    track_map[t] = found
+    track_map[name] = found
   end
 
   -- Helper: Get audio file's TimeReference in seconds
@@ -1794,8 +2170,9 @@ local function conform_matched_items(selected_only)
   local takes_created = 0
 
   for _, row in ipairs(matched_rows) do
-    local tr = track_map[row.track or "A1"]
-    if not tr then tr = track_map[track_order[1]] end
+    local track_name = row_to_trackname[row.__guid]
+    local tr = track_map[track_name]
+    if not tr then tr = track_map[track_names_order[1]] end
     if not tr then goto continue end
 
     -- Timeline position from rec_tc_in
@@ -1895,7 +2272,7 @@ local function conform_matched_items(selected_only)
 
   reaper.ShowMessageBox(
     string.format("Conformed %d items with %d takes on %d track(s).",
-      created, takes_created, #track_order),
+      created, takes_created, #track_names_order),
     SCRIPT_NAME, 0)
 end
 
@@ -1961,6 +2338,7 @@ local function remove_duplicates()
   sel_clear()
   EDIT = nil
   _rebuild_track_filters()
+  _rebuild_reel_filters()
   undo_snapshot()
   CLB.cached_rows = nil; CLB.cached_rows_frame = -1
 
@@ -2218,6 +2596,24 @@ local function draw_toolbar()
     reaper.ImGui_SameLine(ctx)
   end
 
+  -- Reels toggle button
+  if #CLB.reel_filters > 0 then
+    local reel_label = CLB.show_reel_filter and "Reels <<" or "Reels >>"
+    if reaper.ImGui_SmallButton(ctx, reel_label .. "##clb_reel_toggle") then
+      CLB.show_reel_filter = not CLB.show_reel_filter
+    end
+    reaper.ImGui_SameLine(ctx)
+  end
+
+  -- Audio toggle button (show when audio files are loaded)
+  if #CLB.audio_files > 0 then
+    local audio_label = CLB.show_audio_panel and "Audio <<" or "Audio >>"
+    if reaper.ImGui_SmallButton(ctx, audio_label .. "##clb_audio_toggle") then
+      CLB.show_audio_panel = not CLB.show_audio_panel
+    end
+    reaper.ImGui_SameLine(ctx)
+  end
+
   -- Search
   reaper.ImGui_Text(ctx, "|")
   reaper.ImGui_SameLine(ctx)
@@ -2300,24 +2696,46 @@ local function draw_toolbar()
   end
 
   -- Row 2
-  -- FPS selector
+  -- FPS selector (dropdown)
+  local FPS_OPTIONS = {
+    { label = "23.976", value = 23.976 },
+    { label = "24", value = 24 },
+    { label = "25", value = 25 },
+    { label = "29.97 DF", value = 29.97, drop = true },
+    { label = "30", value = 30 },
+    { label = "50", value = 50 },
+    { label = "59.94 DF", value = 59.94, drop = true },
+    { label = "60", value = 60 },
+  }
+
+  -- Find current selection
+  local current_label = tostring(CLB.fps)
+  for _, opt in ipairs(FPS_OPTIONS) do
+    if math.abs(opt.value - CLB.fps) < 0.01 and (opt.drop or false) == CLB.is_drop then
+      current_label = opt.label
+      break
+    end
+  end
+
   reaper.ImGui_Text(ctx, "FPS:")
   reaper.ImGui_SameLine(ctx)
-  reaper.ImGui_SetNextItemWidth(ctx, scale(70))
-  local fps_str = tostring(CLB.fps)
-  local chg_fps, new_fps = reaper.ImGui_InputText(ctx, "##clb_fps", fps_str)
-  if chg_fps then
-    local n = tonumber(new_fps)
-    if n and n > 0 and n <= 120 then
-      CLB.fps = n
-      save_prefs()
-      -- Recompute durations
-      for _, row in ipairs(ROWS) do
-        local ri_sec = EDL.tc_to_seconds(row.rec_tc_in, CLB.fps, CLB.is_drop)
-        local ro_sec = EDL.tc_to_seconds(row.rec_tc_out, CLB.fps, CLB.is_drop)
-        row.duration = EDL.seconds_to_tc(ro_sec - ri_sec, CLB.fps, CLB.is_drop)
+  reaper.ImGui_SetNextItemWidth(ctx, scale(90))
+  if reaper.ImGui_BeginCombo(ctx, "##clb_fps", current_label) then
+    for _, opt in ipairs(FPS_OPTIONS) do
+      local is_sel = math.abs(opt.value - CLB.fps) < 0.01 and (opt.drop or false) == CLB.is_drop
+      if reaper.ImGui_Selectable(ctx, opt.label, is_sel) then
+        CLB.fps = opt.value
+        CLB.is_drop = opt.drop or false
+        save_prefs()
+        -- Recompute durations
+        for _, row in ipairs(ROWS) do
+          local ri_sec = EDL.tc_to_seconds(row.rec_tc_in, CLB.fps, CLB.is_drop)
+          local ro_sec = EDL.tc_to_seconds(row.rec_tc_out, CLB.fps, CLB.is_drop)
+          row.duration = EDL.seconds_to_tc(ro_sec - ri_sec, CLB.fps, CLB.is_drop)
+        end
       end
     end
+    reaper.ImGui_EndCombo(ctx)
   end
   reaper.ImGui_SameLine(ctx)
 
@@ -2332,7 +2750,9 @@ local function draw_toolbar()
   end
   if reaper.ImGui_IsItemHovered(ctx) then
     reaper.ImGui_BeginTooltip(ctx)
-    reaper.ImGui_Text(ctx, "Tokens: ${format} ${track} ${reel} ${event} ${clip} ${title}")
+    reaper.ImGui_Text(ctx, "Tokens: ${track} ${reel} ${clip} ${event}")
+    reaper.ImGui_Text(ctx, "        ${format} ${title} ${edit_type}")
+    reaper.ImGui_Text(ctx, "Items will be grouped by the expanded track name")
     reaper.ImGui_EndTooltip(ctx)
   end
   reaper.ImGui_SameLine(ctx)
@@ -2473,6 +2893,46 @@ local function draw_track_filter_panel()
     local changed, new_val = reaper.ImGui_Checkbox(ctx, label, tf.visible)
     if changed then
       tf.visible = new_val
+      CLB.cached_rows = nil; CLB.cached_rows_frame = -1
+    end
+  end
+end
+
+---------------------------------------------------------------------------
+-- Draw: Reel Filter Panel
+---------------------------------------------------------------------------
+local function draw_reel_filter_panel()
+  if not CLB.show_reel_filter or #CLB.reel_filters == 0 then return end
+
+  reaper.ImGui_Separator(ctx)
+
+  -- Count visible/hidden
+  local visible_count = 0
+  for _, rf in ipairs(CLB.reel_filters) do
+    if rf.visible then visible_count = visible_count + 1 end
+  end
+
+  reaper.ImGui_Text(ctx, string.format("Reel Filter (%d):", #CLB.reel_filters))
+  reaper.ImGui_SameLine(ctx)
+
+  -- Show All / Hide All
+  if reaper.ImGui_SmallButton(ctx, "Show All##clb_reel_all") then
+    for _, rf in ipairs(CLB.reel_filters) do rf.visible = true end
+    CLB.cached_rows = nil; CLB.cached_rows_frame = -1
+  end
+  reaper.ImGui_SameLine(ctx)
+  if reaper.ImGui_SmallButton(ctx, "Hide All##clb_reel_none") then
+    for _, rf in ipairs(CLB.reel_filters) do rf.visible = false end
+    CLB.cached_rows = nil; CLB.cached_rows_frame = -1
+  end
+
+  -- Reel checkboxes (vertical list)
+  for i, rf in ipairs(CLB.reel_filters) do
+    local display_name = rf.name ~= "" and rf.name or "(empty)"
+    local label = string.format("%s (%d)##clb_reel_%d", display_name, rf.count, i)
+    local changed, new_val = reaper.ImGui_Checkbox(ctx, label, rf.visible)
+    if changed then
+      rf.visible = new_val
       CLB.cached_rows = nil; CLB.cached_rows_frame = -1
     end
   end
@@ -2765,13 +3225,16 @@ local function draw_audio_table(table_height)
     return
   end
 
-  -- Table flags
+  -- Table flags (with reorder and sortable)
   local flags = reaper.ImGui_TableFlags_Borders()
     | reaper.ImGui_TableFlags_RowBg()
     | reaper.ImGui_TableFlags_SizingFixedFit()
     | reaper.ImGui_TableFlags_ScrollX()
     | reaper.ImGui_TableFlags_ScrollY()
     | reaper.ImGui_TableFlags_Resizable()
+    | reaper.ImGui_TableFlags_Reorderable()
+    | reaper.ImGui_TableFlags_Sortable()
+    | reaper.ImGui_TableFlags_SortMulti()
 
   if not reaper.ImGui_BeginTable(ctx, "audio_table", AUDIO_COL_COUNT, flags, 0, table_height) then
     return
@@ -2783,14 +3246,27 @@ local function draw_audio_table(table_height)
     reaper.ImGui_TableSetupColumn(ctx, AUDIO_HEADER_LABELS[c] or "",
       reaper.ImGui_TableColumnFlags_WidthFixed(), w)
   end
+  reaper.ImGui_TableSetupScrollFreeze(ctx, 0, 1)
+
+  -- Check for sort specs changes
+  local sort_specs_dirty = reaper.ImGui_TableNeedSort(ctx)
+  if sort_specs_dirty then
+    -- Get sort specs (returns: has_specs, col_idx, col_user_id, sort_dir)
+    if reaper.ImGui_TableGetColumnSortSpecs then
+      local has_specs, col_idx, _, sort_dir = reaper.ImGui_TableGetColumnSortSpecs(ctx, 0)
+      if has_specs and col_idx then
+        CLB.audio_sort_col = col_idx + 1  -- Convert to 1-based
+        CLB.audio_sort_asc = sort_dir == reaper.ImGui_SortDirection_Ascending()
+        CLB.audio_cached = nil
+        CLB.audio_cached_frame = -1
+      else
+        CLB.audio_sort_col = nil
+      end
+    end
+  end
 
   -- Headers
-  reaper.ImGui_TableSetupScrollFreeze(ctx, 0, 1)
-  reaper.ImGui_TableNextRow(ctx)
-  for c = 1, AUDIO_COL_COUNT do
-    reaper.ImGui_TableSetColumnIndex(ctx, c - 1)
-    reaper.ImGui_Text(ctx, AUDIO_HEADER_LABELS[c] or "")
-  end
+  reaper.ImGui_TableHeadersRow(ctx)
 
   -- Rows
   for i = 1, row_count do
@@ -2827,6 +3303,14 @@ local function draw_audio_table(table_height)
         text = meta.channels and tostring(meta.channels) or ""
       elseif c == AUDIO_COL.PROJECT then
         text = meta.project or ""
+      elseif c == AUDIO_COL.FRAMERATE then
+        text = meta.framerate or ""
+      elseif c == AUDIO_COL.SPEED then
+        text = meta.speed or ""
+      elseif c == AUDIO_COL.ORIG_FILENAME then
+        text = meta.orig_filename or ""
+      elseif c == AUDIO_COL.TRACK_NAMES then
+        text = meta.track_names or ""
       elseif c == AUDIO_COL.DESCRIPTION then
         -- Show truncated description
         local desc = meta.description or ""
@@ -2857,6 +3341,67 @@ local function draw_loading_progress()
 end
 
 ---------------------------------------------------------------------------
+-- Draw: Reel Filter Sidebar (left side)
+---------------------------------------------------------------------------
+local function draw_reel_filter_sidebar(height)
+  if not CLB.show_reel_filter or #CLB.reel_filters == 0 then return false end
+
+  -- Calculate sidebar width based on longest reel name
+  local max_text_w = 150
+  for _, rf in ipairs(CLB.reel_filters) do
+    local display_name = rf.name ~= "" and rf.name or "(empty)"
+    local label = string.format("%s (%d)", display_name, rf.count)
+    local text_w = reaper.ImGui_CalcTextSize(ctx, label)
+    if text_w > max_text_w then max_text_w = text_w end
+  end
+  local sidebar_w = max_text_w + 30  -- checkbox + padding
+
+  -- Count visible/hidden
+  local visible_count = 0
+  for _, rf in ipairs(CLB.reel_filters) do
+    if rf.visible then visible_count = visible_count + 1 end
+  end
+
+  -- Left sidebar child
+  if reaper.ImGui_BeginChild(ctx, "##clb_reel_sidebar", sidebar_w, height, reaper.ImGui_ChildFlags_Borders()) then
+    reaper.ImGui_Text(ctx, string.format("Reels (%d)", #CLB.reel_filters))
+
+    -- Show All / Hide All buttons
+    if reaper.ImGui_SmallButton(ctx, "All##clb_reel_all") then
+      for _, rf in ipairs(CLB.reel_filters) do rf.visible = true end
+      CLB.cached_rows = nil; CLB.cached_rows_frame = -1
+    end
+    reaper.ImGui_SameLine(ctx)
+    if reaper.ImGui_SmallButton(ctx, "None##clb_reel_none") then
+      for _, rf in ipairs(CLB.reel_filters) do rf.visible = false end
+      CLB.cached_rows = nil; CLB.cached_rows_frame = -1
+    end
+
+    reaper.ImGui_Separator(ctx)
+
+    -- Reel checkboxes (vertical list, scrollable)
+    local _, list_h = reaper.ImGui_GetContentRegionAvail(ctx)
+    if reaper.ImGui_BeginChild(ctx, "##clb_reel_list", 0, list_h) then
+      for i, rf in ipairs(CLB.reel_filters) do
+        local display_name = rf.name ~= "" and rf.name or "(empty)"
+        local label = string.format("%s (%d)##clb_reel_%d", display_name, rf.count, i)
+        local changed, new_val = reaper.ImGui_Checkbox(ctx, label, rf.visible)
+        if changed then
+          rf.visible = new_val
+          CLB.cached_rows = nil; CLB.cached_rows_frame = -1
+        end
+      end
+      reaper.ImGui_EndChild(ctx)
+    end
+
+    reaper.ImGui_EndChild(ctx)
+  end
+
+  reaper.ImGui_SameLine(ctx)
+  return true
+end
+
+---------------------------------------------------------------------------
 -- Draw: Main Content Area (split view support)
 ---------------------------------------------------------------------------
 local function draw_main_content()
@@ -2867,10 +3412,11 @@ local function draw_main_content()
     return
   end
 
+  local _, avail_h = reaper.ImGui_GetContentRegionAvail(ctx)
+
   -- Check if audio panel should be shown
   if CLB.show_audio_panel and #CLB.audio_files > 0 then
     -- Split view mode
-    local _, avail_h = reaper.ImGui_GetContentRegionAvail(ctx)
     local splitter_h = 6
     local header_h = reaper.ImGui_GetTextLineHeightWithSpacing(ctx) + 4
 
@@ -2879,19 +3425,21 @@ local function draw_main_content()
     local edl_h = content_h * CLB.split_ratio
     local audio_h = content_h - edl_h
 
-    -- EDL Events table (top)
+    -- Upper section: Reel filter sidebar (left) + EDL table (right)
+    draw_reel_filter_sidebar(edl_h)
     draw_table(edl_h)
 
-    -- Splitter (draggable)
+    -- Splitter (draggable, full width)
     draw_splitter()
 
-    -- Audio panel header
+    -- Audio panel header (full width)
     draw_audio_panel_header()
 
-    -- Audio files table (bottom)
+    -- Audio files table (full width)
     draw_audio_table(audio_h)
   else
-    -- Single table mode
+    -- Single table mode with optional reel sidebar (full height)
+    draw_reel_filter_sidebar(avail_h)
     draw_table()
   end
 end
