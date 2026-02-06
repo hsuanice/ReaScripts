@@ -1,6 +1,6 @@
 --[[
 @description Conform List Browser
-@version 260203.2241
+@version 260206.1300
 @author hsuanice
 @about
   A REAPER script for browsing and editing EDL (Edit Decision List) data
@@ -12,18 +12,22 @@
   Workflow:
     1. Load EDL file -> events display in table
     2. Browse, filter, sort, and edit metadata fields
-    3. Generate empty items on REAPER tracks at absolute TC positions
-    4. Use a separate reconform script to relink original audio files
+    3. Load audio folder -> match files to EDL events by metadata
+    4. Generate empty items on REAPER tracks at absolute TC positions
+    5. Use a separate reconform script to relink original audio files
 
   Features:
     - CMX3600 EDL parser (TITLE, FCM, events, comments)
-    - 13-column table: Event#, Reel, Track, Edit Type, Dissolve Len,
-      Source TC In/Out, Record TC In/Out, Duration, Clip Name, Source File, Notes
-    - All fields editable (except Event# and Duration)
+    - 15-column table: Event#, Reel, Track, Edit Type, Dissolve Len,
+      Source TC In/Out, Record TC In/Out, Duration, Clip Name, Source File, Notes,
+      Match Status, Matched File
+    - All fields editable (except Event#, Duration, Match columns)
     - Excel-like selection (click, Shift+rectangle, Cmd/Ctrl multi-select)
     - Copy/Paste with TSV clipboard support
     - Multi-level sorting (click headers, Shift+click for secondary)
     - Text search filter (case-insensitive across all fields)
+    - Audio file matching with BWF/iXML metadata support
+    - Split-view UI for EDL events and audio files
     - Generate empty items on REAPER tracks with P_EXT metadata
     - Configurable track name format with token expansion
     - Absolute timecode positioning on REAPER timeline
@@ -34,8 +38,48 @@
   Future: XML format support (Premiere, FCPX, FCP7, Resolve, Nuendo)
 
   Requires: ReaImGui (install via ReaPack)
+  Optional: js_ReaScriptAPI (for folder selection)
 
 @changelog
+  v260206.1300
+  - Feature: Conform Matched functionality
+    • "Conform All" button: insert matched audio files as items
+    • "Conform Sel" button: conform selected rows only
+    • Multiple matches create multiple takes on the same item
+    • Source offset calculated from EDL src_tc_in vs audio BWF TimeReference
+    • Preserves metadata as P_EXT fields including matched file path
+  - Note: Original "Generate Items" kept for empty item creation
+
+  v260206.1230
+  - Fix: Improved metadata reading for audio files
+    • Check file type before reading metadata (WAV/AIFF/W64 only)
+    • Convert BWF TimeReference (samples) to timecode string
+    • Parse BWF Description for Scene/Take/Tape/Reel (EdiLoad format)
+    • Reorganized audio table columns for conform workflow:
+      Filename | Src TC | Scene | Take | Tape/Roll | Folder | Duration | SR | Ch | Project | Description
+
+  v260206.1200
+  - Feature: Audio file matching
+    • "Load Audio..." button to select folder with audio files
+    • Reads BWF/iXML metadata (scene, take, tape, reel, timereference, etc.)
+    • Recursive folder scanning (configurable)
+    • Auto-matching with multiple strategies:
+      1. Clip name ↔ filename exact match
+      2. Source file ↔ filename exact match
+      3. Reel ↔ tape/reel metadata + partial name match
+      4. Fuzzy partial name match
+    • "Match All" button to re-run matching
+    • "Clear Audio" button to reset audio panel
+  - Feature: Split-view UI
+    • Draggable splitter between EDL and Audio tables
+    • Audio files table shows: filename, folder, duration, SR, channels,
+      scene, take, tape, reel, timereference, description, project
+    • Search filter for audio files
+    • Progress indicator during async loading
+  - Feature: New EDL columns
+    • Match Status: "Found" / "Multiple" / "Not Found"
+    • Matched File: shows matched audio file path
+
   v260203.2241
   - Feature: Remove Duplicates button in toolbar
     • Detects duplicates by composite key (track + rec TC in/out + clip name + reel)
@@ -104,6 +148,11 @@ local TF_PATH = lib_path .. "hsuanice_Time Format.lua"
 local ok_tf, TFLib = pcall(dofile, TF_PATH)
 if not ok_tf then TFLib = nil end
 
+-- Metadata Read (optional, for audio file metadata)
+local META_PATH = lib_path .. "hsuanice_Metadata Read.lua"
+local ok_meta, META = pcall(dofile, META_PATH)
+if not ok_meta then META = nil end
+
 ---------------------------------------------------------------------------
 -- ReaImGui check
 ---------------------------------------------------------------------------
@@ -119,26 +168,78 @@ end
 ---------------------------------------------------------------------------
 local SCRIPT_NAME = "Conform List Browser"
 local EXT_NS = "hsuanice_ConformListBrowser"
-local VERSION = "260203.2241"
+local VERSION = "260206.1300"
 
--- Column definitions
+-- Column definitions (EDL Events table)
 local COL = {
-  EVENT     = 1,
-  REEL      = 2,
-  TRACK     = 3,
-  EDIT_TYPE = 4,
-  DISS_LEN  = 5,
-  SRC_IN    = 6,
-  SRC_OUT   = 7,
-  REC_IN    = 8,
-  REC_OUT   = 9,
-  DURATION  = 10,
-  CLIP_NAME = 11,
-  SRC_FILE  = 12,
-  NOTES     = 13,
+  EVENT        = 1,
+  REEL         = 2,
+  TRACK        = 3,
+  EDIT_TYPE    = 4,
+  DISS_LEN     = 5,
+  SRC_IN       = 6,
+  SRC_OUT      = 7,
+  REC_IN       = 8,
+  REC_OUT      = 9,
+  DURATION     = 10,
+  CLIP_NAME    = 11,
+  SRC_FILE     = 12,
+  NOTES        = 13,
+  MATCH_STATUS = 14,
+  MATCHED_PATH = 15,
 }
 
-local COL_COUNT = 13
+local COL_COUNT = 15
+
+-- Audio Files table column definitions (conform-focused order)
+local AUDIO_COL = {
+  FILENAME      = 1,
+  SRC_TC        = 2,   -- Source timecode (from BWF TimeReference)
+  SCENE         = 3,
+  TAKE          = 4,
+  TAPE          = 5,   -- Tape/Roll
+  FOLDER        = 6,
+  DURATION      = 7,
+  SAMPLERATE    = 8,
+  CHANNELS      = 9,
+  PROJECT       = 10,
+  DESCRIPTION   = 11,
+}
+local AUDIO_COL_COUNT = 11
+
+local AUDIO_HEADER_LABELS = {
+  [1]  = "Filename",
+  [2]  = "Src TC",
+  [3]  = "Scene",
+  [4]  = "Take",
+  [5]  = "Tape/Roll",
+  [6]  = "Folder",
+  [7]  = "Duration",
+  [8]  = "SR",
+  [9]  = "Ch",
+  [10] = "Project",
+  [11] = "Description",
+}
+
+local AUDIO_COL_WIDTH = {
+  [1]  = 200,  -- Filename
+  [2]  = 100,  -- Src TC
+  [3]  = 80,   -- Scene
+  [4]  = 50,   -- Take
+  [5]  = 80,   -- Tape/Roll
+  [6]  = 120,  -- Folder
+  [7]  = 70,   -- Duration
+  [8]  = 50,   -- SR
+  [9]  = 30,   -- Ch
+  [10] = 100,  -- Project
+  [11] = 200,  -- Description
+}
+
+-- Audio file extensions
+local AUDIO_EXTS = {
+  wav = true, aif = true, aiff = true, flac = true, ogg = true,
+  mp3 = true, caf = true, m4a = true, bwf = true, ogm = true, opus = true
+}
 
 local HEADER_LABELS = {
   [1]  = "#",
@@ -154,6 +255,8 @@ local HEADER_LABELS = {
   [11] = "Clip Name",
   [12] = "Source File",
   [13] = "Notes",
+  [14] = "Match",
+  [15] = "Matched File",
 }
 
 local DEFAULT_COL_WIDTH = {
@@ -170,6 +273,8 @@ local DEFAULT_COL_WIDTH = {
   [11] = 300,
   [12] = 300,
   [13] = 200,
+  [14] = 70,
+  [15] = 250,
 }
 
 -- Editable columns (all except Event# and Duration)
@@ -222,10 +327,29 @@ local CLB = {
   is_drop = false,
   track_name_format = "${format} - ${track}",
   last_dir = "",
+  last_audio_dir = "",
 
   -- UI state
   frame_counter = 0,
   show_sources_panel = false,
+  show_track_filter = false,
+  track_filters = {},  -- { { name, count, visible }, ... }
+
+  -- Audio file matching state
+  audio_files = {},           -- { {path, filename, basename, folder, metadata={}}, ... }
+  audio_folder = "",          -- Loaded audio folder path
+  audio_recursive = true,     -- Recursive search enabled
+  show_audio_panel = false,   -- Show audio panel (auto-enabled when files loaded)
+  split_ratio = 0.5,          -- Split ratio for EDL/Audio tables (0.3~0.7)
+  audio_search = "",          -- Audio table search filter
+  audio_cached = nil,         -- Cached filtered audio files
+  audio_cached_frame = -1,    -- Frame number of cached audio files
+
+  -- Loading state (for async loading with progress)
+  loading_state = nil,        -- { phase, total, current, files }
+
+  -- Match picker state
+  match_picker_row = nil,     -- Row being matched (for multi-match selection)
 }
 
 local ROWS = {}    -- Array of row tables
@@ -282,6 +406,404 @@ local function console_msg(msg)
 end
 
 ---------------------------------------------------------------------------
+-- Audio file utilities
+---------------------------------------------------------------------------
+
+--- Check if a filename has an audio extension
+local function is_audio(filename)
+  if not filename or filename == "" then return false end
+  local ext = filename:match("%.([%w]+)$")
+  if not ext then return false end
+  ext = ext:lower()
+  -- Exclude common non-audio files
+  if ext == "ds_store" or ext == "pdf" or ext == "txt" then return false end
+  return AUDIO_EXTS[ext] == true
+end
+
+--- Get basename (filename without extension)
+local function get_basename(filename)
+  if not filename or filename == "" then return "" end
+  -- Extract filename from path if needed
+  local name = filename:match("([^/\\]+)$") or filename
+  -- Remove extension
+  return name:gsub("%.[^%.]+$", "")
+end
+
+--- Get folder name from full path
+local function get_folder(filepath)
+  if not filepath or filepath == "" then return "" end
+  local folder = filepath:match("^(.*)[/\\][^/\\]+$") or ""
+  return folder
+end
+
+--- Join path components
+local function join_path(dir, file)
+  if not dir or dir == "" then return file or "" end
+  if not file or file == "" then return dir end
+  if dir:match("[/\\]$") then
+    return dir .. file
+  else
+    return dir .. "/" .. file
+  end
+end
+
+--- Scan audio folder and return list of audio files
+--- @param base_path string  Base folder path
+--- @param recursive boolean  Whether to search recursively
+--- @return table  Array of { path, filename, basename, folder }
+local function scan_audio_folder(base_path, recursive)
+  if not base_path or base_path == "" then return {} end
+
+  local files = {}
+
+  local function scan_dir(dir, rel_folder)
+    -- Enumerate files in directory
+    local i = 0
+    while true do
+      local fn = reaper.EnumerateFiles(dir, i)
+      if not fn then break end
+      if is_audio(fn) then
+        files[#files + 1] = {
+          path = join_path(dir, fn),
+          filename = fn,
+          basename = get_basename(fn),
+          folder = rel_folder or "",
+          metadata = {},  -- Will be filled later
+        }
+      end
+      i = i + 1
+    end
+
+    -- Enumerate subdirectories if recursive
+    if recursive then
+      i = 0
+      while true do
+        local sd = reaper.EnumerateSubdirectories(dir, i)
+        if not sd then break end
+        local new_rel = (rel_folder and rel_folder ~= "") and (rel_folder .. "/" .. sd) or sd
+        scan_dir(join_path(dir, sd), new_rel)
+        i = i + 1
+      end
+    end
+  end
+
+  scan_dir(base_path, "")
+
+  -- Sort by filename
+  table.sort(files, function(a, b)
+    return (a.filename or ""):lower() < (b.filename or ""):lower()
+  end)
+
+  return files
+end
+
+--- Convert TimeReference (samples) to timecode string
+--- @param samples number|string  Sample count
+--- @param samplerate number  Sample rate
+--- @param fps number  Frame rate (default 25)
+--- @return string  Timecode "HH:MM:SS:FF"
+local function samples_to_tc(samples, samplerate, fps)
+  samples = tonumber(samples) or 0
+  samplerate = samplerate or 48000
+  fps = fps or 25
+  if samples <= 0 or samplerate <= 0 then return "" end
+
+  local seconds = samples / samplerate
+  local total_frames = math.floor(seconds * fps + 0.5)
+  local f = total_frames % fps
+  local total_secs = math.floor(total_frames / fps)
+  local s = total_secs % 60
+  local total_mins = math.floor(total_secs / 60)
+  local m = total_mins % 60
+  local h = math.floor(total_mins / 60)
+
+  return string.format("%02d:%02d:%02d:%02d", h, m, s, f)
+end
+
+--- Parse BWF Description key=value pairs
+--- @param desc string  BWF Description text
+--- @return table  Parsed key-value pairs
+local function parse_bwf_description(desc)
+  local result = {}
+  if not desc or desc == "" then return result end
+
+  for line in (desc .. "\n"):gmatch("(.-)\n") do
+    local k, v = line:match("^%s*([%w_%-]+)%s*=%s*(.-)%s*$")
+    if k and v and k ~= "" then
+      result[k] = v
+      result[k:lower()] = v
+      result[k:upper()] = v
+      -- Map dXXXX/sXXXX → XXXX (EdiLoad style)
+      local base = k:upper():match("^[SD]([A-Z0-9_]+)$")
+      if base then
+        result[base] = v
+        result[base:lower()] = v
+      end
+    end
+  end
+  return result
+end
+
+--- Read metadata from an external audio file
+--- @param filepath string  Full path to audio file
+--- @return table  Metadata table
+local function read_audio_metadata(filepath)
+  local meta = {
+    samplerate = 0,
+    channels = 0,
+    duration = 0,
+    scene = "",
+    take = "",
+    tape = "",
+    reel = "",
+    project = "",
+    timereference = "",      -- raw samples
+    src_tc = "",             -- converted timecode
+    description = "",
+    originator = "",
+    bwf_fields = {},         -- parsed BWF Description fields
+  }
+
+  if not filepath or filepath == "" then return meta end
+
+  -- Create temporary PCM source from file
+  local src = reaper.PCM_Source_CreateFromFile(filepath)
+  if not src then return meta end
+
+  -- Check if file type supports metadata (WAV/AIFF/W64)
+  local srctype = reaper.GetMediaSourceType(src, "") or ""
+  local upper = srctype:upper()
+  local can_meta = upper:find("WAVE") or upper:find("AIFF") or upper:find("W64") or upper:find("WAV")
+
+  -- Read basic info
+  meta.samplerate = reaper.GetMediaSourceSampleRate(src) or 0
+  meta.channels = reaper.GetMediaSourceNumChannels(src) or 0
+  local len, _ = reaper.GetMediaSourceLength(src)
+  meta.duration = len or 0
+
+  if can_meta then
+    -- Helper to read metadata
+    local function get_meta(key)
+      local ok, val = reaper.GetMediaFileMetadata(src, key)
+      return (ok == 1 and val ~= "") and val or nil
+    end
+
+    -- Read iXML metadata
+    meta.scene = get_meta("IXML:SCENE") or ""
+    meta.take = get_meta("IXML:TAKE") or ""
+    meta.tape = get_meta("IXML:TAPE") or ""
+    meta.project = get_meta("IXML:PROJECT") or ""
+
+    -- Read BWF metadata
+    meta.timereference = get_meta("BWF:TimeReference") or ""
+    meta.description = get_meta("BWF:Description") or ""
+    meta.originator = get_meta("BWF:Originator") or ""
+
+    -- Convert TimeReference to timecode (using file's sample rate and default 25fps)
+    if meta.timereference ~= "" and meta.samplerate > 0 then
+      meta.src_tc = samples_to_tc(meta.timereference, meta.samplerate, CLB.fps or 25)
+    end
+
+    -- Parse BWF Description for key=value pairs
+    if meta.description ~= "" then
+      meta.bwf_fields = parse_bwf_description(meta.description)
+
+      -- Extract reel from description (sTRK#/dREEL format)
+      meta.reel = meta.bwf_fields["REEL"]
+               or meta.bwf_fields["sREEL"]
+               or meta.bwf_fields["dREEL"]
+               or ""
+
+      -- Also try SCENE, TAKE, TAPE from BWF if iXML was empty
+      if meta.scene == "" then meta.scene = meta.bwf_fields["SCENE"] or meta.bwf_fields["sSCENE"] or "" end
+      if meta.take == ""  then meta.take  = meta.bwf_fields["TAKE"]  or meta.bwf_fields["sTAKE"]  or "" end
+      if meta.tape == ""  then meta.tape  = meta.bwf_fields["TAPE"]  or meta.bwf_fields["sTAPE"]  or "" end
+    end
+
+    -- If no reel from description, try tape as reel
+    if meta.reel == "" and meta.tape ~= "" then
+      meta.reel = meta.tape
+    end
+  end
+
+  -- Destroy temporary source
+  reaper.PCM_Source_Destroy(src)
+
+  return meta
+end
+
+--- Format duration as HH:MM:SS or MM:SS
+local function format_duration(seconds)
+  if not seconds or seconds <= 0 then return "00:00" end
+  local h = math.floor(seconds / 3600)
+  local m = math.floor((seconds % 3600) / 60)
+  local s = math.floor(seconds % 60)
+  if h > 0 then
+    return string.format("%d:%02d:%02d", h, m, s)
+  else
+    return string.format("%d:%02d", m, s)
+  end
+end
+
+--- Format sample rate as "48k" style
+local function format_samplerate(sr)
+  if not sr or sr <= 0 then return "" end
+  if sr >= 1000 then
+    return string.format("%.0fk", sr / 1000)
+  end
+  return tostring(sr)
+end
+
+---------------------------------------------------------------------------
+-- Audio matching
+---------------------------------------------------------------------------
+
+--- Clear all match results from ROWS
+local function clear_match_results()
+  for _, row in ipairs(ROWS) do
+    row.match_status = ""
+    row.matched_path = ""
+    row.__match_candidates = nil
+  end
+  CLB.cached_rows = nil
+  CLB.cached_rows_frame = -1
+end
+
+--- Match audio files to EDL events
+local function match_audio_files()
+  if #CLB.audio_files == 0 or #ROWS == 0 then return end
+
+  console_msg("Starting audio matching...")
+
+  -- Build audio file indexes
+  local by_basename = {}   -- filename (lowercase, no ext) → {audio_file, ...}
+  local by_tape = {}       -- tape/reel metadata → {audio_file, ...}
+
+  for _, af in ipairs(CLB.audio_files) do
+    -- Index by basename
+    local base = (af.basename or ""):lower()
+    if base ~= "" then
+      by_basename[base] = by_basename[base] or {}
+      by_basename[base][#by_basename[base] + 1] = af
+    end
+
+    -- Index by tape/reel metadata
+    local tape = ""
+    if af.metadata then
+      tape = (af.metadata.tape or af.metadata.reel or ""):lower()
+    end
+    if tape ~= "" then
+      by_tape[tape] = by_tape[tape] or {}
+      by_tape[tape][#by_tape[tape] + 1] = af
+    end
+  end
+
+  -- Match each EDL row
+  local found_count = 0
+  local multiple_count = 0
+  local not_found_count = 0
+
+  for _, row in ipairs(ROWS) do
+    local candidates = {}
+
+    -- Strategy 1: clip_name exact match (ignoring extension)
+    local clip_base = get_basename(row.clip_name or ""):lower()
+    if clip_base ~= "" and by_basename[clip_base] then
+      for _, af in ipairs(by_basename[clip_base]) do
+        candidates[#candidates + 1] = af
+      end
+    end
+
+    -- Strategy 2: source_file exact match (if strategy 1 found nothing)
+    if #candidates == 0 then
+      local src_base = get_basename(row.source_file or ""):lower()
+      if src_base ~= "" and by_basename[src_base] then
+        for _, af in ipairs(by_basename[src_base]) do
+          candidates[#candidates + 1] = af
+        end
+      end
+    end
+
+    -- Strategy 3: reel ↔ tape match + clip_name partial match
+    if #candidates == 0 and row.reel and row.reel ~= "" then
+      local reel_lower = row.reel:lower()
+      local tape_files = by_tape[reel_lower] or {}
+      for _, af in ipairs(tape_files) do
+        local af_base = (af.basename or ""):lower()
+        -- Check if clip_name is contained in audio filename or vice versa
+        if clip_base ~= "" and (af_base:find(clip_base, 1, true) or clip_base:find(af_base, 1, true)) then
+          candidates[#candidates + 1] = af
+        end
+      end
+    end
+
+    -- Strategy 4: Fuzzy match - clip_name partial match in all files
+    if #candidates == 0 and clip_base ~= "" and #clip_base >= 3 then
+      for _, af in ipairs(CLB.audio_files) do
+        local af_base = (af.basename or ""):lower()
+        if af_base:find(clip_base, 1, true) then
+          candidates[#candidates + 1] = af
+        end
+      end
+    end
+
+    -- Set match result
+    if #candidates == 1 then
+      row.match_status = "Found"
+      row.matched_path = candidates[1].path
+      row.__match_candidates = nil
+      found_count = found_count + 1
+    elseif #candidates > 1 then
+      row.match_status = "Multiple"
+      row.matched_path = string.format("(%d)", #candidates)
+      row.__match_candidates = candidates
+      multiple_count = multiple_count + 1
+    else
+      row.match_status = "Not Found"
+      row.matched_path = ""
+      row.__match_candidates = nil
+      not_found_count = not_found_count + 1
+    end
+  end
+
+  CLB.cached_rows = nil
+  CLB.cached_rows_frame = -1
+
+  console_msg(string.format("Matching complete: %d found, %d multiple, %d not found",
+    found_count, multiple_count, not_found_count))
+end
+
+--- Get filtered audio files for display
+local function get_audio_view_rows()
+  local frame = CLB.frame_counter
+  if CLB.audio_cached and CLB.audio_cached_frame == frame then
+    return CLB.audio_cached
+  end
+
+  local search = (CLB.audio_search or ""):lower()
+  if search == "" then
+    CLB.audio_cached = CLB.audio_files
+  else
+    local filtered = {}
+    for _, af in ipairs(CLB.audio_files) do
+      -- Search in filename and metadata
+      local searchable = (af.filename or "") .. " " ..
+        (af.folder or "") .. " " ..
+        (af.metadata and af.metadata.scene or "") .. " " ..
+        (af.metadata and af.metadata.take or "") .. " " ..
+        (af.metadata and af.metadata.tape or "")
+      if searchable:lower():find(search, 1, true) then
+        filtered[#filtered + 1] = af
+      end
+    end
+    CLB.audio_cached = filtered
+  end
+
+  CLB.audio_cached_frame = frame
+  return CLB.audio_cached
+end
+
+---------------------------------------------------------------------------
 -- Column widths
 ---------------------------------------------------------------------------
 local COL_WIDTH = {}
@@ -297,6 +819,9 @@ local function save_prefs()
   reaper.SetExtState(EXT_NS, "fps", tostring(CLB.fps or 25), true)
   reaper.SetExtState(EXT_NS, "track_name_format", CLB.track_name_format or "${format} - ${track}", true)
   reaper.SetExtState(EXT_NS, "last_dir", CLB.last_dir or "", true)
+  reaper.SetExtState(EXT_NS, "last_audio_dir", CLB.last_audio_dir or "", true)
+  reaper.SetExtState(EXT_NS, "audio_recursive", CLB.audio_recursive and "1" or "0", true)
+  reaper.SetExtState(EXT_NS, "split_ratio", tostring(CLB.split_ratio or 0.5), true)
   reaper.SetExtState(EXT_NS, "console_output", CONSOLE.enabled and "1" or "0", true)
   reaper.SetExtState(EXT_NS, "debug_mode", DEBUG and "1" or "0", true)
   reaper.SetExtState(EXT_NS, "allow_docking", ALLOW_DOCKING and "1" or "0", true)
@@ -314,6 +839,9 @@ local function load_prefs()
   CLB.fps = tonumber(get("fps", "25")) or 25
   CLB.track_name_format = get("track_name_format", "${format} - ${track}")
   CLB.last_dir = get("last_dir", "")
+  CLB.last_audio_dir = get("last_audio_dir", "")
+  CLB.audio_recursive = get("audio_recursive", "1") == "1"
+  CLB.split_ratio = tonumber(get("split_ratio", "0.5")) or 0.5
   CONSOLE.enabled = get("console_output", "0") == "1"
   DEBUG = get("debug_mode", "0") == "1"
   ALLOW_DOCKING = get("allow_docking", "0") == "1"
@@ -458,21 +986,29 @@ end
 -- Get cell text for display
 local function get_cell_text(row, col_id)
   if not row then return "" end
-  if col_id == COL.EVENT     then return row.event_num or "" end
-  if col_id == COL.REEL      then return row.reel or "" end
-  if col_id == COL.TRACK     then return row.track or "" end
-  if col_id == COL.EDIT_TYPE then return row.edit_type or "" end
-  if col_id == COL.DISS_LEN  then
+  if col_id == COL.EVENT        then return row.event_num or "" end
+  if col_id == COL.REEL         then return row.reel or "" end
+  if col_id == COL.TRACK        then return row.track or "" end
+  if col_id == COL.EDIT_TYPE    then return row.edit_type or "" end
+  if col_id == COL.DISS_LEN     then
     return row.dissolve_len and tostring(row.dissolve_len) or ""
   end
-  if col_id == COL.SRC_IN    then return row.src_tc_in or "" end
-  if col_id == COL.SRC_OUT   then return row.src_tc_out or "" end
-  if col_id == COL.REC_IN    then return row.rec_tc_in or "" end
-  if col_id == COL.REC_OUT   then return row.rec_tc_out or "" end
-  if col_id == COL.DURATION  then return row.duration or "" end
-  if col_id == COL.CLIP_NAME then return row.clip_name or "" end
-  if col_id == COL.SRC_FILE  then return row.source_file or "" end
-  if col_id == COL.NOTES     then return row.notes or "" end
+  if col_id == COL.SRC_IN       then return row.src_tc_in or "" end
+  if col_id == COL.SRC_OUT      then return row.src_tc_out or "" end
+  if col_id == COL.REC_IN       then return row.rec_tc_in or "" end
+  if col_id == COL.REC_OUT      then return row.rec_tc_out or "" end
+  if col_id == COL.DURATION     then return row.duration or "" end
+  if col_id == COL.CLIP_NAME    then return row.clip_name or "" end
+  if col_id == COL.SRC_FILE     then return row.source_file or "" end
+  if col_id == COL.NOTES        then return row.notes or "" end
+  if col_id == COL.MATCH_STATUS then return row.match_status or "" end
+  if col_id == COL.MATCHED_PATH then
+    -- Show just filename for display, full path in tooltip
+    if row.matched_path and row.matched_path ~= "" then
+      return row.matched_path:match("([^/\\]+)$") or row.matched_path
+    end
+    return ""
+  end
   return ""
 end
 
@@ -588,8 +1124,17 @@ local function get_view_rows()
     end
   end
 
+  -- Build hidden track set
+  local hidden_tracks = nil
+  for _, tf in ipairs(CLB.track_filters) do
+    if not tf.visible then
+      hidden_tracks = hidden_tracks or {}
+      hidden_tracks[tf.name] = true
+    end
+  end
+
   local search = CLB.search_text:lower()
-  local need_filter = search ~= "" or hidden_src_idx
+  local need_filter = search ~= "" or hidden_src_idx or hidden_tracks
 
   if not need_filter then
     CLB.cached_rows = ROWS
@@ -598,6 +1143,10 @@ local function get_view_rows()
     for _, row in ipairs(ROWS) do
       -- Source visibility filter
       if hidden_src_idx and hidden_src_idx[row.__source_idx] then
+        goto skip
+      end
+      -- Track visibility filter
+      if hidden_tracks and hidden_tracks[row.track or ""] then
         goto skip
       end
       -- Search filter
@@ -673,11 +1222,42 @@ local function _register_source(filepath, event_count)
   return idx
 end
 
+--- Rebuild track filter list from current ROWS.
+local function _rebuild_track_filters()
+  local track_counts = {}
+  local track_order = {}
+  for _, row in ipairs(ROWS) do
+    local t = row.track or ""
+    if not track_counts[t] then
+      track_counts[t] = 0
+      track_order[#track_order + 1] = t
+    end
+    track_counts[t] = track_counts[t] + 1
+  end
+  table.sort(track_order)
+
+  -- Preserve existing visibility
+  local old_vis = {}
+  for _, tf in ipairs(CLB.track_filters) do
+    old_vis[tf.name] = tf.visible
+  end
+
+  CLB.track_filters = {}
+  for _, name in ipairs(track_order) do
+    CLB.track_filters[#CLB.track_filters + 1] = {
+      name = name,
+      count = track_counts[name],
+      visible = old_vis[name] == nil or old_vis[name],
+    }
+  end
+end
+
 -- Replace all rows (fresh load)
 local function build_rows_from_parsed(parsed, source_path)
   ROWS = {}
   _guid_counter = 0
   CLB.edl_sources = {}
+  CLB.track_filters = {}
   if not parsed or not parsed.events then return end
 
   CLB.fps = parsed.fps or 25
@@ -693,6 +1273,7 @@ local function build_rows_from_parsed(parsed, source_path)
   UNDO_STACK = {}
   UNDO_POS = 0
   undo_snapshot()
+  _rebuild_track_filters()
   CLB.cached_rows = nil; CLB.cached_rows_frame = -1
 
   console_msg(string.format("Loaded %d events from %s",
@@ -712,6 +1293,7 @@ local function append_rows_from_parsed(parsed, source_path)
   end
 
   undo_snapshot()
+  _rebuild_track_filters()
   CLB.cached_rows = nil; CLB.cached_rows_frame = -1
 
   console_msg(string.format("Appended %d events from %s (total: %d)",
@@ -839,6 +1421,105 @@ local function load_edl_file()
   if #all_parsed > 1 then
     console_msg(string.format("Loaded %d EDL files (%d total events)", #all_parsed, #ROWS))
   end
+end
+
+---------------------------------------------------------------------------
+-- Audio Loading
+---------------------------------------------------------------------------
+
+--- Start loading audio folder (initiates async loading)
+local function load_audio_folder()
+  -- Select folder
+  local folder
+  if reaper.JS_Dialog_BrowseForFolder then
+    local rv, path = reaper.JS_Dialog_BrowseForFolder("Select Audio Folder", CLB.last_audio_dir or "")
+    if rv ~= 1 or not path or path == "" then return end
+    folder = path
+  else
+    reaper.ShowMessageBox(
+      "JS extension required for folder selection.\n\n" ..
+      "Please install js_ReaScriptAPI via ReaPack.",
+      SCRIPT_NAME, 0)
+    return
+  end
+
+  -- Remember directory
+  CLB.last_audio_dir = folder
+  CLB.audio_folder = folder
+  save_prefs()
+
+  console_msg("Scanning audio folder: " .. folder)
+
+  -- Phase 1: Scan files (quick)
+  local files = scan_audio_folder(folder, CLB.audio_recursive)
+
+  if #files == 0 then
+    reaper.ShowMessageBox(
+      "No audio files found in:\n" .. folder ..
+      (CLB.audio_recursive and "\n(recursive search enabled)" or ""),
+      SCRIPT_NAME, 0)
+    return
+  end
+
+  console_msg(string.format("Found %d audio files, reading metadata...", #files))
+
+  -- Initialize loading state for async metadata reading
+  CLB.loading_state = {
+    phase = "reading_metadata",
+    total = #files,
+    current = 0,
+    files = files,
+  }
+
+  -- Show audio panel
+  CLB.show_audio_panel = true
+end
+
+--- Process a batch of audio files for metadata reading (called each frame)
+local function process_audio_loading_batch()
+  if not CLB.loading_state or CLB.loading_state.phase ~= "reading_metadata" then
+    return false  -- Not loading
+  end
+
+  local BATCH_SIZE = 5  -- Files per frame (balance between speed and responsiveness)
+  local state = CLB.loading_state
+
+  for i = 1, BATCH_SIZE do
+    local idx = state.current + 1
+    if idx > state.total then
+      -- Loading complete
+      CLB.audio_files = state.files
+      CLB.loading_state = nil
+      CLB.audio_cached = nil
+      CLB.audio_cached_frame = -1
+
+      console_msg(string.format("Loaded %d audio files with metadata", #CLB.audio_files))
+
+      -- Auto-match if EDL is loaded
+      if #ROWS > 0 then
+        match_audio_files()
+      end
+
+      return false  -- Done loading
+    end
+
+    -- Read metadata for this file
+    local file = state.files[idx]
+    file.metadata = read_audio_metadata(file.path)
+    state.current = idx
+  end
+
+  return true  -- Still loading
+end
+
+--- Clear all loaded audio files
+local function clear_audio_files()
+  CLB.audio_files = {}
+  CLB.audio_folder = ""
+  CLB.audio_cached = nil
+  CLB.audio_cached_frame = -1
+  CLB.loading_state = nil
+  clear_match_results()
 end
 
 ---------------------------------------------------------------------------
@@ -972,6 +1653,253 @@ local function generate_items()
 end
 
 ---------------------------------------------------------------------------
+-- Get Selected Rows (for conform operations)
+---------------------------------------------------------------------------
+local function get_selected_rows()
+  local selected = {}
+  local view_rows = get_view_rows()
+
+  for _, row in ipairs(view_rows) do
+    -- Check if any cell in this row is selected
+    for c = 1, COL_COUNT do
+      if sel_has(row.__guid, c) then
+        selected[#selected + 1] = row
+        break
+      end
+    end
+  end
+
+  return selected
+end
+
+---------------------------------------------------------------------------
+-- Conform Matched Items (insert actual audio files)
+---------------------------------------------------------------------------
+local function conform_matched_items(selected_only)
+  if #ROWS == 0 then
+    reaper.ShowMessageBox("No events loaded. Load an EDL file first.", SCRIPT_NAME, 0)
+    return
+  end
+
+  -- Determine which rows to process
+  local rows_to_process
+  if selected_only then
+    rows_to_process = get_selected_rows()
+    if #rows_to_process == 0 then
+      reaper.ShowMessageBox("No rows selected. Select rows in the table first.", SCRIPT_NAME, 0)
+      return
+    end
+  else
+    rows_to_process = ROWS
+  end
+
+  -- Filter to matched rows only
+  local matched_rows = {}
+  local found_count = 0
+  local multi_count = 0
+
+  for _, row in ipairs(rows_to_process) do
+    if row.match_status == "Found" then
+      matched_rows[#matched_rows + 1] = row
+      found_count = found_count + 1
+    elseif row.match_status == "Multiple" and row.__match_candidates then
+      matched_rows[#matched_rows + 1] = row
+      multi_count = multi_count + 1
+    end
+  end
+
+  if #matched_rows == 0 then
+    reaper.ShowMessageBox(
+      "No matched events to conform.\n\n" ..
+      "Load audio files and run matching first.",
+      SCRIPT_NAME, 0)
+    return
+  end
+
+  -- Collect unique tracks
+  local track_names = {}
+  local track_order = {}
+  for _, row in ipairs(matched_rows) do
+    local t = row.track or "A1"
+    if not track_names[t] then
+      track_names[t] = true
+      track_order[#track_order + 1] = t
+    end
+  end
+
+  -- Confirmation
+  local msg = string.format(
+    "Conform %d matched events?\n\n" ..
+    "• %d single matches (1 take each)\n" ..
+    "• %d multiple matches (multiple takes)\n\n" ..
+    "Tracks: %s\n" ..
+    "FPS: %s%s\n\n" ..
+    "Audio files will be inserted at timeline positions.",
+    #matched_rows, found_count, multi_count,
+    table.concat(track_order, ", "),
+    tostring(CLB.fps),
+    CLB.is_drop and " (Drop Frame)" or ""
+  )
+  if reaper.ShowMessageBox(msg, SCRIPT_NAME, 1) ~= 1 then return end
+
+  reaper.Undo_BeginBlock()
+  reaper.PreventUIRefresh(1)
+
+  -- Create or find tracks by name
+  local track_map = {}
+
+  for _, t in ipairs(track_order) do
+    local tokens = {
+      format = CLB.loaded_format or "EDL",
+      track = t,
+      title = (CLB.parsed_data and CLB.parsed_data.title) or "",
+    }
+    local name = EDL.expand_template(CLB.track_name_format, tokens)
+
+    -- Search existing tracks first
+    local found = nil
+    for ti = 0, reaper.CountTracks(0) - 1 do
+      local tr = reaper.GetTrack(0, ti)
+      local _, tr_name = reaper.GetTrackName(tr)
+      if tr_name == name then
+        found = tr
+        break
+      end
+    end
+
+    if not found then
+      reaper.InsertTrackAtIndex(reaper.CountTracks(0), true)
+      found = reaper.GetTrack(0, reaper.CountTracks(0) - 1)
+      reaper.GetSetMediaTrackInfo_String(found, "P_NAME", name, true)
+    end
+
+    track_map[t] = found
+  end
+
+  -- Helper: Get audio file's TimeReference in seconds
+  local function get_audio_start_sec(audio_file)
+    if not audio_file or not audio_file.metadata then return 0 end
+    local meta = audio_file.metadata
+    local tr = tonumber(meta.timereference) or 0
+    local sr = meta.samplerate or 48000
+    if sr <= 0 then sr = 48000 end
+    if tr > 0 and sr > 0 then
+      return tr / sr
+    end
+    return 0
+  end
+
+  -- Create items
+  local created = 0
+  local takes_created = 0
+
+  for _, row in ipairs(matched_rows) do
+    local tr = track_map[row.track or "A1"]
+    if not tr then tr = track_map[track_order[1]] end
+    if not tr then goto continue end
+
+    -- Timeline position from rec_tc_in
+    local pos = EDL.tc_to_seconds(row.rec_tc_in, CLB.fps, CLB.is_drop)
+    local pos_out = EDL.tc_to_seconds(row.rec_tc_out, CLB.fps, CLB.is_drop)
+    local length = pos_out - pos
+    if length <= 0 then length = 0.001 end
+
+    -- Source offset: src_tc_in - audio's TimeReference
+    local src_in_sec = EDL.tc_to_seconds(row.src_tc_in, CLB.fps, CLB.is_drop)
+
+    -- Get audio files to insert
+    local audio_files = {}
+    if row.match_status == "Found" and row.matched_path then
+      -- Find the audio file entry
+      for _, af in ipairs(CLB.audio_files) do
+        if af.path == row.matched_path then
+          audio_files[1] = af
+          break
+        end
+      end
+    elseif row.match_status == "Multiple" and row.__match_candidates then
+      audio_files = row.__match_candidates
+    end
+
+    if #audio_files == 0 then goto continue end
+
+    -- Create item
+    local item = reaper.AddMediaItemToTrack(tr)
+    reaper.SetMediaItemInfo_Value(item, "D_POSITION", pos)
+    reaper.SetMediaItemInfo_Value(item, "D_LENGTH", length)
+
+    -- Add takes for each audio file
+    local first_take = true
+    for ti, af in ipairs(audio_files) do
+      -- Calculate source offset for this audio file
+      local audio_start = get_audio_start_sec(af)
+      local source_offset = src_in_sec - audio_start
+      if source_offset < 0 then source_offset = 0 end
+
+      -- Insert media source
+      local source = reaper.PCM_Source_CreateFromFile(af.path)
+      if source then
+        local take
+        if first_take then
+          take = reaper.AddTakeToMediaItem(item)
+          first_take = false
+        else
+          take = reaper.AddTakeToMediaItem(item)
+        end
+
+        if take then
+          reaper.SetMediaItemTake_Source(take, source)
+          reaper.SetMediaItemTakeInfo_Value(take, "D_STARTOFFS", source_offset)
+
+          -- Take name: clip name (or filename for additional takes)
+          local take_name = row.clip_name or af.basename or ""
+          if ti > 1 then
+            take_name = af.filename or af.basename or ("Take " .. ti)
+          end
+          reaper.GetSetMediaItemTakeInfo_String(take, "P_NAME", take_name, true)
+
+          -- Store metadata as P_EXT
+          reaper.GetSetMediaItemTakeInfo_String(take, "P_EXT:CLB_EVENT", row.event_num or "", true)
+          reaper.GetSetMediaItemTakeInfo_String(take, "P_EXT:CLB_REEL", row.reel or "", true)
+          reaper.GetSetMediaItemTakeInfo_String(take, "P_EXT:CLB_SRC_TC_IN", row.src_tc_in or "", true)
+          reaper.GetSetMediaItemTakeInfo_String(take, "P_EXT:CLB_SRC_TC_OUT", row.src_tc_out or "", true)
+          reaper.GetSetMediaItemTakeInfo_String(take, "P_EXT:CLB_MATCHED_FILE", af.path or "", true)
+
+          takes_created = takes_created + 1
+        end
+      end
+    end
+
+    -- Item note
+    local note_parts = {}
+    note_parts[#note_parts + 1] = "Reel: " .. (row.reel or "")
+    note_parts[#note_parts + 1] = "Src In: " .. (row.src_tc_in or "")
+    note_parts[#note_parts + 1] = "Src Out: " .. (row.src_tc_out or "")
+    if #audio_files > 1 then
+      note_parts[#note_parts + 1] = ""
+      note_parts[#note_parts + 1] = string.format("(%d takes from multiple matches)", #audio_files)
+    end
+    if row.notes and row.notes ~= "" then
+      note_parts[#note_parts + 1] = ""
+      note_parts[#note_parts + 1] = row.notes
+    end
+    reaper.GetSetMediaItemInfo_String(item, "P_NOTES", table.concat(note_parts, "\n"), true)
+
+    created = created + 1
+    ::continue::
+  end
+
+  reaper.PreventUIRefresh(-1)
+  reaper.UpdateArrange()
+  reaper.Undo_EndBlock("CLB: Conform " .. created .. " items (" .. takes_created .. " takes)", -1)
+
+  reaper.ShowMessageBox(
+    string.format("Conformed %d items with %d takes on %d track(s).",
+      created, takes_created, #track_order),
+    SCRIPT_NAME, 0)
+end
+
+---------------------------------------------------------------------------
 -- Remove Duplicates
 ---------------------------------------------------------------------------
 local function remove_duplicates()
@@ -1018,7 +1946,6 @@ local function remove_duplicates()
 
   if choice ~= 1 then return end
 
-  undo_snapshot()
   ROWS = keep
 
   -- Update source event counts
@@ -1033,6 +1960,7 @@ local function remove_duplicates()
 
   sel_clear()
   EDIT = nil
+  _rebuild_track_filters()
   undo_snapshot()
   CLB.cached_rows = nil; CLB.cached_rows_frame = -1
 
@@ -1128,8 +2056,6 @@ local function paste_selection()
   local clip = reaper.CF_GetClipboard and reaper.CF_GetClipboard("") or ""
   if clip == "" then return end
 
-  undo_snapshot()
-
   -- Parse TSV
   local clip_rows = {}
   for line in (clip .. "\n"):gmatch("(.-)\n") do
@@ -1177,6 +2103,7 @@ local function paste_selection()
     end
   end
 
+  undo_snapshot()
   CLB.cached_rows = nil; CLB.cached_rows_frame = -1
   console_msg("Pasted " .. #clip_rows .. " rows")
 end
@@ -1215,6 +2142,39 @@ local function draw_toolbar()
   end
   reaper.ImGui_SameLine(ctx)
 
+  -- Load Audio button
+  if reaper.ImGui_Button(ctx, "Load Audio...", scale(100), scale(24)) then
+    load_audio_folder()
+  end
+  if reaper.ImGui_IsItemHovered(ctx) then
+    reaper.ImGui_BeginTooltip(ctx)
+    reaper.ImGui_Text(ctx, "Load audio files from folder to match with EDL events")
+    reaper.ImGui_Text(ctx, "Reads BWF/iXML metadata for matching")
+    reaper.ImGui_EndTooltip(ctx)
+  end
+  reaper.ImGui_SameLine(ctx)
+
+  -- Match All button (only show when both EDL and audio are loaded)
+  if #ROWS > 0 and #CLB.audio_files > 0 then
+    if reaper.ImGui_Button(ctx, "Match All", scale(80), scale(24)) then
+      match_audio_files()
+    end
+    if reaper.ImGui_IsItemHovered(ctx) then
+      reaper.ImGui_BeginTooltip(ctx)
+      reaper.ImGui_Text(ctx, "Re-run matching algorithm on all EDL events")
+      reaper.ImGui_EndTooltip(ctx)
+    end
+    reaper.ImGui_SameLine(ctx)
+  end
+
+  -- Clear Audio button (only show when audio is loaded)
+  if #CLB.audio_files > 0 then
+    if reaper.ImGui_Button(ctx, "Clear Audio", scale(90), scale(24)) then
+      clear_audio_files()
+    end
+    reaper.ImGui_SameLine(ctx)
+  end
+
   -- Separator
   reaper.ImGui_Text(ctx, "|")
   reaper.ImGui_SameLine(ctx)
@@ -1245,6 +2205,15 @@ local function draw_toolbar()
     local src_label = CLB.show_sources_panel and "Sources <<" or "Sources >>"
     if reaper.ImGui_SmallButton(ctx, src_label .. "##clb_src_toggle") then
       CLB.show_sources_panel = not CLB.show_sources_panel
+    end
+    reaper.ImGui_SameLine(ctx)
+  end
+
+  -- Tracks toggle button
+  if #CLB.track_filters > 0 then
+    local trk_label = CLB.show_track_filter and "Tracks <<" or "Tracks >>"
+    if reaper.ImGui_SmallButton(ctx, trk_label .. "##clb_trk_toggle") then
+      CLB.show_track_filter = not CLB.show_track_filter
     end
     reaper.ImGui_SameLine(ctx)
   end
@@ -1368,8 +2337,8 @@ local function draw_toolbar()
   end
   reaper.ImGui_SameLine(ctx)
 
-  -- Generate Items button
-  if reaper.ImGui_Button(ctx, "Generate Items", scale(120), scale(24)) then
+  -- Generate Items button (empty items)
+  if reaper.ImGui_Button(ctx, "Generate Items", scale(110), scale(24)) then
     generate_items()
   end
   if reaper.ImGui_IsItemHovered(ctx) then
@@ -1379,6 +2348,39 @@ local function draw_toolbar()
     reaper.ImGui_EndTooltip(ctx)
   end
   reaper.ImGui_SameLine(ctx)
+
+  -- Conform Matched button (with audio)
+  local has_matches = false
+  for _, row in ipairs(ROWS) do
+    if row.match_status == "Found" or row.match_status == "Multiple" then
+      has_matches = true
+      break
+    end
+  end
+
+  if has_matches then
+    if reaper.ImGui_Button(ctx, "Conform All", scale(90), scale(24)) then
+      conform_matched_items(false)
+    end
+    if reaper.ImGui_IsItemHovered(ctx) then
+      reaper.ImGui_BeginTooltip(ctx)
+      reaper.ImGui_Text(ctx, "Insert matched audio files as items")
+      reaper.ImGui_Text(ctx, "Multiple matches = multiple takes on same item")
+      reaper.ImGui_EndTooltip(ctx)
+    end
+    reaper.ImGui_SameLine(ctx)
+
+    -- Conform Selected button
+    if reaper.ImGui_Button(ctx, "Conform Sel", scale(90), scale(24)) then
+      conform_matched_items(true)
+    end
+    if reaper.ImGui_IsItemHovered(ctx) then
+      reaper.ImGui_BeginTooltip(ctx)
+      reaper.ImGui_Text(ctx, "Insert matched audio for selected rows only")
+      reaper.ImGui_EndTooltip(ctx)
+    end
+    reaper.ImGui_SameLine(ctx)
+  end
 
   -- Remove Duplicates button
   if reaper.ImGui_Button(ctx, "Remove Dups", scale(100), scale(24)) then
@@ -1443,9 +2445,43 @@ local function draw_sources_panel()
 end
 
 ---------------------------------------------------------------------------
+-- Draw: Track Filter Panel
+---------------------------------------------------------------------------
+local function draw_track_filter_panel()
+  if not CLB.show_track_filter or #CLB.track_filters == 0 then return end
+
+  reaper.ImGui_Separator(ctx)
+
+  reaper.ImGui_Text(ctx, string.format("Track Filter (%d):", #CLB.track_filters))
+  reaper.ImGui_SameLine(ctx)
+
+  -- Show All / Hide All
+  if reaper.ImGui_SmallButton(ctx, "Show All##clb_trk_all") then
+    for _, tf in ipairs(CLB.track_filters) do tf.visible = true end
+    CLB.cached_rows = nil; CLB.cached_rows_frame = -1
+  end
+  reaper.ImGui_SameLine(ctx)
+  if reaper.ImGui_SmallButton(ctx, "Hide All##clb_trk_none") then
+    for _, tf in ipairs(CLB.track_filters) do tf.visible = false end
+    CLB.cached_rows = nil; CLB.cached_rows_frame = -1
+  end
+
+  -- Track checkboxes (inline, since tracks are usually few)
+  for i, tf in ipairs(CLB.track_filters) do
+    if i > 1 then reaper.ImGui_SameLine(ctx) end
+    local label = string.format("%s (%d)##clb_trk_%d", tf.name, tf.count, i)
+    local changed, new_val = reaper.ImGui_Checkbox(ctx, label, tf.visible)
+    if changed then
+      tf.visible = new_val
+      CLB.cached_rows = nil; CLB.cached_rows_frame = -1
+    end
+  end
+end
+
+---------------------------------------------------------------------------
 -- Draw: Table
 ---------------------------------------------------------------------------
-local function draw_table()
+local function draw_table(table_height)
   local view_rows = get_view_rows()
   local row_count = #view_rows
 
@@ -1468,10 +2504,11 @@ local function draw_table()
     | reaper.ImGui_TableFlags_Resizable()
     | reaper.ImGui_TableFlags_Reorderable()
 
-  -- Available height for table (GetContentRegionAvail returns width, height)
+  -- Available height for table (use provided height or available space)
   local _, avail_h = reaper.ImGui_GetContentRegionAvail(ctx)
+  local height = table_height or avail_h
 
-  if not reaper.ImGui_BeginTable(ctx, "clb_table", COL_COUNT, flags, 0, avail_h) then
+  if not reaper.ImGui_BeginTable(ctx, "clb_table", COL_COUNT, flags, 0, height) then
     return
   end
 
@@ -1579,8 +2616,8 @@ local function draw_table()
                   "Invalid timecode format.\nExpected: HH:MM:SS:FF",
                   SCRIPT_NAME, 0)
               else
-                undo_snapshot()
                 set_cell_value(row, c, EDIT.buf)
+                undo_snapshot()
                 CLB.cached_rows = nil; CLB.cached_rows_frame = -1
               end
             end
@@ -1631,10 +2668,242 @@ local function draw_table()
 end
 
 ---------------------------------------------------------------------------
+-- Draw: Audio Panel Header
+---------------------------------------------------------------------------
+local function draw_audio_panel_header()
+  -- Header line: Audio Files count, folder path, options
+  local file_count = #CLB.audio_files
+  local folder_display = CLB.audio_folder:match("([^/\\]+)$") or CLB.audio_folder
+
+  reaper.ImGui_Text(ctx, string.format("Audio Files (%d)", file_count))
+  reaper.ImGui_SameLine(ctx)
+  reaper.ImGui_TextDisabled(ctx, folder_display)
+
+  -- Recursive checkbox
+  reaper.ImGui_SameLine(ctx)
+  local chg_rec, new_rec = reaper.ImGui_Checkbox(ctx, "Recursive##audio_rec", CLB.audio_recursive)
+  if chg_rec then
+    CLB.audio_recursive = new_rec
+    save_prefs()
+  end
+
+  -- Audio search
+  reaper.ImGui_SameLine(ctx)
+  reaper.ImGui_Text(ctx, "|")
+  reaper.ImGui_SameLine(ctx)
+  reaper.ImGui_Text(ctx, "Search:")
+  reaper.ImGui_SameLine(ctx)
+  reaper.ImGui_SetNextItemWidth(ctx, scale(120))
+  local chg_s, new_s = reaper.ImGui_InputText(ctx, "##audio_search", CLB.audio_search)
+  if chg_s then
+    CLB.audio_search = new_s
+    CLB.audio_cached = nil
+    CLB.audio_cached_frame = -1
+  end
+  if CLB.audio_search ~= "" then
+    reaper.ImGui_SameLine(ctx)
+    if reaper.ImGui_SmallButton(ctx, "X##clr_audio_search") then
+      CLB.audio_search = ""
+      CLB.audio_cached = nil
+      CLB.audio_cached_frame = -1
+    end
+  end
+
+  -- Audio panel toggle
+  reaper.ImGui_SameLine(ctx)
+  if reaper.ImGui_SmallButton(ctx, "Hide##audio_panel") then
+    CLB.show_audio_panel = false
+  end
+end
+
+---------------------------------------------------------------------------
+-- Draw: Splitter (draggable divider between EDL and Audio tables)
+---------------------------------------------------------------------------
+local function draw_splitter()
+  local splitter_height = 6
+  local avail_w = reaper.ImGui_GetContentRegionAvail(ctx)
+
+  -- Invisible button for dragging
+  reaper.ImGui_InvisibleButton(ctx, "##splitter", avail_w, splitter_height)
+
+  if reaper.ImGui_IsItemActive(ctx) then
+    local delta_y = reaper.ImGui_GetMouseDelta(ctx)
+    if delta_y then
+      local _, avail_h = reaper.ImGui_GetContentRegionAvail(ctx)
+      local total_h = avail_h + splitter_height
+      local delta_ratio = delta_y / total_h
+      CLB.split_ratio = math.max(0.2, math.min(0.8, CLB.split_ratio + delta_ratio))
+    end
+  end
+
+  -- Draw splitter line
+  local draw_list = reaper.ImGui_GetWindowDrawList(ctx)
+  local min_x, min_y = reaper.ImGui_GetItemRectMin(ctx)
+  local max_x, max_y = reaper.ImGui_GetItemRectMax(ctx)
+  local color = reaper.ImGui_IsItemHovered(ctx) and 0xAAAAAAFF or 0x666666FF
+  reaper.ImGui_DrawList_AddRectFilled(draw_list, min_x, min_y + 2, max_x, max_y - 2, color)
+
+  -- Change cursor on hover
+  if reaper.ImGui_IsItemHovered(ctx) then
+    reaper.ImGui_SetMouseCursor(ctx, reaper.ImGui_MouseCursor_ResizeNS())
+  end
+end
+
+---------------------------------------------------------------------------
+-- Draw: Audio Table
+---------------------------------------------------------------------------
+local function draw_audio_table(table_height)
+  local audio_rows = get_audio_view_rows()
+  local row_count = #audio_rows
+
+  if row_count == 0 then
+    if #CLB.audio_files == 0 then
+      reaper.ImGui_TextDisabled(ctx, "No audio files loaded.")
+    else
+      reaper.ImGui_TextDisabled(ctx, "No audio files match the current filter.")
+    end
+    return
+  end
+
+  -- Table flags
+  local flags = reaper.ImGui_TableFlags_Borders()
+    | reaper.ImGui_TableFlags_RowBg()
+    | reaper.ImGui_TableFlags_SizingFixedFit()
+    | reaper.ImGui_TableFlags_ScrollX()
+    | reaper.ImGui_TableFlags_ScrollY()
+    | reaper.ImGui_TableFlags_Resizable()
+
+  if not reaper.ImGui_BeginTable(ctx, "audio_table", AUDIO_COL_COUNT, flags, 0, table_height) then
+    return
+  end
+
+  -- Setup columns
+  for c = 1, AUDIO_COL_COUNT do
+    local w = scale(AUDIO_COL_WIDTH[c] or 80)
+    reaper.ImGui_TableSetupColumn(ctx, AUDIO_HEADER_LABELS[c] or "",
+      reaper.ImGui_TableColumnFlags_WidthFixed(), w)
+  end
+
+  -- Headers
+  reaper.ImGui_TableSetupScrollFreeze(ctx, 0, 1)
+  reaper.ImGui_TableNextRow(ctx)
+  for c = 1, AUDIO_COL_COUNT do
+    reaper.ImGui_TableSetColumnIndex(ctx, c - 1)
+    reaper.ImGui_Text(ctx, AUDIO_HEADER_LABELS[c] or "")
+  end
+
+  -- Rows
+  for i = 1, row_count do
+    local af = audio_rows[i]
+    if not af then break end
+
+    reaper.ImGui_TableNextRow(ctx)
+
+    for c = 1, AUDIO_COL_COUNT do
+      reaper.ImGui_TableSetColumnIndex(ctx, c - 1)
+
+      local text = ""
+      local meta = af.metadata or {}
+
+      if c == AUDIO_COL.FILENAME then
+        text = af.filename or ""
+      elseif c == AUDIO_COL.SRC_TC then
+        -- Source timecode (converted from BWF TimeReference)
+        text = meta.src_tc or ""
+      elseif c == AUDIO_COL.SCENE then
+        text = meta.scene or ""
+      elseif c == AUDIO_COL.TAKE then
+        text = meta.take or ""
+      elseif c == AUDIO_COL.TAPE then
+        -- Tape/Roll (prefer tape, fallback to reel)
+        text = meta.tape or meta.reel or ""
+      elseif c == AUDIO_COL.FOLDER then
+        text = af.folder or ""
+      elseif c == AUDIO_COL.DURATION then
+        text = format_duration(meta.duration)
+      elseif c == AUDIO_COL.SAMPLERATE then
+        text = format_samplerate(meta.samplerate)
+      elseif c == AUDIO_COL.CHANNELS then
+        text = meta.channels and tostring(meta.channels) or ""
+      elseif c == AUDIO_COL.PROJECT then
+        text = meta.project or ""
+      elseif c == AUDIO_COL.DESCRIPTION then
+        -- Show truncated description
+        local desc = meta.description or ""
+        if #desc > 50 then desc = desc:sub(1, 47) .. "..." end
+        text = desc
+      end
+
+      reaper.ImGui_Text(ctx, text)
+    end
+  end
+
+  reaper.ImGui_EndTable(ctx)
+end
+
+---------------------------------------------------------------------------
+-- Draw: Loading Progress Indicator
+---------------------------------------------------------------------------
+local function draw_loading_progress()
+  if not CLB.loading_state then return false end
+
+  local state = CLB.loading_state
+  local progress = state.total > 0 and (state.current / state.total) or 0
+
+  reaper.ImGui_Text(ctx, string.format("Loading audio files... %d / %d", state.current, state.total))
+  reaper.ImGui_ProgressBar(ctx, progress, -1, 0)
+
+  return true
+end
+
+---------------------------------------------------------------------------
+-- Draw: Main Content Area (split view support)
+---------------------------------------------------------------------------
+local function draw_main_content()
+  -- Check if we're loading audio files
+  if draw_loading_progress() then
+    -- Show EDL table above progress bar
+    draw_table()
+    return
+  end
+
+  -- Check if audio panel should be shown
+  if CLB.show_audio_panel and #CLB.audio_files > 0 then
+    -- Split view mode
+    local _, avail_h = reaper.ImGui_GetContentRegionAvail(ctx)
+    local splitter_h = 6
+    local header_h = reaper.ImGui_GetTextLineHeightWithSpacing(ctx) + 4
+
+    -- Calculate heights
+    local content_h = avail_h - splitter_h - header_h
+    local edl_h = content_h * CLB.split_ratio
+    local audio_h = content_h - edl_h
+
+    -- EDL Events table (top)
+    draw_table(edl_h)
+
+    -- Splitter (draggable)
+    draw_splitter()
+
+    -- Audio panel header
+    draw_audio_panel_header()
+
+    -- Audio files table (bottom)
+    draw_audio_table(audio_h)
+  else
+    -- Single table mode
+    draw_table()
+  end
+end
+
+---------------------------------------------------------------------------
 -- Main loop
 ---------------------------------------------------------------------------
 local function loop()
   CLB.frame_counter = CLB.frame_counter + 1
+
+  -- Process async audio loading (if in progress)
+  process_audio_loading_batch()
 
   -- Push font
   font_pushed_this_frame = false
@@ -1665,10 +2934,13 @@ local function loop()
     -- Sources panel (collapsible, between toolbar and table)
     draw_sources_panel()
 
+    -- Track filter panel
+    draw_track_filter_panel()
+
     reaper.ImGui_Separator(ctx)
 
-    -- Table
-    draw_table()
+    -- Main content (EDL table, optionally split with Audio table)
+    draw_main_content()
 
     -- Keyboard shortcuts
     local focused = reaper.ImGui_IsWindowFocused(ctx, reaper.ImGui_FocusedFlags_RootAndChildWindows())
@@ -1718,12 +2990,13 @@ local function loop()
         for _, row in ipairs(vr) do
           for c = 1, COL_COUNT do
             if sel_has(row.__guid, c) and EDITABLE_COLS[c] then
-              if not changed then undo_snapshot(); changed = true end
+              changed = true
               set_cell_value(row, c, "")
             end
           end
         end
         if changed then
+          undo_snapshot()
           CLB.cached_rows = nil; CLB.cached_rows_frame = -1
         end
       end
