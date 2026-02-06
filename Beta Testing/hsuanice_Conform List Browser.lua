@@ -1,6 +1,6 @@
 --[[
 @description Conform List Browser
-@version 260206.2152
+@version 260206.2226
 @author hsuanice
 @about
   A REAPER script for browsing and editing EDL (Edit Decision List) data
@@ -41,6 +41,27 @@
   Optional: js_ReaScriptAPI (for folder selection)
 
 @changelog
+  v260206.2226
+  - Feature: Simplified toolbar status
+    • Removed EDL filename display, shows only "Events: X | Showing: Y"
+    • Search box moved to right side of row 2 (after Export EDL)
+  - Feature: Rename Track/Reel filters
+    • Double-click or right-click on Track/Reel checkbox to rename
+    • Updates all matching EDL events automatically
+    • Tooltip shows rename hint on hover
+  - Feature: Audio panel toolbar buttons
+    • Fit Widths: auto-adjust column widths based on content
+    • Copy (TSV): copy visible rows to clipboard
+    • Save .tsv / Save .csv: export to file
+    • Cols: show/hide columns popup (no presets needed)
+  - Feature: Audio table column order
+    • New order: Folder, Tape/Roll, Filename, Tracks, Src TC, Scene, Take,
+      Ch, Duration, SR, Project, FPS, Speed, Orig File, Description
+    • Reset table ID to clear previous column order memory
+  - Fix: TSV/CSV export handles newlines in Description field
+    • TSV: replaces newlines and tabs with spaces
+    • CSV: properly quotes fields containing special characters
+
   v260206.2152
   - Feature: Reel filter sidebar
     • Moved from horizontal bar to left sidebar panel
@@ -210,7 +231,7 @@ end
 ---------------------------------------------------------------------------
 local SCRIPT_NAME = "Conform List Browser"
 local EXT_NS = "hsuanice_ConformListBrowser"
-local VERSION = "260206.2152"
+local VERSION = "260206.2226"
 
 -- Column definitions (EDL Events table)
 local COL = {
@@ -402,12 +423,16 @@ local CLB = {
   audio_cached_frame = -1,    -- Frame number of cached audio files
   audio_sort_col = nil,       -- Column to sort by (nil = no sort)
   audio_sort_asc = true,      -- Sort ascending
+  audio_fit_content = false,  -- Flag to fit content widths next frame
 
   -- Loading state (for async loading with progress)
   loading_state = nil,        -- { phase, total, current, files }
 
   -- Match picker state
   match_picker_row = nil,     -- Row being matched (for multi-match selection)
+
+  -- Rename filter state
+  rename_filter = nil,        -- { type="track"|"reel", idx, old_name, buf }
 }
 
 local ROWS = {}    -- Array of row tables
@@ -423,6 +448,32 @@ local SEL = {
 local SORT_STATE = {
   columns = {},           -- Array of { col_id, ascending }
 }
+
+-- Audio column visibility and order
+-- User-requested order: Folder, Tape/Roll, Filename, Tracks, Src TC, Scene, Take, Ch, Duration, SR, Project, FPS, Speed, Orig File, Description
+local AUDIO_COL_ORDER = {
+  AUDIO_COL.FOLDER,        -- 1. Folder
+  AUDIO_COL.TAPE,          -- 2. Tape/Roll
+  AUDIO_COL.FILENAME,      -- 3. Filename
+  AUDIO_COL.TRACK_NAMES,   -- 4. Tracks
+  AUDIO_COL.SRC_TC,        -- 5. Src TC
+  AUDIO_COL.SCENE,         -- 6. Scene
+  AUDIO_COL.TAKE,          -- 7. Take
+  AUDIO_COL.CHANNELS,      -- 8. Ch
+  AUDIO_COL.DURATION,      -- 9. Duration
+  AUDIO_COL.SAMPLERATE,    -- 10. SR
+  AUDIO_COL.PROJECT,       -- 11. Project
+  AUDIO_COL.FRAMERATE,     -- 12. FPS
+  AUDIO_COL.SPEED,         -- 13. Speed
+  AUDIO_COL.ORIG_FILENAME, -- 14. Orig File
+  AUDIO_COL.DESCRIPTION,   -- 15. Description
+}
+
+-- Audio column visibility (all visible by default)
+local AUDIO_COL_VISIBILITY = {}
+for i = 1, AUDIO_COL_COUNT do
+  AUDIO_COL_VISIBILITY[i] = true
+end
 
 -- Console
 local CONSOLE = { enabled = false }
@@ -859,6 +910,108 @@ local function format_samplerate(sr)
     return string.format("%.0fk", sr / 1000)
   end
   return tostring(sr)
+end
+
+--- Generate timestamp string for filenames (YYMMDD_HHMMSS)
+local function timestamp()
+  return os.date("%y%m%d_%H%M%S")
+end
+
+--- Write text to file
+local function write_text_file(path, text)
+  local f = io.open(path, "w")
+  if f then
+    f:write(text)
+    f:close()
+    return true
+  end
+  return false
+end
+
+--- Choose save path using file dialog
+local function choose_save_path(default_name, filter)
+  local retval, filepath
+  if reaper.JS_Dialog_BrowseForSaveFile then
+    retval, filepath = reaper.JS_Dialog_BrowseForSaveFile(
+      "Save File", CLB.last_dir or "", default_name, filter)
+  else
+    retval, filepath = reaper.GetUserFileNameForRead("", "Save As", filter)
+  end
+  if retval == 1 or (retval and filepath and filepath ~= "") then
+    return filepath
+  end
+  return nil
+end
+
+--- Get audio cell text for export (similar to get_audio_cell_value but returns string)
+local function get_audio_cell_text(af, col)
+  local meta = af.metadata or {}
+  if col == AUDIO_COL.FILENAME then return af.filename or ""
+  elseif col == AUDIO_COL.SRC_TC then return meta.src_tc or ""
+  elseif col == AUDIO_COL.SCENE then return meta.scene or ""
+  elseif col == AUDIO_COL.TAKE then return meta.take or ""
+  elseif col == AUDIO_COL.TAPE then return meta.tape or meta.reel or ""
+  elseif col == AUDIO_COL.FOLDER then return af.folder or ""
+  elseif col == AUDIO_COL.DURATION then return format_duration(meta.duration)
+  elseif col == AUDIO_COL.SAMPLERATE then return format_samplerate(meta.samplerate)
+  elseif col == AUDIO_COL.CHANNELS then return meta.channels and tostring(meta.channels) or ""
+  elseif col == AUDIO_COL.PROJECT then return meta.project or ""
+  elseif col == AUDIO_COL.FRAMERATE then return meta.framerate or ""
+  elseif col == AUDIO_COL.SPEED then return meta.speed or ""
+  elseif col == AUDIO_COL.ORIG_FILENAME then return meta.orig_filename or ""
+  elseif col == AUDIO_COL.TRACK_NAMES then return meta.track_names or ""
+  elseif col == AUDIO_COL.DESCRIPTION then return meta.description or ""
+  end
+  return ""
+end
+
+--- Escape field value for TSV/CSV export
+local function escape_field_value(val, format_type)
+  if not val then return "" end
+  val = tostring(val)
+
+  if format_type == "csv" then
+    -- CSV: wrap in quotes if contains comma, quote, or newline
+    if val:find('[,"\n\r]') then
+      val = '"' .. val:gsub('"', '""') .. '"'
+    end
+  else
+    -- TSV: replace newlines with space (no standard quoting in TSV)
+    val = val:gsub('[\n\r]+', ' ')
+    -- Also replace tabs with spaces
+    val = val:gsub('\t', ' ')
+  end
+  return val
+end
+
+--- Build audio table text for export (TSV or CSV)
+local function build_audio_table_text(format_type, rows, col_order, col_visibility)
+  local sep = format_type == "csv" and "," or "\t"
+  local lines = {}
+
+  -- Header row
+  local headers = {}
+  for _, col in ipairs(col_order) do
+    if col_visibility[col] then
+      local h = AUDIO_HEADER_LABELS[col] or ""
+      table.insert(headers, escape_field_value(h, format_type))
+    end
+  end
+  table.insert(lines, table.concat(headers, sep))
+
+  -- Data rows
+  for _, af in ipairs(rows) do
+    local cells = {}
+    for _, col in ipairs(col_order) do
+      if col_visibility[col] then
+        local val = get_audio_cell_text(af, col)
+        table.insert(cells, escape_field_value(val, format_type))
+      end
+    end
+    table.insert(lines, table.concat(cells, sep))
+  end
+
+  return table.concat(lines, "\n")
 end
 
 ---------------------------------------------------------------------------
@@ -2557,23 +2710,13 @@ local function draw_toolbar()
   reaper.ImGui_Text(ctx, "|")
   reaper.ImGui_SameLine(ctx)
 
-  -- Status
+  -- Status (simplified: just counts, no filename)
   local view_rows = get_view_rows()
   local status
-  if #CLB.edl_sources > 0 then
-    if #CLB.edl_sources == 1 then
-      status = string.format("%s | Events: %d | Showing: %d",
-        CLB.edl_sources[1].name, #ROWS, #view_rows)
-    else
-      status = string.format("%d EDLs | Events: %d | Showing: %d",
-        #CLB.edl_sources, #ROWS, #view_rows)
-    end
-  elseif CLB.loaded_file then
-    local filename = CLB.loaded_file:match("([^/\\]+)$") or CLB.loaded_file
-    status = string.format("%s | Events: %d | Showing: %d",
-      filename, #ROWS, #view_rows)
+  if #ROWS > 0 then
+    status = string.format("Events: %d | Showing: %d", #ROWS, #view_rows)
   else
-    status = "No file loaded"
+    status = "No events"
   end
   reaper.ImGui_Text(ctx, status)
   reaper.ImGui_SameLine(ctx)
@@ -2610,27 +2753,6 @@ local function draw_toolbar()
     local audio_label = CLB.show_audio_panel and "Audio <<" or "Audio >>"
     if reaper.ImGui_SmallButton(ctx, audio_label .. "##clb_audio_toggle") then
       CLB.show_audio_panel = not CLB.show_audio_panel
-    end
-    reaper.ImGui_SameLine(ctx)
-  end
-
-  -- Search
-  reaper.ImGui_Text(ctx, "|")
-  reaper.ImGui_SameLine(ctx)
-  reaper.ImGui_Text(ctx, "Search:")
-  reaper.ImGui_SameLine(ctx)
-  reaper.ImGui_SetNextItemWidth(ctx, scale(160))
-  local chg_s, new_s = reaper.ImGui_InputText(ctx, "##clb_search", CLB.search_text)
-  if chg_s then
-    CLB.search_text = new_s
-    CLB.cached_rows = nil; CLB.cached_rows_frame = -1
-    sel_clear()
-  end
-  reaper.ImGui_SameLine(ctx)
-  if CLB.search_text ~= "" then
-    if reaper.ImGui_SmallButton(ctx, "X##clb_clear_search") then
-      CLB.search_text = ""
-      CLB.cached_rows = nil; CLB.cached_rows_frame = -1
     end
     reaper.ImGui_SameLine(ctx)
   end
@@ -2817,6 +2939,27 @@ local function draw_toolbar()
   if reaper.ImGui_Button(ctx, "Export EDL", scale(90), scale(24)) then
     export_edl()
   end
+  reaper.ImGui_SameLine(ctx)
+
+  -- Search (moved to end of row 2)
+  reaper.ImGui_Text(ctx, "|")
+  reaper.ImGui_SameLine(ctx)
+  reaper.ImGui_Text(ctx, "Search:")
+  reaper.ImGui_SameLine(ctx)
+  reaper.ImGui_SetNextItemWidth(ctx, scale(160))
+  local chg_s, new_s = reaper.ImGui_InputText(ctx, "##clb_search", CLB.search_text)
+  if chg_s then
+    CLB.search_text = new_s
+    CLB.cached_rows = nil; CLB.cached_rows_frame = -1
+    sel_clear()
+  end
+  if CLB.search_text ~= "" then
+    reaper.ImGui_SameLine(ctx)
+    if reaper.ImGui_SmallButton(ctx, "X##clb_clear_search") then
+      CLB.search_text = ""
+      CLB.cached_rows = nil; CLB.cached_rows_frame = -1
+    end
+  end
 end
 
 ---------------------------------------------------------------------------
@@ -2887,6 +3030,7 @@ local function draw_track_filter_panel()
   end
 
   -- Track checkboxes (inline, since tracks are usually few)
+  -- Double-click or right-click to rename
   for i, tf in ipairs(CLB.track_filters) do
     if i > 1 then reaper.ImGui_SameLine(ctx) end
     local label = string.format("%s (%d)##clb_trk_%d", tf.name, tf.count, i)
@@ -2894,6 +3038,63 @@ local function draw_track_filter_panel()
     if changed then
       tf.visible = new_val
       CLB.cached_rows = nil; CLB.cached_rows_frame = -1
+    end
+    -- Double-click or right-click to rename
+    if reaper.ImGui_IsItemHovered(ctx) then
+      reaper.ImGui_SetTooltip(ctx, "Double-click or right-click to rename")
+      if reaper.ImGui_IsMouseDoubleClicked(ctx, 0) or reaper.ImGui_IsMouseClicked(ctx, 1) then
+        CLB.rename_filter = { type = "track", idx = i, old_name = tf.name, buf = tf.name }
+        reaper.ImGui_OpenPopup(ctx, "Rename Filter##clb_rename")
+      end
+    end
+  end
+
+  -- Rename popup (handled after all checkboxes)
+  if CLB.rename_filter and CLB.rename_filter.type == "track" then
+    if reaper.ImGui_BeginPopup(ctx, "Rename Filter##clb_rename") then
+      reaper.ImGui_Text(ctx, "Rename track:")
+      reaper.ImGui_SetNextItemWidth(ctx, scale(150))
+      local chg, new_buf = reaper.ImGui_InputText(ctx, "##rename_input", CLB.rename_filter.buf,
+        reaper.ImGui_InputTextFlags_EnterReturnsTrue())
+      if chg then CLB.rename_filter.buf = new_buf end
+
+      -- Focus input on first frame
+      if not CLB.rename_filter.focused then
+        reaper.ImGui_SetKeyboardFocusHere(ctx, -1)
+        CLB.rename_filter.focused = true
+      end
+
+      -- Apply on Enter or OK button
+      local apply = chg  -- Enter was pressed
+      if reaper.ImGui_Button(ctx, "OK", scale(60), 0) then apply = true end
+      reaper.ImGui_SameLine(ctx)
+      if reaper.ImGui_Button(ctx, "Cancel", scale(60), 0) then
+        CLB.rename_filter = nil
+        reaper.ImGui_CloseCurrentPopup(ctx)
+      end
+
+      if apply and CLB.rename_filter then
+        local old_name = CLB.rename_filter.old_name
+        local new_name = CLB.rename_filter.buf
+        if new_name ~= old_name and new_name ~= "" then
+          -- Update filter name
+          CLB.track_filters[CLB.rename_filter.idx].name = new_name
+          -- Update all ROWS with old track name
+          for _, row in ipairs(ROWS) do
+            if row.track == old_name then
+              row.track = new_name
+            end
+          end
+          CLB.cached_rows = nil; CLB.cached_rows_frame = -1
+        end
+        CLB.rename_filter = nil
+        reaper.ImGui_CloseCurrentPopup(ctx)
+      end
+
+      reaper.ImGui_EndPopup(ctx)
+    else
+      -- Popup was closed externally
+      CLB.rename_filter = nil
     end
   end
 end
@@ -3174,6 +3375,87 @@ local function draw_audio_panel_header()
   if reaper.ImGui_SmallButton(ctx, "Hide##audio_panel") then
     CLB.show_audio_panel = false
   end
+
+  -- Separator
+  reaper.ImGui_SameLine(ctx)
+  reaper.ImGui_Text(ctx, "|")
+
+  -- Fit Content Widths button
+  reaper.ImGui_SameLine(ctx)
+  if reaper.ImGui_SmallButton(ctx, "Fit Widths##audio_fit") then
+    CLB.audio_fit_content = true
+  end
+  if reaper.ImGui_IsItemHovered(ctx) then
+    reaper.ImGui_SetTooltip(ctx, "Auto-adjust column widths based on content")
+  end
+
+  -- Copy (TSV) button
+  reaper.ImGui_SameLine(ctx)
+  if reaper.ImGui_SmallButton(ctx, "Copy (TSV)##audio_copy") then
+    local rows = get_audio_view_rows()
+    local text = build_audio_table_text("tsv", rows, AUDIO_COL_ORDER, AUDIO_COL_VISIBILITY)
+    if text and text ~= "" then
+      reaper.ImGui_SetClipboardText(ctx, text)
+    end
+  end
+
+  -- Save .tsv button
+  reaper.ImGui_SameLine(ctx)
+  if reaper.ImGui_SmallButton(ctx, "Save .tsv##audio_tsv") then
+    local path = choose_save_path("Audio_" .. timestamp() .. ".tsv", "Tab-separated (*.tsv)\0*.tsv\0All (*.*)\0*.*\0")
+    if path then
+      local rows = get_audio_view_rows()
+      local text = build_audio_table_text("tsv", rows, AUDIO_COL_ORDER, AUDIO_COL_VISIBILITY)
+      write_text_file(path, text)
+    end
+  end
+
+  -- Save .csv button
+  reaper.ImGui_SameLine(ctx)
+  if reaper.ImGui_SmallButton(ctx, "Save .csv##audio_csv") then
+    local path = choose_save_path("Audio_" .. timestamp() .. ".csv", "CSV (*.csv)\0*.csv\0All (*.*)\0*.*\0")
+    if path then
+      local rows = get_audio_view_rows()
+      local text = build_audio_table_text("csv", rows, AUDIO_COL_ORDER, AUDIO_COL_VISIBILITY)
+      write_text_file(path, text)
+    end
+  end
+
+  -- Columns button (visibility toggle)
+  reaper.ImGui_SameLine(ctx)
+  if reaper.ImGui_SmallButton(ctx, "Columns##audio_cols") then
+    reaper.ImGui_OpenPopup(ctx, "Audio Columns##audio_col_popup")
+  end
+  if reaper.ImGui_IsItemHovered(ctx) then
+    reaper.ImGui_SetTooltip(ctx, "Show/hide columns")
+  end
+
+  -- Columns popup
+  if reaper.ImGui_BeginPopup(ctx, "Audio Columns##audio_col_popup") then
+    reaper.ImGui_Text(ctx, "Show/Hide Columns:")
+    reaper.ImGui_Separator(ctx)
+
+    -- Show All / Hide All
+    if reaper.ImGui_SmallButton(ctx, "All##audio_col_all") then
+      for i = 1, AUDIO_COL_COUNT do AUDIO_COL_VISIBILITY[i] = true end
+    end
+    reaper.ImGui_SameLine(ctx)
+    if reaper.ImGui_SmallButton(ctx, "None##audio_col_none") then
+      for i = 1, AUDIO_COL_COUNT do AUDIO_COL_VISIBILITY[i] = false end
+    end
+    reaper.ImGui_Separator(ctx)
+
+    -- Checkbox for each column (in display order)
+    for _, col in ipairs(AUDIO_COL_ORDER) do
+      local label = AUDIO_HEADER_LABELS[col] or ("Col " .. col)
+      local chg, new_val = reaper.ImGui_Checkbox(ctx, label .. "##audio_col_" .. col, AUDIO_COL_VISIBILITY[col])
+      if chg then
+        AUDIO_COL_VISIBILITY[col] = new_val
+      end
+    end
+
+    reaper.ImGui_EndPopup(ctx)
+  end
 end
 
 ---------------------------------------------------------------------------
@@ -3225,6 +3507,20 @@ local function draw_audio_table(table_height)
     return
   end
 
+  -- Build list of visible columns in display order
+  local visible_cols = {}
+  for _, col in ipairs(AUDIO_COL_ORDER) do
+    if AUDIO_COL_VISIBILITY[col] then
+      table.insert(visible_cols, col)
+    end
+  end
+  local visible_count = #visible_cols
+
+  if visible_count == 0 then
+    reaper.ImGui_TextDisabled(ctx, "No columns visible. Click 'Cols' to show columns.")
+    return
+  end
+
   -- Table flags (with reorder and sortable)
   local flags = reaper.ImGui_TableFlags_Borders()
     | reaper.ImGui_TableFlags_RowBg()
@@ -3236,29 +3532,43 @@ local function draw_audio_table(table_height)
     | reaper.ImGui_TableFlags_Sortable()
     | reaper.ImGui_TableFlags_SortMulti()
 
-  if not reaper.ImGui_BeginTable(ctx, "audio_table", AUDIO_COL_COUNT, flags, 0, table_height) then
+  -- Use unique table ID (v2) to reset ImGui's column order memory from previous versions
+  if not reaper.ImGui_BeginTable(ctx, "audio_table_v2", visible_count, flags, 0, table_height) then
     return
   end
 
-  -- Setup columns
-  for c = 1, AUDIO_COL_COUNT do
-    local w = scale(AUDIO_COL_WIDTH[c] or 80)
-    reaper.ImGui_TableSetupColumn(ctx, AUDIO_HEADER_LABELS[c] or "",
-      reaper.ImGui_TableColumnFlags_WidthFixed(), w)
+  -- Setup columns (only visible ones, in display order)
+  for idx, col in ipairs(visible_cols) do
+    local w = scale(AUDIO_COL_WIDTH[col] or 80)
+    local col_flags = reaper.ImGui_TableColumnFlags_WidthFixed()
+    -- If fit content is requested, set width stretch for this frame
+    if CLB.audio_fit_content then
+      col_flags = reaper.ImGui_TableColumnFlags_WidthStretch()
+    end
+    reaper.ImGui_TableSetupColumn(ctx, AUDIO_HEADER_LABELS[col] or "",
+      col_flags, w)
   end
   reaper.ImGui_TableSetupScrollFreeze(ctx, 0, 1)
+
+  -- Reset fit content flag after setup
+  if CLB.audio_fit_content then
+    CLB.audio_fit_content = false
+  end
 
   -- Check for sort specs changes
   local sort_specs_dirty = reaper.ImGui_TableNeedSort(ctx)
   if sort_specs_dirty then
-    -- Get sort specs (returns: has_specs, col_idx, col_user_id, sort_dir)
     if reaper.ImGui_TableGetColumnSortSpecs then
       local has_specs, col_idx, _, sort_dir = reaper.ImGui_TableGetColumnSortSpecs(ctx, 0)
       if has_specs and col_idx then
-        CLB.audio_sort_col = col_idx + 1  -- Convert to 1-based
-        CLB.audio_sort_asc = sort_dir == reaper.ImGui_SortDirection_Ascending()
-        CLB.audio_cached = nil
-        CLB.audio_cached_frame = -1
+        -- Map display column index back to actual column ID
+        local actual_col = visible_cols[col_idx + 1]
+        if actual_col then
+          CLB.audio_sort_col = actual_col
+          CLB.audio_sort_asc = sort_dir == reaper.ImGui_SortDirection_Ascending()
+          CLB.audio_cached = nil
+          CLB.audio_cached_frame = -1
+        end
       else
         CLB.audio_sort_col = nil
       end
@@ -3275,44 +3585,41 @@ local function draw_audio_table(table_height)
 
     reaper.ImGui_TableNextRow(ctx)
 
-    for c = 1, AUDIO_COL_COUNT do
-      reaper.ImGui_TableSetColumnIndex(ctx, c - 1)
+    for idx, col in ipairs(visible_cols) do
+      reaper.ImGui_TableSetColumnIndex(ctx, idx - 1)
 
       local text = ""
       local meta = af.metadata or {}
 
-      if c == AUDIO_COL.FILENAME then
+      if col == AUDIO_COL.FILENAME then
         text = af.filename or ""
-      elseif c == AUDIO_COL.SRC_TC then
-        -- Source timecode (converted from BWF TimeReference)
+      elseif col == AUDIO_COL.SRC_TC then
         text = meta.src_tc or ""
-      elseif c == AUDIO_COL.SCENE then
+      elseif col == AUDIO_COL.SCENE then
         text = meta.scene or ""
-      elseif c == AUDIO_COL.TAKE then
+      elseif col == AUDIO_COL.TAKE then
         text = meta.take or ""
-      elseif c == AUDIO_COL.TAPE then
-        -- Tape/Roll (prefer tape, fallback to reel)
+      elseif col == AUDIO_COL.TAPE then
         text = meta.tape or meta.reel or ""
-      elseif c == AUDIO_COL.FOLDER then
+      elseif col == AUDIO_COL.FOLDER then
         text = af.folder or ""
-      elseif c == AUDIO_COL.DURATION then
+      elseif col == AUDIO_COL.DURATION then
         text = format_duration(meta.duration)
-      elseif c == AUDIO_COL.SAMPLERATE then
+      elseif col == AUDIO_COL.SAMPLERATE then
         text = format_samplerate(meta.samplerate)
-      elseif c == AUDIO_COL.CHANNELS then
+      elseif col == AUDIO_COL.CHANNELS then
         text = meta.channels and tostring(meta.channels) or ""
-      elseif c == AUDIO_COL.PROJECT then
+      elseif col == AUDIO_COL.PROJECT then
         text = meta.project or ""
-      elseif c == AUDIO_COL.FRAMERATE then
+      elseif col == AUDIO_COL.FRAMERATE then
         text = meta.framerate or ""
-      elseif c == AUDIO_COL.SPEED then
+      elseif col == AUDIO_COL.SPEED then
         text = meta.speed or ""
-      elseif c == AUDIO_COL.ORIG_FILENAME then
+      elseif col == AUDIO_COL.ORIG_FILENAME then
         text = meta.orig_filename or ""
-      elseif c == AUDIO_COL.TRACK_NAMES then
+      elseif col == AUDIO_COL.TRACK_NAMES then
         text = meta.track_names or ""
-      elseif c == AUDIO_COL.DESCRIPTION then
-        -- Show truncated description
+      elseif col == AUDIO_COL.DESCRIPTION then
         local desc = meta.description or ""
         if #desc > 50 then desc = desc:sub(1, 47) .. "..." end
         text = desc
@@ -3380,6 +3687,7 @@ local function draw_reel_filter_sidebar(height)
     reaper.ImGui_Separator(ctx)
 
     -- Reel checkboxes (vertical list, scrollable)
+    -- Double-click or right-click to rename
     local _, list_h = reaper.ImGui_GetContentRegionAvail(ctx)
     if reaper.ImGui_BeginChild(ctx, "##clb_reel_list", 0, list_h) then
       for i, rf in ipairs(CLB.reel_filters) do
@@ -3390,7 +3698,65 @@ local function draw_reel_filter_sidebar(height)
           rf.visible = new_val
           CLB.cached_rows = nil; CLB.cached_rows_frame = -1
         end
+        -- Double-click or right-click to rename
+        if reaper.ImGui_IsItemHovered(ctx) then
+          reaper.ImGui_SetTooltip(ctx, "Double-click or right-click to rename")
+          if reaper.ImGui_IsMouseDoubleClicked(ctx, 0) or reaper.ImGui_IsMouseClicked(ctx, 1) then
+            CLB.rename_filter = { type = "reel", idx = i, old_name = rf.name, buf = rf.name }
+            reaper.ImGui_OpenPopup(ctx, "Rename Reel##clb_rename_reel")
+          end
+        end
       end
+
+      -- Rename popup for reels
+      if CLB.rename_filter and CLB.rename_filter.type == "reel" then
+        if reaper.ImGui_BeginPopup(ctx, "Rename Reel##clb_rename_reel") then
+          reaper.ImGui_Text(ctx, "Rename reel:")
+          reaper.ImGui_SetNextItemWidth(ctx, scale(150))
+          local chg, new_buf = reaper.ImGui_InputText(ctx, "##rename_reel_input", CLB.rename_filter.buf,
+            reaper.ImGui_InputTextFlags_EnterReturnsTrue())
+          if chg then CLB.rename_filter.buf = new_buf end
+
+          -- Focus input on first frame
+          if not CLB.rename_filter.focused then
+            reaper.ImGui_SetKeyboardFocusHere(ctx, -1)
+            CLB.rename_filter.focused = true
+          end
+
+          -- Apply on Enter or OK button
+          local apply = chg  -- Enter was pressed
+          if reaper.ImGui_Button(ctx, "OK", scale(60), 0) then apply = true end
+          reaper.ImGui_SameLine(ctx)
+          if reaper.ImGui_Button(ctx, "Cancel", scale(60), 0) then
+            CLB.rename_filter = nil
+            reaper.ImGui_CloseCurrentPopup(ctx)
+          end
+
+          if apply and CLB.rename_filter then
+            local old_name = CLB.rename_filter.old_name
+            local new_name = CLB.rename_filter.buf
+            if new_name ~= old_name then
+              -- Update filter name
+              CLB.reel_filters[CLB.rename_filter.idx].name = new_name
+              -- Update all ROWS with old reel name
+              for _, row in ipairs(ROWS) do
+                if row.reel == old_name then
+                  row.reel = new_name
+                end
+              end
+              CLB.cached_rows = nil; CLB.cached_rows_frame = -1
+            end
+            CLB.rename_filter = nil
+            reaper.ImGui_CloseCurrentPopup(ctx)
+          end
+
+          reaper.ImGui_EndPopup(ctx)
+        else
+          -- Popup was closed externally
+          CLB.rename_filter = nil
+        end
+      end
+
       reaper.ImGui_EndChild(ctx)
     end
 
