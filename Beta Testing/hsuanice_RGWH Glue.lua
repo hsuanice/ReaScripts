@@ -1,51 +1,55 @@
 --[[
-@description RGWH Glue - Glue with Handles
+@description RGWH Glue - Glue with Handles (ExtState Shortcut)
 @author hsuanice
-@version 0.1.0
+@version 0.2.2
 @provides
-  [main] hsuanice Scripts/Beta Testing/hsuanice_RGWH Glue.lua
-  hsuanice Scripts/Library/hsuanice_RGWH Core.lua
-  hsuanice Scripts/Library/hsuanice_Metadata Embed.lua
+  [main] .
 @about
-  Thin wrapper for calling RGWH Core via a single entry `RGWH.core(args)`.
-  Use this as a starting point to test and ship wrappers that render/glue with handles.
+  Keyboard shortcut wrapper for RGWH Glue operation.
+  Reads ALL settings from RGWH ExtState (same settings as GUI).
+
+  This script acts as a quick-launch shortcut:
+  - Bind to a keyboard shortcut for instant glue access
+  - Uses the same settings you configured in RGWH GUI
+  - No need to open GUI - just press the shortcut
+
+  Settings are read from:
+  - Project ExtState namespace "RGWH" (set by RGWH GUI)
 
 @usage
-  1) Adjust the USER CONFIG block below.
-  2) Run this script in REAPER. It will call RGWH.core(args) with one-run overrides.
-  3) All non-specified options keep the project's ExtState defaults (then DEFAULTS).
+  1) Configure your preferred settings in RGWH GUI (hsuanice_RGWH ReaImGui.lua)
+  2) Assign this script to a keyboard shortcut in REAPER
+  3) Select item(s) and press the shortcut to glue with handles
 
 @notes
-  - op:
-      "render" : always single-item (selection_scope is ignored).
-      "glue"   : uses selection_scope ("units" | "ts" | "item" | "auto").
-      "auto"   : if single item AND GLUE_SINGLE_ITEMS=false => render; else glue(auto scope).
-  - selection_scope (for glue/auto):
-      "auto"  : TS empty or ≈ selection span => Units; otherwise => TS window.
-      "units" : glue by Item Units (same-track grouping).
-      "ts"    : glue strictly by the current Time Selection window (never render).
-      "item"  : glue per item (SINGLE respects GLUE_SINGLE_ITEMS).
-  - channel_mode maps to GLUE/RENDER_APPLY_MODE: "auto" | "mono" | "multi".
-  - handle/epsilon/cues/policies/debug: one-run overrides; omit or use "ext" to read ExtState as-is.
+  - op is forced to "glue" (this is a glue shortcut)
+  - selection_scope is forced to "auto" (works with items or time selection)
+  - All other settings come from RGWH ExtState
+  - If ExtState is empty, uses RGWH Core defaults
 
 @changelog
+  0.2.2 (260207.0230)
+    - FIXED: Force selection_scope = "auto" (ignore GUI SELECTION_SCOPE)
+      • Prevents "no_time_selection" error when GUI is set to TS mode
+      • Wrapper now works with both item selection and time selection
+    - ADDED: Error message display when Core fails (always shown)
+
+  0.2.1 (260206.2345)
+    - ADDED: MULTI_CHANNEL_POLICY reading
+    - ADDED: SELECTION_SCOPE reading
+    - ADDED: SELECTION_POLICY reading (replaces hardcoded value)
+    - ADDED: GLUE_MERGE_TO_ITEM reading
+    - IMPACT: Now reads ALL GUI settings from ExtState
+
+  0.2.0 (260206.2230)
+    - BREAKING: Now reads ALL settings from RGWH ExtState
+    - Acts as keyboard shortcut for RGWH GUI glue operation
+    - No more hardcoded settings - mirrors GUI configuration
+    - Simplified code: removed manual args table
+    - TS-aware selection restore for split items
+
   0.1.0 (2025-12-12) [internal: v251022_2200]
-    - Changed: merge_volumes now affects ALL takes (not just active take) in RGWH Core
-    - Rationale: Ensures consistent audio output when switching between takes after merge
-    - Added: Volume control options for Render operations [internal: v251022_1745]
-        • merge_volumes (default: true) - merge item volume into take volume before render
-        • print_volumes (default: true) - bake volumes into rendered audio; false = restore original volumes
-    - Changed: args table now includes merge_volumes and print_volumes toggles in Render section
-    - Note: These options only affect render operations; glue operations unchanged
-    - Initial public template for RGWH Wrapper [internal: v251016_1357]
-    - Provides unified entry for calling `RGWH.core(args)`
-    - Includes per-run overrides for handle/epsilon/debug/cues/policies
-    - Adds `QUICK_DEBUG` one-line toggle ("silent", "normal", "verbose", "use-detailed")
-    - Adds wrapper-only `SELECTION_POLICY` ("progress", "restore", "none") with snapshot/restore logic
-    - Adds performance measurement (snapshot/core/restore/total) using `reaper.time_precise()`
-    - Supports auto conversion between frames and seconds for handle and epsilon
-    - Implements robust selection restore via track GUID and time overlap matching
-    - Console summary includes selection debug and timing results
+    - Initial release with hardcoded settings
 ]]--
 
 ------------------------------------------------------------
@@ -57,127 +61,139 @@ local CORE_PATH = RES_PATH .. '/Scripts/hsuanice Scripts/Library/hsuanice_RGWH C
 
 local ok_load, RGWH = pcall(dofile, CORE_PATH)
 if not ok_load or type(RGWH) ~= "table" or type(RGWH.core) ~= "function" then
-  r.ShowConsoleMsg(("[RGWH WRAPPER] Failed to load Core at:\n  %s\nError: %s\n")
+  r.ShowConsoleMsg(("[RGWH GLUE] Failed to load Core at:\n  %s\nError: %s\n")
     :format(CORE_PATH, tostring(RGWH)))
   return
 end
 
 ------------------------------------------------------------
--- QUICK DEBUG SWITCH (one-line toggle)
---   "silent"      → level=0,  no_clear=true
---   "normal"      → level=1,  no_clear=false
---   "verbose"     → level=2,  no_clear=true
---   "use-detailed"→ keep the detailed args.debug settings below
+-- ExtState Reading (project-scope, namespace "RGWH")
 ------------------------------------------------------------
-local QUICK_DEBUG = "silent"  
--- change to: "silent" | "normal" | "verbose" | "use-detailed"
+local NS = "RGWH"
 
-local function apply_quick_debug(quick, detailed)
-  if quick == "silent"  then return { level = 0, no_clear = true  } end
-  if quick == "normal"  then return { level = 1, no_clear = false } end  -- clear console on normal
-  if quick == "verbose" then return { level = 2, no_clear = true  } end
-  return detailed
+local function get_ext(key, fallback)
+  local _, v = r.GetProjExtState(0, NS, key)
+  if v == nil or v == "" then return fallback end
+  return v
+end
+
+local function get_ext_bool(key, fallback_bool)
+  local v = get_ext(key, nil)
+  if v == nil or v == "" then return fallback_bool end
+  v = tostring(v)
+  if v == "1" or v:lower() == "true" then return true end
+  return false
+end
+
+local function get_ext_num(key, fallback_num)
+  local v = get_ext(key, nil)
+  if v == nil or v == "" then return fallback_num end
+  local n = tonumber(v)
+  return n or fallback_num
 end
 
 ------------------------------------------------------------
--- WRAPPER-ONLY SELECTION POLICY (not sent to Core)
---   "progress" -> keep Core's in-run selections (selection follows process)
---   "restore"  -> restore selection context (tracks/TS/cursor + re-select items
---                 by same-track time overlap). Item count may differ after glue.
---   "none"     -> clear all selections after run
-local SELECTION_POLICY = "restore"
+-- Read Settings from ExtState
 ------------------------------------------------------------
--- USER CONFIG (edit here)
-------------------------------------------------------------
--- Quick presets (uncomment ONE block or set manually below):
--- [AUTO scope with one-run defaults from ExtState]
--- local _PRESET = { op="auto", selection_scope="auto", channel_mode="auto" }
+local function read_extstate_settings()
+  return {
+    -- Channel mode
+    channel_mode = get_ext("GLUE_APPLY_MODE", "auto"),
+    multi_channel_policy = get_ext("MULTI_CHANNEL_POLICY", "source_playback"),
 
--- [Force Units glue]
--- local _PRESET = { op="glue", selection_scope="units", channel_mode="auto" }
+    -- FX settings
+    take_fx = get_ext_bool("GLUE_TAKE_FX", true),
+    track_fx = get_ext_bool("GLUE_TRACK_FX", false),
 
--- [Force TS-Window glue]
--- local _PRESET = { op="glue", selection_scope="ts", channel_mode="auto" }
+    -- Selection (from GUI)
+    selection_scope = get_ext("SELECTION_SCOPE", "auto"),
+    selection_policy = get_ext("SELECTION_POLICY", "restore"),
 
--- [Single-item Render]
--- local _PRESET = { op="render", channel_mode="auto", take_fx=true, track_fx=false, tc_mode="previous" }
+    -- Volume handling
+    merge_to_item = get_ext_bool("GLUE_MERGE_TO_ITEM", false),
+    merge_to_take = get_ext_bool("GLUE_MERGE_VOLUMES", true),
+    print_volumes = get_ext_bool("GLUE_PRINT_VOLUMES", true),
 
--- If you didn’t choose a preset, configure manually here:
-local args = (_PRESET) or {
-  -- Core operation
-  op              = "glue",        -- "auto" | "render" | "glue"
-  selection_scope = "auto",          -- "auto" | "units" | "ts" | "item"  (ignored when op="render")
-  channel_mode    = "auto",        -- "auto" | "mono" | "multi"
+    -- Handle
+    handle_mode = get_ext("HANDLE_MODE", "seconds"),
+    handle_seconds = get_ext_num("HANDLE_SECONDS", 5.0),
 
-  -- Render toggles (only effective when op resolves to render)
-  take_fx  = true,                 -- bake take FX on render
-  track_fx = false,                 -- bake track FX on render
-  tc_mode  = "current",           -- "previous" | "current" | "off" (BWF TimeReference embed)
+    -- Cues
+    write_edge_cues = get_ext_bool("WRITE_EDGE_CUES", true),
+    write_glue_cues = get_ext_bool("WRITE_GLUE_CUES", true),
 
-  -- Volume handling (only effective when op resolves to render)
-  merge_volumes = true,             -- merge item volume into take volume before render
-  print_volumes = true,            -- bake volumes into rendered audio (false = restore original volumes)
+    -- Policies
+    glue_single_items = get_ext_bool("GLUE_SINGLE_ITEMS", true),
 
-  -- One-run overrides (simple knobs)
-  -- Handle: choose how to interpret length; wrapper will convert to Core format
-  handle_mode   = "seconds",     -- "ext" | "seconds" | "frames"
-  handle_length = 5.0,       -- value; if "frames", wrapper converts to seconds using project FPS
-
-  -- Epsilon: native support for frames/seconds in Core
-  epsilon_mode  = "frames",  -- "ext" | "frames" | "seconds"
-  epsilon_value = 0.5,       -- threshold value in selected unit
-
-  cues = {
-    write_edge = true,             -- #in/#out edge cues as media cues
-    write_glue = true,             -- #Glue: <TakeName> cues inside glued media when sources change
-  },
-
-  policies = {
-    glue_single_items = true,     -- in op="auto": single item => render (if false)
-    glue_no_trackfx_output_policy   = "preserve",   -- "preserve" | "force_multi"
-    render_no_trackfx_output_policy = "preserve",   -- "preserve" | "force_multi"
-    rename_mode = "auto",          -- "auto" | "glue" | "render" (kept for compatibility)
-  },
-
-}
-
-------------------------------------------------------------
--- Build handle/epsilon objects for Core from simple knobs
-------------------------------------------------------------
-local function resolve_handle_from_knobs(a)
-  local mode = (a.handle_mode or "ext")
-  if mode == "ext" then return "ext" end
-  local len = tonumber(a.handle_length) or 0
-  if mode == "seconds" then
-    return { mode = "seconds", seconds = len }
-  elseif mode == "frames" then
-    local fps = reaper.TimeMap_curFrameRate(0) or 30
-    -- Core expects seconds for handle; convert frames → seconds
-    return { mode = "seconds", seconds = (len / fps) }
-  else
-    return "ext"
-  end
+    -- Debug
+    debug_level = get_ext_num("DEBUG_LEVEL", 0),
+    debug_no_clear = get_ext_bool("DEBUG_NO_CLEAR", true),
+  }
 end
 
-local function resolve_epsilon_from_knobs(a)
-  local mode = (a.epsilon_mode or "ext")
-  if mode == "ext" then return "ext" end
-  local val = tonumber(a.epsilon_value) or 0
-  if mode == "frames" then
-    return { mode = "frames",  value = val }
-  elseif mode == "seconds" then
-    return { mode = "seconds", value = val }
-  else
-    return "ext"
-  end
+------------------------------------------------------------
+-- Build args table from ExtState
+------------------------------------------------------------
+local function build_args_from_extstate()
+  local cfg = read_extstate_settings()
+
+  local args = {
+    -- Force glue operation
+    op = "glue",
+    selection_scope = "auto",  -- Always auto for wrapper (ignore GUI selection_scope)
+    channel_mode = cfg.channel_mode,
+    multi_channel_policy = cfg.multi_channel_policy,
+
+    -- FX toggles (for glue post-processing)
+    take_fx = cfg.take_fx,
+    track_fx = cfg.track_fx,
+    tc_mode = "current",  -- glue always uses current
+
+    -- Volume handling
+    merge_to_item = cfg.merge_to_item,
+    merge_to_take = cfg.merge_to_take,
+    print_volumes = cfg.print_volumes,
+
+    -- Handle
+    handle = (cfg.handle_mode == "ext") and "ext" or {
+      mode = "seconds",
+      seconds = cfg.handle_seconds,
+    },
+
+    -- Epsilon: use Core internal constant
+    epsilon = "ext",
+
+    -- Cues
+    cues = {
+      write_edge = cfg.write_edge_cues,
+      write_glue = cfg.write_glue_cues,
+    },
+
+    -- Policies
+    policies = {
+      glue_single_items = cfg.glue_single_items,
+      glue_no_trackfx_output_policy = "preserve",
+      render_no_trackfx_output_policy = "preserve",
+    },
+
+    -- Debug
+    debug = {
+      level = cfg.debug_level,
+      no_clear = cfg.debug_no_clear,
+    },
+  }
+
+  return args
 end
 
--- apply conversions
-args.handle  = resolve_handle_from_knobs(args)
-args.epsilon = resolve_epsilon_from_knobs(args)
--- Apply quick debug policy to args.debug
-args.debug = apply_quick_debug(QUICK_DEBUG, args.debug or {})
+------------------------------------------------------------
+-- Selection Policy from ExtState (replaces hardcoded value)
+------------------------------------------------------------
+local SELECTION_POLICY = get_ext("SELECTION_POLICY", "restore")
+
+------------------------------------------------------------
 -- Helpers for smart item-restore
+------------------------------------------------------------
 local function track_guid(tr)
   local ok, guid = r.GetSetMediaTrackInfo_String(tr, "GUID", "", false)
   return ok and guid or nil
@@ -194,7 +210,6 @@ local function find_track_by_guid(guid)
 end
 
 local function seconds_epsilon_from_args(a)
-  -- Wrapper already built args.epsilon = {mode="frames"/"seconds", value=...} or "ext"
   if type(a.epsilon) == "table" then
     if a.epsilon.mode == "seconds" then
       return tonumber(a.epsilon.value) or 0.02
@@ -203,39 +218,34 @@ local function seconds_epsilon_from_args(a)
       return (tonumber(a.epsilon.value) or 0) / fps
     end
   end
-return 0.02 -- fallback
+  return 0.02 -- fallback
 end
 
--- Perf helper (format seconds to milliseconds string)
 local function _ms(dt)
   if not dt then return "0.0" end
   return string.format("%.1f", dt * 1000.0)
 end
 
 ------------------------------------------------------------
--- RUN
--------------------------------------------------------------- Helper: snapshot current selection/context
+-- Snapshot / Restore Selection (TS-aware for glue)
+------------------------------------------------------------
 local function snapshot_selection()
   local s = {}
-
-  -- items
   s.items = {}
   for i = 0, r.CountSelectedMediaItems(0)-1 do
-    local it  = r.GetSelectedMediaItem(0, i)
-    local tr  = it and r.GetMediaItem_Track(it) or nil
+    local it = r.GetSelectedMediaItem(0, i)
+    local tr = it and r.GetMediaItem_Track(it) or nil
     local tgd = tr and track_guid(tr) or nil
     local pos = it and r.GetMediaItemInfo_Value(it, "D_POSITION") or nil
-    local len = it and r.GetMediaItemInfo_Value(it, "D_LENGTH")   or nil
+    local len = it and r.GetMediaItemInfo_Value(it, "D_LENGTH") or nil
     s.items[#s.items+1] = {
-      ptr      = it,          -- original pointer (may become invalid after glue)
-      tr       = tr,          -- original track ptr (may be fine)
-      tr_guid  = tgd,         -- robust identifier to refind track
-      start    = pos,         -- seconds
-      finish   = (pos and len) and (pos + len) or nil,
+      ptr = it,
+      tr = tr,
+      tr_guid = tgd,
+      start = pos,
+      finish = (pos and len) and (pos + len) or nil,
     }
   end
-
-  -- tracks
   s.tracks = {}
   for t = 0, r.CountTracks(0)-1 do
     local tr = r.GetTrack(0, t)
@@ -243,25 +253,17 @@ local function snapshot_selection()
       s.tracks[#s.tracks+1] = tr
     end
   end
-
-  -- time selection
   s.ts_start, s.ts_end = r.GetSet_LoopTimeRange2(0, false, false, 0, 0, false)
-
-  -- edit cursor
   s.edit_pos = r.GetCursorPosition()
-
   return s
 end
 
--- Helper: restore selection/context from snapshot
-local function restore_selection(s)
+local function restore_selection(s, args)
   if not s then return end
-
-  -- items (smart restore)
   r.SelectAllMediaItems(0, false)
   if s.items then
     local eps = seconds_epsilon_from_args(args)
-    -- Check if TS exists for smart TS-aware restore (use snapshot TS, not current TS)
+    -- Check if TS exists for smart TS-aware restore
     local tsL, tsR = s.ts_start, s.ts_end
     local has_ts = (tsL and tsR and tsR > tsL)
 
@@ -299,8 +301,8 @@ local function restore_selection(s)
           if has_ts then
             for i = 0, N - 1 do
               local it2 = r.GetTrackMediaItem(tr, i)
-              local p   = r.GetMediaItemInfo_Value(it2, "D_POSITION")
-              local l   = r.GetMediaItemInfo_Value(it2, "D_LENGTH")
+              local p = r.GetMediaItemInfo_Value(it2, "D_POSITION")
+              local l = r.GetMediaItemInfo_Value(it2, "D_LENGTH")
               local q1, q2 = p, p + l
               local a1, a2 = desc.start - eps, desc.finish + eps
 
@@ -326,8 +328,8 @@ local function restore_selection(s)
             -- No TS: use original logic (first overlap)
             for i = 0, N - 1 do
               local it2 = r.GetTrackMediaItem(tr, i)
-              local p   = r.GetMediaItemInfo_Value(it2, "D_POSITION")
-              local l   = r.GetMediaItemInfo_Value(it2, "D_LENGTH")
+              local p = r.GetMediaItemInfo_Value(it2, "D_POSITION")
+              local l = r.GetMediaItemInfo_Value(it2, "D_LENGTH")
               local q1, q2 = p, p + l
               local a1, a2 = desc.start - eps, desc.finish + eps
               -- Overlap test
@@ -340,7 +342,6 @@ local function restore_selection(s)
           end
         end
       end
-      -- (optional) if not selected, we simply skip; no error thrown
     end
   end
   -- tracks
@@ -354,57 +355,19 @@ local function restore_selection(s)
       end
     end
   end
-
   -- time selection
   if s.ts_start and s.ts_end then
     r.GetSet_LoopTimeRange2(0, true, false, s.ts_start, s.ts_end, false)
   end
-
   -- edit cursor
   if s.edit_pos then
     r.SetEditCurPos(s.edit_pos, false, false)
   end
-
-  -- optional: print matching stats
-  if args.debug and (args.debug.level or 0) > 0 then
-    local total = (s.items and #s.items) or 0
-    local matched = 0
-    do
-      -- re-count selected items overlapping previous spans on same tracks
-      local eps = seconds_epsilon_from_args(args)
-      for _, desc in ipairs(s.items or {}) do
-        local tr = desc.tr
-        if (not tr or not r.ValidatePtr2(0, tr, "MediaTrack*")) and desc.tr_guid then
-          tr = find_track_by_guid(desc.tr_guid)
-        end
-        if tr and desc.start and desc.finish then
-          local found = false
-          local N = r.CountTrackMediaItems(tr)
-          for i = 0, N - 1 do
-            local it2 = r.GetTrackMediaItem(tr, i)
-            if r.IsMediaItemSelected(it2) then
-              local p = r.GetMediaItemInfo_Value(it2, "D_POSITION")
-              local l = r.GetMediaItemInfo_Value(it2, "D_LENGTH")
-              local q1, q2 = p, p + l
-              local a1, a2 = desc.start - eps, desc.finish + eps
-              if (q1 < a2) and (q2 > a1) then
-                found = true; break
-              end
-            end
-          end
-          if found then matched = matched + 1 end
-        end
-      end
-    end
-    r.ShowConsoleMsg(("[WRAPPER][Selection Debug] restore matched %d / %d (time-overlap)\n")
-      :format(matched, total))
-  end
 end
 
--- Helper: summarize selection/context for debug
 local function summarize_selection(s)
   if not s then return "  (no snapshot)\n" end
-  local items  = s.items and #s.items or 0
+  local items = s.items and #s.items or 0
   local tracks = s.tracks and #s.tracks or 0
   local ts
   if s.ts_start and s.ts_end and (s.ts_end > s.ts_start) then
@@ -413,18 +376,16 @@ local function summarize_selection(s)
     ts = "empty"
   end
   local cursor = s.edit_pos or -1
-  local buf = {}
-  buf[#buf+1] = string.format("  items=%d  tracks=%d  ts=%s  cursor=%.3f",
-                              items, tracks, ts, cursor)
-  return table.concat(buf, "\n") .. "\n"
+  return string.format("  items=%d  tracks=%d  ts=%s  cursor=%.3f\n", items, tracks, ts, cursor)
 end
 
--- Decide selection policy: "progress" | "restore" | "none"
+------------------------------------------------------------
+-- RUN
+------------------------------------------------------------
+local args = build_args_from_extstate()
 local policy = tostring(SELECTION_POLICY or "restore")
 
--- Snapshot BEFORE
 local sel_before = nil
--- perf timers
 local _t_all0, _t_all1 = r.time_precise(), nil
 local _t_snap0, _t_snap1 = nil, nil
 local _t_core0, _t_core1 = nil, nil
@@ -436,44 +397,41 @@ if policy == "restore" then
   _t_snap1 = r.time_precise()
 end
 
--- Debug (before)
 if args.debug and (args.debug.level or 0) > 0 then
   if args.debug.no_clear == false then r.ClearConsole() end
-  r.ShowConsoleMsg(("[WRAPPER][Selection Debug] policy=%s  [before]\n%s")
+  r.ShowConsoleMsg(("[RGWH GLUE][Selection Debug] policy=%s  [before]\n%s")
     :format(policy, summarize_selection(sel_before)))
 end
 
--- Run Core
 _t_core0 = r.time_precise()
 local ok_run, err = RGWH.core(args)
 _t_core1 = r.time_precise()
 
--- Post-run handling
+-- Show error if Core failed (always, regardless of debug level)
+if not ok_run then
+  r.ShowConsoleMsg(("[RGWH GLUE] Error: %s\n"):format(tostring(err)))
+end
+
 if policy == "restore" and sel_before then
   _t_rest0 = r.time_precise()
-  restore_selection(sel_before)
+  restore_selection(sel_before, args)
   _t_rest1 = r.time_precise()
 elseif policy == "none" then
-  -- Clear item selection only (conservative)
   r.SelectAllMediaItems(0, false)
-else
-  -- "progress": do nothing
 end
 
 r.UpdateArrange()
 _t_all1 = r.time_precise()
 
--- Debug (after)
 if args.debug and (args.debug.level or 0) > 0 then
-  -- One-line perf summary
   local d_snap = (_t_snap0 and _t_snap1) and (_t_snap1 - _t_snap0) or 0
   local d_core = (_t_core0 and _t_core1) and (_t_core1 - _t_core0) or 0
   local d_rest = (_t_rest0 and _t_rest1) and (_t_rest1 - _t_rest0) or 0
-  local d_all  = (_t_all0 and _t_all1) and (_t_all1 - _t_all0) or 0
-  r.ShowConsoleMsg(("[WRAPPER][Perf] snapshot=%sms  core=%sms  restore=%sms  total=%sms\n")
+  local d_all = (_t_all0 and _t_all1) and (_t_all1 - _t_all0) or 0
+  r.ShowConsoleMsg(("[RGWH GLUE][Perf] snapshot=%sms  core=%sms  restore=%sms  total=%sms\n")
     :format(_ms(d_snap), _ms(d_core), _ms(d_rest), _ms(d_all)))
 
   local sel_after = snapshot_selection()
-  r.ShowConsoleMsg(("[WRAPPER][Selection Debug] [after]\n%s")
+  r.ShowConsoleMsg(("[RGWH GLUE][Selection Debug] [after]\n%s")
     :format(summarize_selection(sel_after)))
 end
