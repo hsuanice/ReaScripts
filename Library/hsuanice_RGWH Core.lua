@@ -1,6 +1,6 @@
 --[[
 @description RGWH Core - Render or Glue with Handles
-@version 0.3.5
+@version 0.3.6
 @author hsuanice
 
 @provides
@@ -60,6 +60,16 @@
   • For detailed operation modes guide, see RGWH GUI: Help > Manual (Operation Modes)
 
 @changelog
+  0.3.6 [260207.1717] - FIX: Multi-track Glue with TS now processes all tracks correctly
+    - BUG: When gluing multiple tracks with Time Selection, only Track #1 was processed as GAP unit
+      • Track #2+ were incorrectly treated as "no TS" mode (individual units with handles)
+    - ROOT CAUSE: get_current_ts() was called INSIDE the per-track loop
+      • After Track #1's GAP unit was processed, TS was cleared (line 2252)
+      • Subsequent tracks saw hasTS=false
+    - FIX: Capture TS state BEFORE the track loop starts
+      • capturedTsL, capturedTsR, capturedHasTS = get_current_ts()
+      • All tracks now use the captured values instead of re-querying
+
   0.3.5 [260205.0409] - REMOVE: force_multi / no_trackfx_output_policy settings (redundant with MULTI_CHANNEL_POLICY)
     - REMOVED: GLUE_OUTPUT_POLICY_WHEN_NO_TRACKFX and RENDER_OUTPUT_POLICY_WHEN_NO_TRACKFX settings
       • These settings ("preserve" | "force_multi") are now fully replaced by MULTI_CHANNEL_POLICY
@@ -148,9 +158,9 @@
     - ADDED: New action constants for expanded channel mode support
       • ACT_APPLY_PRESERVE (40209): Apply track/take FX to items - preserves multi-channel (2ch→2ch, 4ch→4ch)
       • ACT_SET_MONO (40178): Set take channel mode to mono downmix - sets I_CHANMODE to downmix
-    - OPTIMIZED: MONO mode 40178 usage (象限-based optimization)
-      • 象限 1,2 (no Track FX): Use 40178 → 40601/42432 (set I_CHANMODE for glue/render)
-      • 象限 3,4 (has Track FX): Skip 40178, use 40361 directly (already forces mono output)
+    - OPTIMIZED: MONO mode 40178 usage (quadrant-based optimization)
+      • quadrant 1,2 (no Track FX): Use 40178 → 40601/42432 (set I_CHANMODE for glue/render)
+      • quadrant 3,4 (has Track FX): Skip 40178, use 40361 directly (already forces mono output)
       • REASON: 40361 inherently forces mono, no need to pre-set I_CHANMODE
     - CHANGED: apply_track_take_fx_to_item() now supports three modes
       • "mono": Uses 40361 (force mono)
@@ -172,7 +182,7 @@
       • New helper functions: get_command_name(), run_command()
       • All REAPER Main_OnCommand calls now logged with: command ID, command name, context
       • Logging format: "[CMD] <context> → <ID>: <command name>"
-      • STATUS: MONO mode verified working correctly (全象限 OK)
+      • STATUS: MONO mode verified working correctly (All quadrant OK)
 
   0.2.3 [251225.1845] - EPSILON VALUE REFINEMENT + CRITICAL BUG FIX
     - CHANGED: Epsilon refined from 0.5 frames to 0.1 frames for better precision
@@ -2211,7 +2221,7 @@ local function glue_unit(tr, u, cfg)
       gap_glue_ids = add_glue_cues(u.members, u.start, DBG, "GAP")
     end
 
-    -- MONO mode without Track FX: Set I_CHANMODE before glue (象限 1,2 optimization)
+    -- MONO mode without Track FX: Set I_CHANMODE before glue (quadrant 1,2 optimization)
     if unit_apply_mode == "mono" and not cfg.GLUE_TRACK_FX then
       for _, item in ipairs(items_sel) do
         local tk = r.GetActiveTake(item)
@@ -2219,7 +2229,7 @@ local function glue_unit(tr, u, cfg)
           r.SetMediaItemTakeInfo_Value(tk, "I_CHANMODE", 2)  -- 2 = mono downmix
         end
       end
-      dbg(DBG,1,"[MONO] GAP unit: Set I_CHANMODE=2 (mono) on %d items before glue (象限 1,2)", #items_sel)
+      dbg(DBG,1,"[MONO] GAP unit: Set I_CHANMODE=2 (mono) on %d items before glue (quadrant 1,2)", #items_sel)
     end
 
     -- Set TS to overall span and glue
@@ -2235,7 +2245,7 @@ local function glue_unit(tr, u, cfg)
     -- Find glued item
     local glued = find_item_by_span_on_track(tr, u.start, u.finish, 0.002)
     if glued and cfg.GLUE_TRACK_FX then
-      -- 象限 3,4: Has Track FX - use Apply directly (40361 for mono, no need for 40178)
+      -- quadrant 3,4: Has Track FX - use Apply directly (40361 for mono, no need for 40178)
       r.SetMediaItemInfo_Value(glued, "D_FADEINLEN", 0)
       r.SetMediaItemInfo_Value(glued, "D_FADEINLEN_AUTO", 0)
       r.SetMediaItemInfo_Value(glued, "D_FADEOUTLEN", 0)
@@ -2243,11 +2253,11 @@ local function glue_unit(tr, u, cfg)
       apply_track_take_fx_to_item(glued, unit_apply_mode, DBG)
       embed_current_tc_for_item(glued, u.start, DBG)
     elseif glued and unit_apply_mode == "multi" then
-      -- 象限 1,2: source_track — force track ch output without Track FX
+      -- quadrant 1,2: source_track — force track ch output without Track FX
       apply_multichannel_no_fx_preserve_take(glued, (cfg.GLUE_TAKE_FX == true), DBG, nil, unit_apply_mode)
       embed_current_tc_for_item(glued, u.start, DBG)
     end
-    -- Note: MONO mode without Track FX (象限 1,2) already handled by I_CHANMODE set before glue
+    -- Note: MONO mode without Track FX (quadrant 1,2) already handled by I_CHANMODE set before glue
 
     r.GetSet_LoopTimeRange(true, false, 0, 0, false)
     dbg(DBG,1,"[RUN] GAP unit glued: %.3f..%.3f", u.start, u.finish)
@@ -2422,7 +2432,7 @@ local function glue_unit(tr, u, cfg)
 
   -- Glue always uses native volume behavior (item+take printed).
 
-  -- MONO mode without Track FX: Set I_CHANMODE before glue (象限 1,2 optimization)
+  -- MONO mode without Track FX: Set I_CHANMODE before glue (quadrant 1,2 optimization)
   if unit_apply_mode == "mono" and not cfg.GLUE_TRACK_FX then
     for _, m in ipairs(members) do
       local tk = r.GetActiveTake(m.it)
@@ -2430,7 +2440,7 @@ local function glue_unit(tr, u, cfg)
         r.SetMediaItemTakeInfo_Value(tk, "I_CHANMODE", 2)  -- 2 = mono downmix
       end
     end
-    dbg(DBG,1,"[MONO] Set I_CHANMODE=2 (mono) on %d items before glue (象限 1,2)", #members)
+    dbg(DBG,1,"[MONO] Set I_CHANMODE=2 (mono) on %d items before glue (quadrant 1,2)", #members)
   end
 
   -- Snapshot track channel count before Glue
@@ -2452,11 +2462,11 @@ local function glue_unit(tr, u, cfg)
   -- Determine if we need Apply render
   local need_apply = false
   if cfg.GLUE_TRACK_FX and glued_pre then
-    -- Need to print track FX (象限 3,4)
+    -- Need to print track FX (quadrant 3,4)
     need_apply = true
     dbg(DBG,1,"[APPLY] Need Apply to print track FX (mode=%s)", unit_apply_mode)
   elseif glued_pre and unit_apply_mode == "multi" then
-    -- 象限 1,2: source_track — need Apply to force track ch output
+    -- quadrant 1,2: source_track — need Apply to force track ch output
     need_apply = true
     dbg(DBG,1,"[APPLY] Need Apply for source_track channel control")
   else
@@ -2876,6 +2886,11 @@ function M.glue_selection(force_units)
     -- Units glue path
     dbg(DBG,1,"[RUN] Using Units glue")
     local by_tr, tr_list = collect_by_track_from_selection()
+
+    -- IMPORTANT: Capture TS state BEFORE the track loop
+    -- (TS is cleared after processing each GAP unit, so we must preserve it for all tracks)
+    local capturedTsL, capturedTsR, capturedHasTS = get_current_ts()
+
     for _,tr in ipairs(tr_list) do
       local list  = by_tr[tr]
       local units = detect_units_same_track(list, eps_s)
@@ -2883,7 +2898,7 @@ function M.glue_selection(force_units)
 
       -- When multiple units with gaps AND TS exists, treat them as one GAP unit
       -- Without TS: keep units separate for individual handle-aware processing
-      local currentTsL, currentTsR, hasTS = get_current_ts()
+      local currentTsL, currentTsR, hasTS = capturedTsL, capturedTsR, capturedHasTS
 
       if #units > 1 and hasTS then
         -- Sort items by position
