@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<index version="1" name="hsuanice Scripts" commit="df325baca6f79ae9043aaa31a743184ac7e17eec">
+<index version="1" name="hsuanice Scripts" commit="8fb74f535326a3368f9dfbcdeea7282c3daefb68">
   <category name="Beta Testing">
     <reapack name="hsuanice_AudioSweet ReaImGui.lua" type="script" desc="AudioSweet ReaImGui - AudioSuite Workflow (Pro Tools–Style)">
       <metadata>
@@ -1648,6 +1648,11 @@ v0.2.0  Previous rename and future-proof notes.]]></changelog>
       </version>
       <version name="0.2.4" author="hsuanice" time="2026-02-07T06:09:46Z">
         <source main="main">https://github.com/hsuanice/ReaScripts/raw/162a452b146109c4a27e68388b8a969ea618e455/Beta%20Testing/hsuanice_RGWH%20ReaImGui.lua</source>
+      </version>
+    </reapack>
+    <reapack name="hsuanice_RGWH Render.lua" type="script" desc="RGWH Render - Render with Handles (ExtState Shortcut)">
+      <version name="0.2.2" author="hsuanice" time="2026-02-07T06:22:18Z">
+        <source main="main">https://github.com/hsuanice/ReaScripts/raw/8fb74f535326a3368f9dfbcdeea7282c3daefb68/Beta%20Testing/hsuanice_RGWH%20Render.lua</source>
       </version>
     </reapack>
     <reapack name="hsuanice_Set Time to Item Selection Mouse Right-Drag Release.lua" type="script" desc="Set Time to Item on Right-Drag Release (Toggle, One-Pass Perf)">
