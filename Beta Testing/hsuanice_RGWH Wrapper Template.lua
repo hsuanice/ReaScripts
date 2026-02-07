@@ -1,19 +1,24 @@
 --[[
 @description RGWH Wrapper Template - Template for Custom RGWH Wrappers
 @author hsuanice
-@version 0.1.0
+@version 0.2.2
 @provides
-  [main] Beta Testing/hsuanice_RGWH Wrapper Template.lua
-  Library/hsuanice_RGWH Core.lua
-  Library/hsuanice_Metadata Embed.lua
+  [main] .
 @about
   Thin wrapper for calling RGWH Core via a single entry `RGWH.core(args)`.
   Use this as a starting point to test and ship wrappers that render/glue with handles.
 
+  NEW: ExtState Mode
+  - Set USE_EXTSTATE = true to read ALL settings from RGWH ExtState (GUI settings)
+  - Set USE_EXTSTATE = false to use the hardcoded settings below
+  - This allows creating keyboard shortcuts that mirror GUI configuration
+
 @usage
-  1) Adjust the USER CONFIG block below.
-  2) Run this script in REAPER. It will call RGWH.core(args) with one-run overrides.
-  3) All non-specified options keep the project's ExtState defaults (then DEFAULTS).
+  1) Choose your mode:
+     - USE_EXTSTATE = true  -> acts like hsuanice_RGWH Render/Glue.lua (reads GUI settings)
+     - USE_EXTSTATE = false -> uses the USER CONFIG block below
+  2) Run this script in REAPER. It will call RGWH.core(args) with your chosen settings.
+  3) When USE_EXTSTATE = false, all non-specified options keep the project's ExtState defaults (then DEFAULTS).
 
 @notes
   - op:
@@ -21,7 +26,7 @@
       "glue"   : uses selection_scope ("units" | "ts" | "item" | "auto").
       "auto"   : if single item AND GLUE_SINGLE_ITEMS=false => render; else glue(auto scope).
   - selection_scope (for glue/auto):
-      "auto"  : TS empty or ≈ selection span => Units; otherwise => TS window.
+      "auto"  : TS empty or = selection span => Units; otherwise => TS window.
       "units" : glue by Item Units (same-track grouping).
       "ts"    : glue strictly by the current Time Selection window (never render).
       "item"  : glue per item (SINGLE respects GLUE_SINGLE_ITEMS).
@@ -29,16 +34,38 @@
   - handle/epsilon/cues/policies/debug: one-run overrides; omit or use "ext" to read ExtState as-is.
 
 @changelog
-  0.1.0 (2025-12-14) [internal: v251214.0040]
+  0.2.2 (260207.0230)
+    - FIXED: Force selection_scope = "auto" in ExtState mode (ignore GUI SELECTION_SCOPE)
+      • Prevents "no_time_selection" error when GUI is set to TS mode
+      • Wrapper now works with both item selection and time selection
+    - ADDED: Error message display when Core fails (always shown)
+
+  0.2.1 (260206.2345)
+    - ADDED: MULTI_CHANNEL_POLICY reading in ExtState mode
+    - ADDED: SELECTION_SCOPE reading in ExtState mode
+    - ADDED: SELECTION_POLICY reading in ExtState mode (replaces hardcoded value)
+    - ADDED: MERGE_TO_ITEM reading in ExtState mode
+    - IMPACT: Now reads ALL GUI settings from ExtState when USE_EXTSTATE = true
+
+  0.2.0 (260206.2230)
+    - ADDED: USE_EXTSTATE toggle at top of USER CONFIG
+      • When true: reads ALL settings from RGWH ExtState (same as GUI)
+      • When false: uses hardcoded settings in this file (original behavior)
+      • Allows creating keyboard shortcuts that mirror GUI configuration
+    - ADDED: ExtState reading functions (get_ext, get_ext_bool, get_ext_num)
+    - ADDED: read_extstate_settings() and build_args_from_extstate()
+    - Note: Volume merge options only affect render operations; glue always forces merge+print
+
+  0.1.0 (251214.0040)
     - Simplified: Volume merge logic (matches RGWH Core v251214.0040)
         • Valid combinations: OFF | merge_to_item | merge_to_take + print OFF | merge_to_take + print ON
         • merge_to_item + print_volumes=true is NOT supported (GUI auto-switches to merge_to_take)
         • Rationale: REAPER can only print take volume, not item volume
         • When using GUI: auto-switches to merge_to_take if you try to enable print with merge_to_item
     - Updated: Bidirectional volume merge support
-        • Changed: merge_volumes → merge_to_item + merge_to_take (mutually exclusive)
-        • merge_to_item: merge take volume INTO item volume (all takes → 1.0, print OFF only)
-        • merge_to_take: merge item volume INTO take volume (item → 1.0, consolidates all takes)
+        • Changed: merge_volumes -> merge_to_item + merge_to_take (mutually exclusive)
+        • merge_to_item: merge take volume INTO item volume (all takes -> 1.0, print OFF only)
+        • merge_to_take: merge item volume INTO take volume (item -> 1.0, consolidates all takes)
         • print_volumes: bake volumes into rendered audio (false = restore original volumes)
         • Default: merge_to_item=false, merge_to_take=true (preserves original behavior)
     - Cleanup: Removed deprecated policies to match RGWH Core v251212.2300
@@ -73,13 +100,20 @@ if not ok_load or type(RGWH) ~= "table" or type(RGWH.core) ~= "function" then
 end
 
 ------------------------------------------------------------
--- QUICK DEBUG SWITCH (one-line toggle)
---   "silent"      → level=0,  no_clear=true
---   "normal"      → level=1,  no_clear=false
---   "verbose"     → level=2,  no_clear=true
---   "use-detailed"→ keep the detailed args.debug settings below
+-- USER CONFIG: ExtState Mode Toggle
 ------------------------------------------------------------
-local QUICK_DEBUG = "verbose"  
+-- Set to true to read ALL settings from RGWH ExtState (same settings as GUI).
+-- Set to false to use the hardcoded settings in the USER CONFIG block below.
+local USE_EXTSTATE = false
+
+------------------------------------------------------------
+-- QUICK DEBUG SWITCH (one-line toggle)
+--   "silent"      -> level=0,  no_clear=true
+--   "normal"      -> level=1,  no_clear=false
+--   "verbose"     -> level=2,  no_clear=true
+--   "use-detailed"-> keep the detailed args.debug settings below
+------------------------------------------------------------
+local QUICK_DEBUG = "verbose"
 -- change to: "silent" | "normal" | "verbose" | "use-detailed"
 
 local function apply_quick_debug(quick, detailed)
@@ -96,8 +130,139 @@ end
 --                 by same-track time overlap). Item count may differ after glue.
 --   "none"     -> clear all selections after run
 local SELECTION_POLICY = "restore"
+
 ------------------------------------------------------------
--- USER CONFIG (edit here)
+-- ExtState Reading (project-scope, namespace "RGWH")
+-- Only used when USE_EXTSTATE = true
+------------------------------------------------------------
+local NS = "RGWH"
+
+local function get_ext(key, fallback)
+  local _, v = r.GetProjExtState(0, NS, key)
+  if v == nil or v == "" then return fallback end
+  return v
+end
+
+local function get_ext_bool(key, fallback_bool)
+  local v = get_ext(key, nil)
+  if v == nil or v == "" then return fallback_bool end
+  v = tostring(v)
+  if v == "1" or v:lower() == "true" then return true end
+  return false
+end
+
+local function get_ext_num(key, fallback_num)
+  local v = get_ext(key, nil)
+  if v == nil or v == "" then return fallback_num end
+  local n = tonumber(v)
+  return n or fallback_num
+end
+
+------------------------------------------------------------
+-- Read Settings from ExtState (for USE_EXTSTATE mode)
+------------------------------------------------------------
+local function read_extstate_settings(op_mode)
+  local is_render = (op_mode == "render")
+  local prefix = is_render and "RENDER" or "GLUE"
+
+  return {
+    -- Channel mode
+    channel_mode = get_ext(prefix .. "_APPLY_MODE", "auto"),
+    multi_channel_policy = get_ext("MULTI_CHANNEL_POLICY", "source_playback"),
+
+    -- FX settings
+    take_fx = get_ext_bool(prefix .. "_TAKE_FX", true),
+    track_fx = get_ext_bool(prefix .. "_TRACK_FX", false),
+
+    -- Timecode embed (render only)
+    tc_mode = get_ext("RENDER_TC_EMBED", "current"),
+
+    -- Selection (from GUI)
+    selection_scope = get_ext("SELECTION_SCOPE", "auto"),
+    selection_policy = get_ext("SELECTION_POLICY", "restore"),
+
+    -- Volume handling
+    merge_to_item = get_ext_bool(prefix .. "_MERGE_TO_ITEM", false),
+    merge_to_take = get_ext_bool(prefix .. "_MERGE_VOLUMES", true),
+    print_volumes = get_ext_bool(prefix .. "_PRINT_VOLUMES", true),
+
+    -- Handle
+    handle_mode = get_ext("HANDLE_MODE", "seconds"),
+    handle_seconds = get_ext_num("HANDLE_SECONDS", 5.0),
+
+    -- Cues
+    write_edge_cues = get_ext_bool("WRITE_EDGE_CUES", true),
+    write_glue_cues = get_ext_bool("WRITE_GLUE_CUES", true),
+
+    -- Policies
+    glue_single_items = get_ext_bool("GLUE_SINGLE_ITEMS", true),
+
+    -- Debug
+    debug_level = get_ext_num("DEBUG_LEVEL", 0),
+    debug_no_clear = get_ext_bool("DEBUG_NO_CLEAR", true),
+  }
+end
+
+------------------------------------------------------------
+-- Build args table from ExtState
+------------------------------------------------------------
+local function build_args_from_extstate(op_mode)
+  local cfg = read_extstate_settings(op_mode)
+
+  local args = {
+    -- Operation (passed in)
+    op = op_mode,
+    selection_scope = "auto",  -- Always auto for wrapper (ignore GUI selection_scope)
+    channel_mode = cfg.channel_mode,
+    multi_channel_policy = cfg.multi_channel_policy,
+
+    -- FX toggles
+    take_fx = cfg.take_fx,
+    track_fx = cfg.track_fx,
+    tc_mode = cfg.tc_mode,
+
+    -- Volume handling
+    merge_to_item = cfg.merge_to_item,
+    merge_to_take = cfg.merge_to_take,
+    print_volumes = cfg.print_volumes,
+
+    -- Handle
+    handle = (cfg.handle_mode == "ext") and "ext" or {
+      mode = "seconds",
+      seconds = cfg.handle_seconds,
+    },
+
+    -- Epsilon: use Core internal constant
+    epsilon = "ext",
+
+    -- Cues
+    cues = {
+      write_edge = cfg.write_edge_cues,
+      write_glue = cfg.write_glue_cues,
+    },
+
+    -- Policies
+    policies = {
+      glue_single_items = cfg.glue_single_items,
+      glue_no_trackfx_output_policy = "preserve",
+      render_no_trackfx_output_policy = "preserve",
+    },
+
+    -- Debug (override with QUICK_DEBUG if not using ExtState debug)
+    debug = {
+      level = cfg.debug_level,
+      no_clear = cfg.debug_no_clear,
+    },
+
+    -- Store selection_policy for wrapper use
+    _selection_policy = cfg.selection_policy,
+  }
+
+  return args
+end
+
+------------------------------------------------------------
+-- USER CONFIG (edit here) - Only used when USE_EXTSTATE = false
 ------------------------------------------------------------
 -- Quick presets (uncomment ONE block or set manually below):
 -- [AUTO scope with one-run defaults from ExtState]
@@ -112,15 +277,15 @@ local SELECTION_POLICY = "restore"
 -- [Single-item Render]
 -- local _PRESET = { op="render", channel_mode="auto", take_fx=true, track_fx=false, tc_mode="previous" }
 
--- If you didn’t choose a preset, configure manually here:
-local args = (_PRESET) or {
+-- If you didn't choose a preset, configure manually here:
+local manual_args = (_PRESET) or {
   -- Core operation
   op              = "render",        -- "auto" | "render" | "glue"
   selection_scope = "auto",          -- "auto" | "units" | "ts" | "item"  (ignored when op="render")
-  channel_mode    = "auto",        -- "auto" | "mono" | "multi"
+  channel_mode    = "mono",        -- "auto" | "mono" | "multi"
 
   -- Render toggles (only effective when op resolves to render)
-  take_fx  = true,                 -- bake take FX on render
+  take_fx  = false,                 -- bake take FX on render
   track_fx = false,                 -- bake track FX on render
   tc_mode  = "current",           -- "previous" | "current" | "off" (BWF TimeReference embed)
 
@@ -134,15 +299,15 @@ local args = (_PRESET) or {
   -- One-run overrides (simple knobs)
   -- Handle: choose how to interpret length; wrapper will convert to Core format
   handle_mode   = "seconds",     -- "ext" | "seconds" | "frames"
-  handle_length = 5.0,       -- value; if "frames", wrapper converts to seconds using project FPS
+  handle_length = 1.5,       -- value; if "frames", wrapper converts to seconds using project FPS
 
   -- Epsilon: native support for frames/seconds in Core
   epsilon_mode  = "frames",  -- "ext" | "frames" | "seconds"
   epsilon_value = 0.5,       -- threshold value in selected unit
 
   cues = {
-    write_edge = true,             -- #in/#out edge cues as media cues
-    write_glue = true,             -- #Glue: <TakeName> cues inside glued media when sources change
+    write_edge = false,             -- #in/#out edge cues as media cues
+    write_glue = false,             -- #Glue: <TakeName> cues inside glued media when sources change
   },
 
   policies = {
@@ -163,8 +328,8 @@ local function resolve_handle_from_knobs(a)
   if mode == "seconds" then
     return { mode = "seconds", seconds = len }
   elseif mode == "frames" then
-    local fps = reaper.TimeMap_curFrameRate(0) or 30
-    -- Core expects seconds for handle; convert frames → seconds
+    local fps = r.TimeMap_curFrameRate(0) or 30
+    -- Core expects seconds for handle; convert frames -> seconds
     return { mode = "seconds", seconds = (len / fps) }
   else
     return "ext"
@@ -184,12 +349,30 @@ local function resolve_epsilon_from_knobs(a)
   end
 end
 
--- apply conversions
-args.handle  = resolve_handle_from_knobs(args)
-args.epsilon = resolve_epsilon_from_knobs(args)
--- Apply quick debug policy to args.debug
-args.debug = apply_quick_debug(QUICK_DEBUG, args.debug or {})
+------------------------------------------------------------
+-- Build final args table
+------------------------------------------------------------
+local args
+if USE_EXTSTATE then
+  -- Read from ExtState (same as GUI settings)
+  -- You can change this to "glue" or "auto" as needed
+  local op_mode = "render"  -- Change this to your desired operation
+  args = build_args_from_extstate(op_mode)
+  -- Override debug with QUICK_DEBUG setting
+  args.debug = apply_quick_debug(QUICK_DEBUG, args.debug or {})
+else
+  -- Use manual config
+  args = manual_args
+  -- Apply conversions for manual config
+  args.handle  = resolve_handle_from_knobs(args)
+  args.epsilon = resolve_epsilon_from_knobs(args)
+  -- Apply quick debug policy to args.debug
+  args.debug = apply_quick_debug(QUICK_DEBUG, args.debug or {})
+end
+
+------------------------------------------------------------
 -- Helpers for smart item-restore
+------------------------------------------------------------
 local function track_guid(tr)
   local ok, guid = r.GetSetMediaTrackInfo_String(tr, "GUID", "", false)
   return ok and guid or nil
@@ -226,7 +409,8 @@ end
 
 ------------------------------------------------------------
 -- RUN
--------------------------------------------------------------- Helper: snapshot current selection/context
+------------------------------------------------------------
+-- Helper: snapshot current selection/context
 local function snapshot_selection()
   local s = {}
 
@@ -382,7 +566,13 @@ local function summarize_selection(s)
 end
 
 -- Decide selection policy: "progress" | "restore" | "none"
-local policy = tostring(SELECTION_POLICY or "restore")
+-- When USE_EXTSTATE is true, read from ExtState; otherwise use hardcoded SELECTION_POLICY
+local policy
+if USE_EXTSTATE and args._selection_policy then
+  policy = tostring(args._selection_policy)
+else
+  policy = tostring(SELECTION_POLICY or "restore")
+end
 
 -- Snapshot BEFORE
 local sel_before = nil
@@ -403,12 +593,22 @@ if args.debug and (args.debug.level or 0) > 0 then
   if args.debug.no_clear == false then r.ClearConsole() end
   r.ShowConsoleMsg(("[WRAPPER][Selection Debug] policy=%s  [before]\n%s")
     :format(policy, summarize_selection(sel_before)))
+  if USE_EXTSTATE then
+    r.ShowConsoleMsg("[WRAPPER] Mode: ExtState (reading from GUI settings)\n")
+  else
+    r.ShowConsoleMsg("[WRAPPER] Mode: Manual (using hardcoded settings)\n")
+  end
 end
 
 -- Run Core
 _t_core0 = r.time_precise()
 local ok_run, err = RGWH.core(args)
 _t_core1 = r.time_precise()
+
+-- Show error if Core failed (always, regardless of debug level)
+if not ok_run then
+  r.ShowConsoleMsg(("[WRAPPER] Error: %s\n"):format(tostring(err)))
+end
 
 -- Post-run handling
 if policy == "restore" and sel_before then
