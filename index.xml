@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<index version="1" name="hsuanice Scripts" commit="162a452b146109c4a27e68388b8a969ea618e455">
+<index version="1" name="hsuanice Scripts" commit="df325baca6f79ae9043aaa31a743184ac7e17eec">
   <category name="Beta Testing">
     <reapack name="hsuanice_AudioSweet ReaImGui.lua" type="script" desc="AudioSweet ReaImGui - AudioSuite Workflow (Pro Tools–Style)">
       <metadata>
@@ -1596,6 +1596,26 @@ v0.2.0  Previous rename and future-proof notes.]]></changelog>
       </version>
       <version name="0.6.0 Remember last-used UI settings" author="hsuanice" time="2025-09-05T09:36:50Z">
         <source main="main">https://github.com/hsuanice/ReaScripts/raw/2247051f789764d9ac7bf77fd4fec102129986f9/Beta%20Testing/hsuanice_Reorder%20or%20sort%20selected%20items%20vertically.lua</source>
+      </version>
+    </reapack>
+    <reapack name="hsuanice_RGWH Glue.lua" type="script" desc="RGWH Glue - Glue with Handles (ExtState Shortcut)">
+      <metadata>
+        <description><![CDATA[{\rtf1\ansi\deff0{\fonttbl{\f0 \fswiss Helvetica;}{\f1 \fmodern Courier;}}
+{\colortbl;\red255\green0\blue0;\red0\green0\blue255;}
+\widowctrl\hyphauto
+
+{\pard \ql \f0 \sa180 \li0 \fi0 Keyboard shortcut wrapper for RGWH Glue operation. Reads ALL settings from RGWH ExtState (same settings as GUI).\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 This script acts as a quick-launch shortcut:\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Bind to a keyboard shortcut for instant glue access\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Uses the same settings you configured in RGWH GUI\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab No need to open GUI - just press the shortcut\sa180\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 Settings are read from:\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Project ExtState namespace "RGWH" (set by RGWH GUI)\sa180\par}
+}
+]]></description>
+      </metadata>
+      <version name="0.2.2" author="hsuanice" time="2026-02-07T06:14:46Z">
+        <source main="main">https://github.com/hsuanice/ReaScripts/raw/df325baca6f79ae9043aaa31a743184ac7e17eec/Beta%20Testing/hsuanice_RGWH%20Glue.lua</source>
       </version>
     </reapack>
     <reapack name="hsuanice_RGWH ReaImGui.lua" type="script" desc="RGWH GUI - ImGui Interface for RGWH Core">
