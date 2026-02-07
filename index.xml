@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<index version="1" name="hsuanice Scripts" commit="8fb74f535326a3368f9dfbcdeea7282c3daefb68">
+<index version="1" name="hsuanice Scripts" commit="6b25eeef0b1b2b27a6f5b652e9296f22c8713e0b">
   <category name="Beta Testing">
     <reapack name="hsuanice_AudioSweet ReaImGui.lua" type="script" desc="AudioSweet ReaImGui - AudioSuite Workflow (Pro Tools–Style)">
       <metadata>
@@ -1653,6 +1653,24 @@ v0.2.0  Previous rename and future-proof notes.]]></changelog>
     <reapack name="hsuanice_RGWH Render.lua" type="script" desc="RGWH Render - Render with Handles (ExtState Shortcut)">
       <version name="0.2.2" author="hsuanice" time="2026-02-07T06:22:18Z">
         <source main="main">https://github.com/hsuanice/ReaScripts/raw/8fb74f535326a3368f9dfbcdeea7282c3daefb68/Beta%20Testing/hsuanice_RGWH%20Render.lua</source>
+      </version>
+    </reapack>
+    <reapack name="hsuanice_RGWH Wrapper Template.lua" type="script" desc="RGWH Wrapper Template - Template for Custom RGWH Wrappers">
+      <metadata>
+        <description><![CDATA[{\rtf1\ansi\deff0{\fonttbl{\f0 \fswiss Helvetica;}{\f1 \fmodern Courier;}}
+{\colortbl;\red255\green0\blue0;\red0\green0\blue255;}
+\widowctrl\hyphauto
+
+{\pard \ql \f0 \sa180 \li0 \fi0 Thin wrapper for calling RGWH Core via a single entry {\f1 RGWH.core(args)}. Use this as a starting point to test and ship wrappers that render/glue with handles.\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 NEW: ExtState Mode\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Set USE_EXTSTATE = true to read ALL settings from RGWH ExtState (GUI settings)\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Set USE_EXTSTATE = false to use the hardcoded settings below\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab This allows creating keyboard shortcuts that mirror GUI configuration\sa180\par}
+}
+]]></description>
+      </metadata>
+      <version name="0.2.2" author="hsuanice" time="2026-02-07T06:33:24Z">
+        <source main="main">https://github.com/hsuanice/ReaScripts/raw/6b25eeef0b1b2b27a6f5b652e9296f22c8713e0b/Beta%20Testing/hsuanice_RGWH%20Wrapper%20Template.lua</source>
       </version>
     </reapack>
     <reapack name="hsuanice_Set Time to Item Selection Mouse Right-Drag Release.lua" type="script" desc="Set Time to Item on Right-Drag Release (Toggle, One-Pass Perf)">
