@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<index version="1" name="hsuanice Scripts" commit="6b25eeef0b1b2b27a6f5b652e9296f22c8713e0b">
+<index version="1" name="hsuanice Scripts" commit="e9bcaddda1729ac210edb7f20ad717aeec2d8853">
   <category name="Beta Testing">
     <reapack name="hsuanice_AudioSweet ReaImGui.lua" type="script" desc="AudioSweet ReaImGui - AudioSuite Workflow (Pro Tools–Style)">
       <metadata>
@@ -2122,6 +2122,9 @@ v0.9.0 - Added Shared Link State section from Project ExtState "hsuanice_Link".]
       </version>
       <version name="0.3.5" author="hsuanice" time="2026-02-05T03:10:17Z">
         <source main="main">https://github.com/hsuanice/ReaScripts/raw/6a143537f99223e307328833238406bfa937f3c2/Library/hsuanice_RGWH%20Core.lua</source>
+      </version>
+      <version name="0.3.6" author="hsuanice" time="2026-02-07T09:29:47Z">
+        <source main="main">https://github.com/hsuanice/ReaScripts/raw/e9bcaddda1729ac210edb7f20ad717aeec2d8853/Library/hsuanice_RGWH%20Core.lua</source>
       </version>
     </reapack>
   </category>
