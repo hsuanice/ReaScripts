@@ -1,12 +1,14 @@
 --[[
 @description AudioSweet Preview Toggle - Auto Detect Focused/Chain
-@version 0.2.0.0.1
+@version 0.2.1
 @author Hsuanice
 @provides
   [main] .
 @changelog
-  0.2.0.0.1 (2025-12-23) [internal: v251223.2328]
-    - CHANGED: Version bump to 0.2.0.0.1
+  0.2.1 (2026-02-09) [internal: v260209.2130]
+    - FIXED: Cross-platform path resolution for Windows/Linux compatibility
+      • Replaced debug.getinfo() relative path with reaper.GetResourcePath() absolute path
+      • Fixes "attempt to concatenate a nil value (local 'SCRIPT_DIR')" on Windows
 
   0.2.0 (2025-12-23) [internal: v251223.2256]
     - CHANGED: Version bump to 0.2.0 (public beta)
@@ -28,8 +30,8 @@
 ------------------------------------------------------------
 -- 1) Load Core Library
 ------------------------------------------------------------
-local SCRIPT_DIR = debug.getinfo(1, "S").source:match("@(.*/)")
-local ASP = dofile(SCRIPT_DIR .. "../Library/hsuanice_AS Preview Core.lua")
+local RES_PATH = reaper.GetResourcePath()
+local ASP = dofile(RES_PATH .. '/Scripts/hsuanice Scripts/Library/hsuanice_AS Preview Core.lua')
 
 ------------------------------------------------------------
 -- 2) Read Settings from GUI ExtState
