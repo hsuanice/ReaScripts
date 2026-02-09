@@ -1,7 +1,7 @@
 --[[
 @description AudioSweet Run
 @author hsuanice
-@version 0.2.0.0.1
+@version 0.2.1
 @provides
   [main] .
 @about
@@ -48,8 +48,12 @@
   - Works independently - can be assigned to keyboard shortcuts
 
 @changelog
-  v0.2.0.0.1 (2025-12-23) [internal: v251223.2328]
-    - CHANGED: Version bump to 0.2.0.0.1
+  v0.2.1 (2026-02-09) [internal: v260209.2130]
+    - FIXED: Cross-platform path resolution for Windows/Linux compatibility
+      • Replaced debug.getinfo() relative path with reaper.GetResourcePath() absolute path
+      • Fixes "attempt to concatenate a nil value (local 'SCRIPT_DIR')" on Windows
+    - FIXED: Debug log path on Windows (os.getenv("HOME") returns nil)
+      • Added os.getenv("USERPROFILE") fallback for Windows
 
   v0.2.0 (2025-12-23) [internal: v251223.2256]
     - CHANGED: Version bump to 0.2.0 (public beta)
@@ -114,13 +118,14 @@ local r = reaper
 -- User Settings
 ------------------------------------------------------------
 local DEBUG = false  -- Set to true for detailed console logging
-local DEBUG_LOG_PATH = (os.getenv("HOME") or "") .. "/Desktop/AudioSweet Run Debug.log"
+local DEBUG_LOG_PATH = (os.getenv("HOME") or os.getenv("USERPROFILE") or "") .. "/Desktop/AudioSweet Run Debug.log"
 
 ------------------------------------------------------------
 -- Constants
 ------------------------------------------------------------
 local SETTINGS_NAMESPACE = "hsuanice_AS_GUI"
-local SCRIPT_DIR = debug.getinfo(1, "S").source:match("@(.*/)")
+local RES_PATH = r.GetResourcePath()
+local LIB_DIR = RES_PATH .. '/Scripts/hsuanice Scripts/Library/'
 
 local function debug_log(msg)
   if not DEBUG then
@@ -557,7 +562,7 @@ local function execute_normal_mode()
   end
 
   -- Load and execute AudioSweet Core
-  local AS_CORE = dofile(SCRIPT_DIR .. "../Library/hsuanice_AudioSweet Core.lua")
+  local AS_CORE = dofile(LIB_DIR .. "hsuanice_AudioSweet Core.lua")
 
   -- AudioSweet Core's main() is called during dofile()
   -- It will read the mode from ExtState and execute accordingly
@@ -688,7 +693,7 @@ local function execute_preview_mode(preview_info)
     debug_log("\n[Preview Mode] Step 4: Execute AudioSweet Core\n")
   end
 
-  local ok, err = pcall(dofile, SCRIPT_DIR .. "../Library/hsuanice_AudioSweet Core.lua")
+  local ok, err = pcall(dofile, LIB_DIR .. "hsuanice_AudioSweet Core.lua")
 
   if not ok then
     r.MB(string.format("AudioSweet Core error: %s", err or "unknown"), "AudioSweet Run - Preview Mode", 0)
