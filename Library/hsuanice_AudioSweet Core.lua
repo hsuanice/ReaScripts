@@ -1,8 +1,9 @@
 --[[
 @description AudioSweet Core - Focused Track FX render via RGWH Core
-@version 0.3.2
+@version 0.3.3
 @author hsuanice
-@noindex
+@provides
+  [main] .
 @notes
 
 Tim Chimes (original), adapted by hsuanice for AudioSweet Core integration.
@@ -12,6 +13,10 @@ Tim Chimes (original), adapted by hsuanice for AudioSweet Core integration.
   http://timchimes.com/scripting-with-reaper-audiosuite/
 
 @changelog
+  0.3.3 [260209.2130]
+    - FIXED: Debug log path on Windows (os.getenv("HOME") returns nil)
+      • Added os.getenv("USERPROFILE") fallback for Windows
+
   0.3.2 [260205.0458]
     - BUGFIX: Mono mode completely broken — always passed channel_mode="auto" to RGWH.core()
       • BUG: Both APPLY and CORE paths hardcoded channel_mode="auto" in RGWH.core() args
@@ -714,7 +719,7 @@ function debug(message)
 end
 
 -- Step logger: always prints when DEBUG=1; use for deterministic tracing
-local DEBUG_FILE_PATH = (os.getenv("HOME") or "") .. "/Desktop/AudioSweet_Core_Debug.log"
+local DEBUG_FILE_PATH = (os.getenv("HOME") or os.getenv("USERPROFILE") or "") .. "/Desktop/AudioSweet_Core_Debug.log"
 local function log_step(tag, fmt, ...)
   if not debug_enabled() then return end
   local msg = fmt and string.format(fmt, ...) or ""
