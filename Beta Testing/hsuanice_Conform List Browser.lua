@@ -1,6 +1,6 @@
 --[[
 @description Conform List Browser
-@version 260206.2226
+@version v260209.1625
 @author hsuanice
 @about
   A REAPER script for browsing and editing EDL (Edit Decision List) data
@@ -41,14 +41,78 @@
   Optional: js_ReaScriptAPI (for folder selection)
 
 @changelog
+  v260209.1625
+  - Fix: Remove Duplicates now compares by Reel + Src TC + Rec TC + Clip Name (excludes Track)
+    • More robust duplicate detection that ignores track changes
+    • Prevents false duplicates when same event appears on multiple tracks
+
+  v260207.1600
+  - Feature: Group Filter in sidebar
+    • Auto-groups tracks by prefix: A* → Audio, V* → Video, NONE → NONE
+    • Groups panel below Reels panel (Reels 2/3, Groups 1/3 height)
+    • Toggle group visibility to filter events by category
+    • Hover to see which tracks belong to each group
+  - Fix: Track Filter right-click menu now works
+    • Popup was opening in wrong ImGui scope
+  - Fix: Reel Filter right-click menu now works
+    • Added Rename, Delete, and Batch Rename options
+
+  v260207.1500
+  - Feature: Track Consolidation (like EdiLoad)
+    • Right-click Track Filter → "Consolidate Tracks..."
+    • Select which tracks to consolidate (e.g., A1~A17 for Dialog)
+    • Merges events into minimum tracks without time overlap
+    • Uses greedy bin-packing algorithm for optimal track count
+    • Specify new track name prefix (e.g., "DX" → DX1, DX2...)
+    • Preview shows estimated result before applying
+
+  v260207.1400
+  - Feature: Natural sorting for Track/Reel filters
+    • Now sorts correctly: A1, A2, A3... A10 (instead of A1, A10, A2)
+  - Feature: Batch Rename for Tracks and Reels
+    • Right-click any Track/Reel → "Batch Rename All..."
+    • Find and replace text across all track/reel names
+    • Shows preview count of affected events
+  - Fix: Track Filter panel height increased
+    • Checkboxes no longer cut off by horizontal scrollbar
+
+  v260207.1300
+  - Feature: EDL column editor with drag reorder
+    • New "Columns" button in EDL panel header
+    • Show/hide individual columns with checkboxes
+    • Drag to reorder columns (like Audio panel)
+    • "All" / "None" / "Reset" buttons for quick configuration
+    • Column settings saved and restored across sessions
+  - Feature: Scrollable toolbar and filter panels
+    • Toolbar rows now scroll horizontally when window is narrow
+    • Track Filter panel now scrolls horizontally for many tracks (A1~A30+)
+    • Prevents UI clipping on small windows or large track counts
+  - UI: Toolbar layout improvements
+    • Search field moved after FPS selector (more accessible)
+    • Track Format field moved to end (rarely modified)
+
+  v260207.0900
+  - Feature: Track naming for multiple EDL imports
+    • Tracks renamed with source suffix when multiple EDLs loaded
+    • Example: EDL1 tracks A,V → A1,V1; EDL2 tracks A,V → A2,V2
+    • Already-numbered tracks preserve number: A2 from EDL1 → A1-2
+    • Single EDL keeps original track names
+  - Feature: Event Number renumbering on EDL export
+    • Events are automatically renumbered sequentially (001, 002, 003...)
+    • Ensures clean, consecutive numbering regardless of original event numbers
+  - Feature: Improved Track/Reel filter context menu
+    • Right-click only (removed double-click which conflicted with checkbox)
+    • Context menu with "Rename..." and "Delete..." options
+    • Delete shows confirmation dialog with event count before removing
+
   v260206.2226
   - Feature: Simplified toolbar status
     • Removed EDL filename display, shows only "Events: X | Showing: Y"
     • Search box moved to right side of row 2 (after Export EDL)
   - Feature: Rename Track/Reel filters
-    • Double-click or right-click on Track/Reel checkbox to rename
+    • Right-click on Track/Reel checkbox for context menu
     • Updates all matching EDL events automatically
-    • Tooltip shows rename hint on hover
+    • Tooltip shows right-click hint on hover
   - Feature: Audio panel toolbar buttons
     • Fit Widths: auto-adjust column widths based on content
     • Copy (TSV): copy visible rows to clipboard
@@ -143,9 +207,10 @@
     • Match Status: "Found" / "Multiple" / "Not Found"
     • Matched File: shows matched audio file path
 
+
   v260203.2241
   - Feature: Remove Duplicates button in toolbar
-    • Detects duplicates by composite key (track + rec TC in/out + clip name + reel)
+    • Detects duplicates by composite key (reel + src TC in/out + rec TC in/out + clip name)
     • Shows confirmation dialog with duplicate count before removing
     • Updates per-source event counts after removal
     • Supports undo/redo
@@ -231,7 +296,7 @@ end
 ---------------------------------------------------------------------------
 local SCRIPT_NAME = "Conform List Browser"
 local EXT_NS = "hsuanice_ConformListBrowser"
-local VERSION = "260206.2226"
+local VERSION = "260207.1600"
 
 -- Column definitions (EDL Events table)
 local COL = {
@@ -375,6 +440,31 @@ local TC_COLS = {
   [COL.REC_OUT] = true,
 }
 
+-- EDL column display order (default order, can be reordered by user)
+local EDL_COL_ORDER = {
+  COL.EVENT,        -- 1. #
+  COL.REEL,         -- 2. Reel
+  COL.TRACK,        -- 3. Track
+  COL.EDIT_TYPE,    -- 4. Edit
+  COL.DISS_LEN,     -- 5. Diss
+  COL.SRC_IN,       -- 6. Src TC In
+  COL.SRC_OUT,      -- 7. Src TC Out
+  COL.REC_IN,       -- 8. Rec TC In
+  COL.REC_OUT,      -- 9. Rec TC Out
+  COL.DURATION,     -- 10. Duration
+  COL.CLIP_NAME,    -- 11. Clip Name
+  COL.SRC_FILE,     -- 12. Source File
+  COL.NOTES,        -- 13. Notes
+  COL.MATCH_STATUS, -- 14. Match
+  COL.MATCHED_PATH, -- 15. Matched File
+}
+
+-- EDL column visibility (all visible by default)
+local EDL_COL_VISIBILITY = {}
+for i = 1, COL_COUNT do
+  EDL_COL_VISIBILITY[i] = true
+end
+
 ---------------------------------------------------------------------------
 -- State
 ---------------------------------------------------------------------------
@@ -411,6 +501,8 @@ local CLB = {
   track_filters = {},  -- { { name, count, visible }, ... }
   show_reel_filter = true,
   reel_filters = {},   -- { { name, count, visible }, ... }
+  show_group_filter = true,
+  group_filters = {},  -- { { name, count, visible, tracks={} }, ... }  -- tracks = list of track names in group
 
   -- Audio file matching state
   audio_files = {},           -- { {path, filename, basename, folder, metadata={}}, ... }
@@ -424,6 +516,7 @@ local CLB = {
   audio_sort_col = nil,       -- Column to sort by (nil = no sort)
   audio_sort_asc = true,      -- Sort ascending
   audio_fit_content = false,  -- Flag to fit content widths next frame
+  edl_fit_content = false,    -- Flag to fit EDL table content widths next frame
 
   -- Loading state (for async loading with progress)
   loading_state = nil,        -- { phase, total, current, files }
@@ -431,8 +524,12 @@ local CLB = {
   -- Match picker state
   match_picker_row = nil,     -- Row being matched (for multi-match selection)
 
-  -- Rename filter state
+  -- Rename/Delete filter state
   rename_filter = nil,        -- { type="track"|"reel", idx, old_name, buf }
+  context_filter = nil,       -- { type="track"|"reel", idx, name } for context menu
+  delete_filter = nil,        -- { type="track"|"reel", idx, name } for delete confirm
+  batch_rename = nil,         -- { type="track"|"reel", find="", replace="" } for batch rename
+  consolidate_tracks = nil,   -- { selected={}, prefix="" } for track consolidation
 }
 
 local ROWS = {}    -- Array of row tables
@@ -1234,6 +1331,17 @@ local function save_prefs()
   reaper.SetExtState(EXT_NS, "console_output", CONSOLE.enabled and "1" or "0", true)
   reaper.SetExtState(EXT_NS, "debug_mode", DEBUG and "1" or "0", true)
   reaper.SetExtState(EXT_NS, "allow_docking", ALLOW_DOCKING and "1" or "0", true)
+
+  -- EDL column order (comma-separated)
+  local order_str = table.concat(EDL_COL_ORDER, ",")
+  reaper.SetExtState(EXT_NS, "edl_col_order", order_str, true)
+
+  -- EDL column visibility (comma-separated 0/1)
+  local vis_parts = {}
+  for i = 1, COL_COUNT do
+    vis_parts[i] = EDL_COL_VISIBILITY[i] and "1" or "0"
+  end
+  reaper.SetExtState(EXT_NS, "edl_col_visibility", table.concat(vis_parts, ","), true)
 end
 
 local function load_prefs()
@@ -1255,6 +1363,34 @@ local function load_prefs()
   CONSOLE.enabled = get("console_output", "0") == "1"
   DEBUG = get("debug_mode", "0") == "1"
   ALLOW_DOCKING = get("allow_docking", "0") == "1"
+
+  -- EDL column order
+  local order_str = get("edl_col_order", "")
+  if order_str ~= "" then
+    local new_order = {}
+    for num_str in order_str:gmatch("(%d+)") do
+      local num = tonumber(num_str)
+      if num and num >= 1 and num <= COL_COUNT then
+        table.insert(new_order, num)
+      end
+    end
+    -- Only use if we got all columns
+    if #new_order == COL_COUNT then
+      EDL_COL_ORDER = new_order
+    end
+  end
+
+  -- EDL column visibility
+  local vis_str = get("edl_col_visibility", "")
+  if vis_str ~= "" then
+    local idx = 0
+    for val in vis_str:gmatch("([01])") do
+      idx = idx + 1
+      if idx <= COL_COUNT then
+        EDL_COL_VISIBILITY[idx] = (val == "1")
+      end
+    end
+  end
 
   -- Apply font
   set_font_size(math.floor(13 * FONT_SCALE))
@@ -1552,8 +1688,17 @@ local function get_view_rows()
     end
   end
 
+  -- Build hidden group set
+  local hidden_groups = nil
+  for _, gf in ipairs(CLB.group_filters) do
+    if not gf.visible then
+      hidden_groups = hidden_groups or {}
+      hidden_groups[gf.name] = true
+    end
+  end
+
   local search = CLB.search_text:lower()
-  local need_filter = search ~= "" or hidden_src_idx or hidden_tracks or hidden_reels
+  local need_filter = search ~= "" or hidden_src_idx or hidden_tracks or hidden_reels or hidden_groups
 
   if not need_filter then
     CLB.cached_rows = ROWS
@@ -1562,6 +1707,10 @@ local function get_view_rows()
     for _, row in ipairs(ROWS) do
       -- Source visibility filter
       if hidden_src_idx and hidden_src_idx[row.__source_idx] then
+        goto skip
+      end
+      -- Group visibility filter (check before track for hierarchy)
+      if hidden_groups and hidden_groups[row.group or ""] then
         goto skip
       end
       -- Track visibility filter
@@ -1594,18 +1743,68 @@ end
 -- GUID counter for unique row IDs across multiple imports
 local _guid_counter = 0
 
+--- Rename track with source suffix for multi-EDL import.
+--- Examples: A → A1, V → V1, A2 → A1-2, AA → AA1
+--- @param track string    Original track name
+--- @param suffix number   Source index (1, 2, 3...)
+--- @return string         Renamed track
+local function _rename_track_with_suffix(track, suffix)
+  if not track or track == "" then return track end
+
+  -- Extract base letters and optional existing number
+  local base, num = track:match("^([A-Za-z]+)(%d*)$")
+  if not base then
+    -- Non-standard track name (contains special chars), just append suffix
+    return track .. "." .. suffix
+  end
+
+  if num and num ~= "" then
+    -- Already has a number (e.g., A2, A12, V2)
+    -- Rename to: base + suffix + "-" + original_num
+    -- e.g., A2 from source 1 → A1-2
+    return base:upper() .. suffix .. "-" .. num
+  else
+    -- Simple track name (e.g., A, V, AA)
+    return base:upper() .. suffix
+  end
+end
+
+--- Apply track suffixes to all rows based on source count.
+--- Called after appending rows to rename tracks from all sources.
+local function _apply_track_suffixes()
+  local source_count = #CLB.edl_sources
+  if source_count <= 1 then
+    -- Single source: restore original track names (no suffix needed)
+    for _, row in ipairs(ROWS) do
+      if row.__orig_track then
+        row.track = row.__orig_track
+      end
+    end
+    return
+  end
+
+  -- Multiple sources: apply suffix based on source index
+  for _, row in ipairs(ROWS) do
+    local orig = row.__orig_track or row.track
+    local src_idx = row.__source_idx or 1
+    row.track = _rename_track_with_suffix(orig, src_idx)
+  end
+end
+
 local function _make_rows_from_events(events, fps, is_drop, source_idx)
   local new_rows = {}
   for _, evt in ipairs(events) do
     _guid_counter = _guid_counter + 1
+    local orig_track = evt.track or ""
     local row = {
       __event_idx = _guid_counter,
       __guid = string.format("clb_%06d", _guid_counter),
       __source_idx = source_idx or 0,
+      __orig_track = orig_track,  -- Store original track for multi-EDL suffix
 
       event_num = evt.event_num or string.format("%03d", _guid_counter),
       reel = evt.reel or "",
-      track = evt.track or "",
+      track = orig_track,
       edit_type = evt.edit_type or "C",
       dissolve_len = evt.dissolve_len,
       src_tc_in = evt.src_tc_in or "00:00:00:00",
@@ -1645,6 +1844,42 @@ local function _register_source(filepath, event_count)
   return idx
 end
 
+--- Natural sort comparison (handles numbers correctly: A1, A2, A10 instead of A1, A10, A2)
+local function _natural_sort_cmp(a, b)
+  -- Split strings into parts of letters and numbers
+  local function split_parts(s)
+    local parts = {}
+    local i = 1
+    while i <= #s do
+      local num_start, num_end = s:find("^%d+", i)
+      if num_start then
+        table.insert(parts, { num = true, val = tonumber(s:sub(num_start, num_end)) })
+        i = num_end + 1
+      else
+        local char = s:sub(i, i)
+        table.insert(parts, { num = false, val = char:lower() })
+        i = i + 1
+      end
+    end
+    return parts
+  end
+
+  local pa, pb = split_parts(a or ""), split_parts(b or "")
+  local len = math.min(#pa, #pb)
+
+  for i = 1, len do
+    local ca, cb = pa[i], pb[i]
+    if ca.num ~= cb.num then
+      -- Numbers come before letters
+      return ca.num
+    elseif ca.val ~= cb.val then
+      return ca.val < cb.val
+    end
+  end
+
+  return #pa < #pb
+end
+
 --- Rebuild track filter list from current ROWS.
 local function _rebuild_track_filters()
   local track_counts = {}
@@ -1657,7 +1892,7 @@ local function _rebuild_track_filters()
     end
     track_counts[t] = track_counts[t] + 1
   end
-  table.sort(track_order)
+  table.sort(track_order, _natural_sort_cmp)
 
   -- Preserve existing visibility
   local old_vis = {}
@@ -1687,7 +1922,7 @@ local function _rebuild_reel_filters()
     end
     reel_counts[r] = reel_counts[r] + 1
   end
-  table.sort(reel_order)
+  table.sort(reel_order, _natural_sort_cmp)
 
   -- Preserve existing visibility
   local old_vis = {}
@@ -1705,6 +1940,62 @@ local function _rebuild_reel_filters()
   end
 end
 
+--- Determine group for a track name based on prefix.
+--- A* → Audio, V* → Video, NONE → NONE, others → Other
+local function _get_track_group(track_name)
+  if not track_name or track_name == "" then return "Other" end
+  local upper = track_name:upper()
+  if upper == "NONE" then return "NONE" end
+  local first_char = upper:sub(1, 1)
+  if first_char == "A" then return "Audio"
+  elseif first_char == "V" then return "Video"
+  else return "Other"
+  end
+end
+
+--- Rebuild group filter list from current ROWS.
+--- Groups are auto-assigned based on track prefix: A*→Audio, V*→Video, NONE→NONE
+local function _rebuild_group_filters()
+  -- Count events per group and collect tracks
+  local group_counts = {}   -- group_name → event_count
+  local group_tracks = {}   -- group_name → { track_name = true, ... }
+  local group_order = { "Audio", "Video", "NONE", "Other" }  -- Fixed order
+
+  for _, row in ipairs(ROWS) do
+    local group = _get_track_group(row.track)
+    row.group = group  -- Assign group to each row
+    group_counts[group] = (group_counts[group] or 0) + 1
+    group_tracks[group] = group_tracks[group] or {}
+    group_tracks[group][row.track or ""] = true
+  end
+
+  -- Preserve existing visibility
+  local old_vis = {}
+  for _, gf in ipairs(CLB.group_filters) do
+    old_vis[gf.name] = gf.visible
+  end
+
+  -- Build group filters (only include groups that have events)
+  CLB.group_filters = {}
+  for _, group_name in ipairs(group_order) do
+    if group_counts[group_name] and group_counts[group_name] > 0 then
+      -- Convert track set to sorted array
+      local tracks = {}
+      for track_name in pairs(group_tracks[group_name] or {}) do
+        tracks[#tracks + 1] = track_name
+      end
+      table.sort(tracks, _natural_sort_cmp)
+
+      CLB.group_filters[#CLB.group_filters + 1] = {
+        name = group_name,
+        count = group_counts[group_name],
+        visible = old_vis[group_name] == nil or old_vis[group_name],
+        tracks = tracks,
+      }
+    end
+  end
+end
+
 -- Replace all rows (fresh load)
 local function build_rows_from_parsed(parsed, source_path)
   ROWS = {}
@@ -1712,6 +2003,7 @@ local function build_rows_from_parsed(parsed, source_path)
   CLB.edl_sources = {}
   CLB.track_filters = {}
   CLB.reel_filters = {}
+  CLB.group_filters = {}
   if not parsed or not parsed.events then return end
 
   CLB.fps = parsed.fps or 25
@@ -1729,6 +2021,7 @@ local function build_rows_from_parsed(parsed, source_path)
   undo_snapshot()
   _rebuild_track_filters()
   _rebuild_reel_filters()
+  _rebuild_group_filters()
   CLB.cached_rows = nil; CLB.cached_rows_frame = -1
 
   console_msg(string.format("Loaded %d events from %s",
@@ -1750,6 +2043,7 @@ local function append_rows_from_parsed(parsed, source_path)
   undo_snapshot()
   _rebuild_track_filters()
   _rebuild_reel_filters()
+  _rebuild_group_filters()
   CLB.cached_rows = nil; CLB.cached_rows_frame = -1
 
   console_msg(string.format("Appended %d events from %s (total: %d)",
@@ -1872,6 +2166,11 @@ local function load_edl_file()
       append_rows_from_parsed(all_parsed[i].parsed, all_parsed[i].path)
     end
   end
+
+  -- Apply track suffixes if multiple sources loaded
+  _apply_track_suffixes()
+  _rebuild_track_filters()
+  CLB.cached_rows = nil; CLB.cached_rows_frame = -1
 
   -- Summary message
   if #all_parsed > 1 then
@@ -2438,18 +2737,19 @@ local function remove_duplicates()
     return
   end
 
-  -- Build duplicate key: track + rec_tc_in + rec_tc_out + clip_name + reel
+  -- Build duplicate key: reel + src TC + rec TC + clip_name (track excluded)
   local seen = {}
   local keep = {}
   local removed = 0
 
   for _, row in ipairs(ROWS) do
     local key = table.concat({
-      row.track or "",
+      row.reel or "",
+      row.src_tc_in or "",
+      row.src_tc_out or "",
       row.rec_tc_in or "",
       row.rec_tc_out or "",
       row.clip_name or "",
-      row.reel or "",
     }, "|")
 
     if seen[key] then
@@ -2469,7 +2769,7 @@ local function remove_duplicates()
   local choice = reaper.ShowMessageBox(
     string.format("Found %d duplicate event(s) out of %d total.\n\n" ..
       "Duplicates are identified by matching:\n" ..
-      "Track + Rec TC In + Rec TC Out + Clip Name + Reel\n\n" ..
+      "Reel + Src TC In/Out + Rec TC In/Out + Clip Name\n\n" ..
       "Remove them? (keeps first occurrence)",
       removed, #ROWS),
     SCRIPT_NAME, 1)  -- 1 = OK/Cancel
@@ -2528,9 +2828,12 @@ local function export_edl()
     events = {},
   }
 
+  -- Renumber events sequentially (001, 002, 003...)
+  local event_num = 0
   for _, row in ipairs(ROWS) do
+    event_num = event_num + 1
     export_data.events[#export_data.events + 1] = {
-      event_num = row.event_num,
+      event_num = string.format("%03d", event_num),
       reel = row.reel,
       track = row.track,
       edit_type = row.edit_type,
@@ -2658,8 +2961,12 @@ end
 -- Draw: Toolbar
 ---------------------------------------------------------------------------
 local function draw_toolbar()
-  -- Load buttons
-  if reaper.ImGui_Button(ctx, "Load EDL...", scale(90), scale(24)) then
+  -- Row 1 (scrollable if window is narrow)
+  local row1_height = scale(28)
+  local flags = reaper.ImGui_WindowFlags_HorizontalScrollbar()
+  if reaper.ImGui_BeginChild(ctx, "##toolbar_row1", 0, row1_height, 0, flags) then
+    -- Load buttons
+    if reaper.ImGui_Button(ctx, "Load EDL...", scale(90), scale(24)) then
     load_edl_file()
   end
   reaper.ImGui_SameLine(ctx)
@@ -2816,9 +3123,13 @@ local function draw_toolbar()
 
     reaper.ImGui_EndPopup(ctx)
   end
+  end
+  reaper.ImGui_EndChild(ctx)  -- End toolbar_row1
 
-  -- Row 2
-  -- FPS selector (dropdown)
+  -- Row 2 (scrollable if window is narrow)
+  local row2_height = scale(28)
+  if reaper.ImGui_BeginChild(ctx, "##toolbar_row2", 0, row2_height, 0, flags) then
+    -- FPS selector (dropdown)
   local FPS_OPTIONS = {
     { label = "23.976", value = 23.976 },
     { label = "24", value = 24 },
@@ -2861,22 +3172,27 @@ local function draw_toolbar()
   end
   reaper.ImGui_SameLine(ctx)
 
-  -- Track name format
-  reaper.ImGui_Text(ctx, "Track Format:")
+  -- Search (after FPS)
+  reaper.ImGui_Text(ctx, "Search:")
   reaper.ImGui_SameLine(ctx)
-  reaper.ImGui_SetNextItemWidth(ctx, scale(250))
-  local chg_tf, new_tf = reaper.ImGui_InputText(ctx, "##clb_trk_fmt", CLB.track_name_format)
-  if chg_tf then
-    CLB.track_name_format = new_tf
-    save_prefs()
+  reaper.ImGui_SetNextItemWidth(ctx, scale(160))
+  local chg_s, new_s = reaper.ImGui_InputText(ctx, "##clb_search", CLB.search_text)
+  if chg_s then
+    CLB.search_text = new_s
+    CLB.cached_rows = nil; CLB.cached_rows_frame = -1
+    sel_clear()
   end
-  if reaper.ImGui_IsItemHovered(ctx) then
-    reaper.ImGui_BeginTooltip(ctx)
-    reaper.ImGui_Text(ctx, "Tokens: ${track} ${reel} ${clip} ${event}")
-    reaper.ImGui_Text(ctx, "        ${format} ${title} ${edit_type}")
-    reaper.ImGui_Text(ctx, "Items will be grouped by the expanded track name")
-    reaper.ImGui_EndTooltip(ctx)
+  if CLB.search_text ~= "" then
+    reaper.ImGui_SameLine(ctx)
+    if reaper.ImGui_SmallButton(ctx, "X##clb_clear_search") then
+      CLB.search_text = ""
+      CLB.cached_rows = nil; CLB.cached_rows_frame = -1
+    end
   end
+  reaper.ImGui_SameLine(ctx)
+
+  -- Separator
+  reaper.ImGui_Text(ctx, "|")
   reaper.ImGui_SameLine(ctx)
 
   -- Generate Items button (empty items)
@@ -2930,7 +3246,7 @@ local function draw_toolbar()
   end
   if reaper.ImGui_IsItemHovered(ctx) then
     reaper.ImGui_BeginTooltip(ctx)
-    reaper.ImGui_Text(ctx, "Remove duplicate events (matching Track + Rec TC + Clip Name + Reel)")
+    reaper.ImGui_Text(ctx, "Remove duplicate events (matching Reel + Src TC + Rec TC + Clip Name)")
     reaper.ImGui_EndTooltip(ctx)
   end
   reaper.ImGui_SameLine(ctx)
@@ -2941,25 +3257,28 @@ local function draw_toolbar()
   end
   reaper.ImGui_SameLine(ctx)
 
-  -- Search (moved to end of row 2)
+  -- Separator
   reaper.ImGui_Text(ctx, "|")
   reaper.ImGui_SameLine(ctx)
-  reaper.ImGui_Text(ctx, "Search:")
+
+  -- Track name format (at end, rarely modified)
+  reaper.ImGui_Text(ctx, "Track Format:")
   reaper.ImGui_SameLine(ctx)
-  reaper.ImGui_SetNextItemWidth(ctx, scale(160))
-  local chg_s, new_s = reaper.ImGui_InputText(ctx, "##clb_search", CLB.search_text)
-  if chg_s then
-    CLB.search_text = new_s
-    CLB.cached_rows = nil; CLB.cached_rows_frame = -1
-    sel_clear()
+  reaper.ImGui_SetNextItemWidth(ctx, scale(250))
+  local chg_tf, new_tf = reaper.ImGui_InputText(ctx, "##clb_trk_fmt", CLB.track_name_format)
+  if chg_tf then
+    CLB.track_name_format = new_tf
+    save_prefs()
   end
-  if CLB.search_text ~= "" then
-    reaper.ImGui_SameLine(ctx)
-    if reaper.ImGui_SmallButton(ctx, "X##clb_clear_search") then
-      CLB.search_text = ""
-      CLB.cached_rows = nil; CLB.cached_rows_frame = -1
-    end
+  if reaper.ImGui_IsItemHovered(ctx) then
+    reaper.ImGui_BeginTooltip(ctx)
+    reaper.ImGui_Text(ctx, "Tokens: ${track} ${reel} ${clip} ${event}")
+    reaper.ImGui_Text(ctx, "        ${format} ${title} ${edit_type}")
+    reaper.ImGui_Text(ctx, "Items will be grouped by the expanded track name")
+    reaper.ImGui_EndTooltip(ctx)
   end
+  end
+  reaper.ImGui_EndChild(ctx)  -- End toolbar_row2
 end
 
 ---------------------------------------------------------------------------
@@ -3029,29 +3348,87 @@ local function draw_track_filter_panel()
     CLB.cached_rows = nil; CLB.cached_rows_frame = -1
   end
 
-  -- Track checkboxes (inline, since tracks are usually few)
-  -- Double-click or right-click to rename
-  for i, tf in ipairs(CLB.track_filters) do
-    if i > 1 then reaper.ImGui_SameLine(ctx) end
-    local label = string.format("%s (%d)##clb_trk_%d", tf.name, tf.count, i)
-    local changed, new_val = reaper.ImGui_Checkbox(ctx, label, tf.visible)
-    if changed then
-      tf.visible = new_val
-      CLB.cached_rows = nil; CLB.cached_rows_frame = -1
-    end
-    -- Double-click or right-click to rename
-    if reaper.ImGui_IsItemHovered(ctx) then
-      reaper.ImGui_SetTooltip(ctx, "Double-click or right-click to rename")
-      if reaper.ImGui_IsMouseDoubleClicked(ctx, 0) or reaper.ImGui_IsMouseClicked(ctx, 1) then
-        CLB.rename_filter = { type = "track", idx = i, old_name = tf.name, buf = tf.name }
-        reaper.ImGui_OpenPopup(ctx, "Rename Filter##clb_rename")
+  -- Track checkboxes in horizontal scrollable region
+  local row_height = scale(38)  -- Extra height for scrollbar
+  local flags = reaper.ImGui_WindowFlags_HorizontalScrollbar()
+  local open_track_ctx = false  -- Deferred popup opening (must be outside BeginChild)
+  if reaper.ImGui_BeginChild(ctx, "##track_filter_scroll", 0, row_height, 0, flags) then
+    -- Right-click to rename or delete
+    for i, tf in ipairs(CLB.track_filters) do
+      if i > 1 then reaper.ImGui_SameLine(ctx) end
+      local label = string.format("%s (%d)##clb_trk_%d", tf.name, tf.count, i)
+      local changed, new_val = reaper.ImGui_Checkbox(ctx, label, tf.visible)
+      if changed then
+        tf.visible = new_val
+        CLB.cached_rows = nil; CLB.cached_rows_frame = -1
+      end
+      -- Right-click context menu (deferred)
+      if reaper.ImGui_IsItemHovered(ctx) then
+        reaper.ImGui_SetTooltip(ctx, "Right-click for options")
+        if reaper.ImGui_IsMouseClicked(ctx, 1) then
+          CLB.context_filter = { type = "track", idx = i, name = tf.name }
+          open_track_ctx = true
+        end
       end
     end
+    reaper.ImGui_EndChild(ctx)
   end
 
-  -- Rename popup (handled after all checkboxes)
+  -- Open popup outside BeginChild scope
+  if open_track_ctx then
+    reaper.ImGui_OpenPopup(ctx, "Track Filter Context##clb_track_ctx")
+  end
+
+  -- Track filter context menu
+  if reaper.ImGui_BeginPopup(ctx, "Track Filter Context##clb_track_ctx") then
+    if CLB.context_filter and CLB.context_filter.type == "track" then
+      reaper.ImGui_Text(ctx, "Track: " .. CLB.context_filter.name)
+      reaper.ImGui_Separator(ctx)
+      if reaper.ImGui_MenuItem(ctx, "Rename...") then
+        CLB.rename_filter = {
+          type = "track",
+          idx = CLB.context_filter.idx,
+          old_name = CLB.context_filter.name,
+          buf = CLB.context_filter.name
+        }
+        reaper.ImGui_OpenPopup(ctx, "Rename Track##clb_rename_track")
+      end
+      if reaper.ImGui_MenuItem(ctx, "Delete...") then
+        CLB.delete_filter = {
+          type = "track",
+          idx = CLB.context_filter.idx,
+          name = CLB.context_filter.name
+        }
+        reaper.ImGui_OpenPopup(ctx, "Confirm Delete Track##clb_del_track")
+      end
+      reaper.ImGui_Separator(ctx)
+      if reaper.ImGui_MenuItem(ctx, "Batch Rename All Tracks...") then
+        CLB.batch_rename = {
+          type = "track",
+          find = "",
+          replace = ""
+        }
+        reaper.ImGui_OpenPopup(ctx, "Batch Rename Tracks##clb_batch_track")
+      end
+      if reaper.ImGui_MenuItem(ctx, "Consolidate Tracks...") then
+        -- Initialize consolidation state with all tracks unselected
+        local selected = {}
+        for i = 1, #CLB.track_filters do
+          selected[i] = false
+        end
+        CLB.consolidate_tracks = {
+          selected = selected,
+          prefix = "A",  -- Default prefix
+        }
+        reaper.ImGui_OpenPopup(ctx, "Consolidate Tracks##clb_consolidate")
+      end
+    end
+    reaper.ImGui_EndPopup(ctx)
+  end
+
+  -- Rename track popup
   if CLB.rename_filter and CLB.rename_filter.type == "track" then
-    if reaper.ImGui_BeginPopup(ctx, "Rename Filter##clb_rename") then
+    if reaper.ImGui_BeginPopup(ctx, "Rename Track##clb_rename_track") then
       reaper.ImGui_Text(ctx, "Rename track:")
       reaper.ImGui_SetNextItemWidth(ctx, scale(150))
       local chg, new_buf = reaper.ImGui_InputText(ctx, "##rename_input", CLB.rename_filter.buf,
@@ -3097,6 +3474,257 @@ local function draw_track_filter_panel()
       CLB.rename_filter = nil
     end
   end
+
+  -- Delete track confirmation popup
+  if CLB.delete_filter and CLB.delete_filter.type == "track" then
+    if reaper.ImGui_BeginPopup(ctx, "Confirm Delete Track##clb_del_track") then
+      reaper.ImGui_Text(ctx, string.format(
+        "Delete track '%s' and all %d events?",
+        CLB.delete_filter.name,
+        CLB.track_filters[CLB.delete_filter.idx] and CLB.track_filters[CLB.delete_filter.idx].count or 0
+      ))
+      reaper.ImGui_Separator(ctx)
+      if reaper.ImGui_Button(ctx, "Delete", scale(60), 0) then
+        -- Remove all rows with this track
+        local del_name = CLB.delete_filter.name
+        local new_rows = {}
+        for _, row in ipairs(ROWS) do
+          if row.track ~= del_name then
+            new_rows[#new_rows + 1] = row
+          end
+        end
+        ROWS = new_rows
+        _rebuild_track_filters()
+        CLB.cached_rows = nil; CLB.cached_rows_frame = -1
+        undo_snapshot()
+        CLB.delete_filter = nil
+        reaper.ImGui_CloseCurrentPopup(ctx)
+      end
+      reaper.ImGui_SameLine(ctx)
+      if reaper.ImGui_Button(ctx, "Cancel", scale(60), 0) then
+        CLB.delete_filter = nil
+        reaper.ImGui_CloseCurrentPopup(ctx)
+      end
+      reaper.ImGui_EndPopup(ctx)
+    else
+      CLB.delete_filter = nil
+    end
+  end
+
+  -- Batch rename tracks popup
+  if CLB.batch_rename and CLB.batch_rename.type == "track" then
+    if reaper.ImGui_BeginPopup(ctx, "Batch Rename Tracks##clb_batch_track") then
+      reaper.ImGui_Text(ctx, "Find and replace in all track names:")
+      reaper.ImGui_Separator(ctx)
+
+      reaper.ImGui_Text(ctx, "Find:")
+      reaper.ImGui_SameLine(ctx, scale(80))
+      reaper.ImGui_SetNextItemWidth(ctx, scale(150))
+      local chg_f, new_f = reaper.ImGui_InputText(ctx, "##batch_find", CLB.batch_rename.find)
+      if chg_f then CLB.batch_rename.find = new_f end
+
+      reaper.ImGui_Text(ctx, "Replace:")
+      reaper.ImGui_SameLine(ctx, scale(80))
+      reaper.ImGui_SetNextItemWidth(ctx, scale(150))
+      local chg_r, new_r = reaper.ImGui_InputText(ctx, "##batch_replace", CLB.batch_rename.replace)
+      if chg_r then CLB.batch_rename.replace = new_r end
+
+      -- Preview count
+      local match_count = 0
+      if CLB.batch_rename.find ~= "" then
+        for _, row in ipairs(ROWS) do
+          if row.track and row.track:find(CLB.batch_rename.find, 1, true) then
+            match_count = match_count + 1
+          end
+        end
+      end
+      reaper.ImGui_TextDisabled(ctx, string.format("Will affect %d events", match_count))
+
+      reaper.ImGui_Separator(ctx)
+      if reaper.ImGui_Button(ctx, "Apply", scale(60), 0) then
+        if CLB.batch_rename.find ~= "" then
+          for _, row in ipairs(ROWS) do
+            if row.track then
+              row.track = row.track:gsub(CLB.batch_rename.find:gsub("([%(%)%.%%%+%-%*%?%[%]%^%$])", "%%%1"), CLB.batch_rename.replace)
+            end
+          end
+          _rebuild_track_filters()
+          CLB.cached_rows = nil; CLB.cached_rows_frame = -1
+          undo_snapshot()
+        end
+        CLB.batch_rename = nil
+        reaper.ImGui_CloseCurrentPopup(ctx)
+      end
+      reaper.ImGui_SameLine(ctx)
+      if reaper.ImGui_Button(ctx, "Cancel", scale(60), 0) then
+        CLB.batch_rename = nil
+        reaper.ImGui_CloseCurrentPopup(ctx)
+      end
+
+      reaper.ImGui_EndPopup(ctx)
+    else
+      CLB.batch_rename = nil
+    end
+  end
+
+  -- Consolidate tracks popup
+  if CLB.consolidate_tracks then
+    if reaper.ImGui_BeginPopup(ctx, "Consolidate Tracks##clb_consolidate") then
+      reaper.ImGui_Text(ctx, "Consolidate selected tracks into minimal non-overlapping tracks:")
+      reaper.ImGui_TextDisabled(ctx, "Events on selected tracks will be merged into as few tracks")
+      reaper.ImGui_TextDisabled(ctx, "as possible without overlapping in time.")
+      reaper.ImGui_Separator(ctx)
+
+      -- Track selection (scrollable list)
+      reaper.ImGui_Text(ctx, "Select tracks to consolidate:")
+      local list_h = math.min(#CLB.track_filters, 10) * reaper.ImGui_GetTextLineHeightWithSpacing(ctx) + 4
+      if reaper.ImGui_BeginChild(ctx, "##consolidate_track_list", scale(300), list_h, reaper.ImGui_ChildFlags_Borders()) then
+        for i, tf in ipairs(CLB.track_filters) do
+          local label = string.format("%s (%d events)##cons_%d", tf.name, tf.count, i)
+          local chg, new_sel = reaper.ImGui_Checkbox(ctx, label, CLB.consolidate_tracks.selected[i] or false)
+          if chg then
+            CLB.consolidate_tracks.selected[i] = new_sel
+          end
+        end
+        reaper.ImGui_EndChild(ctx)
+      end
+
+      -- Select All / None buttons
+      if reaper.ImGui_SmallButton(ctx, "Select All##cons") then
+        for i = 1, #CLB.track_filters do
+          CLB.consolidate_tracks.selected[i] = true
+        end
+      end
+      reaper.ImGui_SameLine(ctx)
+      if reaper.ImGui_SmallButton(ctx, "Select None##cons") then
+        for i = 1, #CLB.track_filters do
+          CLB.consolidate_tracks.selected[i] = false
+        end
+      end
+
+      reaper.ImGui_Separator(ctx)
+
+      -- New track prefix
+      reaper.ImGui_Text(ctx, "New track prefix:")
+      reaper.ImGui_SameLine(ctx, scale(120))
+      reaper.ImGui_SetNextItemWidth(ctx, scale(100))
+      local chg_p, new_p = reaper.ImGui_InputText(ctx, "##cons_prefix", CLB.consolidate_tracks.prefix)
+      if chg_p then CLB.consolidate_tracks.prefix = new_p end
+
+      -- Preview: count selected tracks and events
+      local sel_track_count = 0
+      local sel_event_count = 0
+      local sel_track_names = {}
+      for i, tf in ipairs(CLB.track_filters) do
+        if CLB.consolidate_tracks.selected[i] then
+          sel_track_count = sel_track_count + 1
+          sel_event_count = sel_event_count + tf.count
+          sel_track_names[tf.name] = true
+        end
+      end
+
+      -- Calculate estimated result (bin-packing preview)
+      local estimated_tracks = 0
+      if sel_track_count > 0 then
+        -- Collect events from selected tracks
+        local events = {}
+        for _, row in ipairs(ROWS) do
+          if sel_track_names[row.track] then
+            local ri_sec = EDL.tc_to_seconds(row.rec_tc_in, CLB.fps, CLB.is_drop)
+            local ro_sec = EDL.tc_to_seconds(row.rec_tc_out, CLB.fps, CLB.is_drop)
+            table.insert(events, { row = row, start = ri_sec, stop = ro_sec })
+          end
+        end
+        -- Sort by start time
+        table.sort(events, function(a, b) return a.start < b.start end)
+        -- Bin-packing: count required tracks
+        local track_ends = {}  -- track_ends[i] = end time of track i
+        for _, evt in ipairs(events) do
+          local placed = false
+          for ti, te in ipairs(track_ends) do
+            if evt.start >= te then
+              track_ends[ti] = evt.stop
+              placed = true
+              break
+            end
+          end
+          if not placed then
+            table.insert(track_ends, evt.stop)
+          end
+        end
+        estimated_tracks = #track_ends
+      end
+
+      reaper.ImGui_TextDisabled(ctx, string.format(
+        "Selected: %d tracks, %d events -> ~%d track(s)",
+        sel_track_count, sel_event_count, estimated_tracks))
+
+      reaper.ImGui_Separator(ctx)
+
+      -- Apply / Cancel buttons
+      local can_apply = sel_track_count > 0 and CLB.consolidate_tracks.prefix ~= ""
+      if not can_apply then
+        reaper.ImGui_BeginDisabled(ctx)
+      end
+      if reaper.ImGui_Button(ctx, "Consolidate", scale(80), 0) then
+        -- Perform consolidation
+        local prefix = CLB.consolidate_tracks.prefix
+
+        -- Collect events from selected tracks
+        local events = {}
+        for _, row in ipairs(ROWS) do
+          if sel_track_names[row.track] then
+            local ri_sec = EDL.tc_to_seconds(row.rec_tc_in, CLB.fps, CLB.is_drop)
+            local ro_sec = EDL.tc_to_seconds(row.rec_tc_out, CLB.fps, CLB.is_drop)
+            table.insert(events, { row = row, start = ri_sec, stop = ro_sec })
+          end
+        end
+
+        -- Sort by start time
+        table.sort(events, function(a, b) return a.start < b.start end)
+
+        -- Bin-packing: assign track numbers
+        local track_ends = {}  -- track_ends[i] = end time of track i
+        for _, evt in ipairs(events) do
+          local assigned_track = nil
+          for ti, te in ipairs(track_ends) do
+            if evt.start >= te then
+              track_ends[ti] = evt.stop
+              assigned_track = ti
+              break
+            end
+          end
+          if not assigned_track then
+            table.insert(track_ends, evt.stop)
+            assigned_track = #track_ends
+          end
+          -- Assign new track name
+          evt.row.track = prefix .. tostring(assigned_track)
+        end
+
+        -- Rebuild filters and refresh
+        _rebuild_track_filters()
+        CLB.cached_rows = nil; CLB.cached_rows_frame = -1
+        undo_snapshot()
+
+        CLB.consolidate_tracks = nil
+        reaper.ImGui_CloseCurrentPopup(ctx)
+      end
+      if not can_apply then
+        reaper.ImGui_EndDisabled(ctx)
+      end
+
+      reaper.ImGui_SameLine(ctx)
+      if reaper.ImGui_Button(ctx, "Cancel", scale(60), 0) then
+        CLB.consolidate_tracks = nil
+        reaper.ImGui_CloseCurrentPopup(ctx)
+      end
+
+      reaper.ImGui_EndPopup(ctx)
+    else
+      CLB.consolidate_tracks = nil
+    end
+  end
 end
 
 ---------------------------------------------------------------------------
@@ -3136,6 +3764,192 @@ local function draw_reel_filter_panel()
       rf.visible = new_val
       CLB.cached_rows = nil; CLB.cached_rows_frame = -1
     end
+    -- Right-click context menu
+    if reaper.ImGui_IsItemHovered(ctx) then
+      reaper.ImGui_SetTooltip(ctx, "Right-click for options")
+      if reaper.ImGui_IsMouseClicked(ctx, 1) then
+        CLB.context_filter = { type = "reel", idx = i, name = rf.name }
+        reaper.ImGui_OpenPopup(ctx, "Reel Filter Context##clb_reel_ctx")
+      end
+    end
+  end
+
+  -- Reel filter context menu
+  if reaper.ImGui_BeginPopup(ctx, "Reel Filter Context##clb_reel_ctx") then
+    if CLB.context_filter and CLB.context_filter.type == "reel" then
+      local display_name = CLB.context_filter.name ~= "" and CLB.context_filter.name or "(empty)"
+      reaper.ImGui_Text(ctx, "Reel: " .. display_name)
+      reaper.ImGui_Separator(ctx)
+      if reaper.ImGui_MenuItem(ctx, "Rename...") then
+        CLB.rename_filter = {
+          type = "reel",
+          idx = CLB.context_filter.idx,
+          old_name = CLB.context_filter.name,
+          buf = CLB.context_filter.name
+        }
+        reaper.ImGui_OpenPopup(ctx, "Rename Reel##clb_rename_reel")
+      end
+      if reaper.ImGui_MenuItem(ctx, "Delete...") then
+        CLB.delete_filter = {
+          type = "reel",
+          idx = CLB.context_filter.idx,
+          name = CLB.context_filter.name
+        }
+        reaper.ImGui_OpenPopup(ctx, "Confirm Delete Reel##clb_del_reel")
+      end
+      reaper.ImGui_Separator(ctx)
+      if reaper.ImGui_MenuItem(ctx, "Batch Rename All Reels...") then
+        CLB.batch_rename = {
+          type = "reel",
+          find = "",
+          replace = ""
+        }
+        reaper.ImGui_OpenPopup(ctx, "Batch Rename Reels##clb_batch_reel")
+      end
+    end
+    reaper.ImGui_EndPopup(ctx)
+  end
+
+  -- Rename reel popup
+  if CLB.rename_filter and CLB.rename_filter.type == "reel" then
+    if reaper.ImGui_BeginPopup(ctx, "Rename Reel##clb_rename_reel") then
+      reaper.ImGui_Text(ctx, "Rename reel:")
+      reaper.ImGui_SetNextItemWidth(ctx, scale(150))
+      local chg, new_buf = reaper.ImGui_InputText(ctx, "##rename_reel_input", CLB.rename_filter.buf,
+        reaper.ImGui_InputTextFlags_EnterReturnsTrue())
+      if chg then CLB.rename_filter.buf = new_buf end
+
+      -- Focus input on first frame
+      if not CLB.rename_filter.focused then
+        reaper.ImGui_SetKeyboardFocusHere(ctx, -1)
+        CLB.rename_filter.focused = true
+      end
+
+      -- Apply on Enter or OK button
+      local apply = chg  -- Enter was pressed
+      if reaper.ImGui_Button(ctx, "OK", scale(60), 0) then apply = true end
+      reaper.ImGui_SameLine(ctx)
+      if reaper.ImGui_Button(ctx, "Cancel", scale(60), 0) then
+        CLB.rename_filter = nil
+        reaper.ImGui_CloseCurrentPopup(ctx)
+      end
+
+      if apply and CLB.rename_filter then
+        local old_name = CLB.rename_filter.old_name
+        local new_name = CLB.rename_filter.buf
+        if new_name ~= old_name then
+          -- Update filter name
+          CLB.reel_filters[CLB.rename_filter.idx].name = new_name
+          -- Update all ROWS with old reel name
+          for _, row in ipairs(ROWS) do
+            if row.reel == old_name then
+              row.reel = new_name
+            end
+          end
+          CLB.cached_rows = nil; CLB.cached_rows_frame = -1
+          undo_snapshot()
+        end
+        CLB.rename_filter = nil
+        reaper.ImGui_CloseCurrentPopup(ctx)
+      end
+
+      reaper.ImGui_EndPopup(ctx)
+    else
+      CLB.rename_filter = nil
+    end
+  end
+
+  -- Delete reel confirmation popup
+  if CLB.delete_filter and CLB.delete_filter.type == "reel" then
+    if reaper.ImGui_BeginPopup(ctx, "Confirm Delete Reel##clb_del_reel") then
+      reaper.ImGui_Text(ctx, string.format(
+        "Delete reel '%s' and all %d events?",
+        CLB.delete_filter.name ~= "" and CLB.delete_filter.name or "(empty)",
+        CLB.reel_filters[CLB.delete_filter.idx] and CLB.reel_filters[CLB.delete_filter.idx].count or 0
+      ))
+      reaper.ImGui_Separator(ctx)
+      if reaper.ImGui_Button(ctx, "Delete", scale(60), 0) then
+        -- Remove all rows with this reel
+        local del_name = CLB.delete_filter.name
+        local new_rows = {}
+        for _, row in ipairs(ROWS) do
+          if row.reel ~= del_name then
+            new_rows[#new_rows + 1] = row
+          end
+        end
+        ROWS = new_rows
+        _rebuild_reel_filters()
+        _rebuild_track_filters()
+        CLB.cached_rows = nil; CLB.cached_rows_frame = -1
+        undo_snapshot()
+        CLB.delete_filter = nil
+        reaper.ImGui_CloseCurrentPopup(ctx)
+      end
+      reaper.ImGui_SameLine(ctx)
+      if reaper.ImGui_Button(ctx, "Cancel", scale(60), 0) then
+        CLB.delete_filter = nil
+        reaper.ImGui_CloseCurrentPopup(ctx)
+      end
+      reaper.ImGui_EndPopup(ctx)
+    else
+      CLB.delete_filter = nil
+    end
+  end
+
+  -- Batch rename reels popup
+  if CLB.batch_rename and CLB.batch_rename.type == "reel" then
+    if reaper.ImGui_BeginPopup(ctx, "Batch Rename Reels##clb_batch_reel") then
+      reaper.ImGui_Text(ctx, "Find and replace in all reel names:")
+      reaper.ImGui_Separator(ctx)
+
+      reaper.ImGui_Text(ctx, "Find:")
+      reaper.ImGui_SameLine(ctx, scale(80))
+      reaper.ImGui_SetNextItemWidth(ctx, scale(150))
+      local chg_f, new_f = reaper.ImGui_InputText(ctx, "##batch_reel_find", CLB.batch_rename.find)
+      if chg_f then CLB.batch_rename.find = new_f end
+
+      reaper.ImGui_Text(ctx, "Replace:")
+      reaper.ImGui_SameLine(ctx, scale(80))
+      reaper.ImGui_SetNextItemWidth(ctx, scale(150))
+      local chg_r, new_r = reaper.ImGui_InputText(ctx, "##batch_reel_replace", CLB.batch_rename.replace)
+      if chg_r then CLB.batch_rename.replace = new_r end
+
+      -- Preview count
+      local match_count = 0
+      if CLB.batch_rename.find ~= "" then
+        for _, row in ipairs(ROWS) do
+          if row.reel and row.reel:find(CLB.batch_rename.find, 1, true) then
+            match_count = match_count + 1
+          end
+        end
+      end
+      reaper.ImGui_TextDisabled(ctx, string.format("Will affect %d events", match_count))
+
+      reaper.ImGui_Separator(ctx)
+      if reaper.ImGui_Button(ctx, "Apply", scale(60), 0) then
+        if CLB.batch_rename.find ~= "" then
+          for _, row in ipairs(ROWS) do
+            if row.reel then
+              row.reel = row.reel:gsub(CLB.batch_rename.find:gsub("([%(%)%.%%%+%-%*%?%[%]%^%$])", "%%%1"), CLB.batch_rename.replace)
+            end
+          end
+          _rebuild_reel_filters()
+          CLB.cached_rows = nil; CLB.cached_rows_frame = -1
+          undo_snapshot()
+        end
+        CLB.batch_rename = nil
+        reaper.ImGui_CloseCurrentPopup(ctx)
+      end
+      reaper.ImGui_SameLine(ctx)
+      if reaper.ImGui_Button(ctx, "Cancel", scale(60), 0) then
+        CLB.batch_rename = nil
+        reaper.ImGui_CloseCurrentPopup(ctx)
+      end
+
+      reaper.ImGui_EndPopup(ctx)
+    else
+      CLB.batch_rename = nil
+    end
   end
 end
 
@@ -3156,6 +3970,20 @@ local function draw_table(table_height)
     return
   end
 
+  -- Build visible columns list
+  local visible_cols = {}
+  for _, col in ipairs(EDL_COL_ORDER) do
+    if EDL_COL_VISIBILITY[col] then
+      table.insert(visible_cols, col)
+    end
+  end
+  local visible_count = #visible_cols
+
+  if visible_count == 0 then
+    reaper.ImGui_TextDisabled(ctx, "No columns visible. Click 'Cols' to show columns.")
+    return
+  end
+
   -- Table flags
   local flags = reaper.ImGui_TableFlags_Borders()
     | reaper.ImGui_TableFlags_RowBg()
@@ -3169,27 +3997,27 @@ local function draw_table(table_height)
   local _, avail_h = reaper.ImGui_GetContentRegionAvail(ctx)
   local height = table_height or avail_h
 
-  if not reaper.ImGui_BeginTable(ctx, "clb_table", COL_COUNT, flags, 0, height) then
+  if not reaper.ImGui_BeginTable(ctx, "clb_table", visible_count, flags, 0, height) then
     return
   end
 
-  -- Setup columns
-  for c = 1, COL_COUNT do
-    local w = scale(COL_WIDTH[c] or DEFAULT_COL_WIDTH[c] or 80)
-    reaper.ImGui_TableSetupColumn(ctx, HEADER_LABELS[c] or "",
+  -- Setup columns (only visible ones, in display order)
+  for disp_idx, col in ipairs(visible_cols) do
+    local w = scale(COL_WIDTH[col] or DEFAULT_COL_WIDTH[col] or 80)
+    reaper.ImGui_TableSetupColumn(ctx, HEADER_LABELS[col] or "",
       reaper.ImGui_TableColumnFlags_WidthFixed(), w)
   end
 
   -- Headers (manual rendering for sort indicators + click handling)
   reaper.ImGui_TableSetupScrollFreeze(ctx, 0, 1)
   reaper.ImGui_TableNextRow(ctx)
-  for c = 1, COL_COUNT do
-    reaper.ImGui_TableSetColumnIndex(ctx, c - 1)
+  for disp_idx, col in ipairs(visible_cols) do
+    reaper.ImGui_TableSetColumnIndex(ctx, disp_idx - 1)
 
     -- Sort indicator
     local sort_indicator = ""
     for si, sc in ipairs(SORT_STATE.columns) do
-      if sc.col_id == c then
+      if sc.col_id == col then
         local arrow = sc.ascending and " ^" or " v"
         if #SORT_STATE.columns > 1 then
           sort_indicator = string.format(" [%d]%s", si, arrow)
@@ -3200,13 +4028,13 @@ local function draw_table(table_height)
       end
     end
 
-    local label = (HEADER_LABELS[c] or "") .. sort_indicator
+    local label = (HEADER_LABELS[col] or "") .. sort_indicator
     reaper.ImGui_Text(ctx, label)
 
     -- Click to sort
     if reaper.ImGui_IsItemClicked(ctx, 0) then
       local shift = reaper.ImGui_IsKeyDown(ctx, reaper.ImGui_Mod_Shift())
-      toggle_sort(c, shift)
+      toggle_sort(col, shift)
     end
   end
 
@@ -3241,10 +4069,10 @@ local function draw_table(table_height)
 
       reaper.ImGui_TableNextRow(ctx)
 
-      for c = 1, COL_COUNT do
-        reaper.ImGui_TableSetColumnIndex(ctx, c - 1)
+      for disp_idx, col in ipairs(visible_cols) do
+        reaper.ImGui_TableSetColumnIndex(ctx, disp_idx - 1)
 
-        local is_editing = EDIT and EDIT.row_idx == i and EDIT.col_id == c
+        local is_editing = EDIT and EDIT.row_idx == i and EDIT.col_id == col
 
         if is_editing then
           -- Editing mode
@@ -3255,7 +4083,7 @@ local function draw_table(table_height)
           end
 
           local chg, new_val = reaper.ImGui_InputText(ctx,
-            "##edit_" .. row.__guid .. "_" .. c,
+            "##edit_" .. row.__guid .. "_" .. col,
             EDIT.buf)
 
           if chg then
@@ -3268,16 +4096,16 @@ local function draw_table(table_height)
           local cancel = reaper.ImGui_IsKeyPressed(ctx, reaper.ImGui_Key_Escape(), false)
 
           if confirm then
-            local old_val = get_cell_text(row, c)
+            local old_val = get_cell_text(row, col)
             if EDIT.buf ~= old_val then
               -- TC validation for TC columns
-              if TC_COLS[c] and not EDL.is_valid_tc(EDIT.buf) then
+              if TC_COLS[col] and not EDL.is_valid_tc(EDIT.buf) then
                 -- Invalid TC: reject
                 reaper.ShowMessageBox(
                   "Invalid timecode format.\nExpected: HH:MM:SS:FF",
                   SCRIPT_NAME, 0)
               else
-                set_cell_value(row, c, EDIT.buf)
+                set_cell_value(row, col, EDIT.buf)
                 undo_snapshot()
                 CLB.cached_rows = nil; CLB.cached_rows_frame = -1
               end
@@ -3288,9 +4116,9 @@ local function draw_table(table_height)
           end
         else
           -- Display mode: use Selectable for highlight + click detection
-          local text = get_cell_text(row, c)
-          local selected = sel_has(row.__guid, c)
-          local display = (text ~= "" and text or " ") .. "##" .. row.__guid .. "_" .. c
+          local text = get_cell_text(row, col)
+          local selected = sel_has(row.__guid, col)
+          local display = (text ~= "" and text or " ") .. "##" .. row.__guid .. "_" .. col
 
           reaper.ImGui_Selectable(ctx, display, selected)
 
@@ -3298,24 +4126,24 @@ local function draw_table(table_height)
           if reaper.ImGui_IsItemClicked(ctx, 0) then
             local shift, cmd = _mods()
             if shift and SEL.anchor then
-              sel_rect(SEL.anchor.guid, SEL.anchor.col, row.__guid, c)
+              sel_rect(SEL.anchor.guid, SEL.anchor.col, row.__guid, col)
             elseif cmd then
-              sel_toggle(row.__guid, c)
+              sel_toggle(row.__guid, col)
               if not SEL.anchor then
-                SEL.anchor = { guid = row.__guid, col = c }
+                SEL.anchor = { guid = row.__guid, col = col }
               end
             else
-              sel_set_single(row.__guid, c)
+              sel_set_single(row.__guid, col)
             end
           end
 
           -- Double-click to edit
           if reaper.ImGui_IsItemHovered(ctx) and
              reaper.ImGui_IsMouseDoubleClicked(ctx, 0) and
-             EDITABLE_COLS[c] then
+             EDITABLE_COLS[col] then
             EDIT = {
               row_idx = i,
-              col_id = c,
+              col_id = col,
               buf = text,
               want_focus = true,
             }
@@ -3326,6 +4154,123 @@ local function draw_table(table_height)
   end
 
   reaper.ImGui_EndTable(ctx)
+end
+
+---------------------------------------------------------------------------
+-- Draw: EDL Panel Header (with column editor)
+---------------------------------------------------------------------------
+local function draw_edl_panel_header()
+  -- Header line: Events count, Cols button for column editor
+  local view_rows = get_view_rows()
+  local event_count = #view_rows
+  local total_count = #ROWS
+
+  if total_count > 0 then
+    if event_count ~= total_count then
+      reaper.ImGui_Text(ctx, string.format("EDL Events: %d / %d", event_count, total_count))
+    else
+      reaper.ImGui_Text(ctx, string.format("EDL Events: %d", event_count))
+    end
+  else
+    reaper.ImGui_TextDisabled(ctx, "No EDL loaded")
+  end
+
+  -- Separator
+  reaper.ImGui_SameLine(ctx)
+  reaper.ImGui_Text(ctx, "|")
+
+  -- Columns button (column visibility/order editor)
+  reaper.ImGui_SameLine(ctx)
+  if reaper.ImGui_SmallButton(ctx, "Columns##edl_cols") then
+    reaper.ImGui_OpenPopup(ctx, "EDL Columns##edl_col_popup")
+  end
+  if reaper.ImGui_IsItemHovered(ctx) then
+    reaper.ImGui_SetTooltip(ctx, "Show/hide and reorder columns")
+  end
+
+  -- Fit widths button
+  reaper.ImGui_SameLine(ctx)
+  if reaper.ImGui_SmallButton(ctx, "Fit Widths##edl_fit") then
+    CLB.edl_fit_content = true
+  end
+
+  -- Columns popup
+  if reaper.ImGui_BeginPopup(ctx, "EDL Columns##edl_col_popup") then
+    reaper.ImGui_Text(ctx, "Show/Hide Columns:")
+    reaper.ImGui_Separator(ctx)
+
+    -- Show All / Hide All
+    if reaper.ImGui_SmallButton(ctx, "All##edl_col_all") then
+      for i = 1, COL_COUNT do EDL_COL_VISIBILITY[i] = true end
+      save_prefs()
+    end
+    reaper.ImGui_SameLine(ctx)
+    if reaper.ImGui_SmallButton(ctx, "None##edl_col_none") then
+      for i = 1, COL_COUNT do EDL_COL_VISIBILITY[i] = false end
+      save_prefs()
+    end
+    reaper.ImGui_SameLine(ctx)
+    if reaper.ImGui_SmallButton(ctx, "Reset##edl_col_reset") then
+      -- Reset to default order
+      EDL_COL_ORDER = {
+        COL.EVENT, COL.REEL, COL.TRACK, COL.EDIT_TYPE, COL.DISS_LEN,
+        COL.SRC_IN, COL.SRC_OUT, COL.REC_IN, COL.REC_OUT, COL.DURATION,
+        COL.CLIP_NAME, COL.SRC_FILE, COL.NOTES, COL.MATCH_STATUS, COL.MATCHED_PATH
+      }
+      for i = 1, COL_COUNT do EDL_COL_VISIBILITY[i] = true end
+      save_prefs()
+    end
+    reaper.ImGui_Separator(ctx)
+
+    reaper.ImGui_Text(ctx, "Drag to reorder:")
+    reaper.ImGui_Separator(ctx)
+
+    -- Draggable list with checkboxes
+    local drag_from, drag_to = nil, nil
+    for disp_idx, col in ipairs(EDL_COL_ORDER) do
+      local label = HEADER_LABELS[col] or ("Col " .. col)
+
+      -- Visibility checkbox
+      local chg, new_val = reaper.ImGui_Checkbox(ctx, "##edl_col_vis_" .. col, EDL_COL_VISIBILITY[col])
+      if chg then
+        EDL_COL_VISIBILITY[col] = new_val
+        save_prefs()
+      end
+      reaper.ImGui_SameLine(ctx)
+
+      -- Draggable selectable
+      reaper.ImGui_Selectable(ctx, label .. "##edl_col_drag_" .. col)
+
+      -- Drag source
+      if reaper.ImGui_BeginDragDropSource(ctx, reaper.ImGui_DragDropFlags_None()) then
+        reaper.ImGui_SetDragDropPayload(ctx, "EDL_COL_REORDER", tostring(disp_idx))
+        reaper.ImGui_Text(ctx, "Move: " .. label)
+        reaper.ImGui_EndDragDropSource(ctx)
+      end
+
+      -- Drop target
+      if reaper.ImGui_BeginDragDropTarget(ctx) then
+        local payload, _ = reaper.ImGui_AcceptDragDropPayload(ctx, "EDL_COL_REORDER")
+        if payload then
+          local from_idx = tonumber(payload)
+          if from_idx and from_idx ~= disp_idx then
+            drag_from = from_idx
+            drag_to = disp_idx
+          end
+        end
+        reaper.ImGui_EndDragDropTarget(ctx)
+      end
+    end
+
+    -- Apply reorder
+    if drag_from and drag_to then
+      local item = table.remove(EDL_COL_ORDER, drag_from)
+      table.insert(EDL_COL_ORDER, drag_to, item)
+      save_prefs()
+    end
+
+    reaper.ImGui_EndPopup(ctx)
+  end
 end
 
 ---------------------------------------------------------------------------
@@ -3651,45 +4596,68 @@ end
 -- Draw: Reel Filter Sidebar (left side)
 ---------------------------------------------------------------------------
 local function draw_reel_filter_sidebar(height)
-  if not CLB.show_reel_filter or #CLB.reel_filters == 0 then return false end
+  local has_reels = CLB.show_reel_filter and #CLB.reel_filters > 0
+  local has_groups = CLB.show_group_filter and #CLB.group_filters > 0
+  if not has_reels and not has_groups then return false end
 
-  -- Calculate sidebar width based on longest reel name
-  local max_text_w = 150
-  for _, rf in ipairs(CLB.reel_filters) do
-    local display_name = rf.name ~= "" and rf.name or "(empty)"
-    local label = string.format("%s (%d)", display_name, rf.count)
-    local text_w = reaper.ImGui_CalcTextSize(ctx, label)
-    if text_w > max_text_w then max_text_w = text_w end
+  -- Calculate sidebar width based on longest reel/group name
+  local max_text_w = 120
+  if has_reels then
+    for _, rf in ipairs(CLB.reel_filters) do
+      local display_name = rf.name ~= "" and rf.name or "(empty)"
+      local label = string.format("%s (%d)", display_name, rf.count)
+      local text_w = reaper.ImGui_CalcTextSize(ctx, label)
+      if text_w > max_text_w then max_text_w = text_w end
+    end
+  end
+  if has_groups then
+    for _, gf in ipairs(CLB.group_filters) do
+      local label = string.format("%s (%d)", gf.name, gf.count)
+      local text_w = reaper.ImGui_CalcTextSize(ctx, label)
+      if text_w > max_text_w then max_text_w = text_w end
+    end
   end
   local sidebar_w = max_text_w + 30  -- checkbox + padding
 
-  -- Count visible/hidden
-  local visible_count = 0
-  for _, rf in ipairs(CLB.reel_filters) do
-    if rf.visible then visible_count = visible_count + 1 end
-  end
-
   -- Left sidebar child
-  if reaper.ImGui_BeginChild(ctx, "##clb_reel_sidebar", sidebar_w, height, reaper.ImGui_ChildFlags_Borders()) then
-    reaper.ImGui_Text(ctx, string.format("Reels (%d)", #CLB.reel_filters))
+  if reaper.ImGui_BeginChild(ctx, "##clb_sidebar", sidebar_w, height, reaper.ImGui_ChildFlags_Borders()) then
+    local _, content_h = reaper.ImGui_GetContentRegionAvail(ctx)
+    local header_h = reaper.ImGui_GetTextLineHeightWithSpacing(ctx) * 2 + 4  -- header + buttons line
 
-    -- Show All / Hide All buttons
-    if reaper.ImGui_SmallButton(ctx, "All##clb_reel_all") then
-      for _, rf in ipairs(CLB.reel_filters) do rf.visible = true end
-      CLB.cached_rows = nil; CLB.cached_rows_frame = -1
+    -- Calculate section heights (Reels 2/3, Groups 1/3)
+    local reel_section_h, group_section_h
+    if has_reels and has_groups then
+      reel_section_h = (content_h - header_h) * 0.65
+      group_section_h = content_h - reel_section_h - header_h
+    elseif has_reels then
+      reel_section_h = content_h
+      group_section_h = 0
+    else
+      reel_section_h = 0
+      group_section_h = content_h
     end
-    reaper.ImGui_SameLine(ctx)
-    if reaper.ImGui_SmallButton(ctx, "None##clb_reel_none") then
-      for _, rf in ipairs(CLB.reel_filters) do rf.visible = false end
-      CLB.cached_rows = nil; CLB.cached_rows_frame = -1
-    end
 
-    reaper.ImGui_Separator(ctx)
+    -- ===== REELS SECTION =====
+    if has_reels then
+      reaper.ImGui_Text(ctx, string.format("Reels (%d)", #CLB.reel_filters))
 
-    -- Reel checkboxes (vertical list, scrollable)
-    -- Double-click or right-click to rename
-    local _, list_h = reaper.ImGui_GetContentRegionAvail(ctx)
-    if reaper.ImGui_BeginChild(ctx, "##clb_reel_list", 0, list_h) then
+      -- Show All / Hide All buttons
+      if reaper.ImGui_SmallButton(ctx, "All##clb_reel_all") then
+        for _, rf in ipairs(CLB.reel_filters) do rf.visible = true end
+        CLB.cached_rows = nil; CLB.cached_rows_frame = -1
+      end
+      reaper.ImGui_SameLine(ctx)
+      if reaper.ImGui_SmallButton(ctx, "None##clb_reel_none") then
+        for _, rf in ipairs(CLB.reel_filters) do rf.visible = false end
+        CLB.cached_rows = nil; CLB.cached_rows_frame = -1
+      end
+
+      reaper.ImGui_Separator(ctx)
+
+      -- Reel checkboxes (vertical list, scrollable)
+      local list_h = reel_section_h - header_h - 4
+      if list_h < 50 then list_h = 50 end
+      if reaper.ImGui_BeginChild(ctx, "##clb_reel_list", 0, list_h) then
       for i, rf in ipairs(CLB.reel_filters) do
         local display_name = rf.name ~= "" and rf.name or "(empty)"
         local label = string.format("%s (%d)##clb_reel_%d", display_name, rf.count, i)
@@ -3698,17 +4666,53 @@ local function draw_reel_filter_sidebar(height)
           rf.visible = new_val
           CLB.cached_rows = nil; CLB.cached_rows_frame = -1
         end
-        -- Double-click or right-click to rename
+        -- Right-click context menu
         if reaper.ImGui_IsItemHovered(ctx) then
-          reaper.ImGui_SetTooltip(ctx, "Double-click or right-click to rename")
-          if reaper.ImGui_IsMouseDoubleClicked(ctx, 0) or reaper.ImGui_IsMouseClicked(ctx, 1) then
-            CLB.rename_filter = { type = "reel", idx = i, old_name = rf.name, buf = rf.name }
-            reaper.ImGui_OpenPopup(ctx, "Rename Reel##clb_rename_reel")
+          reaper.ImGui_SetTooltip(ctx, "Right-click for options")
+          if reaper.ImGui_IsMouseClicked(ctx, 1) then
+            CLB.context_filter = { type = "reel", idx = i, name = rf.name }
+            reaper.ImGui_OpenPopup(ctx, "Reel Filter Context##clb_reel_ctx")
           end
         end
       end
 
-      -- Rename popup for reels
+      -- Reel filter context menu
+      if reaper.ImGui_BeginPopup(ctx, "Reel Filter Context##clb_reel_ctx") then
+        if CLB.context_filter and CLB.context_filter.type == "reel" then
+          local display = CLB.context_filter.name ~= "" and CLB.context_filter.name or "(empty)"
+          reaper.ImGui_Text(ctx, "Reel: " .. display)
+          reaper.ImGui_Separator(ctx)
+          if reaper.ImGui_MenuItem(ctx, "Rename...") then
+            CLB.rename_filter = {
+              type = "reel",
+              idx = CLB.context_filter.idx,
+              old_name = CLB.context_filter.name,
+              buf = CLB.context_filter.name
+            }
+            reaper.ImGui_OpenPopup(ctx, "Rename Reel##clb_rename_reel")
+          end
+          if reaper.ImGui_MenuItem(ctx, "Delete...") then
+            CLB.delete_filter = {
+              type = "reel",
+              idx = CLB.context_filter.idx,
+              name = CLB.context_filter.name
+            }
+            reaper.ImGui_OpenPopup(ctx, "Confirm Delete Reel##clb_del_reel")
+          end
+          reaper.ImGui_Separator(ctx)
+          if reaper.ImGui_MenuItem(ctx, "Batch Rename All Reels...") then
+            CLB.batch_rename = {
+              type = "reel",
+              find = "",
+              replace = ""
+            }
+            reaper.ImGui_OpenPopup(ctx, "Batch Rename Reels##clb_batch_reel")
+          end
+        end
+        reaper.ImGui_EndPopup(ctx)
+      end
+
+      -- Rename reel popup
       if CLB.rename_filter and CLB.rename_filter.type == "reel" then
         if reaper.ImGui_BeginPopup(ctx, "Rename Reel##clb_rename_reel") then
           reaper.ImGui_Text(ctx, "Rename reel:")
@@ -3757,8 +4761,146 @@ local function draw_reel_filter_sidebar(height)
         end
       end
 
+      -- Delete reel confirmation popup
+      if CLB.delete_filter and CLB.delete_filter.type == "reel" then
+        if reaper.ImGui_BeginPopup(ctx, "Confirm Delete Reel##clb_del_reel") then
+          local display = CLB.delete_filter.name ~= "" and CLB.delete_filter.name or "(empty)"
+          reaper.ImGui_Text(ctx, string.format(
+            "Delete reel '%s' and all %d events?",
+            display,
+            CLB.reel_filters[CLB.delete_filter.idx] and CLB.reel_filters[CLB.delete_filter.idx].count or 0
+          ))
+          reaper.ImGui_Separator(ctx)
+          if reaper.ImGui_Button(ctx, "Delete", scale(60), 0) then
+            -- Remove all rows with this reel
+            local del_name = CLB.delete_filter.name
+            local new_rows = {}
+            for _, row in ipairs(ROWS) do
+              if row.reel ~= del_name then
+                new_rows[#new_rows + 1] = row
+              end
+            end
+            ROWS = new_rows
+            _rebuild_reel_filters()
+            CLB.cached_rows = nil; CLB.cached_rows_frame = -1
+            undo_snapshot()
+            CLB.delete_filter = nil
+            reaper.ImGui_CloseCurrentPopup(ctx)
+          end
+          reaper.ImGui_SameLine(ctx)
+          if reaper.ImGui_Button(ctx, "Cancel", scale(60), 0) then
+            CLB.delete_filter = nil
+            reaper.ImGui_CloseCurrentPopup(ctx)
+          end
+          reaper.ImGui_EndPopup(ctx)
+        else
+          CLB.delete_filter = nil
+        end
+      end
+
+      -- Batch rename reels popup
+      if CLB.batch_rename and CLB.batch_rename.type == "reel" then
+        if reaper.ImGui_BeginPopup(ctx, "Batch Rename Reels##clb_batch_reel") then
+          reaper.ImGui_Text(ctx, "Find and replace in all reel names:")
+          reaper.ImGui_Separator(ctx)
+
+          reaper.ImGui_Text(ctx, "Find:")
+          reaper.ImGui_SameLine(ctx, scale(80))
+          reaper.ImGui_SetNextItemWidth(ctx, scale(150))
+          local chg_f, new_f = reaper.ImGui_InputText(ctx, "##batch_reel_find", CLB.batch_rename.find)
+          if chg_f then CLB.batch_rename.find = new_f end
+
+          reaper.ImGui_Text(ctx, "Replace:")
+          reaper.ImGui_SameLine(ctx, scale(80))
+          reaper.ImGui_SetNextItemWidth(ctx, scale(150))
+          local chg_r, new_r = reaper.ImGui_InputText(ctx, "##batch_reel_replace", CLB.batch_rename.replace)
+          if chg_r then CLB.batch_rename.replace = new_r end
+
+          -- Preview count
+          local match_count = 0
+          if CLB.batch_rename.find ~= "" then
+            for _, row in ipairs(ROWS) do
+              if row.reel and row.reel:find(CLB.batch_rename.find, 1, true) then
+                match_count = match_count + 1
+              end
+            end
+          end
+          reaper.ImGui_TextDisabled(ctx, string.format("Will affect %d events", match_count))
+
+          reaper.ImGui_Separator(ctx)
+          if reaper.ImGui_Button(ctx, "Apply", scale(60), 0) then
+            if CLB.batch_rename.find ~= "" then
+              for _, row in ipairs(ROWS) do
+                if row.reel then
+                  row.reel = row.reel:gsub(CLB.batch_rename.find:gsub("([%(%)%.%%%+%-%*%?%[%]%^%$])", "%%%1"), CLB.batch_rename.replace)
+                end
+              end
+              _rebuild_reel_filters()
+              CLB.cached_rows = nil; CLB.cached_rows_frame = -1
+              undo_snapshot()
+            end
+            CLB.batch_rename = nil
+            reaper.ImGui_CloseCurrentPopup(ctx)
+          end
+          reaper.ImGui_SameLine(ctx)
+          if reaper.ImGui_Button(ctx, "Cancel", scale(60), 0) then
+            CLB.batch_rename = nil
+            reaper.ImGui_CloseCurrentPopup(ctx)
+          end
+
+          reaper.ImGui_EndPopup(ctx)
+        else
+          CLB.batch_rename = nil
+        end
+      end
+
       reaper.ImGui_EndChild(ctx)
     end
+    end  -- end if has_reels
+
+    -- ===== GROUPS SECTION =====
+    if has_groups then
+      if has_reels then
+        reaper.ImGui_Separator(ctx)
+      end
+
+      reaper.ImGui_Text(ctx, string.format("Groups (%d)", #CLB.group_filters))
+
+      -- Show All / Hide All buttons
+      if reaper.ImGui_SmallButton(ctx, "All##clb_group_all") then
+        for _, gf in ipairs(CLB.group_filters) do gf.visible = true end
+        CLB.cached_rows = nil; CLB.cached_rows_frame = -1
+      end
+      reaper.ImGui_SameLine(ctx)
+      if reaper.ImGui_SmallButton(ctx, "None##clb_group_none") then
+        for _, gf in ipairs(CLB.group_filters) do gf.visible = false end
+        CLB.cached_rows = nil; CLB.cached_rows_frame = -1
+      end
+
+      reaper.ImGui_Separator(ctx)
+
+      -- Group checkboxes (vertical list, scrollable)
+      local _, group_list_h = reaper.ImGui_GetContentRegionAvail(ctx)
+      if group_list_h < 30 then group_list_h = 30 end
+      if reaper.ImGui_BeginChild(ctx, "##clb_group_list", 0, group_list_h) then
+        for i, gf in ipairs(CLB.group_filters) do
+          local label = string.format("%s (%d)##clb_group_%d", gf.name, gf.count, i)
+          local changed, new_val = reaper.ImGui_Checkbox(ctx, label, gf.visible)
+          if changed then
+            gf.visible = new_val
+            CLB.cached_rows = nil; CLB.cached_rows_frame = -1
+          end
+          -- Tooltip showing tracks in this group
+          if reaper.ImGui_IsItemHovered(ctx) then
+            local track_list = table.concat(gf.tracks or {}, ", ")
+            if track_list ~= "" then
+              reaper.ImGui_SetTooltip(ctx, "Tracks: " .. track_list)
+            end
+          end
+        end
+        reaper.ImGui_EndChild(ctx)
+      end
+    end  -- end if has_groups
 
     reaper.ImGui_EndChild(ctx)
   end
@@ -3774,6 +4916,7 @@ local function draw_main_content()
   -- Check if we're loading audio files
   if draw_loading_progress() then
     -- Show EDL table above progress bar
+    draw_edl_panel_header()
     draw_table()
     return
   end
@@ -3791,7 +4934,8 @@ local function draw_main_content()
     local edl_h = content_h * CLB.split_ratio
     local audio_h = content_h - edl_h
 
-    -- Upper section: Reel filter sidebar (left) + EDL table (right)
+    -- Upper section: EDL panel header + Reel filter sidebar (left) + EDL table (right)
+    draw_edl_panel_header()
     draw_reel_filter_sidebar(edl_h)
     draw_table(edl_h)
 
@@ -3805,6 +4949,7 @@ local function draw_main_content()
     draw_audio_table(audio_h)
   else
     -- Single table mode with optional reel sidebar (full height)
+    draw_edl_panel_header()
     draw_reel_filter_sidebar(avail_h)
     draw_table()
   end
