@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<index version="1" name="hsuanice Scripts" commit="b43b2b84123d8333bd1f6bf8de43f1e11a7620ac">
+<index version="1" name="hsuanice Scripts" commit="bbfa03f1a9aab72fef55a29655d187779b9f7362">
   <category name="Beta Testing">
     <reapack name="hsuanice_AudioSweet ReaImGui.lua" type="script" desc="AudioSweet ReaImGui - AudioSuite Workflow (Pro Tools–Style)">
       <metadata>
@@ -1997,6 +1997,9 @@ v0.9.0 - Added Shared Link State section from Project ExtState "hsuanice_Link".]
       <version name="0.2.2" author="hsuanice" time="2025-12-25T16:11:03Z">
         <source main="main">https://github.com/hsuanice/ReaScripts/raw/0627eb07be6c4625d64500a8e4551404f0bdb524/Library/hsuanice_AS%20Preview%20Core.lua</source>
       </version>
+      <version name="0.2.3" author="hsuanice" time="2026-02-10T03:23:55Z">
+        <source main="main">https://github.com/hsuanice/ReaScripts/raw/9e95633bf090257ba343f2b12aa3900e5cc30421/Library/hsuanice_AS%20Preview%20Core.lua</source>
+      </version>
     </reapack>
     <reapack name="hsuanice_AudioSweet Core.lua" type="script" desc="AudioSweet Core - Focused Track FX render via RGWH Core">
       <version name="0.3.3" author="hsuanice" time="2026-02-09T13:46:59Z">
@@ -2183,6 +2186,39 @@ v0.9.0 - Added Shared Link State section from Project ExtState "hsuanice_Link".]
   - Fallback: No FX window → chain preview on preview target track
   - Reads preview settings from AudioSweet GUI ExtState]]></changelog>
         <source main="main">https://github.com/hsuanice/ReaScripts/raw/8161aea34b5e4936d9fbd26552de2715be8c1703/Tools/hsuanice_AudioSweet%20Preview%20Toggle.lua</source>
+      </version>
+      <version name="0.3.1" author="hsuanice" time="2026-02-10T03:24:48Z">
+        <changelog><![CDATA[0.3.1 (2026-02-10) [internal: v260210.1113]
+  - FIXED: Toggle now reliably stops on 2nd execution (was requiring 3 taps)
+    • Root cause: Core's stop-watcher raced with toggle — watcher auto-cleaned up,
+      clearing PREVIEW_RUN flag, so toggle fell through and restarted preview
+    • Fix: Toggle passes no_watcher=true to Core, disabling the deferred stop-watcher
+    • Toggle script now exclusively controls the preview lifecycle via stop_preview()
+    • Core's stop_preview() bootstraps state from placeholder + ExtState for full cleanup
+  - NEW: Core stores FX track GUID in ExtState (PREVIEW_FX_GUID) for cross-instance lookup
+  - NEW: Core.stop_preview() public method — stops transport, finds placeholder,
+    bootstraps state, and runs cleanup from a fresh Lua instance
+
+0.3.0 (2026-02-10) [internal: v260210]
+  - NEW: True toggle behavior — re-running while preview is active now stops preview
+    • Checks PREVIEW_RUN ExtState flag set by Preview Core
+    • If preview is running, calls Core.stop_preview() for full cleanup
+    • Previous behavior (mode switch on re-entry) replaced by clean stop/start toggle
+
+0.2.1 (2026-02-09) [internal: v260209.2130]
+  - FIXED: Cross-platform path resolution for Windows/Linux compatibility
+    • Replaced debug.getinfo() relative path with reaper.GetResourcePath() absolute path
+    • Fixes "attempt to concatenate a nil value (local 'SCRIPT_DIR')" on Windows
+
+0.2.0 (2025-12-23) [internal: v251223.2256]
+  - CHANGED: Version bump to 0.2.0 (public beta)
+
+0.1.0 (2025-12-21) [internal: v251221.1915]
+  - NEW: Unified preview script that auto-detects focused vs chain window
+  - Priority: Chain FX window → chain preview, Single FX floating → focused preview
+  - Fallback: No FX window → chain preview on preview target track
+  - Reads preview settings from AudioSweet GUI ExtState]]></changelog>
+        <source main="main">https://github.com/hsuanice/ReaScripts/raw/bbfa03f1a9aab72fef55a29655d187779b9f7362/Tools/hsuanice_AudioSweet%20Preview%20Toggle.lua</source>
       </version>
     </reapack>
     <reapack name="hsuanice_AudioSweet Run.lua" type="script" desc="AudioSweet Run">
