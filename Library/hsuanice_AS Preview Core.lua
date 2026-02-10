@@ -1,6 +1,6 @@
 --[[
 @description AudioSweet Preview Core
-@version 0.2.3
+@version 0.2.7
 @author hsuanice
 
 @provides
@@ -9,7 +9,53 @@
 @about Minimal, self-contained preview runtime. Later we can extract helpers to "hsuanice_AS Core.lua".
 
 @changelog
-  v0.2.3 (2026-02-10) [internal: v260210.1113]
+  0.2.7 (2026-02-10) [internal: v260210.1935]
+    - FIXED: Toggle now reliably stops preview on 2nd press
+      • Root cause: REAPER terminates the deferred script instance (L1) on re-trigger
+        instead of starting a new instance — Toggle script never ran on 2nd press
+      • Fix: reaper.atexit() registered alongside watcher defer
+      • When REAPER terminates L1, atexit fires with full ASP._state — clean stop
+      • No cross-instance bootstrap needed; atexit has the original state
+    - NEW: reaper.atexit() cleanup handler for script termination
+      • Stops transport, reads GUI restore_mode, runs cleanup_if_any()
+      • Only registered when watcher is active (Toggle-initiated preview)
+      • No-op if watcher already cleaned up (running=false guard)
+    - CHANGED: Removed temporary ShowConsoleMsg debug output
+    - CHANGED: Watcher simplified — removed ShowConsoleMsg, kept ASP.log() for debug mode
+
+  0.2.6 (2026-02-10) [internal: v260210.1303]
+    - FIXED: Toggle stop now works reliably on 2nd execution
+      • Root cause: stop_preview() ran in a fresh Lua state (cross-instance),
+        racing with the watcher in the original instance that has the real state
+      • Fix: Toggle now sets PREVIEW_STOP_REQ ExtState flag instead of calling stop_preview()
+      • Watcher (in the original instance with full ASP._state) picks up the flag and does cleanup
+      • Eliminates all cross-instance state bootstrapping issues
+    - NEW: PREVIEW_STOP_REQ ExtState — cross-instance stop signal from Toggle to watcher
+    - CHANGED: Watcher now reads GUI preview_restore_mode on both toggle-stop and manual-stop
+      • User can change restore mode between preview start and stop
+    - CHANGED: STOP_REQ processed before grace period (toggle-stop is always immediate)
+
+  0.2.5 (2026-02-10) [internal: v260210.1224]
+    - FIXED: stop_preview() now sets moved_count for timesel count check
+      • Previously moved_count was unset (nil→0) causing "Count mismatch" error dialog
+        on every toggle-stop when restore_mode=timesel
+    - FIXED: Watcher race — replaced 3-frame debounce with 500ms startup grace period
+      • Watcher now ignores all transport state changes for 500ms after preview starts
+      • Eliminates false-positive stop detection during play startup
+      • After grace period, watcher monitors normally for manual stop
+
+  0.2.4 (2026-02-10) [internal: v260210.1212]
+    - FIXED: Stop-watcher debounce — requires 3 consecutive non-playing frames (~100ms)
+      before triggering cleanup, preventing false-positive race with toggle script
+    - NEW: stop_preview() now accepts opts.restore_mode ("guid"|"timesel")
+      • Allows caller to specify move-back strategy matching the GUI setting
+      • Ensures newly-generated items (from AudioSweet Run during preview) are moved back
+        when timesel mode is selected
+    - CHANGED: no_watcher option retained but no longer used by Toggle script
+      • Toggle re-enables watcher for manual-stop cleanup support
+      • Debounce eliminates the race condition that previously required no_watcher
+
+  0.2.3 (2026-02-10) [internal: v260210.1113]
     - NEW: ASP.stop_preview() public method for cross-instance preview stop
       • Stops transport, finds FX track via saved GUID, locates placeholder on any track
       • Bootstraps ASP._state from placeholder + ExtState, then runs cleanup_if_any()
@@ -20,7 +66,7 @@
       • Allows caller (e.g. Toggle script) to manage preview lifecycle exclusively
     - CHANGED: ASP.preview() now passes args.no_watcher through to ASP.run()
 
-  v0.2.2 (2025-12-25) [internal: v251225.2220]
+  0.2.2 (2025-12-25) [internal: v251225.2220]
     - REFACTORED: Removed unused unit detection code
       • Removed build_units_from_selection() function (~30 lines of dead code)
       • Function was defined but never called in Preview Core
@@ -28,14 +74,14 @@
       • Helper functions (project_epsilon, approx_eq, ranges_touch_or_overlap) retained for Preview-specific use
     - IMPACT: Cleaner codebase, no functionality change
 
-  v0.2.0.0.1 (2025-12-23) [internal: v251223.2328]
+  0.2.0.0.1 (2025-12-23) [internal: v251223.2328]
     - CHANGED: Version bump to 0.2.0.0.1
     - CHANGED: Default debug disabled
 
-  v0.2.0 (2025-12-23) [internal: v251223.2256]
+  0.2.0 (2025-12-23) [internal: v251223.2256]
     - CHANGED: Version bump to 0.2.0 (public beta)
 
-  v0.1.2 (2025-12-22) [internal: v251222.1035]
+  0.1.2 (2025-12-22) [internal: v251222.1035]
     - ADDED: Source track channel count protection
       • Snapshots source track I_NCHAN before moving items to FX track
       • Restores source track channel count after moving items back
@@ -44,13 +90,13 @@
       • Stored in ASP._state.src_track_nchan
       • Restored in _move_back_and_remove_placeholder()
 
-  v0.1.1 (2025-12-21) [internal: v251221.2141]
+  0.1.1 (2025-12-21) [internal: v251221.2141]
     - ADDED: Track channel count restoration after preview
       • Snapshots track I_NCHAN before preview starts
       • Restores original channel count in cleanup_if_any()
       • Prevents REAPER auto-expansion from persisting after preview
       • Works in both focused and chain preview modes
-  v0.1.0 (2025-12-13) - Initial Public Beta Release
+  0.1.0 (2025-12-13) - Initial Public Beta Release
     Minimal preview runtime for AudioSweet with:
     - High-precision timing using reaper.time_precise()
     - Handle-aware edge/glue cue policies
@@ -332,6 +378,7 @@ ASP.ES_MODE       = "PREVIEW_MODE"      -- "solo" | "normal" ; written by wrappe
 -- NEW: simple run-flag for cross-script handshake
 ASP.ES_RUN        = "PREVIEW_RUN"       -- "1" while preview is running, else "0"
 ASP.ES_FX_GUID    = "PREVIEW_FX_GUID"   -- GUID of the FX track used during preview
+ASP.ES_STOP_REQ   = "PREVIEW_STOP_REQ"  -- "1" = toggle requests watcher to stop & cleanup
 
 local function _set_run_flag(on)
   reaper.SetExtState(ASP.ES_NS, ASP.ES_RUN, on and "1" or "0", false)
@@ -1035,7 +1082,20 @@ function ASP.run(opts)
 
   if not opts.no_watcher and not ASP._state.stop_watcher then
     ASP._state.stop_watcher = true
+    ASP._state._watcher_grace_until = reaper.time_precise() + 0.5  -- 500ms grace
     reaper.defer(ASP._watch_stop_and_cleanup)
+
+    -- atexit: when REAPER terminates this script (e.g. user re-triggers the Toggle action),
+    -- do full cleanup using L1's complete state — no bootstrap needed.
+    reaper.atexit(function()
+      if not ASP._state.running then return end  -- already cleaned up (e.g. by watcher)
+      if (reaper.GetPlayState() & 1) == 1 then
+        reaper.Main_OnCommand(1016, 0)  -- Transport: Stop
+      end
+      local rm_val = reaper.GetExtState("hsuanice_AS_GUI", "preview_restore_mode")
+      USER_RESTORE_MODE = (rm_val ~= "1") and "timesel" or "guid"
+      ASP.cleanup_if_any()
+    end)
   end
 end
 
@@ -1113,15 +1173,51 @@ function ASP.cleanup_if_any()
   write_state({running=false, mode=""})
   _set_run_flag(false)  -- NEW: handshake OFF
   reaper.SetExtState(ASP.ES_NS, ASP.ES_FX_GUID, "", false)
+  reaper.SetExtState(ASP.ES_NS, ASP.ES_STOP_REQ, "", false)  -- clear any stale stop request
   ASP.log("cleanup done")
   undo_end_no_undo("AS Preview: cleanup (no undo)")
 end
 
 function ASP._watch_stop_and_cleanup()
   if not ASP._state.running then return end
+  -- Zombie detection: if PREVIEW_RUN was externally cleared (e.g. by stop_preview
+  -- from another instance), this watcher is orphaned — exit gracefully.
+  if reaper.GetExtState(ASP.ES_NS, ASP.ES_RUN) ~= "1" then
+    ASP._state.running = false
+    ASP._state.stop_watcher = false
+    return
+  end
+
+  -- (A) Check for stop-request from Toggle (cross-instance signal via ExtState)
+  --     Processed immediately, even during grace period.
+  local stop_req = reaper.GetExtState(ASP.ES_NS, ASP.ES_STOP_REQ)
+  if stop_req == "1" then
+    reaper.SetExtState(ASP.ES_NS, ASP.ES_STOP_REQ, "", false)  -- consume flag
+    local rm_val = reaper.GetExtState("hsuanice_AS_GUI", "preview_restore_mode")
+    USER_RESTORE_MODE = (rm_val ~= "1") and "timesel" or "guid"
+    if (reaper.GetPlayState() & 1) == 1 then
+      reaper.Main_OnCommand(1016, 0)  -- Transport: Stop
+    end
+    ASP.log("stop requested via toggle -> cleanup")
+    ASP.cleanup_if_any()
+    return
+  end
+
+  -- (B) Grace period: ignore transport state for 500ms after preview start
+  if ASP._state._watcher_grace_until then
+    if reaper.time_precise() < ASP._state._watcher_grace_until then
+      reaper.defer(ASP._watch_stop_and_cleanup)
+      return
+    end
+    ASP._state._watcher_grace_until = nil  -- grace period over
+  end
+
+  -- (C) Normal stop detection: transport stopped + placeholder still alive
   local playing = (reaper.GetPlayState() & 1) == 1
   local ph_ok   = ASP._state.placeholder and reaper.ValidatePtr2(0, ASP._state.placeholder, "MediaItem*")
   if (not playing) and ph_ok then
+    local rm_val = reaper.GetExtState("hsuanice_AS_GUI", "preview_restore_mode")
+    USER_RESTORE_MODE = (rm_val ~= "1") and "timesel" or "guid"
     ASP.log("detected stop + placeholder alive -> cleanup")
     ASP.cleanup_if_any()
     return
@@ -1421,7 +1517,14 @@ end
 -- Public: stop preview from a fresh script instance
 -- Bootstraps state from placeholder + ExtState, then cleans up.
 ----------------------------------------------------------------
-function ASP.stop_preview()
+function ASP.stop_preview(opts)
+  opts = opts or {}
+
+  -- Respect caller's restore_mode setting (read from GUI ExtState)
+  if opts.restore_mode then
+    USER_RESTORE_MODE = (opts.restore_mode == "timesel") and "timesel" or "guid"
+  end
+
   -- 1. Stop transport
   if (reaper.GetPlayState() & 1) == 1 then
     reaper.Main_OnCommand(1016, 0)  -- Transport: Stop
@@ -1455,7 +1558,7 @@ function ASP.stop_preview()
   end
 
   if not ph_item then
-    -- No placeholder: just clear flags
+    -- No placeholder: just clear flags (stale PREVIEW_RUN)
     _set_run_flag(false)
     reaper.SetExtState(ASP.ES_NS, ASP.ES_FX_GUID, "", false)
     write_state({running=false, mode=""})
@@ -1470,6 +1573,7 @@ function ASP.stop_preview()
   ASP._state.moved_items   = fx_track
     and collect_preview_items_on_fx_track(fx_track, ph_item, UL, UR)
     or {}
+  ASP._state.moved_count   = #ASP._state.moved_items  -- match timesel count check
   -- These snapshots are lost across instances; set safe defaults
   ASP._state.fx_enable_shot  = nil  -- skip FX enable restore
   ASP._state.track_nchan     = nil  -- skip channel count restore
