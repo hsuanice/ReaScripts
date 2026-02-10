@@ -1,6 +1,6 @@
 --[[
 @description AudioSweet Preview Core
-@version 0.2.2
+@version 0.2.3
 @author hsuanice
 
 @provides
@@ -9,6 +9,17 @@
 @about Minimal, self-contained preview runtime. Later we can extract helpers to "hsuanice_AS Core.lua".
 
 @changelog
+  v0.2.3 (2026-02-10) [internal: v260210.1113]
+    - NEW: ASP.stop_preview() public method for cross-instance preview stop
+      • Stops transport, finds FX track via saved GUID, locates placeholder on any track
+      • Bootstraps ASP._state from placeholder + ExtState, then runs cleanup_if_any()
+      • Enables reliable toggle behavior from fresh Lua instances
+    - NEW: PREVIEW_FX_GUID ExtState — stores FX track GUID on preview start, cleared on cleanup
+    - NEW: no_watcher option for ASP.run() / ASP.preview()
+      • When true, skips registering the deferred stop-watcher
+      • Allows caller (e.g. Toggle script) to manage preview lifecycle exclusively
+    - CHANGED: ASP.preview() now passes args.no_watcher through to ASP.run()
+
   v0.2.2 (2025-12-25) [internal: v251225.2220]
     - REFACTORED: Removed unused unit detection code
       • Removed build_units_from_selection() function (~30 lines of dead code)
@@ -320,6 +331,7 @@ ASP.ES_MODE       = "PREVIEW_MODE"      -- "solo" | "normal" ; written by wrappe
 
 -- NEW: simple run-flag for cross-script handshake
 ASP.ES_RUN        = "PREVIEW_RUN"       -- "1" while preview is running, else "0"
+ASP.ES_FX_GUID    = "PREVIEW_FX_GUID"   -- GUID of the FX track used during preview
 
 local function _set_run_flag(on)
   reaper.SetExtState(ASP.ES_NS, ASP.ES_RUN, on and "1" or "0", false)
@@ -654,6 +666,7 @@ function ASP.preview(args)
     focus_track   = FXtrack,
     focus_fxindex = focus_index,
     no_isolate    = chain_mode,
+    no_watcher    = args.no_watcher,
   }
 end
 
@@ -988,6 +1001,7 @@ function ASP.run(opts)
   -- start preview (no-undo wrapper)
   undo_begin()
   _set_run_flag(true)  -- NEW: handshake ON
+  reaper.SetExtState(ASP.ES_NS, ASP.ES_FX_GUID, reaper.GetTrackGUID(FXtrack), false)
   ASP._state.running       = true
   ASP._state.mode          = mode
   ASP._state.fx_track      = FXtrack
@@ -1019,7 +1033,7 @@ function ASP.run(opts)
   ASP.log("preview started: mode=%s", mode)
   undo_end_no_undo("AS Preview: start (no undo)")
 
-  if not ASP._state.stop_watcher then
+  if not opts.no_watcher and not ASP._state.stop_watcher then
     ASP._state.stop_watcher = true
     reaper.defer(ASP._watch_stop_and_cleanup)
   end
@@ -1098,6 +1112,7 @@ function ASP.cleanup_if_any()
 
   write_state({running=false, mode=""})
   _set_run_flag(false)  -- NEW: handshake OFF
+  reaper.SetExtState(ASP.ES_NS, ASP.ES_FX_GUID, "", false)
   ASP.log("cleanup done")
   undo_end_no_undo("AS Preview: cleanup (no undo)")
 end
@@ -1400,6 +1415,73 @@ function ASP._apply_mode_flags(mode)
   reaper.Main_OnCommand(1007, 0) -- Transport: Play
 
   undo_end_no_undo("AS Preview: apply mode flags (no undo)")
+end
+
+----------------------------------------------------------------
+-- Public: stop preview from a fresh script instance
+-- Bootstraps state from placeholder + ExtState, then cleans up.
+----------------------------------------------------------------
+function ASP.stop_preview()
+  -- 1. Stop transport
+  if (reaper.GetPlayState() & 1) == 1 then
+    reaper.Main_OnCommand(1016, 0)  -- Transport: Stop
+  end
+
+  -- 2. Find FX track via saved GUID
+  local fx_guid = reaper.GetExtState(ASP.ES_NS, ASP.ES_FX_GUID)
+  local fx_track = nil
+  if fx_guid and fx_guid ~= "" then
+    for i = 0, reaper.CountTracks(0) - 1 do
+      local tr = reaper.GetTrack(0, i)
+      if reaper.GetTrackGUID(tr) == fx_guid then
+        fx_track = tr
+        break
+      end
+    end
+  end
+
+  -- 3. Find placeholder on any track
+  local src_tr, ph_item, UL, UR
+  for i = 0, reaper.CountTracks(0) - 1 do
+    local tr = reaper.GetTrack(0, i)
+    local ph, pUL, pUR = find_placeholder_on_track(tr)
+    if ph then
+      src_tr = tr
+      ph_item = ph
+      UL = pUL
+      UR = pUR
+      break
+    end
+  end
+
+  if not ph_item then
+    -- No placeholder: just clear flags
+    _set_run_flag(false)
+    reaper.SetExtState(ASP.ES_NS, ASP.ES_FX_GUID, "", false)
+    write_state({running=false, mode=""})
+    return
+  end
+
+  -- 4. Bootstrap state for cleanup
+  ASP._state.running       = true
+  ASP._state.placeholder   = ph_item
+  ASP._state.src_track     = src_tr
+  ASP._state.fx_track      = fx_track
+  ASP._state.moved_items   = fx_track
+    and collect_preview_items_on_fx_track(fx_track, ph_item, UL, UR)
+    or {}
+  -- These snapshots are lost across instances; set safe defaults
+  ASP._state.fx_enable_shot  = nil  -- skip FX enable restore
+  ASP._state.track_nchan     = nil  -- skip channel count restore
+  ASP._state.src_track_nchan = nil
+  ASP._state.selection_cache = nil  -- skip selection restore
+  -- Keep repeat as-is (no-op in _restore_repeat)
+  ASP._state.repeat_was_on = (reaper.GetToggleCommandState(1068) == 1)
+
+  ASP.log("stop_preview: bootstrapped from placeholder (items=%d)", #ASP._state.moved_items)
+
+  -- 5. Run the standard cleanup
+  ASP.cleanup_if_any()
 end
 
 
