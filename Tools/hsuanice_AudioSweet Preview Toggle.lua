@@ -1,11 +1,44 @@
 --[[
 @description AudioSweet Preview Toggle - Auto Detect Focused/Chain
-@version 0.3.1
+@version 0.2.7
 @author hsuanice
 @provides
   [main] .
 @changelog
-  0.3.1 (2026-02-10) [internal: v260210.1113]
+  0.2.7 (2026-02-10) [internal: v260210.1935]
+    - FIXED: Toggle now reliably stops preview on 2nd press
+      • Root cause: REAPER terminates the deferred script (watcher) on re-trigger,
+        never starting a new instance — 2nd press produced zero output
+      • Fix: Core now registers reaper.atexit() alongside watcher
+      • atexit fires on script termination with full L1 state — clean cleanup
+    - CHANGED: Removed temporary ShowConsoleMsg debug output
+    - CHANGED: Version synced with Preview Core 0.2.7
+
+  0.2.6 (2026-02-10) [internal: v260210.1303]
+    - FIXED: Toggle stop now works reliably on 2nd execution
+      • Replaced cross-instance stop_preview() call with PREVIEW_STOP_REQ ExtState flag
+      • Watcher in original instance (with full state) handles cleanup — no state bootstrapping
+      • Toggle check moved before dofile() — stop path doesn't load Core at all
+    - CHANGED: Version synced with Preview Core 0.2.6
+
+  0.2.5 (2026-02-10) [internal: v260210.1224]
+    - FIXED: Toggle self-toggle now works reliably (was failing on 2nd tap)
+      • Core fix: stop_preview() now sets moved_count for timesel count check
+      • Core fix: Watcher race replaced 3-frame debounce with 500ms startup grace period
+    - CHANGED: Version synced with Preview Core 0.2.5
+
+  0.2.4 (2026-02-10) [internal: v260210.1212]
+    - FIXED: Manual stop (spacebar etc.) now auto-cleans up preview again
+      • Re-enabled Core's stop-watcher (was disabled in 0.2.3 to avoid race)
+      • Core watcher now uses 3-frame debounce to prevent false-positive race
+    - FIXED: stop_preview() now respects GUI restore_mode setting (GUID vs timesel)
+      • Reads preview_restore_mode from GUI ExtState before stopping
+      • timesel mode: moves back ALL items in placeholder span (including new items from Run)
+      • guid mode: moves back only the originally-moved items (safe when FX track has other items)
+    - CHANGED: Removed no_watcher=true from args — watcher re-enabled for manual stop support
+    - CHANGED: Version synced with Preview Core 0.2.4
+
+  0.2.3 (2026-02-10) [internal: v260210.1113]
     - FIXED: Toggle now reliably stops on 2nd execution (was requiring 3 taps)
       • Root cause: Core's stop-watcher raced with toggle — watcher auto-cleaned up,
         clearing PREVIEW_RUN flag, so toggle fell through and restarted preview
@@ -16,7 +49,7 @@
     - NEW: Core.stop_preview() public method — stops transport, finds placeholder,
       bootstraps state, and runs cleanup from a fresh Lua instance
 
-  0.3.0 (2026-02-10) [internal: v260210]
+  0.2.2 (2026-02-10) [internal: v260210]
     - NEW: True toggle behavior — re-running while preview is active now stops preview
       • Checks PREVIEW_RUN ExtState flag set by Preview Core
       • If preview is running, calls Core.stop_preview() for full cleanup
@@ -53,13 +86,20 @@ local ASP = dofile(RES_PATH .. '/Scripts/hsuanice Scripts/Library/hsuanice_AS Pr
 ------------------------------------------------------------
 -- 1.5) Toggle: if preview is already running, stop it
 ------------------------------------------------------------
-if reaper.GetExtState("hsuanice_AS", "PREVIEW_RUN") == "1" then
-  ASP.stop_preview()  -- bootstrap from placeholder + cleanup
+-- Dual approach:
+--   a) Set STOP_REQ flag (so watcher can handle it with full state if running)
+--   b) Call stop_preview() as fallback (handles stale flag / dead watcher)
+local _run_flag = reaper.GetExtState("hsuanice_AS", "PREVIEW_RUN")
+if _run_flag == "1" then
+  reaper.SetExtState("hsuanice_AS", "PREVIEW_STOP_REQ", "1", false)
+  local rm_val = reaper.GetExtState("hsuanice_AS_GUI", "preview_restore_mode")
+  local rm = (rm_val ~= "1") and "timesel" or "guid"
+  ASP.stop_preview({ restore_mode = rm })
   return
 end
 
 ------------------------------------------------------------
--- 2) Read Settings from GUI ExtState
+-- 3) Read Settings from GUI ExtState
 ------------------------------------------------------------
 local SETTINGS_NAMESPACE = "hsuanice_AS_GUI"
 
@@ -103,7 +143,7 @@ local function find_track_by_guid(guid)
 end
 
 ------------------------------------------------------------
--- 3) Detect Window State (Chain vs Focused)
+-- 4) Detect Window State (Chain vs Focused)
 ------------------------------------------------------------
 local chain_mode = true
 local target_track_name = preview_target_track
@@ -144,7 +184,7 @@ else
 end
 
 ------------------------------------------------------------
--- 4) Resolve Target Track (Chain Mode Only)
+-- 5) Resolve Target Track (Chain Mode Only)
 ------------------------------------------------------------
 if chain_mode and not target_track_obj then
   if preview_target_track_guid ~= "" then
@@ -170,7 +210,7 @@ if debug_mode then
 end
 
 ------------------------------------------------------------
--- 5) Define Parameters
+-- 6) Define Parameters
 ------------------------------------------------------------
 local args = {
   debug       = debug_mode,
@@ -178,7 +218,6 @@ local args = {
   mode        = "solo",
   solo_scope  = solo_scope_str,
   restore_mode = restore_mode_str,
-  no_watcher  = true,  -- Toggle handles stop via stop_preview(); no auto-cleanup watcher
 }
 
 if chain_mode then
@@ -190,7 +229,7 @@ else
 end
 
 ------------------------------------------------------------
--- 6) Log Parameters (only if debug) and Run Preview
+-- 7) Log Parameters (only if debug) and Run Preview
 ------------------------------------------------------------
 if args.debug then
   reaper.ShowConsoleMsg(string.format(
