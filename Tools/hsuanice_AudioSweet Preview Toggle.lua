@@ -1,10 +1,27 @@
 --[[
 @description AudioSweet Preview Toggle - Auto Detect Focused/Chain
-@version 0.2.1
-@author Hsuanice
+@version 0.3.1
+@author hsuanice
 @provides
   [main] .
 @changelog
+  0.3.1 (2026-02-10) [internal: v260210.1113]
+    - FIXED: Toggle now reliably stops on 2nd execution (was requiring 3 taps)
+      • Root cause: Core's stop-watcher raced with toggle — watcher auto-cleaned up,
+        clearing PREVIEW_RUN flag, so toggle fell through and restarted preview
+      • Fix: Toggle passes no_watcher=true to Core, disabling the deferred stop-watcher
+      • Toggle script now exclusively controls the preview lifecycle via stop_preview()
+      • Core's stop_preview() bootstraps state from placeholder + ExtState for full cleanup
+    - NEW: Core stores FX track GUID in ExtState (PREVIEW_FX_GUID) for cross-instance lookup
+    - NEW: Core.stop_preview() public method — stops transport, finds placeholder,
+      bootstraps state, and runs cleanup from a fresh Lua instance
+
+  0.3.0 (2026-02-10) [internal: v260210]
+    - NEW: True toggle behavior — re-running while preview is active now stops preview
+      • Checks PREVIEW_RUN ExtState flag set by Preview Core
+      • If preview is running, calls Core.stop_preview() for full cleanup
+      • Previous behavior (mode switch on re-entry) replaced by clean stop/start toggle
+
   0.2.1 (2026-02-09) [internal: v260209.2130]
     - FIXED: Cross-platform path resolution for Windows/Linux compatibility
       • Replaced debug.getinfo() relative path with reaper.GetResourcePath() absolute path
@@ -32,6 +49,14 @@
 ------------------------------------------------------------
 local RES_PATH = reaper.GetResourcePath()
 local ASP = dofile(RES_PATH .. '/Scripts/hsuanice Scripts/Library/hsuanice_AS Preview Core.lua')
+
+------------------------------------------------------------
+-- 1.5) Toggle: if preview is already running, stop it
+------------------------------------------------------------
+if reaper.GetExtState("hsuanice_AS", "PREVIEW_RUN") == "1" then
+  ASP.stop_preview()  -- bootstrap from placeholder + cleanup
+  return
+end
 
 ------------------------------------------------------------
 -- 2) Read Settings from GUI ExtState
@@ -153,6 +178,7 @@ local args = {
   mode        = "solo",
   solo_scope  = solo_scope_str,
   restore_mode = restore_mode_str,
+  no_watcher  = true,  -- Toggle handles stop via stop_preview(); no auto-cleanup watcher
 }
 
 if chain_mode then
