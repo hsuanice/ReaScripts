@@ -1,18 +1,31 @@
 --[[
 @description AudioSweet Core - Focused Track FX render via RGWH Core
-@version 0.3.3
+@version 0.3.4
 @author hsuanice
 @provides
   [main] .
 @notes
 
-Tim Chimes (original), adapted by hsuanice for AudioSweet Core integration.
-  Reference:
-  Inspired and named by Tim Chimes
-  Original: Renders selected plugin to selected media item
-  http://timchimes.com/scripting-with-reaper-audiosuite/
+  Tim Chimes (original), adapted by hsuanice for AudioSweet Core integration.
+    Reference:
+    Inspired and named by Tim Chimes
+    Original: Renders selected plugin to selected media item
+    http://timchimes.com/scripting-with-reaper-audiosuite/
 
 @changelog
+  0.3.4 [260212.1247]
+    - FIXED: Items extending beyond time selection now pre-split at TS boundaries before processing
+      • PROBLEM: When item selection > time selection, entire item moved to FX track →
+        render processed full item → RGWH glue split at TS → only TS portion moved back →
+        content outside TS lost on FX track
+      • SOLUTION: Pre-split items at tsL and tsR before any processing
+        (same approach as RGWH Core glue_by_ts_window_on_track, lines 2612-2649)
+      • Split pieces outside TS deselected and remain intact on original track
+      • Units rebuilt from selection after split → Core/GLUE receives TS-aligned items
+      • Selection snapshot retaken after split for correct end-of-run restoration
+      • After split, ts_equals_unit() returns true for trimmed items → Core/GLUE path (with handles)
+      • TS-WINDOW[UNIT] path still handles items smaller than TS (silence padding, Pro Tools behavior)
+
   0.3.3 [260209.2130]
     - FIXED: Debug log path on Windows (os.getenv("HOME") returns nil)
       • Added os.getenv("USERPROFILE") fallback for Windows
@@ -2498,6 +2511,114 @@ function main() -- main part of the script
   local hasTS, tsL, tsR = getLoopSelection()
   if debug_enabled() then
     log_step("PATH", "hasTS=%s TS=[%.3f..%.3f]", tostring(hasTS), tsL or -1, tsR or -1)
+  end
+
+  -- ★ v0.3.4: Pre-split items at TS boundaries before processing
+  -- When items extend beyond TS, split them so that the parts outside TS remain intact.
+  -- Without this: items moved to FX track → render processes full item → glue splits at TS
+  -- → only TS portion moved back → content outside TS lost on FX track.
+  -- Same approach as RGWH Core glue_by_ts_window_on_track().
+  if hasTS then
+    local split_threshold = 0.002
+    local did_split = false
+
+    -- Pass 1: Split at tsL (items that start before tsL and end after tsL)
+    local items_to_check = {}
+    for _, u in ipairs(units) do
+      for _, it in ipairs(u.items) do
+        items_to_check[#items_to_check + 1] = it
+      end
+    end
+
+    for _, it in ipairs(items_to_check) do
+      if reaper.ValidatePtr2(0, it, "MediaItem*") then
+        local L = reaper.GetMediaItemInfo_Value(it, "D_POSITION")
+        local R = L + reaper.GetMediaItemInfo_Value(it, "D_LENGTH")
+        if tsL > (L + split_threshold) and tsL < (R - split_threshold) then
+          local new_right = reaper.SplitMediaItem(it, tsL)
+          if new_right then
+            did_split = true
+            -- Deselect the left piece (outside TS)
+            reaper.SetMediaItemSelected(it, false)
+            log_step("PRE-SPLIT", "Split at tsL=%.3f (item was %.3f..%.3f), deselected left piece", tsL, L, R)
+          end
+        end
+      end
+    end
+
+    -- Pass 2: Split at tsR (iterate track items to find pieces that cross tsR after tsL splits)
+    local tracks_seen = {}
+    for _, u in ipairs(units) do
+      if not tracks_seen[u.track] then tracks_seen[u.track] = true end
+    end
+
+    for tr, _ in pairs(tracks_seen) do
+      local n = reaper.CountTrackMediaItems(tr)
+      for i = 0, n - 1 do
+        local it = reaper.GetTrackMediaItem(tr, i)
+        if it and reaper.IsMediaItemSelected(it) then
+          local L = reaper.GetMediaItemInfo_Value(it, "D_POSITION")
+          local R = L + reaper.GetMediaItemInfo_Value(it, "D_LENGTH")
+          if tsR > (L + split_threshold) and tsR < (R - split_threshold) then
+            local new_right = reaper.SplitMediaItem(it, tsR)
+            if new_right then
+              did_split = true
+              -- Deselect the right piece (outside TS)
+              reaper.SetMediaItemSelected(new_right, false)
+              log_step("PRE-SPLIT", "Split at tsR=%.3f (item was %.3f..%.3f), deselected right piece", tsR, L, R)
+            end
+          end
+        end
+      end
+    end
+
+    if did_split then
+      -- Safety pass: deselect any remaining items fully outside TS
+      local n = reaper.CountSelectedMediaItems(0)
+      local to_deselect = {}
+      for i = 0, n - 1 do
+        local it = reaper.GetSelectedMediaItem(0, i)
+        if it then
+          local L = reaper.GetMediaItemInfo_Value(it, "D_POSITION")
+          local R = L + reaper.GetMediaItemInfo_Value(it, "D_LENGTH")
+          if R <= tsL + split_threshold or L >= tsR - split_threshold then
+            to_deselect[#to_deselect + 1] = it
+          end
+        end
+      end
+      for _, it in ipairs(to_deselect) do
+        reaper.SetMediaItemSelected(it, false)
+      end
+      log_step("PRE-SPLIT", "Deselected %d items outside TS, remaining selected=%d",
+               #to_deselect, reaper.CountSelectedMediaItems(0))
+
+      -- Rebuild units from new selection (items are now trimmed to TS boundaries)
+      rgwh_units = RGWH.utils.detect_units_from_selection()
+      units = {}
+      for _, ru in ipairs(rgwh_units) do
+        local as_unit = {
+          track = ru.track,
+          items = {},
+          UL = ru.start,
+          UR = ru.finish
+        }
+        for _, m in ipairs(ru.members) do
+          table.insert(as_unit.items, m.it)
+        end
+        table.insert(units, as_unit)
+      end
+
+      -- Retake selection snapshot (original items were split, old snapshot is stale)
+      sel_snapshot = snapshot_selection()
+
+      log_step("PRE-SPLIT", "Rebuilt units: count=%d", #units)
+      if debug_enabled() then
+        for i, u in ipairs(units) do
+          reaper.ShowConsoleMsg(string.format("  unit#%d  track=%s  members=%d  span=%.3f..%.3f\n",
+            i, tostring(u.track), #u.items, u.UL, u.UR))
+        end
+      end
+    end
   end
 
   -- Helper: Core flags setup/restore
