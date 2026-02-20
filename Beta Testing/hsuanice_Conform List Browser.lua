@@ -1,6 +1,6 @@
 --[[
 @description Conform List Browser
-@version 260209.1850
+@version v260220.1535
 @author hsuanice
 @about
   A REAPER script for browsing and editing EDL (Edit Decision List) data
@@ -41,11 +41,42 @@
   Optional: js_ReaScriptAPI (for folder selection)
 
 @changelog
-  v260209.1850
-  - Fix: Track consolidation algorithm now handles non-overlapping events correctly
-    • Previous version had a bug that could cause it to create more tracks than necessary
-    • Now uses a greedy bin-packing approach to minimize track count while respecting event timing
-    • Tested on complex EDLs with many overlapping and non-overlapping events
+  v260220.1535
+  - Fix: Consolidate track naming rules
+    • Audio group → A1, A2, A3 ... (no space)
+    • Video group → V1, V2, V3 ... (no space)
+    • Other groups → GroupName 1, GroupName 2, ... (space before number)
+    • Each group's track numbers restart from 1 independently
+  - Fix: Conform / Generate Items track order now sorted (natural sort: A1, A2, A10)
+    • Tracks appear in correct order in REAPER project after conform
+
+  v260209.1846
+  - Feature: Group as table column (COL.GROUP = 16, hidden by default, enable via Columns popup)
+    • Double-click cell to inline edit group name
+    • Group column included in search text and undo/redo
+  - Feature: User-managed Group list in sidebar
+    • + button to add new group
+    • Right-click group checkbox: Rename / Delete / Assign Selected Rows
+    • Delete group: events become unassigned (group = "")
+    • Unassigned events shown as "(Unassigned)" in sidebar
+  - Feature: Consolidate button in toolbar (next to Remove Dups)
+    • Consolidates tracks by group via bin-packing (no time overlap)
+    • Tracks renumbered as GroupName1, GroupName2, ... globally across all groups
+  - Feature: Table right-click → Assign Group
+    • Applies to all selected rows (multi-select via Shift/Cmd+click)
+    • Falls back to clicked row if nothing selected
+    • (Unassign) option to clear group
+  - Fix: All right-click context menu popups now work (rename/delete/batch rename)
+    • Root cause: OpenPopup was called inside context menu popup (wrong scope)
+    • Fixed with deferred flags for track, reel, and group context menus
+  - Fix: Cell edit confirmed when clicking elsewhere (not just Enter)
+    • Added IsItemDeactivated check so clicking away closes edit mode
+  - Fix: Column reorder now works via table header drag (EDL + Audio tables)
+    • Column editor popup simplified to show/hide only (no drag list)
+    • EDL table headers switched from Text() to TableHeader() to enable drag reorder
+  - Fix: Track name normalization on EDL load (AA→A, VV→V, etc.)
+  - Fix: Sidebar Reel/Group panel minimum width increased (~5 chars wider)
+    • To adjust: draw_reel_filter_sidebar() → max_text_w (line ~4694) and sidebar_w padding (line ~4710)
 
   v260209.1625
   - Fix: Remove Duplicates now compares by Reel + Src TC + Rec TC + Clip Name (excludes Track)
@@ -2410,6 +2441,9 @@ local function generate_items()
     end
   end
 
+  -- Sort track names (natural sort: A1, A2, A10 instead of A1, A10, A2)
+  table.sort(track_names_order, _natural_sort_cmp)
+
   -- Confirmation
   local preview_tracks = {}
   for i = 1, math.min(5, #track_names_order) do
@@ -2601,6 +2635,9 @@ local function conform_matched_items(selected_only)
       track_names_order[#track_names_order + 1] = expanded_name
     end
   end
+
+  -- Sort track names (natural sort: A1, A2, A10 instead of A1, A10, A2)
+  table.sort(track_names_order, _natural_sort_cmp)
 
   -- Confirmation
   local preview_tracks = {}
@@ -2883,17 +2920,31 @@ local function consolidate_by_group()
   local msg = string.format(
     "Consolidate tracks by group?\n\n" ..
     "%s\n\n" ..
-    "Events in each group will be bin-packed into\n" ..
-    "minimal non-overlapping tracks named Group1, Group2, ...\n" ..
-    "Track numbers will be renumbered sequentially across all groups.",
+    "Events in each group will be bin-packed into minimal\n" ..
+    "non-overlapping tracks. Naming rules:\n" ..
+    "  Audio → A1, A2, A3 ...\n" ..
+    "  Video → V1, V2, V3 ...\n" ..
+    "  Others → GroupName 1, GroupName 2, ...\n" ..
+    "Each group's track numbers restart from 1.",
     table.concat(preview, "\n"))
   if reaper.ShowMessageBox(msg, SCRIPT_NAME, 1) ~= 1 then return end
 
-  -- Bin-pack each group
-  local global_track_num = 0
+  -- Determine track prefix for a group name:
+  --   Audio → "A"  (no space before number)
+  --   Video → "V"  (no space before number)
+  --   others → "GroupName " (with trailing space before number)
+  local function _group_prefix(g)
+    if g == "" then return "Unassigned " end
+    local up = g:upper()
+    if up == "AUDIO" then return "A" end
+    if up == "VIDEO" then return "V" end
+    return g .. " "
+  end
+
+  -- Bin-pack each group; each group gets its OWN track counter starting at 1
   for _, g in ipairs(group_order) do
     local evts = groups[g]
-    local prefix = g ~= "" and g or "Unassigned"
+    local prefix = _group_prefix(g)
 
     -- Sort by start time
     table.sort(evts, function(a, b) return a.start < b.start end)
@@ -2913,9 +2964,8 @@ local function consolidate_by_group()
         track_ends[#track_ends + 1] = evt.stop
         assigned = #track_ends
       end
-      evt.row.track = prefix .. tostring(global_track_num + assigned)
+      evt.row.track = prefix .. tostring(assigned)
     end
-    global_track_num = global_track_num + #track_ends
   end
 
   _rebuild_track_filters()
@@ -2923,8 +2973,7 @@ local function consolidate_by_group()
   CLB.cached_rows = nil; CLB.cached_rows_frame = -1
   undo_snapshot()
 
-  console_msg(string.format("Consolidated into %d tracks across %d groups",
-    global_track_num, #group_order))
+  console_msg(string.format("Consolidated tracks across %d group(s)", #group_order))
 end
 
 ---------------------------------------------------------------------------
