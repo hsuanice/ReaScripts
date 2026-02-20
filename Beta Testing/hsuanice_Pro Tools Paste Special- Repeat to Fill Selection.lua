@@ -1,6 +1,6 @@
 --[[
 @description hsuanice_Pro Tools Paste Special: Repeat to Fill Selection
-@version 0.4.6 right boundary center mode fixed
+@version 0.4.7 time/item selection fallback
 @author hsuanice
 @about
   Pro Tools-style "Paste Special: Repeat to Fill Selection"
@@ -28,27 +28,31 @@
 
 
 @changelog
+  v0.4.7 (2026-02-20 TPE) - Feat: Fallback priority when no Razor Edit is present:
+           1. Time selection (uses selected tracks).
+           2. Item selection (bounding box of selected items + their tracks).
+
   v0.4.6 - Fix: Right-boundary crossfades in "center" alignment now respect the full
            requested length (CF_VALUE). Previously each side only applied half the length,
            causing too-short overlaps (e.g. 1f+1f when CF_VALUE=2f). Both last-in-area and
            right-neighbor items now receive at least CF_VALUE fade lengths, consistent
            with left-boundary behavior.
-  v0.4.5 - Boundary XF: default to centered; always suspend “Trim content behind…” during
+  v0.4.5 - Boundary XF: default to centered; always suspend "Trim content behind…" during
            boundary XF to prevent right-edge being eaten; restore preference afterward.
   v0.4.4 - Robust handling when JOIN ≈ tile:
            • Auto-adjust JOIN to a percent of tile (configurable via
              JOIN_CLAMP_TRIGGER_RATIO / JOIN_CLAMP_TO_TILE_RATIO) to keep layout stable.
            • Staging switches to butt-pastes when JOIN is near tile
              (MAX_JOIN_RATIO_FOR_STAGING) to avoid tiny step sizes and UI stalls.
-           • Only one warning dialog (“Auto-adjust”) is shown; removed the extra
-             “Clamped to prevent hang” dialog in staging.
+           • Only one warning dialog ("Auto-adjust") is shown; removed the extra
+             "Clamped to prevent hang" dialog in staging.
            • Performance: no beachball; repeat-to-fill completes immediately even in
              extreme JOIN requests.
            NOTE: In rare edge cases the visual arrangement may still look irregular after
              auto-adjust; see Known issues.
 
-  v0.4.3 - Boundary crossfade alignment options (“left” / “center” / “right”).
-           Centering the right edge may extend the outside neighbor’s left edge
+  v0.4.3 - Boundary crossfade alignment options ("left" / "center" / "right").
+           Centering the right edge may extend the outside neighbor's left edge
            (configurable via EDGE_XF_MOVE_OUTSIDE). JOIN tiles unchanged.
 
   v0.4.2 - Fix: multitrack paste restored (single anchor track + reassert last-touched
@@ -88,28 +92,28 @@ local r = reaper
 --------------------------------------------------------------------------------
 -- Crossfade length unit (v0.4.0)
 CF_UNIT        = "frames"            -- "seconds" | "frames" | "grid"
-CF_VALUE       = 1               -- 若 seconds=秒；frames=影格數；grid=幾個 grid 單位
-CF_GRID_REF    = "left"            -- 以哪個時間點換算 grid 長度："left"|"center"|"right"（建議 left）
+CF_VALUE       = 1                   -- seconds=seconds, frames=frame count, grid=number of grid units
+CF_GRID_REF    = "center"            -- reference point for grid length: "left"|"center"|"right" (recommended: left)
 
 
 
 -- Crossfade shape options (v0.3.0)
 CF_SHAPE_PRESET   = "equal_power"  -- "linear" | "equal_power" | "custom"
-CF_EQUALPOWER_VIA_ACTION = true   -- true: 用 41529 Item: Set crossfade shape to type 2 (equal power) 蓋系統等功率；false: 用自家曲率近似
+CF_EQUALPOWER_VIA_ACTION = true    -- true: use action 41529 to stamp equal-power shape; false: use internal curve approximation
 CF_SHAPE_IN       = 0              -- only used when PRESET="custom", 0..6 (0=linear)
 CF_SHAPE_OUT      = 0              -- only used when PRESET="custom", 0..6
-CF_CURVE_IN       = 0            -- -1..1, only used when PRESET="custom"
-CF_CURVE_OUT      = 0            -- -1..1, only used when PRESET="custom"
-CF_EQUALPOWER_FLIP = true   -- set true if you feel the equal-power curvature is reversed
+CF_CURVE_IN       = 0              -- -1..1, only used when PRESET="custom"
+CF_CURVE_OUT      = 0              -- -1..1, only used when PRESET="custom"
+CF_EQUALPOWER_FLIP = true          -- set true if you feel the equal-power curvature is reversed
 
 -- Edge (boundary) crossfade alignment on the Razor borders only:
---   "right"  = 全部在邊界內側（現行行為）
---   "center" = 以邊界為中心，左右各一半
---   "left"   = 全部在邊界外側
--- 內部 JOIN：置中
+--   "right"  = entirely inside the boundary (original behavior)
+--   "center" = centered on the boundary, half on each side
+--   "left"   = entirely outside the boundary
+-- Internal JOIN: centered
 JOIN_XF_ALIGN = "center"   -- "right" | "center" | "left"
 
--- 邊界 EDGE：置中，允許向外側延左緣（只動左緣、不動右邊界）
+-- Boundary EDGE: centered; allows extending the outer item's left edge (left edge only, right boundary untouched)
 EDGE_XF_ALIGN = "center"   -- "right" | "center" | "left"
 EDGE_XF_MOVE_OUTSIDE = true
 
@@ -118,8 +122,8 @@ EDGE_XF_MOVE_OUTSIDE = true
 MAX_JOIN_RATIO_FOR_STAGING = 0.80
 
 -- If requested JOIN is too large vs tile, auto-scale JOIN to a percent of tile:
-JOIN_CLAMP_TRIGGER_RATIO = 0.85   -- 當 (JOIN >= 85% * tile_len) 就觸發縮減
-JOIN_CLAMP_TO_TILE_RATIO = 0.35   -- 縮減為 tile_len 的 45%（可改 0.3~0.6 視口味）
+JOIN_CLAMP_TRIGGER_RATIO = 0.85   -- trigger auto-scale when JOIN >= 85% of tile_len
+JOIN_CLAMP_TO_TILE_RATIO = 0.35   -- scale down to 35% of tile_len (adjust 0.3-0.6 to taste)
 
 
 
@@ -150,8 +154,8 @@ local STAGE_PAD                 = 2
 
 local EPS                       = 1e-9
 
-local warned_join_clamp   = false
-local warned_join_fallback = false   -- ⬅︎ 新增：JOIN 太大時只彈一次提示
+local warned_join_clamp   = false  -- unused; reserved
+local warned_join_fallback = false  -- show the auto-adjust dialog at most once per run
 --------------------------------------------------------------------------------
 
 -- ============================== selection snapshot ==============================
@@ -180,7 +184,7 @@ end
 local function track_index(tr) return math.floor(r.GetMediaTrackInfo_Value(tr,"IP_TRACKNUMBER") or 0) end
 local function unselect_all() r.Main_OnCommand(40289,0); r.Main_OnCommand(40297,0) end
 
--- 選取整組目標軌，並把第一條設為 last touched（作為貼上的基準）
+-- Select the target track group and set the first as last-touched (paste anchor).
 local function select_tracks_block(tracks_sorted)
   r.Main_OnCommand(40297,0) -- Unselect all tracks
   for _,tr in ipairs(tracks_sorted) do
@@ -257,14 +261,14 @@ local function group_areas_by_range(areas)
 end
 
 -- ============================== target pre-clear (Split+Delete) ==============================
--- 僅清除 [t1,t2] 內的片段；保留貼齊邊界的外側 item
--- 在 FIPM 下也會逐個 lane 精準切割與刪除
+-- Clear only items inside [t1,t2]; preserve items that butt the boundary from outside.
+-- Also works per-lane in Fixed Item Pool mode.
 local function clear_items_in_range_on_tracks(t1,t2, tracks_sorted)
-  -- 用較寬鬆的容差（約 1 ms），避免浮點/取樣邊界漏切
+  -- Use a loose tolerance (~1 ms) to avoid floating-point/sample-boundary misses.
   local EPSX = 0.001
 
   for _,tr in ipairs(tracks_sorted) do
-    -- pass1：把跨越 t1/t2 的 item 先切開（剛好等於邊界的不切）
+    -- pass1: split items that cross t1/t2 (items exactly on the boundary are not split)
     for i = r.CountTrackMediaItems(tr)-1, 0, -1 do
       local it = r.GetTrackMediaItem(tr,i)
       local p  = r.GetMediaItemInfo_Value(it,"D_POSITION")
@@ -274,7 +278,7 @@ local function clear_items_in_range_on_tracks(t1,t2, tracks_sorted)
       if p < t2 - EPSX and e > t2 + EPSX then r.SplitMediaItem(it, t2) end
     end
 
-    -- pass2：刪除完全落在 [t1-ε, t2+ε] 內的片段（含剛好等於邊界）
+    -- pass2: delete items fully inside [t1-eps, t2+eps] (including boundary-exact items)
     for i = r.CountTrackMediaItems(tr)-1, 0, -1 do
       local it = r.GetTrackMediaItem(tr,i)
       local p  = r.GetMediaItemInfo_Value(it,"D_POSITION")
@@ -285,14 +289,14 @@ local function clear_items_in_range_on_tracks(t1,t2, tracks_sorted)
       end
     end
 
-    -- pass3（保險）：若仍有殘留與區段相交者，再切再刪一次
+    -- pass3 (safety): if any items still intersect the range, split and delete again
     for i = r.CountTrackMediaItems(tr)-1, 0, -1 do
       local it = r.GetTrackMediaItem(tr,i)
       local p  = r.GetMediaItemInfo_Value(it,"D_POSITION")
       local l  = r.GetMediaItemInfo_Value(it,"D_LENGTH")
       local e  = p + l
       if e > t1 + EPSX and p < t2 - EPSX then
-        -- 這裡一定是跨界殘留（例如極小浮點誤差），直接在邊界再切一次再判斷
+        -- Residual cross-boundary item (tiny float error); re-split at boundary edges.
         if p < t1 - EPSX and e > t1 + EPSX then r.SplitMediaItem(it, t1) end
         if p < t2 - EPSX and e > t2 + EPSX then r.SplitMediaItem(it, t2) end
       end
@@ -357,21 +361,20 @@ local function trim_selection_to_right(end_time)
   end
 end
 
--- convert a length value (edgeXFadeLen / joinXFadeLen) from CF_UNIT to seconds
--- return seconds for CF_VALUE in the selected unit, referenced at refTime
+-- Convert a CF length value from CF_UNIT to seconds, referenced at refTime.
 local function cf_grid_len_seconds(units, refTime)
-  -- anchor：依設定抓參考點附近的格線，統一從「左邊格線」開始量
+  -- Anchor: find the grid line to the left of refTime, then measure from there.
   local t_ref = refTime or reaper.GetCursorPosition()
   local t_left = reaper.BR_GetClosestGridDivision(t_ref)
   if t_left > t_ref + 1e-12 then
-    -- 最靠近但在右邊，就退到前一格
+    -- Closest grid division was to the right; step back one grid.
     t_left = reaper.BR_GetPrevGridDivision(t_left)
   end
   if CF_GRID_REF == "right" then
-    -- 以右側為基準則先進一格當起點
+    -- Right-referenced: advance one grid cell to use as the start point.
     t_left = reaper.BR_GetNextGridDivision(t_left)
   elseif CF_GRID_REF == "center" then
-    -- 以中心為基準：先找到邊界所在格，再往左半格
+    -- Center-referenced: find the current cell, then shift left by half a cell.
     local t_next = reaper.BR_GetNextGridDivision(t_left)
     local half = (t_next - t_left) * 0.5
     t_left = t_ref - half
@@ -399,7 +402,7 @@ local function cf_to_seconds(v, refTime)
   if CF_UNIT == "seconds" then
     return v
   elseif CF_UNIT == "frames" then
-    local fps = reaper.TimeMap_curFrameRate(0) -- seconds/frame = 1/fps
+    local fps = reaper.TimeMap_curFrameRate(0)
     return v / (fps > 0 and fps or 1)
   elseif CF_UNIT == "grid" then
     return cf_grid_len_seconds(v, refTime)
@@ -409,7 +412,7 @@ local function cf_to_seconds(v, refTime)
 end
 
 
--- edge/join crossfade length (in SECONDS) at a given reference time
+-- Edge/join crossfade length (in seconds) at a given reference time.
 local function edge_len_seconds(refTime)
   return cf_to_seconds(CF_VALUE, refTime)
 end
@@ -419,9 +422,9 @@ local function join_len_seconds(refTime)
   return cf_to_seconds(units, refTime)
 end
 
--- 取「有效 JOIN 秒數」；若過大，依比例縮減（僅 JOIN 用；邊界不受影響）
+-- Return effective JOIN length in seconds; auto-scales if too large (boundary CF is unaffected).
 local function effective_join_len_seconds(tile_len, refTime)
-  local req = join_len_seconds(refTime)              -- 你原本的換算（秒）
+  local req = join_len_seconds(refTime)              -- requested JOIN in seconds
   local trig = (JOIN_CLAMP_TRIGGER_RATIO or 0.85) * tile_len
   if req >= trig and tile_len > EPS then
     local eff = (JOIN_CLAMP_TO_TILE_RATIO or 0.45) * tile_len
@@ -436,7 +439,7 @@ local function effective_join_len_seconds(tile_len, refTime)
     end
     return eff
   end
-  -- 正常情況直接用原請求（含你已有的 clamp）
+  -- Normal case: use the requested value (clamped to tile_len - epsilon).
   return math.min(req, tile_len - 1e-4)
 end
 
@@ -462,10 +465,10 @@ local function apply_item_fade_shape(it, fadeInLen, fadeOutLen)
 
   elseif preset == "equal_power" then
     if CF_EQUALPOWER_VIA_ACTION then
-      -- 讓 41529 Item: Set crossfade shape to type 2 (equal power)來蓋「等功率」形狀；這裡只保證長度有設到（上面已寫 D_FADEIN/OUTLEN）
-      -- 不再在這裡寫 shape/curve，避免和 41529 打架
+      -- Action 41529 will stamp the equal-power shape; length is already set above.
+      -- Do not write shape/curve here to avoid conflicting with 41529.
     else
-      -- 若想用自家近似（不用 41529），就保留下面這段
+      -- Internal curve approximation (used when CF_EQUALPOWER_VIA_ACTION = false).
       local s = (CF_EQUALPOWER_FLIP and -1 or 1)
       reaper.SetMediaItemInfo_Value(it, "C_FADEINSHAPE",  0)
       reaper.SetMediaItemInfo_Value(it, "C_FADEOUTSHAPE", 0)
@@ -482,7 +485,8 @@ local function apply_item_fade_shape(it, fadeInLen, fadeOutLen)
   end
 end
 
--- 向左延伸 item 的左緣 amt 秒，保持右邊界不動；若素材不夠，回傳實際可延長秒數
+-- Extend item's left edge leftward by amt seconds, keeping the right boundary fixed.
+-- Returns the actual amount extended (clamped by available source material).
 local function extend_item_left_no_move_right_clamped(it, amt)
   if not it or not (amt and amt > 0) then return 0 end
   local tk = r.GetActiveTake(it)
@@ -491,16 +495,16 @@ local function extend_item_left_no_move_right_clamped(it, amt)
   local pos = r.GetMediaItemInfo_Value(it, "D_POSITION")
   local len = r.GetMediaItemInfo_Value(it, "D_LENGTH")
   local rate = r.GetMediaItemTakeInfo_Value(tk, "D_PLAYRATE")
-  local offs = r.GetMediaItemTakeInfo_Value(tk, "D_STARTOFFS")       -- 秒（source domain）
+  local offs = r.GetMediaItemTakeInfo_Value(tk, "D_STARTOFFS")  -- seconds in source domain
   local loop = r.GetMediaItemTakeInfo_Value(tk, "B_LOOPSRC") > 0.5
 
-  -- 在不 Loop 的情況下，可向左延的「工程秒」= offs / rate
+  -- Without looping, max leftward extension in project time = offs / rate.
   local max_left = loop and amt or math.min(amt, (offs or 0) / math.max(rate, 1e-9))
 
   if max_left <= 0 then return 0 end
   r.SetMediaItemInfo_Value(it, "D_POSITION", pos - max_left)
   r.SetMediaItemInfo_Value(it, "D_LENGTH",   len + max_left)
-  -- 同步滑移 take offset，確保內容不變
+  -- Shift take offset to keep content in place.
   r.SetMediaItemTakeInfo_Value(tk, "D_STARTOFFS", math.max(0, offs - max_left * rate))
   return max_left
 end
@@ -508,7 +512,7 @@ end
 
 
 
--- Manual JOIN crossfades（確保相鄰 item 之間一定有交叉；必要時延長左邊 item 的右緣）
+-- Manual JOIN crossfades: ensure adjacent items overlap; extend the left item's right edge if needed.
 local function ensure_join_crossfades_in_range(a, b, tracks_sorted, joinLen)
   if not joinLen or joinLen <= EPS then return end
   for _,tr in ipairs(tracks_sorted) do
@@ -532,15 +536,15 @@ local function ensure_join_crossfades_in_range(a, b, tracks_sorted, joinLen)
 
       if overlap < joinLen - 1e-6 then
         local need = joinLen - math.max(0, overlap)
-        r.SetMediaItemInfo_Value(L.it, "D_LENGTH", Ll + need)  -- 只延長左邊 item 的右緣
+        r.SetMediaItemInfo_Value(L.it, "D_LENGTH", Ll + need)  -- extend only the left item's right edge
         L.e = L.e + need
         overlap = L.e - R.p
       end
 
       if overlap > EPS then
         local fade = math.min(joinLen, overlap)
-        apply_item_fade_shape(L.it, nil,  fade)  -- 左塊：只設出淡
-        apply_item_fade_shape(R.it, fade, nil )  -- 右塊：只設入淡
+        apply_item_fade_shape(L.it, nil,  fade)  -- left item: fade-out only
+        apply_item_fade_shape(R.it, fade, nil )  -- right item: fade-in only
       end
 
     end
@@ -549,15 +553,14 @@ end
 
 -- Build the staged block of length total_len at stage_pos (JOIN overlaps applied in staging too)
 local function build_staging_block(stage_pos, total_len, tile_len, base_track, tracks_sorted)
-  -- 多軌貼上的正確作法：只選本組的最上面那一軌當「錨點」
+  -- For multi-track paste: use only the top track of this group as the anchor.
   select_only_track(base_track)
-  r.Main_OnCommand(40914,0) -- Track: Set first selected track as last touched track（保險重申一次）
+  r.Main_OnCommand(40914,0) -- Track: Set first selected track as last touched track (reassert for safety)
 
   local join_req = join_len_seconds(stage_pos)
   local join_eff = effective_join_len_seconds(tile_len, stage_pos)
 
-
-  -- staging 若為極端（JOIN 逼近 tile），一律用 butt 貼（join_for_staging=0）
+  -- If JOIN is near tile length, stage with butt pastes (join_for_staging=0) to avoid long loops.
   local join_for_staging = (join_req >= tile_len * (MAX_JOIN_RATIO_FOR_STAGING or 0.80)) and 0 or join_eff
   local step = math.max(EPS, tile_len - join_for_staging)
 
@@ -644,7 +647,7 @@ local function last_item_in_area_on_track(tr, a, b)
 end
 
 local function apply_boundary_crossfades(start_t, end_t, tracks_sorted, fadeLen)
-  -- 暫停「Trim content behind…」，避免邊界延伸時被系統吃掉
+  -- Suspend "Trim content behind media items" to prevent right-edge being eaten during boundary extension.
   local TRIM_CMD = 41117
   local trim_was_on = (r.GetToggleCommandState(TRIM_CMD) == 1)
   if trim_was_on then r.Main_OnCommand(TRIM_CMD,0) end
@@ -662,26 +665,26 @@ local function apply_boundary_crossfades(start_t, end_t, tracks_sorted, fadeLen)
     if first then
       if leftN then
         if align == "center" then
-          -- 左鄰向右延一半；區內第一塊向左延一半（置中）
+          -- Centered: extend left neighbor right by half; extend first item left by half.
           local ll = r.GetMediaItemInfo_Value(leftN,"D_LENGTH")
           r.SetMediaItemInfo_Value(leftN,"D_LENGTH", ll + half)
           extend_item_left_no_move_right_clamped(first, half)
         elseif align == "left" then
-          -- 全部放在邊界外側：只把區內第一塊向左延整個長度
+          -- Outside: extend first item leftward by full fade length.
           extend_item_left_no_move_right_clamped(first, fadeLen)
         else -- "right"
-          -- 現行：全在內側，僅左鄰向右延整個長度
+          -- Inside: extend left neighbor rightward by full fade length.
           local ll = r.GetMediaItemInfo_Value(leftN,"D_LENGTH")
           r.SetMediaItemInfo_Value(leftN,"D_LENGTH", ll + fadeLen)
         end
 
-        -- 形狀/長度（兩側都至少是 fadeLen）
+        -- Apply shape/length (both sides at least fadeLen).
         local fin  = math.max(fadeLen, r.GetMediaItemInfo_Value(first, "D_FADEINLEN"))
         local fout = math.max(fadeLen, r.GetMediaItemInfo_Value(leftN, "D_FADEOUTLEN"))
         apply_item_fade_shape(first, fin, nil)
         apply_item_fade_shape(leftN, nil,  fout)
       else
-        -- 沒有左鄰，但若你不強制 edge-to-edge 才做，可以在此僅對第一塊給淡入
+        -- No left neighbor; apply fade-in to first item only if not restricted to edge-to-edge.
         if not edgeToEdgeOnly then
           local fin = math.max(fadeLen, r.GetMediaItemInfo_Value(first,"D_FADEINLEN"))
           apply_item_fade_shape(first, fin, nil)
@@ -696,27 +699,27 @@ local function apply_boundary_crossfades(start_t, end_t, tracks_sorted, fadeLen)
     if last then
       if rightN then
         if (EDGE_XF_ALIGN or "right"):lower() == "center" and EDGE_XF_MOVE_OUTSIDE then
-          -- 置中：區內最後一塊向右延一半；右鄰向左延一半（若素材不足，會夾緊）
-          local half  = fadeLen * 0.5
+          -- Centered: extend last item right by half; extend right neighbor left by half (clamped if source is short).
+          local half2 = fadeLen * 0.5
           local llen  = r.GetMediaItemInfo_Value(last,"D_LENGTH")
-          r.SetMediaItemInfo_Value(last,"D_LENGTH", llen + half)
+          r.SetMediaItemInfo_Value(last,"D_LENGTH", llen + half2)
 
-          local gotR  = extend_item_left_no_move_right_clamped(rightN, half)
-          if gotR < half - EPS then
-            -- 右鄰素材不足：把「置中」改為「可達到的對稱值」
+          local gotR  = extend_item_left_no_move_right_clamped(rightN, half2)
+          if gotR < half2 - EPS then
+            -- Right neighbor source too short: fall back to the achievable symmetric value.
             local want = gotR
-            -- 回退內側延伸，保持重疊對稱
+            -- Roll back inner extension to maintain symmetric overlap.
             r.SetMediaItemInfo_Value(last,"D_LENGTH", llen + want)
-            half = want
+            half2 = want
           end
-          -- 設置兩側淡化（長度至少 half）
+          -- Apply fades on both sides (length at least fadeLen).
           local fout = math.max(fadeLen, r.GetMediaItemInfo_Value(last,   "D_FADEOUTLEN"))
           local fin  = math.max(fadeLen, r.GetMediaItemInfo_Value(rightN, "D_FADEINLEN"))
           apply_item_fade_shape(last,   nil, fout)
           apply_item_fade_shape(rightN, fin, nil )
 
         elseif (EDGE_XF_ALIGN or "right"):lower() == "left" and EDGE_XF_MOVE_OUTSIDE then
-          -- 全部在外側：只把右鄰向左延整個長度（不足則夾緊）
+          -- Outside: extend right neighbor leftward by full length (clamped if source is short).
           local got = extend_item_left_no_move_right_clamped(rightN, fadeLen)
           local fout = math.max(got, r.GetMediaItemInfo_Value(last,"D_FADEOUTLEN"))
           local fin  = math.max(got, r.GetMediaItemInfo_Value(rightN,"D_FADEINLEN"))
@@ -724,7 +727,7 @@ local function apply_boundary_crossfades(start_t, end_t, tracks_sorted, fadeLen)
           apply_item_fade_shape(rightN, fin, nil)
 
         else
-          -- "right" 或不允許動外側：全在內側，只延長區內最後一塊
+          -- "right" or EDGE_XF_MOVE_OUTSIDE=false: entirely inside, extend last item only.
           local llen = r.GetMediaItemInfo_Value(last,"D_LENGTH")
           r.SetMediaItemInfo_Value(last,"D_LENGTH", llen + fadeLen)
           local fout = math.max(fadeLen, r.GetMediaItemInfo_Value(last,"D_FADEOUTLEN"))
@@ -734,7 +737,7 @@ local function apply_boundary_crossfades(start_t, end_t, tracks_sorted, fadeLen)
         end
 
       else
-        -- 沒右鄰；若非 edge-to-edge 限制，可只對 last 給淡出
+        -- No right neighbor; apply fade-out to last item only if not restricted to edge-to-edge.
         if not edgeToEdgeOnly then
           local fout = math.max(fadeLen, r.GetMediaItemInfo_Value(last,"D_FADEOUTLEN"))
           apply_item_fade_shape(last, nil, fout)
@@ -744,14 +747,14 @@ local function apply_boundary_crossfades(start_t, end_t, tracks_sorted, fadeLen)
 
   end
 
-  -- 還原 Trim behind
+  -- Restore "Trim content behind" preference.
   if trim_was_on then r.Main_OnCommand(TRIM_CMD,0) end
 end
 
 
--- 用系統等功率形狀（Action 41529）蓋掉選區內、指定軌的交叉形狀
+-- Stamp equal-power crossfade shape (Action 41529) over all crossfades in the target range.
 local function stamp_system_equal_power(start_t, end_t, tracks_sorted)
-  -- 1) 暫存原本的 time selection & selection
+  -- 1) Save current time selection and item/track selection.
   local ts_st, ts_en = r.GetSet_LoopTimeRange2(0, false, false, 0, 0, false)
   local saved_items, saved_tracks = {}, {}
   for i=0, r.CountSelectedMediaItems(0)-1 do
@@ -762,11 +765,11 @@ local function stamp_system_equal_power(start_t, end_t, tracks_sorted)
     if r.GetMediaTrackInfo_Value(tr,"I_SELECTED") > 0.5 then saved_tracks[#saved_tracks+1]=tr end
   end
 
-  -- 2) 選本組軌
+  -- 2) Select target tracks.
   r.Main_OnCommand(40297,0)
   for _,tr in ipairs(tracks_sorted) do r.SetMediaTrackInfo_Value(tr,"I_SELECTED",1) end
 
-  -- 3) 依邊界交叉長度擴張 time selection（確保包含邊界兩側的成對 items）
+  -- 3) Expand time selection to include boundary neighbors on both sides.
   local edgeL = edge_len_seconds(start_t)
   local edgeR = edge_len_seconds(end_t)
   local padL  = (edgeL > 0) and edgeL or 0
@@ -775,13 +778,13 @@ local function stamp_system_equal_power(start_t, end_t, tracks_sorted)
   local t2    = end_t   + padR
   r.GetSet_LoopTimeRange2(0, true, false, t1, t2, false)
 
-  -- 4) 選擇這些軌在 time selection 內的所有 items
+  -- 4) Select all items on target tracks within the expanded time selection.
   r.Main_OnCommand(40718,0) -- Item: Select all items on selected tracks in current time selection
 
-  -- 5) 套等功率形狀（41529）
+  -- 5) Apply equal-power shape (action 41529).
   r.Main_OnCommand(41529,0) -- Item: Set crossfade shape to type 2 (equal power)
 
-  -- 6) 還原
+  -- 6) Restore saved state.
   r.GetSet_LoopTimeRange2(0, true, false, ts_st, ts_en, false)
   r.Main_OnCommand(40289,0) -- Unselect items
   for _,it in ipairs(saved_items) do if r.ValidatePtr2(0,it,"MediaItem*") then r.SetMediaItemSelected(it, true) end end
@@ -848,7 +851,7 @@ local function process_group(start_t, end_t, tracks_sorted, tile_len)
     apply_boundary_crossfades(start_t, end_t, tracks_sorted, edgeSec)
   end
 
-  -- 若選擇用系統等功率形狀，最後蓋一次（JOIN + 邊界一起）
+  -- If equal-power via action, stamp all crossfades (JOIN + boundary) at the end.
   if (CF_SHAPE_PRESET or "equal_power") == "equal_power" and CF_EQUALPOWER_VIA_ACTION then
     stamp_system_equal_power(start_t, end_t, tracks_sorted)
   end
@@ -862,25 +865,107 @@ end
 
 
 
+-- ============================== fallback target builders ==============================
+-- Build a single group from time selection and currently selected tracks.
+local function get_target_from_time_selection()
+  local ts_start, ts_end = r.GetSet_LoopTimeRange2(0, false, false, 0, 0, false)
+  if ts_end <= ts_start + EPS then return nil, nil, "No valid time selection." end
+
+  local tracks = {}
+  for i = 0, r.CountTracks(0)-1 do
+    local tr = r.GetTrack(0, i)
+    if r.GetMediaTrackInfo_Value(tr, "I_SELECTED") > 0.5 then
+      tracks[#tracks+1] = tr
+    end
+  end
+  if #tracks == 0 then
+    return nil, nil, "Time selection found, but no tracks selected.\nPlease select at least one track."
+  end
+  table.sort(tracks, function(a, b) return track_index(a) < track_index(b) end)
+
+  local key    = string.format("%.15f|%.15f", ts_start, ts_end)
+  local groups = { [key] = { start=ts_start, finish=ts_end, tracks=tracks } }
+  local order  = { key }
+  return groups, order, nil
+end
+
+-- Build a single group from item selection's bounding box and their tracks.
+local function get_target_from_item_selection()
+  local n = r.CountSelectedMediaItems(0)
+  if n == 0 then
+    return nil, nil, "No Razor Edit, no time selection, and no items selected."
+  end
+
+  local min_start  = math.huge
+  local max_end    = -math.huge
+  local tracks_set = {}
+  local tracks     = {}
+  for i = 0, n-1 do
+    local it = r.GetSelectedMediaItem(0, i)
+    local p  = r.GetMediaItemInfo_Value(it, "D_POSITION")
+    local l  = r.GetMediaItemInfo_Value(it, "D_LENGTH")
+    local tr = r.GetMediaItem_Track(it)
+    if p < min_start then min_start = p end
+    if p+l > max_end then max_end = p+l end
+    local tkey = tostring(tr)
+    if not tracks_set[tkey] then
+      tracks_set[tkey] = true
+      tracks[#tracks+1] = tr
+    end
+  end
+  if max_end <= min_start + EPS then
+    return nil, nil, "Selected items have zero total length."
+  end
+  table.sort(tracks, function(a, b) return track_index(a) < track_index(b) end)
+
+  local key    = string.format("%.15f|%.15f", min_start, max_end)
+  local groups = { [key] = { start=min_start, finish=max_end, tracks=tracks } }
+  local order  = { key }
+  return groups, order, nil
+end
 
 -- ============================== main ==============================
 local function main()
   local areas, err = get_razor_areas_items_only()
-  if not areas then r.ShowMessageBox(err or "Failed to read Razor edits.", "Repeat to Fill", 0); return end
-  if #areas==0 then r.ShowMessageBox("No Razor Edit areas.","Repeat to Fill",0); return end
+  if err then r.ShowMessageBox(err, "Repeat to Fill", 0); return end
+
+  local groups = {}
+  local order  = {}
+  local used_razor = (#areas > 0)
+
+  if used_razor then
+    -- Razor Edit found: original pipeline.
+    groups, order = group_areas_by_range(areas)
+  else
+    -- No Razor Edit: try time selection first.
+    local ts_start, ts_end = r.GetSet_LoopTimeRange2(0, false, false, 0, 0, false)
+    if ts_end > ts_start + EPS then
+      local g, o, e2 = get_target_from_time_selection()
+      if not g then r.ShowMessageBox(e2, "Repeat to Fill", 0); return end
+      groups, order = assert(g), assert(o)
+    else
+      -- No time selection: fall back to item selection.
+      local g, o, e2 = get_target_from_item_selection()
+      if not g then r.ShowMessageBox(e2, "Repeat to Fill", 0); return end
+      groups, order = assert(g), assert(o)
+    end
+  end
 
   local arrangeStart, arrangeEnd = r.GetSet_ArrangeView2(0,false,0,0,0,0)
   local curpos = r.GetCursorPosition()
   local sel_items, sel_tracks = snapshot_selection()
-
-  local groups, order = group_areas_by_range(areas)
 
   r.Undo_BeginBlock()
   r.PreventUIRefresh(1)
   unselect_all()
 
   -- measure tile once (use first group's top track)
-  local first_base = groups[order[1]].tracks[1]
+  local first_base
+  for _, k in ipairs(order) do
+    local fg = groups[k]
+    if fg ~= nil then first_base = fg.tracks[1] end
+    break
+  end
   local tile_len, merr = measure_clipboard_tile_len(first_base)
   if not tile_len then
     r.PreventUIRefresh(-1)
@@ -892,32 +977,35 @@ local function main()
     return
   end
 
-  -- process each Razor group
+  -- process each group
   for _,key in ipairs(order) do
     local g = groups[key]
     process_group(g.start, g.finish, g.tracks, tile_len)
   end
 
-  -- restore Razor or clear
-  if restoreRazorEdits then
-    local lastTrack=nil; local buf={}
-    for _,ar in ipairs(areas) do
-      local tr=ar.track
-      if tr~=lastTrack and lastTrack~=nil then
-        r.GetSetMediaTrackInfo_String(lastTrack,"P_RAZOREDITS", table.concat(buf," "), true); buf={}
+  -- Restore or clear Razor edits (only when Razor mode was used).
+  if used_razor then
+    if restoreRazorEdits then
+      local lastTrack=nil; local buf={}
+      for _,ar in ipairs(areas) do
+        local tr=ar.track
+        if tr~=lastTrack and lastTrack~=nil then
+          r.GetSetMediaTrackInfo_String(lastTrack,"P_RAZOREDITS", table.concat(buf," "), true); buf={}
+        end
+        buf[#buf+1] = string.format("%.20f %.20f \"\"", ar.start, ar.finish)
+        lastTrack=tr
       end
-      buf[#buf+1] = string.format("%.20f %.20f \"\"", ar.start, ar.finish)
-      lastTrack=tr
+      if lastTrack then r.GetSetMediaTrackInfo_String(lastTrack,"P_RAZOREDITS", table.concat(buf," "), true) end
+    else
+      r.Main_OnCommand(42406,0) -- Razor edit: Clear all areas
     end
-    if lastTrack then r.GetSetMediaTrackInfo_String(lastTrack,"P_RAZOREDITS", table.concat(buf," "), true) end
-  else
-    r.Main_OnCommand(42406,0) -- Razor edit: Clear all areas
   end
 
   -- restore selection & UI
   restore_selection(sel_items, sel_tracks)
-  if leaveCursorLocation==1 then r.SetEditCurPos(groups[order[1]].start,false,false)
-  elseif leaveCursorLocation==2 then r.SetEditCurPos(groups[order[1]].finish,false,false)
+  local g0 = groups[order[1]]
+  if leaveCursorLocation==1 then r.SetEditCurPos(g0.start,false,false)
+  elseif leaveCursorLocation==2 then r.SetEditCurPos(g0.finish,false,false)
   else r.SetEditCurPos(curpos,false,false) end
   r.GetSet_ArrangeView2(0,true,0,0,arrangeStart,arrangeEnd)
 
