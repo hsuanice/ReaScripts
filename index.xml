@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<index version="1" name="hsuanice Scripts" commit="8bc100807a237eb7d4cfb588d25cc50126a3b658">
+<index version="1" name="hsuanice Scripts" commit="ff879a9d59ef87be92dfbb27a8a24a2f5a864941">
   <category name="Beta Testing">
     <reapack name="hsuanice_AudioSweet ReaImGui.lua" type="script" desc="AudioSweet ReaImGui - AudioSuite Workflow (Pro Tools–Style)">
       <metadata>
@@ -905,6 +905,9 @@ v0.1.0 (2025-09-13)
       </version>
       <version name="0.4.6 right boundary center mode fixed" author="hsuanice" time="2025-09-05T12:58:07Z">
         <source main="main">https://github.com/hsuanice/ReaScripts/raw/ad333a2caeafcfeeafea1e47eabd563f2df2b366/Beta%20Testing/hsuanice_Pro%20Tools%20Paste%20Special-%20Repeat%20to%20Fill%20Selection.lua</source>
+      </version>
+      <version name="0.4.7 time/item selection fallback" author="hsuanice" time="2026-02-20T09:29:43Z">
+        <source main="main">https://github.com/hsuanice/ReaScripts/raw/ff879a9d59ef87be92dfbb27a8a24a2f5a864941/Beta%20Testing/hsuanice_Pro%20Tools%20Paste%20Special-%20Repeat%20to%20Fill%20Selection.lua</source>
       </version>
     </reapack>
     <reapack name="hsuanice_Pro Tools Trim Clip To File Boundaries.lua" type="script" desc="Pro Tools - Trim Clip To File Boundaries">
