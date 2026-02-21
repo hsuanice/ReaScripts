@@ -1,6 +1,6 @@
 --[[
 @description Conform List Browser
-@version 260221.1128
+@version v260221.1128
 @author hsuanice
 @about
   A REAPER script for browsing and editing EDL (Edit Decision List) data
@@ -41,6 +41,12 @@
   Optional: js_ReaScriptAPI (for folder selection)
 
 @changelog
+  v260221.1200
+  - Fix: REAPER lag when audio files are loaded
+    • Audio table was rendering ALL rows every frame (no virtualization)
+    • Added ListClipper to draw_audio_table() — same as EDL table
+    • Now only visible rows are rendered per frame (50+ row threshold)
+
   v260221.1128
   - Revert: removed all loop rate-cap experiments
     • Rate cap (early return) → context invalidity crash on macOS
@@ -366,7 +372,7 @@ end
 ---------------------------------------------------------------------------
 local SCRIPT_NAME = "Conform List Browser"
 local EXT_NS = "hsuanice_ConformListBrowser"
-local VERSION = "260221.1128"
+local VERSION = "260221.1200"
 
 -- Column definitions (EDL Events table)
 local COL = {
@@ -5152,54 +5158,77 @@ local function draw_audio_table(table_height)
   -- Headers
   reaper.ImGui_TableHeadersRow(ctx)
 
-  -- Rows
-  for i = 1, row_count do
-    local af = audio_rows[i]
-    if not af then break end
+  -- Rows (with ListClipper for virtualization)
+  if list_clipper and not reaper.ImGui_ValidatePtr(list_clipper, "ImGui_ListClipper*") then
+    list_clipper = reaper.ImGui_CreateListClipper(ctx)
+  end
 
-    reaper.ImGui_TableNextRow(ctx)
+  local use_clipper = list_clipper and row_count > 50
+  local cs, ce
 
-    for idx, col in ipairs(visible_cols) do
-      reaper.ImGui_TableSetColumnIndex(ctx, idx - 1)
+  if use_clipper then
+    reaper.ImGui_ListClipper_Begin(list_clipper, row_count)
+  end
 
-      local text = ""
-      local meta = af.metadata or {}
+  local clp = true
+  while clp do
+    if use_clipper then
+      if not reaper.ImGui_ListClipper_Step(list_clipper) then break end
+      local ds, de = reaper.ImGui_ListClipper_GetDisplayRange(list_clipper)
+      cs, ce = ds + 1, de
+    else
+      cs, ce = 1, row_count
+      clp = false
+    end
 
-      if col == AUDIO_COL.FILENAME then
-        text = af.filename or ""
-      elseif col == AUDIO_COL.SRC_TC then
-        text = meta.src_tc or ""
-      elseif col == AUDIO_COL.SCENE then
-        text = meta.scene or ""
-      elseif col == AUDIO_COL.TAKE then
-        text = meta.take or ""
-      elseif col == AUDIO_COL.TAPE then
-        text = meta.tape or meta.reel or ""
-      elseif col == AUDIO_COL.FOLDER then
-        text = af.folder or ""
-      elseif col == AUDIO_COL.DURATION then
-        text = format_duration(meta.duration)
-      elseif col == AUDIO_COL.SAMPLERATE then
-        text = format_samplerate(meta.samplerate)
-      elseif col == AUDIO_COL.CHANNELS then
-        text = meta.channels and tostring(meta.channels) or ""
-      elseif col == AUDIO_COL.PROJECT then
-        text = meta.project or ""
-      elseif col == AUDIO_COL.FRAMERATE then
-        text = meta.framerate or ""
-      elseif col == AUDIO_COL.SPEED then
-        text = meta.speed or ""
-      elseif col == AUDIO_COL.ORIG_FILENAME then
-        text = meta.orig_filename or ""
-      elseif col == AUDIO_COL.TRACK_NAMES then
-        text = meta.track_names or ""
-      elseif col == AUDIO_COL.DESCRIPTION then
-        local desc = meta.description or ""
-        if #desc > 50 then desc = desc:sub(1, 47) .. "..." end
-        text = desc
+    for i = cs, ce do
+      local af = audio_rows[i]
+      if not af then break end
+
+      reaper.ImGui_TableNextRow(ctx)
+
+      for idx, col in ipairs(visible_cols) do
+        reaper.ImGui_TableSetColumnIndex(ctx, idx - 1)
+
+        local text = ""
+        local meta = af.metadata or {}
+
+        if col == AUDIO_COL.FILENAME then
+          text = af.filename or ""
+        elseif col == AUDIO_COL.SRC_TC then
+          text = meta.src_tc or ""
+        elseif col == AUDIO_COL.SCENE then
+          text = meta.scene or ""
+        elseif col == AUDIO_COL.TAKE then
+          text = meta.take or ""
+        elseif col == AUDIO_COL.TAPE then
+          text = meta.tape or meta.reel or ""
+        elseif col == AUDIO_COL.FOLDER then
+          text = af.folder or ""
+        elseif col == AUDIO_COL.DURATION then
+          text = format_duration(meta.duration)
+        elseif col == AUDIO_COL.SAMPLERATE then
+          text = format_samplerate(meta.samplerate)
+        elseif col == AUDIO_COL.CHANNELS then
+          text = meta.channels and tostring(meta.channels) or ""
+        elseif col == AUDIO_COL.PROJECT then
+          text = meta.project or ""
+        elseif col == AUDIO_COL.FRAMERATE then
+          text = meta.framerate or ""
+        elseif col == AUDIO_COL.SPEED then
+          text = meta.speed or ""
+        elseif col == AUDIO_COL.ORIG_FILENAME then
+          text = meta.orig_filename or ""
+        elseif col == AUDIO_COL.TRACK_NAMES then
+          text = meta.track_names or ""
+        elseif col == AUDIO_COL.DESCRIPTION then
+          local desc = meta.description or ""
+          if #desc > 50 then desc = desc:sub(1, 47) .. "..." end
+          text = desc
+        end
+
+        reaper.ImGui_Text(ctx, text)
       end
-
-      reaper.ImGui_Text(ctx, text)
     end
   end
 
