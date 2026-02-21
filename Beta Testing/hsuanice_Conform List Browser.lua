@@ -1,6 +1,6 @@
 --[[
 @description Conform List Browser
-@version v260220.1535
+@version 260221.1128
 @author hsuanice
 @about
   A REAPER script for browsing and editing EDL (Edit Decision List) data
@@ -41,6 +41,39 @@
   Optional: js_ReaScriptAPI (for folder selection)
 
 @changelog
+  v260221.1128
+  - Revert: removed all loop rate-cap experiments
+    • Rate cap (early return) → context invalidity crash on macOS
+    • do_draw content skip → window flickering + buttons unclickable
+    • ImGui immediate mode requires full redraw every frame; partial draw
+      or skipped frames are not viable in ReaImGui
+    • Loop restored to original structure (render everything every defer call)
+    • REAPER lag issue deferred — needs a different investigation approach
+
+  v260221.1041
+  - Fix: REAPER lag when CLB is open
+    • Added frame rate cap to the defer loop: 30fps when window active, 10fps when idle
+    • Previously the loop ran at full REAPER main-thread rate (60+ Hz), consuming
+      continuous main-thread time even when nothing was changing
+    • Audio metadata loading batch still runs at full defer rate (unaffected)
+  - Fix: Filter state (Track/Reel/Group checked/unchecked) now saved in .clb project
+    • Unchecked tracks, reels, and groups are restored exactly on Open
+    • Filter panel visibility (show/hide sidebar panels) also saved and restored
+    • Audio panel show/hide state saved and restored
+
+  v260221.1019
+  - Feature: Save / Open project (.clb format)
+    • "Save..." button in toolbar: saves full session to a .clb file
+      - FPS, drop-frame, track format, audio folder path
+      - EDL column order and visibility
+      - All EDL sources (path, name, visibility)
+      - All event rows (including edits, groups, match status, matched paths)
+    • "Open..." button in toolbar: restores session from .clb file
+      - All row data restored (edits, groups, match state preserved — no re-matching needed)
+      - If audio folder has a cache (.clbcache), audio files auto-restored
+      - If no cache, click "Load Audio..." to re-scan
+    • File format: CLB_PROJECT_V1 (pipe-delimited, with escape for special chars)
+
   v260220.1535
   - Fix: Consolidate track naming rules
     • Audio group → A1, A2, A3 ... (no space)
@@ -333,7 +366,7 @@ end
 ---------------------------------------------------------------------------
 local SCRIPT_NAME = "Conform List Browser"
 local EXT_NS = "hsuanice_ConformListBrowser"
-local VERSION = "260209.1625"
+local VERSION = "260221.1128"
 
 -- Column definitions (EDL Events table)
 local COL = {
@@ -2130,6 +2163,370 @@ local function append_rows_from_parsed(parsed, source_path)
     #new_rows, CLB.edl_sources[src_idx].name, #ROWS))
 end
 
+---------------------------------------------------------------------------
+-- CLB Project Save / Load
+---------------------------------------------------------------------------
+
+--- Escape a value for pipe-delimited CLB format.
+local function _clb_escape(s)
+  s = tostring(s or "")
+  s = s:gsub("\\", "\\\\")
+  s = s:gsub("|", "\\|")
+  s = s:gsub("\n", "\\n")
+  s = s:gsub("\r", "")
+  return s
+end
+
+--- Split a CLB line by unescaped '|', unescaping as we go.
+local function _clb_split(line)
+  local parts = {}
+  local cur = {}
+  local i = 1
+  while i <= #line do
+    local c = line:sub(i, i)
+    if c == "\\" and i < #line then
+      local nxt = line:sub(i + 1, i + 1)
+      if     nxt == "|"  then cur[#cur+1] = "|";  i = i + 2
+      elseif nxt == "n"  then cur[#cur+1] = "\n"; i = i + 2
+      elseif nxt == "\\" then cur[#cur+1] = "\\"; i = i + 2
+      else                    cur[#cur+1] = c;    i = i + 1
+      end
+    elseif c == "|" then
+      parts[#parts+1] = table.concat(cur); cur = {}; i = i + 1
+    else
+      cur[#cur+1] = c; i = i + 1
+    end
+  end
+  parts[#parts+1] = table.concat(cur)
+  return parts
+end
+
+--- Save the current CLB session to a .clb project file.
+local function save_clb_project(filepath)
+  local f = io.open(filepath, "w")
+  if not f then
+    reaper.ShowMessageBox("Cannot write to:\n" .. filepath, SCRIPT_NAME, 0)
+    return false
+  end
+
+  f:write("CLB_PROJECT_V1\n")
+
+  -- Settings
+  f:write(string.format("FPS|%s|%s\n",
+    tostring(CLB.fps), CLB.is_drop and "1" or "0"))
+  f:write(string.format("TRACK_FORMAT|%s\n",
+    _clb_escape(CLB.track_name_format or "")))
+  f:write(string.format("AUDIO_FOLDER|%s\n",
+    _clb_escape(CLB.audio_folder or "")))
+  f:write(string.format("AUDIO_RECURSIVE|%s\n",
+    CLB.audio_recursive and "1" or "0"))
+
+  -- Column layout
+  f:write(string.format("EDL_COL_ORDER|%s\n", table.concat(EDL_COL_ORDER, ",")))
+  local vis_parts = {}
+  for i = 1, COL_COUNT do
+    vis_parts[i] = EDL_COL_VISIBILITY[i] and "1" or "0"
+  end
+  f:write(string.format("EDL_COL_VISIBILITY|%s\n", table.concat(vis_parts, ",")))
+
+  -- EDL sources
+  f:write(string.format("SOURCES|%d\n", #CLB.edl_sources))
+  for _, src in ipairs(CLB.edl_sources) do
+    f:write(string.format("S|%s|%s|%d|%s\n",
+      _clb_escape(src.path or ""),
+      _clb_escape(src.name or ""),
+      src.event_count or 0,
+      src.visible and "1" or "0"))
+  end
+
+  -- EDL rows (including match state and group assignments)
+  -- Format: R|event_num|reel|track|edit_type|dissolve_len|
+  --           src_tc_in|src_tc_out|rec_tc_in|rec_tc_out|
+  --           clip_name|source_file|notes|
+  --           match_status|matched_path|group|orig_track|source_idx
+  f:write(string.format("ROWS|%d\n", #ROWS))
+  for _, row in ipairs(ROWS) do
+    f:write(string.format("R|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%d\n",
+      _clb_escape(row.event_num    or ""),   -- p[2]
+      _clb_escape(row.reel         or ""),   -- p[3]
+      _clb_escape(row.track        or ""),   -- p[4]
+      _clb_escape(row.edit_type    or ""),   -- p[5]
+      _clb_escape(tostring(row.dissolve_len or "")), -- p[6]
+      _clb_escape(row.src_tc_in    or ""),   -- p[7]
+      _clb_escape(row.src_tc_out   or ""),   -- p[8]
+      _clb_escape(row.rec_tc_in    or ""),   -- p[9]
+      _clb_escape(row.rec_tc_out   or ""),   -- p[10]
+      _clb_escape(row.clip_name    or ""),   -- p[11]
+      _clb_escape(row.source_file  or ""),   -- p[12]
+      _clb_escape(row.notes        or ""),   -- p[13]
+      _clb_escape(row.match_status or ""),   -- p[14]
+      _clb_escape(row.matched_path or ""),   -- p[15]
+      _clb_escape(row.group        or ""),   -- p[16]
+      _clb_escape(row.__orig_track or ""),   -- p[17]
+      row.__source_idx or 0))                -- p[18]
+  end
+
+  -- Filter panel visibility flags
+  f:write(string.format("SHOW_TRACK_FILTER|%s\n",   CLB.show_track_filter   and "1" or "0"))
+  f:write(string.format("SHOW_REEL_FILTER|%s\n",    CLB.show_reel_filter    and "1" or "0"))
+  f:write(string.format("SHOW_GROUP_FILTER|%s\n",   CLB.show_group_filter   and "1" or "0"))
+  f:write(string.format("SHOW_SOURCES_PANEL|%s\n",  CLB.show_sources_panel  and "1" or "0"))
+  f:write(string.format("SHOW_AUDIO_PANEL|%s\n",    CLB.show_audio_panel    and "1" or "0"))
+
+  -- Hidden filter items (one name per line, only the hidden ones)
+  for _, tf in ipairs(CLB.track_filters) do
+    if not tf.visible then
+      f:write(string.format("HIDDEN_TRACK|%s\n", _clb_escape(tf.name)))
+    end
+  end
+  for _, rf in ipairs(CLB.reel_filters) do
+    if not rf.visible then
+      f:write(string.format("HIDDEN_REEL|%s\n", _clb_escape(rf.name)))
+    end
+  end
+  for _, gf in ipairs(CLB.group_filters) do
+    if not gf.visible then
+      f:write(string.format("HIDDEN_GROUP|%s\n", _clb_escape(gf.name)))
+    end
+  end
+
+  f:close()
+  console_msg("Saved CLB project: " .. filepath)
+  reaper.ShowMessageBox(
+    string.format("Project saved:\n%s\n\n%d events, %d sources",
+      filepath:match("([^/\\]+)$") or filepath, #ROWS, #CLB.edl_sources),
+    SCRIPT_NAME, 0)
+  return true
+end
+
+--- Load a .clb project file and restore the full session state.
+local function load_clb_project(filepath)
+  local f = io.open(filepath, "r")
+  if not f then
+    reaper.ShowMessageBox("Cannot open:\n" .. filepath, SCRIPT_NAME, 0)
+    return false
+  end
+
+  local header = f:read("*l")
+  if header ~= "CLB_PROJECT_V1" then
+    f:close()
+    reaper.ShowMessageBox("Not a valid CLB project file.", SCRIPT_NAME, 0)
+    return false
+  end
+
+  local new_fps              = 25
+  local new_is_drop          = false
+  local new_track_format     = "${format} - ${track}"
+  local new_audio_folder     = ""
+  local new_audio_recursive  = true
+  local new_col_order        = nil
+  local new_col_vis          = nil
+  local new_sources          = {}
+  local new_rows             = {}
+  local max_guid             = 0
+  -- Filter panel flags (nil = not present in file → keep default)
+  local new_show_track       = nil
+  local new_show_reel        = nil
+  local new_show_group       = nil
+  local new_show_sources     = nil
+  local new_show_audio       = nil
+  -- Hidden filter names (sets, keyed by name)
+  local hidden_tracks        = {}
+  local hidden_reels         = {}
+  local hidden_groups        = {}
+
+  for line in f:lines() do
+    if line ~= "" then
+      local p = _clb_split(line)
+      local key = p[1]
+
+      if key == "FPS" then
+        new_fps      = tonumber(p[2]) or 25
+        new_is_drop  = (p[3] == "1")
+
+      elseif key == "TRACK_FORMAT" then
+        new_track_format = p[2] or "${format} - ${track}"
+
+      elseif key == "AUDIO_FOLDER" then
+        new_audio_folder = p[2] or ""
+
+      elseif key == "AUDIO_RECURSIVE" then
+        new_audio_recursive = (p[2] == "1")
+
+      elseif key == "EDL_COL_ORDER" then
+        local order = {}
+        for num_str in (p[2] or ""):gmatch("(%d+)") do
+          local num = tonumber(num_str)
+          if num and num >= 1 and num <= COL_COUNT then
+            order[#order+1] = num
+          end
+        end
+        if #order == COL_COUNT then new_col_order = order end
+
+      elseif key == "EDL_COL_VISIBILITY" then
+        local vis = {}; local idx = 0
+        for val in (p[2] or ""):gmatch("([01])") do
+          idx = idx + 1
+          if idx <= COL_COUNT then vis[idx] = (val == "1") end
+        end
+        if idx >= COL_COUNT then new_col_vis = vis end
+
+      elseif key == "SHOW_TRACK_FILTER"  then new_show_track   = (p[2] == "1")
+      elseif key == "SHOW_REEL_FILTER"   then new_show_reel    = (p[2] == "1")
+      elseif key == "SHOW_GROUP_FILTER"  then new_show_group   = (p[2] == "1")
+      elseif key == "SHOW_SOURCES_PANEL" then new_show_sources = (p[2] == "1")
+      elseif key == "SHOW_AUDIO_PANEL"   then new_show_audio   = (p[2] == "1")
+      elseif key == "HIDDEN_TRACK"  then hidden_tracks[p[2] or ""] = true
+      elseif key == "HIDDEN_REEL"   then hidden_reels [p[2] or ""] = true
+      elseif key == "HIDDEN_GROUP"  then hidden_groups[p[2] or ""] = true
+
+      elseif key == "S" then
+        new_sources[#new_sources+1] = {
+          path        = p[2] or "",
+          name        = p[3] or "",
+          event_count = tonumber(p[4]) or 0,
+          visible     = (p[5] ~= "0"),
+        }
+
+      elseif key == "R" then
+        max_guid = max_guid + 1
+        local rec_in  = p[9]  or "00:00:00:00"
+        local rec_out = p[10] or "00:00:00:00"
+        local dur = EDL.seconds_to_tc(
+          EDL.tc_to_seconds(rec_out, new_fps, new_is_drop) -
+          EDL.tc_to_seconds(rec_in,  new_fps, new_is_drop),
+          new_fps, new_is_drop)
+        local row = {
+          __event_idx  = max_guid,
+          __guid       = string.format("clb_%06d", max_guid),
+          __source_idx = tonumber(p[18]) or 0,
+          __orig_track = p[17] or "",
+          event_num    = p[2]  or "",
+          reel         = p[3]  or "",
+          track        = p[4]  or "",
+          edit_type    = p[5]  or "C",
+          dissolve_len = (p[6] and p[6] ~= "") and tonumber(p[6]) or nil,
+          src_tc_in    = p[7]  or "00:00:00:00",
+          src_tc_out   = p[8]  or "00:00:00:00",
+          rec_tc_in    = rec_in,
+          rec_tc_out   = rec_out,
+          clip_name    = p[11] or "",
+          source_file  = p[12] or "",
+          notes        = p[13] or "",
+          match_status = p[14] or "",
+          matched_path = p[15] or "",
+          group        = p[16] or "",
+          duration     = dur,
+        }
+        row.__search_text = table.concat({
+          row.event_num, row.reel, row.track,
+          row.clip_name, row.source_file, row.notes, row.group,
+        }, " "):lower()
+        new_rows[#new_rows+1] = row
+      end
+    end
+  end
+  f:close()
+
+  -- Apply loaded data
+  CLB.fps               = new_fps
+  CLB.is_drop           = new_is_drop
+  CLB.track_name_format = new_track_format
+  CLB.audio_folder      = new_audio_folder
+  CLB.audio_recursive   = new_audio_recursive
+  if new_col_order then EDL_COL_ORDER      = new_col_order end
+  if new_col_vis   then EDL_COL_VISIBILITY = new_col_vis   end
+  CLB.edl_sources       = new_sources
+  ROWS                  = new_rows
+  _guid_counter         = max_guid
+
+  -- Filter panel visibility flags
+  if new_show_track   ~= nil then CLB.show_track_filter   = new_show_track   end
+  if new_show_reel    ~= nil then CLB.show_reel_filter    = new_show_reel    end
+  if new_show_group   ~= nil then CLB.show_group_filter   = new_show_group   end
+  if new_show_sources ~= nil then CLB.show_sources_panel  = new_show_sources end
+
+  -- Reset UI state
+  sel_clear()
+  EDIT = nil
+  SORT_STATE.columns = {}
+  UNDO_STACK = {}
+  UNDO_POS   = 0
+  undo_snapshot()
+  CLB.loaded_file   = filepath
+  CLB.loaded_format = "CLB"
+
+  -- Rebuild filter panels, then apply saved hidden states
+  _rebuild_track_filters()
+  _rebuild_reel_filters()
+  _rebuild_group_filters()
+
+  if next(hidden_tracks) then
+    for _, tf in ipairs(CLB.track_filters) do
+      if hidden_tracks[tf.name] then tf.visible = false end
+    end
+  end
+  if next(hidden_reels) then
+    for _, rf in ipairs(CLB.reel_filters) do
+      if hidden_reels[rf.name] then rf.visible = false end
+    end
+  end
+  if next(hidden_groups) then
+    for _, gf in ipairs(CLB.group_filters) do
+      if hidden_groups[gf.name] then gf.visible = false end
+    end
+  end
+
+  CLB.cached_rows = nil; CLB.cached_rows_frame = -1
+
+  -- Try to restore audio files from cache (don't re-run matching — match data is in rows)
+  CLB.audio_files      = {}
+  CLB.show_audio_panel = false
+  if new_audio_folder ~= "" then
+    local cached = load_audio_cache(new_audio_folder, new_audio_recursive)
+    if cached then
+      CLB.audio_files = cached
+      -- Restore audio panel visibility from file, or default to true if audio loaded
+      CLB.show_audio_panel = (new_show_audio ~= nil) and new_show_audio or true
+      console_msg(string.format("Restored %d audio files from cache", #cached))
+    else
+      console_msg("Audio cache not found — click 'Load Audio...' to re-scan: " .. new_audio_folder)
+    end
+  end
+
+  console_msg(string.format("Loaded CLB project: %d events, %d sources", #ROWS, #CLB.edl_sources))
+  return true
+end
+
+--- Open project dialog → load_clb_project.
+local function open_clb_project()
+  local retval, filepath
+  if reaper.JS_Dialog_BrowseForOpenFiles then
+    retval, filepath = reaper.JS_Dialog_BrowseForOpenFiles(
+      "Open CLB Project", CLB.last_dir or "", "",
+      "CLB Project (*.clb)\0*.clb\0All files\0*.*\0", false)
+    if retval ~= 1 or not filepath or filepath == "" then return end
+  else
+    retval, filepath = reaper.GetUserFileNameForRead("", "Open CLB Project", "*.clb")
+    if not retval or filepath == "" then return end
+  end
+  CLB.last_dir = filepath:match("^(.*)[/\\]") or CLB.last_dir
+  load_clb_project(filepath)
+  save_prefs()
+end
+
+--- Save-as dialog → save_clb_project.
+local function save_clb_project_dialog()
+  local default = "conform_" .. os.date("%Y%m%d_%H%M") .. ".clb"
+  local filepath = choose_save_path(default,
+    "CLB Project (*.clb)\0*.clb\0All files\0*.*\0")
+  if not filepath then return end
+  if not filepath:match("%.clb$") then filepath = filepath .. ".clb" end
+  CLB.last_dir = filepath:match("^(.*)[/\\]") or CLB.last_dir
+  save_clb_project(filepath)
+  save_prefs()
+end
+
 local function load_edl_file()
   -- Collect file paths (multi-select via JS extension, fallback to single)
   local filepaths = {}
@@ -3141,6 +3538,31 @@ local function draw_toolbar()
   local row1_height = scale(28)
   local flags = reaper.ImGui_WindowFlags_HorizontalScrollbar()
   if reaper.ImGui_BeginChild(ctx, "##toolbar_row1", 0, row1_height, 0, flags) then
+    -- Project Save / Open
+    if reaper.ImGui_Button(ctx, "Save...", scale(65), scale(24)) then
+      save_clb_project_dialog()
+    end
+    if reaper.ImGui_IsItemHovered(ctx) then
+      reaper.ImGui_BeginTooltip(ctx)
+      reaper.ImGui_Text(ctx, "Save current session as a .clb project file")
+      reaper.ImGui_Text(ctx, "(preserves EDL events, groups, audio matches, settings)")
+      reaper.ImGui_EndTooltip(ctx)
+    end
+    reaper.ImGui_SameLine(ctx)
+
+    if reaper.ImGui_Button(ctx, "Open...", scale(65), scale(24)) then
+      open_clb_project()
+    end
+    if reaper.ImGui_IsItemHovered(ctx) then
+      reaper.ImGui_BeginTooltip(ctx)
+      reaper.ImGui_Text(ctx, "Open a previously saved .clb project file")
+      reaper.ImGui_EndTooltip(ctx)
+    end
+    reaper.ImGui_SameLine(ctx)
+
+    reaper.ImGui_Text(ctx, "|")
+    reaper.ImGui_SameLine(ctx)
+
     -- Load buttons
     if reaper.ImGui_Button(ctx, "Load EDL...", scale(90), scale(24)) then
     load_edl_file()
