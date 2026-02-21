@@ -1,6 +1,6 @@
 --[[
 @description Conform List Browser
-@version v260221.1128
+@version 260221.1500
 @author hsuanice
 @about
   A REAPER script for browsing and editing EDL (Edit Decision List) data
@@ -41,7 +41,14 @@
   Optional: js_ReaScriptAPI (for folder selection)
 
 @changelog
-  v260221.1200
+  v260221.1500
+  - Perf: Switch get_view_rows() and get_audio_view_rows() from frame-based to dirty-flag cache
+    • Previously both functions rebuilt the filtered list every single frame (O(n) per frame)
+    • Now the cached result is reused until explicitly invalidated (CLB.cached_rows = nil)
+    • Eliminates redundant O(n) filtering on 6,000–10,000+ audio file lists every 60+ Hz frame
+    • Removed frame_counter, cached_rows_frame, audio_cached_frame fields entirely
+
+  v260221.1400
   - Fix: REAPER lag when audio files are loaded
     • Audio table was rendering ALL rows every frame (no virtualization)
     • Added ListClipper to draw_audio_table() — same as EDL table
@@ -567,7 +574,6 @@ local CLB = {
   scroll_to_row = nil,
   visible_range = { first = 0, last = 0 },
   cached_rows = nil,
-  cached_rows_frame = -1,
 
   -- Settings
   fps = 25,
@@ -577,7 +583,6 @@ local CLB = {
   last_audio_dir = "",
 
   -- UI state
-  frame_counter = 0,
   show_sources_panel = false,
   show_track_filter = true,
   track_filters = {},  -- { { name, count, visible }, ... }
@@ -594,7 +599,6 @@ local CLB = {
   split_ratio = 0.5,          -- Split ratio for EDL/Audio tables (0.3~0.7)
   audio_search = "",          -- Audio table search filter
   audio_cached = nil,         -- Cached filtered audio files
-  audio_cached_frame = -1,    -- Frame number of cached audio files
   audio_sort_col = nil,       -- Column to sort by (nil = no sort)
   audio_sort_asc = true,      -- Sort ascending
   audio_fit_content = false,  -- Flag to fit content widths next frame
@@ -1205,7 +1209,6 @@ local function clear_match_results()
     row.__match_candidates = nil
   end
   CLB.cached_rows = nil
-  CLB.cached_rows_frame = -1
 end
 
 --- Match audio files to EDL events
@@ -1306,7 +1309,6 @@ local function match_audio_files()
   end
 
   CLB.cached_rows = nil
-  CLB.cached_rows_frame = -1
 
   console_msg(string.format("Matching complete: %d found, %d multiple, %d not found",
     found_count, multiple_count, not_found_count))
@@ -1336,8 +1338,7 @@ end
 
 --- Get filtered and sorted audio files for display
 local function get_audio_view_rows()
-  local frame = CLB.frame_counter
-  if CLB.audio_cached and CLB.audio_cached_frame == frame then
+  if CLB.audio_cached then
     return CLB.audio_cached
   end
 
@@ -1386,7 +1387,6 @@ local function get_audio_view_rows()
   end
 
   CLB.audio_cached = result
-  CLB.audio_cached_frame = frame
   return CLB.audio_cached
 end
 
@@ -1598,7 +1598,7 @@ local function do_undo()
   UNDO_POS = UNDO_POS - 1
   undo_restore(UNDO_STACK[UNDO_POS])
   _rebuild_group_filters()
-  CLB.cached_rows = nil; CLB.cached_rows_frame = -1
+  CLB.cached_rows = nil
   console_msg("Undo")
 end
 
@@ -1607,7 +1607,7 @@ local function do_redo()
   UNDO_POS = UNDO_POS + 1
   undo_restore(UNDO_STACK[UNDO_POS])
   _rebuild_group_filters()
-  CLB.cached_rows = nil; CLB.cached_rows_frame = -1
+  CLB.cached_rows = nil
   console_msg("Redo")
 end
 
@@ -1716,7 +1716,7 @@ local function sort_rows()
     return false
   end)
 
-  CLB.cached_rows = nil; CLB.cached_rows_frame = -1
+  CLB.cached_rows = nil
 end
 
 local function toggle_sort(col_id, add_level)
@@ -1745,8 +1745,7 @@ end
 -- Filtering
 ---------------------------------------------------------------------------
 local function get_view_rows()
-  local frame = CLB.frame_counter
-  if CLB.cached_rows and CLB.cached_rows_frame == frame then
+  if CLB.cached_rows then
     return CLB.cached_rows
   end
 
@@ -1822,7 +1821,6 @@ local function get_view_rows()
     CLB.cached_rows = filtered
   end
 
-  CLB.cached_rows_frame = frame
   return CLB.cached_rows
 end
 
@@ -2141,7 +2139,7 @@ local function build_rows_from_parsed(parsed, source_path)
   _rebuild_track_filters()
   _rebuild_reel_filters()
   _auto_assign_groups()
-  CLB.cached_rows = nil; CLB.cached_rows_frame = -1
+  CLB.cached_rows = nil
 
   console_msg(string.format("Loaded %d events from %s",
     #ROWS, CLB.edl_sources[src_idx].name))
@@ -2163,7 +2161,7 @@ local function append_rows_from_parsed(parsed, source_path)
   _rebuild_track_filters()
   _rebuild_reel_filters()
   _auto_assign_groups()
-  CLB.cached_rows = nil; CLB.cached_rows_frame = -1
+  CLB.cached_rows = nil
 
   console_msg(string.format("Appended %d events from %s (total: %d)",
     #new_rows, CLB.edl_sources[src_idx].name, #ROWS))
@@ -2483,7 +2481,7 @@ local function load_clb_project(filepath)
     end
   end
 
-  CLB.cached_rows = nil; CLB.cached_rows_frame = -1
+  CLB.cached_rows = nil
 
   -- Try to restore audio files from cache (don't re-run matching — match data is in rows)
   CLB.audio_files      = {}
@@ -2653,7 +2651,7 @@ local function load_edl_file()
   -- Apply track suffixes if multiple sources loaded
   _apply_track_suffixes()
   _rebuild_track_filters()
-  CLB.cached_rows = nil; CLB.cached_rows_frame = -1
+  CLB.cached_rows = nil
 
   -- Summary message
   if #all_parsed > 1 then
@@ -2707,7 +2705,6 @@ local function load_audio_folder()
       console_msg(string.format("Using cached metadata for %d files", #cached_files))
       CLB.audio_files = cached_files
       CLB.audio_cached = nil
-      CLB.audio_cached_frame = -1
       CLB.show_audio_panel = true
 
       -- Auto-match if EDL is loaded
@@ -2769,7 +2766,6 @@ local function process_audio_loading_batch()
 
       CLB.loading_state = nil
       CLB.audio_cached = nil
-      CLB.audio_cached_frame = -1
 
       console_msg(string.format("Loaded %d audio files with metadata", #CLB.audio_files))
 
@@ -2795,7 +2791,6 @@ local function clear_audio_files()
   CLB.audio_files = {}
   CLB.audio_folder = ""
   CLB.audio_cached = nil
-  CLB.audio_cached_frame = -1
   CLB.loading_state = nil
   clear_match_results()
 end
@@ -3283,7 +3278,7 @@ local function remove_duplicates()
   _rebuild_reel_filters()
   _rebuild_group_filters()
   undo_snapshot()
-  CLB.cached_rows = nil; CLB.cached_rows_frame = -1
+  CLB.cached_rows = nil
 
   console_msg(string.format("Removed %d duplicates (%d remaining)", removed, #ROWS))
   reaper.ShowMessageBox(
@@ -3373,7 +3368,7 @@ local function consolidate_by_group()
 
   _rebuild_track_filters()
   _rebuild_group_filters()
-  CLB.cached_rows = nil; CLB.cached_rows_frame = -1
+  CLB.cached_rows = nil
   undo_snapshot()
 
   console_msg(string.format("Consolidated tracks across %d group(s)", #group_order))
@@ -3517,7 +3512,7 @@ local function paste_selection()
 
   _rebuild_group_filters()
   undo_snapshot()
-  CLB.cached_rows = nil; CLB.cached_rows_frame = -1
+  CLB.cached_rows = nil
   console_msg("Pasted " .. #clip_rows .. " rows")
 end
 
@@ -3783,14 +3778,14 @@ local function draw_toolbar()
   local chg_s, new_s = reaper.ImGui_InputText(ctx, "##clb_search", CLB.search_text)
   if chg_s then
     CLB.search_text = new_s
-    CLB.cached_rows = nil; CLB.cached_rows_frame = -1
+    CLB.cached_rows = nil
     sel_clear()
   end
   if CLB.search_text ~= "" then
     reaper.ImGui_SameLine(ctx)
     if reaper.ImGui_SmallButton(ctx, "X##clb_clear_search") then
       CLB.search_text = ""
-      CLB.cached_rows = nil; CLB.cached_rows_frame = -1
+      CLB.cached_rows = nil
     end
   end
   reaper.ImGui_SameLine(ctx)
@@ -3916,12 +3911,12 @@ local function draw_sources_panel()
   -- Show All / Hide All buttons (always rendered to keep stable layout)
   if reaper.ImGui_SmallButton(ctx, "Show All##clb_src_all") then
     for _, src in ipairs(CLB.edl_sources) do src.visible = true end
-    CLB.cached_rows = nil; CLB.cached_rows_frame = -1
+    CLB.cached_rows = nil
   end
   reaper.ImGui_SameLine(ctx)
   if reaper.ImGui_SmallButton(ctx, "Hide All##clb_src_none") then
     for _, src in ipairs(CLB.edl_sources) do src.visible = false end
-    CLB.cached_rows = nil; CLB.cached_rows_frame = -1
+    CLB.cached_rows = nil
   end
 
   -- List each source with checkbox (scrollable region, max ~6 rows visible)
@@ -3934,7 +3929,7 @@ local function draw_sources_panel()
       local changed, new_val = reaper.ImGui_Checkbox(ctx, label, src.visible)
       if changed then
         src.visible = new_val
-        CLB.cached_rows = nil; CLB.cached_rows_frame = -1
+        CLB.cached_rows = nil
       end
     end
     reaper.ImGui_EndChild(ctx)
@@ -3955,12 +3950,12 @@ local function draw_track_filter_panel()
   -- Show All / Hide All
   if reaper.ImGui_SmallButton(ctx, "Show All##clb_trk_all") then
     for _, tf in ipairs(CLB.track_filters) do tf.visible = true end
-    CLB.cached_rows = nil; CLB.cached_rows_frame = -1
+    CLB.cached_rows = nil
   end
   reaper.ImGui_SameLine(ctx)
   if reaper.ImGui_SmallButton(ctx, "Hide All##clb_trk_none") then
     for _, tf in ipairs(CLB.track_filters) do tf.visible = false end
-    CLB.cached_rows = nil; CLB.cached_rows_frame = -1
+    CLB.cached_rows = nil
   end
 
   -- Track checkboxes in horizontal scrollable region
@@ -3975,7 +3970,7 @@ local function draw_track_filter_panel()
       local changed, new_val = reaper.ImGui_Checkbox(ctx, label, tf.visible)
       if changed then
         tf.visible = new_val
-        CLB.cached_rows = nil; CLB.cached_rows_frame = -1
+        CLB.cached_rows = nil
       end
       -- Right-click context menu (deferred)
       if reaper.ImGui_IsItemHovered(ctx) then
@@ -4084,7 +4079,7 @@ local function draw_track_filter_panel()
               row.track = new_name
             end
           end
-          CLB.cached_rows = nil; CLB.cached_rows_frame = -1
+          CLB.cached_rows = nil
         end
         CLB.rename_filter = nil
         reaper.ImGui_CloseCurrentPopup(ctx)
@@ -4117,7 +4112,7 @@ local function draw_track_filter_panel()
         end
         ROWS = new_rows
         _rebuild_track_filters()
-        CLB.cached_rows = nil; CLB.cached_rows_frame = -1
+        CLB.cached_rows = nil
         undo_snapshot()
         CLB.delete_filter = nil
         reaper.ImGui_CloseCurrentPopup(ctx)
@@ -4171,7 +4166,7 @@ local function draw_track_filter_panel()
             end
           end
           _rebuild_track_filters()
-          CLB.cached_rows = nil; CLB.cached_rows_frame = -1
+          CLB.cached_rows = nil
           undo_snapshot()
         end
         CLB.batch_rename = nil
@@ -4326,7 +4321,7 @@ local function draw_track_filter_panel()
 
         -- Rebuild filters and refresh
         _rebuild_track_filters()
-        CLB.cached_rows = nil; CLB.cached_rows_frame = -1
+        CLB.cached_rows = nil
         undo_snapshot()
 
         CLB.consolidate_tracks = nil
@@ -4369,12 +4364,12 @@ local function draw_reel_filter_panel()
   -- Show All / Hide All
   if reaper.ImGui_SmallButton(ctx, "Show All##clb_reel_all") then
     for _, rf in ipairs(CLB.reel_filters) do rf.visible = true end
-    CLB.cached_rows = nil; CLB.cached_rows_frame = -1
+    CLB.cached_rows = nil
   end
   reaper.ImGui_SameLine(ctx)
   if reaper.ImGui_SmallButton(ctx, "Hide All##clb_reel_none") then
     for _, rf in ipairs(CLB.reel_filters) do rf.visible = false end
-    CLB.cached_rows = nil; CLB.cached_rows_frame = -1
+    CLB.cached_rows = nil
   end
 
   -- Reel checkboxes (vertical list)
@@ -4384,7 +4379,7 @@ local function draw_reel_filter_panel()
     local changed, new_val = reaper.ImGui_Checkbox(ctx, label, rf.visible)
     if changed then
       rf.visible = new_val
-      CLB.cached_rows = nil; CLB.cached_rows_frame = -1
+      CLB.cached_rows = nil
     end
     -- Right-click context menu
     if reaper.ImGui_IsItemHovered(ctx) then
@@ -4468,7 +4463,7 @@ local function draw_reel_filter_panel()
               row.reel = new_name
             end
           end
-          CLB.cached_rows = nil; CLB.cached_rows_frame = -1
+          CLB.cached_rows = nil
           undo_snapshot()
         end
         CLB.rename_filter = nil
@@ -4502,7 +4497,7 @@ local function draw_reel_filter_panel()
         ROWS = new_rows
         _rebuild_reel_filters()
         _rebuild_track_filters()
-        CLB.cached_rows = nil; CLB.cached_rows_frame = -1
+        CLB.cached_rows = nil
         undo_snapshot()
         CLB.delete_filter = nil
         reaper.ImGui_CloseCurrentPopup(ctx)
@@ -4556,7 +4551,7 @@ local function draw_reel_filter_panel()
             end
           end
           _rebuild_reel_filters()
-          CLB.cached_rows = nil; CLB.cached_rows_frame = -1
+          CLB.cached_rows = nil
           undo_snapshot()
         end
         CLB.batch_rename = nil
@@ -4731,7 +4726,7 @@ local function draw_table(table_height)
                 set_cell_value(row, col, EDIT.buf)
                 if col == COL.GROUP then _rebuild_group_filters() end
                 undo_snapshot()
-                CLB.cached_rows = nil; CLB.cached_rows_frame = -1
+                CLB.cached_rows = nil
               end
             end
             EDIT = nil
@@ -4803,7 +4798,7 @@ local function draw_table(table_height)
               r.group = gf.name
             end
             _rebuild_group_filters()
-            CLB.cached_rows = nil; CLB.cached_rows_frame = -1
+            CLB.cached_rows = nil
             undo_snapshot()
           end
         end
@@ -4816,7 +4811,7 @@ local function draw_table(table_height)
           r.group = ""
         end
         _rebuild_group_filters()
-        CLB.cached_rows = nil; CLB.cached_rows_frame = -1
+        CLB.cached_rows = nil
         undo_snapshot()
       end
     end
@@ -4939,14 +4934,12 @@ local function draw_audio_panel_header()
   if chg_s then
     CLB.audio_search = new_s
     CLB.audio_cached = nil
-    CLB.audio_cached_frame = -1
   end
   if CLB.audio_search ~= "" then
     reaper.ImGui_SameLine(ctx)
     if reaper.ImGui_SmallButton(ctx, "X##clr_audio_search") then
       CLB.audio_search = ""
       CLB.audio_cached = nil
-      CLB.audio_cached_frame = -1
     end
   end
 
@@ -5147,7 +5140,6 @@ local function draw_audio_table(table_height)
           CLB.audio_sort_col = actual_col
           CLB.audio_sort_asc = sort_dir == reaper.ImGui_SortDirection_Ascending()
           CLB.audio_cached = nil
-          CLB.audio_cached_frame = -1
         end
       else
         CLB.audio_sort_col = nil
@@ -5302,12 +5294,12 @@ local function draw_reel_filter_sidebar(height)
       -- Show All / Hide All buttons
       if reaper.ImGui_SmallButton(ctx, "All##clb_reel_all") then
         for _, rf in ipairs(CLB.reel_filters) do rf.visible = true end
-        CLB.cached_rows = nil; CLB.cached_rows_frame = -1
+        CLB.cached_rows = nil
       end
       reaper.ImGui_SameLine(ctx)
       if reaper.ImGui_SmallButton(ctx, "None##clb_reel_none") then
         for _, rf in ipairs(CLB.reel_filters) do rf.visible = false end
-        CLB.cached_rows = nil; CLB.cached_rows_frame = -1
+        CLB.cached_rows = nil
       end
 
       reaper.ImGui_Separator(ctx)
@@ -5322,7 +5314,7 @@ local function draw_reel_filter_sidebar(height)
         local changed, new_val = reaper.ImGui_Checkbox(ctx, label, rf.visible)
         if changed then
           rf.visible = new_val
-          CLB.cached_rows = nil; CLB.cached_rows_frame = -1
+          CLB.cached_rows = nil
         end
         -- Right-click context menu
         if reaper.ImGui_IsItemHovered(ctx) then
@@ -5412,7 +5404,7 @@ local function draw_reel_filter_sidebar(height)
                   row.reel = new_name
                 end
               end
-              CLB.cached_rows = nil; CLB.cached_rows_frame = -1
+              CLB.cached_rows = nil
             end
             CLB.rename_filter = nil
             reaper.ImGui_CloseCurrentPopup(ctx)
@@ -5446,7 +5438,7 @@ local function draw_reel_filter_sidebar(height)
             end
             ROWS = new_rows
             _rebuild_reel_filters()
-            CLB.cached_rows = nil; CLB.cached_rows_frame = -1
+            CLB.cached_rows = nil
             undo_snapshot()
             CLB.delete_filter = nil
             reaper.ImGui_CloseCurrentPopup(ctx)
@@ -5500,7 +5492,7 @@ local function draw_reel_filter_sidebar(height)
                 end
               end
               _rebuild_reel_filters()
-              CLB.cached_rows = nil; CLB.cached_rows_frame = -1
+              CLB.cached_rows = nil
               undo_snapshot()
             end
             CLB.batch_rename = nil
@@ -5544,12 +5536,12 @@ local function draw_reel_filter_sidebar(height)
       reaper.ImGui_SameLine(ctx)
       if reaper.ImGui_SmallButton(ctx, "All##clb_group_all") then
         for _, gf in ipairs(CLB.group_filters) do gf.visible = true end
-        CLB.cached_rows = nil; CLB.cached_rows_frame = -1
+        CLB.cached_rows = nil
       end
       reaper.ImGui_SameLine(ctx)
       if reaper.ImGui_SmallButton(ctx, "None##clb_group_none") then
         for _, gf in ipairs(CLB.group_filters) do gf.visible = false end
-        CLB.cached_rows = nil; CLB.cached_rows_frame = -1
+        CLB.cached_rows = nil
       end
 
       -- Add Group popup
@@ -5610,7 +5602,7 @@ local function draw_reel_filter_sidebar(height)
           local changed, new_val = reaper.ImGui_Checkbox(ctx, label, gf.visible)
           if changed then
             gf.visible = new_val
-            CLB.cached_rows = nil; CLB.cached_rows_frame = -1
+            CLB.cached_rows = nil
           end
           -- Right-click context menu + tooltip
           if reaper.ImGui_IsItemHovered(ctx) then
@@ -5665,7 +5657,7 @@ local function draw_reel_filter_sidebar(height)
                   row.group = CLB.context_filter.name
                 end
                 _rebuild_group_filters()
-                CLB.cached_rows = nil; CLB.cached_rows_frame = -1
+                CLB.cached_rows = nil
                 undo_snapshot()
               end
             end
@@ -5714,7 +5706,7 @@ local function draw_reel_filter_sidebar(height)
                   end
                 end
                 _rebuild_group_filters()
-                CLB.cached_rows = nil; CLB.cached_rows_frame = -1
+                CLB.cached_rows = nil
                 undo_snapshot()
               end
               CLB.rename_filter = nil
@@ -5756,7 +5748,7 @@ local function draw_reel_filter_sidebar(height)
                 end
               end
               _rebuild_group_filters()
-              CLB.cached_rows = nil; CLB.cached_rows_frame = -1
+              CLB.cached_rows = nil
               undo_snapshot()
               CLB.delete_filter = nil
               reaper.ImGui_CloseCurrentPopup(ctx)
@@ -5833,8 +5825,6 @@ end
 -- Main loop
 ---------------------------------------------------------------------------
 local function loop()
-  CLB.frame_counter = CLB.frame_counter + 1
-
   -- Process async audio loading (if in progress)
   process_audio_loading_batch()
 
@@ -5930,7 +5920,7 @@ local function loop()
         end
         if changed then
           undo_snapshot()
-          CLB.cached_rows = nil; CLB.cached_rows_frame = -1
+          CLB.cached_rows = nil
         end
       end
 
