@@ -1,7 +1,7 @@
 --[[
 @description Pro Tools Enable Main Counter Field and Jump to Time
 @author hsuanice
-@version 251221.1520
+@version 260222.0937
 @provides
   [main] .
 @about
@@ -36,6 +36,12 @@
   8. Press = to reset to current timeline position
 
 @changelog
+  [Internal Build 260222.0937]
+    + ADDED: Paste timecode from clipboard (⌘V / Ctrl+V)
+    + ADDED: Copy timecode to clipboard (⌘C / Ctrl+C)
+    + ADDED: Clipboard utilities with SWS extension support, macOS pbpaste/pbcopy fallback
+    + IMPROVED: Window height expanded to 120px for two-line footer
+    + IMPROVED: Footer now shows paste/copy shortcuts
   [Internal Build 251221.1520]
     + CHANGED: Cursor stays at right edge in normal and relative modes
     + CHANGED: Relative input now fills from right to left
@@ -105,6 +111,8 @@ local KEY_PLUS = 43
 local KEY_SLASH = 47           -- "/" key - reset to zero
 local KEY_EQUALS = 108         -- "=" key - reset to current (macOS: 108)
 local KEY_NUMPAD_CLEAR = 144   -- Numpad Clear key
+local KEY_CTRL_V = 22          -- Ctrl+V / Cmd+V (paste)
+local KEY_CTRL_C = 3           -- Ctrl+C / Cmd+C (copy)
 
 -- ============================================================================
 -- GLOBAL STATE
@@ -122,7 +130,7 @@ local state = {
 
 -- GUI settings
 local window_w = 320
-local window_h = 105
+local window_h = 120
 local font_name = "Arial"
 local font_size = 28  -- Larger for better visibility on macOS
 local font_size_small = 11
@@ -407,8 +415,71 @@ function position_to_input(pos_seconds)
 end
 
 -- ============================================================================
+-- CLIPBOARD UTILITIES
+-- ============================================================================
+
+function get_clipboard_text()
+  -- Try SWS extension first
+  if r.CF_GetClipboard then
+    return r.CF_GetClipboard()
+  end
+  -- macOS fallback
+  local handle = io.popen("pbpaste 2>/dev/null")
+  if handle then
+    local text = handle:read("*a")
+    handle:close()
+    return text or ""
+  end
+  return ""
+end
+
+function set_clipboard_text(text)
+  -- Try SWS extension first
+  if r.CF_SetClipboard then
+    r.CF_SetClipboard(text)
+    return
+  end
+  -- macOS fallback
+  local handle = io.popen("pbcopy", "w")
+  if handle then
+    handle:write(text)
+    handle:close()
+  end
+end
+
+-- ============================================================================
 -- INPUT HANDLING
 -- ============================================================================
+
+function handle_paste()
+  local text = get_clipboard_text()
+  if not text or text == "" then return end
+
+  -- Strip separators, keep only digits
+  local digits = text:gsub("[^%d]", "")
+  if #digits == 0 then return end
+
+  -- Trim to max_digits (take rightmost digits, matching right-to-left fill)
+  if #digits > state.max_digits then
+    digits = digits:sub(-state.max_digits)
+  end
+
+  state.is_relative = false
+  state.relative_sign = ""
+  state.input_buffer = digits
+  state.cursor_pos = #digits
+end
+
+function handle_copy()
+  local display_text, _ = format_display()
+  -- Remove relative sign prefix before copying
+  if state.is_relative and #display_text > 0 then
+    display_text = display_text:sub(2)
+  end
+  if #display_text > 0 then
+    set_clipboard_text(display_text)
+  end
+end
 
 function handle_numeric_input(digit)
   local len = #state.input_buffer
@@ -522,14 +593,19 @@ function draw_gui()
     gfx.drawstr("|")
   end
 
-  -- Footer: Help text (compact)
+  -- Footer: Help text (two lines)
   gfx.setfont(1, font_name, font_size_small)
   gfx.set(0.4, 0.4, 0.4, 1)
-  local help_text = "+/- Rel • ⌫⌦ Clear • /C Zero • = Current"
-  local help_w = gfx.measurestr(help_text)
-  gfx.x = (window_w - help_w) / 2
-  gfx.y = window_h - 19
-  gfx.drawstr(help_text)
+  local help_text1 = "+/- Rel • ⌫⌦ Clear • /C Zero • = Current"
+  local help_text2 = "⌘V Paste • ⌘C Copy"
+  local help_w1 = gfx.measurestr(help_text1)
+  local help_w2 = gfx.measurestr(help_text2)
+  gfx.x = (window_w - help_w1) / 2
+  gfx.y = window_h - 32
+  gfx.drawstr(help_text1)
+  gfx.x = (window_w - help_w2) / 2
+  gfx.y = window_h - 16
+  gfx.drawstr(help_text2)
 
   gfx.update()
 end
@@ -547,13 +623,16 @@ function main()
     return
   end
 
+  -- Handle paste (Ctrl+V / Cmd+V → ASCII 22) and copy (Ctrl+C / Cmd+C → ASCII 3)
+  if char == KEY_CTRL_V then
+    handle_paste()
+  elseif char == KEY_CTRL_C then
+    handle_copy()
   -- Handle numeric input (0-9)
-  if char >= 48 and char <= 57 then
+  elseif char >= 48 and char <= 57 then
     handle_numeric_input(string.char(char))
-  end
-
   -- Handle special keys
-  if char == KEY_BACKSPACE or char == KEY_DELETE then
+  elseif char == KEY_BACKSPACE or char == KEY_DELETE then
     clear_input()
   elseif char == KEY_SLASH or char == KEY_NUMPAD_CLEAR then
     reset_to_zero()
