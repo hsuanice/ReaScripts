@@ -1,6 +1,6 @@
 --[[
 @description ReaImGui - Rename Active Take from Metadata (caret insert + cached preview + copy/export)
-@version 260225.1630
+@version 260225.1800
 @author hsuanice
 @about
   Rename active takes and/or item notes from BWF/iXML and true source metadata using a fast ReaImGui UI.
@@ -35,6 +35,24 @@
   hsuanice served as the workflow designer, tester, and integrator for this tool.
 
 @changelog
+  v260225.1800 (2026-02-25)
+    - UI: Three-pane layout (upper-left editor, upper-right Detected Fields, lower Preview)
+      • CollapsingHeader states (Tokens, Renamer, Take Presets, Note Presets) now persist
+        across sessions via ExtState
+      • Detected Fields values now use InputText(ReadOnly) — click and Cmd+A / Cmd+C to copy
+      • "Copy Metadata" section removed (fields are directly selectable/copyable)
+      • Horizontal splitter between upper and lower sections is draggable; ratio persists
+
+  v260225.1700 (2026-02-25)
+    - UI: Redesigned layout — left/right two-column split
+      • Left panel (380px, scrollable): Take Name, Item Note, and all collapsible sections
+      • Right panel (stretch): Detected Fields (top, resizable) + Preview table (bottom)
+      • Top bar: Undo / Redo / Get Metadata / Apply / Cancel + status on a single fixed row
+      • Template Tokens, Take Name Renamer, Take Presets, Note Presets are now collapsible
+        (CollapsingHeader — hidden by default to reduce visual noise)
+      • Copy Metadata moved to a collapsible section inside the Preview pane
+      • Removed standalone Copy-text panes; copy buttons now compact inline
+
   v260225.1630 (2026-02-25)
     - UX: Apply now processes items in deferred batches (50 items per frame via reaper.defer())
       • No more spinning beach ball / UI freeze during large batch renames
@@ -336,6 +354,7 @@ local ctx = reaper.ImGui_CreateContext('Rename Active Take from Metadata')
 local LIBVER = (META and META.VERSION) and (' | Metadata Read v'..tostring(META.VERSION)) or ''
 local FLT_MIN = reaper.ImGui_NumericLimits_Float()
 local WIN_W, WIN_H = 1020, 720
+local LEFT_PANEL_W    = 380   -- fixed width of the left editor panel
 local function TF(name) local fn = reaper[name]; return (type(fn)=="function") and fn() or 0 end
 
 -- ESC key enum (works across ReaImGui versions)
@@ -1653,8 +1672,8 @@ local function field_row_token(key, value)
   local tk = "$"..key
   if reaper.ImGui_SmallButton(ctx, tk .. "##field_" .. key) then append_token(tk) end
   reaper.ImGui_SameLine(ctx)
-  reaper.ImGui_Text(ctx, tk..": "); reaper.ImGui_SameLine(ctx)
-  reaper.ImGui_TextWrapped(ctx, tostring(value))
+  reaper.ImGui_SetNextItemWidth(ctx, -FLT_MIN)
+  reaper.ImGui_InputText(ctx, "##fv_"..key, tostring(value or ""), reaper.ImGui_InputTextFlags_ReadOnly())
 end
 
 -- ===== CSV helpers =====
@@ -2226,16 +2245,36 @@ local function draw_token_row()
 end
 
 
+-- CollapsingHeader state persistence (saved via ExtState across sessions)
+local _SECT_EXT   = "hsuanice_RenameMetadata_v1"
+local _sect_state = {}
+local _sect_init  = {}
+for _, k in ipairs({"tokens","renamer","take_presets","note_presets"}) do
+  local v = reaper.GetExtState(_SECT_EXT, k)
+  _sect_state[k] = (v == "1")
+end
 
--- ===== UI: inputs =====
-local draw_preset_row   -- ← 前置宣告，讓下面可以看見這個區域變數
-local function take_note_inputs()
-  -- Take name
+local function section_header(label, key)
+  if not _sect_init[key] then
+    reaper.ImGui_SetNextItemOpen(ctx, _sect_state[key] or false)
+    _sect_init[key] = true
+  end
+  local open = reaper.ImGui_CollapsingHeader(ctx, label)
+  if open ~= (_sect_state[key] or false) then
+    _sect_state[key] = open
+    reaper.SetExtState(_SECT_EXT, key, open and "1" or "0", true)
+  end
+  return open
+end
+
+
+-- ===== Left panel =====
+local function draw_left_panel()
+  -- Take Name
   reaper.ImGui_Text(ctx, "Take Name"); reaper.ImGui_SameLine(ctx); reaper.ImGui_TextDisabled(ctx, "(click to set caret; snaps out of tokens)")
   reaper.ImGui_SetNextItemWidth(ctx, -FLT_MIN)
-  if focus_take_input then reaper.ImGui_SetKeyboardFocusHere(ctx); focus_take_input = false end  
+  if focus_take_input then reaper.ImGui_SetKeyboardFocusHere(ctx); focus_take_input = false end
   local changed_take, new_take = reaper.ImGui_InputText(ctx, "##take_name_tpl", TAKE_TEMPLATE)
-
   if reaper.ImGui_IsItemActive(ctx) then active_box = "take" end
   if reaper.ImGui_IsItemHovered(ctx) and reaper.ImGui_IsMouseClicked(ctx, 0) then
     local mx, _ = reaper.ImGui_GetMousePos(ctx); local rx, _ = reaper.ImGui_GetItemRectMin(ctx)
@@ -2246,8 +2285,6 @@ local function take_note_inputs()
   if changed_take then TAKE_TEMPLATE = new_take; if SCAN_CACHE then recompute_preview_from_cache() end end
 
   -- Skip-if-empty toggle (Take-only)
-  -- When enabled, if any token in the Take Name template expands to an empty string (e.g. $trk missing),
-  -- this item will be skipped for renaming. Notes are unaffected.
   local chg_skip_empty, val_skip_empty = reaper.ImGui_Checkbox(ctx, "Skip rename if any token empty", SKIP_EMPTY_TOKENS)
   if chg_skip_empty then
     SKIP_EMPTY_TOKENS = val_skip_empty
@@ -2255,7 +2292,6 @@ local function take_note_inputs()
     if SCAN_CACHE then recompute_preview_from_cache() end
   end
 
-  
   -- Take tools (Clear / Save / Default)
   if reaper.ImGui_SmallButton(ctx, "Clear##take") then
     TAKE_TEMPLATE = ""
@@ -2263,7 +2299,6 @@ local function take_note_inputs()
   end
   reaper.ImGui_SameLine(ctx)
   if reaper.ImGui_SmallButton(ctx, "Save##take") then
-    -- 目前沿用同一組 defaults：把 Take/Note 一起存回（簡單、相容）
     save_defaults(TAKE_TEMPLATE, NOTE_TEMPLATE)
   end
   reaper.ImGui_SameLine(ctx)
@@ -2273,128 +2308,104 @@ local function take_note_inputs()
     if SCAN_CACHE then recompute_preview_from_cache() end
   end
 
-  --（可選）和下方 presets 稍微留一點距離
-  -- reaper.ImGui_Spacing(ctx)
-
-  -- === Take Name renamer (after token expansion & filter) ===
-  reaper.ImGui_Separator(ctx)
-  reaper.ImGui_Text(ctx, "Take Name renamer")
-  reaper.ImGui_SameLine(ctx)
-  reaper.ImGui_TextDisabled(ctx, "(applies after tokens & filter; Note unaffected)")
-
-  -- Enable
-  local chgEn, en = reaper.ImGui_Checkbox(ctx, "Enable##takeren", TAKE_RENAMER.enable or false)
-  if chgEn then
-    TAKE_RENAMER.enable = en
-    save_take_renamer(TAKE_RENAMER)
-    if SCAN_CACHE then recompute_preview_from_cache() end
+  -- Template Tokens (collapsible, state persisted)
+  if section_header("Template Tokens", "tokens") then
+    draw_token_row()
   end
 
-  reaper.ImGui_SameLine(ctx)
-  if reaper.ImGui_SmallButton(ctx, "+ Add rename rule##takeren_add_top") then
-    local rules = TAKE_RENAMER.rules or {}
-    rules[#rules+1] = { from = "", to = "" }
-    TAKE_RENAMER.rules = rules
-    save_take_renamer(TAKE_RENAMER)
-    if SCAN_CACHE then recompute_preview_from_cache() end
-  end
-
-  -- Rules table
-  local rules = TAKE_RENAMER.rules or {}
-  local tblFlags = TF('ImGui_TableFlags_Borders') | TF('ImGui_TableFlags_RowBg')
-  if reaper.ImGui_BeginTable(ctx, "TakeRenRules", 3, tblFlags) then
-  reaper.ImGui_TableSetupColumn(ctx, "From", TF('ImGui_TableFlags_None')|TF('ImGui_TableColumnFlags_WidthStretch'), 0.48)
-  reaper.ImGui_TableSetupColumn(ctx, "To",   TF('ImGui_TableFlags_None')|TF('ImGui_TableColumnFlags_WidthStretch'), 0.48)
-  reaper.ImGui_TableSetupColumn(ctx, "",     TF('ImGui_TableFlags_None')|TF('ImGui_TableColumnFlags_WidthFixed'),   60)
-
-  -- 自畫一列表頭（這一列就是你看到的那一行）
-  reaper.ImGui_TableNextRow(ctx, TF('ImGuiTableRowFlags_Headers'))
-
-  -- From
-  reaper.ImGui_TableSetColumnIndex(ctx, 0)
-  reaper.ImGui_Text(ctx, "From")
-
-  -- To
-  reaper.ImGui_TableSetColumnIndex(ctx, 1)
-  reaper.ImGui_Text(ctx, "To")
-
-  -- Clear All（同一行，置中）
-  reaper.ImGui_TableSetColumnIndex(ctx, 2)
-  do
-    local label = "Clear All"
-    local w = select(1, reaper.ImGui_GetContentRegionAvail(ctx))
-    local t = reaper.ImGui_CalcTextSize(ctx, label) -- 小按鈕寬 ≈ 文本寬，視覺可接受
-    reaper.ImGui_SetCursorPosX(ctx, reaper.ImGui_GetCursorPosX(ctx) + math.max(0, (w - t) * 0.5))
-    if reaper.ImGui_SmallButton(ctx, label.."##takeren_clear") then
-      TAKE_RENAMER.rules = {}
+  -- Take Name Renamer (collapsible, state persisted)
+  if section_header("Take Name Renamer", "renamer") then
+    reaper.ImGui_TextDisabled(ctx, "(applies after tokens & filter; Note unaffected)")
+    local chgEn, en = reaper.ImGui_Checkbox(ctx, "Enable##takeren", TAKE_RENAMER.enable or false)
+    if chgEn then
+      TAKE_RENAMER.enable = en
       save_take_renamer(TAKE_RENAMER)
       if SCAN_CACHE then recompute_preview_from_cache() end
     end
-  end
-
-
-    for i=#rules,1,-1 do
-      local row = rules[i]
-      reaper.ImGui_TableNextRow(ctx)
-      -- From
+    reaper.ImGui_SameLine(ctx)
+    if reaper.ImGui_SmallButton(ctx, "+ Add rename rule##takeren_add_top") then
+      local rules = TAKE_RENAMER.rules or {}
+      rules[#rules+1] = { from = "", to = "" }
+      TAKE_RENAMER.rules = rules
+      save_take_renamer(TAKE_RENAMER)
+      if SCAN_CACHE then recompute_preview_from_cache() end
+    end
+    local rules = TAKE_RENAMER.rules or {}
+    local tblFlags = TF('ImGui_TableFlags_Borders') | TF('ImGui_TableFlags_RowBg')
+    if reaper.ImGui_BeginTable(ctx, "TakeRenRules", 3, tblFlags) then
+      reaper.ImGui_TableSetupColumn(ctx, "From", TF('ImGui_TableFlags_None')|TF('ImGui_TableColumnFlags_WidthStretch'), 0.48)
+      reaper.ImGui_TableSetupColumn(ctx, "To",   TF('ImGui_TableFlags_None')|TF('ImGui_TableColumnFlags_WidthStretch'), 0.48)
+      reaper.ImGui_TableSetupColumn(ctx, "",     TF('ImGui_TableFlags_None')|TF('ImGui_TableColumnFlags_WidthFixed'),   60)
+      reaper.ImGui_TableNextRow(ctx, TF('ImGuiTableRowFlags_Headers'))
       reaper.ImGui_TableSetColumnIndex(ctx, 0)
-      reaper.ImGui_SetNextItemWidth(ctx, -FLT_MIN)
-      local chgF, vF = reaper.ImGui_InputText(ctx, ("##ren_from_%d"):format(i), row.from or "")
-      if chgF then
-        row.from = vF; save_take_renamer(TAKE_RENAMER)
-        if SCAN_CACHE then recompute_preview_from_cache() end
-      end
-      -- To
+      reaper.ImGui_Text(ctx, "From")
       reaper.ImGui_TableSetColumnIndex(ctx, 1)
-      reaper.ImGui_SetNextItemWidth(ctx, -FLT_MIN)
-      local chgT, vT = reaper.ImGui_InputText(ctx, ("##ren_to_%d"):format(i), row.to or "")
-      if chgT then
-        row.to = vT; save_take_renamer(TAKE_RENAMER)
-        if SCAN_CACHE then recompute_preview_from_cache() end
-      end
-      -- Del
+      reaper.ImGui_Text(ctx, "To")
       reaper.ImGui_TableSetColumnIndex(ctx, 2)
-      if reaper.ImGui_SmallButton(ctx, ("-##delren_%d"):format(i)) then
-        table.remove(rules, i); save_take_renamer(TAKE_RENAMER)
-        if SCAN_CACHE then recompute_preview_from_cache() end
+      do
+        local label = "Clear All"
+        local w = select(1, reaper.ImGui_GetContentRegionAvail(ctx))
+        local t = reaper.ImGui_CalcTextSize(ctx, label)
+        reaper.ImGui_SetCursorPosX(ctx, reaper.ImGui_GetCursorPosX(ctx) + math.max(0, (w - t) * 0.5))
+        if reaper.ImGui_SmallButton(ctx, label.."##takeren_clear") then
+          TAKE_RENAMER.rules = {}
+          save_take_renamer(TAKE_RENAMER)
+          if SCAN_CACHE then recompute_preview_from_cache() end
+        end
       end
+      for i=#rules,1,-1 do
+        local row = rules[i]
+        reaper.ImGui_TableNextRow(ctx)
+        reaper.ImGui_TableSetColumnIndex(ctx, 0)
+        reaper.ImGui_SetNextItemWidth(ctx, -FLT_MIN)
+        local chgF, vF = reaper.ImGui_InputText(ctx, ("##ren_from_%d"):format(i), row.from or "")
+        if chgF then
+          row.from = vF; save_take_renamer(TAKE_RENAMER)
+          if SCAN_CACHE then recompute_preview_from_cache() end
+        end
+        reaper.ImGui_TableSetColumnIndex(ctx, 1)
+        reaper.ImGui_SetNextItemWidth(ctx, -FLT_MIN)
+        local chgT, vT = reaper.ImGui_InputText(ctx, ("##ren_to_%d"):format(i), row.to or "")
+        if chgT then
+          row.to = vT; save_take_renamer(TAKE_RENAMER)
+          if SCAN_CACHE then recompute_preview_from_cache() end
+        end
+        reaper.ImGui_TableSetColumnIndex(ctx, 2)
+        if reaper.ImGui_SmallButton(ctx, ("-##delren_%d"):format(i)) then
+          table.remove(rules, i); save_take_renamer(TAKE_RENAMER)
+          if SCAN_CACHE then recompute_preview_from_cache() end
+        end
+      end
+      reaper.ImGui_EndTable(ctx)
     end
-    reaper.ImGui_EndTable(ctx)
   end
 
+  -- Take Presets (collapsible, state persisted)
+  if section_header("Take Presets", "take_presets") then
+    draw_preset_row("Take Presets", TAKE_PRESETS,
+      function(i)
+        local v = TAKE_PRESETS[i] or ""
+        if v ~= "" then
+          TAKE_TEMPLATE = v
+          if SCAN_CACHE then recompute_preview_from_cache() end
+          focus_take_input = true
+        end
+      end,
+      function(i)
+        TAKE_PRESETS[i] = TAKE_TEMPLATE or ""
+        save_presets(TAKE_PRESETS_KEY, TAKE_PRESETS)
+      end,
+      true
+    )
+  end
 
+  reaper.ImGui_Separator(ctx)
 
-
-
-  -- Take Presets（移到 Take Name 下面）
-  draw_preset_row("Take Presets",
-    TAKE_PRESETS,
-    function(i) -- load
-      local v = TAKE_PRESETS[i] or ""
-      if v ~= "" then
-        TAKE_TEMPLATE = v
-        if SCAN_CACHE then recompute_preview_from_cache() end
-        focus_take_input = true -- 讓游標回到 Take 欄位（若你有 focus_* 邏輯）
-      end
-    end,
-    function(i) -- save
-      TAKE_PRESETS[i] = TAKE_TEMPLATE or ""
-      save_presets(TAKE_PRESETS_KEY, TAKE_PRESETS)
-    end
-  )
-  
-
-
-
-  -- Item note
+  -- Item Note
   reaper.ImGui_Text(ctx, "Item Note"); reaper.ImGui_SameLine(ctx); reaper.ImGui_TextDisabled(ctx, "(empty = skip)")
   reaper.ImGui_SetNextItemWidth(ctx, -FLT_MIN)
-
-  
   local changed_note, new_note = reaper.ImGui_InputTextMultiline(ctx, "##item_note_tpl", NOTE_TEMPLATE, -FLT_MIN, 92)
-
   if focus_note_input then reaper.ImGui_SetKeyboardFocusHere(ctx); focus_note_input = false end
-
   if reaper.ImGui_IsItemActive(ctx) then active_box = "note" end
   if reaper.ImGui_IsItemHovered(ctx) and reaper.ImGui_IsMouseClicked(ctx, 0) then
     local mx, my = reaper.ImGui_GetMousePos(ctx); local rx, ry = reaper.ImGui_GetItemRectMin(ctx)
@@ -2415,7 +2426,6 @@ local function take_note_inputs()
   end
   reaper.ImGui_SameLine(ctx)
   if reaper.ImGui_SmallButton(ctx, "Save##note") then
-    -- 延用同一組 defaults：把 Take/Note 一起存回，簡單相容
     save_defaults(TAKE_TEMPLATE, NOTE_TEMPLATE)
   end
   reaper.ImGui_SameLine(ctx)
@@ -2425,18 +2435,73 @@ local function take_note_inputs()
     if SCAN_CACHE then recompute_preview_from_cache() end
   end
 
+  -- Note Presets (collapsible, state persisted)
+  if section_header("Note Presets", "note_presets") then
+    draw_preset_row("Note Presets", NOTE_PRESETS,
+      function(i)
+        local v = NOTE_PRESETS[i] or ""
+        if v ~= "" then
+          NOTE_TEMPLATE = v
+          if SCAN_CACHE then recompute_preview_from_cache() end
+          focus_note_input = true
+        end
+      end,
+      function(i)
+        NOTE_PRESETS[i] = NOTE_TEMPLATE or ""
+        save_presets(NOTE_PRESETS_KEY, NOTE_PRESETS)
+      end,
+      true
+    )
+  end
+
 end
 
--- ===== Top bar (Undo/Redo only) =====
+
+-- ===== Top bar =====
 local function draw_top_bar()
-  if reaper.ImGui_Button(ctx, "Undo", 80, 0) then reaper.Undo_DoUndo2(0) end
+  local full_w = select(1, reaper.ImGui_GetContentRegionAvail(ctx))
+
+  -- Undo / Redo
+  if reaper.ImGui_Button(ctx, "Undo", 70, 0) then reaper.Undo_DoUndo2(0) end
   reaper.ImGui_SameLine(ctx)
-  if reaper.ImGui_Button(ctx, "Redo", 80, 0) then reaper.Undo_DoRedo2(0) end
+  if reaper.ImGui_Button(ctx, "Redo", 70, 0) then reaper.Undo_DoRedo2(0) end
+
+  -- Get Metadata / Apply / Cancel (right-aligned)
+  local btn_total = 210 + 150 + 150 + 8 * 2
+  local right_off = full_w - btn_total
+  if right_off > (70 + 70 + 16) then
+    reaper.ImGui_SameLine(ctx, right_off)
+  else
+    reaper.ImGui_NewLine(ctx)
+  end
+  if reaper.ImGui_Button(ctx, "Get Metadata (Preview)", 210, 0) then scan_metadata() end
+  reaper.ImGui_SameLine(ctx)
+  if reaper.ImGui_Button(ctx, "Apply", 150, 0) then apply_renaming() end
+  reaper.ImGui_SameLine(ctx)
+  if reaper.ImGui_Button(ctx, "Cancel", 150, 0) then close_after_apply = true end
+
+  -- Status + Preview first (second row)
+  local nsel = reaper.CountSelectedMediaItems(0)
+  local scanned = (SCAN_CACHE and #SCAN_CACHE.list) or 0
+  local _, sig = get_selected_items_and_sig()
+  local cached_ok = (SCAN_CACHE and SCAN_CACHE.sig == sig)
+  reaper.ImGui_TextDisabled(ctx, string.format("Selected: %d   Scanned: %d   %s",
+    nsel, scanned, cached_ok and "Cached: Yes" or "Cached: No"))
+  reaper.ImGui_SameLine(ctx)
+  reaper.ImGui_Text(ctx, "  Preview first")
+  reaper.ImGui_SameLine(ctx)
+  reaper.ImGui_SetNextItemWidth(ctx, 80)
+  local chg, n = reaper.ImGui_InputInt(ctx, "##preview_limit", preview_limit)
+  if chg then
+    preview_limit = math.max(1, math.min(10000, n or preview_limit))
+    if SCAN_CACHE then recompute_preview_from_cache() end
+  end
 end
 
--- ===== Preset Helper UI =====
-function draw_preset_row(label, presets, on_load_click, on_save_click)
-  reaper.ImGui_Text(ctx, label); reaper.ImGui_SameLine(ctx); reaper.ImGui_TextDisabled(ctx, "(click Pn to load; Save Pn to store current)")
+function draw_preset_row(label, presets, on_load_click, on_save_click, hide_label)
+  if not hide_label then
+    reaper.ImGui_Text(ctx, label); reaper.ImGui_SameLine(ctx); reaper.ImGui_TextDisabled(ctx, "(click Pn to load; Save Pn to store current)")
+  end
   if reaper.ImGui_BeginTable(ctx, label.."##preset_table", PRESET_SLOTS, TF('ImGui_TableFlags_SizingStretchProp')) then
     -- Row 1: P1..P5
     reaper.ImGui_TableNextRow(ctx)
@@ -2444,14 +2509,12 @@ function draw_preset_row(label, presets, on_load_click, on_save_click)
       reaper.ImGui_TableNextColumn(ctx)
       local raw = (presets[i] or ""):gsub("[%c\r\n]", " ")
       local show = (raw ~= "" and raw or "(unchanged)")
-      local label_text = ellipsize_utf8(show, 64)  -- 顯示最多 24 個字，可自行調整
+      local label_text = ellipsize_utf8(show, 64)
       local btn = ("%s##%s_load_%d"):format(label_text, label, i)
       if reaper.ImGui_SmallButton(ctx, btn) then on_load_click(i) end
-      -- 仍保留完整內容的 tooltip（可選）
       if raw ~= "" and reaper.ImGui_IsItemHovered(ctx) then
         reaper.ImGui_BeginTooltip(ctx); reaper.ImGui_Text(ctx, raw); reaper.ImGui_EndTooltip(ctx)
       end
-
     end
     -- Row 2: Save P1..P5
     reaper.ImGui_TableNextRow(ctx)
@@ -2465,228 +2528,138 @@ function draw_preset_row(label, presets, on_load_click, on_save_click)
 end
 
 
-
--- ===== View/Copy split panes =====
-local function draw_view_pane(available_h)
-  local split_thickness = 6.0
-  local view_h = math.max(150, math.floor(available_h * SPLIT_RATIO) - math.floor(split_thickness/2))
-  local copy_h = math.max(120, available_h - view_h - split_thickness)
-
-  local total_h = view_h + copy_h + split_thickness
-  local avail = math.max(0, available_h or (WIN_H - 100))
-  if total_h > avail and avail > 0 then
-    local k = (avail - split_thickness) / (view_h + copy_h)
-    view_h = math.max(80, math.floor(view_h * k))
-    copy_h = math.max(80, math.floor(copy_h * k))
-  end
-
-
-
-  -- Top view child
-  local begun, _ = BeginChildSafe("ViewPane", -1, view_h, true)
-  if begun then
-    local splitFlags = TF('ImGui_TableFlags_Resizable') | TF('ImGui_TableFlags_BordersInnerV')
-    if reaper.ImGui_BeginTable(ctx, "MainSplit", 2, splitFlags) then
-      reaper.ImGui_TableSetupColumn(ctx, "Fields", TF('ImGui_TableColumnFlags_WidthStretch'), 0.5)
-      reaper.ImGui_TableSetupColumn(ctx, "Preview", TF('ImGui_TableColumnFlags_WidthStretch'), 0.5)
-      reaper.ImGui_TableNextRow(ctx)
-
-      -- Left panel
-      reaper.ImGui_TableSetColumnIndex(ctx, 0)
-      reaper.ImGui_Text(ctx, "Detected fields (from FIRST currently-selected item):")
-      reaper.ImGui_Separator(ctx)
-      local first = reaper.GetSelectedMediaItem(0, 0)
-      if not first then
-        reaper.ImGui_TextDisabled(ctx, "No items selected. Click Preview or just Apply.")
-        left_copy_text = ""
-      else
-        local f = collect_metadata_for_item(first)
-        left_copy_text = build_left_copy_text_from_fields(f)
-
-        -- $trk (Interleave-resolved, metadata-only)
-        do
-          local label = "$trk"
-          if reaper.ImGui_SmallButton(ctx, label .. "##field") then append_token(label) end
-          reaper.ImGui_SameLine(ctx); reaper.ImGui_Text(ctx, label..": "); reaper.ImGui_SameLine(ctx)
-
-          -- Ensure interleave diagnostics are up-to-date
-          if not f.__diag_interleave then compute_interleave_diag(f, f.__item or item) end
-          local diag = f.__diag_interleave or {}
-
-          -- e.g. "LAN (interleave 5/8)"
-          local out = (diag.name and diag.name ~= "" and diag.name) or "(auto)"
-          if diag.index and diag.total then
-            out = string.format("%s (interleave %d/%d)", out, diag.index, diag.total)
-          end
-          reaper.ImGui_TextWrapped(ctx, out)
-        end
-
-        -- $trkall (Interleave order concatenation)
-        do
-          local label = "$trkall"
-          if reaper.ImGui_SmallButton(ctx, label .. "##field") then append_token(label) end
-          reaper.ImGui_SameLine(ctx); reaper.ImGui_Text(ctx, label..": "); reaper.ImGui_SameLine(ctx)
-
-          if not f.__diag_interleave then compute_interleave_diag(f, f.__item or item) end
-          local all = (f.__diag_interleave and f.__diag_interleave.all) or ""
-          reaper.ImGui_TextWrapped(ctx, all)
-        end
-
-        do
-          local label = "$curtake"
-          if reaper.ImGui_SmallButton(ctx, label .. "##field") then append_token(label) end
-          reaper.ImGui_SameLine(ctx); reaper.ImGui_Text(ctx, label..": "); reaper.ImGui_SameLine(ctx)
-          reaper.ImGui_TextWrapped(ctx, tostring(f.curtake or ""))
-        end
-
-        do
-          local label = "$curnote"
-          if reaper.ImGui_SmallButton(ctx, label .. "##field") then append_token(label) end
-          reaper.ImGui_SameLine(ctx); reaper.ImGui_Text(ctx, label..": "); reaper.ImGui_SameLine(ctx)
-          reaper.ImGui_TextWrapped(ctx, tostring(f.curnote or ""))
-        end
-
-        reaper.ImGui_Separator(ctx)
-
-        local ordered = {
-          "project","scene","take","tape","track",
-          "filename","srcfile","srcbase","srcext","srcpath","srcdir","filepath",
-          "samplerate","channels","length",
-          "date","time","year","originationdate","originationtime","startoffset",
-          "framerate","speed","ubits","originator","originatorreference",
-          "umid","umid_pt",
-          "timereference",
-          "trk1","trk2","trk3","trk4","trk5","trk6","trk7","trk8","trk9","trk10",
-          "trk11","trk12","trk13","trk14","trk15","trk16",
-          "description"
-        }
-        for _,k in ipairs(ordered) do if f[k] ~= nil then field_row_token(k, f[k]) end end
-      end
-
-
-
-
-      -- Right panel
-      reaper.ImGui_TableSetColumnIndex(ctx, 1)
-      reaper.ImGui_Text(ctx, "Preview (cached; click 'Get Metadata' to refresh selection):")
-      reaper.ImGui_Separator(ctx)
-
-      if RIGHT_SELECTABLE_VIEW then
-        right_copy_text = build_right_copy_text_from_rows(right_copy_fmt)
-        if reaper.ImGui_Button(ctx, "Copy preview table (right)", 230, 0) then reaper.ImGui_SetClipboardText(ctx, right_copy_text or "") end
-        reaper.ImGui_SetNextItemWidth(ctx, -FLT_MIN)
-        reaper.ImGui_InputTextMultiline(ctx, "##right_sel_view", right_copy_text or "", -FLT_MIN, 240, reaper.ImGui_InputTextFlags_ReadOnly())
-      else
-        local prevFlags = TF('ImGui_TableFlags_Borders') | TF('ImGui_TableFlags_RowBg')
-        if reaper.ImGui_BeginTable(ctx, "PreviewTable", 5, prevFlags) then
-          reaper.ImGui_TableSetupColumn(ctx, "#", TF('ImGui_TableColumnFlags_WidthFixed'), 36)
-          reaper.ImGui_TableSetupColumn(ctx, "Current Take Name")
-          reaper.ImGui_TableSetupColumn(ctx, "New Name")
-          reaper.ImGui_TableSetupColumn(ctx, "Current Note")
-          reaper.ImGui_TableSetupColumn(ctx, "New Note")
-          reaper.ImGui_TableHeadersRow(ctx)
-          if not SCAN_CACHE or #preview_rows == 0 then
-            reaper.ImGui_TableNextRow(ctx)
-            reaper.ImGui_TableNextColumn(ctx); reaper.ImGui_TextDisabled(ctx, "-")
-            reaper.ImGui_TableNextColumn(ctx); reaper.ImGui_TextDisabled(ctx, "No cache. Click 'Get Metadata (Preview)'.") -- Current Take Name
-            reaper.ImGui_TableNextColumn(ctx); reaper.ImGui_TextDisabled(ctx, "")   -- New Name
-            reaper.ImGui_TableNextColumn(ctx); reaper.ImGui_TextDisabled(ctx, "")   -- Current Note
-            reaper.ImGui_TableNextColumn(ctx); reaper.ImGui_TextDisabled(ctx, "")   -- New Note
-
-          else
-            for i, row in ipairs(preview_rows) do
-              reaper.ImGui_TableNextRow(ctx)
-              reaper.ImGui_TableNextColumn(ctx); reaper.ImGui_Text(ctx, tostring(i))
-              reaper.ImGui_TableNextColumn(ctx); reaper.ImGui_TextWrapped(ctx, row.current ~= "" and row.current or "(unnamed)")
-              reaper.ImGui_TableNextColumn(ctx)
-              if row.will_skip then
-                reaper.ImGui_TextWrapped(ctx, "(will skip)")
-              else
-                reaper.ImGui_TextWrapped(ctx, row.newname ~= "" and row.newname or "(unchanged)")
-              end
-              reaper.ImGui_TableNextColumn(ctx); reaper.ImGui_TextWrapped(ctx, (row.current_note and row.current_note ~= "" ) and row.current_note or "(empty)")
-              reaper.ImGui_TableNextColumn(ctx)
-              local applied = row.note_applied
-              if applied then
-                reaper.ImGui_TextWrapped(ctx, (row.newnote ~= "" ) and row.newnote or "(empty)")
-              else
-                reaper.ImGui_TextWrapped(ctx, "(unchanged)")
-              end
-            end
-
-          end
-          reaper.ImGui_EndTable(ctx)
-        end
-      end
-      reaper.ImGui_EndTable(ctx)
-    end
-    reaper.ImGui_EndChild(ctx)
-  end
-    
-  -- Splitter (drag to resize)
-  reaper.ImGui_InvisibleButton(ctx, "VSplit", -1, split_thickness)
-  if reaper.ImGui_IsItemActive(ctx) then
-    local _, my = reaper.ImGui_GetMousePos(ctx)
-    if not _drag_active then _drag_active = true; _last_my = my
-    else
-      local dy = (my - _last_my)
-      local total = view_h + copy_h + split_thickness
-      if total > 0 then
-        SPLIT_RATIO = math.min(0.9, math.max(0.1, SPLIT_RATIO + (dy / total)))
-        save_split_ratio(SPLIT_RATIO)
-      end
-      _last_my = my
-    end
+-- ===== Detected fields panel =====
+local function draw_fields_panel()
+  reaper.ImGui_Text(ctx, "Detected fields (from FIRST currently-selected item):")
+  reaper.ImGui_Separator(ctx)
+  local first = reaper.GetSelectedMediaItem(0, 0)
+  if not first then
+    reaper.ImGui_TextDisabled(ctx, "No items selected. Click Get Metadata or just Apply.")
+    left_copy_text = ""
   else
-    _drag_active = false
-  end
+    local f = collect_metadata_for_item(first)
+    left_copy_text = build_left_copy_text_from_fields(f)
 
-
-
-
-
-
-  -- Bottom copy child
-  local begun, _ = BeginChildSafe("CopyPane", -1, copy_h, true)
-  if begun then
-    local copyFlags = TF('ImGui_TableFlags_Resizable') | TF('ImGui_TableFlags_BordersInnerV')
-    if reaper.ImGui_BeginTable(ctx, "CopySplit", 2, copyFlags) then
-      reaper.ImGui_TableSetupColumn(ctx, "CopyLeft", TF('ImGui_TableColumnFlags_WidthStretch'), 0.5)
-      reaper.ImGui_TableSetupColumn(ctx, "CopyRight", TF('ImGui_TableColumnFlags_WidthStretch'), 0.5)
-      reaper.ImGui_TableNextRow(ctx)
-
-      -- Copy left (metadata)
-      reaper.ImGui_TableSetColumnIndex(ctx, 0)
-      reaper.ImGui_Text(ctx, "Copy metadata")
+    do
+      local label = "$trk"
+      if reaper.ImGui_SmallButton(ctx, label .. "##field") then append_token(label) end
       reaper.ImGui_SameLine(ctx)
-      if reaper.ImGui_SmallButton(ctx, "Copy##meta") then
-        reaper.ImGui_SetClipboardText(ctx, left_copy_text or "")
+      if not f.__diag_interleave then compute_interleave_diag(f, f.__item or first) end
+      local diag = f.__diag_interleave or {}
+      local out = (diag.name and diag.name ~= "" and diag.name) or "(auto)"
+      if diag.index and diag.total then
+        out = string.format("%s (interleave %d/%d)", out, diag.index, diag.total)
       end
       reaper.ImGui_SetNextItemWidth(ctx, -FLT_MIN)
-      reaper.ImGui_InputTextMultiline(ctx, "##left_copy_box", left_copy_text or "", -FLT_MIN, copy_h - 48, reaper.ImGui_InputTextFlags_ReadOnly())
-
-      -- Copy right (preview table)
-      reaper.ImGui_TableSetColumnIndex(ctx, 1)
-      reaper.ImGui_Text(ctx, "Copy preview table:")
-      reaper.ImGui_SameLine(ctx)
-      if reaper.ImGui_SmallButton(ctx, "TSV##copytable") then
-        local text = build_right_copy_text_from_rows("tsv")
-        reaper.ImGui_SetClipboardText(ctx, text or "")
-      end
-      reaper.ImGui_SameLine(ctx)
-      if reaper.ImGui_SmallButton(ctx, "CSV##copytable") then
-        local text = build_right_copy_text_from_rows("csv")
-        reaper.ImGui_SetClipboardText(ctx, text or "")
-      end
-      reaper.ImGui_SetNextItemWidth(ctx, -FLT_MIN)
-      right_copy_text = (SCAN_CACHE and #preview_rows>0) and build_right_copy_text_from_rows(right_copy_fmt) or ""
-      reaper.ImGui_InputTextMultiline(ctx, "##right_copy_box", right_copy_text or "", -FLT_MIN, copy_h - 48, reaper.ImGui_InputTextFlags_ReadOnly())
-
-      reaper.ImGui_EndTable(ctx)
+      reaper.ImGui_InputText(ctx, "##fv_trk", out, reaper.ImGui_InputTextFlags_ReadOnly())
     end
-    reaper.ImGui_EndChild(ctx)
+
+    do
+      local label = "$trkall"
+      if reaper.ImGui_SmallButton(ctx, label .. "##field") then append_token(label) end
+      reaper.ImGui_SameLine(ctx)
+      if not f.__diag_interleave then compute_interleave_diag(f, f.__item or first) end
+      local all = (f.__diag_interleave and f.__diag_interleave.all) or ""
+      reaper.ImGui_SetNextItemWidth(ctx, -FLT_MIN)
+      reaper.ImGui_InputText(ctx, "##fv_trkall", all, reaper.ImGui_InputTextFlags_ReadOnly())
+    end
+
+    do
+      local label = "$curtake"
+      if reaper.ImGui_SmallButton(ctx, label .. "##field") then append_token(label) end
+      reaper.ImGui_SameLine(ctx)
+      reaper.ImGui_SetNextItemWidth(ctx, -FLT_MIN)
+      reaper.ImGui_InputText(ctx, "##fv_curtake", tostring(f.curtake or ""), reaper.ImGui_InputTextFlags_ReadOnly())
+    end
+
+    do
+      local label = "$curnote"
+      if reaper.ImGui_SmallButton(ctx, label .. "##field") then append_token(label) end
+      reaper.ImGui_SameLine(ctx)
+      reaper.ImGui_SetNextItemWidth(ctx, -FLT_MIN)
+      reaper.ImGui_InputText(ctx, "##fv_curnote", tostring(f.curnote or ""), reaper.ImGui_InputTextFlags_ReadOnly())
+    end
+
+    reaper.ImGui_Separator(ctx)
+
+    local ordered = {
+      "project","scene","take","tape","track",
+      "filename","srcfile","srcbase","srcext","srcpath","srcdir","filepath",
+      "samplerate","channels","length",
+      "date","time","year","originationdate","originationtime","startoffset",
+      "framerate","speed","ubits","originator","originatorreference",
+      "umid","umid_pt",
+      "timereference",
+      "trk1","trk2","trk3","trk4","trk5","trk6","trk7","trk8","trk9","trk10",
+      "trk11","trk12","trk13","trk14","trk15","trk16",
+      "description"
+    }
+    for _,k in ipairs(ordered) do if f[k] ~= nil then field_row_token(k, f[k]) end end
   end
 end
+
+
+-- ===== Preview panel =====
+local function draw_preview_panel()
+  -- Compact copy row
+  reaper.ImGui_Text(ctx, "Preview:")
+  reaper.ImGui_SameLine(ctx)
+  if reaper.ImGui_SmallButton(ctx, "Copy TSV##copytable") then
+    reaper.ImGui_SetClipboardText(ctx, build_right_copy_text_from_rows("tsv") or "")
+  end
+  reaper.ImGui_SameLine(ctx)
+  if reaper.ImGui_SmallButton(ctx, "Copy CSV##copytable") then
+    reaper.ImGui_SetClipboardText(ctx, build_right_copy_text_from_rows("csv") or "")
+  end
+  reaper.ImGui_Separator(ctx)
+
+  if RIGHT_SELECTABLE_VIEW then
+    right_copy_text = build_right_copy_text_from_rows(right_copy_fmt)
+    if reaper.ImGui_Button(ctx, "Copy preview table", 200, 0) then reaper.ImGui_SetClipboardText(ctx, right_copy_text or "") end
+    reaper.ImGui_SetNextItemWidth(ctx, -FLT_MIN)
+    reaper.ImGui_InputTextMultiline(ctx, "##right_sel_view", right_copy_text or "", -FLT_MIN, -FLT_MIN, reaper.ImGui_InputTextFlags_ReadOnly())
+  else
+    local prevFlags = TF('ImGui_TableFlags_Borders') | TF('ImGui_TableFlags_RowBg')
+    if reaper.ImGui_BeginTable(ctx, "PreviewTable", 5, prevFlags) then
+      reaper.ImGui_TableSetupColumn(ctx, "#", TF('ImGui_TableColumnFlags_WidthFixed'), 36)
+      reaper.ImGui_TableSetupColumn(ctx, "Current Take Name")
+      reaper.ImGui_TableSetupColumn(ctx, "New Name")
+      reaper.ImGui_TableSetupColumn(ctx, "Current Note")
+      reaper.ImGui_TableSetupColumn(ctx, "New Note")
+      reaper.ImGui_TableHeadersRow(ctx)
+      if not SCAN_CACHE or #preview_rows == 0 then
+        reaper.ImGui_TableNextRow(ctx)
+        reaper.ImGui_TableNextColumn(ctx); reaper.ImGui_TextDisabled(ctx, "-")
+        reaper.ImGui_TableNextColumn(ctx); reaper.ImGui_TextDisabled(ctx, "No cache. Click 'Get Metadata (Preview)'.")
+        reaper.ImGui_TableNextColumn(ctx); reaper.ImGui_TextDisabled(ctx, "")
+        reaper.ImGui_TableNextColumn(ctx); reaper.ImGui_TextDisabled(ctx, "")
+        reaper.ImGui_TableNextColumn(ctx); reaper.ImGui_TextDisabled(ctx, "")
+      else
+        for i, row in ipairs(preview_rows) do
+          reaper.ImGui_TableNextRow(ctx)
+          reaper.ImGui_TableNextColumn(ctx); reaper.ImGui_Text(ctx, tostring(i))
+          reaper.ImGui_TableNextColumn(ctx); reaper.ImGui_TextWrapped(ctx, row.current ~= "" and row.current or "(unnamed)")
+          reaper.ImGui_TableNextColumn(ctx)
+          if row.will_skip then
+            reaper.ImGui_TextWrapped(ctx, "(will skip)")
+          else
+            reaper.ImGui_TextWrapped(ctx, row.newname ~= "" and row.newname or "(unchanged)")
+          end
+          reaper.ImGui_TableNextColumn(ctx); reaper.ImGui_TextWrapped(ctx, (row.current_note and row.current_note ~= "" ) and row.current_note or "(empty)")
+          reaper.ImGui_TableNextColumn(ctx)
+          local applied = row.note_applied
+          if applied then
+            reaper.ImGui_TextWrapped(ctx, (row.newnote ~= "" ) and row.newnote or "(empty)")
+          else
+            reaper.ImGui_TextWrapped(ctx, "(unchanged)")
+          end
+        end
+      end
+      reaper.ImGui_EndTable(ctx)
+    end
+  end
+end
+
 
 -- ===== Main loop =====
 local function loop()
@@ -2695,127 +2668,67 @@ local function loop()
   if visible then
 
     -- ESC to Cancel/Close (press Esc anywhere to close the window)
-    if reaper.ImGui_IsWindowFocused(ctx, TF('ImGui_FocusedFlags_RootAndChildWindows')) 
+    if reaper.ImGui_IsWindowFocused(ctx, TF('ImGui_FocusedFlags_RootAndChildWindows'))
       and reaper.ImGui_IsKeyPressed(ctx, KEY_ESC, false) then
       close_after_apply = true
     end
 
-
-
-    -- Top row: Undo / Redo / Preview first
+    -- Top bar: Undo / Redo / Get Metadata / Apply / Cancel + status
     draw_top_bar()
     reaper.ImGui_Separator(ctx)
 
-    -- Tokens & inputs
-    reaper.ImGui_Text(ctx, "Template tokens (click to insert at caret):")
-    draw_token_row()
-    reaper.ImGui_Separator(ctx)
-    take_note_inputs()
-
-    -- Presets for Take/Note templates
-    reaper.ImGui_Separator(ctx)
-
-
-    draw_preset_row("Note Presets",
-      NOTE_PRESETS,
-      function(i) -- load
-        local v = NOTE_PRESETS[i] or ""
-        if v ~= "" then
-          NOTE_TEMPLATE = v
-          if SCAN_CACHE then recompute_preview_from_cache() end
-          focus_note_input = true
-        end
-      end,
-      function(i) -- save
-        NOTE_PRESETS[i] = NOTE_TEMPLATE or ""
-        save_presets(NOTE_PRESETS_KEY, NOTE_PRESETS)
-      end
-    )
-
-
-
-
-    -- Action row: left = Get Metadata, right = Apply buttons (no status text)
-    do
-      local full_w = select(1, reaper.ImGui_GetContentRegionAvail(ctx))
-      local left_btn_w = 210
-
-
-      -- Left button
-      if reaper.ImGui_Button(ctx, "Get Metadata (Preview)", left_btn_w, 28) then scan_metadata() end
-
-      -- Right-aligned Apply buttons
-      local right_x = full_w - (150*2 + 16*1)
-      if right_x > (left_btn_w + 12) then
-        reaper.ImGui_SameLine(ctx, right_x)
-      else
-        reaper.ImGui_NewLine(ctx)
-        local fw2 = select(1, reaper.ImGui_GetContentRegionAvail(ctx))
-        reaper.ImGui_SameLine(ctx, math.max(0, fw2 - (150*2 + 16*1)))
-      end
-
-      -- 只留 Apply / Cancel 兩顆
-      if reaper.ImGui_Button(ctx, "Apply", 150, 28) then apply_renaming() end
-      reaper.ImGui_SameLine(ctx)
-      if reaper.ImGui_Button(ctx, "Cancel", 150, 28) then close_after_apply = true end
-
-    end
-
-
-    -- Status row: Selected / Scanned / Cached / Preview first (with input)
-do
-  -- live selection and cache state
-  local nsel = reaper.CountSelectedMediaItems(0)
-  local scanned = (SCAN_CACHE and #SCAN_CACHE.list) or 0
-  local _, sig = get_selected_items_and_sig()
-  local cached_ok = (SCAN_CACHE and SCAN_CACHE.sig == sig)
-
-  local flags = TF('ImGui_TableFlags_SizingFixedFit')
-  if reaper.ImGui_BeginTable(ctx, "StatusRow", 4, flags) then
-    reaper.ImGui_TableSetupColumn(ctx, "Sel")
-    reaper.ImGui_TableSetupColumn(ctx, "Scan")
-    reaper.ImGui_TableSetupColumn(ctx, "Cache")
-    reaper.ImGui_TableSetupColumn(ctx, "Prev")
-
-    reaper.ImGui_TableNextRow(ctx)
-
-    -- Selected
-    reaper.ImGui_TableNextColumn(ctx)
-    reaper.ImGui_Text(ctx, ("Selected: %d"):format(nsel))
-
-    -- Scanned
-    reaper.ImGui_TableNextColumn(ctx)
-    reaper.ImGui_Text(ctx, ("Scanned: %d"):format(scanned))
-
-    -- Cached state
-    reaper.ImGui_TableNextColumn(ctx)
-    reaper.ImGui_Text(ctx, cached_ok and "Cached: Yes" or "Cached: No")
-    -- 想顯示 "Catched" 就把上行字串改成 "Catched: Yes/No"
-
-    -- Preview first input (moved here)
-    reaper.ImGui_TableNextColumn(ctx)
-    reaper.ImGui_Text(ctx, "Preview first"); reaper.ImGui_SameLine(ctx)
-    reaper.ImGui_SetNextItemWidth(ctx, 90)
-    local chg, n = reaper.ImGui_InputInt(ctx, "##preview_limit", preview_limit)
-    if chg then
-      preview_limit = math.max(1, math.min(10000, n or preview_limit))
-      if SCAN_CACHE then recompute_preview_from_cache() end
-    end
-
-    reaper.ImGui_EndTable(ctx)
-  end
-end
-
-
-
-    -- View/Copy split panes
-    reaper.ImGui_Separator(ctx)
+    -- 3-pane layout: upper-left (editor) + upper-right (detected fields) + lower (preview)
     local _, avail_h = reaper.ImGui_GetContentRegionAvail(ctx)
-    draw_view_pane(avail_h)
+    local split_thickness = 6.0
+    local upper_h = math.max(200, math.floor(avail_h * SPLIT_RATIO) - math.floor(split_thickness / 2))
+    local lower_h = math.max(100, avail_h - upper_h - split_thickness)
+
+    -- Upper section: left editor + detected fields side by side
+    local begun_up = BeginChildSafe("UpperSection", -1, upper_h, false)
+    if begun_up then
+      local begun_l = BeginChildSafe("LeftPanel", LEFT_PANEL_W, -1, true)
+      if begun_l then
+        draw_left_panel()
+        reaper.ImGui_EndChild(ctx)
+      end
+      reaper.ImGui_SameLine(ctx)
+      local begun_f = BeginChildSafe("FieldsPanel", -1, -1, true)
+      if begun_f then
+        draw_fields_panel()
+        reaper.ImGui_EndChild(ctx)
+      end
+      reaper.ImGui_EndChild(ctx)
+    end
+
+    -- Horizontal splitter (drag to resize upper/lower ratio)
+    reaper.ImGui_InvisibleButton(ctx, "HSplit", -1, split_thickness)
+    if reaper.ImGui_IsItemActive(ctx) then
+      local _, my = reaper.ImGui_GetMousePos(ctx)
+      if not _drag_active then
+        _drag_active = true
+        _last_my = my
+      else
+        local dy = my - _last_my
+        local total = upper_h + lower_h + split_thickness
+        if total > 0 then
+          SPLIT_RATIO = math.min(0.9, math.max(0.1, SPLIT_RATIO + dy / total))
+          save_split_ratio(SPLIT_RATIO)
+        end
+        _last_my = my
+      end
+    else
+      _drag_active = false
+    end
+
+    -- Lower section: preview (full width)
+    local begun_prev = BeginChildSafe("PreviewPanel", -1, lower_h, true)
+    if begun_prev then
+      draw_preview_panel()
+      reaper.ImGui_EndChild(ctx)
+    end
 
     -- Draw result modal if needed
     draw_result_modal()
-
 
     reaper.ImGui_End(ctx)
   end
