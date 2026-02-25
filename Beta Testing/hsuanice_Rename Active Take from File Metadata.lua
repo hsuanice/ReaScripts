@@ -1,6 +1,6 @@
 --[[
 @description ReaImGui - Rename Active Take from Metadata (caret insert + cached preview + copy/export)
-@version 260225.1930
+@version 260225.2030
 @author hsuanice
 @about
   Rename active takes and/or item notes from BWF/iXML and true source metadata using a fast ReaImGui UI.
@@ -35,6 +35,16 @@
   hsuanice served as the workflow designer, tester, and integrator for this tool.
 
 @changelog
+  v260225.2030 (2026-02-25)
+    - UI: Preview panel — "Get Metadata (Preview)" button moved from top bar into preview panel header
+      • Button label shows "Get Preview" when no cache exists, "Update Preview" when cache is present
+      • "Clear" button added next to it (clears cache and preview)
+      • "Copy TSV" and "Copy CSV" are right-aligned on the same header row
+    - Perf: Removed all live/real-time preview auto-updates triggered by template or setting changes
+      • Preview only refreshes when "Get Metadata" / "Update Metadata" is clicked explicitly
+    - UI: Item Note input field now matches Take Name visual prominence
+      • Label text in warm gold color; InputText box is taller (increased FramePadding)
+
   v260225.1930 (2026-02-25)
     - UI: Take Name input field is now visually prominent
       • Label text rendered in warm gold color to stand out from other labels
@@ -1648,42 +1658,6 @@ local function append_token(tk)
     local s, new_idx = safe_insert_token(TAKE_TEMPLATE, caret_take_char, tk)
     TAKE_TEMPLATE = s; caret_take_char = new_idx
   end
-  if SCAN_CACHE then
-    preview_rows = {}
-    local shown = 0
-    for i, e in ipairs(SCAN_CACHE.list) do
-      if not preview_limit or shown < preview_limit then
-        -- refresh interleave map/diag before expanding either template
-        e.fields.__trk_by_interleave = nil          -- drop old interleave cache
-        compute_interleave_diag(e.fields, e.item)   -- rebuild interleave map + diag
-        local newname = expand_template(TAKE_TEMPLATE, e.fields, i)
-        newname = apply_take_filter(newname)
-        newname = apply_take_renamer(newname)
-        local newnote  = (NOTE_TEMPLATE ~= "" and expand_template(NOTE_TEMPLATE, e.fields, i, false)) or ""
-        local currnote = tostring(e.fields and e.fields.curnote or "")
-
-        -- 判斷這列是否會因空白 token 而被 Skip（只影響預覽標記）
-        local will_skip = false
-        if SKIP_EMPTY_TOKENS then
-          local empties = empty_tokens_in_take_template(TAKE_TEMPLATE, e.fields, i)
-          will_skip = (#empties > 0)
-        end
-
-        preview_rows[#preview_rows+1] = {
-          current = e.current,
-          newname = newname,
-          current_note = currnote,
-          newnote = newnote,
-          note_applied = (NOTE_TEMPLATE ~= ""),
-          will_skip = will_skip
-        }
-
-
-        shown = shown + 1
-      end
-    end
-    right_copy_text = ""
-  end
 end
 
 local function field_row_token(key, value)
@@ -2053,7 +2027,7 @@ local function scan_metadata()
 end
 
 local function recompute_preview_from_cache()
-  if not SCAN_CACHE then preview_rows = {}; right_copy_text=""; status_msg="No cached metadata. Click 'Get Metadata (Preview)'."; return end
+  if not SCAN_CACHE then preview_rows = {}; right_copy_text=""; status_msg="No cached metadata. Click 'Get Metadata'.";  return end
   preview_rows = {}
   local shown = 0
   for i, e in ipairs(SCAN_CACHE.list) do
@@ -2305,20 +2279,18 @@ local function draw_left_panel()
     caret_take_char = snap_caret_out_of_token(TAKE_TEMPLATE, raw)
     caret_take_char = snap_caret_out_of_word(TAKE_TEMPLATE, caret_take_char, "right")
   end
-  if changed_take then TAKE_TEMPLATE = new_take; if SCAN_CACHE then recompute_preview_from_cache() end end
+  if changed_take then TAKE_TEMPLATE = new_take end
 
   -- Skip-if-empty toggle (Take-only)
   local chg_skip_empty, val_skip_empty = reaper.ImGui_Checkbox(ctx, "Skip rename if any token empty", SKIP_EMPTY_TOKENS)
   if chg_skip_empty then
     SKIP_EMPTY_TOKENS = val_skip_empty
     save_skip_empty_tokens(val_skip_empty)
-    if SCAN_CACHE then recompute_preview_from_cache() end
   end
 
   -- Take tools (Clear / Save / Default)
   if reaper.ImGui_SmallButton(ctx, "Clear##take") then
     TAKE_TEMPLATE = ""
-    if SCAN_CACHE then recompute_preview_from_cache() end
   end
   reaper.ImGui_SameLine(ctx)
   if reaper.ImGui_SmallButton(ctx, "Save##take") then
@@ -2328,7 +2300,6 @@ local function draw_left_panel()
   if reaper.ImGui_SmallButton(ctx, "Default##take") then
     local tdef, ndef = load_defaults()
     TAKE_TEMPLATE = tdef
-    if SCAN_CACHE then recompute_preview_from_cache() end
   end
 
   -- Template Tokens (collapsible, state persisted)
@@ -2343,7 +2314,6 @@ local function draw_left_panel()
     if chgEn then
       TAKE_RENAMER.enable = en
       save_take_renamer(TAKE_RENAMER)
-      if SCAN_CACHE then recompute_preview_from_cache() end
     end
     reaper.ImGui_SameLine(ctx)
     if reaper.ImGui_SmallButton(ctx, "+ Add rename rule##takeren_add_top") then
@@ -2351,7 +2321,6 @@ local function draw_left_panel()
       rules[#rules+1] = { from = "", to = "" }
       TAKE_RENAMER.rules = rules
       save_take_renamer(TAKE_RENAMER)
-      if SCAN_CACHE then recompute_preview_from_cache() end
     end
     local rules = TAKE_RENAMER.rules or {}
     local tblFlags = TF('ImGui_TableFlags_Borders') | TF('ImGui_TableFlags_RowBg')
@@ -2373,7 +2342,6 @@ local function draw_left_panel()
         if reaper.ImGui_SmallButton(ctx, label.."##takeren_clear") then
           TAKE_RENAMER.rules = {}
           save_take_renamer(TAKE_RENAMER)
-          if SCAN_CACHE then recompute_preview_from_cache() end
         end
       end
       for i=#rules,1,-1 do
@@ -2384,19 +2352,16 @@ local function draw_left_panel()
         local chgF, vF = reaper.ImGui_InputText(ctx, ("##ren_from_%d"):format(i), row.from or "")
         if chgF then
           row.from = vF; save_take_renamer(TAKE_RENAMER)
-          if SCAN_CACHE then recompute_preview_from_cache() end
         end
         reaper.ImGui_TableSetColumnIndex(ctx, 1)
         reaper.ImGui_SetNextItemWidth(ctx, -FLT_MIN)
         local chgT, vT = reaper.ImGui_InputText(ctx, ("##ren_to_%d"):format(i), row.to or "")
         if chgT then
           row.to = vT; save_take_renamer(TAKE_RENAMER)
-          if SCAN_CACHE then recompute_preview_from_cache() end
         end
         reaper.ImGui_TableSetColumnIndex(ctx, 2)
         if reaper.ImGui_SmallButton(ctx, ("-##delren_%d"):format(i)) then
           table.remove(rules, i); save_take_renamer(TAKE_RENAMER)
-          if SCAN_CACHE then recompute_preview_from_cache() end
         end
       end
       reaper.ImGui_EndTable(ctx)
@@ -2410,7 +2375,6 @@ local function draw_left_panel()
         local v = TAKE_PRESETS[i] or ""
         if v ~= "" then
           TAKE_TEMPLATE = v
-          if SCAN_CACHE then recompute_preview_from_cache() end
           focus_take_input = true
         end
       end,
@@ -2445,12 +2409,11 @@ local function draw_left_panel()
     caret_note_char = snap_caret_out_of_token(NOTE_TEMPLATE, idx)
     caret_note_char = snap_caret_out_of_word(NOTE_TEMPLATE, caret_note_char, "right")
   end
-  if changed_note then NOTE_TEMPLATE = new_note; if SCAN_CACHE then recompute_preview_from_cache() end end
+  if changed_note then NOTE_TEMPLATE = new_note end
 
   -- Note tools (Clear / Save / Default)
   if reaper.ImGui_SmallButton(ctx, "Clear##note") then
     NOTE_TEMPLATE = ""
-    if SCAN_CACHE then recompute_preview_from_cache() end
   end
   reaper.ImGui_SameLine(ctx)
   if reaper.ImGui_SmallButton(ctx, "Save##note") then
@@ -2460,7 +2423,6 @@ local function draw_left_panel()
   if reaper.ImGui_SmallButton(ctx, "Default##note") then
     local tdef, ndef = load_defaults()
     NOTE_TEMPLATE = ndef
-    if SCAN_CACHE then recompute_preview_from_cache() end
   end
 
   -- Note Presets (collapsible, state persisted)
@@ -2470,7 +2432,6 @@ local function draw_left_panel()
         local v = NOTE_PRESETS[i] or ""
         if v ~= "" then
           NOTE_TEMPLATE = v
-          if SCAN_CACHE then recompute_preview_from_cache() end
           focus_note_input = true
         end
       end,
@@ -2494,16 +2455,14 @@ local function draw_top_bar()
   reaper.ImGui_SameLine(ctx)
   if reaper.ImGui_Button(ctx, "Redo", 70, 0) then reaper.Undo_DoRedo2(0) end
 
-  -- Get Metadata / Apply / Cancel (right-aligned)
-  local btn_total = 210 + 150 + 150 + 8 * 2
+  -- Apply / Cancel (right-aligned)
+  local btn_total = 150 + 150 + 8
   local right_off = full_w - btn_total
   if right_off > (70 + 70 + 16) then
     reaper.ImGui_SameLine(ctx, right_off)
   else
     reaper.ImGui_NewLine(ctx)
   end
-  if reaper.ImGui_Button(ctx, "Get Metadata (Preview)", 210, 0) then scan_metadata() end
-  reaper.ImGui_SameLine(ctx)
   if reaper.ImGui_Button(ctx, "Apply", 150, 0) then apply_renaming() end
   reaper.ImGui_SameLine(ctx)
   if reaper.ImGui_Button(ctx, "Cancel", 150, 0) then close_after_apply = true end
@@ -2522,7 +2481,6 @@ local function draw_top_bar()
   local chg, n = reaper.ImGui_InputInt(ctx, "##preview_limit", preview_limit)
   if chg then
     preview_limit = math.max(1, math.min(10000, n or preview_limit))
-    if SCAN_CACHE then recompute_preview_from_cache() end
   end
 
   -- Options button (font size + docking)
@@ -2606,7 +2564,7 @@ local function draw_fields_panel()
   reaper.ImGui_Separator(ctx)
   local first = reaper.GetSelectedMediaItem(0, 0)
   if not first then
-    reaper.ImGui_TextDisabled(ctx, "No items selected. Click Get Metadata or just Apply.")
+    reaper.ImGui_TextDisabled(ctx, "No items selected. Click 'Get Metadata' above or just Apply.")
     left_copy_text = ""
   else
     local f = collect_metadata_for_item(first)
@@ -2673,9 +2631,29 @@ end
 
 -- ===== Preview panel =====
 local function draw_preview_panel()
-  -- Compact copy row
-  reaper.ImGui_Text(ctx, "Preview:")
+  -- Action row: left = Get/Update Metadata + Clear; right = Copy TSV + Copy CSV
+  local panel_w = select(1, reaper.ImGui_GetContentRegionAvail(ctx))
+  local tsv_w = select(1, reaper.ImGui_CalcTextSize(ctx, "Copy TSV")) + 14
+  local csv_w = select(1, reaper.ImGui_CalcTextSize(ctx, "Copy CSV")) + 14
+  local copy_total_w = tsv_w + csv_w + 8
+
+  local meta_label = SCAN_CACHE and "Update Preview##getmeta_prev" or "Get Preview##getmeta_prev"
+  if reaper.ImGui_SmallButton(ctx, meta_label) then scan_metadata() end
   reaper.ImGui_SameLine(ctx)
+  if reaper.ImGui_SmallButton(ctx, "Clear##clearprev") then
+    SCAN_CACHE = nil
+    preview_rows = {}
+    right_copy_text = ""
+    status_msg = ""
+  end
+
+  local right_x = panel_w - copy_total_w
+  local cur_x = select(1, reaper.ImGui_GetCursorPosX(ctx))
+  if right_x > cur_x + 8 then
+    reaper.ImGui_SameLine(ctx, right_x)
+  else
+    reaper.ImGui_SameLine(ctx)
+  end
   if reaper.ImGui_SmallButton(ctx, "Copy TSV##copytable") then
     reaper.ImGui_SetClipboardText(ctx, build_right_copy_text_from_rows("tsv") or "")
   end
@@ -2702,7 +2680,7 @@ local function draw_preview_panel()
       if not SCAN_CACHE or #preview_rows == 0 then
         reaper.ImGui_TableNextRow(ctx)
         reaper.ImGui_TableNextColumn(ctx); reaper.ImGui_TextDisabled(ctx, "-")
-        reaper.ImGui_TableNextColumn(ctx); reaper.ImGui_TextDisabled(ctx, "No cache. Click 'Get Metadata (Preview)'.")
+        reaper.ImGui_TableNextColumn(ctx); reaper.ImGui_TextDisabled(ctx, "No cache. Click 'Get Metadata'.")
         reaper.ImGui_TableNextColumn(ctx); reaper.ImGui_TextDisabled(ctx, "")
         reaper.ImGui_TableNextColumn(ctx); reaper.ImGui_TextDisabled(ctx, "")
         reaper.ImGui_TableNextColumn(ctx); reaper.ImGui_TextDisabled(ctx, "")
