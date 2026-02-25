@@ -1,6 +1,6 @@
 --[[
 @description ReaImGui - Rename Active Take from Metadata (caret insert + cached preview + copy/export)
-@version 260225.1800
+@version 260225.1930
 @author hsuanice
 @about
   Rename active takes and/or item notes from BWF/iXML and true source metadata using a fast ReaImGui UI.
@@ -35,6 +35,14 @@
   hsuanice served as the workflow designer, tester, and integrator for this tool.
 
 @changelog
+  v260225.1930 (2026-02-25)
+    - UI: Take Name input field is now visually prominent
+      • Label text rendered in warm gold color to stand out from other labels
+      • InputText box is taller (increased FramePadding) for clear visual hierarchy
+    - UI: Font scale — Options ▾ menu in status bar → Font Size submenu (75%–200%)
+      • Font size persists via ExtState across sessions
+    - UI: Dock toggle — Options ▾ menu → Allow Docking (on/off, persists via ExtState)
+
   v260225.1800 (2026-02-25)
     - UI: Three-pane layout (upper-left editor, upper-right Detected Fields, lower Preview)
       • CollapsingHeader states (Tokens, Renamer, Take Presets, Note Presets) now persist
@@ -375,6 +383,16 @@ local function save_defaults(t, n)
   reaper.SetExtState(EXT_NS, "default_take_template", tostring(t or ""), true)
   reaper.SetExtState(EXT_NS, "default_note_template", tostring(n or ""), true)
 end
+
+-- ===== Font scale and docking =====
+local current_font_size      = 13
+local font_pushed_this_frame = false
+local FONT_SCALE   = math.max(0.5, math.min(3.0, tonumber(reaper.GetExtState(EXT_NS, "font_scale")) or 1.0))
+local ALLOW_DOCKING = (reaper.GetExtState(EXT_NS, "allow_docking") == "1")
+local function set_font_size(size)
+  current_font_size = math.max(8, math.min(48, math.floor(size or 13)))
+end
+set_font_size(math.floor(13 * FONT_SCALE))
 
 -- ===== Safe string pack for ExtState (single-line storage) =====
 local SEP = string.char(31) -- ASCII Unit Separator; 不會出現在一般文字中
@@ -2270,11 +2288,16 @@ end
 
 -- ===== Left panel =====
 local function draw_left_panel()
-  -- Take Name
-  reaper.ImGui_Text(ctx, "Take Name"); reaper.ImGui_SameLine(ctx); reaper.ImGui_TextDisabled(ctx, "(click to set caret; snaps out of tokens)")
+  -- Take Name (prominent: colored label + taller input box)
+  reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Text(), 0xFFCC55FF)
+  reaper.ImGui_Text(ctx, "Take Name")
+  reaper.ImGui_PopStyleColor(ctx)
+  reaper.ImGui_SameLine(ctx); reaper.ImGui_TextDisabled(ctx, "(click to set caret; snaps out of tokens)")
   reaper.ImGui_SetNextItemWidth(ctx, -FLT_MIN)
   if focus_take_input then reaper.ImGui_SetKeyboardFocusHere(ctx); focus_take_input = false end
+  reaper.ImGui_PushStyleVar(ctx, reaper.ImGui_StyleVar_FramePadding(), 6, 8)
   local changed_take, new_take = reaper.ImGui_InputText(ctx, "##take_name_tpl", TAKE_TEMPLATE)
+  reaper.ImGui_PopStyleVar(ctx)
   if reaper.ImGui_IsItemActive(ctx) then active_box = "take" end
   if reaper.ImGui_IsItemHovered(ctx) and reaper.ImGui_IsMouseClicked(ctx, 0) then
     local mx, _ = reaper.ImGui_GetMousePos(ctx); local rx, _ = reaper.ImGui_GetItemRectMin(ctx)
@@ -2401,10 +2424,15 @@ local function draw_left_panel()
 
   reaper.ImGui_Separator(ctx)
 
-  -- Item Note
-  reaper.ImGui_Text(ctx, "Item Note"); reaper.ImGui_SameLine(ctx); reaper.ImGui_TextDisabled(ctx, "(empty = skip)")
+  -- Item Note (prominent: colored label + taller multiline box)
+  reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Text(), 0xFFCC55FF)
+  reaper.ImGui_Text(ctx, "Item Note")
+  reaper.ImGui_PopStyleColor(ctx)
+  reaper.ImGui_SameLine(ctx); reaper.ImGui_TextDisabled(ctx, "(empty = skip)")
   reaper.ImGui_SetNextItemWidth(ctx, -FLT_MIN)
+  reaper.ImGui_PushStyleVar(ctx, reaper.ImGui_StyleVar_FramePadding(), 6, 8)
   local changed_note, new_note = reaper.ImGui_InputTextMultiline(ctx, "##item_note_tpl", NOTE_TEMPLATE, -FLT_MIN, 92)
+  reaper.ImGui_PopStyleVar(ctx)
   if focus_note_input then reaper.ImGui_SetKeyboardFocusHere(ctx); focus_note_input = false end
   if reaper.ImGui_IsItemActive(ctx) then active_box = "note" end
   if reaper.ImGui_IsItemHovered(ctx) and reaper.ImGui_IsMouseClicked(ctx, 0) then
@@ -2496,32 +2524,76 @@ local function draw_top_bar()
     preview_limit = math.max(1, math.min(10000, n or preview_limit))
     if SCAN_CACHE then recompute_preview_from_cache() end
   end
+
+  -- Options button (font size + docking)
+  reaper.ImGui_SameLine(ctx)
+  if reaper.ImGui_SmallButton(ctx, "Options \xe2\x96\xbe##opts_btn") then
+    reaper.ImGui_OpenPopup(ctx, "##opts_popup")
+  end
+  if reaper.ImGui_BeginPopup(ctx, "##opts_popup") then
+    -- Docking toggle
+    local dock_l = ALLOW_DOCKING and ">> Allow Docking" or "   Allow Docking"
+    if reaper.ImGui_Selectable(ctx, dock_l, false) then
+      ALLOW_DOCKING = not ALLOW_DOCKING
+      reaper.SetExtState(EXT_NS, "allow_docking", ALLOW_DOCKING and "1" or "0", true)
+    end
+    reaper.ImGui_Separator(ctx)
+    -- Font Size submenu
+    if reaper.ImGui_BeginMenu(ctx, "Font Size") then
+      local sizes = {
+        { label = "75%",            s = 0.75 },
+        { label = "100% (Default)", s = 1.0  },
+        { label = "125%",           s = 1.25 },
+        { label = "150%",           s = 1.5  },
+        { label = "175%",           s = 1.75 },
+        { label = "200%",           s = 2.0  },
+      }
+      for _, sz in ipairs(sizes) do
+        local is_cur = math.abs((FONT_SCALE or 1.0) - sz.s) < 0.01
+        local lbl = (is_cur and ">> " or "   ") .. sz.label
+        if reaper.ImGui_Selectable(ctx, lbl, false) then
+          FONT_SCALE = sz.s
+          set_font_size(math.floor(13 * FONT_SCALE))
+          reaper.SetExtState(EXT_NS, "font_scale", tostring(FONT_SCALE), true)
+        end
+      end
+      reaper.ImGui_EndMenu(ctx)
+    end
+    reaper.ImGui_EndPopup(ctx)
+  end
 end
 
 function draw_preset_row(label, presets, on_load_click, on_save_click, hide_label)
   if not hide_label then
-    reaper.ImGui_Text(ctx, label); reaper.ImGui_SameLine(ctx); reaper.ImGui_TextDisabled(ctx, "(click Pn to load; Save Pn to store current)")
+    reaper.ImGui_TextDisabled(ctx, "(click row to load; Save to store current)")
   end
-  if reaper.ImGui_BeginTable(ctx, label.."##preset_table", PRESET_SLOTS, TF('ImGui_TableFlags_SizingStretchProp')) then
-    -- Row 1: P1..P5
-    reaper.ImGui_TableNextRow(ctx)
-    for i=1,PRESET_SLOTS do
+  -- Vertical layout: one row per preset slot (P# label | content button | Save button)
+  local tbl_flags = TF('ImGui_TableFlags_SizingFixedFit') | TF('ImGui_TableFlags_BordersInnerV')
+  if reaper.ImGui_BeginTable(ctx, label.."##preset_table", 3, tbl_flags) then
+    reaper.ImGui_TableSetupColumn(ctx, "",  TF('ImGui_TableColumnFlags_WidthFixed'), 28)  -- "Pn"
+    reaper.ImGui_TableSetupColumn(ctx, "",  TF('ImGui_TableColumnFlags_WidthStretch'))     -- content
+    reaper.ImGui_TableSetupColumn(ctx, "",  TF('ImGui_TableColumnFlags_WidthFixed'), 46)  -- "Save"
+    for i = 1, PRESET_SLOTS do
+      reaper.ImGui_TableNextRow(ctx)
+      -- Col 0: slot label
+      reaper.ImGui_TableNextColumn(ctx)
+      reaper.ImGui_TextDisabled(ctx, ("P%d"):format(i))
+      -- Col 1: load button showing content preview
       reaper.ImGui_TableNextColumn(ctx)
       local raw = (presets[i] or ""):gsub("[%c\r\n]", " ")
-      local show = (raw ~= "" and raw or "(unchanged)")
-      local label_text = ellipsize_utf8(show, 64)
-      local btn = ("%s##%s_load_%d"):format(label_text, label, i)
-      if reaper.ImGui_SmallButton(ctx, btn) then on_load_click(i) end
+      local show = (raw ~= "" and raw or "(empty)")
+      reaper.ImGui_SetNextItemWidth(ctx, -FLT_MIN)
+      local avail = select(1, reaper.ImGui_GetContentRegionAvail(ctx))
+      local preview = ellipsize_to_width(ctx, show, avail - 6)
+      local load_btn = ("%s##%s_load_%d"):format(preview, label, i)
+      if reaper.ImGui_SmallButton(ctx, load_btn) then on_load_click(i) end
       if raw ~= "" and reaper.ImGui_IsItemHovered(ctx) then
         reaper.ImGui_BeginTooltip(ctx); reaper.ImGui_Text(ctx, raw); reaper.ImGui_EndTooltip(ctx)
       end
-    end
-    -- Row 2: Save P1..P5
-    reaper.ImGui_TableNextRow(ctx)
-    for i=1,PRESET_SLOTS do
+      -- Col 2: save button
       reaper.ImGui_TableNextColumn(ctx)
-      local btn = ("Save P%d##%s_save_%d"):format(i, label, i)
-      if reaper.ImGui_SmallButton(ctx, btn) then on_save_click(i) end
+      local save_btn = ("Save##%s_save_%d"):format(label, i)
+      if reaper.ImGui_SmallButton(ctx, save_btn) then on_save_click(i) end
     end
     reaper.ImGui_EndTable(ctx)
   end
@@ -2663,8 +2735,20 @@ end
 
 -- ===== Main loop =====
 local function loop()
+  -- Push font if scaled (must happen before ImGui_Begin)
+  font_pushed_this_frame = false
+  if current_font_size ~= 13 and reaper.ImGui_PushFont then
+    local ok_font = pcall(reaper.ImGui_PushFont, ctx, nil, current_font_size)
+    if ok_font then font_pushed_this_frame = true end
+  end
+
   reaper.ImGui_SetNextWindowSize(ctx, WIN_W, WIN_H, reaper.ImGui_Cond_FirstUseEver())
-  local visible, open = reaper.ImGui_Begin(ctx, 'Rename Active Take from Metadata'..LIBVER, true, TF('ImGui_WindowFlags_NoScrollbar'))
+  local wnd_flags = TF('ImGui_WindowFlags_NoScrollbar')
+  if not ALLOW_DOCKING then
+    local no_dock = TF('ImGui_WindowFlags_NoDocking')
+    if no_dock ~= 0 then wnd_flags = wnd_flags | no_dock end
+  end
+  local visible, open = reaper.ImGui_Begin(ctx, 'Rename Active Take from Metadata'..LIBVER, true, wnd_flags)
   if visible then
 
     -- ESC to Cancel/Close (press Esc anywhere to close the window)
@@ -2731,6 +2815,11 @@ local function loop()
     draw_result_modal()
 
     reaper.ImGui_End(ctx)
+  end
+
+  -- Pop font (must happen after ImGui_End, always if pushed)
+  if font_pushed_this_frame then
+    reaper.ImGui_PopFont(ctx)
   end
 
   if (not open) or close_after_apply then
