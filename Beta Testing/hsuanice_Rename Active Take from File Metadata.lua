@@ -1,6 +1,6 @@
 --[[
 @description ReaImGui - Rename Active Take from Metadata (caret insert + cached preview + copy/export)
-@version 251210.0145
+@version 260225.1630
 @author hsuanice
 @about
   Rename active takes and/or item notes from BWF/iXML and true source metadata using a fast ReaImGui UI.
@@ -35,6 +35,13 @@
   hsuanice served as the workflow designer, tester, and integrator for this tool.
 
 @changelog
+  v260225.1630 (2026-02-25)
+    - UX: Apply now processes items in deferred batches (50 items per frame via reaper.defer())
+      • No more spinning beach ball / UI freeze during large batch renames
+      • REAPER Console window opens automatically on Apply to show live progress
+      • Each batch prints [processed / total]; final summary printed on completion
+      • Guard against double-trigger: re-pressing Apply while a batch is in progress is ignored
+
   v251210.0145 (2024-12-10)
     - Fixed: BWF Description parsing now handles newline-separated key=value pairs
       • Previously only supported semicolon separators (key=val; key=val)
@@ -1578,7 +1585,8 @@ local _drag_active = false
 local _last_my = 0
 
 -- ===== Post-Apply result state =====
-local SHOW_RESULT_MODAL = false
+local SHOW_RESULT_MODAL  = false
+local PENDING_RESULT_OPEN = false   -- set by deferred apply; ImGui_OpenPopup called on next frame
 local LAST_RESULT = nil  -- { total_sel, renamed, noted, skipped, rows = { {idx, old, newname, newnote, status}... } }
 
 
@@ -1752,11 +1760,16 @@ end
 local function open_result_modal(res)
   LAST_RESULT = res
   SHOW_RESULT_MODAL = true
-  reaper.ImGui_OpenPopup(ctx, "Apply Result")
+  PENDING_RESULT_OPEN = true   -- ImGui_OpenPopup will be called on the next loop frame
 end
 
 local function draw_result_modal()
   if not SHOW_RESULT_MODAL then return end
+  -- Must call ImGui_OpenPopup inside the ImGui frame; deferred apply sets the pending flag
+  if PENDING_RESULT_OPEN then
+    reaper.ImGui_OpenPopup(ctx, "Apply Result")
+    PENDING_RESULT_OPEN = false
+  end
   local opened = reaper.ImGui_BeginPopupModal(ctx, "Apply Result", true)
   if opened then
     local r = LAST_RESULT or { total_sel=0, renamed=0, noted=0, skipped=0, rows={} }
@@ -2038,28 +2051,23 @@ local function recompute_preview_from_cache()
   status_msg = string.format("Using cached metadata. Showing first %d.", shown)
 end
 
--- ===== Apply =====
-local function apply_renaming()
-  local items, sig = get_selected_items_and_sig()
-  local total = #items
-  if total == 0 then status_msg="No items selected."; return end
+-- ===== Apply (deferred with progress console) =====
+local APPLY_STATE = nil
+local APPLY_BATCH = 50   -- items processed per defer frame
 
-  local can_use_cache = (SCAN_CACHE and SCAN_CACHE.sig == sig)
+local function apply_renaming_step()
+  if not APPLY_STATE then return end
+  local p = APPLY_STATE
 
-  reaper.Undo_BeginBlock()
-  local renamed, noted, skipped, counter = 0, 0, 0, 1
-  local rows = {}           -- for result list (renamed / note rows)
-  local skipped_rows = {}   -- only empty-token skipped rows (for modal list/export)
+  local i_end = math.min(p.i + APPLY_BATCH - 1, p.total)
 
-
-  for i, item in ipairs(items) do
+  for i = p.i, i_end do
+    local item = p.items[i]
     local take = get_active_take(item)
     local fields
-    local entry
-    if can_use_cache then
+    if p.can_use_cache then
       local e = SCAN_CACHE.map[get_item_guid(item)]
       fields = e and e.fields
-      entry  = e
     end
     if not fields then
       fields = collect_metadata_for_item(item)
@@ -2074,26 +2082,23 @@ local function apply_renaming()
 
     local srcfile_for_row = tostring(fields and fields.srcfile or "")
 
-
-
     -- compute new
-    local new_name = (take and expand_template(TAKE_TEMPLATE, fields, counter)) or ""
+    local new_name = (take and expand_template(TAKE_TEMPLATE, fields, p.counter)) or ""
 
     -- Skip-if-empty：只要樣板裡任何 token 展開為空，就略過此 item 的 rename
     local skip_reason = nil
     if SKIP_EMPTY_TOKENS then
-      local empties = empty_tokens_in_take_template(TAKE_TEMPLATE, fields, counter)
+      local empties = empty_tokens_in_take_template(TAKE_TEMPLATE, fields, p.counter)
       if #empties > 0 then
         skip_reason = "empty token(s): $" .. table.concat(empties, ", $")
       end
     end
 
-
     new_name = apply_take_filter(new_name)
     local _renamed, _hits = apply_take_renamer(new_name)
     new_name = _renamed
     local ren_hits_str = table.concat(_hits or {}, "; ")
-    local new_note = (NOTE_TEMPLATE ~= "" and expand_template(NOTE_TEMPLATE, fields, counter, false)) or ""
+    local new_note = (NOTE_TEMPLATE ~= "" and expand_template(NOTE_TEMPLATE, fields, p.counter, false)) or ""
 
     local did_rename, did_note = false, false
 
@@ -2101,12 +2106,12 @@ local function apply_renaming()
     if take and new_name ~= "" and not skip_reason then
       reaper.GetSetMediaItemTakeInfo_String(take, "P_NAME", new_name, true)
       did_rename = true
-      renamed = renamed + 1
+      p.renamed = p.renamed + 1
     elseif skip_reason and take then
       -- 只有有 take 的情況，才因空 token 計入 skipped
-      skipped = skipped + 1
+      p.skipped = p.skipped + 1
       -- 記錄到結果視窗的 skipped list（僅空 token 的情況）
-      skipped_rows[#skipped_rows+1] = {
+      p.skipped_rows[#p.skipped_rows+1] = {
         idx     = i,
         current = old_take_name,
         srcfile = srcfile_for_row,
@@ -2114,13 +2119,12 @@ local function apply_renaming()
       }
     end
 
-
     if NOTE_TEMPLATE ~= "" then
       reaper.GetSetMediaItemInfo_String(item, "P_NOTES", new_note, true)
       did_note = true
-      noted = noted + 1
+      p.noted = p.noted + 1
     else
-      if not take then skipped = skipped + 1 end
+      if not take then p.skipped = p.skipped + 1 end
     end
 
     local status
@@ -2133,39 +2137,76 @@ local function apply_renaming()
     else
       status = "Skipped"
     end
-    rows[#rows+1] = {
+    p.rows[#p.rows+1] = {
       idx = i,
       old = old_take_name,
       newname = new_name,
-      replaced = ren_hits_str,  -- 新增：本列命中的 rename 規則（空字串 = 無）
+      replaced = ren_hits_str,
       current_note = tostring(fields and fields.curnote or ""),
       newnote = new_note
     }
-    counter = counter + 1
+    p.counter = p.counter + 1
   end
 
+  p.i = i_end + 1
 
+  -- Print progress to console (one line per batch)
+  reaper.ShowConsoleMsg(string.format("  [%d / %d] processed\n", math.min(i_end, p.total), p.total))
 
+  if p.i > p.total then
+    -- 全部完成，收尾
+    reaper.UpdateArrange()
+    reaper.Undo_EndBlock(string.format("Rename %d take(s), update %d note(s), skipped %d (no take)",
+      p.renamed, p.noted, p.skipped), -1)
+    status_msg = string.format("Done: %d renamed, %d notes updated, %d skipped.", p.renamed, p.noted, p.skipped)
+    reaper.ShowConsoleMsg(string.format("Done: %d renamed, %d notes updated, %d skipped.\n",
+      p.renamed, p.noted, p.skipped))
+    APPLY_STATE = nil
+    -- 重新產生右側預覽（保留原行為）
+    recompute_preview_from_cache()
+    -- 啟動結果視窗
+    open_result_modal({
+      total_sel    = p.total,
+      renamed      = p.renamed,
+      noted        = p.noted,
+      skipped      = p.skipped,
+      rows         = p.rows,
+      skipped_rows = p.skipped_rows,
+    })
+  else
+    reaper.defer(apply_renaming_step)
+  end
+end
 
+local function apply_renaming()
+  local items, sig = get_selected_items_and_sig()
+  local total = #items
+  if total == 0 then status_msg="No items selected."; return end
 
+  -- 防止重複觸發
+  if APPLY_STATE then return end
 
-  reaper.UpdateArrange()
-  reaper.Undo_EndBlock(string.format("Rename %d take(s), update %d note(s), skipped %d (no take)", renamed, noted, skipped), -1)
-  status_msg = string.format("Done: %d renamed, %d notes updated, %d skipped.", renamed, noted, skipped)
+  local can_use_cache = (SCAN_CACHE and SCAN_CACHE.sig == sig)
 
-  -- 重新產生右側預覽（保留原行為）
-  recompute_preview_from_cache()
+  reaper.Undo_BeginBlock()
 
-  -- 啟動結果視窗
-  open_result_modal({
-    total_sel = total,
-    renamed   = renamed,
-    noted     = noted,
-    skipped   = skipped,
-    rows      = rows,
-    skipped_rows = skipped_rows
-  })
+  -- Open Console and print header
+  reaper.ShowConsoleMsg(string.format("=== Renaming %d item(s) ===\n", total))
 
+  APPLY_STATE = {
+    items         = items,
+    total         = total,
+    can_use_cache = can_use_cache,
+    i             = 1,
+    counter       = 1,
+    renamed       = 0,
+    noted         = 0,
+    skipped       = 0,
+    rows          = {},
+    skipped_rows  = {},
+  }
+
+  reaper.defer(apply_renaming_step)
 end
 
 
