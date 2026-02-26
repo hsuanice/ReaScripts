@@ -1,6 +1,6 @@
 --[[
 @description Conform List Browser
-@version 260221.1500
+@version 260227.0120
 @author hsuanice
 @about
   A REAPER script for browsing and editing EDL (Edit Decision List) data
@@ -35,12 +35,27 @@
     - Font size adjustment (50% - 300%)
     - Column presets (save/load visible column configurations)
 
-  Future: XML format support (Premiere, FCPX, FCP7, Resolve, Nuendo)
+  Supported formats (via OpenTimelineIO):
+    - CMX3600 EDL (.edl)
+    - FCP7 XML (.xml) — Final Cut Pro 7 and DaVinci Resolve XML export
+
+  Future: AAF, FCPX, Premiere XML
 
   Requires: ReaImGui (install via ReaPack)
   Optional: js_ReaScriptAPI (for folder selection)
+  Required: Python 3 + opentimelineio (pip3 install opentimelineio)
 
 @changelog
+  v260227.0120
+  - Feature: OpenTimelineIO integration for XML import (FCP7, Resolve)
+    • New files: Tools/otio_to_clb.py, Library/hsuanice_OTIO Bridge.lua, Library/json.lua
+    • "Load XML..." button now functional: FCP7 XML and DaVinci Resolve XML — NEW
+    • load_edl_file() and load_xml_file() share a common _load_timeline_via_otio() helper
+    • CLB.loaded_format reflects actual format name (e.g. "FCP7_XML")
+    • OTIO Bridge auto-routes .edl → native Lua parser (OTIO CMX3600 adapter loses
+      record TC offsets and has dual-track bugs — not suitable for conform workflows)
+  - Requires for XML: python3 in PATH, opentimelineio installed
+
   v260221.1500
   - Perf: Switch get_view_rows() and get_audio_view_rows() from frame-based to dirty-flag cache
     • Previously both functions rebuilt the filtered list every single frame (O(n) per frame)
@@ -345,6 +360,18 @@ if not ok_edl then
   reaper.ShowMessageBox(
     "Cannot load EDL Parser library.\n\nExpected at:\n" .. EDL_PARSER_PATH ..
     "\n\nError: " .. tostring(EDL),
+    "Conform List Browser", 0)
+  return
+end
+
+-- OTIO Bridge (EDL, FCP7 XML, Resolve XML via OpenTimelineIO)
+local OTIO_BRIDGE_PATH = lib_path .. "hsuanice_OTIO Bridge.lua"
+local ok_otio, OTIO = pcall(dofile, OTIO_BRIDGE_PATH)
+if not ok_otio then
+  reaper.ShowMessageBox(
+    "Cannot load OTIO Bridge library.\n\nExpected at:\n" .. OTIO_BRIDGE_PATH ..
+    "\n\nError: " .. tostring(OTIO) ..
+    "\n\nOTIO Bridge is required for EDL and XML import.",
     "Conform List Browser", 0)
   return
 end
@@ -1413,6 +1440,7 @@ local function save_prefs()
   reaper.SetExtState(EXT_NS, "console_output", CONSOLE.enabled and "1" or "0", true)
   reaper.SetExtState(EXT_NS, "debug_mode", DEBUG and "1" or "0", true)
   reaper.SetExtState(EXT_NS, "allow_docking", ALLOW_DOCKING and "1" or "0", true)
+  reaper.SetExtState(EXT_NS, "otio_python", OTIO.python or "python3", true)
 
   -- EDL column order (comma-separated)
   local order_str = table.concat(EDL_COL_ORDER, ",")
@@ -1445,6 +1473,7 @@ local function load_prefs()
   CONSOLE.enabled = get("console_output", "0") == "1"
   DEBUG = get("debug_mode", "0") == "1"
   ALLOW_DOCKING = get("allow_docking", "0") == "1"
+  OTIO.python = get("otio_python", "")  -- set after load_prefs() is called
 
   -- EDL column order
   local order_str = get("edl_col_order", "")
@@ -2531,58 +2560,57 @@ local function save_clb_project_dialog()
   save_prefs()
 end
 
-local function load_edl_file()
+--- Shared timeline loader: opens a file dialog, parses via OTIO Bridge,
+--- then replaces or appends rows. Used by load_edl_file() and load_xml_file().
+---
+--- @param dialog_title  string  Title for the file-open dialog
+--- @param file_filter   string  Null-separated filter string for JS_Dialog_BrowseForOpenFiles
+--- @param fallback_ext  string  Extension for the fallback single-file dialog (e.g. "*.edl")
+local function _load_timeline_via_otio(dialog_title, file_filter, fallback_ext)
   -- Collect file paths (multi-select via JS extension, fallback to single)
   local filepaths = {}
 
   if reaper.JS_Dialog_BrowseForOpenFiles then
-    -- JS extension available: multi-select file dialog
     local rv, filestr = reaper.JS_Dialog_BrowseForOpenFiles(
-      "Open EDL Files", CLB.last_dir or "", "", "EDL files\0*.edl\0All files\0*.*\0", true)
+      dialog_title, CLB.last_dir or "", "", file_filter, true)
     if rv ~= 1 or not filestr or filestr == "" then return end
 
-    -- Parse null-separated result
     local parts = {}
     for part in (filestr .. "\0"):gmatch("([^\0]*)\0") do
       if part ~= "" then parts[#parts + 1] = part end
     end
 
     if #parts == 1 then
-      -- Single file selected (full path returned directly)
       filepaths[1] = parts[1]
     elseif #parts > 1 then
       -- macOS returns all full paths; Windows returns directory + filenames
-      -- Detect: if second part starts with "/" or drive letter, all are full paths
       if parts[2]:match("^/") or parts[2]:match("^%a:\\") then
-        -- All full paths (macOS behavior)
-        for i = 1, #parts do
-          filepaths[#filepaths + 1] = parts[i]
-        end
+        for i = 1, #parts do filepaths[#filepaths + 1] = parts[i] end
       else
-        -- First part is directory, rest are filenames (Windows behavior)
         local dir = parts[1]
         if not dir:match("[/\\]$") then dir = dir .. "/" end
-        for i = 2, #parts do
-          filepaths[#filepaths + 1] = dir .. parts[i]
-        end
+        for i = 2, #parts do filepaths[#filepaths + 1] = dir .. parts[i] end
       end
     end
   else
     -- Fallback: single file dialog
-    local retval, filepath = reaper.GetUserFileNameForRead("", "Open EDL File", "*.edl")
+    local retval, filepath = reaper.GetUserFileNameForRead("", dialog_title, fallback_ext)
     if not retval or filepath == "" then return end
     filepaths[1] = filepath
   end
 
   if #filepaths == 0 then return end
 
-  -- Parse all selected EDL files
-  local all_parsed = {}  -- { { parsed=..., path=... }, ... }
+  -- Parse all selected files via OTIO Bridge
+  local all_parsed = {}
   local errors = {}
   for _, fp in ipairs(filepaths) do
-    local parsed, err = EDL.parse(fp, { default_fps = CLB.fps })
+    local parsed, err = OTIO.parse(fp, { default_fps = CLB.fps })
     if parsed then
       all_parsed[#all_parsed + 1] = { parsed = parsed, path = fp }
+      if parsed._warning then
+        console_msg("Warning [" .. (fp:match("([^/\\]+)$") or fp) .. "]: " .. parsed._warning)
+      end
     else
       errors[#errors + 1] = (fp:match("([^/\\]+)$") or fp) .. ": " .. tostring(err)
     end
@@ -2623,11 +2651,10 @@ local function load_edl_file()
 
     if choice == 6 then
       -- Yes = Replace
-      CLB.loaded_file = #filepaths == 1 and filepaths[1] or nil
-      CLB.loaded_format = "EDL"
-      CLB.parsed_data = all_parsed[1].parsed
+      CLB.loaded_file   = #filepaths == 1 and filepaths[1] or nil
+      CLB.loaded_format = all_parsed[1].parsed.format
+      CLB.parsed_data   = all_parsed[1].parsed
       build_rows_from_parsed(all_parsed[1].parsed, all_parsed[1].path)
-      -- Append remaining files
       for i = 2, #all_parsed do
         append_rows_from_parsed(all_parsed[i].parsed, all_parsed[i].path)
       end
@@ -2638,10 +2665,10 @@ local function load_edl_file()
       end
     end
   else
-    -- First load: build from first, append rest
-    CLB.loaded_file = #filepaths == 1 and filepaths[1] or nil
-    CLB.loaded_format = "EDL"
-    CLB.parsed_data = all_parsed[1].parsed
+    -- First load
+    CLB.loaded_file   = #filepaths == 1 and filepaths[1] or nil
+    CLB.loaded_format = all_parsed[1].parsed.format
+    CLB.parsed_data   = all_parsed[1].parsed
     build_rows_from_parsed(all_parsed[1].parsed, all_parsed[1].path)
     for i = 2, #all_parsed do
       append_rows_from_parsed(all_parsed[i].parsed, all_parsed[i].path)
@@ -2653,10 +2680,23 @@ local function load_edl_file()
   _rebuild_track_filters()
   CLB.cached_rows = nil
 
-  -- Summary message
   if #all_parsed > 1 then
-    console_msg(string.format("Loaded %d EDL files (%d total events)", #all_parsed, #ROWS))
+    console_msg(string.format("Loaded %d files (%d total events)", #all_parsed, #ROWS))
   end
+end
+
+local function load_edl_file()
+  _load_timeline_via_otio(
+    "Open EDL Files",
+    "EDL files\0*.edl\0All files\0*.*\0",
+    "*.edl")
+end
+
+local function load_xml_file()
+  _load_timeline_via_otio(
+    "Open XML Files (FCP7 / Resolve)",
+    "XML files\0*.xml\0All files\0*.*\0",
+    "*.xml")
 end
 
 ---------------------------------------------------------------------------
@@ -3570,12 +3610,8 @@ local function draw_toolbar()
   end
   reaper.ImGui_SameLine(ctx)
 
-  -- Load XML placeholder
   if reaper.ImGui_Button(ctx, "Load XML...", scale(90), scale(24)) then
-    reaper.ShowMessageBox(
-      "XML support coming soon.\n\nCurrently supported: EDL (CMX3600).\n\n" ..
-      "Planned: Premiere XML, FCPX XML, FCP7 XML, Resolve XML, Steinberg XML",
-      SCRIPT_NAME, 0)
+    load_xml_file()
   end
   reaper.ImGui_SameLine(ctx)
 
@@ -4578,7 +4614,7 @@ local function draw_table(table_height)
   local row_count = #view_rows
 
   if row_count == 0 and not CLB.loaded_file then
-    reaper.ImGui_TextDisabled(ctx, "Click 'Load EDL...' to open a CMX3600 EDL file.")
+    reaper.ImGui_TextDisabled(ctx, "Click 'Load EDL...' or 'Load XML...' to open a timeline file (CMX3600 EDL, FCP7 XML, Resolve XML).")
     return
   end
 
@@ -5956,12 +5992,20 @@ reaper.SetExtState(EXT_NS, "instance_id", my_id, false)
 ---------------------------------------------------------------------------
 load_prefs()
 
+-- Configure OTIO Python path.
+-- load_prefs() may have restored a saved path; if empty or invalid, auto-detect.
+if not OTIO.python or OTIO.python == "" then
+  OTIO.python = OTIO.detect_python()
+  save_prefs()
+end
+
 ctx = reaper.ImGui_CreateContext(SCRIPT_NAME)
 if reaper.ImGui_CreateListClipper then
   list_clipper = reaper.ImGui_CreateListClipper(ctx)
 end
 
 console_msg("Conform List Browser v" .. VERSION .. " started")
+console_msg("OTIO Bridge v" .. (OTIO.VERSION or "?") .. " | Python: " .. OTIO.python)
 console_msg("EDL Parser v" .. (EDL.VERSION or "?"))
 
 reaper.defer(loop)
