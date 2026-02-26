@@ -1,6 +1,6 @@
 --[[
 @description ReaImGui - Vertical Reorder and Sort (items)
-@version 260226.1850
+@version 260226.1940
 @author hsuanice
 @about
   Provides three vertical re-arrangement modes for selected items (stacked UI):
@@ -29,6 +29,20 @@
 
 
 @changelog
+  v260226.1940
+  - Fix: Overlap-split tracks no longer get numbered suffixes ("Ch 03 — BOOM1 2")
+    * All tracks in the same metadata group keep the original label unchanged
+  - Fix: Within each metadata group, items are now sorted by (base filename, take name)
+    before being assigned to track slots.
+    * Result: items from the same poly recording (e.g. 4-5-1T1_A3, _A7, _A8) are
+      always placed on consecutive tracks, grouped together.
+    * Items from a later recording (e.g. 5-20-8T1) follow after, not interleaved.
+  - Refactor: Placement algorithm changed from "sub-group → one slot" to
+    "flat sorted list → one-item-at-a-time slot assignment":
+    * Each item is tried against existing slots independently.
+    * If no slot is available, a new track is created with the same label.
+    * This correctly handles the case where items within the same base-filename
+      sub-group overlap each other (different channels of the same poly recording).
   v260226.1850
   - Feature: Font size control (popup menu "Aa" at top of window)
     * Presets: 75%, 100%, 125%, 150%, 175%, 200% of base size (14px)
@@ -979,13 +993,13 @@ local function run_copy_to_new_tracks(name_mode, order_mode, asc, append_seconda
   -- 5) 建新軌並複製 (base-filename-aware overlap avoidance)
   --
   -- Algorithm:
-  --   For each metadata group (e.g. "Ch 03 — boom"):
-  --     a) Sub-group items by base filename (strip channel suffix: .A3, _A3, _3, -3, …)
-  --        so all splits of the same poly recording stay together.
-  --     b) Try to assign each base-filename sub-group to an existing track slot
-  --        where all of its items fit without overlap.
-  --     c) If no slot is available, create a new track:
-  --        first track = "Ch 03 — boom", next = "Ch 03 — boom 2", etc.
+  --   For each metadata group (e.g. "Ch 03 — BOOM1"):
+  --     a) Sort all items by (base_filename, take_name) alphabetically.
+  --        This groups all splits of the same poly recording consecutively
+  --        (e.g. all 4-5-1T1_A* items first, then all 5-20-8T1_A* items).
+  --     b) Assign items one-by-one to the first slot with no overlap.
+  --     c) If no slot is available, create a new track — always with the SAME
+  --        group label (no " 2", " 3" numbering suffix).
   debug("")
   debug("--- Creating tracks and copying items (base-filename grouping) ---")
   debug("Total groups: " .. #order)
@@ -1020,63 +1034,53 @@ local function run_copy_to_new_tracks(name_mode, order_mode, asc, append_seconda
     local label = g.label
     debug(string.format("Group #%d: label='%s' | %d items", gidx, label, #g.items))
 
-    -- a) Sub-group items by base filename, preserving insertion order
-    local base_buckets = {}   -- base_fn -> { items={}, intervals={} }
-    local base_order_list = {}
+    -- a) Build a flat list of items with base filename and take name.
+    --    Sort by (base_filename, take_name) so all splits of the same poly
+    --    recording appear consecutively in alphabetical order.
+    local item_records = {}
     for _, it in ipairs(g.items) do
       local bfn = get_item_base_filename(it)
-      if not base_buckets[bfn] then
-        base_buckets[bfn] = { items = {}, intervals = {} }
-        base_order_list[#base_order_list+1] = bfn
+      local tk  = take_of(it)
+      local tkn = ""
+      if tk then
+        local _, nm = reaper.GetSetMediaItemTakeInfo_String(tk, "P_NAME", "", false)
+        tkn = nm or ""
       end
       local s = item_start(it) or 0
       local e = s + (item_len(it) or 0)
-      table.insert(base_buckets[bfn].items,     it)
-      table.insert(base_buckets[bfn].intervals, { s = s, e = e })
+      item_records[#item_records+1] = { it = it, bfn = bfn, tkn = tkn, s = s, e = e }
     end
-
-    -- Sort sub-groups by earliest start time so primary recordings get first slots
-    table.sort(base_order_list, function(a, b)
-      local ta = base_buckets[a].intervals[1] and base_buckets[a].intervals[1].s or 0
-      local tb = base_buckets[b].intervals[1] and base_buckets[b].intervals[1].s or 0
-      return ta < tb
+    table.sort(item_records, function(a, b)
+      if a.bfn ~= b.bfn then return a.bfn < b.bfn end
+      return a.tkn < b.tkn
     end)
 
-    -- b) Assign sub-groups to track slots; create new slots only when needed
-    -- slots: list of { tr=track, spans={} }
+    -- b) Assign items one-by-one to the first available slot (no overlap).
+    --    When no existing slot fits, create a new track with the SAME label
+    --    (no numbering suffix — all overlap-split tracks keep the group name).
     local slots = {}
-    local slot_counter = 0
+    for _, rec in ipairs(item_records) do
+      debug(string.format("  Item base='%s' take='%s' span=%.3f..%.3f",
+                          rec.bfn, rec.tkn, rec.s, rec.e))
 
-    for _, bfn in ipairs(base_order_list) do
-      local bg = base_buckets[bfn]
-      debug(string.format("  Base filename group: '%s' | %d items", bfn, #bg.items))
-
-      -- Find an existing slot where the whole sub-group fits
       local assigned = nil
       for _, slot in ipairs(slots) do
-        if can_place_all_on(slot.spans, bg.intervals) then
+        if can_place_all_on(slot.spans, { { s = rec.s, e = rec.e } }) then
           assigned = slot
           break
         end
       end
 
-      -- c) No room → create a new numbered track
       if not assigned then
-        slot_counter = slot_counter + 1
-        local track_label = (slot_counter == 1) and label or (label .. " " .. slot_counter)
-        local tr = make_labeled_track(track_label)
-        assigned = { tr = tr, spans = {}, label = track_label }
+        local tr = make_labeled_track(label)
+        assigned = { tr = tr, spans = {} }
         table.insert(slots, assigned)
       end
 
-      -- Copy all items of this sub-group to the assigned slot
-      for i, it in ipairs(bg.items) do
-        copy_item_to_track(it, assigned.tr)
-        copied = copied + 1
-        table.insert(assigned.spans, bg.intervals[i])
-        debug(string.format("    → Copied to '%s' at %.3f  (base='%s')",
-                            assigned.label or label, bg.intervals[i].s, bfn))
-      end
+      copy_item_to_track(rec.it, assigned.tr)
+      copied = copied + 1
+      table.insert(assigned.spans, { s = rec.s, e = rec.e })
+      debug(string.format("    → Copied to '%s' at %.3f  (base='%s')", label, rec.s, rec.bfn))
     end
   end
 
