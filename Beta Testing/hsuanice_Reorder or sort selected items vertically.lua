@@ -1,6 +1,6 @@
 --[[
 @description ReaImGui - Vertical Reorder and Sort (items)
-@version 260120.1856
+@version 260226.1850
 @author hsuanice
 @about
   Provides three vertical re-arrangement modes for selected items (stacked UI):
@@ -29,6 +29,19 @@
 
 
 @changelog
+  v260226.1850
+  - Feature: Font size control (popup menu "Aa" at top of window)
+    * Presets: 75%, 100%, 125%, 150%, 175%, 200% of base size (14px)
+    * Persists across sessions via ExtState
+    * Uses ImGui_PushFont/PopFont for dynamic scaling (same approach as Item List Browser)
+  - Feature: Overlap avoidance in Copy-to-Sort via base-filename grouping
+    * Items at the same timeline position with the same channel/track name are no longer forced to overlap
+    * Within each metadata group (e.g., "Ch 03 — boom"), items are sub-grouped by base filename
+      (base filename = filename stripped of channel suffix like _A3, .A3, _3, -3)
+    * Same-base-filename items (same poly recording, split to mono) always stay on the same track
+    * If base-filename sub-groups would overlap → additional tracks created:
+      "Ch 03 — boom", "Ch 03 — boom 2", "Ch 03 — boom 3", …
+    * Overlap count replaced by sub-track count in the result summary
   v260120.1856
   - Fix: Clear metadata cache at start of each Copy-to-Sort operation
     * Prevents stale metadata from previous runs causing overlaps
@@ -296,6 +309,24 @@ local ctx = reaper.ImGui_CreateContext('Vertical Reorder and Sort')
 local LIBVER = (META and META.VERSION) and ('  |  Metadata Read v'..tostring(META.VERSION)) or ''
 local FONT = reaper.ImGui_CreateFont('sans-serif', 14); reaper.ImGui_Attach(ctx, FONT)
 local function esc_pressed() return reaper.ImGui_IsKeyPressed(ctx, reaper.ImGui_Key_Escape(), false) end
+
+---------------------------------------
+-- Font Size
+---------------------------------------
+local BASE_FONT_SIZE = 14
+local FONT_SCALE = 1.0  -- loaded from prefs after load_pref is defined
+local current_font_size = BASE_FONT_SIZE
+local font_pushed_this_frame = false
+
+local function set_font_size(size)
+  current_font_size = math.max(8, math.min(40, size or BASE_FONT_SIZE))
+  FONT_SCALE = current_font_size / BASE_FONT_SIZE
+end
+
+-- Scale a UI dimension (pixels) proportionally to the current font size
+local function scale(v)
+  return math.floor(v * current_font_size / BASE_FONT_SIZE)
+end
 
 ---------------------------------------
 -- 小工具
@@ -726,6 +757,52 @@ local function parse_channel_from_filename(filename)
 end
 
 ---------------------------------------
+-- Base Filename Helpers (for overlap-avoidance grouping)
+---------------------------------------
+-- Strip channel suffix from a filename to get the base recording name.
+-- e.g. "81-5_5.A3.WAV"  -> "81-5_5"
+--      "81-5_5_A3.WAV"  -> "81-5_5"
+--      "81-5_5_3.WAV"   -> "81-5_5"  (only when letter+digit pattern detected)
+-- Falls back to stripping just the extension when no channel suffix is found.
+local function get_base_filename(filename)
+  if not filename or filename == "" then return "" end
+  -- .A<n>.<ext> or .a<n>.<ext>
+  local base = filename:match("^(.-)%.A%d+%.[^%.]+$")
+               or filename:match("^(.-)%.a%d+%.[^%.]+$")
+  if base then return base end
+  -- _A<n>.<ext>, _a<n>.<ext>, -A<n>.<ext>, -a<n>.<ext>
+  base = filename:match("^(.-)_A%d+%.[^%.]+$")
+         or filename:match("^(.-)_a%d+%.[^%.]+$")
+         or filename:match("^(.-)%-A%d+%.[^%.]+$")
+         or filename:match("^(.-)%-a%d+%.[^%.]+$")
+  if base then return base end
+  -- Strip extension only (no channel suffix detected)
+  return filename:gsub("%.%w+$", "")
+end
+
+local function get_item_base_filename(it)
+  local tk = take_of(it)
+  if not tk then return "" end
+  -- Try source filename; resolve section sources to the underlying file source
+  local src = source_of_take(tk)
+  if src then
+    local file_src = src
+    if reaper.GetMediaSourceParent then
+      local parent = reaper.GetMediaSourceParent(src)
+      if parent then file_src = parent end
+    end
+    local _, p = reaper.GetMediaSourceFileName(file_src, "")
+    if p and p ~= "" then
+      return get_base_filename(path_basename(p))
+    end
+  end
+  -- Fallback: use the take name as the recording-identity key.
+  -- Items from the same recording session share the same take name.
+  local _, tkn = reaper.GetSetMediaItemTakeInfo_String(tk, "P_NAME", "", false)
+  return tkn or ""
+end
+
+---------------------------------------
 -- Copy-to-New-Tracks：核心
 ---------------------------------------
 
@@ -899,67 +976,121 @@ local function run_copy_to_new_tracks(name_mode, order_mode, asc, append_seconda
     table.sort(order, function(x, y) return ord_lt(y, x) end)
   end
 
-  -- 5) 建新軌並複製
+  -- 5) 建新軌並複製 (base-filename-aware overlap avoidance)
+  --
+  -- Algorithm:
+  --   For each metadata group (e.g. "Ch 03 — boom"):
+  --     a) Sub-group items by base filename (strip channel suffix: .A3, _A3, _3, -3, …)
+  --        so all splits of the same poly recording stay together.
+  --     b) Try to assign each base-filename sub-group to an existing track slot
+  --        where all of its items fit without overlap.
+  --     c) If no slot is available, create a new track:
+  --        first track = "Ch 03 — boom", next = "Ch 03 — boom 2", etc.
   debug("")
-  debug("--- Creating tracks and copying items ---")
+  debug("--- Creating tracks and copying items (base-filename grouping) ---")
   debug("Total groups: " .. #order)
 
-  local base = reaper.CountTracks(0)
-  local existing, created = {}, {}
-  local function ensure_track(label)
-    local tr = existing[label]
-    if tr then return tr end
-    reaper.InsertTrackAtIndex(base + #created, true)
-    tr = reaper.GetTrack(0, base + #created)
+  local base_track_count = reaper.CountTracks(0)
+  local all_created = {}   -- ordered list of all created tracks
+
+  -- Check whether a set of intervals can all fit on a slot without overlapping its spans
+  local function can_place_all_on(slot_spans, intervals)
+    for _, iv in ipairs(intervals) do
+      for _, seg in ipairs(slot_spans) do
+        if iv.e > seg.s and seg.e > iv.s then return false end
+      end
+    end
+    return true
+  end
+
+  -- Create one new track appended after existing project tracks
+  local function make_labeled_track(label)
+    local idx = base_track_count + #all_created
+    reaper.InsertTrackAtIndex(idx, true)
+    local tr = reaper.GetTrack(0, idx)
     set_track_name(tr, label)
-    existing[label] = tr
-    created[#created+1] = tr
-    debug(string.format("  ✓ Created track #%d: '%s'", base + #created, label))
+    all_created[#all_created+1] = tr
+    debug(string.format("  ✓ Created track #%d: '%s'", idx + 1, label))
     return tr
   end
 
-  local copied, overlaps = 0, 0
-  local spans = {} -- label -> { {s,e}, ... }
+  local copied = 0
 
   for gidx, g in ipairs(order) do
     local label = g.label
     debug(string.format("Group #%d: label='%s' | %d items", gidx, label, #g.items))
-    local tr = ensure_track(label)
-    local arr = spans[label] or {}
-    spans[label] = arr
-    for iidx, it in ipairs(g.items) do
+
+    -- a) Sub-group items by base filename, preserving insertion order
+    local base_buckets = {}   -- base_fn -> { items={}, intervals={} }
+    local base_order_list = {}
+    for _, it in ipairs(g.items) do
+      local bfn = get_item_base_filename(it)
+      if not base_buckets[bfn] then
+        base_buckets[bfn] = { items = {}, intervals = {} }
+        base_order_list[#base_order_list+1] = bfn
+      end
       local s = item_start(it) or 0
       local e = s + (item_len(it) or 0)
-      local hit = false
-      for i = 1, #arr do
-        local seg = arr[i]
-        if e > seg.s and seg.e > s then
-          hit = true
-          debug(string.format("    ⚠️  OVERLAP detected! Item at %.3f-%.3f overlaps with %.3f-%.3f",
-                              s, e, seg.s, seg.e))
+      table.insert(base_buckets[bfn].items,     it)
+      table.insert(base_buckets[bfn].intervals, { s = s, e = e })
+    end
+
+    -- Sort sub-groups by earliest start time so primary recordings get first slots
+    table.sort(base_order_list, function(a, b)
+      local ta = base_buckets[a].intervals[1] and base_buckets[a].intervals[1].s or 0
+      local tb = base_buckets[b].intervals[1] and base_buckets[b].intervals[1].s or 0
+      return ta < tb
+    end)
+
+    -- b) Assign sub-groups to track slots; create new slots only when needed
+    -- slots: list of { tr=track, spans={} }
+    local slots = {}
+    local slot_counter = 0
+
+    for _, bfn in ipairs(base_order_list) do
+      local bg = base_buckets[bfn]
+      debug(string.format("  Base filename group: '%s' | %d items", bfn, #bg.items))
+
+      -- Find an existing slot where the whole sub-group fits
+      local assigned = nil
+      for _, slot in ipairs(slots) do
+        if can_place_all_on(slot.spans, bg.intervals) then
+          assigned = slot
           break
         end
       end
-      if hit then overlaps = overlaps + 1 end
-      arr[#arr+1] = { s = s, e = e }
-      copy_item_to_track(it, tr)
-      copied = copied + 1
-      if not hit then
-        debug(string.format("    → Item #%d copied to '%s' at %.3f", iidx, label, s))
+
+      -- c) No room → create a new numbered track
+      if not assigned then
+        slot_counter = slot_counter + 1
+        local track_label = (slot_counter == 1) and label or (label .. " " .. slot_counter)
+        local tr = make_labeled_track(track_label)
+        assigned = { tr = tr, spans = {}, label = track_label }
+        table.insert(slots, assigned)
+      end
+
+      -- Copy all items of this sub-group to the assigned slot
+      for i, it in ipairs(bg.items) do
+        copy_item_to_track(it, assigned.tr)
+        copied = copied + 1
+        table.insert(assigned.spans, bg.intervals[i])
+        debug(string.format("    → Copied to '%s' at %.3f  (base='%s')",
+                            assigned.label or label, bg.intervals[i].s, bfn))
       end
     end
   end
 
   debug("")
   debug("=== COPY TO SORT - COMPLETE ===")
-  debug(string.format("Tracks created: %d | Items copied: %d | Overlaps: %d",
-                      #created, copied, overlaps))
+  debug(string.format("Tracks created: %d | Items copied: %d", #all_created, copied))
   debug("======================================")
 
   reaper.Undo_EndBlock("Copy selected items to NEW tracks by metadata", -1)
   reaper.UpdateArrange()
 
-  return { tracks_created = #created, items_copied = copied, overlaps = overlaps }
+  -- extra_tracks = tracks beyond 1-per-group, created to resolve overlaps
+  local extra_tracks = #all_created - #order
+  return { tracks_created = #all_created, items_copied = copied, extra_tracks = math.max(0, extra_tracks) }
 end
 
 
@@ -975,6 +1106,13 @@ local meta_sort_mode  = load_pref("meta_sort_mode", 1)
 local meta_name_mode  = load_pref("meta_name_mode", 1)
 local meta_order_mode = load_pref("meta_order_mode", 1)
 local meta_append_secondary = load_pref("meta_append_secondary", true)
+
+-- Load font scale pref (load_pref is now available)
+do
+  local saved_scale = load_pref("font_size_scale", 1.0)
+  FONT_SCALE = tonumber(saved_scale) or 1.0
+  current_font_size = math.max(8, math.min(40, math.floor(BASE_FONT_SIZE * FONT_SCALE)))
+end
 
 
 local SELECTED_ITEMS, SELECTED_SET = {}, {}
@@ -1021,7 +1159,7 @@ local function draw_summary_popup()
       reaper.ImGui_CloseCurrentPopup(ctx)
     end
 
-    if reaper.ImGui_Button(ctx, "Close", 90, 26) then
+    if reaper.ImGui_Button(ctx, "Close", scale(90), 0) then
       reaper.ImGui_CloseCurrentPopup(ctx)
     end
     reaper.ImGui_EndPopup(ctx)
@@ -1192,6 +1330,38 @@ end
 -- === REPLACE WHOLE FUNCTION ===
 local function draw_confirm()
   compute_selection_and_tracks()
+
+  -- ── Font size control ──────────────────────────────────────────────
+  if reaper.ImGui_SmallButton(ctx, "Aa") then
+    reaper.ImGui_OpenPopup(ctx, "##font_menu")
+  end
+  if reaper.ImGui_IsItemHovered(ctx) then
+    reaper.ImGui_SetTooltip(ctx, "Font Size")
+  end
+  if reaper.ImGui_BeginPopup(ctx, "##font_menu") then
+    reaper.ImGui_Text(ctx, "Font Size")
+    reaper.ImGui_Separator(ctx)
+    local font_presets = {
+      { label = "75%",            size = math.floor(BASE_FONT_SIZE * 0.75) },
+      { label = "100% (Default)", size = BASE_FONT_SIZE },
+      { label = "125%",           size = math.floor(BASE_FONT_SIZE * 1.25) },
+      { label = "150%",           size = math.floor(BASE_FONT_SIZE * 1.5) },
+      { label = "175%",           size = math.floor(BASE_FONT_SIZE * 1.75) },
+      { label = "200%",           size = math.floor(BASE_FONT_SIZE * 2.0) },
+    }
+    for _, p in ipairs(font_presets) do
+      local is_cur = math.abs(current_font_size - p.size) < 1
+      local lbl = (is_cur and "✓ " or "  ") .. p.label
+      if reaper.ImGui_Selectable(ctx, lbl) then
+        set_font_size(p.size)
+        save_pref("font_size_scale", FONT_SCALE)
+      end
+    end
+    reaper.ImGui_EndPopup(ctx)
+  end
+  reaper.ImGui_SameLine(ctx)
+  -- ──────────────────────────────────────────────────────────────────
+
   reaper.ImGui_Text(ctx, string.format("Selected: %d item(s) across %d track(s).", #SELECTED_ITEMS, #ACTIVE_TRACKS))
   reaper.ImGui_Spacing(ctx)
   reaper.ImGui_Spacing(ctx)
@@ -1201,7 +1371,7 @@ local function draw_confirm()
 
   -- 1) Reorder
   reaper.ImGui_Text(ctx, "Reorder")
-  if reaper.ImGui_Button(ctx, "Reorder (fill upward)", 222, 28) then
+  if reaper.ImGui_Button(ctx, "Reorder (fill upward)", scale(222), 0) then
     MODE="reorder"; prepare_plan(); run_engine()
     SUMMARY = ("Completed. Items=%d, Moved=%d, Skipped=%d."):format(TOTAL, MOVED, SKIPPED)
     WANT_POPUP = true
@@ -1246,7 +1416,7 @@ local function draw_confirm()
     reaper.ImGui_Spacing(ctx)
 
     -- 🆕 Sort in Place（就地排序）
-    if reaper.ImGui_Button(ctx, "Sort in Place", 108, 26) then
+    if reaper.ImGui_Button(ctx, "Sort in Place", scale(108), 0) then
       -- 使用現有的「Sort Vertically」引擎，但 key 來自 Metadata
       MODE = "sort"
       sort_key_idx = 3
@@ -1296,12 +1466,15 @@ local function draw_confirm()
     reaper.ImGui_Spacing(ctx)
 
     -- 🆕 Copy to Sort：帶入命名軸與排序軸
-    if reaper.ImGui_Button(ctx, "Copy to Sort", 108, 26) then
+    if reaper.ImGui_Button(ctx, "Copy to Sort", scale(108), 0) then
       local res = run_copy_to_new_tracks(meta_name_mode, meta_order_mode, sort_asc, meta_append_secondary)
       if res then
+        local extra_line = (res.extra_tracks and res.extra_tracks > 0)
+          and string.format("\nExtra tracks (overlap splits): %d", res.extra_tracks)
+          or ""
         SUMMARY = string.format(
-          "Copy to Sort — Done.\nTracks created: %d\nItems copied: %d\nOverlaps detected: %d",
-          res.tracks_created or 0, res.items_copied or 0, res.overlaps or 0
+          "Copy to Sort — Done.\nTracks created: %d\nItems copied: %d%s",
+          res.tracks_created or 0, res.items_copied or 0, extra_line
         )
       else
         SUMMARY = "Copy to Sort — Done."
@@ -1315,7 +1488,7 @@ local function draw_confirm()
     -- Preview（選擇性資訊，放在按鈕之後）
     reaper.ImGui_Spacing(ctx)
     reaper.ImGui_Text(ctx, "Preview detected fields")
-    if reaper.ImGui_Button(ctx, "Scan first 10 items", 200, 22) then
+    if reaper.ImGui_Button(ctx, "Scan first 10 items", scale(200), 0) then
       build_preview_pairs(SELECTED_ITEMS)   -- ← 先生成 PREVIEW_PAIRS
     end
 
@@ -1342,7 +1515,7 @@ local function draw_confirm()
   else
     -- 非 Metadata：這裡才畫 Sort 的主按鈕
     reaper.ImGui_Spacing(ctx)
-    if reaper.ImGui_Button(ctx, "Run Sort Vertically", 220, 26) then
+    if reaper.ImGui_Button(ctx, "Run Sort Vertically", scale(220), 0) then
       MODE="sort"; prepare_plan(); run_engine()
       SUMMARY = ("Completed. Items=%d, Moved=%d, Skipped=%d."):format(TOTAL, MOVED, SKIPPED)
       WANT_POPUP = true
@@ -1355,6 +1528,13 @@ end
 
 
 local function loop()
+  -- Push custom font size (dynamic scaling, same approach as Item List Browser)
+  font_pushed_this_frame = false
+  if current_font_size ~= BASE_FONT_SIZE and reaper.ImGui_PushFont then
+    reaper.ImGui_PushFont(ctx, nil, current_font_size)
+    font_pushed_this_frame = true
+  end
+
   reaper.ImGui_SetNextWindowSize(ctx, 720, 560, reaper.ImGui_Cond_FirstUseEver())
   local flags = reaper.ImGui_WindowFlags_NoCollapse()
   local visible, open = reaper.ImGui_Begin(ctx, "Vertical Reorder and Sort"..LIBVER, true, flags)
@@ -1369,6 +1549,10 @@ local function loop()
     else if draw_summary() then open=false end end
   end
   reaper.ImGui_End(ctx) -- 永遠呼叫（修正 Missing End）
+
+  if font_pushed_this_frame and reaper.ImGui_PopFont then
+    reaper.ImGui_PopFont(ctx)
+  end
 
   if open then reaper.defer(loop) end
 end
