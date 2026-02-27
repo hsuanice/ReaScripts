@@ -1,6 +1,6 @@
 --[[
 @description Conform List Browser
-@version 260227.1714
+@version 260227.1717
 @author hsuanice
 @about
   A REAPER script for browsing and editing EDL (Edit Decision List) data
@@ -46,6 +46,12 @@
   Required: Python 3 + opentimelineio (pip3 install opentimelineio)
 
 @changelog
+  v260227.1717
+  - Fix: Search box now correctly matches TC columns (Src TC In/Out, Rec TC In/Out, Duration)
+    • __search_text is rebuilt in 4 places; all now include TC fields
+    • Previously only the initial EDL load rebuilt search text with TC — after any cell edit,
+      paste, undo/redo, or .clb project load, TC was dropped from search index
+
   v260227.1714
   - Fix: Fit Widths now works correctly and is idempotent (same result every click, no drift)
     • EDL table: fixed-width columns (Reel, Track, Edit, Level, all TC/Duration) stay at
@@ -54,7 +60,6 @@
     • Both EDL and audio tables: always compute from DEFAULT widths, never from already-
       fitted widths (which caused slow shrinkage each click due to rounding/scrollbar drift)
     • Table ID bumped on each Fit Widths click so ImGui creates fresh column state
-  - Fix: Search box now also matches TC columns (Src TC In/Out, Rec TC In/Out, Duration)
   - Fix: Transition events (e.g. BL reel wipes) now show correct clip name
     • When TO CLIP NAME is present, it is used as clip_name instead of FROM CLIP NAME
     • FROM CLIP NAME and TO CLIP NAME lines now also appear in the Notes column
@@ -478,7 +483,7 @@ end
 ---------------------------------------------------------------------------
 local SCRIPT_NAME = "Conform List Browser"
 local EXT_NS = "hsuanice_ConformListBrowser"
-local VERSION = "260227.1500"
+local VERSION = "260227.1717"
 
 -- Column definitions (EDL Events table)
 local COL = {
@@ -1736,7 +1741,10 @@ local function undo_restore(snapshot)
       ROWS[i].__search_text = table.concat({
         ROWS[i].event_num or "", ROWS[i].reel or "", ROWS[i].track or "",
         ROWS[i].clip_name or "", ROWS[i].source_file or "", ROWS[i].notes or "",
-        ROWS[i].group or "",
+        ROWS[i].group or "", ROWS[i].level or "",
+        ROWS[i].src_tc_in or "", ROWS[i].src_tc_out or "",
+        ROWS[i].rec_tc_in or "", ROWS[i].rec_tc_out or "",
+        ROWS[i].duration or "",
       }, " "):lower()
     end
   end
@@ -1826,6 +1834,9 @@ local function set_cell_value(row, col_id, value)
     row.event_num or "", row.reel or "", row.track or "",
     row.clip_name or "", row.source_file or "", row.notes or "",
     row.group or "", row.level or "",
+    row.src_tc_in or "", row.src_tc_out or "",
+    row.rec_tc_in or "", row.rec_tc_out or "",
+    row.duration or "",
   }, " "):lower()
 
   return true
@@ -2608,6 +2619,9 @@ local function load_clb_project(filepath)
         row.__search_text = table.concat({
           row.event_num, row.reel, row.track,
           row.clip_name, row.source_file, row.notes, row.group, row.level,
+          row.src_tc_in, row.src_tc_out,
+          row.rec_tc_in, row.rec_tc_out,
+          row.duration,
         }, " "):lower()
         new_rows[#new_rows+1] = row
       end
