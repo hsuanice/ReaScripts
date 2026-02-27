@@ -1,6 +1,6 @@
 --[[
 @description Conform List Browser
-@version 260227.0120
+@version 260227.1230
 @author hsuanice
 @about
   A REAPER script for browsing and editing EDL (Edit Decision List) data
@@ -46,6 +46,39 @@
   Required: Python 3 + opentimelineio (pip3 install opentimelineio)
 
 @changelog
+  v260227.1230
+  - Feature: Level column (COL.LEVEL = 17) for audio/video level dB values
+    • New "Level" column positioned between Edit and Dissolve (Edit → Level → Dissolve)
+    • Auto-populated from EDL AUDIO/VIDEO LEVEL comments on file load
+    • Multiple level values joined with " | " separator
+    • Editable by user; included in full-text search
+    • Persisted in .clb project file (backward-compatible: p[19])
+    • Visible by default; can be toggled in Columns popup
+
+  v260227.1400
+  - Feature: Extra EDL comments preserved in Notes column
+    • All * comment lines that are not FROM CLIP NAME / SOURCE FILE / TO CLIP NAME
+      are now auto-populated into the Notes column on EDL load
+    • Includes: AUDIO LEVEL, VIDEO LEVEL, EFFECTS NAME IS, and any other * lines
+    • Multiple extra comments joined with " | " separator
+    • Notes remain editable (user can clear/modify freely)
+  - Feature: audio_levels field on each row (parsed from EDL AUDIO/VIDEO LEVEL comments)
+    • row.audio_levels = [{ type, tc, db, reel, src_track }]
+    • reel/src_track populated from "(REEL REEL_NAME TRACK)" suffix when present
+    • Available for programmatic use (e.g., future auto-level or source-track matching)
+  - Requires hsuanice_EDL Parser.lua ≥ v0.3.0
+
+  v260227.0140
+  - Feature: Mini-timeline visualization panel
+    • Collapsible horizontal panel (toggle "Timeline >>" in EDL header)
+    • Events displayed as colored blocks on a horizontal track layout
+    • A-tracks: blue, V-tracks: amber, others: green
+    • TC ruler with adaptive tick intervals
+    • Drag to pan, scroll wheel to zoom (zoom anchored to cursor)
+    • Click block → selects + scrolls to corresponding table row
+    • Hover → tooltip with clip name, Rec TC In/Out, duration
+    • Respects current Track/Reel/Group filters and search box
+
   v260227.0120
   - Feature: OpenTimelineIO integration for XML import (FCP7, Resolve)
     • New files: Tools/otio_to_clb.py, Library/hsuanice_OTIO Bridge.lua, Library/json.lua
@@ -406,7 +439,7 @@ end
 ---------------------------------------------------------------------------
 local SCRIPT_NAME = "Conform List Browser"
 local EXT_NS = "hsuanice_ConformListBrowser"
-local VERSION = "260221.1200"
+local VERSION = "260227.1230"
 
 -- Column definitions (EDL Events table)
 local COL = {
@@ -426,9 +459,10 @@ local COL = {
   MATCH_STATUS = 14,
   MATCHED_PATH = 15,
   GROUP        = 16,
+  LEVEL        = 17,
 }
 
-local COL_COUNT = 16
+local COL_COUNT = 17
 
 -- Audio Files table column definitions (conform-focused order)
 local AUDIO_COL = {
@@ -509,6 +543,7 @@ local HEADER_LABELS = {
   [14] = "Match",
   [15] = "Matched File",
   [16] = "Group",
+  [17] = "Level",
 }
 
 local DEFAULT_COL_WIDTH = {
@@ -528,6 +563,7 @@ local DEFAULT_COL_WIDTH = {
   [14] = 70,
   [15] = 250,
   [16] = 80,
+  [17] = 80,
 }
 
 -- Editable columns (all except Event# and Duration)
@@ -544,6 +580,7 @@ local EDITABLE_COLS = {
   [COL.SRC_FILE] = true,
   [COL.NOTES] = true,
   [COL.GROUP] = true,
+  [COL.LEVEL] = true,
 }
 
 -- TC columns (need TC validation)
@@ -560,18 +597,19 @@ local EDL_COL_ORDER = {
   COL.REEL,         -- 2. Reel
   COL.TRACK,        -- 3. Track
   COL.EDIT_TYPE,    -- 4. Edit
-  COL.DISS_LEN,     -- 5. Diss
-  COL.SRC_IN,       -- 6. Src TC In
-  COL.SRC_OUT,      -- 7. Src TC Out
-  COL.REC_IN,       -- 8. Rec TC In
-  COL.REC_OUT,      -- 9. Rec TC Out
-  COL.DURATION,     -- 10. Duration
-  COL.CLIP_NAME,    -- 11. Clip Name
-  COL.SRC_FILE,     -- 12. Source File
-  COL.NOTES,        -- 13. Notes
-  COL.MATCH_STATUS, -- 14. Match
-  COL.MATCHED_PATH, -- 15. Matched File
-  COL.GROUP,        -- 16. Group
+  COL.LEVEL,        -- 5. Level
+  COL.DISS_LEN,     -- 6. Diss
+  COL.SRC_IN,       -- 7. Src TC In
+  COL.SRC_OUT,      -- 8. Src TC Out
+  COL.REC_IN,       -- 9. Rec TC In
+  COL.REC_OUT,      -- 10. Rec TC Out
+  COL.DURATION,     -- 11. Duration
+  COL.CLIP_NAME,    -- 12. Clip Name
+  COL.SRC_FILE,     -- 13. Source File
+  COL.NOTES,        -- 14. Notes
+  COL.MATCH_STATUS, -- 15. Match
+  COL.MATCHED_PATH, -- 16. Matched File
+  COL.GROUP,        -- 17. Group
 }
 
 -- EDL column visibility (all visible by default, except Group)
@@ -630,6 +668,11 @@ local CLB = {
   audio_sort_asc = true,      -- Sort ascending
   audio_fit_content = false,  -- Flag to fit content widths next frame
   edl_fit_content = false,    -- Flag to fit EDL table content widths next frame
+
+  -- Timeline panel state
+  show_timeline = false,
+  tl_zoom = 50.0,   -- pixels per second
+  tl_scroll = 0.0,  -- seconds panned from tc_min
 
   -- Loading state (for async loading with progress)
   loading_state = nil,        -- { phase, total, current, files }
@@ -1452,6 +1495,8 @@ local function save_prefs()
     vis_parts[i] = EDL_COL_VISIBILITY[i] and "1" or "0"
   end
   reaper.SetExtState(EXT_NS, "edl_col_visibility", table.concat(vis_parts, ","), true)
+  reaper.SetExtState(EXT_NS, "show_timeline", CLB.show_timeline and "1" or "0", true)
+  reaper.SetExtState(EXT_NS, "tl_zoom", tostring(CLB.tl_zoom or 50.0), true)
 end
 
 local function load_prefs()
@@ -1474,6 +1519,8 @@ local function load_prefs()
   DEBUG = get("debug_mode", "0") == "1"
   ALLOW_DOCKING = get("allow_docking", "0") == "1"
   OTIO.python = get("otio_python", "")  -- set after load_prefs() is called
+  CLB.show_timeline = get("show_timeline", "0") == "1"
+  CLB.tl_zoom = tonumber(get("tl_zoom", "50.0")) or 50.0
 
   -- EDL column order
   local order_str = get("edl_col_order", "")
@@ -1651,6 +1698,7 @@ local function get_cell_text(row, col_id)
   if col_id == COL.REEL         then return row.reel or "" end
   if col_id == COL.TRACK        then return row.track or "" end
   if col_id == COL.EDIT_TYPE    then return row.edit_type or "" end
+  if col_id == COL.LEVEL        then return row.level or "" end
   if col_id == COL.DISS_LEN     then
     return row.dissolve_len and tostring(row.dissolve_len) or ""
   end
@@ -1681,6 +1729,7 @@ local function set_cell_value(row, col_id, value)
   if col_id == COL.REEL      then row.reel = value
   elseif col_id == COL.TRACK     then row.track = value
   elseif col_id == COL.EDIT_TYPE then row.edit_type = value
+  elseif col_id == COL.LEVEL     then row.level = value
   elseif col_id == COL.DISS_LEN  then row.dissolve_len = tonumber(value)
   elseif col_id == COL.SRC_IN    then row.src_tc_in = value
   elseif col_id == COL.SRC_OUT   then row.src_tc_out = value
@@ -1703,7 +1752,7 @@ local function set_cell_value(row, col_id, value)
   row.__search_text = table.concat({
     row.event_num or "", row.reel or "", row.track or "",
     row.clip_name or "", row.source_file or "", row.notes or "",
-    row.group or "",
+    row.group or "", row.level or "",
   }, " "):lower()
 
   return true
@@ -1933,8 +1982,10 @@ local function _make_rows_from_events(events, fps, is_drop, source_idx)
       rec_tc_out = evt.rec_tc_out or "00:00:00:00",
       clip_name = evt.clip_name or "",
       source_file = evt.source_file or "",
-      notes = "",
+      notes = "",    -- auto-populated below from extra EDL comments
+      level = "",    -- auto-populated below from AUDIO/VIDEO LEVEL comments
       group = "",
+      audio_levels = evt.audio_levels or {},  -- [{ type, tc, db, reel, src_track }]
 
       duration = evt.duration_tc or EDL.seconds_to_tc(
         EDL.tc_to_seconds(evt.rec_tc_out or "00:00:00:00", fps, is_drop)
@@ -1942,10 +1993,36 @@ local function _make_rows_from_events(events, fps, is_drop, source_idx)
         fps, is_drop),
     }
 
+    -- Auto-populate notes from extra EDL comment lines:
+    -- all * lines that are NOT FROM CLIP NAME / SOURCE FILE / TO CLIP NAME.
+    -- (those three have dedicated columns; everything else goes to Notes)
+    local extra = {}
+    for _, cmt in ipairs(evt.comments or {}) do
+      if not cmt:match("^FROM CLIP NAME:")
+        and not cmt:match("^SOURCE FILE:")
+        and not cmt:match("^TO CLIP NAME:") then
+        extra[#extra + 1] = cmt
+      end
+    end
+    if #extra > 0 then
+      row.notes = table.concat(extra, " | ")
+    end
+
+    -- Auto-populate level from AUDIO/VIDEO LEVEL comments
+    local db_parts = {}
+    for _, lv in ipairs(row.audio_levels) do
+      if lv.db and lv.db ~= "" then
+        db_parts[#db_parts + 1] = lv.db
+      end
+    end
+    if #db_parts > 0 then
+      row.level = table.concat(db_parts, " | ")
+    end
+
     row.__search_text = table.concat({
       row.event_num, row.reel, row.track,
       row.clip_name, row.source_file, row.notes,
-      row.group,
+      row.group, row.level,
     }, " "):lower()
 
     new_rows[#new_rows + 1] = row
@@ -2276,10 +2353,10 @@ local function save_clb_project(filepath)
   -- Format: R|event_num|reel|track|edit_type|dissolve_len|
   --           src_tc_in|src_tc_out|rec_tc_in|rec_tc_out|
   --           clip_name|source_file|notes|
-  --           match_status|matched_path|group|orig_track|source_idx
+  --           match_status|matched_path|group|orig_track|source_idx|level
   f:write(string.format("ROWS|%d\n", #ROWS))
   for _, row in ipairs(ROWS) do
-    f:write(string.format("R|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%d\n",
+    f:write(string.format("R|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%d|%s\n",
       _clb_escape(row.event_num    or ""),   -- p[2]
       _clb_escape(row.reel         or ""),   -- p[3]
       _clb_escape(row.track        or ""),   -- p[4]
@@ -2296,7 +2373,8 @@ local function save_clb_project(filepath)
       _clb_escape(row.matched_path or ""),   -- p[15]
       _clb_escape(row.group        or ""),   -- p[16]
       _clb_escape(row.__orig_track or ""),   -- p[17]
-      row.__source_idx or 0))                -- p[18]
+      row.__source_idx or 0,                 -- p[18]
+      _clb_escape(row.level        or "")))  -- p[19]
   end
 
   -- Filter panel visibility flags
@@ -2449,11 +2527,12 @@ local function load_clb_project(filepath)
           match_status = p[14] or "",
           matched_path = p[15] or "",
           group        = p[16] or "",
+          level        = p[19] or "",
           duration     = dur,
         }
         row.__search_text = table.concat({
           row.event_num, row.reel, row.track,
-          row.clip_name, row.source_file, row.notes, row.group,
+          row.clip_name, row.source_file, row.notes, row.group, row.level,
         }, " "):lower()
         new_rows[#new_rows+1] = row
       end
@@ -4895,6 +4974,19 @@ local function draw_edl_panel_header()
     CLB.edl_fit_content = true
   end
 
+  -- Timeline panel toggle
+  reaper.ImGui_SameLine(ctx)
+  reaper.ImGui_Text(ctx, "|")
+  reaper.ImGui_SameLine(ctx)
+  local tl_lbl = CLB.show_timeline and "Timeline <<##clb_tl" or "Timeline >>##clb_tl"
+  if reaper.ImGui_SmallButton(ctx, tl_lbl) then
+    CLB.show_timeline = not CLB.show_timeline
+    save_prefs()
+  end
+  if reaper.ImGui_IsItemHovered(ctx) then
+    reaper.ImGui_SetTooltip(ctx, "Show/hide mini-timeline visualization")
+  end
+
   -- Columns popup
   if reaper.ImGui_BeginPopup(ctx, "EDL Columns##edl_col_popup") then
     reaper.ImGui_Text(ctx, "Show/Hide Columns:")
@@ -4914,7 +5006,7 @@ local function draw_edl_panel_header()
     if reaper.ImGui_SmallButton(ctx, "Reset##edl_col_reset") then
       -- Reset to default order
       EDL_COL_ORDER = {
-        COL.EVENT, COL.REEL, COL.TRACK, COL.EDIT_TYPE, COL.DISS_LEN,
+        COL.EVENT, COL.REEL, COL.TRACK, COL.EDIT_TYPE, COL.LEVEL, COL.DISS_LEN,
         COL.SRC_IN, COL.SRC_OUT, COL.REC_IN, COL.REC_OUT, COL.DURATION,
         COL.CLIP_NAME, COL.SRC_FILE, COL.NOTES, COL.MATCH_STATUS, COL.MATCHED_PATH,
         COL.GROUP
@@ -5098,6 +5190,258 @@ local function draw_splitter()
   if reaper.ImGui_IsItemHovered(ctx) then
     reaper.ImGui_SetMouseCursor(ctx, reaper.ImGui_MouseCursor_ResizeNS())
   end
+end
+
+---------------------------------------------------------------------------
+-- Draw: Mini-Timeline Panel
+---------------------------------------------------------------------------
+local TL_PANEL_H = 120  -- base pixels (scaled at draw time)
+
+local function draw_timeline_panel()
+  -- 1. Collect rows, compute TC range and unique track list
+  local view_rows = get_view_rows()
+  if #view_rows == 0 then return end
+
+  local tc_min, tc_max
+  local track_set, track_order = {}, {}
+  local row_data = {}
+
+  for _, row in ipairs(view_rows) do
+    local t_in  = EDL.tc_to_seconds(row.rec_tc_in  or "00:00:00:00", CLB.fps, CLB.is_drop)
+    local t_out = EDL.tc_to_seconds(row.rec_tc_out or "00:00:00:00", CLB.fps, CLB.is_drop)
+    if t_out < t_in then t_out = t_in end
+    if not tc_min or t_in  < tc_min then tc_min = t_in  end
+    if not tc_max or t_out > tc_max then tc_max = t_out end
+    local trk = row.track or ""
+    if not track_set[trk] then
+      track_set[trk] = true
+      track_order[#track_order + 1] = trk
+    end
+    row_data[#row_data + 1] = { row = row, t_in = t_in, t_out = t_out }
+  end
+
+  if not tc_min then tc_min = 0 end
+  if not tc_max or tc_max <= tc_min then tc_max = tc_min + 1 end
+
+  -- Sort tracks naturally (reuses _natural_sort_cmp)
+  table.sort(track_order, _natural_sort_cmp)
+  local track_index = {}
+  for i, t in ipairs(track_order) do track_index[t] = i end
+
+  -- 2. Geometry
+  local LABEL_W = scale(55)
+  local RULER_H = scale(16)
+  local TRACK_H = scale(18)
+  local PAD_V   = scale(2)
+  local panel_h = scale(TL_PANEL_H)
+  local avail_w = reaper.ImGui_GetContentRegionAvail(ctx)
+
+  -- 3. BeginChild: fixed height, no scrollbars
+  local wf = reaper.ImGui_WindowFlags_NoScrollbar()
+           | reaper.ImGui_WindowFlags_NoScrollWithMouse()
+  if not reaper.ImGui_BeginChild(ctx, "##clb_tl", avail_w, panel_h, 0, wf) then
+    reaper.ImGui_EndChild(ctx)
+    return
+  end
+
+  -- 4. InvisibleButton = interaction target for the full canvas
+  local cw, ch = reaper.ImGui_GetContentRegionAvail(ctx)
+  reaper.ImGui_InvisibleButton(ctx, "##tl_cvs", cw, ch)
+  local is_hovered = reaper.ImGui_IsItemHovered(ctx)
+  local is_active  = reaper.ImGui_IsItemActive(ctx)
+
+  -- 5. Canvas bounds from InvisibleButton
+  local cx0, cy0 = reaper.ImGui_GetItemRectMin(ctx)
+  local cx1, cy1 = reaper.ImGui_GetItemRectMax(ctx)
+  local ea_x0 = cx0 + LABEL_W           -- event area left edge
+  local ea_w  = math.max(1, cx1 - ea_x0)
+
+  -- 6. DrawList
+  local dl = reaper.ImGui_GetWindowDrawList(ctx)
+
+  -- 7. Zoom / scroll clamping (every frame)
+  local span     = tc_max - tc_min
+  local min_zoom = ea_w / span
+  local max_zoom = 500.0
+  CLB.tl_zoom   = math.max(min_zoom, math.min(max_zoom, CLB.tl_zoom))
+  local vis_sec  = ea_w / CLB.tl_zoom
+  local max_scroll = math.max(0, span - vis_sec)
+  CLB.tl_scroll = math.max(0, math.min(max_scroll, CLB.tl_scroll))
+
+  -- Helper: seconds → screen x
+  local function s2px(t)
+    return ea_x0 + (t - tc_min - CLB.tl_scroll) * CLB.tl_zoom
+  end
+
+  -- 8. Backgrounds
+  reaper.ImGui_DrawList_AddRectFilled(dl, cx0, cy0, cx1, cy1, 0x1A1A1AFF)
+  reaper.ImGui_DrawList_AddRectFilled(dl, cx0, cy0, cx0 + LABEL_W, cy1, 0x252525FF)
+
+  -- 9. TC ruler
+  local ry0 = cy0
+  local ry1 = cy0 + RULER_H
+  reaper.ImGui_DrawList_AddRectFilled(dl, ea_x0, ry0, cx1, ry1, 0x2A2A2AFF)
+
+  -- Pick tick interval: smallest where ticks are >= 40px apart
+  local intervals = { 1, 2, 5, 10, 15, 30, 60, 120, 300, 600 }
+  local tick_iv = 600
+  for _, iv in ipairs(intervals) do
+    if iv * CLB.tl_zoom >= scale(40) then tick_iv = iv; break end
+  end
+
+  local view_start = tc_min + CLB.tl_scroll
+  local view_end   = view_start + vis_sec
+  local t = math.floor(view_start / tick_iv) * tick_iv
+  while t <= view_end + tick_iv do
+    local px = s2px(t)
+    if px >= ea_x0 and px <= cx1 then
+      reaper.ImGui_DrawList_AddLine(dl, px, ry0, px, ry1, 0x555555FF, 1.0)
+      local hh  = math.floor(t / 3600)
+      local mm  = math.floor((t % 3600) / 60)
+      local ss  = math.floor(t % 60)
+      local lbl = span >= 3600
+        and string.format("%d:%02d:%02d", hh, mm, ss)
+        or  string.format("%d:%02d", mm, ss)
+      if px + scale(4) < cx1 then
+        reaper.ImGui_DrawList_AddText(dl, px + scale(2), ry0 + scale(2), 0xAAAAAAFF, lbl)
+      end
+    end
+    t = t + tick_iv
+  end
+  reaper.ImGui_DrawList_AddLine(dl, cx0, ry1, cx1, ry1, 0x444444FF, 1.0)
+
+  -- 10. Track row backgrounds + labels
+  for ti, tname in ipairs(track_order) do
+    local ey0 = ry1 + (ti - 1) * TRACK_H
+    local ey1 = ey0 + TRACK_H
+    if ey1 > cy1 then break end
+    local bg = (ti % 2 == 0) and 0x222222FF or 0x1E1E1EFF
+    reaper.ImGui_DrawList_AddRectFilled(dl, ea_x0, ey0, cx1, ey1, bg)
+    reaper.ImGui_DrawList_AddText(dl, cx0 + scale(3), ey0 + scale(3), 0xCCCCCCFF,
+      tname ~= "" and tname or "?")
+    reaper.ImGui_DrawList_AddLine(dl, cx0, ey1, cx1, ey1, 0x333333FF, 1.0)
+  end
+
+  -- 11. Track color helper (A=blue, V=amber, other=green; shade varies per index)
+  local function track_color(tname, ti, alpha)
+    local p     = (tname:match("^(%a+)") or ""):upper()
+    local shades = { 0xFF, 0xCC, 0xAA }
+    local shade = shades[(ti - 1) % 3 + 1]
+    local r, g, b
+    if p == "A" then
+      r = 0x30 + (ti % 3) * 0x10
+      g = 0x80 + (ti % 2) * 0x20
+      b = shade
+    elseif p == "V" then
+      r = shade
+      g = 0x80 + (ti % 2) * 0x20
+      b = 0x10 + (ti % 3) * 0x10
+    else
+      r = 0x20 + (ti % 2) * 0x20
+      g = shade
+      b = 0x30 + (ti % 3) * 0x10
+    end
+    return (r << 24) | (g << 16) | (b << 8) | alpha
+  end
+
+  -- 12. Draw event blocks
+  local mx, my   = reaper.ImGui_GetMousePos(ctx)
+  local hovered_rd = nil
+
+  for _, rd in ipairs(row_data) do
+    local row = rd.row
+    local ti  = track_index[row.track or ""] or 1
+    local ey0 = ry1 + (ti - 1) * TRACK_H + PAD_V
+    local ey1 = ry1 +  ti      * TRACK_H - PAD_V
+    if ey1 > cy1 then goto next_block end      -- below panel bottom
+
+    local px0 = s2px(rd.t_in)
+    local px1 = s2px(rd.t_out)
+    if px1 < ea_x0 or px0 > cx1 then goto next_block end  -- off canvas
+
+    local dx0 = math.max(px0, ea_x0)
+    local dx1 = math.min(px1, cx1)
+    if dx1 < dx0 + 1 then dx1 = dx0 + 1 end   -- minimum 1px
+
+    local selected = sel_has(row.__guid, COL.REC_IN)
+    local col_fill = track_color(row.track or "", ti, selected and 0xFF or 0xCC)
+    local col_edge = selected and 0xFFFFFFFF or 0x00000088
+    reaper.ImGui_DrawList_AddRectFilled(dl, dx0, ey0, dx1, ey1, col_fill)
+    reaper.ImGui_DrawList_AddRect(dl,      dx0, ey0, dx1, ey1, col_edge)
+
+    -- Hover highlight
+    if is_hovered and mx >= dx0 and mx <= dx1 and my >= ey0 and my <= ey1 then
+      reaper.ImGui_DrawList_AddRectFilled(dl, dx0, ey0, dx1, ey1, 0xFFFFFF22)
+      hovered_rd = rd
+    end
+
+    -- Clip name label (only if block is wide enough)
+    local bw = dx1 - dx0
+    if bw >= scale(20) then
+      local lbl = row.clip_name or ""
+      local max_ch = math.max(0, math.floor(bw / scale(7)) - 1)
+      if #lbl > max_ch then lbl = lbl:sub(1, math.max(0, max_ch - 1)) .. "~" end
+      if #lbl > 0 then
+        reaper.ImGui_DrawList_AddText(dl, dx0 + scale(2), ey0 + scale(2), 0xFFFFFFDD, lbl)
+      end
+    end
+
+    ::next_block::
+  end
+
+  -- 13. Tooltip on hover
+  if hovered_rd then
+    local r = hovered_rd.row
+    reaper.ImGui_BeginTooltip(ctx)
+    reaper.ImGui_Text(ctx, r.clip_name ~= "" and r.clip_name or "(no name)")
+    reaper.ImGui_Text(ctx, "Track:   " .. (r.track or ""))
+    reaper.ImGui_Text(ctx, "Rec In:  " .. (r.rec_tc_in  or ""))
+    reaper.ImGui_Text(ctx, "Rec Out: " .. (r.rec_tc_out or ""))
+    local d = hovered_rd.t_out - hovered_rd.t_in
+    reaper.ImGui_Text(ctx, string.format("Duration: %d:%05.2f", math.floor(d / 60), d % 60))
+    if (r.reel or "") ~= "" then
+      reaper.ImGui_Text(ctx, "Reel:    " .. r.reel)
+    end
+    reaper.ImGui_EndTooltip(ctx)
+  end
+
+  -- 14. Click → select + scroll-to-row in table
+  if is_hovered and reaper.ImGui_IsMouseClicked(ctx, 0) then
+    if hovered_rd then
+      sel_clear()
+      sel_add(hovered_rd.row.__guid, COL.REC_IN)
+      CLB.scroll_to_row = hovered_rd.row.__guid
+    else
+      sel_clear()
+    end
+  end
+
+  -- 15. Scroll wheel → zoom (anchored to cursor position)
+  if is_hovered then
+    local ok_w, scroll_y = pcall(reaper.ImGui_GetMouseWheel, ctx)
+    if ok_w and scroll_y and scroll_y ~= 0 then
+      local mouse_t  = (mx - ea_x0) / CLB.tl_zoom + tc_min + CLB.tl_scroll
+      local factor   = scroll_y > 0 and 1.15 or (1 / 1.15)
+      local new_zoom = math.max(min_zoom, math.min(max_zoom, CLB.tl_zoom * factor))
+      CLB.tl_scroll  = mouse_t - tc_min - (mx - ea_x0) / new_zoom
+      CLB.tl_zoom    = new_zoom
+      local new_vis  = ea_w / CLB.tl_zoom
+      local new_max  = math.max(0, span - new_vis)
+      CLB.tl_scroll  = math.max(0, math.min(new_max, CLB.tl_scroll))
+    end
+  end
+
+  -- 16. Drag → pan  (IsItemActive + GetMouseDelta, same pattern as draw_splitter)
+  if is_active then
+    local delta_x = reaper.ImGui_GetMouseDelta(ctx)
+    if delta_x and delta_x ~= 0 then
+      CLB.tl_scroll = math.max(0, math.min(max_scroll,
+        CLB.tl_scroll - delta_x / CLB.tl_zoom))
+    end
+    reaper.ImGui_SetMouseCursor(ctx, reaper.ImGui_MouseCursor_ResizeEW())
+  end
+
+  reaper.ImGui_EndChild(ctx)
 end
 
 ---------------------------------------------------------------------------
@@ -5825,19 +6169,23 @@ local function draw_main_content()
 
   local _, avail_h = reaper.ImGui_GetContentRegionAvail(ctx)
 
+  -- Reserve height for timeline panel
+  local tl_h = (CLB.show_timeline and #ROWS > 0) and scale(TL_PANEL_H) or 0
+
   -- Check if audio panel should be shown
   if CLB.show_audio_panel and #CLB.audio_files > 0 then
     -- Split view mode
     local splitter_h = 6
     local header_h = reaper.ImGui_GetTextLineHeightWithSpacing(ctx) + 4
 
-    -- Calculate heights
-    local content_h = avail_h - splitter_h - header_h
+    -- Calculate heights (subtract timeline panel from available space)
+    local content_h = avail_h - splitter_h - header_h - tl_h
     local edl_h = content_h * CLB.split_ratio
     local audio_h = content_h - edl_h
 
-    -- Upper section: EDL panel header + Reel filter sidebar (left) + EDL table (right)
+    -- Upper section: EDL panel header + optional timeline + reel sidebar + EDL table
     draw_edl_panel_header()
+    if CLB.show_timeline and #ROWS > 0 then draw_timeline_panel() end
     draw_reel_filter_sidebar(edl_h)
     draw_table(edl_h)
 
@@ -5852,6 +6200,9 @@ local function draw_main_content()
   else
     -- Single table mode with optional reel sidebar (full height)
     draw_edl_panel_header()
+    if CLB.show_timeline and #ROWS > 0 then draw_timeline_panel() end
+    -- Re-query remaining height after timeline panel consumed its space
+    _, avail_h = reaper.ImGui_GetContentRegionAvail(ctx)
     draw_reel_filter_sidebar(avail_h)
     draw_table()
   end
