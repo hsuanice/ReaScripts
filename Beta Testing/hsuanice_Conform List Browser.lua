@@ -1,6 +1,6 @@
 --[[
 @description Conform List Browser
-@version 260227.1717
+@version 260228.0052
 @author hsuanice
 @about
   A REAPER script for browsing and editing EDL (Edit Decision List) data
@@ -46,6 +46,16 @@
   Required: Python 3 + opentimelineio (pip3 install opentimelineio)
 
 @changelog
+  v260228.0052
+  - Feature: Fit Widths button is now a toggle (Fit Widths ↔ Default) for both EDL and Audio tables
+    • "Fit Widths" only stretches content-heavy columns (Clip Name, Notes, Filename, etc.);
+      fixed-content columns (TC, Duration, Level, SR, Ch, FPS, Speed) keep their default widths
+    • Clicking "Default" restores all columns to their default pixel widths
+    • Audio table now uses the same fixed+stretchy strategy as the EDL table
+  - Fix: Audio File List column visibility is now persisted across sessions
+    • Show/hide state saved via ExtState "audio_col_visibility"
+    • Restored on script load; any change in the Columns popup is saved immediately
+
   v260227.1717
   - Fix: Search box now correctly matches TC columns (Src TC In/Out, Rec TC In/Out, Duration)
     • __search_text is rebuilt in 4 places; all now include TC fields
@@ -483,7 +493,7 @@ end
 ---------------------------------------------------------------------------
 local SCRIPT_NAME = "Conform List Browser"
 local EXT_NS = "hsuanice_ConformListBrowser"
-local VERSION = "260227.1717"
+local VERSION = "260228.1200"
 
 -- Column definitions (EDL Events table)
 local COL = {
@@ -595,23 +605,23 @@ local HEADER_LABELS = {
 }
 
 local DEFAULT_COL_WIDTH = {
-  [1]  = 40,
-  [2]  = 100,
+  [1]  = 32,
+  [2]  = 75,
   [3]  = 50,
-  [4]  = 45,
-  [5]  = 45,
-  [6]  = 100,
-  [7]  = 100,
-  [8]  = 100,
-  [9]  = 100,
-  [10] = 85,
+  [4]  = 25,
+  [5]  = 25,
+  [6]  = 75,
+  [7]  = 75,
+  [8]  = 75,
+  [9]  = 75,
+  [10] = 75,
   [11] = 300,
   [12] = 300,
   [13] = 200,
   [14] = 70,
-  [15] = 250,
-  [16] = 80,
-  [17] = 80,
+  [15] = 25,
+  [16] = 65,
+  [17] = 65,
 }
 
 -- Columns with short/fixed-length content: kept at DEFAULT_COL_WIDTH during Fit Widths.
@@ -631,6 +641,17 @@ local FIT_FIXED_COLS = {
   [COL.LEVEL]       = true,  -- dB value(s)
 }
 -- Stretchy: CLIP_NAME (11), SRC_FILE (12), NOTES (13), MATCHED_PATH (15), GROUP (16)
+
+-- Audio columns with short/fixed-length content: kept at AUDIO_DEFAULT_COL_WIDTH during Fit Widths.
+local AUDIO_FIT_FIXED_COLS = {
+  [AUDIO_COL.SRC_TC]     = true,  -- timecode HH:MM:SS:FF
+  [AUDIO_COL.DURATION]   = true,
+  [AUDIO_COL.SAMPLERATE] = true,
+  [AUDIO_COL.CHANNELS]   = true,
+  [AUDIO_COL.FRAMERATE]  = true,
+  [AUDIO_COL.SPEED]      = true,
+}
+-- Stretchy: FILENAME, SCENE, TAKE, TAPE, FOLDER, PROJECT, ORIG_FILENAME, TRACK_NAMES, DESCRIPTION
 
 -- Editable columns (all except Event# and Duration)
 local EDITABLE_COLS = {
@@ -737,6 +758,8 @@ local CLB = {
   edl_fit_content = false,    -- Flag to fit EDL table content widths next frame
   edl_table_gen = 0,          -- Incremented on Fit Widths to reset ImGui column state
   audio_table_gen = 0,        -- Incremented on audio Fit Widths to reset ImGui column state
+  edl_fit_mode = false,       -- true = Fit Widths active; button shows "Default"
+  audio_fit_mode = false,     -- true = Fit Widths active; button shows "Default"
 
   -- Timeline panel state
   show_timeline = false,
@@ -1564,6 +1587,14 @@ local function save_prefs()
     vis_parts[i] = EDL_COL_VISIBILITY[i] and "1" or "0"
   end
   reaper.SetExtState(EXT_NS, "edl_col_visibility", table.concat(vis_parts, ","), true)
+
+  -- Audio column visibility (comma-separated 0/1)
+  local audio_vis_parts = {}
+  for i = 1, AUDIO_COL_COUNT do
+    audio_vis_parts[i] = AUDIO_COL_VISIBILITY[i] and "1" or "0"
+  end
+  reaper.SetExtState(EXT_NS, "audio_col_visibility", table.concat(audio_vis_parts, ","), true)
+
   reaper.SetExtState(EXT_NS, "show_timeline", CLB.show_timeline and "1" or "0", true)
   reaper.SetExtState(EXT_NS, "tl_zoom", tostring(CLB.tl_zoom or 50.0), true)
 end
@@ -1615,6 +1646,18 @@ local function load_prefs()
       idx = idx + 1
       if idx <= COL_COUNT then
         EDL_COL_VISIBILITY[idx] = (val == "1")
+      end
+    end
+  end
+
+  -- Audio column visibility
+  local audio_vis_str = get("audio_col_visibility", "")
+  if audio_vis_str ~= "" then
+    local idx = 0
+    for val in audio_vis_str:gmatch("([01])") do
+      idx = idx + 1
+      if idx <= AUDIO_COL_COUNT then
+        AUDIO_COL_VISIBILITY[idx] = (val == "1")
       end
     end
   end
@@ -5114,10 +5157,18 @@ local function draw_edl_panel_header()
     reaper.ImGui_SetTooltip(ctx, "Show/hide and reorder columns")
   end
 
-  -- Fit widths button
+  -- Fit widths button (toggle: Fit Widths / Default)
   reaper.ImGui_SameLine(ctx)
-  if reaper.ImGui_SmallButton(ctx, "Fit Widths##edl_fit") then
-    CLB.edl_fit_content = true
+  local edl_fit_lbl = CLB.edl_fit_mode and "Default##edl_fit" or "Fit Widths##edl_fit"
+  if reaper.ImGui_SmallButton(ctx, edl_fit_lbl) then
+    if CLB.edl_fit_mode then
+      for k, v in pairs(DEFAULT_COL_WIDTH) do COL_WIDTH[k] = v end
+      CLB.edl_table_gen = (CLB.edl_table_gen or 0) + 1
+      CLB.edl_fit_mode = false
+    else
+      CLB.edl_fit_content = true
+      CLB.edl_fit_mode = true
+    end
   end
 
   -- Timeline panel toggle
@@ -5227,13 +5278,18 @@ local function draw_audio_panel_header()
   reaper.ImGui_SameLine(ctx)
   reaper.ImGui_Text(ctx, "|")
 
-  -- Fit Content Widths button
+  -- Fit Widths button (toggle: Fit Widths / Default)
   reaper.ImGui_SameLine(ctx)
-  if reaper.ImGui_SmallButton(ctx, "Fit Widths##audio_fit") then
-    CLB.audio_fit_content = true
-  end
-  if reaper.ImGui_IsItemHovered(ctx) then
-    reaper.ImGui_SetTooltip(ctx, "Auto-adjust column widths based on content")
+  local audio_fit_lbl = CLB.audio_fit_mode and "Default##audio_fit" or "Fit Widths##audio_fit"
+  if reaper.ImGui_SmallButton(ctx, audio_fit_lbl) then
+    if CLB.audio_fit_mode then
+      for k, v in pairs(AUDIO_DEFAULT_COL_WIDTH) do AUDIO_COL_WIDTH[k] = v end
+      CLB.audio_table_gen = (CLB.audio_table_gen or 0) + 1
+      CLB.audio_fit_mode = false
+    else
+      CLB.audio_fit_content = true
+      CLB.audio_fit_mode = true
+    end
   end
 
   -- Copy (TSV) button
@@ -5285,10 +5341,12 @@ local function draw_audio_panel_header()
     -- Show All / Hide All
     if reaper.ImGui_SmallButton(ctx, "All##audio_col_all") then
       for i = 1, AUDIO_COL_COUNT do AUDIO_COL_VISIBILITY[i] = true end
+      save_prefs()
     end
     reaper.ImGui_SameLine(ctx)
     if reaper.ImGui_SmallButton(ctx, "None##audio_col_none") then
       for i = 1, AUDIO_COL_COUNT do AUDIO_COL_VISIBILITY[i] = false end
+      save_prefs()
     end
     reaper.ImGui_Separator(ctx)
 
@@ -5298,6 +5356,7 @@ local function draw_audio_panel_header()
       local chg, new_val = reaper.ImGui_Checkbox(ctx, label .. "##audio_col_" .. col, AUDIO_COL_VISIBILITY[col])
       if chg then
         AUDIO_COL_VISIBILITY[col] = new_val
+        save_prefs()
       end
     end
 
@@ -5656,26 +5715,32 @@ local function draw_audio_table(table_height)
     | reaper.ImGui_TableFlags_Sortable()
     | reaper.ImGui_TableFlags_SortMulti()
 
-  -- Fit Widths: proportionally scale visible columns to fill the window, using
-  -- AUDIO_DEFAULT_COL_WIDTH as the baseline so repeated clicks give the same result.
-  -- Table ID is bumped to flush ImGui's cached column state (same approach as EDL table).
+  -- Fit Widths: fixed columns (Src TC, Duration, SR, Ch, FPS, Speed) stay at default widths;
+  -- stretchy columns (Filename, Scene, Folder, Tracks, Description, etc.) share remaining
+  -- window width proportionally. Same fixed+stretchy approach as EDL table.
   if CLB.audio_fit_content then
     local scale_ratio = current_font_size / 13.0
     local avail_w_audio, _ = reaper.ImGui_GetContentRegionAvail(ctx)
-    local total_base = 0
+    local fixed_base = 0
+    local stretch_base = 0
     for _, col in ipairs(visible_cols) do
-      total_base = total_base + (AUDIO_DEFAULT_COL_WIDTH[col] or 80)
-    end
-    if total_base > 0 then
-      local target_base = avail_w_audio / scale_ratio
-      local factor = target_base / total_base
-      for _, col in ipairs(visible_cols) do
-        AUDIO_COL_WIDTH[col] = math.max(20, math.floor(
-          (AUDIO_DEFAULT_COL_WIDTH[col] or 80) * factor
-        ))
+      local def_w = AUDIO_DEFAULT_COL_WIDTH[col] or 80
+      if AUDIO_FIT_FIXED_COLS[col] then
+        fixed_base = fixed_base + def_w
+      else
+        stretch_base = stretch_base + def_w
       end
-      CLB.audio_table_gen = (CLB.audio_table_gen or 0) + 1
     end
+    local remaining_base = (avail_w_audio / scale_ratio) - fixed_base
+    for _, col in ipairs(visible_cols) do
+      local def_w = AUDIO_DEFAULT_COL_WIDTH[col] or 80
+      if AUDIO_FIT_FIXED_COLS[col] then
+        AUDIO_COL_WIDTH[col] = def_w
+      elseif stretch_base > 0 then
+        AUDIO_COL_WIDTH[col] = math.max(20, math.floor(def_w / stretch_base * remaining_base))
+      end
+    end
+    CLB.audio_table_gen = (CLB.audio_table_gen or 0) + 1
     CLB.audio_fit_content = false
   end
 
