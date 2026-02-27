@@ -1,6 +1,6 @@
 --[[
 @description Conform List Browser
-@version 260227.1230
+@version 260227.1714
 @author hsuanice
 @about
   A REAPER script for browsing and editing EDL (Edit Decision List) data
@@ -46,6 +46,45 @@
   Required: Python 3 + opentimelineio (pip3 install opentimelineio)
 
 @changelog
+  v260227.1714
+  - Fix: Fit Widths now works correctly and is idempotent (same result every click, no drift)
+    • EDL table: fixed-width columns (Reel, Track, Edit, Level, all TC/Duration) stay at
+      their default widths; stretchy columns (Clip Name, Source File, Notes, Matched File,
+      Group) share the remaining window width proportionally
+    • Both EDL and audio tables: always compute from DEFAULT widths, never from already-
+      fitted widths (which caused slow shrinkage each click due to rounding/scrollbar drift)
+    • Table ID bumped on each Fit Widths click so ImGui creates fresh column state
+  - Fix: Search box now also matches TC columns (Src TC In/Out, Rec TC In/Out, Duration)
+  - Fix: Transition events (e.g. BL reel wipes) now show correct clip name
+    • When TO CLIP NAME is present, it is used as clip_name instead of FROM CLIP NAME
+    • FROM CLIP NAME and TO CLIP NAME lines now also appear in the Notes column
+    • Example: BL → W001 wipe event now shows "4-1-4T1.WAV" not blank
+
+  v260227.1330
+  - Fix: FPS option now shows "24/23.97" so users can find 23.976 FPS files
+  - Fix: Fit Widths now works reliably every click (calculates proportional widths directly,
+    no longer uses WidthStretch toggle which caused revert on second click)
+  - Feature: Timeline block color scheme reworked for clearer selection feedback
+    • Unselected clips: neutral dark gray (0x3A3A3A) — reduces visual noise
+    • Selected clips: full-brightness track color (blue/amber/green)
+    • Edge and text label also dim/brighten with selection state
+
+  v260227.1300
+  - Fix: Toolbar row height increased by 14px to prevent scrollbar from clipping buttons
+  - Fix: FPS 23.976 and 24 merged into single "24" option (match tolerance widened to 0.03)
+  - Fix: EDL "Fit Widths" button now correctly stretches columns to fill table width
+  - Feature: Timeline TC ruler now shows HH:MM:SS:FF timecode (uses EDL.seconds_to_tc)
+    • Tick spacing increased to 80px minimum to accommodate wider TC labels
+    • Sub-second (frame-level) tick intervals added at high zoom
+  - Feature: Timeline horizontal scrollbar (SliderDouble at bottom of panel)
+    • TL_PANEL_H increased from 120 to 136px to accommodate scrollbar
+  - Feature: Timeline ↔ List bidirectional selection sync
+    • Clicking a block in timeline selects all columns of that row in the list
+    • List now scrolls to the selected row (SetScrollHereY, clipper disabled for that frame)
+    • Clicking a row in list centers timeline view on that row's block
+    • Timeline block highlight now reflects any-column selection (sel_has_row)
+  - Fix: $format token now returns user-friendly names (CMX3600→"EDL", *XML*→"XML", AAF→"AAF")
+
   v260227.1230
   - Feature: Level column (COL.LEVEL = 17) for audio/video level dB values
     • New "Level" column positioned between Edit and Dissolve (Edit → Level → Dissolve)
@@ -439,7 +478,7 @@ end
 ---------------------------------------------------------------------------
 local SCRIPT_NAME = "Conform List Browser"
 local EXT_NS = "hsuanice_ConformListBrowser"
-local VERSION = "260227.1230"
+local VERSION = "260227.1500"
 
 -- Column definitions (EDL Events table)
 local COL = {
@@ -520,6 +559,10 @@ local AUDIO_COL_WIDTH = {
   [15] = 200,  -- Description
 }
 
+-- Baseline for Fit Widths (always compute from these, not from current AUDIO_COL_WIDTH)
+local AUDIO_DEFAULT_COL_WIDTH = {}
+for k, v in pairs(AUDIO_COL_WIDTH) do AUDIO_DEFAULT_COL_WIDTH[k] = v end
+
 -- Audio file extensions
 local AUDIO_EXTS = {
   wav = true, aif = true, aiff = true, flac = true, ogg = true,
@@ -565,6 +608,24 @@ local DEFAULT_COL_WIDTH = {
   [16] = 80,
   [17] = 80,
 }
+
+-- Columns with short/fixed-length content: kept at DEFAULT_COL_WIDTH during Fit Widths.
+-- Remaining visible width is distributed among the "stretchy" content columns.
+local FIT_FIXED_COLS = {
+  [COL.EVENT]       = true,  -- "#" always 3 digits
+  [COL.REEL]        = true,  -- reel ID
+  [COL.TRACK]       = true,  -- A/V track (1-2 chars)
+  [COL.EDIT_TYPE]   = true,  -- C/W/D
+  [COL.DISS_LEN]    = true,  -- dissolve frame count
+  [COL.SRC_IN]      = true,  -- HH:MM:SS:FF
+  [COL.SRC_OUT]     = true,
+  [COL.REC_IN]      = true,
+  [COL.REC_OUT]     = true,
+  [COL.DURATION]    = true,
+  [COL.MATCH_STATUS]= true,  -- short status tag
+  [COL.LEVEL]       = true,  -- dB value(s)
+}
+-- Stretchy: CLIP_NAME (11), SRC_FILE (12), NOTES (13), MATCHED_PATH (15), GROUP (16)
 
 -- Editable columns (all except Event# and Duration)
 local EDITABLE_COLS = {
@@ -637,6 +698,7 @@ local CLB = {
   -- Table state
   search_text = "",
   scroll_to_row = nil,
+  tl_center_on_guid = nil,  -- list click → center timeline on this row
   visible_range = { first = 0, last = 0 },
   cached_rows = nil,
 
@@ -668,6 +730,8 @@ local CLB = {
   audio_sort_asc = true,      -- Sort ascending
   audio_fit_content = false,  -- Flag to fit content widths next frame
   edl_fit_content = false,    -- Flag to fit EDL table content widths next frame
+  edl_table_gen = 0,          -- Incremented on Fit Widths to reset ImGui column state
+  audio_table_gen = 0,        -- Incremented on audio Fit Widths to reset ImGui column state
 
   -- Timeline panel state
   show_timeline = false,
@@ -1578,6 +1642,15 @@ local function sel_has(guid, col_id)
   return SEL.cells[sel_key(guid, col_id)] == true
 end
 
+-- Returns true if any column of this row is selected
+local function sel_has_row(guid)
+  local prefix = guid .. ":"
+  for k in pairs(SEL.cells) do
+    if k:sub(1, #prefix) == prefix then return true end
+  end
+  return false
+end
+
 local function sel_toggle(guid, col_id)
   local k = sel_key(guid, col_id)
   if SEL.cells[k] then
@@ -1980,7 +2053,8 @@ local function _make_rows_from_events(events, fps, is_drop, source_idx)
       src_tc_out = evt.src_tc_out or "00:00:00:00",
       rec_tc_in = evt.rec_tc_in or "00:00:00:00",
       rec_tc_out = evt.rec_tc_out or "00:00:00:00",
-      clip_name = evt.clip_name or "",
+      clip_name = (evt.to_clip_name and evt.to_clip_name ~= "" and evt.to_clip_name)
+                  or evt.clip_name or "",
       source_file = evt.source_file or "",
       notes = "",    -- auto-populated below from extra EDL comments
       level = "",    -- auto-populated below from AUDIO/VIDEO LEVEL comments
@@ -1993,14 +2067,12 @@ local function _make_rows_from_events(events, fps, is_drop, source_idx)
         fps, is_drop),
     }
 
-    -- Auto-populate notes from extra EDL comment lines:
-    -- all * lines that are NOT FROM CLIP NAME / SOURCE FILE / TO CLIP NAME.
-    -- (those three have dedicated columns; everything else goes to Notes)
+    -- Auto-populate notes from extra EDL comment lines.
+    -- SOURCE FILE has its own column so it is excluded.
+    -- FROM CLIP NAME and TO CLIP NAME are included (they clarify transition edits like BL reels).
     local extra = {}
     for _, cmt in ipairs(evt.comments or {}) do
-      if not cmt:match("^FROM CLIP NAME:")
-        and not cmt:match("^SOURCE FILE:")
-        and not cmt:match("^TO CLIP NAME:") then
+      if not cmt:match("^SOURCE FILE:") then
         extra[#extra + 1] = cmt
       end
     end
@@ -2023,6 +2095,9 @@ local function _make_rows_from_events(events, fps, is_drop, source_idx)
       row.event_num, row.reel, row.track,
       row.clip_name, row.source_file, row.notes,
       row.group, row.level,
+      row.src_tc_in, row.src_tc_out,
+      row.rec_tc_in, row.rec_tc_out,
+      row.duration,
     }, " "):lower()
 
     new_rows[#new_rows + 1] = row
@@ -2917,10 +2992,20 @@ end
 ---------------------------------------------------------------------------
 -- Generate Items
 ---------------------------------------------------------------------------
+--- Map internal format identifier to user-friendly label
+local function _friendly_format(fmt)
+  if not fmt then return "EDL" end
+  local u = fmt:upper()
+  if u == "CMX3600" or u == "CLB" then return "EDL" end
+  if u:find("XML") then return "XML" end
+  if u == "AAF" then return "AAF" end
+  return fmt  -- pass through any unknown formats unchanged
+end
+
 --- Build tokens table from a row for track name expansion
 local function build_row_tokens(row)
   return {
-    format = CLB.loaded_format or "EDL",
+    format = _friendly_format(CLB.loaded_format),
     track = row.track or "",
     reel = row.reel or "",
     clip = row.clip_name or "",
@@ -3655,7 +3740,8 @@ end
 ---------------------------------------------------------------------------
 local function draw_toolbar()
   -- Row 1 (scrollable if window is narrow)
-  local row1_height = scale(28)
+  -- +14 always reserves horizontal scrollbar space so buttons are never clipped
+  local row1_height = scale(28) + 14
   local flags = reaper.ImGui_WindowFlags_HorizontalScrollbar()
   if reaper.ImGui_BeginChild(ctx, "##toolbar_row1", 0, row1_height, 0, flags) then
     -- Project Save / Open
@@ -3841,12 +3927,11 @@ local function draw_toolbar()
   reaper.ImGui_EndChild(ctx)  -- End toolbar_row1
 
   -- Row 2 (scrollable if window is narrow)
-  local row2_height = scale(28)
+  local row2_height = scale(28) + 14
   if reaper.ImGui_BeginChild(ctx, "##toolbar_row2", 0, row2_height, 0, flags) then
     -- FPS selector (dropdown)
   local FPS_OPTIONS = {
-    { label = "23.976", value = 23.976 },
-    { label = "24", value = 24 },
+    { label = "24/23.97", value = 24 },
     { label = "25", value = 25 },
     { label = "29.97 DF", value = 29.97, drop = true },
     { label = "30", value = 30 },
@@ -3858,7 +3943,7 @@ local function draw_toolbar()
   -- Find current selection
   local current_label = tostring(CLB.fps)
   for _, opt in ipairs(FPS_OPTIONS) do
-    if math.abs(opt.value - CLB.fps) < 0.01 and (opt.drop or false) == CLB.is_drop then
+    if math.abs(opt.value - CLB.fps) < 0.03 and (opt.drop or false) == CLB.is_drop then
       current_label = opt.label
       break
     end
@@ -3869,7 +3954,7 @@ local function draw_toolbar()
   reaper.ImGui_SetNextItemWidth(ctx, scale(90))
   if reaper.ImGui_BeginCombo(ctx, "##clb_fps", current_label) then
     for _, opt in ipairs(FPS_OPTIONS) do
-      local is_sel = math.abs(opt.value - CLB.fps) < 0.01 and (opt.drop or false) == CLB.is_drop
+      local is_sel = math.abs(opt.value - CLB.fps) < 0.03 and (opt.drop or false) == CLB.is_drop
       if reaper.ImGui_Selectable(ctx, opt.label, is_sel) then
         CLB.fps = opt.value
         CLB.is_drop = opt.drop or false
@@ -4725,16 +4810,49 @@ local function draw_table(table_height)
     | reaper.ImGui_TableFlags_Resizable()
     | reaper.ImGui_TableFlags_Reorderable()
 
-  -- Available height for table (use provided height or available space)
-  local _, avail_h = reaper.ImGui_GetContentRegionAvail(ctx)
+  -- Available size for table
+  local avail_w, avail_h = reaper.ImGui_GetContentRegionAvail(ctx)
   local height = table_height or avail_h
 
-  if not reaper.ImGui_BeginTable(ctx, "clb_table", visible_count, flags, 0, height) then
+  -- Fit Widths: fixed columns (Reel/Track/Edit/TC/Level) stay at their default widths;
+  -- stretchy columns (Clip Name, Notes, Source File, Matched File, Group) share the
+  -- remaining window width proportionally, always computed from DEFAULT_COL_WIDTH so
+  -- repeated clicks give the same result (no drift from accumulated rounding errors).
+  -- Table ID is bumped each time so ImGui creates fresh column state and respects the
+  -- updated COL_WIDTH values (cached tables ignore TableSetupColumn width parameter).
+  if CLB.edl_fit_content then
+    local scale_ratio = current_font_size / 13.0
+    local fixed_base = 0   -- sum of default widths for fixed-width visible columns
+    local stretch_base = 0 -- sum of default widths for stretchy visible columns
+    for _, col in ipairs(visible_cols) do
+      local def_w = DEFAULT_COL_WIDTH[col] or 80
+      if FIT_FIXED_COLS[col] then
+        fixed_base = fixed_base + def_w
+      else
+        stretch_base = stretch_base + def_w
+      end
+    end
+    -- remaining base units available for stretchy columns
+    local remaining_base = (avail_w / scale_ratio) - fixed_base
+    for _, col in ipairs(visible_cols) do
+      local def_w = DEFAULT_COL_WIDTH[col] or 80
+      if FIT_FIXED_COLS[col] then
+        COL_WIDTH[col] = def_w
+      elseif stretch_base > 0 then
+        COL_WIDTH[col] = math.max(20, math.floor(def_w / stretch_base * remaining_base))
+      end
+    end
+    CLB.edl_table_gen = (CLB.edl_table_gen or 0) + 1
+    CLB.edl_fit_content = false
+  end
+
+  local table_id = "clb_table_" .. (CLB.edl_table_gen or 0)
+  if not reaper.ImGui_BeginTable(ctx, table_id, visible_count, flags, 0, height) then
     return
   end
 
   -- Setup columns (only visible ones, in display order)
-  for disp_idx, col in ipairs(visible_cols) do
+  for _, col in ipairs(visible_cols) do
     local w = scale(COL_WIDTH[col] or DEFAULT_COL_WIDTH[col] or 80)
     reaper.ImGui_TableSetupColumn(ctx, HEADER_LABELS[col] or "",
       reaper.ImGui_TableColumnFlags_WidthFixed(), w)
@@ -4775,7 +4893,17 @@ local function draw_table(table_height)
     list_clipper = reaper.ImGui_CreateListClipper(ctx)
   end
 
-  local use_clipper = list_clipper and row_count > 100
+  -- Find scroll target row index (from timeline click → table needs to scroll)
+  local scroll_target_idx = nil
+  if CLB.scroll_to_row then
+    for i, row in ipairs(view_rows) do
+      if row.__guid == CLB.scroll_to_row then scroll_target_idx = i; break end
+    end
+    CLB.scroll_to_row = nil
+  end
+
+  -- Disable clipper for this frame if we need to scroll to a row
+  local use_clipper = list_clipper and row_count > 100 and not scroll_target_idx
   local cs, ce
 
   if use_clipper then
@@ -4800,6 +4928,9 @@ local function draw_table(table_height)
       if not row then break end
 
       reaper.ImGui_TableNextRow(ctx)
+      if i == scroll_target_idx then
+        reaper.ImGui_SetScrollHereY(ctx, 0.5)
+      end
 
       for disp_idx, col in ipairs(visible_cols) do
         reaper.ImGui_TableSetColumnIndex(ctx, disp_idx - 1)
@@ -4868,6 +4999,7 @@ local function draw_table(table_height)
               end
             else
               sel_set_single(row.__guid, col)
+              CLB.tl_center_on_guid = row.__guid
             end
           end
 
@@ -5195,7 +5327,7 @@ end
 ---------------------------------------------------------------------------
 -- Draw: Mini-Timeline Panel
 ---------------------------------------------------------------------------
-local TL_PANEL_H = 120  -- base pixels (scaled at draw time)
+local TL_PANEL_H = 136  -- base pixels (scaled at draw time; extra 16px for scrollbar)
 
 local function draw_timeline_panel()
   -- 1. Collect rows, compute TC range and unique track list
@@ -5244,9 +5376,9 @@ local function draw_timeline_panel()
     return
   end
 
-  -- 4. InvisibleButton = interaction target for the full canvas
+  -- 4. InvisibleButton = interaction target for the canvas (reserve bottom 16px for scrollbar)
   local cw, ch = reaper.ImGui_GetContentRegionAvail(ctx)
-  reaper.ImGui_InvisibleButton(ctx, "##tl_cvs", cw, ch)
+  reaper.ImGui_InvisibleButton(ctx, "##tl_cvs", cw, ch - scale(16))
   local is_hovered = reaper.ImGui_IsItemHovered(ctx)
   local is_active  = reaper.ImGui_IsItemActive(ctx)
 
@@ -5268,6 +5400,18 @@ local function draw_timeline_panel()
   local max_scroll = math.max(0, span - vis_sec)
   CLB.tl_scroll = math.max(0, math.min(max_scroll, CLB.tl_scroll))
 
+  -- Center timeline on row selected from the list
+  if CLB.tl_center_on_guid then
+    for _, rd in ipairs(row_data) do
+      if rd.row.__guid == CLB.tl_center_on_guid then
+        local center_t = (rd.t_in + rd.t_out) * 0.5 - tc_min
+        CLB.tl_scroll = math.max(0, math.min(max_scroll, center_t - vis_sec * 0.5))
+        break
+      end
+    end
+    CLB.tl_center_on_guid = nil
+  end
+
   -- Helper: seconds → screen x
   local function s2px(t)
     return ea_x0 + (t - tc_min - CLB.tl_scroll) * CLB.tl_zoom
@@ -5282,11 +5426,16 @@ local function draw_timeline_panel()
   local ry1 = cy0 + RULER_H
   reaper.ImGui_DrawList_AddRectFilled(dl, ea_x0, ry0, cx1, ry1, 0x2A2A2AFF)
 
-  -- Pick tick interval: smallest where ticks are >= 40px apart
-  local intervals = { 1, 2, 5, 10, 15, 30, 60, 120, 300, 600 }
+  -- Pick tick interval: smallest where ticks are >= 80px apart (TC labels are wider)
+  local fps_val = CLB.fps or 24
+  local frame_dur = 1.0 / fps_val
+  local intervals = {
+    frame_dur, frame_dur * 2, frame_dur * 5, frame_dur * 10,
+    1, 2, 5, 10, 15, 30, 60, 120, 300, 600,
+  }
   local tick_iv = 600
   for _, iv in ipairs(intervals) do
-    if iv * CLB.tl_zoom >= scale(40) then tick_iv = iv; break end
+    if iv * CLB.tl_zoom >= scale(80) then tick_iv = iv; break end
   end
 
   local view_start = tc_min + CLB.tl_scroll
@@ -5296,12 +5445,7 @@ local function draw_timeline_panel()
     local px = s2px(t)
     if px >= ea_x0 and px <= cx1 then
       reaper.ImGui_DrawList_AddLine(dl, px, ry0, px, ry1, 0x555555FF, 1.0)
-      local hh  = math.floor(t / 3600)
-      local mm  = math.floor((t % 3600) / 60)
-      local ss  = math.floor(t % 60)
-      local lbl = span >= 3600
-        and string.format("%d:%02d:%02d", hh, mm, ss)
-        or  string.format("%d:%02d", mm, ss)
+      local lbl = EDL.seconds_to_tc(math.max(0, t), CLB.fps or 24, CLB.is_drop or false)
       if px + scale(4) < cx1 then
         reaper.ImGui_DrawList_AddText(dl, px + scale(2), ry0 + scale(2), 0xAAAAAAFF, lbl)
       end
@@ -5363,9 +5507,11 @@ local function draw_timeline_panel()
     local dx1 = math.min(px1, cx1)
     if dx1 < dx0 + 1 then dx1 = dx0 + 1 end   -- minimum 1px
 
-    local selected = sel_has(row.__guid, COL.REC_IN)
-    local col_fill = track_color(row.track or "", ti, selected and 0xFF or 0xCC)
-    local col_edge = selected and 0xFFFFFFFF or 0x00000088
+    local selected = sel_has_row(row.__guid)
+    local col_fill = selected
+      and track_color(row.track or "", ti, 0xFF)   -- selected: full-brightness color
+      or  0x3A3A3ABB                                -- unselected: neutral dark gray
+    local col_edge = selected and 0xFFFFFFEE or 0x00000044
     reaper.ImGui_DrawList_AddRectFilled(dl, dx0, ey0, dx1, ey1, col_fill)
     reaper.ImGui_DrawList_AddRect(dl,      dx0, ey0, dx1, ey1, col_edge)
 
@@ -5382,7 +5528,8 @@ local function draw_timeline_panel()
       local max_ch = math.max(0, math.floor(bw / scale(7)) - 1)
       if #lbl > max_ch then lbl = lbl:sub(1, math.max(0, max_ch - 1)) .. "~" end
       if #lbl > 0 then
-        reaper.ImGui_DrawList_AddText(dl, dx0 + scale(2), ey0 + scale(2), 0xFFFFFFDD, lbl)
+        local txt_col = selected and 0xFFFFFFEE or 0xCCCCCC99
+        reaper.ImGui_DrawList_AddText(dl, dx0 + scale(2), ey0 + scale(2), txt_col, lbl)
       end
     end
 
@@ -5409,7 +5556,9 @@ local function draw_timeline_panel()
   if is_hovered and reaper.ImGui_IsMouseClicked(ctx, 0) then
     if hovered_rd then
       sel_clear()
-      sel_add(hovered_rd.row.__guid, COL.REC_IN)
+      for _, c in ipairs(EDL_COL_ORDER) do
+        sel_add(hovered_rd.row.__guid, c)
+      end
       CLB.scroll_to_row = hovered_rd.row.__guid
     else
       sel_clear()
@@ -5439,6 +5588,14 @@ local function draw_timeline_panel()
         CLB.tl_scroll - delta_x / CLB.tl_zoom))
     end
     reaper.ImGui_SetMouseCursor(ctx, reaper.ImGui_MouseCursor_ResizeEW())
+  end
+
+  -- 17. Horizontal scrollbar at bottom of panel
+  if max_scroll > 0 then
+    reaper.ImGui_SetNextItemWidth(ctx, -1)
+    local chg_sc, new_sc = reaper.ImGui_SliderDouble(ctx, "##tl_hscroll",
+      CLB.tl_scroll, 0, max_scroll, "")
+    if chg_sc then CLB.tl_scroll = new_sc end
   end
 
   reaper.ImGui_EndChild(ctx)
@@ -5485,28 +5642,41 @@ local function draw_audio_table(table_height)
     | reaper.ImGui_TableFlags_Sortable()
     | reaper.ImGui_TableFlags_SortMulti()
 
-  -- Use unique table ID (v2) to reset ImGui's column order memory from previous versions
-  if not reaper.ImGui_BeginTable(ctx, "audio_table_v2", visible_count, flags, 0, table_height) then
+  -- Fit Widths: proportionally scale visible columns to fill the window, using
+  -- AUDIO_DEFAULT_COL_WIDTH as the baseline so repeated clicks give the same result.
+  -- Table ID is bumped to flush ImGui's cached column state (same approach as EDL table).
+  if CLB.audio_fit_content then
+    local scale_ratio = current_font_size / 13.0
+    local avail_w_audio, _ = reaper.ImGui_GetContentRegionAvail(ctx)
+    local total_base = 0
+    for _, col in ipairs(visible_cols) do
+      total_base = total_base + (AUDIO_DEFAULT_COL_WIDTH[col] or 80)
+    end
+    if total_base > 0 then
+      local target_base = avail_w_audio / scale_ratio
+      local factor = target_base / total_base
+      for _, col in ipairs(visible_cols) do
+        AUDIO_COL_WIDTH[col] = math.max(20, math.floor(
+          (AUDIO_DEFAULT_COL_WIDTH[col] or 80) * factor
+        ))
+      end
+      CLB.audio_table_gen = (CLB.audio_table_gen or 0) + 1
+    end
+    CLB.audio_fit_content = false
+  end
+
+  local audio_table_id = "audio_table_v2_" .. (CLB.audio_table_gen or 0)
+  if not reaper.ImGui_BeginTable(ctx, audio_table_id, visible_count, flags, 0, table_height) then
     return
   end
 
   -- Setup columns (only visible ones, in display order)
-  for idx, col in ipairs(visible_cols) do
+  for _, col in ipairs(visible_cols) do
     local w = scale(AUDIO_COL_WIDTH[col] or 80)
-    local col_flags = reaper.ImGui_TableColumnFlags_WidthFixed()
-    -- If fit content is requested, set width stretch for this frame
-    if CLB.audio_fit_content then
-      col_flags = reaper.ImGui_TableColumnFlags_WidthStretch()
-    end
     reaper.ImGui_TableSetupColumn(ctx, AUDIO_HEADER_LABELS[col] or "",
-      col_flags, w)
+      reaper.ImGui_TableColumnFlags_WidthFixed(), w)
   end
   reaper.ImGui_TableSetupScrollFreeze(ctx, 0, 1)
-
-  -- Reset fit content flag after setup
-  if CLB.audio_fit_content then
-    CLB.audio_fit_content = false
-  end
 
   -- Check for sort specs changes
   local sort_specs_dirty = reaper.ImGui_TableNeedSort(ctx)
