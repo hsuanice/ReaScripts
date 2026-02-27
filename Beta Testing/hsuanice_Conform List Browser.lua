@@ -1,6 +1,6 @@
 --[[
 @description Conform List Browser
-@version 260228.0122
+@version 260228.0135
 @author hsuanice
 @about
   A REAPER script for browsing and editing EDL (Edit Decision List) data
@@ -46,6 +46,13 @@
   Required: Python 3 + opentimelineio (pip3 install opentimelineio)
 
 @changelog
+  v260228.0135
+  - Feature: Save / Save As for open CLB projects
+    • When a .clb project is loaded, toolbar shows "Save" (silent overwrite) + "Save As..." (dialog)
+    • "Save" tooltip shows the current filename
+    • "Save As..." updates the loaded file path so subsequent saves go to the new file
+    • When no project is loaded, original "Save..." button (dialog) is shown as before
+
   v260228.0122
   - Fix: Splitter between Event List and Audio List now responds to vertical drag (up/down)
     • Was reading delta_x instead of delta_y from ImGui_GetMouseDelta
@@ -498,7 +505,7 @@ end
 ---------------------------------------------------------------------------
 local SCRIPT_NAME = "Conform List Browser"
 local EXT_NS = "hsuanice_ConformListBrowser"
-local VERSION = "260228.0122"
+local VERSION = "260228.0123"
 
 -- Column definitions (EDL Events table)
 local COL = {
@@ -2446,7 +2453,8 @@ local function _clb_split(line)
 end
 
 --- Save the current CLB session to a .clb project file.
-local function save_clb_project(filepath)
+--- @param silent  boolean  If true, suppress the confirmation MessageBox (for quick Save).
+local function save_clb_project(filepath, silent)
   local f = io.open(filepath, "w")
   if not f then
     reaper.ShowMessageBox("Cannot write to:\n" .. filepath, SCRIPT_NAME, 0)
@@ -2537,10 +2545,12 @@ local function save_clb_project(filepath)
 
   f:close()
   console_msg("Saved CLB project: " .. filepath)
-  reaper.ShowMessageBox(
-    string.format("Project saved:\n%s\n\n%d events, %d sources",
-      filepath:match("([^/\\]+)$") or filepath, #ROWS, #CLB.edl_sources),
-    SCRIPT_NAME, 0)
+  if not silent then
+    reaper.ShowMessageBox(
+      string.format("Project saved:\n%s\n\n%d events, %d sources",
+        filepath:match("([^/\\]+)$") or filepath, #ROWS, #CLB.edl_sources),
+      SCRIPT_NAME, 0)
+  end
   return true
 end
 
@@ -2772,7 +2782,10 @@ local function save_clb_project_dialog()
   if not filepath then return end
   if not filepath:match("%.clb$") then filepath = filepath .. ".clb" end
   CLB.last_dir = filepath:match("^(.*)[/\\]") or CLB.last_dir
-  save_clb_project(filepath)
+  if save_clb_project(filepath, false) then
+    CLB.loaded_file = filepath
+    CLB.loaded_format = "CLB"
+  end
   save_prefs()
 end
 
@@ -3807,14 +3820,38 @@ local function draw_toolbar()
   local flags = reaper.ImGui_WindowFlags_HorizontalScrollbar()
   if reaper.ImGui_BeginChild(ctx, "##toolbar_row1", 0, row1_height, 0, flags) then
     -- Project Save / Open
-    if reaper.ImGui_Button(ctx, "Save...", scale(65), scale(24)) then
-      save_clb_project_dialog()
-    end
-    if reaper.ImGui_IsItemHovered(ctx) then
-      reaper.ImGui_BeginTooltip(ctx)
-      reaper.ImGui_Text(ctx, "Save current session as a .clb project file")
-      reaper.ImGui_Text(ctx, "(preserves EDL events, groups, audio matches, settings)")
-      reaper.ImGui_EndTooltip(ctx)
+    if CLB.loaded_file and CLB.loaded_format == "CLB" then
+      -- Quick Save (overwrite current file, no dialog)
+      if reaper.ImGui_Button(ctx, "Save", scale(50), scale(24)) then
+        if save_clb_project(CLB.loaded_file, true) then
+          save_prefs()
+        end
+      end
+      if reaper.ImGui_IsItemHovered(ctx) then
+        reaper.ImGui_BeginTooltip(ctx)
+        reaper.ImGui_Text(ctx, "Save to: " .. (CLB.loaded_file:match("([^/\\]+)$") or CLB.loaded_file))
+        reaper.ImGui_EndTooltip(ctx)
+      end
+      reaper.ImGui_SameLine(ctx)
+      -- Save As (dialog)
+      if reaper.ImGui_Button(ctx, "Save As...", scale(80), scale(24)) then
+        save_clb_project_dialog()
+      end
+      if reaper.ImGui_IsItemHovered(ctx) then
+        reaper.ImGui_BeginTooltip(ctx)
+        reaper.ImGui_Text(ctx, "Save current session as a new .clb project file")
+        reaper.ImGui_EndTooltip(ctx)
+      end
+    else
+      if reaper.ImGui_Button(ctx, "Save...", scale(65), scale(24)) then
+        save_clb_project_dialog()
+      end
+      if reaper.ImGui_IsItemHovered(ctx) then
+        reaper.ImGui_BeginTooltip(ctx)
+        reaper.ImGui_Text(ctx, "Save current session as a .clb project file")
+        reaper.ImGui_Text(ctx, "(preserves EDL events, groups, audio matches, settings)")
+        reaper.ImGui_EndTooltip(ctx)
+      end
     end
     reaper.ImGui_SameLine(ctx)
 
