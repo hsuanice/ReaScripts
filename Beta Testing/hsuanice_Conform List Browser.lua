@@ -1,6 +1,6 @@
 --[[
 @description Conform List Browser
-@version 260228.0052
+@version 260228.0122
 @author hsuanice
 @about
   A REAPER script for browsing and editing EDL (Edit Decision List) data
@@ -46,6 +46,11 @@
   Required: Python 3 + opentimelineio (pip3 install opentimelineio)
 
 @changelog
+  v260228.0122
+  - Fix: Splitter between Event List and Audio List now responds to vertical drag (up/down)
+    • Was reading delta_x instead of delta_y from ImGui_GetMouseDelta
+  - Feature: "Reels >>" button replaced with "Filters >>" — toggles Reels and Groups together
+
   v260228.0052
   - Feature: Fit Widths button is now a toggle (Fit Widths ↔ Default) for both EDL and Audio tables
     • "Fit Widths" only stretches content-heavy columns (Clip Name, Notes, Filename, etc.);
@@ -493,7 +498,7 @@ end
 ---------------------------------------------------------------------------
 local SCRIPT_NAME = "Conform List Browser"
 local EXT_NS = "hsuanice_ConformListBrowser"
-local VERSION = "260228.1200"
+local VERSION = "260228.0122"
 
 -- Column definitions (EDL Events table)
 local COL = {
@@ -558,20 +563,20 @@ local AUDIO_HEADER_LABELS = {
 
 local AUDIO_COL_WIDTH = {
   [1]  = 200,  -- Filename
-  [2]  = 100,  -- Src TC
-  [3]  = 80,   -- Scene
-  [4]  = 50,   -- Take
+  [2]  = 65,  -- Src TC
+  [3]  = 50,   -- Scene
+  [4]  = 35,   -- Take
   [5]  = 80,   -- Tape/Roll
   [6]  = 120,  -- Folder
-  [7]  = 70,   -- Duration
-  [8]  = 50,   -- SR
-  [9]  = 30,   -- Ch
+  [7]  = 50,   -- Duration
+  [8]  = 35,   -- SR
+  [9]  = 35,   -- Ch
   [10] = 100,  -- Project
-  [11] = 80,   -- FPS
+  [11] = 65,   -- FPS
   [12] = 80,   -- Speed
   [13] = 150,  -- Orig File
   [14] = 120,  -- Tracks
-  [15] = 200,  -- Description
+  [15] = 300,  -- Description
 }
 
 -- Baseline for Fit Widths (always compute from these, not from current AUDIO_COL_WIDTH)
@@ -617,7 +622,7 @@ local DEFAULT_COL_WIDTH = {
   [10] = 75,
   [11] = 300,
   [12] = 300,
-  [13] = 200,
+  [13] = 300,
   [14] = 70,
   [15] = 25,
   [16] = 65,
@@ -3903,11 +3908,15 @@ local function draw_toolbar()
     reaper.ImGui_SameLine(ctx)
   end
 
-  -- Reels toggle button
-  if #CLB.reel_filters > 0 then
-    local reel_label = CLB.show_reel_filter and "Reels <<" or "Reels >>"
-    if reaper.ImGui_SmallButton(ctx, reel_label .. "##clb_reel_toggle") then
-      CLB.show_reel_filter = not CLB.show_reel_filter
+  -- Filters toggle button (controls Reels + Groups sidebar together)
+  local has_filters = #CLB.reel_filters > 0 or #CLB.group_filters > 0
+  if has_filters then
+    local filters_visible = CLB.show_reel_filter or CLB.show_group_filter
+    local filter_label = filters_visible and "Filters <<" or "Filters >>"
+    if reaper.ImGui_SmallButton(ctx, filter_label .. "##clb_filter_toggle") then
+      local new_state = not filters_visible
+      CLB.show_reel_filter = new_state
+      CLB.show_group_filter = new_state
     end
     reaper.ImGui_SameLine(ctx)
   end
@@ -5375,7 +5384,7 @@ local function draw_splitter()
   reaper.ImGui_InvisibleButton(ctx, "##splitter", avail_w, splitter_height)
 
   if reaper.ImGui_IsItemActive(ctx) then
-    local delta_y = reaper.ImGui_GetMouseDelta(ctx)
+    local _, delta_y = reaper.ImGui_GetMouseDelta(ctx)
     if delta_y then
       local _, avail_h = reaper.ImGui_GetContentRegionAvail(ctx)
       local total_h = avail_h + splitter_height
