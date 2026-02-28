@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 otio_to_clb.py
-v0.2.0
+v0.3.1 (260228.1309)
 
 Converts timeline files to CLB simplified JSON for REAPER Conform List Browser.
 
@@ -36,11 +36,29 @@ Output JSON schema:
         "rec_tc_in":    "HH:MM:SS:FF",
         "rec_tc_out":   "HH:MM:SS:FF",
         "clip_name":    string,
-        "source_file":  string    // full path to media file
+        "source_file":  string,   // full path to media file
+        "scene":        string,   // FCP7/Premiere XML masterComment1 (Resolve=Scene)
+        "take":         string    // FCP7/Premiere XML masterComment2 (Resolve=Take)
       },
       ...
     ]
   }
+
+Changelog:
+  v0.3.1 (260228.1309)
+    - Fix source TC > 24h bug for FCP7/Premiere XML: source_range.start_time is the
+      absolute source TC in OTIO's fcp_xml adapter; do NOT add available_range offset.
+    - Fix scene/take extraction for Premiere XML: check fcp_xml["logginginfo"]["scene"]
+      and ["shottake"] (OTIO stores <logginginfo> as a nested dict).
+  v0.3.0
+    - Reel extraction via direct XML pre-parse (<file><timecode><reel><name>).
+    - get_reel() returns empty string for XML when no reel metadata found (no filename fallback).
+    - scene/take: added logginginfo key path, shottake key for Premiere XML.
+  v0.2.0
+    - Added scene/take columns (get_scene, get_take).
+    - Added _parse_xml_reels() for reliable reel extraction.
+  v0.1.0
+    - Initial release.
 """
 
 import sys
@@ -188,30 +206,108 @@ def get_media_available_start(clip, fps):
 # Reel extraction
 # ---------------------------------------------------------------------------
 
-def get_reel(clip, format_name):
+def _parse_xml_reels(filepath):
+    """
+    Pre-parse FCP7/Premiere XML to build a URL → reel_name mapping.
+
+    In FCP7/Premiere XML the reel lives at:
+        <file id="…">
+          <pathurl>file://…</pathurl>
+          <timecode>
+            <reel>
+              <name>221004</name>     ← this
+            </reel>
+          </timecode>
+        </file>
+
+    Returns dict: { pathurl_string: reel_name, ... }
+    """
+    try:
+        import xml.etree.ElementTree as ET
+        tree = ET.parse(filepath)
+        root = tree.getroot()
+    except Exception:
+        return {}
+
+    reels = {}
+    seen_ids = set()
+    for file_elem in root.iter("file"):
+        file_id = file_elem.get("id", "")
+        if file_id in seen_ids:
+            continue          # skip back-references (same <file id> used twice)
+        seen_ids.add(file_id)
+
+        reel_name = ""
+        tc = file_elem.find("timecode")
+        if tc is not None:
+            reel_elem = tc.find("reel/name")
+            if reel_elem is not None and reel_elem.text:
+                reel_name = reel_elem.text.strip()
+
+        if not reel_name:
+            continue
+
+        pathurl_elem = file_elem.find("pathurl")
+        if pathurl_elem is not None and pathurl_elem.text:
+            reels[pathurl_elem.text.strip()] = reel_name
+
+    return reels
+
+
+def get_reel(clip, format_name, xml_reels=None):
     """
     Extract reel/tape name for a clip.
 
     Priority:
-      1. cmx_3600 metadata "reel"        (EDL)
-      2. fcp_xml metadata "reel"/"tape"  (XML)
-      3. Media file basename (no ext)
-      4. Clip name
+      1. cmx_3600 metadata "reel"                 (EDL)
+      2. xml_reels[target_url]                     (FCP7/Premiere XML pre-parsed)
+      3. fcp_xml clip/media-ref metadata keys      (FCP7/Premiere XML OTIO metadata)
+      4. Media file basename (no ext)              (other formats only)
+      5. Clip name                                 (other formats only)
     """
     meta = clip.metadata or {}
 
     if format_name == "CMX3600":
-        cmx = meta.get("cmx_3600", {})
+        cmx = meta.get("cmx_3600", {}) or {}
         reel = cmx.get("reel", "") or cmx.get("Reel", "")
         if reel:
-            return reel
+            return str(reel).strip()
 
     if format_name in ("FCP7_XML", "PREMIERE_XML"):
-        fcp = meta.get("fcp_xml", {})
-        reel = fcp.get("reel", "") or fcp.get("tape", "")
-        if reel:
-            return reel
+        # 1. Direct XML parse: look up file URL in pre-built reel table
+        if xml_reels:
+            ref = getattr(clip, "media_reference", None)
+            url = getattr(ref, "target_url", "") if ref else ""
+            if url and url in xml_reels:
+                return xml_reels[url]
 
+        # 2. OTIO metadata fallback: clip-level fcp_xml keys
+        fcp = meta.get("fcp_xml", {}) or {}
+        for key in ("reel", "tape", "Reel", "Tape"):
+            val = fcp.get(key)
+            if val:
+                return str(val).strip()
+
+        # 3. OTIO metadata fallback: media_reference-level fcp_xml keys
+        ref = getattr(clip, "media_reference", None)
+        if ref is not None:
+            ref_fcp = (getattr(ref, "metadata", {}) or {}).get("fcp_xml", {}) or {}
+            for key in ("reel", "tape", "Reel", "Tape"):
+                val = ref_fcp.get(key)
+                if val:
+                    return str(val).strip()
+            # <file><timecode><reel><name> nested path
+            tc_meta = ref_fcp.get("timecode", {}) or {}
+            reel_meta = (tc_meta.get("reel", {}) or {}) if isinstance(tc_meta, dict) else {}
+            if isinstance(reel_meta, dict):
+                val = reel_meta.get("name", "")
+                if val:
+                    return str(val).strip()
+
+        # No reel/tape metadata found — return empty (don't use filename or clip name)
+        return ""
+
+    # Other formats: use media basename as identifier
     path = get_media_path(clip)
     if path:
         return os.path.splitext(os.path.basename(path))[0]
@@ -280,6 +376,64 @@ def detect_fps_drop(timeline, format_name):
 
 
 # ---------------------------------------------------------------------------
+# FCP XML comment/metadata helpers
+# ---------------------------------------------------------------------------
+
+def get_scene(clip, format_name):
+    """
+    Return Scene value from available metadata.
+    Checks (in order):
+      logginginfo.scene  (Premiere XML — OTIO stores <logginginfo> as a nested dict)
+      masterComment1     (FCP7 XML)
+      scene/Scene        (Resolve-style)
+      comment1
+    """
+    if format_name not in ("FCP7_XML", "PREMIERE_XML"):
+        return ""
+    meta = clip.metadata or {}
+    fcp = meta.get("fcp_xml", {}) or {}
+    # Premiere XML: <logginginfo><scene>
+    li = fcp.get("logginginfo") or {}
+    if isinstance(li, dict):
+        val = li.get("scene")
+        if val:
+            return str(val).strip()
+    # FCP7 / Resolve flat keys
+    for key in ("masterComment1", "scene", "Scene", "comment1", "Comment1"):
+        val = fcp.get(key)
+        if val:
+            return str(val).strip()
+    return ""
+
+
+def get_take(clip, format_name):
+    """
+    Return Take value from available metadata.
+    Checks (in order):
+      logginginfo.shottake  (Premiere XML)
+      masterComment2        (FCP7 XML)
+      take/Take             (Resolve-style)
+      comment2
+    """
+    if format_name not in ("FCP7_XML", "PREMIERE_XML"):
+        return ""
+    meta = clip.metadata or {}
+    fcp = meta.get("fcp_xml", {}) or {}
+    # Premiere XML: <logginginfo><shottake>
+    li = fcp.get("logginginfo") or {}
+    if isinstance(li, dict):
+        val = li.get("shottake")
+        if val:
+            return str(val).strip()
+    # FCP7 / Resolve flat keys
+    for key in ("masterComment2", "take", "Take", "comment2", "Comment2"):
+        val = fcp.get(key)
+        if val:
+            return str(val).strip()
+    return ""
+
+
+# ---------------------------------------------------------------------------
 # Clip name + source file extraction (EDL metadata override)
 # ---------------------------------------------------------------------------
 
@@ -319,8 +473,14 @@ def convert_timeline(timeline, source_path):
     gst = getattr(timeline, "global_start_time", None)
     global_offset = gst.rescaled_to(fps) if gst else otio.opentime.RationalTime(0, fps)
 
+    # Pre-parse XML for reel names (<file><timecode><reel><name>)
+    xml_reels = {}
+    if format_name in ("FCP7_XML", "PREMIERE_XML"):
+        xml_reels = _parse_xml_reels(source_path)
+
     events = []
     event_num = 1
+    first_fcp_meta = None   # collect for scene/take diagnostic
 
     for track in timeline.tracks:
         track_name = normalize_track_name(track)
@@ -341,19 +501,30 @@ def convert_timeline(timeline, source_path):
 
             # ---- Clip ----
             elif isinstance(item, otio.schema.Clip):
+                if first_fcp_meta is None:
+                    first_fcp_meta = (item.metadata or {}).get("fcp_xml", {}) or {}
+
                 src_range = item.source_range
                 if src_range:
-                    # Source TC: clip.source_range + media available_range offset
-                    media_start = get_media_available_start(item, fps)
-                    src_start = src_range.start_time.rescaled_to(fps) + media_start
-                    src_end = (src_range.start_time + src_range.duration).rescaled_to(fps) + media_start
+                    # Source TC:
+                    # For FCP7/Premiere XML, source_range.start_time IS the absolute
+                    # source TC (confirmed by diagnostic: adding available_range start
+                    # doubles the value, producing impossible >24h timecodes).
+                    # For CMX3600/AAF/other, add the media available_range offset.
+                    if format_name in ("FCP7_XML", "PREMIERE_XML"):
+                        src_start = src_range.start_time.rescaled_to(fps)
+                        src_end = (src_range.start_time + src_range.duration).rescaled_to(fps)
+                    else:
+                        media_start = get_media_available_start(item, fps)
+                        src_start = src_range.start_time.rescaled_to(fps) + media_start
+                        src_end = (src_range.start_time + src_range.duration).rescaled_to(fps) + media_start
                 else:
                     # No source range: use 00:00:00:00 with same duration as record
                     src_start = otio.opentime.RationalTime(0, fps)
                     src_end = src_start + record_range.duration.rescaled_to(fps)
 
                 clip_name, source_file = get_clip_name_and_source(item, format_name)
-                reel = get_reel(item, format_name)
+                reel = get_reel(item, format_name, xml_reels)
 
                 events.append({
                     "event_num":    f"{event_num:03d}",
@@ -367,6 +538,8 @@ def convert_timeline(timeline, source_path):
                     "rec_tc_out":   rt_to_tc(rec_end,    fps, is_drop),
                     "clip_name":    clip_name,
                     "source_file":  source_file,
+                    "scene":        get_scene(item, format_name),
+                    "take":         get_take(item, format_name),
                 })
                 event_num += 1
 
@@ -378,7 +551,7 @@ def convert_timeline(timeline, source_path):
                 # TODO: if dissolve events need to be explicit (EDL D-type), revisit.
                 pass
 
-    return {
+    result = {
         "format":      format_name,
         "title":       title,
         "fps":         fps,
@@ -386,6 +559,21 @@ def convert_timeline(timeline, source_path):
         "source_path": source_path,
         "events":      events,
     }
+
+    # Diagnostic: if XML and all scene/take are empty, report available fcp_xml keys
+    if format_name in ("FCP7_XML", "PREMIERE_XML") and events:
+        all_empty = all(not e.get("scene") and not e.get("take") for e in events)
+        if all_empty and first_fcp_meta is not None:
+            keys = sorted(first_fcp_meta.keys())
+            if keys:
+                result["warning"] = (
+                    "Scene/Take columns are empty. "
+                    "fcp_xml metadata keys in first clip: " + ", ".join(keys)
+                )
+            else:
+                result["warning"] = "Scene/Take columns are empty — no fcp_xml metadata found."
+
+    return result
 
 
 # ---------------------------------------------------------------------------
