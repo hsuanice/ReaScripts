@@ -1,6 +1,6 @@
 --[[
 @description ReaImGui - Vertical Reorder and Sort (items)
-@version 260226.1940
+@version 260228.1946
 @author hsuanice
 @about
   Provides three vertical re-arrangement modes for selected items (stacked UI):
@@ -29,6 +29,41 @@
 
 
 @changelog
+  v260228.1946
+  - Fix: GetMediaSourceFileName returns one string (not bool+string); removed incorrect
+    "local _, p =" pattern so source filename is now actually read correctly.
+  - Fix: Scene & Take mode — when all items share the same scene+take key (or have none),
+    automatically falls back to grouping by timeline start position. Items within TIME_TOL
+    of each other get the same virtual key (same recording moment). The global slot
+    bin-packing then separates different recording moments that overlap in time.
+  v260228.1930
+  - Fix: get_item_base_filename fallback now extracts scene+take key ("4-26-3_2") from
+    take name format "TRACKNAME----SCENE_TAKE----DATE", stripping the per-channel prefix
+    and date suffix. All channels of the same recording now share the same filename_base.
+  - Fix: Scene & Take mode now applies intra-slot bin-packing within each group×slot.
+    When all items share the same scene+take (1 global slot), items within each channel
+    group that overlap in time are automatically split onto separate sub-tracks.
+    Items at the same timeline position (simultaneous multi-channel recording) are
+    correctly routed to their own tracks.
+  v260228.1900
+  - Feature: New "Filename" option for Copy-to-Sort track order
+    * Groups (tracks) are now sorted by source filename instead of track name or channel number.
+    * The representative filename for each group is the alphabetically smallest base filename
+      among all items in that group (channel suffix stripped, e.g. "4-5-1T1" from "4-5-1T1_A03").
+    * UI option: Copy-to-Sort — order: ○ Track Name  ○ Channel  ● Filename
+    * Preference persisted via ExtState (meta_order_mode=3)
+  v260226.2300
+  - Feature: New "Overlap grouping" option in Copy-to-Sort: "Scene & Take" mode
+    * When enabled, overlapping items are grouped by iXML Scene & Take metadata
+      instead of by base filename.
+    * All metadata groups (e.g. BOOM1, NAN, FU) share the same global recording-session
+      slots. Tracks are created in slot order:
+        Slot 1: BOOM1 | NAN | FU | NA | YU | TIE  (all channels of session 4-29-7_1)
+        Slot 2: BOOM1 | NAN | FU | NA | YU | TIE  (all channels of session 4-29-8_1)
+    * Scene & Take is read from iXML metadata (SCENE + TAKE fields), with fallback to
+      parsing the take name ("TRACKNAME----SCENE_TAKE----DATE" format).
+    * UI option: Copy-to-Sort — Overlap grouping: ○ Filename  ● Scene & Take
+    * Preference persisted via ExtState (meta_overlap_mode)
   v260226.1940
   - Fix: Overlap-split tracks no longer get numbered suffixes ("Ch 03 — BOOM1 2")
     * All tracks in the same metadata group keep the original label unchanged
@@ -805,15 +840,43 @@ local function get_item_base_filename(it)
       local parent = reaper.GetMediaSourceParent(src)
       if parent then file_src = parent end
     end
-    local _, p = reaper.GetMediaSourceFileName(file_src, "")
+    local p = reaper.GetMediaSourceFileName(file_src, "")
     if p and p ~= "" then
       return get_base_filename(path_basename(p))
     end
   end
-  -- Fallback: use the take name as the recording-identity key.
-  -- Items from the same recording session share the same take name.
+  -- Fallback: extract scene+take key from take name format "TRACKNAME----SCENE_TAKE----DATE".
+  -- Strips the per-channel TRACKNAME prefix and the date suffix so that all channels
+  -- of the same recording (BOOM1, NAN, FU …) return the same key (e.g. "4-26-3_2").
   local _, tkn = reaper.GetSetMediaItemTakeInfo_String(tk, "P_NAME", "", false)
-  return tkn or ""
+  tkn = tostring(tkn or "")
+  local st = tkn:match("^.-%-%-%-%-(.-)%-%-%-%-")
+  if st and st ~= "" then return st end
+  return tkn
+end
+
+-- Extract the Scene & Take key for an item (used by the Scene & Take overlap mode).
+-- Priority: iXML SCENE + TAKE metadata fields → parse from take name.
+-- Take name format: "TRACKNAME----SCENE_TAKE----DATE"  (e.g. "BOOM1----4-29-7_1----25Y05M31")
+-- Returns e.g. "4-29-7_1" — the same value for all metadata groups recorded at the same moment.
+local function extract_scene_take_key(it, prefields)
+  if prefields then
+    local scene = tostring(prefields.SCENE or prefields.scene or "")
+    local take  = tostring(prefields.TAKE  or prefields.take  or "")
+    if scene ~= "" then
+      return scene .. (take ~= "" and ("_" .. take) or "")
+    end
+  end
+  -- Fallback: extract the middle token from "A----B----C" take name
+  local tk = take_of(it)
+  if tk then
+    local _, tkn = reaper.GetSetMediaItemTakeInfo_String(tk, "P_NAME", "", false)
+    -- Pattern: match everything between the first and second ---- delimiters
+    local st = tostring(tkn or ""):match("^.-%-%-%-%-(.-)%-%-%-%-")
+    if st and st ~= "" then return st end
+    return tostring(tkn or "")
+  end
+  return ""
 end
 
 ---------------------------------------
@@ -821,10 +884,12 @@ end
 ---------------------------------------
 
 -- name_mode  : 1=Track Name（以 Track Name 命名新 TCP & 依此分組），2=Channel#
--- order_mode : 1=Track Name（群組排序依名稱），2=Channel#
+-- order_mode : 1=Track Name（群組排序依名稱），2=Channel#，3=Filename（依來源檔名）
 -- asc        : true=Ascending, false=Descending
 -- append_secondary : 若 name_mode=2（Channel#命名），於 TCP 名稱後附加最常見 Track Name
-local function run_copy_to_new_tracks(name_mode, order_mode, asc, append_secondary)
+-- overlap_mode : 1=Filename（依 base filename 分槽），2=Scene & Take（依錄音場次分全域槽）
+local function run_copy_to_new_tracks(name_mode, order_mode, asc, append_secondary, overlap_mode)
+  overlap_mode = overlap_mode or 1
   -- Clear metadata cache to avoid stale data from previous runs
   if META and META.begin_batch then
     META.begin_batch()  -- Clears CACHE
@@ -837,6 +902,7 @@ local function run_copy_to_new_tracks(name_mode, order_mode, asc, append_seconda
   debug("  order_mode=" .. (order_mode==1 and "Track Name" or "Channel#"))
   debug("  asc=" .. tostring(asc))
   debug("  append_secondary=" .. tostring(append_secondary))
+  debug("  overlap_mode=" .. tostring(overlap_mode))
   debug("======================================")
 
   reaper.Undo_BeginBlock()
@@ -893,7 +959,10 @@ local function run_copy_to_new_tracks(name_mode, order_mode, asc, append_seconda
       debug("    → No TRK fields found")
     end
 
-    rows[#rows+1] = { it = it, name = name, ch = ch, take = tkn }
+    local st_key = extract_scene_take_key(it, f)
+    local bfn_debug = get_item_base_filename(it)
+    debug(string.format("    → filename_base='%s' | scene_take='%s'", bfn_debug, st_key))
+    rows[#rows+1] = { it = it, name = name, ch = ch, take = tkn, st_key = st_key }
   end
 
 
@@ -944,6 +1013,8 @@ local function run_copy_to_new_tracks(name_mode, order_mode, asc, append_seconda
     local ord_key
     if order_mode == 1 then
       ord_key = "N|" .. natural_key(r.name ~= "" and r.name or "(unnamed)")
+    elseif order_mode == 3 then
+      ord_key = "F|"  -- placeholder; updated after groups are built
     else
       ord_key = string.format("C|%09d", tonumber(r.ch) or 999)
     end
@@ -977,6 +1048,17 @@ local function run_copy_to_new_tracks(name_mode, order_mode, asc, append_seconda
   -- 不需要再追加「最常見 Track Name」到標籤（避免重複/誤導）
   -- [no-op]
 
+  -- order_mode == 3: 依來源檔名排序 — 以每組內最小 base filename 更新 g.ord
+  if order_mode == 3 then
+    for _, g in ipairs(order) do
+      local min_bfn = nil
+      for _, it in ipairs(g.items) do
+        local bfn = get_item_base_filename(it)
+        if min_bfn == nil or bfn < min_bfn then min_bfn = bfn end
+      end
+      g.ord = "F|" .. natural_key(min_bfn or "")
+    end
+  end
 
   -- 4) 依 ord 排序群組（嚴格弱序）
   local function ord_lt(a, b)
@@ -990,29 +1072,20 @@ local function run_copy_to_new_tracks(name_mode, order_mode, asc, append_seconda
     table.sort(order, function(x, y) return ord_lt(y, x) end)
   end
 
-  -- 5) 建新軌並複製 (base-filename-aware overlap avoidance)
-  --
-  -- Algorithm:
-  --   For each metadata group (e.g. "Ch 03 — BOOM1"):
-  --     a) Sort all items by (base_filename, take_name) alphabetically.
-  --        This groups all splits of the same poly recording consecutively
-  --        (e.g. all 4-5-1T1_A* items first, then all 5-20-8T1_A* items).
-  --     b) Assign items one-by-one to the first slot with no overlap.
-  --     c) If no slot is available, create a new track — always with the SAME
-  --        group label (no " 2", " 3" numbering suffix).
+  -- 5) 建新軌並複製
   debug("")
-  debug("--- Creating tracks and copying items (base-filename grouping) ---")
+  debug("--- Creating tracks and copying items ---")
   debug("Total groups: " .. #order)
+  debug("  overlap_mode=" .. tostring(overlap_mode))
 
   local base_track_count = reaper.CountTracks(0)
   local all_created = {}   -- ordered list of all created tracks
 
-  -- Check whether a set of intervals can all fit on a slot without overlapping its spans
-  local function can_place_all_on(slot_spans, intervals)
-    for _, iv in ipairs(intervals) do
-      for _, seg in ipairs(slot_spans) do
-        if iv.e > seg.s and seg.e > iv.s then return false end
-      end
+  -- Check whether a single interval can fit on a slot without overlapping its spans
+  -- (uses module-level TIME_TOL = 0.005 for touching-interval tolerance)
+  local function can_place_on(slot_spans, s, e)
+    for _, seg in ipairs(slot_spans) do
+      if e - TIME_TOL > seg.s and seg.e - TIME_TOL > s then return false end
     end
     return true
   end
@@ -1030,57 +1103,193 @@ local function run_copy_to_new_tracks(name_mode, order_mode, asc, append_seconda
 
   local copied = 0
 
-  for gidx, g in ipairs(order) do
-    local label = g.label
-    debug(string.format("Group #%d: label='%s' | %d items", gidx, label, #g.items))
+  if overlap_mode == 2 then
+    -- ── Mode 2: Scene & Take 全域槽 ──────────────────────────────────
+    -- Track creation order: (slot 1: all groups) → (slot 2: all groups) → …
+    -- Items with the same Scene & Take key share a global slot across all channels.
 
-    -- a) Build a flat list of items with base filename and take name.
-    --    Sort by (base_filename, take_name) so all splits of the same poly
-    --    recording appear consecutively in alphabetical order.
-    local item_records = {}
-    for _, it in ipairs(g.items) do
-      local bfn = get_item_base_filename(it)
-      local tk  = take_of(it)
-      local tkn = ""
-      if tk then
-        local _, nm = reaper.GetSetMediaItemTakeInfo_String(tk, "P_NAME", "", false)
-        tkn = nm or ""
-      end
-      local s = item_start(it) or 0
-      local e = s + (item_len(it) or 0)
-      item_records[#item_records+1] = { it = it, bfn = bfn, tkn = tkn, s = s, e = e }
+    -- Build item → st_key lookup from rows.
+    -- When all items share the same scene+take key (or have none), fall back to
+    -- grouping by timeline start position: items within TIME_TOL of each other
+    -- get the same virtual key (= same recording moment across all channels).
+    local it_to_stkey = {}
+    local unique_stkeys = {}
+    for _, r in ipairs(rows) do
+      local sk = r.st_key or ""
+      if sk ~= "" then unique_stkeys[sk] = true end
     end
-    table.sort(item_records, function(a, b)
-      if a.bfn ~= b.bfn then return a.bfn < b.bfn end
-      return a.tkn < b.tkn
+    local n_unique = 0
+    for _ in pairs(unique_stkeys) do n_unique = n_unique + 1 end
+
+    if n_unique <= 1 then
+      -- Degenerate: no meaningful scene+take difference → group by timeline position
+      debug("  Scene & Take: all items share same key; falling back to timeline-position grouping")
+      for _, r in ipairs(rows) do
+        local s = item_start(r.it) or 0
+        -- Round to TIME_TOL so items at near-identical positions cluster together
+        local rounded = math.floor(s / TIME_TOL + 0.5) * TIME_TOL
+        it_to_stkey[r.it] = string.format("T_%.4f", rounded)
+      end
+    else
+      -- Normal: use real scene+take keys
+      for _, r in ipairs(rows) do
+        local sk = r.st_key or ""
+        if sk == "" then sk = "_ANON_" .. tostring(r.it) end
+        it_to_stkey[r.it] = sk
+      end
+    end
+
+    -- Compute global time span per st_key (union of all items with that key)
+    local st_key_span = {}
+    for _, r in ipairs(rows) do
+      local sk = it_to_stkey[r.it]
+      local s  = item_start(r.it) or 0
+      local e  = s + (item_len(r.it) or 0)
+      if not st_key_span[sk] then
+        st_key_span[sk] = { s = s, e = e }
+      else
+        if s < st_key_span[sk].s then st_key_span[sk].s = s end
+        if e > st_key_span[sk].e then st_key_span[sk].e = e end
+      end
+    end
+
+    -- Collect unique st_keys in start-time order (deterministic)
+    local all_st_keys = {}
+    local seen_sk = {}
+    for _, r in ipairs(rows) do
+      local sk = it_to_stkey[r.it]
+      if not seen_sk[sk] then
+        seen_sk[sk] = true
+        all_st_keys[#all_st_keys+1] = sk
+      end
+    end
+    table.sort(all_st_keys, function(a, b)
+      local sa = st_key_span[a] and st_key_span[a].s or 0
+      local sb = st_key_span[b] and st_key_span[b].s or 0
+      if sa ~= sb then return sa < sb end
+      return a < b
     end)
 
-    -- b) Assign items one-by-one to the first available slot (no overlap).
-    --    When no existing slot fits, create a new track with the SAME label
-    --    (no numbering suffix — all overlap-split tracks keep the group name).
-    local slots = {}
-    for _, rec in ipairs(item_records) do
-      debug(string.format("  Item base='%s' take='%s' span=%.3f..%.3f",
-                          rec.bfn, rec.tkn, rec.s, rec.e))
-
-      local assigned = nil
-      for _, slot in ipairs(slots) do
-        if can_place_all_on(slot.spans, { { s = rec.s, e = rec.e } }) then
-          assigned = slot
-          break
+    -- Bin-pack st_keys into global slots (first-fit, by start time)
+    local global_slots = {}   -- list of { st_keys={[sk]=true}, spans={...} }
+    for _, sk in ipairs(all_st_keys) do
+      local span = st_key_span[sk] or { s = 0, e = 0 }
+      local placed = false
+      for _, slot in ipairs(global_slots) do
+        if can_place_on(slot.spans, span.s, span.e) then
+          slot.st_keys[sk] = true
+          slot.spans[#slot.spans+1] = { s = span.s, e = span.e }
+          placed = true; break
         end
       end
-
-      if not assigned then
-        local tr = make_labeled_track(label)
-        assigned = { tr = tr, spans = {} }
-        table.insert(slots, assigned)
+      if not placed then
+        global_slots[#global_slots+1] = { st_keys = { [sk] = true },
+                                          spans   = { { s = span.s, e = span.e } } }
       end
+    end
 
-      copy_item_to_track(rec.it, assigned.tr)
-      copied = copied + 1
-      table.insert(assigned.spans, { s = rec.s, e = rec.e })
-      debug(string.format("    → Copied to '%s' at %.3f  (base='%s')", label, rec.s, rec.bfn))
+    debug(string.format("  Scene & Take mode: %d unique keys → %d global slots", #all_st_keys, #global_slots))
+    for si, slot in ipairs(global_slots) do
+      local keys = {}
+      for k in pairs(slot.st_keys) do keys[#keys+1] = k end
+      table.sort(keys)
+      debug(string.format("  Slot %d: %s", si, table.concat(keys, ", ")))
+    end
+
+    -- Create tracks: slot × group (outer = slot so all channels of slot N are together)
+    for si, slot in ipairs(global_slots) do
+      for _, g in ipairs(order) do
+        local label = g.label
+        -- Collect this group's items that belong to this slot
+        local slot_items = {}
+        for _, it in ipairs(g.items) do
+          local sk = it_to_stkey[it] or ""
+          if slot.st_keys[sk] then
+            slot_items[#slot_items+1] = it
+          end
+        end
+        if #slot_items > 0 then
+          -- Intra-slot bin-packing: when all scene+takes are the same (1 global slot),
+          -- items within the same group may still overlap each other.
+          -- Items that share a timeline position (same simultaneous recording) are
+          -- automatically routed to separate sub-tracks via this overlap check.
+          local sub_slots = {}
+          for _, it in ipairs(slot_items) do
+            local s = item_start(it) or 0
+            local e = s + (item_len(it) or 0)
+            local placed = false
+            for _, ss in ipairs(sub_slots) do
+              if can_place_on(ss.spans, s, e) then
+                ss.items[#ss.items+1] = it
+                ss.spans[#ss.spans+1] = { s = s, e = e }
+                placed = true; break
+              end
+            end
+            if not placed then
+              sub_slots[#sub_slots+1] = { items = { it }, spans = { { s = s, e = e } } }
+            end
+          end
+          for _, ss in ipairs(sub_slots) do
+            local tr = make_labeled_track(label)
+            for _, it in ipairs(ss.items) do
+              copy_item_to_track(it, tr)
+              copied = copied + 1
+            end
+          end
+          debug(string.format("    Slot %d | Group '%s': %d item(s) → %d sub-track(s)",
+                              si, label, #slot_items, #sub_slots))
+        end
+      end
+    end
+
+  else
+    -- ── Mode 1: Filename-based overlap avoidance (default) ────────────
+    -- For each metadata group: sort items by (base_filename, take_name),
+    -- assign one-by-one to the first slot with no overlap.
+    for gidx, g in ipairs(order) do
+      local label = g.label
+      debug(string.format("Group #%d: label='%s' | %d items", gidx, label, #g.items))
+
+      -- Build flat list sorted by (base_filename, take_name)
+      local item_records = {}
+      for _, it in ipairs(g.items) do
+        local bfn = get_item_base_filename(it)
+        local tk  = take_of(it)
+        local tkn = ""
+        if tk then
+          local _, nm = reaper.GetSetMediaItemTakeInfo_String(tk, "P_NAME", "", false)
+          tkn = nm or ""
+        end
+        local s = item_start(it) or 0
+        local e = s + (item_len(it) or 0)
+        item_records[#item_records+1] = { it = it, bfn = bfn, tkn = tkn, s = s, e = e }
+      end
+      table.sort(item_records, function(a, b)
+        if a.bfn ~= b.bfn then return a.bfn < b.bfn end
+        return a.tkn < b.tkn
+      end)
+
+      -- Assign one-by-one; new track on overflow (same label, no numbering)
+      local slots = {}
+      for _, rec in ipairs(item_records) do
+        debug(string.format("  Item base='%s' take='%s' span=%.3f..%.3f",
+                            rec.bfn, rec.tkn, rec.s, rec.e))
+        local assigned = nil
+        for _, slot in ipairs(slots) do
+          if can_place_on(slot.spans, rec.s, rec.e) then
+            assigned = slot; break
+          end
+        end
+        if not assigned then
+          local tr = make_labeled_track(label)
+          assigned = { tr = tr, spans = {} }
+          table.insert(slots, assigned)
+        end
+        copy_item_to_track(rec.it, assigned.tr)
+        copied = copied + 1
+        table.insert(assigned.spans, { s = rec.s, e = rec.e })
+        debug(string.format("    → Copied to '%s' at %.3f  (base='%s')", label, rec.s, rec.bfn))
+      end
     end
   end
 
@@ -1092,7 +1301,6 @@ local function run_copy_to_new_tracks(name_mode, order_mode, asc, append_seconda
   reaper.Undo_EndBlock("Copy selected items to NEW tracks by metadata", -1)
   reaper.UpdateArrange()
 
-  -- extra_tracks = tracks beyond 1-per-group, created to resolve overlaps
   local extra_tracks = #all_created - #order
   return { tracks_created = #all_created, items_copied = copied, extra_tracks = math.max(0, extra_tracks) }
 end
@@ -1110,6 +1318,7 @@ local meta_sort_mode  = load_pref("meta_sort_mode", 1)
 local meta_name_mode  = load_pref("meta_name_mode", 1)
 local meta_order_mode = load_pref("meta_order_mode", 1)
 local meta_append_secondary = load_pref("meta_append_secondary", true)
+local meta_overlap_mode     = load_pref("meta_overlap_mode", 1)
 
 -- Load font scale pref (load_pref is now available)
 do
@@ -1456,6 +1665,11 @@ local function draw_confirm()
       meta_order_mode=2
       save_pref("meta_order_mode", meta_order_mode)
     end
+    reaper.ImGui_SameLine(ctx)
+    if reaper.ImGui_RadioButton(ctx, "Filename##ord",   meta_order_mode==3) then
+      meta_order_mode=3
+      save_pref("meta_order_mode", meta_order_mode)
+    end
 
     -- 🆕 當以 Channel# 命名新 TCP 時，附加最常見 Track Name
     if meta_name_mode == 2 then
@@ -1464,14 +1678,26 @@ local function draw_confirm()
         meta_append_secondary = v
         save_pref("meta_append_secondary", meta_append_secondary)
       end
+    end
 
+    -- Overlap grouping mode
+    reaper.ImGui_Text(ctx, "Overlap grouping:")
+    reaper.ImGui_SameLine(ctx)
+    if reaper.ImGui_RadioButton(ctx, "Filename##ovlp", meta_overlap_mode == 1) then
+      meta_overlap_mode = 1
+      save_pref("meta_overlap_mode", meta_overlap_mode)
+    end
+    reaper.ImGui_SameLine(ctx)
+    if reaper.ImGui_RadioButton(ctx, "Scene & Take##ovlp", meta_overlap_mode == 2) then
+      meta_overlap_mode = 2
+      save_pref("meta_overlap_mode", meta_overlap_mode)
     end
 
     reaper.ImGui_Spacing(ctx)
 
     -- 🆕 Copy to Sort：帶入命名軸與排序軸
     if reaper.ImGui_Button(ctx, "Copy to Sort", scale(108), 0) then
-      local res = run_copy_to_new_tracks(meta_name_mode, meta_order_mode, sort_asc, meta_append_secondary)
+      local res = run_copy_to_new_tracks(meta_name_mode, meta_order_mode, sort_asc, meta_append_secondary, meta_overlap_mode)
       if res then
         local extra_line = (res.extra_tracks and res.extra_tracks > 0)
           and string.format("\nExtra tracks (overlap splits): %d", res.extra_tracks)
