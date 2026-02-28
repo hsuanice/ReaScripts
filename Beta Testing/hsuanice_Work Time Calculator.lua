@@ -1,193 +1,200 @@
--- hsuanice_Work Time Calculator.lua
--- Calculates editing work time from empty items on dedicated time-log tracks.
+-- hsuanice_Work Timer.lua
+-- Real-time 24H system clock. Right-click to change color/font.
+-- Window is resizable; clock auto-scales to fill it.
+-- Settings and window geometry are remembered across sessions.
 --
--- Usage:
---   1. Create tracks named exactly as configured below.
---   2. On each track, add empty items where:
---        item start position  = time-of-day you started (using 24H timeline)
---        item end position    = time-of-day you stopped
---      The item LENGTH is what gets summed as work duration.
---   3. Run this script to see a summary.
+-- Version: 260228.1730
 --
--- Version: 260228.1200
+-- Changelog:
+--   v260228.1730
+--     - Dock support: right-click "Dock window" to dock/undock
+--     - Dock state persists across sessions (gfx.init dockstate arg)
+--   v260228.1600
+--     - Remember window position across sessions (gfx.dock)
+--     - Fix right-click menu index offset (flat list, no #-headers)
+--     - Color and font persist via reaper.GetExtState / SetExtState
+--   v260228.1200
+--     - Right-click menu: 5 color presets + 4 font presets
+--     - Clock auto-scales to window size (width + height limit)
+--     - Date row scales proportionally, vertically centred
+--   v260228
+--     - Initial release
+--     - 24H TC clock with project frame rate (TimeMap_curFrameRate)
+--     - gfx-based, no dependencies
 
--- ============================================================
--- CONFIGURATION — edit these to match your track names
--- ============================================================
-
--- Tracks whose empty-item lengths are summed as "Editing" time
--- Add multiple track names if you split across tracks
-local EDITING_TRACK_NAMES = {
-  "Editing",
+-- ── Presets ────────────────────────────────────────────────────────────────
+local COLORS = {
+  { name="Green",  r=0.20, g=0.88, b=0.38 },
+  { name="Amber",  r=0.95, g=0.75, b=0.15 },
+  { name="White",  r=0.90, g=0.90, b=0.90 },
+  { name="Cyan",   r=0.15, g=0.88, b=0.95 },
+  { name="Red",    r=0.92, g=0.22, b=0.18 },
+}
+local FONTS = {
+  { name="Courier New", face="Courier New" },
+  { name="Monaco",      face="Monaco"      },
+  { name="Arial",       face="Arial"       },
+  { name="Helvetica",   face="Helvetica"   },
 }
 
--- Tracks whose empty-item lengths are summed as "Denoise" time
-local DENOISE_TRACK_NAMES = {
-  "Denoise",
-}
+-- ── Persistence ────────────────────────────────────────────────────────────
+local EXT = "hsuanice_WorkTimer"
 
--- Tracks to count total items on (for material count)
--- Leave empty {} to skip
-local PICTURE_TRACK_NAMES = {
-  "Picture Cut",
-}
-
-local SCENE_TRACK_NAMES = {
-  "Scene Cut",
-}
-
--- If true, match is case-insensitive and allows partial match (contains)
--- If false, track name must match exactly
-local FUZZY_MATCH = false
-
--- ============================================================
--- HELPERS
--- ============================================================
-
-local function track_matches(track_name, patterns)
-  for _, pattern in ipairs(patterns) do
-    if FUZZY_MATCH then
-      if track_name:lower():find(pattern:lower(), 1, true) then
-        return true
-      end
-    else
-      if track_name == pattern then
-        return true
-      end
-    end
+local function load_settings()
+  local function gi(key, default)
+    local v = reaper.GetExtState(EXT, key)
+    return (v ~= "" and tonumber(v)) or default
   end
-  return false
+  return {
+    color = gi("color", 1),
+    font  = gi("font",  1),
+    win_w = gi("win_w", 360),
+    win_h = gi("win_h", 110),
+    win_x = gi("win_x", 100),
+    win_y = gi("win_y", 100),
+    dock  = gi("dock",  0),
+  }
 end
 
-local function find_tracks(patterns)
-  local found = {}
-  local count = reaper.CountTracks(0)
-  for i = 0, count - 1 do
-    local track = reaper.GetTrack(0, i)
-    local _, name = reaper.GetTrackName(track)
-    if track_matches(name, patterns) then
-      table.insert(found, { track = track, name = name })
-    end
+local function save_settings(color, font, w, h, x, y, dock)
+  reaper.SetExtState(EXT, "color", tostring(color), true)
+  reaper.SetExtState(EXT, "font",  tostring(font),  true)
+  reaper.SetExtState(EXT, "win_w", tostring(w),     true)
+  reaper.SetExtState(EXT, "win_h", tostring(h),     true)
+  reaper.SetExtState(EXT, "win_x", tostring(x),     true)
+  reaper.SetExtState(EXT, "win_y", tostring(y),     true)
+  reaper.SetExtState(EXT, "dock",  tostring(dock),  true)
+end
+
+-- ── State ──────────────────────────────────────────────────────────────────
+local cfg       = load_settings()
+local cur_color = cfg.color
+local cur_font  = cfg.font
+local last_w    = cfg.win_w
+local last_h    = cfg.win_h
+local last_x    = cfg.win_x
+local last_y    = cfg.win_y
+local last_dock = cfg.dock
+local rmb_prev  = false
+
+-- ── Clock strings ──────────────────────────────────────────────────────────
+local function clock_str()
+  local t   = os.date("*t")
+  local fps = reaper.TimeMap_curFrameRate(0)
+  local f   = math.floor(reaper.time_precise() % 1 * fps)
+  return string.format("%02d:%02d:%02d:%02d", t.hour, t.min, t.sec, f)
+end
+
+local function date_str()
+  return os.date("%A  %Y-%m-%d")
+end
+
+-- ── Font-size calculation ──────────────────────────────────────────────────
+local function calc_clock_sz(face)
+  local TRIAL = 50
+  gfx.setfont(1, face, TRIAL, string.byte("b"))
+  local tw = gfx.measurestr("00:00:00:00")
+  if tw == 0 then return TRIAL end
+  local by_w = math.floor(TRIAL * (gfx.w * 0.88) / tw)
+  local by_h = math.floor(gfx.h * 0.62)
+  return math.max(12, math.min(by_w, by_h))
+end
+
+-- ── Right-click menu ───────────────────────────────────────────────────────
+-- Flat list, unambiguous indices:
+--   1 .. #COLORS        → color choice
+--   #COLORS+1 .. +#FONTS → font choice
+--   #COLORS+#FONTS+1    → dock toggle
+local function show_rmenu()
+  local parts = {}
+  for i, c in ipairs(COLORS) do
+    parts[#parts+1] = (i == cur_color and "!" or "") .. "Color: " .. c.name
   end
-  return found
-end
-
-local function is_empty_item(item)
-  return reaper.GetMediaItemNumTakes(item) == 0
-end
-
--- Returns total length (seconds) and session count of empty items across tracks
-local function sum_empty_item_durations(tracks)
-  local total_sec = 0
-  local sessions   = 0
-  for _, t in ipairs(tracks) do
-    local n = reaper.CountTrackMediaItems(t.track)
-    for i = 0, n - 1 do
-      local item = reaper.GetTrackMediaItem(t.track, i)
-      if is_empty_item(item) then
-        total_sec = total_sec + reaper.GetMediaItemInfo_Value(item, "D_LENGTH")
-        sessions  = sessions + 1
-      end
-    end
+  for i, f in ipairs(FONTS) do
+    parts[#parts+1] = (i == cur_font and "!" or "") .. "Font: "  .. f.name
   end
-  return total_sec, sessions
-end
+  local dockstate = gfx.dock(-1)
+  parts[#parts+1] = (dockstate ~= 0 and "!" or "") .. "Dock window"
 
--- Returns total item count (all items, not just empty) across tracks
-local function count_all_items(tracks)
-  local total = 0
-  for _, t in ipairs(tracks) do
-    total = total + reaper.CountTrackMediaItems(t.track)
-  end
-  return total
-end
+  local sel = gfx.showmenu(table.concat(parts, "|"))
+  if sel <= 0 then return end
 
-local function format_duration(seconds)
-  seconds = math.floor(seconds + 0.5)
-  local h = math.floor(seconds / 3600)
-  local m = math.floor((seconds % 3600) / 60)
-  local s = seconds % 60
-  if h > 0 then
-    return string.format("%d h %02d m %02d s", h, m, s)
+  local nc, nf = #COLORS, #FONTS
+  if sel <= nc then
+    cur_color = sel
+  elseif sel <= nc + nf then
+    cur_font = sel - nc
   else
-    return string.format("%d m %02d s", m, s)
+    -- Toggle dock
+    local new_dock = (dockstate ~= 0) and 0 or 1
+    gfx.dock(new_dock)
+    last_dock = new_dock
   end
+  local _, wx, wy = gfx.dock(-1, 0, 0, 0, 0)
+  save_settings(cur_color, cur_font, gfx.w, gfx.h, wx, wy, last_dock)
 end
 
-local function track_list_label(tracks)
-  if #tracks == 0 then return "(none found)" end
-  local names = {}
-  for _, t in ipairs(tracks) do table.insert(names, '"' .. t.name .. '"') end
-  return table.concat(names, ", ")
-end
+-- ── Main draw loop ─────────────────────────────────────────────────────────
+local function frame()
+  -- Background
+  gfx.r=0.07; gfx.g=0.07; gfx.b=0.09; gfx.a=1
+  gfx.rect(0, 0, gfx.w, gfx.h, 1)
 
--- ============================================================
--- MAIN
--- ============================================================
+  local face     = FONTS[cur_font].face
+  local clock_sz = calc_clock_sz(face)
+  local date_sz  = math.max(10, math.floor(clock_sz / 4))
 
-local function run()
-  local editing_tracks = find_tracks(EDITING_TRACK_NAMES)
-  local denoise_tracks = find_tracks(DENOISE_TRACK_NAMES)
-  local picture_tracks = find_tracks(PICTURE_TRACK_NAMES)
-  local scene_tracks   = find_tracks(SCENE_TRACK_NAMES)
+  -- Measure both strings for vertical centering
+  local tc = clock_str()
+  local ds = date_str()
 
-  local editing_sec, editing_sessions = sum_empty_item_durations(editing_tracks)
-  local denoise_sec,  denoise_sessions = sum_empty_item_durations(denoise_tracks)
-  local total_sec = editing_sec + denoise_sec
+  gfx.setfont(1, face, clock_sz, string.byte("b"))
+  local tw, th = gfx.measurestr(tc)
 
-  local picture_items = count_all_items(picture_tracks)
-  local scene_items   = count_all_items(scene_tracks)
+  gfx.setfont(2, "Arial", date_sz)
+  local dw, dh = gfx.measurestr(ds)
 
-  -- Build report string
-  local lines = {}
-  local sep = string.rep("─", 36)
+  local gap     = math.max(2, math.floor(gfx.h * 0.04))
+  local start_y = math.floor((gfx.h - th - gap - dh) / 2)
 
-  local proj_name = reaper.GetProjectName(0, "")
-  if proj_name == "" then proj_name = "(unsaved project)" end
-  table.insert(lines, "Project: " .. proj_name)
-  table.insert(lines, sep)
+  -- Draw clock
+  local c = COLORS[cur_color]
+  gfx.setfont(1)
+  gfx.r=c.r; gfx.g=c.g; gfx.b=c.b; gfx.a=1
+  gfx.x = math.floor((gfx.w - tw) / 2)
+  gfx.y = start_y
+  gfx.drawstr(tc)
 
-  -- Material section
-  if #picture_tracks > 0 or #scene_tracks > 0 then
-    table.insert(lines, "MATERIAL")
-    if #picture_tracks > 0 then
-      table.insert(lines, string.format("  Picture cuts : %d items", picture_items))
-    end
-    if #scene_tracks > 0 then
-      table.insert(lines, string.format("  Scenes       : %d items", scene_items))
-    end
-    table.insert(lines, sep)
+  -- Draw date (same hue, dimmed)
+  gfx.setfont(2)
+  gfx.r=c.r*0.48; gfx.g=c.g*0.48; gfx.b=c.b*0.48; gfx.a=1
+  gfx.x = math.floor((gfx.w - dw) / 2)
+  gfx.y = start_y + th + gap
+  gfx.drawstr(ds)
+
+  -- Save window geometry / dock state when anything changes
+  local dockstate, wx, wy = gfx.dock(-1, 0, 0, 0, 0)
+  if gfx.w ~= last_w or gfx.h ~= last_h or wx ~= last_x or wy ~= last_y
+      or dockstate ~= last_dock then
+    last_w, last_h, last_x, last_y, last_dock = gfx.w, gfx.h, wx, wy, dockstate
+    save_settings(cur_color, cur_font, gfx.w, gfx.h, wx, wy, dockstate)
   end
 
-  -- Work time section
-  table.insert(lines, "WORK TIME")
+  -- Right-click detection (rising edge)
+  local rmb = (gfx.mouse_cap & 2) ~= 0
+  if rmb and not rmb_prev then show_rmenu() end
+  rmb_prev = rmb
 
-  if #editing_tracks > 0 then
-    table.insert(lines, string.format(
-      "  Editing   : %s  (%d session%s)",
-      format_duration(editing_sec),
-      editing_sessions,
-      editing_sessions == 1 and "" or "s"
-    ))
+  gfx.update()
+
+  if gfx.getchar() >= 0 then
+    reaper.defer(frame)
   else
-    table.insert(lines, "  Editing   : (track not found)")
+    -- Window closed — save final geometry (reuse locals from above)
+    save_settings(cur_color, cur_font, gfx.w, gfx.h, wx, wy, dockstate)
   end
-
-  if #denoise_tracks > 0 then
-    table.insert(lines, string.format(
-      "  Denoise   : %s  (%d session%s)",
-      format_duration(denoise_sec),
-      denoise_sessions,
-      denoise_sessions == 1 and "" or "s"
-    ))
-  else
-    table.insert(lines, "  Denoise   : (track not found)")
-  end
-
-  table.insert(lines, sep)
-  table.insert(lines, string.format("  Total     : %s", format_duration(total_sec)))
-
-  reaper.ShowMessageBox(table.concat(lines, "\n"), "Work Time Calculator", 0)
 end
 
-run()
+-- ── Init ───────────────────────────────────────────────────────────────────
+gfx.init("Work Timer", cfg.win_w, cfg.win_h, cfg.dock, cfg.win_x, cfg.win_y)
+frame()
