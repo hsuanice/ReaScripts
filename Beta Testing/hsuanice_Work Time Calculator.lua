@@ -3,9 +3,12 @@
 -- Window is resizable; clock auto-scales to fill it.
 -- Settings and window geometry are remembered across sessions.
 --
--- Version: 260228.1730
+-- Version: 260228.1800
 --
 -- Changelog:
+--   v260228.1800
+--     - Custom color: right-click "Color: Custom > Edit..." to enter HEX
+--     - Custom hex persists across sessions (custom_hex ExtState key)
 --   v260228.1730
 --     - Dock support: right-click "Dock window" to dock/undock
 --     - Dock state persists across sessions (gfx.init dockstate arg)
@@ -29,6 +32,7 @@ local COLORS = {
   { name="White",  r=0.90, g=0.90, b=0.90 },
   { name="Cyan",   r=0.15, g=0.88, b=0.95 },
   { name="Red",    r=0.92, g=0.22, b=0.18 },
+  { name="Custom", r=0.50, g=0.50, b=0.50 },  -- slot 6, updated from saved hex at startup
 }
 local FONTS = {
   { name="Courier New", face="Courier New" },
@@ -36,6 +40,24 @@ local FONTS = {
   { name="Arial",       face="Arial"       },
   { name="Helvetica",   face="Helvetica"   },
 }
+
+-- ── Hex helpers ────────────────────────────────────────────────────────────
+local function hex_to_rgb(hex)
+  hex = hex:gsub("^#", ""):upper()
+  if #hex ~= 6 then return nil end
+  local r = tonumber(hex:sub(1,2), 16)
+  local g = tonumber(hex:sub(3,4), 16)
+  local b = tonumber(hex:sub(5,6), 16)
+  if not (r and g and b) then return nil end
+  return r/255, g/255, b/255
+end
+
+local function rgb_to_hex(r, g, b)
+  return string.format("%02X%02X%02X",
+    math.floor(r * 255 + 0.5),
+    math.floor(g * 255 + 0.5),
+    math.floor(b * 255 + 0.5))
+end
 
 -- ── Persistence ────────────────────────────────────────────────────────────
 local EXT = "hsuanice_WorkTimer"
@@ -46,13 +68,14 @@ local function load_settings()
     return (v ~= "" and tonumber(v)) or default
   end
   return {
-    color = gi("color", 1),
-    font  = gi("font",  1),
-    win_w = gi("win_w", 360),
-    win_h = gi("win_h", 110),
-    win_x = gi("win_x", 100),
-    win_y = gi("win_y", 100),
-    dock  = gi("dock",  0),
+    color      = gi("color", 1),
+    font       = gi("font",  1),
+    win_w      = gi("win_w", 360),
+    win_h      = gi("win_h", 110),
+    win_x      = gi("win_x", 100),
+    win_y      = gi("win_y", 100),
+    dock       = gi("dock",  0),
+    custom_hex = reaper.GetExtState(EXT, "custom_hex"),
   }
 end
 
@@ -64,6 +87,9 @@ local function save_settings(color, font, w, h, x, y, dock)
   reaper.SetExtState(EXT, "win_x", tostring(x),     true)
   reaper.SetExtState(EXT, "win_y", tostring(y),     true)
   reaper.SetExtState(EXT, "dock",  tostring(dock),  true)
+  -- Always write current custom color
+  reaper.SetExtState(EXT, "custom_hex",
+    rgb_to_hex(COLORS[6].r, COLORS[6].g, COLORS[6].b), true)
 end
 
 -- ── State ──────────────────────────────────────────────────────────────────
@@ -76,6 +102,17 @@ local last_x    = cfg.win_x
 local last_y    = cfg.win_y
 local last_dock = cfg.dock
 local rmb_prev  = false
+
+-- Apply saved custom hex to COLORS[6] at startup
+do
+  local hex = cfg.custom_hex
+  if hex and hex ~= "" then
+    local r, g, b = hex_to_rgb(hex)
+    if r then
+      COLORS[6].r, COLORS[6].g, COLORS[6].b = r, g, b
+    end
+  end
+end
 
 -- ── Clock strings ──────────────────────────────────────────────────────────
 local function clock_str()
@@ -102,9 +139,10 @@ end
 
 -- ── Right-click menu ───────────────────────────────────────────────────────
 -- Flat list, unambiguous indices:
---   1 .. #COLORS        → color choice
---   #COLORS+1 .. +#FONTS → font choice
---   #COLORS+#FONTS+1    → dock toggle
+--   1 .. #COLORS          → color choice
+--   #COLORS+1 .. +#FONTS  → font choice
+--   #COLORS+#FONTS+1      → dock toggle
+--   #COLORS+#FONTS+2      → edit custom color
 local function show_rmenu()
   local parts = {}
   for i, c in ipairs(COLORS) do
@@ -115,6 +153,7 @@ local function show_rmenu()
   end
   local dockstate = gfx.dock(-1)
   parts[#parts+1] = (dockstate ~= 0 and "!" or "") .. "Dock window"
+  parts[#parts+1] = "Edit custom color..."
 
   local sel = gfx.showmenu(table.concat(parts, "|"))
   if sel <= 0 then return end
@@ -124,12 +163,29 @@ local function show_rmenu()
     cur_color = sel
   elseif sel <= nc + nf then
     cur_font = sel - nc
-  else
+  elseif sel == nc + nf + 1 then
     -- Toggle dock
     local new_dock = (dockstate ~= 0) and 0 or 1
     gfx.dock(new_dock)
     last_dock = new_dock
+  else
+    -- Edit custom color via hex input
+    local current_hex = rgb_to_hex(COLORS[6].r, COLORS[6].g, COLORS[6].b)
+    local ok, result = reaper.GetUserInputs(
+      "Custom Color", 1,
+      "Enter hex color (e.g. FF8C00):",
+      current_hex)
+    if ok and result ~= "" then
+      local r, g, b = hex_to_rgb(result)
+      if r then
+        COLORS[6].r, COLORS[6].g, COLORS[6].b = r, g, b
+        cur_color = 6  -- switch to Custom slot
+      else
+        reaper.MB("Invalid hex color. Use 6 hex digits (e.g. FF8C00 or #FF8C00).", "Invalid Input", 0)
+      end
+    end
   end
+
   local _, wx, wy = gfx.dock(-1, 0, 0, 0, 0)
   save_settings(cur_color, cur_font, gfx.w, gfx.h, wx, wy, last_dock)
 end
