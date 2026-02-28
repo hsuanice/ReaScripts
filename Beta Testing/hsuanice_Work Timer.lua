@@ -3,9 +3,12 @@
 -- Window is resizable; clock auto-scales to fill it.
 -- Settings and window geometry are remembered across sessions.
 --
--- Version: 260228.1800
+-- Version: 260228.1858
 --
 -- Changelog:
+--   v260228.1858
+--     - Hover info: shows "⌘+click → set edit cursor" hint when mouse is over window
+--     - ⌘+click (Ctrl+click on Windows): moves REAPER edit cursor to the clicked TC position
 --   v260228.1800
 --     - Custom color: right-click "Color: Custom > Edit..." to enter HEX
 --     - Custom hex persists across sessions (custom_hex ExtState key)
@@ -101,7 +104,8 @@ local last_h    = cfg.win_h
 local last_x    = cfg.win_x
 local last_y    = cfg.win_y
 local last_dock = cfg.dock
-local rmb_prev  = false
+local rmb_prev      = false
+local lmb_ctrl_prev = false
 
 -- Apply saved custom hex to COLORS[6] at startup
 do
@@ -124,6 +128,14 @@ end
 
 local function date_str()
   return os.date("%A  %Y-%m-%d")
+end
+
+-- Convert current system time (as TC) to seconds for SetEditCurPos
+local function tc_to_seconds()
+  local t   = os.date("*t")
+  local fps = reaper.TimeMap_curFrameRate(0)
+  local f   = math.floor(reaper.time_precise() % 1 * fps)
+  return t.hour * 3600 + t.min * 60 + t.sec + f / fps
 end
 
 -- ── Font-size calculation ──────────────────────────────────────────────────
@@ -228,6 +240,21 @@ local function frame()
   gfx.y = start_y + th + gap
   gfx.drawstr(ds)
 
+  -- Hover hint: visible when mouse is over the window
+  local in_win = gfx.mouse_x >= 0 and gfx.mouse_x <= gfx.w
+              and gfx.mouse_y >= 0 and gfx.mouse_y <= gfx.h
+  if in_win then
+    local hint    = "⌘+click → set edit cursor"
+    local hint_sz = math.max(9, math.floor(clock_sz / 6))
+    gfx.setfont(3, "Arial", hint_sz)
+    local hw, hh  = gfx.measurestr(hint)
+    local pad     = math.max(3, math.floor(gfx.h * 0.03))
+    gfx.r=c.r*0.35; gfx.g=c.g*0.35; gfx.b=c.b*0.35; gfx.a=1
+    gfx.x = math.floor((gfx.w - hw) / 2)
+    gfx.y = gfx.h - hh - pad
+    gfx.drawstr(hint)
+  end
+
   -- Save window geometry / dock state when anything changes
   local dockstate, wx, wy = gfx.dock(-1, 0, 0, 0, 0)
   if gfx.w ~= last_w or gfx.h ~= last_h or wx ~= last_x or wy ~= last_y
@@ -240,6 +267,13 @@ local function frame()
   local rmb = (gfx.mouse_cap & 2) ~= 0
   if rmb and not rmb_prev then show_rmenu() end
   rmb_prev = rmb
+
+  -- Ctrl+left-click: move REAPER edit cursor to current TC position
+  local lmb_ctrl = (gfx.mouse_cap & 5) == 5
+  if lmb_ctrl and not lmb_ctrl_prev then
+    reaper.SetEditCurPos(tc_to_seconds(), true, false)
+  end
+  lmb_ctrl_prev = lmb_ctrl
 
   gfx.update()
 
