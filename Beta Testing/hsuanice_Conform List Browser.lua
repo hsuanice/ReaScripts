@@ -1,6 +1,6 @@
 --[[
 @description Conform List Browser
-@version 260228.0135
+@version 260228.1401
 @author hsuanice
 @about
   A REAPER script for browsing and editing EDL (Edit Decision List) data
@@ -46,12 +46,46 @@
   Required: Python 3 + opentimelineio (pip3 install opentimelineio)
 
 @changelog
+  v260228.1401
+  - Feature: Reel multi-select in sidebar (and horizontal panel)
+    • Click on reel name text → select only that reel (sets shift-anchor; no visible change)
+    • Shift+click text → range-select from anchor to here
+    • Ctrl/Cmd+click text → toggle individual reel in/out of selection
+    • Click [ ] checkbox → toggles visible only (no selection change)
+    • Right-click → context menu; if 2+ selected: "Check selected" / "Uncheck selected" shown
+      at top; single-item options (Rename, Delete, Batch Rename) always available below
+    • All / None buttons clear selection
+    • Selection is cleared when reel list is rebuilt (file reload, rename, delete)
+    • Selected rows shown with blue highlight behind both checkbox and text
+
+  v260228.0136
+  - Feature: Premiere Pro XML and AAF support (via OpenTimelineIO)
+    • "Load XML..." now handles FCP7 XML, DaVinci Resolve XML, and Premiere Pro XML
+      (Premiere detected by content sniffing; routed through OTIO fcp_xml adapter)
+    • New "Load AAF..." button — requires: pip3 install aaf2
+      (clear error shown if aaf2 is not installed)
+    • otio_to_clb.py v0.2.0: detect_format() handles .aaf; _detect_xml_format()
+      distinguishes Premiere XML from FCP7 XML by peeking at file content
+
   v260228.0135
   - Feature: Save / Save As for open CLB projects
     • When a .clb project is loaded, toolbar shows "Save" (silent overwrite) + "Save As..." (dialog)
     • "Save" tooltip shows the current filename
     • "Save As..." updates the loaded file path so subsequent saves go to the new file
     • When no project is loaded, original "Save..." button (dialog) is shown as before
+
+  v260228.1600
+  - Fix: json.lua decode_number — negate=true caused immediate stop at digit (empty number string)
+    • Changed next_char(str, i, delimiters, true) → next_char(str, i, delimiters) (negate=nil)
+  - Fix: json.lua decode_literal — ["null"]=nil was silently dropped from table (key absent)
+    • Replaced literals hash with literal_list (ipairs) so nil value is returned correctly
+  - Fix: Reel filter sidebar capped at scale(220)px to prevent long reel/clip names from
+    squeezing the Event List
+  - Feature: Scene and Take columns in Event List (COL 18, 19; hidden by default)
+    • Populated automatically from OTIO/XML metadata (FCP7/Premiere masterComment1/2)
+    • Enable via Cols button in the Event List toolbar
+  - Compat: Old .clb projects and saved column orders (17 cols) are migrated automatically;
+    new columns appended at end of order on first load
 
   v260228.0122
   - Fix: Splitter between Event List and Audio List now responds to vertical drag (up/down)
@@ -505,7 +539,7 @@ end
 ---------------------------------------------------------------------------
 local SCRIPT_NAME = "Conform List Browser"
 local EXT_NS = "hsuanice_ConformListBrowser"
-local VERSION = "260228.0123"
+local VERSION = "260228.1401"
 
 -- Column definitions (EDL Events table)
 local COL = {
@@ -526,9 +560,11 @@ local COL = {
   MATCHED_PATH = 15,
   GROUP        = 16,
   LEVEL        = 17,
+  SCENE        = 18,
+  TAKE         = 19,
 }
 
-local COL_COUNT = 17
+local COL_COUNT = 19
 
 -- Audio Files table column definitions (conform-focused order)
 local AUDIO_COL = {
@@ -614,6 +650,8 @@ local HEADER_LABELS = {
   [15] = "Matched File",
   [16] = "Group",
   [17] = "Level",
+  [18] = "Scene",
+  [19] = "Take",
 }
 
 local DEFAULT_COL_WIDTH = {
@@ -634,6 +672,8 @@ local DEFAULT_COL_WIDTH = {
   [15] = 25,
   [16] = 65,
   [17] = 65,
+  [18] = 55,   -- Scene
+  [19] = 40,   -- Take
 }
 
 -- Columns with short/fixed-length content: kept at DEFAULT_COL_WIDTH during Fit Widths.
@@ -709,14 +749,18 @@ local EDL_COL_ORDER = {
   COL.MATCH_STATUS, -- 15. Match
   COL.MATCHED_PATH, -- 16. Matched File
   COL.GROUP,        -- 17. Group
+  COL.SCENE,        -- 18. Scene (from OTIO/XML metadata)
+  COL.TAKE,         -- 19. Take  (from OTIO/XML metadata)
 }
 
--- EDL column visibility (all visible by default, except Group)
+-- EDL column visibility (all visible by default, except Group / Scene / Take)
 local EDL_COL_VISIBILITY = {}
 for i = 1, COL_COUNT do
   EDL_COL_VISIBILITY[i] = true
 end
 EDL_COL_VISIBILITY[COL.GROUP] = false
+EDL_COL_VISIBILITY[COL.SCENE] = false
+EDL_COL_VISIBILITY[COL.TAKE]  = false
 
 ---------------------------------------------------------------------------
 -- State
@@ -753,6 +797,8 @@ local CLB = {
   track_filters = {},  -- { { name, count, visible }, ... }
   show_reel_filter = true,
   reel_filters = {},   -- { { name, count, visible }, ... }
+  reel_sel = {},       -- { [idx]=true } multi-selected reel indices (visual selection, separate from .visible)
+  reel_sel_anchor = nil, -- anchor index for shift-range selection
   show_group_filter = true,
   group_filters = {},  -- { { name, count, visible, tracks={} }, ... }  -- tracks = list of track names in group
 
@@ -1644,7 +1690,12 @@ local function load_prefs()
         table.insert(new_order, num)
       end
     end
-    -- Only use if we got all columns
+    -- Append any newly-added columns not present in saved order (migration)
+    local in_order = {}
+    for _, c in ipairs(new_order) do in_order[c] = true end
+    for i = 1, COL_COUNT do
+      if not in_order[i] then table.insert(new_order, i) end
+    end
     if #new_order == COL_COUNT then
       EDL_COL_ORDER = new_order
     end
@@ -1855,6 +1906,8 @@ local function get_cell_text(row, col_id)
     return ""
   end
   if col_id == COL.GROUP        then return row.group or "" end
+  if col_id == COL.SCENE        then return row.scene or "" end
+  if col_id == COL.TAKE         then return row.take  or "" end
   return ""
 end
 
@@ -2125,6 +2178,8 @@ local function _make_rows_from_events(events, fps, is_drop, source_idx)
       notes = "",    -- auto-populated below from extra EDL comments
       level = "",    -- auto-populated below from AUDIO/VIDEO LEVEL comments
       group = "",
+      scene = evt.scene or "",
+      take  = evt.take  or "",
       audio_levels = evt.audio_levels or {},  -- [{ type, tc, db, reel, src_track }]
 
       duration = evt.duration_tc or EDL.seconds_to_tc(
@@ -2271,6 +2326,8 @@ local function _rebuild_reel_filters()
   end
 
   CLB.reel_filters = {}
+  CLB.reel_sel = {}          -- indices have shifted; clear selection
+  CLB.reel_sel_anchor = nil
   for _, name in ipairs(reel_order) do
     CLB.reel_filters[#CLB.reel_filters + 1] = {
       name = name,
@@ -2616,6 +2673,12 @@ local function load_clb_project(filepath)
             order[#order+1] = num
           end
         end
+        -- Append newly-added columns not in saved order (migration)
+        local in_order = {}
+        for _, c in ipairs(order) do in_order[c] = true end
+        for i = 1, COL_COUNT do
+          if not in_order[i] then order[#order+1] = i end
+        end
         if #order == COL_COUNT then new_col_order = order end
 
       elseif key == "EDL_COL_VISIBILITY" then
@@ -2923,9 +2986,16 @@ end
 
 local function load_xml_file()
   _load_timeline_via_otio(
-    "Open XML Files (FCP7 / Resolve)",
+    "Open XML Files (FCP7 / Resolve / Premiere)",
     "XML files\0*.xml\0All files\0*.*\0",
     "*.xml")
+end
+
+local function load_aaf_file()
+  _load_timeline_via_otio(
+    "Open AAF Files",
+    "AAF files\0*.aaf\0All files\0*.*\0",
+    "*.aaf")
 end
 
 ---------------------------------------------------------------------------
@@ -3877,6 +3947,17 @@ local function draw_toolbar()
   if reaper.ImGui_Button(ctx, "Load XML...", scale(90), scale(24)) then
     load_xml_file()
   end
+  if reaper.ImGui_IsItemHovered(ctx) then
+    reaper.ImGui_SetTooltip(ctx, "FCP7 XML, DaVinci Resolve XML, Premiere Pro XML")
+  end
+  reaper.ImGui_SameLine(ctx)
+
+  if reaper.ImGui_Button(ctx, "Load AAF...", scale(90), scale(24)) then
+    load_aaf_file()
+  end
+  if reaper.ImGui_IsItemHovered(ctx) then
+    reaper.ImGui_SetTooltip(ctx, "AAF — requires: pip3 install aaf2")
+  end
   reaper.ImGui_SameLine(ctx)
 
   -- Load Audio button
@@ -4668,26 +4749,83 @@ local function draw_reel_filter_panel()
   if reaper.ImGui_SmallButton(ctx, "Show All##clb_reel_all") then
     for _, rf in ipairs(CLB.reel_filters) do rf.visible = true end
     CLB.cached_rows = nil
+    CLB.reel_sel = {}; CLB.reel_sel_anchor = nil
   end
   reaper.ImGui_SameLine(ctx)
   if reaper.ImGui_SmallButton(ctx, "Hide All##clb_reel_none") then
     for _, rf in ipairs(CLB.reel_filters) do rf.visible = false end
     CLB.cached_rows = nil
+    CLB.reel_sel = {}; CLB.reel_sel_anchor = nil
   end
 
-  -- Reel checkboxes (vertical list)
+  -- Reel list
+  -- [ ] checkbox square   → toggles visible only
+  -- Click on text         → selects this reel (clears others); sets anchor
+  -- Shift+click on text   → range-select from anchor to here
+  -- Ctrl/Cmd+click text   → toggle this reel in/out of selection
+  local dl_panel = reaper.ImGui_GetWindowDrawList(ctx)
   for i, rf in ipairs(CLB.reel_filters) do
     local display_name = rf.name ~= "" and rf.name or "(empty)"
-    local label = string.format("%s (%d)##clb_reel_%d", display_name, rf.count, i)
-    local changed, new_val = reaper.ImGui_Checkbox(ctx, label, rf.visible)
-    if changed then
-      rf.visible = new_val
+    local is_sel = CLB.reel_sel[i] or false
+
+    -- Full-row highlight
+    if is_sel then
+      local rx, ry = reaper.ImGui_GetCursorScreenPos(ctx)
+      local rw, _  = reaper.ImGui_GetContentRegionAvail(ctx)
+      local rlh = reaper.ImGui_GetTextLineHeightWithSpacing(ctx)
+      reaper.ImGui_DrawList_AddRectFilled(dl_panel, rx - 4, ry, rx + rw + 4, ry + rlh, 0x3366CC50)
+    end
+
+    -- [ ] Checkbox: visible only
+    local cb_changed, new_vis = reaper.ImGui_Checkbox(ctx, "##reel_cb_" .. i, rf.visible)
+    if cb_changed then
+      rf.visible = new_vis
       CLB.cached_rows = nil
     end
-    -- Right-click context menu
-    if reaper.ImGui_IsItemHovered(ctx) then
-      reaper.ImGui_SetTooltip(ctx, "Right-click for options")
+    local cb_hovered = reaper.ImGui_IsItemHovered(ctx)
+
+    reaper.ImGui_SameLine(ctx, 0, 4)
+
+    -- Text: selection only
+    local sel_label = string.format("%s (%d)##reel_sel_%d", display_name, rf.count, i)
+    if is_sel then
+      reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Header(),        0x3366CC80)
+      reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_HeaderHovered(), 0x4477DD90)
+    end
+    local sel_clicked = reaper.ImGui_Selectable(ctx, sel_label, is_sel, 0, 0, 0)
+    if is_sel then reaper.ImGui_PopStyleColor(ctx, 2) end
+
+    if sel_clicked then
+      local shift, ctrl = _mods()
+      if shift then
+        local anchor = CLB.reel_sel_anchor or i
+        local lo = math.min(anchor, i)
+        local hi = math.max(anchor, i)
+        for j = lo, hi do CLB.reel_sel[j] = true end
+      elseif ctrl then
+        if CLB.reel_sel[i] then CLB.reel_sel[i] = nil
+        else CLB.reel_sel[i] = true end
+        CLB.reel_sel_anchor = i
+      else
+        CLB.reel_sel = { [i] = true }
+        CLB.reel_sel_anchor = i
+      end
+    end
+    local sel_hovered = reaper.ImGui_IsItemHovered(ctx)
+
+    if cb_hovered or sel_hovered then
+      local sel_count = 0
+      for _ in pairs(CLB.reel_sel) do sel_count = sel_count + 1 end
+      if sel_count > 1 then
+        reaper.ImGui_SetTooltip(ctx, sel_count .. " reels selected — right-click to check/uncheck")
+      else
+        reaper.ImGui_SetTooltip(ctx, "[ ] to check/uncheck  |  Shift+click to select range")
+      end
       if reaper.ImGui_IsMouseClicked(ctx, 1) then
+        if not CLB.reel_sel[i] then
+          CLB.reel_sel = { [i] = true }
+          CLB.reel_sel_anchor = i
+        end
         CLB.context_filter = { type = "reel", idx = i, name = rf.name }
         reaper.ImGui_OpenPopup(ctx, "Reel Filter Context##clb_reel_ctx")
       end
@@ -4697,6 +4835,25 @@ local function draw_reel_filter_panel()
   -- Reel filter context menu
   if reaper.ImGui_BeginPopup(ctx, "Reel Filter Context##clb_reel_ctx") then
     if CLB.context_filter and CLB.context_filter.type == "reel" then
+      local sel_count = 0
+      for _ in pairs(CLB.reel_sel) do sel_count = sel_count + 1 end
+      if sel_count > 1 then
+        reaper.ImGui_TextDisabled(ctx, sel_count .. " reels selected")
+        reaper.ImGui_Separator(ctx)
+        if reaper.ImGui_MenuItem(ctx, "Check selected") then
+          for idx in pairs(CLB.reel_sel) do
+            if CLB.reel_filters[idx] then CLB.reel_filters[idx].visible = true end
+          end
+          CLB.cached_rows = nil; CLB.reel_sel = {}
+        end
+        if reaper.ImGui_MenuItem(ctx, "Uncheck selected") then
+          for idx in pairs(CLB.reel_sel) do
+            if CLB.reel_filters[idx] then CLB.reel_filters[idx].visible = false end
+          end
+          CLB.cached_rows = nil; CLB.reel_sel = {}
+        end
+        reaper.ImGui_Separator(ctx)
+      end
       local display_name = CLB.context_filter.name ~= "" and CLB.context_filter.name or "(empty)"
       reaper.ImGui_Text(ctx, "Reel: " .. display_name)
       reaper.ImGui_Separator(ctx)
@@ -5252,10 +5409,12 @@ local function draw_edl_panel_header()
         COL.EVENT, COL.REEL, COL.TRACK, COL.EDIT_TYPE, COL.LEVEL, COL.DISS_LEN,
         COL.SRC_IN, COL.SRC_OUT, COL.REC_IN, COL.REC_OUT, COL.DURATION,
         COL.CLIP_NAME, COL.SRC_FILE, COL.NOTES, COL.MATCH_STATUS, COL.MATCHED_PATH,
-        COL.GROUP
+        COL.GROUP, COL.SCENE, COL.TAKE
       }
       for i = 1, COL_COUNT do EDL_COL_VISIBILITY[i] = true end
       EDL_COL_VISIBILITY[COL.GROUP] = false
+      EDL_COL_VISIBILITY[COL.SCENE] = false
+      EDL_COL_VISIBILITY[COL.TAKE]  = false
       save_prefs()
     end
     reaper.ImGui_Separator(ctx)
@@ -5942,7 +6101,7 @@ local function draw_reel_filter_sidebar(height)
       if text_w > max_text_w then max_text_w = text_w end
     end
   end
-  local sidebar_w = max_text_w + 40  -- checkbox + padding
+  local sidebar_w = math.min(max_text_w + 40, scale(220))  -- cap at 220 base-px
 
   -- Left sidebar child
   if reaper.ImGui_BeginChild(ctx, "##clb_sidebar", sidebar_w, height, reaper.ImGui_ChildFlags_Borders()) then
@@ -5970,31 +6129,90 @@ local function draw_reel_filter_sidebar(height)
       if reaper.ImGui_SmallButton(ctx, "All##clb_reel_all") then
         for _, rf in ipairs(CLB.reel_filters) do rf.visible = true end
         CLB.cached_rows = nil
+        CLB.reel_sel = {}; CLB.reel_sel_anchor = nil
       end
       reaper.ImGui_SameLine(ctx)
       if reaper.ImGui_SmallButton(ctx, "None##clb_reel_none") then
         for _, rf in ipairs(CLB.reel_filters) do rf.visible = false end
         CLB.cached_rows = nil
+        CLB.reel_sel = {}; CLB.reel_sel_anchor = nil
       end
 
       reaper.ImGui_Separator(ctx)
 
-      -- Reel checkboxes (vertical list, scrollable)
+      -- Reel list (vertical, scrollable)
+      -- [ ] checkbox square   → toggles visible only (no selection change)
+      -- Click on text         → selects this reel (clears others); sets anchor
+      -- Shift+click on text   → range-select from anchor to here (no visible change)
+      -- Ctrl/Cmd+click text   → toggle this reel in/out of selection
+      -- Right-click anywhere  → context menu; auto-selects hovered item if unselected
       local list_h = reel_section_h - header_h - 4
       if list_h < 50 then list_h = 50 end
       if reaper.ImGui_BeginChild(ctx, "##clb_reel_list", 0, list_h) then
+      local dl = reaper.ImGui_GetWindowDrawList(ctx)
       for i, rf in ipairs(CLB.reel_filters) do
         local display_name = rf.name ~= "" and rf.name or "(empty)"
-        local label = string.format("%s (%d)##clb_reel_%d", display_name, rf.count, i)
-        local changed, new_val = reaper.ImGui_Checkbox(ctx, label, rf.visible)
-        if changed then
-          rf.visible = new_val
+        local is_sel = CLB.reel_sel[i] or false
+
+        -- Full-row selection highlight (drawn behind both widgets)
+        if is_sel then
+          local rx, ry = reaper.ImGui_GetCursorScreenPos(ctx)
+          local rw, _  = reaper.ImGui_GetContentRegionAvail(ctx)
+          local rlh = reaper.ImGui_GetTextLineHeightWithSpacing(ctx)
+          reaper.ImGui_DrawList_AddRectFilled(dl, rx - 4, ry, rx + rw + 4, ry + rlh, 0x3366CC50)
+        end
+
+        -- [ ] Checkbox: toggles visible only
+        local cb_changed, new_vis = reaper.ImGui_Checkbox(ctx, "##reel_cb_" .. i, rf.visible)
+        if cb_changed then
+          rf.visible = new_vis
           CLB.cached_rows = nil
         end
-        -- Right-click context menu
-        if reaper.ImGui_IsItemHovered(ctx) then
-          reaper.ImGui_SetTooltip(ctx, "Right-click for options")
+        local cb_hovered = reaper.ImGui_IsItemHovered(ctx)
+
+        reaper.ImGui_SameLine(ctx, 0, 4)
+
+        -- Text label: Selectable for selection only
+        local sel_label = string.format("%s (%d)##reel_sel_%d", display_name, rf.count, i)
+        if is_sel then
+          reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Header(),        0x3366CC80)
+          reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_HeaderHovered(), 0x4477DD90)
+        end
+        local sel_clicked = reaper.ImGui_Selectable(ctx, sel_label, is_sel, 0, 0, 0)
+        if is_sel then reaper.ImGui_PopStyleColor(ctx, 2) end
+
+        if sel_clicked then
+          local shift, ctrl = _mods()
+          if shift then
+            local anchor = CLB.reel_sel_anchor or i
+            local lo = math.min(anchor, i)
+            local hi = math.max(anchor, i)
+            for j = lo, hi do CLB.reel_sel[j] = true end
+          elseif ctrl then
+            if CLB.reel_sel[i] then CLB.reel_sel[i] = nil
+            else CLB.reel_sel[i] = true end
+            CLB.reel_sel_anchor = i
+          else
+            CLB.reel_sel = { [i] = true }
+            CLB.reel_sel_anchor = i
+          end
+        end
+        local sel_hovered = reaper.ImGui_IsItemHovered(ctx)
+
+        -- Tooltip + right-click (either widget)
+        if cb_hovered or sel_hovered then
+          local sel_count = 0
+          for _ in pairs(CLB.reel_sel) do sel_count = sel_count + 1 end
+          if sel_count > 1 then
+            reaper.ImGui_SetTooltip(ctx, sel_count .. " reels selected — right-click to check/uncheck")
+          else
+            reaper.ImGui_SetTooltip(ctx, "[ ] to check/uncheck  |  Shift+click to select range")
+          end
           if reaper.ImGui_IsMouseClicked(ctx, 1) then
+            if not CLB.reel_sel[i] then
+              CLB.reel_sel = { [i] = true }
+              CLB.reel_sel_anchor = i
+            end
             CLB.context_filter = { type = "reel", idx = i, name = rf.name }
             reaper.ImGui_OpenPopup(ctx, "Reel Filter Context##clb_reel_ctx")
           end
@@ -6005,6 +6223,29 @@ local function draw_reel_filter_sidebar(height)
       local open_reel_rename, open_reel_delete, open_reel_batch = false, false, false
       if reaper.ImGui_BeginPopup(ctx, "Reel Filter Context##clb_reel_ctx") then
         if CLB.context_filter and CLB.context_filter.type == "reel" then
+          -- Count selected reels
+          local sel_count = 0
+          for _ in pairs(CLB.reel_sel) do sel_count = sel_count + 1 end
+
+          -- Multi-select actions (shown when 2+ reels are selected)
+          if sel_count > 1 then
+            reaper.ImGui_TextDisabled(ctx, sel_count .. " reels selected")
+            reaper.ImGui_Separator(ctx)
+            if reaper.ImGui_MenuItem(ctx, "Check selected") then
+              for idx in pairs(CLB.reel_sel) do
+                if CLB.reel_filters[idx] then CLB.reel_filters[idx].visible = true end
+              end
+              CLB.cached_rows = nil; CLB.reel_sel = {}
+            end
+            if reaper.ImGui_MenuItem(ctx, "Uncheck selected") then
+              for idx in pairs(CLB.reel_sel) do
+                if CLB.reel_filters[idx] then CLB.reel_filters[idx].visible = false end
+              end
+              CLB.cached_rows = nil; CLB.reel_sel = {}
+            end
+            reaper.ImGui_Separator(ctx)
+          end
+
           local display = CLB.context_filter.name ~= "" and CLB.context_filter.name or "(empty)"
           reaper.ImGui_Text(ctx, "Reel: " .. display)
           reaper.ImGui_Separator(ctx)
