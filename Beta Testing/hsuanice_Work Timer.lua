@@ -3,9 +3,12 @@
 -- Window is resizable; clock auto-scales to fill it.
 -- Settings and window geometry are remembered across sessions.
 --
--- Version: 260228.1858
+-- Version: 260228.1930
 --
 -- Changelog:
+--   v260228.1930
+--     - Persistent widget: window auto-reopens if closed by project switch
+--     - Right-click "Close Work Timer" is now the only way to fully stop
 --   v260228.1858
 --     - Hover info: shows "⌘+click → set edit cursor" hint when mouse is over window
 --     - ⌘+click (Ctrl+click on Windows): moves REAPER edit cursor to the clicked TC position
@@ -106,6 +109,7 @@ local last_y    = cfg.win_y
 local last_dock = cfg.dock
 local rmb_prev      = false
 local lmb_ctrl_prev = false
+local user_wants_close = false
 
 -- Apply saved custom hex to COLORS[6] at startup
 do
@@ -155,6 +159,7 @@ end
 --   #COLORS+1 .. +#FONTS  → font choice
 --   #COLORS+#FONTS+1      → dock toggle
 --   #COLORS+#FONTS+2      → edit custom color
+--   #COLORS+#FONTS+3      → close work timer
 local function show_rmenu()
   local parts = {}
   for i, c in ipairs(COLORS) do
@@ -166,6 +171,7 @@ local function show_rmenu()
   local dockstate = gfx.dock(-1)
   parts[#parts+1] = (dockstate ~= 0 and "!" or "") .. "Dock window"
   parts[#parts+1] = "Edit custom color..."
+  parts[#parts+1] = "|Close Work Timer"
 
   local sel = gfx.showmenu(table.concat(parts, "|"))
   if sel <= 0 then return end
@@ -180,7 +186,7 @@ local function show_rmenu()
     local new_dock = (dockstate ~= 0) and 0 or 1
     gfx.dock(new_dock)
     last_dock = new_dock
-  else
+  elseif sel == nc + nf + 2 then
     -- Edit custom color via hex input
     local current_hex = rgb_to_hex(COLORS[6].r, COLORS[6].g, COLORS[6].b)
     local ok, result = reaper.GetUserInputs(
@@ -196,6 +202,10 @@ local function show_rmenu()
         reaper.MB("Invalid hex color. Use 6 hex digits (e.g. FF8C00 or #FF8C00).", "Invalid Input", 0)
       end
     end
+  elseif sel == nc + nf + 3 then
+    -- User explicitly closed — stop the script
+    user_wants_close = true
+    gfx.quit()
   end
 
   local _, wx, wy = gfx.dock(-1, 0, 0, 0, 0)
@@ -280,8 +290,13 @@ local function frame()
   if gfx.getchar() >= 0 then
     reaper.defer(frame)
   else
-    -- Window closed — save final geometry (reuse locals from above)
-    save_settings(cur_color, cur_font, gfx.w, gfx.h, wx, wy, dockstate)
+    -- Window closed — save last known geometry
+    save_settings(cur_color, cur_font, last_w, last_h, last_x, last_y, last_dock)
+    if not user_wants_close then
+      -- Closed externally (e.g. project switch) — reopen window to stay as widget
+      gfx.init("Work Timer", last_w, last_h, last_dock, last_x, last_y)
+      reaper.defer(frame)
+    end
   end
 end
 
