@@ -1,6 +1,6 @@
 --[[
 @description PM Timer - Scene-aware Work Timer
-@version 260302.1820
+@version 260302.1830
 @author hsuanice
 @about
   Scene-aware toggle timer for the hsuanice PM system.
@@ -14,12 +14,29 @@
       2026-03-02      ← depth = 0
       DurationOnly_Log← last child, depth = -1; holds duration-only records
 
-  Work item name: "scene_name (start_tc) | work_type"
-  Work item metadata: P_EXT:SCENE_GUID, P_EXT:WORK_TYPE, P_EXT:END_REASON
+  Two work modes (auto-detected from selection):
+    Scene Mode   : a scene item on "Scene Cut" is selected
+                   P_EXT:SCENE_GUID written; name = "scene (tc) | work_type"
+    Project Mode : no scene item selected
+                   P_EXT:SCENE_GUID not written; name = work_type only
+
+  Work item metadata: P_EXT:SCENE_GUID (Scene Mode only), P_EXT:WORK_TYPE,
+                      P_EXT:END_REASON
   Duration-only items also carry P_EXT:IS_DURATION_ONLY = "1"
   All work items are locked (C_LOCK=1) after creation.
 
 @changelog
+  v260302.1830
+    - Scene vs Project mode auto-detection (no more forced scene selection):
+        Scene Mode  : scene item selected on Scene Cut → SCENE_GUID written,
+                      name = "scene (tc) | work_type"
+        Project Mode: no scene selected → SCENE_GUID omitted, name = work_type
+    - Applies to action_start(), action_add_record() (timed + duration-only)
+    - create_work_item() signature: scene_name replaced by pre-computed item_name;
+      SCENE_GUID only written when scene_guid ~= ""
+    - sync_work_item_names() unchanged; naturally skips Project Mode items
+      (no SCENE_GUID → sync condition `sg ~= ""` is false)
+
   v260302.1820
     - Right-click anywhere in the window shows "Dock window" / "Undock window" menu.
       Uses gfx.dock(1) to dock, gfx.dock(0) to undock; no OS title bar required.
@@ -51,57 +68,27 @@
 
   v260302.1755
     - Fix: window position now tracked each frame via gfx.clienttoscreen(0,0)
-      (previously saved gfx.x/gfx.y which are drawing cursor coords, not window pos)
-      win_x/win_y cached in module vars; written to persistent ExtState on close
 
   v260302.1750
     - Add Record: Duration split into two fields — Dur Hours and Dur Mins
-      Both accept any non-negative integer (no 59 limit); total = h*3600 + m*60
-      e.g. Dur Mins=120 → 2 hours; Dur Hours=8 → 8 hours
 
   v260302.1745
-    - Add Record: Date field changed from YYYY-MM-DD to 6-digit YYMMDD (e.g. 260302)
-      parse_YYMMDD() converts to full YYYY-MM-DD string internally
+    - Add Record: Date field changed from YYYY-MM-DD to 6-digit YYMMDD
 
   v260302.1740
-    - Add Record: Work Type now uses gfx.showmenu (same as Start); no free-text
-      typos possible. GetUserInputs reduced to 4 fields (Date/Start/End/Duration).
+    - Add Record: Work Type now uses gfx.showmenu
 
   v260302.1730
-    - Add Record: added Date (YYYY-MM-DD) field; defaults to today
-      Timed mode uses the provided date for date track lookup/creation
-      Validation: must match YYYY-MM-DD pattern or error before any changes
-    - Window position memory: gfx.init reads WIN_X/WIN_Y from GetExtState on
-      startup and reopen; SetExtState(persistent=true) saves on close
+    - Add Record: added Date field; window position memory
 
   v260302.1700
-    - New: Add Record button — manual backfill without running the timer
-      Timed mode       : Start+End as HHMM → item placed on today's date track
-      Duration-only    : Duration as HHMM  → item placed on DurationOnly_Log track
-    - New: parse_HHMM()  — strict 4-digit HHMM parser with clear error messages
-    - New: get_or_create_duration_log_track() — creates DurationOnly_Log as the
-      last child of Scene Cut if absent
-    - Updated: get_or_create_date_track() — aware of DurationOnly_Log; new date
-      tracks use depth=0 when DurationOnly_Log is the current last child
-    - Updated: sync_work_item_names() — now also renames items on DurationOnly_Log
-    - UI: WIN_W 300→420, WIN_H 225→320; 2-column button layout
-    - Scene name display: truncation limit raised from 22 to 34 chars
-    - Duration-only items tagged P_EXT:IS_DURATION_ONLY = "1"
+    - New: Add Record button with Timed and Duration-only modes
 
   v260302.1620
-    - New: sync_work_item_names() — rebuilds take names for all work items under
-      Scene Cut date tracks on startup and after each Finish/Break.
-      Name format: "scene_name (start_tc) | work_type"
-      Missing scene fallback: "[Missing Scene] | work_type"
-    - start_tc uses format_timestr_pos(pos, "", 5) (HH:MM:SS:FF project TC)
-    - Only writes undo block when at least one name actually changed
+    - New: sync_work_item_names()
 
   v260302.1600
-    - Full architecture reset: Scene Cut becomes the folder; date tracks are
-      its direct children; no per-scene tracks, no placeholder tracks
-    - Item metadata: SCENE_GUID / WORK_TYPE / END_REASON
-    - Date tracks identified by YYYY-MM-DD name pattern (no P_EXT tags)
-    - Folder closing handled via last date track depth = -1
+    - Full architecture reset: Scene Cut folder with date track children
 
   v260302.1540
     - Removed BREAK state; UI high-contrast; Arial 18/22
@@ -134,10 +121,10 @@ local last_draw_time  = 0
 local mouse_prev      = 0
 local mouse_r_prev    = 0
 local BTN             = {}
-local running        = true
-local win_x          = tonumber(r.GetExtState(NS, "WIN_X"))       or 100
-local win_y          = tonumber(r.GetExtState(NS, "WIN_Y"))       or 100
-local cur_dock       = tonumber(r.GetExtState(NS, "DOCK_STATE"))  or 0
+local running         = true
+local win_x           = tonumber(r.GetExtState(NS, "WIN_X"))       or 100
+local win_y           = tonumber(r.GetExtState(NS, "WIN_Y"))       or 100
+local cur_dock        = tonumber(r.GetExtState(NS, "DOCK_STATE"))  or 0
 
 -- ── Helpers ────────────────────────────────────────────────────────────────
 local function elapsed_secs()
@@ -235,7 +222,6 @@ end
 
 -- ── Track management ───────────────────────────────────────────────────────
 
--- Ensures Scene Cut is a folder track (I_FOLDERDEPTH = 1).
 local function ensure_scene_cut_folder(scene_track)
   local fd = math.floor(r.GetMediaTrackInfo_Value(scene_track, "I_FOLDERDEPTH"))
   if fd ~= 1 then
@@ -244,16 +230,6 @@ local function ensure_scene_cut_folder(scene_track)
 end
 
 -- Find or create a YYYY-MM-DD date track as a direct child of Scene Cut.
---
--- Maintained folder invariant:
---   YYYY-MM-DD  depth=0  (all date tracks)
---   ...
---   DurationOnly_Log  depth=-1  (last child, closes folder)
---   — if DurationOnly_Log absent, last date track carries depth=-1 instead
---
--- Adding a new date track:
---   DurationOnly_Log present → insert before it with depth=0
---   DurationOnly_Log absent  → promote current last date to 0, append with -1
 local function get_or_create_date_track(scene_track, date_str)
   local sc_num  = math.floor(r.GetMediaTrackInfo_Value(scene_track, "IP_TRACKNUMBER"))
   local sc_0idx = sc_num - 1
@@ -268,7 +244,7 @@ local function get_or_create_date_track(scene_track, date_str)
     local _, tname = r.GetTrackName(t)
 
     if tname:match(DATE_PAT) then
-      if tname == date_str then return t end  -- found; done
+      if tname == date_str then return t end
       last_date_idx = i
     elseif tname == DURATION_LOG_NAME then
       duration_log_idx = i
@@ -279,9 +255,6 @@ local function get_or_create_date_track(scene_track, date_str)
   end
 
   if duration_log_idx >= 0 then
-    -- DurationOnly_Log is the last child (depth=-1).
-    -- Insert new date track just before it with depth=0; DurationOnly_Log
-    -- shifts one position but retains depth=-1, keeping the folder closed.
     r.InsertTrackAtIndex(duration_log_idx, true)
     local dt = r.GetTrack(0, duration_log_idx)
     r.GetSetMediaTrackInfo_String(dt, "P_NAME", date_str, true)
@@ -289,7 +262,6 @@ local function get_or_create_date_track(scene_track, date_str)
     return dt
 
   elseif last_date_idx < 0 then
-    -- No children at all: insert as sole child with depth=-1.
     r.InsertTrackAtIndex(sc_0idx + 1, true)
     local dt = r.GetTrack(0, sc_0idx + 1)
     r.GetSetMediaTrackInfo_String(dt, "P_NAME", date_str, true)
@@ -297,8 +269,6 @@ local function get_or_create_date_track(scene_track, date_str)
     return dt
 
   else
-    -- Date tracks exist, no DurationOnly_Log.
-    -- Promote current last date track from -1 to 0, append new with depth=-1.
     r.SetMediaTrackInfo_Value(r.GetTrack(0, last_date_idx), "I_FOLDERDEPTH", 0)
     r.InsertTrackAtIndex(last_date_idx + 1, true)
     local dt = r.GetTrack(0, last_date_idx + 1)
@@ -321,23 +291,20 @@ local function get_or_create_duration_log_track(scene_track)
     local fd      = math.floor(r.GetMediaTrackInfo_Value(t, "I_FOLDERDEPTH"))
     local _, tname = r.GetTrackName(t)
 
-    if tname == DURATION_LOG_NAME then return t end  -- found; done
+    if tname == DURATION_LOG_NAME then return t end
 
     last_child_idx = i
     depth = depth + fd
     if depth <= 0 then break end
   end
 
-  -- Not found: append as last child with depth=-1.
   if last_child_idx < 0 then
-    -- Folder is empty.
     r.InsertTrackAtIndex(sc_0idx + 1, true)
     local dt = r.GetTrack(0, sc_0idx + 1)
     r.GetSetMediaTrackInfo_String(dt, "P_NAME", DURATION_LOG_NAME, true)
     r.SetMediaTrackInfo_Value(dt, "I_FOLDERDEPTH", -1)
     return dt
   else
-    -- Promote current last child to depth=0, append DurationOnly_Log with depth=-1.
     r.SetMediaTrackInfo_Value(r.GetTrack(0, last_child_idx), "I_FOLDERDEPTH", 0)
     r.InsertTrackAtIndex(last_child_idx + 1, true)
     local dt = r.GetTrack(0, last_child_idx + 1)
@@ -348,8 +315,11 @@ local function get_or_create_duration_log_track(scene_track)
 end
 
 -- ── Work item ──────────────────────────────────────────────────────────────
-local function create_work_item(date_track, scene_guid, scene_name, work_type, pos_secs)
-  -- Place after the last existing item on this date track.
+-- scene_guid : "" in Project Mode (SCENE_GUID ext-state not written)
+-- item_name  : pre-computed final name
+--   Scene Mode   → "scene_name (tc) | work_type"  (sync will keep it updated)
+--   Project Mode → "work_type"                     (sync skips; name is permanent)
+local function create_work_item(date_track, scene_guid, item_name, work_type, pos_secs)
   local pos = pos_secs
   local n   = r.CountTrackMediaItems(date_track)
   if n > 0 then
@@ -363,11 +333,12 @@ local function create_work_item(date_track, scene_guid, scene_name, work_type, p
   r.SetMediaItemInfo_Value(item, "D_POSITION", pos)
   r.SetMediaItemInfo_Value(item, "D_LENGTH",   1)  -- updated on Finish/Break
 
-  -- Temporary name; sync_work_item_names() rewrites to full "scene (tc) | type" format.
   local take = r.AddTakeToMediaItem(item)
-  r.GetSetMediaItemTakeInfo_String(take, "P_NAME", scene_name .. " | " .. work_type, true)
+  r.GetSetMediaItemTakeInfo_String(take, "P_NAME", item_name, true)
 
-  set_item_ext(item, "SCENE_GUID",  scene_guid)
+  if scene_guid ~= "" then
+    set_item_ext(item, "SCENE_GUID", scene_guid)
+  end
   set_item_ext(item, "WORK_TYPE",   work_type)
   set_item_ext(item, "START_CLOCK", tostring(os.time()))
 
@@ -390,26 +361,24 @@ local function action_start()
     return
   end
 
-  -- 2. Require a selected item on Scene Cut
+  -- 2. Detect mode: Scene (scene item selected on Scene Cut) vs Project (no selection)
   local sel_scene = nil
   for i = 0, r.CountSelectedMediaItems(0) - 1 do
     local item = r.GetSelectedMediaItem(0, i)
     if r.GetMediaItemTrack(item) == scene_track then sel_scene = item; break end
   end
-  if not sel_scene then
-    r.ShowMessageBox(
-      "Please select a scene item on '" .. SCENE_TRACK_NAME .. "' first.",
-      "PM Timer", 0)
-    return
-  end
 
-  local scene_guid = r.BR_GetMediaItemGUID(sel_scene)
-  local scene_name = ""
-  local take = r.GetActiveTake(sel_scene)
-  if take then scene_name = r.GetTakeName(take) end
-  if scene_name == "" then
-    local _, notes = r.GetSetMediaItemInfo_String(sel_scene, "P_NOTES", "", false)
-    scene_name = (notes and notes ~= "") and notes or "(unnamed)"
+  local scene_guid, scene_name, scene_start_tc = "", "", ""
+  if sel_scene then
+    scene_guid = r.BR_GetMediaItemGUID(sel_scene)
+    local take = r.GetActiveTake(sel_scene)
+    if take then scene_name = r.GetTakeName(take) end
+    if scene_name == "" then
+      local _, notes = r.GetSetMediaItemInfo_String(sel_scene, "P_NOTES", "", false)
+      scene_name = (notes and notes ~= "") and notes or "(unnamed)"
+    end
+    scene_start_tc = r.format_timestr_pos(
+      r.GetMediaItemInfo_Value(sel_scene, "D_POSITION"), "", 5)
   end
 
   -- 3. Choose work type
@@ -424,7 +393,17 @@ local function action_start()
     work_type = val
   end
 
-  -- 4. Build track structure and create item
+  -- 4. Build item name
+  --    Scene Mode   : "scene_name (tc) | work_type"  (sync will keep it current)
+  --    Project Mode : "work_type"                     (permanent; sync skips it)
+  local item_name
+  if scene_guid ~= "" then
+    item_name = scene_name .. " (" .. scene_start_tc .. ") | " .. work_type
+  else
+    item_name = work_type
+  end
+
+  -- 5. Build track structure and create item
   local pos_secs    = secs_since_midnight()
   local now_clock   = os.time()
   local now_precise = r.time_precise()
@@ -432,12 +411,12 @@ local function action_start()
   r.Undo_BeginBlock()
   ensure_scene_cut_folder(scene_track)
   local date_track = get_or_create_date_track(scene_track, os.date("%Y-%m-%d"))
-  local item       = create_work_item(date_track, scene_guid, scene_name, work_type, pos_secs)
+  local item       = create_work_item(date_track, scene_guid, item_name, work_type, pos_secs)
   local item_guid  = get_item_guid(item)
   r.Undo_EndBlock("PM: Start work session", -1)
   r.UpdateArrange()
 
-  -- 5. Update state + ExtState
+  -- 6. Update state + ExtState
   S.mode            = "WORKING"
   S.scene_guid      = scene_guid
   S.scene_name      = scene_name
@@ -476,12 +455,11 @@ local function finish_work_session(end_reason)
 end
 
 -- ── Sync work item names ────────────────────────────────────────────────────
--- Rebuilds take names for all work items on YYYY-MM-DD and DurationOnly_Log
--- tracks inside the Scene Cut folder.
+-- Rebuilds take names for all Scene Mode work items (those with P_EXT:SCENE_GUID).
+-- Project Mode items (no SCENE_GUID) are naturally skipped by the sg ~= "" check.
 -- Name format: "scene_name (start_tc) | work_type"
 -- Missing-scene fallback: "[Missing Scene] | work_type"
 local function sync_work_item_names()
-  -- Step A: build scene_map {guid → {name, start_tc}} from Scene Cut items
   local scene_track = nil
   for i = 0, r.CountTracks(0) - 1 do
     local t = r.GetTrack(0, i)
@@ -506,7 +484,6 @@ local function sync_work_item_names()
     scene_map[guid] = { name = name, start_tc = start_tc }
   end
 
-  -- Step B+C: walk date tracks AND DurationOnly_Log inside Scene Cut folder
   local sc_num  = math.floor(r.GetMediaTrackInfo_Value(scene_track, "IP_TRACKNUMBER"))
   local total   = r.CountTracks(0)
   local depth   = 1
@@ -522,7 +499,7 @@ local function sync_work_item_names()
         local item = r.GetTrackMediaItem(t, j)
         local _, sg = r.GetSetMediaItemInfo_String(item, "P_EXT:SCENE_GUID", "", false)
         local _, wt = r.GetSetMediaItemInfo_String(item, "P_EXT:WORK_TYPE",  "", false)
-        if sg ~= "" then
+        if sg ~= "" then  -- Scene Mode items only; Project Mode items untouched
           local work_type = (wt ~= "") and wt or ""
           local new_name
           local sc = scene_map[sg]
@@ -570,10 +547,10 @@ local function action_stop()
 end
 
 -- ── Add Record ─────────────────────────────────────────────────────────────
--- Timed mode        : Start + End as HHMM → item on today's date track
--- Duration-only mode: Duration as HHMM    → item on DurationOnly_Log track
+-- Auto-detects Scene vs Project mode the same way as action_start().
+-- Timed mode        : Start + End as HHMM → item on date track
+-- Duration-only mode: Dur Hours + Mins    → item on DurationOnly_Log track
 local function action_add_record()
-  -- Guard: cannot backfill while a session is running
   if S.mode == "WORKING" then
     r.ShowMessageBox("Finish current session first.", "Add Record", 0)
     return
@@ -591,31 +568,27 @@ local function action_add_record()
     return
   end
 
-  -- Require a selected scene item on Scene Cut
+  -- Detect mode: Scene (scene item selected) vs Project (no selection)
   local sel_scene = nil
   for i = 0, r.CountSelectedMediaItems(0) - 1 do
     local item = r.GetSelectedMediaItem(0, i)
     if r.GetMediaItemTrack(item) == scene_track then sel_scene = item; break end
   end
-  if not sel_scene then
-    r.ShowMessageBox(
-      "Please select a scene item on '" .. SCENE_TRACK_NAME .. "' first.",
-      "Add Record", 0)
-    return
+
+  local scene_guid, scene_name, scene_start_tc = "", "", ""
+  if sel_scene then
+    scene_guid = r.BR_GetMediaItemGUID(sel_scene)
+    local s_take = r.GetActiveTake(sel_scene)
+    if s_take then scene_name = r.GetTakeName(s_take) end
+    if scene_name == "" then
+      local _, notes = r.GetSetMediaItemInfo_String(sel_scene, "P_NOTES", "", false)
+      scene_name = (notes and notes ~= "") and notes or "(unnamed)"
+    end
+    scene_start_tc = r.format_timestr_pos(
+      r.GetMediaItemInfo_Value(sel_scene, "D_POSITION"), "", 5)
   end
 
-  local scene_guid     = r.BR_GetMediaItemGUID(sel_scene)
-  local scene_name     = ""
-  local s_take         = r.GetActiveTake(sel_scene)
-  if s_take then scene_name = r.GetTakeName(s_take) end
-  if scene_name == "" then
-    local _, notes = r.GetSetMediaItemInfo_String(sel_scene, "P_NOTES", "", false)
-    scene_name = (notes and notes ~= "") and notes or "(unnamed)"
-  end
-  local scene_start_tc = r.format_timestr_pos(
-    r.GetMediaItemInfo_Value(sel_scene, "D_POSITION"), "", 5)
-
-  -- Work type via menu (same as Start)
+  -- Work type via menu
   gfx.x, gfx.y = 10, 60
   local choice = gfx.showmenu(table.concat(WORK_TYPES, "|"))
   if choice == 0 then return end
@@ -626,13 +599,12 @@ local function action_add_record()
     work_type = val
   end
 
-  -- Input dialog (5 fields: date + times + duration)
+  -- Input dialog
   local ok, raw = r.GetUserInputs("Add Record", 5,
     "Date (YYMMDD):,Start (HHMM):,End   (HHMM):,Dur Hours:,Dur Mins:",
     os.date("%y%m%d") .. ",,,,")
   if not ok then return end
 
-  -- Parse comma-separated fields
   local fields = {}
   local n = 0
   for f in (raw .. ","):gmatch("([^,]*),") do
@@ -691,9 +663,17 @@ local function action_add_record()
     end
   end
 
-  -- All valid — create item
-  local item_name = scene_name .. " (" .. scene_start_tc .. ") | " .. work_type
+  -- Build item name
+  --   Scene Mode   : "scene_name (tc) | work_type"
+  --   Project Mode : "work_type"
+  local item_name
+  if scene_guid ~= "" then
+    item_name = scene_name .. " (" .. scene_start_tc .. ") | " .. work_type
+  else
+    item_name = work_type
+  end
 
+  -- Create item
   r.Undo_BeginBlock()
   ensure_scene_cut_folder(scene_track)
 
@@ -705,7 +685,9 @@ local function action_add_record()
     r.SetMediaItemInfo_Value(item, "D_LENGTH",   length)
     local it = r.AddTakeToMediaItem(item)
     r.GetSetMediaItemTakeInfo_String(it, "P_NAME", item_name, true)
-    set_item_ext(item, "SCENE_GUID",  scene_guid)
+    if scene_guid ~= "" then
+      set_item_ext(item, "SCENE_GUID", scene_guid)
+    end
     set_item_ext(item, "WORK_TYPE",   work_type)
     set_item_ext(item, "DURATION",    tostring(length))
     set_item_ext(item, "END_REASON",  "manual")
@@ -722,7 +704,9 @@ local function action_add_record()
     r.SetMediaItemInfo_Value(item, "D_LENGTH",   d_secs)
     local it = r.AddTakeToMediaItem(item)
     r.GetSetMediaItemTakeInfo_String(it, "P_NAME", item_name, true)
-    set_item_ext(item, "SCENE_GUID",       scene_guid)
+    if scene_guid ~= "" then
+      set_item_ext(item, "SCENE_GUID", scene_guid)
+    end
     set_item_ext(item, "WORK_TYPE",        work_type)
     set_item_ext(item, "DURATION",         tostring(d_secs))
     set_item_ext(item, "END_REASON",       "manual")
@@ -800,12 +784,9 @@ local function draw()
   sep(44)
 
   -- ── Horizontal buttons ──────────────────────────────────────────────────
-  -- 4 buttons filling WIN_W with small equal margins:
-  --   gap=8, left=10, btn_w=129
-  --   x positions: 10, 147, 284, 421  (last right edge: 421+129=550, right margin: 10)
-  local btn_w  = 129
-  local btn_h  = 40
-  local btn_y  = 58
+  local btn_w   = 129
+  local btn_h   = 40
+  local btn_y   = 58
   local btn_gap = 8
   local btn_x0  = 10
 
@@ -923,8 +904,8 @@ local function loop()
       draw()
       last_draw_time = r.time_precise()
     else
-      r.SetExtState(NS, "WIN_X",      tostring(win_x),   true)
-      r.SetExtState(NS, "WIN_Y",      tostring(win_y),   true)
+      r.SetExtState(NS, "WIN_X",      tostring(win_x),    true)
+      r.SetExtState(NS, "WIN_Y",      tostring(win_y),    true)
       r.SetExtState(NS, "DOCK_STATE", tostring(cur_dock), true)
       running = false
       return
