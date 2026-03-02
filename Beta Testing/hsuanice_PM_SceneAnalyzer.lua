@@ -1,6 +1,6 @@
 --[[
 @description PM Scene Analyzer
-@version 260302.1500
+@version 260302.2100
 @author hsuanice
 @about
   PM System - Phase 1, single-file implementation.
@@ -26,6 +26,10 @@
       stamps P_EXT:SCENE_ID on each one.
 
 @changelog
+  v260302.2100
+    - Output: replaced fixed-width table with paragraph-style per-scene blocks
+      (#index  Name / Range / Length / Shots / Src Cnt / Src Len)
+
   v260302.1501
     - Fix: format_timestr_len requires 4 args; add missing offset=0
       (signature: tpos, buf, offset, modeoverride)
@@ -260,24 +264,17 @@ local function analyze_scenes()
     end
   end
 
-  -- ── Print summary table ───────────────────────────────────────────────
+  -- ── Print per-scene blocks ────────────────────────────────────────────
   log("")
-  local col = "%-4s  %-24s  %-12s  %-12s  %-12s  %6s  %6s  %-12s"
-  log(string.format(col,
-    "#", "Scene Name", "Start TC", "End TC", "Duration TC", "Shots", "Src", "Src Length"))
-  log(string.rep("-", 100))
 
   for idx, sc in ipairs(scenes) do
-    log(string.format(col,
-      idx,
-      sc.name ~= "" and sc.name or "(unnamed)",
-      tc_pos(sc.start_pos),
-      tc_pos(sc.end_pos),
-      tc_dur(sc.duration),
-      sc.shot_count,
-      sc.source_item_count,
-      tc_dur(sc.source_total_length)
-    ))
+    log("--------------------------------------------------")
+    log("#" .. idx .. "  " .. (sc.name ~= "" and sc.name or "(unnamed)"))
+    log("    Range   : " .. tc_pos(sc.start_pos) .. " - " .. tc_pos(sc.end_pos))
+    log("    Length  : " .. tc_dur(sc.duration))
+    log("    Shots   : " .. sc.shot_count)
+    log("    Src Cnt : " .. sc.source_item_count)
+    log("    Src Len : " .. tc_dur(sc.source_total_length))
   end
 
   log("")
