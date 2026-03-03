@@ -1,6 +1,6 @@
 --[[
 @description PM Timer - Scene-aware Work Timer
-@version 260303.1505
+@version 260303.2253
 @author hsuanice
 @about
   Scene-aware toggle timer for the hsuanice PM system.
@@ -26,8 +26,8 @@
   All work items are locked (C_LOCK=1) after creation.
 
 @changelog
-  v260303.1505
-    - Fix color mapping for aap/conform work types
+  v260303.2253
+    - Dialog mode hides aap/conform from work type menu
 
   v260302.1830
     - Scene vs Project mode auto-detection (no more forced scene selection):
@@ -200,6 +200,13 @@ end
 local function set_work_mode(mode)
   S.work_mode = mode
   set_extstate("WORK_MODE", mode)
+end
+
+local function get_work_types_for_mode()
+  if S.work_mode == "Dialog" then
+    return { "editing", "denoise", "double_check", "custom" }
+  end
+  return WORK_TYPES
 end
 
 local function reset_state()
@@ -481,10 +488,11 @@ local function action_start()
 
   -- 3. Choose work type
   gfx.x, gfx.y = 10, 60
-  local choice = gfx.showmenu(table.concat(WORK_TYPES, "|"))
+  local work_types = get_work_types_for_mode()
+  local choice = gfx.showmenu(table.concat(work_types, "|"))
   if choice == 0 then return end
 
-  local work_type = WORK_TYPES[choice]
+  local work_type = work_types[choice]
   if work_type == "custom" then
     local ok, val = r.GetUserInputs("Custom Work Type", 1, "Work type:", "")
     if not ok or val == "" then return end
@@ -870,9 +878,10 @@ local function action_add_record()
 
   -- Work type via menu
   gfx.x, gfx.y = 10, 60
-  local choice = gfx.showmenu(table.concat(WORK_TYPES, "|"))
+  local work_types = get_work_types_for_mode()
+  local choice = gfx.showmenu(table.concat(work_types, "|"))
   if choice == 0 then return end
-  local work_type = WORK_TYPES[choice]
+  local work_type = work_types[choice]
   if work_type == "custom" then
     local ok2, val = r.GetUserInputs("Custom Work Type", 1, "Work type:", "")
     if not ok2 or val == "" then return end
