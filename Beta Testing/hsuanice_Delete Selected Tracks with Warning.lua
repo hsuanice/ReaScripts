@@ -1,6 +1,6 @@
 --[[
 @description Delete Selected Tracks (safe; prompt if content/folders/FX/routing; show selection, children & FX/routing counts)
-@version 0.3.0
+@version 260303.2350
 @author hsuanice
 @about
   Delete selected tracks with safety:
@@ -15,6 +15,10 @@
     - Master track is ignored by REAPER's CountSelectedTracks().
 
 @changelog
+  v260303.2350
+    + Changed delete method to use native Action 40005 (Track: Remove tracks)
+    + Prevent folder depth corruption when deleting folder parent tracks
+    + Now matches REAPER native delete behavior
   v0.3.0
         - Added detection and summary for FX inserts, Input FX, Sends, and Receives; any non-zero count now forces a confirmation dialog.
         - Confirmation dialog now shows totals for these four categories.
@@ -128,12 +132,11 @@ local function summarize_selection(tracks)
          total_fx_inserts, total_fx_input, total_sends, total_receives
 end
 
-local function delete_tracks(tracks)
+local function delete_tracks()
   r.Undo_BeginBlock()
   r.PreventUIRefresh(1)
-  for i = #tracks, 1, -1 do
-    r.DeleteTrack(tracks[i])
-  end
+  -- Native delete (safe for folder depth)
+  r.Main_OnCommand(40005, 0)
   r.PreventUIRefresh(-1)
   r.UpdateArrange()
   r.Undo_EndBlock("Delete selected tracks (safe)", -1)
@@ -163,7 +166,7 @@ local should_prompt =
   (total_receives > 0)
 
 if not should_prompt then
-  delete_tracks(sel_tracks)
+  delete_tracks()
   return
 end
 
@@ -187,7 +190,8 @@ local msg = string.format(
 -- 4 = MB_YESNO, returns 6 if Yes
 local ret = r.ShowMessageBox(msg, "Delete Selected Tracks — Confirm", 4)
 if ret == 6 then
-  delete_tracks(sel_tracks)
+  delete_tracks()
 else
   -- User canceled.
 end
+
