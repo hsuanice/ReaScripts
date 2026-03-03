@@ -1,6 +1,6 @@
 --[[
 @description PM Timer - Scene-aware Work Timer
-@version 260303.1301
+@version 260303.1505
 @author hsuanice
 @about
   Scene-aware toggle timer for the hsuanice PM system.
@@ -26,8 +26,8 @@
   All work items are locked (C_LOCK=1) after creation.
 
 @changelog
-  v260303.1301
-    - Dialog Mode v2: Switch Scene/Type workflow, continuous timing, and new UI
+  v260303.1505
+    - Fix color mapping for aap/conform work types
 
   v260302.1830
     - Scene vs Project mode auto-detection (no more forced scene selection):
@@ -100,9 +100,21 @@
 ---@diagnostic disable: undefined-global
 local r = reaper
 
+----------------------------------------------------------------
+-- Work Type Color Map (Editable)
+----------------------------------------------------------------
+
+local WORK_COLORS = {
+  editing  = {255, 255, 0},      -- Yellow
+  denoise  = {255, 0, 255},      -- Magenta
+  aap      = {0, 0, 255},      -- blue
+  conform  = {0, 255, 0}         -- Green
+}
+
 -- ── Constants ──────────────────────────────────────────────────────────────
 local NS                = "hsuanice_PM"
 local SCENE_TRACK_NAME  = "Scene Cut"
+local WORK_LOG_NAME     = "Work Log"
 local DURATION_LOG_NAME = "DurationOnly_Log"
 local WIN_W, WIN_H      = 560, 140
 local WORK_TYPES        = { "editing", "denoise", "conform", "aap", "double_check", "custom" }
@@ -209,6 +221,28 @@ local function get_item_by_guid(guid)
   return nil
 end
 
+local function get_track_by_name(name)
+  for i = 0, r.CountTracks(0) - 1 do
+    local t = r.GetTrack(0, i)
+    local _, tname = r.GetTrackName(t)
+    if tname == name then return t end
+  end
+  return nil
+end
+
+local function get_or_create_folder_track(name, allow_create)
+  local t = get_track_by_name(name)
+  if t then return t end
+  if not allow_create then return nil end
+
+  local insert_idx = r.CountTracks(0)
+  r.InsertTrackAtIndex(insert_idx, true)
+  t = r.GetTrack(0, insert_idx)
+  r.GetSetMediaTrackInfo_String(t, "P_NAME", name, true)
+  r.SetMediaTrackInfo_Value(t, "I_FOLDERDEPTH", 1)
+  return t
+end
+
 local function get_item_guid(item)
   local _, guid = r.GetSetMediaItemInfo_String(item, "GUID", "", false)
   return guid
@@ -216,6 +250,29 @@ end
 
 local function set_item_ext(item, key, val)
   r.GetSetMediaItemInfo_String(item, "P_EXT:" .. key, tostring(val), true)
+end
+
+----------------------------------------------------------------
+-- Apply color from WORK_TYPE
+----------------------------------------------------------------
+
+local function apply_color_from_type(item)
+  if not item then return end
+
+  local ok, work_type = reaper.GetSetMediaItemInfo_String(
+    item,
+    "P_EXT:WORK_TYPE",
+    "",
+    false
+  )
+
+  if not ok or work_type == "" then return end
+
+  local c = WORK_COLORS[work_type]
+  if not c then return end
+
+  local color = reaper.ColorToNative(c[1], c[2], c[3]) | 0x1000000
+  reaper.SetMediaItemInfo_Value(item, "I_CUSTOMCOLOR", color)
 end
 
 local function get_scene_info_from_item(scene_item)
@@ -277,14 +334,15 @@ end
 
 -- ── Track management ───────────────────────────────────────────────────────
 
-local function ensure_scene_cut_folder(scene_track)
-  local fd = math.floor(r.GetMediaTrackInfo_Value(scene_track, "I_FOLDERDEPTH"))
+local function ensure_folder_track(track)
+  if not track then return end
+  local fd = math.floor(r.GetMediaTrackInfo_Value(track, "I_FOLDERDEPTH"))
   if fd ~= 1 then
-    r.SetMediaTrackInfo_Value(scene_track, "I_FOLDERDEPTH", 1)
+    r.SetMediaTrackInfo_Value(track, "I_FOLDERDEPTH", 1)
   end
 end
 
--- Find or create a YYYY-MM-DD date track as a direct child of Scene Cut.
+-- Find or create a YYYY-MM-DD date track as a direct child of a folder track.
 local function get_or_create_date_track(scene_track, date_str)
   local sc_num  = math.floor(r.GetMediaTrackInfo_Value(scene_track, "IP_TRACKNUMBER"))
   local sc_0idx = sc_num - 1
@@ -333,7 +391,7 @@ local function get_or_create_date_track(scene_track, date_str)
   end
 end
 
--- Find or create DurationOnly_Log as the last child of Scene Cut.
+-- Find or create DurationOnly_Log as the last child of a folder track.
 local function get_or_create_duration_log_track(scene_track)
   local sc_num  = math.floor(r.GetMediaTrackInfo_Value(scene_track, "IP_TRACKNUMBER"))
   local sc_0idx = sc_num - 1
@@ -398,26 +456,21 @@ local function create_work_item(date_track, scene_guid, item_name, work_type, po
   set_item_ext(item, "START_CLOCK", tostring(start_clock or os.time()))
 
   r.UpdateItemInProject(item)
+  apply_color_from_type(item)
   r.SetMediaItemInfo_Value(item, "C_LOCK", 1)  -- lock after creation
   return item
 end
 
 -- ── Actions ────────────────────────────────────────────────────────────────
 local function action_start()
-  -- 1. Find Scene Cut track
-  local scene_track = nil
-  for i = 0, r.CountTracks(0) - 1 do
-    local t = r.GetTrack(0, i)
-    local _, tname = r.GetTrackName(t)
-    if tname == SCENE_TRACK_NAME then scene_track = t; break end
-  end
-  if not scene_track then
-    r.ShowMessageBox("Track '" .. SCENE_TRACK_NAME .. "' not found.", "PM Timer", 0)
-    return
-  end
+  -- 1. Find Scene Cut track (if it exists)
+  local scene_track = get_track_by_name(SCENE_TRACK_NAME)
 
   -- 2. Detect mode: Scene (scene item selected on Scene Cut) vs Project (no selection)
-  local sel_scene = get_selected_scene_info(scene_track)
+  local sel_scene = nil
+  if S.work_mode == "Dialog" and scene_track then
+    sel_scene = get_selected_scene_info(scene_track)
+  end
 
   local scene_guid, scene_name, scene_start_tc = "", "", ""
   if sel_scene then
@@ -449,13 +502,24 @@ local function action_start()
   end
 
   -- 5. Build track structure and create item
+  local parent_track
+  if scene_guid ~= "" then
+    parent_track = scene_track
+  else
+    parent_track = get_or_create_folder_track(WORK_LOG_NAME, true)
+  end
+  if not parent_track then
+    r.ShowMessageBox("Work log track not found.", "PM Timer", 0)
+    return
+  end
+
   local pos_secs    = secs_since_midnight()
   local now_clock   = os.time()
   local now_precise = r.time_precise()
 
   r.Undo_BeginBlock()
-  ensure_scene_cut_folder(scene_track)
-  local date_track = get_or_create_date_track(scene_track, os.date("%Y-%m-%d"))
+  ensure_folder_track(parent_track)
+  local date_track = get_or_create_date_track(parent_track, os.date("%Y-%m-%d"))
   local item       = create_work_item(date_track, scene_guid, item_name, work_type, pos_secs, now_clock)
   local item_guid  = get_item_guid(item)
   r.Undo_EndBlock("PM: Start work session", -1)
@@ -589,15 +653,19 @@ local function action_break()  finish_current_item("break");  sync_work_item_nam
 
 local function action_switch_type()
   if S.mode ~= "WORKING" then return end
-  local scene_track = nil
-  for i = 0, r.CountTracks(0) - 1 do
-    local t = r.GetTrack(0, i)
-    local _, tname = r.GetTrackName(t)
-    if tname == SCENE_TRACK_NAME then scene_track = t; break end
-  end
-  if not scene_track then
-    r.ShowMessageBox("Track '" .. SCENE_TRACK_NAME .. "' not found.", "PM Timer", 0)
-    return
+  local parent_track
+  if S.scene_guid ~= "" then
+    parent_track = get_or_create_folder_track(SCENE_TRACK_NAME, false)
+    if not parent_track then
+      r.ShowMessageBox("Track '" .. SCENE_TRACK_NAME .. "' not found.", "PM Timer", 0)
+      return
+    end
+  else
+    parent_track = get_or_create_folder_track(WORK_LOG_NAME, true)
+    if not parent_track then
+      r.ShowMessageBox("Work log track not found.", "PM Timer", 0)
+      return
+    end
   end
 
   local end_time, end_pos = finish_current_item("switch", true)
@@ -637,8 +705,8 @@ local function action_switch_type()
   end
 
   r.Undo_BeginBlock()
-  ensure_scene_cut_folder(scene_track)
-  local date_track = get_or_create_date_track(scene_track, os.date("%Y-%m-%d"))
+  ensure_folder_track(parent_track)
+  local date_track = get_or_create_date_track(parent_track, os.date("%Y-%m-%d"))
   local item = create_work_item(date_track, S.scene_guid, item_name, new_type,
     end_pos or secs_since_midnight(), now_clock)
   local item_guid = get_item_guid(item)
@@ -664,12 +732,7 @@ end
 local function action_switch_scene()
   if S.mode ~= "WORKING" then return end
 
-  local scene_track = nil
-  for i = 0, r.CountTracks(0) - 1 do
-    local t = r.GetTrack(0, i)
-    local _, tname = r.GetTrackName(t)
-    if tname == SCENE_TRACK_NAME then scene_track = t; break end
-  end
+  local scene_track = get_or_create_folder_track(SCENE_TRACK_NAME, false)
   if not scene_track then
     r.ShowMessageBox("Track '" .. SCENE_TRACK_NAME .. "' not found.", "PM Timer", 0)
     return
@@ -698,7 +761,7 @@ local function action_switch_scene()
 
   local item_name = sel_scene.name .. " (" .. sel_scene.start_tc .. ") | " .. new_type
   r.Undo_BeginBlock()
-  ensure_scene_cut_folder(scene_track)
+  ensure_folder_track(scene_track)
   local date_track = get_or_create_date_track(scene_track, os.date("%Y-%m-%d"))
   local item = create_work_item(date_track, sel_scene.guid, item_name, new_type,
     end_pos or secs_since_midnight(), now_clock)
@@ -744,6 +807,34 @@ local function action_switch_mode()
   set_work_mode(mode)
 end
 
+----------------------------------------------------------------
+-- Sync all existing work item colors
+----------------------------------------------------------------
+
+local function sync_work_item_colors()
+  local track_count = reaper.CountTracks(0)
+
+  for i = 0, track_count - 1 do
+    local track = reaper.GetTrack(0, i)
+    local item_count = reaper.CountTrackMediaItems(track)
+
+    for j = 0, item_count - 1 do
+      local item = reaper.GetTrackMediaItem(track, j)
+
+      local ok, work_type = reaper.GetSetMediaItemInfo_String(
+        item,
+        "P_EXT:WORK_TYPE",
+        "",
+        false
+      )
+
+      if ok and work_type ~= "" then
+        apply_color_from_type(item)
+      end
+    end
+  end
+end
+
 -- ── Add Record ─────────────────────────────────────────────────────────────
 -- Auto-detects Scene vs Project mode the same way as action_start().
 -- Timed mode        : Start + End as HHMM → item on date track
@@ -754,36 +845,27 @@ local function action_add_record()
     return
   end
 
-  -- Find Scene Cut
-  local scene_track = nil
-  for i = 0, r.CountTracks(0) - 1 do
-    local t = r.GetTrack(0, i)
-    local _, tname = r.GetTrackName(t)
-    if tname == SCENE_TRACK_NAME then scene_track = t; break end
-  end
-  if not scene_track then
-    r.ShowMessageBox("Track '" .. SCENE_TRACK_NAME .. "' not found.", "Add Record", 0)
-    return
-  end
+  -- Find Scene Cut (if it exists)
+  local scene_track = get_track_by_name(SCENE_TRACK_NAME)
+  local parent_track = scene_track
 
   -- Detect mode: Scene (scene item selected) vs Project (no selection)
   local sel_scene = nil
-  for i = 0, r.CountSelectedMediaItems(0) - 1 do
-    local item = r.GetSelectedMediaItem(0, i)
-    if r.GetMediaItemTrack(item) == scene_track then sel_scene = item; break end
+  if S.work_mode == "Dialog" and scene_track then
+    sel_scene = get_selected_scene_info(scene_track)
   end
 
   local scene_guid, scene_name, scene_start_tc = "", "", ""
   if sel_scene then
-    scene_guid = r.BR_GetMediaItemGUID(sel_scene)
-    local s_take = r.GetActiveTake(sel_scene)
-    if s_take then scene_name = r.GetTakeName(s_take) end
-    if scene_name == "" then
-      local _, notes = r.GetSetMediaItemInfo_String(sel_scene, "P_NOTES", "", false)
-      scene_name = (notes and notes ~= "") and notes or "(unnamed)"
-    end
-    scene_start_tc = r.format_timestr_pos(
-      r.GetMediaItemInfo_Value(sel_scene, "D_POSITION"), "", 5)
+    scene_guid = sel_scene.guid
+    scene_name = sel_scene.name
+    scene_start_tc = sel_scene.start_tc
+  else
+    parent_track = get_or_create_folder_track(WORK_LOG_NAME, true)
+  end
+  if not parent_track then
+    r.ShowMessageBox("Work log track not found.", "Add Record", 0)
+    return
   end
 
   -- Work type via menu
@@ -873,11 +955,11 @@ local function action_add_record()
 
   -- Create item
   r.Undo_BeginBlock()
-  ensure_scene_cut_folder(scene_track)
+  ensure_folder_track(parent_track)
 
   if is_timed then
     local length     = e_secs - s_secs
-    local date_track = get_or_create_date_track(scene_track, date_str)
+    local date_track = get_or_create_date_track(parent_track, date_str)
     local item       = r.AddMediaItemToTrack(date_track)
     r.SetMediaItemInfo_Value(item, "D_POSITION", s_secs)
     r.SetMediaItemInfo_Value(item, "D_LENGTH",   length)
@@ -896,7 +978,7 @@ local function action_add_record()
     r.Undo_EndBlock("PM: Add Record (timed)", -1)
 
   else  -- duration-only
-    local dur_track = get_or_create_duration_log_track(scene_track)
+    local dur_track = get_or_create_duration_log_track(parent_track)
     local item      = r.AddMediaItemToTrack(dur_track)
     r.SetMediaItemInfo_Value(item, "D_POSITION", 0)
     r.SetMediaItemInfo_Value(item, "D_LENGTH",   d_secs)
@@ -1154,5 +1236,6 @@ gfx.init("hsuanice PM Timer", WIN_W, WIN_H, cur_dock, win_x, win_y)
 setup_fonts()
 draw()
 sync_work_item_names()
+sync_work_item_colors()
 last_draw_time = r.time_precise()
 r.defer(loop)
