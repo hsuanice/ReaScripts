@@ -1,6 +1,6 @@
 --[[
 @description PM Timer - Scene-aware Work Timer
-@version 260302.1830
+@version 260303.1301
 @author hsuanice
 @about
   Scene-aware toggle timer for the hsuanice PM system.
@@ -26,6 +26,9 @@
   All work items are locked (C_LOCK=1) after creation.
 
 @changelog
+  v260303.1301
+    - Dialog Mode v2: Switch Scene/Type workflow, continuous timing, and new UI
+
   v260302.1830
     - Scene vs Project mode auto-detection (no more forced scene selection):
         Scene Mode  : scene item selected on Scene Cut → SCENE_GUID written,
@@ -103,6 +106,8 @@ local SCENE_TRACK_NAME  = "Scene Cut"
 local DURATION_LOG_NAME = "DurationOnly_Log"
 local WIN_W, WIN_H      = 560, 140
 local WORK_TYPES        = { "editing", "denoise", "conform", "aap", "double_check", "custom" }
+local SWITCH_TYPES      = { "editing", "denoise", "custom" }
+local MODE_TYPES        = { "Dialog", "AAP", "Conform" }
 local DATE_PAT          = "^%d%d%d%d%-%d%d%-%d%d$"  -- matches YYYY-MM-DD
 
 -- ── State ──────────────────────────────────────────────────────────────────
@@ -110,6 +115,8 @@ local S = {
   mode            = "IDLE",   -- "IDLE" | "WORKING"
   scene_guid      = "",
   scene_name      = "",
+  scene_start_tc  = "",
+  work_mode       = "Dialog",
   work_type       = "",
   work_item_guid  = "",
   start_clock     = 0,        -- os.time() at session start (for display)
@@ -125,6 +132,7 @@ local running         = true
 local win_x           = tonumber(r.GetExtState(NS, "WIN_X"))       or 100
 local win_y           = tonumber(r.GetExtState(NS, "WIN_Y"))       or 100
 local cur_dock        = tonumber(r.GetExtState(NS, "DOCK_STATE"))  or 0
+local last_dock       = cur_dock
 
 -- ── Helpers ────────────────────────────────────────────────────────────────
 local function elapsed_secs()
@@ -132,6 +140,11 @@ local function elapsed_secs()
     return math.max(0, r.time_precise() - S.last_start_time)
   end
   return 0
+end
+
+local function fmt_clock(ts)
+  if not ts or ts == 0 then return "-" end
+  return os.date("%H:%M:%S", ts)
 end
 
 local function fmt_hms(secs)
@@ -166,8 +179,20 @@ local function clear_active_extstate()
   end
 end
 
+local function get_work_mode()
+  local m = get_extstate("WORK_MODE")
+  if m and m ~= "" then return m end
+  return "Dialog"
+end
+
+local function set_work_mode(mode)
+  S.work_mode = mode
+  set_extstate("WORK_MODE", mode)
+end
+
 local function reset_state()
   S.mode = "IDLE"; S.scene_guid = ""; S.scene_name = ""
+  S.scene_start_tc = ""
   S.work_type = ""; S.work_item_guid = ""
   S.start_clock = 0; S.last_start_time = 0
 end
@@ -191,6 +216,36 @@ end
 
 local function set_item_ext(item, key, val)
   r.GetSetMediaItemInfo_String(item, "P_EXT:" .. key, tostring(val), true)
+end
+
+local function get_scene_info_from_item(scene_item)
+  if not scene_item then return nil end
+  local scene_guid = r.BR_GetMediaItemGUID(scene_item)
+  local take = r.GetActiveTake(scene_item)
+  local scene_name = take and r.GetTakeName(take) or ""
+  if scene_name == "" then
+    local _, notes = r.GetSetMediaItemInfo_String(scene_item, "P_NOTES", "", false)
+    scene_name = (notes and notes ~= "") and notes or "(unnamed)"
+  end
+  local scene_start_tc = r.format_timestr_pos(
+    r.GetMediaItemInfo_Value(scene_item, "D_POSITION"), "", 5)
+  return { guid = scene_guid, name = scene_name, start_tc = scene_start_tc }
+end
+
+local function get_selected_scene_info(scene_track)
+  for i = 0, r.CountSelectedMediaItems(0) - 1 do
+    local item = r.GetSelectedMediaItem(0, i)
+    if r.GetMediaItemTrack(item) == scene_track then
+      return get_scene_info_from_item(item)
+    end
+  end
+  return nil
+end
+
+local function get_scene_info_by_guid(scene_guid)
+  if scene_guid == "" then return nil end
+  local item = get_item_by_guid(scene_guid)
+  return get_scene_info_from_item(item)
 end
 
 -- Parses a 4-digit HHMM string → seconds since midnight.
@@ -319,7 +374,7 @@ end
 -- item_name  : pre-computed final name
 --   Scene Mode   → "scene_name (tc) | work_type"  (sync will keep it updated)
 --   Project Mode → "work_type"                     (sync skips; name is permanent)
-local function create_work_item(date_track, scene_guid, item_name, work_type, pos_secs)
+local function create_work_item(date_track, scene_guid, item_name, work_type, pos_secs, start_clock)
   local pos = pos_secs
   local n   = r.CountTrackMediaItems(date_track)
   if n > 0 then
@@ -340,7 +395,7 @@ local function create_work_item(date_track, scene_guid, item_name, work_type, po
     set_item_ext(item, "SCENE_GUID", scene_guid)
   end
   set_item_ext(item, "WORK_TYPE",   work_type)
-  set_item_ext(item, "START_CLOCK", tostring(os.time()))
+  set_item_ext(item, "START_CLOCK", tostring(start_clock or os.time()))
 
   r.UpdateItemInProject(item)
   r.SetMediaItemInfo_Value(item, "C_LOCK", 1)  -- lock after creation
@@ -362,23 +417,13 @@ local function action_start()
   end
 
   -- 2. Detect mode: Scene (scene item selected on Scene Cut) vs Project (no selection)
-  local sel_scene = nil
-  for i = 0, r.CountSelectedMediaItems(0) - 1 do
-    local item = r.GetSelectedMediaItem(0, i)
-    if r.GetMediaItemTrack(item) == scene_track then sel_scene = item; break end
-  end
+  local sel_scene = get_selected_scene_info(scene_track)
 
   local scene_guid, scene_name, scene_start_tc = "", "", ""
   if sel_scene then
-    scene_guid = r.BR_GetMediaItemGUID(sel_scene)
-    local take = r.GetActiveTake(sel_scene)
-    if take then scene_name = r.GetTakeName(take) end
-    if scene_name == "" then
-      local _, notes = r.GetSetMediaItemInfo_String(sel_scene, "P_NOTES", "", false)
-      scene_name = (notes and notes ~= "") and notes or "(unnamed)"
-    end
-    scene_start_tc = r.format_timestr_pos(
-      r.GetMediaItemInfo_Value(sel_scene, "D_POSITION"), "", 5)
+    scene_guid = sel_scene.guid
+    scene_name = sel_scene.name
+    scene_start_tc = sel_scene.start_tc
   end
 
   -- 3. Choose work type
@@ -411,7 +456,7 @@ local function action_start()
   r.Undo_BeginBlock()
   ensure_scene_cut_folder(scene_track)
   local date_track = get_or_create_date_track(scene_track, os.date("%Y-%m-%d"))
-  local item       = create_work_item(date_track, scene_guid, item_name, work_type, pos_secs)
+  local item       = create_work_item(date_track, scene_guid, item_name, work_type, pos_secs, now_clock)
   local item_guid  = get_item_guid(item)
   r.Undo_EndBlock("PM: Start work session", -1)
   r.UpdateArrange()
@@ -420,6 +465,7 @@ local function action_start()
   S.mode            = "WORKING"
   S.scene_guid      = scene_guid
   S.scene_name      = scene_name
+  S.scene_start_tc  = scene_start_tc
   S.work_type       = work_type
   S.work_item_guid  = item_guid
   S.start_clock     = now_clock
@@ -433,14 +479,18 @@ local function action_start()
   set_extstate("ACTIVE_WORK_OSTIME_START", tostring(now_clock))
 end
 
-local function finish_work_session(end_reason)
-  local duration = r.time_precise() - S.last_start_time
+local function finish_current_item(end_reason, keep_active)
+  local end_time = r.time_precise()
+  local duration = end_time - S.last_start_time
+  local end_pos = nil
 
   local item = get_item_by_guid(S.work_item_guid)
   if item then
+    local start_pos = r.GetMediaItemInfo_Value(item, "D_POSITION")
+    end_pos = start_pos + math.max(duration, 0)
     r.Undo_BeginBlock()
     r.SetMediaItemInfo_Value(item, "C_LOCK",   0)  -- unlock before modifying length
-    r.SetMediaItemInfo_Value(item, "D_LENGTH", math.max(duration, 1))
+    r.SetMediaItemInfo_Value(item, "D_LENGTH", math.max(duration, 0))
     set_item_ext(item, "END_REASON", end_reason)
     set_item_ext(item, "END_CLOCK",  tostring(os.time()))
     set_item_ext(item, "DURATION",   tostring(duration))
@@ -450,8 +500,12 @@ local function finish_work_session(end_reason)
     r.UpdateArrange()
   end
 
-  clear_active_extstate()
-  reset_state()
+  if not keep_active then
+    clear_active_extstate()
+    reset_state()
+  end
+
+  return end_time, end_pos
 end
 
 -- ── Sync work item names ────────────────────────────────────────────────────
@@ -530,8 +584,144 @@ local function sync_work_item_names()
   end
 end
 
-local function action_finish() finish_work_session("finish"); sync_work_item_names() end
-local function action_break()  finish_work_session("break");  sync_work_item_names() end
+local function action_finish() finish_current_item("finish"); sync_work_item_names() end
+local function action_break()  finish_current_item("break");  sync_work_item_names() end
+
+local function action_switch_type()
+  if S.mode ~= "WORKING" then return end
+  local scene_track = nil
+  for i = 0, r.CountTracks(0) - 1 do
+    local t = r.GetTrack(0, i)
+    local _, tname = r.GetTrackName(t)
+    if tname == SCENE_TRACK_NAME then scene_track = t; break end
+  end
+  if not scene_track then
+    r.ShowMessageBox("Track '" .. SCENE_TRACK_NAME .. "' not found.", "PM Timer", 0)
+    return
+  end
+
+  local end_time, end_pos = finish_current_item("switch", true)
+  local now_clock = os.time()
+
+  gfx.x, gfx.y = 10, 60
+  local choice = gfx.showmenu(table.concat(SWITCH_TYPES, "|"))
+  local new_type = SWITCH_TYPES[choice] or S.work_type
+  if new_type == "custom" then
+    local ok, val = r.GetUserInputs("Custom Work Type", 1, "Work type:", "")
+    if ok and val ~= "" then
+      new_type = val
+    else
+      new_type = S.work_type
+    end
+  end
+
+  local scene_name = S.scene_name
+  local scene_start_tc = S.scene_start_tc
+  if S.scene_guid ~= "" and scene_start_tc == "" then
+    local sc = get_scene_info_by_guid(S.scene_guid)
+    if sc then
+      scene_name = sc.name
+      scene_start_tc = sc.start_tc
+    end
+  end
+
+  local item_name
+  if S.scene_guid ~= "" then
+    if scene_start_tc ~= "" then
+      item_name = scene_name .. " (" .. scene_start_tc .. ") | " .. new_type
+    else
+      item_name = "[Missing Scene] | " .. new_type
+    end
+  else
+    item_name = new_type
+  end
+
+  r.Undo_BeginBlock()
+  ensure_scene_cut_folder(scene_track)
+  local date_track = get_or_create_date_track(scene_track, os.date("%Y-%m-%d"))
+  local item = create_work_item(date_track, S.scene_guid, item_name, new_type,
+    end_pos or secs_since_midnight(), now_clock)
+  local item_guid = get_item_guid(item)
+  r.Undo_EndBlock("PM: Switch work type", -1)
+  r.UpdateArrange()
+
+  S.mode            = "WORKING"
+  S.work_type       = new_type
+  S.work_item_guid  = item_guid
+  S.start_clock     = now_clock
+  S.last_start_time = end_time
+  S.scene_name      = scene_name
+  S.scene_start_tc  = scene_start_tc
+
+  set_extstate("ACTIVE_WORK_ITEM_GUID",    item_guid)
+  set_extstate("ACTIVE_WORK_SCENE_GUID",   S.scene_guid)
+  set_extstate("ACTIVE_WORK_SCENE_NAME",   scene_name)
+  set_extstate("ACTIVE_WORK_TYPE",         new_type)
+  set_extstate("ACTIVE_WORK_START_CLOCK",  tostring(now_clock))
+  set_extstate("ACTIVE_WORK_OSTIME_START", tostring(now_clock))
+end
+
+local function action_switch_scene()
+  if S.mode ~= "WORKING" then return end
+
+  local scene_track = nil
+  for i = 0, r.CountTracks(0) - 1 do
+    local t = r.GetTrack(0, i)
+    local _, tname = r.GetTrackName(t)
+    if tname == SCENE_TRACK_NAME then scene_track = t; break end
+  end
+  if not scene_track then
+    r.ShowMessageBox("Track '" .. SCENE_TRACK_NAME .. "' not found.", "PM Timer", 0)
+    return
+  end
+
+  local sel_scene = get_selected_scene_info(scene_track)
+  if not sel_scene then
+    r.ShowMessageBox("Please select a Scene Cut item first.", "PM Timer", 0)
+    return
+  end
+
+  local end_time, end_pos = finish_current_item("switch_scene", true)
+  local now_clock = os.time()
+
+  gfx.x, gfx.y = 10, 60
+  local choice = gfx.showmenu(table.concat(SWITCH_TYPES, "|"))
+  local new_type = SWITCH_TYPES[choice] or S.work_type
+  if new_type == "custom" then
+    local ok, val = r.GetUserInputs("Custom Work Type", 1, "Work type:", "")
+    if ok and val ~= "" then
+      new_type = val
+    else
+      new_type = S.work_type
+    end
+  end
+
+  local item_name = sel_scene.name .. " (" .. sel_scene.start_tc .. ") | " .. new_type
+  r.Undo_BeginBlock()
+  ensure_scene_cut_folder(scene_track)
+  local date_track = get_or_create_date_track(scene_track, os.date("%Y-%m-%d"))
+  local item = create_work_item(date_track, sel_scene.guid, item_name, new_type,
+    end_pos or secs_since_midnight(), now_clock)
+  local item_guid = get_item_guid(item)
+  r.Undo_EndBlock("PM: Switch scene", -1)
+  r.UpdateArrange()
+
+  S.mode            = "WORKING"
+  S.scene_guid      = sel_scene.guid
+  S.scene_name      = sel_scene.name
+  S.scene_start_tc  = sel_scene.start_tc
+  S.work_type       = new_type
+  S.work_item_guid  = item_guid
+  S.start_clock     = now_clock
+  S.last_start_time = end_time
+
+  set_extstate("ACTIVE_WORK_ITEM_GUID",    item_guid)
+  set_extstate("ACTIVE_WORK_SCENE_GUID",   sel_scene.guid)
+  set_extstate("ACTIVE_WORK_SCENE_NAME",   sel_scene.name)
+  set_extstate("ACTIVE_WORK_TYPE",         new_type)
+  set_extstate("ACTIVE_WORK_START_CLOCK",  tostring(now_clock))
+  set_extstate("ACTIVE_WORK_OSTIME_START", tostring(now_clock))
+end
 
 local function action_stop()
   local item = get_item_by_guid(S.work_item_guid)
@@ -544,6 +734,14 @@ local function action_stop()
   end
   clear_active_extstate()
   reset_state()
+end
+
+local function action_switch_mode()
+  gfx.x, gfx.y = 10, 60
+  local choice = gfx.showmenu(table.concat(MODE_TYPES, "|"))
+  if choice == 0 then return end
+  local mode = MODE_TYPES[choice] or "Dialog"
+  set_work_mode(mode)
 end
 
 -- ── Add Record ─────────────────────────────────────────────────────────────
@@ -761,15 +959,19 @@ local function draw()
 
   -- ── Info row ────────────────────────────────────────────────────────────
   local name_disp = S.scene_name
-  if #name_disp > 14 then name_disp = name_disp:sub(1, 13) .. "\xe2\x80\xa6" end
-  local type_disp = (S.work_type ~= "") and S.work_type or "\xe2\x80\x94"
-  if #type_disp > 12 then type_disp = type_disp:sub(1, 11) .. "\xe2\x80\xa6" end
+  if #name_disp > 18 then name_disp = name_disp:sub(1, 17) .. "..." end
+  local type_disp = (S.work_type ~= "") and S.work_type or "---"
+  if #type_disp > 10 then type_disp = type_disp:sub(1, 9) .. "..." end
+  local mode_disp = (S.work_mode ~= "") and S.work_mode or "Dialog"
+  local start_disp = (S.mode == "WORKING") and fmt_clock(S.start_clock) or "--:--:--"
 
   gfx.setfont(3)
   gfx.x, gfx.y = 10, 12
 
-  gfx.set(0.7, 0.7, 0.7, 1); gfx.drawstr("Scene: ")
-  gfx.set(1,   1,   1,   1); gfx.drawstr(name_disp ~= "" and name_disp or "\xe2\x80\x94")
+  gfx.set(0.7, 0.7, 0.7, 1); gfx.drawstr("Mode: ")
+  gfx.set(1,   1,   1,   1); gfx.drawstr(mode_disp)
+  gfx.set(0.7, 0.7, 0.7, 1); gfx.drawstr("  |  Scene: ")
+  gfx.set(1,   1,   1,   1); gfx.drawstr(name_disp ~= "" and name_disp or "---")
   gfx.set(0.7, 0.7, 0.7, 1); gfx.drawstr("  |  Type: ")
   gfx.set(1,   1,   1,   1); gfx.drawstr(type_disp)
   gfx.set(0.7, 0.7, 0.7, 1); gfx.drawstr("  |  Status: ")
@@ -778,6 +980,10 @@ local function draw()
   else
     gfx.set(0.7, 0.7, 0.7, 1); gfx.drawstr("IDLE")
   end
+
+  gfx.x, gfx.y = 10, 28
+  gfx.set(0.7, 0.7, 0.7, 1); gfx.drawstr("Start: ")
+  gfx.set(1,   1,   1,   1); gfx.drawstr(start_disp)
   gfx.set(0.7, 0.7, 0.7, 1); gfx.drawstr("  |  Elapsed: ")
   gfx.set(0.2, 0.8, 1.0, 1); gfx.drawstr(fmt_hms(elapsed_secs()))
 
@@ -801,17 +1007,17 @@ local function draw()
     table.insert(BTN, { rect = draw_btn(btn_x(i), btn_y, btn_w, btn_h, label), action = action })
   end
 
-  if idle    then add_btn(1, "Start",      action_start)
-  else            draw_btn_disabled(btn_x(1), btn_y, btn_w, btn_h, "Start")      end
-
-  if working then add_btn(2, "Finish",     action_finish)
-  else            draw_btn_disabled(btn_x(2), btn_y, btn_w, btn_h, "Finish")     end
-
-  if working then add_btn(3, "Break",      action_break)
-  else            draw_btn_disabled(btn_x(3), btn_y, btn_w, btn_h, "Break")      end
-
-  if idle    then add_btn(4, "Add Record", action_add_record)
-  else            draw_btn_disabled(btn_x(4), btn_y, btn_w, btn_h, "Add Record") end
+  if working then
+    add_btn(1, "Switch Scene", action_switch_scene)
+    add_btn(2, "Switch Type",  action_switch_type)
+    add_btn(3, "Break",        action_break)
+    add_btn(4, "Finish Day",   action_finish)
+  else
+    add_btn(1, "Start",      action_start)
+    add_btn(2, "Mode",       action_switch_mode)
+    add_btn(3, "Add Record", action_add_record)
+    draw_btn_disabled(btn_x(4), btn_y, btn_w, btn_h, "")
+  end
 
   gfx.update()
 end
@@ -841,6 +1047,9 @@ local function handle_mouse()
     local choice = gfx.showmenu(is_docked and "Undock window" or "Dock window")
     if choice == 1 then
       gfx.dock(is_docked and 0 or 1)
+      cur_dock = gfx.dock(-1)
+      r.SetExtState(NS, "DOCK_STATE", tostring(cur_dock), true)
+      last_dock = cur_dock
     end
   end
   mouse_r_prev = rb
@@ -868,6 +1077,7 @@ end
 
 -- ── Recovery ───────────────────────────────────────────────────────────────
 local function try_recover()
+  S.work_mode = get_work_mode()
   local guid = get_extstate("ACTIVE_WORK_ITEM_GUID")
   if not guid then return end
 
@@ -879,8 +1089,14 @@ local function try_recover()
   S.work_item_guid = guid
   S.scene_guid     = get_extstate("ACTIVE_WORK_SCENE_GUID") or ""
   S.scene_name     = get_extstate("ACTIVE_WORK_SCENE_NAME") or ""
+  S.scene_start_tc = ""
   S.work_type      = get_extstate("ACTIVE_WORK_TYPE")       or ""
   S.start_clock    = tonumber(get_extstate("ACTIVE_WORK_START_CLOCK"))  or os.time()
+
+  if S.scene_guid ~= "" then
+    local sc = get_scene_info_by_guid(S.scene_guid)
+    if sc and sc.start_tc then S.scene_start_tc = sc.start_tc end
+  end
 
   local ostime_start = tonumber(get_extstate("ACTIVE_WORK_OSTIME_START"))
   if ostime_start then
@@ -918,6 +1134,10 @@ local function loop()
   local cx, cy = gfx.clienttoscreen(0, 0)
   if cx ~= 0 or cy ~= 0 then win_x, win_y = cx, cy end
   cur_dock = gfx.dock(-1)
+  if cur_dock ~= last_dock then
+    r.SetExtState(NS, "DOCK_STATE", tostring(cur_dock), true)
+    last_dock = cur_dock
+  end
 
   local now = r.time_precise()
   if now - last_draw_time >= 1.0 then
