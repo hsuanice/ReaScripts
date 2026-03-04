@@ -1,6 +1,6 @@
 --[[
 @description PM Timer - Scene-aware Work Timer
-@version 260304.2358
+@version 260305.0038
 @author hsuanice
 @about
   Scene-aware toggle timer for the hsuanice PM system.
@@ -26,6 +26,30 @@
   All work items are locked (C_LOCK=1) after creation.
 
 @changelog
+  v260305.0038
+    - Fix: get_proj_prefix() and get_proj_identity() now use EnumProjects(-1)
+      (the currently active project) instead of EnumProjects(0) (tab index 0).
+      EnumProjects(0) could return an empty filename in some REAPER configurations,
+      causing the prefix to silently not be applied to any items.
+    - Right-click menu: added "Fix Item Prefixes" option (choice 3) — manually
+      runs sync_work_item_names() + sync_all_prefixes() on all items in the project.
+      Use this if items are missing the project prefix after the script restarts.
+
+  v260305.0023
+    - Fix: sync_work_item_names() now preserves existing prefix on scene-mode items
+      when get_proj_prefix() is unavailable (project filename doesn't match expected
+      format), preventing prefix stripping on sync.
+    - Fix: sync_work_item_names() now unlocks items before renaming (C_LOCK), then
+      relocks, matching the pattern used by sync_all_prefixes().
+    - Fix: sync_all_prefixes() now also called after action_add_record() so that
+      custom work-type items and duration-only items get their prefix applied
+      immediately (they have no SCENE_GUID so sync_work_item_names() skips them).
+
+  v260305.0008
+    - Dialog mode: Project Mode items (no scene selected) now placed under Scene Cut
+      date tracks instead of Work Log. DurationOnly_Log also moves under Scene Cut.
+      All Dialog-mode logs are now consolidated in one place. AAP mode is unaffected.
+
   v260304.2358
     - Fix: sync_all_prefixes() now called at startup and on project change,
       so existing items (Project Mode, AAP) also get the prefix applied.
@@ -256,8 +280,9 @@ local last_proj_identity = nil  -- tracks active project for change detection
 
 -- Returns a string that uniquely identifies the current project (its file path).
 -- Falls back to "" for unsaved/new projects. Used to detect project changes.
+-- Uses EnumProjects(-1) = the currently active project (not tab index 0).
 local function get_proj_identity()
-  local _, fn = r.EnumProjects(0)
+  local _, fn = r.EnumProjects(-1)
   return fn or ""
 end
 local function elapsed_secs()
@@ -408,7 +433,7 @@ end
 --   YYMMDD----Project----Episode----Task----OptionalNote
 -- Returns "Project Episode Task | " or "" if the project name doesn't match.
 local function get_proj_prefix()
-  local _, proj_path = r.EnumProjects(0)
+  local _, proj_path = r.EnumProjects(-1)
   if not proj_path or proj_path == "" then return "" end
   local name = proj_path:match("([^/\\]+)$") or proj_path
   name = name:gsub("%.%a+$", "")  -- strip extension (.RPP etc.)
@@ -873,14 +898,10 @@ local function action_start()
   end
 
   -- 5. Build track structure and create item
-  local parent_track
-  if scene_guid ~= "" then
-    parent_track = scene_track
-  else
-    parent_track = get_or_create_folder_track(WORK_LOG_NAME, true)
-  end
+  -- Dialog mode: always place items under Scene Cut (create if needed)
+  local parent_track = get_or_create_folder_track(SCENE_TRACK_NAME, true)
   if not parent_track then
-    r.ShowMessageBox("Work log track not found.", "PM Timer", 0)
+    r.ShowMessageBox("Cannot create '" .. SCENE_TRACK_NAME .. "' track.", "PM Timer", 0)
     return
   end
 
@@ -1053,20 +1074,34 @@ local function sync_work_item_names()
         local _, wt = r.GetSetMediaItemInfo_String(item, "P_EXT:WORK_TYPE",  "", false)
         if sg ~= "" then  -- Scene Mode items only; Project Mode items untouched
           local work_type = (wt ~= "") and wt or ""
-          local new_name
-          local sc = scene_map[sg]
-          if sc then
-            new_name = sc.name .. " (" .. sc.start_tc .. ") | " .. work_type
-          else
-            new_name = "[Missing Scene] | " .. work_type
-          end
-          new_name = apply_proj_prefix(new_name)
           local item_take = r.GetActiveTake(item)
           if not item_take then item_take = r.AddTakeToMediaItem(item) end
-          if r.GetTakeName(item_take) ~= new_name then
+          local cur_name = r.GetTakeName(item_take)
+
+          -- Build base name (scene + tc + type, no prefix)
+          local base_name
+          local sc = scene_map[sg]
+          if sc then
+            base_name = sc.name .. " (" .. sc.start_tc .. ") | " .. work_type
+          else
+            base_name = "[Missing Scene] | " .. work_type
+          end
+
+          -- Apply prefix. If prefix is unavailable (project name not in expected format),
+          -- preserve any existing prefix already stored on the item to avoid stripping it.
+          local new_name = apply_proj_prefix(base_name)
+          if new_name == base_name then  -- prefix unavailable
+            if #cur_name > #base_name and cur_name:sub(-#base_name) == base_name then
+              new_name = cur_name  -- keep existing prefix
+            end
+          end
+
+          if cur_name ~= new_name then
             if changed == 0 then r.Undo_BeginBlock() end
+            r.SetMediaItemInfo_Value(item, "C_LOCK", 0)
             r.GetSetMediaItemTakeInfo_String(item_take, "P_NAME", new_name, true)
             r.UpdateItemInProject(item)
+            r.SetMediaItemInfo_Value(item, "C_LOCK", 1)
             changed = changed + 1
           end
         end
@@ -1128,19 +1163,11 @@ end
 
 local function action_switch_type()
   if S.mode ~= "WORKING" then return end
-  local parent_track
-  if S.scene_guid ~= "" then
-    parent_track = get_or_create_folder_track(SCENE_TRACK_NAME, false)
-    if not parent_track then
-      r.ShowMessageBox("Track '" .. SCENE_TRACK_NAME .. "' not found.", "PM Timer", 0)
-      return
-    end
-  else
-    parent_track = get_or_create_folder_track(WORK_LOG_NAME, true)
-    if not parent_track then
-      r.ShowMessageBox("Work log track not found.", "PM Timer", 0)
-      return
-    end
+  -- Dialog mode: always place items under Scene Cut (create if needed)
+  local parent_track = get_or_create_folder_track(SCENE_TRACK_NAME, true)
+  if not parent_track then
+    r.ShowMessageBox("Cannot create '" .. SCENE_TRACK_NAME .. "' track.", "PM Timer", 0)
+    return
   end
 
   local end_time, end_pos = finish_current_item("switch", true)
@@ -1361,11 +1388,8 @@ local function action_add_record()
     return
   end
 
-  -- Find Scene Cut (if it exists)
+  -- Find Scene Cut (if it exists); detect Scene vs Project mode
   local scene_track = get_track_by_name(SCENE_TRACK_NAME)
-  local parent_track = scene_track
-
-  -- Detect mode: Scene (scene item selected) vs Project (no selection)
   local sel_scene = nil
   if S.work_mode == "Dialog" and scene_track then
     sel_scene = get_selected_scene_info(scene_track)
@@ -1376,11 +1400,12 @@ local function action_add_record()
     scene_guid = sel_scene.guid
     scene_name = sel_scene.name
     scene_start_tc = sel_scene.start_tc
-  else
-    parent_track = get_or_create_folder_track(WORK_LOG_NAME, true)
   end
+
+  -- Dialog mode: always place items under Scene Cut (create if needed)
+  local parent_track = get_or_create_folder_track(SCENE_TRACK_NAME, true)
   if not parent_track then
-    r.ShowMessageBox("Work log track not found.", "Add Record", 0)
+    r.ShowMessageBox("Cannot create '" .. SCENE_TRACK_NAME .. "' track.", "Add Record", 0)
     return
   end
 
@@ -1516,6 +1541,7 @@ local function action_add_record()
 
   r.UpdateArrange()
   sync_work_item_names()
+  sync_all_prefixes()
 end
 
 -- ── Draw ───────────────────────────────────────────────────────────────────
@@ -1662,7 +1688,7 @@ local function handle_mouse()
   if rb == 1 and mouse_r_prev == 0 then
     local is_docked = cur_dock ~= 0
     local dock_label = is_docked and "Undock window" or "Dock window"
-    local choice = gfx.showmenu(dock_label .. "|Fix Duration from item length")
+    local choice = gfx.showmenu(dock_label .. "|Fix Duration from item length|Fix Item Prefixes")
     if choice == 1 then
       gfx.dock(is_docked and 0 or 1)
       cur_dock = gfx.dock(-1)
@@ -1670,6 +1696,10 @@ local function handle_mouse()
       last_dock = cur_dock
     elseif choice == 2 then
       action_fix_duration()
+    elseif choice == 3 then
+      sync_work_item_names()
+      sync_all_prefixes()
+      r.ShowMessageBox("Item prefixes synced.", "PM Timer", 0)
     end
   end
   mouse_r_prev = rb
