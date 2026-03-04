@@ -1,6 +1,6 @@
 --[[
 @description PM Timer - Scene-aware Work Timer
-@version 260305.0038
+@version 260305.0110
 @author hsuanice
 @about
   Scene-aware toggle timer for the hsuanice PM system.
@@ -26,6 +26,24 @@
   All work items are locked (C_LOCK=1) after creation.
 
 @changelog
+  v260305.0110
+    - Fix: Sync to Work Log now also removes orphaned WL items — if a log item is
+      deleted from the source project, the next sync removes the corresponding item
+      from the Work Log. Only items tagged with P_EXT:WL_SRC_PROJ (i.e. created by
+      this script) are eligible for removal; manually added WL items are left alone.
+      Result message now reports "N added, N removed" separately.
+
+  v260305.0050
+    - New: "Sync to Work Log" right-click menu option (choice 4).
+      Mirrors Scene Cut date-track items and DurationOnly_Log items from the current
+      dialog project into an open Work Log project (filename must contain "Work Log").
+      - Date-track items → flat tracks in Work Log (track named YYYY-MM-DD).
+      - DurationOnly_Log items → DurationOnly_Log (folder) > ProjectName (child)
+        hierarchy; project name extracted from item name prefix before first " | ".
+      - Duplicate check: skips items with same position (±0.001 s) and same take name.
+      - Created items are EMPTY (no media source).
+      - All changes are grouped into a single undo block in the Work Log project.
+
   v260305.0038
     - Fix: get_proj_prefix() and get_proj_identity() now use EnumProjects(-1)
       (the currently active project) instead of EnumProjects(0) (tab index 0).
@@ -404,6 +422,16 @@ local function get_track_by_name(name)
     if tname == name then return t end
   end
   return nil
+end
+
+-- Find a track by name in a specific project (uses explicit proj ptr, not current-project "0").
+local function find_track_in_proj(proj, name)
+  for i = 0, r.CountTracks(proj) - 1 do
+    local t = r.GetTrack(proj, i)
+    local _, tname = r.GetTrackName(t)
+    if tname == name then return t, i end
+  end
+  return nil, -1
 end
 
 local function get_or_create_folder_track(name, allow_create, at_top)
@@ -1309,6 +1337,271 @@ local function action_switch_mode()
   set_work_mode(mode)
 end
 
+-- ── Sync to Work Log ────────────────────────────────────────────────────────
+-- Mirrors log items from the current dialog project into a global Work Log
+-- project (any open project whose filename contains "Work Log").
+--
+-- Date tracks (YYYY-MM-DD)  → flat tracks of the same name in Work Log project.
+-- DurationOnly_Log items     → DurationOnly_Log (folder) > ProjectName (child)
+--                              in Work Log project; project name extracted from
+--                              the item's prefix ("TheFixer EP04 Dialog | …"
+--                              → "TheFixer").
+-- Duplicate check: skip if an item with the same position + name already exists.
+-- All items in the Work Log project are EMPTY (no media source).
+
+local function find_work_log_project()
+  local i = 0
+  while true do
+    local proj, fn = r.EnumProjects(i)
+    if not proj then break end
+    local base = (fn:match("([^/\\]+)$") or fn):gsub("%.%a+$", "")
+    if base:find("Work Log", 1, true) then return proj end
+    i = i + 1
+  end
+  return nil
+end
+
+local function wl_item_exists(track, pos, name)
+  for j = 0, r.CountTrackMediaItems(track) - 1 do
+    local item = r.GetTrackMediaItem(track, j)
+    if math.abs(r.GetMediaItemInfo_Value(item, "D_POSITION") - pos) < 0.001 then
+      local take = r.GetActiveTake(item)
+      if take and r.GetTakeName(take) == name then return true end
+    end
+  end
+  return false
+end
+
+-- Create an empty (no media) copy of src_item on dst_track.
+-- Tags the new WL item with src_proj_id (P_EXT:WL_SRC_PROJ) for cleanup tracking.
+-- Returns true if created, false if a duplicate was found.
+local function copy_item_to_wl(src_item, dst_track, src_proj_id)
+  local pos   = r.GetMediaItemInfo_Value(src_item, "D_POSITION")
+  local len   = r.GetMediaItemInfo_Value(src_item, "D_LENGTH")
+  local color = math.floor(r.GetMediaItemInfo_Value(src_item, "I_CUSTOMCOLOR"))
+  local name  = ""
+  local take  = r.GetActiveTake(src_item)
+  if take then name = r.GetTakeName(take) end
+  if wl_item_exists(dst_track, pos, name) then return false end
+  local item = r.AddMediaItemToTrack(dst_track)
+  r.SetMediaItemInfo_Value(item, "D_POSITION", pos)
+  r.SetMediaItemInfo_Value(item, "D_LENGTH",   len)
+  if color ~= 0 then r.SetMediaItemInfo_Value(item, "I_CUSTOMCOLOR", color) end
+  local it = r.AddTakeToMediaItem(item)
+  r.GetSetMediaItemTakeInfo_String(it, "P_NAME", name, true)
+  if src_proj_id and src_proj_id ~= "" then
+    r.GetSetMediaItemInfo_String(item, "P_EXT:WL_SRC_PROJ", src_proj_id, true)
+  end
+  r.UpdateItemInProject(item)
+  return true
+end
+
+-- Remove WL items that were tagged with src_proj_id but no longer exist in source.
+-- src_set is { ["%.3f_pos|name"] = true } built from all current source items.
+-- Returns the number of items removed.
+local function cleanup_wl_orphans(wl_proj, src_proj_id, src_set)
+  local to_delete = {}
+  for i = 0, r.CountTracks(wl_proj) - 1 do
+    local t = r.GetTrack(wl_proj, i)
+    for j = r.CountTrackMediaItems(t) - 1, 0, -1 do
+      local item = r.GetTrackMediaItem(t, j)
+      local _, tagged = r.GetSetMediaItemInfo_String(item, "P_EXT:WL_SRC_PROJ", "", false)
+      if tagged == src_proj_id then
+        local pos   = r.GetMediaItemInfo_Value(item, "D_POSITION")
+        local itake = r.GetActiveTake(item)
+        local iname = itake and r.GetTakeName(itake) or ""
+        local key   = string.format("%.3f|%s", pos, iname)
+        if not src_set[key] then
+          table.insert(to_delete, item)
+        end
+      end
+    end
+  end
+  for _, item in ipairs(to_delete) do
+    r.DeleteTrackMediaItem(r.GetMediaItemTrack(item), item)
+  end
+  return #to_delete
+end
+
+-- Find or create a flat (non-folder) track named `name` at the end of wl_proj.
+local function get_or_create_wl_flat_track(wl_proj, name, src_proj)
+  local t = find_track_in_proj(wl_proj, name)
+  if t then return t end
+  r.SelectProjectInstance(wl_proj)
+  local n = r.CountTracks(wl_proj)
+  r.InsertTrackAtIndex(n, true)
+  t = r.GetTrack(wl_proj, n)
+  r.GetSetMediaTrackInfo_String(t, "P_NAME", name, true)
+  r.SelectProjectInstance(src_proj)
+  return t
+end
+
+-- Find or create the structure: DurationOnly_Log (folder) → proj_name (child)
+-- in wl_proj. Returns the child track.
+local function get_or_create_wl_dur_proj_track(wl_proj, proj_name, src_proj)
+  -- 1. Find or create DurationOnly_Log folder track
+  local dur_log = find_track_in_proj(wl_proj, DURATION_LOG_NAME)
+  if not dur_log then
+    r.SelectProjectInstance(wl_proj)
+    local n = r.CountTracks(wl_proj)
+    r.InsertTrackAtIndex(n, true)
+    dur_log = r.GetTrack(wl_proj, n)
+    r.GetSetMediaTrackInfo_String(dur_log, "P_NAME", DURATION_LOG_NAME, true)
+    r.SetMediaTrackInfo_Value(dur_log, "I_FOLDERDEPTH", 1)
+    r.SelectProjectInstance(src_proj)
+  elseif r.GetMediaTrackInfo_Value(dur_log, "I_FOLDERDEPTH") ~= 1 then
+    r.SetMediaTrackInfo_Value(dur_log, "I_FOLDERDEPTH", 1)
+  end
+
+  -- 2. Scan DurationOnly_Log's children for proj_name
+  local dur_log_num    = math.floor(r.GetMediaTrackInfo_Value(dur_log, "IP_TRACKNUMBER"))
+  local wl_total       = r.CountTracks(wl_proj)
+  local depth          = 1
+  local last_child_idx = -1
+
+  for i = dur_log_num, wl_total - 1 do
+    local t        = r.GetTrack(wl_proj, i)
+    local fd       = math.floor(r.GetMediaTrackInfo_Value(t, "I_FOLDERDEPTH"))
+    local _, tname = r.GetTrackName(t)
+    if tname == proj_name then return t end
+    last_child_idx = i
+    depth = depth + fd
+    if depth <= 0 then break end
+  end
+
+  -- 3. Insert new child track for proj_name
+  r.SelectProjectInstance(wl_proj)
+  local insert_at
+  if last_child_idx < 0 then
+    insert_at = dur_log_num          -- first child: right after DurationOnly_Log
+  else
+    r.SetMediaTrackInfo_Value(r.GetTrack(wl_proj, last_child_idx), "I_FOLDERDEPTH", 0)
+    insert_at = last_child_idx + 1
+  end
+  r.InsertTrackAtIndex(insert_at, true)
+  local new_t = r.GetTrack(wl_proj, insert_at)
+  r.GetSetMediaTrackInfo_String(new_t, "P_NAME", proj_name, true)
+  r.SetMediaTrackInfo_Value(new_t, "I_FOLDERDEPTH", -1)
+  r.SelectProjectInstance(src_proj)
+  return new_t
+end
+
+-- Extract the project name from a work-item take name that has the PM prefix.
+-- "TheFixer EP04 Dialog | double_check" → "TheFixer"
+-- Returns nil for scene-mode names ("4-14 麵包店 (04:04:28:12) | editing")
+-- or names without a recognizable prefix.
+local function extract_proj_from_name(name)
+  local prefix_part = name:match("^(.-)%s*|")
+  if not prefix_part or prefix_part == "" then return nil end
+  -- Scene-mode names contain a timecode "(HH:MM:SS:FF)" → skip
+  if prefix_part:find("%(%d+:%d+:%d+:%d+%)") then return nil end
+  return prefix_part:match("^(%S+)")
+end
+
+local function action_sync_work_log()
+  local src_proj = r.EnumProjects(-1)
+  local wl_proj  = find_work_log_project()
+  if not wl_proj then
+    r.ShowMessageBox(
+      "Work Log project not found.\n\n"
+      .. "Open a project whose filename contains 'Work Log' in REAPER, then try again.",
+      "Sync to Work Log", 0)
+    return
+  end
+  if src_proj == wl_proj then
+    r.ShowMessageBox(
+      "Current project is the Work Log project.\nSwitch to your dialog project first.",
+      "Sync to Work Log", 0)
+    return
+  end
+
+  local scene_track = find_track_in_proj(src_proj, SCENE_TRACK_NAME)
+  if not scene_track then
+    r.ShowMessageBox(
+      "No '" .. SCENE_TRACK_NAME .. "' track found in current project.\nNothing to sync.",
+      "Sync to Work Log", 0)
+    return
+  end
+
+  local sc_num     = math.floor(r.GetMediaTrackInfo_Value(scene_track, "IP_TRACKNUMBER"))
+  local total      = r.CountTracks(src_proj)
+  local _, src_fn  = r.EnumProjects(-1)
+  local src_proj_id = (src_fn or ""):match("([^/\\]+)$") or (src_fn or "")
+
+  -- Build set of all current source items (pos + name) for orphan cleanup.
+  local src_set = {}
+  do
+    local d = 1
+    for i = sc_num, total - 1 do
+      local t        = r.GetTrack(src_proj, i)
+      local fd       = math.floor(r.GetMediaTrackInfo_Value(t, "I_FOLDERDEPTH"))
+      local _, tname = r.GetTrackName(t)
+      if tname:match(DATE_PAT) or tname == DURATION_LOG_NAME then
+        for j = 0, r.CountTrackMediaItems(t) - 1 do
+          local item  = r.GetTrackMediaItem(t, j)
+          local pos   = r.GetMediaItemInfo_Value(item, "D_POSITION")
+          local itake = r.GetActiveTake(item)
+          local iname = itake and r.GetTakeName(itake) or ""
+          src_set[string.format("%.3f|%s", pos, iname)] = true
+        end
+      end
+      d = d + fd
+      if d <= 0 then break end
+    end
+  end
+
+  local depth = 1
+  local added = 0
+
+  r.Undo_BeginBlock2(wl_proj)
+
+  for i = sc_num, total - 1 do
+    local t        = r.GetTrack(src_proj, i)
+    local fd       = math.floor(r.GetMediaTrackInfo_Value(t, "I_FOLDERDEPTH"))
+    local _, tname = r.GetTrackName(t)
+
+    if tname:match(DATE_PAT) then
+      -- ── Date track → flat track in Work Log ───────────────────────────────
+      local dst = get_or_create_wl_flat_track(wl_proj, tname, src_proj)
+      for j = 0, r.CountTrackMediaItems(t) - 1 do
+        if copy_item_to_wl(r.GetTrackMediaItem(t, j), dst, src_proj_id) then
+          added = added + 1
+        end
+      end
+
+    elseif tname == DURATION_LOG_NAME then
+      -- ── DurationOnly_Log → DurationOnly_Log > ProjectName in Work Log ────
+      for j = 0, r.CountTrackMediaItems(t) - 1 do
+        local item      = r.GetTrackMediaItem(t, j)
+        local item_take = r.GetActiveTake(item)
+        local iname     = item_take and r.GetTakeName(item_take) or ""
+        local proj_name = extract_proj_from_name(iname)
+        if proj_name then
+          local dst = get_or_create_wl_dur_proj_track(wl_proj, proj_name, src_proj)
+          if copy_item_to_wl(item, dst, src_proj_id) then
+            added = added + 1
+          end
+        end
+      end
+    end
+
+    depth = depth + fd
+    if depth <= 0 then break end
+  end
+
+  local removed = cleanup_wl_orphans(wl_proj, src_proj_id, src_set)
+
+  r.Undo_EndBlock2(wl_proj, "PM: Sync to Work Log", -1)
+
+  local parts = {}
+  if added   > 0 then table.insert(parts, string.format("%d added",   added))   end
+  if removed > 0 then table.insert(parts, string.format("%d removed", removed)) end
+  local msg = #parts > 0
+    and string.format("Work Log synced: %s.", table.concat(parts, ", "))
+    or  "Work Log already up to date."
+  r.ShowMessageBox(msg, "Sync to Work Log", 0)
+end
+
 -- ── Fix Duration ────────────────────────────────────────────────────────────
 -- For each selected REAPER item that has P_EXT:WORK_TYPE set,
 -- overwrite P_EXT:DURATION with the item's current D_LENGTH.
@@ -1688,7 +1981,7 @@ local function handle_mouse()
   if rb == 1 and mouse_r_prev == 0 then
     local is_docked = cur_dock ~= 0
     local dock_label = is_docked and "Undock window" or "Dock window"
-    local choice = gfx.showmenu(dock_label .. "|Fix Duration from item length|Fix Item Prefixes")
+    local choice = gfx.showmenu(dock_label .. "|Fix Duration from item length|Fix Item Prefixes|Sync to Work Log")
     if choice == 1 then
       gfx.dock(is_docked and 0 or 1)
       cur_dock = gfx.dock(-1)
@@ -1700,6 +1993,8 @@ local function handle_mouse()
       sync_work_item_names()
       sync_all_prefixes()
       r.ShowMessageBox("Item prefixes synced.", "PM Timer", 0)
+    elseif choice == 4 then
+      action_sync_work_log()
     end
   end
   mouse_r_prev = rb
