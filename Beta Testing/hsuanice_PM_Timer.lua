@@ -1,6 +1,6 @@
 --[[
 @description PM Timer - Scene-aware Work Timer
-@version 260304.2252
+@version 260304.2358
 @author hsuanice
 @about
   Scene-aware toggle timer for the hsuanice PM system.
@@ -26,6 +26,20 @@
   All work items are locked (C_LOCK=1) after creation.
 
 @changelog
+  v260304.2358
+    - Fix: sync_all_prefixes() now called at startup and on project change,
+      so existing items (Project Mode, AAP) also get the prefix applied.
+      sync_work_item_names() only covers Scene Mode items; sync_all_prefixes()
+      covers everything with P_EXT:WORK_TYPE regardless of mode.
+
+  v260304.2350
+    - Project prefix: work item names are automatically prefixed with
+      "Project Episode Task | " parsed from the project filename.
+      Format: YYMMDD----Project----Episode----Task----OptionalNote
+      Example: 260304----TheFixer----EP04----Dialog → prefix "TheFixer EP04 Dialog | "
+      Applied on creation (create_work_item), sync (sync_work_item_names),
+      and manual record (action_add_record). Duplicate-safe (prefix not added twice).
+
   v260304.2252
     - Project change detection: script now monitors EnumProjects(0) filename each
       loop iteration. When the active project changes (close/reopen without
@@ -389,6 +403,37 @@ local function set_item_ext(item, key, val)
   r.GetSetMediaItemInfo_String(item, "P_EXT:" .. key, tostring(val), true)
 end
 
+-- ── Project prefix ──────────────────────────────────────────────────────────
+-- Parses the project filename using the format:
+--   YYMMDD----Project----Episode----Task----OptionalNote
+-- Returns "Project Episode Task | " or "" if the project name doesn't match.
+local function get_proj_prefix()
+  local _, proj_path = r.EnumProjects(0)
+  if not proj_path or proj_path == "" then return "" end
+  local name = proj_path:match("([^/\\]+)$") or proj_path
+  name = name:gsub("%.%a+$", "")  -- strip extension (.RPP etc.)
+  local parts = {}
+  for p in (name .. "----"):gmatch("(.-)%-%-%-%-") do
+    parts[#parts + 1] = p
+  end
+  -- parts[1]=YYMMDD, parts[2]=Project, parts[3]=Episode, parts[4]=Task
+  local project = parts[2]
+  local episode = parts[3]
+  local task    = parts[4]
+  if not project or project == "" then return "" end
+  if not episode or episode == "" then return "" end
+  if not task    or task    == "" then return "" end
+  return project .. " " .. episode .. " " .. task .. " | "
+end
+
+-- Prepend the project prefix to name. No-ops if prefix is empty or already present.
+local function apply_proj_prefix(name)
+  local prefix = get_proj_prefix()
+  if prefix == "" then return name end
+  if name:sub(1, #prefix) == prefix then return name end
+  return prefix .. name
+end
+
 ----------------------------------------------------------------
 -- Apply color from WORK_TYPE
 ----------------------------------------------------------------
@@ -583,6 +628,7 @@ local function create_work_item(date_track, scene_guid, item_name, work_type, po
   r.SetMediaItemInfo_Value(item, "D_POSITION", pos)
   r.SetMediaItemInfo_Value(item, "D_LENGTH",   1)  -- updated on Finish/Break
 
+  item_name = apply_proj_prefix(item_name)
   local take = r.AddTakeToMediaItem(item)
   r.GetSetMediaItemTakeInfo_String(take, "P_NAME", item_name, true)
 
@@ -1014,6 +1060,7 @@ local function sync_work_item_names()
           else
             new_name = "[Missing Scene] | " .. work_type
           end
+          new_name = apply_proj_prefix(new_name)
           local item_take = r.GetActiveTake(item)
           if not item_take then item_take = r.AddTakeToMediaItem(item) end
           if r.GetTakeName(item_take) ~= new_name then
@@ -1032,6 +1079,40 @@ local function sync_work_item_names()
 
   if changed > 0 then
     r.Undo_EndBlock("PM: Sync work item names", -1)
+    r.UpdateArrange()
+  end
+end
+
+-- Apply project prefix to ALL work items that are missing it (Project Mode,
+-- AAP, and any item sync_work_item_names() doesn't touch).
+local function sync_all_prefixes()
+  local prefix = get_proj_prefix()
+  if prefix == "" then return end
+  local changed = 0
+  for i = 0, r.CountTracks(0) - 1 do
+    local t = r.GetTrack(0, i)
+    for j = 0, r.CountTrackMediaItems(t) - 1 do
+      local item = r.GetTrackMediaItem(t, j)
+      local _, wt = r.GetSetMediaItemInfo_String(item, "P_EXT:WORK_TYPE", "", false)
+      if wt ~= "" then
+        local take = r.GetActiveTake(item)
+        if take then
+          local cur  = r.GetTakeName(take)
+          local new  = apply_proj_prefix(cur)
+          if new ~= cur then
+            if changed == 0 then r.Undo_BeginBlock() end
+            r.SetMediaItemInfo_Value(item, "C_LOCK", 0)
+            r.GetSetMediaItemTakeInfo_String(take, "P_NAME", new, true)
+            r.UpdateItemInProject(item)
+            r.SetMediaItemInfo_Value(item, "C_LOCK", 1)
+            changed = changed + 1
+          end
+        end
+      end
+    end
+  end
+  if changed > 0 then
+    r.Undo_EndBlock("PM: Sync item prefixes", -1)
     r.UpdateArrange()
   end
 end
@@ -1388,6 +1469,7 @@ local function action_add_record()
   else
     item_name = work_type
   end
+  item_name = apply_proj_prefix(item_name)
 
   -- Create item
   r.Undo_BeginBlock()
@@ -1730,6 +1812,7 @@ local function loop()
     reset_state()
     try_recover()
     sync_work_item_names()
+    sync_all_prefixes()
     sync_work_item_colors()
     draw()
     last_draw_time = r.time_precise()
@@ -1776,6 +1859,7 @@ gfx.init("hsuanice PM Timer", WIN_W, WIN_H, cur_dock, win_x, win_y)
 setup_fonts()
 draw()
 sync_work_item_names()
+sync_all_prefixes()
 sync_work_item_colors()
 last_draw_time = r.time_precise()
 r.defer(loop)
