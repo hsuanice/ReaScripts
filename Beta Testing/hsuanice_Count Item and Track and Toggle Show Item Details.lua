@@ -1,7 +1,7 @@
 ---@diagnostic disable: undefined-global
 --[[
 @description GFX - Count Items/Tracks and Toggle Show Item Details
-@version 260304.1530
+@version 260304.1650
 @author hsuanice
 @about
   Selection monitor HUD using native gfx (no ReaImGui required).
@@ -9,6 +9,11 @@
   Right-click: font size / dock / close
   Supports docking; remembers position, dock state, font size, panel state.
 @changelog
+  v260304.1650
+    - Fix: r.atexit(save_state) ensures dock state and position are saved even when
+      REAPER is closed without manually closing the script window
+    - Fix: save_state() now uses cached vars only (safe when gfx is already gone)
+    - Fix: floating position cached every frame so it's accurate at atexit time
   v260304.1530
     - Rewritten from ReaImGui → native gfx (no ReaImGui dependency)
     - Persistent window position, dock state, font size, panel state across restarts
@@ -78,6 +83,9 @@ local next_scan = 0.0
 local cur_w, cur_h = 0, 0
 local prev_cap     = 0
 local prev_dock    = dock_state  -- track dock state changes
+
+-- Cached position/dock (updated each frame; safe to read in atexit when gfx is gone)
+local cur_x, cur_y = win_x, win_y
 
 ------------------------------------------------------------
 -- Size helpers
@@ -177,18 +185,14 @@ local function ensure_size()
 end
 
 ------------------------------------------------------------
--- Save state
+-- Save state  (uses only cached vars — safe to call from atexit when gfx is gone)
 ------------------------------------------------------------
 local function save_state()
-  local cd = gfx.dock(-1)
-  if cd == 0 then
-    local x, y = gfx.clienttoscreen(0, 0)
-    r.SetExtState(EXT_NS, "WIN_X", tostring(x), true)
-    r.SetExtState(EXT_NS, "WIN_Y", tostring(y), true)
-  end
-  r.SetExtState(EXT_NS, "DOCK_STATE",   tostring(cd),                true)
-  r.SetExtState(EXT_NS, "SHOW_DETAILS", show_details and "1" or "0", true)
-  r.SetExtState(EXT_NS, "FONT_SIZE",    tostring(font_size),         true)
+  r.SetExtState(EXT_NS, "DOCK_STATE",   tostring(dock_state),           true)
+  r.SetExtState(EXT_NS, "WIN_X",        tostring(cur_x),                true)
+  r.SetExtState(EXT_NS, "WIN_Y",        tostring(cur_y),                true)
+  r.SetExtState(EXT_NS, "SHOW_DETAILS", show_details and "1" or "0",    true)
+  r.SetExtState(EXT_NS, "FONT_SIZE",    tostring(font_size),            true)
 end
 
 ------------------------------------------------------------
@@ -317,8 +321,11 @@ local function loop()
 
   prev_cap = cap
 
-  -- Track dock state; if user dragged window out of docker, force resize
+  -- Update cached position and dock state every frame
   local cd = gfx.dock(-1)
+  if cd == 0 then
+    cur_x, cur_y = gfx.clienttoscreen(0, 0)  -- cache floating position
+  end
   if cd ~= prev_dock then
     if cd == 0 then cur_w, cur_h = 0, 0 end  -- just undocked → resize to content
     prev_dock  = cd
@@ -333,4 +340,5 @@ end
 ------------------------------------------------------------
 local init_h = PAD * 2 + lh()
 gfx.init("Selection Monitor", math.max(200, font_size * 16), init_h, dock_state, win_x, win_y)
+r.atexit(save_state)  -- always save on exit, even if REAPER closes the script
 r.defer(loop)
