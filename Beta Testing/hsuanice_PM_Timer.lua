@@ -1,6 +1,6 @@
 --[[
 @description PM Timer - Scene-aware Work Timer
-@version 260303.2253
+@version 260304.2252
 @author hsuanice
 @about
   Scene-aware toggle timer for the hsuanice PM system.
@@ -26,6 +26,85 @@
   All work items are locked (C_LOCK=1) after creation.
 
 @changelog
+  v260304.2252
+    - Project change detection: script now monitors EnumProjects(0) filename each
+      loop iteration. When the active project changes (close/reopen without
+      REAPER restart, or docked-script timing where project loads after the
+      script), state is reset and try_recover() runs automatically — no more
+      manual toggle required to trigger the resume dialog.
+
+  v260304.2240
+    - Crash recovery dialog: on startup, if a session was interrupted (crash /
+      unexpected REAPER close), shows: Resume / Finish & save / Discard.
+    - Heartbeat: every 60 s the active work item's D_LENGTH is silently updated
+      so crash recovery always has approximate timing (no undo entry).
+
+  v260304.2225
+    - Right-click menu: added "Fix Duration from item length"
+      Select stretched work item(s) in REAPER → right-click PM Timer →
+      Fix Duration; overwrites P_EXT:DURATION with current D_LENGTH so
+      InsightAnalyzer reads the corrected time after a crash/manual resize.
+
+  v260304.1300
+    - UI: "Scene:" label switches to "Day:" as soon as AAP mode is active (IDLE or
+      WORKING), not only when a work item is running
+
+  v260304.1200
+    - Fix: get_selected_folder_stats() now counts items on the parent folder track
+      itself (previously only child tracks were iterated; items placed directly on
+      the folder track were silently skipped)
+
+  v260304.1100
+    - Fix: gap between work items when using New Job / switching
+      finish_aap_item() now returns (end_time, end_pos); callers pass these as
+      a "chain" struct so the next item starts exactly where the previous ended
+      (D_POSITION = end_pos, last_start_time = end_time, no menu-delay gap)
+
+  v260304.1000
+    - "New Day" button renamed to "New Job" in AAP WORKING state
+    - New Job: finish current item → submenu [pre-prod | new day | wrap | custom]
+        pre-prod/wrap/custom → simple work item (no folder needed)
+        new day              → folder-based AAP start (select folder first)
+    - Extracted start_simple_aap_work() helper to avoid code duplication
+
+  v260303.2400
+    - AAP folder path: confirmation dialog pre-filled with auto-detected stats;
+      user can review/edit Items and Total Duration before creating the item
+    - Total Len format changed to H:M:S.ms (e.g. 3:42:41.996) in P_NOTES
+    - New: fmt_hms_ms() and parse_duration_str() helpers
+
+  v260303.2350
+    - AAP Start: two paths based on folder selection
+        Folder selected   → AAP with stats (item count / length / size) as before
+        No folder selected→ show [pre-prod | wrap] menu; create simple work item
+    - Fix: AAP-specific P_EXT metadata (AAP_DAY_NAME etc.) was silently lost because
+      create_work_item() locks the item (C_LOCK=1) before returning; fix: unlock →
+      write P_EXT → relock in action_start_aap()
+    - fix: finish_aap_item() P_NOTES omits Items/Size rows when no folder stats exist
+    - Fix: try_recover() now restores AAP state for all AAP work types (was "aap" only)
+    - New work types: pre-prod (orange), wrap (light blue)
+
+  v260303.2340
+    - Fix: get_selected_folder_stats() now counts items on the last child track
+      (break was firing before the item loop — moved to after)
+    - AAP WORKING UI simplified: removed 6-row display and dynamic window height;
+      uses standard 2-row layout with "Day: <name>" instead of "Scene:"
+    - WIN_H fixed at 140px in all states (no more gfx.init resize on state change)
+
+  v260303.2320
+    - Work Log track inserted at top of track list when created (AAP mode)
+    - AAP WORKING buttons: [New Day] [Break] [Finish] (+ 1 disabled)
+    - New Day: saves current session notes, immediately starts next AAP session
+      (user selects next folder track in REAPER before clicking)
+
+  v260303.2310
+    - AAP Mode: select a folder track → logs item count, total length, est. size
+    - AAP Start creates "AAP | <folder_name>" item on Work Log track
+    - AAP Finish writes P_NOTES (Items / Total Len / Est. Size / Work Time)
+    - Mode button (IDLE) cycles Dialog ↔ AAP ↔ Conform via existing menu
+    - Dynamic window height: 180px in AAP WORKING, 140px otherwise
+    - Recovery: AAP state persisted across REAPER restarts
+
   v260303.2253
     - Dialog mode hides aap/conform from work type menu
 
@@ -105,10 +184,12 @@ local r = reaper
 ----------------------------------------------------------------
 
 local WORK_COLORS = {
-  editing  = {255, 255, 0},      -- Yellow
-  denoise  = {255, 0, 255},      -- Magenta
-  aap      = {0, 0, 255},      -- blue
-  conform  = {0, 255, 0}         -- Green
+  editing   = {255, 255, 0},     -- Yellow
+  denoise   = {255, 0, 255},     -- Magenta
+  aap       = {0, 0, 255},       -- Blue
+  conform   = {0, 255, 0},       -- Green
+  ["pre-prod"] = {255, 140, 0},  -- Orange
+  wrap      = {100, 220, 255},   -- Light blue
 }
 
 -- ── Constants ──────────────────────────────────────────────────────────────
@@ -116,11 +197,15 @@ local NS                = "hsuanice_PM"
 local SCENE_TRACK_NAME  = "Scene Cut"
 local WORK_LOG_NAME     = "Work Log"
 local DURATION_LOG_NAME = "DurationOnly_Log"
-local WIN_W, WIN_H      = 560, 140
-local WORK_TYPES        = { "editing", "denoise", "conform", "aap", "double_check", "custom" }
-local SWITCH_TYPES      = { "editing", "denoise", "custom" }
-local MODE_TYPES        = { "Dialog", "AAP", "Conform" }
-local DATE_PAT          = "^%d%d%d%d%-%d%d%-%d%d$"  -- matches YYYY-MM-DD
+local WIN_W, WIN_H           = 560, 140
+local BYTES_PER_SECOND       = 144000
+local BYTES_PER_GB           = 1000000000
+local WORK_TYPES          = { "editing", "denoise", "conform", "aap", "double_check", "custom" }
+local SWITCH_TYPES        = { "editing", "denoise", "custom" }
+local MODE_TYPES          = { "Dialog", "AAP", "Conform" }
+local AAP_GENERAL_TYPES   = { "pre-prod", "wrap" }   -- used when no folder is selected in AAP mode
+local DATE_PAT            = "^%d%d%d%d%-%d%d%-%d%d$"  -- matches YYYY-MM-DD
+local HEARTBEAT_INTERVAL  = 60   -- seconds between silent D_LENGTH updates
 
 -- ── State ──────────────────────────────────────────────────────────────────
 local S = {
@@ -133,11 +218,17 @@ local S = {
   work_item_guid  = "",
   start_clock     = 0,        -- os.time() at session start (for display)
   last_start_time = 0,        -- time_precise() adjusted to session start (elapsed)
+  -- AAP mode fields
+  aap_day_name      = "",
+  aap_item_count    = 0,
+  aap_total_seconds = 0,
+  aap_est_size      = "",
 }
 
 -- ── Refresh + mouse state ──────────────────────────────────────────────────
-local last_draw_time  = 0
-local mouse_prev      = 0
+local last_draw_time      = 0
+local last_heartbeat_time = 0
+local mouse_prev          = 0
 local mouse_r_prev    = 0
 local BTN             = {}
 local running         = true
@@ -145,8 +236,16 @@ local win_x           = tonumber(r.GetExtState(NS, "WIN_X"))       or 100
 local win_y           = tonumber(r.GetExtState(NS, "WIN_Y"))       or 100
 local cur_dock        = tonumber(r.GetExtState(NS, "DOCK_STATE"))  or 0
 local last_dock       = cur_dock
+local last_proj_identity = nil  -- tracks active project for change detection
 
 -- ── Helpers ────────────────────────────────────────────────────────────────
+
+-- Returns a string that uniquely identifies the current project (its file path).
+-- Falls back to "" for unsaved/new projects. Used to detect project changes.
+local function get_proj_identity()
+  local _, fn = r.EnumProjects(0)
+  return fn or ""
+end
 local function elapsed_secs()
   if S.mode == "WORKING" then
     return math.max(0, r.time_precise() - S.last_start_time)
@@ -165,6 +264,33 @@ local function fmt_hms(secs)
     math.floor(secs / 3600),
     math.floor((secs % 3600) / 60),
     secs % 60)
+end
+
+-- Format seconds to H:MM:SS.mmm (includes milliseconds; no leading zero on hours)
+local function fmt_hms_ms(secs)
+  secs = math.max(0, secs)
+  local ms  = math.floor((secs % 1) * 1000 + 0.5)
+  if ms >= 1000 then ms = 999 end
+  secs = math.floor(secs)
+  return string.format("%d:%02d:%02d.%03d",
+    math.floor(secs / 3600),
+    math.floor((secs % 3600) / 60),
+    secs % 60, ms)
+end
+
+-- Parse "H:M:S.ms" or "H:M:S" string → seconds (float). Returns nil on failure.
+local function parse_duration_str(s)
+  if not s or s == "" then return nil end
+  s = s:match("^%s*(.-)%s*$")
+  local h, m, sec, ms = s:match("^(%d+):(%d+):(%d+)%.(%d+)$")
+  if h then
+    while #ms < 3 do ms = ms .. "0" end
+    ms = ms:sub(1, 3)
+    return tonumber(h)*3600 + tonumber(m)*60 + tonumber(sec) + tonumber(ms)/1000
+  end
+  h, m, sec = s:match("^(%d+):(%d+):(%d+)$")
+  if h then return tonumber(h)*3600 + tonumber(m)*60 + tonumber(sec) end
+  return nil
 end
 
 local function secs_since_midnight()
@@ -186,6 +312,8 @@ local function clear_active_extstate()
   for _, k in ipairs({
     "ACTIVE_WORK_ITEM_GUID", "ACTIVE_WORK_SCENE_GUID", "ACTIVE_WORK_SCENE_NAME",
     "ACTIVE_WORK_TYPE", "ACTIVE_WORK_START_CLOCK", "ACTIVE_WORK_OSTIME_START",
+    "ACTIVE_AAP_DAY_NAME", "ACTIVE_AAP_ITEM_COUNT",
+    "ACTIVE_AAP_TOTAL_SECONDS", "ACTIVE_AAP_EST_SIZE",
   }) do
     r.SetProjExtState(0, NS, k, "")
   end
@@ -214,6 +342,8 @@ local function reset_state()
   S.scene_start_tc = ""
   S.work_type = ""; S.work_item_guid = ""
   S.start_clock = 0; S.last_start_time = 0
+  S.aap_day_name = ""; S.aap_item_count = 0
+  S.aap_total_seconds = 0; S.aap_est_size = ""
 end
 
 local function get_item_by_guid(guid)
@@ -237,12 +367,12 @@ local function get_track_by_name(name)
   return nil
 end
 
-local function get_or_create_folder_track(name, allow_create)
+local function get_or_create_folder_track(name, allow_create, at_top)
   local t = get_track_by_name(name)
   if t then return t end
   if not allow_create then return nil end
 
-  local insert_idx = r.CountTracks(0)
+  local insert_idx = (at_top) and 0 or r.CountTracks(0)
   r.InsertTrackAtIndex(insert_idx, true)
   t = r.GetTrack(0, insert_idx)
   r.GetSetMediaTrackInfo_String(t, "P_NAME", name, true)
@@ -468,8 +598,195 @@ local function create_work_item(date_track, scene_guid, item_name, work_type, po
   return item
 end
 
+-- ── AAP helpers ────────────────────────────────────────────────────────────
+
+local function seconds_to_size_string(seconds)
+  local bytes = seconds * BYTES_PER_SECOND
+  local gb    = bytes / BYTES_PER_GB
+  if gb < 1 then
+    return string.format("%.1f MB", bytes / 1000000)
+  else
+    return string.format("%.2f GB", gb)
+  end
+end
+
+local function get_selected_folder_stats()
+  local track = r.GetSelectedTrack(0, 0)
+  if not track then return nil, "No track selected" end
+
+  local depth = r.GetMediaTrackInfo_Value(track, "I_FOLDERDEPTH")
+  if depth ~= 1 then return nil, "Selected track is not a folder" end
+
+  local total_items   = 0
+  local total_seconds = 0
+  local track_index   = math.floor(r.GetMediaTrackInfo_Value(track, "IP_TRACKNUMBER")) - 1
+  local total_tracks  = r.CountTracks(0)
+
+  -- Count items directly on the parent folder track itself
+  for j = 0, r.CountTrackMediaItems(track) - 1 do
+    local item = r.GetTrackMediaItem(track, j)
+    total_items   = total_items   + 1
+    total_seconds = total_seconds + r.GetMediaItemInfo_Value(item, "D_LENGTH")
+  end
+
+  for i = track_index + 1, total_tracks - 1 do
+    local t = r.GetTrack(0, i)
+    local d = r.GetMediaTrackInfo_Value(t, "I_FOLDERDEPTH")
+    local ic = r.CountTrackMediaItems(t)
+    for j = 0, ic - 1 do
+      local item = r.GetTrackMediaItem(t, j)
+      total_items   = total_items   + 1
+      total_seconds = total_seconds + r.GetMediaItemInfo_Value(item, "D_LENGTH")
+    end
+    if d == -1 then break end
+  end
+
+  local _, name = r.GetTrackName(track)
+  return { name = name, item_count = total_items, total_seconds = total_seconds }
+end
+
+-- Create a simple AAP work item (no folder stats) on the Work Log track.
+-- Used for pre-prod, wrap, and custom types.
+-- chain (optional): { end_time, end_pos } from finish_aap_item() for gap-free chaining.
+local function start_simple_aap_work(work_type, chain)
+  local parent_track = get_or_create_folder_track(WORK_LOG_NAME, true, true)
+  if not parent_track then
+    r.ShowMessageBox("Cannot create Work Log track.", "PM Timer", 0); return
+  end
+
+  local pos_secs    = (chain and chain.end_pos) or secs_since_midnight()
+  local now_clock   = os.time()
+  local now_precise = (chain and chain.end_time) or r.time_precise()
+
+  r.Undo_BeginBlock()
+  ensure_folder_track(parent_track)
+  local date_track = get_or_create_date_track(parent_track, os.date("%Y-%m-%d"))
+  local item       = create_work_item(date_track, "", work_type, work_type, pos_secs, now_clock)
+  local item_guid  = get_item_guid(item)
+  r.Undo_EndBlock("PM: Start AAP session", -1)
+  r.UpdateArrange()
+
+  S.mode              = "WORKING"
+  S.scene_guid        = ""; S.scene_name = ""
+  S.work_type         = work_type
+  S.work_item_guid    = item_guid
+  S.start_clock       = now_clock
+  S.last_start_time   = now_precise
+  S.aap_day_name      = ""
+  S.aap_item_count    = 0
+  S.aap_total_seconds = 0
+  S.aap_est_size      = ""
+
+  set_extstate("ACTIVE_WORK_ITEM_GUID",     item_guid)
+  set_extstate("ACTIVE_WORK_SCENE_GUID",    "")
+  set_extstate("ACTIVE_WORK_SCENE_NAME",    "")
+  set_extstate("ACTIVE_WORK_TYPE",          work_type)
+  set_extstate("ACTIVE_WORK_START_CLOCK",   tostring(now_clock))
+  set_extstate("ACTIVE_WORK_OSTIME_START",  tostring(now_clock))
+  set_extstate("ACTIVE_AAP_DAY_NAME",      "")
+  set_extstate("ACTIVE_AAP_ITEM_COUNT",    "0")
+  set_extstate("ACTIVE_AAP_TOTAL_SECONDS", "0")
+  set_extstate("ACTIVE_AAP_EST_SIZE",      "")
+end
+
+-- chain (optional): { end_time, end_pos } from finish_aap_item() for gap-free chaining.
+local function action_start_aap(chain)
+  -- Determine if a folder track is selected → AAP path; else → general work path.
+  local stats = get_selected_folder_stats()  -- returns nil if no valid folder selected
+
+  if not stats then
+    -- No folder: general pre-production work → show type menu
+    gfx.x, gfx.y = 10, 60
+    local choice = gfx.showmenu(table.concat(AAP_GENERAL_TYPES, "|"))
+    if choice == 0 then return end
+    start_simple_aap_work(AAP_GENERAL_TYPES[choice], chain)
+    return
+  end
+
+  local parent_track = get_or_create_folder_track(WORK_LOG_NAME, true, true)
+  if not parent_track then
+    r.ShowMessageBox("Cannot create Work Log track.", "PM Timer", 0)
+    return
+  end
+
+  -- ── Folder selected: show confirmation dialog ─────────────────────────────
+  local ok, raw = r.GetUserInputs("AAP Recording Day", 2,
+    "Items:,Total Duration (H:M:S.ms):",
+    tostring(stats.item_count) .. "," .. fmt_hms_ms(stats.total_seconds))
+  if not ok then return end
+
+  local parts = {}
+  local n = 0
+  for f in (raw .. ","):gmatch("([^,]*),") do
+    n = n + 1; parts[n] = f:match("^%s*(.-)%s*$")
+  end
+
+  local items_n = tonumber(parts[1])
+  if not items_n or items_n < 0 then
+    r.ShowMessageBox("Invalid item count.", "PM Timer — AAP", 0); return
+  end
+  local dur_secs = parse_duration_str(parts[2])
+  if not dur_secs then
+    r.ShowMessageBox("Invalid duration.\nFormat: H:M:S.ms  (e.g. 3:42:41.996)", "PM Timer — AAP", 0); return
+  end
+
+  local aap_item_count = math.floor(items_n)
+  local aap_total_secs = dur_secs
+  local aap_day_name   = stats.name
+  local work_type      = "aap"
+  local item_name      = "AAP | " .. stats.name
+  local est_size       = seconds_to_size_string(aap_total_secs)
+
+  -- ── Create item ──────────────────────────────────────────────────────────
+  local pos_secs    = (chain and chain.end_pos) or secs_since_midnight()
+  local now_clock   = os.time()
+  local now_precise = (chain and chain.end_time) or r.time_precise()
+
+  r.Undo_BeginBlock()
+  ensure_folder_track(parent_track)
+  local date_track = get_or_create_date_track(parent_track, os.date("%Y-%m-%d"))
+  local item       = create_work_item(date_track, "", item_name, work_type, pos_secs, now_clock)
+
+  -- Fix: create_work_item() locks the item (C_LOCK=1); unlock to write AAP P_EXT, then relock.
+  r.SetMediaItemInfo_Value(item, "C_LOCK", 0)
+  set_item_ext(item, "AAP_DAY_NAME",      aap_day_name)
+  set_item_ext(item, "AAP_ITEM_COUNT",    tostring(aap_item_count))
+  set_item_ext(item, "AAP_TOTAL_SECONDS", tostring(aap_total_secs))
+  set_item_ext(item, "AAP_EST_SIZE",      est_size)
+  r.SetMediaItemInfo_Value(item, "C_LOCK", 1)
+
+  local item_guid = get_item_guid(item)
+  r.Undo_EndBlock("PM: Start AAP session", -1)
+  r.UpdateArrange()
+
+  -- ── Update state ─────────────────────────────────────────────────────────
+  S.mode              = "WORKING"
+  S.scene_guid        = ""; S.scene_name = ""
+  S.work_type         = work_type
+  S.work_item_guid    = item_guid
+  S.start_clock       = now_clock
+  S.last_start_time   = now_precise
+  S.aap_day_name      = aap_day_name
+  S.aap_item_count    = aap_item_count
+  S.aap_total_seconds = aap_total_secs
+  S.aap_est_size      = est_size
+
+  set_extstate("ACTIVE_WORK_ITEM_GUID",     item_guid)
+  set_extstate("ACTIVE_WORK_SCENE_GUID",    "")
+  set_extstate("ACTIVE_WORK_SCENE_NAME",    "")
+  set_extstate("ACTIVE_WORK_TYPE",          work_type)
+  set_extstate("ACTIVE_WORK_START_CLOCK",   tostring(now_clock))
+  set_extstate("ACTIVE_WORK_OSTIME_START",  tostring(now_clock))
+  set_extstate("ACTIVE_AAP_DAY_NAME",      aap_day_name)
+  set_extstate("ACTIVE_AAP_ITEM_COUNT",    tostring(aap_item_count))
+  set_extstate("ACTIVE_AAP_TOTAL_SECONDS", tostring(aap_total_secs))
+  set_extstate("ACTIVE_AAP_EST_SIZE",      est_size)
+end
+
 -- ── Actions ────────────────────────────────────────────────────────────────
 local function action_start()
+  if S.work_mode == "AAP" then action_start_aap(); return end
+
   -- 1. Find Scene Cut track (if it exists)
   local scene_track = get_track_by_name(SCENE_TRACK_NAME)
 
@@ -580,6 +897,69 @@ local function finish_current_item(end_reason, keep_active)
   return end_time, end_pos
 end
 
+-- ── AAP finish ─────────────────────────────────────────────────────────────
+-- Returns (end_time, end_pos) so callers can chain the next item with no gap.
+local function finish_aap_item(end_reason)
+  local end_time  = r.time_precise()
+  local duration  = math.max(end_time - S.last_start_time, 0)
+  local work_secs = math.floor(duration + 0.5)
+  local end_pos   = nil
+
+  local item = get_item_by_guid(S.work_item_guid)
+  if item then
+    local start_pos = r.GetMediaItemInfo_Value(item, "D_POSITION")
+    end_pos = start_pos + duration
+    local notes
+    if S.aap_item_count > 0 or S.aap_total_seconds > 0 then
+      notes = string.format(
+        "Items      : %d\nTotal Len  : %s\nEst. Size  : %s\nWork Time  : %s",
+        S.aap_item_count, fmt_hms_ms(S.aap_total_seconds),
+        S.aap_est_size, fmt_hms(work_secs))
+    else
+      notes = string.format("Work Time  : %s", fmt_hms(work_secs))
+    end
+    r.Undo_BeginBlock()
+    r.SetMediaItemInfo_Value(item, "C_LOCK",   0)
+    r.SetMediaItemInfo_Value(item, "D_LENGTH", duration)
+    set_item_ext(item, "END_REASON",       end_reason)
+    set_item_ext(item, "END_CLOCK",        tostring(os.time()))
+    set_item_ext(item, "DURATION",         tostring(duration))
+    set_item_ext(item, "AAP_WORK_SECONDS", tostring(work_secs))
+    r.GetSetMediaItemInfo_String(item, "P_NOTES", notes, true)
+    r.UpdateItemInProject(item)
+    r.SetMediaItemInfo_Value(item, "C_LOCK", 1)
+    r.Undo_EndBlock("PM: " .. end_reason .. " AAP session", -1)
+    r.UpdateArrange()
+  end
+  clear_active_extstate()
+  reset_state()
+  return end_time, end_pos
+end
+
+-- Finish current AAP item and immediately start the next one.
+-- Menu: [pre-prod | new day | wrap | custom]
+--   new day        → folder-based AAP start (select folder in REAPER first)
+--   pre-prod / wrap → simple work item, no folder stats needed
+--   custom         → ask for name, then simple work item
+local AAP_NEW_JOB_MENU = { "pre-prod", "new day", "wrap", "custom" }
+local function action_aap_new_job()
+  local end_time, end_pos = finish_aap_item("new_job")
+  local chain = end_time and { end_time = end_time, end_pos = end_pos } or nil
+  gfx.x, gfx.y = 10, 60
+  local choice = gfx.showmenu(table.concat(AAP_NEW_JOB_MENU, "|"))
+  if choice == 0 then return end
+  local sel = AAP_NEW_JOB_MENU[choice]
+  if sel == "new day" then
+    action_start_aap(chain)
+  elseif sel == "custom" then
+    local ok, val = r.GetUserInputs("Custom Work Type", 1, "Work type:", "")
+    if not ok or val:match("^%s*$") then return end
+    start_simple_aap_work(val:match("^%s*(.-)%s*$"), chain)
+  else
+    start_simple_aap_work(sel, chain)
+  end
+end
+
 -- ── Sync work item names ────────────────────────────────────────────────────
 -- Rebuilds take names for all Scene Mode work items (those with P_EXT:SCENE_GUID).
 -- Project Mode items (no SCENE_GUID) are naturally skipped by the sg ~= "" check.
@@ -656,8 +1036,14 @@ local function sync_work_item_names()
   end
 end
 
-local function action_finish() finish_current_item("finish"); sync_work_item_names() end
-local function action_break()  finish_current_item("break");  sync_work_item_names() end
+local function action_finish()
+  if S.work_mode == "AAP" then finish_aap_item("finish")
+  else finish_current_item("finish"); sync_work_item_names() end
+end
+local function action_break()
+  if S.work_mode == "AAP" then finish_aap_item("break")
+  else finish_current_item("break"); sync_work_item_names() end
+end
 
 local function action_switch_type()
   if S.mode ~= "WORKING" then return end
@@ -813,6 +1199,47 @@ local function action_switch_mode()
   if choice == 0 then return end
   local mode = MODE_TYPES[choice] or "Dialog"
   set_work_mode(mode)
+end
+
+-- ── Fix Duration ────────────────────────────────────────────────────────────
+-- For each selected REAPER item that has P_EXT:WORK_TYPE set,
+-- overwrite P_EXT:DURATION with the item's current D_LENGTH.
+-- Use this after manually stretching a work item (e.g. after a crash recovery).
+local function action_fix_duration()
+  local count = r.CountSelectedMediaItems(0)
+  if count == 0 then
+    r.ShowMessageBox(
+      "No items selected.\nSelect the work item(s) you stretched, then run Fix Duration.",
+      "Fix Duration", 0)
+    return
+  end
+
+  local fixed   = 0
+  local skipped = 0
+
+  r.Undo_BeginBlock()
+  for i = 0, count - 1 do
+    local item = r.GetSelectedMediaItem(0, i)
+    local _, wt = r.GetSetMediaItemInfo_String(item, "P_EXT:WORK_TYPE", "", false)
+    if wt ~= "" then
+      local d_len = r.GetMediaItemInfo_Value(item, "D_LENGTH")
+      r.SetMediaItemInfo_Value(item, "C_LOCK", 0)
+      set_item_ext(item, "DURATION", tostring(d_len))
+      r.UpdateItemInProject(item)
+      r.SetMediaItemInfo_Value(item, "C_LOCK", 1)
+      fixed = fixed + 1
+    else
+      skipped = skipped + 1
+    end
+  end
+  r.Undo_EndBlock("PM: Fix Duration from item length", -1)
+  r.UpdateArrange()
+
+  local msg = string.format("Fixed %d item(s).", fixed)
+  if skipped > 0 then
+    msg = msg .. string.format("\nSkipped %d item(s) — no WORK_TYPE metadata.", skipped)
+  end
+  r.ShowMessageBox(msg, "Fix Duration", 0)
 end
 
 ----------------------------------------------------------------
@@ -1043,42 +1470,55 @@ local function draw_btn_disabled(x, y, w, h, label)
 end
 
 local function draw()
+  local aap_working = (S.work_mode == "AAP" and S.mode == "WORKING")
+
   gfx.setfont(1)
   gfx.set(0.15, 0.15, 0.15, 1)
   gfx.rect(0, 0, WIN_W, WIN_H, 1)
   BTN = {}
 
-  -- ── Info row ────────────────────────────────────────────────────────────
-  local name_disp = S.scene_name
-  if #name_disp > 18 then name_disp = name_disp:sub(1, 17) .. "..." end
-  local type_disp = (S.work_type ~= "") and S.work_type or "---"
-  if #type_disp > 10 then type_disp = type_disp:sub(1, 9) .. "..." end
-  local mode_disp = (S.work_mode ~= "") and S.work_mode or "Dialog"
-  local start_disp = (S.mode == "WORKING") and fmt_clock(S.start_clock) or "--:--:--"
+  -- ── Info rows ───────────────────────────────────────────────────────────
+  do
+    -- 2-row display: in AAP mode show "Day:" instead of "Scene:"
+    local scene_label
+    local name_disp
+    if S.work_mode == "AAP" then
+      scene_label = "  |  Day: "
+      name_disp   = S.aap_day_name ~= "" and S.aap_day_name or "---"
+    else
+      scene_label = "  |  Scene: "
+      name_disp   = S.scene_name
+    end
+    if #name_disp > 18 then name_disp = name_disp:sub(1, 17) .. "..." end
+    local type_disp  = (S.work_type ~= "") and S.work_type or "---"
+    if #type_disp > 10 then type_disp = type_disp:sub(1, 9) .. "..." end
+    local mode_disp  = (S.work_mode ~= "") and S.work_mode or "Dialog"
+    local start_disp = (S.mode == "WORKING") and fmt_clock(S.start_clock) or "--:--:--"
 
-  gfx.setfont(3)
-  gfx.x, gfx.y = 10, 12
+    gfx.setfont(3)
+    gfx.x, gfx.y = 10, 12
 
-  gfx.set(0.7, 0.7, 0.7, 1); gfx.drawstr("Mode: ")
-  gfx.set(1,   1,   1,   1); gfx.drawstr(mode_disp)
-  gfx.set(0.7, 0.7, 0.7, 1); gfx.drawstr("  |  Scene: ")
-  gfx.set(1,   1,   1,   1); gfx.drawstr(name_disp ~= "" and name_disp or "---")
-  gfx.set(0.7, 0.7, 0.7, 1); gfx.drawstr("  |  Type: ")
-  gfx.set(1,   1,   1,   1); gfx.drawstr(type_disp)
-  gfx.set(0.7, 0.7, 0.7, 1); gfx.drawstr("  |  Status: ")
-  if S.mode == "WORKING" then
-    gfx.set(0.2, 1.0, 0.2, 1); gfx.drawstr("WORKING")
-  else
-    gfx.set(0.7, 0.7, 0.7, 1); gfx.drawstr("IDLE")
+    gfx.set(0.7, 0.7, 0.7, 1); gfx.drawstr("Mode: ")
+    gfx.set(1,   1,   1,   1); gfx.drawstr(mode_disp)
+    gfx.set(0.7, 0.7, 0.7, 1); gfx.drawstr(scene_label)
+    gfx.set(1,   1,   1,   1); gfx.drawstr(name_disp)
+    gfx.set(0.7, 0.7, 0.7, 1); gfx.drawstr("  |  Type: ")
+    gfx.set(1,   1,   1,   1); gfx.drawstr(type_disp)
+    gfx.set(0.7, 0.7, 0.7, 1); gfx.drawstr("  |  Status: ")
+    if S.mode == "WORKING" then
+      gfx.set(0.2, 1.0, 0.2, 1); gfx.drawstr("WORKING")
+    else
+      gfx.set(0.7, 0.7, 0.7, 1); gfx.drawstr("IDLE")
+    end
+
+    gfx.x, gfx.y = 10, 28
+    gfx.set(0.7, 0.7, 0.7, 1); gfx.drawstr("Start: ")
+    gfx.set(1,   1,   1,   1); gfx.drawstr(start_disp)
+    gfx.set(0.7, 0.7, 0.7, 1); gfx.drawstr("  |  Elapsed: ")
+    gfx.set(0.2, 0.8, 1.0, 1); gfx.drawstr(fmt_hms(elapsed_secs()))
+
+    sep(44)
   end
-
-  gfx.x, gfx.y = 10, 28
-  gfx.set(0.7, 0.7, 0.7, 1); gfx.drawstr("Start: ")
-  gfx.set(1,   1,   1,   1); gfx.drawstr(start_disp)
-  gfx.set(0.7, 0.7, 0.7, 1); gfx.drawstr("  |  Elapsed: ")
-  gfx.set(0.2, 0.8, 1.0, 1); gfx.drawstr(fmt_hms(elapsed_secs()))
-
-  sep(44)
 
   -- ── Horizontal buttons ──────────────────────────────────────────────────
   local btn_w   = 129
@@ -1087,8 +1527,7 @@ local function draw()
   local btn_gap = 8
   local btn_x0  = 10
 
-  local working = (S.mode == "WORKING")
-  local idle    = (S.mode == "IDLE")
+  local dlg_working = (S.mode == "WORKING" and not aap_working)
 
   gfx.setfont(1)
   local function btn_x(i) return btn_x0 + (i - 1) * (btn_w + btn_gap) end
@@ -1098,7 +1537,12 @@ local function draw()
     table.insert(BTN, { rect = draw_btn(btn_x(i), btn_y, btn_w, btn_h, label), action = action })
   end
 
-  if working then
+  if aap_working then
+    add_btn(1, "New Job",  action_aap_new_job)
+    add_btn(2, "Break",    action_break)
+    add_btn(3, "Finish",   action_finish)
+    draw_btn_disabled(btn_x(4), btn_y, btn_w, btn_h, "")
+  elseif dlg_working then
     add_btn(1, "Switch Scene", action_switch_scene)
     add_btn(2, "Switch Type",  action_switch_type)
     add_btn(3, "Break",        action_break)
@@ -1131,16 +1575,19 @@ local function handle_mouse()
   end
   mouse_prev = mb
 
-  -- Right click: Dock / Undock
+  -- Right click: Dock / Undock + Fix Duration
   local rb = (gfx.mouse_cap & 2) ~= 0 and 1 or 0
   if rb == 1 and mouse_r_prev == 0 then
     local is_docked = cur_dock ~= 0
-    local choice = gfx.showmenu(is_docked and "Undock window" or "Dock window")
+    local dock_label = is_docked and "Undock window" or "Dock window"
+    local choice = gfx.showmenu(dock_label .. "|Fix Duration from item length")
     if choice == 1 then
       gfx.dock(is_docked and 0 or 1)
       cur_dock = gfx.dock(-1)
       r.SetExtState(NS, "DOCK_STATE", tostring(cur_dock), true)
       last_dock = cur_dock
+    elseif choice == 2 then
+      action_fix_duration()
     end
   end
   mouse_r_prev = rb
@@ -1167,22 +1614,28 @@ local function handle_close()
 end
 
 -- ── Recovery ───────────────────────────────────────────────────────────────
+-- Called at startup. If an ACTIVE_WORK_ITEM_GUID exists, a session was
+-- interrupted (crash / unexpected REAPER close). Shows a dialog:
+--   Yes    = Resume  — continue timing from original start
+--   No     = Finish  — save item with D_LENGTH from last heartbeat
+--   Cancel = Discard — mark item as aborted, clear state
 local function try_recover()
   S.work_mode = get_work_mode()
   local guid = get_extstate("ACTIVE_WORK_ITEM_GUID")
   if not guid then return end
 
-  if not get_item_by_guid(guid) then
+  local item = get_item_by_guid(guid)
+  if not item then
     clear_active_extstate(); return
   end
 
-  S.mode           = "WORKING"
+  -- Restore state so the dialog can show scene/type info
   S.work_item_guid = guid
   S.scene_guid     = get_extstate("ACTIVE_WORK_SCENE_GUID") or ""
   S.scene_name     = get_extstate("ACTIVE_WORK_SCENE_NAME") or ""
   S.scene_start_tc = ""
   S.work_type      = get_extstate("ACTIVE_WORK_TYPE")       or ""
-  S.start_clock    = tonumber(get_extstate("ACTIVE_WORK_START_CLOCK"))  or os.time()
+  S.start_clock    = tonumber(get_extstate("ACTIVE_WORK_START_CLOCK")) or os.time()
 
   if S.scene_guid ~= "" then
     local sc = get_scene_info_by_guid(S.scene_guid)
@@ -1194,6 +1647,56 @@ local function try_recover()
     S.last_start_time = r.time_precise() - (os.time() - ostime_start)
   else
     S.last_start_time = r.time_precise()
+  end
+
+  if S.work_mode == "AAP" then
+    S.aap_day_name      = get_extstate("ACTIVE_AAP_DAY_NAME")           or ""
+    S.aap_item_count    = tonumber(get_extstate("ACTIVE_AAP_ITEM_COUNT")) or 0
+    S.aap_total_seconds = tonumber(get_extstate("ACTIVE_AAP_TOTAL_SECONDS")) or 0
+    S.aap_est_size      = get_extstate("ACTIVE_AAP_EST_SIZE")           or ""
+  end
+
+  -- D_LENGTH was kept current by heartbeat — use it as the recorded duration
+  local recorded_len = r.GetMediaItemInfo_Value(item, "D_LENGTH")
+  local scene_info   = (S.scene_name ~= "") and (S.scene_name .. " | ") or ""
+  local msg = string.format(
+    "Session was interrupted (crash / unexpected close):\n%s%s\n\n"
+    .. "Recorded so far: ~%s\n\n"
+    .. "Yes    = Resume timer\n"
+    .. "No     = Finish & save (keep recorded time)\n"
+    .. "Cancel = Discard (mark as aborted)",
+    scene_info, S.work_type, fmt_hms(recorded_len))
+
+  local ret = r.ShowMessageBox(msg, "PM Timer — Recover Interrupted Session", 3)
+
+  if ret == 6 then
+    -- ── Resume: restore WORKING state and continue ─────────────────────────
+    S.mode = "WORKING"
+
+  elseif ret == 7 then
+    -- ── Finish: keep D_LENGTH from heartbeat, add end metadata ────────────
+    r.Undo_BeginBlock()
+    r.SetMediaItemInfo_Value(item, "C_LOCK", 0)
+    -- D_LENGTH already correct from heartbeat; just tag it
+    set_item_ext(item, "END_REASON", "interrupted_finish")
+    set_item_ext(item, "END_CLOCK",  tostring(os.time()))
+    set_item_ext(item, "DURATION",   tostring(recorded_len))
+    r.UpdateItemInProject(item)
+    r.SetMediaItemInfo_Value(item, "C_LOCK", 1)
+    r.Undo_EndBlock("PM: Finish interrupted session", -1)
+    clear_active_extstate()
+    reset_state()
+
+  else
+    -- ── Discard: mark aborted, clear state ────────────────────────────────
+    r.Undo_BeginBlock()
+    r.SetMediaItemInfo_Value(item, "C_LOCK", 0)
+    set_item_ext(item, "END_REASON", "aborted")
+    r.UpdateItemInProject(item)
+    r.SetMediaItemInfo_Value(item, "C_LOCK", 1)
+    r.Undo_EndBlock("PM: Abort interrupted session", -1)
+    clear_active_extstate()
+    reset_state()
   end
 end
 
@@ -1219,6 +1722,19 @@ local function loop()
     end
   end
 
+  -- Detect project change: close/reopen without REAPER restart, or late project
+  -- load (script docked → runs before project finishes loading).
+  local cur_proj_id = get_proj_identity()
+  if cur_proj_id ~= last_proj_identity then
+    last_proj_identity = cur_proj_id
+    reset_state()
+    try_recover()
+    sync_work_item_names()
+    sync_work_item_colors()
+    draw()
+    last_draw_time = r.time_precise()
+  end
+
   handle_mouse()
 
   -- Track window position and dock state each frame so they survive close/reopen.
@@ -1236,11 +1752,26 @@ local function loop()
     last_draw_time = now
   end
 
+  -- Heartbeat: silently keep D_LENGTH current every 60 s so that if REAPER
+  -- crashes the item retains approximate timing for crash recovery.
+  if S.mode == "WORKING" and (now - last_heartbeat_time) >= HEARTBEAT_INTERVAL then
+    local hb_item = get_item_by_guid(S.work_item_guid)
+    if hb_item then
+      local elapsed = math.max(0, r.time_precise() - S.last_start_time)
+      r.SetMediaItemInfo_Value(hb_item, "C_LOCK",   0)
+      r.SetMediaItemInfo_Value(hb_item, "D_LENGTH", elapsed)
+      r.UpdateItemInProject(hb_item)
+      r.SetMediaItemInfo_Value(hb_item, "C_LOCK",   1)
+    end
+    last_heartbeat_time = now
+  end
+
   r.defer(loop)
 end
 
 -- ── Entry ──────────────────────────────────────────────────────────────────
 try_recover()
+last_proj_identity = get_proj_identity()  -- lock in current project after recovery
 gfx.init("hsuanice PM Timer", WIN_W, WIN_H, cur_dock, win_x, win_y)
 setup_fonts()
 draw()
