@@ -1,6 +1,6 @@
 --[[
 @description PM Scene Analyzer
-@version 260302.2100
+@version 260305.2100
 @author hsuanice
 @about
   PM System - Phase 1, single-file implementation.
@@ -26,6 +26,24 @@
       stamps P_EXT:SCENE_ID on each one.
 
 @changelog
+  v260305.2100
+    - New: write_scene_note() now also sets the scene item's take name (P_NAME)
+      from the first line of P_NOTES, so the scene name appears on the timeline.
+      If the item has no take, an empty take is added to hold the name.
+
+  v260305.1930
+    - New: analyze_scenes() now writes metadata into each Scene Cut item's note.
+      Format (first line = scene name, preserved or "(no name)"):
+        Range    : <start> - <end>
+        Length   : <duration>
+        Shots    : <n>
+        Src Cnt  : <n>
+        Src Len  : <duration>
+      Old key=value lines (shots=, src_cnt=, src_len=) are also stripped on update.
+    - Selective update: if any Scene Cut items are selected, only those are updated.
+      If nothing is selected, all scenes are updated.
+    - Undo block wraps the note writes ("PM: Update scene metadata notes").
+
   v260302.2100
     - Output: replaced fixed-width table with paragraph-style per-scene blocks
       (#index  Name / Range / Length / Shots / Src Cnt / Src Len)
@@ -93,7 +111,9 @@ local function get_item_name(item)
     if name and name ~= "" then return name end
   end
   local _, notes = r.GetSetMediaItemInfo_String(item, "P_NOTES", "", false)
-  return (notes and notes ~= "") and notes or ""
+  if not notes or notes == "" then return "" end
+  -- Return only the first line (scene name); ignore metadata lines below it.
+  return notes:match("^([^\n]+)") or ""
 end
 
 local function get_item_ext(item, key)
@@ -145,6 +165,59 @@ local function find_folder_children(folder_name)
   return tracks
 end
 
+-- ── Scene Note Writer ──────────────────────────────────────────────────────
+-- Writes computed scene metadata into the scene item's P_NOTES.
+-- First line = scene name (preserved or "(no name)").
+-- Remaining metadata lines are overwritten; other user lines are kept.
+local function write_scene_note(scene_item, sc)
+  local _, note = r.GetSetMediaItemInfo_String(scene_item, "P_NOTES", "", false)
+
+  local lines = {}
+  for line in ((note or "") .. "\n"):gmatch("([^\n]*)\n") do
+    table.insert(lines, line)
+  end
+
+  -- First line = scene name; preserve it or default to "(no name)"
+  local scene_name = (lines[1] and lines[1] ~= "") and lines[1] or "(no name)"
+
+  -- Strip all known metadata lines (new pretty format + old key=value format)
+  local function is_meta(line)
+    return line:match("^Range%s*:")
+        or line:match("^Length%s*:")
+        or line:match("^Shots%s*:")
+        or line:match("^Src Cnt%s*:")
+        or line:match("^Src Len%s*:")
+        or line:match("^[%w_]+=")
+  end
+
+  local other = {}
+  for i = 2, #lines do
+    if not is_meta(lines[i]) and lines[i] ~= "" then
+      table.insert(other, lines[i])
+    end
+  end
+
+  local parts = {
+    scene_name,
+    "Range    : " .. tc_pos(sc.start_pos) .. " - " .. tc_pos(sc.end_pos),
+    "Length   : " .. tc_dur(sc.duration),
+    "Shots    : " .. tostring(sc.shot_count),
+    "Src Cnt  : " .. tostring(sc.source_item_count),
+    "Src Len  : " .. tc_dur(sc.source_total_length),
+  }
+  for _, l in ipairs(other) do table.insert(parts, l) end
+
+  r.GetSetMediaItemInfo_String(scene_item, "P_NOTES", table.concat(parts, "\n"), true)
+
+  -- Set item name (take P_NAME) from scene name so it shows on the timeline.
+  -- If the item has no take, add an empty one to hold the name.
+  local take = r.GetActiveTake(scene_item)
+  if not take then take = r.AddTakeToMediaItem(scene_item) end
+  if take then r.GetSetMediaItemTakeInfo_String(take, "P_NAME", scene_name, true) end
+
+  r.UpdateItemInProject(scene_item)
+end
+
 -- ── Function 1: Scene Analyzer ─────────────────────────────────────────────
 local function analyze_scenes()
   r.ClearConsole()
@@ -171,6 +244,7 @@ local function analyze_scenes()
 
     local scene = {
       id                  = guid,
+      item                = item,
       name                = get_item_name(item),
       color               = get_item_color(item),
       start_pos           = pos,
@@ -279,6 +353,33 @@ local function analyze_scenes()
 
   log("")
   log("=== Done ===")
+
+  -- ── Write metadata into scene item notes ─────────────────────────────────
+  -- If any scene items are selected → update only those.
+  -- If none selected → update all scenes.
+  local selected_guids = {}
+  for i = 0, r.CountSelectedMediaItems(0) - 1 do
+    local sel = r.GetSelectedMediaItem(0, i)
+    if r.GetMediaItemTrack(sel) == scene_track then
+      selected_guids[get_item_guid(sel)] = true
+    end
+  end
+  local has_selection = next(selected_guids) ~= nil
+
+  r.Undo_BeginBlock()
+  local written = 0
+  for _, sc in ipairs(scenes) do
+    if not has_selection or selected_guids[sc.id] then
+      write_scene_note(sc.item, sc)
+      written = written + 1
+    end
+  end
+  r.Undo_EndBlock("PM: Update scene metadata notes", -1)
+
+  if written > 0 then
+    r.ShowConsoleMsg(string.format("Notes written: %d scene(s)\n", written))
+  end
+
   return scenes
 end
 
