@@ -1,6 +1,6 @@
 --[[
 @description PM Timer - Scene-aware Work Timer
-@version 260305.0110
+@version 260305.2000
 @author hsuanice
 @about
   Scene-aware toggle timer for the hsuanice PM system.
@@ -26,6 +26,48 @@
   All work items are locked (C_LOCK=1) after creation.
 
 @changelog
+  v260305.2000
+    - Fix: repeated metadata updates caused src_cnt/src_len to accumulate.
+      Root cause: Lua's %w pattern excludes underscore, so "src_cnt=" and
+      "src_len=" lines were not matched and were kept as "other" content,
+      then appended again on each update. Pattern changed to [%w_]+ to
+      correctly strip all key=value metadata lines before rewriting.
+
+  v260305.1945
+    - Fix: shots was always 0 because PICTURE_TRACK_NAME was "Picture" instead
+      of "Picture Cut". Renamed constant to match the actual track name.
+    - Fix: shot overlap detection now uses proper range overlap
+      (item_end > scene_start and item_start < scene_end) instead of
+      start-only check, so items straddling the scene boundary are counted.
+
+  v260305.1930
+    - Scene item notes now always start with the scene name on the first line.
+      If the note is empty or has no first line, "(no name)" is used as a placeholder.
+      Existing scene names are preserved when metadata is refreshed.
+    - "Update Scene Metadata" now supports multiple selected Scene Cut items.
+      All selected scenes on the Scene Cut track are updated in one action.
+      Result message reports the number of scenes updated.
+
+  v260305.0300
+    - New: Scene metadata auto-update on session start (Scene Mode only).
+      When starting a work session with a scene selected, the matching Scene Cut
+      item's note is updated with:
+        shots=   (items on "Picture" track within scene range)
+        src_cnt= (EDL items attributed to this scene)
+        src_len= (total EDL source length, HH:MM:SS:FF)
+      Attribution uses P_EXT:SCENE_ID (priority 1) or color+position (priority 2),
+      matching the InsightAnalyzer's EDL attribution logic.
+    - New: "Update Scene Metadata" right-click menu option (choice 5).
+      Manually refreshes the note on the currently selected Scene Cut item.
+    - New constants: EDL_FOLDER_NAME = "EDL", PICTURE_TRACK_NAME = "Picture".
+
+  v260305.0130
+    - New: get_proj_task() extracts the Task component (4th part) from the project
+      filename (YYMMDD----Project----Episode----Task----...).
+    - All newly created work items now store P_EXT:TASK (e.g. "Dialog") so that the
+      InsightAnalyzer can group them by task without re-parsing the item name.
+      Applies to: live sessions (create_work_item), Add Record (timed + duration-only).
+
   v260305.0110
     - Fix: Sync to Work Log now also removes orphaned WL items — if a log item is
       deleted from the source project, the next sync removes the corresponding item
@@ -262,6 +304,8 @@ local MODE_TYPES          = { "Dialog", "AAP", "Conform" }
 local AAP_GENERAL_TYPES   = { "pre-prod", "wrap" }   -- used when no folder is selected in AAP mode
 local DATE_PAT            = "^%d%d%d%d%-%d%d%-%d%d$"  -- matches YYYY-MM-DD
 local HEARTBEAT_INTERVAL  = 60   -- seconds between silent D_LENGTH updates
+local EDL_FOLDER_NAME     = "EDL"
+local PICTURE_TRACK_NAME  = "Picture Cut"
 
 -- ── State ──────────────────────────────────────────────────────────────────
 local S = {
@@ -424,6 +468,29 @@ local function get_track_by_name(name)
   return nil
 end
 
+-- Returns an array of all direct child tracks inside a named folder track.
+local function get_folder_children(folder_name)
+  local count     = r.CountTracks(0)
+  local tracks    = {}
+  local in_folder = false
+  local depth     = 0
+  for i = 0, count - 1 do
+    local t        = r.GetTrack(0, i)
+    local _, tname = r.GetTrackName(t)
+    local fd       = math.floor(r.GetMediaTrackInfo_Value(t, "I_FOLDERDEPTH"))
+    if not in_folder then
+      if tname == folder_name and fd == 1 then
+        in_folder = true; depth = 1
+      end
+    else
+      table.insert(tracks, t)
+      depth = depth + fd
+      if depth <= 0 then break end
+    end
+  end
+  return tracks
+end
+
 -- Find a track by name in a specific project (uses explicit proj ptr, not current-project "0").
 local function find_track_in_proj(proj, name)
   for i = 0, r.CountTracks(proj) - 1 do
@@ -477,6 +544,19 @@ local function get_proj_prefix()
   if not episode or episode == "" then return "" end
   if not task    or task    == "" then return "" end
   return project .. " " .. episode .. " " .. task .. " | "
+end
+
+-- Returns just the Task component (4th part) of the project name, e.g. "Dialog".
+local function get_proj_task()
+  local _, proj_path = r.EnumProjects(-1)
+  if not proj_path or proj_path == "" then return "" end
+  local name = proj_path:match("([^/\\]+)$") or proj_path
+  name = name:gsub("%.%a+$", "")
+  local parts = {}
+  for p in (name .. "----"):gmatch("(.-)%-%-%-%-") do
+    parts[#parts + 1] = p
+  end
+  return parts[4] or ""
 end
 
 -- Prepend the project prefix to name. No-ops if prefix is empty or already present.
@@ -690,6 +770,8 @@ local function create_work_item(date_track, scene_guid, item_name, work_type, po
   end
   set_item_ext(item, "WORK_TYPE",   work_type)
   set_item_ext(item, "START_CLOCK", tostring(start_clock or os.time()))
+  local _task = get_proj_task()
+  if _task ~= "" then set_item_ext(item, "TASK", _task) end
 
   r.UpdateItemInProject(item)
   apply_color_from_type(item)
@@ -882,6 +964,100 @@ local function action_start_aap(chain)
   set_extstate("ACTIVE_AAP_EST_SIZE",      est_size)
 end
 
+-- ── Scene Metadata ──────────────────────────────────────────────────────────
+-- Computes shots / src_cnt / src_len for a Scene Cut item and writes them into
+-- the item's note (P_NOTES) as key=value pairs, one per line.
+-- Existing shots/src_cnt/src_len lines are replaced; other note content kept.
+--
+-- shots   : items on PICTURE_TRACK_NAME whose start falls inside the scene range
+-- src_cnt : EDL folder items attributed to the scene (P_EXT:SCENE_ID or color+pos)
+-- src_len : total D_LENGTH of the attributed EDL items (formatted HH:MM:SS:FF)
+
+local function compute_scene_metadata(scene_item)
+  local scene_start = r.GetMediaItemInfo_Value(scene_item, "D_POSITION")
+  local scene_len   = r.GetMediaItemInfo_Value(scene_item, "D_LENGTH")
+  local scene_end   = scene_start + scene_len
+  local scene_color = math.floor(r.GetMediaItemInfo_Value(scene_item, "I_CUSTOMCOLOR"))
+  local scene_guid  = r.BR_GetMediaItemGUID(scene_item)
+
+  -- shots: Picture Cut items that overlap the scene range
+  local shots = 0
+  local pic_track = get_track_by_name(PICTURE_TRACK_NAME)
+  if pic_track then
+    for i = 0, r.CountTrackMediaItems(pic_track) - 1 do
+      local pitem      = r.GetTrackMediaItem(pic_track, i)
+      local item_start = r.GetMediaItemInfo_Value(pitem, "D_POSITION")
+      local item_end   = item_start + r.GetMediaItemInfo_Value(pitem, "D_LENGTH")
+      if item_end > scene_start and item_start < scene_end then shots = shots + 1 end
+    end
+  end
+
+  -- src_cnt / src_len: EDL items attributed to this scene
+  local src_cnt = 0
+  local src_len = 0
+  for _, t in ipairs(get_folder_children(EDL_FOLDER_NAME)) do
+    for i = 0, r.CountTrackMediaItems(t) - 1 do
+      local item  = r.GetTrackMediaItem(t, i)
+      local ipos  = r.GetMediaItemInfo_Value(item, "D_POSITION")
+      local ilen  = r.GetMediaItemInfo_Value(item, "D_LENGTH")
+      local _, sid = r.GetSetMediaItemInfo_String(item, "P_EXT:SCENE_ID", "", false)
+      local match = (sid == scene_guid)
+      if not match and scene_color ~= 0 then
+        local icolor = math.floor(r.GetMediaItemInfo_Value(item, "I_CUSTOMCOLOR"))
+        match = (icolor == scene_color) and (ipos >= scene_start) and (ipos < scene_end)
+      end
+      if match then src_cnt = src_cnt + 1; src_len = src_len + ilen end
+    end
+  end
+
+  return { shots = shots, src_cnt = src_cnt, src_len = src_len }
+end
+
+local function update_scene_note(scene_item)
+  if not scene_item then return end
+  local meta       = compute_scene_metadata(scene_item)
+  local src_len_tc = r.format_timestr_len(meta.src_len, "", 0, 5)
+
+  -- Parse existing note: first line = scene name; remaining lines = other content
+  local _, note = r.GetSetMediaItemInfo_String(scene_item, "P_NOTES", "", false)
+  local lines = {}
+  for line in ((note or "") .. "\n"):gmatch("([^\n]*)\n") do
+    table.insert(lines, line)
+  end
+
+  -- Preserve scene name from first line, or default to "(no name)"
+  local scene_name = (lines[1] and lines[1] ~= "") and lines[1] or "(no name)"
+
+  -- Collect non-metadata lines from lines 2+ (skip shots/src_cnt/src_len)
+  local meta_keys = { shots = true, src_cnt = true, src_len = true }
+  local other = {}
+  for i = 2, #lines do
+    local line = lines[i]
+    local k = line:match("^([%w_]+)=")
+    if not (k and meta_keys[k]) and line ~= "" then
+      table.insert(other, line)
+    end
+  end
+
+  local parts = {
+    scene_name,
+    "shots="   .. tostring(meta.shots),
+    "src_cnt=" .. tostring(meta.src_cnt),
+    "src_len=" .. src_len_tc,
+  }
+  for _, l in ipairs(other) do table.insert(parts, l) end
+
+  r.GetSetMediaItemInfo_String(scene_item, "P_NOTES", table.concat(parts, "\n"), true)
+  r.UpdateItemInProject(scene_item)
+end
+
+-- Public entry point: update metadata for a scene item found by GUID.
+local function update_scene_metadata_by_guid(guid)
+  if not guid or guid == "" then return end
+  local scene_item = get_item_by_guid(guid)
+  if scene_item then update_scene_note(scene_item) end
+end
+
 -- ── Actions ────────────────────────────────────────────────────────────────
 local function action_start()
   if S.work_mode == "AAP" then action_start_aap(); return end
@@ -936,6 +1112,9 @@ local function action_start()
   local pos_secs    = secs_since_midnight()
   local now_clock   = os.time()
   local now_precise = r.time_precise()
+
+  -- Update scene metadata in Scene Cut item note when starting in Scene Mode
+  if scene_guid ~= "" then update_scene_metadata_by_guid(scene_guid) end
 
   r.Undo_BeginBlock()
   ensure_folder_track(parent_track)
@@ -1807,6 +1986,8 @@ local function action_add_record()
     set_item_ext(item, "WORK_TYPE",   work_type)
     set_item_ext(item, "DURATION",    tostring(length))
     set_item_ext(item, "END_REASON",  "manual")
+    local _task = get_proj_task()
+    if _task ~= "" then set_item_ext(item, "TASK", _task) end
     set_item_ext(item, "START_CLOCK", start_str)
     set_item_ext(item, "END_CLOCK",   end_str)
     r.UpdateItemInProject(item)
@@ -1827,6 +2008,8 @@ local function action_add_record()
     set_item_ext(item, "DURATION",         tostring(d_secs))
     set_item_ext(item, "END_REASON",       "manual")
     set_item_ext(item, "IS_DURATION_ONLY", "1")
+    local _task = get_proj_task()
+    if _task ~= "" then set_item_ext(item, "TASK", _task) end
     r.UpdateItemInProject(item)
     r.SetMediaItemInfo_Value(item, "C_LOCK", 1)  -- lock after creation
     r.Undo_EndBlock("PM: Add Record (duration-only)", -1)
@@ -1981,7 +2164,7 @@ local function handle_mouse()
   if rb == 1 and mouse_r_prev == 0 then
     local is_docked = cur_dock ~= 0
     local dock_label = is_docked and "Undock window" or "Dock window"
-    local choice = gfx.showmenu(dock_label .. "|Fix Duration from item length|Fix Item Prefixes|Sync to Work Log")
+    local choice = gfx.showmenu(dock_label .. "|Fix Duration from item length|Fix Item Prefixes|Sync to Work Log|Update Scene Metadata")
     if choice == 1 then
       gfx.dock(is_docked and 0 or 1)
       cur_dock = gfx.dock(-1)
@@ -1995,6 +2178,25 @@ local function handle_mouse()
       r.ShowMessageBox("Item prefixes synced.", "PM Timer", 0)
     elseif choice == 4 then
       action_sync_work_log()
+    elseif choice == 5 then
+      local scene_track = get_track_by_name(SCENE_TRACK_NAME)
+      if not scene_track then
+        r.ShowMessageBox("No Scene Cut track found.", "PM Timer", 0)
+      else
+        local updated = 0
+        for i = 0, r.CountSelectedMediaItems(0) - 1 do
+          local item = r.GetSelectedMediaItem(0, i)
+          if r.GetMediaItemTrack(item) == scene_track then
+            update_scene_note(item)
+            updated = updated + 1
+          end
+        end
+        if updated > 0 then
+          r.ShowMessageBox(updated .. " scene" .. (updated > 1 and "s" or "") .. " updated.", "PM Timer", 0)
+        else
+          r.ShowMessageBox("No Scene Cut item selected.\nSelect a scene in the Scene Cut track first.", "PM Timer", 0)
+        end
+      end
     end
   end
   mouse_r_prev = rb
