@@ -1,6 +1,6 @@
 --[[
 @description PM Insight Analyzer
-@version 260305.0110
+@version 260305.0230
 @author hsuanice
 @about
   Read-only analysis script. Auto-detects project type:
@@ -17,6 +17,34 @@
   Duration source: D_LENGTH (always). Does not write any data to the project.
 
 @changelog
+  v260305.0230
+    - Unified throughput output format across both modes:
+    - Scene Insight — Per Scene: reorganized into three blocks:
+        Film Length / Source Length / Source Ratio / Time Summary
+        Source Throughput (Editing/Denoise/Total Source/hr)
+        Film Throughput  (Editing/Denoise/Total Film/hr)
+        Added Denoise Source/hr and Denoise Film/hr per scene.
+    - Work Log — "Efficiency" section renamed to "Throughput":
+        Shows same three-block structure per Project → Task.
+        Film and Source fields show N/A (not available in Work Log).
+        Time summary (Editing/Denoise/Total) retained.
+
+  v260305.0200
+    - Work Log Mode: added "Efficiency" section (Ratio metrics) after Per Project.
+
+  v260305.0150
+    - Work Log Mode rewrite: removed "Per Scene" and "By Task" blocks; replaced with:
+      - "Year Overview": grand total + per-task totals across all projects.
+      - "Per Project": Project → Task → Module breakdown.
+        Project = first word of item name prefix (e.g. "TheFixer").
+        Task    = P_EXT:TASK (preferred) or last word of prefix (e.g. "Dialog").
+        Module  = text after the last " | " in the item name.
+      Both sections sorted by duration descending.
+
+  v260305.0130
+    - Work Log Mode: added "By Task" grouping.
+    - Work Log Mode: task extracted from P_EXT:TASK or item name fallback.
+
   v260305.0110
     - Work Log Mode: when no "Scene Cut" track is present, the script switches
       to Work Log mode. Item names are parsed as "Proj | Scene | Module" and
@@ -130,11 +158,14 @@ local function parse_wl_item_name(name)
 end
 
 local function analyze_work_log()
-  -- scene_data: scene_name → { total_sec, modules: { mod → sec } }
-  local scene_data    = {}
-  local scene_order   = {}
-  local module_totals = {}
-  local project_work  = 0
+  -- project_data: project_name → {
+  --   total_sec,
+  --   task_totals: { task_name → sec },
+  --   tasks:       { task_name → { module_totals: { mod → sec } } }
+  -- }
+  local project_data  = {}
+  local project_order = {}
+  local task_totals   = {}   -- across all projects
   local grand_total   = 0
 
   for i = 0, r.CountTracks(0) - 1 do
@@ -147,19 +178,34 @@ local function analyze_work_log()
       if parsed then
         local dur = r.GetMediaItemInfo_Value(item, "D_LENGTH")
         if dur > 0 then
-          grand_total = grand_total + dur
-          local mod = (parsed.module ~= "") and parsed.module or "other"
-          module_totals[mod] = (module_totals[mod] or 0) + dur
-          if parsed.scene then
-            if not scene_data[parsed.scene] then
-              scene_data[parsed.scene] = { total_sec = 0, modules = {} }
-              table.insert(scene_order, parsed.scene)
+          -- Part 1 of the name, e.g. "TheFixer EP04 Dialog"
+          local prefix  = iname:match("^(.-) | ") or iname
+          local project = prefix:match("^(%S+)") or ""
+
+          -- Task: P_EXT:TASK preferred; fallback = last word of prefix
+          local _, ptask = r.GetSetMediaItemInfo_String(item, "P_EXT:TASK", "", false)
+          if ptask == "" then
+            ptask = prefix:match("(%S+)%s*$") or ""
+          end
+
+          if project ~= "" and ptask ~= "" then
+            local mod = (parsed.module ~= "") and parsed.module or "other"
+            grand_total = grand_total + dur
+            task_totals[ptask] = (task_totals[ptask] or 0) + dur
+
+            if not project_data[project] then
+              project_data[project] = { total_sec = 0, task_totals = {}, tasks = {} }
+              table.insert(project_order, project)
             end
-            local sd = scene_data[parsed.scene]
-            sd.total_sec      = sd.total_sec + dur
-            sd.modules[mod]   = (sd.modules[mod] or 0) + dur
-          else
-            project_work = project_work + dur
+            local pd = project_data[project]
+            pd.total_sec = pd.total_sec + dur
+            pd.task_totals[ptask] = (pd.task_totals[ptask] or 0) + dur
+
+            if not pd.tasks[ptask] then
+              pd.tasks[ptask] = { module_totals = {} }
+            end
+            local mt = pd.tasks[ptask].module_totals
+            mt[mod] = (mt[mod] or 0) + dur
           end
         end
       end
@@ -169,44 +215,85 @@ local function analyze_work_log()
   local lines = {}
   local function out(s) table.insert(lines, s) end
 
+  local function sorted_by_val(tbl)
+    local keys = {}
+    for k in pairs(tbl) do table.insert(keys, k) end
+    table.sort(keys, function(a, b) return (tbl[a] or 0) > (tbl[b] or 0) end)
+    return keys
+  end
+
+  -- ── Year Overview ─────────────────────────────────────────────────────────
   out("=== hsuanice PM — Insight Report (Work Log) ===")
   out("")
-  out("Project Overview")
+  out("Year Overview")
   out("--------------------------------")
   out("Grand Total Work: " .. fmt_dur(grand_total))
   out("")
-  -- Module totals sorted by time descending
-  local mod_keys = {}
-  for k in pairs(module_totals) do table.insert(mod_keys, k) end
-  table.sort(mod_keys, function(a, b)
-    return (module_totals[a] or 0) > (module_totals[b] or 0)
-  end)
-  for _, mod in ipairs(mod_keys) do
-    out(string.format("  %-16s %s", mod .. ":", fmt_dur(module_totals[mod])))
-  end
-  if project_work > 0 then
-    out("")
-    out("  Project Work (no scene): " .. fmt_dur(project_work))
+  for _, task in ipairs(sorted_by_val(task_totals)) do
+    out(string.format("  %-14s %s", task .. ":", fmt_dur(task_totals[task])))
   end
 
+  -- ── Per Project ───────────────────────────────────────────────────────────
   out("")
   out("----------------------------------------")
-  out("Per Scene")
+  out("Per Project")
   out("----------------------------------------")
 
-  for _, sname in ipairs(scene_order) do
-    local sd = scene_data[sname]
+  for _, pname in ipairs(project_order) do
+    local pd = project_data[pname]
     out("")
-    out("Scene: " .. sname)
-    local smods = {}
-    for k in pairs(sd.modules) do table.insert(smods, k) end
-    table.sort(smods, function(a, b)
-      return (sd.modules[a] or 0) > (sd.modules[b] or 0)
-    end)
-    for _, mod in ipairs(smods) do
-      out(string.format("  %-16s %s", mod .. ":", fmt_dur(sd.modules[mod])))
+    out("Project: " .. pname)
+    for _, tname in ipairs(sorted_by_val(pd.task_totals)) do
+      local td = pd.tasks[tname]
+      out("")
+      out(tname .. ":")
+      for _, mod in ipairs(sorted_by_val(td.module_totals)) do
+        out(string.format("  %-14s %s", mod .. ":", fmt_dur(td.module_totals[mod])))
+      end
     end
-    out("  Total:           " .. fmt_dur(sd.total_sec))
+  end
+
+  -- ── Throughput ────────────────────────────────────────────────────────────
+  local has_throughput = false
+  for _, pname in ipairs(project_order) do
+    local pd = project_data[pname]
+    for _, tname in ipairs(sorted_by_val(pd.task_totals)) do
+      local mt       = pd.tasks[tname].module_totals
+      local editing  = mt["editing"] or 0
+      local denoise  = mt["denoise"] or 0
+      local task_tot = pd.task_totals[tname]
+      if (editing > 0 or denoise > 0) and task_tot > 0 then
+        if not has_throughput then
+          out("")
+          out("----------------------------------------")
+          out("Throughput")
+          out("----------------------------------------")
+          has_throughput = true
+        end
+        out("")
+        out("Project: " .. pname)
+        out("")
+        out(tname .. " Throughput")
+        out("")
+        out("Film Length:   N/A")
+        out("Source Length: N/A")
+        out("Source Ratio:  N/A")
+        out("")
+        out("Editing Time:  " .. (editing  > 0 and fmt_dur(editing)  or "N/A"))
+        out("Denoise Time:  " .. (denoise  > 0 and fmt_dur(denoise)  or "N/A"))
+        out("Total Time:    " .. fmt_dur(task_tot))
+        out("")
+        out("Source Throughput")
+        out("Editing Source/hr: N/A")
+        out("Denoise Source/hr: N/A")
+        out("Total Source/hr:   N/A")
+        out("")
+        out("Film Throughput")
+        out("Editing Film/hr: N/A")
+        out("Denoise Film/hr: N/A")
+        out("Total Film/hr:   N/A")
+      end
+    end
   end
 
   out("")
@@ -469,34 +556,29 @@ local function analyze()
       out("")
       out("Scene: " .. (sc.name ~= "" and sc.name or "(unnamed)"))
       out("Range: " .. sc.start_tc .. " - " .. sc.end_tc)
+      out("")
       out("Film Length:   " .. fmt_dur(sc.length_sec))
       out("Source Length: " .. fmt_dur(sc.source_length_sec))
-
       if sc.length_sec > 0 then
         out("Source Ratio:  "
           .. string.format("%d%%", math.floor(sc.source_length_sec / sc.length_sec * 100)))
       else
         out("Source Ratio:  N/A")
       end
-
       out("")
-
-      if sc.editing_sec > 0 then
-        out("Editing Time: " .. fmt_dur(sc.editing_sec))
-      else
-        out("Editing Time: N/A")
-      end
-
-      if sc.denoise_sec > 0 then
-        out("Denoise Time: " .. fmt_dur(sc.denoise_sec))
-      else
-        out("Denoise Time: N/A")
-      end
-
+      out("Editing Time:     " .. (sc.editing_sec > 0 and fmt_dur(sc.editing_sec) or "N/A"))
+      out("Denoise Time:     " .. (sc.denoise_sec > 0 and fmt_dur(sc.denoise_sec) or "N/A"))
       out("Total Scene Time: " .. fmt_dur(sc.total_sec))
       out("")
-      out("Editing Film/hr:   " .. rate_or_na(sc.length_sec, sc.editing_sec))
-      out("Total Film/hr:     " .. rate_or_na(sc.length_sec, sc.total_sec))
+      out("Source Throughput")
+      out("Editing Source/hr: " .. rate_or_na(sc.source_length_sec, sc.editing_sec))
+      out("Denoise Source/hr: " .. rate_or_na(sc.source_length_sec, sc.denoise_sec))
+      out("Total Source/hr:   " .. rate_or_na(sc.source_length_sec, sc.total_sec))
+      out("")
+      out("Film Throughput")
+      out("Editing Film/hr: " .. rate_or_na(sc.length_sec, sc.editing_sec))
+      out("Denoise Film/hr: " .. rate_or_na(sc.length_sec, sc.denoise_sec))
+      out("Total Film/hr:   " .. rate_or_na(sc.length_sec, sc.total_sec))
     end
   end
 
