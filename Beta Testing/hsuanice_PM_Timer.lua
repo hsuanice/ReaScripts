@@ -1,6 +1,6 @@
 --[[
 @description PM Timer - Scene-aware Work Timer
-@version 260305.2000
+@version 260305.2100
 @author hsuanice
 @about
   Scene-aware toggle timer for the hsuanice PM system.
@@ -26,6 +26,18 @@
   All work items are locked (C_LOCK=1) after creation.
 
 @changelog
+  v260305.2100
+    - Scene Cut item notes now use the same format as Scene Analyzer:
+        Range    : <start> - <end>
+        Length   : <duration>
+        Shots    : <n>
+        Src Cnt  : <n>
+        Src Len  : <duration>
+      Old key=value lines are recognised and stripped on first update.
+    - Auto-update scene metadata on: timer start, timer finish, break,
+      stop (abort), and scene switch. Keeps notes current without
+      requiring manual Scene Analyzer runs.
+
   v260305.2000
     - Fix: repeated metadata updates caused src_cnt/src_len to accumulate.
       Root cause: Lua's %w pattern excludes underscore, so "src_cnt=" and
@@ -965,13 +977,17 @@ local function action_start_aap(chain)
 end
 
 -- ── Scene Metadata ──────────────────────────────────────────────────────────
--- Computes shots / src_cnt / src_len for a Scene Cut item and writes them into
--- the item's note (P_NOTES) as key=value pairs, one per line.
--- Existing shots/src_cnt/src_len lines are replaced; other note content kept.
+-- Computes scene stats and writes them into the item's P_NOTES.
+-- Note format (first line = scene name, preserved or "(no name)"):
+--   Range    : <start> - <end>
+--   Length   : <duration>
+--   Shots    : <n>
+--   Src Cnt  : <n>
+--   Src Len  : <duration>
 --
--- shots   : items on PICTURE_TRACK_NAME whose start falls inside the scene range
+-- shots   : Picture Cut items overlapping the scene range
 -- src_cnt : EDL folder items attributed to the scene (P_EXT:SCENE_ID or color+pos)
--- src_len : total D_LENGTH of the attributed EDL items (formatted HH:MM:SS:FF)
+-- src_len : total D_LENGTH of the attributed EDL items (seconds)
 
 local function compute_scene_metadata(scene_item)
   local scene_start = r.GetMediaItemInfo_Value(scene_item, "D_POSITION")
@@ -1015,10 +1031,18 @@ end
 
 local function update_scene_note(scene_item)
   if not scene_item then return end
+
+  local scene_start = r.GetMediaItemInfo_Value(scene_item, "D_POSITION")
+  local scene_len   = r.GetMediaItemInfo_Value(scene_item, "D_LENGTH")
+  local scene_end   = scene_start + scene_len
+
   local meta       = compute_scene_metadata(scene_item)
+  local range_s    = r.format_timestr_pos(scene_start, "", -1)
+  local range_e    = r.format_timestr_pos(scene_end,   "", -1)
+  local length_tc  = r.format_timestr_len(scene_len,   "", 0, 5)
   local src_len_tc = r.format_timestr_len(meta.src_len, "", 0, 5)
 
-  -- Parse existing note: first line = scene name; remaining lines = other content
+  -- Parse existing note: first line = scene name; rest = other content
   local _, note = r.GetSetMediaItemInfo_String(scene_item, "P_NOTES", "", false)
   local lines = {}
   for line in ((note or "") .. "\n"):gmatch("([^\n]*)\n") do
@@ -1028,22 +1052,30 @@ local function update_scene_note(scene_item)
   -- Preserve scene name from first line, or default to "(no name)"
   local scene_name = (lines[1] and lines[1] ~= "") and lines[1] or "(no name)"
 
-  -- Collect non-metadata lines from lines 2+ (skip shots/src_cnt/src_len)
-  local meta_keys = { shots = true, src_cnt = true, src_len = true }
+  -- Strip all known metadata lines (new pretty format + old key=value format)
+  local function is_meta(line)
+    return line:match("^Range%s*:")
+        or line:match("^Length%s*:")
+        or line:match("^Shots%s*:")
+        or line:match("^Src Cnt%s*:")
+        or line:match("^Src Len%s*:")
+        or line:match("^[%w_]+=")
+  end
+
   local other = {}
   for i = 2, #lines do
-    local line = lines[i]
-    local k = line:match("^([%w_]+)=")
-    if not (k and meta_keys[k]) and line ~= "" then
-      table.insert(other, line)
+    if not is_meta(lines[i]) and lines[i] ~= "" then
+      table.insert(other, lines[i])
     end
   end
 
   local parts = {
     scene_name,
-    "shots="   .. tostring(meta.shots),
-    "src_cnt=" .. tostring(meta.src_cnt),
-    "src_len=" .. src_len_tc,
+    "Range    : " .. range_s .. " - " .. range_e,
+    "Length   : " .. length_tc,
+    "Shots    : " .. tostring(meta.shots),
+    "Src Cnt  : " .. tostring(meta.src_cnt),
+    "Src Len  : " .. src_len_tc,
   }
   for _, l in ipairs(other) do table.insert(parts, l) end
 
@@ -1361,11 +1393,17 @@ end
 
 local function action_finish()
   if S.work_mode == "AAP" then finish_aap_item("finish")
-  else finish_current_item("finish"); sync_work_item_names() end
+  else
+    if S.scene_guid ~= "" then update_scene_metadata_by_guid(S.scene_guid) end
+    finish_current_item("finish"); sync_work_item_names()
+  end
 end
 local function action_break()
   if S.work_mode == "AAP" then finish_aap_item("break")
-  else finish_current_item("break"); sync_work_item_names() end
+  else
+    if S.scene_guid ~= "" then update_scene_metadata_by_guid(S.scene_guid) end
+    finish_current_item("break"); sync_work_item_names()
+  end
 end
 
 local function action_switch_type()
@@ -1493,9 +1531,13 @@ local function action_switch_scene()
   set_extstate("ACTIVE_WORK_TYPE",         new_type)
   set_extstate("ACTIVE_WORK_START_CLOCK",  tostring(now_clock))
   set_extstate("ACTIVE_WORK_OSTIME_START", tostring(now_clock))
+
+  -- Update new scene's metadata
+  update_scene_metadata_by_guid(sel_scene.guid)
 end
 
 local function action_stop()
+  if S.scene_guid ~= "" then update_scene_metadata_by_guid(S.scene_guid) end
   local item = get_item_by_guid(S.work_item_guid)
   if item then
     r.Undo_BeginBlock()
