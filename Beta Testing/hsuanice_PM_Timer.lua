@@ -1,6 +1,6 @@
 --[[
 @description PM Timer - Scene-aware Work Timer
-@version 260305.2100
+@version 260307.1500
 @author hsuanice
 @about
   Scene-aware toggle timer for the hsuanice PM system.
@@ -26,6 +26,22 @@
   All work items are locked (C_LOCK=1) after creation.
 
 @changelog
+  v260307.0300
+    - New: PM_SyncSceneMetadataToLogItem(item) — reads scene note from the linked
+      scene item and writes it into the log item note (ULT_SetMediaItemNote),
+      preserving any user comment below the first blank line in the existing note.
+    - New: PM_SyncAllLogItems() — scans all project items, filters by take name
+      containing "|", calls PM_SyncSceneMetadataToLogItem on each.
+      Runs at startup and on project change.
+    - Log item note reads/writes now use ULT_GetMediaItemNote / ULT_SetMediaItemNote
+      (SWS extension) instead of P_NOTES.
+    - sync_linked_work_item_notes now preserves user comments in log item notes
+      when pushing updated scene metadata.
+    - New: mirror_log_item_to_work_log(item) — after each log item is created,
+      auto-mirrors it into the open Work Log project (silent no-op if not found).
+    - action_finish: captures work item before state reset and runs
+      PM_SyncSceneMetadataToLogItem on the finished item.
+
   v260305.2100
     - Scene Cut item notes now use the same format as Scene Analyzer:
         Range    : <start> - <end>
@@ -537,8 +553,8 @@ end
 
 -- ── Project prefix ──────────────────────────────────────────────────────────
 -- Parses the project filename using the format:
---   YYMMDD----Project----Episode----Task----OptionalNote
--- Returns "Project Episode Task | " or "" if the project name doesn't match.
+--   YYMMDD----Project----Scope----Task----OptionalNote
+-- Returns "Project Scope Task | " or "" if the project name doesn't match.
 local function get_proj_prefix()
   local _, proj_path = r.EnumProjects(-1)
   if not proj_path or proj_path == "" then return "" end
@@ -548,14 +564,14 @@ local function get_proj_prefix()
   for p in (name .. "----"):gmatch("(.-)%-%-%-%-") do
     parts[#parts + 1] = p
   end
-  -- parts[1]=YYMMDD, parts[2]=Project, parts[3]=Episode, parts[4]=Task
+  -- parts[1]=YYMMDD, parts[2]=Project, parts[3]=Scope, parts[4]=Task
   local project = parts[2]
-  local episode = parts[3]
+  local scope   = parts[3]
   local task    = parts[4]
   if not project or project == "" then return "" end
-  if not episode or episode == "" then return "" end
+  if not scope   or scope   == "" then return "" end
   if not task    or task    == "" then return "" end
-  return project .. " " .. episode .. " " .. task .. " | "
+  return project .. " " .. scope .. " " .. task .. " | "
 end
 
 -- Returns just the Task component (4th part) of the project name, e.g. "Dialog".
@@ -613,7 +629,7 @@ local function get_scene_info_from_item(scene_item)
   end
   local scene_start_tc = r.format_timestr_pos(
     r.GetMediaItemInfo_Value(scene_item, "D_POSITION"), "", 5)
-  return { guid = scene_guid, name = scene_name, start_tc = scene_start_tc }
+  return { guid = scene_guid, name = scene_name, start_tc = scene_start_tc, handle = scene_item }
 end
 
 local function get_selected_scene_info(scene_track)
@@ -630,6 +646,18 @@ local function get_scene_info_by_guid(scene_guid)
   if scene_guid == "" then return nil end
   local item = get_item_by_guid(scene_guid)
   return get_scene_info_from_item(item)
+end
+
+-- Find a Scene Cut item by GUID using BR_GetMediaItemGUID (safe for scene GUIDs).
+local function find_scene_item_by_guid(guid)
+  if not guid or guid == "" then return nil end
+  local scene_track = get_track_by_name(SCENE_TRACK_NAME)
+  if not scene_track then return nil end
+  for i = 0, r.CountTrackMediaItems(scene_track) - 1 do
+    local item = r.GetTrackMediaItem(scene_track, i)
+    if r.BR_GetMediaItemGUID(item) == guid then return item end
+  end
+  return nil
 end
 
 -- Parses a 4-digit HHMM string → seconds since midnight.
@@ -757,9 +785,10 @@ end
 -- ── Work item ──────────────────────────────────────────────────────────────
 -- scene_guid : "" in Project Mode (SCENE_GUID ext-state not written)
 -- item_name  : pre-computed final name
---   Scene Mode   → "scene_name (tc) | work_type"  (sync will keep it updated)
---   Project Mode → "work_type"                     (sync skips; name is permanent)
-local function create_work_item(date_track, scene_guid, item_name, work_type, pos_secs, start_clock)
+--   Scene Mode   → "work_type"  (name is just the action; scene metadata goes in P_NOTES)
+--   Project Mode → "work_type"  (sync skips; name is permanent)
+-- item_note  : optional P_NOTES string (scene metadata block); nil/empty = preserve existing
+local function create_work_item(date_track, scene_guid, item_name, work_type, pos_secs, start_clock, item_note)
   local pos = pos_secs
   local n   = r.CountTrackMediaItems(date_track)
   if n > 0 then
@@ -784,6 +813,10 @@ local function create_work_item(date_track, scene_guid, item_name, work_type, po
   set_item_ext(item, "START_CLOCK", tostring(start_clock or os.time()))
   local _task = get_proj_task()
   if _task ~= "" then set_item_ext(item, "TASK", _task) end
+
+  if item_note and item_note ~= "" then
+    r.ULT_SetMediaItemNote(item, item_note)
+  end
 
   r.UpdateItemInProject(item)
   apply_color_from_type(item)
@@ -1029,6 +1062,89 @@ local function compute_scene_metadata(scene_item)
   return { shots = shots, src_cnt = src_cnt, src_len = src_len }
 end
 
+-- Extract user comment from a log item note: everything after the first blank
+-- line (\n\n). Returns "" if no blank line exists.
+local function extract_log_comment(note)
+  if not note or note == "" then return "" end
+  local pos = note:find("\n\n", 1, true)
+  if not pos then return "" end
+  return note:sub(pos + 2)
+end
+
+-- Merge scene metadata block with optional user comment.
+local function merge_log_note(metadata, comment)
+  if comment and comment ~= "" then
+    return metadata .. "\n\n" .. comment
+  end
+  return metadata
+end
+
+-- Pushes scene metadata into all work log items linked to the given scene GUID.
+-- Preserves any user comment already in the log item note (text after first blank line).
+local function sync_linked_work_item_notes(scene_guid, note)
+  if not scene_guid or scene_guid == "" or not note or note == "" then return end
+  for i = 0, r.CountTracks(0) - 1 do
+    local t = r.GetTrack(0, i)
+    for j = 0, r.CountTrackMediaItems(t) - 1 do
+      local item = r.GetTrackMediaItem(t, j)
+      local _, sg = r.GetSetMediaItemInfo_String(item, "P_EXT:SCENE_GUID", "", false)
+      local _, wt = r.GetSetMediaItemInfo_String(item, "P_EXT:WORK_TYPE",  "", false)
+      if sg == scene_guid and wt ~= "" then
+        local cur_note = r.ULT_GetMediaItemNote(item) or ""
+        local comment  = extract_log_comment(cur_note)
+        local new_note = merge_log_note(note, comment)
+        if cur_note ~= new_note then
+          r.SetMediaItemInfo_Value(item, "C_LOCK", 0)
+          r.ULT_SetMediaItemNote(item, new_note)
+          r.UpdateItemInProject(item)
+          r.SetMediaItemInfo_Value(item, "C_LOCK", 1)
+        end
+      end
+    end
+  end
+end
+
+-- Sync scene metadata into a single log item's note.
+-- Reads the scene note from the item's linked scene (P_EXT:SCENE_GUID),
+-- preserves any user comment already in the log item note, then writes back
+-- using ULT_SetMediaItemNote. No-ops if: not a log item, no GUID, broken link.
+local function PM_SyncSceneMetadataToLogItem(item)
+  if not item then return end
+  local take = r.GetActiveTake(item)
+  if not take then return end
+  if not r.GetTakeName(take):match("|") then return end  -- not a log item
+
+  local _, sg = r.GetSetMediaItemInfo_String(item, "P_EXT:SCENE_GUID", "", false)
+  if not sg or sg == "" then return end  -- no scene link; nothing to sync
+
+  local scene_item = find_scene_item_by_guid(sg)
+  if not scene_item then return end  -- broken link; skip
+
+  local _, scene_note = r.GetSetMediaItemInfo_String(scene_item, "P_NOTES", "", false)
+  if not scene_note or scene_note == "" then return end
+
+  local cur_note = r.ULT_GetMediaItemNote(item) or ""
+  local comment  = extract_log_comment(cur_note)
+  local new_note = merge_log_note(scene_note, comment)
+  if cur_note == new_note then return end
+
+  r.SetMediaItemInfo_Value(item, "C_LOCK", 0)
+  r.ULT_SetMediaItemNote(item, new_note)
+  r.UpdateItemInProject(item)
+  r.SetMediaItemInfo_Value(item, "C_LOCK", 1)
+end
+
+-- Sync scene metadata into every log item in the project.
+-- Filters by take name containing "|" (PM log item convention).
+local function PM_SyncAllLogItems()
+  for i = 0, r.CountTracks(0) - 1 do
+    local t = r.GetTrack(0, i)
+    for j = 0, r.CountTrackMediaItems(t) - 1 do
+      PM_SyncSceneMetadataToLogItem(r.GetTrackMediaItem(t, j))
+    end
+  end
+end
+
 local function update_scene_note(scene_item)
   if not scene_item then return end
 
@@ -1079,8 +1195,13 @@ local function update_scene_note(scene_item)
   }
   for _, l in ipairs(other) do table.insert(parts, l) end
 
-  r.GetSetMediaItemInfo_String(scene_item, "P_NOTES", table.concat(parts, "\n"), true)
+  local new_note = table.concat(parts, "\n")
+  r.GetSetMediaItemInfo_String(scene_item, "P_NOTES", new_note, true)
   r.UpdateItemInProject(scene_item)
+
+  -- Push updated note to all work log items linked to this scene
+  local scene_guid = r.BR_GetMediaItemGUID(scene_item)
+  sync_linked_work_item_notes(scene_guid, new_note)
 end
 
 -- Public entry point: update metadata for a scene item found by GUID.
@@ -1088,6 +1209,14 @@ local function update_scene_metadata_by_guid(guid)
   if not guid or guid == "" then return end
   local scene_item = get_item_by_guid(guid)
   if scene_item then update_scene_note(scene_item) end
+end
+
+-- Returns the P_NOTES of a Scene Cut item to sync into the linked work log item.
+-- The work item note mirrors the scene item note verbatim — no recomputation.
+local function build_work_item_note(scene_item)
+  if not scene_item then return "" end
+  local _, note = r.GetSetMediaItemInfo_String(scene_item, "P_NOTES", "", false)
+  return note or ""
 end
 
 -- ── Actions ────────────────────────────────────────────────────────────────
@@ -1103,11 +1232,16 @@ local function action_start()
     sel_scene = get_selected_scene_info(scene_track)
   end
 
-  local scene_guid, scene_name, scene_start_tc = "", "", ""
+  -- Dialog mode requires a scene selection
+  if S.work_mode == "Dialog" and not sel_scene then
+    r.ShowMessageBox("Please select a Scene Cut item first.", "PM Timer", 0)
+    return
+  end
+
+  local scene_guid, scene_name = "", ""
   if sel_scene then
     scene_guid = sel_scene.guid
     scene_name = sel_scene.name
-    scene_start_tc = sel_scene.start_tc
   end
 
   -- 3. Choose work type
@@ -1123,15 +1257,8 @@ local function action_start()
     work_type = val
   end
 
-  -- 4. Build item name
-  --    Scene Mode   : "scene_name (tc) | work_type"  (sync will keep it current)
-  --    Project Mode : "work_type"                     (permanent; sync skips it)
-  local item_name
-  if scene_guid ~= "" then
-    item_name = scene_name .. " (" .. scene_start_tc .. ") | " .. work_type
-  else
-    item_name = work_type
-  end
+  -- 4. Item name = just work_type (scene metadata goes into P_NOTES)
+  local item_name = work_type
 
   -- 5. Build track structure and create item
   -- Dialog mode: always place items under Scene Cut (create if needed)
@@ -1145,22 +1272,27 @@ local function action_start()
   local now_clock   = os.time()
   local now_precise = r.time_precise()
 
-  -- Update scene metadata in Scene Cut item note when starting in Scene Mode
-  if scene_guid ~= "" then update_scene_metadata_by_guid(scene_guid) end
+  -- Update scene metadata in Scene Cut item note and build work item note
+  local item_note = ""
+  if sel_scene and sel_scene.handle then
+    update_scene_note(sel_scene.handle)
+    item_note = build_work_item_note(sel_scene.handle)
+  end
 
   r.Undo_BeginBlock()
   ensure_folder_track(parent_track)
   local date_track = get_or_create_date_track(parent_track, os.date("%Y-%m-%d"))
-  local item       = create_work_item(date_track, scene_guid, item_name, work_type, pos_secs, now_clock)
+  local item       = create_work_item(date_track, scene_guid, item_name, work_type, pos_secs, now_clock, item_note)
   local item_guid  = get_item_guid(item)
   r.Undo_EndBlock("PM: Start work session", -1)
   r.UpdateArrange()
+  mirror_log_item_to_work_log(item)
 
   -- 6. Update state + ExtState
   S.mode            = "WORKING"
   S.scene_guid      = scene_guid
   S.scene_name      = scene_name
-  S.scene_start_tc  = scene_start_tc
+  S.scene_start_tc  = (sel_scene and sel_scene.start_tc) or ""
   S.work_type       = work_type
   S.work_item_guid  = item_guid
   S.start_clock     = now_clock
@@ -1269,8 +1401,7 @@ end
 -- ── Sync work item names ────────────────────────────────────────────────────
 -- Rebuilds take names for all Scene Mode work items (those with P_EXT:SCENE_GUID).
 -- Project Mode items (no SCENE_GUID) are naturally skipped by the sg ~= "" check.
--- Name format: "scene_name (start_tc) | work_type"
--- Missing-scene fallback: "[Missing Scene] | work_type"
+-- Name format: "work_type" only (scene metadata lives in P_NOTES, not the name)
 local function sync_work_item_names()
   local scene_track = nil
   for i = 0, r.CountTracks(0) - 1 do
@@ -1279,22 +1410,6 @@ local function sync_work_item_names()
     if tname == SCENE_TRACK_NAME then scene_track = t; break end
   end
   if not scene_track then return end
-
-  local scene_map = {}
-  for i = 0, r.CountTrackMediaItems(scene_track) - 1 do
-    local item     = r.GetTrackMediaItem(scene_track, i)
-    local guid     = r.BR_GetMediaItemGUID(item)
-    local spos     = r.GetMediaItemInfo_Value(item, "D_POSITION")
-    local start_tc = r.format_timestr_pos(spos, "", 5)
-    local name     = ""
-    local take     = r.GetActiveTake(item)
-    if take then name = r.GetTakeName(take) end
-    if name == "" then
-      local _, notes = r.GetSetMediaItemInfo_String(item, "P_NOTES", "", false)
-      name = (notes and notes ~= "") and notes or "(unnamed)"
-    end
-    scene_map[guid] = { name = name, start_tc = start_tc }
-  end
 
   local sc_num  = math.floor(r.GetMediaTrackInfo_Value(scene_track, "IP_TRACKNUMBER"))
   local total   = r.CountTracks(0)
@@ -1317,14 +1432,8 @@ local function sync_work_item_names()
           if not item_take then item_take = r.AddTakeToMediaItem(item) end
           local cur_name = r.GetTakeName(item_take)
 
-          -- Build base name (scene + tc + type, no prefix)
-          local base_name
-          local sc = scene_map[sg]
-          if sc then
-            base_name = sc.name .. " (" .. sc.start_tc .. ") | " .. work_type
-          else
-            base_name = "[Missing Scene] | " .. work_type
-          end
+          -- Base name is just the work type (scene metadata is in P_NOTES)
+          local base_name = work_type
 
           -- Apply prefix. If prefix is unavailable (project name not in expected format),
           -- preserve any existing prefix already stored on the item to avoid stripping it.
@@ -1395,7 +1504,10 @@ local function action_finish()
   if S.work_mode == "AAP" then finish_aap_item("finish")
   else
     if S.scene_guid ~= "" then update_scene_metadata_by_guid(S.scene_guid) end
+    local finishing_guid = S.work_item_guid
     finish_current_item("finish"); sync_work_item_names()
+    local log_item = get_item_by_guid(finishing_guid)
+    if log_item then PM_SyncSceneMetadataToLogItem(log_item) end
   end
 end
 local function action_break()
@@ -1430,47 +1542,39 @@ local function action_switch_type()
     end
   end
 
-  local scene_name = S.scene_name
-  local scene_start_tc = S.scene_start_tc
-  if S.scene_guid ~= "" and scene_start_tc == "" then
-    local sc = get_scene_info_by_guid(S.scene_guid)
-    if sc then
-      scene_name = sc.name
-      scene_start_tc = sc.start_tc
-    end
-  end
+  -- Item name = just new_type; scene metadata goes into P_NOTES
+  local item_name = new_type
 
-  local item_name
+  -- Build note from the linked scene item (if any)
+  local item_note = ""
   if S.scene_guid ~= "" then
-    if scene_start_tc ~= "" then
-      item_name = scene_name .. " (" .. scene_start_tc .. ") | " .. new_type
+    local scene_item = find_scene_item_by_guid(S.scene_guid)
+    if scene_item then
+      item_note = build_work_item_note(scene_item)
     else
-      item_name = "[Missing Scene] | " .. new_type
+      r.ShowConsoleMsg("PM Timer: scene item not found for GUID " .. S.scene_guid .. "\n")
     end
-  else
-    item_name = new_type
   end
 
   r.Undo_BeginBlock()
   ensure_folder_track(parent_track)
   local date_track = get_or_create_date_track(parent_track, os.date("%Y-%m-%d"))
   local item = create_work_item(date_track, S.scene_guid, item_name, new_type,
-    end_pos or secs_since_midnight(), now_clock)
+    end_pos or secs_since_midnight(), now_clock, item_note)
   local item_guid = get_item_guid(item)
   r.Undo_EndBlock("PM: Switch work type", -1)
   r.UpdateArrange()
+  mirror_log_item_to_work_log(item)
 
   S.mode            = "WORKING"
   S.work_type       = new_type
   S.work_item_guid  = item_guid
   S.start_clock     = now_clock
   S.last_start_time = end_time
-  S.scene_name      = scene_name
-  S.scene_start_tc  = scene_start_tc
 
   set_extstate("ACTIVE_WORK_ITEM_GUID",    item_guid)
   set_extstate("ACTIVE_WORK_SCENE_GUID",   S.scene_guid)
-  set_extstate("ACTIVE_WORK_SCENE_NAME",   scene_name)
+  set_extstate("ACTIVE_WORK_SCENE_NAME",   S.scene_name)
   set_extstate("ACTIVE_WORK_TYPE",         new_type)
   set_extstate("ACTIVE_WORK_START_CLOCK",  tostring(now_clock))
   set_extstate("ACTIVE_WORK_OSTIME_START", tostring(now_clock))
@@ -1506,15 +1610,24 @@ local function action_switch_scene()
     end
   end
 
-  local item_name = sel_scene.name .. " (" .. sel_scene.start_tc .. ") | " .. new_type
+  -- Update new scene's metadata in Scene Cut note and build work item note
+  local item_note = ""
+  if sel_scene.handle then
+    update_scene_note(sel_scene.handle)
+    item_note = build_work_item_note(sel_scene.handle, sel_scene.name)
+  end
+
+  -- Item name = just new_type; scene metadata goes into P_NOTES
+  local item_name = new_type
   r.Undo_BeginBlock()
   ensure_folder_track(scene_track)
   local date_track = get_or_create_date_track(scene_track, os.date("%Y-%m-%d"))
   local item = create_work_item(date_track, sel_scene.guid, item_name, new_type,
-    end_pos or secs_since_midnight(), now_clock)
+    end_pos or secs_since_midnight(), now_clock, item_note)
   local item_guid = get_item_guid(item)
   r.Undo_EndBlock("PM: Switch scene", -1)
   r.UpdateArrange()
+  mirror_log_item_to_work_log(item)
 
   S.mode            = "WORKING"
   S.scene_guid      = sel_scene.guid
@@ -1531,9 +1644,6 @@ local function action_switch_scene()
   set_extstate("ACTIVE_WORK_TYPE",         new_type)
   set_extstate("ACTIVE_WORK_START_CLOCK",  tostring(now_clock))
   set_extstate("ACTIVE_WORK_OSTIME_START", tostring(now_clock))
-
-  -- Update new scene's metadata
-  update_scene_metadata_by_guid(sel_scene.guid)
 end
 
 local function action_stop()
@@ -1823,6 +1933,44 @@ local function action_sync_work_log()
   r.ShowMessageBox(msg, "Sync to Work Log", 0)
 end
 
+-- ── Auto-mirror to Work Log ─────────────────────────────────────────────────
+-- After creating a new log item, silently copy it to the open Work Log project.
+-- Skips if: Work Log project not open, current project IS the Work Log,
+-- item is not a log item (take name lacks "|"), or no suitable destination track.
+local function mirror_log_item_to_work_log(src_item)
+  if not src_item then return end
+  local take = r.GetActiveTake(src_item)
+  if not take then return end
+  if not r.GetTakeName(take):match("|") then return end
+
+  local src_proj = r.EnumProjects(-1)
+  local wl_proj  = find_work_log_project()
+  if not wl_proj or wl_proj == src_proj then return end
+
+  local _, src_fn   = r.EnumProjects(-1)
+  local src_proj_id = (src_fn or ""):match("([^/\\]+)$") or (src_fn or "")
+
+  local item_track = r.GetMediaItemTrack(src_item)
+  local _, tname   = r.GetTrackName(item_track)
+  local dst_track
+
+  if tname:match(DATE_PAT) then
+    dst_track = get_or_create_wl_flat_track(wl_proj, tname, src_proj)
+  elseif tname == DURATION_LOG_NAME then
+    local iname     = r.GetTakeName(take)
+    local proj_name = extract_proj_from_name(iname)
+    if proj_name then
+      dst_track = get_or_create_wl_dur_proj_track(wl_proj, proj_name, src_proj)
+    end
+  end
+
+  if not dst_track then return end
+
+  if copy_item_to_wl(src_item, dst_track, src_proj_id) then
+    r.UpdateArrange()
+  end
+end
+
 -- ── Fix Duration ────────────────────────────────────────────────────────────
 -- For each selected REAPER item that has P_EXT:WORK_TYPE set,
 -- overwrite P_EXT:DURATION with the item's current D_LENGTH.
@@ -1909,11 +2057,15 @@ local function action_add_record()
     sel_scene = get_selected_scene_info(scene_track)
   end
 
-  local scene_guid, scene_name, scene_start_tc = "", "", ""
+  -- Dialog mode requires a scene selection
+  if S.work_mode == "Dialog" and not sel_scene then
+    r.ShowMessageBox("Please select a Scene Cut item first.", "Add Record", 0)
+    return
+  end
+
+  local scene_guid = ""
   if sel_scene then
     scene_guid = sel_scene.guid
-    scene_name = sel_scene.name
-    scene_start_tc = sel_scene.start_tc
   end
 
   -- Dialog mode: always place items under Scene Cut (create if needed)
@@ -1999,16 +2151,14 @@ local function action_add_record()
     end
   end
 
-  -- Build item name
-  --   Scene Mode   : "scene_name (tc) | work_type"
-  --   Project Mode : "work_type"
-  local item_name
-  if scene_guid ~= "" then
-    item_name = scene_name .. " (" .. scene_start_tc .. ") | " .. work_type
-  else
-    item_name = work_type
+  -- Item name = just work_type (scene metadata goes into P_NOTES)
+  local item_name = apply_proj_prefix(work_type)
+
+  -- Build scene metadata note (if scene is linked)
+  local item_note = ""
+  if sel_scene and sel_scene.handle then
+    item_note = build_work_item_note(sel_scene.handle)
   end
-  item_name = apply_proj_prefix(item_name)
 
   -- Create item
   r.Undo_BeginBlock()
@@ -2032,9 +2182,13 @@ local function action_add_record()
     if _task ~= "" then set_item_ext(item, "TASK", _task) end
     set_item_ext(item, "START_CLOCK", start_str)
     set_item_ext(item, "END_CLOCK",   end_str)
+    if item_note ~= "" then
+      r.ULT_SetMediaItemNote(item, item_note)
+    end
     r.UpdateItemInProject(item)
     r.SetMediaItemInfo_Value(item, "C_LOCK", 1)  -- lock after creation
     r.Undo_EndBlock("PM: Add Record (timed)", -1)
+    mirror_log_item_to_work_log(item)
 
   else  -- duration-only
     local dur_track = get_or_create_duration_log_track(parent_track)
@@ -2052,9 +2206,13 @@ local function action_add_record()
     set_item_ext(item, "IS_DURATION_ONLY", "1")
     local _task = get_proj_task()
     if _task ~= "" then set_item_ext(item, "TASK", _task) end
+    if item_note ~= "" then
+      r.ULT_SetMediaItemNote(item, item_note)
+    end
     r.UpdateItemInProject(item)
     r.SetMediaItemInfo_Value(item, "C_LOCK", 1)  -- lock after creation
     r.Undo_EndBlock("PM: Add Record (duration-only)", -1)
+    mirror_log_item_to_work_log(item)
   end
 
   r.UpdateArrange()
@@ -2383,6 +2541,7 @@ local function loop()
     sync_work_item_names()
     sync_all_prefixes()
     sync_work_item_colors()
+    PM_SyncAllLogItems()
     draw()
     last_draw_time = r.time_precise()
   end
@@ -2430,5 +2589,6 @@ draw()
 sync_work_item_names()
 sync_all_prefixes()
 sync_work_item_colors()
+PM_SyncAllLogItems()
 last_draw_time = r.time_precise()
 r.defer(loop)
