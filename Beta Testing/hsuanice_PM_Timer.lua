@@ -1,6 +1,6 @@
 --[[
 @description PM Timer - Scene-aware Work Timer
-@version 260307.1500
+@version 260307.0335
 @author hsuanice
 @about
   Scene-aware toggle timer for the hsuanice PM system.
@@ -26,6 +26,14 @@
   All work items are locked (C_LOCK=1) after creation.
 
 @changelog
+  v260307.0335
+    - Fix: copy_item_to_wl now uses native P_NOTES instead of ULT_GetMediaItemNote /
+      ULT_SetMediaItemNote, resolving "argument 1: expected MediaItem*" crash caused
+      by SWS ULT functions requiring matching project context.
+    - Fix: copy_item_to_wl now updates existing Work Log items (note, length, color)
+      instead of silently skipping them. wl_item_exists() replaced with find_wl_item()
+      which returns the item handle for in-place update. No-op if nothing changed.
+
   v260307.0300
     - New: PM_SyncSceneMetadataToLogItem(item) — reads scene note from the linked
       scene item and writes it into the log item note (ULT_SetMediaItemNote),
@@ -1692,38 +1700,70 @@ local function find_work_log_project()
   return nil
 end
 
-local function wl_item_exists(track, pos, name)
+-- Returns the existing WL item at the given position+name, or nil if not found.
+local function find_wl_item(track, pos, name)
   for j = 0, r.CountTrackMediaItems(track) - 1 do
     local item = r.GetTrackMediaItem(track, j)
     if math.abs(r.GetMediaItemInfo_Value(item, "D_POSITION") - pos) < 0.001 then
       local take = r.GetActiveTake(item)
-      if take and r.GetTakeName(take) == name then return true end
+      if take and r.GetTakeName(take) == name then return item end
     end
   end
-  return false
+  return nil
 end
 
--- Create an empty (no media) copy of src_item on dst_track.
--- Tags the new WL item with src_proj_id (P_EXT:WL_SRC_PROJ) for cleanup tracking.
--- Returns true if created, false if a duplicate was found.
+-- Mirror src_item onto dst_track in the Work Log project.
+-- If an item with the same position + take name already exists, update its
+-- note, length, and color instead of creating a duplicate.
+-- Uses native P_NOTES (not ULT) so reads/writes work regardless of active project.
+-- Returns true if an item was created or updated, false if nothing changed.
 local function copy_item_to_wl(src_item, dst_track, src_proj_id)
-  local pos   = r.GetMediaItemInfo_Value(src_item, "D_POSITION")
-  local len   = r.GetMediaItemInfo_Value(src_item, "D_LENGTH")
-  local color = math.floor(r.GetMediaItemInfo_Value(src_item, "I_CUSTOMCOLOR"))
-  local name  = ""
-  local take  = r.GetActiveTake(src_item)
-  if take then name = r.GetTakeName(take) end
-  if wl_item_exists(dst_track, pos, name) then return false end
-  local item = r.AddMediaItemToTrack(dst_track)
-  r.SetMediaItemInfo_Value(item, "D_POSITION", pos)
-  r.SetMediaItemInfo_Value(item, "D_LENGTH",   len)
-  if color ~= 0 then r.SetMediaItemInfo_Value(item, "I_CUSTOMCOLOR", color) end
-  local it = r.AddTakeToMediaItem(item)
-  r.GetSetMediaItemTakeInfo_String(it, "P_NAME", name, true)
-  if src_proj_id and src_proj_id ~= "" then
-    r.GetSetMediaItemInfo_String(item, "P_EXT:WL_SRC_PROJ", src_proj_id, true)
+  local _, src_note = r.GetSetMediaItemInfo_String(src_item, "P_NOTES", "", false)
+  local pos         = r.GetMediaItemInfo_Value(src_item, "D_POSITION")
+  local len         = r.GetMediaItemInfo_Value(src_item, "D_LENGTH")
+  local color       = r.GetMediaItemInfo_Value(src_item, "I_CUSTOMCOLOR")
+  local src_take    = r.GetActiveTake(src_item)
+  local name        = src_take and r.GetTakeName(src_take) or ""
+
+  local existing = find_wl_item(dst_track, pos, name)
+  if existing then
+    -- Update mutable fields on the existing WL item.
+    local _, cur_note = r.GetSetMediaItemInfo_String(existing, "P_NOTES", "", false)
+    local cur_len     = r.GetMediaItemInfo_Value(existing, "D_LENGTH")
+    local cur_color   = r.GetMediaItemInfo_Value(existing, "I_CUSTOMCOLOR")
+    if cur_note == src_note and cur_len == len and cur_color == color then
+      return false  -- nothing changed
+    end
+    r.SetMediaItemInfo_Value(existing, "D_LENGTH",      len)
+    r.SetMediaItemInfo_Value(existing, "I_CUSTOMCOLOR", color)
+    if src_note and src_note ~= "" then
+      r.GetSetMediaItemInfo_String(existing, "P_NOTES", src_note, true)
+    end
+    r.UpdateItemInProject(existing)
+    return true
   end
-  r.UpdateItemInProject(item)
+
+  -- No existing item — create a new one.
+  local new_item = r.AddMediaItemToTrack(dst_track)
+  if not new_item then return false end
+
+  r.SetMediaItemInfo_Value(new_item, "D_POSITION",    pos)
+  r.SetMediaItemInfo_Value(new_item, "D_LENGTH",      len)
+  r.SetMediaItemInfo_Value(new_item, "I_CUSTOMCOLOR", color)
+
+  local new_take = r.AddTakeToMediaItem(new_item)
+  if new_take then
+    r.GetSetMediaItemTakeInfo_String(new_take, "P_NAME", name, true)
+  end
+
+  if src_note and src_note ~= "" then
+    r.GetSetMediaItemInfo_String(new_item, "P_NOTES", src_note, true)
+  end
+
+  if src_proj_id and src_proj_id ~= "" then
+    r.GetSetMediaItemInfo_String(new_item, "P_EXT:WL_SRC_PROJ", src_proj_id, true)
+  end
+  r.UpdateItemInProject(new_item)
   return true
 end
 
@@ -1966,7 +2006,13 @@ local function mirror_log_item_to_work_log(src_item)
 
   if not dst_track then return end
 
-  if copy_item_to_wl(src_item, dst_track, src_proj_id) then
+  -- Switch to the WL project so AddMediaItemToTrack and ULT note calls succeed,
+  -- then restore the source project.
+  r.SelectProjectInstance(wl_proj)
+  local did_create = copy_item_to_wl(src_item, dst_track, src_proj_id)
+  r.SelectProjectInstance(src_proj)
+
+  if did_create then
     r.UpdateArrange()
   end
 end
