@@ -1,6 +1,6 @@
 --[[
 @description PM Scene Analyzer
-@version 260305.2100
+@version 260307.1434
 @author hsuanice
 @about
   PM System - Phase 1, single-file implementation.
@@ -26,6 +26,22 @@
       stamps P_EXT:SCENE_ID on each one.
 
 @changelog
+  v260307.1434
+    - New: apply_scene_colors_by_group() — after analyze_scenes() writes notes,
+      propagates each scene item's color to all source items sharing the same
+      I_GROUPID. Only colors items whose I_CUSTOMCOLOR is currently 0 (unset);
+      user-assigned colors are preserved. Scene items themselves are never modified.
+      Wrapped in its own undo block "PM: Apply scene colors to source items".
+      Result logged to console ("Colors applied: N item(s)").
+
+  v260307.1400
+    - New: apply_scene_colors_by_group() — after analyze_scenes() writes notes,
+      propagates each scene item's color to all source items sharing the same
+      I_GROUPID. Only colors items whose I_CUSTOMCOLOR is currently 0 (unset);
+      user-assigned colors are preserved. Scene items themselves are never modified.
+      Wrapped in its own undo block "PM: Apply scene colors to source items".
+      Result logged to console ("Colors applied: N item(s)").
+
   v260305.2100
     - New: write_scene_note() now also sets the scene item's take name (P_NAME)
       from the first line of P_NOTES, so the scene name appears on the timeline.
@@ -218,6 +234,44 @@ local function write_scene_note(scene_item, sc)
   r.UpdateItemInProject(scene_item)
 end
 
+-- ── Scene Color Propagation ────────────────────────────────────────────────
+-- For each scene item that has a group and a color, apply that color to any
+-- non-scene item sharing the same I_GROUPID, but only if the item has no color
+-- yet (I_CUSTOMCOLOR == 0). User-assigned colors are never overwritten.
+-- Returns the number of items colored.
+local function apply_scene_colors_by_group(scenes)
+  -- Build group_id → scene_color lookup (skip scenes with no group or no color).
+  local group_color = {}
+  for _, sc in ipairs(scenes) do
+    local group = math.floor(r.GetMediaItemInfo_Value(sc.item, "I_GROUPID"))
+    if group ~= 0 and sc.color ~= 0 then
+      group_color[group] = sc.color
+    end
+  end
+  if not next(group_color) then return 0 end
+
+  local colored = 0
+  for i = 0, r.CountTracks(0) - 1 do
+    local t = r.GetTrack(0, i)
+    local _, tname = r.GetTrackName(t)
+    if tname ~= SCENE_TRACK_NAME then
+      for j = 0, r.CountTrackMediaItems(t) - 1 do
+        local item  = r.GetTrackMediaItem(t, j)
+        local group = math.floor(r.GetMediaItemInfo_Value(item, "I_GROUPID"))
+        if group ~= 0 and group_color[group] then
+          local src_color = math.floor(r.GetMediaItemInfo_Value(item, "I_CUSTOMCOLOR"))
+          if src_color == 0 then
+            r.SetMediaItemInfo_Value(item, "I_CUSTOMCOLOR", group_color[group])
+            r.UpdateItemInProject(item)
+            colored = colored + 1
+          end
+        end
+      end
+    end
+  end
+  return colored
+end
+
 -- ── Function 1: Scene Analyzer ─────────────────────────────────────────────
 local function analyze_scenes()
   r.ClearConsole()
@@ -378,6 +432,15 @@ local function analyze_scenes()
 
   if written > 0 then
     r.ShowConsoleMsg(string.format("Notes written: %d scene(s)\n", written))
+  end
+
+  -- ── Apply scene colors to grouped source items ────────────────────────────
+  r.Undo_BeginBlock()
+  local colored = apply_scene_colors_by_group(scenes)
+  r.Undo_EndBlock("PM: Apply scene colors to source items", -1)
+  if colored > 0 then
+    r.UpdateArrange()
+    r.ShowConsoleMsg(string.format("Colors applied: %d item(s)\n", colored))
   end
 
   return scenes
