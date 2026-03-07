@@ -1,6 +1,6 @@
 --[[
 @description PM Scene Analyzer
-@version 260307.1434
+@version 260307.1500
 @author hsuanice
 @about
   PM System - Phase 1, single-file implementation.
@@ -26,6 +26,12 @@
       stamps P_EXT:SCENE_ID on each one.
 
 @changelog
+  v260307.1500
+    - Change: source attribution Priority 2 now uses I_GROUPID instead of
+      colour + position range. If a source item's group matches a scene item's
+      group, it is attributed to that scene. Colour is no longer used to
+      determine scene membership. scene_ranges pre-computation removed.
+
   v260307.1434
     - New: apply_scene_colors_by_group() — after analyze_scenes() writes notes,
       propagates each scene item's color to all source items sharing the same
@@ -315,17 +321,13 @@ local function analyze_scenes()
 
   log(string.format("Scenes found : %d  (track: '%s')", #scenes, SCENE_TRACK_NAME))
 
-  -- ── Pre-compute colour-fallback lookup ranges ─────────────────────────
-  -- range_start = prev scene start  (or this scene start if first)
-  -- range_end   = next scene end    (or this scene end  if last)
-  local scene_ranges = {}
-  for idx, sc in ipairs(scenes) do
-    local prev = scenes[idx - 1]
-    local next = scenes[idx + 1]
-    scene_ranges[idx] = {
-      range_start = prev and prev.start_pos or sc.start_pos,
-      range_end   = next and next.end_pos   or sc.end_pos,
-    }
+  -- ── Build group → scene lookup (for I_GROUPID attribution) ──────────
+  local group_scene = {}   -- group_id (int) → scene
+  for _, sc in ipairs(scenes) do
+    local group = math.floor(r.GetMediaItemInfo_Value(sc.item, "I_GROUPID"))
+    if group ~= 0 then
+      group_scene[group] = sc
+    end
   end
 
   -- ── Shot count (Picture Cut) ──────────────────────────────────────────
@@ -362,11 +364,8 @@ local function analyze_scenes()
 
     for _, t in ipairs(edl_tracks) do
       for i = 0, r.CountTrackMediaItems(t) - 1 do
-        local item        = r.GetTrackMediaItem(t, i)
-        local item_start  = r.GetMediaItemInfo_Value(item, "D_POSITION")
-        local item_len    = r.GetMediaItemInfo_Value(item, "D_LENGTH")
-        local item_end    = item_start + item_len
-        local item_color  = get_item_color(item)
+        local item     = r.GetTrackMediaItem(t, i)
+        local item_len = r.GetMediaItemInfo_Value(item, "D_LENGTH")
 
         -- Priority 1: P_EXT:SCENE_ID exact match
         local scene_id = get_item_ext(item, "SCENE_ID")
@@ -375,17 +374,13 @@ local function analyze_scenes()
           sc.source_item_count   = sc.source_item_count   + 1
           sc.source_total_length = sc.source_total_length + item_len
 
-        -- Priority 2: colour match AND position within scene's lookup range
+        -- Priority 2: I_GROUPID match
         else
-          for idx, sc in ipairs(scenes) do
-            if sc.color ~= 0 and item_color == sc.color then
-              local rng = scene_ranges[idx]
-              if item_start >= rng.range_start and item_end <= rng.range_end then
-                sc.source_item_count   = sc.source_item_count   + 1
-                sc.source_total_length = sc.source_total_length + item_len
-                break
-              end
-            end
+          local item_group = math.floor(r.GetMediaItemInfo_Value(item, "I_GROUPID"))
+          if item_group ~= 0 and group_scene[item_group] then
+            local sc = group_scene[item_group]
+            sc.source_item_count   = sc.source_item_count   + 1
+            sc.source_total_length = sc.source_total_length + item_len
           end
         end
       end
