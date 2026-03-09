@@ -1,6 +1,6 @@
 --[[
 @description PM Insight Analyzer
-@version 260305.0230
+@version 260309.1955
 @author hsuanice
 @about
   Read-only analysis script. Auto-detects project type:
@@ -17,6 +17,17 @@
   Duration source: D_LENGTH (always). Does not write any data to the project.
 
 @changelog
+  v260309.1955
+    - Both modes: added Working Days count and Avg Daily Work (on working days)
+      computed from date-named tracks (YYYY-MM-DD pattern).
+    - Avg Daily Work uses trimmed mean (10-90 percentile): excludes the lowest
+      and highest 10% of working days to filter out extreme outliers.
+
+  v260307.1600
+    - Source Length now read from scene item P_NOTES ("Src Len : HH:MM:SS")
+      pre-computed by SceneAnalyzer, overriding EDL-attributed values.
+      Project source total recomputed as sum of per-scene note-based values.
+
   v260305.0230
     - Unified throughput output format across both modes:
     - Scene Insight — Per Scene: reorganized into three blocks:
@@ -107,6 +118,26 @@ local function rate_or_na(film_or_src_sec, work_sec)
   return fmt_rate(film_or_src_sec * 3600 / work_sec)
 end
 
+-- Trimmed mean of daily_tbl values (YYYY-MM-DD → secs).
+-- Drops the bottom and top `trim_pct` fraction (e.g. 0.1 = 10%).
+-- Returns: avg_secs, days_used, total_working_days
+local function trimmed_daily_avg(daily_tbl, trim_pct)
+  local vals = {}
+  for _, secs in pairs(daily_tbl) do
+    if secs > 0 then table.insert(vals, secs) end
+  end
+  local n = #vals
+  if n == 0 then return 0, 0, 0 end
+  table.sort(vals)
+  local trim = math.floor(n * trim_pct)
+  local lo   = trim + 1
+  local hi   = n - trim
+  if lo > hi then lo = 1; hi = n end   -- too few points: use all
+  local sum = 0
+  for i = lo, hi do sum = sum + vals[i] end
+  return sum / (hi - lo + 1), hi - lo + 1, n
+end
+
 -- Returns all child tracks inside a named folder track.
 -- Same implementation as SceneAnalyzer.find_folder_children().
 local function find_folder_children(folder_name)
@@ -167,9 +198,11 @@ local function analyze_work_log()
   local project_order = {}
   local task_totals   = {}   -- across all projects
   local grand_total   = 0
+  local daily_totals  = {}   -- "YYYY-MM-DD" → total work secs that day
 
   for i = 0, r.CountTracks(0) - 1 do
     local t = r.GetTrack(0, i)
+    local _, tname_wl = r.GetTrackName(t)
     for j = 0, r.CountTrackMediaItems(t) - 1 do
       local item   = r.GetTrackMediaItem(t, j)
       local take   = r.GetActiveTake(item)
@@ -178,6 +211,9 @@ local function analyze_work_log()
       if parsed then
         local dur = r.GetMediaItemInfo_Value(item, "D_LENGTH")
         if dur > 0 then
+          if tname_wl:match(DATE_PAT) then
+            daily_totals[tname_wl] = (daily_totals[tname_wl] or 0) + dur
+          end
           -- Part 1 of the name, e.g. "TheFixer EP04 Dialog"
           local prefix  = iname:match("^(.-) | ") or iname
           local project = prefix:match("^(%S+)") or ""
@@ -227,7 +263,12 @@ local function analyze_work_log()
   out("")
   out("Year Overview")
   out("--------------------------------")
+  local wl_avg, wl_used, wl_all = trimmed_daily_avg(daily_totals, 0.1)
   out("Grand Total Work: " .. fmt_dur(grand_total))
+  out("Working Days:     " .. wl_all)
+  out("Avg Daily Work:   " .. (wl_all > 0
+    and (fmt_dur(wl_avg) .. string.format("  (mid %d days, 10-90%%)", wl_used))
+    or "N/A"))
   out("")
   for _, task in ipairs(sorted_by_val(task_totals)) do
     out(string.format("  %-14s %s", task .. ":", fmt_dur(task_totals[task])))
@@ -406,13 +447,51 @@ local function analyze()
     end
   end
 
-  -- 4b. Project Source Total — raw sum of ALL EDL items (no attribution) ───────
+  -- 4b. Project Source Total — sum of ALL items in EDL folder (parent + child tracks)
   local project_source_total_sec = 0
+  -- Include parent EDL folder track items
+  for i = 0, r.CountTracks(0) - 1 do
+    local t        = r.GetTrack(0, i)
+    local _, tname = r.GetTrackName(t)
+    local fd       = math.floor(r.GetMediaTrackInfo_Value(t, "I_FOLDERDEPTH"))
+    if tname == EDL_FOLDER_NAME and fd == 1 then
+      for j = 0, r.CountTrackMediaItems(t) - 1 do
+        local item = r.GetTrackMediaItem(t, j)
+        project_source_total_sec = project_source_total_sec
+          + r.GetMediaItemInfo_Value(item, "D_LENGTH")
+      end
+      break
+    end
+  end
+  -- Include child track items
   for _, t in ipairs(edl_tracks) do
     for i = 0, r.CountTrackMediaItems(t) - 1 do
       local item = r.GetTrackMediaItem(t, i)
       project_source_total_sec = project_source_total_sec
         + r.GetMediaItemInfo_Value(item, "D_LENGTH")
+    end
+  end
+
+  -- 4c. Override source_length_sec from scene item P_NOTES (pre-computed by SceneAnalyzer)
+  --     Format: "Src Len : HH:MM:SS:FF" — parse manually; frames ignored (sub-second)
+  for i = 0, r.CountTrackMediaItems(scene_track) - 1 do
+    local item = r.GetTrackMediaItem(scene_track, i)
+    local guid = r.BR_GetMediaItemGUID(item)
+    if guid and scene_map[guid] then
+      local _, notes = r.GetSetMediaItemInfo_String(item, "P_NOTES", "", false)
+      if notes and notes ~= "" then
+        local src_len_str = notes:match("Src%sLen%s*:%s*([%d:]+)")
+        if src_len_str then
+          -- parse_timestr mis-handles HH:MM:SS:FF; extract H/M/S explicitly
+          local h, m, s = src_len_str:match("^(%d+):(%d+):(%d+)")
+          if h then
+            local sec = tonumber(h)*3600 + tonumber(m)*60 + tonumber(s)
+            if sec > 0 then
+              scene_map[guid].source_length_sec = sec
+            end
+          end
+        end
+      end
     end
   end
 
@@ -422,6 +501,7 @@ local function analyze()
   local depth        = 1
 
   local project_work_total = 0   -- Project Mode work (no SCENE_GUID)
+  local daily_totals       = {}  -- "YYYY-MM-DD" → total work secs that day
 
   for i = sc_num, total_tracks - 1 do
     local t        = r.GetTrack(0, i)
@@ -437,6 +517,9 @@ local function analyze()
           -- Duration: prefer P_EXT:DURATION, fallback D_LENGTH
           local dur_secs = r.GetMediaItemInfo_Value(item, "D_LENGTH")
           if dur_secs < 0 then dur_secs = 0 end
+          if dur_secs > 0 and tname:match(DATE_PAT) then
+            daily_totals[tname] = (daily_totals[tname] or 0) + dur_secs
+          end
 
           local _, sg = r.GetSetMediaItemInfo_String(item, "P_EXT:SCENE_GUID", "", false)
           if sg ~= "" and scene_map[sg] then
@@ -510,7 +593,12 @@ local function analyze()
   out("")
   out("Total Scene Work:   " .. fmt_dur(project_scene_total_sec))
   out("Total Project Work: " .. fmt_dur(project_work_total))
+  local dl_avg, dl_used, dl_all = trimmed_daily_avg(daily_totals, 0.1)
   out("Grand Total Work:   " .. fmt_dur(grand_total))
+  out("Working Days:       " .. dl_all)
+  out("Avg Daily Work:     " .. (dl_all > 0
+    and (fmt_dur(dl_avg) .. string.format("  (mid %d days, 10-90%%)", dl_used))
+    or "N/A"))
 
   -- ── Progress ─────────────────────────────────────────────────────────────
   out("")
