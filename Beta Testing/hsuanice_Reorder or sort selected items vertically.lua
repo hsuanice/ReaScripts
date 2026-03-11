@@ -1,6 +1,6 @@
 --[[
 @description ReaImGui - Vertical Reorder and Sort (items)
-@version 260228.1946
+@version 260311.1200
 @author hsuanice
 @about
   Provides three vertical re-arrangement modes for selected items (stacked UI):
@@ -29,6 +29,19 @@
 
 
 @changelog
+  v260311.1200
+  - Fix: Same-file, same-editing-range items no longer interleave with other recordings
+    in Copy-to-Sort and Sort Vertically.
+  * Added RANGE_BUCKET constant (0.5 s) and get_src_offs() helper (reads D_STARTOFFS).
+  * Sort Vertically / File Name key: secondary sort key now includes source offset,
+    so items from the same file at the same editing range sort adjacent within a cluster.
+  * Copy-to-Sort Mode 1 (Filename): changed from item-by-item to range-group-based
+    bin-packing. Items sharing (base_filename, range_bucket) are placed as a unit on
+    the same track; a new track is opened only when the whole group conflicts.
+    Sort order upgraded to (bfn, range_bucket, take_name).
+  * Copy-to-Sort Mode 2 (Scene & Take): slot_items are sorted by (bfn, src_offs)
+    before intra-slot bin-packing, so same-file same-range items tend to land on the
+    same sub-track across different scene+take sessions.
   v260228.1946
   - Fix: GetMediaSourceFileName returns one string (not bool+string); removed incorrect
     "local _, p =" pattern so source filename is now actually read correctly.
@@ -298,8 +311,8 @@
 ---------------------------------------
 -- Debug Mode
 ---------------------------------------
-local DEBUG_MODE = true  -- Set to true to enable detailed console logging
-local OUTPUT_TO_FILE = true -- Write debug output to file instead of console
+local DEBUG_MODE = false  -- Set to true to enable detailed console logging
+local OUTPUT_TO_FILE = false -- Write debug output to file instead of console
 local OUTPUT_FILE = reaper.GetResourcePath() .. "/Scripts/hsuanice Scripts/Tools/Reorder_Debug_Output.txt"
 
 -- Clear output file at script start
@@ -383,6 +396,12 @@ end
 local function item_start(it) return reaper.GetMediaItemInfo_Value(it,"D_POSITION") end
 local function item_len(it)   return reaper.GetMediaItemInfo_Value(it,"D_LENGTH")   end
 local function item_track(it) return reaper.GetMediaItemTrack(it) end
+-- 取得 take 在 source 檔中的起始偏移（D_STARTOFFS）；無 take 時回傳 0
+local function get_src_offs(it)
+  local tk = reaper.GetActiveTake(it)
+  if not tk then return 0 end
+  return reaper.GetMediaItemTakeInfo_Value(tk, "D_STARTOFFS") or 0
+end
 local function is_item_locked(it) return (reaper.GetMediaItemInfo_Value(it,"C_LOCK") or 0) & 1 == 1 end
 local function track_index(tr) return math.floor(reaper.GetMediaTrackInfo_Value(tr,"IP_TRACKNUMBER") or 0) end
 local function set_track_name(tr, name) reaper.GetSetMediaTrackInfo_String(tr, "P_NAME", tostring(name or ""), true) end
@@ -526,7 +545,8 @@ local function add_interval(occ_list, s,e) occ_list[#occ_list+1] = { s=s, e=e } 
 ---------------------------------------
 -- Sort：同列分群
 ---------------------------------------
-local TIME_TOL = 0.005 -- 秒；欄位容差
+local TIME_TOL    = 0.005 -- 秒；欄位容差
+local RANGE_BUCKET = 0.5  -- 秒；source-offset 分桶容差（同一桶 = 同一 editing range）
 local function build_time_clusters(items)
   local sorted = { table.unpack(items) }
   table.sort(sorted, function(a,b)
@@ -559,7 +579,10 @@ local function key_take_name(it)
 end
 local function key_file_name(it)
   local tk = take_of(it); local src = source_of_take(tk)
-  return path_basename(src_path(src))
+  local fname = path_basename(src_path(src))
+  -- 次鍵加入 source offset（同檔案、同 editing range 的 items 排在一起）
+  local offs = get_src_offs(it)
+  return fname .. string.format("|%015.3f", offs)
 end
 
 -- 以穩定鍵值排序：把 (key, trackIndex, startTime, originalIndex) 組成單一字串鍵比較
@@ -1209,6 +1232,15 @@ local function run_copy_to_new_tracks(name_mode, order_mode, asc, append_seconda
           end
         end
         if #slot_items > 0 then
+          -- Sort slot_items by (bfn, src_offs) so items from the same source file
+          -- and same editing range are processed consecutively, keeping them on the
+          -- same sub-track whenever their timeline spans don't overlap.
+          table.sort(slot_items, function(a, b)
+            local bfn_a = get_item_base_filename(a)
+            local bfn_b = get_item_base_filename(b)
+            if bfn_a ~= bfn_b then return bfn_a < bfn_b end
+            return get_src_offs(a) < get_src_offs(b)
+          end)
           -- Intra-slot bin-packing: when all scene+takes are the same (1 global slot),
           -- items within the same group may still overlap each other.
           -- Items that share a timeline position (same simultaneous recording) are
@@ -1250,45 +1282,89 @@ local function run_copy_to_new_tracks(name_mode, order_mode, asc, append_seconda
       local label = g.label
       debug(string.format("Group #%d: label='%s' | %d items", gidx, label, #g.items))
 
-      -- Build flat list sorted by (base_filename, take_name)
+      -- Build flat list sorted by (base_filename, range_bucket, take_name)
+      -- range_bucket groups items by which portion of the source file they use,
+      -- so items from the same file AND same editing range sort adjacent.
       local item_records = {}
       for _, it in ipairs(g.items) do
-        local bfn = get_item_base_filename(it)
-        local tk  = take_of(it)
-        local tkn = ""
+        local bfn          = get_item_base_filename(it)
+        local src_offs     = get_src_offs(it)
+        local range_bucket = math.floor(src_offs / RANGE_BUCKET)
+        local tk           = take_of(it)
+        local tkn          = ""
         if tk then
           local _, nm = reaper.GetSetMediaItemTakeInfo_String(tk, "P_NAME", "", false)
           tkn = nm or ""
         end
         local s = item_start(it) or 0
         local e = s + (item_len(it) or 0)
-        item_records[#item_records+1] = { it = it, bfn = bfn, tkn = tkn, s = s, e = e }
+        item_records[#item_records+1] = {
+          it = it, bfn = bfn, range_bucket = range_bucket, tkn = tkn, s = s, e = e
+        }
       end
       table.sort(item_records, function(a, b)
         if a.bfn ~= b.bfn then return a.bfn < b.bfn end
+        if a.range_bucket ~= b.range_bucket then return a.range_bucket < b.range_bucket end
         return a.tkn < b.tkn
       end)
 
-      -- Assign one-by-one; new track on overflow (same label, no numbering)
-      local slots = {}
+      -- Group-based bin-packing: items sharing the same (bfn, range_bucket) are treated
+      -- as a unit and placed on the same track together, preventing cross-range interleaving.
+      local range_groups     = {}   -- key → list of recs
+      local range_group_ord  = {}   -- ordered keys
       for _, rec in ipairs(item_records) do
-        debug(string.format("  Item base='%s' take='%s' span=%.3f..%.3f",
-                            rec.bfn, rec.tkn, rec.s, rec.e))
+        local rk = rec.bfn .. "\0" .. tostring(rec.range_bucket)
+        if not range_groups[rk] then
+          range_groups[rk] = {}
+          range_group_ord[#range_group_ord+1] = rk
+        end
+        range_groups[rk][#range_groups[rk]+1] = rec
+      end
+
+      local slots = {}
+      for _, rk in ipairs(range_group_ord) do
+        local rg = range_groups[rk]
+        debug(string.format("  Range-group '%s': %d item(s)", rk:gsub("%z","·"), #rg))
+
+        -- Try to find a slot where ALL items in this range-group fit (no time overlap)
         local assigned = nil
         for _, slot in ipairs(slots) do
-          if can_place_on(slot.spans, rec.s, rec.e) then
-            assigned = slot; break
+          local fits = true
+          for _, rec in ipairs(rg) do
+            if not can_place_on(slot.spans, rec.s, rec.e) then fits = false; break end
+          end
+          if fits then assigned = slot; break end
+        end
+
+        if assigned then
+          -- Place entire range-group on the chosen slot
+          for _, rec in ipairs(rg) do
+            copy_item_to_track(rec.it, assigned.tr)
+            copied = copied + 1
+            table.insert(assigned.spans, { s = rec.s, e = rec.e })
+            debug(string.format("    → Placed on existing '%s' at %.3f (base='%s')",
+                                label, rec.s, rec.bfn))
+          end
+        else
+          -- No single slot fits the whole group; fall back to per-item placement
+          -- (handles edge case of intra-group time overlap)
+          for _, rec in ipairs(rg) do
+            local item_slot = nil
+            for _, slot in ipairs(slots) do
+              if can_place_on(slot.spans, rec.s, rec.e) then item_slot = slot; break end
+            end
+            if not item_slot then
+              local tr = make_labeled_track(label)
+              item_slot = { tr = tr, spans = {} }
+              table.insert(slots, item_slot)
+            end
+            copy_item_to_track(rec.it, item_slot.tr)
+            copied = copied + 1
+            table.insert(item_slot.spans, { s = rec.s, e = rec.e })
+            debug(string.format("    → Fallback placed '%s' at %.3f (base='%s')",
+                                label, rec.s, rec.bfn))
           end
         end
-        if not assigned then
-          local tr = make_labeled_track(label)
-          assigned = { tr = tr, spans = {} }
-          table.insert(slots, assigned)
-        end
-        copy_item_to_track(rec.it, assigned.tr)
-        copied = copied + 1
-        table.insert(assigned.spans, { s = rec.s, e = rec.e })
-        debug(string.format("    → Copied to '%s' at %.3f  (base='%s')", label, rec.s, rec.bfn))
       end
     end
   end
