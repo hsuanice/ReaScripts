@@ -1,6 +1,6 @@
 --[[
 @description ReaImGui - Vertical Reorder and Sort (items)
-@version 260311.1200
+@version 260311.1530
 @author hsuanice
 @about
   Provides three vertical re-arrangement modes for selected items (stacked UI):
@@ -29,6 +29,14 @@
 
 
 @changelog
+  v260311.1530
+  - Fix: Copy-to-Sort Mode 2 (Scene & Take) overflow tracks now appear after ALL primary
+    tracks in a slot, not immediately after each channel's primary track.
+    Track layout per slot is now: [Ch1-primary, Ch2-primary, ..., Ch1-overflow, Ch2-overflow, ...]
+    instead of: [Ch1-primary, Ch1-overflow, Ch2-primary, Ch2-overflow, ...].
+    Implemented two-pass layer-by-layer track creation (bin-packing computed first,
+    then tracks emitted level-by-level across all groups per slot).
+
   v260311.1200
   - Fix: Same-file, same-editing-range items no longer interleave with other recordings
     in Copy-to-Sort and Sort Vertically.
@@ -311,8 +319,8 @@
 ---------------------------------------
 -- Debug Mode
 ---------------------------------------
-local DEBUG_MODE = false  -- Set to true to enable detailed console logging
-local OUTPUT_TO_FILE = false -- Write debug output to file instead of console
+local DEBUG_MODE = true  -- Set to true to enable detailed console logging
+local OUTPUT_TO_FILE = true -- Write debug output to file instead of console
 local OUTPUT_FILE = reaper.GetResourcePath() .. "/Scripts/hsuanice Scripts/Tools/Reorder_Debug_Output.txt"
 
 -- Clear output file at script start
@@ -1219,9 +1227,15 @@ local function run_copy_to_new_tracks(name_mode, order_mode, asc, append_seconda
       debug(string.format("  Slot %d: %s", si, table.concat(keys, ", ")))
     end
 
-    -- Create tracks: slot × group (outer = slot so all channels of slot N are together)
+    -- Two-pass track creation: slot × group
+    -- Pass 1: compute sub_slots (bin-packing) for every (slot, group) without creating tracks.
+    -- Pass 2: create tracks layer-by-layer so all level-1 (primary) tracks for all groups in a
+    --         slot come first, then all level-2 (overflow) tracks, etc.
+    --         Layout per slot: [G1-primary, G2-primary, ..., G1-overflow, G2-overflow, ...]
+    local slot_group_subslots = {}   -- [si][gi] = { sub_slots, label }
     for si, slot in ipairs(global_slots) do
-      for _, g in ipairs(order) do
+      slot_group_subslots[si] = {}
+      for gi, g in ipairs(order) do
         local label = g.label
         -- Collect this group's items that belong to this slot
         local slot_items = {}
@@ -1261,15 +1275,37 @@ local function run_copy_to_new_tracks(name_mode, order_mode, asc, append_seconda
               sub_slots[#sub_slots+1] = { items = { it }, spans = { { s = s, e = e } } }
             end
           end
-          for _, ss in ipairs(sub_slots) do
-            local tr = make_labeled_track(label)
-            for _, it in ipairs(ss.items) do
-              copy_item_to_track(it, tr)
-              copied = copied + 1
-            end
-          end
+          slot_group_subslots[si][gi] = { sub_slots = sub_slots, label = label }
           debug(string.format("    Slot %d | Group '%s': %d item(s) → %d sub-track(s)",
                               si, label, #slot_items, #sub_slots))
+        end
+      end
+    end
+
+    -- Pass 2: create tracks layer-by-layer within each slot
+    for si = 1, #global_slots do
+      -- Find the maximum number of sub-slot levels across all groups in this slot
+      local max_levels = 0
+      for gi = 1, #order do
+        local entry = slot_group_subslots[si][gi]
+        if entry and #entry.sub_slots > max_levels then
+          max_levels = #entry.sub_slots
+        end
+      end
+      -- Emit level 1 tracks for all groups, then level 2, etc.
+      for level = 1, max_levels do
+        for gi = 1, #order do
+          local entry = slot_group_subslots[si][gi]
+          if entry then
+            local ss = entry.sub_slots[level]
+            if ss then
+              local tr = make_labeled_track(entry.label)
+              for _, it in ipairs(ss.items) do
+                copy_item_to_track(it, tr)
+                copied = copied + 1
+              end
+            end
+          end
         end
       end
     end
