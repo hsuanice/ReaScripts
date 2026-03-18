@@ -1,6 +1,6 @@
 --[[
 @description PM Timer - Scene-aware Work Timer
-@version 260318.1618
+@version 260318.2215
 @author hsuanice
 @about
   Scene-aware toggle timer for the hsuanice PM system.
@@ -26,6 +26,9 @@
   All work items are locked (C_LOCK=1) after creation.
 
 @changelog
+  v260318.2215
+    - UI: "Finish Day" button renamed to "Finish".
+
   v260318.1618
     - Break now saves session context (scene, work type) so it can be resumed.
     - New: "Continue" button appears in IDLE when a break is active; restores
@@ -2489,7 +2492,7 @@ local function draw()
     add_btn(1, "Switch Scene", action_switch_scene)
     add_btn(2, "Switch Type",  action_switch_type)
     add_btn(3, "Break",        action_break)
-    add_btn(4, "Finish Day",   action_finish)
+    add_btn(4, "Finish",       action_finish)
   elseif BREAK_STATE then
     add_btn(1, "Continue",   action_continue)
     add_btn(2, "Start New",  action_start)
