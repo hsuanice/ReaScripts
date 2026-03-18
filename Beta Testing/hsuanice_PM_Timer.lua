@@ -1,6 +1,6 @@
 --[[
 @description PM Timer - Scene-aware Work Timer
-@version 260307.0335
+@version 260318.1618
 @author hsuanice
 @about
   Scene-aware toggle timer for the hsuanice PM system.
@@ -26,6 +26,19 @@
   All work items are locked (C_LOCK=1) after creation.
 
 @changelog
+  v260318.1618
+    - Break now saves session context (scene, work type) so it can be resumed.
+    - New: "Continue" button appears in IDLE when a break is active; restores
+      the previous scene + work type and starts a new work item immediately,
+      without showing any menus.
+    - New: "Start New" replaces "Start" when break state is pending; clicking
+      it begins a fresh session and clears the saved break.
+    - Status row shows "ON BREAK" (amber) instead of "IDLE" during a break,
+      and previews the paused scene name and work type in the info row.
+    - Break state persisted via ProjExtState so it survives REAPER restarts.
+    - Fix: build_work_item_note() called with spurious 2nd argument in
+      action_switch_scene (pre-existing, now corrected).
+
   v260307.0335
     - Fix: copy_item_to_wl now uses native P_NOTES instead of ULT_GetMediaItemNote /
       ULT_SetMediaItemNote, resolving "argument 1: expected MediaItem*" crash caused
@@ -373,6 +386,7 @@ local win_y           = tonumber(r.GetExtState(NS, "WIN_Y"))       or 100
 local cur_dock        = tonumber(r.GetExtState(NS, "DOCK_STATE"))  or 0
 local last_dock       = cur_dock
 local last_proj_identity = nil  -- tracks active project for change detection
+local BREAK_STATE = nil  -- {scene_guid, scene_name, scene_start_tc, work_type} set by action_break
 
 -- ── Helpers ────────────────────────────────────────────────────────────────
 
@@ -481,6 +495,39 @@ local function reset_state()
   S.start_clock = 0; S.last_start_time = 0
   S.aap_day_name = ""; S.aap_item_count = 0
   S.aap_total_seconds = 0; S.aap_est_size = ""
+end
+
+-- ── Break state persistence ────────────────────────────────────────────────
+local function save_break_state()
+  BREAK_STATE = {
+    scene_guid    = S.scene_guid,
+    scene_name    = S.scene_name,
+    scene_start_tc = S.scene_start_tc,
+    work_type     = S.work_type,
+  }
+  set_extstate("BREAK_SCENE_GUID", S.scene_guid)
+  set_extstate("BREAK_SCENE_NAME", S.scene_name)
+  set_extstate("BREAK_SCENE_TC",   S.scene_start_tc)
+  set_extstate("BREAK_WORK_TYPE",  S.work_type)
+end
+
+local function load_break_state()
+  local wtype = get_extstate("BREAK_WORK_TYPE")
+  if not wtype then return end
+  BREAK_STATE = {
+    scene_guid     = get_extstate("BREAK_SCENE_GUID") or "",
+    scene_name     = get_extstate("BREAK_SCENE_NAME") or "",
+    scene_start_tc = get_extstate("BREAK_SCENE_TC")   or "",
+    work_type      = wtype,
+  }
+end
+
+local function clear_break_state()
+  BREAK_STATE = nil
+  set_extstate("BREAK_SCENE_GUID", "")
+  set_extstate("BREAK_SCENE_NAME", "")
+  set_extstate("BREAK_SCENE_TC",   "")
+  set_extstate("BREAK_WORK_TYPE",  "")
 end
 
 local function get_item_by_guid(guid)
@@ -1227,6 +1274,9 @@ local function build_work_item_note(scene_item)
   return note or ""
 end
 
+-- Forward declaration: defined after WL helper functions below.
+local mirror_log_item_to_work_log
+
 -- ── Actions ────────────────────────────────────────────────────────────────
 local function action_start()
   if S.work_mode == "AAP" then action_start_aap(); return end
@@ -1312,6 +1362,8 @@ local function action_start()
   set_extstate("ACTIVE_WORK_TYPE",         work_type)
   set_extstate("ACTIVE_WORK_START_CLOCK",  tostring(now_clock))
   set_extstate("ACTIVE_WORK_OSTIME_START", tostring(now_clock))
+
+  clear_break_state()  -- starting fresh clears any saved break
 end
 
 local function finish_current_item(end_reason, keep_active)
@@ -1521,9 +1573,59 @@ end
 local function action_break()
   if S.work_mode == "AAP" then finish_aap_item("break")
   else
+    save_break_state()
     if S.scene_guid ~= "" then update_scene_metadata_by_guid(S.scene_guid) end
     finish_current_item("break"); sync_work_item_names()
   end
+end
+
+local function action_continue()
+  if not BREAK_STATE then return end
+  local bs = BREAK_STATE
+
+  local parent_track = get_or_create_folder_track(SCENE_TRACK_NAME, true)
+  if not parent_track then
+    r.ShowMessageBox("Cannot create '" .. SCENE_TRACK_NAME .. "' track.", "PM Timer", 0)
+    return
+  end
+
+  local scene_handle = (bs.scene_guid ~= "") and get_item_by_guid(bs.scene_guid) or nil
+  local pos_secs    = secs_since_midnight()
+  local now_clock   = os.time()
+  local now_precise = r.time_precise()
+
+  local item_note = ""
+  if scene_handle then
+    update_scene_note(scene_handle)
+    item_note = build_work_item_note(scene_handle)
+  end
+
+  r.Undo_BeginBlock()
+  ensure_folder_track(parent_track)
+  local date_track = get_or_create_date_track(parent_track, os.date("%Y-%m-%d"))
+  local item       = create_work_item(date_track, bs.scene_guid, bs.work_type, bs.work_type, pos_secs, now_clock, item_note)
+  local item_guid  = get_item_guid(item)
+  r.Undo_EndBlock("PM: Continue work session", -1)
+  r.UpdateArrange()
+  mirror_log_item_to_work_log(item)
+
+  S.mode            = "WORKING"
+  S.scene_guid      = bs.scene_guid
+  S.scene_name      = bs.scene_name
+  S.scene_start_tc  = bs.scene_start_tc
+  S.work_type       = bs.work_type
+  S.work_item_guid  = item_guid
+  S.start_clock     = now_clock
+  S.last_start_time = now_precise
+
+  set_extstate("ACTIVE_WORK_ITEM_GUID",    item_guid)
+  set_extstate("ACTIVE_WORK_SCENE_GUID",   bs.scene_guid)
+  set_extstate("ACTIVE_WORK_SCENE_NAME",   bs.scene_name)
+  set_extstate("ACTIVE_WORK_TYPE",         bs.work_type)
+  set_extstate("ACTIVE_WORK_START_CLOCK",  tostring(now_clock))
+  set_extstate("ACTIVE_WORK_OSTIME_START", tostring(now_clock))
+
+  clear_break_state()
 end
 
 local function action_switch_type()
@@ -1622,7 +1724,7 @@ local function action_switch_scene()
   local item_note = ""
   if sel_scene.handle then
     update_scene_note(sel_scene.handle)
-    item_note = build_work_item_note(sel_scene.handle, sel_scene.name)
+    item_note = build_work_item_note(sel_scene.handle)
   end
 
   -- Item name = just new_type; scene metadata goes into P_NOTES
@@ -1977,7 +2079,7 @@ end
 -- After creating a new log item, silently copy it to the open Work Log project.
 -- Skips if: Work Log project not open, current project IS the Work Log,
 -- item is not a log item (take name lacks "|"), or no suitable destination track.
-local function mirror_log_item_to_work_log(src_item)
+mirror_log_item_to_work_log = function(src_item)
   if not src_item then return end
   local take = r.GetActiveTake(src_item)
   if not take then return end
@@ -2310,17 +2412,26 @@ local function draw()
   -- ── Info rows ───────────────────────────────────────────────────────────
   do
     -- 2-row display: in AAP mode show "Day:" instead of "Scene:"
+    -- When IDLE with a saved break state, show the paused session's context.
     local scene_label
     local name_disp
+    local type_src  = S.work_type
+    local bs_idle   = (S.mode == "IDLE") and BREAK_STATE or nil
     if S.work_mode == "AAP" then
       scene_label = "  |  Day: "
       name_disp   = S.aap_day_name ~= "" and S.aap_day_name or "---"
     else
       scene_label = "  |  Scene: "
-      name_disp   = S.scene_name
+      if bs_idle then
+        name_disp = bs_idle.scene_name
+        type_src  = bs_idle.work_type
+      else
+        name_disp = S.scene_name
+      end
     end
+    local on_break = bs_idle ~= nil
     if #name_disp > 18 then name_disp = name_disp:sub(1, 17) .. "..." end
-    local type_disp  = (S.work_type ~= "") and S.work_type or "---"
+    local type_disp  = (type_src ~= "") and type_src or "---"
     if #type_disp > 10 then type_disp = type_disp:sub(1, 9) .. "..." end
     local mode_disp  = (S.work_mode ~= "") and S.work_mode or "Dialog"
     local start_disp = (S.mode == "WORKING") and fmt_clock(S.start_clock) or "--:--:--"
@@ -2337,6 +2448,8 @@ local function draw()
     gfx.set(0.7, 0.7, 0.7, 1); gfx.drawstr("  |  Status: ")
     if S.mode == "WORKING" then
       gfx.set(0.2, 1.0, 0.2, 1); gfx.drawstr("WORKING")
+    elseif on_break then
+      gfx.set(1.0, 0.7, 0.2, 1); gfx.drawstr("ON BREAK")
     else
       gfx.set(0.7, 0.7, 0.7, 1); gfx.drawstr("IDLE")
     end
@@ -2377,6 +2490,11 @@ local function draw()
     add_btn(2, "Switch Type",  action_switch_type)
     add_btn(3, "Break",        action_break)
     add_btn(4, "Finish Day",   action_finish)
+  elseif BREAK_STATE then
+    add_btn(1, "Continue",   action_continue)
+    add_btn(2, "Start New",  action_start)
+    add_btn(3, "Mode",       action_switch_mode)
+    add_btn(4, "Add Record", action_add_record)
   else
     add_btn(1, "Start",      action_start)
     add_btn(2, "Mode",       action_switch_mode)
@@ -2627,6 +2745,7 @@ local function loop()
 end
 
 -- ── Entry ──────────────────────────────────────────────────────────────────
+load_break_state()
 try_recover()
 last_proj_identity = get_proj_identity()  -- lock in current project after recovery
 gfx.init("hsuanice PM Timer", WIN_W, WIN_H, cur_dock, win_x, win_y)
