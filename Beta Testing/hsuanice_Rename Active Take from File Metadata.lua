@@ -1,6 +1,6 @@
 --[[
 @description ReaImGui - Rename Active Take from Metadata (caret insert + cached preview + copy/export)
-@version 260225.2030
+@version 260319.1448
 @author hsuanice
 @about
   Rename active takes and/or item notes from BWF/iXML and true source metadata using a fast ReaImGui UI.
@@ -35,6 +35,10 @@
   hsuanice served as the workflow designer, tester, and integrator for this tool.
 
 @changelog
+  v260319.1448 (2026-03-19)
+    - UI: Take Name and Item Note input boxes now have warm amber background (0x332B08)
+      • Both fields visually stand out from the rest of the UI
+
   v260225.2030 (2026-02-25)
     - UI: Preview panel — "Get Metadata (Preview)" button moved from top bar into preview panel header
       • Button label shows "Get Preview" when no cache exists, "Update Preview" when cache is present
@@ -2262,7 +2266,7 @@ end
 
 -- ===== Left panel =====
 local function draw_left_panel()
-  -- Take Name (prominent: colored label + taller input box)
+  -- Take Name (prominent: colored label + taller input box + warm amber bg)
   reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Text(), 0xFFCC55FF)
   reaper.ImGui_Text(ctx, "Take Name")
   reaper.ImGui_PopStyleColor(ctx)
@@ -2270,7 +2274,9 @@ local function draw_left_panel()
   reaper.ImGui_SetNextItemWidth(ctx, -FLT_MIN)
   if focus_take_input then reaper.ImGui_SetKeyboardFocusHere(ctx); focus_take_input = false end
   reaper.ImGui_PushStyleVar(ctx, reaper.ImGui_StyleVar_FramePadding(), 6, 8)
+  reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_FrameBg(), 0x332B08FF)
   local changed_take, new_take = reaper.ImGui_InputText(ctx, "##take_name_tpl", TAKE_TEMPLATE)
+  reaper.ImGui_PopStyleColor(ctx)
   reaper.ImGui_PopStyleVar(ctx)
   if reaper.ImGui_IsItemActive(ctx) then active_box = "take" end
   if reaper.ImGui_IsItemHovered(ctx) and reaper.ImGui_IsMouseClicked(ctx, 0) then
@@ -2388,14 +2394,16 @@ local function draw_left_panel()
 
   reaper.ImGui_Separator(ctx)
 
-  -- Item Note (prominent: colored label + taller multiline box)
+  -- Item Note (prominent: colored label + taller multiline box + cool teal bg)
   reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Text(), 0xFFCC55FF)
   reaper.ImGui_Text(ctx, "Item Note")
   reaper.ImGui_PopStyleColor(ctx)
   reaper.ImGui_SameLine(ctx); reaper.ImGui_TextDisabled(ctx, "(empty = skip)")
   reaper.ImGui_SetNextItemWidth(ctx, -FLT_MIN)
   reaper.ImGui_PushStyleVar(ctx, reaper.ImGui_StyleVar_FramePadding(), 6, 8)
+  reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_FrameBg(), 0x332B08FF)
   local changed_note, new_note = reaper.ImGui_InputTextMultiline(ctx, "##item_note_tpl", NOTE_TEMPLATE, -FLT_MIN, 92)
+  reaper.ImGui_PopStyleColor(ctx)
   reaper.ImGui_PopStyleVar(ctx)
   if focus_note_input then reaper.ImGui_SetKeyboardFocusHere(ctx); focus_note_input = false end
   if reaper.ImGui_IsItemActive(ctx) then active_box = "note" end
