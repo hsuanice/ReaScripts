@@ -46,6 +46,12 @@
   Required: Python 3 + opentimelineio (pip3 install opentimelineio)
 
 @changelog
+  v260322.0026
+  - Change: Conform always creates new tracks, never reuses existing project tracks
+    • Previous behavior: searched for a matching track name and inserted items into it
+    • New behavior: a fresh track is always created for each conform run, regardless of
+      what already exists in the REAPER project
+
   v260322.0015
   - Fix: Transition events fading out to BL now correctly show the real outgoing clip name
     • Previous logic always preferred TO CLIP NAME when non-empty — correct for fade-in from
@@ -546,7 +552,7 @@ end
 ---------------------------------------------------------------------------
 local SCRIPT_NAME = "Conform List Browser"
 local EXT_NS = "hsuanice_ConformListBrowser"
-local VERSION = "260322.0015"
+local VERSION = "260322.0026"
 
 -- Column definitions (EDL Events table)
 local COL = {
@@ -3433,23 +3439,10 @@ local function conform_matched_items(selected_only)
   local track_map = {}  -- expanded_name -> MediaTrack*
 
   for _, name in ipairs(track_names_order) do
-    -- Search existing tracks first
-    local found = nil
-    for ti = 0, reaper.CountTracks(0) - 1 do
-      local tr = reaper.GetTrack(0, ti)
-      local _, tr_name = reaper.GetTrackName(tr)
-      if tr_name == name then
-        found = tr
-        break
-      end
-    end
-
-    if not found then
-      reaper.InsertTrackAtIndex(reaper.CountTracks(0), true)
-      found = reaper.GetTrack(0, reaper.CountTracks(0) - 1)
-      reaper.GetSetMediaTrackInfo_String(found, "P_NAME", name, true)
-    end
-
+    -- Always create a new track (never reuse existing tracks)
+    reaper.InsertTrackAtIndex(reaper.CountTracks(0), true)
+    local found = reaper.GetTrack(0, reaper.CountTracks(0) - 1)
+    reaper.GetSetMediaTrackInfo_String(found, "P_NAME", name, true)
     track_map[name] = found
   end
 
