@@ -1,6 +1,6 @@
 --[[
 @description Conform List Browser
-@version 260228.1401
+@version 260228.0136
 @author hsuanice
 @about
   A REAPER script for browsing and editing EDL (Edit Decision List) data
@@ -46,6 +46,13 @@
   Required: Python 3 + opentimelineio (pip3 install opentimelineio)
 
 @changelog
+  v260322.0015
+  - Fix: Transition events fading out to BL now correctly show the real outgoing clip name
+    • Previous logic always preferred TO CLIP NAME when non-empty — correct for fade-in from
+      BL, wrong for fade-out to BL (where TO CLIP NAME = "BL" and FROM CLIP NAME = real file)
+    • New logic: skip "BL" as clip name source; prefer whichever of FROM/TO is a real non-BL
+      filename; fall back to the other side only if both are BL or empty
+
   v260228.1401
   - Feature: Reel multi-select in sidebar (and horizontal panel)
     • Click on reel name text → select only that reel (sets shift-anchor; no visible change)
@@ -539,7 +546,7 @@ end
 ---------------------------------------------------------------------------
 local SCRIPT_NAME = "Conform List Browser"
 local EXT_NS = "hsuanice_ConformListBrowser"
-local VERSION = "260228.1401"
+local VERSION = "260322.0015"
 
 -- Column definitions (EDL Events table)
 local COL = {
@@ -2172,8 +2179,17 @@ local function _make_rows_from_events(events, fps, is_drop, source_idx)
       src_tc_out = evt.src_tc_out or "00:00:00:00",
       rec_tc_in = evt.rec_tc_in or "00:00:00:00",
       rec_tc_out = evt.rec_tc_out or "00:00:00:00",
-      clip_name = (evt.to_clip_name and evt.to_clip_name ~= "" and evt.to_clip_name)
-                  or evt.clip_name or "",
+      -- Prefer TO CLIP NAME (incoming clip) unless it is "BL" (black/silence),
+      -- in which case fall back to FROM CLIP NAME (the real outgoing clip).
+      -- This covers: fade-in from BL → show TO; fade-out to BL → show FROM;
+      -- real crossfade (neither BL) → show TO (the incoming material).
+      clip_name = (function()
+        local from_n = evt.clip_name or ""
+        local to_n   = evt.to_clip_name or ""
+        if to_n ~= "" and to_n ~= "BL" then return to_n end
+        if from_n ~= "" and from_n ~= "BL" then return from_n end
+        return to_n ~= "" and to_n or from_n  -- both BL or both empty
+      end)(),
       source_file = evt.source_file or "",
       notes = "",    -- auto-populated below from extra EDL comments
       level = "",    -- auto-populated below from AUDIO/VIDEO LEVEL comments
