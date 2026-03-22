@@ -1,6 +1,6 @@
 --[[
 @description hsuanice Metadata Cache - Shared metadata caching system
-@version 251209.1954
+@version 260323.0324
 @author hsuanice
 @about
   Shared metadata caching library for REAPER scripts.
@@ -29,6 +29,11 @@
     CACHE.flush()
 
 @changelog
+  v260323.0324
+  - Cache: Added bit_depth field to store/lookup
+    • Bit depth (RIFF fmt chunk) is now persisted alongside BWF/iXML metadata
+    • ILB can retrieve bit_depth from cache on startup instead of re-reading every file
+
   v251209.1954 (2024-12-09)
     - Finalized version for production use
     - Changed cache filename from "ItemListEditor.cache" to "Metadata.cache" (more generic)
@@ -47,7 +52,7 @@
 ]]
 
 local M = {}
-M.VERSION = "251209.1954"
+M.VERSION = "260323.0324"
 
 -- Cache version (increment to invalidate all caches)
 local CACHE_VERSION = "2.0"
@@ -444,7 +449,9 @@ function M.store(item_guid, item, metadata)
     tape = metadata.tape or "",
     ubits = metadata.ubits or "",
     framerate = metadata.framerate or "",
-    speed = metadata.speed or ""
+    speed = metadata.speed or "",
+    -- Audio format (from RIFF parsing, previously re-read on every startup)
+    bit_depth = metadata.bit_depth or ""
   }
 
   if CACHE.debug and CACHE.invalidated[item_guid] then
