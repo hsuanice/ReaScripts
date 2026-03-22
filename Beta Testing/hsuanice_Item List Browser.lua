@@ -1,6 +1,6 @@
 --[[
 @description Item List Browser
-@version 260203.1309
+@version 260323.0312
 @author hsuanice
 @about
   A project-wide media browser that shows ALL items in the project with full
@@ -54,6 +54,23 @@
 
 
 @changelog
+  v260323.0312
+  - UX: Only Selected mode is now read-only (list clicks do not change REAPER selection)
+    • Clicking rows in the list updates the list highlight only — REAPER item selection
+      is never modified while Only Selected is active
+    • REAPER → list sync is unaffected: when REAPER selection changes externally the
+      list highlights and filter still update automatically
+    • Effectively makes Only Selected behave like Item List Editor (display-only mode)
+
+  v260323.0251
+  - Feature: Follow Folder — hide items on tracks that are hidden by collapsed folders
+    • New checkbox in toolbar: "Follow: [ ]Selection  [ ]Folder"
+    • When enabled, items on tracks hidden by a collapsed parent folder are filtered
+      out of the list; they reappear automatically when the folder is expanded
+    • Uses reaper.IsTrackVisible(track, false) evaluated per-frame so the list
+      updates instantly as folders are collapsed or expanded in REAPER
+    • Setting persists across sessions via ExtState
+
   v260203.1309
   - Fix: Undo/Redo no longer causes list flash and scroll position loss
     • Previously rebuilt entire ROWS array via scan_selection_rows() on every Cmd+Z / Cmd+Shift+Z
@@ -1857,6 +1874,7 @@ local ILB = {
   sel_cooldown = 0,             -- timestamp of last list-to-REAPER sync
   sel_cooldown_ms = 0.3,        -- 300ms cooldown
   follow = true,                -- auto-scroll arrange view to selected item
+  follow_folder = false,        -- hide items on tracks hidden by collapsed folders
   scroll_to_row = nil,          -- row index to auto-scroll to
   visible_range = { first = 0, last = 0 },  -- clipper visible row range (updated each frame)
   last_reaper_sel_hash = "",    -- REAPER selection state hash
@@ -1959,6 +1977,7 @@ local function save_prefs()
   reaper.SetExtState(EXT_NS, "debug_mode", DEBUG and "1" or "0", true)
   -- ILB prefs
   reaper.SetExtState(EXT_NS, "follow_selection", ILB.follow and "1" or "0", true)
+  reaper.SetExtState(EXT_NS, "follow_folder", ILB.follow_folder and "1" or "0", true)
   reaper.SetExtState(EXT_NS, "expand_rows", EXPAND_ROWS and "1" or "0", true)
 end
 
@@ -2334,6 +2353,8 @@ local function load_prefs()
   -- restore follow selection preference (ILB)
   local fsel = reaper.GetExtState(EXT_NS, "follow_selection")
   if fsel == "1" then ILB.follow = true elseif fsel == "0" then ILB.follow = false end
+  local ffol = reaper.GetExtState(EXT_NS, "follow_folder")
+  if ffol == "1" then ILB.follow_folder = true elseif ffol == "0" then ILB.follow_folder = false end
 
   -- restore expand notes preference (ILB)
   local en = reaper.GetExtState(EXT_NS, "expand_rows")
@@ -3569,6 +3590,13 @@ local function get_view_rows()
         if cf.mode == "include" and cell_val ~= cf.value then return false end
         if cf.mode == "exclude" and cell_val == cf.value then return false end
       end
+      -- Filter: Follow Folder — hide items on tracks hidden by collapsed folders
+      if ILB.follow_folder then
+        local tr = row.__track
+        if tr and reaper.ValidatePtr(tr, "MediaTrack*") then
+          if not reaper.IsTrackVisible(tr, false) then return false end
+        end
+      end
       return true
     end
   })
@@ -3583,6 +3611,8 @@ end
 
 -- List → REAPER: sync table selection to REAPER item selection
 local function sync_list_selection_to_reaper()
+  -- In Only Selected mode, list clicks are read-only — do not push to REAPER
+  if ILB.only_selected then return end
   ILB.sel_source = "list"
   ILB.sel_cooldown = reaper.time_precise()
 
@@ -4575,14 +4605,23 @@ do
   end
 end
 
--- ILB: Follow Selection
+-- ILB: Follow Selection / Follow Folder
 do
-  local chg_fs, nv_fs = reaper.ImGui_Checkbox(ctx, "Follow Selection", ILB.follow)
+  reaper.ImGui_Text(ctx, "Follow:")
   reaper.ImGui_SameLine(ctx)
+  local chg_fs, nv_fs = reaper.ImGui_Checkbox(ctx, "Selection", ILB.follow)
   if chg_fs then
     ILB.follow = nv_fs
     save_prefs()
   end
+  reaper.ImGui_SameLine(ctx)
+  local chg_ff, nv_ff = reaper.ImGui_Checkbox(ctx, "Folder", ILB.follow_folder)
+  if chg_ff then
+    ILB.follow_folder = nv_ff
+    ILB.cached_rows = nil; ILB.cached_rows_frame = -1
+    save_prefs()
+  end
+  reaper.ImGui_SameLine(ctx)
 end
 
 -- (Track dropdown and Search filter moved — see row 2 below)
