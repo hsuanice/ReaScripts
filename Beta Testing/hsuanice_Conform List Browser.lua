@@ -46,11 +46,23 @@
   Required: Python 3 + opentimelineio (pip3 install opentimelineio)
 
 @changelog
+  v260322.1541
+  - Fix: Conform now works for Fallback (Tape+TC) matches with multiple candidates
+    • Fallback rows with multiple candidates (matched_path="(N)") now correctly use
+      __match_candidates and insert all as multiple takes, same as "Multiple" status
+    • Previously these rows silently produced 0 items due to path lookup failure
+
   v260322.0026
   - Change: Conform always creates new tracks, never reuses existing project tracks
     • Previous behavior: searched for a matching track name and inserted items into it
     • New behavior: a fresh track is always created for each conform run, regardless of
       what already exists in the REAPER project
+  - Feature: Tape+TC fallback matching (Strategy 5)
+    • When Strategies 1–4 all fail (e.g. EDL has wrong clip name), matching retries
+      using Reel+TC range only — ignores clip/filename entirely
+    • A file matches if its BWF src_tc ≤ EDL src_tc_in < src_tc + file duration
+    • Match column shows "Fallback" (orange); Matched File column shows "[Tape+TC]
+      filename" in red; hover tooltip explains the fallback reason and shows full path
 
   v260322.0015
   - Fix: Transition events fading out to BL now correctly show the real outgoing clip name
@@ -552,7 +564,7 @@ end
 ---------------------------------------------------------------------------
 local SCRIPT_NAME = "Conform List Browser"
 local EXT_NS = "hsuanice_ConformListBrowser"
-local VERSION = "260322.0026"
+local VERSION = "260322.1541"
 
 -- Column definitions (EDL Events table)
 local COL = {
@@ -1522,14 +1534,43 @@ local function match_audio_files()
       end
     end
 
+    -- Strategy 5 (fallback): Tape+TC range match — ignores filename entirely.
+    -- Used when EDL has wrong clip name but correct reel/TC (e.g. wipe TO=BL or
+    -- a typo in the clip name field). Marks result as "Fallback" so the UI can
+    -- flag it visually.
+    local is_fallback = false
+    if #candidates == 0 and row.reel and row.reel ~= "" and
+       row.src_tc_in and row.src_tc_in ~= "" then
+      local reel_lower = row.reel:lower()
+      local tape_files = by_tape[reel_lower] or {}
+      if #tape_files > 0 then
+        local row_tc_sec = EDL.tc_to_seconds(row.src_tc_in, CLB.fps, CLB.is_drop)
+        if row_tc_sec then
+          for _, af in ipairs(tape_files) do
+            local af_tc_str = af.metadata and af.metadata.src_tc or ""
+            local af_dur    = af.metadata and (af.metadata.duration or 0) or 0
+            if af_tc_str ~= "" and af_dur > 0 then
+              local af_tc_sec = EDL.tc_to_seconds(af_tc_str, CLB.fps, CLB.is_drop)
+              if af_tc_sec and
+                 row_tc_sec >= af_tc_sec - 0.04 and
+                 row_tc_sec <  af_tc_sec + af_dur + 0.04 then
+                candidates[#candidates + 1] = af
+              end
+            end
+          end
+        end
+      end
+      if #candidates > 0 then is_fallback = true end
+    end
+
     -- Set match result
     if #candidates == 1 then
-      row.match_status = "Found"
+      row.match_status = is_fallback and "Fallback" or "Found"
       row.matched_path = candidates[1].path
       row.__match_candidates = nil
       found_count = found_count + 1
     elseif #candidates > 1 then
-      row.match_status = "Multiple"
+      row.match_status = is_fallback and "Fallback" or "Multiple"
       row.matched_path = string.format("(%d)", #candidates)
       row.__match_candidates = candidates
       multiple_count = multiple_count + 1
@@ -1543,8 +1584,14 @@ local function match_audio_files()
 
   CLB.cached_rows = nil
 
-  console_msg(string.format("Matching complete: %d found, %d multiple, %d not found",
-    found_count, multiple_count, not_found_count))
+  local fallback_count = 0
+  for _, row in ipairs(ROWS) do
+    if row.match_status == "Fallback" then fallback_count = fallback_count + 1 end
+  end
+  console_msg(string.format(
+    "Matching complete: %d found, %d multiple, %d not found%s",
+    found_count, multiple_count, not_found_count,
+    fallback_count > 0 and string.format(", %d fallback (Tape+TC only)", fallback_count) or ""))
 end
 
 --- Get value for audio file column (for sorting)
@@ -3372,7 +3419,7 @@ local function conform_matched_items(selected_only)
   local multi_count = 0
 
   for _, row in ipairs(rows_to_process) do
-    if row.match_status == "Found" then
+    if row.match_status == "Found" or row.match_status == "Fallback" then
       matched_rows[#matched_rows + 1] = row
       found_count = found_count + 1
     elseif row.match_status == "Multiple" and row.__match_candidates then
@@ -3480,15 +3527,17 @@ local function conform_matched_items(selected_only)
 
     -- Get audio files to insert
     local audio_files = {}
-    if row.match_status == "Found" and row.matched_path then
-      -- Find the audio file entry
+    if (row.match_status == "Found" or row.match_status == "Fallback") and
+       row.matched_path and not row.matched_path:match("^%(") then
+      -- Single match: find the audio file entry by path
       for _, af in ipairs(CLB.audio_files) do
         if af.path == row.matched_path then
           audio_files[1] = af
           break
         end
       end
-    elseif row.match_status == "Multiple" and row.__match_candidates then
+    elseif row.__match_candidates then
+      -- Multiple candidates (Multiple or Fallback with multiple results)
       audio_files = row.__match_candidates
     end
 
@@ -5252,9 +5301,40 @@ local function draw_table(table_height)
           -- Display mode: use Selectable for highlight + click detection
           local text = get_cell_text(row, col)
           local selected = sel_has(row.__guid, col)
+
+          -- Fallback-match highlighting: orange Match col, red Matched File col
+          local is_fallback_row = row.match_status == "Fallback"
+          local push_color = false
+          if is_fallback_row then
+            if col == COL.MATCH_STATUS then
+              reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Text(), 0xFF8800FF)
+              push_color = true
+            elseif col == COL.MATCHED_PATH then
+              text = "[Tape+TC] " .. text
+              reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Text(), 0xFF4040FF)
+              push_color = true
+            end
+          end
+
           local display = (text ~= "" and text or " ") .. "##" .. row.__guid .. "_" .. col
 
           reaper.ImGui_Selectable(ctx, display, selected)
+          if push_color then reaper.ImGui_PopStyleColor(ctx) end
+
+          -- Tooltip for fallback-matched Matched File cell
+          if is_fallback_row and col == COL.MATCHED_PATH and
+             reaper.ImGui_IsItemHovered(ctx) then
+            if reaper.ImGui_BeginTooltip(ctx) then
+              reaper.ImGui_Text(ctx, "Tape+TC match only")
+              reaper.ImGui_Text(ctx, "EDL clip name did not match any audio file.")
+              reaper.ImGui_Text(ctx, "Matched by reel+timecode range instead.")
+              if row.matched_path and row.matched_path ~= "" then
+                reaper.ImGui_Separator(ctx)
+                reaper.ImGui_Text(ctx, row.matched_path)
+              end
+              reaper.ImGui_EndTooltip(ctx)
+            end
+          end
 
           -- Click handling
           if reaper.ImGui_IsItemClicked(ctx, 0) then
