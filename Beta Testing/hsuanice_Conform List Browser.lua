@@ -46,6 +46,14 @@
   Required: Python 3 + opentimelineio (pip3 install opentimelineio)
 
 @changelog
+  v260323.0202
+  - Feature: Remove Duplicates now heals consecutive split clips (Pass 3)
+    • If event A's rec_out == event B's rec_in AND src_out_A == src_in_B (within 1 frame),
+      they are recognised as the same clip split at an edit point
+    • Merged into a single event spanning the full range (rec_tc_out and src_tc_out extended)
+    • Supports chains of 3+ consecutive splits; debug log shows [HEAL] entries
+    • Confirm dialog and summary updated to show split-healed count separately
+
   v260323.0148
   - Fix: Remove Duplicates containment check now guards against different source content —
     if two events have the same Reel+ClipName but sync offsets differ by more than 5 frames,
@@ -581,7 +589,7 @@ end
 ---------------------------------------------------------------------------
 local SCRIPT_NAME = "Conform List Browser"
 local EXT_NS = "hsuanice_ConformListBrowser"
-local VERSION = "260323.0148"
+local VERSION = "260323.0202"
 
 -- Column definitions (EDL Events table)
 local COL = {
@@ -3722,11 +3730,13 @@ local function remove_duplicates()
       group_order[#group_order + 1] = key
     end
     local src_in  = tc_sec(row.src_tc_in)
+    local src_out = tc_sec(row.src_tc_out)
     local rec_in  = tc_sec(row.rec_tc_in)
     local rec_out = tc_sec(row.rec_tc_out)
     groups[key][#groups[key] + 1] = {
       row     = row,
       src_in  = src_in,
+      src_out = src_out,
       rec_in  = rec_in,
       rec_out = rec_out,
     }
@@ -3866,12 +3876,78 @@ local function remove_duplicates()
     ::next_group::
   end
 
+  -- Pass 3: Consecutive split healing
+  -- If event A's rec_out == event B's rec_in AND src_out_A == src_in_B (within 1 frame),
+  -- the two events are a split of the same continuous clip → merge into one.
+  -- Handles chains of 3+ consecutive splits as well.
+  local SPLIT_TOL = 0.5 / fps  -- must be exactly consecutive (0-frame tolerance; 0.5/fps handles float rounding only)
+  local split_remove     = {}
+  local split_heal_count = 0  -- number of chains healed (not events removed)
+
+  for _, key in ipairs(group_order) do
+    local entries = groups[key]
+    if #entries < 2 then goto next_heal_group end
+
+    -- Build list of entries not already flagged for removal
+    local live = {}
+    for _, e in ipairs(entries) do
+      if not near_remove[e.row.__guid] and not exact_remove[e.row.__guid] then
+        live[#live + 1] = e
+      end
+    end
+    if #live < 2 then goto next_heal_group end
+
+    -- Sort by rec_in ascending
+    table.sort(live, function(a, b) return a.rec_in < b.rec_in end)
+
+    -- Greedy chain merge: walk forward, extend chain while TC boundaries touch
+    local function flush_chain(chain)
+      if #chain < 2 then return end
+      local merged_rec_out = chain[#chain].rec_out
+      local merged_src_out = chain[#chain].src_out
+      dlog(string.format("  [HEAL]    MERGE chain of %d  starting Evt#%s  RecIn=%s → RecOut=%s  SrcIn=%s → SrcOut=%s",
+        #chain, chain[1].row.event_num or "?",
+        chain[1].row.rec_tc_in or "?", sec_to_tc(merged_rec_out),
+        chain[1].row.src_tc_in or "?", sec_to_tc(merged_src_out)))
+      chain[1].row.rec_tc_out = sec_to_tc(merged_rec_out)
+      chain[1].row.src_tc_out = sec_to_tc(merged_src_out)
+      chain[1].rec_out = merged_rec_out
+      chain[1].src_out = merged_src_out
+      split_heal_count = split_heal_count + 1
+      for k = 2, #chain do
+        split_remove[chain[k].row.__guid] = true
+        dlog(string.format("  [HEAL]    REMOVE Evt#%s  RecIn=%s RecOut=%s",
+          chain[k].row.event_num or "?",
+          chain[k].row.rec_tc_in or "?", chain[k].row.rec_tc_out or "?"))
+      end
+    end
+
+    local chain = { live[1] }
+    for i = 2, #live do
+      local prev = chain[#chain]
+      local curr = live[i]
+      local rec_cont = math.abs(prev.rec_out - curr.rec_in) <= SPLIT_TOL
+      local src_cont = math.abs(prev.src_out - curr.src_in) <= SPLIT_TOL
+      if rec_cont and src_cont then
+        chain[#chain + 1] = curr
+      else
+        flush_chain(chain)
+        chain = { curr }
+      end
+    end
+    flush_chain(chain)
+
+    ::next_heal_group::
+  end
+
   local near_count  = 0
   for _ in pairs(near_remove) do near_count = near_count + 1 end
+  local split_count = 0
+  for _ in pairs(split_remove) do split_count = split_count + 1 end
 
   local exact_count = 0
   for _ in pairs(exact_remove) do exact_count = exact_count + 1 end
-  local total = exact_count + near_count
+  local total = exact_count + near_count + split_count
 
   if total == 0 then
     reaper.ShowMessageBox("No duplicate events found.", SCRIPT_NAME, 0)
@@ -3881,19 +3957,21 @@ local function remove_duplicates()
   -- Confirm
   local choice = reaper.ShowMessageBox(
     string.format(
-      "Found %d duplicate event(s) out of %d total:\n\n" ..
+      "Found %d event(s) to remove/merge out of %d total:\n\n" ..
       "  - %d exact duplicates\n" ..
       "  - %d contained (inner event fully covered by another — removed)\n" ..
-      "  - %d merged (partial overlap — TC extended to cover both ranges)\n\n" ..
-      "Remove / merge?",
-      total, #ROWS, exact_count, contain_count, merge_count),
+      "  - %d merged (partial overlap — TC extended to cover both ranges)\n" ..
+      "  - %d healed (%d split clips joined into continuous events)\n\n" ..
+      "Remove / merge / heal?",
+      total, #ROWS, exact_count, contain_count, merge_count, split_count, split_heal_count),
     SCRIPT_NAME, 1)
 
   if choice ~= 1 then return end
 
   local to_remove = {}
-  for g in pairs(exact_remove) do to_remove[g] = true end
-  for g in pairs(near_remove)  do to_remove[g] = true end
+  for g in pairs(exact_remove)  do to_remove[g] = true end
+  for g in pairs(near_remove)   do to_remove[g] = true end
+  for g in pairs(split_remove)  do to_remove[g] = true end
 
   local keep = {}
   for _, row in ipairs(ROWS) do
@@ -3920,8 +3998,8 @@ local function remove_duplicates()
   CLB.cached_rows = nil
 
   local summary = string.format(
-    "Removed %d duplicates (%d exact, %d near-dup); %d remaining",
-    total, exact_count, near_count, #ROWS)
+    "Removed/merged %d events (%d exact, %d near-dup/overlap, %d split-healed); %d remaining",
+    total, exact_count, near_count, split_count, #ROWS)
   console_msg(summary)
 
   -- Write debug log
@@ -3939,7 +4017,8 @@ local function remove_duplicates()
   end
 
   reaper.ShowMessageBox(
-    string.format("Removed %d duplicate event(s).\n%d events remaining.\n\nDebug log: Tools/clb_dedup_debug.txt", total, #ROWS),
+    string.format("Removed/merged %d event(s) (%d exact, %d overlap, %d split-healed).\n%d events remaining.\n\nDebug log: Tools/clb_dedup_debug.txt",
+      total, exact_count, near_count, split_count, #ROWS),
     SCRIPT_NAME, 0)
 end
 
