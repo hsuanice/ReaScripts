@@ -46,6 +46,23 @@
   Required: Python 3 + opentimelineio (pip3 install opentimelineio)
 
 @changelog
+  v260323.0148
+  - Fix: Remove Duplicates containment check now guards against different source content —
+    if two events have the same Reel+ClipName but sync offsets differ by more than 5 frames,
+    they are treated as different content (not duplicates), even if rec TC ranges nest
+
+  v260323.0054
+  - Fix: Near-duplicate tolerance reduced from 24 to 5 frames to prevent false removals
+
+  v260323.0051
+  - Feature: Remove Duplicates now detects near-duplicates within 5-frame tolerance
+    • Exact duplicates: same Reel + Src TC In/Out + Rec TC In/Out + Clip Name (unchanged)
+    • Near-duplicates: same Reel + Clip Name, sync offset (rec_in - src_in) matches within
+      5 frames, and rec TC ranges overlap — catches multi-channel recordings where both
+      src and rec in-points shift by the same small amount (different trim, same content)
+    • Keeps the event with the widest Rec TC range (largest duration)
+    • Confirmation dialog now shows exact vs near-duplicate counts separately
+
   v260322.1541
   - Fix: Conform now works for Fallback (Tape+TC) matches with multiple candidates
     • Fallback rows with multiple candidates (matched_path="(N)") now correctly use
@@ -564,7 +581,7 @@ end
 ---------------------------------------------------------------------------
 local SCRIPT_NAME = "Conform List Browser"
 local EXT_NS = "hsuanice_ConformListBrowser"
-local VERSION = "260322.1541"
+local VERSION = "260323.0148"
 
 -- Column definitions (EDL Events table)
 local COL = {
@@ -3628,45 +3645,260 @@ local function remove_duplicates()
     return
   end
 
-  -- Build duplicate key: reel + src TC + rec TC + clip_name (track excluded)
-  local seen = {}
-  local keep = {}
-  local removed = 0
+  local fps = CLB.fps or 24
+  local tolerance_sec = 5 / fps   -- 5-frame tolerance window
 
+  local function tc_sec(tc_str)
+    return EDL.tc_to_seconds(tc_str or "00:00:00:00", fps, CLB.is_drop) or 0
+  end
+
+  -- Debug log file
+  local debug_lines = {}
+  local debug_path  = script_path .. "../Tools/clb_dedup_debug.txt"
+  local function dlog(s) debug_lines[#debug_lines + 1] = s end
+  dlog(string.format("=== CLB Remove Duplicates Debug ==="))
+  dlog(string.format("FPS: %s%s  NEAR_SRC_TOL: 5 frames  Total events: %d",
+    tostring(fps), CLB.is_drop and " DF" or " NDF", #ROWS))
+  dlog("")
+
+  -- Pass 1: exact duplicates (reel + src TC in/out + rec TC in/out + clip_name)
+  local seen_exact = {}
+  local exact_remove = {}  -- set of __guid
+  local seen_exact_row = {}  -- key → first row (for log)
   for _, row in ipairs(ROWS) do
     local key = table.concat({
-      row.reel or "",
-      row.src_tc_in or "",
-      row.src_tc_out or "",
-      row.rec_tc_in or "",
-      row.rec_tc_out or "",
-      row.clip_name or "",
+      row.reel or "", row.src_tc_in or "", row.src_tc_out or "",
+      row.rec_tc_in or "", row.rec_tc_out or "", row.clip_name or "",
     }, "|")
-
-    if seen[key] then
-      removed = removed + 1
+    if seen_exact[key] then
+      exact_remove[row.__guid] = true
+      local orig = seen_exact_row[key]
+      dlog(string.format("[EXACT DUP] REMOVE  Evt#%s  Reel=%s  Clip=%s  SrcIn=%s  RecIn=%s  RecOut=%s",
+        row.event_num or "?", row.reel or "?", row.clip_name or "?",
+        row.src_tc_in or "?", row.rec_tc_in or "?", row.rec_tc_out or "?"))
+      dlog(string.format("            KEPT    Evt#%s  (first occurrence)",
+        orig and (orig.event_num or "?") or "?"))
     else
-      seen[key] = true
-      keep[#keep + 1] = row
+      seen_exact[key] = true
+      seen_exact_row[key] = row
     end
   end
 
-  if removed == 0 then
+  -- Pass 2: overlap-based healing
+  --
+  -- "Healing" concept: events from the same source placed at overlapping timeline
+  -- positions are merged or de-duplicated:
+  --   • Containment: one rec range fully contains the other → remove the inner one
+  --   • Partial overlap: rec ranges partially overlap → merge into one event spanning
+  --     the full range (TC values updated), like a gap-healing operation
+  --
+  -- Overlap guard: src_in values must also be within 5 frames of each other to confirm
+  -- the events share the same sync position (prevents merging sequential clips from the
+  -- same source that happen to share a clip_name and touch/overlap slightly in TC).
+
+  local NEAR_SRC_TOL = 5 / fps  -- 5-frame src_in proximity guard
+
+  -- Simple NDF seconds → TC string (used when patching merged TC values)
+  local int_fps = math.floor(fps + 0.5)
+  local function sec_to_tc(sec)
+    local tf = math.max(0, math.floor(sec * fps + 0.5))
+    local f  = tf % int_fps
+    local ts = math.floor(tf / int_fps)
+    return string.format("%02d:%02d:%02d:%02d",
+      math.floor(ts / 3600), math.floor(ts / 60) % 60, ts % 60, f)
+  end
+
+  local near_remove  = {}
+  local contain_count = 0
+  local merge_count   = 0
+
+  local groups = {}
+  local group_order = {}
+  for _, row in ipairs(ROWS) do
+    if exact_remove[row.__guid] then goto next_pass2 end
+    local key = (row.reel or "") .. "|" .. (row.clip_name or "")
+    if not groups[key] then
+      groups[key] = {}
+      group_order[#group_order + 1] = key
+    end
+    local src_in  = tc_sec(row.src_tc_in)
+    local rec_in  = tc_sec(row.rec_tc_in)
+    local rec_out = tc_sec(row.rec_tc_out)
+    groups[key][#groups[key] + 1] = {
+      row     = row,
+      src_in  = src_in,
+      rec_in  = rec_in,
+      rec_out = rec_out,
+    }
+    ::next_pass2::
+  end
+
+  for _, key in ipairs(group_order) do
+    local entries = groups[key]
+    if #entries < 2 then goto next_group end
+
+    -- Sort by rec_in ascending; tiebreak: wider rec range first
+    table.sort(entries, function(a, b)
+      if a.rec_in ~= b.rec_in then return a.rec_in < b.rec_in end
+      return a.rec_out > b.rec_out
+    end)
+
+    -- Step 1: Containment removal — NO src_in check required
+    -- If A.rec_in ≤ B.rec_in AND A.rec_out ≥ B.rec_out → A contains B → remove B.
+    -- This correctly handles transition events (wipe/dissolve) whose src_in may differ
+    -- more than NEAR_SRC_TOL from the corresponding cut event, but whose rec TC range
+    -- fully contains the cut event.
+    dlog(string.format("\n[GROUP] Reel+Clip = %s  (%d entries)", key, #entries))
+    for _, e in ipairs(entries) do
+      dlog(string.format("  Evt#%-4s  SrcIn=%-12s  RecIn=%-12s  RecOut=%-12s  SrcIn_sec=%.3f",
+        e.row.event_num or "?", e.row.src_tc_in or "?",
+        e.row.rec_tc_in or "?", e.row.rec_tc_out or "?", e.src_in))
+    end
+
+    -- Pre-compute sync offsets for containment check
+    for _, e in ipairs(entries) do
+      e.sync_off = e.rec_in - e.src_in
+    end
+
+    local contained = {}
+    for i = 1, #entries do
+      if not contained[i] then
+        for j = i + 1, #entries do
+          if not contained[j] then
+            -- Sync offsets must match within NEAR_SRC_TOL: confirms same source content
+            -- at the same timeline position (rules out same clip_name reused elsewhere)
+            local sync_ok = math.abs(entries[i].sync_off - entries[j].sync_off) <= NEAR_SRC_TOL
+            if not sync_ok then
+              dlog(string.format("  [SKIP]    Evt#%s vs Evt#%s  sync_off diff=%.3fs (%.1f frames) — different source position",
+                entries[i].row.event_num or "?", entries[j].row.event_num or "?",
+                math.abs(entries[i].sync_off - entries[j].sync_off),
+                math.abs(entries[i].sync_off - entries[j].sync_off) * fps))
+            elseif entries[i].rec_in  <= entries[j].rec_in and
+                   entries[i].rec_out >= entries[j].rec_out then
+              contained[j] = true
+              contain_count = contain_count + 1
+              near_remove[entries[j].row.__guid] = true
+              dlog(string.format("  [CONTAIN] REMOVE Evt#%s (RecIn=%s RecOut=%s) contained by Evt#%s (RecIn=%s RecOut=%s)",
+                entries[j].row.event_num or "?", entries[j].row.rec_tc_in or "?", entries[j].row.rec_tc_out or "?",
+                entries[i].row.event_num or "?", entries[i].row.rec_tc_in or "?", entries[i].row.rec_tc_out or "?"))
+            elseif entries[j].rec_in  <= entries[i].rec_in and
+                   entries[j].rec_out >= entries[i].rec_out then
+              contained[i] = true
+              contain_count = contain_count + 1
+              near_remove[entries[i].row.__guid] = true
+              dlog(string.format("  [CONTAIN] REMOVE Evt#%s (RecIn=%s RecOut=%s) contained by Evt#%s (RecIn=%s RecOut=%s)",
+                entries[i].row.event_num or "?", entries[i].row.rec_tc_in or "?", entries[i].row.rec_tc_out or "?",
+                entries[j].row.event_num or "?", entries[j].row.rec_tc_in or "?", entries[j].row.rec_tc_out or "?"))
+            end
+          end
+        end
+      end
+    end
+
+    -- Step 2: Partial overlap merge — src_in proximity check required
+    -- Among non-contained entries, find pairs with partial rec TC overlap AND
+    -- src_in within NEAR_SRC_TOL → merge into one event (TC values updated).
+    local remaining = {}
+    for i, e in ipairs(entries) do
+      if not contained[i] then remaining[#remaining + 1] = e end
+    end
+    if #remaining < 2 then goto next_group end
+
+    local merge_groups = {}
+    local cur         = { remaining[1] }
+    local cur_rec_out = remaining[1].rec_out
+
+    for i = 2, #remaining do
+      local e = remaining[i]
+      local overlaps  = e.rec_in < cur_rec_out  -- strictly less: partial overlap only
+      local src_close = false
+      if overlaps then
+        for _, ce in ipairs(cur) do
+          if math.abs(e.src_in - ce.src_in) <= NEAR_SRC_TOL then
+            src_close = true; break
+          end
+        end
+      end
+      if overlaps and src_close then
+        cur[#cur + 1] = e
+        if e.rec_out > cur_rec_out then cur_rec_out = e.rec_out end
+      else
+        merge_groups[#merge_groups + 1] = cur
+        cur         = { e }
+        cur_rec_out = e.rec_out
+      end
+    end
+    merge_groups[#merge_groups + 1] = cur
+
+    for _, grp in ipairs(merge_groups) do
+      if #grp < 2 then goto next_grp end
+
+      local merged_rec_in  = grp[1].rec_in
+      local merged_rec_out = grp[1].rec_out
+      for k = 2, #grp do
+        if grp[k].rec_out > merged_rec_out then merged_rec_out = grp[k].rec_out end
+      end
+
+      local sync_off = grp[1].rec_in - grp[1].src_in
+      local new_rec_in_tc  = sec_to_tc(merged_rec_in)
+      local new_rec_out_tc = sec_to_tc(merged_rec_out)
+      local new_src_in_tc  = sec_to_tc(merged_rec_in  - sync_off)
+      local new_src_out_tc = sec_to_tc(merged_rec_out - sync_off)
+      dlog(string.format("  [MERGE]   KEEP  Evt#%s  old RecIn=%s RecOut=%s → new RecIn=%s RecOut=%s",
+        grp[1].row.event_num or "?",
+        grp[1].row.rec_tc_in or "?", grp[1].row.rec_tc_out or "?",
+        new_rec_in_tc, new_rec_out_tc))
+      grp[1].row.rec_tc_in  = new_rec_in_tc
+      grp[1].row.rec_tc_out = new_rec_out_tc
+      grp[1].row.src_tc_in  = new_src_in_tc
+      grp[1].row.src_tc_out = new_src_out_tc
+      merge_count = merge_count + 1
+
+      for k = 2, #grp do
+        near_remove[grp[k].row.__guid] = true
+        dlog(string.format("  [MERGE]   REMOVE Evt#%s  RecIn=%s RecOut=%s",
+          grp[k].row.event_num or "?",
+          grp[k].row.rec_tc_in or "?", grp[k].row.rec_tc_out or "?"))
+      end
+
+      ::next_grp::
+    end
+    ::next_group::
+  end
+
+  local near_count  = 0
+  for _ in pairs(near_remove) do near_count = near_count + 1 end
+
+  local exact_count = 0
+  for _ in pairs(exact_remove) do exact_count = exact_count + 1 end
+  local total = exact_count + near_count
+
+  if total == 0 then
     reaper.ShowMessageBox("No duplicate events found.", SCRIPT_NAME, 0)
     return
   end
 
   -- Confirm
   local choice = reaper.ShowMessageBox(
-    string.format("Found %d duplicate event(s) out of %d total.\n\n" ..
-      "Duplicates are identified by matching:\n" ..
-      "Reel + Src TC In/Out + Rec TC In/Out + Clip Name\n\n" ..
-      "Remove them? (keeps first occurrence)",
-      removed, #ROWS),
-    SCRIPT_NAME, 1)  -- 1 = OK/Cancel
+    string.format(
+      "Found %d duplicate event(s) out of %d total:\n\n" ..
+      "  - %d exact duplicates\n" ..
+      "  - %d contained (inner event fully covered by another — removed)\n" ..
+      "  - %d merged (partial overlap — TC extended to cover both ranges)\n\n" ..
+      "Remove / merge?",
+      total, #ROWS, exact_count, contain_count, merge_count),
+    SCRIPT_NAME, 1)
 
   if choice ~= 1 then return end
 
+  local to_remove = {}
+  for g in pairs(exact_remove) do to_remove[g] = true end
+  for g in pairs(near_remove)  do to_remove[g] = true end
+
+  local keep = {}
+  for _, row in ipairs(ROWS) do
+    if not to_remove[row.__guid] then keep[#keep + 1] = row end
+  end
   ROWS = keep
 
   -- Update source event counts
@@ -3687,9 +3919,27 @@ local function remove_duplicates()
   undo_snapshot()
   CLB.cached_rows = nil
 
-  console_msg(string.format("Removed %d duplicates (%d remaining)", removed, #ROWS))
+  local summary = string.format(
+    "Removed %d duplicates (%d exact, %d near-dup); %d remaining",
+    total, exact_count, near_count, #ROWS)
+  console_msg(summary)
+
+  -- Write debug log
+  dlog("")
+  dlog("=== SUMMARY ===")
+  dlog(summary)
+  local f = io.open(debug_path, "w")
+  if f then
+    f:write(table.concat(debug_lines, "\n"))
+    f:write("\n")
+    f:close()
+    console_msg("[CLB] Debug log written: " .. debug_path)
+  else
+    console_msg("[CLB] Warning: could not write debug log to " .. debug_path)
+  end
+
   reaper.ShowMessageBox(
-    string.format("Removed %d duplicate event(s).\n%d events remaining.", removed, #ROWS),
+    string.format("Removed %d duplicate event(s).\n%d events remaining.\n\nDebug log: Tools/clb_dedup_debug.txt", total, #ROWS),
     SCRIPT_NAME, 0)
 end
 
