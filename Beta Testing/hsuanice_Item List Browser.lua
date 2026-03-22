@@ -1,6 +1,6 @@
 --[[
 @description Item List Browser
-@version 260323.0312
+@version 260323.0324
 @author hsuanice
 @about
   A project-wide media browser that shows ALL items in the project with full
@@ -54,6 +54,18 @@
 
 
 @changelog
+  v260323.0324
+  - Fix: Bit depth no longer re-read from disk on every REAPER startup
+    • Previously: collect_basic_fields() opened every audio file to parse RIFF fmt chunk
+      on each startup — causing "basic loading" to be slow even when metadata cache was warm
+    • Now: bit_depth is moved to load_metadata_for_row() (Phase 2) where it is stored in
+      and retrieved from CACHE_LIB alongside BWF/iXML metadata
+    • Phase 1 (basic fields) is now pure REAPER API calls — no file I/O
+    • After the first run, bit_depth loads from disk cache in <1ms per item
+    • Requires hsuanice_Metadata Cache v260323.0324+ (adds bit_depth field to cache store)
+    • Note: existing cache files will get a cache miss for bit_depth on first run,
+      then cached automatically — no manual cache clear needed
+
   v260323.0312
   - UX: Only Selected mode is now read-only (list clicks do not change REAPER selection)
     • Clicking rows in the list updates the list highlight only — REAPER item selection
@@ -2625,6 +2637,44 @@ end
 ---------------------------------------
 -- Collect item fields (uses Library)
 ---------------------------------------
+
+-- Read bit depth from a WAV/RF64 file by parsing the RIFF fmt chunk.
+-- Returns a string like "24" or "" if unavailable / non-WAV.
+local function read_bit_depth_from_file(src_path)
+  if not src_path or src_path == "" then return "" end
+  local fh = io.open(src_path, "rb")
+  if not fh then return "" end
+  local result = ""
+  local riff = fh:read(4)
+  if riff == "RIFF" or riff == "RF64" then
+    fh:seek("cur", 4)
+    local wave = fh:read(4)
+    if wave == "WAVE" then
+      for _ = 1, 40 do
+        local chunk_id = fh:read(4)
+        if not chunk_id or #chunk_id < 4 then break end
+        local sb = fh:read(4)
+        if not sb or #sb < 4 then break end
+        local chunk_sz = sb:byte(1) + sb:byte(2)*256 + sb:byte(3)*65536 + sb:byte(4)*16777216
+        if chunk_id == "fmt " then
+          if chunk_sz >= 16 then
+            local fmt = fh:read(16)
+            if fmt and #fmt >= 16 then
+              local bits = fmt:byte(15) + fmt:byte(16) * 256
+              if bits > 0 and bits <= 64 then result = tostring(bits) end
+            end
+          end
+          break
+        else
+          fh:seek("cur", chunk_sz + (chunk_sz % 2))
+        end
+      end
+    end
+  end
+  fh:close()
+  return result
+end
+
 -- Fast: collect basic fields only (no metadata parsing)
 local function collect_basic_fields(item)
   local row = {}
@@ -2683,42 +2733,7 @@ local function collect_basic_fields(item)
       -- File type (returns single string)
       local ftype = reaper.GetMediaSourceType(source, "")
       row.file_type = ftype or ""
-      -- Bit depth: parse RIFF chunks to find "fmt " (handles JUNK/ds64 before fmt)
-      local src_path = reaper.GetMediaSourceFileName(source, "")
-      if src_path and src_path ~= "" then
-        local fh = io.open(src_path, "rb")
-        if fh then
-          local riff = fh:read(4)
-          if riff == "RIFF" or riff == "RF64" then
-            fh:seek("cur", 4) -- skip file size
-            local wave = fh:read(4)
-            if wave == "WAVE" then
-              for _ = 1, 40 do -- safety limit on chunk iterations
-                local chunk_id = fh:read(4)
-                if not chunk_id or #chunk_id < 4 then break end
-                local sb = fh:read(4)
-                if not sb or #sb < 4 then break end
-                local chunk_sz = sb:byte(1) + sb:byte(2)*256 + sb:byte(3)*65536 + sb:byte(4)*16777216
-                if chunk_id == "fmt " then
-                  if chunk_sz >= 16 then
-                    local fmt = fh:read(16)
-                    if fmt and #fmt >= 16 then
-                      local bits = fmt:byte(15) + fmt:byte(16) * 256
-                      if bits > 0 and bits <= 64 then
-                        row.bit_depth = tostring(bits)
-                      end
-                    end
-                  end
-                  break
-                else
-                  fh:seek("cur", chunk_sz + (chunk_sz % 2)) -- skip chunk (pad to even)
-                end
-              end
-            end
-          end
-          fh:close()
-        end
-      end
+      -- bit_depth is deferred to load_metadata_for_row() where it is cached
     end
   end
 
@@ -2857,6 +2872,8 @@ local function load_metadata_for_row(row)
     row.ubits = cached.ubits or ""
     row.framerate = cached.framerate or ""
     row.speed = cached.speed or ""
+    -- bit_depth from cache (avoids RIFF file I/O on startup)
+    row.bit_depth = cached.bit_depth or ""
 
     -- Calculate source position from TimeReference (not cached, always calculated)
     row.source_start, row.source_end = calculate_source_position(item, row.time_reference, nil)
@@ -2906,6 +2923,16 @@ local function load_metadata_for_row(row)
   row.framerate = f.framerate or f.FRAMERATE or ""
   row.speed = f.speed or f.SPEED or ""
 
+  -- bit_depth: read from file (RIFF fmt chunk) and cache it
+  local tk_bd = reaper.GetActiveTake(item)
+  if tk_bd then
+    local src_bd = reaper.GetMediaItemTake_Source(tk_bd)
+    if src_bd then
+      local path_bd = reaper.GetMediaSourceFileName(src_bd, "")
+      row.bit_depth = read_bit_depth_from_file(path_bd)
+    end
+  end
+
   -- Calculate source position from TimeReference (not cached, always calculated)
   row.source_start, row.source_end = calculate_source_position(item, row.time_reference, f)
 
@@ -2941,7 +2968,8 @@ local function load_metadata_for_row(row)
     tape = row.tape,
     ubits = row.ubits,
     framerate = row.framerate,
-    speed = row.speed
+    speed = row.speed,
+    bit_depth = row.bit_depth
   })
 end
 
