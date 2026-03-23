@@ -1,6 +1,6 @@
 --[[
 @description PM Scene Analyzer
-@version 260307.1500
+@version 260323.2127
 @author hsuanice
 @about
   PM System - Phase 1, single-file implementation.
@@ -26,6 +26,12 @@
       stamps P_EXT:SCENE_ID on each one.
 
 @changelog
+  v260323.2127
+    - Fix: write_scene_note() now reads scene name from take P_NAME first,
+      then falls back to P_NOTES first line. Prevents CLB-created Scene Cut
+      items (which store the name in take P_NAME with empty P_NOTES) from
+      having their scene name overwritten with "(no name)" during analysis.
+
   v260307.1500
     - Change: source attribution Priority 2 now uses I_GROUPID instead of
       colour + position range. If a source item's group matches a scene item's
@@ -199,8 +205,19 @@ local function write_scene_note(scene_item, sc)
     table.insert(lines, line)
   end
 
-  -- First line = scene name; preserve it or default to "(no name)"
-  local scene_name = (lines[1] and lines[1] ~= "") and lines[1] or "(no name)"
+  -- First line = scene name.
+  -- Priority: (1) existing take P_NAME, (2) first line of P_NOTES, (3) "(no name)".
+  -- CLB sets take P_NAME but leaves P_NOTES empty, so check take first to
+  -- avoid overwriting a name that was never stored in P_NOTES.
+  local scene_name
+  local take_existing = r.GetActiveTake(scene_item)
+  if take_existing then
+    local tname = r.GetTakeName(take_existing)
+    if tname and tname ~= "" then scene_name = tname end
+  end
+  if not scene_name then
+    scene_name = (lines[1] and lines[1] ~= "") and lines[1] or "(no name)"
+  end
 
   -- Strip all known metadata lines (new pretty format + old key=value format)
   local function is_meta(line)
