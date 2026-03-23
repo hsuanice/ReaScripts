@@ -46,6 +46,31 @@
   Required: Python 3 + opentimelineio (pip3 install opentimelineio)
 
 @changelog
+  v260323.2201
+  - Fix: FPS confirmation dialog now correctly shows the saved FPS (e.g. 24) instead
+    of always defaulting to 25 — EDL Parser now respects CLB's saved FPS preference
+    when the EDL has no explicit FPS comment (plain NON-DROP FRAME header)
+
+  v260323.2151
+  - Change: Default frame rate changed from 25 to 24
+  - Feature: Frame rate confirmation dialog on EDL/XML load and before Scene Cut Track creation
+    • After loading any EDL or XML, a dialog appears showing the detected FPS
+    • User can correct it before events are used (e.g. if EDL header has wrong FCM)
+    • "Scene Cuts" button also asks for FPS confirmation before generating items
+    • Cancelling the dialog cancels the Scene Cut generation (load still proceeds)
+    • Drop Frame flag is also shown and editable in the same dialog
+
+  v260323.2041
+  - Feature: Create Scene Cut Track
+    • New "Scene Cuts" button in toolbar
+    • Loads the currently-open EDL, walks events in timeline order, and groups
+      consecutive events sharing the same EP_Scene into one empty item
+    • Clip name format: EP_Scene_Shot_Ttake[_Camera] (e.g. 06_01B_01_T05_A)
+    • Non-matching events (Black Video, graphics, etc.) act as scene breaks
+    • If scene 01B → 02A → 01B, two separate 01B items are created
+    • Each item's take name is set to the EP_Scene label (e.g. "06_01B")
+    • Creates a new "Scene Cuts" track appended to the project
+
   v260323.0202
   - Feature: Remove Duplicates now heals consecutive split clips (Pass 3)
     • If event A's rec_out == event B's rec_in AND src_out_A == src_in_B (within 1 frame),
@@ -589,7 +614,7 @@ end
 ---------------------------------------------------------------------------
 local SCRIPT_NAME = "Conform List Browser"
 local EXT_NS = "hsuanice_ConformListBrowser"
-local VERSION = "260323.0202"
+local VERSION = "260323.2201"
 
 -- Column definitions (EDL Events table)
 local COL = {
@@ -835,7 +860,7 @@ local CLB = {
   cached_rows = nil,
 
   -- Settings
-  fps = 25,
+  fps = 24,
   is_drop = false,
   track_name_format = "${format} - ${track}",
   last_dir = "",
@@ -1751,7 +1776,7 @@ local function load_prefs()
   end
 
   FONT_SCALE = tonumber(get("font_scale", "1.0")) or 1.0
-  CLB.fps = tonumber(get("fps", "25")) or 25
+  CLB.fps = tonumber(get("fps", "24")) or 24
   CLB.is_drop = get("is_drop", "0") == "1"
   CLB.track_name_format = get("track_name_format", "${format} - ${track}")
   CLB.last_dir = get("last_dir", "")
@@ -2521,7 +2546,7 @@ local function build_rows_from_parsed(parsed, source_path)
   CLB.group_filters = {}
   if not parsed or not parsed.events then return end
 
-  CLB.fps = parsed.fps or 25
+  CLB.fps = parsed.fps or 24
   CLB.is_drop = parsed.is_drop or false
 
   local src_idx = _register_source(
@@ -2946,6 +2971,28 @@ local function save_clb_project_dialog()
   save_prefs()
 end
 
+--- Show a frame-rate confirmation dialog. Updates CLB.fps / CLB.is_drop.
+--- Returns true if user confirmed, false if cancelled.
+local function confirm_fps()
+  local drop_hint = CLB.is_drop and "Y" or "N"
+  local ok, vals = reaper.GetUserInputs(
+    "Confirm Frame Rate", 2,
+    "Frame rate (e.g. 24, 25, 29.97, 30):,Drop Frame? (Y/N):",
+    tostring(CLB.fps) .. "," .. drop_hint)
+  if not ok then return false end
+
+  local fps_str, df_str = vals:match("^([^,]+),(.+)$")
+  local new_fps = tonumber(fps_str)
+  if not new_fps or new_fps <= 0 then
+    reaper.ShowMessageBox("Invalid frame rate: " .. tostring(fps_str), SCRIPT_NAME, 0)
+    return false
+  end
+  CLB.fps     = new_fps
+  CLB.is_drop = (df_str:match("^%s*[Yy]%s*$") ~= nil)
+  save_prefs()
+  return true
+end
+
 --- Shared timeline loader: opens a file dialog, parses via OTIO Bridge,
 --- then replaces or appends rows. Used by load_edl_file() and load_xml_file().
 ---
@@ -3069,6 +3116,9 @@ local function _load_timeline_via_otio(dialog_title, file_filter, fallback_ext)
   if #all_parsed > 1 then
     console_msg(string.format("Loaded %d files (%d total events)", #all_parsed, #ROWS))
   end
+
+  -- Ask user to confirm (or correct) the frame rate after loading
+  confirm_fps()
 end
 
 local function load_edl_file()
@@ -4111,6 +4161,113 @@ local function consolidate_by_group()
 end
 
 ---------------------------------------------------------------------------
+-- Create Scene Cut Track
+---------------------------------------------------------------------------
+local function create_scene_cut_track()
+  if #ROWS == 0 then
+    reaper.ShowMessageBox("No events loaded. Load an EDL file first.", SCRIPT_NAME, 0)
+    return
+  end
+
+  -- Confirm frame rate before generating items
+  if not confirm_fps() then return end
+
+  local fps     = CLB.fps     or 24
+  local is_drop = CLB.is_drop or false
+
+  -- Parse scene ID from clip name: EP_Scene_Shot_Ttake[_Camera]
+  -- e.g. "06_01B_01_T05_A" → "06_01B"
+  local function get_scene_id(clip_name)
+    if not clip_name or clip_name == "" then return nil end
+    local parts = {}
+    for p in clip_name:gmatch("[^_]+") do parts[#parts + 1] = p end
+    if #parts >= 4 and parts[4]:sub(1, 1):upper() == "T" then
+      return parts[1] .. "_" .. parts[2]
+    end
+    return nil
+  end
+
+  -- Walk events in timeline order; group consecutive same-scene events
+  local scene_items = {}
+  local cur_scene, cur_in, cur_out
+
+  local function flush()
+    if cur_scene then
+      scene_items[#scene_items + 1] = { scene_id = cur_scene, rec_in = cur_in, rec_out = cur_out }
+    end
+    cur_scene, cur_in, cur_out = nil, nil, nil
+  end
+
+  for _, row in ipairs(ROWS) do
+    local scene_id = get_scene_id(row.clip_name)
+    local rec_in   = EDL.tc_to_seconds(row.rec_tc_in,  fps, is_drop)
+    local rec_out  = EDL.tc_to_seconds(row.rec_tc_out, fps, is_drop)
+
+    if scene_id and scene_id == cur_scene then
+      if rec_out > cur_out then cur_out = rec_out end  -- extend
+    else
+      flush()
+      if scene_id then
+        cur_scene, cur_in, cur_out = scene_id, rec_in, rec_out
+      end
+    end
+  end
+  flush()
+
+  if #scene_items == 0 then
+    reaper.ShowMessageBox(
+      "No scene events found.\n\n" ..
+      "Expected clip name format: EP_Scene_Shot_Ttake[_Camera]\n" ..
+      "Example: 06_01B_01_T05_A",
+      SCRIPT_NAME, 0)
+    return
+  end
+
+  -- Confirmation
+  local preview = {}
+  for i = 1, math.min(6, #scene_items) do preview[i] = scene_items[i].scene_id end
+  local msg = string.format(
+    "Create Scene Cut Track?\n\n%d scene items will be created.\nOrder: %s%s\n\n" ..
+    "A new 'Scene Cuts' track will be added to the project.",
+    #scene_items,
+    table.concat(preview, " → "),
+    #scene_items > 6 and string.format(" ... (+%d more)", #scene_items - 6) or ""
+  )
+  if reaper.ShowMessageBox(msg, SCRIPT_NAME, 1) ~= 1 then return end
+
+  reaper.Undo_BeginBlock()
+  reaper.PreventUIRefresh(1)
+
+  -- Create track
+  reaper.InsertTrackAtIndex(reaper.CountTracks(0), true)
+  local tr = reaper.GetTrack(0, reaper.CountTracks(0) - 1)
+  reaper.GetSetMediaTrackInfo_String(tr, "P_NAME", "Scene Cuts", true)
+
+  -- Create one empty item per scene segment
+  for _, si in ipairs(scene_items) do
+    local length = si.rec_out - si.rec_in
+    if length <= 0 then length = 0.001 end
+
+    local item = reaper.AddMediaItemToTrack(tr)
+    reaper.SetMediaItemInfo_Value(item, "D_POSITION", si.rec_in)
+    reaper.SetMediaItemInfo_Value(item, "D_LENGTH", length)
+
+    local take = reaper.AddTakeToMediaItem(item)
+    if take then
+      reaper.GetSetMediaItemTakeInfo_String(take, "P_NAME", si.scene_id, true)
+    end
+  end
+
+  reaper.PreventUIRefresh(-1)
+  reaper.UpdateArrange()
+  reaper.Undo_EndBlock("CLB: Create Scene Cut Track (" .. #scene_items .. " scenes)", -1)
+
+  reaper.ShowMessageBox(
+    string.format("Created 'Scene Cuts' track with %d scene items.", #scene_items),
+    SCRIPT_NAME, 0)
+end
+
+---------------------------------------------------------------------------
 -- Export EDL
 ---------------------------------------------------------------------------
 local function export_edl()
@@ -4637,6 +4794,21 @@ local function draw_toolbar()
     export_edl()
   end
   reaper.ImGui_SameLine(ctx)
+
+  -- Scene Cut Track button
+  if #ROWS > 0 then
+    if reaper.ImGui_Button(ctx, "Scene Cuts", scale(90), scale(24)) then
+      create_scene_cut_track()
+    end
+    if reaper.ImGui_IsItemHovered(ctx) then
+      reaper.ImGui_BeginTooltip(ctx)
+      reaper.ImGui_Text(ctx, "Create a 'Scene Cuts' track with empty items for each scene")
+      reaper.ImGui_Text(ctx, "Clip name format: EP_Scene_Shot_Ttake[_Camera]")
+      reaper.ImGui_Text(ctx, "Example: 06_01B_01_T05_A")
+      reaper.ImGui_EndTooltip(ctx)
+    end
+    reaper.ImGui_SameLine(ctx)
+  end
 
   -- Separator
   reaper.ImGui_Text(ctx, "|")
