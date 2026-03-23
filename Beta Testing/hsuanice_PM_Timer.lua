@@ -1,6 +1,6 @@
 --[[
 @description PM Timer - Scene-aware Work Timer
-@version 260318.2215
+@version 260323.2205
 @author hsuanice
 @about
   Scene-aware toggle timer for the hsuanice PM system.
@@ -26,6 +26,38 @@
   All work items are locked (C_LOCK=1) after creation.
 
 @changelog
+  v260323.2205
+    - Dialog work type menu: editing, denoise, scene, ME, PAN, ME+PAN, custom
+      (same list for both scene-selected and project-scope sessions).
+    - Conform work type menu: conform only (auto-selected, single item).
+    - Removed separate project-scope ME+PAN/PAN/Custom branch; all modes now
+      use get_work_types_for_mode() uniformly.
+
+  v260320.2259
+    - New: PM_SyncProjectScopeNotes() — rescans all project-scope work items
+      (WORK_TYPE set, SCENE_GUID empty) and rewrites their note with current
+      project metadata (Scope, Scenes, Reel Len, Shots, Src Cnt, Src Len).
+      Preserves user comments (text after first blank line).
+      Called on startup, project change, action_finish, and action_break.
+
+  v260320.2254
+    - Project-scope note: Scope field now reads the 3rd part of the project
+      filename (e.g. "EP04" from "260320----TheFixer----EP04----Dialog").
+      Falls back to "Project" if filename doesn't match the expected format.
+
+  v260320.2249
+    - Project-scope work items (no scene selected) now get a note with
+      full project metadata: Scope, Scenes, Reel Len, Shots, Src Cnt, Src Len.
+      Computed from Scene Cut, Picture Cut, and EDL folder at session start.
+
+  v260320.2246
+    - Dialog mode, no scene selected → Project scope: shows menu with
+      ME+PAN / PAN / Custom instead of auto-setting ME&PAN.
+
+  v260320.2139
+    - Dialog mode: no scene selected → Project scope, work type auto-set to
+      "ME&PAN" (skips work type menu). Scene selection is no longer required.
+
   v260318.2215
     - UI: "Finish Day" button renamed to "Finish".
 
@@ -486,7 +518,10 @@ end
 
 local function get_work_types_for_mode()
   if S.work_mode == "Dialog" then
-    return { "editing", "denoise", "double_check", "custom" }
+    return { "editing", "denoise", "scene", "ME", "PAN", "ME+PAN", "custom" }
+  end
+  if S.work_mode == "Conform" then
+    return { "conform" }
   end
   return WORK_TYPES
 end
@@ -630,6 +665,19 @@ local function get_proj_prefix()
   if not scope   or scope   == "" then return "" end
   if not task    or task    == "" then return "" end
   return project .. " " .. scope .. " " .. task .. " | "
+end
+
+-- Returns the Scope component (3rd part) of the project name, e.g. "EP04".
+local function get_proj_scope()
+  local _, proj_path = r.EnumProjects(-1)
+  if not proj_path or proj_path == "" then return "" end
+  local name = proj_path:match("([^/\\]+)$") or proj_path
+  name = name:gsub("%.%a+$", "")
+  local parts = {}
+  for p in (name .. "----"):gmatch("(.-)%-%-%-%-") do
+    parts[#parts + 1] = p
+  end
+  return parts[3] or ""
 end
 
 -- Returns just the Task component (4th part) of the project name, e.g. "Dialog".
@@ -1277,6 +1325,80 @@ local function build_work_item_note(scene_item)
   return note or ""
 end
 
+-- Computes project-scope metadata (all scenes, all EDL, all shots) for the
+-- note of a Project-scope work item (no scene selected).
+local function build_project_scope_note()
+  -- Reel length & scene count: sum of all Scene Cut items
+  local scene_track = get_track_by_name(SCENE_TRACK_NAME)
+  local scene_cnt = 0
+  local reel_len  = 0
+  if scene_track then
+    for i = 0, r.CountTrackMediaItems(scene_track) - 1 do
+      local item = r.GetTrackMediaItem(scene_track, i)
+      reel_len  = reel_len + r.GetMediaItemInfo_Value(item, "D_LENGTH")
+      scene_cnt = scene_cnt + 1
+    end
+  end
+
+  -- Shots: total items on Picture Cut track
+  local shots = 0
+  local pic_track = get_track_by_name(PICTURE_TRACK_NAME)
+  if pic_track then
+    shots = r.CountTrackMediaItems(pic_track)
+  end
+
+  -- EDL source: all items across all EDL folder children
+  local src_cnt = 0
+  local src_len = 0
+  for _, t in ipairs(get_folder_children(EDL_FOLDER_NAME)) do
+    for i = 0, r.CountTrackMediaItems(t) - 1 do
+      local item = r.GetTrackMediaItem(t, i)
+      src_cnt = src_cnt + 1
+      src_len = src_len + r.GetMediaItemInfo_Value(item, "D_LENGTH")
+    end
+  end
+
+  local reel_tc    = r.format_timestr_len(reel_len, "", 0, 5)
+  local src_len_tc = r.format_timestr_len(src_len,  "", 0, 5)
+
+  local scope = get_proj_scope()
+  if scope == "" then scope = "Project" end
+
+  return table.concat({
+    "Scope    : " .. scope,
+    "Scenes   : " .. tostring(scene_cnt),
+    "Reel Len : " .. reel_tc,
+    "Shots    : " .. tostring(shots),
+    "Src Cnt  : " .. tostring(src_cnt),
+    "Src Len  : " .. src_len_tc,
+  }, "\n")
+end
+
+-- Rescans all project-scope work items (WORK_TYPE set, SCENE_GUID empty) and
+-- rewrites their note with current project metadata, preserving user comments.
+local function PM_SyncProjectScopeNotes()
+  local new_meta = build_project_scope_note()
+  for i = 0, r.CountTracks(0) - 1 do
+    local t = r.GetTrack(0, i)
+    for j = 0, r.CountTrackMediaItems(t) - 1 do
+      local item = r.GetTrackMediaItem(t, j)
+      local _, wt = r.GetSetMediaItemInfo_String(item, "P_EXT:WORK_TYPE",  "", false)
+      local _, sg = r.GetSetMediaItemInfo_String(item, "P_EXT:SCENE_GUID", "", false)
+      if wt ~= "" and sg == "" then
+        local cur_note = r.ULT_GetMediaItemNote(item) or ""
+        local comment  = extract_log_comment(cur_note)
+        local new_note = merge_log_note(new_meta, comment)
+        if cur_note ~= new_note then
+          r.SetMediaItemInfo_Value(item, "C_LOCK", 0)
+          r.ULT_SetMediaItemNote(item, new_note)
+          r.UpdateItemInProject(item)
+          r.SetMediaItemInfo_Value(item, "C_LOCK", 1)
+        end
+      end
+    end
+  end
+end
+
 -- Forward declaration: defined after WL helper functions below.
 local mirror_log_item_to_work_log
 
@@ -1293,12 +1415,6 @@ local function action_start()
     sel_scene = get_selected_scene_info(scene_track)
   end
 
-  -- Dialog mode requires a scene selection
-  if S.work_mode == "Dialog" and not sel_scene then
-    r.ShowMessageBox("Please select a Scene Cut item first.", "PM Timer", 0)
-    return
-  end
-
   local scene_guid, scene_name = "", ""
   if sel_scene then
     scene_guid = sel_scene.guid
@@ -1306,16 +1422,18 @@ local function action_start()
   end
 
   -- 3. Choose work type
-  gfx.x, gfx.y = 10, 60
-  local work_types = get_work_types_for_mode()
-  local choice = gfx.showmenu(table.concat(work_types, "|"))
-  if choice == 0 then return end
-
-  local work_type = work_types[choice]
-  if work_type == "custom" then
-    local ok, val = r.GetUserInputs("Custom Work Type", 1, "Work type:", "")
-    if not ok or val == "" then return end
-    work_type = val
+  local work_type
+  do
+    gfx.x, gfx.y = 10, 60
+    local work_types = get_work_types_for_mode()
+    local choice = gfx.showmenu(table.concat(work_types, "|"))
+    if choice == 0 then return end
+    work_type = work_types[choice]
+    if work_type == "custom" then
+      local ok, val = r.GetUserInputs("Custom Work Type", 1, "Work type:", "")
+      if not ok or val == "" then return end
+      work_type = val
+    end
   end
 
   -- 4. Item name = just work_type (scene metadata goes into P_NOTES)
@@ -1338,6 +1456,8 @@ local function action_start()
   if sel_scene and sel_scene.handle then
     update_scene_note(sel_scene.handle)
     item_note = build_work_item_note(sel_scene.handle)
+  else
+    item_note = build_project_scope_note()
   end
 
   r.Undo_BeginBlock()
@@ -1566,19 +1686,23 @@ end
 local function action_finish()
   if S.work_mode == "AAP" then finish_aap_item("finish")
   else
+    local was_project_scope = (S.scene_guid == "")
     if S.scene_guid ~= "" then update_scene_metadata_by_guid(S.scene_guid) end
     local finishing_guid = S.work_item_guid
     finish_current_item("finish"); sync_work_item_names()
     local log_item = get_item_by_guid(finishing_guid)
     if log_item then PM_SyncSceneMetadataToLogItem(log_item) end
+    if was_project_scope then PM_SyncProjectScopeNotes() end
   end
 end
 local function action_break()
   if S.work_mode == "AAP" then finish_aap_item("break")
   else
+    local was_project_scope = (S.scene_guid == "")
     save_break_state()
     if S.scene_guid ~= "" then update_scene_metadata_by_guid(S.scene_guid) end
     finish_current_item("break"); sync_work_item_names()
+    if was_project_scope then PM_SyncProjectScopeNotes() end
   end
 end
 
@@ -2709,6 +2833,7 @@ local function loop()
     sync_all_prefixes()
     sync_work_item_colors()
     PM_SyncAllLogItems()
+    PM_SyncProjectScopeNotes()
     draw()
     last_draw_time = r.time_precise()
   end
@@ -2758,5 +2883,6 @@ sync_work_item_names()
 sync_all_prefixes()
 sync_work_item_colors()
 PM_SyncAllLogItems()
+PM_SyncProjectScopeNotes()
 last_draw_time = r.time_precise()
 r.defer(loop)
