@@ -1,6 +1,6 @@
 --[[
 @description Auto Color Items by Take Name
-@version 260324.1340
+@version 260324.1434
 @author hsuanice
 @about
   Config-driven color palette with keyword rules — colors items by take name.
@@ -13,6 +13,21 @@
   No external dependencies — REAPER built-in GFX library.
 
 @changelog
+  v260324.1434
+  - Fix: last active preset now correctly restored on script reopen (was a Lua scoping bug — current_preset declared after save/load_pconf, so they accessed separate globals)
+  - Fix: CJK characters in color swatches now vertically centered (was offset low due to ASCII-only line height measurement)
+  - Add: "Preview chars" setting in Settings panel to control how many characters show per keyword segment in Color View (range 1–9, persisted)
+  - Change: Auto Update now defaults to ON at startup
+  - Change: Auto Color always starts OFF at startup (prevents accidental coloring before user is ready)
+
+  v260324.1407
+  - Fix: Chinese/CJK characters in color swatches now render correctly (was garbled due to byte-level sub)
+  - Change: color swatch now shows first 3 characters of each keyword segment (was 1)
+
+  v260324.1349
+  - Fix: mouse wheel scrolling now works in List View (was consumed by color grid before reaching list)
+  - Add: font size control in Settings panel (Font − / +, range 8–24pt, persisted)
+
   v260324.1340
   - Fix: Paste Color button now correctly previews the copied color (was dividing by 255 twice)
   - Add: Paste Color button — applies copied color to all selected items; button background shows the copied color
@@ -92,6 +107,25 @@ local function cg(c) return ((c>> 8)&0xFF)/255 end
 local function cb(c) return ( c     &0xFF)/255 end
 local function lum(c) return cr(c)*.299+cg(c)*.587+cb(c)*.114 end
 
+-- Returns first n Unicode characters from a UTF-8 string
+local function utf8_take(s, n)
+  local result = ""
+  local i = 1
+  for _ = 1, n do
+    if i > #s then break end
+    local b = s:byte(i)
+    local len
+    if     b < 0x80 then len = 1
+    elseif b < 0xE0 then len = 2
+    elseif b < 0xF0 then len = 3
+    else                  len = 4
+    end
+    result = result .. s:sub(i, i + len - 1)
+    i = i + len
+  end
+  return result
+end
+
 local function apply_color_to_item(item, rrggbb)
   reaper.SetMediaItemInfo_Value(item, "I_CUSTOMCOLOR",
     reaper.ColorToNative((rrggbb>>16)&0xFF,(rrggbb>>8)&0xFF,rrggbb&0xFF)|0x1000000)
@@ -136,7 +170,13 @@ local status_until       = 0
 local show_settings      = false
 local show_presets       = false
 local view_mode          = "color"  -- "color" or "list"
+local current_preset     = nil      -- name of loaded preset, nil = unsaved
+local preset_dirty       = false    -- true when state differs from loaded preset
 local list_scroll        = 0
+local list_sb_drag       = false    -- true while dragging the list scrollbar thumb
+local font_size          = 12       -- base font size (pt); small font = font_size - 2
+local font_dirty         = true     -- force font re-init when true
+local swatch_chars       = 3        -- number of UTF-8 chars shown per keyword segment in Color View
 
 -- ─── persistence ─────────────────────────────────────────────────────────────
 -- palette_v3: line 0 = "cols=N"
@@ -162,6 +202,9 @@ local function save_pconf()
   reaper.SetExtState(PREF_NS, "show_settings", show_settings and "1" or "0", true)
   reaper.SetExtState(PREF_NS, "show_presets",  show_presets  and "1" or "0", true)
   reaper.SetExtState(PREF_NS, "view_mode",     view_mode,                    true)
+  reaper.SetExtState(PREF_NS, "font_size",     tostring(font_size),          true)
+  reaper.SetExtState(PREF_NS, "swatch_chars",  tostring(swatch_chars),       true)
+  reaper.SetExtState(PREF_NS, "last_preset",   current_preset or "",         true)
 end
 
 local function load_pconf()
@@ -187,6 +230,12 @@ local function load_pconf()
   show_presets  = reaper.GetExtState(PREF_NS, "show_presets")  == "1"
   local vm = reaper.GetExtState(PREF_NS, "view_mode")
   if vm == "list" then view_mode = "list" end
+  local fs = tonumber(reaper.GetExtState(PREF_NS, "font_size"))
+  if fs and fs >= 8 and fs <= 24 then font_size = fs end
+  local sc = tonumber(reaper.GetExtState(PREF_NS, "swatch_chars"))
+  if sc and sc >= 1 and sc <= 9 then swatch_chars = sc end
+  local lp = reaper.GetExtState(PREF_NS, "last_preset")
+  if lp ~= "" then current_preset = lp; preset_dirty = false end
 end
 
 local function load_palette()
@@ -229,7 +278,8 @@ local function save_auto_pref()
   reaper.SetExtState(PREF_NS, "auto_color", auto_color_enabled and "1" or "0", true)
 end
 local function load_auto_pref()
-  auto_color_enabled = reaper.GetExtState(PREF_NS, "auto_color") == "1"
+  -- auto_color_enabled intentionally not restored: always starts OFF so the
+  -- user can review before coloring begins
 end
 
 local function set_status(msg)
@@ -433,7 +483,7 @@ end
 local SROW_H = 22   -- settings row height
 
 local function settings_panel_h()
-  return SROW_H*2 + SROW_H * #PCONF.rows + SROW_H + MARGIN*2
+  return SROW_H*2 + SROW_H * #PCONF.rows + SROW_H*2 + MARGIN*2
 end
 
 -- draws the settings panel starting at screen y; returns whether palette should regenerate
@@ -543,6 +593,34 @@ local function draw_settings_panel(start_y)
     PALETTE_COLS = 10; dirty = true
   end
 
+  -- ── Font size row ───────────────────────────────────────────────────────
+  iy = iy + SROW_H
+  txt(px, iy+6, "Font", .55,.55,.55)
+  local ffx = px + 34
+  if smbtn(ffx, iy+2, 16, 18, "−") and font_size > 8 then
+    font_size = font_size - 1; font_dirty = true; save_pconf()
+  end
+  ffx = ffx + 18
+  local fsz = tostring(font_size); local fszw = gfx.measurestr(fsz)
+  txt(ffx + (16-fszw)*.5, iy+6, fsz, .80,.80,.80)
+  ffx = ffx + 18
+  if smbtn(ffx, iy+2, 16, 18, "+") and font_size < 24 then
+    font_size = font_size + 1; font_dirty = true; save_pconf()
+  end
+  ffx = ffx + 24
+
+  txt(ffx, iy+6, "Preview chars", .55,.55,.55); ffx = ffx + 90
+  if smbtn(ffx, iy+2, 16, 18, "−") and swatch_chars > 1 then
+    swatch_chars = swatch_chars - 1; save_pconf()
+  end
+  ffx = ffx + 18
+  local scstr = tostring(swatch_chars); local scw = gfx.measurestr(scstr)
+  txt(ffx + (16-scw)*.5, iy+6, scstr, .80,.80,.80)
+  ffx = ffx + 18
+  if smbtn(ffx, iy+2, 16, 18, "+") and swatch_chars < 9 then
+    swatch_chars = swatch_chars + 1; save_pconf()
+  end
+
   gfx.setfont(1)
   return dirty
 end
@@ -555,9 +633,7 @@ local POPUP_ITEMS = { "Edit Keyword", "────", "Clear Keyword" }
 -- ─── scroll & panel state ────────────────────────────────────────────────────
 local scroll_row         = 0
 local preset_scroll      = 0
-local current_preset     = nil    -- name of loaded preset, nil = unsaved
-local preset_dirty       = false  -- true when state differs from loaded preset
-local preset_auto_update = false  -- auto-save to current_preset on changes
+local preset_auto_update = true   -- auto-save to current_preset on changes
 
 local draw_preset_panel  -- forward declaration (defined in presets section below)
 local draw_list_view     -- forward declaration (defined in presets section below)
@@ -566,6 +642,13 @@ local draw_list_view     -- forward declaration (defined in presets section belo
 local hover_info = ""
 
 local function draw()
+  if font_dirty then
+    -- PingFang SC (macOS) / Microsoft YaHei (Windows) both cover CJK + Latin
+    local face = is_mac and "PingFang SC" or "Microsoft YaHei"
+    gfx.setfont(1, face, font_size)
+    gfx.setfont(2, face, math.max(8, font_size - 2))
+    font_dirty = false
+  end
   local W = gfx.w
   local H = gfx.h
 
@@ -575,7 +658,8 @@ local function draw()
   rb = (gfx.mouse_cap&2)~=0 and 1 or 0
   lclicked = (prev_lb==1 and lb==0)
   rclicked = (prev_rb==1 and rb==0)
-  if gfx.mouse_wheel ~= 0 then
+  -- grid scroll only in color view; list view handles its own wheel inside draw_list_view
+  if view_mode == "color" and gfx.mouse_wheel ~= 0 then
     scroll_row = scroll_row + (gfx.mouse_wheel>0 and -1 or 1)
     gfx.mouse_wheel = 0
   end
@@ -723,13 +807,26 @@ local function draw()
 
       if has then
         gfx.setfont(2)
-        local tc = lum(p.color) > .45 and 0.0 or 1.0
-        local kw = p.keyword
-        while #kw>1 and gfx.measurestr(kw) > cw-5 do kw=kw:sub(1,-2) end
-        if kw ~= p.keyword then kw=kw:sub(1,-2).."~" end
-        local kw2 = gfx.measurestr(kw)
-        local kth = select(2, gfx.measurestr("Aq"))
-        txt(cx + math.max(2, (cw-1-kw2)*.5), cy + (ch-kth)*.5, kw, tc,tc,tc,1.0)
+        local tc  = lum(p.color) > .45 and 0.0 or 1.0
+        -- split by | and collect parts
+        local parts = {}
+        for seg in (p.keyword .. "|"):gmatch("([^|]*)|") do
+          local s = seg:match("^%s*(.-)%s*$")
+          if s ~= "" then parts[#parts+1] = utf8_take(s, swatch_chars) end
+        end
+        -- measure line height from actual content so CJK glyphs center correctly
+        local lh = select(2, gfx.measurestr("Aq"))
+        for _, c1 in ipairs(parts) do
+          local _, h = gfx.measurestr(c1)
+          if h > lh then lh = h end
+        end
+        local total_h = #parts * lh
+        local text_y = cy + math.max(2, (ch - total_h) * .5)
+        for _, c1 in ipairs(parts) do
+          local tw2 = gfx.measurestr(c1)
+          txt(cx + (cw-1-tw2)*.5, text_y, c1, tc,tc,tc,1.0)
+          text_y = text_y + lh
+        end
         gfx.setfont(1)
       end
 
@@ -780,7 +877,7 @@ local function draw()
           local ok, val = reaper.GetUserInputs(
             "Keyword — " .. string.format("#%06X", p.color), 1,
             "Keyword (| for multiple, e.g. boom|lavmic)  [clear to remove]:",
-            p.keyword, 420)
+            p.keyword, 600)
           if ok and val ~= nil then
             p.keyword = val:match("^%s*(.-)%s*$")
             save_palette(); preset_dirty = true
@@ -913,26 +1010,62 @@ draw_list_view = function(top_y, avail_h)
   local ROW_H    = 22
   local SWATCH_W = 20
   local HEX_W    = 62
+  local SB_W     = 10   -- scrollbar width
   local n        = #PALETTE
 
-  local vis = math.max(1, math.floor(avail_h / ROW_H))
-  list_scroll = math.max(0, math.min(list_scroll, math.max(0, n - vis)))
+  local vis      = math.max(1, math.floor(avail_h / ROW_H))
+  local max_sc   = math.max(0, n - vis)
+  list_scroll    = math.max(0, math.min(list_scroll, max_sc))
 
+  -- ── scrollbar geometry ───────────────────────────────────────────────────
+  local need_sb  = n > vis
+  local sb_x     = W - SB_W
+  local content_w = need_sb and (W - SB_W) or W
+
+  if need_sb then
+    local track_h  = avail_h
+    local thumb_h  = math.max(20, math.floor(track_h * vis / n))
+    local thumb_y  = top_y + math.floor((track_h - thumb_h) * list_scroll / math.max(1, max_sc))
+
+    -- track
+    fill(sb_x, top_y, SB_W, track_h, .13,.13,.13)
+
+    -- handle drag
+    local on_track = hit(sb_x, top_y, SB_W, track_h)
+    if lb == 1 and (list_sb_drag or on_track) then
+      list_sb_drag = true
+      local rel = math.max(0, math.min(1, (my - top_y - thumb_h/2) / math.max(1, track_h - thumb_h)))
+      list_scroll = math.floor(rel * max_sc + .5)
+      list_scroll = math.max(0, math.min(list_scroll, max_sc))
+      thumb_y = top_y + math.floor((track_h - thumb_h) * list_scroll / math.max(1, max_sc))
+    elseif lb == 0 then
+      list_sb_drag = false
+    end
+
+    -- thumb
+    local thumb_hov = list_sb_drag or hit(sb_x, thumb_y, SB_W, thumb_h)
+    fill(sb_x+2, thumb_y+1, SB_W-4, thumb_h-2,
+         thumb_hov and .58 or .38, thumb_hov and .58 or .38, thumb_hov and .58 or .38)
+  end
+
+  -- ── mouse wheel ─────────────────────────────────────────────────────────
   if gfx.mouse_wheel ~= 0 and hit(0, top_y, W, avail_h) then
     list_scroll = list_scroll + (gfx.mouse_wheel > 0 and -1 or 1)
+    list_scroll = math.max(0, math.min(list_scroll, max_sc))
     gfx.mouse_wheel = 0
   end
 
+  -- ── rows ─────────────────────────────────────────────────────────────────
   for i = 1, vis do
     local gi = i + list_scroll
     if gi > n then break end
     local p   = PALETTE[gi]
     local ry  = top_y + (i-1) * ROW_H
-    local hov = hit(0, ry, W, ROW_H)
+    local hov = (not list_sb_drag) and hit(0, ry, content_w, ROW_H)
 
-    fill(0, ry, W, ROW_H, hov and .24 or (gi%2==0 and .19 or .17),
-                           hov and .24 or (gi%2==0 and .19 or .17),
-                           hov and .24 or (gi%2==0 and .19 or .17))
+    fill(0, ry, content_w, ROW_H, hov and .24 or (gi%2==0 and .19 or .17),
+                                   hov and .24 or (gi%2==0 and .19 or .17),
+                                   hov and .24 or (gi%2==0 and .19 or .17))
 
     -- color swatch
     fill(MARGIN, ry+3, SWATCH_W, ROW_H-6, cr(p.color), cg(p.color), cb(p.color))
@@ -954,7 +1087,7 @@ draw_list_view = function(top_y, avail_h)
     gfx.setfont(1)
 
     -- row divider
-    gfx.set(.25,.25,.25,1); gfx.line(0, ry+ROW_H-1, W-1, ry+ROW_H-1)
+    gfx.set(.25,.25,.25,1); gfx.line(0, ry+ROW_H-1, content_w-1, ry+ROW_H-1)
 
     -- hover info
     if hov then
@@ -1112,8 +1245,7 @@ do
                              + (show_presets  and 120             or 0)
   gfx_init(base_win_w, init_h)
 end
-gfx.setfont(1, "Arial", 12)
-gfx.setfont(2, "Arial", 10)
+-- fonts initialized each frame via font_dirty flag in draw()
 
 local prev_gfx_w, prev_gfx_h = gfx.w, gfx.h
 local prev_win_x, prev_win_y = gfx.clienttoscreen(0, 0)
