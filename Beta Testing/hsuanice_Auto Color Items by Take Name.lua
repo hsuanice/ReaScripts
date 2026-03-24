@@ -1,6 +1,6 @@
 --[[
 @description Auto Color Items by Take Name
-@version 260324.1225
+@version 260324.1340
 @author hsuanice
 @about
   Config-driven color palette with keyword rules — colors items by take name.
@@ -13,6 +13,13 @@
   No external dependencies — REAPER built-in GFX library.
 
 @changelog
+  v260324.1340
+  - Fix: Paste Color button now correctly previews the copied color (was dividing by 255 twice)
+  - Add: Paste Color button — applies copied color to all selected items; button background shows the copied color
+  - Add: List View — toggle between ⊞ Colors (palette grid) and ≡ List (scrollable keyword editor)
+  - List View: each row shows color swatch, hex code, and keyword; left-click applies, right-click edits
+  - Fix: default window width widened to 620px to prevent toolbar button overlap
+
   v260324.1225
   - Fix: Preset panel open/closed state now saved across sessions (was always resetting to closed on restart)
   - Add: Right-click preset → Rename option (in addition to existing Delete)
@@ -128,6 +135,8 @@ local status_msg         = ""
 local status_until       = 0
 local show_settings      = false
 local show_presets       = false
+local view_mode          = "color"  -- "color" or "list"
+local list_scroll        = 0
 
 -- ─── persistence ─────────────────────────────────────────────────────────────
 -- palette_v3: line 0 = "cols=N"
@@ -152,6 +161,7 @@ local function save_pconf()
   reaper.SetExtState(PREF_NS, "grey_row",     PCONF.grey_row and "1" or "0", true)
   reaper.SetExtState(PREF_NS, "show_settings", show_settings and "1" or "0", true)
   reaper.SetExtState(PREF_NS, "show_presets",  show_presets  and "1" or "0", true)
+  reaper.SetExtState(PREF_NS, "view_mode",     view_mode,                    true)
 end
 
 local function load_pconf()
@@ -175,6 +185,8 @@ local function load_pconf()
   if gr ~= "" then PCONF.grey_row = (gr == "1") end
   show_settings = reaper.GetExtState(PREF_NS, "show_settings") == "1"
   show_presets  = reaper.GetExtState(PREF_NS, "show_presets")  == "1"
+  local vm = reaper.GetExtState(PREF_NS, "view_mode")
+  if vm == "list" then view_mode = "list" end
 end
 
 local function load_palette()
@@ -260,6 +272,31 @@ local function do_auto_color()
 end
 
 
+local copied_color = nil  -- 0xRRGGBB, set by Copy Color
+
+local function do_copy_color()
+  if reaper.CountSelectedMediaItems(0) == 0 then set_status("No items selected"); return end
+  local item   = reaper.GetSelectedMediaItem(0, 0)
+  local native = reaper.GetDisplayedMediaItemColor(item)
+  local r, g, b = reaper.ColorFromNative(native)
+  r, g, b = math.floor(r), math.floor(g), math.floor(b)
+  copied_color = r*65536 + g*256 + b
+  set_status(string.format("Copied: #%02X%02X%02X", r, g, b))
+end
+
+local function do_paste_color()
+  if not copied_color then set_status("Nothing copied"); return end
+  local n = reaper.CountSelectedMediaItems(0)
+  if n == 0 then set_status("No items selected"); return end
+  reaper.Undo_BeginBlock()
+  for i = 0, n-1 do
+    apply_color_to_item(reaper.GetSelectedMediaItem(0, i), copied_color)
+  end
+  reaper.Undo_EndBlock("Paste Item Color", -1)
+  reaper.UpdateArrange()
+  set_status(string.format("Pasted color to %d item(s)", n))
+end
+
 local function do_clear_selected()
   local n = reaper.CountSelectedMediaItems(0)
   if n == 0 then set_status("No items selected"); return end
@@ -277,7 +314,7 @@ local MARGIN  = 8
 local BAR_H   = 24
 
 -- base_win_w/h = palette-only window size; base_win_x/y = screen position
-local base_win_w = 520
+local base_win_w = 620
 local base_win_h = 300
 local base_win_x = -1   -- -1 = let OS decide on first run
 local base_win_y = -1
@@ -309,7 +346,7 @@ local function load_win_size()
   local h = tonumber(reaper.GetExtState(PREF_NS, "win_h"))
   local x = tonumber(reaper.GetExtState(PREF_NS, "win_x"))
   local y = tonumber(reaper.GetExtState(PREF_NS, "win_y"))
-  if w and w >= 200 then base_win_w = w end
+  if w and w >= 580 then base_win_w = w else base_win_w = math.max(base_win_w, 620) end
   if h and h >= 100 then base_win_h = h end
   if x then base_win_x = x end
   if y then base_win_y = y end
@@ -523,6 +560,7 @@ local preset_dirty       = false  -- true when state differs from loaded preset
 local preset_auto_update = false  -- auto-save to current_preset on changes
 
 local draw_preset_panel  -- forward declaration (defined in presets section below)
+local draw_list_view     -- forward declaration (defined in presets section below)
 
 -- ─── main draw ────────────────────────────────────────────────────────────────
 local hover_info = ""
@@ -551,7 +589,29 @@ local function draw()
     save_auto_pref()
     if auto_color_enabled then last_state_count=-1 end
   end
-  if btn(148, 1, 100, BAR_H-2, "Remove Color") then do_clear_selected() end
+  if btn(148, 1, 80, BAR_H-2, "Copy Color") then do_copy_color() end
+  do  -- Paste Color: background shows the copied color when available
+    local px2, py2, pw, ph = 232, 1, 82, BAR_H-2
+    local hov = hit(px2, py2, pw, ph)
+    if copied_color then
+      local br = cr(copied_color) * (hov and 1.15 or 1)
+      local bg = cg(copied_color) * (hov and 1.15 or 1)
+      local bb = cb(copied_color) * (hov and 1.15 or 1)
+      br, bg, bb = math.min(br,1), math.min(bg,1), math.min(bb,1)
+      fill(px2, py2, pw, ph, br, bg, bb)
+      stroke(px2, py2, pw, ph, .60,.60,.60)
+      local tw2, th2 = gfx.measurestr("Paste Color")
+      local tl = lum(copied_color) > 0.4 and 0 or 1  -- dark text on light bg
+      txt(px2+(pw-tw2)*.5, py2+(ph-th2)*.5, "Paste Color", tl, tl, tl)
+    else
+      fill(px2, py2, pw, ph, .20,.20,.20)
+      stroke(px2, py2, pw, ph, .38,.38,.38)
+      local tw2, th2 = gfx.measurestr("Paste Color")
+      txt(px2+(pw-tw2)*.5, py2+(ph-th2)*.5, "Paste Color", .45,.45,.45)
+    end
+    if lclicked and hov then do_paste_color() end
+  end
+  if btn(318, 1, 100, BAR_H-2, "Remove Color") then do_clear_selected() end
 
   -- preset name + save status (to the left of ☰ Presets)
   local preset_btn_x   = W - 172
@@ -571,7 +631,7 @@ local function draw()
     if label then
       local tw = gfx.measurestr(label)
       local px = preset_btn_x - tw - 10
-      if px > 256 then
+      if px > 424 then
         local _, th = gfx.measurestr("A")
         txt(px, (BAR_H-th)//2, label, lr, lg, lb2)
       end
@@ -616,75 +676,83 @@ local function draw()
   gfx.set(.28,.28,.28,1); gfx.line(0, content_top, W, content_top)
   content_top = content_top + 1
 
-  -- ── palette grid ───────────────────────────────────────────────────────────
-  local grid_y   = content_top + 4
-  local cw       = math.max(28, (W - MARGIN*2) // PALETTE_COLS)
-  local avail_h  = H - grid_y - 16 - MARGIN
-  local max_rows = math.max(1, math.ceil(#PALETTE / PALETTE_COLS))
-  local cell_h   = math.max(24, math.floor(avail_h / max_rows))  -- fills window
-  local ch       = cell_h - 2
-  local vis_rows = math.floor(avail_h / cell_h)
-  scroll_row = math.max(0, math.min(scroll_row, math.max(0, max_rows - vis_rows)))
+  -- ── view toggle row ────────────────────────────────────────────────────────
+  local TOGGLE_H = 22
+  fill(0, content_top, W, TOGGLE_H, .14,.14,.14)
+  if btn(MARGIN, content_top+2, 72, TOGGLE_H-4, "⊞ Colors", view_mode == "color") then
+    view_mode = "color"; save_pconf()
+  end
+  if btn(MARGIN+76, content_top+2, 56, TOGGLE_H-4, "≡ List", view_mode == "list") then
+    view_mode = "list"; save_pconf()
+  end
+  content_top = content_top + TOGGLE_H
 
-  hover_info = ""
+  -- ── palette grid or list view ──────────────────────────────────────────────
+  if view_mode == "list" then
+    draw_list_view(content_top, H - content_top - 16 - MARGIN)
+  else
+    local grid_y   = content_top + 4
+    local cw       = math.max(28, (W - MARGIN*2) // PALETTE_COLS)
+    local avail_h  = H - grid_y - 16 - MARGIN
+    local max_rows = math.max(1, math.ceil(#PALETTE / PALETTE_COLS))
+    local cell_h   = math.max(24, math.floor(avail_h / max_rows))
+    local ch       = cell_h - 2
+    local vis_rows = math.floor(avail_h / cell_h)
+    scroll_row = math.max(0, math.min(scroll_row, math.max(0, max_rows - vis_rows)))
 
-  for slot = 1, vis_rows * PALETTE_COLS do
-    local gi  = slot + scroll_row * PALETTE_COLS
-    if gi > #PALETTE then break end
-    local col = (slot-1) % PALETTE_COLS
-    local row = (slot-1) // PALETTE_COLS
-    local cx  = MARGIN + col * cw
-    local cy  = grid_y + row * cell_h
-    local hov = hit(cx, cy, cw-1, ch)
+    for slot = 1, vis_rows * PALETTE_COLS do
+      local gi  = slot + scroll_row * PALETTE_COLS
+      if gi > #PALETTE then break end
+      local col = (slot-1) % PALETTE_COLS
+      local row = (slot-1) // PALETTE_COLS
+      local cx  = MARGIN + col * cw
+      local cy  = grid_y + row * cell_h
+      local hov = hit(cx, cy, cw-1, ch)
 
-    local p   = PALETTE[gi]
-    local has = p.keyword ~= ""
-    local dim = 1.0
+      local p   = PALETTE[gi]
+      local has = p.keyword ~= ""
 
-    fill(cx, cy, cw-1, ch, cr(p.color)*dim, cg(p.color)*dim, cb(p.color)*dim)
-    if hov then
-      stroke(cx, cy, cw-1, ch, 1, 1, 1, .8)
-      hover_info = string.format("#%06X", p.color) ..
-        (has and ("   →  " .. p.keyword) or "   (no keyword)")
-    else
-      stroke(cx, cy, cw-1, ch, 0, 0, 0, .30)
-    end
-
-    -- keyword text (centered)
-    if has then
-      gfx.setfont(2)
-      local l  = lum(p.color)
-      local tc = l > .45 and 0.0 or 1.0
-      local kw = p.keyword
-      while #kw>1 and gfx.measurestr(kw) > cw-5 do kw=kw:sub(1,-2) end
-      if kw ~= p.keyword then kw=kw:sub(1,-2).."~" end
-      local kw2 = gfx.measurestr(kw)
-      local kth = select(2, gfx.measurestr("Aq"))
-      txt(cx + math.max(2, (cw-1-kw2)*.5), cy + (ch-kth)*.5, kw, tc,tc,tc,1.0)
-      gfx.setfont(1)
-    end
-
-    -- left-click: apply color to selected items
-    if lclicked and hov and popup_idx == nil then
-      local n = reaper.CountSelectedMediaItems(0)
-      if n > 0 then
-        reaper.Undo_BeginBlock()
-        for j = 0, n-1 do apply_color_to_item(reaper.GetSelectedMediaItem(0,j), p.color) end
-        reaper.Undo_EndBlock("Apply Color "..string.format("#%06X",p.color), -1)
-        reaper.UpdateArrange()
-        set_status(string.format("Applied to %d item(s)", n))
+      fill(cx, cy, cw-1, ch, cr(p.color), cg(p.color), cb(p.color))
+      if hov then
+        stroke(cx, cy, cw-1, ch, 1, 1, 1, .8)
+        hover_info = string.format("#%06X", p.color) ..
+          (has and ("   →  " .. p.keyword) or "   (no keyword)")
       else
-        set_status("No items selected")
+        stroke(cx, cy, cw-1, ch, 0, 0, 0, .30)
+      end
+
+      if has then
+        gfx.setfont(2)
+        local tc = lum(p.color) > .45 and 0.0 or 1.0
+        local kw = p.keyword
+        while #kw>1 and gfx.measurestr(kw) > cw-5 do kw=kw:sub(1,-2) end
+        if kw ~= p.keyword then kw=kw:sub(1,-2).."~" end
+        local kw2 = gfx.measurestr(kw)
+        local kth = select(2, gfx.measurestr("Aq"))
+        txt(cx + math.max(2, (cw-1-kw2)*.5), cy + (ch-kth)*.5, kw, tc,tc,tc,1.0)
+        gfx.setfont(1)
+      end
+
+      if lclicked and hov and popup_idx == nil then
+        local n = reaper.CountSelectedMediaItems(0)
+        if n > 0 then
+          reaper.Undo_BeginBlock()
+          for j = 0, n-1 do apply_color_to_item(reaper.GetSelectedMediaItem(0,j), p.color) end
+          reaper.Undo_EndBlock("Apply Color "..string.format("#%06X",p.color), -1)
+          reaper.UpdateArrange()
+          set_status(string.format("Applied to %d item(s)", n))
+        else
+          set_status("No items selected")
+        end
+      end
+
+      if rclicked and hov then
+        popup_idx = gi
+        popup_x   = math.min(mx, W-140)
+        popup_y   = math.min(my, H-#POPUP_ITEMS*20-10)
       end
     end
-
-    -- right-click: open popup
-    if rclicked and hov then
-      popup_idx = gi
-      popup_x   = math.min(mx, W-140)
-      popup_y   = math.min(my, H-#POPUP_ITEMS*20-10)
-    end
-  end
+  end  -- view_mode == "list" / else
 
   -- ── right-click popup ────────────────────────────────────────────────────
   if popup_idx then
@@ -838,6 +906,83 @@ local function rename_preset(old_name, new_name)
   end
   reaper.SetExtState(PREF_NS, "preset_list", table.concat(new_names, "|"), true)
   if current_preset == old_name then current_preset = new_name end
+end
+
+draw_list_view = function(top_y, avail_h)
+  local W        = gfx.w
+  local ROW_H    = 22
+  local SWATCH_W = 20
+  local HEX_W    = 62
+  local n        = #PALETTE
+
+  local vis = math.max(1, math.floor(avail_h / ROW_H))
+  list_scroll = math.max(0, math.min(list_scroll, math.max(0, n - vis)))
+
+  if gfx.mouse_wheel ~= 0 and hit(0, top_y, W, avail_h) then
+    list_scroll = list_scroll + (gfx.mouse_wheel > 0 and -1 or 1)
+    gfx.mouse_wheel = 0
+  end
+
+  for i = 1, vis do
+    local gi = i + list_scroll
+    if gi > n then break end
+    local p   = PALETTE[gi]
+    local ry  = top_y + (i-1) * ROW_H
+    local hov = hit(0, ry, W, ROW_H)
+
+    fill(0, ry, W, ROW_H, hov and .24 or (gi%2==0 and .19 or .17),
+                           hov and .24 or (gi%2==0 and .19 or .17),
+                           hov and .24 or (gi%2==0 and .19 or .17))
+
+    -- color swatch
+    fill(MARGIN, ry+3, SWATCH_W, ROW_H-6, cr(p.color), cg(p.color), cb(p.color))
+    stroke(MARGIN, ry+3, SWATCH_W, ROW_H-6, 0, 0, 0, .35)
+
+    -- hex label
+    gfx.setfont(2)
+    local _, th = gfx.measurestr("A")
+    txt(MARGIN+SWATCH_W+6, ry+(ROW_H-th)*.5,
+        string.format("#%06X", p.color), .48,.48,.48)
+
+    -- keyword
+    local kx = MARGIN + SWATCH_W + 6 + HEX_W
+    if p.keyword ~= "" then
+      txt(kx, ry+(ROW_H-th)*.5, p.keyword, .88,.88,.88)
+    else
+      txt(kx, ry+(ROW_H-th)*.5, "—", .28,.28,.28)
+    end
+    gfx.setfont(1)
+
+    -- row divider
+    gfx.set(.25,.25,.25,1); gfx.line(0, ry+ROW_H-1, W-1, ry+ROW_H-1)
+
+    -- hover info
+    if hov then
+      hover_info = string.format("#%06X", p.color) ..
+        (p.keyword ~= "" and ("   →  " .. p.keyword) or "   (no keyword)")
+    end
+
+    -- left-click: apply color
+    if lclicked and hov and popup_idx == nil then
+      local cnt = reaper.CountSelectedMediaItems(0)
+      if cnt > 0 then
+        reaper.Undo_BeginBlock()
+        for j = 0, cnt-1 do apply_color_to_item(reaper.GetSelectedMediaItem(0,j), p.color) end
+        reaper.Undo_EndBlock("Apply Color "..string.format("#%06X",p.color), -1)
+        reaper.UpdateArrange()
+        set_status(string.format("Applied to %d item(s)", cnt))
+      else
+        set_status("No items selected")
+      end
+    end
+
+    -- right-click: open keyword popup
+    if rclicked and hov then
+      popup_idx = gi
+      popup_x   = math.min(mx, W-140)
+      popup_y   = math.min(my, top_y+avail_h-#POPUP_ITEMS*20-10)
+    end
+  end
 end
 
 draw_preset_panel = function(start_y)
