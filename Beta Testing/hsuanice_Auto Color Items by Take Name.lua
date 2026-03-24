@@ -1,6 +1,6 @@
 --[[
 @description Auto Color Items by Take Name
-@version 260324.1800
+@version 260324.1912
 @author hsuanice
 @about
   Config-driven color palette with keyword rules — colors items by take name.
@@ -13,6 +13,12 @@
   No external dependencies — REAPER built-in GFX library.
 
 @changelog
+  v260324.1912
+  - Fix: Daemon no longer slows REAPER on track selection — debounce added (15-frame stable window before recolor); GUI settings polled every 10 frames instead of every frame
+  - Add: Audio / Empty / MIDI item-type filter checkboxes always visible below toolbar (not gated on Auto Color)
+  - Fix: Auto Color checkbox restored to toolbar
+  - Fix: Empty items (audio take with no source file) correctly skipped when Empty is unchecked
+
   v260324.1800
   - Add: Collapse button (▾/▴) in toolbar — shrinks window to a single bar for unobtrusive background use; state persisted
   - Add: Background Daemon script (hsuanice_Auto Color Daemon.lua) — headless, no window, reads GUI settings in real time; toggle state (on/off checkmark) shown in Action List and toolbar buttons via SetToggleCommandState
@@ -168,6 +174,9 @@ end
 -- ─── state ────────────────────────────────────────────────────────────────────
 local PREF_NS            = "hsuanice_AutoColorItems"
 local auto_color_enabled = false
+local ac_audio           = true   -- color audio items
+local ac_empty           = true   -- color empty items (no takes)
+local ac_midi            = true   -- color MIDI items
 local last_state_count   = -1
 local status_msg         = ""
 local status_until       = 0
@@ -283,10 +292,20 @@ end
 
 local function save_auto_pref()
   reaper.SetExtState(PREF_NS, "auto_color", auto_color_enabled and "1" or "0", true)
+  reaper.SetExtState(PREF_NS, "ac_audio",   ac_audio and "1" or "0",           true)
+  reaper.SetExtState(PREF_NS, "ac_empty",   ac_empty and "1" or "0",           true)
+  reaper.SetExtState(PREF_NS, "ac_midi",    ac_midi  and "1" or "0",           true)
 end
 local function load_auto_pref()
   -- auto_color_enabled intentionally not restored: always starts OFF so the
   -- user can review before coloring begins
+  local function b(key, default)
+    local v = reaper.GetExtState(PREF_NS, key)
+    return v == "" and default or v == "1"
+  end
+  ac_audio = b("ac_audio", true)
+  ac_empty = b("ac_empty", true)
+  ac_midi  = b("ac_midi",  true)
 end
 
 local function set_status(msg)
@@ -319,10 +338,32 @@ local function do_auto_color()
   for i = 0, n-1 do
     local item = reaper.GetMediaItem(0, i)
     local take = reaper.GetActiveTake(item)
-    if take then
-      local _, tn = reaper.GetSetMediaItemTakeInfo_String(take, "P_NAME", "", false)
-      local p = match_take(tn)
-      if p then apply_color_to_item(item, p.color) end
+    if take == nil then
+      -- no take at all: skip (cannot keyword-match)
+    elseif reaper.TakeIsMIDI(take) then
+      if ac_midi then
+        local _, tn = reaper.GetSetMediaItemTakeInfo_String(take, "P_NAME", "", false)
+        local p = match_take(tn)
+        if p then apply_color_to_item(item, p.color) end
+      end
+    else
+      -- audio take: check whether source has an actual file
+      local src = reaper.GetMediaItemTake_Source(take)
+      local fn  = reaper.GetMediaSourceFileName(src, "")
+      if fn == "" then
+        -- empty audio source (no media file): controlled by ac_empty
+        if ac_empty then
+          local _, tn = reaper.GetSetMediaItemTakeInfo_String(take, "P_NAME", "", false)
+          local p = match_take(tn)
+          if p then apply_color_to_item(item, p.color) end
+        end
+      else
+        if ac_audio then
+          local _, tn = reaper.GetSetMediaItemTakeInfo_String(take, "P_NAME", "", false)
+          local p = match_take(tn)
+          if p then apply_color_to_item(item, p.color) end
+        end
+      end
     end
   end
   reaper.UpdateArrange()
@@ -369,6 +410,7 @@ end
 -- ─── GFX init ─────────────────────────────────────────────────────────────────
 local MARGIN  = 8
 local BAR_H   = 24
+local AC_BAR_H = 20   -- height of the item-type filter sub-bar below main toolbar
 
 -- base_win_w/h = palette-only window size; base_win_x/y = screen position
 local base_win_w = 620
@@ -491,6 +533,14 @@ local SROW_H = 22   -- settings row height
 
 local function settings_panel_h()
   return SROW_H*2 + SROW_H * #PCONF.rows + SROW_H*2 + MARGIN*2
+end
+
+-- Total expanded window height (palette area + all optional panels)
+local function expanded_h()
+  return base_win_h
+    + (show_settings and settings_panel_h() or 0)
+    + (show_presets  and 120                or 0)
+    + AC_BAR_H
 end
 
 -- draws the settings panel starting at screen y; returns whether palette should regenerate
@@ -735,34 +785,42 @@ local function draw()
     if btn(preset_btn_x,   1, 80, BAR_H-2, "☰ Presets", show_presets) then
       show_presets = not show_presets
       save_pconf()
-      local target_h = base_win_h + (show_settings and settings_panel_h() or 0)
-                                   + (show_presets  and 120             or 0)
       prog_resize = 4
-      gfx_init(gfx.w, target_h)
+      gfx_init(gfx.w, expanded_h())
     end
     if btn(settings_btn_x, 1, 78, BAR_H-2, "⚙ Settings", show_settings) then
       show_settings = not show_settings
       save_pconf()
-      local target_h = base_win_h + (show_settings and settings_panel_h() or 0)
-                                   + (show_presets  and 120             or 0)
       prog_resize = 4
-      gfx_init(gfx.w, target_h)
+      gfx_init(gfx.w, expanded_h())
     end
   end
   if btn(collapse_btn_x, 1, 22, BAR_H-2, collapsed and "▴" or "▾") then
     collapsed = not collapsed
     save_pconf()
-    local target_h = collapsed and BAR_H
-                     or (base_win_h + (show_settings and settings_panel_h() or 0)
-                                    + (show_presets  and 120             or 0))
     prog_resize = 4
-    gfx_init(gfx.w, target_h)
+    gfx_init(gfx.w, collapsed and BAR_H or expanded_h())
   end
 
   if collapsed then return end
 
+  -- ── item-type filter sub-bar (always visible) ─────────────────────────────
+  do
+    local sy = BAR_H
+    fill(0, sy, W, AC_BAR_H, .12, .12, .12)
+    gfx.set(.28,.28,.28,1); gfx.line(0, sy + AC_BAR_H - 1, W, sy + AC_BAR_H - 1)
+    local ty2 = sy + (AC_BAR_H - 14) // 2
+    local fx2 = MARGIN
+    txt(fx2, ty2 + 1, "Types:", .45,.45,.45); fx2 = fx2 + 46
+    if chkbox(fx2, ty2, ac_audio, "Audio") then ac_audio = not ac_audio; save_auto_pref() end
+    fx2 = fx2 + 58
+    if chkbox(fx2, ty2, ac_empty, "Empty") then ac_empty = not ac_empty; save_auto_pref() end
+    fx2 = fx2 + 60
+    if chkbox(fx2, ty2, ac_midi,  "MIDI")  then ac_midi  = not ac_midi;  save_auto_pref() end
+  end
+  local content_top = BAR_H + AC_BAR_H
+
   -- ── separator + optional panels ────────────────────────────────────────────
-  local content_top = BAR_H
   if show_presets then
     draw_preset_panel(content_top)
     content_top = content_top + 120
@@ -1263,10 +1321,7 @@ load_palette()
 load_auto_pref()
 
 do
-  local init_h = collapsed and BAR_H
-                 or (base_win_h + (show_settings and settings_panel_h() or 0)
-                                + (show_presets  and 120             or 0))
-  gfx_init(base_win_w, init_h)
+  gfx_init(base_win_w, collapsed and BAR_H or expanded_h())
 end
 -- fonts initialized each frame via font_dirty flag in draw()
 
@@ -1293,7 +1348,8 @@ local function loop()
   elseif size_changed or pos_changed then
     if size_changed and not collapsed then
       local panels_h = (show_settings and settings_panel_h() or 0)
-                     + (show_presets  and 120             or 0)
+                     + (show_presets  and 120                or 0)
+                     + AC_BAR_H
       base_win_w = math.max(200, gfx.w)
       base_win_h = math.max(100, gfx.h - panels_h)
     end
