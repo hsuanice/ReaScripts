@@ -1,6 +1,6 @@
 --[[
 @description Auto Color Items by Take Name
-@version 260324.0451
+@version 260324.1225
 @author hsuanice
 @about
   Config-driven color palette with keyword rules — colors items by take name.
@@ -13,6 +13,10 @@
   No external dependencies — REAPER built-in GFX library.
 
 @changelog
+  v260324.1225
+  - Fix: Preset panel open/closed state now saved across sessions (was always resetting to closed on restart)
+  - Add: Right-click preset → Rename option (in addition to existing Delete)
+
   v260324.0451
   - Add: Preset panel — save/load/delete named presets; all presets stored in ExtState
   - Add: Built-in "Default" preset that clears all keywords
@@ -123,6 +127,7 @@ local last_state_count   = -1
 local status_msg         = ""
 local status_until       = 0
 local show_settings      = false
+local show_presets       = false
 
 -- ─── persistence ─────────────────────────────────────────────────────────────
 -- palette_v3: line 0 = "cols=N"
@@ -146,6 +151,7 @@ local function save_pconf()
   reaper.SetExtState(PREF_NS, "pconf_v1", table.concat(parts, ","), true)
   reaper.SetExtState(PREF_NS, "grey_row",     PCONF.grey_row and "1" or "0", true)
   reaper.SetExtState(PREF_NS, "show_settings", show_settings and "1" or "0", true)
+  reaper.SetExtState(PREF_NS, "show_presets",  show_presets  and "1" or "0", true)
 end
 
 local function load_pconf()
@@ -168,6 +174,7 @@ local function load_pconf()
   local gr = reaper.GetExtState(PREF_NS, "grey_row")
   if gr ~= "" then PCONF.grey_row = (gr == "1") end
   show_settings = reaper.GetExtState(PREF_NS, "show_settings") == "1"
+  show_presets  = reaper.GetExtState(PREF_NS, "show_presets")  == "1"
 end
 
 local function load_palette()
@@ -510,7 +517,6 @@ local POPUP_ITEMS = { "Edit Keyword", "────", "Clear Keyword" }
 
 -- ─── scroll & panel state ────────────────────────────────────────────────────
 local scroll_row         = 0
-local show_presets       = false
 local preset_scroll      = 0
 local current_preset     = nil    -- name of loaded preset, nil = unsaved
 local preset_dirty       = false  -- true when state differs from loaded preset
