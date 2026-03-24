@@ -1,6 +1,6 @@
 --[[
 @description Auto Color Items by Take Name — Background Daemon
-@version 260324.1800
+@version 260324.1903
 @author hsuanice
 @about
   Headless background daemon for hsuanice_Auto Color Items by Take Name.
@@ -74,11 +74,18 @@ local function gen_palette()
 end
 
 -- ─── load settings from ExtState ─────────────────────────────────────────────
+local ac_audio = true
+local ac_empty = true
+local ac_midi  = true
+
 -- Returns a fingerprint string; compare across frames to detect GUI edits.
 local function settings_fingerprint()
   return reaper.GetExtState(PREF_NS, "pconf_v1")
       .. reaper.GetExtState(PREF_NS, "grey_row")
       .. reaper.GetExtState(PREF_NS, "palette_v3")
+      .. reaper.GetExtState(PREF_NS, "ac_audio")
+      .. reaper.GetExtState(PREF_NS, "ac_empty")
+      .. reaper.GetExtState(PREF_NS, "ac_midi")
 end
 
 local function load_settings()
@@ -100,6 +107,14 @@ local function load_settings()
   end
   local gr = reaper.GetExtState(PREF_NS, "grey_row")
   if gr ~= "" then PCONF.grey_row = (gr == "1") end
+
+  local function b(key, default)
+    local v = reaper.GetExtState(PREF_NS, key)
+    return v == "" and default or v == "1"
+  end
+  ac_audio = b("ac_audio", true)
+  ac_empty = b("ac_empty", true)
+  ac_midi  = b("ac_midi",  true)
 
   -- palette_v3
   local raw = reaper.GetExtState(PREF_NS, "palette_v3")
@@ -147,10 +162,30 @@ local function do_auto_color()
   for i = 0, n-1 do
     local item = reaper.GetMediaItem(0, i)
     local take = reaper.GetActiveTake(item)
-    if take then
-      local _, tn = reaper.GetSetMediaItemTakeInfo_String(take, "P_NAME", "", false)
-      local p = match_take(tn)
-      if p then apply_color_to_item(item, p.color) end
+    if take == nil then
+      -- no take: skip
+    elseif reaper.TakeIsMIDI(take) then
+      if ac_midi then
+        local _, tn = reaper.GetSetMediaItemTakeInfo_String(take, "P_NAME", "", false)
+        local p = match_take(tn)
+        if p then apply_color_to_item(item, p.color) end
+      end
+    else
+      local src = reaper.GetMediaItemTake_Source(take)
+      local fn  = reaper.GetMediaSourceFileName(src, "")
+      if fn == "" then
+        if ac_empty then
+          local _, tn = reaper.GetSetMediaItemTakeInfo_String(take, "P_NAME", "", false)
+          local p = match_take(tn)
+          if p then apply_color_to_item(item, p.color) end
+        end
+      else
+        if ac_audio then
+          local _, tn = reaper.GetSetMediaItemTakeInfo_String(take, "P_NAME", "", false)
+          local p = match_take(tn)
+          if p then apply_color_to_item(item, p.color) end
+        end
+      end
     end
   end
   reaper.UpdateArrange()
@@ -170,20 +205,41 @@ local last_state_count  = reaper.GetProjectStateChangeCount(0)
 do_auto_color()
 
 -- ─── loop ─────────────────────────────────────────────────────────────────────
-local function loop()
-  local fp = settings_fingerprint()
-  local sc = reaper.GetProjectStateChangeCount(0)
+-- Debounce: only recolor after the project state has been stable for
+-- DEBOUNCE_N frames (~0.5 s).  This prevents do_auto_color from firing
+-- on every track-selection click (which also increments state count).
+local DEBOUNCE_N           = 15   -- frames of stability required
+local FINGERPRINT_INTERVAL = 10   -- check GUI settings every N frames
+local pending_recolor      = 0
+local frame_count          = 0
 
-  if fp ~= last_fingerprint then
-    -- GUI changed palette/settings — reload and re-color
-    load_settings()
-    last_fingerprint = fp
-    do_auto_color()
-    last_state_count = reaper.GetProjectStateChangeCount(0)
-  elseif sc ~= last_state_count then
-    -- Project changed (items added/moved/renamed) — re-color
-    do_auto_color()
-    last_state_count = reaper.GetProjectStateChangeCount(0)
+local function loop()
+  frame_count = frame_count + 1
+
+  -- Check for GUI settings changes less frequently
+  if frame_count % FINGERPRINT_INTERVAL == 0 then
+    local fp = settings_fingerprint()
+    if fp ~= last_fingerprint then
+      load_settings()
+      last_fingerprint  = fp
+      pending_recolor   = 0
+      do_auto_color()
+      last_state_count  = reaper.GetProjectStateChangeCount(0)
+      reaper.defer(loop)
+      return
+    end
+  end
+
+  -- Debounce project state changes
+  local sc = reaper.GetProjectStateChangeCount(0)
+  if sc ~= last_state_count then
+    last_state_count = sc
+    pending_recolor  = DEBOUNCE_N   -- reset countdown on each change
+  elseif pending_recolor > 0 then
+    pending_recolor = pending_recolor - 1
+    if pending_recolor == 0 then
+      do_auto_color()
+    end
   end
 
   reaper.defer(loop)
