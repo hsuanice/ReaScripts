@@ -1,6 +1,6 @@
 --[[
 @description Auto Color Items by Take Name
-@version 260324.1434
+@version 260324.1800
 @author hsuanice
 @about
   Config-driven color palette with keyword rules — colors items by take name.
@@ -13,6 +13,10 @@
   No external dependencies — REAPER built-in GFX library.
 
 @changelog
+  v260324.1800
+  - Add: Collapse button (▾/▴) in toolbar — shrinks window to a single bar for unobtrusive background use; state persisted
+  - Add: Background Daemon script (hsuanice_Auto Color Daemon.lua) — headless, no window, reads GUI settings in real time; toggle state (on/off checkmark) shown in Action List and toolbar buttons via SetToggleCommandState
+
   v260324.1434
   - Fix: last active preset now correctly restored on script reopen (was a Lua scoping bug — current_preset declared after save/load_pconf, so they accessed separate globals)
   - Fix: CJK characters in color swatches now vertically centered (was offset low due to ASCII-only line height measurement)
@@ -169,6 +173,7 @@ local status_msg         = ""
 local status_until       = 0
 local show_settings      = false
 local show_presets       = false
+local collapsed          = false    -- true = window shrunk to toolbar-only bar
 local view_mode          = "color"  -- "color" or "list"
 local current_preset     = nil      -- name of loaded preset, nil = unsaved
 local preset_dirty       = false    -- true when state differs from loaded preset
@@ -205,6 +210,7 @@ local function save_pconf()
   reaper.SetExtState(PREF_NS, "font_size",     tostring(font_size),          true)
   reaper.SetExtState(PREF_NS, "swatch_chars",  tostring(swatch_chars),       true)
   reaper.SetExtState(PREF_NS, "last_preset",   current_preset or "",         true)
+  reaper.SetExtState(PREF_NS, "collapsed",     collapsed and "1" or "0",     true)
 end
 
 local function load_pconf()
@@ -236,6 +242,7 @@ local function load_pconf()
   if sc and sc >= 1 and sc <= 9 then swatch_chars = sc end
   local lp = reaper.GetExtState(PREF_NS, "last_preset")
   if lp ~= "" then current_preset = lp; preset_dirty = false end
+  collapsed = reaper.GetExtState(PREF_NS, "collapsed") == "1"
 end
 
 local function load_palette()
@@ -698,8 +705,9 @@ local function draw()
   if btn(318, 1, 100, BAR_H-2, "Remove Color") then do_clear_selected() end
 
   -- preset name + save status (to the left of ☰ Presets)
-  local preset_btn_x   = W - 172
-  local settings_btn_x = W - 86
+  local preset_btn_x   = W - 194
+  local settings_btn_x = W - 108
+  local collapse_btn_x = W - 24
   do
     gfx.setfont(2)
     local label, lr, lg, lb2
@@ -723,22 +731,35 @@ local function draw()
     gfx.setfont(1)
   end
 
-  if btn(preset_btn_x,   1, 80, BAR_H-2, "☰ Presets", show_presets) then
-    show_presets = not show_presets
+  if not collapsed then
+    if btn(preset_btn_x,   1, 80, BAR_H-2, "☰ Presets", show_presets) then
+      show_presets = not show_presets
+      save_pconf()
+      local target_h = base_win_h + (show_settings and settings_panel_h() or 0)
+                                   + (show_presets  and 120             or 0)
+      prog_resize = 4
+      gfx_init(gfx.w, target_h)
+    end
+    if btn(settings_btn_x, 1, 78, BAR_H-2, "⚙ Settings", show_settings) then
+      show_settings = not show_settings
+      save_pconf()
+      local target_h = base_win_h + (show_settings and settings_panel_h() or 0)
+                                   + (show_presets  and 120             or 0)
+      prog_resize = 4
+      gfx_init(gfx.w, target_h)
+    end
+  end
+  if btn(collapse_btn_x, 1, 22, BAR_H-2, collapsed and "▴" or "▾") then
+    collapsed = not collapsed
     save_pconf()
-    local target_h = base_win_h + (show_settings and settings_panel_h() or 0)
-                                 + (show_presets  and 120             or 0)
+    local target_h = collapsed and BAR_H
+                     or (base_win_h + (show_settings and settings_panel_h() or 0)
+                                    + (show_presets  and 120             or 0))
     prog_resize = 4
     gfx_init(gfx.w, target_h)
   end
-  if btn(settings_btn_x, 1, 78, BAR_H-2, "⚙ Settings", show_settings) then
-    show_settings = not show_settings
-    save_pconf()
-    local target_h = base_win_h + (show_settings and settings_panel_h() or 0)
-                                 + (show_presets  and 120             or 0)
-    prog_resize = 4
-    gfx_init(gfx.w, target_h)
-  end
+
+  if collapsed then return end
 
   -- ── separator + optional panels ────────────────────────────────────────────
   local content_top = BAR_H
@@ -1235,14 +1256,16 @@ draw_preset_panel = function(start_y)
 end
 
 -- ─── init & loop ─────────────────────────────────────────────────────────────
+reaper.set_action_options(1)  -- mark as toggle script (checkmark in Action List)
 load_win_size()
 load_pconf()
 load_palette()
 load_auto_pref()
 
 do
-  local init_h = base_win_h + (show_settings and settings_panel_h() or 0)
-                             + (show_presets  and 120             or 0)
+  local init_h = collapsed and BAR_H
+                 or (base_win_h + (show_settings and settings_panel_h() or 0)
+                                + (show_presets  and 120             or 0))
   gfx_init(base_win_w, init_h)
 end
 -- fonts initialized each frame via font_dirty flag in draw()
@@ -1268,7 +1291,7 @@ local function loop()
     prev_gfx_w, prev_gfx_h = gfx.w, gfx.h
     prev_win_x, prev_win_y  = cur_x, cur_y
   elseif size_changed or pos_changed then
-    if size_changed then
+    if size_changed and not collapsed then
       local panels_h = (show_settings and settings_panel_h() or 0)
                      + (show_presets  and 120             or 0)
       base_win_w = math.max(200, gfx.w)
