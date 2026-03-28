@@ -1,5 +1,5 @@
 -- @description AudioSweet ReaImGui - AudioSuite Workflow (Pro Tools–Style)
--- @version 0.2.4
+-- @version 0.2.5
 -- @author hsuanice
 -- @link https://forum.cockos.com/showthread.php?p=2910884#post2910884
 -- @about
@@ -63,6 +63,13 @@
 --
 --
 -- @changelog
+--   0.2.5 [260328.0408]
+--     - ADDED: Tail Seconds input field (requires RGWH Core ≥ 0.3.7)
+--       • New "Tail" input next to the handle seconds field
+--       • Extends the processed item into silence after the right handle
+--       • Captures reverb/delay/echo decay; 0 = off (backward-compatible default)
+--       • Written to RGWH ExtState (TAIL_SECONDS) on every Run/Apply
+--
 --   0.2.4 [260327.2345]
 --     - ADDED: Independent Show/Hide checkboxes for Presets and History panels
 --       • Split "Show Presets/History" into separate "Show Presets" and "Show History" checkboxes
@@ -1411,6 +1418,7 @@ local gui = {
   multi_channel_policy = "source_playback",  -- "source_playback" | "source_track" | "target_track"
   handle_seconds = 5.0,
   use_whole_file = false, -- Use whole file length instead of handles
+  tail_seconds = 0.0,     -- FX tail capture (reverb/delay/echo decay), appended after right handle
   debug = false,
   max_history = 10,      -- Maximum number of history items to keep
   show_fx_on_recall = true,    -- Show FX window when executing SAVED CHAIN/HISTORY
@@ -1531,6 +1539,7 @@ local function save_gui_settings()
 
   r.SetExtState(SETTINGS_NAMESPACE, "handle_seconds", tostring(gui.handle_seconds), true)
   r.SetExtState(SETTINGS_NAMESPACE, "use_whole_file", gui.use_whole_file and "1" or "0", true)
+  r.SetExtState(SETTINGS_NAMESPACE, "tail_seconds", tostring(gui.tail_seconds), true)
   r.SetExtState(SETTINGS_NAMESPACE, "debug", gui.debug and "1" or "0", true)
   r.SetExtState(SETTINGS_NAMESPACE, "max_history", tostring(gui.max_history), true)
   r.SetExtState(SETTINGS_NAMESPACE, "show_fx_on_recall", gui.show_fx_on_recall and "1" or "0", true)
@@ -1622,6 +1631,7 @@ local function load_gui_settings()
   gui.multi_channel_policy = get_string("multi_channel_policy", "source_playback")
   gui.handle_seconds = get_float("handle_seconds", 5.0)
   gui.use_whole_file = get_bool("use_whole_file", false)
+  gui.tail_seconds   = get_float("tail_seconds", 0.0)
   gui.debug = get_bool("debug", false)
   gui.max_history = get_int("max_history", 10)
   gui.show_fx_on_recall = get_bool("show_fx_on_recall", true)
@@ -2883,6 +2893,7 @@ local function set_extstate_from_gui(mode_override)
   -- Use whole file length if enabled, otherwise use configured handle seconds
   local handle_value = gui.use_whole_file and 999999 or gui.handle_seconds
   r.SetProjExtState(0, "RGWH", "HANDLE_SECONDS", tostring(handle_value))
+  r.SetProjExtState(0, "RGWH", "TAIL_SECONDS", tostring(gui.tail_seconds or 0.0))
 
   -- Set RGWH Core debug level (0 = silent, no console output)
   r.SetProjExtState(0, "RGWH", "DEBUG_LEVEL", gui.debug and "2" or "0")
@@ -3432,6 +3443,7 @@ local function run_saved_chain_apply_mode(tr, chain_name, item_count)
   -- Use whole file length if enabled, otherwise use configured handle seconds
   local handle_value = gui.use_whole_file and 999999 or gui.handle_seconds
   r.SetProjExtState(0, "RGWH", "HANDLE_SECONDS", tostring(handle_value))
+  r.SetProjExtState(0, "RGWH", "TAIL_SECONDS", tostring(gui.tail_seconds or 0.0))
   r.SetProjExtState(0, "RGWH", "DEBUG_LEVEL", gui.debug and "2" or "0")
 
   if gui.debug then
@@ -5164,7 +5176,7 @@ end
     end
 
     -- Whole File + handle input (right side of row 2)
-    ImGui.SameLine(ctx, 0, 130)
+    ImGui.SameLine(ctx, 0, 20)
     local rv_whole = ImGui.Checkbox(ctx, "Whole File", gui.use_whole_file)
     if rv_whole then
       gui.use_whole_file = not gui.use_whole_file
@@ -5174,14 +5186,26 @@ end
     if gui.use_whole_file then
       ImGui.BeginDisabled(ctx)
     end
-    ImGui.SetNextItemWidth(ctx, 93)
-    local rv, new_val = ImGui.InputDouble(ctx, "##handle_seconds", gui.handle_seconds, 0, 0, "%.1f")
+    ImGui.SetNextItemWidth(ctx, 85)
+    local rv, new_val = ImGui.InputDouble(ctx, "##handle_seconds", gui.handle_seconds, 0.5, 1.0, "%.1f")
     if rv then
       gui.handle_seconds = math.max(0, new_val)
       save_gui_settings()
     end
     if gui.use_whole_file then
       ImGui.EndDisabled(ctx)
+    end
+    ImGui.SameLine(ctx)
+    ImGui.Text(ctx, "Tail")
+    if ImGui.IsItemHovered(ctx) then
+      ImGui.SetTooltip(ctx, "FX tail capture: extends item into silence after the right handle\nCaptures reverb/delay/echo decay\n0 = off")
+    end
+    ImGui.SameLine(ctx)
+    ImGui.SetNextItemWidth(ctx, 85)
+    local rv_tail, new_tail = ImGui.InputDouble(ctx, "##tail_seconds", gui.tail_seconds, 0.5, 1.0, "%.1f")
+    if rv_tail then
+      gui.tail_seconds = math.max(0, new_tail)
+      save_gui_settings()
     end
   end
 
