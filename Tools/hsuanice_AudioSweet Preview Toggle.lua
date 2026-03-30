@@ -1,74 +1,80 @@
---[[
-@description AudioSweet Preview Toggle - Auto Detect Focused/Chain
-@version 0.2.7
-@author hsuanice
-@provides
-  [main] .
-@changelog
-  0.2.7 (2026-02-10) [internal: v260210.1935]
-    - FIXED: Toggle now reliably stops preview on 2nd press
-      • Root cause: REAPER terminates the deferred script (watcher) on re-trigger,
-        never starting a new instance — 2nd press produced zero output
-      • Fix: Core now registers reaper.atexit() alongside watcher
-      • atexit fires on script termination with full L1 state — clean cleanup
-    - CHANGED: Removed temporary ShowConsoleMsg debug output
-    - CHANGED: Version synced with Preview Core 0.2.7
-
-  0.2.6 (2026-02-10) [internal: v260210.1303]
-    - FIXED: Toggle stop now works reliably on 2nd execution
-      • Replaced cross-instance stop_preview() call with PREVIEW_STOP_REQ ExtState flag
-      • Watcher in original instance (with full state) handles cleanup — no state bootstrapping
-      • Toggle check moved before dofile() — stop path doesn't load Core at all
-    - CHANGED: Version synced with Preview Core 0.2.6
-
-  0.2.5 (2026-02-10) [internal: v260210.1224]
-    - FIXED: Toggle self-toggle now works reliably (was failing on 2nd tap)
-      • Core fix: stop_preview() now sets moved_count for timesel count check
-      • Core fix: Watcher race replaced 3-frame debounce with 500ms startup grace period
-    - CHANGED: Version synced with Preview Core 0.2.5
-
-  0.2.4 (2026-02-10) [internal: v260210.1212]
-    - FIXED: Manual stop (spacebar etc.) now auto-cleans up preview again
-      • Re-enabled Core's stop-watcher (was disabled in 0.2.3 to avoid race)
-      • Core watcher now uses 3-frame debounce to prevent false-positive race
-    - FIXED: stop_preview() now respects GUI restore_mode setting (GUID vs timesel)
-      • Reads preview_restore_mode from GUI ExtState before stopping
-      • timesel mode: moves back ALL items in placeholder span (including new items from Run)
-      • guid mode: moves back only the originally-moved items (safe when FX track has other items)
-    - CHANGED: Removed no_watcher=true from args — watcher re-enabled for manual stop support
-    - CHANGED: Version synced with Preview Core 0.2.4
-
-  0.2.3 (2026-02-10) [internal: v260210.1113]
-    - FIXED: Toggle now reliably stops on 2nd execution (was requiring 3 taps)
-      • Root cause: Core's stop-watcher raced with toggle — watcher auto-cleaned up,
-        clearing PREVIEW_RUN flag, so toggle fell through and restarted preview
-      • Fix: Toggle passes no_watcher=true to Core, disabling the deferred stop-watcher
-      • Toggle script now exclusively controls the preview lifecycle via stop_preview()
-      • Core's stop_preview() bootstraps state from placeholder + ExtState for full cleanup
-    - NEW: Core stores FX track GUID in ExtState (PREVIEW_FX_GUID) for cross-instance lookup
-    - NEW: Core.stop_preview() public method — stops transport, finds placeholder,
-      bootstraps state, and runs cleanup from a fresh Lua instance
-
-  0.2.2 (2026-02-10) [internal: v260210]
-    - NEW: True toggle behavior — re-running while preview is active now stops preview
-      • Checks PREVIEW_RUN ExtState flag set by Preview Core
-      • If preview is running, calls Core.stop_preview() for full cleanup
-      • Previous behavior (mode switch on re-entry) replaced by clean stop/start toggle
-
-  0.2.1 (2026-02-09) [internal: v260209.2130]
-    - FIXED: Cross-platform path resolution for Windows/Linux compatibility
-      • Replaced debug.getinfo() relative path with reaper.GetResourcePath() absolute path
-      • Fixes "attempt to concatenate a nil value (local 'SCRIPT_DIR')" on Windows
-
-  0.2.0 (2025-12-23) [internal: v251223.2256]
-    - CHANGED: Version bump to 0.2.0 (public beta)
-
-  0.1.0 (2025-12-21) [internal: v251221.1915]
-    - NEW: Unified preview script that auto-detects focused vs chain window
-    - Priority: Chain FX window → chain preview, Single FX floating → focused preview
-    - Fallback: No FX window → chain preview on preview target track
-    - Reads preview settings from AudioSweet GUI ExtState
-]]--
+-- @description AudioSweet Preview Toggle - Auto Detect Focused/Chain
+-- @version 0.2.8
+-- @author hsuanice
+-- @link https://forum.cockos.com/showthread.php?p=2910884#post2910884
+-- @provides
+--   [main] .
+-- @changelog
+--   0.2.8 [260330.1809]
+--     - ADDED: Auto track FX chain online/offline restore on preview
+--       • Before starting preview: brings FX chain track online if offline (I_FXEN or per-FX offline bits)
+--       • State is persisted via ExtState (PREVIEW_TOGGLE_FXCHAIN_SAVED) so the stop-path (2nd toggle press) can restore it
+--       • On stop: restores original offline state then calls ASP.stop_preview()
+--       • FX track resolved from: chain target_track_obj → focused FX track → name lookup
+--
+--   0.2.7 (2026-02-10) [internal: v260210.1935]
+--     - FIXED: Toggle now reliably stops preview on 2nd press
+--       • Root cause: REAPER terminates the deferred script (watcher) on re-trigger,
+--         never starting a new instance — 2nd press produced zero output
+--       • Fix: Core now registers reaper.atexit() alongside watcher
+--       • atexit fires on script termination with full L1 state — clean cleanup
+--     - CHANGED: Removed temporary ShowConsoleMsg debug output
+--     - CHANGED: Version synced with Preview Core 0.2.7
+--
+--   0.2.6 (2026-02-10) [internal: v260210.1303]
+--     - FIXED: Toggle stop now works reliably on 2nd execution
+--       • Replaced cross-instance stop_preview() call with PREVIEW_STOP_REQ ExtState flag
+--       • Watcher in original instance (with full state) handles cleanup — no state bootstrapping
+--       • Toggle check moved before dofile() — stop path doesn't load Core at all
+--     - CHANGED: Version synced with Preview Core 0.2.6
+--
+--   0.2.5 (2026-02-10) [internal: v260210.1224]
+--     - FIXED: Toggle self-toggle now works reliably (was failing on 2nd tap)
+--       • Core fix: stop_preview() now sets moved_count for timesel count check
+--       • Core fix: Watcher race replaced 3-frame debounce with 500ms startup grace period
+--     - CHANGED: Version synced with Preview Core 0.2.5
+--
+--   0.2.4 (2026-02-10) [internal: v260210.1212]
+--     - FIXED: Manual stop (spacebar etc.) now auto-cleans up preview again
+--       • Re-enabled Core's stop-watcher (was disabled in 0.2.3 to avoid race)
+--       • Core watcher now uses 3-frame debounce to prevent false-positive race
+--     - FIXED: stop_preview() now respects GUI restore_mode setting (GUID vs timesel)
+--       • Reads preview_restore_mode from GUI ExtState before stopping
+--       • timesel mode: moves back ALL items in placeholder span (including new items from Run)
+--       • guid mode: moves back only the originally-moved items (safe when FX track has other items)
+--     - CHANGED: Removed no_watcher=true from args — watcher re-enabled for manual stop support
+--     - CHANGED: Version synced with Preview Core 0.2.4
+--
+--   0.2.3 (2026-02-10) [internal: v260210.1113]
+--     - FIXED: Toggle now reliably stops on 2nd execution (was requiring 3 taps)
+--       • Root cause: Core's stop-watcher raced with toggle — watcher auto-cleaned up,
+--         clearing PREVIEW_RUN flag, so toggle fell through and restarted preview
+--       • Fix: Toggle passes no_watcher=true to Core, disabling the deferred stop-watcher
+--       • Toggle script now exclusively controls the preview lifecycle via stop_preview()
+--       • Core's stop_preview() bootstraps state from placeholder + ExtState for full cleanup
+--     - NEW: Core stores FX track GUID in ExtState (PREVIEW_FX_GUID) for cross-instance lookup
+--     - NEW: Core.stop_preview() public method — stops transport, finds placeholder,
+--       bootstraps state, and runs cleanup from a fresh Lua instance
+--
+--   0.2.2 (2026-02-10) [internal: v260210]
+--     - NEW: True toggle behavior — re-running while preview is active now stops preview
+--       • Checks PREVIEW_RUN ExtState flag set by Preview Core
+--       • If preview is running, calls Core.stop_preview() for full cleanup
+--       • Previous behavior (mode switch on re-entry) replaced by clean stop/start toggle
+--
+--   0.2.1 (2026-02-09) [internal: v260209.2130]
+--     - FIXED: Cross-platform path resolution for Windows/Linux compatibility
+--       • Replaced debug.getinfo() relative path with reaper.GetResourcePath() absolute path
+--       • Fixes "attempt to concatenate a nil value (local 'SCRIPT_DIR')" on Windows
+--
+--   0.2.0 (2025-12-23) [internal: v251223.2256]
+--     - CHANGED: Version bump to 0.2.0 (public beta)
+--
+--   0.1.0 (2025-12-21) [internal: v251221.1915]
+--     - NEW: Unified preview script that auto-detects focused vs chain window
+--     - Priority: Chain FX window → chain preview, Single FX floating → focused preview
+--     - Fallback: No FX window → chain preview on preview target track
+--     - Reads preview settings from AudioSweet GUI ExtState
 
 --========================================
 -- AudioSweet Preview Toggle
@@ -84,6 +90,81 @@ local RES_PATH = reaper.GetResourcePath()
 local ASP = dofile(RES_PATH .. '/Scripts/hsuanice Scripts/Library/hsuanice_AS Preview Core.lua')
 
 ------------------------------------------------------------
+-- FX Chain Online/Offline Helpers
+------------------------------------------------------------
+local function save_and_enable_track_fx_chain(tr)
+  if not tr or not reaper.ValidatePtr2(0, tr, "MediaTrack*") then return nil end
+  local saved = {}
+  local any_change = false
+  local fxen = math.floor(reaper.GetMediaTrackInfo_Value(tr, "I_FXEN") + 0.5)
+  saved.fxen = fxen
+  if fxen == 0 then reaper.SetMediaTrackInfo_Value(tr, "I_FXEN", 1); any_change = true end
+  local fx_count = reaper.TrackFX_GetCount(tr)
+  saved.offline = {}
+  for i = 0, fx_count - 1 do
+    local is_offline = reaper.TrackFX_GetOffline(tr, i)
+    saved.offline[i] = is_offline
+    if is_offline then reaper.TrackFX_SetOffline(tr, i, false); any_change = true end
+  end
+  return any_change and saved or nil
+end
+
+local function restore_track_fx_chain_state(tr, saved)
+  if not tr or not saved then return end
+  if not reaper.ValidatePtr2(0, tr, "MediaTrack*") then return end
+  if saved.fxen ~= nil then reaper.SetMediaTrackInfo_Value(tr, "I_FXEN", saved.fxen) end
+  if saved.offline then
+    for i, was_offline in pairs(saved.offline) do
+      if was_offline then reaper.TrackFX_SetOffline(tr, i, true) end
+    end
+  end
+end
+
+-- Serialise/deserialise saved state via ExtState so the stop-path
+-- (a second script instance) can restore the original offline state.
+local FXCHAIN_NS = "hsuanice_AS"
+local FXCHAIN_KEY = "PREVIEW_TOGGLE_FXCHAIN_SAVED"
+
+local function persist_saved_state(tr, saved)
+  if not tr or not saved then
+    reaper.SetExtState(FXCHAIN_NS, FXCHAIN_KEY, "", false)
+    return
+  end
+  local guid = reaper.GetTrackGUID(tr)
+  local offline_parts = {}
+  if saved.offline then
+    for i, v in pairs(saved.offline) do
+      offline_parts[#offline_parts + 1] = tostring(i) .. ":" .. (v and "1" or "0")
+    end
+  end
+  local payload = guid .. "|" .. tostring(saved.fxen or 1) .. "|" .. table.concat(offline_parts, ",")
+  reaper.SetExtState(FXCHAIN_NS, FXCHAIN_KEY, payload, false)
+end
+
+local function restore_from_persisted_state()
+  local payload = reaper.GetExtState(FXCHAIN_NS, FXCHAIN_KEY)
+  if not payload or payload == "" then return end
+  reaper.SetExtState(FXCHAIN_NS, FXCHAIN_KEY, "", false)  -- consume
+  local guid, fxen_str, offline_str = payload:match("^([^|]+)|([^|]+)|(.*)$")
+  if not guid then return end
+  -- Find track by GUID
+  local tr = nil
+  for i = 0, reaper.CountTracks(0) - 1 do
+    local t = reaper.GetTrack(0, i)
+    if reaper.GetTrackGUID(t) == guid then tr = t; break end
+  end
+  if not tr then return end
+  local saved = { fxen = tonumber(fxen_str), offline = {} }
+  if offline_str and offline_str ~= "" then
+    for part in offline_str:gmatch("[^,]+") do
+      local idx, val = part:match("^(%d+):([01])$")
+      if idx then saved.offline[tonumber(idx)] = (val == "1") end
+    end
+  end
+  restore_track_fx_chain_state(tr, saved)
+end
+
+------------------------------------------------------------
 -- 1.5) Toggle: if preview is already running, stop it
 ------------------------------------------------------------
 -- Dual approach:
@@ -95,6 +176,7 @@ if _run_flag == "1" then
   local rm_val = reaper.GetExtState("hsuanice_AS_GUI", "preview_restore_mode")
   local rm = (rm_val ~= "1") and "timesel" or "guid"
   ASP.stop_preview({ restore_mode = rm })
+  restore_from_persisted_state()
   return
 end
 
@@ -238,5 +320,24 @@ if args.debug then
     tostring(args.chain_mode), args.solo_scope, args.restore_mode
   ))
 end
+
+-- Resolve FX track: chain mode uses target_track_obj or name lookup; focused mode uses GetFocusedFX
+local fx_track_for_toggle = target_track_obj
+if not fx_track_for_toggle and not chain_mode then
+  local retval2, trackidx2 = reaper.GetFocusedFX()
+  if retval2 == 1 and trackidx2 then
+    fx_track_for_toggle = reaper.GetTrack(0, trackidx2 - 1)
+  end
+end
+if not fx_track_for_toggle and target_track_name ~= "" then
+  for i = 0, reaper.CountTracks(0) - 1 do
+    local tr = reaper.GetTrack(0, i)
+    local _, tn = reaper.GetSetMediaTrackInfo_String(tr, "P_NAME", "", false)
+    if tn == target_track_name then fx_track_for_toggle = tr; break end
+  end
+end
+
+local saved_fxchain = save_and_enable_track_fx_chain(fx_track_for_toggle)
+persist_saved_state(fx_track_for_toggle, saved_fxchain)
 
 ASP.preview(args)
