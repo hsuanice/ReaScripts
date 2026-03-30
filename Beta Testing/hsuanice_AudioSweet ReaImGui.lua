@@ -1,5 +1,5 @@
 -- @description AudioSweet ReaImGui - AudioSuite Workflow (Pro Tools–Style)
--- @version 0.2.5
+-- @version 0.2.6
 -- @author hsuanice
 -- @link https://forum.cockos.com/showthread.php?p=2910884#post2910884
 -- @about
@@ -63,6 +63,14 @@
 --
 --
 -- @changelog
+--   0.2.6 [260330.1448]
+--     - ADDED: Auto track FX chain online/offline restore on preview/run
+--       • Before preview or run: if the FX chain track's chain is offline (I_FXEN=0), it is brought online automatically
+--       • After preview/run completes (or transport stops): original chain state is restored
+--       • If the chain was already online, nothing changes (state is respected)
+--       • Applies to both Single FX (focused) mode and Chain mode
+--       • Covers: Preview start/stop, transport auto-stop, Run, Saved Presets, History
+--
 --   0.2.5 [260328.0408]
 --     - ADDED: Tail Seconds input field (requires RGWH Core ≥ 0.3.7)
 --       • New "Tail" input next to the handle seconds field
@@ -2905,6 +2913,27 @@ local function set_extstate_from_gui(mode_override)
 end
 
 ------------------------------------------------------------
+-- Track FX Chain Online/Offline Helpers (for preview/run)
+------------------------------------------------------------
+-- Save the track FX chain's enabled state (I_FXEN) and bring it online.
+-- Returns the saved I_FXEN value if the chain was offline (0), or nil if
+-- the chain was already online (nothing to do).
+local function save_and_enable_track_fx_chain(tr)
+  if not tr or not r.ValidatePtr2(0, tr, "MediaTrack*") then return nil end
+  local fxen = math.floor(r.GetMediaTrackInfo_Value(tr, "I_FXEN") + 0.5)
+  if fxen ~= 0 then return nil end  -- already online; nothing to do
+  r.SetMediaTrackInfo_Value(tr, "I_FXEN", 1)
+  return fxen  -- returns 0 (was offline)
+end
+
+-- Restore the track FX chain's enabled state saved by save_and_enable_track_fx_chain.
+local function restore_track_fx_chain_state(tr, saved_fxen)
+  if not tr or saved_fxen == nil then return end
+  if not r.ValidatePtr2(0, tr, "MediaTrack*") then return end
+  r.SetMediaTrackInfo_Value(tr, "I_FXEN", saved_fxen)
+end
+
+------------------------------------------------------------
 -- Preview & Solo Functions
 ------------------------------------------------------------
 local function toggle_preview()
@@ -2915,6 +2944,9 @@ local function toggle_preview()
   -- If transport is playing (GUI preview or Tools script preview), stop it
   if gui.is_previewing or is_playing then
     r.Main_OnCommand(40044, 0)  -- Transport: Stop
+    restore_track_fx_chain_state(gui.preview_fxchain_track, gui.preview_fxchain_saved)
+    gui.preview_fxchain_track = nil
+    gui.preview_fxchain_saved = nil
     gui.is_previewing = false
     gui.last_result = "Preview stopped"
     return
@@ -3015,6 +3047,11 @@ local function toggle_preview()
     restore_mode = restore_mode_names[gui.preview_restore_mode + 1],
   }
 
+  -- Bring FX chain track online so AudioSweet can process correctly
+  local fx_track_for_preview = target_track_obj or gui.focused_track
+  gui.preview_fxchain_track = fx_track_for_preview
+  gui.preview_fxchain_saved = save_and_enable_track_fx_chain(fx_track_for_preview)
+
   -- Run preview
   local preview_ok, preview_err = pcall(ASP.preview, args)
 
@@ -3022,6 +3059,10 @@ local function toggle_preview()
     gui.last_result = "Preview: Success"
     gui.is_previewing = true
   else
+    -- Preview failed: restore offline state immediately
+    restore_track_fx_chain_state(gui.preview_fxchain_track, gui.preview_fxchain_saved)
+    gui.preview_fxchain_track = nil
+    gui.preview_fxchain_saved = nil
     gui.last_result = "Preview Error: " .. tostring(preview_err)
     gui.is_previewing = false
   end
@@ -3157,6 +3198,9 @@ local function run_audiosweet(override_track)
     return
   end
 
+  -- Bring FX chain track online so AudioSweet can process correctly
+  local saved_fxchain = save_and_enable_track_fx_chain(target_track)
+
   gui.is_running = true
   gui.last_result = "Running..."
 
@@ -3243,6 +3287,7 @@ local function run_audiosweet(override_track)
   r.SetExtState("hsuanice_AS", "EXTERNAL_UNDO_CONTROL", "", false)
 
   gui.is_running = false
+  restore_track_fx_chain_state(target_track, saved_fxchain)
 end
 
 local function run_focused_fx_copy_mode(tr, fx_name, fx_idx, item_count)
@@ -3696,6 +3741,9 @@ local function run_saved_chain(chain_idx)
 
   if gui.is_running then return end
 
+  -- Bring FX chain track online so AudioSweet can process correctly
+  local saved_fxchain = save_and_enable_track_fx_chain(tr)
+
   gui.is_running = true
   gui.last_result = "Running..."
 
@@ -3730,6 +3778,7 @@ local function run_saved_chain(chain_idx)
 
   -- Clear external undo control flag after execution
   r.SetExtState("hsuanice_AS", "EXTERNAL_UNDO_CONTROL", "", false)
+  restore_track_fx_chain_state(tr, saved_fxchain)
 end
 
 local function run_history_item(hist_idx)
@@ -3749,6 +3798,9 @@ local function run_history_item(hist_idx)
   end
 
   if gui.is_running then return end
+
+  -- Bring FX chain track online so AudioSweet can process correctly
+  local saved_fxchain = save_and_enable_track_fx_chain(tr)
 
   gui.is_running = true
   gui.last_result = "Running..."
@@ -3783,6 +3835,7 @@ local function run_history_item(hist_idx)
 
   -- Clear external undo control flag after execution
   r.SetExtState("hsuanice_AS", "EXTERNAL_UNDO_CONTROL", "", false)
+  restore_track_fx_chain_state(tr, saved_fxchain)
 end
 
 ------------------------------------------------------------
@@ -3793,6 +3846,9 @@ local function draw_gui()
   if gui.is_previewing then
     local play_state = r.GetPlayState()
     if play_state == 0 then  -- 0 = stopped
+      restore_track_fx_chain_state(gui.preview_fxchain_track, gui.preview_fxchain_saved)
+      gui.preview_fxchain_track = nil
+      gui.preview_fxchain_saved = nil
       gui.is_previewing = false
       if gui.last_result == "Preview: Success" or gui.last_result == "Preview stopped" then
         gui.last_result = "Preview stopped (auto-detected)"
