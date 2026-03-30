@@ -1,5 +1,5 @@
 -- @description RGWH ReaImGui - ImGui Interface for RGWH Core（Render or Glue with Handles）
--- @version 0.2.5
+-- @version 0.2.7
 -- @author hsuanice
 -- @link https://forum.cockos.com/showthread.php?t=305456
 -- @provides
@@ -14,6 +14,20 @@
 --   Adjust parameters using the visual controls and click operation buttons to execute.
 --
 -- @changelog
+--   0.2.7 [260330.1415] - MOVED: "Keep MUTED as separate unit" to main panel alongside "Split at crossfades"
+--     - Both unit grouping checkboxes now appear on the same row below Handle/Tail in the main panel
+--     - REMOVED: "GLUE UNIT BEHAVIOUR" section from Settings tab (no longer needed)
+--     - FIX (Core): muted items now group with other muted items — only muted/non-muted boundary breaks the chain
+--
+--   0.2.6 [260330.1354] - ADDED: Glue unit grouping options (requires RGWH Core ≥ 0.3.8)
+--     - NEW: "Split at crossfades" checkbox — main panel, below Tail, right side (default OFF)
+--       • When ON: crossfading items are not grouped into the same unit; each becomes its own unit
+--     - NEW: "Keep MUTED as separate unit" checkbox — main panel, below Handle/Tail (default ON)
+--       • Muted items group only with other muted items; breaks at muted/non-muted boundary
+--     - REMOVED: "HANDLE (Pre/Post Roll)" section header — "Handle (s)" label already self-explanatory
+--     - Both settings persisted in GUI state, synced to RGWH ExtState on every change
+--     - Both options are no-ops when a Time Selection is active (TS-Window path bypasses unit detection)
+--
 --   0.2.5 [260328.0408] - ADDED: Tail Seconds — FX decay extension (requires RGWH Core ≥ 0.3.7)
 --     - NEW: "Tail (s)" input field under Handle settings
 --       • Extends item into silence after right handle to capture reverb/delay/echo decay
@@ -598,6 +612,10 @@ local gui = {
   -- Policies
   glue_single_items = false,  -- AUTO mode: false=single→render, true=single→glue
 
+  -- Unit grouping (Glue only)
+  glue_muted_separate      = true,   -- muted items always form their own unit
+  glue_split_at_crossfades = false,  -- crossfading items are not grouped into the same unit
+
   -- Debug
   debug_level = 2,           -- 0=silent, 1=normal, 2=verbose
   debug_no_clear = true,
@@ -627,7 +645,7 @@ local persist_keys = {
   'handle_length','tail_seconds',
   'epsilon_mode','epsilon_value',
   'cue_write_edge','cue_write_glue',
-  'glue_single_items',
+  'glue_single_items','glue_muted_separate','glue_split_at_crossfades',
   'debug_level','debug_no_clear','selection_policy',
   'enable_docking','bwfmetaedit_custom_path'
 }
@@ -725,7 +743,9 @@ local function sync_rgwh_extstate_from_gui()
   set_rgwh("WRITE_GLUE_CUES", gui.cue_write_glue and "1" or "0")
 
   -- Policies
-  set_rgwh("GLUE_SINGLE_ITEMS", gui.glue_single_items and "1" or "0")
+  set_rgwh("GLUE_SINGLE_ITEMS",        gui.glue_single_items        and "1" or "0")
+  set_rgwh("GLUE_MUTED_SEPARATE",      gui.glue_muted_separate      and "1" or "0")
+  set_rgwh("GLUE_SPLIT_AT_CROSSFADES", gui.glue_split_at_crossfades and "1" or "0")
 
   -- Debug
   set_rgwh("DEBUG_LEVEL", gui.debug_level)
@@ -760,6 +780,7 @@ local function format_setting_value(key, val)
     take_fx = true, track_fx = true,
     merge_to_item = true, merge_to_take = true, print_volumes = true,
     cue_write_edge = true, cue_write_glue = true, glue_single_items = true,
+    glue_muted_separate = true, glue_split_at_crossfades = true,
     debug_no_clear = true, enable_docking = true,
   }
 
@@ -2422,7 +2443,9 @@ local function draw_gui()
   ImGui.EndGroup(ctx)
 
   -- === HANDLE SETTINGS ===
-  draw_section_header("HANDLE (Pre/Post Roll)")
+  ImGui.Spacing(ctx)
+  ImGui.Separator(ctx)
+  ImGui.Spacing(ctx)
 
   ImGui.Text(ctx, "Handle (s)")
   ImGui.SameLine(ctx)
@@ -2438,6 +2461,19 @@ local function draw_gui()
   ImGui.SetNextItemWidth(ctx, 100)
   rv, new_val = ImGui.InputDouble(ctx, "##tail_seconds", gui.tail_seconds, 0.5, 1.0, "%.1f")
   if rv then gui.tail_seconds = math.max(0, new_val) end
+
+  -- Unit grouping checkboxes — below Handle/Tail row (Glue only, no Time Selection)
+  rv, new_val = ImGui.Checkbox(ctx, "Keep MUTED as separate unit", gui.glue_muted_separate)
+  if rv then gui.glue_muted_separate = new_val end
+  if ImGui.IsItemHovered(ctx) then
+    ImGui.SetTooltip(ctx, "Glue only, no Time Selection — muted items always form their own unit\nMuted items only group with other muted items; non-muted boundary breaks the chain\nHas no effect when a Time Selection is active (TS path is used instead)")
+  end
+  ImGui.SameLine(ctx, 0, 24)
+  rv, new_val = ImGui.Checkbox(ctx, "Split at crossfades", gui.glue_split_at_crossfades)
+  if rv then gui.glue_split_at_crossfades = new_val end
+  if ImGui.IsItemHovered(ctx) then
+    ImGui.SetTooltip(ctx, "Glue only, no Time Selection — crossfading items are not grouped into the same unit\nWhen ON: only touching items share a unit; crossfades each become their own unit\nHas no effect when a Time Selection is active (TS path is used instead)")
+  end
 
   -- === OPERATION BUTTONS & INFO ===
   ImGui.Spacing(ctx)
