@@ -1,5 +1,5 @@
 -- @description RGWH Core - Core Library of Render or Glue with Handles
--- @version 0.3.7
+-- @version 0.3.9
 -- @author hsuanice
 -- @link https://forum.cockos.com/showthread.php?t=305456
 -- @provides
@@ -58,6 +58,22 @@
 --   • For detailed operation modes guide, see RGWH GUI: Help > Manual (Operation Modes)
 --
 -- @changelog
+--   0.3.9 [260330.1415] - FIX: GLUE_MUTED_SEPARATE — muted items now group with other muted items
+--     - BUG: muted items were always forced to SINGLE units, even when adjacent to other muted items
+--     - FIX: detect_units_same_track() now breaks only at muted/non-muted boundaries, not at every muted item
+--       • Muted items can now form TOUCH/CROSSFADE/MIXED units with other muted items
+--       • The unit chain only breaks when mute state changes between adjacent items
+--
+--   0.3.8 [260330.1354] - ADDED: Glue unit grouping options — muted_separate and split_at_crossfades
+--     - NEW: GLUE_MUTED_SEPARATE (default: true) — muted items always form their own SINGLE unit;
+--       a muted item breaks the chain on both sides (items before/after are separate units).
+--     - NEW: GLUE_SPLIT_AT_CROSSFADES (default: false) — crossfading items are not grouped into the
+--       same unit; only touching items share a unit.
+--     - detect_units_same_track() now accepts optional opts table: {split_at_crossfades, muted_separate}
+--     - Both flags are read from ExtState and exposed via GUI (RGWH ReaImGui >= 0.2.6).
+--     - Both flags affect Glue and Auto paths only; Render path is unaffected.
+--     - When a Time Selection is active, the TS-Window path is used instead and opts have no effect.
+--
 --   0.3.7 [260328.0408] - ADDED: Tail Seconds — FX decay extension independent of handles
 --     - NEW: TAIL_SECONDS setting (default 0.0): extends the processed item beyond the right handle,
 --       into silence, to capture reverb/delay/echo decay naturally.
@@ -1000,6 +1016,10 @@ local DEFAULTS = {
   -- ✅ 新增：Glue 成品 take 內是否加 take markers（非 SINGLE 才加）
   WRITE_GLUE_CUES = 1,
 
+  -- Unit grouping behaviour (Glue only)
+  GLUE_MUTED_SEPARATE      = true,   -- muted items always form their own unit
+  GLUE_SPLIT_AT_CROSSFADES = false,  -- crossfading items are NOT grouped into the same unit
+
 }
 
 ------------------------------------------------------------
@@ -1058,6 +1078,10 @@ function M.read_settings()
     WRITE_EDGE_CUES    = (get_ext_bool("WRITE_EDGE_CUES",   DEFAULTS.WRITE_EDGE_CUES)==1),
     -- 🔧 修正：用 DEFAULTS，不是 dflt
     WRITE_GLUE_CUES    = (get_ext_bool("WRITE_GLUE_CUES", DEFAULTS.WRITE_GLUE_CUES)==1),
+
+    -- Unit grouping behaviour (Glue only)
+    GLUE_MUTED_SEPARATE      = (get_ext_bool("GLUE_MUTED_SEPARATE",      DEFAULTS.GLUE_MUTED_SEPARATE)==1),
+    GLUE_SPLIT_AT_CROSSFADES = (get_ext_bool("GLUE_SPLIT_AT_CROSSFADES", DEFAULTS.GLUE_SPLIT_AT_CROSSFADES)==1),
 
     DEBUG_NO_CLEAR = (get_ext_bool("DEBUG_NO_CLEAR", false) == 1),
   }
@@ -1574,7 +1598,11 @@ local function sort_items_by_pos(items)
   end)
 end
 
-local function detect_units_same_track(items, eps_s)
+local function detect_units_same_track(items, eps_s, opts)
+  opts = opts or {}
+  local split_xf  = opts.split_at_crossfades or false
+  local muted_sep = opts.muted_separate       or false
+
   local units = {}
   if #items==0 then return units end
   sort_items_by_pos(items)
@@ -1583,6 +1611,10 @@ local function detect_units_same_track(items, eps_s)
   while i<=#items do
     local a = items[i]
     local aL,aR = item_span(a)
+    -- muted_separate: record mute state of the unit's first item;
+    -- only items with the same mute state may join this unit
+    local a_muted = muted_sep and r.GetMediaItemInfo_Value(a,"B_MUTE")==1
+
     if i==#items then
       units[#units+1] = {kind="SINGLE", members={{it=a,L=aL,R=aR}}, start=aL, finish=aR}
       break
@@ -1596,7 +1628,10 @@ local function detect_units_same_track(items, eps_s)
     while j<=#items do
       local itj = items[j]
       local L,R = item_span(itj)
-      if L - cur_end > eps_s then break end
+      if L - cur_end > eps_s then break end              -- gap: stop
+      if split_xf and L < cur_end - eps_s then break end -- split_at_crossfades: crossfade = new unit
+      -- muted_separate: break when mute state changes (muted/non-muted boundary)
+      if muted_sep and (r.GetMediaItemInfo_Value(itj,"B_MUTE")==1) ~= a_muted then break end
       if L >= cur_end - eps_s and L <= cur_end + eps_s then anyTouch=true end
       if L <  cur_end - eps_s then anyOverlap=true end
       members[#members+1] = {it=itj,L=L,R=R}
@@ -2875,10 +2910,10 @@ function M.glue_selection(force_units)
 
   -- Note: When GLUE_APPLY_MODE=="auto", channel mode is now determined per-unit in glue_unit()
 
-  dbg(DBG,1,"[RUN] Glue start  handles=%.3fs  epsilon=%.5fs  GLUE_SINGLE_ITEMS=%s  GLUE_TAKE_FX=%s  GLUE_TRACK_FX=%s  GLUE_APPLY_MODE=%s  WRITE_EDGE_CUES=%s  WRITE_GLUE_CUES=%s  GLUE_CUE_POLICY=%s",
+  dbg(DBG,1,"[RUN] Glue start  handles=%.3fs  epsilon=%.5fs  GLUE_SINGLE_ITEMS=%s  GLUE_TAKE_FX=%s  GLUE_TRACK_FX=%s  GLUE_APPLY_MODE=%s  WRITE_EDGE_CUES=%s  WRITE_GLUE_CUES=%s  GLUE_CUE_POLICY=%s  MUTED_SEPARATE=%s  SPLIT_AT_CROSSFADES=%s",
     cfg.HANDLE_SECONDS or 0, eps_s, tostring(cfg.GLUE_SINGLE_ITEMS), tostring(cfg.GLUE_TAKE_FX),
     tostring(cfg.GLUE_TRACK_FX), cfg.GLUE_APPLY_MODE, tostring(cfg.WRITE_EDGE_CUES), tostring(cfg.WRITE_GLUE_CUES),
-    "adjacent-different-source")
+    "adjacent-different-source", tostring(cfg.GLUE_MUTED_SEPARATE), tostring(cfg.GLUE_SPLIT_AT_CROSSFADES))
 
   -- Auto-detect scope: TS-Window vs Units glue
   -- If force_units=true, always use units glue (for core() API scope="units")
@@ -2908,9 +2943,13 @@ function M.glue_selection(force_units)
     -- (TS is cleared after processing each GAP unit, so we must preserve it for all tracks)
     local capturedTsL, capturedTsR, capturedHasTS = get_current_ts()
 
+    local unit_opts = {
+      split_at_crossfades = cfg.GLUE_SPLIT_AT_CROSSFADES,
+      muted_separate      = cfg.GLUE_MUTED_SEPARATE,
+    }
     for _,tr in ipairs(tr_list) do
       local list  = by_tr[tr]
-      local units = detect_units_same_track(list, eps_s)
+      local units = detect_units_same_track(list, eps_s, unit_opts)
       dbg(DBG,1,"[RUN] Track #%d: units=%d", r.GetMediaTrackInfo_Value(tr,"IP_TRACKNUMBER") or -1, #units)
 
       -- When multiple units with gaps AND TS exists, treat them as one GAP unit
@@ -2998,9 +3037,13 @@ function M.auto_selection(merge_volumes, print_volumes, merge_to_item)
   local multi_units = {}   -- Multi-item units (to glue)
   local has_single = false -- Flag to check if there are single-item units
 
+  local unit_opts_auto = {
+    split_at_crossfades = cfg.GLUE_SPLIT_AT_CROSSFADES,
+    muted_separate      = cfg.GLUE_MUTED_SEPARATE,
+  }
   for _,tr in ipairs(tr_list) do
     local list  = by_tr[tr]
-    local units = detect_units_same_track(list, eps_s)
+    local units = detect_units_same_track(list, eps_s, unit_opts_auto)
     dbg(DBG,1,"[RUN] Track #%d: units=%d", r.GetMediaTrackInfo_Value(tr,"IP_TRACKNUMBER") or -1, #units)
 
     for ui,u in ipairs(units) do
