@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<index version="1" name="hsuanice Scripts" commit="0c6a3d9329d5cdf593ec8b7d38736eb90248c54a">
+<index version="1" name="hsuanice Scripts" commit="ada74be540134277575818afb3ceeda3b62fc070">
   <category name="Beta Testing">
     <reapack name="hsuanice_AudioSweet ReaImGui.lua" type="script" desc="AudioSweet ReaImGui - AudioSuite Workflow (Pro Tools–Style)">
       <metadata>
@@ -9200,6 +9200,7 @@ v250921_1512
 {\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Works independently - can be assigned to keyboard shortcuts\sa180\par}
 }
 ]]></description>
+        <link rel="website">https://forum.cockos.com/showthread.php?p=2910884#post2910884</link>
       </metadata>
       <version name="0.1.0" author="hsuanice" time="2025-12-21T08:47:45Z">
         <source main="main">https://github.com/hsuanice/ReaScripts/raw/34b1ed74e50fee74bafd3ab6ee548de9db40c573/Tools/hsuanice_AudioSweet%20Run.lua</source>
@@ -9218,6 +9219,78 @@ v250921_1512
       </version>
       <version name="0.2.1" author="hsuanice" time="2026-02-09T13:45:58Z">
         <source main="main">https://github.com/hsuanice/ReaScripts/raw/a90b5ee8fd9d3426f1c7ee48d70f5a017b8e31dd/Tools/hsuanice_AudioSweet%20Run.lua</source>
+      </version>
+      <version name="0.2.2" author="hsuanice" time="2026-03-30T10:25:41Z">
+        <changelog><![CDATA[0.2.2 [260330.1809]
+  - ADDED: Auto track FX chain online/offline restore on run
+    • Before executing AudioSweet Core: brings FX chain track online if offline (I_FXEN or per-FX offline bits)
+    • After execution: restores original offline state
+    • Normal mode: resolves FX track from chain window or focused FX
+    • Preview mode: resolves from focused FX (focused mode) or preview target track (chain mode)
+
+0.2.1 (2026-02-09) [internal: v260209.2130]
+  - FIXED: Cross-platform path resolution for Windows/Linux compatibility
+    • Replaced debug.getinfo() relative path with reaper.GetResourcePath() absolute path
+    • Fixes "attempt to concatenate a nil value (local 'SCRIPT_DIR')" on Windows
+  - FIXED: Debug log path on Windows (os.getenv("HOME") returns nil)
+    • Added os.getenv("USERPROFILE") fallback for Windows
+
+0.2.0 (2025-12-23) [internal: v251223.2256]
+  - CHANGED: Version bump to 0.2.0 (public beta)
+
+0.1.2 (2025-12-23) [internal: v251223.1924]
+  - CHANGED: Added Copy+Apply action name support for GUI/Core integration
+
+0.1.1 (2025-12-22) [internal: v251222.1706]
+  - CHANGED: All executions now produce single undo operation
+    • External undo control enabled before calling AudioSweet Core
+    • AudioSweet Core v0.1.7: Skips internal undo when EXTERNAL_UNDO_CONTROL="1"
+    • Cleaner undo stack (one "AudioSweet Run (Normal/Preview)" entry)
+    • Matches GUI v0.1.24 behavior for consistent user experience
+
+0.1.0 (2025-12-21) [internal: v251221.1803]
+  - ADDED: Sync GUI settings to AudioSweet Core + RGWH Core before execution
+    • Apply/Copy action, copy scope/pos now set in hsuanice_AS ExtState
+    • File naming settings now set in hsuanice_AS ExtState
+    • Channel mode now set in hsuanice_AS (AS_APPLY_FX_MODE)
+    • Handle seconds now set in RGWH project ExtState
+  - ADDED: Optional debug file log on Desktop (Console + file)
+  - COMPLETE: Unified AudioSweet execution script with automatic mode detection
+  - Normal Mode: Intelligent window detection system
+    • Chain FX window focused → Chain mode (full FX chain processing)
+    • Single FX floating window → Single FX mode (isolated FX processing)
+    • No FX window → Chain mode on default preview target track
+    • Window state detection via GetFocusedFX + TrackFX_GetChainVisible + TrackFX_GetOpen
+    • Window state always takes priority over GUI settings
+    • Sets correct ExtState for AudioSweet Core: "hsuanice_AS/AS_MODE" = "focused"|"chain"
+    • Sets OVERRIDE ExtState for chain mode without focused FX
+  - Preview Mode: Complete workflow for preview execution
+    • Detects placeholder items (note format: "PREVIEWING @ Track <n> - <FXName>")
+    • Validates item selection on preview target track
+    • Stops preview: deletes placeholder, unsolo all
+    • Executes RGWH Core on selected items
+    • Moves rendered results back to original source track
+    • Stays in normal state (no preview restoration)
+    • Respects time selection for RGWH scope determination
+  - Integration:
+    • Reads all settings from AudioSweet GUI ExtState ("hsuanice_AS_GUI" namespace)
+    • Supports GUID-based track lookup for duplicate track names
+    • Compatible with AudioSweet Core OVERRIDE mechanism
+  - Debug Mode: Optional detailed logging (set DEBUG = true)
+  - Single script for unified workflow - no manual mode switching needed
+
+[internal: v251221.1556]
+  - FIXED: Correct ExtState namespace and key for AudioSweet Core integration
+    • Changed from "hsuanice_AS_GUI/mode" to "hsuanice_AS/AS_MODE"
+    • Mode values changed from numeric (0/1) to string ("focused"/"chain")
+    • Resolves issue where chain mode was executing as focused mode
+  - DEBUG: Added MessageBox debug output (later removed - caused execution interference)
+
+[internal: v251221.1158]
+  - Initial implementation of unified AudioSweet Run script
+  - Placeholder detection for Normal vs Preview mode split
+  - Basic window detection logic (later revised for correct priority)]]></changelog>
+        <source main="main">https://github.com/hsuanice/ReaScripts/raw/ada74be540134277575818afb3ceeda3b62fc070/Tools/hsuanice_AudioSweet%20Run.lua</source>
       </version>
     </reapack>
     <reapack name="hsuanice_AudioSweet Solo Toggle.lua" type="script" desc="AudioSweet Solo Toggle">
