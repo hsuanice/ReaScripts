@@ -1,6 +1,6 @@
 --[[
 @description Auto Color Items by Take Name — Background Daemon
-@version 260324.1912
+@version 260331.1300
 @author hsuanice
 @about
   Headless background daemon for hsuanice_Auto Color Items by Take Name.
@@ -18,9 +18,35 @@
     3. The GUI can be closed; the daemon runs independently.
 ]]
 
-local _, _, sectionID, cmdID = reaper.get_action_context()
+local _, SCRIPT_PATH, sectionID, cmdID = reaper.get_action_context()
 
 local PREF_NS = "hsuanice_AutoColorItems"
+
+-- ─── file-based state bootstrap ───────────────────────────────────────────────
+-- Mirrors the GUI script's load_state_from_file() so the daemon can populate
+-- ExtState from the .dat file even when reaper-extstate.ini was cleared on
+-- REAPER restart (before the GUI script has ever been opened this session).
+do
+  local script_dir = SCRIPT_PATH:match("^(.*[/\\])") or "./"
+  local state_file = script_dir .. "../Tools/hsuanice_AutoColorItems_state.dat"
+  local f = io.open(state_file, "r")
+  if f then
+    local function dec(s) return (s:gsub("\\\\", "\1"):gsub("\\n", "\n"):gsub("\1", "\\")) end
+    for line in f:lines() do
+      if not line:match("^%s*#") and line ~= "" then
+        local key, val = line:match("^([^=]+)=(.*)")
+        if key and val then
+          -- Only populate keys that are currently empty (don't overwrite live
+          -- changes the GUI script may have already written this session).
+          if reaper.GetExtState(PREF_NS, key) == "" then
+            reaper.SetExtState(PREF_NS, key, dec(val), true)
+          end
+        end
+      end
+    end
+    f:close()
+  end
+end
 
 -- ─── palette state (mirrors GUI script structures) ────────────────────────────
 local PCONF = {
