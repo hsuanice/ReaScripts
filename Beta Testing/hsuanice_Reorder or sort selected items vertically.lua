@@ -1,6 +1,6 @@
 --[[
 @description ReaImGui - Vertical Reorder and Sort (items)
-@version 260311.1530
+@version 260402.1433
 @author hsuanice
 @about
   Provides three vertical re-arrangement modes for selected items (stacked UI):
@@ -29,6 +29,14 @@
 
 
 @changelog
+  v260402.1433
+  - Fix: Copy-to-Sort Mode 2 (Scene & Take) now uses global bin-packing per channel group
+    instead of per-slot track creation.
+    Items from different scene+take slots that don't overlap in time now share the same
+    track, consolidating the output from (slots × channels × sub-tracks) tracks down to
+    (channels × max-sub-tracks-per-channel) tracks.
+    e.g. 4 channels × 3 max overlapping = 12 tracks instead of 28.
+
   v260311.1530
   - Fix: Copy-to-Sort Mode 2 (Scene & Take) overflow tracks now appear after ALL primary
     tracks in a slot, not immediately after each channel's primary track.
@@ -319,7 +327,7 @@
 ---------------------------------------
 -- Debug Mode
 ---------------------------------------
-local DEBUG_MODE = true  -- Set to true to enable detailed console logging
+local DEBUG_MODE = true -- Set to true to enable detailed console logging
 local OUTPUT_TO_FILE = true -- Write debug output to file instead of console
 local OUTPUT_FILE = reaper.GetResourcePath() .. "/Scripts/hsuanice Scripts/Tools/Reorder_Debug_Output.txt"
 
@@ -1227,84 +1235,74 @@ local function run_copy_to_new_tracks(name_mode, order_mode, asc, append_seconda
       debug(string.format("  Slot %d: %s", si, table.concat(keys, ", ")))
     end
 
-    -- Two-pass track creation: slot × group
-    -- Pass 1: compute sub_slots (bin-packing) for every (slot, group) without creating tracks.
-    -- Pass 2: create tracks layer-by-layer so all level-1 (primary) tracks for all groups in a
-    --         slot come first, then all level-2 (overflow) tracks, etc.
-    --         Layout per slot: [G1-primary, G2-primary, ..., G1-overflow, G2-overflow, ...]
-    local slot_group_subslots = {}   -- [si][gi] = { sub_slots, label }
-    for si, slot in ipairs(global_slots) do
-      slot_group_subslots[si] = {}
-      for gi, g in ipairs(order) do
-        local label = g.label
-        -- Collect this group's items that belong to this slot
-        local slot_items = {}
-        for _, it in ipairs(g.items) do
-          local sk = it_to_stkey[it] or ""
-          if slot.st_keys[sk] then
-            slot_items[#slot_items+1] = it
+    -- Global bin-packing per group (consolidates across all scene+take slots).
+    -- Items from different slots that don't overlap in time can share the same track,
+    -- reducing the total track count compared to a per-slot approach.
+    -- Sort order: (st_key start time, bfn, src_offs) keeps items from the same
+    -- recording session adjacent, which favours stable track assignment.
+    local group_subslots = {}   -- [gi] = { sub_slots, label }
+    for gi, g in ipairs(order) do
+      local label = g.label
+      -- Collect all items for this group across all scene+take slots
+      local all_items = {}
+      for _, it in ipairs(g.items) do
+        all_items[#all_items+1] = it
+      end
+      -- Sort by (st_key start time, bfn, src_offs)
+      table.sort(all_items, function(a, b)
+        local ska = it_to_stkey[a] or ""
+        local skb = it_to_stkey[b] or ""
+        if ska ~= skb then
+          local sa_t = st_key_span[ska] and st_key_span[ska].s or 0
+          local sb_t = st_key_span[skb] and st_key_span[skb].s or 0
+          if sa_t ~= sb_t then return sa_t < sb_t end
+          return ska < skb
+        end
+        local bfna = get_item_base_filename(a)
+        local bfnb = get_item_base_filename(b)
+        if bfna ~= bfnb then return bfna < bfnb end
+        return get_src_offs(a) < get_src_offs(b)
+      end)
+      -- Global bin-packing: items that don't overlap in time share the same track,
+      -- regardless of which scene+take slot they belong to.
+      local sub_slots = {}
+      for _, it in ipairs(all_items) do
+        local s = item_start(it) or 0
+        local e = s + (item_len(it) or 0)
+        local placed = false
+        for _, ss in ipairs(sub_slots) do
+          if can_place_on(ss.spans, s, e) then
+            ss.items[#ss.items+1] = it
+            ss.spans[#ss.spans+1] = { s = s, e = e }
+            placed = true; break
           end
         end
-        if #slot_items > 0 then
-          -- Sort slot_items by (bfn, src_offs) so items from the same source file
-          -- and same editing range are processed consecutively, keeping them on the
-          -- same sub-track whenever their timeline spans don't overlap.
-          table.sort(slot_items, function(a, b)
-            local bfn_a = get_item_base_filename(a)
-            local bfn_b = get_item_base_filename(b)
-            if bfn_a ~= bfn_b then return bfn_a < bfn_b end
-            return get_src_offs(a) < get_src_offs(b)
-          end)
-          -- Intra-slot bin-packing: when all scene+takes are the same (1 global slot),
-          -- items within the same group may still overlap each other.
-          -- Items that share a timeline position (same simultaneous recording) are
-          -- automatically routed to separate sub-tracks via this overlap check.
-          local sub_slots = {}
-          for _, it in ipairs(slot_items) do
-            local s = item_start(it) or 0
-            local e = s + (item_len(it) or 0)
-            local placed = false
-            for _, ss in ipairs(sub_slots) do
-              if can_place_on(ss.spans, s, e) then
-                ss.items[#ss.items+1] = it
-                ss.spans[#ss.spans+1] = { s = s, e = e }
-                placed = true; break
-              end
-            end
-            if not placed then
-              sub_slots[#sub_slots+1] = { items = { it }, spans = { { s = s, e = e } } }
-            end
-          end
-          slot_group_subslots[si][gi] = { sub_slots = sub_slots, label = label }
-          debug(string.format("    Slot %d | Group '%s': %d item(s) → %d sub-track(s)",
-                              si, label, #slot_items, #sub_slots))
+        if not placed then
+          sub_slots[#sub_slots+1] = { items = { it }, spans = { { s = s, e = e } } }
         end
       end
+      group_subslots[gi] = { sub_slots = sub_slots, label = label }
+      debug(string.format("  Group '%s': %d item(s) → %d track(s)",
+                          label, #all_items, #sub_slots))
     end
 
-    -- Pass 2: create tracks layer-by-layer within each slot
-    for si = 1, #global_slots do
-      -- Find the maximum number of sub-slot levels across all groups in this slot
-      local max_levels = 0
-      for gi = 1, #order do
-        local entry = slot_group_subslots[si][gi]
-        if entry and #entry.sub_slots > max_levels then
-          max_levels = #entry.sub_slots
-        end
+    -- Create tracks level-by-level: all groups' level-1 first, then level-2, etc.
+    -- Layout: [G1-primary, G2-primary, ..., G1-overflow, G2-overflow, ...]
+    local max_levels = 0
+    for gi = 1, #order do
+      if #group_subslots[gi].sub_slots > max_levels then
+        max_levels = #group_subslots[gi].sub_slots
       end
-      -- Emit level 1 tracks for all groups, then level 2, etc.
-      for level = 1, max_levels do
-        for gi = 1, #order do
-          local entry = slot_group_subslots[si][gi]
-          if entry then
-            local ss = entry.sub_slots[level]
-            if ss then
-              local tr = make_labeled_track(entry.label)
-              for _, it in ipairs(ss.items) do
-                copy_item_to_track(it, tr)
-                copied = copied + 1
-              end
-            end
+    end
+    for level = 1, max_levels do
+      for gi = 1, #order do
+        local entry = group_subslots[gi]
+        local ss = entry.sub_slots[level]
+        if ss then
+          local tr = make_labeled_track(entry.label)
+          for _, it in ipairs(ss.items) do
+            copy_item_to_track(it, tr)
+            copied = copied + 1
           end
         end
       end
