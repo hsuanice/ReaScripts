@@ -1,6 +1,6 @@
 --[[
 @description ReaImGui - Vertical Reorder and Sort (items)
-@version 260402.1433
+@version 260402.1924
 @author hsuanice
 @about
   Provides three vertical re-arrangement modes for selected items (stacked UI):
@@ -29,7 +29,10 @@
 
 
 @changelog
-  v260402.1433
+  v260402.1924
+  - New: Copy-to-Sort Mode 2 (Scene & Take) automatically assigns a REAPER track group
+    to each level's tracks (primary level → Group A, overflow level → Group B, etc.).
+    Media/Razor Edited Lead+Follow are grouped. Reuses existing group numbering to avoid collisions.
   - Fix: Copy-to-Sort Mode 2 (Scene & Take) now uses global bin-packing per channel group
     instead of per-slot track creation.
     Items from different scene+take slots that don't overlap in time now share the same
@@ -327,8 +330,8 @@
 ---------------------------------------
 -- Debug Mode
 ---------------------------------------
-local DEBUG_MODE = true -- Set to true to enable detailed console logging
-local OUTPUT_TO_FILE = true -- Write debug output to file instead of console
+local DEBUG_MODE = false -- Set to true to enable detailed console logging
+local OUTPUT_TO_FILE = false -- Write debug output to file instead of console
 local OUTPUT_FILE = reaper.GetResourcePath() .. "/Scripts/hsuanice Scripts/Tools/Reorder_Debug_Output.txt"
 
 -- Clear output file at script start
@@ -1294,16 +1297,52 @@ local function run_copy_to_new_tracks(name_mode, order_mode, asc, append_seconda
         max_levels = #group_subslots[gi].sub_slots
       end
     end
+
+    -- Collect used group numbers from pre-existing tracks so we don't collide
+    local used_group_bits = 0
+    for ti = 0, base_track_count - 1 do
+      local tr = reaper.GetTrack(0, ti)
+      if tr then
+        for _, gname in ipairs({ "MEDIA_EDIT_LEAD", "MEDIA_EDIT_FOLLOW" }) do
+          used_group_bits = used_group_bits | reaper.GetSetTrackGroupMembership(tr, gname, 0, 0)
+        end
+      end
+    end
+
+    local level_tracks = {}   -- [level] = list of tracks created at that level
     for level = 1, max_levels do
+      level_tracks[level] = {}
       for gi = 1, #order do
         local entry = group_subslots[gi]
         local ss = entry.sub_slots[level]
         if ss then
           local tr = make_labeled_track(entry.label)
+          level_tracks[level][#level_tracks[level]+1] = tr
           for _, it in ipairs(ss.items) do
             copy_item_to_track(it, tr)
             copied = copied + 1
           end
+        end
+      end
+    end
+
+    -- Assign each level's tracks to their own REAPER track group
+    local next_group = 1
+    for level = 1, max_levels do
+      if #level_tracks[level] > 1 then
+        while next_group <= 64 and (used_group_bits & (1 << (next_group - 1))) ~= 0 do
+          next_group = next_group + 1
+        end
+        if next_group <= 64 then
+          local bit = 1 << (next_group - 1)
+          for _, tr in ipairs(level_tracks[level]) do
+            reaper.GetSetTrackGroupMembership(tr, "MEDIA_EDIT_LEAD",   bit, bit)
+            reaper.GetSetTrackGroupMembership(tr, "MEDIA_EDIT_FOLLOW", bit, bit)
+          end
+          used_group_bits = used_group_bits | bit
+          debug(string.format("  Assigned track group #%d to %d tracks at level %d",
+                              next_group, #level_tracks[level], level))
+          next_group = next_group + 1
         end
       end
     end
