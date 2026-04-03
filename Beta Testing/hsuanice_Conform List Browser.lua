@@ -1,6 +1,6 @@
 --[[
 @description Conform List Browser
-@version 260402.1405
+@version 260403.1448
 @author hsuanice
 @about
   A REAPER script for browsing and editing EDL (Edit Decision List) data
@@ -46,6 +46,17 @@
   Required for AAF: aaftool in PATH (https://github.com/agfline/LibAAF)
 
 @changelog
+  v260403.1448
+  - Fix: Timeline panel scroll wheel controls reworked for macOS compatibility
+    • Scroll (no modifier)  → vertical scroll through track rows (unchanged)
+    • Shift+scroll          → horizontal pan; macOS converts Shift+scroll to the
+                              horizontal scroll axis, so this now reads scroll_h from
+                              ImGui_GetMouseWheel's second return value — no OS interception
+    • Option/Alt+scroll     → horizontal zoom anchored to cursor position
+    • When no tracks overflow (vscroll_visible = false), plain scroll falls back to zoom
+    • Hint label in label column updated to "opt+scroll:zoom"
+    • Previously Ctrl/Cmd+scroll was used for zoom; replaced with Option/Alt per request
+
   v260402.1405
   - Feature: Click EDL row → auto-filter Audio Files panel to matched file(s)
     • Clicking any row with a Found/Fallback/Multiple match narrows the Audio Files
@@ -1049,6 +1060,7 @@ local CLB = {
   show_timeline = false,
   tl_zoom = 50.0,   -- pixels per second
   tl_scroll = 0.0,  -- seconds panned from tc_min
+  tl_vscroll = 0.0, -- pixels scrolled vertically in track area
 
   -- Loading state (for async loading with progress)
   -- phase="reading_metadata"  : async audio metadata scanning
@@ -6959,12 +6971,14 @@ local function draw_timeline_panel()
   for i, t in ipairs(track_order) do track_index[t] = i end
 
   -- 2. Geometry
-  local LABEL_W = scale(55)
-  local RULER_H = scale(16)
-  local TRACK_H = scale(18)
-  local PAD_V   = scale(2)
-  local panel_h = scale(TL_PANEL_H)
-  local avail_w = reaper.ImGui_GetContentRegionAvail(ctx)
+  local LABEL_W   = scale(55)
+  local RULER_H   = scale(16)
+  local TRACK_H   = scale(18)
+  local PAD_V     = scale(2)
+  local VSCROLL_W = scale(12)   -- width of vertical scrollbar column
+  local HSCROLL_H = scale(16)   -- height of horizontal scrollbar row
+  local panel_h   = scale(TL_PANEL_H)
+  local avail_w   = reaper.ImGui_GetContentRegionAvail(ctx)
 
   -- 3. BeginChild: fixed height, no scrollbars
   local wf = reaper.ImGui_WindowFlags_NoScrollbar()
@@ -6974,17 +6988,26 @@ local function draw_timeline_panel()
     return
   end
 
-  -- 4. InvisibleButton = interaction target for the canvas (reserve bottom 16px for scrollbar)
+  -- 4. InvisibleButton = interaction target (full canvas minus scrollbar rows)
   local cw, ch = reaper.ImGui_GetContentRegionAvail(ctx)
-  reaper.ImGui_InvisibleButton(ctx, "##tl_cvs", cw, ch - scale(16))
+  reaper.ImGui_InvisibleButton(ctx, "##tl_cvs", cw, ch - HSCROLL_H)
   local is_hovered = reaper.ImGui_IsItemHovered(ctx)
   local is_active  = reaper.ImGui_IsItemActive(ctx)
 
-  -- 5. Canvas bounds from InvisibleButton
+  -- 5. Canvas bounds
   local cx0, cy0 = reaper.ImGui_GetItemRectMin(ctx)
   local cx1, cy1 = reaper.ImGui_GetItemRectMax(ctx)
-  local ea_x0 = cx0 + LABEL_W           -- event area left edge
-  local ea_w  = math.max(1, cx1 - ea_x0)
+
+  -- Vertical scroll: compute before ea_w so VSCROLL_W can be omitted when not needed
+  local total_track_h = #track_order * TRACK_H
+  local track_area_h  = math.max(1, cy1 - cy0 - RULER_H)
+  local max_vscroll   = math.max(0, total_track_h - track_area_h)
+  CLB.tl_vscroll = math.max(0, math.min(max_vscroll, CLB.tl_vscroll or 0))
+  local vscroll_visible = max_vscroll > 0
+  local eff_vscroll_w   = vscroll_visible and VSCROLL_W or 0
+
+  local ea_x0 = cx0 + LABEL_W
+  local ea_w  = math.max(1, cx1 - ea_x0 - eff_vscroll_w)
 
   -- 6. DrawList
   local dl = reaper.ImGui_GetWindowDrawList(ctx)
@@ -6998,12 +7021,22 @@ local function draw_timeline_panel()
   local max_scroll = math.max(0, span - vis_sec)
   CLB.tl_scroll = math.max(0, math.min(max_scroll, CLB.tl_scroll))
 
-  -- Center timeline on row selected from the list
+  -- Center timeline on row selected from the list (horizontal + vertical)
   if CLB.tl_center_on_guid then
     for _, rd in ipairs(row_data) do
       if rd.row.__guid == CLB.tl_center_on_guid then
+        -- Horizontal: center block in view
         local center_t = (rd.t_in + rd.t_out) * 0.5 - tc_min
         CLB.tl_scroll = math.max(0, math.min(max_scroll, center_t - vis_sec * 0.5))
+        -- Vertical: bring the track row into view
+        local ti = track_index[rd.row.track or ""] or 1
+        local block_top_rel = (ti - 1) * TRACK_H   -- relative to track area top
+        local block_bot_rel = ti * TRACK_H
+        if block_top_rel < CLB.tl_vscroll then
+          CLB.tl_vscroll = math.max(0, block_top_rel - TRACK_H)
+        elseif block_bot_rel > CLB.tl_vscroll + track_area_h then
+          CLB.tl_vscroll = math.min(max_vscroll, block_bot_rel - track_area_h + TRACK_H)
+        end
         break
       end
     end
@@ -7016,13 +7049,13 @@ local function draw_timeline_panel()
   end
 
   -- 8. Backgrounds
-  reaper.ImGui_DrawList_AddRectFilled(dl, cx0, cy0, cx1, cy1, 0x1A1A1AFF)
+  reaper.ImGui_DrawList_AddRectFilled(dl, cx0, cy0, cx1 - eff_vscroll_w, cy1, 0x1A1A1AFF)
   reaper.ImGui_DrawList_AddRectFilled(dl, cx0, cy0, cx0 + LABEL_W, cy1, 0x252525FF)
 
   -- 9. TC ruler
   local ry0 = cy0
   local ry1 = cy0 + RULER_H
-  reaper.ImGui_DrawList_AddRectFilled(dl, ea_x0, ry0, cx1, ry1, 0x2A2A2AFF)
+  reaper.ImGui_DrawList_AddRectFilled(dl, ea_x0, ry0, cx1 - eff_vscroll_w, ry1, 0x2A2A2AFF)
 
   -- Pick tick interval: smallest where ticks are >= 80px apart (TC labels are wider)
   local fps_val = CLB.fps or 24
@@ -7050,18 +7083,25 @@ local function draw_timeline_panel()
     end
     t = t + tick_iv
   end
-  reaper.ImGui_DrawList_AddLine(dl, cx0, ry1, cx1, ry1, 0x444444FF, 1.0)
+  reaper.ImGui_DrawList_AddLine(dl, cx0, ry1, cx1 - eff_vscroll_w, ry1, 0x444444FF, 1.0)
 
   -- 10. Track row backgrounds + labels
+  local track_right = cx1 - eff_vscroll_w   -- right edge of track/label area
   for ti, tname in ipairs(track_order) do
-    local ey0 = ry1 + (ti - 1) * TRACK_H
-    local ey1 = ey0 + TRACK_H
-    if ey1 > cy1 then break end
+    local ey0_raw = ry1 + (ti - 1) * TRACK_H - CLB.tl_vscroll
+    local ey1_raw = ey0_raw + TRACK_H
+    if ey1_raw <= ry1 then goto next_track_bg end  -- above ruler
+    if ey0_raw >= cy1  then break end               -- below canvas
+    local ey0 = math.max(ey0_raw, ry1)
+    local ey1 = math.min(ey1_raw, cy1)
     local bg = (ti % 2 == 0) and 0x222222FF or 0x1E1E1EFF
-    reaper.ImGui_DrawList_AddRectFilled(dl, ea_x0, ey0, cx1, ey1, bg)
-    reaper.ImGui_DrawList_AddText(dl, cx0 + scale(3), ey0 + scale(3), 0xCCCCCCFF,
-      tname ~= "" and tname or "?")
-    reaper.ImGui_DrawList_AddLine(dl, cx0, ey1, cx1, ey1, 0x333333FF, 1.0)
+    reaper.ImGui_DrawList_AddRectFilled(dl, cx0, ey0, track_right, ey1, bg)
+    if ey0_raw >= ry1 then  -- only draw label when row is fully visible at top
+      reaper.ImGui_DrawList_AddText(dl, cx0 + scale(3), ey0 + scale(3), 0xCCCCCCFF,
+        tname ~= "" and tname or "?")
+    end
+    reaper.ImGui_DrawList_AddLine(dl, cx0, ey1, track_right, ey1, 0x333333FF, 1.0)
+    ::next_track_bg::
   end
 
   -- 11. Track color helper (A=blue, V=amber, other=green; shade varies per index)
@@ -7093,9 +7133,10 @@ local function draw_timeline_panel()
   for _, rd in ipairs(row_data) do
     local row = rd.row
     local ti  = track_index[row.track or ""] or 1
-    local ey0 = ry1 + (ti - 1) * TRACK_H + PAD_V
-    local ey1 = ry1 +  ti      * TRACK_H - PAD_V
-    if ey1 > cy1 then goto next_block end      -- below panel bottom
+    local ey0 = ry1 + (ti - 1) * TRACK_H + PAD_V - CLB.tl_vscroll
+    local ey1 = ry1 +  ti      * TRACK_H - PAD_V - CLB.tl_vscroll
+    if ey1 <= ry1 then goto next_block end     -- above ruler
+    if ey0 >= cy1  then goto next_block end    -- below panel bottom
 
     local px0 = s2px(rd.t_in)
     local px1 = s2px(rd.t_out)
@@ -7163,34 +7204,109 @@ local function draw_timeline_panel()
     end
   end
 
-  -- 15. Scroll wheel → zoom (anchored to cursor position)
+  -- 15. Scroll wheel:
+  --   • Scroll (no mod)    → vertical scroll (track rows)
+  --   • Shift+scroll       → horizontal pan (macOS converts to horizontal axis)
+  --   • Option/Alt+scroll  → horizontal zoom (anchored to cursor)
   if is_hovered then
-    local ok_w, scroll_y = pcall(reaper.ImGui_GetMouseWheel, ctx)
-    if ok_w and scroll_y and scroll_y ~= 0 then
-      local mouse_t  = (mx - ea_x0) / CLB.tl_zoom + tc_min + CLB.tl_scroll
-      local factor   = scroll_y > 0 and 1.15 or (1 / 1.15)
-      local new_zoom = math.max(min_zoom, math.min(max_zoom, CLB.tl_zoom * factor))
-      CLB.tl_scroll  = mouse_t - tc_min - (mx - ea_x0) / new_zoom
-      CLB.tl_zoom    = new_zoom
-      local new_vis  = ea_w / CLB.tl_zoom
-      local new_max  = math.max(0, span - new_vis)
-      CLB.tl_scroll  = math.max(0, math.min(new_max, CLB.tl_scroll))
+    local ok_w, scroll_y, scroll_h = pcall(reaper.ImGui_GetMouseWheel, ctx)
+    if ok_w then
+      local alt_held = reaper.ImGui_IsKeyDown(ctx, reaper.ImGui_Mod_Alt())
+      -- Option/Alt + vertical scroll → zoom
+      if alt_held and scroll_y and scroll_y ~= 0 then
+        local mouse_t  = (mx - ea_x0) / CLB.tl_zoom + tc_min + CLB.tl_scroll
+        local factor   = scroll_y > 0 and 1.15 or (1 / 1.15)
+        local new_zoom = math.max(min_zoom, math.min(max_zoom, CLB.tl_zoom * factor))
+        CLB.tl_scroll  = mouse_t - tc_min - (mx - ea_x0) / new_zoom
+        CLB.tl_zoom    = new_zoom
+        local new_vis  = ea_w / CLB.tl_zoom
+        local new_max  = math.max(0, span - new_vis)
+        CLB.tl_scroll  = math.max(0, math.min(new_max, CLB.tl_scroll))
+      -- Horizontal scroll (Shift+scroll on macOS → horizontal axis) → pan
+      elseif scroll_h and scroll_h ~= 0 then
+        CLB.tl_scroll = math.max(0, math.min(max_scroll,
+          CLB.tl_scroll - scroll_h / CLB.tl_zoom * 60))
+      -- Plain scroll → vertical
+      elseif not alt_held and scroll_y and scroll_y ~= 0 then
+        if vscroll_visible then
+          CLB.tl_vscroll = math.max(0, math.min(max_vscroll,
+            CLB.tl_vscroll - scroll_y * TRACK_H * 3))
+        else
+          -- No overflow → fall back to zoom
+          local mouse_t  = (mx - ea_x0) / CLB.tl_zoom + tc_min + CLB.tl_scroll
+          local factor   = scroll_y > 0 and 1.15 or (1 / 1.15)
+          local new_zoom = math.max(min_zoom, math.min(max_zoom, CLB.tl_zoom * factor))
+          CLB.tl_scroll  = mouse_t - tc_min - (mx - ea_x0) / new_zoom
+          CLB.tl_zoom    = new_zoom
+          local new_vis  = ea_w / CLB.tl_zoom
+          local new_max  = math.max(0, span - new_vis)
+          CLB.tl_scroll  = math.max(0, math.min(new_max, CLB.tl_scroll))
+        end
+      end
     end
   end
 
-  -- 16. Drag → pan  (IsItemActive + GetMouseDelta, same pattern as draw_splitter)
+  -- 16. Drag: scrollbar column → vertical scroll thumb; event area → horizontal pan
+  if not is_active then
+    CLB._tl_sb_dragging = nil   -- reset drag-origin flag
+  end
   if is_active then
-    local delta_x = reaper.ImGui_GetMouseDelta(ctx)
-    if delta_x and delta_x ~= 0 then
-      CLB.tl_scroll = math.max(0, math.min(max_scroll,
-        CLB.tl_scroll - delta_x / CLB.tl_zoom))
+    local delta_x, delta_y = reaper.ImGui_GetMouseDelta(ctx)
+    -- Detect drag origin on first active frame
+    if CLB._tl_sb_dragging == nil then
+      CLB._tl_sb_dragging = vscroll_visible and (mx >= cx1 - eff_vscroll_w)
     end
-    reaper.ImGui_SetMouseCursor(ctx, reaper.ImGui_MouseCursor_ResizeEW())
+    if CLB._tl_sb_dragging then
+      -- Drag inside scrollbar column → move thumb
+      if delta_y and delta_y ~= 0 then
+        local sb_h    = cy1 - ry1
+        local thumb_h = math.max(scale(20), sb_h * track_area_h / total_track_h)
+        local ratio   = delta_y / math.max(1, sb_h - thumb_h)
+        CLB.tl_vscroll = math.max(0, math.min(max_vscroll,
+          CLB.tl_vscroll + ratio * max_vscroll))
+      end
+      reaper.ImGui_SetMouseCursor(ctx, reaper.ImGui_MouseCursor_ResizeNS())
+    else
+      -- Drag in event area → horizontal pan
+      if delta_x and delta_x ~= 0 then
+        CLB.tl_scroll = math.max(0, math.min(max_scroll,
+          CLB.tl_scroll - delta_x / CLB.tl_zoom))
+      end
+      reaper.ImGui_SetMouseCursor(ctx, reaper.ImGui_MouseCursor_ResizeEW())
+    end
   end
 
-  -- 17. Horizontal scrollbar at bottom of panel
+  -- 17. Vertical scrollbar (DrawList, right column)
+  if vscroll_visible then
+    local sb_x0  = cx1 - eff_vscroll_w + scale(1)
+    local sb_x1  = cx1
+    local sb_y0  = ry1
+    local sb_y1  = cy1
+    local sb_h   = sb_y1 - sb_y0
+    local thumb_h = math.max(scale(20), sb_h * track_area_h / total_track_h)
+    local thumb_y = sb_y0 + (CLB.tl_vscroll / max_vscroll) * (sb_h - thumb_h)
+
+    reaper.ImGui_DrawList_AddRectFilled(dl, sb_x0, sb_y0, sb_x1, sb_y1, 0x1A1A1AFF)
+    local thumb_hover = is_hovered and mx >= sb_x0 and mx <= sb_x1
+    local thumb_col   = thumb_hover and 0x888888FF or 0x555555FF
+    reaper.ImGui_DrawList_AddRectFilled(dl, sb_x0, thumb_y, sb_x1,
+      math.min(thumb_y + thumb_h, sb_y1), thumb_col, scale(3))
+
+    -- Click on scrollbar track → jump to position
+    if thumb_hover and reaper.ImGui_IsMouseClicked(ctx, 0) then
+      local rel = math.max(0, math.min(1, (my - sb_y0) / math.max(1, sb_h - thumb_h)))
+      CLB.tl_vscroll = rel * max_vscroll
+    end
+
+    -- Hint label inside label column
+    reaper.ImGui_DrawList_AddText(dl, cx0 + scale(2), cy1 - scale(13), 0x555555FF,
+      "opt+scroll:zoom")
+  end
+
+  -- 18. Horizontal scrollbar at bottom of panel
+  local hscroll_w = cw - eff_vscroll_w
   if max_scroll > 0 then
-    reaper.ImGui_SetNextItemWidth(ctx, -1)
+    reaper.ImGui_SetNextItemWidth(ctx, hscroll_w)
     local chg_sc, new_sc = reaper.ImGui_SliderDouble(ctx, "##tl_hscroll",
       CLB.tl_scroll, 0, max_scroll, "")
     if chg_sc then CLB.tl_scroll = new_sc end
