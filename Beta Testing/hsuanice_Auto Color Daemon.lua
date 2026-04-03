@@ -1,6 +1,6 @@
 --[[
 @description Auto Color Items by Take Name — Background Daemon
-@version 260331.1300
+@version 260403.1810
 @author hsuanice
 @about
   Headless background daemon for hsuanice_Auto Color Items by Take Name.
@@ -13,9 +13,20 @@
   - While running, re-colors whenever the project changes or settings change.
 
   Workflow:
-    1. Open GUI script to configure palette and keywords.
-    2. Run this daemon to keep colors applied automatically in the background.
+    1. Run this daemon to keep colors applied automatically in the background.
+    2. Open GUI script to configure palette and keywords (optional; daemon works independently).
     3. The GUI can be closed; the daemon runs independently.
+
+@changelog
+  v260403.1810
+  - Fix: Daemon now works on REAPER startup without needing to open the GUI script first
+  - On init, reads hsuanice_AutoColorItems_state.dat directly and populates ExtState,
+    so keywords and palette are available even after reaper-extstate.ini is cleared on restart
+
+  v260324.1912
+  - Fix: Daemon no longer slows REAPER on track selection — debounce added (15-frame stable
+    window before recolor); GUI settings polled every 10 frames instead of every frame
+  - Add: Initial release of headless background daemon
 ]]
 
 local _, SCRIPT_PATH, sectionID, cmdID = reaper.get_action_context()
@@ -23,24 +34,21 @@ local _, SCRIPT_PATH, sectionID, cmdID = reaper.get_action_context()
 local PREF_NS = "hsuanice_AutoColorItems"
 
 -- ─── file-based state bootstrap ───────────────────────────────────────────────
--- Mirrors the GUI script's load_state_from_file() so the daemon can populate
--- ExtState from the .dat file even when reaper-extstate.ini was cleared on
--- REAPER restart (before the GUI script has ever been opened this session).
-do
+-- On startup, always write the .dat file contents into ExtState so that
+-- load_settings() has valid data even when reaper-extstate.ini was cleared.
+-- (The GUI script writes the .dat file on every clean exit and on every
+--  explicit "Save Preset", making it the most reliable source of truth.)
+local STATE_FILE do
   local script_dir = SCRIPT_PATH:match("^(.*[/\\])") or "./"
-  local state_file = script_dir .. "../Tools/hsuanice_AutoColorItems_state.dat"
-  local f = io.open(state_file, "r")
+  STATE_FILE = script_dir .. "../Tools/hsuanice_AutoColorItems_state.dat"
+  local f = io.open(STATE_FILE, "r")
   if f then
     local function dec(s) return (s:gsub("\\\\", "\1"):gsub("\\n", "\n"):gsub("\1", "\\")) end
     for line in f:lines() do
       if not line:match("^%s*#") and line ~= "" then
         local key, val = line:match("^([^=]+)=(.*)")
         if key and val then
-          -- Only populate keys that are currently empty (don't overwrite live
-          -- changes the GUI script may have already written this session).
-          if reaper.GetExtState(PREF_NS, key) == "" then
-            reaper.SetExtState(PREF_NS, key, dec(val), true)
-          end
+          reaper.SetExtState(PREF_NS, key, dec(val), true)
         end
       end
     end
