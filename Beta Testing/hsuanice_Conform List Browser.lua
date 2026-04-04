@@ -1,6 +1,6 @@
 --[[
 @description Conform List Browser
-@version 260404.1340
+@version 260404.1358
 @author hsuanice
 @about
   A REAPER script for browsing and editing EDL (Edit Decision List) data
@@ -46,6 +46,19 @@
   Required for AAF: aaftool in PATH (https://github.com/agfline/LibAAF)
 
 @changelog
+  v260404.1358
+  - Fix: ${format} token now correctly reflects source format after saving/reloading .clb
+    • Previously CLB.loaded_format was hardcoded to "CLB" on .clb load, causing ${format}
+      to always expand to "EDL" regardless of the original source (AAF, XML, EDL)
+    • .clb save now writes SOURCE_FORMAT|<format> (e.g. SOURCE_FORMAT|AAF)
+    • .clb load restores CLB.loaded_format from SOURCE_FORMAT; defaults to "CLB" for
+      older files without the key (backwards compatible)
+
+  - Fix: Event count header now shows format-aware label (AAF Events / XML Events / EDL Events)
+    • Used _friendly_format(CLB.loaded_format) to derive the label from the loaded format
+    • Empty state now shows "No Event Loaded" instead of "No EDL loaded"
+    • Empty hint text updated to mention 'Load AAF...' alongside EDL and XML options
+
   v260404.1340
   - Fix: Matching no longer overwrites Clip Name automatically
     • Previously, matching with a single candidate would overwrite row.clip_name with
@@ -3148,6 +3161,8 @@ local function save_clb_project(filepath, silent)
   f:write("CLB_PROJECT_V1\n")
 
   -- Settings
+  f:write(string.format("SOURCE_FORMAT|%s\n",
+    _clb_escape(CLB.loaded_format or "CLB")))
   f:write(string.format("FPS|%s|%s\n",
     tostring(CLB.fps), CLB.is_drop and "1" or "0"))
   f:write(string.format("TRACK_FORMAT|%s\n",
@@ -3258,6 +3273,7 @@ local function load_clb_project(filepath)
 
   local new_fps              = 25
   local new_is_drop          = false
+  local new_source_format    = "CLB"
   local new_track_format     = "${format} - ${track}"
   local new_audio_folder     = ""
   local new_audio_recursive  = true
@@ -3282,7 +3298,10 @@ local function load_clb_project(filepath)
       local p = _clb_split(line)
       local key = p[1]
 
-      if key == "FPS" then
+      if key == "SOURCE_FORMAT" then
+        new_source_format = p[2] or "CLB"
+
+      elseif key == "FPS" then
         new_fps      = tonumber(p[2]) or 25
         new_is_drop  = (p[3] == "1")
 
@@ -3409,7 +3428,7 @@ local function load_clb_project(filepath)
   UNDO_POS   = 0
   undo_snapshot()
   CLB.loaded_file   = filepath
-  CLB.loaded_format = "CLB"
+  CLB.loaded_format = new_source_format
 
   -- Rebuild filter panels, then apply saved hidden states
   _rebuild_track_filters()
@@ -6199,7 +6218,7 @@ local function draw_table(table_height)
   local row_count = #view_rows
 
   if row_count == 0 and not CLB.loaded_file then
-    reaper.ImGui_TextDisabled(ctx, "Click 'Load EDL...' or 'Load XML...' to open a timeline file (CMX3600 EDL, FCP7 XML, Resolve XML).")
+    reaper.ImGui_TextDisabled(ctx, "Click 'Load EDL...', 'Load XML...', or 'Load AAF...' to open a timeline file (CMX3600 EDL, FCP7 XML, Resolve XML, AAF).")
     return
   end
 
@@ -6614,14 +6633,15 @@ local function draw_edl_panel_header()
   local event_count = #view_rows
   local total_count = #ROWS
 
+  local fmt_label = _friendly_format(CLB.loaded_format)
   if total_count > 0 then
     if event_count ~= total_count then
-      reaper.ImGui_Text(ctx, string.format("EDL Events: %d / %d", event_count, total_count))
+      reaper.ImGui_Text(ctx, string.format("%s Events: %d / %d", fmt_label, event_count, total_count))
     else
-      reaper.ImGui_Text(ctx, string.format("EDL Events: %d", event_count))
+      reaper.ImGui_Text(ctx, string.format("%s Events: %d", fmt_label, event_count))
     end
   else
-    reaper.ImGui_TextDisabled(ctx, "No EDL loaded")
+    reaper.ImGui_TextDisabled(ctx, "No Event Loaded")
   end
 
   -- Separator
