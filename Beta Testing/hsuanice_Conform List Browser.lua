@@ -1,6 +1,6 @@
 --[[
 @description Conform List Browser
-@version 260403.1448
+@version 260404.1340
 @author hsuanice
 @about
   A REAPER script for browsing and editing EDL (Edit Decision List) data
@@ -46,6 +46,23 @@
   Required for AAF: aaftool in PATH (https://github.com/agfline/LibAAF)
 
 @changelog
+  v260404.1340
+  - Fix: Matching no longer overwrites Clip Name automatically
+    • Previously, matching with a single candidate would overwrite row.clip_name with
+      af_meta.orig_filename (or the audio file basename), saving the old value to Notes
+    • This caused UUID-style filenames (e.g. f5d25fae-3db0-8413-2c63-c3ad0000007c.wav)
+      to replace scene/take-derived clip names when linking AAF media
+    • Clip Name is now only changed via the explicit "Apply" button with a format template
+    • Reel/Tape, Scene, and Take are still auto-repaired from matched audio as before
+    • Removed backfill_n.clip_name counter and its console summary line
+
+  - Fix: Add Group popup — keyboard focus and OK button now work on first attempt
+    • Replaced manual focused-flag + SetKeyboardFocusHere(-1) pattern with the correct
+      Dear ImGui idiom: IsWindowAppearing → SetKeyboardFocusHere(0) before the InputText
+    • OK button previously created an empty group because CLB.add_group.buf was only
+      updated when Enter was pressed (EnterReturnsTrue flag); now new_buf is always synced
+      every frame so both Enter and OK submit the correct typed text
+
   v260403.1448
   - Fix: Timeline panel scroll wheel controls reworked for macOS compatibility
     • Scroll (no modifier)  → vertical scroll through track rows (unchanged)
@@ -1841,7 +1858,7 @@ local function match_audio_files()
   local not_found_count = 0
   -- Strategy 6 statistics: parser_id → match count
   local s6_stats    = {}
-  local backfill_n  = { scene = 0, take = 0, reel = 0, clip_name = 0 }
+  local backfill_n  = { scene = 0, take = 0, reel = 0 }
 
   for _, row in ipairs(ROWS) do
     local candidates = {}
@@ -1997,21 +2014,6 @@ local function match_audio_files()
           end
         end
 
-        -- Clip Name: always repair from matched audio (orig_filename preferred)
-        local new_cn = (af_meta.orig_filename or "") ~= "" and af_meta.orig_filename
-                       or (candidates[1].basename or "")
-        if new_cn ~= "" then
-          local old_cn = row.clip_name or ""
-          if old_cn ~= new_cn then
-            if old_cn ~= "" then
-              orig_notes[#orig_notes+1] = "Orig Clip: " .. old_cn
-            end
-            row.clip_name = new_cn
-            backfill_n.clip_name = backfill_n.clip_name + 1
-            row_repaired = true
-          end
-        end
-
         -- Mark repaired and save originals to notes
         if row_repaired then
           row.__repaired = true
@@ -2126,7 +2128,7 @@ local function match_audio_files()
   if backfill_n.scene     > 0 then bf_parts[#bf_parts+1] = backfill_n.scene     .. " scene"     end
   if backfill_n.take      > 0 then bf_parts[#bf_parts+1] = backfill_n.take      .. " take"      end
   if backfill_n.reel      > 0 then bf_parts[#bf_parts+1] = backfill_n.reel      .. " tape"      end
-  if backfill_n.clip_name > 0 then bf_parts[#bf_parts+1] = backfill_n.clip_name .. " clip name" end
+
   if #bf_parts > 0 then
     console_msg("  Repaired: " .. table.concat(bf_parts, ", ") .. " value(s) from matched audio  [✦ = repaired row]")
   end
@@ -7916,7 +7918,7 @@ local function draw_reel_filter_sidebar(height)
 
       -- Add group button
       if reaper.ImGui_SmallButton(ctx, "+##clb_group_add") then
-        CLB.add_group = { buf = "", focused = false }
+        CLB.add_group = { buf = "" }
         reaper.ImGui_OpenPopup(ctx, "Add Group##clb_add_group")
       end
       if reaper.ImGui_IsItemHovered(ctx) then
@@ -7940,14 +7942,12 @@ local function draw_reel_filter_sidebar(height)
         if reaper.ImGui_BeginPopup(ctx, "Add Group##clb_add_group") then
           reaper.ImGui_Text(ctx, "New group name:")
           reaper.ImGui_SetNextItemWidth(ctx, scale(150))
+          if reaper.ImGui_IsWindowAppearing(ctx) then
+            reaper.ImGui_SetKeyboardFocusHere(ctx, 0)
+          end
           local chg, new_buf = reaper.ImGui_InputText(ctx, "##add_group_input", CLB.add_group.buf,
             reaper.ImGui_InputTextFlags_EnterReturnsTrue())
-          if chg then CLB.add_group.buf = new_buf end
-
-          if not CLB.add_group.focused then
-            reaper.ImGui_SetKeyboardFocusHere(ctx, -1)
-            CLB.add_group.focused = true
-          end
+          CLB.add_group.buf = new_buf  -- always sync: new_buf is the live typed value
 
           local apply = chg
           if reaper.ImGui_Button(ctx, "OK", scale(60), 0) then apply = true end
