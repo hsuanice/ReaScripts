@@ -1,6 +1,6 @@
 --[[
 @description ReaImGui - Import audio: one folder per track; channel-split files go to child tracks. Sequence only.
-@version 260119.2125 add comprehensive debug mode
+@version 260405.2009 set UI font size to 125%
 @author hsuanice
 @about
   - Pre-confirm dialog: shows total folders/files, lets you choose a channel naming pattern or a custom mask, then offers [Import] / [Cancel].
@@ -27,6 +27,14 @@
   hsuanice served as the workflow designer, tester, and integrator for this tool.
 
 @changelog
+  v260405.2009
+  - Add: UI font size set to 125% (FONT_SIZE = 16) across all four windows.
+         Adjust FONT_SIZE in Tunables to change.
+  v260405.1933
+  - Add: "Spot to original timecode (BWF)" checkbox in the Confirm Import dialog.
+         When enabled, each imported item is spotted to its BWF start offset
+         via command 40299 immediately after insertion. State persists between runs.
+
   v260119.2125
   - Add: Comprehensive DEBUG_MODE with detailed logging:
     * Channel parsing results for each file
@@ -70,9 +78,10 @@
 -- Tunables
 ---------------------------------------
 local JOB_SIZE = 8          -- files per frame; raise for speed
-local DEBUG_MODE = true     -- Enable detailed debug logging
-local OUTPUT_TO_FILE = true -- Write debug output to file instead of console
+local DEBUG_MODE = false     -- Enable detailed debug logging
+local OUTPUT_TO_FILE = false -- Write debug output to file instead of console
 local OUTPUT_FILE = reaper.GetResourcePath() .. "/Scripts/hsuanice Scripts/Tools/Import_Debug_Output.txt"
+local FONT_SIZE   = 16       -- UI font size (default ImGui = 13; 125% ≈ 16)
 ---------------------------------------
 
 -- Channel parsing mode switches (for split-channel naming)
@@ -87,6 +96,9 @@ local MASK_KEY     = "LastMask"
 
 local CHAN_MODE = tonumber(reaper.GetExtState(MODE_SECTION, MODE_KEY)) or 1
 local CHAN_CUSTOM_MASK = reaper.GetExtState(MODE_SECTION, MASK_KEY) or ""
+
+local SPOT_KEY  = "SpotToTC"
+local SPOT_TO_TC = (reaper.GetExtState(MODE_SECTION, SPOT_KEY) == "1")
 
 -- === Custom Mask Presets (ExtState) =========================================
 local MASK_PRESET_SECTION = "hsuanice_ImportAudio_Folder"
@@ -424,7 +436,10 @@ local function insert_sequence(tr, file_abs)
   reaper.InsertMedia(file_abs, 0) -- on selected track
   local after  = reaper.CountTrackMediaItems(tr)
   reaper.SetEditCurPos(prev, false, false)
-  return after>before
+  if after > before then
+    return true, reaper.GetTrackMediaItem(tr, after - 1)
+  end
+  return false, nil
 end
 
 -- ========= folder helpers (2 levels: Parent -> Children) =========
@@ -491,7 +506,8 @@ local function ui_pre_open(base_name, folders, files, on_decide)
   UI_PRE.ctx = reaper.ImGui_CreateContext('Confirm Import')
   local function loop()
     if not UI_PRE.ctx then return end
-    reaper.ImGui_SetNextWindowSize(UI_PRE.ctx, 480, 210, reaper.ImGui_Cond_Once())
+    reaper.ImGui_SetNextWindowSize(UI_PRE.ctx, 480, 240, reaper.ImGui_Cond_Once())
+    reaper.ImGui_PushFont(UI_PRE.ctx, nil, FONT_SIZE)
     local vis, open = reaper.ImGui_Begin(UI_PRE.ctx, 'Confirm Import', true)
     if vis then
       reaper.ImGui_Text(UI_PRE.ctx, ('Base: %s'):format(base_name))
@@ -499,6 +515,10 @@ local function ui_pre_open(base_name, folders, files, on_decide)
       reaper.ImGui_Separator(UI_PRE.ctx)
 
       
+
+      local spot_changed
+      spot_changed, SPOT_TO_TC = reaper.ImGui_Checkbox(UI_PRE.ctx, 'Spot to original timecode (BWF)', SPOT_TO_TC)
+      if spot_changed then reaper.SetExtState(MODE_SECTION, SPOT_KEY, SPOT_TO_TC and "1" or "0", true) end
 
       reaper.ImGui_Separator(UI_PRE.ctx)
       local avail = reaper.ImGui_GetContentRegionAvail(UI_PRE.ctx)
@@ -513,6 +533,7 @@ local function ui_pre_open(base_name, folders, files, on_decide)
 end
 
     end
+    reaper.ImGui_PopFont(UI_PRE.ctx)
     reaper.ImGui_End(UI_PRE.ctx)
     if not open then UI_PRE.ctx=nil; on_decide('cancel'); return end
     if UI_PRE.choice then
@@ -531,7 +552,8 @@ local function ui_progress_open(total_files, total_groups)
   UI_PROGRESS.ctx = reaper.ImGui_CreateContext('Importing...')
   local function loop()
     if not UI_PROGRESS.ctx then return end
-    reaper.ImGui_SetNextWindowSize(UI_PROGRESS.ctx, 360, 110, reaper.ImGui_Cond_Once())
+    reaper.ImGui_SetNextWindowSize(UI_PROGRESS.ctx, 360, 135, reaper.ImGui_Cond_Once())
+    reaper.ImGui_PushFont(UI_PROGRESS.ctx, nil, FONT_SIZE)
     local visible, open = reaper.ImGui_Begin(UI_PROGRESS.ctx, 'Importing...', true)
     if visible then
       reaper.ImGui_Text(UI_PROGRESS.ctx, ('Folders (groups): %d'):format(total_groups or 0))
@@ -541,6 +563,7 @@ local function ui_progress_open(total_files, total_groups)
       reaper.ImGui_Text(UI_PROGRESS.ctx, '(ESC also works)')
       if esc_any(UI_PROGRESS.ctx) then UI_PROGRESS.stop = true end
     end
+    reaper.ImGui_PopFont(UI_PROGRESS.ctx)
     reaper.ImGui_End(UI_PROGRESS.ctx)
     if UI_PROGRESS.stop or not open then
       UI_PROGRESS.ctx = nil
@@ -561,7 +584,8 @@ local function ui_post_open(message)
   UI_POST.ctx = reaper.ImGui_CreateContext('Import Summary')
   local function loop()
     if not UI_POST.ctx then return end
-    reaper.ImGui_SetNextWindowSize(UI_POST.ctx, 420, 160, reaper.ImGui_Cond_Once())
+    reaper.ImGui_SetNextWindowSize(UI_POST.ctx, 420, 200, reaper.ImGui_Cond_Once())
+    reaper.ImGui_PushFont(UI_POST.ctx, nil, FONT_SIZE)
     local vis, open = reaper.ImGui_Begin(UI_POST.ctx, 'Import Summary', true)
     if vis then
       for line in UI_POST.msg:gmatch("[^\n]+") do
@@ -572,6 +596,7 @@ local function ui_post_open(message)
         clicked_ok = true
       end
     end
+    reaper.ImGui_PopFont(UI_POST.ctx)
     reaper.ImGui_End(UI_POST.ctx)
     if clicked_ok or not open then
         UI_POST.ctx = nil
@@ -610,7 +635,8 @@ local function ui_choose_mode(on_done)
 
   local function loop()
     if not ctx then return end
-    reaper.ImGui_SetNextWindowSize(ctx, 320, 330, reaper.ImGui_Cond_Once())
+    reaper.ImGui_SetNextWindowSize(ctx, 360, 415, reaper.ImGui_Cond_Once())
+    reaper.ImGui_PushFont(ctx, nil, FONT_SIZE)
     local vis, open = reaper.ImGui_Begin(ctx, 'Channel naming rule', true)
     if vis then
       reaper.ImGui_Text(ctx, 'Select split-channel naming:')
@@ -710,6 +736,7 @@ local function ui_choose_mode(on_done)
       end
       if esc_any(ctx) then decided, accepted = true, false end
     end
+    reaper.ImGui_PopFont(ctx)
     reaper.ImGui_End(ctx)
 
     if decided or not open then
@@ -843,10 +870,17 @@ local function run_after_confirm(base, list)
         local tr_idx = track_index(target_tr)
         debug("    Target track #"..tr_idx..": '"..tr_name.."'")
 
-        if insert_sequence(target_tr, f) then
+        local ok, new_item = insert_sequence(target_tr, f)
+        if ok then
           imported = imported + 1
           UI_PROGRESS.done = UI_PROGRESS.done + 1
           debug("    ✓ Successfully inserted")
+          if SPOT_TO_TC and new_item then
+            reaper.SelectAllMediaItems(0, false)
+            reaper.SetMediaItemSelected(new_item, true)
+            reaper.Main_OnCommand(40299, 0)
+            debug("    ✓ Spotted to original timecode")
+          end
         else
           debug("    ✗ Failed to insert")
         end
