@@ -1,6 +1,6 @@
 --[[
 @description Track↔Edit link (Pro Tools style). Performance edition; focuses on Razor & item virtual ranges. This build removes menu guards for snappier click-select.
-@version 250925_2241 remove menu guard
+@version 260410.1022
 @author hsuanice
 @about
   Pro Tools-style "Link Track and Edit Selection".
@@ -31,6 +31,13 @@
     hsuanice served as the workflow designer, tester, and integrator for this tool.
 
 @changelog
+  v260410.1022
+    - Fix: clicking on a selected item no longer resets item/track selection.
+    - New: Pro Tools-style guard — if LMB is held on a selected item (no Razor),
+      track selection is immediately restored from item selection before ABCD logic runs,
+      preventing section D from deselecting items on other tracks.
+    - Change: ENABLE_CLICK_SELECT_TRACK now defaults to true so the script fully
+      owns track selection management (required for correct Pro Tools behavior).
   v250925_2241
     - Revert: removed all context-menu click-through mitigations (popup/menu guards, RMB sessions, soft latch, stability gate).
     - Change: removed mouse-up delay guards to restore immediate, reliable selection.
@@ -111,7 +118,7 @@
 -------------------------
 
 -- === CLICK-SELECT (integrated) OPTIONS ===
-local ENABLE_CLICK_SELECT_TRACK        = true   -- 開整合點擊選軌
+local ENABLE_CLICK_SELECT_TRACK        = true    -- 開整合點擊選軌（需要接管 track selection 才能模擬 PT 行為）
 local CLICK_SELECT_ON_MOUSE_UP         = true   -- 建議用 mouse-up
 local CLICK_ENABLE_ITEM_UPPER_HALF     = false  -- 點 item 上半部不選軌
 local CLICK_TOLERANCE_PX               = 3      -- 點擊移動容差(px)
@@ -595,6 +602,34 @@ local function mainloop()
 
   if CLICK_HOOK_PHASE == "pre" then
     Click_TickMaybeSelectTrack()
+  end
+
+  -- Pro Tools guard: if LMB is held on a selected item, restore track selection
+  -- from the current item selection. This overrides REAPER's native
+  -- "click item → select only that track" before ABCD ever sees a change.
+  if Razor.cnt_tracks_with == 0
+     and reaper.APIExists("JS_Mouse_GetState")
+     and (reaper.JS_Mouse_GetState(1) & 1) == 1
+  then
+    local _mx, _my = reaper.GetMousePosition()
+    local _hit = reaper.GetItemFromPoint(_mx, _my, true)
+    if _hit and (reaper.GetMediaItemInfo_Value(_hit, "B_UISEL") or 0) > 0.5 then
+      local _want = {}
+      local _ni = reaper.CountSelectedMediaItems(0)
+      for _i = 0, _ni - 1 do
+        local _it = reaper.GetSelectedMediaItem(0, _i)
+        local _tr = reaper.GetMediaItem_Track(_it)
+        if _tr then _want[track_guid(_tr)] = true end
+      end
+      reaper.PreventUIRefresh(1)
+      local _tc = reaper.CountTracks(0)
+      for _i = 0, _tc - 1 do
+        local _tr = reaper.GetTrack(0, _i)
+        set_track_selected(_tr, _want[track_guid(_tr)] or false)
+      end
+      reaper.PreventUIRefresh(-1)
+      reaper.TrackList_AdjustWindows(false)
+    end
   end
 
   local triggered_side = nil -- "ITEMS" or "TRACKS"
