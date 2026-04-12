@@ -1,6 +1,6 @@
 --[[
 @description Track↔Edit link (Pro Tools style). Performance edition; focuses on Razor & item virtual ranges. This build removes menu guards for snappier click-select.
-@version 260412.1146
+@version 260412.1218
 @author hsuanice
 @about
   Pro Tools-style "Link Track and Edit Selection".
@@ -31,6 +31,11 @@
     hsuanice served as the workflow designer, tester, and integrator for this tool.
 
 @changelog
+  v260412.1218
+    - Fix: clicking empty arrange space (which deselects items) no longer also
+      deselects track selection. Section B now only fires when items ARE selected
+      (it_info.count > 0), so clearing item selection is decoupled from track
+      selection. Item→Track link still works normally when items are present.
   v260412.1146
     - New: ENABLE_TRACKS_TO_RAZOR (C sub-switch) — when false, track-selection
       changes no longer build/clear Razor areas (ENABLE_C must also be true).
@@ -124,7 +129,7 @@
 -------------------------
 
 -- === CLICK-SELECT (integrated) OPTIONS ===
-local ENABLE_CLICK_SELECT_TRACK        = true    -- 開整合點擊選軌（需要接管 track selection 才能模擬 PT 行為）
+local ENABLE_CLICK_SELECT_TRACK        = false    -- 開整合點擊選軌（需要接管 track selection 才能模擬 PT 行為）
 local CLICK_SELECT_ON_MOUSE_UP         = true   -- 建議用 mouse-up
 local CLICK_ENABLE_ITEM_UPPER_HALF     = false  -- 點 item 上半部不選軌
 local CLICK_TOLERANCE_PX               = 3      -- 點擊移動容差(px)
@@ -710,9 +715,12 @@ local function mainloop()
   end
 
   -- B) Items changed (or their track set) and NO Razor → Track selection follows items' tracks (absolute set)
+  -- Guard: only fire when items ARE selected (it_info.count > 0).
+  -- This prevents clicking empty arrange space (which clears items) from also clearing track selection.
   if ENABLE_B
      and (Razor.cnt_tracks_with == 0)
      and items_changed_this_tick
+     and it_info.count > 0
      and triggered_side ~= "TRACKS"
   then
     reaper.PreventUIRefresh(1)
