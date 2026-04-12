@@ -1,6 +1,6 @@
 --[[
 @description Track↔Edit link (Pro Tools style). Performance edition; focuses on Razor & item virtual ranges. This build removes menu guards for snappier click-select.
-@version 260410.1022
+@version 260412.1146
 @author hsuanice
 @about
   Pro Tools-style "Link Track and Edit Selection".
@@ -31,6 +31,12 @@
     hsuanice served as the workflow designer, tester, and integrator for this tool.
 
 @changelog
+  v260412.1146
+    - New: ENABLE_TRACKS_TO_RAZOR (C sub-switch) — when false, track-selection
+      changes no longer build/clear Razor areas (ENABLE_C must also be true).
+    - New: ENABLE_TRACKS_TO_ITEMS (D sub-switch) — when false, track-selection
+      changes no longer trigger item sync; Razor→Items (D) still works normally.
+      Set this to false to prevent automatic item re-selection when clicking tracks.
   v260410.1022
     - Fix: clicking on a selected item no longer resets item/track selection.
     - New: Pro Tools-style guard — if LMB is held on a selected item (no Razor),
@@ -151,6 +157,13 @@ local ENABLE_B = true
 local ENABLE_C = true
 -- D) Razor/Track changed → sync items under ACTIVE range (only on changed tracks)
 local ENABLE_D = true
+
+-- ====== Direction-specific sub-switches ======
+-- C sub) Whether track-selection change builds/clears Razor (requires ENABLE_C = true)
+local ENABLE_TRACKS_TO_RAZOR = false
+-- D sub) Whether track-selection change triggers item sync (requires ENABLE_D = true)
+--        Set false to keep Razor→Items active while blocking Track→Items.
+local ENABLE_TRACKS_TO_ITEMS = false
 
 -- (Quick preset to disable Arrange→TCP fully)
 -- ENABLE_A = false; ENABLE_B = false
@@ -720,6 +733,7 @@ local function mainloop()
   -- C) Track selection changed + REAL TS present → build/remove Razor + sync items
   --    BUT skip if tracks_changed_by_items (e.g. came from 40182 Select-All)
   if ENABLE_C
+     and ENABLE_TRACKS_TO_RAZOR
      and (tr_sel_sig ~= prev.tr_sel_sig)
      and ts and te
      and (not tracks_changed_by_items)
@@ -758,7 +772,7 @@ local function mainloop()
   local a_s, a_e, a_src = active_range(it_info)
   if ENABLE_D
      and (a_s and a_e)
-     and ((Razor.sig ~= prev.razor_sig) or (tr_sel_sig ~= prev.tr_sel_sig))
+     and ((Razor.sig ~= prev.razor_sig) or (ENABLE_TRACKS_TO_ITEMS and tr_sel_sig ~= prev.tr_sel_sig))
      and (not tracks_changed_by_items)
      and triggered_side ~= "ITEMS"
      and (is_razor_item_link_enabled() or (a_src ~= "razor"))
