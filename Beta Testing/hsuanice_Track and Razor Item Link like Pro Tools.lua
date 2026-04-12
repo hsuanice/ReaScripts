@@ -1,6 +1,6 @@
 --[[
 @description Track↔Edit link (Pro Tools style). Performance edition; focuses on Razor & item virtual ranges. This build removes menu guards for snappier click-select.
-@version 260412.1218
+@version 260412.1450
 @author hsuanice
 @about
   Pro Tools-style "Link Track and Edit Selection".
@@ -31,6 +31,19 @@
     hsuanice served as the workflow designer, tester, and integrator for this tool.
 
 @changelog
+  v260412.1450
+    - Fix: fast-click race condition. When LMB-down and LMB-up both arrive
+      in the same defer frame (<33ms), the SNM pref-toggle path is bypassed.
+      The fast-click path now calls _restore_tracks() directly and sets
+      _suppress_D so Section D does not deselect items in the same frame.
+  v260412.1436
+    - Fix: zero-flash Pro Tools guard. On LMB-down over a selected item,
+      SNM_SetIntConfigVar disables 'trackselonmouse' before REAPER's
+      mouse-up handler fires, so REAPER never selects the wrong track.
+      Pref is restored on LMB-up. Uses WM_LBUTTONDOWN/UP intercept
+      (JS extension, passthrough=true) for reliable edge detection;
+      polling fallback when JS unavailable. Manual-restore fallback when
+      SWS/SNM unavailable (flash possible, original behaviour).
   v260412.1218
     - Fix: clicking empty arrange space (which deselects items) no longer also
       deselects track selection. Section B now only fires when items ARE selected
@@ -177,11 +190,78 @@ local ENABLE_TRACKS_TO_ITEMS = false
 local DEBUG_PRINT = false
 ---------------------------------------
 
+-- ================================================
+-- WM_LBUTTONDOWN / WM_LBUTTONUP intercept  (Pro Tools guard — no-flicker)
+--
+-- REAPER selects tracks on mouse-UP.  On mouse-DOWN we check the click
+-- target.  If it's a selected item we disable 'trackselonmouse' before
+-- REAPER's up-handler fires → wrong-track flash never happens.
+-- Pref is restored immediately on mouse-UP.
+--
+-- passthrough=true on both messages: REAPER still receives all clicks for
+-- item selection, dragging, rubber-band, etc.
+-- RMB context menus live in a separate HWND → guard never fires for them.
+--
+-- Fallback (no SNM extension): manual track-selection restoration after the
+-- fact (may flash ~1 frame, same as original behaviour).
+-- ================================================
+local _WM_HWND        = nil
+local _WM_DOWN_LAST   = 0
+local _WM_UP_LAST     = 0
+local _guard_prev_lmb = false   -- fallback polling edge-detector
+local _guard_blocking = false   -- true while trackselonmouse is suppressed
+local _guard_orig_pref = 1      -- saved pref value
+
+local function wm_setup()
+  if not reaper.APIExists("JS_WindowMessage_Intercept") then return false end
+  if not reaper.APIExists("JS_WindowMessage_Peek")      then return false end
+  local arrange = reaper.JS_Window_FindChildByID(reaper.GetMainHwnd(), 1000)
+  if not arrange then return false end
+  local r = reaper.JS_WindowMessage_Intercept(arrange, "WM_LBUTTONDOWN", true)
+  if r ~= 1 then return false end
+  reaper.JS_WindowMessage_Intercept(arrange, "WM_LBUTTONUP", true)
+  _WM_HWND = arrange
+  return true
+end
+
+local function wm_cleanup()
+  if _guard_blocking and reaper.APIExists("SNM_SetIntConfigVar") then
+    reaper.SNM_SetIntConfigVar("trackselonmouse", _guard_orig_pref)
+    _guard_blocking = false
+  end
+  if _WM_HWND and reaper.APIExists("JS_WindowMessage_Release") then
+    reaper.JS_WindowMessage_Release(_WM_HWND, "WM_LBUTTONDOWN")
+    reaper.JS_WindowMessage_Release(_WM_HWND, "WM_LBUTTONUP")
+  end
+  _WM_HWND = nil
+end
+
+local function wm_new_down()
+  if not _WM_HWND then return false end
+  local ok, _, _, time = reaper.JS_WindowMessage_Peek(_WM_HWND, "WM_LBUTTONDOWN")
+  if not (ok and time and time ~= 0) then return false end
+  if time == _WM_DOWN_LAST then return false end
+  _WM_DOWN_LAST = time
+  return true
+end
+
+local function wm_new_up()
+  if not _WM_HWND then return false end
+  local ok, _, _, time = reaper.JS_WindowMessage_Peek(_WM_HWND, "WM_LBUTTONUP")
+  if not (ok and time and time ~= 0) then return false end
+  if time == _WM_UP_LAST then return false end
+  _WM_UP_LAST = time
+  return true
+end
+
 ---------------------------------------
 -- Toolbar auto-terminate + toggle support
 ---------------------------------------
 if reaper.set_action_options then reaper.set_action_options(1|4) end
-reaper.atexit(function() if reaper.set_action_options then reaper.set_action_options(8) end end)
+reaper.atexit(function()
+  if reaper.set_action_options then reaper.set_action_options(8) end
+  wm_cleanup()
+end)
 
 ----------------
 -- Tiny utils
@@ -622,31 +702,96 @@ local function mainloop()
     Click_TickMaybeSelectTrack()
   end
 
-  -- Pro Tools guard: if LMB is held on a selected item, restore track selection
-  -- from the current item selection. This overrides REAPER's native
-  -- "click item → select only that track" before ABCD ever sees a change.
-  if Razor.cnt_tracks_with == 0
-     and reaper.APIExists("JS_Mouse_GetState")
-     and (reaper.JS_Mouse_GetState(1) & 1) == 1
-  then
-    local _mx, _my = reaper.GetMousePosition()
-    local _hit = reaper.GetItemFromPoint(_mx, _my, true)
-    if _hit and (reaper.GetMediaItemInfo_Value(_hit, "B_UISEL") or 0) > 0.5 then
+  -- Pro Tools guard — three-layer defence against wrong track-select.
+  --
+  -- Layer 1 (primary, normal-speed click): on mouse-DOWN disable 'trackselonmouse';
+  --   restore on mouse-UP → REAPER's up-handler skips track select → zero flash.
+  -- Layer 2 (fast-click fallback): if down+up both arrive before this defer frame
+  --   (< ~33 ms click), pref-toggle missed its window → restore tracks manually
+  --   and suppress D so items are not deselected this frame.
+  -- Layer 3 (polling backup): every frame while LMB held on a selected item,
+  --   restore tracks if wrong → catches HWND-staleness failures during drag.
+  local _suppress_D = false
+  if Razor.cnt_tracks_with == 0 then
+    -- Re-validate WM intercept: arrange HWND can change on float/dock.
+    if _WM_HWND then
+      local _ok = reaper.JS_WindowMessage_Peek(_WM_HWND, "WM_LBUTTONDOWN")
+      if not _ok then _WM_HWND = nil; _guard_blocking = false end
+    end
+    if not _WM_HWND then wm_setup() end
+
+    local _is_down = wm_new_down()
+    local _is_up   = wm_new_up()
+
+    -- Fallback polling edges (WM intercept unavailable)
+    if not _WM_HWND and reaper.APIExists("JS_Mouse_GetState") then
+      local _lmb = (reaper.JS_Mouse_GetState(1) & 1) == 1
+      if     _lmb and not _guard_prev_lmb then _is_down = true end
+      if not _lmb and     _guard_prev_lmb then _is_up   = true end
+      _guard_prev_lmb = _lmb
+    end
+
+    -- Safety: missed-up recovery
+    if _guard_blocking and reaper.APIExists("JS_Mouse_GetState") then
+      if (reaper.JS_Mouse_GetState(1) & 1) == 0 then _is_up = true end
+    end
+
+    -- Shared helper: restore track selection to match current item selection
+    local function _restore_tracks()
       local _want = {}
-      local _ni = reaper.CountSelectedMediaItems(0)
-      for _i = 0, _ni - 1 do
+      for _i = 0, reaper.CountSelectedMediaItems(0) - 1 do
         local _it = reaper.GetSelectedMediaItem(0, _i)
         local _tr = reaper.GetMediaItem_Track(_it)
         if _tr then _want[track_guid(_tr)] = true end
       end
       reaper.PreventUIRefresh(1)
-      local _tc = reaper.CountTracks(0)
-      for _i = 0, _tc - 1 do
+      for _i = 0, reaper.CountTracks(0) - 1 do
         local _tr = reaper.GetTrack(0, _i)
         set_track_selected(_tr, _want[track_guid(_tr)] or false)
       end
       reaper.PreventUIRefresh(-1)
       reaper.TrackList_AdjustWindows(false)
+    end
+
+    -- Layer 2: fast-click (down+up in same frame) → manual restore + suppress D
+    if _is_down and _is_up then
+      local _mx, _my = reaper.GetMousePosition()
+      local _hit = reaper.GetItemFromPoint(_mx, _my, true)
+      if _hit and (reaper.GetMediaItemInfo_Value(_hit, "B_UISEL") or 0) > 0.5 then
+        _restore_tracks()
+        _suppress_D = true
+      end
+    else
+      -- Layer 1: normal-speed click — disable pref on down, restore on up
+      if _is_down then
+        local _mx, _my = reaper.GetMousePosition()
+        local _hit = reaper.GetItemFromPoint(_mx, _my, true)
+        if _hit and (reaper.GetMediaItemInfo_Value(_hit, "B_UISEL") or 0) > 0.5 then
+          if reaper.APIExists("SNM_SetIntConfigVar") then
+            _guard_orig_pref = reaper.SNM_GetIntConfigVar("trackselonmouse", 1)
+            reaper.SNM_SetIntConfigVar("trackselonmouse", 0)
+            _guard_blocking = true
+          else
+            _restore_tracks()   -- no SNM: manual fallback (may flash)
+          end
+        end
+      end
+      if _is_up and _guard_blocking then
+        reaper.SNM_SetIntConfigVar("trackselonmouse", _guard_orig_pref)
+        _guard_blocking = false
+      end
+    end
+
+    -- Layer 3: polling backup — every frame while LMB held on selected item
+    -- (catches HWND-stale failures; harmless when layer 1 is working)
+    if not _guard_blocking
+       and reaper.APIExists("JS_Mouse_GetState")
+       and (reaper.JS_Mouse_GetState(1) & 1) == 1 then
+      local _mx, _my = reaper.GetMousePosition()
+      local _hit = reaper.GetItemFromPoint(_mx, _my, true)
+      if _hit and (reaper.GetMediaItemInfo_Value(_hit, "B_UISEL") or 0) > 0.5 then
+        _restore_tracks()
+      end
     end
   end
 
@@ -783,6 +928,7 @@ local function mainloop()
      and ((Razor.sig ~= prev.razor_sig) or (ENABLE_TRACKS_TO_ITEMS and tr_sel_sig ~= prev.tr_sel_sig))
      and (not tracks_changed_by_items)
      and triggered_side ~= "ITEMS"
+     and not _suppress_D
      and (is_razor_item_link_enabled() or (a_src ~= "razor"))
   then
     local prev_set = {}; for g in string.gmatch(prev.tr_sel_sig or "", "[^|]+") do prev_set[g] = true end
@@ -843,4 +989,5 @@ local function mainloop()
   reaper.defer(mainloop)
 end
 
+wm_setup()
 mainloop()
