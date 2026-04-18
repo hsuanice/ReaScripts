@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<index version="1" name="hsuanice Scripts" commit="ada74be540134277575818afb3ceeda3b62fc070">
+<index version="1" name="hsuanice Scripts" commit="41e33a1ef98c11ff9c867319e543ddd26510088c">
   <category name="Beta Testing">
     <reapack name="hsuanice_AudioSweet ReaImGui.lua" type="script" desc="AudioSweet ReaImGui - AudioSuite Workflow (Pro Tools–Style)">
       <metadata>
@@ -8936,6 +8936,22 @@ v250921_1647
 v250921_1512
   - Initial stable Core snapshot (handles, epsilon, glue/render pipeline, hash markers)]]></changelog>
         <source main="main">https://github.com/hsuanice/ReaScripts/raw/f0269663b4a572cfd160f250cf717c5419bda34a/Library/hsuanice_RGWH%20Core.lua</source>
+      </version>
+    </reapack>
+  </category>
+  <category name="PRO TOOLS">
+    <reapack name="hsuanice_Grid_Nudge_Panel_Reset_Position.lua" type="script" desc="hsuanice_Grid Nudge Panel - Reset Position">
+      <metadata>
+        <description><![CDATA[{\rtf1\ansi\deff0{\fonttbl{\f0 \fswiss Helvetica;}{\f1 \fmodern Courier;}}
+{\colortbl;\red255\green0\blue0;\red0\green0\blue255;}
+\widowctrl\hyphauto
+
+{\pard \ql \f0 \sa180 \li0 \fi0 Run this to reset the Grid Nudge Panel position back to default.\par}
+}
+]]></description>
+      </metadata>
+      <version name="1.0" time="2026-04-18T12:49:44Z">
+        <source main="main">https://github.com/hsuanice/ReaScripts/raw/41e33a1ef98c11ff9c867319e543ddd26510088c/PRO%20TOOLS/hsuanice_Grid_Nudge_Panel_Reset_Position.lua</source>
       </version>
     </reapack>
   </category>
