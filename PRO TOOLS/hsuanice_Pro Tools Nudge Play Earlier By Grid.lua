@@ -1,0 +1,32 @@
+-- @description hsuanice_Pro Tools Nudge Play Earlier By Grid
+-- @version 0.1.0 [260413.1324]
+-- @author hsuanice
+-- @link https://forum.cockos.com/showthread.php?p=2910884#post2910884
+-- @about
+--   # hsuanice Pro Tools Keybindings for REAPER
+--
+--   Stub script for the Pro Tools action:
+--   **Nudge Play Earlier By Grid**
+--
+--   ## Status
+--   NOT YET IMPLEMENTED — placeholder only.
+--
+--   ## Details
+--   - Pro Tools equivalent : Nudge Play Earlier By Grid
+--   - Module               : Editing
+--   - Mac shortcut (PT)    : Control + Comma
+--   - Tags                 : Editing
+--
+--   ## About This Project
+--   Part of the PT2Reaper project — a complete mapping of Pro Tools
+--   keyboard shortcuts and actions to native REAPER equivalents.
+--
+--   ## Development
+--   Developed with the assistance of Claude AI (Anthropic).
+--
+-- @changelog
+--   0.1.0 [260413.1324]
+--     - Stub placeholder created
+
+-- TODO: not yet mapped to a Reaper action
+reaper.ShowMessageBox("Not yet implemented: Nudge Play Earlier By Grid", "PT2Reaper", 0)

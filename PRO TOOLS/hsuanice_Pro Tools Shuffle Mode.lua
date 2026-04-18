@@ -1,0 +1,22 @@
+-- @description hsuanice_Pro Tools Shuffle Mode
+-- @version 0.1.0 [260416.1323]
+-- @author hsuanice
+-- @link https://forum.cockos.com/showthread.php?p=2910884#post2910884
+-- @about
+--   # hsuanice Pro Tools Keybindings for REAPER
+--
+--   Wrapper replicating Pro Tools: **Shuffle Mode**
+--
+--   ## Mapping
+--   - Pro Tools equivalent : Shuffle Mode
+--   - Reaper action        : Options: Cycle ripple editing mode
+--   - Command ID           : 1155
+--   - Mac shortcut (PT)    : Option + 1
+--   - Tags                 : Edit Tools, Editing
+--
+-- @changelog
+--   0.1.0 [260416.1323]
+--     - Initial release
+--     - Maps Pro Tools "Shuffle Mode" to Reaper command ID 1155
+
+reaper.Main_OnCommand(1155, 0)

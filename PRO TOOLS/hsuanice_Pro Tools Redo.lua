@@ -1,0 +1,22 @@
+-- @description hsuanice_Pro Tools Redo
+-- @version 0.1.0 [260416.1323]
+-- @author hsuanice
+-- @link https://forum.cockos.com/showthread.php?p=2910884#post2910884
+-- @about
+--   # hsuanice Pro Tools Keybindings for REAPER
+--
+--   Wrapper replicating Pro Tools: **Redo**
+--
+--   ## Mapping
+--   - Pro Tools equivalent : Redo
+--   - Reaper action        : Edit: Redo
+--   - Command ID           : 40030
+--   - Mac shortcut (PT)    : Control + Shift + Z
+--   - Tags                 : Edit menu, Editing
+--
+-- @changelog
+--   0.1.0 [260416.1323]
+--     - Initial release
+--     - Maps Pro Tools "Redo" to Reaper command ID 40030
+
+reaper.Main_OnCommand(40030, 0)

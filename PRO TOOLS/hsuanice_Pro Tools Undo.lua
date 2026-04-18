@@ -1,0 +1,22 @@
+-- @description hsuanice_Pro Tools Undo
+-- @version 0.1.0 [260416.1323]
+-- @author hsuanice
+-- @link https://forum.cockos.com/showthread.php?p=2910884#post2910884
+-- @about
+--   # hsuanice Pro Tools Keybindings for REAPER
+--
+--   Wrapper replicating Pro Tools: **Undo**
+--
+--   ## Mapping
+--   - Pro Tools equivalent : Undo
+--   - Reaper action        : Edit: Undo
+--   - Command ID           : 40029
+--   - Mac shortcut (PT)    : Commands Focus + Z
+--   - Tags                 : Edit menu, Editing
+--
+-- @changelog
+--   0.1.0 [260416.1323]
+--     - Initial release
+--     - Maps Pro Tools "Undo" to Reaper command ID 40029
+
+reaper.Main_OnCommand(40029, 0)

@@ -1,0 +1,22 @@
+-- @description hsuanice_Pro Tools Heal Separation
+-- @version 0.1.0 [260415.1250]
+-- @author hsuanice
+-- @link https://forum.cockos.com/showthread.php?p=2910884#post2910884
+-- @about
+--   # hsuanice Pro Tools Keybindings for REAPER
+--
+--   Wrapper replicating Pro Tools: **Heal Separation**
+--
+--   ## Mapping
+--   - Pro Tools equivalent : Heal Separation
+--   - Reaper action        : Item: Heal splits in items
+--   - Command ID           : 40548
+--   - Mac shortcut (PT)    : Command + H
+--   - Tags                 : Edit menu, Editing
+--
+-- @changelog
+--   0.1.0 [260415.1250]
+--     - Initial release
+--     - Maps to Reaper command ID 40548
+
+reaper.Main_OnCommand(40548, 0)

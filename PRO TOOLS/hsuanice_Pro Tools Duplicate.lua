@@ -1,0 +1,22 @@
+-- @description hsuanice_Pro Tools Duplicate
+-- @version 0.1.0 [260415.1250]
+-- @author hsuanice
+-- @link https://forum.cockos.com/showthread.php?p=2910884#post2910884
+-- @about
+--   # hsuanice Pro Tools Keybindings for REAPER
+--
+--   Wrapper replicating Pro Tools: **Duplicate**
+--
+--   ## Mapping
+--   - Pro Tools equivalent : Duplicate
+--   - Reaper action        : Item: Duplicate items
+--   - Command ID           : 41295
+--   - Mac shortcut (PT)    : Command + D
+--   - Tags                 : Edit menu, Editing
+--
+-- @changelog
+--   0.1.0 [260415.1250]
+--     - Initial release
+--     - Maps to Reaper command ID 41295
+
+reaper.Main_OnCommand(41295, 0)

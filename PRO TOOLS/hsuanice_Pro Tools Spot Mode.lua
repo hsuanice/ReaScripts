@@ -1,0 +1,22 @@
+-- @description hsuanice_Pro Tools Spot Mode
+-- @version 0.1.0 [260416.1323]
+-- @author hsuanice
+-- @link https://forum.cockos.com/showthread.php?p=2910884#post2910884
+-- @about
+--   # hsuanice Pro Tools Keybindings for REAPER
+--
+--   Wrapper replicating Pro Tools: **Spot Mode**
+--
+--   ## Mapping
+--   - Pro Tools equivalent : Spot Mode
+--   - Reaper action        : Item: Move to media source preferred position [BWF start offset]
+--   - Command ID           : 40299
+--   - Mac shortcut (PT)    : F3
+--   - Tags                 : Edit Tools, Editing
+--
+-- @changelog
+--   0.1.0 [260416.1323]
+--     - Initial release
+--     - Maps Pro Tools "Spot Mode" to Reaper command ID 40299
+
+reaper.Main_OnCommand(40299, 0)

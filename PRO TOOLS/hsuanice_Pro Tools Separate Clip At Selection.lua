@@ -1,0 +1,22 @@
+-- @description hsuanice_Pro Tools Separate Clip At Selection
+-- @version 0.1.0 [260415.1250]
+-- @author hsuanice
+-- @link https://forum.cockos.com/showthread.php?p=2910884#post2910884
+-- @about
+--   # hsuanice Pro Tools Keybindings for REAPER
+--
+--   Wrapper replicating Pro Tools: **Separate Clip At Selection**
+--
+--   ## Mapping
+--   - Pro Tools equivalent : Separate Clip At Selection
+--   - Reaper action        : Item: Split items at edit cursor (no change selection)
+--   - Command ID           : 40757
+--   - Mac shortcut (PT)    : Commands Focus + B
+--   - Tags                 : Edit menu, Editing, Selection
+--
+-- @changelog
+--   0.1.0 [260415.1250]
+--     - Initial release
+--     - Maps to Reaper command ID 40757
+
+reaper.Main_OnCommand(40757, 0)
