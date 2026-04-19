@@ -1,6 +1,6 @@
 --[[
 @description hsuanice_PT_Nudge - Nudge Library
-@version 0.2.0 [260418.1931]
+@version 0.3.2 [260419.1037]
 @author hsuanice
 @about
   Library for all hsuanice nudge scripts.
@@ -96,7 +96,85 @@ function M.apply(nudgewhat, reverse)
   local mode, idx = M.get_state()
   local preset = M.get_preset(mode, idx)
   if not preset then return end
-  reaper.ApplyNudge(0, 0, nudgewhat, preset.unit, preset.value, reverse, 0)
+
+  -- Record first selected item position before nudge
+  local r = reaper
+  local first_it = r.GetSelectedMediaItem(0, 0)
+  local pos_before, len_before
+  if first_it then
+    pos_before = r.GetMediaItemInfo_Value(first_it, 'D_POSITION')
+    len_before  = r.GetMediaItemInfo_Value(first_it, 'D_LENGTH')
+  end
+
+  -- Apply nudge
+  r.ApplyNudge(0, 0, nudgewhat, preset.unit, preset.value, reverse, 0)
+
+  -- Calculate actual delta from first selected item
+  local delta = 0
+  if first_it and pos_before then
+    if nudgewhat == 0 or nudgewhat == 5 then
+      -- position: delta = new pos - old pos
+      delta = r.GetMediaItemInfo_Value(first_it, 'D_POSITION') - pos_before
+    elseif nudgewhat == 1 then
+      -- left trim: delta = new pos - old pos
+      delta = r.GetMediaItemInfo_Value(first_it, 'D_POSITION') - pos_before
+    elseif nudgewhat == 3 then
+      -- right edge: delta = new end - old end
+      local new_end = r.GetMediaItemInfo_Value(first_it, 'D_POSITION') +
+                      r.GetMediaItemInfo_Value(first_it, 'D_LENGTH')
+      delta = new_end - (pos_before + len_before)
+    end
+    -- nudgewhat==4 (contents): delta stays 0, selection doesn't move
+  end
+
+  -- Update time selection, razor areas, and edit cursor
+  if math.abs(delta) > 1e-10 then
+    local ts, te = r.GetSet_LoopTimeRange(false, false, 0, 0, false)
+    local has_ts = te > ts + 1e-4
+
+    if has_ts then
+      if nudgewhat == 0 or nudgewhat == 5 then
+        -- position: move both ends
+        r.GetSet_LoopTimeRange(true, false, ts + delta, te + delta, false)
+      elseif nudgewhat == 1 then
+        -- start: move left end only
+        r.GetSet_LoopTimeRange(true, false, ts + delta, te, false)
+      elseif nudgewhat == 3 then
+        -- end: move right end only
+        r.GetSet_LoopTimeRange(true, false, ts, te + delta, false)
+      end
+    end
+
+    -- Move edit cursor when Loop linked to time selection is ON
+    -- and nudge affects item position or start
+    local linked = r.GetToggleCommandState(40621) == 1
+    if linked and (nudgewhat == 0 or nudgewhat == 1 or nudgewhat == 5) then
+      local cursor = r.GetCursorPosition()
+      r.SetEditCurPos(cursor + delta, false, false)
+    end
+
+    -- Update razor areas by same delta
+    for ti = 0, r.CountTracks(0)-1 do
+      local track = r.GetTrack(0, ti)
+      local _, s = r.GetSetMediaTrackInfo_String(track, 'P_RAZOREDITS', '', false)
+      if s and s ~= '' then
+        local new_s = s:gsub('(%S+)%s+(%S+)%s+(%S+)', function(a, b, c)
+          local rs, re = tonumber(a), tonumber(b)
+          if rs and re and c == '""' then
+            if nudgewhat == 0 or nudgewhat == 5 then
+              return string.format('%.14f %.14f ""', rs+delta, re+delta)
+            elseif nudgewhat == 1 then
+              return string.format('%.14f %.14f ""', rs+delta, re)
+            elseif nudgewhat == 3 then
+              return string.format('%.14f %.14f ""', rs, re+delta)
+            end
+          end
+          return a..' '..b..' '..c
+        end)
+        r.GetSetMediaTrackInfo_String(track, 'P_RAZOREDITS', new_s, true)
+      end
+    end
+  end
 end
 
 function M.increase()
