@@ -1,6 +1,6 @@
 --[[
 @description hsuanice_Grid Nudge Panel
-@version 0.2.2 [260418.2041]
+@version 0.2.3 [260419.1002]
 @author hsuanice
 @link https://forum.cockos.com/showthread.php?p=2910884#post2910884
 @about
@@ -327,17 +327,24 @@ init_h = math.max(28, init_h)
 
 gfx.init('hsuanice_Grid Nudge Panel', init_w, init_h, -1)
 gfx.clear = 0x1a1a1a
+-- Pass keyboard shortcuts through to Reaper (don't steal focus)
+if reaper.set_action_options then reaper.set_action_options(1) end
 
 local function frame()
   if done then return end
   local c = gfx.getchar()
   if c == -1 then done = true; return end
-  if c == 27 then done = true; return end  -- ESC closes
+  -- Note: no key handling here — all keys pass through to Reaper
 
   -- Mouse click handling (on button release)
   local mb = gfx.mouse_cap & 3
   local just_released_l = (mb & 1 == 0) and (prev_mouse_cap & 1 == 1)
   local just_released_r = (mb & 2 == 0) and (prev_mouse_cap & 2 == 2)
+
+  -- After any interaction, return focus to main window so shortcuts work
+  local function refocus_main()
+    r.JS_Window_SetFocus(r.GetMainHwnd())
+  end
 
   if just_released_l then
     local row = gfx.h // 2
@@ -350,6 +357,7 @@ local function frame()
         save_nudge(nudge_mode, nudge_idx)
       end
     end
+    refocus_main()
   end
 
   if just_released_r then
@@ -376,6 +384,7 @@ local function frame()
       r.SetExtState(EXT, 'gfx_w', tostring(nw), true)
       r.SetExtState(EXT, 'gfx_h', tostring(nh), true)
     end
+    refocus_main()
   end
 
   prev_mouse_cap = mb

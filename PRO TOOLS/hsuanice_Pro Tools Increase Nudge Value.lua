@@ -1,68 +1,21 @@
 -- @description hsuanice_Pro Tools Increase Nudge Value
--- @version 0.1.0 [260418.1534]
+-- @version 0.3.0 [260419.0934]
 -- @author hsuanice
+-- @link https://forum.cockos.com/showthread.php?p=2910884#post2910884
 -- @about
 --   Increases nudge value to next preset in current mode. Stops at list boundary.
---   Reads/writes state shared with hsuanice_Grid Nudge Panel.
 --   Mac shortcut (PT): Option + Shift + =
+--   Tags: Editing
 -- @changelog
+--   0.3.0 [260419.0934] - Remove tooltip (blocks rapid switching)
+--   0.2.0 [260419.0921] - Cleaner GFX tooltip
 --   0.1.0 [260418.1534] - Initial release
 
 local r = reaper
-local info = debug.getinfo(1,'S')
-local dir  = info.source:match('^@(.+)[\/]') or ''
-local Nudge = dofile(dir .. '/hsuanice_PT_Nudge.lua')
+local info = debug.getinfo(1, 'S')
+local dir = info.source:match('^@(.*[/\\])') or ''
+local ok, Nudge = pcall(dofile, dir .. 'hsuanice_PT_Nudge.lua')
+if not ok then return end
 
-local mode, idx = Nudge.increase()
-local preset = Nudge.get_preset(mode, idx)
-if not preset then r.defer(function() end); return end
-
--- Show floating tooltip via GFX
-local label = preset.label
-local mx, my = r.GetMousePosition()
-
-local TOOLTIP_DURATION = 2.0
-local start_time = r.time_precise()
-
-gfx.init('hsuanice_NudgeTooltip', 1, 1, 0, mx + 20, my - 40)
-local tooltip_hwnd = r.JS_Window_Find('hsuanice_NudgeTooltip', true)
-if tooltip_hwnd then
-  r.JS_Window_SetOpacity(tooltip_hwnd, 'ALPHA', 0)
-end
-
--- Measure text for sizing
-gfx.setfont(1, 'Arial', 13)
-local tw, th = gfx.measurestr(label)
-local W = tw + 20
-local H = th + 10
-
-gfx.quit()
-gfx.init('hsuanice_NudgeTooltip', W, H, 0, mx + 20, my - H - 10)
-tooltip_hwnd = r.JS_Window_Find('hsuanice_NudgeTooltip', true)
-
-local function draw_tooltip()
-  gfx.clear = 0x242424
-  gfx.set(0.15, 0.15, 0.15)
-  gfx.rect(0, 0, W, H, 1)
-  gfx.set(0.27, 0.27, 0.27)
-  gfx.rect(0, 0, W, H, 0)
-  gfx.setfont(1, 'Arial', 13)
-  gfx.set(0.8, 0.8, 0.8)
-  gfx.x = 10; gfx.y = 5
-  gfx.drawstr(label)
-  gfx.update()
-end
-
-local function tooltip_loop()
-  local elapsed = r.time_precise() - start_time
-  if elapsed > TOOLTIP_DURATION then
-    gfx.quit()
-    return
-  end
-  if gfx.getchar() == -1 then return end
-  draw_tooltip()
-  r.defer(tooltip_loop)
-end
-
-draw_tooltip()
-r.defer(tooltip_loop)
+Nudge.increase()
+r.defer(function() end)
