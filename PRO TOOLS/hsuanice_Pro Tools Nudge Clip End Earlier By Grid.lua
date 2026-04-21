@@ -1,8 +1,8 @@
--- @description hsuanice_Pro Tools Nudge Clip End Later By Grid
+-- @description hsuanice_Pro Tools Nudge Clip End Earlier By Grid
 -- @version 0.5.0 [260421.1048]
 -- @author hsuanice
 -- @about
---   Replicates Pro Tools: **Nudge Clip End Later By Grid**
+--   Replicates Pro Tools: **Nudge Clip End Earlier By Grid**
 --   Fill + nudge mechanism: boundary fills to selection edge first, then nudges.
 --   Zone-aware stop guard prevents zone from disappearing.
 --   Tags: Editing
@@ -124,7 +124,7 @@ local function nudge_end(item, sel_s, sel_e, delta)
   end
 end
 
-local delta = get_delta()
+local delta = -get_delta()
 if math.abs(delta) < 1e-10 then return end
 
 local has_items = r.CountSelectedMediaItems(0) > 0
@@ -192,4 +192,4 @@ end
 
 r.PreventUIRefresh(-1)
 r.UpdateArrange()
-r.Undo_EndBlock('Pro Tools: Nudge Clip End Later By Grid', -1)
+r.Undo_EndBlock('Pro Tools: Nudge Clip End Earlier By Grid', -1)

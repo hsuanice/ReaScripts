@@ -1,13 +1,14 @@
--- @description hsuanice_Pro Tools Nudge Clip End Later By Grid
--- @version 0.5.0 [260421.1048]
+-- @description hsuanice_Pro Tools Nudge Clip Start Later By Grid
+-- @version 0.6.0 [260421.1048]
 -- @author hsuanice
 -- @about
---   Replicates Pro Tools: **Nudge Clip End Later By Grid**
+--   Replicates Pro Tools: **Nudge Clip Start Later By Grid**
 --   Fill + nudge mechanism: boundary fills to selection edge first, then nudges.
 --   Zone-aware stop guard prevents zone from disappearing.
 --   Tags: Editing
 -- @changelog
---   0.5.0 [260421.1048] - Item-only selection uses nudge_end (fade-aware) instead of ApplyNudge
+--   0.6.0 [260421.1048] - Add cursor_follow via SelectionSync when loop-link is active
+--   0.5.0 [260421.1048] - Item-only selection uses nudge_start (fade-aware) instead of ApplyNudge
 --   0.4.0 [260420.1523] - Add fill mechanism + correct zone-size stop guard
 --   0.3.0 [260420.1247] - 3-boundary logic with stop guard
 --   0.2.0 [260420.1132] - PT selection-aware nudge
@@ -21,6 +22,7 @@ if not ok then
   r.ShowMessageBox('Could not load hsuanice_PT_Nudge.lua', 'Error', 0)
   return
 end
+local _, Sync = pcall(dofile, dir .. '../Library/hsuanice_PT_SelectionSync.lua')
 
 local EPS = 1e-4
 
@@ -72,9 +74,9 @@ local function update_razor(track, new_s, new_e)
   r.GetSetMediaTrackInfo_String(track, 'P_RAZOREDITS', updated, true)
 end
 
--- Nudge End: fill boundary to sel_e, then nudge
--- Priority: C end > B end > A end
-local function nudge_end(item, sel_s, sel_e, delta)
+-- Nudge Start: fill boundary to sel_s, then nudge
+-- Priority: A start > B start > C start
+local function nudge_start(item, sel_s, sel_e, delta)
   local pos      = r.GetMediaItemInfo_Value(item, 'D_POSITION')
   local len      = r.GetMediaItemInfo_Value(item, 'D_LENGTH')
   local fi_len   = r.GetMediaItemInfo_Value(item, 'D_FADEINLEN')
@@ -82,49 +84,57 @@ local function nudge_end(item, sel_s, sel_e, delta)
   local item_e   = pos + len
   local fi_end   = pos + fi_len
   local fo_start = item_e - fo_len
+  local take     = r.GetActiveTake(item)
 
-  -- Zone-collapse guard: prevent sel_e from collapsing onto sel_s
+  -- Zone-collapse guard: prevent sel_s from collapsing onto sel_e
   if delta < 0 and (sel_e - sel_s) <= math.abs(delta) + EPS then return sel_s, sel_e end
 
-  -- Priority 1: C end (item_e) in selection
-  if sel_s <= item_e + EPS and sel_e >= item_e - EPS then
-    -- Fill: fo_len expands to reach sel_e, then nudge
-    local fill_amt = sel_e - item_e  -- how much to fill (can be negative)
-    local new_fo_len = fo_len + fill_amt  -- after fill
-    -- Guard: after fill, new_fo_len must be > delta (for Earlier)
-    if delta < 0 and new_fo_len <= math.abs(delta) + EPS then return sel_s, sel_e end
-    -- Apply fill + nudge
+  -- Priority 1: A start (pos) in selection
+  if sel_s <= pos + EPS and sel_e >= pos - EPS then
+    local fill_amt = pos - sel_s  -- positive = sel_s is left of pos
+    local new_fi_len = fi_len + fill_amt  -- fi_len after fill
+    if delta < 0 and new_fi_len <= math.abs(delta) + EPS then return sel_s, sel_e end
     local total = fill_amt + delta
-    r.SetMediaItemInfo_Value(item, 'D_LENGTH',     len + total)
-    r.SetMediaItemInfo_Value(item, 'D_FADEOUTLEN', fo_len + total)
-    return sel_s, item_e + total
+    r.SetMediaItemInfo_Value(item, 'D_POSITION',  pos - total)
+    r.SetMediaItemInfo_Value(item, 'D_LENGTH',    len + total)
+    r.SetMediaItemInfo_Value(item, 'D_FADEINLEN', fi_len + total)
+    if take then
+      local offs = r.GetMediaItemTakeInfo_Value(take, 'D_STARTOFFS')
+      r.SetMediaItemTakeInfo_Value(take, 'D_STARTOFFS', offs - total)
+    end
+    return pos - total, sel_e
 
-  -- Priority 2: B end (fo_start) in selection
-  elseif sel_s <= fo_start + EPS and sel_e >= fo_start - EPS then
-    local fill_amt = sel_e - fo_start
-    local new_clip_len = (fo_start - fi_end) + fill_amt
+  -- Priority 2: B start (fi_end) in selection
+  elseif sel_s <= fi_end + EPS and sel_e >= fi_end - EPS then
+    local fill_amt = fi_end - sel_s  -- positive = sel_s is left of fi_end
+    local new_clip_len = (fo_start - fi_end) + fill_amt  -- body after fill
     if delta < 0 and new_clip_len <= math.abs(delta) + EPS then return sel_s, sel_e end
     local total = fill_amt + delta
-    r.SetMediaItemInfo_Value(item, 'D_LENGTH', len + total)
-    return sel_s, fo_start + total
+    r.SetMediaItemInfo_Value(item, 'D_POSITION', pos - total)
+    r.SetMediaItemInfo_Value(item, 'D_LENGTH',   len + total)
+    if take then
+      local offs = r.GetMediaItemTakeInfo_Value(take, 'D_STARTOFFS')
+      r.SetMediaItemTakeInfo_Value(take, 'D_STARTOFFS', offs - total)
+    end
+    return fi_end - total, sel_e
 
-  -- Priority 3: A end (fi_end) in selection
-  elseif sel_s <= fi_end + EPS and sel_e >= fi_end - EPS then
-    local fill_amt = sel_e - fi_end
-    local new_fi_len = fi_len + fill_amt
-    local clip_len_after = (fo_start - fi_end) - fill_amt
-    if delta < 0 and new_fi_len   <= math.abs(delta) + EPS then return sel_s, sel_e end
+  -- Priority 3: C start (fo_start) in selection
+  elseif sel_s <= fo_start + EPS and sel_e >= fo_start - EPS then
+    local fill_amt    = fo_start - sel_s
+    local new_fo_len  = fo_len + fill_amt        -- fo_len after fill
+    local clip_len_after = (fo_start - fi_end) - fill_amt  -- body after fill
+    if delta < 0 and new_fo_len    <= math.abs(delta) + EPS then return sel_s, sel_e end
     if delta > 0 and clip_len_after <= math.abs(delta) + EPS then return sel_s, sel_e end
     local total = fill_amt + delta
-    r.SetMediaItemInfo_Value(item, 'D_FADEINLEN', fi_len + total)
-    return sel_s, fi_end + total
+    r.SetMediaItemInfo_Value(item, 'D_FADEOUTLEN', fo_len + total)
+    return fo_start - total, sel_e
 
   else
-    return sel_s, sel_e + delta
+    return sel_s + delta, sel_e
   end
 end
 
-local delta = get_delta()
+local delta = -get_delta()
 if math.abs(delta) < 1e-10 then return end
 
 local has_items = r.CountSelectedMediaItems(0) > 0
@@ -145,7 +155,7 @@ end
 r.Undo_BeginBlock()
 r.PreventUIRefresh(1)
 
-local new_sel_e_global = nil
+local new_sel_s_global = nil
 
 for i = 0, r.CountSelectedMediaItems(0) - 1 do
   local item  = r.GetSelectedMediaItem(0, i)
@@ -156,16 +166,16 @@ for i = 0, r.CountSelectedMediaItems(0) - 1 do
 
   if sel_s and sel_e then
     if sel_e > pos + EPS and sel_s < item_e - EPS then
-      local new_s, new_e = nudge_end(item, sel_s, sel_e, delta)
+      local new_s, new_e = nudge_start(item, sel_s, sel_e, delta)
       if math.abs(new_s - sel_s) > 1e-10 or math.abs(new_e - sel_e) > 1e-10 then
-        new_sel_e_global = new_e
+        new_sel_s_global = new_s
         update_razor(track, new_s, new_e)
       end
     end
   else
-    local _, new_e = nudge_end(item, pos, item_e, delta)
-    if math.abs(new_e - item_e) > 1e-10 then
-      new_sel_e_global = new_e
+    local new_s, _ = nudge_start(item, pos, item_e, delta)
+    if math.abs(new_s - pos) > 1e-10 then
+      new_sel_s_global = new_s
     end
   end
 end
@@ -176,20 +186,21 @@ if not has_items then
       local tr = r.GetTrack(0, ti)
       local rs, re = get_track_razor(tr)
       if rs then
-        new_sel_e_global = re + delta
-        update_razor(tr, rs, re + delta)
+        new_sel_s_global = rs - delta
+        update_razor(tr, rs - delta, re)
       end
     end
   elseif has_ts then
-    new_sel_e_global = ts_e + delta
+    new_sel_s_global = ts_s - delta
   end
 end
 
 local ts, te = r.GetSet_LoopTimeRange(false, false, 0, 0, false)
-if te > ts + EPS and new_sel_e_global then
-  r.GetSet_LoopTimeRange(true, false, ts, new_sel_e_global, false)
+if te > ts + EPS and new_sel_s_global then
+  r.GetSet_LoopTimeRange(true, false, new_sel_s_global, te, false)
 end
 
 r.PreventUIRefresh(-1)
 r.UpdateArrange()
-r.Undo_EndBlock('Pro Tools: Nudge Clip End Later By Grid', -1)
+r.Undo_EndBlock('Pro Tools: Nudge Clip Start Later By Grid', -1)
+if Sync then Sync.cursor_follow() end

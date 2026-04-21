@@ -31,6 +31,7 @@ if not ok then
   r.ShowMessageBox("Could not load hsuanice_PT_Nudge.lua", "Error", 0)
   return
 end
+local _, Sync = pcall(dofile, dir .. "../Library/hsuanice_PT_SelectionSync.lua")
 
 local EPS = 1e-4
 
@@ -173,8 +174,7 @@ end
 r.Undo_BeginBlock()
 r.PreventUIRefresh(1)
 
-local any_item_nudged = false
-local position_moved = false  -- track if any item did a full position move
+local _ = false
 
 for i = 0, r.CountSelectedMediaItems(0) - 1 do
   local item  = r.GetSelectedMediaItem(0, i)
@@ -187,25 +187,15 @@ for i = 0, r.CountSelectedMediaItems(0) - 1 do
   if sel_s and sel_e then
     -- Razor exists: use razor as selection
     if sel_e > pos + EPS and sel_s < item_e - EPS then
-      -- Check if this will be a full position move (case 1)
-      local fi_len  = r.GetMediaItemInfo_Value(item, 'D_FADEINLEN')
-      local fo_len  = r.GetMediaItemInfo_Value(item, 'D_FADEOUTLEN')
-      local fi_end  = pos + fi_len
-      local fo_start = item_e - fo_len
       local clamped_s = math.max(sel_s, pos)
       local clamped_e = math.min(sel_e, item_e)
-      local fi_cov = clamped_s <= pos      + EPS and clamped_e >= fi_end    - EPS
-      local fo_cov = clamped_s <= fo_start + EPS and clamped_e >= item_e   - EPS
-      local cl_cov = clamped_s <= fi_end   + EPS and clamped_e >= fo_start - EPS
-      if fi_cov and cl_cov and fo_cov then position_moved = true end
       nudge_item(item, clamped_s, clamped_e, delta)
-      any_item_nudged = true
+      _ = true
     end
   else
     -- No razor: item selection = entire item -> position move
     r.SetMediaItemInfo_Value(item, 'D_POSITION', pos + delta)
-    any_item_nudged = true
-    position_moved = true
+    _ = true
   end
 end
 
@@ -230,11 +220,7 @@ if te > ts + EPS then
   r.GetSet_LoopTimeRange(true, false, ts + delta, te + delta, false)
 end
 
--- Move edit cursor when Loop linked to time selection is ON and item position moved
-local linked = r.GetToggleCommandState(40621) == 1
-if linked and position_moved then
-  r.SetEditCurPos(r.GetCursorPosition() + delta, false, false)
-end
+if Sync then Sync.cursor_follow() end
 
 r.PreventUIRefresh(-1)
 r.UpdateArrange()
