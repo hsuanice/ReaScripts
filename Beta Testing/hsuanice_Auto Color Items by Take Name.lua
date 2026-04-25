@@ -1,6 +1,6 @@
 --[[
 @description Auto Color Items by Take Name
-@version 260324.1912
+@version 260425.1857
 @author hsuanice
 @about
   Config-driven color palette with keyword rules — colors items by take name.
@@ -13,6 +13,28 @@
   No external dependencies — REAPER built-in GFX library.
 
 @changelog
+  v260425.1857
+  - Fix: Export Keywords failed with "Could not write to: 1" — JS_Dialog_BrowseForSaveFile returns (retval, fileName); only the retval (1) was being captured as the path. Now captures both return values correctly.
+
+  v260325.1752
+  - Add: file-based state persistence — all presets, keywords, and prefs saved to hsuanice Scripts/Tools/hsuanice_AutoColorItems_state.dat on script exit and on every explicit "Save Preset"
+  - On startup: file is loaded first so ExtState is repopulated even if reaper-extstate.ini was lost across REAPER restarts
+
+  v260325.1647
+  - Fix: startup no longer overwrites palette_v3 keywords with (possibly older) saved preset — load_preset() now only fires as fallback when palette_v3 has no keywords at all
+  - Add: Export / Import buttons in List View footer — tab-separated text file (hex_color TAB keyword, one line per palette entry)
+  - Export uses native macOS/Windows save dialog via js_ReaScriptAPI (JS_Dialog_BrowseForSaveFile); falls back to text-input if extension not installed
+  - Import/Export default location is the REAPER session (.rpp) folder, not the media recording folder
+
+  v260325.1620
+  - Fix: add atexit handler to flush palette + pconf to ExtState when script exits (guards against data lost on normal close without prior save_pconf trigger)
+  - Fix: save_pconf() called immediately on startup (so last_preset is always current after init)
+  - Fix: clicking Default preset now immediately persists last_preset = "Default" to prevent stale restore on next open
+
+  v260325.1605
+  - Fix: saved preset now reliably restored on script reopen — startup now calls load_preset() directly instead of relying on palette_v3 (which could become stale)
+  - Fix: saving a preset (Save Preset button) now also persists last_preset so it survives reopen even without any other settings change
+
   v260324.1912
   - Fix: Daemon no longer slows REAPER on track selection — debounce added (15-frame stable window before recolor); GUI settings polled every 10 frames instead of every frame
   - Add: Audio / Empty / MIDI item-type filter checkboxes always visible below toolbar (not gated on Auto Color)
@@ -170,6 +192,10 @@ local function gen_palette()
     end
   end
 end
+
+-- ─── script path (used for export/import default location) ───────────────────
+local _, SCRIPT_PATH = reaper.get_action_context()
+local SCRIPT_DIR     = SCRIPT_PATH:match("^(.*[/\\])") or "./"
 
 -- ─── state ────────────────────────────────────────────────────────────────────
 local PREF_NS            = "hsuanice_AutoColorItems"
@@ -408,9 +434,10 @@ local function do_clear_selected()
 end
 
 -- ─── GFX init ─────────────────────────────────────────────────────────────────
-local MARGIN  = 8
-local BAR_H   = 24
-local AC_BAR_H = 20   -- height of the item-type filter sub-bar below main toolbar
+local MARGIN        = 8
+local BAR_H         = 24
+local AC_BAR_H      = 20   -- height of the item-type filter sub-bar below main toolbar
+local LIST_FOOTER_H = 24   -- export/import toolbar below list view
 
 -- base_win_w/h = palette-only window size; base_win_x/y = screen position
 local base_win_w = 620
@@ -694,6 +721,8 @@ local preset_auto_update = true   -- auto-save to current_preset on changes
 
 local draw_preset_panel  -- forward declaration (defined in presets section below)
 local draw_list_view     -- forward declaration (defined in presets section below)
+local export_keywords    -- forward declaration (defined in presets section below)
+local import_keywords    -- forward declaration (defined in presets section below)
 
 -- ─── main draw ────────────────────────────────────────────────────────────────
 local hover_info = ""
@@ -852,7 +881,13 @@ local function draw()
 
   -- ── palette grid or list view ──────────────────────────────────────────────
   if view_mode == "list" then
-    draw_list_view(content_top, H - content_top - 16 - MARGIN)
+    draw_list_view(content_top, H - content_top - 16 - MARGIN - LIST_FOOTER_H)
+    -- ── export / import footer ────────────────────────────────────────────
+    local fy = H - 16 - MARGIN - LIST_FOOTER_H
+    fill(0, fy, W, LIST_FOOTER_H, .11, .11, .11)
+    gfx.set(.28,.28,.28,1); gfx.line(0, fy, W, fy)
+    if btn(MARGIN, fy+3, 72, LIST_FOOTER_H-6, "⬆ Export") then export_keywords() end
+    if btn(MARGIN+76, fy+3, 72, LIST_FOOTER_H-6, "⬇ Import") then import_keywords() end
   else
     local grid_y   = content_top + 4
     local cw       = math.max(28, (W - MARGIN*2) // PALETTE_COLS)
@@ -1084,6 +1119,135 @@ local function rename_preset(old_name, new_name)
   if current_preset == old_name then current_preset = new_name end
 end
 
+-- ─── keyword export / import ──────────────────────────────────────────────────
+-- Format: one line per palette entry — "RRGGBB\tkeyword"
+-- Empty keyword = empty string after the tab (line still present for position).
+-- Comment lines starting with # are skipped on import.
+
+local function proj_dir()
+  -- EnumProjects(-1) gives the current project's .rpp file path (session folder),
+  -- unlike GetProjectPath which returns the media/recording folder.
+  local _, rpp = reaper.EnumProjects(-1, "")
+  local p = (rpp ~= "" and rpp:match("^(.*[/\\])")) or SCRIPT_DIR
+  if not p:match("[/\\]$") then p = p .. "/" end
+  return p
+end
+
+export_keywords = function()
+  local dir  = proj_dir()
+  local path
+  if reaper.JS_Dialog_BrowseForSaveFile then
+    -- js_ReaScriptAPI available: native macOS/Windows save dialog
+    -- JS_Dialog_BrowseForSaveFile returns (retval, fileName) — must capture both
+    local ret
+    ret, path = reaper.JS_Dialog_BrowseForSaveFile(
+      "Export Keywords", dir, "hsuanice_keywords.txt",
+      "Text files (.txt)\0*.txt\0All files (*.*)\0*.*\0")
+    if not ret or ret ~= 1 or not path or path == "" then return end
+  else
+    -- fallback: plain text-input dialog
+    local ok, p = reaper.GetUserInputs("Export Keywords", 1,
+      "Save to file (full path):", dir .. "hsuanice_keywords.txt", 512)
+    if not ok or p == "" then return end
+    path = p:match("^%s*(.-)%s*$")
+  end
+  local f = io.open(path, "w")
+  if not f then
+    reaper.ShowMessageBox("Could not write to:\n" .. path, "Export Error", 0)
+    return
+  end
+  f:write("# hsuanice Auto Color Items — keyword export\n")
+  f:write("# hex_color\tkeyword\n")
+  for _, p in ipairs(PALETTE) do
+    f:write(string.format("%06X\t%s\n", p.color & 0xFFFFFF, p.keyword or ""))
+  end
+  f:close()
+  set_status("Exported " .. #PALETTE .. " entries → " .. path)
+end
+
+import_keywords = function()
+  local ok, path = reaper.GetUserFileNameForRead(
+    proj_dir() .. "hsuanice_keywords.txt", "Import Keywords", "txt")
+  if not ok or path == "" then return end
+  local f = io.open(path, "r")
+  if not f then
+    reaper.ShowMessageBox("Could not open:\n" .. path, "Import Error", 0)
+    return
+  end
+  local kws = {}
+  for line in f:lines() do
+    if not line:match("^%s*#") then          -- skip comment lines
+      -- accept "hex\tkeyword" or just "keyword"
+      local kw = line:match("\t(.*)$") or line
+      kws[#kws+1] = kw:match("^%s*(.-)%s*$")
+    end
+  end
+  f:close()
+  local count = 0
+  for i, p in ipairs(PALETTE) do
+    if kws[i] ~= nil then
+      p.keyword = kws[i]
+      count = count + 1
+    end
+  end
+  save_palette()
+  preset_dirty = true
+  if auto_color_enabled then last_state_count = -1 end
+  set_status("Imported " .. count .. " keywords from file")
+end
+
+-- ─── file-based state persistence ────────────────────────────────────────────
+-- Saves/loads ALL ExtState keys (palette, presets, prefs) to a plain-text file
+-- in Tools/ so data survives REAPER restarts even if reaper-extstate.ini is lost.
+local STATE_DIR  = SCRIPT_DIR .. "../Tools/"
+local STATE_FILE = STATE_DIR  .. "hsuanice_AutoColorItems_state.dat"
+
+-- Encode/decode newlines so each key fits on one line.
+local function enc(s) return (s:gsub("\\", "\\\\"):gsub("\n", "\\n")) end
+local function dec(s) return (s:gsub("\\\\", "\1"):gsub("\\n", "\n"):gsub("\1", "\\")) end
+
+local PERSIST_KEYS = {
+  "pconf_v1", "grey_row", "palette_v3", "last_preset",
+  "collapsed", "show_settings", "show_presets", "view_mode",
+  "font_size", "swatch_chars", "ac_audio", "ac_empty", "ac_midi",
+  "win_w", "win_h", "win_x", "win_y", "preset_list",
+}
+
+local function save_state_to_file()
+  os.execute('mkdir -p "' .. STATE_DIR .. '"')
+  local f = io.open(STATE_FILE, "w")
+  if not f then return end
+  f:write("# hsuanice_AutoColorItems state v1\n")
+  for _, key in ipairs(PERSIST_KEYS) do
+    local val = reaper.GetExtState(PREF_NS, key)
+    if val ~= "" then f:write(key .. "=" .. enc(val) .. "\n") end
+  end
+  -- write each saved preset
+  local names = list_presets()
+  for _, name in ipairs(names) do
+    local pk  = "preset:" .. name
+    local val = reaper.GetExtState(PREF_NS, pk)
+    if val ~= "" then f:write(pk .. "=" .. enc(val) .. "\n") end
+  end
+  f:close()
+end
+
+local function load_state_from_file()
+  local f = io.open(STATE_FILE, "r")
+  if not f then return false end
+  for line in f:lines() do
+    if not line:match("^%s*#") and line ~= "" then
+      -- split on first '=' only (preset names / keywords may contain '=')
+      local key, val = line:match("^([^=]+)=(.*)")
+      if key and val then
+        reaper.SetExtState(PREF_NS, key, dec(val), true)
+      end
+    end
+  end
+  f:close()
+  return true
+end
+
 draw_list_view = function(top_y, avail_h)
   local W        = gfx.w
   local ROW_H    = 22
@@ -1230,6 +1394,8 @@ draw_preset_panel = function(start_y)
       save_preset(n)
       current_preset = n
       preset_dirty   = false
+      save_pconf()
+      save_state_to_file()   -- write to Tools/ immediately on explicit save
       set_status("Saved: " .. n)
     end
   end
@@ -1250,6 +1416,7 @@ draw_preset_panel = function(start_y)
     save_palette()
     current_preset = "Default"
     preset_dirty   = false
+    save_pconf()   -- persist last_preset = "Default" immediately
     if auto_color_enabled then last_state_count = -1 end
     set_status("Loaded: Default")
   end
@@ -1315,10 +1482,39 @@ end
 
 -- ─── init & loop ─────────────────────────────────────────────────────────────
 reaper.set_action_options(1)  -- mark as toggle script (checkmark in Action List)
+-- Restore from Tools/ file first so ExtState is populated even after a
+-- REAPER restart that wiped reaper-extstate.ini.
+load_state_from_file()
 load_win_size()
 load_pconf()
 load_palette()
 load_auto_pref()
+-- If a named preset was active last session, reload it from saved data
+-- (guards against palette_v3 becoming stale between sessions)
+-- On startup: trust palette_v3 (updated on every keyword edit) as the
+-- authoritative state.  Only fall back to the saved preset if palette_v3
+-- has no keywords at all (e.g. user loaded Default just before closing).
+do
+  local has_kw = false
+  for _, p in ipairs(PALETTE) do
+    if p.keyword ~= "" then has_kw = true; break end
+  end
+  if not has_kw and current_preset and current_preset ~= "Default" then
+    load_preset(current_preset)
+  end
+end
+save_pconf()   -- flush last_preset to ExtState immediately
+
+-- On exit: save both palette and preset so they stay in sync.
+-- This means load_preset() on next startup loads the same content as palette_v3.
+reaper.atexit(function()
+  save_palette()
+  if current_preset and current_preset ~= "Default" then
+    save_preset(current_preset)
+  end
+  save_pconf()
+  save_state_to_file()   -- write complete snapshot to Tools/ for reliable persistence
+end)
 
 do
   gfx_init(base_win_w, collapsed and BAR_H or expanded_h())
