@@ -1,6 +1,6 @@
 --[[
 @description Conform List Browser
-@version 260404.1358
+@version 260426.1446
 @author hsuanice
 @about
   A REAPER script for browsing and editing EDL (Edit Decision List) data
@@ -39,13 +39,46 @@
     - CMX3600 EDL (.edl)
     - FCP7 XML (.xml) — Final Cut Pro 7 and DaVinci Resolve XML export
     - AAF (.aaf)      — via LibAAF (aaftool) + OpenTimelineIO
+    - Subtitles / dialogue lists:
+        .srt                 SubRip absolute time
+        .csv / .tsv          Tabular dialogue lists with auto IN/OUT detection
+        .xlsx / .xlsm        Excel dialogue lists; multi-sheet picker
 
   Requires: ReaImGui (install via ReaPack)
   Optional: js_ReaScriptAPI (for folder selection)
   Required: Python 3 + opentimelineio (pip3 install opentimelineio)
+  Optional: openpyxl  (pip3 install openpyxl) — only for .xlsx subtitle import
   Required for AAF: aaftool in PATH (https://github.com/agfline/LibAAF)
 
 @changelog
+  v260426.1446
+  - Fix: Subtitle imports now use track name "SUBTITLE" instead of the raw
+    "SUBTITLE_XLSX" / "SUBTITLE_CSV" etc. internal format identifier.
+  - Fix: Track-name template expansion now strips dangling separators left
+    by empty tokens (e.g. "SUBTITLE - " with empty ${track} → "SUBTITLE").
+
+  - Tweak: Subtitle import dialog no longer shows a Frame Rate row.
+    • Parsing uses the current CLB.fps; the existing post-import "Confirm
+      Frame Rate" prompt remains the canonical place to set FPS / drop frame
+    • A small hint shows the FPS that will be used at parse time
+
+  v260426.1426
+  - Feature: Subtitle / Dialogue List import (.srt / .csv / .tsv / .xlsx)
+    • New "Load Subtitle..." toolbar button next to Load EDL/XML/AAF
+    • SRT loads silently using the current CLB FPS for TC conversion
+    • CSV / TSV / XLSX open a column-picker dialog with sample-row preview
+    • Auto-detects IN/OUT columns by scanning for time-like cells (left-most
+      pair wins). User picks sheet (xlsx) and text column manually
+    • Subtitle in/out are written to rec_tc_in / rec_tc_out (absolute
+      timeline position). Source TC, reel, scene, take left empty
+    • Overlapping subtitles preserved as-is (no shifting)
+    • New: Tools/subtitle_to_clb.py and Library/hsuanice_Subtitle Bridge.lua
+
+  - Feature: CJK-capable font for clip-name display
+    • Loads PingFang.ttc (macOS), Microsoft YaHei (Windows), or Noto CJK
+      (Linux) at startup so Chinese / Japanese clip names render properly
+    • Falls back silently to ImGui default if no CJK font is available
+
   v260404.1358
   - Fix: ${format} token now correctly reflects source format after saving/reloading .clb
     • Previously CLB.loaded_format was hardcoded to "CLB" on .clb load, causing ${format}
@@ -774,6 +807,14 @@ if not ok_otio then
   return
 end
 
+-- Subtitle Bridge (SRT, CSV, TSV, XLSX subtitle / dialogue list import)
+local SUBTITLE_BRIDGE_PATH = lib_path .. "hsuanice_Subtitle Bridge.lua"
+local ok_sub, SUBTITLE = pcall(dofile, SUBTITLE_BRIDGE_PATH)
+if not ok_sub then
+  -- Optional: subtitle import is not required for core CLB workflows
+  SUBTITLE = nil
+end
+
 -- List Table (optional, for clipboard/export helpers)
 local LT_PATH = lib_path .. "hsuanice_List Table.lua"
 local ok_lt, LT = pcall(dofile, LT_PATH)
@@ -804,7 +845,7 @@ end
 ---------------------------------------------------------------------------
 local SCRIPT_NAME = "Conform List Browser"
 local EXT_NS = "hsuanice_ConformListBrowser"
-local VERSION = "260402.1520"
+local VERSION = "260426.1446"
 
 -- Column definitions (EDL Events table)
 local COL = {
@@ -1163,6 +1204,24 @@ local current_font_size = 13
 local font_pushed_this_frame = false
 local FONT_SCALE = 1.0
 local ALLOW_DOCKING = false
+
+-- CJK-capable font object, populated at startup. nil if no CJK font is found
+-- (e.g. on Linux without Noto CJK installed) — in that case ImGui falls back
+-- to the default font, which lacks Chinese glyphs.
+local cjk_font = nil
+
+-- Candidate font files to load for CJK glyph coverage.
+-- macOS PingFang.ttc covers Traditional and Simplified Chinese, Japanese, and
+-- Hangul, plus the basic Latin set we need for the rest of the UI.
+local CJK_FONT_CANDIDATES = {
+  "/System/Library/Fonts/PingFang.ttc",
+  "/System/Library/Fonts/STHeiti Medium.ttc",
+  "/System/Library/Fonts/Hiragino Sans GB.ttc",
+  "C:\\Windows\\Fonts\\msyh.ttc",
+  "C:\\Windows\\Fonts\\msjh.ttc",
+  "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
+  "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+}
 
 ---------------------------------------------------------------------------
 -- Font size
@@ -3626,6 +3685,9 @@ local function load_aaf_file()
     "*.aaf")
 end
 
+-- Forward-declared; defined after _apply_timeline_results so it can call it.
+local load_subtitle_file
+
 ---------------------------------------------------------------------------
 -- Audio Loading
 ---------------------------------------------------------------------------
@@ -3814,6 +3876,123 @@ local function _apply_timeline_results(all_parsed, filepaths, default_fps)
   confirm_fps()
 end
 
+---------------------------------------------------------------------------
+-- Subtitle / Dialogue List Loading
+---------------------------------------------------------------------------
+
+--- Apply a single subtitle parse result to ROWS via the shared timeline pipeline.
+local function _apply_subtitle_parsed(parsed, filepath)
+  _apply_timeline_results({{ parsed = parsed, path = filepath }}, { filepath },
+                          CLB.fps)
+end
+
+--- Open a subtitle file dialog and start the inspect/import flow.
+---
+--- Flow:
+---   1. Pick file (.srt / .csv / .tsv / .xlsx)
+---   2. Call SUBTITLE.inspect → returns metadata
+---   3. SRT  → no questions; call SUBTITLE.parse with CLB.fps and apply
+---   4. CSV/TSV/XLSX → open subtitle_inspect dialog; user picks sheet,
+---      text column, FPS; on OK → SUBTITLE.parse and apply
+load_subtitle_file = function()
+  if not SUBTITLE then
+    reaper.ShowMessageBox(
+      "Subtitle Bridge library failed to load.\n\nExpected at:\n"
+      .. SUBTITLE_BRIDGE_PATH,
+      SCRIPT_NAME, 0)
+    return
+  end
+
+  local filter =
+    "Subtitle / Dialogue files\0*.srt;*.csv;*.tsv;*.xlsx;*.xlsm\0" ..
+    "SRT subtitles\0*.srt\0" ..
+    "CSV (comma-separated)\0*.csv\0" ..
+    "TSV (tab-separated)\0*.tsv\0" ..
+    "Excel\0*.xlsx;*.xlsm\0" ..
+    "All files\0*.*\0"
+
+  local filepath
+  if reaper.JS_Dialog_BrowseForOpenFiles then
+    local rv, filestr = reaper.JS_Dialog_BrowseForOpenFiles(
+      "Open Subtitle / Dialogue File", CLB.last_dir or "", "", filter, false)
+    if rv ~= 1 or not filestr or filestr == "" then return end
+    filepath = filestr
+  else
+    local retval, fp = reaper.GetUserFileNameForRead(
+      "", "Open Subtitle / Dialogue File", "*.srt")
+    if not retval or fp == "" then return end
+    filepath = fp
+  end
+
+  CLB.last_dir = filepath:match("(.*[/\\])") or ""
+  save_prefs()
+
+  local fname = filepath:match("([^/\\]+)$") or filepath
+  console_msg("Inspecting subtitle file: " .. fname)
+
+  local meta, err = SUBTITLE.inspect(filepath, { python = OTIO.python })
+  if not meta then
+    reaper.ShowMessageBox("Failed to inspect subtitle file:\n\n" .. tostring(err),
+                          SCRIPT_NAME, 0)
+    return
+  end
+
+  -- SRT → no choices; parse immediately at CLB.fps
+  if meta.ready then
+    local parsed, perr = SUBTITLE.parse(filepath, {
+      python      = OTIO.python,
+      default_fps = CLB.fps,
+      is_drop     = CLB.is_drop,
+    })
+    if not parsed then
+      reaper.ShowMessageBox(
+        "Failed to parse subtitle file:\n\n" .. tostring(perr),
+        SCRIPT_NAME, 0)
+      return
+    end
+    _apply_subtitle_parsed(parsed, filepath)
+    console_msg(string.format("Loaded %d subtitle entries from %s",
+                              #parsed.events, fname))
+    return
+  end
+
+  -- CSV / TSV / XLSX → open inspect dialog for sheet / text-column / FPS choice
+  local sheets = meta.sheets
+  if not sheets then
+    -- CSV / TSV: wrap into a single virtual sheet for uniform UI handling
+    sheets = { {
+      name             = (meta.format or "FILE"),
+      header_present   = meta.header_present,
+      columns          = meta.columns or {},
+      sample_rows      = meta.sample_rows or {},
+      detected_in_col  = meta.detected_in_col,
+      detected_out_col = meta.detected_out_col,
+      text_candidates  = meta.text_candidates or {},
+    } }
+  end
+
+  -- Pick first sheet that actually has detected IN/OUT (skip blank cover sheets)
+  local default_idx = 1
+  for i, s in ipairs(sheets) do
+    if s.detected_in_col and s.detected_out_col and #s.text_candidates > 0 then
+      default_idx = i
+      break
+    end
+  end
+  local active_sheet = sheets[default_idx] or sheets[1]
+  local default_text_col = (active_sheet and active_sheet.text_candidates and
+                            active_sheet.text_candidates[1]) or nil
+
+  CLB.subtitle_inspect = {
+    filepath           = filepath,
+    format             = meta.format,
+    sheets             = sheets,
+    selected_sheet_idx = default_idx,
+    selected_text_col  = default_text_col,
+    open               = true,
+  }
+end
+
 --- Poll background OTIO loads (called every frame from main loop).
 --- Returns true while still loading, false when done or idle.
 local function process_otio_loading()
@@ -3902,7 +4081,20 @@ local function _friendly_format(fmt)
   if u == "CMX3600" or u == "CLB" then return "EDL" end
   if u:find("XML") then return "XML" end
   if u == "AAF" then return "AAF" end
+  if u:find("^SUBTITLE") then return "SUBTITLE" end
   return fmt  -- pass through any unknown formats unchanged
+end
+
+--- Expand the track-name template for a row, then clean up dangling
+--- separators left behind by empty tokens (e.g. "${format} - ${track}"
+--- with track="" → "SUBTITLE - " → "SUBTITLE").
+local function _expand_track_name(template, tokens)
+  local name = EDL.expand_template(template, tokens) or ""
+  -- Trim leading/trailing whitespace + dashes/pipes
+  name = name:gsub("^[%s%-|]+", ""):gsub("[%s%-|]+$", "")
+  -- Collapse repeated internal separator runs: "  -  -  " → " - "
+  name = name:gsub("%s*[%-|]%s*[%-|]+%s*", " - ")
+  return name
 end
 
 --- Build tokens table from a row for track name expansion
@@ -3937,7 +4129,7 @@ local function generate_items()
 
   for _, row in ipairs(visible_rows) do
     local tokens = build_row_tokens(row)
-    local expanded_name = EDL.expand_template(CLB.track_name_format, tokens)
+    local expanded_name = _expand_track_name(CLB.track_name_format, tokens)
     row_to_trackname[row.__guid] = expanded_name
 
     if not track_names_set[expanded_name] then
@@ -4132,7 +4324,7 @@ local function conform_matched_items(selected_only)
 
   for _, row in ipairs(matched_rows) do
     local tokens = build_row_tokens(row)
-    local expanded_name = EDL.expand_template(CLB.track_name_format, tokens)
+    local expanded_name = _expand_track_name(CLB.track_name_format, tokens)
     row_to_trackname[row.__guid] = expanded_name
 
     if not track_names_set[expanded_name] then
@@ -5122,6 +5314,23 @@ local function draw_toolbar()
   end
   if reaper.ImGui_IsItemHovered(ctx) then
     reaper.ImGui_SetTooltip(ctx, "AAF — requires: aaftool (LibAAF) in PATH\nhttps://github.com/agfline/LibAAF")
+  end
+  reaper.ImGui_SameLine(ctx)
+
+  -- Load Subtitle button (.srt / .csv / .tsv / .xlsx dialogue list)
+  if reaper.ImGui_Button(ctx, "Load Subtitle...", scale(110), scale(24)) then
+    load_subtitle_file()
+  end
+  if reaper.ImGui_IsItemHovered(ctx) then
+    reaper.ImGui_BeginTooltip(ctx)
+    reaper.ImGui_Text(ctx, "Load subtitle / dialogue list file:")
+    reaper.ImGui_Text(ctx, "  .srt        SubRip subtitles")
+    reaper.ImGui_Text(ctx, "  .csv / .tsv Tabular dialogue lists")
+    reaper.ImGui_Text(ctx, "  .xlsx       Excel dialogue lists (multi-sheet)")
+    reaper.ImGui_Text(ctx, "")
+    reaper.ImGui_Text(ctx, "Generates empty items at subtitle in/out points")
+    reaper.ImGui_Text(ctx, "with the text as Clip Name.")
+    reaper.ImGui_EndTooltip(ctx)
   end
   reaper.ImGui_SameLine(ctx)
 
@@ -8240,6 +8449,220 @@ local function draw_main_content()
 end
 
 ---------------------------------------------------------------------------
+-- Subtitle Import Dialog
+---------------------------------------------------------------------------
+
+--- Render the subtitle inspect / column-selection dialog.
+--- Called every frame from the main loop; only does work if open.
+local function draw_subtitle_inspect_dialog()
+  local st = CLB.subtitle_inspect
+  if not st or not st.open then return end
+
+  local POPUP_ID = "Subtitle Import##clb_subtitle_inspect"
+
+  -- Open on first frame
+  if not st._popped then
+    reaper.ImGui_OpenPopup(ctx, POPUP_ID)
+    st._popped = true
+  end
+
+  -- Center on first appearance
+  reaper.ImGui_SetNextWindowSize(ctx, scale(680), scale(480),
+                                 reaper.ImGui_Cond_Appearing())
+
+  local visible, open = reaper.ImGui_BeginPopupModal(ctx, POPUP_ID, true,
+    reaper.ImGui_WindowFlags_NoCollapse())
+
+  if not visible then
+    if not open then CLB.subtitle_inspect = nil end
+    return
+  end
+
+  -- File header
+  local fname = (st.filepath or ""):match("([^/\\]+)$") or st.filepath or ""
+  reaper.ImGui_Text(ctx, fname)
+  reaper.ImGui_TextDisabled(ctx, "Format: " .. (st.format or "?"))
+  reaper.ImGui_Separator(ctx)
+
+  -- Sheet selector (XLSX with multiple sheets)
+  if st.sheets and #st.sheets > 1 then
+    reaper.ImGui_Text(ctx, "Sheet:")
+    reaper.ImGui_SameLine(ctx)
+    reaper.ImGui_SetNextItemWidth(ctx, scale(220))
+    local cur_sheet = st.sheets[st.selected_sheet_idx] or st.sheets[1]
+    if reaper.ImGui_BeginCombo(ctx, "##subtitle_sheet", cur_sheet.name) then
+      for i, sheet in ipairs(st.sheets) do
+        local sel = (i == st.selected_sheet_idx)
+        if reaper.ImGui_Selectable(ctx, sheet.name, sel) then
+          st.selected_sheet_idx = i
+          -- Reset text col when sheet changes
+          local tc = sheet.text_candidates and sheet.text_candidates[1] or nil
+          st.selected_text_col = tc
+        end
+      end
+      reaper.ImGui_EndCombo(ctx)
+    end
+  end
+
+  local active_sheet = (st.sheets and st.sheets[st.selected_sheet_idx]) or st.sheets[1]
+  if not active_sheet then
+    reaper.ImGui_TextColored(ctx, 0xFF6060FF, "No sheet data available.")
+    if reaper.ImGui_Button(ctx, "Close", scale(80), scale(24)) then
+      CLB.subtitle_inspect = nil
+      reaper.ImGui_CloseCurrentPopup(ctx)
+    end
+    reaper.ImGui_EndPopup(ctx)
+    return
+  end
+
+  -- Auto-detection summary
+  local in_col  = active_sheet.detected_in_col
+  local out_col = active_sheet.detected_out_col
+  local function _col_name(idx)
+    if not idx then return "(none)" end
+    local cols = active_sheet.columns or {}
+    for _, c in ipairs(cols) do
+      if c.index == idx then return c.name end
+    end
+    return "Column " .. tostring(idx)
+  end
+
+  if in_col and out_col then
+    reaper.ImGui_Text(ctx, string.format(
+      "IN column: %s (#%d)    OUT column: %s (#%d)  -- auto-detected",
+      _col_name(in_col), in_col, _col_name(out_col), out_col))
+  else
+    reaper.ImGui_TextColored(ctx, 0xFFD060FF,
+      "Could not auto-detect IN/OUT columns. Pick a different sheet, or "
+      .. "ensure the sheet has at least two timecode columns.")
+  end
+
+  -- Sample rows preview
+  reaper.ImGui_Spacing(ctx)
+  reaper.ImGui_Text(ctx, "Preview (first rows):")
+  local sample_rows = active_sheet.sample_rows or {}
+  local cols = active_sheet.columns or {}
+  if #sample_rows > 0 and #cols > 0 then
+    local table_flags = reaper.ImGui_TableFlags_Borders()
+                      | reaper.ImGui_TableFlags_RowBg()
+                      | reaper.ImGui_TableFlags_ScrollX()
+                      | reaper.ImGui_TableFlags_ScrollY()
+                      | reaper.ImGui_TableFlags_SizingFixedFit()
+    if reaper.ImGui_BeginTable(ctx, "##subtitle_preview", #cols,
+                               table_flags, 0, scale(160)) then
+      for _, c in ipairs(cols) do
+        local label = c.name .. "##sub_col_" .. tostring(c.index)
+        reaper.ImGui_TableSetupColumn(ctx, label,
+          reaper.ImGui_TableColumnFlags_WidthFixed(), scale(100))
+      end
+      reaper.ImGui_TableHeadersRow(ctx)
+      for _, row in ipairs(sample_rows) do
+        reaper.ImGui_TableNextRow(ctx)
+        for ci, c in ipairs(cols) do
+          reaper.ImGui_TableSetColumnIndex(ctx, ci - 1)
+          local v = row[c.index] or ""
+          if c.index == in_col or c.index == out_col then
+            reaper.ImGui_TextColored(ctx, 0x80C0FFFF, tostring(v))
+          elseif c.index == st.selected_text_col then
+            reaper.ImGui_TextColored(ctx, 0xC0FFA0FF, tostring(v))
+          else
+            reaper.ImGui_Text(ctx, tostring(v))
+          end
+        end
+      end
+      reaper.ImGui_EndTable(ctx)
+    end
+  else
+    reaper.ImGui_TextDisabled(ctx, "(no preview data)")
+  end
+
+  -- Text-column picker
+  reaper.ImGui_Spacing(ctx)
+  reaper.ImGui_Text(ctx, "Text column:")
+  reaper.ImGui_SameLine(ctx)
+  reaper.ImGui_SetNextItemWidth(ctx, scale(220))
+  local cur_label = (st.selected_text_col and _col_name(st.selected_text_col)
+                     .. " (#" .. st.selected_text_col .. ")") or "(select)"
+  if reaper.ImGui_BeginCombo(ctx, "##subtitle_text_col", cur_label) then
+    -- Always offer all columns except IN/OUT; mark candidates with a star
+    local cand_set = {}
+    for _, ci in ipairs(active_sheet.text_candidates or {}) do cand_set[ci] = true end
+    for _, c in ipairs(cols) do
+      if c.index ~= in_col and c.index ~= out_col then
+        local marker = cand_set[c.index] and " *" or ""
+        local label = string.format("%s (#%d)%s", c.name, c.index, marker)
+        local sel = (c.index == st.selected_text_col)
+        if reaper.ImGui_Selectable(ctx, label, sel) then
+          st.selected_text_col = c.index
+        end
+      end
+    end
+    reaper.ImGui_EndCombo(ctx)
+  end
+  reaper.ImGui_SameLine(ctx)
+  reaper.ImGui_TextDisabled(ctx, "(* = auto-suggested)")
+
+  -- Frame rate is taken from CLB.fps; the existing post-import "Confirm Frame
+  -- Rate" prompt (confirm_fps()) is the canonical place to adjust it.
+  reaper.ImGui_Spacing(ctx)
+  reaper.ImGui_TextDisabled(ctx, string.format(
+    "Parsing TC at %.3f fps%s — adjust in the Confirm Frame Rate prompt after Import.",
+    CLB.fps or 25, CLB.is_drop and " (drop frame)" or ""))
+
+  -- Buttons
+  reaper.ImGui_Separator(ctx)
+
+  local can_import = (in_col ~= nil and out_col ~= nil and
+                      st.selected_text_col ~= nil)
+
+  if not can_import then reaper.ImGui_BeginDisabled(ctx, true) end
+  if reaper.ImGui_Button(ctx, "Import", scale(100), scale(28)) then
+    local fps_num = tonumber(CLB.fps) or 25
+    local sheet_arg = nil
+    if st.format == "XLSX" and st.sheets and #st.sheets > 0 then
+      sheet_arg = active_sheet.name
+    end
+
+    local parsed, perr = SUBTITLE.parse(st.filepath, {
+      python      = OTIO.python,
+      default_fps = fps_num,
+      is_drop     = CLB.is_drop and true or false,
+      sheet       = sheet_arg,
+      in_col      = in_col,
+      out_col     = out_col,
+      text_col    = st.selected_text_col,
+    })
+
+    if not parsed then
+      reaper.ShowMessageBox(
+        "Failed to parse subtitle file:\n\n" .. tostring(perr),
+        SCRIPT_NAME, 0)
+    else
+      _apply_subtitle_parsed(parsed, st.filepath)
+      console_msg(string.format(
+        "Loaded %d subtitle entries from %s (%s, fps=%g)",
+        #parsed.events,
+        (st.filepath:match("([^/\\]+)$") or st.filepath),
+        sheet_arg or st.format or "FILE",
+        fps_num))
+      CLB.subtitle_inspect = nil
+      reaper.ImGui_CloseCurrentPopup(ctx)
+      reaper.ImGui_EndPopup(ctx)
+      return
+    end
+  end
+  if not can_import then reaper.ImGui_EndDisabled(ctx) end
+
+  reaper.ImGui_SameLine(ctx)
+  if reaper.ImGui_Button(ctx, "Cancel", scale(80), scale(28)) then
+    CLB.subtitle_inspect = nil
+    reaper.ImGui_CloseCurrentPopup(ctx)
+  end
+
+  reaper.ImGui_EndPopup(ctx)
+end
+
+---------------------------------------------------------------------------
 -- Main loop
 ---------------------------------------------------------------------------
 local function loop()
@@ -8248,12 +8671,30 @@ local function loop()
   -- Process async OTIO/AAF background parse (if in progress)
   process_otio_loading()
 
-  -- Push font
+  -- Push font: prefer the CJK-capable font when available so Chinese / Japanese
+  -- text in clip names (e.g. from subtitle import) renders correctly. Falls
+  -- back to the ImGui default if the CJK font failed to load.
   font_pushed_this_frame = false
-  if current_font_size ~= 13 and reaper.ImGui_PushFont then
-    local ok_font = pcall(reaper.ImGui_PushFont, ctx, nil, current_font_size)
-    if ok_font then
-      font_pushed_this_frame = true
+  if reaper.ImGui_PushFont then
+    local font_obj = cjk_font  -- nil → default font
+    local push_size = current_font_size
+    -- Always push when we have a custom CJK font so glyph coverage is present;
+    -- otherwise only push when size differs from default to avoid no-op cost.
+    if font_obj or current_font_size ~= 13 then
+      local ok_font = pcall(reaper.ImGui_PushFont, ctx, font_obj, push_size)
+      if ok_font then
+        font_pushed_this_frame = true
+      elseif font_obj then
+        -- Custom-font push failed (older ReaImGui without size override?);
+        -- retry without size, then with default font + size.
+        local ok2 = pcall(reaper.ImGui_PushFont, ctx, font_obj)
+        if ok2 then
+          font_pushed_this_frame = true
+        else
+          local ok3 = pcall(reaper.ImGui_PushFont, ctx, nil, current_font_size)
+          if ok3 then font_pushed_this_frame = true end
+        end
+      end
     end
   end
 
@@ -8284,6 +8725,9 @@ local function loop()
 
     -- Main content (EDL table, optionally split with Audio table)
     draw_main_content()
+
+    -- Subtitle import inspect/column-picker dialog (modal popup)
+    draw_subtitle_inspect_dialog()
 
     -- Keyboard shortcuts
     local focused = reaper.ImGui_IsWindowFocused(ctx, reaper.ImGui_FocusedFlags_RootAndChildWindows())
@@ -8386,6 +8830,30 @@ end
 ctx = reaper.ImGui_CreateContext(SCRIPT_NAME)
 if reaper.ImGui_CreateListClipper then
   list_clipper = reaper.ImGui_CreateListClipper(ctx)
+end
+
+-- Load a CJK-capable font so Chinese / Japanese text (e.g. from subtitle
+-- import) renders properly. ImGui's default font is ASCII-only.
+-- Candidates are tried in order; the first that successfully loads wins.
+if reaper.ImGui_CreateFont and reaper.ImGui_Attach then
+  for _, path in ipairs(CJK_FONT_CANDIDATES) do
+    local f = io.open(path, "rb")
+    if f then
+      f:close()
+      local ok, font = pcall(reaper.ImGui_CreateFont, path, 13)
+      if ok and font then
+        local ok_a = pcall(reaper.ImGui_Attach, ctx, font)
+        if ok_a then
+          cjk_font = font
+          console_msg("CJK font loaded: " .. path)
+          break
+        end
+      end
+    end
+  end
+  if not cjk_font then
+    console_msg("CJK font: none found; default font will be used (CJK glyphs missing)")
+  end
 end
 
 console_msg("Conform List Browser v" .. VERSION .. " started")
