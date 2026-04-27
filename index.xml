@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<index version="1" name="hsuanice Scripts" commit="41e33a1ef98c11ff9c867319e543ddd26510088c">
+<index version="1" name="hsuanice Scripts" commit="5f3979aec3d7f6b38cb5c22ea5197357f960bfab">
   <category name="Beta Testing">
     <reapack name="hsuanice_AudioSweet ReaImGui.lua" type="script" desc="AudioSweet ReaImGui - AudioSuite Workflow (Pro Tools–Style)">
       <metadata>
@@ -6972,6 +6972,13 @@ v0.9.0 - Added Shared Link State section from Project ExtState "hsuanice_Link".]
       </version>
       <version name="0.9.5-driver" author="hsuanice" time="2025-08-23T10:54:41Z">
         <source main="main">https://github.com/hsuanice/ReaScripts/raw/4cbf0bc3b73b3663d34432f20539549b13c5bfc7/Beta%20Testing/hsuanice_Track%20and%20Razor%20Item%20Link%20Monitor.lua</source>
+      </version>
+    </reapack>
+  </category>
+  <category name="Beta Testing/REAPER PT Sync">
+    <reapack name="hsuanice_Reaper Spot to Pro Tools.lua" type="script" desc="Spot selected items to Pro Tools (REAPER&lt;&gt;PT, v1)">
+      <version name="0.1" author="Shanice" time="2026-04-27T08:37:40Z">
+        <source main="main">https://github.com/hsuanice/ReaScripts/raw/5f3979aec3d7f6b38cb5c22ea5197357f960bfab/Beta%20Testing/REAPER%20PT%20Sync/hsuanice_Reaper%20Spot%20to%20Pro%20Tools.lua</source>
       </version>
     </reapack>
   </category>
