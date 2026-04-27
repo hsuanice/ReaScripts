@@ -1,6 +1,6 @@
 --[[
 @description BirdBird Global Sampler — Spot Time Sync
-@version 260427.0034
+@version 260427.1140
 @author hsuanice
 @about
   Spot the most recent play→stop session captured in BirdBird Global
@@ -50,6 +50,24 @@
       (auto-resolves on first run)
 
 @changelog
+  v260427.1140
+    - Naming order changed to <SOURCE>_<GS_NAME>_<TIMESTAMP>-jsfx
+      (source track first). Zero-source case unchanged
+      (just <GS_NAME>_<TIMESTAMP>-jsfx).
+  v260427.1115
+    - Spotted item now reflects its source track in both the wav
+      filename and the take display name. Sources are detected as
+      tracks that are record-armed AND have a send to the GS track,
+      checked at spot time. Multiple armed sources are joined with
+      "+", e.g. `Vocal+Guitar`. Naming format:
+        <GS_TRACK_NAME>_<SOURCE>_<YYMMDD_HHMM>-jsfx.wav
+      (no source segment if zero matches). The original BirdBird
+      timestamp is reused so file/take stay consistent. The wav
+      file plus its `.reapeaks` are renamed on disk; the take's
+      source is replaced via PCM_Source_CreateFromFile so REAPER
+      tracks the new path. If file rename fails (e.g. cross-volume),
+      the take display name is still updated and the BWF write
+      falls back to the original path.
   v260427.0034
     - Auto-detect missing JSFX patch and offer to apply it. When
       gmem[15]/gmem[17] read 0, the script locates the JSFX file under
@@ -300,6 +318,98 @@ local function take_wav_path(take)
 end
 
 ----------------------------------------------------------------
+-- Source-track detection & file/take renaming
+----------------------------------------------------------------
+local function track_name_or_default(tr, fallback)
+  local _, name = reaper.GetSetMediaTrackInfo_String(tr, "P_NAME", "", false)
+  if name and name ~= "" then return name end
+  return fallback
+end
+
+local function track_index_1based(tr)
+  return math.floor(reaper.GetMediaTrackInfo_Value(tr, "IP_TRACKNUMBER"))
+end
+
+-- Tracks that are record-armed AND have at least one send to gs_track.
+local function find_armed_source_tracks(gs_track)
+  local out = {}
+  for i = 0, reaper.CountTracks(0) - 1 do
+    local tr = reaper.GetTrack(0, i)
+    if tr ~= gs_track and reaper.GetMediaTrackInfo_Value(tr, "I_RECARM") == 1 then
+      local n = reaper.GetTrackNumSends(tr, 0) -- 0 = sends from this track
+      for s = 0, n - 1 do
+        local dest = reaper.GetTrackSendInfo_Value(tr, 0, s, "P_DESTTRACK")
+        if dest == gs_track then
+          out[#out + 1] = tr
+          break
+        end
+      end
+    end
+  end
+  return out
+end
+
+-- Strip filesystem-illegal chars and control chars; trim whitespace.
+local function sanitize_for_filename(s)
+  s = (s or ""):gsub('[\\/:*?"<>|]', "_")
+  s = s:gsub("%c", "")
+  s = s:gsub("^%s+", ""):gsub("%s+$", "")
+  return s
+end
+
+-- Compose the new basename (no extension). Format:
+--   <GS_NAME>_<SRC1+SRC2+...>_<YYMMDD_HHMM>-jsfx
+-- If no source tracks: <GS_NAME>_<YYMMDD_HHMM>-jsfx
+-- Timestamp is reused from the original BirdBird filename when possible
+-- so file/take/JSFX-side timestamps stay consistent.
+local function compute_new_basename(gs_track, source_tracks, original_basename)
+  local gs_name = sanitize_for_filename(
+    track_name_or_default(gs_track, "Global Sampler"))
+
+  local source_str = ""
+  if #source_tracks > 0 then
+    local names = {}
+    for _, tr in ipairs(source_tracks) do
+      local fb = "Track" .. tostring(track_index_1based(tr))
+      names[#names + 1] = sanitize_for_filename(track_name_or_default(tr, fb))
+    end
+    source_str = table.concat(names, "+")
+  end
+
+  local ts = original_basename and original_basename:match("(%d+_%d+)%-jsfx") or nil
+  if not ts then ts = os.date("%y%m%d_%H%M") end
+
+  if source_str ~= "" then
+    return string.format("%s_%s_%s-jsfx", source_str, gs_name, ts)
+  end
+  return string.format("%s_%s-jsfx", gs_name, ts)
+end
+
+-- Rename the wav (and .reapeaks) on disk and replace the take's source.
+-- Returns the new path on success, or (nil, errmsg) on failure. Caller
+-- should still update the take display name regardless of return.
+local function rename_dumped_file(take, new_basename)
+  local cur_src = reaper.GetMediaItemTake_Source(take)
+  if not cur_src then return nil, "no source" end
+  local cur_path = reaper.GetMediaSourceFileName(cur_src, "")
+  if not cur_path or cur_path == "" then return nil, "no path" end
+
+  local cur_dir = cur_path:match("^(.*[/\\])") or ""
+  local new_path = cur_dir .. new_basename .. ".wav"
+  if cur_path == new_path then return new_path end
+
+  local ok, rename_err = os.rename(cur_path, new_path)
+  if not ok then return nil, rename_err or "os.rename failed" end
+  os.rename(cur_path .. ".reapeaks", new_path .. ".reapeaks") -- best effort
+
+  local new_src = reaper.PCM_Source_CreateFromFile(new_path)
+  if not new_src then return nil, "PCM_Source_CreateFromFile failed" end
+  reaper.SetMediaItemTake_Source(take, new_src)
+
+  return new_path
+end
+
+----------------------------------------------------------------
 -- Main
 ----------------------------------------------------------------
 local function finalize(track, before_set, params)
@@ -309,12 +419,24 @@ local function finalize(track, before_set, params)
   reaper.PreventUIRefresh(1)
   reaper.Undo_BeginBlock()
 
+  local active_take = reaper.GetActiveTake(it)
+
+  -- 1. Rename file + take to include source track name(s).
+  local cur_path     = take_wav_path(active_take) or ""
+  local cur_basename = cur_path:match("([^/\\]+)%.wav$") or ""
+  local sources      = find_armed_source_tracks(track)
+  local new_basename = compute_new_basename(track, sources, cur_basename)
+  local new_path     = rename_dumped_file(active_take, new_basename) or cur_path
+  if active_take then
+    reaper.GetSetMediaItemTakeInfo_String(active_take, "P_NAME", new_basename, true)
+  end
+
+  -- 2. Position, length, source-start offset (= left handle).
   local startoffs_sec = params.left_handle_frames / params.srate
   local visible_sec   = params.play_counter      / params.srate
 
   reaper.SetMediaItemInfo_Value(it, "D_POSITION", params.play_start_pp)
   reaper.SetMediaItemInfo_Value(it, "D_LENGTH",   visible_sec)
-
   for t = 0, reaper.CountTakes(it) - 1 do
     local tk = reaper.GetTake(it, t)
     if tk then
@@ -322,17 +444,15 @@ local function finalize(track, before_set, params)
     end
   end
 
-  -- BWF time_reference: project-time of the FIRST sample in the wav
-  -- = play_start_pp - left_handle_secs, expressed in samples-from-project-zero.
-  local active_take = reaper.GetActiveTake(it)
-  local wav = take_wav_path(active_take)
-  if E and wav and E.CLI_Resolve and E.TR_Write and E.SecToSamples then
+  -- 3. BWF time_reference = project-time of the wav's FIRST sample,
+  --    expressed in samples from project zero.
+  if E and new_path ~= "" and E.CLI_Resolve and E.TR_Write and E.SecToSamples then
     local cli = E.CLI_Resolve()
     if cli then
       local first_sample_pp = params.play_start_pp - startoffs_sec
       if first_sample_pp < 0 then first_sample_pp = 0 end
       local tr_samples = E.SecToSamples(params.srate, first_sample_pp)
-      E.TR_Write(cli, wav, tr_samples)
+      E.TR_Write(cli, new_path, tr_samples)
       -- Force offline → online so REAPER re-reads the freshly written
       -- BWF header (a soft refresh isn't enough — the PCM source is cached).
       if E.Refresh_Items then
