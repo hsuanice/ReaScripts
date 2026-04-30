@@ -1,6 +1,6 @@
 -- @description Spot selected items to Pro Tools (REAPER<>PT, v1)
 -- @author Shanice
--- @version 0.1
+-- @version 260430.0956
 --
 -- v1 scope:
 --   * playrate must be 1.0 (no time-stretch) — render first if not
@@ -15,6 +15,40 @@
 --
 -- Track mapping: Reaper track name == PT track name (exact match).
 -- Suggested convention: REAPER<>PT_01, REAPER<>PT_02, ...
+--
+-- Changelog:
+--   260430.0956
+--     * Activate Pro Tools on macOS after bridge succeeds, so the spotted
+--       clip is visible without manually switching apps.
+--     * Bridge: rename via select_all_clips_on_track + rename_selected_clip
+--       (timeline instance), plus best-effort rename_target_clip on the
+--       Clip List whole-file entry. Both targets get the Reaper take name;
+--       a missing Clip List entry is logged as "cliplist:none" (not a fail).
+--     * iXML patch can now resize the chunk in place — supports cases where
+--       new TC has more digits than the original (RIFF outer size + iXML
+--       chunk header are recomputed; even-byte word alignment preserved).
+--     * Stamp Reaper take name into bext Description (256 bytes, ASCII)
+--       for downstream tools that read it; PT itself doesn't honor this
+--       for clip naming, but other DAWs/loggers may.
+--     * Embed target TC in the patched copy filename (`<stem>__pt<TC>.wav`)
+--       so re-spotting at a different TC always yields a unique path; PT's
+--       per-session clip cache is keyed by path and stale entries were
+--       confusing the rename step.
+--     * Bug fix: file_for_pt no longer falls back to the unpatched source
+--       when the iXML/bext patch fails — failed items are now properly
+--       skipped instead of sending the original file (with wrong TC).
+--     * Bridge stdout/stderr piped through to Reaper console (io.popen)
+--       for visibility of [OK]/[FAIL] and PTSL error details.
+--     * iXML BWF_TIME_REFERENCE_LOW/HIGH and TIMESTAMP_SAMPLES_SINCE_MIDNIGHT
+--       _LO/_HI patched alongside bext — keeps metadata internally consistent
+--       so PT doesn't decode garbled audio past the first ~1/3 of the file.
+--     * Bridge: bypass py-ptsl Engine.import_audio (which hard-codes
+--       import_type=1 / IType_Session) by building the CId_Import op
+--       directly with import_type=Audio, audio_destination=None,
+--       audio_location=Spot, location in Samples = target_samples.
+--     * is_full check relaxed: trimmed items are now allowed (we spot the
+--       full source at file-origin TC = item_pos - src_offset). Only the
+--       playrate==1.0 requirement remains.
 
 ------------------------------------------------------------------------------
 -- USER CONFIG
@@ -519,6 +553,10 @@ local function main()
   local ok, why, rc = p:close()
   if ok then
     msg("Done.")
+    -- Bring Pro Tools to the foreground so the user can see the spotted clip.
+    if PATH_SEP ~= "\\" then
+      os.execute([[osascript -e 'tell application "Pro Tools" to activate' >/dev/null 2>&1]])
+    end
   else
     msg(string.format("Bridge exit: %s (%s)", tostring(why), tostring(rc)))
     reaper.MB("Bridge command failed. See Reaper console for details.",
