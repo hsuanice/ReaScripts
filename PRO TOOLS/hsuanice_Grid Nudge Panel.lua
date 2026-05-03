@@ -1,6 +1,6 @@
 --[[
 @description hsuanice_Grid Nudge Panel
-@version 0.4.0 [260503.1314]
+@version 0.4.6 [260503.1528]
 @author hsuanice
 @link https://forum.cockos.com/showthread.php?p=2910884#post2910884
 @about
@@ -13,6 +13,28 @@
   Grid logic now lives in hsuanice_PT_Grid.lua (parallel to PT_Nudge).
 
 @changelog
+  0.4.6 [260503.1528]
+    - Picks up hsuanice_PT_Grid 0.3.1: Metronome preset removed (couldn't
+      sync reliably and the implementation had a denominator/tempo bug).
+  0.4.5 [260503.1509]
+    - Picks up hsuanice_PT_Grid 0.3.0: adds "Metronome" preset to Measure
+      mode. Sets grid_div = 1/denom (4/4 → 1/4, 6/8 → 1/8, etc.).
+  0.4.4 [260503.1442]
+    - Picks up hsuanice_PT_Grid 0.2.3: log spam fix + Measure auto-sync.
+  0.4.3 [260503.1439]
+    - Right-click menu adds "Debug log" toggle and "Clear ReaScript console".
+      Output goes to View → Show ReaScript console output. Useful for
+      diagnosing intermittent grid-switch issues.
+  0.4.2 [260503.1428]
+    - Picks up hsuanice_PT_Grid 0.2.1: defensive grid_div writes around
+      command 40904 toggle. Fixes "first attempt fails, second works"
+      symptom when leaving Timecode "1 frame" (native_frame).
+  0.4.1 [260503.1409]
+    - Timecode "1 frame" and Feet+Frames "1 frame" now engage REAPER's
+      built-in Frame grid (cmd 40904) under the hood — exact, tempo-free.
+      Display still shows the TC string (e.g. "00:00:00:01.00").
+    - Mode switch picks DEFAULT_IDX per mode (Timecode / Feet+Frames land
+      on "1 frame" → no tempo prompt fires when you just switch modes).
   0.4.0 [260503.1314]
     - Restructure: Grid menu now mirrors Nudge — 5 modes
       (Measure / Min:Secs / Timecode / Feet+Frames / Samples).
@@ -217,10 +239,11 @@ local function show_grid_menu()
   -- Top half: preset values for the current mode
   for i, p in ipairs(presets) do
     local target_idx = i
+    local target_preset = p
     entries[#entries+1] = {
       label = (i == cur_idx and '!' or '') .. p.label,
       action = function()
-        if Grid.ensure_tempo(cur_mode) then
+        if Grid.ensure_tempo(cur_mode, target_preset) then
           Grid.apply(cur_mode, target_idx)
         end
       end,
@@ -228,15 +251,18 @@ local function show_grid_menu()
   end
   entries[#entries+1] = {sep=true}
 
-  -- Bottom half: mode list
+  -- Bottom half: mode list. Mode switch picks a sensible default preset
+  -- (DEFAULT_IDX prefers native_frame when available → no tempo prompt).
   for _, m in ipairs(Grid.MODES) do
     local target_mode = m
     entries[#entries+1] = {
       label = (m == cur_mode and '!' or '') .. m,
       action = function()
         if target_mode == cur_mode then return end
-        if Grid.ensure_tempo(target_mode) then
-          Grid.apply(target_mode, 1)
+        local def_idx = Grid.get_default_idx(target_mode)
+        local def_preset = Grid.get_preset(target_mode, def_idx)
+        if Grid.ensure_tempo(target_mode, def_preset) then
+          Grid.apply(target_mode, def_idx)
         end
       end,
     }
@@ -389,7 +415,16 @@ local function frame()
   end
 
   if just_released_r then
-    local items = {'Size: Small (160x28)', 'Size: Medium (220x36)', 'Size: Large (280x46)', 'Size: Custom...'}
+    local dbg_on = Grid.is_debug()
+    local items = {
+      'Size: Small (160x28)',
+      'Size: Medium (220x36)',
+      'Size: Large (280x46)',
+      'Size: Custom...',
+      '',  -- separator
+      (dbg_on and '!' or '') .. 'Debug log (ReaScript console)',
+      'Clear ReaScript console',
+    }
     local ret = popup_menu(items)
     local nw, nh
     if     ret == 1 then nw, nh = 160, 28
@@ -404,6 +439,12 @@ local function frame()
         nw = p[1] and math.max(80, p[1])
         nh = p[2] and math.max(28, p[2])
       end
+    elseif ret == 5 then
+      Grid.set_debug(not dbg_on)
+      -- Grid.set_debug already appends a line to the console when turning ON,
+      -- which auto-opens the console window.
+    elseif ret == 6 then
+      if r.ClearConsole then r.ClearConsole() end
     end
     if nw and nh then
       gfx.quit()

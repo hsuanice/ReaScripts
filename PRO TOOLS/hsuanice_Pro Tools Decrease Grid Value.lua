@@ -1,5 +1,5 @@
 -- @description hsuanice_Pro Tools Decrease Grid Value
--- @version 0.4.0 [260503.1314]
+-- @version 0.4.1 [260503.1409]
 -- @author hsuanice
 -- @link https://forum.cockos.com/showthread.php?p=2910884#post2910884
 -- @about
@@ -9,6 +9,7 @@
 --   Mac shortcut (PT): Shift + Minus
 --   Tags: Editing
 -- @changelog
+--   0.4.1 [260503.1409] - Drop local 40904 bail; let library handle native_frame transitions
 --   0.4.0 [260503.1314] - Use shared hsuanice_PT_Grid.lua library; supports all 5 modes
 --   0.3.0 [260502.1928] - Honor Timecode grid mode from Grid Nudge Panel
 --   0.2.0 [260419.0934] - Remove tooltip (blocks rapid switching)
@@ -19,9 +20,6 @@ local info = debug.getinfo(1, 'S')
 local dir = info.source:match('^@(.*[/\\])') or ''
 local ok, Grid = pcall(dofile, dir .. 'hsuanice_PT_Grid.lua')
 if not ok or type(Grid) ~= 'table' then return end
-
--- Frame grid (40904) is special — only Measure-style nav makes sense there
-if r.GetToggleCommandState(40904) == 1 then r.defer(function() end); return end
 
 Grid.decrease()
 r.defer(function() end)
