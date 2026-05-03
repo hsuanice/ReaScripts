@@ -1,6 +1,6 @@
 --[[
 @description hsuanice_PT_Grid - Grid Library
-@version 0.3.3 [260503.1909]
+@version 0.3.4 [260503.1918]
 @author hsuanice
 @about
   Library for grid mode handling, parallel to hsuanice_PT_Nudge.lua.
@@ -23,6 +23,13 @@
   internal only.
 
 @changelog
+  0.3.4 [260503.1918]
+    - Auto-resync on project fps / BPM change. When the user changes
+      the Video frame rate (or BPM), simulated grids (Timecode /
+      Feet+Frames / Min:Secs / Samples) now re-apply with the new
+      environment instead of jumping to a fallback display ("1/X" etc).
+      Only fires when the parameter that actually affects the current
+      preset has changed (fps only matters for unit==18 frame presets).
   0.3.3 [260503.1909]
     - Fix: TimeMap_curFrameRate returns (fps, isdrop) — fps is the FIRST
       value, not the second. We were doing `local _, fps = ...` which
@@ -557,7 +564,43 @@ local function get_text_inner()
   return '1/' .. denom, 'fallback_div'
 end
 
+-- Re-apply the current preset when project fps or BPM changes, so
+-- simulated grids (Timecode/Feet+Frames/Min:Secs/Samples) follow the
+-- new environment instead of jumping to a fallback display.
+-- Only fires when the change is real and the current preset depends
+-- on the changed parameter.
+local _last_fps, _last_bpm
+local function maybe_resync_env()
+  local fps = r.TimeMap_curFrameRate(0)
+  local bpm = r.GetProjectTimeSignature2(0)
+  if not _last_fps then
+    _last_fps, _last_bpm = fps, bpm
+    return
+  end
+  local fps_changed = fps and (fps ~= _last_fps)
+  local bpm_changed = bpm and _last_bpm and (math.abs(bpm - _last_bpm) > 1e-3)
+  if fps_changed or bpm_changed then
+    local mode, idx = M.get_state()
+    local preset = M.get_preset(mode, idx)
+    if preset and mode ~= 'Measure' and not preset.native_frame then
+      -- fps only matters for frame-unit presets (unit==18)
+      local should = bpm_changed or (fps_changed and preset.unit == 18)
+      if should then
+        if dbg_enabled() then
+          dbg('  env change → resync %s/%d (fps %s→%s, bpm %s→%s)',
+            mode, idx,
+            tostring(_last_fps), tostring(fps),
+            tostring(_last_bpm), tostring(bpm))
+        end
+        M.apply(mode, idx)
+      end
+    end
+  end
+  _last_fps, _last_bpm = fps, bpm
+end
+
 function M.get_text()
+  maybe_resync_env()
   local text, why = get_text_inner()
   if dbg_enabled() then
     -- Log on transition (text or "why" branch changed) to avoid frame-rate spam.

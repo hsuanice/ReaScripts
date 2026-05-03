@@ -1,6 +1,6 @@
 --[[
 @description hsuanice_PT_Nudge - Nudge Library
-@version 0.4.3 [260503.1909]
+@version 0.4.4 [260503.1918]
 @author hsuanice
 @about
   Library for all hsuanice nudge scripts.
@@ -12,6 +12,13 @@
     3 = right edge, 4 = contents, 6 = edit cursor
 
 @changelog
+  0.4.4 [260503.1918]
+    - Fix: r.ApplyNudge with unit=18 (frames) doesn't track project fps
+      reliably — at non-24 fps it appears to default to 24, so item
+      nudges came out wrong (e.g. 6 frames at 25 fps gave 12000 samples
+      instead of 11520 at 48k). M.apply now converts frame-unit values
+      to seconds (unit=1) before calling ApplyNudge, using the same fps
+      lookup calc_delta_sec uses for razor-area mode.
   0.4.3 [260503.1909]
     - Fix: TimeMap_curFrameRate returns (fps, isdrop) — fps is FIRST.
       `calc_delta_sec` was doing `local _, fps = ...` which captured
@@ -267,7 +274,20 @@ function M.apply(nudgewhat, reverse)
     len_before  = r.GetMediaItemInfo_Value(first_it, 'D_LENGTH')
   end
 
-  r.ApplyNudge(0, 0, nudgewhat, preset.unit, preset.value, reverse, 0)
+  -- ApplyNudge's frame unit (18) doesn't track project fps reliably:
+  -- at non-24 fps it appears to default to 24 (e.g. nudging 6 frames at
+  -- 25 fps moves items 12000 samples instead of 11520 at 48k). Convert
+  -- frame-unit nudges to seconds (unit=1) using our authoritative fps —
+  -- the same calc_delta_sec uses for razor-area mode.
+  local nudge_unit, nudge_value = preset.unit, preset.value
+  if nudge_unit == 18 then
+    local fps = r.TimeMap_curFrameRate(0)
+    if fps and fps > 0 then
+      nudge_unit  = 1  -- seconds
+      nudge_value = preset.value / fps
+    end
+  end
+  r.ApplyNudge(0, 0, nudgewhat, nudge_unit, nudge_value, reverse, 0)
 
   -- Calculate actual delta
   local delta = 0

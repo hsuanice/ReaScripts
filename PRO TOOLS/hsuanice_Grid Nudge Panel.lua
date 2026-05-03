@@ -1,6 +1,6 @@
 --[[
 @description hsuanice_Grid Nudge Panel
-@version 0.4.8 [260503.1909]
+@version 0.4.9 [260503.1918]
 @author hsuanice
 @link https://forum.cockos.com/showthread.php?p=2910884#post2910884
 @about
@@ -13,6 +13,9 @@
   Grid logic now lives in hsuanice_PT_Grid.lua (parallel to PT_Nudge).
 
 @changelog
+  0.4.9 [260503.1918]
+    - Picks up hsuanice_PT_Grid 0.3.4: auto-resync on project fps/BPM
+      change so grid panel doesn't jump to a fallback when fps changes.
   0.4.8 [260503.1909]
     - Fix: format_nudge_value swapped TimeMap_curFrameRate return values.
       Same bug as PT_Grid 0.3.3 — fps was being captured as isdrop, so

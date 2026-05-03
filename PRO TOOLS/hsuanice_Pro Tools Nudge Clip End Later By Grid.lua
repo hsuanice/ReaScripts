@@ -1,5 +1,5 @@
 -- @description hsuanice_Pro Tools Nudge Clip End Later By Grid
--- @version 0.5.0 [260421.1048]
+-- @version 0.8.3 [260503.1934]
 -- @author hsuanice
 -- @about
 --   Replicates Pro Tools: **Nudge Clip End Later By Grid**
@@ -7,6 +7,24 @@
 --   Zone-aware stop guard prevents zone from disappearing.
 --   Tags: Editing
 -- @changelog
+--   0.8.3 [260503.1934] - Fix: TimeMap_curFrameRate return order — fps was being read as
+--                         the isdrop boolean, causing get_delta() at unit==18 to default to
+--                         24 on non-drop projects and crash on drop-frame projects.
+--   0.8.2 [260424.2227] - No-razor branch: skip item when right xfade partner is also selected.
+--                         Treats full crossfade pair as one virtual item — only the trailing
+--                         O-end nudges (matches nudge_start behavior). Also closes a TS-sync hole
+--                         where in-library skip's delta_used=0 was dragging min_actual down.
+--   0.8.1 [260422.1820] - Handle "skipped" return value from nudge_end (3rd value `true`).
+--                         Skipped items don't influence min_actual sync, so pure razor + TS shift correctly
+--                         when crossfade pair has one item handling, the other skipping.
+--   0.8.0 [260422.1820] - Item-track is anchor: track min |shift_e| from nudge_end; pure razors
+--                         and time selection sync to that effective_delta. When item is blocked
+--                         (zone guard), all razors and TS freeze together.
+--   0.7.1 [260422.1820] - Pure-razor and time-selection width guard: keep razor/TS >= 1 nudge grid
+--                         (guard inactive when razor grows, i.e., End Later).
+--   0.7.0 [260422.1820] - Sync razors on tracks WITHOUT items: pure-razor tracks now shift along
+--                         with item-driven nudge (matches Move script behavior).
+--   0.6.0 [260421.1214] - Use NudgeEdge module (crossfade-aware nudge_end)
 --   0.5.0 [260421.1048] - Item-only selection uses nudge_end (fade-aware) instead of ApplyNudge
 --   0.4.0 [260420.1523] - Add fill mechanism + correct zone-size stop guard
 --   0.3.0 [260420.1247] - 3-boundary logic with stop guard
@@ -21,6 +39,7 @@ if not ok then
   r.ShowMessageBox('Could not load hsuanice_PT_Nudge.lua', 'Error', 0)
   return
 end
+local _, NudgeEdge = pcall(dofile, dir .. '../Library/hsuanice_PT_NudgeEdge.lua')
 
 local EPS = 1e-4
 
@@ -36,7 +55,7 @@ local function get_delta()
     return value / sr
   end
   if unit == 18 then
-    local _, fps = r.TimeMap_curFrameRate(0)
+    local fps = r.TimeMap_curFrameRate(0)  -- returns (fps, isdrop) — fps FIRST
     fps = (fps and fps > 0) and fps or 24
     return value / fps
   end
@@ -72,57 +91,7 @@ local function update_razor(track, new_s, new_e)
   r.GetSetMediaTrackInfo_String(track, 'P_RAZOREDITS', updated, true)
 end
 
--- Nudge End: fill boundary to sel_e, then nudge
--- Priority: C end > B end > A end
-local function nudge_end(item, sel_s, sel_e, delta)
-  local pos      = r.GetMediaItemInfo_Value(item, 'D_POSITION')
-  local len      = r.GetMediaItemInfo_Value(item, 'D_LENGTH')
-  local fi_len   = r.GetMediaItemInfo_Value(item, 'D_FADEINLEN')
-  local fo_len   = r.GetMediaItemInfo_Value(item, 'D_FADEOUTLEN')
-  local item_e   = pos + len
-  local fi_end   = pos + fi_len
-  local fo_start = item_e - fo_len
-
-  -- Zone-collapse guard: prevent sel_e from collapsing onto sel_s
-  if delta < 0 and (sel_e - sel_s) <= math.abs(delta) + EPS then return sel_s, sel_e end
-
-  -- Priority 1: C end (item_e) in selection
-  if sel_s <= item_e + EPS and sel_e >= item_e - EPS then
-    -- Fill: fo_len expands to reach sel_e, then nudge
-    local fill_amt = sel_e - item_e  -- how much to fill (can be negative)
-    local new_fo_len = fo_len + fill_amt  -- after fill
-    -- Guard: after fill, new_fo_len must be > delta (for Earlier)
-    if delta < 0 and new_fo_len <= math.abs(delta) + EPS then return sel_s, sel_e end
-    -- Apply fill + nudge
-    local total = fill_amt + delta
-    r.SetMediaItemInfo_Value(item, 'D_LENGTH',     len + total)
-    r.SetMediaItemInfo_Value(item, 'D_FADEOUTLEN', fo_len + total)
-    return sel_s, item_e + total
-
-  -- Priority 2: B end (fo_start) in selection
-  elseif sel_s <= fo_start + EPS and sel_e >= fo_start - EPS then
-    local fill_amt = sel_e - fo_start
-    local new_clip_len = (fo_start - fi_end) + fill_amt
-    if delta < 0 and new_clip_len <= math.abs(delta) + EPS then return sel_s, sel_e end
-    local total = fill_amt + delta
-    r.SetMediaItemInfo_Value(item, 'D_LENGTH', len + total)
-    return sel_s, fo_start + total
-
-  -- Priority 3: A end (fi_end) in selection
-  elseif sel_s <= fi_end + EPS and sel_e >= fi_end - EPS then
-    local fill_amt = sel_e - fi_end
-    local new_fi_len = fi_len + fill_amt
-    local clip_len_after = (fo_start - fi_end) - fill_amt
-    if delta < 0 and new_fi_len   <= math.abs(delta) + EPS then return sel_s, sel_e end
-    if delta > 0 and clip_len_after <= math.abs(delta) + EPS then return sel_s, sel_e end
-    local total = fill_amt + delta
-    r.SetMediaItemInfo_Value(item, 'D_FADEINLEN', fi_len + total)
-    return sel_s, fi_end + total
-
-  else
-    return sel_s, sel_e + delta
-  end
-end
+local nudge_end = NudgeEdge and NudgeEdge.nudge_end or function(_, sel_s, sel_e, _) return sel_s, sel_e end
 
 local delta = get_delta()
 if math.abs(delta) < 1e-10 then return end
@@ -145,7 +114,8 @@ end
 r.Undo_BeginBlock()
 r.PreventUIRefresh(1)
 
-local new_sel_e_global = nil
+local processed_tracks = {}  -- tracks whose razor was processed via nudge_end (item-driven)
+local min_actual = nil       -- minimum |shift_e| across item-track operations (nil = no items processed)
 
 for i = 0, r.CountSelectedMediaItems(0) - 1 do
   local item  = r.GetSelectedMediaItem(0, i)
@@ -156,38 +126,56 @@ for i = 0, r.CountSelectedMediaItems(0) - 1 do
 
   if sel_s and sel_e then
     if sel_e > pos + EPS and sel_s < item_e - EPS then
-      local new_s, new_e = nudge_end(item, sel_s, sel_e, delta)
-      if math.abs(new_s - sel_s) > 1e-10 or math.abs(new_e - sel_e) > 1e-10 then
-        new_sel_e_global = new_e
-        update_razor(track, new_s, new_e)
+      local new_s, new_e, skipped = nudge_end(item, sel_s, sel_e, delta)
+      if not skipped then
+        local shift = new_e - sel_e
+        if min_actual == nil or math.abs(shift) < math.abs(min_actual) then
+          min_actual = shift
+        end
+        if math.abs(shift) > 1e-10 or math.abs(new_s - sel_s) > 1e-10 then
+          update_razor(track, new_s, new_e)
+        end
       end
+      processed_tracks[track] = true
     end
   else
-    local _, new_e = nudge_end(item, pos, item_e, delta)
-    if math.abs(new_e - item_e) > 1e-10 then
-      new_sel_e_global = new_e
-    end
-  end
-end
-
-if not has_items then
-  if has_razor then
-    for ti = 0, r.CountTracks(0) - 1 do
-      local tr = r.GetTrack(0, ti)
-      local rs, re = get_track_razor(tr)
-      if rs then
-        new_sel_e_global = re + delta
-        update_razor(tr, rs, re + delta)
+    -- No razor on this track: treat full crossfade pair as one virtual item.
+    -- If right xfade partner is also selected, skip — partner is the "pair end" (O-end).
+    local rxf = NudgeEdge and NudgeEdge.find_right_xfade(track, item)
+    if not (rxf and r.IsMediaItemSelected(rxf)) then
+      local _, new_e = nudge_end(item, pos, item_e, delta)
+      local shift = new_e - item_e
+      if min_actual == nil or math.abs(shift) < math.abs(min_actual) then
+        min_actual = shift
       end
     end
-  elseif has_ts then
-    new_sel_e_global = ts_e + delta
   end
 end
 
+-- Effective delta: item track is anchor; pure razors and TS sync to it
+-- (no items → use full delta; any item blocked → effective_delta = 0 → all freeze)
+local effective_delta = min_actual ~= nil and min_actual or delta
+
+-- Sync razors on tracks NOT processed by item loop (pure-razor tracks)
+for ti = 0, r.CountTracks(0) - 1 do
+  local tr = r.GetTrack(0, ti)
+  if not processed_tracks[tr] then
+    local rs, re = get_track_razor(tr)
+    if rs and re and math.abs(effective_delta) > 1e-10 then
+      if (re - rs) >= -2*effective_delta - EPS then
+        update_razor(tr, rs, re + effective_delta)
+      end
+    end
+  end
+end
+
+-- Time selection: shift by effective_delta (also blocks when item track blocks)
 local ts, te = r.GetSet_LoopTimeRange(false, false, 0, 0, false)
-if te > ts + EPS and new_sel_e_global then
-  r.GetSet_LoopTimeRange(true, false, ts, new_sel_e_global, false)
+if te > ts + EPS and math.abs(effective_delta) > 1e-10 then
+  local new_te = te + effective_delta
+  if (new_te - ts) >= math.abs(effective_delta) - EPS then
+    r.GetSet_LoopTimeRange(true, false, ts, new_te, false)
+  end
 end
 
 r.PreventUIRefresh(-1)
