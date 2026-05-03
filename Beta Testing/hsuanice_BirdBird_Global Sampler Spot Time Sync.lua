@@ -1,6 +1,6 @@
 --[[
 @description BirdBird Global Sampler — Spot Time Sync
-@version 260427.1140
+@version 260503.2120
 @author hsuanice
 @about
   Spot the most recent play→stop session captured in BirdBird Global
@@ -50,6 +50,20 @@
       (auto-resolves on first run)
 
 @changelog
+  v260503.2120
+    - Fix: spotted item now shows a proper waveform. Previously the
+      file rename + source swap left REAPER without a peak file for
+      the new path:
+        * call PCM_Source_BuildPeaks(new_src, 0) right after
+          SetMediaItemTake_Source so peak generation kicks off
+        * always run E.Refresh_Items (offline → online toggle) at
+          the end of finalize, not just inside the BWF block —
+          the toggle is needed for the renamed source even when
+          BWF wasn't written
+        * additionally call action 40441 (Build any missing peaks)
+          since the Library has the peak rebuild commented out
+        * inline fallback for the offline/online toggle when the
+          Library isn't installed
   v260427.1140
     - Naming order changed to <SOURCE>_<GS_NAME>_<TIMESTAMP>-jsfx
       (source track first). Zero-source case unchanged
@@ -405,6 +419,11 @@ local function rename_dumped_file(take, new_basename)
   local new_src = reaper.PCM_Source_CreateFromFile(new_path)
   if not new_src then return nil, "PCM_Source_CreateFromFile failed" end
   reaper.SetMediaItemTake_Source(take, new_src)
+  -- Kick off async peak generation for the freshly-assigned source.
+  -- Without this, REAPER may not auto-trigger peaks for sources that
+  -- were swapped in via SetMediaItemTake_Source (vs. files it created
+  -- itself), leaving the spotted item with a blank waveform.
+  reaper.PCM_Source_BuildPeaks(new_src, 0)
 
   return new_path
 end
@@ -453,13 +472,24 @@ local function finalize(track, before_set, params)
       if first_sample_pp < 0 then first_sample_pp = 0 end
       local tr_samples = E.SecToSamples(params.srate, first_sample_pp)
       E.TR_Write(cli, new_path, tr_samples)
-      -- Force offline → online so REAPER re-reads the freshly written
-      -- BWF header (a soft refresh isn't enough — the PCM source is cached).
-      if E.Refresh_Items then
-        E.Refresh_Items({it})
-      end
     end
   end
+
+  -- 4. Refresh source: forces REAPER to re-read the BWF header (when
+  --    written above) AND triggers peak rebuild for the renamed source.
+  --    Always run, regardless of BWF availability — without this the
+  --    spotted item shows a blank waveform.
+  if E and E.Refresh_Items then
+    E.Refresh_Items({it})
+  else
+    -- Inline fallback when the Library isn't available
+    reaper.SelectAllMediaItems(0, false)
+    reaper.SetMediaItemSelected(it, true)
+    reaper.UpdateArrange()
+    reaper.Main_OnCommand(42356, 0) -- Toggle force media offline
+    reaper.Main_OnCommand(42356, 0) -- Toggle back online
+  end
+  reaper.Main_OnCommand(40441, 0) -- Item: Build any missing peaks for selected items
 
   reaper.SetMediaItemSelected(it, true)
 
