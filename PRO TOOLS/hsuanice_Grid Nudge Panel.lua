@@ -1,6 +1,6 @@
 --[[
 @description hsuanice_Grid Nudge Panel
-@version 0.4.6 [260503.1528]
+@version 0.4.8 [260503.1909]
 @author hsuanice
 @link https://forum.cockos.com/showthread.php?p=2910884#post2910884
 @about
@@ -13,6 +13,15 @@
   Grid logic now lives in hsuanice_PT_Grid.lua (parallel to PT_Nudge).
 
 @changelog
+  0.4.8 [260503.1909]
+    - Fix: format_nudge_value swapped TimeMap_curFrameRate return values.
+      Same bug as PT_Grid 0.3.3 — fps was being captured as isdrop, so
+      Nudge "Timecode" mode display was always computed at 24 fps and
+      crashed on drop-frame projects.
+    - Picks up hsuanice_PT_Grid 0.3.3.
+  0.4.7 [260503.1550]
+    - Picks up hsuanice_PT_Grid 0.3.2: deferred retry chain to keep
+      Frame grid OFF when REAPER state re-engages it after our toggle.
   0.4.6 [260503.1528]
     - Picks up hsuanice_PT_Grid 0.3.1: Metronome preset removed (couldn't
       sync reliably and the implementation had a denominator/tempo bug).
@@ -140,7 +149,10 @@ local NUDGE_PRESETS = {
 -- ============================================================
 local function format_nudge_value(mode, preset)
   if not preset then return '?' end
-  local _, fps = r.TimeMap_curFrameRate(0)
+  -- NB: TimeMap_curFrameRate returns (fps, isdrop) — fps FIRST. Capturing
+  -- the second return as fps was a long-standing bug that defaulted to 24
+  -- everywhere and crashed on drop-frame projects.
+  local fps = r.TimeMap_curFrameRate(0)
   if not fps or fps <= 0 then fps = 24 end
 
   if mode == 'Timecode' then

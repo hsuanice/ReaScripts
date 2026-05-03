@@ -1,6 +1,6 @@
 --[[
 @description hsuanice_PT_Grid - Grid Library
-@version 0.3.1 [260503.1528]
+@version 0.3.3 [260503.1909]
 @author hsuanice
 @about
   Library for grid mode handling, parallel to hsuanice_PT_Nudge.lua.
@@ -23,6 +23,27 @@
   internal only.
 
 @changelog
+  0.3.3 [260503.1909]
+    - Fix: TimeMap_curFrameRate returns (fps, isdrop) — fps is the FIRST
+      value, not the second. We were doing `local _, fps = ...` which
+      captured isdrop (a boolean) as fps and threw away the real frame
+      rate. Symptoms:
+        * Non-drop projects (24/25/30/60): fps captured as `false`, our
+          guard `if not fps or fps <= 0 then fps = 24 end` defaulted to
+          24 silently. Worked only by coincidence at 24 fps.
+        * Drop-frame projects (29.97DF/23.976DF): fps captured as `true`,
+          the guard hit `true <= 0` → "attempt to compare boolean with
+          number" → script crash.
+      Now reads fps as the first return; calculations are accurate at all
+      fps including the 1.001-slowdown rates (23.976 = 24000/1001 exact,
+      29.97 = 30000/1001 exact).
+  0.3.2 [260503.1550]
+    - Add 5-iteration deferred retry to keep 40904 OFF when applying a
+      non-native_frame preset. Defends against REAPER state that re-engages
+      Frame grid after our toggle (observed: user adjusts Frame's "minimum
+      pixels" in Snap/Grid Settings + Enter — REAPER then keeps re-applying
+      Frame across our changes for several event loops). The retry chain
+      stops as soon as 40904 stays OFF.
   0.3.1 [260503.1528]
     - Remove Metronome preset (added in 0.3.0). Reasons:
       (1) REAPER's native "Metronome" dropdown isn't a distinct API state,
@@ -237,7 +258,7 @@ function M.preset_to_seconds(preset)
     return preset.value / sr
   end
   if preset.unit == 18 then
-    local _, fps = r.TimeMap_curFrameRate(0)
+    local fps = r.TimeMap_curFrameRate(0)  -- returns (fps, isdrop)
     if not fps or fps <= 0 then fps = 24 end
     return preset.value / fps
   end
@@ -260,7 +281,7 @@ function M.format_value(mode, preset)
   if mode == 'Measure' then return preset.label end
 
   if mode == 'Timecode' then
-    local _, fps = r.TimeMap_curFrameRate(0)
+    local fps = r.TimeMap_curFrameRate(0)  -- returns (fps, isdrop)
     if not fps or fps <= 0 then fps = 24 end
     if preset.unit == 1 then return '00:00:01:00.00' end
     local frames = preset.value
@@ -336,6 +357,26 @@ local function write_grid_div(div, swing)
   end
 end
 
+-- Defensive: walks defer iterations to keep enforcing 40904=OFF in case
+-- some external REAPER state re-engages Frame grid after our toggle.
+-- Observed trigger: user opens Snap/Grid Settings, sets the dropdown to
+-- "Frame", adjusts Frame's "minimum: N pixels" field, hits Enter — REAPER
+-- then re-applies Frame across our changes for several event loops.
+-- Each iteration checks 40904; if it has come back ON we toggle it off,
+-- then schedule another check on the next event loop. Stops once 40904
+-- stays OFF, or after `remaining` iterations.
+local function ensure_frame_off_chain(remaining)
+  if remaining <= 0 then return end
+  if r.GetToggleCommandState(40904) ~= 1 then return end  -- already off
+  r.Main_OnCommand(40904, 0)
+  if M.is_debug() then
+    r.ShowConsoleMsg(string.format(
+      '[Grid]   (defer) retoggle 40904 off (retries left: %d) | 40904=%s\n',
+      remaining - 1, r.GetToggleCommandState(40904) == 1 and 'ON' or 'OFF'))
+  end
+  r.defer(function() ensure_frame_off_chain(remaining - 1) end)
+end
+
 function M.apply(mode, idx)
   local preset = M.get_preset(mode, idx)
   if not preset then return end
@@ -390,6 +431,10 @@ function M.apply(mode, idx)
       local _, _, sw = r.GetSetProjectGrid(0, 0)
       write_grid_div(div, sw)
       dbg('  step4 (deferred write) | %s', snapshot())
+      -- 5) Persistent enforcement: if some other REAPER state re-engages
+      -- Frame grid (e.g. Snap/Grid Settings dialog with Frame selected),
+      -- keep toggling 40904 off across a few event loops.
+      ensure_frame_off_chain(5)
     else
       dbg('  step4 SKIPPED (state moved to %s/%d)', cur_mode, cur_idx)
     end

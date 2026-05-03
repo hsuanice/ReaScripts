@@ -1,6 +1,6 @@
 --[[
 @description hsuanice_PT_Nudge - Nudge Library
-@version 0.4.2 [260419.1211]
+@version 0.4.3 [260503.1909]
 @author hsuanice
 @about
   Library for all hsuanice nudge scripts.
@@ -12,6 +12,12 @@
     3 = right edge, 4 = contents, 6 = edit cursor
 
 @changelog
+  0.4.3 [260503.1909]
+    - Fix: TimeMap_curFrameRate returns (fps, isdrop) — fps is FIRST.
+      `calc_delta_sec` was doing `local _, fps = ...` which captured
+      isdrop (a boolean) as the frame rate. Frame-unit nudges (Timecode
+      / Feet+Frames) were always computed at the 24 fps fallback for
+      non-drop projects, and crashed on drop-frame projects.
   0.2.0 [260418.1931]
     - Sync NUDGE_PRESETS with Grid Nudge Panel (Feet+Frames restored)
   0.1.0 [260418.1534]
@@ -111,8 +117,8 @@ local function calc_delta_sec(preset, reverse)
     local sr = r.GetSetProjectInfo(0, 'PROJECT_SRATE', 0, false)
     delta = value / sr
   elseif unit == 18 then
-    -- frames
-    local _, fps = r.TimeMap_curFrameRate(0)
+    -- frames. NB: TimeMap_curFrameRate returns (fps, isdrop) — fps FIRST.
+    local fps = r.TimeMap_curFrameRate(0)
     fps = (fps and fps > 0) and fps or 24
     delta = value / fps
   elseif unit == 16 then
