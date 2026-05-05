@@ -1,7 +1,7 @@
 ---@diagnostic disable: undefined-global
 --[[
 @description GFX - Count Items/Tracks and Toggle Show Item Details
-@version 260505.1520
+@version 260505.1742
 @author hsuanice
 @about
   Pro Tools-style selection monitor HUD using native gfx (no ReaImGui).
@@ -11,6 +11,10 @@
   Right-click: font size (UI scale) / dock / close.
   Window position, dock state, font size, and panel state persist across restarts.
 @changelog
+  v260505.1742
+    - Selection range priority changed to: Razor edits > Time selection >
+      Item selection > Edit cursor. Razor scan walks every track's
+      P_RAZOREDITS and takes the min start / max end across all areas.
   v260505.1520
     - Remove "Follow Transport" option: REAPER's transport primary time
       mode is not exposed by any native lua API (and projtimemode actually
@@ -142,8 +146,37 @@ local function fmt_tc(t)
   return r.format_timestr_pos(t or 0, "", time_mode)
 end
 
--- Selection range: items if any → time selection → edit cursor
+-- Walk every track's P_RAZOREDITS and return min start / max end across
+-- all razor areas (track + envelope). Returns nil when no razor exists.
+-- P_RAZOREDITS string format: triplets of `start end "GUID"` separated by
+-- whitespace; GUID is "" for track-level razors, otherwise an envelope GUID.
+local function get_razor_range()
+  local s, e, found = math.huge, -math.huge, false
+  for ti = 0, r.CountTracks(0) - 1 do
+    local tr = r.GetTrack(0, ti)
+    local _, str = r.GetSetMediaTrackInfo_String(tr, "P_RAZOREDITS", "", false)
+    if str and str ~= "" then
+      for ss, ee in str:gmatch('(%S+)%s+(%S+)%s+"[^"]*"') do
+        local sn, en = tonumber(ss), tonumber(ee)
+        if sn and en then
+          if sn < s then s = sn end
+          if en > e then e = en end
+          found = true
+        end
+      end
+    end
+  end
+  if found then return s, e end
+end
+
+-- Selection range priority: Razor > Time selection > Item selection > Cursor
 local function compute_range()
+  local rs, re_ = get_razor_range()
+  if rs then return rs, re_ end
+
+  local ts1, ts2 = r.GetSet_LoopTimeRange(false, false, 0, 0, false)
+  if ts2 > ts1 then return ts1, ts2 end
+
   local ic = r.CountSelectedMediaItems(0)
   if ic > 0 then
     local s, e = math.huge, -math.huge
@@ -156,8 +189,7 @@ local function compute_range()
     end
     return s, e
   end
-  local ts1, ts2 = r.GetSet_LoopTimeRange(false, false, 0, 0, false)
-  if ts2 > ts1 then return ts1, ts2 end
+
   local cp = r.GetCursorPosition()
   return cp, cp
 end
