@@ -1,14 +1,26 @@
 ---@diagnostic disable: undefined-global
 --[[
 @description GFX - Count Items/Tracks and Toggle Show Item Details
-@version 260304.1650
+@version 260505.1443
 @author hsuanice
 @about
-  Selection monitor HUD using native gfx (no ReaImGui required).
-  Left-click: toggle detail panel
-  Right-click: font size / dock / close
-  Supports docking; remembers position, dock state, font size, panel state.
+  Pro Tools-style selection monitor HUD using native gfx (no ReaImGui).
+    Top row    : Items count (left)  +  Tracks count (right)
+    Mid rows   : Start / End / Length timecodes  (PT transport style)
+    Detail rows: MIDI / Audio / Empty + Channel Count  (toggle with arrow / left-click)
+  Right-click: font size (UI scale) / dock / close.
+  Window position, dock state, font size, and panel state persist across restarts.
 @changelog
+  v260505.1443
+    - Redesign layout to mirror Pro Tools transport selection display:
+      * Top row keeps Items / Tracks counts + arrow toggle.
+      * New Start / End / Length timecode rows beneath the counts.
+      * Detail panel (MIDI / Audio / Empty / Channel Count) still toggles via
+        the arrow / left-click.
+    - Selection range source: selected items if any → time selection → edit cursor.
+    - Timecodes formatted via reaper.format_timestr_pos(t, "", 5) (HH:MM:SS:FF).
+    - Auto-resize accounts for the new TC rows; UI scale (font 13/16/20/24)
+      reflows everything proportionally.
   v260304.1650
     - Fix: r.atexit(save_state) ensures dock state and position are saved even when
       REAPER is closed without manually closing the script window
@@ -47,7 +59,7 @@ local dock_state   = tonumber(r.GetExtState(EXT_NS, "DOCK_STATE")) or 0
 ------------------------------------------------------------
 -- Layout constants
 ------------------------------------------------------------
-local SCAN_INTERVAL = 0.15
+local SCAN_INTERVAL = 0.10
 local PAD   = 10   -- window padding
 local LPAD  = 5    -- extra vertical space per line
 local FSLOT = 1    -- gfx font slot
@@ -55,9 +67,11 @@ local FSLOT = 1    -- gfx font slot
 ------------------------------------------------------------
 -- Colors { r, g, b }
 ------------------------------------------------------------
-local CB = { 0.13, 0.13, 0.13 }  -- background
-local CT = { 0.87, 0.87, 0.87 }  -- text
-local CD = { 0.55, 0.55, 0.55 }  -- dim labels
+local CB = { 0.10, 0.10, 0.10 }  -- background
+local CT = { 0.87, 0.87, 0.87 }  -- text (counts / values)
+local CV = { 0.00, 0.87, 0.00 }  -- timecode value (PT-style green)
+local CL = { 0.55, 0.55, 0.55 }  -- timecode labels (Start/End/Length)
+local CD = { 0.55, 0.55, 0.55 }  -- dim labels (details)
 local CH = { 1.00, 1.00, 1.00 }  -- section header
 local CA = { 0.60, 0.80, 1.00 }  -- arrow accent
 
@@ -71,10 +85,14 @@ local function lh()      return font_size + LPAD end
 local cached = {
   item_count  = 0,
   track_count = 0,
-  types    = { midi=0, audio=0, empty=0 },
-  channels = {},
+  start_str   = "00:00:00:00",
+  end_str     = "00:00:00:00",
+  len_str     = "00:00:00:00",
+  types       = { midi=0, audio=0, empty=0 },
+  channels    = {},
 }
-local scan_pv, scan_ic, scan_tc = -1, -1, -1
+local scan_pv, scan_ic, scan_tc           = -1, -1, -1
+local scan_cur, scan_ts1, scan_ts2        = -1, -1, -1
 local next_scan = 0.0
 
 ------------------------------------------------------------
@@ -82,10 +100,38 @@ local next_scan = 0.0
 ------------------------------------------------------------
 local cur_w, cur_h = 0, 0
 local prev_cap     = 0
-local prev_dock    = dock_state  -- track dock state changes
+local prev_dock    = dock_state
 
 -- Cached position/dock (updated each frame; safe to read in atexit when gfx is gone)
 local cur_x, cur_y = win_x, win_y
+
+------------------------------------------------------------
+-- Helpers
+------------------------------------------------------------
+local function fmt_tc(t)
+  -- Mode 5 = h:m:s:f (timecode); matches PT-style display.
+  return r.format_timestr_pos(t or 0, "", 5)
+end
+
+-- Selection range: items if any → time selection → edit cursor
+local function compute_range()
+  local ic = r.CountSelectedMediaItems(0)
+  if ic > 0 then
+    local s, e = math.huge, -math.huge
+    for i = 0, ic - 1 do
+      local it = r.GetSelectedMediaItem(0, i)
+      local p  = r.GetMediaItemInfo_Value(it, "D_POSITION")
+      local l  = r.GetMediaItemInfo_Value(it, "D_LENGTH")
+      if p < s then s = p end
+      if p + l > e then e = p + l end
+    end
+    return s, e
+  end
+  local ts1, ts2 = r.GetSet_LoopTimeRange(false, false, 0, 0, false)
+  if ts2 > ts1 then return ts1, ts2 end
+  local cp = r.GetCursorPosition()
+  return cp, cp
+end
 
 ------------------------------------------------------------
 -- Size helpers
@@ -97,10 +143,11 @@ local function ch_line_count()
 end
 
 local function want_h()
-  local rows = 1  -- summary row
+  local rows = 1   -- summary row (Items / Tracks)
+  rows = rows + 3  -- Start / End / Length
   if show_details then
-    rows = rows + 3  -- midi / audio / empty
-    rows = rows + 1  -- "Channel Count:" header
+    rows = rows + 3   -- midi / audio / empty
+    rows = rows + 1   -- "Channel Count:" header
     rows = rows + ch_line_count()
   end
   return PAD * 2 + rows * lh()
@@ -109,12 +156,12 @@ end
 local function want_w()
   setfont()
   local candidates = {
-    string.format("Items: %d    Tracks: %d  v", cached.item_count, cached.track_count),
+    string.format("Items: %d    Tracks: %d   v", cached.item_count, cached.track_count),
+    "Length    " .. cached.len_str,
     "Channel Count:",
     "Stereo: 999",
-    "Audio: 999",
   }
-  local max_w = 120
+  local max_w = 160
   for _, s in ipairs(candidates) do
     local w = gfx.measurestr(s)
     if w > max_w then max_w = w end
@@ -128,11 +175,15 @@ end
 local function scan_summary()
   cached.item_count  = r.CountSelectedMediaItems(0)
   cached.track_count = r.CountSelectedTracks(0)
+  local s, e = compute_range()
+  cached.start_str = fmt_tc(s)
+  cached.end_str   = fmt_tc(e)
+  cached.len_str   = fmt_tc(e - s)
 end
 
 local function scan_full()
-  local ic    = r.CountSelectedMediaItems(0)
-  local tc    = r.CountSelectedTracks(0)
+  scan_summary()
+  local ic    = cached.item_count
   local types = { midi=0, audio=0, empty=0 }
   local chs   = {}
   for i = 0, ic - 1 do
@@ -152,21 +203,21 @@ local function scan_full()
       if ch > 0 then chs[ch] = (chs[ch] or 0) + 1 end
     end
   end
-  cached.item_count  = ic
-  cached.track_count = tc
-  cached.types       = types
-  cached.channels    = chs
+  cached.types    = types
+  cached.channels = chs
 end
 
 local function maybe_scan(now)
-  local pv = r.GetProjectStateChangeCount(0) or 0
-  local ic = r.CountSelectedMediaItems(0)
-  local tc = r.CountSelectedTracks(0)
+  local pv  = r.GetProjectStateChangeCount(0) or 0
+  local ic  = r.CountSelectedMediaItems(0)
+  local tc  = r.CountSelectedTracks(0)
+  local cp  = r.GetCursorPosition()
+  local ts1, ts2 = r.GetSet_LoopTimeRange(false, false, 0, 0, false)
   local changed = pv ~= scan_pv or ic ~= scan_ic or tc ~= scan_tc
+              or cp ~= scan_cur or ts1 ~= scan_ts1 or ts2 ~= scan_ts2
   if not changed or now < next_scan then return end
-  scan_pv   = pv
-  scan_ic   = ic
-  scan_tc   = tc
+  scan_pv,  scan_ic,  scan_tc  = pv, ic, tc
+  scan_cur, scan_ts1, scan_ts2 = cp, ts1, ts2
   next_scan = now + SCAN_INTERVAL
   if show_details then scan_full() else scan_summary() end
 end
@@ -208,14 +259,20 @@ local function draw()
   local y = PAD
   local h = lh()
 
-  -- Summary row
-  local sum = string.format("Items: %d    Tracks: %d", cached.item_count, cached.track_count)
-  local arr = show_details and "v" or ">"
-  local aw  = gfx.measurestr(arr)
+  -- ── Summary row: Items (left) | Tracks (right) | arrow (far right)
+  local items_str  = string.format("Items: %d",  cached.item_count)
+  local tracks_str = string.format("Tracks: %d", cached.track_count)
+  local arr        = show_details and "v" or ">"
+  local aw         = gfx.measurestr(arr)
 
   setcol(CT)
   gfx.x, gfx.y = PAD, y
-  gfx.drawstr(sum)
+  gfx.drawstr(items_str)
+
+  local tw = gfx.measurestr(tracks_str)
+  gfx.x = gfx.w - PAD - aw - 8 - tw
+  gfx.y = y
+  gfx.drawstr(tracks_str)
 
   setcol(CA)
   gfx.x = gfx.w - PAD - aw - 2
@@ -223,9 +280,27 @@ local function draw()
   gfx.drawstr(arr)
 
   y = y + h
+
+  -- ── Start / End / Length rows (PT transport style)
+  local function trow(label, val)
+    setcol(CL)
+    gfx.x, gfx.y = PAD, y
+    gfx.drawstr(label)
+    setcol(CV)
+    local vw = gfx.measurestr(val)
+    gfx.x = gfx.w - PAD - vw
+    gfx.y = y
+    gfx.drawstr(val)
+    y = y + h
+  end
+
+  trow("Start",  cached.start_str)
+  trow("End",    cached.end_str)
+  trow("Length", cached.len_str)
+
   if not show_details then return end
 
-  -- Detail rows helper
+  -- ── Detail rows
   local function drow(label, val, lc, vc)
     setcol(lc or CD)
     gfx.x, gfx.y = PAD, y
@@ -238,8 +313,8 @@ local function draw()
   end
 
   drow("MIDI:   ", cached.types.midi)
-  drow("Audio: ", cached.types.audio)
-  drow("Empty: ", cached.types.empty)
+  drow("Audio: ",  cached.types.audio)
+  drow("Empty: ",  cached.types.empty)
 
   setcol(CH)
   gfx.x, gfx.y = PAD, y
@@ -292,6 +367,7 @@ local function loop()
   maybe_scan(now)
   ensure_size()
   draw()
+  gfx.update()
 
   local cap  = gfx.mouse_cap
   local char = gfx.getchar()
@@ -324,10 +400,10 @@ local function loop()
   -- Update cached position and dock state every frame
   local cd = gfx.dock(-1)
   if cd == 0 then
-    cur_x, cur_y = gfx.clienttoscreen(0, 0)  -- cache floating position
+    cur_x, cur_y = gfx.clienttoscreen(0, 0)
   end
   if cd ~= prev_dock then
-    if cd == 0 then cur_w, cur_h = 0, 0 end  -- just undocked → resize to content
+    if cd == 0 then cur_w, cur_h = 0, 0 end
     prev_dock  = cd
     dock_state = cd
   end
@@ -338,7 +414,7 @@ end
 ------------------------------------------------------------
 -- Init
 ------------------------------------------------------------
-local init_h = PAD * 2 + lh()
-gfx.init("Selection Monitor", math.max(200, font_size * 16), init_h, dock_state, win_x, win_y)
-r.atexit(save_state)  -- always save on exit, even if REAPER closes the script
+local init_h = PAD * 2 + 4 * lh()  -- summary + start/end/length
+gfx.init("Selection Monitor", math.max(220, font_size * 16), init_h, dock_state, win_x, win_y)
+r.atexit(save_state)
 r.defer(loop)
