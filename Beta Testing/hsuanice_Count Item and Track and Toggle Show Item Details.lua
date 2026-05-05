@@ -1,7 +1,7 @@
 ---@diagnostic disable: undefined-global
 --[[
 @description GFX - Count Items/Tracks and Toggle Show Item Details
-@version 260505.1443
+@version 260505.1520
 @author hsuanice
 @about
   Pro Tools-style selection monitor HUD using native gfx (no ReaImGui).
@@ -11,6 +11,30 @@
   Right-click: font size (UI scale) / dock / close.
   Window position, dock state, font size, and panel state persist across restarts.
 @changelog
+  v260505.1520
+    - Remove "Follow Transport" option: REAPER's transport primary time
+      mode is not exposed by any native lua API (and projtimemode actually
+      reflects the ruler / project default, not the transport). Pick the
+      matching explicit format (Timecode / Min:Secs / etc.) instead.
+  v260505.1506
+    - Rename time-format menu entries for clarity:
+        Project default (ruler)  → Follow Ruler
+        Timecode (h:m:s:f)       → Project Timecode (h:m:s:f)
+      "Project Timecode" uses Project Settings → frame rate + start time
+      and is fixed regardless of the ruler / grid display (matches Pro Tools).
+  v260505.1457
+    - Time format is now selectable via right-click menu:
+        * Project default (ruler)   — mode -1
+        * Timecode (h:m:s:f)        — mode 5
+        * Min:Secs                  — mode 0
+        * Measures.Beats            — mode 2
+        * Seconds                   — mode 3
+        * Samples                   — mode 4
+      Persisted in TIME_MODE ext state.
+  v260505.1451
+    - Start / End / Length now follow the project's primary time unit
+      (ruler setting, format_timestr_pos mode -1) instead of being locked
+      to timecode. Switching the ruler updates the display live.
   v260505.1443
     - Redesign layout to mirror Pro Tools transport selection display:
       * Top row keeps Items / Tracks counts + arrow toggle.
@@ -55,6 +79,12 @@ local font_size    = tonumber(r.GetExtState(EXT_NS, "FONT_SIZE"))  or 16
 local win_x        = tonumber(r.GetExtState(EXT_NS, "WIN_X"))      or 200
 local win_y        = tonumber(r.GetExtState(EXT_NS, "WIN_Y"))      or 200
 local dock_state   = tonumber(r.GetExtState(EXT_NS, "DOCK_STATE")) or 0
+-- Time format passed to format_timestr_pos:
+--   -1 = project default (ruler) | 0 = Min:Secs | 2 = Measures.Beats
+--    3 = Seconds | 4 = Samples   | 5 = Timecode (h:m:s:f)
+local time_mode    = tonumber(r.GetExtState(EXT_NS, "TIME_MODE"))  or -1
+-- Migrate: previous beta default was -2 (Follow Transport), now removed.
+if time_mode == -2 then time_mode = -1 end
 
 ------------------------------------------------------------
 -- Layout constants
@@ -109,8 +139,7 @@ local cur_x, cur_y = win_x, win_y
 -- Helpers
 ------------------------------------------------------------
 local function fmt_tc(t)
-  -- Mode 5 = h:m:s:f (timecode); matches PT-style display.
-  return r.format_timestr_pos(t or 0, "", 5)
+  return r.format_timestr_pos(t or 0, "", time_mode)
 end
 
 -- Selection range: items if any → time selection → edit cursor
@@ -244,6 +273,7 @@ local function save_state()
   r.SetExtState(EXT_NS, "WIN_Y",        tostring(cur_y),                true)
   r.SetExtState(EXT_NS, "SHOW_DETAILS", show_details and "1" or "0",    true)
   r.SetExtState(EXT_NS, "FONT_SIZE",    tostring(font_size),            true)
+  r.SetExtState(EXT_NS, "TIME_MODE",    tostring(time_mode),            true)
 end
 
 ------------------------------------------------------------
@@ -336,25 +366,57 @@ end
 -- Right-click context menu  (returns true = close requested)
 ------------------------------------------------------------
 local function do_menu()
-  local function mk(lbl, sz)
-    return (font_size == sz and "!" or "") .. lbl
-  end
+  local function fmark(sz) return font_size == sz and "!" or "" end
+  local function tmark(m)  return time_mode == m  and "!" or "" end
   local cd         = gfx.dock(-1)
   local dock_label = cd == 0 and "Dock Window" or "Undock Window"
-  local menu = mk("Font: Small (13)", 13)  .. "|" ..
-               mk("Font: Medium (16)", 16) .. "|" ..
-               mk("Font: Large (20)", 20)  .. "|" ..
-               mk("Font: XL (24)", 24)     .. "|" ..
-               dock_label                  .. "|" ..
-               "Close"
+
+  local items = {
+    tmark(-1) .. "Time: Follow Ruler / Project default",
+    tmark( 5) .. "Time: Timecode (h:m:s:f)",
+    tmark( 0) .. "Time: Min:Secs",
+    tmark( 2) .. "Time: Measures.Beats",
+    tmark( 3) .. "Time: Seconds",
+    tmark( 4) .. "Time: Samples",
+    "",
+    fmark(13) .. "Font: Small (13)",
+    fmark(16) .. "Font: Medium (16)",
+    fmark(20) .. "Font: Large (20)",
+    fmark(24) .. "Font: XL (24)",
+    "",
+    dock_label,
+    "Close",
+  }
+  local menu = ""
+  for i, it in ipairs(items) do
+    menu = menu .. it
+    if i < #items then menu = menu .. "|" end
+  end
+
   local sel = gfx.showmenu(menu)
-  if     sel == 1 then font_size = 13; cur_w, cur_h = 0, 0
-  elseif sel == 2 then font_size = 16; cur_w, cur_h = 0, 0
-  elseif sel == 3 then font_size = 20; cur_w, cur_h = 0, 0
-  elseif sel == 4 then font_size = 24; cur_w, cur_h = 0, 0
-  elseif sel == 5 then
+
+  -- Time format (separators are NOT counted in the return index)
+  local function set_time_mode(m)
+    if time_mode ~= m then
+      time_mode = m
+      scan_pv = -1                 -- force rescan to refresh formatted strings
+      cur_w, cur_h = 0, 0          -- new format may need a different window width
+    end
+  end
+
+  if     sel ==  1 then set_time_mode(-1)
+  elseif sel ==  2 then set_time_mode( 5)
+  elseif sel ==  3 then set_time_mode( 0)
+  elseif sel ==  4 then set_time_mode( 2)
+  elseif sel ==  5 then set_time_mode( 3)
+  elseif sel ==  6 then set_time_mode( 4)
+  elseif sel ==  7 then font_size = 13; cur_w, cur_h = 0, 0
+  elseif sel ==  8 then font_size = 16; cur_w, cur_h = 0, 0
+  elseif sel ==  9 then font_size = 20; cur_w, cur_h = 0, 0
+  elseif sel == 10 then font_size = 24; cur_w, cur_h = 0, 0
+  elseif sel == 11 then
     if cd == 0 then gfx.dock(1) else gfx.dock(0) end
-  elseif sel == 6 then return true
+  elseif sel == 12 then return true
   end
   return false
 end
