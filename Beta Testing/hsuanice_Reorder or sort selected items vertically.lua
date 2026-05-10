@@ -1,6 +1,6 @@
 --[[
 @description ReaImGui - Vertical Reorder and Sort (items)
-@version 260402.1924
+@version 260510.1721
 @author hsuanice
 @about
   Provides three vertical re-arrangement modes for selected items (stacked UI):
@@ -29,6 +29,24 @@
 
 
 @changelog
+  v260510.1721
+  - Fix: Copy-to-Sort Mode 2 (Scene & Take) — items from different scene+take slots
+    no longer share a track within a metadata group, even when they don't overlap in
+    time. Restores per-slot track alignment so each recording session occupies its
+    own row of tracks across all channels.
+    * Per-group bin-packing now partitions items by their global slot first, then
+      packs within each (group, slot) by time only.
+    * Track creation order: slot-by-slot, per slot
+      [G1-primary, G2-primary, …, G1-overflow, G2-overflow, …].
+      Groups with no items in a given slot are skipped, so empty tracks are not
+      created (the previous v260402.1924 consolidation behavior is reverted, but
+      empty per-slot tracks are still avoided).
+    * Track grouping (MEDIA_EDIT_LEAD/FOLLOW) is now keyed on (slot, level), so a
+      razor edit on slot 1 doesn't propagate to slot 2 even when they share a
+      channel.
+    * Resolves the case where e.g. BOOM1 items from session A and session B landed
+      on the same track because they happened not to overlap.
+
   v260402.1924
   - New: Copy-to-Sort Mode 2 (Scene & Take) automatically assigns a REAPER track group
     to each level's tracks (primary level → Group A, overflow level → Group B, etc.).
@@ -330,8 +348,8 @@
 ---------------------------------------
 -- Debug Mode
 ---------------------------------------
-local DEBUG_MODE = false -- Set to true to enable detailed console logging
-local OUTPUT_TO_FILE = false -- Write debug output to file instead of console
+local DEBUG_MODE = true -- Set to true to enable detailed console logging
+local OUTPUT_TO_FILE = true -- Write debug output to file instead of console
 local OUTPUT_FILE = reaper.GetResourcePath() .. "/Scripts/hsuanice Scripts/Tools/Reorder_Debug_Output.txt"
 
 -- Clear output file at script start
@@ -1238,63 +1256,68 @@ local function run_copy_to_new_tracks(name_mode, order_mode, asc, append_seconda
       debug(string.format("  Slot %d: %s", si, table.concat(keys, ", ")))
     end
 
-    -- Global bin-packing per group (consolidates across all scene+take slots).
-    -- Items from different slots that don't overlap in time can share the same track,
-    -- reducing the total track count compared to a per-slot approach.
-    -- Sort order: (st_key start time, bfn, src_offs) keeps items from the same
-    -- recording session adjacent, which favours stable track assignment.
-    local group_subslots = {}   -- [gi] = { sub_slots, label }
-    for gi, g in ipairs(order) do
-      local label = g.label
-      -- Collect all items for this group across all scene+take slots
-      local all_items = {}
-      for _, it in ipairs(g.items) do
-        all_items[#all_items+1] = it
+    -- Per-slot, per-group bin-packing.
+    -- Items from different scene+take slots stay on different tracks even when they
+    -- don't overlap in time — each recording session occupies its own row of tracks
+    -- across all metadata groups, so razor edits on one slot can't affect another.
+    -- Build st_key → slot index lookup.
+    local st_key_to_slot = {}
+    for si, slot in ipairs(global_slots) do
+      for sk in pairs(slot.st_keys) do
+        st_key_to_slot[sk] = si
       end
-      -- Sort by (st_key start time, bfn, src_offs)
-      table.sort(all_items, function(a, b)
-        local ska = it_to_stkey[a] or ""
-        local skb = it_to_stkey[b] or ""
-        if ska ~= skb then
-          local sa_t = st_key_span[ska] and st_key_span[ska].s or 0
-          local sb_t = st_key_span[skb] and st_key_span[skb].s or 0
-          if sa_t ~= sb_t then return sa_t < sb_t end
-          return ska < skb
-        end
-        local bfna = get_item_base_filename(a)
-        local bfnb = get_item_base_filename(b)
-        if bfna ~= bfnb then return bfna < bfnb end
-        return get_src_offs(a) < get_src_offs(b)
-      end)
-      -- Global bin-packing: items that don't overlap in time share the same track,
-      -- regardless of which scene+take slot they belong to.
-      local sub_slots = {}
-      for _, it in ipairs(all_items) do
-        local s = item_start(it) or 0
-        local e = s + (item_len(it) or 0)
-        local placed = false
-        for _, ss in ipairs(sub_slots) do
-          if can_place_on(ss.spans, s, e) then
-            ss.items[#ss.items+1] = it
-            ss.spans[#ss.spans+1] = { s = s, e = e }
-            placed = true; break
-          end
-        end
-        if not placed then
-          sub_slots[#sub_slots+1] = { items = { it }, spans = { { s = s, e = e } } }
-        end
-      end
-      group_subslots[gi] = { sub_slots = sub_slots, label = label }
-      debug(string.format("  Group '%s': %d item(s) → %d track(s)",
-                          label, #all_items, #sub_slots))
     end
 
-    -- Create tracks level-by-level: all groups' level-1 first, then level-2, etc.
-    -- Layout: [G1-primary, G2-primary, ..., G1-overflow, G2-overflow, ...]
-    local max_levels = 0
-    for gi = 1, #order do
-      if #group_subslots[gi].sub_slots > max_levels then
-        max_levels = #group_subslots[gi].sub_slots
+    local group_slot_subslots = {}   -- [gi][si] = { sub_slots, label }
+    for gi, g in ipairs(order) do
+      group_slot_subslots[gi] = {}
+      -- Partition this group's items by their global slot
+      local per_slot_items = {}
+      for _, it in ipairs(g.items) do
+        local sk = it_to_stkey[it] or ""
+        local si = st_key_to_slot[sk] or 1
+        per_slot_items[si] = per_slot_items[si] or {}
+        per_slot_items[si][#per_slot_items[si]+1] = it
+      end
+      -- Bin-pack within each (group, slot) by time overlap only
+      for si, its in pairs(per_slot_items) do
+        table.sort(its, function(a, b)
+          local bfna = get_item_base_filename(a)
+          local bfnb = get_item_base_filename(b)
+          if bfna ~= bfnb then return bfna < bfnb end
+          return get_src_offs(a) < get_src_offs(b)
+        end)
+        local sub_slots = {}
+        for _, it in ipairs(its) do
+          local s = item_start(it) or 0
+          local e = s + (item_len(it) or 0)
+          local placed = false
+          for _, ss in ipairs(sub_slots) do
+            if can_place_on(ss.spans, s, e) then
+              ss.items[#ss.items+1] = it
+              ss.spans[#ss.spans+1] = { s = s, e = e }
+              placed = true; break
+            end
+          end
+          if not placed then
+            sub_slots[#sub_slots+1] = { items = { it }, spans = { { s = s, e = e } } }
+          end
+        end
+        group_slot_subslots[gi][si] = { sub_slots = sub_slots, label = g.label }
+        debug(string.format("  Group '%s' slot %d: %d item(s) → %d track(s)",
+                            g.label, si, #its, #sub_slots))
+      end
+    end
+
+    -- Per-slot max levels (sub_slot count) across all groups in that slot
+    local slot_max_levels = {}
+    for si = 1, #global_slots do
+      slot_max_levels[si] = 0
+      for gi = 1, #order do
+        local entry = group_slot_subslots[gi][si]
+        if entry and #entry.sub_slots > slot_max_levels[si] then
+          slot_max_levels[si] = #entry.sub_slots
+        end
       end
     end
 
@@ -1309,40 +1332,48 @@ local function run_copy_to_new_tracks(name_mode, order_mode, asc, append_seconda
       end
     end
 
-    local level_tracks = {}   -- [level] = list of tracks created at that level
-    for level = 1, max_levels do
-      level_tracks[level] = {}
-      for gi = 1, #order do
-        local entry = group_subslots[gi]
-        local ss = entry.sub_slots[level]
-        if ss then
-          local tr = make_labeled_track(entry.label)
-          level_tracks[level][#level_tracks[level]+1] = tr
-          for _, it in ipairs(ss.items) do
-            copy_item_to_track(it, tr)
-            copied = copied + 1
+    -- Create tracks slot-by-slot; per slot: [G1-primary, G2-primary, …, G1-overflow, …]
+    local slot_level_tracks = {}   -- [si][level] = list of tracks
+    for si = 1, #global_slots do
+      slot_level_tracks[si] = {}
+      for level = 1, slot_max_levels[si] do
+        slot_level_tracks[si][level] = {}
+        for gi = 1, #order do
+          local entry = group_slot_subslots[gi][si]
+          local ss = entry and entry.sub_slots[level]
+          if ss then
+            local tr = make_labeled_track(entry.label)
+            slot_level_tracks[si][level][#slot_level_tracks[si][level]+1] = tr
+            for _, it in ipairs(ss.items) do
+              copy_item_to_track(it, tr)
+              copied = copied + 1
+            end
           end
         end
       end
     end
 
-    -- Assign each level's tracks to their own REAPER track group
+    -- Assign each (slot, level)'s tracks to their own REAPER track group, so razor
+    -- edits stay within one recording session at one overflow level.
     local next_group = 1
-    for level = 1, max_levels do
-      if #level_tracks[level] > 1 then
-        while next_group <= 64 and (used_group_bits & (1 << (next_group - 1))) ~= 0 do
-          next_group = next_group + 1
-        end
-        if next_group <= 64 then
-          local bit = 1 << (next_group - 1)
-          for _, tr in ipairs(level_tracks[level]) do
-            reaper.GetSetTrackGroupMembership(tr, "MEDIA_EDIT_LEAD",   bit, bit)
-            reaper.GetSetTrackGroupMembership(tr, "MEDIA_EDIT_FOLLOW", bit, bit)
+    for si = 1, #global_slots do
+      for level = 1, slot_max_levels[si] do
+        local trs = slot_level_tracks[si][level]
+        if trs and #trs > 1 then
+          while next_group <= 64 and (used_group_bits & (1 << (next_group - 1))) ~= 0 do
+            next_group = next_group + 1
           end
-          used_group_bits = used_group_bits | bit
-          debug(string.format("  Assigned track group #%d to %d tracks at level %d",
-                              next_group, #level_tracks[level], level))
-          next_group = next_group + 1
+          if next_group <= 64 then
+            local bit = 1 << (next_group - 1)
+            for _, tr in ipairs(trs) do
+              reaper.GetSetTrackGroupMembership(tr, "MEDIA_EDIT_LEAD",   bit, bit)
+              reaper.GetSetTrackGroupMembership(tr, "MEDIA_EDIT_FOLLOW", bit, bit)
+            end
+            used_group_bits = used_group_bits | bit
+            debug(string.format("  Assigned track group #%d to %d tracks at slot %d level %d",
+                                next_group, #trs, si, level))
+            next_group = next_group + 1
+          end
         end
       end
     end
