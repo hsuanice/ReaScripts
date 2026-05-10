@@ -1,6 +1,6 @@
 --[[
 @description PM Timer - Scene-aware Work Timer
-@version 260323.2205
+@version 260510.1632
 @author hsuanice
 @about
   Scene-aware toggle timer for the hsuanice PM system.
@@ -26,6 +26,22 @@
   All work items are locked (C_LOCK=1) after creation.
 
 @changelog
+  v260510.1632
+    - Fix: Start / Finish / Break / Continue / Switch Scene / Stop no longer
+      recompute and overwrite the Scene Cut item's metadata note. The local
+      compute_scene_metadata() only knows P_EXT:SCENE_ID and color+position
+      attribution — it has no I_GROUPID fallback, so workflows that link EDL
+      items to scenes via REAPER item grouping caused Src Cnt / Src Len to be
+      reset to 0 on every action, requiring a Scene Analyzer rerun.
+      Scene metadata is now owned by Scene Analyzer; PM Timer reads the
+      existing note via build_work_item_note() and only writes when the user
+      explicitly invokes "Update Scene Metadata" from the right-click menu.
+
+  v260324.1250
+    - Conform mode work type menu: conform, picture cut, subtitle, custom
+      (was conform-only). Custom prompts for free-text entry.
+    - Added WORK_COLORS entries: picture cut (red), subtitle (cyan).
+
   v260323.2205
     - Dialog work type menu: editing, denoise, scene, ME, PAN, ME+PAN, custom
       (same list for both scene-selected and project-scope sessions).
@@ -366,12 +382,14 @@ local r = reaper
 ----------------------------------------------------------------
 
 local WORK_COLORS = {
-  editing   = {255, 255, 0},     -- Yellow
-  denoise   = {255, 0, 255},     -- Magenta
-  aap       = {0, 0, 255},       -- Blue
-  conform   = {0, 255, 0},       -- Green
-  ["pre-prod"] = {255, 140, 0},  -- Orange
-  wrap      = {100, 220, 255},   -- Light blue
+  editing          = {255, 255, 0},     -- Yellow
+  denoise          = {255, 0, 255},     -- Magenta
+  aap              = {0, 0, 255},       -- Blue
+  conform          = {0, 255, 0},       -- Green
+  ["picture cut"]  = {255, 100, 100},   -- Red
+  subtitle         = {0, 200, 200},     -- Cyan
+  ["pre-prod"]     = {255, 140, 0},     -- Orange
+  wrap             = {100, 220, 255},   -- Light blue
 }
 
 -- ── Constants ──────────────────────────────────────────────────────────────
@@ -521,7 +539,7 @@ local function get_work_types_for_mode()
     return { "editing", "denoise", "scene", "ME", "PAN", "ME+PAN", "custom" }
   end
   if S.work_mode == "Conform" then
-    return { "conform" }
+    return { "conform", "picture cut", "subtitle", "custom" }
   end
   return WORK_TYPES
 end
@@ -1451,10 +1469,9 @@ local function action_start()
   local now_clock   = os.time()
   local now_precise = r.time_precise()
 
-  -- Update scene metadata in Scene Cut item note and build work item note
+  -- Read scene metadata from Scene Cut item note (owned by Scene Analyzer).
   local item_note = ""
   if sel_scene and sel_scene.handle then
-    update_scene_note(sel_scene.handle)
     item_note = build_work_item_note(sel_scene.handle)
   else
     item_note = build_project_scope_note()
@@ -1687,7 +1704,6 @@ local function action_finish()
   if S.work_mode == "AAP" then finish_aap_item("finish")
   else
     local was_project_scope = (S.scene_guid == "")
-    if S.scene_guid ~= "" then update_scene_metadata_by_guid(S.scene_guid) end
     local finishing_guid = S.work_item_guid
     finish_current_item("finish"); sync_work_item_names()
     local log_item = get_item_by_guid(finishing_guid)
@@ -1700,7 +1716,6 @@ local function action_break()
   else
     local was_project_scope = (S.scene_guid == "")
     save_break_state()
-    if S.scene_guid ~= "" then update_scene_metadata_by_guid(S.scene_guid) end
     finish_current_item("break"); sync_work_item_names()
     if was_project_scope then PM_SyncProjectScopeNotes() end
   end
@@ -1723,7 +1738,6 @@ local function action_continue()
 
   local item_note = ""
   if scene_handle then
-    update_scene_note(scene_handle)
     item_note = build_work_item_note(scene_handle)
   end
 
@@ -1847,10 +1861,9 @@ local function action_switch_scene()
     end
   end
 
-  -- Update new scene's metadata in Scene Cut note and build work item note
+  -- Read new scene's metadata from Scene Cut note (owned by Scene Analyzer).
   local item_note = ""
   if sel_scene.handle then
-    update_scene_note(sel_scene.handle)
     item_note = build_work_item_note(sel_scene.handle)
   end
 
@@ -1884,7 +1897,6 @@ local function action_switch_scene()
 end
 
 local function action_stop()
-  if S.scene_guid ~= "" then update_scene_metadata_by_guid(S.scene_guid) end
   local item = get_item_by_guid(S.work_item_guid)
   if item then
     r.Undo_BeginBlock()
