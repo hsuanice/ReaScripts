@@ -1,6 +1,6 @@
 --[[
 @description ReaImGui - Rename Source File from Metadata (cached preview + source rename)
-@version 260710.1356
+@version 260710.1425
 @author hsuanice
 @about
   Rename the actual source file on disk from BWF/iXML and true source metadata using a fast ReaImGui UI.
@@ -35,6 +35,12 @@
   hsuanice served as the workflow designer, tester, and integrator for this tool.
 
 @changelog
+  v260710.1425 (2026-07-10)
+    - UI: History is now a standalone fold section (separate from Presets) with a Clear All action.
+    - UI: Token row simplified by removing $trk1~$trk8 and keeping only one counter token (${counter:2}).
+    - Behavior: Apply no longer auto-refreshes preview; preview updates only when user clicks Update Preview.
+    - Fix: Rename History preview now reflects persisted note history only (no projected extra row).
+
   v260710.1356 (2026-07-10)
     - UI: Removed $curnote from the token list and Detected fields to keep the workflow focused on source renaming.
     - UI: Preview now shows rename history instead of Current/New Note columns, with $origsrcfile prioritized in token ordering.
@@ -1844,10 +1850,10 @@ local TOKEN_LIST = {
   "$origsrcfile","$curtake","$clearnote","$track","$filename","$srcfile","$srcbase",'$srcbaseprefix:N','$srcbasesuffix:N',"$srcext","$srcpath","$srcdir",
   "$samplerate","$channels","$length",
   "$project","$scene","$take","$tape",
-  "$trk","$trkall","$trk1","$trk2","$trk3","$trk4","$trk5","$trk6","$trk7","$trk8",
+  "$trk","$trkall",
   "$ubits","$framerate","$speed",
   "$date","$time","$year","$originationdate","$umid", "$umid_pt","$originationtime","$startoffset",
-  "${counter:2}","${counter:3}","$interleave","$interum","$chnum",
+  "${counter:2}","$interleave","$interum","$chnum",
 }
 
 -- ===== Token insertion (caret only) =====
@@ -2241,10 +2247,12 @@ local function scan_metadata()
       end
       e.fields.__trk_by_interleave = nil
       compute_interleave_diag(e.fields, e.item)
-      local current_src = tostring(e.fields and e.fields.srcfile or e.current or "")
-      local newname = build_source_name(TAKE_TEMPLATE, e.fields, i, e.fields and e.fields.srcpath or "")
+      local take = get_active_take(e.item)
+      local actual_src_path = (take and get_take_source_path(take)) or (e.fields and e.fields.srcpath) or ""
+      local current_src = basename(actual_src_path)
+      if current_src == "" then current_src = tostring(e.fields and e.fields.srcfile or e.current or "") end
+      local newname = build_source_name(TAKE_TEMPLATE, e.fields, i, actual_src_path)
       local _, raw_note = reaper.GetSetMediaItemInfo_String(e.item, "P_NOTES", "", false)
-      local history_note = append_rename_note_history(raw_note, current_src, newname)
       local will_skip = false
       if SKIP_EMPTY_TOKENS then
         local empties = empty_tokens_in_take_template(TAKE_TEMPLATE, e.fields, i)
@@ -2254,7 +2262,7 @@ local function scan_metadata()
       preview_rows[#preview_rows+1] = {
         current = current_src,
         newname = newname,
-        history_preview = format_history_preview(will_skip and raw_note or history_note),
+        history_preview = format_history_preview(raw_note),
         note_applied = false,
         will_skip = will_skip
       }
@@ -2277,10 +2285,12 @@ local function recompute_preview_from_cache()
     if not preview_limit or shown < preview_limit then
       e.fields.__trk_by_interleave = nil
       compute_interleave_diag(e.fields, e.item)
-      local current_src = tostring(e.fields and e.fields.srcfile or e.current or "")
-      local newname = build_source_name(TAKE_TEMPLATE, e.fields, i, e.fields and e.fields.srcpath or "")
+      local take = get_active_take(e.item)
+      local actual_src_path = (take and get_take_source_path(take)) or (e.fields and e.fields.srcpath) or ""
+      local current_src = basename(actual_src_path)
+      if current_src == "" then current_src = tostring(e.fields and e.fields.srcfile or e.current or "") end
+      local newname = build_source_name(TAKE_TEMPLATE, e.fields, i, actual_src_path)
       local _, raw_note = reaper.GetSetMediaItemInfo_String(e.item, "P_NOTES", "", false)
-      local history_note = append_rename_note_history(raw_note, current_src, newname)
       local will_skip = false
       if SKIP_EMPTY_TOKENS then
         local empties = empty_tokens_in_take_template(TAKE_TEMPLATE, e.fields, i)
@@ -2290,7 +2300,7 @@ local function recompute_preview_from_cache()
       preview_rows[#preview_rows+1] = {
         current = current_src,
         newname = newname,
-        history_preview = format_history_preview(will_skip and raw_note or history_note),
+        history_preview = format_history_preview(raw_note),
         note_applied = false,
         will_skip = will_skip
       }
@@ -2406,7 +2416,6 @@ local function apply_renaming_step()
     status_msg = string.format("Done: %d renamed, %d skipped.", p.renamed, p.skipped)
     reaper.ShowConsoleMsg(string.format("Done: %d renamed, %d skipped.\n", p.renamed, p.skipped))
     APPLY_STATE = nil
-    recompute_preview_from_cache()
     open_result_modal({
       total_sel = p.total,
       renamed = p.renamed,
@@ -2474,7 +2483,7 @@ end
 local _SECT_EXT   = "hsuanice_RenameMetadata_v1"
 local _sect_state = {}
 local _sect_init  = {}
-for _, k in ipairs({"tokens","renamer","take_presets","note_presets"}) do
+for _, k in ipairs({"tokens","renamer","take_presets","history","note_presets"}) do
   local v = reaper.GetExtState(_SECT_EXT, k)
   _sect_state[k] = (v == "1")
 end
@@ -2653,31 +2662,44 @@ local function draw_left_panel()
       end,
       true
     )
+  end
 
-    reaper.ImGui_Separator(ctx)
-    reaper.ImGui_TextDisabled(ctx, "History")
-    reaper.ImGui_SameLine(ctx)
-    if reaper.ImGui_SmallButton(ctx, "History ▾##take_history_btn") then
-      reaper.ImGui_OpenPopup(ctx, "take_template_history_popup")
+  if section_header("History", "history") then
+    reaper.ImGui_TextDisabled(ctx, "(stores up to 10 recent Source File Name templates after Preview or Apply)")
+    if reaper.ImGui_SmallButton(ctx, "Clear All##take_history_clear") then
+      TAKE_TEMPLATE_HISTORY = {}
+      save_recent_list(TAKE_HISTORY_KEY, TAKE_HISTORY_LIMIT, TAKE_TEMPLATE_HISTORY)
     end
-    if reaper.ImGui_BeginPopup(ctx, "take_template_history_popup") then
+    local tbl_flags = TF('ImGui_TableFlags_SizingFixedFit') | TF('ImGui_TableFlags_BordersInnerV')
+    if reaper.ImGui_BeginTable(ctx, "TakeTemplateHistoryTable", 2, tbl_flags) then
+      reaper.ImGui_TableSetupColumn(ctx, "", TF('ImGui_TableColumnFlags_WidthFixed'), 32)
+      reaper.ImGui_TableSetupColumn(ctx, "", TF('ImGui_TableColumnFlags_WidthStretch'))
       if #TAKE_TEMPLATE_HISTORY == 0 then
+        reaper.ImGui_TableNextRow(ctx)
+        reaper.ImGui_TableNextColumn(ctx)
+        reaper.ImGui_TextDisabled(ctx, "-")
+        reaper.ImGui_TableNextColumn(ctx)
         reaper.ImGui_TextDisabled(ctx, "No history yet.")
       else
         for i, v in ipairs(TAKE_TEMPLATE_HISTORY) do
-          local label = ellipsize_utf8(v, 60)
-          if reaper.ImGui_Selectable(ctx, label .. "##take_hist_" .. i, false) then
+          reaper.ImGui_TableNextRow(ctx)
+          reaper.ImGui_TableNextColumn(ctx)
+          reaper.ImGui_TextDisabled(ctx, ("H%d"):format(i))
+          reaper.ImGui_TableNextColumn(ctx)
+          local avail = select(1, reaper.ImGui_GetContentRegionAvail(ctx))
+          local preview = ellipsize_to_width(ctx, v, avail - 6)
+          if reaper.ImGui_SmallButton(ctx, preview .. "##take_hist_" .. i) then
             TAKE_TEMPLATE = v
             focus_take_input = true
           end
-          if reaper.ImGui_IsItemHovered(ctx) and label ~= v then
+          if reaper.ImGui_IsItemHovered(ctx) and preview ~= v then
             reaper.ImGui_BeginTooltip(ctx)
             reaper.ImGui_Text(ctx, v)
             reaper.ImGui_EndTooltip(ctx)
           end
         end
       end
-      reaper.ImGui_EndPopup(ctx)
+      reaper.ImGui_EndTable(ctx)
     end
   end
 
