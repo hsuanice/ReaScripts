@@ -1,5 +1,5 @@
 -- @description RGWH ReaImGui - ImGui Interface for RGWH Core（Render or Glue with Handles）
--- @version 0.2.7
+-- @version 0.2.8
 -- @author hsuanice
 -- @link https://forum.cockos.com/showthread.php?t=305456
 -- @provides
@@ -14,6 +14,11 @@
 --   Adjust parameters using the visual controls and click operation buttons to execute.
 --
 -- @changelog
+--   0.2.8 [260710.1556] - FIX: ImGui window stability + Settings collapse lock
+--     - FIXED: Removed extra End() calls on non-visible Begin() paths (prevents "ImGui_End: Calling End() too many times!")
+--     - FIXED: BWF install modal now uses NoDocking to avoid docking-related stack issues
+--     - UI: Disabled Settings window collapse arrow (NoCollapse) to prevent accidental fold/collapse
+--
 --   0.2.7 [260330.1415] - MOVED: "Keep MUTED as separate unit" to main panel alongside "Split at crossfades"
 --     - Both unit grouping checkboxes now appear on the same row below Handle/Tail in the main panel
 --     - REMOVED: "GLUE UNIT BEHAVIOUR" section from Settings tab (no longer needed)
@@ -1411,7 +1416,7 @@ local function draw_bwfmetaedit_install_modal()
     gui.open_bwf_install_popup = false
   end
 
-  if ImGui.BeginPopupModal(ctx, BWF_INSTALL_POPUP_ID, true, ImGui.WindowFlags_AlwaysAutoResize) then
+  if ImGui.BeginPopupModal(ctx, BWF_INSTALL_POPUP_ID, true, ImGui.WindowFlags_AlwaysAutoResize | ImGui.WindowFlags_NoDocking) then
     if ImGui.IsWindowFocused(ctx) and ImGui.IsKeyPressed(ctx, ImGui.Key_Escape, false) then
       ImGui.CloseCurrentPopup(ctx)
     end
@@ -1474,11 +1479,17 @@ local function draw_settings_popup()
   local before_state = serialize_gui_state(gui)
 
   ImGui.SetNextWindowSize(ctx, 500, 600, ImGui.Cond_FirstUseEver)
-  -- Disable docking for settings window
-  local settings_flags = ImGui.WindowFlags_NoDocking
+  -- Disable docking and collapse for settings window
+  local settings_flags = ImGui.WindowFlags_NoDocking | ImGui.WindowFlags_NoCollapse
   local visible, open = ImGui.Begin(ctx, 'Settings', true, settings_flags)
+  if visible == nil then
+    gui.show_settings = false
+    return
+  end
+  if open == nil then
+    open = true
+  end
   if not visible then
-    ImGui.End(ctx)
     gui.show_settings = open
     return
   end
@@ -1567,8 +1578,14 @@ local function draw_manual_window()
   -- Disable docking for manual window
   local manual_flags = ImGui.WindowFlags_NoDocking
   local visible, open = ImGui.Begin(ctx, 'RGWH Manual - Operation Modes', true, manual_flags)
+  if visible == nil then
+    gui.show_manual = false
+    return
+  end
+  if open == nil then
+    open = true
+  end
   if not visible then
-    ImGui.End(ctx)
     gui.show_manual = open
     return
   end
@@ -2221,8 +2238,13 @@ local function draw_gui()
   end
 
   local visible, open = ImGui.Begin(ctx, 'RGWH Control Panel', true, window_flags)
+  if visible == nil then
+    return gui.open
+  end
+  if open == nil then
+    open = true
+  end
   if not visible then
-    ImGui.End(ctx)
     return open
   end
 
