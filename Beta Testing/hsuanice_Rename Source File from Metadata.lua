@@ -1,6 +1,6 @@
 --[[
 @description ReaImGui - Rename Source File from Metadata (cached preview + source rename)
-@version 260709.2218
+@version 260710.1356
 @author hsuanice
 @about
   Rename the actual source file on disk from BWF/iXML and true source metadata using a fast ReaImGui UI.
@@ -35,6 +35,26 @@
   hsuanice served as the workflow designer, tester, and integrator for this tool.
 
 @changelog
+  v260710.1356 (2026-07-10)
+    - UI: Removed $curnote from the token list and Detected fields to keep the workflow focused on source renaming.
+    - UI: Preview now shows rename history instead of Current/New Note columns, with $origsrcfile prioritized in token ordering.
+    - Fixed: Recent template History initialization no longer errors on startup when trimming entries.
+
+  v260710.1349 (2026-07-10)
+    - UI: Added an Original button under Source File Name to load $origsrcfile directly.
+    - UI: Renamed Source File Renamer to Replace Rules and Source Presets to Presets.
+    - UI: Added a recent template History dropdown under Presets (keeps the latest 10 entries).
+
+  v260710.1340 (2026-07-10)
+    - Changed: Rename history now stores only resulting filenames to reduce Item Note size.
+    - Changed: Renaming back to $origsrcfile now clears this script's internal note metadata while preserving visible note text.
+    - Compatibility: Legacy history entries in old -> new format are read and normalized automatically.
+
+  v260710.1321 (2026-07-10)
+    - New: Added $origsrcfile token for restoring the first saved source filename.
+    - New: Rename history is appended to Item Note in a structured internal block.
+    - Changed: Visible Item Note text is preserved while internal rename metadata is parsed separately.
+
   v260709.2218 (2026-07-09)
     - New: Rename the actual source file on disk from metadata-driven templates, not just the take name.
     - New: After a successful rename, update the take name to match the new source filename.
@@ -461,6 +481,8 @@ end
 local TAKE_PRESETS_KEY = "take_template_presets_v1"  -- newline-separated 5 lines
 local NOTE_PRESETS_KEY = "note_template_presets_v1"  -- newline-separated 5 lines
 local PRESET_SLOTS = 5
+local TAKE_HISTORY_KEY = "take_template_history_v1"
+local TAKE_HISTORY_LIMIT = 10
 
 local function load_presets(key)
   local s = reaper.GetExtState(EXT_NS, key)
@@ -481,6 +503,40 @@ local function save_presets(key, list)
     packed[i] = esc(list[i] or "")
   end
   reaper.SetExtState(EXT_NS, key, join_by_sep(packed), true)
+end
+
+local function load_recent_list(key, limit)
+  local s = reaper.GetExtState(EXT_NS, key)
+  local t = {}
+  if s and s ~= "" then
+    local parts = split_by_sep(s)
+    for i = 1, math.min(#parts, limit) do
+      local v = unesc(parts[i])
+      if v ~= "" then t[#t + 1] = v end
+    end
+  end
+  return t
+end
+
+local function save_recent_list(key, limit, list)
+  local packed = {}
+  for i = 1, math.min(#list, limit) do
+    packed[i] = esc(list[i] or "")
+  end
+  reaper.SetExtState(EXT_NS, key, join_by_sep(packed), true)
+end
+
+local function push_recent_list(list, key, limit, value)
+  local trimmed = tostring(value or ""):gsub("^%s+", ""):gsub("%s+$", "")
+  if trimmed == "" then return list end
+  local next_list = { trimmed }
+  for _, existing in ipairs(list or {}) do
+    if existing ~= trimmed and #next_list < limit then
+      next_list[#next_list + 1] = existing
+    end
+  end
+  save_recent_list(key, limit, next_list)
+  return next_list
 end
 
 -- ===== Skip-If-Empty (Take-only) =====
@@ -659,6 +715,109 @@ end
 
 -- ===== UTF-8 helpers =====
 local function trim(s) return (tostring(s or "")):gsub("^%s+",""):gsub("%s+$","") end
+local NOTE_META_BEGIN = "[hsuanice_source_rename_meta]"
+local NOTE_META_END = "[/hsuanice_source_rename_meta]"
+
+local function split_note_and_meta(note)
+  note = tostring(note or "")
+  local start_pos = note:find(NOTE_META_BEGIN, 1, true)
+  if not start_pos then return note, nil end
+
+  local end_pos = note:find(NOTE_META_END, start_pos + #NOTE_META_BEGIN, true)
+  if not end_pos then
+    local visible = note:sub(1, start_pos - 1):gsub("[%s\r\n]+$", "")
+    local meta_block = note:sub(start_pos + #NOTE_META_BEGIN)
+    return visible, meta_block
+  end
+
+  local visible = note:sub(1, start_pos - 1):gsub("[%s\r\n]+$", "")
+  local meta_block = note:sub(start_pos + #NOTE_META_BEGIN, end_pos - 1)
+  return visible, meta_block
+end
+
+local function parse_note_meta(note)
+  local visible, meta_block = split_note_and_meta(note)
+  local meta = { origsrcfile = "", history = {} }
+  if not meta_block or meta_block == "" then
+    return visible, meta
+  end
+
+  local normalized = tostring(meta_block):gsub("\r\n", "\n"):gsub("\r", "\n")
+  for line in (normalized .. "\n"):gmatch("(.-)\n") do
+    if line:match("^origsrcfile=") then
+      meta.origsrcfile = line:sub(#"origsrcfile=" + 1)
+    elseif line:match("^history=") then
+      local entry = line:sub(#"history=" + 1)
+      local new_name = entry:match("^.- | .- %-%> (.-)$")
+      meta.history[#meta.history + 1] = new_name or entry
+    end
+  end
+  return visible, meta
+end
+
+local function build_note_with_meta(visible, meta)
+  visible = tostring(visible or "")
+  meta = meta or {}
+  local lines = {}
+  if meta.origsrcfile and meta.origsrcfile ~= "" then
+    lines[#lines + 1] = "origsrcfile=" .. tostring(meta.origsrcfile)
+  end
+  for _, entry in ipairs(meta.history or {}) do
+    if tostring(entry or "") ~= "" then
+      lines[#lines + 1] = "history=" .. tostring(entry)
+    end
+  end
+  if #lines == 0 then
+    return visible
+  end
+
+  local out = visible
+  if out ~= "" then out = out:gsub("[%s\r\n]+$", "") end
+  if out ~= "" then out = out .. "\n" end
+  return out .. NOTE_META_BEGIN .. "\n" .. table.concat(lines, "\n") .. "\n" .. NOTE_META_END
+end
+
+local function append_rename_note_history(note, old_name, new_name)
+  local visible, meta = parse_note_meta(note)
+  local old_trimmed = trim(old_name)
+  local new_trimmed = trim(new_name)
+
+  if new_trimmed == "" or old_trimmed == "" or new_trimmed == old_trimmed then
+    return build_note_with_meta(visible, meta)
+  end
+  if old_trimmed ~= "" and (not meta.origsrcfile or meta.origsrcfile == "") then
+    meta.origsrcfile = old_trimmed
+  end
+
+  if meta.origsrcfile ~= "" and new_trimmed == meta.origsrcfile then
+    meta.origsrcfile = ""
+    meta.history = {}
+    return build_note_with_meta(visible, meta)
+  end
+
+  if new_trimmed ~= "" then
+    meta.history[#meta.history + 1] = new_trimmed
+  end
+  return build_note_with_meta(visible, meta)
+end
+
+local function format_history_preview(note)
+  local _, meta = parse_note_meta(note)
+  local lines = {}
+  if meta.origsrcfile and meta.origsrcfile ~= "" then
+    lines[#lines + 1] = "1. Original: " .. tostring(meta.origsrcfile)
+  end
+  for i, entry in ipairs(meta.history or {}) do
+    if tostring(entry or "") ~= "" then
+      lines[#lines + 1] = string.format("%d. Rename %d: %s", #lines + 1, i, tostring(entry))
+    end
+  end
+  if #lines == 0 then
+    return "(no history)"
+  end
+  return table.concat(lines, "\n")
+end
+
 local function utf8_spans(s)
   s = tostring(s or ""); local spans, i, n = {}, 1, #s
   while i <= n do
@@ -1043,7 +1202,7 @@ local function collect_metadata_for_item(item)
     "Description","OriginationDate","OriginationTime","Originator","OriginatorReference","TimeReference",
     "PROJECT","SCENE","TAKE","TAPE","TRK1","UBITS","FRAMERATE","SPEED",
     "filename","filepath","samplerate","channels","track","length","year","date","time",
-    "originationdate","originationtime","startoffset",
+    "originationdate","originationtime","startoffset","origsrcfile",
     "srcpath","srcfile","srcbase","srcext","srcdir",
   }
   for _,k in ipairs(alias) do local v=t[k]; if v and not t[string.lower(k)] then t[string.lower(k)]=v end end
@@ -1072,11 +1231,9 @@ local function collect_metadata_for_item(item)
   -- current item note
   do
     local _, note = reaper.GetSetMediaItemInfo_String(item, "P_NOTES", "", false)
-    if note and note ~= "" then
-      t.curnote = note
-    else
-      t.curnote = ""
-    end
+    local visible_note, note_meta = parse_note_meta(note)
+    t.curnote = visible_note or ""
+    t.origsrcfile = note_meta.origsrcfile or ""
   end
   return t
 end
@@ -1241,7 +1398,7 @@ local function normalize_tokens(s)
 
   -- plain known tokens
   local known = {
-    "curtake","curnote","clearnote","track","filename","srcfile","srcbase","srcext","srcpath","srcdir",
+    "curtake","curnote","clearnote","track","filename","origsrcfile","srcfile","srcbase","srcext","srcpath","srcdir",
     "samplerate","channels","length","project","scene","take","tape","trk","trkall",
     "ubits","framerate","speed","date","time","year","originationdate","originationtime","startoffset",
     "filepath","originator","originatorreference","timereference","description", "interleave","interum","chnum","channelnum",
@@ -1557,7 +1714,9 @@ local function cache_to_fields(cached, item)
 
   -- Get current item note
   local _, note = reaper.GetSetMediaItemInfo_String(item, "P_NOTES", "", false)
-  fields.curnote = (note and note ~= "") and note or ""
+  local visible_note, note_meta = parse_note_meta(note)
+  fields.curnote = (visible_note and visible_note ~= "") and visible_note or ""
+  fields.origsrcfile = note_meta.origsrcfile or ""
 
   -- UI-specific fields (not cached, computed on the fly)
   fields.track = get_item_track_name(item)
@@ -1656,6 +1815,7 @@ end
 local TAKE_TEMPLATE, NOTE_TEMPLATE = load_defaults()
 -- Presets (in-memory) + focus flags
 local TAKE_PRESETS = load_presets(TAKE_PRESETS_KEY)
+local TAKE_TEMPLATE_HISTORY = load_recent_list(TAKE_HISTORY_KEY, TAKE_HISTORY_LIMIT)
 local NOTE_PRESETS = load_presets(NOTE_PRESETS_KEY)
 local focus_take_input, focus_note_input = false, false
 
@@ -1681,7 +1841,7 @@ local LAST_RESULT = nil  -- { total_sel, renamed, noted, skipped, rows = { {idx,
 
 -- ===== Token list =====
 local TOKEN_LIST = {
-  "$curtake","$curnote","$clearnote","$track","$filename","$srcfile","$srcbase",'$srcbaseprefix:N','$srcbasesuffix:N',"$srcext","$srcpath","$srcdir",
+  "$origsrcfile","$curtake","$clearnote","$track","$filename","$srcfile","$srcbase",'$srcbaseprefix:N','$srcbasesuffix:N',"$srcext","$srcpath","$srcdir",
   "$samplerate","$channels","$length",
   "$project","$scene","$take","$tape",
   "$trk","$trkall","$trk1","$trk2","$trk3","$trk4","$trk5","$trk6","$trk7","$trk8",
@@ -1990,6 +2150,7 @@ local function build_left_copy_text_from_fields(f)
 
   -- rest in stable order (unchanged)
   local ordered = {
+    "origsrcfile",
     "project","scene","take","tape","track",
     "filename","srcfile","srcbase","srcext","srcpath","srcdir","filepath",
     "samplerate","channels","length",
@@ -2016,8 +2177,8 @@ local function build_right_copy_text_from_rows(fmt)
     out[#out + 1] = table.concat(a, sep)
   end
 
-  -- 表頭（順序：#, Current Take Name, New Name, Current Note, New Note）
-  add("#","Current Take Name","New Name","Current Note","New Note")
+  -- 表頭（順序：#, Current Source File, New Source File, Rename History）
+  add("#","Current Source File","New Source File","Rename History")
 
   -- 內容
   if preview_rows and #preview_rows > 0 then
@@ -2026,8 +2187,7 @@ local function build_right_copy_text_from_rows(fmt)
         tostring(i),
         r.current or "",
         r.newname or "",
-        r.current_note or "",
-        r.newnote or ""
+        r.history_preview or ""
       )
     end
   end
@@ -2036,6 +2196,7 @@ end
 
 -- ===== Build preview (from selection) =====
 local function scan_metadata()
+  TAKE_TEMPLATE_HISTORY = push_recent_list(TAKE_TEMPLATE_HISTORY, TAKE_HISTORY_KEY, TAKE_HISTORY_LIMIT, TAKE_TEMPLATE)
   local items, sig = get_selected_items_and_sig()
   SCAN_CACHE = { sig=sig, list={}, map={} }
   local counter = 1
@@ -2082,6 +2243,8 @@ local function scan_metadata()
       compute_interleave_diag(e.fields, e.item)
       local current_src = tostring(e.fields and e.fields.srcfile or e.current or "")
       local newname = build_source_name(TAKE_TEMPLATE, e.fields, i, e.fields and e.fields.srcpath or "")
+      local _, raw_note = reaper.GetSetMediaItemInfo_String(e.item, "P_NOTES", "", false)
+      local history_note = append_rename_note_history(raw_note, current_src, newname)
       local will_skip = false
       if SKIP_EMPTY_TOKENS then
         local empties = empty_tokens_in_take_template(TAKE_TEMPLATE, e.fields, i)
@@ -2091,8 +2254,7 @@ local function scan_metadata()
       preview_rows[#preview_rows+1] = {
         current = current_src,
         newname = newname,
-        current_note = "",
-        newnote = "",
+        history_preview = format_history_preview(will_skip and raw_note or history_note),
         note_applied = false,
         will_skip = will_skip
       }
@@ -2117,6 +2279,8 @@ local function recompute_preview_from_cache()
       compute_interleave_diag(e.fields, e.item)
       local current_src = tostring(e.fields and e.fields.srcfile or e.current or "")
       local newname = build_source_name(TAKE_TEMPLATE, e.fields, i, e.fields and e.fields.srcpath or "")
+      local _, raw_note = reaper.GetSetMediaItemInfo_String(e.item, "P_NOTES", "", false)
+      local history_note = append_rename_note_history(raw_note, current_src, newname)
       local will_skip = false
       if SKIP_EMPTY_TOKENS then
         local empties = empty_tokens_in_take_template(TAKE_TEMPLATE, e.fields, i)
@@ -2126,8 +2290,7 @@ local function recompute_preview_from_cache()
       preview_rows[#preview_rows+1] = {
         current = current_src,
         newname = newname,
-        current_note = "",
-        newnote = "",
+        history_preview = format_history_preview(will_skip and raw_note or history_note),
         note_applied = false,
         will_skip = will_skip
       }
@@ -2194,8 +2357,10 @@ local function apply_renaming_step()
                 skip_reason = string.format("source update failed: %s", replace_err or "unknown")
               else
                 local take_name = basename(target_path)
+                local _, current_note = reaper.GetSetMediaItemInfo_String(item, "P_NOTES", "", false)
+                local updated_note = append_rename_note_history(current_note, original_source_name, take_name)
                 reaper.GetSetMediaItemTakeInfo_String(take, "P_NAME", take_name, true)
-                reaper.GetSetMediaItemInfo_String(item, "P_NOTES", original_source_name, true)
+                reaper.GetSetMediaItemInfo_String(item, "P_NOTES", updated_note, true)
                 p.renamed = p.renamed + 1
               end
             else
@@ -2259,6 +2424,8 @@ local function apply_renaming()
   local items, sig = get_selected_items_and_sig()
   local total = #items
   if total == 0 then status_msg="No items selected."; return end
+
+  TAKE_TEMPLATE_HISTORY = push_recent_list(TAKE_TEMPLATE_HISTORY, TAKE_HISTORY_KEY, TAKE_HISTORY_LIMIT, TAKE_TEMPLATE)
 
   -- 防止重複觸發
   if APPLY_STATE then return end
@@ -2385,7 +2552,7 @@ local function draw_left_panel()
     save_skip_empty_tokens(val_skip_empty)
   end
 
-  -- Source template tools (Clear / Save / Default)
+  -- Source template tools (Clear / Save / Default / Original)
   if reaper.ImGui_SmallButton(ctx, "Clear##take") then
     TAKE_TEMPLATE = ""
   end
@@ -2398,14 +2565,19 @@ local function draw_left_panel()
     local tdef, ndef = load_defaults()
     TAKE_TEMPLATE = tdef
   end
+  reaper.ImGui_SameLine(ctx)
+  if reaper.ImGui_SmallButton(ctx, "Original##take") then
+    TAKE_TEMPLATE = "$origsrcfile"
+    focus_take_input = true
+  end
 
   -- Template Tokens (collapsible, state persisted)
   if section_header("Template Tokens", "tokens") then
     draw_token_row()
   end
 
-  -- Source File Renamer (collapsible, state persisted)
-  if section_header("Source File Renamer", "renamer") then
+  -- Replace Rules (collapsible, state persisted)
+  if section_header("Replace Rules", "renamer") then
     reaper.ImGui_TextDisabled(ctx, "(applies after tokens & filter; Note unaffected)")
     local chgEn, en = reaper.ImGui_Checkbox(ctx, "Enable##takeren", TAKE_RENAMER.enable or false)
     if chgEn then
@@ -2413,7 +2585,7 @@ local function draw_left_panel()
       save_take_renamer(TAKE_RENAMER)
     end
     reaper.ImGui_SameLine(ctx)
-    if reaper.ImGui_SmallButton(ctx, "+ Add rename rule##takeren_add_top") then
+    if reaper.ImGui_SmallButton(ctx, "+ Add replace rule##takeren_add_top") then
       local rules = TAKE_RENAMER.rules or {}
       rules[#rules+1] = { from = "", to = "" }
       TAKE_RENAMER.rules = rules
@@ -2422,14 +2594,14 @@ local function draw_left_panel()
     local rules = TAKE_RENAMER.rules or {}
     local tblFlags = TF('ImGui_TableFlags_Borders') | TF('ImGui_TableFlags_RowBg')
     if reaper.ImGui_BeginTable(ctx, "TakeRenRules", 3, tblFlags) then
-      reaper.ImGui_TableSetupColumn(ctx, "From", TF('ImGui_TableFlags_None')|TF('ImGui_TableColumnFlags_WidthStretch'), 0.48)
-      reaper.ImGui_TableSetupColumn(ctx, "To",   TF('ImGui_TableFlags_None')|TF('ImGui_TableColumnFlags_WidthStretch'), 0.48)
+      reaper.ImGui_TableSetupColumn(ctx, "Find", TF('ImGui_TableFlags_None')|TF('ImGui_TableColumnFlags_WidthStretch'), 0.48)
+      reaper.ImGui_TableSetupColumn(ctx, "Replace",   TF('ImGui_TableFlags_None')|TF('ImGui_TableColumnFlags_WidthStretch'), 0.48)
       reaper.ImGui_TableSetupColumn(ctx, "",     TF('ImGui_TableFlags_None')|TF('ImGui_TableColumnFlags_WidthFixed'),   60)
       reaper.ImGui_TableNextRow(ctx, TF('ImGuiTableRowFlags_Headers'))
       reaper.ImGui_TableSetColumnIndex(ctx, 0)
-      reaper.ImGui_Text(ctx, "From")
+      reaper.ImGui_Text(ctx, "Find")
       reaper.ImGui_TableSetColumnIndex(ctx, 1)
-      reaper.ImGui_Text(ctx, "To")
+      reaper.ImGui_Text(ctx, "Replace")
       reaper.ImGui_TableSetColumnIndex(ctx, 2)
       do
         local label = "Clear All"
@@ -2465,9 +2637,9 @@ local function draw_left_panel()
     end
   end
 
-  -- Source Presets (collapsible, state persisted)
-  if section_header("Source Presets", "take_presets") then
-    draw_preset_row("Source Presets", TAKE_PRESETS,
+  -- Presets (collapsible, state persisted)
+  if section_header("Presets", "take_presets") then
+    draw_preset_row("Presets", TAKE_PRESETS,
       function(i)
         local v = TAKE_PRESETS[i] or ""
         if v ~= "" then
@@ -2481,65 +2653,32 @@ local function draw_left_panel()
       end,
       true
     )
-  end
 
-  reaper.ImGui_Separator(ctx)
-
-  -- Item Note (prominent: colored label + taller multiline box + cool teal bg)
-  reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Text(), 0xFFCC55FF)
-  reaper.ImGui_Text(ctx, "Item Note")
-  reaper.ImGui_PopStyleColor(ctx)
-  reaper.ImGui_SameLine(ctx); reaper.ImGui_TextDisabled(ctx, "(empty = skip)")
-  reaper.ImGui_SetNextItemWidth(ctx, -FLT_MIN)
-  reaper.ImGui_PushStyleVar(ctx, reaper.ImGui_StyleVar_FramePadding(), 6, 8)
-  reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_FrameBg(), 0x332B08FF)
-  local changed_note, new_note = reaper.ImGui_InputTextMultiline(ctx, "##item_note_tpl", NOTE_TEMPLATE, -FLT_MIN, 92)
-  reaper.ImGui_PopStyleColor(ctx)
-  reaper.ImGui_PopStyleVar(ctx)
-  if focus_note_input then reaper.ImGui_SetKeyboardFocusHere(ctx); focus_note_input = false end
-  if reaper.ImGui_IsItemActive(ctx) then active_box = "note" end
-  if reaper.ImGui_IsItemHovered(ctx) and reaper.ImGui_IsMouseClicked(ctx, 0) then
-    local mx, my = reaper.ImGui_GetMousePos(ctx); local rx, ry = reaper.ImGui_GetItemRectMin(ctx)
-    local line_h = reaper.ImGui_GetTextLineHeight(ctx); local relx = mx - rx - 6; local rely = my - ry - 6
-    local lines = {}; for line in (tostring(NOTE_TEMPLATE or "").."\n"):gmatch("(.-)\n") do lines[#lines+1]=line end; if #lines==0 then lines[1]="" end
-    local li = math.floor(rely / line_h) + 1; if li<1 then li=1 end; if li>#lines then li=#lines end
-    local col = utf8_index_from_x(ctx, lines[li], relx)
-    local idx = 0; for i=1,li-1 do idx = idx + utf8_len(lines[i]) + 1 end; idx = idx + col
-    caret_note_char = snap_caret_out_of_token(NOTE_TEMPLATE, idx)
-    caret_note_char = snap_caret_out_of_word(NOTE_TEMPLATE, caret_note_char, "right")
-  end
-  if changed_note then NOTE_TEMPLATE = new_note end
-
-  -- Note tools (Clear / Save / Default)
-  if reaper.ImGui_SmallButton(ctx, "Clear##note") then
-    NOTE_TEMPLATE = ""
-  end
-  reaper.ImGui_SameLine(ctx)
-  if reaper.ImGui_SmallButton(ctx, "Save##note") then
-    save_defaults(TAKE_TEMPLATE, NOTE_TEMPLATE)
-  end
-  reaper.ImGui_SameLine(ctx)
-  if reaper.ImGui_SmallButton(ctx, "Default##note") then
-    local tdef, ndef = load_defaults()
-    NOTE_TEMPLATE = ndef
-  end
-
-  -- Note Presets (collapsible, state persisted)
-  if section_header("Note Presets", "note_presets") then
-    draw_preset_row("Note Presets", NOTE_PRESETS,
-      function(i)
-        local v = NOTE_PRESETS[i] or ""
-        if v ~= "" then
-          NOTE_TEMPLATE = v
-          focus_note_input = true
+    reaper.ImGui_Separator(ctx)
+    reaper.ImGui_TextDisabled(ctx, "History")
+    reaper.ImGui_SameLine(ctx)
+    if reaper.ImGui_SmallButton(ctx, "History ▾##take_history_btn") then
+      reaper.ImGui_OpenPopup(ctx, "take_template_history_popup")
+    end
+    if reaper.ImGui_BeginPopup(ctx, "take_template_history_popup") then
+      if #TAKE_TEMPLATE_HISTORY == 0 then
+        reaper.ImGui_TextDisabled(ctx, "No history yet.")
+      else
+        for i, v in ipairs(TAKE_TEMPLATE_HISTORY) do
+          local label = ellipsize_utf8(v, 60)
+          if reaper.ImGui_Selectable(ctx, label .. "##take_hist_" .. i, false) then
+            TAKE_TEMPLATE = v
+            focus_take_input = true
+          end
+          if reaper.ImGui_IsItemHovered(ctx) and label ~= v then
+            reaper.ImGui_BeginTooltip(ctx)
+            reaper.ImGui_Text(ctx, v)
+            reaper.ImGui_EndTooltip(ctx)
+          end
         end
-      end,
-      function(i)
-        NOTE_PRESETS[i] = NOTE_TEMPLATE or ""
-        save_presets(NOTE_PRESETS_KEY, NOTE_PRESETS)
-      end,
-      true
-    )
+      end
+      reaper.ImGui_EndPopup(ctx)
+    end
   end
 
 end
@@ -2701,17 +2840,10 @@ local function draw_fields_panel()
       reaper.ImGui_InputText(ctx, "##fv_curtake", tostring(f.curtake or ""), reaper.ImGui_InputTextFlags_ReadOnly())
     end
 
-    do
-      local label = "$curnote"
-      if reaper.ImGui_SmallButton(ctx, label .. "##field") then append_token(label) end
-      reaper.ImGui_SameLine(ctx)
-      reaper.ImGui_SetNextItemWidth(ctx, -FLT_MIN)
-      reaper.ImGui_InputText(ctx, "##fv_curnote", tostring(f.curnote or ""), reaper.ImGui_InputTextFlags_ReadOnly())
-    end
-
     reaper.ImGui_Separator(ctx)
 
     local ordered = {
+      "origsrcfile",
       "project","scene","take","tape","track",
       "filename","srcfile","srcbase","srcext","srcpath","srcdir","filepath",
       "samplerate","channels","length",
@@ -2769,18 +2901,16 @@ local function draw_preview_panel()
     reaper.ImGui_InputTextMultiline(ctx, "##right_sel_view", right_copy_text or "", -FLT_MIN, -FLT_MIN, reaper.ImGui_InputTextFlags_ReadOnly())
   else
     local prevFlags = TF('ImGui_TableFlags_Borders') | TF('ImGui_TableFlags_RowBg')
-    if reaper.ImGui_BeginTable(ctx, "PreviewTable", 5, prevFlags) then
+    if reaper.ImGui_BeginTable(ctx, "PreviewTable", 4, prevFlags) then
       reaper.ImGui_TableSetupColumn(ctx, "#", TF('ImGui_TableColumnFlags_WidthFixed'), 36)
       reaper.ImGui_TableSetupColumn(ctx, "Current Source File")
       reaper.ImGui_TableSetupColumn(ctx, "New Source File")
-      reaper.ImGui_TableSetupColumn(ctx, "Current Note")
-      reaper.ImGui_TableSetupColumn(ctx, "New Note")
+      reaper.ImGui_TableSetupColumn(ctx, "Rename History")
       reaper.ImGui_TableHeadersRow(ctx)
       if not SCAN_CACHE or #preview_rows == 0 then
         reaper.ImGui_TableNextRow(ctx)
         reaper.ImGui_TableNextColumn(ctx); reaper.ImGui_TextDisabled(ctx, "-")
         reaper.ImGui_TableNextColumn(ctx); reaper.ImGui_TextDisabled(ctx, "No cache. Click 'Get Metadata'.")
-        reaper.ImGui_TableNextColumn(ctx); reaper.ImGui_TextDisabled(ctx, "")
         reaper.ImGui_TableNextColumn(ctx); reaper.ImGui_TextDisabled(ctx, "")
         reaper.ImGui_TableNextColumn(ctx); reaper.ImGui_TextDisabled(ctx, "")
       else
@@ -2794,14 +2924,7 @@ local function draw_preview_panel()
           else
             reaper.ImGui_TextWrapped(ctx, row.newname ~= "" and row.newname or "(unchanged)")
           end
-          reaper.ImGui_TableNextColumn(ctx); reaper.ImGui_TextWrapped(ctx, (row.current_note and row.current_note ~= "" ) and row.current_note or "(empty)")
-          reaper.ImGui_TableNextColumn(ctx)
-          local applied = row.note_applied
-          if applied then
-            reaper.ImGui_TextWrapped(ctx, (row.newnote ~= "" ) and row.newnote or "(empty)")
-          else
-            reaper.ImGui_TextWrapped(ctx, "(unchanged)")
-          end
+          reaper.ImGui_TableNextColumn(ctx); reaper.ImGui_TextWrapped(ctx, row.history_preview or "(no history)")
         end
       end
       reaper.ImGui_EndTable(ctx)
