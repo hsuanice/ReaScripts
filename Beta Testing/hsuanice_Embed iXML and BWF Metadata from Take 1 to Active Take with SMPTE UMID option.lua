@@ -1,6 +1,6 @@
 --[[
 @description hsuanice_Embed iXML and BWF Metadata from Take 1 to Active Take with SMPTE UMID option
-@version 260126.1545
+@version 260711.2204
 @author hsuanice
 @about
   Copy ALL metadata from TAKE 1's source file to the ACTIVE take's source file:
@@ -16,6 +16,16 @@
     • For UMID: hsuanice_Metadata Generator.lua and hsuanice_Metadata Embed.lua libraries.
 
 @changelog
+  260711.2204 - Added channel-aware metadata embed for mono-of-N items
+             - Detects active take I_CHANMODE interleave index and resolves the matching track name.
+             - iXML TRACK_LIST/TRKALL/TRK1 are patched to the selected channel name before embed.
+             - CORE channel field ITCH now follows the selected channel name instead of full TRKALL text.
+
+  260126.1737 - Added "Start" and "Start & Close" buttons
+             - "Start" runs the process and keeps window open for multiple runs
+             - "Start & Close" runs and closes the window (previous behavior)
+             - Renamed "Cancel" to "Close" for clarity
+
   260126.1545 - Improved error messages with detailed skip reasons
              - Now shows exact cause: src/dst path nil, not WAV, or file not found
              - Displays full path in error message for easier debugging
@@ -174,6 +184,92 @@ end
 local function get_take1(item)  return R.GetMediaItemTake(item, 0) end
 local function get_active(item) return R.GetActiveTake(item) end
 
+local function get_take_source_channels(take)
+  if not take or not R.ValidatePtr(take, "MediaItem_Take*") then return nil end
+  local src = R.GetMediaItemTake_Source(take)
+  if not src then return nil end
+  local nch = tonumber(R.GetMediaSourceNumChannels(src) or 0)
+  if nch and nch > 0 then return nch end
+  return nil
+end
+
+local function guess_interleave_index_from_take(take, src_channels)
+  if not take or not R.ValidatePtr(take, "MediaItem_Take*") then return nil end
+  local cm = tonumber(R.GetMediaItemTakeInfo_Value(take, "I_CHANMODE") or 0) or 0
+  if cm >= 3 and cm <= 66 then
+    local idx = math.floor(cm - 2)
+    if src_channels and src_channels > 0 then
+      if idx < 1 then idx = 1 end
+      if idx > src_channels then idx = src_channels end
+    end
+    return idx
+  end
+  return nil
+end
+
+local function get_track_name_from_take_source(take, target_idx)
+  if not take or not R.ValidatePtr(take, "MediaItem_Take*") then return nil end
+  if not target_idx or target_idx < 1 then return nil end
+
+  local src = R.GetMediaItemTake_Source(take)
+  if not src then return nil end
+
+  local function meta(key)
+    local ok, val = R.GetMediaFileMetadata(src, key)
+    if ok == 1 and val and val ~= "" then return val end
+    return nil
+  end
+
+  local count = tonumber(meta("IXML:TRACK_LIST:TRACK_COUNT") or "") or 0
+  if count > 0 then
+    local ordered_names = {}
+    for i = 1, count do
+      local suf = (i > 1) and (":" .. i) or ""
+      local idx_s = meta("IXML:TRACK_LIST:TRACK:CHANNEL_INDEX" .. suf)
+      local nm = meta("IXML:TRACK_LIST:TRACK:NAME" .. suf)
+      local idx = tonumber(idx_s or "")
+      if nm and nm ~= "" then
+        ordered_names[i] = nm
+      end
+      if idx and idx == target_idx and nm and nm ~= "" then
+        return nm
+      end
+    end
+    if ordered_names[target_idx] and ordered_names[target_idx] ~= "" then
+      return ordered_names[target_idx]
+    end
+  end
+
+  local trk = meta("IXML:TRK" .. tostring(target_idx))
+    or meta("IXML:trk" .. tostring(target_idx))
+    or meta("IXML:sTRK" .. tostring(target_idx))
+  if trk and trk ~= "" then return trk end
+
+  return nil
+end
+
+local function build_channel_embed_context(item, take1, active)
+  if not item or not take1 or not active then return nil end
+
+  local src_channels = get_take_source_channels(take1)
+    or get_take_source_channels(active)
+    or 1
+
+  local idx = guess_interleave_index_from_take(active, src_channels)
+    or guess_interleave_index_from_take(take1, src_channels)
+  if not idx then return nil end
+
+  local nm = get_track_name_from_take_source(take1, idx)
+    or get_track_name_from_take_source(active, idx)
+  if not nm or nm == "" then return nil end
+
+  return {
+    index = idx,
+    total = src_channels,
+    name = nm,
+  }
+end
+
 -- =========================
 -- Parse fields from --out-xml
 -- =========================
@@ -215,7 +311,57 @@ local function normalize_ixml_sidecar(path)
   if wf then wf:write(data) wf:close() end
 end
 
-local function do_ixml_copy(cli, src_wav, dst_wav)
+local function xml_escape_text(s)
+  s = tostring(s or "")
+  s = s:gsub("&", "&amp;")
+       :gsub("<", "&lt;")
+       :gsub(">", "&gt;")
+       :gsub('"', "&quot;")
+       :gsub("'", "&apos;")
+  return s
+end
+
+local function patch_ixml_for_channel(xml, chan_ctx)
+  if not xml or xml == "" or not chan_ctx or not chan_ctx.name or chan_ctx.name == "" then
+    return xml
+  end
+
+  local name_xml = xml_escape_text(chan_ctx.name)
+
+  -- Force iXML TRACK_LIST to a single mono track name matching selected interleave.
+  local replacement = "<TRACK_LIST><TRACK_COUNT>1</TRACK_COUNT><TRACK><CHANNEL_INDEX>1</CHANNEL_INDEX><NAME>" .. name_xml .. "</NAME></TRACK></TRACK_LIST>"
+  local patched, n_track_list = xml:gsub("<TRACK_LIST%s*>.-</TRACK_LIST>", replacement, 1)
+  if n_track_list == 0 then
+    patched = patched:gsub("(</BWFXML>)", replacement .. "%1", 1)
+    patched = patched:gsub("(</iXML>)", replacement .. "%1", 1)
+  end
+
+  -- Keep TRKALL aligned with selected mono channel name.
+  patched = patched:gsub("(<TRKALL%s*>)(.-)(</TRKALL%s*>)", "%1" .. name_xml .. "%3", 1)
+  patched = patched:gsub("(<trkall%s*>)(.-)(</trkall%s*>)", "%1" .. name_xml .. "%3", 1)
+
+  -- Remove TRK2+ entries and keep TRK1 as selected channel name.
+  patched = patched:gsub("<TRK[2-9]%d*%s*>.-</TRK[2-9]%d*%s*>", "")
+  patched = patched:gsub("<trk[2-9]%d*%s*>.-</trk[2-9]%d*%s*>", "")
+
+  local n1
+  patched, n1 = patched:gsub("(<TRK1%s*>)(.-)(</TRK1%s*>)", "%1" .. name_xml .. "%3", 1)
+  if n1 == 0 then
+    patched = patched:gsub("(</BWFXML>)", "<TRK1>" .. name_xml .. "</TRK1>%1", 1)
+    patched = patched:gsub("(</iXML>)", "<TRK1>" .. name_xml .. "</TRK1>%1", 1)
+  end
+
+  local n2
+  patched, n2 = patched:gsub("(<trk1%s*>)(.-)(</trk1%s*>)", "%1" .. name_xml .. "%3", 1)
+  if n2 == 0 then
+    patched = patched:gsub("(</BWFXML>)", "<trk1>" .. name_xml .. "</trk1>%1", 1)
+    patched = patched:gsub("(</iXML>)", "<trk1>" .. name_xml .. "</trk1>%1", 1)
+  end
+
+  return patched
+end
+
+local function do_ixml_copy(cli, src_wav, dst_wav, chan_ctx)
   local src_iXML = src_wav .. ".iXML.xml"
   local dst_iXML = dst_wav .. ".iXML.xml"
 
@@ -224,7 +370,17 @@ local function do_ixml_copy(cli, src_wav, dst_wav)
 
   if file_exists(src_iXML) then
     local x = read_file(src_iXML)
-    if x then write_file(dst_iXML, x) end
+    if x then
+      if chan_ctx and chan_ctx.name and chan_ctx.name ~= "" then
+        x = patch_ixml_for_channel(x, chan_ctx)
+        msg(("    iXML: channel-aware patch -> %d/%d '%s'"):format(
+          tonumber(chan_ctx.index or 0) or 0,
+          tonumber(chan_ctx.total or 0) or 0,
+          tostring(chan_ctx.name or "")
+        ))
+      end
+      write_file(dst_iXML, x)
+    end
     normalize_ixml_sidecar(dst_iXML)
     local code2, out2 = exec_shell(('"%s" --in-iXML-xml --continue-errors --verbose "%s"'):format(cli, dst_wav), 20000)
     msg(("    iXML: import sidecar → dst (code=%s)"):format(tostring(code2)))
@@ -235,7 +391,7 @@ local function do_ixml_copy(cli, src_wav, dst_wav)
   end
 end
 
-local function do_core_copy(cli, src_wav, dst_wav)
+local function do_core_copy(cli, src_wav, dst_wav, chan_ctx)
   local codeR, outR = exec_shell(('"%s" --out-xml=- --continue-errors --verbose "%s"'):format(cli, src_wav), 30000)
   msg(("    CORE(FLAGS): export src (code=%s)"):format(tostring(codeR)))
   if codeR ~= 0 or not outR or #outR == 0 then
@@ -247,6 +403,12 @@ local function do_core_copy(cli, src_wav, dst_wav)
   -- Normalize fields
   for k, v in pairs(fields) do
     fields[k] = collapse_blank_lines(normalize_newlines(v))
+  end
+
+  -- Channel-aware override for channel-related metadata field.
+  if chan_ctx and chan_ctx.name and chan_ctx.name ~= "" then
+    fields.ITCH = chan_ctx.name
+    msg(("    CORE: channel-aware ITCH -> %s"):format(tostring(chan_ctx.name)))
   end
 
   local function trunc_bext_desc(s)
@@ -523,13 +685,24 @@ local function run_worker(enable_umid, umid_strategy)
           msg("  [SKIP] " .. skip_reason)
         else
           -- iXML
-          local ok_ixml = do_ixml_copy(cli, src, dst)
+          local chan_ctx = build_channel_embed_context(it, take1, active)
+          if chan_ctx then
+            msg(("  CH mode        : %d/%d -> %s"):format(
+              tonumber(chan_ctx.index or 0) or 0,
+              tonumber(chan_ctx.total or 0) or 0,
+              tostring(chan_ctx.name or "")
+            ))
+          else
+            msg("  CH mode        : (no mono-of-N context; keep full metadata)")
+          end
+
+          local ok_ixml = do_ixml_copy(cli, src, dst, chan_ctx)
           msg(("  iXML result    : %s"):format(ok_ixml and "OK" or "FAIL"))
 
           set_ixml_embedder(cli, dst, "BWF MetaEdit")
 
           -- CORE
-          local ok_core = do_core_copy(cli, src, dst)
+          local ok_core = do_core_copy(cli, src, dst, chan_ctx)
           msg(("  CORE result    : %s"):format(ok_core and "OK" or "FAIL"))
 
           -- TR
@@ -768,16 +941,24 @@ local function gui_loop()
 
   -- Buttons
   local btn_y = GUI.enable_umid and 180 or 120
-  local btn_w = 180
+  local btn_w = 125
   local btn_h = 28
 
+  -- Start (keep window open)
   if draw_button(20, btn_y, btn_w, btn_h, "Start") then
+    run_worker(GUI.enable_umid, GUI.umid_strategy)
+    -- Window stays open for another run
+  end
+
+  -- Start & Close
+  if draw_button(155, btn_y, btn_w, btn_h, "Start & Close") then
     gfx.quit()
     run_worker(GUI.enable_umid, GUI.umid_strategy)
     return
   end
 
-  if draw_button(220, btn_y, btn_w, btn_h, "Cancel") then
+  -- Close
+  if draw_button(290, btn_y, btn_w, btn_h, "Close") then
     GUI.should_close = true
   end
 
