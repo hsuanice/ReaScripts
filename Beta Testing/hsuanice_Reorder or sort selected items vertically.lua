@@ -1,6 +1,6 @@
 --[[
 @description ReaImGui - Vertical Reorder and Sort (items)
-@version 260510.1721
+@version 260711.1913
 @author hsuanice
 @about
   Provides three vertical re-arrangement modes for selected items (stacked UI):
@@ -29,6 +29,30 @@
 
 
 @changelog
+  v260711.1913
+  - Fix: Copy to Sort now preserves take channel mode (`I_CHANMODE`) when
+    duplicating items to new tracks.
+    * Keeps Rodilab-exploded mono channel playback/display state intact.
+    * Prevents copied items from reverting to the source poly channel state.
+
+  v260510.1835
+  - Fix: Copy-to-Sort Mode 2 (Scene & Take) now consolidates tracks across slots
+    when the items don't time-overlap — restoring the v260402.1924 space-saving
+    behavior — but using each (group, slot) as the bin-packing unit, so a single
+    slot's items never get split or interleaved with another slot's items on the
+    same track.
+    * Each metadata group's items are partitioned by global slot, then the
+      slot-units are bin-packed: a unit is consolidated onto an existing sub_slot
+      only when none of its items overlap any items already there.
+    * Each sub_slot remembers its primary_slot (the slot of the unit that opened
+      it). Track layout groups sub_slots by primary_slot row, then by metadata
+      group, then by overflow level. So when consolidation succeeds across all
+      slots, all tracks land in one row; when it fails (e.g. overlapping scenes),
+      tracks split into per-slot rows aligned by recording session.
+    * Track groups (MEDIA_EDIT_LEAD/FOLLOW) are still per (primary_slot, level).
+    * Resolves cases where 7 channels × 4 sequential scenes were producing 20
+      tracks instead of the desired 7 (one per channel, all scenes consolidated).
+
   v260510.1721
   - Fix: Copy-to-Sort Mode 2 (Scene & Take) — items from different scene+take slots
     no longer share a track within a metadata group, even when they don't overlap in
@@ -348,8 +372,8 @@
 ---------------------------------------
 -- Debug Mode
 ---------------------------------------
-local DEBUG_MODE = true -- Set to true to enable detailed console logging
-local OUTPUT_TO_FILE = true -- Write debug output to file instead of console
+local DEBUG_MODE = false -- Set to true to enable detailed console logging
+local OUTPUT_TO_FILE = false -- Write debug output to file instead of console
 local OUTPUT_FILE = reaper.GetResourcePath() .. "/Scripts/hsuanice Scripts/Tools/Reorder_Debug_Output.txt"
 
 -- Clear output file at script start
@@ -513,9 +537,11 @@ local function copy_item_to_track(src_it, dst_tr)
     local soffs   = reaper.GetMediaItemTakeInfo_Value(src_tk, "D_STARTOFFS") or 0
     local rate    = reaper.GetMediaItemTakeInfo_Value(src_tk, "D_PLAYRATE")  or 1
     local pitch   = reaper.GetMediaItemTakeInfo_Value(src_tk, "D_PITCH")     or 0
+    local chanmode= reaper.GetMediaItemTakeInfo_Value(src_tk, "I_CHANMODE")  or 0
     reaper.SetMediaItemTakeInfo_Value(new_tk, "D_STARTOFFS", soffs)
     reaper.SetMediaItemTakeInfo_Value(new_tk, "D_PLAYRATE",  rate)
     reaper.SetMediaItemTakeInfo_Value(new_tk, "D_PITCH",     pitch)
+    reaper.SetMediaItemTakeInfo_Value(new_tk, "I_CHANMODE",  chanmode)
     -- take 名稱
     local _, tkn = reaper.GetSetMediaItemTakeInfo_String(src_tk, "P_NAME", "", false)
     if tkn and tkn ~= "" then
@@ -1256,11 +1282,13 @@ local function run_copy_to_new_tracks(name_mode, order_mode, asc, append_seconda
       debug(string.format("  Slot %d: %s", si, table.concat(keys, ", ")))
     end
 
-    -- Per-slot, per-group bin-packing.
-    -- Items from different scene+take slots stay on different tracks even when they
-    -- don't overlap in time — each recording session occupies its own row of tracks
-    -- across all metadata groups, so razor edits on one slot can't affect another.
-    -- Build st_key → slot index lookup.
+    -- Per-group bin-packing using slot-units (each slot's items inside a group are
+    -- treated as a single unit). A unit is consolidated onto an existing sub_slot
+    -- only when none of its items time-overlaps with what's already there — this
+    -- preserves slot integrity (no scene mixing in a sub_slot) while still saving
+    -- tracks when scenes are sequential and could share a row.
+    -- Each sub_slot remembers its primary_slot (the slot of the unit that opened it)
+    -- so layout can group tracks by recording session.
     local st_key_to_slot = {}
     for si, slot in ipairs(global_slots) do
       for sk in pairs(slot.st_keys) do
@@ -1268,9 +1296,8 @@ local function run_copy_to_new_tracks(name_mode, order_mode, asc, append_seconda
       end
     end
 
-    local group_slot_subslots = {}   -- [gi][si] = { sub_slots, label }
+    local group_subslots = {}   -- [gi] = list of { items, spans, primary_slot }
     for gi, g in ipairs(order) do
-      group_slot_subslots[gi] = {}
       -- Partition this group's items by their global slot
       local per_slot_items = {}
       for _, it in ipairs(g.items) do
@@ -1279,7 +1306,8 @@ local function run_copy_to_new_tracks(name_mode, order_mode, asc, append_seconda
         per_slot_items[si] = per_slot_items[si] or {}
         per_slot_items[si][#per_slot_items[si]+1] = it
       end
-      -- Bin-pack within each (group, slot) by time overlap only
+      -- Build slot_units, sort each unit's items, and sort units by min start time
+      local slot_units = {}
       for si, its in pairs(per_slot_items) do
         table.sort(its, function(a, b)
           local bfna = get_item_base_filename(a)
@@ -1287,38 +1315,90 @@ local function run_copy_to_new_tracks(name_mode, order_mode, asc, append_seconda
           if bfna ~= bfnb then return bfna < bfnb end
           return get_src_offs(a) < get_src_offs(b)
         end)
-        local sub_slots = {}
+        local spans, min_s = {}, math.huge
         for _, it in ipairs(its) do
           local s = item_start(it) or 0
           local e = s + (item_len(it) or 0)
-          local placed = false
-          for _, ss in ipairs(sub_slots) do
-            if can_place_on(ss.spans, s, e) then
-              ss.items[#ss.items+1] = it
-              ss.spans[#ss.spans+1] = { s = s, e = e }
-              placed = true; break
-            end
+          spans[#spans+1] = { s = s, e = e }
+          if s < min_s then min_s = s end
+        end
+        slot_units[#slot_units+1] = { si = si, items = its, spans = spans, min_s = min_s }
+      end
+      table.sort(slot_units, function(a, b)
+        if a.min_s ~= b.min_s then return a.min_s < b.min_s end
+        return a.si < b.si
+      end)
+
+      -- Bin-pack: try to place each slot_unit as a whole on an existing sub_slot.
+      -- If it doesn't fit anywhere, open new sub_slot(s) for it (preserving its
+      -- items as a group; only split if the unit has internal time overlap).
+      local sub_slots = {}
+      for _, su in ipairs(slot_units) do
+        local assigned
+        for _, ss in ipairs(sub_slots) do
+          local fits = true
+          for _, sp in ipairs(su.spans) do
+            if not can_place_on(ss.spans, sp.s, sp.e) then fits = false; break end
           end
-          if not placed then
-            sub_slots[#sub_slots+1] = { items = { it }, spans = { { s = s, e = e } } }
+          if fits then assigned = ss; break end
+        end
+        if assigned then
+          for i, it in ipairs(su.items) do
+            assigned.items[#assigned.items+1] = it
+            assigned.spans[#assigned.spans+1] = su.spans[i]
+          end
+        else
+          local new_subs = { { items = {}, spans = {}, primary_slot = su.si } }
+          for i, it in ipairs(su.items) do
+            local placed_in
+            for _, ns in ipairs(new_subs) do
+              if can_place_on(ns.spans, su.spans[i].s, su.spans[i].e) then placed_in = ns; break end
+            end
+            if not placed_in then
+              placed_in = { items = {}, spans = {}, primary_slot = su.si }
+              new_subs[#new_subs+1] = placed_in
+            end
+            placed_in.items[#placed_in.items+1] = it
+            placed_in.spans[#placed_in.spans+1] = su.spans[i]
+          end
+          for _, ns in ipairs(new_subs) do
+            sub_slots[#sub_slots+1] = ns
           end
         end
-        group_slot_subslots[gi][si] = { sub_slots = sub_slots, label = g.label }
-        debug(string.format("  Group '%s' slot %d: %d item(s) → %d track(s)",
-                            g.label, si, #its, #sub_slots))
+      end
+
+      group_subslots[gi] = sub_slots
+      debug(string.format("  Group '%s': %d slot-unit(s) → %d sub_slot(s)",
+                          g.label, #slot_units, #sub_slots))
+      for ssi, ss in ipairs(sub_slots) do
+        debug(string.format("    sub_slot #%d (primary slot %d): %d item(s)",
+                            ssi, ss.primary_slot, #ss.items))
       end
     end
 
-    -- Per-slot max levels (sub_slot count) across all groups in that slot
-    local slot_max_levels = {}
-    for si = 1, #global_slots do
-      slot_max_levels[si] = 0
-      for gi = 1, #order do
-        local entry = group_slot_subslots[gi][si]
-        if entry and #entry.sub_slots > slot_max_levels[si] then
-          slot_max_levels[si] = #entry.sub_slots
-        end
+    -- Layout: group sub_slots by their primary_slot, then by group order. Within
+    -- each (primary_slot, group) bucket, multiple sub_slots become overflow levels.
+    local slot_group_subs = {}   -- [si][gi] = list of sub_slots with primary_slot==si
+    for gi, sub_slots in pairs(group_subslots) do
+      for _, ss in ipairs(sub_slots) do
+        local si = ss.primary_slot
+        slot_group_subs[si] = slot_group_subs[si] or {}
+        slot_group_subs[si][gi] = slot_group_subs[si][gi] or {}
+        slot_group_subs[si][gi][#slot_group_subs[si][gi]+1] = ss
       end
+    end
+
+    local slot_indices_used = {}
+    for si in pairs(slot_group_subs) do slot_indices_used[#slot_indices_used+1] = si end
+    table.sort(slot_indices_used)
+
+    local slot_max_levels = {}
+    for _, si in ipairs(slot_indices_used) do
+      local m = 0
+      for _, ss_list in pairs(slot_group_subs[si]) do
+        if #ss_list > m then m = #ss_list end
+      end
+      slot_max_levels[si] = m
     end
 
     -- Collect used group numbers from pre-existing tracks so we don't collide
@@ -1332,17 +1412,17 @@ local function run_copy_to_new_tracks(name_mode, order_mode, asc, append_seconda
       end
     end
 
-    -- Create tracks slot-by-slot; per slot: [G1-primary, G2-primary, …, G1-overflow, …]
+    -- Create tracks: per primary slot, per overflow level, per group.
     local slot_level_tracks = {}   -- [si][level] = list of tracks
-    for si = 1, #global_slots do
+    for _, si in ipairs(slot_indices_used) do
       slot_level_tracks[si] = {}
       for level = 1, slot_max_levels[si] do
         slot_level_tracks[si][level] = {}
         for gi = 1, #order do
-          local entry = group_slot_subslots[gi][si]
-          local ss = entry and entry.sub_slots[level]
+          local ss_list = slot_group_subs[si][gi]
+          local ss = ss_list and ss_list[level]
           if ss then
-            local tr = make_labeled_track(entry.label)
+            local tr = make_labeled_track(order[gi].label)
             slot_level_tracks[si][level][#slot_level_tracks[si][level]+1] = tr
             for _, it in ipairs(ss.items) do
               copy_item_to_track(it, tr)
@@ -1356,7 +1436,7 @@ local function run_copy_to_new_tracks(name_mode, order_mode, asc, append_seconda
     -- Assign each (slot, level)'s tracks to their own REAPER track group, so razor
     -- edits stay within one recording session at one overflow level.
     local next_group = 1
-    for si = 1, #global_slots do
+    for _, si in ipairs(slot_indices_used) do
       for level = 1, slot_max_levels[si] do
         local trs = slot_level_tracks[si][level]
         if trs and #trs > 1 then
