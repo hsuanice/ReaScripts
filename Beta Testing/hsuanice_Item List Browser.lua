@@ -1,6 +1,6 @@
 --[[
 @description Item List Browser
-@version 260323.0324
+@version 260711.1941
 @author hsuanice
 @about
   A project-wide media browser that shows ALL items in the project with full
@@ -54,6 +54,21 @@
 
 
 @changelog
+  v260711.1941
+  - Feature: Added active REAPER take slot column.
+    • New read-only column: "Takes" (e.g. "1/2", "2/2").
+    • Included in sorting, copy/export, and column preset order/visibility.
+  - UX: Disambiguated metadata TAKE vs item take slot.
+    • Metadata column keeps original label "TAKE".
+    • Item take display uses "Takes" naming.
+
+  v260711.1931
+  - Fix: Browser now correctly detects active-take switches on the same item.
+    • Selection/project hash checks now track item GUID + active take index (I_CURTAKE).
+    • light_refresh detects per-row take-state changes and reloads metadata for
+      affected rows immediately.
+    • No manual Clear Cache needed when toggling take 1/2, 2/2 on the same item.
+
   v260323.0324
   - Fix: Bit depth no longer re-read from disk on every REAPER startup
     • Previously: collect_basic_fields() opened every audio file to parse RIFF fmt chunk
@@ -1916,7 +1931,7 @@ end
 
 -- Column order mapping (single source of truth)
 local COL_ORDER, COL_POS = {}, {}   -- visual→logical / logical→visual
-local COL_VISIBILITY = {}           -- col_id → true/false (for all 34 columns)
+local COL_VISIBILITY = {}           -- col_id → true/false (for all 35 columns)
 
 -- Column width configuration (customizable)
 -- Edit these values to change default column widths
@@ -1962,6 +1977,7 @@ local DEFAULT_COL_WIDTH = {
   [32] = 60,   -- Sample Rate (e.g. "48000")
   [33] = 40,   -- Bit Depth (e.g. "24")
   [34] = 40,   -- File Type (e.g. "WAV")
+  [35] = 40,   -- Takes (e.g. "2/4")
 }
 
 -- Current column widths (may be modified by user or Fit Content Width)
@@ -2017,7 +2033,7 @@ local function _csv_from_order_and_visibility(order, visibility_map)
   -- Build a normalized visibility table (even when caller did not provide visibility_map)
   local vis_map = {}
   if visibility_map then
-    for col_id = 1, 34 do
+    for col_id = 1, 35 do
       local flag = visibility_map[col_id]
       if flag == nil then
         vis_map[col_id] = false
@@ -2030,7 +2046,7 @@ local function _csv_from_order_and_visibility(order, visibility_map)
     for _, col_id in ipairs(order) do
       visible_set[col_id] = true
     end
-    for col_id = 1, 34 do
+    for col_id = 1, 35 do
       vis_map[col_id] = visible_set[col_id] or false
     end
   end
@@ -2046,7 +2062,7 @@ local function _csv_from_order_and_visibility(order, visibility_map)
 
   -- If order is empty but visibility_map has visible columns, fill in order by column ID
   if #ord_parts == 0 then
-    for col_id = 1, 34 do
+    for col_id = 1, 35 do
       if vis_map[col_id] then
         ord_parts[#ord_parts+1] = tostring(col_id)
       end
@@ -2055,7 +2071,7 @@ local function _csv_from_order_and_visibility(order, visibility_map)
 
   -- Serialize full column visibility
   local vis_parts = {}
-  for col_id = 1, 34 do
+  for col_id = 1, 35 do
     local flag = vis_map[col_id] and "1" or "0"
     vis_parts[#vis_parts+1] = string.format("%d:%s", col_id, flag)
   end
@@ -2089,7 +2105,7 @@ local function _order_and_visibility_from_csv(s)
 
     -- Columns not mentioned in the saved vis= section are new (added after preset was saved)
     -- Default new columns to visible so they appear automatically
-    for col_id = 1, 34 do
+    for col_id = 1, 35 do
       if visibility_map[col_id] == nil then visibility_map[col_id] = true end
     end
 
@@ -2097,7 +2113,7 @@ local function _order_and_visibility_from_csv(s)
     if visibility_map then
       local seen = {}
       for _, col_id in ipairs(order) do seen[col_id] = true end
-      for col_id = 1, 34 do
+      for col_id = 1, 35 do
         if visibility_map[col_id] and not seen[col_id] then
           order[#order+1] = col_id
         end
@@ -2126,7 +2142,7 @@ local function _order_and_visibility_from_csv(s)
     end
 
     -- New columns not in saved data default to visible
-    for col_id = 1, 34 do
+    for col_id = 1, 35 do
       if visibility_map[col_id] == nil then
         visibility_map[col_id] = true
         order[#order+1] = col_id
@@ -2148,7 +2164,7 @@ local function _order_and_visibility_from_csv(s)
     for _, col_id in ipairs(order) do
       visible_set[col_id] = true
     end
-    for col_id = 1, 34 do
+    for col_id = 1, 35 do
       visibility_map[col_id] = visible_set[col_id] or false
     end
 
@@ -2177,7 +2193,7 @@ local function _normalize_full_order(order)
   for i=1,#(order or {}) do
     local v = tonumber(order[i]); if v and not seen[v] then seen[v]=true; out[#out+1]=v end
   end
-  for id=1,34 do if not seen[id] then out[#out+1]=id end end
+  for id=1,35 do if not seen[id] then out[#out+1]=id end end
   return out
 end
 
@@ -2388,7 +2404,7 @@ local function load_prefs()
 
         -- Initialize COL_VISIBILITY - all columns in ord are visible
         COL_VISIBILITY = {}
-        for col_id = 1, 34 do
+        for col_id = 1, 35 do
           COL_VISIBILITY[col_id] = (COL_POS[col_id] ~= nil)
         end
       end
@@ -2398,7 +2414,7 @@ local function load_prefs()
   -- Ensure COL_VISIBILITY is initialized even if no preset/order was loaded
   if not COL_VISIBILITY or not next(COL_VISIBILITY) then
     COL_VISIBILITY = {}
-    for col_id = 1, 34 do
+    for col_id = 1, 35 do
       COL_VISIBILITY[col_id] = true  -- default: all visible
     end
   end
@@ -2438,7 +2454,7 @@ local function _normalize_full_order(order)
   for i=1,#(order or {}) do
     local v = tonumber(order[i]); if v and not seen[v] then seen[v]=true; out[#out+1]=v end
   end
-  for id=1,34 do if not seen[id] then out[#out+1]=id end end
+  for id=1,35 do if not seen[id] then out[#out+1]=id end end
   return out
 end
 
@@ -2675,6 +2691,25 @@ local function read_bit_depth_from_file(src_path)
   return result
 end
 
+local function get_take_state_signature(item)
+  if not item then return "" end
+  local cur_take = reaper.GetMediaItemInfo_Value(item, "I_CURTAKE") or -1
+  local tk = reaper.GetActiveTake(item)
+  if not tk then return string.format("%d|-", math.floor(cur_take)) end
+  local soffs = reaper.GetMediaItemTakeInfo_Value(tk, "D_STARTOFFS") or 0
+  local rate = reaper.GetMediaItemTakeInfo_Value(tk, "D_PLAYRATE") or 1
+  local chanmode = reaper.GetMediaItemTakeInfo_Value(tk, "I_CHANMODE") or 0
+  return string.format("%d|%.6f|%.6f|%d", math.floor(cur_take), soffs, rate, math.floor(chanmode))
+end
+
+local function get_active_take_label(item)
+  if not item then return "" end
+  local take_count = reaper.CountTakes(item) or 0
+  if take_count <= 0 then return "" end
+  local cur_take = (reaper.GetMediaItemInfo_Value(item, "I_CURTAKE") or 0) + 1
+  return string.format("%d/%d", math.floor(cur_take), math.floor(take_count))
+end
+
 -- Fast: collect basic fields only (no metadata parsing)
 local function collect_basic_fields(item)
   local row = {}
@@ -2692,6 +2727,8 @@ local function collect_basic_fields(item)
 
   local tk = reaper.GetActiveTake(item)
   row.__take = tk
+  row.__take_sig = get_take_state_signature(item)
+  row.take_slot = get_active_take_label(item)
 
   -- Basic take info (fast)
   row.take_name = tk and (select(2, reaper.GetSetMediaItemTakeInfo_String(tk, "P_NAME", "", false)) or "") or ""
@@ -3000,6 +3037,7 @@ local function refresh_rows_by_guids(item_guids)
           local _, take_name = reaper.GetSetMediaItemTakeInfo_String(take, "P_NAME", "", false)
           row.take_name = take_name
         end
+        row.take_slot = get_active_take_label(item) or ""
 
         local _, note = reaper.GetSetMediaItemInfo_String(item, "P_NOTES", "", false)
         row.item_note = note
@@ -3075,6 +3113,13 @@ scan_all_project_rows = function()
 end
 
 -- ILB: Project structure change detection
+local function item_selection_signature(item)
+  if not item then return "" end
+  local _, guid = reaper.GetSetMediaItemInfo_String(item, "GUID", "", false)
+  local cur_take = reaper.GetMediaItemInfo_Value(item, "I_CURTAKE") or -1
+  return string.format("%s:%d", guid or "", math.floor(cur_take))
+end
+
 local function build_project_hash()
   local track_count = reaper.CountTracks(0)
   local total_items = 0
@@ -3086,14 +3131,12 @@ local function build_project_hash()
     if ic > 0 then
       local item = reaper.GetTrackMediaItem(track, 0)
       if item then
-        local _, guid = reaper.GetSetMediaItemInfo_String(item, "GUID", "", false)
-        hash_parts[#hash_parts + 1] = guid
+        hash_parts[#hash_parts + 1] = item_selection_signature(item)
       end
       if ic > 1 then
         local item2 = reaper.GetTrackMediaItem(track, ic - 1)
         if item2 then
-          local _, guid2 = reaper.GetSetMediaItemInfo_String(item2, "GUID", "", false)
-          hash_parts[#hash_parts + 1] = guid2
+          hash_parts[#hash_parts + 1] = item_selection_signature(item2)
         end
       end
     end
@@ -3227,7 +3270,10 @@ local function start_progressive_load()
   PROGRESSIVE.start_time = reaper.time_precise()
 
   -- Generate hash to detect project changes during load
-  PROGRESSIVE.selection_hash = ILB.last_project_hash
+  local hash, count = build_project_hash()
+  PROGRESSIVE.selection_hash = hash
+  ILB.last_project_hash = hash
+  ILB.last_project_count = count
 
   -- Clear current rows, show loading state
   ROWS = {}
@@ -3336,20 +3382,7 @@ end
 
 -- Check if selection changed during progressive loading
 local function has_selection_changed_during_load()
-  local count = reaper.CountSelectedMediaItems(0)
-  if count ~= #PROGRESSIVE.items then return true end
-
-  -- Use same indexing as start_progressive_load() to ensure hashes match
-  local hash_parts = {}
-  for i = 1, math.min(#PROGRESSIVE.items, 20) do
-    local item = PROGRESSIVE.items[i]
-    if item then
-      local _, guid = reaper.GetSetMediaItemInfo_String(item, "GUID", "", false)
-      hash_parts[#hash_parts + 1] = guid
-    end
-  end
-  local current_hash = table.concat(hash_parts, "|")
-
+  local current_hash = build_project_hash()
   return current_hash ~= PROGRESSIVE.selection_hash
 end
 
@@ -3407,6 +3440,7 @@ local function get_sort_value(row, col_id)
   elseif col_id == 29 then return (row.source_start or ""):lower()
   elseif col_id == 30 then return (row.source_end or ""):lower()
   elseif col_id == 31 then return row.length or 0
+  elseif col_id == 35 then return (row.take_slot or ""):lower()
   end
   return ""
 end
@@ -3576,6 +3610,7 @@ local function get_cell_text(i, r, col, fmt)
   elseif col == 32 then text = tostring(r.sample_rate or "")
   elseif col == 33 then text = tostring(r.bit_depth or "")
   elseif col == 34 then text = tostring(r.file_type or "")
+  elseif col == 35 then text = tostring(r.take_slot or "")
   end
 
   -- For TSV format, escape special characters to prevent format corruption
@@ -3824,6 +3859,7 @@ local function header_label_from_id(col_id)
   if col_id == 32 then return "Sample Rate" end
   if col_id == 33 then return "Bit Depth" end
   if col_id == 34 then return "File Type" end
+  if col_id == 35 then return "Takes" end
   return tostring(col_id)
 end
 
@@ -4167,8 +4203,7 @@ local function has_selection_changed()
     for i = 0, count - 1 do
       local item = reaper.GetSelectedMediaItem(0, i)
       if item then
-        local _, guid = reaper.GetSetMediaItemInfo_String(item, "GUID", "", false)
-        hash_parts[#hash_parts + 1] = guid
+        hash_parts[#hash_parts + 1] = item_selection_signature(item)
       end
     end
   else
@@ -4176,15 +4211,13 @@ local function has_selection_changed()
     for i = 0, 9 do
       local item = reaper.GetSelectedMediaItem(0, i)
       if item then
-        local _, guid = reaper.GetSetMediaItemInfo_String(item, "GUID", "", false)
-        hash_parts[#hash_parts + 1] = guid
+        hash_parts[#hash_parts + 1] = item_selection_signature(item)
       end
     end
     for i = count - 10, count - 1 do
       local item = reaper.GetSelectedMediaItem(0, i)
       if item then
-        local _, guid = reaper.GetSetMediaItemInfo_String(item, "GUID", "", false)
-        hash_parts[#hash_parts + 1] = guid
+        hash_parts[#hash_parts + 1] = item_selection_signature(item)
       end
     end
   end
@@ -4216,23 +4249,20 @@ local function update_selection_cache()
     for i = 0, count - 1 do
       local item = reaper.GetSelectedMediaItem(0, i)
       if item then
-        local _, guid = reaper.GetSetMediaItemInfo_String(item, "GUID", "", false)
-        hash_parts[#hash_parts + 1] = guid
+        hash_parts[#hash_parts + 1] = item_selection_signature(item)
       end
     end
   else
     for i = 0, 9 do
       local item = reaper.GetSelectedMediaItem(0, i)
       if item then
-        local _, guid = reaper.GetSetMediaItemInfo_String(item, "GUID", "", false)
-        hash_parts[#hash_parts + 1] = guid
+        hash_parts[#hash_parts + 1] = item_selection_signature(item)
       end
     end
     for i = count - 10, count - 1 do
       local item = reaper.GetSelectedMediaItem(0, i)
       if item then
-        local _, guid = reaper.GetSetMediaItemInfo_String(item, "GUID", "", false)
-        hash_parts[#hash_parts + 1] = guid
+        hash_parts[#hash_parts + 1] = item_selection_signature(item)
       end
     end
   end
@@ -4255,6 +4285,9 @@ local function light_refresh()
   for _, row in ipairs(ROWS) do
     local item = row.__item
     if item and reaper.ValidatePtr(item, "MediaItem*") then
+      local take_sig = get_take_state_signature(item)
+      local take_changed = (take_sig ~= (row.__take_sig or ""))
+
       local tr = reaper.GetMediaItemTrack(item)
       if tr then
         row.track_name = select(2, reaper.GetTrackName(tr, "")) or ""
@@ -4263,7 +4296,25 @@ local function light_refresh()
       end
       local tk = reaper.GetActiveTake(item)
       if tk then
+        row.__take = tk
+        row.__take_sig = take_sig
         row.take_name = select(2, reaper.GetSetMediaItemTakeInfo_String(tk, "P_NAME", "", false)) or ""
+        row.take_slot = get_active_take_label(item) or ""
+        local source = reaper.GetMediaItemTake_Source(tk)
+        if source then
+          local sr = reaper.GetMediaSourceSampleRate(source)
+          row.sample_rate = (sr and sr > 0) and tostring(math.floor(sr)) or ""
+          row.file_type = reaper.GetMediaSourceType(source, "") or ""
+        else
+          row.sample_rate = ""
+          row.file_type = ""
+        end
+      else
+        row.__take = nil
+        row.__take_sig = take_sig
+        row.take_name = ""
+        row.sample_rate = ""
+        row.file_type = ""
       end
       local ok_note, note = reaper.GetSetMediaItemInfo_String(item, "P_NOTES", "", false)
       row.item_note = (ok_note and note) or ""
@@ -4290,6 +4341,11 @@ local function light_refresh()
         row.project or "", row.scene or "", row.take_meta or "", row.tape or "",
         row.sample_rate or "", row.file_type or "",
       }, " "):lower()
+
+      if take_changed then
+        row.__metadata_loaded = false
+        load_metadata_for_row(row)
+      end
     end
   end
   ILB.cached_rows_frame = -1  -- Invalidate filter cache
@@ -4330,6 +4386,10 @@ local LIGHT_REFRESH_INTERVAL = 0.5  -- Throttle: max 2 light refreshes per secon
 local function smart_refresh()
   -- If progressive loading is active, continue processing batches
   if PROGRESSIVE.active then
+    if has_selection_changed_during_load() then
+      start_progressive_load()
+      return
+    end
     process_progressive_batch()
     return
   end
@@ -4360,8 +4420,17 @@ local function smart_refresh()
       if now - _last_light_refresh >= LIGHT_REFRESH_INTERVAL then
         _last_light_refresh = now
         light_refresh()
+        update_selection_cache()
       end
     end
+    return
+  end
+
+  -- Fallback: some take switches may not bump project state count.
+  local now = reaper.time_precise()
+  if (now - LAST_REFRESH_TIME) >= REFRESH_THROTTLE and has_selection_changed() then
+    light_refresh()
+    update_selection_cache()
   end
 end
 
@@ -4437,7 +4506,7 @@ local function draw_advanced_sort_popup()
 
     -- Build list of available columns (following COL_ORDER)
     local available_cols = COL_ORDER and #COL_ORDER > 0 and COL_ORDER or {
-      1, 2, 3, 12, 13, 31, 4, 5, 6, 7, 8, 9, 10, 11,
+      1, 2, 3, 12, 13, 31, 35, 4, 5, 6, 7, 8, 9, 10, 11,
       14, 15, 16, 17, 18, 19, 20, 21,
       22, 23, 24, 25, 26, 27, 28, 29, 30
     }
@@ -5171,7 +5240,7 @@ if reaper.ImGui_BeginPopupModal(ctx, "Column Preset Editor", true, TF('ImGui_Win
     end
 
     -- Then add hidden columns (those not in COL_ORDER) at the end
-    for col_id = 1, 34 do
+    for col_id = 1, 35 do
       if not added[col_id] then
         local is_visible = COL_VISIBILITY[col_id] or false
         table.insert(PRESET_EDITOR_STATE.columns, {
@@ -5274,9 +5343,9 @@ if reaper.ImGui_BeginPopupModal(ctx, "Column Preset Editor", true, TF('ImGui_Win
 
   -- Reset to default button
   if reaper.ImGui_Button(ctx, "Reset to Default", scale(140), scale(24)) then
-    -- Reset to default column order (all 34 columns)
+    -- Reset to default column order (all 35 columns)
     local reset_order = {
-      1, 2, 3, 12, 13, 31, 4, 5, 6, 32, 33, 34, 7, 8, 9, 10, 11,  -- Basic + Time + Length + File Info + Status
+      1, 2, 3, 12, 13, 31, 35, 4, 5, 6, 32, 33, 34, 7, 8, 9, 10, 11,  -- Basic + Time + Length + Take + File Info + Status
       14, 15,  -- UMID
       16, 17, 18, 19, 20, 21,  -- BWF metadata
       22, 23, 24, 25, 26, 27, 28,  -- iXML metadata
@@ -5393,7 +5462,7 @@ local function draw_table(rows, height)
   -- Fit content width: Calculate actual text widths for all columns
   if FIT_CONTENT_WIDTH then
     local initial_order = (COL_ORDER and #COL_ORDER > 0) and COL_ORDER or {
-      1, 2, 3, 12, 13, 31, 4, 5, 6, 32, 33, 34, 7, 8, 9, 10, 11,
+      1, 2, 3, 12, 13, 31, 35, 4, 5, 6, 32, 33, 34, 7, 8, 9, 10, 11,
       14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30
     }
 
@@ -5413,6 +5482,7 @@ local function draw_table(rows, height)
       [29] = true,  -- Source Start (TC)
       [30] = true,  -- Source End (TC)
       [31] = true,  -- Length (fits "hh:mm:ss.SSS")
+      [35] = true,  -- Takes (fixed width)
     }
 
     -- Calculate max width for each column
@@ -5467,11 +5537,11 @@ local function draw_table(rows, height)
   -- Use dynamic height (fills remaining space) or fallback to 360
   -- If height is provided (not nil), use it; otherwise use -1 (fill available space)
   local outer_height = height or -1
-  if reaper.ImGui_BeginTable(ctx, table_id, 34, flags, 0, outer_height) then
+  if reaper.ImGui_BeginTable(ctx, table_id, 35, flags, 0, outer_height) then
     -- Use existing COL_ORDER for header rendering; use default if not set yet
     -- Default order: Basic info, Time, Metadata (BWF), Metadata (iXML), Status
     local DEFAULT_COL_ORDER = {
-      1, 2, 3, 12, 13, 31, 4, 5, 6, 32, 33, 34, 7, 8, 9, 10, 11,  -- Basic + Time + Length + File Info + Status
+      1, 2, 3, 12, 13, 31, 35, 4, 5, 6, 32, 33, 34, 7, 8, 9, 10, 11,  -- Basic + Time + Length + Take + File Info + Status
       14, 15,  -- UMID
       16, 17, 18, 19, 20, 21,  -- BWF metadata
       22, 23, 24, 25, 26, 27, 28,  -- iXML metadata
@@ -5506,6 +5576,9 @@ local function draw_table(rows, height)
       end
 
       local col_flags = reaper.ImGui_TableColumnFlags_WidthFixed()
+      if id == 35 then
+        col_flags = col_flags | reaper.ImGui_TableColumnFlags_NoResize()
+      end
       reaper.ImGui_TableSetupColumn(ctx, label, col_flags, scale(width))
     end
 
@@ -5981,6 +6054,11 @@ local function draw_table(rows, height)
           local t = tostring(r.file_type or ""); local sel = sel_has(r.__item_guid, 34)
           reaper.ImGui_Selectable(ctx, (t ~= "" and t or " ").."##c34", sel)
           if reaper.ImGui_IsItemClicked(ctx) then handle_cell_click(r.__item_guid, 34) end
+
+        elseif col == 35 then
+          local t = tostring(r.take_slot or ""); local sel = sel_has(r.__item_guid, 35)
+          reaper.ImGui_Selectable(ctx, (t ~= "" and t or " ").."##c35", sel)
+          if reaper.ImGui_IsItemClicked(ctx) then handle_cell_click(r.__item_guid, 35) end
         end
 
         -- Right-click on any cell: open filter context menu
