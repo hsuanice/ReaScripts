@@ -1,6 +1,6 @@
 --[[
 @description hsuanice_PT_Grid - Grid Library
-@version 0.3.4 [260503.1918]
+@version 0.3.5 [260712.1307]
 @author hsuanice
 @about
   Library for grid mode handling, parallel to hsuanice_PT_Nudge.lua.
@@ -23,6 +23,10 @@
   internal only.
 
 @changelog
+  0.3.5 [260712.1307]
+    - Samples mode minimum grid value is now 100 samples.
+      Removed 10 / 2 / 1 sample presets to avoid inaccurate sub-100
+      behavior and instability at 1 sample.
   0.3.4 [260503.1918]
     - Auto-resync on project fps / BPM change. When the user changes
       the Video frame rate (or BPM), simulated grids (Timecode /
@@ -168,9 +172,6 @@ local GRID_PRESETS = {
     {label='10000 samples', unit=17, value=10000},
     {label='1000 samples',  unit=17, value=1000},
     {label='100 samples',   unit=17, value=100},
-    {label='10 samples',    unit=17, value=10},
-    {label='2 samples',     unit=17, value=2},
-    {label='1 sample',      unit=17, value=1},
   },
 }
 
