@@ -1,6 +1,6 @@
 --[[
 @description ReaImGui - Rename Source File from Metadata (cached preview + source rename)
-@version 260710.1425
+@version 260714.1438
 @author hsuanice
 @about
   Rename the actual source file on disk from BWF/iXML and true source metadata using a fast ReaImGui UI.
@@ -35,6 +35,16 @@
   hsuanice served as the workflow designer, tester, and integrator for this tool.
 
 @changelog
+  v260714.1438 (2026-07-14)
+    - Replace Rules: Added a global RegEx checkbox for pattern matching mode.
+    - Replace Rules: Preserved leading spaces in Find when RegEx mode is enabled.
+    - Workflow: Source renaming now consistently applies Source File Name template first, then Replace Rules.
+    - Defaults: Source File Name default template changed to $srcfile.
+    - UI: Removed Replace Rules Base override option to avoid bypassing Source File Name input.
+    - UX: Clear button for Source File Name now resets to $srcfile.
+    - Apply: Removed premature file existence pre-check before os.rename to prevent false skips.
+    - Result: Skipped details now include real skip reasons in Apply Result.
+
   v260710.1425 (2026-07-10)
     - UI: History is now a standalone fold section (separate from Presets) with a Clear All action.
     - UI: Token row simplified by removing $trk1~$trk8 and keeping only one counter token (${counter:2}).
@@ -417,7 +427,7 @@ local KEY_ESC = TF('ImGui_Key_Escape')
 
 -- ===== ExtState (defaults) =====
 local EXT_NS = "RENAME_TAKE_FROM_METADATA_V1"
-local DEFAULT_TAKE_TEMPLATE_INIT = "$curtake"
+local DEFAULT_TAKE_TEMPLATE_INIT = "$srcfile"
 local DEFAULT_NOTE_TEMPLATE_INIT = "$curnote"
 local function load_defaults()
   local t = reaper.GetExtState(EXT_NS, "default_take_template")
@@ -609,6 +619,51 @@ local R_FIELD_SEP = string.char(30)
 
 local function _escape_lua_pat_safe(s) return tostring(s or ""):gsub("(%W)","%%%1") end
 
+local function _repeat_pat_atom(atom, n)
+  local count = tonumber(n) or 0
+  if count <= 0 then return "" end
+  local t = {}
+  for i = 1, count do t[i] = atom end
+  return table.concat(t)
+end
+
+local function _regex_like_to_lua_pat(s)
+  local out = tostring(s or "")
+  -- Convenience translation for common regex-style shortcuts.
+  out = out:gsub("\\d", "%%d")
+           :gsub("\\s", "%%s")
+           :gsub("\\w", "%%w")
+
+  -- Support simple fixed quantifiers like %d{3} or [0-9]{3}.
+  out = out:gsub("(%b[]){(%d+)}", function(atom, n)
+    return _repeat_pat_atom(atom, n)
+  end)
+  out = out:gsub("(%%[%a]){(%d+)}", function(atom, n)
+    return _repeat_pat_atom(atom, n)
+  end)
+
+  return out
+end
+
+local function _resolve_rule_pat(from, use_regex)
+  local raw = tostring(from or "")
+  if use_regex then
+    local body = raw
+    if body:sub(1, 3) == "re:" then
+      body = body:sub(4)
+    end
+    if body == "" then return "", true end
+    return _regex_like_to_lua_pat(body), true
+  end
+  local lead_trim = raw:gsub("^%s+", "")
+  if lead_trim:sub(1, 3) == "re:" then
+    local body = lead_trim:sub(4):gsub("^%s+", "")
+    if body == "" then return "", true end
+    return _regex_like_to_lua_pat(body), true
+  end
+  return _escape_lua_pat_safe(raw), false
+end
+
 local function pack_rules(rules)
   -- rules: { {from="2.0", to="2"}, {from="1.0", to="1"}, ... }
   local packed = {}
@@ -648,13 +703,15 @@ end
 
 local function load_take_renamer()
   local en = (reaper.GetExtState(EXT_NS, "take_ren_enable") == "1")
+  local rex = (reaper.GetExtState(EXT_NS, "take_ren_regex") == "1")
   local raw = reaper.GetExtState(EXT_NS, "take_ren_rules")
   local rules = unpack_rules(raw)
-  return { enable = en, rules = rules }
+  return { enable = en, regex = rex, rules = rules }
 end
 
 local function save_take_renamer(R)
   reaper.SetExtState(EXT_NS, "take_ren_enable", R.enable and "1" or "0", true)
+  reaper.SetExtState(EXT_NS, "take_ren_regex",  R.regex and "1" or "0", true)
   reaper.SetExtState(EXT_NS, "take_ren_rules",  pack_rules(R.rules or {}), true)
 end
 
@@ -668,9 +725,16 @@ local function apply_take_renamer(name)
       local from = pair.from or ""
       local to   = pair.to   or ""
       if from ~= "" then
-        local pat = _escape_lua_pat_safe(from)
-        local replaced
-        out, replaced = out:gsub(pat, to)
+        local pat = _resolve_rule_pat(from, TAKE_RENAMER.regex)
+        local replaced = 0
+        local ok, new_out, rep_count = pcall(string.gsub, out, pat, to)
+        if ok then
+          out, replaced = new_out, (rep_count or 0)
+        else
+          -- Fallback to literal mode if an invalid pattern was entered.
+          local lit = _escape_lua_pat_safe(from)
+          out, replaced = out:gsub(lit, to)
+        end
         if replaced and replaced > 0 then
           hits[#hits+1] = from .. "→" .. to
         end
@@ -1927,7 +1991,15 @@ local function make_unique_target_path(old_path, new_name)
 end
 
 local function build_source_name(template, fields, index, old_path)
-  local new_name = expand_template(template, fields, index)
+  local tpl = tostring(template or "")
+  local tpl_trim = tpl:gsub("^%s+", ""):gsub("%s+$", "")
+  local has_rules = TAKE_RENAMER and TAKE_RENAMER.enable and TAKE_RENAMER.rules and (#TAKE_RENAMER.rules > 0)
+  if tpl_trim == "" and has_rules then
+    tpl = "$srcfile"
+  end
+
+  local new_name = expand_template(tpl, fields, index)
+
   new_name = apply_take_filter(new_name)
   new_name = apply_take_renamer(new_name)
   if not new_name or new_name == "" then
@@ -1994,7 +2066,7 @@ local function build_result_text(fmt, rows)
   return table.concat(out, "\n")
 end
 
--- Build text (TSV/CSV) for skipped list (only empty-token skips)
+-- Build text (TSV/CSV) for skipped list
 local function build_skipped_text(fmt, srows)
   local sep = (fmt == "csv") and "," or "\t"
   local out = {}
@@ -2064,10 +2136,10 @@ local function draw_result_modal()
       end
     end
 
-    -- ----- Skipped details (only empty-token skips) -----
+    -- ----- Skipped details -----
     reaper.ImGui_Separator(ctx)
     local srows = r.skipped_rows or {}
-    reaper.ImGui_Text(ctx, ("Skipped details (empty-token skips): %d"):format(#srows))
+    reaper.ImGui_Text(ctx, ("Skipped details: %d"):format(#srows))
 
     do
       local begun, _ = BeginChildSafe("##skip_list_child", -1, 220, true)
@@ -2325,6 +2397,11 @@ local function apply_renaming_step()
   for i = p.i, i_end do
     local item = p.items[i]
     local take = get_active_take(item)
+    local current_take_name = "(no take)"
+    if take then
+      local _, tn = reaper.GetSetMediaItemTakeInfo_String(take, "P_NAME", "", false)
+      current_take_name = (tn and tn ~= "") and tn or "(unnamed)"
+    end
     local fields
     if p.can_use_cache then
       local e = SCAN_CACHE and SCAN_CACHE.map and SCAN_CACHE.map[get_item_guid(item)]
@@ -2347,7 +2424,7 @@ local function apply_renaming_step()
         local dir = old_source:match("^(.*[\\/])") or ""
         local target_path = make_unique_target_path(old_source, new_name)
         local target_full = dir .. new_name
-        if target_path ~= old_source and file_exists(old_source) then
+        if target_path ~= old_source then
           local ok_rename, err = os.rename(old_source, target_path)
           if not ok_rename then
             ok_rename, err = os.rename(old_source:gsub("\\", "/"), target_path:gsub("\\", "/"))
@@ -2381,8 +2458,6 @@ local function apply_renaming_step()
           end
         elseif target_full == old_source then
           skip_reason = "unchanged"
-        else
-          skip_reason = "file missing"
         end
       else
         skip_reason = "empty template"
@@ -2393,6 +2468,12 @@ local function apply_renaming_step()
 
     if skip_reason then
       p.skipped = p.skipped + 1
+      p.skipped_rows[#p.skipped_rows+1] = {
+        idx = i,
+        current = current_take_name,
+        srcfile = old_name,
+        reason = skip_reason,
+      }
     end
 
     p.rows[#p.rows+1] = {
@@ -2422,7 +2503,7 @@ local function apply_renaming_step()
       noted = 0,
       skipped = p.skipped,
       rows = p.rows,
-      skipped_rows = {}
+      skipped_rows = p.skipped_rows or {}
     })
   else
     reaper.defer(apply_renaming_step)
@@ -2563,7 +2644,8 @@ local function draw_left_panel()
 
   -- Source template tools (Clear / Save / Default / Original)
   if reaper.ImGui_SmallButton(ctx, "Clear##take") then
-    TAKE_TEMPLATE = ""
+    TAKE_TEMPLATE = "$srcfile"
+    focus_take_input = true
   end
   reaper.ImGui_SameLine(ctx)
   if reaper.ImGui_SmallButton(ctx, "Save##take") then
@@ -2588,12 +2670,23 @@ local function draw_left_panel()
   -- Replace Rules (collapsible, state persisted)
   if section_header("Replace Rules", "renamer") then
     reaper.ImGui_TextDisabled(ctx, "(applies after tokens & filter; Note unaffected)")
+    reaper.ImGui_TextDisabled(ctx, "Tip: Turn on RegEx for pattern mode (e.g. render \\d+). When off, Find is literal text.")
     local chgEn, en = reaper.ImGui_Checkbox(ctx, "Enable##takeren", TAKE_RENAMER.enable or false)
     if chgEn then
       TAKE_RENAMER.enable = en
       save_take_renamer(TAKE_RENAMER)
     end
     reaper.ImGui_SameLine(ctx)
+    local chgRe, reMode = reaper.ImGui_Checkbox(ctx, "RegEx##takeren_regex", TAKE_RENAMER.regex or false)
+    if chgRe then
+      TAKE_RENAMER.regex = reMode
+      save_take_renamer(TAKE_RENAMER)
+    end
+    local take_tpl_trim = tostring(TAKE_TEMPLATE or ""):gsub("^%s+", ""):gsub("%s+$", "")
+    if take_tpl_trim == "" and TAKE_RENAMER.enable and TAKE_RENAMER.rules and #TAKE_RENAMER.rules > 0 then
+      reaper.ImGui_TextDisabled(ctx, "Template is empty, auto-using $srcfile for rule processing.")
+    end
+
     if reaper.ImGui_SmallButton(ctx, "+ Add replace rule##takeren_add_top") then
       local rules = TAKE_RENAMER.rules or {}
       rules[#rules+1] = { from = "", to = "" }
