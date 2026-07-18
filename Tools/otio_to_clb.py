@@ -29,9 +29,22 @@ Dependencies:
   pip install opentimelineio
   aaftool in PATH (LibAAF) — only needed for .aaf files
 
-Version: 260718.2204
+Version: 260718.2230
 
 Changelog:
+    260718.2230
+        - AAF metadata probe now resolves bwfmetaedit from common absolute paths
+            (/opt/homebrew/bin, /usr/local/bin) when PATH is restricted.
+        - Fixes missing source TC/reel reconstruction when launched from REAPER
+            environments that do not inherit shell PATH.
+
+    260718.2216
+        - AAF fallback (aaf_to_otio path) now reconstructs Reel and absolute source TC
+            from BWF/iXML in extracted AAF media files via bwfmetaedit.
+        - Uses iXML/BEXT tape fields (e.g. TAPE / sTAPE) for Reel and
+            TIMESTAMP_SAMPLES_SINCE_MIDNIGHT for source timecode base.
+        - Avoids GUID-like source filename stems as Reel when metadata reel is missing.
+
     260718.2204
         - Reel resolver now prioritizes explicit metadata fields from media reference
             (e.g. fcp_xml.timecode.reel.name) before any path-derived fallback.
@@ -51,6 +64,9 @@ import sys
 import os
 import re
 import json
+import subprocess
+import shutil
+import xml.etree.ElementTree as ET
 from pathlib import Path
 
 
@@ -320,7 +336,12 @@ def _reel_from_clip(clip):
     # an editorial clip label instead of the actual reel/source name.
     mr = clip.media_reference
     if mr and hasattr(mr, "target_url") and mr.target_url:
-        return Path(mr.target_url.split("?")[0]).stem
+        stem = Path(mr.target_url.split("?")[0]).stem
+        if not _looks_like_guid_stem(stem):
+            return stem
+        if clip.name:
+            return _url_decode(clip.name)
+        return stem
 
     # Final fallback: clip name (AAF paths may still rely on this)
     if clip.name:
@@ -373,6 +394,137 @@ def _source_file(clip):
                 return path
         return url
     return ""
+
+
+_BWF_META_CACHE = {}
+_BWFMETAEDIT_EXE = None
+
+
+def _resolve_bwfmetaedit():
+    """Find a usable bwfmetaedit executable even when PATH is minimal."""
+    global _BWFMETAEDIT_EXE
+    if _BWFMETAEDIT_EXE is not None:
+        return _BWFMETAEDIT_EXE
+
+    candidates = [
+        shutil.which("bwfmetaedit"),
+        "/opt/homebrew/bin/bwfmetaedit",
+        "/usr/local/bin/bwfmetaedit",
+        "/usr/bin/bwfmetaedit",
+    ]
+
+    for c in candidates:
+        if not c:
+            continue
+        p = Path(c)
+        if p.exists() and os.access(str(p), os.X_OK):
+            _BWFMETAEDIT_EXE = str(p)
+            return _BWFMETAEDIT_EXE
+
+    _BWFMETAEDIT_EXE = ""
+    return _BWFMETAEDIT_EXE
+
+
+def _looks_like_guid_stem(name):
+    if not name:
+        return False
+    return re.match(
+        r'^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$',
+        name,
+    ) is not None
+
+
+def _parse_int(v):
+    try:
+        return int(str(v).strip())
+    except Exception:
+        return None
+
+
+def _bwf_probe(path):
+    """
+    Read reel and timestamp samples from a WAV/W64/AIFF file via bwfmetaedit.
+
+    Returns dict keys:
+        reel: str
+        ts_samples: int or None
+        sample_rate: int or None
+    """
+    if not path:
+        return {"reel": "", "ts_samples": None, "sample_rate": None}
+    if path in _BWF_META_CACHE:
+        return _BWF_META_CACHE[path]
+
+    p = Path(path)
+    if p.suffix.lower() not in (".wav", ".w64", ".aif", ".aiff"):
+        out = {"reel": "", "ts_samples": None, "sample_rate": None}
+        _BWF_META_CACHE[path] = out
+        return out
+    if not p.exists():
+        out = {"reel": "", "ts_samples": None, "sample_rate": None}
+        _BWF_META_CACHE[path] = out
+        return out
+
+    exe = _resolve_bwfmetaedit()
+    if not exe:
+        out = {"reel": "", "ts_samples": None, "sample_rate": None}
+        _BWF_META_CACHE[path] = out
+        return out
+
+    try:
+        proc = subprocess.run(
+            [exe, "--out-ixml", str(p)],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except Exception:
+        out = {"reel": "", "ts_samples": None, "sample_rate": None}
+        _BWF_META_CACHE[path] = out
+        return out
+
+    txt = (proc.stdout or "").strip()
+    reel = ""
+    ts_samples = None
+    sample_rate = None
+
+    if txt.startswith("<?xml") or txt.startswith("<"):
+        try:
+            root = ET.fromstring(txt)
+            reel = (
+                (root.findtext(".//TAPE") or "").strip()
+                or (root.findtext(".//ROLL") or "").strip()
+            )
+            sample_rate = _parse_int(root.findtext(".//SPEED/FILE_SAMPLE_RATE"))
+
+            lo = _parse_int(root.findtext(".//SPEED/TIMESTAMP_SAMPLES_SINCE_MIDNIGHT_LO"))
+            hi = _parse_int(root.findtext(".//SPEED/TIMESTAMP_SAMPLES_SINCE_MIDNIGHT_HI"))
+
+            # Fallback to BEXT time reference tags.
+            if lo is None:
+                lo = _parse_int(root.findtext(".//BEXT/BWF_TIME_REFERENCE_LOW"))
+            if hi is None:
+                hi = _parse_int(root.findtext(".//BEXT/BWF_TIME_REFERENCE_HIGH"))
+
+            if lo is not None:
+                ts_samples = lo + ((hi or 0) << 32)
+
+            # If explicit <TAPE> is missing, parse Sound Devices description tags.
+            if not reel:
+                desc = root.findtext(".//BEXT/BWF_DESCRIPTION") or ""
+                m = re.search(r"(?mi)^sTAPE=([^\r\n]+)$", desc)
+                if m:
+                    reel = m.group(1).strip()
+        except Exception:
+            pass
+
+    out = {
+        "reel": reel,
+        "ts_samples": ts_samples,
+        "sample_rate": sample_rate,
+    }
+    _BWF_META_CACHE[path] = out
+    return out
 
 
 def _audio_roll_from_path(path):
@@ -567,6 +719,28 @@ def _timeline_to_clb(tl, fmt, progress_file=""):
             scene, take  = _scene_take(clip)
             clip_name    = _url_decode(clip.name) if clip.name else reel
             source_file  = _source_file(clip)
+
+            # Fallback AAF path (via aaf_to_otio) may lose reel + absolute source TC.
+            # Reconstruct from BWF/iXML in extracted AAF media files when available.
+            if fmt == "AAF":
+                clip_meta = clip.metadata or {}
+                has_native_aaf_meta = isinstance(clip_meta, dict) and ("AAF" in clip_meta)
+                bwf = _bwf_probe(source_file)
+
+                if bwf.get("reel") and (not has_native_aaf_meta or not reel or _looks_like_guid_stem(reel)):
+                    reel = bwf.get("reel")
+
+                ts_samples = bwf.get("ts_samples")
+                sample_rate = bwf.get("sample_rate")
+                if (not has_native_aaf_meta and ts_samples is not None
+                        and sample_rate and sample_rate > 0):
+                    base_frames = (float(ts_samples) / float(sample_rate)) * float(fps)
+                    base_rt = ot.RationalTime(base_frames, fps)
+                    src_start = base_rt + src_start
+                    src_end = src_start + (sr.duration if sr else rp.duration)
+
+                    src_in  = _rt_to_tc(src_start, fps, is_drop, ot)
+                    src_out = _rt_to_tc(src_end,   fps, is_drop, ot)
 
             linked = linked_audio.get(clip_name)
             if linked and linked.get("reel"):
