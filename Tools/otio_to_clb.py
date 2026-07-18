@@ -29,15 +29,30 @@ Dependencies:
   pip install opentimelineio
   aaftool in PATH (LibAAF) — only needed for .aaf files
 
-Version: 260402.1405
+Version: 260718.2204
+
+Changelog:
+    260718.2204
+        - Reel resolver now prioritizes explicit metadata fields from media reference
+            (e.g. fcp_xml.timecode.reel.name) before any path-derived fallback.
+        - Linked-audio reel map for XML now reads recorder roll/tape from metadata
+            first, using folder path only when metadata is unavailable.
+
+    260718.2208
+        - XML/Premiere reel parsing now prefers linked production audio roll/tape
+            information (e.g. 24Y02M18) over editorial clip labels.
+        - For XML timelines, builds a clip-name -> linked audio map from WAV/W64/AIFF
+            items and reuses it for merged picture clip Reel values.
+        - Keeps clip_name as the editorial clip label while improving Reel grouping
+            to match EdiLoad more closely.
 """
 
 import sys
 import os
 import re
 import json
-import traceback
 from pathlib import Path
+
 
 
 # ---------------------------------------------------------------------------
@@ -175,9 +190,9 @@ def _parse_scene_take_from_name(clip_name):
     Try to extract a normalised scene string and take number from a
     structured clip name such as:
 
-        06_01B_02_T01 - Merged   →  ('6-1B-2', '1')
-        06_01B_01_T05_A - Merged →  ('6-1B-1', '5')
-        12_03C_01_T02            →  ('12-3C-1', '2')
+        06_01B_02_T01 - Merged   -> ('6-1B-2', '1')
+        06_01B_01_T05_A - Merged -> ('6-1B-1', '5')
+        12_03C_01_T02            -> ('12-3C-1', '2')
 
     Convention assumed:
         {part1}_{part2}_…_{partN}_T{take}[_{channel}] [- Merged/Synced/…]
@@ -192,12 +207,12 @@ def _parse_scene_take_from_name(clip_name):
     if not clip_name:
         return '', ''
 
-    # Strip common trailing annotations: " - Merged", " - Synced", " - MOS" …
+    # Strip common trailing annotations: " - Merged", " - Synced", " - MOS" ...
     name = re.sub(
         r'\s*[-–]\s*(Merged|Synced|MOS|Mix|Stem)\b.*$',
         '', clip_name, flags=re.IGNORECASE).strip()
 
-    # Strip single-letter channel suffix at the very end: _A, _B, _a …
+    # Strip single-letter channel suffix at the very end: _A, _B, _a ...
     name = re.sub(r'_([A-Za-z])$', '', name)
 
     # Require pattern: {body}_T{digits}
@@ -239,11 +254,49 @@ def _aaf_user_comments(clip):
     return uc if isinstance(uc, dict) else {}
 
 
+def _reel_from_media_ref_metadata(clip):
+    """
+    Extract reel/tape/roll from media-reference metadata.
+
+    XML adapters often preserve recorder roll in:
+        media_reference.metadata.fcp_xml.timecode.reel.name
+    This should be preferred over path/folder heuristics.
+    """
+    mr = clip.media_reference
+    if mr is None:
+        return ""
+
+    meta = mr.metadata or {}
+
+    for path in (
+        ("fcp_xml", "timecode", "reel", "name"),
+        ("fcp_xml", "timecode", "reel"),
+        ("timecode", "reel", "name"),
+        ("timecode", "reel"),
+        ("reel", "name"),
+        ("reel",),
+        ("tape",),
+        ("roll",),
+        ("soundroll",),
+        ("sound_roll",),
+    ):
+        v = _meta_str(meta, *path)
+        if v:
+            return _url_decode(v)
+
+    return ""
+
+
 def _reel_from_clip(clip):
     """
     Derive a reel/tape name from clip metadata, then fall back to
-    the clip name (= original source filename for AAF clips), then
-    the target URL stem.  URL-decodes the result.
+        the target URL stem, then the clip name. URL-decodes the result.
+
+        Rationale:
+            - Premiere XML often uses clip.name as the edited clip label
+                (e.g. "005_12_T02 - Merged"), not the source reel.
+            - media_reference.target_url stem is usually the desired reel/source name
+                for CLB's Reel column.
     """
     meta = clip.metadata or {}
 
@@ -259,15 +312,19 @@ def _reel_from_clip(clip):
     if tape:
         return str(tape)
 
-    # Clip name (aaf_to_otio sets this to original source filename;
-    # native AAF adapter uses MasterMob name)
-    if clip.name:
-        return _url_decode(clip.name)
+    mr_reel = _reel_from_media_ref_metadata(clip)
+    if mr_reel:
+        return mr_reel
 
-    # Last resort: source file stem
+    # Prefer source file stem for XML timelines where clip.name is often
+    # an editorial clip label instead of the actual reel/source name.
     mr = clip.media_reference
     if mr and hasattr(mr, "target_url") and mr.target_url:
         return Path(mr.target_url.split("?")[0]).stem
+
+    # Final fallback: clip name (AAF paths may still rely on this)
+    if clip.name:
+        return _url_decode(clip.name)
 
     return ""
 
@@ -316,6 +373,58 @@ def _source_file(clip):
                 return path
         return url
     return ""
+
+
+def _audio_roll_from_path(path):
+    """Return tape/roll from an audio source path when it follows recorder folder layout."""
+    if not path:
+        return ""
+    try:
+        p = Path(path)
+    except Exception:
+        return ""
+
+    ext = p.suffix.lower()
+    if ext not in (".wav", ".w64", ".aif", ".aiff", ".mxf"):
+        return ""
+
+    parent = p.parent.name or ""
+    if parent:
+        return parent
+    return ""
+
+
+def _build_linked_audio_map(tl):
+    """
+    Build a clip-name -> linked audio info map for XML timelines.
+
+    Premiere merged clips often store the desired reel/tape information on the
+    linked production audio item (e.g. /24Y02M18/P5-12T02.WAV) rather than the
+    picture clip. EdiLoad's Reel column typically reflects that tape/roll.
+    """
+    out = {}
+    try:
+        import opentimelineio as otio_inner
+    except Exception:
+        return out
+
+    for track in tl.tracks:
+        if getattr(track, "kind", None) != otio_inner.schema.TrackKind.Audio:
+            continue
+        for item in track:
+            if not isinstance(item, otio_inner.schema.Clip):
+                continue
+            clip_name = _url_decode(item.name) if item.name else ""
+            if not clip_name or clip_name in out:
+                continue
+            src_path = _source_file(item)
+            roll = _reel_from_media_ref_metadata(item) or _audio_roll_from_path(src_path)
+            if roll:
+                out[clip_name] = {
+                    "reel": roll,
+                    "source_file": src_path,
+                }
+    return out
 
 
 # ---------------------------------------------------------------------------
@@ -379,6 +488,8 @@ def _timeline_to_clb(tl, fmt, progress_file=""):
     )
     if progress_file:
         _write_progress(progress_file, "converting", 0, total_clips, "")
+
+    linked_audio = _build_linked_audio_map(tl) if fmt in ("PREMIERE_XML", "FCP7_XML", "RESOLVE_XML") else {}
 
     events    = []
     event_num = 0
@@ -456,6 +567,10 @@ def _timeline_to_clb(tl, fmt, progress_file=""):
             scene, take  = _scene_take(clip)
             clip_name    = _url_decode(clip.name) if clip.name else reel
             source_file  = _source_file(clip)
+
+            linked = linked_audio.get(clip_name)
+            if linked and linked.get("reel"):
+                reel = linked.get("reel") or reel
 
             events.append({
                 "event_num":    str(event_num),
