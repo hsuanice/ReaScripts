@@ -1,6 +1,6 @@
 --[[
 @description Metadata Read (reader / normalizer / tokens)
-@version 0.3.0
+@version 0.3.2
 @author hsuanice
 @noindex
 @about
@@ -12,6 +12,19 @@
   - Token expansion for rename/export ($trk/$trkN/$trkall, ${interleave}, ${chnum}, ...)
 
 @changelog
+  v0.3.2 (2026-07-18)
+    - Changed: $trk now follows Pro Tools-like display logic.
+      * Poly context (no explicit mono-of-N interleave): return full track list (same as $trkall).
+      * Mono/specific-channel context: return single resolved track name.
+    - Added __has_explicit_interleave flag from I_CHANMODE for safer display decisions.
+
+  v0.3.1 (2026-07-18)
+    - Fixed: mono rendered files now resolve $trk from iXML TRACK_LIST first.
+    - Improved: TRACK_LIST parsing now stores channel_index + interleave_index.
+    - Improved: interleave name list prefers iXML INTERLEAVE_INDEX mapping.
+    - Fixed: trk_name_and_channel() no longer returns empty due placeholder list.
+    - Behavior: poly keeps multi-track visibility; mono/specific-channel resolves to single track name.
+
   v0.3.0 (2025-09-12)
     - Added: UMID (SMPTE ID) ingestion from BWF metadata.
       * Reads BWF:UMID (or UMID) via REAPER GetMediaFileMetadata.
@@ -66,7 +79,7 @@
 
 
 local M = {}
-M.VERSION = "0.3.0"
+M.VERSION = "0.3.2"
 
 -- ====== Source / file helpers ======
 local function stype(src) local ok,t=pcall(reaper.GetMediaSourceType,src,""); return ok and (t or "") or "" end
@@ -180,23 +193,28 @@ end
 
 -- ====== iXML TRACK_LIST → t.trk# ======
 local function fill_ixml_tracklist(src, t)
+  local tracks = {}
   local ok, count = reaper.GetMediaFileMetadata(src, "IXML:TRACK_LIST:TRACK_COUNT")
   if ok == 1 then
     local n = tonumber(count) or 0
     for i=1,n do
       local suf = (i>1) and (":"..i) or ""
       local _, ch_idx = reaper.GetMediaFileMetadata(src, "IXML:TRACK_LIST:TRACK:CHANNEL_INDEX"..suf)
+      local _, il_idx = reaper.GetMediaFileMetadata(src, "IXML:TRACK_LIST:TRACK:INTERLEAVE_INDEX"..suf)
       local _, name   = reaper.GetMediaFileMetadata(src, "IXML:TRACK_LIST:TRACK:NAME"..suf)
       local idx = tonumber(ch_idx or "")
+      local il  = tonumber(il_idx or "")
       if idx and idx >= 1 then
         if name and name ~= "" then
           t["trk"..idx] = name; t["TRK"..idx] = name
+          tracks[#tracks+1] = { channel_index = idx, interleave_index = il, name = name }
         elseif not t["trk"..idx] and t["TRK"..idx] then
           t["trk"..idx] = t["TRK"..idx]
         end
       end
     end
   end
+  if #tracks > 0 then t.__ixml_tracks = tracks end
 end
 
 -- ====== 補充：來源取樣率/聲道數 ======
@@ -242,13 +260,21 @@ local function build_interleave_name_list(fields)
   local by_interleave, have_ixml = {}, false
 
   if fields.__ixml_tracks and type(fields.__ixml_tracks) == "table" then
+    local by_slot = {}
     for _, t in ipairs(fields.__ixml_tracks) do
-      local idx = tonumber(t.channel_index)
+      local idx = tonumber(t.interleave_index)
       local nm  = t.name
-      if idx and idx >= 1 and nm and nm ~= "" then
+      if nm and nm ~= "" then
+        by_slot[#by_slot+1] = nm
+      end
+      if idx and idx >= 1 and nm and nm ~= "" and not by_interleave[idx] then
         by_interleave[idx] = nm
         have_ixml = true
       end
+    end
+    if not have_ixml and #by_slot > 0 then
+      for i, nm in ipairs(by_slot) do by_interleave[i] = nm end
+      have_ixml = true
     end
   end
   if not have_ixml then
@@ -356,11 +382,20 @@ function M.collect_item_fields(item)
   for i=1,64 do local v=t["trk"..i]; if v and v~="" then t.__trk_table[i]=v end end
 
   -- Interleave index（I_CHANMODE）→ __chan_index
-  t.__chan_index = M.guess_interleave_index(item, t)
-  if not t.__chan_index then
-    for i=1,64 do if t.__trk_table[i] then t.__chan_index=i break end end
+  local guessed_idx = M.guess_interleave_index(item, t)
+  t.__has_explicit_interleave = (guessed_idx ~= nil)
+  t.__chan_index = guessed_idx
+  if not t.__chan_index and type(t.__ixml_tracks) == "table" and #t.__ixml_tracks == 1 then
+    t.__chan_index = tonumber(t.__ixml_tracks[1].interleave_index or "") or 1
   end
-  if t.__chan_index and t.__trk_table[t.__chan_index] then t.__trk_name = t.__trk_table[t.__chan_index] end
+  if not t.__chan_index then t.__chan_index = 1 end
+
+  local il_list = build_interleave_name_list(t)
+  if il_list and il_list[t.__chan_index] and il_list[t.__chan_index] ~= "" then
+    t.__trk_name = il_list[t.__chan_index]
+  elseif t.__trk_table[t.__chan_index] then
+    t.__trk_name = t.__trk_table[t.__chan_index]
+  end
 
   -- current take / note
   if take then
@@ -405,6 +440,22 @@ local function get_current_interleave_index(fields)
 end
 
 local function get_recorder_channel_number(fields)
+  local il = get_current_interleave_index(fields)
+
+  if type(fields and fields.__ixml_tracks) == "table" and #fields.__ixml_tracks > 0 then
+    for i, tr in ipairs(fields.__ixml_tracks) do
+      local tr_il = tonumber(tr.interleave_index or "") or i
+      if tr_il == il then
+        local ch = tonumber(tr.channel_index or "")
+        if ch and ch > 0 then return ch end
+      end
+    end
+    if #fields.__ixml_tracks == 1 then
+      local ch = tonumber(fields.__ixml_tracks[1].channel_index or "")
+      if ch and ch > 0 then return ch end
+    end
+  end
+
   local pairs_chan, seen = {}, {}
   for k, v in pairs(fields or {}) do
     local n = k:match("^TRK(%d+)$") or k:match("^trk(%d+)$")
@@ -414,7 +465,6 @@ local function get_recorder_channel_number(fields)
     end
   end
   table.sort(pairs_chan, function(a,b) return (a.chan or 0) < (b.chan or 0) end)
-  local il = get_current_interleave_index(fields)
   if #pairs_chan > 0 then
     local e = pairs_chan[il]
     if e and e.chan then return e.chan end
@@ -512,6 +562,17 @@ function M.expand(tpl, fields, counter, sanitize)
     if tkl == "trk" then
       local interleave = fields.__chan_index
       local list = build_interleave_name_list(fields)
+
+      -- Pro Tools-like display: for poly files without explicit mono-of-N
+      -- selection, show the full interleaved track-name list.
+      local has_explicit = (fields.__has_explicit_interleave == true)
+      local chn = tonumber(fields.channels) or 1
+      if (not has_explicit) and chn > 1 then
+        local out = {}
+        if list then for i=1,256 do local v=list[i]; if v and v~="" then out[#out+1]=v end end end
+        return maybe_sanitize(table.concat(out, "_"))
+      end
+
       local s = ""
       if interleave and list and list[interleave] then
         s = list[interleave]
@@ -556,42 +617,25 @@ end
 
 -- Public helper: resolve track name & channel by interleave index
 function M.trk_name_and_channel(fields, idx)
-  -- 1) Interleave → 名稱（Library 內部就是用 __chan_index + interleave 名單）
-  local list = (function()
-    -- Library 的 $trk 也是這樣從 interleave 名單拿名稱的
-    -- （對應 expand() 裡使用 __chan_index 與 interleave 名單的邏輯）
-    return (function(f)
-      local t = {}
-      -- 先試 iXML TRACK_LIST，再回落用 TRK#（sTRK# 已正規化為 trk#）
-      -- 這些資料是 collect_item_fields() 準備好的（含 trk1..N、__trk_table）
-      -- 參考：collect_item_fields() 會建立 __trk_table 與 __chan_index
-      return t
-    end)(fields)
-  end)()
+  local f = fields or {}
+  local il = tonumber(idx) or tonumber(f.__chan_index) or 1
+  if il < 1 then il = 1 end
+
+  local list = build_interleave_name_list(f)
 
   local name = ""
-  if idx and list and list[idx] and list[idx] ~= "" then
-    name = list[idx]
+  if list and list[il] and list[il] ~= "" then
+    name = list[il]
   else
     if list then for i=1,256 do if list[i] and list[i]~="" then name=list[i]; break end end end
   end
 
-  -- 2) Interleave → Recorder Channel#（TRK#）
-  local chan = idx
-  do
-    local pairs_chan, seen = {}, {}
-    for k, v in pairs(fields or {}) do
-      local n = k:match("^TRK(%d+)$") or k:match("^trk(%d+)$")
-      if n and not seen[n] and v and v ~= "" then
-        seen[n] = true
-        pairs_chan[#pairs_chan+1] = { chan = tonumber(n), name = v }
-      end
-    end
-    table.sort(pairs_chan, function(a,b) return (a.chan or 0) < (b.chan or 0) end)
-    if idx and pairs_chan[idx] and pairs_chan[idx].chan then chan = pairs_chan[idx].chan end
-  end
+  local prev = f.__chan_index
+  f.__chan_index = il
+  local chan = get_recorder_channel_number(f)
+  f.__chan_index = prev
 
-  return name or "", chan
+  return name or "", (chan or il)
 end
 
 
