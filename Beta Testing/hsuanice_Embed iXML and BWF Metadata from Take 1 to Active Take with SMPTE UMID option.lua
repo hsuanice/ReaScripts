@@ -1,6 +1,6 @@
 --[[
 @description hsuanice_Embed iXML and BWF Metadata from Take 1 to Active Take with SMPTE UMID option
-@version 260718.1703
+@version 260718.1910
 @author hsuanice
 @about
   Copy ALL metadata from TAKE 1's source file to the ACTIVE take's source file:
@@ -16,6 +16,11 @@
     • For UMID: hsuanice_Metadata Generator.lua and hsuanice_Metadata Embed.lua libraries.
 
 @changelog
+  260718.1910 - Switched embed pipeline to shared Metadata Embed API
+             - iXML/CORE/TR copy now calls hsuanice_Metadata Embed.lua (single source of truth).
+             - Keeps set_embedder disabled in this script to preserve richer original iXML metadata.
+             - Reduces logic drift between this script and explode/render workflows.
+
   260718.1703 - Improved iXML copy reliability with post-import verification
              - Added strict verify step: export iXML from destination and validate sidecar existence/content.
              - Missing source sidecar now returns FAIL (no longer treated as success).
@@ -722,6 +727,11 @@ end
 -- Worker
 -- =========================
 local function run_worker(enable_umid, umid_strategy)
+  if not E or type(E.Copy_Metadata) ~= "function" then
+    R.MB("無法載入 hsuanice_Metadata Embed.lua API（Copy_Metadata）。", "Embed iXML+BWF", 0)
+    return
+  end
+
   local cli = resolve_cli()
   if not cli then
     local hint = IS_WIN and "請安裝 BWF MetaEdit，或指定 bwfmetaedit.exe 路徑。"
@@ -815,29 +825,18 @@ local function run_worker(enable_umid, umid_strategy)
             msg("  CH mode        : (no mono-of-N context; keep full metadata)")
           end
 
-          local ok_ixml = do_ixml_copy(cli, src, dst, chan_ctx)
+          local mres = E.Copy_Metadata(cli, src, dst, {
+            chan_ctx = chan_ctx,
+            copy_tr = true,
+            set_embedder = false,
+            log = function(line) msg(line) end,
+          })
+          local ok_ixml = mres and mres.ixml == true
+          local ok_core = mres and mres.core == true
+          local ok_tr = mres and mres.tr == true
           msg(("  iXML result    : %s"):format(ok_ixml and "OK" or "FAIL"))
-
-          -- Keep iXML closer to Wave Agent split style; avoid EMBEDDER injection.
-
-          -- CORE
-          local ok_core = do_core_copy(cli, src, dst, chan_ctx)
           msg(("  CORE result    : %s"):format(ok_core and "OK" or "FAIL"))
-
-          -- TR
-          local tr_src = select(1, read_TR(cli, src))
-          msg(("  TAKE1 TR read  : %s"):format(tostring(tr_src)))
-          local tr_written = false
-          if tr_src then
-            local wc = select(1, write_TR(cli, dst, tr_src))
-            msg(("  WRITE dst TR   : code=%s"):format(tostring(wc)))
-            local vr = select(1, read_TR(cli, dst))
-            msg(("  VERIFY dst TR  : %s"):format(tostring(vr)))
-            tr_written = (wc == 0 and vr == tr_src)
-            msg(("  TR result      : %s"):format(tr_written and "OK" or "FAIL"))
-          else
-            msg("  TR result      : SKIP (cannot read src TR)")
-          end
+          msg(("  TR result      : %s"):format(ok_tr and "OK" or "FAIL"))
 
           -- UMID (optional)
           local ok_umid = true
@@ -846,7 +845,7 @@ local function run_worker(enable_umid, umid_strategy)
             msg(("  UMID result    : %s"):format(ok_umid and "OK" or "FAIL"))
           end
 
-          if (ok_ixml and ok_core and (tr_written or tr_src==nil) and ok_umid) then
+          if (ok_ixml and ok_core and ok_tr and ok_umid) then
             ok_cnt = ok_cnt + 1
             modified[#modified+1] = it
             msg("  RESULT: OK")
