@@ -1,6 +1,6 @@
 --[[
 hsuanice_OTIO Bridge.lua
-v0.4.0
+v0.4.1
 
 Calls the OpenTimelineIO Python wrapper (Tools/otio_to_clb.py) and converts
 the JSON output into a parsed table compatible with hsuanice_EDL Parser.lua.
@@ -31,6 +31,10 @@ Requires:
   Python 3 with opentimelineio installed
 
 Changelog:
+  v0.4.1  Harden Python runtime detection.
+          Prefer healthy Homebrew/system Python ahead of broken pyenv shims.
+          Validate required OTIO adapters (e.g. fcp_xml for Premiere/FCP XML)
+          and auto-fallback to a working interpreter during parse/async parse.
   v0.4.0  Add parse_async_progress() for live per-clip progress during AAF/XML load.
           parse_async_poll() and M.parse() now strip non-JSON prefix from stdout before
           JSON decode (prevents crash on pyaaf2 warning lines prefixed before "{").
@@ -40,7 +44,7 @@ Changelog:
 --]]
 
 local M = {}
-M.VERSION = "0.4.0"
+M.VERSION = "0.4.1"
 
 -- ---------------------------------------------------------------------------
 -- Path discovery
@@ -91,33 +95,50 @@ local function shell_quote(s)
   return "'" .. s:gsub("'", "'\\''") .. "'"
 end
 
---- Probe a Python executable: returns true if it can import opentimelineio.
-local function _python_has_otio(py)
-  local cmd = shell_quote(py) .. " -c 'import opentimelineio' 2>&1"
+local function _python_supports(py, ext)
+  local probe = "import opentimelineio as otio"
+  local lower_ext = tostring(ext or ""):lower()
+  if lower_ext == "xml" then
+    probe = probe .. "; otio.adapters.from_name(\"fcp_xml\")"
+  end
+  local cmd = shell_quote(py) .. " -c '" .. probe .. "' 2>&1"
   local h = io.popen(cmd, "r")
   if not h then return false end
   local out = h:read("*a"); h:close()
   return out == ""  -- no output = no error = import succeeded
 end
 
---- Auto-detect a Python that has opentimelineio installed.
---- Checks common locations; returns the first working path, or "python3" as fallback.
-function M.detect_python()
+function M.python_supports(py, ext)
+  return _python_supports(py, ext)
+end
+
+-- Auto-detect a Python that has opentimelineio installed.
+-- Checks common locations; returns the first working path, or "python3" as fallback.
+function M.detect_python(ext)
   local home = os.getenv("HOME") or ""
   local candidates = {
-    "python3",
+    "/opt/homebrew/bin/python3",
+    "/opt/homebrew/opt/python@3.13/bin/python3.13",
+    "/usr/local/bin/python3",
+    "/Library/Developer/CommandLineTools/usr/bin/python3",
     home .. "/.pyenv/versions/otio-env/bin/python",
     home .. "/.pyenv/shims/python3",
-    "/opt/homebrew/bin/python3",
-    "/usr/local/bin/python3",
+    "python3",
     "python",
   }
   for _, p in ipairs(candidates) do
-    if p ~= "" and _python_has_otio(p) then
+    if p ~= "" and _python_supports(p, ext) then
       return p
     end
   end
   return "python3"
+end
+
+local function _resolve_python_for_ext(py, ext)
+  if py and py ~= "" and _python_supports(py, ext) then
+    return py
+  end
+  return M.detect_python(ext)
 end
 
 -- ---------------------------------------------------------------------------
@@ -147,7 +168,7 @@ function M.parse(filepath, opts)
   end
 
   -- .xml and others → OTIO Python bridge
-  local python = opts.python or M.python
+  local python = _resolve_python_for_ext(opts.python or M.python, ext)
 
   -- Verify the Python script exists
   local f = io.open(_python_script, "r")
@@ -174,7 +195,8 @@ function M.parse(filepath, opts)
     return nil,
       "No output from Python script.\n"
       .. "  Is '" .. python .. "' in your PATH?\n"
-      .. "  Is opentimelineio installed? Run: pip3 install opentimelineio\n"
+      .. "  Are opentimelineio and required adapters installed?\n"
+      .. "  Run: pip3 install opentimelineio otio-fcp-adapter\n"
       .. "  Command: " .. cmd
   end
 
@@ -302,7 +324,7 @@ function M.parse_async_start(filepath, opts)
   end
 
   -- Python bridge: verify script exists
-  local python = opts.python or M.python
+  local python = _resolve_python_for_ext(opts.python or M.python, ext)
   local f = io.open(_python_script, "r")
   if not f then
     return nil,
