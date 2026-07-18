@@ -29,9 +29,14 @@ Dependencies:
   pip install opentimelineio
   aaftool in PATH (LibAAF) — only needed for .aaf files
 
-Version: 260718.2230
+Version: 260718.2240
 
 Changelog:
+    260718.2240
+        - XML linked-audio reel inheritance is now limited to Audio tracks only.
+        - Prevents Video events from being overwritten by production-audio tape/reel
+            values, avoiding mixed/incorrect reel labels in CLB.
+
     260718.2230
         - AAF metadata probe now resolves bwfmetaedit from common absolute paths
             (/opt/homebrew/bin, /usr/local/bin) when PATH is restricted.
@@ -743,7 +748,9 @@ def _timeline_to_clb(tl, fmt, progress_file=""):
                     src_out = _rt_to_tc(src_end,   fps, is_drop, ot)
 
             linked = linked_audio.get(clip_name)
-            if linked and linked.get("reel"):
+            # Only borrow linked-audio reel for audio events.
+            # Video events should keep their own reel/source identity.
+            if (kind == otio_inner.schema.TrackKind.Audio) and linked and linked.get("reel"):
                 reel = linked.get("reel") or reel
 
             events.append({
