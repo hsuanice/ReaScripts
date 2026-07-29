@@ -1,6 +1,6 @@
 --[[
 @description PM Insight Analyzer
-@version 260309.1955
+@version 260729.1217
 @author hsuanice
 @about
   Read-only analysis script. Auto-detects project type:
@@ -17,7 +17,10 @@
   Duration source: D_LENGTH (always). Does not write any data to the project.
 
 @changelog
-  v260309.1955
+  v260729.1217
+    - Taipei-time version stamp aligned for this changelog entry.
+
+  v260309.2010
     - Both modes: added Working Days count and Avg Daily Work (on working days)
       computed from date-named tracks (YYYY-MM-DD pattern).
     - Avg Daily Work uses trimmed mean (10-90 percentile): excludes the lowest
@@ -196,9 +199,10 @@ local function analyze_work_log()
   -- }
   local project_data  = {}
   local project_order = {}
-  local task_totals   = {}   -- across all projects
-  local grand_total   = 0
-  local daily_totals  = {}   -- "YYYY-MM-DD" → total work secs that day
+  local task_totals        = {}   -- across all projects
+  local module_year_totals = {}   -- module (editing/denoise/…) across all projects
+  local grand_total        = 0
+  local daily_totals       = {}   -- "YYYY-MM-DD" → total work secs that day
 
   for i = 0, r.CountTracks(0) - 1 do
     local t = r.GetTrack(0, i)
@@ -227,7 +231,8 @@ local function analyze_work_log()
           if project ~= "" and ptask ~= "" then
             local mod = (parsed.module ~= "") and parsed.module or "other"
             grand_total = grand_total + dur
-            task_totals[ptask] = (task_totals[ptask] or 0) + dur
+            task_totals[ptask]             = (task_totals[ptask]             or 0) + dur
+            module_year_totals[mod]        = (module_year_totals[mod]        or 0) + dur
 
             if not project_data[project] then
               project_data[project] = { total_sec = 0, task_totals = {}, tasks = {} }
@@ -270,8 +275,14 @@ local function analyze_work_log()
     and (fmt_dur(wl_avg) .. string.format("  (mid %d days, 10-90%%)", wl_used))
     or "N/A"))
   out("")
+  out("By Task:")
   for _, task in ipairs(sorted_by_val(task_totals)) do
     out(string.format("  %-14s %s", task .. ":", fmt_dur(task_totals[task])))
+  end
+  out("")
+  out("By Module:")
+  for _, mod in ipairs(sorted_by_val(module_year_totals)) do
+    out(string.format("  %-14s %s", mod .. ":", fmt_dur(module_year_totals[mod])))
   end
 
   -- ── Per Project ───────────────────────────────────────────────────────────
@@ -502,6 +513,7 @@ local function analyze()
 
   local project_work_total = 0   -- Project Mode work (no SCENE_GUID)
   local daily_totals       = {}  -- "YYYY-MM-DD" → total work secs that day
+  local wt_totals          = {}  -- work_type → total secs across all items
 
   for i = sc_num, total_tracks - 1 do
     local t        = r.GetTrack(0, i)
@@ -519,6 +531,9 @@ local function analyze()
           if dur_secs < 0 then dur_secs = 0 end
           if dur_secs > 0 and tname:match(DATE_PAT) then
             daily_totals[tname] = (daily_totals[tname] or 0) + dur_secs
+          end
+          if dur_secs > 0 then
+            wt_totals[wt] = (wt_totals[wt] or 0) + dur_secs
           end
 
           local _, sg = r.GetSetMediaItemInfo_String(item, "P_EXT:SCENE_GUID", "", false)
@@ -595,6 +610,14 @@ local function analyze()
   out("Total Project Work: " .. fmt_dur(project_work_total))
   local dl_avg, dl_used, dl_all = trimmed_daily_avg(daily_totals, 0.1)
   out("Grand Total Work:   " .. fmt_dur(grand_total))
+  do
+    local wt_keys = {}
+    for k in pairs(wt_totals) do table.insert(wt_keys, k) end
+    table.sort(wt_keys, function(a, b) return (wt_totals[a] or 0) > (wt_totals[b] or 0) end)
+    for _, k in ipairs(wt_keys) do
+      out(string.format("  %-14s %s", k .. ":", fmt_dur(wt_totals[k])))
+    end
+  end
   out("Working Days:       " .. dl_all)
   out("Avg Daily Work:     " .. (dl_all > 0
     and (fmt_dur(dl_avg) .. string.format("  (mid %d days, 10-90%%)", dl_used))

@@ -1,6 +1,6 @@
 --[[
 @description PM Timer - Scene-aware Work Timer
-@version 260510.1632
+@version 260729.1217
 @author hsuanice
 @about
   Scene-aware toggle timer for the hsuanice PM system.
@@ -26,6 +26,9 @@
   All work items are locked (C_LOCK=1) after creation.
 
 @changelog
+  v260729.1217
+    - Taipei-time version stamp aligned for this changelog entry.
+
   v260510.1632
     - Fix: Start / Finish / Break / Continue / Switch Scene / Stop no longer
       recompute and overwrite the Scene Cut item's metadata note. The local
@@ -1015,6 +1018,7 @@ local function start_simple_aap_work(work_type, chain)
   local item_guid  = get_item_guid(item)
   r.Undo_EndBlock("PM: Start AAP session", -1)
   r.UpdateArrange()
+  auto_sync_work_log_if_open()
 
   S.mode              = "WORKING"
   S.scene_guid        = ""; S.scene_name = ""
@@ -1108,6 +1112,7 @@ local function action_start_aap(chain)
   local item_guid = get_item_guid(item)
   r.Undo_EndBlock("PM: Start AAP session", -1)
   r.UpdateArrange()
+  auto_sync_work_log_if_open()
 
   -- ── Update state ─────────────────────────────────────────────────────────
   S.mode              = "WORKING"
@@ -1485,6 +1490,7 @@ local function action_start()
   r.Undo_EndBlock("PM: Start work session", -1)
   r.UpdateArrange()
   mirror_log_item_to_work_log(item)
+  auto_sync_work_log_if_open()
 
   -- 6. Update state + ExtState
   S.mode            = "WORKING"
@@ -1526,6 +1532,8 @@ local function finish_current_item(end_reason, keep_active)
     r.Undo_EndBlock("PM: " .. end_reason .. " work session", -1)
     r.UpdateArrange()
   end
+
+  auto_sync_work_log_if_open()
 
   if not keep_active then
     clear_active_extstate()
@@ -1569,6 +1577,8 @@ local function finish_aap_item(end_reason)
     r.Undo_EndBlock("PM: " .. end_reason .. " AAP session", -1)
     r.UpdateArrange()
   end
+
+  auto_sync_work_log_if_open()
   clear_active_extstate()
   reset_state()
   return end_time, end_pos
@@ -1749,6 +1759,7 @@ local function action_continue()
   r.Undo_EndBlock("PM: Continue work session", -1)
   r.UpdateArrange()
   mirror_log_item_to_work_log(item)
+  auto_sync_work_log_if_open()
 
   S.mode            = "WORKING"
   S.scene_guid      = bs.scene_guid
@@ -1816,6 +1827,7 @@ local function action_switch_type()
   r.Undo_EndBlock("PM: Switch work type", -1)
   r.UpdateArrange()
   mirror_log_item_to_work_log(item)
+  auto_sync_work_log_if_open()
 
   S.mode            = "WORKING"
   S.work_type       = new_type
@@ -1878,6 +1890,7 @@ local function action_switch_scene()
   r.Undo_EndBlock("PM: Switch scene", -1)
   r.UpdateArrange()
   mirror_log_item_to_work_log(item)
+  auto_sync_work_log_if_open()
 
   S.mode            = "WORKING"
   S.scene_guid      = sel_scene.guid
@@ -1905,6 +1918,7 @@ local function action_stop()
     r.Undo_EndBlock("PM: Abort work session", -1)
     r.UpdateArrange()
   end
+  auto_sync_work_log_if_open()
   clear_active_extstate()
   reset_state()
 end
@@ -2110,38 +2124,134 @@ local function extract_proj_from_name(name)
   return prefix_part:match("^(%S+)")
 end
 
-local function action_sync_work_log()
+-- Find or create a YYYY-MM-DD date track in the Work Log project.
+-- Missing tracks are inserted after the previous date track when possible,
+-- or before DurationOnly_Log so the date range stays contiguous.
+local function get_or_create_wl_date_track(wl_proj, date_str, after_idx, src_proj)
+  local existing, existing_idx = find_track_in_proj(wl_proj, date_str)
+  if existing then
+    if r.GetMediaTrackInfo_Value(existing, "I_FOLDERDEPTH") ~= 0 then
+      r.SetMediaTrackInfo_Value(existing, "I_FOLDERDEPTH", 0)
+    end
+    return existing, existing_idx
+  end
+
+  local insert_at
+  if after_idx and after_idx >= 0 then
+    insert_at = after_idx + 1
+  else
+    local dur_log = find_track_in_proj(wl_proj, DURATION_LOG_NAME)
+    if dur_log then
+      insert_at = math.floor(r.GetMediaTrackInfo_Value(dur_log, "IP_TRACKNUMBER")) - 1
+    else
+      insert_at = r.CountTracks(wl_proj)
+    end
+  end
+
+  r.SelectProjectInstance(wl_proj)
+  r.InsertTrackAtIndex(insert_at, true)
+  local new_t = r.GetTrack(wl_proj, insert_at)
+  r.GetSetMediaTrackInfo_String(new_t, "P_NAME", date_str, true)
+  r.SetMediaTrackInfo_Value(new_t, "I_FOLDERDEPTH", 0)
+  r.SelectProjectInstance(src_proj)
+  return new_t, insert_at
+end
+
+local function date_str_to_ts(date_str)
+  local year, month, day = date_str:match("^(%d%d%d%d)%-(%d%d)%-(%d%d)$")
+  if not year then return nil end
+  return os.time({ year = tonumber(year), month = tonumber(month), day = tonumber(day), hour = 12 })
+end
+
+local function expand_date_range(start_date, end_date)
+  local dates = {}
+  local start_ts = date_str_to_ts(start_date)
+  local end_ts   = date_str_to_ts(end_date)
+  if not start_ts or not end_ts then return dates end
+
+  local ts = start_ts
+  while ts <= end_ts do
+    dates[#dates + 1] = os.date("%Y-%m-%d", ts)
+    ts = ts + 86400
+  end
+  return dates
+end
+
+-- Ensure the Work Log project has one date track for every day in `year`.
+-- Existing tracks are preserved; missing tracks are inserted in date order.
+local function ensure_wl_year_calendar(wl_proj, year)
+  if not wl_proj then return 0 end
+  year = tonumber(year)
+  if not year then return 0 end
+
+  local start_ts = os.time({ year = year, month = 1, day = 1, hour = 12 })
+  local next_year_ts = os.time({ year = year + 1, month = 1, day = 1, hour = 12 })
+  if not start_ts or not next_year_ts then return 0 end
+
+  local filled = 0
+  local last_idx = -1
+  for ts = start_ts, next_year_ts - 86400, 86400 do
+    local date_str = os.date("%Y-%m-%d", ts)
+    local _, cur_idx = find_track_in_proj(wl_proj, date_str)
+    if cur_idx >= 0 then
+      last_idx = cur_idx
+    else
+      local _, new_idx = get_or_create_wl_date_track(wl_proj, date_str, last_idx, wl_proj)
+      last_idx = new_idx
+      filled = filled + 1
+    end
+  end
+  return filled
+end
+
+local function sync_work_log_internal(opts)
+  opts = opts or {}
+  local show_messages = not not opts.show_messages
+
   local src_proj = r.EnumProjects(-1)
   local wl_proj  = find_work_log_project()
   if not wl_proj then
-    r.ShowMessageBox(
-      "Work Log project not found.\n\n"
-      .. "Open a project whose filename contains 'Work Log' in REAPER, then try again.",
-      "Sync to Work Log", 0)
-    return
+    if show_messages then
+      r.ShowMessageBox(
+        "Work Log project not found.\n\n"
+        .. "Open a project whose filename contains 'Work Log' in REAPER, then try again.",
+        "Sync to Work Log", 0)
+    end
+    return false
   end
+
+  local current_year = tonumber(os.date("%Y"))
+  local calendar_filled = ensure_wl_year_calendar(wl_proj, current_year)
+
   if src_proj == wl_proj then
-    r.ShowMessageBox(
-      "Current project is the Work Log project.\nSwitch to your dialog project first.",
-      "Sync to Work Log", 0)
-    return
+    if show_messages then
+      local msg = "Work Log calendar ensured for " .. tostring(current_year) .. "."
+      if calendar_filled > 0 then
+        msg = msg .. "\nCreated " .. tostring(calendar_filled) .. " missing date tracks."
+      end
+      r.ShowMessageBox(msg, "Sync to Work Log", 0)
+    end
+    return true
   end
 
   local scene_track = find_track_in_proj(src_proj, SCENE_TRACK_NAME)
   if not scene_track then
-    r.ShowMessageBox(
-      "No '" .. SCENE_TRACK_NAME .. "' track found in current project.\nNothing to sync.",
-      "Sync to Work Log", 0)
-    return
+    if show_messages then
+      r.ShowMessageBox(
+        "No '" .. SCENE_TRACK_NAME .. "' track found in current project.\nNothing to sync.",
+        "Sync to Work Log", 0)
+    end
+    return false
   end
 
-  local sc_num     = math.floor(r.GetMediaTrackInfo_Value(scene_track, "IP_TRACKNUMBER"))
-  local total      = r.CountTracks(src_proj)
-  local _, src_fn  = r.EnumProjects(-1)
+  local sc_num      = math.floor(r.GetMediaTrackInfo_Value(scene_track, "IP_TRACKNUMBER"))
+  local total       = r.CountTracks(src_proj)
+  local _, src_fn   = r.EnumProjects(-1)
   local src_proj_id = (src_fn or ""):match("([^/\\]+)$") or (src_fn or "")
 
-  -- Build set of all current source items (pos + name) for orphan cleanup.
   local src_set = {}
+  local src_dates = {}
+  local src_date_seen = {}
   do
     local d = 1
     for i = sc_num, total - 1 do
@@ -2157,15 +2267,35 @@ local function action_sync_work_log()
           src_set[string.format("%.3f|%s", pos, iname)] = true
         end
       end
+      if tname:match(DATE_PAT) and not src_date_seen[tname] then
+        src_date_seen[tname] = true
+        src_dates[#src_dates + 1] = tname
+      end
       d = d + fd
       if d <= 0 then break end
+    end
+  end
+  table.sort(src_dates)
+
+  local filled = 0
+  r.Undo_BeginBlock2(wl_proj)
+  if #src_dates > 0 then
+    local expected_dates = expand_date_range(src_dates[1], src_dates[#src_dates])
+    local last_idx = -1
+    for _, date_str in ipairs(expected_dates) do
+      local _, cur_idx = find_track_in_proj(wl_proj, date_str)
+      if cur_idx >= 0 then
+        last_idx = cur_idx
+      else
+        local _, new_idx = get_or_create_wl_date_track(wl_proj, date_str, last_idx, src_proj)
+        last_idx = new_idx
+        filled = filled + 1
+      end
     end
   end
 
   local depth = 1
   local added = 0
-
-  r.Undo_BeginBlock2(wl_proj)
 
   for i = sc_num, total - 1 do
     local t        = r.GetTrack(src_proj, i)
@@ -2173,8 +2303,7 @@ local function action_sync_work_log()
     local _, tname = r.GetTrackName(t)
 
     if tname:match(DATE_PAT) then
-      -- ── Date track → flat track in Work Log ───────────────────────────────
-      local dst = get_or_create_wl_flat_track(wl_proj, tname, src_proj)
+      local dst = get_or_create_wl_date_track(wl_proj, tname, nil, src_proj)
       for j = 0, r.CountTrackMediaItems(t) - 1 do
         if copy_item_to_wl(r.GetTrackMediaItem(t, j), dst, src_proj_id) then
           added = added + 1
@@ -2182,7 +2311,6 @@ local function action_sync_work_log()
       end
 
     elseif tname == DURATION_LOG_NAME then
-      -- ── DurationOnly_Log → DurationOnly_Log > ProjectName in Work Log ────
       for j = 0, r.CountTrackMediaItems(t) - 1 do
         local item      = r.GetTrackMediaItem(t, j)
         local item_take = r.GetActiveTake(item)
@@ -2205,13 +2333,26 @@ local function action_sync_work_log()
 
   r.Undo_EndBlock2(wl_proj, "PM: Sync to Work Log", -1)
 
-  local parts = {}
-  if added   > 0 then table.insert(parts, string.format("%d added",   added))   end
-  if removed > 0 then table.insert(parts, string.format("%d removed", removed)) end
-  local msg = #parts > 0
-    and string.format("Work Log synced: %s.", table.concat(parts, ", "))
-    or  "Work Log already up to date."
-  r.ShowMessageBox(msg, "Sync to Work Log", 0)
+  if show_messages then
+    local parts = {}
+    if added   > 0 then table.insert(parts, string.format("%d added",   added))   end
+    if filled  > 0 then table.insert(parts, string.format("%d date tracks filled", filled)) end
+    if removed > 0 then table.insert(parts, string.format("%d removed", removed)) end
+    local msg = #parts > 0
+      and string.format("Work Log synced: %s.", table.concat(parts, ", "))
+      or  "Work Log already up to date."
+    r.ShowMessageBox(msg, "Sync to Work Log", 0)
+  end
+
+  return true
+end
+
+local function action_sync_work_log()
+  sync_work_log_internal({ show_messages = true })
+end
+
+local function auto_sync_work_log_if_open()
+  sync_work_log_internal({ show_messages = false })
 end
 
 -- ── Auto-mirror to Work Log ─────────────────────────────────────────────────
@@ -2236,7 +2377,7 @@ mirror_log_item_to_work_log = function(src_item)
   local dst_track
 
   if tname:match(DATE_PAT) then
-    dst_track = get_or_create_wl_flat_track(wl_proj, tname, src_proj)
+    dst_track = get_or_create_wl_date_track(wl_proj, tname, nil, src_proj)
   elseif tname == DURATION_LOG_NAME then
     local iname     = r.GetTakeName(take)
     local proj_name = extract_proj_from_name(iname)
@@ -2846,6 +2987,7 @@ local function loop()
     sync_work_item_colors()
     PM_SyncAllLogItems()
     PM_SyncProjectScopeNotes()
+    auto_sync_work_log_if_open()
     draw()
     last_draw_time = r.time_precise()
   end
@@ -2896,5 +3038,6 @@ sync_all_prefixes()
 sync_work_item_colors()
 PM_SyncAllLogItems()
 PM_SyncProjectScopeNotes()
+auto_sync_work_log_if_open()
 last_draw_time = r.time_precise()
 r.defer(loop)
