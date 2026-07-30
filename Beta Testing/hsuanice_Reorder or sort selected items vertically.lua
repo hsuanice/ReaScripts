@@ -1,6 +1,6 @@
 --[[
 @description ReaImGui - Vertical Reorder and Sort (items)
-@version 260711.1913
+@version 260730.1537
 @author hsuanice
 @about
   Provides three vertical re-arrangement modes for selected items (stacked UI):
@@ -29,6 +29,14 @@
 
 
 @changelog
+  v260730.1537
+  - Update: Copy to Sort progress/output refined for console-first workflow.
+    * Console progress now emphasizes phase percentage only.
+    * Removed overall percentage from progress lines.
+    * Copy to Sort no longer opens ReaImGui result summary popup.
+    * Final result summary (tracks created/items copied/extra overlap splits)
+      is printed directly in the console.
+
   v260711.1913
   - Fix: Copy to Sort now preserves take channel mode (`I_CHANMODE`) when
     duplicating items to new tracks.
@@ -976,6 +984,7 @@ end
 -- overlap_mode : 1=Filename（依 base filename 分槽），2=Scene & Take（依錄音場次分全域槽）
 local function run_copy_to_new_tracks(name_mode, order_mode, asc, append_secondary, overlap_mode)
   overlap_mode = overlap_mode or 1
+  local t0 = reaper.time_precise()
   -- Clear metadata cache to avoid stale data from previous runs
   if META and META.begin_batch then
     META.begin_batch()  -- Clears CACHE
@@ -991,10 +1000,54 @@ local function run_copy_to_new_tracks(name_mode, order_mode, asc, append_seconda
   debug("  overlap_mode=" .. tostring(overlap_mode))
   debug("======================================")
 
+  -- Live progress (console streaming)
+  local progress_total = 1
+  local progress_last_t = 0
+  local phase_totals = {
+    ["Starting"] = 1,
+    ["Scanning metadata"] = 1,
+    ["Grouping"] = 1,
+    ["Copying items"] = 1,
+    ["Finishing"] = 1,
+  }
+  local phase_offsets = {
+    ["Scanning metadata"] = 0,
+    ["Grouping"] = 0,
+    ["Copying items"] = 0,
+  }
+  local function push_progress(phase, done, force)
+    done = math.max(0, math.min(progress_total, tonumber(done) or 0))
+    local now = reaper.time_precise()
+    if (not force) and done < progress_total and (now - progress_last_t < 0.06) then return end
+    local phase_total = phase_totals[phase] or 1
+    local phase_done = done
+    local off = phase_offsets[phase]
+    if off then phase_done = done - off end
+    phase_done = math.max(0, math.min(phase_total, phase_done))
+    local phase_pct = (phase_total > 0) and (phase_done / phase_total * 100) or 100
+
+    reaper.ShowConsoleMsg(string.format(
+      "[Copy to Sort] %s  %d/%d (phase %.1f%%)\n",
+      phase, phase_done, phase_total, phase_pct
+    ))
+    progress_last_t = now
+  end
+
+  reaper.ClearConsole()
+  push_progress("Starting", 0, true)
+
   reaper.Undo_BeginBlock()
 
   -- 2) 取目前選取 items，抽出 metadata
   local items = get_selected_items()
+  progress_total = math.max(1, #items * 3)
+  phase_totals["Scanning metadata"] = math.max(1, #items)
+  phase_totals["Grouping"] = math.max(1, #items)
+  phase_totals["Copying items"] = math.max(1, #items)
+  phase_offsets["Scanning metadata"] = 0
+  phase_offsets["Grouping"] = #items
+  phase_offsets["Copying items"] = #items * 2
+  push_progress("Scanning metadata", 0, true)
   debug("Total selected items: " .. #items)
 
   local rows = {}
@@ -1049,7 +1102,9 @@ local function run_copy_to_new_tracks(name_mode, order_mode, asc, append_seconda
     local bfn_debug = get_item_base_filename(it)
     debug(string.format("    → filename_base='%s' | scene_take='%s'", bfn_debug, st_key))
     rows[#rows+1] = { it = it, name = name, ch = ch, take = tkn, st_key = st_key }
+    push_progress("Scanning metadata", i, false)
   end
+  push_progress("Scanning metadata", #items, true)
 
 
   -- 排序鍵工具
@@ -1128,7 +1183,10 @@ local function run_copy_to_new_tracks(name_mode, order_mode, asc, append_seconda
       g.name_hist[r.name] = (g.name_hist[r.name] or 0) + 1
     end
 
+    push_progress("Grouping", #items + idx, false)
+
   end
+  push_progress("Grouping", #items * 2, true)
 
   -- 當以 Channel# 命名且勾選 Append Track Name 時，已依 Track Name 拆分到不同新軌，
   -- 不需要再追加「最常見 Track Name」到標籤（避免重複/誤導）
@@ -1427,6 +1485,7 @@ local function run_copy_to_new_tracks(name_mode, order_mode, asc, append_seconda
             for _, it in ipairs(ss.items) do
               copy_item_to_track(it, tr)
               copied = copied + 1
+              push_progress("Copying items", #items * 2 + copied, false)
             end
           end
         end
@@ -1525,6 +1584,7 @@ local function run_copy_to_new_tracks(name_mode, order_mode, asc, append_seconda
           for _, rec in ipairs(rg) do
             copy_item_to_track(rec.it, assigned.tr)
             copied = copied + 1
+            push_progress("Copying items", #items * 2 + copied, false)
             table.insert(assigned.spans, { s = rec.s, e = rec.e })
             debug(string.format("    → Placed on existing '%s' at %.3f (base='%s')",
                                 label, rec.s, rec.bfn))
@@ -1544,6 +1604,7 @@ local function run_copy_to_new_tracks(name_mode, order_mode, asc, append_seconda
             end
             copy_item_to_track(rec.it, item_slot.tr)
             copied = copied + 1
+            push_progress("Copying items", #items * 2 + copied, false)
             table.insert(item_slot.spans, { s = rec.s, e = rec.e })
             debug(string.format("    → Fallback placed '%s' at %.3f (base='%s')",
                                 label, rec.s, rec.bfn))
@@ -1557,12 +1618,17 @@ local function run_copy_to_new_tracks(name_mode, order_mode, asc, append_seconda
   debug("=== COPY TO SORT - COMPLETE ===")
   debug(string.format("Tracks created: %d | Items copied: %d", #all_created, copied))
   debug("======================================")
+  local extra_tracks = #all_created - #order
+  local extra_tracks_clamped = math.max(0, extra_tracks)
+  push_progress("Finishing", progress_total, true)
+  reaper.ShowConsoleMsg(string.format("[Copy to Sort] Done in %.2fs\n", reaper.time_precise() - t0))
+  reaper.ShowConsoleMsg(string.format("[Copy to Sort] Result: Tracks created=%d | Items copied=%d | Extra tracks (overlap splits)=%d\n",
+    #all_created, copied, extra_tracks_clamped))
 
   reaper.Undo_EndBlock("Copy selected items to NEW tracks by metadata", -1)
   reaper.UpdateArrange()
 
-  local extra_tracks = #all_created - #order
-  return { tracks_created = #all_created, items_copied = copied, extra_tracks = math.max(0, extra_tracks) }
+  return { tracks_created = #all_created, items_copied = copied, extra_tracks = extra_tracks_clamped }
 end
 
 
@@ -1957,19 +2023,7 @@ local function draw_confirm()
 
     -- 🆕 Copy to Sort：帶入命名軸與排序軸
     if reaper.ImGui_Button(ctx, "Copy to Sort", scale(108), 0) then
-      local res = run_copy_to_new_tracks(meta_name_mode, meta_order_mode, sort_asc, meta_append_secondary, meta_overlap_mode)
-      if res then
-        local extra_line = (res.extra_tracks and res.extra_tracks > 0)
-          and string.format("\nExtra tracks (overlap splits): %d", res.extra_tracks)
-          or ""
-        SUMMARY = string.format(
-          "Copy to Sort — Done.\nTracks created: %d\nItems copied: %d%s",
-          res.tracks_created or 0, res.items_copied or 0, extra_line
-        )
-      else
-        SUMMARY = "Copy to Sort — Done."
-      end
-      WANT_POPUP = true
+      run_copy_to_new_tracks(meta_name_mode, meta_order_mode, sort_asc, meta_append_secondary, meta_overlap_mode)
     end
 
 
