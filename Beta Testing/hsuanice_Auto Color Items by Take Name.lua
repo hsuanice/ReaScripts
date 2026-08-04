@@ -1,6 +1,6 @@
 --[[
 @description Auto Color Items by Take Name
-@version 260425.1857
+@version 260804.1623
 @author hsuanice
 @about
   Config-driven color palette with keyword rules — colors items by take name.
@@ -13,6 +13,11 @@
   No external dependencies — REAPER built-in GFX library.
 
 @changelog
+  v260804.1623
+  - Add: ShinyColor mode (Pro Tools-like) toggle in toolbar — writes take peak color and applies a lighter item background color for readability
+  - Change: all apply paths now follow mode behavior (Auto Color, swatch click, List View click, Paste Color)
+  - Change: Remove Color now clears item color and all take colors
+
   v260425.1857
   - Fix: Export Keywords failed with "Could not write to: 1" — JS_Dialog_BrowseForSaveFile returns (retval, fileName); only the retval (1) was being captured as the path. Now captures both return values correctly.
 
@@ -133,11 +138,52 @@ local PALETTE_COLS = 10
 -- PALETTE: { color=0xRRGGBB, keyword="" }  — regenerated from PCONF
 local PALETTE = {}
 
+-- color application mode
+local COLOR_MODE_NORMAL = "normal"
+local COLOR_MODE_SHINY  = "shiny"
+local color_mode         = COLOR_MODE_NORMAL
+
 -- ─── color helpers ────────────────────────────────────────────────────────────
 local function cr(c) return ((c>>16)&0xFF)/255 end
 local function cg(c) return ((c>> 8)&0xFF)/255 end
 local function cb(c) return ( c     &0xFF)/255 end
 local function lum(c) return cr(c)*.299+cg(c)*.587+cb(c)*.114 end
+
+local function rgb_to_hsv(r, g, b)
+  local maxc = math.max(r, g, b)
+  local minc = math.min(r, g, b)
+  local d = maxc - minc
+  local h = 0
+  local s = maxc == 0 and 0 or (d / maxc)
+  local v = maxc
+
+  if d ~= 0 then
+    if maxc == r then
+      h = ((g - b) / d) % 6
+    elseif maxc == g then
+      h = ((b - r) / d) + 2
+    else
+      h = ((r - g) / d) + 4
+    end
+    h = h * 60
+  end
+
+  return h, s, v
+end
+
+local function shiny_background_rrggbb(rrggbb)
+  local r = ((rrggbb >> 16) & 0xFF) / 255
+  local g = ((rrggbb >> 8) & 0xFF) / 255
+  local b = (rrggbb & 0xFF) / 255
+  local h, s, v = rgb_to_hsv(r, g, b)
+
+  -- mirror Chroma's ShinyColor behavior: desaturate and lift value.
+  s = s / 3.7
+  v = v + ((0.92 - v) / 1.3)
+  if v > 0.99 then v = 0.99 end
+
+  return hsv(h, s, v)
+end
 
 -- Returns first n Unicode characters from a UTF-8 string
 local function utf8_take(s, n)
@@ -161,6 +207,30 @@ end
 local function apply_color_to_item(item, rrggbb)
   reaper.SetMediaItemInfo_Value(item, "I_CUSTOMCOLOR",
     reaper.ColorToNative((rrggbb>>16)&0xFF,(rrggbb>>8)&0xFF,rrggbb&0xFF)|0x1000000)
+end
+
+local function apply_shiny_color_to_item(item, rrggbb)
+  local peak_native = reaper.ColorToNative((rrggbb >> 16) & 0xFF, (rrggbb >> 8) & 0xFF, rrggbb & 0xFF) | 0x1000000
+  local take_count = reaper.GetMediaItemNumTakes(item)
+  if take_count and take_count > 0 then
+    for t = 0, take_count - 1 do
+      local take = reaper.GetMediaItemTake(item, t)
+      if take then
+        reaper.SetMediaItemTakeInfo_Value(take, "I_CUSTOMCOLOR", peak_native)
+      end
+    end
+  end
+
+  local bg_rrggbb = shiny_background_rrggbb(rrggbb)
+  apply_color_to_item(item, bg_rrggbb)
+end
+
+local function apply_color_by_mode(item, rrggbb)
+  if color_mode == COLOR_MODE_SHINY then
+    apply_shiny_color_to_item(item, rrggbb)
+  else
+    apply_color_to_item(item, rrggbb)
+  end
 end
 
 -- ─── palette generation ───────────────────────────────────────────────────────
@@ -246,6 +316,7 @@ local function save_pconf()
   reaper.SetExtState(PREF_NS, "swatch_chars",  tostring(swatch_chars),       true)
   reaper.SetExtState(PREF_NS, "last_preset",   current_preset or "",         true)
   reaper.SetExtState(PREF_NS, "collapsed",     collapsed and "1" or "0",     true)
+  reaper.SetExtState(PREF_NS, "color_mode",    color_mode,                    true)
 end
 
 local function load_pconf()
@@ -278,6 +349,8 @@ local function load_pconf()
   local lp = reaper.GetExtState(PREF_NS, "last_preset")
   if lp ~= "" then current_preset = lp; preset_dirty = false end
   collapsed = reaper.GetExtState(PREF_NS, "collapsed") == "1"
+  local cm = reaper.GetExtState(PREF_NS, "color_mode")
+  if cm == COLOR_MODE_SHINY or cm == COLOR_MODE_NORMAL then color_mode = cm end
 end
 
 local function load_palette()
@@ -347,9 +420,9 @@ local function match_take(take_name)
   for _, p in ipairs(PALETTE) do
     if p.keyword ~= "" then
       for kw in (p.keyword.."|"):gmatch("([^|]+)|") do
-        kw = kw:match("^%s*(.-)%s*$")
-        if kw ~= "" and #kw > best_len and lo:find(kw:lower(), 1, true) then
-          best_p, best_len = p, #kw
+        local kw_trim = kw:match("^%s*(.-)%s*$")
+        if kw_trim ~= "" and #kw_trim > best_len and lo:find(kw_trim:lower(), 1, true) then
+          best_p, best_len = p, #kw_trim
         end
       end
     end
@@ -370,7 +443,7 @@ local function do_auto_color()
       if ac_midi then
         local _, tn = reaper.GetSetMediaItemTakeInfo_String(take, "P_NAME", "", false)
         local p = match_take(tn)
-        if p then apply_color_to_item(item, p.color) end
+        if p then apply_color_by_mode(item, p.color) end
       end
     else
       -- audio take: check whether source has an actual file
@@ -381,13 +454,13 @@ local function do_auto_color()
         if ac_empty then
           local _, tn = reaper.GetSetMediaItemTakeInfo_String(take, "P_NAME", "", false)
           local p = match_take(tn)
-          if p then apply_color_to_item(item, p.color) end
+          if p then apply_color_by_mode(item, p.color) end
         end
       else
         if ac_audio then
           local _, tn = reaper.GetSetMediaItemTakeInfo_String(take, "P_NAME", "", false)
           local p = match_take(tn)
-          if p then apply_color_to_item(item, p.color) end
+          if p then apply_color_by_mode(item, p.color) end
         end
       end
     end
@@ -414,7 +487,7 @@ local function do_paste_color()
   if n == 0 then set_status("No items selected"); return end
   reaper.Undo_BeginBlock()
   for i = 0, n-1 do
-    apply_color_to_item(reaper.GetSelectedMediaItem(0, i), copied_color)
+    apply_color_by_mode(reaper.GetSelectedMediaItem(0, i), copied_color)
   end
   reaper.Undo_EndBlock("Paste Item Color", -1)
   reaper.UpdateArrange()
@@ -426,7 +499,15 @@ local function do_clear_selected()
   if n == 0 then set_status("No items selected"); return end
   reaper.Undo_BeginBlock()
   for i = 0, n-1 do
-    reaper.SetMediaItemInfo_Value(reaper.GetSelectedMediaItem(0,i),"I_CUSTOMCOLOR",0)
+    local item = reaper.GetSelectedMediaItem(0, i)
+    reaper.SetMediaItemInfo_Value(item, "I_CUSTOMCOLOR", 0)
+    local take_count = reaper.GetMediaItemNumTakes(item)
+    if take_count and take_count > 0 then
+      for t = 0, take_count - 1 do
+        local take = reaper.GetMediaItemTake(item, t)
+        if take then reaper.SetMediaItemTakeInfo_Value(take, "I_CUSTOMCOLOR", 0) end
+      end
+    end
   end
   reaper.Undo_EndBlock("Clear Item Colors", -1)
   reaper.UpdateArrange()
@@ -846,6 +927,13 @@ local function draw()
     if chkbox(fx2, ty2, ac_empty, "Empty") then ac_empty = not ac_empty; save_auto_pref() end
     fx2 = fx2 + 60
     if chkbox(fx2, ty2, ac_midi,  "MIDI")  then ac_midi  = not ac_midi;  save_auto_pref() end
+    local mode_label = (color_mode == COLOR_MODE_SHINY) and "ShinyColor" or "Normal"
+    if btn(W - 126, sy + 1, 118, AC_BAR_H - 2, "Mode: " .. mode_label, color_mode == COLOR_MODE_SHINY) then
+      color_mode = (color_mode == COLOR_MODE_SHINY) and COLOR_MODE_NORMAL or COLOR_MODE_SHINY
+      save_pconf()
+      if auto_color_enabled then last_state_count = -1 end
+      set_status(color_mode == COLOR_MODE_SHINY and "Mode: ShinyColor" or "Mode: Normal")
+    end
   end
   local content_top = BAR_H + AC_BAR_H
 
@@ -948,7 +1036,7 @@ local function draw()
         local n = reaper.CountSelectedMediaItems(0)
         if n > 0 then
           reaper.Undo_BeginBlock()
-          for j = 0, n-1 do apply_color_to_item(reaper.GetSelectedMediaItem(0,j), p.color) end
+          for j = 0, n-1 do apply_color_by_mode(reaper.GetSelectedMediaItem(0,j), p.color) end
           reaper.Undo_EndBlock("Apply Color "..string.format("#%06X",p.color), -1)
           reaper.UpdateArrange()
           set_status(string.format("Applied to %d item(s)", n))
@@ -1209,7 +1297,7 @@ local function dec(s) return (s:gsub("\\\\", "\1"):gsub("\\n", "\n"):gsub("\1", 
 local PERSIST_KEYS = {
   "pconf_v1", "grey_row", "palette_v3", "last_preset",
   "collapsed", "show_settings", "show_presets", "view_mode",
-  "font_size", "swatch_chars", "ac_audio", "ac_empty", "ac_midi",
+  "font_size", "swatch_chars", "ac_audio", "ac_empty", "ac_midi", "color_mode",
   "win_w", "win_h", "win_x", "win_y", "preset_list",
 }
 
@@ -1343,7 +1431,7 @@ draw_list_view = function(top_y, avail_h)
       local cnt = reaper.CountSelectedMediaItems(0)
       if cnt > 0 then
         reaper.Undo_BeginBlock()
-        for j = 0, cnt-1 do apply_color_to_item(reaper.GetSelectedMediaItem(0,j), p.color) end
+        for j = 0, cnt-1 do apply_color_by_mode(reaper.GetSelectedMediaItem(0,j), p.color) end
         reaper.Undo_EndBlock("Apply Color "..string.format("#%06X",p.color), -1)
         reaper.UpdateArrange()
         set_status(string.format("Applied to %d item(s)", cnt))

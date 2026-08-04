@@ -1,6 +1,6 @@
 --[[
 @description Auto Color Items by Take Name — Background Daemon
-@version 260403.1810
+@version 260804.1623
 @author hsuanice
 @about
   Headless background daemon for hsuanice_Auto Color Items by Take Name.
@@ -18,6 +18,11 @@
     3. The GUI can be closed; the daemon runs independently.
 
 @changelog
+  v260804.1623
+  - Add: supports color_mode from GUI (normal/shiny)
+  - Add: ShinyColor mode now writes take peak color and applies lighter item background color in daemon auto-coloring
+  - Fix: include color_mode in settings fingerprint so daemon reacts immediately to mode changes
+
   v260403.1810
   - Fix: Daemon now works on REAPER startup without needing to open the GUI script first
   - On init, reads hsuanice_AutoColorItems_state.dat directly and populates ExtState,
@@ -70,6 +75,10 @@ local PCONF = {
 local PALETTE_COLS = 10
 local PALETTE = {}
 
+local COLOR_MODE_NORMAL = "normal"
+local COLOR_MODE_SHINY  = "shiny"
+local color_mode        = COLOR_MODE_NORMAL
+
 -- ─── HSV → 0xRRGGBB ──────────────────────────────────────────────────────────
 local function hsv(h, s, v)
   h = h % 360
@@ -81,6 +90,39 @@ local function hsv(h, s, v)
   elseif i==2 then r,g,b=p,v,t elseif i==3 then r,g,b=p,q,v
   elseif i==4 then r,g,b=t,p,v else                r,g,b=v,p,q end
   return math.floor(r*255+.5)<<16 | math.floor(g*255+.5)<<8 | math.floor(b*255+.5)
+end
+
+local function rgb_to_hsv(r, g, b)
+  local maxc = math.max(r, g, b)
+  local minc = math.min(r, g, b)
+  local d = maxc - minc
+  local h = 0
+  local s = maxc == 0 and 0 or (d / maxc)
+  local v = maxc
+
+  if d ~= 0 then
+    if maxc == r then
+      h = ((g - b) / d) % 6
+    elseif maxc == g then
+      h = ((b - r) / d) + 2
+    else
+      h = ((r - g) / d) + 4
+    end
+    h = h * 60
+  end
+
+  return h, s, v
+end
+
+local function shiny_background_rrggbb(rrggbb)
+  local r = ((rrggbb >> 16) & 0xFF) / 255
+  local g = ((rrggbb >> 8) & 0xFF) / 255
+  local b = (rrggbb & 0xFF) / 255
+  local h, s, v = rgb_to_hsv(r, g, b)
+  s = s / 3.7
+  v = v + ((0.92 - v) / 1.3)
+  if v > 0.99 then v = 0.99 end
+  return hsv(h, s, v)
 end
 
 -- ─── palette generation (identical to GUI script) ────────────────────────────
@@ -119,7 +161,8 @@ local function settings_fingerprint()
       .. reaper.GetExtState(PREF_NS, "palette_v3")
       .. reaper.GetExtState(PREF_NS, "ac_audio")
       .. reaper.GetExtState(PREF_NS, "ac_empty")
-      .. reaper.GetExtState(PREF_NS, "ac_midi")
+  .. reaper.GetExtState(PREF_NS, "ac_midi")
+  .. reaper.GetExtState(PREF_NS, "color_mode")
 end
 
 local function load_settings()
@@ -149,6 +192,12 @@ local function load_settings()
   ac_audio = b("ac_audio", true)
   ac_empty = b("ac_empty", true)
   ac_midi  = b("ac_midi",  true)
+  local cm = reaper.GetExtState(PREF_NS, "color_mode")
+  if cm == COLOR_MODE_SHINY or cm == COLOR_MODE_NORMAL then
+    color_mode = cm
+  else
+    color_mode = COLOR_MODE_NORMAL
+  end
 
   -- palette_v3
   local raw = reaper.GetExtState(PREF_NS, "palette_v3")
@@ -173,6 +222,29 @@ local function apply_color_to_item(item, rrggbb)
     reaper.ColorToNative((rrggbb>>16)&0xFF,(rrggbb>>8)&0xFF,rrggbb&0xFF)|0x1000000)
 end
 
+local function apply_shiny_color_to_item(item, rrggbb)
+  local peak_native = reaper.ColorToNative((rrggbb >> 16) & 0xFF, (rrggbb >> 8) & 0xFF, rrggbb & 0xFF) | 0x1000000
+  local take_count = reaper.GetMediaItemNumTakes(item)
+  if take_count and take_count > 0 then
+    for t = 0, take_count - 1 do
+      local take = reaper.GetMediaItemTake(item, t)
+      if take then
+        reaper.SetMediaItemTakeInfo_Value(take, "I_CUSTOMCOLOR", peak_native)
+      end
+    end
+  end
+
+  apply_color_to_item(item, shiny_background_rrggbb(rrggbb))
+end
+
+local function apply_color_by_mode(item, rrggbb)
+  if color_mode == COLOR_MODE_SHINY then
+    apply_shiny_color_to_item(item, rrggbb)
+  else
+    apply_color_to_item(item, rrggbb)
+  end
+end
+
 local function match_take(take_name)
   local lo = (take_name or ""):lower()
   if lo == "" then return nil end
@@ -180,9 +252,9 @@ local function match_take(take_name)
   for _, p in ipairs(PALETTE) do
     if p.keyword ~= "" then
       for kw in (p.keyword.."|"):gmatch("([^|]+)|") do
-        kw = kw:match("^%s*(.-)%s*$")
-        if kw ~= "" and #kw > best_len and lo:find(kw:lower(), 1, true) then
-          best_p, best_len = p, #kw
+        local kw_trim = kw:match("^%s*(.-)%s*$")
+        if kw_trim ~= "" and #kw_trim > best_len and lo:find(kw_trim:lower(), 1, true) then
+          best_p, best_len = p, #kw_trim
         end
       end
     end
@@ -202,7 +274,7 @@ local function do_auto_color()
       if ac_midi then
         local _, tn = reaper.GetSetMediaItemTakeInfo_String(take, "P_NAME", "", false)
         local p = match_take(tn)
-        if p then apply_color_to_item(item, p.color) end
+        if p then apply_color_by_mode(item, p.color) end
       end
     else
       local src = reaper.GetMediaItemTake_Source(take)
@@ -211,13 +283,13 @@ local function do_auto_color()
         if ac_empty then
           local _, tn = reaper.GetSetMediaItemTakeInfo_String(take, "P_NAME", "", false)
           local p = match_take(tn)
-          if p then apply_color_to_item(item, p.color) end
+          if p then apply_color_by_mode(item, p.color) end
         end
       else
         if ac_audio then
           local _, tn = reaper.GetSetMediaItemTakeInfo_String(take, "P_NAME", "", false)
           local p = match_take(tn)
-          if p then apply_color_to_item(item, p.color) end
+          if p then apply_color_by_mode(item, p.color) end
         end
       end
     end
