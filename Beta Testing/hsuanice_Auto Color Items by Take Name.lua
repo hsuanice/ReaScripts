@@ -1,6 +1,6 @@
 --[[
 @description Auto Color Items by Take Name
-@version 260806.1921
+@version 260806.1959
 @author hsuanice
 @about
   Config-driven color palette with keyword rules — colors items by take name.
@@ -13,6 +13,18 @@
   No external dependencies — REAPER built-in GFX library.
 
 @changelog
+  v260806.1959
+  - Change: hover info now shows HEX, RGB, and CMYK for palette swatches in that order
+  - Change: Edit Color now provides separate HEX, RGB, and CMYK input fields, with the last non-empty field taking priority
+
+  v260806.1949
+  - Change: adjust built-in default 3x8 palette colors to the latest provided values
+  - Change: update Recording Auto Color fixed 10-color set to the latest provided sequence
+
+  v260806.1940
+  - Change: built-in default color palette is now a fixed 3x8 RGB set matching the updated custom default palette
+  - Change: Reset Default and first-run palette initialization now use the same fixed palette
+
   v260806.1921
   - Add: right-click swatch Edit Color action with HEX, RGB, and CMYK input support
   - Change: color parsing is now shared between swatch editing and color-list import
@@ -201,14 +213,20 @@ end
 local PCONF = {
   hue_offset = 0,
   hue_range  = 330,
-  grey_row   = true,
+  grey_row   = false,
   rows = {
     { sat=0.20, val=0.90 },
     { sat=0.65, val=0.75 },
     { sat=0.90, val=0.55 },
   }
 }
-local PALETTE_COLS = 10
+local PALETTE_COLS = 8
+
+local DEFAULT_PALETTE_COLORS = {
+  0xFF0000, 0xFF7600, 0xFFFF00, 0x00FF00, 0x00FFFF, 0x0000FF, 0xA000FF, 0xFF00FF,
+  0x990000, 0x994700, 0x808000, 0x008000, 0x008080, 0x000080, 0x800080, 0xB400B4,
+  0x000000, 0x242424, 0x494949, 0x6D6D6D, 0x929292, 0xB6B6B6, 0xDBDBDB, 0xFFFFFF,
+}
 
 -- PALETTE: { color=0xRRGGBB, keyword="" }  — regenerated from PCONF
 local PALETTE = {}
@@ -244,6 +262,44 @@ local function rgb_to_hsv(r, g, b)
   end
 
   return h, s, v
+end
+
+local function rrggbb_to_rgb(rrggbb)
+  return (rrggbb >> 16) & 0xFF, (rrggbb >> 8) & 0xFF, rrggbb & 0xFF
+end
+
+local function rrggbb_to_cmyk(rrggbb)
+  local r, g, b = rrggbb_to_rgb(rrggbb)
+  local rf, gf, bf = r / 255, g / 255, b / 255
+  local k = 1 - math.max(rf, gf, bf)
+  if k >= 0.999999 then
+    return 0, 0, 0, 100
+  end
+  local c = (1 - rf - k) / (1 - k)
+  local m = (1 - gf - k) / (1 - k)
+  local y = (1 - bf - k) / (1 - k)
+  return math.floor(c * 100 + 0.5), math.floor(m * 100 + 0.5), math.floor(y * 100 + 0.5), math.floor(k * 100 + 0.5)
+end
+
+local function format_hex_color(rrggbb)
+  return string.format("#%06X", rrggbb & 0xFFFFFF)
+end
+
+local function format_rgb_color(rrggbb)
+  local r, g, b = rrggbb_to_rgb(rrggbb)
+  return string.format("%d,%d,%d", r, g, b)
+end
+
+local function format_cmyk_color(rrggbb)
+  local c, m, y, k = rrggbb_to_cmyk(rrggbb)
+  return string.format("%d,%d,%d,%d", c, m, y, k)
+end
+
+local function format_color_info(rrggbb)
+  return string.format("HEX %s   RGB %s   CMYK %s",
+    format_hex_color(rrggbb),
+    format_rgb_color(rrggbb),
+    format_cmyk_color(rrggbb))
 end
 
 local function shiny_background_rrggbb(rrggbb)
@@ -334,6 +390,29 @@ local function gen_palette()
     for c = 1, cols do
       local v = cols <= 1 and 0.5 or (1.0 - (c-1)/(cols-1))
       PALETTE[#PALETTE+1] = { color=hsv(0, 0, v), keyword=old_kw[base+c] or "" }
+    end
+  end
+end
+
+local function apply_builtin_default_palette()
+  local old_kw = {}
+  for i, p in ipairs(PALETTE) do old_kw[i] = p.keyword end
+
+  PCONF.hue_offset = 0
+  PCONF.hue_range = 330
+  PCONF.grey_row = false
+  PCONF.rows = {
+    { sat=0.20, val=0.90 },
+    { sat=0.65, val=0.75 },
+    { sat=0.90, val=0.55 },
+  }
+  PALETTE_COLS = 8
+  gen_palette()
+
+  for i, color in ipairs(DEFAULT_PALETTE_COLORS) do
+    if PALETTE[i] then
+      PALETTE[i].color = color
+      PALETTE[i].keyword = old_kw[i] or PALETTE[i].keyword or ""
     end
   end
 end
@@ -509,10 +588,10 @@ local function load_palette()
         end
         row = row + 1
       end
-      gen_palette()
+      apply_builtin_default_palette()
       for i, p in ipairs(PALETTE) do p.keyword = kws[i] or "" end
     else
-      gen_palette()
+      apply_builtin_default_palette()
     end
     return
   end
@@ -560,6 +639,7 @@ local function set_status(msg)
 end
 
 local function load_default_preset_state()
+  apply_builtin_default_palette()
   for _, p in ipairs(PALETTE) do p.keyword = "" end
   save_palette()
   current_preset = "Default"
@@ -597,12 +677,12 @@ end
 
 local REC_FIXED_COLORS = {
   0xFF0000, -- Red
-  0xFFA500, -- Orange
+  0xFF7600, -- Orange
   0xFFFF00, -- Yellow
   0x00FF00, -- Green
   0x00FFFF, -- Cyan
   0x0000FF, -- Blue
-  0x800080, -- Purple
+  0xA000FF, -- Purple
   0xFF00FF, -- Magenta
   0x000000, -- Black
   0xFFFFFF, -- White
@@ -1246,9 +1326,12 @@ local function draw_settings_panel(start_y)
   end
 
   if btn(W-100, iy+2, 92, 18, "Reset Default") then
-    PCONF.hue_offset = 0; PCONF.hue_range = 330; PCONF.grey_row = true
-    PCONF.rows = {{sat=0.20,val=0.90},{sat=0.65,val=0.75},{sat=0.90,val=0.55}}
-    PALETTE_COLS = 10; dirty = true
+    apply_builtin_default_palette()
+    save_palette()
+    save_pconf()
+    preset_dirty = true
+    if auto_color_enabled then last_state_count = -1 end
+    set_status("Reset to default palette")
   end
 
   -- ── Font size row ───────────────────────────────────────────────────────
@@ -1543,7 +1626,7 @@ local function draw()
       fill(cx, cy, cw-1, ch, cr(p.color), cg(p.color), cb(p.color))
       if hov then
         stroke(cx, cy, cw-1, ch, 1, 1, 1, .8)
-        hover_info = string.format("#%06X", p.color) ..
+        hover_info = format_color_info(p.color) ..
           (has and ("   →  " .. p.keyword) or "   (no keyword)")
       elseif sel then
         stroke(cx, cy, cw-1, ch, 1.00, .95, .18, 1)
@@ -1621,17 +1704,35 @@ local function draw()
 
       if lclicked and hov2 and p then
         if item == "Edit Color" then
-          local ok, val = reaper.GetUserInputs(
-            "Edit Color", 1,
-            "HEX / RGB / CMYK:",
-            string.format("#%06X", p.color), 600)
-          if ok and val ~= nil then
-            local new_color = parse_color_token(val)
+          local ok, vals = reaper.GetUserInputs(
+            "Edit Color — current " .. format_color_info(p.color), 3,
+            "HEX:,RGB:,CMYK:,separator=|",
+            "||", 600)
+          if ok and vals ~= nil then
+            local fields = {}
+            for field in (vals .. "|"):gmatch("(.-)|") do
+              fields[#fields+1] = field
+            end
+            local new_color = nil
+            local had_input = false
+            for i = 3, 1, -1 do
+              local candidate = fields[i] and fields[i]:match("^%s*(.-)%s*$") or ""
+              if candidate ~= "" then
+                had_input = true
+                new_color = parse_color_token(candidate)
+                if new_color then break end
+                new_color = false
+                break
+              end
+            end
+            if new_color == false then new_color = nil end
             if new_color then
               p.color = new_color
               save_palette(); preset_dirty = true
               if auto_color_enabled then last_state_count=-1 end
-              set_status("Color updated: " .. string.format("#%06X", new_color))
+              set_status("Color updated: " .. format_color_info(new_color))
+            elseif not had_input then
+              -- no-op: user opened the dialog but left all fields blank
             else
               set_status("Invalid color. Use HEX, RGB, or CMYK")
             end
@@ -2069,7 +2170,7 @@ draw_list_view = function(top_y, avail_h)
 
     -- hover info
     if hov then
-      hover_info = string.format("#%06X", p.color) ..
+      hover_info = format_color_info(p.color) ..
         (p.keyword ~= "" and ("   →  " .. p.keyword) or "   (no keyword)")
     end
 
