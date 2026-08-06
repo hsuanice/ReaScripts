@@ -1,6 +1,6 @@
 --[[
 @description Auto Color Items by Take Name
-@version 260806.1422
+@version 260806.1828
 @author hsuanice
 @about
   Config-driven color palette with keyword rules — colors items by take name.
@@ -13,6 +13,66 @@
   No external dependencies — REAPER built-in GFX library.
 
 @changelog
+  v260806.1828
+  - Change: Recording Auto Color fixed set now uses white instead of gray for the final slot
+
+  v260806.1819
+  - Change: Import Colors now reads tabular hex rows and regenerates palette rows/cols from file content
+  - Change: importing colors disables the extra grey row so imported dimensions match exactly (e.g. 2x8)
+
+  v260806.1812
+  - Add: Import Colors button for loading a text list of hex colors into the current palette grid order
+  - Change: imported palette colors are persisted in palette_v3 and preset files
+  - Change: preset panel footer now exposes Import Colors / Import Keywords buttons
+
+  v260806.1728
+  - Change: Recording Auto Color now groups by recording base name (e.g. vocal, guitar) and assigns sequences per group
+  - Add: Reset Seq button to clear recording color sequence state manually
+  - Change: recording sequence no longer resets when item is moved to another track; it stays tied to recording name
+
+  v260806.1650
+  - Change: rollback to pre-custom-palette behavior (palette remains generator-driven)
+  - Change: remove per-swatch manual color edit/reset and custom-color preset binding
+  - Change: restore preset UI wording to "Presets" / "Save Preset"
+
+  v260806.1644
+  - Fix: Recording Auto Color no longer re-colors already-colored takes at recording stop when take GUIDs finalize
+  - Change: Preset UI labels clarified for palette workflow (toolbar "Palette", button "Save Palette")
+  - Add: Preset panel hint text "Click preset name to load"
+
+  v260806.1633
+  - Add: per-swatch color editing via right-click (Edit Color, accepts HEX #RRGGBB or RGB R,G,B)
+  - Add: per-swatch reset to generated default color (Reset Color)
+  - Change: presets now bind full palette state (color + keyword + custom flag), not keyword only
+  - Change: palette_v3 save/load now persists per-cell custom-color flags and remains backward-compatible with older data
+
+  v260806.1624
+  - Change: Recording Auto Color now uses 10-color loop: bright red/yellow/green/blue/purple, then dark red/yellow/green/blue/purple
+  - Change: Orange/indigo and grayscale are excluded from recording auto-color sequence for clearer visual separation
+
+  v260806.1615
+  - Change: Recording Auto Color now loops a high-contrast six-color set (red/orange/yellow/green/blue/purple)
+  - Change: Exclude grayscale/low-saturation colors from recording auto-color pool
+  - Change: Indigo-adjacent ambiguity reduced by target-hue mapping for better visual separation
+
+  v260806.1605
+  - Change: Recording Auto Color now uses session lineage order (new take #1, #2, #3...) across tracks
+  - Fix: Loop recording on the same track/range now colors new takes individually (take GUID based)
+  - Fix: Moving recorded items to other edit tracks no longer causes Recording Auto Color re-calculation
+  - Change: Recording Auto Color applies take color directly and updates active item background by mode
+
+  v260806.1546
+  - Change: Recording Auto Color is now a checkbox on the main Colors/List action row
+  - Fix: Recording Auto Color now scans only rec-armed tracks (no full-project scan)
+  - Fix: Recording scan is throttled (~100ms interval) to reduce CPU load
+  - Fix: On recording stop, run one finalize pass so the just-finished last item is colored immediately
+
+  v260806.1500
+  - Add: Safety Mode option in Settings (enabled by default)
+  - Add: Auto safety trigger when any track is record-armed or project is recording
+  - Safety action: auto-save current preset (or create "Safety Backup" when unsaved), then switch to Default preset
+  - Add: safety_mode to persisted state file and ExtState preferences
+
   v260806.1422
   - Add: Auto Color by Palette button in the Colors/List row
   - Add: Palette pattern setting with Row Repeat (default) and Full modes
@@ -255,8 +315,8 @@ local function gen_palette()
       else
         hue = PCONF.hue_offset + PCONF.hue_range * (c-1) / (cols-1)
       end
-      local color = hsv(hue % 360, row.sat, row.val)
       local idx = (r-1)*cols + c
+      local color = hsv(hue % 360, row.sat, row.val)
       PALETTE[#PALETTE+1] = { color=color, keyword=old_kw[idx] or "" }
     end
   end
@@ -297,10 +357,26 @@ local swatch_chars       = 3        -- number of UTF-8 chars shown per keyword s
 local PALPAT_FULL        = "full"
 local PALPAT_ROW_REPEAT  = "row_repeat"
 local palette_pattern    = PALPAT_ROW_REPEAT
+local safety_mode        = true
+local safety_engaged     = false
+local recording_auto_color = true
+local REC_SCAN_INTERVAL    = 0.10
+local rec_next_scan_at     = 0
+local rec_was_running      = false
+local rec_last_armed_tracks = {}
+local rec_session_base_guids = {}
 
 -- ─── persistence ─────────────────────────────────────────────────────────────
 -- palette_v3: line 0 = "cols=N"
 --             lines 1+ = "RRGGBB\tkeyword"
+
+local function parse_hex_color_token(token)
+  if not token then return nil end
+  local t = token:match("^%s*(.-)%s*$")
+  if t == "" then return nil end
+  local hex = t:match("^#?(%x%x%x%x%x%x)$")
+  return hex and tonumber(hex, 16) or nil
+end
 
 local function save_palette()
   local lines = { "cols=" .. PALETTE_COLS }
@@ -325,6 +401,8 @@ local function save_pconf()
   reaper.SetExtState(PREF_NS, "font_size",     tostring(font_size),          true)
   reaper.SetExtState(PREF_NS, "swatch_chars",  tostring(swatch_chars),       true)
   reaper.SetExtState(PREF_NS, "palette_pattern", palette_pattern,            true)
+  reaper.SetExtState(PREF_NS, "safety_mode",  safety_mode and "1" or "0",  true)
+  reaper.SetExtState(PREF_NS, "recording_auto_color", recording_auto_color and "1" or "0", true)
   reaper.SetExtState(PREF_NS, "last_preset",   current_preset or "",         true)
   reaper.SetExtState(PREF_NS, "collapsed",     collapsed and "1" or "0",     true)
   reaper.SetExtState(PREF_NS, "color_mode",    color_mode,                    true)
@@ -359,6 +437,10 @@ local function load_pconf()
   if sc and sc >= 1 and sc <= 9 then swatch_chars = sc end
   local pp = reaper.GetExtState(PREF_NS, "palette_pattern")
   if pp == PALPAT_FULL or pp == PALPAT_ROW_REPEAT then palette_pattern = pp end
+  local sm = reaper.GetExtState(PREF_NS, "safety_mode")
+  if sm ~= "" then safety_mode = (sm == "1") end
+  local rac = reaper.GetExtState(PREF_NS, "recording_auto_color")
+  if rac ~= "" then recording_auto_color = (rac == "1") end
   local lp = reaper.GetExtState(PREF_NS, "last_preset")
   if lp ~= "" then current_preset = lp; preset_dirty = false end
   collapsed = reaper.GetExtState(PREF_NS, "collapsed") == "1"
@@ -387,19 +469,24 @@ local function load_palette()
     end
     return
   end
+  local colors = {}
   local kws = {}
   local row = 0
   for line in (raw.."\n"):gmatch("(.-)\n") do
     if row == 0 then
       PALETTE_COLS = math.max(1, tonumber(line:match("cols=(%d+)")) or PALETTE_COLS)
     else
-      local _, kw = line:match("^(%x+)\t(.-)$")
+      local hx, kw = line:match("^(%x+)\t(.-)$")
+      colors[#colors+1] = tonumber(hx or "0", 16) or 0
       kws[#kws+1] = kw or ""
     end
     row = row + 1
   end
   gen_palette()
-  for i, p in ipairs(PALETTE) do p.keyword = kws[i] or "" end
+  for i, p in ipairs(PALETTE) do
+    p.color = colors[i] or p.color
+    p.keyword = kws[i] or ""
+  end
 end
 
 local function save_auto_pref()
@@ -423,6 +510,177 @@ end
 local function set_status(msg)
   status_msg   = msg
   status_until = reaper.time_precise() + 3.5
+end
+
+local function load_default_preset_state()
+  for _, p in ipairs(PALETTE) do p.keyword = "" end
+  save_palette()
+  current_preset = "Default"
+  preset_dirty   = false
+  save_pconf()   -- persist last_preset = "Default" immediately
+  if auto_color_enabled then last_state_count = -1 end
+end
+
+local function get_take_guid(take)
+  local _, guid = reaper.GetSetMediaItemTakeInfo_String(take, "GUID", "", false)
+  return guid or ""
+end
+
+local function is_track_rec_armed(track)
+  return track and reaper.GetMediaTrackInfo_Value(track, "I_RECARM") == 1
+end
+
+local function take_has_custom_color(take)
+  local cc = math.floor(reaper.GetMediaItemTakeInfo_Value(take, "I_CUSTOMCOLOR") or 0)
+  return (cc & 0x1000000) ~= 0
+end
+
+local function apply_recording_color_to_take(take, rrggbb)
+  local native = reaper.ColorToNative((rrggbb >> 16) & 0xFF, (rrggbb >> 8) & 0xFF, rrggbb & 0xFF) | 0x1000000
+  reaper.SetMediaItemTakeInfo_Value(take, "I_CUSTOMCOLOR", native)
+end
+
+local function apply_recording_color_to_item(item, rrggbb)
+  if color_mode == COLOR_MODE_SHINY then
+    apply_color_to_item(item, shiny_background_rrggbb(rrggbb))
+  else
+    apply_color_to_item(item, rrggbb)
+  end
+end
+
+local REC_FIXED_COLORS = {
+  0xFF0000, -- Red
+  0xFFA500, -- Orange
+  0xFFFF00, -- Yellow
+  0x00FF00, -- Green
+  0x00FFFF, -- Cyan
+  0x0000FF, -- Blue
+  0x800080, -- Purple
+  0xFF00FF, -- Magenta
+  0x000000, -- Black
+  0xFFFFFF, -- White
+}
+
+local recording_seq_by_root = {}
+
+local function recording_root_from_take_name(take_name)
+  local s = (take_name or ""):match("^%s*(.-)%s*$")
+  if s == "" then return "Recording" end
+  s = s:gsub("%.[^%.]+$", "")
+  while true do
+    local stripped = s:match("^(.-)%s*[%-%_]+%d+$")
+    if not stripped or stripped == "" or stripped == s then break end
+    s = stripped
+  end
+  return s
+end
+
+local function next_recording_color_for_root(root)
+  if #REC_FIXED_COLORS == 0 then return nil end
+  local idx = (recording_seq_by_root[root] or 0) + 1
+  recording_seq_by_root[root] = idx
+  return REC_FIXED_COLORS[((idx - 1) % #REC_FIXED_COLORS) + 1]
+end
+
+local function reset_recording_sequence()
+  recording_seq_by_root = {}
+end
+
+local function collect_rec_armed_tracks()
+  local tracks = {}
+  local trn = reaper.CountTracks(0)
+  for i = 0, trn - 1 do
+    local tr = reaper.GetTrack(0, i)
+    if is_track_rec_armed(tr) then tracks[#tracks + 1] = tr end
+  end
+  return tracks
+end
+
+local function build_take_guid_set_for_tracks(tracks)
+  local set = {}
+  for _, tr in ipairs(tracks) do
+    local n = reaper.CountTrackMediaItems(tr)
+    for i = 0, n - 1 do
+      local item = reaper.GetTrackMediaItem(tr, i)
+      local take_n = reaper.GetMediaItemNumTakes(item)
+      for t = 0, take_n - 1 do
+        local take = reaper.GetMediaItemTake(item, t)
+        local g = get_take_guid(take)
+        if g ~= "" then set[g] = true end
+      end
+    end
+  end
+  return set
+end
+
+local function color_new_recording_items_on_tracks(tracks, baseline_guids)
+  if not recording_auto_color or #tracks == 0 then return end
+  local colored = 0
+  for _, tr in ipairs(tracks) do
+    local n = reaper.CountTrackMediaItems(tr)
+    for i = 0, n - 1 do
+      local item = reaper.GetTrackMediaItem(tr, i)
+      local active_take = reaper.GetActiveTake(item)
+      local take_n = reaper.GetMediaItemNumTakes(item)
+      for t = 0, take_n - 1 do
+        local take = reaper.GetMediaItemTake(item, t)
+        local g = get_take_guid(take)
+        local is_new = (g ~= "" and baseline_guids[g] ~= true) or (g == "" and not take_has_custom_color(take))
+        if is_new then
+          if g ~= "" then baseline_guids[g] = true end
+          if not take_has_custom_color(take) then
+            local _, take_name = reaper.GetSetMediaItemTakeInfo_String(take, "P_NAME", "", false)
+            local root = recording_root_from_take_name(take_name)
+            local c = next_recording_color_for_root(root)
+            if c then
+              apply_recording_color_to_take(take, c)
+              if take == active_take then
+                apply_recording_color_to_item(item, c)
+              end
+              colored = colored + 1
+            end
+          end
+        end
+      end
+    end
+  end
+
+  if colored > 0 then
+    reaper.UpdateArrange()
+    set_status(string.format("Recording Auto Color: %d new item(s)", colored))
+  end
+end
+
+local function color_new_recording_items_finalize()
+  local armed = collect_rec_armed_tracks()
+  local tracks = (#armed > 0) and armed or rec_last_armed_tracks
+  if #tracks == 0 then return end
+  color_new_recording_items_on_tracks(tracks, rec_session_base_guids)
+end
+
+local function color_new_recording_items_throttled(now)
+  if not recording_auto_color then return end
+  if now < rec_next_scan_at then return end
+
+  local armed = collect_rec_armed_tracks()
+  if #armed > 0 then rec_last_armed_tracks = armed end
+  local tracks = (#armed > 0) and armed or rec_last_armed_tracks
+  color_new_recording_items_on_tracks(tracks, rec_session_base_guids)
+  rec_next_scan_at = now + REC_SCAN_INTERVAL
+end
+
+local function on_recording_start()
+  local armed = collect_rec_armed_tracks()
+  rec_last_armed_tracks = armed
+  rec_session_base_guids = build_take_guid_set_for_tracks(armed)
+  rec_next_scan_at = 0
+end
+
+local function on_recording_stop()
+  color_new_recording_items_finalize()
+  rec_session_base_guids = {}
+  rec_last_armed_tracks = {}
+  rec_next_scan_at = 0
 end
 
 -- ─── matching ─────────────────────────────────────────────────────────────────
@@ -828,14 +1086,14 @@ end
 local SROW_H = 22   -- settings row height
 
 local function settings_panel_h()
-  return SROW_H*2 + SROW_H * #PCONF.rows + SROW_H*3 + MARGIN*2
+  return SROW_H*2 + SROW_H * #PCONF.rows + SROW_H*4 + MARGIN*2
 end
 
 -- Total expanded window height (palette area + all optional panels)
 local function expanded_h()
   return base_win_h
     + (show_settings and settings_panel_h() or 0)
-    + (show_presets  and 120                or 0)
+    + (show_presets  and 144                or 0)
     + AC_BAR_H
 end
 
@@ -984,6 +1242,13 @@ local function draw_settings_panel(start_y)
     palette_pattern = PALPAT_FULL; save_pconf()
   end
 
+  iy = iy + SROW_H
+  if chkbox(px, iy+2, safety_mode, "Safety Mode (Rec Arm/Record => Save + Default)") then
+    safety_mode = not safety_mode
+    if not safety_mode then safety_engaged = false end
+    save_pconf()
+  end
+
   gfx.setfont(1)
   return dirty
 end
@@ -1002,6 +1267,7 @@ local draw_preset_panel  -- forward declaration (defined in presets section belo
 local draw_list_view     -- forward declaration (defined in presets section below)
 local export_keywords    -- forward declaration (defined in presets section below)
 local import_keywords    -- forward declaration (defined in presets section below)
+local save_state_to_file -- forward declaration (used by import_colors)
 local selected_color_set = nil
 
 local function is_palette_color_selected(palette_color)
@@ -1151,7 +1417,7 @@ local function draw()
   -- ── separator + optional panels ────────────────────────────────────────────
   if show_presets then
     draw_preset_panel(content_top)
-    content_top = content_top + 120
+    content_top = content_top + 144
   end
   if show_settings then
     local dirty = draw_settings_panel(content_top)
@@ -1181,6 +1447,17 @@ local function draw()
   end
   if btn(MARGIN+278, content_top+2, 102, TOGGLE_H-4, "Smart Random") then
     do_smart_random_color()
+  end
+  local rec_chk_y = content_top + (TOGGLE_H - 14) // 2
+  local rec_chk_x = math.max(MARGIN + 384, W - 260)
+  if chkbox(rec_chk_x, rec_chk_y, recording_auto_color, "Auto Color Recording") then
+    recording_auto_color = not recording_auto_color
+    save_pconf()
+    set_status(recording_auto_color and "Recording Auto Color: ON" or "Recording Auto Color: OFF")
+  end
+  if btn(W - 102, content_top+1, 94, TOGGLE_H-2, "Reset Seq") then
+    reset_recording_sequence()
+    set_status("Recording sequence reset")
   end
   content_top = content_top + TOGGLE_H
 
@@ -1346,7 +1623,7 @@ local function list_presets()
 end
 
 local function save_preset(name)
-  -- save current pconf + palette keywords under this name
+  -- save current pconf + full palette colors/keywords under this name
   local parts = { string.format("%.2f", PCONF.hue_offset),
                   string.format("%.2f", PCONF.hue_range),
                   PCONF.grey_row and "1" or "0",
@@ -1356,7 +1633,7 @@ local function save_preset(name)
   end
   parts[#parts+1] = "---"
   for _, p in ipairs(PALETTE) do
-    parts[#parts+1] = p.keyword or ""
+    parts[#parts+1] = string.format("%06X\t%s", p.color & 0xFFFFFF, p.keyword or "")
   end
   reaper.SetExtState(PREF_NS, preset_key(name), table.concat(parts, "\n"), true)
   -- add to list
@@ -1394,10 +1671,17 @@ local function load_preset(name)
   end
   if #rows > 0 then PCONF.rows = rows end
   gen_palette()
-  -- restore keywords
+  -- restore palette colors + keywords
   local ki = i + 1
   for _, p in ipairs(PALETTE) do
-    p.keyword = parts[ki] or ""
+    local raw = parts[ki] or ""
+    local hx, kw = raw:match("^(%x+)\t(.-)$")
+    if hx then
+      p.color = tonumber(hx, 16) or p.color
+      p.keyword = kw or ""
+    elseif raw ~= "" then
+      p.keyword = raw
+    end
     ki = ki + 1
   end
   save_palette(); save_pconf()
@@ -1505,6 +1789,73 @@ import_keywords = function()
   set_status("Imported " .. count .. " keywords from file")
 end
 
+import_colors = function()
+  local ok, path = reaper.GetUserFileNameForRead(
+    proj_dir() .. "hsuanice_colors.txt", "Import Colors", "txt")
+  if not ok or path == "" then return end
+  local f = io.open(path, "r")
+  if not f then
+    reaper.ShowMessageBox("Could not open:\n" .. path, "Import Error", 0)
+    return
+  end
+
+  local color_rows = {}
+  local max_cols = 0
+  for line in f:lines() do
+    local row = {}
+    for token in line:gmatch("[^%s\t,;]+") do
+      local c = parse_hex_color_token(token)
+      if c then row[#row+1] = c end
+    end
+    if #row > 0 then
+      color_rows[#color_rows+1] = row
+      if #row > max_cols then max_cols = #row end
+    end
+  end
+  f:close()
+
+  if #color_rows == 0 or max_cols == 0 then
+    set_status("No valid colors found")
+    return
+  end
+
+  local target_rows = #color_rows
+  local old_rows = PCONF.rows
+  local rebuilt_rows = {}
+  for r = 1, target_rows do
+    local src = old_rows[r] or old_rows[#old_rows] or { sat = 0.65, val = 0.75 }
+    rebuilt_rows[r] = { sat = src.sat, val = src.val }
+  end
+
+  PCONF.rows = rebuilt_rows
+  PCONF.grey_row = false
+  PALETTE_COLS = max_cols
+  gen_palette()
+
+  local imported = 0
+  for r = 1, target_rows do
+    local row = color_rows[r]
+    for c = 1, max_cols do
+      local col = row[c]
+      if col then
+        local idx = (r-1)*PALETTE_COLS + c
+        PALETTE[idx].color = col
+        imported = imported + 1
+      end
+    end
+  end
+
+  save_palette()
+  save_pconf()
+  if current_preset and current_preset ~= "Default" then
+    save_preset(current_preset)
+  end
+  save_state_to_file()
+  preset_dirty = true
+  if auto_color_enabled then last_state_count = -1 end
+  set_status(string.format("Imported palette %dx%d (%d colors)", target_rows, max_cols, imported))
+end
+
 -- ─── file-based state persistence ────────────────────────────────────────────
 -- Saves/loads ALL ExtState keys (palette, presets, prefs) to a plain-text file
 -- in Tools/ so data survives REAPER restarts even if reaper-extstate.ini is lost.
@@ -1518,11 +1869,11 @@ local function dec(s) return (s:gsub("\\\\", "\1"):gsub("\\n", "\n"):gsub("\1", 
 local PERSIST_KEYS = {
   "pconf_v1", "grey_row", "palette_v3", "last_preset",
   "collapsed", "show_settings", "show_presets", "view_mode",
-  "font_size", "swatch_chars", "palette_pattern", "ac_audio", "ac_empty", "ac_midi", "color_mode",
+  "font_size", "swatch_chars", "palette_pattern", "safety_mode", "recording_auto_color", "ac_audio", "ac_empty", "ac_midi", "color_mode",
   "win_w", "win_h", "win_x", "win_y", "preset_list",
 }
 
-local function save_state_to_file()
+save_state_to_file = function()
   os.execute('mkdir -p "' .. STATE_DIR .. '"')
   local f = io.open(STATE_FILE, "w")
   if not f then return end
@@ -1678,7 +2029,7 @@ end
 
 draw_preset_panel = function(start_y)
   local W   = gfx.w
-  local ph  = 120
+  local ph  = 144
   fill(0, start_y, W, ph, .12, .12, .12)
   gfx.set(.30,.30,.30,1); gfx.line(0, start_y+ph-1, W, start_y+ph-1)
 
@@ -1727,12 +2078,7 @@ draw_preset_panel = function(start_y)
   txt(lx+4, ly+4, "Default  (clear all keywords)", .55,.55,.55)
   gfx.setfont(1)
   if lclicked and def_hov then
-    for _, p in ipairs(PALETTE) do p.keyword = "" end
-    save_palette()
-    current_preset = "Default"
-    preset_dirty   = false
-    save_pconf()   -- persist last_preset = "Default" immediately
-    if auto_color_enabled then last_state_count = -1 end
+    load_default_preset_state()
     set_status("Loaded: Default")
   end
   ly = ly + row_h
@@ -1793,6 +2139,45 @@ draw_preset_panel = function(start_y)
     txt(lx+4, ly+4, "No saved presets  (right-click to delete)", .35,.35,.35)
     gfx.setfont(1)
   end
+
+  local footer_y = start_y + ph - 22
+  if btn(lx, footer_y, 100, 18, "Import Colors") then
+    import_colors()
+  end
+  if btn(lx+106, footer_y, 104, 18, "Import Keywords") then
+    import_keywords()
+  end
+
+end
+
+local function has_rec_arm_or_recording()
+  if (reaper.GetPlayState() & 4) ~= 0 then return true end
+  local trn = reaper.CountTracks(0)
+  for i = 0, trn - 1 do
+    local tr = reaper.GetTrack(0, i)
+    if tr and reaper.GetMediaTrackInfo_Value(tr, "I_RECARM") == 1 then
+      return true
+    end
+  end
+  return false
+end
+
+local function engage_safety_default_mode()
+  local saved_name = current_preset
+  if current_preset and current_preset ~= "Default" then
+    save_preset(current_preset)
+  elseif preset_dirty then
+    saved_name = "Safety Backup"
+    save_preset(saved_name)
+  end
+
+  load_default_preset_state()
+  safety_engaged = true
+  if saved_name and saved_name ~= "Default" then
+    set_status("Safety Mode: saved " .. saved_name .. " and switched to Default")
+  else
+    set_status("Safety Mode: switched to Default")
+  end
 end
 
 -- ─── init & loop ─────────────────────────────────────────────────────────────
@@ -1839,7 +2224,37 @@ end
 local prev_gfx_w, prev_gfx_h = gfx.w, gfx.h
 local prev_win_x, prev_win_y = gfx.clienttoscreen(0, 0)
 
+local function is_recording_now()
+  return (reaper.GetPlayState() & 4) ~= 0
+end
+
 local function loop()
+  local rec_now = is_recording_now()
+
+  if rec_now and not rec_was_running then
+    on_recording_start()
+  elseif (not rec_now) and rec_was_running then
+    on_recording_stop()
+  end
+
+  if safety_mode then
+    if has_rec_arm_or_recording() then
+      if not safety_engaged then
+        engage_safety_default_mode()
+      end
+    else
+      safety_engaged = false
+    end
+  else
+    safety_engaged = false
+  end
+
+  if rec_now then
+    color_new_recording_items_throttled(reaper.time_precise())
+  end
+
+  rec_was_running = rec_now
+
   if auto_color_enabled then
     local sc = reaper.GetProjectStateChangeCount(0)
     if sc ~= last_state_count then
@@ -1859,7 +2274,7 @@ local function loop()
   elseif size_changed or pos_changed then
     if size_changed and not collapsed then
       local panels_h = (show_settings and settings_panel_h() or 0)
-                     + (show_presets  and 120                or 0)
+                     + (show_presets  and 144                or 0)
                      + AC_BAR_H
       base_win_w = math.max(200, gfx.w)
       base_win_h = math.max(100, gfx.h - panels_h)
