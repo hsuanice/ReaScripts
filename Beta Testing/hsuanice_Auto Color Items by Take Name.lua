@@ -1,6 +1,6 @@
 --[[
 @description Auto Color Items by Take Name
-@version 260804.1623
+@version 260806.1422
 @author hsuanice
 @about
   Config-driven color palette with keyword rules — colors items by take name.
@@ -13,6 +13,13 @@
   No external dependencies — REAPER built-in GFX library.
 
 @changelog
+  v260806.1422
+  - Add: Auto Color by Palette button in the Colors/List row
+  - Add: Palette pattern setting with Row Repeat (default) and Full modes
+  - Change: Rename Palette Flow to Auto Color by Palette
+  - Add: Smart Random coloring mode that avoids similar adjacent colors for better readability
+  - Add: Selected-color swatch highlight (supports both Normal and Shiny mode matching)
+
   v260804.1623
   - Add: ShinyColor mode (Pro Tools-like) toggle in toolbar — writes take peak color and applies a lighter item background color for readability
   - Change: all apply paths now follow mode behavior (Auto Color, swatch click, List View click, Paste Color)
@@ -287,6 +294,9 @@ local list_sb_drag       = false    -- true while dragging the list scrollbar th
 local font_size          = 12       -- base font size (pt); small font = font_size - 2
 local font_dirty         = true     -- force font re-init when true
 local swatch_chars       = 3        -- number of UTF-8 chars shown per keyword segment in Color View
+local PALPAT_FULL        = "full"
+local PALPAT_ROW_REPEAT  = "row_repeat"
+local palette_pattern    = PALPAT_ROW_REPEAT
 
 -- ─── persistence ─────────────────────────────────────────────────────────────
 -- palette_v3: line 0 = "cols=N"
@@ -314,6 +324,7 @@ local function save_pconf()
   reaper.SetExtState(PREF_NS, "view_mode",     view_mode,                    true)
   reaper.SetExtState(PREF_NS, "font_size",     tostring(font_size),          true)
   reaper.SetExtState(PREF_NS, "swatch_chars",  tostring(swatch_chars),       true)
+  reaper.SetExtState(PREF_NS, "palette_pattern", palette_pattern,            true)
   reaper.SetExtState(PREF_NS, "last_preset",   current_preset or "",         true)
   reaper.SetExtState(PREF_NS, "collapsed",     collapsed and "1" or "0",     true)
   reaper.SetExtState(PREF_NS, "color_mode",    color_mode,                    true)
@@ -346,6 +357,8 @@ local function load_pconf()
   if fs and fs >= 8 and fs <= 24 then font_size = fs end
   local sc = tonumber(reaper.GetExtState(PREF_NS, "swatch_chars"))
   if sc and sc >= 1 and sc <= 9 then swatch_chars = sc end
+  local pp = reaper.GetExtState(PREF_NS, "palette_pattern")
+  if pp == PALPAT_FULL or pp == PALPAT_ROW_REPEAT then palette_pattern = pp end
   local lp = reaper.GetExtState(PREF_NS, "last_preset")
   if lp ~= "" then current_preset = lp; preset_dirty = false end
   collapsed = reaper.GetExtState(PREF_NS, "collapsed") == "1"
@@ -514,6 +527,181 @@ local function do_clear_selected()
   set_status(string.format("Cleared %d item(s)", n))
 end
 
+local function collect_target_items_row_major()
+  local items = {}
+  local selected_n = reaper.CountSelectedMediaItems(0)
+
+  if selected_n > 0 then
+    for i = 0, selected_n - 1 do
+      items[#items + 1] = reaper.GetSelectedMediaItem(0, i)
+    end
+  else
+    local n = reaper.CountMediaItems(0)
+    for i = 0, n - 1 do
+      items[#items + 1] = reaper.GetMediaItem(0, i)
+    end
+  end
+
+  table.sort(items, function(a, b)
+    local ta = reaper.GetMediaItem_Track(a)
+    local tb = reaper.GetMediaItem_Track(b)
+    local ya = math.floor((reaper.GetMediaTrackInfo_Value(ta, "IP_TRACKNUMBER") or 0) + 0.5)
+    local yb = math.floor((reaper.GetMediaTrackInfo_Value(tb, "IP_TRACKNUMBER") or 0) + 0.5)
+    if ya ~= yb then return ya < yb end
+
+    local xa = reaper.GetMediaItemInfo_Value(a, "D_POSITION") or 0
+    local xb = reaper.GetMediaItemInfo_Value(b, "D_POSITION") or 0
+    if xa ~= xb then return xa < xb end
+
+    local la = reaper.GetMediaItemInfo_Value(a, "D_LENGTH") or 0
+    local lb2 = reaper.GetMediaItemInfo_Value(b, "D_LENGTH") or 0
+    if la ~= lb2 then return la < lb2 end
+
+    return tostring(a) < tostring(b)
+  end)
+
+  local scope = (selected_n > 0) and "selected" or "all"
+  return items, scope
+end
+
+local function do_palette_flow_color()
+  if #PALETTE == 0 then set_status("Palette is empty"); return end
+  local items, scope = collect_target_items_row_major()
+  local n = #items
+  if n == 0 then set_status("No items to color"); return end
+
+  reaper.Undo_BeginBlock()
+  if palette_pattern == PALPAT_FULL then
+    for i, item in ipairs(items) do
+      local p = PALETTE[((i - 1) % #PALETTE) + 1]
+      apply_color_by_mode(item, p.color)
+    end
+  else
+    local palette_rows = math.max(1, math.floor(#PALETTE / PALETTE_COLS))
+    local track_i = 0
+    local prev_track = nil
+    local in_track_i = 0
+
+    for _, item in ipairs(items) do
+      local tr = reaper.GetMediaItem_Track(item)
+      if tr ~= prev_track then
+        track_i = track_i + 1
+        in_track_i = 0
+        prev_track = tr
+      end
+      in_track_i = in_track_i + 1
+
+      local row_idx = ((track_i - 1) % palette_rows) + 1
+      local col_idx = ((in_track_i - 1) % PALETTE_COLS) + 1
+      local pi = (row_idx - 1) * PALETTE_COLS + col_idx
+      local p = PALETTE[pi] or PALETTE[((pi - 1) % #PALETTE) + 1]
+      apply_color_by_mode(item, p.color)
+    end
+  end
+  reaper.Undo_EndBlock("Auto Color by Palette", -1)
+  reaper.UpdateArrange()
+
+  set_status(string.format("Auto Palette (%s): %d %s item(s)",
+    palette_pattern == PALPAT_FULL and "full" or "row-repeat", n, scope))
+end
+
+local function weighted_rgb_distance(c1, c2)
+  local r1, g1, b1 = (c1 >> 16) & 0xFF, (c1 >> 8) & 0xFF, c1 & 0xFF
+  local r2, g2, b2 = (c2 >> 16) & 0xFF, (c2 >> 8) & 0xFF, c2 & 0xFF
+  local dr, dg, db = r1 - r2, g1 - g2, b1 - b2
+  return math.sqrt(0.299 * dr * dr + 0.587 * dg * dg + 0.114 * db * db)
+end
+
+local function hue_gap_degrees(c1, c2)
+  local h1 = select(1, rgb_to_hsv(((c1 >> 16) & 0xFF) / 255, ((c1 >> 8) & 0xFF) / 255, (c1 & 0xFF) / 255))
+  local h2 = select(1, rgb_to_hsv(((c2 >> 16) & 0xFF) / 255, ((c2 >> 8) & 0xFF) / 255, (c2 & 0xFF) / 255))
+  local d = math.abs(h1 - h2)
+  return math.min(d, 360 - d)
+end
+
+local function smart_color_distance(c1, c2)
+  local rgbd = weighted_rgb_distance(c1, c2)      -- approx 0..255
+  local huew = (hue_gap_degrees(c1, c2) / 180) * 255
+  return rgbd * 0.65 + huew * 0.35
+end
+
+local function shuffled_indices(n)
+  local t = {}
+  for i = 1, n do t[i] = i end
+  for i = n, 2, -1 do
+    local j = math.random(i)
+    t[i], t[j] = t[j], t[i]
+  end
+  return t
+end
+
+local function do_smart_random_color()
+  if #PALETTE == 0 then set_status("Palette is empty"); return end
+  local items, scope = collect_target_items_row_major()
+  local n = #items
+  if n == 0 then set_status("No items to color"); return end
+
+  local min_dist = 95
+  local prev1, prev2 = nil, nil
+
+  reaper.Undo_BeginBlock()
+  for i, item in ipairs(items) do
+    local choice_color = nil
+    local best_color = nil
+    local best_score = -1
+
+    local order = shuffled_indices(#PALETTE)
+    for _, idx in ipairs(order) do
+      local c = PALETTE[idx].color
+      local ok1 = (not prev1) or (smart_color_distance(c, prev1) >= min_dist)
+      local ok2 = (not prev2) or (smart_color_distance(c, prev2) >= (min_dist * 0.75))
+      if ok1 and ok2 then
+        choice_color = c
+        break
+      end
+
+      if prev1 then
+        local s = smart_color_distance(c, prev1)
+        if s > best_score then
+          best_score = s
+          best_color = c
+        end
+      else
+        best_color = c
+      end
+    end
+
+    choice_color = choice_color or best_color or PALETTE[((i - 1) % #PALETTE) + 1].color
+    apply_color_by_mode(item, choice_color)
+    prev2, prev1 = prev1, choice_color
+  end
+  reaper.Undo_EndBlock("Smart Random Color", -1)
+  reaper.UpdateArrange()
+
+  set_status(string.format("Smart Random: %d %s item(s)", n, scope))
+end
+
+-- Returns a set of selected item custom colors in 0xRRGGBB format.
+-- Only true custom item colors are included (track/default display colors are ignored).
+local function get_selected_custom_color_set()
+  local n = reaper.CountSelectedMediaItems(0)
+  if n == 0 then return nil end
+
+  local set = {}
+  for i = 0, n - 1 do
+    local item = reaper.GetSelectedMediaItem(0, i)
+    local custom = math.floor(reaper.GetMediaItemInfo_Value(item, "I_CUSTOMCOLOR") or 0)
+    if (custom & 0x1000000) ~= 0 then
+      local native = custom & 0xFFFFFF
+      local r, g, b = reaper.ColorFromNative(native)
+      local rrggbb = (math.floor(r) << 16) | (math.floor(g) << 8) | math.floor(b)
+      set[rrggbb] = true
+    end
+  end
+
+  return next(set) and set or nil
+end
+
 -- ─── GFX init ─────────────────────────────────────────────────────────────────
 local MARGIN        = 8
 local BAR_H         = 24
@@ -640,7 +828,7 @@ end
 local SROW_H = 22   -- settings row height
 
 local function settings_panel_h()
-  return SROW_H*2 + SROW_H * #PCONF.rows + SROW_H*2 + MARGIN*2
+  return SROW_H*2 + SROW_H * #PCONF.rows + SROW_H*3 + MARGIN*2
 end
 
 -- Total expanded window height (palette area + all optional panels)
@@ -786,6 +974,16 @@ local function draw_settings_panel(start_y)
     swatch_chars = swatch_chars + 1; save_pconf()
   end
 
+  iy = iy + SROW_H
+  txt(px, iy+6, "Palette pattern", .55,.55,.55)
+  local ppx = px + 92
+  if btn(ppx, iy+2, 86, 18, "Row Repeat", palette_pattern == PALPAT_ROW_REPEAT) then
+    palette_pattern = PALPAT_ROW_REPEAT; save_pconf()
+  end
+  if btn(ppx + 90, iy+2, 62, 18, "Full", palette_pattern == PALPAT_FULL) then
+    palette_pattern = PALPAT_FULL; save_pconf()
+  end
+
   gfx.setfont(1)
   return dirty
 end
@@ -804,6 +1002,14 @@ local draw_preset_panel  -- forward declaration (defined in presets section belo
 local draw_list_view     -- forward declaration (defined in presets section below)
 local export_keywords    -- forward declaration (defined in presets section below)
 local import_keywords    -- forward declaration (defined in presets section below)
+local selected_color_set = nil
+
+local function is_palette_color_selected(palette_color)
+  if not selected_color_set then return false end
+  if selected_color_set[palette_color] then return true end
+  local shiny_bg = shiny_background_rrggbb(palette_color)
+  return selected_color_set[shiny_bg] == true
+end
 
 -- ─── main draw ────────────────────────────────────────────────────────────────
 local hover_info = ""
@@ -825,11 +1031,16 @@ local function draw()
   rb = (gfx.mouse_cap&2)~=0 and 1 or 0
   lclicked = (prev_lb==1 and lb==0)
   rclicked = (prev_rb==1 and rb==0)
+  if lclicked then
+    math.randomseed(math.floor(reaper.time_precise() * 1000000) % 2147483647)
+  end
   -- grid scroll only in color view; list view handles its own wheel inside draw_list_view
   if view_mode == "color" and gfx.mouse_wheel ~= 0 then
     scroll_row = scroll_row + (gfx.mouse_wheel>0 and -1 or 1)
     gfx.mouse_wheel = 0
   end
+
+  selected_color_set = get_selected_custom_color_set()
 
   fill(0, 0, W, H, .17, .17, .17)
 
@@ -965,6 +1176,12 @@ local function draw()
   if btn(MARGIN+76, content_top+2, 56, TOGGLE_H-4, "≡ List", view_mode == "list") then
     view_mode = "list"; save_pconf()
   end
+  if btn(MARGIN+136, content_top+2, 138, TOGGLE_H-4, "Auto Color by Palette") then
+    do_palette_flow_color()
+  end
+  if btn(MARGIN+278, content_top+2, 102, TOGGLE_H-4, "Smart Random") then
+    do_smart_random_color()
+  end
   content_top = content_top + TOGGLE_H
 
   -- ── palette grid or list view ──────────────────────────────────────────────
@@ -996,6 +1213,7 @@ local function draw()
       local hov = hit(cx, cy, cw-1, ch)
 
       local p   = PALETTE[gi]
+      local sel = is_palette_color_selected(p.color)
       local has = p.keyword ~= ""
 
       fill(cx, cy, cw-1, ch, cr(p.color), cg(p.color), cb(p.color))
@@ -1003,6 +1221,9 @@ local function draw()
         stroke(cx, cy, cw-1, ch, 1, 1, 1, .8)
         hover_info = string.format("#%06X", p.color) ..
           (has and ("   →  " .. p.keyword) or "   (no keyword)")
+      elseif sel then
+        stroke(cx, cy, cw-1, ch, 1.00, .95, .18, 1)
+        stroke(cx+1, cy+1, cw-3, ch-2, .10, .10, .10, .95)
       else
         stroke(cx, cy, cw-1, ch, 0, 0, 0, .30)
       end
@@ -1297,7 +1518,7 @@ local function dec(s) return (s:gsub("\\\\", "\1"):gsub("\\n", "\n"):gsub("\1", 
 local PERSIST_KEYS = {
   "pconf_v1", "grey_row", "palette_v3", "last_preset",
   "collapsed", "show_settings", "show_presets", "view_mode",
-  "font_size", "swatch_chars", "ac_audio", "ac_empty", "ac_midi", "color_mode",
+  "font_size", "swatch_chars", "palette_pattern", "ac_audio", "ac_empty", "ac_midi", "color_mode",
   "win_w", "win_h", "win_x", "win_y", "preset_list",
 }
 
@@ -1393,6 +1614,7 @@ draw_list_view = function(top_y, avail_h)
     local p   = PALETTE[gi]
     local ry  = top_y + (i-1) * ROW_H
     local hov = (not list_sb_drag) and hit(0, ry, content_w, ROW_H)
+    local sel = is_palette_color_selected(p.color)
 
     fill(0, ry, content_w, ROW_H, hov and .24 or (gi%2==0 and .19 or .17),
                                    hov and .24 or (gi%2==0 and .19 or .17),
@@ -1400,7 +1622,12 @@ draw_list_view = function(top_y, avail_h)
 
     -- color swatch
     fill(MARGIN, ry+3, SWATCH_W, ROW_H-6, cr(p.color), cg(p.color), cb(p.color))
-    stroke(MARGIN, ry+3, SWATCH_W, ROW_H-6, 0, 0, 0, .35)
+    if sel then
+      stroke(MARGIN, ry+3, SWATCH_W, ROW_H-6, 1.00, .95, .18, 1)
+      stroke(MARGIN+1, ry+4, SWATCH_W-2, ROW_H-8, .10, .10, .10, .95)
+    else
+      stroke(MARGIN, ry+3, SWATCH_W, ROW_H-6, 0, 0, 0, .35)
+    end
 
     -- hex label
     gfx.setfont(2)
