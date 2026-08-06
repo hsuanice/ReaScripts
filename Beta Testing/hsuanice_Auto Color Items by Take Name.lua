@@ -1,18 +1,26 @@
 --[[
 @description Auto Color Items by Take Name
-@version 260806.1828
+@version 260806.1921
 @author hsuanice
 @about
   Config-driven color palette with keyword rules — colors items by take name.
 
   Palette is generated from Hue + per-row Saturation/Value settings (like rodilab's Color palette).
-  Right-click any swatch → Edit Keyword / Clear Keyword
+  Right-click any swatch → Edit Color / Edit Keyword / Clear Keyword
   Left-click a swatch  → apply that color to selected items
   Auto Color mode colors all items automatically on project changes
 
   No external dependencies — REAPER built-in GFX library.
 
 @changelog
+  v260806.1921
+  - Add: right-click swatch Edit Color action with HEX, RGB, and CMYK input support
+  - Change: color parsing is now shared between swatch editing and color-list import
+
+  v260806.1841
+  - Change: Import Colors now accepts RGB values (R,G,B and rgb(R,G,B)) in addition to hex
+  - Fix: tabular import parser no longer splits RGB triplets by comma
+
   v260806.1828
   - Change: Recording Auto Color fixed set now uses white instead of gray for the final slot
 
@@ -370,10 +378,49 @@ local rec_session_base_guids = {}
 -- palette_v3: line 0 = "cols=N"
 --             lines 1+ = "RRGGBB\tkeyword"
 
-local function parse_hex_color_token(token)
+local function parse_color_token(token)
   if not token then return nil end
   local t = token:match("^%s*(.-)%s*$")
   if t == "" then return nil end
+
+  local r1, g1, b1 = t:match("^rgb%s*%(%s*(%d+)%s*,%s*(%d+)%s*,%s*(%d+)%s*%)$")
+  if r1 and g1 and b1 then
+    local r, g, b = tonumber(r1), tonumber(g1), tonumber(b1)
+    if r and g and b and r >= 0 and r <= 255 and g >= 0 and g <= 255 and b >= 0 and b <= 255 then
+      return (r << 16) | (g << 8) | b
+    end
+  end
+
+  local r2, g2, b2 = t:match("^(%d+)%s*,%s*(%d+)%s*,%s*(%d+)$")
+  if r2 and g2 and b2 then
+    local r, g, b = tonumber(r2), tonumber(g2), tonumber(b2)
+    if r and g and b and r >= 0 and r <= 255 and g >= 0 and g <= 255 and b >= 0 and b <= 255 then
+      return (r << 16) | (g << 8) | b
+    end
+  end
+
+  local c1, m1, y1, k1 = t:match("^cmyk%s*%(%s*(%d+)%s*,%s*(%d+)%s*,%s*(%d+)%s*,%s*(%d+)%s*%)$")
+  if c1 and m1 and y1 and k1 then
+    local c, m, y, k = tonumber(c1), tonumber(m1), tonumber(y1), tonumber(k1)
+    if c and m and y and k and c >= 0 and c <= 100 and m >= 0 and m <= 100 and y >= 0 and y <= 100 and k >= 0 and k <= 100 then
+      local r = math.floor(255 * (1 - c / 100) * (1 - k / 100) + 0.5)
+      local g = math.floor(255 * (1 - m / 100) * (1 - k / 100) + 0.5)
+      local b = math.floor(255 * (1 - y / 100) * (1 - k / 100) + 0.5)
+      return (r << 16) | (g << 8) | b
+    end
+  end
+
+  local c2, m2, y2, k2 = t:match("^(%d+)%s*,%s*(%d+)%s*,%s*(%d+)%s*,%s*(%d+)$")
+  if c2 and m2 and y2 and k2 then
+    local c, m, y, k = tonumber(c2), tonumber(m2), tonumber(y2), tonumber(k2)
+    if c and m and y and k and c >= 0 and c <= 100 and m >= 0 and m <= 100 and y >= 0 and y <= 100 and k >= 0 and k <= 100 then
+      local r = math.floor(255 * (1 - c / 100) * (1 - k / 100) + 0.5)
+      local g = math.floor(255 * (1 - m / 100) * (1 - k / 100) + 0.5)
+      local b = math.floor(255 * (1 - y / 100) * (1 - k / 100) + 0.5)
+      return (r << 16) | (g << 8) | b
+    end
+  end
+
   local hex = t:match("^#?(%x%x%x%x%x%x)$")
   return hex and tonumber(hex, 16) or nil
 end
@@ -1256,7 +1303,7 @@ end
 -- ─── right-click popup ────────────────────────────────────────────────────────
 local popup_idx = nil
 local popup_x, popup_y = 0, 0
-local POPUP_ITEMS = { "Edit Keyword", "────", "Clear Keyword" }
+local POPUP_ITEMS = { "Edit Color", "Edit Keyword", "────", "Clear Keyword" }
 
 -- ─── scroll & panel state ────────────────────────────────────────────────────
 local scroll_row         = 0
@@ -1573,7 +1620,23 @@ local function draw()
       end
 
       if lclicked and hov2 and p then
-        if item == "Edit Keyword" then
+        if item == "Edit Color" then
+          local ok, val = reaper.GetUserInputs(
+            "Edit Color", 1,
+            "HEX / RGB / CMYK:",
+            string.format("#%06X", p.color), 600)
+          if ok and val ~= nil then
+            local new_color = parse_color_token(val)
+            if new_color then
+              p.color = new_color
+              save_palette(); preset_dirty = true
+              if auto_color_enabled then last_state_count=-1 end
+              set_status("Color updated: " .. string.format("#%06X", new_color))
+            else
+              set_status("Invalid color. Use HEX, RGB, or CMYK")
+            end
+          end
+        elseif item == "Edit Keyword" then
           local ok, val = reaper.GetUserInputs(
             "Keyword — " .. string.format("#%06X", p.color), 1,
             "Keyword (| for multiple, e.g. boom|lavmic)  [clear to remove]:",
@@ -1803,8 +1866,14 @@ import_colors = function()
   local max_cols = 0
   for line in f:lines() do
     local row = {}
-    for token in line:gmatch("[^%s\t,;]+") do
-      local c = parse_hex_color_token(token)
+    local cells = {}
+    if line:find("\t") then
+      for cell in line:gmatch("[^\t]+") do cells[#cells+1] = cell end
+    else
+      for cell in line:gmatch("[^%s;]+") do cells[#cells+1] = cell end
+    end
+    for _, cell in ipairs(cells) do
+      local c = parse_color_token(cell)
       if c then row[#row+1] = c end
     end
     if #row > 0 then
