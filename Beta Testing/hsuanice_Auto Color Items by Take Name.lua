@@ -1,6 +1,6 @@
 --[[
 @description Auto Color Items by Take Name
-@version 260806.1959
+@version 260806.2303
 @author hsuanice
 @about
   Config-driven color palette with keyword rules — colors items by take name.
@@ -13,6 +13,11 @@
   No external dependencies — REAPER built-in GFX library.
 
 @changelog
+  v260806.2303
+  - Add: keyword export/import now explicitly supports separate Take Name and Track Name targets with dedicated file defaults
+  - Change: Smart Random now excludes grayscale/low-saturation swatches to avoid overly similar color assignments
+  - Fix: Take/Track keyword tab switching now correctly updates palette keyword display and editing target
+
   v260806.1959
   - Change: hover info now shows HEX, RGB, and CMYK for palette swatches in that order
   - Change: Edit Color now provides separate HEX, RGB, and CMYK input fields, with the last non-empty field taking priority
@@ -235,6 +240,16 @@ local PALETTE = {}
 local COLOR_MODE_NORMAL = "normal"
 local COLOR_MODE_SHINY  = "shiny"
 local color_mode         = COLOR_MODE_NORMAL
+local NORMAL_PRIMARY_BG   = "background"
+local NORMAL_PRIMARY_PEAK = "peak"
+local NORMAL_SECONDARY_MATCH = "match"
+local NORMAL_SECONDARY_BLACK = "black"
+local NORMAL_SECONDARY_WHITE = "white"
+local normal_primary_target  = NORMAL_PRIMARY_BG
+local normal_secondary_color = NORMAL_SECONDARY_WHITE
+local KEYTAB_TAKE        = "take"
+local KEYTAB_TRACK       = "track"
+local keyword_tab
 
 -- ─── color helpers ────────────────────────────────────────────────────────────
 local function cr(c) return ((c>>16)&0xFF)/255 end
@@ -335,12 +350,12 @@ local function utf8_take(s, n)
   return result
 end
 
-local function apply_color_to_item(item, rrggbb)
+local function apply_item_background_color(item, rrggbb)
   reaper.SetMediaItemInfo_Value(item, "I_CUSTOMCOLOR",
     reaper.ColorToNative((rrggbb>>16)&0xFF,(rrggbb>>8)&0xFF,rrggbb&0xFF)|0x1000000)
 end
 
-local function apply_shiny_color_to_item(item, rrggbb)
+local function apply_item_peak_color_all_takes(item, rrggbb)
   local peak_native = reaper.ColorToNative((rrggbb >> 16) & 0xFF, (rrggbb >> 8) & 0xFF, rrggbb & 0xFF) | 0x1000000
   local take_count = reaper.GetMediaItemNumTakes(item)
   if take_count and take_count > 0 then
@@ -351,23 +366,95 @@ local function apply_shiny_color_to_item(item, rrggbb)
       end
     end
   end
+end
+
+local function normal_secondary_rrggbb(primary_rrggbb)
+  if normal_secondary_color == NORMAL_SECONDARY_MATCH then return primary_rrggbb end
+  if normal_secondary_color == NORMAL_SECONDARY_BLACK then return 0x000000 end
+  if normal_secondary_color == NORMAL_SECONDARY_WHITE then return 0xFFFFFF end
+  return primary_rrggbb
+end
+
+local function apply_normal_color_to_item(item, rrggbb)
+  if normal_primary_target == NORMAL_PRIMARY_PEAK then
+    apply_item_peak_color_all_takes(item, rrggbb)
+    if normal_secondary_color == "transparent" then
+      reaper.SetMediaItemInfo_Value(item, "I_CUSTOMCOLOR", 0)
+    else
+      apply_item_background_color(item, normal_secondary_rrggbb(rrggbb))
+    end
+  else
+    apply_item_background_color(item, rrggbb)
+    if normal_secondary_color == "transparent" then
+      local take_count = reaper.GetMediaItemNumTakes(item)
+      if take_count and take_count > 0 then
+        for t = 0, take_count - 1 do
+          local take = reaper.GetMediaItemTake(item, t)
+          if take then
+            reaper.SetMediaItemTakeInfo_Value(take, "I_CUSTOMCOLOR", 0)
+          end
+        end
+      end
+    else
+      apply_item_peak_color_all_takes(item, normal_secondary_rrggbb(rrggbb))
+    end
+  end
+end
+
+local function apply_color_to_track(track, rrggbb)
+  reaper.SetMediaTrackInfo_Value(track, "I_CUSTOMCOLOR",
+    reaper.ColorToNative((rrggbb>>16)&0xFF,(rrggbb>>8)&0xFF,rrggbb&0xFF)|0x1000000)
+end
+
+local function apply_shiny_color_to_item(item, rrggbb)
+  apply_item_peak_color_all_takes(item, rrggbb)
 
   local bg_rrggbb = shiny_background_rrggbb(rrggbb)
-  apply_color_to_item(item, bg_rrggbb)
+  apply_item_background_color(item, bg_rrggbb)
 end
 
 local function apply_color_by_mode(item, rrggbb)
   if color_mode == COLOR_MODE_SHINY then
     apply_shiny_color_to_item(item, rrggbb)
   else
-    apply_color_to_item(item, rrggbb)
+    apply_normal_color_to_item(item, rrggbb)
   end
+end
+
+local function get_palette_keyword(p, tab)
+  if tab == KEYTAB_TRACK then return p.track_keyword or "" end
+  return p.take_keyword or p.keyword or ""
+end
+
+local function set_palette_keyword(p, tab, value)
+  if tab == KEYTAB_TRACK then
+    p.track_keyword = value or ""
+  else
+    p.take_keyword = value or ""
+  end
+end
+
+local function active_keyword(p)
+  return get_palette_keyword(p, keyword_tab)
+end
+
+local function current_target_is_tracks()
+  if reaper.CountSelectedMediaItems(0) > 0 then return false end
+  if reaper.CountSelectedTracks(0) > 0 then return true end
+  return false
+end
+
+local function current_target_label()
+  return current_target_is_tracks() and "Tracks" or "Items"
 end
 
 -- ─── palette generation ───────────────────────────────────────────────────────
 local function gen_palette()
-  local old_kw = {}
-  for i, p in ipairs(PALETTE) do old_kw[i] = p.keyword end
+  local old_take_kw, old_track_kw = {}, {}
+  for i, p in ipairs(PALETTE) do
+    old_take_kw[i] = p.take_keyword or p.keyword or ""
+    old_track_kw[i] = p.track_keyword or ""
+  end
   while #PALETTE > 0 do table.remove(PALETTE) end
   local cols = PALETTE_COLS
   for r = 1, #PCONF.rows do
@@ -381,7 +468,11 @@ local function gen_palette()
       end
       local idx = (r-1)*cols + c
       local color = hsv(hue % 360, row.sat, row.val)
-      PALETTE[#PALETTE+1] = { color=color, keyword=old_kw[idx] or "" }
+      PALETTE[#PALETTE+1] = {
+        color=color,
+        take_keyword=old_take_kw[idx] or "",
+        track_keyword=old_track_kw[idx] or "",
+      }
     end
   end
   -- grey row: white → black
@@ -389,14 +480,21 @@ local function gen_palette()
     local base = #PCONF.rows * cols
     for c = 1, cols do
       local v = cols <= 1 and 0.5 or (1.0 - (c-1)/(cols-1))
-      PALETTE[#PALETTE+1] = { color=hsv(0, 0, v), keyword=old_kw[base+c] or "" }
+      PALETTE[#PALETTE+1] = {
+        color=hsv(0, 0, v),
+        take_keyword=old_take_kw[base+c] or "",
+        track_keyword=old_track_kw[base+c] or "",
+      }
     end
   end
 end
 
 local function apply_builtin_default_palette()
-  local old_kw = {}
-  for i, p in ipairs(PALETTE) do old_kw[i] = p.keyword end
+  local old_take_kw, old_track_kw = {}, {}
+  for i, p in ipairs(PALETTE) do
+    old_take_kw[i] = p.take_keyword or p.keyword or ""
+    old_track_kw[i] = p.track_keyword or ""
+  end
 
   PCONF.hue_offset = 0
   PCONF.hue_range = 330
@@ -412,7 +510,8 @@ local function apply_builtin_default_palette()
   for i, color in ipairs(DEFAULT_PALETTE_COLORS) do
     if PALETTE[i] then
       PALETTE[i].color = color
-      PALETTE[i].keyword = old_kw[i] or PALETTE[i].keyword or ""
+      PALETTE[i].take_keyword = old_take_kw[i] or PALETTE[i].take_keyword or ""
+      PALETTE[i].track_keyword = old_track_kw[i] or PALETTE[i].track_keyword or ""
     end
   end
 end
@@ -423,6 +522,7 @@ local SCRIPT_DIR     = SCRIPT_PATH:match("^(.*[/\\])") or "./"
 
 -- ─── state ────────────────────────────────────────────────────────────────────
 local PREF_NS            = "hsuanice_AutoColorItems"
+local UI_HEARTBEAT_KEY   = "ui_heartbeat"
 local auto_color_enabled = false
 local ac_audio           = true   -- color audio items
 local ac_empty           = true   -- color empty items (no takes)
@@ -441,6 +541,7 @@ local list_sb_drag       = false    -- true while dragging the list scrollbar th
 local font_size          = 12       -- base font size (pt); small font = font_size - 2
 local font_dirty         = true     -- force font re-init when true
 local swatch_chars       = 3        -- number of UTF-8 chars shown per keyword segment in Color View
+keyword_tab              = KEYTAB_TAKE
 local PALPAT_FULL        = "full"
 local PALPAT_ROW_REPEAT  = "row_repeat"
 local palette_pattern    = PALPAT_ROW_REPEAT
@@ -455,7 +556,7 @@ local rec_session_base_guids = {}
 
 -- ─── persistence ─────────────────────────────────────────────────────────────
 -- palette_v3: line 0 = "cols=N"
---             lines 1+ = "RRGGBB\tkeyword"
+--             lines 1+ = "RRGGBB\ttake_keyword\ttrack_keyword"
 
 local function parse_color_token(token)
   if not token then return nil end
@@ -507,7 +608,7 @@ end
 local function save_palette()
   local lines = { "cols=" .. PALETTE_COLS }
   for _, p in ipairs(PALETTE) do
-    lines[#lines+1] = string.format("%06X\t%s", p.color & 0xFFFFFF, p.keyword or "")
+    lines[#lines+1] = string.format("%06X\t%s\t%s", p.color & 0xFFFFFF, p.take_keyword or "", p.track_keyword or "")
   end
   reaper.SetExtState(PREF_NS, "palette_v3", table.concat(lines, "\n"), true)
 end
@@ -526,12 +627,15 @@ local function save_pconf()
   reaper.SetExtState(PREF_NS, "view_mode",     view_mode,                    true)
   reaper.SetExtState(PREF_NS, "font_size",     tostring(font_size),          true)
   reaper.SetExtState(PREF_NS, "swatch_chars",  tostring(swatch_chars),       true)
+  reaper.SetExtState(PREF_NS, "keyword_tab",   keyword_tab,                  true)
   reaper.SetExtState(PREF_NS, "palette_pattern", palette_pattern,            true)
   reaper.SetExtState(PREF_NS, "safety_mode",  safety_mode and "1" or "0",  true)
   reaper.SetExtState(PREF_NS, "recording_auto_color", recording_auto_color and "1" or "0", true)
   reaper.SetExtState(PREF_NS, "last_preset",   current_preset or "",         true)
   reaper.SetExtState(PREF_NS, "collapsed",     collapsed and "1" or "0",     true)
   reaper.SetExtState(PREF_NS, "color_mode",    color_mode,                    true)
+  reaper.SetExtState(PREF_NS, "normal_primary_target", normal_primary_target, true)
+  reaper.SetExtState(PREF_NS, "normal_secondary_color", normal_secondary_color, true)
 end
 
 local function load_pconf()
@@ -561,6 +665,8 @@ local function load_pconf()
   if fs and fs >= 8 and fs <= 24 then font_size = fs end
   local sc = tonumber(reaper.GetExtState(PREF_NS, "swatch_chars"))
   if sc and sc >= 1 and sc <= 9 then swatch_chars = sc end
+  local kt = reaper.GetExtState(PREF_NS, "keyword_tab")
+  if kt == KEYTAB_TAKE or kt == KEYTAB_TRACK then keyword_tab = kt end
   local pp = reaper.GetExtState(PREF_NS, "palette_pattern")
   if pp == PALPAT_FULL or pp == PALPAT_ROW_REPEAT then palette_pattern = pp end
   local sm = reaper.GetExtState(PREF_NS, "safety_mode")
@@ -572,6 +678,15 @@ local function load_pconf()
   collapsed = reaper.GetExtState(PREF_NS, "collapsed") == "1"
   local cm = reaper.GetExtState(PREF_NS, "color_mode")
   if cm == COLOR_MODE_SHINY or cm == COLOR_MODE_NORMAL then color_mode = cm end
+  local npt = reaper.GetExtState(PREF_NS, "normal_primary_target")
+  if npt == NORMAL_PRIMARY_BG or npt == NORMAL_PRIMARY_PEAK then
+    normal_primary_target = npt
+  end
+  local nsc = reaper.GetExtState(PREF_NS, "normal_secondary_color")
+  if nsc == "keep" then nsc = NORMAL_SECONDARY_MATCH end
+  if nsc == NORMAL_SECONDARY_MATCH or nsc == NORMAL_SECONDARY_BLACK or nsc == NORMAL_SECONDARY_WHITE or nsc == "transparent" then
+    normal_secondary_color = nsc
+  end
 end
 
 local function load_palette()
@@ -589,29 +704,39 @@ local function load_palette()
         row = row + 1
       end
       apply_builtin_default_palette()
-      for i, p in ipairs(PALETTE) do p.keyword = kws[i] or "" end
+      for i, p in ipairs(PALETTE) do
+        p.take_keyword = kws[i] or ""
+        p.track_keyword = ""
+      end
     else
       apply_builtin_default_palette()
     end
     return
   end
   local colors = {}
-  local kws = {}
+  local take_kws = {}
+  local track_kws = {}
   local row = 0
   for line in (raw.."\n"):gmatch("(.-)\n") do
     if row == 0 then
       PALETTE_COLS = math.max(1, tonumber(line:match("cols=(%d+)")) or PALETTE_COLS)
     else
-      local hx, kw = line:match("^(%x+)\t(.-)$")
+      local hx, take_kw, track_kw = line:match("^(%x+)\t(.-)\t(.-)$")
+      if not hx then
+        hx, take_kw = line:match("^(%x+)\t(.-)$")
+        track_kw = ""
+      end
       colors[#colors+1] = tonumber(hx or "0", 16) or 0
-      kws[#kws+1] = kw or ""
+      take_kws[#take_kws+1] = take_kw or ""
+      track_kws[#track_kws+1] = track_kw or ""
     end
     row = row + 1
   end
   gen_palette()
   for i, p in ipairs(PALETTE) do
     p.color = colors[i] or p.color
-    p.keyword = kws[i] or ""
+    p.take_keyword = take_kws[i] or ""
+    p.track_keyword = track_kws[i] or ""
   end
 end
 
@@ -633,6 +758,10 @@ local function load_auto_pref()
   ac_midi  = b("ac_midi",  true)
 end
 
+local function touch_ui_heartbeat()
+  reaper.SetExtState(PREF_NS, UI_HEARTBEAT_KEY, string.format("%.3f", reaper.time_precise()), false)
+end
+
 local function set_status(msg)
   status_msg   = msg
   status_until = reaper.time_precise() + 3.5
@@ -640,7 +769,10 @@ end
 
 local function load_default_preset_state()
   apply_builtin_default_palette()
-  for _, p in ipairs(PALETTE) do p.keyword = "" end
+  for _, p in ipairs(PALETTE) do
+    p.take_keyword = ""
+    p.track_keyword = ""
+  end
   save_palette()
   current_preset = "Default"
   preset_dirty   = false
@@ -669,9 +801,18 @@ end
 
 local function apply_recording_color_to_item(item, rrggbb)
   if color_mode == COLOR_MODE_SHINY then
-    apply_color_to_item(item, shiny_background_rrggbb(rrggbb))
+    apply_item_background_color(item, shiny_background_rrggbb(rrggbb))
   else
-    apply_color_to_item(item, rrggbb)
+    if normal_primary_target == NORMAL_PRIMARY_PEAK then
+      if normal_secondary_color == "transparent" then
+        reaper.SetMediaItemInfo_Value(item, "I_CUSTOMCOLOR", 0)
+      else
+        local secondary = normal_secondary_rrggbb(rrggbb)
+        apply_item_background_color(item, secondary)
+      end
+    else
+      apply_item_background_color(item, rrggbb)
+    end
   end
 end
 
@@ -816,8 +957,9 @@ local function match_take(take_name)
   if lo == "" then return nil end
   local best_p, best_len = nil, 0
   for _, p in ipairs(PALETTE) do
-    if p.keyword ~= "" then
-      for kw in (p.keyword.."|"):gmatch("([^|]+)|") do
+    local keyword = get_palette_keyword(p, KEYTAB_TAKE)
+    if keyword ~= "" then
+      for kw in (keyword.."|"):gmatch("([^|]+)|") do
         local kw_trim = kw:match("^%s*(.-)%s*$")
         if kw_trim ~= "" and #kw_trim > best_len and lo:find(kw_trim:lower(), 1, true) then
           best_p, best_len = p, #kw_trim
@@ -828,8 +970,40 @@ local function match_take(take_name)
   return best_p
 end
 
+local function match_track(track_name)
+  local lo = (track_name or ""):lower()
+  if lo == "" then return nil end
+  local best_p, best_len = nil, 0
+  for _, p in ipairs(PALETTE) do
+    local keyword = get_palette_keyword(p, KEYTAB_TRACK)
+    if keyword ~= "" then
+      for kw in (keyword.."|"):gmatch("([^|]+)|") do
+        local kw_trim = kw:match("^%s*(.-)%s*$")
+        if kw_trim ~= "" and #kw_trim > best_len and lo:find(kw_trim:lower(), 1, true) then
+          best_p, best_len = p, #kw_trim
+        end
+      end
+    end
+  end
+  return best_p
+end
+
+local function do_auto_color_tracks()
+  local trn = reaper.CountTracks(0)
+  if trn == 0 then return end
+  for i = 0, trn - 1 do
+    local tr = reaper.GetTrack(0, i)
+    local _, tn = reaper.GetTrackName(tr)
+    local p = match_track(tn)
+    if p then apply_color_to_track(tr, p.color) end
+  end
+  reaper.TrackList_AdjustWindows(false)
+  reaper.UpdateArrange()
+end
+
 -- ─── core operations ─────────────────────────────────────────────────────────
 local function do_auto_color()
+  do_auto_color_tracks()
   local n = reaper.CountMediaItems(0)
   if n == 0 then return end
   for i = 0, n-1 do
@@ -870,9 +1044,18 @@ end
 local copied_color = nil  -- 0xRRGGBB, set by Copy Color
 
 local function do_copy_color()
-  if reaper.CountSelectedMediaItems(0) == 0 then set_status("No items selected"); return end
-  local item   = reaper.GetSelectedMediaItem(0, 0)
-  local native = reaper.GetDisplayedMediaItemColor(item)
+  local native = nil
+  if current_target_is_tracks() then
+    local tn = reaper.CountSelectedTracks(0)
+    if tn == 0 then set_status("No tracks selected"); return end
+    native = reaper.GetTrackColor(reaper.GetSelectedTrack(0, 0))
+    if native == 0 then set_status("Selected track has no custom color"); return end
+  else
+    local n = reaper.CountSelectedMediaItems(0)
+    if n == 0 then set_status("No items selected"); return end
+    local item = reaper.GetSelectedMediaItem(0, 0)
+    native = reaper.GetDisplayedMediaItemColor(item)
+  end
   local r, g, b = reaper.ColorFromNative(native)
   r, g, b = math.floor(r), math.floor(g), math.floor(b)
   copied_color = r*65536 + g*256 + b
@@ -881,35 +1064,72 @@ end
 
 local function do_paste_color()
   if not copied_color then set_status("Nothing copied"); return end
-  local n = reaper.CountSelectedMediaItems(0)
-  if n == 0 then set_status("No items selected"); return end
+  local item_n = reaper.CountSelectedMediaItems(0)
+  local track_n = reaper.CountSelectedTracks(0)
   reaper.Undo_BeginBlock()
-  for i = 0, n-1 do
-    apply_color_by_mode(reaper.GetSelectedMediaItem(0, i), copied_color)
+  if current_target_is_tracks() then
+    if track_n == 0 then reaper.Undo_EndBlock("Paste Track Color", -1); set_status("No tracks selected"); return end
+    for i = 0, track_n-1 do
+      apply_color_to_track(reaper.GetSelectedTrack(0, i), copied_color)
+    end
+    reaper.Undo_EndBlock("Paste Track Color", -1)
+    set_status(string.format("Pasted color to %d track(s)", track_n))
+  else
+    if item_n == 0 then reaper.Undo_EndBlock("Paste Item Color", -1); set_status("No items selected"); return end
+    for i = 0, item_n-1 do
+      apply_color_by_mode(reaper.GetSelectedMediaItem(0, i), copied_color)
+    end
+    reaper.Undo_EndBlock("Paste Item Color", -1)
+    set_status(string.format("Pasted color to %d item(s)", item_n))
   end
-  reaper.Undo_EndBlock("Paste Item Color", -1)
   reaper.UpdateArrange()
-  set_status(string.format("Pasted color to %d item(s)", n))
 end
 
 local function do_clear_selected()
-  local n = reaper.CountSelectedMediaItems(0)
-  if n == 0 then set_status("No items selected"); return end
+  local item_n = reaper.CountSelectedMediaItems(0)
+  local track_n = reaper.CountSelectedTracks(0)
   reaper.Undo_BeginBlock()
-  for i = 0, n-1 do
-    local item = reaper.GetSelectedMediaItem(0, i)
-    reaper.SetMediaItemInfo_Value(item, "I_CUSTOMCOLOR", 0)
-    local take_count = reaper.GetMediaItemNumTakes(item)
-    if take_count and take_count > 0 then
-      for t = 0, take_count - 1 do
-        local take = reaper.GetMediaItemTake(item, t)
-        if take then reaper.SetMediaItemTakeInfo_Value(take, "I_CUSTOMCOLOR", 0) end
+  if current_target_is_tracks() then
+    if track_n == 0 then reaper.Undo_EndBlock("Clear Track Colors", -1); set_status("No tracks selected"); return end
+    for i = 0, track_n-1 do
+      reaper.SetMediaTrackInfo_Value(reaper.GetSelectedTrack(0, i), "I_CUSTOMCOLOR", 0)
+    end
+    reaper.Undo_EndBlock("Clear Track Colors", -1)
+    set_status(string.format("Cleared %d track(s)", track_n))
+  else
+    if item_n == 0 then reaper.Undo_EndBlock("Clear Item Colors", -1); set_status("No items selected"); return end
+    for i = 0, item_n-1 do
+      local item = reaper.GetSelectedMediaItem(0, i)
+      reaper.SetMediaItemInfo_Value(item, "I_CUSTOMCOLOR", 0)
+      local take_count = reaper.GetMediaItemNumTakes(item)
+      if take_count and take_count > 0 then
+        for t = 0, take_count - 1 do
+          local take = reaper.GetMediaItemTake(item, t)
+          if take then reaper.SetMediaItemTakeInfo_Value(take, "I_CUSTOMCOLOR", 0) end
+        end
       end
     end
+    reaper.Undo_EndBlock("Clear Item Colors", -1)
+    set_status(string.format("Cleared %d item(s)", item_n))
   end
-  reaper.Undo_EndBlock("Clear Item Colors", -1)
   reaper.UpdateArrange()
-  set_status(string.format("Cleared %d item(s)", n))
+end
+
+local function collect_target_tracks()
+  local tracks = {}
+  local selected_n = reaper.CountSelectedTracks(0)
+  if selected_n > 0 then
+    for i = 0, selected_n - 1 do
+      tracks[#tracks + 1] = reaper.GetSelectedTrack(0, i)
+    end
+  else
+    local n = reaper.CountTracks(0)
+    for i = 0, n - 1 do
+      tracks[#tracks + 1] = reaper.GetTrack(0, i)
+    end
+  end
+  local scope = (selected_n > 0) and "selected" or "all"
+  return tracks, scope
 end
 
 local function collect_target_items_row_major()
@@ -951,6 +1171,21 @@ end
 
 local function do_palette_flow_color()
   if #PALETTE == 0 then set_status("Palette is empty"); return end
+  if current_target_is_tracks() then
+    local tracks, scope = collect_target_tracks()
+    local n = #tracks
+    if n == 0 then set_status("No tracks to color"); return end
+    reaper.Undo_BeginBlock()
+    for i, track in ipairs(tracks) do
+      local p = PALETTE[((i - 1) % #PALETTE) + 1]
+      apply_color_to_track(track, p.color)
+    end
+    reaper.Undo_EndBlock("Auto Color Tracks by Palette", -1)
+    reaper.TrackList_AdjustWindows(false)
+    reaper.UpdateArrange()
+    set_status(string.format("Auto Palette tracks: %d %s track(s)", n, scope))
+    return
+  end
   local items, scope = collect_target_items_row_major()
   local n = #items
   if n == 0 then set_status("No items to color"); return end
@@ -1020,8 +1255,85 @@ local function shuffled_indices(n)
   return t
 end
 
+local function is_grayscale_color(c)
+  local r = ((c >> 16) & 0xFF) / 255
+  local g = ((c >> 8) & 0xFF) / 255
+  local b = (c & 0xFF) / 255
+  local _, s = rgb_to_hsv(r, g, b)
+  return (s or 0) < 0.08
+end
+
+local function non_grayscale_palette_indices()
+  local t = {}
+  for i, p in ipairs(PALETTE) do
+    if not is_grayscale_color(p.color) then
+      t[#t+1] = i
+    end
+  end
+  return t
+end
+
+local function shuffled_values(src)
+  local t = {}
+  for i = 1, #src do t[i] = src[i] end
+  for i = #t, 2, -1 do
+    local j = math.random(i)
+    t[i], t[j] = t[j], t[i]
+  end
+  return t
+end
+
 local function do_smart_random_color()
   if #PALETTE == 0 then set_status("Palette is empty"); return end
+  local candidate_idxs = non_grayscale_palette_indices()
+  if #candidate_idxs == 0 then
+    set_status("Smart Random: no colorful swatches (all grayscale)")
+    return
+  end
+  if current_target_is_tracks() then
+    local tracks, scope = collect_target_tracks()
+    local n = #tracks
+    if n == 0 then set_status("No tracks to color"); return end
+
+    local min_dist = 95
+    local prev1, prev2 = nil, nil
+
+    reaper.Undo_BeginBlock()
+    for _, track in ipairs(tracks) do
+      local choice_color = nil
+      local best_color = nil
+      local best_score = -1
+
+      local order = shuffled_values(candidate_idxs)
+      for _, idx in ipairs(order) do
+        local c = PALETTE[idx].color
+        local ok1 = (not prev1) or (smart_color_distance(c, prev1) >= min_dist)
+        local ok2 = (not prev2) or (smart_color_distance(c, prev2) >= (min_dist * 0.75))
+        if ok1 and ok2 then
+          choice_color = c
+          break
+        end
+        if prev1 then
+          local s = smart_color_distance(c, prev1)
+          if s > best_score then
+            best_score = s
+            best_color = c
+          end
+        else
+          best_color = c
+        end
+      end
+
+      choice_color = choice_color or best_color or PALETTE[candidate_idxs[math.random(#candidate_idxs)]].color
+      apply_color_to_track(track, choice_color)
+      prev2, prev1 = prev1, choice_color
+    end
+    reaper.Undo_EndBlock("Smart Random Track Color", -1)
+    reaper.TrackList_AdjustWindows(false)
+    reaper.UpdateArrange()
+    set_status(string.format("Smart Random tracks: %d %s track(s)", n, scope))
+    return
+  end
   local items, scope = collect_target_items_row_major()
   local n = #items
   if n == 0 then set_status("No items to color"); return end
@@ -1035,7 +1347,7 @@ local function do_smart_random_color()
     local best_color = nil
     local best_score = -1
 
-    local order = shuffled_indices(#PALETTE)
+    local order = shuffled_values(candidate_idxs)
     for _, idx in ipairs(order) do
       local c = PALETTE[idx].color
       local ok1 = (not prev1) or (smart_color_distance(c, prev1) >= min_dist)
@@ -1056,7 +1368,7 @@ local function do_smart_random_color()
       end
     end
 
-    choice_color = choice_color or best_color or PALETTE[((i - 1) % #PALETTE) + 1].color
+    choice_color = choice_color or best_color or PALETTE[candidate_idxs[((i - 1) % #candidate_idxs) + 1]].color
     apply_color_by_mode(item, choice_color)
     prev2, prev1 = prev1, choice_color
   end
@@ -1213,7 +1525,7 @@ end
 local SROW_H = 22   -- settings row height
 
 local function settings_panel_h()
-  return SROW_H*2 + SROW_H * #PCONF.rows + SROW_H*4 + MARGIN*2
+  return SROW_H*2 + SROW_H * #PCONF.rows + SROW_H*6 + MARGIN*2
 end
 
 -- Total expanded window height (palette area + all optional panels)
@@ -1370,6 +1682,45 @@ local function draw_settings_panel(start_y)
   end
   if btn(ppx + 90, iy+2, 62, 18, "Full", palette_pattern == PALPAT_FULL) then
     palette_pattern = PALPAT_FULL; save_pconf()
+  end
+
+  iy = iy + SROW_H
+  txt(px, iy+6, "Normal target", .55,.55,.55)
+  local ntx = px + 92
+  if btn(ntx, iy+2, 94, 18, "Background", normal_primary_target == NORMAL_PRIMARY_BG) then
+    normal_primary_target = NORMAL_PRIMARY_BG
+    save_pconf()
+    set_status("Normal target: Background")
+  end
+  if btn(ntx + 98, iy+2, 72, 18, "Peak", normal_primary_target == NORMAL_PRIMARY_PEAK) then
+    normal_primary_target = NORMAL_PRIMARY_PEAK
+    save_pconf()
+    set_status("Normal target: Peak")
+  end
+
+  iy = iy + SROW_H
+  txt(px, iy+6, "Other color", .55,.55,.55)
+  local ocx = px + 92
+  if btn(ocx, iy+2, 58, 18, "Match", normal_secondary_color == NORMAL_SECONDARY_MATCH) then
+    normal_secondary_color = NORMAL_SECONDARY_MATCH
+    save_pconf()
+    set_status("Other color: Match")
+  end
+  if btn(ocx + 62, iy+2, 58, 18, "Black", normal_secondary_color == NORMAL_SECONDARY_BLACK) then
+    normal_secondary_color = NORMAL_SECONDARY_BLACK
+    save_pconf()
+    set_status("Other color: Black")
+  end
+  if btn(ocx + 124, iy+2, 58, 18, "White", normal_secondary_color == NORMAL_SECONDARY_WHITE) then
+    normal_secondary_color = NORMAL_SECONDARY_WHITE
+    save_pconf()
+    set_status("Other color: White")
+  end
+  if btn(ocx + 186, iy+2, 90, 18, "Theme", normal_secondary_color == "transparent") then
+    normal_secondary_color = "transparent"
+    save_pconf()
+    reaper.Main_OnCommand(41930, 0) -- Theme development: Show theme tweak/configuration window
+    set_status("Other color: Theme default (opened Tweaker)")
   end
 
   iy = iy + SROW_H
@@ -1572,12 +1923,19 @@ local function draw()
   if btn(MARGIN+76, content_top+2, 56, TOGGLE_H-4, "≡ List", view_mode == "list") then
     view_mode = "list"; save_pconf()
   end
-  if btn(MARGIN+136, content_top+2, 138, TOGGLE_H-4, "Auto Color by Palette") then
+  if btn(MARGIN+136, content_top+2, 94, TOGGLE_H-4, "Take Name", keyword_tab == KEYTAB_TAKE) then
+    keyword_tab = KEYTAB_TAKE; save_pconf()
+  end
+  if btn(MARGIN+234, content_top+2, 100, TOGGLE_H-4, "Track Name", keyword_tab == KEYTAB_TRACK) then
+    keyword_tab = KEYTAB_TRACK; save_pconf()
+  end
+  if btn(MARGIN+338, content_top+2, 138, TOGGLE_H-4, "Auto Color by Palette") then
     do_palette_flow_color()
   end
-  if btn(MARGIN+278, content_top+2, 102, TOGGLE_H-4, "Smart Random") then
+  if btn(MARGIN+480, content_top+2, 102, TOGGLE_H-4, "Smart Random") then
     do_smart_random_color()
   end
+  txt(math.max(MARGIN + 586, W - 390), content_top + 6, "Target: " .. current_target_label(), .66,.66,.66)
   local rec_chk_y = content_top + (TOGGLE_H - 14) // 2
   local rec_chk_x = math.max(MARGIN + 384, W - 260)
   if chkbox(rec_chk_x, rec_chk_y, recording_auto_color, "Auto Color Recording") then
@@ -1621,13 +1979,14 @@ local function draw()
 
       local p   = PALETTE[gi]
       local sel = is_palette_color_selected(p.color)
-      local has = p.keyword ~= ""
+      local kw  = active_keyword(p)
+      local has = kw ~= ""
 
       fill(cx, cy, cw-1, ch, cr(p.color), cg(p.color), cb(p.color))
       if hov then
         stroke(cx, cy, cw-1, ch, 1, 1, 1, .8)
         hover_info = format_color_info(p.color) ..
-          (has and ("   →  " .. p.keyword) or "   (no keyword)")
+          (has and ("   →  " .. kw) or "   (no keyword)")
       elseif sel then
         stroke(cx, cy, cw-1, ch, 1.00, .95, .18, 1)
         stroke(cx+1, cy+1, cw-3, ch-2, .10, .10, .10, .95)
@@ -1640,7 +1999,7 @@ local function draw()
         local tc  = lum(p.color) > .45 and 0.0 or 1.0
         -- split by | and collect parts
         local parts = {}
-        for seg in (p.keyword .. "|"):gmatch("([^|]*)|") do
+        for seg in (kw .. "|"):gmatch("([^|]*)|") do
           local s = seg:match("^%s*(.-)%s*$")
           if s ~= "" then parts[#parts+1] = utf8_take(s, swatch_chars) end
         end
@@ -1661,13 +2020,24 @@ local function draw()
       end
 
       if lclicked and hov and popup_idx == nil then
-        local n = reaper.CountSelectedMediaItems(0)
-        if n > 0 then
+        local item_n = reaper.CountSelectedMediaItems(0)
+        local track_n = reaper.CountSelectedTracks(0)
+        if current_target_is_tracks() then
+          if track_n > 0 then
+            reaper.Undo_BeginBlock()
+            for j = 0, track_n-1 do apply_color_to_track(reaper.GetSelectedTrack(0,j), p.color) end
+            reaper.Undo_EndBlock("Apply Track Color "..string.format("#%06X",p.color), -1)
+            reaper.UpdateArrange()
+            set_status(string.format("Applied to %d track(s)", track_n))
+          else
+            set_status("No tracks selected")
+          end
+        elseif item_n > 0 then
           reaper.Undo_BeginBlock()
-          for j = 0, n-1 do apply_color_by_mode(reaper.GetSelectedMediaItem(0,j), p.color) end
+          for j = 0, item_n-1 do apply_color_by_mode(reaper.GetSelectedMediaItem(0,j), p.color) end
           reaper.Undo_EndBlock("Apply Color "..string.format("#%06X",p.color), -1)
           reaper.UpdateArrange()
-          set_status(string.format("Applied to %d item(s)", n))
+          set_status(string.format("Applied to %d item(s)", item_n))
         else
           set_status("No items selected")
         end
@@ -1738,17 +2108,19 @@ local function draw()
             end
           end
         elseif item == "Edit Keyword" then
+          local existing_kw = active_keyword(p)
+          local prompt_target = (keyword_tab == KEYTAB_TRACK) and "Track" or "Take"
           local ok, val = reaper.GetUserInputs(
-            "Keyword — " .. string.format("#%06X", p.color), 1,
-            "Keyword (| for multiple, e.g. boom|lavmic)  [clear to remove]:",
-            p.keyword, 600)
+            prompt_target .. " Keyword — " .. string.format("#%06X", p.color), 1,
+            prompt_target .. " keyword (| for multiple, e.g. boom|lavmic)  [clear to remove]:",
+            existing_kw, 600)
           if ok and val ~= nil then
-            p.keyword = val:match("^%s*(.-)%s*$")
+            set_palette_keyword(p, keyword_tab, val:match("^%s*(.-)%s*$"))
             save_palette(); preset_dirty = true
             if auto_color_enabled then last_state_count=-1 end
           end
         elseif item == "Clear Keyword" then
-          p.keyword = ""
+          set_palette_keyword(p, keyword_tab, "")
           save_palette(); preset_dirty = true
         end
         popup_idx = nil
@@ -1769,7 +2141,7 @@ local function draw()
   elseif hover_info ~= "" then
     txt(MARGIN, bot_y, hover_info, .62,.62,.62)
   else
-    txt(MARGIN, bot_y, "Left-click: apply to selected   Right-click: set keyword", .34,.34,.34)
+    txt(MARGIN, bot_y, "Left-click: apply to current target   Right-click: set keyword", .34,.34,.34)
   end
   gfx.setfont(1)
 
@@ -1797,7 +2169,7 @@ local function save_preset(name)
   end
   parts[#parts+1] = "---"
   for _, p in ipairs(PALETTE) do
-    parts[#parts+1] = string.format("%06X\t%s", p.color & 0xFFFFFF, p.keyword or "")
+    parts[#parts+1] = string.format("%06X\t%s\t%s", p.color & 0xFFFFFF, p.take_keyword or "", p.track_keyword or "")
   end
   reaper.SetExtState(PREF_NS, preset_key(name), table.concat(parts, "\n"), true)
   -- add to list
@@ -1839,12 +2211,18 @@ local function load_preset(name)
   local ki = i + 1
   for _, p in ipairs(PALETTE) do
     local raw = parts[ki] or ""
-    local hx, kw = raw:match("^(%x+)\t(.-)$")
+    local hx, take_kw, track_kw = raw:match("^(%x+)\t(.-)\t(.-)$")
+    if not hx then
+      hx, take_kw = raw:match("^(%x+)\t(.-)$")
+      track_kw = ""
+    end
     if hx then
       p.color = tonumber(hx, 16) or p.color
-      p.keyword = kw or ""
+      p.take_keyword = take_kw or ""
+      p.track_keyword = track_kw or ""
     elseif raw ~= "" then
-      p.keyword = raw
+      p.take_keyword = raw
+      p.track_keyword = ""
     end
     ki = ki + 1
   end
@@ -1891,20 +2269,29 @@ local function proj_dir()
 end
 
 export_keywords = function()
+  local target_tab = keyword_tab
+  if gfx.showmenu then
+    local c = gfx.showmenu("Export Take Name Keywords|Export Track Name Keywords")
+    if c == 1 then target_tab = KEYTAB_TAKE
+    elseif c == 2 then target_tab = KEYTAB_TRACK
+    else return end
+  end
+
   local dir  = proj_dir()
   local path
+  local default_name = (target_tab == KEYTAB_TRACK) and "hsuanice_track_keywords.txt" or "hsuanice_take_keywords.txt"
   if reaper.JS_Dialog_BrowseForSaveFile then
     -- js_ReaScriptAPI available: native macOS/Windows save dialog
     -- JS_Dialog_BrowseForSaveFile returns (retval, fileName) — must capture both
     local ret
     ret, path = reaper.JS_Dialog_BrowseForSaveFile(
-      "Export Keywords", dir, "hsuanice_keywords.txt",
+      "Export Keywords", dir, default_name,
       "Text files (.txt)\0*.txt\0All files (*.*)\0*.*\0")
     if not ret or ret ~= 1 or not path or path == "" then return end
   else
     -- fallback: plain text-input dialog
     local ok, p = reaper.GetUserInputs("Export Keywords", 1,
-      "Save to file (full path):", dir .. "hsuanice_keywords.txt", 512)
+      "Save to file (full path):", dir .. default_name, 512)
     if not ok or p == "" then return end
     path = p:match("^%s*(.-)%s*$")
   end
@@ -1914,17 +2301,27 @@ export_keywords = function()
     return
   end
   f:write("# hsuanice Auto Color Items — keyword export\n")
+  f:write("# target=" .. target_tab .. "\n")
   f:write("# hex_color\tkeyword\n")
   for _, p in ipairs(PALETTE) do
-    f:write(string.format("%06X\t%s\n", p.color & 0xFFFFFF, p.keyword or ""))
+    f:write(string.format("%06X\t%s\n", p.color & 0xFFFFFF, get_palette_keyword(p, target_tab) or ""))
   end
   f:close()
-  set_status("Exported " .. #PALETTE .. " entries → " .. path)
+  set_status("Exported " .. #PALETTE .. " " .. target_tab .. " keywords → " .. path)
 end
 
 import_keywords = function()
+  local target_tab = keyword_tab
+  if gfx.showmenu then
+    local c = gfx.showmenu("Import to Take Name Keywords|Import to Track Name Keywords")
+    if c == 1 then target_tab = KEYTAB_TAKE
+    elseif c == 2 then target_tab = KEYTAB_TRACK
+    else return end
+  end
+
+  local default_name = (target_tab == KEYTAB_TRACK) and "hsuanice_track_keywords.txt" or "hsuanice_take_keywords.txt"
   local ok, path = reaper.GetUserFileNameForRead(
-    proj_dir() .. "hsuanice_keywords.txt", "Import Keywords", "txt")
+    proj_dir() .. default_name, "Import Keywords", "txt")
   if not ok or path == "" then return end
   local f = io.open(path, "r")
   if not f then
@@ -1943,14 +2340,14 @@ import_keywords = function()
   local count = 0
   for i, p in ipairs(PALETTE) do
     if kws[i] ~= nil then
-      p.keyword = kws[i]
+      set_palette_keyword(p, target_tab, kws[i])
       count = count + 1
     end
   end
   save_palette()
   preset_dirty = true
   if auto_color_enabled then last_state_count = -1 end
-  set_status("Imported " .. count .. " keywords from file")
+  set_status("Imported " .. count .. " " .. target_tab .. " keywords from file")
 end
 
 import_colors = function()
@@ -2039,7 +2436,7 @@ local function dec(s) return (s:gsub("\\\\", "\1"):gsub("\\n", "\n"):gsub("\1", 
 local PERSIST_KEYS = {
   "pconf_v1", "grey_row", "palette_v3", "last_preset",
   "collapsed", "show_settings", "show_presets", "view_mode",
-  "font_size", "swatch_chars", "palette_pattern", "safety_mode", "recording_auto_color", "ac_audio", "ac_empty", "ac_midi", "color_mode",
+  "font_size", "swatch_chars", "palette_pattern", "safety_mode", "recording_auto_color", "ac_audio", "ac_empty", "ac_midi", "color_mode", "normal_primary_target", "normal_secondary_color",
   "win_w", "win_h", "win_x", "win_y", "preset_list",
 }
 
@@ -2158,8 +2555,9 @@ draw_list_view = function(top_y, avail_h)
 
     -- keyword
     local kx = MARGIN + SWATCH_W + 6 + HEX_W
-    if p.keyword ~= "" then
-      txt(kx, ry+(ROW_H-th)*.5, p.keyword, .88,.88,.88)
+    local kw = active_keyword(p)
+    if kw ~= "" then
+      txt(kx, ry+(ROW_H-th)*.5, kw, .88,.88,.88)
     else
       txt(kx, ry+(ROW_H-th)*.5, "—", .28,.28,.28)
     end
@@ -2171,18 +2569,29 @@ draw_list_view = function(top_y, avail_h)
     -- hover info
     if hov then
       hover_info = format_color_info(p.color) ..
-        (p.keyword ~= "" and ("   →  " .. p.keyword) or "   (no keyword)")
+        (kw ~= "" and ("   →  " .. kw) or "   (no keyword)")
     end
 
     -- left-click: apply color
     if lclicked and hov and popup_idx == nil then
-      local cnt = reaper.CountSelectedMediaItems(0)
-      if cnt > 0 then
+      local item_n = reaper.CountSelectedMediaItems(0)
+      local track_n = reaper.CountSelectedTracks(0)
+      if current_target_is_tracks() then
+        if track_n > 0 then
+          reaper.Undo_BeginBlock()
+          for j = 0, track_n-1 do apply_color_to_track(reaper.GetSelectedTrack(0,j), p.color) end
+          reaper.Undo_EndBlock("Apply Track Color "..string.format("#%06X",p.color), -1)
+          reaper.UpdateArrange()
+          set_status(string.format("Applied to %d track(s)", track_n))
+        else
+          set_status("No tracks selected")
+        end
+      elseif item_n > 0 then
         reaper.Undo_BeginBlock()
-        for j = 0, cnt-1 do apply_color_by_mode(reaper.GetSelectedMediaItem(0,j), p.color) end
+        for j = 0, item_n-1 do apply_color_by_mode(reaper.GetSelectedMediaItem(0,j), p.color) end
         reaper.Undo_EndBlock("Apply Color "..string.format("#%06X",p.color), -1)
         reaper.UpdateArrange()
-        set_status(string.format("Applied to %d item(s)", cnt))
+        set_status(string.format("Applied to %d item(s)", item_n))
       else
         set_status("No items selected")
       end
@@ -2367,7 +2776,10 @@ load_auto_pref()
 do
   local has_kw = false
   for _, p in ipairs(PALETTE) do
-    if p.keyword ~= "" then has_kw = true; break end
+    if get_palette_keyword(p, KEYTAB_TAKE) ~= "" or get_palette_keyword(p, KEYTAB_TRACK) ~= "" then
+      has_kw = true
+      break
+    end
   end
   if not has_kw and current_preset and current_preset ~= "Default" then
     load_preset(current_preset)
@@ -2378,6 +2790,7 @@ save_pconf()   -- flush last_preset to ExtState immediately
 -- On exit: save both palette and preset so they stay in sync.
 -- This means load_preset() on next startup loads the same content as palette_v3.
 reaper.atexit(function()
+  reaper.SetExtState(PREF_NS, UI_HEARTBEAT_KEY, "0", false)
   save_palette()
   if current_preset and current_preset ~= "Default" then
     save_preset(current_preset)
@@ -2399,6 +2812,7 @@ local function is_recording_now()
 end
 
 local function loop()
+  touch_ui_heartbeat()
   local rec_now = is_recording_now()
 
   if rec_now and not rec_was_running then

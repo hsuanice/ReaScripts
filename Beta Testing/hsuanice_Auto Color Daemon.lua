@@ -37,6 +37,15 @@
 local _, SCRIPT_PATH, sectionID, cmdID = reaper.get_action_context()
 
 local PREF_NS = "hsuanice_AutoColorItems"
+local UI_HEARTBEAT_KEY = "ui_heartbeat"
+local UI_HEARTBEAT_TTL = 1.0
+
+local function ui_has_auto_control()
+  local hb = tonumber(reaper.GetExtState(PREF_NS, UI_HEARTBEAT_KEY) or "")
+  if not hb then return false end
+  if (reaper.time_precise() - hb) > UI_HEARTBEAT_TTL then return false end
+  return reaper.GetExtState(PREF_NS, "auto_color") == "1"
+end
 
 -- ─── file-based state bootstrap ───────────────────────────────────────────────
 -- On startup, always write the .dat file contents into ExtState so that
@@ -78,6 +87,14 @@ local PALETTE = {}
 local COLOR_MODE_NORMAL = "normal"
 local COLOR_MODE_SHINY  = "shiny"
 local color_mode        = COLOR_MODE_NORMAL
+local NORMAL_PRIMARY_BG   = "background"
+local NORMAL_PRIMARY_PEAK = "peak"
+local NORMAL_SECONDARY_MATCH = "match"
+local NORMAL_SECONDARY_BLACK = "black"
+local NORMAL_SECONDARY_WHITE = "white"
+local NORMAL_SECONDARY_TRANSPARENT = "transparent"
+local normal_primary_target  = NORMAL_PRIMARY_BG
+local normal_secondary_color = NORMAL_SECONDARY_WHITE
 
 -- ─── HSV → 0xRRGGBB ──────────────────────────────────────────────────────────
 local function hsv(h, s, v)
@@ -163,6 +180,8 @@ local function settings_fingerprint()
       .. reaper.GetExtState(PREF_NS, "ac_empty")
   .. reaper.GetExtState(PREF_NS, "ac_midi")
   .. reaper.GetExtState(PREF_NS, "color_mode")
+      .. reaper.GetExtState(PREF_NS, "normal_primary_target")
+      .. reaper.GetExtState(PREF_NS, "normal_secondary_color")
 end
 
 local function load_settings()
@@ -198,31 +217,62 @@ local function load_settings()
   else
     color_mode = COLOR_MODE_NORMAL
   end
+  local npt = reaper.GetExtState(PREF_NS, "normal_primary_target")
+  if npt == NORMAL_PRIMARY_BG or npt == NORMAL_PRIMARY_PEAK then
+    normal_primary_target = npt
+  else
+    normal_primary_target = NORMAL_PRIMARY_BG
+  end
+  local nsc = reaper.GetExtState(PREF_NS, "normal_secondary_color")
+  if nsc == "keep" then nsc = NORMAL_SECONDARY_MATCH end
+  if nsc == NORMAL_SECONDARY_MATCH or nsc == NORMAL_SECONDARY_BLACK or nsc == NORMAL_SECONDARY_WHITE or nsc == NORMAL_SECONDARY_TRANSPARENT then
+    normal_secondary_color = nsc
+  else
+    normal_secondary_color = NORMAL_SECONDARY_WHITE
+  end
 
   -- palette_v3
+  -- Supports:
+  --   cols=N
+  --   RRGGBB<TAB>take_keyword
+  --   RRGGBB<TAB>take_keyword<TAB>track_keyword   (newer GUI format)
   local raw = reaper.GetExtState(PREF_NS, "palette_v3")
+  local colors = {}
   local kws = {}
   local row = 0
   for line in (raw.."\n"):gmatch("(.-)\n") do
     if row == 0 then
       PALETTE_COLS = math.max(1, tonumber(line:match("cols=(%d+)")) or PALETTE_COLS)
     else
-      local _, kw = line:match("^(%x+)\t(.-)$")
+      local hx, kw = line:match("^(%x+)\t(.-)\t.-$")
+      if not hx then
+        hx, kw = line:match("^(%x+)\t(.-)$")
+      end
+      colors[#colors+1] = tonumber(hx or "0", 16) or 0
       kws[#kws+1] = kw or ""
     end
     row = row + 1
   end
   gen_palette()
-  for i, p in ipairs(PALETTE) do p.keyword = kws[i] or "" end
+  for i, p in ipairs(PALETTE) do
+    if colors[i] and colors[i] > 0 then
+      p.color = colors[i]
+    end
+    p.keyword = kws[i] or ""
+  end
 end
 
 -- ─── coloring logic (identical to GUI script) ─────────────────────────────────
-local function apply_color_to_item(item, rrggbb)
+local function apply_item_background_color(item, rrggbb)
   reaper.SetMediaItemInfo_Value(item, "I_CUSTOMCOLOR",
     reaper.ColorToNative((rrggbb>>16)&0xFF,(rrggbb>>8)&0xFF,rrggbb&0xFF)|0x1000000)
 end
 
-local function apply_shiny_color_to_item(item, rrggbb)
+local function clear_item_background_color(item)
+  reaper.SetMediaItemInfo_Value(item, "I_CUSTOMCOLOR", 0)
+end
+
+local function apply_item_peak_color_all_takes(item, rrggbb)
   local peak_native = reaper.ColorToNative((rrggbb >> 16) & 0xFF, (rrggbb >> 8) & 0xFF, rrggbb & 0xFF) | 0x1000000
   local take_count = reaper.GetMediaItemNumTakes(item)
   if take_count and take_count > 0 then
@@ -233,15 +283,68 @@ local function apply_shiny_color_to_item(item, rrggbb)
       end
     end
   end
+end
 
-  apply_color_to_item(item, shiny_background_rrggbb(rrggbb))
+local function clear_item_peak_color_all_takes(item)
+  local take_count = reaper.GetMediaItemNumTakes(item)
+  if take_count and take_count > 0 then
+    for t = 0, take_count - 1 do
+      local take = reaper.GetMediaItemTake(item, t)
+      if take then
+        reaper.SetMediaItemTakeInfo_Value(take, "I_CUSTOMCOLOR", 0)
+      end
+    end
+  end
+end
+
+local function normal_secondary_rrggbb(primary_rrggbb)
+  if normal_secondary_color == NORMAL_SECONDARY_MATCH then return primary_rrggbb end
+  if normal_secondary_color == NORMAL_SECONDARY_BLACK then return 0x000000 end
+  if normal_secondary_color == NORMAL_SECONDARY_WHITE then return 0xFFFFFF end
+  return primary_rrggbb
+end
+
+local function apply_normal_secondary_background(item, primary_rrggbb)
+  if normal_secondary_color == NORMAL_SECONDARY_TRANSPARENT then
+    clear_item_background_color(item)
+  else
+    apply_item_background_color(item, normal_secondary_rrggbb(primary_rrggbb))
+  end
+end
+
+local function apply_normal_secondary_peak(item, primary_rrggbb)
+  if normal_secondary_color == NORMAL_SECONDARY_TRANSPARENT then
+    clear_item_peak_color_all_takes(item)
+  else
+    apply_item_peak_color_all_takes(item, normal_secondary_rrggbb(primary_rrggbb))
+  end
+end
+
+local function apply_normal_color_to_item(item, rrggbb)
+  if normal_primary_target == NORMAL_PRIMARY_PEAK then
+    apply_item_peak_color_all_takes(item, rrggbb)
+    apply_normal_secondary_background(item, rrggbb)
+  else
+    apply_item_background_color(item, rrggbb)
+    apply_normal_secondary_peak(item, rrggbb)
+  end
+end
+
+local function apply_color_to_track(track, rrggbb)
+  reaper.SetMediaTrackInfo_Value(track, "I_CUSTOMCOLOR",
+    reaper.ColorToNative((rrggbb>>16)&0xFF,(rrggbb>>8)&0xFF,rrggbb&0xFF)|0x1000000)
+end
+
+local function apply_shiny_color_to_item(item, rrggbb)
+  apply_item_peak_color_all_takes(item, rrggbb)
+  apply_item_background_color(item, shiny_background_rrggbb(rrggbb))
 end
 
 local function apply_color_by_mode(item, rrggbb)
   if color_mode == COLOR_MODE_SHINY then
     apply_shiny_color_to_item(item, rrggbb)
   else
-    apply_color_to_item(item, rrggbb)
+    apply_normal_color_to_item(item, rrggbb)
   end
 end
 
@@ -262,7 +365,37 @@ local function match_take(take_name)
   return best_p
 end
 
+local function match_track(track_name)
+  local lo = (track_name or ""):lower()
+  if lo == "" then return nil end
+  local best_p, best_len = nil, 0
+  for _, p in ipairs(PALETTE) do
+    if p.keyword ~= "" then
+      for kw in (p.keyword.."|"):gmatch("([^|]+)|") do
+        local kw_trim = kw:match("^%s*(.-)%s*$")
+        if kw_trim ~= "" and #kw_trim > best_len and lo:find(kw_trim:lower(), 1, true) then
+          best_p, best_len = p, #kw_trim
+        end
+      end
+    end
+  end
+  return best_p
+end
+
+local function do_auto_color_tracks()
+  local trn = reaper.CountTracks(0)
+  if trn == 0 then return end
+  for i = 0, trn - 1 do
+    local tr = reaper.GetTrack(0, i)
+    local _, tn = reaper.GetTrackName(tr)
+    local p = match_track(tn)
+    if p then apply_color_to_track(tr, p.color) end
+  end
+  reaper.TrackList_AdjustWindows(false)
+end
+
 local function do_auto_color()
+  do_auto_color_tracks()
   local n = reaper.CountMediaItems(0)
   if n == 0 then return end
   for i = 0, n-1 do
@@ -320,6 +453,11 @@ local pending_recolor      = 0
 local frame_count          = 0
 
 local function loop()
+  if ui_has_auto_control() then
+    reaper.defer(loop)
+    return
+  end
+
   frame_count = frame_count + 1
 
   -- Check for GUI settings changes less frequently
