@@ -103,57 +103,94 @@ SETS["SoundMiner"] = {
 -- 2. FIELD RECORDER / POST
 --
 -- Based on the iXML + BWF structure supplied by the user.
--- Exactly 32 columns, prioritizing information useful for
--- location sound / dialogue / post workflows.
 --
--- Intentionally omitted from this 32-column profile:
---   SPEED:CURRENT_SPEED
---   SPEED:MASTER_SPEED
---   SPEED:TIMESTAMP_SAMPLE_RATE:2
+-- The order is intentionally NOT iXML-first / BWF-second.
+-- It is arranged by workflow meaning:
+--   file identity
+--   production identity
+--   description
+--   timecode / timing / offset
+--   recording date/time
+--   recorder track / channel identity
+--   file / iXML technical information
+--   recorder / machine information
 --
--- These are redundant with the other speed/sample-rate fields
--- for the normal field-recorder workflow.
--- ------------------------------------------------------------
-
+-- Standard Media Explorer fields such as Channels, Bits/sample and
+-- Sample rate are intentionally not duplicated as User Columns.
+-- TRACK_COUNT is omitted because it represents channel count.
+--
+-- SAMPLES_MIDNIGHT_HI is retained as a User Column so it can be
+-- hidden manually when not needed. The LO field is displayed as
+-- SAMPLES_MIDNIGHT(ixml).
+--
 SETS["Field Recorder / Post"] = {
-  {"IXML:TAPE",                                         "TAPE(ixml)"},
-  {"IXML:SCENE",                                        "SCENE(ixml)"},
-  {"IXML:TAKE",                                         "TAKE(ixml)"},
-  {"IXML:PROJECT",                                      "PROJECT(ixml)"},
-  {"IXML:CIRCLED",                                      "CIRCLED(ixml)"},
+  -- ==========================================================
+  -- A. FILE / BASIC IDENTITY
+  -- ==========================================================
+  {"IXML:HISTORY:CURRENT_FILENAME",                  "CURRENT_FILENAME(ixml)"},
+  {"IXML:HISTORY:ORIGINAL_FILENAME",                 "ORIGINAL_FILENAME(ixml)"},
 
-  {"IXML:FILE_SET:FAMILY_UID",                          "FAMILY_UID(ixml)"},
-  {"IXML:FILE_SET:FILE_SET_INDEX",                      "FILE_SET_INDEX(ixml)"},
-  {"IXML:FILE_SET:TOTAL_FILES",                         "TOTAL_FILES(ixml)"},
-  {"IXML:FILE_UID",                                     "FILE_UID(ixml)"},
+  -- ==========================================================
+  -- B. PRODUCTION / EDITING IDENTITY
+  -- ==========================================================
+  {"IXML:PROJECT",                                   "PROJECT(ixml)"},
+  {"IXML:TAPE",                                      "TAPE(ixml)"},
+  {"IXML:SCENE",                                     "SCENE(ixml)"},
+  {"IXML:TAKE",                                      "TAKE(ixml)"},
+  {"IXML:CIRCLED",                                   "CIRCLED(ixml)"},
 
-  {"IXML:HISTORY:CURRENT_FILENAME",                     "CURRENT_FILENAME(ixml)"},
-  {"IXML:HISTORY:ORIGINAL_FILENAME",                    "ORIGINAL_FILENAME(ixml)"},
-  {"IXML:IXML_VERSION",                                 "IXML_VERSION(ixml)"},
+  -- ==========================================================
+  -- C. DESCRIPTION / CONTENT
+  -- ==========================================================
+  {"BWF:Description",                                "Description(bwf)"},
 
-  {"IXML:SPEED:AUDIO_BIT_DEPTH",                        "AUDIO_BIT_DEPTH(ixml)"},
-  {"IXML:SPEED:DIGITIZER_SAMPLE_RATE",                  "DIGITIZER_SAMPLE_RATE(ixml)"},
-  {"IXML:SPEED:FILE_SAMPLE_RATE",                       "FILE_SAMPLE_RATE(ixml)"},
-  {"IXML:SPEED:TIMECODE_FLAG",                          "TIMECODE_FLAG(ixml)"},
-  {"IXML:SPEED:TIMECODE_RATE",                          "TIMECODE_RATE(ixml)"},
-  {"IXML:SPEED:TIMESTAMP_SAMPLE_RATE",                  "TIMESTAMP_SAMPLE_RATE(ixml)"},
-  {"IXML:SPEED:TIMESTAMP_SAMPLES_SINCE_MIDNIGHT_HI",    "SAMPLES_MIDNIGHT_HI(ixml)"},
-  {"IXML:SPEED:TIMESTAMP_SAMPLES_SINCE_MIDNIGHT_LO",    "SAMPLES_MIDNIGHT_LO(ixml)"},
+  -- ==========================================================
+  -- D. TIMECODE / TIMING / OFFSET
+  --
+  -- HI is intentionally retained but can be hidden in Media
+  -- Explorer. LO is displayed as SAMPLES_MIDNIGHT(ixml).
+  -- ==========================================================
+  {"IXML:SPEED:TIMECODE_FLAG",                       "TIMECODE_FLAG(ixml)"},
+  {"IXML:SPEED:TIMECODE_RATE",                       "TIMECODE_RATE(ixml)"},
+  {"IXML:SPEED:TIMESTAMP_SAMPLE_RATE",               "TIMESTAMP_SAMPLE_RATE(ixml)"},
+  {"IXML:SPEED:TIMESTAMP_SAMPLES_SINCE_MIDNIGHT_HI", "SAMPLES_MIDNIGHT_HI(ixml)"},
+  {"IXML:SPEED:TIMESTAMP_SAMPLES_SINCE_MIDNIGHT_LO", "SAMPLES_MIDNIGHT(ixml)"},
+  {"BWF:TimeReference",                              "TimeReference(bwf)"},
 
-  {"IXML:TRACK_LIST:TRACK:CHANNEL_INDEX",               "CHANNEL_INDEX(ixml)"},
-  {"IXML:TRACK_LIST:TRACK:INTERLEAVE_INDEX",            "INTERLEAVE_INDEX(ixml)"},
-  {"IXML:TRACK_LIST:TRACK:NAME",                        "TRACK_NAME(ixml)"},
-  {"IXML:TRACK_LIST:TRACK_COUNT",                       "TRACK_COUNT(ixml)"},
+  -- ==========================================================
+  -- E. RECORDING DATE / TIME
+  -- ==========================================================
+  {"BWF:OriginationDate",                            "OriginationDate(bwf)"},
+  {"BWF:OriginationTime",                            "OriginationTime(bwf)"},
 
-  {"IXML:UBITS",                                        "UBITS(ixml)"},
+  -- ==========================================================
+  -- F. RECORDER TRACK / CHANNEL IDENTITY
+  --
+  -- CHANNEL_INDEX = Recorder Ch
+  -- INTERLEAVE_INDEX = stream
+  -- TRACK_COUNT omitted because it duplicates Media Explorer's
+  -- normal Channels information.
+  -- ==========================================================
+  {"IXML:TRACK_LIST:TRACK:CHANNEL_INDEX",             "CHANNEL_INDEX(ixml)"},
+  {"IXML:TRACK_LIST:TRACK:INTERLEAVE_INDEX",          "INTERLEAVE_INDEX(ixml)"},
+  {"IXML:TRACK_LIST:TRACK:NAME",                      "TRACK_NAME(ixml)"},
 
-  {"BWF:Description",                                   "Description(bwf)"},
-  {"BWF:OriginationDate",                               "OriginationDate(bwf)"},
-  {"BWF:OriginationTime",                               "OriginationTime(bwf)"},
-  {"BWF:Originator",                                    "Originator(bwf)"},
-  {"BWF:OriginatorReference",                           "OriginatorReference(bwf)"},
-  {"BWF:TimeReference",                                 "TimeReference(bwf)"},
-  {"BWF:CodingHistory",                                 "CodingHistory(bwf)"},
+  -- ==========================================================
+  -- G. FILE / IXML TECHNICAL INFORMATION
+  -- ==========================================================
+  {"IXML:FILE_UID",                                  "FILE_UID(ixml)"},
+  {"IXML:FILE_SET:FAMILY_UID",                       "FAMILY_UID(ixml)"},
+  {"IXML:FILE_SET:FILE_SET_INDEX",                   "FILE_SET_INDEX(ixml)"},
+  {"IXML:FILE_SET:TOTAL_FILES",                      "TOTAL_FILES(ixml)"},
+  {"IXML:IXML_VERSION",                              "IXML_VERSION(ixml)"},
+  {"IXML:UBITS",                                     "UBITS(ixml)"},
+
+  -- ==========================================================
+  -- H. RECORDER / MACHINE INFORMATION
+  -- ==========================================================
+  {"BWF:Originator",                                 "Originator(bwf)"},
+  {"BWF:OriginatorReference",                        "OriginatorReference(bwf)"},
+  {"BWF:CodingHistory",                              "CodingHistory(bwf)"},
 }
 
 -- ------------------------------------------------------------
