@@ -1,6 +1,6 @@
 --[[
 @description ReaImGui - Rename Source File from Metadata (cached preview + source rename)
-@version 260714.1438
+@version 260816.0000
 @author hsuanice
 @about
   Rename the actual source file on disk from BWF/iXML and true source metadata using a fast ReaImGui UI.
@@ -35,6 +35,11 @@
   hsuanice served as the workflow designer, tester, and integrator for this tool.
 
 @changelog
+  v2026.08.16 (Taipei Time)
+    - Perf: Preview generation now limits work to the actual selected item range and avoids redundant full-cache rebuilds.
+    - Fix: $baseindex / $baseidx now renumbers consistently within the same metadata group without needing a real interleave restore.
+    - UX: Preview refresh is faster and more predictable when reviewing selected items.
+
   v260714.1438 (2026-07-14)
     - Replace Rules: Added a global RegEx checkbox for pattern matching mode.
     - Replace Rules: Preserved leading spaces in Find when RegEx mode is enabled.
@@ -390,6 +395,13 @@ local META = dofile(
 )
 assert(META and (META.VERSION or "0") >= "0.2.0",
        "Please update 'hsuanice Metadata Read' to >= 0.2.0")
+
+-- ===== Integrate with hsuanice Metadata Rename Core =====
+local RENAME_CORE = dofile(
+  reaper.GetResourcePath() ..
+  "/Scripts/hsuanice Scripts/Library/hsuanice_Metadata Rename Core.lua"
+)
+assert(RENAME_CORE and RENAME_CORE.VERSION, "Failed to load 'hsuanice Metadata Rename Core'")
 
 -- ===== Integrate with hsuanice Metadata Cache (shared with Item List Editor) =====
 local CACHE = dofile(
@@ -1455,83 +1467,87 @@ local function get_recorder_channel_number(fields)
   return il
 end
 
+local function detect_base_and_index(name)
+  return RENAME_CORE.detect_base_and_index(name)
+end
+
+local function strip_channel_suffix(stem)
+  return RENAME_CORE.strip_channel_suffix(stem)
+end
+
+local function parse_channel_suffix_number(stem)
+  return RENAME_CORE.parse_channel_suffix_number(stem)
+end
+
+local function get_item_guid(item)
+  local _, guid = reaper.GetSetMediaItemInfo_String(item, "GUID", "", false)
+  return guid or ""
+end
+
+local function bind_selected_items(fields, items)
+  if not fields then return fields end
+  local selected = {}
+  if type(items) == "table" then
+    for _, it in ipairs(items) do
+      if it then selected[#selected + 1] = it end
+    end
+  end
+  fields.__selected_items = selected
+  return fields
+end
+
+local function current_base_index(fields)
+  local item = fields and fields.__item
+  local selected = fields and fields.__selected_items or {}
+
+  if not selected or #selected == 0 then
+    selected = {}
+    local sel_count = reaper.CountSelectedMediaItems(0)
+    for i = 0, sel_count - 1 do
+      local it = reaper.GetSelectedMediaItem(0, i)
+      if it then selected[#selected + 1] = it end
+    end
+  end
+
+  local debug_cb = DEBUG and function(msg)
+    reaper.ShowConsoleMsg(msg .. "\n")
+  end or nil
+
+  if debug_cb then
+    local guid = item and get_item_guid(item) or "(none)"
+    debug_cb(string.format("[baseindex] item=%s selected=%d group_key=%s", tostring(guid), #selected, tostring(item and RENAME_CORE.item_group_key(item, function(it) return collect_metadata_for_item(it) end) or "(none)")))
+  end
+
+  return RENAME_CORE.current_base_index(item, selected, function(it)
+    return collect_metadata_for_item(it)
+  end, debug_cb)
+end
 
 -- Wrap known $tokens to ${token} so $sceneT$take -> ${scene}T${take}
 local function normalize_tokens(s)
-  s = tostring(s or "")
-
-  -- forms with numbers/colon
-  s = s:gsub("%$trk(%d+)", "${trk%1}")
-  s = s:gsub("%$(counter:%d+)", "${%1}")
-  s = s:gsub("%$(srcbaseprefix:%d+)", "${%1}")
-  s = s:gsub("%$(srcbasesuffix:%d+)", "${%1}")
-
-  -- plain known tokens
-  local known = {
-    "curtake","curnote","clearnote","track","filename","origsrcfile","srcfile","srcbase","srcext","srcpath","srcdir",
-    "samplerate","channels","length","project","scene","take","tape","trk","trkall",
-    "ubits","framerate","speed","date","time","year","originationdate","originationtime","startoffset",
-    "filepath","originator","originatorreference","timereference","description", "interleave","interum","chnum","channelnum",
-  }
-  table.sort(known, function(a,b) return #a > #b end)  -- NEW
-  for _,k in ipairs(known) do
-    s = s:gsub("%$"..k, "${"..k.."}")
-  end
-
-  return s
+  return RENAME_CORE.normalize_tokens(s)
 end
 
 -- Forward declare so helpers below can call it before its definition
 local expand_template
 
-
-
-
 -- 列出樣板中實際使用到的 token（以 normalize 後的 ${...} 為準）
 local function template_token_list(tpl)
-  local list, seen = {}, {}
-  local s = normalize_tokens(tpl or "")
-  for name in s:gmatch("%${([%w_:]+)}") do
-    if not seen[name] then
-      seen[name] = true
-      list[#list+1] = name
-    end
-  end
-  table.sort(list)
-  return list
+  return RENAME_CORE.template_token_list(tpl)
 end
 
 -- 回傳「在 Take 樣板裡會展開為空字串」的 token 名稱陣列
 -- 不改變/污染任何 fields；僅用 expand_template 試算
 local function empty_tokens_in_take_template(tpl, fields, counter)
-  local empties = {}
-  local tokens = template_token_list(tpl)
-  for _, tk in ipairs(tokens) do
-    if tk ~= "clearnote" then
-      local probe = "${" .. tk .. "}"
-      local out = expand_template(probe, fields, counter, false) or ""
-      out = tostring(out):gsub("^%s+", ""):gsub("%s+$", "")
-      if out == "" then empties[#empties+1] = tk end
-    end
-  end
-  return empties
+  return RENAME_CORE.empty_tokens_in_template(tpl, fields, counter, expand_template)
 end
 
 -- ===== Template expansion =====
 function expand_template(tpl, fields, counter, sanitize)
-  if sanitize == nil then sanitize = true end
-
-  local function maybe_sanitize(s)
-    s = tostring(s or "")
-    if sanitize then return (s:gsub('[\\/:*?"<>|%c]', '_')) end
-    return s
-  end
-
-  local function repl(name)
+  return RENAME_CORE.expand_template(tpl, fields, counter, sanitize, function(name, fields, counter, sanitize, maybe_sanitize)
     local tkl = string.lower(name or "")
     if tkl == "clearnote" then return "" end
 
-    -- $srcbaseprefix:N - first N chars of srcbase
     local prefix = tkl:match("^srcbaseprefix:(%d+)$")
     if prefix then
       local n = tonumber(prefix) or 0
@@ -1547,7 +1563,6 @@ function expand_template(tpl, fields, counter, sanitize)
       return ""
     end
 
-    -- $srcbasesuffix:N - last N chars of srcbase
     local suffix = tkl:match("^srcbasesuffix:(%d+)$")
     if suffix then
       local n = tonumber(suffix) or 0
@@ -1562,7 +1577,6 @@ function expand_template(tpl, fields, counter, sanitize)
       return ""
     end
 
-    -- ${counter:N}
     local digits = tkl:match("^counter:(%d+)$")
     if digits then
       local n = tonumber(digits) or 0
@@ -1571,7 +1585,6 @@ function expand_template(tpl, fields, counter, sanitize)
       return val
     end
 
-    -- $trk → Interleave-resolved name (metadata-only, Wave Agent–style)
     if tkl == "trk" then
       local interleave = fields.__chan_index
       local list = build_interleave_name_list(fields)
@@ -1579,7 +1592,6 @@ function expand_template(tpl, fields, counter, sanitize)
       if interleave and list and list[interleave] then
         s = list[interleave]
       else
-        -- Fallback: first available name
         if list then
           for i = 1, 128 do
             if list[i] and list[i] ~= "" then s = list[i]; break end
@@ -1589,7 +1601,6 @@ function expand_template(tpl, fields, counter, sanitize)
       return trim(maybe_sanitize(s or ""))
     end
 
-    -- $trkall → names concatenated in Interleave order (metadata-only)
     if tkl == "trkall" then
       local list = build_interleave_name_list(fields)
       local out = {}
@@ -1602,7 +1613,6 @@ function expand_template(tpl, fields, counter, sanitize)
       return table.concat(out, "_")
     end
 
-    -- $trkN (explicit by recorder channel number indexing table)
     local nidx = tkl:match("^trk(%d+)$")
     if nidx then
       local idx = tonumber(nidx)
@@ -1611,30 +1621,27 @@ function expand_template(tpl, fields, counter, sanitize)
       return trim(maybe_sanitize(s))
     end
 
-    -- ${interleave} / ${interum} → 目前 Interleave 序號（1..N）
     if tkl == "interleave" or tkl == "interum" then
       local idx = get_current_interleave_index(fields)
       return tostring(idx or "")
     end
 
-    -- ${chnum} / ${channelnum} → 錄音機的 Channel 編號（優先 TRK#，否則退回 interleave）
+    if tkl == "baseindex" or tkl == "baseidx" then
+      return tostring(current_base_index(fields) or 1)
+    end
+
     if tkl == "chnum" or tkl == "channelnum" then
       local chn = get_recorder_channel_number(fields)
       return tostring(chn or "")
     end
 
+    if tkl == "origsrcfile" then
+      local v = fields.origsrcfile or ""
+      return trim(maybe_sanitize(v))
+    end
 
-    -- default: plain field
-    local v = fields[tkl] or fields[name] or ""
-    local s = tostring(v or "")
-    return trim(maybe_sanitize(s))
-  end
-
-  local out = normalize_tokens(tpl or "")
-  out = out:gsub("%${(.-)}", function(s) return repl(s) end)
-  out = out:gsub("%$([%a%d:]+)", function(s) return repl(s) end)
-  out = out:gsub("%s+", " "):gsub("^%s+", ""):gsub("%s+$", "")
-  return out
+    return nil
+  end)
 end
 
 
@@ -1662,6 +1669,7 @@ local function cache_to_fields(cached, item)
 
   local fields = {
     -- From cache (BWF/iXML metadata)
+    __item = item,
     umid = cached.umid or "",
     umid_pt = cached.umid_pt or "",
     origination_date = cached.origination_date or "",
@@ -1860,12 +1868,10 @@ compute_interleave_diag = function(fields, item)
   return META.compute_interleave_diag(fields, item)
 end
 
+-- Keep the custom expand_template defined above; do not overwrite it with META.expand.
+-- The custom handler is required so $baseindex/$baseidx resolves from the selected group.
 empty_tokens_in_take_template = function(tpl, fields, counter)
-  return META.empty_tokens_in_template(tpl, fields, counter)
-end
-
-expand_template = function(tpl, fields, counter, sanitize)
-  return META.expand(tpl, fields, counter, sanitize)
+  return RENAME_CORE.empty_tokens_in_template(tpl, fields, counter, expand_template)
 end
 
 guess_channel_index = function(item, fields)
@@ -1917,7 +1923,7 @@ local TOKEN_LIST = {
   "$trk","$trkall",
   "$ubits","$framerate","$speed",
   "$date","$time","$year","$originationdate","$umid", "$umid_pt","$originationtime","$startoffset",
-  "${counter:2}","$interleave","$interum","$chnum",
+  "${counter:2}","$interleave","$interum","$baseindex","$baseidx","$chnum",
 }
 
 -- ===== Token insertion (caret only) =====
@@ -2301,22 +2307,30 @@ local function scan_metadata()
       cur = (cur_name and cur_name ~= "") and cur_name or "(unnamed)"
     end
 
+    bind_selected_items(f, items)
     local entry = { item=item, guid=guid, fields=f, current=cur, order=counter }
     SCAN_CACHE.list[#SCAN_CACHE.list+1] = entry
     SCAN_CACHE.map[guid] = entry
     counter = counter + 1
   end
   preview_rows = {}
-  local shown = 0
+  local total = #SCAN_CACHE.list
+  local preview_cap = (preview_limit and math.min(preview_limit, total)) or total
+  local selected_items = {}
+  for _, row in ipairs(SCAN_CACHE.list) do
+    if row and row.item then selected_items[#selected_items + 1] = row.item end
+  end
+
   if DEBUG then
-    reaper.ShowConsoleMsg(string.format("[scan_metadata] Building preview for %d items, preview_limit=%s\n",
-      #SCAN_CACHE.list, tostring(preview_limit)))
+    reaper.ShowConsoleMsg(string.format("[scan_metadata] Building preview for %d items, preview_limit=%s, preview_cap=%d\n",
+      total, tostring(preview_limit), preview_cap))
   end
   for i, e in ipairs(SCAN_CACHE.list) do
-    if not preview_limit or shown < preview_limit then
+    if i <= preview_cap then
       if DEBUG and i <= 3 then
-        reaper.ShowConsoleMsg(string.format("[scan_metadata] Processing item %d/%d for preview\n", i, #SCAN_CACHE.list))
+        reaper.ShowConsoleMsg(string.format("[scan_metadata] Processing item %d/%d for preview\n", i, total))
       end
+      bind_selected_items(e.fields, selected_items)
       e.fields.__trk_by_interleave = nil
       compute_interleave_diag(e.fields, e.item)
       local take = get_active_take(e.item)
@@ -2338,23 +2352,27 @@ local function scan_metadata()
         note_applied = false,
         will_skip = will_skip
       }
-
-
-      shown = shown + 1
     end
   end
   right_copy_text = build_right_copy_text_from_rows(right_copy_fmt)
-  local total = #items
-  status_msg = (total==0) and "No items selected."
-            or string.format("Scanned %d item(s). Preview shows first %d. (cached)", total, math.min(total, preview_limit))
+  local total_sel = #items
+  status_msg = (total_sel==0) and "No items selected."
+            or string.format("Scanned %d item(s). Preview shows first %d.", total_sel, math.min(total_sel, preview_cap))
 end
 
 local function recompute_preview_from_cache()
   if not SCAN_CACHE then preview_rows = {}; right_copy_text=""; status_msg="No cached metadata. Click 'Get Metadata'.";  return end
   preview_rows = {}
-  local shown = 0
+  local total = #SCAN_CACHE.list
+  local preview_cap = (preview_limit and math.min(preview_limit, total)) or total
+  local selected_items = {}
+  for _, row in ipairs(SCAN_CACHE.list) do
+    if row and row.item then selected_items[#selected_items + 1] = row.item end
+  end
+
   for i, e in ipairs(SCAN_CACHE.list) do
-    if not preview_limit or shown < preview_limit then
+    if i <= preview_cap then
+      bind_selected_items(e.fields, selected_items)
       e.fields.__trk_by_interleave = nil
       compute_interleave_diag(e.fields, e.item)
       local take = get_active_take(e.item)
@@ -2376,12 +2394,10 @@ local function recompute_preview_from_cache()
         note_applied = false,
         will_skip = will_skip
       }
-      
-      shown = shown + 1
     end
   end
   right_copy_text = build_right_copy_text_from_rows(right_copy_fmt)
-  status_msg = string.format("Using cached metadata. Showing first %d.", shown)
+  status_msg = string.format("Using cached metadata. Showing first %d.", preview_cap)
 end
 
 -- ===== Apply (deferred with progress console) =====
