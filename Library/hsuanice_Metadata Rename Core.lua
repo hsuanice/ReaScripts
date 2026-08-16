@@ -28,7 +28,7 @@ function M.normalize_tokens(s, extra_known)
     "curtake","curnote","clearnote","track","filename","srcfile","srcbase","srcext","srcpath","srcdir",
     "samplerate","channels","length","project","scene","take","tape","trk","trkall",
     "ubits","framerate","speed","date","time","year","originationdate","originationtime","startoffset",
-    "filepath","originator","originatorreference","timereference","description","interleave","interum","baseindex","baseidx","chnum","channelnum",
+    "filepath","originator","originatorreference","timereference","description","interleave","interum","baseindex","baseidx","overlapindex","rangeindex","chnum","channelnum",
   }
   if extra_known then
     for _, k in ipairs(extra_known) do
@@ -214,6 +214,88 @@ function M.current_base_index(item, selected_items, metadata_getter, debug_cb)
   end
 
   if debug_cb then debug_cb("[baseindex] no match in selected group -> fallback 1") end
+  return 1
+end
+
+function M.current_overlap_index(item, selected_items, debug_cb)
+  if not item then
+    if debug_cb then debug_cb("[overlapindex] missing item -> return 1") end
+    return 1
+  end
+
+  local items = {}
+  for _, it in ipairs(selected_items or {}) do
+    if it then items[#items + 1] = it end
+  end
+  if #items == 0 then return 1 end
+
+  local function item_range(it)
+    local start = reaper.GetMediaItemInfo_Value(it, "D_POSITION") or 0
+    local len = reaper.GetMediaItemInfo_Value(it, "D_LENGTH") or 0
+    return start, start + len
+  end
+
+  local function item_track_order(it)
+    local tr = reaper.GetMediaItemTrack(it)
+    return tr and (reaper.GetMediaTrackInfo_Value(tr, "IP_TRACKNUMBER") or 1e9) or 1e9
+  end
+
+  local function overlaps(a, b)
+    local a_start, a_end = item_range(a)
+    local b_start, b_end = item_range(b)
+    return (a_end > b_start) and (b_end > a_start)
+  end
+
+  local visited = {}
+  local groups = {}
+  for _, it in ipairs(items) do
+    if not visited[it] then
+      local stack = { it }
+      visited[it] = true
+      local group = {}
+
+      while #stack > 0 do
+        local cur = table.remove(stack)
+        group[#group + 1] = cur
+        for _, other in ipairs(items) do
+          if not visited[other] and overlaps(cur, other) then
+            visited[other] = true
+            stack[#stack + 1] = other
+          end
+        end
+      end
+
+      table.sort(group, function(a, b)
+        local ta = item_track_order(a)
+        local tb = item_track_order(b)
+        if ta ~= tb then return ta < tb end
+        local sa = reaper.GetMediaItemInfo_Value(a, "D_POSITION") or 0
+        local sb = reaper.GetMediaItemInfo_Value(b, "D_POSITION") or 0
+        if math.abs(sa - sb) > 0.000001 then return sa < sb end
+        local la = reaper.GetMediaItemInfo_Value(a, "D_LENGTH") or 0
+        local lb = reaper.GetMediaItemInfo_Value(b, "D_LENGTH") or 0
+        if math.abs(la - lb) > 0.000001 then return la < lb end
+        local ga = reaper.GetSetMediaItemInfo_String(a, "GUID", "", false)
+        local gb = reaper.GetSetMediaItemInfo_String(b, "GUID", "", false)
+        return tostring(ga or "") < tostring(gb or "")
+      end)
+
+      groups[#groups + 1] = group
+    end
+  end
+
+  for _, group in ipairs(groups) do
+    for idx, it in ipairs(group) do
+      if it == item then
+        if debug_cb then
+          debug_cb(string.format("[overlapindex] resolved item=%s => index=%d group_size=%d", tostring(reaper.GetSetMediaItemInfo_String(it, "GUID", "", false) or ""), idx, #group))
+        end
+        return idx
+      end
+    end
+  end
+
+  if debug_cb then debug_cb("[overlapindex] no match -> fallback 1") end
   return 1
 end
 
