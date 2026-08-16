@@ -1,6 +1,6 @@
 --[[
 @description ReaImGui - Rename Source File from Metadata (cached preview + source rename)
-@version 260816.0000
+@version 260817.0000
 @author hsuanice
 @about
   Rename the actual source file on disk from BWF/iXML and true source metadata using a fast ReaImGui UI.
@@ -35,10 +35,10 @@
   hsuanice served as the workflow designer, tester, and integrator for this tool.
 
 @changelog
-  v2026.08.16 (Taipei Time)
-    - Perf: Preview generation now limits work to the actual selected item range and avoids redundant full-cache rebuilds.
-    - Fix: $baseindex / $baseidx now renumbers consistently within the same metadata group without needing a real interleave restore.
-    - UX: Preview refresh is faster and more predictable when reviewing selected items.
+  v2026.08.17 (Taipei Time)
+    - New: Added $overlapindex (with $rangeindex alias) for a pure time-overlap-based numbering mode.
+    - Perf: Preview/index generation now groups selected items by overlap range and track order for fast sequential numbering.
+    - UX: Keeps $baseindex behavior intact while adding a much faster metadata-free option for large batches.
 
   v260714.1438 (2026-07-14)
     - Replace Rules: Added a global RegEx checkbox for pattern matching mode.
@@ -1523,6 +1523,26 @@ local function current_base_index(fields)
   end, debug_cb)
 end
 
+local function current_overlap_index(fields)
+  local item = fields and fields.__item
+  local selected = fields and fields.__selected_items or {}
+
+  if not selected or #selected == 0 then
+    selected = {}
+    local sel_count = reaper.CountSelectedMediaItems(0)
+    for i = 0, sel_count - 1 do
+      local it = reaper.GetSelectedMediaItem(0, i)
+      if it then selected[#selected + 1] = it end
+    end
+  end
+
+  local debug_cb = DEBUG and function(msg)
+    reaper.ShowConsoleMsg(msg .. "\n")
+  end or nil
+
+  return RENAME_CORE.current_overlap_index(item, selected, debug_cb)
+end
+
 -- Wrap known $tokens to ${token} so $sceneT$take -> ${scene}T${take}
 local function normalize_tokens(s)
   return RENAME_CORE.normalize_tokens(s)
@@ -1628,6 +1648,10 @@ function expand_template(tpl, fields, counter, sanitize)
 
     if tkl == "baseindex" or tkl == "baseidx" then
       return tostring(current_base_index(fields) or 1)
+    end
+
+    if tkl == "overlapindex" or tkl == "rangeindex" then
+      return tostring(current_overlap_index(fields) or 1)
     end
 
     if tkl == "chnum" or tkl == "channelnum" then
@@ -1923,7 +1947,7 @@ local TOKEN_LIST = {
   "$trk","$trkall",
   "$ubits","$framerate","$speed",
   "$date","$time","$year","$originationdate","$umid", "$umid_pt","$originationtime","$startoffset",
-  "${counter:2}","$interleave","$interum","$baseindex","$baseidx","$chnum",
+  "${counter:2}","$interleave","$interum","$baseindex","$baseidx","$overlapindex","$rangeindex","$chnum",
 }
 
 -- ===== Token insertion (caret only) =====
