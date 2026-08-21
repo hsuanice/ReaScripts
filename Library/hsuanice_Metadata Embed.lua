@@ -1,6 +1,6 @@
 --[[
 @description Metadata Embed - BWF MetaEdit helpers
-@version 260718.1728
+@version 260821.2036
 @author hsuanice
 @noindex
 @about
@@ -12,6 +12,17 @@
   - Post-embed refresh (offline->online, rebuild peaks)
 
 @changelog
+  260821.2036 - Tolerate non-fatal bwfmetaedit warnings on CORE/TR reads
+    - Copy_CORE() no longer aborts solely because bwfmetaedit exits non-zero
+      (e.g. "invalid Wave: iXML, missing padding byte"); it now uses the
+      recovered --continue-errors report as long as output was produced.
+    - TR_Read() now passes --continue-errors so TimeReference can still be
+      read from source files with the same non-fatal chunk warning, instead
+      of returning nil and causing "TR result: SKIP (cannot read src TR)".
+    - Root cause of the reported CORE/TR FAILs: some source WAVs have an
+      odd-sized chunk missing its pad byte, which bwfmetaedit flags as an
+      error (exit code 1) even though it still emits a usable XML report.
+
   260718.1728 - Synced channel-aware APIs with production fixes from Embed script
     - Build_Channel_Context now prefers TRACK_LIST slot order for interleave mapping and returns channel_index.
     - Copy_iXML now validates post-import iXML by re-exporting destination sidecar.
@@ -90,7 +101,7 @@
 ]]
 
 local E = {}
-E.VERSION = "260718.1728"
+E.VERSION = "260821.2036"
 
 -- ===== Shell wrapper / exec (same as TR tool style) =====
 local IS_WIN = reaper.GetOS():match("Win")
@@ -473,7 +484,10 @@ function E.Copy_CORE(cli, src_wav, dst_wav, opts)
 
   local codeR, outR = exec_shell(('"%s" --out-xml=- --continue-errors --verbose "%s"'):format(cli, src_wav), 30000)
   _log(opts.log, ("    CORE(FLAGS): export src (code=%s)"):format(tostring(codeR)))
-  if codeR ~= 0 or not outR or #outR == 0 then return false end
+  if not outR or #outR == 0 then return false end
+  if codeR ~= 0 then
+    _log(opts.log, "    CORE(FLAGS): export reported non-fatal warning (--continue-errors), using recovered report")
+  end
 
   local fields = _parse_core_from_xml_report(outR)
   for k, v in pairs(fields) do
@@ -741,7 +755,7 @@ end
 -- read BWF TimeReference (samples) using --out-xml=-
 function E.TR_Read(cli, wav_path)
   if not cli or not _is_wav(wav_path) then return nil, -1, "" end
-  local cmd = ('"%s" --out-xml=- "%s"'):format(cli, wav_path)
+  local cmd = ('"%s" --out-xml=- --continue-errors "%s"'):format(cli, wav_path)
   local code, out = exec_shell(cmd, 20000)
   local tr = tonumber(out:match("<TimeReference>(%d+)</TimeReference>") or "")
   return tr, code, out
