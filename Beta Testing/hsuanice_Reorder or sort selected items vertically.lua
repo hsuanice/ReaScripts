@@ -1,6 +1,6 @@
 --[[
 @description ReaImGui - Vertical Reorder and Sort (items)
-@version 260730.1537
+@version 260822.1314
 @author hsuanice
 @about
   Provides three vertical re-arrangement modes for selected items (stacked UI):
@@ -29,6 +29,16 @@
 
 
 @changelog
+  v260822.1314
+  - Fix: Copy to Sort's per-item Recorder Ch resolution no longer falls back to
+    Interleave when a TRK# name has trailing/leading whitespace (e.g. "DOOR ").
+    * Now resolves Ch directly from iXML CHANNEL_INDEX via the library's
+      trk_name_and_channel() (Interleave -> CHANNEL_INDEX, no name matching).
+    * Name-matching against TRK# fields is kept only as a trimmed cross-check
+      fallback, and no longer used to silently substitute Interleave for Ch.
+    * Debug now also prints normalized TRK name, matched TRK#, CHANNEL_INDEX,
+      and INTERLEAVE_INDEX separately for easier troubleshooting.
+
   v260730.1537
   - Update: Copy to Sort progress/output refined for console-first workflow.
     * Console progress now emphasizes phase percentage only.
@@ -462,6 +472,7 @@ end
 ---------------------------------------
 -- 小工具
 ---------------------------------------
+local function trim(s) return tostring(s or ""):gsub("^%s+", ""):gsub("%s+$", "") end
 local function item_start(it) return reaper.GetMediaItemInfo_Value(it,"D_POSITION") end
 local function item_len(it)   return reaper.GetMediaItemInfo_Value(it,"D_LENGTH")   end
 local function item_track(it) return reaper.GetMediaItemTrack(it) end
@@ -1067,22 +1078,33 @@ local function run_copy_to_new_tracks(name_mode, order_mode, asc, append_seconda
     -- Get track name from metadata (from sTRK# field)
     local name = tostring(META.expand("${trk}",   f, nil, false) or "")
 
-    -- CRITICAL: Extract recorder channel number from sTRK# field
-    -- The ${trk} expansion finds the track name, but we need the # from sTRK#
-    -- We need to find which TRK# field matched this item's interleave index
-    local ch = idx  -- fallback to interleave index
+    -- CRITICAL: Recorder Ch (= iXML CHANNEL_INDEX) must NOT be confused with Interleave.
+    -- Prefer the library's trk_name_and_channel(), which maps Interleave -> CHANNEL_INDEX
+    -- via __ixml_tracks (no name matching involved, so trailing-whitespace TRK# names
+    -- can never cause a wrong fallback to Interleave).
+    local _, lib_ch = META.trk_name_and_channel(f, idx)
+    local ch = tonumber(lib_ch) or idx  -- last-resort fallback only if library gave nothing
 
-    -- Search through TRK1..TRK64 fields to find which one has this track name
+    -- Fallback / cross-check: name matching against TRK# fields, trimmed to avoid
+    -- whitespace mismatches (e.g. "DOOR" vs "DOOR ").
+    local matched_trk_num = nil
+    local name_trim = trim(name)
     for trk_num = 1, 64 do
       local trk_name = f["TRK"..trk_num] or f["trk"..trk_num]
-      if trk_name and trk_name ~= "" and trk_name == name then
-        ch = trk_num
+      if trk_name and trk_name ~= "" and trim(trk_name) == name_trim then
+        matched_trk_num = trk_num
         break
       end
+    end
+    if not (tonumber(lib_ch)) and matched_trk_num then
+      ch = matched_trk_num  -- only used when CHANNEL_INDEX mapping was unavailable
     end
 
     debug(string.format("Item #%d: take='%s' | Track Name='%s' | Ch=%d (interleave=%d) | pos=%.3f",
                         i, tkn, name, ch, idx, item_start(it)))
+    debug(string.format("    → raw TRK name(matched)='%s' | normalized='%s' | matched TRK#=%s | CHANNEL_INDEX(ch)=%d | INTERLEAVE_INDEX=%d",
+                        matched_trk_num and (f["TRK"..matched_trk_num] or f["trk"..matched_trk_num]) or "(none)",
+                        name_trim, tostring(matched_trk_num or "n/a"), ch, idx))
 
     -- DEBUG: List all non-empty TRK# fields for this item
     local all_trks = {}
