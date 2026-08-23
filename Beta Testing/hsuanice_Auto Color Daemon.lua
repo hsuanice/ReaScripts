@@ -1,6 +1,6 @@
 --[[
 @description Auto Color Items by Take Name — Background Daemon
-@version 260804.1623
+@version 260823.1429
 @author hsuanice
 @about
   Headless background daemon for hsuanice_Auto Color Items by Take Name.
@@ -18,6 +18,13 @@
     3. The GUI can be closed; the daemon runs independently.
 
 @changelog
+  v260823.1429 (Taipei Time)
+  - Fix: daemon now runs independently of GUI heartbeat gating (no need to open GUI first).
+  - Fix: stale heartbeat values from prior REAPER sessions no longer block daemon processing.
+  - Fix: daemon keyword matching now follows GUI's split model (take_keyword for items, track_keyword for tracks).
+  - Add: periodic safety recolor pass to avoid missed updates when state-count changes are not emitted.
+  - Debug: added runtime logs for startup/recolor diagnostics; default logging is now OFF.
+
   v260804.1623
   - Add: supports color_mode from GUI (normal/shiny)
   - Add: ShinyColor mode now writes take peak color and applies lighter item background color in daemon auto-coloring
@@ -38,13 +45,10 @@ local _, SCRIPT_PATH, sectionID, cmdID = reaper.get_action_context()
 
 local PREF_NS = "hsuanice_AutoColorItems"
 local UI_HEARTBEAT_KEY = "ui_heartbeat"
-local UI_HEARTBEAT_TTL = 1.0
+local DEBUG = false
 
-local function ui_has_auto_control()
-  local hb = tonumber(reaper.GetExtState(PREF_NS, UI_HEARTBEAT_KEY) or "")
-  if not hb then return false end
-  if (reaper.time_precise() - hb) > UI_HEARTBEAT_TTL then return false end
-  return reaper.GetExtState(PREF_NS, "auto_color") == "1"
+local function log(msg)
+  if DEBUG then reaper.ShowConsoleMsg("[AutoColorDaemon] " .. tostring(msg) .. "\n") end
 end
 
 -- ─── file-based state bootstrap ───────────────────────────────────────────────
@@ -52,11 +56,13 @@ end
 -- load_settings() has valid data even when reaper-extstate.ini was cleared.
 -- (The GUI script writes the .dat file on every clean exit and on every
 --  explicit "Save Preset", making it the most reliable source of truth.)
+local state_bootstrap_loaded = false
 local STATE_FILE do
   local script_dir = SCRIPT_PATH:match("^(.*[/\\])") or "./"
   STATE_FILE = script_dir .. "../Tools/hsuanice_AutoColorItems_state.dat"
   local f = io.open(STATE_FILE, "r")
   if f then
+    state_bootstrap_loaded = true
     local function dec(s) return (s:gsub("\\\\", "\1"):gsub("\\n", "\n"):gsub("\1", "\\")) end
     for line in f:lines() do
       if not line:match("^%s*#") and line ~= "" then
@@ -144,8 +150,11 @@ end
 
 -- ─── palette generation (identical to GUI script) ────────────────────────────
 local function gen_palette()
-  local old_kw = {}
-  for i, p in ipairs(PALETTE) do old_kw[i] = p.keyword end
+  local old_take_kw, old_track_kw = {}, {}
+  for i, p in ipairs(PALETTE) do
+    old_take_kw[i] = p.take_keyword or p.keyword or ""
+    old_track_kw[i] = p.track_keyword or ""
+  end
   while #PALETTE > 0 do table.remove(PALETTE) end
   local cols = PALETTE_COLS
   for r = 1, #PCONF.rows do
@@ -154,14 +163,22 @@ local function gen_palette()
       local hue = cols <= 1 and PCONF.hue_offset
                              or (PCONF.hue_offset + PCONF.hue_range * (c-1) / (cols-1))
       local idx = (r-1)*cols + c
-      PALETTE[#PALETTE+1] = { color=hsv(hue % 360, row.sat, row.val), keyword=old_kw[idx] or "" }
+      PALETTE[#PALETTE+1] = {
+        color=hsv(hue % 360, row.sat, row.val),
+        take_keyword=old_take_kw[idx] or "",
+        track_keyword=old_track_kw[idx] or "",
+      }
     end
   end
   if PCONF.grey_row then
     local base = #PCONF.rows * cols
     for c = 1, cols do
       local v = cols <= 1 and 0.5 or (1.0 - (c-1)/(cols-1))
-      PALETTE[#PALETTE+1] = { color=hsv(0, 0, v), keyword=old_kw[base+c] or "" }
+      PALETTE[#PALETTE+1] = {
+        color=hsv(0, 0, v),
+        take_keyword=old_take_kw[base+c] or "",
+        track_keyword=old_track_kw[base+c] or "",
+      }
     end
   end
 end
@@ -238,18 +255,21 @@ local function load_settings()
   --   RRGGBB<TAB>take_keyword<TAB>track_keyword   (newer GUI format)
   local raw = reaper.GetExtState(PREF_NS, "palette_v3")
   local colors = {}
-  local kws = {}
+  local take_kws = {}
+  local track_kws = {}
   local row = 0
   for line in (raw.."\n"):gmatch("(.-)\n") do
     if row == 0 then
       PALETTE_COLS = math.max(1, tonumber(line:match("cols=(%d+)")) or PALETTE_COLS)
     else
-      local hx, kw = line:match("^(%x+)\t(.-)\t.-$")
+      local hx, take_kw, track_kw = line:match("^(%x+)\t(.-)\t(.-)$")
       if not hx then
-        hx, kw = line:match("^(%x+)\t(.-)$")
+        hx, take_kw = line:match("^(%x+)\t(.-)$")
+        track_kw = ""
       end
       colors[#colors+1] = tonumber(hx or "0", 16) or 0
-      kws[#kws+1] = kw or ""
+      take_kws[#take_kws+1] = take_kw or ""
+      track_kws[#track_kws+1] = track_kw or ""
     end
     row = row + 1
   end
@@ -258,7 +278,9 @@ local function load_settings()
     if colors[i] and colors[i] > 0 then
       p.color = colors[i]
     end
-    p.keyword = kws[i] or ""
+    p.take_keyword = take_kws[i] or ""
+    p.track_keyword = track_kws[i] or ""
+    p.keyword = p.take_keyword -- compatibility alias
   end
 end
 
@@ -353,8 +375,9 @@ local function match_take(take_name)
   if lo == "" then return nil end
   local best_p, best_len = nil, 0
   for _, p in ipairs(PALETTE) do
-    if p.keyword ~= "" then
-      for kw in (p.keyword.."|"):gmatch("([^|]+)|") do
+    local keyword = p.take_keyword or p.keyword or ""
+    if keyword ~= "" then
+      for kw in (keyword.."|"):gmatch("([^|]+)|") do
         local kw_trim = kw:match("^%s*(.-)%s*$")
         if kw_trim ~= "" and #kw_trim > best_len and lo:find(kw_trim:lower(), 1, true) then
           best_p, best_len = p, #kw_trim
@@ -370,8 +393,9 @@ local function match_track(track_name)
   if lo == "" then return nil end
   local best_p, best_len = nil, 0
   for _, p in ipairs(PALETTE) do
-    if p.keyword ~= "" then
-      for kw in (p.keyword.."|"):gmatch("([^|]+)|") do
+    local keyword = p.track_keyword or ""
+    if keyword ~= "" then
+      for kw in (keyword.."|"):gmatch("([^|]+)|") do
         local kw_trim = kw:match("^%s*(.-)%s*$")
         if kw_trim ~= "" and #kw_trim > best_len and lo:find(kw_trim:lower(), 1, true) then
           best_p, best_len = p, #kw_trim
@@ -384,20 +408,26 @@ end
 
 local function do_auto_color_tracks()
   local trn = reaper.CountTracks(0)
-  if trn == 0 then return end
+  if trn == 0 then return 0, 0 end
+  local track_hits = 0
   for i = 0, trn - 1 do
     local tr = reaper.GetTrack(0, i)
     local _, tn = reaper.GetTrackName(tr)
     local p = match_track(tn)
-    if p then apply_color_to_track(tr, p.color) end
+    if p then
+      apply_color_to_track(tr, p.color)
+      track_hits = track_hits + 1
+    end
   end
   reaper.TrackList_AdjustWindows(false)
+  return trn, track_hits
 end
 
 local function do_auto_color()
-  do_auto_color_tracks()
+  local trn, track_hits = do_auto_color_tracks()
   local n = reaper.CountMediaItems(0)
-  if n == 0 then return end
+  if n == 0 then return trn, track_hits, 0, 0 end
+  local item_hits = 0
   for i = 0, n-1 do
     local item = reaper.GetMediaItem(0, i)
     local take = reaper.GetActiveTake(item)
@@ -407,7 +437,10 @@ local function do_auto_color()
       if ac_midi then
         local _, tn = reaper.GetSetMediaItemTakeInfo_String(take, "P_NAME", "", false)
         local p = match_take(tn)
-        if p then apply_color_by_mode(item, p.color) end
+        if p then
+          apply_color_by_mode(item, p.color)
+          item_hits = item_hits + 1
+        end
       end
     else
       local src = reaper.GetMediaItemTake_Source(take)
@@ -416,18 +449,25 @@ local function do_auto_color()
         if ac_empty then
           local _, tn = reaper.GetSetMediaItemTakeInfo_String(take, "P_NAME", "", false)
           local p = match_take(tn)
-          if p then apply_color_by_mode(item, p.color) end
+          if p then
+            apply_color_by_mode(item, p.color)
+            item_hits = item_hits + 1
+          end
         end
       else
         if ac_audio then
           local _, tn = reaper.GetSetMediaItemTakeInfo_String(take, "P_NAME", "", false)
           local p = match_take(tn)
-          if p then apply_color_by_mode(item, p.color) end
+          if p then
+            apply_color_by_mode(item, p.color)
+            item_hits = item_hits + 1
+          end
         end
       end
     end
   end
   reaper.UpdateArrange()
+  return trn, track_hits, n, item_hits
 end
 
 -- ─── init ─────────────────────────────────────────────────────────────────────
@@ -439,9 +479,12 @@ reaper.atexit(function()
 end)
 
 load_settings()
+-- Clear any residual GUI heartbeat so daemon can start independently.
+reaper.SetExtState(PREF_NS, UI_HEARTBEAT_KEY, "0", false)
 local last_fingerprint  = settings_fingerprint()
 local last_state_count  = reaper.GetProjectStateChangeCount(0)
-do_auto_color()
+local itrn, ihit_tr, iitm, ihit_itm = do_auto_color()
+log(string.format("start: bootstrap=%s, tracks=%d hit=%d, items=%d hit=%d", tostring(state_bootstrap_loaded), itrn or 0, ihit_tr or 0, iitm or 0, ihit_itm or 0))
 
 -- ─── loop ─────────────────────────────────────────────────────────────────────
 -- Debounce: only recolor after the project state has been stable for
@@ -449,15 +492,11 @@ do_auto_color()
 -- on every track-selection click (which also increments state count).
 local DEBOUNCE_N           = 15   -- frames of stability required
 local FINGERPRINT_INTERVAL = 10   -- check GUI settings every N frames
+local FORCE_RECOLOR_INTERVAL = 120 -- safety refresh (~3.6s @ ~30ms defer cadence)
 local pending_recolor      = 0
 local frame_count          = 0
 
 local function loop()
-  if ui_has_auto_control() then
-    reaper.defer(loop)
-    return
-  end
-
   frame_count = frame_count + 1
 
   -- Check for GUI settings changes less frequently
@@ -467,7 +506,8 @@ local function loop()
       load_settings()
       last_fingerprint  = fp
       pending_recolor   = 0
-      do_auto_color()
+      local trn, th, itm, ih = do_auto_color()
+      log(string.format("recolor: settings changed | tracks=%d hit=%d, items=%d hit=%d", trn or 0, th or 0, itm or 0, ih or 0))
       last_state_count  = reaper.GetProjectStateChangeCount(0)
       reaper.defer(loop)
       return
@@ -482,8 +522,16 @@ local function loop()
   elseif pending_recolor > 0 then
     pending_recolor = pending_recolor - 1
     if pending_recolor == 0 then
-      do_auto_color()
+      local trn, th, itm, ih = do_auto_color()
+      log(string.format("recolor: state settled | tracks=%d hit=%d, items=%d hit=%d", trn or 0, th or 0, itm or 0, ih or 0))
     end
+  end
+
+  -- Safety pass: even without detected state changes, refresh periodically.
+  -- This covers edge cases where some edits don't bump state count reliably.
+  if frame_count % FORCE_RECOLOR_INTERVAL == 0 then
+    local trn, th, itm, ih = do_auto_color()
+    log(string.format("recolor: interval | tracks=%d hit=%d, items=%d hit=%d", trn or 0, th or 0, itm or 0, ih or 0))
   end
 
   reaper.defer(loop)
