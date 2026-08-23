@@ -1,6 +1,6 @@
 --[[
 @description hsuanice Batch Metadata Conform
-@version 260823.2050
+@version 260823.2222
 @author hsuanice
 @noindex
 @about
@@ -12,6 +12,10 @@
   the source identity and poly stream mapping are validated against real files.
 
 @changelog
+  v260823.2222 (Asia/Taipei)
+    - Removed column-width debug console output.
+    - Made Fit Widths a stateless table layout reset.
+
   v260823.2050 (Asia/Taipei)
     - Saved stable loading/preview milestone.
     - Load folders using fast filename-only indexing before metadata scanning.
@@ -60,6 +64,9 @@ for _, option in ipairs(MATCH_OPTIONS) do
   if saved == "0" then MATCH_CONFIG[option.key] = false end
 end
 local selected_target_index = 1
+local sort_state = { columns = {} }
+local table_generation = 1
+local sort_results
 local loading_state = nil
 local scan_jobs = {}
 local cache_scan_jobs = {}
@@ -507,6 +514,7 @@ local function build_results(write_console)
     end
   end
   table.sort(RESULTS, function(a, b) return (status_order[a.status] or 9) < (status_order[b.status] or 9) end)
+  if sort_results then sort_results() end
   last_build_status = string.format("Last build: %d matched, %d ambiguous, %d not found, %d invalid", counts.MATCHED, counts.AMBIGUOUS, counts.NOT_FOUND, counts.INVALID)
   if write_console then
     reaper.ShowConsoleMsg(string.format("[Batch Metadata Conform] match elapsed: %.2fs\n", reaper.time_precise() - started_at))
@@ -1099,6 +1107,56 @@ local function display_column_value(result, row_role, key)
   return fields and (fields[key] or "") or "-"
 end
 
+local function display_sort_value(result, key)
+  local value = display_column_value(result, "TARGET", key)
+  if key == "status" then return status_order[result.status] or 99 end
+  if key == "stream" or key == "recorder_ch" then return tonumber(value) or 999999 end
+  return lower(value)
+end
+
+sort_results = function()
+  if #sort_state.columns == 0 then return end
+  table.sort(RESULTS, function(left, right)
+    for _, sort_column in ipairs(sort_state.columns) do
+      local left_value = display_sort_value(left, sort_column.key)
+      local right_value = display_sort_value(right, sort_column.key)
+      if left_value ~= right_value then
+        return sort_column.ascending and left_value < right_value or left_value > right_value
+      end
+    end
+    return false
+  end)
+end
+
+local function toggle_sort(key, add_level)
+  if add_level then
+    for _, sort_column in ipairs(sort_state.columns) do
+      if sort_column.key == key then
+        sort_column.ascending = not sort_column.ascending
+        sort_results()
+        return
+      end
+    end
+    sort_state.columns[#sort_state.columns + 1] = { key = key, ascending = true }
+  else
+    local ascending = true
+    if #sort_state.columns == 1 and sort_state.columns[1].key == key then
+      ascending = not sort_state.columns[1].ascending
+    end
+    sort_state.columns = { { key = key, ascending = ascending } }
+  end
+  sort_results()
+end
+
+local function sort_indicator(key)
+  for index, sort_column in ipairs(sort_state.columns) do
+    if sort_column.key == key then
+      return (#sort_state.columns > 1 and (" [" .. index .. "]") or "") .. (sort_column.ascending and " ^" or " v")
+    end
+  end
+  return ""
+end
+
 ctx = reaper.ImGui_CreateContext("hsuanice Batch Metadata Conform")
 reaper.ImGui_SetNextWindowSize(ctx, 1180, 720, reaper.ImGui_Cond_FirstUseEver())
 
@@ -1167,15 +1225,31 @@ local function loop()
     end
     local changed, value = reaper.ImGui_InputText(ctx, "Search", search)
     if changed then search = value end
+    reaper.ImGui_SameLine(ctx)
+    if reaper.ImGui_Button(ctx, "Fit Widths") then table_generation = table_generation + 1 end
 
-    if reaper.ImGui_BeginTable(ctx, "matches", #DISPLAY_COLUMNS, reaper.ImGui_TableFlags_Borders() + reaper.ImGui_TableFlags_RowBg() + reaper.ImGui_TableFlags_ScrollY() + reaper.ImGui_TableFlags_ScrollX() + reaper.ImGui_TableFlags_Resizable() + reaper.ImGui_TableFlags_SizingFixedFit(), 0, 420) then
+    if reaper.ImGui_BeginTable(ctx, "matches##" .. table_generation, #DISPLAY_COLUMNS,
+      reaper.ImGui_TableFlags_Borders()
+      | reaper.ImGui_TableFlags_RowBg()
+      | reaper.ImGui_TableFlags_ScrollY()
+      | reaper.ImGui_TableFlags_ScrollX()
+      | reaper.ImGui_TableFlags_Resizable()
+      | reaper.ImGui_TableFlags_SizingFixedFit(), 0, 420) then
       for _, column in ipairs(DISPLAY_COLUMNS) do
         local label = column.label
         if MATCH_CONFIG[column.key] and column.key ~= "track_name" then label = label .. " [MATCH]" end
         if MATCH_CONFIG.track_name and column.key == "track_name" then label = label .. " [STREAM]" end
-        reaper.ImGui_TableSetupColumn(ctx, label)
+        local initial_width = math.max(80, #label * 7 + 28)
+        reaper.ImGui_TableSetupColumn(ctx, label, reaper.ImGui_TableColumnFlags_WidthFixed(), initial_width)
       end
-      reaper.ImGui_TableHeadersRow(ctx)
+      reaper.ImGui_TableNextRow(ctx, reaper.ImGui_TableRowFlags_Headers())
+      for index, column in ipairs(DISPLAY_COLUMNS) do
+        reaper.ImGui_TableSetColumnIndex(ctx, index - 1)
+        local label = column.label .. sort_indicator(column.key)
+        if reaper.ImGui_Selectable(ctx, label .. "##header_" .. column.key, false) then
+          toggle_sort(column.key, reaper.ImGui_IsKeyDown(ctx, reaper.ImGui_Mod_Shift()))
+        end
+      end
       local visible_results = {}
       for _, result in ipairs(RESULTS) do
         local allowed = filter == "All" or (filter == "Matched" and result.status == "MATCHED") or (filter == "Warning" and result.status == "AMBIGUOUS") or (filter == "Not Found" and result.status == "NOT_FOUND") or (filter == "Invalid" and result.status == "INVALID")
@@ -1184,11 +1258,19 @@ local function loop()
           visible_results[#visible_results + 1] = result
         end
       end
-      local preview_count = math.min(5, #visible_results)
+      local preview_results = {}
+      local status_counts = { MATCHED = 0, AMBIGUOUS = 0, NOT_FOUND = 0, INVALID = 0 }
+      for _, result in ipairs(visible_results) do
+        if status_counts[result.status] < 5 then
+          preview_results[#preview_results + 1] = result
+          status_counts[result.status] = status_counts[result.status] + 1
+        end
+      end
+      local preview_count = #preview_results
       local row_count = preview_count * 2
       local first_row, last_row = 1, row_count
       for display_row = first_row, last_row do
-        local result = visible_results[math.floor((display_row - 1) / 2) + 1]
+        local result = preview_results[math.floor((display_row - 1) / 2) + 1]
         local row_index = ((display_row - 1) % 2) + 1
         local row_role = row_index == 1 and "TARGET" or "REFERENCE"
         if result then
