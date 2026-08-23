@@ -1,6 +1,6 @@
 --[[
 @description ReaImGui - Rename Active Take from Metadata (caret insert + cached preview + copy/export)
-@version 260817.0000
+@version 260823.1355
 @author hsuanice
 @about
   Rename active takes and/or item notes from BWF/iXML and true source metadata using a fast ReaImGui UI.
@@ -35,6 +35,10 @@
   hsuanice served as the workflow designer, tester, and integrator for this tool.
 
 @changelog
+  v260823.1355 (Taipei Time)
+    - Apply progress: processing now runs one-by-one (1 item per defer step), so Console progress updates per item instead of per 50-item batch.
+    - Persistence scope: moved this script to its own ExtState namespace so input fields, presets, and section states are isolated from other rename scripts.
+
   v2026.08.17 (Taipei Time)
     - New: Added $overlapindex (with $rangeindex alias) for a pure time-overlap-based numbering mode.
     - Perf: Preview/index generation now groups selected items by overlap range and track order for fast sequential numbering.
@@ -395,7 +399,7 @@ local function TF(name) local fn = reaper[name]; return (type(fn)=="function") a
 local KEY_ESC = TF('ImGui_Key_Escape')
 
 -- ===== ExtState (defaults) =====
-local EXT_NS = "RENAME_TAKE_FROM_METADATA_V1"
+local EXT_NS = "RENAME_ACTIVE_TAKE_FROM_METADATA_V1"
 local DEFAULT_TAKE_TEMPLATE_INIT = "$curtake"
 local DEFAULT_NOTE_TEMPLATE_INIT = "$curnote"
 local function load_defaults()
@@ -2101,7 +2105,7 @@ end
 
 -- ===== Apply (deferred with progress console) =====
 local APPLY_STATE = nil
-local APPLY_BATCH = 50   -- items processed per defer frame
+local APPLY_BATCH = 1   -- process one item per defer frame so progress prints one-by-one
 
 local function apply_renaming_step()
   if not APPLY_STATE then return end
@@ -2275,7 +2279,7 @@ end
 
 
 -- CollapsingHeader state persistence (saved via ExtState across sessions)
-local _SECT_EXT   = "hsuanice_RenameMetadata_v1"
+local _SECT_EXT   = "hsuanice_RenameActiveTakeMetadata_sections_v1"
 local _sect_state = {}
 local _sect_init  = {}
 for _, k in ipairs({"tokens","renamer","take_presets","note_presets"}) do

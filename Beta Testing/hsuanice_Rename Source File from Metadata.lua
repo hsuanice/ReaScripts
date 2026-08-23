@@ -1,6 +1,6 @@
 --[[
 @description ReaImGui - Rename Source File from Metadata (cached preview + source rename)
-@version 260817.0000
+@version 260823.1355
 @author hsuanice
 @about
   Rename the actual source file on disk from BWF/iXML and true source metadata using a fast ReaImGui UI.
@@ -35,6 +35,14 @@
   hsuanice served as the workflow designer, tester, and integrator for this tool.
 
 @changelog
+  v260823.1355 (Taipei Time)
+    - Apply progress: processing now runs one-by-one (1 item per defer step), so Console progress updates per item instead of per 50-item batch.
+    - Persistence scope: moved this script to its own ExtState namespace so input fields, presets, and section states are isolated from other rename scripts.
+
+  v2026.08.21 (Taipei Time)
+    - New: Added $marker token — nearest project marker at/before the item start (same semantics as REAPER's own render wildcard), for non-metadata channel/scene naming workflows.
+    - UI: Template Tokens row is now split into two color-coded groups: "REAPER / Session" (e.g. $track, $marker, $srcfile, counters) vs "File Metadata (BWF/iXML)" (e.g. $scene, $trk, $umid), so file-embedded metadata tokens are visually distinct from REAPER/session-derived ones.
+
   v2026.08.17 (Taipei Time)
     - New: Added $overlapindex (with $rangeindex alias) for a pure time-overlap-based numbering mode.
     - Perf: Preview/index generation now groups selected items by overlap range and track order for fast sequential numbering.
@@ -438,7 +446,7 @@ local function TF(name) local fn = reaper[name]; return (type(fn)=="function") a
 local KEY_ESC = TF('ImGui_Key_Escape')
 
 -- ===== ExtState (defaults) =====
-local EXT_NS = "RENAME_TAKE_FROM_METADATA_V1"
+local EXT_NS = "RENAME_SOURCE_FILE_FROM_METADATA_V1"
 local DEFAULT_TAKE_TEMPLATE_INIT = "$srcfile"
 local DEFAULT_NOTE_TEMPLATE_INIT = "$curnote"
 local function load_defaults()
@@ -1103,6 +1111,21 @@ local function basename_no_ext(p) local n=basename(p); return (n:gsub("%.%w+$","
 local function get_ext(p) local n=basename(p); return (n:match("%.([^.]+)$") or "") end
 local function dirname(p) return p and (p:match("^(.*)[/\\][^/\\]+$") or "") or "" end
 local function get_item_track_name(item) local tr=reaper.GetMediaItem_Track(item); if not tr then return "" end local _,name=reaper.GetTrackName(tr,""); return name or "" end
+-- Nearest project marker at/before item start (same semantics as REAPER's own $marker render wildcard).
+local function get_item_marker_name(item)
+  if not item then return "" end
+  local pos = reaper.GetMediaItemInfo_Value(item, "D_POSITION") or 0.0
+  local best_name, best_pos, i = "", -math.huge, 0
+  while true do
+    local retval, isrgn, mpos, _, name = reaper.EnumProjectMarkers3(0, i)
+    if retval == 0 then break end
+    if not isrgn and mpos <= pos + 1e-9 and mpos > best_pos then
+      best_pos = mpos; best_name = name or ""
+    end
+    i = i + 1
+  end
+  return best_name
+end
 local function get_item_length_sec(item) return reaper.GetMediaItemInfo_Value(item,"D_LENGTH") or 0.0 end
 local function seconds_to_m_ss_mmm(sec) local s=math.max(0,tonumber(sec) or 0) local m=math.floor(s/60) local r=s-m*60 return string.format("%d:%06.3f", m, r) end
 
@@ -1241,6 +1264,7 @@ local function collect_metadata_for_item(item)
   if sr and sr>0 then t.samplerate = tostring(math.floor(sr+0.5)) end
   if ch and ch>0 then t.channels   = tostring(ch) end
   t.track      = get_item_track_name(item)
+  t.marker     = get_item_marker_name(item)
   t.length     = seconds_to_m_ss_mmm(get_item_length_sec(item))
   -- can read bwf/ixml?
   local srctype = src and reaper.GetMediaSourceType(src, "") or ""
@@ -1822,6 +1846,7 @@ local function cache_to_fields(cached, item)
 
   -- UI-specific fields (not cached, computed on the fly)
   fields.track = get_item_track_name(item)
+  fields.marker = get_item_marker_name(item)
   fields.length = seconds_to_m_ss_mmm(get_item_length_sec(item))
 
   -- Build __trk_table and __chan_index (needed by interleave resolution)
@@ -1884,6 +1909,7 @@ collect_metadata_for_item = function(item)
   local t = META.collect_item_fields(item) or {}
   -- Supplement fields that are UI-specific in this script
   t.track  = get_item_track_name(item)
+  t.marker = get_item_marker_name(item)
   t.length = seconds_to_m_ss_mmm(get_item_length_sec(item))
   return t
 end
@@ -1940,15 +1966,25 @@ local LAST_RESULT = nil  -- { total_sel, renamed, noted, skipped, rows = { {idx,
 
 
 -- ===== Token list =====
-local TOKEN_LIST = {
-  "$origsrcfile","$curtake","$clearnote","$track","$filename","$srcfile","$srcbase",'$srcbaseprefix:N','$srcbasesuffix:N',"$srcext","$srcpath","$srcdir",
+-- Split by origin so the UI can color-code them:
+--   SESSION tokens  = REAPER/session/file-system derived (not embedded file metadata)
+--   META tokens     = read from embedded BWF/iXML metadata in the source file
+local TOKEN_LIST_SESSION = {
+  "$track","$marker","$origsrcfile","$curtake","$clearnote",
+  "$filename","$srcfile","$srcbase",'$srcbaseprefix:N','$srcbasesuffix:N',"$srcext","$srcpath","$srcdir",
   "$samplerate","$channels","$length",
+  "${counter:2}","$interleave","$interum","$baseindex","$baseidx","$overlapindex","$rangeindex","$chnum",
+}
+local TOKEN_LIST_META = {
   "$project","$scene","$take","$tape",
   "$trk","$trkall",
   "$ubits","$framerate","$speed",
   "$date","$time","$year","$originationdate","$umid", "$umid_pt","$originationtime","$startoffset",
-  "${counter:2}","$interleave","$interum","$baseindex","$baseidx","$overlapindex","$rangeindex","$chnum",
 }
+-- Back-compat flat list (used by anything that still expects a single array)
+local TOKEN_LIST = {}
+for _, tk in ipairs(TOKEN_LIST_SESSION) do TOKEN_LIST[#TOKEN_LIST+1] = tk end
+for _, tk in ipairs(TOKEN_LIST_META) do TOKEN_LIST[#TOKEN_LIST+1] = tk end
 
 -- ===== Token insertion (caret only) =====
 local function append_token(tk)
@@ -2259,7 +2295,7 @@ local function build_left_copy_text_from_fields(f)
   -- rest in stable order (unchanged)
   local ordered = {
     "origsrcfile",
-    "project","scene","take","tape","track",
+    "project","scene","take","tape","track","marker",
     "filename","srcfile","srcbase","srcext","srcpath","srcdir","filepath",
     "samplerate","channels","length",
     "date","time","year","originationdate","originationtime","startoffset",
@@ -2426,7 +2462,7 @@ end
 
 -- ===== Apply (deferred with progress console) =====
 local APPLY_STATE = nil
-local APPLY_BATCH = 50   -- items processed per defer frame
+local APPLY_BATCH = 1   -- process one item per defer frame so progress prints one-by-one
 
 local function apply_renaming_step()
   if not APPLY_STATE then return end
@@ -2585,10 +2621,13 @@ end
 
 
 -- ===== UI: token row =====
-local function draw_token_row()
+local function draw_token_button_group(list, btn_color, btn_hover, btn_active)
   local avail_w = select(1, reaper.ImGui_GetContentRegionAvail(ctx))
   local x_used, pad, safety = 0, 14, 28
-  for i, tk in ipairs(TOKEN_LIST) do
+  reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Button(), btn_color)
+  reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_ButtonHovered(), btn_hover)
+  reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_ButtonActive(), btn_active)
+  for i, tk in ipairs(list) do
     local tw = select(1, reaper.ImGui_CalcTextSize(ctx, tk)) + pad
     if i > 1 and (x_used + tw) <= (avail_w - safety) then
       reaper.ImGui_SameLine(ctx); x_used = x_used + tw
@@ -2597,11 +2636,20 @@ local function draw_token_row()
     end
     if reaper.ImGui_SmallButton(ctx, tk) then append_token(tk) end
   end
+  reaper.ImGui_PopStyleColor(ctx, 3)
+end
+
+local function draw_token_row()
+  reaper.ImGui_TextColored(ctx, 0x8FB7FFFF, "REAPER / Session")
+  draw_token_button_group(TOKEN_LIST_SESSION, 0x3A5A8CFF, 0x4A6EA3FF, 0x2E4A73FF)
+  reaper.ImGui_Spacing(ctx)
+  reaper.ImGui_TextColored(ctx, 0xFFC978FF, "File Metadata (BWF/iXML)")
+  draw_token_button_group(TOKEN_LIST_META, 0x8C5A2AFF, 0xA3703EFF, 0x734A22FF)
 end
 
 
 -- CollapsingHeader state persistence (saved via ExtState across sessions)
-local _SECT_EXT   = "hsuanice_RenameMetadata_v1"
+local _SECT_EXT   = "hsuanice_RenameSourceFileMetadata_sections_v1"
 local _sect_state = {}
 local _sect_init  = {}
 for _, k in ipairs({"tokens","renamer","take_presets","history","note_presets"}) do
@@ -2999,7 +3047,7 @@ local function draw_fields_panel()
 
     local ordered = {
       "origsrcfile",
-      "project","scene","take","tape","track",
+      "project","scene","take","tape","track","marker",
       "filename","srcfile","srcbase","srcext","srcpath","srcdir","filepath",
       "samplerate","channels","length",
       "date","time","year","originationdate","originationtime","startoffset",
