@@ -1,6 +1,6 @@
 --[[
 @description hsuanice Batch Metadata Conform
-@version 260823.2222
+@version 260824.0039
 @author hsuanice
 @noindex
 @about
@@ -8,10 +8,28 @@
   Phase 1/2: load WAV targets and original poly references, read metadata,
   build conservative matches, and preview the shared Match Result database.
 
-  This version is intentionally read-only. Embed and rename are disabled until
-  the source identity and poly stream mapping are validated against real files.
+  Embed is available for confirmed MATCHED results. Rename and Spot are not yet
+  included; Reference files remain read-only.
 
 @changelog
+  v260824.0039 (Asia/Taipei)
+    - Added a dedicated Save As project action.
+    - Normalize saved project filenames to the .bmc extension.
+    - Keep Save Project for writing back to the current project path.
+
+  v260823.2244 (Asia/Taipei)
+    - Save complete Target and Reference metadata records in BMC projects.
+    - Restore full metadata and Poly stream mappings without rescan on open.
+    - Keep folder Audio Cache paths for future refresh/rescan workflows.
+
+  v260823.2225 (Asia/Taipei)
+    - Added MATCHED-only deferred metadata embed.
+    - Reuse Metadata Embed file APIs for BWF, iXML, and TimeReference.
+    - Add optional SMPTE UMID writing with existing Generator fallback.
+    - Use the shared Match Result stream/Recorder Ch/track context.
+    - Invalidate affected target Audio Cache files after embed.
+    - Added BMC project save/open for folder paths and match settings.
+
   v260823.2222 (Asia/Taipei)
     - Removed column-width debug console output.
     - Made Fit Widths a stateless table layout reset.
@@ -33,6 +51,13 @@ if not ok_meta then
   reaper.ShowMessageBox("Cannot load Metadata Read library:\n\n" .. tostring(META), "Batch Metadata Conform", 0)
   return
 end
+local ok_embed, EMBED = pcall(dofile, LIB_DIR .. "hsuanice_Metadata Embed.lua")
+if not ok_embed then
+  reaper.ShowMessageBox("Cannot load Metadata Embed library:\n\n" .. tostring(EMBED), "Batch Metadata Conform", 0)
+  return
+end
+local ok_generator, GENERATOR = pcall(dofile, LIB_DIR .. "hsuanice_Metadata Generator.lua")
+if not ok_generator then GENERATOR = nil end
 if not reaper.ImGui_CreateContext then
   reaper.ShowMessageBox("This script requires ReaImGui.", "Batch Metadata Conform", 0)
   return
@@ -74,9 +99,16 @@ local folder_scan_state = nil
 local last_cache_status = ""
 local metadata_scan_requested = false
 local metadata_scan_status = "Metadata scan not started"
+local project_path = ""
+local project_restore_queue = nil
+local project_open_state = nil
 local active_task_status = "IDLE"
 local active_task_started_at = 0
 local match_coroutine = nil
+local embed_coroutine = nil
+local embed_options = { bwf = true, ixml = true, umid = true, timereference = true }
+local embed_status = "Embed not started"
+local embed_progress = nil
 local cache_fields = { "srcfile", "srcbase", "folder", "samplerate", "channels", "duration", "scene", "take", "tape", "reel", "project", "timereference", "src_tc", "description", "framerate", "speed", "orig_filename", "track_names", "ubits", "bit_depth", "file_type", "originationdate", "originationtime", "originator", "originatorreference", "umid", "clip_name" }
 
 local function basename(path)
@@ -111,8 +143,22 @@ local function dirname(path)
   return tostring(path or ""):match("^(.*)[/\\][^/\\]+$") or ""
 end
 
+local function project_escape(value)
+  local output = tostring(value or "")
+  output = output:gsub("%%", "%%25"):gsub("\n", "%%0A"):gsub("|", "%%7C")
+  return output
+end
+
+local function project_unescape(value)
+  local output = tostring(value or "")
+  output = output:gsub("%%7C", "|"):gsub("%%0A", "\n"):gsub("%%25", "%%")
+  return output
+end
+
 local function trim(value)
-  return tostring(value or ""):gsub("^%s+", ""):gsub("%s+$", "")
+  local output = tostring(value or "")
+  output = output:gsub("^%s+", ""):gsub("%s+$", "")
+  return output
 end
 
 local function lower(value)
@@ -127,11 +173,15 @@ local function read_meta(src, key)
 end
 
 local function cache_escape(value)
-  return tostring(value or ""):gsub("%%", "%%25"):gsub("|", "%%7C"):gsub("\r\n", "\n"):gsub("\n", "%%0A")
+  local output = tostring(value or "")
+  output = output:gsub("%%", "%%25"):gsub("|", "%%7C"):gsub("\r\n", "\n"):gsub("\n", "%%0A")
+  return output
 end
 
 local function cache_unescape(value)
-  return tostring(value or ""):gsub("%%0A", "\n"):gsub("%%7C", "|"):gsub("%%25", "%%")
+  local output = tostring(value or "")
+  output = output:gsub("%%0A", "\n"):gsub("%%7C", "|"):gsub("%%25", "%%")
+  return output
 end
 
 local function cache_path(folder, role)
@@ -143,10 +193,16 @@ local function cache_encode_fields(path, fields)
   for _, key in ipairs(cache_fields) do values[#values + 1] = cache_escape(fields[key]) end
   local tracks = {}
   for _, track in ipairs(fields.__ixml_tracks or {}) do
-    tracks[#tracks + 1] = table.concat({ track.channel_index or "", track.interleave_index or "", cache_escape(track.name) }, "^")
+    tracks[#tracks + 1] = table.concat({ track.channel_index or "", track.interleave_index or "", cache_escape(track.name), "0" }, "^")
   end
   values[#values + 1] = table.concat(tracks, "~")
   return table.concat(values, "|")
+end
+
+local function split_pipe_line(line)
+  local parts = {}
+  for part in (tostring(line or "") .. "|"):gmatch("([^|]*)|") do parts[#parts + 1] = part end
+  return parts
 end
 
 local function cache_decode_fields(parts)
@@ -545,6 +601,125 @@ local function process_match_build()
   end
 end
 
+local function matched_results()
+  local output = {}
+  for _, result in ipairs(RESULTS) do
+    if result.status == "MATCHED" and result.reference and result.stream then output[#output + 1] = result end
+  end
+  return output
+end
+
+local function make_embed_channel_context(result)
+  local reference_fields = result.reference.fields or {}
+  local target_fields = result.target.fields or {}
+  local target_channels = tonumber(target_fields.channels) or 0
+  local reference_channels = tonumber(reference_fields.channels) or 0
+  if target_channels ~= 1 or reference_channels <= 1 then return nil end
+  return {
+    index = tonumber(result.stream),
+    total = tonumber(reference_fields.channels) or #reference_fields.__ixml_tracks,
+    name = result.track_name or "",
+    channel_index = tonumber(result.recorder_ch),
+  }
+end
+
+local function start_embed()
+  if embed_coroutine or match_coroutine or #cache_scan_jobs > 0 then
+    embed_status = "Another task is running"
+    return
+  end
+  local items = matched_results()
+  if #items == 0 then
+    embed_status = "No MATCHED files are ready"
+    return
+  end
+  if not (embed_options.bwf and embed_options.ixml) then
+    embed_status = "Enable Embed BWF + iXML first"
+    return
+  end
+  local answer = reaper.ShowMessageBox(string.format(
+    "%d MATCHED target files will be modified.\n\nReference files are read-only. Continue?", #items),
+    "Confirm Embed Metadata", 4)
+  if answer ~= 6 then return end
+  local cli = EMBED.CLI_Resolve()
+  if not cli then embed_status = "BWF MetaEdit CLI not found"; return end
+  active_task_status = "EMBEDDING METADATA"
+  active_task_started_at = reaper.time_precise()
+  embed_status = string.format("Embedding 0/%d", #items)
+  embed_progress = { current = 0, total = #items, started_at = active_task_started_at, success = 0, failed = 0 }
+  reaper.ShowConsoleMsg(string.format("[Batch Metadata Conform] START Embed Metadata (%d matched files)\n", #items))
+  embed_coroutine = coroutine.create(function()
+    local success, failed = 0, 0
+    local affected_folders = {}
+    for _, result in ipairs(items) do affected_folders[dirname(result.target.fields.srcpath)] = true end
+    for index, result in ipairs(items) do
+      local source_path = result.reference.fields.srcpath
+      local target_path = result.target.fields.srcpath
+      local context = make_embed_channel_context(result)
+      reaper.ShowConsoleMsg(string.format("[Batch Metadata Conform] embed %d/%d START: %s <- %s | stream=%s | Recorder Ch=%s | Track=%s | channel_patch=%s\n", index, #items, basename(target_path), basename(source_path), context and context.index or "-", context and context.channel_index or "-", context and context.name or "-", context and "yes" or "no"))
+      local details = EMBED.Copy_Metadata(cli, source_path, target_path, {
+        chan_ctx = context,
+        copy_tr = true,
+        set_embedder = true,
+        cleanup = true,
+        log = function(message) reaper.ShowConsoleMsg(string.format("[Batch Metadata Conform] embed %d/%d [library] %s\n", index, #items, tostring(message))) end,
+      })
+      details = details or { ok = false, reason = "Metadata Embed library returned no result" }
+      local ok = details and details.ok == true
+      reaper.ShowConsoleMsg(string.format("[Batch Metadata Conform] embed %d/%d copy result: iXML=%s CORE=%s TimeReference=%s embedder=%s\n", index, #items, tostring(details.ixml), tostring(details.core), tostring(details.tr), tostring(details.embedder)))
+      if embed_options.umid then
+        local umid = result.reference.fields.umid
+        if (not umid or #umid:gsub("[^%x]", "") ~= 64) and GENERATOR then
+          umid = GENERATOR.generate_umid_basic({ material = source_path, instance = index })
+          reaper.ShowConsoleMsg(string.format("[Batch Metadata Conform] embed %d/%d UMID: source missing, generated new 64-hex value\n", index, #items))
+        elseif umid and umid ~= "" then
+          reaper.ShowConsoleMsg(string.format("[Batch Metadata Conform] embed %d/%d UMID: preserving reference value\n", index, #items))
+        end
+        if umid and umid ~= "" then
+          local umid_ok, umid_code, umid_output = EMBED.write_bext_umid(cli, target_path, umid)
+          ok = umid_ok and ok
+          reaper.ShowConsoleMsg(string.format("[Batch Metadata Conform] embed %d/%d UMID write: %s (code=%s)\n", index, #items, umid_ok and "OK" or "FAIL", tostring(umid_code)))
+        else
+          reaper.ShowConsoleMsg(string.format("[Batch Metadata Conform] embed %d/%d UMID: unavailable, skipped\n", index, #items))
+        end
+      end
+      if ok then success = success + 1 else failed = failed + 1 end
+      reaper.ShowConsoleMsg(string.format("[Batch Metadata Conform] embed %d/%d END: %s\n", index, #items, ok and "SUCCESS" or "FAILED"))
+      embed_progress.current = index
+      embed_progress.success = success
+      embed_progress.failed = failed
+      local elapsed = math.max(0, reaper.time_precise() - embed_progress.started_at)
+      local rate = index / math.max(elapsed, 0.001)
+      local remaining = math.max(0, #items - index) / math.max(rate, 0.001)
+      embed_status = string.format("Embedding %d/%d | elapsed %02d:%02d | ETA %02d:%02d | %.2f files/s | success=%d failed=%d", index, #items, math.floor(elapsed / 60), math.floor(elapsed % 60), math.floor(remaining / 60), math.floor(remaining % 60), rate, success, failed)
+      if index % 100 == 0 or index == #items then
+        reaper.ShowConsoleMsg(string.format("[Batch Metadata Conform] embed progress: %d/%d | elapsed %02d:%02d | ETA %02d:%02d | %.2f files/s | success=%d failed=%d\n", index, #items, math.floor(elapsed / 60), math.floor(elapsed % 60), math.floor(remaining / 60), math.floor(remaining % 60), rate, success, failed))
+      end
+      coroutine.yield()
+    end
+    for folder in pairs(affected_folders) do
+      os.remove(cache_path(folder, "target"))
+      reaper.ShowConsoleMsg("[Batch Metadata Conform] invalidated target cache: " .. cache_path(folder, "target") .. "\n")
+    end
+    reaper.ShowConsoleMsg(string.format("[Batch Metadata Conform] END Embed Metadata: success=%d failed=%d\n", success, failed))
+    embed_status = string.format("Embed complete | elapsed %02d:%02d | success=%d failed=%d", math.floor((reaper.time_precise() - embed_progress.started_at) / 60), math.floor((reaper.time_precise() - embed_progress.started_at) % 60), success, failed)
+  end)
+end
+
+local function process_embed()
+  if not embed_coroutine then return end
+  local ok, error_message = coroutine.resume(embed_coroutine)
+  if not ok then
+    reaper.ShowConsoleMsg("[Batch Metadata Conform] EMBED ERROR: " .. tostring(error_message) .. "\n")
+    embed_status = "Embed failed: " .. tostring(error_message)
+    embed_coroutine = nil
+    active_task_status = "IDLE"
+  elseif coroutine.status(embed_coroutine) == "dead" then
+    embed_coroutine = nil
+    active_task_status = "IDLE"
+  end
+end
+
 local function build_basic_results()
   RESULTS = {}
   for _, target in ipairs(TARGETS) do
@@ -850,6 +1025,14 @@ local function process_folder_scan()
     add_paths(paths, role, folder)
     active_task_status = "IDLE"
     reaper.ShowConsoleMsg(string.format("[Batch Metadata Conform] END file list: %s (%d WAV files, %.2fs)\n", role, #paths, reaper.time_precise() - state.started_at))
+    if project_restore_queue and #project_restore_queue > 0 then
+      local next_folder = table.remove(project_restore_queue, 1)
+      start_folder_scan(next_folder.folder, next_folder.role)
+    elseif project_restore_queue then
+      project_restore_queue = nil
+      metadata_scan_status = "Project restored; press Scan Metadata"
+      reaper.ShowConsoleMsg("[Batch Metadata Conform] Project folders restored\n")
+    end
   end
 end
 
@@ -898,6 +1081,174 @@ local function clear_lists(clear_targets, clear_references)
   loading_state = nil
   reaper.ShowConsoleMsg(string.format("[Batch Metadata Conform] CLEAR lists: targets=%s references=%s\n", tostring(clear_targets), tostring(clear_references)))
   build_basic_results()
+end
+
+local function choose_project_path(for_save)
+  local path
+  if for_save and reaper.JS_Dialog_BrowseForSaveFile then
+    local ok, selected = reaper.JS_Dialog_BrowseForSaveFile(
+      "Save Batch Metadata Conform Project", "", "BatchConform.bmc",
+      "BMC project (*.bmc)\0*.bmc\0")
+    if ok == 1 then path = selected end
+  else
+    local ok, selected = reaper.GetUserFileNameForRead(
+      "", for_save and "Save Batch Metadata Conform Project" or "Open Batch Metadata Conform Project",
+      for_save and "*.bmc" or "*.bmc")
+    if ok and selected ~= "" then path = selected end
+  end
+  if not path or path == "" then return nil end
+  if for_save and not path:lower():match("%.bmc$") then path = path .. ".bmc" end
+  return path
+end
+
+local function save_project(path)
+  local file = io.open(path, "w")
+  if not file then reaper.ShowMessageBox("Cannot write project:\n" .. path, "Batch Metadata Conform", 0); return false end
+  local target_folder = scan_jobs.target and scan_jobs.target.folder or ""
+  local reference_folder = scan_jobs.reference and scan_jobs.reference.folder or ""
+  file:write("BMC_PROJECT_V1\n")
+  file:write("TARGET_FOLDER|", project_escape(target_folder), "\n")
+  file:write("REFERENCE_FOLDER|", project_escape(reference_folder), "\n")
+  file:write("FILTER|", project_escape(filter), "\n")
+  file:write("SEARCH|", project_escape(search), "\n")
+  for _, option in ipairs(MATCH_OPTIONS) do file:write("MATCH|", option.key, "|", MATCH_CONFIG[option.key] and "1" or "0", "\n") end
+  file:write("TARGET_COUNT|", #TARGETS, "\n")
+  for _, record in ipairs(TARGETS) do
+    if record.fields and record.fields.__metadata_loaded then
+      file:write("TARGET_META|", cache_encode_fields(record.path, record.fields), "\n")
+    end
+  end
+  file:write("REFERENCE_COUNT|", #REFERENCES, "\n")
+  for _, record in ipairs(REFERENCES) do
+    if record.fields and record.fields.__metadata_loaded then
+      file:write("REFERENCE_META|", cache_encode_fields(record.path, record.fields), "\n")
+    end
+  end
+  file:write("MATCH_RESULT_COUNT|", #RESULTS, "\n")
+  for _, result in ipairs(RESULTS) do
+    file:write("MATCH_RESULT|",
+      project_escape(result.target and result.target.path), "|",
+      project_escape(result.status), "|",
+      project_escape(result.reference and result.reference.path), "|",
+      project_escape(result.stream), "|",
+      project_escape(result.recorder_ch), "|",
+      project_escape(result.track_name), "|",
+      project_escape(result.target_track_name), "|",
+      project_escape(result.proposed_filename), "|",
+      project_escape(result.candidate_count), "|",
+      project_escape(result.reason), "\n")
+  end
+  file:close()
+  project_path = path
+  reaper.ShowConsoleMsg("[Batch Metadata Conform] Saved project: " .. path .. "\n")
+  return true
+end
+
+local function finish_open_project(state)
+  local target_folder, reference_folder = state.target_folder, state.reference_folder
+  local saved_targets, saved_references = state.saved_targets, state.saved_references
+  state.file:close()
+  project_path = state.path
+  clear_lists(true, true)
+  if #saved_targets > 0 or #saved_references > 0 then
+    TARGETS, REFERENCES = {}, {}
+    for _, fields in ipairs(saved_targets) do TARGETS[#TARGETS + 1] = { path = fields.srcpath, filename = fields.srcfile, fields = fields } end
+    for _, fields in ipairs(saved_references) do REFERENCES[#REFERENCES + 1] = { path = fields.srcpath, filename = fields.srcfile, fields = fields } end
+    local targets_by_path, references_by_path = {}, {}
+    for _, record in ipairs(TARGETS) do targets_by_path[record.path] = record end
+    for _, record in ipairs(REFERENCES) do references_by_path[record.path] = record end
+    RESULTS = {}
+    for _, values in ipairs(state.saved_matches) do
+      local target = targets_by_path[project_unescape(values[1] or "")]
+      if target then
+        local reference = references_by_path[project_unescape(values[3] or "")]
+        RESULTS[#RESULTS + 1] = {
+          target = target,
+          status = project_unescape(values[2] or "NOT_FOUND"),
+          reference = reference,
+          stream = tonumber(project_unescape(values[4] or "")),
+          recorder_ch = tonumber(project_unescape(values[5] or "")),
+          track_name = project_unescape(values[6] or ""),
+          target_track_name = project_unescape(values[7] or ""),
+          proposed_filename = project_unescape(values[8] or ""),
+          candidate_count = tonumber(project_unescape(values[9] or "")) or 0,
+          reason = project_unescape(values[10] or ""),
+          match_values = selected_match_values(target.fields),
+        }
+      end
+    end
+    if #RESULTS == 0 then start_match_build(false) end
+    scan_jobs = {}
+    metadata_scan_status = "Project metadata restored; no scan required"
+    project_restore_queue = nil
+    active_task_status = "IDLE"
+    reaper.ShowConsoleMsg(string.format("[Batch Metadata Conform] Restored full metadata: %d targets, %d references\n", #TARGETS, #REFERENCES))
+    return
+  end
+  project_restore_queue = {}
+  if target_folder and target_folder ~= "" then project_restore_queue[#project_restore_queue + 1] = { folder = target_folder, role = "target" } end
+  if reference_folder and reference_folder ~= "" then project_restore_queue[#project_restore_queue + 1] = { folder = reference_folder, role = "reference" } end
+  if #project_restore_queue > 0 then
+    local next_folder = table.remove(project_restore_queue, 1)
+    start_folder_scan(next_folder.folder, next_folder.role)
+    active_task_status = "RESTORING PROJECT"
+  else
+    active_task_status = "IDLE"
+  end
+  reaper.ShowConsoleMsg("[Batch Metadata Conform] Project settings restored\n")
+end
+
+local function process_open_project()
+  local state = project_open_state
+  if not state then return end
+  local lines_per_frame = 500
+  for _ = 1, lines_per_frame do
+    local line = state.file:read("*l")
+    if not line then
+      project_open_state = nil
+      reaper.ShowConsoleMsg(string.format("[Batch Metadata Conform] END project read: %d lines, %.2fs\n", state.lines, reaper.time_precise() - state.started_at))
+      finish_open_project(state)
+      return
+    end
+    state.lines = state.lines + 1
+    local key, a, b = line:match("^([^|]+)|([^|]*)|?(.*)$")
+    if key == "TARGET_FOLDER" then state.target_folder = project_unescape(a)
+    elseif key == "REFERENCE_FOLDER" then state.reference_folder = project_unescape(a)
+    elseif key == "FILTER" then filter = project_unescape(a)
+    elseif key == "SEARCH" then search = project_unescape(a)
+    elseif key == "MATCH" and MATCH_CONFIG[a] ~= nil then MATCH_CONFIG[a] = b == "1"
+    elseif key == "TARGET_META" then state.saved_targets[#state.saved_targets + 1] = cache_decode_fields(split_pipe_line(a .. "|" .. b))
+    elseif key == "REFERENCE_META" then state.saved_references[#state.saved_references + 1] = cache_decode_fields(split_pipe_line(a .. "|" .. b))
+    elseif key == "MATCH_RESULT" then state.saved_matches[#state.saved_matches + 1] = split_pipe_line(a .. "|" .. b)
+    end
+  end
+  if state.lines % 500 == 0 then
+    reaper.ShowConsoleMsg(string.format("[Batch Metadata Conform] project read: %d lines, targets=%d references=%d\n", state.lines, #state.saved_targets, #state.saved_references))
+  end
+end
+
+local function open_project(path)
+  local file = io.open(path, "r")
+  if not file then reaper.ShowMessageBox("Cannot read project:\n" .. path, "Batch Metadata Conform", 0); return false end
+  project_open_state = { path = path, file = file, lines = 0, saved_targets = {}, saved_references = {}, saved_matches = {}, started_at = reaper.time_precise() }
+  active_task_status = "OPENING PROJECT"
+  reaper.ShowConsoleMsg("[Batch Metadata Conform] START project read: " .. path .. "\n")
+  return true
+end
+
+local function save_project_dialog()
+  local path = project_path ~= "" and project_path or choose_project_path(true)
+  if path and path ~= "" then save_project(path) end
+end
+
+local function save_project_as_dialog()
+  local path = choose_project_path(true)
+  if path and path ~= "" then save_project(path) end
+end
+
+local function open_project_dialog()
+  local path = choose_project_path(false)
+  if path and path ~= "" then open_project(path) end
 end
 
 local function text(value) return tostring(value or "") end
@@ -1161,10 +1512,12 @@ ctx = reaper.ImGui_CreateContext("hsuanice Batch Metadata Conform")
 reaper.ImGui_SetNextWindowSize(ctx, 1180, 720, reaper.ImGui_Cond_FirstUseEver())
 
 local function loop()
+  process_open_project()
   process_folder_scan()
   process_cache_scan_batch()
   process_loading_batch()
   process_match_build()
+  process_embed()
   local window_flags = reaper.ImGui_WindowFlags_NoCollapse()
   if not ALLOW_DOCKING then
     window_flags = window_flags | reaper.ImGui_WindowFlags_NoDocking()
@@ -1177,6 +1530,12 @@ local function loop()
   local visible, open = reaper.ImGui_Begin(ctx, "hsuanice Batch Metadata Conform", true, window_flags)
   if visible then
     reaper.ImGui_Text(ctx, "File-based batch conform preview")
+    reaper.ImGui_SameLine(ctx)
+    if reaper.ImGui_Button(ctx, "Save Project") then save_project_dialog() end
+    reaper.ImGui_SameLine(ctx)
+    if reaper.ImGui_Button(ctx, "Save As...") then save_project_as_dialog() end
+    reaper.ImGui_SameLine(ctx)
+    if reaper.ImGui_Button(ctx, "Open Project") then open_project_dialog() end
     reaper.ImGui_Separator(ctx)
     reaper.ImGui_Text(ctx, string.format("TARGET FILES %d", #TARGETS))
     reaper.ImGui_SameLine(ctx); button("Load Target Folder...", function() pick_folder("target") end)
@@ -1186,6 +1545,9 @@ local function loop()
     if folder_scan_state then
       reaper.ImGui_SameLine(ctx)
       reaper.ImGui_Text(ctx, folder_scan_progress_text(folder_scan_state))
+    elseif project_open_state then
+      reaper.ImGui_SameLine(ctx)
+      reaper.ImGui_Text(ctx, string.format("Opening project: %d lines | %d targets | %d references", project_open_state.lines, #project_open_state.saved_targets, #project_open_state.saved_references))
     elseif #cache_scan_jobs > 0 then
       reaper.ImGui_SameLine(ctx)
       reaper.ImGui_Text(ctx, "Loading Audio Cache... " .. (cache_scan_jobs[1].role or ""))
@@ -1213,6 +1575,17 @@ local function loop()
     end
     reaper.ImGui_SameLine(ctx)
     reaper.ImGui_Text(ctx, last_build_status)
+    local embed_changed, embed_value = reaper.ImGui_Checkbox(ctx, "Embed BWF + iXML", embed_options.bwf and embed_options.ixml)
+    if embed_changed then embed_options.bwf, embed_options.ixml = embed_value, embed_value end
+    reaper.ImGui_SameLine(ctx)
+    reaper.ImGui_Text(ctx, "TimeReference: always copy")
+    reaper.ImGui_SameLine(ctx)
+    local umid_changed, umid_value = reaper.ImGui_Checkbox(ctx, "Write SMPTE UMID", embed_options.umid)
+    if umid_changed then embed_options.umid = umid_value end
+    reaper.ImGui_SameLine(ctx)
+    if reaper.ImGui_Button(ctx, "Embed Metadata##embed_button") then start_embed() end
+    reaper.ImGui_SameLine(ctx)
+    reaper.ImGui_Text(ctx, embed_status)
     draw_match_settings()
     reaper.ImGui_Separator(ctx)
 
