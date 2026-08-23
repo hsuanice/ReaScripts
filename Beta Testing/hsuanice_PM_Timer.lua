@@ -1,6 +1,6 @@
 --[[
 @description PM Timer - Scene-aware Work Timer
-@version 260729.1217
+@version 260823.1332
 @author hsuanice
 @about
   Scene-aware toggle timer for the hsuanice PM system.
@@ -26,6 +26,13 @@
   All work items are locked (C_LOCK=1) after creation.
 
 @changelog
+  v260823.1332
+    - AAP mode: added custom option to Start (no-folder flow) and New Job menu.
+    - AAP mode: custom selection now prompts for a free-text work type and starts
+      a simple AAP work item with that type.
+    - Break/Continue: when continuing an AAP break session, mode is now forced
+      back to AAP before creating the resumed item.
+
   v260729.1217
     - Taipei-time version stamp aligned for this changelog entry.
 
@@ -391,7 +398,8 @@ local WORK_COLORS = {
   conform          = {0, 255, 0},       -- Green
   ["picture cut"]  = {255, 100, 100},   -- Red
   subtitle         = {0, 200, 200},     -- Cyan
-  ["pre-prod"]     = {255, 140, 0},     -- Orange
+  ["pre-prod"]      = {255, 140, 0},     -- Orange (legacy)
+  ["pre-production"] = {255, 140, 0},     -- Orange
   wrap             = {100, 220, 255},   -- Light blue
 }
 
@@ -403,14 +411,16 @@ local DURATION_LOG_NAME = "DurationOnly_Log"
 local WIN_W, WIN_H           = 560, 140
 local BYTES_PER_SECOND       = 144000
 local BYTES_PER_GB           = 1000000000
-local WORK_TYPES          = { "editing", "denoise", "conform", "aap", "double_check", "custom" }
+local WORK_TYPES          = { "pre-production", "wrap" }
 local SWITCH_TYPES        = { "editing", "denoise", "custom" }
 local MODE_TYPES          = { "Dialog", "AAP", "Conform" }
-local AAP_GENERAL_TYPES   = { "pre-prod", "wrap" }   -- used when no folder is selected in AAP mode
+local AAP_GENERAL_TYPES   = { "pre-production", "wrap", "custom" }   -- used when no folder is selected in AAP mode
+local AAP_FOLDER_DEFAULT_TYPE = "aap"
 local DATE_PAT            = "^%d%d%d%d%-%d%d%-%d%d$"  -- matches YYYY-MM-DD
 local HEARTBEAT_INTERVAL  = 60   -- seconds between silent D_LENGTH updates
 local EDL_FOLDER_NAME     = "EDL"
 local PICTURE_TRACK_NAME  = "Picture Cut"
+local auto_sync_work_log_if_open
 
 -- ── State ──────────────────────────────────────────────────────────────────
 local S = {
@@ -442,7 +452,7 @@ local win_y           = tonumber(r.GetExtState(NS, "WIN_Y"))       or 100
 local cur_dock        = tonumber(r.GetExtState(NS, "DOCK_STATE"))  or 0
 local last_dock       = cur_dock
 local last_proj_identity = nil  -- tracks active project for change detection
-local BREAK_STATE = nil  -- {scene_guid, scene_name, scene_start_tc, work_type} set by action_break
+local BREAK_STATE = nil  -- set by action_break; includes mode/work type and optional AAP stats
 
 -- ── Helpers ────────────────────────────────────────────────────────────────
 
@@ -556,37 +566,64 @@ local function reset_state()
   S.aap_total_seconds = 0; S.aap_est_size = ""
 end
 
+local function is_aap_work_type(work_type)
+  return work_type == "pre-production"
+      or work_type == "wrap"
+    or work_type == "custom"
+      or work_type == "aap" -- legacy data compatibility
+end
+
 -- ── Break state persistence ────────────────────────────────────────────────
 local function save_break_state()
   BREAK_STATE = {
+    work_mode    = S.work_mode,
     scene_guid    = S.scene_guid,
     scene_name    = S.scene_name,
     scene_start_tc = S.scene_start_tc,
     work_type     = S.work_type,
+    aap_day_name      = S.aap_day_name,
+    aap_item_count    = S.aap_item_count,
+    aap_total_seconds = S.aap_total_seconds,
+    aap_est_size      = S.aap_est_size,
   }
+  set_extstate("BREAK_WORK_MODE", S.work_mode)
   set_extstate("BREAK_SCENE_GUID", S.scene_guid)
   set_extstate("BREAK_SCENE_NAME", S.scene_name)
   set_extstate("BREAK_SCENE_TC",   S.scene_start_tc)
   set_extstate("BREAK_WORK_TYPE",  S.work_type)
+  set_extstate("BREAK_AAP_DAY_NAME",      S.aap_day_name)
+  set_extstate("BREAK_AAP_ITEM_COUNT",    tostring(S.aap_item_count or 0))
+  set_extstate("BREAK_AAP_TOTAL_SECONDS", tostring(S.aap_total_seconds or 0))
+  set_extstate("BREAK_AAP_EST_SIZE",      S.aap_est_size)
 end
 
 local function load_break_state()
   local wtype = get_extstate("BREAK_WORK_TYPE")
   if not wtype then return end
   BREAK_STATE = {
+    work_mode      = get_extstate("BREAK_WORK_MODE") or "Dialog",
     scene_guid     = get_extstate("BREAK_SCENE_GUID") or "",
     scene_name     = get_extstate("BREAK_SCENE_NAME") or "",
     scene_start_tc = get_extstate("BREAK_SCENE_TC")   or "",
     work_type      = wtype,
+    aap_day_name      = get_extstate("BREAK_AAP_DAY_NAME") or "",
+    aap_item_count    = tonumber(get_extstate("BREAK_AAP_ITEM_COUNT")) or 0,
+    aap_total_seconds = tonumber(get_extstate("BREAK_AAP_TOTAL_SECONDS")) or 0,
+    aap_est_size      = get_extstate("BREAK_AAP_EST_SIZE") or "",
   }
 end
 
 local function clear_break_state()
   BREAK_STATE = nil
+  set_extstate("BREAK_WORK_MODE", "")
   set_extstate("BREAK_SCENE_GUID", "")
   set_extstate("BREAK_SCENE_NAME", "")
   set_extstate("BREAK_SCENE_TC",   "")
   set_extstate("BREAK_WORK_TYPE",  "")
+  set_extstate("BREAK_AAP_DAY_NAME",      "")
+  set_extstate("BREAK_AAP_ITEM_COUNT",    "")
+  set_extstate("BREAK_AAP_TOTAL_SECONDS", "")
+  set_extstate("BREAK_AAP_EST_SIZE",      "")
 end
 
 local function get_item_by_guid(guid)
@@ -720,6 +757,52 @@ local function apply_proj_prefix(name)
   if prefix == "" then return name end
   if name:sub(1, #prefix) == prefix then return name end
   return prefix .. name
+end
+
+-- Build "project workflow | process" fallback when strict prefix is unavailable.
+-- Example: 260729----FishTown----AAP  ->  "FishTown AAP | pre-production"
+local function get_project_workflow_prefix_fallback()
+  local _, proj_path = r.EnumProjects(-1)
+  if not proj_path or proj_path == "" then return "" end
+  local name = proj_path:match("([^/\\]+)$") or proj_path
+  name = name:gsub("%.%a+$", "")
+
+  local parts = {}
+  for p in (name .. "----"):gmatch("(.-)%-%-%-%-") do
+    parts[#parts + 1] = p
+  end
+  local project  = parts[2] or ""
+  local workflow = parts[3] or ""
+  if project ~= "" and workflow ~= "" then
+    return project .. " " .. workflow .. " | "
+  end
+  return ""
+end
+
+local function get_project_label_fallback()
+  local _, proj_path = r.EnumProjects(-1)
+  if not proj_path or proj_path == "" then return "Project" end
+  local name = proj_path:match("([^/\\]+)$") or proj_path
+  name = name:gsub("%.%a+$", "")
+
+  local parts = {}
+  for p in (name .. "----"):gmatch("(.-)%-%-%-%-") do
+    parts[#parts + 1] = p
+  end
+  if parts[2] and parts[2] ~= "" then return parts[2] end
+  return name
+end
+
+local function build_project_process_name(process_name)
+  local prefix = get_proj_prefix()
+  if prefix ~= "" then
+    return apply_proj_prefix(process_name)
+  end
+  local wf_prefix = get_project_workflow_prefix_fallback()
+  if wf_prefix ~= "" then
+    return wf_prefix .. process_name
+  end
+  return get_project_label_fallback() .. " | " .. process_name
 end
 
 ----------------------------------------------------------------
@@ -925,6 +1008,15 @@ local function create_work_item(date_track, scene_guid, item_name, work_type, po
     if last_end > pos then pos = last_end end
   end
 
+  -- Safety: for AAP-style sessions, ensure item names always include
+  -- "project workflow | process" even if caller passed only work_type.
+  local is_aap_style = (S.work_mode == "AAP")
+                    or (work_type == "pre-production")
+                    or (work_type == "wrap")
+  if is_aap_style and item_name and not item_name:find(" | ", 1, true) then
+    item_name = build_project_process_name(work_type)
+  end
+
   local item = r.AddMediaItemToTrack(date_track)
   r.SetMediaItemInfo_Value(item, "D_POSITION", pos)
   r.SetMediaItemInfo_Value(item, "D_LENGTH",   1)  -- updated on Finish/Break
@@ -956,11 +1048,7 @@ end
 local function seconds_to_size_string(seconds)
   local bytes = seconds * BYTES_PER_SECOND
   local gb    = bytes / BYTES_PER_GB
-  if gb < 1 then
-    return string.format("%.1f MB", bytes / 1000000)
-  else
-    return string.format("%.2f GB", gb)
-  end
+  return string.format("%.1f GB", gb)
 end
 
 local function get_selected_folder_stats()
@@ -1014,7 +1102,8 @@ local function start_simple_aap_work(work_type, chain)
   r.Undo_BeginBlock()
   ensure_folder_track(parent_track)
   local date_track = get_or_create_date_track(parent_track, os.date("%Y-%m-%d"))
-  local item       = create_work_item(date_track, "", work_type, work_type, pos_secs, now_clock)
+  local item_name  = build_project_process_name(work_type)
+  local item       = create_work_item(date_track, "", item_name, work_type, pos_secs, now_clock)
   local item_guid  = get_item_guid(item)
   r.Undo_EndBlock("PM: Start AAP session", -1)
   r.UpdateArrange()
@@ -1053,7 +1142,13 @@ local function action_start_aap(chain)
     gfx.x, gfx.y = 10, 60
     local choice = gfx.showmenu(table.concat(AAP_GENERAL_TYPES, "|"))
     if choice == 0 then return end
-    start_simple_aap_work(AAP_GENERAL_TYPES[choice], chain)
+    local selected_type = AAP_GENERAL_TYPES[choice]
+    if selected_type == "custom" then
+      local ok, val = r.GetUserInputs("Custom Work Type", 1, "Work type:", "")
+      if not ok or val == "" then return end
+      selected_type = val
+    end
+    start_simple_aap_work(selected_type, chain)
     return
   end
 
@@ -1087,8 +1182,8 @@ local function action_start_aap(chain)
   local aap_item_count = math.floor(items_n)
   local aap_total_secs = dur_secs
   local aap_day_name   = stats.name
-  local work_type      = "aap"
-  local item_name      = "AAP | " .. stats.name
+  local work_type      = AAP_FOLDER_DEFAULT_TYPE
+  local item_name      = build_project_process_name(work_type)
   local est_size       = seconds_to_size_string(aap_total_secs)
 
   -- ── Create item ──────────────────────────────────────────────────────────
@@ -1206,6 +1301,19 @@ local function merge_log_note(metadata, comment)
     return metadata .. "\n\n" .. comment
   end
   return metadata
+end
+
+local function build_aap_recording_note(day_name, item_count, total_seconds)
+  local day = (day_name and day_name ~= "") and day_name or "(unknown)"
+  local cnt = math.max(0, math.floor(tonumber(item_count) or 0))
+  local secs = math.max(0, tonumber(total_seconds) or 0)
+
+  return table.concat({
+    "Recording Date : " .. day,
+    "Items          : " .. tostring(cnt),
+    "Source Len     : " .. fmt_hms_ms(secs),
+    "Source Size    : " .. seconds_to_size_string(secs),
+  }, "\n")
 end
 
 -- Pushes scene metadata into all work log items linked to the given scene GUID.
@@ -1407,7 +1515,7 @@ local function PM_SyncProjectScopeNotes()
       local item = r.GetTrackMediaItem(t, j)
       local _, wt = r.GetSetMediaItemInfo_String(item, "P_EXT:WORK_TYPE",  "", false)
       local _, sg = r.GetSetMediaItemInfo_String(item, "P_EXT:SCENE_GUID", "", false)
-      if wt ~= "" and sg == "" then
+      if wt ~= "" and sg == "" and not is_aap_work_type(wt) then
         local cur_note = r.ULT_GetMediaItemNote(item) or ""
         local comment  = extract_log_comment(cur_note)
         local new_note = merge_log_note(new_meta, comment)
@@ -1555,15 +1663,29 @@ local function finish_aap_item(end_reason)
   if item then
     local start_pos = r.GetMediaItemInfo_Value(item, "D_POSITION")
     end_pos = start_pos + duration
-    local notes
-    if S.aap_item_count > 0 or S.aap_total_seconds > 0 then
-      notes = string.format(
-        "Items      : %d\nTotal Len  : %s\nEst. Size  : %s\nWork Time  : %s",
-        S.aap_item_count, fmt_hms_ms(S.aap_total_seconds),
-        S.aap_est_size, fmt_hms(work_secs))
-    else
-      notes = string.format("Work Time  : %s", fmt_hms(work_secs))
+
+    local aap_day_name = S.aap_day_name
+    if aap_day_name == "" then
+      local _, v = r.GetSetMediaItemInfo_String(item, "P_EXT:AAP_DAY_NAME", "", false)
+      aap_day_name = v or ""
     end
+    local aap_item_count = S.aap_item_count
+    if (aap_item_count or 0) <= 0 then
+      local _, v = r.GetSetMediaItemInfo_String(item, "P_EXT:AAP_ITEM_COUNT", "", false)
+      aap_item_count = tonumber(v) or 0
+    end
+    local aap_total_seconds = S.aap_total_seconds
+    if (aap_total_seconds or 0) <= 0 then
+      local _, v = r.GetSetMediaItemInfo_String(item, "P_EXT:AAP_TOTAL_SECONDS", "", false)
+      aap_total_seconds = tonumber(v) or 0
+    end
+
+    local cur_note = r.ULT_GetMediaItemNote(item) or ""
+    local user_comment = extract_log_comment(cur_note)
+    if user_comment == "" and cur_note ~= "" and not cur_note:find("Recording Date :", 1, true) then
+      user_comment = cur_note
+    end
+
     r.Undo_BeginBlock()
     r.SetMediaItemInfo_Value(item, "C_LOCK",   0)
     r.SetMediaItemInfo_Value(item, "D_LENGTH", duration)
@@ -1571,7 +1693,11 @@ local function finish_aap_item(end_reason)
     set_item_ext(item, "END_CLOCK",        tostring(os.time()))
     set_item_ext(item, "DURATION",         tostring(duration))
     set_item_ext(item, "AAP_WORK_SECONDS", tostring(work_secs))
-    r.GetSetMediaItemInfo_String(item, "P_NOTES", notes, true)
+    if S.work_type == "aap" then
+      local meta = build_aap_recording_note(aap_day_name, aap_item_count, aap_total_seconds)
+      local new_note = merge_log_note(meta, user_comment)
+      r.ULT_SetMediaItemNote(item, new_note)
+    end
     r.UpdateItemInProject(item)
     r.SetMediaItemInfo_Value(item, "C_LOCK", 1)
     r.Undo_EndBlock("PM: " .. end_reason .. " AAP session", -1)
@@ -1585,11 +1711,10 @@ local function finish_aap_item(end_reason)
 end
 
 -- Finish current AAP item and immediately start the next one.
--- Menu: [pre-prod | new day | wrap | custom]
+-- Menu: [pre-production | new day | wrap | custom]
 --   new day        → folder-based AAP start (select folder in REAPER first)
---   pre-prod / wrap → simple work item, no folder stats needed
---   custom         → ask for name, then simple work item
-local AAP_NEW_JOB_MENU = { "pre-prod", "new day", "wrap", "custom" }
+--   pre-production / wrap / custom → simple work item, no folder stats needed
+local AAP_NEW_JOB_MENU = { "pre-production", "new day", "wrap", "custom" }
 local function action_aap_new_job()
   local end_time, end_pos = finish_aap_item("new_job")
   local chain = end_time and { end_time = end_time, end_pos = end_pos } or nil
@@ -1601,8 +1726,8 @@ local function action_aap_new_job()
     action_start_aap(chain)
   elseif sel == "custom" then
     local ok, val = r.GetUserInputs("Custom Work Type", 1, "Work type:", "")
-    if not ok or val:match("^%s*$") then return end
-    start_simple_aap_work(val:match("^%s*(.-)%s*$"), chain)
+    if not ok or val == "" then return end
+    start_simple_aap_work(val, chain)
   else
     start_simple_aap_work(sel, chain)
   end
@@ -1722,7 +1847,9 @@ local function action_finish()
   end
 end
 local function action_break()
-  if S.work_mode == "AAP" then finish_aap_item("break")
+  if S.work_mode == "AAP" then
+    save_break_state()
+    finish_aap_item("break")
   else
     local was_project_scope = (S.scene_guid == "")
     save_break_state()
@@ -1734,6 +1861,58 @@ end
 local function action_continue()
   if not BREAK_STATE then return end
   local bs = BREAK_STATE
+
+  if bs.work_mode == "AAP" then
+    -- Continue should always restore AAP mode even if user changed mode while on break.
+    set_work_mode("AAP")
+
+    local parent_track = get_or_create_folder_track(WORK_LOG_NAME, true, true)
+    if not parent_track then
+      r.ShowMessageBox("Cannot create Work Log track.", "PM Timer", 0)
+      return
+    end
+
+    local pos_secs    = secs_since_midnight()
+    local now_clock   = os.time()
+    local now_precise = r.time_precise()
+    local item_name   = build_project_process_name(bs.work_type)
+
+    r.Undo_BeginBlock()
+    ensure_folder_track(parent_track)
+    local date_track = get_or_create_date_track(parent_track, os.date("%Y-%m-%d"))
+    local item       = create_work_item(date_track, "", item_name, bs.work_type, pos_secs, now_clock)
+    local item_guid  = get_item_guid(item)
+    r.Undo_EndBlock("PM: Continue AAP session", -1)
+    r.UpdateArrange()
+    auto_sync_work_log_if_open()
+
+    S.mode              = "WORKING"
+    S.scene_guid        = ""
+    S.scene_name        = ""
+    S.scene_start_tc    = ""
+    S.work_type         = bs.work_type
+    S.work_item_guid    = item_guid
+    S.start_clock       = now_clock
+    S.last_start_time   = now_precise
+    S.aap_day_name      = bs.aap_day_name or ""
+    S.aap_item_count    = bs.aap_item_count or 0
+    S.aap_total_seconds = bs.aap_total_seconds or 0
+    S.aap_est_size      = bs.aap_est_size or ""
+
+    set_extstate("ACTIVE_WORK_ITEM_GUID",    item_guid)
+    set_extstate("ACTIVE_WORK_SCENE_GUID",   "")
+    set_extstate("ACTIVE_WORK_SCENE_NAME",   "")
+    set_extstate("ACTIVE_WORK_TYPE",         bs.work_type)
+    set_extstate("ACTIVE_WORK_START_CLOCK",  tostring(now_clock))
+    set_extstate("ACTIVE_WORK_OSTIME_START", tostring(now_clock))
+    set_extstate("ACTIVE_AAP_DAY_NAME",      S.aap_day_name)
+    set_extstate("ACTIVE_AAP_ITEM_COUNT",    tostring(S.aap_item_count))
+    set_extstate("ACTIVE_AAP_TOTAL_SECONDS", tostring(S.aap_total_seconds))
+    set_extstate("ACTIVE_AAP_EST_SIZE",      S.aap_est_size)
+
+    clear_break_state()
+    return
+  end
 
   local parent_track = get_or_create_folder_track(SCENE_TRACK_NAME, true)
   if not parent_track then
@@ -1989,12 +2168,14 @@ local function copy_item_to_wl(src_item, dst_track, src_proj_id)
     if cur_note == src_note and cur_len == len and cur_color == color then
       return false  -- nothing changed
     end
+    r.SetMediaItemInfo_Value(existing, "C_LOCK", 0)
     r.SetMediaItemInfo_Value(existing, "D_LENGTH",      len)
     r.SetMediaItemInfo_Value(existing, "I_CUSTOMCOLOR", color)
     if src_note and src_note ~= "" then
       r.GetSetMediaItemInfo_String(existing, "P_NOTES", src_note, true)
     end
     r.UpdateItemInProject(existing)
+    r.SetMediaItemInfo_Value(existing, "C_LOCK", 1)
     return true
   end
 
@@ -2018,6 +2199,7 @@ local function copy_item_to_wl(src_item, dst_track, src_proj_id)
   if src_proj_id and src_proj_id ~= "" then
     r.GetSetMediaItemInfo_String(new_item, "P_EXT:WL_SRC_PROJ", src_proj_id, true)
   end
+  r.SetMediaItemInfo_Value(new_item, "C_LOCK", 1)
   r.UpdateItemInProject(new_item)
   return true
 end
@@ -2234,17 +2416,23 @@ local function sync_work_log_internal(opts)
     return true
   end
 
-  local scene_track = find_track_in_proj(src_proj, SCENE_TRACK_NAME)
-  if not scene_track then
+  local source_track, source_name = find_track_in_proj(src_proj, SCENE_TRACK_NAME)
+  if not source_track then
+    source_track, source_name = find_track_in_proj(src_proj, WORK_LOG_NAME)
+  end
+  if not source_track then
     if show_messages then
-      r.ShowMessageBox(
-        "No '" .. SCENE_TRACK_NAME .. "' track found in current project.\nNothing to sync.",
-        "Sync to Work Log", 0)
+      local msg = "Work Log calendar ensured for " .. tostring(current_year) .. "."
+      if calendar_filled > 0 then
+        msg = msg .. "\nCreated " .. tostring(calendar_filled) .. " missing date tracks."
+      end
+      msg = msg .. "\nNo source folder found ('" .. SCENE_TRACK_NAME .. "' or '" .. WORK_LOG_NAME .. "')."
+      r.ShowMessageBox(msg, "Sync to Work Log", 0)
     end
-    return false
+    return true
   end
 
-  local sc_num      = math.floor(r.GetMediaTrackInfo_Value(scene_track, "IP_TRACKNUMBER"))
+  local sc_num      = math.floor(r.GetMediaTrackInfo_Value(source_track, "IP_TRACKNUMBER"))
   local total       = r.CountTracks(src_proj)
   local _, src_fn   = r.EnumProjects(-1)
   local src_proj_id = (src_fn or ""):match("([^/\\]+)$") or (src_fn or "")
@@ -2351,7 +2539,7 @@ local function action_sync_work_log()
   sync_work_log_internal({ show_messages = true })
 end
 
-local function auto_sync_work_log_if_open()
+auto_sync_work_log_if_open = function()
   sync_work_log_internal({ show_messages = false })
 end
 
