@@ -1,6 +1,6 @@
 --[[
 @description Item List Editor
-@version 260711.1941
+@version 260824.1538
 @author hsuanice
 @about
   Shows a live, spreadsheet-style table of the currently selected items and all
@@ -43,6 +43,11 @@
 
 
 @changelog
+  v260824.1538
+  - Fix: ReaImGui compatibility on stale-instance cleanup.
+    • Guarded `ImGui_DestroyContext` call to avoid nil-value crash on builds
+      where this API is unavailable.
+
   v260711.1941
   - UX: Disambiguated metadata TAKE vs REAPER item take slot naming.
     • Metadata column keeps original label "TAKE".
@@ -5789,7 +5794,9 @@ if was_running == "1" then
     -- If we can create a test context, the old flag is probably stale
     reaper.ShowConsoleMsg("[ILE] Detected stale running flag, clearing...\n")
     reaper.SetExtState(INSTANCE_KEY, "running", "0", false)
-    reaper.ImGui_DestroyContext(test_ctx)
+    if reaper.ImGui_DestroyContext then
+      reaper.ImGui_DestroyContext(test_ctx)
+    end
   else
     -- Really running
     reaper.ShowMessageBox(
