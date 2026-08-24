@@ -1,6 +1,6 @@
 --[[
 @description hsuanice Batch Metadata Conform
-@version 260824.0039
+@version 260824.1601
 @author hsuanice
 @noindex
 @about
@@ -12,6 +12,30 @@
   included; Reference files remain read-only.
 
 @changelog
+  v260824.1601 (Asia/Taipei)
+    - Added automatic end-of-embed full report export (.tsv) to avoid console truncation.
+    - Added in-UI Embed Issues list for failed items with compact failure reasons.
+    - Added manual Export Full Embed List button for re-exporting current run results.
+
+  v260824.0340 (Asia/Taipei)
+    - Use BWF MetaEdit XML TRACK_LIST as canonical source for multichannel Poly mapping.
+    - Keep REAPER metadata key reads as fallback when CLI output is unavailable.
+    - Strip NUL characters from parsed track names to avoid ^0 display artifacts.
+
+  v260824.0311 (Asia/Taipei)
+    - Parse full iXML TRACK_LIST from XML first to avoid compressed/shifted per-key track names.
+    - Preserve empty-name TRACK_LIST slots so interleave positions stay stable.
+    - Resolve A# target suffix as Recorder Ch first, then fallback to interleave index.
+
+  v260824.0242 (Asia/Taipei)
+    - Normalized AAP/POLY filename families to share the same source base key.
+    - Canonicalized match text (trim + collapse spaces) for metadata key comparison.
+    - Added conservative fallback matching by unique source base, then Originator Ref.
+
+  v260824.0226 (Asia/Taipei)
+    - Allow unique source matches to embed without resolved channel mapping.
+    - Preserve source metadata and skip channel-specific patching when stream is unknown.
+
   v260824.0039 (Asia/Taipei)
     - Added a dedicated Save As project action.
     - Normalize saved project filenames to the .bmc extension.
@@ -106,9 +130,15 @@ local active_task_status = "IDLE"
 local active_task_started_at = 0
 local match_coroutine = nil
 local embed_coroutine = nil
+local TRACKLIST_CLI_CACHE = {}
 local embed_options = { bwf = true, ixml = true, umid = true, timereference = true }
 local embed_status = "Embed not started"
 local embed_progress = nil
+local embed_run_records = {}
+local embed_issue_records = {}
+local embed_report_path = ""
+local embed_report_status = "No embed report yet"
+local classify_embed_issue, export_embed_report, default_embed_report_path
 local cache_fields = { "srcfile", "srcbase", "folder", "samplerate", "channels", "duration", "scene", "take", "tape", "reel", "project", "timereference", "src_tc", "description", "framerate", "speed", "orig_filename", "track_names", "ubits", "bit_depth", "file_type", "originationdate", "originationtime", "originator", "originatorreference", "umid", "clip_name" }
 
 local function basename(path)
@@ -121,9 +151,12 @@ end
 
 local function source_base(path_or_stem)
   local value = stem(path_or_stem)
-  value = value:gsub("%.[Aa]%d+$", "")
   value = value:gsub("%s+[Rr][Ee][Nn][Dd][Ee][Rr]%s*[%d]+$", "")
   value = value:gsub("[_%-]+[Rr][Ee][Nn][Dd][Ee][Rr][_-]*[%d]+$", "")
+  value = value:gsub("%.[Aa]%d+$", "")
+  value = value:gsub("[_%-%s%.]+[Aa][Aa][Pp]$", "")
+  value = value:gsub("[_%-%s%.]+[Pp][Oo][Ll][Yy]$", "")
+  value = value:gsub("[_%-%s%.]+[Ii][Ss][Oo]$", "")
   return value:gsub("^%s+", ""):gsub("%s+$", "")
 end
 
@@ -162,7 +195,25 @@ local function trim(value)
 end
 
 local function lower(value)
-  return trim(value):lower()
+  local output = trim(value):lower()
+  output = output:gsub("%s+", " ")
+  return output
+end
+
+local function canonical_ref(value)
+  local output = lower(value)
+  if output == "" then return "" end
+  local compact = output:gsub("[%s%-%_]+", "")
+  local tail = compact:match("([a-z]+%d+)$")
+  if tail and #tail >= 6 then return tail end
+  return compact
+end
+
+local function canonical_base(value)
+  local output = source_base(value)
+  output = lower(output)
+  output = output:gsub("[%s_%-]+", "")
+  return output
 end
 
 local parse_description
@@ -181,6 +232,14 @@ end
 local function cache_unescape(value)
   local output = tostring(value or "")
   output = output:gsub("%%0A", "\n"):gsub("%%7C", "|"):gsub("%%25", "%%")
+  return output
+end
+
+local function clean_track_name(value)
+  local output = tostring(value or "")
+  output = output:gsub("%z", "")
+  output = output:gsub("%^0", "")
+  output = output:gsub("^%s+", ""):gsub("%s+$", "")
   return output
 end
 
@@ -239,7 +298,7 @@ local function cache_decode_fields(parts)
       local channel, interleave, name = track_text:match("^([^%^]*)%^([^%^]*)%^(.-)%^")
       if name then
         fields.__ixml_tracks[#fields.__ixml_tracks + 1] = {
-          channel_index = tonumber(channel), interleave_index = tonumber(interleave), name = name
+          channel_index = tonumber(channel), interleave_index = tonumber(interleave), name = clean_track_name(name)
         }
       end
     end
@@ -265,7 +324,7 @@ local function cache_decode_fields(parts)
       __ixml_tracks = {}, __metadata_loaded = true,
     }
     for name in (fields.track_names .. "_"):gmatch("([^_]+)_") do
-      fields.__ixml_tracks[#fields.__ixml_tracks + 1] = { interleave_index = #fields.__ixml_tracks + 1, name = name }
+      fields.__ixml_tracks[#fields.__ixml_tracks + 1] = { interleave_index = #fields.__ixml_tracks + 1, name = clean_track_name(name) }
     end
     return fields
   end
@@ -274,7 +333,7 @@ local function cache_decode_fields(parts)
   fields.__ixml_tracks = {}
   for track_text in (parts[#parts] or ""):gmatch("([^~]+)") do
     local channel, interleave, name = track_text:match("^([^%^]*)%^([^%^]*)%^(.*)$")
-    if name then fields.__ixml_tracks[#fields.__ixml_tracks + 1] = { channel_index = tonumber(channel), interleave_index = tonumber(interleave), name = cache_unescape(name) } end
+    if name then fields.__ixml_tracks[#fields.__ixml_tracks + 1] = { channel_index = tonumber(channel), interleave_index = tonumber(interleave), name = clean_track_name(cache_unescape(name)) } end
   end
   fields.__trk_table = {}
   for index = 1, 64 do fields.__trk_table[index] = fields["trk" .. index] end
@@ -335,6 +394,69 @@ local function read_meta_any(src, keys)
   return ""
 end
 
+local function decode_xml_text(value)
+  local output = tostring(value or "")
+  output = output:gsub("<!%[CDATA%[(.-)%]%]>", "%1")
+  output = output:gsub("&lt;", "<")
+  output = output:gsub("&gt;", ">")
+  output = output:gsub("&quot;", '"')
+  output = output:gsub("&apos;", "'")
+  output = output:gsub("&amp;", "&")
+  output = output:gsub("%z", "")
+  return trim(output)
+end
+
+local parse_ixml_track_list_xml
+
+local function read_tracklist_via_cli(path)
+  local target = tostring(path or "")
+  if target == "" then return nil end
+  if TRACKLIST_CLI_CACHE[target] ~= nil then
+    return TRACKLIST_CLI_CACHE[target] or nil
+  end
+  local cli = EMBED and EMBED.CLI_Resolve and EMBED.CLI_Resolve() or nil
+  if not cli or cli == "" then
+    TRACKLIST_CLI_CACHE[target] = false
+    return nil
+  end
+  local cmd = string.format('"%s" --out-xml=- "%s"', cli, target)
+  local fh = io.popen(cmd)
+  if not fh then
+    TRACKLIST_CLI_CACHE[target] = false
+    return nil
+  end
+  local xml = fh:read("*a") or ""
+  fh:close()
+  local tracks = nil
+  if type(parse_ixml_track_list_xml) == "function" then
+    local ok, parsed = pcall(parse_ixml_track_list_xml, xml)
+    if ok then tracks = parsed end
+  end
+  TRACKLIST_CLI_CACHE[target] = tracks or false
+  return tracks
+end
+
+parse_ixml_track_list_xml = function(ixml_text)
+  local xml = tostring(ixml_text or "")
+  if xml == "" then return nil end
+  local block = xml:match("<TRACK_LIST>(.-)</TRACK_LIST>")
+  if not block or block == "" then return nil end
+  local tracks = {}
+  for track_xml in block:gmatch("<TRACK>(.-)</TRACK>") do
+    local channel = tonumber(track_xml:match("<CHANNEL_INDEX>%s*(%d+)%s*</CHANNEL_INDEX>") or "")
+    local interleave = tonumber(track_xml:match("<INTERLEAVE_INDEX>%s*(%d+)%s*</INTERLEAVE_INDEX>") or "")
+    local name = decode_xml_text(track_xml:match("<NAME>(.-)</NAME>") or "")
+    if channel or interleave or name ~= "" then
+      tracks[#tracks + 1] = {
+        channel_index = channel,
+        interleave_index = interleave,
+        name = name,
+      }
+    end
+  end
+  return #tracks > 0 and tracks or nil
+end
+
 local function target_track_name(fields)
   if type(fields and fields.__ixml_tracks) == "table" and #fields.__ixml_tracks == 1 then
     return trim(fields.__ixml_tracks[1].name)
@@ -390,17 +512,43 @@ local function read_file(path, role)
   }
   if fields.description ~= "" then parse_description(fields.description, fields) end
 
-  local count = tonumber(read_meta_any(src, { "IXML:TRACK_LIST:TRACK_COUNT", "TRACK_LIST:TRACK_COUNT" })) or 0
-  for index = 1, count do
-    local suffix = index > 1 and ":" .. index or ""
-    local channel = tonumber(read_meta_any(src, { "IXML:TRACK_LIST:TRACK:CHANNEL_INDEX" .. suffix, "TRACK_LIST:TRACK:CHANNEL_INDEX" .. suffix }))
-    local interleave = tonumber(read_meta_any(src, { "IXML:TRACK_LIST:TRACK:INTERLEAVE_INDEX" .. suffix, "TRACK_LIST:TRACK:INTERLEAVE_INDEX" .. suffix }))
-    local name = read_meta_any(src, { "IXML:TRACK_LIST:TRACK:NAME" .. suffix, "TRACK_LIST:TRACK:NAME" .. suffix })
-    if name ~= "" then
+  local parsed_tracks = nil
+  if (tonumber(fields.channels) or 0) > 1 then
+    parsed_tracks = read_tracklist_via_cli(path)
+  end
+  if not parsed_tracks then
+    parsed_tracks = parse_ixml_track_list_xml(read_meta(src, "IXML"))
+  end
+  if parsed_tracks then
+    fields.__ixml_tracks = parsed_tracks
+    for index, track in ipairs(parsed_tracks) do
+      track.interleave_index = tonumber(track.interleave_index) or index
+      track.name = decode_xml_text(track.name)
+      if track.name ~= "" then
+        local channel = tonumber(track.channel_index) or tonumber(track.interleave_index)
+        if channel then
+          fields["trk" .. channel] = track.name
+          fields["TRK" .. channel] = track.name
+        end
+      end
+    end
+  else
+    local count = tonumber(read_meta_any(src, { "IXML:TRACK_LIST:TRACK_COUNT", "TRACK_LIST:TRACK_COUNT" })) or 0
+    for index = 1, count do
+      local suffix = index > 1 and ":" .. index or ""
+      local channel = tonumber(read_meta_any(src, { "IXML:TRACK_LIST:TRACK:CHANNEL_INDEX" .. suffix, "TRACK_LIST:TRACK:CHANNEL_INDEX" .. suffix }))
+      local interleave = tonumber(read_meta_any(src, { "IXML:TRACK_LIST:TRACK:INTERLEAVE_INDEX" .. suffix, "TRACK_LIST:TRACK:INTERLEAVE_INDEX" .. suffix }))
+      local name = decode_xml_text(read_meta_any(src, { "IXML:TRACK_LIST:TRACK:NAME" .. suffix, "TRACK_LIST:TRACK:NAME" .. suffix }))
       fields.__ixml_tracks[#fields.__ixml_tracks + 1] = {
-        channel_index = channel, interleave_index = interleave or index, name = name
+        channel_index = channel,
+        interleave_index = interleave or index,
+        name = name,
       }
-      if channel then fields["trk" .. channel] = name; fields["TRK" .. channel] = name end
+      if name ~= "" then
+        local map_channel = channel or interleave or index
+        fields["trk" .. map_channel] = name
+        fields["TRK" .. map_channel] = name
+      end
     end
   end
   fields.__trk_table = {}
@@ -425,9 +573,10 @@ local function identity_keys(fields)
 end
 
 local function match_value(fields, key)
-  if key == "filename" then return lower(fields.srcbase) end
+  if key == "filename" then return canonical_base(fields.srcbase) end
   if key == "clip_name" then return lower(fields.clip_name) end
   if key == "track_name" then return lower(target_track_name(fields)) end
+  if key == "originatorreference" then return canonical_ref(fields.originatorreference) end
   return lower(fields[key])
 end
 
@@ -442,7 +591,8 @@ local function selected_match_values(fields)
 end
 
 local function channel_from_name(path)
-  local name = stem(path)
+  local name = stem(path):gsub("%s+[Rr][Ee][Nn][Dd][Ee][Rr]%s*[%d]+$", "")
+  name = name:gsub("[_%-]+[Rr][Ee][Nn][Dd][Ee][Rr][_-]*[%d]+$", "")
   local number = name:match("%[?%s*[Cc]han(?:nel)?[%s_%-]*(%d+)%s*%]?")
     or name:match("[_%-][Cc][Hh](%d+)")
     or name:match("[_%-][Cc](%d+)$")
@@ -451,6 +601,8 @@ end
 
 local function render_index_from_name(path)
   local name = stem(path)
+  local split_number = name:match("%.[Aa](%d+)%s+[Rr][Ee][Nn][Dd][Ee][Rr]%s*[%d]+$")
+  if split_number then return tonumber(split_number) end
   return tonumber(name:match("%.[Aa](%d+)$"))
     or tonumber(name:match("%s+[Rr][Ee][Nn][Dd][Ee][Rr]%s*(%d+)$"))
     or tonumber(name:match("[_%-][Rr][Ee][Nn][Dd][Ee][Rr][_-]*(%d+)$"))
@@ -458,11 +610,18 @@ end
 
 local function reference_matches(target)
   local candidates, target_values = {}, selected_match_values(target)
+  local strict_fields_enabled = false
+  for _, option in ipairs(MATCH_OPTIONS) do
+    if MATCH_CONFIG[option.key] and option.key ~= "track_name" then
+      strict_fields_enabled = true
+      break
+    end
+  end
   for _, reference in ipairs(REFERENCES) do
     if reference.fields then
       local filename_only = not target.__metadata_loaded or not reference.fields.__metadata_loaded
       if filename_only then
-        if lower(target.srcbase) == lower(reference.fields.srcbase) then candidates[#candidates + 1] = reference end
+        if canonical_base(target.srcbase) == canonical_base(reference.fields.srcbase) then candidates[#candidates + 1] = reference end
       else
       local matched = false
       local usable = true
@@ -481,15 +640,78 @@ local function reference_matches(target)
       end
     end
   end
+  if #candidates > 0 then return candidates end
+
+  -- Strict mode: if any non-track match key is enabled, do not use heuristic fallback.
+  if strict_fields_enabled then return candidates end
+
+  -- Conservative fallback: unique source base match (AAP/POLY normalized).
+  local base_candidates = {}
+  local target_base = canonical_base(target.srcbase or target.srcfile or target.clip_name)
+  if target_base ~= "" then
+    for _, reference in ipairs(REFERENCES) do
+      if reference.fields and canonical_base(reference.fields.srcbase or reference.filename or "") == target_base then
+        base_candidates[#base_candidates + 1] = reference
+      end
+    end
+  end
+  if #base_candidates == 1 then return base_candidates end
+  if #base_candidates > 1 then
+    local target_ref = canonical_ref(target.originatorreference)
+    if target_ref ~= "" then
+      local ref_filtered = {}
+      for _, reference in ipairs(base_candidates) do
+        if canonical_ref(reference.fields and reference.fields.originatorreference or "") == target_ref then
+          ref_filtered[#ref_filtered + 1] = reference
+        end
+      end
+      if #ref_filtered >= 1 then return ref_filtered end
+    end
+    return base_candidates
+  end
+
+  -- Final fallback: Originator Ref only (still conservative; ambiguity preserved).
+  local target_ref = canonical_ref(target.originatorreference)
+  if target_ref ~= "" then
+    local ref_only = {}
+    for _, reference in ipairs(REFERENCES) do
+      if reference.fields and canonical_ref(reference.fields.originatorreference) == target_ref then
+        ref_only[#ref_only + 1] = reference
+      end
+    end
+    if #ref_only >= 1 then return ref_only end
+  end
   return candidates
 end
 
 local function resolve_stream(target_fields, reference_fields)
+  local function stream_track_name(fields, stream_index)
+    if not fields or not stream_index then return nil end
+    local slot_name = trim((fields.__trk_table and fields.__trk_table[stream_index]) or fields["trk" .. tostring(stream_index)] or fields["TRK" .. tostring(stream_index)] or "")
+    if slot_name ~= "" then return slot_name end
+    for _, track in ipairs(fields.__ixml_tracks or {}) do
+      if tonumber(track and track.interleave_index or 0) == tonumber(stream_index) then
+        local name = trim(track and track.name or "")
+        if name ~= "" then return name end
+      end
+    end
+    local direct = fields.__ixml_tracks and fields.__ixml_tracks[stream_index]
+    if direct then
+      local name = trim(direct.name or "")
+      if name ~= "" then return name end
+    end
+    return nil
+  end
+
   local target_name = target_track_name(target_fields)
   if MATCH_CONFIG.track_name and target_name ~= "" then
     local matches = {}
-    for index, track in ipairs(reference_fields.__ixml_tracks or {}) do
-      if lower(track.name) == lower(target_name) then matches[#matches + 1] = { index = index, track = track } end
+    local max_streams = math.max(tonumber(reference_fields.channels) or 0, #(reference_fields.__ixml_tracks or {}), 64)
+    for index = 1, max_streams do
+      local name = stream_track_name(reference_fields, index)
+      if name and lower(name) == lower(target_name) then
+        matches[#matches + 1] = { index = index, track = { name = name, interleave_index = index } }
+      end
     end
     if #matches == 1 then return matches[1].index, matches[1].track, "Target track name" end
     if #matches > 1 then return nil, nil, "Track name matches multiple streams" end
@@ -502,9 +724,21 @@ local function resolve_stream(target_fields, reference_fields)
   end
   if stream then
     for _, track in ipairs(reference_fields.__ixml_tracks or {}) do
-      if tonumber(track.interleave_index) == stream then
-        return stream, track, source
+      if tonumber(track.channel_index) == stream then
+        local resolved_stream = tonumber(track.interleave_index) or stream
+        local slot_name = stream_track_name(reference_fields, resolved_stream)
+        if slot_name then
+          return resolved_stream, { name = slot_name, channel_index = stream, interleave_index = resolved_stream }, "Target filename Recorder Ch suffix"
+        end
+        return resolved_stream, track, "Target filename Recorder Ch suffix"
       end
+    end
+    local slot_name = stream_track_name(reference_fields, stream)
+    if slot_name then
+      return stream, { name = slot_name, interleave_index = stream, channel_index = stream }, source
+    end
+    for _, track in ipairs(reference_fields.__ixml_tracks or {}) do
+      if tonumber(track.interleave_index) == stream then return stream, track, source end
     end
   end
   return nil, nil, target_name ~= "" and "Target track name was not selected or found in Poly" or "Target stream is not explicit"
@@ -544,8 +778,9 @@ local function build_results(write_console)
         result.reason = "Unique source and stream match: " .. stream_reason
         result.proposed_filename = target.fields.srcbase .. "_" .. (track.name ~= "" and track.name or ("stream" .. stream)) .. ".wav"
       else
-        result.status = "AMBIGUOUS"
-        result.reason = "Reference found, but " .. stream_reason
+        result.status = "MATCHED"
+        result.source_only_match = true
+        result.reason = "Source matched; channel mapping unavailable, embed without channel patch: " .. stream_reason
       end
       elseif #candidates > 1 then
         result.status = "AMBIGUOUS"
@@ -604,7 +839,7 @@ end
 local function matched_results()
   local output = {}
   for _, result in ipairs(RESULTS) do
-    if result.status == "MATCHED" and result.reference and result.stream then output[#output + 1] = result end
+    if result.status == "MATCHED" and result.reference then output[#output + 1] = result end
   end
   return output
 end
@@ -614,12 +849,13 @@ local function make_embed_channel_context(result)
   local target_fields = result.target.fields or {}
   local target_channels = tonumber(target_fields.channels) or 0
   local reference_channels = tonumber(reference_fields.channels) or 0
-  if target_channels ~= 1 or reference_channels <= 1 then return nil end
+  if target_channels ~= 1 or reference_channels <= 1 or not result.stream or not result.track_name or result.track_name == "" then return nil end
   return {
     index = tonumber(result.stream),
     total = tonumber(reference_fields.channels) or #reference_fields.__ixml_tracks,
-    name = result.track_name or "",
+    name = trim(result.track_name or ""),
     channel_index = tonumber(result.recorder_ch),
+    target_tracks = target_fields.__ixml_tracks,
   }
 end
 
@@ -647,42 +883,81 @@ local function start_embed()
   active_task_started_at = reaper.time_precise()
   embed_status = string.format("Embedding 0/%d", #items)
   embed_progress = { current = 0, total = #items, started_at = active_task_started_at, success = 0, failed = 0 }
+  embed_run_records = {}
+  embed_issue_records = {}
+  embed_report_path = ""
+  embed_report_status = "Embedding in progress..."
   reaper.ShowConsoleMsg(string.format("[Batch Metadata Conform] START Embed Metadata (%d matched files)\n", #items))
   embed_coroutine = coroutine.create(function()
     local success, failed = 0, 0
     local affected_folders = {}
-    for _, result in ipairs(items) do affected_folders[dirname(result.target.fields.srcpath)] = true end
+    for _, result in ipairs(items) do
+      local target_folder_path = (result.target and result.target.fields and result.target.fields.srcpath) or (result.target and result.target.path) or ""
+      if target_folder_path ~= "" then affected_folders[dirname(target_folder_path)] = true end
+    end
     for index, result in ipairs(items) do
-      local source_path = result.reference.fields.srcpath
-      local target_path = result.target.fields.srcpath
+      local source_path = (result.reference and result.reference.fields and result.reference.fields.srcpath) or (result.reference and result.reference.path) or ""
+      local target_path = (result.target and result.target.fields and result.target.fields.srcpath) or (result.target and result.target.path) or ""
       local context = make_embed_channel_context(result)
+      local item_logs = {}
       reaper.ShowConsoleMsg(string.format("[Batch Metadata Conform] embed %d/%d START: %s <- %s | stream=%s | Recorder Ch=%s | Track=%s | channel_patch=%s\n", index, #items, basename(target_path), basename(source_path), context and context.index or "-", context and context.channel_index or "-", context and context.name or "-", context and "yes" or "no"))
+      if source_path == "" or target_path == "" then
+        item_logs[#item_logs + 1] = "path resolve failed: empty source or target path"
+      end
       local details = EMBED.Copy_Metadata(cli, source_path, target_path, {
         chan_ctx = context,
         copy_tr = true,
         set_embedder = true,
         cleanup = true,
-        log = function(message) reaper.ShowConsoleMsg(string.format("[Batch Metadata Conform] embed %d/%d [library] %s\n", index, #items, tostring(message))) end,
+        log = function(message)
+          local msg = tostring(message)
+          item_logs[#item_logs + 1] = msg
+          reaper.ShowConsoleMsg(string.format("[Batch Metadata Conform] embed %d/%d [library] %s\n", index, #items, msg))
+        end,
       })
       details = details or { ok = false, reason = "Metadata Embed library returned no result" }
       local ok = details and details.ok == true
+      local umid_status = embed_options.umid and "SKIP" or "DISABLED"
       reaper.ShowConsoleMsg(string.format("[Batch Metadata Conform] embed %d/%d copy result: iXML=%s CORE=%s TimeReference=%s embedder=%s\n", index, #items, tostring(details.ixml), tostring(details.core), tostring(details.tr), tostring(details.embedder)))
       if embed_options.umid then
         local umid = result.reference.fields.umid
         if (not umid or #umid:gsub("[^%x]", "") ~= 64) and GENERATOR then
-          umid = GENERATOR.generate_umid_basic({ material = source_path, instance = index })
+          local stable_instance = (context and tonumber(context.index)) or (context and tonumber(context.channel_index)) or 1
+          umid = GENERATOR.generate_umid_basic({ material = source_path, instance = stable_instance })
           reaper.ShowConsoleMsg(string.format("[Batch Metadata Conform] embed %d/%d UMID: source missing, generated new 64-hex value\n", index, #items))
         elseif umid and umid ~= "" then
           reaper.ShowConsoleMsg(string.format("[Batch Metadata Conform] embed %d/%d UMID: preserving reference value\n", index, #items))
         end
         if umid and umid ~= "" then
-          local umid_ok, umid_code, umid_output = EMBED.write_bext_umid(cli, target_path, umid)
+          local umid_ok, umid_code = EMBED.write_bext_umid(cli, target_path, umid)
           ok = umid_ok and ok
+          umid_status = umid_ok and "OK" or "FAIL"
           reaper.ShowConsoleMsg(string.format("[Batch Metadata Conform] embed %d/%d UMID write: %s (code=%s)\n", index, #items, umid_ok and "OK" or "FAIL", tostring(umid_code)))
         else
+          umid_status = "UNAVAILABLE"
           reaper.ShowConsoleMsg(string.format("[Batch Metadata Conform] embed %d/%d UMID: unavailable, skipped\n", index, #items))
         end
       end
+      local issue_code, issue_reason = classify_embed_issue(details, item_logs, embed_options.umid, umid_status)
+      local record = {
+        index = index,
+        total = #items,
+        result = ok and "SUCCESS" or "FAILED",
+        issue_code = issue_code,
+        issue_reason = issue_reason,
+        target_file = basename(target_path ~= "" and target_path or ((result.target and result.target.path) or "")),
+        reference_file = basename(source_path ~= "" and source_path or ((result.reference and result.reference.path) or "")),
+        stream = context and context.index or "-",
+        recorder_ch = context and context.channel_index or "-",
+        track_name = context and context.name or "-",
+        ixml = details.ixml,
+        core = details.core,
+        tr = details.tr,
+        embedder = details.embedder,
+        umid_status = umid_status,
+      }
+      embed_run_records[#embed_run_records + 1] = record
+      if not ok then embed_issue_records[#embed_issue_records + 1] = record end
       if ok then success = success + 1 else failed = failed + 1 end
       reaper.ShowConsoleMsg(string.format("[Batch Metadata Conform] embed %d/%d END: %s\n", index, #items, ok and "SUCCESS" or "FAILED"))
       embed_progress.current = index
@@ -701,6 +976,7 @@ local function start_embed()
       os.remove(cache_path(folder, "target"))
       reaper.ShowConsoleMsg("[Batch Metadata Conform] invalidated target cache: " .. cache_path(folder, "target") .. "\n")
     end
+    export_embed_report(default_embed_report_path())
     reaper.ShowConsoleMsg(string.format("[Batch Metadata Conform] END Embed Metadata: success=%d failed=%d\n", success, failed))
     embed_status = string.format("Embed complete | elapsed %02d:%02d | success=%d failed=%d", math.floor((reaper.time_precise() - embed_progress.started_at) / 60), math.floor((reaper.time_precise() - embed_progress.started_at) % 60), success, failed)
   end)
@@ -711,6 +987,9 @@ local function process_embed()
   local ok, error_message = coroutine.resume(embed_coroutine)
   if not ok then
     reaper.ShowConsoleMsg("[Batch Metadata Conform] EMBED ERROR: " .. tostring(error_message) .. "\n")
+    if #embed_run_records > 0 then
+      export_embed_report(default_embed_report_path())
+    end
     embed_status = "Embed failed: " .. tostring(error_message)
     embed_coroutine = nil
     active_task_status = "IDLE"
@@ -915,7 +1194,14 @@ local function process_loading_batch()
   for _ = 1, batch_size do
     local record = state.pending[state.current + 1]
     if not record then break end
-    record.fields, record.error = read_file(record.path, state.role)
+    local ok, fields, read_error = pcall(read_file, record.path, state.role)
+    if ok then
+      record.fields, record.error = fields, read_error
+    else
+      record.fields = nil
+      record.error = "Metadata read crashed: " .. tostring(fields)
+      reaper.ShowConsoleMsg(string.format("[Batch Metadata Conform] metadata read error (%s): %s\n", record.filename or basename(record.path), tostring(fields)))
+    end
     if record.fields then record.fields.__metadata_loaded = true end
     state.current = state.current + 1
     if state.current % 500 == 0 then
@@ -1083,11 +1369,17 @@ local function clear_lists(clear_targets, clear_references)
   build_basic_results()
 end
 
+local function default_project_filename()
+  local stamp = os.date("%y%m%d_%H%M%S")
+  if not stamp or stamp == "" then return "BatchConform.bmc" end
+  return stamp .. ".bmc"
+end
+
 local function choose_project_path(for_save)
   local path
   if for_save and reaper.JS_Dialog_BrowseForSaveFile then
     local ok, selected = reaper.JS_Dialog_BrowseForSaveFile(
-      "Save Batch Metadata Conform Project", "", "BatchConform.bmc",
+      "Save Batch Metadata Conform Project", "", default_project_filename(),
       "BMC project (*.bmc)\0*.bmc\0")
     if ok == 1 then path = selected end
   else
@@ -1152,8 +1444,20 @@ local function finish_open_project(state)
   clear_lists(true, true)
   if #saved_targets > 0 or #saved_references > 0 then
     TARGETS, REFERENCES = {}, {}
-    for _, fields in ipairs(saved_targets) do TARGETS[#TARGETS + 1] = { path = fields.srcpath, filename = fields.srcfile, fields = fields } end
-    for _, fields in ipairs(saved_references) do REFERENCES[#REFERENCES + 1] = { path = fields.srcpath, filename = fields.srcfile, fields = fields } end
+    for _, fields in ipairs(saved_targets) do
+      if fields and fields.srcpath and fields.srcpath ~= "" then
+        TARGETS[#TARGETS + 1] = { path = fields.srcpath, filename = fields.srcfile or basename(fields.srcpath), fields = fields }
+      else
+        reaper.ShowConsoleMsg("[Batch Metadata Conform] skipped target metadata record with missing path\n")
+      end
+    end
+    for _, fields in ipairs(saved_references) do
+      if fields and fields.srcpath and fields.srcpath ~= "" then
+        REFERENCES[#REFERENCES + 1] = { path = fields.srcpath, filename = fields.srcfile or basename(fields.srcpath), fields = fields }
+      else
+        reaper.ShowConsoleMsg("[Batch Metadata Conform] skipped reference metadata record with missing path\n")
+      end
+    end
     local targets_by_path, references_by_path = {}, {}
     for _, record in ipairs(TARGETS) do targets_by_path[record.path] = record end
     for _, record in ipairs(REFERENCES) do references_by_path[record.path] = record end
@@ -1228,8 +1532,29 @@ local function process_open_project()
 end
 
 local function open_project(path)
+  local lower_path = tostring(path or ""):lower()
+  if lower_path:match("%.tsv$") then
+    local bmc_path = tostring(path):gsub("%.tsv$", ".bmc")
+    local probe = io.open(bmc_path, "r")
+    if probe then
+      probe:close()
+      reaper.ShowConsoleMsg("[Batch Metadata Conform] Open Project: redirected TSV to BMC -> " .. bmc_path .. "\n")
+      path = bmc_path
+    else
+      reaper.ShowMessageBox("Selected file is a report (.tsv), not a project file.\n\nPlease open a .bmc file.", "Batch Metadata Conform", 0)
+      return false
+    end
+  end
+
   local file = io.open(path, "r")
   if not file then reaper.ShowMessageBox("Cannot read project:\n" .. path, "Batch Metadata Conform", 0); return false end
+  local header = file:read("*l")
+  if header ~= "BMC_PROJECT_V1" then
+    file:close()
+    reaper.ShowMessageBox("Invalid project file format.\n\nPlease open a .bmc file saved by Batch Metadata Conform.", "Batch Metadata Conform", 0)
+    return false
+  end
+  file:seek("set", 0)
   project_open_state = { path = path, file = file, lines = 0, saved_targets = {}, saved_references = {}, saved_matches = {}, started_at = reaper.time_precise() }
   active_task_status = "OPENING PROJECT"
   reaper.ShowConsoleMsg("[Batch Metadata Conform] START project read: " .. path .. "\n")
@@ -1257,6 +1582,134 @@ local function single_line(value, max_chars)
   max_chars = max_chars or 160
   if #value_text > max_chars then return value_text:sub(1, max_chars - 3) .. "..." end
   return value_text
+end
+
+local function report_cell(value)
+  local output = single_line(value, 4096)
+  output = output:gsub("\t", "    ")
+  return output
+end
+
+local function embed_report_timestamp()
+  local stamp = os.date("%y%m%d_%H%M%S")
+  if not stamp or stamp == "" then return "unknown" end
+  return stamp
+end
+
+default_embed_report_path = function()
+  local base = ""
+  if project_path ~= "" then base = dirname(project_path) end
+  if base == "" and scan_jobs.target and scan_jobs.target.folder then base = scan_jobs.target.folder end
+  if base == "" then base = SCRIPT_DIR:gsub("[/\\]$", "") end
+  if base == "" then base = "." end
+  return base .. "/BatchConform_EmbedReport_" .. embed_report_timestamp() .. ".tsv"
+end
+
+classify_embed_issue = function(details, logs, umid_enabled, umid_status)
+  if details and details.ok then return "OK", "" end
+  for _, message in ipairs(logs or {}) do
+    if tostring(message):find("no sidecar exported from source", 1, true) then
+      return "MISSING_IXML_SOURCE", "Source has no iXML chunk"
+    end
+  end
+  if details and details.ixml == false then return "IXML_COPY_FAILED", "iXML copy failed" end
+  if details and details.core == false then return "CORE_COPY_FAILED", "CORE copy failed" end
+  if details and details.tr == false then return "TR_COPY_FAILED", "TimeReference copy failed" end
+  if details and details.embedder == false then return "EMBEDDER_SET_FAILED", "iXML embedder write failed" end
+  if umid_enabled and umid_status == "FAIL" then return "UMID_WRITE_FAILED", "UMID write failed" end
+  for _, message in ipairs(logs or {}) do
+    if tostring(message):find("FAIL", 1, true) then return "LIBRARY_FAIL", report_cell(message) end
+  end
+  return "FAILED", "Unknown failure"
+end
+
+local function current_embed_summary()
+  local success, failed = 0, 0
+  for _, record in ipairs(embed_run_records) do
+    if record.result == "SUCCESS" then success = success + 1 else failed = failed + 1 end
+  end
+  return {
+    total = #embed_run_records,
+    success = success,
+    failed = failed,
+    started_at = active_task_started_at,
+    ended_at = reaper.time_precise(),
+  }
+end
+
+local function write_embed_report(path, summary, records)
+  local file, err = io.open(path, "w")
+  if not file then return false, err end
+  file:write("BATCH_METADATA_CONFORM_EMBED_REPORT_V1\n")
+  file:write("GeneratedAt\t", os.date("%Y-%m-%d %H:%M:%S"), "\n")
+  file:write("Total\t", tostring(summary.total or 0), "\n")
+  file:write("Success\t", tostring(summary.success or 0), "\n")
+  file:write("Failed\t", tostring(summary.failed or 0), "\n")
+  file:write("ElapsedSec\t", string.format("%.2f", math.max(0, (summary.ended_at or 0) - (summary.started_at or 0))), "\n")
+  local issue_counts = {}
+  for _, record in ipairs(records or {}) do
+    if record.issue_code and record.issue_code ~= "OK" then
+      issue_counts[record.issue_code] = (issue_counts[record.issue_code] or 0) + 1
+    end
+  end
+  if next(issue_counts) then
+    file:write("IssueCounts\n")
+    for code, count in pairs(issue_counts) do
+      file:write(code, "\t", tostring(count), "\n")
+    end
+  end
+  file:write("\n")
+  file:write("Index\tTotal\tResult\tIssueCode\tIssueReason\tTarget\tReference\tStream\tRecorderCh\tTrack\tiXML\tCORE\tTimeReference\tEmbedder\tUMID\n")
+  for _, record in ipairs(records or {}) do
+    file:write(table.concat({
+      tostring(record.index or ""),
+      tostring(record.total or ""),
+      report_cell(record.result),
+      report_cell(record.issue_code),
+      report_cell(record.issue_reason),
+      report_cell(record.target_file),
+      report_cell(record.reference_file),
+      tostring(record.stream or "-"),
+      tostring(record.recorder_ch or "-"),
+      report_cell(record.track_name),
+      tostring(record.ixml),
+      tostring(record.core),
+      tostring(record.tr),
+      tostring(record.embedder),
+      report_cell(record.umid_status),
+    }, "\t"), "\n")
+  end
+  file:close()
+  return true
+end
+
+export_embed_report = function(path)
+  if #embed_run_records == 0 then
+    embed_report_status = "No embed records to export"
+    return false
+  end
+  local summary = current_embed_summary()
+  local output_path = path or default_embed_report_path()
+  local ok, err = write_embed_report(output_path, summary, embed_run_records)
+  if not ok then
+    local fallback_path = SCRIPT_DIR:gsub("[/\\]$", "") .. "/BatchConform_EmbedReport_" .. embed_report_timestamp() .. ".tsv"
+    local fallback_ok, fallback_err = write_embed_report(fallback_path, summary, embed_run_records)
+    if fallback_ok then
+      embed_report_path = fallback_path
+      embed_report_status = "Embed report fallback saved: " .. fallback_path .. " (original path failed)"
+      reaper.ShowConsoleMsg("[Batch Metadata Conform] Embed report fallback saved: " .. fallback_path .. "\n")
+      reaper.ShowConsoleMsg("[Batch Metadata Conform] Original report path failed: " .. tostring(output_path) .. " | " .. tostring(err) .. "\n")
+      return true
+    end
+    embed_report_status = "Embed report write failed: " .. tostring(err) .. " | fallback failed: " .. tostring(fallback_err)
+    reaper.ShowConsoleMsg("[Batch Metadata Conform] Embed report write failed: " .. tostring(err) .. "\n")
+    reaper.ShowConsoleMsg("[Batch Metadata Conform] Embed report fallback failed: " .. tostring(fallback_err) .. "\n")
+    return false
+  end
+  embed_report_path = output_path
+  embed_report_status = "Embed report saved: " .. output_path
+  reaper.ShowConsoleMsg("[Batch Metadata Conform] Embed report saved: " .. output_path .. "\n")
+  return true
 end
 
 local function color_u32(red, green, blue, alpha)
@@ -1294,6 +1747,41 @@ end
 
 local function button(label, callback)
   if reaper.ImGui_Button(ctx, label) then callback() end
+end
+
+local function draw_embed_issue_list()
+  reaper.ImGui_Separator(ctx)
+  reaper.ImGui_Text(ctx, string.format("Embed Issues: %d", #embed_issue_records))
+  reaper.ImGui_SameLine(ctx)
+  if reaper.ImGui_Button(ctx, "Export Full Embed List") then
+    export_embed_report()
+  end
+  reaper.ImGui_TextWrapped(ctx, embed_report_status)
+  if #embed_issue_records == 0 then return end
+  if reaper.ImGui_BeginTable(ctx, "embed_issues_table", 6,
+    reaper.ImGui_TableFlags_Borders()
+    | reaper.ImGui_TableFlags_RowBg()
+    | reaper.ImGui_TableFlags_ScrollY()
+    | reaper.ImGui_TableFlags_Resizable()
+    | reaper.ImGui_TableFlags_SizingFixedFit(), 0, 180) then
+    reaper.ImGui_TableSetupColumn(ctx, "#", reaper.ImGui_TableColumnFlags_WidthFixed(), 60)
+    reaper.ImGui_TableSetupColumn(ctx, "Issue", reaper.ImGui_TableColumnFlags_WidthFixed(), 180)
+    reaper.ImGui_TableSetupColumn(ctx, "Target", reaper.ImGui_TableColumnFlags_WidthFixed(), 280)
+    reaper.ImGui_TableSetupColumn(ctx, "Reference", reaper.ImGui_TableColumnFlags_WidthFixed(), 280)
+    reaper.ImGui_TableSetupColumn(ctx, "Copy Result", reaper.ImGui_TableColumnFlags_WidthFixed(), 220)
+    reaper.ImGui_TableSetupColumn(ctx, "Reason", reaper.ImGui_TableColumnFlags_WidthFixed(), 320)
+    reaper.ImGui_TableHeadersRow(ctx)
+    for _, record in ipairs(embed_issue_records) do
+      reaper.ImGui_TableNextRow(ctx)
+      reaper.ImGui_TableNextColumn(ctx); reaper.ImGui_Text(ctx, tostring(record.index or ""))
+      reaper.ImGui_TableNextColumn(ctx); reaper.ImGui_Text(ctx, tostring(record.issue_code or "FAILED"))
+      reaper.ImGui_TableNextColumn(ctx); reaper.ImGui_Text(ctx, tostring(record.target_file or ""))
+      reaper.ImGui_TableNextColumn(ctx); reaper.ImGui_Text(ctx, tostring(record.reference_file or ""))
+      reaper.ImGui_TableNextColumn(ctx); reaper.ImGui_Text(ctx, string.format("iXML=%s CORE=%s TR=%s UMID=%s", tostring(record.ixml), tostring(record.core), tostring(record.tr), tostring(record.umid_status)))
+      reaper.ImGui_TableNextColumn(ctx); reaper.ImGui_Text(ctx, tostring(record.issue_reason or ""))
+    end
+    reaper.ImGui_EndTable(ctx)
+  end
 end
 
 local function draw_options()
@@ -1390,7 +1878,8 @@ end
 local function poly_streams_text(fields)
   local streams = {}
   for index, track in ipairs(fields and fields.__ixml_tracks or {}) do
-    streams[#streams + 1] = string.format("stream %d / Recorder Ch %s / %s", index, track.channel_index or "-", track.name ~= "" and track.name or "<unnamed>")
+    local clean_name = clean_track_name(track.name)
+    streams[#streams + 1] = string.format("stream %d / Recorder Ch %s / %s", index, track.channel_index or "-", clean_name ~= "" and clean_name or "<unnamed>")
   end
   return #streams > 0 and table.concat(streams, " | ") or "No TRACK_LIST metadata"
 end
@@ -1398,7 +1887,8 @@ end
 local function poly_track_names_text(fields)
   local names = {}
   for _, track in ipairs(fields and fields.__ixml_tracks or {}) do
-    if trim(track.name) ~= "" then names[#names + 1] = trim(track.name) end
+    local clean_name = clean_track_name(track.name)
+    if clean_name ~= "" then names[#names + 1] = clean_name end
   end
   return #names > 0 and table.concat(names, " | ") or "-"
 end
@@ -1467,16 +1957,43 @@ end
 
 sort_results = function()
   if #sort_state.columns == 0 then return end
-  table.sort(RESULTS, function(left, right)
-    for _, sort_column in ipairs(sort_state.columns) do
-      local left_value = display_sort_value(left, sort_column.key)
-      local right_value = display_sort_value(right, sort_column.key)
-      if left_value ~= right_value then
-        return sort_column.ascending and left_value < right_value or left_value > right_value
-      end
+  local original_index = {}
+  for index, result in ipairs(RESULTS) do
+    original_index[result] = index
+  end
+
+  local function compare_values(left_value, right_value)
+    local left_type, right_type = type(left_value), type(right_value)
+    if left_type == "number" and right_type == "number" then
+      if left_value ~= left_value then left_value = math.huge end
+      if right_value ~= right_value then right_value = math.huge end
+      if left_value < right_value then return -1 end
+      if left_value > right_value then return 1 end
+      return 0
     end
-    return false
+    if left_type ~= "string" then left_value = tostring(left_value or "") end
+    if right_type ~= "string" then right_value = tostring(right_value or "") end
+    if left_value < right_value then return -1 end
+    if left_value > right_value then return 1 end
+    return 0
+  end
+
+  local ok, err = pcall(function()
+    table.sort(RESULTS, function(left, right)
+      for _, sort_column in ipairs(sort_state.columns) do
+        local left_value = display_sort_value(left, sort_column.key)
+        local right_value = display_sort_value(right, sort_column.key)
+        local order = compare_values(left_value, right_value)
+        if order ~= 0 then
+          return sort_column.ascending and order < 0 or order > 0
+        end
+      end
+      return (original_index[left] or 0) < (original_index[right] or 0)
+    end)
   end)
+  if not ok then
+    reaper.ShowConsoleMsg("[Batch Metadata Conform] sort error: " .. tostring(err) .. "\n")
+  end
 end
 
 local function toggle_sort(key, add_level)
@@ -1586,6 +2103,8 @@ local function loop()
     if reaper.ImGui_Button(ctx, "Embed Metadata##embed_button") then start_embed() end
     reaper.ImGui_SameLine(ctx)
     reaper.ImGui_Text(ctx, embed_status)
+    reaper.ImGui_SameLine(ctx)
+    if reaper.ImGui_Button(ctx, "Export Full Embed List##quick_export") then export_embed_report() end
     draw_match_settings()
     reaper.ImGui_Separator(ctx)
 
@@ -1632,11 +2151,13 @@ local function loop()
         end
       end
       local preview_results = {}
-      local status_counts = { MATCHED = 0, AMBIGUOUS = 0, NOT_FOUND = 0, INVALID = 0 }
+      local folder_seen = {}
       for _, result in ipairs(visible_results) do
-        if status_counts[result.status] < 5 then
+        local folder_key = dirname(result.target and result.target.path or "")
+        if folder_key == "" then folder_key = "(no-folder)" end
+        if not folder_seen[folder_key] then
           preview_results[#preview_results + 1] = result
-          status_counts[result.status] = status_counts[result.status] + 1
+          folder_seen[folder_key] = true
         end
       end
       local preview_count = #preview_results
@@ -1680,6 +2201,7 @@ local function loop()
       end
       reaper.ImGui_EndTable(ctx)
     end
+    draw_embed_issue_list()
     draw_target_metadata_preview()
     reaper.ImGui_Separator(ctx)
     reaper.ImGui_Text(ctx, "Processing is read-only in this phase. Embed + Rename will be enabled after stream mapping validation.")
