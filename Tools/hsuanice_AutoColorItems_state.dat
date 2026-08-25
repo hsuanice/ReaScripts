@@ -1,0 +1,30 @@
+# hsuanice_AutoColorItems state v1
+pconf_v1=0.00,330.00,0.2000,0.9000,0.6500,0.7500,0.9000,0.5500
+grey_row=0
+palette_v3=cols=8\nFF0000		\nFF7600		\nFFFF00		\n00FF00		\n00FFFF		\n0000FF		\nA000FF		\nFF00FF		\n990000		\n994700		\n808000		\n008000		\n008080		\n000080		\n800080		\nB400B4		\n000000		\n242424		\n494949		\n6D6D6D		\n929292		\nB6B6B6		\nDBDBDB		\nFFFFFF		
+last_preset=Default
+collapsed=0
+show_settings=0
+show_presets=0
+view_mode=color
+font_size=15
+swatch_chars=7
+palette_pattern=row_repeat
+safety_mode=1
+recording_auto_color=1
+ac_audio=1
+ac_empty=0
+ac_midi=0
+color_mode=shiny
+normal_primary_target=background
+normal_secondary_color=transparent
+win_w=1024.0
+win_h=528.0
+win_x=0.0
+win_y=0.0
+preset_list=TheFixer|FishTown|Safety Backup|TEST|PointUp
+preset:TheFixer=0.00\n360.00\n1\n14\n1.0000,1.0000\n1.0000,0.6000\n1.0000,0.2000\n---\nFF0000	BOOM|BOCM|\nFF7600	沈美娜|NA|雅姐|YA|\nFFEB00	黃股|HUANG|江振豪|CHEN|陳良吉|JI|\n9DFF00	老天股|SKY|\n27FF00	江福生|FU\n00FF4E	\n00FFC4	洪爺|HONG\n00C4FF	薛秋楠|NAN|LI|牛奶|MILK|\n004EFF	\n2700FF	POLICE|\n9D00FF	范姐|FAN|\nFF00EB	吳秀雯|WEN|DOLLY|孫安真|ZHEN|\nFF0076	\nFF0000	\n990000	BOOM2\n994700	洪國隆|LONG|林桂斌|BEN|\n998D00	黃天宗|ZONG|甜不辣老闆|BOSS|\n5E9900	\n189900	陳肇武|WU|\n00992F	\n009976	WHITE|\n007699	薛春誠|CHENG|\n002F99	OM1|攤販老闆|BLACK|\n180099	\n5E0099	\n99008D	OW|\n990047	\n990000	\n330000	\n331800	\n332F00	\n1F3300	TrkG|\n083300	\n003310	OM2|\n003327	\n002733	薛宗耀|YAO|\n001033	\n080033	\n1F0033	\n33002F	呂淑蓉|Lu|\n330018	\n330000	\nFFFFFF	\nEBEBEB	\nD8D8D8	\nC4C4C4	\nB1B1B1	\n9D9D9D	\n898989	\n767676	\n626262	\n4E4E4E	\n3B3B3B	\n272727	\n141414	\n000000	
+preset:FishTown=0.00\n360.00\n1\n14\n1.0000,1.0000\n1.0000,0.6000\n1.0000,0.2000\n---\nCMIT 5U|\n\n\n\nWU|\n\n\n\n\n\n\nwoman|\n\n\nTrk 2|\nClerk|\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n
+preset:Safety Backup=0.00\n330.00\n0\n8\n0.2000,0.9000\n0.6500,0.7500\n0.9000,0.5500\n---\nFF0000	\nFF7600	\nFFFF00	\n00FF00	\n00FFFF	\n0000FF	\nA000FF	\nFF00FF	\n990000	\n994700	\n808000	\n008000	\n008080	\n000080	\n800080	\nB400B4	\n000000	\n242424	\n494949	\n6D6D6D	\n929292	\nB6B6B6	\nDBDBDB	\nFFFFFF	
+preset:TEST=0.00\n330.00\n0\n8\n0.2000,0.9000\n0.6500,0.7500\n0.9000,0.5500\n---\nFF0000		DIA MN\nFF7600		\nFFFF00	BOSS	DIA PAN\n00FF00	YAO	\n00FFFF	NAN	OPT |\n0000FF	cheng	\nA000FF		\nFF00FF	NA----	\n990000		\n994700		PFX MN\n808000	HONG	PFX PAN\n008000		\n008080		\n000080		\n800080		\nB400B4		\n000000		Edited\n242424		\n494949		\n6D6D6D		\n929292		\nB6B6B6		\nDBDBDB		\nFFFFFF		
+preset:PointUp=0.00\n330.00\n0\n8\n0.2000,0.9000\n0.6500,0.7500\n0.9000,0.5500\n---\nFF0000	A1.WAV	— S\nFF7600	A2.WAV	\nFFFF00	A3.WAV	\n00FF00	A4.WAV	MUSIC\n00FFFF	A5.WAV	\n0000FF	A6.WAV	\nA000FF	A7.WAV	\nFF00FF	A8.WAV	\n990000		\n994700		\n808000		\n008000		\n008080		\n000080		\n800080		\nB400B4		\n000000	A9.WAV	\n242424		MIX L|MIX R|\n494949		\n6D6D6D		\n929292		\nB6B6B6		\nDBDBDB		\nFFFFFF	A10.WAV	

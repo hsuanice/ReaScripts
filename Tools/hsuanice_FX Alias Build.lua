@@ -11,9 +11,10 @@
   Part of AudioSweet ReaImGui Tools suite.
 
 @changelog
-  + FIXED: False error "Failed to create Settings folder" when folder already exists
-  + IMPROVED: Error handling now consistent with Export and Update tools
-  + RecursiveCreateDirectory() behavior more robust across platforms
+  0.1.1
+    + FIXED: False error "Failed to create Settings folder" when folder already exists
+    + IMPROVED: Error handling now consistent with Export and Update tools
+    + RecursiveCreateDirectory() behavior more robust across platforms
   0.1.0 [Internal Build 251216.1820] - Settings Directory Safeguard
     - ADDED: Automatically create the Settings folder before writing fx_alias.json to avoid write errors.
     - ADDED: Clear warning dialog if the folder cannot be created so the user knows why the build stops.

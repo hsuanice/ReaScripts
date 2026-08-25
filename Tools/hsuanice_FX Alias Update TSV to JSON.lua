@@ -3,7 +3,7 @@
 @version 0.1.0
 @author hsuanice
 @provides
-  [main] hsuanice Scripts/Tools/hsuanice_FX Alias Update TSV to JSON.lua
+  [main] Tools/hsuanice_FX Alias Update TSV to JSON.lua
 @about
   Read Settings/fx_alias.tsv and update Settings/fx_alias.json.
   Only rows that exist in TSV will be updated/added. Others are kept.
