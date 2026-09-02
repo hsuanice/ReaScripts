@@ -187,6 +187,27 @@ typedef struct {
 //------------------------------------------------
 // Broadcast Wave Format (BWF) metadata
 //------------------------------------------------
+typedef uchar BWFUMID[64] <read=ReadBWFUMID>;
+
+string ReadBWFUMID(BWFUMID value)
+{
+    local string result;
+
+    SPrintf( result,
+        "%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x-%02x%02x%02x-%02x%02x%02x%02x%02x%02x%02x%02x-%02x%02x%02x%02x%02x%02x-%02x%02x",
+        value[0],  value[1],  value[2],  value[3],
+        value[4],  value[5],  value[6],  value[7],
+        value[8],  value[9],  value[10], value[11], value[12],
+        value[13], value[14], value[15],
+        value[16], value[17], value[18], value[19],
+        value[20], value[21], value[22], value[23],
+        value[24], value[25], value[26], value[27],
+        value[28], value[29],
+        value[30], value[31] );
+
+    return result;
+}
+
 typedef struct {
     ID        chunkID <style=sHeading2Accent>;
     long      chunkSize;
@@ -205,7 +226,7 @@ typedef struct {
         unsigned short Version;
 
         if( Version >= 1 )
-            uchar UMID[64];
+            BWFUMID UMID;
         else
             uchar ReservedForUMID[64];
 
