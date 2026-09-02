@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<index version="1" name="hsuanice Scripts" commit="d3b2cadb922dfc0fcf76ac98592df601cb8eaa78">
+<index version="1" name="hsuanice Scripts" commit="606a801cac342d57d227b511a89717fba343a263">
   <category name="Beta Testing">
     <reapack name="hsuanice_AudioSweet ReaImGui.lua" type="script" desc="AudioSweet ReaImGui - AudioSuite Workflow (Pro Tools–Style)">
       <metadata>
@@ -5357,6 +5357,48 @@ v0.2.0  Previous rename and future-proof notes.]]></changelog>
       </version>
       <version name="0.12.5" author="hsuanice" time="2025-09-12T16:32:03Z">
         <source main="main">https://github.com/hsuanice/ReaScripts/raw/39da7658e1f68667dbc7d35098b56937e418b005/Beta%20Testing/hsuanice_Rename%20Active%20Take%20from%20File%20Metadata.lua</source>
+      </version>
+    </reapack>
+    <reapack name="hsuanice_Reorder - Copy to Sort.lua" type="script" desc="hsuanice_Reorder - Copy to Sort">
+      <metadata>
+        <description><![CDATA[{\rtf1\ansi\deff0{\fonttbl{\f0 \fswiss Helvetica;}{\f1 \fmodern Courier;}}
+{\colortbl;\red255\green0\blue0;\red0\green0\blue255;}
+\widowctrl\hyphauto
+
+{\pard \ql \f0 \sa180 \li0 \fi0 Runs Copy to Sort using preferences saved in "hsuanice_Reorder or sort selected items vertically.lua".\par}
+}
+]]></description>
+      </metadata>
+      <version name="1.0.0" author="hsuanice" time="2026-09-02T01:21:45Z">
+        <source main="main">https://github.com/hsuanice/ReaScripts/raw/606a801cac342d57d227b511a89717fba343a263/Beta%20Testing/hsuanice_Reorder%20-%20Copy%20to%20Sort.lua</source>
+      </version>
+    </reapack>
+    <reapack name="hsuanice_Reorder - Sort in Place.lua" type="script" desc="hsuanice_Reorder - Sort in Place">
+      <metadata>
+        <description><![CDATA[{\rtf1\ansi\deff0{\fonttbl{\f0 \fswiss Helvetica;}{\f1 \fmodern Courier;}}
+{\colortbl;\red255\green0\blue0;\red0\green0\blue255;}
+\widowctrl\hyphauto
+
+{\pard \ql \f0 \sa180 \li0 \fi0 Runs Sort in Place using preferences saved in "hsuanice_Reorder or sort selected items vertically.lua".\par}
+}
+]]></description>
+      </metadata>
+      <version name="1.0.0" author="hsuanice" time="2026-09-02T01:21:45Z">
+        <source main="main">https://github.com/hsuanice/ReaScripts/raw/606a801cac342d57d227b511a89717fba343a263/Beta%20Testing/hsuanice_Reorder%20-%20Sort%20in%20Place.lua</source>
+      </version>
+    </reapack>
+    <reapack name="hsuanice_Reorder - Upfill.lua" type="script" desc="hsuanice_Reorder - Upfill">
+      <metadata>
+        <description><![CDATA[{\rtf1\ansi\deff0{\fonttbl{\f0 \fswiss Helvetica;}{\f1 \fmodern Courier;}}
+{\colortbl;\red255\green0\blue0;\red0\green0\blue255;}
+\widowctrl\hyphauto
+
+{\pard \ql \f0 \sa180 \li0 \fi0 Runs the Upfill action using preferences saved in "hsuanice_Reorder or sort selected items vertically.lua".\par}
+}
+]]></description>
+      </metadata>
+      <version name="1.0.0" author="hsuanice" time="2026-09-02T01:21:45Z">
+        <source main="main">https://github.com/hsuanice/ReaScripts/raw/606a801cac342d57d227b511a89717fba343a263/Beta%20Testing/hsuanice_Reorder%20-%20Upfill.lua</source>
       </version>
     </reapack>
     <reapack name="hsuanice_Reorder or sort selected items vertically Monitor.lua" type="script" desc="Monitor - Reorder or sort selected items vertically">
