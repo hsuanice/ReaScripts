@@ -1,6 +1,6 @@
 --[[
 @description ReaImGui - Vertical Reorder and Sort (items)
-@version 260822.1314
+@version 260902.0921
 @author hsuanice
 @about
   Provides three vertical re-arrangement modes for selected items (stacked UI):
@@ -29,6 +29,14 @@
 
 
 @changelog
+  v260902.0921
+  - New: Added ExtState-driven action wrappers for Upfill, Sort in Place, and
+    Copy to Sort. Each wrapper now follows the settings last saved in this GUI.
+  - Update: Sort action UI now uses one mode-dependent button: Run Sort
+    Vertically for Take/File keys, and Sort in Place for the Metadata key.
+  - Fix: Ascending preference is now stored explicitly as 1/0 in ExtState and
+    is correctly followed by GUI actions and wrappers when disabled.
+
   v260822.1314
   - Fix: Copy to Sort's per-item Recorder Ch resolution no longer falls back to
     Interleave when a TRK# name has trailing/leading whitespace (e.g. "DOOR ").
@@ -498,13 +506,16 @@ local function path_basename(p) p=tostring(p or ""); return p:match("([^/\\]+)$"
 local PREF_NS = "hsuanice_ReorderSort_Prefs"
 
 local function save_pref(key, val)
+  if type(val) == "boolean" then
+    val = val and "1" or "0"
+  end
   reaper.SetExtState(PREF_NS, key, tostring(val or ""), true)
 end
 local function load_pref(key, default)
   local v = reaper.GetExtState(PREF_NS, key)
   if v == "" then return default end
-  if v == "true" then return true
-  elseif v == "false" then return false
+  if v == "true" or v == "1" then return true
+  elseif v == "false" or v == "0" then return false
   else
     local num = tonumber(v)
     return num or v
@@ -1663,6 +1674,13 @@ local sort_key_idx    = load_pref("sort_key_idx", 1)
 local sort_asc        = load_pref("sort_asc", true)
 local meta_sort_mode  = load_pref("meta_sort_mode", 1)
 
+-- Wrapper scripts set this transient key, while all persistent behavior comes
+-- from the preferences above. Clear it immediately so direct GUI launches stay normal.
+local WRAPPER_ACTION = reaper.GetExtState(PREF_NS, "run_action")
+if WRAPPER_ACTION ~= "" then
+  reaper.SetExtState(PREF_NS, "run_action", "", false)
+end
+
 local meta_name_mode  = load_pref("meta_name_mode", 1)
 local meta_order_mode = load_pref("meta_order_mode", 1)
 local meta_append_secondary = load_pref("meta_append_secondary", true)
@@ -1848,6 +1866,14 @@ local function run_engine()
   reaper.UpdateArrange()
 end
 
+local function run_sort_action()
+  MODE = "sort"
+  prepare_plan()
+  run_engine()
+  SUMMARY = ("Completed. Items=%d, Moved=%d, Skipped=%d."):format(TOTAL, MOVED, SKIPPED)
+  WANT_POPUP = true
+end
+
 ---------------------------------------
 -- Metadata Preview helpers (for UI)
 ---------------------------------------
@@ -1979,12 +2005,9 @@ local function draw_confirm()
     -- 🆕 Sort in Place（就地排序）
     if reaper.ImGui_Button(ctx, "Sort in Place", scale(108), 0) then
       -- 使用現有的「Sort Vertically」引擎，但 key 來自 Metadata
-      MODE = "sort"
       sort_key_idx = 3
-      prepare_plan()
-      run_engine()
-      SUMMARY = ("Completed. Items=%d, Moved=%d, Skipped=%d."):format(TOTAL, MOVED, SKIPPED)
-      WANT_POPUP = true
+      save_pref("sort_key_idx", sort_key_idx)
+      run_sort_action()
     end
     reaper.ImGui_SameLine(ctx)
 
@@ -2082,9 +2105,7 @@ local function draw_confirm()
     -- 非 Metadata：這裡才畫 Sort 的主按鈕
     reaper.ImGui_Spacing(ctx)
     if reaper.ImGui_Button(ctx, "Run Sort Vertically", scale(220), 0) then
-      MODE="sort"; prepare_plan(); run_engine()
-      SUMMARY = ("Completed. Items=%d, Moved=%d, Skipped=%d."):format(TOTAL, MOVED, SKIPPED)
-      WANT_POPUP = true
+      run_sort_action()
     end
   end
 
@@ -2123,4 +2144,29 @@ local function loop()
   if open then reaper.defer(loop) end
 end
 
-loop()
+local function run_wrapper_action(action)
+  if action == "upfill" then
+    MODE = "reorder"
+    compute_selection_and_tracks()
+    prepare_plan()
+    run_engine()
+  elseif action == "sort_in_place" then
+    -- Sort in Place always uses the metadata key selected in the GUI.
+    sort_key_idx = 3
+    save_pref("sort_key_idx", sort_key_idx)
+    compute_selection_and_tracks()
+    run_sort_action()
+  elseif action == "copy_to_sort" then
+    run_copy_to_new_tracks(meta_name_mode, meta_order_mode, sort_asc,
+      meta_append_secondary, meta_overlap_mode)
+  else
+    reaper.ShowMessageBox("Unknown Reorder/Sort wrapper action: " .. tostring(action),
+      "Reorder or Sort", 0)
+  end
+end
+
+if WRAPPER_ACTION ~= "" then
+  run_wrapper_action(WRAPPER_ACTION)
+else
+  loop()
+end
