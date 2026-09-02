@@ -1,0 +1,473 @@
+//------------------------------------------------
+//--- 010 Editor v2.0 Binary Template
+//
+//      File: WAV_BEXT_iXML.bt
+//    Author: SweetScape Software, Paulo Max Gil I Reis
+//   Version: 1.4
+//   Purpose: Parse WAV audio files, including BEXT and iXML metadata.
+//  Category: Audio
+// File Mask: *.wav
+//  ID Bytes: 52 49 46 46 [+4] 57 41 56 45 //RIFF????WAVE
+//   History:
+//   1.4   2026-09-02 Added standards-compliant BEXT and iXML parsing.
+//   1.3   2023-06-09 SweetScape: Updated to use template styles.
+//   1.2   2020-02-04 Paulo Max: Improved to correct parsing of DVI ADPCM and fix some issues in subchunk list parsing.
+//   1.1   2015-10-05 SweetScape: Updated header for repository submission.
+//   1.0   SweetScape: Initial release.
+//
+// More information available at:
+//  https://en.wikipedia.org/wiki/WAV
+//------------------------------------------------
+
+RequiresVersion( 14 );
+
+// Typedefs for the wave file
+typedef char ID[4];
+
+// Record whether we have found a format chunk yet
+local int haveValidFormat = false;
+
+//-----------------------------------
+// Define structures used in WAV files
+
+// Stores the file header information
+typedef struct 
+{
+    ID     groupID <style=sHeading1Accent>;
+    long   size;
+    ID     riffType;
+} WAVRIFFHEADER <style=sHeading1>;
+
+// Stores the format information for the file
+typedef struct {
+    ID             chunkID <style=sHeading2Accent>;
+    long           chunkSize;
+    local int pos = FTell();
+    short          wFormatTag;
+    unsigned short wChannels;
+    unsigned long  dwSamplesPerSec;
+    unsigned long  dwAvgBytesPerSec;
+    unsigned short wBlockAlign;
+    unsigned short wBitsPerSample;
+
+    if (wFormatTag == 17) //DVI IMA ADPCM
+    {
+        unsigned short wcbsize;
+        unsigned short wSamplesPerBlock;
+    }
+
+    // Mark that we have found a valid format chunk
+    haveValidFormat = true;
+
+    // Unknown data at the end of the chunk
+    if( chunkSize > (FTell() - pos) )
+        uchar unknown[ chunkSize - (FTell() - pos) ];
+
+    // Padding so the next chunk starts on an even byte
+    if( chunkSize & 1 )
+        uchar padding;
+} FORMATCHUNK <style=sHeading2>;
+
+// Stores the actual wave data
+typedef struct 
+{
+    ID             chunkID   <style=sDataAccent>;
+    long           chunkSize <style=sDataAccent>;
+
+    // Test if we have a valid format
+    if( !haveValidFormat )
+    {
+        Warning( "File contains no valid WAVE format chunk." );
+        return -1;
+    }
+
+    // Parse the samples of the data
+    if( ((format.wBitsPerSample != 8) && (format.wBitsPerSample != 16) && (format.wBitsPerSample != 32)) 
+        || (chunkSize % (int)format.wBlockAlign != 0) )
+    {
+        // Unsupported storage method used
+        unsigned char  waveformData[chunkSize];
+    }
+    else if( (format.wChannels == 1) && (format.wBitsPerSample == 8) )
+    {
+        // Define an array of 8-bit samples - common case
+        uchar samples[ chunkSize ];
+    }
+    else if( (format.wChannels == 1) && (format.wBitsPerSample == 16) )
+    {
+        // Define an array of 16-bit samples - common case
+        short samples[ chunkSize/2 ];
+    }
+    else if( (format.wChannels == 1) && (format.wBitsPerSample == 32) )
+    {
+        // Define an array of 32-bit samples - common case
+        int samples[ chunkSize/4 ];
+    }
+    else
+    {
+        // Define general case sample
+        struct SAMPLES {
+            if( format.wBitsPerSample == 8 )
+                 uchar channels[ format.wChannels ];
+            else if( format.wBitsPerSample == 16 )
+                 short channels[ format.wChannels ];
+            else if( format.wBitsPerSample == 32 )
+                 int   channels[ format.wChannels ];
+        } samples[ chunkSize / (int)format.wBlockAlign ];
+    }
+
+    // Padding so the next chunk starts on an even byte
+    if( (chunkSize & 1) && (FTell() < FileSize()) )
+        uchar padding;
+} DATACHUNK <style=sData>;
+
+// Stores the size of the wave after decompression
+typedef struct
+{
+    ID             chunkID;
+    long           chunkSize;
+    unsigned long  uncompressedSize;
+} FACTCHUNK <style=sSection1>;
+
+// Stores a list of cue points or markers to points in the data
+typedef struct {
+    long    dwIdentifier;
+    long    dwPosition;
+    ID      fccChunk;
+    long    dwChunkStart;
+    long    dwBlockStart;
+    long    dwSampleOffset;
+} CUEPOINT;
+
+typedef struct {
+    ID        chunkID;
+    long      chunkSize;
+    local int pos = FTell();
+    long      dwCuePoints;
+    CUEPOINT  points[dwCuePoints];
+
+    // Unknown data at the end of the chunk
+    if( chunkSize > (FTell() - pos) )
+        uchar unknown[ chunkSize - (FTell() - pos) ];
+} CUECHUNK <style=sSection3>;
+
+// Define a list chunk with a set of subchunks
+typedef struct {
+    ID        chunkID;
+    long      chunkSize;
+    char      listData[chunkSize];
+
+    // Padding so the next chunk starts on an even byte
+    if( (chunkSize & 1) && (FTell() < FileSize()) )
+        uchar padding;
+} LISTSUBCHUNK <style=sSection4>;
+
+typedef struct {
+    ID        chunkID;
+    long      chunkSize;
+    local quad pos = FTell();
+    ID        chunkType;
+    local uint size;
+
+    // Read the subchunks
+    while( FTell() - pos < chunkSize ) {
+        size = ReadUInt( FTell()+4 );
+        if  (FTell() - pos + size <= chunkSize)
+            LISTSUBCHUNK subchunk;
+        else
+            uchar unknown[ chunkSize - (FTell() - pos) ];       
+    }
+
+    // Padding so the next chunk starts on an even byte
+    if( (chunkSize & 1) && (FTell() < FileSize()) )
+        uchar padding;
+} LISTCHUNK <style=sHeading4>;
+
+
+//------------------------------------------------
+// Broadcast Wave Format (BWF) metadata
+//------------------------------------------------
+typedef struct {
+    ID        chunkID <style=sHeading2Accent>;
+    long      chunkSize;
+
+    // EBU Tech 3285 defines a 602-byte fixed portion. Older versions keep
+    // later-version fields reserved but do not remove them from the layout.
+    if( chunkSize >= 602 )
+    {
+        char           Description[256];
+        char           Originator[32];
+        char           OriginatorReference[32];
+        char           OriginationDate[10];
+        char           OriginationTime[8];
+        unsigned long  TimeReferenceLow;
+        unsigned long  TimeReferenceHigh;
+        unsigned short Version;
+
+        if( Version >= 1 )
+            uchar UMID[64];
+        else
+            uchar ReservedForUMID[64];
+
+        if( Version >= 2 )
+        {
+            short LoudnessValue;
+            short LoudnessRange;
+            short MaxTruePeakLevel;
+            short MaxMomentaryLoudness;
+            short MaxShortTermLoudness;
+        }
+        else
+            uchar ReservedForLoudness[10];
+
+        uchar Reserved[180];
+
+        // CR/LF-delimited ASCII records occupying all bytes after byte 602.
+        if( chunkSize > 602 )
+            char CodingHistory[chunkSize - 602];
+    }
+    else
+    {
+        Warning( "BEXT chunk is shorter than the 602-byte fixed header." );
+        uchar InvalidBextData[chunkSize];
+    }
+
+    // Padding so the next chunk starts on an even byte
+    if( (chunkSize & 1) && (FTell() < FileSize()) )
+        uchar padding;
+
+} BEXTCHUNK <style=sSection1>;
+
+
+//------------------------------------------------
+// iXML metadata
+//------------------------------------------------
+int GetXMLTagLength(quad position, quad endPosition)
+{
+    local int length = 0;
+
+    while( position + length < endPosition &&
+           ReadUByte( position + length ) != '>' )
+        length++;
+
+    if( position + length < endPosition )
+        length++;
+
+    return length;
+}
+
+string GetXMLTagName(quad position, int tagLength)
+{
+    local int offset = 1;
+    local int length;
+
+    if( ReadUByte( position + offset ) == '/' )
+        offset++;
+
+    while( offset < tagLength &&
+           ReadUByte( position + offset ) != ' ' &&
+           ReadUByte( position + offset ) != '\t' &&
+           ReadUByte( position + offset ) != '/' &&
+           ReadUByte( position + offset ) != '>' )
+        offset++;
+
+    length = offset - 1;
+    if( ReadUByte( position + 1 ) == '/' )
+        length--;
+
+    return ReadString( position + tagLength - tagLength +
+                       (ReadUByte( position + 1 ) == '/' ? 2 : 1), length );
+}
+
+void SkipXMLWhitespace(quad endPosition)
+{
+    while( FTell() < endPosition &&
+           (ReadUByte( FTell() ) == ' ' ||
+            ReadUByte( FTell() ) == '\t' ||
+            ReadUByte( FTell() ) == 10 ||
+            ReadUByte( FTell() ) == 13) )
+        FSkip( 1 );
+}
+
+void ParseXMLElement(quad endPosition);
+
+typedef struct (quad endPosition) {
+        local quad elementPosition = FTell();
+        local int openingLength = GetXMLTagLength( elementPosition, endPosition );
+        local string elementName = GetXMLTagName( elementPosition, openingLength );
+        local string scalarValue = "";
+        local int textLength;
+        local int closingLength;
+        local int selfClosing = openingLength >= 2 &&
+            ReadUByte( elementPosition + openingLength - 2 ) == '/';
+
+        char openingTag[openingLength] <hidden=true, optimize=false>;
+
+        if( !selfClosing )
+        {
+            while( FTell() < endPosition )
+            {
+                SkipXMLWhitespace( endPosition );
+
+                if( FTell() >= endPosition )
+                    break;
+
+                if( ReadUByte( FTell() ) == '<' &&
+                    FTell() + 1 < endPosition &&
+                    ReadUByte( FTell() + 1 ) == '/' )
+                {
+                    closingLength = GetXMLTagLength( FTell(), endPosition );
+                    char closingTag[closingLength] <hidden=true, optimize=false>;
+                    break;
+                }
+                else if( ReadUByte( FTell() ) == '<' )
+                {
+                    ParseXMLElement( endPosition );
+                }
+                else
+                {
+                    textLength = 0;
+                    while( FTell() + textLength < endPosition &&
+                           ReadUByte( FTell() + textLength ) != '<' )
+                        textLength++;
+
+                    if( textLength > 0 )
+                    {
+                        char text[textLength] <hidden=true, optimize=false>;
+                        scalarValue = text;
+                    }
+                }
+            }
+        }
+} XMLELEMENT <name=ReadXMLElementName, read=ReadXMLElementValue>;
+
+string ReadXMLElementName(XMLELEMENT &element)
+{
+    return element.elementName;
+}
+
+string ReadXMLElementValue(XMLELEMENT &element)
+{
+    return element.scalarValue;
+}
+
+void ParseXMLElement(quad endPosition)
+{
+    XMLELEMENT element( endPosition );
+}
+
+void SkipXMLDeclaration(quad endPosition)
+{
+    local int declarationLength;
+
+    SkipXMLWhitespace( endPosition );
+
+    if( FTell() + 1 < endPosition &&
+        ReadUByte( FTell() ) == '<' && ReadUByte( FTell() + 1 ) == '?' )
+    {
+        declarationLength = GetXMLTagLength( FTell(), endPosition );
+        FSkip( declarationLength );
+    }
+}
+
+typedef struct {
+    ID        chunkID <style=sHeading2Accent>;
+    long      chunkSize;
+    local quad endPosition = FTell() + chunkSize;
+
+    SkipXMLDeclaration( endPosition );
+    SkipXMLWhitespace( endPosition );
+
+    // iXML uses BWFXML as its document element. Parse all XML elements into a
+    // semantic tree while retaining recorder-specific nodes such as AATON_CANTAR.
+    while( FTell() < endPosition )
+    {
+        if( ReadUByte( FTell() ) == '<' )
+            ParseXMLElement( endPosition );
+        else
+            FSkip( 1 );
+
+        SkipXMLWhitespace( endPosition );
+    }
+
+    // Padding so the next chunk starts on an even byte
+    if( (chunkSize & 1) && (FTell() < FileSize()) )
+        uchar padding;
+
+} IXMLCHUNK <style=sSection2>;
+
+
+// A chunk which could not be identified
+typedef struct {
+    ID        chunkID;
+    long      chunkSize;
+    uchar     unknownData[chunkSize];
+
+    // Padding so the next chunk starts on an even byte
+    if( (chunkSize & 1) && (FTell() < FileSize()) )
+        uchar padding;
+} UNKNOWNCHUNK;
+
+//---------------------------------------------
+
+// Define the headers
+LittleEndian(); 
+WAVRIFFHEADER header;
+
+// Check for valid header
+if( header.groupID != "RIFF" || header.riffType != "WAVE" )
+{
+    Warning( "File is not a valid wave file. Template stopped." );
+    return -1;
+}
+
+// Read the file as a set of chunks
+local char tag[5];
+local uint size;
+
+while( FTell() + 8 <= FileSize() )
+{
+    // Read the chunk tag 
+    ReadBytes( tag, FTell(), 4 );
+    tag[4] = 0;
+
+    // See which chunk this is
+    switch( tag )
+    {
+        case "fmt ":
+            FORMATCHUNK format;
+            break;
+
+        case "data":
+            DATACHUNK   data;
+            break;
+
+        case "fact":
+            FACTCHUNK   fact;
+            break;
+
+        case "cue ":
+            CUECHUNK    cue;
+            break;
+
+        case "LIST":
+            LISTCHUNK   list;
+            break;
+
+        case "bext":
+            BEXTCHUNK   bext;
+            break;
+
+        case "iXML":
+            IXMLCHUNK   ixml;
+            break;
+
+        default:
+            // Unknown chunk
+            size = ReadUInt( FTell()+4 );
+            Printf( "Encountered unknown chunk '%s' of size %d at position %Ld.\n",
+                tag, size, FTell() );
+            UNKNOWNCHUNK unknown;
+            break;
+    }
+}
