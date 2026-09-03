@@ -24,6 +24,51 @@ RequiresVersion( 14 );
 // Typedefs for the wave file
 typedef char ID[4];
 
+// Display the full speaker positions represented by a WAVE_FORMAT_EXTENSIBLE mask.
+string ReadChannelMask(unsigned long value)
+{
+    local string result = "";
+
+    if( value == 0 )
+        return "Unspecified / No Channel Mask";
+
+    if( value & 0x00000001 ) result = "Front Left";
+    if( value & 0x00000002 ) { if( result == "" ) result = "Front Right"; else result += " / Front Right"; }
+    if( value & 0x00000004 ) { if( result == "" ) result = "Front Center"; else result += " / Front Center"; }
+    if( value & 0x00000008 ) { if( result == "" ) result = "Low Frequency Effects"; else result += " / Low Frequency Effects"; }
+    if( value & 0x00000010 ) { if( result == "" ) result = "Back Left"; else result += " / Back Left"; }
+    if( value & 0x00000020 ) { if( result == "" ) result = "Back Right"; else result += " / Back Right"; }
+    if( value & 0x00000040 ) { if( result == "" ) result = "Front Left of Center"; else result += " / Front Left of Center"; }
+    if( value & 0x00000080 ) { if( result == "" ) result = "Front Right of Center"; else result += " / Front Right of Center"; }
+    if( value & 0x00000100 ) { if( result == "" ) result = "Back Center"; else result += " / Back Center"; }
+    if( value & 0x00000200 ) { if( result == "" ) result = "Side Left"; else result += " / Side Left"; }
+    if( value & 0x00000400 ) { if( result == "" ) result = "Side Right"; else result += " / Side Right"; }
+    if( value & 0x00000800 ) { if( result == "" ) result = "Top Center"; else result += " / Top Center"; }
+    if( value & 0x00001000 ) { if( result == "" ) result = "Top Front Left"; else result += " / Top Front Left"; }
+    if( value & 0x00002000 ) { if( result == "" ) result = "Top Front Center"; else result += " / Top Front Center"; }
+    if( value & 0x00004000 ) { if( result == "" ) result = "Top Front Right"; else result += " / Top Front Right"; }
+    if( value & 0x00008000 ) { if( result == "" ) result = "Top Back Left"; else result += " / Top Back Left"; }
+    if( value & 0x00010000 ) { if( result == "" ) result = "Top Back Center"; else result += " / Top Back Center"; }
+    if( value & 0x00020000 ) { if( result == "" ) result = "Top Back Right"; else result += " / Top Back Right"; }
+
+    if( value & 0x00040000 ) { if( result == "" ) result = "Unknown Speaker Position (Bit 18)"; else result += " / Unknown Speaker Position (Bit 18)"; }
+    if( value & 0x00080000 ) { if( result == "" ) result = "Unknown Speaker Position (Bit 19)"; else result += " / Unknown Speaker Position (Bit 19)"; }
+    if( value & 0x00100000 ) { if( result == "" ) result = "Unknown Speaker Position (Bit 20)"; else result += " / Unknown Speaker Position (Bit 20)"; }
+    if( value & 0x00200000 ) { if( result == "" ) result = "Unknown Speaker Position (Bit 21)"; else result += " / Unknown Speaker Position (Bit 21)"; }
+    if( value & 0x00400000 ) { if( result == "" ) result = "Unknown Speaker Position (Bit 22)"; else result += " / Unknown Speaker Position (Bit 22)"; }
+    if( value & 0x00800000 ) { if( result == "" ) result = "Unknown Speaker Position (Bit 23)"; else result += " / Unknown Speaker Position (Bit 23)"; }
+    if( value & 0x01000000 ) { if( result == "" ) result = "Unknown Speaker Position (Bit 24)"; else result += " / Unknown Speaker Position (Bit 24)"; }
+    if( value & 0x02000000 ) { if( result == "" ) result = "Unknown Speaker Position (Bit 25)"; else result += " / Unknown Speaker Position (Bit 25)"; }
+    if( value & 0x04000000 ) { if( result == "" ) result = "Unknown Speaker Position (Bit 26)"; else result += " / Unknown Speaker Position (Bit 26)"; }
+    if( value & 0x08000000 ) { if( result == "" ) result = "Unknown Speaker Position (Bit 27)"; else result += " / Unknown Speaker Position (Bit 27)"; }
+    if( value & 0x10000000 ) { if( result == "" ) result = "Unknown Speaker Position (Bit 28)"; else result += " / Unknown Speaker Position (Bit 28)"; }
+    if( value & 0x20000000 ) { if( result == "" ) result = "Unknown Speaker Position (Bit 29)"; else result += " / Unknown Speaker Position (Bit 29)"; }
+    if( value & 0x40000000 ) { if( result == "" ) result = "Unknown Speaker Position (Bit 30)"; else result += " / Unknown Speaker Position (Bit 30)"; }
+    if( value & 0x80000000 ) { if( result == "" ) result = "Unknown Speaker Position (Bit 31)"; else result += " / Unknown Speaker Position (Bit 31)"; }
+
+    return result;
+}
+
 // Record whether we have found a format chunk yet
 local int haveValidFormat = false;
 
@@ -54,6 +99,15 @@ typedef struct {
     {
         unsigned short wcbsize;
         unsigned short wSamplesPerBlock;
+    }
+
+    // WAVE_FORMAT_EXTENSIBLE (0xFFFE, displayed as -2 by signed wFormatTag)
+    if( wFormatTag == -2 && chunkSize >= 40 )
+    {
+        unsigned short cbSize;
+        unsigned short wValidBitsPerSample;
+        unsigned long  dwChannelMask <read=ReadChannelMask>;
+        uchar           SubFormat[16];
     }
 
     // Mark that we have found a valid format chunk
