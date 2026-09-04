@@ -1,6 +1,6 @@
 --[[
 @description Item List Editor
-@version 260824.1538
+@version 260904.0819
 @author hsuanice
 @about
   Shows a live, spreadsheet-style table of the currently selected items and all
@@ -43,6 +43,11 @@
 
 
 @changelog
+  v260904.0819
+  - Fix: Prevented a nil-function error when selecting a large number of items.
+    • Forward-declared item_selection_signature before progressive loading uses
+      it, so all selection-change checks resolve to the local helper correctly.
+
   v260824.1538
   - Fix: ReaImGui compatibility on stale-instance cleanup.
     • Guarded `ImGui_DestroyContext` call to avoid nil-value crash on builds
@@ -2938,6 +2943,8 @@ local PROGRESSIVE = {
   metadata_index = 0,       -- Index for phase 2 loading
 }
 
+local item_selection_signature
+
 -- Start progressive loading for current selection
 local function start_progressive_load()
   PROGRESSIVE.items = get_selected_items_sorted()
@@ -3695,7 +3702,7 @@ local REFRESH_THROTTLE = 0.1  -- Max refresh rate: 100ms (10 fps)
 local NEEDS_REFRESH = false   -- Dirty flag
 
 -- Build a lightweight selection signature that also reacts to active-take switches.
-local function item_selection_signature(item)
+item_selection_signature = function(item)
   if not item then return "" end
   local _, guid = reaper.GetSetMediaItemInfo_String(item, "GUID", "", false)
   local cur_take = reaper.GetMediaItemInfo_Value(item, "I_CURTAKE") or -1
