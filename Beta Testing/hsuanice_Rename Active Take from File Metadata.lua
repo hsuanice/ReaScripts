@@ -1,6 +1,6 @@
 --[[
 @description ReaImGui - Rename Active Take from Metadata (caret insert + cached preview + copy/export)
-@version 260823.1355
+@version 260910.2332
 @author hsuanice
 @about
   Rename active takes and/or item notes from BWF/iXML and true source metadata using a fast ReaImGui UI.
@@ -35,6 +35,16 @@
   hsuanice served as the workflow designer, tester, and integrator for this tool.
 
 @changelog
+  v260910.2332 (Taipei Time)
+    - Fixed: $trk resolved to empty (causing false "will skip" / blank output) for items whose
+      metadata came from the shared Metadata.cache after a cache hit, when the recorder's iXML
+      description does not embed per-channel "TRK#=" pairs (e.g. Cantar/Aaton poly files).
+      • $trk now trusts the already-resolved fields.meta_trk_name first (same value the shared
+        cache and Item List Editor already carry for that channel), instead of only ever
+        reconstructing the name by re-parsing TRK# tokens out of the description text.
+      • Falls back to the previous interleave-list reconstruction when meta_trk_name is empty
+        (e.g. very first scan before any cache exists), so behavior for other recorders is unchanged.
+
   v260823.1355 (Taipei Time)
     - Apply progress: processing now runs one-by-one (1 item per defer step), so Console progress updates per item instead of per 50-item batch.
     - Persistence scope: moved this script to its own ExtState namespace so input fields, presets, and section states are isolated from other rename scripts.
@@ -1347,15 +1357,22 @@ function expand_template(tpl, fields, counter, sanitize)
     end
 
     if tkl == "trk" then
-      local interleave = fields.__chan_index
-      local list = build_interleave_name_list(fields)
-      local s = ""
-      if interleave and list and list[interleave] then
-        s = list[interleave]
-      else
-        if list then
-          for i = 1, 128 do
-            if list[i] and list[i] ~= "" then s = list[i]; break end
+      -- Prefer the already-resolved single-channel name (meta_trk_name) since
+      -- it survives the metadata cache round-trip; some recorders (e.g. Cantar/
+      -- Aaton) don't embed per-channel TRK#= pairs in the description text, so
+      -- the interleave-list reconstruction below can come back empty on a cache hit.
+      local s = fields.meta_trk_name
+      if not s or s == "" then
+        local interleave = fields.__chan_index
+        local list = build_interleave_name_list(fields)
+        s = ""
+        if interleave and list and list[interleave] then
+          s = list[interleave]
+        else
+          if list then
+            for i = 1, 128 do
+              if list[i] and list[i] ~= "" then s = list[i]; break end
+            end
           end
         end
       end
