@@ -1,6 +1,6 @@
 --[[
 @description Conform List Browser
-@version 260426.1446
+@version 260911.1950
 @author hsuanice
 @about
   A REAPER script for browsing and editing EDL (Edit Decision List) data
@@ -51,7 +51,32 @@
   Required for AAF: aaftool in PATH (https://github.com/agfline/LibAAF)
 
 @changelog
-  v260426.1446
+  v260911.1950
+  - Fix: Subtitle import no longer fails when the saved OTIO Python path is
+    stale (e.g. a pyenv virtualenv that was later removed). Subtitle Bridge
+    now validates the interpreter itself and auto-falls-back to a working
+    python3 (subtitle parsing never needed opentimelineio to begin with).
+    Also hardened the main script's startup check to re-detect Python when
+    the saved path is invalid, not just when it's empty.
+  - Feature: Batch SRT import
+    • "Load Subtitle..." now supports multi-select; selecting several .srt
+      files parses and applies them all in one go, using the same
+      Replace/Append prompt already used for multi-file EDL/XML/AAF import.
+    • If a mixed selection also includes CSV/TSV/XLSX (which need a per-file
+      sheet/column choice), those files are skipped with a console notice;
+      load them one at a time as before.
+  - Fix: SRT display-formatting tags (e.g. <i>, <font color=#RRGGBBAA>) are
+    now stripped from clip-name text at parse time (Tools/subtitle_to_clb.py),
+    so styled lyrics/dialogue SRTs no longer carry raw tag markup into CLB.
+
+  v260426.1458
+  - Feature: Custom CJK font (Options → CJK Font…)
+    • Lets users point CLB at a font file (.ttf / .ttc / .otf) or family
+      name. Useful for Taiwanese / Hakka characters not covered by PingFang.
+    • Path is persisted via CJK_FONT_PATH ExtState key.
+    • Apply switches the font immediately; no script restart needed.
+    • Empty path falls back to platform candidates (PingFang / msyh / Noto).
+
   - Fix: Subtitle imports now use track name "SUBTITLE" instead of the raw
     "SUBTITLE_XLSX" / "SUBTITLE_CSV" etc. internal format identifier.
   - Fix: Track-name template expansion now strips dangling separators left
@@ -845,7 +870,7 @@ end
 ---------------------------------------------------------------------------
 local SCRIPT_NAME = "Conform List Browser"
 local EXT_NS = "hsuanice_ConformListBrowser"
-local VERSION = "260426.1446"
+local VERSION = "260426.1458"
 
 -- Column definitions (EDL Events table)
 local COL = {
@@ -1209,10 +1234,12 @@ local ALLOW_DOCKING = false
 -- (e.g. on Linux without Noto CJK installed) — in that case ImGui falls back
 -- to the default font, which lacks Chinese glyphs.
 local cjk_font = nil
+local cjk_font_source = ""  -- Human-readable description of which font was loaded
 
--- Candidate font files to load for CJK glyph coverage.
+-- Candidate font files to load when the user has not specified a custom path.
 -- macOS PingFang.ttc covers Traditional and Simplified Chinese, Japanese, and
--- Hangul, plus the basic Latin set we need for the rest of the UI.
+-- Hangul, but lacks rare Taiwanese / Hakka characters — users with those
+-- needs can point at a custom font in Options → CJK Font…
 local CJK_FONT_CANDIDATES = {
   "/System/Library/Fonts/PingFang.ttc",
   "/System/Library/Fonts/STHeiti Medium.ttc",
@@ -1222,6 +1249,67 @@ local CJK_FONT_CANDIDATES = {
   "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
   "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
 }
+
+--- Try loading a font (file path or family name) and attaching it to the
+--- given ImGui context. Returns (font_obj, source_label) on success, or
+--- (nil, error_message) on failure.
+---
+--- @param ctx_         ReaImGui context
+--- @param path_or_name string|nil  Path to .ttf/.ttc/.otf, OR a font family name
+local function _try_create_font(ctx_, path_or_name)
+  if not path_or_name or path_or_name == "" then return nil, "(no path)" end
+  if not reaper.ImGui_CreateFont or not reaper.ImGui_Attach then
+    return nil, "ReaImGui CreateFont / Attach not available"
+  end
+
+  -- File-existence check: only meaningful for absolute paths. Family names
+  -- pass through to CoreText / system font resolution.
+  local looks_like_path = path_or_name:find("[/\\]") ~= nil
+                        or path_or_name:lower():match("%.tt[fc]$")
+                        or path_or_name:lower():match("%.otf$")
+  if looks_like_path then
+    local f = io.open(path_or_name, "rb")
+    if not f then
+      return nil, "File not found: " .. path_or_name
+    end
+    f:close()
+  end
+
+  local ok, font = pcall(reaper.ImGui_CreateFont, path_or_name, 13)
+  if not ok or not font then
+    return nil, "CreateFont failed: " .. tostring(font)
+  end
+  local ok_a, attach_err = pcall(reaper.ImGui_Attach, ctx_, font)
+  if not ok_a then
+    return nil, "Attach failed: " .. tostring(attach_err)
+  end
+  return font, path_or_name
+end
+
+--- Load a CJK font, preferring the user-supplied path/family, then falling
+--- back to the platform candidates list.
+---
+--- @param ctx_        ReaImGui context
+--- @param custom      string|nil  User-supplied font file path or family name
+--- @return font_obj|nil
+--- @return source_label  When font loaded: path/name that succeeded.
+---                       When font is nil: error message describing the failure.
+--- @return custom_err string|nil  Non-nil only when the *custom* path was
+---                                tried and failed (regardless of whether
+---                                a fallback later succeeded).
+local function _load_cjk_font(ctx_, custom)
+  local custom_err = nil
+  if custom and custom ~= "" then
+    local font, src = _try_create_font(ctx_, custom)
+    if font then return font, src, nil end
+    custom_err = tostring(src)
+  end
+  for _, path in ipairs(CJK_FONT_CANDIDATES) do
+    local font, src = _try_create_font(ctx_, path)
+    if font then return font, src, custom_err end
+  end
+  return nil, "(none found)", custom_err
+end
 
 ---------------------------------------------------------------------------
 -- Font size
@@ -2341,6 +2429,7 @@ local function save_prefs()
   reaper.SetExtState(EXT_NS, "show_timeline", CLB.show_timeline and "1" or "0", true)
   reaper.SetExtState(EXT_NS, "tl_zoom", tostring(CLB.tl_zoom or 50.0), true)
   reaper.SetExtState(EXT_NS, "clip_name_format", CLB.clip_name_format or "", true)
+  reaper.SetExtState(EXT_NS, "cjk_font_path", CLB.cjk_font_path or "", true)
 end
 
 local function load_prefs()
@@ -2366,6 +2455,7 @@ local function load_prefs()
   CLB.show_timeline = get("show_timeline", "0") == "1"
   CLB.tl_zoom = tonumber(get("tl_zoom", "50.0")) or 50.0
   CLB.clip_name_format = get("clip_name_format", "")
+  CLB.cjk_font_path = get("cjk_font_path", "")
 
   -- EDL column order
   local order_str = get("edl_col_order", "")
@@ -3889,10 +3979,15 @@ end
 --- Open a subtitle file dialog and start the inspect/import flow.
 ---
 --- Flow:
----   1. Pick file (.srt / .csv / .tsv / .xlsx)
+---   1. Pick file(s) (.srt / .csv / .tsv / .xlsx) — multi-select via JS extension
 ---   2. Call SUBTITLE.inspect → returns metadata
----   3. SRT  → no questions; call SUBTITLE.parse with CLB.fps and apply
----   4. CSV/TSV/XLSX → open subtitle_inspect dialog; user picks sheet,
+---   3. SRT  → no questions; call SUBTITLE.parse with CLB.fps and apply.
+---      When multiple files are selected, all ready (SRT) files are parsed
+---      and applied together as a single batch (Replace/Append prompt shown
+---      once, same as multi-file EDL/XML/AAF import). Any non-SRT file in a
+---      mixed selection is skipped with a console notice, since CSV/TSV/XLSX
+---      need per-file sheet/column choices.
+---   4. Single CSV/TSV/XLSX → open subtitle_inspect dialog; user picks sheet,
 ---      text column, FPS; on OK → SUBTITLE.parse and apply
 load_subtitle_file = function()
   if not SUBTITLE then
@@ -3911,22 +4006,94 @@ load_subtitle_file = function()
     "Excel\0*.xlsx;*.xlsm\0" ..
     "All files\0*.*\0"
 
-  local filepath
+  -- Collect file paths (multi-select via JS extension, fallback to single)
+  local filepaths = {}
   if reaper.JS_Dialog_BrowseForOpenFiles then
     local rv, filestr = reaper.JS_Dialog_BrowseForOpenFiles(
-      "Open Subtitle / Dialogue File", CLB.last_dir or "", "", filter, false)
+      "Open Subtitle / Dialogue File(s)", CLB.last_dir or "", "", filter, true)
     if rv ~= 1 or not filestr or filestr == "" then return end
-    filepath = filestr
+
+    local parts = {}
+    for part in (filestr .. "\0"):gmatch("([^\0]*)\0") do
+      if part ~= "" then parts[#parts + 1] = part end
+    end
+
+    if #parts == 1 then
+      filepaths[1] = parts[1]
+    elseif #parts > 1 then
+      -- macOS returns all full paths; Windows returns directory + filenames
+      if parts[2]:match("^/") or parts[2]:match("^%a:\\") then
+        for i = 1, #parts do filepaths[#filepaths + 1] = parts[i] end
+      else
+        local dir = parts[1]
+        if not dir:match("[/\\]$") then dir = dir .. "/" end
+        for i = 2, #parts do filepaths[#filepaths + 1] = dir .. parts[i] end
+      end
+    end
   else
     local retval, fp = reaper.GetUserFileNameForRead(
       "", "Open Subtitle / Dialogue File", "*.srt")
     if not retval or fp == "" then return end
-    filepath = fp
+    filepaths[1] = fp
   end
 
-  CLB.last_dir = filepath:match("(.*[/\\])") or ""
+  if #filepaths == 0 then return end
+
+  CLB.last_dir = filepaths[1]:match("(.*[/\\])") or ""
   save_prefs()
 
+  -- Multiple files selected → batch mode: parse every .srt, skip the rest.
+  if #filepaths > 1 then
+    local all_parsed, skipped = {}, {}
+    for _, fp in ipairs(filepaths) do
+      local fname = fp:match("([^/\\]+)$") or fp
+      if not fp:lower():match("%.srt$") then
+        skipped[#skipped + 1] = fname
+      else
+        local meta, err = SUBTITLE.inspect(fp, { python = OTIO.python })
+        if not meta or not meta.ready then
+          skipped[#skipped + 1] = fname
+          console_msg("Skipped (inspect failed): " .. fname
+                      .. (err and (" - " .. tostring(err)) or ""))
+        else
+          local parsed, perr = SUBTITLE.parse(fp, {
+            python      = OTIO.python,
+            default_fps = CLB.fps,
+            is_drop     = CLB.is_drop,
+          })
+          if not parsed then
+            skipped[#skipped + 1] = fname
+            console_msg("Skipped (parse failed): " .. fname
+                        .. (perr and (" - " .. tostring(perr)) or ""))
+          else
+            all_parsed[#all_parsed + 1] = { parsed = parsed, path = fp }
+          end
+        end
+      end
+    end
+
+    if #skipped > 0 then
+      console_msg(string.format("Skipped %d file(s) (need column selection or failed): %s",
+                                #skipped, table.concat(skipped, ", ")))
+    end
+
+    if #all_parsed == 0 then
+      reaper.ShowMessageBox(
+        "No SRT files could be loaded from the selection.\n\n" ..
+        "CSV / TSV / XLSX files must be loaded one at a time (they need " ..
+        "sheet / column selection).",
+        SCRIPT_NAME, 0)
+      return
+    end
+
+    local batch_paths = {}
+    for _, ap in ipairs(all_parsed) do batch_paths[#batch_paths + 1] = ap.path end
+    _apply_timeline_results(all_parsed, batch_paths, CLB.fps)
+    return
+  end
+
+  -- Single file selected
+  local filepath = filepaths[1]
   local fname = filepath:match("([^/\\]+)$") or filepath
   console_msg("Inspecting subtitle file: " .. fname)
 
@@ -5477,6 +5644,16 @@ local function draw_toolbar()
         end
       end
       reaper.ImGui_EndMenu(ctx)
+    end
+
+    -- CJK Font path (file path or family name)
+    if reaper.ImGui_Selectable(ctx, "   CJK Font...") then
+      CLB.cjk_font_dialog = {
+        open       = true,
+        buf        = CLB.cjk_font_path or "",
+        status_msg = "",
+        status_ok  = nil,
+      }
     end
 
     reaper.ImGui_EndPopup(ctx)
@@ -8452,6 +8629,118 @@ end
 -- Subtitle Import Dialog
 ---------------------------------------------------------------------------
 
+--- Render the CJK Font selection dialog.
+--- Lets the user pick a font file (.ttf/.ttc/.otf) or type a family name.
+--- On Apply: re-attaches the font to the ImGui context immediately and
+--- saves the path so it persists across sessions.
+local function draw_cjk_font_dialog()
+  local d = CLB.cjk_font_dialog
+  if not d or not d.open then return end
+
+  local POPUP_ID = "CJK Font##clb_cjk_font"
+  if not d._popped then
+    reaper.ImGui_OpenPopup(ctx, POPUP_ID)
+    d._popped = true
+  end
+
+  reaper.ImGui_SetNextWindowSize(ctx, scale(560), scale(260),
+                                 reaper.ImGui_Cond_Appearing())
+
+  local visible, open = reaper.ImGui_BeginPopupModal(ctx, POPUP_ID, true,
+    reaper.ImGui_WindowFlags_NoCollapse())
+  if not visible then
+    if not open then CLB.cjk_font_dialog = nil end
+    return
+  end
+
+  reaper.ImGui_TextWrapped(ctx,
+    "Set a custom font for CJK display. Useful for Taiwanese / Hakka and " ..
+    "other rare characters not covered by PingFang. Accepts a font file " ..
+    "(.ttf / .ttc / .otf) or a font family name.")
+
+  reaper.ImGui_Spacing(ctx)
+  reaper.ImGui_Text(ctx, "Currently loaded:")
+  reaper.ImGui_SameLine(ctx)
+  reaper.ImGui_TextDisabled(ctx, cjk_font_source ~= "" and cjk_font_source
+                                                       or "(none / default)")
+
+  reaper.ImGui_Spacing(ctx)
+  reaper.ImGui_Text(ctx, "Path or family name:")
+  reaper.ImGui_SetNextItemWidth(ctx, scale(440))
+  local chg, new_buf = reaper.ImGui_InputText(ctx, "##cjk_font_path", d.buf)
+  if chg then d.buf = new_buf end
+  reaper.ImGui_SameLine(ctx)
+  if reaper.ImGui_Button(ctx, "Browse...##cjk_font_browse",
+                         scale(80), scale(22)) then
+    if reaper.JS_Dialog_BrowseForOpenFiles then
+      local rv, fp = reaper.JS_Dialog_BrowseForOpenFiles(
+        "Select Font File", "", "",
+        "Font files\0*.ttf;*.ttc;*.otf\0All files\0*.*\0", false)
+      if rv == 1 and fp and fp ~= "" then
+        d.buf = fp
+      end
+    else
+      d.status_msg = "JS extension required for Browse"
+      d.status_ok  = false
+    end
+  end
+
+  reaper.ImGui_TextDisabled(ctx,
+    "Examples:\n" ..
+    "  /Library/Fonts/MyTaigiFont.ttf\n" ..
+    "  /System/Library/Fonts/PingFang.ttc\n" ..
+    "  Noto Sans CJK TC      (family name on macOS)")
+
+  if d.status_msg and d.status_msg ~= "" then
+    reaper.ImGui_Spacing(ctx)
+    if d.status_ok then
+      reaper.ImGui_TextColored(ctx, 0x80FF80FF, d.status_msg)
+    else
+      reaper.ImGui_TextColored(ctx, 0xFF8080FF, d.status_msg)
+    end
+  end
+
+  reaper.ImGui_Separator(ctx)
+
+  if reaper.ImGui_Button(ctx, "Apply", scale(90), scale(26)) then
+    local trimmed = (d.buf or ""):gsub("^%s+", ""):gsub("%s+$", "")
+    local font, src, custom_err = _load_cjk_font(ctx, trimmed)
+    if trimmed ~= "" and not custom_err then
+      -- Custom path supplied AND it succeeded as the primary
+      cjk_font = font
+      cjk_font_source = src or trimmed
+      CLB.cjk_font_path = trimmed
+      save_prefs()
+      d.status_msg = "Loaded: " .. tostring(cjk_font_source)
+      d.status_ok  = true
+    elseif trimmed == "" then
+      -- Cleared → reset to auto-detect; whatever fallback resolves, use it
+      cjk_font = font
+      cjk_font_source = src or ""
+      CLB.cjk_font_path = ""
+      save_prefs()
+      d.status_msg = "Reset to default. Loaded: " ..
+                     (cjk_font and tostring(cjk_font_source) or "(none)")
+      d.status_ok  = cjk_font ~= nil
+    else
+      -- Custom failed; do not swap
+      d.status_msg = "Failed: " .. tostring(custom_err)
+      d.status_ok  = false
+    end
+  end
+  reaper.ImGui_SameLine(ctx)
+  if reaper.ImGui_Button(ctx, "Reset to Default", scale(140), scale(26)) then
+    d.buf = ""
+  end
+  reaper.ImGui_SameLine(ctx)
+  if reaper.ImGui_Button(ctx, "Close", scale(80), scale(26)) then
+    CLB.cjk_font_dialog = nil
+    reaper.ImGui_CloseCurrentPopup(ctx)
+  end
+
+  reaper.ImGui_EndPopup(ctx)
+end
+
 --- Render the subtitle inspect / column-selection dialog.
 --- Called every frame from the main loop; only does work if open.
 local function draw_subtitle_inspect_dialog()
@@ -8729,6 +9018,9 @@ local function loop()
     -- Subtitle import inspect/column-picker dialog (modal popup)
     draw_subtitle_inspect_dialog()
 
+    -- CJK font path dialog (modal popup, opened from Options menu)
+    draw_cjk_font_dialog()
+
     -- Keyboard shortcuts
     local focused = reaper.ImGui_IsWindowFocused(ctx, reaper.ImGui_FocusedFlags_RootAndChildWindows())
     if focused and not EDIT then
@@ -8821,8 +9113,9 @@ reaper.SetExtState(EXT_NS, "instance_id", my_id, false)
 load_prefs()
 
 -- Configure OTIO Python path.
--- load_prefs() may have restored a saved path; if empty or invalid, auto-detect.
-if not OTIO.python or OTIO.python == "" then
+-- load_prefs() may have restored a saved path; if empty or invalid (e.g. a
+-- pyenv virtualenv that was since removed), auto-detect a working one.
+if not OTIO.python or OTIO.python == "" or not OTIO.python_supports(OTIO.python) then
   OTIO.python = OTIO.detect_python()
   save_prefs()
 end
@@ -8834,24 +9127,18 @@ end
 
 -- Load a CJK-capable font so Chinese / Japanese text (e.g. from subtitle
 -- import) renders properly. ImGui's default font is ASCII-only.
--- Candidates are tried in order; the first that successfully loads wins.
-if reaper.ImGui_CreateFont and reaper.ImGui_Attach then
-  for _, path in ipairs(CJK_FONT_CANDIDATES) do
-    local f = io.open(path, "rb")
-    if f then
-      f:close()
-      local ok, font = pcall(reaper.ImGui_CreateFont, path, 13)
-      if ok and font then
-        local ok_a = pcall(reaper.ImGui_Attach, ctx, font)
-        if ok_a then
-          cjk_font = font
-          console_msg("CJK font loaded: " .. path)
-          break
-        end
-      end
-    end
+-- Custom path (Options → CJK Font…) wins; otherwise platform candidates.
+do
+  local font, src, custom_err = _load_cjk_font(ctx, CLB.cjk_font_path)
+  cjk_font = font
+  cjk_font_source = src or ""
+  if custom_err then
+    console_msg("CJK font (custom): failed to load '" ..
+                tostring(CLB.cjk_font_path) .. "' — " .. tostring(custom_err))
   end
-  if not cjk_font then
+  if cjk_font then
+    console_msg("CJK font loaded: " .. tostring(cjk_font_source))
+  else
     console_msg("CJK font: none found; default font will be used (CJK glyphs missing)")
   end
 end

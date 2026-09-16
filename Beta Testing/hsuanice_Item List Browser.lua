@@ -1,6 +1,6 @@
 --[[
 @description Item List Browser
-@version 260711.1941
+@version 260913.1356
 @author hsuanice
 @about
   A project-wide media browser that shows ALL items in the project with full
@@ -54,6 +54,34 @@
 
 
 @changelog
+  v260913.1356
+  - Fix: Script failed to load with "too many local variables (limit is
+    200) in main function" after the v260912.1443 perf fix, because that
+    fix added two new top-level local functions and pushed this already
+    large file's main chunk over Lua's 200-local limit.
+    • Consolidated light_refresh_one_row()/light_refresh_selected() back
+      into the single light_refresh(selected_only) local, moving the
+      shared per-row logic into a function-local nested closure instead
+      of a new top-level local. Net top-level local count is unchanged
+      from before v260912.1443, and the perf fix's behavior is preserved:
+      light_refresh(true) does the targeted (selected-rows-only) rescan,
+      light_refresh() with no argument does the full project rescan.
+
+  v260912.1443
+  - Perf: Fixed severe UI lag on large projects when selecting items.
+    • Root cause: any REAPER selection change (e.g. clicking a row in the
+      list) was triggering light_refresh(), which re-scanned metadata,
+      color, sample rate/file type, search text — and re-sorted — for
+      EVERY row in the project (not just the selected ones). On projects
+      with thousands of items this made list/arrange focus take seconds.
+    • Fix: added a targeted refresh path that only re-reads the rows for
+      the currently selected item(s). The plain "selection changed"
+      fallback path now uses this instead of the full-project rescan.
+      The full rescan is still used (unchanged) when the project itself
+      actually changes (edits, add/remove, undo/redo) — only the
+      selection-only path was narrowed. (See v260913.1356 — the initial
+      implementation of this fix broke script loading; fixed there.)
+
   v260711.1941
   - Feature: Added active REAPER take slot column.
     • New read-only column: "Takes" (e.g. "1/2", "2/2").
@@ -4279,74 +4307,110 @@ function refresh_now()
   PROGRESSIVE.active = false
 end
 
--- Light refresh: re-read basic fields for existing rows without metadata rescan
--- Used for auto-detecting REAPER changes (track renames, position changes, etc.)
-local function light_refresh()
-  for _, row in ipairs(ROWS) do
+-- Light refresh: re-read basic fields for existing rows without metadata rescan.
+-- Pass selected_only=true to only rescan the rows for the item(s) currently
+-- selected in REAPER (used as the selection-change fallback so a plain
+-- click/selection change doesn't trigger a full project-wide rescan — that
+-- full-table rescan was the cause of multi-second lag on large projects).
+-- Default (no arg / full scan) is used when the project itself actually
+-- changed (edits, add/remove, undo/redo, NEEDS_REFRESH / state-count change).
+-- NOTE: keep the per-row logic nested inside this single top-level local
+-- function rather than splitting it into extra top-level locals — REAPER's
+-- Lua enforces a 200-local-variable limit on the main chunk, and this file
+-- is already close to it (see v260913 changelog entry).
+local function light_refresh(selected_only)
+  local function refresh_row(row)
     local item = row.__item
-    if item and reaper.ValidatePtr(item, "MediaItem*") then
-      local take_sig = get_take_state_signature(item)
-      local take_changed = (take_sig ~= (row.__take_sig or ""))
+    if not (item and reaper.ValidatePtr(item, "MediaItem*")) then return end
 
-      local tr = reaper.GetMediaItemTrack(item)
-      if tr then
-        row.track_name = select(2, reaper.GetTrackName(tr, "")) or ""
-        row.__track = tr
-        row.track_idx = math.floor(reaper.GetMediaTrackInfo_Value(tr, "IP_TRACKNUMBER") or 0)
-      end
-      local tk = reaper.GetActiveTake(item)
-      if tk then
-        row.__take = tk
-        row.__take_sig = take_sig
-        row.take_name = select(2, reaper.GetSetMediaItemTakeInfo_String(tk, "P_NAME", "", false)) or ""
-        row.take_slot = get_active_take_label(item) or ""
-        local source = reaper.GetMediaItemTake_Source(tk)
-        if source then
-          local sr = reaper.GetMediaSourceSampleRate(source)
-          row.sample_rate = (sr and sr > 0) and tostring(math.floor(sr)) or ""
-          row.file_type = reaper.GetMediaSourceType(source, "") or ""
-        else
-          row.sample_rate = ""
-          row.file_type = ""
-        end
+    local take_sig = get_take_state_signature(item)
+    local take_changed = (take_sig ~= (row.__take_sig or ""))
+
+    local tr = reaper.GetMediaItemTrack(item)
+    if tr then
+      row.track_name = select(2, reaper.GetTrackName(tr, "")) or ""
+      row.__track = tr
+      row.track_idx = math.floor(reaper.GetMediaTrackInfo_Value(tr, "IP_TRACKNUMBER") or 0)
+    end
+    local tk = reaper.GetActiveTake(item)
+    if tk then
+      row.__take = tk
+      row.__take_sig = take_sig
+      row.take_name = select(2, reaper.GetSetMediaItemTakeInfo_String(tk, "P_NAME", "", false)) or ""
+      row.take_slot = get_active_take_label(item) or ""
+      local source = reaper.GetMediaItemTake_Source(tk)
+      if source then
+        local sr = reaper.GetMediaSourceSampleRate(source)
+        row.sample_rate = (sr and sr > 0) and tostring(math.floor(sr)) or ""
+        row.file_type = reaper.GetMediaSourceType(source, "") or ""
       else
-        row.__take = nil
-        row.__take_sig = take_sig
-        row.take_name = ""
         row.sample_rate = ""
         row.file_type = ""
       end
-      local ok_note, note = reaper.GetSetMediaItemInfo_String(item, "P_NOTES", "", false)
-      row.item_note = (ok_note and note) or ""
-      local pos = reaper.GetMediaItemInfo_Value(item, "D_POSITION") or 0
-      local len = reaper.GetMediaItemInfo_Value(item, "D_LENGTH") or 0
-      row.start_time = pos
-      row.end_time = pos + len
-      row.length = len
-      row.muted = (reaper.GetMediaItemInfo_Value(item, "B_MUTE") or 0) > 0.5
-      -- Update color
-      local native = reaper.GetDisplayedMediaItemColor(item) or 0
-      if native ~= 0 then
-        local r, g, b = reaper.ColorFromNative(native)
-        row.color_rgb = { r, g, b }
-        row.color_hex = string.format("#%02X%02X%02X", r, g, b)
-      else
-        row.color_rgb, row.color_hex = nil, ""
-      end
-      -- Rebuild search text
-      row.__search_text = table.concat({
-        row.track_name or "", row.take_name or "", row.item_note or "",
-        row.file_name or "", row.meta_trk_name or "",
-        row.originator or "", row.description or "",
-        row.project or "", row.scene or "", row.take_meta or "", row.tape or "",
-        row.sample_rate or "", row.file_type or "",
-      }, " "):lower()
+    else
+      row.__take = nil
+      row.__take_sig = take_sig
+      row.take_name = ""
+      row.sample_rate = ""
+      row.file_type = ""
+    end
+    local ok_note, note = reaper.GetSetMediaItemInfo_String(item, "P_NOTES", "", false)
+    row.item_note = (ok_note and note) or ""
+    local pos = reaper.GetMediaItemInfo_Value(item, "D_POSITION") or 0
+    local len = reaper.GetMediaItemInfo_Value(item, "D_LENGTH") or 0
+    row.start_time = pos
+    row.end_time = pos + len
+    row.length = len
+    row.muted = (reaper.GetMediaItemInfo_Value(item, "B_MUTE") or 0) > 0.5
+    -- Update color
+    local native = reaper.GetDisplayedMediaItemColor(item) or 0
+    if native ~= 0 then
+      local r, g, b = reaper.ColorFromNative(native)
+      row.color_rgb = { r, g, b }
+      row.color_hex = string.format("#%02X%02X%02X", r, g, b)
+    else
+      row.color_rgb, row.color_hex = nil, ""
+    end
+    -- Rebuild search text
+    row.__search_text = table.concat({
+      row.track_name or "", row.take_name or "", row.item_note or "",
+      row.file_name or "", row.meta_trk_name or "",
+      row.originator or "", row.description or "",
+      row.project or "", row.scene or "", row.take_meta or "", row.tape or "",
+      row.sample_rate or "", row.file_type or "",
+    }, " "):lower()
 
-      if take_changed then
-        row.__metadata_loaded = false
-        load_metadata_for_row(row)
+    if take_changed then
+      row.__metadata_loaded = false
+      load_metadata_for_row(row)
+    end
+  end
+
+  if selected_only then
+    local count = reaper.CountSelectedMediaItems(0)
+    if count == 0 then return end
+
+    local selected_guids = {}
+    for i = 0, count - 1 do
+      local item = reaper.GetSelectedMediaItem(0, i)
+      if item then
+        local _, guid = reaper.GetSetMediaItemInfo_String(item, "GUID", "", false)
+        if guid and guid ~= "" then selected_guids[guid] = true end
       end
     end
+    if not next(selected_guids) then return end
+
+    for _, row in ipairs(ROWS) do
+      if row.__item_guid and selected_guids[row.__item_guid] then
+        refresh_row(row)
+      end
+    end
+    ILB.cached_rows_frame = -1  -- Invalidate filter cache so updated fields show immediately
+    return
+  end
+
+  for _, row in ipairs(ROWS) do
+    refresh_row(row)
   end
   ILB.cached_rows_frame = -1  -- Invalidate filter cache
   build_track_list()
@@ -4427,9 +4491,11 @@ local function smart_refresh()
   end
 
   -- Fallback: some take switches may not bump project state count.
+  -- Only rescan the rows for the currently selected item(s), not the whole
+  -- project — a plain selection change should never trigger a full rescan.
   local now = reaper.time_precise()
   if (now - LAST_REFRESH_TIME) >= REFRESH_THROTTLE and has_selection_changed() then
-    light_refresh()
+    light_refresh(true)
     update_selection_cache()
   end
 end

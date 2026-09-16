@@ -1,6 +1,6 @@
 --[[
 @description ReaImGui - Rename Active Take from Metadata (caret insert + cached preview + copy/export)
-@version 260910.2332
+@version 260911.1302
 @author hsuanice
 @about
   Rename active takes and/or item notes from BWF/iXML and true source metadata using a fast ReaImGui UI.
@@ -35,6 +35,30 @@
   hsuanice served as the workflow designer, tester, and integrator for this tool.
 
 @changelog
+  v260911.1302 (Taipei Time)
+    - Cleanup: removed a pre-existing dead-code trap — local guess_channel_index()
+      (and the get_source_num_channels() it alone called) had a full I_CHANMODE-based
+      implementation defined early, but every call site actually ran later at
+      runtime, by which point a bare "guess_channel_index = function(...) return
+      META.guess_interleave_index(...) end" reassignment (no 'local') had already
+      silently overwritten it — so the local body never executed. Removed the dead
+      body; guess_channel_index is now forward-declared (matching expand_template's
+      existing pattern) and defined once, delegating to the library. No behavior
+      change (the delegating version was already the only one actually running).
+
+  v260911.1056 (Taipei Time)
+    - Refactored: $trk, $trkN, $trkall, $interleave/$interum, $chnum/$channelnum,
+      $counter:N, $srcbaseprefix:N/$srcbasesuffix:N no longer duplicate their
+      own local implementation — they now delegate to the shared "hsuanice
+      Metadata Read" library (Metadata Read >= 0.3.10, adds M.resolve_trk_name),
+      the same library "Rename Source File from Metadata.lua" uses. Removed the
+      now-unused local build_interleave_name_list()/get_current_interleave_index()/
+      get_recorder_channel_number() and the dead pre-library copy of
+      compute_interleave_diag() that only these fed. $baseindex/$baseidx and
+      $overlapindex/$rangeindex stay local (they depend on this UI's current
+      selection/grouping state, which the metadata library has no concept of).
+      No output change intended beyond the meta_trk_name-first fix below.
+
   v260910.2332 (Taipei Time)
     - Fixed: $trk resolved to empty (causing false "will skip" / blank output) for items whose
       metadata came from the shared Metadata.cache after a cache hit, when the recorder's iXML
@@ -854,49 +878,12 @@ local function get_item_track_name(item) local tr=reaper.GetMediaItem_Track(item
 local function get_item_length_sec(item) return reaper.GetMediaItemInfo_Value(item,"D_LENGTH") or 0.0 end
 local function seconds_to_m_ss_mmm(sec) local s=math.max(0,tonumber(sec) or 0) local m=math.floor(s/60) local r=s-m*60 return string.format("%d:%06.3f", m, r) end
 
--- Return the number of channels in the true source (poly N).
-local function get_source_num_channels(item, fields)
-  -- 1) Prefer the media source (most reliable)
-  local take = reaper.GetActiveTake(item)
-  if take then
-    local src = reaper.GetMediaItemTake_Source(take)
-    if src then
-      local nch = reaper.GetMediaSourceNumChannels(src)
-      if type(nch) == "number" and nch > 0 then
-        return nch
-      end
-    end
-  end
-  -- 2) Fallback: metadata $channels
-  local n = tonumber(fields and fields.channels)
-  if n and n > 0 then
-    return n
-  end
-  return 1
-end
-
--- Interleave-only: derive Interleave index N from I_CHANMODE (Mono of N),
--- then clamp to 1..num_channels. This returns Interleave index (1..N),
--- not the recorder's channel label (3/4/5/...).
-local function guess_channel_index(item, fields)
-  local take = reaper.GetActiveTake(item)
-  if not take then
-    return nil
-  end
-
-  local cm = reaper.GetMediaItemTakeInfo_Value(take, "I_CHANMODE") or 0
-  -- Mono of N: cm = 2 + N  →  N = cm - 2
-  if cm >= 3 and cm <= 66 then
-    local n = math.floor(cm - 2)
-    local nch = get_source_num_channels(item, fields)
-    if n < 1 then n = 1 end
-    if n > nch then n = nch end
-    return n
-  end
-
-  return nil -- No Mono-of-N set; $trk branch will decide fallback behavior.
-end
-
+-- NOTE: channel/interleave-index guessing now lives in the shared Metadata
+-- Read library (META.guess_interleave_index) — see guess_channel_index()
+-- further down in this file. Forward-declared here (like expand_template
+-- below) so callers positioned above its real definition still resolve to
+-- this local instead of an undefined global.
+local guess_channel_index
 
 -- metadata keys
 local BWF_KEYS = {
@@ -1070,153 +1057,10 @@ local function collect_metadata_for_item(item)
   return t
 end
 
--- Build a map: Interleave index (1..N) → Track Name.
--- Priority: iXML TRACK_LIST (CHANNEL_INDEX → NAME).
--- Fallback: TRK# keys (incl. normalized dTRK#) sorted numerically → mapped to 1..N.
-local function build_interleave_name_list(fields)
-  if fields.__trk_by_interleave then return fields.__trk_by_interleave end
-
-  local by_interleave = {}
-  local have_ixml = false
-
-  -- 1) iXML source (if your parser filled this):
-  --    fields.__ixml_tracks = { {channel_index=1, channel=3, name="BOOM1"}, ... }
-  if fields.__ixml_tracks and type(fields.__ixml_tracks) == "table" then
-    for _, t in ipairs(fields.__ixml_tracks) do
-      local idx = tonumber(t.channel_index)
-      local nm  = t.name
-      if idx and idx >= 1 and nm and nm ~= "" then
-        by_interleave[idx] = nm
-        have_ixml = true
-      end
-    end
-  end
-
-  -- 2) Fallback: derive Interleave order from TRK# keys (dedup by channel number)
-  if not have_ixml then
-    local pairs_chan = {}  -- { {chan=3,name="BOOM1"}, ... }
-    local seen = {}        -- deduplicate by channel number
-
-    for k, v in pairs(fields or {}) do
-      -- Accept both "TRK#" and "trk#" but keep only the first occurrence per channel
-      local n = k:match("^TRK(%d+)$") or k:match("^trk(%d+)$")
-      if n then
-        local ch = tonumber(n)
-        if ch and v and v ~= "" and not seen[ch] then
-          pairs_chan[#pairs_chan+1] = { chan = ch, name = v }
-          seen[ch] = true
-          if DEBUG then
-            reaper.ShowConsoleMsg(string.format("[build_interleave_name_list] Found %s = %s\n", k, v))
-          end
-        end
-      end
-    end
-
-    table.sort(pairs_chan, function(a,b) return a.chan < b.chan end)
-    for i, e in ipairs(pairs_chan) do
-      by_interleave[i] = e.name
-      if DEBUG then
-        reaper.ShowConsoleMsg(string.format("[build_interleave_name_list] by_interleave[%d] = %s\n", i, e.name))
-      end
-    end
-  end
-
-  fields.__trk_by_interleave = by_interleave
-  return by_interleave
-end
-
--- Compute interleave diagnostics for UI and copy/preview paths.
--- Fills:
---   fields.__diag_interleave = {
---     index  = <N>,             -- Interleave index (1..num_channels) from I_CHANMODE
---     total  = <num_channels>,  -- Actual poly channel count (from source or $channels)
---     name   = <string>,        -- Interleave-resolved track name
---     all    = <string>         -- $trkall concatenated in interleave order
---   }
-local function compute_interleave_diag(fields, item)
-  -- (Re)build interleave table: [1..N] -> track name (iXML CHANNEL_INDEX or TRK# fallback)
-  local list = build_interleave_name_list(fields)
-
-  -- Interleave index from I_CHANMODE (clamped to 1..num_channels)
-  local nch = get_source_num_channels(item, fields)
-  local idx = guess_channel_index(item, fields)
-
-  if DEBUG then
-    local list_count = 0
-    if list then
-      for i = 1, 256 do
-        if list[i] then list_count = list_count + 1 end
-      end
-    end
-    reaper.ShowConsoleMsg(string.format("[compute_interleave_diag] nch=%s, idx=%s, list entries=%d\n",
-      tostring(nch), tostring(idx), list_count))
-  end
-
-  local name = ""
-  if idx and list and list[idx] then
-    name = list[idx]
-    if DEBUG then
-      reaper.ShowConsoleMsg(string.format("[compute_interleave_diag] Using list[%d] = %s\n", idx, name))
-    end
-  else
-    -- Fallback: first available name to avoid empty UI
-    if list then
-      for i = 1, 256 do
-        if list[i] and list[i] ~= "" then
-          name = list[i]
-          if DEBUG then
-            reaper.ShowConsoleMsg(string.format("[compute_interleave_diag] Fallback to list[%d] = %s\n", i, name))
-          end
-          break
-        end
-      end
-    end
-  end
-
-  local all = {}
-  if list then
-    for i = 1, 256 do
-      local v = list[i]
-      if v and v ~= "" then all[#all+1] = v end
-    end
-  end
-
-  fields.__diag_interleave = {
-    index = idx,
-    total = nch,
-    name  = name,
-    all   = table.concat(all, "_"),
-  }
-end
-
--- === Interleave / ChannelNumber helpers (NEW) ===
-local function get_current_interleave_index(fields)
-  local idx = tonumber(fields and fields.__chan_index) or 1
-  if idx < 1 then idx = 1 end
-  return idx
-end
-
-local function get_recorder_channel_number(fields)
-  -- 先蒐集 TRK 表（錄音機 channel → 名稱）
-  local pairs_chan, seen = {}, {}
-  for k, v in pairs(fields or {}) do
-    local n = k:match("^TRK(%d+)$") or k:match("^trk(%d+)$")
-    if n and not seen[n] then
-      seen[n] = true
-      pairs_chan[#pairs_chan+1] = { chan = tonumber(n), name = v }
-    end
-  end
-  table.sort(pairs_chan, function(a,b) return (a.chan or 0) < (b.chan or 0) end)
-
-  local il = get_current_interleave_index(fields)
-  if #pairs_chan > 0 then
-    local e = pairs_chan[il]
-    if e and e.chan then return e.chan end
-  end
-  -- 找不到 TRK# → 回退用 interleave
-  return il
-end
-
+-- NOTE: interleave/channel-name resolution ($trk-family) now lives in the
+-- shared Metadata Read library (META.resolve_trk_name / META.expand) — see
+-- expand_template() below. compute_interleave_diag is likewise delegated to
+-- META.compute_interleave_diag further down in this file.
 
 local function detect_base_and_index(name)
   return RENAME_CORE.detect_base_and_index(name)
@@ -1319,102 +1163,34 @@ function expand_template(tpl, fields, counter, sanitize)
     local tkl = string.lower(name or "")
     if tkl == "clearnote" then return "" end
 
-    local prefix = tkl:match("^srcbaseprefix:(%d+)$")
-    if prefix then
-      local n = tonumber(prefix) or 0
-      local srcbase = fields.srcbase or fields.filename or ""
-      if n > 0 then
-        local spans = utf8_spans(srcbase)
-        local len = math.min(n, #spans)
-        if len > 0 then
-          local cut = srcbase:sub(1, spans[len][2])
-          return cut
-        end
-      end
-      return ""
-    end
-
-    local suffix = tkl:match("^srcbasesuffix:(%d+)$")
-    if suffix then
-      local n = tonumber(suffix) or 0
-      local srcbase = fields.srcbase or fields.filename or ""
-      local spans = utf8_spans(srcbase)
-      local len = #spans
-      if n > 0 and len > 0 then
-        local start_i = math.max(1, len - n + 1)
-        local cut = srcbase:sub(spans[start_i][1], spans[len][2])
-        return cut
-      end
-      return ""
-    end
-
-    local digits = tkl:match("^counter:(%d+)$")
-    if digits then
-      local n = tonumber(digits) or 0
-      local val = tostring(counter or 1)
-      if n > 0 then val = string.rep("0", math.max(0, n - #val)) .. val end
-      return val
-    end
-
-    if tkl == "trk" then
-      -- Prefer the already-resolved single-channel name (meta_trk_name) since
-      -- it survives the metadata cache round-trip; some recorders (e.g. Cantar/
-      -- Aaton) don't embed per-channel TRK#= pairs in the description text, so
-      -- the interleave-list reconstruction below can come back empty on a cache hit.
-      local s = fields.meta_trk_name
-      if not s or s == "" then
-        local interleave = fields.__chan_index
-        local list = build_interleave_name_list(fields)
-        s = ""
-        if interleave and list and list[interleave] then
-          s = list[interleave]
-        else
-          if list then
-            for i = 1, 128 do
-              if list[i] and list[i] ~= "" then s = list[i]; break end
-            end
-          end
-        end
-      end
-      return trim(maybe_sanitize(s or ""))
-    end
-
-    if tkl == "trkall" then
-      local list = build_interleave_name_list(fields)
-      local out = {}
-      if list then
-        for i = 1, 256 do
-          local v = list[i]
-          if v and v ~= "" then out[#out+1] = v end
-        end
-      end
-      return table.concat(out, "_")
-    end
-
-    local nidx = tkl:match("^trk(%d+)$")
-    if nidx then
-      local idx = tonumber(nidx)
-      local v = (fields.__trk_table and fields.__trk_table[idx]) or fields["trk"..nidx] or fields["TRK"..nidx]
-      local s = tostring(v or "")
-      return trim(maybe_sanitize(s))
-    end
-
-    if tkl == "interleave" or tkl == "interum" then
-      local idx = get_current_interleave_index(fields)
-      return tostring(idx or "")
-    end
-
+    -- Rename-tool-specific tokens (depend on this UI's current selection /
+    -- grouping state, not on file metadata) — kept local, no library equivalent.
     if tkl == "baseindex" or tkl == "baseidx" then
       return tostring(current_base_index(fields) or 1)
     end
-
     if tkl == "overlapindex" or tkl == "rangeindex" then
       return tostring(current_overlap_index(fields) or 1)
     end
 
-    if tkl == "chnum" or tkl == "channelnum" then
-      local chn = get_recorder_channel_number(fields)
-      return tostring(chn or "")
+    -- $trk prefers the already-resolved single-channel name (meta_trk_name)
+    -- so it survives a Metadata.cache round-trip even for recorders that
+    -- don't embed per-channel TRK#= pairs in the description text.
+    if tkl == "trk" then
+      return trim(META.resolve_trk_name(fields, sanitize))
+    end
+
+    -- Everything else metadata-shaped ($trkN, $trkall, $interleave/$interum,
+    -- $chnum/$channelnum, $counter:N, $srcbaseprefix:N/$srcbasesuffix:N) is
+    -- resolved by the shared Metadata Read library instead of a local copy,
+    -- so there's one implementation to fix instead of three.
+    if tkl == "trkall"
+       or tkl:match("^trk%d+$")
+       or tkl == "interleave" or tkl == "interum"
+       or tkl == "chnum" or tkl == "channelnum"
+       or tkl:match("^counter:%d+$")
+       or tkl:match("^srcbaseprefix:%d+$")
+       or tkl:match("^srcbasesuffix:%d+$") then
+      return META.expand("${" .. tkl .. "}", fields, counter, sanitize)
     end
 
     return nil
@@ -1639,7 +1415,7 @@ collect_metadata_for_item = function(item)
   return t
 end
 
-compute_interleave_diag = function(fields, item)
+local function compute_interleave_diag(fields, item)
   return META.compute_interleave_diag(fields, item)
 end
 
@@ -1649,7 +1425,7 @@ empty_tokens_in_take_template = function(tpl, fields, counter)
   return RENAME_CORE.empty_tokens_in_template(tpl, fields, counter, expand_template)
 end
 
-guess_channel_index = function(item, fields)
+function guess_channel_index(item, fields)
   return META.guess_interleave_index(item, fields)
 end
 
