@@ -3,9 +3,12 @@
 -- Window is resizable; clock auto-scales to fill it.
 -- Settings and window geometry are remembered across sessions.
 --
--- Version: 260228.1930
+-- Version: 260917.1054
 --
 -- Changelog:
+--   v260917.1054
+--     - Right-click "Show Seconds" / "Show Frames" toggles (independent, persist across sessions)
+--     - Date text enlarged (~2x)
 --   v260228.1930
 --     - Persistent widget: window auto-reopens if closed by project switch
 --     - Right-click "Close Work Timer" is now the only way to fully stop
@@ -81,11 +84,13 @@ local function load_settings()
     win_x      = gi("win_x", 100),
     win_y      = gi("win_y", 100),
     dock       = gi("dock",  0),
+    show_sec   = gi("show_sec", 1),
+    show_frm   = gi("show_frm", 1),
     custom_hex = reaper.GetExtState(EXT, "custom_hex"),
   }
 end
 
-local function save_settings(color, font, w, h, x, y, dock)
+local function save_settings(color, font, w, h, x, y, dock, show_sec, show_frm)
   reaper.SetExtState(EXT, "color", tostring(color), true)
   reaper.SetExtState(EXT, "font",  tostring(font),  true)
   reaper.SetExtState(EXT, "win_w", tostring(w),     true)
@@ -93,6 +98,8 @@ local function save_settings(color, font, w, h, x, y, dock)
   reaper.SetExtState(EXT, "win_x", tostring(x),     true)
   reaper.SetExtState(EXT, "win_y", tostring(y),     true)
   reaper.SetExtState(EXT, "dock",  tostring(dock),  true)
+  reaper.SetExtState(EXT, "show_sec", tostring(show_sec), true)
+  reaper.SetExtState(EXT, "show_frm", tostring(show_frm), true)
   -- Always write current custom color
   reaper.SetExtState(EXT, "custom_hex",
     rgb_to_hex(COLORS[6].r, COLORS[6].g, COLORS[6].b), true)
@@ -107,6 +114,8 @@ local last_h    = cfg.win_h
 local last_x    = cfg.win_x
 local last_y    = cfg.win_y
 local last_dock = cfg.dock
+local show_seconds = (cfg.show_sec == 1)
+local show_frames  = (cfg.show_frm == 1)
 local rmb_prev      = false
 local lmb_ctrl_prev = false
 local user_wants_close = false
@@ -124,10 +133,25 @@ end
 
 -- ── Clock strings ──────────────────────────────────────────────────────────
 local function clock_str()
-  local t   = os.date("*t")
-  local fps = reaper.TimeMap_curFrameRate(0)
-  local f   = math.floor(reaper.time_precise() % 1 * fps)
-  return string.format("%02d:%02d:%02d:%02d", t.hour, t.min, t.sec, f)
+  local t = os.date("*t")
+  local parts = { string.format("%02d", t.hour), string.format("%02d", t.min) }
+  if show_seconds then
+    parts[#parts+1] = string.format("%02d", t.sec)
+  end
+  if show_frames then
+    local fps = reaper.TimeMap_curFrameRate(0)
+    local f   = math.floor(reaper.time_precise() % 1 * fps)
+    parts[#parts+1] = string.format("%02d", f)
+  end
+  return table.concat(parts, ":")
+end
+
+-- Fixed-width reference string matching the current field layout (for auto-scale sizing)
+local function clock_trial_str()
+  local parts = { "00", "00" }
+  if show_seconds then parts[#parts+1] = "00" end
+  if show_frames  then parts[#parts+1] = "00" end
+  return table.concat(parts, ":")
 end
 
 local function date_str()
@@ -146,7 +170,7 @@ end
 local function calc_clock_sz(face)
   local TRIAL = 50
   gfx.setfont(1, face, TRIAL, string.byte("b"))
-  local tw = gfx.measurestr("00:00:00:00")
+  local tw = gfx.measurestr(clock_trial_str())
   if tw == 0 then return TRIAL end
   local by_w = math.floor(TRIAL * (gfx.w * 0.88) / tw)
   local by_h = math.floor(gfx.h * 0.62)
@@ -157,9 +181,11 @@ end
 -- Flat list, unambiguous indices:
 --   1 .. #COLORS          → color choice
 --   #COLORS+1 .. +#FONTS  → font choice
---   #COLORS+#FONTS+1      → dock toggle
---   #COLORS+#FONTS+2      → edit custom color
---   #COLORS+#FONTS+3      → close work timer
+--   #COLORS+#FONTS+1      → show seconds toggle
+--   #COLORS+#FONTS+2      → show frames toggle
+--   #COLORS+#FONTS+3      → dock toggle
+--   #COLORS+#FONTS+4      → edit custom color
+--   #COLORS+#FONTS+5      → close work timer
 local function show_rmenu()
   local parts = {}
   for i, c in ipairs(COLORS) do
@@ -168,8 +194,10 @@ local function show_rmenu()
   for i, f in ipairs(FONTS) do
     parts[#parts+1] = (i == cur_font and "!" or "") .. "Font: "  .. f.name
   end
+  parts[#parts+1] = "|" .. (show_seconds and "!" or "") .. "Show Seconds"
+  parts[#parts+1] = (show_frames and "!" or "") .. "Show Frames"
   local dockstate = gfx.dock(-1)
-  parts[#parts+1] = (dockstate ~= 0 and "!" or "") .. "Dock window"
+  parts[#parts+1] = "|" .. (dockstate ~= 0 and "!" or "") .. "Dock window"
   parts[#parts+1] = "Edit custom color..."
   parts[#parts+1] = "|Close Work Timer"
 
@@ -182,11 +210,15 @@ local function show_rmenu()
   elseif sel <= nc + nf then
     cur_font = sel - nc
   elseif sel == nc + nf + 1 then
+    show_seconds = not show_seconds
+  elseif sel == nc + nf + 2 then
+    show_frames = not show_frames
+  elseif sel == nc + nf + 3 then
     -- Toggle dock
     local new_dock = (dockstate ~= 0) and 0 or 1
     gfx.dock(new_dock)
     last_dock = new_dock
-  elseif sel == nc + nf + 2 then
+  elseif sel == nc + nf + 4 then
     -- Edit custom color via hex input
     local current_hex = rgb_to_hex(COLORS[6].r, COLORS[6].g, COLORS[6].b)
     local ok, result = reaper.GetUserInputs(
@@ -202,14 +234,14 @@ local function show_rmenu()
         reaper.MB("Invalid hex color. Use 6 hex digits (e.g. FF8C00 or #FF8C00).", "Invalid Input", 0)
       end
     end
-  elseif sel == nc + nf + 3 then
+  elseif sel == nc + nf + 5 then
     -- User explicitly closed — stop the script
     user_wants_close = true
     gfx.quit()
   end
 
   local _, wx, wy = gfx.dock(-1, 0, 0, 0, 0)
-  save_settings(cur_color, cur_font, gfx.w, gfx.h, wx, wy, last_dock)
+  save_settings(cur_color, cur_font, gfx.w, gfx.h, wx, wy, last_dock, show_seconds and 1 or 0, show_frames and 1 or 0)
 end
 
 -- ── Main draw loop ─────────────────────────────────────────────────────────
@@ -220,7 +252,7 @@ local function frame()
 
   local face     = FONTS[cur_font].face
   local clock_sz = calc_clock_sz(face)
-  local date_sz  = math.max(10, math.floor(clock_sz / 4))
+  local date_sz  = math.max(20, math.floor(clock_sz / 2))
 
   -- Measure both strings for vertical centering
   local tc = clock_str()
@@ -270,7 +302,7 @@ local function frame()
   if gfx.w ~= last_w or gfx.h ~= last_h or wx ~= last_x or wy ~= last_y
       or dockstate ~= last_dock then
     last_w, last_h, last_x, last_y, last_dock = gfx.w, gfx.h, wx, wy, dockstate
-    save_settings(cur_color, cur_font, gfx.w, gfx.h, wx, wy, dockstate)
+    save_settings(cur_color, cur_font, gfx.w, gfx.h, wx, wy, dockstate, show_seconds and 1 or 0, show_frames and 1 or 0)
   end
 
   -- Right-click detection (rising edge)
@@ -291,7 +323,7 @@ local function frame()
     reaper.defer(frame)
   else
     -- Window closed — save last known geometry
-    save_settings(cur_color, cur_font, last_w, last_h, last_x, last_y, last_dock)
+    save_settings(cur_color, cur_font, last_w, last_h, last_x, last_y, last_dock, show_seconds and 1 or 0, show_frames and 1 or 0)
     if not user_wants_close then
       -- Closed externally (e.g. project switch) — reopen window to stay as widget
       gfx.init("Work Timer", last_w, last_h, last_dock, last_x, last_y)
