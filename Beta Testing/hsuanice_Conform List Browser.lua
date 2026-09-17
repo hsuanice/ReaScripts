@@ -1,6 +1,6 @@
 --[[
 @description Conform List Browser
-@version 260917.1844
+@version 260917.2326
 @author hsuanice
 @about
   A REAPER script for browsing and editing EDL (Edit Decision List) data
@@ -51,6 +51,133 @@
   Required for AAF: aaftool in PATH (https://github.com/agfline/LibAAF)
 
 @changelog
+  v260917.2326
+  - Fix: main-table click-to-jump was wrongly conflating Src TC with Rec TC
+    (jumping Src TC In/Out to rec_tc_in/rec_tc_out instead of their own
+    values). Reaper's timeline spans 0 to infinity, so a Source TC value is
+    just as valid an absolute timeline position as a Rec TC value — this
+    matters for manual conform, where raw/source dailies are commonly
+    parked on a track at their own embedded timecode, separate from where
+    the edited/conformed material sits at Rec TC. Each of the four TC
+    columns (Src TC In, Src TC Out, Rec TC In, Rec TC Out) now jumps
+    independently to its own literal TC value.
+
+  v260917.2316
+  - Feature: click-to-jump extended to the main table (every loaded list,
+    including "Show as Table" recut groups — not Compare-specific). All
+    four TC columns — Src TC In, Src TC Out, Rec TC In, Rec TC Out — are
+    now clickable and move Reaper's edit cursor: Src TC In and Rec TC In
+    both jump to rec_tc_in, Src TC Out and Rec TC Out both jump to
+    rec_tc_out, since source-media timecode has no timeline position of
+    its own — all four are just different views of the same two moments
+    (an event's start and end). Selection/multi-select behavior on these
+    cells is unchanged; the jump happens alongside it, not instead of it.
+
+  v260917.2306
+  - Feature: click-to-jump — Compare events can now move Reaper's edit
+    cursor directly, mirroring Matchbox's old/new jump behavior:
+    • Graphical Compare view: clicking a block in the SRC (old) timeline
+      moves the edit cursor to that event's old Rec TC and scrolls the
+      arrange view to it; clicking a block in the DEST (new) timeline does
+      the same for its new Rec TC — each panel already carries its own
+      side's native position, so no extra lookup is needed.
+    • Recut Group Details table: the Old/New Rec TC In/Out cells are now
+      clickable (hover shows "Click to move edit cursor here") — jumps to
+      that specific value for that specific item, old or new independently.
+    • Uses SetEditCurPos(pos, moveview=true, seekplay=false) — scrolls the
+      arrange view into view without forcing playback to jump.
+
+  v260917.2259
+  - Change: the Apply confirmation dialog no longer lists every individual
+    plan entry (didn't scale once there are many recut events) — it's now
+    a compact summary: how many deleted events, the old TC range they
+    span, how many selected tracks, and a per-strategy breakdown (N via
+    Matched Item, N via Length Match, N via Range Clear [full/partial
+    split], N not found, N locked/skipped). Full per-item detail (track,
+    take name, action, strategy) still lives in the HTML report generated
+    right after Apply runs — the confirm step is a sanity check, the
+    report is the record.
+
+  v260917.2117
+  - Fix: Length Match was finding only the FIRST length-matching item and
+    stopping (so it silently duplicated Matched Item's result whenever
+    metadata happened to still be intact, and missed any other item that
+    coincidentally shared the same length). Confirmed via real testing: the
+    intent is that Length Match ignores metadata entirely and sweeps EVERY
+    item overlapping the target's old range whose own length matches —
+    including unrelated content deliberately cut in with the same
+    duration. Now does exactly that (excluding whatever Matched Item
+    already claimed for the same target, so it's never listed/deleted
+    twice); Matched Item itself stays a single precise match, as content
+    identity is meant to be unique.
+  - Fix: track references in the preview and HTML report now include the
+    1-based track number ("#5 XML - A3") — Reaper does not enforce unique
+    track names, so the name alone could refer to more than one track.
+  - Change: renamed the A/B/C resolution-strategy labels to descriptive
+    text throughout the UI and messages — "Matched Item", "Length Match",
+    "Range Clear" — no bare letters left anywhere user-facing.
+  - Feature: HTML Apply report. Every "Apply to Reaper" run now writes a
+    self-contained HTML report (Reaper's own render-completion page was
+    the model) to Resources/CLB_Apply_Reports/ and opens it in the default
+    browser — one row per target: track, take name, status (done/partial/
+    skipped/none), action, which strategy resolved it, old Rec TC In/Out,
+    and the target's label. Built from the exact same plan/locked_list
+    used to execute, so it's a precise record of what actually happened,
+    not a re-derived summary — for tracking/audit beyond the console log
+    and the timeline markers. Validated standalone: escaping (HTML
+    entities, CJK text intact), table structure, and the macOS `open`
+    launch all checked before shipping.
+
+  v260917.2057
+  - Feature: "Apply to Reaper" resolution strategies (A/B/C) are now
+    individually toggleable via a new "Modes..." button/popup next to
+    Apply to Reaper (persisted across sessions). Tried in fixed priority
+    A > C > B regardless of toggle order; disabling a mode skips it
+    entirely (skip all three and Apply refuses to run, with a message).
+    • Added Mode C — length match: an item overlapping the target's old
+      REC TC range whose own length matches the target's, with no
+      metadata required. Sits between A (exact content identity) and B
+      (identity-blind range clear) — useful when an item has drifted
+      slightly but wasn't trimmed, so it no longer sits at the exact old
+      position Mode B's overlap check would still catch, but retains its
+      original duration. Resolved via Mode C deletes the whole item
+      outright (no split), same as Mode A.
+    • The preview list now labels which mode (A/C/B) resolved each target.
+
+  v260917.2001
+  - Change: "Apply to Reaper" (Deleted) rebuilt around two proper strategies
+    instead of the previous exact position+length coincidence match (which
+    risked deleting an unrelated item that happened to occupy the same TC
+    range — confirmed by hands-on testing):
+    • Mode A (matched item): if any item on the selected track(s) carries
+      P_EXT:CLB_REEL + CLB_SRC_TC_IN/OUT metadata (written by Generate
+      Items / conform_matched_items) identifying it as this event's own
+      content, delete that specific item by identity — regardless of
+      exactly where it now sits.
+    • Mode B (range clear): when no item carries that identity (e.g.
+      content that's been edited/rendered since conform, so metadata no
+      longer applies — the common case recut is actually for), clear
+      whatever occupies the old REC TC range on the selected track(s)
+      instead, splitting items at the range edges as needed (partial
+      overlaps are trimmed, not deleted whole) rather than requiring an
+      exact boundary match.
+    • Each target tries Mode A first, falls back to Mode B automatically —
+      no manual mode selection needed.
+    • The preview (see below) now shows which mode resolved each target
+      and, for Mode B, whether the overlap was full or partial.
+  - Feature: "Apply to Reaper" (Deleted) now previews exactly what it found
+    before deleting anything, instead of just a count. Confirmed by hands-
+    on testing: matching is purely by position+length on the selected
+    track(s) — no name/content/metadata check — so it's possible (if rare)
+    for an unrelated item that happens to occupy the identical TC range to
+    match too. The confirmation dialog now lists each matched item's track
+    name and current take name (capped at 15, "...and N more" beyond that)
+    so a coincidental or unexpected match can be caught and cancelled
+    before committing, not discovered afterward via Undo. Locked items that
+    matched are also called out separately. The scan-then-confirm-then-
+    delete now reuses one match list throughout (previously re-scanned at
+    delete time), so what's previewed is exactly what gets deleted.
+
   v260917.1844
   - Fix: once a compare result existed, the graphical Compare view had no
     way back to Load Old/New/Session — "Close" only exited the whole
@@ -1106,7 +1233,7 @@ end
 ---------------------------------------------------------------------------
 local SCRIPT_NAME = "Conform List Browser"
 local EXT_NS = "hsuanice_ConformListBrowser"
-local VERSION = "260917.1844"
+local VERSION = "260917.2326"
 
 -- Column definitions (EDL Events table)
 local COL = {
@@ -1402,6 +1529,13 @@ local CLB = {
   viewing_compare_groups = false, -- true = main table (ROWS) is temporarily showing recut-group rows
   show_cmp_details = true,   -- inline Details panel visible while viewing_compare_groups (Hide/Details toggles it)
   cmp_group_details = nil,   -- rebuilt every frame by CMP.refresh_group_details(): {labels, items} — live, follows current row selection
+
+  -- Apply to Reaper: which resolution strategies are enabled, tried in
+  -- fixed priority order A > C > B regardless of toggle order (see
+  -- CMP.apply_to_reaper). All on by default.
+  apply_mode_a = true,  -- matched item: P_EXT:CLB_REEL + SRC_TC identity, regardless of current position
+  apply_mode_c = true,  -- length match: item overlapping the range whose own length matches the target's
+  apply_mode_b = true,  -- range clear: clear whatever occupies the range, split at edges, no identity check
   cmp_zoom = 50.0,
   cmp_scroll = 0.0,
   cmp_vscroll_old = 0.0,
@@ -2680,6 +2814,9 @@ local function save_prefs()
   reaper.SetExtState(EXT_NS, "tl_zoom", tostring(CLB.tl_zoom or 50.0), true)
   reaper.SetExtState(EXT_NS, "clip_name_format", CLB.clip_name_format or "", true)
   reaper.SetExtState(EXT_NS, "cjk_font_path", CLB.cjk_font_path or "", true)
+  reaper.SetExtState(EXT_NS, "apply_mode_a", CLB.apply_mode_a and "1" or "0", true)
+  reaper.SetExtState(EXT_NS, "apply_mode_c", CLB.apply_mode_c and "1" or "0", true)
+  reaper.SetExtState(EXT_NS, "apply_mode_b", CLB.apply_mode_b and "1" or "0", true)
 end
 
 local function load_prefs()
@@ -2706,6 +2843,9 @@ local function load_prefs()
   CLB.tl_zoom = tonumber(get("tl_zoom", "50.0")) or 50.0
   CLB.clip_name_format = get("clip_name_format", "")
   CLB.cjk_font_path = get("cjk_font_path", "")
+  CLB.apply_mode_a = get("apply_mode_a", "1") == "1"
+  CLB.apply_mode_c = get("apply_mode_c", "1") == "1"
+  CLB.apply_mode_b = get("apply_mode_b", "1") == "1"
 
   -- EDL column order
   local order_str = get("edl_col_order", "")
@@ -7436,6 +7576,12 @@ local function draw_table(table_height)
             end
           end
 
+          -- Hint that TC columns also jump Reaper's edit cursor on click
+          if (col == COL.SRC_IN or col == COL.SRC_OUT or col == COL.REC_IN or col == COL.REC_OUT)
+             and reaper.ImGui_IsItemHovered(ctx) then
+            reaper.ImGui_SetTooltip(ctx, "Click to move edit cursor here")
+          end
+
           -- Click handling
           if reaper.ImGui_IsItemClicked(ctx, 0) then
             local shift, cmd = _mods()
@@ -7450,6 +7596,25 @@ local function draw_table(table_height)
               sel_set_single(row.__guid, col)
               CLB.tl_center_on_guid = row.__guid
             end
+
+            -- Any of the 4 TC columns also moves Reaper's edit cursor to
+            -- that column's own literal TC value, treated as an absolute
+            -- position on Reaper's timeline (0 to infinity, so a Source TC
+            -- is just as valid a position as a Rec TC). This is exactly
+            -- what manual conform relies on: raw dailies are commonly
+            -- spotted at their own embedded/source timecode, so jumping to
+            -- Src TC In/Out finds the correct source content directly,
+            -- which is then moved back to the Rec TC position.
+            local tc_col_field = {
+              [COL.SRC_IN]  = "src_tc_in",  [COL.SRC_OUT] = "src_tc_out",
+              [COL.REC_IN]  = "rec_tc_in",  [COL.REC_OUT] = "rec_tc_out",
+            }
+            local tc_field = tc_col_field[col]
+            if tc_field then
+              local sec = EDL.tc_to_seconds(row[tc_field] or "00:00:00:00", CLB.fps, CLB.is_drop)
+              reaper.SetEditCurPos(sec, true, false)
+            end
+
             -- Auto-filter audio panel to matched file(s) for this row
             do
               local new_filter = nil
@@ -7606,6 +7771,31 @@ local function draw_edl_panel_header()
       reaper.ImGui_Text(ctx, "operate on in Reaper, then click this to apply them.")
       reaper.ImGui_Text(ctx, "Only 'Deleted' groups are supported so far.")
       reaper.ImGui_EndTooltip(ctx)
+    end
+    reaper.ImGui_SameLine(ctx)
+    if reaper.ImGui_SmallButton(ctx, "Modes...##cmp_apply_modes") then
+      reaper.ImGui_OpenPopup(ctx, "Apply Resolution Modes##cmp_apply_modes_popup")
+    end
+    if reaper.ImGui_IsItemHovered(ctx) then
+      reaper.ImGui_SetTooltip(ctx, "Choose which strategies Apply may use to find items\n(tried in order: Matched Item > Length Match > Range Clear;\na disabled strategy is skipped).")
+    end
+    if reaper.ImGui_BeginPopup(ctx, "Apply Resolution Modes##cmp_apply_modes_popup") then
+      reaper.ImGui_Text(ctx, "Tried in this order; untoggle to skip a strategy:")
+      reaper.ImGui_Separator(ctx)
+      local chg_a, new_a = reaper.ImGui_Checkbox(ctx, "Matched Item (metadata identity)", CLB.apply_mode_a)
+      if chg_a then CLB.apply_mode_a = new_a; save_prefs() end
+      reaper.ImGui_TextDisabled(ctx, "    P_EXT:CLB_REEL + Source TC on the item — exact content\n    identity, wherever it currently sits.")
+      local chg_c, new_c = reaper.ImGui_Checkbox(ctx, "Length Match (within range)", CLB.apply_mode_c)
+      if chg_c then CLB.apply_mode_c = new_c; save_prefs() end
+      reaper.ImGui_TextDisabled(ctx, "    An item overlapping the old range whose own length\n    matches the target's — no metadata needed.")
+      local chg_b, new_b = reaper.ImGui_Checkbox(ctx, "Range Clear", CLB.apply_mode_b)
+      if chg_b then CLB.apply_mode_b = new_b; save_prefs() end
+      reaper.ImGui_TextDisabled(ctx, "    Clear whatever occupies the old range regardless of\n    item boundaries — splits at the range edges.")
+      reaper.ImGui_Separator(ctx)
+      if reaper.ImGui_Button(ctx, "Close", scale(70), scale(22)) then
+        reaper.ImGui_CloseCurrentPopup(ctx)
+      end
+      reaper.ImGui_EndPopup(ctx)
     end
     reaper.ImGui_SameLine(ctx)
     local details_lbl = CLB.show_cmp_details and "Hide Details" or "Show Details"
@@ -9353,7 +9543,17 @@ function CMP.draw_side(title, events, track_order, track_index, tmin, tmax, pane
     end
     reaper.ImGui_Text(ctx, "Rec In:  " .. EDL.seconds_to_tc(hovered.rec_in, fps_val, is_drop_val))
     reaper.ImGui_Text(ctx, "Rec Out: " .. EDL.seconds_to_tc(hovered.rec_out, fps_val, is_drop_val))
+    reaper.ImGui_Text(ctx, "(click to move edit cursor here)")
     reaper.ImGui_EndTooltip(ctx)
+  end
+
+  -- Click a block → move Reaper's edit cursor to its Rec TC In and scroll
+  -- the arrange view to it (SRC blocks use the old TC, DEST blocks the
+  -- new TC — each panel already carries its own side's native position),
+  -- so old/new material can be checked directly in the Reaper session
+  -- without leaving Compare (mirrors Matchbox's old/new jump behavior).
+  if is_hovered and hovered and reaper.ImGui_IsMouseClicked(ctx, 0) then
+    reaper.SetEditCurPos(hovered.rec_in, true, false)
   end
 
   -- Scroll wheel: plain = vertical, alt = horizontal zoom (mirrors draw_timeline_panel)
@@ -9655,6 +9855,70 @@ function CMP.load_session_dialog()
   CMP.load_session(filepath)
 end
 
+local function _html_escape(s)
+  s = tostring(s or "")
+  s = s:gsub("&", "&amp;"):gsub("<", "&lt;"):gsub(">", "&gt;"):gsub('"', "&quot;")
+  return s
+end
+
+--- Generate a self-contained HTML report of exactly what an Apply run did
+--- (track, item, action, which strategy resolved it) and open it in the
+--- default browser — mirrors Reaper's own render-completion result page,
+--- so there's a reviewable/archivable record beyond the in-session console
+--- log and the timeline markers.
+--- @param title string           e.g. "Apply Deleted"
+--- @param summary_line string    one-line run summary
+--- @param rows table             { { track_name, take_name, action, mode, old_in_tc, old_out_tc, target_label, status } }
+---   status: "done" | "partial" | "skipped" | "none" — drives the row's color band
+function CMP.write_apply_report(title, summary_line, rows)
+  local report_dir = reaper.GetResourcePath() .. "/CLB_Apply_Reports"
+  reaper.RecursiveCreateDirectory(report_dir, 0)
+  local filepath = string.format("%s/CLB_Apply_%s.html", report_dir, os.date("%Y%m%d_%H%M%S"))
+
+  local f = io.open(filepath, "w")
+  if not f then
+    console_msg("Apply report: could not write to " .. filepath)
+    return nil
+  end
+
+  f:write("<!DOCTYPE html>\n<html><head><meta charset=\"utf-8\">\n")
+  f:write("<title>" .. _html_escape(title) .. "</title>\n<style>\n")
+  f:write([[
+    body { font-family: -apple-system, Helvetica, Arial, sans-serif; background:#1e1e1e; color:#ddd; margin:24px; }
+    h1 { font-size:18px; margin-bottom:4px; }
+    .meta { color:#999; font-size:12px; margin-bottom:16px; }
+    .summary { background:#2a2a2a; border-left:3px solid #5599cc; padding:8px 12px; margin-bottom:20px; font-size:13px; }
+    table { border-collapse:collapse; width:100%; font-size:12px; }
+    th, td { text-align:left; padding:6px 10px; border-bottom:1px solid #333; }
+    th { background:#2a2a2a; color:#aaa; font-weight:600; position:sticky; top:0; }
+    tr:hover { background:#262626; }
+    .badge { display:inline-block; padding:1px 8px; border-radius:3px; font-size:11px; font-weight:600; }
+    .status-done    { background:#2d5c2d; color:#a6e0a6; }
+    .status-partial { background:#6b5a1e; color:#f0d38a; }
+    .status-skipped { background:#444; color:#ccc; }
+    .status-none    { background:#5c2d2d; color:#e0a6a6; }
+    .mono { font-family: ui-monospace, Menlo, monospace; }
+  ]])
+  f:write("</style></head><body>\n")
+  f:write("<h1>" .. _html_escape(title) .. "</h1>\n")
+  f:write("<div class=\"meta\">" .. os.date("%Y-%m-%d %H:%M:%S") .. "</div>\n")
+  f:write("<div class=\"summary\">" .. _html_escape(summary_line) .. "</div>\n")
+  f:write("<table>\n<tr><th>Track</th><th>Take Name</th><th>Status</th><th>Action</th><th>Strategy</th><th>Old Rec TC In</th><th>Old Rec TC Out</th><th>Target</th></tr>\n")
+  for _, r in ipairs(rows) do
+    f:write(string.format(
+      "<tr><td>%s</td><td>%s</td><td><span class=\"badge status-%s\">%s</span></td><td>%s</td><td>%s</td><td class=\"mono\">%s</td><td class=\"mono\">%s</td><td>%s</td></tr>\n",
+      _html_escape(r.track_name or ""), _html_escape(r.take_name or ""), r.status or "done",
+      _html_escape((r.status or "done"):upper()), _html_escape(r.action or ""), _html_escape(r.mode or ""),
+      _html_escape(r.old_in_tc or ""), _html_escape(r.old_out_tc or ""), _html_escape(r.target_label or "")))
+  end
+  f:write("</table>\n</body></html>\n")
+  f:close()
+
+  os.execute(string.format('open %s', ("'" .. filepath:gsub("'", "'\\''") .. "'")))
+  console_msg("Apply report saved: " .. filepath)
+  return filepath
+end
+
 --- Apply the recut groups behind the currently-selected table row(s) — see
 --- "Show as Table" — to the user's REAPER-selected track(s). First
 --- increment: "Deleted" groups only (find the item positioned at the old
@@ -9721,18 +9985,21 @@ function CMP.apply_to_reaper()
     return
   end
 
-  local targets = {}  -- { rec_in, rec_out (seconds), label }
+  local targets = {}  -- { rec_in, rec_out, src_in, src_out (seconds), reel, label }
   for _, g in ipairs(deleted_groups) do
     for _, c in ipairs(g.items) do
       if c.old then
         targets[#targets + 1] = {
           rec_in = c.old.rec_in, rec_out = c.old.rec_out,
+          src_in = c.old.src_in, src_out = c.old.src_out,
+          reel = c.old.reel or "",
           label = (c.old.clip_name ~= "" and c.old.clip_name) or c.old.reel or "",
         }
       end
     end
   end
   if #targets == 0 then return end
+  table.sort(targets, function(a, b) return a.rec_in < b.rec_in end)
 
   local skip_msg = ""
   do
@@ -9743,42 +10010,225 @@ function CMP.apply_to_reaper()
     end
   end
 
-  local confirm = reaper.ShowMessageBox(
-    string.format(
-      "Search %d selected track(s) for %d deleted item(s) (matched by position)\n" ..
-      "and remove them. A red marker is left at each removed position.%s\n\n" ..
-      "This will be added to the Undo history. Continue?",
-      #sel_tracks, #targets, skip_msg),
-    SCRIPT_NAME, 4)  -- Yes/No
-  if confirm ~= 6 then return end
-
   local fps     = (CLB.compare_result and CLB.compare_result.fps) or CLB.fps
-  local TOL     = 1.5 / fps  -- ~1.5 frame position-match tolerance
-  local RED     = reaper.ColorToNative(200, 60, 60) | 0x1000000
+  local is_drop = (CLB.compare_result and CLB.compare_result.is_drop) or false
+  local TOL     = 1.5 / fps  -- ~1.5 frame tolerance
 
-  reaper.Undo_BeginBlock()
-  reaper.PreventUIRefresh(1)
+  if not (CLB.apply_mode_a or CLB.apply_mode_c or CLB.apply_mode_b) then
+    reaper.ShowMessageBox("All resolution strategies (Matched Item / Length Match / Range Clear) are disabled — enable at least one in 'Modes...'.", SCRIPT_NAME, 0)
+    return
+  end
 
-  local removed_count, locked_count = 0, 0
-  for _, t in ipairs(targets) do
+  -- Reaper does not enforce unique track names (confirmed by real use —
+  -- two tracks both named e.g. "XML - A3" is entirely possible), so every
+  -- track reference in the preview/report includes its 1-based track
+  -- number alongside the name to stay unambiguous.
+  local function track_label(track)
+    local _, name = reaper.GetTrackName(track)
+    local num = reaper.GetMediaTrackInfo_Value(track, "IP_TRACKNUMBER")
+    return string.format("#%d %s", num, name)
+  end
+
+  local function item_take_name(item)
+    local take = reaper.GetActiveTake(item)
+    return take and select(2, reaper.GetSetMediaItemTakeInfo_String(take, "P_NAME", "", false)) or "(no take)"
+  end
+
+  --- Mode A: does any item on the selected track(s) carry P_EXT:CLB_REEL /
+  --- CLB_SRC_TC_IN/OUT metadata (written by Generate Items / conform_
+  --- matched_items) identifying it as THIS target's own content, regardless
+  --- of where it currently sits? Content identity, not position coincidence.
+  --- Single match by design — metadata identity is meant to be unique.
+  local function find_metadata_match(target)
+    if not CLB.apply_mode_a then return nil, nil end
     for _, track in ipairs(sel_tracks) do
       local n_items = reaper.CountTrackMediaItems(track)
-      for i = n_items - 1, 0, -1 do
+      for i = 0, n_items - 1 do
         local item = reaper.GetTrackMediaItem(track, i)
-        local pos  = reaper.GetMediaItemInfo_Value(item, "D_POSITION")
-        local len  = reaper.GetMediaItemInfo_Value(item, "D_LENGTH")
-        if math.abs(pos - t.rec_in) <= TOL and math.abs((pos + len) - t.rec_out) <= TOL then
-          local lock_state = reaper.GetMediaItemInfo_Value(item, "C_LOCK")
-          if (lock_state & 1) == 1 then
-            -- Respect a locked item — don't force it. Reported below.
-            locked_count = locked_count + 1
-          else
-            reaper.DeleteTrackMediaItem(track, item)
-            removed_count = removed_count + 1
+        local take = reaper.GetActiveTake(item)
+        if take then
+          local _, reel = reaper.GetSetMediaItemTakeInfo_String(take, "P_EXT:CLB_REEL", "", false)
+          if reel ~= "" and reel == target.reel then
+            local _, src_in_tc  = reaper.GetSetMediaItemTakeInfo_String(take, "P_EXT:CLB_SRC_TC_IN", "", false)
+            local _, src_out_tc = reaper.GetSetMediaItemTakeInfo_String(take, "P_EXT:CLB_SRC_TC_OUT", "", false)
+            if src_in_tc ~= "" and src_out_tc ~= "" then
+              local ok1, src_in_sec  = pcall(EDL.tc_to_seconds, src_in_tc,  fps, is_drop)
+              local ok2, src_out_sec = pcall(EDL.tc_to_seconds, src_out_tc, fps, is_drop)
+              if ok1 and ok2 and math.abs(src_in_sec - target.src_in) <= TOL
+                 and math.abs(src_out_sec - target.src_out) <= TOL then
+                return track, item
+              end
+            end
           end
         end
       end
     end
+    return nil, nil
+  end
+
+  --- Mode C: EVERY item overlapping the target's old REC TC range whose
+  --- own length matches the target's length — no metadata needed. Unlike
+  --- Mode A, this deliberately sweeps *all* qualifying items, not just the
+  --- first: the point of ignoring metadata is to also catch content that
+  --- was cut in from elsewhere but happens to share the same duration
+  --- (confirmed wanted behavior via real testing — a single-match version
+  --- would just duplicate Mode A's result whenever metadata happens to
+  --- still be intact, defeating the purpose). `exclude_item` is Mode A's
+  --- own match for this target, if any, so it isn't listed/deleted twice.
+  local function find_all_length_matches(target, exclude_item)
+    local out = {}
+    if not CLB.apply_mode_c then return out end
+    local target_len = target.rec_out - target.rec_in
+    for _, track in ipairs(sel_tracks) do
+      local n_items = reaper.CountTrackMediaItems(track)
+      for i = 0, n_items - 1 do
+        local item = reaper.GetTrackMediaItem(track, i)
+        if item ~= exclude_item then
+          local pos  = reaper.GetMediaItemInfo_Value(item, "D_POSITION")
+          local len  = reaper.GetMediaItemInfo_Value(item, "D_LENGTH")
+          local item_end = pos + len
+          if item_end > target.rec_in and pos < target.rec_out and math.abs(len - target_len) <= TOL then
+            out[#out + 1] = { track = track, item = item }
+          end
+        end
+      end
+    end
+    return out
+  end
+
+  -- Dry-run scan: for each target, Mode A (single precise match) and Mode C
+  -- (sweep of every length-matching item) both contribute independently
+  -- when enabled; Mode B (range clear) only runs as a fallback when
+  -- neither A nor C found anything for that target. Preview exactly what
+  -- was found before touching anything, so a coincidence or surprise can
+  -- be caught here instead of discovered afterward via Undo.
+  local plan, locked_list = {}, {}
+  for _, t in ipairs(targets) do
+    local resolved = false
+    local a_item = nil
+
+    local mtrack, mitem = find_metadata_match(t)
+    if mtrack then
+      resolved = true
+      a_item = mitem
+      local locked = (reaper.GetMediaItemInfo_Value(mitem, "C_LOCK") & 1) == 1
+      local entry = { mode = "A", track = mtrack, item = mitem, track_name = track_label(mtrack),
+                       take_name = item_take_name(mitem), target = t }
+      if locked then locked_list[#locked_list + 1] = entry else plan[#plan + 1] = entry end
+    end
+
+    for _, hit in ipairs(find_all_length_matches(t, a_item)) do
+      resolved = true
+      local locked = (reaper.GetMediaItemInfo_Value(hit.item, "C_LOCK") & 1) == 1
+      local entry = { mode = "C", track = hit.track, item = hit.item, track_name = track_label(hit.track),
+                       take_name = item_take_name(hit.item), target = t }
+      if locked then locked_list[#locked_list + 1] = entry else plan[#plan + 1] = entry end
+    end
+
+    if not resolved and CLB.apply_mode_b then
+      for _, track in ipairs(sel_tracks) do
+        local n_items = reaper.CountTrackMediaItems(track)
+        for i = 0, n_items - 1 do
+          local item = reaper.GetTrackMediaItem(track, i)
+          local pos  = reaper.GetMediaItemInfo_Value(item, "D_POSITION")
+          local len  = reaper.GetMediaItemInfo_Value(item, "D_LENGTH")
+          local item_end = pos + len
+          if item_end > t.rec_in and pos < t.rec_out then
+            resolved = true
+            local locked = (reaper.GetMediaItemInfo_Value(item, "C_LOCK") & 1) == 1
+            local full = pos >= t.rec_in - TOL and item_end <= t.rec_out + TOL
+            local entry = { mode = "B", track = track, item = item, pos = pos, item_end = item_end,
+                             track_name = track_label(track), take_name = item_take_name(item),
+                             target = t, full = full }
+            if locked then locked_list[#locked_list + 1] = entry else plan[#plan + 1] = entry end
+          end
+        end
+      end
+    end
+
+    if not resolved then
+      plan[#plan + 1] = { mode = "none", target = t }
+    end
+  end
+
+  -- A per-item listing here doesn't scale once there are many recut
+  -- events — keep the confirm dialog to a compact summary (range, track
+  -- count, item counts per strategy) and leave the full per-item detail
+  -- to the HTML report generated after this runs (see CMP.write_apply_report).
+  local count_a, count_c, count_b_full, count_b_partial, count_none = 0, 0, 0, 0, 0
+  for _, m in ipairs(plan) do
+    if m.mode == "A" then count_a = count_a + 1
+    elseif m.mode == "C" then count_c = count_c + 1
+    elseif m.mode == "B" then
+      if m.full then count_b_full = count_b_full + 1 else count_b_partial = count_b_partial + 1 end
+    else count_none = count_none + 1 end
+  end
+
+  local range_min, range_max = targets[1].rec_in, targets[1].rec_out
+  for _, t in ipairs(targets) do
+    if t.rec_in  < range_min then range_min = t.rec_in  end
+    if t.rec_out > range_max then range_max = t.rec_out end
+  end
+
+  local summary_parts = {}
+  if count_a > 0 then summary_parts[#summary_parts + 1] = count_a .. " via Matched Item" end
+  if count_c > 0 then summary_parts[#summary_parts + 1] = count_c .. " via Length Match" end
+  if count_b_full + count_b_partial > 0 then
+    summary_parts[#summary_parts + 1] = string.format("%d via Range Clear (%d full, %d partial)",
+      count_b_full + count_b_partial, count_b_full, count_b_partial)
+  end
+  if count_none > 0 then summary_parts[#summary_parts + 1] = count_none .. " not found" end
+  if #locked_list > 0 then summary_parts[#summary_parts + 1] = #locked_list .. " locked (skipped)" end
+
+  local confirm = reaper.ShowMessageBox(
+    string.format(
+      "%d deleted event(s) spanning %s – %s, across %d selected track(s).\n\n" ..
+      "%s%s\n\n" ..
+      "A red marker is left at each removed position; a detailed HTML " ..
+      "report opens after this runs. This will be added to the Undo " ..
+      "history. Continue?",
+      #targets, EDL.seconds_to_tc(range_min, fps, is_drop), EDL.seconds_to_tc(range_max, fps, is_drop),
+      #sel_tracks, table.concat(summary_parts, ", "), skip_msg),
+    SCRIPT_NAME, 4)  -- Yes/No
+  if confirm ~= 6 then return end
+
+  local RED = reaper.ColorToNative(200, 60, 60) | 0x1000000
+
+  --- Remove the portion of [item: pos..item_end] that overlaps
+  --- [range_start..range_end], splitting at the range edges as needed so
+  --- content outside the range is left untouched (Mode B).
+  local function clear_item_range(track, item, pos, item_end, range_start, range_end)
+    if pos >= range_start - TOL and item_end <= range_end + TOL then
+      reaper.DeleteTrackMediaItem(track, item)
+    elseif pos < range_start and item_end > range_end then
+      reaper.SplitMediaItem(item, range_end)
+      local middle = reaper.SplitMediaItem(item, range_start)
+      if middle then reaper.DeleteTrackMediaItem(track, middle) end
+    elseif pos < range_start then
+      local right = reaper.SplitMediaItem(item, range_start)
+      if right then reaper.DeleteTrackMediaItem(track, right) end
+    else
+      -- pos within range, extends past range_end: split there (keeps the
+      -- right remainder), then delete the now-truncated original piece.
+      reaper.SplitMediaItem(item, range_end)
+      reaper.DeleteTrackMediaItem(track, item)
+    end
+  end
+
+  reaper.Undo_BeginBlock()
+  reaper.PreventUIRefresh(1)
+
+  local mode_a_count, mode_c_count, mode_b_count = 0, 0, 0
+  for _, m in ipairs(plan) do
+    if m.mode == "A" or m.mode == "C" then
+      reaper.DeleteTrackMediaItem(m.track, m.item)
+      if m.mode == "A" then mode_a_count = mode_a_count + 1 else mode_c_count = mode_c_count + 1 end
+    elseif m.mode == "B" then
+      clear_item_range(m.track, m.item, m.pos, m.item_end, m.target.rec_in, m.target.rec_out)
+      mode_b_count = mode_b_count + 1
+    end
+  end
+  for _, t in ipairs(targets) do
     reaper.AddProjectMarker2(0, false, t.rec_in, 0, "Deleted: " .. t.label, -1, RED)
   end
 
@@ -9786,17 +10236,53 @@ function CMP.apply_to_reaper()
   reaper.Undo_EndBlock("CLB Compare: Apply Deleted recut group(s)", -1)
   reaper.UpdateArrange()
 
-  console_msg(string.format(
-    "Apply: removed %d item(s) for %d Deleted group(s) across %d selected track(s)",
-    removed_count, #deleted_groups, #sel_tracks))
-  if locked_count > 0 then
-    console_msg(string.format("  Note: %d item(s) were locked and left untouched.", locked_count))
+  local summary_line = string.format(
+    "Apply: %d Deleted group(s) across %d selected track(s) — %d Matched Item, %d Length Match, %d Range Clear",
+    #deleted_groups, #sel_tracks, mode_a_count, mode_c_count, mode_b_count)
+  console_msg(summary_line)
+  if #locked_list > 0 then
+    console_msg(string.format("  Note: %d item(s) were locked and left untouched.", #locked_list))
   end
-  if removed_count + locked_count < #targets then
-    console_msg(string.format(
-      "  Note: %d target(s) had no matching item on the selected track(s) (position match, ±1.5 frame).",
-      #targets - removed_count - locked_count))
+  local none_count = 0
+  for _, m in ipairs(plan) do if m.mode == "none" then none_count = none_count + 1 end end
+  if none_count > 0 then
+    console_msg(string.format("  Note: %d target(s) had nothing on the selected track(s) to remove.", none_count))
   end
+
+  -- Build the HTML report from the exact same plan/locked_list used to
+  -- execute — track/item/action/strategy for every target, not just a
+  -- console summary, so what happened is reviewable/archivable afterward.
+  local mode_names = { A = "Matched Item", C = "Length Match", B = "Range Clear" }
+  local report_rows = {}
+  for _, m in ipairs(plan) do
+    local row = {
+      track_name = m.track_name, take_name = m.take_name,
+      old_in_tc = EDL.seconds_to_tc(m.target.rec_in, fps, is_drop),
+      old_out_tc = EDL.seconds_to_tc(m.target.rec_out, fps, is_drop),
+      target_label = m.target.label,
+    }
+    if m.mode == "A" or m.mode == "C" then
+      row.status, row.action, row.mode = "done", "Deleted", mode_names[m.mode]
+    elseif m.mode == "B" then
+      row.status = m.full and "done" or "partial"
+      row.action = m.full and "Deleted (full overlap)" or "Trimmed (partial overlap)"
+      row.mode = mode_names.B
+    else
+      row.status, row.action, row.mode, row.track_name, row.take_name = "none", "Nothing found", "—", "—", "—"
+    end
+    report_rows[#report_rows + 1] = row
+  end
+  for _, m in ipairs(locked_list) do
+    report_rows[#report_rows + 1] = {
+      track_name = m.track_name, take_name = m.take_name, status = "skipped",
+      action = "Skipped (item locked)", mode = mode_names[m.mode] or "—",
+      old_in_tc = EDL.seconds_to_tc(m.target.rec_in, fps, is_drop),
+      old_out_tc = EDL.seconds_to_tc(m.target.rec_out, fps, is_drop),
+      target_label = m.target.label,
+    }
+  end
+
+  CMP.write_apply_report("CLB Apply — Deleted", summary_line, report_rows)
 end
 
 --- Rebuild the inline Group Details panel's content from whichever recut-
@@ -9868,15 +10354,33 @@ function CMP.draw_group_details_table(table_height)
     reaper.ImGui_TableSetupColumn(ctx, "Clip Name")
     reaper.ImGui_TableHeadersRow(ctx)
 
-    for _, c in ipairs(d.items) do
+    -- Old/New Rec TC In/Out cells are clickable — jump Reaper's edit
+    -- cursor there and scroll it into view, same as clicking a block in
+    -- the graphical SRC/DEST timeline (see CMP.draw_side), so a specific
+    -- item's old or new position can be checked directly without leaving
+    -- this table (mirrors Matchbox's old/new jump behavior).
+    local function tc_cell(sec, row_id)
+      if not sec then
+        reaper.ImGui_Text(ctx, "-")
+        return
+      end
+      if reaper.ImGui_Selectable(ctx, tc(sec) .. "##" .. row_id, false) then
+        reaper.SetEditCurPos(sec, true, false)
+      end
+      if reaper.ImGui_IsItemHovered(ctx) then
+        reaper.ImGui_SetTooltip(ctx, "Click to move edit cursor here")
+      end
+    end
+
+    for idx, c in ipairs(d.items) do
       local rep = c.new or c.old
       reaper.ImGui_TableNextRow(ctx)
       reaper.ImGui_TableNextColumn(ctx); reaper.ImGui_Text(ctx, rep.reel or "")
       reaper.ImGui_TableNextColumn(ctx); reaper.ImGui_Text(ctx, table.concat(rep.tracks or {}, ","))
-      reaper.ImGui_TableNextColumn(ctx); reaper.ImGui_Text(ctx, c.old and tc(c.old.rec_in) or "-")
-      reaper.ImGui_TableNextColumn(ctx); reaper.ImGui_Text(ctx, c.old and tc(c.old.rec_out) or "-")
-      reaper.ImGui_TableNextColumn(ctx); reaper.ImGui_Text(ctx, c.new and tc(c.new.rec_in) or "-")
-      reaper.ImGui_TableNextColumn(ctx); reaper.ImGui_Text(ctx, c.new and tc(c.new.rec_out) or "-")
+      reaper.ImGui_TableNextColumn(ctx); tc_cell(c.old and c.old.rec_in,  "oi" .. idx)
+      reaper.ImGui_TableNextColumn(ctx); tc_cell(c.old and c.old.rec_out, "oo" .. idx)
+      reaper.ImGui_TableNextColumn(ctx); tc_cell(c.new and c.new.rec_in,  "ni" .. idx)
+      reaper.ImGui_TableNextColumn(ctx); tc_cell(c.new and c.new.rec_out, "no" .. idx)
       reaper.ImGui_TableNextColumn(ctx); reaper.ImGui_Text(ctx, c.old and tc(c.old.src_in) or "-")
       reaper.ImGui_TableNextColumn(ctx); reaper.ImGui_Text(ctx, c.new and tc(c.new.src_in) or "-")
       reaper.ImGui_TableNextColumn(ctx); reaper.ImGui_Text(ctx, rep.clip_name or "")
