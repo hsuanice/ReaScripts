@@ -1,6 +1,6 @@
 --[[
 @description Conform List Browser
-@version 260917.2326
+@version 260917.2349
 @author hsuanice
 @about
   A REAPER script for browsing and editing EDL (Edit Decision List) data
@@ -51,6 +51,39 @@
   Required for AAF: aaftool in PATH (https://github.com/agfline/LibAAF)
 
 @changelog
+  v260917.2349
+  - Change: TC columns are no longer user-resizable, in every table/mode
+    that shows them — main event list (Src/Rec TC In/Out), Audio list (Src
+    TC), and Recut Group Details (all 8 Old/New Src/Rec In/Out columns).
+    Their content is fixed-format "HH:MM:SS:FF" text, so a fixed width made
+    more sense than letting them be dragged. Width source per table, for
+    hand-tuning: main event list → DEFAULT_COL_WIDTH (top of file, indices
+    6-9 = Src In/Out, Rec In/Out); Audio list → AUDIO_COL_WIDTH (index 2 =
+    Src TC); Recut Group Details → the local TC_W in
+    CMP.draw_group_details_table.
+
+  v260917.2344
+  - Fix: Recut Group Details table columns were cramped (equal stretch
+    across all 11 columns squeezed the fixed-format TC text). TC columns
+    (Src/Rec In/Out, old and new) now use a fixed width, matching the main
+    event-list table's Fit-Widths treatment of TC columns; Reel, Tracks and
+    Clip Name stretch to fill the remaining space instead.
+  - Change: column order now puts Src TC (Old/New In/Out) left of Rec TC
+    (Old/New In/Out), matching the main table's existing Src-before-Rec
+    order and the manual-conform workflow (jump to Src TC first to find the
+    source content, then to Rec TC to place it).
+
+  v260917.2333
+  - Feature: Recut Group Details table now supports all four TC columns for
+    click-to-jump, matching the main table. Added "Old Src Out" and "New
+    Src Out" columns (previously only Src In was shown, and as plain text),
+    and converted Old/New Src In into clickable cells alongside them. Every
+    Rec/Src In/Out cell now jumps Reaper's edit cursor to its own literal
+    TC value — same rationale as the main-table fix in v260917.2326: a
+    Source TC is a real, independent absolute Reaper timeline position,
+    used for manual conform (jump to Src TC to grab the right source
+    content, then move it to Rec TC).
+
   v260917.2326
   - Fix: main-table click-to-jump was wrongly conflating Src TC with Rec TC
     (jumping Src TC In/Out to rec_tc_in/rec_tc_out instead of their own
@@ -1233,7 +1266,7 @@ end
 ---------------------------------------------------------------------------
 local SCRIPT_NAME = "Conform List Browser"
 local EXT_NS = "hsuanice_ConformListBrowser"
-local VERSION = "260917.2326"
+local VERSION = "260917.2349"
 
 -- Column definitions (EDL Events table)
 local COL = {
@@ -1300,7 +1333,7 @@ local AUDIO_HEADER_LABELS = {
 
 local AUDIO_COL_WIDTH = {
   [1]  = 200,  -- Filename
-  [2]  = 65,  -- Src TC
+  [2]  = 75,  -- Src TC
   [3]  = 50,   -- Scene
   [4]  = 35,   -- Take
   [5]  = 80,   -- Tape/Roll
@@ -1388,6 +1421,17 @@ local FIT_FIXED_COLS = {
 }
 -- Stretchy: CLIP_NAME (11), SRC_FILE (12), NOTES (13), MATCHED_PATH (15), GROUP (16)
 
+-- TC columns are fixed-format "HH:MM:SS:FF" text — never user-resizable, in
+-- any table/mode that shows them (main event list, Audio list, Recut Group
+-- Details). Width still comes from DEFAULT_COL_WIDTH (edit that table to
+-- change it).
+local TC_COLS = {
+  [COL.SRC_IN]  = true,
+  [COL.SRC_OUT] = true,
+  [COL.REC_IN]  = true,
+  [COL.REC_OUT] = true,
+}
+
 -- Audio columns with short/fixed-length content: kept at AUDIO_DEFAULT_COL_WIDTH during Fit Widths.
 local AUDIO_FIT_FIXED_COLS = {
   [AUDIO_COL.SRC_TC]     = true,  -- timecode HH:MM:SS:FF
@@ -1398,6 +1442,11 @@ local AUDIO_FIT_FIXED_COLS = {
   [AUDIO_COL.SPEED]      = true,
 }
 -- Stretchy: FILENAME, SCENE, TAKE, TAPE, FOLDER, PROJECT, ORIG_FILENAME, TRACK_NAMES, DESCRIPTION
+
+-- Audio list's TC column — never user-resizable (see TC_COLS above).
+local AUDIO_TC_COLS = {
+  [AUDIO_COL.SRC_TC] = true,
+}
 
 -- Editable columns (all except Event# and Duration)
 local EDITABLE_COLS = {
@@ -7397,8 +7446,11 @@ local function draw_table(table_height)
   -- Setup columns (only visible ones, in display order)
   for _, col in ipairs(visible_cols) do
     local w = scale(COL_WIDTH[col] or DEFAULT_COL_WIDTH[col] or 80)
-    reaper.ImGui_TableSetupColumn(ctx, HEADER_LABELS[col] or "",
-      reaper.ImGui_TableColumnFlags_WidthFixed(), w)
+    local col_flags = reaper.ImGui_TableColumnFlags_WidthFixed()
+    if TC_COLS[col] then
+      col_flags = col_flags | reaper.ImGui_TableColumnFlags_NoResize()
+    end
+    reaper.ImGui_TableSetupColumn(ctx, HEADER_LABELS[col] or "", col_flags, w)
   end
 
   -- Headers (using TableHeader for drag-reorder support + sort indicators)
@@ -8611,8 +8663,11 @@ local function draw_audio_table(table_height)
   -- Setup columns (only visible ones, in display order)
   for _, col in ipairs(visible_cols) do
     local w = scale(AUDIO_COL_WIDTH[col] or 80)
-    reaper.ImGui_TableSetupColumn(ctx, AUDIO_HEADER_LABELS[col] or "",
-      reaper.ImGui_TableColumnFlags_WidthFixed(), w)
+    local col_flags = reaper.ImGui_TableColumnFlags_WidthFixed()
+    if AUDIO_TC_COLS[col] then
+      col_flags = col_flags | reaper.ImGui_TableColumnFlags_NoResize()
+    end
+    reaper.ImGui_TableSetupColumn(ctx, AUDIO_HEADER_LABELS[col] or "", col_flags, w)
   end
   reaper.ImGui_TableSetupScrollFreeze(ctx, 0, 1)
 
@@ -10340,25 +10395,37 @@ function CMP.draw_group_details_table(table_height)
   local avail_w = reaper.ImGui_GetContentRegionAvail(ctx)
   local tflags = reaper.ImGui_TableFlags_Borders() | reaper.ImGui_TableFlags_RowBg()
                | reaper.ImGui_TableFlags_ScrollY() | reaper.ImGui_TableFlags_Resizable()
-               | reaper.ImGui_TableFlags_SizingStretchProp()
-  if reaper.ImGui_BeginTable(ctx, "##cmp_details_tbl", 9, tflags, avail_w, table_height) then
+  if reaper.ImGui_BeginTable(ctx, "##cmp_details_tbl", 11, tflags, avail_w, table_height) then
     reaper.ImGui_TableSetupScrollFreeze(ctx, 0, 1)
-    reaper.ImGui_TableSetupColumn(ctx, "Reel")
-    reaper.ImGui_TableSetupColumn(ctx, "Tracks")
-    reaper.ImGui_TableSetupColumn(ctx, "Old Rec In")
-    reaper.ImGui_TableSetupColumn(ctx, "Old Rec Out")
-    reaper.ImGui_TableSetupColumn(ctx, "New Rec In")
-    reaper.ImGui_TableSetupColumn(ctx, "New Rec Out")
-    reaper.ImGui_TableSetupColumn(ctx, "Old Src In")
-    reaper.ImGui_TableSetupColumn(ctx, "New Src In")
-    reaper.ImGui_TableSetupColumn(ctx, "Clip Name")
+    -- TC columns hold fixed-format "HH:MM:SS:FF" text, so they get a fixed,
+    -- non-user-resizable width (edit TC_W below to change it — matches the
+    -- main event-list/Audio-list tables' treatment of TC columns, see
+    -- TC_COLS/AUDIO_TC_COLS); Reel/Tracks/Clip Name stretch to fill the rest.
+    -- Src TC (old/new) is placed left of Rec TC (old/new) per user request.
+    local TC_W = scale(75)
+    local TC_FLAGS = reaper.ImGui_TableColumnFlags_WidthFixed() | reaper.ImGui_TableColumnFlags_NoResize()
+    reaper.ImGui_TableSetupColumn(ctx, "Reel",       reaper.ImGui_TableColumnFlags_WidthStretch(), 1.0)
+    reaper.ImGui_TableSetupColumn(ctx, "Tracks",     reaper.ImGui_TableColumnFlags_WidthStretch(), 0.6)
+    reaper.ImGui_TableSetupColumn(ctx, "Old Src In",  TC_FLAGS, TC_W)
+    reaper.ImGui_TableSetupColumn(ctx, "Old Src Out", TC_FLAGS, TC_W)
+    reaper.ImGui_TableSetupColumn(ctx, "New Src In",  TC_FLAGS, TC_W)
+    reaper.ImGui_TableSetupColumn(ctx, "New Src Out", TC_FLAGS, TC_W)
+    reaper.ImGui_TableSetupColumn(ctx, "Old Rec In",  TC_FLAGS, TC_W)
+    reaper.ImGui_TableSetupColumn(ctx, "Old Rec Out", TC_FLAGS, TC_W)
+    reaper.ImGui_TableSetupColumn(ctx, "New Rec In",  TC_FLAGS, TC_W)
+    reaper.ImGui_TableSetupColumn(ctx, "New Rec Out", TC_FLAGS, TC_W)
+    reaper.ImGui_TableSetupColumn(ctx, "Clip Name",  reaper.ImGui_TableColumnFlags_WidthStretch(), 2.0)
     reaper.ImGui_TableHeadersRow(ctx)
 
-    -- Old/New Rec TC In/Out cells are clickable — jump Reaper's edit
-    -- cursor there and scroll it into view, same as clicking a block in
-    -- the graphical SRC/DEST timeline (see CMP.draw_side), so a specific
-    -- item's old or new position can be checked directly without leaving
-    -- this table (mirrors Matchbox's old/new jump behavior).
+    -- All Old/New Rec and Src TC cells are clickable — each jumps Reaper's
+    -- edit cursor to that cell's own literal TC value and scrolls it into
+    -- view, same as clicking a block in the graphical SRC/DEST timeline
+    -- (see CMP.draw_side). Src TC is a real, independent Reaper timeline
+    -- position (0 to infinity covers it) distinct from Rec TC — this
+    -- supports manual conform, where raw/source dailies are commonly
+    -- parked on a track at their own embedded timecode: jump to Src TC to
+    -- grab the right source content, then move it to Rec TC (mirrors
+    -- Matchbox's old/new jump behavior).
     local function tc_cell(sec, row_id)
       if not sec then
         reaper.ImGui_Text(ctx, "-")
@@ -10377,12 +10444,14 @@ function CMP.draw_group_details_table(table_height)
       reaper.ImGui_TableNextRow(ctx)
       reaper.ImGui_TableNextColumn(ctx); reaper.ImGui_Text(ctx, rep.reel or "")
       reaper.ImGui_TableNextColumn(ctx); reaper.ImGui_Text(ctx, table.concat(rep.tracks or {}, ","))
+      reaper.ImGui_TableNextColumn(ctx); tc_cell(c.old and c.old.src_in,  "osi" .. idx)
+      reaper.ImGui_TableNextColumn(ctx); tc_cell(c.old and c.old.src_out, "oso" .. idx)
+      reaper.ImGui_TableNextColumn(ctx); tc_cell(c.new and c.new.src_in,  "nsi" .. idx)
+      reaper.ImGui_TableNextColumn(ctx); tc_cell(c.new and c.new.src_out, "nso" .. idx)
       reaper.ImGui_TableNextColumn(ctx); tc_cell(c.old and c.old.rec_in,  "oi" .. idx)
       reaper.ImGui_TableNextColumn(ctx); tc_cell(c.old and c.old.rec_out, "oo" .. idx)
       reaper.ImGui_TableNextColumn(ctx); tc_cell(c.new and c.new.rec_in,  "ni" .. idx)
       reaper.ImGui_TableNextColumn(ctx); tc_cell(c.new and c.new.rec_out, "no" .. idx)
-      reaper.ImGui_TableNextColumn(ctx); reaper.ImGui_Text(ctx, c.old and tc(c.old.src_in) or "-")
-      reaper.ImGui_TableNextColumn(ctx); reaper.ImGui_Text(ctx, c.new and tc(c.new.src_in) or "-")
       reaper.ImGui_TableNextColumn(ctx); reaper.ImGui_Text(ctx, rep.clip_name or "")
     end
     reaper.ImGui_EndTable(ctx)
