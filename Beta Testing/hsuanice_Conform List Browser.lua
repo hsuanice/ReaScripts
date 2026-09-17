@@ -1,6 +1,6 @@
 --[[
 @description Conform List Browser
-@version 260911.1950
+@version 260917.1704
 @author hsuanice
 @about
   A REAPER script for browsing and editing EDL (Edit Decision List) data
@@ -51,6 +51,125 @@
   Required for AAF: aaftool in PATH (https://github.com/agfline/LibAAF)
 
 @changelog
+  v260917.1704
+  - Fix: "Show as Table" recut-group rows had Src TC In/Out hardcoded to
+    00:00:00:00 — never actually populated. Now computed the same way as
+    Rec TC In/Out (min/max across the group's visible member items' source
+    timecode): a single-item group shows that item's exact src range; a
+    multi-item group (e.g. an "Added" block) shows the span covering all
+    of them.
+
+  v260917.1653
+  - Fix: toggling a track off in the Track Filter panel while viewing
+    Compare now collapses that track's entire lane in the SRC/DEST
+    timelines (saves vertical space), instead of only hiding its clips
+    while leaving an empty row behind.
+
+  v260917.1648
+  - Feature: "Clear List" toolbar button — resets the main table to empty
+    (confirms first if anything is loaded; doesn't touch loaded audio files
+    or Compare's independent Old/New state).
+  - Feature: "Save..." in the Compare view — saves the current compare
+    result's recut groups directly to a .clb project file, without needing
+    "Show as Table" first and without disturbing whatever the main table
+    currently has loaded (temporarily swaps ROWS for the save, then
+    restores it exactly).
+  - Fix: the Compare view (graphical dual timeline and "Show as Table")
+    now actually respects the Track/Reel/Group filter panels shown above
+    it. CMP.rebuild_filters() re-points those panels at Compare's own old+
+    new dedup data whenever a compare result is (re)computed or reopened,
+    and both the graphical renderer and the group-rows builder skip
+    events/items whose reel or category is hidden (a recut group left with
+    zero visible items after filtering is omitted from "Show as Table"
+    entirely). Closing the Compare view restores the filter panels to
+    reflect ROWS again, so the main table's own filtering isn't left showing
+    Compare's data by mistake.
+  - Internal: consolidated ~9 Compare-related top-level locals (functions,
+    color tables) into one CMP namespace table — the file had hit Lua's
+    200-local-per-chunk limit for the main script after this session's
+    additions ("too many local variables"); no behavior change.
+
+  v260917.1559
+  - Feature: Compare workflow redesign — independent Load Old/New, own
+    session (.clb) support, and "Show as Table" for recut groups.
+    • "Compare..." is now a self-contained workflow: it no longer needs (or
+      touches) the main table's currently-loaded ROWS/sources. Opening it
+      shows a setup screen with dedicated "Load Old..." / "Load New..."
+      buttons; Compare runs automatically once both sides are loaded.
+    • Each side accepts .edl / .xml / .aaf (parsed synchronously via
+      OTIO.parse) or an existing .clb project — loading a .clb carries its
+      already-curated row.group categories straight into the comparison,
+      via a new pure _parse_clb_file() parser extracted from
+      load_clb_project() (same behavior, now reusable without mutating the
+      live session).
+    • New "<< Show as Table" button: converts the compare result's recut
+      groups into one row per group (via _build_group_rows_from_compare)
+      and shows them in the main table, reusing its existing sort / filter
+      / search / right-click group-rename — no bespoke Change List UI
+      needed. Each group's category is inherited by majority vote from the
+      original rows' own .group field (Video/Audio/Other, or whatever the
+      user had already curated).
+    • This temporarily replaces the main table's ROWS; a banner ("Showing
+      Compare recut groups...") with an "Exit (restore my list)" button
+      appears until the user switches back, restoring the exact prior list.
+    • The graphical dual-timeline view (Phase 2) is otherwise unchanged.
+
+  v260917.1526
+  - Fix: "Compare..." button was completely hidden from the toolbar unless
+    exactly two sources were already loaded, making the whole reconform
+    feature undiscoverable. Now always visible; disabled/grayed with a
+    tooltip explaining what's missing (0 sources / 1 source / >2 sources)
+    until exactly two are loaded, then enables normally.
+
+  v260917.1516
+  - Feature: Compare view (reconform) — Phase 2, visual dual timeline.
+    • Clicking "Compare..." now opens a dedicated Compare view instead of
+      only printing to console: a summary bar (Deleted/Trimmed/Extended/
+      Moved/Added counts + a color legend + a "Matched %" indicator) above
+      two stacked timeline canvases — SRC (old) on top, DEST (new) on
+      bottom, split by a draggable divider, sharing one horizontal zoom/pan
+      (scroll wheel = vertical scroll, Alt+scroll = zoom, drag = pan).
+    • Blocks are colored by change type instead of by track (red=Deleted,
+      green=Trimmed, yellow=Extended, blue=Moved, purple=Added, neutral
+      gray=Unchanged); hover shows clip name, reel, tracks, change type,
+      recut-group label, and rec TC.
+    • DEST events are displayed using the new `align_shift` the Compare
+      Engine now computes per event (new.rec_in - old.rec_in for matched
+      pairs, the running ripple offset for Added) — subtracting it
+      normalizes away ripple/base-offset so unchanged content lines up
+      with SRC at the same x position, and only genuinely-changed items
+      visibly diverge between the two panels, without needing Matchbox-
+      style connector lines (deferred; may revisit later).
+    • "<< Back to Table" returns to the normal EDL table/timeline view;
+      the Compare view is otherwise a full replacement of the content area
+      while active (CLB.show_compare_view).
+    • Interactive group/item selection and the actual recut/apply engine
+      (Stage Offset, Mode 1 bulk move, Mode 2 per-item metadata recut,
+      Deleted auto-delete, Added auto-conform) are Phase 3 — not yet
+      implemented; this pass is view-only.
+
+  v260917.1352
+  - Feature: Old-vs-new Compare (reconform) — Phase 1, console output only.
+    • New "Compare..." toolbar button, shown when exactly two sources are
+      loaded (load the OLD version, then Load EDL/XML/AAF again and choose
+      Append for the NEW version).
+    • New Library/hsuanice_CLB Compare Engine.lua: matches old→new events by
+      Reel + Source TC (5-frame tolerance), collapses cross-track duplicates
+      (e.g. a stereo pair on A1/A2) into one canonical event, then walks the
+      timeline tracking a running ripple offset so moves fully explained by
+      upstream Added/Deleted/Trimmed/Extended content (or a constant
+      project-start-TC difference between the two files) are not reported as
+      independent changes — only genuinely anomalous moves are.
+    • Classifies each real change as Trimmed / Extended / Moved / Added /
+      Deleted, then groups changes that share the exact same transformation
+      ("recut signature") into one reviewable/applicable group instead of
+      listing every affected clip separately; Added/Deleted are grouped by
+      timeline contiguity instead.
+    • Results print to console (summary counts + group breakdown) and are
+      stored in CLB.compare_result for the upcoming Change List / dual
+      SRC-DEST timeline review UI (Phase 2) and the recut/apply engine
+      (Phase 3) — not yet implemented; this pass only computes and reports.
+
   v260911.1950
   - Fix: Subtitle import no longer fails when the saved OTIO Python path is
     stale (e.g. a pyenv virtualenv that was later removed). Subtitle Bridge
@@ -840,6 +959,14 @@ if not ok_sub then
   SUBTITLE = nil
 end
 
+-- Compare Engine (old-vs-new EDL/XML/AAF reconform comparison)
+local COMPARE_ENGINE_PATH = lib_path .. "hsuanice_CLB Compare Engine.lua"
+local ok_cmp, COMPARE = pcall(dofile, COMPARE_ENGINE_PATH)
+if not ok_cmp then
+  -- Optional: compare/reconform is not required for core CLB workflows
+  COMPARE = nil
+end
+
 -- List Table (optional, for clipboard/export helpers)
 local LT_PATH = lib_path .. "hsuanice_List Table.lua"
 local ok_lt, LT = pcall(dofile, LT_PATH)
@@ -870,7 +997,7 @@ end
 ---------------------------------------------------------------------------
 local SCRIPT_NAME = "Conform List Browser"
 local EXT_NS = "hsuanice_ConformListBrowser"
-local VERSION = "260426.1458"
+local VERSION = "260917.1704"
 
 -- Column definitions (EDL Events table)
 local COL = {
@@ -1157,6 +1284,18 @@ local CLB = {
   tl_zoom = 50.0,   -- pixels per second
   tl_scroll = 0.0,  -- seconds panned from tc_min
   tl_vscroll = 0.0, -- pixels scrolled vertically in track area
+
+  -- Compare (reconform) view state
+  compare_old = nil,         -- {name, path, rows, fps, is_drop} loaded via "Load Old..."
+  compare_new = nil,         -- {name, path, rows, fps, is_drop} loaded via "Load New..."
+  compare_result = nil,      -- set by run_compare(): {old_source,new_source,old_dedup,new_dedup,changes,groups,reordered,fps,is_drop}
+  show_compare_view = false, -- true = show dual SRC/DEST timeline instead of the normal table
+  viewing_compare_groups = false, -- true = main table (ROWS) is temporarily showing recut-group rows
+  cmp_zoom = 50.0,
+  cmp_scroll = 0.0,
+  cmp_vscroll_old = 0.0,
+  cmp_vscroll_new = 0.0,
+  cmp_split_ratio = 0.5,
 
   -- Loading state (for async loading with progress)
   -- phase="reading_metadata"  : async audio metadata scanning
@@ -3406,18 +3545,27 @@ local function save_clb_project(filepath, silent)
 end
 
 --- Load a .clb project file and restore the full session state.
-local function load_clb_project(filepath)
+--- Pure parser: read a .clb project file into a plain data table without
+--- touching any live CLB.*/ROWS state. Used by load_clb_project() (which
+--- applies the result to the live session) and by Compare's Load Old/New
+--- (which needs the rows/fps in isolation, without disturbing whatever the
+--- user currently has open in the main table).
+--- @return table|nil  { fps, is_drop, source_format, track_format,
+---                       audio_folder, audio_recursive, col_order, col_vis,
+---                       sources, rows, max_guid,
+---                       show_track, show_reel, show_group, show_sources, show_audio,
+---                       hidden_tracks, hidden_reels, hidden_groups }
+--- @return string|nil  error message if nil was returned
+local function _parse_clb_file(filepath)
   local f = io.open(filepath, "r")
   if not f then
-    reaper.ShowMessageBox("Cannot open:\n" .. filepath, SCRIPT_NAME, 0)
-    return false
+    return nil, "Cannot open:\n" .. filepath
   end
 
   local header = f:read("*l")
   if header ~= "CLB_PROJECT_V1" then
     f:close()
-    reaper.ShowMessageBox("Not a valid CLB project file.", SCRIPT_NAME, 0)
-    return false
+    return nil, "Not a valid CLB project file."
   end
 
   local new_fps              = 25
@@ -3551,23 +3699,43 @@ local function load_clb_project(filepath)
   end
   f:close()
 
+  return {
+    fps = new_fps, is_drop = new_is_drop,
+    source_format = new_source_format, track_format = new_track_format,
+    audio_folder = new_audio_folder, audio_recursive = new_audio_recursive,
+    col_order = new_col_order, col_vis = new_col_vis,
+    sources = new_sources, rows = new_rows, max_guid = max_guid,
+    show_track = new_show_track, show_reel = new_show_reel,
+    show_group = new_show_group, show_sources = new_show_sources,
+    show_audio = new_show_audio,
+    hidden_tracks = hidden_tracks, hidden_reels = hidden_reels, hidden_groups = hidden_groups,
+  }
+end
+
+local function load_clb_project(filepath)
+  local data, err = _parse_clb_file(filepath)
+  if not data then
+    reaper.ShowMessageBox(err or "Failed to load CLB project.", SCRIPT_NAME, 0)
+    return false
+  end
+
   -- Apply loaded data
-  CLB.fps               = new_fps
-  CLB.is_drop           = new_is_drop
-  CLB.track_name_format = new_track_format
-  CLB.audio_folder      = new_audio_folder
-  CLB.audio_recursive   = new_audio_recursive
-  if new_col_order then EDL_COL_ORDER      = new_col_order end
-  if new_col_vis   then EDL_COL_VISIBILITY = new_col_vis   end
-  CLB.edl_sources       = new_sources
-  ROWS                  = new_rows
-  _guid_counter         = max_guid
+  CLB.fps               = data.fps
+  CLB.is_drop           = data.is_drop
+  CLB.track_name_format = data.track_format
+  CLB.audio_folder      = data.audio_folder
+  CLB.audio_recursive   = data.audio_recursive
+  if data.col_order then EDL_COL_ORDER      = data.col_order end
+  if data.col_vis   then EDL_COL_VISIBILITY = data.col_vis   end
+  CLB.edl_sources       = data.sources
+  ROWS                  = data.rows
+  _guid_counter         = data.max_guid
 
   -- Filter panel visibility flags
-  if new_show_track   ~= nil then CLB.show_track_filter   = new_show_track   end
-  if new_show_reel    ~= nil then CLB.show_reel_filter    = new_show_reel    end
-  if new_show_group   ~= nil then CLB.show_group_filter   = new_show_group   end
-  if new_show_sources ~= nil then CLB.show_sources_panel  = new_show_sources end
+  if data.show_track   ~= nil then CLB.show_track_filter   = data.show_track   end
+  if data.show_reel    ~= nil then CLB.show_reel_filter    = data.show_reel    end
+  if data.show_group   ~= nil then CLB.show_group_filter   = data.show_group   end
+  if data.show_sources ~= nil then CLB.show_sources_panel  = data.show_sources end
 
   -- Reset UI state
   sel_clear()
@@ -3577,26 +3745,26 @@ local function load_clb_project(filepath)
   UNDO_POS   = 0
   undo_snapshot()
   CLB.loaded_file   = filepath
-  CLB.loaded_format = new_source_format
+  CLB.loaded_format = data.source_format
 
   -- Rebuild filter panels, then apply saved hidden states
   _rebuild_track_filters()
   _rebuild_reel_filters()
   _rebuild_group_filters()
 
-  if next(hidden_tracks) then
+  if next(data.hidden_tracks) then
     for _, tf in ipairs(CLB.track_filters) do
-      if hidden_tracks[tf.name] then tf.visible = false end
+      if data.hidden_tracks[tf.name] then tf.visible = false end
     end
   end
-  if next(hidden_reels) then
+  if next(data.hidden_reels) then
     for _, rf in ipairs(CLB.reel_filters) do
-      if hidden_reels[rf.name] then rf.visible = false end
+      if data.hidden_reels[rf.name] then rf.visible = false end
     end
   end
-  if next(hidden_groups) then
+  if next(data.hidden_groups) then
     for _, gf in ipairs(CLB.group_filters) do
-      if hidden_groups[gf.name] then gf.visible = false end
+      if data.hidden_groups[gf.name] then gf.visible = false end
     end
   end
 
@@ -3605,15 +3773,15 @@ local function load_clb_project(filepath)
   -- Try to restore audio files from cache (don't re-run matching — match data is in rows)
   CLB.audio_files      = {}
   CLB.show_audio_panel = false
-  if new_audio_folder ~= "" then
-    local cached = load_audio_cache(new_audio_folder, new_audio_recursive)
+  if data.audio_folder ~= "" then
+    local cached = load_audio_cache(data.audio_folder, data.audio_recursive)
     if cached then
       CLB.audio_files = cached
       -- Restore audio panel visibility from file, or default to true if audio loaded
-      CLB.show_audio_panel = (new_show_audio ~= nil) and new_show_audio or true
+      CLB.show_audio_panel = (data.show_audio ~= nil) and data.show_audio or true
       console_msg(string.format("Restored %d audio files from cache", #cached))
     else
-      console_msg("Audio cache not found — click 'Load Audio...' to re-scan: " .. new_audio_folder)
+      console_msg("Audio cache not found — click 'Load Audio...' to re-scan: " .. data.audio_folder)
     end
   end
 
@@ -3636,6 +3804,40 @@ local function open_clb_project()
   CLB.last_dir = filepath:match("^(.*)[/\\]") or CLB.last_dir
   load_clb_project(filepath)
   save_prefs()
+end
+
+--- Reset the main table to empty (does not touch loaded audio files/folder,
+--- or Compare's independent Old/New state). Confirms first if there's
+--- anything loaded, since it can't be undone once the undo stack is reset.
+local function clear_list()
+  if #ROWS > 0 then
+    local choice = reaper.ShowMessageBox(
+      string.format("Clear the current list? (%d events)\n\nThis cannot be undone.", #ROWS),
+      SCRIPT_NAME, 4)  -- Yes/No
+    if choice ~= 6 then return end
+  end
+
+  ROWS            = {}
+  CLB.edl_sources = {}
+  _guid_counter   = 0
+  CLB.loaded_file   = nil
+  CLB.loaded_format = nil
+  CLB.viewing_compare_groups = false
+  CLB._compare_rows_backup   = nil
+
+  sel_clear()
+  EDIT = nil
+  SORT_STATE.columns = {}
+  UNDO_STACK = {}
+  UNDO_POS   = 0
+  undo_snapshot()
+
+  _rebuild_track_filters()
+  _rebuild_reel_filters()
+  _rebuild_group_filters()
+  CLB.cached_rows = nil
+
+  console_msg("List cleared")
 end
 
 --- Save-as dialog → save_clb_project.
@@ -4158,6 +4360,233 @@ load_subtitle_file = function()
     selected_text_col  = default_text_col,
     open               = true,
   }
+end
+
+---------------------------------------------------------------------------
+-- Old-vs-New Compare (reconform)
+---------------------------------------------------------------------------
+
+-- Namespaced under one table (rather than ~9 separate top-level locals) to
+-- stay under Lua's 200-local-per-chunk limit for this already-large script.
+local CMP = {}
+
+--- Category (row.group — Video/Audio/Dialog/Effects/Music/etc, the user's
+--- own classification) inherited by majority vote from a dedup event's
+--- original member rows. Shared by CMP.build_group_rows and
+--- CMP.rebuild_filters so both agree on what "group" an event
+--- belongs to for filtering / table-category purposes.
+function CMP.event_category(e)
+  local cat_votes = {}
+  for _, orig_row in ipairs(e.__rows or {}) do
+    local cat = orig_row.group
+    if cat and cat ~= "" then cat_votes[cat] = (cat_votes[cat] or 0) + 1 end
+  end
+  local best, best_n = "", 0
+  for cat, n in pairs(cat_votes) do
+    if n > best_n then best, best_n = cat, n end
+  end
+  return best
+end
+
+--- Rebuild the Track/Reel/Group filter panels (CLB.track_filters /
+--- .reel_filters / .group_filters) from Compare's own old+new dedup events
+--- instead of ROWS. These panels are drawn above the Compare view
+--- regardless of view mode (see draw_track_filter_panel, called at the top
+--- level), so without this they'd keep showing whatever the main table had
+--- loaded before Compare opened — stale, and unable to actually hide
+--- anything Compare draws. CMP.draw_side and CMP.build_group_rows
+--- both check these same lists so filtering stays consistent between the
+--- graphical timeline and the "Show as Table" recut-group list.
+function CMP.rebuild_filters(cr)
+  local track_counts, track_order = {}, {}
+  local reel_counts, reel_order = {}, {}
+  local group_counts, group_order = {}, {}
+
+  local function visit(events)
+    for _, e in ipairs(events) do
+      for _, t in ipairs(e.tracks or {}) do
+        if not track_counts[t] then track_counts[t] = 0; track_order[#track_order + 1] = t end
+        track_counts[t] = track_counts[t] + 1
+      end
+      local r = e.reel or ""
+      if not reel_counts[r] then reel_counts[r] = 0; reel_order[#reel_order + 1] = r end
+      reel_counts[r] = reel_counts[r] + 1
+      local g = CMP.event_category(e)
+      if not group_counts[g] then group_counts[g] = 0; group_order[#group_order + 1] = g end
+      group_counts[g] = group_counts[g] + 1
+    end
+  end
+  visit(cr.old_dedup)
+  visit(cr.new_dedup)
+
+  table.sort(track_order, _natural_sort_cmp)
+  table.sort(reel_order, _natural_sort_cmp)
+  table.sort(group_order, _natural_sort_cmp)
+
+  local function rebuild(old_list, order, counts)
+    local old_vis = {}
+    for _, f in ipairs(old_list) do old_vis[f.name] = f.visible end
+    local new_list = {}
+    for _, name in ipairs(order) do
+      new_list[#new_list + 1] = {
+        name = name, count = counts[name],
+        visible = old_vis[name] == nil or old_vis[name],
+      }
+    end
+    return new_list
+  end
+
+  CLB.track_filters    = rebuild(CLB.track_filters, track_order, track_counts)
+  CLB.reel_filters      = rebuild(CLB.reel_filters, reel_order, reel_counts)
+  CLB.reel_sel          = {}
+  CLB.reel_sel_anchor   = nil
+  CLB.group_filters     = rebuild(CLB.group_filters, group_order, group_counts)
+end
+
+--- Run the old-vs-new compare engine against CLB.compare_old / .compare_new
+--- (loaded independently via CMP.load_side() — see below; entirely
+--- separate from the main ROWS table so opening Compare never disturbs
+--- whatever the user currently has loaded there). Results are stored in
+--- CLB.compare_result for the Compare view; a summary also prints to console.
+function CMP.run()
+  if not COMPARE then
+    reaper.ShowMessageBox(
+      "Compare Engine library failed to load.\n\nExpected at:\n"
+      .. COMPARE_ENGINE_PATH,
+      SCRIPT_NAME, 0)
+    return
+  end
+  if not (CLB.compare_old and CLB.compare_new) then
+    reaper.ShowMessageBox("Load both the OLD and NEW versions first.", SCRIPT_NAME, 0)
+    return
+  end
+
+  -- Both sides are normalized to the NEW side's fps/is_drop for the compare
+  -- math (assumes both versions belong to the same project/frame rate).
+  local fps     = CLB.compare_new.fps or CLB.fps
+  local is_drop = CLB.compare_new.is_drop or false
+
+  local function to_events(rows)
+    local evts = {}
+    for _, r in ipairs(rows) do
+      evts[#evts + 1] = COMPARE.event_from_row(r, fps, is_drop)
+    end
+    return evts
+  end
+
+  local old_dedup = COMPARE.dedup(to_events(CLB.compare_old.rows), fps)
+  local new_dedup = COMPARE.dedup(to_events(CLB.compare_new.rows), fps)
+
+  local changes, reordered = COMPARE.compare(old_dedup, new_dedup, fps)
+  local groups = COMPARE.group(changes, fps)
+
+  -- Tag each dedup event with its change classification + owning group, so
+  -- the compare-view renderer can color-lookup in O(1). Events left
+  -- untagged are Unchanged (not part of any reported change).
+  for _, g in ipairs(groups) do
+    for _, c in ipairs(g.items) do
+      if c.old then c.old.change_type = c.type; c.old.change_group = g end
+      if c.new then c.new.change_type = c.type; c.new.change_group = g end
+    end
+  end
+
+  CLB.compare_result = {
+    old_source = { name = CLB.compare_old.name }, new_source = { name = CLB.compare_new.name },
+    old_dedup = old_dedup, new_dedup = new_dedup,
+    changes = changes, groups = groups, reordered = reordered,
+    fps = fps, is_drop = is_drop,
+  }
+  CLB.show_compare_view = true
+  CMP.rebuild_filters(CLB.compare_result)
+
+  local counts = {}
+  for _, c in ipairs(changes) do
+    counts[c.type] = (counts[c.type] or 0) + 1
+  end
+
+  console_msg(string.format(
+    "Compare: %s (old, %d events) vs %s (new, %d events)",
+    CLB.compare_old.name, #old_dedup, CLB.compare_new.name, #new_dedup))
+  console_msg(string.format(
+    "  Deleted=%d  Trimmed=%d  Extended=%d  Moved=%d  Added=%d  -> %d group(s)",
+    counts.Deleted or 0, counts.Trimmed or 0, counts.Extended or 0,
+    counts.Moved or 0, counts.Added or 0, #groups))
+  if reordered then
+    console_msg("  Note: at least one clip's relative order changed vs. its neighbors (see groups).")
+  end
+  for _, g in ipairs(groups) do
+    console_msg(string.format("  [%s] %s  x%d", g.type, g.label, #g.items))
+  end
+end
+
+--- Load one side ("old" or "new") of Compare from a file dialog. Accepts
+--- EDL/XML/AAF (parsed synchronously via OTIO.parse — Compare typically
+--- loads one or two specific version files, not a big multi-file batch, so
+--- the blocking call is an acceptable trade for not needing the async
+--- poll machinery here) or an existing .clb project (via the pure
+--- _parse_clb_file parser, so its already-curated row.group values and
+--- rows carry straight through). Auto-runs CMP.run() once both sides
+--- are loaded. Never touches ROWS / CLB.edl_sources.
+function CMP.load_side(side)
+  local filter =
+    "Timeline / Project files\0*.edl;*.xml;*.aaf;*.clb\0" ..
+    "EDL files\0*.edl\0" ..
+    "XML files\0*.xml\0" ..
+    "AAF files\0*.aaf\0" ..
+    "CLB Project\0*.clb\0" ..
+    "All files\0*.*\0"
+  local title = "Load " .. (side == "old" and "OLD" or "NEW") .. " version"
+
+  local filepath
+  if reaper.JS_Dialog_BrowseForOpenFiles then
+    local rv, fp = reaper.JS_Dialog_BrowseForOpenFiles(title, CLB.last_dir or "", "", filter, false)
+    if rv ~= 1 or not fp or fp == "" then return end
+    filepath = fp
+  else
+    local retval, fp = reaper.GetUserFileNameForRead("", title, "*.edl")
+    if not retval or fp == "" then return end
+    filepath = fp
+  end
+
+  CLB.last_dir = filepath:match("(.*[/\\])") or CLB.last_dir
+  local fname = filepath:match("([^/\\]+)$") or filepath
+  local ext = (filepath:match("%.([%w]+)$") or ""):lower()
+
+  local rows, fps, is_drop
+
+  if ext == "clb" then
+    local data, err = _parse_clb_file(filepath)
+    if not data then
+      reaper.ShowMessageBox("Failed to load:\n\n" .. tostring(err), SCRIPT_NAME, 0)
+      return
+    end
+    rows, fps, is_drop = data.rows, data.fps, data.is_drop
+
+  elseif ext == "edl" or ext == "xml" or ext == "aaf" then
+    console_msg("Compare: loading " .. fname .. " ...")
+    local parsed, err = OTIO.parse(filepath, { default_fps = CLB.fps, python = OTIO.python })
+    if not parsed then
+      reaper.ShowMessageBox("Failed to load:\n\n" .. tostring(err), SCRIPT_NAME, 0)
+      return
+    end
+    fps = parsed.fps or CLB.fps
+    is_drop = parsed.is_drop or false
+    rows = _make_rows_from_events(parsed.events, fps, is_drop, 0)
+
+  else
+    reaper.ShowMessageBox("Unsupported file type: ." .. ext
+      .. "\n\nCompare accepts .edl, .xml, .aaf, or .clb.", SCRIPT_NAME, 0)
+    return
+  end
+
+  local entry = { name = fname, path = filepath, rows = rows, fps = fps, is_drop = is_drop }
+  if side == "old" then CLB.compare_old = entry else CLB.compare_new = entry end
+  CLB.compare_result = nil  -- stale after (re)loading either side
+  console_msg(string.format("Compare: loaded %s (%s, %d events)", side, fname, #rows))
+
+  if CLB.compare_old and CLB.compare_new then
+    CMP.run()
+  end
 end
 
 --- Poll background OTIO loads (called every frame from main loop).
@@ -5459,6 +5888,14 @@ local function draw_toolbar()
     end
     reaper.ImGui_SameLine(ctx)
 
+    if reaper.ImGui_Button(ctx, "Clear List", scale(80), scale(24)) then
+      clear_list()
+    end
+    if reaper.ImGui_IsItemHovered(ctx) then
+      reaper.ImGui_SetTooltip(ctx, "Reset the table to empty (asks for confirmation first)")
+    end
+    reaper.ImGui_SameLine(ctx)
+
     reaper.ImGui_Text(ctx, "|")
     reaper.ImGui_SameLine(ctx)
 
@@ -5497,6 +5934,27 @@ local function draw_toolbar()
     reaper.ImGui_Text(ctx, "")
     reaper.ImGui_Text(ctx, "Generates empty items at subtitle in/out points")
     reaper.ImGui_Text(ctx, "with the text as Clip Name.")
+    reaper.ImGui_EndTooltip(ctx)
+  end
+  reaper.ImGui_SameLine(ctx)
+
+  -- Compare button (old-vs-new reconform). Opens its own setup/view screen
+  -- with independent Load Old/New buttons — always enabled; it never
+  -- depends on (or disturbs) whatever is currently loaded in the main table.
+  if reaper.ImGui_Button(ctx, "Compare...", scale(90), scale(24)) then
+    CLB.show_compare_view = true
+    -- Re-point the Track/Reel/Group filter panels at Compare's data when
+    -- reopening a cached result (Close already restored them to ROWS).
+    if CLB.compare_result then
+      CMP.rebuild_filters(CLB.compare_result)
+    end
+  end
+  if reaper.ImGui_IsItemHovered(ctx) then
+    reaper.ImGui_BeginTooltip(ctx)
+    reaper.ImGui_Text(ctx, "Compare an OLD vs NEW version (EDL/XML/AAF/.clb)")
+    reaper.ImGui_Text(ctx, "and classify Trimmed / Extended / Moved / Added / Deleted.")
+    reaper.ImGui_Text(ctx, "Opens its own Load Old/New screen — independent of")
+    reaper.ImGui_Text(ctx, "whatever is currently loaded in the main table.")
     reaper.ImGui_EndTooltip(ctx)
   end
   reaper.ImGui_SameLine(ctx)
@@ -7014,6 +7472,30 @@ end
 -- Draw: EDL Panel Header (with column editor)
 ---------------------------------------------------------------------------
 local function draw_edl_panel_header()
+  -- Compare group-results banner: the table is temporarily showing one row
+  -- per recut group (see "Show as Table" in the Compare view) instead of
+  -- the user's own working list. Offer a clear way back.
+  if CLB.viewing_compare_groups then
+    reaper.ImGui_TextColored(ctx, 0xCCAA33FF, "Showing Compare recut groups (not your working list).")
+    reaper.ImGui_SameLine(ctx)
+    if reaper.ImGui_Button(ctx, "Exit (restore my list)", scale(160), scale(22)) then
+      if CLB._compare_rows_backup then
+        ROWS            = CLB._compare_rows_backup.rows
+        CLB.edl_sources = CLB._compare_rows_backup.sources
+        CLB._compare_rows_backup = nil
+      else
+        ROWS = {}
+      end
+      CLB.viewing_compare_groups = false
+      sel_clear()
+      _rebuild_track_filters()
+      _rebuild_reel_filters()
+      _rebuild_group_filters()
+      CLB.cached_rows = nil
+    end
+    reaper.ImGui_Separator(ctx)
+  end
+
   -- Header line: Events count, Cols button for column editor
   local view_rows = get_view_rows()
   local event_count = #view_rows
@@ -8573,9 +9055,526 @@ local function draw_reel_filter_sidebar(height)
 end
 
 ---------------------------------------------------------------------------
+-- Draw: Compare View (old-vs-new reconform dual timeline)
+---------------------------------------------------------------------------
+CMP.colors = {
+  Deleted  = 0xCC3333FF,
+  Trimmed  = 0x33AA55FF,
+  Extended = 0xCCAA22FF,
+  Moved    = 0x3388CCFF,
+  Added    = 0xAA55CCFF,
+}
+CMP.unchanged_color = 0x4A4A4ABB
+
+--- Draw one half (SRC/old or DEST/new) of the Compare view.
+--- events: cr.old_dedup or cr.new_dedup (see CMP.run()); each has
+---   reel, tracks[], rec_in/out (seconds), clip_name, change_type (nil =
+---   Unchanged), change_group. DEST events additionally carry align_shift:
+---   displaying at (rec_in/out - align_shift) normalizes ripple/base-offset
+---   away so unchanged content lines up with SRC at the same x position —
+---   only genuinely-changed items visibly diverge between the two panels.
+function CMP.draw_side(title, events, track_order, track_index, tmin, tmax, panel_h, is_dest, child_id, fps_val, is_drop_val, hidden_tracks, hidden_reels, hidden_groups)
+  local LABEL_W = scale(50)
+  local RULER_H = scale(16)
+  local TRACK_H = scale(16)
+
+  local avail_w = reaper.ImGui_GetContentRegionAvail(ctx)
+  local wf = reaper.ImGui_WindowFlags_NoScrollbar() | reaper.ImGui_WindowFlags_NoScrollWithMouse()
+  if not reaper.ImGui_BeginChild(ctx, "##" .. child_id, avail_w, panel_h, 0, wf) then
+    reaper.ImGui_EndChild(ctx)
+    return
+  end
+
+  local cw, ch = reaper.ImGui_GetContentRegionAvail(ctx)
+  reaper.ImGui_InvisibleButton(ctx, "##" .. child_id .. "_cvs", cw, ch)
+  local is_hovered = reaper.ImGui_IsItemHovered(ctx)
+  local is_active  = reaper.ImGui_IsItemActive(ctx)
+
+  local cx0, cy0 = reaper.ImGui_GetItemRectMin(ctx)
+  local cx1, cy1 = reaper.ImGui_GetItemRectMax(ctx)
+
+  local ea_x0 = cx0 + LABEL_W
+  local ea_w  = math.max(1, cx1 - ea_x0)
+
+  local dl = reaper.ImGui_GetWindowDrawList(ctx)
+
+  local span     = tmax - tmin
+  local min_zoom = ea_w / span
+  local max_zoom = 500.0
+  CLB.cmp_zoom   = math.max(min_zoom, math.min(max_zoom, CLB.cmp_zoom))
+  local vis_sec  = ea_w / CLB.cmp_zoom
+  local max_scroll = math.max(0, span - vis_sec)
+  CLB.cmp_scroll = math.max(0, math.min(max_scroll, CLB.cmp_scroll))
+
+  local function s2px(t)
+    return ea_x0 + (t - tmin - CLB.cmp_scroll) * CLB.cmp_zoom
+  end
+
+  reaper.ImGui_DrawList_AddRectFilled(dl, cx0, cy0, cx1, cy1, 0x1A1A1AFF)
+  reaper.ImGui_DrawList_AddRectFilled(dl, cx0, cy0, cx0 + LABEL_W, cy1, 0x252525FF)
+
+  local ry0, ry1 = cy0, cy0 + RULER_H
+  reaper.ImGui_DrawList_AddRectFilled(dl, ea_x0, ry0, cx1, ry1, 0x2A2A2AFF)
+  reaper.ImGui_DrawList_AddText(dl, cx0 + scale(3), ry0 + scale(2), 0xCCCCCCFF, title)
+
+  local fps_val = fps_val or CLB.fps or 24
+  local is_drop_val = is_drop_val or false
+  local frame_dur = 1.0 / fps_val
+  local intervals = {
+    frame_dur, frame_dur * 2, frame_dur * 5, frame_dur * 10,
+    1, 2, 5, 10, 15, 30, 60, 120, 300, 600,
+  }
+  local tick_iv = 600
+  for _, iv in ipairs(intervals) do
+    if iv * CLB.cmp_zoom >= scale(80) then tick_iv = iv; break end
+  end
+  local view_start = tmin + CLB.cmp_scroll
+  local view_end   = view_start + vis_sec
+  local t = math.floor(view_start / tick_iv) * tick_iv
+  while t <= view_end + tick_iv do
+    local px = s2px(t)
+    if px >= ea_x0 and px <= cx1 then
+      reaper.ImGui_DrawList_AddLine(dl, px, ry0, px, ry1, 0x555555FF, 1.0)
+      local lbl = EDL.seconds_to_tc(math.max(0, t), fps_val, is_drop_val)
+      if px + scale(4) < cx1 then
+        reaper.ImGui_DrawList_AddText(dl, px + scale(2), ry0 + scale(2), 0xAAAAAAFF, lbl)
+      end
+    end
+    t = t + tick_iv
+  end
+  reaper.ImGui_DrawList_AddLine(dl, cx0, ry1, cx1, ry1, 0x444444FF, 1.0)
+
+  local vscroll = is_dest and CLB.cmp_vscroll_new or CLB.cmp_vscroll_old
+  for ti, tname in ipairs(track_order) do
+    local ey0 = ry1 + (ti - 1) * TRACK_H - vscroll
+    local ey1 = ey0 + TRACK_H
+    if ey1 > ry1 and ey0 < cy1 then
+      local bg = (ti % 2 == 0) and 0x222222FF or 0x1E1E1EFF
+      local dy0, dy1 = math.max(ey0, ry1), math.min(ey1, cy1)
+      reaper.ImGui_DrawList_AddRectFilled(dl, cx0, dy0, cx1, dy1, bg)
+      if ey0 >= ry1 then
+        reaper.ImGui_DrawList_AddText(dl, cx0 + scale(3), ey0 + scale(2), 0xCCCCCCFF, tname)
+      end
+      reaper.ImGui_DrawList_AddLine(dl, cx0, dy1, cx1, dy1, 0x333333FF, 1.0)
+    end
+  end
+
+  local mx, my = reaper.ImGui_GetMousePos(ctx)
+  local hovered = nil
+  for _, e in ipairs(events) do
+    local reel_hidden  = hidden_reels  and hidden_reels[e.reel or ""]
+    local group_hidden = hidden_groups and hidden_groups[CMP.event_category(e)]
+    if not reel_hidden and not group_hidden then
+    local shift = is_dest and (e.align_shift or 0) or 0
+    local t_in, t_out = e.rec_in - shift, e.rec_out - shift
+    local px0, px1 = s2px(t_in), s2px(t_out)
+    if px1 >= ea_x0 and px0 <= cx1 then
+      local dx0 = math.max(px0, ea_x0)
+      local dx1 = math.min(px1, cx1)
+      if dx1 < dx0 + 1 then dx1 = dx0 + 1 end
+      local col = CMP.colors[e.change_type] or CMP.unchanged_color
+      for _, trk in ipairs(e.tracks) do
+        local ti = (not (hidden_tracks and hidden_tracks[trk])) and track_index[trk]
+        if ti then
+          local ey0 = ry1 + (ti - 1) * TRACK_H - vscroll
+          local ey1 = ey0 + TRACK_H
+          if ey1 > ry1 and ey0 < cy1 then
+            local dy0, dy1 = math.max(ey0, ry1), math.min(ey1, cy1)
+            reaper.ImGui_DrawList_AddRectFilled(dl, dx0, dy0, dx1, dy1, col)
+            reaper.ImGui_DrawList_AddRect(dl, dx0, dy0, dx1, dy1, 0x00000066)
+            if is_hovered and mx >= dx0 and mx <= dx1 and my >= dy0 and my <= dy1 then
+              reaper.ImGui_DrawList_AddRectFilled(dl, dx0, dy0, dx1, dy1, 0xFFFFFF22)
+              hovered = e
+            end
+          end
+        end
+      end
+    end
+    end
+  end
+
+  if hovered then
+    reaper.ImGui_BeginTooltip(ctx)
+    reaper.ImGui_Text(ctx, hovered.clip_name ~= "" and hovered.clip_name or "(no name)")
+    reaper.ImGui_Text(ctx, "Reel:   " .. (hovered.reel or ""))
+    reaper.ImGui_Text(ctx, "Tracks: " .. table.concat(hovered.tracks, ", "))
+    reaper.ImGui_Text(ctx, "Change: " .. (hovered.change_type or "Unchanged"))
+    if hovered.change_group then
+      reaper.ImGui_Text(ctx, "Group:  " .. hovered.change_group.label)
+    end
+    reaper.ImGui_Text(ctx, "Rec In:  " .. EDL.seconds_to_tc(hovered.rec_in, fps_val, is_drop_val))
+    reaper.ImGui_Text(ctx, "Rec Out: " .. EDL.seconds_to_tc(hovered.rec_out, fps_val, is_drop_val))
+    reaper.ImGui_EndTooltip(ctx)
+  end
+
+  -- Scroll wheel: plain = vertical, alt = horizontal zoom (mirrors draw_timeline_panel)
+  if is_hovered then
+    local ok_w, scroll_y, scroll_h = pcall(reaper.ImGui_GetMouseWheel, ctx)
+    if ok_w then
+      local alt_held = reaper.ImGui_IsKeyDown(ctx, reaper.ImGui_Mod_Alt())
+      if alt_held and scroll_y and scroll_y ~= 0 then
+        local mouse_t  = (mx - ea_x0) / CLB.cmp_zoom + tmin + CLB.cmp_scroll
+        local factor   = scroll_y > 0 and 1.15 or (1 / 1.15)
+        local new_zoom = math.max(min_zoom, math.min(max_zoom, CLB.cmp_zoom * factor))
+        CLB.cmp_scroll = mouse_t - tmin - (mx - ea_x0) / new_zoom
+        CLB.cmp_zoom   = new_zoom
+        local new_vis  = ea_w / CLB.cmp_zoom
+        local new_max  = math.max(0, span - new_vis)
+        CLB.cmp_scroll = math.max(0, math.min(new_max, CLB.cmp_scroll))
+      elseif scroll_h and scroll_h ~= 0 then
+        CLB.cmp_scroll = math.max(0, math.min(max_scroll, CLB.cmp_scroll - scroll_h / CLB.cmp_zoom * 60))
+      elseif not alt_held and scroll_y and scroll_y ~= 0 then
+        local nv = math.max(0, vscroll - scroll_y * TRACK_H * 3)
+        if is_dest then CLB.cmp_vscroll_new = nv else CLB.cmp_vscroll_old = nv end
+      end
+    end
+  end
+
+  -- Drag: horizontal pan
+  if is_active then
+    local dx = reaper.ImGui_GetMouseDelta(ctx)
+    if dx and dx ~= 0 then
+      CLB.cmp_scroll = math.max(0, math.min(max_scroll, CLB.cmp_scroll - dx / CLB.cmp_zoom))
+    end
+    reaper.ImGui_SetMouseCursor(ctx, reaper.ImGui_MouseCursor_ResizeEW())
+  end
+
+  reaper.ImGui_EndChild(ctx)
+end
+
+--- Top-level Compare view: header/summary/legend + dual SRC/DEST timeline
+--- (see draw_cmp_side). Shown instead of the normal table when
+--- CLB.show_compare_view is true (see run_compare() and draw_main_content()).
+--- Convert a Compare result's recut groups into ROWS-shaped table rows —
+--- one row per group instead of one per raw EDL event — so "Show as Table"
+--- can reuse the main table's existing sort/filter/search/right-click
+--- group-rename machinery for free. The category (Video/Audio/Other, or
+--- whatever the user has curated) is inherited by majority vote from the
+--- original rows' own .group field, so groups loaded from a .clb session
+--- keep their existing classification.
+--- Convert Compare's recut groups into ROWS-shaped rows. Change items whose
+--- representative event's reel/category is currently hidden via the
+--- Track/Reel/Group filter panels (see CMP.rebuild_filters) are excluded
+--- from the group's aggregate, and a group left with zero visible items is
+--- skipped entirely — so "Show as Table" respects the same filters as the
+--- graphical view (CMP.draw_side) rather than always showing everything.
+function CMP.build_group_rows(cr)
+  local fps, is_drop = cr.fps or CLB.fps, cr.is_drop or false
+  local rows = {}
+
+  local hidden_reels, hidden_groups
+  for _, rf in ipairs(CLB.reel_filters) do
+    if not rf.visible then hidden_reels = hidden_reels or {}; hidden_reels[rf.name] = true end
+  end
+  for _, gf in ipairs(CLB.group_filters) do
+    if not gf.visible then hidden_groups = hidden_groups or {}; hidden_groups[gf.name] = true end
+  end
+
+  for idx, g in ipairs(cr.groups) do
+    local tracks_set, reels_set, cat_votes = {}, {}, {}
+    local rec_min, rec_max, src_min, src_max
+    local visible_items = 0
+
+    for _, c in ipairs(g.items) do
+      local rep = c.new or c.old
+      local reel_hidden  = hidden_reels  and hidden_reels[rep.reel or ""]
+      local group_hidden = hidden_groups and hidden_groups[CMP.event_category(rep)]
+      if not reel_hidden and not group_hidden then
+        visible_items = visible_items + 1
+        for _, t in ipairs(rep.tracks or {}) do tracks_set[t] = true end
+        if rep.reel and rep.reel ~= "" then reels_set[rep.reel] = true end
+        if not rec_min or rep.rec_in < rec_min then rec_min = rep.rec_in end
+        if not rec_max or rep.rec_out > rec_max then rec_max = rep.rec_out end
+        if not src_min or rep.src_in < src_min then src_min = rep.src_in end
+        if not src_max or rep.src_out > src_max then src_max = rep.src_out end
+        for _, orig_row in ipairs(rep.__rows or {}) do
+          local cat = orig_row.group
+          if cat and cat ~= "" then cat_votes[cat] = (cat_votes[cat] or 0) + 1 end
+        end
+      end
+    end
+
+    if visible_items == 0 then goto next_group end
+    _guid_counter = _guid_counter + 1
+
+    local tracks, reels = {}, {}
+    for t in pairs(tracks_set) do tracks[#tracks + 1] = t end
+    for r in pairs(reels_set) do reels[#reels + 1] = r end
+    table.sort(tracks); table.sort(reels)
+
+    local best_cat, best_n = "", 0
+    for cat, n in pairs(cat_votes) do
+      if n > best_n then best_cat, best_n = cat, n end
+    end
+
+    rec_min, rec_max = rec_min or 0, rec_max or 0
+    src_min, src_max = src_min or 0, src_max or 0
+    local row = {
+      __event_idx  = _guid_counter,
+      __guid       = string.format("clb_%06d", _guid_counter),
+      __source_idx = 0,
+      __orig_track = "",
+      __compare_group = g,
+      event_num    = string.format("%03d", idx),
+      reel         = table.concat(reels, ", "),
+      track        = table.concat(tracks, ","),
+      edit_type    = "C",
+      src_tc_in    = EDL.seconds_to_tc(src_min, fps, is_drop),
+      src_tc_out   = EDL.seconds_to_tc(src_max, fps, is_drop),
+      rec_tc_in    = EDL.seconds_to_tc(rec_min, fps, is_drop),
+      rec_tc_out   = EDL.seconds_to_tc(rec_max, fps, is_drop),
+      clip_name    = g.label,
+      source_file  = "",
+      notes        = string.format("%s | %d item(s)", g.type, visible_items),
+      match_status = "",
+      matched_path = "",
+      group        = best_cat,
+      level        = "",
+      scene        = "",
+      take         = "",
+      audio_levels = {},
+      duration     = EDL.seconds_to_tc(rec_max - rec_min, fps, is_drop),
+    }
+    row.__search_text = table.concat({
+      row.event_num, row.reel, row.track, row.clip_name, row.notes, row.group,
+    }, " "):lower()
+    rows[#rows + 1] = row
+    ::next_group::
+  end
+
+  return rows
+end
+
+--- Save the current Compare result's recut groups directly to a .clb file,
+--- without disturbing whatever the user has loaded in the main table (works
+--- even if "Show as Table" was never clicked). Temporarily swaps ROWS /
+--- sources / loaded_file for the save, then restores them exactly.
+function CMP.save_dialog()
+  local cr = CLB.compare_result
+  if not cr then return end
+
+  local rows_backup           = ROWS
+  local sources_backup        = CLB.edl_sources
+  local loaded_file_backup    = CLB.loaded_file
+  local loaded_format_backup  = CLB.loaded_format
+
+  ROWS = CMP.build_group_rows(cr)
+  CLB.edl_sources = {}
+
+  local function base(name) return (name or ""):gsub("%.%w+$", "") end
+  local default = string.format("Compare_%s_vs_%s_%s.clb",
+    base(cr.old_source.name), base(cr.new_source.name), os.date("%Y%m%d_%H%M"))
+  local filepath = choose_save_path(default, "CLB Project (*.clb)\0*.clb\0All files\0*.*\0")
+  if filepath then
+    if not filepath:match("%.clb$") then filepath = filepath .. ".clb" end
+    CLB.last_dir = filepath:match("^(.*)[/\\]") or CLB.last_dir
+    save_clb_project(filepath, false)
+  end
+
+  ROWS              = rows_backup
+  CLB.edl_sources   = sources_backup
+  CLB.loaded_file   = loaded_file_backup
+  CLB.loaded_format = loaded_format_backup
+  save_prefs()
+end
+
+function CMP.draw_panel()
+  local cr = CLB.compare_result
+
+  if not cr then
+    reaper.ImGui_Text(ctx, "Compare: load OLD and NEW versions to begin.")
+    reaper.ImGui_Spacing(ctx)
+
+    if reaper.ImGui_Button(ctx, "Load Old...", scale(100), scale(26)) then
+      CMP.load_side("old")
+    end
+    reaper.ImGui_SameLine(ctx)
+    reaper.ImGui_Text(ctx, CLB.compare_old and
+      string.format("%s (%d events)", CLB.compare_old.name, #CLB.compare_old.rows)
+      or "(not loaded)")
+
+    if reaper.ImGui_Button(ctx, "Load New...", scale(100), scale(26)) then
+      CMP.load_side("new")
+    end
+    reaper.ImGui_SameLine(ctx)
+    reaper.ImGui_Text(ctx, CLB.compare_new and
+      string.format("%s (%d events)", CLB.compare_new.name, #CLB.compare_new.rows)
+      or "(not loaded)")
+
+    reaper.ImGui_Spacing(ctx)
+    reaper.ImGui_TextDisabled(ctx, "Accepts .edl / .xml / .aaf / .clb. Compare runs automatically once both are loaded.")
+    reaper.ImGui_Spacing(ctx)
+
+    if reaper.ImGui_Button(ctx, "Close", scale(90), scale(24)) then
+      -- Restore the Track/Reel/Group filter panels to reflect whatever is
+      -- actually in ROWS (CMP.run() repoints them at Compare's own data —
+      -- see CMP.rebuild_filters — so they'd otherwise stay stale here).
+      _rebuild_track_filters()
+      _rebuild_reel_filters()
+      _rebuild_group_filters()
+      CLB.show_compare_view = false
+    end
+    return
+  end
+
+  if reaper.ImGui_Button(ctx, "<< Show as Table", scale(140), scale(24)) then
+    CLB._compare_rows_backup = { rows = ROWS, sources = CLB.edl_sources }
+    ROWS = CMP.build_group_rows(cr)
+    CLB.edl_sources = {}
+    CLB.viewing_compare_groups = true
+    CLB.show_compare_view = false
+    sel_clear()
+    _rebuild_track_filters()
+    _rebuild_reel_filters()
+    _rebuild_group_filters()
+    CLB.cached_rows = nil
+  end
+  if reaper.ImGui_IsItemHovered(ctx) then
+    reaper.ImGui_SetTooltip(ctx, "Show one row per recut group in the main table\n(temporarily replaces your current list — 'Exit' restores it).")
+  end
+  reaper.ImGui_SameLine(ctx)
+  if reaper.ImGui_Button(ctx, "Save...", scale(70), scale(24)) then
+    CMP.save_dialog()
+  end
+  if reaper.ImGui_IsItemHovered(ctx) then
+    reaper.ImGui_SetTooltip(ctx, "Save the recut groups as a .clb project\n(does not touch your main table's current list).")
+  end
+  reaper.ImGui_SameLine(ctx)
+  if reaper.ImGui_Button(ctx, "Close", scale(70), scale(24)) then
+    -- Same reasoning as the setup-screen Close above: restore the filter
+    -- panels to reflect ROWS, not Compare's data.
+    _rebuild_track_filters()
+    _rebuild_reel_filters()
+    _rebuild_group_filters()
+    CLB.show_compare_view = false
+  end
+  reaper.ImGui_SameLine(ctx)
+  reaper.ImGui_Text(ctx, string.format("Compare: %s (old)  vs  %s (new)",
+    cr.old_source.name, cr.new_source.name))
+
+  local counts = {}
+  for _, c in ipairs(cr.changes) do counts[c.type] = (counts[c.type] or 0) + 1 end
+  local total_old, changed_old = #cr.old_dedup, 0
+  for _, e in ipairs(cr.old_dedup) do
+    if e.change_type then changed_old = changed_old + 1 end
+  end
+  local matched_pct = total_old > 0 and (100 * (total_old - changed_old) / total_old) or 100
+
+  reaper.ImGui_Text(ctx, string.format(
+    "Deleted %d   Trimmed %d   Extended %d   Moved %d   Added %d   |   Matched %.0f%%",
+    counts.Deleted or 0, counts.Trimmed or 0, counts.Extended or 0,
+    counts.Moved or 0, counts.Added or 0, matched_pct))
+
+  local function legend_swatch(label, color)
+    local dl = reaper.ImGui_GetWindowDrawList(ctx)
+    local x, y = reaper.ImGui_GetCursorScreenPos(ctx)
+    local sz = scale(12)
+    reaper.ImGui_DrawList_AddRectFilled(dl, x, y + scale(2), x + sz, y + sz + scale(2), color)
+    reaper.ImGui_Dummy(ctx, sz, sz + scale(2))
+    reaper.ImGui_SameLine(ctx)
+    reaper.ImGui_Text(ctx, label)
+    reaper.ImGui_SameLine(ctx)
+  end
+  legend_swatch("Deleted", CMP.colors.Deleted)
+  legend_swatch("Trimmed", CMP.colors.Trimmed)
+  legend_swatch("Extended", CMP.colors.Extended)
+  legend_swatch("Moved", CMP.colors.Moved)
+  legend_swatch("Added", CMP.colors.Added)
+  reaper.ImGui_NewLine(ctx)
+
+  -- Hidden sets from the Track/Reel/Group filter panels (rebuilt from this
+  -- compare result by CMP.rebuild_filters — see run()), so toggling them
+  -- above the Compare view actually hides what's drawn here.
+  local hidden_tracks, hidden_reels, hidden_groups
+  for _, tf in ipairs(CLB.track_filters) do
+    if not tf.visible then hidden_tracks = hidden_tracks or {}; hidden_tracks[tf.name] = true end
+  end
+  for _, rf in ipairs(CLB.reel_filters) do
+    if not rf.visible then hidden_reels = hidden_reels or {}; hidden_reels[rf.name] = true end
+  end
+  for _, gf in ipairs(CLB.group_filters) do
+    if not gf.visible then hidden_groups = hidden_groups or {}; hidden_groups[gf.name] = true end
+  end
+
+  -- Union track order so SRC/DEST lanes line up at the same row.
+  local track_set, track_order = {}, {}
+  for _, e in ipairs(cr.old_dedup) do
+    for _, t in ipairs(e.tracks) do
+      if not track_set[t] then track_set[t] = true; track_order[#track_order + 1] = t end
+    end
+  end
+  for _, e in ipairs(cr.new_dedup) do
+    for _, t in ipairs(e.tracks) do
+      if not track_set[t] then track_set[t] = true; track_order[#track_order + 1] = t end
+    end
+  end
+  -- Drop hidden tracks from the lane list entirely (not just their clips),
+  -- so toggling a track off actually collapses its row instead of leaving
+  -- an empty lane taking up vertical space.
+  if hidden_tracks then
+    local visible_order = {}
+    for _, t in ipairs(track_order) do
+      if not hidden_tracks[t] then visible_order[#visible_order + 1] = t end
+    end
+    track_order = visible_order
+  end
+  table.sort(track_order, _natural_sort_cmp)
+  local track_index = {}
+  for i, t in ipairs(track_order) do track_index[t] = i end
+
+  -- Shared time domain: OLD is the reference axis; DEST is displayed at
+  -- (rec - align_shift), see draw_cmp_side's header comment.
+  local tmin, tmax
+  local function scan(events, is_dest)
+    for _, e in ipairs(events) do
+      local shift = is_dest and (e.align_shift or 0) or 0
+      local a, b = e.rec_in - shift, e.rec_out - shift
+      if not tmin or a < tmin then tmin = a end
+      if not tmax or b > tmax then tmax = b end
+    end
+  end
+  scan(cr.old_dedup, false)
+  scan(cr.new_dedup, true)
+  if not tmin then tmin = 0 end
+  if not tmax or tmax <= tmin then tmax = tmin + 1 end
+
+  local _, avail_h = reaper.ImGui_GetContentRegionAvail(ctx)
+  local splitter_h = scale(6)
+  local half_h  = math.max(scale(40), (avail_h - splitter_h) * CLB.cmp_split_ratio)
+  local other_h = math.max(scale(40), avail_h - splitter_h - half_h)
+
+  CMP.draw_side("SRC (old)", cr.old_dedup, track_order, track_index, tmin, tmax, half_h, false, "cmp_old", cr.fps, cr.is_drop, hidden_tracks, hidden_reels, hidden_groups)
+
+  local avail_w = reaper.ImGui_GetContentRegionAvail(ctx)
+  reaper.ImGui_InvisibleButton(ctx, "##cmp_splitter", avail_w, splitter_h)
+  if reaper.ImGui_IsItemActive(ctx) then
+    local _, dy = reaper.ImGui_GetMouseDelta(ctx)
+    if dy and dy ~= 0 then
+      CLB.cmp_split_ratio = math.max(0.2, math.min(0.8, CLB.cmp_split_ratio + dy / avail_h))
+    end
+  end
+  local dl2 = reaper.ImGui_GetWindowDrawList(ctx)
+  local mnx, mny = reaper.ImGui_GetItemRectMin(ctx)
+  local mxx, mxy = reaper.ImGui_GetItemRectMax(ctx)
+  reaper.ImGui_DrawList_AddRectFilled(dl2, mnx, mny + 2, mxx, mxy - 2,
+    reaper.ImGui_IsItemHovered(ctx) and 0xAAAAAAFF or 0x666666FF)
+  if reaper.ImGui_IsItemHovered(ctx) then
+    reaper.ImGui_SetMouseCursor(ctx, reaper.ImGui_MouseCursor_ResizeNS())
+  end
+
+  CMP.draw_side("DEST (new)", cr.new_dedup, track_order, track_index, tmin, tmax, other_h, true, "cmp_new", cr.fps, cr.is_drop, hidden_tracks, hidden_reels, hidden_groups)
+end
+
+---------------------------------------------------------------------------
 -- Draw: Main Content Area (split view support)
 ---------------------------------------------------------------------------
 local function draw_main_content()
+  -- Compare view takes over the whole content area when active.
+  if CLB.show_compare_view then
+    CMP.draw_panel()
+    return
+  end
+
   -- Check if we're loading audio files
   if draw_loading_progress() then
     -- Show EDL table above progress bar
