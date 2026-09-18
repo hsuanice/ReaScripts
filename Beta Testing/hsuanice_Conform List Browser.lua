@@ -1,6 +1,6 @@
 --[[
 @description Conform List Browser
-@version 260918.1350
+@version 260919.0106
 @author hsuanice
 @about
   A REAPER script for browsing and editing EDL (Edit Decision List) data
@@ -51,6 +51,215 @@
   Required for AAF: aaftool in PATH (https://github.com/agfline/LibAAF)
 
 @changelog
+  v260919.0106
+  - Fix: "Scene Cuts" never actually used Match All's audio-inferred
+    row.scene — it preferred row.clip_name whenever clip_name was merely
+    non-empty (true for almost every row, even filler/"Empty" items with
+    no real scene in the name), so the inferred value sat there unused.
+    Now prefers row.scene when it's set (the authoritative, already-
+    resolved value) and only falls back to parsing clip_name when
+    row.scene is empty.
+  - Fix: scene numbers differing only by leading zeros (e.g. "4" and "04")
+    were treated as different scenes, splitting what should have been one
+    Scene Cuts segment. Now normalised the same way track/reel/group names
+    already are elsewhere in the tool, so "4" and "04" group together.
+
+  v260919.0052
+  - Change: moved the audio-based Scene/Take inference from "Scene Cuts"
+    into Match All, per feedback — it now runs for every Video row whose
+    Scene/Take is empty, backfilling row.scene/row.take verbatim (not
+    split) from the majority Scene/Take among overlapping Audio rows.
+    Inferred rows are flagged (row.__scene_inferred), colored orange on
+    the Scene/Take columns (with a tooltip explaining why, mirroring the
+    Fallback convention), and noted in the Notes column. Never overwrites
+    an existing value. The console summary reports how many were
+    inferred.
+  - Change: "Scene Cuts" no longer does its own audio scanning/inference
+    or (inferred) labeling — it now simply reads row.scene as a fallback
+    when the clip name itself has no scene, and always strips down to
+    just the leading scene token for grouping (e.g. "P1" out of a
+    Match-All-backfilled "P1-1"), regardless of source.
+
+  v260919.0033
+  - Fix: audio-inferred scenes were showing the full "Scene-Shot" value
+    from the audio's Scene metadata (e.g. "P1-1", "P1-WT", "P2-13") instead
+    of just the Scene half ("P1", "P2") — fragmenting what should have been
+    one Scene Cuts segment per scene. Now splits the audio Scene field into
+    Scene + Shot, votes/groups on Scene only, and separately tracks a
+    representative Shot (nested majority vote among the winning scene's
+    own audio entries).
+  - Feature: that inference now also syncs back onto the actual Video row
+    — not just the transient Scene Cuts item — filling row.scene (from the
+    inferred Scene) and row.take (from the inferred Shot) whenever those
+    fields are currently empty, so it shows up in the main table's Scene/
+    Take columns and persists. Never overwrites existing values; applies
+    as soon as Scene Cuts runs, independent of whether you go on to create
+    the track. The confirm dialog reports how many rows were backfilled.
+
+  v260919.0024
+  - Feature: "Scene Cuts" now infers a scene for video clips whose own clip
+    name has no scene info at all, from whichever scene the majority of
+    overlapping audio events (row.scene — parsed from the audio clip name
+    or backfilled from matched BWF metadata by Match All) agree on; a
+    handful of inserts/cutaways from a different scene in the same range
+    are outvoted and ignored. Inferred items are colored orange with
+    "(inferred)" appended to the take name — same "double check this one"
+    visual language as Fallback audio matches — since it's a majority-vote
+    guess, not read directly off the clip. Requires Match All to have been
+    run first so audio rows actually have row.scene populated; the confirm
+    and completion dialogs both report how many items were inferred.
+
+  v260919.0010
+  - Fix: "Scene Cuts" produced overlapping, fragmented items for the same
+    scene — the algorithm walked rows sequentially (essentially detecting
+    picture CUTS, not real scene continuity), so a second video track
+    (B-roll/insert coverage) carrying the same scene number over an
+    overlapping time range produced its own separate, shorter same-scene
+    item that visually overlapped the main one. Now collects every Video-
+    row occurrence of each scene from ALL video tracks first, then merges
+    overlapping-or-touching (within ~2 frames, to bridge a cut/transition
+    gap) intervals per scene into one continuous item — a scene number
+    that genuinely recurs later with a real gap still gets its own item,
+    but continuous coverage of the same scene across multiple tracks now
+    collapses into a single non-overlapping segment as expected.
+
+  v260919.0002
+  - Change: "Scene Cuts" now groups by just the FIRST clip-name token (e.g.
+    "06" in "06_01_T03_A - Merged") instead of "scene_shot" combined
+    ("06_01") — for episodic naming, the shot number right after the scene
+    number isn't itself a scene boundary, so shots 06_01/06_02/06_03 etc.
+    should all merge into one Scene Cuts segment rather than each starting
+    a new one. Kept separate from Strategy 6's audio Scene+Take matching,
+    which still needs the fuller "scene_shot" to avoid matching audio to
+    the wrong shot within a scene.
+
+  v260918.2358
+  - Fix: "Scene Cuts" used its own crude, hardcoded scene-ID parser instead
+    of the same robust ones Strategy 6 (audio Scene+Take matching) already
+    uses — it required clip names to split into exactly 4+ underscore
+    tokens with the 4th starting with "T", so real video clips like
+    "06_01_T03_A - Merged" (take lands at token 3, not 4, once the " -
+    Merged" suffix and trailing channel letter are accounted for) were
+    silently skipped, while unrelated audio-recorder filenames like
+    "BK9526_56B_..._t1..." happened to satisfy that same narrow check and
+    got wrongly treated as scenes. Now reuses the shared scene/take parsers
+    and only scans Video-track rows (audio clip names aren't scene/shot/
+    take names at all, so they were never meant to be scanned here).
+
+  v260918.2144
+  - Fix: sorting the main table by "Matched File" couldn't actually group
+    Scene+Take fallback matches apart from Tape+TC ones (or from real
+    matches), even though the header showed a sort arrow and appeared to
+    do something — the "[Scene+Take] "/"[Tape+TC] " prefix added in
+    v260918.2133 was only applied at draw time, never part of the actual
+    value being compared, so identical-looking "(N)" candidate-count
+    strings just kept their original row order. The prefix now lives in
+    get_cell_text() itself (single source of truth for both display and
+    sort), so sorting by Matched File clusters Scene+Take, Tape+TC, and
+    plain matches into separate blocks as expected — e.g. to bulk-assign
+    all Scene+Take rows to their own Group.
+
+  v260918.2133
+  - Fix: Strategy 6 (normalised Scene+Take) audio matches were reported as
+    plain "Found"/"Multiple" — identical to an actual filename- or TC-
+    verified match — even though Strategy 6 never checks source TC at all
+    (it's the last-resort strategy, tried only when Strategies 1-5,
+    including the Tape+TC fallback, all found nothing). Confirmed by a real
+    case: an EDL row matched several audio files sharing its Scene+Take
+    despite their embedded Source TC being hours off from the row's Src TC
+    In. Strategy 6 matches are now flagged "Fallback" (same orange
+    highlighting as the existing Tape+TC fallback) with their own "[Scene+
+    Take]" Matched File label and tooltip explaining source TC was never
+    checked, instead of silently looking identical to a solid match. The
+    matching-complete console summary now also breaks fallback counts down
+    by which kind.
+
+  v260918.1740
+  - Fix: Audio List / conform matching sorted files strictly alphabetically
+    (A1, A10, A11, A12, A2, A3...), not naturally — confirmed by a real
+    folder of PN_AAP.A2–A12.WAV files listing out of order. Now uses the
+    same natural-sort helper already used for track/reel/group names (A1,
+    A2, A3...A10, A11, A12) in three places: scanning an audio folder fresh,
+    loading a previously-saved audio metadata cache (so an old cache from
+    before this fix still comes back in the right order), and the Audio
+    table's own column-header sort when sorting by a text column.
+
+  v260918.1534
+  - Feature: "Shift Selected Tracks Now" now adds a region ("CLB: OLD",
+    gray) spanning the full range of the just-shifted items, so the offset
+    stretch is obviously labeled on the ruler/timeline at a glance.
+    Re-running the shift replaces the same-named region with a fresh one
+    covering the new bounds, instead of piling up duplicates.
+
+  v260918.1527
+  - Feature: "Shift Selected Tracks Now" now bakes the same shift into the
+    loaded Compare result's Old Rec TC (cr.old_dedup), not just the real
+    Reaper items — Recut Group Details, the graphical Compare timeline, and
+    every click-to-jump were still reading the pre-shift position, which no
+    longer matched where the item actually sits after a real shift. "Show
+    as Table"'s cached rows are rebuilt too if currently viewing them. The
+    matching-only "Offset Old" checkbox (Modes... popup) is then turned off
+    automatically, since the shift is now baked directly into the data —
+    leaving it on would double-count it in later Analyze & Match / Apply
+    runs.
+
+  v260918.1521
+  - Fix: "Shift Selected Tracks Now" could scatter items across several
+    different landing spots instead of a uniform +Nh shift, and not every
+    item actually moved — confirmed on a real 526-item run via before/after
+    RGWH Monitor track dumps (a touching run of items fragmented into
+    isolated items at irregular gaps after shifting). Cause: the shift loop
+    re-read GetTrackMediaItem(track, i) by index on every iteration while
+    moving items — Reaper keeps each track's item list sorted by position,
+    so moving item i re-sorts the list the remaining indices point into,
+    silently skipping some items and reprocessing others. Fixed by
+    snapshotting every item pointer into a fixed list before moving
+    anything, then looping over that snapshot.
+  - Change: locked items are no longer skipped — each is temporarily
+    unlocked, shifted, then re-locked to its original state, so a locked
+    item no longer gets left behind when the rest of the track moves out
+    of the way.
+
+  v260918.1454
+  - Feature: "Shift Selected Tracks Now" now confirms exactly how many
+    items it moved ("Shifted N item(s) by +Nh on N track(s)") after
+    finishing, instead of finishing silently — the shift itself was never
+    limited to a subset (it always walks every item on every selected
+    track, skipping only locked ones), but with no completion feedback a
+    docked overview panel bound to a stale time selection could look like
+    proof that fewer items moved than expected.
+
+  v260918.1450
+  - Fix: Reconform Offset controls in the Modes popup were cramped at
+    larger font scales (e.g. 125%) — the hours field, its "h" label, and
+    the "Shift Selected Tracks Now" button all ran into each other on one
+    line ("10 - + h Shift Selected Tracks Now"). Widened the hours field,
+    replaced the glued-on "h" with a spaced-out "hours" label, and moved
+    "Shift Selected Tracks Now" to its own indented line below each
+    checkbox+field row instead of packing everything horizontally.
+
+  v260918.1442
+  - Feature: "Analyze & Match..." — step 3 of the reconform pipeline
+    (Compare → Offset Old → Analyze & Match → manual fixes → Apply).
+    Non-destructive preview: scans the Reaper-selected track(s) and matches
+    every recut candidate (all groups except Added, which has no old item)
+    to a real item there, using the same Matched Item (metadata identity)
+    and Length Match strategies Apply uses — offset-aware, so if Offset Old
+    is enabled the search targets the shifted position, not the original
+    one. Matched items are colored by recut type (Deleted red, Trimmed
+    blue, Extended green, Moved orange, Shift gray) and get a take marker
+    (prefixed "[CLB] ", reused on repeat runs rather than piling up) naming
+    the group's own label, e.g. "Trimmed (head +0f/tail+78f)" or "Shift
+    +86392f (635 clips)" — a glance at the arrange view shows what Apply
+    would do, before anything is actually touched. Ends with a match-count
+    summary (Matched Item / Length Match / Unmatched).
+  - Refactor: extracted the Mode A/C matcher functions (find_metadata_match,
+    find_all_length_matches) and track_label/item_take_name out of
+    CMP.apply_to_reaper into standalone CMP.* functions so both Apply and
+    the new Analyze & Match share one implementation instead of two. Apply
+    itself is unchanged — its local names now just delegate to the shared
+    versions.
+
   v260918.1350
   - Change: Remove Dups and Consolidate now only scan/act on the currently-
     filtered (visible) event list, like Generate Items already did — rows
@@ -1352,7 +1561,7 @@ end
 ---------------------------------------------------------------------------
 local SCRIPT_NAME = "Conform List Browser"
 local EXT_NS = "hsuanice_ConformListBrowser"
-local VERSION = "260918.1350"
+local VERSION = "260919.0106"
 
 -- Column definitions (EDL Events table)
 local COL = {
@@ -1970,6 +2179,18 @@ local function save_audio_cache(folder, recursive, files)
   return true
 end
 
+-- Forward-declared here so load_audio_cache/scan_audio_folder below can use
+-- it for filename sort order (natural sort: A1, A2, A10 instead of A1, A10,
+-- A2); actually defined further down, alongside its other users (track/
+-- reel/group sorts).
+local _natural_sort_cmp
+
+-- Forward-declared here so match_audio_files below can use it (to tell
+-- Video rows apart from Audio ones when inferring Scene/Take from
+-- overlapping audio); actually defined further down, alongside its other
+-- use (initial auto-assign of row.group on load).
+local _get_track_group
+
 --- Load audio metadata cache from file
 --- Returns files array if cache valid, nil if cache invalid/missing
 local function load_audio_cache(folder, recursive)
@@ -2035,6 +2256,11 @@ local function load_audio_cache(folder, recursive)
     return nil
   end
 
+  -- Natural sort (A1, A2, A10 instead of A1, A10, A2) — applied here so a
+  -- cache saved before this fix existed still comes back in the right
+  -- order, not whatever order it happened to be saved in.
+  table.sort(files, function(a, b) return _natural_sort_cmp(a.filename or "", b.filename or "") end)
+
   console_msg(string.format("Loaded %d files from cache", #files))
   return files
 end
@@ -2081,9 +2307,9 @@ local function scan_audio_folder(base_path, recursive)
 
   scan_dir(base_path, "")
 
-  -- Sort by filename
+  -- Sort by filename (natural sort: A1, A2, A10 instead of A1, A10, A2)
   table.sort(files, function(a, b)
-    return (a.filename or ""):lower() < (b.filename or ""):lower()
+    return _natural_sort_cmp(a.filename or "", b.filename or "")
   end)
 
   return files
@@ -2604,8 +2830,12 @@ local function match_audio_files()
     -- Strategy 5 (fallback): Tape+TC range match — ignores filename entirely.
     -- Used when EDL has wrong clip name but correct reel/TC (e.g. wipe TO=BL or
     -- a typo in the clip name field). Marks result as "Fallback" so the UI can
-    -- flag it visually.
-    local is_fallback = false
+    -- flag it visually. fallback_kind records WHICH fallback strategy actually
+    -- produced the match (Strategy 5 = "tape_tc", Strategy 6 below =
+    -- "scene_take") so the UI can show the right reason instead of assuming
+    -- Tape+TC for every fallback — a Strategy-6 (Scene+Take-only) match never
+    -- checked source TC at all, so it needs its own distinct warning.
+    local fallback_kind = nil
     if #candidates == 0 and row.reel and row.reel ~= "" and
        row.src_tc_in and row.src_tc_in ~= "" then
       local reel_lower = row.reel:lower()
@@ -2627,10 +2857,18 @@ local function match_audio_files()
           end
         end
       end
-      if #candidates > 0 then is_fallback = true end
+      if #candidates > 0 then fallback_kind = "tape_tc" end
     end
 
-    -- Strategy 6: normalised Scene + Take match
+    -- Strategy 6: normalised Scene + Take match — source TC is never
+    -- consulted here at all (unlike Strategy 5, which at least confirms the
+    -- audio file's own embedded TC range covers the EDL row's src_tc_in).
+    -- This exists for productions where the audio recorder wasn't jam-
+    -- synced to camera (embedded TC is meaningless) but slate scene/take
+    -- numbers are trustworthy — real, but strictly weaker evidence than any
+    -- TC-based strategy, so it's flagged as "Fallback" too (fallback_kind
+    -- = "scene_take") rather than silently reported as "Found"/"Multiple"
+    -- the same as an identity- or TC-verified match.
     -- Tries (in order):
     --   1. Existing scene/take metadata on the row (from AAF UserComments or
     --      otio_to_clb.py clip-name parse)
@@ -2671,11 +2909,13 @@ local function match_audio_files()
           end
         end
       end
+      if #candidates > 0 then fallback_kind = "scene_take" end
     end
 
     -- Set match result
+    row.__fallback_kind = fallback_kind
     if #candidates == 1 then
-      row.match_status = is_fallback and "Fallback" or "Found"
+      row.match_status = fallback_kind and "Fallback" or "Found"
       row.matched_path = candidates[1].path
       row.__match_candidates = nil
       found_count = found_count + 1
@@ -2723,7 +2963,7 @@ local function match_audio_files()
 
       end
     elseif #candidates > 1 then
-      row.match_status = is_fallback and "Fallback" or "Multiple"
+      row.match_status = fallback_kind and "Fallback" or "Multiple"
       row.matched_path = string.format("(%d)", #candidates)
       row.__match_candidates = candidates
       multiple_count = multiple_count + 1
@@ -2790,14 +3030,23 @@ local function match_audio_files()
     }, " "):lower()
   end
 
-  local fallback_count = 0
+  local fallback_tc_count, fallback_st_count = 0, 0
   for _, row in ipairs(ROWS) do
-    if row.match_status == "Fallback" then fallback_count = fallback_count + 1 end
+    if row.match_status == "Fallback" then
+      if row.__fallback_kind == "scene_take" then
+        fallback_st_count = fallback_st_count + 1
+      else
+        fallback_tc_count = fallback_tc_count + 1
+      end
+    end
   end
+  local fallback_parts = {}
+  if fallback_tc_count > 0 then fallback_parts[#fallback_parts+1] = string.format("%d fallback (Tape+TC only)", fallback_tc_count) end
+  if fallback_st_count > 0 then fallback_parts[#fallback_parts+1] = string.format("%d fallback (Scene+Take only, TC unverified)", fallback_st_count) end
   console_msg(string.format(
     "Matching complete: %d found, %d multiple, %d not found%s",
     found_count, multiple_count, not_found_count,
-    fallback_count > 0 and string.format(", %d fallback (Tape+TC only)", fallback_count) or ""))
+    #fallback_parts > 0 and (", " .. table.concat(fallback_parts, ", ")) or ""))
 
   -- Strategy 6 detail: which parsers matched how many clips
   local s6_total = 0
@@ -2828,6 +3077,89 @@ local function match_audio_files()
 
   if #bf_parts > 0 then
     console_msg("  Repaired: " .. table.concat(bf_parts, ", ") .. " value(s) from matched audio  [✦ = repaired row]")
+  end
+
+  -- Infer Scene/Take for Video rows whose own metadata is still empty
+  -- (clip name gave nothing, and no BWF-metadata backfill applies to
+  -- Video rows the way it does for matched Audio rows), from the majority
+  -- Scene/Take among Audio rows overlapping the same REC TC range —
+  -- copied verbatim, not split. This production's Scene field may itself
+  -- be a combined "Scene-Shot" value like "P1-1"; that's preserved as-is
+  -- here — Scene Cuts strips it down to just the scene prefix at its own
+  -- use site instead of this being split at the source. A handful of
+  -- inserts/cutaways voting for a different scene in the same range are
+  -- outvoted and ignored.
+  do
+    local audio_evts = {}
+    for _, row in ipairs(ROWS) do
+      if _get_track_group(row.track) == "Audio" and ((row.scene or "") ~= "" or (row.take or "") ~= "") then
+        audio_evts[#audio_evts + 1] = {
+          rec_in  = EDL.tc_to_seconds(row.rec_tc_in,  CLB.fps, CLB.is_drop),
+          rec_out = EDL.tc_to_seconds(row.rec_tc_out, CLB.fps, CLB.is_drop),
+          scene   = row.scene or "",
+          take    = row.take  or "",
+        }
+      end
+    end
+    table.sort(audio_evts, function(a, b) return a.rec_in < b.rec_in end)
+
+    local function vote(rec_in, rec_out, field)
+      local votes, first_seen = {}, {}
+      for _, a in ipairs(audio_evts) do
+        if a.rec_in >= rec_out then break end   -- sorted by rec_in: nothing further can overlap
+        if a.rec_out > rec_in and a[field] ~= "" then
+          local key = a[field]:upper()
+          votes[key] = (votes[key] or 0) + 1
+          first_seen[key] = first_seen[key] or a[field]
+        end
+      end
+      local best_key, best_n = nil, 0
+      for key, n in pairs(votes) do
+        if n > best_n then best_key, best_n = key, n end
+      end
+      return best_key and first_seen[best_key] or nil
+    end
+
+    local scene_inferred_n, take_inferred_n = 0, 0
+    if #audio_evts > 0 then
+      for _, row in ipairs(ROWS) do
+        if _get_track_group(row.track) == "Video" then
+          local need_scene = (row.scene or "") == ""
+          local need_take  = (row.take  or "") == ""
+          if need_scene or need_take then
+            local rec_in  = EDL.tc_to_seconds(row.rec_tc_in,  CLB.fps, CLB.is_drop)
+            local rec_out = EDL.tc_to_seconds(row.rec_tc_out, CLB.fps, CLB.is_drop)
+            local touched = false
+            if need_scene then
+              local s = vote(rec_in, rec_out, "scene")
+              if s then row.scene = s; scene_inferred_n = scene_inferred_n + 1; touched = true end
+            end
+            if need_take then
+              local t = vote(rec_in, rec_out, "take")
+              if t then row.take = t; take_inferred_n = take_inferred_n + 1; touched = true end
+            end
+            if touched then
+              row.__scene_inferred = true
+              row.notes = ((row.notes or "") ~= "" and (row.notes .. " | ") or "") .. "Scene/Take inferred from overlapping audio"
+              row.__search_text = table.concat({
+                row.event_num or "", row.reel or "", row.track or "",
+                row.clip_name or "", row.source_file or "", row.notes or "",
+                row.group or "", row.level or "",
+                row.scene or "", row.take or "",
+                row.src_tc_in or "", row.src_tc_out or "",
+                row.rec_tc_in or "", row.rec_tc_out or "",
+                row.duration or "",
+              }, " "):lower()
+            end
+          end
+        end
+      end
+    end
+    if scene_inferred_n > 0 or take_inferred_n > 0 then
+      console_msg(string.format(
+        "  Video Scene/Take inferred from overlapping audio: %d scene, %d take value(s)  [orange Scene/Take = inferred]",
+        scene_inferred_n, take_inferred_n))
+    end
   end
 
   -- Reel values may have changed; refresh the Reel Filter sidebar
@@ -2909,10 +3241,10 @@ local function get_audio_view_rows()
       if type(va) == "number" and type(vb) == "number" then
         if asc then return va < vb else return va > vb end
       end
-      -- Handle strings (case-insensitive)
-      va = tostring(va):lower()
-      vb = tostring(vb):lower()
-      if asc then return va < vb else return va > vb end
+      -- Handle strings (natural sort: A1, A2, A10 instead of A1, A10, A2)
+      va = tostring(va)
+      vb = tostring(vb)
+      if asc then return _natural_sort_cmp(va, vb) else return _natural_sort_cmp(vb, va) end
     end)
   end
 
@@ -3254,11 +3586,19 @@ local function get_cell_text(row, col_id)
   if col_id == COL.NOTES        then return row.notes or "" end
   if col_id == COL.MATCH_STATUS then return row.match_status or "" end
   if col_id == COL.MATCHED_PATH then
-    -- Show just filename for display, full path in tooltip
+    -- Show just filename for display, full path in tooltip. The Fallback
+    -- "[Scene+Take] "/"[Tape+TC] " prefix lives here (not just at render
+    -- time) so it's also part of what get_sort_value below sorts by —
+    -- otherwise sorting this column couldn't tell the two fallback kinds
+    -- apart (they were only distinguished by a draw-time-only text mutation).
+    local text = ""
     if row.matched_path and row.matched_path ~= "" then
-      return row.matched_path:match("([^/\\]+)$") or row.matched_path
+      text = row.matched_path:match("([^/\\]+)$") or row.matched_path
     end
-    return ""
+    if row.match_status == "Fallback" then
+      text = (row.__fallback_kind == "scene_take" and "[Scene+Take] " or "[Tape+TC] ") .. text
+    end
+    return text
   end
   if col_id == COL.GROUP        then return row.group or "" end
   if col_id == COL.SCENE        then return row.scene or "" end
@@ -3606,7 +3946,7 @@ local function _register_source(filepath, event_count)
 end
 
 --- Natural sort comparison (handles numbers correctly: A1, A2, A10 instead of A1, A10, A2)
-local function _natural_sort_cmp(a, b)
+function _natural_sort_cmp(a, b)
   -- Split strings into parts of letters and numbers
   local function split_parts(s)
     local parts = {}
@@ -3711,7 +4051,7 @@ local DEFAULT_GROUP_NAMES = { "Video", "Audio", "ADR", "Location", "Effects", "M
 
 --- Determine group for a track name based on prefix (used for initial auto-assign only).
 --- A* → Audio, V* → Video, NONE → NONE, others → Other
-local function _get_track_group(track_name)
+function _get_track_group(track_name)
   if not track_name or track_name == "" then return "Other" end
   local upper = track_name:upper()
   if upper == "NONE" then return "NONE" end
@@ -6081,50 +6421,92 @@ local function create_scene_cut_track()
   local fps     = CLB.fps     or 24
   local is_drop = CLB.is_drop or false
 
-  -- Parse scene ID from clip name: EP_Scene_Shot_Ttake[_Camera]
-  -- e.g. "06_01B_01_T05_A" → "06_01B"
-  local function get_scene_id(clip_name)
-    if not clip_name or clip_name == "" then return nil end
-    local parts = {}
-    for p in clip_name:gmatch("[^_]+") do parts[#parts + 1] = p end
-    if #parts >= 4 and parts[4]:sub(1, 1):upper() == "T" then
-      return parts[1] .. "_" .. parts[2]
+  -- Scene ID for "Scene Cuts" purposes: prefer row.scene when it's set —
+  -- it's the authoritative, already-resolved value (either originally
+  -- parsed, or backfilled by Match All's audio-inference — see
+  -- match_audio_files), and can't be reliably re-derived by blindly
+  -- grabbing clip_name's first token (many clip names, e.g. filler/
+  -- "Empty" items, start with alnum text that isn't a scene at all — an
+  -- earlier version of this preferred clip_name whenever it was merely
+  -- non-empty, which meant an inferred row.scene was never actually used
+  -- here even though it existed). Falls back to clip_name's first token
+  -- only when row.scene is empty (e.g. Match All hasn't been run yet).
+  -- Either way, only the FIRST token is kept — e.g. "06" out of
+  -- "06_01_T03_A - Merged", or "P1" out of a row.scene of "P1-1" — this
+  -- deliberately does NOT reuse SCENE_TAKE_PARSERS (which keeps the
+  -- fuller "06_01"/"P1-1" for Strategy 6's audio Scene+Take matching,
+  -- where dropping the shot number would risk matching audio to the
+  -- wrong shot within a scene): for episodic naming, the shot/take
+  -- number after the scene number is not itself a scene boundary, so
+  -- shots "06_01"/"06_02"/"06_03" (or "P1-1"/"P1-WT") all merge into one
+  -- Scene Cuts segment. _norm_scene_token also strips leading zeros, so
+  -- "4" and "04" are recognised as the same scene. Rows are already
+  -- filtered to Video tracks only below, so no extra pattern validation
+  -- is needed here.
+  local function get_scene_id(row)
+    local raw
+    if row.scene and row.scene ~= "" then
+      raw = row.scene:match("^([%w]+)")
+    elseif row.clip_name and row.clip_name ~= "" then
+      raw = row.clip_name:match("^([%w]+)")
     end
-    return nil
+    return raw and _norm_scene_token(raw) or nil
   end
 
-  -- Walk events in timeline order; group consecutive same-scene events
-  local scene_items = {}
-  local cur_scene, cur_in, cur_out
-
-  local function flush()
-    if cur_scene then
-      scene_items[#scene_items + 1] = { scene_id = cur_scene, rec_in = cur_in, rec_out = cur_out }
-    end
-    cur_scene, cur_in, cur_out = nil, nil, nil
-  end
-
+  -- Collect every Video-row occurrence of each scene, from ALL video
+  -- tracks — not just walked in row order on one track at a time. Walking
+  -- rows sequentially (an earlier approach) only ever detected picture
+  -- CUTS (every row-to-row change), not real scene continuity: a second
+  -- video track (B-roll/insert coverage) carrying the same scene number
+  -- over an overlapping time range produced its own separate, shorter
+  -- same-scene item that visually overlapped the main one instead of
+  -- being recognised as the same continuous scene.
+  local by_scene = {}      -- scene_id -> { {rec_in, rec_out}, ... }
+  local scene_order = {}   -- first-seen order, for stable iteration
   for _, row in ipairs(ROWS) do
-    local scene_id = get_scene_id(row.clip_name)
-    local rec_in   = EDL.tc_to_seconds(row.rec_tc_in,  fps, is_drop)
-    local rec_out  = EDL.tc_to_seconds(row.rec_tc_out, fps, is_drop)
-
-    if scene_id and scene_id == cur_scene then
-      if rec_out > cur_out then cur_out = rec_out end  -- extend
-    else
-      flush()
+    if _get_track_group(row.track) == "Video" then
+      local scene_id = get_scene_id(row)
       if scene_id then
-        cur_scene, cur_in, cur_out = scene_id, rec_in, rec_out
+        local rec_in  = EDL.tc_to_seconds(row.rec_tc_in,  fps, is_drop)
+        local rec_out = EDL.tc_to_seconds(row.rec_tc_out, fps, is_drop)
+        if not by_scene[scene_id] then
+          by_scene[scene_id] = {}
+          scene_order[#scene_order + 1] = scene_id
+        end
+        local list = by_scene[scene_id]
+        list[#list + 1] = { rec_in = rec_in, rec_out = rec_out }
       end
     end
   end
-  flush()
+
+  -- Merge each scene's own intervals: overlapping or touching (within a
+  -- small tolerance, to bridge a 1-2 frame gap at a cut/transition) runs
+  -- become one continuous Scene Cuts item; a scene number that recurs much
+  -- later with a real gap in between still becomes its own separate item.
+  local GAP_TOL = 2 / fps
+  local scene_items = {}
+  for _, scene_id in ipairs(scene_order) do
+    local list = by_scene[scene_id]
+    table.sort(list, function(a, b) return a.rec_in < b.rec_in end)
+    local run_in, run_out = list[1].rec_in, list[1].rec_out
+    for i = 2, #list do
+      local iv = list[i]
+      if iv.rec_in <= run_out + GAP_TOL then
+        if iv.rec_out > run_out then run_out = iv.rec_out end
+      else
+        scene_items[#scene_items + 1] = { scene_id = scene_id, rec_in = run_in, rec_out = run_out }
+        run_in, run_out = iv.rec_in, iv.rec_out
+      end
+    end
+    scene_items[#scene_items + 1] = { scene_id = scene_id, rec_in = run_in, rec_out = run_out }
+  end
+  table.sort(scene_items, function(a, b) return a.rec_in < b.rec_in end)
 
   if #scene_items == 0 then
     reaper.ShowMessageBox(
-      "No scene events found.\n\n" ..
-      "Expected clip name format: EP_Scene_Shot_Ttake[_Camera]\n" ..
-      "Example: 06_01B_01_T05_A",
+      "No scene events found on Video track(s).\n\n" ..
+      "Scene is read as the first token of the clip name, or of row Scene\n" ..
+      "(e.g. \"06\" in \"06_01_T03_A - Merged\", or \"P1\" in \"P1-1\").",
       SCRIPT_NAME, 0)
     return
   end
@@ -7772,9 +8154,11 @@ local function draw_table(table_height)
           local text = get_cell_text(row, col)
           local selected = sel_has(row.__guid, col)
 
-          -- Match col highlighting: orange=Fallback, cyan=Repaired
+          -- Match col highlighting: orange=Fallback, cyan=Repaired,
+          -- orange=Scene/Take inferred from overlapping audio (Match All)
           local is_fallback_row = row.match_status == "Fallback"
           local is_repaired_row = row.__repaired == true
+          local is_scene_inferred_row = row.__scene_inferred == true
           local push_color = 0
           if is_repaired_row and col == COL.MATCH_STATUS then
             text = text .. " ✦"
@@ -7785,10 +8169,16 @@ local function draw_table(table_height)
               reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Text(), 0xFF8800FF)
               push_color = 1
             elseif col == COL.MATCHED_PATH then
-              text = "[Tape+TC] " .. text
+              -- Prefix is already part of `text` — get_cell_text() adds it
+              -- (see there for why: it needs to be sortable, not just a
+              -- draw-time label).
               reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Text(), 0xFF4040FF)
               push_color = 1
             end
+          end
+          if push_color == 0 and is_scene_inferred_row and (col == COL.SCENE or col == COL.TAKE) then
+            reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Text(), 0xFF8800FF)
+            push_color = 1
           end
 
           local display = (text ~= "" and text or " ") .. "##" .. row.__guid .. "_" .. col
@@ -7810,13 +8200,33 @@ local function draw_table(table_height)
           if is_fallback_row and col == COL.MATCHED_PATH and
              reaper.ImGui_IsItemHovered(ctx) then
             if reaper.ImGui_BeginTooltip(ctx) then
-              reaper.ImGui_Text(ctx, "Tape+TC match only")
-              reaper.ImGui_Text(ctx, "EDL clip name did not match any audio file.")
-              reaper.ImGui_Text(ctx, "Matched by reel+timecode range instead.")
+              if row.__fallback_kind == "scene_take" then
+                reaper.ImGui_Text(ctx, "Scene+Take match only — source TC was NOT checked")
+                reaper.ImGui_Text(ctx, "Neither clip name, reel, nor timecode matched any audio file.")
+                reaper.ImGui_Text(ctx, "Matched purely by normalised Scene+Take — verify manually")
+                reaper.ImGui_Text(ctx, "if the audio recorder wasn't jam-synced to camera.")
+              else
+                reaper.ImGui_Text(ctx, "Tape+TC match only")
+                reaper.ImGui_Text(ctx, "EDL clip name did not match any audio file.")
+                reaper.ImGui_Text(ctx, "Matched by reel+timecode range instead.")
+              end
               if row.matched_path and row.matched_path ~= "" then
                 reaper.ImGui_Separator(ctx)
                 reaper.ImGui_Text(ctx, row.matched_path)
               end
+              reaper.ImGui_EndTooltip(ctx)
+            end
+          end
+
+          -- Tooltip for Scene/Take inferred from overlapping audio
+          if is_scene_inferred_row and (col == COL.SCENE or col == COL.TAKE) and
+             reaper.ImGui_IsItemHovered(ctx) then
+            if reaper.ImGui_BeginTooltip(ctx) then
+              reaper.ImGui_Text(ctx, "Inferred from overlapping audio — this Video row's own")
+              reaper.ImGui_Text(ctx, "clip name/metadata had no Scene/Take. Filled in from the")
+              reaper.ImGui_Text(ctx, "majority Scene/Take among audio events in the same range")
+              reaper.ImGui_Text(ctx, "(a run by Match All) — verify manually if this range mixes")
+              reaper.ImGui_Text(ctx, "scenes (inserts/cutaways).")
               reaper.ImGui_EndTooltip(ctx)
             end
           end
@@ -8007,6 +8417,20 @@ local function draw_edl_panel_header()
   if CLB.viewing_compare_groups then
     reaper.ImGui_TextColored(ctx, 0xCCAA33FF, "Showing Compare recut groups (not your working list).")
     reaper.ImGui_SameLine(ctx)
+    if reaper.ImGui_Button(ctx, "Analyze & Match...", scale(140), scale(22)) then
+      CMP.analyze_and_match_session()
+    end
+    if reaper.ImGui_IsItemHovered(ctx) then
+      reaper.ImGui_BeginTooltip(ctx)
+      reaper.ImGui_Text(ctx, "Scan the selected track(s) and match every recut candidate")
+      reaper.ImGui_Text(ctx, "(all groups except Added) to a real item there — same Matched")
+      reaper.ImGui_Text(ctx, "Item / Length Match strategies as Apply, offset-aware if you")
+      reaper.ImGui_Text(ctx, "shifted Old. Matched items get colored by recut type and a")
+      reaper.ImGui_Text(ctx, "take marker describing what Apply would do to them — run this")
+      reaper.ImGui_Text(ctx, "before Apply to preview/spot-check, non-destructively.")
+      reaper.ImGui_EndTooltip(ctx)
+    end
+    reaper.ImGui_SameLine(ctx)
     if reaper.ImGui_Button(ctx, "Apply to Reaper...", scale(140), scale(22)) then
       CMP.apply_to_reaper()
     end
@@ -8038,28 +8462,35 @@ local function draw_edl_panel_header()
       reaper.ImGui_TextDisabled(ctx, "    Clear whatever occupies the old range regardless of\n    item boundaries — splits at the range edges.")
       reaper.ImGui_Separator(ctx)
 
-      reaper.ImGui_Text(ctx, "Reconform Offset (hours):")
+      reaper.ImGui_Text(ctx, "Reconform Offset:")
       reaper.ImGui_TextDisabled(ctx, "    Shift the old Reaper session out of the way so it stays\n    pristine while the new cut is rebuilt in its place.")
+
       local chg_oe, new_oe = reaper.ImGui_Checkbox(ctx, "Offset Old##cmp_off_old_en", CLB.offset_old_enabled)
       if chg_oe then CLB.offset_old_enabled = new_oe; save_prefs() end
-      reaper.ImGui_SameLine(ctx)
-      reaper.ImGui_SetNextItemWidth(ctx, scale(60))
-      local chg_oh, new_oh = reaper.ImGui_InputInt(ctx, "h##cmp_off_old_h", CLB.offset_old_hours or 10)
+      reaper.ImGui_SameLine(ctx, 0, scale(10))
+      reaper.ImGui_SetNextItemWidth(ctx, scale(90))
+      local chg_oh, new_oh = reaper.ImGui_InputInt(ctx, "##cmp_off_old_h", CLB.offset_old_hours or 10)
       if chg_oh then CLB.offset_old_hours = new_oh; save_prefs() end
-      reaper.ImGui_SameLine(ctx)
+      reaper.ImGui_SameLine(ctx, 0, scale(6))
+      reaper.ImGui_Text(ctx, "hours")
+      reaper.ImGui_Indent(ctx, scale(16))
       if reaper.ImGui_SmallButton(ctx, "Shift Selected Tracks Now##cmp_off_old_go") then
-        CMP.offset_selected_tracks(CLB.offset_old_hours or 0)
+        CMP.offset_selected_tracks(CLB.offset_old_hours or 0, "old")
       end
       if reaper.ImGui_IsItemHovered(ctx) then
         reaper.ImGui_SetTooltip(ctx, "Moves every unlocked item on the Reaper-selected track(s)\nby this many hours, right now. Undoable (Edit > Undo).")
       end
+      reaper.ImGui_Unindent(ctx, scale(16))
 
+      reaper.ImGui_Spacing(ctx)
       local chg_ne, new_ne = reaper.ImGui_Checkbox(ctx, "Offset New##cmp_off_new_en", CLB.offset_new_enabled)
       if chg_ne then CLB.offset_new_enabled = new_ne; save_prefs() end
-      reaper.ImGui_SameLine(ctx)
-      reaper.ImGui_SetNextItemWidth(ctx, scale(60))
-      local chg_nh, new_nh = reaper.ImGui_InputInt(ctx, "h##cmp_off_new_h", CLB.offset_new_hours or 0)
+      reaper.ImGui_SameLine(ctx, 0, scale(10))
+      reaper.ImGui_SetNextItemWidth(ctx, scale(90))
+      local chg_nh, new_nh = reaper.ImGui_InputInt(ctx, "##cmp_off_new_h", CLB.offset_new_hours or 0)
       if chg_nh then CLB.offset_new_hours = new_nh; save_prefs() end
+      reaper.ImGui_SameLine(ctx, 0, scale(6))
+      reaper.ImGui_Text(ctx, "hours")
       reaper.ImGui_TextDisabled(ctx, "    (For matching math only — used when the NEW EDL/XML\n    itself is authored at a non-zero hour.)")
 
       reaper.ImGui_Separator(ctx)
@@ -10240,14 +10671,23 @@ end
 --- that position for QC). Trimmed/Extended/Moved/Added are reported as not
 --- yet supported and left untouched — selecting them alongside a Deleted
 --- group still applies the Deleted ones.
---- Physically shifts every unlocked item on the currently REAPER-selected
---- track(s) by `hours` (may be negative). Used to move the "old" real
---- session out of the way before Compare-session matching, so the pristine
---- cut is preserved as a source pool while "new" is rebuilt in the vacated
---- real-timeline space (see CLB.offset_old_enabled/offset_old_hours in the
---- "Modes..." popup). A plain bulk position shift — no ripple, no other
---- side effects — locked items are left untouched.
-function CMP.offset_selected_tracks(hours)
+--- Physically shifts every item on the currently REAPER-selected track(s)
+--- by `hours` (may be negative), locked items included (temporarily
+--- unlocked, shifted, then re-locked — see below). Used to move the "old"
+--- real session out of the way before Compare-session matching, so the
+--- pristine cut is preserved as a source pool while "new" is rebuilt in the
+--- vacated real-timeline space (see CLB.offset_old_enabled/offset_old_hours
+--- in the "Modes..." popup).
+--- `side` ("old" or "new") says which side of the loaded Compare result (if
+--- any) this shift corresponds to: once items are actually moved, that
+--- side's dedup event positions (cr.old_dedup/new_dedup — read live by the
+--- Recut Group Details table, the graphical Compare timeline, and every
+--- click-to-jump) are updated by the same delta, so "Old Rec TC" etc. keep
+--- pointing at where the item really is now instead of its pre-shift
+--- position. The matching-only "virtual" offset for that side (Offset Old/
+--- New's checkbox) is then turned off, since the shift is now baked
+--- directly into the data — leaving it on would double-count it.
+function CMP.offset_selected_tracks(hours, side)
   local n_sel_tracks = reaper.CountSelectedTracks(0)
   if n_sel_tracks == 0 then
     reaper.ShowMessageBox("Select at least one track in Reaper first.", SCRIPT_NAME, 0)
@@ -10264,15 +10704,28 @@ function CMP.offset_selected_tracks(hours)
     sel_tracks[#sel_tracks + 1] = reaper.GetSelectedTrack(0, i)
   end
 
-  local total_items, locked_items = 0, 0
+  -- Snapshot every item pointer up front, per track, BEFORE moving
+  -- anything. Reaper keeps each track's item list sorted by position, so
+  -- moving item i re-sorts the list the *other* indices refer to; reading
+  -- GetTrackMediaItem(track, i) fresh on every loop iteration while
+  -- shifting positions mid-loop skips some items entirely and can leave a
+  -- run of touching items fragmented across several different, unevenly-
+  -- spaced landing spots — confirmed by a real multi-hundred-item run
+  -- where some items landed at the correct +10h and others didn't move at
+  -- all, or piled up elsewhere. Snapshotting pointers into a fixed Lua
+  -- list first and looping over THAT avoids the re-sort entirely.
+  local items = {}
   for _, track in ipairs(sel_tracks) do
     local n = reaper.CountTrackMediaItems(track)
-    total_items = total_items + n
     for i = 0, n - 1 do
-      local item = reaper.GetTrackMediaItem(track, i)
-      if (reaper.GetMediaItemInfo_Value(item, "C_LOCK") & 1) == 1 then
-        locked_items = locked_items + 1
-      end
+      items[#items + 1] = reaper.GetTrackMediaItem(track, i)
+    end
+  end
+
+  local locked_count = 0
+  for _, item in ipairs(items) do
+    if reaper.GetMediaItemInfo_Value(item, "C_LOCK") ~= 0 then
+      locked_count = locked_count + 1
     end
   end
 
@@ -10282,25 +10735,302 @@ function CMP.offset_selected_tracks(hours)
     "Shift all items on %d selected track(s) by %s%g hour(s)?\n\n%d item(s) total%s.\n\n" ..
     "This moves real item positions in this Reaper project — undoable via\n" ..
     "Edit > Undo, but is separate from the Compare/Apply report.",
-    #sel_tracks, sign, abs_h, total_items,
-    locked_items > 0 and string.format(" (%d locked, will be skipped)", locked_items) or "")
+    #sel_tracks, sign, abs_h, #items,
+    locked_count > 0 and string.format(" (%d locked — unlocked, shifted, then re-locked)", locked_count) or "")
   if reaper.ShowMessageBox(msg, "Offset Tracks", 1) ~= 1 then return end
 
   reaper.Undo_BeginBlock()
+  reaper.PreventUIRefresh(1)
   local moved = 0
+  local region_start, region_end = nil, nil
+  for _, item in ipairs(items) do
+    local orig_lock = reaper.GetMediaItemInfo_Value(item, "C_LOCK")
+    if orig_lock ~= 0 then reaper.SetMediaItemInfo_Value(item, "C_LOCK", 0) end
+    local pos = reaper.GetMediaItemInfo_Value(item, "D_POSITION")
+    local len = reaper.GetMediaItemInfo_Value(item, "D_LENGTH")
+    local new_pos = pos + delta
+    reaper.SetMediaItemInfo_Value(item, "D_POSITION", new_pos)
+    if orig_lock ~= 0 then reaper.SetMediaItemInfo_Value(item, "C_LOCK", orig_lock) end
+    moved = moved + 1
+    if not region_start or new_pos < region_start then region_start = new_pos end
+    local new_end = new_pos + len
+    if not region_end or new_end > region_end then region_end = new_end end
+  end
+
+  -- Label the shifted span with a region so it's obvious at a glance on
+  -- the timeline/ruler which stretch is the (now offset) old — or new —
+  -- material. Re-running this replaces the same-named region rather than
+  -- piling up a fresh one every time.
+  local region_label = "CLB: " .. ((side == "new") and "NEW" or "OLD")
+  if region_start and region_end then
+    local region_color = (side == "new")
+      and (reaper.ColorToNative(220, 150, 60) | 0x1000000)
+      or  (reaper.ColorToNative(140, 140, 140) | 0x1000000)
+    local i = 0
+    while true do
+      local retval, isrgn, _, _, name, idx = reaper.EnumProjectMarkers3(0, i)
+      if retval == 0 then break end
+      if isrgn and name == region_label then
+        reaper.DeleteProjectMarker(0, idx, true)
+      else
+        i = i + 1
+      end
+    end
+    reaper.AddProjectMarker2(0, true, region_start, region_end, region_label, -1, region_color)
+  end
+
+  reaper.PreventUIRefresh(-1)
+  reaper.Undo_EndBlock(string.format("CLB: Offset %d item(s) by %s%g hour(s)", moved, sign, abs_h), -1)
+  reaper.UpdateArrange()
+
+  -- Explicit confirmation of exactly how many items this script actually
+  -- moved — a docked overview/clock panel (Items:/Tracks:/Start/End/Length)
+  -- reflects whatever is currently item- or time-selected, not necessarily
+  -- all items on the shifted tracks, so it can look like "fewer moved than
+  -- expected" even when every one of them did.
+  -- Bake the shift into the matching Compare-result dedup list (if one is
+  -- loaded), so every live reader of old/new rec_in/rec_out — Recut Group
+  -- Details, the graphical Compare timeline, click-to-jump — reflects where
+  -- the item actually sits now. Also disable that side's virtual offset
+  -- (Modes... popup), since it's now redundant with this real change.
+  local baked_msg = ""
+  local cr = CLB.compare_result
+  if cr and (side == "old" or side == "new") then
+    local dedup = (side == "old") and cr.old_dedup or cr.new_dedup
+    for _, e in ipairs(dedup or {}) do
+      e.rec_in  = e.rec_in  + delta
+      e.rec_out = e.rec_out + delta
+    end
+    if side == "old" then CLB.offset_old_enabled = false else CLB.offset_new_enabled = false end
+    save_prefs()
+    -- "Show as Table" caches old/new TC as formatted strings at build
+    -- time — rebuild so those reflect the shift too.
+    if CLB.viewing_compare_groups then
+      ROWS = CMP.build_group_rows(cr)
+      CLB.cached_rows = nil
+    end
+    baked_msg = string.format(
+      "\n\nAlso updated %s Rec TC in the loaded Compare result to match — " ..
+      "\"Offset %s\" is now off (the shift is baked in).",
+      side == "old" and "Old" or "New", side == "old" and "Old" or "New")
+  end
+
+  reaper.ShowMessageBox(
+    string.format("Shifted %d item(s) by %s%g hour(s) on %d track(s).%s", moved, sign, abs_h, #sel_tracks, baked_msg),
+    "Offset Tracks", 0)
+end
+
+-- Reaper does not enforce unique track names (confirmed by real use — two
+-- tracks both named e.g. "XML - A3" is entirely possible), so every track
+-- reference in previews/reports includes its 1-based track number. Shared
+-- by CMP.apply_to_reaper and CMP.analyze_and_match_session.
+function CMP.track_label(track)
+  local _, name = reaper.GetTrackName(track)
+  local num = reaper.GetMediaTrackInfo_Value(track, "IP_TRACKNUMBER")
+  return string.format("#%d %s", num, name)
+end
+
+function CMP.item_take_name(item)
+  local take = reaper.GetActiveTake(item)
+  return take and select(2, reaper.GetSetMediaItemTakeInfo_String(take, "P_NAME", "", false)) or "(no take)"
+end
+
+--- Mode A: does any item on `sel_tracks` carry P_EXT:CLB_REEL / CLB_SRC_TC_
+--- IN/OUT metadata (written by Generate Items / conform_matched_items)
+--- identifying it as THIS target's own content, regardless of where it
+--- currently sits? Content identity, not position coincidence — so target's
+--- src_in/src_out need no offset adjustment even when the session has been
+--- shifted (see CMP.offset_selected_tracks). Single match by design.
+function CMP.find_metadata_match(target, sel_tracks, fps, is_drop, tol)
+  if not CLB.apply_mode_a then return nil, nil end
   for _, track in ipairs(sel_tracks) do
-    local n = reaper.CountTrackMediaItems(track)
-    for i = 0, n - 1 do
+    local n_items = reaper.CountTrackMediaItems(track)
+    for i = 0, n_items - 1 do
       local item = reaper.GetTrackMediaItem(track, i)
-      if (reaper.GetMediaItemInfo_Value(item, "C_LOCK") & 1) ~= 1 then
-        local pos = reaper.GetMediaItemInfo_Value(item, "D_POSITION")
-        reaper.SetMediaItemInfo_Value(item, "D_POSITION", pos + delta)
-        moved = moved + 1
+      local take = reaper.GetActiveTake(item)
+      if take then
+        local _, reel = reaper.GetSetMediaItemTakeInfo_String(take, "P_EXT:CLB_REEL", "", false)
+        if reel ~= "" and reel == target.reel then
+          local _, src_in_tc  = reaper.GetSetMediaItemTakeInfo_String(take, "P_EXT:CLB_SRC_TC_IN", "", false)
+          local _, src_out_tc = reaper.GetSetMediaItemTakeInfo_String(take, "P_EXT:CLB_SRC_TC_OUT", "", false)
+          if src_in_tc ~= "" and src_out_tc ~= "" then
+            local ok1, src_in_sec  = pcall(EDL.tc_to_seconds, src_in_tc,  fps, is_drop)
+            local ok2, src_out_sec = pcall(EDL.tc_to_seconds, src_out_tc, fps, is_drop)
+            if ok1 and ok2 and math.abs(src_in_sec - target.src_in) <= tol
+               and math.abs(src_out_sec - target.src_out) <= tol then
+              return track, item
+            end
+          end
+        end
       end
     end
   end
-  reaper.Undo_EndBlock(string.format("CLB: Offset %d item(s) by %s%g hour(s)", moved, sign, abs_h), -1)
+  return nil, nil
+end
+
+--- Mode C: EVERY item overlapping the target's REC TC range (the caller
+--- offset-adjusts target.rec_in/rec_out first if the session was shifted)
+--- whose own length matches the target's — no metadata needed. Sweeps
+--- *all* qualifying items, not just the first (see CMP.apply_to_reaper's
+--- Deleted-mode testing notes for why this matters). `exclude_item` is
+--- Mode A's own match for this target, if any, so it isn't listed twice.
+function CMP.find_all_length_matches(target, sel_tracks, exclude_item, tol)
+  local out = {}
+  if not CLB.apply_mode_c then return out end
+  local target_len = target.rec_out - target.rec_in
+  for _, track in ipairs(sel_tracks) do
+    local n_items = reaper.CountTrackMediaItems(track)
+    for i = 0, n_items - 1 do
+      local item = reaper.GetTrackMediaItem(track, i)
+      if item ~= exclude_item then
+        local pos  = reaper.GetMediaItemInfo_Value(item, "D_POSITION")
+        local len  = reaper.GetMediaItemInfo_Value(item, "D_LENGTH")
+        local item_end = pos + len
+        if item_end > target.rec_in and pos < target.rec_out and math.abs(len - target_len) <= tol then
+          out[#out + 1] = { track = track, item = item }
+        end
+      end
+    end
+  end
+  return out
+end
+
+-- Fixed color per recut type, applied to matched items' I_CUSTOMCOLOR.
+-- "Shift" (a Moved group with is_shift=true — many items sharing one
+-- systemic offset) gets its own neutral gray so it reads as "nothing to
+-- worry about" at a glance, distinct from individually Moved items. Kept as
+-- CMP fields (not top-level locals) — this script is already at Lua's
+-- 200-local-per-chunk ceiling.
+CMP.TYPE_COLOR = {
+  Deleted  = reaper.ColorToNative(200,  60,  60) | 0x1000000,
+  Trimmed  = reaper.ColorToNative( 70, 130, 220) | 0x1000000,
+  Extended = reaper.ColorToNative( 80, 170,  90) | 0x1000000,
+  Moved    = reaper.ColorToNative(220, 150,  60) | 0x1000000,
+  Shift    = reaper.ColorToNative(140, 140, 140) | 0x1000000,
+}
+CMP.MARKER_PREFIX = "[CLB] "
+
+--- Non-destructive preview step, meant to run before Apply: scans the
+--- Reaper-selected track(s) and matches every recut candidate (every group
+--- except Added, which has no old item) to a real item there, using the
+--- same Matched Item (metadata identity) / Length Match strategies as
+--- Apply — Range Clear intentionally excluded, since it doesn't identify a
+--- specific item the way this preview needs. Matched items are colored by
+--- recut type and get a take marker naming the group's own label (e.g.
+--- "Trimmed (head +0f/tail+78f)", "Shift +86392f (635 clips)"), so a glance
+--- at the arrange view shows what Apply would do to them. Offset-aware: if
+--- Offset Old is enabled (see CMP.offset_selected_tracks), old positions
+--- are searched at their shifted location, not their original one.
+function CMP.analyze_and_match_session()
+  local cr = CLB.compare_result
+  if not cr then
+    reaper.ShowMessageBox("Run Compare first.", SCRIPT_NAME, 0)
+    return
+  end
+
+  local n_sel_tracks = reaper.CountSelectedTracks(0)
+  if n_sel_tracks == 0 then
+    reaper.ShowMessageBox(
+      "Select at least one track in Reaper first.\n\n"
+      .. "Analyze & Match only searches the track(s) you have selected there.",
+      SCRIPT_NAME, 0)
+    return
+  end
+  local sel_tracks = {}
+  for i = 0, n_sel_tracks - 1 do
+    sel_tracks[#sel_tracks + 1] = reaper.GetSelectedTrack(0, i)
+  end
+
+  if not (CLB.apply_mode_a or CLB.apply_mode_c) then
+    reaper.ShowMessageBox(
+      "Matched Item and Length Match are both disabled in 'Modes...' — enable at least one to analyze.",
+      SCRIPT_NAME, 0)
+    return
+  end
+
+  local fps, is_drop = cr.fps or CLB.fps, cr.is_drop or false
+  local TOL = 1.5 / fps
+  local offset_sec = (CLB.offset_old_enabled and (CLB.offset_old_hours or 0) * 3600) or 0
+
+  -- Writes (or overwrites, if one from a previous Analyze run already
+  -- exists) a single take marker on `item` describing the planned recut
+  -- action, at source position 0. Only ever touches markers already
+  -- carrying CMP.MARKER_PREFIX, so any of the user's own take markers are
+  -- left alone.
+  local function set_take_marker(item, text, color)
+    local take = reaper.GetActiveTake(item)
+    if not take then return end
+    local label = CMP.MARKER_PREFIX .. text
+    local n = reaper.GetNumTakeMarkers(take)
+    local idx = -1
+    for i = 0, n - 1 do
+      local _, name = reaper.GetTakeMarker(take, i)
+      if name and name:sub(1, #CMP.MARKER_PREFIX) == CMP.MARKER_PREFIX then
+        idx = i
+        break
+      end
+    end
+    reaper.SetTakeMarker(take, idx, label, 0, color)
+  end
+
+  local matched_a, matched_c, unmatched = 0, 0, 0
+  local touched = {}  -- item → true, so an item hit by more than one target this run isn't recolored twice
+
+  reaper.Undo_BeginBlock()
+  reaper.PreventUIRefresh(1)
+
+  for _, g in ipairs(cr.groups) do
+    if g.type ~= "Added" then
+      local style_key = (g.type == "Moved" and g.is_shift) and "Shift" or g.type
+      local color = CMP.TYPE_COLOR[style_key] or CMP.TYPE_COLOR.Moved
+      local label_text = g.label or g.type
+
+      for _, c in ipairs(g.items) do
+        if c.old then
+          local target = {
+            reel = c.old.reel, src_in = c.old.src_in, src_out = c.old.src_out,
+            rec_in = c.old.rec_in + offset_sec, rec_out = c.old.rec_out + offset_sec,
+          }
+
+          local _, a_item = CMP.find_metadata_match(target, sel_tracks, fps, is_drop, TOL)
+          local hits = {}
+          if a_item then hits[#hits + 1] = a_item end
+          for _, hit in ipairs(CMP.find_all_length_matches(target, sel_tracks, a_item, TOL)) do
+            hits[#hits + 1] = hit.item
+          end
+
+          if #hits == 0 then
+            unmatched = unmatched + 1
+          else
+            if a_item then matched_a = matched_a + 1 else matched_c = matched_c + 1 end
+            for _, item in ipairs(hits) do
+              if not touched[item] then
+                touched[item] = true
+                reaper.SetMediaItemInfo_Value(item, "I_CUSTOMCOLOR", color)
+                set_take_marker(item, label_text, color)
+              end
+            end
+          end
+        end
+      end
+    end
+  end
+
+  reaper.PreventUIRefresh(-1)
   reaper.UpdateArrange()
+  reaper.Undo_EndBlock("CLB: Analyze & Match Session", -1)
+
+  local total = matched_a + matched_c + unmatched
+  reaper.ShowMessageBox(string.format(
+    "Analyzed %d recut event(s) against %d selected track(s):\n\n" ..
+    "  Matched (Matched Item):  %d\n" ..
+    "  Matched (Length Match):  %d\n" ..
+    "  Unmatched:               %d\n\n" ..
+    "Matched items are now colored by recut type, with a take marker\n" ..
+    "describing what Apply would do to them. Nothing was moved, trimmed,\n" ..
+    "or deleted — this is a preview only.",
+    total, #sel_tracks, matched_a, matched_c, unmatched),
+    "Analyze & Match Session", 0)
 end
 
 function CMP.apply_to_reaper()
@@ -10396,81 +11126,17 @@ function CMP.apply_to_reaper()
     return
   end
 
-  -- Reaper does not enforce unique track names (confirmed by real use —
-  -- two tracks both named e.g. "XML - A3" is entirely possible), so every
-  -- track reference in the preview/report includes its 1-based track
-  -- number alongside the name to stay unambiguous.
-  local function track_label(track)
-    local _, name = reaper.GetTrackName(track)
-    local num = reaper.GetMediaTrackInfo_Value(track, "IP_TRACKNUMBER")
-    return string.format("#%d %s", num, name)
-  end
-
-  local function item_take_name(item)
-    local take = reaper.GetActiveTake(item)
-    return take and select(2, reaper.GetSetMediaItemTakeInfo_String(take, "P_NAME", "", false)) or "(no take)"
-  end
-
-  --- Mode A: does any item on the selected track(s) carry P_EXT:CLB_REEL /
-  --- CLB_SRC_TC_IN/OUT metadata (written by Generate Items / conform_
-  --- matched_items) identifying it as THIS target's own content, regardless
-  --- of where it currently sits? Content identity, not position coincidence.
-  --- Single match by design — metadata identity is meant to be unique.
+  -- Thin delegations to the shared CMP-level matchers (defined above, right
+  -- before this function) — kept as local wrappers so this function's call
+  -- sites (track_label(), find_metadata_match(t), find_all_length_matches(t,
+  -- a_item), ...) don't need to change.
+  local function track_label(track) return CMP.track_label(track) end
+  local function item_take_name(item) return CMP.item_take_name(item) end
   local function find_metadata_match(target)
-    if not CLB.apply_mode_a then return nil, nil end
-    for _, track in ipairs(sel_tracks) do
-      local n_items = reaper.CountTrackMediaItems(track)
-      for i = 0, n_items - 1 do
-        local item = reaper.GetTrackMediaItem(track, i)
-        local take = reaper.GetActiveTake(item)
-        if take then
-          local _, reel = reaper.GetSetMediaItemTakeInfo_String(take, "P_EXT:CLB_REEL", "", false)
-          if reel ~= "" and reel == target.reel then
-            local _, src_in_tc  = reaper.GetSetMediaItemTakeInfo_String(take, "P_EXT:CLB_SRC_TC_IN", "", false)
-            local _, src_out_tc = reaper.GetSetMediaItemTakeInfo_String(take, "P_EXT:CLB_SRC_TC_OUT", "", false)
-            if src_in_tc ~= "" and src_out_tc ~= "" then
-              local ok1, src_in_sec  = pcall(EDL.tc_to_seconds, src_in_tc,  fps, is_drop)
-              local ok2, src_out_sec = pcall(EDL.tc_to_seconds, src_out_tc, fps, is_drop)
-              if ok1 and ok2 and math.abs(src_in_sec - target.src_in) <= TOL
-                 and math.abs(src_out_sec - target.src_out) <= TOL then
-                return track, item
-              end
-            end
-          end
-        end
-      end
-    end
-    return nil, nil
+    return CMP.find_metadata_match(target, sel_tracks, fps, is_drop, TOL)
   end
-
-  --- Mode C: EVERY item overlapping the target's old REC TC range whose
-  --- own length matches the target's length — no metadata needed. Unlike
-  --- Mode A, this deliberately sweeps *all* qualifying items, not just the
-  --- first: the point of ignoring metadata is to also catch content that
-  --- was cut in from elsewhere but happens to share the same duration
-  --- (confirmed wanted behavior via real testing — a single-match version
-  --- would just duplicate Mode A's result whenever metadata happens to
-  --- still be intact, defeating the purpose). `exclude_item` is Mode A's
-  --- own match for this target, if any, so it isn't listed/deleted twice.
   local function find_all_length_matches(target, exclude_item)
-    local out = {}
-    if not CLB.apply_mode_c then return out end
-    local target_len = target.rec_out - target.rec_in
-    for _, track in ipairs(sel_tracks) do
-      local n_items = reaper.CountTrackMediaItems(track)
-      for i = 0, n_items - 1 do
-        local item = reaper.GetTrackMediaItem(track, i)
-        if item ~= exclude_item then
-          local pos  = reaper.GetMediaItemInfo_Value(item, "D_POSITION")
-          local len  = reaper.GetMediaItemInfo_Value(item, "D_LENGTH")
-          local item_end = pos + len
-          if item_end > target.rec_in and pos < target.rec_out and math.abs(len - target_len) <= TOL then
-            out[#out + 1] = { track = track, item = item }
-          end
-        end
-      end
-    end
-    return out
+    return CMP.find_all_length_matches(target, sel_tracks, exclude_item, TOL)
   end
 
   -- Dry-run scan: for each target, Mode A (single precise match) and Mode C
