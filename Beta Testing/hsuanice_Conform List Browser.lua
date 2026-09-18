@@ -1,6 +1,6 @@
 --[[
 @description Conform List Browser
-@version 260917.2349
+@version 260918.1350
 @author hsuanice
 @about
   A REAPER script for browsing and editing EDL (Edit Decision List) data
@@ -51,6 +51,92 @@
   Required for AAF: aaftool in PATH (https://github.com/agfline/LibAAF)
 
 @changelog
+  v260918.1350
+  - Change: Remove Dups and Consolidate now only scan/act on the currently-
+    filtered (visible) event list, like Generate Items already did — rows
+    hidden by the Track/Reel/Group/search filters are left completely
+    untouched. Lets you e.g. hide everything but the Audio group and click
+    Remove Dups to dedupe just Audio, without touching Video/other groups
+    that happen to share reel/clip names. Hidden rows are always preserved
+    regardless (the final rebuild still starts from the full list).
+
+  v260918.1333
+  - Fix: saving a CLB session (Save As .clb) immediately changed the header
+    label from e.g. "XML Events" to "EDL Events", with no reload needed.
+    Cause: CLB.loaded_format doubled as both "the original content format
+    (XML/AAF/EDL), used for the header label and ${format} token" AND "is
+    the loaded file a .clb project, for the toolbar's Quick Save button" —
+    saving set it to the literal string "CLB" to mark the second thing,
+    which clobbered the first. Split into two fields: loaded_format now
+    stays untouched by saving/loading .clb (always the true original
+    format), and a new loaded_is_clb flag alone gates Quick Save.
+  - Feature: added "ADR" to the default group set (now Video, Audio, ADR,
+    Location, Effects, Music, Delete).
+
+  v260918.1322
+  - Fix: the actual root cause of Add/Rename Group (and Rename Track/Reel)
+    "silently doing nothing" — these popups used ImGui_InputTextFlags_
+    EnterReturnsTrue and only copied the typed text into Lua state when
+    that flag's return value was true (i.e. only on the exact frame Enter
+    was pressed). Typing a name and clicking OK instead of pressing Enter
+    left the tracked buffer at its original value ("" for Add, the old name
+    for Rename), so OK read back an empty/unchanged name and the previous
+    build's new empty/collision message ("Group name can't be empty")
+    fired even though text was clearly visible in the field. All four
+    popups (Add Group, Rename Group, Rename Track, Rename Reel) now use
+    plain InputText, synced on every keystroke, with Enter-to-submit
+    detected separately via IsKeyPressed — both Enter and clicking OK work
+    correctly now regardless of which one is used.
+
+  v260918.1309
+  - Feature: new lists now start with a default group set — Video, Audio,
+    Location, Effects, Music, Delete — so they're all pickable right away
+    (right-click a group → Assign Selected Rows Here) instead of having to
+    "+" add each by hand. Add/Rename/Delete Group already existed (the "+"
+    button, and right-click → Rename.../Delete Group... on any group).
+  - Fix: adding or renaming a group silently did nothing when the trimmed
+    name collided with an existing group, or produced a group that looked
+    identical to an existing one (a stray leading/trailing space, e.g. from
+    a fat-fingered space or IME artifact, made "Audio " coexist invisibly
+    next to "Audio") — this read as "add/rename doesn't work." Both now
+    trim whitespace and show a message box on an empty or colliding name
+    instead of silently no-op'ing; Rename previously had no collision check
+    at all (could invisibly merge two groups under one name).
+  - Fix: CMP.rebuild_filters (used when reopening the graphical Compare
+    view) dropped any manually added/renamed group with zero events —
+    unlike the main list's own _rebuild_group_filters, which already
+    preserves those. Now consistent between the two.
+
+  v260918.1258
+  - Feature: first step of the reconform pipeline redesign — "Reconform
+    Offset" controls in the Apply "Modes..." popup. Offset Old (checkbox +
+    hours, default +10h) and Offset New (checkbox + hours, for matching
+    math only) let the old Reaper session be shifted out of the way before
+    Trim/Extend/Moved matching begins, so the pristine old cut survives
+    untouched as a source pool while the new cut gets rebuilt in the
+    vacated real-timeline space. "Shift Selected Tracks Now" (next to
+    Offset Old) performs the actual move: every unlocked item on the
+    Reaper-selected track(s) shifts by the configured hours, wrapped in one
+    undo block. This is the first of several planned steps (analyze/match
+    session, per-item color + take-marker planned-action labels, manual
+    match override, then Apply) — Trim/Extend/Moved matching/apply itself
+    isn't wired up yet.
+
+  v260918.1219
+  - Feature: Recut Group Details table now has its own "Columns" button
+    (next to Hide) with show/hide checkboxes per column, persisted like the
+    main event-list's column visibility. Default view hides the four Src TC
+    columns (Old/New Src In/Out) — after Compare, Src TC has already turned
+    into a relative trim/extend number shown in the main table's Notes
+    column, so most review only needs Old/New Rec TC. Any column can be
+    toggled back on.
+  - Refactor: moved `local CMP = {}` earlier in the file (right before
+    save_prefs/load_prefs) so those two functions can read/write the new
+    CMP.GD_COL_VISIBILITY table directly; previously CMP was declared after
+    both, which would have made a CMP.* reference from inside them resolve
+    to an unrelated global. No behavior change to anything already using
+    CMP.
+
   v260917.2349
   - Change: TC columns are no longer user-resizable, in every table/mode
     that shows them — main event list (Src/Rec TC In/Out), Audio list (Src
@@ -1266,7 +1352,7 @@ end
 ---------------------------------------------------------------------------
 local SCRIPT_NAME = "Conform List Browser"
 local EXT_NS = "hsuanice_ConformListBrowser"
-local VERSION = "260917.2349"
+local VERSION = "260918.1350"
 
 -- Column definitions (EDL Events table)
 local COL = {
@@ -1514,7 +1600,14 @@ local list_clipper
 local CLB = {
   -- File state
   loaded_file = nil,
-  loaded_format = nil,
+  loaded_format = nil,  -- ORIGINAL content format (XML/AAF/EDL/...) — for the
+                        -- header label and ${format} token; untouched by
+                        -- saving/loading a .clb project (see loaded_is_clb).
+  loaded_is_clb = false, -- true once loaded_file points at an actual .clb
+                          -- project (gates the toolbar's Quick Save button) —
+                          -- kept separate from loaded_format so saving as
+                          -- .clb doesn't overwrite the remembered original
+                          -- source format.
   parsed_data = nil,
 
   -- EDL source tracking: { { name, path, event_count, visible }, ... }
@@ -1585,6 +1678,17 @@ local CLB = {
   apply_mode_a = true,  -- matched item: P_EXT:CLB_REEL + SRC_TC identity, regardless of current position
   apply_mode_c = true,  -- length match: item overlapping the range whose own length matches the target's
   apply_mode_b = true,  -- range clear: clear whatever occupies the range, split at edges, no identity check
+
+  -- Reconform offset: shifts the OLD Reaper session (real items on selected
+  -- tracks) out of the way by +/-N hours before Compare-session matching, so
+  -- the pristine old cut is preserved as a source pool while the new cut is
+  -- rebuilt in the vacated real-timeline space. Hours only for now (no
+  -- fractional TC). "New" offset covers the rarer case where the NEW EDL/XML
+  -- itself is authored at a non-zero hour and needs the same alignment.
+  offset_old_enabled = false,
+  offset_old_hours   = 10,
+  offset_new_enabled = false,
+  offset_new_hours   = 0,
   cmp_zoom = 50.0,
   cmp_scroll = 0.0,
   cmp_vscroll_old = 0.0,
@@ -2824,6 +2928,13 @@ for k, v in pairs(DEFAULT_COL_WIDTH) do
   COL_WIDTH[k] = v
 end
 
+-- Namespaced under one table (rather than ~9 separate top-level locals) to
+-- stay under Lua's 200-local-per-chunk limit for this already-large script.
+-- Declared here (ahead of its first use in save_prefs/load_prefs below) so
+-- both can read/write CMP.GD_* fields; all CMP.foo() functions are defined
+-- further down, under "Old-vs-New Compare (reconform)".
+local CMP = {}
+
 ---------------------------------------------------------------------------
 -- Preferences
 ---------------------------------------------------------------------------
@@ -2866,6 +2977,17 @@ local function save_prefs()
   reaper.SetExtState(EXT_NS, "apply_mode_a", CLB.apply_mode_a and "1" or "0", true)
   reaper.SetExtState(EXT_NS, "apply_mode_c", CLB.apply_mode_c and "1" or "0", true)
   reaper.SetExtState(EXT_NS, "apply_mode_b", CLB.apply_mode_b and "1" or "0", true)
+  reaper.SetExtState(EXT_NS, "offset_old_enabled", CLB.offset_old_enabled and "1" or "0", true)
+  reaper.SetExtState(EXT_NS, "offset_old_hours", tostring(CLB.offset_old_hours or 10), true)
+  reaper.SetExtState(EXT_NS, "offset_new_enabled", CLB.offset_new_enabled and "1" or "0", true)
+  reaper.SetExtState(EXT_NS, "offset_new_hours", tostring(CLB.offset_new_hours or 0), true)
+
+  -- Recut Group Details column visibility (comma-separated 0/1)
+  local gd_vis_parts = {}
+  for i = 1, CMP.GD_COL_COUNT do
+    gd_vis_parts[i] = CMP.GD_COL_VISIBILITY[i] and "1" or "0"
+  end
+  reaper.SetExtState(EXT_NS, "cmp_gd_col_visibility", table.concat(gd_vis_parts, ","), true)
 end
 
 local function load_prefs()
@@ -2895,6 +3017,10 @@ local function load_prefs()
   CLB.apply_mode_a = get("apply_mode_a", "1") == "1"
   CLB.apply_mode_c = get("apply_mode_c", "1") == "1"
   CLB.apply_mode_b = get("apply_mode_b", "1") == "1"
+  CLB.offset_old_enabled = get("offset_old_enabled", "0") == "1"
+  CLB.offset_old_hours   = tonumber(get("offset_old_hours", "10")) or 10
+  CLB.offset_new_enabled = get("offset_new_enabled", "0") == "1"
+  CLB.offset_new_hours   = tonumber(get("offset_new_hours", "0")) or 0
 
   -- EDL column order
   local order_str = get("edl_col_order", "")
@@ -2937,6 +3063,18 @@ local function load_prefs()
       idx = idx + 1
       if idx <= AUDIO_COL_COUNT then
         AUDIO_COL_VISIBILITY[idx] = (val == "1")
+      end
+    end
+  end
+
+  -- Recut Group Details column visibility
+  local gd_vis_str = get("cmp_gd_col_visibility", "")
+  if gd_vis_str ~= "" then
+    local idx = 0
+    for val in gd_vis_str:gmatch("([01])") do
+      idx = idx + 1
+      if idx <= CMP.GD_COL_COUNT then
+        CMP.GD_COL_VISIBILITY[idx] = (val == "1")
       end
     end
   end
@@ -3565,6 +3703,12 @@ _rebuild_reel_filters = function()
   end
 end
 
+-- Starting set of selectable groups on a fresh load — lets the user assign
+-- rows to any of these right away (right-click a group → Assign Selected
+-- Rows Here) without first having to "+" add each one by hand. Users can
+-- still add/rename/delete freely; this only seeds the initial list.
+local DEFAULT_GROUP_NAMES = { "Video", "Audio", "ADR", "Location", "Effects", "Music", "Delete" }
+
 --- Determine group for a track name based on prefix (used for initial auto-assign only).
 --- A* → Audio, V* → Video, NONE → NONE, others → Other
 local function _get_track_group(track_name)
@@ -3653,6 +3797,9 @@ local function build_rows_from_parsed(parsed, source_path)
   CLB.track_filters = {}
   CLB.reel_filters = {}
   CLB.group_filters = {}
+  for _, name in ipairs(DEFAULT_GROUP_NAMES) do
+    CLB.group_filters[#CLB.group_filters + 1] = { name = name, count = 0, visible = true, tracks = {} }
+  end
   if not parsed or not parsed.events then return end
 
   CLB.fps = parsed.fps or 24
@@ -4046,6 +4193,7 @@ local function load_clb_project(filepath)
   undo_snapshot()
   CLB.loaded_file   = filepath
   CLB.loaded_format = data.source_format
+  CLB.loaded_is_clb = true
 
   -- Rebuild filter panels, then apply saved hidden states
   _rebuild_track_filters()
@@ -4122,6 +4270,7 @@ local function clear_list()
   _guid_counter   = 0
   CLB.loaded_file   = nil
   CLB.loaded_format = nil
+  CLB.loaded_is_clb = false
   CLB.viewing_compare_groups = false
   CLB._compare_rows_backup   = nil
 
@@ -4150,7 +4299,13 @@ local function save_clb_project_dialog()
   CLB.last_dir = filepath:match("^(.*)[/\\]") or CLB.last_dir
   if save_clb_project(filepath, false) then
     CLB.loaded_file = filepath
-    CLB.loaded_format = "CLB"
+    -- loaded_format is NOT changed here — it's the original content format
+    -- (XML/AAF/EDL) and stays whatever it was; only loaded_is_clb reflects
+    -- that CLB.loaded_file is now a .clb project (previously this line set
+    -- loaded_format = "CLB" directly, which overwrote e.g. "XML" the moment
+    -- you saved and flipped the header label from "XML Events" to "EDL
+    -- Events" without even reloading anything).
+    CLB.loaded_is_clb = true
   end
   save_prefs()
 end
@@ -4437,6 +4592,7 @@ local function _apply_timeline_results(all_parsed, filepaths, default_fps)
     if choice == 6 then
       CLB.loaded_file   = #filepaths == 1 and filepaths[1] or nil
       CLB.loaded_format = all_parsed[1].parsed.format
+      CLB.loaded_is_clb = false
       CLB.parsed_data   = all_parsed[1].parsed
       build_rows_from_parsed(all_parsed[1].parsed, all_parsed[1].path)
       for i = 2, #all_parsed do
@@ -4450,6 +4606,7 @@ local function _apply_timeline_results(all_parsed, filepaths, default_fps)
   else
     CLB.loaded_file   = #filepaths == 1 and filepaths[1] or nil
     CLB.loaded_format = all_parsed[1].parsed.format
+    CLB.loaded_is_clb = false
     CLB.parsed_data   = all_parsed[1].parsed
     build_rows_from_parsed(all_parsed[1].parsed, all_parsed[1].path)
     for i = 2, #all_parsed do
@@ -4666,10 +4823,6 @@ end
 -- Old-vs-New Compare (reconform)
 ---------------------------------------------------------------------------
 
--- Namespaced under one table (rather than ~9 separate top-level locals) to
--- stay under Lua's 200-local-per-chunk limit for this already-large script.
-local CMP = {}
-
 --- Category (row.group — Video/Audio/Dialog/Effects/Music/etc, the user's
 --- own classification) inherited by majority vote from a dedup event's
 --- original member rows. Shared by CMP.build_group_rows and
@@ -4736,11 +4889,34 @@ function CMP.rebuild_filters(cr)
     return new_list
   end
 
+  -- Like rebuild() above, but for groups: also carries over every name
+  -- already in old_list even if it currently has zero events (a group the
+  -- user just added or renamed via the Groups panel, before any row was
+  -- reassigned to it) — otherwise it would silently vanish the next time
+  -- Compare's filter panel refreshes, since it only ever existed here, not
+  -- in ROWS' own _rebuild_group_filters (which already preserves these).
+  local function rebuild_groups(old_list, order, counts)
+    local new_list, seen = {}, {}
+    for _, f in ipairs(old_list) do
+      if not seen[f.name] then
+        seen[f.name] = true
+        new_list[#new_list + 1] = { name = f.name, count = counts[f.name] or 0, visible = f.visible }
+      end
+    end
+    for _, name in ipairs(order) do
+      if not seen[name] then
+        seen[name] = true
+        new_list[#new_list + 1] = { name = name, count = counts[name], visible = true }
+      end
+    end
+    return new_list
+  end
+
   CLB.track_filters    = rebuild(CLB.track_filters, track_order, track_counts)
   CLB.reel_filters      = rebuild(CLB.reel_filters, reel_order, reel_counts)
   CLB.reel_sel          = {}
   CLB.reel_sel_anchor   = nil
-  CLB.group_filters     = rebuild(CLB.group_filters, group_order, group_counts)
+  CLB.group_filters     = rebuild_groups(CLB.group_filters, group_order, group_counts)
 end
 
 --- Run the old-vs-new compare engine against CLB.compare_old / .compare_new
@@ -5427,20 +5603,27 @@ local function remove_duplicates()
     return EDL.tc_to_seconds(tc_str or "00:00:00:00", fps, CLB.is_drop) or 0
   end
 
+  -- Only scan/remove within the currently-filtered (visible) event list —
+  -- rows hidden by the Track/Reel/Group/search filters are left untouched,
+  -- so e.g. "only remove dups within Audio" works by hiding other groups
+  -- first. The final apply step below still rebuilds from the full ROWS,
+  -- so hidden rows are always preserved regardless.
+  local visible_rows = get_view_rows() or ROWS
+
   -- Debug log file
   local debug_lines = {}
   local debug_path  = script_path .. "../Tools/clb_dedup_debug.txt"
   local function dlog(s) debug_lines[#debug_lines + 1] = s end
   dlog(string.format("=== CLB Remove Duplicates Debug ==="))
-  dlog(string.format("FPS: %s%s  NEAR_SRC_TOL: 5 frames  Total events: %d",
-    tostring(fps), CLB.is_drop and " DF" or " NDF", #ROWS))
+  dlog(string.format("FPS: %s%s  NEAR_SRC_TOL: 5 frames  Events scanned: %d (of %d total)",
+    tostring(fps), CLB.is_drop and " DF" or " NDF", #visible_rows, #ROWS))
   dlog("")
 
   -- Pass 1: exact duplicates (reel + src TC in/out + rec TC in/out + clip_name)
   local seen_exact = {}
   local exact_remove = {}  -- set of __guid
   local seen_exact_row = {}  -- key → first row (for log)
-  for _, row in ipairs(ROWS) do
+  for _, row in ipairs(visible_rows) do
     local key = table.concat({
       row.reel or "", row.src_tc_in or "", row.src_tc_out or "",
       row.rec_tc_in or "", row.rec_tc_out or "", row.clip_name or "",
@@ -5489,7 +5672,7 @@ local function remove_duplicates()
 
   local groups = {}
   local group_order = {}
-  for _, row in ipairs(ROWS) do
+  for _, row in ipairs(visible_rows) do
     if exact_remove[row.__guid] then goto next_pass2 end
     local key = (row.reel or "") .. "|" .. (row.clip_name or "")
     if not groups[key] then
@@ -5730,7 +5913,7 @@ local function remove_duplicates()
       "  - %d merged (partial overlap — TC extended to cover both ranges)\n" ..
       "  - %d healed (%d split clips joined into continuous events)\n\n" ..
       "Remove / merge / heal?",
-      total, #ROWS, exact_count, contain_count, merge_count, split_count, split_heal_count),
+      total, #visible_rows, exact_count, contain_count, merge_count, split_count, split_heal_count),
     SCRIPT_NAME, 1)
 
   if choice ~= 1 then return end
@@ -5798,10 +5981,16 @@ local function consolidate_by_group()
     return
   end
 
+  -- Only consolidate within the currently-filtered (visible) event list —
+  -- rows hidden by the Track/Reel/Group/search filters keep their existing
+  -- track assignment untouched (e.g. hide everything but Audio first to
+  -- consolidate just that group).
+  local visible_rows = get_view_rows() or ROWS
+
   -- Collect groups with events
   local groups = {}   -- { group_name = { events } }
   local group_order = {}
-  for _, row in ipairs(ROWS) do
+  for _, row in ipairs(visible_rows) do
     local g = row.group or ""
     if not groups[g] then
       groups[g] = {}
@@ -6151,7 +6340,7 @@ local function draw_toolbar()
   local flags = reaper.ImGui_WindowFlags_HorizontalScrollbar()
   if reaper.ImGui_BeginChild(ctx, "##toolbar_row1", 0, row1_height, 0, flags) then
     -- Project Save / Open
-    if CLB.loaded_file and CLB.loaded_format == "CLB" then
+    if CLB.loaded_file and CLB.loaded_is_clb then
       -- Quick Save (overwrite current file, no dialog)
       if reaper.ImGui_Button(ctx, "Save", scale(50), scale(24)) then
         if save_clb_project(CLB.loaded_file, true) then
@@ -6764,8 +6953,11 @@ local function draw_track_filter_panel()
     if reaper.ImGui_BeginPopup(ctx, "Rename Track##clb_rename_track") then
       reaper.ImGui_Text(ctx, "Rename track:")
       reaper.ImGui_SetNextItemWidth(ctx, scale(150))
-      local chg, new_buf = reaper.ImGui_InputText(ctx, "##rename_input", CLB.rename_filter.buf,
-        reaper.ImGui_InputTextFlags_EnterReturnsTrue())
+      -- Plain InputText (no EnterReturnsTrue) — that flag's returned buffer
+      -- was only reliable on the exact frame Enter was pressed, so clicking
+      -- OK after typing (without pressing Enter) read back the stale
+      -- original name and silently no-op'd as "unchanged".
+      local chg, new_buf = reaper.ImGui_InputText(ctx, "##rename_input", CLB.rename_filter.buf)
       if chg then CLB.rename_filter.buf = new_buf end
 
       -- Focus input on first frame
@@ -6775,7 +6967,8 @@ local function draw_track_filter_panel()
       end
 
       -- Apply on Enter or OK button
-      local apply = chg  -- Enter was pressed
+      local apply = reaper.ImGui_IsKeyPressed(ctx, reaper.ImGui_Key_Enter(), false)
+        or reaper.ImGui_IsKeyPressed(ctx, reaper.ImGui_Key_KeypadEnter(), false)
       if reaper.ImGui_Button(ctx, "OK", scale(60), 0) then apply = true end
       reaper.ImGui_SameLine(ctx)
       if reaper.ImGui_Button(ctx, "Cancel", scale(60), 0) then
@@ -7843,6 +8036,32 @@ local function draw_edl_panel_header()
       local chg_b, new_b = reaper.ImGui_Checkbox(ctx, "Range Clear", CLB.apply_mode_b)
       if chg_b then CLB.apply_mode_b = new_b; save_prefs() end
       reaper.ImGui_TextDisabled(ctx, "    Clear whatever occupies the old range regardless of\n    item boundaries — splits at the range edges.")
+      reaper.ImGui_Separator(ctx)
+
+      reaper.ImGui_Text(ctx, "Reconform Offset (hours):")
+      reaper.ImGui_TextDisabled(ctx, "    Shift the old Reaper session out of the way so it stays\n    pristine while the new cut is rebuilt in its place.")
+      local chg_oe, new_oe = reaper.ImGui_Checkbox(ctx, "Offset Old##cmp_off_old_en", CLB.offset_old_enabled)
+      if chg_oe then CLB.offset_old_enabled = new_oe; save_prefs() end
+      reaper.ImGui_SameLine(ctx)
+      reaper.ImGui_SetNextItemWidth(ctx, scale(60))
+      local chg_oh, new_oh = reaper.ImGui_InputInt(ctx, "h##cmp_off_old_h", CLB.offset_old_hours or 10)
+      if chg_oh then CLB.offset_old_hours = new_oh; save_prefs() end
+      reaper.ImGui_SameLine(ctx)
+      if reaper.ImGui_SmallButton(ctx, "Shift Selected Tracks Now##cmp_off_old_go") then
+        CMP.offset_selected_tracks(CLB.offset_old_hours or 0)
+      end
+      if reaper.ImGui_IsItemHovered(ctx) then
+        reaper.ImGui_SetTooltip(ctx, "Moves every unlocked item on the Reaper-selected track(s)\nby this many hours, right now. Undoable (Edit > Undo).")
+      end
+
+      local chg_ne, new_ne = reaper.ImGui_Checkbox(ctx, "Offset New##cmp_off_new_en", CLB.offset_new_enabled)
+      if chg_ne then CLB.offset_new_enabled = new_ne; save_prefs() end
+      reaper.ImGui_SameLine(ctx)
+      reaper.ImGui_SetNextItemWidth(ctx, scale(60))
+      local chg_nh, new_nh = reaper.ImGui_InputInt(ctx, "h##cmp_off_new_h", CLB.offset_new_hours or 0)
+      if chg_nh then CLB.offset_new_hours = new_nh; save_prefs() end
+      reaper.ImGui_TextDisabled(ctx, "    (For matching math only — used when the NEW EDL/XML\n    itself is authored at a non-zero hour.)")
+
       reaper.ImGui_Separator(ctx)
       if reaper.ImGui_Button(ctx, "Close", scale(70), scale(22)) then
         reaper.ImGui_CloseCurrentPopup(ctx)
@@ -9037,8 +9256,11 @@ local function draw_reel_filter_sidebar(height)
         if reaper.ImGui_BeginPopup(ctx, "Rename Reel##clb_rename_reel") then
           reaper.ImGui_Text(ctx, "Rename reel:")
           reaper.ImGui_SetNextItemWidth(ctx, scale(150))
-          local chg, new_buf = reaper.ImGui_InputText(ctx, "##rename_reel_input", CLB.rename_filter.buf,
-            reaper.ImGui_InputTextFlags_EnterReturnsTrue())
+          -- Plain InputText (no EnterReturnsTrue) — that flag's returned
+          -- buffer was only reliable on the exact frame Enter was pressed,
+          -- so clicking OK after typing (without pressing Enter) read back
+          -- the stale original name and silently no-op'd as "unchanged".
+          local chg, new_buf = reaper.ImGui_InputText(ctx, "##rename_reel_input", CLB.rename_filter.buf)
           if chg then CLB.rename_filter.buf = new_buf end
 
           -- Focus input on first frame
@@ -9048,7 +9270,8 @@ local function draw_reel_filter_sidebar(height)
           end
 
           -- Apply on Enter or OK button
-          local apply = chg  -- Enter was pressed
+          local apply = reaper.ImGui_IsKeyPressed(ctx, reaper.ImGui_Key_Enter(), false)
+            or reaper.ImGui_IsKeyPressed(ctx, reaper.ImGui_Key_KeypadEnter(), false)
           if reaper.ImGui_Button(ctx, "OK", scale(60), 0) then apply = true end
           reaper.ImGui_SameLine(ctx)
           if reaper.ImGui_Button(ctx, "Cancel", scale(60), 0) then
@@ -9216,11 +9439,17 @@ local function draw_reel_filter_sidebar(height)
           if reaper.ImGui_IsWindowAppearing(ctx) then
             reaper.ImGui_SetKeyboardFocusHere(ctx, 0)
           end
-          local chg, new_buf = reaper.ImGui_InputText(ctx, "##add_group_input", CLB.add_group.buf,
-            reaper.ImGui_InputTextFlags_EnterReturnsTrue())
-          CLB.add_group.buf = new_buf  -- always sync: new_buf is the live typed value
+          -- Plain InputText (no EnterReturnsTrue): that flag's returned
+          -- buffer was only reliable on the exact frame Enter was pressed,
+          -- so clicking OK (or Cancel/retyping) after typing without ever
+          -- hitting Enter left CLB.add_group.buf stuck at "" — read by OK
+          -- as an empty name even though "Delete" was visibly typed. Plain
+          -- InputText reports the live buffer on every keystroke instead.
+          local chg, new_buf = reaper.ImGui_InputText(ctx, "##add_group_input", CLB.add_group.buf)
+          if chg then CLB.add_group.buf = new_buf end
 
-          local apply = chg
+          local apply = reaper.ImGui_IsKeyPressed(ctx, reaper.ImGui_Key_Enter(), false)
+            or reaper.ImGui_IsKeyPressed(ctx, reaper.ImGui_Key_KeypadEnter(), false)
           if reaper.ImGui_Button(ctx, "OK", scale(60), 0) then apply = true end
           reaper.ImGui_SameLine(ctx)
           if reaper.ImGui_Button(ctx, "Cancel", scale(60), 0) then
@@ -9229,20 +9458,28 @@ local function draw_reel_filter_sidebar(height)
           end
 
           if apply and CLB.add_group then
-            local name = CLB.add_group.buf
-            if name ~= "" then
+            -- Trim leading/trailing whitespace: a stray space typed by
+            -- accident (or left over from an IME) previously produced a
+            -- new group that LOOKED identical to an existing one (e.g.
+            -- "Audio " next to "Audio"), which read as "add did nothing".
+            local name = (CLB.add_group.buf or ""):match("^%s*(.-)%s*$")
+            if name == "" then
+              reaper.ShowMessageBox("Group name can't be empty.", SCRIPT_NAME, 0)
+            else
               local exists = false
               for _, gf in ipairs(CLB.group_filters) do
                 if gf.name == name then exists = true; break end
               end
-              if not exists then
+              if exists then
+                reaper.ShowMessageBox("A group named '" .. name .. "' already exists.", SCRIPT_NAME, 0)
+              else
                 CLB.group_filters[#CLB.group_filters + 1] = {
                   name = name, count = 0, visible = true, tracks = {}
                 }
+                CLB.add_group = nil
+                reaper.ImGui_CloseCurrentPopup(ctx)
               end
             end
-            CLB.add_group = nil
-            reaper.ImGui_CloseCurrentPopup(ctx)
           end
 
           reaper.ImGui_EndPopup(ctx)
@@ -9336,8 +9573,12 @@ local function draw_reel_filter_sidebar(height)
           if reaper.ImGui_BeginPopup(ctx, "Rename Group##clb_rename_group") then
             reaper.ImGui_Text(ctx, "Rename group:")
             reaper.ImGui_SetNextItemWidth(ctx, scale(150))
-            local chg, new_buf = reaper.ImGui_InputText(ctx, "##rename_group_input", CLB.rename_filter.buf,
-              reaper.ImGui_InputTextFlags_EnterReturnsTrue())
+            -- Plain InputText (no EnterReturnsTrue) — see the Add Group
+            -- popup for why: that flag's returned buffer was only reliable
+            -- on the exact frame Enter was pressed, so clicking OK after
+            -- typing (without pressing Enter) read back the stale original
+            -- name and silently no-op'd as "unchanged".
+            local chg, new_buf = reaper.ImGui_InputText(ctx, "##rename_group_input", CLB.rename_filter.buf)
             if chg then CLB.rename_filter.buf = new_buf end
 
             if not CLB.rename_filter.focused then
@@ -9345,7 +9586,8 @@ local function draw_reel_filter_sidebar(height)
               CLB.rename_filter.focused = true
             end
 
-            local apply = chg
+            local apply = reaper.ImGui_IsKeyPressed(ctx, reaper.ImGui_Key_Enter(), false)
+              or reaper.ImGui_IsKeyPressed(ctx, reaper.ImGui_Key_KeypadEnter(), false)
             if reaper.ImGui_Button(ctx, "OK", scale(60), 0) then apply = true end
             reaper.ImGui_SameLine(ctx)
             if reaper.ImGui_Button(ctx, "Cancel", scale(60), 0) then
@@ -9355,24 +9597,41 @@ local function draw_reel_filter_sidebar(height)
 
             if apply and CLB.rename_filter then
               local old_name = CLB.rename_filter.old_name
-              local new_name = CLB.rename_filter.buf
-              if new_name ~= "" and new_name ~= old_name then
-                -- Update filter name
+              -- Trim whitespace — see the Add Group popup for why (a
+              -- trailing/leading space made the rename look like it "did
+              -- nothing" since the result was visually indistinguishable
+              -- from an existing name).
+              local new_name = (CLB.rename_filter.buf or ""):match("^%s*(.-)%s*$")
+              if new_name == "" then
+                reaper.ShowMessageBox("Group name can't be empty.", SCRIPT_NAME, 0)
+              elseif new_name == old_name then
+                CLB.rename_filter = nil
+                reaper.ImGui_CloseCurrentPopup(ctx)
+              else
+                local collides = false
                 for _, gf in ipairs(CLB.group_filters) do
-                  if gf.name == old_name then gf.name = new_name; break end
+                  if gf.name == new_name then collides = true; break end
                 end
-                -- Update all rows with old group name
-                for _, row in ipairs(ROWS) do
-                  if row.group == old_name then
-                    row.group = new_name
+                if collides then
+                  reaper.ShowMessageBox("A group named '" .. new_name .. "' already exists.", SCRIPT_NAME, 0)
+                else
+                  -- Update filter name
+                  for _, gf in ipairs(CLB.group_filters) do
+                    if gf.name == old_name then gf.name = new_name; break end
                   end
+                  -- Update all rows with old group name
+                  for _, row in ipairs(ROWS) do
+                    if row.group == old_name then
+                      row.group = new_name
+                    end
+                  end
+                  _rebuild_group_filters()
+                  CLB.cached_rows = nil
+                  undo_snapshot()
+                  CLB.rename_filter = nil
+                  reaper.ImGui_CloseCurrentPopup(ctx)
                 end
-                _rebuild_group_filters()
-                CLB.cached_rows = nil
-                undo_snapshot()
               end
-              CLB.rename_filter = nil
-              reaper.ImGui_CloseCurrentPopup(ctx)
             end
 
             reaper.ImGui_EndPopup(ctx)
@@ -9981,6 +10240,69 @@ end
 --- that position for QC). Trimmed/Extended/Moved/Added are reported as not
 --- yet supported and left untouched — selecting them alongside a Deleted
 --- group still applies the Deleted ones.
+--- Physically shifts every unlocked item on the currently REAPER-selected
+--- track(s) by `hours` (may be negative). Used to move the "old" real
+--- session out of the way before Compare-session matching, so the pristine
+--- cut is preserved as a source pool while "new" is rebuilt in the vacated
+--- real-timeline space (see CLB.offset_old_enabled/offset_old_hours in the
+--- "Modes..." popup). A plain bulk position shift — no ripple, no other
+--- side effects — locked items are left untouched.
+function CMP.offset_selected_tracks(hours)
+  local n_sel_tracks = reaper.CountSelectedTracks(0)
+  if n_sel_tracks == 0 then
+    reaper.ShowMessageBox("Select at least one track in Reaper first.", SCRIPT_NAME, 0)
+    return
+  end
+  local delta = (hours or 0) * 3600
+  if delta == 0 then
+    reaper.ShowMessageBox("Offset is 0 hours — nothing to do.", SCRIPT_NAME, 0)
+    return
+  end
+
+  local sel_tracks = {}
+  for i = 0, n_sel_tracks - 1 do
+    sel_tracks[#sel_tracks + 1] = reaper.GetSelectedTrack(0, i)
+  end
+
+  local total_items, locked_items = 0, 0
+  for _, track in ipairs(sel_tracks) do
+    local n = reaper.CountTrackMediaItems(track)
+    total_items = total_items + n
+    for i = 0, n - 1 do
+      local item = reaper.GetTrackMediaItem(track, i)
+      if (reaper.GetMediaItemInfo_Value(item, "C_LOCK") & 1) == 1 then
+        locked_items = locked_items + 1
+      end
+    end
+  end
+
+  local sign  = delta >= 0 and "+" or "-"
+  local abs_h = math.abs(hours or 0)
+  local msg = string.format(
+    "Shift all items on %d selected track(s) by %s%g hour(s)?\n\n%d item(s) total%s.\n\n" ..
+    "This moves real item positions in this Reaper project — undoable via\n" ..
+    "Edit > Undo, but is separate from the Compare/Apply report.",
+    #sel_tracks, sign, abs_h, total_items,
+    locked_items > 0 and string.format(" (%d locked, will be skipped)", locked_items) or "")
+  if reaper.ShowMessageBox(msg, "Offset Tracks", 1) ~= 1 then return end
+
+  reaper.Undo_BeginBlock()
+  local moved = 0
+  for _, track in ipairs(sel_tracks) do
+    local n = reaper.CountTrackMediaItems(track)
+    for i = 0, n - 1 do
+      local item = reaper.GetTrackMediaItem(track, i)
+      if (reaper.GetMediaItemInfo_Value(item, "C_LOCK") & 1) ~= 1 then
+        local pos = reaper.GetMediaItemInfo_Value(item, "D_POSITION")
+        reaper.SetMediaItemInfo_Value(item, "D_POSITION", pos + delta)
+        moved = moved + 1
+      end
+    end
+  end
+  reaper.Undo_EndBlock(string.format("CLB: Offset %d item(s) by %s%g hour(s)", moved, sign, abs_h), -1)
+  reaper.UpdateArrange()
+end
+
 function CMP.apply_to_reaper()
   -- Pre-flight: refuse to run while Reaper's Ripple Editing is on. A
   -- ripple-mode delete/move would let Reaper itself shift *other* items to
@@ -10361,6 +10683,103 @@ function CMP.refresh_group_details()
   CLB.cmp_group_details = { labels = labels, items = items }
 end
 
+-- Recut Group Details table columns — independently toggleable via the
+-- "Columns" button below, separate from the main event-list column set.
+CMP.GD_COL = {
+  REEL = 1, TRACKS = 2,
+  OLD_SRC_IN = 3, OLD_SRC_OUT = 4, NEW_SRC_IN = 5, NEW_SRC_OUT = 6,
+  OLD_REC_IN = 7, OLD_REC_OUT = 8, NEW_REC_IN = 9, NEW_REC_OUT = 10,
+  CLIP_NAME = 11,
+}
+CMP.GD_COL_COUNT = 11
+CMP.GD_HEADER_LABELS = {
+  [CMP.GD_COL.REEL] = "Reel", [CMP.GD_COL.TRACKS] = "Tracks",
+  [CMP.GD_COL.OLD_SRC_IN] = "Old Src In", [CMP.GD_COL.OLD_SRC_OUT] = "Old Src Out",
+  [CMP.GD_COL.NEW_SRC_IN] = "New Src In", [CMP.GD_COL.NEW_SRC_OUT] = "New Src Out",
+  [CMP.GD_COL.OLD_REC_IN] = "Old Rec In", [CMP.GD_COL.OLD_REC_OUT] = "Old Rec Out",
+  [CMP.GD_COL.NEW_REC_IN] = "New Rec In", [CMP.GD_COL.NEW_REC_OUT] = "New Rec Out",
+  [CMP.GD_COL.CLIP_NAME] = "Clip Name",
+}
+-- Default order: Src TC (old/new) left of Rec TC (old/new), per user request.
+CMP.GD_COL_ORDER = {
+  CMP.GD_COL.REEL, CMP.GD_COL.TRACKS,
+  CMP.GD_COL.OLD_SRC_IN, CMP.GD_COL.OLD_SRC_OUT, CMP.GD_COL.NEW_SRC_IN, CMP.GD_COL.NEW_SRC_OUT,
+  CMP.GD_COL.OLD_REC_IN, CMP.GD_COL.OLD_REC_OUT, CMP.GD_COL.NEW_REC_IN, CMP.GD_COL.NEW_REC_OUT,
+  CMP.GD_COL.CLIP_NAME,
+}
+CMP.GD_COL_IS_TC = {
+  [CMP.GD_COL.OLD_SRC_IN] = true, [CMP.GD_COL.OLD_SRC_OUT] = true,
+  [CMP.GD_COL.NEW_SRC_IN] = true, [CMP.GD_COL.NEW_SRC_OUT] = true,
+  [CMP.GD_COL.OLD_REC_IN] = true, [CMP.GD_COL.OLD_REC_OUT] = true,
+  [CMP.GD_COL.NEW_REC_IN] = true, [CMP.GD_COL.NEW_REC_OUT] = true,
+}
+CMP.GD_COL_STRETCH_WEIGHT = {
+  [CMP.GD_COL.REEL] = 1.0, [CMP.GD_COL.TRACKS] = 0.6, [CMP.GD_COL.CLIP_NAME] = 2.0,
+}
+-- Default visibility: after Compare, Src TC has already become a relative
+-- trim/extend number (visible in the main table's Notes column), so it's
+-- hidden here by default — only Rec TC matters for most review. Persisted
+-- via save_prefs/load_prefs; any column can be toggled back on via "Columns".
+CMP.GD_COL_VISIBILITY = {}
+for i = 1, CMP.GD_COL_COUNT do CMP.GD_COL_VISIBILITY[i] = true end
+CMP.GD_COL_VISIBILITY[CMP.GD_COL.OLD_SRC_IN]  = false
+CMP.GD_COL_VISIBILITY[CMP.GD_COL.OLD_SRC_OUT] = false
+CMP.GD_COL_VISIBILITY[CMP.GD_COL.NEW_SRC_IN]  = false
+CMP.GD_COL_VISIBILITY[CMP.GD_COL.NEW_SRC_OUT] = false
+
+-- Per-TC-column (item, row_id_suffix, value) accessor, shared by the table
+-- body loop below — keeps that loop column-order-agnostic.
+CMP.GD_TC_GETTERS = {
+  [CMP.GD_COL.OLD_SRC_IN]  = { id = "osi", get = function(c) return c.old and c.old.src_in  end },
+  [CMP.GD_COL.OLD_SRC_OUT] = { id = "oso", get = function(c) return c.old and c.old.src_out end },
+  [CMP.GD_COL.NEW_SRC_IN]  = { id = "nsi", get = function(c) return c.new and c.new.src_in  end },
+  [CMP.GD_COL.NEW_SRC_OUT] = { id = "nso", get = function(c) return c.new and c.new.src_out end },
+  [CMP.GD_COL.OLD_REC_IN]  = { id = "oi",  get = function(c) return c.old and c.old.rec_in  end },
+  [CMP.GD_COL.OLD_REC_OUT] = { id = "oo",  get = function(c) return c.old and c.old.rec_out end },
+  [CMP.GD_COL.NEW_REC_IN]  = { id = "ni",  get = function(c) return c.new and c.new.rec_in  end },
+  [CMP.GD_COL.NEW_REC_OUT] = { id = "no",  get = function(c) return c.new and c.new.rec_out end },
+}
+
+--- Show/hide checkboxes for the Group Details table's columns (see CMP.GD_COL
+--- above). Mirrors the main event-list "Columns" popup (EDL Columns).
+function CMP.draw_group_details_columns_popup()
+  if reaper.ImGui_BeginPopup(ctx, "Group Details Columns##cmp_gd_col_popup") then
+    reaper.ImGui_Text(ctx, "Show/Hide Columns:")
+    reaper.ImGui_Separator(ctx)
+
+    if reaper.ImGui_SmallButton(ctx, "All##cmp_gd_col_all") then
+      for i = 1, CMP.GD_COL_COUNT do CMP.GD_COL_VISIBILITY[i] = true end
+      save_prefs()
+    end
+    reaper.ImGui_SameLine(ctx)
+    if reaper.ImGui_SmallButton(ctx, "None##cmp_gd_col_none") then
+      for i = 1, CMP.GD_COL_COUNT do CMP.GD_COL_VISIBILITY[i] = false end
+      save_prefs()
+    end
+    reaper.ImGui_SameLine(ctx)
+    if reaper.ImGui_SmallButton(ctx, "Reset##cmp_gd_col_reset") then
+      for i = 1, CMP.GD_COL_COUNT do CMP.GD_COL_VISIBILITY[i] = true end
+      CMP.GD_COL_VISIBILITY[CMP.GD_COL.OLD_SRC_IN]  = false
+      CMP.GD_COL_VISIBILITY[CMP.GD_COL.OLD_SRC_OUT] = false
+      CMP.GD_COL_VISIBILITY[CMP.GD_COL.NEW_SRC_IN]  = false
+      CMP.GD_COL_VISIBILITY[CMP.GD_COL.NEW_SRC_OUT] = false
+      save_prefs()
+    end
+    reaper.ImGui_Separator(ctx)
+
+    for _, col in ipairs(CMP.GD_COL_ORDER) do
+      local label = CMP.GD_HEADER_LABELS[col] or ("Col " .. col)
+      local chg, new_val = reaper.ImGui_Checkbox(ctx, label .. "##cmp_gd_col_vis_" .. col, CMP.GD_COL_VISIBILITY[col])
+      if chg then
+        CMP.GD_COL_VISIBILITY[col] = new_val
+        save_prefs()
+      end
+    end
+
+    reaper.ImGui_EndPopup(ctx)
+  end
+end
+
 --- Header row for the inline Group Details panel — occupies the same
 --- split-view slot the Audio List normally uses (see draw_main_content);
 --- Compare mode has no use for the audio panel there, so this reuses the
@@ -10375,6 +10794,14 @@ function CMP.draw_group_details_header()
     reaper.ImGui_TextDisabled(ctx, "Recut Group Details — select a row above to see what it matches.")
   end
   reaper.ImGui_SameLine(ctx)
+  if reaper.ImGui_SmallButton(ctx, "Columns##cmp_gd_cols") then
+    reaper.ImGui_OpenPopup(ctx, "Group Details Columns##cmp_gd_col_popup")
+  end
+  if reaper.ImGui_IsItemHovered(ctx) then
+    reaper.ImGui_SetTooltip(ctx, "Show/hide this table's columns")
+  end
+  CMP.draw_group_details_columns_popup()
+  reaper.ImGui_SameLine(ctx)
   if reaper.ImGui_SmallButton(ctx, "Hide##cmp_details_panel") then
     CLB.show_cmp_details = false
   end
@@ -10388,6 +10815,15 @@ function CMP.draw_group_details_table(table_height)
     return
   end
 
+  local visible_cols = {}
+  for _, col in ipairs(CMP.GD_COL_ORDER) do
+    if CMP.GD_COL_VISIBILITY[col] then visible_cols[#visible_cols + 1] = col end
+  end
+  if #visible_cols == 0 then
+    reaper.ImGui_TextDisabled(ctx, "No columns visible. Click 'Columns' to show columns.")
+    return
+  end
+
   local fps     = (CLB.compare_result and CLB.compare_result.fps) or CLB.fps
   local is_drop = (CLB.compare_result and CLB.compare_result.is_drop) or false
   local function tc(sec) return sec and EDL.seconds_to_tc(sec, fps, is_drop) or "-" end
@@ -10395,26 +10831,23 @@ function CMP.draw_group_details_table(table_height)
   local avail_w = reaper.ImGui_GetContentRegionAvail(ctx)
   local tflags = reaper.ImGui_TableFlags_Borders() | reaper.ImGui_TableFlags_RowBg()
                | reaper.ImGui_TableFlags_ScrollY() | reaper.ImGui_TableFlags_Resizable()
-  if reaper.ImGui_BeginTable(ctx, "##cmp_details_tbl", 11, tflags, avail_w, table_height) then
+  if reaper.ImGui_BeginTable(ctx, "##cmp_details_tbl", #visible_cols, tflags, avail_w, table_height) then
     reaper.ImGui_TableSetupScrollFreeze(ctx, 0, 1)
     -- TC columns hold fixed-format "HH:MM:SS:FF" text, so they get a fixed,
     -- non-user-resizable width (edit TC_W below to change it — matches the
     -- main event-list/Audio-list tables' treatment of TC columns, see
     -- TC_COLS/AUDIO_TC_COLS); Reel/Tracks/Clip Name stretch to fill the rest.
-    -- Src TC (old/new) is placed left of Rec TC (old/new) per user request.
     local TC_W = scale(75)
     local TC_FLAGS = reaper.ImGui_TableColumnFlags_WidthFixed() | reaper.ImGui_TableColumnFlags_NoResize()
-    reaper.ImGui_TableSetupColumn(ctx, "Reel",       reaper.ImGui_TableColumnFlags_WidthStretch(), 1.0)
-    reaper.ImGui_TableSetupColumn(ctx, "Tracks",     reaper.ImGui_TableColumnFlags_WidthStretch(), 0.6)
-    reaper.ImGui_TableSetupColumn(ctx, "Old Src In",  TC_FLAGS, TC_W)
-    reaper.ImGui_TableSetupColumn(ctx, "Old Src Out", TC_FLAGS, TC_W)
-    reaper.ImGui_TableSetupColumn(ctx, "New Src In",  TC_FLAGS, TC_W)
-    reaper.ImGui_TableSetupColumn(ctx, "New Src Out", TC_FLAGS, TC_W)
-    reaper.ImGui_TableSetupColumn(ctx, "Old Rec In",  TC_FLAGS, TC_W)
-    reaper.ImGui_TableSetupColumn(ctx, "Old Rec Out", TC_FLAGS, TC_W)
-    reaper.ImGui_TableSetupColumn(ctx, "New Rec In",  TC_FLAGS, TC_W)
-    reaper.ImGui_TableSetupColumn(ctx, "New Rec Out", TC_FLAGS, TC_W)
-    reaper.ImGui_TableSetupColumn(ctx, "Clip Name",  reaper.ImGui_TableColumnFlags_WidthStretch(), 2.0)
+    for _, col in ipairs(visible_cols) do
+      local label = CMP.GD_HEADER_LABELS[col] or ""
+      if CMP.GD_COL_IS_TC[col] then
+        reaper.ImGui_TableSetupColumn(ctx, label, TC_FLAGS, TC_W)
+      else
+        reaper.ImGui_TableSetupColumn(ctx, label,
+          reaper.ImGui_TableColumnFlags_WidthStretch(), CMP.GD_COL_STRETCH_WEIGHT[col] or 1.0)
+      end
+    end
     reaper.ImGui_TableHeadersRow(ctx)
 
     -- All Old/New Rec and Src TC cells are clickable — each jumps Reaper's
@@ -10442,17 +10875,19 @@ function CMP.draw_group_details_table(table_height)
     for idx, c in ipairs(d.items) do
       local rep = c.new or c.old
       reaper.ImGui_TableNextRow(ctx)
-      reaper.ImGui_TableNextColumn(ctx); reaper.ImGui_Text(ctx, rep.reel or "")
-      reaper.ImGui_TableNextColumn(ctx); reaper.ImGui_Text(ctx, table.concat(rep.tracks or {}, ","))
-      reaper.ImGui_TableNextColumn(ctx); tc_cell(c.old and c.old.src_in,  "osi" .. idx)
-      reaper.ImGui_TableNextColumn(ctx); tc_cell(c.old and c.old.src_out, "oso" .. idx)
-      reaper.ImGui_TableNextColumn(ctx); tc_cell(c.new and c.new.src_in,  "nsi" .. idx)
-      reaper.ImGui_TableNextColumn(ctx); tc_cell(c.new and c.new.src_out, "nso" .. idx)
-      reaper.ImGui_TableNextColumn(ctx); tc_cell(c.old and c.old.rec_in,  "oi" .. idx)
-      reaper.ImGui_TableNextColumn(ctx); tc_cell(c.old and c.old.rec_out, "oo" .. idx)
-      reaper.ImGui_TableNextColumn(ctx); tc_cell(c.new and c.new.rec_in,  "ni" .. idx)
-      reaper.ImGui_TableNextColumn(ctx); tc_cell(c.new and c.new.rec_out, "no" .. idx)
-      reaper.ImGui_TableNextColumn(ctx); reaper.ImGui_Text(ctx, rep.clip_name or "")
+      for _, col in ipairs(visible_cols) do
+        reaper.ImGui_TableNextColumn(ctx)
+        if col == CMP.GD_COL.REEL then
+          reaper.ImGui_Text(ctx, rep.reel or "")
+        elseif col == CMP.GD_COL.TRACKS then
+          reaper.ImGui_Text(ctx, table.concat(rep.tracks or {}, ","))
+        elseif col == CMP.GD_COL.CLIP_NAME then
+          reaper.ImGui_Text(ctx, rep.clip_name or "")
+        else
+          local g = CMP.GD_TC_GETTERS[col]
+          tc_cell(g.get(c), g.id .. idx)
+        end
+      end
     end
     reaper.ImGui_EndTable(ctx)
   end

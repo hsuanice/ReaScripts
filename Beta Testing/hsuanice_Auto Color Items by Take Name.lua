@@ -1,6 +1,6 @@
 --[[
 @description Auto Color Items by Take Name
-@version 260806.2303
+@version 260918.1411
 @author hsuanice
 @about
   Config-driven color palette with keyword rules — colors items by take name.
@@ -13,6 +13,45 @@
   No external dependencies — REAPER built-in GFX library.
 
 @changelog
+  v260918.1411
+  - Fix: adding the Follow Track Color function pushed the script over Lua's 200-local-per-function
+    limit ("too many local variables ... in main function near 'in'" on load). Grouped
+    do_palette_flow_color / do_smart_random_color / do_follow_track_color and their Smart-Random-only
+    helper functions (weighted_rgb_distance, hue_gap_degrees, smart_color_distance, shuffled_indices,
+    is_grayscale_color, non_grayscale_palette_indices, shuffled_values) into one shared `do...end`
+    block with forward-declared locals for the three functions, so the helpers' local slots are
+    freed when the block ends instead of staying live for the rest of the file.
+
+  v260918.1405
+  - Add: Follow Track Color function — colors selected items (or all items if none selected) to
+    match their own track's current custom color; tracks without a custom color are left
+    unchanged. Only applies to items (Target: Tracks shows a reminder and does nothing), since a
+    track following its own color has no meaning.
+  - Add: standalone "Auto Color Follow Track Color" wrapper script for Action-List/toolbar use,
+    matching the existing Auto Color by Palette / Smart Random wrappers.
+  - Change: moved the Palette / Random / Follow function buttons out of the crowded Take
+    Name/Track Name toggle row and into the Types: sub-bar (right of the MIDI checkbox), under a
+    new "Functions:" label, with shorter button labels (Palette / Random / Follow)
+
+  v260908.1427
+  - Change: BG Bright / BG Sat now only take effect in Shiny mode (Normal mode's background is
+    left exactly as before — raw palette color, or Match/Black/White/Theme secondary). Only
+    Shiny mode's pastel background formula was ever the thing getting washed out by REAPER's
+    razor-edit selection highlight, so that's the only case this setting should touch.
+
+  v260908.1424
+  - Fix: BG Bright / BG Sat sliders were marked `dirty`, which made the Settings panel call
+    gen_palette()+save_palette() on every drag — silently regenerating and overwriting the whole
+    color palette (losing custom/imported swatch colors) instead of only affecting how background
+    color is rendered. Now persists via save_pconf() directly, like Normal target/Other color/mode.
+
+  v260908.1404
+  - Add: BG Bright / BG Sat sliders in Settings panel — scale item background Value/Saturation
+    (0-200%, default 100% = no change) independent of Normal/Shiny mode, to give headroom against
+    REAPER's razor-edit selection highlight blowing out very pale (e.g. Shiny mode) backgrounds
+  - Change: settings persisted to ExtState as bg_brightness_scale / bg_saturation_scale so
+    Auto Color Daemon, Auto Color by Palette, and Auto Color Smart Random follow automatically
+
   v260806.2303
   - Add: keyword export/import now explicitly supports separate Take Name and Track Name targets with dedicated file defaults
   - Change: Smart Random now excludes grayscale/low-saturation swatches to avoid overly similar color assignments
@@ -247,6 +286,8 @@ local NORMAL_SECONDARY_BLACK = "black"
 local NORMAL_SECONDARY_WHITE = "white"
 local normal_primary_target  = NORMAL_PRIMARY_BG
 local normal_secondary_color = NORMAL_SECONDARY_WHITE
+local bg_brightness_scale = 1.0   -- 0.0–2.0, scales item background Value; 1.0 = no change
+local bg_saturation_scale = 1.0   -- 0.0–2.0, scales item background Saturation; 1.0 = no change
 local KEYTAB_TAKE        = "take"
 local KEYTAB_TRACK       = "track"
 local keyword_tab
@@ -350,7 +391,27 @@ local function utf8_take(s, n)
   return result
 end
 
+local function clamp01(x) return x < 0 and 0 or (x > 1 and 1 or x) end
+
+-- Scales item background Saturation/Value by bg_saturation_scale/bg_brightness_scale.
+-- Shiny mode only — Normal mode's background is left untouched (raw palette
+-- color, or Match/Black/White/Theme secondary), since only Shiny mode's
+-- built-in pastel background formula (shiny_background_rrggbb) is what gets
+-- washed out under REAPER's razor-edit selection highlight.
+local function adjust_bg_color(rrggbb)
+  if color_mode ~= COLOR_MODE_SHINY then return rrggbb end
+  if bg_brightness_scale == 1.0 and bg_saturation_scale == 1.0 then return rrggbb end
+  local r = ((rrggbb >> 16) & 0xFF) / 255
+  local g = ((rrggbb >> 8) & 0xFF) / 255
+  local b = (rrggbb & 0xFF) / 255
+  local h, s, v = rgb_to_hsv(r, g, b)
+  s = clamp01(s * bg_saturation_scale)
+  v = clamp01(v * bg_brightness_scale)
+  return hsv(h, s, v)
+end
+
 local function apply_item_background_color(item, rrggbb)
+  rrggbb = adjust_bg_color(rrggbb)
   reaper.SetMediaItemInfo_Value(item, "I_CUSTOMCOLOR",
     reaper.ColorToNative((rrggbb>>16)&0xFF,(rrggbb>>8)&0xFF,rrggbb&0xFF)|0x1000000)
 end
@@ -636,6 +697,8 @@ local function save_pconf()
   reaper.SetExtState(PREF_NS, "color_mode",    color_mode,                    true)
   reaper.SetExtState(PREF_NS, "normal_primary_target", normal_primary_target, true)
   reaper.SetExtState(PREF_NS, "normal_secondary_color", normal_secondary_color, true)
+  reaper.SetExtState(PREF_NS, "bg_brightness_scale", string.format("%.3f", bg_brightness_scale), true)
+  reaper.SetExtState(PREF_NS, "bg_saturation_scale", string.format("%.3f", bg_saturation_scale), true)
 end
 
 local function load_pconf()
@@ -687,6 +750,10 @@ local function load_pconf()
   if nsc == NORMAL_SECONDARY_MATCH or nsc == NORMAL_SECONDARY_BLACK or nsc == NORMAL_SECONDARY_WHITE or nsc == "transparent" then
     normal_secondary_color = nsc
   end
+  local bbs = tonumber(reaper.GetExtState(PREF_NS, "bg_brightness_scale"))
+  if bbs and bbs >= 0 and bbs <= 2 then bg_brightness_scale = bbs end
+  local bss = tonumber(reaper.GetExtState(PREF_NS, "bg_saturation_scale"))
+  if bss and bss >= 0 and bss <= 2 then bg_saturation_scale = bss end
 end
 
 local function load_palette()
@@ -1169,7 +1236,17 @@ local function collect_target_items_row_major()
   return items, scope
 end
 
-local function do_palette_flow_color()
+-- Grouped in one block (rather than each as its own top-level local) to stay
+-- under Lua's 200-local limit for the main chunk: the helpers below are only
+-- used by these three functions, so scoping them here frees their slots for
+-- reuse once the block ends, instead of holding them live for the rest of
+-- the file. Only the three functions themselves need to outlive the block
+-- (they're called later from the toolbar draw code), hence the forward
+-- declaration.
+local do_palette_flow_color, do_smart_random_color, do_follow_track_color
+do
+
+do_palette_flow_color = function()
   if #PALETTE == 0 then set_status("Palette is empty"); return end
   if current_target_is_tracks() then
     local tracks, scope = collect_target_tracks()
@@ -1283,7 +1360,7 @@ local function shuffled_values(src)
   return t
 end
 
-local function do_smart_random_color()
+do_smart_random_color = function()
   if #PALETTE == 0 then set_status("Palette is empty"); return end
   local candidate_idxs = non_grayscale_palette_indices()
   if #candidate_idxs == 0 then
@@ -1377,6 +1454,42 @@ local function do_smart_random_color()
 
   set_status(string.format("Smart Random: %d %s item(s)", n, scope))
 end
+
+do_follow_track_color = function()
+  if current_target_is_tracks() then
+    set_status("Follow Track Color only applies to items")
+    return
+  end
+  local items, scope = collect_target_items_row_major()
+  local n = #items
+  if n == 0 then set_status("No items to color"); return end
+
+  reaper.Undo_BeginBlock()
+  local applied, skipped = 0, 0
+  for _, item in ipairs(items) do
+    local track = reaper.GetMediaItem_Track(item)
+    local native = track and reaper.GetTrackColor(track) or 0
+    if native ~= 0 then
+      local r, g, b = reaper.ColorFromNative(native)
+      apply_color_by_mode(item, math.floor(r) * 65536 + math.floor(g) * 256 + math.floor(b))
+      applied = applied + 1
+    else
+      skipped = skipped + 1
+    end
+  end
+  reaper.Undo_EndBlock("Follow Track Color", -1)
+  reaper.UpdateArrange()
+
+  if applied == 0 then
+    set_status(string.format("Follow Track Color: no custom track colors (%d %s item(s) skipped)", skipped, scope))
+  elseif skipped > 0 then
+    set_status(string.format("Follow Track Color: %d %s item(s) (%d skipped)", applied, scope, skipped))
+  else
+    set_status(string.format("Follow Track Color: %d %s item(s)", applied, scope))
+  end
+end
+
+end -- do_palette_flow_color / do_smart_random_color / do_follow_track_color scope
 
 -- Returns a set of selected item custom colors in 0xRRGGBB format.
 -- Only true custom item colors are included (track/default display colors are ignored).
@@ -1525,15 +1638,12 @@ end
 local SROW_H = 22   -- settings row height
 
 local function settings_panel_h()
-  return SROW_H*2 + SROW_H * #PCONF.rows + SROW_H*6 + MARGIN*2
+  return SROW_H*2 + SROW_H * #PCONF.rows + SROW_H*7 + MARGIN*2
 end
 
 -- Total expanded window height (palette area + all optional panels)
 local function expanded_h()
-  return base_win_h
-    + (show_settings and settings_panel_h() or 0)
-    + (show_presets  and 144                or 0)
-    + AC_BAR_H
+  return base_win_h + AC_BAR_H
 end
 
 -- draws the settings panel starting at screen y; returns whether palette should regenerate
@@ -1724,6 +1834,41 @@ local function draw_settings_panel(start_y)
   end
 
   iy = iy + SROW_H
+  do
+    -- BG Bright / BG Sat: scales item background Value/Saturation, Shiny
+    -- mode only (100% = no change; no effect at all in Normal mode).
+    local lw2  = 56   -- "BG Bright" label width
+    local vw2  = 40   -- value display width ("200%")
+    local gap2 = 12
+    local sw2  = (pw - lw2*2 - vw2*2 - gap2) // 2
+
+    -- Note: these two only affect color *rendering* (like Normal target / Other
+    -- color / mode below), never the palette itself — so they persist via
+    -- save_pconf() directly and must NOT set `dirty` (dirty triggers
+    -- gen_palette()+save_palette(), which would regenerate/overwrite PALETTE).
+    txt(px, iy+5, "BG Bright", .55,.55,.55)
+    local nb, cb2 = hslider("bgbright", px+lw2, iy, sw2, bg_brightness_scale, 0, 2)
+    if cb2 then
+      bg_brightness_scale = math.floor(nb*100+.5)/100
+      save_pconf()
+      preset_dirty = true
+      if auto_color_enabled then last_state_count = -1 end
+    end
+    txt(px+lw2+sw2+4, iy+5, string.format("%d%%", math.floor(bg_brightness_scale*100+.5)), .72,.72,.72)
+
+    local sx3 = px + lw2 + sw2 + vw2 + gap2
+    txt(sx3, iy+5, "BG Sat", .55,.55,.55)
+    local nsat, csat = hslider("bgsat", sx3+lw2, iy, sw2, bg_saturation_scale, 0, 2)
+    if csat then
+      bg_saturation_scale = math.floor(nsat*100+.5)/100
+      save_pconf()
+      preset_dirty = true
+      if auto_color_enabled then last_state_count = -1 end
+    end
+    txt(sx3+lw2+sw2+4, iy+5, string.format("%d%%", math.floor(bg_saturation_scale*100+.5)), .72,.72,.72)
+  end
+
+  iy = iy + SROW_H
   if chkbox(px, iy+2, safety_mode, "Safety Mode (Rec Arm/Record => Save + Default)") then
     safety_mode = not safety_mode
     if not safety_mode then safety_engaged = false end
@@ -1753,8 +1898,8 @@ local selected_color_set = nil
 
 local function is_palette_color_selected(palette_color)
   if not selected_color_set then return false end
-  if selected_color_set[palette_color] then return true end
-  local shiny_bg = shiny_background_rrggbb(palette_color)
+  if selected_color_set[adjust_bg_color(palette_color)] then return true end
+  local shiny_bg = adjust_bg_color(shiny_background_rrggbb(palette_color))
   return selected_color_set[shiny_bg] == true
 end
 
@@ -1821,6 +1966,7 @@ local function draw()
     if lclicked and hov then do_paste_color() end
   end
   if btn(318, 1, 100, BAR_H-2, "Remove Color") then do_clear_selected() end
+  txt(426, 6, "Target: " .. current_target_label(), .66,.66,.66)
 
   -- preset name + save status (to the left of ☰ Presets)
   local preset_btn_x   = W - 194
@@ -1852,15 +1998,13 @@ local function draw()
   if not collapsed then
     if btn(preset_btn_x,   1, 80, BAR_H-2, "☰ Presets", show_presets) then
       show_presets = not show_presets
+      if show_presets then show_settings = false end
       save_pconf()
-      prog_resize = 4
-      gfx_init(gfx.w, expanded_h())
     end
     if btn(settings_btn_x, 1, 78, BAR_H-2, "⚙ Settings", show_settings) then
       show_settings = not show_settings
+      if show_settings then show_presets = false end
       save_pconf()
-      prog_resize = 4
-      gfx_init(gfx.w, expanded_h())
     end
   end
   if btn(collapse_btn_x, 1, 22, BAR_H-2, collapsed and "▴" or "▾") then
@@ -1885,8 +2029,21 @@ local function draw()
     if chkbox(fx2, ty2, ac_empty, "Empty") then ac_empty = not ac_empty; save_auto_pref() end
     fx2 = fx2 + 60
     if chkbox(fx2, ty2, ac_midi,  "MIDI")  then ac_midi  = not ac_midi;  save_auto_pref() end
+    fx2 = fx2 + 54
+
+    -- ── color function buttons (Palette / Random / Follow) ──────────────────
+    fx2 = fx2 + 12
+    txt(fx2, ty2 + 1, "Functions:", .45,.45,.45); fx2 = fx2 + 68
+    if btn(fx2, sy + 1, 54, AC_BAR_H - 2, "Palette") then do_palette_flow_color() end
+    fx2 = fx2 + 60
+    if btn(fx2, sy + 1, 54, AC_BAR_H - 2, "Random") then do_smart_random_color() end
+    fx2 = fx2 + 60
+    if btn(fx2, sy + 1, 54, AC_BAR_H - 2, "Follow") then do_follow_track_color() end
+    fx2 = fx2 + 60
+
     local mode_label = (color_mode == COLOR_MODE_SHINY) and "ShinyColor" or "Normal"
-    if btn(W - 126, sy + 1, 118, AC_BAR_H - 2, "Mode: " .. mode_label, color_mode == COLOR_MODE_SHINY) then
+    local mode_x = math.max(fx2 + 12, W - 126)
+    if btn(mode_x, sy + 1, 118, AC_BAR_H - 2, "Mode: " .. mode_label, color_mode == COLOR_MODE_SHINY) then
       color_mode = (color_mode == COLOR_MODE_SHINY) and COLOR_MODE_NORMAL or COLOR_MODE_SHINY
       save_pconf()
       if auto_color_enabled then last_state_count = -1 end
@@ -1895,12 +2052,13 @@ local function draw()
   end
   local content_top = BAR_H + AC_BAR_H
 
-  -- ── separator + optional panels ────────────────────────────────────────────
+  -- ── separator ──────────────────────────────────────────────────────────────
+  gfx.set(.28,.28,.28,1); gfx.line(0, content_top, W, content_top)
+  content_top = content_top + 1
+
   if show_presets then
     draw_preset_panel(content_top)
-    content_top = content_top + 144
-  end
-  if show_settings then
+  elseif show_settings then
     local dirty = draw_settings_panel(content_top)
     if dirty then
       gen_palette()
@@ -1909,56 +2067,42 @@ local function draw()
       preset_dirty = true
       if auto_color_enabled then last_state_count = -1 end
     end
-    content_top = content_top + settings_panel_h()
-  end
-  gfx.set(.28,.28,.28,1); gfx.line(0, content_top, W, content_top)
-  content_top = content_top + 1
-
-  -- ── view toggle row ────────────────────────────────────────────────────────
-  local TOGGLE_H = 22
-  fill(0, content_top, W, TOGGLE_H, .14,.14,.14)
-  if btn(MARGIN, content_top+2, 72, TOGGLE_H-4, "⊞ Colors", view_mode == "color") then
-    view_mode = "color"; save_pconf()
-  end
-  if btn(MARGIN+76, content_top+2, 56, TOGGLE_H-4, "≡ List", view_mode == "list") then
-    view_mode = "list"; save_pconf()
-  end
-  if btn(MARGIN+136, content_top+2, 94, TOGGLE_H-4, "Take Name", keyword_tab == KEYTAB_TAKE) then
-    keyword_tab = KEYTAB_TAKE; save_pconf()
-  end
-  if btn(MARGIN+234, content_top+2, 100, TOGGLE_H-4, "Track Name", keyword_tab == KEYTAB_TRACK) then
-    keyword_tab = KEYTAB_TRACK; save_pconf()
-  end
-  if btn(MARGIN+338, content_top+2, 138, TOGGLE_H-4, "Auto Color by Palette") then
-    do_palette_flow_color()
-  end
-  if btn(MARGIN+480, content_top+2, 102, TOGGLE_H-4, "Smart Random") then
-    do_smart_random_color()
-  end
-  txt(math.max(MARGIN + 586, W - 390), content_top + 6, "Target: " .. current_target_label(), .66,.66,.66)
-  local rec_chk_y = content_top + (TOGGLE_H - 14) // 2
-  local rec_chk_x = math.max(MARGIN + 384, W - 260)
-  if chkbox(rec_chk_x, rec_chk_y, recording_auto_color, "Auto Color Recording") then
-    recording_auto_color = not recording_auto_color
-    save_pconf()
-    set_status(recording_auto_color and "Recording Auto Color: ON" or "Recording Auto Color: OFF")
-  end
-  if btn(W - 102, content_top+1, 94, TOGGLE_H-2, "Reset Seq") then
-    reset_recording_sequence()
-    set_status("Recording sequence reset")
-  end
-  content_top = content_top + TOGGLE_H
-
-  -- ── palette grid or list view ──────────────────────────────────────────────
-  if view_mode == "list" then
-    draw_list_view(content_top, H - content_top - 16 - MARGIN - LIST_FOOTER_H)
-    -- ── export / import footer ────────────────────────────────────────────
-    local fy = H - 16 - MARGIN - LIST_FOOTER_H
-    fill(0, fy, W, LIST_FOOTER_H, .11, .11, .11)
-    gfx.set(.28,.28,.28,1); gfx.line(0, fy, W, fy)
-    if btn(MARGIN, fy+3, 72, LIST_FOOTER_H-6, "⬆ Export") then export_keywords() end
-    if btn(MARGIN+76, fy+3, 72, LIST_FOOTER_H-6, "⬇ Import") then import_keywords() end
   else
+    -- ── view toggle row ──────────────────────────────────────────────────────
+    local TOGGLE_H = 22
+    fill(0, content_top, W, TOGGLE_H, .14,.14,.14)
+    if btn(MARGIN, content_top+2, 72, TOGGLE_H-4, "⊞ Colors", view_mode == "color") then
+      view_mode = "color"; save_pconf()
+    end
+    if btn(MARGIN+76, content_top+2, 56, TOGGLE_H-4, "≡ List", view_mode == "list") then
+      view_mode = "list"; save_pconf()
+    end
+    if btn(MARGIN+136, content_top+2, 94, TOGGLE_H-4, "Take Name", keyword_tab == KEYTAB_TAKE) then
+      keyword_tab = KEYTAB_TAKE; save_pconf()
+    end
+    if btn(MARGIN+234, content_top+2, 100, TOGGLE_H-4, "Track Name", keyword_tab == KEYTAB_TRACK) then
+      keyword_tab = KEYTAB_TRACK; save_pconf()
+    end
+    local rec_chk_y = content_top + (TOGGLE_H - 14) // 2
+    local rec_chk_x = math.max(MARGIN + 350, W - 290)
+    if chkbox(rec_chk_x, rec_chk_y, recording_auto_color, "Auto Color Recording") then
+      recording_auto_color = not recording_auto_color
+      reset_recording_sequence()
+      save_pconf()
+      set_status(recording_auto_color and "Recording Auto Color: ON" or "Recording Auto Color: OFF")
+    end
+    content_top = content_top + TOGGLE_H
+
+    -- ── palette grid or list view ────────────────────────────────────────────
+    if view_mode == "list" then
+      draw_list_view(content_top, H - content_top - 16 - MARGIN - LIST_FOOTER_H)
+      -- ── export / import footer ──────────────────────────────────────────
+      local fy = H - 16 - MARGIN - LIST_FOOTER_H
+      fill(0, fy, W, LIST_FOOTER_H, .11, .11, .11)
+      gfx.set(.28,.28,.28,1); gfx.line(0, fy, W, fy)
+      if btn(MARGIN, fy+3, 72, LIST_FOOTER_H-6, "⬆ Export") then export_keywords() end
+      if btn(MARGIN+76, fy+3, 72, LIST_FOOTER_H-6, "⬇ Import") then import_keywords() end
+    else
     local grid_y   = content_top + 4
     local cw       = math.max(28, (W - MARGIN*2) // PALETTE_COLS)
     local avail_h  = H - grid_y - 16 - MARGIN
@@ -2049,7 +2193,8 @@ local function draw()
         popup_y   = math.min(my, H-#POPUP_ITEMS*20-10)
       end
     end
-  end  -- view_mode == "list" / else
+    end  -- view_mode == "list" / else
+  end
 
   -- ── right-click popup ────────────────────────────────────────────────────
   if popup_idx then
@@ -2158,7 +2303,7 @@ local function list_presets()
   return names
 end
 
-local function save_preset(name)
+function save_preset(name)
   -- save current pconf + full palette colors/keywords under this name
   local parts = { string.format("%.2f", PCONF.hue_offset),
                   string.format("%.2f", PCONF.hue_range),
@@ -2182,7 +2327,7 @@ local function save_preset(name)
   end
 end
 
-local function load_preset(name)
+function load_preset(name)
   local raw = reaper.GetExtState(PREF_NS, preset_key(name))
   if raw == "" then return false end
   local parts = {}
@@ -2857,9 +3002,7 @@ local function loop()
     prev_win_x, prev_win_y  = cur_x, cur_y
   elseif size_changed or pos_changed then
     if size_changed and not collapsed then
-      local panels_h = (show_settings and settings_panel_h() or 0)
-                     + (show_presets  and 144                or 0)
-                     + AC_BAR_H
+      local panels_h = AC_BAR_H
       base_win_w = math.max(200, gfx.w)
       base_win_h = math.max(100, gfx.h - panels_h)
     end
