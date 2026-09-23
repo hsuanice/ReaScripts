@@ -27,10 +27,39 @@ API:
 Requires:
   Library/json.lua
   Library/hsuanice_EDL Parser.lua
+  Library/hsuanice_Process Exec.lua  (shell exec + reliable output capture)
   Tools/otio_to_clb.py
   Python 3 with opentimelineio installed
 
 Changelog:
+  v0.4.4  Refactor: _python_supports/detect_python/_resolve_python_for_ext's
+          "run python, optionally require an extra import to succeed, else
+          scan a candidate path list" logic moved into the new shared
+          hsuanice_Process Exec.lua (PX.python_works/PX.resolve_python),
+          since hsuanice_Subtitle Bridge.lua had the same skeleton (minus
+          the OTIO-specific import probe). This module now passes its own
+          candidate list and opentimelineio/fcp_xml probe via opts. No
+          behavior change; M.python_supports/M.detect_python's public
+          signatures are unchanged.
+  v0.4.3  Refactor: M.parse's temp-file-redirect + retry logic (added in
+          v0.4.2) moved into the new shared hsuanice_Process Exec.lua
+          (PX.run_capture), since hsuanice_Subtitle Bridge.lua v0.1.2 had
+          an identical copy for the same io.popen problem. No behavior
+          change. (The async parse_async_start/poll path is untouched —
+          it uses a different, already-safe reaper.ExecProcess pattern.)
+  v0.4.2  Fix: M.parse's synchronous .xml/.aaf path (used by Compare's Load
+          Old/New) could report "No output from Python script" even on a
+          clean exit(0) with real stdout produced — io.popen's pipe read
+          confirmed unreliable from inside Reaper for substantial output,
+          while the identical command always succeeds run directly in a
+          shell. Switched to the same fix already applied to
+          hsuanice_Subtitle Bridge.lua v0.1.2: redirect stdout+stderr to a
+          temp file via shell redirection and read that back from disk
+          instead of through io.popen's pipe, with one retry on empty
+          output before giving up. (The already-existing async path,
+          parse_async_start/poll, was unaffected — it already used this
+          temp-file technique via reaper.ExecProcess.) TODO: consolidate
+          this and Subtitle Bridge's copy into one shared helper.
   v0.4.1  Harden Python runtime detection.
           Prefer healthy Homebrew/system Python ahead of broken pyenv shims.
           Validate required OTIO adapters (e.g. fcp_xml for Premiere/FCP XML)
@@ -44,7 +73,7 @@ Changelog:
 --]]
 
 local M = {}
-M.VERSION = "0.4.1"
+M.VERSION = "0.4.4"
 
 -- ---------------------------------------------------------------------------
 -- Path discovery
@@ -58,6 +87,7 @@ local _root_dir = _lib_dir:match("^(.*[/\\])[^/\\]*[/\\]$") or _lib_dir
 
 local _json_path     = _lib_dir  .. "json.lua"
 local _edl_path      = _lib_dir  .. "hsuanice_EDL Parser.lua"
+local _px_path       = _lib_dir  .. "hsuanice_Process Exec.lua"
 local _python_script = _root_dir .. "Tools/otio_to_clb.py"
 
 -- ---------------------------------------------------------------------------
@@ -76,6 +106,12 @@ if not ok_edl then
         .. "\n  Error: " .. tostring(EDL))
 end
 
+local ok_px, PX = pcall(dofile, _px_path)
+if not ok_px then
+  error("OTIO Bridge: cannot load Process Exec\n  Expected: " .. _px_path
+        .. "\n  Error: " .. tostring(PX))
+end
+
 -- ---------------------------------------------------------------------------
 -- Configuration
 -- ---------------------------------------------------------------------------
@@ -90,33 +126,26 @@ M.python = "python3"
 -- ---------------------------------------------------------------------------
 
 --- Shell-quote a single argument (macOS / Linux single-quote style).
-local function shell_quote(s)
-  -- Single-quote the whole string; escape any embedded single quotes.
-  return "'" .. s:gsub("'", "'\\''") .. "'"
-end
+local shell_quote = PX.shell_quote
 
-local function _python_supports(py, ext)
+--- Build the extra-import probe for a given extension: OTIO Bridge needs
+--- opentimelineio itself, plus (for .xml) the fcp_xml adapter specifically,
+--- since a python can have OTIO installed without that adapter.
+local function _otio_probe(ext)
   local probe = "import opentimelineio as otio"
   local lower_ext = tostring(ext or ""):lower()
   if lower_ext == "xml" then
     probe = probe .. "; otio.adapters.from_name(\"fcp_xml\")"
   end
-  local cmd = shell_quote(py) .. " -c '" .. probe .. "' 2>&1"
-  local h = io.popen(cmd, "r")
-  if not h then return false end
-  local out = h:read("*a"); h:close()
-  return out == ""  -- no output = no error = import succeeded
+  return probe
 end
 
-function M.python_supports(py, ext)
-  return _python_supports(py, ext)
-end
-
--- Auto-detect a Python that has opentimelineio installed.
--- Checks common locations; returns the first working path, or "python3" as fallback.
-function M.detect_python(ext)
+--- Candidate python paths to scan, most-specific (a known otio-env
+--- virtualenv) first. Built fresh each call since $HOME can't be cached
+--- at file-load time in every host environment.
+local function _otio_candidates()
   local home = os.getenv("HOME") or ""
-  local candidates = {
+  return {
     "/opt/homebrew/bin/python3",
     "/opt/homebrew/opt/python@3.13/bin/python3.13",
     "/usr/local/bin/python3",
@@ -126,19 +155,26 @@ function M.detect_python(ext)
     "python3",
     "python",
   }
-  for _, p in ipairs(candidates) do
-    if p ~= "" and _python_supports(p, ext) then
-      return p
-    end
-  end
-  return "python3"
+end
+
+function M.python_supports(py, ext)
+  return PX.python_works(py, { probe = _otio_probe(ext) })
+end
+
+-- Auto-detect a Python that has opentimelineio installed.
+-- Checks common locations; returns the first working path, or "python3" as fallback.
+function M.detect_python(ext)
+  return PX.resolve_python(nil, {
+    probe      = _otio_probe(ext),
+    candidates = _otio_candidates(),
+  })
 end
 
 local function _resolve_python_for_ext(py, ext)
-  if py and py ~= "" and _python_supports(py, ext) then
-    return py
-  end
-  return M.detect_python(ext)
+  return PX.resolve_python(py, {
+    probe      = _otio_probe(ext),
+    candidates = _otio_candidates(),
+  })
 end
 
 -- ---------------------------------------------------------------------------
@@ -179,25 +215,31 @@ function M.parse(filepath, opts)
   f:close()
 
   -- Build and run command
-  local cmd = python .. " " .. shell_quote(_python_script)
+  local cmd = shell_quote(python) .. " " .. shell_quote(_python_script)
                       .. " " .. shell_quote(filepath)
 
-  local handle, popen_err = io.popen(cmd, "r")
-  if not handle then
-    return nil, "io.popen failed: " .. tostring(popen_err)
-               .. "\n  Command was: " .. cmd
-  end
-
-  local output = handle:read("*a")
-  handle:close()
+  -- Redirect stdout+stderr to a temp file and read it back from disk,
+  -- rather than through io.popen's pipe — confirmed unreliable from inside
+  -- Reaper for substantial Python stdout (exit 0, zero bytes read on every
+  -- attempt, even though the identical command always succeeds run
+  -- directly in a shell, or through a standalone Lua 5.4 interpreter's own
+  -- io.popen). This is Compare's Load Old/New path for .xml/.aaf, so it's
+  -- exposed to the same risk on any large timeline. Delegates to the
+  -- shared hsuanice_Process Exec.lua (PX.run_capture), which also backs
+  -- hsuanice_Subtitle Bridge.lua's identical fix.
+  local output, _exec_ok, exec_why, exec_code = PX.run_capture(cmd)
 
   if not output or output == "" then
+    local status = ""
+    if exec_why then
+      status = string.format("\n  Process %s: %s", tostring(exec_why), tostring(exec_code))
+    end
     return nil,
-      "No output from Python script.\n"
+      "No output from Python script (after 2 attempts).\n"
       .. "  Is '" .. python .. "' in your PATH?\n"
       .. "  Are opentimelineio and required adapters installed?\n"
       .. "  Run: pip3 install opentimelineio otio-fcp-adapter\n"
-      .. "  Command: " .. cmd
+      .. "  Command: " .. cmd .. status
   end
 
   -- Strip any non-JSON prefix lines (e.g. Python logging warnings on stdout)

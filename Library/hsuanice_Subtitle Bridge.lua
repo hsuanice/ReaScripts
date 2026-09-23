@@ -33,15 +33,46 @@ to the user-facing dialog flow.
 Requires:
   Library/json.lua
   Library/hsuanice_EDL Parser.lua  (for tc_to_seconds / seconds_to_tc)
+  Library/hsuanice_Process Exec.lua  (shell exec + reliable output capture)
   Tools/subtitle_to_clb.py
   Python 3, plus openpyxl for .xlsx files (pip3 install openpyxl)
 
 Changelog:
+  v0.1.4  Refactor: _python_works/_detect_python/_resolve_python's "run
+          python, else scan a candidate path list" logic moved into the
+          new shared hsuanice_Process Exec.lua (PX.python_works/
+          PX.resolve_python), since hsuanice_OTIO Bridge.lua had the same
+          skeleton (plus its own opentimelineio import probe, passed via
+          opts there). No behavior change — same default candidate list,
+          no extra probe needed here.
+  v0.1.3  Refactor: _run_python_once/_run_python's temp-file-redirect +
+          retry logic (added in v0.1.2) moved into the new shared
+          hsuanice_Process Exec.lua (PX.run_capture), since
+          hsuanice_OTIO Bridge.lua v0.4.2 had an identical copy for the
+          same io.popen problem. No behavior change.
+  v0.1.2  Fix: "No output from Python script" persisted even after v0.1.1's
+          retry — confirmed the real cause is io.popen's pipe read being
+          unreliable specifically when called from inside Reaper (exit 0,
+          zero bytes read, every attempt) against a real multi-sheet
+          .xlsx, even though the identical command always succeeds run
+          directly in a shell, and even a standalone Lua 5.4 interpreter's
+          io.popen succeeds too. Switched to the same technique
+          hsuanice_OTIO Bridge.lua already relies on for exactly this
+          class of problem: redirect the Python process's stdout+stderr to
+          a temp file via shell redirection (os.execute, blocking — this
+          module is intentionally synchronous), then read that file back
+          from disk instead of through a pipe.
+  v0.1.1  Fix: "No output from Python script" could fire even though the
+          exact same command always succeeded run directly in a shell —
+          seen once against a large .xlsx via openpyxl. _run_python now
+          retries once automatically on empty output before reporting an
+          error, and the error (if it still happens) now also reports the
+          child process's exit status for better diagnosis.
   v0.1.0  Initial release: SRT / CSV / TSV / XLSX support; inspect + parse modes.
 --]]
 
 local M = {}
-M.VERSION = "0.1.0"
+M.VERSION = "0.1.4"
 
 -- ---------------------------------------------------------------------------
 -- Path discovery
@@ -53,6 +84,7 @@ local _root_dir = _lib_dir:match("^(.*[/\\])[^/\\]*[/\\]$") or _lib_dir
 
 local _json_path     = _lib_dir  .. "json.lua"
 local _edl_path      = _lib_dir  .. "hsuanice_EDL Parser.lua"
+local _px_path       = _lib_dir  .. "hsuanice_Process Exec.lua"
 local _python_script = _root_dir .. "Tools/subtitle_to_clb.py"
 
 -- ---------------------------------------------------------------------------
@@ -71,6 +103,12 @@ if not ok_edl then
         .. "\n  Error: " .. tostring(EDL))
 end
 
+local ok_px, PX = pcall(dofile, _px_path)
+if not ok_px then
+  error("Subtitle Bridge: cannot load Process Exec\n  Expected: " .. _px_path
+        .. "\n  Error: " .. tostring(PX))
+end
+
 -- Default Python executable; override with M.python = "/full/path/to/python3"
 M.python = "python3"
 
@@ -78,12 +116,30 @@ M.python = "python3"
 -- Internal helpers
 -- ---------------------------------------------------------------------------
 
-local function shell_quote(s)
-  return "'" .. s:gsub("'", "'\\''") .. "'"
+local shell_quote = PX.shell_quote
+
+-- ---------------------------------------------------------------------------
+-- Python runtime detection (independent of OTIO Bridge — subtitle parsing
+-- needs no special libraries beyond stdlib + optional openpyxl for .xlsx,
+-- so it must not fail just because an otio-env virtualenv was removed).
+-- Delegates to hsuanice_Process Exec.lua's PX.resolve_python with no extra
+-- probe and the default candidate list (a plain "does python run" check is
+-- all this module needs — no special import requirement like OTIO Bridge).
+-- ---------------------------------------------------------------------------
+
+--- Resolve a usable python executable: prefer the given path if it actually
+--- runs; otherwise fall back to auto-detection. Handles a stale saved path
+--- (e.g. an OTIO.python virtualenv that was later removed) transparently.
+local function _resolve_python(py)
+  return PX.resolve_python(py)
 end
 
 --- Run subtitle_to_clb.py with the given args; return (raw_output, err).
---- Captures both stdout and stderr (merged) so Python tracebacks are visible.
+--- Captures both stdout and stderr (merged) so Python tracebacks are
+--- visible. Delegates to hsuanice_Process Exec.lua's PX.run_capture, which
+--- redirects output to a temp file and retries once on empty output — see
+--- that file's header for why (Reaper's io.popen is unreliable for
+--- substantial subprocess stdout).
 local function _run_python(python, args)
   local f = io.open(_python_script, "r")
   if not f then
@@ -96,22 +152,19 @@ local function _run_python(python, args)
   for _, a in ipairs(args) do
     cmd = cmd .. " " .. shell_quote(a)
   end
-  cmd = cmd .. " 2>&1"
 
-  local h, popen_err = io.popen(cmd, "r")
-  if not h then
-    return nil, "io.popen failed: " .. tostring(popen_err)
-                 .. "\n  Command was: " .. cmd
-  end
-  local out = h:read("*a")
-  h:close()
+  local out, exec_ok, exec_why, exec_code = PX.run_capture(cmd)
 
   if not out or out == "" then
+    local status = ""
+    if exec_why then
+      status = string.format("\n  Process %s: %s", tostring(exec_why), tostring(exec_code))
+    end
     return nil,
-      "No output from Python script.\n"
+      "No output from Python script (after 2 attempts).\n"
       .. "  Is '" .. python .. "' in your PATH?\n"
       .. "  Is openpyxl installed (for .xlsx)? Run: pip3 install openpyxl\n"
-      .. "  Command: " .. cmd
+      .. "  Command: " .. cmd .. status
   end
   return out, nil
 end
@@ -160,7 +213,7 @@ end
 --- @return string|nil       Error message if nil was returned
 function M.inspect(filepath, opts)
   opts = opts or {}
-  local python = opts.python or M.python
+  local python = _resolve_python(opts.python or M.python)
   local args = { "--inspect", filepath }
   local raw, err = _run_python(python, args)
   if not raw then return nil, err end
@@ -181,7 +234,7 @@ end
 --- @return string|nil   Error message if nil was returned.
 function M.parse(filepath, opts)
   opts = opts or {}
-  local python = opts.python or M.python
+  local python = _resolve_python(opts.python or M.python)
   local fps = tonumber(opts.default_fps) or 25
   local args = { "--parse", filepath, "--fps=" .. tostring(fps) }
   if opts.is_drop then args[#args + 1] = "--drop-frame" end
