@@ -1,6 +1,6 @@
 --[[
 @description Conform List Browser
-@version 260923.1154
+@version 260923.1448
 @author hsuanice
 @about
   A REAPER script for browsing and editing EDL (Edit Decision List) data
@@ -71,6 +71,73 @@
   Required for AAF: aaftool in PATH (https://github.com/agfline/LibAAF)
 
 @changelog
+  v260923.1448
+  - Feature: "Calibrate TC (Anchor)" popup gains a second calibration
+    method — no Reaper item needed at all. Select one event row and type
+    the Rec TC In it SHOULD be (e.g. a Universal Counting Leader that's
+    always placed 2 seconds before each hour mark: 00:59:58:00,
+    01:59:58:00, ...); the delta is derived from the difference between
+    that target and the row's current raw Rec TC In (CLB.
+    calibrate_tc_to_target). Same per-source storage/behavior as Set
+    Anchor — whichever row you use picks the source, re-running either
+    method replaces that source's delta outright.
+  - Feature: the new target-TC input (and the main Search box, which had
+    identical inline logic — now shares this) accepts either "HH:MM:SS:FF"
+    or 8 bare digits with no colons (e.g. "00595800"), via new
+    CLB.normalize_tc_input.
+  v260923.1345
+  - Fix: an .edl reel split across several files (CMX3600's 4-audio-track-
+    per-file limit means a full channel set commonly exports as A1-2/A3-4/
+    .../Video, one reel spread across N files sitting together in a reel
+    folder — e.g. "R01/POINT_DIR_v8_R1_*.edl" x7) was being registered as N
+    SEPARATE sources, one per file, so "Calibrate TC (Anchor)" (per-source
+    since v260923.1330) needed one Set Anchor per file instead of once for
+    the whole reel. _register_source now folds multiple .edl files sharing
+    the same parent FOLDER into one source entry (name becomes "R01 (7
+    files)"), so Set Anchor on any one of them calibrates the whole reel.
+    Confirmed this holds even when selecting many reels' files together in
+    one giant multi-select (e.g. R01 through R05 in a single "Load EDL..."
+    dialog, the user's actual workflow) — grouping is per-folder, not
+    per-load-action, so R01/R02/.../R05 still end up as separate sources.
+    XML/AAF are unaffected (always one file per reel already; the
+    4-track-per-file limit is EDL-specific).
+  v260923.1330
+  - Change: "Calibrate TC (Anchor)" (added in v260923.1303) is now PER
+    SOURCE instead of one global correction — the common real case is
+    loading several reels/episodes at once, each exported by the editor
+    starting at 0 but placed by audio post at its own hour slot on the
+    session timeline (00595800, 01595800, 02595800...), which a single
+    delta can't correct. Calibration state moved from global CLB fields to
+    CLB.edl_sources[i].tc_calib_enabled/tc_calib_delta_sec/tc_calib_note;
+    CLB.rec_tc_seconds/CLB.calibrated_rec_tc_string now take the row (to
+    look up its source via row.__source_idx) alongside the TC string.
+    "Set Anchor..." still just needs one selected row + one selected
+    Reaper item — it calibrates whichever source that row belongs to, so
+    running it once per loaded reel handles the whole multi-source case.
+    The toolbar popup now lists every loaded source with its own
+    Enabled/offset/Clear, instead of one global row. Persisted per-source
+    in the .clb project format (S| line gains 3 fields; old .clb files
+    without them load as "no calibration", unaffected).
+  v260923.1303
+  - Feature: "Calibrate TC (Anchor)" — a virtual, toggleable Rec TC
+    correction for the whole currently-loaded list, computed from one
+    user-confirmed event<->item pair instead of a typed round number of
+    hours (the "Set Anchor" idea from the paused Recut TODO, generalized
+    to work on any loaded list, not just a Compare/recut result). Select
+    one event row + one Reaper item that IS that event's real content,
+    click "Set Anchor..." (new "Calibrate TC..." button/popup in the main
+    toolbar) — the script verifies the item's length matches the row's Rec
+    duration (refuses on mismatch, since that usually means the wrong item
+    was picked), then derives delta = item's real position - event's
+    expected position. Never rewrites row.rec_tc_in/rec_tc_out — applied
+    on top wherever a Rec TC becomes a real Reaper timeline position or a
+    table display value (REC_IN/REC_OUT columns, click-to-jump, Generate
+    Items, Conform Matched Items, Create Scene Cut Track), so it can be
+    switched off at any time to see the untouched original list again.
+    Inline cell editing of Rec TC always operates on the true raw value
+    regardless of calibration state (new CLB.get_cell_edit_text), so
+    editing a cell never accidentally bakes the calibration delta into the
+    stored data. Persisted across sessions (tc_calib_enabled/delta_sec).
   v260923.1154
   - Docs: expanded the header's "Supported formats" section with real,
     confirmed software/version info gathered from a 39-file real-project
@@ -1963,6 +2030,16 @@ local CLB = {
   offset_old_hours   = 10,
   offset_new_enabled = false,
   offset_new_hours   = 0,
+  -- "Calibrate TC (Anchor)" state lives PER SOURCE, not here — see
+  -- CLB.edl_sources[i].tc_calib_enabled/tc_calib_delta_sec/tc_calib_note
+  -- (set by CLB.calibrate_tc_via_anchor / CLB.calibrate_tc_to_target).
+  -- Audio post commonly loads several reels/episodes at once, each
+  -- authored by the editor starting at 0 but placed at its own hour slot
+  -- on the real session timeline (00595800, 01595800, 02595800...) — a
+  -- single global delta can't correct that, so each loaded source gets
+  -- its own. tc_calib_target_buf is just the popup's InputText buffer for
+  -- CLB.calibrate_tc_to_target, not calibration state itself.
+  tc_calib_target_buf = "",
   cmp_zoom = 50.0,
   cmp_scroll = 0.0,
   cmp_vscroll_old = 0.0,
@@ -3402,6 +3479,11 @@ local function save_prefs()
   reaper.SetExtState(EXT_NS, "offset_old_hours", tostring(CLB.offset_old_hours or 10), true)
   reaper.SetExtState(EXT_NS, "offset_new_enabled", CLB.offset_new_enabled and "1" or "0", true)
   reaper.SetExtState(EXT_NS, "offset_new_hours", tostring(CLB.offset_new_hours or 0), true)
+  -- "Calibrate TC (Anchor)" state is per-source (CLB.edl_sources[i].
+  -- tc_calib_*), saved/restored as part of each source's own "S|" line in
+  -- the .clb project format (see save_clb_project / load_clb_project) —
+  -- not a global ExtState pref here, since it's tied to specific loaded
+  -- files, not a persistent app-wide setting.
 
   -- Recut Group Details column visibility (comma-separated 0/1)
   local gd_vis_parts = {}
@@ -3654,6 +3736,57 @@ end
 -- Row data helpers
 ---------------------------------------------------------------------------
 
+--- Accept a timecode typed either as "HH:MM:SS:FF" or as 8 bare digits
+--- "HHMMSSFF" (no colons — e.g. "00595800") and return the colon form.
+--- Anything else is returned unchanged (untouched, so EDL.is_valid_tc's
+--- own error message still applies to a genuinely malformed value). Shared
+--- by the main Search box and "Calibrate to Target TC" — both need "type
+--- 8 digits, no colons required" the same way.
+function CLB.normalize_tc_input(s)
+  s = (s or ""):match("^%s*(.-)%s*$")
+  if s:match("^%d%d%d%d%d%d%d%d$") then
+    return s:sub(1,2) .. ":" .. s:sub(3,4) .. ":" .. s:sub(5,6) .. ":" .. s:sub(7,8)
+  end
+  return s
+end
+
+--- Rec TC (seconds), with the active "Calibrate TC (Anchor)" delta applied
+--- if enabled for `row`'s own source. Use this — never a bare
+--- EDL.tc_to_seconds(row.rec_tc_in) — everywhere a Rec TC becomes a real
+--- Reaper timeline position (Generate Items, Conform Matched Items, Create
+--- Scene Cut Track, click-to-jump). Not used for purely relative
+--- comparisons between the list's own rows (Consolidate, Scene/Take
+--- inference, mini-timeline panel) — a uniform shift cancels out there
+--- anyway, so those are left reading raw TC.
+---
+--- Calibration is per SOURCE, not global: audio post commonly loads
+--- several reels/episodes at once, each authored by the editor starting at
+--- 0 but placed at its own hour slot on the real session timeline — a
+--- single delta can't correct all of them, so each entry in
+--- CLB.edl_sources carries its own tc_calib_enabled/tc_calib_delta_sec,
+--- looked up here via row.__source_idx.
+--- @param tc_str string   A Rec TC string ("HH:MM:SS:FF").
+--- @param row table|nil   The row this TC belongs to, for source lookup.
+---                        Pass nil only when there's genuinely no row
+---                        (falls back to no calibration).
+function CLB.rec_tc_seconds(tc_str, row)
+  local sec = EDL.tc_to_seconds(tc_str or "00:00:00:00", CLB.fps, CLB.is_drop)
+  local src = row and CLB.edl_sources[row.__source_idx or 0]
+  if src and src.tc_calib_enabled then
+    sec = sec + (src.tc_calib_delta_sec or 0)
+  end
+  return sec
+end
+
+--- Calibrated Rec TC as a display string — what get_cell_text shows for
+--- COL.REC_IN/REC_OUT. Returns the raw string unchanged when `row`'s
+--- source has no calibration enabled, so it's always safe to call.
+function CLB.calibrated_rec_tc_string(tc_str, row)
+  local src = row and CLB.edl_sources[row.__source_idx or 0]
+  if not (src and src.tc_calib_enabled) then return tc_str or "" end
+  return EDL.seconds_to_tc(CLB.rec_tc_seconds(tc_str, row), CLB.fps, CLB.is_drop)
+end
+
 -- Get cell text for display
 local function get_cell_text(row, col_id)
   if not row then return "" end
@@ -3667,8 +3800,8 @@ local function get_cell_text(row, col_id)
   end
   if col_id == COL.SRC_IN       then return row.src_tc_in or "" end
   if col_id == COL.SRC_OUT      then return row.src_tc_out or "" end
-  if col_id == COL.REC_IN       then return row.rec_tc_in or "" end
-  if col_id == COL.REC_OUT      then return row.rec_tc_out or "" end
+  if col_id == COL.REC_IN       then return CLB.calibrated_rec_tc_string(row.rec_tc_in, row) end
+  if col_id == COL.REC_OUT      then return CLB.calibrated_rec_tc_string(row.rec_tc_out, row) end
   if col_id == COL.DURATION     then return row.duration or "" end
   if col_id == COL.CLIP_NAME    then return row.clip_name or "" end
   if col_id == COL.SRC_FILE     then return row.source_file or "" end
@@ -3693,6 +3826,18 @@ local function get_cell_text(row, col_id)
   if col_id == COL.SCENE        then return row.scene or "" end
   if col_id == COL.TAKE         then return row.take  or "" end
   return ""
+end
+
+--- Raw (uncalibrated) cell text — used only for entering/comparing an
+--- inline edit. REC_IN/REC_OUT must always be edited against their true
+--- stored value, never get_cell_text's "Calibrate TC (Anchor)" display
+--- value, or every edit made while calibration is on would silently bake
+--- the delta into the raw data (typing what you see, which is already
+--- +delta, as the new "raw" value).
+function CLB.get_cell_edit_text(row, col_id)
+  if col_id == COL.REC_IN  then return row.rec_tc_in  or "" end
+  if col_id == COL.REC_OUT then return row.rec_tc_out or "" end
+  return get_cell_text(row, col_id)
 end
 
 -- Set cell value (with undo)
@@ -3842,12 +3987,13 @@ local function get_view_rows()
 
   local search = CLB.search_text:lower()
   -- 8 bare digits ("01102203") are almost certainly a timecode typed
-  -- without the colons — also check the "HH:MM:SS:FF" form so it matches
-  -- Src/Rec TC In/Out (stored with colons in __search_text) the same as
-  -- typing "01:10:22:03" directly would.
+  -- without the colons — also check the "HH:MM:SS:FF" form (via
+  -- CLB.normalize_tc_input) so it matches Src/Rec TC In/Out (stored with
+  -- colons in __search_text) the same as typing "01:10:22:03" directly would.
   local search_tc = nil
-  if search:match("^%d%d%d%d%d%d%d%d$") then
-    search_tc = search:sub(1,2) .. ":" .. search:sub(3,4) .. ":" .. search:sub(5,6) .. ":" .. search:sub(7,8)
+  local normalized_search = CLB.normalize_tc_input(search)
+  if normalized_search ~= search then
+    search_tc = normalized_search
   end
   local need_filter = search ~= "" or hidden_src_idx or hidden_tracks or hidden_reels or hidden_groups
 
@@ -4033,15 +4179,57 @@ local function _make_rows_from_events(events, fps, is_drop, source_idx)
   return new_rows
 end
 
---- Register an EDL source and return its index.
+--- Parent folder of a path, trailing slash included ("" if none).
+function CLB.folder_of(filepath)
+  return filepath:match("(.*[/\\])") or ""
+end
+
+--- Last path segment of a folder path (its own display name).
+function CLB.folder_display_name(folder)
+  local trimmed = folder:gsub("[/\\]+$", "")
+  return trimmed:match("([^/\\]+)$") or trimmed
+end
+
+--- Register a source and return its index. .edl files sitting in the same
+--- folder are folded into ONE source instead of one-per-file: CMX3600's
+--- 4-audio-track-per-file limit means a single reel's full channel set is
+--- routinely exported as several .edl files (A1-2/A3-4/.../Video) placed
+--- together in one reel folder — see the real case that prompted this,
+--- POINT_DIR_v8_R1_*.edl (7 files) sitting in a "R01" folder. Those are
+--- one reel, not several, and must share one "Calibrate TC (Anchor)"
+--- correction (Set Anchor on any one of them then calibrates the whole
+--- reel). XML/AAF exports are always one file per reel already, so they
+--- keep the previous one-file-one-source behavior untouched.
 local function _register_source(filepath, event_count)
-  local name = filepath:match("([^/\\]+)$") or filepath
+  local ext = (filepath:match("%.([^./\\]+)$") or ""):lower()
+
+  if ext == "edl" then
+    local folder = CLB.folder_of(filepath)
+    for idx, src in ipairs(CLB.edl_sources) do
+      if src.__folder and src.__folder == folder then
+        src.event_count  = (src.event_count or 0) + event_count
+        src.__file_count = (src.__file_count or 1) + 1
+        src.name = string.format("%s (%d files)", CLB.folder_display_name(folder), src.__file_count)
+        return idx
+      end
+    end
+  end
+
+  local folder = (ext == "edl") and CLB.folder_of(filepath) or nil
   local idx = #CLB.edl_sources + 1
   CLB.edl_sources[idx] = {
-    name = name,
+    name = folder and CLB.folder_display_name(folder) or (filepath:match("([^/\\]+)$") or filepath),
     path = filepath,
     event_count = event_count,
     visible = true,
+    -- Per-source "Calibrate TC (Anchor)" state — see CLB.calibrate_tc_via_anchor.
+    tc_calib_enabled   = false,
+    tc_calib_delta_sec = 0,
+    tc_calib_note      = "",
+    -- Folder-grouping bookkeeping (.edl only) — not saved to .clb directly;
+    -- re-derived from `path` on project load (see load_clb_project).
+    __folder     = folder,
+    __file_count = folder and 1 or nil,
   }
   return idx
 end
@@ -4356,14 +4544,17 @@ local function save_clb_project(filepath, silent)
   end
   f:write(string.format("EDL_COL_VISIBILITY|%s\n", table.concat(vis_parts, ",")))
 
-  -- EDL sources
+  -- EDL sources (tc_calib_* = per-source "Calibrate TC (Anchor)" state)
   f:write(string.format("SOURCES|%d\n", #CLB.edl_sources))
   for _, src in ipairs(CLB.edl_sources) do
-    f:write(string.format("S|%s|%s|%d|%s\n",
+    f:write(string.format("S|%s|%s|%d|%s|%s|%s|%s\n",
       _clb_escape(src.path or ""),
       _clb_escape(src.name or ""),
       src.event_count or 0,
-      src.visible and "1" or "0"))
+      src.visible and "1" or "0",
+      src.tc_calib_enabled and "1" or "0",
+      tostring(src.tc_calib_delta_sec or 0),
+      _clb_escape(src.tc_calib_note or "")))
   end
 
   -- EDL rows (including match state and group assignments)
@@ -4533,11 +4724,27 @@ local function _parse_clb_file(filepath)
       elseif key == "HIDDEN_GROUP"  then hidden_groups[p[2] or ""] = true
 
       elseif key == "S" then
+        -- p[6]/p[7]/p[8] (tc_calib_*) are absent in .clb files saved before
+        -- "Calibrate TC (Anchor)" existed — nil p[6]/p[8] fall back to
+        -- disabled/"" and tonumber(nil) falls back to 0, so old files load
+        -- exactly as before (no calibration).
+        local s_path = p[2] or ""
+        local s_ext  = (s_path:match("%.([^./\\]+)$") or ""):lower()
+        -- Re-derive the folder-grouping key (see _register_source) so a
+        -- later "Load EDL..." for another file from this same reel folder
+        -- still folds into this restored source instead of creating a
+        -- duplicate. Not itself saved in the .clb format.
+        local s_folder = (s_ext == "edl") and CLB.folder_of(s_path) or nil
         new_sources[#new_sources+1] = {
-          path        = p[2] or "",
+          path        = s_path,
           name        = p[3] or "",
           event_count = tonumber(p[4]) or 0,
           visible     = (p[5] ~= "0"),
+          tc_calib_enabled   = (p[6] == "1"),
+          tc_calib_delta_sec = tonumber(p[7]) or 0,
+          tc_calib_note      = p[8] or "",
+          __folder     = s_folder,
+          __file_count = s_folder and 1 or nil,
         }
 
       elseif key == "R" then
@@ -5750,8 +5957,8 @@ local function generate_items()
       if not tr then tr = track_map[track_names_order[1]] end
       if not tr then return end
 
-      local pos = EDL.tc_to_seconds(row.rec_tc_in, CLB.fps, CLB.is_drop)
-      local pos_out = EDL.tc_to_seconds(row.rec_tc_out, CLB.fps, CLB.is_drop)
+      local pos = CLB.rec_tc_seconds(row.rec_tc_in, row)
+      local pos_out = CLB.rec_tc_seconds(row.rec_tc_out, row)
       local length = pos_out - pos
       if length <= 0 then length = 0.001 end  -- minimum length
 
@@ -5822,6 +6029,174 @@ local function get_selected_rows()
   end
 
   return selected
+end
+
+---------------------------------------------------------------------------
+-- Calibrate TC (Anchor)
+---------------------------------------------------------------------------
+
+--- Pick one selected event row + one selected Reaper item that the user
+--- has confirmed IS that event's real content, and derive a Rec TC
+--- position-correction delta from the difference between where the item
+--- actually sits and where the row's Rec TC says it should be. Verifies
+--- the item's length matches the row's Rec duration within a small
+--- tolerance first — a mismatch almost certainly means the wrong item was
+--- picked, so this refuses rather than silently computing a bogus delta.
+--- Always computed from the RAW (uncalibrated) Rec TC, so re-running this
+--- replaces any previous calibration outright rather than compounding on
+--- top of it.
+---
+--- The calibration is stored on the row's own SOURCE (CLB.edl_sources),
+--- not globally — loading several reels/episodes at once, each authored
+--- by the editor starting at 0 but placed at its own hour slot on the real
+--- session timeline, is the normal case in audio post, and each one needs
+--- its own correction. Whichever row you anchor from picks the source.
+function CLB.calibrate_tc_via_anchor()
+  local rows = get_selected_rows()
+  if #rows ~= 1 then
+    reaper.ShowMessageBox(
+      "Select exactly one event row in the table first (click one cell).",
+      "Calibrate TC (Anchor)", 0)
+    return
+  end
+  local row = rows[1]
+
+  local src = CLB.edl_sources[row.__source_idx or 0]
+  if not src then
+    reaper.ShowMessageBox(
+      "This row isn't tied to a loaded source — can't calibrate it.",
+      "Calibrate TC (Anchor)", 0)
+    return
+  end
+
+  if reaper.CountSelectedMediaItems(0) ~= 1 then
+    reaper.ShowMessageBox(
+      "Select exactly one item in Reaper first — the item that IS this\n"
+      .. "event's real content.",
+      "Calibrate TC (Anchor)", 0)
+    return
+  end
+  local item = reaper.GetSelectedMediaItem(0, 0)
+
+  local fps, is_drop = CLB.fps, CLB.is_drop
+  local event_in  = EDL.tc_to_seconds(row.rec_tc_in  or "00:00:00:00", fps, is_drop)
+  local event_out = EDL.tc_to_seconds(row.rec_tc_out or "00:00:00:00", fps, is_drop)
+  local event_len = event_out - event_in
+
+  local item_pos = reaper.GetMediaItemInfo_Value(item, "D_POSITION")
+  local item_len = reaper.GetMediaItemInfo_Value(item, "D_LENGTH")
+
+  local tol = 1.5 / fps
+  if math.abs(item_len - event_len) > tol then
+    reaper.ShowMessageBox(string.format(
+      "Length mismatch — probably not the same content:\n\n"
+      .. "  Event Rec length:  %s\n"
+      .. "  Item length:       %s\n\n"
+      .. "Refusing to calibrate.",
+      EDL.seconds_to_tc(event_len, fps, is_drop),
+      EDL.seconds_to_tc(item_len,  fps, is_drop)),
+      "Calibrate TC (Anchor)", 0)
+    return
+  end
+
+  local delta = item_pos - event_in
+  local sign  = delta >= 0 and "+" or "-"
+  local delta_tc = EDL.seconds_to_tc(math.abs(delta), fps, is_drop)
+
+  local take = reaper.GetActiveTake(item)
+  local item_name = take and select(2, reaper.GetSetMediaItemTakeInfo_String(take, "P_NAME", "", false)) or "(no take)"
+
+  local msg = string.format(
+    "Source: %s\n\n"
+    .. "Anchor pair:\n"
+    .. "  Event #%s  (Rec TC In %s)\n"
+    .. "  Item \"%s\"  (at %s)\n\n"
+    .. "Computed correction: %s%s\n\n"
+    .. "Enable TC Calibration for this source with this offset? All Rec TC\n"
+    .. "shown in the table for this source's rows, and every action that\n"
+    .. "positions its items on the Reaper timeline (Generate Items, Conform\n"
+    .. "Matched Items, Create Scene Cut Track, click-to-jump), will apply\n"
+    .. "this correction until you turn it off. The underlying list data is\n"
+    .. "not changed — this can be switched off at any time. Other loaded\n"
+    .. "sources are unaffected.",
+    src.name or "?",
+    row.event_num or "?", row.rec_tc_in or "",
+    item_name, EDL.seconds_to_tc(item_pos, fps, is_drop),
+    sign, delta_tc)
+
+  if reaper.ShowMessageBox(msg, "Calibrate TC (Anchor)", 1) ~= 1 then return end
+
+  src.tc_calib_enabled   = true
+  src.tc_calib_delta_sec = delta
+  src.tc_calib_note      = string.format("Event #%s <-> \"%s\"", row.event_num or "?", item_name)
+  CLB.cached_rows = nil
+
+  reaper.ShowMessageBox(string.format(
+    "TC Calibration enabled for \"%s\": %s%s\n\nRec TC for this source's rows now reflect this correction.",
+    src.name or "?", sign, delta_tc), "Calibrate TC (Anchor)", 0)
+end
+
+--- Second "Calibrate TC (Anchor)" entry point: no Reaper item needed at
+--- all — pick one selected event row and type the Rec TC In it SHOULD be
+--- (e.g. a Universal Counting Leader that's always placed 2 seconds before
+--- each hour mark: 00:59:58:00, 01:59:58:00, ...), and the delta is
+--- derived from the difference between that target and the row's current
+--- raw Rec TC In. Accepts "HH:MM:SS:FF" or 8 bare digits "HHMMSSFF" (see
+--- CLB.normalize_tc_input). Same per-source storage as
+--- CLB.calibrate_tc_via_anchor — whichever row you use picks the source,
+--- and re-running either method replaces that source's delta outright.
+function CLB.calibrate_tc_to_target(target_tc_raw)
+  local rows = get_selected_rows()
+  if #rows ~= 1 then
+    reaper.ShowMessageBox(
+      "Select exactly one event row in the table first (click one cell).",
+      "Calibrate to Target TC", 0)
+    return
+  end
+  local row = rows[1]
+
+  local src = CLB.edl_sources[row.__source_idx or 0]
+  if not src then
+    reaper.ShowMessageBox(
+      "This row isn't tied to a loaded source — can't calibrate it.",
+      "Calibrate to Target TC", 0)
+    return
+  end
+
+  local target_tc = CLB.normalize_tc_input(target_tc_raw)
+  if not EDL.is_valid_tc(target_tc) then
+    reaper.ShowMessageBox(
+      "Invalid timecode.\nExpected HH:MM:SS:FF, or 8 digits with no colons (e.g. 00595800).",
+      "Calibrate to Target TC", 0)
+    return
+  end
+
+  local fps, is_drop = CLB.fps, CLB.is_drop
+  local event_in   = EDL.tc_to_seconds(row.rec_tc_in or "00:00:00:00", fps, is_drop)
+  local target_sec = EDL.tc_to_seconds(target_tc, fps, is_drop)
+  local delta = target_sec - event_in
+  local sign  = delta >= 0 and "+" or "-"
+  local delta_tc = EDL.seconds_to_tc(math.abs(delta), fps, is_drop)
+
+  local msg = string.format(
+    "Source: %s\n\n"
+    .. "Event #%s  Rec TC In %s  ->  %s\n\n"
+    .. "Computed correction: %s%s\n\n"
+    .. "Enable TC Calibration for this source with this offset? Other\n"
+    .. "loaded sources are unaffected.",
+    src.name or "?", row.event_num or "?", row.rec_tc_in or "", target_tc,
+    sign, delta_tc)
+
+  if reaper.ShowMessageBox(msg, "Calibrate to Target TC", 1) ~= 1 then return end
+
+  src.tc_calib_enabled   = true
+  src.tc_calib_delta_sec = delta
+  src.tc_calib_note      = string.format("Event #%s -> %s", row.event_num or "?", target_tc)
+  CLB.cached_rows = nil
+
+  reaper.ShowMessageBox(string.format(
+    "TC Calibration enabled for \"%s\": %s%s\n\nRec TC for this source's rows now reflect this correction.",
+    src.name or "?", sign, delta_tc), "Calibrate to Target TC", 0)
 end
 
 ---------------------------------------------------------------------------
@@ -5962,8 +6337,8 @@ local function conform_matched_items(selected_only)
       if not tr then return end
 
       -- Timeline position from rec_tc_in
-      local pos = EDL.tc_to_seconds(row.rec_tc_in, CLB.fps, CLB.is_drop)
-      local pos_out = EDL.tc_to_seconds(row.rec_tc_out, CLB.fps, CLB.is_drop)
+      local pos = CLB.rec_tc_seconds(row.rec_tc_in, row)
+      local pos_out = CLB.rec_tc_seconds(row.rec_tc_out, row)
       local length = pos_out - pos
       if length <= 0 then length = 0.001 end
 
@@ -6611,8 +6986,10 @@ local function create_scene_cut_track()
     if _get_track_group(row.track) == "Video" then
       local scene_id = get_scene_id(row)
       if scene_id then
-        local rec_in  = EDL.tc_to_seconds(row.rec_tc_in,  fps, is_drop)
-        local rec_out = EDL.tc_to_seconds(row.rec_tc_out, fps, is_drop)
+        -- These become the real item's D_POSITION/D_LENGTH below — apply
+        -- "Calibrate TC (Anchor)" here, same as Generate Items/Conform.
+        local rec_in  = CLB.rec_tc_seconds(row.rec_tc_in, row)
+        local rec_out = CLB.rec_tc_seconds(row.rec_tc_out, row)
         if not by_scene[scene_id] then
           by_scene[scene_id] = {}
           scene_order[#scene_order + 1] = scene_id
@@ -7300,6 +7677,93 @@ local function draw_toolbar()
     end
     reaper.ImGui_SameLine(ctx)
   end
+
+  -- Calibrate TC (Anchor) button
+  if reaper.ImGui_SmallButton(ctx, "Calibrate TC...##clb_tc_calib") then
+    reaper.ImGui_OpenPopup(ctx, "Calibrate TC (Anchor)##clb_tc_calib_popup")
+  end
+  if reaper.ImGui_IsItemHovered(ctx) then
+    reaper.ImGui_SetTooltip(ctx,
+      "Correct each loaded source's Rec TC to match where its content\n"
+      .. "actually sits in this Reaper session — one confirmed event<->item\n"
+      .. "pair per source (editors export from 0; audio post commonly\n"
+      .. "places each reel/episode at its own hour slot).")
+  end
+  if reaper.ImGui_BeginPopup(ctx, "Calibrate TC (Anchor)##clb_tc_calib_popup") then
+    reaper.ImGui_Text(ctx, "Calibrate TC (Anchor)")
+    reaper.ImGui_TextDisabled(ctx,
+      "Select one event row + one Reaper item that IS that event's\n"
+      .. "real content, then Set Anchor — calibrates that row's source.")
+    reaper.ImGui_Separator(ctx)
+
+    if reaper.ImGui_Button(ctx, "Set Anchor...##clb_tc_calib_set", scale(140), 0) then
+      CLB.calibrate_tc_via_anchor()
+    end
+    reaper.ImGui_Separator(ctx)
+
+    -- Second method: no Reaper item needed — select one event row and
+    -- type the Rec TC In it SHOULD be (e.g. a Universal Counting Leader
+    -- always placed 2 seconds before each hour mark). Plain InputText (no
+    -- EnterReturnsTrue — see the Rename Group popup for why that flag's
+    -- buffer sync is unreliable); Enter or the Apply button both submit.
+    reaper.ImGui_TextDisabled(ctx,
+      "...or select one event row and type the Rec TC In it\n"
+      .. "SHOULD be (no Reaper item needed):")
+    reaper.ImGui_SetNextItemWidth(ctx, scale(120))
+    local chg_tgt, new_tgt = reaper.ImGui_InputText(ctx, "##clb_tc_calib_target", CLB.tc_calib_target_buf)
+    if chg_tgt then CLB.tc_calib_target_buf = new_tgt end
+    if reaper.ImGui_IsItemHovered(ctx) then
+      reaper.ImGui_SetTooltip(ctx, "HH:MM:SS:FF, or 8 digits with no colons (e.g. 00595800)")
+    end
+    reaper.ImGui_SameLine(ctx)
+    local apply_target = reaper.ImGui_IsKeyPressed(ctx, reaper.ImGui_Key_Enter(), false)
+      or reaper.ImGui_IsKeyPressed(ctx, reaper.ImGui_Key_KeypadEnter(), false)
+    if reaper.ImGui_Button(ctx, "Apply##clb_tc_calib_target_apply", scale(70), 0) then
+      apply_target = true
+    end
+    if apply_target and CLB.tc_calib_target_buf ~= "" then
+      CLB.calibrate_tc_to_target(CLB.tc_calib_target_buf)
+    end
+    reaper.ImGui_Separator(ctx)
+
+    -- One row per loaded source — each carries its own calibration, since
+    -- a single delta can't correct multiple reels/episodes placed at
+    -- different hour slots (see CLB.calibrate_tc_via_anchor).
+    if #CLB.edl_sources == 0 then
+      reaper.ImGui_TextDisabled(ctx, "No sources loaded.")
+    else
+      for i, src in ipairs(CLB.edl_sources) do
+        reaper.ImGui_PushID(ctx, i)
+        local chg_en, new_en = reaper.ImGui_Checkbox(ctx, src.name or "?", src.tc_calib_enabled)
+        if chg_en then
+          src.tc_calib_enabled = new_en
+          CLB.cached_rows = nil
+        end
+        reaper.ImGui_SameLine(ctx, scale(200))
+        local calib_sign = (src.tc_calib_delta_sec or 0) >= 0 and "+" or "-"
+        local calib_tc = EDL.seconds_to_tc(math.abs(src.tc_calib_delta_sec or 0), CLB.fps, CLB.is_drop)
+        reaper.ImGui_Text(ctx, string.format("%s%s", calib_sign, calib_tc))
+        reaper.ImGui_SameLine(ctx)
+        if reaper.ImGui_SmallButton(ctx, "Clear") then
+          src.tc_calib_enabled   = false
+          src.tc_calib_delta_sec = 0
+          src.tc_calib_note      = ""
+          CLB.cached_rows = nil
+        end
+        if src.tc_calib_note and src.tc_calib_note ~= "" then
+          reaper.ImGui_TextDisabled(ctx, "    from: " .. src.tc_calib_note)
+        end
+        reaper.ImGui_PopID(ctx)
+      end
+    end
+
+    reaper.ImGui_Separator(ctx)
+    if reaper.ImGui_Button(ctx, "Close##clb_tc_calib_close", scale(70), scale(22)) then
+      reaper.ImGui_CloseCurrentPopup(ctx)
+    end
+    reaper.ImGui_EndPopup(ctx)
+  end
+  reaper.ImGui_SameLine(ctx)
 
   -- Separator
   reaper.ImGui_Text(ctx, "|")
@@ -8277,7 +8741,7 @@ local function draw_table(table_height)
           local cancel = reaper.ImGui_IsKeyPressed(ctx, reaper.ImGui_Key_Escape(), false)
 
           if edited then
-            local old_val = get_cell_text(row, col)
+            local old_val = CLB.get_cell_edit_text(row, col)
             if EDIT.buf ~= old_val then
               -- TC validation for TC columns
               if TC_COLS[col] and not EDL.is_valid_tc(EDIT.buf) then
@@ -8413,7 +8877,16 @@ local function draw_table(table_height)
             }
             local tc_field = tc_col_field[col]
             if tc_field then
-              local sec = EDL.tc_to_seconds(row[tc_field] or "00:00:00:00", CLB.fps, CLB.is_drop)
+              -- Rec TC columns jump to the "Calibrate TC (Anchor)"-corrected
+              -- position when active, matching what the cell now displays;
+              -- Src TC is a source-file position, unrelated to Rec TC
+              -- calibration, so it's never affected.
+              local sec
+              if col == COL.REC_IN or col == COL.REC_OUT then
+                sec = CLB.rec_tc_seconds(row[tc_field], row)
+              else
+                sec = EDL.tc_to_seconds(row[tc_field] or "00:00:00:00", CLB.fps, CLB.is_drop)
+              end
               reaper.SetEditCurPos(sec, true, false)
             end
 
@@ -8447,7 +8920,7 @@ local function draw_table(table_height)
             EDIT = {
               row_idx = i,
               col_id = col,
-              buf = text,
+              buf = CLB.get_cell_edit_text(row, col),
               want_focus = true,
             }
           end
