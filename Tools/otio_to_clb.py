@@ -29,9 +29,20 @@ Dependencies:
   pip install opentimelineio
   aaftool in PATH (LibAAF) — only needed for .aaf files
 
-Version: 260718.2240
+Version: 260923.1138
 
 Changelog:
+    260923.1138
+        - Fixed _detect_xml_format() only sniffing the first 2KB of the file:
+            Premiere Pro's real signature (authoringApp="PremierePro") is written
+            per-effect and can sit tens of KB (or more) into a real export, so the
+            2KB head window silently mislabeled every real Premiere XML export as
+            FCP7_XML. Now scans the whole file in chunks (with overlap so the
+            marker can't be split across a chunk boundary), breaking out as soon
+            as a signature is found. Confirmed against 10 real production XML
+            samples (all Adobe Premiere Pro exports) — all now correctly detected
+            as PREMIERE_XML.
+
     260718.2240
         - XML linked-audio reel inheritance is now limited to Audio tracks only.
         - Prevents Video events from being overwritten by production-audio tape/reel
@@ -112,29 +123,48 @@ def _import_aaf_to_otio():
 # ---------------------------------------------------------------------------
 
 _XML_PREMIERE_RE = re.compile(
-    r'<PremiereData\b|xmeml.*?application.*?premiere',
-    re.IGNORECASE | re.DOTALL,
+    r'<PremiereData\b|authoringApp="PremierePro"',
+    re.IGNORECASE,
 )
 _XML_RESOLVE_RE = re.compile(
-    r'<xmeml.*?version|<fcpxml|DaVinci Resolve',
-    re.IGNORECASE | re.DOTALL,
+    r'DaVinci\s*Resolve',
+    re.IGNORECASE,
 )
 
-def _detect_xml_format(path):
+def _detect_xml_format(path, chunk_size=1 << 20):
     """
-    Sniff the first 2 KB of an XML file to distinguish:
+    Scan an XML file for known authoring-app signatures to distinguish:
       'PREMIERE_XML', 'RESOLVE_XML', 'FCP7_XML'
+
+    Premiere Pro's real signature (`authoringApp="PremierePro"`) is written
+    per-effect parameter, not near the top of the file — in real exports it
+    can be tens of KB (or more) into the document. A fixed head-window sniff
+    misses it entirely, silently mislabeling every real Premiere export as
+    FCP7_XML. So this scans the whole file in chunks (with a small overlap
+    so the marker can't be split across a chunk boundary) instead, breaking
+    out as soon as a signature is found.
+
+    Note: Premiere Pro also always writes `<appname>Final Cut Pro</appname>`
+    near the top of its XML for FCP7-schema compatibility, regardless of the
+    real authoring app — that pair is NOT a usable signal for detecting
+    Premiere and must not be checked here.
     """
+    overlap = 64
     try:
         with open(path, "r", encoding="utf-8", errors="replace") as f:
-            head = f.read(2048)
+            tail = ""
+            while True:
+                chunk = f.read(chunk_size)
+                if not chunk:
+                    break
+                window = tail + chunk
+                if _XML_PREMIERE_RE.search(window):
+                    return "PREMIERE_XML"
+                if _XML_RESOLVE_RE.search(window):
+                    return "RESOLVE_XML"
+                tail = window[-overlap:]
     except OSError:
         return "FCP7_XML"
-
-    if _XML_PREMIERE_RE.search(head):
-        return "PREMIERE_XML"
-    if re.search(r'DaVinci\s*Resolve', head, re.IGNORECASE):
-        return "RESOLVE_XML"
     return "FCP7_XML"
 
 
