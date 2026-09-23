@@ -1,6 +1,6 @@
 --[[
 @description Conform List Browser
-@version 260919.0106
+@version 260923.1154
 @author hsuanice
 @about
   A REAPER script for browsing and editing EDL (Edit Decision List) data
@@ -36,13 +36,33 @@
     - Column presets (save/load visible column configurations)
 
   Supported formats:
-    - CMX3600 EDL (.edl)
-    - FCP7 XML (.xml) — Final Cut Pro 7 and DaVinci Resolve XML export
-    - AAF (.aaf)      — via LibAAF (aaftool) + OpenTimelineIO
-    - Subtitles / dialogue lists:
+    - CMX3600 EDL (.edl)  — no embedded software/version info in this format
+    - XML (.xml)          — FCP7-schema XMEML, read via OpenTimelineIO.
+        Confirmed via real project files (Tools/format_tests/, 260923):
+          - Adobe Premiere Pro export — 10/10 real samples tested were this.
+            Detected via authoringApp="PremierePro" (NOT the <appname>/
+            <appversion> tags near the top of the file — Premiere always
+            writes "Final Cut Pro"/"7.0" there for schema-compat, regardless
+            of the real authoring app; that pair is not a usable signal).
+          - Final Cut Pro 7 / DaVinci Resolve XMEML export — same parser
+            path, not yet exercised against a real sample from either app.
+        UI/track-naming ${format} token shows all of the above simply as
+        "XML" (see _friendly_format()); the distinction (CLB.loaded_format:
+        "PREMIERE_XML"/"FCP7_XML"/"RESOLVE_XML") is tracked internally only.
+    - AAF (.aaf)          — via LibAAF (aaftool) + OpenTimelineIO.
+        Confirmed via real project files: Adobe Premiere Pro, versions
+        15.0.0 / 25.6.4 / 26.3.0 (read from the AAF's own Identification
+        chain via aaf2/pyaaf2 — see Tools/format_tests/aaf_identify.py).
+    - Subtitles / dialogue lists — no embedded software/version info:
         .srt                 SubRip absolute time
         .csv / .tsv          Tabular dialogue lists with auto IN/OUT detection
         .xlsx / .xlsm        Excel dialogue lists; multi-sheet picker
+
+    Regression coverage: Tools/format_tests/ holds a golden-snapshot test
+    harness (39 real production samples across all formats above, referenced
+    by external path — not copied into the repo) that verifies a change to
+    one format's parsing doesn't silently break another. Run with:
+      lua5.4 Tools/format_tests/run_regression.lua
 
   Requires: ReaImGui (install via ReaPack)
   Optional: js_ReaScriptAPI (for folder selection)
@@ -51,6 +71,51 @@
   Required for AAF: aaftool in PATH (https://github.com/agfline/LibAAF)
 
 @changelog
+  v260923.1154
+  - Docs: expanded the header's "Supported formats" section with real,
+    confirmed software/version info gathered from a 39-file real-project
+    test corpus (Tools/format_tests/) — Adobe Premiere Pro confirmed for
+    both AAF and XML export paths (versions 15.0.0/25.6.4/26.3.0 for AAF);
+    FCP7/Resolve XMEML noted as same-parser-path but not yet real-sample
+    tested. No behavior change; internal reference only (not surfaced in
+    the UI — ${format} still shows the collapsed "XML"/"EDL"/"AAF" label).
+  - Fix (Tools/otio_to_clb.py, not this file): _detect_xml_format() only
+    sniffed the first 2KB of the file, missing Premiere's real signature
+    (authoringApp="PremierePro") which sits much deeper in real exports —
+    was silently mislabeling every real Premiere XML as FCP7_XML internally
+    (CLB.loaded_format). Now scans the whole file in chunks. See that
+    file's own changelog for details.
+
+  v260922.1854
+  - Feature: the main event list's Search box now auto-detects an 8-digit
+    timecode typed without colons (e.g. "01102203") and also matches it
+    against "01:10:22:03" — no need to type the colons to find a Src/Rec
+    TC In/Out. Tooltip on the search box explains it.
+
+  v260922.1604
+  - Fix: "Generate Items" reused an existing track whenever its computed
+    track name matched one already in the project, so a second run landed
+    its items on top of whatever the first run already placed there.
+    Now always inserts a fresh track per run, matching what Conform All/
+    Sel already did (see its own "always create a new track" comment).
+
+  v260922.1546
+  - Feature: Generate Items, Conform All/Sel, and Match All now show a
+    progress bar (same yellow style as loading EDL/XML) instead of
+    freezing Reaper for the whole run — these are the three most likely to
+    actually be slow (Generate/Conform make heavy Reaper API calls per
+    row; Match All's fuzzy scan is O(rows × audio files), and this tool
+    routinely sees thousands of both). Built on a new generic chunked-
+    batch-job runner (CLB.process_batch_job, modeled on the existing Load
+    Audio metadata batch loader): each processes a bounded chunk of rows
+    per frame instead of one giant synchronous loop, so the progress bar
+    actually redraws between chunks. Clicking any of these three while
+    another is still running now shows a message instead of silently
+    corrupting the in-progress one. Remove Dups / Consolidate / Scene Cuts
+    were left as plain synchronous loops — they're pure in-memory Lua with
+    no Reaper API calls per row, fast enough in practice that a progress
+    bar would likely just flash and disappear.
+
   v260919.0106
   - Fix: "Scene Cuts" never actually used Match All's audio-inferred
     row.scene — it preferred row.clip_name whenever clip_name was merely
@@ -1561,7 +1626,7 @@ end
 ---------------------------------------------------------------------------
 local SCRIPT_NAME = "Conform List Browser"
 local EXT_NS = "hsuanice_ConformListBrowser"
-local VERSION = "260919.0106"
+local VERSION = "260922.1854"
 
 -- Column definitions (EDL Events table)
 local COL = {
@@ -1908,6 +1973,13 @@ local CLB = {
   -- phase="reading_metadata"  : async audio metadata scanning
   -- phase="otio_loading"      : async OTIO/AAF Python parse in background
   loading_state = nil,        -- { phase, ... }
+
+  -- Generic chunked batch-job state (Generate Items / Conform / Match All):
+  -- { label, total, current, batch_size, step=fn(job,i), finish=fn(job) }.
+  -- Processed a few items per frame by process_batch_job() (see there) so
+  -- the progress bar actually redraws instead of Reaper freezing for the
+  -- whole run — same principle as loading_state's audio metadata scan.
+  batch_job = nil,
 
   -- Match picker state
   match_picker_row = nil,     -- Row being matched (for multi-match selection)
@@ -2736,6 +2808,10 @@ end
 local _rebuild_reel_filters  -- forward declaration (defined later)
 
 local function match_audio_files()
+  if CLB.batch_job then
+    reaper.ShowMessageBox("Another operation (" .. (CLB.batch_job.label or "batch job") .. ") is still running — wait for it to finish first.", SCRIPT_NAME, 0)
+    return
+  end
   if #CLB.audio_files == 0 or #ROWS == 0 then return end
 
   console_msg("Starting audio matching...")
@@ -2775,15 +2851,26 @@ local function match_audio_files()
     end
   end
 
-  -- Match each EDL row
-  local found_count = 0
-  local multiple_count = 0
-  local not_found_count = 0
-  -- Strategy 6 statistics: parser_id → match count
-  local s6_stats    = {}
-  local backfill_n  = { scene = 0, take = 0, reel = 0 }
-
-  for _, row in ipairs(ROWS) do
+  -- Match each EDL row — a chunk per frame via the shared batch-job runner
+  -- (see CLB.process_batch_job), since Strategy 4's fuzzy scan is
+  -- O(rows_needing_it × total_audio_files) and can be genuinely slow on a
+  -- large list (this tool routinely sees thousands of rows against
+  -- thousands of audio files). finish() below runs once, after the last
+  -- row: rebuilds search text, prints the console summary, and runs the
+  -- audio→video Scene/Take inference pass — all pure in-memory Lua, fast
+  -- enough to stay synchronous even at full row count.
+  CLB.batch_job = {
+    label = "Matching audio",
+    total = #ROWS,
+    current = 0,
+    found_count = 0,
+    multiple_count = 0,
+    not_found_count = 0,
+    s6_stats   = {},                          -- parser_id → match count
+    backfill_n = { scene = 0, take = 0, reel = 0 },
+    batch_size = 100,
+    step = function(job, i)
+    local row = ROWS[i]
     local candidates = {}
 
     -- Strategy 1: clip_name exact match (ignoring extension)
@@ -2885,7 +2972,7 @@ local function match_audio_files()
         local hits = by_scene_take[r_scene .. "/" .. r_take] or {}
         if #hits > 0 then
           for _, af in ipairs(hits) do candidates[#candidates + 1] = af end
-          s6_stats["meta"] = (s6_stats["meta"] or 0) + 1
+          job.s6_stats["meta"] = (job.s6_stats["meta"] or 0) + 1
         end
       end
 
@@ -2898,7 +2985,7 @@ local function match_audio_files()
               local hits = by_scene_take[ps .. "/" .. pt] or {}
               if #hits > 0 then
                 for _, af in ipairs(hits) do candidates[#candidates + 1] = af end
-                s6_stats[parser.id] = (s6_stats[parser.id] or 0) + 1
+                job.s6_stats[parser.id] = (job.s6_stats[parser.id] or 0) + 1
                 -- Promote the parsed scene/take onto the row so backfill
                 -- can use the normalised form if the original fields are empty.
                 if (row.scene or "") == "" then row.scene = ps end
@@ -2918,7 +3005,7 @@ local function match_audio_files()
       row.match_status = fallback_kind and "Fallback" or "Found"
       row.matched_path = candidates[1].path
       row.__match_candidates = nil
-      found_count = found_count + 1
+      job.found_count = job.found_count + 1
 
       -- Repair Tape/Clip Name from matched audio; backfill Scene/Take only when empty.
       -- Original values are preserved in notes; repaired rows are flagged.
@@ -2929,11 +3016,11 @@ local function match_audio_files()
         -- Scene / Take: fill only when empty
         if (row.scene or "") == "" and (af_meta.scene or "") ~= "" then
           row.scene = af_meta.scene
-          backfill_n.scene = backfill_n.scene + 1
+          job.backfill_n.scene = job.backfill_n.scene + 1
         end
         if (row.take or "") == "" and (af_meta.take or "") ~= "" then
           row.take = af_meta.take
-          backfill_n.take = backfill_n.take + 1
+          job.backfill_n.take = job.backfill_n.take + 1
         end
 
         -- Tape: always repair from matched audio
@@ -2946,7 +3033,7 @@ local function match_audio_files()
               orig_notes[#orig_notes+1] = "Orig Tape: " .. old_tape
             end
             row.reel = new_tape
-            backfill_n.reel = backfill_n.reel + 1
+            job.backfill_n.reel = job.backfill_n.reel + 1
             row_repaired = true
           end
         end
@@ -2966,7 +3053,7 @@ local function match_audio_files()
       row.match_status = fallback_kind and "Fallback" or "Multiple"
       row.matched_path = string.format("(%d)", #candidates)
       row.__match_candidates = candidates
-      multiple_count = multiple_count + 1
+      job.multiple_count = job.multiple_count + 1
 
       -- Backfill from candidates[1] — all candidates are channels of the same
       -- recording so they share scene/take/tape metadata.
@@ -2976,11 +3063,11 @@ local function match_audio_files()
 
         if (row.scene or "") == "" and (af_meta.scene or "") ~= "" then
           row.scene = af_meta.scene
-          backfill_n.scene = backfill_n.scene + 1
+          job.backfill_n.scene = job.backfill_n.scene + 1
         end
         if (row.take or "") == "" and (af_meta.take or "") ~= "" then
           row.take = af_meta.take
-          backfill_n.take = backfill_n.take + 1
+          job.backfill_n.take = job.backfill_n.take + 1
         end
 
         local row_repaired = false
@@ -2992,7 +3079,7 @@ local function match_audio_files()
               orig_notes[#orig_notes+1] = "Orig Tape: " .. old_tape
             end
             row.reel = new_tape
-            backfill_n.reel = backfill_n.reel + 1
+            job.backfill_n.reel = job.backfill_n.reel + 1
             row_repaired = true
           end
         end
@@ -3011,10 +3098,10 @@ local function match_audio_files()
       row.match_status = "Not Found"
       row.matched_path = ""
       row.__match_candidates = nil
-      not_found_count = not_found_count + 1
+      job.not_found_count = job.not_found_count + 1
     end
-  end
-
+    end,
+    finish = function(job)
   CLB.cached_rows = nil
 
   -- Rebuild search text for all rows (scene/take/reel may have been updated)
@@ -3045,12 +3132,12 @@ local function match_audio_files()
   if fallback_st_count > 0 then fallback_parts[#fallback_parts+1] = string.format("%d fallback (Scene+Take only, TC unverified)", fallback_st_count) end
   console_msg(string.format(
     "Matching complete: %d found, %d multiple, %d not found%s",
-    found_count, multiple_count, not_found_count,
+    job.found_count, job.multiple_count, job.not_found_count,
     #fallback_parts > 0 and (", " .. table.concat(fallback_parts, ", ")) or ""))
 
   -- Strategy 6 detail: which parsers matched how many clips
   local s6_total = 0
-  for _, v in pairs(s6_stats) do s6_total = s6_total + v end
+  for _, v in pairs(job.s6_stats) do s6_total = s6_total + v end
   if s6_total > 0 then
     local parser_labels = {
       meta = "Existing metadata",
@@ -3061,7 +3148,7 @@ local function match_audio_files()
     console_msg(string.format("  Strategy 6 (Scene+Take): %d clip(s) matched", s6_total))
     -- Print in definition order so output is stable
     for _, p in ipairs(SCENE_TAKE_PARSERS) do
-      local n = s6_stats[p.id] or 0
+      local n = job.s6_stats[p.id] or 0
       if n > 0 then
         console_msg(string.format("    %-38s %d clip(s)",
           (parser_labels[p.id] or p.id) .. ":", n))
@@ -3071,9 +3158,9 @@ local function match_audio_files()
 
   -- Repair / backfill summary
   local bf_parts = {}
-  if backfill_n.scene     > 0 then bf_parts[#bf_parts+1] = backfill_n.scene     .. " scene"     end
-  if backfill_n.take      > 0 then bf_parts[#bf_parts+1] = backfill_n.take      .. " take"      end
-  if backfill_n.reel      > 0 then bf_parts[#bf_parts+1] = backfill_n.reel      .. " tape"      end
+  if job.backfill_n.scene     > 0 then bf_parts[#bf_parts+1] = job.backfill_n.scene     .. " scene"     end
+  if job.backfill_n.take      > 0 then bf_parts[#bf_parts+1] = job.backfill_n.take      .. " take"      end
+  if job.backfill_n.reel      > 0 then bf_parts[#bf_parts+1] = job.backfill_n.reel      .. " tape"      end
 
   if #bf_parts > 0 then
     console_msg("  Repaired: " .. table.concat(bf_parts, ", ") .. " value(s) from matched audio  [✦ = repaired row]")
@@ -3164,6 +3251,8 @@ local function match_audio_files()
 
   -- Reel values may have changed; refresh the Reel Filter sidebar
   _rebuild_reel_filters()
+    end,
+  }
 end
 
 --- Get value for audio file column (for sorting)
@@ -3752,6 +3841,14 @@ local function get_view_rows()
   end
 
   local search = CLB.search_text:lower()
+  -- 8 bare digits ("01102203") are almost certainly a timecode typed
+  -- without the colons — also check the "HH:MM:SS:FF" form so it matches
+  -- Src/Rec TC In/Out (stored with colons in __search_text) the same as
+  -- typing "01:10:22:03" directly would.
+  local search_tc = nil
+  if search:match("^%d%d%d%d%d%d%d%d$") then
+    search_tc = search:sub(1,2) .. ":" .. search:sub(3,4) .. ":" .. search:sub(5,6) .. ":" .. search:sub(7,8)
+  end
   local need_filter = search ~= "" or hidden_src_idx or hidden_tracks or hidden_reels or hidden_groups
 
   if not need_filter then
@@ -3777,7 +3874,11 @@ local function get_view_rows()
       end
       -- Search filter
       if search ~= "" then
-        if not (row.__search_text and row.__search_text:find(search, 1, true)) then
+        local hit = row.__search_text and (
+          row.__search_text:find(search, 1, true)
+          or (search_tc and row.__search_text:find(search_tc, 1, true))
+        )
+        if not hit then
           goto skip
         end
       end
@@ -4902,6 +5003,34 @@ local function process_audio_loading_batch()
   return true  -- Still loading
 end
 
+--- Generic per-frame chunked batch-job runner. A job processes
+--- job.batch_size items per frame via job.step(job, i) (i = 1-based index
+--- into whatever the job is iterating), then calls job.finish(job) once
+--- job.current reaches job.total. Keeps Reaper responsive — the progress
+--- bar actually redraws between batches — instead of freezing for the
+--- whole run inside one giant synchronous loop. Same principle as
+--- process_audio_loading_batch() above, generalised for Generate Items /
+--- Conform / Match All, each of which sets CLB.batch_job and returns
+--- immediately rather than running its own loop to completion inline.
+--- Hung off CLB (not a new top-level local) — this script is already at
+--- Lua's 200-local-per-chunk ceiling (see CMP for the same workaround).
+function CLB.process_batch_job()
+  local job = CLB.batch_job
+  if not job then return false end
+
+  local batch_size = job.batch_size or 25
+  for i = 1, batch_size do
+    if job.current >= job.total then
+      job.finish(job)
+      CLB.batch_job = nil
+      return false
+    end
+    job.current = job.current + 1
+    job.step(job, job.current)
+  end
+  return true
+end
+
 --- Apply a list of successfully-parsed timeline results (all_parsed).
 --- all_parsed = array of { parsed=table, path=string }
 --- filepaths  = original file paths (for Replace/Append dialog)
@@ -5534,6 +5663,10 @@ local function build_row_tokens(row)
 end
 
 local function generate_items()
+  if CLB.batch_job then
+    reaper.ShowMessageBox("Another operation (" .. (CLB.batch_job.label or "batch job") .. ") is still running — wait for it to finish first.", SCRIPT_NAME, 0)
+    return
+  end
   if #ROWS == 0 then
     reaper.ShowMessageBox("No events loaded. Load an EDL file first.", SCRIPT_NAME, 0)
     return
@@ -5586,91 +5719,89 @@ local function generate_items()
   reaper.Undo_BeginBlock()
   reaper.PreventUIRefresh(1)
 
-  -- Create or find tracks by expanded name
+  -- Always create a new track (never reuse an existing track with the same
+  -- name) — reusing meant a second Generate Items run landed its items on
+  -- top of whatever the first run already placed there, since track names
+  -- aren't unique keys for "this run's own content". Matches
+  -- conform_matched_items()'s existing behavior (see there).
   local track_map = {}  -- expanded_name -> MediaTrack*
 
   for _, name in ipairs(track_names_order) do
-    -- Search existing tracks first
-    local found = nil
-    for ti = 0, reaper.CountTracks(0) - 1 do
-      local tr = reaper.GetTrack(0, ti)
-      local _, tr_name = reaper.GetTrackName(tr)
-      if tr_name == name then
-        found = tr
-        break
-      end
-    end
-
-    if not found then
-      -- Create new track
-      reaper.InsertTrackAtIndex(reaper.CountTracks(0), true)
-      found = reaper.GetTrack(0, reaper.CountTracks(0) - 1)
-      reaper.GetSetMediaTrackInfo_String(found, "P_NAME", name, true)
-    end
-
+    reaper.InsertTrackAtIndex(reaper.CountTracks(0), true)
+    local found = reaper.GetTrack(0, reaper.CountTracks(0) - 1)
+    reaper.GetSetMediaTrackInfo_String(found, "P_NAME", name, true)
     track_map[name] = found
   end
 
-  -- Create items
-  local created = 0
-  for _, row in ipairs(visible_rows) do
-    local track_name = row_to_trackname[row.__guid]
-    local tr = track_map[track_name]
-    if not tr then tr = track_map[track_names_order[1]] end
-    if not tr then goto continue end
+  -- Create items — a chunk per frame via the shared batch-job runner (see
+  -- CLB.process_batch_job) instead of one giant synchronous loop, so the
+  -- progress bar actually redraws and Reaper stays responsive on a large
+  -- list. finish() below runs once, after the last row.
+  CLB.batch_job = {
+    label = "Generating items",
+    total = #visible_rows,
+    current = 0,
+    created = 0,
+    batch_size = 40,
+    step = function(job, i)
+      local row = visible_rows[i]
+      local track_name = row_to_trackname[row.__guid]
+      local tr = track_map[track_name]
+      if not tr then tr = track_map[track_names_order[1]] end
+      if not tr then return end
 
-    local pos = EDL.tc_to_seconds(row.rec_tc_in, CLB.fps, CLB.is_drop)
-    local pos_out = EDL.tc_to_seconds(row.rec_tc_out, CLB.fps, CLB.is_drop)
-    local length = pos_out - pos
-    if length <= 0 then length = 0.001 end  -- minimum length
+      local pos = EDL.tc_to_seconds(row.rec_tc_in, CLB.fps, CLB.is_drop)
+      local pos_out = EDL.tc_to_seconds(row.rec_tc_out, CLB.fps, CLB.is_drop)
+      local length = pos_out - pos
+      if length <= 0 then length = 0.001 end  -- minimum length
 
-    local item = reaper.AddMediaItemToTrack(tr)
-    reaper.SetMediaItemInfo_Value(item, "D_POSITION", pos)
-    reaper.SetMediaItemInfo_Value(item, "D_LENGTH", length)
+      local item = reaper.AddMediaItemToTrack(tr)
+      reaper.SetMediaItemInfo_Value(item, "D_POSITION", pos)
+      reaper.SetMediaItemInfo_Value(item, "D_LENGTH", length)
 
-    local take = reaper.AddTakeToMediaItem(item)
-    if take then
-      -- Take name = clip name
-      reaper.GetSetMediaItemTakeInfo_String(take, "P_NAME", row.clip_name or "", true)
+      local take = reaper.AddTakeToMediaItem(item)
+      if take then
+        -- Take name = clip name
+        reaper.GetSetMediaItemTakeInfo_String(take, "P_NAME", row.clip_name or "", true)
 
-      -- Item note: Source TC In/Out + Reel (human-readable)
-      local note_parts = {}
-      note_parts[#note_parts + 1] = "Reel: " .. (row.reel or "")
-      note_parts[#note_parts + 1] = "Src In: " .. (row.src_tc_in or "")
-      note_parts[#note_parts + 1] = "Src Out: " .. (row.src_tc_out or "")
-      if row.notes and row.notes ~= "" then
-        note_parts[#note_parts + 1] = ""
-        note_parts[#note_parts + 1] = row.notes
+        -- Item note: Source TC In/Out + Reel (human-readable)
+        local note_parts = {}
+        note_parts[#note_parts + 1] = "Reel: " .. (row.reel or "")
+        note_parts[#note_parts + 1] = "Src In: " .. (row.src_tc_in or "")
+        note_parts[#note_parts + 1] = "Src Out: " .. (row.src_tc_out or "")
+        if row.notes and row.notes ~= "" then
+          note_parts[#note_parts + 1] = ""
+          note_parts[#note_parts + 1] = row.notes
+        end
+        local note_text = table.concat(note_parts, "\n")
+        reaper.GetSetMediaItemInfo_String(item, "P_NOTES", note_text, true)
+
+        -- Store all metadata as P_EXT fields
+        reaper.GetSetMediaItemTakeInfo_String(take, "P_EXT:CLB_EVENT", row.event_num or "", true)
+        reaper.GetSetMediaItemTakeInfo_String(take, "P_EXT:CLB_REEL", row.reel or "", true)
+        reaper.GetSetMediaItemTakeInfo_String(take, "P_EXT:CLB_TRACK", row.track or "", true)
+        reaper.GetSetMediaItemTakeInfo_String(take, "P_EXT:CLB_EDIT_TYPE", row.edit_type or "", true)
+        reaper.GetSetMediaItemTakeInfo_String(take, "P_EXT:CLB_SRC_TC_IN", row.src_tc_in or "", true)
+        reaper.GetSetMediaItemTakeInfo_String(take, "P_EXT:CLB_SRC_TC_OUT", row.src_tc_out or "", true)
+        reaper.GetSetMediaItemTakeInfo_String(take, "P_EXT:CLB_REC_TC_IN", row.rec_tc_in or "", true)
+        reaper.GetSetMediaItemTakeInfo_String(take, "P_EXT:CLB_REC_TC_OUT", row.rec_tc_out or "", true)
+        reaper.GetSetMediaItemTakeInfo_String(take, "P_EXT:CLB_SOURCE_FILE", row.source_file or "", true)
+        if row.notes and row.notes ~= "" then
+          reaper.GetSetMediaItemTakeInfo_String(take, "P_EXT:CLB_NOTES", row.notes, true)
+        end
       end
-      local note_text = table.concat(note_parts, "\n")
-      reaper.GetSetMediaItemInfo_String(item, "P_NOTES", note_text, true)
 
-      -- Store all metadata as P_EXT fields
-      reaper.GetSetMediaItemTakeInfo_String(take, "P_EXT:CLB_EVENT", row.event_num or "", true)
-      reaper.GetSetMediaItemTakeInfo_String(take, "P_EXT:CLB_REEL", row.reel or "", true)
-      reaper.GetSetMediaItemTakeInfo_String(take, "P_EXT:CLB_TRACK", row.track or "", true)
-      reaper.GetSetMediaItemTakeInfo_String(take, "P_EXT:CLB_EDIT_TYPE", row.edit_type or "", true)
-      reaper.GetSetMediaItemTakeInfo_String(take, "P_EXT:CLB_SRC_TC_IN", row.src_tc_in or "", true)
-      reaper.GetSetMediaItemTakeInfo_String(take, "P_EXT:CLB_SRC_TC_OUT", row.src_tc_out or "", true)
-      reaper.GetSetMediaItemTakeInfo_String(take, "P_EXT:CLB_REC_TC_IN", row.rec_tc_in or "", true)
-      reaper.GetSetMediaItemTakeInfo_String(take, "P_EXT:CLB_REC_TC_OUT", row.rec_tc_out or "", true)
-      reaper.GetSetMediaItemTakeInfo_String(take, "P_EXT:CLB_SOURCE_FILE", row.source_file or "", true)
-      if row.notes and row.notes ~= "" then
-        reaper.GetSetMediaItemTakeInfo_String(take, "P_EXT:CLB_NOTES", row.notes, true)
-      end
-    end
-
-    created = created + 1
-    ::continue::
-  end
-
-  reaper.PreventUIRefresh(-1)
-  reaper.UpdateArrange()
-  reaper.Undo_EndBlock("CLB: Generate " .. created .. " conform items", -1)
-
-  reaper.ShowMessageBox(
-    string.format("Generated %d empty items on %d track(s).", created, #track_names_order),
-    SCRIPT_NAME, 0)
+      job.created = job.created + 1
+    end,
+    finish = function(job)
+      reaper.PreventUIRefresh(-1)
+      reaper.UpdateArrange()
+      reaper.Undo_EndBlock("CLB: Generate " .. job.created .. " conform items", -1)
+      reaper.ShowMessageBox(
+        string.format("Generated %d empty items on %d track(s).", job.created, #track_names_order),
+        SCRIPT_NAME, 0)
+    end,
+  }
 end
 
 ---------------------------------------------------------------------------
@@ -5697,6 +5828,10 @@ end
 -- Conform Matched Items (insert actual audio files)
 ---------------------------------------------------------------------------
 local function conform_matched_items(selected_only)
+  if CLB.batch_job then
+    reaper.ShowMessageBox("Another operation (" .. (CLB.batch_job.label or "batch job") .. ") is still running — wait for it to finish first.", SCRIPT_NAME, 0)
+    return
+  end
   if #ROWS == 0 then
     reaper.ShowMessageBox("No events loaded. Load an EDL file first.", SCRIPT_NAME, 0)
     return
@@ -5807,124 +5942,133 @@ local function conform_matched_items(selected_only)
     return 0
   end
 
-  -- Create items
-  local created = 0
-  local takes_created = 0
+  -- Create items — a chunk per frame via the shared batch-job runner (see
+  -- CLB.process_batch_job): each item here also opens a source file
+  -- (reaper.PCM_Source_CreateFromFile), which is real disk I/O per row on
+  -- top of the item/take API calls generate_items() already has, so this
+  -- is typically the slowest of the three — most in need of a progress bar.
+  CLB.batch_job = {
+    label = "Conforming items",
+    total = #matched_rows,
+    current = 0,
+    created = 0,
+    takes_created = 0,
+    batch_size = 25,
+    step = function(job, i)
+      local row = matched_rows[i]
+      local track_name = row_to_trackname[row.__guid]
+      local tr = track_map[track_name]
+      if not tr then tr = track_map[track_names_order[1]] end
+      if not tr then return end
 
-  for _, row in ipairs(matched_rows) do
-    local track_name = row_to_trackname[row.__guid]
-    local tr = track_map[track_name]
-    if not tr then tr = track_map[track_names_order[1]] end
-    if not tr then goto continue end
+      -- Timeline position from rec_tc_in
+      local pos = EDL.tc_to_seconds(row.rec_tc_in, CLB.fps, CLB.is_drop)
+      local pos_out = EDL.tc_to_seconds(row.rec_tc_out, CLB.fps, CLB.is_drop)
+      local length = pos_out - pos
+      if length <= 0 then length = 0.001 end
 
-    -- Timeline position from rec_tc_in
-    local pos = EDL.tc_to_seconds(row.rec_tc_in, CLB.fps, CLB.is_drop)
-    local pos_out = EDL.tc_to_seconds(row.rec_tc_out, CLB.fps, CLB.is_drop)
-    local length = pos_out - pos
-    if length <= 0 then length = 0.001 end
+      -- Source offset: src_tc_in - audio's TimeReference
+      local src_in_sec = EDL.tc_to_seconds(row.src_tc_in, CLB.fps, CLB.is_drop)
 
-    -- Source offset: src_tc_in - audio's TimeReference
-    local src_in_sec = EDL.tc_to_seconds(row.src_tc_in, CLB.fps, CLB.is_drop)
-
-    -- Get audio files to insert
-    local audio_files = {}
-    if (row.match_status == "Found" or row.match_status == "Fallback") and
-       row.matched_path and not row.matched_path:match("^%(") then
-      -- Single match: find the audio file entry by path
-      for _, af in ipairs(CLB.audio_files) do
-        if af.path == row.matched_path then
-          audio_files[1] = af
-          break
-        end
-      end
-    elseif row.__match_candidates then
-      -- Multiple candidates (Multiple or Fallback with multiple results)
-      audio_files = row.__match_candidates
-    end
-
-    if #audio_files == 0 then
-      -- Fallback/Multiple rows lose __match_candidates after .clb reload;
-      -- re-run matching to restore them.
-      console_msg(string.format(
-        "  Skipped row %s (Clip: %s) — match candidates lost. Re-run matching to restore.",
-        row.event_num or "?", row.clip_name or ""))
-      goto continue
-    end
-
-    -- Create item
-    local item = reaper.AddMediaItemToTrack(tr)
-    reaper.SetMediaItemInfo_Value(item, "D_POSITION", pos)
-    reaper.SetMediaItemInfo_Value(item, "D_LENGTH", length)
-
-    -- Add takes for each audio file
-    local first_take = true
-    for ti, af in ipairs(audio_files) do
-      -- Calculate source offset for this audio file
-      local audio_start = get_audio_start_sec(af)
-      local source_offset = src_in_sec - audio_start
-      if source_offset < 0 then source_offset = 0 end
-
-      -- Insert media source
-      local source = reaper.PCM_Source_CreateFromFile(af.path)
-      if source then
-        local take
-        if first_take then
-          take = reaper.AddTakeToMediaItem(item)
-          first_take = false
-        else
-          take = reaper.AddTakeToMediaItem(item)
-        end
-
-        if take then
-          reaper.SetMediaItemTake_Source(take, source)
-          reaper.SetMediaItemTakeInfo_Value(take, "D_STARTOFFS", source_offset)
-
-          -- Take name: clip name (or filename for additional takes)
-          local take_name = row.clip_name or af.basename or ""
-          if ti > 1 then
-            take_name = af.filename or af.basename or ("Take " .. ti)
+      -- Get audio files to insert
+      local audio_files = {}
+      if (row.match_status == "Found" or row.match_status == "Fallback") and
+         row.matched_path and not row.matched_path:match("^%(") then
+        -- Single match: find the audio file entry by path
+        for _, af in ipairs(CLB.audio_files) do
+          if af.path == row.matched_path then
+            audio_files[1] = af
+            break
           end
-          reaper.GetSetMediaItemTakeInfo_String(take, "P_NAME", take_name, true)
+        end
+      elseif row.__match_candidates then
+        -- Multiple candidates (Multiple or Fallback with multiple results)
+        audio_files = row.__match_candidates
+      end
 
-          -- Store metadata as P_EXT
-          reaper.GetSetMediaItemTakeInfo_String(take, "P_EXT:CLB_EVENT", row.event_num or "", true)
-          reaper.GetSetMediaItemTakeInfo_String(take, "P_EXT:CLB_REEL", row.reel or "", true)
-          reaper.GetSetMediaItemTakeInfo_String(take, "P_EXT:CLB_SRC_TC_IN", row.src_tc_in or "", true)
-          reaper.GetSetMediaItemTakeInfo_String(take, "P_EXT:CLB_SRC_TC_OUT", row.src_tc_out or "", true)
-          reaper.GetSetMediaItemTakeInfo_String(take, "P_EXT:CLB_MATCHED_FILE", af.path or "", true)
+      if #audio_files == 0 then
+        -- Fallback/Multiple rows lose __match_candidates after .clb reload;
+        -- re-run matching to restore them.
+        console_msg(string.format(
+          "  Skipped row %s (Clip: %s) — match candidates lost. Re-run matching to restore.",
+          row.event_num or "?", row.clip_name or ""))
+        return
+      end
 
-          takes_created = takes_created + 1
+      -- Create item
+      local item = reaper.AddMediaItemToTrack(tr)
+      reaper.SetMediaItemInfo_Value(item, "D_POSITION", pos)
+      reaper.SetMediaItemInfo_Value(item, "D_LENGTH", length)
+
+      -- Add takes for each audio file
+      local first_take = true
+      for ti, af in ipairs(audio_files) do
+        -- Calculate source offset for this audio file
+        local audio_start = get_audio_start_sec(af)
+        local source_offset = src_in_sec - audio_start
+        if source_offset < 0 then source_offset = 0 end
+
+        -- Insert media source
+        local source = reaper.PCM_Source_CreateFromFile(af.path)
+        if source then
+          local take
+          if first_take then
+            take = reaper.AddTakeToMediaItem(item)
+            first_take = false
+          else
+            take = reaper.AddTakeToMediaItem(item)
+          end
+
+          if take then
+            reaper.SetMediaItemTake_Source(take, source)
+            reaper.SetMediaItemTakeInfo_Value(take, "D_STARTOFFS", source_offset)
+
+            -- Take name: clip name (or filename for additional takes)
+            local take_name = row.clip_name or af.basename or ""
+            if ti > 1 then
+              take_name = af.filename or af.basename or ("Take " .. ti)
+            end
+            reaper.GetSetMediaItemTakeInfo_String(take, "P_NAME", take_name, true)
+
+            -- Store metadata as P_EXT
+            reaper.GetSetMediaItemTakeInfo_String(take, "P_EXT:CLB_EVENT", row.event_num or "", true)
+            reaper.GetSetMediaItemTakeInfo_String(take, "P_EXT:CLB_REEL", row.reel or "", true)
+            reaper.GetSetMediaItemTakeInfo_String(take, "P_EXT:CLB_SRC_TC_IN", row.src_tc_in or "", true)
+            reaper.GetSetMediaItemTakeInfo_String(take, "P_EXT:CLB_SRC_TC_OUT", row.src_tc_out or "", true)
+            reaper.GetSetMediaItemTakeInfo_String(take, "P_EXT:CLB_MATCHED_FILE", af.path or "", true)
+
+            job.takes_created = job.takes_created + 1
+          end
         end
       end
-    end
 
-    -- Item note
-    local note_parts = {}
-    note_parts[#note_parts + 1] = "Reel: " .. (row.reel or "")
-    note_parts[#note_parts + 1] = "Src In: " .. (row.src_tc_in or "")
-    note_parts[#note_parts + 1] = "Src Out: " .. (row.src_tc_out or "")
-    if #audio_files > 1 then
-      note_parts[#note_parts + 1] = ""
-      note_parts[#note_parts + 1] = string.format("(%d takes from multiple matches)", #audio_files)
-    end
-    if row.notes and row.notes ~= "" then
-      note_parts[#note_parts + 1] = ""
-      note_parts[#note_parts + 1] = row.notes
-    end
-    reaper.GetSetMediaItemInfo_String(item, "P_NOTES", table.concat(note_parts, "\n"), true)
+      -- Item note
+      local note_parts = {}
+      note_parts[#note_parts + 1] = "Reel: " .. (row.reel or "")
+      note_parts[#note_parts + 1] = "Src In: " .. (row.src_tc_in or "")
+      note_parts[#note_parts + 1] = "Src Out: " .. (row.src_tc_out or "")
+      if #audio_files > 1 then
+        note_parts[#note_parts + 1] = ""
+        note_parts[#note_parts + 1] = string.format("(%d takes from multiple matches)", #audio_files)
+      end
+      if row.notes and row.notes ~= "" then
+        note_parts[#note_parts + 1] = ""
+        note_parts[#note_parts + 1] = row.notes
+      end
+      reaper.GetSetMediaItemInfo_String(item, "P_NOTES", table.concat(note_parts, "\n"), true)
 
-    created = created + 1
-    ::continue::
-  end
-
-  reaper.PreventUIRefresh(-1)
-  reaper.UpdateArrange()
-  reaper.Undo_EndBlock("CLB: Conform " .. created .. " items (" .. takes_created .. " takes)", -1)
-
-  reaper.ShowMessageBox(
-    string.format("Conformed %d items with %d takes on %d track(s).",
-      created, takes_created, #track_names_order),
-    SCRIPT_NAME, 0)
+      job.created = job.created + 1
+    end,
+    finish = function(job)
+      reaper.PreventUIRefresh(-1)
+      reaper.UpdateArrange()
+      reaper.Undo_EndBlock("CLB: Conform " .. job.created .. " items (" .. job.takes_created .. " takes)", -1)
+      reaper.ShowMessageBox(
+        string.format("Conformed %d items with %d takes on %d track(s).",
+          job.created, job.takes_created, #track_names_order),
+        SCRIPT_NAME, 0)
+    end,
+  }
 end
 
 ---------------------------------------------------------------------------
@@ -7052,6 +7196,9 @@ local function draw_toolbar()
     CLB.search_text = new_s
     CLB.cached_rows = nil
     sel_clear()
+  end
+  if reaper.ImGui_IsItemHovered(ctx) then
+    reaper.ImGui_SetTooltip(ctx, "8 digits (e.g. 01102203) also matches\nthe timecode 01:10:22:03")
   end
   if CLB.search_text ~= "" then
     reaper.ImGui_SameLine(ctx)
@@ -9424,6 +9571,14 @@ end
 -- Draw: Loading Progress Indicator
 ---------------------------------------------------------------------------
 local function draw_loading_progress()
+  if CLB.batch_job then
+    local job = CLB.batch_job
+    local progress = job.total > 0 and (job.current / job.total) or 0
+    reaper.ImGui_Text(ctx, string.format("%s... %d / %d", job.label or "Working", job.current, job.total))
+    reaper.ImGui_ProgressBar(ctx, progress, -1, 0)
+    return true
+  end
+
   if not CLB.loading_state then return false end
 
   local state = CLB.loading_state
@@ -12188,6 +12343,9 @@ local function loop()
   process_audio_loading_batch()
   -- Process async OTIO/AAF background parse (if in progress)
   process_otio_loading()
+  -- Process a chunk of the current batch job (Generate Items / Conform /
+  -- Match All), if one is running
+  CLB.process_batch_job()
 
   -- Push font: prefer the CJK-capable font when available so Chinese / Japanese
   -- text in clip names (e.g. from subtitle import) renders correctly. Falls
