@@ -1,6 +1,6 @@
 --[[
 @description Move selected items to track under mouse (vertical only, keep timeline position)
-@version 260502.1833
+@version 261001.1153
 @author hsuanice
 @about
   Moves the currently selected items (one or many, possibly spanning multiple
@@ -37,6 +37,15 @@
     - Script generated and refined with Claude.
 
 @changelog
+  v261001.1153
+  - Fix: Overwrite mode shifted the content of an overwritten item whose
+    head was cut (item starting inside the moved range). It moved
+    D_POSITION without compensating the take start offset. All cuts now
+    use SplitMediaItem + delete, so surviving pieces keep exact source
+    alignment (start offset, stretch markers, take envelopes).
+  - Overwrite mode re-scans the destination track per moved item, so pieces
+    created by earlier splits are also trimmed correctly.
+
   v260502.1833
   - Auto-append tracks at the bottom when the destination span exceeds
     the last existing track.
@@ -162,46 +171,37 @@ else
   end
 
   if mode == "overwrite" then
-    -- Snapshot existing items per destination track (excluding our selection)
-    local snapshots = {}
-    for didx in pairs(by_dest) do
-      local tr = r.GetTrack(0, didx)
-      if tr then
-        local n = r.CountTrackMediaItems(tr)
-        local list = {}
-        for i = 0, n - 1 do
-          local it = r.GetTrackMediaItem(tr, i)
-          if not selected_set[it] then list[#list + 1] = it end
-        end
-        snapshots[didx] = { track = tr, items = list }
-      end
-    end
-    -- For each moving item, trim/split/delete overlapping existing items
+    -- For each moving item, remove the overlapped portion of existing items.
+    -- All cuts go through SplitMediaItem (never manual D_POSITION edits) so the
+    -- surviving pieces keep their source alignment (take start offset, stretch
+    -- markers, take envelopes) — content must never shift.
+    -- The destination track is re-scanned per moving item so pieces created by
+    -- earlier splits are also handled.
     for _, e in ipairs(items) do
-      local snap = snapshots[e.dest_idx]
-      if snap then
+      local tr = r.GetTrack(0, e.dest_idx)
+      if tr then
         local mv_pos = e.pos
         local mv_end = e.pos + e.len
-        for _, ex in ipairs(snap.items) do
-          if r.ValidatePtr2(0, ex, "MediaItem*") then
-            local exp = r.GetMediaItemInfo_Value(ex, "D_POSITION")
-            local exl = r.GetMediaItemInfo_Value(ex, "D_LENGTH")
-            local exe = exp + exl
-            if ranges_overlap(mv_pos, mv_end, exp, exe) then
-              if exp >= mv_pos and exe <= mv_end then
-                r.DeleteTrackMediaItem(snap.track, ex)
-              elseif exp < mv_pos and exe > mv_end then
-                local middle = r.SplitMediaItem(ex, mv_pos)
-                if middle then
-                  r.SplitMediaItem(middle, mv_end)
-                  r.DeleteTrackMediaItem(snap.track, middle)
-                end
-              elseif exp < mv_pos then
-                r.SetMediaItemInfo_Value(ex, "D_LENGTH", mv_pos - exp)
-              else
-                r.SetMediaItemInfo_Value(ex, "D_POSITION", mv_end)
-                r.SetMediaItemInfo_Value(ex, "D_LENGTH", exe - mv_end)
+        local existing = {}
+        for i = 0, r.CountTrackMediaItems(tr) - 1 do
+          local it = r.GetTrackMediaItem(tr, i)
+          if not selected_set[it] then existing[#existing + 1] = it end
+        end
+        for _, ex in ipairs(existing) do
+          local exp = r.GetMediaItemInfo_Value(ex, "D_POSITION")
+          local exe = exp + r.GetMediaItemInfo_Value(ex, "D_LENGTH")
+          if ranges_overlap(mv_pos, mv_end, exp, exe) then
+            -- Split off the part before mv_pos (kept); continue with the rest
+            local mid = ex
+            if exp < mv_pos then
+              mid = r.SplitMediaItem(ex, mv_pos)
+            end
+            -- Split off the part after mv_end (kept); delete the middle
+            if mid then
+              if exe > mv_end then
+                r.SplitMediaItem(mid, mv_end)
               end
+              r.DeleteTrackMediaItem(tr, mid)
             end
           end
         end
