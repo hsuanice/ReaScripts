@@ -1,6 +1,6 @@
 --[[
 @description hsuanice Metadata Cache - Shared metadata caching system
-@version 260718.1923
+@version 261002.1652
 @author hsuanice
 @about
   Shared metadata caching library for REAPER scripts.
@@ -29,6 +29,22 @@
     CACHE.flush()
 
 @changelog
+  v261002.1652
+  - Fix: a cached entry is now invalidated when its SOURCE FILE changes, not
+    only when the item changes. Each entry stores a file signature (size +
+    modification time via js_ReaScriptAPI's JS_File_Stat when installed,
+    size alone otherwise) and lookup() treats a different signature as a
+    miss. Before, rewriting a file's metadata in place (Wave Repair rebuilding
+    an iXML, Wave Manager re-embedding) kept serving the old values until
+    "Clear Cache" — the item's position/length/source name hadn't changed.
+  - Cache invalidation: bumped CACHE_VERSION to 2.3 so every existing cache is
+    rebuilt once with the signature, and to drop Meta Trk Names resolved by
+    Metadata Read <= 0.3.10 (empty TRACK_LIST channels borrowed the first
+    non-empty name, e.g. "CMIT 5U").
+  - Fix: bit_depth is now actually written to / read from the cache file
+    (v260323.0324 added it to store/lookup in memory only, so it was lost on
+    every reload).
+
   v260718.1923
   - Cache invalidation: bumped CACHE_VERSION to 2.2 for Metadata Read v0.3.2
     Pro Tools-like $trk display behavior (poly -> full track list).
@@ -69,10 +85,10 @@
 ]]
 
 local M = {}
-M.VERSION = "260718.1923"
+M.VERSION = "261002.1652"
 
 -- Cache version (increment to invalidate all caches)
-local CACHE_VERSION = "2.2"
+local CACHE_VERSION = "2.3"
 
 -- Global cache state
 local CACHE = {
@@ -191,6 +207,38 @@ local function get_item_mod_hash(item)
   ) * 1000)
 end
 
+-- Signature of the item's source file: "size:modified-time" when
+-- js_ReaScriptAPI is installed (JS_File_Stat), "size" otherwise. Any change to
+-- the file's bytes on disk changes its modification time, so metadata
+-- rewritten in place (same size, same name) is still detected.
+local function get_source_file_signature(item)
+  if not item or not reaper.ValidatePtr(item, "MediaItem*") then return "" end
+  local tk = reaper.GetActiveTake(item)
+  local src = tk and reaper.GetMediaItemTake_Source(tk)
+  if not src then return "" end
+  -- Follow section/reversed wrappers to the real file
+  local parent = reaper.GetMediaSourceParent and reaper.GetMediaSourceParent(src)
+  while parent do
+    src = parent
+    parent = reaper.GetMediaSourceParent(src)
+  end
+  local _, fn = reaper.GetMediaSourceFileName(src, "")
+  if not fn or fn == "" then return "" end
+  if reaper.JS_File_Stat then
+    -- Use it whenever it yields a modification time (not relying on the
+    -- exact success code); otherwise fall through to size only.
+    local ok, _retval, size, _accessed, modified = pcall(reaper.JS_File_Stat, fn)
+    if ok and modified and tostring(modified) ~= "" then
+      return string.format("%.0f:%s", tonumber(size) or 0, tostring(modified))
+    end
+  end
+  local fh = io.open(fn, "rb")
+  if not fh then return "missing" end
+  local size = fh:seek("end") or 0
+  fh:close()
+  return string.format("%.0f", size)
+end
+
 -- Get item details for logging
 local function get_item_debug_info(item)
   if not item or not reaper.ValidatePtr(item, "MediaItem*") then return "invalid item" end
@@ -225,7 +273,7 @@ local function serialize_cache(cache_data)
   }
 
   for guid, meta in pairs(cache_data.items or {}) do
-    -- Format: GUID|mod_time|file_name|interleave|meta_trk_name|channel_num|umid|umid_pt|origination_date|origination_time|originator|originator_ref|time_reference|description|project|scene|take_meta|tape|ubits|framerate|speed
+    -- Format: GUID|mod_time|file_name|interleave|meta_trk_name|channel_num|umid|umid_pt|origination_date|origination_time|originator|originator_ref|time_reference|description|project|scene|take_meta|tape|ubits|framerate|speed|bit_depth|file_sig
     local parts = {
       guid,
       tostring(meta.mod_time or 0),
@@ -248,7 +296,9 @@ local function serialize_cache(cache_data)
       meta.tape or "",
       meta.ubits or "",
       meta.framerate or "",
-      meta.speed or ""
+      meta.speed or "",
+      meta.bit_depth or "",
+      meta.file_sig or ""
     }
     -- Escape special characters in data (skip GUID and mod_time)
     for i = 3, #parts do
@@ -346,7 +396,9 @@ local function deserialize_cache(content)
           tape = parts[18] or "",
           ubits = parts[19] or "",
           framerate = parts[20] or "",
-          speed = parts[21] or ""
+          speed = parts[21] or "",
+          bit_depth = parts[22] or "",
+          file_sig = parts[23] or ""
         }
       end
     end
@@ -439,14 +491,15 @@ function M.lookup(item_guid, item)
     return nil
   end
 
-  -- Verify item hasn't changed
+  -- Verify neither the item nor its source file has changed
   local current_hash = get_item_mod_hash(item)
-  if current_hash ~= cached.mod_time then
+  local current_sig = get_source_file_signature(item)
+  if current_hash ~= cached.mod_time or current_sig ~= (cached.file_sig or "") then
     CACHE.misses = CACHE.misses + 1
     CACHE.invalidated[item_guid] = true
     if CACHE.debug then
-      reaper.ShowConsoleMsg(string.format("[Cache] MISS (changed): %s | hash: %d -> %d\n",
-        get_item_debug_info(item), cached.mod_time, current_hash))
+      reaper.ShowConsoleMsg(string.format("[Cache] MISS (changed): %s | hash: %d -> %d | file: %s -> %s\n",
+        get_item_debug_info(item), cached.mod_time, current_hash, tostring(cached.file_sig), current_sig))
     end
     CACHE.data.items[item_guid] = nil
     CACHE.dirty = true
@@ -467,6 +520,7 @@ function M.store(item_guid, item, metadata)
   local hash = get_item_mod_hash(item)
   CACHE.data.items[item_guid] = {
     mod_time = hash,
+    file_sig = get_source_file_signature(item),
     file_name = metadata.file_name or "",
     interleave = metadata.interleave or 0,
     meta_trk_name = metadata.meta_trk_name or "",

@@ -1,6 +1,6 @@
 --[[
 @description Metadata Read (reader / normalizer / tokens)
-@version 0.3.2
+@version 0.3.11
 @author hsuanice
 @noindex
 @about
@@ -11,7 +11,93 @@
   - Interleave index ↔ recorder channel mapping
   - Token expansion for rename/export ($trk/$trkN/$trkall, ${interleave}, ${chnum}, ...)
 
+  Shared with the Rename scripts (2026-09-11):
+  - "Rename Active Take from File Metadata.lua" and "Rename Source File from
+    Metadata.lua" (Beta Testing folder) used to keep their own local copies of
+    the $trk/$trkN/$trkall/${interleave}/${chnum}/${counter:N}/
+    ${srcbaseprefix:N}/${srcbasesuffix:N} token logic instead of calling into
+    this library. Both scripts now delegate those tokens to M.expand()
+    directly, and $trk specifically calls M.resolve_trk_name() — so this file
+    is the single place to fix or extend that logic. Two tokens stay local to
+    the Rename scripts on purpose ($baseindex/$baseidx, $overlapindex/
+    $rangeindex): they depend on the current multi-item selection/grouping
+    state in that UI, which this read-only metadata library has no concept of.
+  - M.resolve_trk_name() prefers fields.meta_trk_name (the already-resolved
+    single-channel name that survives the shared Metadata.cache round-trip)
+    before falling back to reconstructing the name from TRK#= pairs in the
+    description text — needed because some recorders (e.g. Cantar/Aaton)
+    don't embed per-channel TRK#= in the description, so the old
+    reconstruction alone came back empty on a cache hit. $trk inside
+    M.expand() now calls the same helper for its single-name case (its
+    Pro-Tools-style "no explicit interleave → full track list" poly branch
+    is unchanged).
+
 @changelog
+  v0.3.11 (2026-10-02)
+    - Fixed: a channel whose TRACK_LIST entry exists but has an empty name now
+      resolves to an empty track name again, instead of borrowing the first
+      non-empty name in the list. M.resolve_trk_name() (added in v0.3.10)
+      ended with an unconditional "first non-empty name" fallback, which
+      undid the v0.3.9 fix: on Cantar polys that record every channel even
+      when unused (2026-01 "FISHTOWN" cards), channels 3-10 — empty in
+      TRACK_LIST — all read as "CMIT 5U" ($trk, Meta Trk Name in Item List
+      Browser/Editor, Reorder Monitor). The first-non-empty fallback now only
+      applies when the file has no TRACK_LIST at all; a file with one describes
+      all of its channels, so an empty or missing entry (also in the
+      compressed AATON lists REAPER can expose) means "no name".
+    - Cached names written by the old behaviour are discarded by Metadata
+      Cache 261002 (CACHE_VERSION 2.3).
+
+  v0.3.10 (2026-09-11)
+    - Added: M.resolve_trk_name(fields, sanitize) — single-channel track name
+      resolver (meta_trk_name-first, falls back to interleave-list
+      reconstruction), factored out of $trk's single-name path.
+    - Fixed: $trk (single-name path) now prefers fields.meta_trk_name before
+      reconstructing from TRK#= pairs in the description, fixing empty $trk
+      after a Metadata.cache hit for recorders that don't embed per-channel
+      TRK#= in the description (e.g. Cantar/Aaton). The poly "no explicit
+      interleave → full track list" branch is unchanged.
+    - Consolidated: "Rename Active Take from File Metadata.lua" and "Rename
+      Source File from Metadata.lua" no longer keep local copies of
+      $trk/$trkN/$trkall/$interleave/$chnum/$counter:N/$srcbaseprefix:N/
+      $srcbasesuffix:N — both now delegate to this library.
+
+  v0.3.9 (2026-08-24)
+    - Fixed: explicit interleave slots with empty TRACK_LIST names no longer
+      fall back to the first non-empty name.
+    - Fixed: recorder channel number no longer remaps via compacted AATON
+      ACTIVE order (uses TRACK_LIST interleave->channel mapping first).
+
+  v0.3.8 (2026-08-24)
+    - Added canonical TRACK_LIST reader via BWF MetaEdit XML output.
+    - Multichannel files now prefer CLI TRACK_LIST for stable cross-recorder parsing.
+    - REAPER metadata keys remain as fallback when CLI is unavailable.
+
+  v0.3.7 (2026-08-24)
+    - Added recorder-family aware mapping policy (AATON / Sound Devices / Sonosax / generic).
+    - AATON ACTIVE-slot remap now applies only to AATON-family files.
+    - Sound Devices and Sonosax stay on strict TRACK_LIST index mapping.
+
+  v0.3.6 (2026-08-24)
+    - Enforced deterministic interleave mapping priority:
+      TRACK_LIST.INTERLEAVE_INDEX first, no compressed-slot fallback.
+    - Only falls back to sequential names when interleave indexes are absent.
+
+  v0.3.5 (2026-08-24)
+    - Fixed: interleave track-name map now uses AATON ACTIVE slot mapping
+      when available and unambiguous.
+    - Prevents compressed TRACK_LIST names from shifting MIX L/R to wrong slots.
+
+  v0.3.4 (2026-08-24)
+    - Fixed: recorder-channel detection for exploded poly items can use
+      AATON ACTIVE slot mapping instead of assuming interleave == channel.
+    - Preserves previous behavior when ACTIVE metadata is unavailable.
+
+  v0.3.3 (2026-08-24)
+    - Fixed: TRACK_LIST parsing now prefers full IXML XML chunk before per-key reads.
+    - Fixed: preserves empty TRACK_LIST slots so interleave/channel mapping does not shift.
+    - Improved: channel mapping remains stable for AATON-style poly metadata with sparse names.
+
   v0.3.2 (2026-07-18)
     - Changed: $trk now follows Pro Tools-like display logic.
       * Poly context (no explicit mono-of-N interleave): return full track list (same as $trkall).
@@ -79,7 +165,7 @@
 
 
 local M = {}
-M.VERSION = "0.3.2"
+M.VERSION = "0.3.11"
 
 -- ====== Source / file helpers ======
 local function stype(src) local ok,t=pcall(reaper.GetMediaSourceType,src,""); return ok and (t or "") or "" end
@@ -110,6 +196,8 @@ local function umid_to_pt(hex64)
   }, "-")
 end
 
+local parse_ixml_tracklist_from_chunk
+
 -- 讀不到 BWF:UMID 時的 CLI fallback（bwfmetaedit --out-xml）
 local function read_umid_via_cli_abs(path_to_cli, wav_path)
   local cli = path_to_cli or "/opt/homebrew/bin/bwfmetaedit"
@@ -128,13 +216,35 @@ local function read_umid_via_cli_abs(path_to_cli, wav_path)
   return hex
 end
 
+local TRACKLIST_CLI_CACHE = {}
+
+local function read_tracklist_via_cli_abs(path_to_cli, wav_path)
+  local path = tostring(wav_path or "")
+  if path == "" then return nil end
+  if TRACKLIST_CLI_CACHE[path] ~= nil then return TRACKLIST_CLI_CACHE[path] end
+
+  local cli = path_to_cli or "/opt/homebrew/bin/bwfmetaedit"
+  local cmd = string.format('"%s" --out-xml=- "%s"', cli, path)
+  local xml = ""
+  local fh = io.popen(cmd)
+  if fh then
+    xml = fh:read("*a") or ""
+    fh:close()
+  end
+
+  local tracks = nil
+  if xml ~= "" then tracks = parse_ixml_tracklist_from_chunk(xml) end
+  TRACKLIST_CLI_CACHE[path] = tracks or false
+  return tracks
+end
+
 
 
 
 -- ====== cached metadata reads ======
 local CACHE = {}
 function M.begin_batch() CACHE = {} end
-function M.end_batch()   CACHE = {} end
+function M.end_batch()   CACHE = {}; TRACKLIST_CLI_CACHE = {} end
 local function meta(src, key)
   local k = tostring(src) .. "\0" .. key
   if CACHE[k] ~= nil then return CACHE[k] end
@@ -191,30 +301,120 @@ local function parse_description_pairs(desc_text, out_tbl)
   end
 end
 
+local function decode_xml_text(s)
+  local v = tostring(s or "")
+  v = v:gsub("<!%[CDATA%[(.-)%]%]>", "%1")
+  v = v:gsub("&lt;", "<")
+  v = v:gsub("&gt;", ">")
+  v = v:gsub("&quot;", '"')
+  v = v:gsub("&apos;", "'")
+  v = v:gsub("&amp;", "&")
+  v = v:gsub("^%s+", ""):gsub("%s+$", "")
+  return v
+end
+
+parse_ixml_tracklist_from_chunk = function(ixml_chunk)
+  local xml = tostring(ixml_chunk or "")
+  if xml == "" then return nil end
+  local block = xml:match("<TRACK_LIST>(.-)</TRACK_LIST>")
+  if not block or block == "" then return nil end
+
+  local tracks = {}
+  for track_xml in block:gmatch("<TRACK>(.-)</TRACK>") do
+    local ch = tonumber(track_xml:match("<CHANNEL_INDEX>%s*(%d+)%s*</CHANNEL_INDEX>") or "")
+    local il = tonumber(track_xml:match("<INTERLEAVE_INDEX>%s*(%d+)%s*</INTERLEAVE_INDEX>") or "")
+    local nm = decode_xml_text(track_xml:match("<NAME>(.-)</NAME>") or "")
+    if ch or il or nm ~= "" then
+      tracks[#tracks+1] = { channel_index = ch, interleave_index = il, name = nm }
+    end
+  end
+  return (#tracks > 0) and tracks or nil
+end
+
+local function detect_recorder_family(src)
+  local originator = tostring(meta(src, "BWF:Originator") or "")
+  local originator_upper = originator:upper()
+  local ixml_blob = tostring(meta(src, "IXML") or ""):upper()
+
+  if originator_upper:find("AATON", 1, true) or originator_upper:find("CANTAR", 1, true)
+    or ixml_blob:find("AATON_CANTAR", 1, true) then
+    return "aaton"
+  end
+  if originator_upper:find("SOUND DEVICES", 1, true)
+    or originator_upper:find("MIXPRE", 1, true)
+    or ixml_blob:find("SOUND_DEVICES", 1, true) then
+    return "sounddevices"
+  end
+  if originator_upper:find("SONOSAX", 1, true)
+    or ixml_blob:find("SONOSAX", 1, true) then
+    return "sonosax"
+  end
+  return "generic"
+end
+
 -- ====== iXML TRACK_LIST → t.trk# ======
 local function fill_ixml_tracklist(src, t)
-  local tracks = {}
-  local ok, count = reaper.GetMediaFileMetadata(src, "IXML:TRACK_LIST:TRACK_COUNT")
-  if ok == 1 then
-    local n = tonumber(count) or 0
-    for i=1,n do
-      local suf = (i>1) and (":"..i) or ""
-      local _, ch_idx = reaper.GetMediaFileMetadata(src, "IXML:TRACK_LIST:TRACK:CHANNEL_INDEX"..suf)
-      local _, il_idx = reaper.GetMediaFileMetadata(src, "IXML:TRACK_LIST:TRACK:INTERLEAVE_INDEX"..suf)
-      local _, name   = reaper.GetMediaFileMetadata(src, "IXML:TRACK_LIST:TRACK:NAME"..suf)
-      local idx = tonumber(ch_idx or "")
-      local il  = tonumber(il_idx or "")
-      if idx and idx >= 1 then
-        if name and name ~= "" then
-          t["trk"..idx] = name; t["TRK"..idx] = name
-          tracks[#tracks+1] = { channel_index = idx, interleave_index = il, name = name }
-        elseif not t["trk"..idx] and t["TRK"..idx] then
-          t["trk"..idx] = t["TRK"..idx]
-        end
+  t.__recorder_family = detect_recorder_family(src)
+  local tracks = nil
+  local src_channels = tonumber(t.channels) or 0
+
+  -- Canonical source for multichannel track maps across recorder brands.
+  if src_channels > 1 and t.srcpath and t.srcpath ~= "" then
+    tracks = read_tracklist_via_cli_abs(nil, t.srcpath)
+  end
+  if not tracks then
+    tracks = parse_ixml_tracklist_from_chunk(meta(src, "IXML"))
+  end
+
+  if not tracks then
+    tracks = {}
+    local ok, count = reaper.GetMediaFileMetadata(src, "IXML:TRACK_LIST:TRACK_COUNT")
+    if ok == 1 then
+      local n = tonumber(count) or 0
+      for i=1,n do
+        local suf = (i>1) and (":"..i) or ""
+        local _, ch_idx = reaper.GetMediaFileMetadata(src, "IXML:TRACK_LIST:TRACK:CHANNEL_INDEX"..suf)
+        local _, il_idx = reaper.GetMediaFileMetadata(src, "IXML:TRACK_LIST:TRACK:INTERLEAVE_INDEX"..suf)
+        local _, name   = reaper.GetMediaFileMetadata(src, "IXML:TRACK_LIST:TRACK:NAME"..suf)
+        local idx = tonumber(ch_idx or "")
+        local il  = tonumber(il_idx or "") or i
+        local nm  = decode_xml_text(name)
+        tracks[#tracks+1] = { channel_index = idx, interleave_index = il, name = nm }
       end
     end
   end
-  if #tracks > 0 then t.__ixml_tracks = tracks end
+
+  if #tracks > 0 then
+    for i, tr in ipairs(tracks) do
+      tr.interleave_index = tonumber(tr.interleave_index) or i
+      local ch = tonumber(tr.channel_index) or tonumber(tr.interleave_index)
+      local nm = tostring(tr.name or "")
+      if ch and ch >= 1 and nm ~= "" then
+        t["trk"..ch] = nm
+        t["TRK"..ch] = nm
+      end
+    end
+    t.__ixml_tracks = tracks
+  end
+
+  local active_slots = {}
+  local saw_active = false
+  local max_slots = math.max(#tracks, tonumber(t.channels) or 0, 1)
+  for i = 1, max_slots do
+    local suf = (i > 1) and (":" .. i) or ""
+    local raw = meta(src, "IXML:AATON_CANTAR:ALL_TRK_NAME:DATA:ACTIVE" .. suf)
+             or meta(src, "AATON_CANTAR:ALL_TRK_NAME:DATA:ACTIVE" .. suf)
+    if raw and raw ~= "" then
+      saw_active = true
+      local v = tostring(raw):upper():gsub("^%s+", ""):gsub("%s+$", "")
+      if v == "YES" or v == "TRUE" or v == "1" or v == "ARMED" then
+        active_slots[#active_slots + 1] = i
+      end
+    end
+  end
+  if t.__recorder_family == "aaton" and saw_active and #active_slots > 0 then
+    t.__aaton_active_slots = active_slots
+  end
 end
 
 -- ====== 補充：來源取樣率/聲道數 ======
@@ -261,18 +461,43 @@ local function build_interleave_name_list(fields)
 
   if fields.__ixml_tracks and type(fields.__ixml_tracks) == "table" then
     local by_slot = {}
+    local have_any_interleave_index = false
     for _, t in ipairs(fields.__ixml_tracks) do
       local idx = tonumber(t.interleave_index)
       local nm  = t.name
       if nm and nm ~= "" then
         by_slot[#by_slot+1] = nm
       end
-      if idx and idx >= 1 and nm and nm ~= "" and not by_interleave[idx] then
-        by_interleave[idx] = nm
-        have_ixml = true
+      if idx and idx >= 1 then
+        have_any_interleave_index = true
+        if nm and nm ~= "" and not by_interleave[idx] then
+          by_interleave[idx] = nm
+          have_ixml = true
+        end
       end
     end
-    if not have_ixml and #by_slot > 0 then
+
+    local active_slots = fields.__aaton_active_slots
+    if fields.__recorder_family == "aaton"
+      and type(active_slots) == "table"
+      and #active_slots > 0
+      and #by_slot > 0
+      and #active_slots == #by_slot then
+      -- AATON files can expose compressed TRACK_LIST names in REAPER metadata.
+      -- Re-map the non-empty sequence onto active recorder slots to preserve layout.
+      by_interleave = {}
+      for i, slot in ipairs(active_slots) do
+        local slot_idx = tonumber(slot)
+        local nm = by_slot[i]
+        if slot_idx and slot_idx >= 1 and nm and nm ~= "" and not by_interleave[slot_idx] then
+          by_interleave[slot_idx] = nm
+        end
+      end
+      have_ixml = true
+    end
+
+    -- Only use sequential fallback when interleave indexes are absent.
+    if not have_ixml and (not have_any_interleave_index) and #by_slot > 0 then
       for i, nm in ipairs(by_slot) do by_interleave[i] = nm end
       have_ixml = true
     end
@@ -560,26 +785,18 @@ function M.expand(tpl, fields, counter, sanitize)
     end
 
     if tkl == "trk" then
-      local interleave = fields.__chan_index
-      local list = build_interleave_name_list(fields)
-
       -- Pro Tools-like display: for poly files without explicit mono-of-N
       -- selection, show the full interleaved track-name list.
       local has_explicit = (fields.__has_explicit_interleave == true)
       local chn = tonumber(fields.channels) or 1
       if (not has_explicit) and chn > 1 then
+        local list = build_interleave_name_list(fields)
         local out = {}
         if list then for i=1,256 do local v=list[i]; if v and v~="" then out[#out+1]=v end end end
         return maybe_sanitize(table.concat(out, "_"))
       end
 
-      local s = ""
-      if interleave and list and list[interleave] then
-        s = list[interleave]
-      else
-        if list then for i=1,128 do if list[i] and list[i]~="" then s=list[i]; break end end end
-      end
-      return maybe_sanitize(s)
+      return M.resolve_trk_name(fields, sanitize)
     end
 
     if tkl == "trkall" then
@@ -615,6 +832,56 @@ function M.expand(tpl, fields, counter, sanitize)
   return out
 end
 
+-- Whether the file's iXML TRACK_LIST covers this channel. A file with a
+-- TRACK_LIST describes every one of its channels: a channel with an empty
+-- name — or with no entry at all, as in the compressed AATON lists REAPER can
+-- expose (only the named tracks) — has no name. It must never borrow another
+-- channel's; only a file with no TRACK_LIST at all falls back.
+local function track_list_describes_slot(fields, interleave)
+  local tracks = fields and fields.__ixml_tracks
+  if type(tracks) ~= "table" or #tracks == 0 or not interleave then return false end
+  local channels = math.max(tonumber(fields.channels) or 0, #tracks)
+  return interleave >= 1 and interleave <= channels
+end
+
+-- Public helper: single resolved track name for the item's current channel.
+-- Prefers fields.meta_trk_name (the already-resolved single-channel name,
+-- which survives a Metadata.cache round-trip even when the recorder doesn't
+-- embed per-channel TRK#= pairs in the description text), falling back to
+-- the interleave-name-list reconstruction and then — only when the track list
+-- doesn't describe this channel at all — to the first non-empty
+-- name in that list. Always resolves to one name (no Pro-Tools-style "full
+-- poly list" behavior) — this is the single-name path $trk uses above, and
+-- what the Rename-from-Metadata scripts call directly for their $trk token.
+function M.resolve_trk_name(fields, sanitize)
+  if sanitize == nil then sanitize = true end
+  local function maybe_sanitize(s)
+    s = tostring(s or "")
+    if sanitize then return (s:gsub('[\\/:*?"<>|%c]', '_')) end
+    return s
+  end
+
+  local f = fields or {}
+  local s = f.meta_trk_name
+  if not s or s == "" then
+    local interleave = f.__chan_index
+    local list = build_interleave_name_list(f)
+    s = ""
+    if interleave and list and list[interleave] then
+      s = list[interleave]
+    elseif track_list_describes_slot(f, interleave) then
+      s = ""  -- explicit, empty slot: stays empty (v0.3.9 rule, restored in v0.3.11)
+    else
+      if list then
+        for i = 1, 128 do
+          if list[i] and list[i] ~= "" then s = list[i]; break end
+        end
+      end
+    end
+  end
+  return maybe_sanitize(s or "")
+end
+
 -- Public helper: resolve track name & channel by interleave index
 function M.trk_name_and_channel(fields, idx)
   local f = fields or {}
@@ -626,8 +893,6 @@ function M.trk_name_and_channel(fields, idx)
   local name = ""
   if list and list[il] and list[il] ~= "" then
     name = list[il]
-  else
-    if list then for i=1,256 do if list[i] and list[i]~="" then name=list[i]; break end end end
   end
 
   local prev = f.__chan_index
