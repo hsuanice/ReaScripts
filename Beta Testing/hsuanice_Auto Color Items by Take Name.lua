@@ -1,6 +1,6 @@
 --[[
 @description Auto Color Items by Take Name
-@version 260918.1411
+@version 261002.1042
 @author hsuanice
 @about
   Config-driven color palette with keyword rules — colors items by take name.
@@ -13,6 +13,25 @@
   No external dependencies — REAPER built-in GFX library.
 
 @changelog
+  v261002.1042
+  - Fix: "All Shiny" was re-pastelizing items that were already Shiny (background recomputed from
+    the already-pale background instead of the true peak color), so running it repeatedly faded
+    every colored item out more each time. Now detects "already shiny" by checking whether the
+    background's hue matches the peak's hue and its saturation is meaningfully lower (the shiny
+    formula's signature) and leaves those items alone instead of reprocessing them.
+  - Change: "All Shiny" now converts just the selected items when any are selected (consistent with
+    Palette/Random/Follow); only falls back to the whole project — with an OK/Cancel confirmation
+    prompt — when nothing is selected.
+
+  v261002.1021
+  - Add: "All Shiny" function button (Functions row, right of Follow) — forces every colored item
+    in the whole project to Shiny color, regardless of current selection or the global Normal/Shiny
+    mode setting. Items with no custom color are left alone. One-shot convert-once action: an item
+    already in Shiny mode has no stored flag saying so, so re-running it on already-shiny items will
+    re-derive the pastel background from the existing pastel background rather than skip it.
+  - Add: standalone "Auto Color All ShinyColor" wrapper script for Action-List/toolbar use, matching
+    the existing Palette / Smart Random / Follow Track Color wrappers.
+
   v260918.1411
   - Fix: adding the Follow Track Color function pushed the script over Lua's 200-local-per-function
     limit ("too many local variables ... in main function near 'in'" on load). Grouped
@@ -1243,7 +1262,7 @@ end
 -- the file. Only the three functions themselves need to outlive the block
 -- (they're called later from the toolbar draw code), hence the forward
 -- declaration.
-local do_palette_flow_color, do_smart_random_color, do_follow_track_color
+local do_palette_flow_color, do_smart_random_color, do_follow_track_color, do_all_shiny_color
 do
 
 do_palette_flow_color = function()
@@ -1489,7 +1508,99 @@ do_follow_track_color = function()
   end
 end
 
-end -- do_palette_flow_color / do_smart_random_color / do_follow_track_color scope
+local function item_custom_rrggbb(custom)
+  if (custom & 0x1000000) == 0 then return nil end
+  local r, g, b = reaper.ColorFromNative(custom & 0xFFFFFF)
+  return math.floor(r) * 65536 + math.floor(g) * 256 + math.floor(b)
+end
+
+-- Does bg look like the shiny-pastel derivative of peak? Checked by the
+-- shape of the transform (same hue, meaningfully lower saturation) rather
+-- than recomputing+comparing against the exact formula, so it stays correct
+-- even if BG Bright/BG Sat have been changed since the item was colored.
+-- Guards against false positives from black/white/grayscale secondary
+-- colors (sb<=0.01) and grayscale peaks (sp<=0.01), where hue is meaningless.
+local function looks_already_shiny(peak_rrggbb, bg_rrggbb)
+  local hp, sp = rgb_to_hsv(((peak_rrggbb>>16)&0xFF)/255, ((peak_rrggbb>>8)&0xFF)/255, (peak_rrggbb&0xFF)/255)
+  local hb, sb = rgb_to_hsv(((bg_rrggbb>>16)&0xFF)/255, ((bg_rrggbb>>8)&0xFF)/255, (bg_rrggbb&0xFF)/255)
+  if sp <= 0.01 or sb <= 0.01 then return false end
+  local hue_diff = math.abs(hp - hb)
+  hue_diff = math.min(hue_diff, 360 - hue_diff)
+  if hue_diff > 4 then return false end
+  return sb <= sp * 0.6
+end
+
+-- Figures out what to do with one item: returns (seed_rrggbb, nil) when it
+-- should be converted to Shiny from that seed color, or (nil, reason) when
+-- it should be left alone — reason is "no_color" (nothing custom set) or
+-- "already_shiny" (background already looks like a pastel of the peak
+-- color, so re-deriving from it would just pastel it further — this is
+-- what was making repeated runs fade everything out).
+local function get_item_shiny_seed(item)
+  local bg_rrggbb = item_custom_rrggbb(math.floor(reaper.GetMediaItemInfo_Value(item, "I_CUSTOMCOLOR") or 0))
+  local take = reaper.GetActiveTake(item) or reaper.GetMediaItemTake(item, 0)
+  local peak_rrggbb = take and item_custom_rrggbb(math.floor(reaper.GetMediaItemTakeInfo_Value(take, "I_CUSTOMCOLOR") or 0)) or nil
+
+  if not bg_rrggbb and not peak_rrggbb then return nil, "no_color" end
+  if bg_rrggbb and peak_rrggbb and looks_already_shiny(peak_rrggbb, bg_rrggbb) then
+    return nil, "already_shiny"
+  end
+  if normal_primary_target == NORMAL_PRIMARY_PEAK then
+    return peak_rrggbb or bg_rrggbb
+  else
+    return bg_rrggbb or peak_rrggbb
+  end
+end
+
+do_all_shiny_color = function()
+  local sel_n = reaper.CountSelectedMediaItems(0)
+  local items, scope
+
+  if sel_n > 0 then
+    items = {}
+    for i = 0, sel_n - 1 do items[#items + 1] = reaper.GetSelectedMediaItem(0, i) end
+    scope = "selected"
+  else
+    local choice = reaper.ShowMessageBox(
+      "No items are selected.\n\nConvert ALL items in the project to Shiny color?",
+      "All Shiny", 1)
+    if choice ~= 1 then set_status("All Shiny: cancelled"); return end
+    local n = reaper.CountMediaItems(0)
+    items = {}
+    for i = 0, n - 1 do items[#items + 1] = reaper.GetMediaItem(0, i) end
+    scope = "all"
+  end
+
+  if #items == 0 then set_status("No items to color"); return end
+
+  reaper.Undo_BeginBlock()
+  local applied, already_shiny, no_color = 0, 0, 0
+  for _, item in ipairs(items) do
+    local rrggbb, reason = get_item_shiny_seed(item)
+    if rrggbb then
+      apply_shiny_color_to_item(item, rrggbb)
+      applied = applied + 1
+    elseif reason == "already_shiny" then
+      already_shiny = already_shiny + 1
+    else
+      no_color = no_color + 1
+    end
+  end
+  reaper.Undo_EndBlock("All Shiny Color", -1)
+  reaper.UpdateArrange()
+
+  local notes = {}
+  if already_shiny > 0 then notes[#notes+1] = already_shiny .. " already shiny" end
+  if no_color > 0 then notes[#notes+1] = no_color .. " uncolored" end
+  local suffix = #notes > 0 and (" (" .. table.concat(notes, ", ") .. ")") or ""
+  if applied == 0 then
+    set_status(string.format("All Shiny: nothing to convert%s", suffix))
+  else
+    set_status(string.format("All Shiny: %d %s item(s) converted%s", applied, scope, suffix))
+  end
+end
+
+end -- do_palette_flow_color / do_smart_random_color / do_follow_track_color / do_all_shiny_color scope
 
 -- Returns a set of selected item custom colors in 0xRRGGBB format.
 -- Only true custom item colors are included (track/default display colors are ignored).
@@ -2031,7 +2142,7 @@ local function draw()
     if chkbox(fx2, ty2, ac_midi,  "MIDI")  then ac_midi  = not ac_midi;  save_auto_pref() end
     fx2 = fx2 + 54
 
-    -- ── color function buttons (Palette / Random / Follow) ──────────────────
+    -- ── color function buttons (Palette / Random / Follow / All Shiny) ──────
     fx2 = fx2 + 12
     txt(fx2, ty2 + 1, "Functions:", .45,.45,.45); fx2 = fx2 + 68
     if btn(fx2, sy + 1, 54, AC_BAR_H - 2, "Palette") then do_palette_flow_color() end
@@ -2040,6 +2151,8 @@ local function draw()
     fx2 = fx2 + 60
     if btn(fx2, sy + 1, 54, AC_BAR_H - 2, "Follow") then do_follow_track_color() end
     fx2 = fx2 + 60
+    if btn(fx2, sy + 1, 64, AC_BAR_H - 2, "All Shiny") then do_all_shiny_color() end
+    fx2 = fx2 + 70
 
     local mode_label = (color_mode == COLOR_MODE_SHINY) and "ShinyColor" or "Normal"
     local mode_x = math.max(fx2 + 12, W - 126)
