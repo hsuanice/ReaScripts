@@ -1,6 +1,6 @@
 --[[
 @description ReaImGui - Vertical Reorder and Sort (items)
-@version 260902.0921
+@version 261004.0013
 @author hsuanice
 @about
   Provides three vertical re-arrangement modes for selected items (stacked UI):
@@ -29,6 +29,21 @@
 
 
 @changelog
+  v261004.0013
+  - Fix: Upfill (Reorder fill upward) no longer creates overlapping items.
+    * Cause: still-unprocessed selected items were not counted as occupying
+      their current track, so an earlier item could move onto a track where a
+      later selected item still sat; that later item could not move up and
+      stayed put, overlapping.
+    * Now every selected item (including locked ones) is reserved on its
+      current track first; the reservation is released only when it moves.
+    * Upfill repeats passes until nothing can move up further, so space freed
+      by an item moving up can be filled by others.
+  - Fix: Sort Vertically uses the same reservation logic. Each time cluster is
+    placed as a whole; if any item cannot fit, the cluster stays where it was
+    instead of falling back onto an occupied track.
+  - Fix: Overlap check ignores sub-microsecond floating-point error, so
+    back-to-back items are not treated as overlapping.
   v260902.0921
   - New: Added ExtState-driven action wrappers for Upfill, Sort in Place, and
     Copy to Sort. Each wrapper now follows the settings last saved in this GUI.
@@ -628,12 +643,25 @@ local function build_initial_occupancy(tracks, selected_set)
   return occ
 end
 
-local function interval_overlaps(a_s,a_e,b_s,b_e) return (a_e>b_s) and (b_e>a_s) end
+local OVERLAP_EPS = 1e-7 -- 秒；忽略浮點誤差造成的「首尾相接卻判定重疊」
+local function interval_overlaps(a_s,a_e,b_s,b_e) return (a_e>b_s+OVERLAP_EPS) and (b_e>a_s+OVERLAP_EPS) end
 local function track_has_overlap(occ_list, s,e)
   for i=1,#occ_list do local seg=occ_list[i]; if interval_overlaps(s,e, seg.s,seg.e) then return true end end
   return false
 end
-local function add_interval(occ_list, s,e) occ_list[#occ_list+1] = { s=s, e=e } end
+local function add_interval(occ_list, s,e, it) occ_list[#occ_list+1] = { s=s, e=e, item=it } end
+local function remove_item_interval(occ_list, it)
+  if not occ_list then return end
+  for i=#occ_list,1,-1 do if occ_list[i].item==it then table.remove(occ_list, i); return end end
+end
+-- 選取的 items 也先登記在「原本所在的軌」上：還沒處理到的 item 仍佔著位置，
+-- 其他 item 不可以搬進去（否則會重疊）。item 真的搬走時再移除原位登記。
+local function reserve_selected(items, occ)
+  for _, it in ipairs(items) do
+    local list = occ[item_track(it)]
+    if list then local s = item_start(it); add_interval(list, s, s+item_len(it), it) end
+  end
+end
 
 ---------------------------------------
 -- Sort：同列分群
@@ -703,6 +731,7 @@ end
 -- 計畫：Reorder / Sort
 ---------------------------------------
 local function plan_reorder_moves(items, tracks, occ)
+  reserve_selected(items, occ)
   local sorted = { table.unpack(items) }
   table.sort(sorted, function(a,b)
     local sa,sb = item_start(a), item_start(b)
@@ -710,45 +739,72 @@ local function plan_reorder_moves(items, tracks, occ)
     return track_index(item_track(a)) < track_index(item_track(b))
   end)
   local pos_in = {}; for i,tr in ipairs(tracks) do pos_in[tr]=i end
+  local cur_of = {}; for _, it in ipairs(sorted) do cur_of[it] = item_track(it) end
+  -- 反覆往上補，直到沒有 item 可以再上移（前面的 item 搬走後可能空出位置）。
+  -- 每次搬移都讓 item 的軌序變小，所以一定會停止。
+  local changed = true
+  while changed do
+    changed = false
+    for _, it in ipairs(sorted) do
+      if not is_item_locked(it) then
+        local s = item_start(it); local e = s + item_len(it)
+        local cur_tr = cur_of[it]; local cur_pos = pos_in[cur_tr] or (#tracks + 1)
+        for i=1, cur_pos-1 do
+          local tr = tracks[i]
+          if not track_has_overlap(occ[tr], s, e) then
+            remove_item_interval(occ[cur_tr], it)
+            add_interval(occ[tr], s, e, it)
+            cur_of[it] = tr; changed = true
+            break
+          end
+        end
+      end
+    end
+  end
   local moves = {}
   for _, it in ipairs(sorted) do
-    if not is_item_locked(it) then
-      local s = item_start(it); local e = s + item_len(it)
-      local cur_tr = item_track(it); local cur_pos = pos_in[cur_tr] or #tracks
-      local target = cur_tr
-      for i=1, cur_pos do
-        local tr = tracks[i]
-        if not track_has_overlap(occ[tr], s, e) then target = tr; break end
-      end
-      if target ~= cur_tr then
-        moves[#moves+1] = { item=it, to=target, s=s, e=e }
-        add_interval(occ[target], s, e)
-      else
-        add_interval(occ[cur_tr], s, e)
-      end
+    if cur_of[it] ~= item_track(it) then
+      local s = item_start(it)
+      moves[#moves+1] = { item=it, to=cur_of[it], s=s, e=s+item_len(it) }
     end
   end
   return moves
 end
 
 local function plan_sort_moves(items, tracks, occ, keyfn, asc)
+  reserve_selected(items, occ)
   local moves, clusters = {}, build_time_clusters(items)
   for _, cluster in ipairs(clusters) do
     sort_cluster(cluster, keyfn, asc)
+    -- 先釋放本群（未鎖定）items 的原位登記，再依排序重新放置。
+    -- 若有任一 item 放不下，整群還原到原位（原位彼此不重疊，保證安全）。
+    local movable = {}
     for _, it in ipairs(cluster) do
       if not is_item_locked(it) then
-        local s = item_start(it); local e = s + item_len(it)
-        local placed = nil
-        for _, tr in ipairs(tracks) do
-          if not track_has_overlap(occ[tr], s, e) then placed = tr; break end
-        end
-        local cur_tr = item_track(it)
-        if placed and placed ~= cur_tr then
-          moves[#moves+1] = { item=it, to=placed, s=s, e=e }
-          add_interval(occ[placed], s, e)
-        else
-          add_interval(occ[cur_tr], s, e)
-        end
+        movable[#movable+1] = it
+        remove_item_interval(occ[item_track(it)], it)
+      end
+    end
+    local placed_list, ok = {}, true
+    for _, it in ipairs(movable) do
+      local s = item_start(it); local e = s + item_len(it)
+      local placed = nil
+      for _, tr in ipairs(tracks) do
+        if not track_has_overlap(occ[tr], s, e) then placed = tr; break end
+      end
+      if not placed then ok = false; break end
+      add_interval(occ[placed], s, e, it)
+      placed_list[#placed_list+1] = { item=it, to=placed, s=s, e=e }
+    end
+    if ok then
+      for _, p in ipairs(placed_list) do
+        if p.to ~= item_track(p.item) then moves[#moves+1] = p end
+      end
+    else
+      for _, p in ipairs(placed_list) do remove_item_interval(occ[p.to], p.item) end
+      for _, it in ipairs(movable) do
+        local list = occ[item_track(it)]
+        if list then local s = item_start(it); add_interval(list, s, s+item_len(it), it) end
       end
     end
   end
