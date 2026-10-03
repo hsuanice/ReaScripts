@@ -1,6 +1,6 @@
 --[[
 @description Conform List Browser
-@version 260923.1448
+@version 261004.0125
 @author hsuanice
 @about
   A REAPER script for browsing and editing EDL (Edit Decision List) data
@@ -71,6 +71,173 @@
   Required for AAF: aaftool in PATH (https://github.com/agfline/LibAAF)
 
 @changelog
+  v261004.0125
+  - Change: "DME Recut" now COPIES instead of cutting/moving — user
+    feedback: the original v261003.2338 implementation split and
+    repositioned the real items it found, which consumed/altered V1's
+    content at its Src TC position, breaking the "keep the old pristine"
+    principle the rest of this pipeline already follows (see
+    CMP.offset_selected_tracks). Now creates a brand new item at the Rec
+    TC position whose take points at the SAME underlying source media as
+    whatever occupied the Src TC range, with D_STARTOFFS adjusted to play
+    the exact portion that was there (handles partial item overlaps
+    correctly too) — the original items are only ever read, never split or
+    moved. Verified the position/source-offset math for both a fully-
+    contained and a partial-overlap case.
+  v261004.0100
+  - Fix: Calibrate TC popup crashed on open ("'reaper.ImGui_Checkbox'
+    argument 1: expected ImGui_Context*") — v261004.0035's new axis_row()
+    helper dropped the `ctx` argument from its ImGui_Checkbox call. Fixed.
+  v261004.0035
+  - Feature: "Calibrate TC (Anchor)" now supports TWO independent axes per
+    source — "New (Rec TC)" (the original, used everywhere outside DME
+    Recut) and "Old (Src TC)" (DME Recut mode only, where Src TC is
+    repurposed as V1's real Reaper timeline position rather than a
+    position inside an audio source file). Real case that prompted this:
+    V1's actual content staged at +10h, a separate V2 reference at +20h,
+    and the EDL's raw Rec TC already matching the real target (V3)
+    position — DME Recut needed a way to tell it "look +10h away from the
+    raw Src TC," without touching the Rec TC side at all. The popup now
+    has an axis selector (radio buttons) above Set Anchor/Target-TC-Apply,
+    and lists both axes' status per source. CLB.calibrate_tc_via_anchor/
+    CLB.calibrate_tc_to_target take an optional axis parameter ("rec"
+    default, or "src") instead of being duplicated per axis. New
+    CLB.src_tc_seconds/CLB.calibrated_src_tc_string mirror the existing
+    Rec-axis helpers; Src TC table display and click-to-jump now honor
+    this calibration too (previously Src TC never read any calibration at
+    all, correctly so before DME Recut gave it a second meaning). Persisted
+    per-source in the .clb format (S| line gains 3 more trailing fields;
+    old .clb files without them load as "no Src calibration," unaffected).
+    Verified the combined math against the real example: with V1 staged at
+    +10h, DME Recut now correctly looks for content at the staged position
+    and moves it to the real target, combining the +10h removal with the
+    scene's own +8.5s picture-lock shift correctly.
+  v261003.2338
+  - Feature: "DME Recut" — a new, Compare-free recut tool for a specific
+    real workflow: an editor cuts a V2 edit from V1's printed-to-pitch DME
+    stems (DX/ADR/FX/MU, each bounced with the SAME embedded start
+    timecode baked across the whole reel) and exports an EDL. Because of
+    that convention, each event's Src TC is already V1's real Reaper
+    timeline position — a different sense of "Src TC" than the rest of
+    CLB uses (position inside an audio source file) — and Rec TC is V2's
+    target position, so the single EDL already IS the old->new mapping;
+    no second EDL or Compare step needed. Also confirmed: per CMX3600
+    format rules a plain cut event always has equal Src/Rec duration (a
+    real trim/extend only ever shows up as separate adjacent events, or
+    when comparing Src TC across TWO different EDLs — not within one),
+    so this is purely a position MOVE, never a trim/extend.
+    New "DME Recut..." toolbar button: select the Reaper track(s) to
+    recut, filter the loaded list down to the relevant rows first (e.g.
+    search "DX"), click — for every visible event whose Src TC position
+    differs from its Rec TC position, whatever currently occupies that
+    Src TC range on the selected track(s) is split out and shifted
+    (position only) to the Rec TC range. No identity/content matching,
+    same "just the range, not which item" spirit as Mode B (Range Clear).
+    Verified the move/skip classification against the real example that
+    prompted this (a scene edited upstream causing matching +8.5s shifts
+    across both the DX and ADR stems' corresponding events).
+  v260923.2158
+  - Change: reverted v260923.2148's 2-minute duration cutoff for Scene
+    Cuts — correctly flagged by the user as unsafe: some real Taiwanese
+    films legitimately use long takes running 10+ minutes, which a fixed
+    duration limit would silently exclude from Scene Cuts entirely (worse
+    than the overlap it was meant to prevent — a false negative that's
+    invisible, vs. a false positive that's at least visible as an
+    overlap). Replaced with detect-and-warn: "Create Scene Cut Track"
+    still creates every item as before (no filtering), but now scans the
+    merged result for cross-scene overlaps and surfaces them —
+    grouped by the "wide" item causing each cluster, not listed pairwise
+    (the real shape of this problem is one long item overlapping many
+    real scenes, which would otherwise mean one dialog line per real
+    scene — confirmed 154 pairwise lines collapsing to 4 readable summary
+    lines on the same real session). The confirmation dialog lists each
+    cluster (which scene, its range, how many/which others it overlaps)
+    before creating anything; after creation, the culprit items themselves
+    are colored red and take-name-suffixed " ⚠ overlap" directly on the
+    Scene Cuts track, so the user can find and resolve them with full
+    editorial judgement in Reaper — the tool no longer tries to guess
+    which is real footage and which isn't.
+  v260923.2148
+  - Fix: "Create Scene Cut Track" still produced overlapping items (one
+    per reel) after v260923.2131's fix — root cause was different: an
+    un-flattened video track carrying a single whole-reel reference/
+    pic-lock clip (real case: "S.O. ... PICLOCK R1 for AAF.mov" spanning
+    the entire ~28-minute reel on V1, alongside the real per-scene cut on
+    V2) still carries SOME scene value in its own metadata, so it got
+    collected like any other scene occurrence — and being the length of
+    the whole reel, swallowed every real scene's interval into one giant
+    merged overlap. Fixed by skipping any Video row longer than 2 minutes
+    from scene detection entirely (new REF_CLIP_MAX_DUR_SEC), logged to
+    console when it fires. Threshold chosen from real data: real shots had
+    a 3.1s median / 27s p99 duration; the reference clips were
+    1200-1900s — 2 minutes sits comfortably above the former, well below
+    the latter. Confirmed: scene "7" (previously merged into a bogus
+    1680s span) now correctly spans its real 70s range.
+  v260923.2131
+  - Fix: "Create Scene Cut Track" produced overlapping items when a
+    session had non-scene technical clips on a Video track (a leader like
+    "Universal Counting Leader", raw camera-roll dumps like
+    "DVA001_070_260414.MTS") whose row.scene was correctly left empty by
+    Match All (it tried and found no scene from overlapping audio, since
+    these genuinely aren't scenes) — get_scene_id's clip_name-first-token
+    fallback then guessed a fake "scene" from the filename anyway
+    ("Universal", "DVA001"), which occupied the same time range as real
+    scenes and overlapped them once dumped onto the shared output track.
+    Confirmed via a real 3846-row session: the old logic produced 174
+    "scenes" (mostly junk); the fix produces 33, all real. Fallback to
+    clip_name now only applies when NO Video row anywhere in the list has
+    row.scene populated at all (Match All hasn't run this session, or the
+    source has no Scene column) — once any row.scene exists, an empty one
+    elsewhere is trusted as Match All's own confirmed "no scene here",
+    not re-guessed. (Considered filtering fallback results by pattern —
+    e.g. digits-only — instead, but rejected: this production's real
+    scene labels include alpha-prefixed ones like "X1", which a pattern
+    filter would have wrongly excluded too.)
+  v260923.2052
+  - Fix: the Recut Group Details "Assign Selected Reaper Item"/"Clear
+    Match" buttons (added v260923.1900) were invisible — CMP.draw_group_
+    details_table passed its ENTIRE height budget straight to BeginTable,
+    so the table claimed all available space and the buttons, laid out
+    right after it, ended up below the window's visible bounds. Now
+    reserves room for the toolbar (one text line + one button row) before
+    sizing the table, so both are visible together.
+  v260923.2026
+  - Fix: loading a .clb file into Compare (Load Old.../Load New...) ignored
+    any "Calibrate TC (Anchor)" correction saved on its sources — CMP.
+    load_side's .clb branch read data.rows but never looked at data.sources
+    at all, so Compare silently ran on the pre-calibration Rec TC even
+    though the main table showed (and Generate Items/Conform would have
+    used) the corrected values. Now bakes each row's source-level
+    calibration into rec_tc_in/rec_tc_out at load time, since Compare's
+    old/new entries are a disconnected snapshot with no ongoing link back
+    to CLB.edl_sources once loaded (unlike the main list's virtual/
+    toggleable calibration). Confirmed with a real calibrated .clb.
+  v260923.1900
+  - Feature: manual match-correction UI (Recut Group Details' "Matched
+    Item" column) — pipeline step 4 of the Recut/Reconform TODO. Click a
+    row's Matched Item cell to select it, select the correct item in
+    Reaper, click "Assign Selected Reaper Item" to override whatever
+    Analyze & Match either missed or got wrong; "Clear Match" removes it
+    (and its coloring/take marker). Not offered for Deleted groups —
+    Deleted intentionally clears every overlapping item, not one specific
+    match (see CMP.assign_group_detail_match's doc comment).
+  - CMP.analyze_and_match_session now persists a single definitive match on
+    each candidate (c.match = {item, kind}) whenever it's unambiguous
+    (Mode A's own pick, or exactly one Mode C hit) — previously it only
+    ever wrote to the Reaper item's own color/take-marker, with no queryable
+    record the script itself could show or let the user correct.
+  - Refactor: extracted CMP.mark_matched_item/CMP.unmark_matched_item from
+    analyze_and_match_session's inline set_take_marker, now shared with the
+    new manual-assign path so both leave identical visual feedback.
+  - Requires hsuanice_CLB Compare Engine.lua v0.3.1+ (M.group() now stamps
+    item.__group = g on every recut candidate, so this file can find a
+    candidate's type/label/color without threading the parent group
+    through separately).
+  - Scope note: match state (c.match/c.__group) lives only on the current
+    in-memory Compare result — it's rebuilt fresh (lost) if you reload a
+    .clbcmp Compare Session or re-run Compare, same as Analyze & Match's
+    auto-matches already were. The item's own color/take marker, being
+    real Reaper project data, still persists regardless.
   v260923.1448
   - Feature: "Calibrate TC (Anchor)" popup gains a second calibration
     method — no Reaper item needed at all. Select one event row and type
@@ -1693,7 +1860,10 @@ end
 ---------------------------------------------------------------------------
 local SCRIPT_NAME = "Conform List Browser"
 local EXT_NS = "hsuanice_ConformListBrowser"
-local VERSION = "260922.1854"
+-- Shown in the window title bar — must be kept in sync with @version in
+-- the header comment at the top of this file by hand; they are two
+-- separate strings with no automatic link between them.
+local VERSION = "261004.0125"
 
 -- Column definitions (EDL Events table)
 local COL = {
@@ -2012,6 +2182,7 @@ local CLB = {
   viewing_compare_groups = false, -- true = main table (ROWS) is temporarily showing recut-group rows
   show_cmp_details = true,   -- inline Details panel visible while viewing_compare_groups (Hide/Details toggles it)
   cmp_group_details = nil,   -- rebuilt every frame by CMP.refresh_group_details(): {labels, items} — live, follows current row selection
+  gd_selected_c = nil,       -- which recut candidate (an item from cmp_group_details.items) is picked in the "Matched Item" column, for Assign/Clear
 
   -- Apply to Reaper: which resolution strategies are enabled, tried in
   -- fixed priority order A > C > B regardless of toggle order (see
@@ -3787,6 +3958,31 @@ function CLB.calibrated_rec_tc_string(tc_str, row)
   return EDL.seconds_to_tc(CLB.rec_tc_seconds(tc_str, row), CLB.fps, CLB.is_drop)
 end
 
+--- Src TC (seconds), with the "Old" axis of "Calibrate TC (Anchor)"
+--- applied if enabled for `row`'s own source. Only meaningful in DME
+--- Recut mode, where Src TC is repurposed as V1's real Reaper timeline
+--- position rather than a position inside an audio source file (see
+--- CLB.dme_recut) — everywhere else in CLB, Src TC keeps its usual
+--- file-relative meaning and this is simply never called for it.
+function CLB.src_tc_seconds(tc_str, row)
+  local sec = EDL.tc_to_seconds(tc_str or "00:00:00:00", CLB.fps, CLB.is_drop)
+  local src = row and CLB.edl_sources[row.__source_idx or 0]
+  if src and src.src_calib_enabled then
+    sec = sec + (src.src_calib_delta_sec or 0)
+  end
+  return sec
+end
+
+--- Calibrated Src TC as a display string — the "Old" axis counterpart of
+--- CLB.calibrated_rec_tc_string, shown for COL.SRC_IN/SRC_OUT only when
+--- DME Recut's Src calibration is enabled for `row`'s source (otherwise
+--- identical to the raw string, so always safe to call).
+function CLB.calibrated_src_tc_string(tc_str, row)
+  local src = row and CLB.edl_sources[row.__source_idx or 0]
+  if not (src and src.src_calib_enabled) then return tc_str or "" end
+  return EDL.seconds_to_tc(CLB.src_tc_seconds(tc_str, row), CLB.fps, CLB.is_drop)
+end
+
 -- Get cell text for display
 local function get_cell_text(row, col_id)
   if not row then return "" end
@@ -3798,8 +3994,8 @@ local function get_cell_text(row, col_id)
   if col_id == COL.DISS_LEN     then
     return row.dissolve_len and tostring(row.dissolve_len) or ""
   end
-  if col_id == COL.SRC_IN       then return row.src_tc_in or "" end
-  if col_id == COL.SRC_OUT      then return row.src_tc_out or "" end
+  if col_id == COL.SRC_IN       then return CLB.calibrated_src_tc_string(row.src_tc_in, row) end
+  if col_id == COL.SRC_OUT      then return CLB.calibrated_src_tc_string(row.src_tc_out, row) end
   if col_id == COL.REC_IN       then return CLB.calibrated_rec_tc_string(row.rec_tc_in, row) end
   if col_id == COL.REC_OUT      then return CLB.calibrated_rec_tc_string(row.rec_tc_out, row) end
   if col_id == COL.DURATION     then return row.duration or "" end
@@ -3837,6 +4033,8 @@ end
 function CLB.get_cell_edit_text(row, col_id)
   if col_id == COL.REC_IN  then return row.rec_tc_in  or "" end
   if col_id == COL.REC_OUT then return row.rec_tc_out or "" end
+  if col_id == COL.SRC_IN  then return row.src_tc_in  or "" end
+  if col_id == COL.SRC_OUT then return row.src_tc_out or "" end
   return get_cell_text(row, col_id)
 end
 
@@ -4223,9 +4421,17 @@ local function _register_source(filepath, event_count)
     event_count = event_count,
     visible = true,
     -- Per-source "Calibrate TC (Anchor)" state — see CLB.calibrate_tc_via_anchor.
+    -- Two independent axes: Rec TC ("New" — V2/target position, used by
+    -- Generate Items/Conform/Scene Cuts/table display/click-to-jump) and
+    -- Src TC ("Old" — only meaningful in DME Recut mode, where Src TC is
+    -- repurposed as V1's real Reaper timeline position rather than a
+    -- position inside an audio source file; see CLB.dme_recut).
     tc_calib_enabled   = false,
     tc_calib_delta_sec = 0,
     tc_calib_note      = "",
+    src_calib_enabled   = false,
+    src_calib_delta_sec = 0,
+    src_calib_note      = "",
     -- Folder-grouping bookkeeping (.edl only) — not saved to .clb directly;
     -- re-derived from `path` on project load (see load_clb_project).
     __folder     = folder,
@@ -4544,17 +4750,21 @@ local function save_clb_project(filepath, silent)
   end
   f:write(string.format("EDL_COL_VISIBILITY|%s\n", table.concat(vis_parts, ",")))
 
-  -- EDL sources (tc_calib_* = per-source "Calibrate TC (Anchor)" state)
+  -- EDL sources (tc_calib_* = per-source "Calibrate TC (Anchor)" state,
+  -- Rec/"New" axis; src_calib_* = the Src/"Old" axis, DME Recut only)
   f:write(string.format("SOURCES|%d\n", #CLB.edl_sources))
   for _, src in ipairs(CLB.edl_sources) do
-    f:write(string.format("S|%s|%s|%d|%s|%s|%s|%s\n",
+    f:write(string.format("S|%s|%s|%d|%s|%s|%s|%s|%s|%s|%s\n",
       _clb_escape(src.path or ""),
       _clb_escape(src.name or ""),
       src.event_count or 0,
       src.visible and "1" or "0",
       src.tc_calib_enabled and "1" or "0",
       tostring(src.tc_calib_delta_sec or 0),
-      _clb_escape(src.tc_calib_note or "")))
+      _clb_escape(src.tc_calib_note or ""),
+      src.src_calib_enabled and "1" or "0",
+      tostring(src.src_calib_delta_sec or 0),
+      _clb_escape(src.src_calib_note or "")))
   end
 
   -- EDL rows (including match state and group assignments)
@@ -4724,8 +4934,9 @@ local function _parse_clb_file(filepath)
       elseif key == "HIDDEN_GROUP"  then hidden_groups[p[2] or ""] = true
 
       elseif key == "S" then
-        -- p[6]/p[7]/p[8] (tc_calib_*) are absent in .clb files saved before
-        -- "Calibrate TC (Anchor)" existed — nil p[6]/p[8] fall back to
+        -- p[6]/p[7]/p[8] (tc_calib_*, Rec/"New" axis) and p[9]/p[10]/p[11]
+        -- (src_calib_*, Src/"Old" axis) are absent in .clb files saved
+        -- before each existed — nil p[6]/p[8]/p[9]/p[11] fall back to
         -- disabled/"" and tonumber(nil) falls back to 0, so old files load
         -- exactly as before (no calibration).
         local s_path = p[2] or ""
@@ -4743,6 +4954,9 @@ local function _parse_clb_file(filepath)
           tc_calib_enabled   = (p[6] == "1"),
           tc_calib_delta_sec = tonumber(p[7]) or 0,
           tc_calib_note      = p[8] or "",
+          src_calib_enabled   = (p[9] == "1"),
+          src_calib_delta_sec = tonumber(p[10]) or 0,
+          src_calib_note      = p[11] or "",
           __folder     = s_folder,
           __file_count = s_folder and 1 or nil,
         }
@@ -5722,6 +5936,31 @@ function CMP.load_side(side)
     end
     rows, fps, is_drop = data.rows, data.fps, data.is_drop
 
+    -- Bake each row's "Calibrate TC (Anchor)" correction (if its source
+    -- has one enabled) into rec_tc_in/rec_tc_out. Compare's old/new
+    -- entries are a disconnected snapshot — once loaded here they have no
+    -- ongoing link back to CLB.edl_sources, unlike the main list's
+    -- virtual/toggleable calibration (CLB.rec_tc_seconds) — so baking it
+    -- in at load time is the only way Compare sees the corrected
+    -- positions at all. Otherwise a calibrated .clb compared here would
+    -- silently use its pre-calibration Rec TC.
+    local calib_count = 0
+    for _, row in ipairs(rows) do
+      local src = data.sources[row.__source_idx or 0]
+      if src and src.tc_calib_enabled and (src.tc_calib_delta_sec or 0) ~= 0 then
+        local delta = src.tc_calib_delta_sec
+        local ri = EDL.tc_to_seconds(row.rec_tc_in,  fps, is_drop) + delta
+        local ro = EDL.tc_to_seconds(row.rec_tc_out, fps, is_drop) + delta
+        row.rec_tc_in  = EDL.seconds_to_tc(ri, fps, is_drop)
+        row.rec_tc_out = EDL.seconds_to_tc(ro, fps, is_drop)
+        calib_count = calib_count + 1
+      end
+    end
+    if calib_count > 0 then
+      console_msg(string.format(
+        "Compare: applied TC calibration to %d event(s) from %s", calib_count, fname))
+    end
+
   elseif ext == "edl" or ext == "xml" or ext == "aaf" then
     console_msg("Compare: loading " .. fname .. " ...")
     local parsed, err = OTIO.parse(filepath, { default_fps = CLB.fps, python = OTIO.python })
@@ -6035,23 +6274,37 @@ end
 -- Calibrate TC (Anchor)
 ---------------------------------------------------------------------------
 
+--- Field names + display labels for the two independent calibration axes
+--- a source can carry. "rec" ("New") is the original axis — Rec TC as
+--- V2/target position, used everywhere outside DME Recut (Generate Items,
+--- Conform, Scene Cuts, table display, click-to-jump). "src" ("Old") only
+--- means something in DME Recut mode, where Src TC is repurposed as V1's
+--- real Reaper timeline position rather than a position inside an audio
+--- source file (see CLB.dme_recut).
+CLB.TC_CALIB_AXES = {
+  rec = { field = "rec_tc_in", enabled = "tc_calib_enabled",  delta = "tc_calib_delta_sec",  note = "tc_calib_note",  label = "New (Rec TC)" },
+  src = { field = "src_tc_in", enabled = "src_calib_enabled", delta = "src_calib_delta_sec", note = "src_calib_note", label = "Old (Src TC)" },
+}
+
 --- Pick one selected event row + one selected Reaper item that the user
---- has confirmed IS that event's real content, and derive a Rec TC
---- position-correction delta from the difference between where the item
---- actually sits and where the row's Rec TC says it should be. Verifies
---- the item's length matches the row's Rec duration within a small
+--- has confirmed IS that event's real content, and derive a position-
+--- correction delta from the difference between where the item actually
+--- sits and where the row's TC (on the given axis) says it should be.
+--- Verifies the item's length matches the row's duration within a small
 --- tolerance first — a mismatch almost certainly means the wrong item was
 --- picked, so this refuses rather than silently computing a bogus delta.
---- Always computed from the RAW (uncalibrated) Rec TC, so re-running this
---- replaces any previous calibration outright rather than compounding on
---- top of it.
+--- Always computed from the RAW (uncalibrated) TC, so re-running this
+--- replaces any previous calibration on that axis outright rather than
+--- compounding on top of it.
 ---
 --- The calibration is stored on the row's own SOURCE (CLB.edl_sources),
 --- not globally — loading several reels/episodes at once, each authored
 --- by the editor starting at 0 but placed at its own hour slot on the real
 --- session timeline, is the normal case in audio post, and each one needs
 --- its own correction. Whichever row you anchor from picks the source.
-function CLB.calibrate_tc_via_anchor()
+--- @param axis string|nil  "rec" (default) or "src" — see CLB.TC_CALIB_AXES.
+function CLB.calibrate_tc_via_anchor(axis)
+  local ax = CLB.TC_CALIB_AXES[axis or "rec"]
   local rows = get_selected_rows()
   if #rows ~= 1 then
     reaper.ShowMessageBox(
@@ -6079,8 +6332,10 @@ function CLB.calibrate_tc_via_anchor()
   local item = reaper.GetSelectedMediaItem(0, 0)
 
   local fps, is_drop = CLB.fps, CLB.is_drop
-  local event_in  = EDL.tc_to_seconds(row.rec_tc_in  or "00:00:00:00", fps, is_drop)
-  local event_out = EDL.tc_to_seconds(row.rec_tc_out or "00:00:00:00", fps, is_drop)
+  local event_in_tc  = row[ax.field]
+  local event_out_tc = axis == "src" and row.src_tc_out or row.rec_tc_out
+  local event_in  = EDL.tc_to_seconds(event_in_tc  or "00:00:00:00", fps, is_drop)
+  local event_out = EDL.tc_to_seconds(event_out_tc or "00:00:00:00", fps, is_drop)
   local event_len = event_out - event_in
 
   local item_pos = reaper.GetMediaItemInfo_Value(item, "D_POSITION")
@@ -6090,9 +6345,10 @@ function CLB.calibrate_tc_via_anchor()
   if math.abs(item_len - event_len) > tol then
     reaper.ShowMessageBox(string.format(
       "Length mismatch — probably not the same content:\n\n"
-      .. "  Event Rec length:  %s\n"
+      .. "  Event %s length:  %s\n"
       .. "  Item length:       %s\n\n"
       .. "Refusing to calibrate.",
+      ax.label,
       EDL.seconds_to_tc(event_len, fps, is_drop),
       EDL.seconds_to_tc(item_len,  fps, is_drop)),
       "Calibrate TC (Anchor)", 0)
@@ -6107,45 +6363,46 @@ function CLB.calibrate_tc_via_anchor()
   local item_name = take and select(2, reaper.GetSetMediaItemTakeInfo_String(take, "P_NAME", "", false)) or "(no take)"
 
   local msg = string.format(
-    "Source: %s\n\n"
+    "Source: %s\n"
+    .. "Axis: %s\n\n"
     .. "Anchor pair:\n"
-    .. "  Event #%s  (Rec TC In %s)\n"
+    .. "  Event #%s  (%s %s)\n"
     .. "  Item \"%s\"  (at %s)\n\n"
     .. "Computed correction: %s%s\n\n"
-    .. "Enable TC Calibration for this source with this offset? All Rec TC\n"
-    .. "shown in the table for this source's rows, and every action that\n"
-    .. "positions its items on the Reaper timeline (Generate Items, Conform\n"
-    .. "Matched Items, Create Scene Cut Track, click-to-jump), will apply\n"
-    .. "this correction until you turn it off. The underlying list data is\n"
-    .. "not changed — this can be switched off at any time. Other loaded\n"
-    .. "sources are unaffected.",
-    src.name or "?",
-    row.event_num or "?", row.rec_tc_in or "",
+    .. "Enable TC Calibration for this source/axis with this offset?\n"
+    .. "The underlying list data is not changed — this can be switched\n"
+    .. "off at any time. Other loaded sources, and the other axis, are\n"
+    .. "unaffected.",
+    src.name or "?", ax.label,
+    row.event_num or "?", ax.label, event_in_tc or "",
     item_name, EDL.seconds_to_tc(item_pos, fps, is_drop),
     sign, delta_tc)
 
   if reaper.ShowMessageBox(msg, "Calibrate TC (Anchor)", 1) ~= 1 then return end
 
-  src.tc_calib_enabled   = true
-  src.tc_calib_delta_sec = delta
-  src.tc_calib_note      = string.format("Event #%s <-> \"%s\"", row.event_num or "?", item_name)
+  src[ax.enabled] = true
+  src[ax.delta]   = delta
+  src[ax.note]    = string.format("Event #%s <-> \"%s\"", row.event_num or "?", item_name)
   CLB.cached_rows = nil
 
   reaper.ShowMessageBox(string.format(
-    "TC Calibration enabled for \"%s\": %s%s\n\nRec TC for this source's rows now reflect this correction.",
-    src.name or "?", sign, delta_tc), "Calibrate TC (Anchor)", 0)
+    "TC Calibration enabled for \"%s\" [%s]: %s%s",
+    src.name or "?", ax.label, sign, delta_tc), "Calibrate TC (Anchor)", 0)
 end
 
 --- Second "Calibrate TC (Anchor)" entry point: no Reaper item needed at
---- all — pick one selected event row and type the Rec TC In it SHOULD be
---- (e.g. a Universal Counting Leader that's always placed 2 seconds before
---- each hour mark: 00:59:58:00, 01:59:58:00, ...), and the delta is
---- derived from the difference between that target and the row's current
---- raw Rec TC In. Accepts "HH:MM:SS:FF" or 8 bare digits "HHMMSSFF" (see
---- CLB.normalize_tc_input). Same per-source storage as
+--- all — pick one selected event row and type the TC (on the given axis)
+--- it SHOULD be (e.g. a Universal Counting Leader that's always placed 2
+--- seconds before each hour mark: 00:59:58:00, 01:59:58:00, ...), and the
+--- delta is derived from the difference between that target and the row's
+--- current raw TC on that axis. Accepts "HH:MM:SS:FF" or 8 bare digits
+--- "HHMMSSFF" (see CLB.normalize_tc_input). Same per-source storage as
 --- CLB.calibrate_tc_via_anchor — whichever row you use picks the source,
---- and re-running either method replaces that source's delta outright.
-function CLB.calibrate_tc_to_target(target_tc_raw)
+--- and re-running either method replaces that source/axis's delta
+--- outright.
+--- @param axis string|nil  "rec" (default) or "src" — see CLB.TC_CALIB_AXES.
+function CLB.calibrate_tc_to_target(target_tc_raw, axis)
+  local ax = CLB.TC_CALIB_AXES[axis or "rec"]
   local rows = get_selected_rows()
   if #rows ~= 1 then
     reaper.ShowMessageBox(
@@ -6172,31 +6429,33 @@ function CLB.calibrate_tc_to_target(target_tc_raw)
   end
 
   local fps, is_drop = CLB.fps, CLB.is_drop
-  local event_in   = EDL.tc_to_seconds(row.rec_tc_in or "00:00:00:00", fps, is_drop)
+  local event_in_tc = row[ax.field]
+  local event_in   = EDL.tc_to_seconds(event_in_tc or "00:00:00:00", fps, is_drop)
   local target_sec = EDL.tc_to_seconds(target_tc, fps, is_drop)
   local delta = target_sec - event_in
   local sign  = delta >= 0 and "+" or "-"
   local delta_tc = EDL.seconds_to_tc(math.abs(delta), fps, is_drop)
 
   local msg = string.format(
-    "Source: %s\n\n"
-    .. "Event #%s  Rec TC In %s  ->  %s\n\n"
+    "Source: %s\n"
+    .. "Axis: %s\n\n"
+    .. "Event #%s  %s %s  ->  %s\n\n"
     .. "Computed correction: %s%s\n\n"
-    .. "Enable TC Calibration for this source with this offset? Other\n"
-    .. "loaded sources are unaffected.",
-    src.name or "?", row.event_num or "?", row.rec_tc_in or "", target_tc,
+    .. "Enable TC Calibration for this source/axis with this offset?\n"
+    .. "Other loaded sources, and the other axis, are unaffected.",
+    src.name or "?", ax.label, row.event_num or "?", ax.label, event_in_tc or "", target_tc,
     sign, delta_tc)
 
   if reaper.ShowMessageBox(msg, "Calibrate to Target TC", 1) ~= 1 then return end
 
-  src.tc_calib_enabled   = true
-  src.tc_calib_delta_sec = delta
-  src.tc_calib_note      = string.format("Event #%s -> %s", row.event_num or "?", target_tc)
+  src[ax.enabled] = true
+  src[ax.delta]   = delta
+  src[ax.note]    = string.format("Event #%s -> %s", row.event_num or "?", target_tc)
   CLB.cached_rows = nil
 
   reaper.ShowMessageBox(string.format(
-    "TC Calibration enabled for \"%s\": %s%s\n\nRec TC for this source's rows now reflect this correction.",
-    src.name or "?", sign, delta_tc), "Calibrate to Target TC", 0)
+    "TC Calibration enabled for \"%s\" [%s]: %s%s",
+    src.name or "?", ax.label, sign, delta_tc), "Calibrate to Target TC", 0)
 end
 
 ---------------------------------------------------------------------------
@@ -6948,25 +7207,43 @@ local function create_scene_cut_track()
   -- "Empty" items, start with alnum text that isn't a scene at all — an
   -- earlier version of this preferred clip_name whenever it was merely
   -- non-empty, which meant an inferred row.scene was never actually used
-  -- here even though it existed). Falls back to clip_name's first token
-  -- only when row.scene is empty (e.g. Match All hasn't been run yet).
-  -- Either way, only the FIRST token is kept — e.g. "06" out of
-  -- "06_01_T03_A - Merged", or "P1" out of a row.scene of "P1-1" — this
-  -- deliberately does NOT reuse SCENE_TAKE_PARSERS (which keeps the
-  -- fuller "06_01"/"P1-1" for Strategy 6's audio Scene+Take matching,
-  -- where dropping the shot number would risk matching audio to the
-  -- wrong shot within a scene): for episodic naming, the shot/take
-  -- number after the scene number is not itself a scene boundary, so
-  -- shots "06_01"/"06_02"/"06_03" (or "P1-1"/"P1-WT") all merge into one
-  -- Scene Cuts segment. _norm_scene_token also strips leading zeros, so
-  -- "4" and "04" are recognised as the same scene. Rows are already
-  -- filtered to Video tracks only below, so no extra pattern validation
-  -- is needed here.
+  -- here even though it existed). Either way, only the FIRST token is
+  -- kept — e.g. "06" out of "06_01_T03_A - Merged", or "P1" out of a
+  -- row.scene of "P1-1" — this deliberately does NOT reuse
+  -- SCENE_TAKE_PARSERS (which keeps the fuller "06_01"/"P1-1" for
+  -- Strategy 6's audio Scene+Take matching, where dropping the shot
+  -- number would risk matching audio to the wrong shot within a scene):
+  -- for episodic naming, the shot/take number after the scene number is
+  -- not itself a scene boundary, so shots "06_01"/"06_02"/"06_03" (or
+  -- "P1-1"/"P1-WT") all merge into one Scene Cuts segment. _norm_scene_
+  -- token also strips leading zeros, so "4" and "04" are recognised as
+  -- the same scene. Rows are already filtered to Video tracks only below.
+  --
+  -- Falls back to clip_name's first token when row.scene is empty ONLY IF
+  -- no Video row anywhere in the list has row.scene populated at all
+  -- (any_scene_populated below) — i.e. Match All hasn't been run this
+  -- session, or the source has no Scene column, so clip-name is the only
+  -- signal available. Once Match All HAS run (any_scene_populated true),
+  -- an empty row.scene is Match All's own confirmed "no scene here" (it
+  -- tried and found none from overlapping audio) — a real bug this
+  -- guards against: a "Universal Counting Leader" or raw camera-roll dump
+  -- clip like "DVA001_070_260414.MTS" (genuinely not a scene) had its
+  -- filename's first token guessed as a fake scene ("Universal",
+  -- "DVA001"), which then overlapped real Scene Cuts items on the shared
+  -- output track since the fake "scene" occupied the same time range.
+  local any_scene_populated = false
+  for _, row in ipairs(ROWS) do
+    if _get_track_group(row.track) == "Video" and row.scene and row.scene ~= "" then
+      any_scene_populated = true
+      break
+    end
+  end
+
   local function get_scene_id(row)
     local raw
     if row.scene and row.scene ~= "" then
       raw = row.scene:match("^([%w]+)")
-    elseif row.clip_name and row.clip_name ~= "" then
+    elseif not any_scene_populated and row.clip_name and row.clip_name ~= "" then
       raw = row.clip_name:match("^([%w]+)")
     end
     return raw and _norm_scene_token(raw) or nil
@@ -6980,6 +7257,12 @@ local function create_scene_cut_track()
   -- over an overlapping time range produced its own separate, shorter
   -- same-scene item that visually overlapped the main one instead of
   -- being recognised as the same continuous scene.
+  --
+  -- No duration-based filtering here (a fixed cutoff was tried and
+  -- reverted — some real long-take cinema shots legitimately run 10+
+  -- minutes, so any hard duration limit risks silently discarding
+  -- genuine footage, which is worse than the overlap it would prevent;
+  -- see the cross-scene overlap detection after merging below instead).
   local by_scene = {}      -- scene_id -> { {rec_in, rec_out}, ... }
   local scene_order = {}   -- first-seen order, for stable iteration
   for _, row in ipairs(ROWS) do
@@ -7032,15 +7315,79 @@ local function create_scene_cut_track()
     return
   end
 
+  -- Detect cross-scene overlaps: two DIFFERENT scenes whose merged ranges
+  -- overlap in time. This can happen for reasons Scene Cuts can't reliably
+  -- tell apart on its own — e.g. a genuine long-take scene vs. an
+  -- un-flattened reference/pic-lock clip sharing the same time range on a
+  -- separate video track. A fixed duration cutoff to guess which is which
+  -- was tried and reverted: real long-take cinema shots can legitimately
+  -- run 10+ minutes, so any hard limit risks silently discarding real
+  -- footage — worse than the overlap itself. Instead this just surfaces
+  -- exactly which scenes overlap (still creating all the items) so the
+  -- user can resolve it directly in Reaper with full editorial judgement.
+  --
+  -- Grouped by the WIDE item causing each cluster of overlaps, not listed
+  -- pairwise — the real-world shape of this problem is one long item
+  -- (e.g. a whole-reel reference clip) overlapping every real scene in
+  -- its range, which would otherwise mean one dialog line per real scene
+  -- (confirmed: 154 pairwise lines from just 4 actual culprit clips on a
+  -- real 4-reel session). One summary line per culprit stays readable
+  -- regardless of how many scenes it happens to span.
+  local function tc(sec) return EDL.seconds_to_tc(sec, fps, is_drop) end
+  local overlap_lines = {}
+  do
+    local groups, group_order = {}, {}
+    local active_end, active_item = nil, nil
+    for _, item in ipairs(scene_items) do
+      if active_end and item.rec_in < active_end - GAP_TOL then
+        local g = groups[active_item]
+        if not g then
+          g = { item = active_item, count = 0, sample_ids = {} }
+          groups[active_item] = g
+          group_order[#group_order + 1] = g
+        end
+        g.count = g.count + 1
+        if #g.sample_ids < 5 then g.sample_ids[#g.sample_ids + 1] = item.scene_id end
+        -- Only the wide culprit item is flagged red, not every narrower
+        -- item it happens to overlap — in the real case (a whole-reel
+        -- reference clip), that's every scene in the reel, and painting
+        -- all of them red would bury the one item that actually needs
+        -- attention instead of pointing straight at it.
+        active_item.__overlap = true
+      end
+      if not active_end or item.rec_out > active_end then
+        active_end = item.rec_out
+        active_item = item
+      end
+    end
+    for _, g in ipairs(group_order) do
+      local sample = table.concat(g.sample_ids, ", ")
+      if g.count > #g.sample_ids then sample = sample .. ", ..." end
+      overlap_lines[#overlap_lines + 1] = string.format(
+        "  Scene %s (%s–%s) overlaps %d other scene(s): %s",
+        g.item.scene_id, tc(g.item.rec_in), tc(g.item.rec_out), g.count, sample)
+    end
+  end
+  local overlap_warning = ""
+  if #overlap_lines > 0 then
+    overlap_warning = string.format(
+      "\n\n⚠ %d overlap cluster(s) detected — Scene Cuts can't automatically\n" ..
+      "tell these apart (e.g. a genuine long take vs. an un-flattened\n" ..
+      "reference clip). Items will still be created; please review and\n" ..
+      "fix manually in Reaper:\n%s",
+      #overlap_lines, table.concat(overlap_lines, "\n"))
+  end
+
   -- Confirmation
   local preview = {}
   for i = 1, math.min(6, #scene_items) do preview[i] = scene_items[i].scene_id end
   local msg = string.format(
     "Create Scene Cut Track?\n\n%d scene items will be created.\nOrder: %s%s\n\n" ..
-    "A new 'Scene Cuts' track will be added to the project.",
+    "A new 'Scene Cuts' track will be added to the project.%s",
     #scene_items,
     table.concat(preview, " → "),
-    #scene_items > 6 and string.format(" ... (+%d more)", #scene_items - 6) or ""
+    #scene_items > 6 and string.format(" ... (+%d more)", #scene_items - 6) or "",
+    overlap_warning
   )
   if reaper.ShowMessageBox(msg, SCRIPT_NAME, 1) ~= 1 then return end
 
@@ -7052,7 +7399,11 @@ local function create_scene_cut_track()
   local tr = reaper.GetTrack(0, reaper.CountTracks(0) - 1)
   reaper.GetSetMediaTrackInfo_String(tr, "P_NAME", "Scene Cuts", true)
 
-  -- Create one empty item per scene segment
+  -- Create one empty item per scene segment. Items flagged by the overlap
+  -- sweep above are colored/labeled so the conflict is visible directly on
+  -- the timeline, not just in the dialog text — same red used for the
+  -- other "needs manual attention" cases in this script (CMP.TYPE_COLOR.Deleted).
+  local OVERLAP_COLOR = reaper.ColorToNative(200, 60, 60) | 0x1000000
   for _, si in ipairs(scene_items) do
     local length = si.rec_out - si.rec_in
     if length <= 0 then length = 0.001 end
@@ -7060,10 +7411,14 @@ local function create_scene_cut_track()
     local item = reaper.AddMediaItemToTrack(tr)
     reaper.SetMediaItemInfo_Value(item, "D_POSITION", si.rec_in)
     reaper.SetMediaItemInfo_Value(item, "D_LENGTH", length)
+    if si.__overlap then
+      reaper.SetMediaItemInfo_Value(item, "I_CUSTOMCOLOR", OVERLAP_COLOR)
+    end
 
     local take = reaper.AddTakeToMediaItem(item)
     if take then
-      reaper.GetSetMediaItemTakeInfo_String(take, "P_NAME", si.scene_id, true)
+      local take_name = si.__overlap and (si.scene_id .. " ⚠ overlap") or si.scene_id
+      reaper.GetSetMediaItemTakeInfo_String(take, "P_NAME", take_name, true)
     end
   end
 
@@ -7071,9 +7426,188 @@ local function create_scene_cut_track()
   reaper.UpdateArrange()
   reaper.Undo_EndBlock("CLB: Create Scene Cut Track (" .. #scene_items .. " scenes)", -1)
 
-  reaper.ShowMessageBox(
-    string.format("Created 'Scene Cuts' track with %d scene items.", #scene_items),
-    SCRIPT_NAME, 0)
+  local done_msg = string.format("Created 'Scene Cuts' track with %d scene items.", #scene_items)
+  if #overlap_lines > 0 then
+    done_msg = done_msg .. string.format(
+      "\n\n⚠ %d overlap cluster(s) — the affected items are colored red on\n" ..
+      "the track and take-name-suffixed \" ⚠ overlap\" (details were listed\n" ..
+      "in the confirmation dialog). Review and fix manually.", #overlap_lines)
+  end
+  reaper.ShowMessageBox(done_msg, SCRIPT_NAME, 0)
+end
+
+---------------------------------------------------------------------------
+-- DME Recut
+---------------------------------------------------------------------------
+--- Recut real items on Reaper-selected track(s) using the currently
+--- loaded/filtered list directly — no Compare needed. Built for DME-stem
+--- cut lists: when an editor cuts a V2 edit from V1's printed-to-pitch DME
+--- stems (DX/ADR/FX/MU) and exports an EDL, each event's Src TC is already
+--- V1's real timeline position (not a position inside an audio source
+--- file — a different sense of "Src TC" than the rest of CLB uses) and
+--- Rec TC is V2's target position. Per CMX3600 format rules a plain cut
+--- event always has equal Src and Rec duration (a real trim/extend shows
+--- up as separate adjacent events, never as one event with mismatched
+--- durations — that only happens when comparing Src TC across TWO
+--- different EDLs, which is what CMP.compare's Trimmed/Extended
+--- classification is for), so this is a pure range-based reposition: the
+--- content occupying an event's Src TC range on the selected track(s)
+--- lands at that event's Rec TC range. No identity/content matching —
+--- like Mode B (Range Clear), it only cares what's physically in the
+--- range.
+---
+--- COPY, not cut: V1's real content at its Src TC position is left
+--- completely untouched (same "keep the old pristine" principle
+--- CMP.offset_selected_tracks already follows) — a brand new item is
+--- created at the Rec TC position, its take pointing at the SAME
+--- underlying source media (safe, standard REAPER practice; many items
+--- can reference one source) with D_STARTOFFS adjusted so it plays the
+--- exact portion that was sitting in the Src TC range. The original items
+--- are only ever read, never split or repositioned.
+function CLB.dme_recut()
+  if #ROWS == 0 then
+    reaper.ShowMessageBox("No events loaded. Load an EDL file first.", SCRIPT_NAME, 0)
+    return
+  end
+
+  local n_sel_tracks = reaper.CountSelectedTracks(0)
+  if n_sel_tracks == 0 then
+    reaper.ShowMessageBox(
+      "Select at least one track in Reaper first — the track(s) this\n"
+      .. "recut should operate on.",
+      SCRIPT_NAME, 0)
+    return
+  end
+  local sel_tracks = {}
+  for i = 0, n_sel_tracks - 1 do
+    sel_tracks[#sel_tracks + 1] = reaper.GetSelectedTrack(0, i)
+  end
+
+  local fps, is_drop = CLB.fps, CLB.is_drop
+  local TOL = 0.5 / fps  -- sub-frame float noise tolerance
+  local visible_rows = get_view_rows() or ROWS
+
+  -- Build the move list from the currently visible/filtered rows (same
+  -- "operate on what's currently filtered" convention as Generate Items/
+  -- Remove Dups/Consolidate) — filter to just the relevant stem's rows
+  -- first via CLB's own Search/Track/Group filters, same as any other
+  -- batch action here.
+  local moves = {}
+  for _, row in ipairs(visible_rows) do
+    if row.src_tc_in and row.src_tc_in ~= "" and row.src_tc_out and row.src_tc_out ~= ""
+       and row.rec_tc_in and row.rec_tc_in ~= "" then
+      local src_in  = CLB.src_tc_seconds(row.src_tc_in,  row)
+      local src_out = CLB.src_tc_seconds(row.src_tc_out, row)
+      local rec_in  = CLB.rec_tc_seconds(row.rec_tc_in,  row)
+      if src_out > src_in + TOL and math.abs(rec_in - src_in) > TOL then
+        moves[#moves + 1] = { src_in = src_in, src_out = src_out, rec_in = rec_in }
+      end
+    end
+  end
+
+  if #moves == 0 then
+    reaper.ShowMessageBox(
+      "Nothing to recut — every visible event's Src TC already matches\n"
+      .. "its Rec TC position.",
+      SCRIPT_NAME, 0)
+    return
+  end
+
+  local msg = string.format(
+    "DME Recut: build %d event(s) on %d selected track(s)?\n\n"
+    .. "For each one, whatever currently occupies its Src TC range is\n"
+    .. "COPIED (not moved — the original stays exactly where it is) to\n"
+    .. "its Rec TC range. This creates new real items in this Reaper\n"
+    .. "project.",
+    #moves, #sel_tracks)
+  if reaper.ShowMessageBox(msg, "DME Recut", 1) ~= 1 then return end
+
+  reaper.Undo_BeginBlock()
+  reaper.PreventUIRefresh(1)
+
+  -- Snapshot each selected track's ORIGINAL items once, up front — the
+  -- new items this creates must never be treated as more "original V1
+  -- content" to read from again on a later event (matters if two events'
+  -- Rec TC ranges ever land close enough to overlap what a later lookup
+  -- would scan).
+  local track_items = {}
+  for _, track in ipairs(sel_tracks) do
+    local snap = {}
+    local n = reaper.CountTrackMediaItems(track)
+    for i = 0, n - 1 do snap[#snap + 1] = reaper.GetTrackMediaItem(track, i) end
+    track_items[track] = snap
+  end
+
+  local created = 0
+  local unmatched_events = 0
+
+  for _, mv in ipairs(moves) do
+    local any_found = false
+    for _, track in ipairs(sel_tracks) do
+      for _, item in ipairs(track_items[track]) do
+        local pos  = reaper.GetMediaItemInfo_Value(item, "D_POSITION")
+        local iend = pos + reaper.GetMediaItemInfo_Value(item, "D_LENGTH")
+        local overlap_start = math.max(pos, mv.src_in)
+        local overlap_end   = math.min(iend, mv.src_out)
+        if overlap_end > overlap_start + TOL then
+          any_found = true
+
+          local rel_offset = overlap_start - mv.src_in   -- position within the event's own range
+          local chunk_len  = overlap_end - overlap_start
+          local new_pos    = mv.rec_in + rel_offset
+
+          local new_item = reaper.AddMediaItemToTrack(track)
+          reaper.SetMediaItemInfo_Value(new_item, "D_POSITION", new_pos)
+          reaper.SetMediaItemInfo_Value(new_item, "D_LENGTH", chunk_len)
+          reaper.SetMediaItemInfo_Value(new_item, "D_VOL",
+            reaper.GetMediaItemInfo_Value(item, "D_VOL"))
+          reaper.SetMediaItemInfo_Value(new_item, "B_MUTE",
+            reaper.GetMediaItemInfo_Value(item, "B_MUTE"))
+
+          local take = reaper.GetActiveTake(item)
+          if take then
+            local rate      = reaper.GetMediaItemTakeInfo_Value(take, "D_PLAYRATE")
+            local startoffs = reaper.GetMediaItemTakeInfo_Value(take, "D_STARTOFFS")
+            local _, take_name = reaper.GetSetMediaItemTakeInfo_String(take, "P_NAME", "", false)
+
+            local new_take = reaper.AddTakeToMediaItem(new_item)
+            reaper.SetMediaItemTake_Source(new_take, reaper.GetMediaItemTake_Source(take))
+            reaper.SetMediaItemTakeInfo_Value(new_take, "D_PLAYRATE", rate)
+            -- How far overlap_start sits past this item's own start,
+            -- converted to source time via the take's own playback rate,
+            -- gives exactly where in the source media to begin.
+            reaper.SetMediaItemTakeInfo_Value(new_take, "D_STARTOFFS",
+              startoffs + (overlap_start - pos) * rate)
+            reaper.SetMediaItemTakeInfo_Value(new_take, "D_VOL",
+              reaper.GetMediaItemTakeInfo_Value(take, "D_VOL"))
+            reaper.SetMediaItemTakeInfo_Value(new_take, "D_PAN",
+              reaper.GetMediaItemTakeInfo_Value(take, "D_PAN"))
+            reaper.SetMediaItemTakeInfo_Value(new_take, "I_CHANMODE",
+              reaper.GetMediaItemTakeInfo_Value(take, "I_CHANMODE"))
+            reaper.GetSetMediaItemTakeInfo_String(new_take, "P_NAME", take_name or "", true)
+          end
+
+          created = created + 1
+        end
+      end
+    end
+    if not any_found then unmatched_events = unmatched_events + 1 end
+  end
+
+  reaper.PreventUIRefresh(-1)
+  reaper.UpdateArrange()
+  reaper.Undo_EndBlock(string.format("CLB: DME Recut (%d event(s), %d item(s) created)", #moves, created), -1)
+
+  local done_msg = string.format(
+    "DME Recut done.\n\n%d event(s) processed, %d real item(s) created.\n\n"
+    .. "Originals were left untouched — this copied from them.",
+    #moves, created)
+  if unmatched_events > 0 then
+    done_msg = done_msg .. string.format(
+      "\n\n%d event(s) had nothing on the selected track(s) at their Src\n"
+      .. "TC range — skipped.", unmatched_events)
+  end
+  reaper.ShowMessageBox(done_msg, "DME Recut", 0)
 end
 
 ---------------------------------------------------------------------------
@@ -7684,10 +8218,13 @@ local function draw_toolbar()
   end
   if reaper.ImGui_IsItemHovered(ctx) then
     reaper.ImGui_SetTooltip(ctx,
-      "Correct each loaded source's Rec TC to match where its content\n"
+      "Correct each loaded source's TC to match where its content\n"
       .. "actually sits in this Reaper session — one confirmed event<->item\n"
       .. "pair per source (editors export from 0; audio post commonly\n"
-      .. "places each reel/episode at its own hour slot).")
+      .. "places each reel/episode at its own hour slot). Two independent\n"
+      .. "axes: New/Rec TC (the usual case) and Old/Src TC (DME Recut mode\n"
+      .. "only, when V1's real content has been staged somewhere other\n"
+      .. "than where the EDL's raw Src TC implies).")
   end
   if reaper.ImGui_BeginPopup(ctx, "Calibrate TC (Anchor)##clb_tc_calib_popup") then
     reaper.ImGui_Text(ctx, "Calibrate TC (Anchor)")
@@ -7696,19 +8233,38 @@ local function draw_toolbar()
       .. "real content, then Set Anchor — calibrates that row's source.")
     reaper.ImGui_Separator(ctx)
 
+    -- Which axis Set Anchor / Apply below act on. "New (Rec TC)" is the
+    -- usual case (everywhere outside DME Recut). "Old (Src TC)" only
+    -- matters in DME Recut mode, where Src TC is repurposed as V1's real
+    -- Reaper position rather than a position inside an audio source file
+    -- (see CLB.dme_recut) — e.g. when V1's own content has been staged at
+    -- a different real hour-slot than the EDL's raw Src TC implies.
+    CLB.tc_calib_axis = CLB.tc_calib_axis or "rec"
+    reaper.ImGui_Text(ctx, "Axis:")
+    reaper.ImGui_SameLine(ctx)
+    if reaper.ImGui_RadioButton(ctx, "New (Rec TC)##clb_tc_calib_axis_rec", CLB.tc_calib_axis == "rec") then
+      CLB.tc_calib_axis = "rec"
+    end
+    reaper.ImGui_SameLine(ctx)
+    if reaper.ImGui_RadioButton(ctx, "Old (Src TC, DME Recut)##clb_tc_calib_axis_src", CLB.tc_calib_axis == "src") then
+      CLB.tc_calib_axis = "src"
+    end
+    reaper.ImGui_Separator(ctx)
+
     if reaper.ImGui_Button(ctx, "Set Anchor...##clb_tc_calib_set", scale(140), 0) then
-      CLB.calibrate_tc_via_anchor()
+      CLB.calibrate_tc_via_anchor(CLB.tc_calib_axis)
     end
     reaper.ImGui_Separator(ctx)
 
     -- Second method: no Reaper item needed — select one event row and
-    -- type the Rec TC In it SHOULD be (e.g. a Universal Counting Leader
-    -- always placed 2 seconds before each hour mark). Plain InputText (no
-    -- EnterReturnsTrue — see the Rename Group popup for why that flag's
-    -- buffer sync is unreliable); Enter or the Apply button both submit.
+    -- type the TC (on the axis above) it SHOULD be (e.g. a Universal
+    -- Counting Leader always placed 2 seconds before each hour mark).
+    -- Plain InputText (no EnterReturnsTrue — see the Rename Group popup
+    -- for why that flag's buffer sync is unreliable); Enter or the Apply
+    -- button both submit.
     reaper.ImGui_TextDisabled(ctx,
-      "...or select one event row and type the Rec TC In it\n"
-      .. "SHOULD be (no Reaper item needed):")
+      "...or select one event row and type the TC it SHOULD be\n"
+      .. "on the axis above (no Reaper item needed):")
     reaper.ImGui_SetNextItemWidth(ctx, scale(120))
     local chg_tgt, new_tgt = reaper.ImGui_InputText(ctx, "##clb_tc_calib_target", CLB.tc_calib_target_buf)
     if chg_tgt then CLB.tc_calib_target_buf = new_tgt end
@@ -7722,37 +8278,48 @@ local function draw_toolbar()
       apply_target = true
     end
     if apply_target and CLB.tc_calib_target_buf ~= "" then
-      CLB.calibrate_tc_to_target(CLB.tc_calib_target_buf)
+      CLB.calibrate_tc_to_target(CLB.tc_calib_target_buf, CLB.tc_calib_axis)
     end
     reaper.ImGui_Separator(ctx)
 
-    -- One row per loaded source — each carries its own calibration, since
-    -- a single delta can't correct multiple reels/episodes placed at
-    -- different hour slots (see CLB.calibrate_tc_via_anchor).
+    -- One block per loaded source, each showing BOTH axes independently —
+    -- a single source can need a correction on one axis, the other, or
+    -- both (e.g. DME Recut: Old/Src needs +10h because V1 was staged
+    -- there, New/Rec needs no correction because it already matches V3's
+    -- real position).
+    local function axis_row(src, ax, row_label)
+      local enabled = src[ax.enabled]
+      local chg_en, new_en = reaper.ImGui_Checkbox(ctx, row_label .. "##" .. ax.enabled, enabled)
+      if chg_en then
+        src[ax.enabled] = new_en
+        CLB.cached_rows = nil
+      end
+      reaper.ImGui_SameLine(ctx, scale(190))
+      local sign = (src[ax.delta] or 0) >= 0 and "+" or "-"
+      local tc = EDL.seconds_to_tc(math.abs(src[ax.delta] or 0), CLB.fps, CLB.is_drop)
+      reaper.ImGui_Text(ctx, string.format("%s%s", sign, tc))
+      reaper.ImGui_SameLine(ctx)
+      if reaper.ImGui_SmallButton(ctx, "Clear##" .. ax.enabled) then
+        src[ax.enabled] = false
+        src[ax.delta]   = 0
+        src[ax.note]    = ""
+        CLB.cached_rows = nil
+      end
+      if src[ax.note] and src[ax.note] ~= "" then
+        reaper.ImGui_TextDisabled(ctx, "      from: " .. src[ax.note])
+      end
+    end
+
     if #CLB.edl_sources == 0 then
       reaper.ImGui_TextDisabled(ctx, "No sources loaded.")
     else
       for i, src in ipairs(CLB.edl_sources) do
         reaper.ImGui_PushID(ctx, i)
-        local chg_en, new_en = reaper.ImGui_Checkbox(ctx, src.name or "?", src.tc_calib_enabled)
-        if chg_en then
-          src.tc_calib_enabled = new_en
-          CLB.cached_rows = nil
-        end
-        reaper.ImGui_SameLine(ctx, scale(200))
-        local calib_sign = (src.tc_calib_delta_sec or 0) >= 0 and "+" or "-"
-        local calib_tc = EDL.seconds_to_tc(math.abs(src.tc_calib_delta_sec or 0), CLB.fps, CLB.is_drop)
-        reaper.ImGui_Text(ctx, string.format("%s%s", calib_sign, calib_tc))
-        reaper.ImGui_SameLine(ctx)
-        if reaper.ImGui_SmallButton(ctx, "Clear") then
-          src.tc_calib_enabled   = false
-          src.tc_calib_delta_sec = 0
-          src.tc_calib_note      = ""
-          CLB.cached_rows = nil
-        end
-        if src.tc_calib_note and src.tc_calib_note ~= "" then
-          reaper.ImGui_TextDisabled(ctx, "    from: " .. src.tc_calib_note)
-        end
+        reaper.ImGui_Text(ctx, src.name or "?")
+        reaper.ImGui_Indent(ctx, scale(12))
+        axis_row(src, CLB.TC_CALIB_AXES.rec, "New (Rec)")
+        axis_row(src, CLB.TC_CALIB_AXES.src, "Old (Src)")
+        reaper.ImGui_Unindent(ctx, scale(12))
         reaper.ImGui_PopID(ctx)
       end
     end
@@ -7762,6 +8329,23 @@ local function draw_toolbar()
       reaper.ImGui_CloseCurrentPopup(ctx)
     end
     reaper.ImGui_EndPopup(ctx)
+  end
+  reaper.ImGui_SameLine(ctx)
+
+  -- DME Recut: no Compare needed — select Reaper track(s), click, and
+  -- every visible/filtered event's Src TC range gets COPIED to its Rec
+  -- TC range directly (originals untouched — see CLB.dme_recut's own doc
+  -- comment for why this works for printed-to-pitch DME-stem cut lists).
+  if reaper.ImGui_SmallButton(ctx, "DME Recut...##clb_dme_recut") then
+    CLB.dme_recut()
+  end
+  if reaper.ImGui_IsItemHovered(ctx) then
+    reaper.ImGui_SetTooltip(ctx,
+      "Select the Reaper track(s) to recut, then click this. Uses the\n"
+      .. "currently visible/filtered list directly (filter down to one\n"
+      .. "stem's rows first, e.g. search \"DX\") — no Compare needed.\n"
+      .. "Whatever occupies each event's Src TC range gets COPIED (the\n"
+      .. "original is left untouched) to its Rec TC range.")
   end
   reaper.ImGui_SameLine(ctx)
 
@@ -8877,15 +9461,16 @@ local function draw_table(table_height)
             }
             local tc_field = tc_col_field[col]
             if tc_field then
-              -- Rec TC columns jump to the "Calibrate TC (Anchor)"-corrected
-              -- position when active, matching what the cell now displays;
-              -- Src TC is a source-file position, unrelated to Rec TC
-              -- calibration, so it's never affected.
+              -- Both axes jump to their own "Calibrate TC (Anchor)"-
+              -- corrected position when active, matching what the cell
+              -- now displays — Rec TC via the usual "New" axis, Src TC
+              -- via the "Old" axis (only meaningful in DME Recut mode;
+              -- a no-op otherwise, so this is always safe to call).
               local sec
               if col == COL.REC_IN or col == COL.REC_OUT then
                 sec = CLB.rec_tc_seconds(row[tc_field], row)
               else
-                sec = EDL.tc_to_seconds(row[tc_field] or "00:00:00:00", CLB.fps, CLB.is_drop)
+                sec = CLB.src_tc_seconds(row[tc_field], row)
               end
               reaper.SetEditCurPos(sec, true, false)
             end
@@ -11538,6 +12123,50 @@ CMP.TYPE_COLOR = {
 }
 CMP.MARKER_PREFIX = "[CLB] "
 
+--- Color-code + take-marker a real item to show what a planned recut
+--- action will do to it — shared by CMP.analyze_and_match_session (auto
+--- matches) and CMP.assign_group_detail_match (manual corrections via the
+--- Recut Group Details table), so both leave identical visual feedback on
+--- the arrange view regardless of which one produced the match. Only ever
+--- touches a take marker already carrying CMP.MARKER_PREFIX (reused on
+--- repeat calls, not piled up), so any of the user's own take markers are
+--- left alone.
+function CMP.mark_matched_item(item, style_key, label_text)
+  local color = CMP.TYPE_COLOR[style_key] or CMP.TYPE_COLOR.Moved
+  reaper.SetMediaItemInfo_Value(item, "I_CUSTOMCOLOR", color)
+  local take = reaper.GetActiveTake(item)
+  if not take then return end
+  local label = CMP.MARKER_PREFIX .. label_text
+  local n = reaper.GetNumTakeMarkers(take)
+  local idx = -1
+  for i = 0, n - 1 do
+    local _, name = reaper.GetTakeMarker(take, i)
+    if name and name:sub(1, #CMP.MARKER_PREFIX) == CMP.MARKER_PREFIX then
+      idx = i
+      break
+    end
+  end
+  reaper.SetTakeMarker(take, idx, label, 0, color)
+end
+
+--- Undo CMP.mark_matched_item's visual feedback on an item — used by
+--- "Clear Match". Resets the item's custom color to "use track/default"
+--- and removes CLB's own take marker (again, only one carrying
+--- CMP.MARKER_PREFIX; the user's own markers are untouched).
+function CMP.unmark_matched_item(item)
+  if not item then return end
+  reaper.SetMediaItemInfo_Value(item, "I_CUSTOMCOLOR", 0)
+  local take = reaper.GetActiveTake(item)
+  if not take then return end
+  local n = reaper.GetNumTakeMarkers(take)
+  for i = n - 1, 0, -1 do
+    local _, name = reaper.GetTakeMarker(take, i)
+    if name and name:sub(1, #CMP.MARKER_PREFIX) == CMP.MARKER_PREFIX then
+      reaper.DeleteTakeMarker(take, i)
+    end
+  end
+end
+
 --- Non-destructive preview step, meant to run before Apply: scans the
 --- Reaper-selected track(s) and matches every recut candidate (every group
 --- except Added, which has no old item) to a real item there, using the
@@ -11549,6 +12178,16 @@ CMP.MARKER_PREFIX = "[CLB] "
 --- at the arrange view shows what Apply would do to them. Offset-aware: if
 --- Offset Old is enabled (see CMP.offset_selected_tracks), old positions
 --- are searched at their shifted location, not their original one.
+---
+--- Also persists a single definitive match on the candidate itself
+--- (c.match = {item, kind}) whenever it's unambiguous — Mode A's own pick,
+--- or exactly one Mode C hit — so the Recut Group Details table's "Matched
+--- Item" column can show/correct it afterward (see CMP.assign_group_
+--- detail_match / CMP.clear_group_detail_match). Multiple Mode C hits with
+--- no Mode A pick is genuinely ambiguous (which one is really it?), so
+--- c.match is left nil for those — needs a manual pick. Doesn't affect
+--- Deleted, which intentionally clears every hit regardless and has no
+--- manual-correction UI.
 function CMP.analyze_and_match_session()
   local cr = CLB.compare_result
   if not cr then
@@ -11580,27 +12219,6 @@ function CMP.analyze_and_match_session()
   local TOL = 1.5 / fps
   local offset_sec = (CLB.offset_old_enabled and (CLB.offset_old_hours or 0) * 3600) or 0
 
-  -- Writes (or overwrites, if one from a previous Analyze run already
-  -- exists) a single take marker on `item` describing the planned recut
-  -- action, at source position 0. Only ever touches markers already
-  -- carrying CMP.MARKER_PREFIX, so any of the user's own take markers are
-  -- left alone.
-  local function set_take_marker(item, text, color)
-    local take = reaper.GetActiveTake(item)
-    if not take then return end
-    local label = CMP.MARKER_PREFIX .. text
-    local n = reaper.GetNumTakeMarkers(take)
-    local idx = -1
-    for i = 0, n - 1 do
-      local _, name = reaper.GetTakeMarker(take, i)
-      if name and name:sub(1, #CMP.MARKER_PREFIX) == CMP.MARKER_PREFIX then
-        idx = i
-        break
-      end
-    end
-    reaper.SetTakeMarker(take, idx, label, 0, color)
-  end
-
   local matched_a, matched_c, unmatched = 0, 0, 0
   local touched = {}  -- item → true, so an item hit by more than one target this run isn't recolored twice
 
@@ -11610,7 +12228,6 @@ function CMP.analyze_and_match_session()
   for _, g in ipairs(cr.groups) do
     if g.type ~= "Added" then
       local style_key = (g.type == "Moved" and g.is_shift) and "Shift" or g.type
-      local color = CMP.TYPE_COLOR[style_key] or CMP.TYPE_COLOR.Moved
       local label_text = g.label or g.type
 
       for _, c in ipairs(g.items) do
@@ -11629,14 +12246,21 @@ function CMP.analyze_and_match_session()
 
           if #hits == 0 then
             unmatched = unmatched + 1
+            c.match = nil
           else
             if a_item then matched_a = matched_a + 1 else matched_c = matched_c + 1 end
             for _, item in ipairs(hits) do
               if not touched[item] then
                 touched[item] = true
-                reaper.SetMediaItemInfo_Value(item, "I_CUSTOMCOLOR", color)
-                set_take_marker(item, label_text, color)
+                CMP.mark_matched_item(item, style_key, label_text)
               end
+            end
+            if a_item then
+              c.match = { item = a_item, kind = "auto_a" }
+            elseif #hits == 1 then
+              c.match = { item = hits[1], kind = "auto_c" }
+            else
+              c.match = nil  -- ambiguous (multiple Mode C hits, no Mode A pick) — needs a manual pick
             end
           end
         end
@@ -11659,6 +12283,72 @@ function CMP.analyze_and_match_session()
     "or deleted — this is a preview only.",
     total, #sel_tracks, matched_a, matched_c, unmatched),
     "Analyze & Match Session", 0)
+end
+
+--- Manual match correction (pipeline step 4): assign whichever ONE item is
+--- currently selected in Reaper as `c`'s match, overriding whatever
+--- CMP.analyze_and_match_session did or didn't find. Used by the Recut
+--- Group Details table's "Assign" button — for the types that need a
+--- single definitive item (Trimmed/Extended/Moved/unmatched candidates of
+--- those types). Deleted is intentionally not offered this — see
+--- CMP.analyze_and_match_session's doc comment.
+---
+--- `c.__group` (stamped by hsuanice_CLB Compare Engine.lua's M.group) is
+--- how this finds the type/label to color/mark the newly-assigned item
+--- with, without the caller having to thread the parent group through.
+function CMP.assign_group_detail_match(c)
+  if not c or not c.old then
+    reaper.ShowMessageBox("This row has no old item to match.", "Assign Match", 0)
+    return
+  end
+  local g = c.__group
+  if not g then
+    reaper.ShowMessageBox("Internal error: this row has no parent group.", "Assign Match", 0)
+    return
+  end
+  if g.type == "Deleted" then
+    reaper.ShowMessageBox(
+      "Deleted groups clear every overlapping item automatically —\n"
+      .. "manual assignment doesn't apply here.",
+      "Assign Match", 0)
+    return
+  end
+
+  if reaper.CountSelectedMediaItems(0) ~= 1 then
+    reaper.ShowMessageBox(
+      "Select exactly one item in Reaper first — the item this\n"
+      .. "row should be matched to.",
+      "Assign Match", 0)
+    return
+  end
+  local item = reaper.GetSelectedMediaItem(0, 0)
+
+  -- If this candidate already had a different matched item, clean up its
+  -- old marker/color first so it doesn't keep looking "matched" too.
+  if c.match and c.match.item and c.match.item ~= item then
+    CMP.unmark_matched_item(c.match.item)
+  end
+
+  local style_key = (g.type == "Moved" and g.is_shift) and "Shift" or g.type
+  local label_text = g.label or g.type
+
+  reaper.Undo_BeginBlock()
+  CMP.mark_matched_item(item, style_key, label_text)
+  reaper.Undo_EndBlock("CLB: Assign match (Recut Group Details)", -1)
+
+  c.match = { item = item, kind = "manual" }
+end
+
+--- Clear `c`'s current match (manual or automatic) — used by the Recut
+--- Group Details table's "Clear" button. Also removes CMP.mark_matched_
+--- item's coloring/take-marker from the item itself, so nothing keeps
+--- looking matched on the arrange view once cleared here.
+function CMP.clear_group_detail_match(c)
+  if not c or not c.match then return end
+  reaper.Undo_BeginBlock()
+  CMP.unmark_matched_item(c.match.item)
+  reaper.Undo_EndBlock("CLB: Clear match (Recut Group Details)", -1)
+  c.match = nil
 end
 
 function CMP.apply_to_reaper()
@@ -11983,23 +12673,25 @@ CMP.GD_COL = {
   REEL = 1, TRACKS = 2,
   OLD_SRC_IN = 3, OLD_SRC_OUT = 4, NEW_SRC_IN = 5, NEW_SRC_OUT = 6,
   OLD_REC_IN = 7, OLD_REC_OUT = 8, NEW_REC_IN = 9, NEW_REC_OUT = 10,
-  CLIP_NAME = 11,
+  CLIP_NAME = 11, MATCH = 12,
 }
-CMP.GD_COL_COUNT = 11
+CMP.GD_COL_COUNT = 12
 CMP.GD_HEADER_LABELS = {
   [CMP.GD_COL.REEL] = "Reel", [CMP.GD_COL.TRACKS] = "Tracks",
   [CMP.GD_COL.OLD_SRC_IN] = "Old Src In", [CMP.GD_COL.OLD_SRC_OUT] = "Old Src Out",
   [CMP.GD_COL.NEW_SRC_IN] = "New Src In", [CMP.GD_COL.NEW_SRC_OUT] = "New Src Out",
   [CMP.GD_COL.OLD_REC_IN] = "Old Rec In", [CMP.GD_COL.OLD_REC_OUT] = "Old Rec Out",
   [CMP.GD_COL.NEW_REC_IN] = "New Rec In", [CMP.GD_COL.NEW_REC_OUT] = "New Rec Out",
-  [CMP.GD_COL.CLIP_NAME] = "Clip Name",
+  [CMP.GD_COL.CLIP_NAME] = "Clip Name", [CMP.GD_COL.MATCH] = "Matched Item",
 }
--- Default order: Src TC (old/new) left of Rec TC (old/new), per user request.
+-- Default order: Src TC (old/new) left of Rec TC (old/new), per user
+-- request; Matched Item last (click a row there to select it, then use the
+-- Assign/Clear buttons below the table — see CMP.draw_group_details_table).
 CMP.GD_COL_ORDER = {
   CMP.GD_COL.REEL, CMP.GD_COL.TRACKS,
   CMP.GD_COL.OLD_SRC_IN, CMP.GD_COL.OLD_SRC_OUT, CMP.GD_COL.NEW_SRC_IN, CMP.GD_COL.NEW_SRC_OUT,
   CMP.GD_COL.OLD_REC_IN, CMP.GD_COL.OLD_REC_OUT, CMP.GD_COL.NEW_REC_IN, CMP.GD_COL.NEW_REC_OUT,
-  CMP.GD_COL.CLIP_NAME,
+  CMP.GD_COL.CLIP_NAME, CMP.GD_COL.MATCH,
 }
 CMP.GD_COL_IS_TC = {
   [CMP.GD_COL.OLD_SRC_IN] = true, [CMP.GD_COL.OLD_SRC_OUT] = true,
@@ -12009,6 +12701,7 @@ CMP.GD_COL_IS_TC = {
 }
 CMP.GD_COL_STRETCH_WEIGHT = {
   [CMP.GD_COL.REEL] = 1.0, [CMP.GD_COL.TRACKS] = 0.6, [CMP.GD_COL.CLIP_NAME] = 2.0,
+  [CMP.GD_COL.MATCH] = 1.6,
 }
 -- Default visibility: after Compare, Src TC has already become a relative
 -- trim/extend number (visible in the main table's Notes column), so it's
@@ -12109,6 +12802,17 @@ function CMP.draw_group_details_table(table_height)
     return
   end
 
+  -- Drop a stale selection (e.g. the main table's row selection changed,
+  -- so this candidate isn't even shown here anymore) rather than letting
+  -- Assign/Clear silently act on something no longer visible.
+  if CLB.gd_selected_c then
+    local still_here = false
+    for _, c in ipairs(d.items) do
+      if c == CLB.gd_selected_c then still_here = true; break end
+    end
+    if not still_here then CLB.gd_selected_c = nil end
+  end
+
   local visible_cols = {}
   for _, col in ipairs(CMP.GD_COL_ORDER) do
     if CMP.GD_COL_VISIBILITY[col] then visible_cols[#visible_cols + 1] = col end
@@ -12123,9 +12827,19 @@ function CMP.draw_group_details_table(table_height)
   local function tc(sec) return sec and EDL.seconds_to_tc(sec, fps, is_drop) or "-" end
 
   local avail_w = reaper.ImGui_GetContentRegionAvail(ctx)
+  -- Reserve room below the table for the Assign/Clear toolbar (see the end
+  -- of this function) — BeginTable's height param claims that much space
+  -- outright, so passing the full table_height left nothing for it: those
+  -- widgets were being laid out below the table but past the window's
+  -- visible bounds, effectively invisible. line_h covers the "Selected:
+  -- ..." text row; button_h the button row; a little spacing between.
+  local line_h   = reaper.ImGui_GetTextLineHeightWithSpacing(ctx)
+  local button_h = scale(22)
+  local toolbar_h = line_h + button_h + scale(8)
+  local table_h = math.max(scale(60), table_height - toolbar_h)
   local tflags = reaper.ImGui_TableFlags_Borders() | reaper.ImGui_TableFlags_RowBg()
                | reaper.ImGui_TableFlags_ScrollY() | reaper.ImGui_TableFlags_Resizable()
-  if reaper.ImGui_BeginTable(ctx, "##cmp_details_tbl", #visible_cols, tflags, avail_w, table_height) then
+  if reaper.ImGui_BeginTable(ctx, "##cmp_details_tbl", #visible_cols, tflags, avail_w, table_h) then
     reaper.ImGui_TableSetupScrollFreeze(ctx, 0, 1)
     -- TC columns hold fixed-format "HH:MM:SS:FF" text, so they get a fixed,
     -- non-user-resizable width (edit TC_W below to change it — matches the
@@ -12166,6 +12880,17 @@ function CMP.draw_group_details_table(table_height)
       end
     end
 
+    -- "Matched Item" cell text: the assigned/auto-found item's take name
+    -- plus how it was matched, or "—" if none. A dangling pointer (item
+    -- deleted from Reaper since matching ran) shows as "(item deleted)"
+    -- rather than erroring.
+    local match_kind_label = { auto_a = "auto: item", auto_c = "auto: length", manual = "manual" }
+    local function match_cell_text(c)
+      if not c.match or not c.match.item then return "—" end
+      if not reaper.ValidatePtr2(0, c.match.item, "MediaItem*") then return "(item deleted)" end
+      return string.format("%s (%s)", CMP.item_take_name(c.match.item), match_kind_label[c.match.kind] or "?")
+    end
+
     for idx, c in ipairs(d.items) do
       local rep = c.new or c.old
       reaper.ImGui_TableNextRow(ctx)
@@ -12177,6 +12902,13 @@ function CMP.draw_group_details_table(table_height)
           reaper.ImGui_Text(ctx, table.concat(rep.tracks or {}, ","))
         elseif col == CMP.GD_COL.CLIP_NAME then
           reaper.ImGui_Text(ctx, rep.clip_name or "")
+        elseif col == CMP.GD_COL.MATCH then
+          -- Click to select this candidate for the Assign/Clear buttons
+          -- below the table (see the rest of this function).
+          if reaper.ImGui_Selectable(ctx, match_cell_text(c) .. "##match" .. idx,
+                                      CLB.gd_selected_c == c) then
+            CLB.gd_selected_c = c
+          end
         else
           local g = CMP.GD_TC_GETTERS[col]
           tc_cell(g.get(c), g.id .. idx)
@@ -12185,6 +12917,36 @@ function CMP.draw_group_details_table(table_height)
     end
     reaper.ImGui_EndTable(ctx)
   end
+
+  -- Manual match correction (pipeline step 4): click a row's Matched Item
+  -- cell above to select it, select the correct item in Reaper, then
+  -- Assign. Not offered for Deleted groups (see CMP.assign_group_detail_
+  -- match's own doc comment) — the button stays but errors clearly if
+  -- clicked on one, rather than silently hiding (the row is still visible
+  -- in this table and clicking it to inspect is normal).
+  local sel_c = CLB.gd_selected_c
+  reaper.ImGui_Spacing(ctx)
+  if sel_c then
+    local g = sel_c.__group
+    local rep = sel_c.new or sel_c.old
+    reaper.ImGui_TextDisabled(ctx, string.format("Selected: [%s] %s",
+      g and g.type or "?", (rep and rep.clip_name) or ""))
+  else
+    reaper.ImGui_TextDisabled(ctx, "Click a row's Matched Item cell above to select it.")
+  end
+  local can_correct = sel_c ~= nil
+  if not can_correct then reaper.ImGui_BeginDisabled(ctx) end
+  if reaper.ImGui_Button(ctx, "Assign Selected Reaper Item##gd_assign", scale(190), scale(22)) then
+    CMP.assign_group_detail_match(sel_c)
+  end
+  if reaper.ImGui_IsItemHovered(ctx) then
+    reaper.ImGui_SetTooltip(ctx, "Select exactly one item in Reaper — the item the selected\nrow should be matched to — then click this.")
+  end
+  reaper.ImGui_SameLine(ctx)
+  if reaper.ImGui_Button(ctx, "Clear Match##gd_clear", scale(90), scale(22)) then
+    CMP.clear_group_detail_match(sel_c)
+  end
+  if not can_correct then reaper.ImGui_EndDisabled(ctx) end
 end
 
 function CMP.draw_panel()
