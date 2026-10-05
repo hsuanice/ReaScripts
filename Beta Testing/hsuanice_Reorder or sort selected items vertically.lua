@@ -1,6 +1,6 @@
 --[[
 @description ReaImGui - Vertical Reorder and Sort (items)
-@version 261004.0013
+@version 261005.1820
 @author hsuanice
 @about
   Provides three vertical re-arrangement modes for selected items (stacked UI):
@@ -29,6 +29,27 @@
 
 
 @changelog
+  v261005.1820
+  - Fix: Copy to Sort now keeps each recording's channels together on the same
+    layer of tracks ("group first, then track name"), instead of pooling all
+    items by track name and letting overlaps scatter them.
+    * Cause: items were bin-packed per track name one by one, so when two
+      recordings overlapped, a channel of recording A could take recording B's
+      place on the top track while A's other channels stayed above — mixing
+      two recordings across layers, and overflow tracks were inserted right
+      after their own track name (S, S overflow, S2, S2 overflow ...).
+    * New: a "recording unit" = all items from the same recording (Filename
+      mode: same base filename; Scene & Take mode: same scene+take) that start
+      at the same timeline position. Each unit is placed WHOLE onto the first
+      layer where none of its channels overlap; otherwise the whole unit moves
+      to the next layer. Units starting together: more channels, then longer,
+      goes on top.
+    * Tracks are emitted layer by layer (layer 1: S, S2, CHING HAN, S3 ... ;
+      layer 2: S, S2, CHING HAN ...), track-name/channel order within a layer.
+    * Each layer's tracks get their own new REAPER track group (Media/Razor
+      edit lead+follow), now in Filename mode too.
+    * Both overlap modes share this logic; replaces the previous per-mode
+      bin-packing (Filename range buckets / Scene & Take global slots).
   v261004.0013
   - Fix: Upfill (Reorder fill upward) no longer creates overlapping items.
     * Cause: still-unprocessed selected items were not counted as occupying
@@ -1336,369 +1357,135 @@ local function run_copy_to_new_tracks(name_mode, order_mode, asc, append_seconda
 
   local copied = 0
 
-  if overlap_mode == 2 then
-    -- ── Mode 2: Scene & Take 全域槽 ──────────────────────────────────
-    -- Track creation order: (slot 1: all groups) → (slot 2: all groups) → …
-    -- Items with the same Scene & Take key share a global slot across all channels.
+  -- ── Recording-unit layering (shared by both overlap modes) ──────────
+  -- A recording unit = all items from the same recording (Filename mode: same
+  -- base filename; Scene & Take mode: same scene+take key) that start at the
+  -- same timeline position — i.e. every channel of one edit. Each unit is
+  -- placed WHOLE onto one layer; if any of its channels would overlap what is
+  -- already on that layer, the whole unit moves to the next layer. Tracks are
+  -- then emitted layer by layer, metadata groups in `order` within each layer.
+  local it_to_gi = {}
+  for gi, g in ipairs(order) do
+    for _, it in ipairs(g.items) do it_to_gi[it] = gi end
+  end
 
-    -- Build item → st_key lookup from rows.
-    -- When all items share the same scene+take key (or have none), fall back to
-    -- grouping by timeline start position: items within TIME_TOL of each other
-    -- get the same virtual key (= same recording moment across all channels).
-    local it_to_stkey = {}
-    local unique_stkeys = {}
-    for _, r in ipairs(rows) do
-      local sk = r.st_key or ""
-      if sk ~= "" then unique_stkeys[sk] = true end
-    end
-    local n_unique = 0
-    for _ in pairs(unique_stkeys) do n_unique = n_unique + 1 end
-
-    if n_unique <= 1 then
-      -- Degenerate: no meaningful scene+take difference → group by timeline position
-      debug("  Scene & Take: all items share same key; falling back to timeline-position grouping")
-      for _, r in ipairs(rows) do
-        local s = item_start(r.it) or 0
-        -- Round to TIME_TOL so items at near-identical positions cluster together
-        local rounded = math.floor(s / TIME_TOL + 0.5) * TIME_TOL
-        it_to_stkey[r.it] = string.format("T_%.4f", rounded)
-      end
+  local recs = {}
+  for _, r in ipairs(rows) do
+    local rk
+    if overlap_mode == 2 then
+      rk = (r.st_key ~= "" and r.st_key) or get_item_base_filename(r.it)
     else
-      -- Normal: use real scene+take keys
-      for _, r in ipairs(rows) do
-        local sk = r.st_key or ""
-        if sk == "" then sk = "_ANON_" .. tostring(r.it) end
-        it_to_stkey[r.it] = sk
-      end
+      rk = get_item_base_filename(r.it)
     end
+    local s = item_start(r.it) or 0
+    recs[#recs+1] = { it = r.it, gi = it_to_gi[r.it], rk = rk or "", s = s, e = s + (item_len(r.it) or 0) }
+  end
+  table.sort(recs, function(a, b)
+    if a.s ~= b.s then return a.s < b.s end
+    return a.gi < b.gi
+  end)
 
-    -- Compute global time span per st_key (union of all items with that key)
-    local st_key_span = {}
-    for _, r in ipairs(rows) do
-      local sk = it_to_stkey[r.it]
-      local s  = item_start(r.it) or 0
-      local e  = s + (item_len(r.it) or 0)
-      if not st_key_span[sk] then
-        st_key_span[sk] = { s = s, e = e }
-      else
-        if s < st_key_span[sk].s then st_key_span[sk].s = s end
-        if e > st_key_span[sk].e then st_key_span[sk].e = e end
-      end
+  -- Build units. A unit holds at most one item per metadata group; a duplicate
+  -- group at the same key+start opens a separate unit (defensive).
+  local units, units_by_key = {}, {}
+  for _, rec in ipairs(recs) do
+    local list = units_by_key[rec.rk]
+    if not list then list = {}; units_by_key[rec.rk] = list end
+    local unit
+    for _, u in ipairs(list) do
+      if math.abs(u.s - rec.s) <= TIME_TOL and not u.has_gi[rec.gi] then unit = u; break end
     end
-
-    -- Collect unique st_keys in start-time order (deterministic)
-    local all_st_keys = {}
-    local seen_sk = {}
-    for _, r in ipairs(rows) do
-      local sk = it_to_stkey[r.it]
-      if not seen_sk[sk] then
-        seen_sk[sk] = true
-        all_st_keys[#all_st_keys+1] = sk
-      end
+    if not unit then
+      unit = { rk = rec.rk, s = rec.s, members = {}, has_gi = {}, idx = #units + 1 }
+      list[#list+1] = unit
+      units[#units+1] = unit
     end
-    table.sort(all_st_keys, function(a, b)
-      local sa = st_key_span[a] and st_key_span[a].s or 0
-      local sb = st_key_span[b] and st_key_span[b].s or 0
-      if sa ~= sb then return sa < sb end
-      return a < b
-    end)
+    unit.members[#unit.members+1] = rec
+    unit.has_gi[rec.gi] = true
+    if not unit.e or rec.e > unit.e then unit.e = rec.e end
+  end
+  -- Same start time: the main recording (more channels, then longer) takes the
+  -- upper layer.
+  table.sort(units, function(a, b)
+    if a.s ~= b.s then return a.s < b.s end
+    if #a.members ~= #b.members then return #a.members > #b.members end
+    if a.e ~= b.e then return a.e > b.e end
+    if a.rk ~= b.rk then return a.rk < b.rk end
+    return a.idx < b.idx
+  end)
 
-    -- Bin-pack st_keys into global slots (first-fit, by start time)
-    local global_slots = {}   -- list of { st_keys={[sk]=true}, spans={...} }
-    for _, sk in ipairs(all_st_keys) do
-      local span = st_key_span[sk] or { s = 0, e = 0 }
-      local placed = false
-      for _, slot in ipairs(global_slots) do
-        if can_place_on(slot.spans, span.s, span.e) then
-          slot.st_keys[sk] = true
-          slot.spans[#slot.spans+1] = { s = span.s, e = span.e }
-          placed = true; break
+  -- First-fit units onto layers (per-group occupancy).
+  local layers = {}   -- [li] = { spans = {[gi]=list}, items = {[gi]=list} }
+  for _, u in ipairs(units) do
+    local li = 1
+    while true do
+      local L = layers[li]
+      if not L then
+        L = { spans = {}, items = {} }
+        layers[li] = L
+      end
+      local fits = true
+      for _, m in ipairs(u.members) do
+        if not can_place_on(L.spans[m.gi] or {}, m.s, m.e) then fits = false; break end
+      end
+      if fits then
+        for _, m in ipairs(u.members) do
+          L.spans[m.gi] = L.spans[m.gi] or {}
+          L.items[m.gi] = L.items[m.gi] or {}
+          L.spans[m.gi][#L.spans[m.gi]+1] = { s = m.s, e = m.e }
+          L.items[m.gi][#L.items[m.gi]+1] = m.it
         end
+        debug(string.format("  Unit '%s' @%.3f (%d item(s)) → layer %d",
+                            u.rk, u.s, #u.members, li))
+        break
       end
-      if not placed then
-        global_slots[#global_slots+1] = { st_keys = { [sk] = true },
-                                          spans   = { { s = span.s, e = span.e } } }
+      li = li + 1
+    end
+  end
+  debug(string.format("  %d recording unit(s) → %d layer(s)", #units, #layers))
+
+  -- Collect used group numbers from pre-existing tracks so we don't collide
+  local used_group_bits = 0
+  for ti = 0, base_track_count - 1 do
+    local tr = reaper.GetTrack(0, ti)
+    if tr then
+      for _, gname in ipairs({ "MEDIA_EDIT_LEAD", "MEDIA_EDIT_FOLLOW" }) do
+        used_group_bits = used_group_bits | reaper.GetSetTrackGroupMembership(tr, gname, 0, 0)
       end
     end
+  end
 
-    debug(string.format("  Scene & Take mode: %d unique keys → %d global slots", #all_st_keys, #global_slots))
-    for si, slot in ipairs(global_slots) do
-      local keys = {}
-      for k in pairs(slot.st_keys) do keys[#keys+1] = k end
-      table.sort(keys)
-      debug(string.format("  Slot %d: %s", si, table.concat(keys, ", ")))
-    end
-
-    -- Per-group bin-packing using slot-units (each slot's items inside a group are
-    -- treated as a single unit). A unit is consolidated onto an existing sub_slot
-    -- only when none of its items time-overlaps with what's already there — this
-    -- preserves slot integrity (no scene mixing in a sub_slot) while still saving
-    -- tracks when scenes are sequential and could share a row.
-    -- Each sub_slot remembers its primary_slot (the slot of the unit that opened it)
-    -- so layout can group tracks by recording session.
-    local st_key_to_slot = {}
-    for si, slot in ipairs(global_slots) do
-      for sk in pairs(slot.st_keys) do
-        st_key_to_slot[sk] = si
-      end
-    end
-
-    local group_subslots = {}   -- [gi] = list of { items, spans, primary_slot }
-    for gi, g in ipairs(order) do
-      -- Partition this group's items by their global slot
-      local per_slot_items = {}
-      for _, it in ipairs(g.items) do
-        local sk = it_to_stkey[it] or ""
-        local si = st_key_to_slot[sk] or 1
-        per_slot_items[si] = per_slot_items[si] or {}
-        per_slot_items[si][#per_slot_items[si]+1] = it
-      end
-      -- Build slot_units, sort each unit's items, and sort units by min start time
-      local slot_units = {}
-      for si, its in pairs(per_slot_items) do
-        table.sort(its, function(a, b)
-          local bfna = get_item_base_filename(a)
-          local bfnb = get_item_base_filename(b)
-          if bfna ~= bfnb then return bfna < bfnb end
-          return get_src_offs(a) < get_src_offs(b)
-        end)
-        local spans, min_s = {}, math.huge
+  -- Create tracks layer by layer, groups in `order` within each layer; each
+  -- layer's tracks get their own REAPER track group (razor edits stay in-layer).
+  local next_group = 1
+  for li, L in ipairs(layers) do
+    local trs = {}
+    for gi = 1, #order do
+      local its = L.items[gi]
+      if its then
+        local tr = make_labeled_track(order[gi].label)
+        trs[#trs+1] = tr
         for _, it in ipairs(its) do
-          local s = item_start(it) or 0
-          local e = s + (item_len(it) or 0)
-          spans[#spans+1] = { s = s, e = e }
-          if s < min_s then min_s = s end
-        end
-        slot_units[#slot_units+1] = { si = si, items = its, spans = spans, min_s = min_s }
-      end
-      table.sort(slot_units, function(a, b)
-        if a.min_s ~= b.min_s then return a.min_s < b.min_s end
-        return a.si < b.si
-      end)
-
-      -- Bin-pack: try to place each slot_unit as a whole on an existing sub_slot.
-      -- If it doesn't fit anywhere, open new sub_slot(s) for it (preserving its
-      -- items as a group; only split if the unit has internal time overlap).
-      local sub_slots = {}
-      for _, su in ipairs(slot_units) do
-        local assigned
-        for _, ss in ipairs(sub_slots) do
-          local fits = true
-          for _, sp in ipairs(su.spans) do
-            if not can_place_on(ss.spans, sp.s, sp.e) then fits = false; break end
-          end
-          if fits then assigned = ss; break end
-        end
-        if assigned then
-          for i, it in ipairs(su.items) do
-            assigned.items[#assigned.items+1] = it
-            assigned.spans[#assigned.spans+1] = su.spans[i]
-          end
-        else
-          local new_subs = { { items = {}, spans = {}, primary_slot = su.si } }
-          for i, it in ipairs(su.items) do
-            local placed_in
-            for _, ns in ipairs(new_subs) do
-              if can_place_on(ns.spans, su.spans[i].s, su.spans[i].e) then placed_in = ns; break end
-            end
-            if not placed_in then
-              placed_in = { items = {}, spans = {}, primary_slot = su.si }
-              new_subs[#new_subs+1] = placed_in
-            end
-            placed_in.items[#placed_in.items+1] = it
-            placed_in.spans[#placed_in.spans+1] = su.spans[i]
-          end
-          for _, ns in ipairs(new_subs) do
-            sub_slots[#sub_slots+1] = ns
-          end
-        end
-      end
-
-      group_subslots[gi] = sub_slots
-      debug(string.format("  Group '%s': %d slot-unit(s) → %d sub_slot(s)",
-                          g.label, #slot_units, #sub_slots))
-      for ssi, ss in ipairs(sub_slots) do
-        debug(string.format("    sub_slot #%d (primary slot %d): %d item(s)",
-                            ssi, ss.primary_slot, #ss.items))
-      end
-    end
-
-    -- Layout: group sub_slots by their primary_slot, then by group order. Within
-    -- each (primary_slot, group) bucket, multiple sub_slots become overflow levels.
-    local slot_group_subs = {}   -- [si][gi] = list of sub_slots with primary_slot==si
-    for gi, sub_slots in pairs(group_subslots) do
-      for _, ss in ipairs(sub_slots) do
-        local si = ss.primary_slot
-        slot_group_subs[si] = slot_group_subs[si] or {}
-        slot_group_subs[si][gi] = slot_group_subs[si][gi] or {}
-        slot_group_subs[si][gi][#slot_group_subs[si][gi]+1] = ss
-      end
-    end
-
-    local slot_indices_used = {}
-    for si in pairs(slot_group_subs) do slot_indices_used[#slot_indices_used+1] = si end
-    table.sort(slot_indices_used)
-
-    local slot_max_levels = {}
-    for _, si in ipairs(slot_indices_used) do
-      local m = 0
-      for _, ss_list in pairs(slot_group_subs[si]) do
-        if #ss_list > m then m = #ss_list end
-      end
-      slot_max_levels[si] = m
-    end
-
-    -- Collect used group numbers from pre-existing tracks so we don't collide
-    local used_group_bits = 0
-    for ti = 0, base_track_count - 1 do
-      local tr = reaper.GetTrack(0, ti)
-      if tr then
-        for _, gname in ipairs({ "MEDIA_EDIT_LEAD", "MEDIA_EDIT_FOLLOW" }) do
-          used_group_bits = used_group_bits | reaper.GetSetTrackGroupMembership(tr, gname, 0, 0)
+          copy_item_to_track(it, tr)
+          copied = copied + 1
+          push_progress("Copying items", #items * 2 + copied, false)
         end
       end
     end
-
-    -- Create tracks: per primary slot, per overflow level, per group.
-    local slot_level_tracks = {}   -- [si][level] = list of tracks
-    for _, si in ipairs(slot_indices_used) do
-      slot_level_tracks[si] = {}
-      for level = 1, slot_max_levels[si] do
-        slot_level_tracks[si][level] = {}
-        for gi = 1, #order do
-          local ss_list = slot_group_subs[si][gi]
-          local ss = ss_list and ss_list[level]
-          if ss then
-            local tr = make_labeled_track(order[gi].label)
-            slot_level_tracks[si][level][#slot_level_tracks[si][level]+1] = tr
-            for _, it in ipairs(ss.items) do
-              copy_item_to_track(it, tr)
-              copied = copied + 1
-              push_progress("Copying items", #items * 2 + copied, false)
-            end
-          end
-        end
+    if #trs > 1 then
+      while next_group <= 64 and (used_group_bits & (1 << (next_group - 1))) ~= 0 do
+        next_group = next_group + 1
       end
-    end
-
-    -- Assign each (slot, level)'s tracks to their own REAPER track group, so razor
-    -- edits stay within one recording session at one overflow level.
-    local next_group = 1
-    for _, si in ipairs(slot_indices_used) do
-      for level = 1, slot_max_levels[si] do
-        local trs = slot_level_tracks[si][level]
-        if trs and #trs > 1 then
-          while next_group <= 64 and (used_group_bits & (1 << (next_group - 1))) ~= 0 do
-            next_group = next_group + 1
-          end
-          if next_group <= 64 then
-            local bit = 1 << (next_group - 1)
-            for _, tr in ipairs(trs) do
-              reaper.GetSetTrackGroupMembership(tr, "MEDIA_EDIT_LEAD",   bit, bit)
-              reaper.GetSetTrackGroupMembership(tr, "MEDIA_EDIT_FOLLOW", bit, bit)
-            end
-            used_group_bits = used_group_bits | bit
-            debug(string.format("  Assigned track group #%d to %d tracks at slot %d level %d",
-                                next_group, #trs, si, level))
-            next_group = next_group + 1
-          end
+      if next_group <= 64 then
+        local bit = 1 << (next_group - 1)
+        for _, tr in ipairs(trs) do
+          reaper.GetSetTrackGroupMembership(tr, "MEDIA_EDIT_LEAD",   bit, bit)
+          reaper.GetSetTrackGroupMembership(tr, "MEDIA_EDIT_FOLLOW", bit, bit)
         end
-      end
-    end
-
-  else
-    -- ── Mode 1: Filename-based overlap avoidance (default) ────────────
-    -- For each metadata group: sort items by (base_filename, take_name),
-    -- assign one-by-one to the first slot with no overlap.
-    for gidx, g in ipairs(order) do
-      local label = g.label
-      debug(string.format("Group #%d: label='%s' | %d items", gidx, label, #g.items))
-
-      -- Build flat list sorted by (base_filename, range_bucket, take_name)
-      -- range_bucket groups items by which portion of the source file they use,
-      -- so items from the same file AND same editing range sort adjacent.
-      local item_records = {}
-      for _, it in ipairs(g.items) do
-        local bfn          = get_item_base_filename(it)
-        local src_offs     = get_src_offs(it)
-        local range_bucket = math.floor(src_offs / RANGE_BUCKET)
-        local tk           = take_of(it)
-        local tkn          = ""
-        if tk then
-          local _, nm = reaper.GetSetMediaItemTakeInfo_String(tk, "P_NAME", "", false)
-          tkn = nm or ""
-        end
-        local s = item_start(it) or 0
-        local e = s + (item_len(it) or 0)
-        item_records[#item_records+1] = {
-          it = it, bfn = bfn, range_bucket = range_bucket, tkn = tkn, s = s, e = e
-        }
-      end
-      table.sort(item_records, function(a, b)
-        if a.bfn ~= b.bfn then return a.bfn < b.bfn end
-        if a.range_bucket ~= b.range_bucket then return a.range_bucket < b.range_bucket end
-        return a.tkn < b.tkn
-      end)
-
-      -- Group-based bin-packing: items sharing the same (bfn, range_bucket) are treated
-      -- as a unit and placed on the same track together, preventing cross-range interleaving.
-      local range_groups     = {}   -- key → list of recs
-      local range_group_ord  = {}   -- ordered keys
-      for _, rec in ipairs(item_records) do
-        local rk = rec.bfn .. "\0" .. tostring(rec.range_bucket)
-        if not range_groups[rk] then
-          range_groups[rk] = {}
-          range_group_ord[#range_group_ord+1] = rk
-        end
-        range_groups[rk][#range_groups[rk]+1] = rec
-      end
-
-      local slots = {}
-      for _, rk in ipairs(range_group_ord) do
-        local rg = range_groups[rk]
-        debug(string.format("  Range-group '%s': %d item(s)", rk:gsub("%z","·"), #rg))
-
-        -- Try to find a slot where ALL items in this range-group fit (no time overlap)
-        local assigned = nil
-        for _, slot in ipairs(slots) do
-          local fits = true
-          for _, rec in ipairs(rg) do
-            if not can_place_on(slot.spans, rec.s, rec.e) then fits = false; break end
-          end
-          if fits then assigned = slot; break end
-        end
-
-        if assigned then
-          -- Place entire range-group on the chosen slot
-          for _, rec in ipairs(rg) do
-            copy_item_to_track(rec.it, assigned.tr)
-            copied = copied + 1
-            push_progress("Copying items", #items * 2 + copied, false)
-            table.insert(assigned.spans, { s = rec.s, e = rec.e })
-            debug(string.format("    → Placed on existing '%s' at %.3f (base='%s')",
-                                label, rec.s, rec.bfn))
-          end
-        else
-          -- No single slot fits the whole group; fall back to per-item placement
-          -- (handles edge case of intra-group time overlap)
-          for _, rec in ipairs(rg) do
-            local item_slot = nil
-            for _, slot in ipairs(slots) do
-              if can_place_on(slot.spans, rec.s, rec.e) then item_slot = slot; break end
-            end
-            if not item_slot then
-              local tr = make_labeled_track(label)
-              item_slot = { tr = tr, spans = {} }
-              table.insert(slots, item_slot)
-            end
-            copy_item_to_track(rec.it, item_slot.tr)
-            copied = copied + 1
-            push_progress("Copying items", #items * 2 + copied, false)
-            table.insert(item_slot.spans, { s = rec.s, e = rec.e })
-            debug(string.format("    → Fallback placed '%s' at %.3f (base='%s')",
-                                label, rec.s, rec.bfn))
-          end
-        end
+        used_group_bits = used_group_bits | bit
+        debug(string.format("  Assigned track group #%d to %d tracks at layer %d",
+                            next_group, #trs, li))
+        next_group = next_group + 1
       end
     end
   end
