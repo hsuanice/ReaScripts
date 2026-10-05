@@ -1,6 +1,6 @@
 --[[
 @description Conform List Browser
-@version 261005.1407
+@version 261005.1507
 @author hsuanice
 @about
   A REAPER script for browsing and editing EDL (Edit Decision List) data
@@ -71,7 +71,47 @@
   Required for AAF: aaftool in PATH (https://github.com/agfline/LibAAF)
 
 @changelog
-  v261005.1407
+  v261005.1507
+  - Fix: CLB.populate_recut_track (v261005.1455) could silently delete a
+    NEIGHBORING move's CLB Recut item instead of only replacing its own.
+    Real user report, confirmed from an RGWH Monitor dump: an Old item
+    was missing even though its New counterpart existed. Root cause: the
+    old-item-cleanup check was a loose "do these ranges overlap" test
+    with TOL padding on both edges — since consecutive EDL events
+    routinely share an exact boundary (one event's Src TC Out equals the
+    next one's Src TC In), the TOL padding treated two merely-ADJACENT
+    (not actually overlapping) moves' items as colliding. Replaced with
+    an exact match (position AND length both within TOL) — only a prior
+    run's item at the EXACT SAME range gets replaced now; a neighboring,
+    merely-touching move's item is never touched.
+  - Change: the wrapper (hsuanice_CLB Jump Old-New TC.lua) now preserves
+    the cursor's exact position within a CLB Recut item when jumping,
+    instead of always landing on the paired item's own start — e.g.
+    landing 3 seconds into a 10-second Old item now jumps to 3 seconds
+    into its New counterpart, not just New's start. Both sides of a move
+    always share the same length (CMX3600 rule — see
+    CLB.populate_recut_track's own doc comment), so this is a simple
+    offset carried over, no new data needed on the CLB side.
+  - Feature: "CLB Recut" track — Phase 1 of a planned "Jump Old/New TC"
+    feature (user-requested, modeled on Matchbox's old/new jump, but
+    runnable from REAPER's own Action List with a keyboard shortcut,
+    which Matchbox's own version can't do — it only works from inside
+    Matchbox). CLB.dme_recut_execute now also records each recut move as
+    a pair of real, empty items on a shared "CLB Recut" track (created at
+    the top of the track list, not hidden, if it doesn't exist yet): one
+    spanning the move's OLD (Src TC) range, one spanning its NEW (Rec TC)
+    range, each with the other's position written into its own item
+    Notes ("CLB_JUMP:<seconds>") — real REAPER project data as the
+    exchange format, no separate file/ExtState sync needed between CLB
+    and the new standalone wrapper script (hsuanice_CLB Jump Old-New
+    TC.lua — load it into REAPER's Action List and assign a shortcut to
+    use it). Re-running DME Recut on the same moves replaces, not piles
+    up, overlapping items on that track. Scoped to DME Recut only for
+    Phase 1 (Compare's own Trimmed/Extended/Moved Apply isn't built yet,
+    so there's no "move" to pair there) — deliberately single old<->new
+    pair only, no multi-version chain (V1->V2->V3) or overlap/folder-
+    track handling yet; those are planned Phase 2, after this basic
+    mechanism gets validated in real use.
   - Revert: removed the entire "NONE Track → B" feature (v261005.1339,
     fixed in v261005.1401, renamed B-Roll→B) — user reconsidered: wants
     the list to faithfully reflect the original EDL's own content, no
@@ -2162,7 +2202,7 @@ local EXT_NS = "hsuanice_ConformListBrowser"
 -- Shown in the window title bar — must be kept in sync with @version in
 -- the header comment at the top of this file by hand; they are two
 -- separate strings with no automatic link between them.
-local VERSION = "261005.1407"
+local VERSION = "261005.1507"
 
 -- Column definitions (EDL Events table)
 local COL = {
@@ -7910,6 +7950,107 @@ function CLB.dme_recut_prepare()
   reaper.ImGui_OpenPopup(ctx, "DME Recut Settings##clb_dme_recut_popup")
 end
 
+---------------------------------------------------------------------------
+-- CLB Recut track (old<->new jump markers) — Phase 1
+---------------------------------------------------------------------------
+--- Phase 1 of a planned "Jump Old/New TC" feature (see project memory):
+--- a standalone wrapper script, runnable from REAPER's own Action List
+--- with a keyboard shortcut (something Matchbox's own old/new jump can't
+--- do — it only works from inside Matchbox), finds whichever "CLB Recut"
+--- track item the edit cursor currently sits inside and jumps to that
+--- item's paired position, read from its own item note. This is how CLB
+--- publishes that pairing — real REAPER items are the data store, no
+--- separate ExtState/file sync needed between CLB and the wrapper.
+---
+--- Scoped to DME Recut only for Phase 1 (the only operation that today
+--- repositions real content old-position -> new-position) — Compare's
+--- own Trimmed/Extended/Moved Apply isn't built yet (only Deleted apply
+--- exists), so there is no "move" to pair there yet; it'll get the same
+--- treatment once that exists. Deliberately single-pair only here — no
+--- multi-version chain (V1->V2->V3), no overlap/folder-track handling —
+--- those are planned Phase 2, once this basic mechanism is validated.
+CLB.RECUT_TRACK_NAME = "CLB Recut"
+CLB.RECUT_OLD_COLOR  = reaper.ColorToNative( 90, 120, 170) | 0x1000000
+CLB.RECUT_NEW_COLOR  = reaper.ColorToNative(200, 160,  70) | 0x1000000
+
+--- Finds the shared "CLB Recut" track, or creates one at the TOP of the
+--- track list (not hidden — user's own call while this is new/being
+--- tried out) if none exists yet.
+function CLB._find_or_create_recut_track()
+  local n = reaper.CountTracks(0)
+  for i = 0, n - 1 do
+    local tr = reaper.GetTrack(0, i)
+    local _, name = reaper.GetTrackName(tr)
+    if name == CLB.RECUT_TRACK_NAME then return tr end
+  end
+  reaper.InsertTrackAtIndex(0, true)
+  local tr = reaper.GetTrack(0, 0)
+  reaper.GetSetMediaTrackInfo_String(tr, "P_NAME", CLB.RECUT_TRACK_NAME, true)
+  return tr
+end
+
+--- Records an old<->new position pair per move as TWO empty items on the
+--- CLB Recut track: one spanning the OLD (Src TC) range with a note
+--- pointing at the NEW position, one spanning the NEW (Rec TC) range
+--- with a note pointing at the OLD position — so the wrapper can jump
+--- either direction depending which one the cursor is on. Re-running on
+--- the same moves replaces (doesn't pile up) any EXISTING item at the
+--- EXACT SAME position+length (a prior run of this exact move), so
+--- repeat DME Recut runs stay idempotent; markers from other moves are
+--- left alone.
+---
+--- Deliberately an EXACT match (position AND length both within TOL),
+--- not a loose overlap test — a loose "do these ranges touch" test was
+--- the original implementation and had a real bug: consecutive EDL
+--- events routinely share an exact boundary (one event's Src TC Out
+--- equals the next one's Src TC In), so a loose overlap check with TOL
+--- padding on both edges treated two merely-ADJACENT (not actually
+--- overlapping) moves' items as colliding, deleting one neighbor's item
+--- while adding the other's — confirmed from a real RGWH Monitor dump
+--- where an Old item was silently missing for exactly this reason.
+function CLB.populate_recut_track(moves, fps, is_drop)
+  local tr = CLB._find_or_create_recut_track()
+  local TOL = 0.5 / fps
+
+  local function clear_exact(pos_target, len_target)
+    local n = reaper.CountTrackMediaItems(tr)
+    for i = n - 1, 0, -1 do
+      local item = reaper.GetTrackMediaItem(tr, i)
+      local pos = reaper.GetMediaItemInfo_Value(item, "D_POSITION")
+      local len = reaper.GetMediaItemInfo_Value(item, "D_LENGTH")
+      if math.abs(pos - pos_target) < TOL and math.abs(len - len_target) < TOL then
+        reaper.DeleteTrackMediaItem(tr, item)
+      end
+    end
+  end
+
+  local function add_marker_item(pos, len, label, jump_to_sec, color)
+    local item = reaper.AddMediaItemToTrack(tr)
+    reaper.SetMediaItemInfo_Value(item, "D_POSITION", pos)
+    reaper.SetMediaItemInfo_Value(item, "D_LENGTH", math.max(len, 0.001))
+    reaper.SetMediaItemInfo_Value(item, "I_CUSTOMCOLOR", color)
+    local take = reaper.AddTakeToMediaItem(item)
+    if take then
+      reaper.GetSetMediaItemTakeInfo_String(take, "P_NAME", label, true)
+    end
+    -- Machine-readable: "CLB_JUMP:<seconds>" as the first line — the
+    -- wrapper only ever parses this line, the rest of the note (if any
+    -- gets added later, e.g. in Phase 2) is free-form.
+    reaper.GetSetMediaItemInfo_String(item, "P_NOTES",
+      string.format("CLB_JUMP:%.6f", jump_to_sec), true)
+  end
+
+  for _, mv in ipairs(moves) do
+    local len = mv.src_out - mv.src_in
+    clear_exact(mv.src_in, len)
+    clear_exact(mv.rec_in, len)
+    local old_tc = EDL.seconds_to_tc(mv.src_in, fps, is_drop)
+    local new_tc = EDL.seconds_to_tc(mv.rec_in, fps, is_drop)
+    add_marker_item(mv.src_in, len, "CLB Old → " .. new_tc, mv.rec_in, CLB.RECUT_OLD_COLOR)
+    add_marker_item(mv.rec_in, len, "CLB New → " .. old_tc, mv.src_in, CLB.RECUT_NEW_COLOR)
+  end
+end
+
 --- Runs the analysis CLB.dme_recut_prepare stored in CLB.dme_recut_pending,
 --- per the user's CLB.dme_recut_mode ("copy"/"cut") and
 --- CLB.dme_recut_markers choice — called from the Settings popup's "Run
@@ -8060,6 +8201,11 @@ function CLB.dme_recut_execute()
       end
     end
   end
+
+  -- Phase 1 of the planned Jump Old/New TC feature (see project memory)
+  -- — records each move's old<->new position pair on the shared "CLB
+  -- Recut" track for the standalone jump wrapper to read.
+  CLB.populate_recut_track(moves, pending.fps, pending.is_drop)
 
   reaper.PreventUIRefresh(-1)
   reaper.UpdateArrange()
