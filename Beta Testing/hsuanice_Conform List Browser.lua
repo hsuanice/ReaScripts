@@ -1,6 +1,6 @@
 --[[
 @description Conform List Browser
-@version 261004.0125
+@version 261005.1205
 @author hsuanice
 @about
   A REAPER script for browsing and editing EDL (Edit Decision List) data
@@ -71,6 +71,170 @@
   Required for AAF: aaftool in PATH (https://github.com/agfline/LibAAF)
 
 @changelog
+  v261005.1205
+  - Change: "Shift Range..." no longer creates/updates a "CLB: OLD"/"CLB:
+    NEW" region marking the shifted span — user feedback right after
+    v261005.1157 shipped it. Now scoped to an explicit Razor Edit/Time
+    Selection range the user already made themselves, so an extra auto-
+    generated region restating that same span added no information.
+  v261005.1157
+  - Feature: "Shift Tracks..." rebuilt as "Shift Range..." — scoped to a
+    Razor Edit selection (priority) or a Time Selection + REAPER-selected
+    track(s), instead of unconditionally shifting an entire track. Items
+    are split at the range edges so only the portion actually inside the
+    range moves (`CLB.cut_shift_range`, a new shared primitive — see
+    below). Requires an explicit range now; refuses to run on "just
+    select tracks and click" alone, confirmed over falling back to the
+    old whole-track behavior, since a silent scope change could move far
+    more than intended.
+  - Feature: project markers AND regions inside the same time span now
+    move together with the items (`CLB.shift_markers_regions`) — a marker
+    moves if its own position falls in range; a region moves only if BOTH
+    its start and end fall fully inside (a region straddling the edge is
+    left alone rather than guessed at). Repositions each one IN PLACE via
+    `SetProjectMarker4` (same ID) rather than deleting and recreating —
+    REAPER's ReaScript API has no getter/setter for the newer marker/
+    region ruler "lane" assignment, but since nothing is ever deleted,
+    lane (and anything else ReaScript can't see) is never touched and
+    stays exactly as REAPER already has it.
+  - Refactor: extracted `CLB.cut_shift_range(track, range_start,
+    range_end, delta, TOL)` — isolate whatever overlaps a range on a
+    track (splitting at the edges, locked items included) and move it by
+    a constant delta — as a shared primitive. DME Recut's Cut mode
+    (`CLB.dme_recut_execute`) now delegates to it too (delta = mv.rec_in
+    - mv.src_in per move) instead of its own near-identical inline loop:
+    the two features turned out to be the exact same mechanical
+    operation once Shift Range needed per-track range-splitting too, not
+    just a hypothetical future refactor (see the open question noted in
+    v261005.1129). A future Compare Trimmed/Extended/Moved Apply could
+    reuse the same primitive once content-identity matching picks the
+    target range.
+  - Change: `CMP.offset_selected_tracks` renamed to `CMP.shift_range`
+    (only call sites were internal to this file — the toolbar "Shift
+    Range..." button and Compare's "Modes..." > Offset Old). No longer
+    auto-disables the matching side's "virtual offset" checkbox after a
+    shift — a scoped shift may only bake in some Compare dedup entries,
+    not all of them like the old whole-track version always did, so
+    deciding whether the virtual offset is now redundant is left to the
+    user instead of guessed.
+  v261005.1129
+  - Refactor: renamed the internal "Mode A/B/C" naming throughout the
+    live code (variables, function doc comments, match-result tags) to
+    the same descriptive names the UI has used since v260917.2117
+    ("Matched Item", "Length Match", "Range Clear") — no more bare
+    letters anywhere, including internally. `CLB.apply_mode_a/c/b` →
+    `CLB.apply_mode_matched/length/range`; `m.mode`/`c.match.kind` values
+    "A"/"C"/"B" → "matched"/"length"/"range" (and "auto_a"/"auto_c" →
+    "auto_matched"/"auto_length"); `mode_a_count`/`mode_c_count`/
+    `mode_b_count` → `matched_count`/`length_count`/`range_count`. The
+    ExtState keys used to persist these toggles ("apply_mode_a"/"_c"/"_b")
+    were deliberately NOT renamed — purely internal plumbing, invisible
+    to the user, and changing them would silently reset everyone's saved
+    Modes... toggle state on next load. Dated @changelog entries from
+    before this pass keep their original "Mode A/B/C" wording as a
+    historical record, not live documentation — only current, non-dated
+    code/comments were renamed. No behavior change.
+  v261005.1114
+  - Fix: DME Recut's new "Cut" mode left the result incomplete/patchy —
+    real user report, first test: output looked like some events moved
+    and others silently didn't, no error shown. Root cause: Cut mode's
+    inner scan iterated `reaper.GetTrackMediaItem(track, i)` by index
+    (backward, 0..n-1 captured once per move) while ALSO calling
+    `SplitMediaItem`/changing `D_POSITION` on the very track being
+    scanned — REAPER's own per-track item index order isn't guaranteed
+    stable once items are split/repositioned mid-scan, so later indices
+    in the same backward sweep could silently point at the wrong item or
+    get skipped. This is the exact same class of bug `CMP.
+    offset_selected_tracks` ("Shift Tracks") already hit and fixed by
+    snapshotting item pointers first (see its own history). Fixed the
+    same way here: each move now snapshots its selected tracks' item
+    POINTERS into a plain Lua array immediately before scanning (fresh
+    per move, so it still sees every earlier move's real result — unlike
+    "Copy" mode's single upfront-for-the-whole-run snapshot), then
+    iterates that array instead of live indices. Untested against a real
+    session this session (no REAPER runtime access) — still needs the
+    user's next real round-trip to confirm.
+  v261004.2048
+  - Feature: "DME Recut" now opens a "DME Recut Settings" dialog (modeled
+    on Matchbox/Ediload's own "Run Reconform" dialog, scoped to the
+    minimum viable for v1) instead of running immediately: a Copy/Cut mode
+    choice and a Delete/Insert-marker on/off toggle, both remembered
+    between runs (CLB.dme_recut_mode/dme_recut_markers, persisted via
+    save_prefs/load_prefs same as every other toolbar setting). The
+    existing validation + duplicate-Src-TC-range warning now run up front
+    in CLB.dme_recut_prepare() and show inside the dialog itself (not a
+    separate confirm box); "Run It" calls the new CLB.dme_recut_execute(),
+    "Cancel" discards the pending analysis.
+  - Feature: "Cut" mode added as an alternative to the existing Copy-only
+    behavior — really splits/repositions the original items (matching
+    Matchbox/Ediload's own Cut/Paste mode) instead of duplicating from
+    them. Implemented as a live per-move track scan (not a snapshot, as
+    Copy mode uses): a moved chunk's position changes to its Rec TC slot,
+    so it naturally drops out of a later move's Src TC-range scan on its
+    own, the same safety property Copy mode gets from snapshotting up
+    front. Copy stays the default (safer — never touches V1's real
+    content).
+  v261004.1929
+  - Feature: "DME Recut" now adds Delete/Insert project markers describing
+    what happened at each gap — the point of DME Recut mode (see its doc
+    comment): Src TC already IS V1's real position for printed-to-pitch
+    stems, so comparing consecutive events' own Src TC against their Rec
+    TC (no second EDL/Compare needed) tells you directly where content was
+    dropped or added. Walking the recut events in their new (Rec) order: a
+    Rec TC gap with no matching Src TC gap is new content with no V1
+    source ("Insert For <duration>", green); a Src TC gap with no matching
+    Rec TC gap is V1 content that didn't make it into V2 ("Delete For
+    <duration>", red — reusing CMP.TYPE_COLOR for visual consistency with
+    Analyze & Match). Modeled on Matchbox's (Cargo Cult) own marker
+    vocabulary, confirmed from a real Matchbox session + its Markers list
+    view — deliberately not its bare "x"/">"/"<" edge markers (clear to
+    Matchbox's own users, opaque to anyone else, and tellingly absent from
+    its own categorized Markers list) or its Trim/Extend/Reorder types
+    (those only arise comparing TWO different EDLs' clip selections, not
+    within one EDL's own Src-vs-Rec — see Trimmed/Extended/Moved in
+    hsuanice_CLB Compare Engine.lua for where those belong). Verified the
+    gap math against the real ADR sequence from the dup-overlap bug
+    report: correctly finds "Insert For 00:00:03:04" and "Delete For
+    00:00:04:22" at the two real gaps.
+  - Change: default group set is now Video, Audio, Dialog, Music, Effects,
+    Location, ADR, Delete (was Video, Audio, ADR, Location, Effects,
+    Music, Delete) — user's real DME workflow needs Dialog/Music/Effects
+    grouped together in that order so Consolidate (bin-pack by group into
+    non-overlapping tracks) correctly separates DME stems that the raw EDL
+    otherwise places on one generic track (e.g. "AA") with no real
+    separation — confirmed via a real session where DX/ADR/FX/MU rows all
+    showed Track=AA, needing Consolidate-by-group to actually split them.
+    ADR kept (not removed) for productions that still track it separately.
+  v261004.1106
+  - Feature: "DME Recut" now pre-flight-checks for overlapping Src TC
+    ranges before creating anything. Real bug report: recutting a filtered
+    list that mixed DX + ADR rows duplicated every real item (9 → 18 on
+    the affected track, confirmed via RGWH Monitor) — root cause is that
+    DX/ADR/FX/MU all share ONE embedded timecode baseline (see this
+    function's own doc comment), so the exact same real cut point shows up
+    as a separate event per stem type whenever more than one stem's rows
+    are processed together; the user confirmed even Matchbox (Cargo Cult)
+    shows this same duplication (the identical match listed 4x, once per
+    stem, in its own Matches view) on the same kind of list. Rather than
+    guessing which duplicate is "right" and silently dropping/merging the
+    rest (see feedback_warn_dont_guess_ambiguous_heuristics), this now
+    detects moves whose Src TC ranges overlap/duplicate each other and
+    lists them (grouped, with sample clip names) in the confirmation
+    dialog and the completion report — items are still created if the user
+    confirms, but now with clear warning of where duplicate copies are
+    likely. Verified the detection against the real DX/ADR data from the
+    bug report (3 overlapping pairs, all found).
+  v261004.0136
+  - Feature: "Shift Tracks..." — the same real-item-moving action
+    Compare's "Offset Old" already had (CMP.offset_selected_tracks, type
+    a number of hours, click, moves every unlocked item on the Reaper-
+    selected track(s)), now exposed as its own toolbar button too. DME
+    Recut doesn't use Compare mode at all, so that existing action was
+    unreachable from it — e.g. to stage V1's real content out of the way
+    before a DME Recut run. No new logic — delegates straight to the
+    existing function; the Compare-only "Offset Old" checkbox (a virtual
+    offset for Analyze & Match's matching math) stays where it was, since
+    it has no meaning outside Compare.
   v261004.0125
   - Change: "DME Recut" now COPIES instead of cutting/moving — user
     feedback: the original v261003.2338 implementation split and
@@ -1863,7 +2027,7 @@ local EXT_NS = "hsuanice_ConformListBrowser"
 -- Shown in the window title bar — must be kept in sync with @version in
 -- the header comment at the top of this file by hand; they are two
 -- separate strings with no automatic link between them.
-local VERSION = "261004.0125"
+local VERSION = "261005.1205"
 
 -- Column definitions (EDL Events table)
 local COL = {
@@ -2185,11 +2349,12 @@ local CLB = {
   gd_selected_c = nil,       -- which recut candidate (an item from cmp_group_details.items) is picked in the "Matched Item" column, for Assign/Clear
 
   -- Apply to Reaper: which resolution strategies are enabled, tried in
-  -- fixed priority order A > C > B regardless of toggle order (see
-  -- CMP.apply_to_reaper). All on by default.
-  apply_mode_a = true,  -- matched item: P_EXT:CLB_REEL + SRC_TC identity, regardless of current position
-  apply_mode_c = true,  -- length match: item overlapping the range whose own length matches the target's
-  apply_mode_b = true,  -- range clear: clear whatever occupies the range, split at edges, no identity check
+  -- fixed priority order Matched Item > Length Match > Range Clear
+  -- regardless of toggle order (see CMP.apply_to_reaper). All on by
+  -- default.
+  apply_mode_matched = true,  -- Matched Item: P_EXT:CLB_REEL + SRC_TC identity, regardless of current position
+  apply_mode_length  = true,  -- Length Match: item overlapping the range whose own length matches the target's
+  apply_mode_range   = true,  -- Range Clear: clear whatever occupies the range, split at edges, no identity check
 
   -- Reconform offset: shifts the OLD Reaper session (real items on selected
   -- tracks) out of the way by +/-N hours before Compare-session matching, so
@@ -2211,6 +2376,15 @@ local CLB = {
   -- its own. tc_calib_target_buf is just the popup's InputText buffer for
   -- CLB.calibrate_tc_to_target, not calibration state itself.
   tc_calib_target_buf = "",
+
+  -- DME Recut settings (remembered between runs — see CLB.dme_recut_prepare/
+  -- CLB.dme_recut_execute). "copy" leaves V1's real content untouched and
+  -- duplicates from it (the original, safer default); "cut" really moves/
+  -- splits the original items, matching Matchbox/Ediload's Cut/Paste mode.
+  dme_recut_mode    = "copy",   -- "copy" or "cut"
+  dme_recut_markers = true,     -- add Delete/Insert project markers
+  dme_recut_pending = nil,      -- { moves, dup_lines, dup_warning, sel_tracks } between prepare and execute
+
   cmp_zoom = 50.0,
   cmp_scroll = 0.0,
   cmp_vscroll_old = 0.0,
@@ -3643,13 +3817,18 @@ local function save_prefs()
   reaper.SetExtState(EXT_NS, "tl_zoom", tostring(CLB.tl_zoom or 50.0), true)
   reaper.SetExtState(EXT_NS, "clip_name_format", CLB.clip_name_format or "", true)
   reaper.SetExtState(EXT_NS, "cjk_font_path", CLB.cjk_font_path or "", true)
-  reaper.SetExtState(EXT_NS, "apply_mode_a", CLB.apply_mode_a and "1" or "0", true)
-  reaper.SetExtState(EXT_NS, "apply_mode_c", CLB.apply_mode_c and "1" or "0", true)
-  reaper.SetExtState(EXT_NS, "apply_mode_b", CLB.apply_mode_b and "1" or "0", true)
+  -- ExtState key names kept as the old "apply_mode_a/c/b" letters on
+  -- purpose — purely internal plumbing, invisible to the user, and
+  -- changing them would silently reset everyone's saved toggle state.
+  reaper.SetExtState(EXT_NS, "apply_mode_a", CLB.apply_mode_matched and "1" or "0", true)
+  reaper.SetExtState(EXT_NS, "apply_mode_c", CLB.apply_mode_length and "1" or "0", true)
+  reaper.SetExtState(EXT_NS, "apply_mode_b", CLB.apply_mode_range and "1" or "0", true)
   reaper.SetExtState(EXT_NS, "offset_old_enabled", CLB.offset_old_enabled and "1" or "0", true)
   reaper.SetExtState(EXT_NS, "offset_old_hours", tostring(CLB.offset_old_hours or 10), true)
   reaper.SetExtState(EXT_NS, "offset_new_enabled", CLB.offset_new_enabled and "1" or "0", true)
   reaper.SetExtState(EXT_NS, "offset_new_hours", tostring(CLB.offset_new_hours or 0), true)
+  reaper.SetExtState(EXT_NS, "dme_recut_mode", CLB.dme_recut_mode or "copy", true)
+  reaper.SetExtState(EXT_NS, "dme_recut_markers", CLB.dme_recut_markers and "1" or "0", true)
   -- "Calibrate TC (Anchor)" state is per-source (CLB.edl_sources[i].
   -- tc_calib_*), saved/restored as part of each source's own "S|" line in
   -- the .clb project format (see save_clb_project / load_clb_project) —
@@ -3688,13 +3867,15 @@ local function load_prefs()
   CLB.tl_zoom = tonumber(get("tl_zoom", "50.0")) or 50.0
   CLB.clip_name_format = get("clip_name_format", "")
   CLB.cjk_font_path = get("cjk_font_path", "")
-  CLB.apply_mode_a = get("apply_mode_a", "1") == "1"
-  CLB.apply_mode_c = get("apply_mode_c", "1") == "1"
-  CLB.apply_mode_b = get("apply_mode_b", "1") == "1"
+  CLB.apply_mode_matched = get("apply_mode_a", "1") == "1"
+  CLB.apply_mode_length  = get("apply_mode_c", "1") == "1"
+  CLB.apply_mode_range   = get("apply_mode_b", "1") == "1"
   CLB.offset_old_enabled = get("offset_old_enabled", "0") == "1"
   CLB.offset_old_hours   = tonumber(get("offset_old_hours", "10")) or 10
   CLB.offset_new_enabled = get("offset_new_enabled", "0") == "1"
   CLB.offset_new_hours   = tonumber(get("offset_new_hours", "0")) or 0
+  CLB.dme_recut_mode     = get("dme_recut_mode", "copy")
+  CLB.dme_recut_markers  = get("dme_recut_markers", "1") == "1"
 
   -- EDL column order
   local order_str = get("edl_col_order", "")
@@ -4542,7 +4723,7 @@ end
 -- rows to any of these right away (right-click a group → Assign Selected
 -- Rows Here) without first having to "+" add each one by hand. Users can
 -- still add/rename/delete freely; this only seeds the initial list.
-local DEFAULT_GROUP_NAMES = { "Video", "Audio", "ADR", "Location", "Effects", "Music", "Delete" }
+local DEFAULT_GROUP_NAMES = { "Video", "Audio", "Dialog", "Music", "Effects", "Location", "ADR", "Delete" }
 
 --- Determine group for a track name based on prefix (used for initial auto-assign only).
 --- A* → Audio, V* → Video, NONE → NONE, others → Other
@@ -7453,18 +7634,27 @@ end
 --- classification is for), so this is a pure range-based reposition: the
 --- content occupying an event's Src TC range on the selected track(s)
 --- lands at that event's Rec TC range. No identity/content matching —
---- like Mode B (Range Clear), it only cares what's physically in the
---- range.
+--- same spirit as Compare's Apply's Range Clear strategy, it only cares
+--- what's physically in the range.
 ---
---- COPY, not cut: V1's real content at its Src TC position is left
---- completely untouched (same "keep the old pristine" principle
---- CMP.offset_selected_tracks already follows) — a brand new item is
---- created at the Rec TC position, its take pointing at the SAME
---- underlying source media (safe, standard REAPER practice; many items
---- can reference one source) with D_STARTOFFS adjusted so it plays the
---- exact portion that was sitting in the Src TC range. The original items
---- are only ever read, never split or repositioned.
-function CLB.dme_recut()
+--- Copy vs Cut is a user choice (CLB.dme_recut_mode, set in the Settings
+--- popup this opens — see the draw-side "DME Recut Settings" popup block):
+--- "copy" leaves V1's real content at its Src TC position completely
+--- untouched (same "keep the old pristine" principle CMP.offset_selected_
+--- tracks already follows) — a brand new item is created at the Rec TC
+--- position, its take pointing at the SAME underlying source media (safe,
+--- standard REAPER practice; many items can reference one source) with
+--- D_STARTOFFS adjusted so it plays the exact portion that was sitting in
+--- the Src TC range. "cut" really splits/repositions the original items
+--- instead (matching Matchbox/Ediload's Cut/Paste mode) — see
+--- CLB.dme_recut_execute for both paths.
+---
+--- Split in two for the Settings popup: CLB.dme_recut_prepare() validates
+--- and analyzes (builds the move list + duplicate-overlap warning) and
+--- opens the popup; CLB.dme_recut_execute() (called from the popup's "Run
+--- It" button) does the actual work, reading CLB.dme_recut_pending for
+--- what to run and CLB.dme_recut_mode/dme_recut_markers for how.
+function CLB.dme_recut_prepare()
   if #ROWS == 0 then
     reaper.ShowMessageBox("No events loaded. Load an EDL file first.", SCRIPT_NAME, 0)
     return
@@ -7500,7 +7690,7 @@ function CLB.dme_recut()
       local src_out = CLB.src_tc_seconds(row.src_tc_out, row)
       local rec_in  = CLB.rec_tc_seconds(row.rec_tc_in,  row)
       if src_out > src_in + TOL and math.abs(rec_in - src_in) > TOL then
-        moves[#moves + 1] = { src_in = src_in, src_out = src_out, rec_in = rec_in }
+        moves[#moves + 1] = { src_in = src_in, src_out = src_out, rec_in = rec_in, row = row }
       end
     end
   end
@@ -7513,99 +7703,251 @@ function CLB.dme_recut()
     return
   end
 
-  local msg = string.format(
-    "DME Recut: build %d event(s) on %d selected track(s)?\n\n"
-    .. "For each one, whatever currently occupies its Src TC range is\n"
-    .. "COPIED (not moved — the original stays exactly where it is) to\n"
-    .. "its Rec TC range. This creates new real items in this Reaper\n"
-    .. "project.",
-    #moves, #sel_tracks)
-  if reaper.ShowMessageBox(msg, "DME Recut", 1) ~= 1 then return end
+  -- Pre-flight: detect moves whose Src TC ranges overlap (or are exact
+  -- duplicates of) each other — a strong signal the filtered list mixes
+  -- more than one "layer" of the same underlying content. Real, confirmed
+  -- case: DX/ADR/FX/MU all share ONE embedded timecode baseline (see
+  -- CLB.dme_recut's own doc comment), so the same real cut point shows up
+  -- as a separate event per stem type when their rows aren't filtered
+  -- apart — even Matchbox (Cargo Cult) shows this exact duplication (the
+  -- same match listed 4x, once per stem, in its own Matches view) when
+  -- fed the same kind of list. Processing overlapping moves together
+  -- risks copying the same real content more than once onto the selected
+  -- track(s). This only warns — it never guesses which one is "right" and
+  -- silently drops/merges the others (see
+  -- feedback_warn_dont_guess_ambiguous_heuristics) — the user decides
+  -- whether to clean up the filter/track selection first or proceed
+  -- anyway.
+  local function tc(sec) return EDL.seconds_to_tc(sec, fps, is_drop) end
+  table.sort(moves, function(a, b) return a.src_in < b.src_in end)
+  local dup_lines = {}
+  do
+    local groups, group_order = {}, {}
+    local active_end, active_mv = nil, nil
+    for _, mv in ipairs(moves) do
+      if active_end and mv.src_in < active_end - TOL then
+        local g = groups[active_mv]
+        if not g then
+          g = { mv = active_mv, count = 0, sample_clips = {} }
+          groups[active_mv] = g
+          group_order[#group_order + 1] = g
+        end
+        g.count = g.count + 1
+        local clip = (mv.row and mv.row.clip_name) or "?"
+        if #g.sample_clips < 4 then g.sample_clips[#g.sample_clips + 1] = clip end
+      end
+      if not active_end or mv.src_out > active_end then
+        active_end = mv.src_out
+        active_mv = mv
+      end
+    end
+    for _, g in ipairs(group_order) do
+      local sample = table.concat(g.sample_clips, ", ")
+      if g.count > #g.sample_clips then sample = sample .. ", ..." end
+      dup_lines[#dup_lines + 1] = string.format(
+        "  %s–%s (%s) overlaps %d other event(s): %s",
+        tc(g.mv.src_in), tc(g.mv.src_out), (g.mv.row and g.mv.row.clip_name) or "?",
+        g.count, sample)
+    end
+  end
+  local dup_warning = ""
+  if #dup_lines > 0 then
+    dup_warning = string.format(
+      "\n\n⚠ %d Src TC range(s) overlap another event in this list — likely\n"
+      .. "more than one stem/layer mixed together (e.g. DX+ADR share a\n"
+      .. "timecode baseline). Proceeding may copy the same real content\n"
+      .. "more than once:\n%s",
+      #dup_lines, table.concat(dup_lines, "\n"))
+  end
+
+  -- Analysis done — hand off to the Settings popup (Copy/Cut, Marker
+  -- on/off; see the draw-side "DME Recut Settings" popup block) instead of
+  -- running immediately. CLB.dme_recut_execute (below) reads this back.
+  CLB.dme_recut_pending = {
+    moves = moves, sel_tracks = sel_tracks,
+    dup_lines = dup_lines, dup_warning = dup_warning,
+    fps = fps, is_drop = is_drop, tc = tc,
+  }
+  reaper.ImGui_OpenPopup(ctx, "DME Recut Settings##clb_dme_recut_popup")
+end
+
+--- Runs the analysis CLB.dme_recut_prepare stored in CLB.dme_recut_pending,
+--- per the user's CLB.dme_recut_mode ("copy"/"cut") and
+--- CLB.dme_recut_markers choice — called from the Settings popup's "Run
+--- It" button.
+function CLB.dme_recut_execute()
+  local pending = CLB.dme_recut_pending
+  if not pending then return end
+  local moves, sel_tracks = pending.moves, pending.sel_tracks
+  local dup_lines, tc = pending.dup_lines, pending.tc
+  local TOL = 0.5 / pending.fps
+  local mode = CLB.dme_recut_mode or "copy"
 
   reaper.Undo_BeginBlock()
   reaper.PreventUIRefresh(1)
 
-  -- Snapshot each selected track's ORIGINAL items once, up front — the
-  -- new items this creates must never be treated as more "original V1
-  -- content" to read from again on a later event (matters if two events'
-  -- Rec TC ranges ever land close enough to overlap what a later lookup
-  -- would scan).
-  local track_items = {}
-  for _, track in ipairs(sel_tracks) do
-    local snap = {}
-    local n = reaper.CountTrackMediaItems(track)
-    for i = 0, n - 1 do snap[#snap + 1] = reaper.GetTrackMediaItem(track, i) end
-    track_items[track] = snap
-  end
-
   local created = 0
   local unmatched_events = 0
 
-  for _, mv in ipairs(moves) do
-    local any_found = false
+  if mode == "cut" then
+    -- Really split/reposition the original items (Matchbox/Ediload's Cut/
+    -- Paste mode) — delegates to CLB.cut_shift_range, the same low-level
+    -- primitive CMP.shift_range ("Shift Tracks...") uses: isolate
+    -- whatever overlaps [a,b] on a track and move it by a constant delta.
+    -- Here delta = mv.rec_in - mv.src_in, the same constant for every
+    -- overlapping piece within one move, since Src/Rec duration is always
+    -- equal per CMX3600 rules (see this function's own doc comment) — a
+    -- DME Recut move and a Shift Range move are the exact same mechanical
+    -- operation, just computing their delta differently.
+    for _, mv in ipairs(moves) do
+      local delta = mv.rec_in - mv.src_in
+      local any_found = false
+      for _, track in ipairs(sel_tracks) do
+        local n = CLB.cut_shift_range(track, mv.src_in, mv.src_out, delta, TOL)
+        if n > 0 then any_found = true; created = created + n end
+      end
+      if not any_found then unmatched_events = unmatched_events + 1 end
+    end
+  else
+    -- Copy: V1's real content stays exactly where it is; a brand new item
+    -- is created at the Rec TC position sharing the same underlying
+    -- source. Snapshot each selected track's ORIGINAL items once, up
+    -- front — the new items this creates must never be treated as more
+    -- "original V1 content" to read from again on a later event.
+    local track_items = {}
     for _, track in ipairs(sel_tracks) do
-      for _, item in ipairs(track_items[track]) do
-        local pos  = reaper.GetMediaItemInfo_Value(item, "D_POSITION")
-        local iend = pos + reaper.GetMediaItemInfo_Value(item, "D_LENGTH")
-        local overlap_start = math.max(pos, mv.src_in)
-        local overlap_end   = math.min(iend, mv.src_out)
-        if overlap_end > overlap_start + TOL then
-          any_found = true
+      local snap = {}
+      local n = reaper.CountTrackMediaItems(track)
+      for i = 0, n - 1 do snap[#snap + 1] = reaper.GetTrackMediaItem(track, i) end
+      track_items[track] = snap
+    end
 
-          local rel_offset = overlap_start - mv.src_in   -- position within the event's own range
-          local chunk_len  = overlap_end - overlap_start
-          local new_pos    = mv.rec_in + rel_offset
+    for _, mv in ipairs(moves) do
+      local any_found = false
+      for _, track in ipairs(sel_tracks) do
+        for _, item in ipairs(track_items[track]) do
+          local pos  = reaper.GetMediaItemInfo_Value(item, "D_POSITION")
+          local iend = pos + reaper.GetMediaItemInfo_Value(item, "D_LENGTH")
+          local overlap_start = math.max(pos, mv.src_in)
+          local overlap_end   = math.min(iend, mv.src_out)
+          if overlap_end > overlap_start + TOL then
+            any_found = true
 
-          local new_item = reaper.AddMediaItemToTrack(track)
-          reaper.SetMediaItemInfo_Value(new_item, "D_POSITION", new_pos)
-          reaper.SetMediaItemInfo_Value(new_item, "D_LENGTH", chunk_len)
-          reaper.SetMediaItemInfo_Value(new_item, "D_VOL",
-            reaper.GetMediaItemInfo_Value(item, "D_VOL"))
-          reaper.SetMediaItemInfo_Value(new_item, "B_MUTE",
-            reaper.GetMediaItemInfo_Value(item, "B_MUTE"))
+            local rel_offset = overlap_start - mv.src_in   -- position within the event's own range
+            local chunk_len  = overlap_end - overlap_start
+            local new_pos    = mv.rec_in + rel_offset
 
-          local take = reaper.GetActiveTake(item)
-          if take then
-            local rate      = reaper.GetMediaItemTakeInfo_Value(take, "D_PLAYRATE")
-            local startoffs = reaper.GetMediaItemTakeInfo_Value(take, "D_STARTOFFS")
-            local _, take_name = reaper.GetSetMediaItemTakeInfo_String(take, "P_NAME", "", false)
+            local new_item = reaper.AddMediaItemToTrack(track)
+            reaper.SetMediaItemInfo_Value(new_item, "D_POSITION", new_pos)
+            reaper.SetMediaItemInfo_Value(new_item, "D_LENGTH", chunk_len)
+            reaper.SetMediaItemInfo_Value(new_item, "D_VOL",
+              reaper.GetMediaItemInfo_Value(item, "D_VOL"))
+            reaper.SetMediaItemInfo_Value(new_item, "B_MUTE",
+              reaper.GetMediaItemInfo_Value(item, "B_MUTE"))
 
-            local new_take = reaper.AddTakeToMediaItem(new_item)
-            reaper.SetMediaItemTake_Source(new_take, reaper.GetMediaItemTake_Source(take))
-            reaper.SetMediaItemTakeInfo_Value(new_take, "D_PLAYRATE", rate)
-            -- How far overlap_start sits past this item's own start,
-            -- converted to source time via the take's own playback rate,
-            -- gives exactly where in the source media to begin.
-            reaper.SetMediaItemTakeInfo_Value(new_take, "D_STARTOFFS",
-              startoffs + (overlap_start - pos) * rate)
-            reaper.SetMediaItemTakeInfo_Value(new_take, "D_VOL",
-              reaper.GetMediaItemTakeInfo_Value(take, "D_VOL"))
-            reaper.SetMediaItemTakeInfo_Value(new_take, "D_PAN",
-              reaper.GetMediaItemTakeInfo_Value(take, "D_PAN"))
-            reaper.SetMediaItemTakeInfo_Value(new_take, "I_CHANMODE",
-              reaper.GetMediaItemTakeInfo_Value(take, "I_CHANMODE"))
-            reaper.GetSetMediaItemTakeInfo_String(new_take, "P_NAME", take_name or "", true)
+            local take = reaper.GetActiveTake(item)
+            if take then
+              local rate      = reaper.GetMediaItemTakeInfo_Value(take, "D_PLAYRATE")
+              local startoffs = reaper.GetMediaItemTakeInfo_Value(take, "D_STARTOFFS")
+              local _, take_name = reaper.GetSetMediaItemTakeInfo_String(take, "P_NAME", "", false)
+
+              local new_take = reaper.AddTakeToMediaItem(new_item)
+              reaper.SetMediaItemTake_Source(new_take, reaper.GetMediaItemTake_Source(take))
+              reaper.SetMediaItemTakeInfo_Value(new_take, "D_PLAYRATE", rate)
+              -- How far overlap_start sits past this item's own start,
+              -- converted to source time via the take's own playback rate,
+              -- gives exactly where in the source media to begin.
+              reaper.SetMediaItemTakeInfo_Value(new_take, "D_STARTOFFS",
+                startoffs + (overlap_start - pos) * rate)
+              reaper.SetMediaItemTakeInfo_Value(new_take, "D_VOL",
+                reaper.GetMediaItemTakeInfo_Value(take, "D_VOL"))
+              reaper.SetMediaItemTakeInfo_Value(new_take, "D_PAN",
+                reaper.GetMediaItemTakeInfo_Value(take, "D_PAN"))
+              reaper.SetMediaItemTakeInfo_Value(new_take, "I_CHANMODE",
+                reaper.GetMediaItemTakeInfo_Value(take, "I_CHANMODE"))
+              reaper.GetSetMediaItemTakeInfo_String(new_take, "P_NAME", take_name or "", true)
+            end
+
+            created = created + 1
           end
-
-          created = created + 1
         end
       end
+      if not any_found then unmatched_events = unmatched_events + 1 end
     end
-    if not any_found then unmatched_events = unmatched_events + 1 end
+  end
+
+  -- Recut markers: DME Recut can tell "how much was trimmed/deleted"
+  -- directly from its own Src TC, without a second EDL/Compare — the
+  -- whole premise of this function (see CLB.dme_recut_prepare's doc
+  -- comment: Src TC already IS V1's real position for printed-to-pitch
+  -- stems). Walking moves in their NEW (Rec) order: a gap between
+  -- consecutive events' Rec TC with no matching Src TC gap is new content
+  -- with no V1 source (INSERT); a gap in Src TC with no matching Rec TC
+  -- gap is V1 content that didn't make it into V2 (DELETE). Modeled on
+  -- Matchbox's (Cargo Cult) own marker vocabulary, confirmed from a real
+  -- Matchbox session and its own Markers list view — deliberately NOT its
+  -- bare "x"/">"/"<" edge markers (user's own call: clear to Matchbox's
+  -- regular users, opaque to anyone else, and tellingly absent from
+  -- Matchbox's own categorized Markers list — only its worded Insert/
+  -- Delete/Trim/Extend/Reorder types are) or its Trim/Extend/Reorder
+  -- types (those only arise comparing TWO different EDLs' own clip
+  -- selections — not meaningful within one EDL's own Src-vs-Rec, where
+  -- duration is always identical per CMX3600 rules; that's what
+  -- Trimmed/Extended/Moved in hsuanice_CLB Compare Engine.lua are for).
+  -- Skippable via CLB.dme_recut_markers (the popup's Marker toggle).
+  local n_markers = 0
+  if CLB.dme_recut_markers then
+    local by_rec = {}
+    for _, mv in ipairs(moves) do
+      by_rec[#by_rec + 1] = {
+        src_in = mv.src_in, src_out = mv.src_out,
+        rec_in = mv.rec_in, rec_out = mv.rec_in + (mv.src_out - mv.src_in),
+      }
+    end
+    table.sort(by_rec, function(a, b) return a.rec_in < b.rec_in end)
+    local DELETE_COLOR = CMP.TYPE_COLOR.Deleted   -- red  — reused for visual consistency with Analyze & Match
+    local INSERT_COLOR = CMP.TYPE_COLOR.Extended  -- green
+    for i = 2, #by_rec do
+      local prev, cur = by_rec[i - 1], by_rec[i]
+      local rec_gap = cur.rec_in - prev.rec_out
+      local src_gap = cur.src_in - prev.src_out
+      if src_gap > TOL then
+        reaper.AddProjectMarker2(0, false, cur.rec_in, 0, "Delete For " .. tc(src_gap), -1, DELETE_COLOR)
+        n_markers = n_markers + 1
+      end
+      if rec_gap > TOL then
+        reaper.AddProjectMarker2(0, false, prev.rec_out, 0, "Insert For " .. tc(rec_gap), -1, INSERT_COLOR)
+        n_markers = n_markers + 1
+      end
+    end
   end
 
   reaper.PreventUIRefresh(-1)
   reaper.UpdateArrange()
-  reaper.Undo_EndBlock(string.format("CLB: DME Recut (%d event(s), %d item(s) created)", #moves, created), -1)
+  reaper.Undo_EndBlock(string.format("CLB: DME Recut (%d event(s), %d item(s) %s)",
+    #moves, created, mode == "cut" and "moved" or "created"), -1)
+
+  CLB.dme_recut_pending = nil
 
   local done_msg = string.format(
-    "DME Recut done.\n\n%d event(s) processed, %d real item(s) created.\n\n"
-    .. "Originals were left untouched — this copied from them.",
-    #moves, created)
+    "DME Recut done.\n\n%d event(s) processed, %d real item(s) %s.",
+    #moves, created, mode == "cut" and "moved/split" or "created")
+  if n_markers > 0 then
+    done_msg = done_msg .. string.format("\n%d Delete/Insert marker(s) added.", n_markers)
+  end
+  done_msg = done_msg .. (mode == "cut"
+    and "\n\nOriginals were split/repositioned directly."
+    or "\n\nOriginals were left untouched — this copied from them.")
   if unmatched_events > 0 then
     done_msg = done_msg .. string.format(
       "\n\n%d event(s) had nothing on the selected track(s) at their Src\n"
       .. "TC range — skipped.", unmatched_events)
+  end
+  if #dup_lines > 0 then
+    done_msg = done_msg .. string.format(
+      "\n\n⚠ %d overlapping Src TC range(s) were processed anyway (per\n"
+      .. "your confirmation) — check the result for unwanted duplicate\n"
+      .. "copies.", #dup_lines)
   end
   reaper.ShowMessageBox(done_msg, "DME Recut", 0)
 end
@@ -8337,15 +8679,94 @@ local function draw_toolbar()
   -- TC range directly (originals untouched — see CLB.dme_recut's own doc
   -- comment for why this works for printed-to-pitch DME-stem cut lists).
   if reaper.ImGui_SmallButton(ctx, "DME Recut...##clb_dme_recut") then
-    CLB.dme_recut()
+    CLB.dme_recut_prepare()
   end
   if reaper.ImGui_IsItemHovered(ctx) then
     reaper.ImGui_SetTooltip(ctx,
       "Select the Reaper track(s) to recut, then click this. Uses the\n"
       .. "currently visible/filtered list directly (filter down to one\n"
       .. "stem's rows first, e.g. search \"DX\") — no Compare needed.\n"
-      .. "Whatever occupies each event's Src TC range gets COPIED (the\n"
-      .. "original is left untouched) to its Rec TC range.")
+      .. "Opens a Settings dialog (Copy/Cut, Markers) before running.")
+  end
+  if reaper.ImGui_BeginPopup(ctx, "DME Recut Settings##clb_dme_recut_popup") then
+    local pending = CLB.dme_recut_pending
+    reaper.ImGui_Text(ctx, "DME Recut Settings")
+    if pending then
+      reaper.ImGui_TextDisabled(ctx, string.format(
+        "%d event(s) on %d selected track(s).", #pending.moves, #pending.sel_tracks))
+    end
+    reaper.ImGui_Separator(ctx)
+
+    reaper.ImGui_Text(ctx, "Mode:")
+    reaper.ImGui_SameLine(ctx)
+    if reaper.ImGui_RadioButton(ctx, "Copy (keep originals)##clb_dme_recut_mode_copy", CLB.dme_recut_mode ~= "cut") then
+      CLB.dme_recut_mode = "copy"; save_prefs()
+    end
+    reaper.ImGui_SameLine(ctx)
+    if reaper.ImGui_RadioButton(ctx, "Cut (move originals)##clb_dme_recut_mode_cut", CLB.dme_recut_mode == "cut") then
+      CLB.dme_recut_mode = "cut"; save_prefs()
+    end
+
+    local chg_mk, new_mk = reaper.ImGui_Checkbox(ctx, "Add Delete/Insert markers##clb_dme_recut_markers", CLB.dme_recut_markers)
+    if chg_mk then CLB.dme_recut_markers = new_mk; save_prefs() end
+
+    if pending and pending.dup_warning and pending.dup_warning ~= "" then
+      reaper.ImGui_Separator(ctx)
+      reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Text(), 0xFFB000FF)
+      reaper.ImGui_TextWrapped(ctx, pending.dup_warning)
+      reaper.ImGui_PopStyleColor(ctx)
+    end
+
+    reaper.ImGui_Separator(ctx)
+    if reaper.ImGui_Button(ctx, "Run It##clb_dme_recut_run", scale(90), scale(22)) then
+      reaper.ImGui_CloseCurrentPopup(ctx)
+      CLB.dme_recut_execute()
+    end
+    reaper.ImGui_SameLine(ctx)
+    if reaper.ImGui_Button(ctx, "Cancel##clb_dme_recut_cancel", scale(70), scale(22)) then
+      CLB.dme_recut_pending = nil
+      reaper.ImGui_CloseCurrentPopup(ctx)
+    end
+    reaper.ImGui_EndPopup(ctx)
+  end
+  reaper.ImGui_SameLine(ctx)
+
+  -- Shift Range: the same real-data-moving action Compare's "Offset Old"
+  -- already has (CMP.shift_range), exposed here too — Compare mode isn't
+  -- part of the DME Recut workflow at all, so that copy was unreachable
+  -- from it. Just the move itself; the Compare-only "Offset Old" checkbox
+  -- (a VIRTUAL offset for Analyze & Match's matching math) stays in the
+  -- Modes popup, since it has no meaning outside Compare. Requires a
+  -- Razor Edit or Time Selection (see CMP.shift_range's doc comment) —
+  -- no longer shifts a whole track unconditionally.
+  if reaper.ImGui_SmallButton(ctx, "Shift Range...##clb_shift_tracks") then
+    reaper.ImGui_OpenPopup(ctx, "Shift Range##clb_shift_tracks_popup")
+  end
+  if reaper.ImGui_IsItemHovered(ctx) then
+    reaper.ImGui_SetTooltip(ctx,
+      "Move everything inside a Razor Edit area, or a Time Selection on\n"
+      .. "the Reaper-selected track(s), by N hours — items (split at the\n"
+      .. "range edges) AND any project marker/region fully inside that\n"
+      .. "time span. E.g. to stage V1's real content out of the way\n"
+      .. "before a DME Recut. Undoable (Edit > Undo).")
+  end
+  if reaper.ImGui_BeginPopup(ctx, "Shift Range##clb_shift_tracks_popup") then
+    reaper.ImGui_Text(ctx, "Shift Range")
+    reaper.ImGui_TextDisabled(ctx,
+      "Make a Razor Edit selection, or a Time Selection + select the\n"
+      .. "track(s) to shift in Reaper, first.")
+    reaper.ImGui_Separator(ctx)
+    reaper.ImGui_SetNextItemWidth(ctx, scale(90))
+    local chg_h, new_h = reaper.ImGui_InputInt(ctx, "hours##clb_shift_tracks_h", CLB.offset_old_hours or 10)
+    if chg_h then CLB.offset_old_hours = new_h; save_prefs() end
+    if reaper.ImGui_Button(ctx, "Shift Now##clb_shift_tracks_go", scale(100), 0) then
+      CMP.shift_range(CLB.offset_old_hours or 0, "old")
+    end
+    reaper.ImGui_Separator(ctx)
+    if reaper.ImGui_Button(ctx, "Close##clb_shift_tracks_close", scale(70), scale(22)) then
+      reaper.ImGui_CloseCurrentPopup(ctx)
+    end
+    reaper.ImGui_EndPopup(ctx)
   end
   reaper.ImGui_SameLine(ctx)
 
@@ -9656,14 +10077,14 @@ local function draw_edl_panel_header()
     if reaper.ImGui_BeginPopup(ctx, "Apply Resolution Modes##cmp_apply_modes_popup") then
       reaper.ImGui_Text(ctx, "Tried in this order; untoggle to skip a strategy:")
       reaper.ImGui_Separator(ctx)
-      local chg_a, new_a = reaper.ImGui_Checkbox(ctx, "Matched Item (metadata identity)", CLB.apply_mode_a)
-      if chg_a then CLB.apply_mode_a = new_a; save_prefs() end
+      local chg_matched, new_matched = reaper.ImGui_Checkbox(ctx, "Matched Item (metadata identity)", CLB.apply_mode_matched)
+      if chg_matched then CLB.apply_mode_matched = new_matched; save_prefs() end
       reaper.ImGui_TextDisabled(ctx, "    P_EXT:CLB_REEL + Source TC on the item — exact content\n    identity, wherever it currently sits.")
-      local chg_c, new_c = reaper.ImGui_Checkbox(ctx, "Length Match (within range)", CLB.apply_mode_c)
-      if chg_c then CLB.apply_mode_c = new_c; save_prefs() end
+      local chg_length, new_length = reaper.ImGui_Checkbox(ctx, "Length Match (within range)", CLB.apply_mode_length)
+      if chg_length then CLB.apply_mode_length = new_length; save_prefs() end
       reaper.ImGui_TextDisabled(ctx, "    An item overlapping the old range whose own length\n    matches the target's — no metadata needed.")
-      local chg_b, new_b = reaper.ImGui_Checkbox(ctx, "Range Clear", CLB.apply_mode_b)
-      if chg_b then CLB.apply_mode_b = new_b; save_prefs() end
+      local chg_range, new_range = reaper.ImGui_Checkbox(ctx, "Range Clear", CLB.apply_mode_range)
+      if chg_range then CLB.apply_mode_range = new_range; save_prefs() end
       reaper.ImGui_TextDisabled(ctx, "    Clear whatever occupies the old range regardless of\n    item boundaries — splits at the range edges.")
       reaper.ImGui_Separator(ctx)
 
@@ -9680,10 +10101,10 @@ local function draw_edl_panel_header()
       reaper.ImGui_Text(ctx, "hours")
       reaper.ImGui_Indent(ctx, scale(16))
       if reaper.ImGui_SmallButton(ctx, "Shift Selected Tracks Now##cmp_off_old_go") then
-        CMP.offset_selected_tracks(CLB.offset_old_hours or 0, "old")
+        CMP.shift_range(CLB.offset_old_hours or 0, "old")
       end
       if reaper.ImGui_IsItemHovered(ctx) then
-        reaper.ImGui_SetTooltip(ctx, "Moves every unlocked item on the Reaper-selected track(s)\nby this many hours, right now. Undoable (Edit > Undo).")
+        reaper.ImGui_SetTooltip(ctx, "Moves everything inside a Razor Edit area, or a Time\nSelection on the Reaper-selected track(s), by this many\nhours, right now. Undoable (Edit > Undo).")
       end
       reaper.ImGui_Unindent(ctx, scale(16))
 
@@ -11877,160 +12298,257 @@ function CMP.write_apply_report(title, summary_line, rows)
   return filepath
 end
 
---- Apply the recut groups behind the currently-selected table row(s) — see
---- "Show as Table" — to the user's REAPER-selected track(s). First
---- increment: "Deleted" groups only (find the item positioned at the old
---- REC TC range on a selected track and remove it, leaving a red marker at
---- that position for QC). Trimmed/Extended/Moved/Added are reported as not
---- yet supported and left untouched — selecting them alongside a Deleted
---- group still applies the Deleted ones.
---- Physically shifts every item on the currently REAPER-selected track(s)
---- by `hours` (may be negative), locked items included (temporarily
---- unlocked, shifted, then re-locked — see below). Used to move the "old"
---- real session out of the way before Compare-session matching, so the
---- pristine cut is preserved as a source pool while "new" is rebuilt in the
---- vacated real-timeline space (see CLB.offset_old_enabled/offset_old_hours
---- in the "Modes..." popup).
---- `side` ("old" or "new") says which side of the loaded Compare result (if
---- any) this shift corresponds to: once items are actually moved, that
---- side's dedup event positions (cr.old_dedup/new_dedup — read live by the
---- Recut Group Details table, the graphical Compare timeline, and every
---- click-to-jump) are updated by the same delta, so "Old Rec TC" etc. keep
---- pointing at where the item really is now instead of its pre-shift
---- position. The matching-only "virtual" offset for that side (Offset Old/
---- New's checkbox) is then turned off, since the shift is now baked
---- directly into the data — leaving it on would double-count it.
-function CMP.offset_selected_tracks(hours, side)
-  local n_sel_tracks = reaper.CountSelectedTracks(0)
-  if n_sel_tracks == 0 then
-    reaper.ShowMessageBox("Select at least one track in Reaper first.", SCRIPT_NAME, 0)
-    return
+--- Finds whatever's physically on `track` overlapping [range_start,
+--- range_end] (TOL-tolerant), splits it at the range edges as needed so
+--- content outside the range is left untouched, and shifts the isolated
+--- portion by `delta` seconds. A locked item is unlocked before
+--- splitting/moving and every resulting piece is re-locked afterward, so
+--- a locked item straddling the range edge ends up as a locked remainder
+--- plus a locked, moved piece — same lock intent, just split.
+---
+--- Snapshots the track's item pointers fresh right before scanning (not a
+--- live index loop) — REAPER's own per-track item index order isn't
+--- guaranteed stable once items are split/repositioned mid-scan, the
+--- exact bug class CLB.dme_recut_execute's Cut mode hit and fixed this
+--- same way. Shared by CMP.shift_range (below) and DME Recut's Cut mode.
+function CLB.cut_shift_range(track, range_start, range_end, delta, TOL)
+  local snap = {}
+  local n = reaper.CountTrackMediaItems(track)
+  for i = 0, n - 1 do snap[#snap + 1] = reaper.GetTrackMediaItem(track, i) end
+  local moved = 0
+  for _, item in ipairs(snap) do
+    local pos  = reaper.GetMediaItemInfo_Value(item, "D_POSITION")
+    local iend = pos + reaper.GetMediaItemInfo_Value(item, "D_LENGTH")
+    local overlap_start = math.max(pos, range_start)
+    local overlap_end   = math.min(iend, range_end)
+    if overlap_end > overlap_start + TOL then
+      local orig_locked = (reaper.GetMediaItemInfo_Value(item, "C_LOCK") & 1) == 1
+      local pieces = { item }
+      if orig_locked then reaper.SetMediaItemInfo_Value(item, "C_LOCK", 0) end
+
+      local working = item
+      if overlap_start > pos + TOL then
+        local right = reaper.SplitMediaItem(working, overlap_start)
+        if right then working = right; pieces[#pieces + 1] = right end
+      end
+      local w_pos = reaper.GetMediaItemInfo_Value(working, "D_POSITION")
+      local w_len = reaper.GetMediaItemInfo_Value(working, "D_LENGTH")
+      if overlap_end < w_pos + w_len - TOL then
+        local right2 = reaper.SplitMediaItem(working, overlap_end)
+        if right2 then pieces[#pieces + 1] = right2 end
+      end
+
+      reaper.SetMediaItemInfo_Value(working, "D_POSITION", w_pos + delta)
+
+      if orig_locked then
+        for _, p in ipairs(pieces) do reaper.SetMediaItemInfo_Value(p, "C_LOCK", 1) end
+      end
+      moved = moved + 1
+    end
   end
+  return moved
+end
+
+--- Shifts every project marker/region whose position falls within any of
+--- `windows` (a list of {start=,stop=}, time-only — track selection has no
+--- meaning for markers/regions) by `delta` seconds. A marker counts as
+--- in-range if its own position falls in a window; a region counts only
+--- if BOTH its start and end fall within the SAME window — one straddling
+--- a window edge is left alone rather than guessing how to resolve it.
+---
+--- Repositions each hit IN PLACE via SetProjectMarker4 (same ID number,
+--- same call) rather than deleting and recreating — REAPER's ReaScript
+--- API has no getter/setter for a marker/region's ruler "lane" assignment,
+--- but since this never deletes the object, whatever REAPER itself tracks
+--- that isn't exposed here (lane included) simply isn't touched and stays
+--- exactly as it was. Snapshots via EnumProjectMarkers3 first (same
+--- "don't mutate what you're iterating" reasoning as CLB.cut_shift_range).
+function CLB.shift_markers_regions(windows, delta, TOL)
+  local function in_any_window(pos, pos2)
+    for _, w in ipairs(windows) do
+      if pos2 then
+        if pos >= w.start - TOL and pos2 <= w.stop + TOL then return true end
+      elseif pos >= w.start - TOL and pos <= w.stop + TOL then
+        return true
+      end
+    end
+    return false
+  end
+
+  local snap = {}
+  local i = 0
+  while true do
+    local retval, isrgn, pos, rgnend, name, idnum, color = reaper.EnumProjectMarkers3(0, i)
+    if retval == 0 then break end
+    snap[#snap + 1] = { isrgn = isrgn, pos = pos, rgnend = rgnend, name = name, id = idnum, color = color }
+    i = i + 1
+  end
+
+  local moved = 0
+  for _, m in ipairs(snap) do
+    local hit = m.isrgn and in_any_window(m.pos, m.rgnend) or in_any_window(m.pos, nil)
+    if hit then
+      local new_pos    = m.pos + delta
+      local new_rgnend = m.isrgn and (m.rgnend + delta) or new_pos
+      reaper.SetProjectMarker4(0, m.id, m.isrgn, new_pos, new_rgnend, m.name, m.color, 0)
+      moved = moved + 1
+    end
+  end
+  return moved
+end
+
+--- Collects the ranges to shift: Razor Edit areas (if any exist on any
+--- track in the project) take priority — each area already carries its
+--- own track + time range, so REAPER's track selection (TCP) is ignored
+--- entirely in that case. Otherwise falls back to Time Selection x
+--- REAPER-selected track(s) (TCP selection required). Envelope-lane razor
+--- areas (their 3rd field is a non-empty envelope GUID, not "") are
+--- skipped — this is about media items, not automation points. Returns
+--- nil if neither a razor edit nor a (time selection + track selection)
+--- is present — caller must refuse to run rather than guess a scope.
+function CLB._collect_shift_ranges()
+  local ranges = {}
+  local n_tracks = reaper.CountTracks(0)
+  for i = 0, n_tracks - 1 do
+    local track = reaper.GetTrack(0, i)
+    local ok, raz = reaper.GetSetMediaTrackInfo_String(track, "P_RAZOREDITS", "", false)
+    if ok and raz and raz ~= "" then
+      for a, b, env_guid in raz:gmatch('(%S+)%s+(%S+)%s+"(.-)"') do
+        if env_guid == "" then
+          local s, e = tonumber(a), tonumber(b)
+          if s and e and e > s then
+            ranges[#ranges + 1] = { track = track, start = s, stop = e }
+          end
+        end
+      end
+    end
+  end
+  if #ranges > 0 then return ranges, "razor edit" end
+
+  local ts_start, ts_end = reaper.GetSet_LoopTimeRange2(0, false, false, 0, 0, false)
+  if not (ts_end > ts_start) then return nil, nil end
+  local n_sel = reaper.CountSelectedTracks(0)
+  if n_sel == 0 then return nil, nil end
+  for i = 0, n_sel - 1 do
+    ranges[#ranges + 1] = { track = reaper.GetSelectedTrack(0, i), start = ts_start, stop = ts_end }
+  end
+  return ranges, "time selection"
+end
+
+--- Physically shifts whatever's inside the current range selection —
+--- Razor Edit areas if any exist (their own track + time range), else
+--- Time Selection x REAPER-selected track(s) — by `hours` (may be
+--- negative): items (split at the range edges, locked items included —
+--- see CLB.cut_shift_range) AND project markers/regions whose own
+--- position falls inside that same time span (see
+--- CLB.shift_markers_regions). Requires an explicit range; refuses to run
+--- on "select some tracks and click" alone (see CLB._collect_shift_ranges).
+---
+--- Used to move the "old" real session out of the way before Compare-
+--- session matching, so the pristine cut is preserved as a source pool
+--- while "new" is rebuilt in the vacated real-timeline space (see
+--- CLB.offset_old_enabled/offset_old_hours in the "Modes..." popup) — or,
+--- outside Compare, to stage DME Recut's V1 content before a recut.
+--- `side` ("old" or "new") says which side of the loaded Compare result
+--- (if any) this shift corresponds to: once items are actually moved,
+--- that side's dedup event positions (cr.old_dedup/new_dedup — read live
+--- by the Recut Group Details table, the graphical Compare timeline, and
+--- every click-to-jump) are updated by the same delta FOR WHICHEVER
+--- entries fall inside the shifted time span (not unconditionally every
+--- entry, unlike the old whole-track version of this function — this is
+--- now a scoped shift). The matching-only "virtual" offset for that side
+--- (Offset Old/New's checkbox in "Modes...") is NOT auto-disabled anymore
+--- (the old whole-track version did, since back then the shift always
+--- covered every entry) — a scoped shift may only bake in some of them,
+--- so leaving that decision to the user is safer than guessing.
+function CMP.shift_range(hours, side)
   local delta = (hours or 0) * 3600
   if delta == 0 then
     reaper.ShowMessageBox("Offset is 0 hours — nothing to do.", SCRIPT_NAME, 0)
     return
   end
 
-  local sel_tracks = {}
-  for i = 0, n_sel_tracks - 1 do
-    sel_tracks[#sel_tracks + 1] = reaper.GetSelectedTrack(0, i)
+  local ranges, source = CLB._collect_shift_ranges()
+  if not ranges then
+    reaper.ShowMessageBox(
+      "No range to shift — make a Razor Edit selection, or a Time\n"
+      .. "Selection plus select the track(s) to shift in REAPER first.",
+      SCRIPT_NAME, 0)
+    return
   end
 
-  -- Snapshot every item pointer up front, per track, BEFORE moving
-  -- anything. Reaper keeps each track's item list sorted by position, so
-  -- moving item i re-sorts the list the *other* indices refer to; reading
-  -- GetTrackMediaItem(track, i) fresh on every loop iteration while
-  -- shifting positions mid-loop skips some items entirely and can leave a
-  -- run of touching items fragmented across several different, unevenly-
-  -- spaced landing spots — confirmed by a real multi-hundred-item run
-  -- where some items landed at the correct +10h and others didn't move at
-  -- all, or piled up elsewhere. Snapshotting pointers into a fixed Lua
-  -- list first and looping over THAT avoids the re-sort entirely.
-  local items = {}
-  for _, track in ipairs(sel_tracks) do
-    local n = reaper.CountTrackMediaItems(track)
-    for i = 0, n - 1 do
-      items[#items + 1] = reaper.GetTrackMediaItem(track, i)
-    end
-  end
+  local fps = CLB.fps or 24
+  local TOL = 0.5 / fps
 
-  local locked_count = 0
-  for _, item in ipairs(items) do
-    if reaper.GetMediaItemInfo_Value(item, "C_LOCK") ~= 0 then
-      locked_count = locked_count + 1
-    end
+  local tracks_seen, n_tracks = {}, 0
+  for _, r in ipairs(ranges) do
+    if not tracks_seen[r.track] then tracks_seen[r.track] = true; n_tracks = n_tracks + 1 end
   end
 
   local sign  = delta >= 0 and "+" or "-"
   local abs_h = math.abs(hours or 0)
   local msg = string.format(
-    "Shift all items on %d selected track(s) by %s%g hour(s)?\n\n%d item(s) total%s.\n\n" ..
-    "This moves real item positions in this Reaper project — undoable via\n" ..
-    "Edit > Undo, but is separate from the Compare/Apply report.",
-    #sel_tracks, sign, abs_h, #items,
-    locked_count > 0 and string.format(" (%d locked — unlocked, shifted, then re-locked)", locked_count) or "")
-  if reaper.ShowMessageBox(msg, "Offset Tracks", 1) ~= 1 then return end
+    "Shift everything inside the current %s by %s%g hour(s)?\n\n" ..
+    "%d range(s) across %d track(s), plus any project marker/region\n" ..
+    "fully inside that time span.\n\n" ..
+    "Items are split at the range edges — only the portion inside moves.\n" ..
+    "This moves real project data — undoable via Edit > Undo, but is\n" ..
+    "separate from the Compare/Apply report.",
+    source, sign, abs_h, #ranges, n_tracks)
+  if reaper.ShowMessageBox(msg, "Shift Range", 1) ~= 1 then return end
 
   reaper.Undo_BeginBlock()
   reaper.PreventUIRefresh(1)
-  local moved = 0
-  local region_start, region_end = nil, nil
-  for _, item in ipairs(items) do
-    local orig_lock = reaper.GetMediaItemInfo_Value(item, "C_LOCK")
-    if orig_lock ~= 0 then reaper.SetMediaItemInfo_Value(item, "C_LOCK", 0) end
-    local pos = reaper.GetMediaItemInfo_Value(item, "D_POSITION")
-    local len = reaper.GetMediaItemInfo_Value(item, "D_LENGTH")
-    local new_pos = pos + delta
-    reaper.SetMediaItemInfo_Value(item, "D_POSITION", new_pos)
-    if orig_lock ~= 0 then reaper.SetMediaItemInfo_Value(item, "C_LOCK", orig_lock) end
-    moved = moved + 1
-    if not region_start or new_pos < region_start then region_start = new_pos end
-    local new_end = new_pos + len
-    if not region_end or new_end > region_end then region_end = new_end end
-  end
 
-  -- Label the shifted span with a region so it's obvious at a glance on
-  -- the timeline/ruler which stretch is the (now offset) old — or new —
-  -- material. Re-running this replaces the same-named region rather than
-  -- piling up a fresh one every time.
-  local region_label = "CLB: " .. ((side == "new") and "NEW" or "OLD")
-  if region_start and region_end then
-    local region_color = (side == "new")
-      and (reaper.ColorToNative(220, 150, 60) | 0x1000000)
-      or  (reaper.ColorToNative(140, 140, 140) | 0x1000000)
-    local i = 0
-    while true do
-      local retval, isrgn, _, _, name, idx = reaper.EnumProjectMarkers3(0, i)
-      if retval == 0 then break end
-      if isrgn and name == region_label then
-        reaper.DeleteProjectMarker(0, idx, true)
-      else
-        i = i + 1
-      end
-    end
-    reaper.AddProjectMarker2(0, true, region_start, region_end, region_label, -1, region_color)
+  local moved = 0
+  local windows = {}
+  for _, r in ipairs(ranges) do
+    moved = moved + CLB.cut_shift_range(r.track, r.start, r.stop, delta, TOL)
+    windows[#windows + 1] = { start = r.start, stop = r.stop }
   end
+  local markers_moved = CLB.shift_markers_regions(windows, delta, TOL)
 
   reaper.PreventUIRefresh(-1)
-  reaper.Undo_EndBlock(string.format("CLB: Offset %d item(s) by %s%g hour(s)", moved, sign, abs_h), -1)
+  reaper.Undo_EndBlock(string.format("CLB: Shift range by %s%g hour(s)", sign, abs_h), -1)
   reaper.UpdateArrange()
 
-  -- Explicit confirmation of exactly how many items this script actually
-  -- moved — a docked overview/clock panel (Items:/Tracks:/Start/End/Length)
-  -- reflects whatever is currently item- or time-selected, not necessarily
-  -- all items on the shifted tracks, so it can look like "fewer moved than
-  -- expected" even when every one of them did.
   -- Bake the shift into the matching Compare-result dedup list (if one is
-  -- loaded), so every live reader of old/new rec_in/rec_out — Recut Group
-  -- Details, the graphical Compare timeline, click-to-jump — reflects where
-  -- the item actually sits now. Also disable that side's virtual offset
-  -- (Modes... popup), since it's now redundant with this real change.
+  -- loaded) — but ONLY for entries whose own Rec TC falls inside one of
+  -- the shifted windows, since this is now a scoped shift, not always the
+  -- whole track (see this function's own doc comment for why the virtual
+  -- offset checkbox is deliberately left alone here, unlike before).
   local baked_msg = ""
   local cr = CLB.compare_result
   if cr and (side == "old" or side == "new") then
     local dedup = (side == "old") and cr.old_dedup or cr.new_dedup
+    local baked = 0
     for _, e in ipairs(dedup or {}) do
-      e.rec_in  = e.rec_in  + delta
-      e.rec_out = e.rec_out + delta
+      for _, w in ipairs(windows) do
+        if e.rec_in >= w.start - TOL and e.rec_out <= w.stop + TOL then
+          e.rec_in  = e.rec_in  + delta
+          e.rec_out = e.rec_out + delta
+          baked = baked + 1
+          break
+        end
+      end
     end
-    if side == "old" then CLB.offset_old_enabled = false else CLB.offset_new_enabled = false end
-    save_prefs()
-    -- "Show as Table" caches old/new TC as formatted strings at build
-    -- time — rebuild so those reflect the shift too.
-    if CLB.viewing_compare_groups then
-      ROWS = CMP.build_group_rows(cr)
-      CLB.cached_rows = nil
+    if baked > 0 then
+      -- "Show as Table" caches old/new TC as formatted strings at build
+      -- time — rebuild so those reflect the shift too.
+      if CLB.viewing_compare_groups then
+        ROWS = CMP.build_group_rows(cr)
+        CLB.cached_rows = nil
+      end
+      baked_msg = string.format(
+        "\n\nAlso updated %d %s Rec TC entry/entries in the loaded Compare result to match.",
+        baked, side == "old" and "Old" or "New")
     end
-    baked_msg = string.format(
-      "\n\nAlso updated %s Rec TC in the loaded Compare result to match — " ..
-      "\"Offset %s\" is now off (the shift is baked in).",
-      side == "old" and "Old" or "New", side == "old" and "Old" or "New")
   end
 
   reaper.ShowMessageBox(
-    string.format("Shifted %d item(s) by %s%g hour(s) on %d track(s).%s", moved, sign, abs_h, #sel_tracks, baked_msg),
-    "Offset Tracks", 0)
+    string.format("Shifted %d item piece(s) and %d marker/region(s) by %s%g hour(s), from a %s.%s",
+      moved, markers_moved, sign, abs_h, source, baked_msg),
+    "Shift Range", 0)
 end
 
 -- Reaper does not enforce unique track names (confirmed by real use — two
@@ -12048,14 +12566,15 @@ function CMP.item_take_name(item)
   return take and select(2, reaper.GetSetMediaItemTakeInfo_String(take, "P_NAME", "", false)) or "(no take)"
 end
 
---- Mode A: does any item on `sel_tracks` carry P_EXT:CLB_REEL / CLB_SRC_TC_
---- IN/OUT metadata (written by Generate Items / conform_matched_items)
---- identifying it as THIS target's own content, regardless of where it
---- currently sits? Content identity, not position coincidence — so target's
---- src_in/src_out need no offset adjustment even when the session has been
---- shifted (see CMP.offset_selected_tracks). Single match by design.
+--- Matched Item: does any item on `sel_tracks` carry P_EXT:CLB_REEL /
+--- CLB_SRC_TC_IN/OUT metadata (written by Generate Items /
+--- conform_matched_items) identifying it as THIS target's own content,
+--- regardless of where it currently sits? Content identity, not position
+--- coincidence — so target's src_in/src_out need no offset adjustment even
+--- when the session has been shifted (see CMP.shift_range). Single match
+--- by design.
 function CMP.find_metadata_match(target, sel_tracks, fps, is_drop, tol)
-  if not CLB.apply_mode_a then return nil, nil end
+  if not CLB.apply_mode_matched then return nil, nil end
   for _, track in ipairs(sel_tracks) do
     local n_items = reaper.CountTrackMediaItems(track)
     for i = 0, n_items - 1 do
@@ -12081,15 +12600,16 @@ function CMP.find_metadata_match(target, sel_tracks, fps, is_drop, tol)
   return nil, nil
 end
 
---- Mode C: EVERY item overlapping the target's REC TC range (the caller
---- offset-adjusts target.rec_in/rec_out first if the session was shifted)
---- whose own length matches the target's — no metadata needed. Sweeps
---- *all* qualifying items, not just the first (see CMP.apply_to_reaper's
---- Deleted-mode testing notes for why this matters). `exclude_item` is
---- Mode A's own match for this target, if any, so it isn't listed twice.
+--- Length Match: EVERY item overlapping the target's REC TC range (the
+--- caller offset-adjusts target.rec_in/rec_out first if the session was
+--- shifted) whose own length matches the target's — no metadata needed.
+--- Sweeps *all* qualifying items, not just the first (see
+--- CMP.apply_to_reaper's Deleted-mode testing notes for why this
+--- matters). `exclude_item` is Matched Item's own match for this target,
+--- if any, so it isn't listed twice.
 function CMP.find_all_length_matches(target, sel_tracks, exclude_item, tol)
   local out = {}
-  if not CLB.apply_mode_c then return out end
+  if not CLB.apply_mode_length then return out end
   local target_len = target.rec_out - target.rec_in
   for _, track in ipairs(sel_tracks) do
     local n_items = reaper.CountTrackMediaItems(track)
@@ -12176,18 +12696,18 @@ end
 --- recut type and get a take marker naming the group's own label (e.g.
 --- "Trimmed (head +0f/tail+78f)", "Shift +86392f (635 clips)"), so a glance
 --- at the arrange view shows what Apply would do to them. Offset-aware: if
---- Offset Old is enabled (see CMP.offset_selected_tracks), old positions
---- are searched at their shifted location, not their original one.
+--- Offset Old is enabled (see CMP.shift_range), old positions are
+--- searched at their shifted location, not their original one.
 ---
 --- Also persists a single definitive match on the candidate itself
---- (c.match = {item, kind}) whenever it's unambiguous — Mode A's own pick,
---- or exactly one Mode C hit — so the Recut Group Details table's "Matched
---- Item" column can show/correct it afterward (see CMP.assign_group_
---- detail_match / CMP.clear_group_detail_match). Multiple Mode C hits with
---- no Mode A pick is genuinely ambiguous (which one is really it?), so
---- c.match is left nil for those — needs a manual pick. Doesn't affect
---- Deleted, which intentionally clears every hit regardless and has no
---- manual-correction UI.
+--- (c.match = {item, kind}) whenever it's unambiguous — Matched Item's
+--- own pick, or exactly one Length Match hit — so the Recut Group
+--- Details table's "Matched Item" column can show/correct it afterward
+--- (see CMP.assign_group_detail_match / CMP.clear_group_detail_match).
+--- Multiple Length Match hits with no Matched Item pick is genuinely
+--- ambiguous (which one is really it?), so c.match is left nil for those
+--- — needs a manual pick. Doesn't affect Deleted, which intentionally
+--- clears every hit regardless and has no manual-correction UI.
 function CMP.analyze_and_match_session()
   local cr = CLB.compare_result
   if not cr then
@@ -12208,7 +12728,7 @@ function CMP.analyze_and_match_session()
     sel_tracks[#sel_tracks + 1] = reaper.GetSelectedTrack(0, i)
   end
 
-  if not (CLB.apply_mode_a or CLB.apply_mode_c) then
+  if not (CLB.apply_mode_matched or CLB.apply_mode_length) then
     reaper.ShowMessageBox(
       "Matched Item and Length Match are both disabled in 'Modes...' — enable at least one to analyze.",
       SCRIPT_NAME, 0)
@@ -12256,11 +12776,11 @@ function CMP.analyze_and_match_session()
               end
             end
             if a_item then
-              c.match = { item = a_item, kind = "auto_a" }
+              c.match = { item = a_item, kind = "auto_matched" }
             elseif #hits == 1 then
-              c.match = { item = hits[1], kind = "auto_c" }
+              c.match = { item = hits[1], kind = "auto_length" }
             else
-              c.match = nil  -- ambiguous (multiple Mode C hits, no Mode A pick) — needs a manual pick
+              c.match = nil  -- ambiguous (multiple Length Match hits, no Matched Item pick) — needs a manual pick
             end
           end
         end
@@ -12439,7 +12959,7 @@ function CMP.apply_to_reaper()
   local is_drop = (CLB.compare_result and CLB.compare_result.is_drop) or false
   local TOL     = 1.5 / fps  -- ~1.5 frame tolerance
 
-  if not (CLB.apply_mode_a or CLB.apply_mode_c or CLB.apply_mode_b) then
+  if not (CLB.apply_mode_matched or CLB.apply_mode_length or CLB.apply_mode_range) then
     reaper.ShowMessageBox("All resolution strategies (Matched Item / Length Match / Range Clear) are disabled — enable at least one in 'Modes...'.", SCRIPT_NAME, 0)
     return
   end
@@ -12457,12 +12977,12 @@ function CMP.apply_to_reaper()
     return CMP.find_all_length_matches(target, sel_tracks, exclude_item, TOL)
   end
 
-  -- Dry-run scan: for each target, Mode A (single precise match) and Mode C
-  -- (sweep of every length-matching item) both contribute independently
-  -- when enabled; Mode B (range clear) only runs as a fallback when
-  -- neither A nor C found anything for that target. Preview exactly what
-  -- was found before touching anything, so a coincidence or surprise can
-  -- be caught here instead of discovered afterward via Undo.
+  -- Dry-run scan: for each target, Matched Item (single precise match) and
+  -- Length Match (sweep of every length-matching item) both contribute
+  -- independently when enabled; Range Clear only runs as a fallback when
+  -- neither found anything for that target. Preview exactly what was
+  -- found before touching anything, so a coincidence or surprise can be
+  -- caught here instead of discovered afterward via Undo.
   local plan, locked_list = {}, {}
   for _, t in ipairs(targets) do
     local resolved = false
@@ -12473,7 +12993,7 @@ function CMP.apply_to_reaper()
       resolved = true
       a_item = mitem
       local locked = (reaper.GetMediaItemInfo_Value(mitem, "C_LOCK") & 1) == 1
-      local entry = { mode = "A", track = mtrack, item = mitem, track_name = track_label(mtrack),
+      local entry = { mode = "matched", track = mtrack, item = mitem, track_name = track_label(mtrack),
                        take_name = item_take_name(mitem), target = t }
       if locked then locked_list[#locked_list + 1] = entry else plan[#plan + 1] = entry end
     end
@@ -12481,12 +13001,12 @@ function CMP.apply_to_reaper()
     for _, hit in ipairs(find_all_length_matches(t, a_item)) do
       resolved = true
       local locked = (reaper.GetMediaItemInfo_Value(hit.item, "C_LOCK") & 1) == 1
-      local entry = { mode = "C", track = hit.track, item = hit.item, track_name = track_label(hit.track),
+      local entry = { mode = "length", track = hit.track, item = hit.item, track_name = track_label(hit.track),
                        take_name = item_take_name(hit.item), target = t }
       if locked then locked_list[#locked_list + 1] = entry else plan[#plan + 1] = entry end
     end
 
-    if not resolved and CLB.apply_mode_b then
+    if not resolved and CLB.apply_mode_range then
       for _, track in ipairs(sel_tracks) do
         local n_items = reaper.CountTrackMediaItems(track)
         for i = 0, n_items - 1 do
@@ -12498,7 +13018,7 @@ function CMP.apply_to_reaper()
             resolved = true
             local locked = (reaper.GetMediaItemInfo_Value(item, "C_LOCK") & 1) == 1
             local full = pos >= t.rec_in - TOL and item_end <= t.rec_out + TOL
-            local entry = { mode = "B", track = track, item = item, pos = pos, item_end = item_end,
+            local entry = { mode = "range", track = track, item = item, pos = pos, item_end = item_end,
                              track_name = track_label(track), take_name = item_take_name(item),
                              target = t, full = full }
             if locked then locked_list[#locked_list + 1] = entry else plan[#plan + 1] = entry end
@@ -12516,12 +13036,12 @@ function CMP.apply_to_reaper()
   -- events — keep the confirm dialog to a compact summary (range, track
   -- count, item counts per strategy) and leave the full per-item detail
   -- to the HTML report generated after this runs (see CMP.write_apply_report).
-  local count_a, count_c, count_b_full, count_b_partial, count_none = 0, 0, 0, 0, 0
+  local count_matched, count_length, count_range_full, count_range_partial, count_none = 0, 0, 0, 0, 0
   for _, m in ipairs(plan) do
-    if m.mode == "A" then count_a = count_a + 1
-    elseif m.mode == "C" then count_c = count_c + 1
-    elseif m.mode == "B" then
-      if m.full then count_b_full = count_b_full + 1 else count_b_partial = count_b_partial + 1 end
+    if m.mode == "matched" then count_matched = count_matched + 1
+    elseif m.mode == "length" then count_length = count_length + 1
+    elseif m.mode == "range" then
+      if m.full then count_range_full = count_range_full + 1 else count_range_partial = count_range_partial + 1 end
     else count_none = count_none + 1 end
   end
 
@@ -12532,11 +13052,11 @@ function CMP.apply_to_reaper()
   end
 
   local summary_parts = {}
-  if count_a > 0 then summary_parts[#summary_parts + 1] = count_a .. " via Matched Item" end
-  if count_c > 0 then summary_parts[#summary_parts + 1] = count_c .. " via Length Match" end
-  if count_b_full + count_b_partial > 0 then
+  if count_matched > 0 then summary_parts[#summary_parts + 1] = count_matched .. " via Matched Item" end
+  if count_length > 0 then summary_parts[#summary_parts + 1] = count_length .. " via Length Match" end
+  if count_range_full + count_range_partial > 0 then
     summary_parts[#summary_parts + 1] = string.format("%d via Range Clear (%d full, %d partial)",
-      count_b_full + count_b_partial, count_b_full, count_b_partial)
+      count_range_full + count_range_partial, count_range_full, count_range_partial)
   end
   if count_none > 0 then summary_parts[#summary_parts + 1] = count_none .. " not found" end
   if #locked_list > 0 then summary_parts[#summary_parts + 1] = #locked_list .. " locked (skipped)" end
@@ -12557,7 +13077,8 @@ function CMP.apply_to_reaper()
 
   --- Remove the portion of [item: pos..item_end] that overlaps
   --- [range_start..range_end], splitting at the range edges as needed so
-  --- content outside the range is left untouched (Mode B).
+  --- content outside the range is left untouched (the Range Clear
+  --- strategy's own logic).
   local function clear_item_range(track, item, pos, item_end, range_start, range_end)
     if pos >= range_start - TOL and item_end <= range_end + TOL then
       reaper.DeleteTrackMediaItem(track, item)
@@ -12579,14 +13100,14 @@ function CMP.apply_to_reaper()
   reaper.Undo_BeginBlock()
   reaper.PreventUIRefresh(1)
 
-  local mode_a_count, mode_c_count, mode_b_count = 0, 0, 0
+  local matched_count, length_count, range_count = 0, 0, 0
   for _, m in ipairs(plan) do
-    if m.mode == "A" or m.mode == "C" then
+    if m.mode == "matched" or m.mode == "length" then
       reaper.DeleteTrackMediaItem(m.track, m.item)
-      if m.mode == "A" then mode_a_count = mode_a_count + 1 else mode_c_count = mode_c_count + 1 end
-    elseif m.mode == "B" then
+      if m.mode == "matched" then matched_count = matched_count + 1 else length_count = length_count + 1 end
+    elseif m.mode == "range" then
       clear_item_range(m.track, m.item, m.pos, m.item_end, m.target.rec_in, m.target.rec_out)
-      mode_b_count = mode_b_count + 1
+      range_count = range_count + 1
     end
   end
   for _, t in ipairs(targets) do
@@ -12599,7 +13120,7 @@ function CMP.apply_to_reaper()
 
   local summary_line = string.format(
     "Apply: %d Deleted group(s) across %d selected track(s) — %d Matched Item, %d Length Match, %d Range Clear",
-    #deleted_groups, #sel_tracks, mode_a_count, mode_c_count, mode_b_count)
+    #deleted_groups, #sel_tracks, matched_count, length_count, range_count)
   console_msg(summary_line)
   if #locked_list > 0 then
     console_msg(string.format("  Note: %d item(s) were locked and left untouched.", #locked_list))
@@ -12613,7 +13134,7 @@ function CMP.apply_to_reaper()
   -- Build the HTML report from the exact same plan/locked_list used to
   -- execute — track/item/action/strategy for every target, not just a
   -- console summary, so what happened is reviewable/archivable afterward.
-  local mode_names = { A = "Matched Item", C = "Length Match", B = "Range Clear" }
+  local mode_names = { matched = "Matched Item", length = "Length Match", range = "Range Clear" }
   local report_rows = {}
   for _, m in ipairs(plan) do
     local row = {
@@ -12622,12 +13143,12 @@ function CMP.apply_to_reaper()
       old_out_tc = EDL.seconds_to_tc(m.target.rec_out, fps, is_drop),
       target_label = m.target.label,
     }
-    if m.mode == "A" or m.mode == "C" then
+    if m.mode == "matched" or m.mode == "length" then
       row.status, row.action, row.mode = "done", "Deleted", mode_names[m.mode]
-    elseif m.mode == "B" then
+    elseif m.mode == "range" then
       row.status = m.full and "done" or "partial"
       row.action = m.full and "Deleted (full overlap)" or "Trimmed (partial overlap)"
-      row.mode = mode_names.B
+      row.mode = mode_names.range
     else
       row.status, row.action, row.mode, row.track_name, row.take_name = "none", "Nothing found", "—", "—", "—"
     end
@@ -12884,7 +13405,7 @@ function CMP.draw_group_details_table(table_height)
     -- plus how it was matched, or "—" if none. A dangling pointer (item
     -- deleted from Reaper since matching ran) shows as "(item deleted)"
     -- rather than erroring.
-    local match_kind_label = { auto_a = "auto: item", auto_c = "auto: length", manual = "manual" }
+    local match_kind_label = { auto_matched = "auto: item", auto_length = "auto: length", manual = "manual" }
     local function match_cell_text(c)
       if not c.match or not c.match.item then return "—" end
       if not reaper.ValidatePtr2(0, c.match.item, "MediaItem*") then return "(item deleted)" end
