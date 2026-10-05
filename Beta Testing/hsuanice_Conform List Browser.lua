@@ -1,6 +1,6 @@
 --[[
 @description Conform List Browser
-@version 261005.1205
+@version 261005.1407
 @author hsuanice
 @about
   A REAPER script for browsing and editing EDL (Edit Decision List) data
@@ -71,6 +71,141 @@
   Required for AAF: aaftool in PATH (https://github.com/agfline/LibAAF)
 
 @changelog
+  v261005.1407
+  - Revert: removed the entire "NONE Track → B" feature (v261005.1339,
+    fixed in v261005.1401, renamed B-Roll→B) — user reconsidered: wants
+    the list to faithfully reflect the original EDL's own content, no
+    automatic track/group rewriting. Removed CLB.none_track_to_b (and its
+    ExtState key), CLB._convert_none_tracks_to_b and all its call sites
+    (build_rows_from_parsed/append_rows_from_parsed/load_clb_project/the
+    Options toggle), the Options popup UI, and the "B" special-casing in
+    _get_track_group/DEFAULT_GROUP_NAMES/consolidate_by_group's
+    _group_prefix — all back to exactly their pre-v261005.1339 state.
+    NONE tracks are plain NONE again, same as before this whole feature.
+  v261005.1401
+  - Fix: "NONE Track → B" (v261005.1339) never actually ran for a loaded
+    .clb project file — `load_clb_project` restores `row.track`/
+    `row.group` verbatim from the saved data and never called
+    `CLB._convert_none_tracks_to_b`, unlike the two EDL/XML/AAF parse
+    paths. Real user report: the toggle was on, but Track Filter and the
+    timeline's track rows still showed "NONE" after re-opening a saved
+    project — confirmed from a live screenshot: "NONE (223)" in Track
+    Filter alongside a genuinely unrelated "B (202)" group that just
+    happened to already exist from the source EDL's own real "B"-prefixed
+    tracks. Now also wired into `load_clb_project`. Also upgrades
+    `row.group` from the stale "NONE"/empty auto-assignment to "B" on a
+    converted row (leaves any other group alone — the user may have
+    re-grouped it by hand on purpose).
+  - Change: renamed the group itself from "B-Roll" to plain "B" — user
+    feedback, simpler/more concise, matching Audio/Video's own bare
+    single-letter group names. `DEFAULT_GROUP_NAMES`, `_get_track_group`,
+    and `consolidate_by_group`'s `_group_prefix` all updated; Consolidate
+    output unchanged (still B1, B2, B3 ... with no space).
+  v261005.1354
+  - Change: Delete now behaves the same everywhere — main table AND
+    timeline alike — confirmed with the user over keeping the main
+    table's old "clear selected cell values" behavior. Previously only
+    the timeline tagged selected clips as the "Delete" group (see
+    v261005.1339); the main table's Delete still destructively blanked
+    out selected cells regardless of selection shape (a single cell, a
+    whole column across many rows, or Cmd+A everything). Both now tag
+    every selected row's group as "Delete" and hide the Delete group, a
+    single consistent "remove this from the cut, non-destructively"
+    gesture either way. To clear an individual cell's text, double-click
+    to edit it and delete the text directly instead.
+  - Change: the "Delete" group filter now defaults to hidden (visible =
+    false) wherever it's seeded or freshly discovered — a fresh list
+    load, or loading a project/file with Delete-tagged rows already in
+    it, now starts with Delete already out of view, consistent with the
+    Delete-key handler's own "hide it immediately" behavior rather than
+    only hiding it on the very first keypress.
+  - Refactor: removed CLB.tl_focused (the window-focus flag added in
+    v261005.1339 to distinguish timeline vs. table Delete presses) — no
+    longer needed now that both contexts do the same thing.
+  v261005.1339
+  - Feature: timeline mini-view now supports drag box-select (multiple
+    clips at once), not just single click-select — draws a live
+    selection rectangle and rebuilds the selection from scratch every
+    frame while dragging. This REPLACES drag-to-pan (confirmed via
+    AskUserQuestion): horizontal panning moves to Shift+scroll, which
+    already existed as an alternative, so nothing is lost.
+  - Fix: pressing Delete after selecting clip(s) in the timeline was
+    wiping those events' TC/Reel/Clip Name data — the timeline reuses
+    the same cell-selection state the main table's spreadsheet editing
+    uses, so the existing "Delete = clear selected cells" handler fired
+    on it too. Now, Delete pressed while the timeline has window focus
+    instead tags the selected clips' group as "Delete" (non-destructive)
+    and turns the Delete group's visibility off, so they drop out of
+    view immediately — same idea as using the row context menu's "Assign
+    Group: Delete," just reachable with one keypress from the timeline.
+    Delete in the main table is unchanged (still clears selected cells).
+  - Change: unselected timeline clips now use a lighter, legible slate
+    gray fill (was a near-black 0x3A3A3A that read as empty space) and
+    brighter clip-name text — still clearly duller than a selected
+    clip's full-brightness per-track-type color, so the two states stay
+    easy to tell apart.
+  - Feature: new Options toggle "NONE Track → B (B-Roll)" — real EDLs
+    (e.g. from Premiere) commonly leave some usable audio events with a
+    literal "NONE" track field, which CLB was grouping into a dead-end
+    "NONE" group that Consolidate doesn't meaningfully bin-pack. When on,
+    those rows get rewritten to track "B" on load (and immediately for
+    already-loaded rows when switched on) — groups as "B-Roll" and
+    Consolidate names them B1, B2, B3 ..., parallel to Audio → A1, A2 ...
+    "B-Roll" added to the default group seed list and to
+    _get_track_group's prefix rules (B* → B-Roll). Does not revert
+    already-converted rows when switched back off.
+  v261005.1309
+  - Feature: "Clear List" and "Clear Audio" moved to the top of the left
+    sidebar as their own red "danger" color group (CLB.BTN_GROUP_COLORS.
+    danger) — kept visually separate from the other action groups since
+    they're destructive resets, not routine workflow steps.
+  - Change: the status text ("Events: N | Showing: N") and the Sources/
+    Tracks/Filters/Audio panel-toggle buttons moved from the end of row 1
+    to row 2, right after Search — row 1 now ends with Options right
+    after the Load List/Export EDL/Load Audio group.
+  v261005.1248
+  - Feature: all "action" buttons (Compare, DME Recut, Shift Range,
+    Calibrate TC, Generate Items, Conform All, Conform Sel, Scene Cuts,
+    Match All, Remove Dups, Consolidate) moved out of the top toolbar
+    rows into a new vertical left sidebar (CLB.draw_left_sidebar) —
+    user's own workflow: the list itself only needs a glance most of the
+    time, but these buttons get clicked constantly while flipping back
+    and forth checking REAPER's own window, so they need to stay
+    reachable even when this window is narrow and parked to one side of
+    the screen. The non-action toolbar (Save/Open/Clear List, Load
+    List/Load Audio, FPS, Search, Sources/Tracks/Filters/Audio toggles,
+    Columns, Fit Widths, Timeline, Apply Clip Name Format, Options)
+    deliberately stays at the top — confirmed via AskUserQuestion.
+  - Change: Export EDL moved up next to Load List... in the top toolbar
+    (both I/O, per the existing color grouping) instead of living among
+    the relocated action buttons.
+  v261005.1235
+  - Feature: main toolbar buttons now color-coded by function group
+    (user-requested, confirmed via AskUserQuestion), via a new
+    CLB.push_btn_color/pop_btn_color helper (CLB.BTN_GROUP_COLORS) —
+    purely visual, no behavior change. Five groups: list editing/cleanup
+    (teal — Remove Dups, Consolidate), input/output (blue — Load List,
+    Load Audio, Export EDL), position correction (purple — Shift Range,
+    Calibrate TC), recut/reconform (orange — Compare, DME Recut), and
+    build real content from the list (green — Generate Items, Conform
+    All, Conform Sel, Scene Cuts, Match All). Anything not wrapped in one
+    of these keeps the theme's default button color.
+  v261005.1229
+  - Change: "Load EDL...", "Load XML...", "Load AAF...", "Load
+    Subtitle..." (4 separate toolbar buttons) consolidated into one
+    "Load List..." button opening a popup menu — same pattern as the
+    existing Options popup. "Load Audio..." stays as its own separate
+    button (a genuinely different kind of load — a folder of audio
+    files, not an EDL/XML/AAF/subtitle list).
+  - Change: Track Format and Clip Name Format template fields moved out
+    of the toolbar rows into a new "Formats:" section inside the Options
+    popup — both are set once and rarely touched again, so keeping them
+    permanently visible in the toolbar cost more space than it was worth.
+    Clip Name Format's "Apply" action button stays where it was (near the
+    Audio table, where it's contextually useful right after matching),
+    now reading the template from Options instead of its own inline
+    field; relabeled "Apply Clip Name Format" since the field next to it
+    is gone.
   v261005.1205
   - Change: "Shift Range..." no longer creates/updates a "CLB: OLD"/"CLB:
     NEW" region marking the shifted span — user feedback right after
@@ -2027,7 +2162,7 @@ local EXT_NS = "hsuanice_ConformListBrowser"
 -- Shown in the window title bar — must be kept in sync with @version in
 -- the header comment at the top of this file by hand; they are two
 -- separate strings with no automatic link between them.
-local VERSION = "261005.1205"
+local VERSION = "261005.1407"
 
 -- Column definitions (EDL Events table)
 local COL = {
@@ -4786,7 +4921,7 @@ local function _rebuild_group_filters()
       new_filters[#new_filters + 1] = {
         name = g_name,
         count = count,
-        visible = true,
+        visible = (g_name ~= "Delete"),  -- see build_rows_from_parsed's own comment
         tracks = tracks,
       }
     end
@@ -4814,7 +4949,11 @@ local function build_rows_from_parsed(parsed, source_path)
   CLB.reel_filters = {}
   CLB.group_filters = {}
   for _, name in ipairs(DEFAULT_GROUP_NAMES) do
-    CLB.group_filters[#CLB.group_filters + 1] = { name = name, count = 0, visible = true, tracks = {} }
+    -- Delete defaults to hidden — it's a "things excluded from the cut"
+    -- bucket (see the Delete-key handler), not a normal content group,
+    -- so a freshly loaded list shouldn't show anything in it yet.
+    CLB.group_filters[#CLB.group_filters + 1] =
+      { name = name, count = 0, visible = (name ~= "Delete"), tracks = {} }
   end
   if not parsed or not parsed.events then return end
 
@@ -8110,6 +8249,41 @@ local function _mods()
 end
 
 ---------------------------------------------------------------------------
+-- Toolbar button color coding, by function group (user-requested, see
+-- project memory) — purely visual grouping, no behavior change. Each
+-- entry is {Button, ButtonHovered, ButtonActive} in ImGui's 0xRRGGBBAA
+-- format. Six groups:
+--   danger Destructive/reset: Clear List, Clear Audio
+--   list   List editing/cleanup: Remove Dups, Consolidate
+--   io     Input/Output: Load List, Load Audio, Export EDL
+--   align  Position correction: Shift Range, Calibrate TC
+--   recut  Recut/reconform: Compare, DME Recut
+--   build  Build real content from the list: Generate Items, Conform
+--          All/Sel, Scene Cuts, Match All
+-- Anything not wrapped in one of these stays the theme's default color.
+CLB.BTN_GROUP_COLORS = {
+  danger = { 0xB33838C0, 0xCC4444D0, 0x992D2DD0 },
+  list   = { 0x2E7D7DC0, 0x3D9999D0, 0x256363D0 },
+  io     = { 0x3366CCC0, 0x4477DDD0, 0x2855AAD0 },
+  align  = { 0x7A4FC2C0, 0x8F63D6D0, 0x63409FD0 },
+  recut  = { 0xCC7A33C0, 0xDD8F44D0, 0xAA6628D0 },
+  build  = { 0x3D8C40C0, 0x4FA352D0, 0x2F6E31D0 },
+}
+
+function CLB.push_btn_color(group_key)
+  local c = CLB.BTN_GROUP_COLORS[group_key]
+  if not c then return end
+  reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Button(), c[1])
+  reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_ButtonHovered(), c[2])
+  reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_ButtonActive(), c[3])
+end
+
+function CLB.pop_btn_color(group_key)
+  if not CLB.BTN_GROUP_COLORS[group_key] then return end
+  reaper.ImGui_PopStyleColor(ctx, 3)
+end
+
+---------------------------------------------------------------------------
 -- Draw: Toolbar
 ---------------------------------------------------------------------------
 local function draw_toolbar()
@@ -8164,79 +8338,62 @@ local function draw_toolbar()
     end
     reaper.ImGui_SameLine(ctx)
 
-    if reaper.ImGui_Button(ctx, "Clear List", scale(80), scale(24)) then
-      clear_list()
-    end
-    if reaper.ImGui_IsItemHovered(ctx) then
-      reaper.ImGui_SetTooltip(ctx, "Reset the table to empty (asks for confirmation first)")
-    end
-    reaper.ImGui_SameLine(ctx)
+    -- Clear List now lives in the left sidebar (draw_left_sidebar), in
+    -- its own red "danger" group with Clear Audio — not here.
 
     reaper.ImGui_Text(ctx, "|")
     reaper.ImGui_SameLine(ctx)
 
-    -- Load buttons
-    if reaper.ImGui_Button(ctx, "Load EDL...", scale(90), scale(24)) then
-    load_edl_file()
-  end
-  reaper.ImGui_SameLine(ctx)
-
-  if reaper.ImGui_Button(ctx, "Load XML...", scale(90), scale(24)) then
-    load_xml_file()
-  end
-  if reaper.ImGui_IsItemHovered(ctx) then
-    reaper.ImGui_SetTooltip(ctx, "FCP7 XML, DaVinci Resolve XML, Premiere Pro XML")
-  end
-  reaper.ImGui_SameLine(ctx)
-
-  if reaper.ImGui_Button(ctx, "Load AAF...", scale(90), scale(24)) then
-    load_aaf_file()
-  end
-  if reaper.ImGui_IsItemHovered(ctx) then
-    reaper.ImGui_SetTooltip(ctx, "AAF — requires: aaftool (LibAAF) in PATH\nhttps://github.com/agfline/LibAAF")
-  end
-  reaper.ImGui_SameLine(ctx)
-
-  -- Load Subtitle button (.srt / .csv / .tsv / .xlsx dialogue list)
-  if reaper.ImGui_Button(ctx, "Load Subtitle...", scale(110), scale(24)) then
-    load_subtitle_file()
-  end
-  if reaper.ImGui_IsItemHovered(ctx) then
-    reaper.ImGui_BeginTooltip(ctx)
-    reaper.ImGui_Text(ctx, "Load subtitle / dialogue list file:")
-    reaper.ImGui_Text(ctx, "  .srt        SubRip subtitles")
-    reaper.ImGui_Text(ctx, "  .csv / .tsv Tabular dialogue lists")
-    reaper.ImGui_Text(ctx, "  .xlsx       Excel dialogue lists (multi-sheet)")
-    reaper.ImGui_Text(ctx, "")
-    reaper.ImGui_Text(ctx, "Generates empty items at subtitle in/out points")
-    reaper.ImGui_Text(ctx, "with the text as Clip Name.")
-    reaper.ImGui_EndTooltip(ctx)
-  end
-  reaper.ImGui_SameLine(ctx)
-
-  -- Compare button (old-vs-new reconform). Opens its own setup/view screen
-  -- with independent Load Old/New buttons — always enabled; it never
-  -- depends on (or disturbs) whatever is currently loaded in the main table.
-  if reaper.ImGui_Button(ctx, "Compare...", scale(90), scale(24)) then
-    CLB.show_compare_view = true
-    -- Re-point the Track/Reel/Group filter panels at Compare's data when
-    -- reopening a cached result (Close already restored them to ROWS).
-    if CLB.compare_result then
-      CMP.rebuild_filters(CLB.compare_result)
+    -- Load List button: EDL/XML/AAF/Subtitle consolidated into one
+    -- popup menu (were 4 separate buttons) — saves toolbar space, same
+    -- pattern as the Options popup.
+    CLB.push_btn_color("io")
+    local load_list_clicked = reaper.ImGui_Button(ctx, "Load List...", scale(90), scale(24))
+    CLB.pop_btn_color("io")
+    if load_list_clicked then
+      reaper.ImGui_OpenPopup(ctx, "##clb_load_list")
     end
-  end
-  if reaper.ImGui_IsItemHovered(ctx) then
-    reaper.ImGui_BeginTooltip(ctx)
-    reaper.ImGui_Text(ctx, "Compare an OLD vs NEW version (EDL/XML/AAF/.clb)")
-    reaper.ImGui_Text(ctx, "and classify Trimmed / Extended / Moved / Added / Deleted.")
-    reaper.ImGui_Text(ctx, "Opens its own Load Old/New screen — independent of")
-    reaper.ImGui_Text(ctx, "whatever is currently loaded in the main table.")
-    reaper.ImGui_EndTooltip(ctx)
+    if reaper.ImGui_BeginPopup(ctx, "##clb_load_list") then
+      if reaper.ImGui_Selectable(ctx, "Load EDL...") then load_edl_file() end
+      if reaper.ImGui_Selectable(ctx, "Load XML...") then load_xml_file() end
+      if reaper.ImGui_IsItemHovered(ctx) then
+        reaper.ImGui_SetTooltip(ctx, "FCP7 XML, DaVinci Resolve XML, Premiere Pro XML")
+      end
+      if reaper.ImGui_Selectable(ctx, "Load AAF...") then load_aaf_file() end
+      if reaper.ImGui_IsItemHovered(ctx) then
+        reaper.ImGui_SetTooltip(ctx, "AAF — requires: aaftool (LibAAF) in PATH\nhttps://github.com/agfline/LibAAF")
+      end
+      if reaper.ImGui_Selectable(ctx, "Load Subtitle...") then load_subtitle_file() end
+      if reaper.ImGui_IsItemHovered(ctx) then
+        reaper.ImGui_BeginTooltip(ctx)
+        reaper.ImGui_Text(ctx, "Load subtitle / dialogue list file:")
+        reaper.ImGui_Text(ctx, "  .srt        SubRip subtitles")
+        reaper.ImGui_Text(ctx, "  .csv / .tsv Tabular dialogue lists")
+        reaper.ImGui_Text(ctx, "  .xlsx       Excel dialogue lists (multi-sheet)")
+        reaper.ImGui_Text(ctx, "")
+        reaper.ImGui_Text(ctx, "Generates empty items at subtitle in/out points")
+        reaper.ImGui_Text(ctx, "with the text as Clip Name.")
+        reaper.ImGui_EndTooltip(ctx)
+      end
+      reaper.ImGui_EndPopup(ctx)
+    end
+    reaper.ImGui_SameLine(ctx)
+
+  -- Export EDL button — lives next to Load List (both I/O), not down
+  -- with the action buttons in the left sidebar.
+  CLB.push_btn_color("io")
+  local export_edl_clicked = reaper.ImGui_Button(ctx, "Export EDL", scale(90), scale(24))
+  CLB.pop_btn_color("io")
+  if export_edl_clicked then
+    export_edl()
   end
   reaper.ImGui_SameLine(ctx)
 
   -- Load Audio button
-  if reaper.ImGui_Button(ctx, "Load Audio...", scale(100), scale(24)) then
+  CLB.push_btn_color("io")
+  local load_audio_clicked = reaper.ImGui_Button(ctx, "Load Audio...", scale(100), scale(24))
+  CLB.pop_btn_color("io")
+  if load_audio_clicked then
     load_audio_folder()
   end
   if reaper.ImGui_IsItemHovered(ctx) then
@@ -8247,81 +8404,14 @@ local function draw_toolbar()
   end
   reaper.ImGui_SameLine(ctx)
 
-  -- Match All button (only show when both EDL and audio are loaded)
-  if #ROWS > 0 and #CLB.audio_files > 0 then
-    if reaper.ImGui_Button(ctx, "Match All", scale(80), scale(24)) then
-      match_audio_files()
-    end
-    if reaper.ImGui_IsItemHovered(ctx) then
-      reaper.ImGui_BeginTooltip(ctx)
-      reaper.ImGui_Text(ctx, "Re-run matching algorithm on all EDL events")
-      reaper.ImGui_EndTooltip(ctx)
-    end
-    reaper.ImGui_SameLine(ctx)
-  end
-
-  -- Clear Audio button (only show when audio is loaded)
-  if #CLB.audio_files > 0 then
-    if reaper.ImGui_Button(ctx, "Clear Audio", scale(90), scale(24)) then
-      clear_audio_files()
-    end
-    reaper.ImGui_SameLine(ctx)
-  end
+  -- Match All and Clear Audio now live in the left sidebar
+  -- (draw_left_sidebar) — not here. The status text and Sources/Tracks/
+  -- Filters/Audio toggle buttons that used to follow them moved to row 2,
+  -- right of Search — see there.
 
   -- Separator
   reaper.ImGui_Text(ctx, "|")
   reaper.ImGui_SameLine(ctx)
-
-  -- Status (simplified: just counts, no filename)
-  local view_rows = get_view_rows()
-  local status
-  if #ROWS > 0 then
-    status = string.format("Events: %d | Showing: %d", #ROWS, #view_rows)
-  else
-    status = "No events"
-  end
-  reaper.ImGui_Text(ctx, status)
-  reaper.ImGui_SameLine(ctx)
-
-  -- Sources toggle button (only show when files are loaded)
-  if #CLB.edl_sources > 0 then
-    local src_label = CLB.show_sources_panel and "Sources <<" or "Sources >>"
-    if reaper.ImGui_SmallButton(ctx, src_label .. "##clb_src_toggle") then
-      CLB.show_sources_panel = not CLB.show_sources_panel
-    end
-    reaper.ImGui_SameLine(ctx)
-  end
-
-  -- Tracks toggle button
-  if #CLB.track_filters > 0 then
-    local trk_label = CLB.show_track_filter and "Tracks <<" or "Tracks >>"
-    if reaper.ImGui_SmallButton(ctx, trk_label .. "##clb_trk_toggle") then
-      CLB.show_track_filter = not CLB.show_track_filter
-    end
-    reaper.ImGui_SameLine(ctx)
-  end
-
-  -- Filters toggle button (controls Reels + Groups sidebar together)
-  local has_filters = #CLB.reel_filters > 0 or #CLB.group_filters > 0
-  if has_filters then
-    local filters_visible = CLB.show_reel_filter or CLB.show_group_filter
-    local filter_label = filters_visible and "Filters <<" or "Filters >>"
-    if reaper.ImGui_SmallButton(ctx, filter_label .. "##clb_filter_toggle") then
-      local new_state = not filters_visible
-      CLB.show_reel_filter = new_state
-      CLB.show_group_filter = new_state
-    end
-    reaper.ImGui_SameLine(ctx)
-  end
-
-  -- Audio toggle button (show when audio files are loaded)
-  if #CLB.audio_files > 0 then
-    local audio_label = CLB.show_audio_panel and "Audio <<" or "Audio >>"
-    if reaper.ImGui_SmallButton(ctx, audio_label .. "##clb_audio_toggle") then
-      CLB.show_audio_panel = not CLB.show_audio_panel
-    end
-    reaper.ImGui_SameLine(ctx)
-  end
 
   -- Options button
   if reaper.ImGui_Button(ctx, "Options", scale(70), scale(24)) then
@@ -8388,6 +8478,41 @@ local function draw_toolbar()
         status_msg = "",
         status_ok  = nil,
       }
+    end
+
+    reaper.ImGui_Separator(ctx)
+    reaper.ImGui_Text(ctx, "Formats:")
+
+    reaper.ImGui_Text(ctx, "Track Format")
+    reaper.ImGui_SetNextItemWidth(ctx, scale(250))
+    local chg_tf, new_tf = reaper.ImGui_InputText(ctx, "##clb_trk_fmt", CLB.track_name_format)
+    if chg_tf then
+      CLB.track_name_format = new_tf
+      save_prefs()
+    end
+    if reaper.ImGui_IsItemHovered(ctx) then
+      reaper.ImGui_BeginTooltip(ctx)
+      reaper.ImGui_Text(ctx, "Tokens: ${track} ${reel} ${clip} ${event}")
+      reaper.ImGui_Text(ctx, "        ${format} ${title} ${edit_type}")
+      reaper.ImGui_Text(ctx, "Items will be grouped by the expanded track name")
+      reaper.ImGui_EndTooltip(ctx)
+    end
+
+    reaper.ImGui_Spacing(ctx)
+    reaper.ImGui_Text(ctx, "Clip Name Format")
+    reaper.ImGui_SetNextItemWidth(ctx, scale(250))
+    local cnf_chg, cnf_new = reaper.ImGui_InputText(ctx, "##clip_name_fmt", CLB.clip_name_format or "")
+    if cnf_chg then
+      CLB.clip_name_format = cnf_new
+      save_prefs()
+    end
+    if reaper.ImGui_IsItemHovered(ctx) then
+      reaper.ImGui_SetTooltip(ctx,
+        "Clip name template applied when matching audio (or via\n" ..
+        "\"Apply Clip Name Format\" near the Audio table).\n" ..
+        "Leave blank to keep original clip names.\n" ..
+        "Tokens: $reel  $scene  $take\n" ..
+        "Example: $reel----$sceneT$take  →  D043----9-9-12T1")
     end
 
     reaper.ImGui_EndPopup(ctx)
@@ -8466,96 +8591,240 @@ local function draw_toolbar()
   reaper.ImGui_Text(ctx, "|")
   reaper.ImGui_SameLine(ctx)
 
-  -- Generate Items button (empty items)
-  if reaper.ImGui_Button(ctx, "Generate Items", scale(110), scale(24)) then
-    generate_items()
-  end
-  if reaper.ImGui_IsItemHovered(ctx) then
-    reaper.ImGui_BeginTooltip(ctx)
-    reaper.ImGui_Text(ctx, "Create empty items on REAPER tracks at absolute TC positions")
-    reaper.ImGui_Text(ctx, "Metadata stored as P_EXT fields on each take")
-    reaper.ImGui_EndTooltip(ctx)
-  end
-  reaper.ImGui_SameLine(ctx)
-
-  -- Conform Matched button (with audio)
-  local has_matches = false
-  for _, row in ipairs(ROWS) do
-    if row.match_status == "Found" or row.match_status == "Fallback" or row.match_status == "Multiple" then
-      has_matches = true
-      break
-    end
-  end
-
-  if has_matches then
-    if reaper.ImGui_Button(ctx, "Conform All", scale(90), scale(24)) then
-      conform_matched_items(false)
-    end
-    if reaper.ImGui_IsItemHovered(ctx) then
-      reaper.ImGui_BeginTooltip(ctx)
-      reaper.ImGui_Text(ctx, "Insert matched audio files as items")
-      reaper.ImGui_Text(ctx, "Multiple matches = multiple takes on same item")
-      reaper.ImGui_EndTooltip(ctx)
-    end
-    reaper.ImGui_SameLine(ctx)
-
-    -- Conform Selected button
-    if reaper.ImGui_Button(ctx, "Conform Sel", scale(90), scale(24)) then
-      conform_matched_items(true)
-    end
-    if reaper.ImGui_IsItemHovered(ctx) then
-      reaper.ImGui_BeginTooltip(ctx)
-      reaper.ImGui_Text(ctx, "Insert matched audio for selected rows only")
-      reaper.ImGui_EndTooltip(ctx)
-    end
-    reaper.ImGui_SameLine(ctx)
-  end
-
-  -- Remove Duplicates button
-  if reaper.ImGui_Button(ctx, "Remove Dups", scale(100), scale(24)) then
-    remove_duplicates()
-  end
-  if reaper.ImGui_IsItemHovered(ctx) then
-    reaper.ImGui_BeginTooltip(ctx)
-    reaper.ImGui_Text(ctx, "Remove duplicate events (matching Reel + Src TC + Rec TC + Clip Name)")
-    reaper.ImGui_EndTooltip(ctx)
-  end
-  reaper.ImGui_SameLine(ctx)
-
-  -- Consolidate by Group button
-  if reaper.ImGui_Button(ctx, "Consolidate", scale(90), scale(24)) then
-    consolidate_by_group()
-  end
-  if reaper.ImGui_IsItemHovered(ctx) then
-    reaper.ImGui_BeginTooltip(ctx)
-    reaper.ImGui_Text(ctx, "Consolidate tracks by group (bin-pack + renumber)")
-    reaper.ImGui_EndTooltip(ctx)
-  end
-  reaper.ImGui_SameLine(ctx)
-
-  -- Export EDL button
-  if reaper.ImGui_Button(ctx, "Export EDL", scale(90), scale(24)) then
-    export_edl()
-  end
-  reaper.ImGui_SameLine(ctx)
-
-  -- Scene Cut Track button
+  -- Status (simplified: just counts, no filename)
+  local view_rows = get_view_rows()
+  local status
   if #ROWS > 0 then
-    if reaper.ImGui_Button(ctx, "Scene Cuts", scale(90), scale(24)) then
-      create_scene_cut_track()
-    end
-    if reaper.ImGui_IsItemHovered(ctx) then
-      reaper.ImGui_BeginTooltip(ctx)
-      reaper.ImGui_Text(ctx, "Create a 'Scene Cuts' track with empty items for each scene")
-      reaper.ImGui_Text(ctx, "Clip name format: EP_Scene_Shot_Ttake[_Camera]")
-      reaper.ImGui_Text(ctx, "Example: 06_01B_01_T05_A")
-      reaper.ImGui_EndTooltip(ctx)
+    status = string.format("Events: %d | Showing: %d", #ROWS, #view_rows)
+  else
+    status = "No events"
+  end
+  reaper.ImGui_Text(ctx, status)
+  reaper.ImGui_SameLine(ctx)
+
+  -- Sources toggle button (only show when files are loaded)
+  if #CLB.edl_sources > 0 then
+    local src_label = CLB.show_sources_panel and "Sources <<" or "Sources >>"
+    if reaper.ImGui_SmallButton(ctx, src_label .. "##clb_src_toggle") then
+      CLB.show_sources_panel = not CLB.show_sources_panel
     end
     reaper.ImGui_SameLine(ctx)
+  end
+
+  -- Tracks toggle button
+  if #CLB.track_filters > 0 then
+    local trk_label = CLB.show_track_filter and "Tracks <<" or "Tracks >>"
+    if reaper.ImGui_SmallButton(ctx, trk_label .. "##clb_trk_toggle") then
+      CLB.show_track_filter = not CLB.show_track_filter
+    end
+    reaper.ImGui_SameLine(ctx)
+  end
+
+  -- Filters toggle button (controls Reels + Groups sidebar together)
+  local has_filters = #CLB.reel_filters > 0 or #CLB.group_filters > 0
+  if has_filters then
+    local filters_visible = CLB.show_reel_filter or CLB.show_group_filter
+    local filter_label = filters_visible and "Filters <<" or "Filters >>"
+    if reaper.ImGui_SmallButton(ctx, filter_label .. "##clb_filter_toggle") then
+      local new_state = not filters_visible
+      CLB.show_reel_filter = new_state
+      CLB.show_group_filter = new_state
+    end
+    reaper.ImGui_SameLine(ctx)
+  end
+
+  -- Audio toggle button (show when audio files are loaded)
+  if #CLB.audio_files > 0 then
+    local audio_label = CLB.show_audio_panel and "Audio <<" or "Audio >>"
+    if reaper.ImGui_SmallButton(ctx, audio_label .. "##clb_audio_toggle") then
+      CLB.show_audio_panel = not CLB.show_audio_panel
+    end
+  end
+
+  -- Track Format and Clip Name Format templates now live in
+  -- Options > Formats — not here, to save toolbar space (they're set
+  -- once and rarely touched again). The "action" buttons (Compare, DME
+  -- Recut, Shift Range, Calibrate TC, Generate Items, Conform, Scene
+  -- Cuts, Match All, Remove Dups, Consolidate) now live in
+  -- draw_left_sidebar(), not here — see its own doc comment for why.
+  end
+  reaper.ImGui_EndChild(ctx)  -- End toolbar_row2
+end
+
+---------------------------------------------------------------------------
+-- Draw: Left Sidebar (action buttons)
+---------------------------------------------------------------------------
+--- All the "do something now" buttons, stacked vertically along the left
+--- edge instead of spread across the top toolbar rows — user's own
+--- workflow description: the list itself only gets a glance up front and
+--- after cleanup, but the action buttons get used constantly while
+--- flipping back and forth checking REAPER's own window, so they need to
+--- stay reachable even when the CLB window is narrow and parked off to
+--- one side of the screen. Load List/Load Audio/Export EDL (and the
+--- non-action tool row: FPS, Search, Sources/Tracks/Filters/Audio
+--- toggles, Columns, Fit Widths, Timeline, Apply Clip Name Format,
+--- Options) deliberately stay in the top toolbar — confirmed via
+--- AskUserQuestion — since those are used once per session or need to
+--- stay next to the table they affect, not per-click action triggers.
+function CLB.draw_left_sidebar()
+  local btn_w = -1  -- fill the sidebar's full width
+  local btn_h = scale(26)
+
+  -- Clear List / Clear Audio: destructive resets, deliberately their own
+  -- red "danger" group at the very top of the sidebar — separate from
+  -- the action groups below so they're never confused for a routine
+  -- workflow step.
+  CLB.push_btn_color("danger")
+  local clear_list_clicked = reaper.ImGui_Button(ctx, "Clear List", btn_w, btn_h)
+  CLB.pop_btn_color("danger")
+  if clear_list_clicked then
+    clear_list()
+  end
+  if reaper.ImGui_IsItemHovered(ctx) then
+    reaper.ImGui_SetTooltip(ctx, "Reset the table to empty (asks for confirmation first)")
+  end
+
+  if #CLB.audio_files > 0 then
+    CLB.push_btn_color("danger")
+    local clear_audio_clicked = reaper.ImGui_Button(ctx, "Clear Audio", btn_w, btn_h)
+    CLB.pop_btn_color("danger")
+    if clear_audio_clicked then
+      clear_audio_files()
+    end
+  end
+
+  reaper.ImGui_Spacing(ctx)
+  reaper.ImGui_Separator(ctx)
+  reaper.ImGui_Spacing(ctx)
+
+  -- Compare button (old-vs-new reconform). Opens its own setup/view screen
+  -- with independent Load Old/New buttons — always enabled; it never
+  -- depends on (or disturbs) whatever is currently loaded in the main table.
+  CLB.push_btn_color("recut")
+  local compare_clicked = reaper.ImGui_Button(ctx, "Compare...", btn_w, btn_h)
+  CLB.pop_btn_color("recut")
+  if compare_clicked then
+    CLB.show_compare_view = true
+    -- Re-point the Track/Reel/Group filter panels at Compare's data when
+    -- reopening a cached result (Close already restored them to ROWS).
+    if CLB.compare_result then
+      CMP.rebuild_filters(CLB.compare_result)
+    end
+  end
+  if reaper.ImGui_IsItemHovered(ctx) then
+    reaper.ImGui_BeginTooltip(ctx)
+    reaper.ImGui_Text(ctx, "Compare an OLD vs NEW version (EDL/XML/AAF/.clb)")
+    reaper.ImGui_Text(ctx, "and classify Trimmed / Extended / Moved / Added / Deleted.")
+    reaper.ImGui_Text(ctx, "Opens its own Load Old/New screen — independent of")
+    reaper.ImGui_Text(ctx, "whatever is currently loaded in the main table.")
+    reaper.ImGui_EndTooltip(ctx)
+  end
+
+  -- DME Recut: no Compare needed — select Reaper track(s), click, and
+  -- every visible/filtered event's Src TC range gets COPIED to its Rec
+  -- TC range directly (originals untouched — see CLB.dme_recut's own doc
+  -- comment for why this works for printed-to-pitch DME-stem cut lists).
+  CLB.push_btn_color("recut")
+  local dme_recut_clicked = reaper.ImGui_Button(ctx, "DME Recut...##clb_dme_recut", btn_w, btn_h)
+  CLB.pop_btn_color("recut")
+  if dme_recut_clicked then
+    CLB.dme_recut_prepare()
+  end
+  if reaper.ImGui_IsItemHovered(ctx) then
+    reaper.ImGui_SetTooltip(ctx,
+      "Select the Reaper track(s) to recut, then click this. Uses the\n"
+      .. "currently visible/filtered list directly (filter down to one\n"
+      .. "stem's rows first, e.g. search \"DX\") — no Compare needed.\n"
+      .. "Opens a Settings dialog (Copy/Cut, Markers) before running.")
+  end
+  if reaper.ImGui_BeginPopup(ctx, "DME Recut Settings##clb_dme_recut_popup") then
+    local pending = CLB.dme_recut_pending
+    reaper.ImGui_Text(ctx, "DME Recut Settings")
+    if pending then
+      reaper.ImGui_TextDisabled(ctx, string.format(
+        "%d event(s) on %d selected track(s).", #pending.moves, #pending.sel_tracks))
+    end
+    reaper.ImGui_Separator(ctx)
+
+    reaper.ImGui_Text(ctx, "Mode:")
+    reaper.ImGui_SameLine(ctx)
+    if reaper.ImGui_RadioButton(ctx, "Copy (keep originals)##clb_dme_recut_mode_copy", CLB.dme_recut_mode ~= "cut") then
+      CLB.dme_recut_mode = "copy"; save_prefs()
+    end
+    reaper.ImGui_SameLine(ctx)
+    if reaper.ImGui_RadioButton(ctx, "Cut (move originals)##clb_dme_recut_mode_cut", CLB.dme_recut_mode == "cut") then
+      CLB.dme_recut_mode = "cut"; save_prefs()
+    end
+
+    local chg_mk, new_mk = reaper.ImGui_Checkbox(ctx, "Add Delete/Insert markers##clb_dme_recut_markers", CLB.dme_recut_markers)
+    if chg_mk then CLB.dme_recut_markers = new_mk; save_prefs() end
+
+    if pending and pending.dup_warning and pending.dup_warning ~= "" then
+      reaper.ImGui_Separator(ctx)
+      reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Text(), 0xFFB000FF)
+      reaper.ImGui_TextWrapped(ctx, pending.dup_warning)
+      reaper.ImGui_PopStyleColor(ctx)
+    end
+
+    reaper.ImGui_Separator(ctx)
+    if reaper.ImGui_Button(ctx, "Run It##clb_dme_recut_run", scale(90), scale(22)) then
+      reaper.ImGui_CloseCurrentPopup(ctx)
+      CLB.dme_recut_execute()
+    end
+    reaper.ImGui_SameLine(ctx)
+    if reaper.ImGui_Button(ctx, "Cancel##clb_dme_recut_cancel", scale(70), scale(22)) then
+      CLB.dme_recut_pending = nil
+      reaper.ImGui_CloseCurrentPopup(ctx)
+    end
+    reaper.ImGui_EndPopup(ctx)
+  end
+
+  -- Shift Range: the same real-data-moving action Compare's "Offset Old"
+  -- already has (CMP.shift_range), exposed here too — Compare mode isn't
+  -- part of the DME Recut workflow at all, so that copy was unreachable
+  -- from it. Just the move itself; the Compare-only "Offset Old" checkbox
+  -- (a VIRTUAL offset for Analyze & Match's matching math) stays in the
+  -- Modes popup, since it has no meaning outside Compare. Requires a
+  -- Razor Edit or Time Selection (see CMP.shift_range's doc comment) —
+  -- no longer shifts a whole track unconditionally.
+  CLB.push_btn_color("align")
+  local shift_range_clicked = reaper.ImGui_Button(ctx, "Shift Range...##clb_shift_tracks", btn_w, btn_h)
+  CLB.pop_btn_color("align")
+  if shift_range_clicked then
+    reaper.ImGui_OpenPopup(ctx, "Shift Range##clb_shift_tracks_popup")
+  end
+  if reaper.ImGui_IsItemHovered(ctx) then
+    reaper.ImGui_SetTooltip(ctx,
+      "Move everything inside a Razor Edit area, or a Time Selection on\n"
+      .. "the Reaper-selected track(s), by N hours — items (split at the\n"
+      .. "range edges) AND any project marker/region fully inside that\n"
+      .. "time span. E.g. to stage V1's real content out of the way\n"
+      .. "before a DME Recut. Undoable (Edit > Undo).")
+  end
+  if reaper.ImGui_BeginPopup(ctx, "Shift Range##clb_shift_tracks_popup") then
+    reaper.ImGui_Text(ctx, "Shift Range")
+    reaper.ImGui_TextDisabled(ctx,
+      "Make a Razor Edit selection, or a Time Selection + select the\n"
+      .. "track(s) to shift in Reaper, first.")
+    reaper.ImGui_Separator(ctx)
+    reaper.ImGui_SetNextItemWidth(ctx, scale(90))
+    local chg_h, new_h = reaper.ImGui_InputInt(ctx, "hours##clb_shift_tracks_h", CLB.offset_old_hours or 10)
+    if chg_h then CLB.offset_old_hours = new_h; save_prefs() end
+    if reaper.ImGui_Button(ctx, "Shift Now##clb_shift_tracks_go", scale(100), 0) then
+      CMP.shift_range(CLB.offset_old_hours or 0, "old")
+    end
+    reaper.ImGui_Separator(ctx)
+    if reaper.ImGui_Button(ctx, "Close##clb_shift_tracks_close", scale(70), scale(22)) then
+      reaper.ImGui_CloseCurrentPopup(ctx)
+    end
+    reaper.ImGui_EndPopup(ctx)
   end
 
   -- Calibrate TC (Anchor) button
-  if reaper.ImGui_SmallButton(ctx, "Calibrate TC...##clb_tc_calib") then
+  CLB.push_btn_color("align")
+  local calib_tc_clicked = reaper.ImGui_Button(ctx, "Calibrate TC...##clb_tc_calib", btn_w, btn_h)
+  CLB.pop_btn_color("align")
+  if calib_tc_clicked then
     reaper.ImGui_OpenPopup(ctx, "Calibrate TC (Anchor)##clb_tc_calib_popup")
   end
   if reaper.ImGui_IsItemHovered(ctx) then
@@ -8672,126 +8941,122 @@ local function draw_toolbar()
     end
     reaper.ImGui_EndPopup(ctx)
   end
-  reaper.ImGui_SameLine(ctx)
 
-  -- DME Recut: no Compare needed — select Reaper track(s), click, and
-  -- every visible/filtered event's Src TC range gets COPIED to its Rec
-  -- TC range directly (originals untouched — see CLB.dme_recut's own doc
-  -- comment for why this works for printed-to-pitch DME-stem cut lists).
-  if reaper.ImGui_SmallButton(ctx, "DME Recut...##clb_dme_recut") then
-    CLB.dme_recut_prepare()
-  end
-  if reaper.ImGui_IsItemHovered(ctx) then
-    reaper.ImGui_SetTooltip(ctx,
-      "Select the Reaper track(s) to recut, then click this. Uses the\n"
-      .. "currently visible/filtered list directly (filter down to one\n"
-      .. "stem's rows first, e.g. search \"DX\") — no Compare needed.\n"
-      .. "Opens a Settings dialog (Copy/Cut, Markers) before running.")
-  end
-  if reaper.ImGui_BeginPopup(ctx, "DME Recut Settings##clb_dme_recut_popup") then
-    local pending = CLB.dme_recut_pending
-    reaper.ImGui_Text(ctx, "DME Recut Settings")
-    if pending then
-      reaper.ImGui_TextDisabled(ctx, string.format(
-        "%d event(s) on %d selected track(s).", #pending.moves, #pending.sel_tracks))
-    end
-    reaper.ImGui_Separator(ctx)
+  reaper.ImGui_Spacing(ctx)
+  reaper.ImGui_Separator(ctx)
+  reaper.ImGui_Spacing(ctx)
 
-    reaper.ImGui_Text(ctx, "Mode:")
-    reaper.ImGui_SameLine(ctx)
-    if reaper.ImGui_RadioButton(ctx, "Copy (keep originals)##clb_dme_recut_mode_copy", CLB.dme_recut_mode ~= "cut") then
-      CLB.dme_recut_mode = "copy"; save_prefs()
-    end
-    reaper.ImGui_SameLine(ctx)
-    if reaper.ImGui_RadioButton(ctx, "Cut (move originals)##clb_dme_recut_mode_cut", CLB.dme_recut_mode == "cut") then
-      CLB.dme_recut_mode = "cut"; save_prefs()
-    end
-
-    local chg_mk, new_mk = reaper.ImGui_Checkbox(ctx, "Add Delete/Insert markers##clb_dme_recut_markers", CLB.dme_recut_markers)
-    if chg_mk then CLB.dme_recut_markers = new_mk; save_prefs() end
-
-    if pending and pending.dup_warning and pending.dup_warning ~= "" then
-      reaper.ImGui_Separator(ctx)
-      reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Text(), 0xFFB000FF)
-      reaper.ImGui_TextWrapped(ctx, pending.dup_warning)
-      reaper.ImGui_PopStyleColor(ctx)
-    end
-
-    reaper.ImGui_Separator(ctx)
-    if reaper.ImGui_Button(ctx, "Run It##clb_dme_recut_run", scale(90), scale(22)) then
-      reaper.ImGui_CloseCurrentPopup(ctx)
-      CLB.dme_recut_execute()
-    end
-    reaper.ImGui_SameLine(ctx)
-    if reaper.ImGui_Button(ctx, "Cancel##clb_dme_recut_cancel", scale(70), scale(22)) then
-      CLB.dme_recut_pending = nil
-      reaper.ImGui_CloseCurrentPopup(ctx)
-    end
-    reaper.ImGui_EndPopup(ctx)
-  end
-  reaper.ImGui_SameLine(ctx)
-
-  -- Shift Range: the same real-data-moving action Compare's "Offset Old"
-  -- already has (CMP.shift_range), exposed here too — Compare mode isn't
-  -- part of the DME Recut workflow at all, so that copy was unreachable
-  -- from it. Just the move itself; the Compare-only "Offset Old" checkbox
-  -- (a VIRTUAL offset for Analyze & Match's matching math) stays in the
-  -- Modes popup, since it has no meaning outside Compare. Requires a
-  -- Razor Edit or Time Selection (see CMP.shift_range's doc comment) —
-  -- no longer shifts a whole track unconditionally.
-  if reaper.ImGui_SmallButton(ctx, "Shift Range...##clb_shift_tracks") then
-    reaper.ImGui_OpenPopup(ctx, "Shift Range##clb_shift_tracks_popup")
-  end
-  if reaper.ImGui_IsItemHovered(ctx) then
-    reaper.ImGui_SetTooltip(ctx,
-      "Move everything inside a Razor Edit area, or a Time Selection on\n"
-      .. "the Reaper-selected track(s), by N hours — items (split at the\n"
-      .. "range edges) AND any project marker/region fully inside that\n"
-      .. "time span. E.g. to stage V1's real content out of the way\n"
-      .. "before a DME Recut. Undoable (Edit > Undo).")
-  end
-  if reaper.ImGui_BeginPopup(ctx, "Shift Range##clb_shift_tracks_popup") then
-    reaper.ImGui_Text(ctx, "Shift Range")
-    reaper.ImGui_TextDisabled(ctx,
-      "Make a Razor Edit selection, or a Time Selection + select the\n"
-      .. "track(s) to shift in Reaper, first.")
-    reaper.ImGui_Separator(ctx)
-    reaper.ImGui_SetNextItemWidth(ctx, scale(90))
-    local chg_h, new_h = reaper.ImGui_InputInt(ctx, "hours##clb_shift_tracks_h", CLB.offset_old_hours or 10)
-    if chg_h then CLB.offset_old_hours = new_h; save_prefs() end
-    if reaper.ImGui_Button(ctx, "Shift Now##clb_shift_tracks_go", scale(100), 0) then
-      CMP.shift_range(CLB.offset_old_hours or 0, "old")
-    end
-    reaper.ImGui_Separator(ctx)
-    if reaper.ImGui_Button(ctx, "Close##clb_shift_tracks_close", scale(70), scale(22)) then
-      reaper.ImGui_CloseCurrentPopup(ctx)
-    end
-    reaper.ImGui_EndPopup(ctx)
-  end
-  reaper.ImGui_SameLine(ctx)
-
-  -- Separator
-  reaper.ImGui_Text(ctx, "|")
-  reaper.ImGui_SameLine(ctx)
-
-  -- Track name format (at end, rarely modified)
-  reaper.ImGui_Text(ctx, "Track Format:")
-  reaper.ImGui_SameLine(ctx)
-  reaper.ImGui_SetNextItemWidth(ctx, scale(250))
-  local chg_tf, new_tf = reaper.ImGui_InputText(ctx, "##clb_trk_fmt", CLB.track_name_format)
-  if chg_tf then
-    CLB.track_name_format = new_tf
-    save_prefs()
+  -- Generate Items button (empty items)
+  CLB.push_btn_color("build")
+  local gen_items_clicked = reaper.ImGui_Button(ctx, "Generate Items", btn_w, btn_h)
+  CLB.pop_btn_color("build")
+  if gen_items_clicked then
+    generate_items()
   end
   if reaper.ImGui_IsItemHovered(ctx) then
     reaper.ImGui_BeginTooltip(ctx)
-    reaper.ImGui_Text(ctx, "Tokens: ${track} ${reel} ${clip} ${event}")
-    reaper.ImGui_Text(ctx, "        ${format} ${title} ${edit_type}")
-    reaper.ImGui_Text(ctx, "Items will be grouped by the expanded track name")
+    reaper.ImGui_Text(ctx, "Create empty items on REAPER tracks at absolute TC positions")
+    reaper.ImGui_Text(ctx, "Metadata stored as P_EXT fields on each take")
     reaper.ImGui_EndTooltip(ctx)
   end
+
+  -- Conform Matched buttons (with audio)
+  local has_matches = false
+  for _, row in ipairs(ROWS) do
+    if row.match_status == "Found" or row.match_status == "Fallback" or row.match_status == "Multiple" then
+      has_matches = true
+      break
+    end
   end
-  reaper.ImGui_EndChild(ctx)  -- End toolbar_row2
+
+  if has_matches then
+    CLB.push_btn_color("build")
+    local conform_all_clicked = reaper.ImGui_Button(ctx, "Conform All", btn_w, btn_h)
+    CLB.pop_btn_color("build")
+    if conform_all_clicked then
+      conform_matched_items(false)
+    end
+    if reaper.ImGui_IsItemHovered(ctx) then
+      reaper.ImGui_BeginTooltip(ctx)
+      reaper.ImGui_Text(ctx, "Insert matched audio files as items")
+      reaper.ImGui_Text(ctx, "Multiple matches = multiple takes on same item")
+      reaper.ImGui_EndTooltip(ctx)
+    end
+
+    CLB.push_btn_color("build")
+    local conform_sel_clicked = reaper.ImGui_Button(ctx, "Conform Sel", btn_w, btn_h)
+    CLB.pop_btn_color("build")
+    if conform_sel_clicked then
+      conform_matched_items(true)
+    end
+    if reaper.ImGui_IsItemHovered(ctx) then
+      reaper.ImGui_BeginTooltip(ctx)
+      reaper.ImGui_Text(ctx, "Insert matched audio for selected rows only")
+      reaper.ImGui_EndTooltip(ctx)
+    end
+  end
+
+  -- Scene Cut Track button
+  if #ROWS > 0 then
+    CLB.push_btn_color("build")
+    local scene_cuts_clicked = reaper.ImGui_Button(ctx, "Scene Cuts", btn_w, btn_h)
+    CLB.pop_btn_color("build")
+    if scene_cuts_clicked then
+      create_scene_cut_track()
+    end
+    if reaper.ImGui_IsItemHovered(ctx) then
+      reaper.ImGui_BeginTooltip(ctx)
+      reaper.ImGui_Text(ctx, "Create a 'Scene Cuts' track with empty items for each scene")
+      reaper.ImGui_Text(ctx, "Clip name format: EP_Scene_Shot_Ttake[_Camera]")
+      reaper.ImGui_Text(ctx, "Example: 06_01B_01_T05_A")
+      reaper.ImGui_EndTooltip(ctx)
+    end
+  end
+
+  -- Match All button (only show when both EDL and audio are loaded)
+  if #ROWS > 0 and #CLB.audio_files > 0 then
+    CLB.push_btn_color("build")
+    local match_all_clicked = reaper.ImGui_Button(ctx, "Match All", btn_w, btn_h)
+    CLB.pop_btn_color("build")
+    if match_all_clicked then
+      match_audio_files()
+    end
+    if reaper.ImGui_IsItemHovered(ctx) then
+      reaper.ImGui_BeginTooltip(ctx)
+      reaper.ImGui_Text(ctx, "Re-run matching algorithm on all EDL events")
+      reaper.ImGui_EndTooltip(ctx)
+    end
+  end
+
+  reaper.ImGui_Spacing(ctx)
+  reaper.ImGui_Separator(ctx)
+  reaper.ImGui_Spacing(ctx)
+
+  -- Remove Duplicates button
+  CLB.push_btn_color("list")
+  local remove_dups_clicked = reaper.ImGui_Button(ctx, "Remove Dups", btn_w, btn_h)
+  CLB.pop_btn_color("list")
+  if remove_dups_clicked then
+    remove_duplicates()
+  end
+  if reaper.ImGui_IsItemHovered(ctx) then
+    reaper.ImGui_BeginTooltip(ctx)
+    reaper.ImGui_Text(ctx, "Remove duplicate events (matching Reel + Src TC + Rec TC + Clip Name)")
+    reaper.ImGui_EndTooltip(ctx)
+  end
+
+  -- Consolidate by Group button
+  CLB.push_btn_color("list")
+  local consolidate_clicked = reaper.ImGui_Button(ctx, "Consolidate", btn_w, btn_h)
+  CLB.pop_btn_color("list")
+  if consolidate_clicked then
+    consolidate_by_group()
+  end
+  if reaper.ImGui_IsItemHovered(ctx) then
+    reaper.ImGui_BeginTooltip(ctx)
+    reaper.ImGui_Text(ctx, "Consolidate tracks by group (bin-pack + renumber)")
+    reaper.ImGui_EndTooltip(ctx)
+  end
 end
 
 ---------------------------------------------------------------------------
@@ -10208,29 +10473,15 @@ local function draw_edl_panel_header()
     reaper.ImGui_SetTooltip(ctx, "Show/hide mini-timeline visualization")
   end
 
-  -- Clip Name format input (applied automatically on each match)
+  -- Clip Name format: the editable template itself now lives in
+  -- Options > Formats (CLB.clip_name_format) — only the action button
+  -- stays here, where it's contextually useful (right after matching).
   reaper.ImGui_SameLine(ctx)
   reaper.ImGui_Text(ctx, "|")
   reaper.ImGui_SameLine(ctx)
-  reaper.ImGui_Text(ctx, "Clip Name:")
-  reaper.ImGui_SameLine(ctx)
-  reaper.ImGui_SetNextItemWidth(ctx, scale(160))
-  local cnf_chg, cnf_new = reaper.ImGui_InputText(ctx, "##clip_name_fmt", CLB.clip_name_format or "")
-  if cnf_chg then
-    CLB.clip_name_format = cnf_new
-    save_prefs()
-  end
-  if reaper.ImGui_IsItemHovered(ctx) then
-    reaper.ImGui_SetTooltip(ctx,
-      "Clip name template applied when matching audio.\n" ..
-      "Leave blank to keep original clip names.\n" ..
-      "Tokens: $reel  $scene  $take\n" ..
-      "Example: $reel----$sceneT$take  →  D043----9-9-12T1")
-  end
-  reaper.ImGui_SameLine(ctx)
   local can_apply_fmt = (CLB.clip_name_format or "") ~= ""
   if not can_apply_fmt then reaper.ImGui_BeginDisabled(ctx) end
-  if reaper.ImGui_SmallButton(ctx, "Apply##clip_name_apply") then
+  if reaper.ImGui_SmallButton(ctx, "Apply Clip Name Format##clip_name_apply") then
     local n = 0
     for _, row in ipairs(ROWS) do
       local ms = row.match_status or ""
@@ -10246,7 +10497,9 @@ local function draw_edl_panel_header()
   end
   if not can_apply_fmt then reaper.ImGui_EndDisabled(ctx) end
   if reaper.ImGui_IsItemHovered(ctx) then
-    reaper.ImGui_SetTooltip(ctx, "Apply clip name template to all matched rows now")
+    reaper.ImGui_SetTooltip(ctx,
+      "Apply the Clip Name template (set in Options > Formats) to all\n"
+      .. "matched rows now.")
   end
 
   -- Columns popup
@@ -10675,6 +10928,10 @@ local function draw_timeline_panel()
   -- 12. Draw event blocks
   local mx, my   = reaper.ImGui_GetMousePos(ctx)
   local hovered_rd = nil
+  -- Every on-screen block's own rect, kept for the box-select hit-test in
+  -- section 16 below (built here since this is already where each
+  -- block's exact screen geometry is computed).
+  local block_rects = {}
 
   for _, rd in ipairs(row_data) do
     local row = rd.row
@@ -10692,11 +10949,17 @@ local function draw_timeline_panel()
     local dx1 = math.min(px1, cx1)
     if dx1 < dx0 + 1 then dx1 = dx0 + 1 end   -- minimum 1px
 
+    block_rects[#block_rects + 1] = { row = row, dx0 = dx0, ey0 = ey0, dx1 = dx1, ey1 = ey1 }
+
     local selected = sel_has_row(row.__guid)
+    -- Unselected clips use a lighter, legible slate gray (was a near-
+    -- black 0x3A3A3A that was hard to read) — still clearly duller than
+    -- selected's full-brightness per-track-type color so the two never
+    -- get confused.
     local col_fill = selected
       and track_color(row.track or "", ti, 0xFF)   -- selected: full-brightness color
-      or  0x3A3A3ABB                                -- unselected: neutral dark gray
-    local col_edge = selected and 0xFFFFFFEE or 0x00000044
+      or  0x5C6670DD                                -- unselected: legible slate gray
+    local col_edge = selected and 0xFFFFFFEE or 0x00000066
     reaper.ImGui_DrawList_AddRectFilled(dl, dx0, ey0, dx1, ey1, col_fill)
     reaper.ImGui_DrawList_AddRect(dl,      dx0, ey0, dx1, ey1, col_edge)
 
@@ -10713,7 +10976,7 @@ local function draw_timeline_panel()
       local max_ch = math.max(0, math.floor(bw / scale(7)) - 1)
       if #lbl > max_ch then lbl = lbl:sub(1, math.max(0, max_ch - 1)) .. "~" end
       if #lbl > 0 then
-        local txt_col = selected and 0xFFFFFFEE or 0xCCCCCC99
+        local txt_col = selected and 0xFFFFFFEE or 0xE8E8E8DD
         reaper.ImGui_DrawList_AddText(dl, dx0 + scale(2), ey0 + scale(2), txt_col, lbl)
       end
     end
@@ -10737,7 +11000,10 @@ local function draw_timeline_panel()
     reaper.ImGui_EndTooltip(ctx)
   end
 
-  -- 14. Click → select + scroll-to-row in table
+  -- 14. Click → select one clip + scroll-to-row in table. A drag past the
+  -- threshold (section 16) supersedes this every frame it's active, so a
+  -- click that turns into a drag ends up box-selected instead — no extra
+  -- bookkeeping needed to tell click and drag-start apart.
   if is_hovered and reaper.ImGui_IsMouseClicked(ctx, 0) then
     if hovered_rd then
       sel_clear()
@@ -10792,15 +11058,22 @@ local function draw_timeline_panel()
     end
   end
 
-  -- 16. Drag: scrollbar column → vertical scroll thumb; event area → horizontal pan
+  -- 16. Drag: scrollbar column → vertical scroll thumb; event area → box-
+  -- select (replaces the old drag-to-pan — horizontal panning now lives
+  -- on Shift+scroll instead, confirmed with the user, so plain left-drag
+  -- is free to mean "select multiple clips," same convention REAPER's
+  -- own arrange view uses).
   if not is_active then
     CLB._tl_sb_dragging = nil   -- reset drag-origin flag
   end
   if is_active then
-    local delta_x, delta_y = reaper.ImGui_GetMouseDelta(ctx)
+    local delta_y = select(2, reaper.ImGui_GetMouseDelta(ctx))
     -- Detect drag origin on first active frame
     if CLB._tl_sb_dragging == nil then
       CLB._tl_sb_dragging = vscroll_visible and (mx >= cx1 - eff_vscroll_w)
+      if not CLB._tl_sb_dragging then
+        CLB.tl_box_x0, CLB.tl_box_y0 = mx, my
+      end
     end
     if CLB._tl_sb_dragging then
       -- Drag inside scrollbar column → move thumb
@@ -10812,13 +11085,21 @@ local function draw_timeline_panel()
           CLB.tl_vscroll + ratio * max_vscroll))
       end
       reaper.ImGui_SetMouseCursor(ctx, reaper.ImGui_MouseCursor_ResizeNS())
-    else
-      -- Drag in event area → horizontal pan
-      if delta_x and delta_x ~= 0 then
-        CLB.tl_scroll = math.max(0, math.min(max_scroll,
-          CLB.tl_scroll - delta_x / CLB.tl_zoom))
+    elseif reaper.ImGui_IsMouseDragging(ctx, 0) then
+      -- Box-select: live rectangle from drag origin to current mouse pos,
+      -- recomputed (and the selection rebuilt from scratch) every frame
+      -- so it tracks the rect exactly, including growing/shrinking back.
+      local bx0, by0 = CLB.tl_box_x0 or mx, CLB.tl_box_y0 or my
+      local rx0, rx1 = math.min(bx0, mx), math.max(bx0, mx)
+      local rsy0, rsy1 = math.min(by0, my), math.max(by0, my)
+      reaper.ImGui_DrawList_AddRectFilled(dl, rx0, rsy0, rx1, rsy1, 0x4C9BFF33)
+      reaper.ImGui_DrawList_AddRect(dl,       rx0, rsy0, rx1, rsy1, 0x7CB8FFDD)
+      sel_clear()
+      for _, br in ipairs(block_rects) do
+        if br.dx1 >= rx0 and br.dx0 <= rx1 and br.ey1 >= rsy0 and br.ey0 <= rsy1 then
+          for _, c in ipairs(EDL_COL_ORDER) do sel_add(br.row.__guid, c) end
+        end
       end
-      reaper.ImGui_SetMouseCursor(ctx, reaper.ImGui_MouseCursor_ResizeEW())
     end
   end
 
@@ -14144,19 +14425,36 @@ local function loop()
     SCRIPT_NAME .. " v" .. VERSION .. "###clb_main", true, wnd_flags)
 
   if visible then
-    -- Toolbar
+    -- Toolbar (Save/Open/Load List/Load Audio/Export EDL, FPS, Search,
+    -- panel toggles, Options — the "action" buttons live in the left
+    -- sidebar below, not here; see draw_left_sidebar's own doc comment)
     draw_toolbar()
 
-    -- Sources panel (collapsible, between toolbar and table)
-    draw_sources_panel()
+    -- Left sidebar (action buttons) + everything else, side by side.
+    -- User's own workflow: the list itself only needs a glance most of
+    -- the time, but the action buttons get clicked constantly while
+    -- flipping back and forth checking REAPER's own window — they need
+    -- to stay reachable on the left edge even when this window is
+    -- narrow and parked off to one side of the screen.
+    local sidebar_w = scale(150)
+    if reaper.ImGui_BeginChild(ctx, "##clb_left_sidebar", sidebar_w, 0) then
+      CLB.draw_left_sidebar()
+    end
+    reaper.ImGui_EndChild(ctx)
+    reaper.ImGui_SameLine(ctx)
+    if reaper.ImGui_BeginChild(ctx, "##clb_right_content", 0, 0) then
+      -- Sources panel (collapsible, between toolbar and table)
+      draw_sources_panel()
 
-    -- Track filter panel
-    draw_track_filter_panel()
+      -- Track filter panel
+      draw_track_filter_panel()
 
-    reaper.ImGui_Separator(ctx)
+      reaper.ImGui_Separator(ctx)
 
-    -- Main content (EDL table, optionally split with Audio table)
-    draw_main_content()
+      -- Main content (EDL table, optionally split with Audio table)
+      draw_main_content()
+    end
+    reaper.ImGui_EndChild(ctx)
 
     -- Subtitle import inspect/column-picker dialog (modal popup)
     draw_subtitle_inspect_dialog()
@@ -14204,20 +14502,27 @@ local function loop()
         end
       end
 
-      -- Delete = Clear selected cells
+      -- Delete: same meaning everywhere now, main table and timeline
+      -- alike (confirmed with the user — previously the main table
+      -- cleared selected CELL VALUES, a destructive spreadsheet-editing
+      -- action with no undo-visible record of what was removed). Tags
+      -- every selected row's group as "Delete" non-destructively and
+      -- hides the Delete group, so excluded events just drop out of view
+      -- — the same list-cleanup gesture whether you selected clips in
+      -- the timeline or rows/cells in the table. To clear an individual
+      -- cell's text now, double-click to edit it and delete the text
+      -- directly, rather than selecting + pressing Delete.
       if reaper.ImGui_IsKeyPressed(ctx, reaper.ImGui_Key_Delete(), false) or
          reaper.ImGui_IsKeyPressed(ctx, reaper.ImGui_Key_Backspace(), false) then
-        local changed = false
-        local vr = get_view_rows()
-        for _, row in ipairs(vr) do
-          for c = 1, COL_COUNT do
-            if sel_has(row.__guid, c) and EDITABLE_COLS[c] then
-              changed = true
-              set_cell_value(row, c, "")
-            end
+        local sel_rows = get_selected_rows()
+        if #sel_rows > 0 then
+          for _, r in ipairs(sel_rows) do r.group = "Delete" end
+          _rebuild_group_filters()
+          -- Hide the Delete group immediately, same as toggling it off
+          -- by hand, so tagged clips drop out of view right away.
+          for _, gf in ipairs(CLB.group_filters) do
+            if gf.name == "Delete" then gf.visible = false end
           end
-        end
-        if changed then
           undo_snapshot()
           CLB.cached_rows = nil
         end
