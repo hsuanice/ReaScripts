@@ -1,6 +1,6 @@
 --[[
 @description Conform List Browser
-@version 261005.1507
+@version 261007.1451
 @author hsuanice
 @about
   A REAPER script for browsing and editing EDL (Edit Decision List) data
@@ -71,7 +71,325 @@
   Required for AAF: aaftool in PATH (https://github.com/agfline/LibAAF)
 
 @changelog
-  v261005.1507
+  v261007.1451
+  - Change: removed the "Simple" (shared-file) mode from Generate Ref
+    Media entirely — user's own request: "我希望保留 full完整版就好...
+    因為如果要basic，那用一般 empty item的就好" (just keep the Full
+    version — if Basic/no-real-metadata is what's wanted, the plain
+    "Generate Items" empty-item placeholder already covers that; this
+    feature's reason to exist is specifically the real embedded BWF/
+    iXML metadata). Deleted CLB.generate_reference_media_shared and
+    CLB._build_ref_ixml (the shared-mode-only iXML builder) entirely.
+    CLB.ref_media_mode setting removed.
+  - New: the popup that used to pick Simple-vs-Full now picks SCOPE
+    instead — "Visible list (currently filtered/shown)" (default,
+    unchanged existing behavior) vs. "Selected rows only" (matches the
+    existing convention used by Conform Selected/Remove Dups/etc., via
+    get_selected_rows()) — new CLB.ref_media_scope setting ("visible"
+    default | "selected"), shows a live "N row(s) in scope" count that
+    updates as the radio choice changes. Row-set resolution + the "no
+    rows have Src/Rec TC" check moved from
+    CLB.generate_reference_media_prepare() into
+    CLB.generate_reference_media_pick_folder_and_run() (now has to
+    happen after the scope choice, not before it) — prepare() itself is
+    now just guards + opening the popup.
+  - Fix (caught before shipping, not a user report): the moved
+    CLB.generate_reference_media_pick_folder_and_run() calls
+    get_selected_rows(), a `local function` declared much later in this
+    file (every other caller already happens to be below its
+    declaration) — bare local references resolve lexically, so code
+    positioned before a local's declaration can't see it regardless of
+    call-time order; luac -p can't catch this class of bug (same as the
+    DME Recut ctx-argument miss noted earlier this session), only
+    manual scope-tracing does. Relocated the whole function to
+    immediately after get_selected_rows()'s own definition instead of
+    leaving it up near the rest of Generate Ref Media.
+
+  v261007.1434
+  - Revert: the v261007.1417 "simplify Full mode to drop all BWF/iXML
+    metadata" change is reverted — real user report immediately after
+    testing both modes side by side: Item List Editor (a separate
+    hsuanice metadata-reading tool) showed Source TC for Basic/shared-
+    mode items but blank Source TC for Adv/independent-mode ones, since
+    there was no metadata left to compute it from (D_STARTOFFS=0, no
+    embedded TimeReference at all — Source TC existed only as text in
+    each item's own Notes). Asked whether this was acceptable; answer was
+    explicit and strict: "ADV 模式就是要有完整的metadata，包含TC 嚴格！"
+    (Adv mode must have complete metadata including TC — strict).
+    Restored CLB._build_ref_ixml_independent and the per-event
+    TR_Write(tr_samples)/Write_iXML_Raw/SecToSamples calls exactly as
+    they were at v261007.1336 — "Full" mode embeds real per-event BWF
+    TimeReference + iXML (Scene/Take/Reel) again, batch_size back to 10.
+    The "_REF" filename prefix added in the same v261007.1417 pass is
+    KEPT (that part was never in question — only the metadata-dropping
+    part was reverted).
+
+  v261007.1417
+  - Change: "Full" (independent) mode's filenames now get a leading
+    "_REF" prefix — "_REF001_AX_Universal Counting Leader.wav" instead
+    of "001_AX_Universal Counting Leader.wav" — user's own request: once
+    these files end up bundled into one delivery folder alongside real
+    production media, a leading "_" (rare in ordinary filenames) plus
+    "REF" makes them unmistakably reference-only at a glance.
+  - Simplify: "Full" mode no longer embeds any BWF/iXML metadata at all
+    (removed CLB._build_ref_ixml_independent and the TR_Write/
+    Write_iXML_Raw/SecToSamples calls entirely) — user's own
+    simplification, after reflecting that the cross-software Source-TC
+    problem which originally motivated embedding a real per-event
+    TimeReference turns out to be a Pro Tools import/translation
+    question, out of CLB's control either way ("這是別的軟體的事了我們先
+    不處理"). Now follows
+    hsuanice_Convert empty items to audio items.lua's own approach
+    exactly: one real silent WAV per event (still sized to that event's
+    own Rec duration, still in its own subfolder) just so the item is
+    portable to other DAWs, D_STARTOFFS=0/D_PLAYRATE=1.0, take name =
+    clip name, and Source TC/Scene/Take/Reel/Speed-flag all live in the
+    item's own Notes (already had most of this from v261007.1300 for a
+    different reason — now it's ALSO this mode's only metadata record,
+    not just a human-review convenience alongside embedded BWF). No
+    longer needs bwfmetaedit at all for this mode specifically (sox
+    only) — lighter and simpler; batch_size raised 10→20 accordingly.
+
+  v261007.1355
+  - Change: user's own suggestion after the v261007.1345 fix — ask which
+    mode (Simple/Full) BEFORE the folder picker, not after. Reordered:
+    CLB.generate_reference_media_prepare() now only validates + opens the
+    mode popup (no folder dialog at all); its "Next: Choose Folder..."
+    button (renamed from "Generate") closes the popup, then a new
+    CLB.generate_reference_media_pick_folder_and_run() shows the folder
+    dialog and dispatches to the matching generator. This also happens
+    to be a cleaner fix for v261007.1345's bug than the deferred-flag
+    workaround: the popup now opens from a plain button click with NO
+    blocking dialog before it at all (same shape as the already-working
+    DME Recut Settings popup), so CLB.ref_media_want_popup is gone
+    entirely — nothing left to defer. Applied the same caution in the
+    new direction too: the folder dialog isn't called directly from the
+    "Next" button (which fires while still inside that popup's Begin/End
+    pair) — it's deferred via CLB.ref_media_want_folder_pick, consumed
+    right after EndPopup in the same frame, so the blocking dialog never
+    straddles an open ImGui widget boundary either way.
+
+  v261007.1345
+  - Fix: real user report — clicking "Generate Ref Media..." only showed
+    the Finder folder picker; after choosing a folder, nothing happened
+    (no settings popup, no progress). Root cause: unlike
+    CLB.dme_recut_prepare (pure synchronous Lua, no I/O) which this
+    popup's prepare/popup/execute split was modeled on,
+    CLB.generate_reference_media_prepare() calls
+    reaper.ImGui_OpenPopup() right after returning from a BLOCKING
+    native dialog (JS_Dialog_BrowseForFolder) — a combination with no
+    precedent anywhere else in this file (Load Audio Folder uses the same
+    blocking dialog but never follows it with an ImGui popup). Whatever
+    ImGui frame/ID-stack state a blocking modal mid-frame leaves behind,
+    OpenPopup couldn't latch onto it, so the matching BeginPopup never
+    saw it open. Fixed by deferring: prepare() now just sets
+    CLB.ref_media_want_popup = true; the button's own draw code consumes
+    it (OpenPopup + reset) on the very next frame, right before its
+    BeginPopup check — decouples the popup-open call from the dialog's
+    return entirely.
+
+  v261007.1336
+  - New: "Generate Ref Media..." now opens a mode-picker popup first
+    (mirrors the DME Recut Settings dialog) instead of generating
+    directly — user feedback on the shared-file design: BWF survives
+    being handed between software more reliably than anything that
+    lives only inside this REAPER project (D_STARTOFFS), and even iXML
+    itself can get dropped in some conversions in their experience, so
+    the existing "ONE shared file" approach risks failing on a transfer
+    to other software.
+  - New: "Full" mode (CLB.generate_reference_media_independent) — one
+    real silent WAV PER EVENT, each with its OWN embedded BWF
+    TimeReference (that event's real Source TC, via
+    E.SecToSamples — not fixed at 0) + its own iXML carrying Scene/Take/
+    Reel. Each item's D_STARTOFFS is 0 (the file itself already starts
+    at the right Source TC, no REAPER-side trick needed). Written into
+    an auto-created subfolder (reaper.RecursiveCreateDirectory) named
+    from the same ${timestamp} template, not loose in the chosen parent
+    folder — this mode can create hundreds/thousands of files. Filename
+    per event: "{event_num}_{reel}_{clip_name}" (sanitized), always
+    collision-free since event_num is unique. Slower than the existing
+    mode (real sox + bwfmetaedit x2 per event) — smaller batch_size (10
+    vs 60) to keep the progress bar responsive.
+  - Change: the pre-existing single-shared-file behavior is now "Simple"
+    mode (CLB.generate_reference_media_shared, logic unchanged from
+    v261007.1300) — split out from the old CLB.generate_reference_media
+    together with a new CLB.generate_reference_media_prepare() (guards +
+    folder picker + usable_rows, same prepare/popup/execute split as
+    CLB.dme_recut_prepare/_execute) and a new CLB.ref_media_mode setting
+    ("shared" default | "independent"). CLB._build_track_map_for_rows()
+    factored out of the old single function so both modes build their
+    per-row Reaper tracks identically.
+
+  v261007.1300
+  - New: "Speed" column (COL.SPEED) — surfaces an EDL M2 (aux source
+    timecode) line's raw rate per event, e.g. "48.0" or "-24.0". Real
+    user comparison (292-event production EDL vs. its own generated
+    item list, event-by-event) found 114 Source-End-TC mismatches, ALL
+    and ONLY on events carrying an M2 line — confirmed via exact ratio
+    math (Src-duration/Rec-duration == M2-rate/project-fps for every
+    single one, no residual error) that M2 flags a clip shot at a
+    different native frame rate (speed retime) or, when negative,
+    reverse playback. hsuanice_EDL Parser.lua (v261007.1253) now parses
+    this into event.aux_rate; carried through to row.aux_rate (both the
+    initial parse and the .clb/Compare-session save formats, new
+    trailing field, backward-compatible). User's own framing after
+    seeing this: CLB's job is to show which events are retimed, not to
+    guess how to correct them — "我們只負責套原始檔案，或是知道正確的長度"
+    (we're only responsible for referencing the original file, or
+    knowing the correct length) — so this column is informational only,
+    not a correction.
+  - Change: Generate Ref Media's confirm dialog now mentions how many
+    visible events carry this flag (if any), and each such item's own
+    Notes get a "⚠ Speed: N.N" line — human-review flag, not a
+    correction (Source End TC in that item still assumes normal speed).
+  - Change: Generate Items / Conform Matched Items / Generate Ref Media
+    now all include Scene/Take (when present) in each created item's
+    Notes, alongside the existing Reel/Src In/Src Out — user's own
+    simplification of an earlier, much bigger ask (embedding into real
+    audio FILES after matching): "generate時，把這些metadata資訊，寫在
+    item note裡就好" (just write it into the item's own Notes at
+    generate time) — no file writes at all, so this carries none of the
+    risk embedding into original production recordings would have.
+
+  v261007.1246
+  - Fix: a short, no-name "BL" (blank/slug) event — real user report with
+    a screenshot, a 2.333s-long event at Rec 03:00:01:20 — still showed
+    padded/extended audio past the shared reference file's end. The
+    v261007.1212 B_LOOPSRC=0 fix only covers an item whose own START-
+    OFFSET (real Source TC, often hours) exceeds the file's short
+    physical length; it does nothing when an item's start-offset is
+    small/zero but its own REC DURATION ALONE already exceeds the file's
+    fixed 2.0s. Fixed by sizing REF_DURATION_SEC to the LONGEST usable
+    event's own Rec duration instead of a flat 2.0s (verified safe on
+    this real 292-event list: longest event is 34s, nowhere near the
+    multi-GB territory v261007.1149 fixed — this only ever has to cover
+    one event's own duration, never the full absolute Source TC range).
+    Both fixes are complementary, not alternatives: this one and
+    B_LOOPSRC=0 each close a different failure mode of the same single-
+    shared-file design.
+
+  v261007.1212
+  - Fix: generated filename came out literally as "_.wav" — real user
+    report with a screenshot. Root cause: ref_media_name_format was
+    persisted in ExtState from BEFORE the v261007.1149 redesign changed
+    its default from "${reel}_${track}" to "!CLB_Mute_${timestamp}";
+    load_prefs()'s default-on-missing-key logic doesn't touch a value
+    that WAS already saved, so the stale old-style template kept loading
+    with ${reel}/${track} tokens the new design no longer provides,
+    silently expanding to nothing. load_prefs() now detects and migrates
+    any old-style value (contains ${reel}/${track}, or is missing
+    ${timestamp}) back to the current default.
+  - Fix: generated items' Source Start/End TC read back completely blank
+    in hsuanice_Item List Editor.lua (and presumably any other BWF-reading
+    tool) — real user report with a screenshot (14 items, both columns
+    empty). Root cause, confirmed by direct bwfmetaedit testing: writing
+    --TimeReference=0 to a WAV with no pre-existing bext chunk is a
+    silent no-op — bwfmetaedit prunes the WHOLE bext chunk back out
+    whenever every field in it would end up at its default value, so the
+    reference file's bext chunk (and therefore its TimeReference) never
+    actually got created at all, even though the write command itself
+    reported success. hsuanice_Metadata Embed.lua's TR_Write() now takes
+    an optional 4th `originator` argument that's written in the SAME
+    command (confirmed this keeps the chunk from being pruned); CLB now
+    passes "hsuanice CLB".
+  - Fix: generated items could show a looped/repeated waveform — user's
+    own report plus a concrete, directly relevant precedent they pointed
+    to (hsuanice_Convert empty items to audio items.lua, which avoids
+    this by sizing its own shared silent file to the longest item in
+    each group). Investigated that approach for this feature too, but
+    it doesn't actually apply here: that script always uses
+    D_STARTOFFS=0, so a file merely longer than the longest item is
+    enough; CLB's items instead set D_STARTOFFS to each event's real
+    Source TC (often far larger than any practical shared-file length),
+    so sizing the file to "longest event length" wouldn't reliably avoid
+    the loop and would reopen the huge-file problem v261007.1149 fixed
+    for lists spanning hours. Used a cheaper, fully general fix instead:
+    new items now have B_LOOPSRC off, so playback past the shared file's
+    short physical end reads as silence past end-of-source (correct —
+    the file is silent throughout anyway) instead of wrapping/looping,
+    regardless of how large an individual item's own D_STARTOFFS is.
+
+  v261007.1149
+  - Fix: "Generate Ref Media..." (v261007.1135) generated one WAV per
+    (reel, track) group spanning that group's FULL real TC range —
+    real user report with a screenshot: files up to 10.4 GB each, for a
+    session with reels spanning hours of real timeline. Root cause: the
+    file's own audio content never needed to be that long in the first
+    place — D_STARTOFFS can exceed a source's own physical duration
+    without Reaper objecting (it just plays silence past the end,
+    indistinguishable from this file's own silence anyway), and that
+    metadata (not real sample data sitting at that offset) is exactly
+    what AAF/OMF/XML conform interchange actually reads to compute a
+    clip's Source TC.
+  - Change: now generates exactly ONE short (2s) shared reference WAV
+    for the entire run — user's own request, confirmed by them: same
+    idea as EdiLoad's own generic "!EdiLoad_Mute_<timestamp>.WAV" file
+    (which turned out to be the right real-world precedent all along).
+    The shared file's own BWF TimeReference is fixed at 0; every item's
+    own Source TC is instead baked entirely into its own D_STARTOFFS
+    (that event's real, fully-calibrated Source TC in seconds) — so
+    (file TR=0 + item's own offset) still gives each item's correct
+    absolute Source TC independently, regardless of which reel/track it
+    came from, with no per-reel file needed at all. This also makes the
+    (reel, track) grouping from v261007.1135 unnecessary — removed.
+    ref_media_name_format's default changed from "${reel}_${track}" to
+    "!CLB_Mute_${timestamp}" (only token now: ${timestamp}) to match.
+    The file's iXML no longer carries per-reel Tape/Track fields (there's
+    only one universal file now) — just a note identifying it as CLB-
+    generated reference media; reel/track identity still travels via
+    each item's own P_EXT fields and take name, unaffected.
+  - Feature: progress bar for item creation — already free via the
+    existing generic draw_loading_progress()/CLB.batch_job mechanism
+    (same one Generate Items already uses), not new code; collapsing
+    file-generation down to one fast step (was a per-group loop with no
+    progress) addresses the "need progress display" request for that
+    part on its own, since there's no longer a slow multi-file loop to
+    show progress for.
+  - Verified TimeReference=0 writes and reads back correctly via
+    bwfmetaedit (not a special/reserved "unset" value) before relying on
+    it as the shared file's fixed baseline.
+  - Feature: "Generate Ref Media..." — a client reported that an exported
+    picture-cut track carries no Source TC at all, so they can't
+    re-conform the original files themselves; "Generate Items" only ever
+    creates REAPER-internal placeholders (P_EXT fields, no real
+    underlying file), which don't survive export to another tool at all.
+    This generates REAL silent WAV files with embedded BWF TimeReference
+    + iXML (Tape/Track name), so any professional tool reading the
+    exported/conformed media can compute each clip's own correct Source
+    TC (file's BWF TimeReference + that clip's start-offset — standard
+    broadcast-wave math every NLE/DAW already understands) alongside its
+    Clip Name (the item/take's own name, sequence-level metadata that
+    travels with the edit regardless) and a real, meaningful filename.
+    Deliberately NOT one WAV per event (user's own reference: this is how
+    EdiLoad V4 behaves) — ONE shared reference WAV per (reel, track)
+    group, long enough to span every event in that group; each event
+    becomes a REAPER item referencing that SAME file via D_STARTOFFS
+    (the same "many items, one shared PCM source" mechanism
+    CLB.dme_recut_execute's Copy mode already uses), so a list with a
+    few thousand events but a few dozen reels only generates a few dozen
+    real files, not thousands. Grouped by (reel, track) specifically, not
+    just reel — different tracks on one reel are genuinely different
+    audio content (e.g. DME stems share one embedded timecode baseline
+    but are NOT interchangeable — the real bug CLB.dme_recut's own
+    duplicate-content warning exists for) and must never share one file.
+    Settings: output folder (asked each run, like Load Audio) and a
+    filename template (Options > Formats, ${reel}/${track} tokens,
+    default "${reel}_${track}"). Reuses existing shared libraries end to
+    end — hsuanice_Metadata Embed.lua's CLI_Resolve/TR_Write/SecToSamples
+    for bwfmetaedit, plus a new Write_iXML_Raw added there for this (see
+    its own changelog); hsuanice_Process Exec.lua's run_capture/
+    shell_quote for the new sox call (synthesizes the silent audio — sox
+    resolved via the same candidate-path + ExtState-cache pattern
+    CLI_Resolve already uses for bwfmetaedit). A separate action from
+    Generate Items, not a replacement (confirmed with the user) — this is
+    much heavier (real disk I/O, external processes per group) where
+    Generate Items is instant and file-free. The full sox+bwfmetaedit
+    command pipeline was validated directly on this machine (real WAV
+    generated, real BWF TimeReference + iXML written and read back
+    correctly, including with a folder path containing a space) before
+    wiring it into CLB, but the REAPER-side integration itself (item/
+    track creation, D_STARTOFFS math, UI) could not be — first real
+    round-trip in REAPER still pending.
   - Fix: CLB.populate_recut_track (v261005.1455) could silently delete a
     NEIGHBORING move's CLB Recut item instead of only replacing its own.
     Real user report, confirmed from an RGWH Monitor dump: an Old item
@@ -2184,6 +2502,11 @@ local META_PATH = lib_path .. "hsuanice_Metadata Read.lua"
 local ok_meta, META = pcall(dofile, META_PATH)
 if not ok_meta then META = nil end
 
+-- Metadata Embed and Process Exec: loaded further below, right after the
+-- CLB table itself is defined (as CLB.METAEMBED/CLB.PX fields, not new
+-- top-level locals like the other optional libs above — this file is
+-- already pinned at Lua's 200-local-per-chunk ceiling) — see there.
+
 ---------------------------------------------------------------------------
 -- ReaImGui check
 ---------------------------------------------------------------------------
@@ -2202,7 +2525,7 @@ local EXT_NS = "hsuanice_ConformListBrowser"
 -- Shown in the window title bar — must be kept in sync with @version in
 -- the header comment at the top of this file by hand; they are two
 -- separate strings with no automatic link between them.
-local VERSION = "261005.1507"
+local VERSION = "261007.1451"
 
 -- Column definitions (EDL Events table)
 local COL = {
@@ -2225,9 +2548,10 @@ local COL = {
   LEVEL        = 17,
   SCENE        = 18,
   TAKE         = 19,
+  SPEED        = 20,
 }
 
-local COL_COUNT = 19
+local COL_COUNT = 20
 
 -- Audio Files table column definitions (conform-focused order)
 local AUDIO_COL = {
@@ -2315,6 +2639,7 @@ local HEADER_LABELS = {
   [17] = "Level",
   [18] = "Scene",
   [19] = "Take",
+  [20] = "Speed",
 }
 
 local DEFAULT_COL_WIDTH = {
@@ -2337,6 +2662,7 @@ local DEFAULT_COL_WIDTH = {
   [17] = 65,
   [18] = 55,   -- Scene
   [19] = 40,   -- Take
+  [20] = 65,   -- Speed (EDL M2 rate, e.g. "48.0" or "-24.0")
 }
 
 -- Columns with short/fixed-length content: kept at DEFAULT_COL_WIDTH during Fit Widths.
@@ -2354,6 +2680,7 @@ local FIT_FIXED_COLS = {
   [COL.DURATION]    = true,
   [COL.MATCH_STATUS]= true,  -- short status tag
   [COL.LEVEL]       = true,  -- dB value(s)
+  [COL.SPEED]       = true,  -- EDL M2 rate, e.g. "48.0" or "-24.0"
 }
 -- Stretchy: CLIP_NAME (11), SRC_FILE (12), NOTES (13), MATCHED_PATH (15), GROUP (16)
 
@@ -2419,6 +2746,7 @@ local EDL_COL_ORDER = {
   COL.DISS_LEN,     -- 6. Diss
   COL.SRC_IN,       -- 7. Src TC In
   COL.SRC_OUT,      -- 8. Src TC Out
+  COL.SPEED,        -- 8b. Speed (EDL M2 rate — retimed/reverse flag)
   COL.REC_IN,       -- 9. Rec TC In
   COL.REC_OUT,      -- 10. Rec TC Out
   COL.DURATION,     -- 11. Duration
@@ -2476,6 +2804,27 @@ local CLB = {
   track_name_format = "${format} - ${track}",
   last_dir = "",
   last_audio_dir = "",
+  -- Generate Ref Media (see CLB.generate_reference_media_prepare): one
+  -- real WAV PER EVENT, each with its OWN embedded BWF TimeReference
+  -- (that event's real Source TC) + iXML (Scene/Take/Reel) — a
+  -- "Simple/shared ONE file" mode existed briefly (fast, few files, but
+  -- Source TC lived only in REAPER's own D_STARTOFFS, not embedded in
+  -- any file) and was removed entirely at the user's request: "我希望
+  -- 保留 full完整版就好...因為如果要basic，那用一般 empty item的就好" (just
+  -- keep Full — Basic's need is already covered by the plain "Generate
+  -- Items" empty-item placeholder). ref_media_scope ("visible" default |
+  -- "selected") picks which rows to use, chosen per run in the popup —
+  -- files go in an auto-created subfolder (filenames prefixed "_REF",
+  -- user's own request so they stand out once bundled with real
+  -- production media) rather than loose in the chosen parent folder.
+  -- ref_media_folder is that parent folder (user picks each run, like
+  -- Load Audio); ref_media_name_format is the filename template
+  -- (${timestamp} token) — used as the subfolder's name.
+  ref_media_folder      = "",
+  ref_media_name_format = "!CLB_Mute_${timestamp}",
+  ref_media_scope       = "visible", -- "visible" | "selected"
+  ref_media_pending     = nil,      -- { sox, bwf, usable_rows, folder, sr, retimed_count } between prepare and the scope popup's Next button
+  ref_media_want_folder_pick = false, -- set by the scope popup's "Next" button, consumed (folder dialog + reset) right after EndPopup — see its own comment
 
   -- UI state
   show_sources_panel = false,
@@ -2589,6 +2938,21 @@ local CLB = {
   batch_rename = nil,         -- { type="track"|"reel", find="", replace="" } for batch rename
   consolidate_tracks = nil,   -- { selected={}, prefix="" } for track consolidation
 }
+
+-- Metadata Embed (optional — BWF/iXML write via bwfmetaedit, for
+-- CLB.generate_reference_media) and Process Exec (optional — shared
+-- shell-exec helper, for the sox call there). CLB.* fields, not new
+-- top-level locals like the other optional libs loaded earlier above —
+-- this file is already pinned at Lua's 200-local-per-chunk ceiling, so
+-- any further top-level local breaks the build; table fields are exempt.
+do
+  local ok, mod = pcall(dofile, lib_path .. "hsuanice_Metadata Embed.lua")
+  CLB.METAEMBED = ok and mod or nil
+end
+do
+  local ok, mod = pcall(dofile, lib_path .. "hsuanice_Process Exec.lua")
+  CLB.PX = ok and mod or nil
+end
 
 local ROWS = {}    -- Array of row tables
 local EDIT = nil   -- { row_idx, col_id, buf, want_focus }
@@ -3961,6 +4325,9 @@ local function save_prefs()
   reaper.SetExtState(EXT_NS, "fps", tostring(CLB.fps or 25), true)
   reaper.SetExtState(EXT_NS, "is_drop", CLB.is_drop and "1" or "0", true)
   reaper.SetExtState(EXT_NS, "track_name_format", CLB.track_name_format or "${format} - ${track}", true)
+  reaper.SetExtState(EXT_NS, "ref_media_folder", CLB.ref_media_folder or "", true)
+  reaper.SetExtState(EXT_NS, "ref_media_name_format", CLB.ref_media_name_format or "!CLB_Mute_${timestamp}", true)
+  reaper.SetExtState(EXT_NS, "ref_media_scope", CLB.ref_media_scope or "visible", true)
   reaper.SetExtState(EXT_NS, "last_dir", CLB.last_dir or "", true)
   reaper.SetExtState(EXT_NS, "last_audio_dir", CLB.last_audio_dir or "", true)
   reaper.SetExtState(EXT_NS, "audio_recursive", CLB.audio_recursive and "1" or "0", true)
@@ -4030,6 +4397,20 @@ local function load_prefs()
   CLB.fps = tonumber(get("fps", "24")) or 24
   CLB.is_drop = get("is_drop", "0") == "1"
   CLB.track_name_format = get("track_name_format", "${format} - ${track}")
+  CLB.ref_media_folder = get("ref_media_folder", "")
+  CLB.ref_media_name_format = get("ref_media_name_format", "!CLB_Mute_${timestamp}")
+  -- Migrate a stale pre-redesign template: the old one-file-per-(reel,track)
+  -- design used ${reel}/${track} tokens, which generate_reference_media's
+  -- single-shared-file design no longer provides (only ${timestamp}) — a
+  -- leftover old-style value would silently expand to an empty/"_" filename.
+  if CLB.ref_media_name_format:find("%${reel}") or CLB.ref_media_name_format:find("%${track}")
+     or not CLB.ref_media_name_format:find("%${timestamp}") then
+    CLB.ref_media_name_format = "!CLB_Mute_${timestamp}"
+  end
+  CLB.ref_media_scope = get("ref_media_scope", "visible")
+  if CLB.ref_media_scope ~= "visible" and CLB.ref_media_scope ~= "selected" then
+    CLB.ref_media_scope = "visible"
+  end
   CLB.last_dir = get("last_dir", "")
   CLB.last_audio_dir = get("last_audio_dir", "")
   CLB.audio_recursive = get("audio_recursive", "1") == "1"
@@ -4377,6 +4758,14 @@ local function get_cell_text(row, col_id)
   if col_id == COL.GROUP        then return row.group or "" end
   if col_id == COL.SCENE        then return row.scene or "" end
   if col_id == COL.TAKE         then return row.take  or "" end
+  if col_id == COL.SPEED        then
+    -- EDL M2 line (aux source timecode) — see hsuanice_EDL Parser.lua's
+    -- own parsing comment. Shown exactly as the EDL itself expresses it
+    -- (raw fps-style rate), not translated into "2x"/"REV" wording — this
+    -- is a from-the-EDL fact for human review, not a derived judgement.
+    if not row.aux_rate then return "" end
+    return string.format("%.1f", row.aux_rate)
+  end
   return ""
 end
 
@@ -4687,6 +5076,12 @@ local function _make_rows_from_events(events, fps, is_drop, source_idx)
       scene = evt.scene or "",
       take  = evt.take  or "",
       audio_levels = evt.audio_levels or {},  -- [{ type, tc, db, reel, src_track }]
+      -- EDL M2 line (aux source timecode): signals this clip was shot at
+      -- a different native frame rate (speed retime) or reverse playback
+      -- — see hsuanice_EDL Parser.lua's own M2-parsing comment. Surfaced
+      -- via the "Speed" column and noted on generated ref-media items;
+      -- not otherwise acted on (see CLB.generate_reference_media).
+      aux_rate = evt.aux_rate,
 
       duration = evt.duration_tc or EDL.seconds_to_tc(
         EDL.tc_to_seconds(evt.rec_tc_out or "00:00:00:00", fps, is_drop)
@@ -5132,10 +5527,10 @@ local function save_clb_project(filepath, silent)
   --           src_tc_in|src_tc_out|rec_tc_in|rec_tc_out|
   --           clip_name|source_file|notes|
   --           match_status|matched_path|group|orig_track|source_idx|level|
-  --           scene|take
+  --           scene|take|aux_rate
   f:write(string.format("ROWS|%d\n", #ROWS))
   for _, row in ipairs(ROWS) do
-    f:write(string.format("R|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%d|%s|%s|%s\n",
+    f:write(string.format("R|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%d|%s|%s|%s|%s\n",
       _clb_escape(row.event_num    or ""),   -- p[2]
       _clb_escape(row.reel         or ""),   -- p[3]
       _clb_escape(row.track        or ""),   -- p[4]
@@ -5155,7 +5550,8 @@ local function save_clb_project(filepath, silent)
       row.__source_idx or 0,                 -- p[18]
       _clb_escape(row.level        or ""),   -- p[19]
       _clb_escape(row.scene        or ""),   -- p[20]
-      _clb_escape(row.take         or "")))  -- p[21]
+      _clb_escape(row.take         or ""),   -- p[21]
+      _clb_escape(row.aux_rate and tostring(row.aux_rate) or ""))) -- p[22], EDL M2 rate
   end
 
   -- Filter panel visibility flags
@@ -5352,6 +5748,7 @@ local function _parse_clb_file(filepath)
           level        = p[19] or "",
           scene        = p[20] or "",
           take         = p[21] or "",
+          aux_rate     = (p[22] and p[22] ~= "") and tonumber(p[22]) or nil, -- nil for files saved before this field existed
           duration     = dur,
         }
         row.__search_text = table.concat({
@@ -6468,6 +6865,349 @@ local function build_row_tokens(row)
   }
 end
 
+---------------------------------------------------------------------------
+-- Generate Ref Media — real BWF/iXML reference WAVs for conform
+---------------------------------------------------------------------------
+--- A client reported that an exported picture-cut track carries no
+--- Source TC at all, so they can't re-conform the original files
+--- themselves — "Generate Items" (above) only ever creates REAPER-
+--- internal placeholders (P_EXT fields, no real underlying file), which
+--- don't survive export to another tool at all. This generates REAL WAV
+--- files with embedded BWF TimeReference + iXML (Scene/Tape/Track name)
+--- so any professional tool reading the exported/conformed media sees
+--- the correct Source TC, Clip Name (the item/take's own name — that's
+--- sequence-level metadata, travels with the edit independent of the
+--- file), and a real, meaningful filename.
+---
+--- Deliberately NOT one WAV per event — user's own reference, from
+--- EdiLoad V4's behavior: ONE shared reference WAV per (reel, track)
+--- group, long enough to span every event in that group, with its own
+--- BWF TimeReference set to the GROUP's own earliest Src TC. Each
+--- event becomes a REAPER item referencing that SAME file via
+--- D_STARTOFFS (same "many items, one shared PCM source" mechanism
+--- CLB.dme_recut_execute's Copy mode already uses) — so a list with a
+--- few thousand events but a few dozen reels only ever generates a few
+--- dozen real files, not thousands. When opened/conformed in another
+--- tool, each item's own Source TC is then just (file's own BWF
+--- TimeReference + that item's start-offset into the file) — standard
+--- broadcast-wave math every professional NLE/DAW already understands,
+--- no per-clip metadata needed at all.
+---
+--- Grouped by (reel, track), not just reel — different tracks on the
+--- same reel are genuinely different audio content (e.g. DME stems:
+--- DX/ADR/FX/MU share one embedded timecode baseline but are NOT
+--- interchangeable — see CLB.dme_recut's own doc comment for the real
+--- bug this caused once already) and must never share one file.
+---
+--- A separate action from Generate Items, not a replacement or a mode
+--- toggle on it (confirmed with the user) — this is much heavier (spawns
+--- sox + bwfmetaedit per GROUP, real disk I/O) where Generate Items is
+--- instant and file-free; most sessions won't need both every time.
+
+--- Filesystem-safe filename piece — strips path separators and other
+--- characters that would break on macOS/Windows either way.
+function CLB._sanitize_filename(s)
+  s = tostring(s or "")
+  s = s:gsub('[/\\:%*%?"<>|]', "_")
+  s = s:gsub("^%s+", ""):gsub("%s+$", "")
+  if s == "" then s = "untitled" end
+  return s
+end
+
+--- Resolves the `sox` executable path (used to synthesize the silent
+--- reference WAV itself — bwfmetaedit only edits metadata on a file that
+--- already exists, it doesn't create audio data), with the same
+--- candidate-list + ExtState-cache-then-verify pattern
+--- hsuanice_Metadata Embed.lua's E.CLI_Resolve uses for bwfmetaedit.
+function CLB._resolve_sox()
+  if not CLB.PX then return nil end
+  local EXT_NS, EXT_KEY = "hsuanice_CLB", "SoxPath"
+
+  local function ok_cli(p)
+    if not p or p == "" then return false end
+    local _, exec_ok = CLB.PX.run_capture(CLB.PX.shell_quote(p) .. " --version")
+    return exec_ok == true
+  end
+
+  local saved = reaper.GetExtState(EXT_NS, EXT_KEY)
+  if saved ~= "" and ok_cli(saved) then return saved end
+
+  local is_win = reaper.GetOS():match("Win")
+  local cands = is_win
+    and { "sox" }
+    or  { "/opt/homebrew/bin/sox", "/usr/local/bin/sox", "sox" }
+  for _, p in ipairs(cands) do
+    if ok_cli(p) then
+      reaper.SetExtState(EXT_NS, EXT_KEY, p, true)
+      return p
+    end
+  end
+  return nil
+end
+
+--- Synthesizes `duration_sec` of pure silence at the given sample rate/
+--- channel count/bit depth via sox. Returns ok, output.
+function CLB._generate_silent_wav(sox, path, sr, channels, duration_sec)
+  local cmd = string.format("%s -n -r %d -c %d -b 24 %s synth %.6f sine 0 vol 0",
+    CLB.PX.shell_quote(sox), sr, channels, CLB.PX.shell_quote(path),
+    math.max(duration_sec, 0.05))
+  local out, exec_ok = CLB.PX.run_capture(cmd)
+  return exec_ok == true, out
+end
+
+--- Builds a per-event iXML document — carries the real Scene/Take/Reel
+--- for ITS OWN event, since this file is self-contained production
+--- metadata, not a throwaway placeholder: the whole point of this
+--- feature is that the FILE ITSELF (not a REAPER-only D_STARTOFFS
+--- trick) carries the truth. User's explicit requirement after briefly
+--- trying a version without this: "ADV 模式就是要有完整的metadata，包含TC
+--- 嚴格！" (this mode must have COMPLETE metadata, including TC —
+--- strict).
+function CLB._build_ref_ixml_independent(opts)
+  local tracks = {}
+  for ch = 1, opts.channels do
+    tracks[#tracks + 1] = table.concat({
+      "    <TRACK>",
+      "      <CHANNEL_INDEX>" .. ch .. "</CHANNEL_INDEX>",
+      "      <INTERLEAVE_INDEX>" .. ch .. "</INTERLEAVE_INDEX>",
+      "      <NAME>CLB_Ref</NAME>",
+      "    </TRACK>",
+    }, "\n")
+  end
+  local parts = {
+    '<?xml version="1.0" encoding="UTF-8"?>',
+    "<BWFXML>",
+    "  <IXML_VERSION>1.5</IXML_VERSION>",
+    "  <NOTE>Generated by hsuanice Conform List Browser — silent reference media for conform (event #" .. (opts.event_num or "") .. "). Content is never actually played; embedded BWF TimeReference carries this event's real Source TC.</NOTE>",
+  }
+  if opts.tape and opts.tape ~= "" then parts[#parts+1] = "  <TAPE>" .. opts.tape .. "</TAPE>" end
+  if opts.scene and opts.scene ~= "" then parts[#parts+1] = "  <SCENE>" .. opts.scene .. "</SCENE>" end
+  if opts.take and opts.take ~= "" then parts[#parts+1] = "  <TAKE>" .. opts.take .. "</TAKE>" end
+  parts[#parts+1] = "  <SPEED>"
+  parts[#parts+1] = "    <FILE_SAMPLE_RATE>" .. tostring(opts.sr) .. "</FILE_SAMPLE_RATE>"
+  parts[#parts+1] = "  </SPEED>"
+  parts[#parts+1] = "  <TRACK_LIST>"
+  parts[#parts+1] = "    <TRACK_COUNT>" .. tostring(opts.channels) .. "</TRACK_COUNT>"
+  parts[#parts+1] = table.concat(tracks, "\n")
+  parts[#parts+1] = "  </TRACK_LIST>"
+  parts[#parts+1] = "</BWFXML>"
+  return table.concat(parts, "\n")
+end
+
+--- Shared helper: collect-and-create one REAPER track per expanded track
+--- name across `rows` (natural-sorted) — used identically by both
+--- Generate Ref Media modes below. Returns row_to_trackname, track_map,
+--- track_names_order (for diagnostics/messages).
+function CLB._build_track_map_for_rows(rows)
+  local track_names_set, track_names_order, row_to_trackname = {}, {}, {}
+  for _, row in ipairs(rows) do
+    local rtokens = build_row_tokens(row)
+    local expanded = _expand_track_name(CLB.track_name_format, rtokens)
+    row_to_trackname[row.__guid] = expanded
+    if not track_names_set[expanded] then
+      track_names_set[expanded] = true
+      track_names_order[#track_names_order + 1] = expanded
+    end
+  end
+  table.sort(track_names_order, _natural_sort_cmp)
+  local track_map = {}
+  for _, name in ipairs(track_names_order) do
+    reaper.InsertTrackAtIndex(reaper.CountTracks(0), true)
+    local tr = reaper.GetTrack(0, reaper.CountTracks(0) - 1)
+    reaper.GetSetMediaTrackInfo_String(tr, "P_NAME", name, true)
+    track_map[name] = tr
+  end
+  return row_to_trackname, track_map, track_names_order
+end
+
+--- Validates prerequisites, THEN opens the "Generate Reference Media"
+--- scope-picker popup (Selected rows vs. the currently visible/filtered
+--- list — see CLB.ref_media_scope's own doc comment above). The actual
+--- row set depends on that choice, so it isn't computed here — see
+--- CLB.generate_reference_media_pick_folder_and_run, which reads
+--- CLB.ref_media_scope once the popup's "Next" button is clicked. This
+--- function itself stays pure synchronous Lua with no blocking dialog
+--- before its OpenPopup call (same shape as CLB.dme_recut_prepare's
+--- already-proven-working pattern) — the folder dialog happens later,
+--- after the popup closes, for the same reason (see
+--- CLB.generate_reference_media_pick_folder_and_run's own comment).
+function CLB.generate_reference_media_prepare()
+  if CLB.batch_job then
+    reaper.ShowMessageBox("Another operation (" .. (CLB.batch_job.label or "batch job") .. ") is still running — wait for it to finish first.", SCRIPT_NAME, 0)
+    return
+  end
+  if #ROWS == 0 then
+    reaper.ShowMessageBox("No events loaded. Load an EDL file first.", SCRIPT_NAME, 0)
+    return
+  end
+  if not (CLB.PX and CLB.METAEMBED) then
+    reaper.ShowMessageBox(
+      "Required library failed to load (hsuanice_Process Exec.lua /\n"
+      .. "hsuanice_Metadata Embed.lua) — Generate Ref Media is unavailable.",
+      SCRIPT_NAME, 0)
+    return
+  end
+  local sox = CLB._resolve_sox()
+  if not sox then
+    reaper.ShowMessageBox(
+      "Could not find \"sox\" (used to synthesize the reference WAV's\n"
+      .. "silent audio). Install it, e.g. via Homebrew: brew install sox",
+      SCRIPT_NAME, 0)
+    return
+  end
+  local bwf = CLB.METAEMBED.CLI_Resolve()
+  if not bwf then
+    reaper.ShowMessageBox("Could not find \"bwfmetaedit\" — Generate Ref Media is unavailable.", SCRIPT_NAME, 0)
+    return
+  end
+  if not reaper.JS_Dialog_BrowseForFolder then
+    reaper.ShowMessageBox(
+      "JS extension required for folder selection.\n\n"
+      .. "Please install js_ReaScriptAPI via ReaPack.",
+      SCRIPT_NAME, 0)
+    return
+  end
+
+  CLB.ref_media_pending = { sox = sox, bwf = bwf }
+  reaper.ImGui_OpenPopup(ctx, "Generate Reference Media##clb_genref_popup")
+end
+
+--- CLB.generate_reference_media_pick_folder_and_run is defined further
+--- down, right after get_selected_rows() — it needs to call that
+--- function, which (being a `local function`, not a CLB.* field) can
+--- only be referenced by code appearing AFTER its own declaration in
+--- this file's source order, regardless of call order at runtime.
+
+--- One real WAV PER EVENT, each with its OWN embedded BWF TimeReference
+--- (that event's real Source TC — not fixed/shared) + iXML (Scene/Take/
+--- Reel). This is the ONLY generation mode — a "Simple/shared ONE file"
+--- mode existed briefly but was removed entirely at the user's request:
+--- "我希望保留 full完整版就好...因為如果要basic，那用一般 empty item的就好"
+--- (just keep the Full version — if Basic is wanted, the plain
+--- "Generate Items" empty-item placeholder already covers that; this
+--- feature's whole reason to exist is the real embedded metadata).
+function CLB.generate_reference_media_independent(pending)
+  local usable_rows, folder, sox, bwf, sr = pending.usable_rows, pending.folder, pending.sox, pending.bwf, pending.sr
+  local CHANNELS = 1
+  local sep = reaper.GetOS():match("Win") and "\\" or "/"
+
+  local tokens = { timestamp = os.date("%y%m%d_%H%M%S") }
+  local subfolder_name = CLB._sanitize_filename(EDL.expand_template(CLB.ref_media_name_format, tokens))
+  local subfolder = folder .. sep .. subfolder_name .. sep
+  reaper.RecursiveCreateDirectory(subfolder, 0)
+
+  local retimed_note = ""
+  if pending.retimed_count > 0 then
+    retimed_note = string.format(
+      "\n\n%d event(s) carry an EDL M2 (speed/reverse) flag — see the\n"
+      .. "\"Speed\" column. Their own file's Source TC assumes normal\n"
+      .. "speed (flagged in each item's own Notes for manual review).",
+      pending.retimed_count)
+  end
+
+  local msg = string.format(
+    "Generate %d independent reference WAV(s), one per event?\n\n"
+    .. "Folder: %s\n"
+    .. "Sample rate: %d Hz, mono — each file's own embedded BWF\n"
+    .. "TimeReference is that event's real Source TC (not shared/fixed\n"
+    .. "at 0), so Source TC survives even a render/export to other\n"
+    .. "software. Slower than the shared-file mode; creates %d files.%s",
+    #usable_rows, subfolder, sr, #usable_rows, retimed_note)
+  if reaper.ShowMessageBox(msg, SCRIPT_NAME, 1) ~= 1 then return end
+
+  reaper.Undo_BeginBlock()
+  reaper.PreventUIRefresh(1)
+
+  local row_to_trackname, track_map, track_names_order = CLB._build_track_map_for_rows(usable_rows)
+  local fail_count = 0
+
+  CLB.batch_job = {
+    label = "Generating independent reference files",
+    total = #usable_rows,
+    current = 0,
+    created = 0,
+    batch_size = 10, -- heavier per-step work (real sox + bwfmetaedit x2 per event) than the shared mode
+    step = function(job, i)
+      local row = usable_rows[i]
+      local tr = track_map[row_to_trackname[row.__guid]] or track_map[track_names_order[1]]
+      if not tr then return end
+
+      local pos     = CLB.rec_tc_seconds(row.rec_tc_in,  row)
+      local pos_out = CLB.rec_tc_seconds(row.rec_tc_out, row)
+      local length  = math.max(pos_out - pos, 0.001)
+      local src_tc_sec = math.max(CLB.src_tc_seconds(row.src_tc_in, row), 0)
+      local tr_samples = CLB.METAEMBED.SecToSamples(sr, src_tc_sec)
+
+      -- "_REF" prefix keeps these unmistakable once bundled alongside
+      -- real production files — leading "_" is rare in ordinary
+      -- filenames, "REF" spells out why.
+      local fname = CLB._sanitize_filename(string.format("_REF%s_%s_%s",
+        row.event_num or tostring(i), row.reel or "", row.clip_name or "")) .. ".wav"
+      local fpath = subfolder .. fname
+
+      local ok_gen = CLB._generate_silent_wav(sox, fpath, sr, CHANNELS, length)
+      if not ok_gen then fail_count = fail_count + 1; return end
+      local xml = CLB._build_ref_ixml_independent{
+        sr = sr, channels = CHANNELS,
+        event_num = row.event_num, tape = row.reel, scene = row.scene, take = row.take,
+      }
+      -- Same Originator-forcing fix as the shared mode's TR_Write call —
+      -- required whenever tr_samples could legitimately be 0 (e.g. a "BL"
+      -- blank event's Src TC In is literally 00:00:00:00), not just as a
+      -- general precaution — see hsuanice_Metadata Embed.lua's TR_Write
+      -- doc comment.
+      local ok_tr = CLB.METAEMBED.TR_Write(bwf, fpath, tr_samples, "hsuanice CLB")
+      local ok_ix = CLB.METAEMBED.Write_iXML_Raw(bwf, fpath, xml)
+      if not (ok_tr and ok_ix) then fail_count = fail_count + 1 end
+
+      local source = reaper.PCM_Source_CreateFromFile(fpath)
+      if not source then fail_count = fail_count + 1; return end
+
+      local item = reaper.AddMediaItemToTrack(tr)
+      reaper.SetMediaItemInfo_Value(item, "D_POSITION", pos)
+      reaper.SetMediaItemInfo_Value(item, "D_LENGTH", length)
+      reaper.SetMediaItemInfo_Value(item, "B_LOOPSRC", 0) -- defensive; file is already exactly this item's own length
+      local take = reaper.AddTakeToMediaItem(item)
+      if take then
+        reaper.SetMediaItemTake_Source(take, source)
+        reaper.SetMediaItemTakeInfo_Value(take, "D_STARTOFFS", 0)
+        reaper.GetSetMediaItemTakeInfo_String(take, "P_NAME", row.clip_name or "", true)
+        reaper.GetSetMediaItemTakeInfo_String(take, "P_EXT:CLB_EVENT", row.event_num or "", true)
+        reaper.GetSetMediaItemTakeInfo_String(take, "P_EXT:CLB_REEL", row.reel or "", true)
+        reaper.GetSetMediaItemTakeInfo_String(take, "P_EXT:CLB_TRACK", row.track or "", true)
+        reaper.GetSetMediaItemTakeInfo_String(take, "P_EXT:CLB_SRC_TC_IN", row.src_tc_in or "", true)
+        reaper.GetSetMediaItemTakeInfo_String(take, "P_EXT:CLB_SRC_TC_OUT", row.src_tc_out or "", true)
+      end
+
+      local note_parts = {}
+      note_parts[#note_parts + 1] = "Reel: " .. (row.reel or "")
+      if row.scene and row.scene ~= "" then note_parts[#note_parts + 1] = "Scene: " .. row.scene end
+      if row.take  and row.take  ~= "" then note_parts[#note_parts + 1] = "Take: "  .. row.take  end
+      if row.aux_rate then
+        note_parts[#note_parts + 1] = string.format(
+          "\xE2\x9A\xA0 Speed: %.1f (EDL M2 — retimed or reverse source; this file's Source TC assumes normal speed)",
+          row.aux_rate)
+      end
+      reaper.GetSetMediaItemInfo_String(item, "P_NOTES", table.concat(note_parts, "\n"), true)
+
+      job.created = job.created + 1
+    end,
+    finish = function(job)
+      reaper.PreventUIRefresh(-1)
+      reaper.UpdateArrange()
+      reaper.Undo_EndBlock(string.format("CLB: Generate Reference Media (%d independent file(s))", job.created), -1)
+
+      local fail_note = fail_count > 0
+        and string.format("\n\n%d event(s) failed to generate (sox/bwfmetaedit error) — check the folder directly.", fail_count)
+        or ""
+      reaper.ShowMessageBox(string.format(
+        "Generate Reference Media done.\n\nFolder:\n%s\n\n%d file(s)/item(s) created.%s",
+        subfolder, job.created, fail_note),
+        SCRIPT_NAME, 0)
+    end,
+  }
+end
+
 local function generate_items()
   if CLB.batch_job then
     reaper.ShowMessageBox("Another operation (" .. (CLB.batch_job.label or "batch job") .. ") is still running — wait for it to finish first.", SCRIPT_NAME, 0)
@@ -6570,9 +7310,11 @@ local function generate_items()
         -- Take name = clip name
         reaper.GetSetMediaItemTakeInfo_String(take, "P_NAME", row.clip_name or "", true)
 
-        -- Item note: Source TC In/Out + Reel (human-readable)
+        -- Item note: Source TC In/Out + Reel/Scene/Take (human-readable)
         local note_parts = {}
         note_parts[#note_parts + 1] = "Reel: " .. (row.reel or "")
+        if row.scene and row.scene ~= "" then note_parts[#note_parts + 1] = "Scene: " .. row.scene end
+        if row.take  and row.take  ~= "" then note_parts[#note_parts + 1] = "Take: "  .. row.take  end
         note_parts[#note_parts + 1] = "Src In: " .. (row.src_tc_in or "")
         note_parts[#note_parts + 1] = "Src Out: " .. (row.src_tc_out or "")
         if row.notes and row.notes ~= "" then
@@ -6628,6 +7370,62 @@ local function get_selected_rows()
   end
 
   return selected
+end
+
+--- Called from the Generate Reference Media scope popup's "Next"
+--- button: resolves which rows to use (Selected vs. visible/filtered,
+--- per CLB.ref_media_scope — needs get_selected_rows just above, hence
+--- this function living here rather than next to the rest of Generate
+--- Ref Media further up), closes the popup, then asks for the output
+--- folder (JS_Dialog_BrowseForFolder — BLOCKING) and runs the
+--- generator. The folder dialog deliberately happens here, AFTER the
+--- popup has already closed, rather than before opening it — a real bug
+--- report: opening an ImGui popup right after a blocking native dialog
+--- returns doesn't actually work (confirmed no other OpenPopup in this
+--- file is ever preceded by one), so the dialog can't come before any
+--- ImGui_OpenPopup call in this flow.
+function CLB.generate_reference_media_pick_folder_and_run()
+  local pending = CLB.ref_media_pending
+  CLB.ref_media_pending = nil
+  if not pending then return end
+
+  local source_rows = (CLB.ref_media_scope == "selected")
+    and get_selected_rows()
+    or (get_view_rows() or ROWS)
+  if CLB.ref_media_scope == "selected" and #source_rows == 0 then
+    reaper.ShowMessageBox("No rows selected. Select rows in the table first.", SCRIPT_NAME, 0)
+    return
+  end
+  local usable_rows = {}
+  for _, row in ipairs(source_rows) do
+    if row.src_tc_in and row.src_tc_in ~= ""
+       and row.rec_tc_in and row.rec_tc_in ~= "" and row.rec_tc_out and row.rec_tc_out ~= "" then
+      usable_rows[#usable_rows + 1] = row
+    end
+  end
+  if #usable_rows == 0 then
+    reaper.ShowMessageBox("No events have both Src and Rec TC — nothing to generate.", SCRIPT_NAME, 0)
+    return
+  end
+
+  local sr = math.floor((reaper.GetSetProjectInfo(0, "PROJECT_SRATE", 0, false)) or 0)
+  if not sr or sr <= 0 then sr = 48000 end
+  local retimed_count = 0
+  for _, row in ipairs(usable_rows) do
+    if row.aux_rate then retimed_count = retimed_count + 1 end
+  end
+
+  local rv, folder = reaper.JS_Dialog_BrowseForFolder(
+    "Select Output Folder for Reference Media", CLB.ref_media_folder or "")
+  if rv ~= 1 or not folder or folder == "" then return end
+  CLB.ref_media_folder = folder
+  save_prefs()
+
+  pending.usable_rows = usable_rows
+  pending.folder = folder
+  pending.sr = sr
+  pending.retimed_count = retimed_count
+  CLB.generate_reference_media_independent(pending)
 end
 
 ---------------------------------------------------------------------------
@@ -7039,6 +7837,8 @@ local function conform_matched_items(selected_only)
       -- Item note
       local note_parts = {}
       note_parts[#note_parts + 1] = "Reel: " .. (row.reel or "")
+      if row.scene and row.scene ~= "" then note_parts[#note_parts + 1] = "Scene: " .. row.scene end
+      if row.take  and row.take  ~= "" then note_parts[#note_parts + 1] = "Take: "  .. row.take  end
       note_parts[#note_parts + 1] = "Src In: " .. (row.src_tc_in or "")
       note_parts[#note_parts + 1] = "Src Out: " .. (row.src_tc_out or "")
       if #audio_files > 1 then
@@ -8661,6 +9461,23 @@ local function draw_toolbar()
         "Example: $reel----$sceneT$take  →  D043----9-9-12T1")
     end
 
+    reaper.ImGui_Spacing(ctx)
+    reaper.ImGui_Text(ctx, "Ref Media Filename Format")
+    reaper.ImGui_SetNextItemWidth(ctx, scale(250))
+    local rmf_chg, rmf_new = reaper.ImGui_InputText(ctx, "##ref_media_fmt", CLB.ref_media_name_format or "")
+    if rmf_chg then
+      CLB.ref_media_name_format = rmf_new
+      save_prefs()
+    end
+    if reaper.ImGui_IsItemHovered(ctx) then
+      reaper.ImGui_SetTooltip(ctx,
+        "Filename for \"Generate Ref Media...\" — ONE shared file per run\n"
+        .. "(not per event or per reel), same idea as EdiLoad's own\n"
+        .. "generic \"!EdiLoad_Mute_...\" reference file.\n"
+        .. "Tokens: ${timestamp}\n"
+        .. "Example: !CLB_Mute_${timestamp}  →  !CLB_Mute_261007_120000.wav")
+    end
+
     reaper.ImGui_EndPopup(ctx)
   end
   end
@@ -9104,6 +9921,70 @@ function CLB.draw_left_sidebar()
     reaper.ImGui_Text(ctx, "Create empty items on REAPER tracks at absolute TC positions")
     reaper.ImGui_Text(ctx, "Metadata stored as P_EXT fields on each take")
     reaper.ImGui_EndTooltip(ctx)
+  end
+
+  -- Generate Ref Media button — opens a scope-picker popup (Selected
+  -- rows vs. the visible/filtered list, see CLB.ref_media_scope's doc
+  -- comment) instead of generating directly, same prepare/popup/execute
+  -- split as DME Recut Settings above. One real WAV per event with real
+  -- embedded BWF/iXML metadata — the only mode; a "Simple/shared ONE
+  -- file" mode existed briefly but was removed at the user's request
+  -- (see CLB.generate_reference_media_independent's own doc comment).
+  CLB.push_btn_color("build")
+  local gen_ref_clicked = reaper.ImGui_Button(ctx, "Generate Ref Media...", btn_w, btn_h)
+  CLB.pop_btn_color("build")
+  if gen_ref_clicked then
+    CLB.generate_reference_media_prepare()
+  end
+  if reaper.ImGui_IsItemHovered(ctx) then
+    reaper.ImGui_BeginTooltip(ctx)
+    reaper.ImGui_Text(ctx, "Generate one real silent WAV per event, with embedded")
+    reaper.ImGui_Text(ctx, "BWF TimeReference + iXML, so other software reads")
+    reaper.ImGui_Text(ctx, "correct Source TC/Scene/Take/Reel after conform/export.")
+    reaper.ImGui_Text(ctx, "Opens a dialog to pick Selected rows or the visible list.")
+    reaper.ImGui_EndTooltip(ctx)
+  end
+  if reaper.ImGui_BeginPopup(ctx, "Generate Reference Media##clb_genref_popup") then
+    reaper.ImGui_Text(ctx, "Generate Reference Media")
+    local scope_count = (CLB.ref_media_scope == "selected")
+      and #get_selected_rows()
+      or #(get_view_rows() or ROWS)
+    reaper.ImGui_TextDisabled(ctx, string.format("%d row(s) in scope.", scope_count))
+    reaper.ImGui_Separator(ctx)
+
+    if reaper.ImGui_RadioButton(ctx, "Visible list (currently filtered/shown)##clb_genref_scope_visible", CLB.ref_media_scope ~= "selected") then
+      CLB.ref_media_scope = "visible"; save_prefs()
+    end
+    reaper.ImGui_Spacing(ctx)
+    if reaper.ImGui_RadioButton(ctx, "Selected rows only##clb_genref_scope_selected", CLB.ref_media_scope == "selected") then
+      CLB.ref_media_scope = "selected"; save_prefs()
+    end
+
+    reaper.ImGui_Separator(ctx)
+    -- "Next" (not "Generate"): picking the output folder — a blocking
+    -- native dialog — happens AFTER this popup closes, not before it
+    -- opened. See CLB.generate_reference_media_pick_folder_and_run's own
+    -- comment for why that order is required, not just reordered for
+    -- the user's convenience (though it is also that). The actual call
+    -- is deferred one step further still, to AFTER EndPopup below (not
+    -- called directly from inside this still-open popup) — same
+    -- "don't call a blocking native dialog right across an ImGui
+    -- Begin/End boundary" caution as the OpenPopup fix above, just the
+    -- other direction (into a popup this time, not out of one).
+    if reaper.ImGui_Button(ctx, "Next: Choose Folder...##clb_genref_go", scale(140), scale(22)) then
+      reaper.ImGui_CloseCurrentPopup(ctx)
+      CLB.ref_media_want_folder_pick = true
+    end
+    reaper.ImGui_SameLine(ctx)
+    if reaper.ImGui_Button(ctx, "Cancel##clb_genref_cancel", scale(70), scale(22)) then
+      CLB.ref_media_pending = nil
+      reaper.ImGui_CloseCurrentPopup(ctx)
+    end
+    reaper.ImGui_EndPopup(ctx)
+  end
+  if CLB.ref_media_want_folder_pick then
+    CLB.ref_media_want_folder_pick = false
+    CLB.generate_reference_media_pick_folder_and_run()
   end
 
   -- Conform Matched buttons (with audio)
@@ -12509,7 +13390,7 @@ end
 --- Session file holds two row-sets (old + new) in one file, and the
 --- prefix ("OR"/"NR") is what tells them apart unambiguously on read-back.
 local function _write_cmp_row(f, prefix, row)
-  f:write(string.format("%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%d|%s|%s|%s\n",
+  f:write(string.format("%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%d|%s|%s|%s|%s\n",
     prefix,
     _clb_escape(row.event_num or ""), _clb_escape(row.reel or ""), _clb_escape(row.track or ""),
     _clb_escape(row.edit_type or ""), _clb_escape(tostring(row.dissolve_len or "")),
@@ -12518,7 +13399,8 @@ local function _write_cmp_row(f, prefix, row)
     _clb_escape(row.clip_name or ""), _clb_escape(row.source_file or ""), _clb_escape(row.notes or ""),
     _clb_escape(row.match_status or ""), _clb_escape(row.matched_path or ""), _clb_escape(row.group or ""),
     _clb_escape(row.__orig_track or ""), row.__source_idx or 0,
-    _clb_escape(row.level or ""), _clb_escape(row.scene or ""), _clb_escape(row.take or "")))
+    _clb_escape(row.level or ""), _clb_escape(row.scene or ""), _clb_escape(row.take or ""),
+    _clb_escape(row.aux_rate and tostring(row.aux_rate) or "")))
 end
 
 local function _read_cmp_row(p)
@@ -12531,6 +13413,7 @@ local function _read_cmp_row(p)
     match_status = p[14] or "", matched_path = p[15] or "", group = p[16] or "",
     __orig_track = p[17] or "", __source_idx = tonumber(p[18]) or 0,
     level = p[19] or "", scene = p[20] or "", take = p[21] or "",
+    aux_rate = (p[22] and p[22] ~= "") and tonumber(p[22]) or nil,
   }
 end
 
