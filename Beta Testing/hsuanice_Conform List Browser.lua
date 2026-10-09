@@ -1,6 +1,6 @@
 --[[
 @description Conform List Browser
-@version 261007.1451
+@version 261009.2349
 @author hsuanice
 @about
   A REAPER script for browsing and editing EDL (Edit Decision List) data
@@ -71,6 +71,311 @@
   Required for AAF: aaftool in PATH (https://github.com/agfline/LibAAF)
 
 @changelog
+  v261009.2349
+  - Change: Conform (All/Sel) now adds the matched audio as new take(s) on
+    the linked Reaper item for rows linked via "Link Reaper Items"/Reveal
+    (row.reaper_item_guid) too — not only Load From Reaper rows — instead
+    of creating a new item on a new track. User's own request; reverses
+    v261009.1505's deliberate separation. Both link kinds now go through
+    CLB.row_linked_item. Track-suffixing still keys off row.__reaper_item
+    only (only a Load From Reaper row's track is a live Reaper track name).
+  - New: on a linked item, Conform skips any audio file the item already
+    has a take of (counted in the completion message) — several rows can
+    share one linked item (same cut on V1 + a NONE track; A1/A2 matching
+    the same file), and a re-Conform would otherwise stack duplicate takes.
+  - Perf: CLB.find_item_by_guid rescans the project on a miss at most once
+    per project state change (GetProjectStateChangeCount), so Conform over
+    many rows with stale links can't rescan once per row.
+
+  v261009.2122
+  - UI: button color groups recolored in rainbow order 紅橙黃綠藍靛紫
+    (user's own request), following the left sidebar top→bottom: danger
+    red, recut orange, align (Shift Range / Calibrate TC) purple → YELLOW,
+    build green, io blue (top toolbar), list (Remove Dups / Consolidate)
+    teal → INDIGO, link → a MUTED violet (lower saturation/alpha — user:
+    Link/Reveal aren't serious enough to need an eye-catching color).
+    CLB.push/pop_btn_color now take an optional 4th palette entry (text
+    color) — used for yellow, where the default white text is hard to read.
+  - UI: "Auto Match" checkbox moved from the top toolbar (next to Load
+    From Reaper) to the left sidebar, right under Match All, with the other
+    match controls — user's own request. Same persisted setting/behavior;
+    tooltip now names Load From Reaper explicitly since it no longer sits
+    beside it. Always shown (Match All itself only appears once both a list
+    and audio are loaded).
+
+  v261009.2104
+  - UI: Link Reaper Items, a new "Reveal Item" button and the "Follow
+    Reaper" checkbox (+ its status text, now wrapped) moved out of the top
+    toolbar to the very bottom of the left sidebar, in their own new
+    magenta "link" button color group (CLB.BTN_GROUP_COLORS.link) — user's
+    own request. Reveal Item = the same action as the
+    hsuanice_CLB Reveal Item.lua wrapper, on the first selected Reaper item.
+
+  v261009.1823
+  - New: reverse link — Reaper item → its event row(s) in CLB
+    (CLB.reveal_reaper_item; selects their Clip Name cells, scrolls the
+    table and centers the timeline panel there). User's own choices:
+    • Two triggers: a persisted "Follow Reaper" checkbox (off by default,
+      next to Link Reaper Items) that reveals on every change of Reaper's
+      first selected item — one pointer compare per frame, lookup only on
+      change, result shown as small status text, no dialogs — and a new
+      wrapper hsuanice_CLB Reveal Item.lua (pending_action "reveal_item")
+      for a keyboard shortcut.
+    • An item not linked yet is matched on the spot with the same 4-TC
+      rules and the link is STORED (saved with the .clb) — but only onto
+      rows without a link yet, never stealing one linked to another item.
+    • A row hidden by current filters/search is still selected, with a
+      note to clear filters to see it.
+    • Clicking a linked Clip Name (CLB → Reaper) marks that item as already
+      seen, so Follow doesn't bounce it straight back.
+  - Refactor: Link Reaper Items' matching extracted into shared
+    CLB._build_link_index / CLB._match_item_rows (Link and Reveal share them).
+
+  v261009.1608
+  - New: pending_action "link_reaper_items" → CLB.link_reaper_items_selection(),
+    driven by the new standalone wrapper hsuanice_CLB Link Reaper Items.lua
+    (same heartbeat/ExtState pattern as the Load From Reaper wrapper). When
+    CLB isn't open the wrapper only offers to open it — linking needs a list
+    already loaded, which a fresh CLB never has.
+
+  v261009.1505
+  - New: "Link Reaper Items" button (next to Load From Reaper / Auto
+    Match) — user's own request: link the rows of an ALREADY LOADED list
+    (e.g. a .clb) to real items already in the session, so clicking a
+    row's Clip Name selects and scrolls to its item. Real case: Picture
+    Cut items generated from this list long ago and since converted to
+    audio, item Notes / take data still intact. Unlike Load From Reaper
+    (creates NEW rows from items), this only attaches items to existing
+    rows. Select items in Reaper, click the button.
+    • Matching: all 4 TCs, ±1 frame. Src In/Out from the item's take
+      P_EXT:CLB_SRC_TC_* → else the item Notes' "Src In:/Src Out:" lines
+      → else its source's BWF TimeReference + take offset (reverse
+      conform, for real production audio with no CLB data at all). Rec
+      In/Out from P_EXT:CLB_REC_TC_* vs the row's raw Rec TC first
+      (survives an item that's since been moved), else the item's real
+      position/length vs the row's calibrated Rec TC. When several rows
+      share all 4 TCs, P_EXT:CLB_TRACK narrows them; any that remain
+      are the same edit, so all get linked. Items matching nothing are
+      listed in the report and NOT linked (no position-only guessing).
+    • Persisted: stored per row as the item's GUID (new 23rd field of the
+      .clb "R|" line — older files load unchanged; older CLB versions
+      just ignore it). Resolved via a GUID→item cache rebuilt on miss.
+    • Kept SEPARATE from row.__reaper_item on purpose: that pointer also
+      makes Conform add takes onto the linked item and skips track-
+      suffixing — a GUID link only drives jump/select, so linking an EDL
+      row to a reference item never changes Conform's behavior.
+    • Clip Name of a linked row shows a "Click to select its linked
+      Reaper item" tooltip; a link whose item is gone logs a console note.
+    Verified offline against the real session (POINT R1 Dialog .rpp,
+    478 Picture Cut items) + conform_20260918.clb: 478/478 matched,
+    via take data alone and via Notes alone, no multi-row ambiguity.
+  - Refactor: Load From Reaper's per-item read extracted into the shared
+    CLB._read_item_event (used by both features). One behavior change:
+    Load From Reaper's Src TC now also falls back to the item Notes'
+    "Src In:/Src Out:" lines before BWF TimeReference — a glued/rendered
+    item's BWF TC is the glue file's own, not the original source's.
+
+  v261008.1052
+  - Change: unified default filenames across Export and Save CLB
+    Project, per the user's own explicit spec — "export_YYMMDD_HHMMSS"
+    for all 3 Export formats (prefix changed from the previous pass's
+    "clb_" to "export_") and "conform_YYMMDD_HHMMSS" for Save CLB
+    Project (added seconds + switched from 4-digit to 2-digit year,
+    matching Export's own format — was "conform_YYYYMMDD_HHMM" with no
+    seconds before this).
+
+  v261008.1033
+  - Change: all 3 Export formats (EDL/TSV/CSV) now default to a
+    timestamped filename ("clb_YYMMDD_HHMMSS.<ext>") instead of the
+    generic "export.<ext>" — user's own request, same idea Save CLB
+    Project's own default filename already uses.
+
+  v261008.1021
+  - New: Export TSV / Export CSV — user's own request. New
+    CLB._build_edl_table_text(format_type, rows) mirrors the Audio Files
+    panel's existing build_audio_table_text (same escape_field_value
+    helper, same tab/comma separator convention), but against the main
+    table's own HEADER_LABELS/get_cell_text — includes every CURRENTLY
+    VISIBLE column, in the user's current column order (EDL_COL_ORDER/
+    EDL_COL_VISIBILITY), unlike Export EDL's fixed narrow CMX3600
+    schema. New CLB.export_tsv_csv(format_type) handles the save dialog
+    + file write, exporting the full list (not just the filtered view —
+    same convention Export EDL already used).
+  - Change: "Export EDL" button replaced with a unified "Export..."
+    button opening a popup menu (Export EDL.../Export TSV.../Export
+    CSV...) — user's own request: "Export整合成和Import一樣，點下去後才看到
+    要輸出什麼格式" (make Export work like Import — show format choices
+    only after clicking). Same pattern as the existing "Load List..."
+    button, which already consolidates Load EDL/XML/AAF/Subtitle the
+    same way.
+
+  v261007.1711
+  - New: "Load From Reaper" no longer re-asks the same two confirm
+    dialogs on every run — user's own request, since it's commonly
+    re-run many times while iterating on a match. (1) FPS confirm: now
+    skipped after the first successful run IN THE SAME REAPER PROJECT
+    (tracked via GetProjExtState/SetProjExtState — lives in the .rpp
+    itself, so a different project correctly asks again). (2) Replace/
+    Append dialog: new Options setting CLB.ref_load_merge_mode ("ask"
+    default | "replace" | "append") skips it entirely when set to a
+    fixed choice. _apply_timeline_results (the shared load pipeline
+    every loader uses) gained an optional 4th `opts` table
+    ({force_choice, skip_fps_confirm}) to support both — every other
+    loader (EDL/XML/AAF/Subtitle) always passes neither, unaffected.
+    New "Load From Reaper: Replace/Append" radio buttons in Options.
+
+  v261007.1701
+  - New: "is_running" heartbeat ExtState flag — set on startup, cleared
+    via reaper.atexit on exit. Real user report: the "Load From Reaper"
+    wrapper's GetToggleCommandStateEx-based "is CLB already running?"
+    check (v261007.1635) still toggled CLB OFF every time it was
+    already open, confirmed by testing — this script never registers
+    Reaper's own toggle-command state at all, so that check was always
+    false regardless of whether CLB was actually running. This flag is
+    the robust alternative: the wrapper (now hsuanice_CLB Load From
+    Reaper.lua v261007.1708) reads it directly instead.
+  - Fix: a row loaded via "Load From Reaper" could get its real, live
+    Reaper track name mangled with a confusing source-index suffix
+    (e.g. real track "A1" coming out as something like "A1 - 3") —
+    real user report with a screenshot, triggered whenever
+    CLB.edl_sources held more than one entry (any other load mixed in,
+    or "Load From Reaper" itself run more than once in one session).
+    Root cause: _apply_track_suffixes() exists to disambiguate an EDL's
+    own ABSTRACT track label (e.g. "A1" meaning "that file's own audio
+    track 1") when the same label shows up across several separately-
+    loaded EDL files covering one reel — it was never written with
+    "Load From Reaper" in mind, where row.track is already the REAL,
+    live Reaper track name, not an abstract label needing
+    disambiguation at all. Now skips any row with row.__reaper_item set
+    entirely, in both its "restore original" (single source) and
+    "apply suffix" (multiple sources) branches.
+
+  v261007.1653
+  - Fix: "Load From Reaper" rows had an empty Notes column even when the
+    item they came from had real Notes text — user's own observation.
+    Root cause: _make_rows_from_events's row.notes was only ever
+    populated from evt.comments (EDL comment lines), a concept
+    CLB.load_from_reaper_selection has no equivalent for. Added a second,
+    direct evt.notes string field (appended to, not replacing, any
+    evt.comments-derived text — the two are mutually exclusive in
+    practice) — CLB.load_from_reaper_selection now sets it to the item's
+    own P_NOTES verbatim (multi-line text collapsed to the same " | "-
+    joined single line as EDL comments, for consistent display).
+
+  v261007.1635
+  - Fix: "Load From Reaper" rows showed the frozen P_EXT:CLB_TRACK value
+    (whatever track the item was ON WHEN GENERATED) instead of the
+    item's actual CURRENT Reaper track — real user report with a
+    screenshot. User's own framing: this list should reflect the
+    session's current state, and an item may have moved to a different
+    track (or that track been renamed) since it was created. Swapped
+    the fallback order: Track now prefers the live Reaper track name,
+    falling back to P_EXT only if that's somehow unavailable.
+  - New: CLB's main loop now polls a one-shot ExtState flag
+    (hsuanice_ConformListBrowser / "pending_action") at the top of every
+    frame, consuming it immediately — lets an external wrapper script
+    drive CLB (currently: "load_from_reaper" → runs
+    CLB.load_from_reaper_selection()) via a Reaper Action List shortcut,
+    whether CLB's window is already open or needs to be launched fresh;
+    the flag is picked up on the very next frame either way. New
+    standalone wrapper hsuanice_CLB Load From Reaper.lua — user's own
+    request: select items in Reaper, run the wrapper, it brings up CLB
+    and runs the rest automatically, same pattern as the existing
+    hsuanice_CLB Jump Old-New TC.lua wrapper (though that one never
+    needs CLB running at all, since it only reads real project data —
+    this one actually has to call INTO CLB, a new class of wrapper for
+    this toolkit). Documented honestly in the wrapper's own @about: if
+    CLB is already open but not focused, Reaper doesn't guarantee
+    bringing its window to front just because its action command runs
+    again while its defer loop is active — only the ACTION itself
+    (load + optional auto-match) is guaranteed, not window focus.
+
+  v261007.1625
+  - Fix: conform_matched_items — every conformed take's own name was
+    showing the EDL clip name instead of the matched audio file's own
+    name, including the first/primary match (not just additional ones
+    from a "Multiple" match). Real user report with a screenshot
+    (REAPER's own Take list showing "Take 2/7: 26_01_T02_B - Merged" —
+    a clip name, not a filename). Root cause: the take-naming code had a
+    ti==1-vs-ti>1 split (first take = row.clip_name, later ones =
+    af.filename) left over from an earlier design; since both the
+    normal new-item path AND the new Load-From-Reaper linked-item path
+    share this one loop, a single-match row always hits ti==1 — so
+    EVERY normal conform's take, and the one real new take added onto a
+    linked Reaper item, used clip_name. The clip name is already visible
+    elsewhere (item Notes, P_EXT, the event list itself); the matched
+    file's own name is the one thing you need on the take itself to
+    verify which file actually matched. Removed the ti split entirely —
+    take name is now always af.filename (or af.basename, or row.clip_name
+    only as a last-resort fallback if neither exists). Also removed a
+    dead first_take/else branch that called the identical
+    AddTakeToMediaItem(item) in both arms.
+
+  v261007.1618
+  - New: rows loaded via "Load From Reaper" now carry a direct link
+    (row.__reaper_item) back to the real item they came from. Clicking
+    the Clip Name cell on such a row selects and scrolls to that exact
+    item in Reaper — user's own request, parallel to the existing 4-TC-
+    column click-to-jump but precise to one specific item (a shared TC
+    position alone could land on the wrong one among several). Threaded
+    through _make_rows_from_events (evt.__reaper_item → row.__reaper_item,
+    nil for every other load path) and set when building the synthetic
+    events in CLB.load_from_reaper_selection. Lost on .clb save/reload,
+    same already-accepted limitation as row.__match_candidates (a raw
+    item pointer can't be serialized).
+  - Change: conform_matched_items — a row with a valid, still-alive
+    row.__reaper_item now adds the matched audio as a NEW TAKE on that
+    SAME real item instead of creating a separate item on a separate
+    track. User's own request: "套到的資訊，應該直接變成原本那個item 的
+    takes，不需要額外增加一軌新的" (the matched info should become that
+    original item's own takes, no need for an extra new track). The
+    item's own position/length are left untouched (only a take is
+    added, never a move/resize); falls back to the normal new-item-on-
+    a-track path if the linked item was deleted since loading. Track
+    collection now skips linked rows entirely, so no empty unused track
+    gets created for them. Confirm dialog and completion message both
+    mention the linked-item count for transparency.
+
+  v261007.1606
+  - New: "Load From Reaper" — reads currently selected Reaper item(s)
+    back into the event list, the reverse of Generate Items/Generate Ref
+    Media. User's own framing: "另外一種list來源" (another kind of list
+    source), deliberately general-purpose, not just for testing — real
+    motivating case given: re-verify a just-generated batch of Full-mode
+    reference items actually Find-Matches correctly, without re-
+    exporting/re-loading any EDL file. Builds a synthetic
+    EDL.parse()-shaped event list from the selection (sorted by timeline
+    position for event numbering) and hands it to the SAME
+    _apply_timeline_results pipeline every other loader already uses —
+    gets the existing Replace/Append/Cancel prompt, source registration,
+    filter rebuild, and FPS confirm for free. Per-item field fallback
+    chain: Src TC prefers P_EXT:CLB_SRC_TC_IN/OUT (exact round-trip for
+    CLB-generated items) then the take's own source BWF TimeReference +
+    D_STARTOFFS/D_PLAYRATE (same math as
+    hsuanice_Item List Editor.lua's calculate_source_position, for real
+    production audio); Reel/Scene/Take prefer P_EXT/the item's own Notes
+    (CLB's "Reel:"/"Scene:"/"Take:" convention) then the source file's
+    own iXML fields. New CLB._read_metadata_from_source(src) factored out
+    of the existing read_audio_metadata(filepath) so this reuses the
+    exact same BWF/iXML field-reading logic already proven for the Audio
+    Files panel, instead of a second implementation.
+  - New: "Auto Match" checkbox next to the button (persisted setting,
+    off by default) — when on, loading also runs Find Match right after
+    (loading Audio first via the same folder-picker as "Load Audio..."
+    if none is loaded yet, otherwise matching immediately). Discussed
+    and iterated on with the user before implementing: originally
+    proposed as two separate buttons ("Load" vs. "Load + Auto Match"),
+    changed to one button + a toggle at the user's own suggestion.
+  - Fix (caught before shipping): _apply_timeline_results (the shared
+    loader pipeline every Load action — EDL/XML/AAF/Subtitle/this one —
+    already uses) now returns true/false for whether it actually applied
+    anything, instead of nothing. It silently returned on an unchanged
+    ROWS when the user picked Cancel on its own Replace/Append prompt;
+    every EXISTING caller already ignored the return value so this is
+    backward-compatible, but CLB.load_from_reaper_selection needed it —
+    without it, cancelling that prompt while "Auto Match" was on would
+    still have run Find Match against the OLD, unchanged list.
+
   v261007.1451
   - Change: removed the "Simple" (shared-file) mode from Generate Ref
     Media entirely — user's own request: "我希望保留 full完整版就好...
@@ -2525,7 +2830,7 @@ local EXT_NS = "hsuanice_ConformListBrowser"
 -- Shown in the window title bar — must be kept in sync with @version in
 -- the header comment at the top of this file by hand; they are two
 -- separate strings with no automatic link between them.
-local VERSION = "261007.1451"
+local VERSION = "261009.2349"
 
 -- Column definitions (EDL Events table)
 local COL = {
@@ -2825,6 +3130,28 @@ local CLB = {
   ref_media_scope       = "visible", -- "visible" | "selected"
   ref_media_pending     = nil,      -- { sox, bwf, usable_rows, folder, sr, retimed_count } between prepare and the scope popup's Next button
   ref_media_want_folder_pick = false, -- set by the scope popup's "Next" button, consumed (folder dialog + reset) right after EndPopup — see its own comment
+
+  -- Load List From Reaper Selection (see CLB.load_from_reaper_selection):
+  -- when on, loading from the current Reaper selection also runs Find
+  -- Match right after (loading Audio first via the same folder-picker
+  -- as "Load Audio" if none is loaded yet) — off by default so the
+  -- plain "just read the selection into a list" action never surprises
+  -- with an automatic match the user didn't ask for that run.
+  ref_load_auto_match = false,
+
+  -- "Follow Reaper" (see CLB.reveal_reaper_item): when on, selecting an
+  -- item in Reaper reveals its event row(s). Persisted, off by default.
+  follow_reaper_sel = false,
+  follow_status = "",        -- last reveal result, shown next to the checkbox
+  _follow_last_item = nil,   -- first selected item seen last frame (change detection)
+
+  -- "ask" (default) shows the usual Replace/Append/Cancel dialog every
+  -- run; "replace"/"append" skip it and always do that directly — user's
+  -- own request, since re-answering the same dialog on every "Load From
+  -- Reaper" run (often repeated many times while iterating) got old.
+  -- Set in Options. Only this action honors it — every other loader
+  -- (EDL/XML/AAF/Subtitle) always asks, unaffected.
+  ref_load_merge_mode = "ask", -- "ask" | "replace" | "append"
 
   -- UI state
   show_sources_panel = false,
@@ -3395,10 +3722,15 @@ local function parse_bwf_description(desc)
   return result
 end
 
---- Read metadata from an external audio file
---- @param filepath string  Full path to audio file
---- @return table  Metadata table
-local function read_audio_metadata(filepath)
+--- Core of read_audio_metadata: reads BWF/iXML fields from an EXISTING
+--- PCM_Source object (e.g. a REAPER item take's own source via
+--- GetMediaItemTake_Source) — doesn't create or destroy anything, so
+--- it's also what CLB.load_from_reaper_selection reuses to read the
+--- exact same fields from items already in the project, instead of
+--- duplicating this logic against a path it would have to re-derive.
+--- @param src userdata|nil  An existing PCM_Source
+--- @return table  Metadata table (same shape/defaults either way)
+function CLB._read_metadata_from_source(src)
   local meta = {
     samplerate = 0,
     channels = 0,
@@ -3421,10 +3753,6 @@ local function read_audio_metadata(filepath)
     ubits = "",              -- sUBITS
   }
 
-  if not filepath or filepath == "" then return meta end
-
-  -- Create temporary PCM source from file
-  local src = reaper.PCM_Source_CreateFromFile(filepath)
   if not src then return meta end
 
   -- Check if file type supports metadata (WAV/AIFF/W64)
@@ -3501,9 +3829,21 @@ local function read_audio_metadata(filepath)
     end
   end
 
-  -- Destroy temporary source
-  reaper.PCM_Source_Destroy(src)
+  return meta
+end
 
+--- Read metadata from an external audio file — creates a temporary
+--- PCM_Source just for this call (destroyed before returning); see
+--- CLB._read_metadata_from_source for the actual field-reading logic,
+--- shared with reading an existing item take's own source directly.
+--- @param filepath string  Full path to audio file
+--- @return table  Metadata table
+local function read_audio_metadata(filepath)
+  if not filepath or filepath == "" then return CLB._read_metadata_from_source(nil) end
+  local src = reaper.PCM_Source_CreateFromFile(filepath)
+  if not src then return CLB._read_metadata_from_source(nil) end
+  local meta = CLB._read_metadata_from_source(src)
+  reaper.PCM_Source_Destroy(src)
   return meta
 end
 
@@ -4328,6 +4668,9 @@ local function save_prefs()
   reaper.SetExtState(EXT_NS, "ref_media_folder", CLB.ref_media_folder or "", true)
   reaper.SetExtState(EXT_NS, "ref_media_name_format", CLB.ref_media_name_format or "!CLB_Mute_${timestamp}", true)
   reaper.SetExtState(EXT_NS, "ref_media_scope", CLB.ref_media_scope or "visible", true)
+  reaper.SetExtState(EXT_NS, "ref_load_auto_match", CLB.ref_load_auto_match and "1" or "0", true)
+  reaper.SetExtState(EXT_NS, "follow_reaper_sel", CLB.follow_reaper_sel and "1" or "0", true)
+  reaper.SetExtState(EXT_NS, "ref_load_merge_mode", CLB.ref_load_merge_mode or "ask", true)
   reaper.SetExtState(EXT_NS, "last_dir", CLB.last_dir or "", true)
   reaper.SetExtState(EXT_NS, "last_audio_dir", CLB.last_audio_dir or "", true)
   reaper.SetExtState(EXT_NS, "audio_recursive", CLB.audio_recursive and "1" or "0", true)
@@ -4410,6 +4753,12 @@ local function load_prefs()
   CLB.ref_media_scope = get("ref_media_scope", "visible")
   if CLB.ref_media_scope ~= "visible" and CLB.ref_media_scope ~= "selected" then
     CLB.ref_media_scope = "visible"
+  end
+  CLB.ref_load_auto_match = get("ref_load_auto_match", "0") == "1"
+  CLB.follow_reaper_sel = get("follow_reaper_sel", "0") == "1"
+  CLB.ref_load_merge_mode = get("ref_load_merge_mode", "ask")
+  if CLB.ref_load_merge_mode ~= "ask" and CLB.ref_load_merge_mode ~= "replace" and CLB.ref_load_merge_mode ~= "append" then
+    CLB.ref_load_merge_mode = "ask"
   end
   CLB.last_dir = get("last_dir", "")
   CLB.last_audio_dir = get("last_audio_dir", "")
@@ -5019,18 +5368,30 @@ local function _apply_track_suffixes()
   if source_count <= 1 then
     -- Single source: restore original track names (no suffix needed)
     for _, row in ipairs(ROWS) do
-      if row.__orig_track then
+      if row.__orig_track and not row.__reaper_item then
         row.track = row.__orig_track
       end
     end
     return
   end
 
-  -- Multiple sources: apply suffix based on source index
+  -- Multiple sources: apply suffix based on source index — EXCEPT rows
+  -- from "Load From Reaper" (row.__reaper_item set). This suffixing
+  -- exists to disambiguate an EDL's own abstract track label (e.g. "A1"
+  -- meaning "audio track 1" in the file) when the SAME label appears in
+  -- several separately-loaded EDL files for one reel. A Load-From-Reaper
+  -- row's track is already the real, live Reaper track name — not an
+  -- abstract label needing disambiguation — so suffixing it is actively
+  -- wrong (confirmed by a real user report with a screenshot: real
+  -- track names like "A1" were coming out mangled with a confusing "- N"
+  -- source-index suffix appended, every time any other source besides
+  -- that Reaper load pushed CLB.edl_sources above 1).
   for _, row in ipairs(ROWS) do
-    local orig = row.__orig_track or row.track
-    local src_idx = row.__source_idx or 1
-    row.track = _rename_track_with_suffix(orig, src_idx)
+    if not row.__reaper_item then
+      local orig = row.__orig_track or row.track
+      local src_idx = row.__source_idx or 1
+      row.track = _rename_track_with_suffix(orig, src_idx)
+    end
   end
 end
 
@@ -5083,6 +5444,15 @@ local function _make_rows_from_events(events, fps, is_drop, source_idx)
       -- not otherwise acted on (see CLB.generate_reference_media).
       aux_rate = evt.aux_rate,
 
+      -- Only ever set by CLB.load_from_reaper_selection — a direct link
+      -- back to the real Reaper item this row was read from, so Clip
+      -- Name can jump/select it (see the main table's click handler) and
+      -- Conform can add a take there instead of creating a new item.
+      -- Lost on .clb save/reload (a raw item pointer can't be
+      -- serialized) — same already-accepted limitation as
+      -- row.__match_candidates.
+      __reaper_item = evt.__reaper_item,
+
       duration = evt.duration_tc or EDL.seconds_to_tc(
         EDL.tc_to_seconds(evt.rec_tc_out or "00:00:00:00", fps, is_drop)
         - EDL.tc_to_seconds(evt.rec_tc_in or "00:00:00:00", fps, is_drop),
@@ -5100,6 +5470,21 @@ local function _make_rows_from_events(events, fps, is_drop, source_idx)
     end
     if #extra > 0 then
       row.notes = table.concat(extra, " | ")
+    end
+
+    -- evt.notes: a direct, already-formed notes string — only set by
+    -- CLB.load_from_reaper_selection (the real item's own P_NOTES text),
+    -- which has no "EDL comment lines" concept at all. User's own
+    -- report: a Load-From-Reaper row's Notes column was blank even
+    -- though the item it came from had real Notes. Appended (not
+    -- replacing evt.comments-derived text above) since the two are
+    -- mutually exclusive in practice — no loader sets both. Multi-line
+    -- item Notes (CLB's own "Reel:\nScene:\n..." convention) collapse to
+    -- the same " | "-joined single line as EDL comments above, for
+    -- consistent display in the Notes column/cell.
+    if evt.notes and evt.notes ~= "" then
+      local one_line = evt.notes:gsub("[\r\n]+", " | ")
+      row.notes = (row.notes ~= "" and (row.notes .. " | ") or "") .. one_line
     end
 
     -- Auto-populate level from AUDIO/VIDEO LEVEL comments
@@ -5527,10 +5912,10 @@ local function save_clb_project(filepath, silent)
   --           src_tc_in|src_tc_out|rec_tc_in|rec_tc_out|
   --           clip_name|source_file|notes|
   --           match_status|matched_path|group|orig_track|source_idx|level|
-  --           scene|take|aux_rate
+  --           scene|take|aux_rate|reaper_item_guid
   f:write(string.format("ROWS|%d\n", #ROWS))
   for _, row in ipairs(ROWS) do
-    f:write(string.format("R|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%d|%s|%s|%s|%s\n",
+    f:write(string.format("R|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%d|%s|%s|%s|%s|%s\n",
       _clb_escape(row.event_num    or ""),   -- p[2]
       _clb_escape(row.reel         or ""),   -- p[3]
       _clb_escape(row.track        or ""),   -- p[4]
@@ -5551,7 +5936,8 @@ local function save_clb_project(filepath, silent)
       _clb_escape(row.level        or ""),   -- p[19]
       _clb_escape(row.scene        or ""),   -- p[20]
       _clb_escape(row.take         or ""),   -- p[21]
-      _clb_escape(row.aux_rate and tostring(row.aux_rate) or ""))) -- p[22], EDL M2 rate
+      _clb_escape(row.aux_rate and tostring(row.aux_rate) or ""), -- p[22], EDL M2 rate
+      _clb_escape(row.reaper_item_guid or ""))) -- p[23], Link Reaper Items
   end
 
   -- Filter panel visibility flags
@@ -5749,6 +6135,7 @@ local function _parse_clb_file(filepath)
           scene        = p[20] or "",
           take         = p[21] or "",
           aux_rate     = (p[22] and p[22] ~= "") and tonumber(p[22]) or nil, -- nil for files saved before this field existed
+          reaper_item_guid = (p[23] and p[23] ~= "") and p[23] or nil, -- see CLB.link_reaper_items_selection; nil for older files
           duration     = dur,
         }
         row.__search_text = table.concat({
@@ -5910,7 +6297,10 @@ end
 
 --- Save-as dialog → save_clb_project.
 local function save_clb_project_dialog()
-  local default = "conform_" .. os.date("%Y%m%d_%H%M") .. ".clb"
+  -- "conform_YYMMDD_HHMMSS" — user's own request: unify with Export's
+  -- own default naming (export_YYMMDD_HHMMSS.<ext>), same date/time
+  -- format (2-digit year + seconds), just a different prefix per action.
+  local default = "conform_" .. os.date("%y%m%d_%H%M%S") .. ".clb"
   local filepath = choose_save_path(default,
     "CLB Project (*.clb)\0*.clb\0All files\0*.*\0")
   if not filepath then return end
@@ -6213,28 +6603,52 @@ end
 --- all_parsed = array of { parsed=table, path=string }
 --- filepaths  = original file paths (for Replace/Append dialog)
 --- default_fps = fallback fps
-local function _apply_timeline_results(all_parsed, filepaths, default_fps)
-  if #all_parsed == 0 then return end
+--- opts (optional) = {
+---   force_choice = "replace"|"append"|nil — skips the Replace/Append
+---     dialog entirely and does that directly instead. Only
+---     CLB.load_from_reaper_selection uses this (CLB.ref_load_merge_mode
+---     setting, user's own request — repeatedly re-answering the same
+---     dialog on every "Load From Reaper" run got old). Every other
+---     loader (EDL/XML/AAF/Subtitle) always passes nil, unaffected.
+---   skip_fps_confirm = true|false — skips the trailing confirm_fps()
+---     call. Only CLB.load_from_reaper_selection uses this too (once
+---     FPS has been confirmed for this Reaper PROJECT, user's own
+---     request to stop re-asking every run).
+--- }
+--- @return boolean  true if rows were actually loaded/appended, false if
+---   there was nothing to apply or the user cancelled the Replace/Append
+---   prompt — existing callers ignore this; CLB.load_from_reaper_selection
+---   checks it before deciding whether to auto-match (running Find Match
+---   after a cancelled load would be wrong).
+local function _apply_timeline_results(all_parsed, filepaths, default_fps, opts)
+  opts = opts or {}
+  if #all_parsed == 0 then return false end
 
   -- Count total events for the dialog
   local total_events = 0
   for _, ap in ipairs(all_parsed) do total_events = total_events + #ap.parsed.events end
 
   if #ROWS > 0 then
-    local file_desc = #filepaths == 1
-      and (filepaths[1]:match("([^/\\]+)$") or filepaths[1])
-      or (#filepaths .. " files")
+    local choice
+    if opts.force_choice == "replace" then
+      choice = 6
+    elseif opts.force_choice == "append" then
+      choice = 7
+    else
+      local file_desc = #filepaths == 1
+        and (filepaths[1]:match("([^/\\]+)$") or filepaths[1])
+        or (#filepaths .. " files")
+      choice = reaper.ShowMessageBox(
+        string.format(
+          "Current list has %d events.\n\n" ..
+          "Loading: %s (%d events)\n\n" ..
+          "Yes = Replace (clear current list)\n" ..
+          "No = Append (add to current list)",
+          #ROWS, file_desc, total_events),
+        SCRIPT_NAME, 3)
+    end
 
-    local choice = reaper.ShowMessageBox(
-      string.format(
-        "Current list has %d events.\n\n" ..
-        "Loading: %s (%d events)\n\n" ..
-        "Yes = Replace (clear current list)\n" ..
-        "No = Append (add to current list)",
-        #ROWS, file_desc, total_events),
-      SCRIPT_NAME, 3)
-
-    if choice == 2 then return end   -- Cancel
+    if choice == 2 then return false end   -- Cancel
 
     if choice == 6 then
       CLB.loaded_file   = #filepaths == 1 and filepaths[1] or nil
@@ -6269,7 +6683,543 @@ local function _apply_timeline_results(all_parsed, filepaths, default_fps)
     console_msg(string.format("Loaded %d files (%d total events)", #all_parsed, #ROWS))
   end
 
-  confirm_fps()
+  if not opts.skip_fps_confirm then
+    confirm_fps()
+  end
+  return true
+end
+
+---------------------------------------------------------------------------
+-- Read one Reaper item as an event (shared: Load From Reaper, Link Items)
+---------------------------------------------------------------------------
+-- Wrapped in do...end: the main chunk is at Lua's 200-local limit, so
+-- these helpers stay scoped to CLB._read_item_event instead.
+do
+--- Reads one line matching "Label: value" out of an item's free-form
+--- Notes text (CLB's own convention — see e.g. CLB.generate_items's
+--- note_parts) — nil if that label isn't present.
+local function _item_notes_field(notes, label)
+  if not notes or notes == "" then return nil end
+  for line in notes:gmatch("[^\r\n]+") do
+    local v = line:match("^" .. label .. ":%s*(.-)%s*$")
+    if v and v ~= "" then return v end
+  end
+  return nil
+end
+
+local function _take_pext(take, key)
+  local ok, v = reaper.GetSetMediaItemTakeInfo_String(take, "P_EXT:" .. key, "", false)
+  return (ok and v ~= "") and v or nil
+end
+
+--- True only for a real "HH:MM:SS:FF" (or ;/. separated) TC string —
+--- EDL.tc_to_seconds silently returns 0 for anything else, which would
+--- otherwise read as a valid 00:00:00:00.
+local function _is_tc(s)
+  return type(s) == "string" and s:match("^%d+[:;.]%d+[:;.]%d+[:;.]%d+$") ~= nil
+end
+
+--- Reads one Reaper item into an EDL.parse()-shaped event — the per-item
+--- core of CLB.load_from_reaper_selection, also reused by
+--- CLB.link_reaper_items_selection (same field derivation, so "what CLB
+--- thinks this item is" never differs between the two features).
+---
+--- Src TC In/Out falls back: P_EXT:CLB_SRC_TC_IN/OUT (exact round-trip
+--- for any CLB-generated item) → "Src In:"/"Src Out:" lines in the item's
+--- own Notes (survive a glue/render that replaced the take) → this take's
+--- own source BWF TimeReference + D_STARTOFFS/D_PLAYRATE ("reverse
+--- conform" for real production audio) → none. See
+--- CLB.load_from_reaper_selection's doc comment for the other fields.
+---
+--- event_num is left nil when the take has no P_EXT:CLB_EVENT — the
+--- caller decides its own fallback numbering.
+--- @return table evt   Event (src_tc_* default "00:00:00:00" when unknown)
+--- @return table info  { src_method = "pext"|"notes"|"bwf"|nil,
+---                       src_tc_in, src_tc_out (nil when unknown),
+---                       pext_rec_tc_in, pext_rec_tc_out, pext_track,
+---                       pos, len }
+function CLB._read_item_event(item)
+  local pos = reaper.GetMediaItemInfo_Value(item, "D_POSITION")
+  local len = reaper.GetMediaItemInfo_Value(item, "D_LENGTH")
+  local take = reaper.GetActiveTake(item)
+  local _, notes = reaper.GetSetMediaItemInfo_String(item, "P_NOTES", "", false)
+  local track_obj = reaper.GetMediaItem_Track(item)
+  local _, reaper_track_name = reaper.GetTrackName(track_obj)
+
+  local clip_name, source_file = "", ""
+  local src_tc_in, src_tc_out, src_method = nil, nil, nil
+  local reel, scene, take_field = nil, nil, nil
+  local event_num, track_val = nil, nil
+  local pext_rec_in, pext_rec_out = nil, nil
+
+  if take then
+    local _, tn = reaper.GetSetMediaItemTakeInfo_String(take, "P_NAME", "", false)
+    clip_name = tn or ""
+
+    event_num = _take_pext(take, "CLB_EVENT")
+    reel      = _take_pext(take, "CLB_REEL")
+    track_val = _take_pext(take, "CLB_TRACK")
+    pext_rec_in  = _take_pext(take, "CLB_REC_TC_IN")
+    pext_rec_out = _take_pext(take, "CLB_REC_TC_OUT")
+    local p_in, p_out = _take_pext(take, "CLB_SRC_TC_IN"), _take_pext(take, "CLB_SRC_TC_OUT")
+    if _is_tc(p_in) and _is_tc(p_out) then
+      src_tc_in, src_tc_out, src_method = p_in, p_out, "pext"
+    end
+
+    local source = reaper.GetMediaItemTake_Source(take)
+    if source then
+      local srcfile = reaper.GetMediaSourceFileName(source, "")
+      if srcfile and srcfile ~= "" then
+        source_file = srcfile:match("([^/\\]+)$") or srcfile
+      end
+    end
+
+    if not src_method then
+      local n_in, n_out = _item_notes_field(notes, "Src In"), _item_notes_field(notes, "Src Out")
+      local meta = source and CLB._read_metadata_from_source(source) or nil
+      if _is_tc(n_in) and _is_tc(n_out) then
+        src_tc_in, src_tc_out, src_method = n_in, n_out, "notes"
+      elseif meta and meta.timereference ~= "" and meta.samplerate and meta.samplerate > 0 then
+        local startoffs = reaper.GetMediaItemTakeInfo_Value(take, "D_STARTOFFS") or 0
+        local playrate  = reaper.GetMediaItemTakeInfo_Value(take, "D_PLAYRATE") or 1.0
+        if playrate == 0 then playrate = 1.0 end
+        local source_start_sec = (tonumber(meta.timereference) / meta.samplerate) + startoffs
+        local source_len_sec = len * playrate
+        src_tc_in  = EDL.seconds_to_tc(source_start_sec, CLB.fps, CLB.is_drop)
+        src_tc_out = EDL.seconds_to_tc(source_start_sec + source_len_sec, CLB.fps, CLB.is_drop)
+        src_method = "bwf"
+      end
+      if not reel and meta then
+        reel = (meta.reel ~= "" and meta.reel) or (meta.tape ~= "" and meta.tape) or nil
+      end
+      if meta then
+        scene      = (meta.scene ~= "" and meta.scene) or nil
+        take_field = (meta.take  ~= "" and meta.take)  or nil
+      end
+    end
+  end
+
+  -- Notes override/fill scene/take/reel last — these are CLB's own
+  -- human-readable record of what a previous CLB step already wrote
+  -- (e.g. Generate Ref Media's own note_parts), so prefer them over a
+  -- freshly-read file metadata guess when both exist.
+  scene      = _item_notes_field(notes, "Scene") or scene
+  take_field = _item_notes_field(notes, "Take")  or take_field
+  reel       = reel or _item_notes_field(notes, "Reel")
+
+  local evt = {
+    event_num  = event_num,
+    reel       = reel or "",
+    -- Reaper's OWN current track name is authoritative, not the
+    -- P_EXT:CLB_TRACK value (frozen at generation time) — user's own
+    -- request: this list reflects the session's CURRENT state, and an
+    -- item may have been moved to a different track since it was
+    -- created, or that track renamed, since then.
+    track      = reaper_track_name or track_val or "",
+    edit_type  = "C",
+    src_tc_in  = src_tc_in  or "00:00:00:00",
+    src_tc_out = src_tc_out or "00:00:00:00",
+    rec_tc_in  = EDL.seconds_to_tc(pos, CLB.fps, CLB.is_drop),
+    rec_tc_out = EDL.seconds_to_tc(pos + len, CLB.fps, CLB.is_drop),
+    clip_name  = clip_name,
+    source_file = source_file,
+    scene = scene or "",
+    take  = take_field or "",
+    notes = notes or "", -- the item's own P_NOTES, verbatim — see _make_rows_from_events' evt.notes handling
+    __reaper_item = item, -- see _make_rows_from_events' own comment on row.__reaper_item
+  }
+  local info = {
+    src_method = src_method,
+    src_tc_in = src_tc_in, src_tc_out = src_tc_out,
+    pext_rec_tc_in  = _is_tc(pext_rec_in)  and pext_rec_in  or nil,
+    pext_rec_tc_out = _is_tc(pext_rec_out) and pext_rec_out or nil,
+    pext_track = track_val,
+    pos = pos, len = len,
+  }
+  return evt, info
+end
+end -- do (CLB._read_item_event helpers)
+
+---------------------------------------------------------------------------
+-- Load List From Reaper Selection
+---------------------------------------------------------------------------
+--- "Another kind of list source" (user's own framing) — reads currently
+--- selected REAPER media items back into the event list, the reverse of
+--- Generate Items/Generate Ref Media. Real motivating case: verify a
+--- just-generated batch of reference items actually Find-Matches
+--- correctly, without re-exporting/re-loading any EDL file at all — but
+--- deliberately general-purpose (works on any selected item, CLB-
+--- generated or real production audio already in the session), per the
+--- user's own framing. Builds a synthetic EDL.parse()-shaped event list
+--- from the selection and hands it to the SAME _apply_timeline_results
+--- pipeline every other loader (EDL/XML/AAF/Subtitle) already uses —
+--- gets the existing Replace/Append/Cancel prompt, source registration,
+--- filter rebuild, and FPS confirm for free, instead of duplicating any
+--- of that.
+---
+--- Per-item field derivation (each one falls back in this order):
+---   Src TC In/Out  — P_EXT:CLB_SRC_TC_IN/OUT (exact round-trip for any
+---                    CLB-generated item) → "Src In:"/"Src Out:" lines
+---                    in the item's own Notes → else this take's own source
+---                    BWF TimeReference + D_STARTOFFS/D_PLAYRATE (same
+---                    math as hsuanice_Item List Editor.lua's own
+---                    calculate_source_position, for real production
+---                    audio already carrying embedded metadata) → blank
+---   Reel           — P_EXT:CLB_REEL → source's own iXML TAPE/BWF REEL
+---                    (via CLB._read_metadata_from_source) → "Reel:" line
+---                    in the item's own Notes (CLB's own Notes
+---                    convention) → ""
+---   Scene/Take     — "Scene:"/"Take:" lines in Notes → source's own
+---                    iXML SCENE/TAKE → ""
+---   Track          — P_EXT:CLB_TRACK (the ORIGINAL EDL track label,
+---                    which the Reaper track's own name may have been
+---                    expanded away from via track_name_format) → the
+---                    Reaper track's own name
+---   Event #        — P_EXT:CLB_EVENT → sequential, numbered after
+---                    sorting selected items by timeline position (not
+---                    Reaper's arbitrary selection/click order)
+---   Clip Name      — the take's own P_NAME, always
+---   Source File    — the take's underlying source file's own basename,
+---                    if any (just for display/reference)
+function CLB.load_from_reaper_selection()
+  local n_sel = reaper.CountSelectedMediaItems(0)
+  if n_sel == 0 then
+    reaper.ShowMessageBox(
+      "No items selected in Reaper.\n\nSelect item(s) on the timeline first.",
+      SCRIPT_NAME, 0)
+    return
+  end
+
+  local items = {}
+  for i = 0, n_sel - 1 do
+    items[#items + 1] = reaper.GetSelectedMediaItem(0, i)
+  end
+  table.sort(items, function(a, b)
+    return reaper.GetMediaItemInfo_Value(a, "D_POSITION") < reaper.GetMediaItemInfo_Value(b, "D_POSITION")
+  end)
+
+  local events = {}
+  for idx, item in ipairs(items) do
+    local evt = CLB._read_item_event(item)
+    -- Sequential fallback, numbered in timeline order (see sort above)
+    evt.event_num = evt.event_num or string.format("%03d", idx)
+    events[#events + 1] = evt
+  end
+
+  local parsed = {
+    format = "REAPER",
+    title = "Reaper Selection",
+    fps = CLB.fps,
+    is_drop = CLB.is_drop,
+    events = events,
+    source_path = "Reaper Selection",
+  }
+
+  -- Per-PROJECT (not global) "already asked" flag — user's own request:
+  -- re-confirming FPS on every single "Load From Reaper" run in the same
+  -- project got old; still asks once, the first time, per project (via
+  -- GetProjExtState/SetProjExtState, which live in the .rpp itself, so a
+  -- DIFFERENT project correctly asks again).
+  local ok_pes, fps_already_confirmed = reaper.GetProjExtState(0, EXT_NS, "lfr_fps_confirmed")
+  fps_already_confirmed = (ok_pes == 1 and fps_already_confirmed == "1")
+
+  -- CLB.ref_load_merge_mode ("ask" default | "replace" | "append", see
+  -- Options) — same spirit, same user request: repeatedly re-answering
+  -- the Replace/Append dialog on every run got old too.
+  local force_choice = (CLB.ref_load_merge_mode == "replace" or CLB.ref_load_merge_mode == "append")
+    and CLB.ref_load_merge_mode or nil
+
+  local applied = _apply_timeline_results(
+    { { parsed = parsed, path = "Reaper Selection" } }, { "Reaper Selection" }, CLB.fps,
+    { force_choice = force_choice, skip_fps_confirm = fps_already_confirmed })
+
+  if applied and not fps_already_confirmed then
+    reaper.SetProjExtState(0, EXT_NS, "lfr_fps_confirmed", "1")
+  end
+
+  -- Only auto-match if the load actually happened — _apply_timeline_results
+  -- returns false if the user cancelled its own Replace/Append prompt
+  -- (ROWS is then unchanged, so running Find Match here would be wrong).
+  if applied and CLB.ref_load_auto_match then
+    if #CLB.audio_files == 0 then
+      load_audio_folder() -- auto-matches internally once it finishes, since ROWS is already populated
+    else
+      match_audio_files()
+    end
+  end
+end
+
+---------------------------------------------------------------------------
+-- Link Reaper Items (persistent row → item link, by item GUID)
+---------------------------------------------------------------------------
+--- GUID → MediaItem* lookup cache for CLB.find_item_by_guid. Rebuilt in
+--- full (one pass over every project item) when a lookup misses or finds
+--- a stale pointer — but at most once per project state change
+--- (GetProjectStateChangeCount), so a batch of stale links (e.g. Conform
+--- over many rows whose items were deleted) can't rescan per row.
+CLB._guid_item_cache = nil
+CLB._guid_cache_state = nil
+
+--- Finds the item with this exact GUID in the current project, or nil.
+function CLB.find_item_by_guid(guid)
+  if not guid or guid == "" then return nil end
+  local cache = CLB._guid_item_cache
+  local it = cache and cache[guid]
+  if it and reaper.ValidatePtr2(0, it, "MediaItem*") then
+    local _, g = reaper.GetSetMediaItemInfo_String(it, "GUID", "", false)
+    if g == guid then return it end
+  end
+  local state = reaper.GetProjectStateChangeCount(0)
+  if cache and CLB._guid_cache_state == state and not it then return nil end
+  cache = {}
+  for i = 0, reaper.CountMediaItems(0) - 1 do
+    local item = reaper.GetMediaItem(0, i)
+    local _, g = reaper.GetSetMediaItemInfo_String(item, "GUID", "", false)
+    if g and g ~= "" then cache[g] = item end
+  end
+  CLB._guid_item_cache = cache
+  CLB._guid_cache_state = state
+  return cache[guid]
+end
+
+--- The Reaper item a row is linked to, or nil: the live pointer from
+--- "Load From Reaper" (row.__reaper_item) if still valid, else the
+--- persisted GUID link from "Link Reaper Items" (row.reaper_item_guid).
+--- Used for jump/select AND Conform (both link kinds get the matched audio
+--- added as takes on that item — user's own request, v261009.2349; the
+--- GUID link originally deliberately didn't). Track-suffixing still keys
+--- off row.__reaper_item alone: only a Load From Reaper row's track is a
+--- live Reaper track name rather than an EDL label.
+function CLB.row_linked_item(row)
+  if row.__reaper_item and reaper.ValidatePtr2(0, row.__reaper_item, "MediaItem*") then
+    return row.__reaper_item
+  end
+  return CLB.find_item_by_guid(row.reaper_item_guid)
+end
+
+--- Index of every row in ROWS for 4-TC item matching (see
+--- CLB._match_item_rows) — built once per Link run / Reveal, never per
+--- frame. Keyed by Src TC In frame; ±1 frame is looked up at match time.
+function CLB._build_link_index()
+  local fps, drop = CLB.fps, CLB.is_drop
+  local function frames(sec) return math.floor(sec * fps + 0.5) end
+  local function tc_frames(tc) return frames(EDL.tc_to_seconds(tc, fps, drop)) end
+  local by_src_in = {}
+  for _, row in ipairs(ROWS) do
+    local k = tc_frames(row.src_tc_in)
+    by_src_in[k] = by_src_in[k] or {}
+    table.insert(by_src_in[k], {
+      row = row,
+      s_in = k, s_out = tc_frames(row.src_tc_out),
+      r_in_raw = tc_frames(row.rec_tc_in), r_out_raw = tc_frames(row.rec_tc_out),
+      r_in_pos  = frames(CLB.rec_tc_seconds(row.rec_tc_in, row)),
+      r_out_pos = frames(CLB.rec_tc_seconds(row.rec_tc_out, row)),
+    })
+  end
+  return { by_src_in = by_src_in, frames = frames, tc_frames = tc_frames }
+end
+
+--- Rows matching one item (its `info` from CLB._read_item_event, which
+--- must have a src_method) on all 4 TCs, ±1 frame — see
+--- CLB.link_reaper_items_selection's doc comment for the exact rules.
+--- @return table  list of rows (empty if none)
+function CLB._match_item_rows(link_idx, info)
+  local frames, tc_frames = link_idx.frames, link_idx.tc_frames
+  local function near(a, b) return math.abs(a - b) <= 1 end
+  local s_in, s_out = tc_frames(info.src_tc_in), tc_frames(info.src_tc_out)
+  local cands = {}
+  for k = s_in - 1, s_in + 1 do
+    for _, e in ipairs(link_idx.by_src_in[k] or {}) do
+      if near(e.s_out, s_out) then cands[#cands + 1] = e end
+    end
+  end
+  local hits = {}
+  if info.pext_rec_tc_in and info.pext_rec_tc_out then
+    local ri, ro = tc_frames(info.pext_rec_tc_in), tc_frames(info.pext_rec_tc_out)
+    for _, e in ipairs(cands) do
+      if near(e.r_in_raw, ri) and near(e.r_out_raw, ro) then hits[#hits + 1] = e.row end
+    end
+  end
+  if #hits == 0 then
+    local ri, ro = frames(info.pos), frames(info.pos + info.len)
+    for _, e in ipairs(cands) do
+      if near(e.r_in_pos, ri) and near(e.r_out_pos, ro) then hits[#hits + 1] = e.row end
+    end
+  end
+  if #hits > 1 and info.pext_track then
+    local narrowed = {}
+    for _, row in ipairs(hits) do
+      if row.track == info.pext_track or row.__orig_track == info.pext_track then
+        narrowed[#narrowed + 1] = row
+      end
+    end
+    if #narrowed > 0 then hits = narrowed end
+  end
+  return hits
+end
+
+--- "Link Reaper Items" — user's own request: link the CURRENTLY LOADED
+--- event list's rows to real items already in the session (e.g. items
+--- generated from this list long ago, since glued/rendered to audio), so
+--- clicking Clip Name jumps to that item — and keep the link across .clb
+--- save/reload (stored as the item's GUID, which Reaper itself persists
+--- in the .rpp, through Save As too). The reverse of Load From Reaper:
+--- that one CREATES rows from items, this one attaches items to EXISTING
+--- rows without touching anything else on them.
+---
+--- Per selected item, reads it via the shared CLB._read_item_event, then
+--- matches rows on all 4 TCs (±1 frame):
+---   Src In/Out — whichever source _read_item_event found (P_EXT → Notes
+---                "Src In/Out" → BWF TimeReference "reverse conform").
+---   Rec In/Out — the item's own P_EXT:CLB_REC_TC_IN/OUT vs each row's RAW
+---                Rec TC first (still matches an item that's since been
+---                moved); else the item's real position/length vs each
+---                row's CALIBRATED Rec TC (CLB.rec_tc_seconds).
+--- If several rows share all 4 TCs (the same cut on several EDL tracks,
+--- e.g. V1 + a NONE track), P_EXT:CLB_TRACK narrows them when it can;
+--- whatever remains is linked to the same item — identical TCs mean the
+--- same edit, so this isn't a guess. Items matching NO row are left
+--- unlinked and listed in the report, never position-only guessed (see
+--- feedback: warn, don't guess).
+function CLB.link_reaper_items_selection()
+  local n_sel = reaper.CountSelectedMediaItems(0)
+  if n_sel == 0 then
+    reaper.ShowMessageBox(
+      "No items selected in Reaper.\n\nSelect item(s) on the timeline first.",
+      SCRIPT_NAME, 0)
+    return
+  end
+  if #ROWS == 0 then
+    reaper.ShowMessageBox(
+      "No event list loaded.\n\nLoad the list (.clb/EDL/XML/AAF) first, then link items to it.",
+      SCRIPT_NAME, 0)
+    return
+  end
+
+  local fps, drop = CLB.fps, CLB.is_drop
+  local link_idx = CLB._build_link_index()
+
+  local linked_items, linked_rows, relinked_rows = 0, 0, 0
+  local by_method = { pext = 0, notes = 0, bwf = 0 }
+  local no_tc, unmatched = {}, {}
+  for i = 0, n_sel - 1 do
+    local item = reaper.GetSelectedMediaItem(0, i)
+    local evt, info = CLB._read_item_event(item)
+    local _, guid = reaper.GetSetMediaItemInfo_String(item, "GUID", "", false)
+    local label = string.format("%s @ %s  \"%s\"", evt.track,
+      EDL.seconds_to_tc(info.pos, fps, drop), evt.clip_name)
+    if not info.src_method then
+      no_tc[#no_tc + 1] = label
+    else
+      local hits = CLB._match_item_rows(link_idx, info)
+      if #hits == 0 then
+        unmatched[#unmatched + 1] = label .. "  [Src " .. info.src_tc_in .. " via " .. info.src_method .. "]"
+      else
+        linked_items = linked_items + 1
+        by_method[info.src_method] = by_method[info.src_method] + 1
+        for _, row in ipairs(hits) do
+          if row.reaper_item_guid and row.reaper_item_guid ~= "" and row.reaper_item_guid ~= guid then
+            relinked_rows = relinked_rows + 1
+          end
+          row.reaper_item_guid = guid
+          linked_rows = linked_rows + 1
+        end
+      end
+    end
+  end
+  CLB._guid_item_cache = nil
+
+  local lines = {
+    string.format("Selected items: %d", n_sel),
+    string.format("Linked: %d item(s) → %d event row(s)", linked_items, linked_rows),
+    string.format("   by CLB take data: %d   by Notes Src In/Out: %d   by BWF timecode: %d",
+      by_method.pext, by_method.notes, by_method.bwf),
+  }
+  if relinked_rows > 0 then
+    lines[#lines + 1] = string.format("   (%d row(s) were re-linked from a different item)", relinked_rows)
+  end
+  local function list_some(title, t)
+    if #t == 0 then return end
+    lines[#lines + 1] = ""
+    lines[#lines + 1] = string.format("%s: %d", title, #t)
+    for k = 1, math.min(#t, 10) do lines[#lines + 1] = "   " .. t[k] end
+    if #t > 10 then lines[#lines + 1] = string.format("   ... and %d more (see console)", #t - 10) end
+  end
+  list_some("No 4-TC match in the list (not linked)", unmatched)
+  list_some("No Src TC found on item (no CLB data / Notes / BWF — not linked)", no_tc)
+  if linked_rows > 0 then
+    lines[#lines + 1] = ""
+    lines[#lines + 1] = "Click a linked row's Clip Name to jump to its item."
+    lines[#lines + 1] = "Save the .clb to keep these links."
+  end
+
+  for _, l in ipairs(unmatched) do console_msg("Link Items — unmatched: " .. l) end
+  for _, l in ipairs(no_tc)     do console_msg("Link Items — no Src TC: " .. l) end
+  reaper.ShowMessageBox(table.concat(lines, "\n"), SCRIPT_NAME .. " — Link Reaper Items", 0)
+end
+
+--- Reverse link — user's own request: a Reaper item → its event row(s)
+--- in CLB (selects their Clip Name cells and scrolls the table there).
+--- Rows already linked to this item (persisted GUID or Load From Reaper
+--- pointer) win; otherwise the item is matched on the spot with the same
+--- 4-TC rules as Link Reaper Items, and — user's own choice — the link is
+--- stored too (saved with the .clb), but only onto rows with no link yet:
+--- a reveal never silently steals a row already linked to another item.
+--- Driven by the "Follow Reaper" checkbox (quiet: result goes to the
+--- small status text next to it, no dialogs while you edit) and by the
+--- hsuanice_CLB Reveal Item.lua wrapper (not quiet: dialogs on failure).
+--- @return boolean  true if at least one row was revealed
+function CLB.reveal_reaper_item(item, quiet)
+  local function tell(msg)
+    CLB.follow_status = msg
+    if not quiet then reaper.ShowMessageBox(msg, SCRIPT_NAME .. " — Reveal Item", 0) end
+  end
+  if #ROWS == 0 then tell("No event list loaded."); return false end
+
+  local _, guid = reaper.GetSetMediaItemInfo_String(item, "GUID", "", false)
+  local hits = {}
+  for _, row in ipairs(ROWS) do
+    if row.reaper_item_guid == guid or row.__reaper_item == item then hits[#hits + 1] = row end
+  end
+
+  local newly_linked = 0
+  if #hits == 0 then
+    local _, info = CLB._read_item_event(item)
+    if not info.src_method then
+      tell("No Src TC on this item (no CLB data / Notes / BWF) — can't find its event.")
+      return false
+    end
+    hits = CLB._match_item_rows(CLB._build_link_index(), info)
+    if #hits == 0 then
+      tell("No event in the list matches this item's 4 TCs (Src " .. info.src_tc_in .. ").")
+      return false
+    end
+    for _, row in ipairs(hits) do
+      if not row.reaper_item_guid or row.reaper_item_guid == "" then
+        row.reaper_item_guid = guid
+        newly_linked = newly_linked + 1
+      end
+    end
+  end
+
+  sel_set_single(hits[1].__guid, COL.CLIP_NAME)
+  for k = 2, #hits do sel_add(hits[k].__guid, COL.CLIP_NAME) end
+  CLB.scroll_to_row = hits[1].__guid
+  CLB.tl_center_on_guid = hits[1].__guid
+
+  local visible = false
+  for _, vr in ipairs(get_view_rows()) do
+    if vr.__guid == hits[1].__guid then visible = true; break end
+  end
+  local desc = string.format("→ #%s %s%s%s", hits[1].event_num or "", hits[1].track or "",
+    #hits > 1 and string.format(" (+%d)", #hits - 1) or "",
+    newly_linked > 0 and "  [linked]" or "")
+  if not visible then
+    tell(desc .. " — hidden by current filters/search; clear them to see it.")
+  else
+    CLB.follow_status = desc
+  end
+  return true
 end
 
 ---------------------------------------------------------------------------
@@ -7664,19 +8614,27 @@ local function conform_matched_items(selected_only)
     return
   end
 
-  -- Collect unique track names (based on expanded template)
+  -- Collect unique track names (based on expanded template) — skip rows
+  -- that will instead reuse their own linked Reaper item (see
+  -- CLB.row_linked_item below), so a linked row never causes an unused
+  -- empty track to be created for nothing.
   local track_names_set = {}
   local track_names_order = {}
   local row_to_trackname = {}  -- row.__guid -> expanded track name
+  local linked_count = 0
 
   for _, row in ipairs(matched_rows) do
-    local tokens = build_row_tokens(row)
-    local expanded_name = _expand_track_name(CLB.track_name_format, tokens)
-    row_to_trackname[row.__guid] = expanded_name
+    if CLB.row_linked_item(row) then
+      linked_count = linked_count + 1
+    else
+      local tokens = build_row_tokens(row)
+      local expanded_name = _expand_track_name(CLB.track_name_format, tokens)
+      row_to_trackname[row.__guid] = expanded_name
 
-    if not track_names_set[expanded_name] then
-      track_names_set[expanded_name] = true
-      track_names_order[#track_names_order + 1] = expanded_name
+      if not track_names_set[expanded_name] then
+        track_names_set[expanded_name] = true
+        track_names_order[#track_names_order + 1] = expanded_name
+      end
     end
   end
 
@@ -7693,14 +8651,26 @@ local function conform_matched_items(selected_only)
     tracks_preview = tracks_preview .. string.format(" ... (+%d more)", #track_names_order - 5)
   end
 
+  -- Linked rows — "Load From Reaper" (row.__reaper_item) or "Link Reaper
+  -- Items"/Reveal (row.reaper_item_guid), see CLB.row_linked_item — carry
+  -- a link to a real item already in the session; conforming those adds the
+  -- matched audio as a NEW TAKE on that SAME item instead of creating a
+  -- separate item on a separate track, per the user's own request: "套
+  -- 到的資訊，應該直接變成原本那個item 的takes，不需要額外增加一軌新的"
+  -- (the matched info should become that original item's own takes, no
+  -- need for an extra new track).
+  local linked_note = linked_count > 0
+    and string.format("\n• %d linked to their own Reaper item (new take added there, no new item/track)", linked_count)
+    or ""
+
   local msg = string.format(
     "Conform %d matched events?\n\n" ..
     "• %d single matches (1 take each)\n" ..
-    "• %d multiple matches (multiple takes)\n\n" ..
+    "• %d multiple matches (multiple takes)%s\n\n" ..
     "Tracks: %s\n" ..
     "FPS: %s%s\n\n" ..
     "Audio files will be inserted at timeline positions.",
-    #matched_rows, found_count, multi_count,
+    #matched_rows, found_count, multi_count, linked_note,
     tracks_preview,
     tostring(CLB.fps),
     CLB.is_drop and " (Drop Frame)" or ""
@@ -7748,16 +8718,6 @@ local function conform_matched_items(selected_only)
     batch_size = 25,
     step = function(job, i)
       local row = matched_rows[i]
-      local track_name = row_to_trackname[row.__guid]
-      local tr = track_map[track_name]
-      if not tr then tr = track_map[track_names_order[1]] end
-      if not tr then return end
-
-      -- Timeline position from rec_tc_in
-      local pos = CLB.rec_tc_seconds(row.rec_tc_in, row)
-      local pos_out = CLB.rec_tc_seconds(row.rec_tc_out, row)
-      local length = pos_out - pos
-      if length <= 0 then length = 0.001 end
 
       -- Source offset: src_tc_in - audio's TimeReference
       local src_in_sec = EDL.tc_to_seconds(row.src_tc_in, CLB.fps, CLB.is_drop)
@@ -7787,51 +8747,88 @@ local function conform_matched_items(selected_only)
         return
       end
 
-      -- Create item
-      local item = reaper.AddMediaItemToTrack(tr)
-      reaper.SetMediaItemInfo_Value(item, "D_POSITION", pos)
-      reaper.SetMediaItemInfo_Value(item, "D_LENGTH", length)
+      -- A linked row (Load From Reaper, or Link Reaper Items/Reveal — see
+      -- CLB.row_linked_item) already has a real item — add the
+      -- matched audio as a new take THERE instead of creating a separate
+      -- item on a separate track. Its own position/length are left
+      -- untouched (it's already positioned correctly; this only adds a
+      -- take, never moves/resizes the item). Falls back to the normal
+      -- new-item path if the linked item was deleted since loading.
+      local item = CLB.row_linked_item(row)
+      local is_linked = item ~= nil
+      if not is_linked then
+        local track_name = row_to_trackname[row.__guid]
+        local tr = track_map[track_name] or track_map[track_names_order[1]]
+        if not tr then return end
+
+        -- Timeline position from rec_tc_in
+        local pos = CLB.rec_tc_seconds(row.rec_tc_in, row)
+        local pos_out = CLB.rec_tc_seconds(row.rec_tc_out, row)
+        local length = pos_out - pos
+        if length <= 0 then length = 0.001 end
+
+        item = reaper.AddMediaItemToTrack(tr)
+        reaper.SetMediaItemInfo_Value(item, "D_POSITION", pos)
+        reaper.SetMediaItemInfo_Value(item, "D_LENGTH", length)
+      end
+
+      -- On a linked item, skip any audio file it already has a take of —
+      -- several rows can share one linked item (same cut on V1 + NONE, or
+      -- A1/A2 matching the same file), and a re-Conform would otherwise
+      -- stack the same take again each run.
+      local existing_src = {}
+      if is_linked then
+        for t = 0, reaper.CountTakes(item) - 1 do
+          local tk = reaper.GetTake(item, t)
+          local src = tk and reaper.GetMediaItemTake_Source(tk)
+          local fn = src and reaper.GetMediaSourceFileName(src, "")
+          if fn and fn ~= "" then existing_src[fn] = true end
+        end
+      end
 
       -- Add takes for each audio file
-      local first_take = true
       for ti, af in ipairs(audio_files) do
-        -- Calculate source offset for this audio file
-        local audio_start = get_audio_start_sec(af)
-        local source_offset = src_in_sec - audio_start
-        if source_offset < 0 then source_offset = 0 end
+        if existing_src[af.path or ""] then
+          job.takes_skipped = (job.takes_skipped or 0) + 1
+        else
+          existing_src[af.path or ""] = true
+          -- Calculate source offset for this audio file
+          local audio_start = get_audio_start_sec(af)
+          local source_offset = src_in_sec - audio_start
+          if source_offset < 0 then source_offset = 0 end
 
-        -- Insert media source
-        local source = reaper.PCM_Source_CreateFromFile(af.path)
-        if source then
-          local take
-          if first_take then
-            take = reaper.AddTakeToMediaItem(item)
-            first_take = false
-          else
-            take = reaper.AddTakeToMediaItem(item)
-          end
+          -- Insert media source
+          local source = reaper.PCM_Source_CreateFromFile(af.path)
+          if source then
+            local take = reaper.AddTakeToMediaItem(item)
 
-          if take then
-            reaper.SetMediaItemTake_Source(take, source)
-            reaper.SetMediaItemTakeInfo_Value(take, "D_STARTOFFS", source_offset)
+            if take then
+              reaper.SetMediaItemTake_Source(take, source)
+              reaper.SetMediaItemTakeInfo_Value(take, "D_STARTOFFS", source_offset)
 
-            -- Take name: clip name (or filename for additional takes)
-            local take_name = row.clip_name or af.basename or ""
-            if ti > 1 then
-              take_name = af.filename or af.basename or ("Take " .. ti)
+              -- Take name: the MATCHED FILE's own name, always — not the
+              -- EDL clip name. Real user report with a screenshot: every
+              -- conformed take (including the first/primary match, in
+              -- both the normal new-item path and the Load-From-Reaper
+              -- linked-item path — they share this exact loop) was
+              -- showing the clip name instead, which is already visible
+              -- elsewhere (item Notes, P_EXT, the event list itself) and
+              -- isn't what you need at a glance on the take itself —
+              -- which file actually got matched is.
+              local take_name = af.filename or af.basename or row.clip_name or ("Take " .. ti)
+              reaper.GetSetMediaItemTakeInfo_String(take, "P_NAME", take_name, true)
+
+              -- Store metadata as P_EXT
+              reaper.GetSetMediaItemTakeInfo_String(take, "P_EXT:CLB_EVENT", row.event_num or "", true)
+              reaper.GetSetMediaItemTakeInfo_String(take, "P_EXT:CLB_REEL", row.reel or "", true)
+              reaper.GetSetMediaItemTakeInfo_String(take, "P_EXT:CLB_SRC_TC_IN", row.src_tc_in or "", true)
+              reaper.GetSetMediaItemTakeInfo_String(take, "P_EXT:CLB_SRC_TC_OUT", row.src_tc_out or "", true)
+              reaper.GetSetMediaItemTakeInfo_String(take, "P_EXT:CLB_MATCHED_FILE", af.path or "", true)
+
+              job.takes_created = job.takes_created + 1
             end
-            reaper.GetSetMediaItemTakeInfo_String(take, "P_NAME", take_name, true)
-
-            -- Store metadata as P_EXT
-            reaper.GetSetMediaItemTakeInfo_String(take, "P_EXT:CLB_EVENT", row.event_num or "", true)
-            reaper.GetSetMediaItemTakeInfo_String(take, "P_EXT:CLB_REEL", row.reel or "", true)
-            reaper.GetSetMediaItemTakeInfo_String(take, "P_EXT:CLB_SRC_TC_IN", row.src_tc_in or "", true)
-            reaper.GetSetMediaItemTakeInfo_String(take, "P_EXT:CLB_SRC_TC_OUT", row.src_tc_out or "", true)
-            reaper.GetSetMediaItemTakeInfo_String(take, "P_EXT:CLB_MATCHED_FILE", af.path or "", true)
-
-            job.takes_created = job.takes_created + 1
           end
-        end
+        end -- not already on the linked item
       end
 
       -- Item note
@@ -7858,8 +8855,11 @@ local function conform_matched_items(selected_only)
       reaper.UpdateArrange()
       reaper.Undo_EndBlock("CLB: Conform " .. job.created .. " items (" .. job.takes_created .. " takes)", -1)
       reaper.ShowMessageBox(
-        string.format("Conformed %d items with %d takes on %d track(s).",
-          job.created, job.takes_created, #track_names_order),
+        string.format("Conformed %d items with %d takes on %d track(s).%s",
+          job.created, job.takes_created, #track_names_order,
+          (linked_count > 0 and string.format("\n(%d added as a new take on their own linked Reaper item.)", linked_count) or "")
+          .. ((job.takes_skipped or 0) > 0
+            and string.format("\n(%d take(s) skipped — that linked item already had a take of the same file.)", job.takes_skipped) or "")),
         SCRIPT_NAME, 0)
     end,
   }
@@ -9038,18 +10038,94 @@ function CLB.dme_recut_execute()
 end
 
 ---------------------------------------------------------------------------
--- Export EDL
+-- Export EDL / TSV / CSV
 ---------------------------------------------------------------------------
+
+--- Builds TSV/CSV text from the main event table — mirrors
+--- build_audio_table_text (Audio Files panel's own Save .tsv/.csv),
+--- just against the main table's own HEADER_LABELS/get_cell_text/
+--- COL_COUNT instead of the audio-specific equivalents. Respects the
+--- user's CURRENT column order/visibility (EDL_COL_ORDER/VISIBILITY),
+--- unlike Export EDL's fixed narrow CMX3600 schema — a TSV/CSV dump
+--- isn't constrained by a legacy format spec, so it includes whatever
+--- columns are actually shown (Scene/Take/Speed/Notes/Group/... if on).
+function CLB._build_edl_table_text(format_type, rows)
+  local sep = format_type == "csv" and "," or "\t"
+  local lines = {}
+
+  local headers = {}
+  for _, col in ipairs(EDL_COL_ORDER) do
+    if EDL_COL_VISIBILITY[col] then
+      headers[#headers + 1] = escape_field_value(HEADER_LABELS[col] or "", format_type)
+    end
+  end
+  lines[#lines + 1] = table.concat(headers, sep)
+
+  for _, row in ipairs(rows) do
+    local cells = {}
+    for _, col in ipairs(EDL_COL_ORDER) do
+      if EDL_COL_VISIBILITY[col] then
+        cells[#cells + 1] = escape_field_value(get_cell_text(row, col), format_type)
+      end
+    end
+    lines[#lines + 1] = table.concat(cells, sep)
+  end
+
+  return table.concat(lines, "\n")
+end
+
+--- Export the full list (not just the filtered/visible view — same
+--- convention Export EDL already uses) as TSV or CSV.
+function CLB.export_tsv_csv(format_type)
+  if #ROWS == 0 then
+    reaper.ShowMessageBox("No events to export.", SCRIPT_NAME, 0)
+    return
+  end
+
+  local ext = format_type == "csv" and "csv" or "tsv"
+  local filter = format_type == "csv"
+    and "CSV Files\0*.csv\0\0" or "TSV Files\0*.tsv\0\0"
+  -- Default filename: "export_YYMMDD_HHMMSS" — user's own request, same
+  -- timestamped-default idea as Save CLB Project's own default name,
+  -- same for every export format.
+  local default_name = "export_" .. os.date("%y%m%d_%H%M%S") .. "." .. ext
+  local retval, filepath
+  if reaper.JS_Dialog_BrowseForSaveFile then
+    retval, filepath = reaper.JS_Dialog_BrowseForSaveFile(
+      "Export " .. ext:upper(), CLB.last_dir or "", default_name, filter)
+    if not retval or retval == 0 or not filepath or filepath == "" then return end
+  else
+    retval, filepath = reaper.GetUserFileNameForRead("", "Export " .. ext:upper() .. " (choose or type filename)", "*." .. ext)
+    if not retval or not filepath or filepath == "" then return end
+  end
+
+  local text = CLB._build_edl_table_text(format_type, ROWS)
+  local f = io.open(filepath, "w")
+  if not f then
+    reaper.ShowMessageBox("Export failed: could not write to:\n" .. filepath, SCRIPT_NAME, 0)
+    return
+  end
+  f:write(text)
+  f:close()
+  reaper.ShowMessageBox(
+    string.format("Exported %d events to:\n%s", #ROWS, filepath),
+    SCRIPT_NAME, 0)
+end
+
 local function export_edl()
   if #ROWS == 0 then
     reaper.ShowMessageBox("No events to export.", SCRIPT_NAME, 0)
     return
   end
 
+  -- Default filename: "export_YYMMDD_HHMMSS" — same as Export TSV/CSV's
+  -- own default, user's own request (same idea Save CLB Project's own
+  -- default name already uses: a timestamped default).
+  local default_name = "export_" .. os.date("%y%m%d_%H%M%S") .. ".edl"
   local retval, filepath
   if reaper.JS_Dialog_BrowseForSaveFile then
     retval, filepath = reaper.JS_Dialog_BrowseForSaveFile(
-      "Export EDL", CLB.last_dir or "", "export.edl", "EDL Files\0*.edl\0\0")
+      "Export EDL", CLB.last_dir or "", default_name, "EDL Files\0*.edl\0\0")
     if not retval or retval == 0 or not filepath or filepath == "" then return end
   else
     -- Fallback if JS extension not available
@@ -9198,7 +10274,7 @@ end
 -- Toolbar button color coding, by function group (user-requested, see
 -- project memory) — purely visual grouping, no behavior change. Each
 -- entry is {Button, ButtonHovered, ButtonActive} in ImGui's 0xRRGGBBAA
--- format. Six groups:
+-- format. Seven groups:
 --   danger Destructive/reset: Clear List, Clear Audio
 --   list   List editing/cleanup: Remove Dups, Consolidate
 --   io     Input/Output: Load List, Load Audio, Export EDL
@@ -9206,14 +10282,23 @@ end
 --   recut  Recut/reconform: Compare, DME Recut
 --   build  Build real content from the list: Generate Items, Conform
 --          All/Sel, Scene Cuts, Match All
+--   link   Reaper item <-> event links: Link Reaper Items, Reveal Item
 -- Anything not wrapped in one of these stays the theme's default color.
+--
+-- Rainbow order 紅橙黃綠藍靛紫 (user's own request), following the left
+-- sidebar top→bottom: danger 紅, recut 橙, align 黃, build 綠, io 藍 (top
+-- toolbar), list 靛, link 紫 — link deliberately muted (lower saturation +
+-- alpha): user's own call, its actions aren't consequential enough to
+-- need an eye-catching color. Optional 4th entry = text color, for a
+-- background too light for the theme's default white text (yellow).
 CLB.BTN_GROUP_COLORS = {
   danger = { 0xB33838C0, 0xCC4444D0, 0x992D2DD0 },
-  list   = { 0x2E7D7DC0, 0x3D9999D0, 0x256363D0 },
-  io     = { 0x3366CCC0, 0x4477DDD0, 0x2855AAD0 },
-  align  = { 0x7A4FC2C0, 0x8F63D6D0, 0x63409FD0 },
   recut  = { 0xCC7A33C0, 0xDD8F44D0, 0xAA6628D0 },
+  align  = { 0xD4B23AC8, 0xE3C452D8, 0xB3952CD8, 0x1E1E1EFF },
   build  = { 0x3D8C40C0, 0x4FA352D0, 0x2F6E31D0 },
+  io     = { 0x3366CCC0, 0x4477DDD0, 0x2855AAD0 },
+  list   = { 0x5B3FB0C0, 0x6E52C6D0, 0x4A3391D0 },
+  link   = { 0x8C7096A0, 0x9C80A8B8, 0x76607FB8 },
 }
 
 function CLB.push_btn_color(group_key)
@@ -9222,11 +10307,13 @@ function CLB.push_btn_color(group_key)
   reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Button(), c[1])
   reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_ButtonHovered(), c[2])
   reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_ButtonActive(), c[3])
+  if c[4] then reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Text(), c[4]) end
 end
 
 function CLB.pop_btn_color(group_key)
-  if not CLB.BTN_GROUP_COLORS[group_key] then return end
-  reaper.ImGui_PopStyleColor(ctx, 3)
+  local c = CLB.BTN_GROUP_COLORS[group_key]
+  if not c then return end
+  reaper.ImGui_PopStyleColor(ctx, c[4] and 4 or 3)
 end
 
 ---------------------------------------------------------------------------
@@ -9325,13 +10412,31 @@ local function draw_toolbar()
     end
     reaper.ImGui_SameLine(ctx)
 
-  -- Export EDL button — lives next to Load List (both I/O), not down
-  -- with the action buttons in the left sidebar.
+  -- Export button — EDL/TSV/CSV consolidated into one popup menu, same
+  -- pattern as "Load List..." (user's own request: "Export整合成和Import
+  -- 一樣，點下去後才看到要輸出什麼格式" — make Export work like Import,
+  -- show the format choices only after clicking). Lives next to Load
+  -- List (both I/O), not down with the action buttons in the sidebar.
   CLB.push_btn_color("io")
-  local export_edl_clicked = reaper.ImGui_Button(ctx, "Export EDL", scale(90), scale(24))
+  local export_clicked = reaper.ImGui_Button(ctx, "Export...", scale(90), scale(24))
   CLB.pop_btn_color("io")
-  if export_edl_clicked then
-    export_edl()
+  if export_clicked then
+    reaper.ImGui_OpenPopup(ctx, "##clb_export_list")
+  end
+  if reaper.ImGui_BeginPopup(ctx, "##clb_export_list") then
+    if reaper.ImGui_Selectable(ctx, "Export EDL...") then export_edl() end
+    if reaper.ImGui_IsItemHovered(ctx) then
+      reaper.ImGui_SetTooltip(ctx, "CMX3600 EDL — fixed schema (Event/Reel/Track/TC/Clip Name/Source File)")
+    end
+    if reaper.ImGui_Selectable(ctx, "Export TSV...") then CLB.export_tsv_csv("tsv") end
+    if reaper.ImGui_IsItemHovered(ctx) then
+      reaper.ImGui_SetTooltip(ctx, "Tab-separated — includes every currently visible column, in your current column order")
+    end
+    if reaper.ImGui_Selectable(ctx, "Export CSV...") then CLB.export_tsv_csv("csv") end
+    if reaper.ImGui_IsItemHovered(ctx) then
+      reaper.ImGui_SetTooltip(ctx, "Comma-separated — includes every currently visible column, in your current column order")
+    end
+    reaper.ImGui_EndPopup(ctx)
   end
   reaper.ImGui_SameLine(ctx)
 
@@ -9346,6 +10451,29 @@ local function draw_toolbar()
     reaper.ImGui_BeginTooltip(ctx)
     reaper.ImGui_Text(ctx, "Load audio files from folder to match with EDL events")
     reaper.ImGui_Text(ctx, "Reads BWF/iXML metadata for matching")
+    reaper.ImGui_EndTooltip(ctx)
+  end
+  reaper.ImGui_SameLine(ctx)
+
+  -- Load From Reaper button — "another kind of list source" (user's own
+  -- framing), independent from the "Load List..." menu's file-based
+  -- loaders: reads currently selected Reaper items back into the event
+  -- list instead of parsing a file. See CLB.load_from_reaper_selection's
+  -- own doc comment. The "Auto Match" checkbox is a persisted setting
+  -- (off by default), not a one-off popup choice — matches the existing
+  -- "Recursive" checkbox-next-to-its-button convention (Audio Files
+  -- panel header) rather than inventing a new settings-popup pattern.
+  CLB.push_btn_color("io")
+  local load_from_reaper_clicked = reaper.ImGui_Button(ctx, "Load From Reaper", scale(130), scale(24))
+  CLB.pop_btn_color("io")
+  if load_from_reaper_clicked then
+    CLB.load_from_reaper_selection()
+  end
+  if reaper.ImGui_IsItemHovered(ctx) then
+    reaper.ImGui_BeginTooltip(ctx)
+    reaper.ImGui_Text(ctx, "Read currently selected Reaper item(s) into the event")
+    reaper.ImGui_Text(ctx, "list (replaces/appends like any other Load) — e.g. to")
+    reaper.ImGui_Text(ctx, "Find Match-test a batch of items you just generated.")
     reaper.ImGui_EndTooltip(ctx)
   end
   reaper.ImGui_SameLine(ctx)
@@ -9471,11 +10599,27 @@ local function draw_toolbar()
     end
     if reaper.ImGui_IsItemHovered(ctx) then
       reaper.ImGui_SetTooltip(ctx,
-        "Filename for \"Generate Ref Media...\" — ONE shared file per run\n"
-        .. "(not per event or per reel), same idea as EdiLoad's own\n"
-        .. "generic \"!EdiLoad_Mute_...\" reference file.\n"
+        "Subfolder name for \"Generate Ref Media...\" — one real WAV per\n"
+        .. "event goes inside it (filenames prefixed \"_REF\").\n"
         .. "Tokens: ${timestamp}\n"
-        .. "Example: !CLB_Mute_${timestamp}  →  !CLB_Mute_261007_120000.wav")
+        .. "Example: !CLB_Mute_${timestamp}  →  !CLB_Mute_261007_120000/")
+    end
+
+    reaper.ImGui_Spacing(ctx)
+    reaper.ImGui_Separator(ctx)
+    reaper.ImGui_Text(ctx, "Load From Reaper: Replace/Append")
+    reaper.ImGui_TextDisabled(ctx, "Re-running \"Load From Reaper\" many times while iterating")
+    reaper.ImGui_TextDisabled(ctx, "can mean re-answering this every time — set a fixed default here.")
+    if reaper.ImGui_RadioButton(ctx, "Always ask (default)##clb_lfr_merge_ask", CLB.ref_load_merge_mode == "ask") then
+      CLB.ref_load_merge_mode = "ask"; save_prefs()
+    end
+    reaper.ImGui_SameLine(ctx)
+    if reaper.ImGui_RadioButton(ctx, "Always Replace##clb_lfr_merge_replace", CLB.ref_load_merge_mode == "replace") then
+      CLB.ref_load_merge_mode = "replace"; save_prefs()
+    end
+    reaper.ImGui_SameLine(ctx)
+    if reaper.ImGui_RadioButton(ctx, "Always Append##clb_lfr_merge_append", CLB.ref_load_merge_mode == "append") then
+      CLB.ref_load_merge_mode = "append"; save_prefs()
     end
 
     reaper.ImGui_EndPopup(ctx)
@@ -10055,6 +11199,19 @@ function CLB.draw_left_sidebar()
     end
   end
 
+  -- Auto Match (Load From Reaper's persisted "match right after loading"
+  -- setting) — lives here with the other match controls (user's own
+  -- request), not next to the Load From Reaper button. Always shown,
+  -- unlike Match All, since it's a setting, not an action.
+  local chg_ram, new_ram = reaper.ImGui_Checkbox(ctx, "Auto Match##clb_ref_load_auto_match", CLB.ref_load_auto_match)
+  if chg_ram then CLB.ref_load_auto_match = new_ram; save_prefs() end
+  if reaper.ImGui_IsItemHovered(ctx) then
+    reaper.ImGui_SetTooltip(ctx,
+      "After \"Load From Reaper\", also run Find Match — loads Audio\n"
+      .. "first (same folder picker as \"Load Audio...\") if none is\n"
+      .. "loaded yet.")
+  end
+
   reaper.ImGui_Spacing(ctx)
   reaper.ImGui_Separator(ctx)
   reaper.ImGui_Spacing(ctx)
@@ -10083,6 +11240,69 @@ function CLB.draw_left_sidebar()
     reaper.ImGui_BeginTooltip(ctx)
     reaper.ImGui_Text(ctx, "Consolidate tracks by group (bin-pack + renumber)")
     reaper.ImGui_EndTooltip(ctx)
+  end
+
+  reaper.ImGui_Spacing(ctx)
+  reaper.ImGui_Separator(ctx)
+  reaper.ImGui_Spacing(ctx)
+
+  -- Reaper item <-> event links, their own magenta "link" group at the
+  -- very bottom (user's own placement request). Link attaches selected
+  -- items to EXISTING rows (CLB.link_reaper_items_selection); Reveal and
+  -- Follow go the other way (CLB.reveal_reaper_item).
+  CLB.push_btn_color("link")
+  local link_items_clicked = reaper.ImGui_Button(ctx, "Link Reaper Items", btn_w, btn_h)
+  CLB.pop_btn_color("link")
+  if link_items_clicked then
+    CLB.link_reaper_items_selection()
+  end
+  if reaper.ImGui_IsItemHovered(ctx) then
+    reaper.ImGui_BeginTooltip(ctx)
+    reaper.ImGui_Text(ctx, "Link selected Reaper item(s) to the events already in this")
+    reaper.ImGui_Text(ctx, "list (matched on Src + Rec TC), so clicking an event's Clip")
+    reaper.ImGui_Text(ctx, "Name jumps to its item. Saved in the .clb.")
+    reaper.ImGui_EndTooltip(ctx)
+  end
+
+  CLB.push_btn_color("link")
+  local reveal_clicked = reaper.ImGui_Button(ctx, "Reveal Item##clb_reveal_item", btn_w, btn_h)
+  CLB.pop_btn_color("link")
+  if reveal_clicked then
+    local it = reaper.GetSelectedMediaItem(0, 0)
+    if it then
+      CLB._follow_last_item = it -- don't re-reveal it via Follow next frame
+      CLB.reveal_reaper_item(it, false)
+    else
+      reaper.ShowMessageBox("No item selected in Reaper.\n\nSelect an item on the timeline first.",
+        SCRIPT_NAME, 0)
+    end
+  end
+  if reaper.ImGui_IsItemHovered(ctx) then
+    reaper.ImGui_SetTooltip(ctx,
+      "Jump this list to the event(s) of the item selected in Reaper.\n"
+      .. "Unlinked items are matched on the spot and linked.")
+  end
+
+  local chg_fr, new_fr = reaper.ImGui_Checkbox(ctx, "Follow Reaper##clb_follow_reaper_sel", CLB.follow_reaper_sel)
+  if chg_fr then
+    CLB.follow_reaper_sel = new_fr
+    CLB._follow_last_item = nil -- re-reveal whatever is selected right now
+    CLB.follow_status = ""
+    save_prefs()
+  end
+  if reaper.ImGui_IsItemHovered(ctx) then
+    reaper.ImGui_SetTooltip(ctx,
+      "Reveal automatically: selecting an item in Reaper jumps this\n"
+      .. "list to its event(s). Unlinked items are matched on the spot\n"
+      .. "(same rules as Link Reaper Items) and linked — save the .clb\n"
+      .. "to keep it.")
+  end
+  if CLB.follow_status ~= "" then
+    -- Wrapped dim text (narrow sidebar) — same PushStyleColor +
+    -- TextWrapped pattern as the DME Recut popup's warning text.
+    reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Text(), 0x9A9A9AFF)
+    reaper.ImGui_TextWrapped(ctx, CLB.follow_status)
+    reaper.ImGui_PopStyleColor(ctx)
   end
 end
 
@@ -11139,6 +12359,12 @@ local function draw_table(table_height)
             end
           end
 
+          -- Hint that a linked row's Clip Name jumps to its Reaper item
+          if col == COL.CLIP_NAME and (row.__reaper_item or row.reaper_item_guid)
+             and reaper.ImGui_IsItemHovered(ctx) then
+            reaper.ImGui_SetTooltip(ctx, "Click to select its linked Reaper item")
+          end
+
           -- Hint that TC columns also jump Reaper's edit cursor on click
           if (col == COL.SRC_IN or col == COL.SRC_OUT or col == COL.REC_IN or col == COL.REC_OUT)
              and reaper.ImGui_IsItemHovered(ctx) then
@@ -11186,6 +12412,27 @@ local function draw_table(table_height)
                 sec = CLB.src_tc_seconds(row[tc_field], row)
               end
               reaper.SetEditCurPos(sec, true, false)
+            end
+
+            -- Clip Name on a linked row ("Load From Reaper" pointer or a
+            -- persisted "Link Reaper Items" GUID — see
+            -- CLB.row_linked_item) selects and scrolls to that REAL item
+            -- — user's own request, parallel to the TC columns' jump-to-
+            -- position above but precise to one exact item (a position
+            -- alone could land on the wrong one if several share a TC).
+            if col == COL.CLIP_NAME and (row.__reaper_item or row.reaper_item_guid) then
+              local linked = CLB.row_linked_item(row)
+              if linked then
+                reaper.SelectAllMediaItems(0, false)
+                reaper.SetMediaItemSelected(linked, true)
+                CLB._follow_last_item = linked -- our own selection: Follow mustn't re-reveal it
+                local item_pos = reaper.GetMediaItemInfo_Value(linked, "D_POSITION")
+                reaper.SetEditCurPos(item_pos, true, false)
+                reaper.UpdateArrange()
+              else
+                console_msg("Linked item not found in the current Reaper project"
+                  .. " (deleted, re-glued, or a different project open) — re-run Link Reaper Items.")
+              end
             end
 
             -- Auto-filter audio panel to matched file(s) for this row
@@ -15413,6 +16660,41 @@ local function loop()
   -- Match All), if one is running
   CLB.process_batch_job()
 
+  -- Process a pending action requested by an external wrapper script
+  -- (e.g. hsuanice_CLB Load From Reaper.lua) via ExtState — lets a
+  -- Reaper Action List shortcut drive CLB even when this window wasn't
+  -- already open (the wrapper launches/wakes this script, then sets
+  -- this flag; picked up on the very next frame either way). Consumed
+  -- immediately so it only ever fires once per request.
+  do
+    local pending = reaper.GetExtState(EXT_NS, "pending_action")
+    if pending ~= "" then
+      reaper.SetExtState(EXT_NS, "pending_action", "", false)
+      if pending == "load_from_reaper" then
+        CLB.load_from_reaper_selection()
+      elseif pending == "link_reaper_items" then -- hsuanice_CLB Link Reaper Items.lua
+        CLB.link_reaper_items_selection()
+      elseif pending == "reveal_item" then -- hsuanice_CLB Reveal Item.lua
+        local it = reaper.GetSelectedMediaItem(0, 0)
+        if it then
+          CLB._follow_last_item = it -- don't re-reveal it via Follow next frame
+          CLB.reveal_reaper_item(it, false)
+        end
+      end
+    end
+  end
+
+  -- "Follow Reaper": reveal the first selected Reaper item's event(s)
+  -- whenever that item changes. One pointer compare per frame; the actual
+  -- lookup only runs on a change (see CLB.reveal_reaper_item).
+  if CLB.follow_reaper_sel and #ROWS > 0 then
+    local it = reaper.GetSelectedMediaItem(0, 0)
+    if it ~= CLB._follow_last_item then
+      CLB._follow_last_item = it
+      if it then CLB.reveal_reaper_item(it, true) end
+    end
+  end
+
   -- Push font: prefer the CJK-capable font when available so Chinese / Japanese
   -- text in clip names (e.g. from subtitle import) renders correctly. Falls
   -- back to the ImGui default if the CJK font failed to load.
@@ -15623,5 +16905,18 @@ end
 console_msg("Conform List Browser v" .. VERSION .. " started")
 console_msg("OTIO Bridge v" .. (OTIO.VERSION or "?") .. " | Python: " .. OTIO.python)
 console_msg("EDL Parser v" .. (EDL.VERSION or "?"))
+
+-- "Is CLB running" heartbeat for external wrapper scripts (e.g.
+-- hsuanice_CLB Load From Reaper.lua) — Reaper's own GetToggleCommandStateEx
+-- doesn't reliably report this (confirmed by real user report: a wrapper
+-- using it still toggled CLB OFF every time, since this script never
+-- registers toggle state at all), so a plain ExtState flag this script
+-- sets itself on startup and clears on exit is the only robust signal. A
+-- wrapper reads this to decide "signal the already-running instance" vs.
+-- "launch it" WITHOUT ever calling this script's own command on a guess.
+reaper.SetExtState(EXT_NS, "is_running", "1", false)
+reaper.atexit(function()
+  reaper.SetExtState(EXT_NS, "is_running", "", false)
+end)
 
 reaper.defer(loop)
