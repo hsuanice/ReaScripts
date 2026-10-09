@@ -1,6 +1,6 @@
 --[[
 @description CLB - Reveal Item in Conform List Browser (wrapper)
-@version 261009.1823
+@version 261010.0021
 @author hsuanice
 @about
   Standalone wrapper for hsuanice_Conform List Browser.lua's reverse
@@ -10,10 +10,11 @@
   How it works:
   - Same heartbeat/pending_action pattern as hsuanice_CLB Load From
     Reaper.lua: if CLB is running, sets pending_action = "reveal_item"
-    and CLB runs CLB.reveal_reaper_item() on the first selected item on
-    its next frame.
-  - An item not linked yet is matched on the spot (same 4-TC rules as
-    Link Reaper Items) and linked — save the .clb to keep it.
+    and CLB runs CLB.reveal_reaper_selection() on its next frame.
+  - One selected item: if not linked yet, it's matched on the spot (same
+    4-TC rules as Link Reaper Items) and linked — save the .clb to keep it.
+  - Several selected items: already-linked ones only, all their events
+    get selected (unlinked ones are counted — use Link first).
   - Needs an event list already loaded in CLB, so when CLB isn't open
     this only offers to open it (load your list, then run this again).
   - For hands-free use, CLB's own "Follow Reaper" checkbox does the
@@ -22,6 +23,8 @@
   Requires: hsuanice_Conform List Browser.lua already added to Reaper's
   Action List at least once (so its command ID below resolves).
 @changelog
+  v261010.0021 - Several selected items: reveals all their linked events (CLB
+    v261010.0021+).
   v261009.1823 - Initial release.
 ]]--
 

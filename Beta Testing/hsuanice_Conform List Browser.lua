@@ -1,6 +1,6 @@
 --[[
 @description Conform List Browser
-@version 261009.2349
+@version 261010.0026
 @author hsuanice
 @about
   A REAPER script for browsing and editing EDL (Edit Decision List) data
@@ -71,6 +71,62 @@
   Required for AAF: aaftool in PATH (https://github.com/agfline/LibAAF)
 
 @changelog
+  v261010.0026
+  - New: Follow Reaper is now two-way for multi-selection — user's own
+    report: Reaper multi-select showed up in CLB, but not the reverse.
+    Any CLB row-selection change (click, Cmd/Shift+click, Cmd+A, arrows,
+    the timeline panel's click/box-select) now makes the selected rows'
+    linked items Reaper's item selection (CLB.sync_reaper_from_table_sel).
+    Detected generically via a new SEL.version counter (bumped by
+    sel_clear/add/remove/toggle) rather than hooking every call site;
+    synced once the mouse is released (a box-select drag rebuilds the
+    selection every frame). Reaper's selection is left alone when none of
+    the selected rows is linked; selections that came FROM Reaper (Reveal/
+    Follow) are marked synced so they never bounce back; turning Follow on
+    lets Reaper's current selection win first. Arrow-key nav now uses the
+    same sync (plus moving the edit cursor to the cursor row's item).
+
+  v261010.0021
+  - Fix: every "Cmd" shortcut on macOS (Cmd+A/C/V/Z/Shift+Z/Y, Cmd+click
+    multi-select) actually needed the physical Control key — real user
+    report: Cmd+A did nothing. _mods() read ImGui_Mod_Super on macOS, but
+    ReaImGui's ConfigVar_MacOSXBehaviors ("Enabled by default on macOS.
+    Swap Cmd<>Ctrl keys") makes Mod_Ctrl the Cmd key there. Now reads
+    Mod_Ctrl everywhere, and on macOS also still accepts Mod_Super (=
+    Control, or Cmd if MacOSXBehaviors were ever turned off).
+    (Item List Browser/Editor and the Reorder Monitor were checked too —
+    their _mods() already accepts Ctrl OR Super, so Cmd already worked.)
+  - New: event table keyboard nav — user's own request. ↑/↓ move the
+    selection one row (key repeat when held), Home/End (or Cmd+↑/↓) jump
+    to the first/last row, Shift+any of these extends a range from the
+    anchor. Visible (filtered/sorted) rows only, keeps the current
+    column. Scrolls only as far as needed, with the list clipper still on
+    (ListClipper_IncludeItemByIndex) so holding an arrow stays cheap. With
+    Follow Reaper on, the selected rows' linked items get selected in
+    Reaper and the edit cursor moves to the cursor row's item.
+  - New: Cmd+F jumps into the Search box.
+  - Fix: table shortcuts no longer fire while typing in a text field
+    (Search, popups) — Cmd+A/C/V/Z, arrows, Home/End, Delete/Backspace,
+    Esc now belong to that field (ImGui_IsAnyItemActive guard). Before,
+    e.g. Backspace in an EMPTY Search box (no text change, so no
+    sel_clear) also tagged the selected rows "Delete".
+  - Fix: Shift-range selection (Shift+click, and now Shift+arrows) walked
+    raw ROWS, so it also silently selected rows hidden by filters/search
+    in between (which Delete would then tag unseen) — now visible rows
+    only. It also lost its anchor after one use (sel_clear wiped it), so
+    a second Shift+click acted like a plain click — anchor now kept.
+  - New: Follow Reaper / Reveal Item / the Reveal wrapper handle a
+    MULTI-item Reaper selection — every selected item's linked event rows
+    get selected (CLB.reveal_reaper_selection). User's own choice: with
+    several items, ALREADY-LINKED ones only (on-the-spot matching reads
+    each item's audio metadata — too slow for e.g. a whole track);
+    unlinked ones are counted in the status ("use Link"). One item works
+    as before (matched + linked on the spot). Follow's change detection
+    is now a count+first+last selection signature (CLB._reaper_sel_sig, 3
+    API calls/frame) instead of just the first item.
+  - Cmd+A now also sets the Shift/arrow anchor (first row) and cursor
+    (last row).
+
   v261009.2349
   - Change: Conform (All/Sel) now adds the matched audio as new take(s) on
     the linked Reaper item for rows linked via "Link Reaper Items"/Reveal
@@ -2830,7 +2886,7 @@ local EXT_NS = "hsuanice_ConformListBrowser"
 -- Shown in the window title bar — must be kept in sync with @version in
 -- the header comment at the top of this file by hand; they are two
 -- separate strings with no automatic link between them.
-local VERSION = "261009.2349"
+local VERSION = "261010.0026"
 
 -- Column definitions (EDL Events table)
 local COL = {
@@ -3143,7 +3199,11 @@ local CLB = {
   -- item in Reaper reveals its event row(s). Persisted, off by default.
   follow_reaper_sel = false,
   follow_status = "",        -- last reveal result, shown next to the checkbox
-  _follow_last_item = nil,   -- first selected item seen last frame (change detection)
+  _follow_sig = nil,         -- Reaper item-selection signature seen last (see CLB._reaper_sel_sig)
+  _sel_synced_version = nil, -- SEL.version last pushed to Reaper (see CLB.sync_reaper_from_table_sel)
+  sel_cursor = nil,          -- {guid, col}: moving end of keyboard nav (see CLB.table_nav)
+  nav_scroll_to_row = nil,   -- row guid: scroll just enough to show it (keyboard nav)
+  focus_search = false,      -- Cmd+F → focus the Search box next frame
 
   -- "ask" (default) shows the usual Replace/Append/Cancel dialog every
   -- run; "replace"/"append" skip it and always do that directly — user's
@@ -3288,6 +3348,7 @@ local EDIT = nil   -- { row_idx, col_id, buf, want_focus }
 local SEL = {
   cells = {},             -- set: ["guid:col_id"] = true
   anchor = nil,           -- { guid, col } or nil
+  version = 0,            -- bumped on every change — Follow Reaper's CLB→Reaper sync watches it
 }
 
 -- Sort state
@@ -4853,14 +4914,17 @@ end
 local function sel_clear()
   SEL.cells = {}
   SEL.anchor = nil
+  SEL.version = SEL.version + 1
 end
 
 local function sel_add(guid, col_id)
   SEL.cells[sel_key(guid, col_id)] = true
+  SEL.version = SEL.version + 1
 end
 
 local function sel_remove(guid, col_id)
   SEL.cells[sel_key(guid, col_id)] = nil
+  SEL.version = SEL.version + 1
 end
 
 local function sel_has(guid, col_id)
@@ -4883,6 +4947,7 @@ local function sel_toggle(guid, col_id)
   else
     SEL.cells[k] = true
   end
+  SEL.version = SEL.version + 1
 end
 
 local function sel_set_single(guid, col_id)
@@ -4892,10 +4957,17 @@ local function sel_set_single(guid, col_id)
 end
 
 -- Rectangle selection (Shift+Click)
+-- Walks the VISIBLE (filtered/searched) rows — via CLB.get_view_rows,
+-- assigned once get_view_rows itself is defined further down — not raw
+-- ROWS: ROWS is sorted in place but still holds filtered-out rows, which
+-- a Shift range used to silently include (then e.g. Delete tagged rows
+-- you couldn't see). Keeps SEL.anchor (sel_clear wipes it), so repeated
+-- Shift+click / Shift+arrow keep extending from the same anchor.
 local function sel_rect(guid_from, col_from, guid_to, col_to)
+  local rows = CLB.get_view_rows and CLB.get_view_rows() or ROWS
   -- Find row indices
   local idx_from, idx_to
-  for i, row in ipairs(ROWS) do
+  for i, row in ipairs(rows) do
     if row.__guid == guid_from then idx_from = i end
     if row.__guid == guid_to then idx_to = i end
   end
@@ -4904,10 +4976,12 @@ local function sel_rect(guid_from, col_from, guid_to, col_to)
   local r1, r2 = math.min(idx_from, idx_to), math.max(idx_from, idx_to)
   local c1, c2 = math.min(col_from, col_to), math.max(col_from, col_to)
 
+  local anchor = SEL.anchor
   sel_clear()
+  SEL.anchor = anchor
   for i = r1, r2 do
     for c = c1, c2 do
-      sel_add(ROWS[i].__guid, c)
+      sel_add(rows[i].__guid, c)
     end
   end
 end
@@ -5328,6 +5402,7 @@ local function get_view_rows()
 
   return CLB.cached_rows
 end
+CLB.get_view_rows = get_view_rows -- for code above this point (sel_rect)
 
 ---------------------------------------------------------------------------
 -- File loading
@@ -7204,6 +7279,8 @@ function CLB.reveal_reaper_item(item, quiet)
 
   sel_set_single(hits[1].__guid, COL.CLIP_NAME)
   for k = 2, #hits do sel_add(hits[k].__guid, COL.CLIP_NAME) end
+  CLB.sel_cursor = { guid = hits[1].__guid, col = COL.CLIP_NAME }
+  CLB._sel_synced_version = SEL.version -- came FROM Reaper: don't sync it back
   CLB.scroll_to_row = hits[1].__guid
   CLB.tl_center_on_guid = hits[1].__guid
 
@@ -7220,6 +7297,98 @@ function CLB.reveal_reaper_item(item, quiet)
     CLB.follow_status = desc
   end
   return true
+end
+
+--- Cheap signature of Reaper's current item selection — count + first +
+--- last selected item pointer (3 API calls, regardless of selection
+--- size) — compared per frame by Follow Reaper. Changing only a middle
+--- item without changing count/first/last isn't caught, but any real
+--- click, Cmd+click (count changes) or marquee (first/last change) is.
+function CLB._reaper_sel_sig()
+  local n = reaper.CountSelectedMediaItems(0)
+  if n == 0 then return "0" end
+  return n .. "|" .. tostring(reaper.GetSelectedMediaItem(0, 0))
+    .. "|" .. tostring(reaper.GetSelectedMediaItem(0, n - 1))
+end
+
+--- Reveal for the whole Reaper selection. One item → CLB.reveal_reaper_item
+--- (matched on the spot + linked if needed). Several items → ALREADY-
+--- LINKED ones only (user's own choice: on-the-spot matching reads each
+--- item's audio metadata, too slow for e.g. a whole selected track), all
+--- their rows selected; unlinked items are just counted ("use Link").
+--- Only rows visible under the current filters/search get selected (a
+--- hidden selected row could then be hit by e.g. Delete unseen); hidden
+--- ones are counted in the status instead.
+function CLB.reveal_reaper_selection(quiet)
+  local function tell(msg)
+    CLB.follow_status = msg
+    if not quiet then reaper.ShowMessageBox(msg, SCRIPT_NAME .. " — Reveal Item", 0) end
+  end
+  local n = reaper.CountSelectedMediaItems(0)
+  if n == 0 then
+    tell("No item selected in Reaper — select item(s) on the timeline first.")
+    return false
+  end
+  if n == 1 then return CLB.reveal_reaper_item(reaper.GetSelectedMediaItem(0, 0), quiet) end
+  if #ROWS == 0 then tell("No event list loaded."); return false end
+
+  local by_guid, by_ptr = {}, {}
+  for _, row in ipairs(ROWS) do
+    if row.reaper_item_guid and row.reaper_item_guid ~= "" then
+      local t = by_guid[row.reaper_item_guid] or {}
+      t[#t + 1] = row
+      by_guid[row.reaper_item_guid] = t
+    end
+    if row.__reaper_item then
+      local t = by_ptr[row.__reaper_item] or {}
+      t[#t + 1] = row
+      by_ptr[row.__reaper_item] = t
+    end
+  end
+
+  local hit_set, linked_items, unlinked = {}, 0, 0
+  for i = 0, n - 1 do
+    local it = reaper.GetSelectedMediaItem(0, i)
+    local _, g = reaper.GetSetMediaItemInfo_String(it, "GUID", "", false)
+    local found = false
+    for _, list in ipairs({ by_guid[g] or {}, by_ptr[it] or {} }) do
+      for _, row in ipairs(list) do hit_set[row.__guid] = true; found = true end
+    end
+    if found then linked_items = linked_items + 1 else unlinked = unlinked + 1 end
+  end
+
+  local n_hit_rows = 0
+  for _ in pairs(hit_set) do n_hit_rows = n_hit_rows + 1 end
+  if n_hit_rows == 0 then
+    tell(string.format("None of the %d selected items is linked yet — use Link Reaper Items first.", n))
+    return false
+  end
+
+  sel_clear()
+  local first_vis, n_vis = nil, 0
+  for _, vr in ipairs(get_view_rows()) do
+    if hit_set[vr.__guid] then
+      sel_add(vr.__guid, COL.CLIP_NAME)
+      first_vis = first_vis or vr
+      n_vis = n_vis + 1
+    end
+  end
+  CLB._sel_synced_version = SEL.version -- came FROM Reaper: don't sync it back
+  if first_vis then
+    SEL.anchor = { guid = first_vis.__guid, col = COL.CLIP_NAME }
+    CLB.sel_cursor = { guid = first_vis.__guid, col = COL.CLIP_NAME }
+    CLB.scroll_to_row = first_vis.__guid
+    CLB.tl_center_on_guid = first_vis.__guid
+  end
+
+  local parts = { string.format("→ %d event(s) from %d item(s)", n_vis, linked_items) }
+  if unlinked > 0 then parts[#parts + 1] = string.format("%d unlinked skipped (use Link)", unlinked) end
+  if n_hit_rows > n_vis then
+    parts[#parts + 1] = string.format("%d hidden by filters/search", n_hit_rows - n_vis)
+  end
+  local msg = table.concat(parts, "; ")
+  if n_vis == 0 or (not quiet and unlinked > 0) then tell(msg) else CLB.follow_status = msg end
+  return n_vis > 0
 end
 
 ---------------------------------------------------------------------------
@@ -8866,6 +9035,70 @@ local function conform_matched_items(selected_only)
 end
 
 ---------------------------------------------------------------------------
+-- Keyboard navigation in the event table (↑↓ / Home / End, +Shift)
+---------------------------------------------------------------------------
+--- Moves the table's selection cursor — user's own request for basic
+--- spreadsheet-style keyboard nav. `target` = -1 / +1 (one row), "home"
+--- or "end"; `extend` (Shift) grows a range from SEL.anchor instead of
+--- moving a single selection. Works on the visible (filtered/sorted) rows
+--- and keeps the cursor's column. With Follow Reaper on, the linked
+--- Reaper item(s) of the selected rows get selected too and the edit
+--- cursor moves to the cursor row's item (linked rows only).
+function CLB.table_nav(target, extend)
+  local vr = get_view_rows()
+  if #vr == 0 then return end
+  local cur = CLB.sel_cursor or SEL.anchor
+  local idx
+  if cur then
+    for i, r in ipairs(vr) do
+      if r.__guid == cur.guid then idx = i; break end
+    end
+  end
+  local col = (cur and cur.col) or COL.CLIP_NAME
+  local new
+  if target == "home" then new = 1
+  elseif target == "end" then new = #vr
+  elseif not idx then new = (target < 0) and #vr or 1
+  else new = math.max(1, math.min(#vr, idx + target)) end
+
+  local g = vr[new].__guid
+  if extend and SEL.anchor then
+    sel_rect(SEL.anchor.guid, SEL.anchor.col, g, col)
+  else
+    sel_set_single(g, col)
+  end
+  CLB.sel_cursor = { guid = g, col = col }
+  CLB.nav_scroll_to_row = g
+  CLB.tl_center_on_guid = g
+
+  if CLB.follow_reaper_sel then CLB.sync_reaper_from_table_sel(vr[new]) end
+end
+
+--- Follow Reaper, CLB → Reaper direction — user's own request: whatever
+--- rows are selected in CLB (click, Cmd/Shift+click, Cmd+A, arrows, the
+--- timeline panel's click/box-select) → their linked items become
+--- Reaper's item selection. Leaves Reaper's selection alone when none of
+--- the selected rows is linked. `focus_row` (optional, keyboard nav):
+--- also move the edit cursor to that row's item.
+function CLB.sync_reaper_from_table_sel(focus_row)
+  CLB._sel_synced_version = SEL.version
+  local items, seen = {}, {}
+  for _, r in ipairs(get_selected_rows()) do
+    local it = CLB.row_linked_item(r)
+    if it and not seen[it] then seen[it] = true; items[#items + 1] = it end
+  end
+  if #items == 0 then return end
+  reaper.SelectAllMediaItems(0, false)
+  for _, it in ipairs(items) do reaper.SetMediaItemSelected(it, true) end
+  local focus_item = focus_row and CLB.row_linked_item(focus_row)
+  if focus_item then
+    reaper.SetEditCurPos(reaper.GetMediaItemInfo_Value(focus_item, "D_POSITION"), true, false)
+  end
+  reaper.UpdateArrange()
+  CLB._follow_sig = CLB._reaper_sel_sig() -- our own selection: Follow mustn't re-reveal it
+end
+
+---------------------------------------------------------------------------
 -- Remove Duplicates
 ---------------------------------------------------------------------------
 local function remove_duplicates()
@@ -10258,14 +10491,19 @@ end
 ---------------------------------------------------------------------------
 -- Modifier key helpers
 ---------------------------------------------------------------------------
+CLB._IS_MAC = (reaper.GetOS():find("OSX") or reaper.GetOS():find("macOS")) ~= nil -- (not a local: main chunk is at the 200-local limit)
 local function _mods()
   local shift = reaper.ImGui_IsKeyDown(ctx, reaper.ImGui_Mod_Shift())
-  local ctrl_cmd
-  -- macOS: use Cmd (Super), Windows/Linux: use Ctrl
-  if reaper.GetOS():find("OSX") or reaper.GetOS():find("macOS") then
+  -- Mod_Ctrl IS the Cmd key on macOS: ReaImGui's ConfigVar_MacOSXBehaviors
+  -- ("Enabled by default on macOS. Swap Cmd<>Ctrl keys") — so Mod_Super
+  -- there is the physical Control key. This used to read Mod_Super on
+  -- macOS, which made every "Cmd" shortcut (A/C/V/Z, Cmd+click) actually
+  -- need Control — real user report: Cmd+A did nothing. Mod_Super is
+  -- still accepted on macOS too, in case MacOSXBehaviors is ever off
+  -- (then Super = Cmd) and so Control keeps working as before.
+  local ctrl_cmd = reaper.ImGui_IsKeyDown(ctx, reaper.ImGui_Mod_Ctrl())
+  if not ctrl_cmd and CLB._IS_MAC then
     ctrl_cmd = reaper.ImGui_IsKeyDown(ctx, reaper.ImGui_Mod_Super())
-  else
-    ctrl_cmd = reaper.ImGui_IsKeyDown(ctx, reaper.ImGui_Mod_Ctrl())
   end
   return shift, ctrl_cmd
 end
@@ -10676,6 +10914,10 @@ local function draw_toolbar()
   reaper.ImGui_Text(ctx, "Search:")
   reaper.ImGui_SameLine(ctx)
   reaper.ImGui_SetNextItemWidth(ctx, scale(160))
+  if CLB.focus_search then -- Cmd+F (see the keyboard shortcuts block)
+    reaper.ImGui_SetKeyboardFocusHere(ctx)
+    CLB.focus_search = false
+  end
   local chg_s, new_s = reaper.ImGui_InputText(ctx, "##clb_search", CLB.search_text)
   if chg_s then
     CLB.search_text = new_s
@@ -11268,25 +11510,21 @@ function CLB.draw_left_sidebar()
   local reveal_clicked = reaper.ImGui_Button(ctx, "Reveal Item##clb_reveal_item", btn_w, btn_h)
   CLB.pop_btn_color("link")
   if reveal_clicked then
-    local it = reaper.GetSelectedMediaItem(0, 0)
-    if it then
-      CLB._follow_last_item = it -- don't re-reveal it via Follow next frame
-      CLB.reveal_reaper_item(it, false)
-    else
-      reaper.ShowMessageBox("No item selected in Reaper.\n\nSelect an item on the timeline first.",
-        SCRIPT_NAME, 0)
-    end
+    CLB._follow_sig = CLB._reaper_sel_sig() -- don't re-reveal it via Follow next frame
+    CLB.reveal_reaper_selection(false)
   end
   if reaper.ImGui_IsItemHovered(ctx) then
     reaper.ImGui_SetTooltip(ctx,
-      "Jump this list to the event(s) of the item selected in Reaper.\n"
-      .. "Unlinked items are matched on the spot and linked.")
+      "Jump this list to the event(s) of the item(s) selected in Reaper.\n"
+      .. "One item: matched on the spot and linked if it isn't yet.\n"
+      .. "Several items: already-linked ones only (use Link first).")
   end
 
   local chg_fr, new_fr = reaper.ImGui_Checkbox(ctx, "Follow Reaper##clb_follow_reaper_sel", CLB.follow_reaper_sel)
   if chg_fr then
     CLB.follow_reaper_sel = new_fr
-    CLB._follow_last_item = nil -- re-reveal whatever is selected right now
+    CLB._follow_sig = nil -- re-reveal whatever is selected right now
+    CLB._sel_synced_version = SEL.version -- ...rather than pushing CLB's old selection to Reaper
     CLB.follow_status = ""
     save_prefs()
   end
@@ -12199,6 +12437,17 @@ local function draw_table(table_height)
     end
     CLB.scroll_to_row = nil
   end
+  -- Keyboard nav target (CLB.table_nav): scroll only as far as needed to
+  -- keep it in view, and keep the clipper on (IncludeItemByIndex forces
+  -- just that row to be laid out) — holding an arrow key would otherwise
+  -- render every row every frame and re-center the list on each step.
+  local nav_target_idx = nil
+  if CLB.nav_scroll_to_row then
+    for i, row in ipairs(view_rows) do
+      if row.__guid == CLB.nav_scroll_to_row then nav_target_idx = i; break end
+    end
+    CLB.nav_scroll_to_row = nil
+  end
 
   -- Disable clipper for this frame if we need to scroll to a row
   local use_clipper = list_clipper and row_count > 100 and not scroll_target_idx
@@ -12206,6 +12455,9 @@ local function draw_table(table_height)
 
   if use_clipper then
     reaper.ImGui_ListClipper_Begin(list_clipper, row_count)
+    if nav_target_idx and reaper.ImGui_ListClipper_IncludeItemByIndex then
+      reaper.ImGui_ListClipper_IncludeItemByIndex(list_clipper, nav_target_idx - 1)
+    end
   end
 
   local clp = true
@@ -12228,6 +12480,18 @@ local function draw_table(table_height)
       reaper.ImGui_TableNextRow(ctx)
       if i == scroll_target_idx then
         reaper.ImGui_SetScrollHereY(ctx, 0.5)
+      elseif i == nav_target_idx then
+        -- Only scroll if the row is (about to be) out of view; the frozen
+        -- header row takes ~1 row height at the top.
+        local y  = reaper.ImGui_GetCursorPosY(ctx)
+        local sy = reaper.ImGui_GetScrollY(ctx)
+        local wh = reaper.ImGui_GetWindowHeight(ctx)
+        local rh = reaper.ImGui_GetTextLineHeightWithSpacing(ctx)
+        if y < sy + rh * 1.5 then
+          reaper.ImGui_SetScrollHereY(ctx, 0.15)
+        elseif y + rh * 2 > sy + wh then
+          reaper.ImGui_SetScrollHereY(ctx, 0.85)
+        end
       end
 
       for disp_idx, col in ipairs(visible_cols) do
@@ -12374,6 +12638,7 @@ local function draw_table(table_height)
           -- Click handling
           if reaper.ImGui_IsItemClicked(ctx, 0) then
             local shift, cmd = _mods()
+            CLB.sel_cursor = { guid = row.__guid, col = col } -- arrow-key nav continues from here
             if shift and SEL.anchor then
               sel_rect(SEL.anchor.guid, SEL.anchor.col, row.__guid, col)
             elseif cmd then
@@ -12425,7 +12690,7 @@ local function draw_table(table_height)
               if linked then
                 reaper.SelectAllMediaItems(0, false)
                 reaper.SetMediaItemSelected(linked, true)
-                CLB._follow_last_item = linked -- our own selection: Follow mustn't re-reveal it
+                CLB._follow_sig = CLB._reaper_sel_sig() -- our own selection: Follow mustn't re-reveal it
                 local item_pos = reaper.GetMediaItemInfo_Value(linked, "D_POSITION")
                 reaper.SetEditCurPos(item_pos, true, false)
                 reaper.UpdateArrange()
@@ -16675,23 +16940,27 @@ local function loop()
       elseif pending == "link_reaper_items" then -- hsuanice_CLB Link Reaper Items.lua
         CLB.link_reaper_items_selection()
       elseif pending == "reveal_item" then -- hsuanice_CLB Reveal Item.lua
-        local it = reaper.GetSelectedMediaItem(0, 0)
-        if it then
-          CLB._follow_last_item = it -- don't re-reveal it via Follow next frame
-          CLB.reveal_reaper_item(it, false)
-        end
+        CLB._follow_sig = CLB._reaper_sel_sig() -- don't re-reveal it via Follow next frame
+        CLB.reveal_reaper_selection(false)
       end
     end
   end
 
-  -- "Follow Reaper": reveal the first selected Reaper item's event(s)
-  -- whenever that item changes. One pointer compare per frame; the actual
-  -- lookup only runs on a change (see CLB.reveal_reaper_item).
+  -- "Follow Reaper": reveal the selected Reaper item(s)' event(s) whenever
+  -- the selection changes. Three cheap API calls per frame (see
+  -- CLB._reaper_sel_sig); the actual lookup only runs on a change.
+  -- CLB → Reaper first: a table selection change (once the mouse is
+  -- released — a box-select drag rebuilds it every frame) pushes the
+  -- rows' linked items to Reaper. Then Reaper → CLB below.
+  if CLB.follow_reaper_sel and SEL.version ~= CLB._sel_synced_version
+     and not reaper.ImGui_IsMouseDown(ctx, 0) then
+    CLB.sync_reaper_from_table_sel()
+  end
   if CLB.follow_reaper_sel and #ROWS > 0 then
-    local it = reaper.GetSelectedMediaItem(0, 0)
-    if it ~= CLB._follow_last_item then
-      CLB._follow_last_item = it
-      if it then CLB.reveal_reaper_item(it, true) end
+    local sig = CLB._reaper_sel_sig()
+    if sig ~= CLB._follow_sig then
+      CLB._follow_sig = sig
+      if sig ~= "0" then CLB.reveal_reaper_selection(true) end
     end
   end
 
@@ -16775,8 +17044,28 @@ local function loop()
 
     -- Keyboard shortcuts
     local focused = reaper.ImGui_IsWindowFocused(ctx, reaper.ImGui_FocusedFlags_RootAndChildWindows())
-    if focused and not EDIT then
+    -- Not while a text field (Search, popups' InputText) is being typed
+    -- in — Cmd+A/C/V/Z, arrows, Home/End belong to that field then.
+    if focused and not EDIT and not reaper.ImGui_IsAnyItemActive(ctx) then
       local shift, cmd = _mods()
+
+      -- ↑↓ / Home / End (Cmd+↑↓ = Home/End, macOS-style); +Shift extends
+      local nav_t
+      if reaper.ImGui_IsKeyPressed(ctx, reaper.ImGui_Key_UpArrow(), true) then
+        nav_t = cmd and "home" or -1
+      elseif reaper.ImGui_IsKeyPressed(ctx, reaper.ImGui_Key_DownArrow(), true) then
+        nav_t = cmd and "end" or 1
+      elseif reaper.ImGui_IsKeyPressed(ctx, reaper.ImGui_Key_Home(), false) then
+        nav_t = "home"
+      elseif reaper.ImGui_IsKeyPressed(ctx, reaper.ImGui_Key_End(), false) then
+        nav_t = "end"
+      end
+      if nav_t then CLB.table_nav(nav_t, shift) end
+
+      -- Cmd+F = jump to the Search box
+      if cmd and reaper.ImGui_IsKeyPressed(ctx, reaper.ImGui_Key_F(), false) then
+        CLB.focus_search = true
+      end
 
       -- Cmd+Z = Undo
       if cmd and reaper.ImGui_IsKeyPressed(ctx, reaper.ImGui_Key_Z(), false) then
@@ -16810,6 +17099,10 @@ local function loop()
           for c = 1, COL_COUNT do
             sel_add(row.__guid, c)
           end
+        end
+        if #vr > 0 then
+          SEL.anchor = { guid = vr[1].__guid, col = COL.CLIP_NAME }
+          CLB.sel_cursor = { guid = vr[#vr].__guid, col = COL.CLIP_NAME }
         end
       end
 
