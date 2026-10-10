@@ -29,9 +29,32 @@ Dependencies:
   pip install opentimelineio
   aaftool in PATH (LibAAF) — only needed for .aaf files
 
-Version: 260923.1138
+Version: 261010.1318
 
 Changelog:
+    261010.1318
+        - Fix: AAF reel (TAPE) from the embedded media's BWF/iXML was never
+            read when the AAF had been moved off the editor's machine — real
+            user report (R03: every event ended up "AX", yet CLB's own Audio
+            panel showed Tape/Roll 0130/0204/... for the same files). The
+            AAF's media paths are the editor's ("/X10/12_Export/..."), so
+            _bwf_probe always hit "file doesn't exist". New
+            _resolve_local_media looks for the same filename next to the AAF
+            ("AAF Media/", the AAF's folder, then anywhere under it). "AX"
+            now only for media that genuinely has no tape info. Reel only —
+            Src TC still comes from the AAF itself (adding the local file's
+            BWF TimeReference on top doubled it; checked against R03's EDLs).
+
+    261010.1223
+        - AAF: an event with no reel/tape info (AAF metadata, or BWF/iXML of
+            its media) now gets Reel "AX" instead of its clip name — user's
+            own request, matching common conform-tool practice. Real case:
+            POINT_DIR_v8_LOCK_R03 — GUID-named embedded media, no tape in
+            the AAF, so all 720 events had their clip name ("20B_03_T01_A -
+            Merged") as Reel. _reel_from_clip(name_fallbacks=False) for AAF
+            skips both the file-stem and clip-name substitutes; XML/OTIO
+            unchanged.
+
     260923.1138
         - Fixed _detect_xml_format() only sniffing the first 2KB of the file:
             Premiere Pro's real signature (authoringApp="PremierePro") is written
@@ -338,10 +361,17 @@ def _reel_from_media_ref_metadata(clip):
     return ""
 
 
-def _reel_from_clip(clip):
+def _reel_from_clip(clip, name_fallbacks=True):
     """
     Derive a reel/tape name from clip metadata, then fall back to
         the target URL stem, then the clip name. URL-decodes the result.
+
+        name_fallbacks=False (AAF): stop after the real metadata sources —
+            no file-stem or clip-name substitute; returns "" when there's no
+            reel/tape info, and the caller files it under "AX" (see
+            AAF_NO_REEL). An AAF's embedded media is GUID-named and its clip
+            names are editorial labels ("20B_03_T01_A - Merged"), so neither
+            is a reel — using them gave every event its own fake reel.
 
         Rationale:
             - Premiere XML often uses clip.name as the edited clip label
@@ -366,6 +396,9 @@ def _reel_from_clip(clip):
     mr_reel = _reel_from_media_ref_metadata(clip)
     if mr_reel:
         return mr_reel
+
+    if not name_fallbacks:
+        return ""
 
     # Prefer source file stem for XML timelines where clip.name is often
     # an editorial clip label instead of the actual reel/source name.
@@ -432,6 +465,38 @@ def _source_file(clip):
 
 
 _BWF_META_CACHE = {}
+
+# Folder of the AAF being converted (set by _load_aaf) — where its exported
+# media usually sits ("<aaf dir>/AAF Media/..."), for _resolve_local_media.
+_AAF_DIR = None
+_AAF_MEDIA_INDEX = None   # basename (lowercase) -> local path, built lazily
+
+
+def _resolve_local_media(path):
+    """
+    An AAF's media paths are the EDITOR's machine paths (e.g.
+    "/X10/12_Export/for_Audio/AAF/R03/AAF Media/<guid>.wav"), which don't
+    exist here — so their BWF/iXML (TAPE etc.) was never read. If `path`
+    doesn't exist, look for the same filename next to the AAF instead:
+    "<aaf dir>/AAF Media/", "<aaf dir>/", then anywhere under <aaf dir>.
+    Returns the local path, or `path` unchanged if nothing is found.
+    """
+    global _AAF_MEDIA_INDEX
+    if not path or Path(path).exists() or not _AAF_DIR:
+        return path
+    name = Path(path).name
+    for cand in (_AAF_DIR / "AAF Media" / name, _AAF_DIR / name):
+        if cand.exists():
+            return str(cand)
+    if _AAF_MEDIA_INDEX is None:
+        _AAF_MEDIA_INDEX = {}
+        try:
+            for f in _AAF_DIR.rglob("*"):
+                if f.is_file():
+                    _AAF_MEDIA_INDEX.setdefault(f.name.lower(), str(f))
+        except Exception:
+            pass
+    return _AAF_MEDIA_INDEX.get(name.lower(), path)
 _BWFMETAEDIT_EXE = None
 
 
@@ -458,6 +523,12 @@ def _resolve_bwfmetaedit():
 
     _BWFMETAEDIT_EXE = ""
     return _BWFMETAEDIT_EXE
+
+
+# Reel for an AAF event with no reel/tape info anywhere (AAF metadata, BWF/
+# iXML of its media) — the conventional "auxiliary source" reel other conform
+# tools use too, instead of substituting the clip name.
+AAF_NO_REEL = "AX"
 
 
 def _looks_like_guid_stem(name):
@@ -750,7 +821,7 @@ def _timeline_to_clb(tl, fmt, progress_file=""):
             pending_transition = None
 
             # Metadata
-            reel         = _reel_from_clip(clip)
+            reel         = _reel_from_clip(clip, name_fallbacks=(fmt != "AAF"))
             scene, take  = _scene_take(clip)
             clip_name    = _url_decode(clip.name) if clip.name else reel
             source_file  = _source_file(clip)
@@ -762,8 +833,18 @@ def _timeline_to_clb(tl, fmt, progress_file=""):
                 has_native_aaf_meta = isinstance(clip_meta, dict) and ("AAF" in clip_meta)
                 bwf = _bwf_probe(source_file)
 
-                if bwf.get("reel") and (not has_native_aaf_meta or not reel or _looks_like_guid_stem(reel)):
-                    reel = bwf.get("reel")
+                # Reel: also from the media's LOCAL copy next to the AAF
+                # (see _resolve_local_media) — reel only. The TC rebuild
+                # below must keep using the original path: these AAFs'
+                # source TC is already absolute even when no "AAF" clip
+                # metadata is present, and adding the local file's BWF
+                # TimeReference again doubled it (verified on R03 against
+                # its EDLs: 11:22:53:01 became 22:45:38:01).
+                local_media = _resolve_local_media(source_file)
+                bwf_reel = bwf.get("reel") or (
+                    _bwf_probe(local_media).get("reel") if local_media != source_file else "")
+                if bwf_reel and (not has_native_aaf_meta or not reel or _looks_like_guid_stem(reel)):
+                    reel = bwf_reel
 
                 ts_samples = bwf.get("ts_samples")
                 sample_rate = bwf.get("sample_rate")
@@ -776,6 +857,9 @@ def _timeline_to_clb(tl, fmt, progress_file=""):
 
                     src_in  = _rt_to_tc(src_start, fps, is_drop, ot)
                     src_out = _rt_to_tc(src_end,   fps, is_drop, ot)
+
+                if not reel:
+                    reel = AAF_NO_REEL
 
             linked = linked_audio.get(clip_name)
             # Only borrow linked-audio reel for audio events.
@@ -839,6 +923,10 @@ def _load_aaf(path, progress_file=""):
     adapter is unavailable (e.g. aaf2 not installed).
     """
     otio, ot = _import_otio()
+
+    global _AAF_DIR, _AAF_MEDIA_INDEX
+    _AAF_DIR = Path(path).resolve().parent
+    _AAF_MEDIA_INDEX = None
 
     # Signal that we're in the slow AAF parse phase (no clip count yet)
     _write_progress(progress_file, "parsing", 0, 0, Path(path).name)
