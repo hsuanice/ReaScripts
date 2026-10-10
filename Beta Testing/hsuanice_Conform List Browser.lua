@@ -1,6 +1,6 @@
 --[[
 @description Conform List Browser
-@version 261010.0026
+@version 261010.1341
 @author hsuanice
 @about
   A REAPER script for browsing and editing EDL (Edit Decision List) data
@@ -71,6 +71,25 @@
   Required for AAF: aaftool in PATH (https://github.com/agfline/LibAAF)
 
 @changelog
+  v261010.1341
+  - Fix: a box-select (drag) in the timeline panel never scrolled the event
+    table to what it selected — real user report: a single click "linked"
+    to the list, a drag didn't, even when it caught only one clip. The rows
+    WERE selected, just off-screen. When the drag ends, the table now
+    scrolls to the topmost selected row (in its own sorted/filtered order)
+    and the selection's first/last rows become the Shift/arrow-key anchor/
+    cursor. Selected guids gathered in one pass over SEL.cells.
+
+  v261010.1329
+  - New: right-click a clip in the timeline panel → the same row context
+    menu as the event table (Assign Reel / Group, ...) — user's own request.
+    Reuses draw_table's deferred popup (CLB.row_context/_open_row_ctx), so
+    both menus stay identical. Right-clicking a clip outside the current
+    selection selects it alone first (the menu acts on the selection).
+  - (Related, not this file: Tools/otio_to_clb.py v261010.1318 — AAF events
+    with no reel/tape get "AX"; tape now read from the media's local copy
+    next to the AAF. Src TC untouched.)
+
   v261010.0026
   - New: Follow Reaper is now two-way for multi-selection — user's own
     report: Reaper multi-select showed up in CLB, but not the reverse.
@@ -2886,7 +2905,7 @@ local EXT_NS = "hsuanice_ConformListBrowser"
 -- Shown in the window title bar — must be kept in sync with @version in
 -- the header comment at the top of this file by hand; they are two
 -- separate strings with no automatic link between them.
-local VERSION = "261010.0026"
+local VERSION = "261010.1341"
 
 -- Column definitions (EDL Events table)
 local COL = {
@@ -13555,6 +13574,24 @@ local function draw_timeline_panel()
     end
   end
 
+  -- 14b. Right-click a clip → the SAME row context menu as the event table
+  -- (user's own request) — reuses draw_table's deferred popup
+  -- (CLB.row_context + CLB._open_row_ctx; draw_table runs after this panel
+  -- every frame and opens/draws it in its own scope), so the two menus can
+  -- never drift apart. Right-clicking a clip that isn't part of the current
+  -- selection selects it alone first, so the menu never silently acts on
+  -- some other, unseen selection.
+  if is_hovered and hovered_rd and reaper.ImGui_IsMouseClicked(ctx, 1) then
+    local g = hovered_rd.row.__guid
+    if not sel_has_row(g) then
+      sel_clear()
+      for _, c in ipairs(EDL_COL_ORDER) do sel_add(g, c) end
+      CLB.scroll_to_row = g
+    end
+    CLB.row_context = { row = hovered_rd.row }
+    CLB._open_row_ctx = true
+  end
+
   -- 15. Scroll wheel:
   --   • Scroll (no mod)    → vertical scroll (track rows)
   --   • Shift+scroll       → horizontal pan (macOS converts to horizontal axis)
@@ -13604,6 +13641,33 @@ local function draw_timeline_panel()
   -- own arrange view uses).
   if not is_active then
     CLB._tl_sb_dragging = nil   -- reset drag-origin flag
+    -- Box-select just ended → bring the table to the selection, same as a
+    -- single click does (user's own report: a drag-select, even of one
+    -- clip, never scrolled the event list, so it looked unlinked). Scrolls
+    -- to the topmost selected row in the table's own (sorted/filtered)
+    -- order and sets it as the Shift/arrow-key anchor.
+    if CLB._tl_box_selected then
+      CLB._tl_box_selected = nil
+      -- One pass over the selected cells → guid set (sel_has_row per row
+      -- would rescan every selected cell for every row: rows × cells).
+      local sel_guids = {}
+      for k in pairs(SEL.cells) do
+        local g = k:match("^(.*):[^:]*$")
+        if g then sel_guids[g] = true end
+      end
+      local first, last
+      for _, vr in ipairs(get_view_rows()) do
+        if sel_guids[vr.__guid] then
+          first = first or vr
+          last = vr
+        end
+      end
+      if first then
+        CLB.scroll_to_row = first.__guid
+        SEL.anchor = { guid = first.__guid, col = COL.CLIP_NAME }
+        CLB.sel_cursor = { guid = last.__guid, col = COL.CLIP_NAME }
+      end
+    end
   end
   if is_active then
     local delta_y = select(2, reaper.ImGui_GetMouseDelta(ctx))
@@ -13639,6 +13703,7 @@ local function draw_timeline_panel()
           for _, c in ipairs(EDL_COL_ORDER) do sel_add(br.row.__guid, c) end
         end
       end
+      CLB._tl_box_selected = true -- scroll the table once the drag ends (see above)
     end
   end
 
