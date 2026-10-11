@@ -1,5 +1,5 @@
 -- @description AudioSweet Run
--- @version 0.2.2
+-- @version 0.2.5
 -- @author hsuanice
 -- @links https://forum.cockos.com/showthread.php?p=2910884#post2910884
 -- @provides
@@ -48,6 +48,17 @@
 --   - Works independently - can be assigned to keyboard shortcuts
 --
 -- @changelog
+--   0.2.5 [261011.1053]
+--     - ADDED: Syncs "Retain Glue Cues" → AS_RENDER_KEEP_GLUE_CUES (AudioSweet Core >= 0.3.8)
+--
+--   0.2.4 [261010.1609]
+--     - ADDED: Syncs "Single item: Render (keep takes)" → AS_SINGLE_ITEM_RENDER (AudioSweet Core >= 0.3.6)
+--
+--   0.2.3 [261010.1547]
+--     - ADDED: Syncs GUI glue grouping (Settings → Glue) to AudioSweet Core
+--       • AS_GLUE_GROUPING / AS_GLUE_SPLIT_AT_CROSSFADES / AS_GLUE_MUTED_SEPARATE
+--       • Requires AudioSweet Core >= 0.3.5 and RGWH Core >= 0.3.10
+--
 --   0.2.2 [260330.1809]
 --     - ADDED: Auto track FX chain online/offline restore on run
 --       • Before executing AudioSweet Core: brings FX chain track online if offline (I_FXEN or per-FX offline bits)
@@ -194,6 +205,11 @@ local function sync_gui_settings_to_core()
   local max_fx_tokens = get_int("max_fx_tokens", 3)
   local trackname_strip_symbols = get_bool("trackname_strip_symbols", true)
   local sanitize_token = get_bool("sanitize_token", false)
+  local glue_grouping = math.max(0, math.min(2, get_int("glue_grouping", 0)))
+  local glue_split_at_crossfades = get_bool("glue_split_at_crossfades", false)
+  local glue_muted_separate = get_bool("glue_muted_separate", true)
+  local single_item_render = get_bool("single_item_render", false)
+  local render_keep_glue_cues = get_bool("render_keep_glue_cues", false)
   local handle_to_set = use_whole_file and 999999 or handle_seconds
 
   -- AudioSweet Core reads from "hsuanice_AS"
@@ -220,6 +236,13 @@ local function sync_gui_settings_to_core()
   r.SetExtState("hsuanice_AS", "AS_MAX_FX_TOKENS", tostring(max_fx_tokens), false)
   r.SetExtState("hsuanice_AS", "TRACKNAME_STRIP_SYMBOLS", trackname_strip_symbols and "1" or "0", false)
   r.SetExtState("hsuanice_AS", "SANITIZE_TOKEN_FOR_FILENAME", sanitize_token and "1" or "0", false)
+  -- Glue unit grouping (AudioSweet Core >= 0.3.5)
+  local glue_grouping_names = { "all", "rgwh", "custom" }
+  r.SetExtState("hsuanice_AS", "AS_GLUE_GROUPING", glue_grouping_names[glue_grouping + 1], false)
+  r.SetExtState("hsuanice_AS", "AS_GLUE_SPLIT_AT_CROSSFADES", glue_split_at_crossfades and "1" or "0", false)
+  r.SetExtState("hsuanice_AS", "AS_GLUE_MUTED_SEPARATE", glue_muted_separate and "1" or "0", false)
+  r.SetExtState("hsuanice_AS", "AS_SINGLE_ITEM_RENDER", single_item_render and "1" or "0", false)
+  r.SetExtState("hsuanice_AS", "AS_RENDER_KEEP_GLUE_CUES", render_keep_glue_cues and "1" or "0", false)
 
   -- RGWH Core reads handle settings from project ExtState "RGWH"
   r.SetProjExtState(0, "RGWH", "HANDLE_MODE", "seconds")
