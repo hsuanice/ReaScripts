@@ -1,0 +1,29 @@
+# Whitelist: ignore everything, then allow only what is published to ReaPack.
+# Local-only folders (Beta Testing, PRO TOOLS, Tools/Apps, _backup, ...) stay on this Mac.
+/*
+
+!/.gitignore
+!/.github/
+!/.reapack-index.conf
+!/README.md
+!/index.xml
+!/Changelogs/
+
+# Images linked from REAPER forum posts — keep so old links keep working
+!/Reaper Forum/
+
+# Published categories
+!/Rendering/
+
+# Library: only files used by published packages
+!/Library/
+/Library/*
+!/Library/hsuanice_Library.lua
+!/Library/hsuanice_RGWH Core.lua
+!/Library/hsuanice_AudioSweet Core.lua
+!/Library/hsuanice_AS Preview Core.lua
+!/Library/hsuanice_Metadata Embed.lua
+!/Library/hsuanice_Metadata Read.lua
+
+.DS_Store
+__pycache__/

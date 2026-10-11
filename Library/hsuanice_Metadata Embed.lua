@@ -1,107 +1,27 @@
 --[[
 @description Metadata Embed - BWF MetaEdit helpers
-@version 260821.2036
+@version 26.1011.2142
 @author hsuanice
 @noindex
-@about
-  Helpers to call BWF MetaEdit safely:
-  - Shell quoting
-  - Normalize iXML sidecar newline
-  - Copy iXML/core, 
-  read/write TimeReference
-  - Post-embed refresh (offline->online, rebuild peaks)
-
 @changelog
-  260821.2036 - Tolerate non-fatal bwfmetaedit warnings on CORE/TR reads
-    - Copy_CORE() no longer aborts solely because bwfmetaedit exits non-zero
-      (e.g. "invalid Wave: iXML, missing padding byte"); it now uses the
-      recovered --continue-errors report as long as output was produced.
-    - TR_Read() now passes --continue-errors so TimeReference can still be
-      read from source files with the same non-fatal chunk warning, instead
-      of returning nil and causing "TR result: SKIP (cannot read src TR)".
-    - Root cause of the reported CORE/TR FAILs: some source WAVs have an
-      odd-sized chunk missing its pad byte, which bwfmetaedit flags as an
-      error (exit code 1) even though it still emits a usable XML report.
-
-  260718.1728 - Synced channel-aware APIs with production fixes from Embed script
-    - Build_Channel_Context now prefers TRACK_LIST slot order for interleave mapping and returns channel_index.
-    - Copy_iXML now validates post-import iXML by re-exporting destination sidecar.
-    - Missing source iXML sidecar is now treated as FAIL (not success).
-    - Patch_iXML_For_Channel preserves non-channel iXML blocks and writes channel_index in TRACK_LIST.
-    - Copy_CORE now normalizes sTRK/sTRKALL textual tokens for mono channel metadata consistency.
-    - Added richer command output logging for export/import/verify operations.
-
-  260711.2215 - Added reusable channel-aware metadata copy APIs
-    - Added Build_Channel_Context() for mono-of-N channel resolution from I_CHANMODE and source TRACK_LIST.
-    - Added Copy_iXML(), Copy_CORE(), Set_iXML_Embedder(), and Copy_Metadata() APIs.
-    - Added Copy_Take1_To_Active() as a workflow-friendly entry point for render/glue pipelines.
-    - Purpose: let explode/render scripts reuse the same metadata re-embed logic.
-
-  0.3.0 (2025-10-30) - Initial Public Beta Release
-    BWF MetaEdit helpers library featuring:
-    - Shell quoting for safe CLI execution
-    - iXML sidecar normalization
-    - TimeReference read/write operations
-    - Post-embed refresh (offline->online, rebuild peaks)
-    - Integration with RGWH Core for BWF TimeReference embed
-
-  Internal Build v251010_0037
-    - Rationale: Refresh_Items already does offline->online->rebuild peaks.
-    - Prevent redundant peak rebuild (40441) after every single item refresh.
-
-  v250926_2018 (2025-09-26)
-    - Change: Refresh_Items now uses 42356 (Toggle force media offline) twice (offline→online), then 40441 (Rebuild peaks), to force immediate BWF header (TimeReference) reload.
-    - Rationale: 40440/40439 were insufficient in some cases after render with newly embedded TC.
-
-  v0.3.0 (2025-09-25)
-    - Added: CLI_Resolve() — resolve & persist BWF MetaEdit path
-      (ExtState: hsuanice_TCTools/BWFMetaEditPath; Apple Silicon default
-       /opt/homebrew/bin/bwfmetaedit is tried first).
-    - Added: TR_Read(), TR_Write() — read/write BWF TimeReference (samples)
-      via --out-xml=- / --TimeReference= with safe quoting (exec_shell).
-    - Added: SecToSamples() — floor+epsilon sample quantization to prevent +1 jitter.
-    - Added: TR_PrevToActive(), TR_FromItemStart() — handle-aware TC math using
-      SrcStart (D_STARTOFFS) and cross-SR safety; negative results clamped to 0.
-    - Added: Refresh_Items() — batch offline→online→rebuild peaks for items/takes.
-    - Kept: write_bext_umid(), refresh_media_item_take(), shell helpers (unchanged).
-    - Notes: TC/TimeReference math here is the single source of truth; RGWH and tools
-      should call this library. Backward-compatible insertion; UMID workflows unaffected.
-
-
-  v0.2.4 (2025-09-12)
-    - Changed: E.write_bext_umid() now returns the actual command string
-      used for execution, in addition to (ok, code, out).
-      * Return signature: ok, code, out, cmd
-      * cmd is the fully formatted bwfmetaedit command.
-    - Purpose: allows calling tools to log the exact command
-      instead of reconstructing it, avoiding stale or incorrect flags.
-    - No change to write logic (still uses only --UMID=).
-    - Maintains compatibility with v0.2.3 behavior if cmd return is ignored.
-
-  v0.2.2 (2025-09-12)
-    - Improved: E.write_bext_umid() now aggressively cleans input
-      before validation:
-        * Strips all non-hex characters.
-        * Forces uppercase to ensure consistent 64 hex chars.
-    - Safer: Prevents hidden characters or dash-separated UMIDs
-      from being rejected incorrectly.
-    - No change to CLI execution or return values.
-    - Compatible with v0.2.1 calling convention
-      (cli_path, wav_path, umid_hex).
-  v0.2.1 (2025-09-12)
-    - Changed: E.write_bext_umid() now requires an explicit bwfmetaedit CLI path
-      and uses ExecProcess (non-blocking) instead of os.execute.
-      * Usage: E.write_bext_umid(cli_path, wav_path, umid_hex)
-      * CLI path can be resolved via the same logic as BWF TimeReference tool.
-    - Improved: sh_wrap() and exec_shell() helpers added (consistent with TR tool).
-    - Notes:
-      * Only writes to BWF bext:UMID; iXML UMID is left to recorders.
-      * Requires BWF MetaEdit installed and accessible (path must be provided).
-    - No breaking changes besides function signature update.
-]]
+  - Released as part of the 26.1011.2142 package update.
+  - Full history of earlier versions: Changelogs/ in the repository (https://github.com/hsuanice/ReaScripts/tree/master/Changelogs)
+@about
+  Direct-copy metadata embed helpers for Ediload-split / fully-correct source files.
+  - Safe BWF MetaEdit calls
+  - Normalize iXML sidecar newline
+  - Exact copy of metadata from a trusted source to a target WAV
+  - No channel-name guessing or per-track metadata remapping in direct mode
+  - Read/write TimeReference and post-embed refresh
+  - Write a caller-built iXML document from scratch (not copied from a source)
+--]]
 
 local E = {}
-E.VERSION = "260821.2036"
+E.VERSION = "261007.1128"
+
+local function _trim_outer(s)
+  return tostring(s or ""):gsub("^%s+", ""):gsub("%s+$", "")
+end
 
 -- ===== Shell wrapper / exec (same as TR tool style) =====
 local IS_WIN = reaper.GetOS():match("Win")
@@ -184,10 +104,34 @@ local function _shorten_output(s, maxlen)
   return (#out > maxlen) and out:sub(1, maxlen) .. "..." or out
 end
 
+-- Direct-copy mode intentionally avoids per-track metadata guessing.
+-- If you need the full, already-correct Ediload split metadata, use the exact-copy APIs below.
+
 local function _patch_track_tokens_text(s, chan_name)
-  if not s or s == "" or not chan_name or chan_name == "" then return s end
+  if not s or s == "" or chan_name == nil then return s end
   local t = tostring(s)
   local esc = chan_name:gsub("%%", "%%%%")
+  t = t:gsub("([sS][tT][rR][kK][aA][lL][lL]%s*=%s*)[^\r\n;|]+", "%1" .. esc)
+  t = t:gsub("([sS][tT][rR][kK]%s*=%s*)[^\r\n;|]+", "%1" .. esc)
+  t = t:gsub("([tT][rR][kK][aA][lL][lL]%s*=%s*)[^\r\n;|]+", "%1" .. esc)
+  t = t:gsub("([tT][rR][kK]%s*=%s*)[^\r\n;|]+", "%1" .. esc)
+  return t
+end
+
+local function _join_track_names(tracks)
+  local out = {}
+  for _, tr in ipairs(tracks or {}) do
+    out[#out + 1] = tostring((tr and tr.name) or "")
+  end
+  return table.concat(out, ",")
+end
+
+local function _patch_track_tokens_with_list(s, tracks)
+  if not s or s == "" then return s end
+  local list = _join_track_names(tracks)
+  if list == "" then return s end
+  local esc = list:gsub("%%", "%%%%")
+  local t = tostring(s)
   t = t:gsub("([sS][tT][rR][kK][aA][lL][lL]%s*=%s*)[^\r\n;|]+", "%1" .. esc)
   t = t:gsub("([sS][tT][rR][kK]%s*=%s*)[^\r\n;|]+", "%1" .. esc)
   t = t:gsub("([tT][rR][kK][aA][lL][lL]%s*=%s*)[^\r\n;|]+", "%1" .. esc)
@@ -320,8 +264,8 @@ local function _get_track_name_from_take_source(take, target_idx)
       end
     end
 
-    if ordered_names[target_idx] and ordered_names[target_idx] ~= "" then
-      return ordered_names[target_idx], ordered_channel_index[target_idx]
+    if target_idx <= count then
+      return ordered_names[target_idx] or "", ordered_channel_index[target_idx] or target_idx
     end
     if by_channel_index[target_idx] and by_channel_index[target_idx] ~= "" then
       return by_channel_index[target_idx], target_idx
@@ -350,26 +294,43 @@ function E.Build_Channel_Context(item, src_take, active_take)
   if not idx then return nil end
 
   local nm, channel_index = _get_track_name_from_take_source(src_take, idx)
-  if not nm or nm == "" then
+  if nm == nil then
     nm, channel_index = _get_track_name_from_take_source(active_take, idx)
   end
-  if not nm or nm == "" then return nil end
 
   return {
     index = idx,
     total = src_channels,
-    name = nm,
-    channel_index = tonumber(channel_index or 0) or idx,
+    name = nm or "",
+    channel_index = idx,
   }
 end
 
 function E.Patch_iXML_For_Channel(xml, chan_ctx)
-  if not xml or xml == "" or not chan_ctx or not chan_ctx.name or chan_ctx.name == "" then
+  if not xml or xml == "" or not chan_ctx then
     return xml
   end
 
-  local name_xml = _xml_escape_text(chan_ctx.name)
-  local channel_index = tonumber(chan_ctx.channel_index or 0) or tonumber(chan_ctx.index or 1) or 1
+  local target_tracks = (type(chan_ctx.target_tracks) == "table") and chan_ctx.target_tracks or nil
+  if target_tracks and #target_tracks > 0 then
+    local chunks = {}
+    for i, tr in ipairs(target_tracks) do
+      local name_xml = _xml_escape_text((tr and tr.name) or "")
+      local ch_idx = tonumber((tr and tr.channel_index) or 0) or tonumber((tr and tr.interleave_index) or 0) or i
+      local il_idx = tonumber((tr and tr.interleave_index) or 0) or i
+      chunks[#chunks + 1] = "<TRACK><CHANNEL_INDEX>" .. tostring(ch_idx) .. "</CHANNEL_INDEX><INTERLEAVE_INDEX>" .. tostring(il_idx) .. "</INTERLEAVE_INDEX><NAME>" .. name_xml .. "</NAME><FUNCTION></FUNCTION></TRACK>"
+    end
+    local replacement = "<TRACK_LIST><TRACK_COUNT>" .. tostring(#target_tracks) .. "</TRACK_COUNT>" .. table.concat(chunks, "") .. "</TRACK_LIST>"
+    local patched, n_track_list = xml:gsub("<TRACK_LIST%s*>.-</TRACK_LIST>", replacement, 1)
+    if n_track_list == 0 then
+      patched = patched:gsub("(</BWFXML>)", replacement .. "%1", 1)
+      patched = patched:gsub("(</iXML>)", replacement .. "%1", 1)
+    end
+    return patched
+  end
+
+  local name_xml = _xml_escape_text(chan_ctx.name or "")
+  local channel_index = tonumber(chan_ctx.index or 1) or 1
   if channel_index < 1 then channel_index = 1 end
   local replacement = "<TRACK_LIST><TRACK_COUNT>1</TRACK_COUNT><TRACK><CHANNEL_INDEX>" .. tostring(channel_index) .. "</CHANNEL_INDEX><INTERLEAVE_INDEX>1</INTERLEAVE_INDEX><NAME>" .. name_xml .. "</NAME><FUNCTION></FUNCTION></TRACK></TRACK_LIST>"
   local patched, n_track_list = xml:gsub("<TRACK_LIST%s*>.-</TRACK_LIST>", replacement, 1)
@@ -387,6 +348,48 @@ function E.Patch_iXML_For_Channel(xml, chan_ctx)
   patched = patched:gsub("(<trk1%s*>)(.-)(</trk1%s*>)", "%1" .. name_xml .. "%3", 1)
 
   return patched
+end
+
+function E.Copy_iXML_Exact(cli, src_wav, dst_wav, opts)
+  opts = opts or {}
+  if not cli or not _is_wav(src_wav) or not _is_wav(dst_wav) then return false end
+
+  local src_iXML = src_wav .. ".iXML.xml"
+  local dst_iXML = dst_wav .. ".iXML.xml"
+  local code1, out1 = exec_shell(('"%s" --out-iXML-xml --continue-errors --verbose "%s"'):format(cli, src_wav), 20000)
+  _log(opts.log, ("    iXML exact: export src → sidecar (code=%s)"):format(tostring(code1)))
+  _log(opts.log, ("    iXML exact: export output -> %s"):format(_shorten_output(out1, 600)))
+
+  if not _file_exists(src_iXML) then
+    _log(opts.log, "    iXML exact: source sidecar missing -> FAIL")
+    return false
+  end
+
+  local x = _read_file(src_iXML) or ""
+  if x == "" then
+    _log(opts.log, "    iXML exact: source sidecar empty -> FAIL")
+    return false
+  end
+
+  _write_file(dst_iXML, x)
+  _normalize_ixml_sidecar(dst_iXML)
+
+  local code2, out2 = exec_shell(('"%s" --in-iXML-xml --continue-errors --verbose "%s"'):format(cli, dst_wav), 20000)
+  _log(opts.log, ("    iXML exact: import sidecar → dst (code=%s)"):format(tostring(code2)))
+  _log(opts.log, ("    iXML exact: import output -> %s"):format(_shorten_output(out2, 600)))
+  if code2 ~= 0 then
+    _log(opts.log, "    iXML exact: import command failed -> FAIL")
+    return false
+  end
+
+  local ok_verify = _verify_ixml_chunk(cli, dst_wav, opts.log)
+  if not ok_verify then
+    _log(opts.log, "    iXML exact: verification FAILED after import")
+    return false
+  end
+
+  _log(opts.log, "    iXML exact: verification OK")
+  return true
 end
 
 function E.Copy_iXML(cli, src_wav, dst_wav, opts)
@@ -411,9 +414,9 @@ function E.Copy_iXML(cli, src_wav, dst_wav, opts)
     return false
   end
 
-  if opts.chan_ctx and opts.chan_ctx.name and opts.chan_ctx.name ~= "" then
+  if opts.chan_ctx then
     x = E.Patch_iXML_For_Channel(x, opts.chan_ctx)
-    _log(opts.log, ("    iXML: channel-aware patch -> %d/%d '%s'"):format(
+    _log(opts.log, ("    iXML: strict channel patch -> %d/%d '%s'"):format(
       tonumber(opts.chan_ctx.index or 0) or 0,
       tonumber(opts.chan_ctx.total or 0) or 0,
       tostring(opts.chan_ctx.name or "")
@@ -494,12 +497,25 @@ function E.Copy_CORE(cli, src_wav, dst_wav, opts)
     fields[k] = _collapse_blank_lines(_normalize_newlines(v))
   end
 
-  if opts.chan_ctx and opts.chan_ctx.name and opts.chan_ctx.name ~= "" then
-    fields.ITCH = opts.chan_ctx.name
-    fields.Description = _patch_track_tokens_text(fields.Description, opts.chan_ctx.name)
-    fields.ICMT = _patch_track_tokens_text(fields.ICMT, opts.chan_ctx.name)
-    fields.ISBJ = _patch_track_tokens_text(fields.ISBJ, opts.chan_ctx.name)
-    _log(opts.log, ("    CORE: channel-aware ITCH -> %s"):format(tostring(opts.chan_ctx.name)))
+  -- Normalize key BWF identity fields to avoid split-tool padding differences.
+  fields.Originator = _trim_outer(fields.Originator)
+  fields.OriginatorReference = _trim_outer(fields.OriginatorReference)
+  fields.OriginationDate = _trim_outer(fields.OriginationDate)
+  fields.OriginationTime = _trim_outer(fields.OriginationTime)
+
+  if opts.chan_ctx then
+    fields.ITCH = opts.chan_ctx.name or ""
+    if type(opts.chan_ctx.target_tracks) == "table" and #opts.chan_ctx.target_tracks > 0 then
+      fields.Description = _patch_track_tokens_with_list(fields.Description, opts.chan_ctx.target_tracks)
+      fields.ICMT = _patch_track_tokens_with_list(fields.ICMT, opts.chan_ctx.target_tracks)
+      fields.ISBJ = _patch_track_tokens_with_list(fields.ISBJ, opts.chan_ctx.target_tracks)
+      _log(opts.log, "    CORE: preserved target track slot layout for sTRK/sTRKALL")
+    else
+      fields.Description = _patch_track_tokens_text(fields.Description, opts.chan_ctx.name or "")
+      fields.ICMT = _patch_track_tokens_text(fields.ICMT, opts.chan_ctx.name or "")
+      fields.ISBJ = _patch_track_tokens_text(fields.ISBJ, opts.chan_ctx.name or "")
+    end
+    _log(opts.log, ("    CORE: strict channel ITCH -> %s"):format(tostring(opts.chan_ctx.name or "(empty)")))
     _log(opts.log, "    CORE: normalized sTRK/sTRKALL tokens for mono channel")
   end
   if type(opts.override_fields) == "table" then
@@ -508,9 +524,21 @@ function E.Copy_CORE(cli, src_wav, dst_wav, opts)
 
   fields.Description = _trunc_bext_desc(fields.Description, opts.log)
 
+  local field_filter = opts.core_fields
+  if type(field_filter) == "table" then
+    for key in pairs(fields) do
+      if not field_filter[key] then fields[key] = "" end
+    end
+  end
+
   local flags = {}
   local function add(k, v)
-    if v and v ~= "" then flags[#flags+1] = ('--%s=%s'):format(k, _sh_quote(v)) end
+    if v and v ~= "" then
+      if k == "Originator" or k == "OriginatorReference" or k == "OriginationDate" or k == "OriginationTime" then
+        v = _trim_outer(v)
+      end
+      if v ~= "" then flags[#flags+1] = ('--%s=%s'):format(k, _sh_quote(v)) end
+    end
   end
   local function add_info(k, v)
     if v and v ~= "" then
@@ -557,6 +585,65 @@ function E.Copy_CORE(cli, src_wav, dst_wav, opts)
   return codeW == 0
 end
 
+function E.Analyze_Metadata_Fields(cli, src_wav, dst_wav, opts)
+  opts = opts or {}
+  local function read_core(path)
+    local code, output = exec_shell(('"%s" --out-xml=- --continue-errors "%s"'):format(cli, path), 30000)
+    if not output or output == "" then return nil, code end
+    return _parse_core_from_xml_report(output), code
+  end
+  local source, source_code = read_core(src_wav)
+  local target, target_code = read_core(dst_wav)
+  local result = {
+    source = source or {}, target = target or {}, missing = {}, different = {}, same = {},
+    source_code = source_code, target_code = target_code,
+  }
+  local function read_ixml(path)
+    local sidecar = path .. ".iXML.xml"
+    _remove_file_silent(sidecar)
+    local code = select(1, exec_shell(('"%s" --out-iXML-xml --continue-errors "%s"'):format(cli, path), 30000))
+    local data = _read_file(sidecar) or ""
+    _remove_file_silent(sidecar)
+    return code, data
+  end
+  local fields = {
+    "Description", "Originator", "OriginatorReference", "OriginationDate", "OriginationTime",
+    "IARL", "IART", "ICMT", "ICRD", "INAM", "ICOP", "ICMS", "IGNR", "ISFT", "ISBJ", "ITCH",
+    "CodingHistory", "UMID",
+  }
+  for _, key in ipairs(fields) do
+    local source_value = _normalize_newlines(source and source[key] or "") or ""
+    local target_value = _normalize_newlines(target and target[key] or "") or ""
+    result.source[key], result.target[key] = source_value, target_value
+    if source_value ~= "" and target_value == "" then
+      result.missing[key] = { source = source_value, target = target_value }
+    elseif source_value ~= target_value then
+      result.different[key] = { source = source_value, target = target_value }
+    else
+      result.same[key] = source_value
+    end
+  end
+  result.source_time_reference = select(1, E.TR_Read(cli, src_wav))
+  result.target_time_reference = select(1, E.TR_Read(cli, dst_wav))
+  if result.source_time_reference and (not result.target_time_reference or result.target_time_reference == 0) then
+    result.missing.TimeReference = { source = result.source_time_reference, target = result.target_time_reference }
+  elseif result.source_time_reference and result.source_time_reference ~= result.target_time_reference then
+    result.different.TimeReference = { source = result.source_time_reference, target = result.target_time_reference }
+  end
+  local source_ixml_code, source_ixml = read_ixml(src_wav)
+  local target_ixml_code, target_ixml = read_ixml(dst_wav)
+  result.source_ixml, result.target_ixml = source_ixml, target_ixml
+  result.ixml = { source_code = source_ixml_code, target_code = target_ixml_code }
+  if source_ixml ~= "" and target_ixml == "" then
+    result.missing.iXML = { source = source_ixml, target = target_ixml }
+  elseif source_ixml ~= target_ixml then
+    result.different.iXML = { source = source_ixml, target = target_ixml }
+  else
+    result.same.iXML = source_ixml
+  end
+  return result
+end
+
 function E.Copy_Metadata(cli, src_wav, dst_wav, opts)
   opts = opts or {}
   local res = {
@@ -568,7 +655,16 @@ function E.Copy_Metadata(cli, src_wav, dst_wav, opts)
     ok = false,
   }
 
-  res.ixml = E.Copy_iXML(cli, src_wav, dst_wav, opts)
+  if opts.copy_ixml == false then
+    res.ixml = true
+    res.ixml_skipped = true
+  else
+    if opts.direct_copy then
+      res.ixml = E.Copy_iXML_Exact(cli, src_wav, dst_wav, opts)
+    else
+      res.ixml = E.Copy_iXML(cli, src_wav, dst_wav, opts)
+    end
+  end
   if opts.set_embedder ~= false then
     res.embedder = E.Set_iXML_Embedder(cli, dst_wav, opts.embedder_name or "BWF MetaEdit")
   else
@@ -598,6 +694,14 @@ function E.Copy_Metadata(cli, src_wav, dst_wav, opts)
 
   res.ok = res.ixml and res.core and res.tr and res.embedder
   return res
+end
+
+function E.Copy_Metadata_Exact(cli, src_wav, dst_wav, opts)
+  opts = opts or {}
+  opts.direct_copy = true
+  opts.chan_ctx = nil
+  opts.channel_aware = false
+  return E.Copy_Metadata(cli, src_wav, dst_wav, opts)
 end
 
 function E.Copy_Take1_To_Active(item, opts)
@@ -762,13 +866,64 @@ function E.TR_Read(cli, wav_path)
 end
 
 -- write BWF TimeReference (samples) using --TimeReference=
-function E.TR_Write(cli, wav_path, tr_samples)
+--
+-- @param originator (optional) when set, also writes --Originator= in the
+--   SAME command. Needed because bwfmetaedit prunes the whole bext chunk
+--   right back out whenever every field in it would end up at its default
+--   (empty/zero) value — confirmed by direct testing: writing
+--   --TimeReference=0 alone to a file with no pre-existing bext chunk is a
+--   silent no-op (bext never gets created), and even writing a non-zero
+--   value first then writing 0 right after deletes the chunk again, since
+--   the resulting record (TR=0, everything else blank) still reads as
+--   "all default." Any other non-empty bext field keeps the chunk from
+--   being pruned, so a brand-new file (e.g. CLB's generated reference
+--   media, which legitimately needs TimeReference=0 since its real
+--   position data lives entirely in each item's own D_STARTOFFS) must pass
+--   one here to actually persist TR=0.
+function E.TR_Write(cli, wav_path, tr_samples, originator)
   if not cli or not _is_wav(wav_path) then return false, -1, "" end
   local tr = tonumber(tr_samples or 0) or 0
   if tr < 0 then tr = 0 end
-  local cmd = ('"%s" --TimeReference=%d "%s"'):format(cli, tr, wav_path)
+  local extra = ""
+  if originator and originator ~= "" then
+    extra = (' --Originator="%s"'):format(originator)
+  end
+  local cmd = ('"%s" --TimeReference=%d%s "%s"'):format(cli, tr, extra, wav_path)
   local code, out = exec_shell(cmd, 20000)
   return (code == 0), code, out
+end
+
+--- Writes a caller-supplied iXML document straight into a WAV's iXML
+--- chunk — unlike Copy_iXML/Copy_iXML_Exact (which only ever COPY iXML
+--- from an existing source WAV), this takes raw XML text the caller
+--- already built itself (e.g. a fresh <BWFXML> document for a brand-new
+--- file with no source to copy from — see
+--- hsuanice_Conform List Browser.lua's CLB.generate_reference_media).
+--- Writes via the same sidecar import mechanism (--in-iXML=) bwfmetaedit
+--- itself uses, verifies the import actually took by reading the chunk
+--- back and comparing size, then cleans up the sidecar either way.
+--- @param cli string        bwfmetaedit path (see CLI_Resolve)
+--- @param wav_path string   destination WAV (must already exist)
+--- @param xml_text string   a complete iXML document, e.g. "<BWFXML>...</BWFXML>"
+--- @return boolean ok, number code, string out
+function E.Write_iXML_Raw(cli, wav_path, xml_text)
+  if not cli or not _is_wav(wav_path) then return false, -1, "" end
+  if not xml_text or xml_text == "" then return false, -1, "empty xml_text" end
+
+  local side = wav_path .. ".iXML.xml"
+  _write_file(side, xml_text)
+  _normalize_ixml_sidecar(side)
+
+  local code, out = exec_shell(('"%s" --in-iXML="%s" --continue-errors --verbose "%s"')
+    :format(cli, side, wav_path), 20000)
+  _remove_file_silent(side)
+  if code ~= 0 then return false, code, out end
+
+  local ok_verify = _verify_ixml_chunk(cli, wav_path, nil)
+  _remove_file_silent(wav_path .. ".iXML.xml")  -- left behind by the verify export
+  if not ok_verify then return false, code, out .. "\n(verification failed)" end
+
+  return true, code, out
 end
 
 -- compute TR for active take from previous take (handle-aware, cross-SR safe)
