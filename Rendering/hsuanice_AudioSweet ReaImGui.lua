@@ -1,6 +1,6 @@
 --[[
 @description AudioSweet ReaImGui - AudioSuite Workflow (Pro Tools–Style)
-@version 26.1011.2142
+@version 26.1011.2225
 @author hsuanice
 @links
   https://forum.cockos.com/showthread.php?p=2910884#post2910884
@@ -13,13 +13,9 @@
   [nomain] hsuanice_FX Alias Export JSON to TSV.lua
   [nomain] hsuanice_FX Alias Update TSV to JSON.lua
 @changelog
-  - First release in the hsuanice/ReaScripts repository (replaces hsuanice/PublicBeta).
-  - Remove the PublicBeta repository in ReaPack before installing this one.
-  - Requires the "hsuanice Library" package.
-  - Version format is now YY.MMDD.HHMM.
-  - FX Alias tools are now installed with AudioSweet (run them from Settings > FX Alias Tools); they no longer appear in the Action List.
-  - Help > About now reads the version from the script header.
-  - Full history of earlier versions: Changelogs/ in the repository (https://github.com/hsuanice/ReaScripts/tree/master/Changelogs)
+  - Fix: AudioSweet Solo Toggle no longer requires the SWS extension.
+  - Requirements: ReaImGui (install via ReaPack, ReaTeam Extensions) and the "hsuanice Library" package; BWF MetaEdit (bwfmetaedit) is needed only for timecode embedding.
+  - Full history: Changelogs/ in the repository (https://github.com/hsuanice/ReaScripts/tree/master/Changelogs)
 @about
   # AudioSweet ReaImGui
 

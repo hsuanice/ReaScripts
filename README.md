@@ -15,6 +15,12 @@ REAPER scripts for audio post-production, by hsuanice.
    - **hsuanice Library** (required by every script below)
    - **RGWH** and/or **AudioSweet**
 
+### Requirements
+
+- **ReaImGui** — install with ReaPack (*ReaTeam Extensions* repository, included by default).
+- **SWS Extension** — optional; a few features use it (e.g. *Retain Glue Cues*).
+- **BWF MetaEdit** (`bwfmetaedit` command-line tool) — optional; only needed for timecode (BWF TimeReference) embedding.
+
 ### Moving from hsuanice/PublicBeta
 
 This repository replaces `hsuanice/PublicBeta`, which is no longer updated.

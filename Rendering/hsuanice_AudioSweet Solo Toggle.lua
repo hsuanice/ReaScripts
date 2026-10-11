@@ -1,11 +1,11 @@
 --[[
 @description AudioSweet Solo Toggle
-@version 26.1011.2142
+@version 26.1011.2225
 @author hsuanice
 @noindex
 @changelog
-  - Released as part of the 26.1011.2142 package update.
-  - Full history of earlier versions: Changelogs/ in the repository (https://github.com/hsuanice/ReaScripts/tree/master/Changelogs)
+  - Fix: no longer requires the SWS extension (uses REAPER's native GetTrackGUID instead of BR_GetMediaTrackGUID).
+  - Full history: Changelogs/ in the repository (https://github.com/hsuanice/ReaScripts/tree/master/Changelogs)
 @about
   # AudioSweet Solo Toggle
 
@@ -54,7 +54,7 @@ local function get_track_guid(track)
   if not track or not r.ValidatePtr2(0, track, "MediaTrack*") then
     return nil
   end
-  local guid = r.BR_GetMediaTrackGUID(track)
+  local guid = r.GetTrackGUID(track)  -- native API (same "{...}" format as SWS BR_GetMediaTrackGUID)
   return guid
 end
 

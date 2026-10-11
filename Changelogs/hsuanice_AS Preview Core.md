@@ -3,7 +3,6 @@
 AudioSweet Preview Core
 
 History before 26.1011.2142 (moved out of the script header; last header version: `0.2.7`).
-Newer entries are kept in each release's `@changelog` and shown in ReaPack.
 
 ```text
 0.2.7 (2026-02-10) [internal: v260210.1935]

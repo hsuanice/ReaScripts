@@ -3,7 +3,6 @@
 AudioSweet Run
 
 History before 26.1011.2142 (moved out of the script header; last header version: `0.2.5`).
-Newer entries are kept in each release's `@changelog` and shown in ReaPack.
 
 ```text
 0.2.5 [261011.1053]

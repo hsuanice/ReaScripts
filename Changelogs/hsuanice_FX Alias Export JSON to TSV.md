@@ -3,7 +3,6 @@
 FX Alias Export - Convert FX Alias JSON to TSV
 
 History before 26.1011.2142 (moved out of the script header; last header version: `0.1.0`).
-Newer entries are kept in each release's `@changelog` and shown in ReaPack.
 
 ```text
 0.1.0 (2025-12-12) [internal: v251030.1600]

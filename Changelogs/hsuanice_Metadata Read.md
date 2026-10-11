@@ -3,7 +3,6 @@
 Metadata Read (reader / normalizer / tokens)
 
 History before 26.1011.2142 (moved out of the script header; last header version: `0.3.11`).
-Newer entries are kept in each release's `@changelog` and shown in ReaPack.
 
 ```text
 v0.3.11 (2026-10-02)

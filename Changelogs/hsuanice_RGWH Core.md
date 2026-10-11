@@ -3,7 +3,6 @@
 RGWH Core - Core Library of Render or Glue with Handles
 
 History before 26.1011.2142 (moved out of the script header; last header version: `0.3.13`).
-Newer entries are kept in each release's `@changelog` and shown in ReaPack.
 
 ```text
 0.3.13 [261011.1106] - FIX: Glue with Time Selection lost its handles when grouping options were on

@@ -3,7 +3,6 @@
 AudioSweet Core - Focused Track FX render via RGWH Core
 
 History before 26.1011.2142 (moved out of the script header; last header version: `0.3.8`).
-Newer entries are kept in each release's `@changelog` and shown in ReaPack.
 
 ```text
 0.3.8 [261011.1053]

@@ -3,7 +3,6 @@
 RGWH Glue - Glue with Handles (ExtState Shortcut)
 
 History before 26.1011.2142 (moved out of the script header; last header version: `0.2.2`).
-Newer entries are kept in each release's `@changelog` and shown in ReaPack.
 
 ```text
 0.2.2 (260207.0230)

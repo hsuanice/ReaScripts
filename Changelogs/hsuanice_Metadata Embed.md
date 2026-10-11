@@ -3,7 +3,6 @@
 Metadata Embed - BWF MetaEdit helpers
 
 History before 26.1011.2142 (moved out of the script header; last header version: `261007.1210`).
-Newer entries are kept in each release's `@changelog` and shown in ReaPack.
 
 ```text
 261007.1210 - Fixed TR_Write(): writing --TimeReference=0 to a WAV with

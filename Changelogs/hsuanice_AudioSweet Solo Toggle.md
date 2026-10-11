@@ -2,8 +2,15 @@
 
 AudioSweet Solo Toggle
 
+## 26.1011.2225
+
+- Fix: no longer requires the SWS extension (uses REAPER's native GetTrackGUID instead of BR_GetMediaTrackGUID).
+
+## 26.1011.2142
+
+- Released as part of the 26.1011.2142 package update.
+
 History before 26.1011.2142 (moved out of the script header; last header version: `0.2.0`).
-Newer entries are kept in each release's `@changelog` and shown in ReaPack.
 
 ```text
 0.2.0 [Internal Build 251223.2256] - Public Beta Release

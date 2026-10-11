@@ -3,7 +3,6 @@
 RGWH ReaImGui - ImGui Interface for RGWH Core（Render or Glue with Handles）
 
 History before 26.1011.2142 (moved out of the script header; last header version: `0.2.9`).
-Newer entries are kept in each release's `@changelog` and shown in ReaPack.
 
 ```text
 0.2.9 [261011.1053] - ADDED: "Render: Retain Glue Cues" checkbox (Settings → CUES, default OFF)

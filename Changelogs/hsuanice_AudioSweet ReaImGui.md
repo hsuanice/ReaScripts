@@ -2,8 +2,21 @@
 
 AudioSweet ReaImGui - AudioSuite Workflow (Pro Tools–Style)
 
+## 26.1011.2225
+
+- Fix: AudioSweet Solo Toggle no longer requires the SWS extension.
+- Requirements: ReaImGui (install via ReaPack, ReaTeam Extensions) and the "hsuanice Library" package; BWF MetaEdit (bwfmetaedit) is needed only for timecode embedding.
+
+## 26.1011.2142
+
+- First release in the hsuanice/ReaScripts repository (replaces hsuanice/PublicBeta).
+- Remove the PublicBeta repository in ReaPack before installing this one.
+- Requires the "hsuanice Library" package.
+- Version format is now YY.MMDD.HHMM.
+- FX Alias tools are now installed with AudioSweet (run them from Settings > FX Alias Tools); they no longer appear in the Action List.
+- Help > About now reads the version from the script header.
+
 History before 26.1011.2142 (moved out of the script header; last header version: `0.2.11 [261011.1059]`).
-Newer entries are kept in each release's `@changelog` and shown in ReaPack.
 
 ```text
 0.2.11 [261011.1059]
