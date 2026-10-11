@@ -1,18 +1,49 @@
 --[[
 @description AudioSweet Core - Focused Track FX render via RGWH Core
-@version 0.3.4
+@version 0.3.8
 @author hsuanice
 @provides
   [main] .
 @notes
 
-  Tim Chimes (original), adapted by hsuanice for AudioSweet Core integration.
-    Reference:
-    Inspired and named by Tim Chimes
-    Original: Renders selected plugin to selected media item
-    http://timchimes.com/scripting-with-reaper-audiosuite/
+Tim Chimes (original), adapted by hsuanice for AudioSweet Core integration.
+  Reference:
+  Inspired and named by Tim Chimes
+  Original: Renders selected plugin to selected media item
+  http://timchimes.com/scripting-with-reaper-audiosuite/
 
 @changelog
+  0.3.8 [261011.1053]
+    - ADDED: AS_RENDER_KEEP_GLUE_CUES (default 0) — single-item Render retains the source's
+      existing Glue cues (passed to RGWH.core as args.cues.render_keep_glue; RGWH Core >= 0.3.12)
+
+  0.3.7 [261010.1616]
+    - CHANGED: Glue grouping and single-item render now apply to item selection ONLY
+      • Any Time Selection → original behaviour: glue all, TS decides the range, no render
+      • (RGWH grouping flags are still forced to match during the glue call, so the
+        "glue results left on the FX track" fix from 0.3.5 stays in effect)
+
+  0.3.6 [261010.1609]
+    - ADDED: Single-item render option (AS_SINGLE_ITEM_RENDER, default 0)
+      • Single-item units use RGWH Render (new take, older takes kept) instead of Glue
+      • Applies with no TS, or TS == item; a partial TS is pre-split first, so it renders too
+      • Multi-item units and TS-WINDOW paths still glue
+      • Tail Seconds does not apply to Render (RGWH: tail is Glue-only)
+      • Apply after Copy: FX is copied only to the take that was active before render,
+        appended to its existing take FX (not cleared); other older takes are untouched
+
+  0.3.5 [261010.1545]
+    - ADDED: Glue unit grouping option (item selection, no Time Selection)
+      • AS_GLUE_GROUPING = all (default, legacy) / rgwh (follow RGWH GUI) / custom
+      • custom reads AS_GLUE_SPLIT_AT_CROSSFADES (default 0) and AS_GLUE_MUTED_SEPARATE (default 1)
+      • Units built via RGWH.utils.detect_units_from_selection(opts) (requires RGWH Core >= 0.3.10)
+    - FIXED: Glue results sometimes left behind on the FX track
+      • CAUSE: AudioSweet grouped units ignoring mute/crossfade, but RGWH Glue re-grouped them
+        using its own GLUE_MUTED_SEPARATE (default ON) / GLUE_SPLIT_AT_CROSSFADES → one unit
+        became several glued items, and only the first one was renamed and moved back
+      • FIX: the resolved grouping is forced onto RGWH for the glue call (snapshot/restore)
+      • FIX: every new item on the FX track after glue is now treated as output and moved back
+
   0.3.4 [260212.1247]
     - FIXED: Items extending beyond time selection now pre-split at TS boundaries before processing
       • PROBLEM: When item selection > time selection, entire item moved to FX track →
@@ -1000,7 +1031,9 @@ local function compute_desired_nchan_for_copy(item, FXmediaTrack, apply_fx_mode,
   return nil
 end
 
-local function copy_fx_to_non_active_takes(item, FXmediaTrack, fxIndex, source_track_nchan)
+-- only_take (v0.3.6, render path): copy to that one take only and APPEND to its
+-- existing take FX instead of clearing — older takes are the user's own and stay untouched.
+local function copy_fx_to_non_active_takes(item, FXmediaTrack, fxIndex, source_track_nchan, only_take)
   if not item then return 0 end
   local take_count = reaper.CountTakes(item) or 0
   if take_count <= 1 then return 0 end
@@ -1025,8 +1058,8 @@ local function copy_fx_to_non_active_takes(item, FXmediaTrack, fxIndex, source_t
   local copy_mode = (AS and AS.mode) or AS_merge_args_with_extstate({}).mode
   for t = 0, take_count - 1 do
     local tk = reaper.GetMediaItemTake(item, t)
-    if tk and tk ~= active then
-      clear_take_fx(tk)
+    if tk and tk ~= active and (only_take == nil or tk == only_take) then
+      if only_take == nil then clear_take_fx(tk) end
       if copy_mode == "focused" then
         total = total + copy_focused_fx_to_take(FXmediaTrack, fxIndex, tk, "tail")
       else
@@ -1789,6 +1822,34 @@ end
 local RGWH = nil  -- Will be loaded in main() and accessible to all functions
 
 -- ==========================================================
+-- v0.3.5: Glue unit grouping (no-TS item-selection path)
+--   AS_GLUE_GROUPING = "all"    → glue every touching/crossfading item together (legacy)
+--                      "rgwh"   → follow RGWH GUI (project ExtState RGWH/GLUE_*)
+--                      "custom" → AudioSweet's own AS_GLUE_SPLIT_AT_CROSSFADES / AS_GLUE_MUTED_SEPARATE
+-- The same opts are forced onto RGWH Core during the glue call so both sides
+-- agree on unit boundaries (one unit in → one glued item out).
+-- ==========================================================
+local function resolve_glue_unit_opts()
+  local mode = reaper.GetExtState("hsuanice_AS", "AS_GLUE_GROUPING")
+  if mode == "rgwh" then
+    local cfg = (RGWH and type(RGWH.read_settings) == "function") and RGWH.read_settings() or {}
+    return { mode = mode,
+             split_at_crossfades = cfg.GLUE_SPLIT_AT_CROSSFADES == true,
+             muted_separate      = cfg.GLUE_MUTED_SEPARATE == true }
+  elseif mode == "custom" then
+    local function flag(key, def)
+      local v = reaper.GetExtState("hsuanice_AS", key)
+      if v == "" then return def end
+      return v == "1"
+    end
+    return { mode = mode,
+             split_at_crossfades = flag("AS_GLUE_SPLIT_AT_CROSSFADES", false),
+             muted_separate      = flag("AS_GLUE_MUTED_SEPARATE", true) }
+  end
+  return { mode = "all", split_at_crossfades = false, muted_separate = false }
+end
+
+-- ==========================================================
 -- v0.2.2: Unit detection delegated to RGWH.utils
 -- Note: Helper functions below still exist for AudioSweet-specific use
 -- TODO v0.3.0: Further refactor to use RGWH.utils directly throughout
@@ -2467,7 +2528,23 @@ function main() -- main part of the script
 
 
   -- Build units from current selection (v0.2.2: using RGWH.utils)
-  local rgwh_units = RGWH.utils.detect_units_from_selection()
+  -- v0.3.5: grouping follows AS_GLUE_GROUPING (all / rgwh / custom)
+  local glue_unit_opts = resolve_glue_unit_opts()
+  -- v0.3.7: grouping options and single-item render apply to item selection only;
+  -- any Time Selection → original behaviour (glue all, TS decides the range)
+  local run_has_ts = getLoopSelection()
+  if run_has_ts then
+    glue_unit_opts = { mode = "all", split_at_crossfades = false, muted_separate = false }
+  end
+  log_step("UNITS", "glue grouping=%s split_at_crossfades=%s muted_separate=%s",
+    glue_unit_opts.mode, tostring(glue_unit_opts.split_at_crossfades), tostring(glue_unit_opts.muted_separate))
+  local rgwh_units = RGWH.utils.detect_units_from_selection(glue_unit_opts)
+  -- v0.3.6: single-item units → RGWH Render (new take, older takes kept) instead of Glue
+  local single_item_render = (not run_has_ts)
+                             and (reaper.GetExtState("hsuanice_AS", "AS_SINGLE_ITEM_RENDER") == "1")
+  -- v0.3.8: carry existing Glue cues into the rendered take (RGWH Core >= 0.3.12)
+  local render_keep_glue_cues = (reaper.GetExtState("hsuanice_AS", "AS_RENDER_KEEP_GLUE_CUES") == "1")
+  log_step("UNITS", "hasTS=%s single_item_render=%s", tostring(run_has_ts), tostring(single_item_render))
   if #rgwh_units == 0 then
     reaper.MB("No media items selected.", "AudioSweet", 0)
     reaper.PreventUIRefresh(-1)
@@ -2509,6 +2586,7 @@ function main() -- main part of the script
 
   -- Time selection state
   local hasTS, tsL, tsR = getLoopSelection()
+
   if debug_enabled() then
     log_step("PATH", "hasTS=%s TS=[%.3f..%.3f]", tostring(hasTS), tsL or -1, tsR or -1)
   end
@@ -2593,7 +2671,7 @@ function main() -- main part of the script
                #to_deselect, reaper.CountSelectedMediaItems(0))
 
       -- Rebuild units from new selection (items are now trimmed to TS boundaries)
-      rgwh_units = RGWH.utils.detect_units_from_selection()
+      rgwh_units = RGWH.utils.detect_units_from_selection(glue_unit_opts)
       units = {}
       for _, ru in ipairs(rgwh_units) do
         local as_unit = {
@@ -2888,6 +2966,11 @@ function main() -- main part of the script
 
         -- Snapshot & set project flags
         local snap = {}
+        local pre_fx_items = {}  -- v0.3.5: FX-track items before glue (to find every output)
+        -- v0.3.6: render instead of glue for a single-item unit (item selection only, no TS — v0.3.7)
+        local use_render = single_item_render and #u.items == 1
+                           and type(mod) == "table" and type(mod.core) == "function"
+        local pre_render_take = use_render and reaper.GetActiveTake(u.items[1]) or nil
         local function proj_get(ns, key, def)
           local _, val = reaper.GetProjExtState(0, ns, key); return (val == "" and def) or val
         end
@@ -2912,12 +2995,18 @@ function main() -- main part of the script
         snap.GLUE_APPLY_MODE   = proj_get("RGWH","GLUE_APPLY_MODE","")
         snap.GLUE_SINGLE_ITEMS = proj_get("RGWH","GLUE_SINGLE_ITEMS","")
         snap.RENDER_TC_EMBED   = proj_get("RGWH","RENDER_TC_EMBED","")
+        snap.GLUE_MUTED_SEPARATE      = proj_get("RGWH","GLUE_MUTED_SEPARATE","")
+        snap.GLUE_SPLIT_AT_CROSSFADES = proj_get("RGWH","GLUE_SPLIT_AT_CROSSFADES","")
 
         -- Set desired flags
         proj_set("RGWH","GLUE_TAKE_FX","1")
         proj_set("RGWH","GLUE_TRACK_FX","1")
         proj_set("RGWH","GLUE_APPLY_MODE",apply_fx_mode)
         proj_set("RGWH","GLUE_SINGLE_ITEMS","1")
+        -- v0.3.5: RGWH must group exactly like AudioSweet did, or a unit can glue into
+        -- several items and the extras get stranded on the FX track
+        proj_set("RGWH","GLUE_MUTED_SEPARATE",      glue_unit_opts.muted_separate and "1" or "0")
+        proj_set("RGWH","GLUE_SPLIT_AT_CROSSFADES", glue_unit_opts.split_at_crossfades and "1" or "0")
         -- Do not override RGWH TC embed mode; preserve its own setting
 
         if debug_enabled() then
@@ -3015,17 +3104,24 @@ function main() -- main part of the script
           -- Use new M.core() API
           local is_chain_mode = (AS_merge_args_with_extstate({}).mode == "chain")
           local args = {
-            op = "glue",
+            op = use_render and "render" or "glue",
             channel_mode = (apply_fx_mode == "mono") and "mono" or "auto",
             take_fx = true,
             track_fx = true,
           }
+          if use_render then
+            args.cues = { render_keep_glue = render_keep_glue_cues }  -- one-run override
+          end
           if debug_enabled() then
             local c = reaper.CountSelectedMediaItems(0)
             log_step("CORE", "call M.core: op=%s channel_mode=%s take_fx=true track_fx=true unit_members=%d",
               tostring(args.op), tostring(args.channel_mode), #u.items)
             log_step("CORE", "pre-apply FINAL selected_items=%d", c)
             dbg_dump_selection("CORE pre-apply FINAL")
+          end
+
+          for k = 0, reaper.CountTrackMediaItems(FXmediaTrack) - 1 do
+            pre_fx_items[reaper.GetTrackMediaItem(FXmediaTrack, k)] = true
           end
 
           local ok_call, ok_apply, err = pcall(core_api, args)
@@ -3055,29 +3151,53 @@ function main() -- main part of the script
         proj_set("RGWH","GLUE_APPLY_MODE",   snap.GLUE_APPLY_MODE)
         proj_set("RGWH","GLUE_SINGLE_ITEMS", snap.GLUE_SINGLE_ITEMS)
         proj_set("RGWH","RENDER_TC_EMBED",   snap.RENDER_TC_EMBED)
+        proj_set("RGWH","GLUE_MUTED_SEPARATE",      snap.GLUE_MUTED_SEPARATE)
+        proj_set("RGWH","GLUE_SPLIT_AT_CROSSFADES", snap.GLUE_SPLIT_AT_CROSSFADES)
 
         -- Pick output, rename, move back
         if not failed then
-          local postItem = reaper.GetSelectedMediaItem(0, 0)
-          if not postItem then
+          -- v0.3.5: take every new item on the FX track as output (was: first selected only,
+          -- which stranded extra glue results on the FX track)
+          local post_items = {}
+          if use_render then
+            -- Render keeps the same item and adds a new take
+            if is_valid_item(anchor) then post_items[1] = anchor end
+          else
+            for k = 0, reaper.CountTrackMediaItems(FXmediaTrack) - 1 do
+              local it = reaper.GetTrackMediaItem(FXmediaTrack, k)
+              if not pre_fx_items[it] then post_items[#post_items + 1] = it end
+            end
+          end
+          if #post_items == 0 then
+            local sel_it = reaper.GetSelectedMediaItem(0, 0)
+            if sel_it then post_items[1] = sel_it end
+          end
+          if #post_items > 1 then
+            log_step("WARN", "Core produced %d items for one unit — moving all back", #post_items)
+          end
+
+          if #post_items == 0 then
             reaper.MB("Core finished, but no item is selected.", "AudioSweet", 0)
             failed = true
           else
-            append_fx_to_take_name(postItem, naming_token)
-            local origTR = u.track
-            reaper.MoveMediaItemToTrack(postItem, origTR)
-            -- Fix TC after RGWH glue/apply; use item start minus handle (D_STARTOFFS)
-            embed_current_tc_from_item_start(postItem)
-            if is_apply_after_copy then
-              local copied = copy_fx_to_non_active_takes(postItem, FXmediaTrack, fxIndex, orig_track_nchan_core)
-              log_step("COPY", "apply_after_copy: copied FX to %d take(s)", copied)
+            for _, postItem in ipairs(post_items) do
+              append_fx_to_take_name(postItem, naming_token)
+              local origTR = u.track
+              reaper.MoveMediaItemToTrack(postItem, origTR)
+              -- Fix TC after RGWH glue/apply; use item start minus handle (D_STARTOFFS)
+              embed_current_tc_from_item_start(postItem)
+              if is_apply_after_copy then
+                local copied = copy_fx_to_non_active_takes(postItem, FXmediaTrack, fxIndex, orig_track_nchan_core,
+                                                           use_render and pre_render_take or nil)
+                log_step("COPY", "apply_after_copy: copied FX to %d take(s)", copied)
+              end
+              table.insert(outputs, postItem)
             end
-            table.insert(outputs, postItem)
           end
 
           if debug_enabled() then
             dbg_dump_selection("CORE post-apply selection")
-            if postItem then
+            for _, postItem in ipairs(post_items) do
               dbg_item_brief(postItem, "CORE picked postItem")
             end
           end

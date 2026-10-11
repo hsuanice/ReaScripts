@@ -1,5 +1,5 @@
 -- @description RGWH Core - Core Library of Render or Glue with Handles
--- @version 0.3.9
+-- @version 0.3.13
 -- @author hsuanice
 -- @link https://forum.cockos.com/showthread.php?t=305456
 -- @provides
@@ -58,6 +58,39 @@
 --   • For detailed operation modes guide, see RGWH GUI: Help > Manual (Operation Modes)
 --
 -- @changelog
+--   0.3.13 [261011.1106] - FIX: Glue with Time Selection lost its handles when grouping options were on
+--     - CAUSE: with a TS (≈ selection → Units glue), GLUE_SPLIT_AT_CROSSFADES / GLUE_MUTED_SEPARATE
+--       still split a crossfading/touching run into several units; "multiple units + TS" then
+--       merged them into one GAP unit glued to the TS span with NO handles
+--     - FIX: with a TS, Units glue ignores both grouping options (legacy grouping), as the GUI
+--       tooltip already stated → the run stays one unit and gets its handles
+--     - Real gaps between units + TS still use the GAP path as before
+--
+--   0.3.12 [261011.1052] - ADDED: RENDER_KEEP_GLUE_CUES (default 0) — Render retains existing Glue cues
+--     - Before rendering, the "Glue:" cues already in the take's source file are read
+--       (SWS CF_EnumMediaSourceCues), mapped to project time (position / offset / playrate)
+--       and re-written as temporary "#Glue: <name>" markers inside the render window
+--       (incl. handles) → embedded into the new take, then removed
+--     - Only Glue cues are carried; #in/#out are written fresh as before
+--     - M.core(): args.cues.render_keep_glue overrides it for one run
+--     - Requires SWS; without it the option is skipped (logged)
+--
+--   0.3.11 [261011.1038] - FIX: muted unit lost its content when glued (item selection)
+--     - CAUSE: REAPER Glue / Apply (40361/41993/40209) can render muted items as silence
+--       (seen with a single muted item, and whenever Track FX are printed)
+--     - FIX: with GLUE_MUTED_SEPARATE on and NO Time Selection, the members of an all-muted
+--       unit are unmuted before Glue, and the final glued item is muted again afterwards
+--       → content + FX printed, item stays muted
+--     - cfg.ITEM_SELECTION_RUN set by glue_selection (Units, no TS) and auto_selection (no TS)
+--     - Render: with NO Time Selection, a muted item is unmuted for the render and muted
+--       again afterwards (independent of GLUE_MUTED_SEPARATE — a single item is its own unit)
+--     - Time Selection paths unchanged
+--
+--   0.3.10 [261010.1545] - ADDED: M.utils.detect_units_from_selection(opts)
+--     - Accepts optional opts {split_at_crossfades, muted_separate}, forwarded to detect_units_same_track()
+--     - No opts → unchanged legacy grouping (backward compatible)
+--     - PURPOSE: lets AudioSweet Core group units with the same rules RGWH Glue will use
+--
 --   0.3.9 [260330.1415] - FIX: GLUE_MUTED_SEPARATE — muted items now group with other muted items
 --     - BUG: muted items were always forced to SINGLE units, even when adjacent to other muted items
 --     - FIX: detect_units_same_track() now breaks only at muted/non-muted boundaries, not at every muted item
@@ -1015,6 +1048,8 @@ local DEFAULTS = {
   WRITE_EDGE_CUES   = 1,
   -- ✅ 新增：Glue 成品 take 內是否加 take markers（非 SINGLE 才加）
   WRITE_GLUE_CUES = 1,
+  -- Render: carry the source's existing "Glue:" cues into the rendered take
+  RENDER_KEEP_GLUE_CUES = 0,
 
   -- Unit grouping behaviour (Glue only)
   GLUE_MUTED_SEPARATE      = true,   -- muted items always form their own unit
@@ -1078,6 +1113,7 @@ function M.read_settings()
     WRITE_EDGE_CUES    = (get_ext_bool("WRITE_EDGE_CUES",   DEFAULTS.WRITE_EDGE_CUES)==1),
     -- 🔧 修正：用 DEFAULTS，不是 dflt
     WRITE_GLUE_CUES    = (get_ext_bool("WRITE_GLUE_CUES", DEFAULTS.WRITE_GLUE_CUES)==1),
+    RENDER_KEEP_GLUE_CUES = (get_ext_bool("RENDER_KEEP_GLUE_CUES", DEFAULTS.RENDER_KEEP_GLUE_CUES==1)==1),
 
     -- Unit grouping behaviour (Glue only)
     GLUE_MUTED_SEPARATE      = (get_ext_bool("GLUE_MUTED_SEPARATE",      DEFAULTS.GLUE_MUTED_SEPARATE)==1),
@@ -1844,6 +1880,51 @@ local function add_glue_cues(members, unit_start, DBG, tag)
   return glue_ids
 end
 
+------------------------------------------------------------
+-- Render: retain existing Glue cues (v0.3.12)
+------------------------------------------------------------
+-- Reads the "Glue:" cues already embedded in the take's source file (SWS
+-- CF_EnumMediaSourceCues), maps them to project time and re-writes them as
+-- temporary "#Glue: <name>" project markers inside [winL, winR], so the render
+-- embeds them into the new file again. Returns marker IDs (or nil).
+local function add_retained_glue_cues(it, winL, winR, DBG)
+  if not r.CF_EnumMediaSourceCues then
+    dbg(DBG,1,"[GLUE-CUE][RENDER] SWS CF_EnumMediaSourceCues not available → skip")
+    return nil
+  end
+  local tk = r.GetActiveTake(it)
+  if not tk or r.TakeIsMIDI(tk) then return nil end
+  local src = r.GetMediaItemTake_Source(tk)
+  if not src then return nil end
+
+  local pos  = r.GetMediaItemInfo_Value(it, "D_POSITION")
+  local offs = r.GetMediaItemTakeInfo_Value(tk, "D_STARTOFFS") or 0.0
+  local rate = r.GetMediaItemTakeInfo_Value(tk, "D_PLAYRATE") or 1.0
+  if rate <= 0 then rate = 1.0 end
+  local eps = 1e-6
+
+  local ids = {}
+  local idx = 0
+  while true do
+    local nxt, t, _, is_region, name = r.CF_EnumMediaSourceCues(src, idx)
+    if not nxt or nxt == 0 then break end
+    if not is_region and type(name) == "string" then
+      local label = name:match("^#?(Glue:.*)$")
+      if label then
+        local abs = pos + (t - offs) / rate
+        if abs >= winL - eps and abs <= winR + eps then
+          ids[#ids+1] = r.AddProjectMarker2(0, false, abs, 0, "#" .. label, -1, 0)
+          dbg(DBG,2,"[GLUE-CUE][RENDER] retain @ %.3f  %s", abs, label)
+        end
+      end
+    end
+    idx = nxt
+  end
+  if #ids == 0 then return nil end
+  dbg(DBG,1,"[GLUE-CUE][RENDER] retained %d glue cue(s)", #ids)
+  return ids
+end
+
 local function remove_markers_by_ids(ids)
   if not ids then return end
   local proj = 0
@@ -2479,6 +2560,21 @@ local function glue_unit(tr, u, cfg)
     end
   end
 
+  -- v0.3.11: all-muted unit (MUTED_SEPARATE on, item selection only) keeps its content.
+  -- Glue/Apply can render muted items as silence, so unmute the members before Glue
+  -- and mute the final glued item afterwards (content + FX printed, item stays muted).
+  local muted_unit = false
+  if cfg.GLUE_MUTED_SEPARATE and cfg.ITEM_SELECTION_RUN == true and #members > 0 then
+    muted_unit = true
+    for _, m in ipairs(members) do
+      if r.GetMediaItemInfo_Value(m.it, "B_MUTE") ~= 1 then muted_unit = false; break end
+    end
+    if muted_unit then
+      for _, m in ipairs(members) do r.SetMediaItemInfo_Value(m.it, "B_MUTE", 0) end
+      dbg(DBG,1,"[MUTE] muted unit %.3f..%.3f (%d items) → unmuted for Glue/Apply", u.start, u.finish, #members)
+    end
+  end
+
   -- Unified logic for ALL modes (mono/multi/auto): Glue → (conditionally) Apply
   -- 時選=UL..UR → Glue → (必要時)對成品 Apply → Trim 回 UL..UR
 
@@ -2605,6 +2701,15 @@ local function glue_unit(tr, u, cfg)
       u.start, u.finish, left_total, left_total, right_total)
   else
     dbg(DBG,1,"       WARNING: glued item not found by span (UL=%.3f UR=%.3f)", UL, UR)
+  end
+
+  -- v0.3.11: re-mute the result of an all-muted unit (and any member Glue did not consume)
+  if muted_unit then
+    if glued then r.SetMediaItemInfo_Value(glued, "B_MUTE", 1) end
+    for _, m in ipairs(members) do
+      if r.ValidatePtr2(0, m.it, "MediaItem*") then r.SetMediaItemInfo_Value(m.it, "B_MUTE", 1) end
+    end
+    r.UpdateArrange()
   end
 
   -- Clear time selection
@@ -2942,11 +3047,17 @@ function M.glue_selection(force_units)
     -- IMPORTANT: Capture TS state BEFORE the track loop
     -- (TS is cleared after processing each GAP unit, so we must preserve it for all tracks)
     local capturedTsL, capturedTsR, capturedHasTS = get_current_ts()
+    cfg.ITEM_SELECTION_RUN = not capturedHasTS  -- v0.3.11: muted-unit handling is item-selection only
 
-    local unit_opts = {
+    -- v0.3.13: grouping options are item-selection only. With a TS, split units would be
+    -- merged into a GAP unit and glued to the TS span WITHOUT handles → use legacy grouping
+    local unit_opts = capturedHasTS and {} or {
       split_at_crossfades = cfg.GLUE_SPLIT_AT_CROSSFADES,
       muted_separate      = cfg.GLUE_MUTED_SEPARATE,
     }
+    if capturedHasTS and (cfg.GLUE_SPLIT_AT_CROSSFADES or cfg.GLUE_MUTED_SEPARATE) then
+      dbg(DBG,1,"[RUN] TS present → unit grouping options ignored (legacy grouping)")
+    end
     for _,tr in ipairs(tr_list) do
       local list  = by_tr[tr]
       local units = detect_units_same_track(list, eps_s, unit_opts)
@@ -3017,6 +3128,10 @@ function M.auto_selection(merge_volumes, print_volumes, merge_to_item)
   local cfg = M.read_settings()
   cfg.OP = "auto"  -- Set operation mode for glue_unit()
   local DBG = cfg.DEBUG_LEVEL or 1
+  do  -- v0.3.11: muted-unit handling is item-selection only
+    local _, _, has_ts = get_current_ts()
+    cfg.ITEM_SELECTION_RUN = not has_ts
+  end
 
   r.Undo_BeginBlock()
   r.PreventUIRefresh(1)
@@ -3206,6 +3321,9 @@ function M.render_selection(take_fx, track_fx, mode, tc_mode, merge_volumes, pri
   local HANDLE = (cfg.HANDLE_MODE=="seconds") and (cfg.HANDLE_SECONDS or 0.0) or 0.0
   -- NOTE: TAIL_SECONDS is intentionally ignored for Render. Tail is Glue-only.
 
+  -- v0.3.11: item selection only (no TS) → muted items keep their content when rendered
+  local render_item_selection_run = not select(3, get_current_ts())
+
   dbg(DBG,1,"[RUN] Render start  mode=%s  TAKE=%s TRACK=%s  items=%d  handles=%.3fs  WRITE_EDGE_CUES=%s  GLUE_CUE_POLICY=%s",
       cfg.RENDER_APPLY_MODE, tostring(cfg.RENDER_TAKE_FX), tostring(cfg.RENDER_TRACK_FX),
       nsel, HANDLE, tostring(cfg.WRITE_EDGE_CUES), "adjacent-different-source")
@@ -3305,6 +3423,12 @@ function M.render_selection(take_fx, track_fx, mode, tc_mode, merge_volumes, pri
       dbg(DBG,1,"[EDGE-CUE] add #in @ %.3f  #out @ %.3f  ids=(%s,%s)", L0, R0, tostring(edge_ids and edge_ids[1]), tostring(edge_ids and edge_ids[2]))
     end
 
+    -- v0.3.12: carry existing Glue cues (within the render window incl. handles) into the new take
+    local kept_glue_ids = nil
+    if cfg.RENDER_KEEP_GLUE_CUES then
+      kept_glue_ids = add_retained_glue_cues(it, d.gotL, d.finalR, DBG)
+    end
+
 
     -- move to render window and align take offset (finalR includes tail beyond source)
     r.SetMediaItemInfo_Value(it, "D_POSITION", d.gotL)
@@ -3353,6 +3477,13 @@ function M.render_selection(take_fx, track_fx, mode, tc_mode, merge_volumes, pri
       zero_fades(it)
     end
 
+    -- v0.3.11: a muted item renders as silence → unmute for the render, mute again after
+    local unmuted_for_render = render_item_selection_run and r.GetMediaItemInfo_Value(it, "B_MUTE") == 1
+    if unmuted_for_render then
+      r.SetMediaItemInfo_Value(it, "B_MUTE", 0)
+      dbg(DBG,1,"[MUTE] '%s' muted → unmuted for render", name0)
+    end
+
     -- render (v0.3.0: use policy-aware apply with track channel adjustment)
     r.SelectAllMediaItems(0, false)
     r.SetMediaItemSelected(it, true)
@@ -3363,10 +3494,17 @@ function M.render_selection(take_fx, track_fx, mode, tc_mode, merge_volumes, pri
       run_command(ACT_RENDER_PRES, "Render to new take", DBG)
     end
 
+    if unmuted_for_render and r.ValidatePtr2(0, it, "MediaItem*") then
+      r.SetMediaItemInfo_Value(it, "B_MUTE", 1)
+    end
+
     -- remove temporary # markers (if any)
     if edge_ids then
       remove_markers_by_ids(edge_ids)
       dbg(DBG,1,"[EDGE-CUE] removed ids: %s, %s", tostring(edge_ids[1]), tostring(edge_ids[2]))
+    end
+    if kept_glue_ids then
+      remove_markers_by_ids(kept_glue_ids)
     end
 
     -- restore fades if we cleared them for 40361/41993
@@ -3485,6 +3623,7 @@ function M.core(args)
     HANDLE_SECONDS  = get_ext("HANDLE_SECONDS",  ""),
     WRITE_EDGE_CUES = get_ext("WRITE_EDGE_CUES", ""),
     WRITE_GLUE_CUES = get_ext("WRITE_GLUE_CUES", ""),
+    RENDER_KEEP_GLUE_CUES = get_ext("RENDER_KEEP_GLUE_CUES", ""),
     DEBUG_LEVEL     = get_ext("DEBUG_LEVEL",     ""),
     DEBUG_NO_CLEAR  = get_ext("DEBUG_NO_CLEAR",  ""),
 
@@ -3511,6 +3650,9 @@ function M.core(args)
   if args.cues then
     if args.cues.write_edge ~= nil then set_opt("WRITE_EDGE_CUES", args.cues.write_edge and "1" or "0") end
     if args.cues.write_glue ~= nil then set_opt("WRITE_GLUE_CUES", args.cues.write_glue and "1" or "0") end
+    if args.cues.render_keep_glue ~= nil then
+      set_opt("RENDER_KEEP_GLUE_CUES", args.cues.render_keep_glue and "1" or "0")
+    end
   end
 
   -- debug
@@ -3648,14 +3790,16 @@ end
 -- Detect units from current selection
 -- Returns array of units: {kind, members, start, finish, track}
 -- Unit kinds: "SINGLE", "TOUCH", "CROSSFADE", "MIXED"
-function M.utils.detect_units_from_selection()
+-- opts (optional): {split_at_crossfades=bool, muted_separate=bool}
+--   nil/omitted → legacy behaviour (group all touching/crossfading items, ignore mute)
+function M.utils.detect_units_from_selection(opts)
   local eps_s = M.utils.project_epsilon()
   local by_tr, tracks = collect_by_track_from_selection()
 
   local all_units = {}
   for _, tr in ipairs(tracks) do
     local items = by_tr[tr]
-    local units = detect_units_same_track(items, eps_s)
+    local units = detect_units_same_track(items, eps_s, opts)
     for _, u in ipairs(units) do
       u.track = tr  -- Add track reference
       all_units[#all_units+1] = u
