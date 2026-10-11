@@ -1,5 +1,5 @@
 -- @description RGWH ReaImGui - ImGui Interface for RGWH Core（Render or Glue with Handles）
--- @version 0.2.8
+-- @version 0.2.9
 -- @author hsuanice
 -- @link https://forum.cockos.com/showthread.php?t=305456
 -- @provides
@@ -14,6 +14,10 @@
 --   Adjust parameters using the visual controls and click operation buttons to execute.
 --
 -- @changelog
+--   0.2.9 [261011.1053] - ADDED: "Render: Retain Glue Cues" checkbox (Settings → CUES, default OFF)
+--     - Render carries the Glue cues already embedded in the source file into the new take
+--     - Saved to RGWH ExtState RENDER_KEEP_GLUE_CUES; requires RGWH Core >= 0.3.12 and SWS
+--
 --   0.2.8 [260710.1556] - FIX: ImGui window stability + Settings collapse lock
 --     - FIXED: Removed extra End() calls on non-visible Begin() paths (prevents "ImGui_End: Calling End() too many times!")
 --     - FIXED: BWF install modal now uses NoDocking to avoid docking-related stack issues
@@ -613,6 +617,7 @@ local gui = {
   -- Cues (v0.1.4: epsilon removed - now internal constant in RGWH Core)
   cue_write_edge = true,
   cue_write_glue = true,
+  cue_render_keep_glue = false,  -- Render: carry existing Glue cues into the new take
 
   -- Policies
   glue_single_items = false,  -- AUTO mode: false=single→render, true=single→glue
@@ -649,7 +654,7 @@ local persist_keys = {
   'merge_to_item','merge_to_take','print_volumes',
   'handle_length','tail_seconds',
   'epsilon_mode','epsilon_value',
-  'cue_write_edge','cue_write_glue',
+  'cue_write_edge','cue_write_glue','cue_render_keep_glue',
   'glue_single_items','glue_muted_separate','glue_split_at_crossfades',
   'debug_level','debug_no_clear','selection_policy',
   'enable_docking','bwfmetaedit_custom_path'
@@ -746,6 +751,7 @@ local function sync_rgwh_extstate_from_gui()
   -- Cues (v0.1.4: epsilon sync removed)
   set_rgwh("WRITE_EDGE_CUES", gui.cue_write_edge and "1" or "0")
   set_rgwh("WRITE_GLUE_CUES", gui.cue_write_glue and "1" or "0")
+  set_rgwh("RENDER_KEEP_GLUE_CUES", gui.cue_render_keep_glue and "1" or "0")
 
   -- Policies
   set_rgwh("GLUE_SINGLE_ITEMS",        gui.glue_single_items        and "1" or "0")
@@ -784,7 +790,7 @@ local function format_setting_value(key, val)
   local bool_keys = {
     take_fx = true, track_fx = true,
     merge_to_item = true, merge_to_take = true, print_volumes = true,
-    cue_write_edge = true, cue_write_glue = true, glue_single_items = true,
+    cue_write_edge = true, cue_write_glue = true, cue_render_keep_glue = true, glue_single_items = true,
     glue_muted_separate = true, glue_split_at_crossfades = true,
     debug_no_clear = true, enable_docking = true,
   }
@@ -844,6 +850,7 @@ local function log_setting_changes(before_state, after_state)
     handle_length = "Handle Length",
     cue_write_edge = "Write Edge Cues",
     cue_write_glue = "Write Glue Cues",
+    cue_render_keep_glue = "Render: Retain Glue Cues",
     glue_single_items = "Glue Single Items",
     debug_level = "Debug Level",
     debug_no_clear = "No Clear Console",
@@ -1031,6 +1038,7 @@ local function print_all_settings(prefix)
   -- v0.1.4: Epsilon debug output removed (now internal constant: 0.1 frames)
   r.ShowConsoleMsg(string.format("  Write Edge Cues: %s\n", bool_str(gui.cue_write_edge)))
   r.ShowConsoleMsg(string.format("  Write Glue Cues: %s\n", bool_str(gui.cue_write_glue)))
+  r.ShowConsoleMsg(string.format("  Render: Retain Glue Cues: %s\n", bool_str(gui.cue_render_keep_glue)))
   r.ShowConsoleMsg(string.format("  Glue Single Items: %s\n", bool_str(gui.glue_single_items)))
   r.ShowConsoleMsg(string.format("  Debug Level: %s\n", debug_names[gui.debug_level + 1] or "Unknown"))
   r.ShowConsoleMsg(string.format("  Debug No Clear: %s\n", bool_str(gui.debug_no_clear)))
@@ -1266,6 +1274,7 @@ local function build_args_from_gui(operation)
     cues = {
       write_edge = gui.cue_write_edge,
       write_glue = gui.cue_write_glue,
+      render_keep_glue = gui.cue_render_keep_glue,
     },
 
     policies = {
@@ -1543,6 +1552,10 @@ local function draw_settings_popup()
   rv, new_val = ImGui.Checkbox(ctx, "Write Glue Cues", gui.cue_write_glue)
   if rv then gui.cue_write_glue = new_val end
   draw_help_marker("#Glue: <TakeName> cues when sources change")
+
+  rv, new_val = ImGui.Checkbox(ctx, "Render: Retain Glue Cues", gui.cue_render_keep_glue)
+  if rv then gui.cue_render_keep_glue = new_val end
+  draw_help_marker("Render keeps the Glue cues already in the source file (requires SWS)")
 
   -- === DEBUG ===
   draw_section_header("DEBUG")

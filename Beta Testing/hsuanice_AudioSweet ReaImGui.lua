@@ -1,5 +1,5 @@
 -- @description AudioSweet ReaImGui - AudioSuite Workflow (Pro Tools–Style)
--- @version 0.2.8 [260708.1252]
+-- @version 0.2.11 [261011.1059]
 -- @author hsuanice
 -- @link https://forum.cockos.com/showthread.php?p=2910884#post2910884
 -- @about
@@ -63,6 +63,27 @@
 --
 --
 -- @changelog
+--   0.2.11 [261011.1059]
+--     - ADDED: Settings → Glue & Render tab: "Retain Glue Cues" under Single item Render (default OFF)
+--     - CHANGED: Settings tab "Glue" renamed to "Glue & Render"; Single Item section title clarified
+--       • Render keeps the Glue cues already in the source file (requires SWS)
+--       • Synced as AS_RENDER_KEEP_GLUE_CUES (AudioSweet Core >= 0.3.8, RGWH Core >= 0.3.12)
+--
+--   0.2.10 [261010.1616]
+--     - ADDED: Settings → Glue tab: "Single item: Render (keep takes)" (default OFF)
+--       • Single-item units are rendered to a new take instead of glued; older takes kept
+--       • Item selection only: with any Time Selection, glue as before (no render, no grouping)
+--       • Synced to Core as AS_SINGLE_ITEM_RENDER (requires AudioSweet Core >= 0.3.6)
+--
+--   0.2.9 [261010.1547]
+--     - ADDED: Settings → Glue tab: glue unit grouping for item selection (no Time Selection)
+--       • Glue all (original behavior, default)
+--       • Follow RGWH GUI settings (Keep MUTED as separate unit / Split at crossfades)
+--       • AudioSweet settings: own Keep MUTED as separate unit + Split at crossfades checkboxes
+--       • Synced to Core as AS_GLUE_GROUPING / AS_GLUE_SPLIT_AT_CROSSFADES / AS_GLUE_MUTED_SEPARATE
+--       • Requires AudioSweet Core >= 0.3.5 and RGWH Core >= 0.3.10
+--     - FIXED (in AudioSweet Core 0.3.5): glue results sometimes left behind on the FX track
+--
 --   0.2.8 [260708.1252]
 --     - ADDED: Load Track FX now imports all single-FX presets from the selected REAPER track
 --     - ADDED: Load Chain now loads presets from all selected tracks in REAPER
@@ -1448,6 +1469,11 @@ local gui = {
   handle_seconds = 5.0,
   use_whole_file = false, -- Use whole file length instead of handles
   tail_seconds = 0.0,     -- FX tail capture (reverb/delay/echo decay), appended after right handle
+  glue_grouping = 0,               -- 0=glue all (legacy), 1=follow RGWH GUI, 2=AudioSweet custom
+  glue_split_at_crossfades = false, -- custom: crossfading items become separate units
+  glue_muted_separate = true,       -- custom: muted items never share a unit with unmuted items
+  single_item_render = false,       -- single-item units: RGWH Render (keep takes) instead of Glue
+  render_keep_glue_cues = false,    -- Render: carry existing Glue cues into the new take
   debug = false,
   max_history = 10,      -- Maximum number of history items to keep
   show_fx_on_recall = true,    -- Show FX window when executing SAVED CHAIN/HISTORY
@@ -1548,6 +1574,16 @@ end
 ------------------------------------------------------------
 local SETTINGS_NAMESPACE = "hsuanice_AS_GUI"
 
+-- Glue unit grouping → Core namespace (read by AudioSweet Core >= 0.3.5)
+local GLUE_GROUPING_KEYS = { "all", "rgwh", "custom" }
+local function sync_glue_grouping_to_core()
+  r.SetExtState("hsuanice_AS", "AS_GLUE_GROUPING", GLUE_GROUPING_KEYS[gui.glue_grouping + 1] or "all", false)
+  r.SetExtState("hsuanice_AS", "AS_GLUE_SPLIT_AT_CROSSFADES", gui.glue_split_at_crossfades and "1" or "0", false)
+  r.SetExtState("hsuanice_AS", "AS_GLUE_MUTED_SEPARATE", gui.glue_muted_separate and "1" or "0", false)
+  r.SetExtState("hsuanice_AS", "AS_SINGLE_ITEM_RENDER", gui.single_item_render and "1" or "0", false)
+  r.SetExtState("hsuanice_AS", "AS_RENDER_KEEP_GLUE_CUES", gui.render_keep_glue_cues and "1" or "0", false)
+end
+
 local function save_gui_settings()
   -- Debug: Log ExtState update when debug mode is enabled
   if gui.debug then
@@ -1569,6 +1605,12 @@ local function save_gui_settings()
   r.SetExtState(SETTINGS_NAMESPACE, "handle_seconds", tostring(gui.handle_seconds), true)
   r.SetExtState(SETTINGS_NAMESPACE, "use_whole_file", gui.use_whole_file and "1" or "0", true)
   r.SetExtState(SETTINGS_NAMESPACE, "tail_seconds", tostring(gui.tail_seconds), true)
+  r.SetExtState(SETTINGS_NAMESPACE, "glue_grouping", tostring(gui.glue_grouping), true)
+  r.SetExtState(SETTINGS_NAMESPACE, "glue_split_at_crossfades", gui.glue_split_at_crossfades and "1" or "0", true)
+  r.SetExtState(SETTINGS_NAMESPACE, "glue_muted_separate", gui.glue_muted_separate and "1" or "0", true)
+  r.SetExtState(SETTINGS_NAMESPACE, "single_item_render", gui.single_item_render and "1" or "0", true)
+  r.SetExtState(SETTINGS_NAMESPACE, "render_keep_glue_cues", gui.render_keep_glue_cues and "1" or "0", true)
+  sync_glue_grouping_to_core()
   r.SetExtState(SETTINGS_NAMESPACE, "debug", gui.debug and "1" or "0", true)
   r.SetExtState(SETTINGS_NAMESPACE, "max_history", tostring(gui.max_history), true)
   r.SetExtState(SETTINGS_NAMESPACE, "show_fx_on_recall", gui.show_fx_on_recall and "1" or "0", true)
@@ -1661,6 +1703,11 @@ local function load_gui_settings()
   gui.handle_seconds = get_float("handle_seconds", 5.0)
   gui.use_whole_file = get_bool("use_whole_file", false)
   gui.tail_seconds   = get_float("tail_seconds", 0.0)
+  gui.glue_grouping  = math.max(0, math.min(2, get_int("glue_grouping", 0)))
+  gui.glue_split_at_crossfades = get_bool("glue_split_at_crossfades", false)
+  gui.glue_muted_separate      = get_bool("glue_muted_separate", true)
+  gui.single_item_render       = get_bool("single_item_render", false)
+  gui.render_keep_glue_cues    = get_bool("render_keep_glue_cues", false)
   gui.debug = get_bool("debug", false)
   gui.max_history = get_int("max_history", 10)
   gui.show_fx_on_recall = get_bool("show_fx_on_recall", true)
@@ -3168,6 +3215,7 @@ local function set_extstate_from_gui(mode_override)
   r.SetExtState("hsuanice_AS", "AS_COPY_POS", pos_names[gui.copy_pos + 1], false)
   r.SetExtState("hsuanice_AS", "AS_APPLY_FX_MODE", channel_names[gui.channel_mode + 1], false)
   r.SetExtState("hsuanice_AS", "AS_MULTI_CHANNEL_POLICY", gui.multi_channel_policy, false)
+  sync_glue_grouping_to_core()
   r.SetExtState("hsuanice_AS", "DEBUG", gui.debug and "1" or "0", false)
 
   -- File Naming ExtStates
@@ -3817,6 +3865,7 @@ local function run_saved_chain_apply_mode(tr, chain_name, item_count)
   -- Set ExtState for AudioSweet (chain mode)
   r.SetExtState("hsuanice_AS", "AS_MODE", "chain", false)
   r.SetExtState("hsuanice_AS", "AS_ACTION", get_action_key(gui.action), false)
+  sync_glue_grouping_to_core()
   r.SetExtState("hsuanice_AS", "DEBUG", gui.debug and "1" or "0", false)
 
   -- Set OVERRIDE ExtState to specify track and FX for Core
@@ -4394,7 +4443,7 @@ local function draw_gui()
           "=================================================\n" ..
           "AudioSweet ReaImGui - ImGui Interface for AudioSweet\n" ..
           "=================================================\n" ..
-          "Version: 0.2.8 (260708.1143)\n" ..
+          "Version: 0.2.11 (261011.1059)\n" ..
           "Author: hsuanice\n\n" ..
 
           "Reference:\n" ..
@@ -4678,6 +4727,93 @@ end
         ImGui.TextWrapped(ctx,
           "Time Selection: Restores original FX state when leaving time selection.\n" ..
           "GUID: Restores FX state when the preview track GUID changes (switching projects).")
+
+        ImGui.EndTabItem(ctx)
+      end
+
+      -- ============================================================
+      -- Tab: Glue unit grouping (item selection, no Time Selection)
+      -- ============================================================
+      if ImGui.BeginTabItem(ctx, 'Glue & Render') then
+        ImGui.Text(ctx, "Glue Grouping (item selection, no Time Selection)")
+        ImGui.TextDisabled(ctx, "Which touching / crossfading items are glued into one unit")
+        ImGui.Separator(ctx)
+        ImGui.Spacing(ctx)
+
+        if ImGui.RadioButton(ctx, "Glue all (original behavior)##glue_grouping", gui.glue_grouping == 0) then
+          gui.glue_grouping = 0
+          save_gui_settings()
+        end
+        if ImGui.IsItemHovered(ctx) then
+          ImGui.SetTooltip(ctx, "All touching and crossfading items on a track become one unit\nMute state is ignored")
+        end
+
+        if ImGui.RadioButton(ctx, "Follow RGWH GUI settings##glue_grouping", gui.glue_grouping == 1) then
+          gui.glue_grouping = 1
+          save_gui_settings()
+        end
+        if ImGui.IsItemHovered(ctx) then
+          ImGui.SetTooltip(ctx, "Use RGWH GUI's \"Keep MUTED as separate unit\" and \"Split at crossfades\"\n(read from this project's RGWH settings at run time)")
+        end
+
+        if ImGui.RadioButton(ctx, "AudioSweet settings##glue_grouping", gui.glue_grouping == 2) then
+          gui.glue_grouping = 2
+          save_gui_settings()
+        end
+
+        ImGui.Indent(ctx)
+        if gui.glue_grouping ~= 2 then ImGui.BeginDisabled(ctx) end
+        local rv_mute, new_mute = ImGui.Checkbox(ctx, "Keep MUTED as separate unit##as_glue", gui.glue_muted_separate)
+        if rv_mute then
+          gui.glue_muted_separate = new_mute
+          save_gui_settings()
+        end
+        if ImGui.IsItemHovered(ctx, ImGui.HoveredFlags_AllowWhenDisabled) then
+          ImGui.SetTooltip(ctx, "Muted and unmuted items never share a unit\n(adjacent muted items still group together)")
+        end
+        local rv_xf, new_xf = ImGui.Checkbox(ctx, "Split at crossfades##as_glue", gui.glue_split_at_crossfades)
+        if rv_xf then
+          gui.glue_split_at_crossfades = new_xf
+          save_gui_settings()
+        end
+        if ImGui.IsItemHovered(ctx, ImGui.HoveredFlags_AllowWhenDisabled) then
+          ImGui.SetTooltip(ctx, "Crossfading items are not grouped into the same unit\nOnly touching items share a unit")
+        end
+        if gui.glue_grouping ~= 2 then ImGui.EndDisabled(ctx) end
+        ImGui.Unindent(ctx)
+
+        ImGui.Spacing(ctx)
+        ImGui.Separator(ctx)
+        ImGui.TextWrapped(ctx, "Glue grouping and Single item Render only apply to item selection. With a Time Selection, AudioSweet glues as before (the Time Selection decides the range).")
+
+        ImGui.Spacing(ctx)
+        ImGui.Separator(ctx)
+        ImGui.Text(ctx, "Single Item Render (item selection, no Time Selection)")
+        ImGui.Spacing(ctx)
+        local rv_render, new_render = ImGui.Checkbox(ctx, "Single item: Render (keep takes)##as_single_render", gui.single_item_render)
+        if rv_render then
+          gui.single_item_render = new_render
+          save_gui_settings()
+        end
+        if ImGui.IsItemHovered(ctx) then
+          ImGui.SetTooltip(ctx, "A unit with only one item is rendered to a new take instead of glued\n" ..
+            "Older takes are kept\n" ..
+            "Item selection only — with a Time Selection, items are glued as before\n" ..
+            "Tail Seconds does not apply to Render")
+        end
+
+        ImGui.Indent(ctx)
+        if not gui.single_item_render then ImGui.BeginDisabled(ctx) end
+        local rv_keep, new_keep = ImGui.Checkbox(ctx, "Retain Glue Cues##as_render_keep_glue", gui.render_keep_glue_cues)
+        if rv_keep then
+          gui.render_keep_glue_cues = new_keep
+          save_gui_settings()
+        end
+        if ImGui.IsItemHovered(ctx, ImGui.HoveredFlags_AllowWhenDisabled) then
+          ImGui.SetTooltip(ctx, "Render keeps the Glue cues already in the source file\n(e.g. from an earlier glue of the edit). Requires SWS")
+        end
+        if not gui.single_item_render then ImGui.EndDisabled(ctx) end
+        ImGui.Unindent(ctx)
 
         ImGui.EndTabItem(ctx)
       end
