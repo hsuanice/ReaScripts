@@ -38,42 +38,6 @@
   ## Development
   This script was developed with the assistance of AI tools
   including ChatGPT and Claude AI.
-
-  ## Future Development
-  Planned features and experimental ideas for future implementation:
-
-  ### Approved for Implementation
-  - **Independent AudioSweet Run Scripts**: Create standalone action list scripts
-    • Run (Stop mode): Standard execution reading all GUI ExtState settings
-    • Run (Preview mode): Process items in item/time selection during preview
-      - Stop preview, preserve FX state/bypass
-      - Execute RGWH Core print/render with current FX configuration
-      - Return processed items to original track positions
-      - Resume preview workflow
-
-  - **Independent Solo Script**: Unified solo logic extractable to action list
-    • Priority: Focused FX/chain track → Default chain track
-    • Can be assigned to keyboard shortcuts independently
-
-  - **Right Handle Only Mode**: Extends existing audio content (different from tail)
-    • Processes additional duration on right side only
-    • Handle extends content that already exists in source
-
-  - **Fixed-Length Tail Mode**: FX tail from non-handle content processing
-    • Important: RIGHT HANDLE ≠ TAIL MODE
-    • Tail = reverb/delay tail printed from non-handle processed content
-    • Fixed parameter: user-defined length (e.g., 3s, 5s)
-    • Tail processes decay/reverb after main content, not extended source
-
-  ### Deferred Ideas for Research
-  - **Live FX Switching During Preview**: Dynamic FX parameter changes
-    • Challenge: Requires real-time FX state synchronization
-    • Needs investigation of REAPER API capabilities
-
-  - **Auto Tail Detection**: Intelligent tail length via audio analysis
-    • Analyze processed audio amplitude/RMS to detect natural decay
-    • Auto-determine tail length based on reverb/delay characteristics
-    • Advanced feature requiring signal processing research
 --]]
 
 -- hsuanice Library is a separate ReaPack package: tell the user if it is missing
