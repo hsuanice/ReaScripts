@@ -1,6 +1,6 @@
 --[[
 @description hsuanice Library - shared code used by hsuanice scripts (required)
-@version 26.1012.0957
+@version 26.1012.1113
 @author hsuanice
 @metapackage
 @provides
@@ -11,12 +11,17 @@
   [nomain] hsuanice_Metadata Read.lua
   [nomain] hsuanice_Hover.lua
   [nomain] hsuanice_Mouse.lua
+  [nomain] hsuanice_Metadata Cache.lua
+  [nomain] hsuanice_Metadata Rename Core.lua
+  [nomain] hsuanice_List Table.lua
+  [nomain] hsuanice_Time Format.lua
+  [nomain] hsuanice_Metadata Generator.lua
 @changelog
-  - Add: hsuanice_Mouse.lua (used by Set Time to Item on Right-Drag Release).
+  - Add: Metadata Cache, Metadata Rename Core, List Table, Time Format, Metadata Generator (used by the Metadata packages).
 @about
   # hsuanice Library
 
-  Shared code used by hsuanice scripts (RGWH, AudioSweet, Hover Mode, Reorder, ...).
+  Shared code used by hsuanice scripts (RGWH, AudioSweet, Hover Mode, Reorder, Rename / Item List / Embed tools, ...).
   Install this package together with any hsuanice script.
   It adds nothing to the Action List.
 --]]

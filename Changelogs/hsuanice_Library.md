@@ -1,5 +1,9 @@
 # hsuanice_Library.lua — Changelog
 
+## 26.1012.1113
+
+- Add: Metadata Cache, Metadata Rename Core, List Table, Time Format, Metadata Generator (used by the Metadata packages).
+
 ## 26.1012.0957
 
 - Add: hsuanice_Mouse.lua (used by Set Time to Item on Right-Drag Release).

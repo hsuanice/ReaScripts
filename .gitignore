@@ -18,6 +18,7 @@
 !/Items Properties/
 !/Selection/
 !/Tracks/
+!/Metadata/
 
 # Library: only files used by published packages
 !/Library/
@@ -30,6 +31,11 @@
 !/Library/hsuanice_Metadata Read.lua
 !/Library/hsuanice_Hover.lua
 !/Library/hsuanice_Mouse.lua
+!/Library/hsuanice_Metadata Cache.lua
+!/Library/hsuanice_Metadata Rename Core.lua
+!/Library/hsuanice_List Table.lua
+!/Library/hsuanice_Time Format.lua
+!/Library/hsuanice_Metadata Generator.lua
 
 .DS_Store
 __pycache__/

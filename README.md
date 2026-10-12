@@ -80,6 +80,14 @@ Both install to the same folder, so remove PublicBeta first:
 | Import audio files per folder (Field Recorder) | Import one folder per track; channel-split recorder files are grouped (GUI) |
 | Import audio files per folder (Music Multitrack) | Import one folder per track for music multitrack sessions (GUI) |
 
+### Metadata
+
+| Package | What it does |
+|---|---|
+| Rename from Metadata | Rename takes or source files from BWF / iXML metadata tokens, with live preview (GUI) |
+| Item List | Spreadsheet-style item tables with metadata columns: Item List Editor + Item List Browser (GUI) |
+| BWF / iXML Embed Tools | Write timecode, iXML / BWF metadata and SMPTE UMID into files (needs BWF MetaEdit) |
+
 ### Library
 
 | Package | What it does |
