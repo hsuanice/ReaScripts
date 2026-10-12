@@ -18,8 +18,8 @@ REAPER scripts for audio post-production, by hsuanice.
 ### Requirements
 
 - **ReaImGui** — needed by the GUI scripts; install with ReaPack (*ReaTeam Extensions* repository, included by default).
-- **SWS Extension** — optional; a few features use it (e.g. *Retain Glue Cues*).
-- **js_ReaScriptAPI** — needed by *Set Time to Item on Right-Drag Release*, recommended for *Track and Razor Item Link*; install with ReaPack (*ReaTeam Extensions*).
+- **SWS Extension** — required by *PM Timer* and *PM Insight Analyzer*; optional elsewhere (a few features use it, e.g. *Retain Glue Cues*).
+- **js_ReaScriptAPI** — needed by *Set Time to Item on Right-Drag Release* and *Console to Work Log Daemon*, recommended for *Track and Razor Item Link*; install with ReaPack (*ReaTeam Extensions*).
 - **Python 3 + OpenTimelineIO** (`pip install opentimelineio`) — only for *Conform List Browser* AAF / XML / OTIO import; EDL needs nothing extra. AAF also needs **aaftool** from LibAAF.
 - **BWF MetaEdit** (`bwfmetaedit` command-line tool) — optional; only needed for timecode (BWF TimeReference) embedding.
 
@@ -94,6 +94,16 @@ Both install to the same folder, so remove PublicBeta first:
 | Package | What it does |
 |---|---|
 | Conform List Browser *(pre-release)* | Spreadsheet-style conform tool for EDL / AAF / XML / OTIO / subtitle lists: match source media, generate and link items, compare old / new cuts (GUI + Jump / Link / Load / Reveal wrappers) |
+
+### Various
+
+| Package | What it does |
+|---|---|
+| PM Timer | Scene-aware work timer: logs work sessions per scene / project, keeps scene metadata up to date, shows FPS (needs SWS) |
+| PM Insight Analyzer *(pre-release)* | Work-time and efficiency analysis of PM Timer work logs (work in progress; needs SWS) |
+| Console to Work Log Daemon | Appends ReaScript console output to work.log in the project folder (needs js_ReaScriptAPI) |
+| Work Timer | Real-time 24H clock window (resizable, dockable) |
+| Count Items / Tracks | Pro Tools-style selection HUD: item / track counts, start / end / length |
 
 ### Library
 
