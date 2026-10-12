@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<index version="1" name="hsuanice Scripts" commit="d041401023a48cbf068bde6ea96be9927df7b068">
+<index version="1" name="hsuanice Scripts" commit="46702ee8e58ba37cad9048b9a9bccd94e29471af">
   <category name="Items Editing">
     <reapack name="hsuanice_Convert empty items to audio items.lua" type="script" desc="Convert empty items to audio items (preserve name &amp; notes)">
       <metadata>
@@ -146,6 +146,7 @@
 {\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Toggle: switch Hover Mode on/off (toolbar-friendly)\par}
 {\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Split: split items at the selection, edit cursor or mouse\par}
 {\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Trim Left / Right: trim or extend the item edge to the cursor, keeping fades\sa180\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 Hover Mode Toggle is based on / inspired by TJF's "Hover Mode Toggle" script.\par}
 {\pard \ql \f0 \sa180 \li0 \fi0 \outlinelevel1 \b \fs32 Suggested shortcuts\par}
 {\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Hover Mode Split Item by Selection or Edit or Mouse Cursor: B\par}
 {\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Hover Mode Trim or Extend Left Edge of Item: A\par}
@@ -393,10 +394,13 @@ ReaPack
 {\pard \ql \f0 \sa180 \li360 \fi-360 2.\tx360\tab In REAPER: {\b Extensions > ReaPack > Import repositories...} and paste:\par}
 {\pard \ql \f0 \sa180 \li360 \fi0 \f1 https://github.com/hsuanice/ReaScripts/raw/master/index.xml\par}
 {\pard \ql \f0 \sa180 \li360 \fi-360 3.\tx360\tab {\b Extensions > ReaPack > Browse packages}, search for {\f1 hsuanice}, and install:\par}
-{\pard \ql \f0 \sa0 \li720 \fi-360 \endash \tx360\tab {\b hsuanice Library} (required by every script below)\par}
-{\pard \ql \f0 \sa0 \li720 \fi-360 \endash \tx360\tab {\b RGWH} and/or {\b AudioSweet}\sa180\sa180\par}
+{\pard \ql \f0 \sa0 \li720 \fi-360 \endash \tx360\tab {\b hsuanice Library} (required by most scripts below; adds nothing to the Action List)\par}
+{\pard \ql \f0 \sa0 \li720 \fi-360 \endash \tx360\tab any of the packages listed under {\field{\*\fldinst{HYPERLINK "#packages"}}{\fldrslt{\ul
+Packages
+}}}
+\sa180\sa180\par}
 {\pard \ql \f0 \sa180 \li0 \fi0 \outlinelevel2 \b \fs28 Requirements\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab {\b ReaImGui} \u8212- install with ReaPack ({\i ReaTeam Extensions} repository, included by default).\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab {\b ReaImGui} \u8212- needed by the GUI scripts; install with ReaPack ({\i ReaTeam Extensions} repository, included by default).\par}
 {\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab {\b SWS Extension} \u8212- optional; a few features use it (e.g. {\i Retain Glue Cues}).\par}
 {\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab {\b BWF MetaEdit} ({\f1 bwfmetaedit} command-line tool) \u8212- optional; only needed for timecode (BWF TimeReference) embedding.\sa180\par}
 {\pard \ql \f0 \sa180 \li0 \fi0 \outlinelevel2 \b \fs28 Moving from hsuanice/PublicBeta\par}
@@ -404,14 +408,30 @@ ReaPack
 {\pard \ql \f0 \sa0 \li360 \fi-360 1.\tx360\tab {\b Extensions > ReaPack > Manage repositories}, right-click {\b hsuanice Scripts} (PublicBeta) > {\b Uninstall}.\par}
 {\pard \ql \f0 \sa0 \li360 \fi-360 2.\tx360\tab Import this repository and install the packages as above.\sa180\par}
 {\pard \ql \f0 \sa180 \li0 \fi0 \outlinelevel1 \b \fs32 Packages\par}
-{\pard \ql \f0 \sa180 \li0 \fi0 | Package | Category | What it does | |---|---|---| | RGWH | Rendering | Render or glue items with handles (GUI + Glue / Render shortcuts) | | AudioSweet | Rendering | AudioSuite-style workflow in REAPER, Pro Tools style (GUI + Run / Preview / Solo shortcuts, FX Alias tools) | | hsuanice Library | Library | Shared code used by the scripts above; adds nothing to the Action List |\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 \outlinelevel2 \b \fs28 Rendering\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 | Package | What it does | |---|---| | RGWH | Render or glue items with handles (GUI + Glue / Render shortcuts) | | AudioSweet | AudioSuite-style workflow in REAPER, Pro Tools style (GUI + Run / Preview / Solo shortcuts, FX Alias tools) |\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 \outlinelevel2 \b \fs28 Items Editing\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 | Package | What it does | |---|---| | Hover Mode | Pro Tools-style Split / Trim at the mouse or edit cursor (Toggle, Split, Trim Left / Right) | | Reorder | Vertical reorder and sort of selected items (GUI + Copy to Sort / Sort in Place / Upfill) | | Fix Tools | Clean up edits before moving a session to Pro Tools or Nuendo (edges off grid, looped sources, crossfades, overlaps, fades) | | Copy / Cut with Razor | Copy or cut items and envelope points, respecting razor edits | | Item Reposition | Reposition selected items by interval (GUI) | | Move selected items to track under mouse | Move items vertically, keeping their timeline position | | Toggle Mute Item under Mouse Cursor | Mute / unmute the item under the mouse | | Explode takes of items across tracks | Put each take of the selected items on its own track | | Explode Multichannel Poly Audio | Split poly files into one-channel items, keeping metadata | | Convert empty items to audio items | Keep names and notes | | Copy Unmuted Child Items to Parent Folder Track | Copy unmuted child items to the folder track (checks overlaps first) |\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 \outlinelevel2 \b \fs28 Library\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 | Package | What it does | |---|---| | hsuanice Library | Shared code used by the scripts above; adds nothing to the Action List |\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 Suggested shortcuts are listed in each package's About page in ReaPack (never assigned automatically).\par}
 {\pard \ql \f0 \sa180 \li0 \fi0 Release notes are shown in ReaPack. Older history is in {\field{\*\fldinst{HYPERLINK "Changelogs/"}}{\fldrslt{\ul
 Changelogs/
 }}}
 .\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 \outlinelevel1 \b \fs32 Built with AI (vibe coding)\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 These scripts are a product of {\b vibe coding}: hsuanice is an audio post-production engineer, not a professional programmer.\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab {\b hsuanice} designs every workflow, decides how each tool should behave, and tests it in real post-production work.\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab {\b AI writes most of the code}: {\field{\*\fldinst{HYPERLINK "https://claude.ai"}}{\fldrslt{\ul
+Claude
+}}}
+ by Anthropic and ChatGPT by OpenAI.\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab {\b Claude Code} (Anthropic's AI coding agent) also helps maintain this repository: the folder structure, ReaPack packaging, version numbers, changelogs and the release workflow.\sa180\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 Please treat the scripts as such: try them on a copy of your project first, and keep backups of media you process. Bug reports and feedback are very welcome \u8212- open an issue on GitHub or reply in the REAPER forum threads linked in each package.\par}
 {\pard \ql \f0 \sa180 \li0 \fi0 \outlinelevel1 \b \fs32 Credits\par}
-{\pard \ql \f0 \sa180 \li0 \fi0 The scripts in this repository are created and maintained by hsuanice, with the assistance of AI tools such as ChatGPT and Claude.\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 The scripts in this repository are designed, tested and maintained by hsuanice, with code written together with AI tools (Claude, ChatGPT).\par}
 {\pard \ql \f0 \sa180 \li0 \fi0 AudioSweet is inspired by the AudioSuite-like script by Tim Chimes. "AudioSweet" is a name originally given by Tim Chimes; this project continues to use the name in reference to his original work. Original: "Renders selected plugin to selected media item", written for REAPER 5.1 with Lua (v1.1, 2015-12-22) \u8212- http://timchimes.com/scripting-with-reaper-audiosuite/\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 Hover Mode Toggle is based on / inspired by TJF's {\i Hover Mode Toggle} script.\par}
 }
 ]]></description>
   </metadata>
