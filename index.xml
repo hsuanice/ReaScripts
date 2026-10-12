@@ -927,6 +927,11 @@ Packages
 Changelogs/
 }}}
 .\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 \outlinelevel1 \b \fs32 Maintaining\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 Rules, folder layout and the release workflow are documented in {\field{\*\fldinst{HYPERLINK "MAINTAINING.md"}}{\fldrslt{\ul
+MAINTAINING.md
+}}}
+.\par}
 {\pard \ql \f0 \sa180 \li0 \fi0 \outlinelevel1 \b \fs32 Built with AI (vibe coding)\par}
 {\pard \ql \f0 \sa180 \li0 \fi0 These scripts are a product of {\b vibe coding}: hsuanice is an audio post-production engineer, not a professional programmer.\par}
 {\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab {\b hsuanice} designs every workflow, decides how each tool should behave, and tests it in real post-production work.\par}
