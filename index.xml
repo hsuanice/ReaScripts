@@ -1,5 +1,66 @@
 <?xml version="1.0" encoding="utf-8"?>
-<index version="1" name="hsuanice Scripts" commit="4ff7b58205f3abd19855a238fc65ad160678ba1f">
+<index version="1" name="hsuanice Scripts" commit="6ef5b7ef4f1aae083db79bd539d2dc5f07e3f200">
+  <category name="Conform">
+    <reapack name="hsuanice_Conform List Browser.lua" type="script" desc="Conform List Browser">
+      <metadata>
+        <description><![CDATA[{\rtf1\ansi\deff0{\fonttbl{\f0 \fswiss Helvetica;}{\f1 \fmodern Courier;}}
+{\colortbl;\red255\green0\blue0;\red0\green0\blue255;}
+\widowctrl\hyphauto
+
+{\pard \ql \f0 \sa180 \li0 \fi0 A REAPER script for browsing and editing EDL (Edit Decision List) data with a spreadsheet-style table UI, based on the Item List Browser framework.\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 Reads CMX3600 EDL files, displays events in an editable table, and can generate empty items with metadata on REAPER tracks for conform workflows.\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 Workflow:\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 1.\tx360\tab Load EDL file -> events display in table\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 2.\tx360\tab Browse, filter, sort, and edit metadata fields\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 3.\tx360\tab Load audio folder -> match files to EDL events by metadata\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 4.\tx360\tab Generate empty items on REAPER tracks at absolute TC positions\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 5.\tx360\tab Use a separate reconform script to relink original audio files\sa180\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 Features:\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab CMX3600 EDL parser (TITLE, FCM, events, comments)\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab 15-column table: Event#, Reel, Track, Edit Type, Dissolve Len, Source TC In/Out, Record TC In/Out, Duration, Clip Name, Source File, Notes, Match Status, Matched File\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab All fields editable (except Event#, Duration, Match columns)\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Excel-like selection (click, Shift+rectangle, Cmd/Ctrl multi-select)\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Copy/Paste with TSV clipboard support\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Multi-level sorting (click headers, Shift+click for secondary)\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Text search filter (case-insensitive across all fields)\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Audio file matching with BWF/iXML metadata support\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Split-view UI for EDL events and audio files\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Generate empty items on REAPER tracks with P_EXT metadata\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Configurable track name format with token expansion\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Absolute timecode positioning on REAPER timeline\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Export edited EDL back to CMX3600 format\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Font size adjustment (50% - 300%)\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Column presets (save/load visible column configurations)\sa180\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 Supported formats:\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab CMX3600 EDL (.edl) \u8212- no embedded software/version info in this format\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab XML (.xml) \u8212- FCP7-schema XMEML, read via OpenTimelineIO. Confirmed via real project files (Tools/format_tests/, 260923): - Adobe Premiere Pro export \u8212- 10/10 real samples tested were this. Detected via authoringApp="PremierePro" (NOT the /  tags near the top of the file \u8212- Premiere always writes "Final Cut Pro"/"7.0" there for schema-compat, regardless of the real authoring app; that pair is not a usable signal). - Final Cut Pro 7 / DaVinci Resolve XMEML export \u8212- same parser path, not yet exercised against a real sample from either app. UI/track-naming $\{format\} token shows all of the above simply as "XML" (see _friendly_format()); the distinction (CLB.loaded_format: "PREMIERE_XML"/"FCP7_XML"/"RESOLVE_XML") is tracked internally only.\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab AAF (.aaf) \u8212- via LibAAF (aaftool) + OpenTimelineIO. Confirmed via real project files: Adobe Premiere Pro, versions 15.0.0 / 25.6.4 / 26.3.0 (read from the AAF's own Identification chain via aaf2/pyaaf2 \u8212- see Tools/format_tests/aaf_identify.py).\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Subtitles / dialogue lists \u8212- no embedded software/version info: .srt SubRip absolute time .csv / .tsv Tabular dialogue lists with auto IN/OUT detection .xlsx / .xlsm Excel dialogue lists; multi-sheet picker\sa180\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 Regression coverage: Tools/format_tests/ holds a golden-snapshot test harness (39 real production samples across all formats above, referenced by external path \u8212- not copied into the repo) that verifies a change to one format's parsing doesn't silently break another. Run with: lua5.4 Tools/format_tests/run_regression.lua\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 Requires: ReaImGui (install via ReaPack) Optional: js_ReaScriptAPI (for folder selection) Required: Python 3 + opentimelineio (pip3 install opentimelineio) Optional: openpyxl (pip3 install openpyxl) \u8212- only for .xlsx subtitle import Required for AAF: aaftool in PATH (https://github.com/agfline/LibAAF)\par}
+}
+]]></description>
+      </metadata>
+      <version name="26.1012.1206pre1" author="hsuanice" time="2026-10-12T04:48:13Z">
+        <changelog><![CDATA[- First release in the hsuanice/ReaScripts repository.
+- Requires the "hsuanice Library" package.
+- Pre-release: everything is in daily use except Compare, which is still being tested — only installed when "Enable pre-releases" is on in ReaPack.
+- Includes the CLB wrappers (Jump Old-New TC, Link Reaper Items, Load From Reaper, Reveal Item) and the Python helpers in Tools/ for AAF / XML / OTIO / subtitle import.
+- EDL works out of the box. AAF / XML / OTIO need Python 3 + OpenTimelineIO; AAF also needs LibAAF's aaftool.
+- Fix: the wrappers now find CLB from its file path, so they work on any machine.
+- Window title / console version is read from the header.
+- Full history: Changelogs/ in the repository (https://github.com/hsuanice/ReaScripts/tree/master/Changelogs)]]></changelog>
+        <source main="main">https://github.com/hsuanice/ReaScripts/raw/6ef5b7ef4f1aae083db79bd539d2dc5f07e3f200/Conform/hsuanice_Conform%20List%20Browser.lua</source>
+        <source main="main" file="hsuanice_CLB Jump Old-New TC.lua">https://github.com/hsuanice/ReaScripts/raw/6ef5b7ef4f1aae083db79bd539d2dc5f07e3f200/Conform/hsuanice_CLB%20Jump%20Old-New%20TC.lua</source>
+        <source main="main" file="hsuanice_CLB Link Reaper Items.lua">https://github.com/hsuanice/ReaScripts/raw/6ef5b7ef4f1aae083db79bd539d2dc5f07e3f200/Conform/hsuanice_CLB%20Link%20Reaper%20Items.lua</source>
+        <source main="main" file="hsuanice_CLB Load From Reaper.lua">https://github.com/hsuanice/ReaScripts/raw/6ef5b7ef4f1aae083db79bd539d2dc5f07e3f200/Conform/hsuanice_CLB%20Load%20From%20Reaper.lua</source>
+        <source main="main" file="hsuanice_CLB Reveal Item.lua">https://github.com/hsuanice/ReaScripts/raw/6ef5b7ef4f1aae083db79bd539d2dc5f07e3f200/Conform/hsuanice_CLB%20Reveal%20Item.lua</source>
+        <source file="../Tools/otio_to_clb.py">https://github.com/hsuanice/ReaScripts/raw/6ef5b7ef4f1aae083db79bd539d2dc5f07e3f200/Tools/otio_to_clb.py</source>
+        <source file="../Tools/aaf_to_otio.py">https://github.com/hsuanice/ReaScripts/raw/6ef5b7ef4f1aae083db79bd539d2dc5f07e3f200/Tools/aaf_to_otio.py</source>
+        <source file="../Tools/subtitle_to_clb.py">https://github.com/hsuanice/ReaScripts/raw/6ef5b7ef4f1aae083db79bd539d2dc5f07e3f200/Tools/subtitle_to_clb.py</source>
+      </version>
+    </reapack>
+  </category>
   <category name="Items Editing">
     <reapack name="hsuanice_Convert empty items to audio items.lua" type="script" desc="Convert empty items to audio items (preserve name &amp; notes)">
       <metadata>
@@ -309,7 +370,7 @@
 \widowctrl\hyphauto
 
 {\pard \ql \f0 \sa180 \li0 \fi0 \outlinelevel0 \b \fs36 hsuanice Library\par}
-{\pard \ql \f0 \sa180 \li0 \fi0 Shared code used by hsuanice scripts (RGWH, AudioSweet, Hover Mode, Reorder, Rename / Item List / Embed tools, ...). Install this package together with any hsuanice script. It adds nothing to the Action List.\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 Shared code used by hsuanice scripts (RGWH, AudioSweet, Hover Mode, Reorder, Rename / Item List / Embed tools, Conform List Browser, ...). Install this package together with any hsuanice script. It adds nothing to the Action List.\par}
 }
 ]]></description>
       </metadata>
@@ -355,6 +416,27 @@
         <source file="hsuanice_List Table.lua">https://github.com/hsuanice/ReaScripts/raw/4ff7b58205f3abd19855a238fc65ad160678ba1f/Library/hsuanice_List%20Table.lua</source>
         <source file="hsuanice_Time Format.lua">https://github.com/hsuanice/ReaScripts/raw/4ff7b58205f3abd19855a238fc65ad160678ba1f/Library/hsuanice_Time%20Format.lua</source>
         <source file="hsuanice_Metadata Generator.lua">https://github.com/hsuanice/ReaScripts/raw/4ff7b58205f3abd19855a238fc65ad160678ba1f/Library/hsuanice_Metadata%20Generator.lua</source>
+      </version>
+      <version name="26.1012.1206" author="hsuanice" time="2026-10-12T04:48:13Z">
+        <changelog><![CDATA[- Add: CLB Compare Engine, EDL Parser, OTIO Bridge, Subtitle Bridge, Process Exec, json.lua (used by Conform List Browser).]]></changelog>
+        <source file="hsuanice_RGWH Core.lua">https://github.com/hsuanice/ReaScripts/raw/6ef5b7ef4f1aae083db79bd539d2dc5f07e3f200/Library/hsuanice_RGWH%20Core.lua</source>
+        <source file="hsuanice_AudioSweet Core.lua">https://github.com/hsuanice/ReaScripts/raw/6ef5b7ef4f1aae083db79bd539d2dc5f07e3f200/Library/hsuanice_AudioSweet%20Core.lua</source>
+        <source file="hsuanice_AS Preview Core.lua">https://github.com/hsuanice/ReaScripts/raw/6ef5b7ef4f1aae083db79bd539d2dc5f07e3f200/Library/hsuanice_AS%20Preview%20Core.lua</source>
+        <source file="hsuanice_Metadata Embed.lua">https://github.com/hsuanice/ReaScripts/raw/6ef5b7ef4f1aae083db79bd539d2dc5f07e3f200/Library/hsuanice_Metadata%20Embed.lua</source>
+        <source file="hsuanice_Metadata Read.lua">https://github.com/hsuanice/ReaScripts/raw/6ef5b7ef4f1aae083db79bd539d2dc5f07e3f200/Library/hsuanice_Metadata%20Read.lua</source>
+        <source file="hsuanice_Hover.lua">https://github.com/hsuanice/ReaScripts/raw/6ef5b7ef4f1aae083db79bd539d2dc5f07e3f200/Library/hsuanice_Hover.lua</source>
+        <source file="hsuanice_Mouse.lua">https://github.com/hsuanice/ReaScripts/raw/6ef5b7ef4f1aae083db79bd539d2dc5f07e3f200/Library/hsuanice_Mouse.lua</source>
+        <source file="hsuanice_Metadata Cache.lua">https://github.com/hsuanice/ReaScripts/raw/6ef5b7ef4f1aae083db79bd539d2dc5f07e3f200/Library/hsuanice_Metadata%20Cache.lua</source>
+        <source file="hsuanice_Metadata Rename Core.lua">https://github.com/hsuanice/ReaScripts/raw/6ef5b7ef4f1aae083db79bd539d2dc5f07e3f200/Library/hsuanice_Metadata%20Rename%20Core.lua</source>
+        <source file="hsuanice_List Table.lua">https://github.com/hsuanice/ReaScripts/raw/6ef5b7ef4f1aae083db79bd539d2dc5f07e3f200/Library/hsuanice_List%20Table.lua</source>
+        <source file="hsuanice_Time Format.lua">https://github.com/hsuanice/ReaScripts/raw/6ef5b7ef4f1aae083db79bd539d2dc5f07e3f200/Library/hsuanice_Time%20Format.lua</source>
+        <source file="hsuanice_Metadata Generator.lua">https://github.com/hsuanice/ReaScripts/raw/6ef5b7ef4f1aae083db79bd539d2dc5f07e3f200/Library/hsuanice_Metadata%20Generator.lua</source>
+        <source file="hsuanice_CLB Compare Engine.lua">https://github.com/hsuanice/ReaScripts/raw/6ef5b7ef4f1aae083db79bd539d2dc5f07e3f200/Library/hsuanice_CLB%20Compare%20Engine.lua</source>
+        <source file="hsuanice_EDL Parser.lua">https://github.com/hsuanice/ReaScripts/raw/6ef5b7ef4f1aae083db79bd539d2dc5f07e3f200/Library/hsuanice_EDL%20Parser.lua</source>
+        <source file="hsuanice_OTIO Bridge.lua">https://github.com/hsuanice/ReaScripts/raw/6ef5b7ef4f1aae083db79bd539d2dc5f07e3f200/Library/hsuanice_OTIO%20Bridge.lua</source>
+        <source file="hsuanice_Subtitle Bridge.lua">https://github.com/hsuanice/ReaScripts/raw/6ef5b7ef4f1aae083db79bd539d2dc5f07e3f200/Library/hsuanice_Subtitle%20Bridge.lua</source>
+        <source file="hsuanice_Process Exec.lua">https://github.com/hsuanice/ReaScripts/raw/6ef5b7ef4f1aae083db79bd539d2dc5f07e3f200/Library/hsuanice_Process%20Exec.lua</source>
+        <source file="json.lua">https://github.com/hsuanice/ReaScripts/raw/6ef5b7ef4f1aae083db79bd539d2dc5f07e3f200/Library/json.lua</source>
       </version>
     </reapack>
   </category>
@@ -734,6 +816,7 @@ Packages
 {\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab {\b ReaImGui} \u8212- needed by the GUI scripts; install with ReaPack ({\i ReaTeam Extensions} repository, included by default).\par}
 {\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab {\b SWS Extension} \u8212- optional; a few features use it (e.g. {\i Retain Glue Cues}).\par}
 {\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab {\b js_ReaScriptAPI} \u8212- needed by {\i Set Time to Item on Right-Drag Release}, recommended for {\i Track and Razor Item Link}; install with ReaPack ({\i ReaTeam Extensions}).\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab {\b Python 3 + OpenTimelineIO} ({\f1 pip install opentimelineio}) \u8212- only for {\i Conform List Browser} AAF / XML / OTIO import; EDL needs nothing extra. AAF also needs {\b aaftool} from LibAAF.\par}
 {\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab {\b BWF MetaEdit} ({\f1 bwfmetaedit} command-line tool) \u8212- optional; only needed for timecode (BWF TimeReference) embedding.\sa180\par}
 {\pard \ql \f0 \sa180 \li0 \fi0 \outlinelevel2 \b \fs28 Moving from hsuanice/PublicBeta\par}
 {\pard \ql \f0 \sa180 \li0 \fi0 This repository replaces {\f1 hsuanice/PublicBeta}, which is no longer updated. Both install to the same folder, so remove PublicBeta first:\par}
@@ -752,6 +835,8 @@ Packages
 {\pard \ql \f0 \sa180 \li0 \fi0 | Package | What it does | |---|---| | Auto Pan LR tracks | Pan adjacent XXX_L / XXX_R track pairs hard left / right | | Delete Selected Tracks with Warning | Safe delete: asks first when tracks have items, FX, routing or are folders | | Show/Hide TCP children of folder tracks | Show or hide the children of the selected folder tracks (or of their parent) in the TCP | | Split Tracks by Item Channel {\i (pre-release)} | Split tracks whose items mix mono / stereo / multichannel into one track per channel count | | Import audio files per folder (Field Recorder) | Import one folder per track; channel-split recorder files are grouped (GUI) | | Import audio files per folder (Music Multitrack) | Import one folder per track for music multitrack sessions (GUI) |\par}
 {\pard \ql \f0 \sa180 \li0 \fi0 \outlinelevel2 \b \fs28 Metadata\par}
 {\pard \ql \f0 \sa180 \li0 \fi0 | Package | What it does | |---|---| | Rename from Metadata | Rename takes or source files from BWF / iXML metadata tokens, with live preview (GUI) | | Item List | Spreadsheet-style item tables with metadata columns: Item List Editor + Item List Browser (GUI) | | BWF / iXML Embed Tools | Write timecode, iXML / BWF metadata and SMPTE UMID into files (needs BWF MetaEdit) |\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 \outlinelevel2 \b \fs28 Conform\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 | Package | What it does | |---|---| | Conform List Browser {\i (pre-release)} | Spreadsheet-style conform tool for EDL / AAF / XML / OTIO / subtitle lists: match source media, generate and link items, compare old / new cuts (GUI + Jump / Link / Load / Reveal wrappers) |\par}
 {\pard \ql \f0 \sa180 \li0 \fi0 \outlinelevel2 \b \fs28 Library\par}
 {\pard \ql \f0 \sa180 \li0 \fi0 | Package | What it does | |---|---| | hsuanice Library | Shared code used by the scripts above; adds nothing to the Action List |\par}
 {\pard \ql \f0 \sa180 \li0 \fi0 Suggested shortcuts are listed in each package's About page in ReaPack (never assigned automatically).\par}
@@ -774,6 +859,16 @@ Claude
 {\pard \ql \f0 \sa180 \li0 \fi0 AudioSweet is inspired by the AudioSuite-like script by Tim Chimes. "AudioSweet" is a name originally given by Tim Chimes; this project continues to use the name in reference to his original work. Original: "Renders selected plugin to selected media item", written for REAPER 5.1 with Lua (v1.1, 2015-12-22) \u8212- http://timchimes.com/scripting-with-reaper-audiosuite/\par}
 {\pard \ql \f0 \sa180 \li0 \fi0 Hover Mode Toggle is based on / inspired by TJF's {\i Hover Mode Toggle} script.\par}
 {\pard \ql \f0 \sa180 \li0 \fi0 Auto Color's palette (hue + per-row saturation / value) is modeled after rodilab's {\i Color palette} script. Auto Color's Shiny mode follows the ShinyColor behavior of {\i Chroma - Coloring Tool} by OLSHALOM \u8212- https://forum.cockos.com/showthread.php?t=281516\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 Conform List Browser uses {\field{\*\fldinst{HYPERLINK "https://github.com/AcademySoftwareFoundation/OpenTimelineIO"}}{\fldrslt{\ul
+OpenTimelineIO
+}}}
+ (Academy Software Foundation) for timeline files and {\field{\*\fldinst{HYPERLINK "https://github.com/agfline/LibAAF"}}{\fldrslt{\ul
+LibAAF
+}}}
+ by agfline (aaftool) for AAF. {\f1 Library/json.lua} is based on {\field{\*\fldinst{HYPERLINK "https://github.com/rxi/json.lua"}}{\fldrslt{\ul
+rxi/json.lua
+}}}
+ (MIT License, Copyright (c) 2020 rxi); the full license notice is kept in the file.\par}
 }
 ]]></description>
   </metadata>
