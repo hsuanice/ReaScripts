@@ -64,9 +64,20 @@ Suggested shortcuts are listed in each package's About page in ReaPack (never as
 
 Release notes are shown in ReaPack. Older history is in [Changelogs/](Changelogs/).
 
+## Built with AI (vibe coding)
+
+These scripts are a product of **vibe coding**: hsuanice is an audio post-production engineer, not a professional programmer.
+
+- **hsuanice** designs every workflow, decides how each tool should behave, and tests it in real post-production work.
+- **AI writes most of the code**: [Claude](https://claude.ai) by Anthropic and ChatGPT by OpenAI.
+- **Claude Code** (Anthropic's AI coding agent) also helps maintain this repository: the folder structure, ReaPack packaging, version numbers, changelogs and the release workflow.
+
+Please treat the scripts as such: try them on a copy of your project first, and keep backups of media you process.
+Bug reports and feedback are very welcome — open an issue on GitHub or reply in the REAPER forum threads linked in each package.
+
 ## Credits
 
-The scripts in this repository are created and maintained by hsuanice, with the assistance of AI tools such as ChatGPT and Claude.
+The scripts in this repository are designed, tested and maintained by hsuanice, with code written together with AI tools (Claude, ChatGPT).
 
 AudioSweet is inspired by the AudioSuite-like script by Tim Chimes.
 "AudioSweet" is a name originally given by Tim Chimes; this project continues to use the name in reference to his original work.
