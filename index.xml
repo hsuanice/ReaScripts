@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<index version="1" name="hsuanice Scripts" commit="69a8697e1b54666ea7228379b1490811fd778fa8">
+<index version="1" name="hsuanice Scripts" commit="cbba4cbebfac9c3a9957fa4a54f6f4fde6af588c">
   <category name="Conform">
     <reapack name="hsuanice_Conform List Browser - CLB.lua" type="script" desc="Conform List Browser - CLB: conform EDL / AAF / XML / OTIO / subtitle lists (GUI + Jump / Link / Load / Reveal)">
       <metadata>
@@ -643,7 +643,7 @@
 {\colortbl;\red255\green0\blue0;\red0\green0\blue255;}
 \widowctrl\hyphauto
 
-{\pard \ql \f0 \sa180 \li0 \fi0 After an AAF import, split-stereo tracks (e.g. "Audio 9_L" / "Audio 9_R") arrive panned center. This script scans ALL tracks and pans each adjacent L/R pair: \u8226 ? L track -> 100% Left, R track -> 100% Right \u8226 ? A pair = track N ends with an L suffix AND track N+1 has the same base name with an R suffix \u8226 ? Recognized suffixes (case-insensitive): _L/_R, -L/-R, .L/.R, " L"/" R" Unpaired L/R-looking tracks are left untouched and listed in a message for review. Notes:\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 After an AAF import, split-stereo tracks (e.g. "Audio 9_L" / "Audio 9_R") arrive panned center. This script pans each adjacent L/R pair \u8212- within the selected tracks, or in the whole project when no track is selected: \u8226 ? L track -> 100% Left, R track -> 100% Right \u8226 ? A pair = track N ends with an L suffix AND track N+1 has the same base name with an R suffix (with a selection, both tracks of the pair must be selected); every pair is set on its own \u8226 ? Recognized suffixes (case-insensitive): _L/_R, -L/-R, .L/.R, " L"/" R" Unpaired L/R-looking tracks are left untouched and listed in a message for review. Notes:\par}
 {\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Works with every pan mode; in Dual Pan mode both knobs are set to the same side.\par}
 {\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Single undo point.\sa180\par}
 }
@@ -654,6 +654,10 @@
 - Messages translated to English.
 - Full history: Changelogs/ in the repository (https://github.com/hsuanice/ReaScripts/tree/master/Changelogs)]]></changelog>
         <source main="main">https://github.com/hsuanice/ReaScripts/raw/f4a9e400d5b11f9e5dee836f025ba6efdaae8c77/Tracks/hsuanice_Auto%20Pan%20LR%20tracks.lua</source>
+      </version>
+      <version name="26.1012.2303" author="hsuanice" time="2026-10-12T15:41:20Z">
+        <changelog><![CDATA[- Change: works on the selected tracks — every L/R pair inside the selection is panned 100% left / 100% right on its own (both tracks of a pair must be selected). With no selection, the whole project is processed as before.]]></changelog>
+        <source main="main">https://github.com/hsuanice/ReaScripts/raw/cbba4cbebfac9c3a9957fa4a54f6f4fde6af588c/Tracks/hsuanice_Auto%20Pan%20LR%20tracks.lua</source>
       </version>
     </reapack>
     <reapack name="hsuanice_Delete Selected Tracks with Warning.lua" type="script" desc="Delete Selected Tracks (safe; prompt if content/folders/FX/routing; show selection, children &amp; FX/routing counts)">
