@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<index version="1" name="hsuanice Scripts" commit="7da8f85a30be8947b6bfb8b01a1e2b93856b0482">
+<index version="1" name="hsuanice Scripts" commit="62d581c70c8ce9ed9443614aaf46ca96bcd542f8">
   <category name="Items Editing">
     <reapack name="hsuanice_Convert empty items to audio items.lua" type="script" desc="Convert empty items to audio items (preserve name &amp; notes)">
       <metadata>
@@ -331,6 +331,16 @@
         <source file="hsuanice_Metadata Read.lua">https://github.com/hsuanice/ReaScripts/raw/d041401023a48cbf068bde6ea96be9927df7b068/Library/hsuanice_Metadata%20Read.lua</source>
         <source file="hsuanice_Hover.lua">https://github.com/hsuanice/ReaScripts/raw/d041401023a48cbf068bde6ea96be9927df7b068/Library/hsuanice_Hover.lua</source>
       </version>
+      <version name="26.1012.0957" author="hsuanice" time="2026-10-12T02:16:08Z">
+        <changelog><![CDATA[- Add: hsuanice_Mouse.lua (used by Set Time to Item on Right-Drag Release).]]></changelog>
+        <source file="hsuanice_RGWH Core.lua">https://github.com/hsuanice/ReaScripts/raw/62d581c70c8ce9ed9443614aaf46ca96bcd542f8/Library/hsuanice_RGWH%20Core.lua</source>
+        <source file="hsuanice_AudioSweet Core.lua">https://github.com/hsuanice/ReaScripts/raw/62d581c70c8ce9ed9443614aaf46ca96bcd542f8/Library/hsuanice_AudioSweet%20Core.lua</source>
+        <source file="hsuanice_AS Preview Core.lua">https://github.com/hsuanice/ReaScripts/raw/62d581c70c8ce9ed9443614aaf46ca96bcd542f8/Library/hsuanice_AS%20Preview%20Core.lua</source>
+        <source file="hsuanice_Metadata Embed.lua">https://github.com/hsuanice/ReaScripts/raw/62d581c70c8ce9ed9443614aaf46ca96bcd542f8/Library/hsuanice_Metadata%20Embed.lua</source>
+        <source file="hsuanice_Metadata Read.lua">https://github.com/hsuanice/ReaScripts/raw/62d581c70c8ce9ed9443614aaf46ca96bcd542f8/Library/hsuanice_Metadata%20Read.lua</source>
+        <source file="hsuanice_Hover.lua">https://github.com/hsuanice/ReaScripts/raw/62d581c70c8ce9ed9443614aaf46ca96bcd542f8/Library/hsuanice_Hover.lua</source>
+        <source file="hsuanice_Mouse.lua">https://github.com/hsuanice/ReaScripts/raw/62d581c70c8ce9ed9443614aaf46ca96bcd542f8/Library/hsuanice_Mouse.lua</source>
+      </version>
     </reapack>
   </category>
   <category name="Rendering">
@@ -407,6 +417,70 @@
       </version>
     </reapack>
   </category>
+  <category name="Selection">
+    <reapack name="hsuanice_Razor and Item Link with Mode Switch to Overlap or Contain like Pro Tools.lua" type="script" desc="Razor and Item Link with Mode switch to Overlap or Contain like Pro Tools">
+      <metadata>
+        <description><![CDATA[{\rtf1\ansi\deff0{\fonttbl{\f0 \fswiss Helvetica;}{\f1 \fmodern Courier;}}
+{\colortbl;\red255\green0\blue0;\red0\green0\blue255;}
+\widowctrl\hyphauto
+
+{\pard \ql \f0 \sa180 \li0 \fi0 Single-button toggle watcher that add-selects media items on each track according to that track's TRACK-LEVEL Razor Areas (GUID == ""). Envelope-lane razors are preserved but ignored for matching.\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 MODE (user option inside the script): \u8226 ? RANGE_MODE = 1 \u8594 ? Overlap : item is selected if it INTERSECTS any Razor range \u8226 ? RANGE_MODE = 2 \u8594 ? Contain : item is selected only if it is FULLY inside a Razor range (INCLUSIVE with tiny EPS tolerance, so equal-length is selected; Pro Tools-like)\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 Behavior: \u8226 ? Add-only selection (does not clear existing item selection unless STRICT_SYNC = true). \u8226 ? Does not modify Razor Areas; only reads them. \u8226 ? Relaunching terminates the previous instance and keeps a toolbar toggle in sync.\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 Note: This script was generated using ChatGPT based on design concepts and iterative testing by hsuanice. hsuanice served as the workflow designer, tester, and integrator for this tool.\par}
+}
+]]></description>
+      </metadata>
+      <version name="26.1012.0958" author="hsuanice" time="2026-10-12T02:16:08Z">
+        <changelog><![CDATA[- First release in the hsuanice/ReaScripts repository.
+- Full history: Changelogs/ in the repository (https://github.com/hsuanice/ReaScripts/tree/master/Changelogs)]]></changelog>
+        <source main="main">https://github.com/hsuanice/ReaScripts/raw/62d581c70c8ce9ed9443614aaf46ca96bcd542f8/Selection/hsuanice_Razor%20and%20Item%20Link%20with%20Mode%20Switch%20to%20Overlap%20or%20Contain%20like%20Pro%20Tools.lua</source>
+      </version>
+    </reapack>
+    <reapack name="hsuanice_Set Time to Item Selection Mouse Right-Drag Release.lua" type="script" desc="Set Time to Item on Right-Drag Release (Toggle, One-Pass Perf)">
+      <metadata>
+        <description><![CDATA[{\rtf1\ansi\deff0{\fonttbl{\f0 \fswiss Helvetica;}{\f1 \fmodern Courier;}}
+{\colortbl;\red255\green0\blue0;\red0\green0\blue255;}
+\widowctrl\hyphauto
+
+{\pard \ql \f0 \sa180 \li0 \fi0 Toggle (background watcher). After a right-button DRAG, on the frame the button is released (optionally one frame later) the time selection is set to the earliest start / latest end of the currently selected items. Optimized for large projects: a single pass over the selected items on release (no GUID table, no before/after diff), and an optional skip when the time selection would not change. Requires hsuanice_Mouse.lua (hsuanice Library) and the js_ReaScriptAPI extension.\par}
+}
+]]></description>
+      </metadata>
+      <version name="26.1012.0958" author="hsuanice" time="2026-10-12T02:16:08Z">
+        <changelog><![CDATA[- First release in the hsuanice/ReaScripts repository.
+- Requires the "hsuanice Library" package.
+- Requires the js_ReaScriptAPI extension.
+- Header and comments translated to English.
+- Full history: Changelogs/ in the repository (https://github.com/hsuanice/ReaScripts/tree/master/Changelogs)]]></changelog>
+        <source main="main">https://github.com/hsuanice/ReaScripts/raw/62d581c70c8ce9ed9443614aaf46ca96bcd542f8/Selection/hsuanice_Set%20Time%20to%20Item%20Selection%20Mouse%20Right-Drag%20Release.lua</source>
+      </version>
+    </reapack>
+    <reapack name="hsuanice_Track and Razor Item Link like Pro Tools.lua" type="script" desc="Track↔Edit link (Pro Tools style). Performance edition; focuses on Razor &amp; item virtual ranges. This build removes menu guards for snappier click-select.">
+      <metadata>
+        <description><![CDATA[{\rtf1\ansi\deff0{\fonttbl{\f0 \fswiss Helvetica;}{\f1 \fmodern Courier;}}
+{\colortbl;\red255\green0\blue0;\red0\green0\blue255;}
+\widowctrl\hyphauto
+
+{\pard \ql \f0 \sa180 \li0 \fi0 Pro Tools-style "Link Track and Edit Selection". Edit Selection = Razor Area or Item Selection.\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 Perf principles: \u8226 ? Gate heavy scans by GetProjectStateChangeCount(). \u8226 ? Enumerate ONLY selected tracks/items when possible. \u8226 ? Cache per-track Razor; recompute on project-state changes only. \u8226 ? Apply changes only on delta tracks; publish ExtState only on change. \u8226 ? Keep Latched Virtual Range; avoid shrinking on track toggles.\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 Priority:\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 1)\tx360\tab Razor exists \u8594 ? use Razor (highest)\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 2)\tx360\tab Else Item Selection \u8594 ? use VIRTUAL (latched) span [min..max]\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 3)\tx360\tab Else no active range\sa180\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 Notes: \u8226 ? ABCD switches added (USER OPTIONS) to enable/disable each main section: A) Razor changed \u8594 ? Track selection follows "tracks with Razor" B) Items changed (no Razor) \u8594 ? Track selection follows items' tracks C) Track selection changed + REAL TS \u8594 ? build/clear Razor + sync items (Overlap) D) Razor/Track changed \u8594 ? sync items under ACTIVE range on changed tracks \u8226 ? DEBUG_PRINT will log which section fired (A/B/C/D) for instant diagnosis.\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 Credits: This script was generated using ChatGPT based on design concepts and iterative testing by hsuanice. hsuanice served as the workflow designer, tester, and integrator for this tool.\par}
+}
+]]></description>
+      </metadata>
+      <version name="26.1012.0958" author="hsuanice" time="2026-10-12T02:16:08Z">
+        <changelog><![CDATA[- First release in the hsuanice/ReaScripts repository.
+- Works best with the js_ReaScriptAPI and SWS extensions installed (optional).
+- Full history: Changelogs/ in the repository (https://github.com/hsuanice/ReaScripts/tree/master/Changelogs)]]></changelog>
+        <source main="main">https://github.com/hsuanice/ReaScripts/raw/62d581c70c8ce9ed9443614aaf46ca96bcd542f8/Selection/hsuanice_Track%20and%20Razor%20Item%20Link%20like%20Pro%20Tools.lua</source>
+      </version>
+    </reapack>
+  </category>
   <metadata>
     <description><![CDATA[{\rtf1\ansi\deff0{\fonttbl{\f0 \fswiss Helvetica;}{\f1 \fmodern Courier;}}
 {\colortbl;\red255\green0\blue0;\red0\green0\blue255;}
@@ -430,6 +504,7 @@ Packages
 {\pard \ql \f0 \sa180 \li0 \fi0 \outlinelevel2 \b \fs28 Requirements\par}
 {\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab {\b ReaImGui} \u8212- needed by the GUI scripts; install with ReaPack ({\i ReaTeam Extensions} repository, included by default).\par}
 {\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab {\b SWS Extension} \u8212- optional; a few features use it (e.g. {\i Retain Glue Cues}).\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab {\b js_ReaScriptAPI} \u8212- needed by {\i Set Time to Item on Right-Drag Release}, recommended for {\i Track and Razor Item Link}; install with ReaPack ({\i ReaTeam Extensions}).\par}
 {\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab {\b BWF MetaEdit} ({\f1 bwfmetaedit} command-line tool) \u8212- optional; only needed for timecode (BWF TimeReference) embedding.\sa180\par}
 {\pard \ql \f0 \sa180 \li0 \fi0 \outlinelevel2 \b \fs28 Moving from hsuanice/PublicBeta\par}
 {\pard \ql \f0 \sa180 \li0 \fi0 This repository replaces {\f1 hsuanice/PublicBeta}, which is no longer updated. Both install to the same folder, so remove PublicBeta first:\par}
@@ -442,6 +517,8 @@ Packages
 {\pard \ql \f0 \sa180 \li0 \fi0 | Package | What it does | |---|---| | Hover Mode | Pro Tools-style Split / Trim at the mouse or edit cursor (Toggle, Split, Trim Left / Right) | | Reorder | Vertical reorder and sort of selected items (GUI + Copy to Sort / Sort in Place / Upfill) | | Fix Tools | Clean up edits before moving a session to Pro Tools or Nuendo (edges off grid, looped sources, crossfades, overlaps, fades) | | Copy / Cut with Razor | Copy or cut items and envelope points, respecting razor edits | | Item Reposition | Reposition selected items by interval (GUI) | | Move selected items to track under mouse | Move items vertically, keeping their timeline position | | Toggle Mute Item under Mouse Cursor | Mute / unmute the item under the mouse | | Explode takes of items across tracks | Put each take of the selected items on its own track | | Explode Multichannel Poly Audio | Split poly files into one-channel items, keeping metadata | | Convert empty items to audio items | Keep names and notes | | Copy Unmuted Child Items to Parent Folder Track | Copy unmuted child items to the folder track (checks overlaps first) |\par}
 {\pard \ql \f0 \sa180 \li0 \fi0 \outlinelevel2 \b \fs28 Items Properties\par}
 {\pard \ql \f0 \sa180 \li0 \fi0 | Package | What it does | |---|---| | Auto Color | Color items by take-name keywords with a configurable palette (GUI + Background Daemon, by Palette, Smart Random, Follow Track Color, All ShinyColor) |\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 \outlinelevel2 \b \fs28 Selection\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 | Package | What it does | |---|---| | Track and Razor Item Link like Pro Tools | Pro Tools-style "Link Track and Edit Selection": tracks follow razor areas / item selection (toggle) | | Razor and Item Link with Mode Switch | Razor areas select the items they overlap or fully contain (toggle) | | Set Time to Item on Right-Drag Release | After a right-button drag, the time selection follows the selected items (toggle) |\par}
 {\pard \ql \f0 \sa180 \li0 \fi0 \outlinelevel2 \b \fs28 Library\par}
 {\pard \ql \f0 \sa180 \li0 \fi0 | Package | What it does | |---|---| | hsuanice Library | Shared code used by the scripts above; adds nothing to the Action List |\par}
 {\pard \ql \f0 \sa180 \li0 \fi0 Suggested shortcuts are listed in each package's About page in ReaPack (never assigned automatically).\par}
