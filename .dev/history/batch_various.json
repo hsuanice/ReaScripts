@@ -1,0 +1,28 @@
+{
+  "category": "Various",
+  "packages": [
+    {"files": [{"src": "Beta Testing/hsuanice_PM_Timer.lua"}]},
+    {"files": [{"src": "Beta Testing/hsuanice_PM_InsightAnalyzer.lua"}]},
+    {"files": [{"src": "Beta Testing/hsuanice_Console to Work Log Daemon.lua"}]},
+    {"files": [{"src": "Beta Testing/hsuanice_Work Timer.lua"}]},
+    {"files": [{"src": "Beta Testing/hsuanice_Count Item and Track and Toggle Show Item Details.lua"}]},
+    {"files": [{"src": "Beta Testing/hsuanice_Media Explorer User Column Set Switcher.lua", "section": "mediaexplorer",
+                "shortcut": "Cmd+Option+Shift+Control+S (in the Media Explorer action section)"}]}
+  ],
+  "notes": {
+    "hsuanice_PM_Timer.lua": [
+      "Requires the SWS extension.",
+      "New: FPS (and DF for drop-frame) shown on the status line.",
+      "Update Scene Metadata rewritten: scene name taken from the take name first (CLB-created scenes no longer become \"(no name)\"), take name set from the scene name, source items attributed by item group, selected scenes or all; runs automatically when PM Timer opens, closes or the project changes, and only writes when something changed.",
+      "New: broken scene links (work log items pointing to a scene that no longer exists) are shown on the status line; Update Scene Metadata offers to re-link them automatically when a scene with the same name and start is found, and the new \"Relink to Selected Scene\" menu item re-links them by hand."],
+    "hsuanice_PM_InsightAnalyzer.lua": [
+      "Pre-release: work in progress (basic info and time totals so far) — only installed when \"Enable pre-releases\" is on in ReaPack.",
+      "Requires the SWS extension."],
+    "hsuanice_Console to Work Log Daemon.lua": [
+      "Requires the js_ReaScriptAPI extension.",
+      "Fix: the log folder is created with REAPER's API (works on Windows, no shell call on every write)."],
+    "hsuanice_Media Explorer User Column Set Switcher.lua": [
+      "Installed in the Media Explorer action section.",
+      "Requires ReaImGui and the SWS extension."]
+  }
+}

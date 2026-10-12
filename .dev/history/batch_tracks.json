@@ -1,0 +1,17 @@
+{
+  "category": "Tracks",
+  "packages": [
+    {"files": [{"src": "Beta Testing/hsuanice_Auto Pan LR tracks.lua", "shortcut": "Control+Option+Cmd+Shift+L"}]},
+    {"files": [{"src": "Beta Testing/hsuanice_Delete Selected Tracks with Warning.lua", "shortcut": "Control+Cmd+Delete"}]},
+    {"files": [{"src": "Beta Testing/hsuanice_Show Hide Tracks of Selected Parent or Childred Folder Tracks in TCP.lua", "shortcut": "Shift+F"}]},
+    {"files": [{"src": "Beta Testing/hsuanice_Split Tracks by Item Channel.lua"}]},
+    {"files": [{"src": "Beta Testing/hsuanice_Import audio files per folder into separate tracks Field Recorder.lua"}]},
+    {"files": [{"src": "Beta Testing/hsuanice_Import audio files per folder into separate tracks Music Multitrack.lua"}]}
+  ],
+  "notes": {
+    "hsuanice_Auto Pan LR tracks.lua": ["Messages translated to English."],
+    "hsuanice_Show Hide Tracks of Selected Parent or Childred Folder Tracks in TCP.lua": ["Comments translated to English."],
+    "hsuanice_Split Tracks by Item Channel.lua": ["Pre-release: splitting works but is not perfect yet — only installed when \"Enable pre-releases\" is on in ReaPack.", "Comments translated to English."],
+    "hsuanice_Import audio files per folder into separate tracks Field Recorder.lua": ["Comments translated to English."]
+  }
+}

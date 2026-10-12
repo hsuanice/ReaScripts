@@ -124,6 +124,10 @@ Suggested shortcuts are listed in each package's About page in ReaPack (never as
 
 Release notes are shown in ReaPack. Older history is in [Changelogs/](Changelogs/).
 
+## Maintaining
+
+Rules, folder layout and the release workflow are documented in [MAINTAINING.md](MAINTAINING.md).
+
 ## Built with AI (vibe coding)
 
 These scripts are a product of **vibe coding**: hsuanice is an audio post-production engineer, not a professional programmer.

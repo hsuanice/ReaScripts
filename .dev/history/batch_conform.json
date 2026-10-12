@@ -1,0 +1,30 @@
+{
+  "category": "Conform",
+  "packages": [
+    {"files": [
+       {"src": "Beta Testing/hsuanice_Conform List Browser.lua"},
+       {"src": "Beta Testing/hsuanice_CLB Jump Old-New TC.lua"},
+       {"src": "Beta Testing/hsuanice_CLB Link Reaper Items.lua"},
+       {"src": "Beta Testing/hsuanice_CLB Load From Reaper.lua"},
+       {"src": "Beta Testing/hsuanice_CLB Reveal Item.lua"}],
+     "extra_provides": ["[nomain] ../Tools/otio_to_clb.py",
+                        "[nomain] ../Tools/aaf_to_otio.py",
+                        "[nomain] ../Tools/subtitle_to_clb.py"]}
+  ],
+  "libs": ["Library/hsuanice_CLB Compare Engine.lua", "Library/hsuanice_EDL Parser.lua",
+           "Library/hsuanice_OTIO Bridge.lua", "Library/hsuanice_Subtitle Bridge.lua",
+           "Library/hsuanice_Process Exec.lua", "Library/json.lua"],
+  "lib_checks": {
+    "hsuanice_Conform List Browser.lua": ["hsuanice_EDL Parser.lua", "hsuanice_OTIO Bridge.lua", "hsuanice_Subtitle Bridge.lua",
+      "hsuanice_CLB Compare Engine.lua", "hsuanice_List Table.lua", "hsuanice_Time Format.lua", "hsuanice_Metadata Read.lua",
+      "hsuanice_Metadata Embed.lua", "hsuanice_Process Exec.lua", "json.lua"]
+  },
+  "notes": {
+    "hsuanice_Conform List Browser.lua": [
+      "Pre-release: everything is in daily use except Compare, which is still being tested — only installed when \"Enable pre-releases\" is on in ReaPack.",
+      "Includes the CLB wrappers (Jump Old-New TC, Link Reaper Items, Load From Reaper, Reveal Item) and the Python helpers in Tools/ for AAF / XML / OTIO / subtitle import.",
+      "EDL works out of the box. AAF / XML / OTIO need Python 3 + OpenTimelineIO; AAF also needs LibAAF's aaftool.",
+      "Fix: the wrappers now find CLB from its file path, so they work on any machine.",
+      "Window title / console version is read from the header."]
+  }
+}

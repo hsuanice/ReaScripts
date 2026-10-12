@@ -1,0 +1,17 @@
+{
+  "category": "Items Properties",
+  "packages": [
+    {"files": [
+       {"src": "Beta Testing/hsuanice_Auto Color Items by Take Name.lua"},
+       {"src": "Beta Testing/hsuanice_Auto Color Daemon.lua"},
+       {"src": "Beta Testing/hsuanice_Auto Color by Palette.lua"},
+       {"src": "Beta Testing/hsuanice_Auto Color Smart Random.lua"},
+       {"src": "Beta Testing/hsuanice_Auto Color Follow Track Color.lua"},
+       {"src": "Beta Testing/hsuanice_Auto Color All ShinyColor.lua"}]}
+  ],
+  "notes": {
+    "hsuanice_Auto Color Items by Take Name.lua": [
+      "Includes: GUI, Background Daemon, by Palette, Smart Random, Follow Track Color, All ShinyColor (all share the GUI's settings).",
+      "Fix: the settings folder is now created with REAPER's API, so saving also works on Windows."]
+  }
+}

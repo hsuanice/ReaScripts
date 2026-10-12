@@ -6,6 +6,9 @@
 !/.github/
 !/.reapack-index.conf
 !/README.md
+!/MAINTAINING.md
+!/CLAUDE.md
+!/.dev/
 !/index.xml
 !/Changelogs/
 

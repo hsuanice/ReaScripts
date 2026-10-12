@@ -1,0 +1,64 @@
+{
+  "category": "Items Editing",
+  "packages": [
+    {"meta": "hsuanice_Hover Mode.lua",
+     "description": "Hover Mode - Pro Tools-style Split / Trim at the mouse or edit cursor",
+     "about": ["# Hover Mode", "",
+               "Pro Tools-style editing that follows the mouse (Hover Mode on) or the edit cursor (Hover Mode off).",
+               "", "- Toggle: switch Hover Mode on/off (toolbar-friendly)",
+               "- Split: split items at the selection, edit cursor or mouse",
+               "- Trim Left / Right: trim or extend the item edge to the cursor, keeping fades"],
+     "files": [
+       {"src": "Beta Testing/hsuanice_Hover Mode Toggle.lua"},
+       {"src": "Beta Testing/hsuanice_Hover Mode Split Item by Selection or Edit or Mouse Cursor.lua", "shortcut": "B"},
+       {"src": "Beta Testing/hsuanice_Hover Mode Trim or Extend Left Edge of Item.lua", "shortcut": "A"},
+       {"src": "Beta Testing/hsuanice_Hover Mode Trim or Extend Right Edge of Item.lua", "shortcut": "S"}]},
+
+    {"files": [
+       {"src": "Beta Testing/hsuanice_Reorder or sort selected items vertically.lua"},
+       {"src": "Beta Testing/hsuanice_Reorder - Copy to Sort.lua", "shortcut": "Control+Cmd+Shift+C"},
+       {"src": "Beta Testing/hsuanice_Reorder - Sort in Place.lua", "shortcut": "Control+Cmd+Shift+S"},
+       {"src": "Beta Testing/hsuanice_Reorder - Upfill.lua", "shortcut": "Control+Cmd+Shift+U"}]},
+
+    {"meta": "hsuanice_Fix Tools.lua",
+     "description": "Fix Tools - clean up edits before moving a REAPER session to Pro Tools or Nuendo",
+     "about": ["# Fix Tools", "",
+               "Find and fix edit details that other DAWs handle differently when a REAPER session is exported.",
+               "", "- Fix Edges Off Grid", "- Fix Looped Source Items", "- Fix Misaligned Crossfades",
+               "- Fix Overlap Items (partial or complete)", "- Fix Split Items at Fade Edges"],
+     "files": [
+       {"src": "Beta Testing/hsuanice_Fix Edges Off Grid.lua"},
+       {"src": "Beta Testing/hsuanice_Fix Looped Source Items.lua"},
+       {"src": "Beta Testing/hsuanice_Fix Misaligned Crossfades.lua"},
+       {"src": "Beta Testing/hsuanice_Fix Overlap Items Partial or Complete.lua"},
+       {"src": "Beta Testing/hsuanice_Fix Split Items at Fade Edges.lua"}]},
+
+    {"meta": "hsuanice_Copy and Cut with Razor.lua",
+     "description": "Copy / Cut items and envelope points (respects razor edits), then move the edit cursor to the selection start",
+     "about": ["# Copy / Cut with Razor", "",
+               "Copy or cut items together with envelope points, respecting razor edit areas,",
+               "and move the edit cursor to the start of the selection."],
+     "files": [
+       {"src": "Beta Testing/hsuanice_Copy Items and Envelope Points and Move Edit Cursor to Selection Start Respect Razor.lua", "shortcut": "Cmd+C (or C)"},
+       {"src": "Beta Testing/hsuanice_Cut Items and Envelope Points and Move Edit Cursor to Selection Start Respect Razor.lua", "shortcut": "Cmd+X (or X)"}]},
+
+    {"files": [{"src": "Beta Testing/hsuanice_Item Reposition.lua", "shortcut": "Option+Shift+H"}]},
+    {"files": [{"src": "Beta Testing/hsuanice_Move selected items to track under mouse.lua", "shortcut": "Control+Shift+X"}]},
+    {"files": [{"src": "Beta Testing/hsuanice_Toggle Mute Item under Mouse Cursor.lua", "shortcut": "Control+M"}]},
+    {"files": [{"src": "Beta Testing/hsuanice_Explode takes of items across tracks.lua"}]},
+    {"files": [{"src": "Beta Testing/hsuanice_Explode Multichannel Poly Audio to New One-channel Items Preserve Metadata.lua"}]},
+    {"files": [{"src": "Beta Testing/hsuanice_Convert empty items to audio items.lua"}]},
+    {"files": [{"src": "Beta Testing/hsuanice_Copy Unmuted Child Items to Parent Folder Track.lua"}]}
+  ],
+  "libs": ["Library/hsuanice_Hover.lua"],
+  "lib_checks": {
+    "hsuanice_Hover Mode Split Item by Selection or Edit or Mouse Cursor.lua": ["hsuanice_Hover.lua"],
+    "hsuanice_Hover Mode Trim or Extend Left Edge of Item.lua": ["hsuanice_Hover.lua"],
+    "hsuanice_Hover Mode Trim or Extend Right Edge of Item.lua": ["hsuanice_Hover.lua"],
+    "hsuanice_Reorder or sort selected items vertically.lua": ["hsuanice_Metadata Read.lua"],
+    "hsuanice_Explode Multichannel Poly Audio to New One-channel Items Preserve Metadata.lua": ["hsuanice_Metadata Embed.lua"]
+  },
+  "notes": {
+    "hsuanice_Fix Tools.lua": ["Known issue: Fix Edges Off Grid can also move crossfades when run on many items; a fix is planned (crossfades will be skipped)."]
+  }
+}

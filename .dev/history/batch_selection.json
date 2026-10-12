@@ -1,0 +1,14 @@
+{
+  "category": "Selection",
+  "packages": [
+    {"files": [{"src": "Beta Testing/hsuanice_Track and Razor Item Link like Pro Tools.lua"}]},
+    {"files": [{"src": "Beta Testing/hsuanice_Razor and Item Link with Mode Switch to Overlap or Contain like Pro Tools.lua"}]},
+    {"files": [{"src": "Beta Testing/hsuanice_Set Time to Item Selection Mouse Right-Drag Release.lua"}]}
+  ],
+  "libs": ["Library/hsuanice_Mouse.lua"],
+  "lib_checks": {"hsuanice_Set Time to Item Selection Mouse Right-Drag Release.lua": ["hsuanice_Mouse.lua"]},
+  "notes": {
+    "hsuanice_Track and Razor Item Link like Pro Tools.lua": ["Works best with the js_ReaScriptAPI and SWS extensions installed (optional)."],
+    "hsuanice_Set Time to Item Selection Mouse Right-Drag Release.lua": ["Requires the js_ReaScriptAPI extension.", "Header and comments translated to English."]
+  }
+}

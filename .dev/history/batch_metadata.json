@@ -1,0 +1,52 @@
+{
+  "category": "Metadata",
+  "packages": [
+    {"meta": "hsuanice_Rename from Metadata.lua",
+     "description": "Rename from Metadata - rename takes or source files from BWF / iXML metadata with tokens (GUI)",
+     "about": ["# Rename from Metadata", "",
+               "Two GUI tools that build names from BWF / iXML metadata tokens ($trk, ${interleave}, ${chnum}, scene / take, ...)",
+               "with a cached live preview:", "",
+               "- Rename Active Take from File Metadata: take names and take notes",
+               "- Rename Source File from Metadata: renames the media files on disk and relinks them"],
+     "files": [{"src": "Beta Testing/hsuanice_Rename Active Take from File Metadata.lua"},
+               {"src": "Beta Testing/hsuanice_Rename Source File from Metadata.lua"}]},
+    {"meta": "hsuanice_Item List.lua",
+     "description": "Item List - spreadsheet-style table of items with metadata columns (Browser + Editor)",
+     "about": ["# Item List", "",
+               "Spreadsheet-style tables of items with track / take / note / source and metadata columns",
+               "(metadata track name, channel number, interleave, ...).", "",
+               "- Item List Editor: live table of the selected items with inline editing, copy / paste and export (TSV / CSV)",
+               "- Item List Browser: based on the Editor, with browsing and filtering features for larger sessions"],
+     "files": [{"src": "Beta Testing/hsuanice_Item List Browser.lua"},
+               {"src": "Beta Testing/hsuanice_Item List Editor.lua"}]},
+    {"meta": "hsuanice_BWF and iXML Embed Tools.lua",
+     "description": "BWF / iXML Embed Tools - write timecode, iXML / BWF metadata and SMPTE UMID into files (BWF MetaEdit)",
+     "about": ["# BWF / iXML Embed Tools", "",
+               "Write metadata into WAV files with the BWF MetaEdit command-line tool (bwfmetaedit):", "",
+               "- Embed iXML and BWF Metadata from Take 1 to Active Take (with SMPTE UMID option)",
+               "- Timecode Embed Tool: TimeReference to BWF + iXML, from Take 1 or the item position",
+               "- SMPTE UMID Generate and Embed Tool (bext:UMID)", "",
+               "Requires BWF MetaEdit: https://mediaarea.net/BWFMetaEdit (macOS: brew install bwfmetaedit)."],
+     "files": [{"src": "Beta Testing/hsuanice_Embed iXML and BWF Metadata from Take 1 to Active Take with SMPTE UMID option.lua"},
+               {"src": "Beta Testing/hsuanice_Timecode Embed Tool.lua"},
+               {"src": "Beta Testing/hsuanice_SMPTE UMID Generate and Embed Tool.lua"}]},
+    {"files": [{"src": "Beta Testing/hsuanice_Batch Metadata Conform.lua"}]},
+    {"files": [{"src": "Beta Testing/hsuanice_Find Items with Mismatched Lengths.lua"}]}
+  ],
+  "libs": ["Library/hsuanice_Metadata Cache.lua", "Library/hsuanice_Metadata Rename Core.lua",
+           "Library/hsuanice_List Table.lua", "Library/hsuanice_Time Format.lua",
+           "Library/hsuanice_Metadata Generator.lua"],
+  "lib_checks": {
+    "hsuanice_Rename Active Take from File Metadata.lua": ["hsuanice_Metadata Read.lua", "hsuanice_Metadata Cache.lua", "hsuanice_Metadata Rename Core.lua"],
+    "hsuanice_Rename Source File from Metadata.lua": ["hsuanice_Metadata Read.lua", "hsuanice_Metadata Cache.lua", "hsuanice_Metadata Rename Core.lua"],
+    "hsuanice_Item List Browser.lua": ["hsuanice_Metadata Read.lua", "hsuanice_Metadata Cache.lua", "hsuanice_List Table.lua", "hsuanice_Time Format.lua"],
+    "hsuanice_Item List Editor.lua": ["hsuanice_Metadata Read.lua", "hsuanice_Metadata Cache.lua", "hsuanice_List Table.lua", "hsuanice_Time Format.lua"],
+    "hsuanice_Batch Metadata Conform.lua": ["hsuanice_Metadata Read.lua", "hsuanice_Metadata Embed.lua", "hsuanice_Metadata Generator.lua"],
+    "hsuanice_Embed iXML and BWF Metadata from Take 1 to Active Take with SMPTE UMID option.lua": ["hsuanice_Metadata Embed.lua", "hsuanice_Metadata Generator.lua"],
+    "hsuanice_SMPTE UMID Generate and Embed Tool.lua": ["hsuanice_Metadata Embed.lua", "hsuanice_Metadata Generator.lua"]
+  },
+  "notes": {
+    "hsuanice_BWF and iXML Embed Tools.lua": ["Requires BWF MetaEdit (bwfmetaedit).", "Messages translated to English."],
+    "hsuanice_Batch Metadata Conform.lua": ["Fix: finds the hsuanice Library from any install folder (it used to expect the script inside \"Beta Testing\")."]
+  }
+}
