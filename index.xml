@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
-<index version="1" name="hsuanice Scripts" commit="bebe7e67d014263f833c5d2a4597572b5bf33e9f">
+<index version="1" name="hsuanice Scripts" commit="69a8697e1b54666ea7228379b1490811fd778fa8">
   <category name="Conform">
-    <reapack name="hsuanice_Conform List Browser.lua" type="script" desc="Conform List Browser">
+    <reapack name="hsuanice_Conform List Browser - CLB.lua" type="script" desc="Conform List Browser - CLB: conform EDL / AAF / XML / OTIO / subtitle lists (GUI + Jump / Link / Load / Reveal)">
       <metadata>
         <description><![CDATA[{\rtf1\ansi\deff0{\fonttbl{\f0 \fswiss Helvetica;}{\f1 \fmodern Courier;}}
 {\colortbl;\red255\green0\blue0;\red0\green0\blue255;}
@@ -41,28 +41,22 @@
 }
 ]]></description>
       </metadata>
-      <version name="26.1012.1206pre1" author="hsuanice" time="2026-10-12T04:48:13Z">
-        <changelog><![CDATA[- First release in the hsuanice/ReaScripts repository.
-- Requires the "hsuanice Library" package.
-- Pre-release: everything is in daily use except Compare, which is still being tested — only installed when "Enable pre-releases" is on in ReaPack.
-- Includes the CLB wrappers (Jump Old-New TC, Link Reaper Items, Load From Reaper, Reveal Item) and the Python helpers in Tools/ for AAF / XML / OTIO / subtitle import.
-- EDL works out of the box. AAF / XML / OTIO need Python 3 + OpenTimelineIO; AAF also needs LibAAF's aaftool.
-- Fix: the wrappers now find CLB from its file path, so they work on any machine.
-- Window title / console version is read from the header.
-- Full history: Changelogs/ in the repository (https://github.com/hsuanice/ReaScripts/tree/master/Changelogs)]]></changelog>
-        <source main="main">https://github.com/hsuanice/ReaScripts/raw/6ef5b7ef4f1aae083db79bd539d2dc5f07e3f200/Conform/hsuanice_Conform%20List%20Browser.lua</source>
-        <source main="main" file="hsuanice_CLB Jump Old-New TC.lua">https://github.com/hsuanice/ReaScripts/raw/6ef5b7ef4f1aae083db79bd539d2dc5f07e3f200/Conform/hsuanice_CLB%20Jump%20Old-New%20TC.lua</source>
-        <source main="main" file="hsuanice_CLB Link Reaper Items.lua">https://github.com/hsuanice/ReaScripts/raw/6ef5b7ef4f1aae083db79bd539d2dc5f07e3f200/Conform/hsuanice_CLB%20Link%20Reaper%20Items.lua</source>
-        <source main="main" file="hsuanice_CLB Load From Reaper.lua">https://github.com/hsuanice/ReaScripts/raw/6ef5b7ef4f1aae083db79bd539d2dc5f07e3f200/Conform/hsuanice_CLB%20Load%20From%20Reaper.lua</source>
-        <source main="main" file="hsuanice_CLB Reveal Item.lua">https://github.com/hsuanice/ReaScripts/raw/6ef5b7ef4f1aae083db79bd539d2dc5f07e3f200/Conform/hsuanice_CLB%20Reveal%20Item.lua</source>
-        <source file="../Tools/otio_to_clb.py">https://github.com/hsuanice/ReaScripts/raw/6ef5b7ef4f1aae083db79bd539d2dc5f07e3f200/Tools/otio_to_clb.py</source>
-        <source file="../Tools/aaf_to_otio.py">https://github.com/hsuanice/ReaScripts/raw/6ef5b7ef4f1aae083db79bd539d2dc5f07e3f200/Tools/aaf_to_otio.py</source>
-        <source file="../Tools/subtitle_to_clb.py">https://github.com/hsuanice/ReaScripts/raw/6ef5b7ef4f1aae083db79bd539d2dc5f07e3f200/Tools/subtitle_to_clb.py</source>
+      <version name="26.1012.1641pre1" author="hsuanice" time="2026-10-12T09:44:14Z">
+        <changelog><![CDATA[- Renamed to "Conform List Browser - CLB" (was "Conform List Browser") as part of the 2026-10-12 naming clean-up.
+- Reinstall the package from ReaPack and re-assign your shortcuts / toolbar buttons.]]></changelog>
+        <source main="main">https://github.com/hsuanice/ReaScripts/raw/69a8697e1b54666ea7228379b1490811fd778fa8/Conform/hsuanice_Conform%20List%20Browser%20-%20CLB.lua</source>
+        <source main="main" file="hsuanice_Conform List Browser - CLB Jump Old New TC.lua">https://github.com/hsuanice/ReaScripts/raw/69a8697e1b54666ea7228379b1490811fd778fa8/Conform/hsuanice_Conform%20List%20Browser%20-%20CLB%20Jump%20Old%20New%20TC.lua</source>
+        <source main="main" file="hsuanice_Conform List Browser - CLB Link REAPER Items.lua">https://github.com/hsuanice/ReaScripts/raw/69a8697e1b54666ea7228379b1490811fd778fa8/Conform/hsuanice_Conform%20List%20Browser%20-%20CLB%20Link%20REAPER%20Items.lua</source>
+        <source main="main" file="hsuanice_Conform List Browser - CLB Load from REAPER.lua">https://github.com/hsuanice/ReaScripts/raw/69a8697e1b54666ea7228379b1490811fd778fa8/Conform/hsuanice_Conform%20List%20Browser%20-%20CLB%20Load%20from%20REAPER.lua</source>
+        <source main="main" file="hsuanice_Conform List Browser - CLB Reveal Item.lua">https://github.com/hsuanice/ReaScripts/raw/69a8697e1b54666ea7228379b1490811fd778fa8/Conform/hsuanice_Conform%20List%20Browser%20-%20CLB%20Reveal%20Item.lua</source>
+        <source file="../Tools/otio_to_clb.py">https://github.com/hsuanice/ReaScripts/raw/69a8697e1b54666ea7228379b1490811fd778fa8/Tools/otio_to_clb.py</source>
+        <source file="../Tools/aaf_to_otio.py">https://github.com/hsuanice/ReaScripts/raw/69a8697e1b54666ea7228379b1490811fd778fa8/Tools/aaf_to_otio.py</source>
+        <source file="../Tools/subtitle_to_clb.py">https://github.com/hsuanice/ReaScripts/raw/69a8697e1b54666ea7228379b1490811fd778fa8/Tools/subtitle_to_clb.py</source>
       </version>
     </reapack>
   </category>
   <category name="Items Editing">
-    <reapack name="hsuanice_Convert empty items to audio items.lua" type="script" desc="Convert empty items to audio items (preserve name &amp; notes)">
+    <reapack name="hsuanice_Convert Empty Items to Audio Items.lua" type="script" desc="Convert Empty Items to Audio Items - keeps take names and notes">
       <metadata>
         <description><![CDATA[{\rtf1\ansi\deff0{\fonttbl{\f0 \fswiss Helvetica;}{\f1 \fmodern Courier;}}
 {\colortbl;\red255\green0\blue0;\red0\green0\blue255;}
@@ -79,19 +73,19 @@
 }
 ]]></description>
       </metadata>
-      <version name="26.1012.0736" author="hsuanice" time="2026-10-12T00:03:42Z">
-        <changelog><![CDATA[- First release in the hsuanice/ReaScripts repository.
-- Full history: Changelogs/ in the repository (https://github.com/hsuanice/ReaScripts/tree/master/Changelogs)]]></changelog>
-        <source main="main">https://github.com/hsuanice/ReaScripts/raw/d041401023a48cbf068bde6ea96be9927df7b068/Items%20Editing/hsuanice_Convert%20empty%20items%20to%20audio%20items.lua</source>
+      <version name="26.1012.1641" author="hsuanice" time="2026-10-12T09:44:14Z">
+        <changelog><![CDATA[- Renamed to "Convert Empty Items to Audio Items" (was "Convert empty items to audio items") as part of the 2026-10-12 naming clean-up.
+- Reinstall the package from ReaPack and re-assign your shortcuts / toolbar buttons.]]></changelog>
+        <source main="main">https://github.com/hsuanice/ReaScripts/raw/69a8697e1b54666ea7228379b1490811fd778fa8/Items%20Editing/hsuanice_Convert%20Empty%20Items%20to%20Audio%20Items.lua</source>
       </version>
     </reapack>
-    <reapack name="hsuanice_Copy and Cut with Razor.lua" type="script" desc="Copy / Cut items and envelope points (respects razor edits), then move the edit cursor to the selection start">
+    <reapack name="hsuanice_Copy and Cut with Razor.lua" type="script" desc="Copy / Cut Items and Envelope Points Respect Razor - then move the edit cursor to the selection start">
       <metadata>
         <description><![CDATA[{\rtf1\ansi\deff0{\fonttbl{\f0 \fswiss Helvetica;}{\f1 \fmodern Courier;}}
 {\colortbl;\red255\green0\blue0;\red0\green0\blue255;}
 \widowctrl\hyphauto
 
-{\pard \ql \f0 \sa180 \li0 \fi0 \outlinelevel0 \b \fs36 Copy / Cut with Razor\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 \outlinelevel0 \b \fs36 Copy / Cut Items and Envelope Points Respect Razor\par}
 {\pard \ql \f0 \sa180 \li0 \fi0 Copy or cut items together with envelope points, respecting razor edit areas, and move the edit cursor to the start of the selection.\par}
 {\pard \ql \f0 \sa180 \li0 \fi0 \outlinelevel1 \b \fs32 Suggested shortcuts\par}
 {\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Copy Items and Envelope Points and Move Edit Cursor to Selection Start Respect Razor: Cmd+C (or C)\par}
@@ -105,6 +99,12 @@
 - Full history: Changelogs/ in the repository (https://github.com/hsuanice/ReaScripts/tree/master/Changelogs)]]></changelog>
         <source main="main" file="hsuanice_Copy Items and Envelope Points and Move Edit Cursor to Selection Start Respect Razor.lua">https://github.com/hsuanice/ReaScripts/raw/d041401023a48cbf068bde6ea96be9927df7b068/Items%20Editing/hsuanice_Copy%20Items%20and%20Envelope%20Points%20and%20Move%20Edit%20Cursor%20to%20Selection%20Start%20Respect%20Razor.lua</source>
         <source main="main" file="hsuanice_Cut Items and Envelope Points and Move Edit Cursor to Selection Start Respect Razor.lua">https://github.com/hsuanice/ReaScripts/raw/d041401023a48cbf068bde6ea96be9927df7b068/Items%20Editing/hsuanice_Cut%20Items%20and%20Envelope%20Points%20and%20Move%20Edit%20Cursor%20to%20Selection%20Start%20Respect%20Razor.lua</source>
+      </version>
+      <version name="26.1012.1641" author="hsuanice" time="2026-10-12T09:44:14Z">
+        <changelog><![CDATA[- Scripts renamed as part of the 2026-10-12 naming clean-up (see the file list in @provides).
+- Reinstall the package from ReaPack and re-assign your shortcuts / toolbar buttons.]]></changelog>
+        <source main="main" file="hsuanice_Copy Items and Envelope Points Respect Razor.lua">https://github.com/hsuanice/ReaScripts/raw/69a8697e1b54666ea7228379b1490811fd778fa8/Items%20Editing/hsuanice_Copy%20Items%20and%20Envelope%20Points%20Respect%20Razor.lua</source>
+        <source main="main" file="hsuanice_Cut Items and Envelope Points Respect Razor.lua">https://github.com/hsuanice/ReaScripts/raw/69a8697e1b54666ea7228379b1490811fd778fa8/Items%20Editing/hsuanice_Cut%20Items%20and%20Envelope%20Points%20Respect%20Razor.lua</source>
       </version>
     </reapack>
     <reapack name="hsuanice_Copy Unmuted Child Items to Parent Folder Track.lua" type="script" desc="Copy UNMUTED child items to the parent folder track (pre-check overlaps → mark &amp; abort)">
@@ -123,7 +123,7 @@
         <source main="main">https://github.com/hsuanice/ReaScripts/raw/d041401023a48cbf068bde6ea96be9927df7b068/Items%20Editing/hsuanice_Copy%20Unmuted%20Child%20Items%20to%20Parent%20Folder%20Track.lua</source>
       </version>
     </reapack>
-    <reapack name="hsuanice_Explode Multichannel Poly Audio to New One-channel Items Preserve Metadata.lua" type="script" desc="Explode Multichannel Poly Audio to New One-channel Items Preserve Metadata">
+    <reapack name="hsuanice_Explode Multichannel Poly Audio to Mono Items.lua" type="script" desc="Explode Multichannel Poly Audio to Mono Items - one-channel items, metadata preserved">
       <metadata>
         <description><![CDATA[{\rtf1\ansi\deff0{\fonttbl{\f0 \fswiss Helvetica;}{\f1 \fmodern Courier;}}
 {\colortbl;\red255\green0\blue0;\red0\green0\blue255;}
@@ -144,14 +144,13 @@
 }
 ]]></description>
       </metadata>
-      <version name="26.1012.0736" author="hsuanice" time="2026-10-12T00:03:42Z">
-        <changelog><![CDATA[- First release in the hsuanice/ReaScripts repository.
-- Requires the "hsuanice Library" package.
-- Full history: Changelogs/ in the repository (https://github.com/hsuanice/ReaScripts/tree/master/Changelogs)]]></changelog>
-        <source main="main">https://github.com/hsuanice/ReaScripts/raw/d041401023a48cbf068bde6ea96be9927df7b068/Items%20Editing/hsuanice_Explode%20Multichannel%20Poly%20Audio%20to%20New%20One-channel%20Items%20Preserve%20Metadata.lua</source>
+      <version name="26.1012.1641" author="hsuanice" time="2026-10-12T09:44:14Z">
+        <changelog><![CDATA[- Renamed to "Explode Multichannel Poly Audio to Mono Items" (was "Explode Multichannel Poly Audio to New One-channel Items Preserve Metadata") as part of the 2026-10-12 naming clean-up.
+- Reinstall the package from ReaPack and re-assign your shortcuts / toolbar buttons.]]></changelog>
+        <source main="main">https://github.com/hsuanice/ReaScripts/raw/69a8697e1b54666ea7228379b1490811fd778fa8/Items%20Editing/hsuanice_Explode%20Multichannel%20Poly%20Audio%20to%20Mono%20Items.lua</source>
       </version>
     </reapack>
-    <reapack name="hsuanice_Explode takes of items across tracks.lua" type="script" desc="Explode takes of items across tracks">
+    <reapack name="hsuanice_Explode Takes Across Tracks.lua" type="script" desc="Explode Takes Across Tracks - each take on its own track, tracks named after the source">
       <metadata>
         <description><![CDATA[{\rtf1\ansi\deff0{\fonttbl{\f0 \fswiss Helvetica;}{\f1 \fmodern Courier;}}
 {\colortbl;\red255\green0\blue0;\red0\green0\blue255;}
@@ -163,51 +162,24 @@
 }
 ]]></description>
       </metadata>
-      <version name="26.1012.0736" author="hsuanice" time="2026-10-12T00:03:42Z">
-        <changelog><![CDATA[- First release in the hsuanice/ReaScripts repository.
-- Full history: Changelogs/ in the repository (https://github.com/hsuanice/ReaScripts/tree/master/Changelogs)]]></changelog>
-        <source main="main">https://github.com/hsuanice/ReaScripts/raw/d041401023a48cbf068bde6ea96be9927df7b068/Items%20Editing/hsuanice_Explode%20takes%20of%20items%20across%20tracks.lua</source>
+      <version name="26.1012.1641" author="hsuanice" time="2026-10-12T09:44:14Z">
+        <changelog><![CDATA[- Renamed to "Explode Takes Across Tracks" (was "Explode takes of items across tracks") as part of the 2026-10-12 naming clean-up.
+- Reinstall the package from ReaPack and re-assign your shortcuts / toolbar buttons.]]></changelog>
+        <source main="main">https://github.com/hsuanice/ReaScripts/raw/69a8697e1b54666ea7228379b1490811fd778fa8/Items%20Editing/hsuanice_Explode%20Takes%20Across%20Tracks.lua</source>
       </version>
     </reapack>
-    <reapack name="hsuanice_Fix Tools.lua" type="script" desc="Fix Tools - clean up edits before moving a REAPER session to Pro Tools or Nuendo">
+    <reapack name="hsuanice_Hover Editing.lua" type="script" desc="Hover Editing - Pro Tools-style Split / Trim at the mouse or edit cursor (Toggle Hover Mode, Split, Trim Left / Right)">
       <metadata>
         <description><![CDATA[{\rtf1\ansi\deff0{\fonttbl{\f0 \fswiss Helvetica;}{\f1 \fmodern Courier;}}
 {\colortbl;\red255\green0\blue0;\red0\green0\blue255;}
 \widowctrl\hyphauto
 
-{\pard \ql \f0 \sa180 \li0 \fi0 \outlinelevel0 \b \fs36 Fix Tools\par}
-{\pard \ql \f0 \sa180 \li0 \fi0 Find and fix edit details that other DAWs handle differently when a REAPER session is exported.\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Fix Edges Off Grid\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Fix Looped Source Items\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Fix Misaligned Crossfades\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Fix Overlap Items (partial or complete)\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Fix Split Items at Fade Edges\sa180\par}
-}
-]]></description>
-      </metadata>
-      <version name="26.1012.0736" author="hsuanice" time="2026-10-12T00:03:42Z">
-        <changelog><![CDATA[- First release in the hsuanice/ReaScripts repository.
-- Known issue: Fix Edges Off Grid can also move crossfades when run on many items; a fix is planned (crossfades will be skipped).
-- Full history: Changelogs/ in the repository (https://github.com/hsuanice/ReaScripts/tree/master/Changelogs)]]></changelog>
-        <source main="main" file="hsuanice_Fix Edges Off Grid.lua">https://github.com/hsuanice/ReaScripts/raw/d041401023a48cbf068bde6ea96be9927df7b068/Items%20Editing/hsuanice_Fix%20Edges%20Off%20Grid.lua</source>
-        <source main="main" file="hsuanice_Fix Looped Source Items.lua">https://github.com/hsuanice/ReaScripts/raw/d041401023a48cbf068bde6ea96be9927df7b068/Items%20Editing/hsuanice_Fix%20Looped%20Source%20Items.lua</source>
-        <source main="main" file="hsuanice_Fix Misaligned Crossfades.lua">https://github.com/hsuanice/ReaScripts/raw/d041401023a48cbf068bde6ea96be9927df7b068/Items%20Editing/hsuanice_Fix%20Misaligned%20Crossfades.lua</source>
-        <source main="main" file="hsuanice_Fix Overlap Items Partial or Complete.lua">https://github.com/hsuanice/ReaScripts/raw/d041401023a48cbf068bde6ea96be9927df7b068/Items%20Editing/hsuanice_Fix%20Overlap%20Items%20Partial%20or%20Complete.lua</source>
-        <source main="main" file="hsuanice_Fix Split Items at Fade Edges.lua">https://github.com/hsuanice/ReaScripts/raw/d041401023a48cbf068bde6ea96be9927df7b068/Items%20Editing/hsuanice_Fix%20Split%20Items%20at%20Fade%20Edges.lua</source>
-      </version>
-    </reapack>
-    <reapack name="hsuanice_Hover Mode.lua" type="script" desc="Hover Mode - Pro Tools-style Split / Trim at the mouse or edit cursor">
-      <metadata>
-        <description><![CDATA[{\rtf1\ansi\deff0{\fonttbl{\f0 \fswiss Helvetica;}{\f1 \fmodern Courier;}}
-{\colortbl;\red255\green0\blue0;\red0\green0\blue255;}
-\widowctrl\hyphauto
-
-{\pard \ql \f0 \sa180 \li0 \fi0 \outlinelevel0 \b \fs36 Hover Mode\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 \outlinelevel0 \b \fs36 Hover Editing\par}
 {\pard \ql \f0 \sa180 \li0 \fi0 Pro Tools-style editing that follows the mouse (Hover Mode on) or the edit cursor (Hover Mode off).\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Toggle: switch Hover Mode on/off (toolbar-friendly)\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Toggle Hover Mode: switch Hover Mode on/off (toolbar-friendly)\par}
 {\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Split: split items at the selection, edit cursor or mouse\par}
 {\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Trim Left / Right: trim or extend the item edge to the cursor, keeping fades\sa180\par}
-{\pard \ql \f0 \sa180 \li0 \fi0 Hover Mode Toggle is based on / inspired by TJF's "Hover Mode Toggle" script.\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 Toggle Hover Mode is based on / inspired by TJF's "Hover Mode Toggle" script.\par}
 {\pard \ql \f0 \sa180 \li0 \fi0 \outlinelevel1 \b \fs32 Suggested shortcuts\par}
 {\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Hover Mode Split Item by Selection or Edit or Mouse Cursor: B\par}
 {\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Hover Mode Trim or Extend Left Edge of Item: A\par}
@@ -216,17 +188,72 @@
 }
 ]]></description>
       </metadata>
-      <version name="26.1012.0736" author="hsuanice" time="2026-10-12T00:03:42Z">
-        <changelog><![CDATA[- First release in the hsuanice/ReaScripts repository.
-- Requires the "hsuanice Library" package.
-- Full history: Changelogs/ in the repository (https://github.com/hsuanice/ReaScripts/tree/master/Changelogs)]]></changelog>
-        <source main="main" file="hsuanice_Hover Mode Toggle.lua">https://github.com/hsuanice/ReaScripts/raw/d041401023a48cbf068bde6ea96be9927df7b068/Items%20Editing/hsuanice_Hover%20Mode%20Toggle.lua</source>
-        <source main="main" file="hsuanice_Hover Mode Split Item by Selection or Edit or Mouse Cursor.lua">https://github.com/hsuanice/ReaScripts/raw/d041401023a48cbf068bde6ea96be9927df7b068/Items%20Editing/hsuanice_Hover%20Mode%20Split%20Item%20by%20Selection%20or%20Edit%20or%20Mouse%20Cursor.lua</source>
-        <source main="main" file="hsuanice_Hover Mode Trim or Extend Left Edge of Item.lua">https://github.com/hsuanice/ReaScripts/raw/d041401023a48cbf068bde6ea96be9927df7b068/Items%20Editing/hsuanice_Hover%20Mode%20Trim%20or%20Extend%20Left%20Edge%20of%20Item.lua</source>
-        <source main="main" file="hsuanice_Hover Mode Trim or Extend Right Edge of Item.lua">https://github.com/hsuanice/ReaScripts/raw/d041401023a48cbf068bde6ea96be9927df7b068/Items%20Editing/hsuanice_Hover%20Mode%20Trim%20or%20Extend%20Right%20Edge%20of%20Item.lua</source>
+      <version name="26.1012.1641" author="hsuanice" time="2026-10-12T09:44:14Z">
+        <changelog><![CDATA[- Renamed to "Hover Editing" (was "Hover Mode") as part of the 2026-10-12 naming clean-up.
+- Reinstall the package from ReaPack and re-assign your shortcuts / toolbar buttons.]]></changelog>
+        <source main="main" file="hsuanice_Hover Editing - Toggle Hover Mode.lua">https://github.com/hsuanice/ReaScripts/raw/69a8697e1b54666ea7228379b1490811fd778fa8/Items%20Editing/hsuanice_Hover%20Editing%20-%20Toggle%20Hover%20Mode.lua</source>
+        <source main="main" file="hsuanice_Hover Editing - Split Items at Mouse or Edit Cursor.lua">https://github.com/hsuanice/ReaScripts/raw/69a8697e1b54666ea7228379b1490811fd778fa8/Items%20Editing/hsuanice_Hover%20Editing%20-%20Split%20Items%20at%20Mouse%20or%20Edit%20Cursor.lua</source>
+        <source main="main" file="hsuanice_Hover Editing - Trim or Extend Left Edge.lua">https://github.com/hsuanice/ReaScripts/raw/69a8697e1b54666ea7228379b1490811fd778fa8/Items%20Editing/hsuanice_Hover%20Editing%20-%20Trim%20or%20Extend%20Left%20Edge.lua</source>
+        <source main="main" file="hsuanice_Hover Editing - Trim or Extend Right Edge.lua">https://github.com/hsuanice/ReaScripts/raw/69a8697e1b54666ea7228379b1490811fd778fa8/Items%20Editing/hsuanice_Hover%20Editing%20-%20Trim%20or%20Extend%20Right%20Edge.lua</source>
       </version>
     </reapack>
-    <reapack name="hsuanice_Item Reposition.lua" type="script" desc="ReaImGui - Item Reposition Tool (Interval + Mode + Undo)">
+    <reapack name="hsuanice_Move Selected Items to Track Under Mouse.lua" type="script" desc="Move Selected Items to Track Under Mouse - vertical only, keeps the timeline position">
+      <metadata>
+        <description><![CDATA[{\rtf1\ansi\deff0{\fonttbl{\f0 \fswiss Helvetica;}{\f1 \fmodern Courier;}}
+{\colortbl;\red255\green0\blue0;\red0\green0\blue255;}
+\widowctrl\hyphauto
+
+{\pard \ql \f0 \sa180 \li0 \fi0 Moves the currently selected items (one or many, possibly spanning multiple tracks) to the track that the mouse cursor is hovering over. Timeline position is preserved \u8212- only the vertical (track) position changes.\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 Acts as a one-step "vertical cut & paste":\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab No need to cut, scroll, click target track, then paste.\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Just select items, hover over the target track, run the action.\sa180\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 Behavior: \u8226 ? Scope: operates on the current item selection. \u8226 ? The topmost selected track is aligned to the track under the mouse. All other selected items keep their relative track offsets, so multi- track selections move together as a block. \u8226 ? If the destination span exceeds the last track, new empty tracks are auto-appended at the bottom of the project so all items have a home. \u8226 ? If any moved item would overlap an existing item on its destination track, a warning dialog is shown with three options: Yes (Insert) \u8212- Insert N empty tracks at the destination so the selection lands on fresh, empty tracks. No (Overwrite) \u8212- Trim/split existing items in the overlap range, then place the moved items on top. Cancel \u8212- Abort. \u8226 ? If the mouse is not over any track (e.g. over TCP empty area, ruler, or master), the script does nothing. \u8226 ? If the target offset is zero (mouse already on the topmost selected track), the script does nothing.\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 Notes:\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Designed for keyboard/mouse-modifier workflow (assign to a shortcut and trigger while hovering the destination track).\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Based on design concepts and iterative testing by hsuanice.\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Script generated and refined with Claude.\sa180\par}
+}
+]]></description>
+      </metadata>
+      <version name="26.1012.1641" author="hsuanice" time="2026-10-12T09:44:14Z">
+        <changelog><![CDATA[- Renamed to "Move Selected Items to Track Under Mouse" (was "Move selected items to track under mouse") as part of the 2026-10-12 naming clean-up.
+- Reinstall the package from ReaPack and re-assign your shortcuts / toolbar buttons.]]></changelog>
+        <source main="main">https://github.com/hsuanice/ReaScripts/raw/69a8697e1b54666ea7228379b1490811fd778fa8/Items%20Editing/hsuanice_Move%20Selected%20Items%20to%20Track%20Under%20Mouse.lua</source>
+      </version>
+    </reapack>
+    <reapack name="hsuanice_Reorder - Sort Items Vertically.lua" type="script" desc="Reorder - Sort Items Vertically by metadata (GUI + Copy to Sort / Sort in Place / Upfill)">
+      <metadata>
+        <description><![CDATA[{\rtf1\ansi\deff0{\fonttbl{\f0 \fswiss Helvetica;}{\f1 \fmodern Courier;}}
+{\colortbl;\red255\green0\blue0;\red0\green0\blue255;}
+\widowctrl\hyphauto
+
+{\pard \ql \f0 \sa180 \li0 \fi0 Provides three vertical re-arrangement modes for selected items (stacked UI):\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 \u8226 ? Reorder (fill upward)\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Keeps items at their original timeline position.\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Packs items upward into available selected tracks, avoiding gaps.\sa180\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 \u8226 ? Sort Vertically\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Groups items by near-identical start time.\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Within each time cluster, re-orders items top-to-bottom by: Take Name / File Name / Metadata (Track Name or Channel Number).\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Ascending / Descending toggle.\sa180\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 \u8226 ? Metadata modes\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Copy to Sort: duplicates selected items to NEW tracks grouped by metadata.\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Sort in Place: reorders items on their existing tracks based on metadata (Track Name or Channel Number). No new tracks are created, no names changed.\sa180\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 Notes:\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Based on design concepts and iterative testing by hsuanice.\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Script generated and refined with ChatGPT.\sa180\par}
+}
+]]></description>
+      </metadata>
+      <version name="26.1012.1641" author="hsuanice" time="2026-10-12T09:44:14Z">
+        <changelog><![CDATA[- Renamed to "Reorder - Sort Items Vertically" (was "Reorder or sort selected items vertically") as part of the 2026-10-12 naming clean-up.
+- Reinstall the package from ReaPack and re-assign your shortcuts / toolbar buttons.]]></changelog>
+        <source main="main">https://github.com/hsuanice/ReaScripts/raw/69a8697e1b54666ea7228379b1490811fd778fa8/Items%20Editing/hsuanice_Reorder%20-%20Sort%20Items%20Vertically.lua</source>
+        <source main="main" file="hsuanice_Reorder - Copy to Sort.lua">https://github.com/hsuanice/ReaScripts/raw/69a8697e1b54666ea7228379b1490811fd778fa8/Items%20Editing/hsuanice_Reorder%20-%20Copy%20to%20Sort.lua</source>
+        <source main="main" file="hsuanice_Reorder - Sort in Place.lua">https://github.com/hsuanice/ReaScripts/raw/69a8697e1b54666ea7228379b1490811fd778fa8/Items%20Editing/hsuanice_Reorder%20-%20Sort%20in%20Place.lua</source>
+        <source main="main" file="hsuanice_Reorder - Upfill.lua">https://github.com/hsuanice/ReaScripts/raw/69a8697e1b54666ea7228379b1490811fd778fa8/Items%20Editing/hsuanice_Reorder%20-%20Upfill.lua</source>
+      </version>
+    </reapack>
+    <reapack name="hsuanice_Reposition Items.lua" type="script" desc="Reposition Items - space selected items by an interval (GUI)">
       <metadata>
         <description><![CDATA[{\rtf1\ansi\deff0{\fonttbl{\f0 \fswiss Helvetica;}{\f1 \fmodern Courier;}}
 {\colortbl;\red255\green0\blue0;\red0\green0\blue255;}
@@ -252,70 +279,39 @@
 }
 ]]></description>
       </metadata>
-      <version name="26.1012.0736" author="hsuanice" time="2026-10-12T00:03:42Z">
-        <changelog><![CDATA[- First release in the hsuanice/ReaScripts repository.
-- Full history: Changelogs/ in the repository (https://github.com/hsuanice/ReaScripts/tree/master/Changelogs)]]></changelog>
-        <source main="main">https://github.com/hsuanice/ReaScripts/raw/d041401023a48cbf068bde6ea96be9927df7b068/Items%20Editing/hsuanice_Item%20Reposition.lua</source>
+      <version name="26.1012.1641" author="hsuanice" time="2026-10-12T09:44:14Z">
+        <changelog><![CDATA[- Renamed to "Reposition Items" (was "Item Reposition") as part of the 2026-10-12 naming clean-up.
+- Reinstall the package from ReaPack and re-assign your shortcuts / toolbar buttons.]]></changelog>
+        <source main="main">https://github.com/hsuanice/ReaScripts/raw/69a8697e1b54666ea7228379b1490811fd778fa8/Items%20Editing/hsuanice_Reposition%20Items.lua</source>
       </version>
     </reapack>
-    <reapack name="hsuanice_Move selected items to track under mouse.lua" type="script" desc="Move selected items to track under mouse (vertical only, keep timeline position)">
+    <reapack name="hsuanice_Session Fix.lua" type="script" desc="Session Fix - clean up edits before moving a REAPER session to Pro Tools or Nuendo">
       <metadata>
         <description><![CDATA[{\rtf1\ansi\deff0{\fonttbl{\f0 \fswiss Helvetica;}{\f1 \fmodern Courier;}}
 {\colortbl;\red255\green0\blue0;\red0\green0\blue255;}
 \widowctrl\hyphauto
 
-{\pard \ql \f0 \sa180 \li0 \fi0 Moves the currently selected items (one or many, possibly spanning multiple tracks) to the track that the mouse cursor is hovering over. Timeline position is preserved \u8212- only the vertical (track) position changes.\par}
-{\pard \ql \f0 \sa180 \li0 \fi0 Acts as a one-step "vertical cut & paste":\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab No need to cut, scroll, click target track, then paste.\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Just select items, hover over the target track, run the action.\sa180\par}
-{\pard \ql \f0 \sa180 \li0 \fi0 Behavior: \u8226 ? Scope: operates on the current item selection. \u8226 ? The topmost selected track is aligned to the track under the mouse. All other selected items keep their relative track offsets, so multi- track selections move together as a block. \u8226 ? If the destination span exceeds the last track, new empty tracks are auto-appended at the bottom of the project so all items have a home. \u8226 ? If any moved item would overlap an existing item on its destination track, a warning dialog is shown with three options: Yes (Insert) \u8212- Insert N empty tracks at the destination so the selection lands on fresh, empty tracks. No (Overwrite) \u8212- Trim/split existing items in the overlap range, then place the moved items on top. Cancel \u8212- Abort. \u8226 ? If the mouse is not over any track (e.g. over TCP empty area, ruler, or master), the script does nothing. \u8226 ? If the target offset is zero (mouse already on the topmost selected track), the script does nothing.\par}
-{\pard \ql \f0 \sa180 \li0 \fi0 Notes:\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Designed for keyboard/mouse-modifier workflow (assign to a shortcut and trigger while hovering the destination track).\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Based on design concepts and iterative testing by hsuanice.\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Script generated and refined with Claude.\sa180\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 \outlinelevel0 \b \fs36 Session Fix\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 Find and fix edit details that other DAWs handle differently when a REAPER session is exported.\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Fix Edges Off Grid\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Fix Looped Source Items\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Fix Misaligned Crossfades\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Fix Overlap Items (partial or complete)\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Fix Split Items at Fade Edges\sa180\par}
 }
 ]]></description>
       </metadata>
-      <version name="26.1012.0736" author="hsuanice" time="2026-10-12T00:03:42Z">
-        <changelog><![CDATA[- First release in the hsuanice/ReaScripts repository.
-- Full history: Changelogs/ in the repository (https://github.com/hsuanice/ReaScripts/tree/master/Changelogs)]]></changelog>
-        <source main="main">https://github.com/hsuanice/ReaScripts/raw/d041401023a48cbf068bde6ea96be9927df7b068/Items%20Editing/hsuanice_Move%20selected%20items%20to%20track%20under%20mouse.lua</source>
+      <version name="26.1012.1641" author="hsuanice" time="2026-10-12T09:44:14Z">
+        <changelog><![CDATA[- Renamed to "Session Fix" (was "Fix Tools") as part of the 2026-10-12 naming clean-up.
+- Reinstall the package from ReaPack and re-assign your shortcuts / toolbar buttons.]]></changelog>
+        <source main="main" file="hsuanice_Session Fix - Edges Off Grid.lua">https://github.com/hsuanice/ReaScripts/raw/69a8697e1b54666ea7228379b1490811fd778fa8/Items%20Editing/hsuanice_Session%20Fix%20-%20Edges%20Off%20Grid.lua</source>
+        <source main="main" file="hsuanice_Session Fix - Looped Source Items.lua">https://github.com/hsuanice/ReaScripts/raw/69a8697e1b54666ea7228379b1490811fd778fa8/Items%20Editing/hsuanice_Session%20Fix%20-%20Looped%20Source%20Items.lua</source>
+        <source main="main" file="hsuanice_Session Fix - Misaligned Crossfades.lua">https://github.com/hsuanice/ReaScripts/raw/69a8697e1b54666ea7228379b1490811fd778fa8/Items%20Editing/hsuanice_Session%20Fix%20-%20Misaligned%20Crossfades.lua</source>
+        <source main="main" file="hsuanice_Session Fix - Overlap Items.lua">https://github.com/hsuanice/ReaScripts/raw/69a8697e1b54666ea7228379b1490811fd778fa8/Items%20Editing/hsuanice_Session%20Fix%20-%20Overlap%20Items.lua</source>
+        <source main="main" file="hsuanice_Session Fix - Split Items at Fade Edges.lua">https://github.com/hsuanice/ReaScripts/raw/69a8697e1b54666ea7228379b1490811fd778fa8/Items%20Editing/hsuanice_Session%20Fix%20-%20Split%20Items%20at%20Fade%20Edges.lua</source>
       </version>
     </reapack>
-    <reapack name="hsuanice_Reorder or sort selected items vertically.lua" type="script" desc="ReaImGui - Vertical Reorder and Sort (items)">
-      <metadata>
-        <description><![CDATA[{\rtf1\ansi\deff0{\fonttbl{\f0 \fswiss Helvetica;}{\f1 \fmodern Courier;}}
-{\colortbl;\red255\green0\blue0;\red0\green0\blue255;}
-\widowctrl\hyphauto
-
-{\pard \ql \f0 \sa180 \li0 \fi0 Provides three vertical re-arrangement modes for selected items (stacked UI):\par}
-{\pard \ql \f0 \sa180 \li0 \fi0 \u8226 ? Reorder (fill upward)\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Keeps items at their original timeline position.\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Packs items upward into available selected tracks, avoiding gaps.\sa180\par}
-{\pard \ql \f0 \sa180 \li0 \fi0 \u8226 ? Sort Vertically\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Groups items by near-identical start time.\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Within each time cluster, re-orders items top-to-bottom by: Take Name / File Name / Metadata (Track Name or Channel Number).\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Ascending / Descending toggle.\sa180\par}
-{\pard \ql \f0 \sa180 \li0 \fi0 \u8226 ? Metadata modes\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Copy to Sort: duplicates selected items to NEW tracks grouped by metadata.\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Sort in Place: reorders items on their existing tracks based on metadata (Track Name or Channel Number). No new tracks are created, no names changed.\sa180\par}
-{\pard \ql \f0 \sa180 \li0 \fi0 Notes:\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Based on design concepts and iterative testing by hsuanice.\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Script generated and refined with ChatGPT.\sa180\par}
-}
-]]></description>
-      </metadata>
-      <version name="26.1012.0736" author="hsuanice" time="2026-10-12T00:03:42Z">
-        <changelog><![CDATA[- First release in the hsuanice/ReaScripts repository.
-- Requires the "hsuanice Library" package.
-- Full history: Changelogs/ in the repository (https://github.com/hsuanice/ReaScripts/tree/master/Changelogs)]]></changelog>
-        <source main="main">https://github.com/hsuanice/ReaScripts/raw/d041401023a48cbf068bde6ea96be9927df7b068/Items%20Editing/hsuanice_Reorder%20or%20sort%20selected%20items%20vertically.lua</source>
-        <source main="main" file="hsuanice_Reorder - Copy to Sort.lua">https://github.com/hsuanice/ReaScripts/raw/d041401023a48cbf068bde6ea96be9927df7b068/Items%20Editing/hsuanice_Reorder%20-%20Copy%20to%20Sort.lua</source>
-        <source main="main" file="hsuanice_Reorder - Sort in Place.lua">https://github.com/hsuanice/ReaScripts/raw/d041401023a48cbf068bde6ea96be9927df7b068/Items%20Editing/hsuanice_Reorder%20-%20Sort%20in%20Place.lua</source>
-        <source main="main" file="hsuanice_Reorder - Upfill.lua">https://github.com/hsuanice/ReaScripts/raw/d041401023a48cbf068bde6ea96be9927df7b068/Items%20Editing/hsuanice_Reorder%20-%20Upfill.lua</source>
-      </version>
-    </reapack>
-    <reapack name="hsuanice_Toggle Mute Item under Mouse Cursor.lua" type="script" desc="Toggle Mute Item under Mouse Cursor">
+    <reapack name="hsuanice_Toggle Mute Item Under Mouse.lua" type="script" desc="Toggle Mute Item Under Mouse">
       <metadata>
         <description><![CDATA[{\rtf1\ansi\deff0{\fonttbl{\f0 \fswiss Helvetica;}{\f1 \fmodern Courier;}}
 {\colortbl;\red255\green0\blue0;\red0\green0\blue255;}
@@ -327,15 +323,15 @@
 }
 ]]></description>
       </metadata>
-      <version name="26.1012.0736" author="hsuanice" time="2026-10-12T00:03:42Z">
-        <changelog><![CDATA[- First release in the hsuanice/ReaScripts repository.
-- Full history: Changelogs/ in the repository (https://github.com/hsuanice/ReaScripts/tree/master/Changelogs)]]></changelog>
-        <source main="main">https://github.com/hsuanice/ReaScripts/raw/d041401023a48cbf068bde6ea96be9927df7b068/Items%20Editing/hsuanice_Toggle%20Mute%20Item%20under%20Mouse%20Cursor.lua</source>
+      <version name="26.1012.1641" author="hsuanice" time="2026-10-12T09:44:14Z">
+        <changelog><![CDATA[- Renamed to "Toggle Mute Item Under Mouse" (was "Toggle Mute Item under Mouse Cursor") as part of the 2026-10-12 naming clean-up.
+- Reinstall the package from ReaPack and re-assign your shortcuts / toolbar buttons.]]></changelog>
+        <source main="main">https://github.com/hsuanice/ReaScripts/raw/69a8697e1b54666ea7228379b1490811fd778fa8/Items%20Editing/hsuanice_Toggle%20Mute%20Item%20Under%20Mouse.lua</source>
       </version>
     </reapack>
   </category>
   <category name="Items Properties">
-    <reapack name="hsuanice_Auto Color Items by Take Name.lua" type="script" desc="Auto Color Items by Take Name">
+    <reapack name="hsuanice_Auto Color - Items by Take Name.lua" type="script" desc="Auto Color - Items by Take Name: keyword palette GUI + background toggle and quick color actions">
       <metadata>
         <description><![CDATA[{\rtf1\ansi\deff0{\fonttbl{\f0 \fswiss Helvetica;}{\f1 \fmodern Courier;}}
 {\colortbl;\red255\green0\blue0;\red0\green0\blue255;}
@@ -347,18 +343,15 @@
 }
 ]]></description>
       </metadata>
-      <version name="26.1012.0930" author="hsuanice" time="2026-10-12T01:52:55Z">
-        <changelog><![CDATA[- First release in the hsuanice/ReaScripts repository.
-- Includes: GUI, Background Daemon, by Palette, Smart Random, Follow Track Color, All ShinyColor (all share the GUI's settings).
-- Fix: the settings folder is now created with REAPER's API, so saving also works on Windows.
-- Fix: All Shiny (GUI button and All ShinyColor script) no longer re-colors items in the black / gray / white row that are already Shiny.
-- Full history: Changelogs/ in the repository (https://github.com/hsuanice/ReaScripts/tree/master/Changelogs)]]></changelog>
-        <source main="main">https://github.com/hsuanice/ReaScripts/raw/7da8f85a30be8947b6bfb8b01a1e2b93856b0482/Items%20Properties/hsuanice_Auto%20Color%20Items%20by%20Take%20Name.lua</source>
-        <source main="main" file="hsuanice_Auto Color Daemon.lua">https://github.com/hsuanice/ReaScripts/raw/7da8f85a30be8947b6bfb8b01a1e2b93856b0482/Items%20Properties/hsuanice_Auto%20Color%20Daemon.lua</source>
-        <source main="main" file="hsuanice_Auto Color by Palette.lua">https://github.com/hsuanice/ReaScripts/raw/7da8f85a30be8947b6bfb8b01a1e2b93856b0482/Items%20Properties/hsuanice_Auto%20Color%20by%20Palette.lua</source>
-        <source main="main" file="hsuanice_Auto Color Smart Random.lua">https://github.com/hsuanice/ReaScripts/raw/7da8f85a30be8947b6bfb8b01a1e2b93856b0482/Items%20Properties/hsuanice_Auto%20Color%20Smart%20Random.lua</source>
-        <source main="main" file="hsuanice_Auto Color Follow Track Color.lua">https://github.com/hsuanice/ReaScripts/raw/7da8f85a30be8947b6bfb8b01a1e2b93856b0482/Items%20Properties/hsuanice_Auto%20Color%20Follow%20Track%20Color.lua</source>
-        <source main="main" file="hsuanice_Auto Color All ShinyColor.lua">https://github.com/hsuanice/ReaScripts/raw/7da8f85a30be8947b6bfb8b01a1e2b93856b0482/Items%20Properties/hsuanice_Auto%20Color%20All%20ShinyColor.lua</source>
+      <version name="26.1012.1641" author="hsuanice" time="2026-10-12T09:44:14Z">
+        <changelog><![CDATA[- Renamed to "Auto Color - Items by Take Name" (was "Auto Color Items by Take Name") as part of the 2026-10-12 naming clean-up.
+- Reinstall the package from ReaPack and re-assign your shortcuts / toolbar buttons.]]></changelog>
+        <source main="main">https://github.com/hsuanice/ReaScripts/raw/69a8697e1b54666ea7228379b1490811fd778fa8/Items%20Properties/hsuanice_Auto%20Color%20-%20Items%20by%20Take%20Name.lua</source>
+        <source main="main" file="hsuanice_Auto Color - Toggle Background Coloring.lua">https://github.com/hsuanice/ReaScripts/raw/69a8697e1b54666ea7228379b1490811fd778fa8/Items%20Properties/hsuanice_Auto%20Color%20-%20Toggle%20Background%20Coloring.lua</source>
+        <source main="main" file="hsuanice_Auto Color - By Palette.lua">https://github.com/hsuanice/ReaScripts/raw/69a8697e1b54666ea7228379b1490811fd778fa8/Items%20Properties/hsuanice_Auto%20Color%20-%20By%20Palette.lua</source>
+        <source main="main" file="hsuanice_Auto Color - Smart Random.lua">https://github.com/hsuanice/ReaScripts/raw/69a8697e1b54666ea7228379b1490811fd778fa8/Items%20Properties/hsuanice_Auto%20Color%20-%20Smart%20Random.lua</source>
+        <source main="main" file="hsuanice_Auto Color - Follow Track Color.lua">https://github.com/hsuanice/ReaScripts/raw/69a8697e1b54666ea7228379b1490811fd778fa8/Items%20Properties/hsuanice_Auto%20Color%20-%20Follow%20Track%20Color.lua</source>
+        <source main="main" file="hsuanice_Auto Color - All Shiny Color.lua">https://github.com/hsuanice/ReaScripts/raw/69a8697e1b54666ea7228379b1490811fd778fa8/Items%20Properties/hsuanice_Auto%20Color%20-%20All%20Shiny%20Color.lua</source>
       </version>
     </reapack>
   </category>
@@ -467,6 +460,13 @@
         <source main="main" file="hsuanice_Timecode Embed Tool.lua">https://github.com/hsuanice/ReaScripts/raw/4ff7b58205f3abd19855a238fc65ad160678ba1f/Metadata/hsuanice_Timecode%20Embed%20Tool.lua</source>
         <source main="main" file="hsuanice_SMPTE UMID Generate and Embed Tool.lua">https://github.com/hsuanice/ReaScripts/raw/4ff7b58205f3abd19855a238fc65ad160678ba1f/Metadata/hsuanice_SMPTE%20UMID%20Generate%20and%20Embed%20Tool.lua</source>
       </version>
+      <version name="26.1012.1641" author="hsuanice" time="2026-10-12T09:44:14Z">
+        <changelog><![CDATA[- Scripts renamed as part of the 2026-10-12 naming clean-up (see the file list in @provides).
+- Reinstall the package from ReaPack and re-assign your shortcuts / toolbar buttons.]]></changelog>
+        <source main="main" file="hsuanice_Embed BWF iXML Metadata from Take 1.lua">https://github.com/hsuanice/ReaScripts/raw/69a8697e1b54666ea7228379b1490811fd778fa8/Metadata/hsuanice_Embed%20BWF%20iXML%20Metadata%20from%20Take%201.lua</source>
+        <source main="main" file="hsuanice_Embed Timecode to BWF and iXML.lua">https://github.com/hsuanice/ReaScripts/raw/69a8697e1b54666ea7228379b1490811fd778fa8/Metadata/hsuanice_Embed%20Timecode%20to%20BWF%20and%20iXML.lua</source>
+        <source main="main" file="hsuanice_Embed SMPTE UMID.lua">https://github.com/hsuanice/ReaScripts/raw/69a8697e1b54666ea7228379b1490811fd778fa8/Metadata/hsuanice_Embed%20SMPTE%20UMID.lua</source>
+      </version>
     </reapack>
     <reapack name="hsuanice_Item List.lua" type="script" desc="Item List - spreadsheet-style table of items with metadata columns (Browser + Editor)">
       <metadata>
@@ -487,6 +487,12 @@
 - Full history: Changelogs/ in the repository (https://github.com/hsuanice/ReaScripts/tree/master/Changelogs)]]></changelog>
         <source main="main" file="hsuanice_Item List Browser.lua">https://github.com/hsuanice/ReaScripts/raw/4ff7b58205f3abd19855a238fc65ad160678ba1f/Metadata/hsuanice_Item%20List%20Browser.lua</source>
         <source main="main" file="hsuanice_Item List Editor.lua">https://github.com/hsuanice/ReaScripts/raw/4ff7b58205f3abd19855a238fc65ad160678ba1f/Metadata/hsuanice_Item%20List%20Editor.lua</source>
+      </version>
+      <version name="26.1012.1641" author="hsuanice" time="2026-10-12T09:44:14Z">
+        <changelog><![CDATA[- Scripts renamed as part of the 2026-10-12 naming clean-up (see the file list in @provides).
+- Reinstall the package from ReaPack and re-assign your shortcuts / toolbar buttons.]]></changelog>
+        <source main="main" file="hsuanice_Item List Browser - ILB.lua">https://github.com/hsuanice/ReaScripts/raw/69a8697e1b54666ea7228379b1490811fd778fa8/Metadata/hsuanice_Item%20List%20Browser%20-%20ILB.lua</source>
+        <source main="main" file="hsuanice_Item List Editor - ILE.lua">https://github.com/hsuanice/ReaScripts/raw/69a8697e1b54666ea7228379b1490811fd778fa8/Metadata/hsuanice_Item%20List%20Editor%20-%20ILE.lua</source>
       </version>
     </reapack>
     <reapack name="hsuanice_Rename from Metadata.lua" type="script" desc="Rename from Metadata - rename takes or source files from BWF / iXML metadata with tokens (GUI)">
@@ -509,10 +515,16 @@
         <source main="main" file="hsuanice_Rename Active Take from File Metadata.lua">https://github.com/hsuanice/ReaScripts/raw/4ff7b58205f3abd19855a238fc65ad160678ba1f/Metadata/hsuanice_Rename%20Active%20Take%20from%20File%20Metadata.lua</source>
         <source main="main" file="hsuanice_Rename Source File from Metadata.lua">https://github.com/hsuanice/ReaScripts/raw/4ff7b58205f3abd19855a238fc65ad160678ba1f/Metadata/hsuanice_Rename%20Source%20File%20from%20Metadata.lua</source>
       </version>
+      <version name="26.1012.1641" author="hsuanice" time="2026-10-12T09:44:14Z">
+        <changelog><![CDATA[- Scripts renamed as part of the 2026-10-12 naming clean-up (see the file list in @provides).
+- Reinstall the package from ReaPack and re-assign your shortcuts / toolbar buttons.]]></changelog>
+        <source main="main" file="hsuanice_Rename from Metadata - Active Take.lua">https://github.com/hsuanice/ReaScripts/raw/69a8697e1b54666ea7228379b1490811fd778fa8/Metadata/hsuanice_Rename%20from%20Metadata%20-%20Active%20Take.lua</source>
+        <source main="main" file="hsuanice_Rename from Metadata - Source File.lua">https://github.com/hsuanice/ReaScripts/raw/69a8697e1b54666ea7228379b1490811fd778fa8/Metadata/hsuanice_Rename%20from%20Metadata%20-%20Source%20File.lua</source>
+      </version>
     </reapack>
   </category>
   <category name="Rendering">
-    <reapack name="hsuanice_AudioSweet ReaImGui.lua" type="script" desc="AudioSweet ReaImGui - AudioSuite Workflow (Pro Tools–Style)">
+    <reapack name="hsuanice_AudioSweet - AudioSuite Workflow.lua" type="script" desc="AudioSweet - AudioSuite Workflow: Pro Tools-style offline FX processing (GUI + Run / Preview / Solo)">
       <metadata>
         <description><![CDATA[{\rtf1\ansi\deff0{\fonttbl{\f0 \fswiss Helvetica;}{\f1 \fmodern Courier;}}
 {\colortbl;\red255\green0\blue0;\red0\green0\blue255;}
@@ -532,36 +544,19 @@
 ]]></description>
         <link rel="website">https://forum.cockos.com/showthread.php?p=2910884#post2910884</link>
       </metadata>
-      <version name="26.1011.2142" author="hsuanice" time="2026-10-11T14:12:14Z">
-        <changelog><![CDATA[- First release in the hsuanice/ReaScripts repository (replaces hsuanice/PublicBeta).
-- Remove the PublicBeta repository in ReaPack before installing this one.
-- Requires the "hsuanice Library" package.
-- Version format is now YY.MMDD.HHMM.
-- FX Alias tools are now installed with AudioSweet (run them from Settings > FX Alias Tools); they no longer appear in the Action List.
-- Help > About now reads the version from the script header.
-- Full history of earlier versions: Changelogs/ in the repository (https://github.com/hsuanice/ReaScripts/tree/master/Changelogs)]]></changelog>
-        <source main="main">https://github.com/hsuanice/ReaScripts/raw/cff4486379294e1de695cecac8734e27f7950776/Rendering/hsuanice_AudioSweet%20ReaImGui.lua</source>
-        <source main="main" file="hsuanice_AudioSweet Run.lua">https://github.com/hsuanice/ReaScripts/raw/cff4486379294e1de695cecac8734e27f7950776/Rendering/hsuanice_AudioSweet%20Run.lua</source>
-        <source main="main" file="hsuanice_AudioSweet Preview Toggle.lua">https://github.com/hsuanice/ReaScripts/raw/cff4486379294e1de695cecac8734e27f7950776/Rendering/hsuanice_AudioSweet%20Preview%20Toggle.lua</source>
-        <source main="main" file="hsuanice_AudioSweet Solo Toggle.lua">https://github.com/hsuanice/ReaScripts/raw/cff4486379294e1de695cecac8734e27f7950776/Rendering/hsuanice_AudioSweet%20Solo%20Toggle.lua</source>
-        <source file="hsuanice_FX Alias Build.lua">https://github.com/hsuanice/ReaScripts/raw/cff4486379294e1de695cecac8734e27f7950776/Rendering/hsuanice_FX%20Alias%20Build.lua</source>
-        <source file="hsuanice_FX Alias Export JSON to TSV.lua">https://github.com/hsuanice/ReaScripts/raw/cff4486379294e1de695cecac8734e27f7950776/Rendering/hsuanice_FX%20Alias%20Export%20JSON%20to%20TSV.lua</source>
-        <source file="hsuanice_FX Alias Update TSV to JSON.lua">https://github.com/hsuanice/ReaScripts/raw/cff4486379294e1de695cecac8734e27f7950776/Rendering/hsuanice_FX%20Alias%20Update%20TSV%20to%20JSON.lua</source>
-      </version>
-      <version name="26.1011.2225" author="hsuanice" time="2026-10-11T14:30:25Z">
-        <changelog><![CDATA[- Fix: AudioSweet Solo Toggle no longer requires the SWS extension.
-- Requirements: ReaImGui (install via ReaPack, ReaTeam Extensions) and the "hsuanice Library" package; BWF MetaEdit (bwfmetaedit) is needed only for timecode embedding.
-- Full history: Changelogs/ in the repository (https://github.com/hsuanice/ReaScripts/tree/master/Changelogs)]]></changelog>
-        <source main="main">https://github.com/hsuanice/ReaScripts/raw/eedf91805466156cde85a24aafee3b9c3b806b42/Rendering/hsuanice_AudioSweet%20ReaImGui.lua</source>
-        <source main="main" file="hsuanice_AudioSweet Run.lua">https://github.com/hsuanice/ReaScripts/raw/eedf91805466156cde85a24aafee3b9c3b806b42/Rendering/hsuanice_AudioSweet%20Run.lua</source>
-        <source main="main" file="hsuanice_AudioSweet Preview Toggle.lua">https://github.com/hsuanice/ReaScripts/raw/eedf91805466156cde85a24aafee3b9c3b806b42/Rendering/hsuanice_AudioSweet%20Preview%20Toggle.lua</source>
-        <source main="main" file="hsuanice_AudioSweet Solo Toggle.lua">https://github.com/hsuanice/ReaScripts/raw/eedf91805466156cde85a24aafee3b9c3b806b42/Rendering/hsuanice_AudioSweet%20Solo%20Toggle.lua</source>
-        <source file="hsuanice_FX Alias Build.lua">https://github.com/hsuanice/ReaScripts/raw/eedf91805466156cde85a24aafee3b9c3b806b42/Rendering/hsuanice_FX%20Alias%20Build.lua</source>
-        <source file="hsuanice_FX Alias Export JSON to TSV.lua">https://github.com/hsuanice/ReaScripts/raw/eedf91805466156cde85a24aafee3b9c3b806b42/Rendering/hsuanice_FX%20Alias%20Export%20JSON%20to%20TSV.lua</source>
-        <source file="hsuanice_FX Alias Update TSV to JSON.lua">https://github.com/hsuanice/ReaScripts/raw/eedf91805466156cde85a24aafee3b9c3b806b42/Rendering/hsuanice_FX%20Alias%20Update%20TSV%20to%20JSON.lua</source>
+      <version name="26.1012.1641" author="hsuanice" time="2026-10-12T09:44:14Z">
+        <changelog><![CDATA[- Renamed to "AudioSweet - AudioSuite Workflow" (was "AudioSweet ReaImGui") as part of the 2026-10-12 naming clean-up.
+- Reinstall the package from ReaPack and re-assign your shortcuts / toolbar buttons.]]></changelog>
+        <source main="main">https://github.com/hsuanice/ReaScripts/raw/69a8697e1b54666ea7228379b1490811fd778fa8/Rendering/hsuanice_AudioSweet%20-%20AudioSuite%20Workflow.lua</source>
+        <source main="main" file="hsuanice_AudioSweet - Run.lua">https://github.com/hsuanice/ReaScripts/raw/69a8697e1b54666ea7228379b1490811fd778fa8/Rendering/hsuanice_AudioSweet%20-%20Run.lua</source>
+        <source main="main" file="hsuanice_AudioSweet - Toggle Preview.lua">https://github.com/hsuanice/ReaScripts/raw/69a8697e1b54666ea7228379b1490811fd778fa8/Rendering/hsuanice_AudioSweet%20-%20Toggle%20Preview.lua</source>
+        <source main="main" file="hsuanice_AudioSweet - Toggle Solo.lua">https://github.com/hsuanice/ReaScripts/raw/69a8697e1b54666ea7228379b1490811fd778fa8/Rendering/hsuanice_AudioSweet%20-%20Toggle%20Solo.lua</source>
+        <source file="hsuanice_AudioSweet - FX Alias Build.lua">https://github.com/hsuanice/ReaScripts/raw/69a8697e1b54666ea7228379b1490811fd778fa8/Rendering/hsuanice_AudioSweet%20-%20FX%20Alias%20Build.lua</source>
+        <source file="hsuanice_AudioSweet - FX Alias Export TSV.lua">https://github.com/hsuanice/ReaScripts/raw/69a8697e1b54666ea7228379b1490811fd778fa8/Rendering/hsuanice_AudioSweet%20-%20FX%20Alias%20Export%20TSV.lua</source>
+        <source file="hsuanice_AudioSweet - FX Alias Import TSV.lua">https://github.com/hsuanice/ReaScripts/raw/69a8697e1b54666ea7228379b1490811fd778fa8/Rendering/hsuanice_AudioSweet%20-%20FX%20Alias%20Import%20TSV.lua</source>
       </version>
     </reapack>
-    <reapack name="hsuanice_RGWH ReaImGui.lua" type="script" desc="RGWH ReaImGui - ImGui Interface for RGWH Core（Render or Glue with Handles）">
+    <reapack name="hsuanice_Render or Glue with Handles - RGWH.lua" type="script" desc="Render or Glue with Handles - RGWH: render or glue items with handles (GUI + Glue / Render actions)">
       <metadata>
         <description><![CDATA[{\rtf1\ansi\deff0{\fonttbl{\f0 \fswiss Helvetica;}{\f1 \fmodern Courier;}}
 {\colortbl;\red255\green0\blue0;\red0\green0\blue255;}
@@ -572,21 +567,17 @@
 ]]></description>
         <link rel="website">https://forum.cockos.com/showthread.php?t=305456</link>
       </metadata>
-      <version name="26.1011.2142" author="hsuanice" time="2026-10-11T14:12:14Z">
-        <changelog><![CDATA[- First release in the hsuanice/ReaScripts repository (replaces hsuanice/PublicBeta).
-- Remove the PublicBeta repository in ReaPack before installing this one.
-- Requires the "hsuanice Library" package.
-- Version format is now YY.MMDD.HHMM.
-- Fix: Help > About showed version "unknown".
-- Full history of earlier versions: Changelogs/ in the repository (https://github.com/hsuanice/ReaScripts/tree/master/Changelogs)]]></changelog>
-        <source main="main">https://github.com/hsuanice/ReaScripts/raw/cff4486379294e1de695cecac8734e27f7950776/Rendering/hsuanice_RGWH%20ReaImGui.lua</source>
-        <source main="main" file="hsuanice_RGWH Glue.lua">https://github.com/hsuanice/ReaScripts/raw/cff4486379294e1de695cecac8734e27f7950776/Rendering/hsuanice_RGWH%20Glue.lua</source>
-        <source main="main" file="hsuanice_RGWH Render.lua">https://github.com/hsuanice/ReaScripts/raw/cff4486379294e1de695cecac8734e27f7950776/Rendering/hsuanice_RGWH%20Render.lua</source>
+      <version name="26.1012.1641" author="hsuanice" time="2026-10-12T09:44:14Z">
+        <changelog><![CDATA[- Renamed to "Render or Glue with Handles - RGWH" (was "RGWH ReaImGui") as part of the 2026-10-12 naming clean-up.
+- Reinstall the package from ReaPack and re-assign your shortcuts / toolbar buttons.]]></changelog>
+        <source main="main">https://github.com/hsuanice/ReaScripts/raw/69a8697e1b54666ea7228379b1490811fd778fa8/Rendering/hsuanice_Render%20or%20Glue%20with%20Handles%20-%20RGWH.lua</source>
+        <source main="main" file="hsuanice_Render or Glue with Handles - RGWH Glue.lua">https://github.com/hsuanice/ReaScripts/raw/69a8697e1b54666ea7228379b1490811fd778fa8/Rendering/hsuanice_Render%20or%20Glue%20with%20Handles%20-%20RGWH%20Glue.lua</source>
+        <source main="main" file="hsuanice_Render or Glue with Handles - RGWH Render.lua">https://github.com/hsuanice/ReaScripts/raw/69a8697e1b54666ea7228379b1490811fd778fa8/Rendering/hsuanice_Render%20or%20Glue%20with%20Handles%20-%20RGWH%20Render.lua</source>
       </version>
     </reapack>
   </category>
   <category name="Selection">
-    <reapack name="hsuanice_Razor and Item Link with Mode Switch to Overlap or Contain like Pro Tools.lua" type="script" desc="Razor and Item Link with Mode switch to Overlap or Contain like Pro Tools">
+    <reapack name="hsuanice_Toggle Razor and Item Link Overlap or Contain.lua" type="script" desc="Toggle Razor and Item Link Overlap or Contain - razor areas select the items they overlap or contain">
       <metadata>
         <description><![CDATA[{\rtf1\ansi\deff0{\fonttbl{\f0 \fswiss Helvetica;}{\f1 \fmodern Courier;}}
 {\colortbl;\red255\green0\blue0;\red0\green0\blue255;}
@@ -599,13 +590,13 @@
 }
 ]]></description>
       </metadata>
-      <version name="26.1012.0958" author="hsuanice" time="2026-10-12T02:16:08Z">
-        <changelog><![CDATA[- First release in the hsuanice/ReaScripts repository.
-- Full history: Changelogs/ in the repository (https://github.com/hsuanice/ReaScripts/tree/master/Changelogs)]]></changelog>
-        <source main="main">https://github.com/hsuanice/ReaScripts/raw/62d581c70c8ce9ed9443614aaf46ca96bcd542f8/Selection/hsuanice_Razor%20and%20Item%20Link%20with%20Mode%20Switch%20to%20Overlap%20or%20Contain%20like%20Pro%20Tools.lua</source>
+      <version name="26.1012.1641" author="hsuanice" time="2026-10-12T09:44:14Z">
+        <changelog><![CDATA[- Renamed to "Toggle Razor and Item Link Overlap or Contain" (was "Razor and Item Link with Mode Switch to Overlap or Contain like Pro Tools") as part of the 2026-10-12 naming clean-up.
+- Reinstall the package from ReaPack and re-assign your shortcuts / toolbar buttons.]]></changelog>
+        <source main="main">https://github.com/hsuanice/ReaScripts/raw/69a8697e1b54666ea7228379b1490811fd778fa8/Selection/hsuanice_Toggle%20Razor%20and%20Item%20Link%20Overlap%20or%20Contain.lua</source>
       </version>
     </reapack>
-    <reapack name="hsuanice_Set Time to Item Selection Mouse Right-Drag Release.lua" type="script" desc="Set Time to Item on Right-Drag Release (Toggle, One-Pass Perf)">
+    <reapack name="hsuanice_Toggle Set Time Selection to Items on Right Drag.lua" type="script" desc="Toggle Set Time Selection to Items on Right Drag - time selection follows the selected items after a right-button drag">
       <metadata>
         <description><![CDATA[{\rtf1\ansi\deff0{\fonttbl{\f0 \fswiss Helvetica;}{\f1 \fmodern Courier;}}
 {\colortbl;\red255\green0\blue0;\red0\green0\blue255;}
@@ -615,16 +606,13 @@
 }
 ]]></description>
       </metadata>
-      <version name="26.1012.0958" author="hsuanice" time="2026-10-12T02:16:08Z">
-        <changelog><![CDATA[- First release in the hsuanice/ReaScripts repository.
-- Requires the "hsuanice Library" package.
-- Requires the js_ReaScriptAPI extension.
-- Header and comments translated to English.
-- Full history: Changelogs/ in the repository (https://github.com/hsuanice/ReaScripts/tree/master/Changelogs)]]></changelog>
-        <source main="main">https://github.com/hsuanice/ReaScripts/raw/62d581c70c8ce9ed9443614aaf46ca96bcd542f8/Selection/hsuanice_Set%20Time%20to%20Item%20Selection%20Mouse%20Right-Drag%20Release.lua</source>
+      <version name="26.1012.1641" author="hsuanice" time="2026-10-12T09:44:14Z">
+        <changelog><![CDATA[- Renamed to "Toggle Set Time Selection to Items on Right Drag" (was "Set Time to Item Selection Mouse Right-Drag Release") as part of the 2026-10-12 naming clean-up.
+- Reinstall the package from ReaPack and re-assign your shortcuts / toolbar buttons.]]></changelog>
+        <source main="main">https://github.com/hsuanice/ReaScripts/raw/69a8697e1b54666ea7228379b1490811fd778fa8/Selection/hsuanice_Toggle%20Set%20Time%20Selection%20to%20Items%20on%20Right%20Drag.lua</source>
       </version>
     </reapack>
-    <reapack name="hsuanice_Track and Razor Item Link like Pro Tools.lua" type="script" desc="Track↔Edit link (Pro Tools style). Performance edition; focuses on Razor &amp; item virtual ranges. This build removes menu guards for snappier click-select.">
+    <reapack name="hsuanice_Toggle Track and Razor Item Link like Pro Tools.lua" type="script" desc="Toggle Track and Razor Item Link like Pro Tools - Link Track and Edit Selection">
       <metadata>
         <description><![CDATA[{\rtf1\ansi\deff0{\fonttbl{\f0 \fswiss Helvetica;}{\f1 \fmodern Courier;}}
 {\colortbl;\red255\green0\blue0;\red0\green0\blue255;}
@@ -641,11 +629,10 @@
 }
 ]]></description>
       </metadata>
-      <version name="26.1012.0958" author="hsuanice" time="2026-10-12T02:16:08Z">
-        <changelog><![CDATA[- First release in the hsuanice/ReaScripts repository.
-- Works best with the js_ReaScriptAPI and SWS extensions installed (optional).
-- Full history: Changelogs/ in the repository (https://github.com/hsuanice/ReaScripts/tree/master/Changelogs)]]></changelog>
-        <source main="main">https://github.com/hsuanice/ReaScripts/raw/62d581c70c8ce9ed9443614aaf46ca96bcd542f8/Selection/hsuanice_Track%20and%20Razor%20Item%20Link%20like%20Pro%20Tools.lua</source>
+      <version name="26.1012.1641" author="hsuanice" time="2026-10-12T09:44:14Z">
+        <changelog><![CDATA[- Renamed to "Toggle Track and Razor Item Link like Pro Tools" (was "Track and Razor Item Link like Pro Tools") as part of the 2026-10-12 naming clean-up.
+- Reinstall the package from ReaPack and re-assign your shortcuts / toolbar buttons.]]></changelog>
+        <source main="main">https://github.com/hsuanice/ReaScripts/raw/69a8697e1b54666ea7228379b1490811fd778fa8/Selection/hsuanice_Toggle%20Track%20and%20Razor%20Item%20Link%20like%20Pro%20Tools.lua</source>
       </version>
     </reapack>
   </category>
@@ -689,7 +676,7 @@
         <source main="main">https://github.com/hsuanice/ReaScripts/raw/f4a9e400d5b11f9e5dee836f025ba6efdaae8c77/Tracks/hsuanice_Delete%20Selected%20Tracks%20with%20Warning.lua</source>
       </version>
     </reapack>
-    <reapack name="hsuanice_Import audio files per folder into separate tracks Field Recorder.lua" type="script" desc="ReaImGui - Import audio: one folder per track; channel-split files go to child tracks. Sequence only.">
+    <reapack name="hsuanice_Import Audio Folders to Tracks - Field Recorder.lua" type="script" desc="Import Audio Folders to Tracks - Field Recorder: one folder per track, channel-split files grouped (GUI)">
       <metadata>
         <description><![CDATA[{\rtf1\ansi\deff0{\fonttbl{\f0 \fswiss Helvetica;}{\f1 \fmodern Courier;}}
 {\colortbl;\red255\green0\blue0;\red0\green0\blue255;}
@@ -716,14 +703,13 @@
 }
 ]]></description>
       </metadata>
-      <version name="26.1012.1024" author="hsuanice" time="2026-10-12T02:42:41Z">
-        <changelog><![CDATA[- First release in the hsuanice/ReaScripts repository.
-- Comments translated to English.
-- Full history: Changelogs/ in the repository (https://github.com/hsuanice/ReaScripts/tree/master/Changelogs)]]></changelog>
-        <source main="main">https://github.com/hsuanice/ReaScripts/raw/f4a9e400d5b11f9e5dee836f025ba6efdaae8c77/Tracks/hsuanice_Import%20audio%20files%20per%20folder%20into%20separate%20tracks%20Field%20Recorder.lua</source>
+      <version name="26.1012.1641" author="hsuanice" time="2026-10-12T09:44:14Z">
+        <changelog><![CDATA[- Renamed to "Import Audio Folders to Tracks - Field Recorder" (was "Import audio files per folder into separate tracks Field Recorder") as part of the 2026-10-12 naming clean-up.
+- Reinstall the package from ReaPack and re-assign your shortcuts / toolbar buttons.]]></changelog>
+        <source main="main">https://github.com/hsuanice/ReaScripts/raw/69a8697e1b54666ea7228379b1490811fd778fa8/Tracks/hsuanice_Import%20Audio%20Folders%20to%20Tracks%20-%20Field%20Recorder.lua</source>
       </version>
     </reapack>
-    <reapack name="hsuanice_Import audio files per folder into separate tracks Music Multitrack.lua" type="script" desc="Import audio files per folder into separate tracks Music Multitrack">
+    <reapack name="hsuanice_Import Audio Folders to Tracks - Music Multitrack.lua" type="script" desc="Import Audio Folders to Tracks - Music Multitrack: one folder per track (GUI)">
       <metadata>
         <description><![CDATA[{\rtf1\ansi\deff0{\fonttbl{\f0 \fswiss Helvetica;}{\f1 \fmodern Courier;}}
 {\colortbl;\red255\green0\blue0;\red0\green0\blue255;}
@@ -747,13 +733,13 @@
 }
 ]]></description>
       </metadata>
-      <version name="26.1012.1024" author="hsuanice" time="2026-10-12T02:42:41Z">
-        <changelog><![CDATA[- First release in the hsuanice/ReaScripts repository.
-- Full history: Changelogs/ in the repository (https://github.com/hsuanice/ReaScripts/tree/master/Changelogs)]]></changelog>
-        <source main="main">https://github.com/hsuanice/ReaScripts/raw/f4a9e400d5b11f9e5dee836f025ba6efdaae8c77/Tracks/hsuanice_Import%20audio%20files%20per%20folder%20into%20separate%20tracks%20Music%20Multitrack.lua</source>
+      <version name="26.1012.1641" author="hsuanice" time="2026-10-12T09:44:14Z">
+        <changelog><![CDATA[- Renamed to "Import Audio Folders to Tracks - Music Multitrack" (was "Import audio files per folder into separate tracks Music Multitrack") as part of the 2026-10-12 naming clean-up.
+- Reinstall the package from ReaPack and re-assign your shortcuts / toolbar buttons.]]></changelog>
+        <source main="main">https://github.com/hsuanice/ReaScripts/raw/69a8697e1b54666ea7228379b1490811fd778fa8/Tracks/hsuanice_Import%20Audio%20Folders%20to%20Tracks%20-%20Music%20Multitrack.lua</source>
       </version>
     </reapack>
-    <reapack name="hsuanice_Show Hide Tracks of Selected Parent or Childred Folder Tracks in TCP.lua" type="script" desc="Show/Hide TCP children of selected folder parents, or of the parent of selected children">
+    <reapack name="hsuanice_Show Hide Folder Child Tracks in TCP.lua" type="script" desc="Show Hide Folder Child Tracks in TCP - for the selected folders, or the parent of a selected child">
       <metadata>
         <description><![CDATA[{\rtf1\ansi\deff0{\fonttbl{\f0 \fswiss Helvetica;}{\f1 \fmodern Courier;}}
 {\colortbl;\red255\green0\blue0;\red0\green0\blue255;}
@@ -766,14 +752,13 @@
 }
 ]]></description>
       </metadata>
-      <version name="26.1012.1024" author="hsuanice" time="2026-10-12T02:42:41Z">
-        <changelog><![CDATA[- First release in the hsuanice/ReaScripts repository.
-- Comments translated to English.
-- Full history: Changelogs/ in the repository (https://github.com/hsuanice/ReaScripts/tree/master/Changelogs)]]></changelog>
-        <source main="main">https://github.com/hsuanice/ReaScripts/raw/f4a9e400d5b11f9e5dee836f025ba6efdaae8c77/Tracks/hsuanice_Show%20Hide%20Tracks%20of%20Selected%20Parent%20or%20Childred%20Folder%20Tracks%20in%20TCP.lua</source>
+      <version name="26.1012.1641" author="hsuanice" time="2026-10-12T09:44:14Z">
+        <changelog><![CDATA[- Renamed to "Show Hide Folder Child Tracks in TCP" (was "Show Hide Tracks of Selected Parent or Childred Folder Tracks in TCP") as part of the 2026-10-12 naming clean-up.
+- Reinstall the package from ReaPack and re-assign your shortcuts / toolbar buttons.]]></changelog>
+        <source main="main">https://github.com/hsuanice/ReaScripts/raw/69a8697e1b54666ea7228379b1490811fd778fa8/Tracks/hsuanice_Show%20Hide%20Folder%20Child%20Tracks%20in%20TCP.lua</source>
       </version>
     </reapack>
-    <reapack name="hsuanice_Split Tracks by Item Channel.lua" type="script" desc="Split Tracks by Item Channel">
+    <reapack name="hsuanice_Split Tracks by Item Channel Count.lua" type="script" desc="Split Tracks by Item Channel Count - one track per mono / stereo / multichannel group">
       <metadata>
         <description><![CDATA[{\rtf1\ansi\deff0{\fonttbl{\f0 \fswiss Helvetica;}{\f1 \fmodern Courier;}}
 {\colortbl;\red255\green0\blue0;\red0\green0\blue255;}
@@ -783,17 +768,86 @@
 }
 ]]></description>
       </metadata>
-      <version name="26.1012.1024pre1" author="hsuanice" time="2026-10-12T02:42:41Z">
-        <changelog><![CDATA[- First release in the hsuanice/ReaScripts repository.
-- Pre-release: splitting works but is not perfect yet — only installed when "Enable pre-releases" is on in ReaPack.
-- Comments translated to English.
-- Full history: Changelogs/ in the repository (https://github.com/hsuanice/ReaScripts/tree/master/Changelogs)]]></changelog>
-        <source main="main">https://github.com/hsuanice/ReaScripts/raw/f4a9e400d5b11f9e5dee836f025ba6efdaae8c77/Tracks/hsuanice_Split%20Tracks%20by%20Item%20Channel.lua</source>
+      <version name="26.1012.1641pre1" author="hsuanice" time="2026-10-12T09:44:14Z">
+        <changelog><![CDATA[- Renamed to "Split Tracks by Item Channel Count" (was "Split Tracks by Item Channel") as part of the 2026-10-12 naming clean-up.
+- Reinstall the package from ReaPack and re-assign your shortcuts / toolbar buttons.]]></changelog>
+        <source main="main">https://github.com/hsuanice/ReaScripts/raw/69a8697e1b54666ea7228379b1490811fd778fa8/Tracks/hsuanice_Split%20Tracks%20by%20Item%20Channel%20Count.lua</source>
       </version>
     </reapack>
   </category>
   <category name="Various">
-    <reapack name="hsuanice_Console to Work Log Daemon.lua" type="script" desc="Console to Work Log Daemon">
+    <reapack name="hsuanice_Clock with Date 24H.lua" type="script" desc="Clock with Date 24H - resizable, dockable clock window">
+      <metadata>
+        <description><![CDATA[{\rtf1\ansi\deff0{\fonttbl{\f0 \fswiss Helvetica;}{\f1 \fmodern Courier;}}
+{\colortbl;\red255\green0\blue0;\red0\green0\blue255;}
+\widowctrl\hyphauto
+
+{\pard \ql \f0 \sa180 \li0 \fi0 Real-time 24H system clock. Right-click to change color/font. Window is resizable; clock auto-scales to fill it. Settings and window geometry are remembered across sessions.\par}
+}
+]]></description>
+      </metadata>
+      <version name="26.1012.1641" author="hsuanice" time="2026-10-12T09:44:14Z">
+        <changelog><![CDATA[- Renamed to "Clock with Date 24H" (was "Work Timer") as part of the 2026-10-12 naming clean-up.
+- Reinstall the package from ReaPack and re-assign your shortcuts / toolbar buttons.]]></changelog>
+        <source main="main">https://github.com/hsuanice/ReaScripts/raw/69a8697e1b54666ea7228379b1490811fd778fa8/Various/hsuanice_Clock%20with%20Date%2024H.lua</source>
+      </version>
+    </reapack>
+    <reapack name="hsuanice_Count Items and Tracks - Selection HUD.lua" type="script" desc="Count Items and Tracks - Selection HUD: Pro Tools-style item / track counts and start / end / length">
+      <metadata>
+        <description><![CDATA[{\rtf1\ansi\deff0{\fonttbl{\f0 \fswiss Helvetica;}{\f1 \fmodern Courier;}}
+{\colortbl;\red255\green0\blue0;\red0\green0\blue255;}
+\widowctrl\hyphauto
+
+{\pard \ql \f0 \sa180 \li0 \fi0 Pro Tools-style selection monitor HUD using native gfx (no ReaImGui). Top row : Items count (left) + Tracks count (right) Mid rows : Start / End / Length timecodes (PT transport style) Detail rows: MIDI / Audio / Empty + Channel Count (toggle with arrow / left-click) Right-click: font size (UI scale) / dock / close. Window position, dock state, font size, and panel state persist across restarts.\par}
+}
+]]></description>
+      </metadata>
+      <version name="26.1012.1641" author="hsuanice" time="2026-10-12T09:44:14Z">
+        <changelog><![CDATA[- Renamed to "Count Items and Tracks - Selection HUD" (was "Count Item and Track and Toggle Show Item Details") as part of the 2026-10-12 naming clean-up.
+- Reinstall the package from ReaPack and re-assign your shortcuts / toolbar buttons.]]></changelog>
+        <source main="main">https://github.com/hsuanice/ReaScripts/raw/69a8697e1b54666ea7228379b1490811fd778fa8/Various/hsuanice_Count%20Items%20and%20Tracks%20-%20Selection%20HUD.lua</source>
+      </version>
+    </reapack>
+    <reapack name="hsuanice_Project Manager - PM Insight Analyzer.lua" type="script" desc="Project Manager - PM Insight Analyzer: work-time analysis of PM Timer logs (work in progress)">
+      <metadata>
+        <description><![CDATA[{\rtf1\ansi\deff0{\fonttbl{\f0 \fswiss Helvetica;}{\f1 \fmodern Courier;}}
+{\colortbl;\red255\green0\blue0;\red0\green0\blue255;}
+\widowctrl\hyphauto
+
+{\pard \ql \f0 \sa180 \li0 \fi0 Read-only analysis script. Auto-detects project type:\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 Dialog Project Mode (Scene Cut track present): Combines scene data, EDL source lengths, and work log. Outputs per-scene efficiency metrics and project-wide summary. Tracks required: "Scene Cut", "EDL" (folder).\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 Work Log Mode (no Scene Cut track): Parses item names ("Proj | Scene | Module") to compute durations grouped by scene and module. No EDL data required.\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 Duration source: D_LENGTH (always). Does not write any data to the project.\par}
+}
+]]></description>
+      </metadata>
+      <version name="26.1012.1641pre1" author="hsuanice" time="2026-10-12T09:44:14Z">
+        <changelog><![CDATA[- Renamed to "Project Manager - PM Insight Analyzer" (was "PM_InsightAnalyzer") as part of the 2026-10-12 naming clean-up.
+- Reinstall the package from ReaPack and re-assign your shortcuts / toolbar buttons.]]></changelog>
+        <source main="main">https://github.com/hsuanice/ReaScripts/raw/69a8697e1b54666ea7228379b1490811fd778fa8/Various/hsuanice_Project%20Manager%20-%20PM%20Insight%20Analyzer.lua</source>
+      </version>
+    </reapack>
+    <reapack name="hsuanice_Project Manager - PM Timer.lua" type="script" desc="Project Manager - PM Timer: scene-aware work timer">
+      <metadata>
+        <description><![CDATA[{\rtf1\ansi\deff0{\fonttbl{\f0 \fswiss Helvetica;}{\f1 \fmodern Courier;}}
+{\colortbl;\red255\green0\blue0;\red0\green0\blue255;}
+\widowctrl\hyphauto
+
+{\pard \ql \f0 \sa180 \li0 \fi0 Scene-aware toggle timer for the hsuanice PM system. Uses gfx (no ReaImGui). 1-second display refresh via defer + time_precise.\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 State machine: IDLE \u8596 ? WORKING (no BREAK state)\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 Track structure (auto-managed): Scene Cut \u8592 ? folder track (I_FOLDERDEPTH = 1) 2026-03-01 \u8592 ? date track, direct child, depth = 0 2026-03-02 \u8592 ? depth = 0 DurationOnly_Log\u8592 ? last child, depth = -1; holds duration-only records\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 Two work modes (auto-detected from selection): Scene Mode : a scene item on "Scene Cut" is selected P_EXT:SCENE_GUID written; name = "scene (tc) | work_type" Project Mode : no scene item selected P_EXT:SCENE_GUID not written; name = work_type only\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 Work item metadata: P_EXT:SCENE_GUID (Scene Mode only), P_EXT:WORK_TYPE, P_EXT:END_REASON Duration-only items also carry P_EXT:IS_DURATION_ONLY = "1" All work items are locked (C_LOCK=1) after creation.\par}
+}
+]]></description>
+      </metadata>
+      <version name="26.1012.1641" author="hsuanice" time="2026-10-12T09:44:14Z">
+        <changelog><![CDATA[- Renamed to "Project Manager - PM Timer" (was "PM_Timer") as part of the 2026-10-12 naming clean-up.
+- Reinstall the package from ReaPack and re-assign your shortcuts / toolbar buttons.]]></changelog>
+        <source main="main">https://github.com/hsuanice/ReaScripts/raw/69a8697e1b54666ea7228379b1490811fd778fa8/Various/hsuanice_Project%20Manager%20-%20PM%20Timer.lua</source>
+      </version>
+    </reapack>
+    <reapack name="hsuanice_Toggle Console to Work Log.lua" type="script" desc="Toggle Console to Work Log - append ReaScript console output to work.log">
       <metadata>
         <description><![CDATA[{\rtf1\ansi\deff0{\fonttbl{\f0 \fswiss Helvetica;}{\f1 \fmodern Courier;}}
 {\colortbl;\red255\green0\blue0;\red0\green0\blue255;}
@@ -809,89 +863,10 @@
 }
 ]]></description>
       </metadata>
-      <version name="26.1012.1358" author="hsuanice" time="2026-10-12T06:57:17Z">
-        <changelog><![CDATA[- First release in the hsuanice/ReaScripts repository.
-- Requires the js_ReaScriptAPI extension.
-- Fix: the log folder is created with REAPER's API (works on Windows, no shell call on every write).
-- Full history: Changelogs/ in the repository (https://github.com/hsuanice/ReaScripts/tree/master/Changelogs)]]></changelog>
-        <source main="main">https://github.com/hsuanice/ReaScripts/raw/bebe7e67d014263f833c5d2a4597572b5bf33e9f/Various/hsuanice_Console%20to%20Work%20Log%20Daemon.lua</source>
-      </version>
-    </reapack>
-    <reapack name="hsuanice_Count Item and Track and Toggle Show Item Details.lua" type="script" desc="GFX - Count Items/Tracks and Toggle Show Item Details">
-      <metadata>
-        <description><![CDATA[{\rtf1\ansi\deff0{\fonttbl{\f0 \fswiss Helvetica;}{\f1 \fmodern Courier;}}
-{\colortbl;\red255\green0\blue0;\red0\green0\blue255;}
-\widowctrl\hyphauto
-
-{\pard \ql \f0 \sa180 \li0 \fi0 Pro Tools-style selection monitor HUD using native gfx (no ReaImGui). Top row : Items count (left) + Tracks count (right) Mid rows : Start / End / Length timecodes (PT transport style) Detail rows: MIDI / Audio / Empty + Channel Count (toggle with arrow / left-click) Right-click: font size (UI scale) / dock / close. Window position, dock state, font size, and panel state persist across restarts.\par}
-}
-]]></description>
-      </metadata>
-      <version name="26.1012.1358" author="hsuanice" time="2026-10-12T06:57:17Z">
-        <changelog><![CDATA[- First release in the hsuanice/ReaScripts repository.
-- Full history: Changelogs/ in the repository (https://github.com/hsuanice/ReaScripts/tree/master/Changelogs)]]></changelog>
-        <source main="main">https://github.com/hsuanice/ReaScripts/raw/bebe7e67d014263f833c5d2a4597572b5bf33e9f/Various/hsuanice_Count%20Item%20and%20Track%20and%20Toggle%20Show%20Item%20Details.lua</source>
-      </version>
-    </reapack>
-    <reapack name="hsuanice_PM_InsightAnalyzer.lua" type="script" desc="PM Insight Analyzer">
-      <metadata>
-        <description><![CDATA[{\rtf1\ansi\deff0{\fonttbl{\f0 \fswiss Helvetica;}{\f1 \fmodern Courier;}}
-{\colortbl;\red255\green0\blue0;\red0\green0\blue255;}
-\widowctrl\hyphauto
-
-{\pard \ql \f0 \sa180 \li0 \fi0 Read-only analysis script. Auto-detects project type:\par}
-{\pard \ql \f0 \sa180 \li0 \fi0 Dialog Project Mode (Scene Cut track present): Combines scene data, EDL source lengths, and work log. Outputs per-scene efficiency metrics and project-wide summary. Tracks required: "Scene Cut", "EDL" (folder).\par}
-{\pard \ql \f0 \sa180 \li0 \fi0 Work Log Mode (no Scene Cut track): Parses item names ("Proj | Scene | Module") to compute durations grouped by scene and module. No EDL data required.\par}
-{\pard \ql \f0 \sa180 \li0 \fi0 Duration source: D_LENGTH (always). Does not write any data to the project.\par}
-}
-]]></description>
-      </metadata>
-      <version name="26.1012.1358pre1" author="hsuanice" time="2026-10-12T06:57:17Z">
-        <changelog><![CDATA[- First release in the hsuanice/ReaScripts repository.
-- Pre-release: work in progress (basic info and time totals so far) — only installed when "Enable pre-releases" is on in ReaPack.
-- Requires the SWS extension.
-- Full history: Changelogs/ in the repository (https://github.com/hsuanice/ReaScripts/tree/master/Changelogs)]]></changelog>
-        <source main="main">https://github.com/hsuanice/ReaScripts/raw/bebe7e67d014263f833c5d2a4597572b5bf33e9f/Various/hsuanice_PM_InsightAnalyzer.lua</source>
-      </version>
-    </reapack>
-    <reapack name="hsuanice_PM_Timer.lua" type="script" desc="PM Timer - Scene-aware Work Timer">
-      <metadata>
-        <description><![CDATA[{\rtf1\ansi\deff0{\fonttbl{\f0 \fswiss Helvetica;}{\f1 \fmodern Courier;}}
-{\colortbl;\red255\green0\blue0;\red0\green0\blue255;}
-\widowctrl\hyphauto
-
-{\pard \ql \f0 \sa180 \li0 \fi0 Scene-aware toggle timer for the hsuanice PM system. Uses gfx (no ReaImGui). 1-second display refresh via defer + time_precise.\par}
-{\pard \ql \f0 \sa180 \li0 \fi0 State machine: IDLE \u8596 ? WORKING (no BREAK state)\par}
-{\pard \ql \f0 \sa180 \li0 \fi0 Track structure (auto-managed): Scene Cut \u8592 ? folder track (I_FOLDERDEPTH = 1) 2026-03-01 \u8592 ? date track, direct child, depth = 0 2026-03-02 \u8592 ? depth = 0 DurationOnly_Log\u8592 ? last child, depth = -1; holds duration-only records\par}
-{\pard \ql \f0 \sa180 \li0 \fi0 Two work modes (auto-detected from selection): Scene Mode : a scene item on "Scene Cut" is selected P_EXT:SCENE_GUID written; name = "scene (tc) | work_type" Project Mode : no scene item selected P_EXT:SCENE_GUID not written; name = work_type only\par}
-{\pard \ql \f0 \sa180 \li0 \fi0 Work item metadata: P_EXT:SCENE_GUID (Scene Mode only), P_EXT:WORK_TYPE, P_EXT:END_REASON Duration-only items also carry P_EXT:IS_DURATION_ONLY = "1" All work items are locked (C_LOCK=1) after creation.\par}
-}
-]]></description>
-      </metadata>
-      <version name="26.1012.1358" author="hsuanice" time="2026-10-12T06:57:17Z">
-        <changelog><![CDATA[- First release in the hsuanice/ReaScripts repository.
-- Requires the SWS extension.
-- New: FPS (and DF for drop-frame) shown on the status line.
-- Update Scene Metadata rewritten: scene name taken from the take name first (CLB-created scenes no longer become "(no name)"), take name set from the scene name, source items attributed by item group, selected scenes or all; runs automatically when PM Timer opens, closes or the project changes, and only writes when something changed.
-- New: broken scene links (work log items pointing to a scene that no longer exists) are shown on the status line; Update Scene Metadata offers to re-link them automatically when a scene with the same name and start is found, and the new "Relink to Selected Scene" menu item re-links them by hand.
-- Full history: Changelogs/ in the repository (https://github.com/hsuanice/ReaScripts/tree/master/Changelogs)]]></changelog>
-        <source main="main">https://github.com/hsuanice/ReaScripts/raw/bebe7e67d014263f833c5d2a4597572b5bf33e9f/Various/hsuanice_PM_Timer.lua</source>
-      </version>
-    </reapack>
-    <reapack name="hsuanice_Work Timer.lua" type="script" desc="Work Timer - real-time 24H clock (resizable, dockable, follows the project frame rate)">
-      <metadata>
-        <description><![CDATA[{\rtf1\ansi\deff0{\fonttbl{\f0 \fswiss Helvetica;}{\f1 \fmodern Courier;}}
-{\colortbl;\red255\green0\blue0;\red0\green0\blue255;}
-\widowctrl\hyphauto
-
-{\pard \ql \f0 \sa180 \li0 \fi0 Real-time 24H system clock. Right-click to change color/font. Window is resizable; clock auto-scales to fill it. Settings and window geometry are remembered across sessions.\par}
-}
-]]></description>
-      </metadata>
-      <version name="26.1012.1358" author="hsuanice" time="2026-10-12T06:57:17Z">
-        <changelog><![CDATA[- First release in the hsuanice/ReaScripts repository.
-- Full history: Changelogs/ in the repository (https://github.com/hsuanice/ReaScripts/tree/master/Changelogs)]]></changelog>
-        <source main="main">https://github.com/hsuanice/ReaScripts/raw/bebe7e67d014263f833c5d2a4597572b5bf33e9f/Various/hsuanice_Work%20Timer.lua</source>
+      <version name="26.1012.1641" author="hsuanice" time="2026-10-12T09:44:14Z">
+        <changelog><![CDATA[- Renamed to "Toggle Console to Work Log" (was "Console to Work Log Daemon") as part of the 2026-10-12 naming clean-up.
+- Reinstall the package from ReaPack and re-assign your shortcuts / toolbar buttons.]]></changelog>
+        <source main="main">https://github.com/hsuanice/ReaScripts/raw/69a8697e1b54666ea7228379b1490811fd778fa8/Various/hsuanice_Toggle%20Console%20to%20Work%20Log.lua</source>
       </version>
     </reapack>
   </category>
@@ -917,8 +892,8 @@ Packages
 \sa180\sa180\par}
 {\pard \ql \f0 \sa180 \li0 \fi0 \outlinelevel2 \b \fs28 Requirements\par}
 {\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab {\b ReaImGui} \u8212- needed by the GUI scripts; install with ReaPack ({\i ReaTeam Extensions} repository, included by default).\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab {\b SWS Extension} \u8212- required by {\i PM Timer} and {\i PM Insight Analyzer}; optional elsewhere (a few features use it, e.g. {\i Retain Glue Cues}).\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab {\b js_ReaScriptAPI} \u8212- needed by {\i Set Time to Item on Right-Drag Release} and {\i Console to Work Log Daemon}, recommended for {\i Track and Razor Item Link}; install with ReaPack ({\i ReaTeam Extensions}).\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab {\b SWS Extension} \u8212- required by {\i Project Manager - PM Timer} and {\i PM Insight Analyzer}; optional elsewhere (a few features use it, e.g. {\i Retain Glue Cues}).\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab {\b js_ReaScriptAPI} \u8212- needed by {\i Toggle Set Time Selection to Items on Right Drag} and {\i Toggle Console to Work Log}, recommended for {\i Toggle Track and Razor Item Link like Pro Tools}; install with ReaPack ({\i ReaTeam Extensions}).\par}
 {\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab {\b Python 3 + OpenTimelineIO} ({\f1 pip install opentimelineio}) \u8212- only for {\i Conform List Browser} AAF / XML / OTIO import; EDL needs nothing extra. AAF also needs {\b aaftool} from LibAAF.\par}
 {\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab {\b BWF MetaEdit} ({\f1 bwfmetaedit} command-line tool) \u8212- optional; only needed for timecode (BWF TimeReference) embedding.\sa180\par}
 {\pard \ql \f0 \sa180 \li0 \fi0 \outlinelevel2 \b \fs28 Moving from hsuanice/PublicBeta\par}
@@ -926,22 +901,24 @@ Packages
 {\pard \ql \f0 \sa0 \li360 \fi-360 1.\tx360\tab {\b Extensions > ReaPack > Manage repositories}, right-click {\b hsuanice Scripts} (PublicBeta) > {\b Uninstall}.\par}
 {\pard \ql \f0 \sa0 \li360 \fi-360 2.\tx360\tab Import this repository and install the packages as above.\sa180\par}
 {\pard \ql \f0 \sa180 \li0 \fi0 \outlinelevel1 \b \fs32 Packages\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 Script names follow one pattern so they are easy to find in the Action List: the series or package name comes first ({\f1 Hover Editing - ...}, {\f1 Auto Color - ...}), abbreviations are kept next to the full name ({\f1 Conform List Browser - CLB ...}), and background on/off scripts start with {\f1 Toggle}.\par}
+{\pard \ql \f0 \sa180 \li720 \fi0 {\b Renamed on 2026-10-12.} Every script got a clearer name. If you installed an earlier version, reinstall the packages from ReaPack and re-assign your shortcuts / toolbar buttons. The changelog of each package lists the old name.\par}
 {\pard \ql \f0 \sa180 \li0 \fi0 \outlinelevel2 \b \fs28 Rendering\par}
-{\pard \ql \f0 \sa180 \li0 \fi0 | Package | What it does | |---|---| | RGWH | Render or glue items with handles (GUI + Glue / Render shortcuts) | | AudioSweet | AudioSuite-style workflow in REAPER, Pro Tools style (GUI + Run / Preview / Solo shortcuts, FX Alias tools) |\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 | Package | What it does | |---|---| | Render or Glue with Handles - RGWH | Render or glue items with handles (GUI + Glue / Render actions) | | AudioSweet - AudioSuite Workflow | AudioSuite-style offline FX processing, Pro Tools style (GUI + Run / Toggle Preview / Toggle Solo, FX Alias tools) |\par}
 {\pard \ql \f0 \sa180 \li0 \fi0 \outlinelevel2 \b \fs28 Items Editing\par}
-{\pard \ql \f0 \sa180 \li0 \fi0 | Package | What it does | |---|---| | Hover Mode | Pro Tools-style Split / Trim at the mouse or edit cursor (Toggle, Split, Trim Left / Right) | | Reorder | Vertical reorder and sort of selected items (GUI + Copy to Sort / Sort in Place / Upfill) | | Fix Tools | Clean up edits before moving a session to Pro Tools or Nuendo (edges off grid, looped sources, crossfades, overlaps, fades) | | Copy / Cut with Razor | Copy or cut items and envelope points, respecting razor edits | | Item Reposition | Reposition selected items by interval (GUI) | | Move selected items to track under mouse | Move items vertically, keeping their timeline position | | Toggle Mute Item under Mouse Cursor | Mute / unmute the item under the mouse | | Explode takes of items across tracks | Put each take of the selected items on its own track | | Explode Multichannel Poly Audio | Split poly files into one-channel items, keeping metadata | | Convert empty items to audio items | Keep names and notes | | Copy Unmuted Child Items to Parent Folder Track | Copy unmuted child items to the folder track (checks overlaps first) |\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 | Package | What it does | |---|---| | Hover Editing | Pro Tools-style Split / Trim at the mouse or edit cursor (Toggle Hover Mode, Split, Trim or Extend Left / Right Edge) | | Reorder - Sort Items Vertically | Vertical reorder and sort of selected items by metadata (GUI + Copy to Sort / Sort in Place / Upfill) | | Session Fix | Clean up edits before moving a session to Pro Tools or Nuendo (edges off grid, looped sources, misaligned crossfades, overlaps, splits at fade edges) | | Copy / Cut Items and Envelope Points Respect Razor | Copy or cut items and envelope points, respecting razor edits | | Reposition Items | Space selected items by an interval (GUI) | | Move Selected Items to Track Under Mouse | Move items vertically, keeping their timeline position | | Toggle Mute Item Under Mouse | Mute / unmute the item under the mouse | | Explode Takes Across Tracks | Put each take of the selected items on its own track | | Explode Multichannel Poly Audio to Mono Items | Split poly files into one-channel items, keeping metadata | | Convert Empty Items to Audio Items | Keeps take names and notes | | Copy Unmuted Child Items to Parent Folder Track | Copy unmuted child items to the folder track (checks overlaps first) |\par}
 {\pard \ql \f0 \sa180 \li0 \fi0 \outlinelevel2 \b \fs28 Items Properties\par}
-{\pard \ql \f0 \sa180 \li0 \fi0 | Package | What it does | |---|---| | Auto Color | Color items by take-name keywords with a configurable palette (GUI + Background Daemon, by Palette, Smart Random, Follow Track Color, All ShinyColor) |\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 | Package | What it does | |---|---| | Auto Color - Items by Take Name | Color items by take-name keywords with a palette (GUI + Toggle Background Coloring, By Palette, Smart Random, Follow Track Color, All Shiny Color) |\par}
 {\pard \ql \f0 \sa180 \li0 \fi0 \outlinelevel2 \b \fs28 Selection\par}
-{\pard \ql \f0 \sa180 \li0 \fi0 | Package | What it does | |---|---| | Track and Razor Item Link like Pro Tools | Pro Tools-style "Link Track and Edit Selection": tracks follow razor areas / item selection (toggle) | | Razor and Item Link with Mode Switch | Razor areas select the items they overlap or fully contain (toggle) | | Set Time to Item on Right-Drag Release | After a right-button drag, the time selection follows the selected items (toggle) |\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 | Package | What it does | |---|---| | Toggle Track and Razor Item Link like Pro Tools | Pro Tools-style "Link Track and Edit Selection": tracks follow razor areas / item selection | | Toggle Razor and Item Link Overlap or Contain | Razor areas select the items they overlap or fully contain | | Toggle Set Time Selection to Items on Right Drag | After a right-button drag, the time selection follows the selected items |\par}
 {\pard \ql \f0 \sa180 \li0 \fi0 \outlinelevel2 \b \fs28 Tracks\par}
-{\pard \ql \f0 \sa180 \li0 \fi0 | Package | What it does | |---|---| | Auto Pan LR tracks | Pan adjacent XXX_L / XXX_R track pairs hard left / right | | Delete Selected Tracks with Warning | Safe delete: asks first when tracks have items, FX, routing or are folders | | Show/Hide TCP children of folder tracks | Show or hide the children of the selected folder tracks (or of their parent) in the TCP | | Split Tracks by Item Channel {\i (pre-release)} | Split tracks whose items mix mono / stereo / multichannel into one track per channel count | | Import audio files per folder (Field Recorder) | Import one folder per track; channel-split recorder files are grouped (GUI) | | Import audio files per folder (Music Multitrack) | Import one folder per track for music multitrack sessions (GUI) |\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 | Package | What it does | |---|---| | Auto Pan LR tracks | Pan adjacent XXX_L / XXX_R track pairs hard left / right | | Delete Selected Tracks with Warning | Safe delete: asks first when tracks have items, FX, routing or are folders | | Show Hide Folder Child Tracks in TCP | Show or hide the children of the selected folder tracks (or of their parent) | | Split Tracks by Item Channel Count {\i (pre-release)} | One track per mono / stereo / multichannel group | | Import Audio Folders to Tracks - Field Recorder | Import one folder per track; channel-split recorder files are grouped (GUI) | | Import Audio Folders to Tracks - Music Multitrack | Import one folder per track for music multitrack sessions (GUI) |\par}
 {\pard \ql \f0 \sa180 \li0 \fi0 \outlinelevel2 \b \fs28 Metadata\par}
-{\pard \ql \f0 \sa180 \li0 \fi0 | Package | What it does | |---|---| | Rename from Metadata | Rename takes or source files from BWF / iXML metadata tokens, with live preview (GUI) | | Item List | Spreadsheet-style item tables with metadata columns: Item List Editor + Item List Browser (GUI) | | BWF / iXML Embed Tools | Write timecode, iXML / BWF metadata and SMPTE UMID into files (needs BWF MetaEdit) |\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 | Package | What it does | |---|---| | Rename from Metadata | Rename the active take or the source file from BWF / iXML metadata tokens, with live preview (GUI) | | Item List | Spreadsheet-style item tables with metadata columns: Item List Browser - ILB, Item List Editor - ILE (GUI) | | BWF / iXML Embed Tools | Embed BWF iXML Metadata from Take 1, Embed Timecode to BWF and iXML, Embed SMPTE UMID (needs BWF MetaEdit) |\par}
 {\pard \ql \f0 \sa180 \li0 \fi0 \outlinelevel2 \b \fs28 Conform\par}
-{\pard \ql \f0 \sa180 \li0 \fi0 | Package | What it does | |---|---| | Conform List Browser {\i (pre-release)} | Spreadsheet-style conform tool for EDL / AAF / XML / OTIO / subtitle lists: match source media, generate and link items, compare old / new cuts (GUI + Jump / Link / Load / Reveal wrappers) |\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 | Package | What it does | |---|---| | Conform List Browser - CLB {\i (pre-release)} | Conform tool for EDL / AAF / XML / OTIO / subtitle lists: match source media, generate and link items, compare old / new cuts (GUI + Jump Old New TC, Link REAPER Items, Load from REAPER, Reveal Item) |\par}
 {\pard \ql \f0 \sa180 \li0 \fi0 \outlinelevel2 \b \fs28 Various\par}
-{\pard \ql \f0 \sa180 \li0 \fi0 | Package | What it does | |---|---| | PM Timer | Scene-aware work timer: logs work sessions per scene / project, keeps scene metadata up to date, shows FPS (needs SWS) | | PM Insight Analyzer {\i (pre-release)} | Work-time and efficiency analysis of PM Timer work logs (work in progress; needs SWS) | | Console to Work Log Daemon | Appends ReaScript console output to work.log in the project folder (needs js_ReaScriptAPI) | | Work Timer | Real-time 24H clock window (resizable, dockable) | | Count Items / Tracks | Pro Tools-style selection HUD: item / track counts, start / end / length |\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 | Package | What it does | |---|---| | Project Manager - PM Timer | Scene-aware work timer: logs work sessions per scene / project, keeps scene metadata up to date, shows FPS (needs SWS) | | Project Manager - PM Insight Analyzer {\i (pre-release)} | Work-time and efficiency analysis of PM Timer logs (work in progress; needs SWS) | | Toggle Console to Work Log | Appends ReaScript console output to work.log in the project folder (needs js_ReaScriptAPI) | | Clock with Date 24H | Resizable, dockable clock window | | Count Items and Tracks - Selection HUD | Pro Tools-style selection info: item / track counts, start / end / length |\par}
 {\pard \ql \f0 \sa180 \li0 \fi0 \outlinelevel2 \b \fs28 Library\par}
 {\pard \ql \f0 \sa180 \li0 \fi0 | Package | What it does | |---|---| | hsuanice Library | Shared code used by the scripts above; adds nothing to the Action List |\par}
 {\pard \ql \f0 \sa180 \li0 \fi0 Suggested shortcuts are listed in each package's About page in ReaPack (never assigned automatically).\par}
@@ -962,7 +939,7 @@ Claude
 {\pard \ql \f0 \sa180 \li0 \fi0 \outlinelevel1 \b \fs32 Credits\par}
 {\pard \ql \f0 \sa180 \li0 \fi0 The scripts in this repository are designed, tested and maintained by hsuanice, with code written together with AI tools (Claude, ChatGPT).\par}
 {\pard \ql \f0 \sa180 \li0 \fi0 AudioSweet is inspired by the AudioSuite-like script by Tim Chimes. "AudioSweet" is a name originally given by Tim Chimes; this project continues to use the name in reference to his original work. Original: "Renders selected plugin to selected media item", written for REAPER 5.1 with Lua (v1.1, 2015-12-22) \u8212- http://timchimes.com/scripting-with-reaper-audiosuite/\par}
-{\pard \ql \f0 \sa180 \li0 \fi0 Hover Mode Toggle is based on / inspired by TJF's {\i Hover Mode Toggle} script.\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 Hover Editing - Toggle Hover Mode is based on / inspired by TJF's {\i Hover Mode Toggle} script.\par}
 {\pard \ql \f0 \sa180 \li0 \fi0 Auto Color's palette (hue + per-row saturation / value) is modeled after rodilab's {\i Color palette} script. Auto Color's Shiny mode follows the ShinyColor behavior of {\i Chroma - Coloring Tool} by OLSHALOM \u8212- https://forum.cockos.com/showthread.php?t=281516\par}
 {\pard \ql \f0 \sa180 \li0 \fi0 Conform List Browser uses {\field{\*\fldinst{HYPERLINK "https://github.com/AcademySoftwareFoundation/OpenTimelineIO"}}{\fldrslt{\ul
 OpenTimelineIO
