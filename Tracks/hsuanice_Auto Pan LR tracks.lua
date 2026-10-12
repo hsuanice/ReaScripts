@@ -1,16 +1,16 @@
 --[[
 @description Auto Pan LR Tracks (pan adjacent XXX_L / XXX_R track pairs hard left / hard right)
-@version 26.1012.1024
+@version 26.1012.2303
 @author hsuanice
 @changelog
-  - First release in the hsuanice/ReaScripts repository.
-  - Messages translated to English.
-  - Full history: Changelogs/ in the repository (https://github.com/hsuanice/ReaScripts/tree/master/Changelogs)
+  - Change: works on the selected tracks — every L/R pair inside the selection is panned 100% left / 100% right on its own (both tracks of a pair must be selected). With no selection, the whole project is processed as before.
 @about
     After an AAF import, split-stereo tracks (e.g. "Audio 9_L" / "Audio 9_R") arrive panned center.
-    This script scans ALL tracks and pans each adjacent L/R pair:
+    This script pans each adjacent L/R pair — within the selected tracks, or in the whole
+    project when no track is selected:
       • L track -> 100% Left, R track -> 100% Right
       • A pair = track N ends with an L suffix AND track N+1 has the same base name with an R suffix
+        (with a selection, both tracks of the pair must be selected); every pair is set on its own
       • Recognized suffixes (case-insensitive): _L/_R, -L/-R, .L/.R, " L"/" R"
     Unpaired L/R-looking tracks are left untouched and listed in a message for review.
     Notes:
@@ -42,13 +42,17 @@ local function set_pan(tr, pan)
   end
 end
 
+-- Scope: the selected tracks, or every track when nothing is selected
+local use_selection = r.CountSelectedTracks(0) > 0
+
 local n = r.CountTracks(0)
 local tracks = {}
 for i = 0, n - 1 do
   local tr = r.GetTrack(0, i)
   local _, name = r.GetTrackName(tr)
   local base, side = parse_lr(name)
-  tracks[#tracks + 1] = { tr = tr, name = name, base = base, side = side }
+  local in_scope = (not use_selection) or r.IsTrackSelected(tr)
+  tracks[#tracks + 1] = { tr = tr, name = name, base = base, side = side, in_scope = in_scope }
 end
 
 r.Undo_BeginBlock()
@@ -58,13 +62,13 @@ local paired, orphans = 0, {}
 local i = 1
 while i <= #tracks do
   local t, nxt = tracks[i], tracks[i + 1]
-  if t.side == "L" and nxt and nxt.side == "R" and nxt.base == t.base then
+  if t.in_scope and t.side == "L" and nxt and nxt.in_scope and nxt.side == "R" and nxt.base == t.base then
     set_pan(t.tr, -1)
     set_pan(nxt.tr, 1)
     paired = paired + 1
     i = i + 2
   else
-    if t.side then orphans[#orphans + 1] = string.format("  #%d  %s", i, t.name) end
+    if t.in_scope and t.side then orphans[#orphans + 1] = string.format("  #%d  %s", i, t.name) end
     i = i + 1
   end
 end
@@ -75,7 +79,8 @@ r.Undo_EndBlock(string.format("Auto Pan LR tracks (%d pairs)", paired), 1)
 
 if #orphans > 0 then
   r.ShowMessageBox(
-    string.format("Panned %d L/R track pair(s).\n\nThese tracks look like L/R by name but have no matching neighbor above or below, so they were left unchanged:\n\n%s",
-      paired, table.concat(orphans, "\n")),
+    string.format("Panned %d L/R track pair(s)%s.\n\nThese tracks look like L/R by name but have no matching neighbor above or below%s, so they were left unchanged:\n\n%s",
+      paired, use_selection and " in the selection" or "",
+      use_selection and " (both tracks of a pair must be selected)" or "", table.concat(orphans, "\n")),
     "Auto Pan LR Tracks", 0)
 end
