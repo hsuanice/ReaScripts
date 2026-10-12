@@ -54,6 +54,12 @@ Both install to the same folder, so remove PublicBeta first:
 | Convert empty items to audio items | Keep names and notes |
 | Copy Unmuted Child Items to Parent Folder Track | Copy unmuted child items to the folder track (checks overlaps first) |
 
+### Items Properties
+
+| Package | What it does |
+|---|---|
+| Auto Color | Color items by take-name keywords with a configurable palette (GUI + Background Daemon, by Palette, Smart Random, Follow Track Color, All ShinyColor) |
+
 ### Library
 
 | Package | What it does |
@@ -85,3 +91,6 @@ Original: "Renders selected plugin to selected media item", written for REAPER 5
 http://timchimes.com/scripting-with-reaper-audiosuite/
 
 Hover Mode Toggle is based on / inspired by TJF's *Hover Mode Toggle* script.
+
+Auto Color's palette (hue + per-row saturation / value) is modeled after rodilab's *Color palette* script.
+Auto Color's Shiny mode follows the ShinyColor behavior of *Chroma - Coloring Tool* by OLSHALOM — https://forum.cockos.com/showthread.php?t=281516

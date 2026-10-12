@@ -15,6 +15,7 @@
 # Published categories
 !/Rendering/
 !/Items Editing/
+!/Items Properties/
 
 # Library: only files used by published packages
 !/Library/
