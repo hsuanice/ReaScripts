@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<index version="1" name="hsuanice Scripts" commit="46702ee8e58ba37cad9048b9a9bccd94e29471af">
+<index version="1" name="hsuanice Scripts" commit="7da8f85a30be8947b6bfb8b01a1e2b93856b0482">
   <category name="Items Editing">
     <reapack name="hsuanice_Convert empty items to audio items.lua" type="script" desc="Convert empty items to audio items (preserve name &amp; notes)">
       <metadata>
@@ -273,6 +273,34 @@
       </version>
     </reapack>
   </category>
+  <category name="Items Properties">
+    <reapack name="hsuanice_Auto Color Items by Take Name.lua" type="script" desc="Auto Color Items by Take Name">
+      <metadata>
+        <description><![CDATA[{\rtf1\ansi\deff0{\fonttbl{\f0 \fswiss Helvetica;}{\f1 \fmodern Courier;}}
+{\colortbl;\red255\green0\blue0;\red0\green0\blue255;}
+\widowctrl\hyphauto
+
+{\pard \ql \f0 \sa180 \li0 \fi0 Config-driven color palette with keyword rules \u8212- colors items by take name.\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 Palette is generated from Hue + per-row Saturation/Value settings (like rodilab's Color palette). Shiny mode follows the ShinyColor behavior of Chroma - Coloring Tool by OLSHALOM (https://forum.cockos.com/showthread.php?t=281516). Right-click any swatch \u8594 ? Edit Color / Edit Keyword / Clear Keyword Left-click a swatch \u8594 ? apply that color to selected items Auto Color mode colors all items automatically on project changes\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 No external dependencies \u8212- REAPER built-in GFX library.\par}
+}
+]]></description>
+      </metadata>
+      <version name="26.1012.0930" author="hsuanice" time="2026-10-12T01:52:55Z">
+        <changelog><![CDATA[- First release in the hsuanice/ReaScripts repository.
+- Includes: GUI, Background Daemon, by Palette, Smart Random, Follow Track Color, All ShinyColor (all share the GUI's settings).
+- Fix: the settings folder is now created with REAPER's API, so saving also works on Windows.
+- Fix: All Shiny (GUI button and All ShinyColor script) no longer re-colors items in the black / gray / white row that are already Shiny.
+- Full history: Changelogs/ in the repository (https://github.com/hsuanice/ReaScripts/tree/master/Changelogs)]]></changelog>
+        <source main="main">https://github.com/hsuanice/ReaScripts/raw/7da8f85a30be8947b6bfb8b01a1e2b93856b0482/Items%20Properties/hsuanice_Auto%20Color%20Items%20by%20Take%20Name.lua</source>
+        <source main="main" file="hsuanice_Auto Color Daemon.lua">https://github.com/hsuanice/ReaScripts/raw/7da8f85a30be8947b6bfb8b01a1e2b93856b0482/Items%20Properties/hsuanice_Auto%20Color%20Daemon.lua</source>
+        <source main="main" file="hsuanice_Auto Color by Palette.lua">https://github.com/hsuanice/ReaScripts/raw/7da8f85a30be8947b6bfb8b01a1e2b93856b0482/Items%20Properties/hsuanice_Auto%20Color%20by%20Palette.lua</source>
+        <source main="main" file="hsuanice_Auto Color Smart Random.lua">https://github.com/hsuanice/ReaScripts/raw/7da8f85a30be8947b6bfb8b01a1e2b93856b0482/Items%20Properties/hsuanice_Auto%20Color%20Smart%20Random.lua</source>
+        <source main="main" file="hsuanice_Auto Color Follow Track Color.lua">https://github.com/hsuanice/ReaScripts/raw/7da8f85a30be8947b6bfb8b01a1e2b93856b0482/Items%20Properties/hsuanice_Auto%20Color%20Follow%20Track%20Color.lua</source>
+        <source main="main" file="hsuanice_Auto Color All ShinyColor.lua">https://github.com/hsuanice/ReaScripts/raw/7da8f85a30be8947b6bfb8b01a1e2b93856b0482/Items%20Properties/hsuanice_Auto%20Color%20All%20ShinyColor.lua</source>
+      </version>
+    </reapack>
+  </category>
   <category name="Library">
     <reapack name="hsuanice_Library.lua" type="script" desc="hsuanice Library - shared code used by hsuanice scripts (required)">
       <metadata>
@@ -412,6 +440,8 @@ Packages
 {\pard \ql \f0 \sa180 \li0 \fi0 | Package | What it does | |---|---| | RGWH | Render or glue items with handles (GUI + Glue / Render shortcuts) | | AudioSweet | AudioSuite-style workflow in REAPER, Pro Tools style (GUI + Run / Preview / Solo shortcuts, FX Alias tools) |\par}
 {\pard \ql \f0 \sa180 \li0 \fi0 \outlinelevel2 \b \fs28 Items Editing\par}
 {\pard \ql \f0 \sa180 \li0 \fi0 | Package | What it does | |---|---| | Hover Mode | Pro Tools-style Split / Trim at the mouse or edit cursor (Toggle, Split, Trim Left / Right) | | Reorder | Vertical reorder and sort of selected items (GUI + Copy to Sort / Sort in Place / Upfill) | | Fix Tools | Clean up edits before moving a session to Pro Tools or Nuendo (edges off grid, looped sources, crossfades, overlaps, fades) | | Copy / Cut with Razor | Copy or cut items and envelope points, respecting razor edits | | Item Reposition | Reposition selected items by interval (GUI) | | Move selected items to track under mouse | Move items vertically, keeping their timeline position | | Toggle Mute Item under Mouse Cursor | Mute / unmute the item under the mouse | | Explode takes of items across tracks | Put each take of the selected items on its own track | | Explode Multichannel Poly Audio | Split poly files into one-channel items, keeping metadata | | Convert empty items to audio items | Keep names and notes | | Copy Unmuted Child Items to Parent Folder Track | Copy unmuted child items to the folder track (checks overlaps first) |\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 \outlinelevel2 \b \fs28 Items Properties\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 | Package | What it does | |---|---| | Auto Color | Color items by take-name keywords with a configurable palette (GUI + Background Daemon, by Palette, Smart Random, Follow Track Color, All ShinyColor) |\par}
 {\pard \ql \f0 \sa180 \li0 \fi0 \outlinelevel2 \b \fs28 Library\par}
 {\pard \ql \f0 \sa180 \li0 \fi0 | Package | What it does | |---|---| | hsuanice Library | Shared code used by the scripts above; adds nothing to the Action List |\par}
 {\pard \ql \f0 \sa180 \li0 \fi0 Suggested shortcuts are listed in each package's About page in ReaPack (never assigned automatically).\par}
@@ -432,6 +462,7 @@ Claude
 {\pard \ql \f0 \sa180 \li0 \fi0 The scripts in this repository are designed, tested and maintained by hsuanice, with code written together with AI tools (Claude, ChatGPT).\par}
 {\pard \ql \f0 \sa180 \li0 \fi0 AudioSweet is inspired by the AudioSuite-like script by Tim Chimes. "AudioSweet" is a name originally given by Tim Chimes; this project continues to use the name in reference to his original work. Original: "Renders selected plugin to selected media item", written for REAPER 5.1 with Lua (v1.1, 2015-12-22) \u8212- http://timchimes.com/scripting-with-reaper-audiosuite/\par}
 {\pard \ql \f0 \sa180 \li0 \fi0 Hover Mode Toggle is based on / inspired by TJF's {\i Hover Mode Toggle} script.\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 Auto Color's palette (hue + per-row saturation / value) is modeled after rodilab's {\i Color palette} script. Auto Color's Shiny mode follows the ShinyColor behavior of {\i Chroma - Coloring Tool} by OLSHALOM \u8212- https://forum.cockos.com/showthread.php?t=281516\par}
 }
 ]]></description>
   </metadata>
