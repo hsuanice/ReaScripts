@@ -1,19 +1,15 @@
 --[[
 @description BWF / iXML Embed Tools - write timecode, iXML / BWF metadata and SMPTE UMID into files (BWF MetaEdit)
-@version 26.1012.1113
+@version 26.1012.1641
 @author hsuanice
 @metapackage
 @provides
-  [main] hsuanice_Embed iXML and BWF Metadata from Take 1 to Active Take with SMPTE UMID option.lua
-  [main] hsuanice_Timecode Embed Tool.lua
-  [main] hsuanice_SMPTE UMID Generate and Embed Tool.lua
+  [main] hsuanice_Embed BWF iXML Metadata from Take 1.lua
+  [main] hsuanice_Embed Timecode to BWF and iXML.lua
+  [main] hsuanice_Embed SMPTE UMID.lua
 @changelog
-  - First release in the hsuanice/ReaScripts repository.
-  - Requires the "hsuanice Library" package.
-  - Requires BWF MetaEdit (bwfmetaedit).
-  - Messages translated to English.
-  - Timecode Embed Tool: files without iXML TimeReference fields (e.g. REAPER renders) were reported as FAIL although the BWF TimeReference was written and verified; they now report OK.
-  - Full history: Changelogs/ in the repository (https://github.com/hsuanice/ReaScripts/tree/master/Changelogs)
+  - Scripts renamed as part of the 2026-10-12 naming clean-up (see the file list in @provides).
+  - Reinstall the package from ReaPack and re-assign your shortcuts / toolbar buttons.
 @about
   # BWF / iXML Embed Tools
 

@@ -2,6 +2,11 @@
 
 BWF / iXML Embed Tools - write timecode, iXML / BWF metadata and SMPTE UMID into files (BWF MetaEdit)
 
+## 26.1012.1641
+
+- Scripts renamed as part of the 2026-10-12 naming clean-up (see the file list in @provides).
+- Reinstall the package from ReaPack and re-assign your shortcuts / toolbar buttons.
+
 ## 26.1012.1113
 
 - First release in the hsuanice/ReaScripts repository.

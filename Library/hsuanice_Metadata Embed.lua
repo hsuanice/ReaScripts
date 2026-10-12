@@ -898,7 +898,7 @@ end
 --- from an existing source WAV), this takes raw XML text the caller
 --- already built itself (e.g. a fresh <BWFXML> document for a brand-new
 --- file with no source to copy from — see
---- hsuanice_Conform List Browser.lua's CLB.generate_reference_media).
+--- hsuanice_Conform List Browser - CLB.lua's CLB.generate_reference_media).
 --- Writes via the same sidecar import mechanism (--in-iXML=) bwfmetaedit
 --- itself uses, verifies the import actually took by reading the chunk
 --- back and comparing size, then cleans up the sidecar either way.

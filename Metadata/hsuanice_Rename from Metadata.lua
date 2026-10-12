@@ -1,15 +1,14 @@
 --[[
 @description Rename from Metadata - rename takes or source files from BWF / iXML metadata with tokens (GUI)
-@version 26.1012.1113
+@version 26.1012.1641
 @author hsuanice
 @metapackage
 @provides
-  [main] hsuanice_Rename Active Take from File Metadata.lua
-  [main] hsuanice_Rename Source File from Metadata.lua
+  [main] hsuanice_Rename from Metadata - Active Take.lua
+  [main] hsuanice_Rename from Metadata - Source File.lua
 @changelog
-  - First release in the hsuanice/ReaScripts repository.
-  - Requires the "hsuanice Library" package.
-  - Full history: Changelogs/ in the repository (https://github.com/hsuanice/ReaScripts/tree/master/Changelogs)
+  - Scripts renamed as part of the 2026-10-12 naming clean-up (see the file list in @provides).
+  - Reinstall the package from ReaPack and re-assign your shortcuts / toolbar buttons.
 @about
   # Rename from Metadata
 

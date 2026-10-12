@@ -18,8 +18,8 @@ REAPER scripts for audio post-production, by hsuanice.
 ### Requirements
 
 - **ReaImGui** — needed by the GUI scripts; install with ReaPack (*ReaTeam Extensions* repository, included by default).
-- **SWS Extension** — required by *PM Timer* and *PM Insight Analyzer*; optional elsewhere (a few features use it, e.g. *Retain Glue Cues*).
-- **js_ReaScriptAPI** — needed by *Set Time to Item on Right-Drag Release* and *Console to Work Log Daemon*, recommended for *Track and Razor Item Link*; install with ReaPack (*ReaTeam Extensions*).
+- **SWS Extension** — required by *Project Manager - PM Timer* and *PM Insight Analyzer*; optional elsewhere (a few features use it, e.g. *Retain Glue Cues*).
+- **js_ReaScriptAPI** — needed by *Toggle Set Time Selection to Items on Right Drag* and *Toggle Console to Work Log*, recommended for *Toggle Track and Razor Item Link like Pro Tools*; install with ReaPack (*ReaTeam Extensions*).
 - **Python 3 + OpenTimelineIO** (`pip install opentimelineio`) — only for *Conform List Browser* AAF / XML / OTIO import; EDL needs nothing extra. AAF also needs **aaftool** from LibAAF.
 - **BWF MetaEdit** (`bwfmetaedit` command-line tool) — optional; only needed for timecode (BWF TimeReference) embedding.
 
@@ -33,42 +33,49 @@ Both install to the same folder, so remove PublicBeta first:
 
 ## Packages
 
+Script names follow one pattern so they are easy to find in the Action List: the series or package name comes first
+(`Hover Editing - ...`, `Auto Color - ...`), abbreviations are kept next to the full name (`Conform List Browser - CLB ...`),
+and background on/off scripts start with `Toggle`.
+
+> **Renamed on 2026-10-12.** Every script got a clearer name. If you installed an earlier version, reinstall the
+> packages from ReaPack and re-assign your shortcuts / toolbar buttons. The changelog of each package lists the old name.
+
 ### Rendering
 
 | Package | What it does |
 |---|---|
-| RGWH | Render or glue items with handles (GUI + Glue / Render shortcuts) |
-| AudioSweet | AudioSuite-style workflow in REAPER, Pro Tools style (GUI + Run / Preview / Solo shortcuts, FX Alias tools) |
+| Render or Glue with Handles - RGWH | Render or glue items with handles (GUI + Glue / Render actions) |
+| AudioSweet - AudioSuite Workflow | AudioSuite-style offline FX processing, Pro Tools style (GUI + Run / Toggle Preview / Toggle Solo, FX Alias tools) |
 
 ### Items Editing
 
 | Package | What it does |
 |---|---|
-| Hover Mode | Pro Tools-style Split / Trim at the mouse or edit cursor (Toggle, Split, Trim Left / Right) |
-| Reorder | Vertical reorder and sort of selected items (GUI + Copy to Sort / Sort in Place / Upfill) |
-| Fix Tools | Clean up edits before moving a session to Pro Tools or Nuendo (edges off grid, looped sources, crossfades, overlaps, fades) |
-| Copy / Cut with Razor | Copy or cut items and envelope points, respecting razor edits |
-| Item Reposition | Reposition selected items by interval (GUI) |
-| Move selected items to track under mouse | Move items vertically, keeping their timeline position |
-| Toggle Mute Item under Mouse Cursor | Mute / unmute the item under the mouse |
-| Explode takes of items across tracks | Put each take of the selected items on its own track |
-| Explode Multichannel Poly Audio | Split poly files into one-channel items, keeping metadata |
-| Convert empty items to audio items | Keep names and notes |
+| Hover Editing | Pro Tools-style Split / Trim at the mouse or edit cursor (Toggle Hover Mode, Split, Trim or Extend Left / Right Edge) |
+| Reorder - Sort Items Vertically | Vertical reorder and sort of selected items by metadata (GUI + Copy to Sort / Sort in Place / Upfill) |
+| Session Fix | Clean up edits before moving a session to Pro Tools or Nuendo (edges off grid, looped sources, misaligned crossfades, overlaps, splits at fade edges) |
+| Copy / Cut Items and Envelope Points Respect Razor | Copy or cut items and envelope points, respecting razor edits |
+| Reposition Items | Space selected items by an interval (GUI) |
+| Move Selected Items to Track Under Mouse | Move items vertically, keeping their timeline position |
+| Toggle Mute Item Under Mouse | Mute / unmute the item under the mouse |
+| Explode Takes Across Tracks | Put each take of the selected items on its own track |
+| Explode Multichannel Poly Audio to Mono Items | Split poly files into one-channel items, keeping metadata |
+| Convert Empty Items to Audio Items | Keeps take names and notes |
 | Copy Unmuted Child Items to Parent Folder Track | Copy unmuted child items to the folder track (checks overlaps first) |
 
 ### Items Properties
 
 | Package | What it does |
 |---|---|
-| Auto Color | Color items by take-name keywords with a configurable palette (GUI + Background Daemon, by Palette, Smart Random, Follow Track Color, All ShinyColor) |
+| Auto Color - Items by Take Name | Color items by take-name keywords with a palette (GUI + Toggle Background Coloring, By Palette, Smart Random, Follow Track Color, All Shiny Color) |
 
 ### Selection
 
 | Package | What it does |
 |---|---|
-| Track and Razor Item Link like Pro Tools | Pro Tools-style "Link Track and Edit Selection": tracks follow razor areas / item selection (toggle) |
-| Razor and Item Link with Mode Switch | Razor areas select the items they overlap or fully contain (toggle) |
-| Set Time to Item on Right-Drag Release | After a right-button drag, the time selection follows the selected items (toggle) |
+| Toggle Track and Razor Item Link like Pro Tools | Pro Tools-style "Link Track and Edit Selection": tracks follow razor areas / item selection |
+| Toggle Razor and Item Link Overlap or Contain | Razor areas select the items they overlap or fully contain |
+| Toggle Set Time Selection to Items on Right Drag | After a right-button drag, the time selection follows the selected items |
 
 ### Tracks
 
@@ -76,34 +83,34 @@ Both install to the same folder, so remove PublicBeta first:
 |---|---|
 | Auto Pan LR tracks | Pan adjacent XXX_L / XXX_R track pairs hard left / right |
 | Delete Selected Tracks with Warning | Safe delete: asks first when tracks have items, FX, routing or are folders |
-| Show/Hide TCP children of folder tracks | Show or hide the children of the selected folder tracks (or of their parent) in the TCP |
-| Split Tracks by Item Channel *(pre-release)* | Split tracks whose items mix mono / stereo / multichannel into one track per channel count |
-| Import audio files per folder (Field Recorder) | Import one folder per track; channel-split recorder files are grouped (GUI) |
-| Import audio files per folder (Music Multitrack) | Import one folder per track for music multitrack sessions (GUI) |
+| Show Hide Folder Child Tracks in TCP | Show or hide the children of the selected folder tracks (or of their parent) |
+| Split Tracks by Item Channel Count *(pre-release)* | One track per mono / stereo / multichannel group |
+| Import Audio Folders to Tracks - Field Recorder | Import one folder per track; channel-split recorder files are grouped (GUI) |
+| Import Audio Folders to Tracks - Music Multitrack | Import one folder per track for music multitrack sessions (GUI) |
 
 ### Metadata
 
 | Package | What it does |
 |---|---|
-| Rename from Metadata | Rename takes or source files from BWF / iXML metadata tokens, with live preview (GUI) |
-| Item List | Spreadsheet-style item tables with metadata columns: Item List Editor + Item List Browser (GUI) |
-| BWF / iXML Embed Tools | Write timecode, iXML / BWF metadata and SMPTE UMID into files (needs BWF MetaEdit) |
+| Rename from Metadata | Rename the active take or the source file from BWF / iXML metadata tokens, with live preview (GUI) |
+| Item List | Spreadsheet-style item tables with metadata columns: Item List Browser - ILB, Item List Editor - ILE (GUI) |
+| BWF / iXML Embed Tools | Embed BWF iXML Metadata from Take 1, Embed Timecode to BWF and iXML, Embed SMPTE UMID (needs BWF MetaEdit) |
 
 ### Conform
 
 | Package | What it does |
 |---|---|
-| Conform List Browser *(pre-release)* | Spreadsheet-style conform tool for EDL / AAF / XML / OTIO / subtitle lists: match source media, generate and link items, compare old / new cuts (GUI + Jump / Link / Load / Reveal wrappers) |
+| Conform List Browser - CLB *(pre-release)* | Conform tool for EDL / AAF / XML / OTIO / subtitle lists: match source media, generate and link items, compare old / new cuts (GUI + Jump Old New TC, Link REAPER Items, Load from REAPER, Reveal Item) |
 
 ### Various
 
 | Package | What it does |
 |---|---|
-| PM Timer | Scene-aware work timer: logs work sessions per scene / project, keeps scene metadata up to date, shows FPS (needs SWS) |
-| PM Insight Analyzer *(pre-release)* | Work-time and efficiency analysis of PM Timer work logs (work in progress; needs SWS) |
-| Console to Work Log Daemon | Appends ReaScript console output to work.log in the project folder (needs js_ReaScriptAPI) |
-| Work Timer | Real-time 24H clock window (resizable, dockable) |
-| Count Items / Tracks | Pro Tools-style selection HUD: item / track counts, start / end / length |
+| Project Manager - PM Timer | Scene-aware work timer: logs work sessions per scene / project, keeps scene metadata up to date, shows FPS (needs SWS) |
+| Project Manager - PM Insight Analyzer *(pre-release)* | Work-time and efficiency analysis of PM Timer logs (work in progress; needs SWS) |
+| Toggle Console to Work Log | Appends ReaScript console output to work.log in the project folder (needs js_ReaScriptAPI) |
+| Clock with Date 24H | Resizable, dockable clock window |
+| Count Items and Tracks - Selection HUD | Pro Tools-style selection info: item / track counts, start / end / length |
 
 ### Library
 
@@ -137,7 +144,7 @@ AudioSweet is inspired by the AudioSuite-like script by Tim Chimes.
 Original: "Renders selected plugin to selected media item", written for REAPER 5.1 with Lua (v1.1, 2015-12-22) —
 http://timchimes.com/scripting-with-reaper-audiosuite/
 
-Hover Mode Toggle is based on / inspired by TJF's *Hover Mode Toggle* script.
+Hover Editing - Toggle Hover Mode is based on / inspired by TJF's *Hover Mode Toggle* script.
 
 Auto Color's palette (hue + per-row saturation / value) is modeled after rodilab's *Color palette* script.
 Auto Color's Shiny mode follows the ShinyColor behavior of *Chroma - Coloring Tool* by OLSHALOM — https://forum.cockos.com/showthread.php?t=281516

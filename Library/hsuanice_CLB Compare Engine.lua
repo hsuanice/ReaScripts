@@ -298,7 +298,7 @@ function M.group(changes, fps)
     -- (e.g. CLB's Recut Group Details table, one row per item) can look up
     -- its type/label/color without threading the parent group through
     -- separately. Used by manual match-correction (CMP.assign_group_detail_
-    -- match) in hsuanice_Conform List Browser.lua.
+    -- match) in hsuanice_Conform List Browser - CLB.lua.
     item.__group = g
   end
 

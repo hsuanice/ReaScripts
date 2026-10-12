@@ -26,7 +26,7 @@
       real user's production EDL had 114 events carrying this, used by the
       editorial system to flag clips shot at a different native frame rate
       (speed retime) or reverse playback. For
-      hsuanice_Conform List Browser.lua's new "Speed" column + Generate Ref
+      hsuanice_Conform List Browser - CLB.lua's new "Speed" column + Generate Ref
       Media note, so retimed/reversed events are at least visible for human
       review (not silently mis-measured as normal-speed cuts, nor guessed
       at by this parser itself).
