@@ -21,6 +21,8 @@
   - Split: split items at the selection, edit cursor or mouse
   - Trim Left / Right: trim or extend the item edge to the cursor, keeping fades
 
+  Hover Mode Toggle is based on / inspired by TJF's "Hover Mode Toggle" script.
+
   ## Suggested shortcuts
   - Hover Mode Split Item by Selection or Edit or Mouse Cursor: B
   - Hover Mode Trim or Extend Left Edge of Item: A

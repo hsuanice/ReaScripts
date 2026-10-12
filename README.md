@@ -83,3 +83,5 @@ AudioSweet is inspired by the AudioSuite-like script by Tim Chimes.
 "AudioSweet" is a name originally given by Tim Chimes; this project continues to use the name in reference to his original work.
 Original: "Renders selected plugin to selected media item", written for REAPER 5.1 with Lua (v1.1, 2015-12-22) —
 http://timchimes.com/scripting-with-reaper-audiosuite/
+
+Hover Mode Toggle is based on / inspired by TJF's *Hover Mode Toggle* script.
