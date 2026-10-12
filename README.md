@@ -20,6 +20,7 @@ REAPER scripts for audio post-production, by hsuanice.
 - **ReaImGui** — needed by the GUI scripts; install with ReaPack (*ReaTeam Extensions* repository, included by default).
 - **SWS Extension** — optional; a few features use it (e.g. *Retain Glue Cues*).
 - **js_ReaScriptAPI** — needed by *Set Time to Item on Right-Drag Release*, recommended for *Track and Razor Item Link*; install with ReaPack (*ReaTeam Extensions*).
+- **Python 3 + OpenTimelineIO** (`pip install opentimelineio`) — only for *Conform List Browser* AAF / XML / OTIO import; EDL needs nothing extra. AAF also needs **aaftool** from LibAAF.
 - **BWF MetaEdit** (`bwfmetaedit` command-line tool) — optional; only needed for timecode (BWF TimeReference) embedding.
 
 ### Moving from hsuanice/PublicBeta
@@ -88,6 +89,12 @@ Both install to the same folder, so remove PublicBeta first:
 | Item List | Spreadsheet-style item tables with metadata columns: Item List Editor + Item List Browser (GUI) |
 | BWF / iXML Embed Tools | Write timecode, iXML / BWF metadata and SMPTE UMID into files (needs BWF MetaEdit) |
 
+### Conform
+
+| Package | What it does |
+|---|---|
+| Conform List Browser *(pre-release)* | Spreadsheet-style conform tool for EDL / AAF / XML / OTIO / subtitle lists: match source media, generate and link items, compare old / new cuts (GUI + Jump / Link / Load / Reveal wrappers) |
+
 ### Library
 
 | Package | What it does |
@@ -124,3 +131,6 @@ Hover Mode Toggle is based on / inspired by TJF's *Hover Mode Toggle* script.
 
 Auto Color's palette (hue + per-row saturation / value) is modeled after rodilab's *Color palette* script.
 Auto Color's Shiny mode follows the ShinyColor behavior of *Chroma - Coloring Tool* by OLSHALOM — https://forum.cockos.com/showthread.php?t=281516
+
+Conform List Browser uses [OpenTimelineIO](https://github.com/AcademySoftwareFoundation/OpenTimelineIO) (Academy Software Foundation) for timeline files and [LibAAF](https://github.com/agfline/LibAAF) by agfline (aaftool) for AAF.
+`Library/json.lua` is based on [rxi/json.lua](https://github.com/rxi/json.lua) (MIT License, Copyright (c) 2020 rxi); the full license notice is kept in the file.

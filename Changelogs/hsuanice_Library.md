@@ -1,5 +1,9 @@
 # hsuanice_Library.lua — Changelog
 
+## 26.1012.1206
+
+- Add: CLB Compare Engine, EDL Parser, OTIO Bridge, Subtitle Bridge, Process Exec, json.lua (used by Conform List Browser).
+
 ## 26.1012.1113
 
 - Add: Metadata Cache, Metadata Rename Core, List Table, Time Format, Metadata Generator (used by the Metadata packages).

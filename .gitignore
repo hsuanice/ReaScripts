@@ -19,6 +19,14 @@
 !/Selection/
 !/Tracks/
 !/Metadata/
+!/Conform/
+
+# Python helpers installed with Conform List Browser (not the test corpus)
+!/Tools/
+/Tools/*
+!/Tools/otio_to_clb.py
+!/Tools/aaf_to_otio.py
+!/Tools/subtitle_to_clb.py
 
 # Library: only files used by published packages
 !/Library/
@@ -36,6 +44,12 @@
 !/Library/hsuanice_List Table.lua
 !/Library/hsuanice_Time Format.lua
 !/Library/hsuanice_Metadata Generator.lua
+!/Library/hsuanice_CLB Compare Engine.lua
+!/Library/hsuanice_EDL Parser.lua
+!/Library/hsuanice_OTIO Bridge.lua
+!/Library/hsuanice_Subtitle Bridge.lua
+!/Library/hsuanice_Process Exec.lua
+!/Library/json.lua
 
 .DS_Store
 __pycache__/

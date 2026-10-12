@@ -1,6 +1,6 @@
 --[[
 @description hsuanice Library - shared code used by hsuanice scripts (required)
-@version 26.1012.1113
+@version 26.1012.1206
 @author hsuanice
 @metapackage
 @provides
@@ -16,12 +16,18 @@
   [nomain] hsuanice_List Table.lua
   [nomain] hsuanice_Time Format.lua
   [nomain] hsuanice_Metadata Generator.lua
+  [nomain] hsuanice_CLB Compare Engine.lua
+  [nomain] hsuanice_EDL Parser.lua
+  [nomain] hsuanice_OTIO Bridge.lua
+  [nomain] hsuanice_Subtitle Bridge.lua
+  [nomain] hsuanice_Process Exec.lua
+  [nomain] json.lua
 @changelog
-  - Add: Metadata Cache, Metadata Rename Core, List Table, Time Format, Metadata Generator (used by the Metadata packages).
+  - Add: CLB Compare Engine, EDL Parser, OTIO Bridge, Subtitle Bridge, Process Exec, json.lua (used by Conform List Browser).
 @about
   # hsuanice Library
 
-  Shared code used by hsuanice scripts (RGWH, AudioSweet, Hover Mode, Reorder, Rename / Item List / Embed tools, ...).
+  Shared code used by hsuanice scripts (RGWH, AudioSweet, Hover Mode, Reorder, Rename / Item List / Embed tools, Conform List Browser, ...).
   Install this package together with any hsuanice script.
   It adds nothing to the Action List.
 --]]
