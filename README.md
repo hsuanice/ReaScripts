@@ -69,6 +69,17 @@ Both install to the same folder, so remove PublicBeta first:
 | Razor and Item Link with Mode Switch | Razor areas select the items they overlap or fully contain (toggle) |
 | Set Time to Item on Right-Drag Release | After a right-button drag, the time selection follows the selected items (toggle) |
 
+### Tracks
+
+| Package | What it does |
+|---|---|
+| Auto Pan LR tracks | Pan adjacent XXX_L / XXX_R track pairs hard left / right |
+| Delete Selected Tracks with Warning | Safe delete: asks first when tracks have items, FX, routing or are folders |
+| Show/Hide TCP children of folder tracks | Show or hide the children of the selected folder tracks (or of their parent) in the TCP |
+| Split Tracks by Item Channel *(pre-release)* | Split tracks whose items mix mono / stereo / multichannel into one track per channel count |
+| Import audio files per folder (Field Recorder) | Import one folder per track; channel-split recorder files are grouped (GUI) |
+| Import audio files per folder (Music Multitrack) | Import one folder per track for music multitrack sessions (GUI) |
+
 ### Library
 
 | Package | What it does |
@@ -76,6 +87,8 @@ Both install to the same folder, so remove PublicBeta first:
 | hsuanice Library | Shared code used by the scripts above; adds nothing to the Action List |
 
 Suggested shortcuts are listed in each package's About page in ReaPack (never assigned automatically).
+
+*Pre-release* packages are only offered when **Enable pre-releases** is turned on in ReaPack (Extensions > ReaPack > Manage repositories > Options).
 
 Release notes are shown in ReaPack. Older history is in [Changelogs/](Changelogs/).
 
