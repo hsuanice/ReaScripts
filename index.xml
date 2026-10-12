@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<index version="1" name="hsuanice Scripts" commit="6ef5b7ef4f1aae083db79bd539d2dc5f07e3f200">
+<index version="1" name="hsuanice Scripts" commit="bebe7e67d014263f833c5d2a4597572b5bf33e9f">
   <category name="Conform">
     <reapack name="hsuanice_Conform List Browser.lua" type="script" desc="Conform List Browser">
       <metadata>
@@ -792,6 +792,109 @@
       </version>
     </reapack>
   </category>
+  <category name="Various">
+    <reapack name="hsuanice_Console to Work Log Daemon.lua" type="script" desc="Console to Work Log Daemon">
+      <metadata>
+        <description><![CDATA[{\rtf1\ansi\deff0{\fonttbl{\f0 \fswiss Helvetica;}{\f1 \fmodern Courier;}}
+{\colortbl;\red255\green0\blue0;\red0\green0\blue255;}
+\widowctrl\hyphauto
+
+{\pard \ql \f0 \sa180 \li0 \fi0 Monitors REAPER's "ReaScript console output" window and appends new lines to work.log.\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab No changes required in other scripts.\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab One log file per project folder: <project_folder>/work.log.\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab If project is unsaved, uses: /../Tools/work.log.\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Each appended line is prefixed with local timestamp: YYYY-MM-DD HH:MM:SS.\sa180\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 Requirements: - js_ReaScriptAPI extension (for reading console window text)\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 Notes: - This captures whatever is visible in the ReaScript console window text. - If the console is manually cleared, this daemon marks a reset in the log.\par}
+}
+]]></description>
+      </metadata>
+      <version name="26.1012.1358" author="hsuanice" time="2026-10-12T06:57:17Z">
+        <changelog><![CDATA[- First release in the hsuanice/ReaScripts repository.
+- Requires the js_ReaScriptAPI extension.
+- Fix: the log folder is created with REAPER's API (works on Windows, no shell call on every write).
+- Full history: Changelogs/ in the repository (https://github.com/hsuanice/ReaScripts/tree/master/Changelogs)]]></changelog>
+        <source main="main">https://github.com/hsuanice/ReaScripts/raw/bebe7e67d014263f833c5d2a4597572b5bf33e9f/Various/hsuanice_Console%20to%20Work%20Log%20Daemon.lua</source>
+      </version>
+    </reapack>
+    <reapack name="hsuanice_Count Item and Track and Toggle Show Item Details.lua" type="script" desc="GFX - Count Items/Tracks and Toggle Show Item Details">
+      <metadata>
+        <description><![CDATA[{\rtf1\ansi\deff0{\fonttbl{\f0 \fswiss Helvetica;}{\f1 \fmodern Courier;}}
+{\colortbl;\red255\green0\blue0;\red0\green0\blue255;}
+\widowctrl\hyphauto
+
+{\pard \ql \f0 \sa180 \li0 \fi0 Pro Tools-style selection monitor HUD using native gfx (no ReaImGui). Top row : Items count (left) + Tracks count (right) Mid rows : Start / End / Length timecodes (PT transport style) Detail rows: MIDI / Audio / Empty + Channel Count (toggle with arrow / left-click) Right-click: font size (UI scale) / dock / close. Window position, dock state, font size, and panel state persist across restarts.\par}
+}
+]]></description>
+      </metadata>
+      <version name="26.1012.1358" author="hsuanice" time="2026-10-12T06:57:17Z">
+        <changelog><![CDATA[- First release in the hsuanice/ReaScripts repository.
+- Full history: Changelogs/ in the repository (https://github.com/hsuanice/ReaScripts/tree/master/Changelogs)]]></changelog>
+        <source main="main">https://github.com/hsuanice/ReaScripts/raw/bebe7e67d014263f833c5d2a4597572b5bf33e9f/Various/hsuanice_Count%20Item%20and%20Track%20and%20Toggle%20Show%20Item%20Details.lua</source>
+      </version>
+    </reapack>
+    <reapack name="hsuanice_PM_InsightAnalyzer.lua" type="script" desc="PM Insight Analyzer">
+      <metadata>
+        <description><![CDATA[{\rtf1\ansi\deff0{\fonttbl{\f0 \fswiss Helvetica;}{\f1 \fmodern Courier;}}
+{\colortbl;\red255\green0\blue0;\red0\green0\blue255;}
+\widowctrl\hyphauto
+
+{\pard \ql \f0 \sa180 \li0 \fi0 Read-only analysis script. Auto-detects project type:\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 Dialog Project Mode (Scene Cut track present): Combines scene data, EDL source lengths, and work log. Outputs per-scene efficiency metrics and project-wide summary. Tracks required: "Scene Cut", "EDL" (folder).\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 Work Log Mode (no Scene Cut track): Parses item names ("Proj | Scene | Module") to compute durations grouped by scene and module. No EDL data required.\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 Duration source: D_LENGTH (always). Does not write any data to the project.\par}
+}
+]]></description>
+      </metadata>
+      <version name="26.1012.1358pre1" author="hsuanice" time="2026-10-12T06:57:17Z">
+        <changelog><![CDATA[- First release in the hsuanice/ReaScripts repository.
+- Pre-release: work in progress (basic info and time totals so far) — only installed when "Enable pre-releases" is on in ReaPack.
+- Requires the SWS extension.
+- Full history: Changelogs/ in the repository (https://github.com/hsuanice/ReaScripts/tree/master/Changelogs)]]></changelog>
+        <source main="main">https://github.com/hsuanice/ReaScripts/raw/bebe7e67d014263f833c5d2a4597572b5bf33e9f/Various/hsuanice_PM_InsightAnalyzer.lua</source>
+      </version>
+    </reapack>
+    <reapack name="hsuanice_PM_Timer.lua" type="script" desc="PM Timer - Scene-aware Work Timer">
+      <metadata>
+        <description><![CDATA[{\rtf1\ansi\deff0{\fonttbl{\f0 \fswiss Helvetica;}{\f1 \fmodern Courier;}}
+{\colortbl;\red255\green0\blue0;\red0\green0\blue255;}
+\widowctrl\hyphauto
+
+{\pard \ql \f0 \sa180 \li0 \fi0 Scene-aware toggle timer for the hsuanice PM system. Uses gfx (no ReaImGui). 1-second display refresh via defer + time_precise.\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 State machine: IDLE \u8596 ? WORKING (no BREAK state)\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 Track structure (auto-managed): Scene Cut \u8592 ? folder track (I_FOLDERDEPTH = 1) 2026-03-01 \u8592 ? date track, direct child, depth = 0 2026-03-02 \u8592 ? depth = 0 DurationOnly_Log\u8592 ? last child, depth = -1; holds duration-only records\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 Two work modes (auto-detected from selection): Scene Mode : a scene item on "Scene Cut" is selected P_EXT:SCENE_GUID written; name = "scene (tc) | work_type" Project Mode : no scene item selected P_EXT:SCENE_GUID not written; name = work_type only\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 Work item metadata: P_EXT:SCENE_GUID (Scene Mode only), P_EXT:WORK_TYPE, P_EXT:END_REASON Duration-only items also carry P_EXT:IS_DURATION_ONLY = "1" All work items are locked (C_LOCK=1) after creation.\par}
+}
+]]></description>
+      </metadata>
+      <version name="26.1012.1358" author="hsuanice" time="2026-10-12T06:57:17Z">
+        <changelog><![CDATA[- First release in the hsuanice/ReaScripts repository.
+- Requires the SWS extension.
+- New: FPS (and DF for drop-frame) shown on the status line.
+- Update Scene Metadata rewritten: scene name taken from the take name first (CLB-created scenes no longer become "(no name)"), take name set from the scene name, source items attributed by item group, selected scenes or all; runs automatically when PM Timer opens, closes or the project changes, and only writes when something changed.
+- New: broken scene links (work log items pointing to a scene that no longer exists) are shown on the status line; Update Scene Metadata offers to re-link them automatically when a scene with the same name and start is found, and the new "Relink to Selected Scene" menu item re-links them by hand.
+- Full history: Changelogs/ in the repository (https://github.com/hsuanice/ReaScripts/tree/master/Changelogs)]]></changelog>
+        <source main="main">https://github.com/hsuanice/ReaScripts/raw/bebe7e67d014263f833c5d2a4597572b5bf33e9f/Various/hsuanice_PM_Timer.lua</source>
+      </version>
+    </reapack>
+    <reapack name="hsuanice_Work Timer.lua" type="script" desc="Work Timer - real-time 24H clock (resizable, dockable, follows the project frame rate)">
+      <metadata>
+        <description><![CDATA[{\rtf1\ansi\deff0{\fonttbl{\f0 \fswiss Helvetica;}{\f1 \fmodern Courier;}}
+{\colortbl;\red255\green0\blue0;\red0\green0\blue255;}
+\widowctrl\hyphauto
+
+{\pard \ql \f0 \sa180 \li0 \fi0 Real-time 24H system clock. Right-click to change color/font. Window is resizable; clock auto-scales to fill it. Settings and window geometry are remembered across sessions.\par}
+}
+]]></description>
+      </metadata>
+      <version name="26.1012.1358" author="hsuanice" time="2026-10-12T06:57:17Z">
+        <changelog><![CDATA[- First release in the hsuanice/ReaScripts repository.
+- Full history: Changelogs/ in the repository (https://github.com/hsuanice/ReaScripts/tree/master/Changelogs)]]></changelog>
+        <source main="main">https://github.com/hsuanice/ReaScripts/raw/bebe7e67d014263f833c5d2a4597572b5bf33e9f/Various/hsuanice_Work%20Timer.lua</source>
+      </version>
+    </reapack>
+  </category>
   <metadata>
     <description><![CDATA[{\rtf1\ansi\deff0{\fonttbl{\f0 \fswiss Helvetica;}{\f1 \fmodern Courier;}}
 {\colortbl;\red255\green0\blue0;\red0\green0\blue255;}
@@ -814,8 +917,8 @@ Packages
 \sa180\sa180\par}
 {\pard \ql \f0 \sa180 \li0 \fi0 \outlinelevel2 \b \fs28 Requirements\par}
 {\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab {\b ReaImGui} \u8212- needed by the GUI scripts; install with ReaPack ({\i ReaTeam Extensions} repository, included by default).\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab {\b SWS Extension} \u8212- optional; a few features use it (e.g. {\i Retain Glue Cues}).\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab {\b js_ReaScriptAPI} \u8212- needed by {\i Set Time to Item on Right-Drag Release}, recommended for {\i Track and Razor Item Link}; install with ReaPack ({\i ReaTeam Extensions}).\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab {\b SWS Extension} \u8212- required by {\i PM Timer} and {\i PM Insight Analyzer}; optional elsewhere (a few features use it, e.g. {\i Retain Glue Cues}).\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab {\b js_ReaScriptAPI} \u8212- needed by {\i Set Time to Item on Right-Drag Release} and {\i Console to Work Log Daemon}, recommended for {\i Track and Razor Item Link}; install with ReaPack ({\i ReaTeam Extensions}).\par}
 {\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab {\b Python 3 + OpenTimelineIO} ({\f1 pip install opentimelineio}) \u8212- only for {\i Conform List Browser} AAF / XML / OTIO import; EDL needs nothing extra. AAF also needs {\b aaftool} from LibAAF.\par}
 {\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab {\b BWF MetaEdit} ({\f1 bwfmetaedit} command-line tool) \u8212- optional; only needed for timecode (BWF TimeReference) embedding.\sa180\par}
 {\pard \ql \f0 \sa180 \li0 \fi0 \outlinelevel2 \b \fs28 Moving from hsuanice/PublicBeta\par}
@@ -837,6 +940,8 @@ Packages
 {\pard \ql \f0 \sa180 \li0 \fi0 | Package | What it does | |---|---| | Rename from Metadata | Rename takes or source files from BWF / iXML metadata tokens, with live preview (GUI) | | Item List | Spreadsheet-style item tables with metadata columns: Item List Editor + Item List Browser (GUI) | | BWF / iXML Embed Tools | Write timecode, iXML / BWF metadata and SMPTE UMID into files (needs BWF MetaEdit) |\par}
 {\pard \ql \f0 \sa180 \li0 \fi0 \outlinelevel2 \b \fs28 Conform\par}
 {\pard \ql \f0 \sa180 \li0 \fi0 | Package | What it does | |---|---| | Conform List Browser {\i (pre-release)} | Spreadsheet-style conform tool for EDL / AAF / XML / OTIO / subtitle lists: match source media, generate and link items, compare old / new cuts (GUI + Jump / Link / Load / Reveal wrappers) |\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 \outlinelevel2 \b \fs28 Various\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 | Package | What it does | |---|---| | PM Timer | Scene-aware work timer: logs work sessions per scene / project, keeps scene metadata up to date, shows FPS (needs SWS) | | PM Insight Analyzer {\i (pre-release)} | Work-time and efficiency analysis of PM Timer work logs (work in progress; needs SWS) | | Console to Work Log Daemon | Appends ReaScript console output to work.log in the project folder (needs js_ReaScriptAPI) | | Work Timer | Real-time 24H clock window (resizable, dockable) | | Count Items / Tracks | Pro Tools-style selection HUD: item / track counts, start / end / length |\par}
 {\pard \ql \f0 \sa180 \li0 \fi0 \outlinelevel2 \b \fs28 Library\par}
 {\pard \ql \f0 \sa180 \li0 \fi0 | Package | What it does | |---|---| | hsuanice Library | Shared code used by the scripts above; adds nothing to the Action List |\par}
 {\pard \ql \f0 \sa180 \li0 \fi0 Suggested shortcuts are listed in each package's About page in ReaPack (never assigned automatically).\par}
