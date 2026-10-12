@@ -1,5 +1,9 @@
 # hsuanice_Library.lua — Changelog
 
+## 26.1012.0957
+
+- Add: hsuanice_Mouse.lua (used by Set Time to Item on Right-Drag Release).
+
 ## 26.1012.0737
 
 - Add: hsuanice_Hover.lua (used by Hover Mode).

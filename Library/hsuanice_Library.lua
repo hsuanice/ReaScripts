@@ -1,6 +1,6 @@
 --[[
 @description hsuanice Library - shared code used by hsuanice scripts (required)
-@version 26.1012.0737
+@version 26.1012.0957
 @author hsuanice
 @metapackage
 @provides
@@ -10,8 +10,9 @@
   [nomain] hsuanice_Metadata Embed.lua
   [nomain] hsuanice_Metadata Read.lua
   [nomain] hsuanice_Hover.lua
+  [nomain] hsuanice_Mouse.lua
 @changelog
-  - Add: hsuanice_Hover.lua (used by Hover Mode).
+  - Add: hsuanice_Mouse.lua (used by Set Time to Item on Right-Drag Release).
 @about
   # hsuanice Library
 

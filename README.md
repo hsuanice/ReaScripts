@@ -19,6 +19,7 @@ REAPER scripts for audio post-production, by hsuanice.
 
 - **ReaImGui** — needed by the GUI scripts; install with ReaPack (*ReaTeam Extensions* repository, included by default).
 - **SWS Extension** — optional; a few features use it (e.g. *Retain Glue Cues*).
+- **js_ReaScriptAPI** — needed by *Set Time to Item on Right-Drag Release*, recommended for *Track and Razor Item Link*; install with ReaPack (*ReaTeam Extensions*).
 - **BWF MetaEdit** (`bwfmetaedit` command-line tool) — optional; only needed for timecode (BWF TimeReference) embedding.
 
 ### Moving from hsuanice/PublicBeta
@@ -59,6 +60,14 @@ Both install to the same folder, so remove PublicBeta first:
 | Package | What it does |
 |---|---|
 | Auto Color | Color items by take-name keywords with a configurable palette (GUI + Background Daemon, by Palette, Smart Random, Follow Track Color, All ShinyColor) |
+
+### Selection
+
+| Package | What it does |
+|---|---|
+| Track and Razor Item Link like Pro Tools | Pro Tools-style "Link Track and Edit Selection": tracks follow razor areas / item selection (toggle) |
+| Razor and Item Link with Mode Switch | Razor areas select the items they overlap or fully contain (toggle) |
+| Set Time to Item on Right-Drag Release | After a right-button drag, the time selection follows the selected items (toggle) |
 
 ### Library
 

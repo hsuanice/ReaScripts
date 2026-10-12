@@ -16,6 +16,7 @@
 !/Rendering/
 !/Items Editing/
 !/Items Properties/
+!/Selection/
 
 # Library: only files used by published packages
 !/Library/
@@ -27,6 +28,7 @@
 !/Library/hsuanice_Metadata Embed.lua
 !/Library/hsuanice_Metadata Read.lua
 !/Library/hsuanice_Hover.lua
+!/Library/hsuanice_Mouse.lua
 
 .DS_Store
 __pycache__/
