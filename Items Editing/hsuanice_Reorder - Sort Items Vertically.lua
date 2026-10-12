@@ -103,7 +103,7 @@ assert(META and (META.VERSION or "0") >= "0.2.0",
 
 
 ---------------------------------------
--- 依賴檢查
+-- Dependency check
 ---------------------------------------
 if not reaper or not reaper.ImGui_CreateContext then
   reaper.MB("ReaImGui is required (install via ReaPack).","Missing dependency",0)
@@ -137,13 +137,13 @@ local function scale(v)
 end
 
 ---------------------------------------
--- 小工具
+-- Helpers
 ---------------------------------------
 local function trim(s) return tostring(s or ""):gsub("^%s+", ""):gsub("%s+$", "") end
 local function item_start(it) return reaper.GetMediaItemInfo_Value(it,"D_POSITION") end
 local function item_len(it)   return reaper.GetMediaItemInfo_Value(it,"D_LENGTH")   end
 local function item_track(it) return reaper.GetMediaItemTrack(it) end
--- 取得 take 在 source 檔中的起始偏移（D_STARTOFFS）；無 take 時回傳 0
+-- Start offset of the take inside its source file (D_STARTOFFS); 0 when there is no take
 local function get_src_offs(it)
   local tk = reaper.GetActiveTake(it)
   if not tk then return 0 end
@@ -182,13 +182,13 @@ local function load_pref(key, default)
 end
 
 
--- 複製單一 item 到指定軌道（保留位置/長度/靜音/顏色/音量/淡入淡出；複製「現用 take」的來源與參數）
+-- Copy one item to a target track (keeps position/length/mute/color/volume/fades; copies the active take's source and parameters)
 local function copy_item_to_track(src_it, dst_tr)
   if not (src_it and dst_tr) then return nil end
   if not reaper.ValidatePtr2(0, src_it, "MediaItem*") then return nil end
   if not reaper.ValidatePtr2(0, dst_tr, "MediaTrack*") then return nil end
 
-  -- Item 屬性
+  -- Item properties
   local pos   = reaper.GetMediaItemInfo_Value(src_it, "D_POSITION") or 0
   local len   = reaper.GetMediaItemInfo_Value(src_it, "D_LENGTH")   or 0
   local mute  = reaper.GetMediaItemInfo_Value(src_it, "B_MUTE")     or 0
@@ -199,7 +199,7 @@ local function copy_item_to_track(src_it, dst_tr)
   local lock  = reaper.GetMediaItemInfo_Value(src_it, "C_LOCK") or 0
   local color = reaper.GetDisplayedMediaItemColor(src_it) or 0
 
-  -- 建立新 item
+  -- Create the new item
   local it = reaper.AddMediaItemToTrack(dst_tr)
   reaper.SetMediaItemInfo_Value(it, "D_POSITION", pos)
   reaper.SetMediaItemInfo_Value(it, "D_LENGTH",   len)
@@ -210,11 +210,11 @@ local function copy_item_to_track(src_it, dst_tr)
   reaper.SetMediaItemInfo_Value(it, "D_FADEOUTLEN", fo)
   reaper.SetMediaItemInfo_Value(it, "C_LOCK",     lock)
   if color ~= 0 then
-    -- I_CUSTOMCOLOR 要帶「啟用」bit；GetDisplayedMediaItemColor 已經是 native 值
+    -- I_CUSTOMCOLOR needs the "enabled" bit; GetDisplayedMediaItemColor is already a native value
     reaper.SetMediaItemInfo_Value(it, "I_CUSTOMCOLOR", color | 0x1000000)
   end
 
-  -- 複製現用 take
+  -- Copy the active take
   local src_tk = reaper.GetActiveTake(src_it)
   if src_tk then
     local new_tk = reaper.AddTakeToMediaItem(it)
@@ -222,7 +222,7 @@ local function copy_item_to_track(src_it, dst_tr)
     if reaper.SetMediaItemTake_Source then
       reaper.SetMediaItemTake_Source(new_tk, src)
     end
-    -- take 參數
+    -- take parameters
     local soffs   = reaper.GetMediaItemTakeInfo_Value(src_tk, "D_STARTOFFS") or 0
     local rate    = reaper.GetMediaItemTakeInfo_Value(src_tk, "D_PLAYRATE")  or 1
     local pitch   = reaper.GetMediaItemTakeInfo_Value(src_tk, "D_PITCH")     or 0
@@ -231,7 +231,7 @@ local function copy_item_to_track(src_it, dst_tr)
     reaper.SetMediaItemTakeInfo_Value(new_tk, "D_PLAYRATE",  rate)
     reaper.SetMediaItemTakeInfo_Value(new_tk, "D_PITCH",     pitch)
     reaper.SetMediaItemTakeInfo_Value(new_tk, "I_CHANMODE",  chanmode)
-    -- take 名稱
+    -- take name
     local _, tkn = reaper.GetSetMediaItemTakeInfo_String(src_tk, "P_NAME", "", false)
     if tkn and tkn ~= "" then
       reaper.GetSetMediaItemTakeInfo_String(new_tk, "P_NAME", tkn, true)
@@ -245,7 +245,7 @@ end
 
 
 ---------------------------------------
--- 選取集合
+-- Selection set
 ---------------------------------------
 local function get_selected_items()
   local t, n = {}, reaper.CountSelectedMediaItems(0)
@@ -270,7 +270,7 @@ local function unique_tracks_from_items(items)
 end
 
 ---------------------------------------
--- 佔用資訊（避免重疊）
+-- Occupancy info (avoid overlaps)
 ---------------------------------------
 local function build_initial_occupancy(tracks, selected_set)
   local occ = {}
@@ -287,7 +287,7 @@ local function build_initial_occupancy(tracks, selected_set)
   return occ
 end
 
-local OVERLAP_EPS = 1e-7 -- 秒；忽略浮點誤差造成的「首尾相接卻判定重疊」
+local OVERLAP_EPS = 1e-7 -- seconds; ignore float error that makes touching items look overlapping
 local function interval_overlaps(a_s,a_e,b_s,b_e) return (a_e>b_s+OVERLAP_EPS) and (b_e>a_s+OVERLAP_EPS) end
 local function track_has_overlap(occ_list, s,e)
   for i=1,#occ_list do local seg=occ_list[i]; if interval_overlaps(s,e, seg.s,seg.e) then return true end end
@@ -298,8 +298,8 @@ local function remove_item_interval(occ_list, it)
   if not occ_list then return end
   for i=#occ_list,1,-1 do if occ_list[i].item==it then table.remove(occ_list, i); return end end
 end
--- 選取的 items 也先登記在「原本所在的軌」上：還沒處理到的 item 仍佔著位置，
--- 其他 item 不可以搬進去（否則會重疊）。item 真的搬走時再移除原位登記。
+-- Selected items are also registered on their original track: items not processed yet still occupy their place,
+-- so other items may not move in (they would overlap). The registration is removed when the item actually moves.
 local function reserve_selected(items, occ)
   for _, it in ipairs(items) do
     local list = occ[item_track(it)]
@@ -308,10 +308,10 @@ local function reserve_selected(items, occ)
 end
 
 ---------------------------------------
--- Sort：同列分群
+-- Sort: group items into rows
 ---------------------------------------
-local TIME_TOL    = 0.005 -- 秒；欄位容差
-local RANGE_BUCKET = 0.5  -- 秒；source-offset 分桶容差（同一桶 = 同一 editing range）
+local TIME_TOL    = 0.005 -- seconds; field tolerance
+local RANGE_BUCKET = 0.5  -- seconds; source-offset bucket tolerance (same bucket = same editing range)
 local function build_time_clusters(items)
   local sorted = { table.unpack(items) }
   table.sort(sorted, function(a,b)
@@ -335,7 +335,7 @@ local function build_time_clusters(items)
 end
 
 ---------------------------------------
--- Sort keys（Take / File / Metadata）
+-- Sort keys (Take / File / Metadata)
 ---------------------------------------
 local function key_take_name(it)
   local tk = take_of(it); if not tk then return "" end
@@ -345,12 +345,12 @@ end
 local function key_file_name(it)
   local tk = take_of(it); local src = source_of_take(tk)
   local fname = path_basename(src_path(src))
-  -- 次鍵加入 source offset（同檔案、同 editing range 的 items 排在一起）
+  -- Secondary key adds the source offset (items of the same file and editing range stay together)
   local offs = get_src_offs(it)
   return fname .. string.format("|%015.3f", offs)
 end
 
--- 以穩定鍵值排序：把 (key, trackIndex, startTime, originalIndex) 組成單一字串鍵比較
+-- Sort by a stable key: combine (key, trackIndex, startTime, originalIndex) into one string key
 local function sort_cluster(cluster, keyfn, asc)
   local recs = {}
   for i, it in ipairs(cluster) do
@@ -372,7 +372,7 @@ local function sort_cluster(cluster, keyfn, asc)
 end
 
 ---------------------------------------
--- 計畫：Reorder / Sort
+-- Plan: Reorder / Sort
 ---------------------------------------
 local function plan_reorder_moves(items, tracks, occ)
   reserve_selected(items, occ)
@@ -384,8 +384,8 @@ local function plan_reorder_moves(items, tracks, occ)
   end)
   local pos_in = {}; for i,tr in ipairs(tracks) do pos_in[tr]=i end
   local cur_of = {}; for _, it in ipairs(sorted) do cur_of[it] = item_track(it) end
-  -- 反覆往上補，直到沒有 item 可以再上移（前面的 item 搬走後可能空出位置）。
-  -- 每次搬移都讓 item 的軌序變小，所以一定會停止。
+  -- Keep filling upward until no item can move up (moving an item may free a slot above).
+  -- Every move makes an item's track index smaller, so this always terminates.
   local changed = true
   while changed do
     changed = false
@@ -420,8 +420,8 @@ local function plan_sort_moves(items, tracks, occ, keyfn, asc)
   local moves, clusters = {}, build_time_clusters(items)
   for _, cluster in ipairs(clusters) do
     sort_cluster(cluster, keyfn, asc)
-    -- 先釋放本群（未鎖定）items 的原位登記，再依排序重新放置。
-    -- 若有任一 item 放不下，整群還原到原位（原位彼此不重疊，保證安全）。
+    -- First release the original-place registrations of this group's (unlocked) items, then place them again in sorted order.
+    -- If any item does not fit, the whole group goes back to its original places (those never overlap, so this is safe).
     local movable = {}
     for _, it in ipairs(cluster) do
       if not is_item_locked(it) then
@@ -460,7 +460,7 @@ local function apply_moves(moves)
 end
 
 ---------------------------------------
--- 讀取 Metadata：BWF/iXML + take/name/note
+-- Read metadata: BWF/iXML + take/name/note
 ---------------------------------------
 local function get_meta(src, key)
   if not src or not reaper.GetMediaFileMetadata then return nil end
@@ -533,7 +533,7 @@ end
 
 
 
--- 解析：從檔名推 channel；優先用 TRK{ch} 取 name；最後才用 $trk 的 "Name (ch N)"
+-- Resolve: derive the channel from the file name; prefer TRK{ch} for the name; use $trk's "Name (ch N)" last
 local function extract_name_and_chan(fields, name_key)
   local k = normalize_key(name_key)
   local name, ch = "", nil
@@ -598,10 +598,10 @@ local snapshot_rows_tsv
 
 
 ---------------------------------------
--- Copy-to-New-Tracks：輔助函數
+-- Copy-to-New-Tracks: helpers
 ---------------------------------------
 
--- 從檔名解析 channel number (優先使用檔名,避免使用 metadata 中可能錯誤的 channel)
+-- Parse the channel number from the file name (preferred, because the channel in metadata may be wrong)
 local function parse_channel_from_filename(filename)
   if not filename or filename == "" then return nil end
 
@@ -696,14 +696,14 @@ local function extract_scene_take_key(it, prefields)
 end
 
 ---------------------------------------
--- Copy-to-New-Tracks：核心
+-- Copy-to-New-Tracks: core
 ---------------------------------------
 
--- name_mode  : 1=Track Name（以 Track Name 命名新 TCP & 依此分組），2=Channel#
--- order_mode : 1=Track Name（群組排序依名稱），2=Channel#，3=Filename（依來源檔名）
+-- name_mode  : 1=Track Name (name the new TCPs and group by Track Name), 2=Channel#
+-- order_mode : 1=Track Name (sort groups by name), 2=Channel#, 3=Filename (by source file name)
 -- asc        : true=Ascending, false=Descending
--- append_secondary : 若 name_mode=2（Channel#命名），於 TCP 名稱後附加最常見 Track Name
--- overlap_mode : 1=Filename（依 base filename 分槽），2=Scene & Take（依錄音場次分全域槽）
+-- append_secondary : if name_mode=2 (Channel# naming), append the most common Track Name to the TCP name
+-- overlap_mode : 1=Filename (slots by base filename), 2=Scene & Take (global slots by recording scene/take)
 local function run_copy_to_new_tracks(name_mode, order_mode, asc, append_secondary, overlap_mode)
   overlap_mode = overlap_mode or 1
   local t0 = reaper.time_precise()
@@ -760,7 +760,7 @@ local function run_copy_to_new_tracks(name_mode, order_mode, asc, append_seconda
 
   reaper.Undo_BeginBlock()
 
-  -- 2) 取目前選取 items，抽出 metadata
+  -- 2) Take the currently selected items and extract their metadata
   local items = get_selected_items()
   progress_total = math.max(1, #items * 3)
   phase_totals["Scanning metadata"] = math.max(1, #items)
@@ -840,7 +840,7 @@ local function run_copy_to_new_tracks(name_mode, order_mode, asc, append_seconda
   push_progress("Scanning metadata", #items, true)
 
 
-  -- 排序鍵工具
+  -- Sort key helpers
   local function natural_key(s)
     s = tostring(s or ""):lower():gsub("%s+"," ")
     return s:gsub("(%d+)", function(d) return string.format("%09d", tonumber(d) or 0) end)
@@ -849,7 +849,7 @@ local function run_copy_to_new_tracks(name_mode, order_mode, asc, append_seconda
     return (n and n ~= 999) and string.format("Ch %02d", n) or "Ch ??"
   end
 
-  -- 3) 依「命名軸」分組；群組排序鍵由「排序軸」決定
+  -- 3) Group by the naming axis; the group sort key comes from the ordering axis
   local groups, order = {}, {}
 
   local function natural_key(s)
@@ -873,7 +873,7 @@ local function run_copy_to_new_tracks(name_mode, order_mode, asc, append_seconda
   debug("")
   debug("--- Grouping items ---")
   for idx, r in ipairs(rows) do
-    -- 命名/分組 key 與初始 label
+    -- Naming/grouping key and initial label
     local gkey, glabel
     if name_mode == 1 then
       gkey  = (r.name ~= "" and r.name or "(unnamed)")
@@ -883,7 +883,7 @@ local function run_copy_to_new_tracks(name_mode, order_mode, asc, append_seconda
       glabel = channel_label(gkey)
     end
 
-    -- 主軸的排序鍵
+    -- Sort key of the main axis
     local ord_key
     if order_mode == 1 then
       ord_key = "N|" .. natural_key(r.name ~= "" and r.name or "(unnamed)")
@@ -893,17 +893,17 @@ local function run_copy_to_new_tracks(name_mode, order_mode, asc, append_seconda
       ord_key = string.format("C|%09d", tonumber(r.ch) or 999)
     end
 
-    -- 副軸（隱式）：當以 Channel# 命名且勾選 Append Track Name → 依 Track Name 拆分
+    -- Secondary axis (implicit): with Channel# naming and Append Track Name on → split by Track Name
     local skey, slabel = "", ""
     if name_mode == 2 and append_secondary then
       local sub = tostring(r.name or "")
       skey   = "\0" .. sub
       slabel = (sub ~= "" and (" — " .. sub) or " — (name)")
-      -- 同群之間的次序：主軸 ord_key 後再接自然鍵，維持嚴格弱序
+      -- Order within a group: main-axis ord_key followed by the natural key, keeping a strict weak order
       ord_key = ord_key .. "|S|" .. natural_key(sub)
     end
 
-    -- 組合群組鍵與標籤
+    -- Combine the group key and label
     local comb_key   = tostring(gkey) .. skey
     local comb_label = tostring(glabel) .. slabel
 
@@ -921,11 +921,11 @@ local function run_copy_to_new_tracks(name_mode, order_mode, asc, append_seconda
   end
   push_progress("Grouping", #items * 2, true)
 
-  -- 當以 Channel# 命名且勾選 Append Track Name 時，已依 Track Name 拆分到不同新軌，
-  -- 不需要再追加「最常見 Track Name」到標籤（避免重複/誤導）
+  -- With Channel# naming and Append Track Name on, items are already split into separate new tracks by Track Name,
+  -- so do not append the "most common Track Name" to the label again (duplicate / misleading)
   -- [no-op]
 
-  -- order_mode == 3: 依來源檔名排序 — 以每組內最小 base filename 更新 g.ord
+  -- order_mode == 3: sort by source file name — update g.ord with the smallest base filename in each group
   if order_mode == 3 then
     for _, g in ipairs(order) do
       local min_bfn = nil
@@ -937,7 +937,7 @@ local function run_copy_to_new_tracks(name_mode, order_mode, asc, append_seconda
     end
   end
 
-  -- 4) 依 ord 排序群組（嚴格弱序）
+  -- 4) Sort groups by ord (strict weak order)
   local function ord_lt(a, b)
     local ax, ay = tostring(a and a.ord or ""), tostring(b and b.ord or "")
     if ax == ay then return false end
@@ -949,7 +949,7 @@ local function run_copy_to_new_tracks(name_mode, order_mode, asc, append_seconda
     table.sort(order, function(x, y) return ord_lt(y, x) end)
   end
 
-  -- 5) 建新軌並複製
+  -- 5) Create the new tracks and copy
   debug("")
   debug("--- Creating tracks and copying items ---")
   debug("Total groups: " .. #order)
@@ -1133,7 +1133,7 @@ end
 
 
 ---------------------------------------
--- UI / Engine 狀態
+-- UI / engine state
 ---------------------------------------
 local STATE, MODE, EXIT = "confirm", nil, false
 local sort_key_idx    = load_pref("sort_key_idx", 1)
@@ -1166,15 +1166,15 @@ local MOVED, SKIPPED, TOTAL = 0, 0, 0
 local SUMMARY = ""
 
 -- === Selection polling throttle ===
-local LAST_NI, LAST_NT = -1, -1         -- 上次看到的選取數量（items/tracks）
+local LAST_NI, LAST_NT = -1, -1         -- selection counts seen last time (items/tracks)
 local NEXT_SCAN_AT = 0
-local SCAN_INTERVAL = 0.12              -- 每 0.12 秒才允許重掃一次
+local SCAN_INTERVAL = 0.12              -- rescan at most every 0.12 s
 
 local function maybe_compute_selection()
   local now = reaper.time_precise()
   local ni = reaper.CountSelectedMediaItems(0)
   local nt = reaper.CountSelectedTracks(0)
-  -- 若數量變了，或到了下一個掃描時刻，就重建整份快照
+  -- Rebuild the whole snapshot when the counts changed or the next scan time is reached
   if ni ~= LAST_NI or nt ~= LAST_NT or now >= NEXT_SCAN_AT then
     compute_selection_and_tracks()
     LAST_NI, LAST_NT = ni, nt
@@ -1188,7 +1188,7 @@ local WANT_POPUP = false
 local POPUP_TITLE = "Result Summary"
 
 local function draw_summary_popup()
-  -- 如果剛剛要求彈窗，先開啟
+  -- If a popup was just requested, open it first
   if WANT_POPUP then
     reaper.ImGui_OpenPopup(ctx, POPUP_TITLE)
     WANT_POPUP = false
@@ -1199,7 +1199,7 @@ local function draw_summary_popup()
     reaper.ImGui_Text(ctx, SUMMARY ~= "" and SUMMARY or "Done.")
     reaper.ImGui_Spacing(ctx)
 
-    -- ESC 關閉（額外保險）
+    -- ESC closes (extra safety)
     if esc_pressed() then
       reaper.ImGui_CloseCurrentPopup(ctx)
     end
@@ -1224,7 +1224,7 @@ local function compute_selection_and_tracks()
 end
 
 ---------------------------------------
--- Metadata 取鍵（供 Sort Vertically 用）
+-- Metadata keys (for Sort Vertically)
 ---------------------------------------
 local function meta_key_track_name(it)
   local f = META.collect_item_fields(it)
@@ -1263,7 +1263,7 @@ function snapshot_rows_tsv(items)
   local out = {}
   local function esc(s)
     s = tostring(s or "")
-    s = s:gsub("[\r\n\t]", " ") -- TSV 安全
+    s = s:gsub("[\r\n\t]", " ") -- TSV-safe
     return s
   end
 
@@ -1343,16 +1343,16 @@ end
 ---------------------------------------
 -- Metadata Preview helpers (for UI)
 ---------------------------------------
--- 保存在 UI 期間可重用的對照表：{ {ch=1,name="Vocal"}, ... }
+-- Lookup table reused while the UI is open: { {ch=1,name="Vocal"}, ... }
 local PREVIEW_PAIRS = {}
 
--- 給名稱排序用的簡單自然排序鍵
+-- Simple natural sort key for names
 local function _preview_natkey(s)
   s = tostring(s or ""):lower():gsub("%s+", " ")
   return s:gsub("(%d+)", function(d) return string.format("%09d", tonumber(d) or 0) end)
 end
 
--- 從目前的 items（最多取頭 10 個樣本）掃出 TRK1..64 的 {ch ↔ name}
+-- Scan TRK1..64 {ch ↔ name} from the current items (at most the first 10 as samples)
 local function build_preview_pairs(items)
   PREVIEW_PAIRS = {}
   local seen = {}
@@ -1378,7 +1378,7 @@ end
 
 
 ---------------------------------------
--- UI：畫面（直向）
+-- UI: layout (vertical)
 ---------------------------------------
 -- === REPLACE WHOLE FUNCTION ===
 local function draw_confirm()
@@ -1435,7 +1435,7 @@ local function draw_confirm()
   -- 2) Sort Vertically
   reaper.ImGui_Text(ctx, "Sort Vertically")
 
-  -- Sort key 選項
+  -- Sort key options
   local labels = { "Take name", "File name", "Metadata" }
   for i=1,3 do
     if reaper.ImGui_RadioButton(ctx, labels[i], sort_key_idx==i) then
@@ -1451,7 +1451,7 @@ local function draw_confirm()
   end
 
   if sort_key_idx==3 then
-    -- ---- Metadata 子選項（分離命名與排序）----
+    -- ---- Metadata sub-options (naming and ordering separated) ----
     reaper.ImGui_Spacing(ctx)
     reaper.ImGui_Text(ctx, "Sort by Metadata (engine key):")
     reaper.ImGui_SameLine(ctx)
@@ -1465,19 +1465,19 @@ local function draw_confirm()
       save_pref("meta_sort_mode", meta_sort_mode)
     end
 
-    -- ★ 主按鈕放在這裡（Preview 上方）
+    -- ★ main buttons go here (above Preview)
     reaper.ImGui_Spacing(ctx)
 
-    -- 🆕 Sort in Place（就地排序）
+    -- 🆕 Sort in Place
     if reaper.ImGui_Button(ctx, "Sort in Place", scale(108), 0) then
-      -- 使用現有的「Sort Vertically」引擎，但 key 來自 Metadata
+      -- Uses the existing "Sort Vertically" engine, but the key comes from Metadata
       sort_key_idx = 3
       save_pref("sort_key_idx", sort_key_idx)
       run_sort_action()
     end
     reaper.ImGui_SameLine(ctx)
 
-    -- 🆕 Copy-to-Sort 的「TCP命名」與「群組排序」
+    -- 🆕 Copy-to-Sort: "TCP naming" and "group order"
     reaper.ImGui_Spacing(ctx)
     reaper.ImGui_Text(ctx, "Copy-to-Sort — TCP naming:")
     reaper.ImGui_SameLine(ctx)
@@ -1508,7 +1508,7 @@ local function draw_confirm()
       save_pref("meta_order_mode", meta_order_mode)
     end
 
-    -- 🆕 當以 Channel# 命名新 TCP 時，附加最常見 Track Name
+    -- 🆕 When the new TCPs are named by Channel#, append the most common Track Name
     if meta_name_mode == 2 then
       local chg, v = reaper.ImGui_Checkbox(ctx, "Append Track Name label (e.g., 'Ch 03 — BOOM1')", meta_append_secondary)
       if chg then
@@ -1532,7 +1532,7 @@ local function draw_confirm()
 
     reaper.ImGui_Spacing(ctx)
 
-    -- 🆕 Copy to Sort：帶入命名軸與排序軸
+    -- 🆕 Copy to Sort: pass the naming axis and the ordering axis
     if reaper.ImGui_Button(ctx, "Copy to Sort", scale(108), 0) then
       run_copy_to_new_tracks(meta_name_mode, meta_order_mode, sort_asc, meta_append_secondary, meta_overlap_mode)
     end
@@ -1540,14 +1540,14 @@ local function draw_confirm()
 
 
 
-    -- Preview（選擇性資訊，放在按鈕之後）
+    -- Preview (optional info, placed after the buttons)
     reaper.ImGui_Spacing(ctx)
     reaper.ImGui_Text(ctx, "Preview detected fields")
     if reaper.ImGui_Button(ctx, "Scan first 10 items", scale(200), 0) then
-      build_preview_pairs(SELECTED_ITEMS)   -- ← 先生成 PREVIEW_PAIRS
+      build_preview_pairs(SELECTED_ITEMS)   -- ← generate PREVIEW_PAIRS first
     end
 
-    -- 只有有資料才畫表格，避免 PREVIEW_PAIRS 為 nil/空表時當掉
+    -- Draw the table only when there is data, to avoid a crash when PREVIEW_PAIRS is nil/empty
     if type(PREVIEW_PAIRS) == "table" and #PREVIEW_PAIRS > 0 then
       reaper.ImGui_Spacing(ctx)
       if reaper.ImGui_BeginTable(ctx, "tbl_preview", 2,
@@ -1568,7 +1568,7 @@ local function draw_confirm()
     end
 
   else
-    -- 非 Metadata：這裡才畫 Sort 的主按鈕
+    -- Not Metadata: draw the Sort main button here
     reaper.ImGui_Spacing(ctx)
     if reaper.ImGui_Button(ctx, "Run Sort Vertically", scale(220), 0) then
       run_sort_action()
@@ -1592,7 +1592,7 @@ local function loop()
   local flags = reaper.ImGui_WindowFlags_NoCollapse()
   local visible, open = reaper.ImGui_Begin(ctx, "Vertical Reorder and Sort"..LIBVER, true, flags)
 
-  -- ESC 關閉整個視窗（若 Summary modal 開著，先只關 modal）
+  -- ESC closes the whole window (if the Summary modal is open, close only the modal first)
   if esc_pressed() and not reaper.ImGui_IsPopupOpen(ctx, POPUP_TITLE) then
     open = false
   end
@@ -1601,7 +1601,7 @@ local function loop()
     if STATE=="confirm" then draw_confirm()
     else if draw_summary() then open=false end end
   end
-  reaper.ImGui_End(ctx) -- 永遠呼叫（修正 Missing End）
+  reaper.ImGui_End(ctx) -- always called (fixes Missing End)
 
   if font_pushed_this_frame and reaper.ImGui_PopFont then
     reaper.ImGui_PopFont(ctx)

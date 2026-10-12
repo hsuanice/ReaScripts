@@ -234,7 +234,7 @@ local function main()
       picks = filter_picks_rightmost_selected_per_track(picks)
     end
 
-    -- selection-sync OFF（no/one selection）+ nothing from library → gap extend on mouse track
+    -- selection-sync OFF (no/one selection) + nothing from library → gap extend on mouse track
     if (not prefer_selection) and (#picks == 0) then
       local extra = picks_extend_from_gap_on_mouse_track_right(pos)
       for i = 1, #extra do picks[#picks+1] = extra[i] end

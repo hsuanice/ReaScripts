@@ -95,13 +95,13 @@ local DEFAULTS = {
   TAIL_SECONDS       = 0.0,
   DEBUG_LEVEL        = 0,
   -- FX policies (separate for GLUE vs RENDER)
-  GLUE_TAKE_FX       = 1,             -- 1=Glue 之後的成品要印入 take FX；0=不印入
-  GLUE_TRACK_FX      = 0,             -- 1=Glue 成品再套用 Track/Take FX
-  GLUE_APPLY_MODE    = "mono",        -- "mono" | "multi"（給 Glue 後的 apply 用）
+  GLUE_TAKE_FX       = 1,             -- 1=print take FX into the glued result; 0=don't
+  GLUE_TRACK_FX      = 0,             -- 1=apply Track/Take FX to the glued result as well
+  GLUE_APPLY_MODE    = "mono",        -- "mono" | "multi" (apply mode used after Glue)
 
-  RENDER_TAKE_FX     = 0,             -- 1=Render 直接印入 take FX；0=保留（偏向 non-destructive）
-  RENDER_TRACK_FX    = 0,             -- 1=Render 同時印入 Track FX
-  RENDER_APPLY_MODE  = "mono",        -- "mono" | "multi"（Render 使用的 apply 模式）
+  RENDER_TAKE_FX     = 0,             -- 1=Render prints take FX directly; 0=keep them (leans non-destructive)
+  RENDER_TRACK_FX    = 0,             -- 1=Render also prints Track FX
+  RENDER_APPLY_MODE  = "mono",        -- "mono" | "multi" (apply mode used by Render)
   RENDER_TC_EMBED    = "current",    -- TR embed mode for render: "previous" | "current" | "off"
 
   -- Volume handling policies
@@ -110,9 +110,9 @@ local DEFAULTS = {
   GLUE_MERGE_VOLUMES   = 1,           -- 1=Merge item volume into take volume before glue
   GLUE_PRINT_VOLUMES   = 1,           -- 1=Bake volumes into glued audio; 0=restore (non-destructive)
 
-  -- Hash markers（#in/#out 以供 Media Cues）
+  -- Hash markers (#in/#out for Media Cues)
   WRITE_EDGE_CUES   = 1,
-  -- ✅ 新增：Glue 成品 take 內是否加 take markers（非 SINGLE 才加）
+  -- ✅ new: whether the glued take gets take markers (only when not SINGLE)
   WRITE_GLUE_CUES = 1,
   -- Render: carry the source's existing "Glue:" cues into the rendered take
   RENDER_KEEP_GLUE_CUES = 0,
@@ -177,7 +177,7 @@ function M.read_settings()
     GLUE_PRINT_VOLUMES   = (get_ext_bool("GLUE_PRINT_VOLUMES",   DEFAULTS.GLUE_PRINT_VOLUMES)==1),
 
     WRITE_EDGE_CUES    = (get_ext_bool("WRITE_EDGE_CUES",   DEFAULTS.WRITE_EDGE_CUES)==1),
-    -- 🔧 修正：用 DEFAULTS，不是 dflt
+    -- 🔧 fix: use DEFAULTS, not dflt
     WRITE_GLUE_CUES    = (get_ext_bool("WRITE_GLUE_CUES", DEFAULTS.WRITE_GLUE_CUES)==1),
     RENDER_KEEP_GLUE_CUES = (get_ext_bool("RENDER_KEEP_GLUE_CUES", DEFAULTS.RENDER_KEEP_GLUE_CUES==1)==1),
 
@@ -218,14 +218,14 @@ local function add_take_marker_at(item, rel_pos_sec, label)
 end
 
 
--- 取 base/ext（若無副檔名則 ext=""）
+-- Get base/ext (ext="" when there is no extension)
 local function split_ext(s)
   local base, ext = s:match("^(.*)(%.[^%./\\]+)$")
   if not base then return s or "", "" end
   return base, ext
 end
 
--- 移除尾端標籤：-takefx / -trackfx / -renderedN（僅針對字尾，避免中段誤刪）
+-- Remove trailing tags: -takefx / -trackfx / -renderedN (suffix only, so nothing mid-name is removed)
 local function strip_tail_tags(s)
   s = s or ""
   while true do
@@ -233,23 +233,23 @@ local function strip_tail_tags(s)
     s = s:gsub("%-takefx$", "")
     s = s:gsub("%-trackfx$", "")
     s = s:gsub("%-rendered%d+$", "")
-    s = s:gsub("%-$","")  -- 若剛好留下尾端 '-'，順手清掉
+    s = s:gsub("%-$","")  -- also clear a trailing '-' left behind
     if s == before then break end
   end
   return s
 end
 
--- 取名字中的 renderedN（僅字尾，允許後面跟 -takefx/-trackfx 再抽回去）
+-- Get renderedN from the name (suffix only; -takefx/-trackfx may follow and are put back)
 local function extract_rendered_n(name)
   local b = split_ext(name)
-  -- 先暫時移除尾端 -takefx/-trackfx，抓 renderedN
+  -- Temporarily remove a trailing -takefx/-trackfx to read renderedN
   local t = b:gsub("%-takefx$",""):gsub("%-trackfx$","")
   t = t:gsub("%-takefx$",""):gsub("%-trackfx$","")
   local n = t:match("%-rendered(%d+)$")
   return tonumber(n or 0) or 0
 end
 
--- 掃「同一個 item 的所有 takes」找出已存在的最大 renderedN
+-- Scan all takes of the same item for the highest existing renderedN
 local function max_rendered_n_on_item(it)
   local maxn = 0
   local tc = reaper.CountTakes(it)
@@ -262,8 +262,8 @@ local function max_rendered_n_on_item(it)
   return maxn
 end
 
--- 只改「新產生的 rendered take」的名稱；舊 take 不動
--- base 用「render 前的舊 take 名稱（去掉既有 suffix）」；ext 用「新 take 現名的副檔名」
+-- Rename only the newly created rendered take; old takes are untouched
+-- base = the old take name before rendering (existing suffix removed); ext = the extension of the new take's current name
 local function rename_new_render_take(it, orig_take_name, want_takefx, want_trackfx, DBG)
   if not it then return end
   local tc = reaper.CountTakes(it)
@@ -290,7 +290,7 @@ local function rename_new_render_take(it, orig_take_name, want_takefx, want_trac
 end
 
 
--- 只快照「offline」布林，不記 bypass
+-- Snapshot only the "offline" flag, not bypass
 local function snapshot_takefx_offline(tk)
   local n = r.TakeFX_GetCount(tk) or 0
   local snap = {}
@@ -300,7 +300,7 @@ local function snapshot_takefx_offline(tk)
   return snap
 end
 
--- 暫時把「原本不是 offline」的 FX 設為 offline（不動原本就 offline 的）
+-- Temporarily set FX that were not offline to offline (FX already offline are untouched)
 local function temp_offline_nonoffline_fx(tk)
   local n = r.TakeFX_GetCount(tk) or 0
   local cnt = 0
@@ -313,7 +313,7 @@ local function temp_offline_nonoffline_fx(tk)
   return cnt
 end
 
--- 依快照還原 offline 狀態
+-- Restore the offline state from the snapshot
 local function restore_takefx_offline(tk, snap)
   if not (tk and snap) then return 0 end
   local n = r.TakeFX_GetCount(tk) or 0
@@ -1012,8 +1012,8 @@ local function strip_suffixes(base)
   return base, n, false, false
 end
 
--- 把 -takefx / -trackfx 插在真正的音訊副檔名（.wav/.aif/.aiff/...）之前
--- 若找不到副檔名，就附加在字串尾端。已存在就不重複加（冪等）。
+-- Insert -takefx / -trackfx before the real audio extension (.wav/.aif/.aiff/...)
+-- If no extension is found, append at the end. Not added twice (idempotent).
 local _KNOWN_EXTS = { ".wav", ".aif", ".aiff", ".flac", ".mp3", ".ogg", ".wv", ".caf", ".m4a" }
 
 local function _split_name_by_audio_ext(nm)
@@ -1029,7 +1029,7 @@ local function _split_name_by_audio_ext(nm)
     end
   end
   if s_best then
-    -- stem | .ext | tail（例如 "foo" | ".wav" | "-rendered1-TrackFX"）
+    -- stem | .ext | tail (e.g. "foo" | ".wav" | "-rendered1-TrackFX")
     return nm:sub(1, s_best - 1), nm:sub(s_best, e_best), nm:sub(e_best + 1)
   else
     return nm, "", ""
@@ -1046,14 +1046,14 @@ local function _add_tag_once_in_stem(stem, tag)
   return (stem or "") .. "-" .. tag
 end
 
--- op 參數保留相容性；實際不再分 glue/render 模式
+-- The op parameter is kept for compatibility; glue/render modes are no longer distinguished
 function compute_new_name(op, oldn, flags)
   local stem, ext, tail = _split_name_by_audio_ext(oldn or "")
 
   local want_take  = flags and flags.takePrinted  == true
   local want_track = flags and flags.trackPrinted == true
 
-  -- 固定順序：takefx → trackfx
+  -- Fixed order: takefx → trackfx
   if want_take  then stem = _add_tag_once_in_stem(stem, "takefx")  end
   if want_track then stem = _add_tag_once_in_stem(stem, "trackfx") end
 
@@ -1466,7 +1466,7 @@ local function glue_unit(tr, u, cfg)
   -- Prepare Glue Cues using shared function (skipped for SINGLE units)
   -- Rule: write a cue only when adjacent items switch to a different file source.
 
-  -- 保存左右邊界淡入淡出（之後還原）
+  -- Save the outer-edge fade in/out (restored later)
   local members = {}
   for i,m in ipairs(u.members) do members[i]=m end
   local first_it = members[1] and members[1].it or nil
@@ -1487,7 +1487,7 @@ local function glue_unit(tr, u, cfg)
     fout_auto  = r.GetMediaItemInfo_Value(last_it,"D_FADEOUTLEN_AUTO") or 0
   end
 
-  -- 計算 UL/UR（handles + clamp）
+  -- Compute UL/UR (handles + clamp)
   -- If TS exists and its edge is outside unit edge, extend handle to TS edge
   local tsL, tsR, hasTS = get_current_ts()
 
@@ -1560,7 +1560,7 @@ local function glue_unit(tr, u, cfg)
     end
   end
 
-  -- RENDER_TAKE_FX=0 → 先清空成員的 take FX（避免被 Glue 印入）
+  -- RENDER_TAKE_FX=0 → clear the members' take FX first (so Glue does not print them)
   if not cfg.GLUE_TAKE_FX then
     local items = {}
     for i,m in ipairs(members) do items[i]=m.it end
@@ -1584,7 +1584,7 @@ local function glue_unit(tr, u, cfg)
 
 
 
-  -- 選取並暫時把左右最外側 item 撐到 UL/UR 以吃到 handles
+  -- Select and temporarily stretch the outermost left/right items to UL/UR to include the handles
   local items_sel = {}
   for i,m in ipairs(members) do items_sel[i]=m.it end
   select_only_items(items_sel)
@@ -1642,7 +1642,7 @@ local function glue_unit(tr, u, cfg)
   end
 
   -- Unified logic for ALL modes (mono/multi/auto): Glue → (conditionally) Apply
-  -- 時選=UL..UR → Glue → (必要時)對成品 Apply → Trim 回 UL..UR
+  -- Time selection = UL..UR → Glue → (if needed) Apply on the result → trim back to UL..UR
 
   -- Glue always uses native volume behavior (item+take printed).
 
@@ -1692,7 +1692,7 @@ local function glue_unit(tr, u, cfg)
     local print_volumes = (cfg.GLUE_PRINT_VOLUMES == true)
     local volume_snap = preprocess_item_volumes(glued_pre, merge_volumes, print_volumes, false, DBG)
 
-    -- 清掉 fades（40361/41993 會把 fade 烘進音檔）
+    -- Clear fades (40361/41993 would bake the fades into the audio file)
     r.SetMediaItemInfo_Value(glued_pre, "D_FADEINLEN",       0)
     r.SetMediaItemInfo_Value(glued_pre, "D_FADEINLEN_AUTO",  0)
     r.SetMediaItemInfo_Value(glued_pre, "D_FADEOUTLEN",      0)
@@ -1717,7 +1717,7 @@ local function glue_unit(tr, u, cfg)
 
   run_command(ACT_TRIM_TO_TS, "Trim to time selection", DBG)
 
-  -- 找到最後成品（UL..UR），移回 u.start..u.finish 並寫入 offset
+  -- Find the final result (UL..UR), move it back to u.start..u.finish and write the offset
   local glued = find_item_by_span_on_track(tr, UL, UR, 0.002)
   if glued then
     local left_total  = u.start - UL
@@ -1742,7 +1742,7 @@ local function glue_unit(tr, u, cfg)
       end
     end
 
-    -- 還原邊界淡入淡出
+    -- Restore the outer-edge fade in/out
     r.SetMediaItemInfo_Value(glued,"D_FADEINLEN",      fin_len)
     r.SetMediaItemInfo_Value(glued,"D_FADEINDIR",      fin_dir)
     r.SetMediaItemInfo_Value(glued,"C_FADEINSHAPE",    fin_shape)

@@ -44,7 +44,7 @@ local function randbytes(n) local t={}; for i=1,n do if (i-1)%4==0 then t._=ru32
 
 -- ===== constants (strict lengths) =====
 local L = { BASIC=32, EXT=64, UL=16, MAT=16, INS=8, EXT_PAD=32 }
--- Default UMID UL (16B). 若你有公司/專案指定 UL，改這裡即可。
+-- Default UMID UL (16B). Change it here if your company / project has its own UL.
 local DEFAULT_UMID_UL_HEX = "060E2B340101010101010F1313000000"
 
 -- ===== API: normalize / validate =====
@@ -71,7 +71,7 @@ local function build_basic32_bytes(opts)
   local ul  = fromhex(DEFAULT_UMID_UL_HEX)
   local mat = build_material_16B(opts)
   local ins = build_instance_8B(opts)
-  -- 將 instance 摺入 material 後 8B（確保總長 32B；未來如需完全位址化，可改為顯式欄位）
+  -- Fold the instance into the last 8B of material (keeps the total at 32B; switch to explicit fields if full addressing is ever needed)
   local head = mat:sub(1, L.MAT - L.INS) -- 8B
   local tail = mat:sub(L.MAT - L.INS + 1) -- 8B
   local xored = {}
@@ -84,7 +84,7 @@ function G.generate_umid_basic_strict(opts) opts=opts or {}; seed(opts.seed); re
 
 function G.generate_umid_extended_strict(opts)
   local basic = fromhex(G.generate_umid_basic_strict(opts))
-  -- 32B source pack：UTC秒(4) + usec(4) + device(8) + geo(16; 預設 0)
+  -- 32B source pack: UTC seconds(4) + usec(4) + device(8) + geo(16; 0 by default)
   local t=os.time() or 0; local p=(reaper and reaper.time_precise) and reaper.time_precise() or os.clock()
   local secs = string.pack(">I4", t & 0xffffffff)
   local usec = string.pack(">I4", math.floor((p*1e6)%0xffffffff))

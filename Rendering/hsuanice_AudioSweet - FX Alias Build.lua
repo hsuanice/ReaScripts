@@ -57,7 +57,7 @@ local function make_fingerprint(raw_label)
   return table.concat({t,c,v},"|")
 end
 
--- 預設別名：移除非英數與空白；若 core 為空則用 vendor..core 兜底
+-- Default alias: remove non-alphanumerics and spaces; if core is empty fall back to vendor..core
 local function default_alias(core, vendor)
   local a = tostring(core or ""):gsub("[^%w]+","")
   if a == "" then
@@ -67,7 +67,7 @@ local function default_alias(core, vendor)
 end
 
 local function now_iso()
-  local t=os.date("!*t") -- UTC 避免時區差異
+  local t=os.date("!*t") -- UTC to avoid time-zone differences
   return string.format("%04d-%02d-%02dT%02d:%02d:%02dZ",t.year,t.month,t.day,t.hour,t.min,t.sec)
 end
 
@@ -84,14 +84,14 @@ local function main()
 local added, merged = 0, 0
 local scanned = 0
 
--- 兼容不同 REAPER 版本的 EnumInstalledFX 回傳形式
+-- Handle the different EnumInstalledFX return forms across REAPER versions
 local function enum_installed_fx(i)
   local a,b = reaper.EnumInstalledFX(i, "")
   if type(a) == "string" and (b == nil or type(b) == "number") then
-    -- 舊式：只回傳字串
+    -- Old form: returns only a string
     return a
   end
-  -- 新式：回傳成功布林與字串
+  -- New form: returns a success boolean and a string
   return b
 end
 
@@ -106,7 +106,7 @@ for i=0, 1000000 do
 
   if not rec then
     rec = {
-      alias             = default_alias(core, vendor),  -- 只在新建時給預設 alias
+      alias             = default_alias(core, vendor),  -- default alias only for new entries
       normalized_core   = core,
       normalized_vendor = vendor,
       raw_examples      = { rawlabel },
@@ -116,7 +116,7 @@ for i=0, 1000000 do
     obj[fp] = rec
     added = added + 1
   else
-    -- merge 到既有紀錄
+    -- merge into the existing record
     local seen = {}
     for _,s in ipairs(rec.raw_examples or {}) do seen[s]=true end
     if not seen[rawlabel] then
@@ -132,7 +132,7 @@ for i=0, 1000000 do
     if not rec.normalized_core or rec.normalized_core=="" then rec.normalized_core = core end
     if not rec.normalized_vendor or rec.normalized_vendor=="" then rec.normalized_vendor = vendor end
 
-    -- 只在 alias 目前為空時才自動補預設別名；已有內容一律不動
+    -- Fill in the default alias only when the alias is empty; existing content is never touched
     if not rec.alias or rec.alias == "" then
       rec.alias = default_alias(core, vendor)
     end
@@ -141,7 +141,7 @@ for i=0, 1000000 do
     merged = merged + 1
   end
 end
-  -- 寫回
+  -- Write back
   if not write_file(json_path, json.encode(obj)) then
     reaper.MB("Failed to write "..json_path, "Build FX Alias JSON", 0)
     return

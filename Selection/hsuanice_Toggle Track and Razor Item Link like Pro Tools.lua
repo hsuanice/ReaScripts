@@ -38,20 +38,20 @@
 -------------------------
 
 -- === CLICK-SELECT (integrated) OPTIONS ===
-local ENABLE_CLICK_SELECT_TRACK        = false    -- 開整合點擊選軌（需要接管 track selection 才能模擬 PT 行為）
-local CLICK_SELECT_ON_MOUSE_UP         = true   -- 建議用 mouse-up
-local CLICK_ENABLE_ITEM_UPPER_HALF     = false  -- 點 item 上半部不選軌
-local CLICK_TOLERANCE_PX               = 3      -- 點擊移動容差(px)
+local ENABLE_CLICK_SELECT_TRACK        = false    -- integrated click-to-select-track (must take over track selection to emulate PT behavior)
+local CLICK_SELECT_ON_MOUSE_UP         = true   -- mouse-up recommended
+local CLICK_ENABLE_ITEM_UPPER_HALF     = false  -- clicking the upper half of an item does not select the track
+local CLICK_TOLERANCE_PX               = 3      -- click movement tolerance (px)
 
-local CLICK_FOCUS_RETURN_GRACE_SEC     = 0.20   -- 焦點回來保護窗
+local CLICK_FOCUS_RETURN_GRACE_SEC     = 0.20   -- grace window after focus returns
 
--- 除錯
-local CLICK_WANT_DEBUG                 = false  -- 需要時再開
+-- Debug
+local CLICK_WANT_DEBUG                 = false  -- enable when needed
 
 
 -- === CLICK-SELECT hook phase ===
--- "pre":  在 mainloop 一開始就處理點一下→選軌（0.12.0 的做法）
--- "post": 在 mainloop 結尾再處理（本版預設，讓 ABCD 在下一圈才吃到選軌變化）
+-- "pre":  handle click → select track at the start of mainloop (the 0.12.0 approach)
+-- "post": handle it at the end of mainloop (default in this version, so ABCD sees the track change on the next loop)
 local CLICK_HOOK_PHASE = "post"
 --------------------------------
 
@@ -199,7 +199,7 @@ local function Click_GetTrackTCPRect(tr)
   if c > a and d > b then return a,b,(c-a),(d-b) else return a,b,c,d end
 end
 
--- 命中測試：回傳「要被選取的 track」或 nil
+-- Hit test: returns the track to select, or nil
 local function Click_TrackIfSelectTarget(x, y)
   local _, info = reaper.GetThingFromPoint(x, y)
   local isArrange = (info == "arrange") or (type(info)=="string" and info:find("arrange",1,true))
@@ -244,14 +244,14 @@ local CLICK_down_x, CLICK_down_y, CLICK_down_t = nil, nil, -1
 local CLICK_focus_was_main     = true
 local CLICK_focus_return_time  = -1
 
--- 每圈呼叫；若這一圈內「真的有處理一個點擊→選軌」，回傳 true
+-- Called every loop; returns true if a click → track selection was actually handled in this loop
 local function Click_TickMaybeSelectTrack()
   if not ENABLE_CLICK_SELECT_TRACK then return false end
   if not reaper.APIExists("JS_Mouse_GetState") then return false end
 
   local now = reaper.time_precise()
 
-  -- === 焦點守門（對齊原生 App 的 click-to-activate 抑制） ===
+  -- === Focus guard (matches the native app's click-to-activate suppression) ===
   if reaper.APIExists("JS_Window_GetFocus") and reaper.APIExists("JS_Window_IsChild") then
     local main = reaper.GetMainHwnd()
     local fh   = reaper.JS_Window_GetFocus()
@@ -278,7 +278,7 @@ local function Click_TickMaybeSelectTrack()
     end
   end
 
-  -- 讀滑鼠狀態＋邊緣
+  -- Read the mouse state + edges
   local mstate = reaper.JS_Mouse_GetState(1 + 2)   -- LMB|RMB
   local x, y   = reaper.GetMousePosition()
   local lmb    = (mstate & 1) == 1
@@ -288,14 +288,14 @@ local function Click_TickMaybeSelectTrack()
   local r_down = ( rmb and not CLICK_prev_rmb)
   local r_up   = ((not rmb) and CLICK_prev_rmb)
 
-  -- === 左鍵手勢（一次點擊 = down→up 的完整手勢） ===
+  -- === Left-button gesture (one click = a complete down→up gesture) ===
   local did = false
 
   if CLICK_STATE == "IDLE" then
     if l_down then
       CLICK_down_x, CLICK_down_y, CLICK_down_t = x, y, now
       if not CLICK_SELECT_ON_MOUSE_UP then
-        -- mouse-down 模式：當下命中就選軌
+        -- mouse-down mode: select the track immediately on a hit
         local tr, why = Click_TrackIfSelectTarget(x, y)
         if tr then
           reaper.Undo_BeginBlock()
@@ -313,7 +313,7 @@ local function Click_TickMaybeSelectTrack()
     end
 
   elseif CLICK_STATE == "LMB_GESTURE" then
-    -- 任何干擾（右鍵）都取消手勢
+    -- any interference (right button) cancels the gesture
     if r_down then
       CLICK_STATE = "IDLE"
       CLICK_prev_lmb, CLICK_prev_rmb = lmb, rmb
@@ -407,7 +407,7 @@ local function item_matches_range(s,e,rs,re_, mode)
   if mode == 1 then
     return (e > rs + EPS) and (s < re_ - EPS)     -- overlap
   else
-    return (s >= rs - EPS) and (e <= re_ + EPS)   -- contain（含EPS，含邊界）
+    return (s >= rs - EPS) and (e <= re_ + EPS)   -- contain (with EPS, edges included)
   end
 end
 

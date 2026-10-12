@@ -17,8 +17,8 @@
 local r = reaper
 
 -- ================= User options =================
-local ABS_TOL_SAMPLES = 64     -- 絕對容差（samples）
-local REL_TOL_FRAC    = 0.01   -- 相對容差（0.01 = 1%）
+local ABS_TOL_SAMPLES = 64     -- absolute tolerance (samples)
+local REL_TOL_FRAC    = 0.01   -- relative tolerance (0.01 = 1%)
 local OPEN_AND_CLEAR_CONSOLE = true
 
 local LABEL_IN  = "Review: Fade-in spans entire item"
@@ -38,7 +38,7 @@ local SR = project_sr()
 local function toSamples(sec) return math.floor(sec * SR + 0.5) end
 local function fmtTC(sec)    return r.format_timestr_pos(sec, "", 5) end  -- h:m:s:f
 
--- 手動/AUTO 淡變取最大（秒）
+-- Max of manual / AUTO fades (seconds)
 local function effective_fades_sec(item)
   local fi  = r.GetMediaItemInfo_Value(item, "D_FADEINLEN") or 0
   local fo  = r.GetMediaItemInfo_Value(item, "D_FADEOUTLEN") or 0
@@ -49,7 +49,7 @@ local function effective_fades_sec(item)
   return math.max(fi, fia), math.max(fo, foa) -- inSec, outSec
 end
 
--- 專案時間 -> take 時間（SetTakeMarker 用）
+-- Project time -> take time (for SetTakeMarker)
 local function proj_to_take_time(take, item, project_pos)
   if not take or not item then return 0 end
   local item_pos = r.GetMediaItemInfo_Value(item, "D_POSITION")
@@ -62,7 +62,7 @@ local function proj_to_take_time(take, item, project_pos)
 end
 
 local function add_marker_at_item_edge(item, edge, label)
-  -- edge: "start" or "end"（在 item 起點或終點放 marker）
+  -- edge: "start" or "end" (marker at the item start or end)
   local take = r.GetActiveTake(item)
   if not take then return end
   local item_pos = r.GetMediaItemInfo_Value(item, "D_POSITION")
@@ -115,7 +115,7 @@ for ti = 0, tr_count-1 do
           (near_in and near_out) and "fade-in & fade-out" or
           (near_in and "fade-in" or "fade-out")
 
-        -- 標記：淡入命中 → item 起點；淡出命中 → item 終點（兩者都命中就各放一個）
+        -- Mark: fade-in hit → item start; fade-out hit → item end (one marker each when both hit)
         if near_in  then add_marker_at_item_edge(it, "start", LABEL_IN)  end
         if near_out then add_marker_at_item_edge(it, "end",   LABEL_OUT) end
 

@@ -91,7 +91,7 @@ local json = (function()
         if type(key) ~= "string" then decode_error(str,i,"Expected string for object key") end
         i = skip_whitespace(str, i)
         if str:sub(i,i) ~= ":" then decode_error(str,i,"Expected ':' after key") end
-        -- 這裡要直接解析 value，位置索引給下一輪用
+        -- Parse the value directly here; the position index is used by the next iteration
         local val; val, i = parse_value(str, i+1)
         obj[key] = val
         i = skip_whitespace(str,i)
@@ -177,7 +177,7 @@ local function settings_dir()
 end
 
 local function ensure_dir(path)
-  -- (REAPER/Lua 沒有跨平台 mkdir；這裡假設你已建立 Settings 夾)
+  -- (REAPER/Lua has no cross-platform mkdir; assumes the Settings folder already exists)
   return true
 end
 
@@ -197,7 +197,7 @@ end
 
 local function tsv_escape(s)
   if not s or s=="" then return "" end
-  -- 以單行為主：替換換行與 tab
+  -- Keep it single-line: replace line breaks and tabs
   s = s:gsub("\r\n","\n"):gsub("\r","\n")
   s = s:gsub("\n","\\n")
   s = s:gsub("\t","    ")
@@ -218,7 +218,7 @@ local function main()
 
   local raw = read_file(json_path)
   if not raw or raw == "" then
-    -- 建一個範例空殼
+    -- Create an empty example
     local empty = json.encode({
       -- key = fingerprint
       -- value = { alias="", normalized_core="", normalized_vendor="", raw_examples=[], seen_types=[], last_seen="" }
@@ -233,7 +233,7 @@ local function main()
     return
   end
 
-  -- 以 key（fingerprint）排序穩定輸出
+  -- Sort by key (fingerprint) for stable output
   local keys = {}
   for k in pairs(obj) do keys[#keys+1]=k end
   table.sort(keys)

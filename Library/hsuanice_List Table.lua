@@ -42,12 +42,12 @@ function LT.rebuild_display_mapping(ctx, resolve_label_to_id)
   local order = {}
   local pos   = {}  -- pos[logical_id] = visual_pos
 
-  -- 以「顯示序」(display order) 逐欄走訪
+  -- Walk the columns in display order
   for disp = 0, n-1 do
-    -- 把「目前欄」切到顯示序的第 disp 欄
+    -- Move the "current column" to display-order column disp
     reaper.ImGui_TableSetColumnIndex(ctx, disp)
 
-    -- 現在位於該顯示欄位上，取得其名稱（或你也可直接用 resolve_label_to_id）
+    -- Now on that display column, get its name (resolve_label_to_id also works)
     local name = reaper.ImGui_TableGetColumnName(ctx, reaper.ImGui_TableGetColumnIndex(ctx)) or ""
     local id   = resolve_label_to_id(name)
 
@@ -76,13 +76,13 @@ end
 -- LT.filter_rows(rows, opts) -> filtered_rows (new table)
 --   opts = {
 --     show_muted = true/false (default: true)
---     predicate  = function(row) -> boolean   -- 可選，自訂過濾條件（與 show_muted AND 起來）
+--     predicate  = function(row) -> boolean   -- optional custom filter (ANDed with show_muted)
 --   }
 function LT.filter_rows(rows, opts)
   local out = {}
   rows = rows or {}
   opts = opts or {}
-  local show_muted = (opts.show_muted ~= false)  -- 預設顯示靜音列
+  local show_muted = (opts.show_muted ~= false)  -- muted rows are shown by default
 
   for i = 1, #rows do
     local r = rows[i]
@@ -261,7 +261,7 @@ function LT.build_dst_by_anchor_and_shape(rows, anchor, src_h, src_w, COL_ORDER,
   for ri = r0, rmax do
     for j = 0, src_w - 1 do
       local pos = posA + j
-      if pos > pmax then break end           -- 視覺上超過右界，截斷
+      if pos > pmax then break end           -- visually past the right edge: truncate
       local logical = COL_ORDER[pos]
       if logical then
         dst[#dst+1] = { row_index = ri, col = logical, row = rows[ri] }
@@ -286,7 +286,7 @@ function LT.build_dst_spill_writable(rows, anchor, src_h, src_w, COL_ORDER, COL_
 
   local WRITABLE = { [3]=true, [4]=true, [5]=true }
 
-  -- 1) 取得 anchor 的 row_index 與「視覺位置」posA
+  -- 1) Get the anchor's row_index and its visual position posA
   local r0 = anchor.row_index or 1
   if (not anchor.row_index) and anchor.guid then
     for i, row in ipairs(rows) do
@@ -295,9 +295,9 @@ function LT.build_dst_spill_writable(rows, anchor, src_h, src_w, COL_ORDER, COL_
   end
 
   local colA = anchor.col or 3
-  local posA = (COL_POS and COL_POS[colA]) or colA  -- anchor 在畫面中的位置（1-based）
+  local posA = (COL_POS and COL_POS[colA]) or colA  -- anchor's on-screen position (1-based)
 
-  -- 2) 從畫面右邊開始找「可寫欄」的視覺位置，依序收集 src_w 個
+  -- 2) From the anchor rightwards, collect the visual positions of src_w writable columns
   local vis_targets = {}
   local pos = posA
   while #vis_targets < src_w and pos <= #COL_ORDER do
@@ -307,10 +307,10 @@ function LT.build_dst_spill_writable(rows, anchor, src_h, src_w, COL_ORDER, COL_
     end
     pos = pos + 1
   end
-  -- 若右邊不夠欄就截斷（符合你一直以來「不換行、不環繞」的規則）
+  -- Truncate when there are not enough columns on the right (the long-standing "no wrap, no wrap-around" rule)
   if #vis_targets == 0 then return {} end
 
-  -- 3) 產生目的地清單：每一列都用同一組 vis_targets
+  -- 3) Build the destination list: every row uses the same vis_targets
   local dst = {}
   local rmax = math.min(#rows, r0 + src_h - 1)
   for ri = r0, rmax do
@@ -320,7 +320,7 @@ function LT.build_dst_spill_writable(rows, anchor, src_h, src_w, COL_ORDER, COL_
     end
   end
 
-  -- 4) 穩定排序（行優先、視覺位置往右）
+  -- 4) Stable sort (row-major, visual position left to right)
   table.sort(dst, function(a,b)
     if a.row_index ~= b.row_index then return a.row_index < b.row_index end
     local pa = (COL_POS and COL_POS[a.col]) or a.col
@@ -335,13 +335,13 @@ end
 
 
 -- Apply paste according to Excel-like rules.
--- rows: 可見列（Editor 依 UI 狀態傳入）
--- dst:  目標格列表（行優先、左到右），通常由 LT.build_dst_list_from_selection() 回傳
--- tbl:  2D 來源（parse_clipboard_table 的結果）
--- COL_ORDER/COL_POS: 視覺欄序映射（維持與畫面一致）
--- apply_cell_cb(d, value): 實際寫入一格的 callback（由 Editor 提供）
+-- rows: visible rows (passed by the Editor according to the UI state)
+-- dst:  target cells (row-major, left to right), usually from LT.build_dst_list_from_selection()
+-- tbl:  2D source (result of parse_clipboard_table)
+-- COL_ORDER/COL_POS: visual column order mapping (kept in line with the screen)
+-- apply_cell_cb(d, value): callback that actually writes one cell (provided by the Editor)
 function LT.apply_paste(rows, dst, tbl, COL_ORDER, COL_POS, apply_cell_cb)
-  -- 前置：將來源扁平化並取得形狀
+  -- Preparation: flatten the source and get its shape
   local src   = LT.flatten_tsv_to_list(tbl)
   if #src == 0 or #dst == 0 then return 0 end
   local src_h, src_w = LT.src_shape_dims(tbl)
@@ -349,10 +349,10 @@ function LT.apply_paste(rows, dst, tbl, COL_ORDER, COL_POS, apply_cell_cb)
   local function spill_from_anchor(anchor_desc, only_writable)
     local ddst
     if only_writable then
-      -- 僅 3/4/5 欄（可寫）
+      -- Only columns 3/4/5 (writable)
       ddst = LT.build_dst_spill_writable(rows, anchor_desc, src_h, src_w, COL_ORDER, COL_POS)
     else
-      -- 依來源形狀完整展開（所有欄；實際寫回交給 apply_cell_cb 決定要不要忽略）
+      -- Fully expand by the source shape (all columns; apply_cell_cb decides what to ignore when writing)
       ddst = LT.build_dst_by_anchor_and_shape(rows, anchor_desc, src_h, src_w, COL_ORDER, COL_POS)
     end
     local n = math.min(#src, #ddst)
@@ -362,21 +362,21 @@ function LT.apply_paste(rows, dst, tbl, COL_ORDER, COL_POS, apply_cell_cb)
 
   local written = 0
   if #src == 1 then
-    -- 單值 → 填滿選取
+    -- Single value → fill the selection
     local v = src[1]
     for i = 1, #dst do apply_cell_cb(dst[i], v); written = written + 1 end
 
   elseif #dst == 1 then
-    -- 多值 → 單一目標格：以該格為錨點 spill（僅可寫欄位）
+    -- Multiple values → single target cell: spill from that cell as anchor (writable columns only)
     written = written + spill_from_anchor(dst[1], true)
 
   elseif #dst < #src then
-    -- 來源大於目標：以選取「最左上」為錨點 spill（僅可寫欄位）
+    -- Source larger than target: spill from the top-left of the selection as anchor (writable columns only)
     written = written + spill_from_anchor(dst[1], true)
 
   elseif src_h == 1 then
-    -- 單列來源 → fill-down：每一列取前 src_w 格逐列套用
-    -- 先按列分組，再由左到右對應
+    -- Single-row source → fill down: apply the first src_w cells to every row
+    -- Group by row first, then map left to right
     local by_row = {}
     for _, d in ipairs(dst) do
       local t = by_row[d.row_index]; if not t then t = {}; by_row[d.row_index] = t end
@@ -393,7 +393,7 @@ function LT.apply_paste(rows, dst, tbl, COL_ORDER, COL_POS, apply_cell_cb)
     end
 
   else
-    -- 多對多：row-major 一一對應
+    -- Many to many: row-major one-to-one
     local n = math.min(#src, #dst)
     for k = 1, n do apply_cell_cb(dst[k], src[k]); written = written + 1 end
   end

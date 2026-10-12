@@ -128,13 +128,13 @@ end
 set_font_size(math.floor(13 * FONT_SCALE))
 
 -- ===== Safe string pack for ExtState (single-line storage) =====
-local SEP = string.char(31) -- ASCII Unit Separator; 不會出現在一般文字中
+local SEP = string.char(31) -- ASCII Unit Separator; never appears in normal text
 
 local function esc(s)
   s = tostring(s or "")
-  -- 歸一化換行 → \n
+  -- Normalize line breaks → \n
   s = s:gsub("\r\n", "\n"):gsub("\r", "\n")
-  -- 轉義：反斜線、分隔符、以及換行
+  -- Escape: backslash, separator and line breaks
   s = s:gsub("\\", "\\\\")
        :gsub(SEP, "\\x1F")
        :gsub("\n", "\\n")
@@ -213,8 +213,8 @@ local function load_take_filter()
   local col  = (reaper.GetExtState(EXT_NS, "take_filter_collapse") == "1")
   return {
     enable   = en,
-    chars    = ch or ".",   -- 預設把 '.' 視為不允許
-    repl     = repl or "_", -- 預設用底線取代
+    chars    = ch or ".",   -- by default '.' is not allowed
+    repl     = repl or "_", -- replace with an underscore by default
     collapse = col,
   }
 end
@@ -226,15 +226,15 @@ local function save_take_filter(F)
 end
 local TAKE_FILTER = load_take_filter()
 
--- 把使用者輸入的「字元清單」組成 Lua 字元類別，處理必要跳脫
+-- Build a Lua character class from the user's character list, escaping where needed
 local function _build_charclass(literals)
   literals = tostring(literals or "")
-  -- 在 [] 內要跳脫的字元：^ - ]
+  -- Characters that must be escaped inside []: ^ - ]
   literals = literals:gsub("([%^%-%]])", "%%%1")
   return "[" .. literals .. "]"
 end
 
--- 把 literal 字串轉成 Lua pattern-safe（用於 collapse 重複）
+-- Make a literal string Lua-pattern-safe (used to collapse repeats)
 local function _escape_lua_pat(s) return tostring(s or ""):gsub("(%W)", "%%%1") end
 
 local function apply_take_filter(name)
@@ -242,9 +242,9 @@ local function apply_take_filter(name)
   if TAKE_FILTER.enable and TAKE_FILTER.chars and TAKE_FILTER.chars ~= "" then
     local cls = _build_charclass(TAKE_FILTER.chars)
     local repl = TAKE_FILTER.repl or "_"
-    -- 1) 不允許的字元 → 取代字元（留空代表刪除）
+    -- 1) disallowed characters → replacement character (empty = delete)
     out = out:gsub(cls, repl)
-    -- 2) 折疊連續取代字元
+    -- 2) collapse consecutive replacement characters
     if TAKE_FILTER.collapse and repl ~= "" then
       local rp = _escape_lua_pat(repl)
       out = out:gsub(rp.."+", repl)
@@ -275,7 +275,7 @@ local function unpack_rules(s)
   local out = {}
   if s and s ~= "" then
     local items = split_by_sep(s:gsub(R_FIELD_SEP, R_FIELD_SEP)) -- reuse splitter
-    -- 手動 split item → fields（from/to）
+    -- Manually split item → fields (from/to)
     local start = 1
     local function split_once(str, sep)
       local i = str:find(sep, 1, true)
@@ -346,24 +346,24 @@ local function save_split_ratio(ratio)
 end
 
 -- ===== Safe BeginChild (cross-version) =====
--- 回傳兩個值：begun:boolean, visible:boolean
+-- Returns two values: begun:boolean, visible:boolean
 local function BeginChildSafe(id, w, h, border, flags)
   border = not not border
   flags  = flags or 0
 
-  -- 最常見簽名：(ctx, id, w, h, border:boolean, flags:number)
+  -- Most common signature: (ctx, id, w, h, border:boolean, flags:number)
   local ok, ret = pcall(reaper.ImGui_BeginChild, ctx, id, w, h, border, flags)
   if ok then return true, ret end
 
-  -- 舊綁定簽名 A：(ctx, id, w, h, flags:number)
+  -- Old binding signature A: (ctx, id, w, h, flags:number)
   ok, ret = pcall(reaper.ImGui_BeginChild, ctx, id, w, h, flags)
   if ok then return true, ret end
 
-  -- 舊綁定簽名 B：(ctx, id, w, h)
+  -- Old binding signature B: (ctx, id, w, h)
   ok, ret = pcall(reaper.ImGui_BeginChild, ctx, id, w, h)
   if ok then return true, ret end
 
-  -- 全部失敗 → 沒有開始 child（千萬別 EndChild）
+  -- All failed → no child was begun (never call EndChild)
   return false, false
 end
 
@@ -436,19 +436,19 @@ local function byte_to_char_index(s, bpos)
   return #spans
 end
 
--- 根據可用寬度（像素）截斷並加省略號
+-- Truncate to the available width (pixels) and add an ellipsis
 local function ellipsize_to_width(ctx, s, max_w)
   s = tostring(s or "")
   if max_w <= 0 then return "…" end
   local w = select(1, reaper.ImGui_CalcTextSize(ctx, s)) or 0
   if w <= max_w then return s end
-  -- 二分搜尋最長可顯示的字元數
+  -- Binary search for the longest displayable number of characters
   local spans = utf8_spans(s)
   local lo, hi, best = 0, #spans, 0
   while lo <= hi do
     local mid = math.floor((lo + hi) / 2)
     local pw = utf8_width_first_k(ctx, s, mid)
-    if pw <= (max_w - 8) then  -- 留一點邊距
+    if pw <= (max_w - 8) then  -- keep a small margin
       best = mid; lo = mid + 1
     else
       hi = mid - 1
@@ -699,7 +699,7 @@ local function collect_metadata_for_item(item)
   if not t.__chan_index then for i=1,64 do if t.__trk_table[i] then t.__chan_index=i break end end end
   if t.__chan_index and t.__trk_table[t.__chan_index] then t.__trk_name = t.__trk_table[t.__chan_index] end
 
-  -- 讓左欄診斷可直接取得 item（供 I_CHANMODE 讀取）
+  -- Let the left-column diagnostics get the item directly (to read I_CHANMODE)
   t.__item = item
 
   -- current take name
@@ -815,13 +815,13 @@ end
 -- Forward declare so helpers below can call it before its definition
 local expand_template
 
--- 列出樣板中實際使用到的 token（以 normalize 後的 ${...} 為準）
+-- List the tokens actually used in a template (based on the normalized ${...} form)
 local function template_token_list(tpl)
   return RENAME_CORE.template_token_list(tpl)
 end
 
--- 回傳「在 Take 樣板裡會展開為空字串」的 token 名稱陣列
--- 不改變/污染任何 fields；僅用 expand_template 試算
+-- Return the names of tokens that expand to an empty string in the Take template
+-- Does not change or pollute any fields; only test-expands with expand_template
 local function empty_tokens_in_take_template(tpl, fields, counter)
   return RENAME_CORE.empty_tokens_in_template(tpl, fields, counter, expand_template)
 end
@@ -1190,7 +1190,7 @@ local function write_text_file(path, text)
   return true
 end
 
--- 優先用 js_ReaScriptAPI 的另存對話框；若沒有，直接自動存到專案資料夾
+-- Prefer js_ReaScriptAPI's save dialog; otherwise save to the project folder automatically
 local function choose_save_path(default_name, filter)
   local js = reaper.JS_Dialog_BrowseForSaveFile
   if type(js) == "function" then
@@ -1213,7 +1213,7 @@ local function build_result_text(fmt, rows)
     if fmt == "csv" and s:find('[,\r\n"]') then s = '"'..s:gsub('"','""')..'"' end
     return s
   end
-    -- Info row（最上面一行）
+    -- Info row (the top line)
     local rule_str = ""
     if TAKE_RENAMER and TAKE_RENAMER.enable and TAKE_RENAMER.rules and #TAKE_RENAMER.rules > 0 then
       for i, p in ipairs(TAKE_RENAMER.rules) do
@@ -1225,12 +1225,12 @@ local function build_result_text(fmt, rows)
       rule_str = "(none)"
     end
     out[#out+1] = table.concat({
-      "Info",                         -- # 欄
-      "",                             -- Current Take Name 欄（留空）
-      tostring(TAKE_TEMPLATE or ""),  -- New Name 欄：放 Take Name rename token
-      rule_str,                       -- Replaced 欄：放 Replace 規則彙總
-      "",                             -- Current Note 欄（留空）
-      tostring(NOTE_TEMPLATE or "")   -- New Note 欄：放 Take Note rename token
+      "Info",                         -- # column
+      "",                             -- Current Take Name column (empty)
+      tostring(TAKE_TEMPLATE or ""),  -- New Name column: the Take Name rename tokens
+      rule_str,                       -- Replaced column: summary of the Replace rules
+      "",                             -- Current Note column (empty)
+      tostring(NOTE_TEMPLATE or "")   -- New Note column: the Take Note rename tokens
     }, sep)
     out[#out+1] = table.concat({ "#","Current Take Name","New Name","Replaced","Current Note","New Note" }, sep)
   for _, r in ipairs(rows or {}) do
@@ -1248,7 +1248,7 @@ local function build_skipped_text(fmt, srows)
     if fmt == "csv" and s:find('[,\r\n"]') then s = '"'..s:gsub('"','""')..'"' end
     return s
   end
-  -- Header：#, Current Take Name, Srcfile, Reason
+  -- Header: #, Current Take Name, Srcfile, Reason
   out[#out+1] = table.concat({ "#", "Current Take Name", "Srcfile", "Reason" }, sep)
   for _, r in ipairs(srows or {}) do
     out[#out+1] = table.concat({
@@ -1319,7 +1319,7 @@ local function draw_result_modal()
       if begun then
         local flags = TF('ImGui_TableFlags_Borders') | TF('ImGui_TableFlags_RowBg')
         if reaper.ImGui_BeginTable(ctx, "SkippedTable", 4, flags) then
-          -- 新順序：#, Current Take Name, Srcfile, Reason
+          -- New order: #, Current Take Name, Srcfile, Reason
           reaper.ImGui_TableSetupColumn(ctx, "#", TF('ImGui_TableColumnFlags_WidthFixed'), 36)
           reaper.ImGui_TableSetupColumn(ctx, "Current Take Name")
           reaper.ImGui_TableSetupColumn(ctx, "Srcfile")
@@ -1374,7 +1374,7 @@ local function draw_result_modal()
     end
     reaper.ImGui_EndPopup(ctx)
   else
-    -- 關閉/ESC 後清旗標
+    -- Clear the flag after close/ESC
     SHOW_RESULT_MODAL = false
   end
 end
@@ -1427,10 +1427,10 @@ local function build_right_copy_text_from_rows(fmt)
     out[#out + 1] = table.concat(a, sep)
   end
 
-  -- 表頭（順序：#, Current Take Name, New Name, Current Note, New Note）
+  -- Header (order: #, Current Take Name, New Name, Current Note, New Note)
   add("#","Current Take Name","New Name","Current Note","New Note")
 
-  -- 內容
+  -- Content
   if preview_rows and #preview_rows > 0 then
     for i, r in ipairs(preview_rows) do
       add(
@@ -1599,7 +1599,7 @@ local function apply_renaming_step()
     -- compute new
     local new_name = (take and expand_template(TAKE_TEMPLATE, fields, p.counter)) or ""
 
-    -- Skip-if-empty：只要樣板裡任何 token 展開為空，就略過此 item 的 rename
+    -- Skip-if-empty: if any token in the template expands to empty, skip renaming this item
     local skip_reason = nil
     if SKIP_EMPTY_TOKENS then
       local empties = empty_tokens_in_take_template(TAKE_TEMPLATE, fields, p.counter)
@@ -1616,15 +1616,15 @@ local function apply_renaming_step()
 
     local did_rename, did_note = false, false
 
-    -- Rename：若有空 token 且啟用 Skip，就跳過 rename（Note 照常）
+    -- Rename: skip when there is an empty token and Skip is on (Note is still written)
     if take and new_name ~= "" and not skip_reason then
       reaper.GetSetMediaItemTakeInfo_String(take, "P_NAME", new_name, true)
       did_rename = true
       p.renamed = p.renamed + 1
     elseif skip_reason and take then
-      -- 只有有 take 的情況，才因空 token 計入 skipped
+      -- Count as skipped for an empty token only when the item has a take
       p.skipped = p.skipped + 1
-      -- 記錄到結果視窗的 skipped list（僅空 token 的情況）
+      -- Record in the result window's skipped list (empty-token cases only)
       p.skipped_rows[#p.skipped_rows+1] = {
         idx     = i,
         current = old_take_name,
@@ -1668,7 +1668,7 @@ local function apply_renaming_step()
   reaper.ShowConsoleMsg(string.format("  [%d / %d] processed\n", math.min(i_end, p.total), p.total))
 
   if p.i > p.total then
-    -- 全部完成，收尾
+    -- All done, finish up
     reaper.UpdateArrange()
     reaper.Undo_EndBlock(string.format("Rename %d take(s), update %d note(s), skipped %d (no take)",
       p.renamed, p.noted, p.skipped), -1)
@@ -1676,9 +1676,9 @@ local function apply_renaming_step()
     reaper.ShowConsoleMsg(string.format("Done: %d renamed, %d notes updated, %d skipped.\n",
       p.renamed, p.noted, p.skipped))
     APPLY_STATE = nil
-    -- 重新產生右側預覽（保留原行為）
+    -- Regenerate the right-hand preview (original behavior kept)
     recompute_preview_from_cache()
-    -- 啟動結果視窗
+    -- Open the result window
     open_result_modal({
       total_sel    = p.total,
       renamed      = p.renamed,
@@ -1697,7 +1697,7 @@ local function apply_renaming()
   local total = #items
   if total == 0 then status_msg="No items selected."; return end
 
-  -- 防止重複觸發
+  -- Prevent double triggering
   if APPLY_STATE then return end
 
   local can_use_cache = (SCAN_CACHE and SCAN_CACHE.sig == sig)

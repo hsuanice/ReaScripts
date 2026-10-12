@@ -11,7 +11,7 @@
 
   Priority:
     1) Razor Edit spans → split at time selection, keep overlapped items selected, clear razor visuals.
-    2) Time Selection (with selected items) → split, then unselect all（可在 USER OPTIONS 設定忽略）.
+    2) Time Selection (with selected items) → split, then unselect all (can be ignored in USER OPTIONS).
     3) Hover/Edit path:
        - True Hover (mouse over arrange, not Ruler/TCP):
            • If there are selected items, split those crossing the mouse time;
@@ -47,10 +47,10 @@ end
 ----------------------------------------
 -- USER OPTIONS
 ----------------------------------------
-local DEBUG                 = false  -- ← 設 true 開啟除錯輸出
-local CLEAR_ON_RUN          = false  -- ← 設 true 在每次執行且 DEBUG=ON 時先清空 console
-local IGNORE_TIME_SELECTION = true  -- ← 設 true 直接忽略 Time Selection 優先權（走下一層流程）
-local SYNC_SELECTION_MIN = 2  -- Hover 下啟用「選取同步」的最小選取數
+local DEBUG                 = false  -- ← true = debug output
+local CLEAR_ON_RUN          = false  -- ← true = clear the console on every run while DEBUG=ON
+local IGNORE_TIME_SELECTION = true  -- ← true = ignore the Time Selection priority (go to the next step)
+local SYNC_SELECTION_MIN = 2  -- minimum selection count that enables "selection sync" in Hover
 
 ----------------------------------------
 -- Load shared Hover library
@@ -97,7 +97,7 @@ local function restore_item_selection(list)
   end
 end
 
--- 事先記錄「原本已選且會被切到的 items」資訊（track + 舊的 end），以便分割後選到右半
+-- Record beforehand which selected items will be split (track + old end), so the right halves can be selected after the split
 local function build_selected_items_split_info(pos, eps)
   local info = {}
   for i = 0, reaper.CountSelectedMediaItems(0) - 1 do
@@ -115,7 +115,7 @@ local function build_selected_items_split_info(pos, eps)
   return info
 end
 
--- 分割後，針對「原本已選且被切」的每個 item，把右半也選回來（start≈pos 且 end≈old_end）
+-- After splitting, also reselect the right half of every item that was selected and split (start≈pos and end≈old_end)
 local function select_right_halves_after_split(split_info, pos, eps)
   for _, s in ipairs(split_info) do
     local tr = s.track
@@ -135,7 +135,7 @@ local function select_right_halves_after_split(split_info, pos, eps)
   end
 end
 
--- 用原生 Action 40757 來分割，並正確保留原本選取（若原本已選且被切 → 左右半都保持選取）
+-- Split with native action 40757 and keep the original selection (a selected item that is split keeps both halves selected)
 local function split_via_action_preserve_selection(pos, targets, eps)
   if #targets == 0 then return end
   local old_cur   = reaper.GetCursorPosition()
@@ -144,20 +144,20 @@ local function split_via_action_preserve_selection(pos, targets, eps)
 
   reaper.Main_OnCommand(40289, 0)              -- Unselect all
   for _, it in ipairs(targets) do
-    reaper.SetMediaItemSelected(it, true)       -- 只選要切的目標
+    reaper.SetMediaItemSelected(it, true)       -- select only the items to split
   end
   reaper.SetEditCurPos(pos, false, false)
   reaper.Main_OnCommand(40757, 0)               -- Split items at edit cursor
   reaper.SetEditCurPos(old_cur, false, false)
 
-  -- 還原原本選取（此時原 item 指標對應「左半」），再把右半也補選回來
+  -- Restore the original selection (the original item pointer is now the left half), then add the right halves
   restore_item_selection(prev_sel)
   select_right_halves_after_split(sel_split, pos, eps)
 
   logf("[HoverSplit] split_via_action_preserve_selection: targets=%d, split_sel=%d", #targets, #sel_split)
 end
 
--- Fallback：在已選軌上收集覆蓋 pos 的 items
+-- Fallback: collect items covering pos on the selected tracks
 local function collect_items_on_selected_tracks_at(pos)
   local result = {}
   local selected_tracks = {}
@@ -180,7 +180,7 @@ local function collect_items_on_selected_tracks_at(pos)
   return result
 end
 
--- 工具：把 hovered item（若未選且覆蓋 pos）加入 targets
+-- Helper: add the hovered item to targets (if it is not selected and covers pos)
 local function maybe_add_hover_item_outside_selection(targets, pos, eps)
   local x, y = reaper.GetMousePosition()
   local hit  = reaper.GetItemFromPoint(x, y, false)
@@ -188,7 +188,7 @@ local function maybe_add_hover_item_outside_selection(targets, pos, eps)
     log("[HoverSplit] hover item: none")
     return
   end
-  -- 未選才考慮（需求：在 selection 以外才補切 hovered）
+  -- Only when not selected (requirement: also split the hovered item outside the selection)
   if reaper.IsMediaItemSelected(hit) then
     log("[HoverSplit] hover item: is selected → already covered by selection path")
     return
@@ -200,7 +200,7 @@ local function maybe_add_hover_item_outside_selection(targets, pos, eps)
     log("[HoverSplit] hover item: exists but not crossing time")
     return
   end
-  -- 避免重複
+  -- Avoid duplicates
   for _, it in ipairs(targets) do
     if it == hit then
       log("[HoverSplit] hover item: already in targets")
@@ -285,18 +285,18 @@ local function handle_time_selection_if_any()
     local st = reaper.GetMediaItemInfo_Value(it, "D_POSITION")
     local en = st + reaper.GetMediaItemInfo_Value(it, "D_LENGTH")
 
-    -- 是否和 TS 有重疊（開區間重疊檢查）
+    -- Does it overlap the TS (open-interval overlap check)
     local has_overlap = (en > ts_start and st < ts_end)
     if has_overlap then
       overlapped[#overlapped+1] = it
 
-      -- 是否「TS 邊界有落在 item 內部」→ 40061 會切
+      -- Does a TS edge fall inside the item → 40061 will split
       local hit_start = (st < ts_start and en > ts_start)
       local hit_end   = (st < ts_end   and en > ts_end)
       if hit_start or hit_end then
         boundary_hits = boundary_hits + 1
       else
-        -- 只有重疊，但兩個邊界都沒穿進 item（例如 TS 正好等於 item 邊界）
+        -- Only overlaps, but neither edge cuts into the item (e.g. the TS equals the item edges)
         edges_only = edges_only + 1
       end
     end
@@ -305,8 +305,8 @@ local function handle_time_selection_if_any()
   logf("[HoverSplit] TS dbg: ts=[%.6f, %.6f] sel=%d overlaps=%d boundary_hits=%d edges_only=%d",
        ts_start, ts_end, sel_items, #overlapped, boundary_hits, edges_only)
 
-  -- 注意：為了「只加除錯不改行為」，下面仍沿用 0.2.4 的邏輯：
-  -- 只要有 overlapped 就跑 40061（即使 boundary_hits=0 的時候其實不會切）
+  -- Note: to only add debug output without changing behavior, the 0.2.4 logic below is kept:
+  -- 40061 runs whenever something overlaps (even with boundary_hits=0, when it does not actually split)
   if #overlapped == 0 then
     return false
   end
@@ -360,13 +360,13 @@ local function main_hover_or_edit()
     logf("[HoverSplit] targets via library (true hover, prefer_selection=%s): %d",
         tostring(prefer_selection), #targets)
 
-    -- 只有在啟用「選取同步」（≥2）時，才同時把 selection 以外、滑鼠下那顆也納入
+    -- Only with "selection sync" enabled (≥2) is the item under the mouse outside the selection also included
     if prefer_selection then
       local eps = hover.half_pixel_sec()
       maybe_add_hover_item_outside_selection(targets, pos, eps)
     end
   else
-    -- 非 hover 路徑：以 Edit Cursor 在已選軌上收集目標
+    -- Non-hover path: collect targets at the Edit Cursor on the selected tracks
     targets = collect_items_on_selected_tracks_at(pos)
   end
 

@@ -9,7 +9,7 @@
 local r = reaper
 
 -- ========= User options =========
-local DRY_RUN = true -- 目前只標記與列出，不做自動修復
+local DRY_RUN = true -- for now only mark and list, no automatic fix
 
 -- ========= Utils =========
 local function msg(s) r.ShowConsoleMsg(tostring(s).."\n") end
@@ -34,7 +34,7 @@ local function get_take_name_safe(tk)
   return name or ""
 end
 
--- 把「專案時間」換成 take/source 時間，供 SetTakeMarker 使用
+-- Convert project time to take/source time for SetTakeMarker
 local function projtime_to_taketime(take, item, project_pos)
   if not take or not item then return 0 end
   local item_pos = r.GetMediaItemInfo_Value(item, "D_POSITION")
@@ -53,7 +53,7 @@ local function add_overlap_marker(item, proj_pos, label)
   r.SetTakeMarker(take, -1, label, tpos) -- -1=append
 end
 
--- 取有效淡入/淡出秒數（手動與自動取最大，AUTO=-1 視為 0）
+-- Effective fade in/out seconds (max of manual and auto; AUTO=-1 counts as 0)
 local function effective_fadesec(it)
   local fi  = r.GetMediaItemInfo_Value(it, "D_FADEINLEN") or 0
   local fo  = r.GetMediaItemInfo_Value(it, "D_FADEOUTLEN") or 0
@@ -64,7 +64,7 @@ local function effective_fadesec(it)
   return math.max(fi, fia), math.max(fo, foa) -- in_len, out_len
 end
 
--- 判斷 A(左) 與 B(右) 的重疊是否屬於「交叉淡變」→ 若是就忽略
+-- Whether the overlap of A (left) and B (right) is a crossfade → if so, ignore it
 local function is_crossfade(A, B, tol)
   if not (A.s <= B.s) then return false end
   local overlap_start = math.max(A.s, B.s)
@@ -110,13 +110,13 @@ local function scan_overlaps()
         end
         table.sort(items, function(a,b) return a.s < b.s end)
 
-        -- 逐一檢查相鄰的 A(左) 與 B(右)
+        -- Check each adjacent pair A (left) and B (right)
         for i = 1, #items-1 do
           local A = items[i]
           local B = items[i+1]
 
           if B.s < (A.e - tol) then
-            -- 純交叉淡變 → 忽略
+            -- Pure crossfade → ignore
             if is_crossfade(A, B, tol) then goto continue_pair end
 
             local overlap_start = math.max(A.s, B.s)
@@ -128,11 +128,11 @@ local function scan_overlaps()
 
             local note = is_complete and "Item overlap — complete" or "Item overlap — partial"
 
-            -- 兩個 item 都加 marker（用相同 label）
+            -- Add a marker to both items (same label)
             add_overlap_marker(A.it, overlap_start, "Review: " .. note)
             add_overlap_marker(B.it, overlap_start, "Review: " .. note)
 
-            -- 各自列一行（之後比較好逐一定位/處理）
+            -- One line each (easier to locate / handle one by one later)
             for _, node in ipairs({A,B}) do
               local tk  = r.GetActiveTake(node.it)
               local tnm = get_take_name_safe(tk)
@@ -151,8 +151,8 @@ local function scan_overlaps()
     end
   end
 
-  -- 強制打開 Console，再清空，然後輸出
-  r.ShowConsoleMsg(" \n")  -- 這行會「開啟」Console（不是 !SHOW: 前綴）
+  -- Force the Console open, clear it, then print
+  r.ShowConsoleMsg(" \n")  -- this line opens the Console (not the !SHOW: prefix)
   r.ClearConsole()
   msg("=== Overlap report (per track) ===")
   for _, line in ipairs(lines) do msg(line) end

@@ -68,7 +68,7 @@ local function logf(f, ...)        if DEBUG then reaper.ShowConsoleMsg(string.fo
 if DEBUG and CLEAR_ON_RUN then reaper.ShowConsoleMsg("") end
 log("[LeftEdge] --- run ---")
 
--- 👇 新增這行：顯示實際載入的 library 路徑
+-- 👇 added: show the library path that was actually loaded
 logf("[LeftEdge] Hover lib: %s", LIB_PATH)
 
 ----------------------------------------

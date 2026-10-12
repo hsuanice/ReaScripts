@@ -260,11 +260,11 @@ local function main()
   for line in raw_tsv:gmatch("([^\n]*)\n?") do
     line_no = line_no + 1
     if line_no == 1 then
-      -- header，略過
+      -- header, skip
     else
       if line ~= "" then
         local cols = split_tabs(line)
-        -- 欄位順序：
+        -- Column order:
         -- fingerprint, raw_examples, alias, normalized_core, normalized_vendor, seen_types, last_seen
         local fingerprint       = unescape_tsv(cols[1] or "")
         local raw_examples_cell = unescape_tsv(cols[2] or "")
@@ -290,7 +290,7 @@ local function main()
           rec.normalized_core  = norm_core
           rec.normalized_vendor= norm_vendor
           rec.last_seen        = last_seen
-          -- 陣列欄位
+          -- Array columns
           rec.seen_types       = parse_seen_types(seen_types_cell)
           rec.raw_examples     = parse_examples(raw_examples_cell)
 
@@ -307,7 +307,7 @@ local function main()
     end
   end
 
-  -- 安全：備份並原子更新
+  -- Safety: back up and update atomically
   backup_file(json_path)
   local tmp_path = json_path..".tmp"
   local ok = write_file(tmp_path, json.encode(obj))
@@ -316,7 +316,7 @@ local function main()
     return
   end
 
-  -- 覆蓋
+  -- Overwrite
   local final_ok = write_file(json_path, read_file(tmp_path))
   if not final_ok then
     reaper.MB("Failed to finalize JSON write.", "FX Alias Update", 0)

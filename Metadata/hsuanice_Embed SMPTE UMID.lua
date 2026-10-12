@@ -138,7 +138,7 @@ local function do_embed(strategy)
     return
   end
 
-  -- 開始執行才開/清空 Console（同 iXML+BWF 腳本）
+  -- Open/clear the Console only when running starts (same as the iXML+BWF script)
   R.ClearConsole()
   msg(("=== SMPTE UMID Tool ==="))
   msg(("CLI : %s"):format(cli))

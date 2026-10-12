@@ -51,11 +51,11 @@ local MARKER_EDGE_INSET_PROJ_SEC = 0.001  -- project-time inset for fixed marker
 --   "content_locked"   → move D_POSITION by Δ and shift all takes' STARTOFFS by Δ*rate so content stays locked to timeline
 local LEFT_EDGE_STRATEGY = "content_locked"
 
--- 時基容差（比對是否「貼齊格線」時的近似容許）
--- 這些是「轉回秒」後的比較會用到的 epsilon（盡量小，但避免浮點誤差造成誤判）
+-- Timebase tolerance (approximation allowed when checking "snapped to grid")
+-- Epsilons used when comparing after converting back to seconds (as small as possible, but avoiding float false positives)
 local EPS_SEC = 1e-7
 
--- 標籤樣式（沿用你的 Review 風格）
+-- Label style (same as the Review style)
 local LABEL_LEFT_FMT  = "Review: Left edge off grid (%s)"
 local LABEL_RIGHT_FMT = "Review: Right edge off grid (%s)"
 local UNDO_TITLE_FMT = "Review: flag off-grid edges (%s) — %d marker(s)"
@@ -80,7 +80,7 @@ local function abs(x) return x >= 0 and x or -x end
 local function round(x) return math.floor(x + 0.5) end
 local function nearly_equal(a, b, eps) return abs(a - b) <= (eps or EPS_SEC) end
 
--- 取得專案取樣率（若未鎖定，回落到音效裝置 SR 或 48000）
+-- Project sample rate (if not locked, fall back to the audio device SR or 48000)
 local function get_project_samplerate()
   local use = r.GetSetProjectInfo(0, "PROJECT_SRATE_USE", 0, false)
   local srate = r.GetSetProjectInfo(0, "PROJECT_SRATE", 0, false)
@@ -181,7 +181,7 @@ local function is_off_grid(dev_units)
   return abs(dev_units) > tol
 end
 
--- project time → take/source time（位置映射）
+-- project time → take/source time (position mapping)
 local function projtime_to_taketime(take, item, proj_t)
   local item_pos  = r.GetMediaItemInfo_Value(item, "D_POSITION") or 0
   local rate      = r.GetMediaItemTakeInfo_Value(take, "D_PLAYRATE") or 1
@@ -190,7 +190,7 @@ local function projtime_to_taketime(take, item, proj_t)
   return startoffs + (proj_t - item_pos) * rate
 end
 
--- 取偏好的 take（優先 active，否則回落第一個有效 take）
+-- Preferred take (active first, otherwise the first valid take)
 local function get_preferred_take(it)
   local tk = r.GetActiveTake(it)
   if tk and r.ValidatePtr2(0, tk, "MediaItem_Take*") then return tk end
@@ -202,7 +202,7 @@ local function get_preferred_take(it)
   return nil
 end
 
--- 同名且同源位置附近已有 marker 就略過（避免重複）
+-- Skip when a marker with the same name already exists near the same source position (avoid duplicates)
 local function has_similar_marker(take, name, srcpos, src_eps)
   local n = r.GetNumTakeMarkers(take) or 0
   for i = 0, n - 1 do

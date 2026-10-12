@@ -604,7 +604,7 @@ end
 
 -- ImGui setup
 ---------------------------------------
--- ImGui setup (唯一的一組，請勿重複建立)
+-- ImGui setup (the only one; do not create another)
 local ctx = reaper.ImGui_CreateContext('Item List Editor')
 
 -- Debug: Check context creation
@@ -651,7 +651,7 @@ end
 
 
 
--- Popup title（供 ESC 判斷與 BeginPopupModal 使用）
+-- Popup title (used by the ESC check and BeginPopupModal)
 local POPUP_TITLE = "Summary"
 
 
@@ -662,10 +662,10 @@ local POPUP_TITLE = "Summary"
 
 -- Forward declarations so load_prefs() updates the same locals (not globals)
 local TIME_MODE, CUSTOM_PATTERN, FORMAT, AUTO, FONT_SCALE
-local SHOW_MUTED_ITEMS      -- ← 新增：是否顯示「被靜音的列」
+local SHOW_MUTED_ITEMS      -- ← new: whether muted rows are shown
 local scan_selection_rows
-local refresh_now          -- ← 新增：先宣告 refresh_now，讓上面函式抓到 local
-local _trim               -- ← 新增：先宣告 _trim，供前面函式當作同一個 local 來引用
+local refresh_now          -- ← new: declare refresh_now first so the functions above capture the same local
+local _trim               -- ← new: declare _trim first so earlier functions reference the same local
 
 -- defaults
 if SHOW_MUTED_ITEMS == nil then SHOW_MUTED_ITEMS = true end
@@ -775,7 +775,7 @@ local PENDING_VISIBILITY_MAP = nil     -- temp storage for visibility when savin
 local function _csv_from_order_and_visibility(order, visibility_map)
   order = order or {}
 
-  -- Build a normalized visibility table (even when caller沒有提供 visibility_map)
+  -- Build a normalized visibility table (even when the caller passes no visibility_map)
   local vis_map = {}
   if visibility_map then
     for col_id = 1, 35 do
@@ -796,7 +796,7 @@ local function _csv_from_order_and_visibility(order, visibility_map)
     end
   end
 
-  -- Serialize顯示順序（只記錄目前顯示的欄位）
+  -- Serialize the display order (only the columns currently shown)
   local ord_parts, seen = {}, {}
   for _, col_id in ipairs(order) do
     if not seen[col_id] and vis_map[col_id] then
@@ -805,7 +805,7 @@ local function _csv_from_order_and_visibility(order, visibility_map)
     end
   end
 
-  -- 假如 order 為空，但 visibility_map 有顯示欄位，補上一份順序（以欄位 ID 排序）
+  -- If order is empty but visibility_map has visible columns, fill in an order (sorted by column ID)
   if #ord_parts == 0 then
     for col_id = 1, 35 do
       if vis_map[col_id] then
@@ -814,7 +814,7 @@ local function _csv_from_order_and_visibility(order, visibility_map)
     end
   end
 
-  -- Serialize 全欄位 visibility
+  -- Serialize visibility of all columns
   local vis_parts = {}
   for col_id = 1, 35 do
     local flag = vis_map[col_id] and "1" or "0"
@@ -828,7 +828,7 @@ end
 local function _order_and_visibility_from_csv(s)
   s = tostring(s or "")
 
-  -- 首先嘗試新格式 ord=...;vis=...
+  -- First try the new format ord=...;vis=...
   local ord_section, vis_section = s:match("^ord=([^;]*);vis=(.+)$")
   if ord_section then
     local order = {}
@@ -854,7 +854,7 @@ local function _order_and_visibility_from_csv(s)
       if visibility_map[col_id] == nil then visibility_map[col_id] = true end
     end
 
-    -- 有些舊資料可能 visibility_map 裡有 true 但 ord_section 沒列到，補進順序。
+    -- Some old data may have true in visibility_map but be missing from ord_section; append those to the order.
     if visibility_map then
       local seen = {}
       for _, col_id in ipairs(order) do seen[col_id] = true end
@@ -868,7 +868,7 @@ local function _order_and_visibility_from_csv(s)
     return (#order > 0) and order or nil, visibility_map
   end
 
-  -- 其次處理舊版「id:flag」格式
+  -- Then handle the old "id:flag" format
   if s:find(":") then
     -- New format: "1:1,2:1,3:1,4:0,..."
     local order = {}
@@ -1040,12 +1040,12 @@ local function preset_delete(name)
   PRESET_STATUS = "Deleted: "..name
 end
 
--- 讓 UI 右上角的下拉選單可以拿到所有名稱
+-- Lets the drop-down at the top right of the UI get all names
 local function preset_list()
   return PRESETS
 end
 
--- 讓 Summary 右側的小字狀態能顯示目前狀態
+-- Lets the small status text right of Summary show the current state
 local function col_preset_status_text()
   return PRESET_STATUS or ""
 end
@@ -1160,7 +1160,7 @@ end
 -- Runtime cache
 local PRESET = nil          -- {logical_id,...} read from ExtState
 local LAST_SAVED_STR = nil  -- csv cache for quick compare
-local PRESET_STATUS = ""    -- "Preset ✓" / "Column not saved" 等小字提示
+local PRESET_STATUS = ""    -- small status hints such as "Preset ✓" / "Column not saved"
 
 local function _csv_from_order(order)
   local t = {}
@@ -1184,7 +1184,7 @@ local function _order_equal(a,b)
 end
 
 local function _normalize_full_order(order)
-  -- 確保包含 1..34 全部欄位，缺的補上（避免舊版本或不完整資料）
+  -- Make sure all columns 1..34 are present; add missing ones (old versions or incomplete data)
   local seen, out = {}, {}
   for i=1,#(order or {}) do
     local v = tonumber(order[i]); if v and not seen[v] then seen[v]=true; out[#out+1]=v end
@@ -1233,7 +1233,7 @@ local ok
 ok, TFLib = pcall(dofile, reaper.GetResourcePath().."/Scripts/hsuanice Scripts/Library/hsuanice_Time Format.lua")
 
 if not ok or not TFLib or not TFLib.make_formatter then
-  -- fallback: 支援 m:s / TC / Beats（三種）
+  -- fallback: supports m:s / TC / Beats (three modes)
   local function _fmt_ms(sec, decimals)
     if sec == nil then return "" end
     local sign = ""
@@ -1305,10 +1305,10 @@ local function build_summary_text(rows)
   local S = LT.compute_summary(rows or {})
   if not S or (S.count or 0) == 0 then return "No items." end
 
-  -- 如果你已有 format_time()，直接用。沒有的話，改用下面 fallback：
+  -- Use format_time() if it exists; otherwise use the fallback below:
   local function _fmt(sec)
     if format_time then return format_time(sec) end
-    -- fallback: 直接用 TFLib 依目前 TIME_MODE 格式化
+    -- fallback: format with TFLib using the current TIME_MODE
     local opts = (TIME_MODE == TFLib.MODE.MS) and {decimals=3}
               or (TIME_MODE == TFLib.MODE.CUSTOM) and {pattern=CUSTOM_PATTERN}
               or nil
@@ -1333,7 +1333,7 @@ end
 
 
 
--- forward locals (避免之後被重新 local 化)
+-- forward locals (so they are not re-localized later)
 ROWS = {}
 
 
@@ -1352,7 +1352,7 @@ local function dump_order_once()
   end
 end
 
--- 可附帶標籤與 COL_POS 的即時輸出
+-- Immediate output, optionally with a label and COL_POS
 local function dump_cols(tag)
   local a = {}
   for i, id in ipairs(COL_ORDER or {}) do a[#a+1] = string.format("%d:%d", i, id) end
@@ -2086,7 +2086,7 @@ local function sort_rows_by_state(rows)
   end)
 end
 
--- Current formatter（會在切換模式/修改 pattern 時重建）
+-- Current formatter (rebuilt when the mode or pattern changes)
 FORMAT = TFLib.make_formatter(TIME_MODE, {decimals=3})
 
 -- === Inline edit state ===
@@ -2106,7 +2106,7 @@ local function sel_toggle(guid, col)
   SEL.cells[k] = not SEL.cells[k] or nil
 end
 
--- 取得目前是否按住 CmdOrCtrl / Shift
+-- Whether CmdOrCtrl / Shift is currently held
 local function _mods()
   local mods = reaper.ImGui_GetKeyMods(ctx)
   local has = function(mask) return (mask ~= 0) and ((mods & mask) ~= 0) end
@@ -2135,11 +2135,11 @@ end
 
 
 
--- 計算矩形選取（anchor 與目前 guid,col 之間）
+-- Compute the rectangular selection (between the anchor and the current guid, col)
 local function sel_rect_apply(rows, row_index_map, cur_guid, cur_col)
   if not (SEL.anchor and SEL.anchor.guid and SEL.anchor.col) then
     SEL.anchor = { guid = cur_guid, col = cur_col }
-    -- 只清已選的 cells，不要清掉 anchor
+    -- Clear only the selected cells, keep the anchor
     SEL.cells = {}; sel_add(cur_guid, cur_col)
     return
   end
@@ -2148,7 +2148,7 @@ local function sel_rect_apply(rows, row_index_map, cur_guid, cur_col)
   local b_idx = row_index_map[cur_guid] or a_idx
   local r1, r2 = math.min(a_idx, b_idx), math.max(a_idx, b_idx)
 
-  -- 依畫面順序的欄位位置算矩形，再轉回邏輯欄位 id
+  -- Build the rectangle from on-screen column positions, then map back to logical column ids
   local p1 = (COL_POS and COL_POS[SEL.anchor.col]) or SEL.anchor.col
   local p2 = (COL_POS and COL_POS[cur_col])       or cur_col
   local c1, c2 = math.min(p1, p2), math.max(p1, p2)
@@ -2159,7 +2159,7 @@ local function sel_rect_apply(rows, row_index_map, cur_guid, cur_col)
       if logical_col then sel_add(g, logical_col) end
     end
   end
-end  -- ★★★ 補這個 end，結束 sel_rect_apply() 函式
+end  -- ★★★ this end closes the sel_rect_apply() function
 
 -- Helper function to escape special characters for TSV format
 -- Note: TSV fields with newlines/tabs will be quoted by build_table_text()
@@ -2172,7 +2172,7 @@ local function escape_for_tsv(text)
   return text
 end
 
--- 取得某格「顯示用文字」（複製用；與 UI 呈現一致）
+-- Get a cell's display text (for copying; matches what the UI shows)
 local function get_cell_text(i, r, col, fmt)
   local text = ""
 
@@ -2284,7 +2284,7 @@ local function header_label_from_id(col_id)
 end
 
 -- === Header label helpers (for mapping display order) ===
--- 依你目前的邏輯欄位 ID 來填；4/5/12/13 的 Start/End 會用 FORMAT 抬頭
+-- Filled by the current logical column IDs; Start/End of 4/5/12/13 use the FORMAT header
 local HEADER_BY_ID = {
   [1]  = "#",
   [2]  = "TrkID",
@@ -2297,12 +2297,12 @@ local HEADER_BY_ID = {
   [9]  = "Int#",
   [10] = "Mute",
   [11] = "Color",
-  [12] = nil,  -- Start (動態)
-  [13] = nil,  -- End   (動態)
+  [12] = nil,  -- Start (dynamic)
+  [13] = nil,  -- End   (dynamic)
 }
 
 local function current_start_label()
-  -- 這裡沿用你畫抬頭用的同一套邏輯 / TFLib
+  -- Reuses the same logic / TFLib used to draw the headers
   if TIME_MODE == TFLib.MODE.MS      then return "Start (m:s)"
   elseif TIME_MODE == TFLib.MODE.TC  then return "Start (TC)"
   elseif TIME_MODE == TFLib.MODE.BEATS then return "Start (Beats)"
@@ -2328,7 +2328,7 @@ end
 
 
 local function _colid_from_label(label)
-  -- 時間欄位標題是動態的，要先取出目前的 Start/End 名稱來比對
+  -- Time column titles are dynamic; get the current Start/End names before comparing
   local sh, eh = TFLib.headers(TIME_MODE, {pattern=CUSTOM_PATTERN})
   if label == "#"                then return 1 end
   if label == "TrkID"            then return 2 end
@@ -2346,7 +2346,7 @@ local function _colid_from_label(label)
   return nil
 end
 
--- 讀取「顯示欄位順序」→ COL_ORDER / COL_POS
+-- Read the displayed column order → COL_ORDER / COL_POS
 -- COL_ORDER[display_pos] = logical_col_id
 -- COL_POS[logical_col_id] = display_pos
 local __last_dump = nil
@@ -2372,7 +2372,7 @@ end
 
 
 
--- 依「來源形狀」與「單一錨點（選到的一格）」產生展開後的目標格清單（行優先、左到右）
+-- From the source shape and a single anchor (one selected cell), build the expanded target cell list (row-major, left to right)
 local function build_dst_by_anchor_and_shape(rows, anchor_desc, src_rows, src_cols)
   local dst = {}
   for i = 0, src_rows - 1 do
@@ -2385,7 +2385,7 @@ local function build_dst_by_anchor_and_shape(rows, anchor_desc, src_rows, src_co
       end
     end
   end
-  -- 依畫面欄位順序排序（與 COL_ORDER/COL_POS 一致）
+  -- Sort by on-screen column order (consistent with COL_ORDER/COL_POS)
   table.sort(dst, function(a,b)
     if a.row_index ~= b.row_index then return a.row_index < b.row_index end
     local pa = (COL_POS and COL_POS[a.col]) or a.col
@@ -2395,11 +2395,11 @@ local function build_dst_by_anchor_and_shape(rows, anchor_desc, src_rows, src_co
   return dst
 end
 
--- 依來源形狀與單一錨點，產生「只落在可寫欄位 3/4/5」的展開目標
+-- From the source shape and a single anchor, build expanded targets that fall only on writable columns 3/4/5
 local function build_dst_spill_writable(rows, anchor_desc, src_rows, src_cols)
   local dst = {}
   local writable = {3,4,5}
-  -- 找到 >= 錨點欄 的第一個可寫欄位；若沒有（例如錨在 6），就用最後一個（5）
+  -- Find the first writable column >= the anchor column; if none (e.g. anchor on 6), use the last one (5)
   local start_idx
   for idx, c in ipairs(writable) do
     if c >= (anchor_desc.col or 3) then start_idx = idx; break end
@@ -2412,7 +2412,7 @@ local function build_dst_spill_writable(rows, anchor_desc, src_rows, src_cols)
       local r = rows[ri]
       for j = 0, src_cols - 1 do
         local wi = start_idx + j
-        if wi > #writable then break end  -- 超出可寫欄位就截斷
+        if wi > #writable then break end  -- truncate beyond the writable columns
         local col = writable[wi]
         dst[#dst+1] = { row_index = ri, col = col, row = r }
       end
@@ -2429,7 +2429,7 @@ end
 
 
 
--- === Undo/Redo 選取保護（以 GUID 快照） ===
+-- === Undo/Redo selection protection (GUID snapshot) ===
 local function _snapshot_selected_item_guids()
   local list = {}
   local n = reaper.CountSelectedMediaItems(0)
@@ -2443,12 +2443,12 @@ end
 
 local function _restore_item_selection_by_guids(guids)
   if not guids or #guids == 0 then return end
-  -- 先清空目前選取
+  -- Clear the current selection first
   reaper.Main_OnCommand(40289, 0) -- Unselect all items
-  -- 建索引表以加速比對
+  -- Build an index table to speed up matching
   local want = {}
   for _, g in ipairs(guids) do if g and g ~= "" then want[g] = true end end
-  -- 逐一掃描專案 item，比對 GUID 後重選
+  -- Scan project items, match GUIDs and reselect
   local total = reaper.CountMediaItems(0)
   for i = 0, total-1 do
     local it = reaper.GetMediaItem(0, i)
@@ -2466,7 +2466,7 @@ local function mark_dirty()
   NEEDS_REFRESH = true
 end
 
--- Bulk-commit（一次 Undo、最後再 UpdateArrange/Refresh）
+-- Bulk commit (one Undo, UpdateArrange/Refresh at the end)
 local BULK = false
 local function bulk_begin() BULK = true end
 local function bulk_end(refresh_cb)
@@ -2476,13 +2476,13 @@ local function bulk_end(refresh_cb)
 end
 
 
--- 清除目前選取到的「格子文字」（只在 Live 視圖；僅 3/4/5 欄可寫）
+-- Clear the text of the selected cells (Live view only; only columns 3/4/5 are writable)
 local function delete_selected_cells()
-  -- 0) 沒選取就離開
+  -- 0) Nothing selected: leave
   if not SEL or not SEL.cells or next(SEL.cells) == nil then return end
 
-  -- 1) 可見列 + 以畫面欄位順序展開選取
-  local rows = get_view_rows()                              -- ← 替代 ROWS
+  -- 1) Visible rows + expand the selection in on-screen column order
+  local rows = get_view_rows()                              -- ← replaces ROWS
   local dst = LT.build_dst_list_from_selection(rows, sel_has, COL_ORDER, COL_POS)
   if #dst == 0 then return end
 
@@ -2490,7 +2490,7 @@ local function delete_selected_cells()
   local affected_guids = {}
   for i = 1, #dst do
     local d = dst[i]
-    local r = rows[d.row_index]             -- ★ 用 row_index 取 row
+    local r = rows[d.row_index]             -- ★ get the row via row_index
     local col = d.col
     if col == 3 then
       local tr = r.track or r.__track
@@ -2532,7 +2532,7 @@ end
 
 
 
-local COL = { TRACK_NAME = 3, TAKE_NAME = 4, ITEM_NOTE = 5 } -- 以表頭順序為準（#、TrackIdx、Track Name、Take Name、Item Note、Source File...）
+local COL = { TRACK_NAME = 3, TAKE_NAME = 4, ITEM_NOTE = 5 } -- follows the header order (#, TrackIdx, Track Name, Take Name, Item Note, Source File...)
 
 function _trim(s)
   s = tostring(s or "")
@@ -2556,11 +2556,11 @@ local function _commit_if_changed(label, oldv, newv, fn_apply)
 end
 
 
--- 寫回：Track / Take / Item Note
+-- Write back: Track / Take / Item Note
 local function apply_track_name(tr, newname, rows)
   _commit_if_changed("Rename Track", select(2, reaper.GetTrackName(tr, "")), newname, function(v)
     reaper.GetSetMediaTrackInfo_String(tr, "P_NAME", v, true)
-    -- 同一個 track 之所有列同步更新（依物件，而非名字）
+    -- Update all rows of the same track (by object, not by name)
     for _, rr in ipairs(rows or {}) do
       if rr.__track == tr then rr.track_name = v end
     end
@@ -2595,7 +2595,7 @@ end
 
 
 
--- 超薄轉接（保留相容性；也可以讓 table/export 都直接叫 FORMAT(r.start_time)）
+-- Thin adapter (kept for compatibility; table/export may also call FORMAT(r.start_time) directly)
 local function format_time(val) return FORMAT(val) end
 
 ----------------------------------------
@@ -2764,7 +2764,7 @@ local function smart_refresh()
   end
 end
 
--- 啟動時讀回上次的模式與 pattern，並重建 FORMAT
+-- On start, read back the last mode and pattern and rebuild FORMAT
 if load_prefs then load_prefs() end
 
 -- Set font size after loading preferences
@@ -2794,12 +2794,12 @@ end
 
 local function draw_summary_popup()
   if reaper.ImGui_BeginPopupModal(ctx, POPUP_TITLE, true, reaper.ImGui_WindowFlags_AlwaysAutoResize()) then
-    -- 依目前顯示來源挑 rows
+    -- Pick rows by the current display source
     local rows = ROWS
 
     local txt = build_summary_text(rows)
 
-    -- 可選可複製：用唯讀的多行輸入框
+    -- Selectable and copyable: a read-only multi-line input box
     reaper.ImGui_SetNextItemWidth(ctx, scale(560))
     reaper.ImGui_InputTextMultiline(ctx, "##summary_text", txt, scale(560), scale(200),
       reaper.ImGui_InputTextFlags_ReadOnly())
@@ -2989,7 +2989,7 @@ local function draw_toolbar()
   end
   reaper.ImGui_SameLine(ctx)
 
--- Show muted items（隱藏被靜音的列；影響當前表格與輸出）
+-- Show muted items (hides muted rows; affects the current table and exports)
 local changed, nv = reaper.ImGui_Checkbox(ctx, "Show muted items", SHOW_MUTED_ITEMS)
 reaper.ImGui_SameLine(ctx)
 if changed then
@@ -3000,7 +3000,7 @@ if changed then
 end
 
   
--- 四種：m:s / TC / Beats / Custom（Input 直接在 Custom 右邊）
+-- Four modes: m:s / TC / Beats / Custom (the input sits right of Custom)
 reaper.ImGui_SameLine(ctx)
 if reaper.ImGui_RadioButton(ctx, "m:s", TIME_MODE==TFLib.MODE.MS) then
   TIME_MODE = TFLib.MODE.MS
@@ -3025,7 +3025,7 @@ if reaper.ImGui_RadioButton(ctx, "Custom", TIME_MODE==TFLib.MODE.CUSTOM) then
   FORMAT = TFLib.make_formatter(TIME_MODE, {pattern=CUSTOM_PATTERN})
   save_prefs()
 end
--- ← 直接接在 Custom 後面放輸入框
+-- ← the input box goes right after Custom
 reaper.ImGui_SameLine(ctx)
 reaper.ImGui_Text(ctx, "Pattern:")
 reaper.ImGui_SameLine(ctx)
@@ -3038,7 +3038,7 @@ if changed then
   end
   save_prefs()
 end
--- 小提示（hover 顯示）
+-- Small hint (shown on hover)
 reaper.ImGui_SameLine(ctx)
 reaper.ImGui_TextDisabled(ctx, "ⓘ")
 if reaper.ImGui_IsItemHovered(ctx) then
@@ -3397,7 +3397,7 @@ if reaper.ImGui_Button(ctx, "Copy (TSV)", scale(110), scale(24)) then
       "tsv",
       rows,
       COL_ORDER,
-      header_label_from_id,                              -- ★ 改這裡：傳入欄頭函式
+      header_label_from_id,                              -- ★ changed here: pass the header label function
       function(i, r, col) return get_cell_text(i, r, col, "tsv") end
     )
     if text and text ~= "" then
@@ -3452,11 +3452,11 @@ reaper.ImGui_Text(ctx, "Preset:")
 reaper.ImGui_SameLine(ctx)
 do
   local current = ACTIVE_PRESET or "(none)"
-  -- 固定預覽欄位寬度，避免太長
+  -- Fixed preview column width so it does not get too long
   reaper.ImGui_SetNextItemWidth(ctx, scale(160))
-  -- 控制彈出高度不要過長（可捲動）
+  -- Keep the popup height limited (scrollable)
   if reaper.ImGui_BeginCombo(ctx, "##colpreset_combo", current, reaper.ImGui_ComboFlags_HeightRegular()) then
-    -- "(none)"：清空預設，不套用任何儲存的順序
+    -- "(none)": clear the default, apply no saved order
     local sel = (ACTIVE_PRESET == nil)
     if reaper.ImGui_Selectable(ctx, "(none)", sel) then
       ACTIVE_PRESET = nil
@@ -3464,33 +3464,33 @@ do
     end
     reaper.ImGui_Separator(ctx)
 
-    -- 列出使用者命名的所有 preset；選到就「立即套用」
+    -- List all user-named presets; selecting one applies it immediately
     for i, name in ipairs(PRESETS) do
       local selected = (name == ACTIVE_PRESET)
       if reaper.ImGui_Selectable(ctx, name, selected) then
         ACTIVE_PRESET = name
-        preset_recall(name)       -- ← 直接套用，不需要再按 Recall
-        FIT_CONTENT_WIDTH = true  -- 自動 fit content width
+        preset_recall(name)       -- ← applied directly, no need to press Recall
+        FIT_CONTENT_WIDTH = true  -- auto fit content width
       end
     end
     reaper.ImGui_EndCombo(ctx)
   end
 end
 
--- 「Edit...」：打開 Preset Editor
+-- "Edit...": open the Preset Editor
 reaper.ImGui_SameLine(ctx)
 if reaper.ImGui_Button(ctx, "Edit...", scale(68), scale(24)) then
   reaper.ImGui_OpenPopup(ctx, "Column Preset Editor")
 end
 
--- 「Save as…」：用使用者自訂名稱另存
+-- "Save as…": save under a user-defined name
 reaper.ImGui_SameLine(ctx)
 if reaper.ImGui_Button(ctx, "Save as…", scale(88), scale(24)) then
   PRESET_NAME_BUF = ACTIVE_PRESET or PRESET_NAME_BUF or ""
   reaper.ImGui_OpenPopup(ctx, "Save preset as")
 end
 
--- 「Delete」：刪除目前選到的 preset
+-- "Delete": delete the currently selected preset
 reaper.ImGui_SameLine(ctx)
 local can_delete = (ACTIVE_PRESET and ACTIVE_PRESET~="")
 if reaper.ImGui_BeginDisabled(ctx, not can_delete) then end
@@ -3499,7 +3499,7 @@ if reaper.ImGui_Button(ctx, "Delete", scale(68), scale(24)) and can_delete then
 end
 if reaper.ImGui_EndDisabled then reaper.ImGui_EndDisabled(ctx) end
 
--- 小字狀態
+-- Small status text
 reaper.ImGui_SameLine(ctx)
 reaper.ImGui_TextDisabled(ctx, PRESET_STATUS or "")
 
@@ -3690,7 +3690,7 @@ if reaper.ImGui_BeginPopupModal(ctx, "Column Preset Editor", true, TF('ImGui_Win
     end
     PRESET_EDITOR_STATE.dirty = false
     PRESET_STATUS = "Applied (unsaved)"
-    FIT_CONTENT_WIDTH = true  -- 自動 fit content width
+    FIT_CONTENT_WIDTH = true  -- auto fit content width
   end
 
   reaper.ImGui_SameLine(ctx)
@@ -3709,7 +3709,7 @@ if reaper.ImGui_BeginPopupModal(ctx, "Column Preset Editor", true, TF('ImGui_Win
       end
     end
 
-    FIT_CONTENT_WIDTH = true  -- 自動 fit content width
+    FIT_CONTENT_WIDTH = true  -- auto fit content width
 
     if ACTIVE_PRESET and ACTIVE_PRESET ~= "" then
       -- Update existing preset with visibility data
@@ -3988,46 +3988,46 @@ local function draw_table(rows, height)
           row_index_map,
           SEL.anchor.guid,  -- anchor guid
           guid,             -- current guid
-          SEL.anchor.col,   -- anchor col (邏輯欄位 ID)
-          col,              -- current col (邏輯欄位 ID)
-          COL_ORDER,        -- 視覺→邏輯欄序
-          COL_POS,          -- 邏輯→視覺欄序
-          sel_add           -- 把每個被選的 cell 加入 SEL 的 callback
+          SEL.anchor.col,   -- anchor col (logical column ID)
+          col,              -- current col (logical column ID)
+          COL_ORDER,        -- visual → logical column order
+          COL_POS,          -- logical → visual column order
+          sel_add           -- callback that adds each selected cell to SEL
         )
 
 
         
       elseif m.shortcut then
-        -- 切換單格
+        -- Toggle a single cell
         if not SEL.anchor then SEL.anchor = { guid = guid, col = col } end
         sel_toggle(guid, col)
       else
-        -- 清空已選 → 設新錨點 → 選單格（避免把剛設的 anchor 清掉）
+        -- Clear selection → set new anchor → select the cell (so the new anchor is not cleared)
         sel_clear()
         SEL.anchor = { guid = guid, col = col }
         sel_add(guid, col)
       end
     end
 
-    -- 視覺順序版：依畫面欄位順序（COL_POS/COL_ORDER）做 Shift 矩形
+    -- Visual-order version: Shift rectangle by on-screen column order (COL_POS/COL_ORDER)
     local function sel_rect_apply_visual(rows, row_index_map, guid, col, COL_ORDER, COL_POS)
       local a = SEL and SEL.anchor
       if not (a and a.guid and a.col) then return end
 
-      -- 轉成「視覺位置」再求區間
+      -- Convert to visual positions, then take the range
       local p1 = (COL_POS and COL_POS[a.col]) or a.col
       local p2 = (COL_POS and COL_POS[col])   or col
       if not (p1 and p2) then return end
-      if p1 > p2 then p1, p2 = p2, p1 end        -- 視覺欄位區間（左→右）
+      if p1 > p2 then p1, p2 = p2, p1 end        -- visual column range (left → right)
 
       local r1 = row_index_map[a.guid]
       local r2 = row_index_map[guid]
       if not (r1 and r2) then return end
-      if r1 > r2 then r1, r2 = r2, r1 end        -- 列區間（上→下）
+      if r1 > r2 then r1, r2 = r2, r1 end        -- row range (top → bottom)
 
-      -- 以視覺位置回推邏輯欄位，再逐格加入
-      -- 保留 anchor，不清空 anchor 本身
-      SEL.cells = {}                             -- 只清「選取的格」，錨點照舊
+      -- Map visual positions back to logical columns and add cell by cell
+      -- Keep the anchor itself; do not clear it
+      SEL.cells = {}                             -- clear only the selected cells, the anchor stays
       for ri = r1, r2 do
         local row = rows[ri]
         local row_guid = row and row.__item_guid
@@ -4042,7 +4042,7 @@ local function draw_table(rows, height)
 
 
 
-    -- === 取代原本每欄固定順序的整段：改成依 COL_ORDER 繪製 ===
+    -- === Replaces the old fixed per-column block: draw by COL_ORDER ===
     for i, r in ipairs(rows or {}) do
       reaper.ImGui_TableNextRow(ctx)
       reaper.ImGui_PushID(ctx, (r.__item_guid ~= "" and r.__item_guid) or tostring(i))
@@ -4438,7 +4438,7 @@ local function loop()
         process_project_scan_batch()
       end
 
-      -- ESC 關閉整個視窗（若 Summary modal 開著，先只關 modal）
+      -- ESC closes the whole window (if the Summary modal is open, close only the modal first)
       -- Also cancel project scan if active
       if esc_pressed() and not reaper.ImGui_IsPopupOpen(ctx, POPUP_TITLE) then
         if PROJECT_SCAN.active then
@@ -4456,7 +4456,7 @@ local function loop()
 
       -- Top bar + Summary popup
       draw_toolbar()
-      draw_summary_popup()   -- ← 要保留這行
+      draw_summary_popup()   -- ← keep this line
       draw_advanced_sort_popup()  -- Advanced Sort dialog
 
       -- Calculate table height: window height minus toolbar and minimal padding
@@ -4500,9 +4500,9 @@ local function loop()
           end
         end
 
-        -- Paste（Live only，Excel 風規則）
+        -- Paste (Live only, Excel-style rules)
         if shortcut_pressed(reaper.ImGui_Key_V()) then
-      -- 檢查是否有選取      
+      -- Check whether anything is selected
       if not SEL or not SEL.cells or next(SEL.cells) == nil then
         reaper.ShowMessageBox("No cells selected. Please select target cells before pasting.", "Pasting", 0)
         goto PASTE_END
@@ -4515,26 +4515,26 @@ local function loop()
       if #src == 0 then goto PASTE_END end
       local src_h, src_w = src_shape_dims(tbl)
 
-      -- 目標格（行優先、左到右），包含所有被選欄；實際寫回僅 3/4/5
+      -- Target cells (row-major, left to right), including all selected columns; only 3/4/5 are written back
       local rows = get_view_rows()
       local dst  = LT.build_dst_list_from_selection(rows, sel_has, COL_ORDER, COL_POS)
       if #dst == 0 then goto PASTE_END end
 
-      -- 寫入工具：只在 3/4/5 欄動作
+      -- Write helper: acts only on columns 3/4/5
       local tracks_renamed, takes_named, notes_set, takes_created, skipped = 0,0,0,0,0
-      -- 只示範關鍵幾行，其他維持你現有邏輯（Track/Take/Item Note 寫入與 ValidatePtr）
+      -- Only the key lines are shown; the rest keeps the existing logic (Track/Take/Item Note writes and ValidatePtr)
       local function apply_cell(d, val)
         local col = d.col
-        local r   = rows[d.row_index]              -- ★ 改這裡：用 row_index 取 row
+        local r   = rows[d.row_index]              -- ★ changed here: get the row via row_index
         if not r then return end
 
         if col == 3 then
-          local tr = r.track or r.__track          -- 兩種欄位名都相容
+          local tr = r.track or r.__track          -- both field names are supported
           if tr and reaper.ValidatePtr(tr, "MediaTrack*") then
             local cur = r.track_name or ""
             if val ~= cur then
               reaper.GetSetMediaTrackInfo_String(tr, "P_NAME", val, true)
-              r.track_name = val                  -- 同步 rows
+              r.track_name = val                  -- sync rows
             end
           end
 
@@ -4548,7 +4548,7 @@ local function loop()
               r.take_name = val
             end
           end
-          -- 若你想恢復「沒有 take 時自動建立」的舊行為，可在這裡加偏好開關再 AddTake（可另給我就地 patch）
+          -- To restore the old "create a take when there is none" behavior, add a preference switch here and call AddTake
 
         elseif col == 5 then
           local it = r.item or r.__item
@@ -4562,15 +4562,15 @@ local function loop()
         end
       end
 
-      -- 一次 Undo：單值填滿；多值截斷；若只選 1 格則依來源形狀展開；單列來源可往下填滿
+      -- One Undo: single value fills; multiple values truncate; with one selected cell expand by the source shape; a single-row source can fill downward
       reaper.Undo_BeginBlock2(0)
 
-      -- 解析剪貼簿 → 2D
+      -- Parse the clipboard → 2D
       local clip = reaper.ImGui_GetClipboardText(ctx) or ""
       local tbl  = LT.parse_clipboard_table(clip)
       if not tbl or #tbl == 0 then goto PASTE_END end
 
-      -- 寫入工具（只處理 3/4/5；其餘欄 apply_cell_cb 直接忽略）
+      -- Write helper (only 3/4/5; apply_cell_cb ignores other columns)
       local function apply_cell(d, val)
         local r = rows[d.row_index]
         local col = d.col
@@ -4598,7 +4598,7 @@ local function loop()
         end
       end
 
-      -- 一次 Undo：交給 Library 做分流
+      -- One Undo: the Library dispatches
       reaper.Undo_BeginBlock2(0)
       LT.apply_paste(rows, dst, tbl, COL_ORDER, COL_POS, apply_cell)
       reaper.Undo_EndBlock2(0, "[ILE] Paste", 4|1)  -- UNDO_STATE_ITEMS | UNDO_STATE_TRACKCFG
@@ -4617,14 +4617,14 @@ local function loop()
       reaper.UpdateArrange()
       -- No need for mark_dirty() - rows already refreshed
 
-      --（可選）你若有狀態列，可顯示摘要；沒有就略過
+      -- (optional) if there is a status bar, show a summary; otherwise skip
       -- status(string.format("Paste: trk=%d, take=%d (+%d), note=%d, skipped=%d",
       --   tracks_renamed, takes_named, takes_created, notes_set, skipped))
 
           ::PASTE_END::
         end
 
-        -- Delete（Live only）：Delete 或 Backspace 皆可
+        -- Delete (Live only): Delete or Backspace
         if TABLE_SOURCE == "live" then
           local del_pressed = reaper.ImGui_IsKeyPressed(ctx, reaper.ImGui_Key_Delete(), false)
                            or reaper.ImGui_IsKeyPressed(ctx, reaper.ImGui_Key_Backspace(), false)
@@ -4634,16 +4634,16 @@ local function loop()
         end
       end  -- End of: if not (EDIT and EDIT.col)
 
-      -- Undo / Redo（專案層級；保護 item 選取）- MOVED OUTSIDE editing check
+      -- Undo / Redo (project level; protects the item selection) - MOVED OUTSIDE editing check
       -- Only process when ILE window is focused or hovered (to capture keyboard input)
       if reaper.ImGui_IsWindowFocused(ctx, reaper.ImGui_FocusedFlags_RootAndChildWindows())
          or reaper.ImGui_IsWindowHovered(ctx, reaper.ImGui_HoveredFlags_RootAndChildWindows()) then
         local m = _mods()
         if m.shortcut then
-          -- 先快照目前選取（以 GUID）
+          -- Snapshot the current selection first (by GUID)
           local sel_snapshot = _snapshot_selected_item_guids()
 
-          -- 先判斷 Redo：Cmd/Ctrl+Shift+Z 或 Cmd/Ctrl+Y
+          -- Check Redo first: Cmd/Ctrl+Shift+Z or Cmd/Ctrl+Y
           local redo_combo = (m.shift and reaper.ImGui_IsKeyPressed(ctx, reaper.ImGui_Key_Z(), false))
                           or reaper.ImGui_IsKeyPressed(ctx, reaper.ImGui_Key_Y(), false)
           if redo_combo then
@@ -4683,7 +4683,7 @@ local function loop()
   -- MUST call End() to match Begin() - no exceptions!
   reaper.ImGui_End(ctx)
 
-  -- GOOD：要不要續跑只看 `open`；按 ESC 的判斷已在上面完成
+  -- GOOD: whether to keep running depends only on `open`; the ESC check is done above
   if open then
     reaper.defer(loop)
   else

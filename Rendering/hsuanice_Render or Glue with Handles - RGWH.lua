@@ -450,9 +450,9 @@ local function check_bwfmetaedit(force)
   end
 
   if custom ~= "" then
-    try_candidate(custom, "自訂路徑")
+    try_candidate(custom, "custom path")
     if IS_WINDOWS and not found_path and not custom:lower():match("%.exe$") then
-      try_candidate(custom .. ".exe", "自訂路徑 (.exe)")
+      try_candidate(custom .. ".exe", "custom path (.exe)")
     end
   end
 

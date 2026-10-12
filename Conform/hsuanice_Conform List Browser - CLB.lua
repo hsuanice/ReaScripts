@@ -477,8 +477,8 @@ local CLB = {
   -- (that event's real Source TC) + iXML (Scene/Take/Reel) — a
   -- "Simple/shared ONE file" mode existed briefly (fast, few files, but
   -- Source TC lived only in REAPER's own D_STARTOFFS, not embedded in
-  -- any file) and was removed entirely at the user's request: "我希望
-  -- 保留 full完整版就好...因為如果要basic，那用一般 empty item的就好" (just
+  -- any file) and was removed entirely at the user's request
+  -- (just
   -- keep Full — Basic's need is already covered by the plain "Generate
   -- Items" empty-item placeholder). ref_media_scope ("visible" default |
   -- "selected") picks which rows to use, chosen per run in the popup —
@@ -5386,8 +5386,8 @@ end
 --- metadata, not a throwaway placeholder: the whole point of this
 --- feature is that the FILE ITSELF (not a REAPER-only D_STARTOFFS
 --- trick) carries the truth. User's explicit requirement after briefly
---- trying a version without this: "ADV 模式就是要有完整的metadata，包含TC
---- 嚴格！" (this mode must have COMPLETE metadata, including TC —
+--- trying a version without this:
+--- (this mode must have COMPLETE metadata, including TC —
 --- strict).
 function CLB._build_ref_ixml_independent(opts)
   local tracks = {}
@@ -5508,7 +5508,7 @@ end
 --- (that event's real Source TC — not fixed/shared) + iXML (Scene/Take/
 --- Reel). This is the ONLY generation mode — a "Simple/shared ONE file"
 --- mode existed briefly but was removed entirely at the user's request:
---- "我希望保留 full完整版就好...因為如果要basic，那用一般 empty item的就好"
+--- in the user's own words
 --- (just keep the Full version — if Basic is wanted, the plain
 --- "Generate Items" empty-item placeholder already covers that; this
 --- feature's whole reason to exist is the real embedded metadata).
@@ -6131,8 +6131,8 @@ local function conform_matched_items(selected_only)
   -- Items"/Reveal (row.reaper_item_guid), see CLB.row_linked_item — carry
   -- a link to a real item already in the session; conforming those adds the
   -- matched audio as a NEW TAKE on that SAME item instead of creating a
-  -- separate item on a separate track, per the user's own request: "套
-  -- 到的資訊，應該直接變成原本那個item 的takes，不需要額外增加一軌新的"
+  -- separate item on a separate track, per the user's own request
+  -- (in the user's words)
   -- (the matched info should become that original item's own takes, no
   -- need for an extra new track).
   local linked_note = linked_count > 0
@@ -7830,9 +7830,9 @@ end
 --   link   Reaper item <-> event links: Link Reaper Items, Reveal Item
 -- Anything not wrapped in one of these stays the theme's default color.
 --
--- Rainbow order 紅橙黃綠藍靛紫 (user's own request), following the left
--- sidebar top→bottom: danger 紅, recut 橙, align 黃, build 綠, io 藍 (top
--- toolbar), list 靛, link 紫 — link deliberately muted (lower saturation +
+-- Rainbow order red-orange-yellow-green-blue-indigo-violet (user's own request), following the left
+-- sidebar top→bottom: danger red, recut orange, align yellow, build green, io blue (top
+-- toolbar), list indigo, link violet — link deliberately muted (lower saturation +
 -- alpha): user's own call, its actions aren't consequential enough to
 -- need an eye-catching color. Optional 4th entry = text color, for a
 -- background too light for the theme's default white text (yellow).
@@ -7958,8 +7958,8 @@ local function draw_toolbar()
     reaper.ImGui_SameLine(ctx)
 
   -- Export button — EDL/TSV/CSV consolidated into one popup menu, same
-  -- pattern as "Load List..." (user's own request: "Export整合成和Import
-  -- 一樣，點下去後才看到要輸出什麼格式" — make Export work like Import,
+  -- pattern as "Load List..." (user's own request:
+  -- make Export work like Import,
   -- show the format choices only after clicking). Lives next to Load
   -- List (both I/O), not down with the action buttons in the sidebar.
   CLB.push_btn_color("io")

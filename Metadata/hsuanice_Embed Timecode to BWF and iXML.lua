@@ -245,7 +245,7 @@ local function quantize_samples_floor(sr, sec)
   return math.floor((sec or 0) * (sr or 48000) + QUANT_EPS)
 end
 
--- Helper: 判斷一段秒數在該 SR 下是否「落在整數 sample 邊界」
+-- Helper: whether a number of seconds falls on an integer sample boundary at this SR
 local function is_on_sample_boundary(sr, sec)
   if not sr then return false end
   local smp = (sec or 0) * sr

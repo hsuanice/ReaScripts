@@ -715,7 +715,7 @@ function ASP.run(opts)
   ASP._state.running       = true
   ASP._state.mode          = mode
   ASP._state.fx_track      = FXtrack
-  ASP._state.fx_index      = FXindex     -- 允許 nil（Chain）
+  ASP._state.fx_index      = FXindex     -- nil allowed (Chain)
   ASP._state.selection_cache = ASP._snapshot_item_selection()
   ASP._state.play_was_on   = (reaper.GetPlayState() & 1) == 1
   ASP._state.repeat_was_on = reaper.GetToggleCommandState(1068) == 1
@@ -796,7 +796,7 @@ end
 
 function ASP.cleanup_if_any()
   if not ASP._state.running then return end
-  undo_begin()  -- ← 補上：與結尾的 undo_end_no_undo 成對
+  undo_begin()  -- ← added: pairs with undo_end_no_undo at the end
   ASP.log("cleanup begin")
 
   -- Safety: clear item-solo and track-solo
@@ -817,10 +817,10 @@ function ASP.cleanup_if_any()
     ASP._state.track_nchan = nil
   end
 
-  -- 搬回 items 並刪除 placeholder
+  -- Move the items back and delete the placeholder
   ASP._move_back_and_remove_placeholder()
 
-  -- 還原 Repeat / 選取
+  -- Restore Repeat / selection
   ASP._restore_repeat()
   ASP._restore_item_selection()
 
@@ -970,7 +970,7 @@ local function clone_item_to_track(src_it, dst_tr)
     local src   = reaper.GetMediaItemTake_Source(take)
     local newtk = reaper.AddTakeToMediaItem(newit)
     reaper.SetMediaItemTake_Source(newtk, src)
-    -- 常用屬性
+    -- Common properties
     reaper.SetMediaItemTakeInfo_Value(newtk, "D_STARTOFFS", reaper.GetMediaItemTakeInfo_Value(take, "D_STARTOFFS"))
     reaper.SetMediaItemTakeInfo_Value(newtk, "D_PLAYRATE",  reaper.GetMediaItemTakeInfo_Value(take, "D_PLAYRATE"))
     reaper.SetMediaItemTakeInfo_Value(newtk, "I_CHANMODE",  reaper.GetMediaItemTakeInfo_Value(take, "I_CHANMODE"))
@@ -1025,7 +1025,7 @@ function ASP._prepare_preview_items_on_fx_track(mode)
 
   ASP.log("placeholder created: [%0.3f..%0.3f] %s", UL or -1, UR or -1, note)
 
-  -- 搬移所選 item 到 FX 軌
+  -- Move the selected items to the FX track
   -- IMPORTANT: Collect all items FIRST, then move them.
   -- If we move items during iteration, the selection indices shift when FX track is below the source track.
   ASP._state.moved_items = {}

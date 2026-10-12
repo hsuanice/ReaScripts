@@ -60,7 +60,7 @@ function M.source_file_path(src)
   return (ok and p) or ""
 end
 
--- PT 風格（26-6-16-12-4，小寫＋破折號）
+-- PT style (26-6-16-12-4, lower case + dashes)
 local function umid_to_pt(hex64)
   local h = (hex64 or ""):gsub("%s+", ""):lower()
   if #h ~= 64 then return nil end
@@ -71,7 +71,7 @@ end
 
 local parse_ixml_tracklist_from_chunk
 
--- 讀不到 BWF:UMID 時的 CLI fallback（bwfmetaedit --out-xml）
+-- CLI fallback when BWF:UMID cannot be read (bwfmetaedit --out-xml)
 local function read_umid_via_cli_abs(path_to_cli, wav_path)
   local cli = path_to_cli or "/opt/homebrew/bin/bwfmetaedit"
   local cmd = string.format('"%s" --out-xml=- "%s"', cli, wav_path)
@@ -81,7 +81,7 @@ local function read_umid_via_cli_abs(path_to_cli, wav_path)
     local fh = io.popen(cmd); out = fh and fh:read("*a") or ""; if fh then fh:close() end
   end
   if not out or out == "" then return nil end
-  -- 找 <UMID>…</UMID>（bext 區段）
+  -- Find <UMID>…</UMID> (bext section)
   local hex = out:match("<UMID>([%x%s]+)</UMID>")
   if not hex then return nil end
   hex = hex:gsub("%s+", ""):upper()
@@ -127,7 +127,7 @@ local function meta(src, key)
   return v
 end
 
--- ====== UTF-8 helpers（給 token: srcbaseprefix/suffix） ======
+-- ====== UTF-8 helpers (for tokens: srcbaseprefix/suffix) ======
 local function utf8_spans(s)
   s = tostring(s or ""); local spans, i, n = {}, 1, #s
   while i <= n do
@@ -148,7 +148,7 @@ local function utf8_sub(s, ci1, ci2)
   return s:sub(b, e)
 end
 
--- ====== BWF/Description 解析（含 dXXXX/sXXXX 正規化） ======
+-- ====== BWF/Description parsing (incl. dXXXX/sXXXX normalization) ======
 local function parse_description_pairs(desc_text, out_tbl)
   for line in (tostring(desc_text or "") .. "\n"):gmatch("(.-)\n") do
     local k, v = line:match("^%s*([%w_%-]+)%s*=%s*(.-)%s*$")
@@ -156,7 +156,7 @@ local function parse_description_pairs(desc_text, out_tbl)
       out_tbl[k] = v
       out_tbl[string.lower(k)] = v
 
-      -- Map dXXXX/sXXXX → XXXX（upper & lower）
+      -- Map dXXXX/sXXXX → XXXX (upper & lower)
       local up = k:upper()
       local base = up:match("^[SD]([A-Z0-9_]+)$")
       if base and base ~= "" then
@@ -290,7 +290,7 @@ local function fill_ixml_tracklist(src, t)
   end
 end
 
--- ====== 補充：來源取樣率/聲道數 ======
+-- ====== Extra: source sample rate / channel count ======
 local function detect_samplerate_channels(src)
   if not src then return nil,nil end
   local srate = reaper.GetMediaSourceSampleRate(src) or 0
@@ -298,7 +298,7 @@ local function detect_samplerate_channels(src)
   return srate, ch
 end
 
--- ====== Interleave index（來自 I_CHANMODE 的 Mono-of-N） ======
+-- ====== Interleave index (Mono-of-N from I_CHANMODE) ======
 local function get_source_num_channels(item, fields)
   local tk = item and reaper.GetActiveTake(item)
   if tk then
@@ -327,7 +327,7 @@ function M.guess_interleave_index(item, fields)
   return nil
 end
 
--- ====== 建立 Interleave → Name 表 ======
+-- ====== Build the Interleave → Name table ======
 local function build_interleave_name_list(fields)
   if fields.__trk_by_interleave then return fields.__trk_by_interleave end
   local by_interleave, have_ixml = {}, false
@@ -395,7 +395,7 @@ local function build_interleave_name_list(fields)
   return by_interleave
 end
 
--- ====== 將 item 讀成規範化欄位表（Rename/Monitor/Sort 共用） ======
+-- ====== Read an item into a normalized field table (shared by Rename/Monitor/Sort) ======
 function M.collect_item_fields(item)
   local t = {}
   local take = item and reaper.GetActiveTake(item)
@@ -417,7 +417,7 @@ function M.collect_item_fields(item)
   if sr and sr>0 then t.samplerate = tostring(math.floor(sr+0.5)) end
   if ch and ch>0 then t.channels   = tostring(ch) end
 
-  -- 可讀 metadata？
+  -- Is metadata readable?
   local srctype = src and reaper.GetMediaSourceType(src, "") or ""
   local upper = (srctype or ""):upper()
   local can_meta = (upper:find("WAVE") or upper:find("AIFF") or upper:find("WAVE64")) and true or false
@@ -438,7 +438,7 @@ function M.collect_item_fields(item)
     
     if desc then parse_description_pairs(desc, t) end
 
-    -- ====== BWF:UMID（SMPTE ID）======
+    -- ====== BWF:UMID (SMPTE ID) ======
     local function set_umid_fields(hex)
       t.UMID = hex
       t.umid = hex
@@ -446,7 +446,7 @@ function M.collect_item_fields(item)
       if pt then t.umid_pt = pt end
     end
 
-    -- 1) 先嘗試 REAPER API（有些版本讀不到）
+    -- 1) Try the REAPER API first (some versions cannot read it)
     do
       local um = meta(src, "BWF:UMID") or meta(src, "UMID")
       if um and um ~= "" then
@@ -455,9 +455,9 @@ function M.collect_item_fields(item)
       end
     end
 
-    -- 2) 讀不到就走 CLI fallback（bwfmetaedit --out-xml）
+    -- 2) If that fails, use the CLI fallback (bwfmetaedit --out-xml)
     if not t.umid and t.srcpath and t.srcpath ~= "" then
-      local hex = read_umid_via_cli_abs(nil, t.srcpath)  -- nil=預設 /opt/homebrew/bin/bwfmetaedit
+      local hex = read_umid_via_cli_abs(nil, t.srcpath)  -- nil = default /opt/homebrew/bin/bwfmetaedit
       if hex then set_umid_fields(hex) end
     end
 
@@ -475,11 +475,11 @@ function M.collect_item_fields(item)
     fill_ixml_tracklist(src, t)
   end
 
-  -- 推出 __trk_table
+  -- Derive __trk_table
   t.__trk_table = {}
   for i=1,64 do local v=t["trk"..i]; if v and v~="" then t.__trk_table[i]=v end end
 
-  -- Interleave index（I_CHANMODE）→ __chan_index
+  -- Interleave index (I_CHANMODE) → __chan_index
   local guessed_idx = M.guess_interleave_index(item, t)
   t.__has_explicit_interleave = (guessed_idx ~= nil)
   t.__chan_index = guessed_idx
@@ -505,12 +505,12 @@ function M.collect_item_fields(item)
   local _, note = reaper.GetSetMediaItemInfo_String(item,"P_NOTES","",false)
   t.curnote = note or ""
 
-  -- 給診斷用
+  -- For diagnostics
   t.__item = item
   return t
 end
 
--- ====== Interleave 診斷（供 UI/複製區） ======
+-- ====== Interleave diagnostics (for the UI / copy area) ======
 function M.compute_interleave_diag(fields, item)
   local list = build_interleave_name_list(fields)
   local nch  = get_source_num_channels(item, fields)
@@ -570,7 +570,7 @@ local function get_recorder_channel_number(fields)
   return il
 end
 
--- ====== Token 處理 ======
+-- ====== Token handling ======
 local function normalize_tokens(s)
   s = tostring(s or "")
   s = s:gsub("%$trk(%d+)", "${trk%1}")
@@ -582,7 +582,7 @@ local function normalize_tokens(s)
     "samplerate","channels","length","project","scene","take","tape","trk","trkall",
     "ubits","framerate","speed","date","time","year","originationdate","originationtime","startoffset",
     "filepath","originator","originatorreference","timereference","description","interleave","interum","chnum","channelnum",
-    -- 新增 UMID tokens
+    -- New UMID tokens
     "umid","umid_pt",
   }
   table.sort(known, function(a,b) return #a > #b end)
