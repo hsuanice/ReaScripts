@@ -14,6 +14,7 @@
 
 # Published categories
 !/Rendering/
+!/Items Editing/
 
 # Library: only files used by published packages
 !/Library/
@@ -24,6 +25,7 @@
 !/Library/hsuanice_AS Preview Core.lua
 !/Library/hsuanice_Metadata Embed.lua
 !/Library/hsuanice_Metadata Read.lua
+!/Library/hsuanice_Hover.lua
 
 .DS_Store
 __pycache__/
