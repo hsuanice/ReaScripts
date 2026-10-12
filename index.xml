@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<index version="1" name="hsuanice Scripts" commit="62d581c70c8ce9ed9443614aaf46ca96bcd542f8">
+<index version="1" name="hsuanice Scripts" commit="f4a9e400d5b11f9e5dee836f025ba6efdaae8c77">
   <category name="Items Editing">
     <reapack name="hsuanice_Convert empty items to audio items.lua" type="script" desc="Convert empty items to audio items (preserve name &amp; notes)">
       <metadata>
@@ -481,6 +481,149 @@
       </version>
     </reapack>
   </category>
+  <category name="Tracks">
+    <reapack name="hsuanice_Auto Pan LR tracks.lua" type="script" desc="Auto Pan LR Tracks (pan adjacent XXX_L / XXX_R track pairs hard left / hard right)">
+      <metadata>
+        <description><![CDATA[{\rtf1\ansi\deff0{\fonttbl{\f0 \fswiss Helvetica;}{\f1 \fmodern Courier;}}
+{\colortbl;\red255\green0\blue0;\red0\green0\blue255;}
+\widowctrl\hyphauto
+
+{\pard \ql \f0 \sa180 \li0 \fi0 After an AAF import, split-stereo tracks (e.g. "Audio 9_L" / "Audio 9_R") arrive panned center. This script scans ALL tracks and pans each adjacent L/R pair: \u8226 ? L track -> 100% Left, R track -> 100% Right \u8226 ? A pair = track N ends with an L suffix AND track N+1 has the same base name with an R suffix \u8226 ? Recognized suffixes (case-insensitive): _L/_R, -L/-R, .L/.R, " L"/" R" Unpaired L/R-looking tracks are left untouched and listed in a message for review. Notes:\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Works with every pan mode; in Dual Pan mode both knobs are set to the same side.\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Single undo point.\sa180\par}
+}
+]]></description>
+      </metadata>
+      <version name="26.1012.1024" author="hsuanice" time="2026-10-12T02:42:41Z">
+        <changelog><![CDATA[- First release in the hsuanice/ReaScripts repository.
+- Messages translated to English.
+- Full history: Changelogs/ in the repository (https://github.com/hsuanice/ReaScripts/tree/master/Changelogs)]]></changelog>
+        <source main="main">https://github.com/hsuanice/ReaScripts/raw/f4a9e400d5b11f9e5dee836f025ba6efdaae8c77/Tracks/hsuanice_Auto%20Pan%20LR%20tracks.lua</source>
+      </version>
+    </reapack>
+    <reapack name="hsuanice_Delete Selected Tracks with Warning.lua" type="script" desc="Delete Selected Tracks (safe; prompt if content/folders/FX/routing; show selection, children &amp; FX/routing counts)">
+      <metadata>
+        <description><![CDATA[{\rtf1\ansi\deff0{\fonttbl{\f0 \fswiss Helvetica;}{\f1 \fmodern Courier;}}
+{\colortbl;\red255\green0\blue0;\red0\green0\blue255;}
+\widowctrl\hyphauto
+
+{\pard \ql \f0 \sa180 \li0 \fi0 Delete selected tracks with safety: \u8226 ? If ALL selected tracks are empty (no items, no automation/envelope data, no FX inserts, no input FX, no sends/receives) AND none is a folder parent with children, delete immediately with no prompt. \u8226 ? Otherwise (any content, folder parents with children, or FX/routing present), show a detailed summary and ask for confirmation. \u8226 ? Summary includes: selected track count, items, automation tracks, folder parents, total child tracks, FX inserts, input FX, sends, receives. Notes:\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab "Automation present" = any track envelope has \u8805 ?1 point OR \u8805 ?1 automation item.\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab "Folder parent with children" = a selected track whose next track depth is greater than its own.\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Child tracks counting includes all descendants under each selected folder parent (until depth returns to or above the parent's depth).\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Master track is ignored by REAPER's CountSelectedTracks().\sa180\par}
+}
+]]></description>
+      </metadata>
+      <version name="26.1012.1024" author="hsuanice" time="2026-10-12T02:42:41Z">
+        <changelog><![CDATA[- First release in the hsuanice/ReaScripts repository.
+- Full history: Changelogs/ in the repository (https://github.com/hsuanice/ReaScripts/tree/master/Changelogs)]]></changelog>
+        <source main="main">https://github.com/hsuanice/ReaScripts/raw/f4a9e400d5b11f9e5dee836f025ba6efdaae8c77/Tracks/hsuanice_Delete%20Selected%20Tracks%20with%20Warning.lua</source>
+      </version>
+    </reapack>
+    <reapack name="hsuanice_Import audio files per folder into separate tracks Field Recorder.lua" type="script" desc="ReaImGui - Import audio: one folder per track; channel-split files go to child tracks. Sequence only.">
+      <metadata>
+        <description><![CDATA[{\rtf1\ansi\deff0{\fonttbl{\f0 \fswiss Helvetica;}{\f1 \fmodern Courier;}}
+{\colortbl;\red255\green0\blue0;\red0\green0\blue255;}
+\widowctrl\hyphauto
+
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Pre-confirm dialog: shows total folders/files, lets you choose a channel naming pattern or a custom mask, then offers [Import] / [Cancel].\par}
+{\pard \ql \f0 \sa0 \li720 \fi-360 \endash \tx360\tab Sequence only (append at the end of the target track).\par}
+{\pard \ql \f0 \sa0 \li720 \fi-360 \endash \tx360\tab Every directory that contains audio becomes a folder parent track (including the selected root).\par}
+{\pard \ql \f0 \sa0 \li720 \fi-360 \endash \tx360\tab Non\u8211-channel-split files (no ".A" or "_" match) go onto the PARENT folder track (one track per folder, including root).\par}
+{\pard \ql \f0 \sa0 \li720 \fi-360 \endash \tx360\tab Channel-split files \u8594 ? child tracks named "Ch XX" (XX is the parsed channel number).\par}
+{\pard \ql \f0 \sa0 \li720 \fi-360 \endash \tx360\tab Recursively scans all subfolders but does NOT nest folder tracks beyond two levels: each directory with files is its own parent+children block.\par}
+{\pard \ql \f0 \sa0 \li720 \fi-360 \endash \tx360\tab Streaming import with a small ReaImGui "Stop" window (ESC also works on some systems). On completion/abort: auto-close progress, then show a finish summary.\par}
+{\pard \ql \f0 \sa0 \li720 \fi-360 \endash \tx360\tab No ImGui Destroy/Detach calls (avoids crashes on some builds).\sa180\sa180\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 Features:\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Built with ReaImGui for a compact, responsive UI.\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Designed for fast, keyboard-light workflows.\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Optionally leverages js_ReaScriptAPI for advanced interactions.\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab DEBUG_MODE: Set to true to enable detailed console logging for troubleshooting.\sa180\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 References:\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab REAPER ReaScript API (Lua)\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab js_ReaScriptAPI\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab ReaImGui (ReaScript ImGui binding)\sa180\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 This script was generated using ChatGPT based on design concepts and iterative testing by hsuanice. hsuanice served as the workflow designer, tester, and integrator for this tool.\par}
+}
+]]></description>
+      </metadata>
+      <version name="26.1012.1024" author="hsuanice" time="2026-10-12T02:42:41Z">
+        <changelog><![CDATA[- First release in the hsuanice/ReaScripts repository.
+- Comments translated to English.
+- Full history: Changelogs/ in the repository (https://github.com/hsuanice/ReaScripts/tree/master/Changelogs)]]></changelog>
+        <source main="main">https://github.com/hsuanice/ReaScripts/raw/f4a9e400d5b11f9e5dee836f025ba6efdaae8c77/Tracks/hsuanice_Import%20audio%20files%20per%20folder%20into%20separate%20tracks%20Field%20Recorder.lua</source>
+      </version>
+    </reapack>
+    <reapack name="hsuanice_Import audio files per folder into separate tracks Music Multitrack.lua" type="script" desc="Import audio files per folder into separate tracks Music Multitrack">
+      <metadata>
+        <description><![CDATA[{\rtf1\ansi\deff0{\fonttbl{\f0 \fswiss Helvetica;}{\f1 \fmodern Courier;}}
+{\colortbl;\red255\green0\blue0;\red0\green0\blue255;}
+\widowctrl\hyphauto
+
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Pre-confirm dialog: shows total folders/files, then offers [Import] / [Cancel].\par}
+{\pard \ql \f0 \sa0 \li720 \fi-360 \endash \tx360\tab Each subfolder that contains audio becomes a parent folder track with child tracks (no nesting).\par}
+{\pard \ql \f0 \sa0 \li720 \fi-360 \endash \tx360\tab Files in the base folder are imported as single tracks (not grouped under a parent folder track).\par}
+{\pard \ql \f0 \sa0 \li720 \fi-360 \endash \tx360\tab Streaming import with progress window (ESC and Cancel supported). Files and tracks are imported into REAPER one by one.\par}
+{\pard \ql \f0 \sa0 \li720 \fi-360 \endash \tx360\tab On completion/abort: auto-close progress, then show summary dialog.\par}
+{\pard \ql \f0 \sa0 \li720 \fi-360 \endash \tx360\tab No ImGui Destroy/Detach calls (avoids crashes on some builds).\sa180\sa180\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 Features:\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Built with ReaImGui for a compact, responsive UI.\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Designed for fast, keyboard-light workflows.\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Optionally leverages js_ReaScriptAPI for advanced interactions.\sa180\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 References:\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab REAPER ReaScript API (Lua)\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab js_ReaScriptAPI\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab ReaImGui (ReaScript ImGui binding)\sa180\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 This script was generated using ChatGPT based on design concepts and iterative testing by hsuanice. hsuanice served as the workflow designer, tester, and integrator for this tool.\par}
+}
+]]></description>
+      </metadata>
+      <version name="26.1012.1024" author="hsuanice" time="2026-10-12T02:42:41Z">
+        <changelog><![CDATA[- First release in the hsuanice/ReaScripts repository.
+- Full history: Changelogs/ in the repository (https://github.com/hsuanice/ReaScripts/tree/master/Changelogs)]]></changelog>
+        <source main="main">https://github.com/hsuanice/ReaScripts/raw/f4a9e400d5b11f9e5dee836f025ba6efdaae8c77/Tracks/hsuanice_Import%20audio%20files%20per%20folder%20into%20separate%20tracks%20Music%20Multitrack.lua</source>
+      </version>
+    </reapack>
+    <reapack name="hsuanice_Show Hide Tracks of Selected Parent or Childred Folder Tracks in TCP.lua" type="script" desc="Show/Hide TCP children of selected folder parents, or of the parent of selected children">
+      <metadata>
+        <description><![CDATA[{\rtf1\ansi\deff0{\fonttbl{\f0 \fswiss Helvetica;}{\f1 \fmodern Courier;}}
+{\colortbl;\red255\green0\blue0;\red0\green0\blue255;}
+\widowctrl\hyphauto
+
+{\pard \ql \f0 \sa180 \li0 \fi0 Toggle TCP folder children efficiently:\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab If a selected track is a folder parent, toggle its TCP children visibility.\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab If a selected track is a child, find its nearest folder parent and toggle that one.\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Multi-selection supported with de-duplication. No full-project scan. Designed for very large sessions.\sa180\par}
+}
+]]></description>
+      </metadata>
+      <version name="26.1012.1024" author="hsuanice" time="2026-10-12T02:42:41Z">
+        <changelog><![CDATA[- First release in the hsuanice/ReaScripts repository.
+- Comments translated to English.
+- Full history: Changelogs/ in the repository (https://github.com/hsuanice/ReaScripts/tree/master/Changelogs)]]></changelog>
+        <source main="main">https://github.com/hsuanice/ReaScripts/raw/f4a9e400d5b11f9e5dee836f025ba6efdaae8c77/Tracks/hsuanice_Show%20Hide%20Tracks%20of%20Selected%20Parent%20or%20Childred%20Folder%20Tracks%20in%20TCP.lua</source>
+      </version>
+    </reapack>
+    <reapack name="hsuanice_Split Tracks by Item Channel.lua" type="script" desc="Split Tracks by Item Channel">
+      <metadata>
+        <description><![CDATA[{\rtf1\ansi\deff0{\fonttbl{\f0 \fswiss Helvetica;}{\f1 \fmodern Courier;}}
+{\colortbl;\red255\green0\blue0;\red0\green0\blue255;}
+\widowctrl\hyphauto
+
+{\pard \ql \f0 \sa180 \li0 \fi0 Scan all non-hidden tracks and detect mixed item channel counts (1/2/3+). If confirmed, split items into separate tracks per channel group: "OriginalName Mono", "OriginalName Stereo", "OriginalName N-Ch" (N>=3). The original track is duplicated to preserve FX/routing; the duplicates are cleared via API and the relevant items are moved to them. No Fixed Lanes used. Effective channel count is taken from the source; takes with I_CHANMODE set to downmix/left/right are treated as Mono.\par}
+}
+]]></description>
+      </metadata>
+      <version name="26.1012.1024pre1" author="hsuanice" time="2026-10-12T02:42:41Z">
+        <changelog><![CDATA[- First release in the hsuanice/ReaScripts repository.
+- Pre-release: splitting works but is not perfect yet — only installed when "Enable pre-releases" is on in ReaPack.
+- Comments translated to English.
+- Full history: Changelogs/ in the repository (https://github.com/hsuanice/ReaScripts/tree/master/Changelogs)]]></changelog>
+        <source main="main">https://github.com/hsuanice/ReaScripts/raw/f4a9e400d5b11f9e5dee836f025ba6efdaae8c77/Tracks/hsuanice_Split%20Tracks%20by%20Item%20Channel.lua</source>
+      </version>
+    </reapack>
+  </category>
   <metadata>
     <description><![CDATA[{\rtf1\ansi\deff0{\fonttbl{\f0 \fswiss Helvetica;}{\f1 \fmodern Courier;}}
 {\colortbl;\red255\green0\blue0;\red0\green0\blue255;}
@@ -519,9 +662,12 @@ Packages
 {\pard \ql \f0 \sa180 \li0 \fi0 | Package | What it does | |---|---| | Auto Color | Color items by take-name keywords with a configurable palette (GUI + Background Daemon, by Palette, Smart Random, Follow Track Color, All ShinyColor) |\par}
 {\pard \ql \f0 \sa180 \li0 \fi0 \outlinelevel2 \b \fs28 Selection\par}
 {\pard \ql \f0 \sa180 \li0 \fi0 | Package | What it does | |---|---| | Track and Razor Item Link like Pro Tools | Pro Tools-style "Link Track and Edit Selection": tracks follow razor areas / item selection (toggle) | | Razor and Item Link with Mode Switch | Razor areas select the items they overlap or fully contain (toggle) | | Set Time to Item on Right-Drag Release | After a right-button drag, the time selection follows the selected items (toggle) |\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 \outlinelevel2 \b \fs28 Tracks\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 | Package | What it does | |---|---| | Auto Pan LR tracks | Pan adjacent XXX_L / XXX_R track pairs hard left / right | | Delete Selected Tracks with Warning | Safe delete: asks first when tracks have items, FX, routing or are folders | | Show/Hide TCP children of folder tracks | Show or hide the children of the selected folder tracks (or of their parent) in the TCP | | Split Tracks by Item Channel {\i (pre-release)} | Split tracks whose items mix mono / stereo / multichannel into one track per channel count | | Import audio files per folder (Field Recorder) | Import one folder per track; channel-split recorder files are grouped (GUI) | | Import audio files per folder (Music Multitrack) | Import one folder per track for music multitrack sessions (GUI) |\par}
 {\pard \ql \f0 \sa180 \li0 \fi0 \outlinelevel2 \b \fs28 Library\par}
 {\pard \ql \f0 \sa180 \li0 \fi0 | Package | What it does | |---|---| | hsuanice Library | Shared code used by the scripts above; adds nothing to the Action List |\par}
 {\pard \ql \f0 \sa180 \li0 \fi0 Suggested shortcuts are listed in each package's About page in ReaPack (never assigned automatically).\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 {\i Pre-release} packages are only offered when {\b Enable pre-releases} is turned on in ReaPack (Extensions > ReaPack > Manage repositories > Options).\par}
 {\pard \ql \f0 \sa180 \li0 \fi0 Release notes are shown in ReaPack. Older history is in {\field{\*\fldinst{HYPERLINK "Changelogs/"}}{\fldrslt{\ul
 Changelogs/
 }}}
