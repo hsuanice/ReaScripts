@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<index version="1" name="hsuanice Scripts" commit="cbba4cbebfac9c3a9957fa4a54f6f4fde6af588c">
+<index version="1" name="hsuanice Scripts" commit="c989af471f48dfcb016c5b858bd49c6b91b9ed9f">
   <category name="Conform">
     <reapack name="hsuanice_Conform List Browser - CLB.lua" type="script" desc="Conform List Browser - CLB: conform EDL / AAF / XML / OTIO / subtitle lists (GUI + Jump / Link / Load / Reveal)">
       <metadata>
@@ -285,19 +285,15 @@
         <source main="main">https://github.com/hsuanice/ReaScripts/raw/69a8697e1b54666ea7228379b1490811fd778fa8/Items%20Editing/hsuanice_Reposition%20Items.lua</source>
       </version>
     </reapack>
-    <reapack name="hsuanice_Session Fix.lua" type="script" desc="Session Fix - clean up edits before moving a REAPER session to Pro Tools or Nuendo">
+    <reapack name="hsuanice_Session Fix.lua" type="script" desc="Session Fix - check and fix a REAPER session before moving it to Pro Tools, Nuendo or Cubase (Interchanger)">
       <metadata>
         <description><![CDATA[{\rtf1\ansi\deff0{\fonttbl{\f0 \fswiss Helvetica;}{\f1 \fmodern Courier;}}
 {\colortbl;\red255\green0\blue0;\red0\green0\blue255;}
 \widowctrl\hyphauto
 
 {\pard \ql \f0 \sa180 \li0 \fi0 \outlinelevel0 \b \fs36 Session Fix\par}
-{\pard \ql \f0 \sa180 \li0 \fi0 Find and fix edit details that other DAWs handle differently when a REAPER session is exported.\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Fix Edges Off Grid\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Fix Looped Source Items\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Fix Misaligned Crossfades\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Fix Overlap Items (partial or complete)\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Fix Split Items at Fade Edges\sa180\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 Find and fix edit details that other DAWs handle differently when a REAPER session is converted (for example with Interchanger): one window, "Session Fix - Interchange Prep", with a checklist, automatic fixes, a before / after check of every fix and review tracks.\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 Requires ReaImGui and the "hsuanice Library" package; js_ReaScriptAPI is optional.\par}
 }
 ]]></description>
       </metadata>
@@ -309,6 +305,12 @@
         <source main="main" file="hsuanice_Session Fix - Misaligned Crossfades.lua">https://github.com/hsuanice/ReaScripts/raw/69a8697e1b54666ea7228379b1490811fd778fa8/Items%20Editing/hsuanice_Session%20Fix%20-%20Misaligned%20Crossfades.lua</source>
         <source main="main" file="hsuanice_Session Fix - Overlap Items.lua">https://github.com/hsuanice/ReaScripts/raw/69a8697e1b54666ea7228379b1490811fd778fa8/Items%20Editing/hsuanice_Session%20Fix%20-%20Overlap%20Items.lua</source>
         <source main="main" file="hsuanice_Session Fix - Split Items at Fade Edges.lua">https://github.com/hsuanice/ReaScripts/raw/69a8697e1b54666ea7228379b1490811fd778fa8/Items%20Editing/hsuanice_Session%20Fix%20-%20Split%20Items%20at%20Fade%20Edges.lua</source>
+      </version>
+      <version name="26.1014.2216" author="hsuanice" time="2026-10-14T16:32:18Z">
+        <changelog><![CDATA[- New: Session Fix - Interchange Prep, one window that checks and fixes a session before Interchanger (Pro Tools / Nuendo / Cubase).
+- Removed: the five separate scripts (Edges Off Grid, Looped Source Items, Misaligned Crossfades, Overlap Items, Split Items at Fade Edges) - their checks are part of the new window. Re-assign shortcuts / toolbar buttons to the new script.
+- Requires ReaImGui and the hsuanice Library package.]]></changelog>
+        <source main="main" file="hsuanice_Session Fix - Interchange Prep.lua">https://github.com/hsuanice/ReaScripts/raw/c989af471f48dfcb016c5b858bd49c6b91b9ed9f/Items%20Editing/hsuanice_Session%20Fix%20-%20Interchange%20Prep.lua</source>
       </version>
     </reapack>
     <reapack name="hsuanice_Toggle Mute Item Under Mouse.lua" type="script" desc="Toggle Mute Item Under Mouse">
@@ -430,6 +432,28 @@
         <source file="hsuanice_Subtitle Bridge.lua">https://github.com/hsuanice/ReaScripts/raw/6ef5b7ef4f1aae083db79bd539d2dc5f07e3f200/Library/hsuanice_Subtitle%20Bridge.lua</source>
         <source file="hsuanice_Process Exec.lua">https://github.com/hsuanice/ReaScripts/raw/6ef5b7ef4f1aae083db79bd539d2dc5f07e3f200/Library/hsuanice_Process%20Exec.lua</source>
         <source file="json.lua">https://github.com/hsuanice/ReaScripts/raw/6ef5b7ef4f1aae083db79bd539d2dc5f07e3f200/Library/json.lua</source>
+      </version>
+      <version name="26.1014.2216" author="hsuanice" time="2026-10-14T16:32:18Z">
+        <changelog><![CDATA[- Add: hsuanice_Session Fix Core.lua (used by Session Fix - Interchange Prep).]]></changelog>
+        <source file="hsuanice_RGWH Core.lua">https://github.com/hsuanice/ReaScripts/raw/c989af471f48dfcb016c5b858bd49c6b91b9ed9f/Library/hsuanice_RGWH%20Core.lua</source>
+        <source file="hsuanice_AudioSweet Core.lua">https://github.com/hsuanice/ReaScripts/raw/c989af471f48dfcb016c5b858bd49c6b91b9ed9f/Library/hsuanice_AudioSweet%20Core.lua</source>
+        <source file="hsuanice_AS Preview Core.lua">https://github.com/hsuanice/ReaScripts/raw/c989af471f48dfcb016c5b858bd49c6b91b9ed9f/Library/hsuanice_AS%20Preview%20Core.lua</source>
+        <source file="hsuanice_Metadata Embed.lua">https://github.com/hsuanice/ReaScripts/raw/c989af471f48dfcb016c5b858bd49c6b91b9ed9f/Library/hsuanice_Metadata%20Embed.lua</source>
+        <source file="hsuanice_Metadata Read.lua">https://github.com/hsuanice/ReaScripts/raw/c989af471f48dfcb016c5b858bd49c6b91b9ed9f/Library/hsuanice_Metadata%20Read.lua</source>
+        <source file="hsuanice_Hover.lua">https://github.com/hsuanice/ReaScripts/raw/c989af471f48dfcb016c5b858bd49c6b91b9ed9f/Library/hsuanice_Hover.lua</source>
+        <source file="hsuanice_Mouse.lua">https://github.com/hsuanice/ReaScripts/raw/c989af471f48dfcb016c5b858bd49c6b91b9ed9f/Library/hsuanice_Mouse.lua</source>
+        <source file="hsuanice_Metadata Cache.lua">https://github.com/hsuanice/ReaScripts/raw/c989af471f48dfcb016c5b858bd49c6b91b9ed9f/Library/hsuanice_Metadata%20Cache.lua</source>
+        <source file="hsuanice_Metadata Rename Core.lua">https://github.com/hsuanice/ReaScripts/raw/c989af471f48dfcb016c5b858bd49c6b91b9ed9f/Library/hsuanice_Metadata%20Rename%20Core.lua</source>
+        <source file="hsuanice_List Table.lua">https://github.com/hsuanice/ReaScripts/raw/c989af471f48dfcb016c5b858bd49c6b91b9ed9f/Library/hsuanice_List%20Table.lua</source>
+        <source file="hsuanice_Time Format.lua">https://github.com/hsuanice/ReaScripts/raw/c989af471f48dfcb016c5b858bd49c6b91b9ed9f/Library/hsuanice_Time%20Format.lua</source>
+        <source file="hsuanice_Metadata Generator.lua">https://github.com/hsuanice/ReaScripts/raw/c989af471f48dfcb016c5b858bd49c6b91b9ed9f/Library/hsuanice_Metadata%20Generator.lua</source>
+        <source file="hsuanice_CLB Compare Engine.lua">https://github.com/hsuanice/ReaScripts/raw/c989af471f48dfcb016c5b858bd49c6b91b9ed9f/Library/hsuanice_CLB%20Compare%20Engine.lua</source>
+        <source file="hsuanice_EDL Parser.lua">https://github.com/hsuanice/ReaScripts/raw/c989af471f48dfcb016c5b858bd49c6b91b9ed9f/Library/hsuanice_EDL%20Parser.lua</source>
+        <source file="hsuanice_Session Fix Core.lua">https://github.com/hsuanice/ReaScripts/raw/c989af471f48dfcb016c5b858bd49c6b91b9ed9f/Library/hsuanice_Session%20Fix%20Core.lua</source>
+        <source file="hsuanice_OTIO Bridge.lua">https://github.com/hsuanice/ReaScripts/raw/c989af471f48dfcb016c5b858bd49c6b91b9ed9f/Library/hsuanice_OTIO%20Bridge.lua</source>
+        <source file="hsuanice_Subtitle Bridge.lua">https://github.com/hsuanice/ReaScripts/raw/c989af471f48dfcb016c5b858bd49c6b91b9ed9f/Library/hsuanice_Subtitle%20Bridge.lua</source>
+        <source file="hsuanice_Process Exec.lua">https://github.com/hsuanice/ReaScripts/raw/c989af471f48dfcb016c5b858bd49c6b91b9ed9f/Library/hsuanice_Process%20Exec.lua</source>
+        <source file="json.lua">https://github.com/hsuanice/ReaScripts/raw/c989af471f48dfcb016c5b858bd49c6b91b9ed9f/Library/json.lua</source>
       </version>
     </reapack>
   </category>
@@ -910,7 +934,7 @@ Packages
 {\pard \ql \f0 \sa180 \li0 \fi0 \outlinelevel2 \b \fs28 Rendering\par}
 {\pard \ql \f0 \sa180 \li0 \fi0 | Package | What it does | |---|---| | Render or Glue with Handles - RGWH | Render or glue items with handles (GUI + Glue / Render actions) | | AudioSweet - AudioSuite Workflow | AudioSuite-style offline FX processing, Pro Tools style (GUI + Run / Toggle Preview / Toggle Solo, FX Alias tools) |\par}
 {\pard \ql \f0 \sa180 \li0 \fi0 \outlinelevel2 \b \fs28 Items Editing\par}
-{\pard \ql \f0 \sa180 \li0 \fi0 | Package | What it does | |---|---| | Hover Editing | Pro Tools-style Split / Trim at the mouse or edit cursor (Toggle Hover Mode, Split, Trim or Extend Left / Right Edge) | | Reorder - Sort Items Vertically | Vertical reorder and sort of selected items by metadata (GUI + Copy to Sort / Sort in Place / Upfill) | | Session Fix | Clean up edits before moving a session to Pro Tools or Nuendo (edges off grid, looped sources, misaligned crossfades, overlaps, splits at fade edges) | | Copy / Cut Items and Envelope Points Respect Razor | Copy or cut items and envelope points, respecting razor edits | | Reposition Items | Space selected items by an interval (GUI) | | Move Selected Items to Track Under Mouse | Move items vertically, keeping their timeline position | | Toggle Mute Item Under Mouse | Mute / unmute the item under the mouse | | Explode Takes Across Tracks | Put each take of the selected items on its own track | | Explode Multichannel Poly Audio to Mono Items | Split poly files into one-channel items, keeping metadata | | Convert Empty Items to Audio Items | Keeps take names and notes | | Copy Unmuted Child Items to Parent Folder Track | Copy unmuted child items to the folder track (checks overlaps first) |\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 | Package | What it does | |---|---| | Hover Editing | Pro Tools-style Split / Trim at the mouse or edit cursor (Toggle Hover Mode, Split, Trim or Extend Left / Right Edge) | | Reorder - Sort Items Vertically | Vertical reorder and sort of selected items by metadata (GUI + Copy to Sort / Sort in Place / Upfill) | | Session Fix | Session Fix - Interchange Prep: one window that checks and fixes a session before converting it with Interchanger (Pro Tools / Nuendo / Cubase) \u8212- checklist, Fix All, before / after check, review tracks (ReaImGui; replaces the five earlier Session Fix scripts) | | Copy / Cut Items and Envelope Points Respect Razor | Copy or cut items and envelope points, respecting razor edits | | Reposition Items | Space selected items by an interval (GUI) | | Move Selected Items to Track Under Mouse | Move items vertically, keeping their timeline position | | Toggle Mute Item Under Mouse | Mute / unmute the item under the mouse | | Explode Takes Across Tracks | Put each take of the selected items on its own track | | Explode Multichannel Poly Audio to Mono Items | Split poly files into one-channel items, keeping metadata | | Convert Empty Items to Audio Items | Keeps take names and notes | | Copy Unmuted Child Items to Parent Folder Track | Copy unmuted child items to the folder track (checks overlaps first) |\par}
 {\pard \ql \f0 \sa180 \li0 \fi0 \outlinelevel2 \b \fs28 Items Properties\par}
 {\pard \ql \f0 \sa180 \li0 \fi0 | Package | What it does | |---|---| | Auto Color - Items by Take Name | Color items by take-name keywords with a palette (GUI + Toggle Background Coloring, By Palette, Smart Random, Follow Track Color, All Shiny Color) |\par}
 {\pard \ql \f0 \sa180 \li0 \fi0 \outlinelevel2 \b \fs28 Selection\par}
