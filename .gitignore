@@ -50,6 +50,7 @@
 !/Library/hsuanice_Metadata Generator.lua
 !/Library/hsuanice_CLB Compare Engine.lua
 !/Library/hsuanice_EDL Parser.lua
+!/Library/hsuanice_Session Fix Core.lua
 !/Library/hsuanice_OTIO Bridge.lua
 !/Library/hsuanice_Subtitle Bridge.lua
 !/Library/hsuanice_Process Exec.lua

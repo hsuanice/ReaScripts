@@ -53,7 +53,7 @@ and background on/off scripts start with `Toggle`.
 |---|---|
 | Hover Editing | Pro Tools-style Split / Trim at the mouse or edit cursor (Toggle Hover Mode, Split, Trim or Extend Left / Right Edge) |
 | Reorder - Sort Items Vertically | Vertical reorder and sort of selected items by metadata (GUI + Copy to Sort / Sort in Place / Upfill) |
-| Session Fix | Clean up edits before moving a session to Pro Tools or Nuendo (edges off grid, looped sources, misaligned crossfades, overlaps, splits at fade edges) |
+| Session Fix | Session Fix - Interchange Prep: one window that checks and fixes a session before converting it with Interchanger (Pro Tools / Nuendo / Cubase) — checklist, Fix All, before / after check, review tracks (ReaImGui; replaces the five earlier Session Fix scripts) |
 | Copy / Cut Items and Envelope Points Respect Razor | Copy or cut items and envelope points, respecting razor edits |
 | Reposition Items | Space selected items by an interval (GUI) |
 | Move Selected Items to Track Under Mouse | Move items vertically, keeping their timeline position |

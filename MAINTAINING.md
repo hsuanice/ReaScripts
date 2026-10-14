@@ -27,7 +27,7 @@ These came from real decisions; follow them unless hsuanice says otherwise.
    files still contain Chinese comments; translate user-visible text before publishing, and
    comments when a file is touched (open TODO).
 4. **Small tools use REAPER's native `gfx`**, not ReaImGui. ReaImGui is for the big GUIs only
-   (RGWH, AudioSweet, Rename, Item List, Reorder, Conform List Browser).
+   (RGWH, AudioSweet, Rename, Item List, Reorder, Conform List Browser, Session Fix - Interchange Prep).
 5. **Warn, don't guess.** When a heuristic could pick the wrong item (re-linking, matching, cleanup),
    only act on unambiguous matches and show the rest to the user.
 6. **Reuse before writing.** Look for an existing function or Library module first.
@@ -207,7 +207,7 @@ For risky changes, push to a branch first — `check` runs on every branch, `dep
 ## 9. Open work
 
 Kept in hsuanice's notes; the main items: translate remaining Chinese comments; convert small
-ReaImGui tools to gfx; Session Fix - Edges Off Grid must skip crossfades; new
+ReaImGui tools to gfx; new
 `Session Fix - Remove Workflow Cues`; merge PM Scene Analyzer's report into PM Insight Analyzer;
 RGWH / AudioSweet efficiency clean-ups; a new product name for Conform List Browser (if renamed:
 new `.clm` files, still open `.clb`, keep internal names); offer the BirdBird gmem patch upstream.

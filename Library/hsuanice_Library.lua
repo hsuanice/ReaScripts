@@ -1,6 +1,6 @@
 --[[
 @description hsuanice Library - shared code used by hsuanice scripts (required)
-@version 26.1012.1206
+@version 26.1014.2216
 @author hsuanice
 @metapackage
 @provides
@@ -18,12 +18,13 @@
   [nomain] hsuanice_Metadata Generator.lua
   [nomain] hsuanice_CLB Compare Engine.lua
   [nomain] hsuanice_EDL Parser.lua
+  [nomain] hsuanice_Session Fix Core.lua
   [nomain] hsuanice_OTIO Bridge.lua
   [nomain] hsuanice_Subtitle Bridge.lua
   [nomain] hsuanice_Process Exec.lua
   [nomain] json.lua
 @changelog
-  - Add: CLB Compare Engine, EDL Parser, OTIO Bridge, Subtitle Bridge, Process Exec, json.lua (used by Conform List Browser).
+  - Add: hsuanice_Session Fix Core.lua (used by Session Fix - Interchange Prep).
 @about
   # hsuanice Library
 

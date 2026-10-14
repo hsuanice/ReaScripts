@@ -4,6 +4,12 @@
 
 Fix Tools - clean up edits before moving a REAPER session to Pro Tools or Nuendo
 
+## 26.1014.2216
+
+- New: Session Fix - Interchange Prep, one window that checks and fixes a session before Interchanger (Pro Tools / Nuendo / Cubase).
+- Removed: the five separate scripts (Edges Off Grid, Looped Source Items, Misaligned Crossfades, Overlap Items, Split Items at Fade Edges) - their checks are part of the new window. Re-assign shortcuts / toolbar buttons to the new script.
+- Requires ReaImGui and the hsuanice Library package.
+
 ## 26.1012.1641
 
 - Renamed to "Session Fix" (was "Fix Tools") as part of the 2026-10-12 naming clean-up.

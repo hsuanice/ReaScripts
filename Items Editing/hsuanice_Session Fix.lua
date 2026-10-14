@@ -1,26 +1,21 @@
 --[[
-@description Session Fix - clean up edits before moving a REAPER session to Pro Tools or Nuendo
-@version 26.1012.1641
+@description Session Fix - check and fix a REAPER session before moving it to Pro Tools, Nuendo or Cubase (Interchanger)
+@version 26.1014.2216
 @author hsuanice
 @metapackage
 @provides
-  [main] hsuanice_Session Fix - Edges Off Grid.lua
-  [main] hsuanice_Session Fix - Looped Source Items.lua
-  [main] hsuanice_Session Fix - Misaligned Crossfades.lua
-  [main] hsuanice_Session Fix - Overlap Items.lua
-  [main] hsuanice_Session Fix - Split Items at Fade Edges.lua
+  [main] hsuanice_Session Fix - Interchange Prep.lua
 @changelog
-  - Renamed to "Session Fix" (was "Fix Tools") as part of the 2026-10-12 naming clean-up.
-  - Reinstall the package from ReaPack and re-assign your shortcuts / toolbar buttons.
+  - New: Session Fix - Interchange Prep, one window that checks and fixes a session before Interchanger (Pro Tools / Nuendo / Cubase).
+  - Removed: the five separate scripts (Edges Off Grid, Looped Source Items, Misaligned Crossfades, Overlap Items, Split Items at Fade Edges) - their checks are part of the new window. Re-assign shortcuts / toolbar buttons to the new script.
+  - Requires ReaImGui and the hsuanice Library package.
 @about
   # Session Fix
 
-  Find and fix edit details that other DAWs handle differently when a REAPER session is exported.
+  Find and fix edit details that other DAWs handle differently when a REAPER session is
+  converted (for example with Interchanger): one window, "Session Fix - Interchange Prep",
+  with a checklist, automatic fixes, a before / after check of every fix and review tracks.
 
-  - Fix Edges Off Grid
-  - Fix Looped Source Items
-  - Fix Misaligned Crossfades
-  - Fix Overlap Items (partial or complete)
-  - Fix Split Items at Fade Edges
+  Requires ReaImGui and the "hsuanice Library" package; js_ReaScriptAPI is optional.
 --]]
 -- This file only describes the package for ReaPack; it is not installed.

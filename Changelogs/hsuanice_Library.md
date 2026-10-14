@@ -1,5 +1,9 @@
 # hsuanice_Library.lua — Changelog
 
+## 26.1014.2216
+
+- Add: hsuanice_Session Fix Core.lua (used by Session Fix - Interchange Prep).
+
 ## 26.1012.1206
 
 - Add: CLB Compare Engine, EDL Parser, OTIO Bridge, Subtitle Bridge, Process Exec, json.lua (used by Conform List Browser).

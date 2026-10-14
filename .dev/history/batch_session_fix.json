@@ -1,0 +1,13 @@
+{
+ "category": "Items Editing",
+ "packages": [
+  {
+   "files": [
+    {
+     "src": "Beta Testing/hsuanice_Session Fix - Interchange Prep.lua"
+    }
+   ]
+  }
+ ],
+ "note": "Published by hand (bump.py + edits) on 26.1014.2216 into the existing Session Fix metapackage; this file is only used by switch.py to repoint reaper-kb.ini."
+}
