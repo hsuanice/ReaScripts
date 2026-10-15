@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<index version="1" name="hsuanice Scripts" commit="f4b7b8c33375992ae5b67141a59f8b26aa3a4520">
+<index version="1" name="hsuanice Scripts" commit="9399592ff134b893b0ec3625228bf6f34a4e8790">
   <category name="Conform">
     <reapack name="hsuanice_Conform List Browser - CLB.lua" type="script" desc="Conform List Browser - CLB: conform EDL / AAF / XML / OTIO / subtitle lists (GUI + Jump / Link / Load / Reveal)">
       <metadata>
@@ -872,22 +872,6 @@
         <source main="main">https://github.com/hsuanice/ReaScripts/raw/69a8697e1b54666ea7228379b1490811fd778fa8/Tracks/hsuanice_Show%20Hide%20Folder%20Child%20Tracks%20in%20TCP.lua</source>
       </version>
     </reapack>
-    <reapack name="hsuanice_Split Tracks by Item Channel Count.lua" type="script" desc="Split Tracks by Item Channel Count - one track per mono / stereo / multichannel group">
-      <metadata>
-        <description><![CDATA[{\rtf1\ansi\deff0{\fonttbl{\f0 \fswiss Helvetica;}{\f1 \fmodern Courier;}}
-{\colortbl;\red255\green0\blue0;\red0\green0\blue255;}
-\widowctrl\hyphauto
-
-{\pard \ql \f0 \sa180 \li0 \fi0 Scan all non-hidden tracks and detect mixed item channel counts (1/2/3+). If confirmed, split items into separate tracks per channel group: "OriginalName Mono", "OriginalName Stereo", "OriginalName N-Ch" (N>=3). The original track is duplicated to preserve FX/routing; the duplicates are cleared via API and the relevant items are moved to them. No Fixed Lanes used. Effective channel count is taken from the source; takes with I_CHANMODE set to downmix/left/right are treated as Mono.\par}
-}
-]]></description>
-      </metadata>
-      <version name="26.1012.1641pre1" author="hsuanice" time="2026-10-12T09:44:14Z">
-        <changelog><![CDATA[- Renamed to "Split Tracks by Item Channel Count" (was "Split Tracks by Item Channel") as part of the 2026-10-12 naming clean-up.
-- Reinstall the package from ReaPack and re-assign your shortcuts / toolbar buttons.]]></changelog>
-        <source main="main">https://github.com/hsuanice/ReaScripts/raw/69a8697e1b54666ea7228379b1490811fd778fa8/Tracks/hsuanice_Split%20Tracks%20by%20Item%20Channel%20Count.lua</source>
-      </version>
-    </reapack>
   </category>
   <category name="Various">
     <reapack name="hsuanice_Clock with Date 24H.lua" type="script" desc="Clock with Date 24H - resizable, dockable clock window">
@@ -1026,7 +1010,7 @@ Packages
 {\pard \ql \f0 \sa180 \li0 \fi0 \outlinelevel2 \b \fs28 Selection\par}
 {\pard \ql \f0 \sa180 \li0 \fi0 | Package | What it does | |---|---| | Toggle Track and Razor Item Link like Pro Tools | Pro Tools-style "Link Track and Edit Selection": tracks follow razor areas / item selection | | Toggle Razor and Item Link Overlap or Contain | Razor areas select the items they overlap or fully contain | | Toggle Set Time Selection to Items on Right Drag | After a right-button drag, the time selection follows the selected items |\par}
 {\pard \ql \f0 \sa180 \li0 \fi0 \outlinelevel2 \b \fs28 Tracks\par}
-{\pard \ql \f0 \sa180 \li0 \fi0 | Package | What it does | |---|---| | Auto Pan LR tracks | Pan adjacent XXX_L / XXX_R track pairs hard left / right | | Delete Selected Tracks with Warning | Safe delete: asks first when tracks have items, FX, routing or are folders | | Show Hide Folder Child Tracks in TCP | Show or hide the children of the selected folder tracks (or of their parent) | | Split Tracks by Item Channel Count {\i (pre-release)} | One track per mono / stereo / multichannel group | | Import Audio Folders to Tracks - Field Recorder | Import one folder per track; channel-split recorder files are grouped (GUI) | | Import Audio Folders to Tracks - Music Multitrack | Import one folder per track for music multitrack sessions (GUI) |\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 | Package | What it does | |---|---| | Auto Pan LR tracks | Pan adjacent XXX_L / XXX_R track pairs hard left / right | | Delete Selected Tracks with Warning | Safe delete: asks first when tracks have items, FX, routing or are folders | | Show Hide Folder Child Tracks in TCP | Show or hide the children of the selected folder tracks (or of their parent) | | Import Audio Folders to Tracks - Field Recorder | Import one folder per track; channel-split recorder files are grouped (GUI) | | Import Audio Folders to Tracks - Music Multitrack | Import one folder per track for music multitrack sessions (GUI) |\par}
 {\pard \ql \f0 \sa180 \li0 \fi0 \outlinelevel2 \b \fs28 Metadata\par}
 {\pard \ql \f0 \sa180 \li0 \fi0 | Package | What it does | |---|---| | Rename from Metadata | Rename the active take or the source file from BWF / iXML metadata tokens, with live preview (GUI) | | Item List | Spreadsheet-style item tables with metadata columns: Item List Browser - ILB, Item List Editor - ILE (GUI) | | BWF / iXML Embed Tools | Embed BWF iXML Metadata from Take 1, Embed Timecode to BWF and iXML, Embed SMPTE UMID (needs BWF MetaEdit) |\par}
 {\pard \ql \f0 \sa180 \li0 \fi0 \outlinelevel2 \b \fs28 Conform\par}
