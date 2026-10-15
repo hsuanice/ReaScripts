@@ -4,6 +4,9 @@
 
 PM Insight Analyzer
 
+
+**Removed from ReaPack** (2026-10-15) while it is a work in progress; the script stays in the repository (`@noindex`) as a backup.
+
 ## 26.1012.1641pre1
 
 - Renamed to "Project Manager - PM Insight Analyzer" (was "PM_InsightAnalyzer") as part of the 2026-10-12 naming clean-up.

@@ -24,6 +24,7 @@ for d, _, fs in os.walk(ROOT):
             files.append(rel)
 
 errs, owners, pk = [], collections.defaultdict(list), 0
+backups = set()  # kept in the repository but not offered on ReaPack
 for rel in sorted(files):
     s = open(os.path.join(ROOT, rel), encoding="utf-8").read()
     m = re.match(r"--\[\[\n(.*?)\n--\]\]", s, re.S)
@@ -40,6 +41,8 @@ for rel in sorted(files):
     if not re.match(r"^\d", v) or " " in v or any(int(x) > 65535 for x in re.findall(r"\d+", v)):
         errs.append(f"{rel}: bad version '{v}'")
     if tag("noindex"):
+        if "backup" in tag("noindex").group(1).lower():  # "@noindex  (kept ... as a backup ...)": intentionally unlisted
+            backups.add(rel)
         continue
     pk += 1
     if not tag("description") or not tag("author"):
@@ -59,7 +62,7 @@ for t, o in owners.items():
     if len(o) > 1:
         errs.append(f"{t}: provided by more than one package: {o}")
 for rel in files:
-    if rel not in owners and not re.search(r"^@metapackage", open(os.path.join(ROOT, rel), encoding="utf-8").read(3000), re.M):
+    if rel not in owners and rel not in backups and not re.search(r"^@metapackage", open(os.path.join(ROOT, rel), encoding="utf-8").read(3000), re.M):
         errs.append(f"{rel}: published but not installed by any package")
 print(f"checked {len(files)} files, {pk} packages")
 print("\n".join(errs) if errs else "NO ERRORS")

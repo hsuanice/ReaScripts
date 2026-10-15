@@ -2,6 +2,7 @@
 @description Project Manager - PM Insight Analyzer: work-time analysis of PM Timer logs (work in progress)
 @version 26.1012.1641pre1
 @author hsuanice
+@noindex  (kept in the repository as a backup; not offered on ReaPack while it is a work in progress)
 @changelog
   - Renamed to "Project Manager - PM Insight Analyzer" (was "PM_InsightAnalyzer") as part of the 2026-10-12 naming clean-up.
   - Reinstall the package from ReaPack and re-assign your shortcuts / toolbar buttons.

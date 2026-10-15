@@ -79,6 +79,10 @@ command IDs).
   - *Metapackage*: a small description-only file with `@metapackage` and `@provides`
     (e.g. `hsuanice_Hover Editing.lua`); it is not installed itself.
   - `[nomain]` = installed but not in the Action List. `[main=mediaexplorer]` = Media Explorer section.
+  - *Backup only*: a script that stays in the repository (version history on GitHub) but is not
+    offered on ReaPack — `@noindex  (kept in the repository as a backup; ...)` in its header. The
+    word "backup" tells `validate.py` it is unlisted on purpose (e.g. PM Insight Analyzer while it
+    is a work in progress). Remove the line to publish it again.
 - **hsuanice Library** (`Library/hsuanice_Library.lua`) is a metapackage that installs every
   shared library as `[nomain]`. When a script starts using a new library file: add it to that
   `@provides`, to `.gitignore`, and bump the Library package.
