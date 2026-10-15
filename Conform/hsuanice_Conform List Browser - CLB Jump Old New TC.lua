@@ -1,10 +1,10 @@
 --[[
 @description CLB - Jump Old/New TC (Recut)
-@version 26.1012.1641
+@version 26.1015.1941
 @author hsuanice
 @noindex
 @changelog
-  - Renamed to "Conform List Browser - CLB Jump Old New TC" (was "CLB Jump Old-New TC") as part of the 2026-10-12 naming clean-up.
+  - Fix: after a jump the video sometimes showed the previous frame although the timecode looked right (the stored target was rounded to 6 decimals and could sit just before the frame); the jump now lands exactly on the frame.
 @about
   Standalone wrapper for hsuanice_Conform List Browser - CLB.lua's "CLB Recut"
   track — jumps the REAPER edit cursor between an event's old and new
@@ -117,7 +117,18 @@ local function main()
   if offset < 0 then offset = 0 end
   if offset > item_len then offset = item_len end
 
-  reaper.SetEditCurPos(jump_to + offset, true, false)
+  -- Land exactly on a frame: the stored target is rounded text (older CLB versions wrote 6
+  -- decimals), so it can sit a hair before the frame boundary and the video then shows the
+  -- previous frame although the timecode looks right. Snap to the nearest frame (project
+  -- timecode offset included) and stay a tiny fraction of a frame inside it.
+  local target = jump_to + offset
+  local fps = reaper.TimeMap_curFrameRate(0)
+  if fps and fps > 0 then
+    local toff = reaper.GetProjectTimeOffset(0, false)
+    local frame = math.floor((target + toff) * fps + 0.5)
+    target = (frame + 1e-6) / fps - toff
+  end
+  reaper.SetEditCurPos(target, true, false)
 end
 
 main()

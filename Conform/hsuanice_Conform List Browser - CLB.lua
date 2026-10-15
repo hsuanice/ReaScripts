@@ -1,6 +1,6 @@
 --[[
 @description Conform List Browser - CLB: conform EDL / AAF / XML / OTIO / subtitle lists (GUI + Jump / Link / Load / Reveal)
-@version 26.1015.1609
+@version 26.1015.1941
 @author hsuanice
 @provides
   [main] .
@@ -12,8 +12,7 @@
   [nomain] ../Tools/aaf_to_otio.py
   [nomain] ../Tools/subtitle_to_clb.py
 @changelog
-  - First stable (non pre-release) version: EDL / AAF / XML / OTIO / subtitle import, matching, item generation, Jump / Link / Load / Reveal.
-  - Known limitation: comparing old / new cuts (Compare view) is not finished yet - it may change or be incomplete.
+  - Fix: CLB Jump Old New TC could show the previous video frame; jumps land exactly on the frame now, and DME Recut stores jump targets with full precision.
 @about
   Note: the Compare view (old vs new cut, reconform) is a work in progress and not finished yet.
 
@@ -7379,7 +7378,7 @@ function CLB.populate_recut_track(moves, fps, is_drop)
     -- wrapper only ever parses this line, the rest of the note (if any
     -- gets added later, e.g. in Phase 2) is free-form.
     reaper.GetSetMediaItemInfo_String(item, "P_NOTES",
-      string.format("CLB_JUMP:%.6f", jump_to_sec), true)
+      string.format("CLB_JUMP:%.10f", jump_to_sec), true)
   end
 
   for _, mv in ipairs(moves) do

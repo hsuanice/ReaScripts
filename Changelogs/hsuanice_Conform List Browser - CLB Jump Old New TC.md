@@ -4,6 +4,10 @@
 
 CLB - Jump Old/New TC (Recut)
 
+## 26.1015.1941
+
+- Fix: after a jump the video sometimes showed the previous frame although the timecode looked right (the stored target was rounded to 6 decimals and could sit just before the frame); the jump now lands exactly on the frame.
+
 ## 26.1012.1641
 
 - Renamed to "Conform List Browser - CLB Jump Old New TC" (was "CLB Jump Old-New TC") as part of the 2026-10-12 naming clean-up.

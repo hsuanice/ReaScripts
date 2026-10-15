@@ -4,6 +4,10 @@
 
 Conform List Browser
 
+## 26.1015.1941
+
+- Fix: CLB Jump Old New TC could show the previous video frame; jumps land exactly on the frame now, and DME Recut stores jump targets with full precision.
+
 ## 26.1015.1609
 
 - First stable (non pre-release) version: EDL / AAF / XML / OTIO / subtitle import, matching, item generation, Jump / Link / Load / Reveal.
