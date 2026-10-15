@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<index version="1" name="hsuanice Scripts" commit="089799fc5bf1c33708d990d14e80d95af9b7f39a">
+<index version="1" name="hsuanice Scripts" commit="d815b532239938cd16accde583a81e6a2c30d0fc">
   <category name="Conform">
     <reapack name="hsuanice_Conform List Browser - CLB.lua" type="script" desc="Conform List Browser - CLB: conform EDL / AAF / XML / OTIO / subtitle lists (GUI + Jump / Link / Load / Reveal)">
       <metadata>
@@ -941,26 +941,6 @@
         <source main="main">https://github.com/hsuanice/ReaScripts/raw/69a8697e1b54666ea7228379b1490811fd778fa8/Various/hsuanice_Count%20Items%20and%20Tracks%20-%20Selection%20HUD.lua</source>
       </version>
     </reapack>
-    <reapack name="hsuanice_Project Manager - PM Timer.lua" type="script" desc="Project Manager - PM Timer: scene-aware work timer">
-      <metadata>
-        <description><![CDATA[{\rtf1\ansi\deff0{\fonttbl{\f0 \fswiss Helvetica;}{\f1 \fmodern Courier;}}
-{\colortbl;\red255\green0\blue0;\red0\green0\blue255;}
-\widowctrl\hyphauto
-
-{\pard \ql \f0 \sa180 \li0 \fi0 Scene-aware toggle timer for the hsuanice PM system. Uses gfx (no ReaImGui). 1-second display refresh via defer + time_precise.\par}
-{\pard \ql \f0 \sa180 \li0 \fi0 State machine: IDLE \u8596 ? WORKING (no BREAK state)\par}
-{\pard \ql \f0 \sa180 \li0 \fi0 Track structure (auto-managed): Scene Cut \u8592 ? folder track (I_FOLDERDEPTH = 1) 2026-03-01 \u8592 ? date track, direct child, depth = 0 2026-03-02 \u8592 ? depth = 0 DurationOnly_Log\u8592 ? last child, depth = -1; holds duration-only records\par}
-{\pard \ql \f0 \sa180 \li0 \fi0 Two work modes (auto-detected from selection): Scene Mode : a scene item on "Scene Cut" is selected P_EXT:SCENE_GUID written; name = "scene (tc) | work_type" Project Mode : no scene item selected P_EXT:SCENE_GUID not written; name = work_type only\par}
-{\pard \ql \f0 \sa180 \li0 \fi0 Work item metadata: P_EXT:SCENE_GUID (Scene Mode only), P_EXT:WORK_TYPE, P_EXT:END_REASON Duration-only items also carry P_EXT:IS_DURATION_ONLY = "1" All work items are locked (C_LOCK=1) after creation.\par}
-}
-]]></description>
-      </metadata>
-      <version name="26.1012.1641" author="hsuanice" time="2026-10-12T09:44:14Z">
-        <changelog><![CDATA[- Renamed to "Project Manager - PM Timer" (was "PM_Timer") as part of the 2026-10-12 naming clean-up.
-- Reinstall the package from ReaPack and re-assign your shortcuts / toolbar buttons.]]></changelog>
-        <source main="main">https://github.com/hsuanice/ReaScripts/raw/69a8697e1b54666ea7228379b1490811fd778fa8/Various/hsuanice_Project%20Manager%20-%20PM%20Timer.lua</source>
-      </version>
-    </reapack>
     <reapack name="hsuanice_Toggle Console to Work Log.lua" type="script" desc="Toggle Console to Work Log - append ReaScript console output to work.log">
       <metadata>
         <description><![CDATA[{\rtf1\ansi\deff0{\fonttbl{\f0 \fswiss Helvetica;}{\f1 \fmodern Courier;}}
@@ -1006,7 +986,7 @@ Packages
 \sa180\sa180\par}
 {\pard \ql \f0 \sa180 \li0 \fi0 \outlinelevel2 \b \fs28 Requirements\par}
 {\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab {\b ReaImGui} \u8212- needed by the GUI scripts; install with ReaPack ({\i ReaTeam Extensions} repository, included by default).\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab {\b SWS Extension} \u8212- required by {\i Project Manager - PM Timer}; optional elsewhere (a few features use it, e.g. {\i Retain Glue Cues}).\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab {\b SWS Extension} \u8212- optional; a few features use it (e.g. {\i Retain Glue Cues}, Session Fix's Off grid).\par}
 {\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab {\b js_ReaScriptAPI} \u8212- needed by {\i Toggle Set Time Selection to Items on Right Drag} and {\i Toggle Console to Work Log}, recommended for {\i Toggle Track and Razor Item Link like Pro Tools}; install with ReaPack ({\i ReaTeam Extensions}).\par}
 {\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab {\b Python 3 + OpenTimelineIO} ({\f1 pip install opentimelineio}) \u8212- only for {\i Conform List Browser} AAF / XML / OTIO import; EDL needs nothing extra. AAF also needs {\b aaftool} from LibAAF.\par}
 {\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab {\b BWF MetaEdit} ({\f1 bwfmetaedit} command-line tool) \u8212- optional; only needed for timecode (BWF TimeReference) embedding.\sa180\par}
@@ -1032,7 +1012,7 @@ Packages
 {\pard \ql \f0 \sa180 \li0 \fi0 \outlinelevel2 \b \fs28 Conform\par}
 {\pard \ql \f0 \sa180 \li0 \fi0 | Package | What it does | |---|---| | Conform List Browser - CLB | Conform tool for EDL / AAF / XML / OTIO / subtitle lists: match source media, generate and link items, compare old / new cuts {\i (compare: work in progress)} (GUI + Jump Old New TC, Link REAPER Items, Load from REAPER, Reveal Item) |\par}
 {\pard \ql \f0 \sa180 \li0 \fi0 \outlinelevel2 \b \fs28 Various\par}
-{\pard \ql \f0 \sa180 \li0 \fi0 | Package | What it does | |---|---| | Project Manager - PM Timer | Scene-aware work timer: logs work sessions per scene / project, keeps scene metadata up to date, shows FPS (needs SWS) | | Toggle Console to Work Log | Appends ReaScript console output to work.log in the project folder (needs js_ReaScriptAPI) | | Clock with Date 24H | Resizable, dockable clock window | | Count Items and Tracks - Selection HUD | Pro Tools-style selection info: item / track counts, start / end / length |\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 | Package | What it does | |---|---| | Toggle Console to Work Log | Appends ReaScript console output to work.log in the project folder (needs js_ReaScriptAPI) | | Clock with Date 24H | Resizable, dockable clock window | | Count Items and Tracks - Selection HUD | Pro Tools-style selection info: item / track counts, start / end / length |\par}
 {\pard \ql \f0 \sa180 \li0 \fi0 \outlinelevel2 \b \fs28 Library\par}
 {\pard \ql \f0 \sa180 \li0 \fi0 | Package | What it does | |---|---| | hsuanice Library | Shared code used by the scripts above; adds nothing to the Action List |\par}
 {\pard \ql \f0 \sa180 \li0 \fi0 Suggested shortcuts are listed in each package's About page in ReaPack (never assigned automatically).\par}
