@@ -4,6 +4,11 @@
 
 Conform List Browser
 
+## 26.1015.1609
+
+- First stable (non pre-release) version: EDL / AAF / XML / OTIO / subtitle import, matching, item generation, Jump / Link / Load / Reveal.
+- Known limitation: comparing old / new cuts (Compare view) is not finished yet - it may change or be incomplete.
+
 ## 26.1012.1641pre1
 
 - Renamed to "Conform List Browser - CLB" (was "Conform List Browser") as part of the 2026-10-12 naming clean-up.

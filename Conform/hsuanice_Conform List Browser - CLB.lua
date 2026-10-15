@@ -1,6 +1,6 @@
 --[[
 @description Conform List Browser - CLB: conform EDL / AAF / XML / OTIO / subtitle lists (GUI + Jump / Link / Load / Reveal)
-@version 26.1012.1641pre1
+@version 26.1015.1609
 @author hsuanice
 @provides
   [main] .
@@ -12,9 +12,11 @@
   [nomain] ../Tools/aaf_to_otio.py
   [nomain] ../Tools/subtitle_to_clb.py
 @changelog
-  - Renamed to "Conform List Browser - CLB" (was "Conform List Browser") as part of the 2026-10-12 naming clean-up.
-  - Reinstall the package from ReaPack and re-assign your shortcuts / toolbar buttons.
+  - First stable (non pre-release) version: EDL / AAF / XML / OTIO / subtitle import, matching, item generation, Jump / Link / Load / Reveal.
+  - Known limitation: comparing old / new cuts (Compare view) is not finished yet - it may change or be incomplete.
 @about
+  Note: the Compare view (old vs new cut, reconform) is a work in progress and not finished yet.
+
   A REAPER script for browsing and editing EDL (Edit Decision List) data
   with a spreadsheet-style table UI, based on the Item List Browser framework.
 
