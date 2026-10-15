@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<index version="1" name="hsuanice Scripts" commit="9399592ff134b893b0ec3625228bf6f34a4e8790">
+<index version="1" name="hsuanice Scripts" commit="28ae1d34ec782af38c552381527673d368cf3aaf">
   <category name="Conform">
     <reapack name="hsuanice_Conform List Browser - CLB.lua" type="script" desc="Conform List Browser - CLB: conform EDL / AAF / XML / OTIO / subtitle lists (GUI + Jump / Link / Load / Reveal)">
       <metadata>
@@ -7,6 +7,7 @@
 {\colortbl;\red255\green0\blue0;\red0\green0\blue255;}
 \widowctrl\hyphauto
 
+{\pard \ql \f0 \sa180 \li0 \fi0 Note: the Compare view (old vs new cut, reconform) is a work in progress and not finished yet.\par}
 {\pard \ql \f0 \sa180 \li0 \fi0 A REAPER script for browsing and editing EDL (Edit Decision List) data with a spreadsheet-style table UI, based on the Item List Browser framework.\par}
 {\pard \ql \f0 \sa180 \li0 \fi0 Reads CMX3600 EDL files, displays events in an editable table, and can generate empty items with metadata on REAPER tracks for conform workflows.\par}
 {\pard \ql \f0 \sa180 \li0 \fi0 Workflow:\par}
@@ -52,6 +53,18 @@
         <source file="../Tools/otio_to_clb.py">https://github.com/hsuanice/ReaScripts/raw/69a8697e1b54666ea7228379b1490811fd778fa8/Tools/otio_to_clb.py</source>
         <source file="../Tools/aaf_to_otio.py">https://github.com/hsuanice/ReaScripts/raw/69a8697e1b54666ea7228379b1490811fd778fa8/Tools/aaf_to_otio.py</source>
         <source file="../Tools/subtitle_to_clb.py">https://github.com/hsuanice/ReaScripts/raw/69a8697e1b54666ea7228379b1490811fd778fa8/Tools/subtitle_to_clb.py</source>
+      </version>
+      <version name="26.1015.1609" author="hsuanice" time="2026-10-15T08:10:06Z">
+        <changelog><![CDATA[- First stable (non pre-release) version: EDL / AAF / XML / OTIO / subtitle import, matching, item generation, Jump / Link / Load / Reveal.
+- Known limitation: comparing old / new cuts (Compare view) is not finished yet - it may change or be incomplete.]]></changelog>
+        <source main="main">https://github.com/hsuanice/ReaScripts/raw/28ae1d34ec782af38c552381527673d368cf3aaf/Conform/hsuanice_Conform%20List%20Browser%20-%20CLB.lua</source>
+        <source main="main" file="hsuanice_Conform List Browser - CLB Jump Old New TC.lua">https://github.com/hsuanice/ReaScripts/raw/28ae1d34ec782af38c552381527673d368cf3aaf/Conform/hsuanice_Conform%20List%20Browser%20-%20CLB%20Jump%20Old%20New%20TC.lua</source>
+        <source main="main" file="hsuanice_Conform List Browser - CLB Link REAPER Items.lua">https://github.com/hsuanice/ReaScripts/raw/28ae1d34ec782af38c552381527673d368cf3aaf/Conform/hsuanice_Conform%20List%20Browser%20-%20CLB%20Link%20REAPER%20Items.lua</source>
+        <source main="main" file="hsuanice_Conform List Browser - CLB Load from REAPER.lua">https://github.com/hsuanice/ReaScripts/raw/28ae1d34ec782af38c552381527673d368cf3aaf/Conform/hsuanice_Conform%20List%20Browser%20-%20CLB%20Load%20from%20REAPER.lua</source>
+        <source main="main" file="hsuanice_Conform List Browser - CLB Reveal Item.lua">https://github.com/hsuanice/ReaScripts/raw/28ae1d34ec782af38c552381527673d368cf3aaf/Conform/hsuanice_Conform%20List%20Browser%20-%20CLB%20Reveal%20Item.lua</source>
+        <source file="../Tools/otio_to_clb.py">https://github.com/hsuanice/ReaScripts/raw/28ae1d34ec782af38c552381527673d368cf3aaf/Tools/otio_to_clb.py</source>
+        <source file="../Tools/aaf_to_otio.py">https://github.com/hsuanice/ReaScripts/raw/28ae1d34ec782af38c552381527673d368cf3aaf/Tools/aaf_to_otio.py</source>
+        <source file="../Tools/subtitle_to_clb.py">https://github.com/hsuanice/ReaScripts/raw/28ae1d34ec782af38c552381527673d368cf3aaf/Tools/subtitle_to_clb.py</source>
       </version>
     </reapack>
   </category>
@@ -1014,7 +1027,7 @@ Packages
 {\pard \ql \f0 \sa180 \li0 \fi0 \outlinelevel2 \b \fs28 Metadata\par}
 {\pard \ql \f0 \sa180 \li0 \fi0 | Package | What it does | |---|---| | Rename from Metadata | Rename the active take or the source file from BWF / iXML metadata tokens, with live preview (GUI) | | Item List | Spreadsheet-style item tables with metadata columns: Item List Browser - ILB, Item List Editor - ILE (GUI) | | BWF / iXML Embed Tools | Embed BWF iXML Metadata from Take 1, Embed Timecode to BWF and iXML, Embed SMPTE UMID (needs BWF MetaEdit) |\par}
 {\pard \ql \f0 \sa180 \li0 \fi0 \outlinelevel2 \b \fs28 Conform\par}
-{\pard \ql \f0 \sa180 \li0 \fi0 | Package | What it does | |---|---| | Conform List Browser - CLB {\i (pre-release)} | Conform tool for EDL / AAF / XML / OTIO / subtitle lists: match source media, generate and link items, compare old / new cuts (GUI + Jump Old New TC, Link REAPER Items, Load from REAPER, Reveal Item) |\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 | Package | What it does | |---|---| | Conform List Browser - CLB | Conform tool for EDL / AAF / XML / OTIO / subtitle lists: match source media, generate and link items, compare old / new cuts {\i (compare: work in progress)} (GUI + Jump Old New TC, Link REAPER Items, Load from REAPER, Reveal Item) |\par}
 {\pard \ql \f0 \sa180 \li0 \fi0 \outlinelevel2 \b \fs28 Various\par}
 {\pard \ql \f0 \sa180 \li0 \fi0 | Package | What it does | |---|---| | Project Manager - PM Timer | Scene-aware work timer: logs work sessions per scene / project, keeps scene metadata up to date, shows FPS (needs SWS) | | Project Manager - PM Insight Analyzer {\i (pre-release)} | Work-time and efficiency analysis of PM Timer logs (work in progress; needs SWS) | | Toggle Console to Work Log | Appends ReaScript console output to work.log in the project folder (needs js_ReaScriptAPI) | | Clock with Date 24H | Resizable, dockable clock window | | Count Items and Tracks - Selection HUD | Pro Tools-style selection info: item / track counts, start / end / length |\par}
 {\pard \ql \f0 \sa180 \li0 \fi0 \outlinelevel2 \b \fs28 Library\par}
