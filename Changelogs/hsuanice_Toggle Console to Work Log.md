@@ -4,6 +4,9 @@
 
 Console to Work Log Daemon
 
+
+**Removed from ReaPack** (2026-10-15) with the other Project Manager scripts; the script stays in the repository (`@noindex`) as a backup.
+
 ## 26.1012.1641
 
 - Renamed to "Toggle Console to Work Log" (was "Console to Work Log Daemon") as part of the 2026-10-12 naming clean-up.

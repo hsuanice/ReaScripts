@@ -2,6 +2,7 @@
 @description Toggle Console to Work Log - append ReaScript console output to work.log
 @version 26.1012.1641
 @author hsuanice
+@noindex  (kept in the repository as a backup; part of Project Manager, not offered on ReaPack for now)
 @changelog
   - Renamed to "Toggle Console to Work Log" (was "Console to Work Log Daemon") as part of the 2026-10-12 naming clean-up.
   - Reinstall the package from ReaPack and re-assign your shortcuts / toolbar buttons.

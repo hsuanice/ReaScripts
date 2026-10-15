@@ -19,7 +19,7 @@ REAPER scripts for audio post-production, by hsuanice.
 
 - **ReaImGui** — needed by the GUI scripts; install with ReaPack (*ReaTeam Extensions* repository, included by default).
 - **SWS Extension** — optional; a few features use it (e.g. *Retain Glue Cues*, Session Fix's Off grid).
-- **js_ReaScriptAPI** — needed by *Toggle Set Time Selection to Items on Right Drag* and *Toggle Console to Work Log*, recommended for *Toggle Track and Razor Item Link like Pro Tools*; install with ReaPack (*ReaTeam Extensions*).
+- **js_ReaScriptAPI** — needed by *Toggle Set Time Selection to Items on Right Drag*, recommended for *Toggle Track and Razor Item Link like Pro Tools*; install with ReaPack (*ReaTeam Extensions*).
 - **Python 3 + OpenTimelineIO** (`pip install opentimelineio`) — only for *Conform List Browser* AAF / XML / OTIO import; EDL needs nothing extra. AAF also needs **aaftool** from LibAAF.
 - **BWF MetaEdit** (`bwfmetaedit` command-line tool) — optional; only needed for timecode (BWF TimeReference) embedding.
 
@@ -105,7 +105,6 @@ and background on/off scripts start with `Toggle`.
 
 | Package | What it does |
 |---|---|
-| Toggle Console to Work Log | Appends ReaScript console output to work.log in the project folder (needs js_ReaScriptAPI) |
 | Clock with Date 24H | Resizable, dockable clock window |
 | Count Items and Tracks - Selection HUD | Pro Tools-style selection info: item / track counts, start / end / length |
 
