@@ -4,6 +4,11 @@
 
 CLB - Jump Old/New TC (Recut)
 
+## 26.1015.1954
+
+- Fix: with the cursor on the boundary of two back-to-back CLB Recut items, the jump used the item ending there and landed at its end (e.g. 3 frames early); the item starting there is used now.
+- Fix: the jump lands exactly on the frame (no previous video frame).
+
 ## 26.1015.1941
 
 - Fix: after a jump the video sometimes showed the previous frame although the timecode looked right (the stored target was rounded to 6 decimals and could sit just before the frame); the jump now lands exactly on the frame.

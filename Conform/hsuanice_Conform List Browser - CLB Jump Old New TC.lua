@@ -1,10 +1,11 @@
 --[[
 @description CLB - Jump Old/New TC (Recut)
-@version 26.1015.1941
+@version 26.1015.1954
 @author hsuanice
 @noindex
 @changelog
-  - Fix: after a jump the video sometimes showed the previous frame although the timecode looked right (the stored target was rounded to 6 decimals and could sit just before the frame); the jump now lands exactly on the frame.
+  - Fix: with the cursor on the boundary of two back-to-back CLB Recut items, the jump used the item ending there and landed at its end (e.g. 3 frames early); the item starting there is used now.
+  - Fix: the jump lands exactly on the frame (no previous video frame).
 @about
   Standalone wrapper for hsuanice_Conform List Browser - CLB.lua's "CLB Recut"
   track — jumps the REAPER edit cursor between an event's old and new
@@ -56,16 +57,25 @@ local function find_item_at_cursor(track, cursor_pos)
   local fps = reaper.TimeMap_curFrameRate(0)
   if not fps or fps <= 0 then fps = 24 end
   local tol = 0.5 / fps
+  local eps = 1e-6
+  -- 1) the item the cursor is in: start included, end excluded, so on the boundary of two
+  --    back-to-back items the one that STARTS there wins (the one ending there would jump to
+  --    its own end, e.g. 3 frames early); overlapping items: the later start wins
+  -- 2) otherwise the nearest item within half a frame
+  local best, best_pos, near, near_d
   local n = reaper.CountTrackMediaItems(track)
   for i = 0, n - 1 do
     local item = reaper.GetTrackMediaItem(track, i)
     local pos  = reaper.GetMediaItemInfo_Value(item, "D_POSITION")
     local iend = pos + reaper.GetMediaItemInfo_Value(item, "D_LENGTH")
-    if cursor_pos >= pos - tol and cursor_pos <= iend + tol then
-      return item
+    if cursor_pos >= pos - eps and cursor_pos < iend - eps then
+      if not best or pos > best_pos then best, best_pos = item, pos end
+    elseif cursor_pos >= pos - tol and cursor_pos <= iend + tol then
+      local d = math.min(math.abs(cursor_pos - pos), math.abs(cursor_pos - iend))
+      if not near or d < near_d then near, near_d = item, d end
     end
   end
-  return nil
+  return best or near
 end
 
 local function parse_jump_target(item)

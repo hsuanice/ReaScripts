@@ -1,6 +1,6 @@
 --[[
 @description Conform List Browser - CLB: conform EDL / AAF / XML / OTIO / subtitle lists (GUI + Jump / Link / Load / Reveal)
-@version 26.1015.1941
+@version 26.1015.1954
 @author hsuanice
 @provides
   [main] .
@@ -12,7 +12,7 @@
   [nomain] ../Tools/aaf_to_otio.py
   [nomain] ../Tools/subtitle_to_clb.py
 @changelog
-  - Fix: CLB Jump Old New TC could show the previous video frame; jumps land exactly on the frame now, and DME Recut stores jump targets with full precision.
+  - Fix: CLB Jump Old New TC - on the boundary of two back-to-back Recut items it jumped from the wrong one (e.g. 3 frames early); jumps also land exactly on the frame, and DME Recut stores jump targets with full precision.
 @about
   Note: the Compare view (old vs new cut, reconform) is a work in progress and not finished yet.
 

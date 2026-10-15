@@ -4,6 +4,10 @@
 
 Conform List Browser
 
+## 26.1015.1954
+
+- Fix: CLB Jump Old New TC - on the boundary of two back-to-back Recut items it jumped from the wrong one (e.g. 3 frames early); jumps also land exactly on the frame, and DME Recut stores jump targets with full precision.
+
 ## 26.1015.1941
 
 - Fix: CLB Jump Old New TC could show the previous video frame; jumps land exactly on the frame now, and DME Recut stores jump targets with full precision.
