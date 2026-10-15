@@ -4,6 +4,9 @@
 
 Split Tracks by Item Channel
 
+
+**Retired** (2026-10-15): replaced by the Mixed channels check in Session Fix - Interchange Prep (splits by channel count as played; the largest group stays on the original track). Kept in the local Archive.
+
 ## 26.1012.1641pre1
 
 - Renamed to "Split Tracks by Item Channel Count" (was "Split Tracks by Item Channel") as part of the 2026-10-12 naming clean-up.

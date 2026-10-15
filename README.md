@@ -84,7 +84,6 @@ and background on/off scripts start with `Toggle`.
 | Auto Pan LR tracks | Pan adjacent XXX_L / XXX_R track pairs hard left / right |
 | Delete Selected Tracks with Warning | Safe delete: asks first when tracks have items, FX, routing or are folders |
 | Show Hide Folder Child Tracks in TCP | Show or hide the children of the selected folder tracks (or of their parent) |
-| Split Tracks by Item Channel Count *(pre-release)* | One track per mono / stereo / multichannel group |
 | Import Audio Folders to Tracks - Field Recorder | Import one folder per track; channel-split recorder files are grouped (GUI) |
 | Import Audio Folders to Tracks - Music Multitrack | Import one folder per track for music multitrack sessions (GUI) |
 
