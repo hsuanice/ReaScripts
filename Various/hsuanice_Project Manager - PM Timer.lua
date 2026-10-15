@@ -2,6 +2,7 @@
 @description Project Manager - PM Timer: scene-aware work timer
 @version 26.1012.1641
 @author hsuanice
+@noindex  (kept in the repository as a backup; Project Manager is not offered on ReaPack for now)
 @changelog
   - Renamed to "Project Manager - PM Timer" (was "PM_Timer") as part of the 2026-10-12 naming clean-up.
   - Reinstall the package from ReaPack and re-assign your shortcuts / toolbar buttons.

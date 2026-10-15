@@ -4,6 +4,9 @@
 
 PM Timer - Scene-aware Work Timer
 
+
+**Removed from ReaPack** (2026-10-15) together with PM Insight Analyzer; the script stays in the repository (`@noindex`) as a backup.
+
 ## 26.1012.1641
 
 - Renamed to "Project Manager - PM Timer" (was "PM_Timer") as part of the 2026-10-12 naming clean-up.
