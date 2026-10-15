@@ -1,6 +1,6 @@
 --[[
 @description hsuanice Library - shared code used by hsuanice scripts (required)
-@version 26.1014.2216
+@version 26.1015.1125
 @author hsuanice
 @metapackage
 @provides
@@ -24,7 +24,7 @@
   [nomain] hsuanice_Process Exec.lua
   [nomain] json.lua
 @changelog
-  - Add: hsuanice_Session Fix Core.lua (used by Session Fix - Interchange Prep).
+  - Update: hsuanice_Session Fix Core.lua (short titles and impact levels for the checks).
 @about
   # hsuanice Library
 

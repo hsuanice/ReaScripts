@@ -1,12 +1,10 @@
 --[[
 @description Session Fix - Interchange Prep: check and fix a REAPER session before converting it with Interchanger
-@version 26.1014.2216
+@version 26.1015.1125
 @author hsuanice
 @noindex
 @changelog
-  - First release: one window replaces the five Session Fix scripts (Edges Off Grid, Looped Source
-    Items, Misaligned Crossfades, Overlap Items, Split Items at Fade Edges).
-  - Full history: Changelogs/ in the repository (https://github.com/hsuanice/ReaScripts/tree/master/Changelogs)
+  - Change: each check shows a short coloured title and a one-line description; colour = impact on the sound in an editing session (red print / delete, orange big change, yellow small change, green sound unchanged, grey review only), with a legend above the list.
 @about
   # Session Fix - Interchange Prep
 
@@ -141,6 +139,10 @@ local COL_BAD  = 0xFF9B4AFF
 local COL_INFO = 0xA0A0A0FF
 local COL_RED  = 0xFF5050FF
 local COL_YEL  = 0xF0D040FF
+local COL_ORG  = 0xFF9B4AFF
+local COL_GREY = 0x9A9A9AFF
+-- impact level of a check (see CORE: red / orange / yellow / green / review)
+local LEVEL_COL = { red = COL_RED, orange = COL_ORG, yellow = COL_YEL, green = COL_OK, review = COL_GREY }
 
 local function project_key()
   local proj, path = r.EnumProjects(-1, "")
@@ -514,6 +516,14 @@ local function draw_rules()
   ImGui.SameLine(ctx)
   if ImGui.Button(ctx, "Close all") then state.open_all = false end
   if ImGui.IsItemHovered(ctx) then ImGui.SetTooltip(ctx, "Close every list (lists with items to review stay open)") end
+  -- colour legend: what a fix does to the sound (rated for an editing session)
+  ImGui.SameLine(ctx, 0, S(18))
+  ImGui.TextColored(ctx, COL_INFO, CORE.SESSION_TYPE .. ":")
+  for _, l in ipairs({ { "red", "print / delete" }, { "orange", "big change" }, { "yellow", "small change" },
+      { "green", "sound unchanged" }, { "review", "review only" } }) do
+    ImGui.SameLine(ctx)
+    ImGui.TextColored(ctx, LEVEL_COL[l[1]], l[2])
+  end
   local _, avail_h = ImGui.GetContentRegionAvail(ctx)
   if not ImGui.BeginTable(ctx, "rules", 4, flags, 0, avail_h) then return end
   ImGui.TableSetupScrollFreeze(ctx, 0, 1) -- keep the header row visible
@@ -584,12 +594,21 @@ local function draw_rules()
       elseif state.open_all ~= nil then ImGui.SetNextItemOpen(ctx, state.open_all)
       elseif state.force_open[d.id] then ImGui.SetNextItemOpen(ctx, true) end
       state.force_open[d.id] = nil
-      open = ImGui.TreeNode(ctx, d.title .. tag .. "###tree")
+      ImGui.PushStyleColor(ctx, ImGui.Col_Text, LEVEL_COL[d.level] or COL_GREY)
+      open = ImGui.TreeNode(ctx, d.short .. "###tree")
+      ImGui.PopStyleColor(ctx)
+      if ImGui.IsItemHovered(ctx) then ImGui.SetTooltip(ctx, d.title .. "\nFix: " .. d.fix_note) end
+      ImGui.SameLine(ctx)
+      ImGui.TextColored(ctx, COL_INFO, d.desc .. tag)
       if todo > 0 and state.scroll_to_review then ImGui.SetScrollHereY(ctx, 0.1); state.scroll_to_review = nil end
     else
-      ImGui.Text(ctx, d.title)
+      ImGui.Indent(ctx, ImGui.GetTreeNodeToLabelSpacing(ctx)) -- line up with the titles that have an arrow
+      ImGui.TextColored(ctx, LEVEL_COL[d.level] or COL_GREY, d.short)
+      if ImGui.IsItemHovered(ctx) then ImGui.SetTooltip(ctx, d.title .. "\nFix: " .. d.fix_note) end
+      ImGui.SameLine(ctx)
+      ImGui.TextColored(ctx, COL_INFO, d.desc)
+      ImGui.Unindent(ctx, ImGui.GetTreeNodeToLabelSpacing(ctx))
     end
-    if ImGui.IsItemHovered(ctx) then ImGui.SetTooltip(ctx, "Fix: " .. d.fix_note) end
 
     if open then
       ImGui.TableNextRow(ctx)

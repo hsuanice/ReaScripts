@@ -1,11 +1,10 @@
 --[[
 @description hsuanice Session Fix Core - checks and fixes for preparing a REAPER session for Interchanger / Pro Tools / Nuendo
-@version 26.1014.2216
+@version 26.1015.1125
 @author hsuanice
 @noindex
 @changelog
-  - First release: the checks and fixes behind "Session Fix - Interchange Prep".
-  - Full history: Changelogs/ in the repository (https://github.com/hsuanice/ReaScripts/tree/master/Changelogs)
+  - Add: short title, description and impact level for every check.
 @about
   Shared library behind "Session Fix - Interchange Prep".
   Every rule has: id, title, scope ("item" / "track" / "file"), scan() returning issues,
@@ -1749,6 +1748,39 @@ rule {
 M.RULES = RULES
 function M.rule_by_id(id)
   for _, d in ipairs(RULES) do if d.id == id then return d end end
+end
+
+-- Short title (key words first), one-line description and impact level for the checklist.
+-- Levels for an EDITING session (tracks only hold material; no mixing, no panning):
+--   red = prints audio or deletes items, orange = big change, yellow = small change (sound
+--   slightly different), green = sound unchanged, review = listed only, no automatic fix.
+M.SESSION_TYPE = "Editing session"
+local LABELS = {
+  visibility     = { "Hidden tracks",  "show and expand all tracks first", "green" },
+  take_volume    = { "Take volume",    "merge take volume into item volume", "green" },
+  take_pan       = { "Take pan",       "take pan not centered (review)", "review" },
+  mixed_channels = { "Mixed channels", "mono / stereo / multichannel items on one track (review)", "review" },
+  folders        = { "Folders",        "flatten folders, keep the children (Keep Folder: only expand)", "green" },
+  empty_tracks   = { "Empty tracks",   "tracks without items (aux, buses) -> delete", "green" },
+  renumber       = { "Track names",    "number same-name tracks in order", "green" },
+  track_mix      = { "Track mix",      "reset volume / pan / width / polarity, L/R pairs hard left / right", "green" },
+  mute_solo      = { "Mute / Solo",    "muted or soloed tracks (review)", "review" },
+  envelopes      = { "Automation",     "single-value take volume -> merge, changing take envelopes -> print, track envelopes -> remove", "red" },
+  needs_render   = { "Render",         "playrate / pitch / stretch markers / take FX / polarity -> print with RGWH", "red" },
+  overlaps       = { "Overlaps",       "hidden duplicates and leftover slivers -> delete", "red" },
+  crossfades     = { "Crossfades",     "broken crossfades -> match the overlap", "yellow" },
+  fade_meet      = { "Fade overlap",   "fade-in and fade-out meet -> shorten", "yellow" },
+  fade_shapes    = { "Fade shapes",    "set the standard shapes (Settings)", "yellow" },
+  source_range   = { "Source length limit", "item starts before / ends after its file -> trim (up to 1 frame) or print", "red" },
+  media          = { "Media",          "files outside the project / not WAV / other sample rate", "review" },
+  off_grid       = { "Frame grid",     "edges off the frame grid -> snap (max. 1 frame)", "yellow" },
+  empty_midi     = { "Empty / MIDI",   "empty items and MIDI items (review)", "review" },
+  channel_mode   = { "Channel mode",   "not \"normal\" (reverse, downmix, one channel, a pair): mono file -> reset, stereo / poly file -> print", "red" },
+  inactive_takes = { "Inactive takes", "crop to the active take", "green" },
+}
+for _, d in ipairs(RULES) do
+  local l = LABELS[d.id]
+  if l then d.short, d.desc, d.level = l[1], l[2], l[3] else d.short, d.desc, d.level = d.title, "", "review" end
 end
 
 -- What each fix is allowed to change, for the before / after check (see Audit below)

@@ -4,6 +4,10 @@
 
 Fix Tools - clean up edits before moving a REAPER session to Pro Tools or Nuendo
 
+## 26.1015.1125
+
+- Change: each check shows a short coloured title and a one-line description; colour = impact on the sound in an editing session (red print / delete, orange big change, yellow small change, green sound unchanged, grey review only), with a legend above the list.
+
 ## 26.1014.2216
 
 - New: Session Fix - Interchange Prep, one window that checks and fixes a session before Interchanger (Pro Tools / Nuendo / Cubase).
