@@ -1,10 +1,12 @@
 --[[
 @description hsuanice Session Fix Core - checks and fixes for preparing a REAPER session for Interchanger / Pro Tools / Nuendo
-@version 26.1015.1125
+@version 26.1015.1303
 @author hsuanice
 @noindex
 @changelog
-  - Add: short title, description and impact level for every check.
+  - Add: Mixed channels can be fixed - one track per channel count as played ("<track> mono / stereo / 4ch ..."); the group with the most items stays on the original track, fewer channels above, more below; folders stay intact. Runs after Channel mode.
+  - Change: Off grid and the Source length limit trim use the project grid (SWS BR_GetClosest/Next/PrevGridDivision; frame grid without SWS); grid_label() describes it.
+  - Fix: an edge 1 sample off the grid was listed but never snapped (the fix used a 1-sample tolerance, the scan half a sample).
 @about
   Shared library behind "Session Fix - Interchange Prep".
   Every rule has: id, title, scope ("item" / "track" / "file"), scan() returning issues,
@@ -48,6 +50,54 @@ local function tc(t)
   return r.format_timestr_pos(t, "", 5) -- timecode
 end
 M.tc = tc
+
+-- The project grid (frames, beats, bars ... whatever the grid is set to, following the tempo map).
+-- Uses SWS (BR_Get*GridDivision: every division, whatever the zoom); without SWS: the frame grid.
+local function frame_q(t, mode)
+  local fps, off = r.TimeMap_curFrameRate(0), r.GetProjectTimeOffset(0, false)
+  local f = (t + off) * fps
+  local g = mode == "floor" and math.floor(f + 1e-6) or (mode == "ceil" and math.ceil(f - 1e-6) or math.floor(f + 0.5))
+  return g / fps - off
+end
+local HAS_SWS_GRID = r.BR_GetClosestGridDivision and r.BR_GetNextGridDivision and r.BR_GetPrevGridDivision
+-- nearest / floor / ceil grid position
+local function grid_q(t, mode)
+  if not HAS_SWS_GRID then return frame_q(t, mode) end
+  local c = r.BR_GetClosestGridDivision(t)
+  if mode == "floor" then return (c <= t + 1e-9) and c or r.BR_GetPrevGridDivision(t) end
+  if mode == "ceil" then return (c >= t - 1e-9) and c or r.BR_GetNextGridDivision(t) end
+  return c
+end
+M.grid_q = grid_q
+-- size of one grid step at a position (seconds)
+local function grid_step(t)
+  if not HAS_SWS_GRID then return 1 / r.TimeMap_curFrameRate(0) end
+  local c = r.BR_GetClosestGridDivision(t or 0)
+  local step = r.BR_GetNextGridDivision(c) - c
+  return step > 0 and step or 1 / r.TimeMap_curFrameRate(0)
+end
+M.grid_step = grid_step
+-- the grid in words, e.g. "1 frame", "2 frames", "1/16 note", "0.500 s"
+function M.grid_label()
+  local t = r.GetCursorPosition()
+  local step = grid_step(t)
+  local frames = step * r.TimeMap_curFrameRate(0)
+  local label
+  if math.abs(frames - math.floor(frames + 0.5)) < 0.01 and frames >= 0.99 then
+    local n = math.floor(frames + 0.5)
+    label = n == 1 and "1 frame" or (n .. " frames")
+  else
+    local c = grid_q(t)
+    local qn = r.TimeMap2_timeToQN(0, c + step) - r.TimeMap2_timeToQN(0, c)
+    local x = qn > 0 and 4 / qn or 0
+    if x >= 1 and math.abs(x - math.floor(x + 0.5)) < 0.01 then
+      label = string.format("1/%d note", math.floor(x + 0.5))
+    else
+      label = string.format("%.3f s", step)
+    end
+  end
+  return HAS_SWS_GRID and label or (label .. ", frame grid (SWS not installed)")
+end
 
 local function track_name(tr)
   if tr == r.GetMasterTrack(0) then return "MASTER" end
@@ -119,17 +169,6 @@ local function source_type(src)
 end
 
 -- Channel count as heard (downmix / left / right channel modes count as mono)
-local function take_channels(take)
-  if not take then return nil end
-  local src = r.GetMediaItemTake_Source(take)
-  if not src or source_type(src) == "MIDI" then return nil end
-  local mode = r.GetMediaItemTakeInfo_Value(take, "I_CHANMODE") or 0
-  if mode == 2 or mode == 3 or mode == 4 then return 1 end
-  local n = math.floor(r.GetMediaSourceNumChannels(src) or 0)
-  if n <= 1 then return 1 end
-  return n
-end
-
 local function is_video(src)
   local t = source_type(src)
   return t == "VIDEO" or t == "VIDEOEFFECT"
@@ -536,28 +575,6 @@ rule {
         if math.abs(p) > 1e-6 or env then
           out[#out + 1] = { item = it, text = string.format("take pan %.0f%%%s", p * 100, env and " + pan envelope" or "") }
         end
-      end
-    end
-    return out
-  end,
-}
-
-rule {
-  id = "mixed_channels", title = "Track mixes mono / stereo / multichannel items", scope = "track",
-  fix_note = "Split into one track per channel count",
-  scan = function(ctx)
-    local out = {}
-    for _, tr in ipairs(ctx.tracks) do
-      local seen, kinds = {}, {}
-      for i = 0, r.CountTrackMediaItems(tr) - 1 do
-        local ch = take_channels(r.GetActiveTake(r.GetTrackMediaItem(tr, i)))
-        if ch and not seen[ch] then seen[ch] = true; kinds[#kinds + 1] = ch end
-      end
-      if #kinds > 1 then
-        table.sort(kinds)
-        local names = {}
-        for _, k in ipairs(kinds) do names[#names + 1] = k == 1 and "mono" or (k == 2 and "stereo" or (k .. "ch")) end
-        out[#out + 1] = { track = tr, text = table.concat(names, " + ") }
       end
     end
     return out
@@ -1426,17 +1443,12 @@ rule {
       if take then
         local plan, over_s, over_e, s, e = overrun_plan(it, take, frame, eps)
         if plan == "trim" then
-          -- trim to the source, then inward to the frame grid; fade edges stay on the grid
-          local off = ctx.time_offset
-          local function q(t, mode)
-            local f = (t + off) * ctx.fps
-            local g = mode == "floor" and math.floor(f + 1e-6) or (mode == "ceil" and math.ceil(f - 1e-6) or math.floor(f + 0.5))
-            return g / ctx.fps - off
-          end
+          -- trim to the source, then inward to the project grid; fade edges stay on the grid
+          local q = grid_q
           local fi, fo = fades(it)
           local ns = over_s > 0 and q(s + over_s, "ceil") or s
           local ne = over_e > 0 and q(e - over_e, "floor") or e
-          if ne - ns < frame then ns, ne = s + over_s, e - over_e end -- too short for the grid: exact trim
+          if ne - ns < grid_step(s) then ns, ne = s + over_s, e - over_e end -- too short for the grid: exact trim
           local d = ns - s
           if d > 0 then
             r.SetMediaItemInfo_Value(it, "D_POSITION", ns)
@@ -1538,17 +1550,13 @@ rule {
 }
 
 rule {
-  id = "off_grid", title = "Item / fade edges not on the frame grid (crossfades excluded)", scope = "item",
-  fix_note = "Snap to the nearest frame, content stays in place; crossfades are never moved. Falls back to snapping inward when outward would pass the source or touch a neighbor",
+  id = "off_grid", title = "Item / fade edges not on the project grid (crossfades excluded)", scope = "item",
+  fix_note = "Snap to the nearest grid line of the project grid (frames, beats ... as set in REAPER), content stays in place; crossfades are never moved. Falls back to snapping inward when outward would pass the source or touch a neighbor",
   fix = function(issues, ctx)
-    local fps = ctx.fps
-    local off = ctx.time_offset
-    local function q(t, mode) -- nearest / floor / ceil frame time
-      local f = (t + off) * fps
-      local g = mode == "floor" and math.floor(f + 1e-9) or (mode == "ceil" and math.ceil(f - 1e-9) or math.floor(f + 0.5))
-      return g / fps - off
-    end
-    local eps = ctx.sample_sec
+    local q = grid_q -- nearest / floor / ceil position on the project grid
+    -- same tolerance as the scan (half a sample): an edge 1 sample off the grid must move,
+    -- e.g. a file whose TimeReference is 1 sample late, spotted to its timecode
+    local eps = 0.5 / ctx.sr
     local n = 0
     for _, is in ipairs(issues) do
       local it = is.item
@@ -1601,17 +1609,12 @@ rule {
         n = n + 1
       end
     end
-    return n, string.format("%d item%s snapped to the frame grid", n, n == 1 and "" or "s")
+    return n, string.format("%d item%s snapped to the project grid", n, n == 1 and "" or "s")
   end,
   scan = function(ctx)
     local out = {}
-    local fps = ctx.fps
-    local off = ctx.time_offset
     local tol = 0.5 / ctx.sr -- half a sample
-    local function off_grid(t)
-      local f = (t + off) * fps
-      return math.abs(f - math.floor(f + 0.5)) / fps > tol
-    end
+    local function off_grid(t) return math.abs(t - grid_q(t)) > tol end
     for _, tr in ipairs(ctx.tracks) do
       local list = sorted_items(tr)
       for i, A in ipairs(list) do
@@ -1721,6 +1724,109 @@ rule {
   end,
 }
 
+-- Channel count as the item plays it: mono downmix / one channel = 1, a stereo pair = 2,
+-- otherwise the file's channel count (MIDI / empty: nil)
+local function played_channels(take)
+  local src = take and r.GetMediaItemTake_Source(take)
+  if not src or source_type(src) == "MIDI" then return nil end
+  local n = math.max(1, math.floor(r.GetMediaSourceNumChannels(src) or 1))
+  local mode = math.floor(r.GetMediaItemTakeInfo_Value(take, "I_CHANMODE") or 0)
+  if mode >= 2 and mode <= 66 then return 1 end
+  if mode >= 67 then return 2 end
+  return n
+end
+local function ch_label(n) return n == 1 and "mono" or (n == 2 and "stereo" or (n .. "ch")) end
+M.ch_label = ch_label
+
+-- Items of a track grouped by channel count: { [ch] = { items } }, sorted list of counts
+local function channel_groups(tr)
+  local groups, counts = {}, {}
+  for i = 0, r.CountTrackMediaItems(tr) - 1 do
+    local it = r.GetTrackMediaItem(tr, i)
+    local ch = played_channels(r.GetActiveTake(it))
+    if ch then
+      if not groups[ch] then groups[ch] = {}; counts[#counts + 1] = ch end
+      table.insert(groups[ch], it)
+    end
+  end
+  table.sort(counts)
+  return groups, counts
+end
+
+-- The group that stays on the original track: the most items (tie: fewer channels)
+local function keep_group(groups, counts)
+  local keep
+  for _, ch in ipairs(counts) do
+    if not keep or #groups[ch] > #groups[keep] then keep = ch end
+  end
+  return keep
+end
+
+rule {
+  id = "mixed_channels", title = "Track mixes mono / stereo / multichannel items", scope = "track",
+  fix_note = "Split into one track per channel count, named \"<track> mono / stereo / 4ch ...\"; the group with the most items stays on the original track, fewer channels above it, more below (items only move, nothing else changes)",
+  scan = function(ctx)
+    local out = {}
+    for _, tr in ipairs(ctx.tracks) do
+      local groups, counts = channel_groups(tr)
+      if #counts > 1 then
+        local keep = keep_group(groups, counts)
+        local parts = {}
+        for _, ch in ipairs(counts) do parts[#parts + 1] = string.format("%s %d", ch_label(ch), #groups[ch]) end
+        out[#out + 1] = { track = tr, text = table.concat(parts, " + ") .. " -> " .. ch_label(keep) .. " stays on this track" }
+      end
+    end
+    return out
+  end,
+  fix = function(issues)
+    local n, made = 0, 0
+    for _, is in ipairs(issues) do
+      local tr = is.track
+      if tr and r.ValidatePtr2(0, tr, "MediaTrack*") then
+        local groups, counts = channel_groups(tr)
+        if #counts > 1 then
+          local keep = keep_group(groups, counts)
+          local _, base = r.GetTrackName(tr)
+          r.GetSetMediaTrackInfo_String(tr, "P_NAME", base .. " " .. ch_label(keep), true)
+          local depth = r.GetMediaTrackInfo_Value(tr, "I_FOLDERDEPTH")
+          local below, last_below = 0, nil
+          local parts = {}
+          for _, ch in ipairs(counts) do
+            if ch ~= keep then
+              local idx = math.floor(r.GetMediaTrackInfo_Value(tr, "IP_TRACKNUMBER")) - 1 -- 0-based index of the original
+              if ch < keep then
+                r.InsertTrackAtIndex(idx, true) -- above: the original moves down one
+              else
+                below = below + 1
+                idx = idx + below
+                r.InsertTrackAtIndex(idx, true)
+              end
+              local nt = r.GetTrack(0, idx)
+              r.GetSetMediaTrackInfo_String(nt, "P_NAME", base .. " " .. ch_label(ch), true)
+              for _, it in ipairs(groups[ch]) do r.MoveMediaItemToTrack(it, nt) end
+              if ch > keep then last_below = nt end
+              parts[#parts + 1] = string.format("%s (%d)", ch_label(ch), #groups[ch])
+              made = made + 1
+            end
+          end
+          -- the original closed a folder: the last new track below closes it now
+          if depth < 0 and last_below then
+            r.SetMediaTrackInfo_Value(tr, "I_FOLDERDEPTH", 0)
+            r.SetMediaTrackInfo_Value(last_below, "I_FOLDERDEPTH", depth)
+          end
+          if CHANGE_LOG then
+            CHANGE_LOG[#CHANGE_LOG + 1] = { kind = "split", track = tr, reason = string.format("%s -> kept %s (%d), new %s",
+              base, ch_label(keep), #groups[keep], table.concat(parts, ", ")), where = { track_name(tr), "", "" } }
+          end
+          n = n + 1
+        end
+      end
+    end
+    r.TrackList_AdjustWindows(false)
+    return n, string.format("%d track%s split by channel count, %d new track%s", n, n == 1 and "" or "s", made, made == 1 and "" or "s")
+  end,
+}
+
 rule {
   id = "inactive_takes", title = "Inactive takes", scope = "item",
   fix_note = "Last step: crop to the active take (after printing, the old take is not needed: the original is kept on \"<track> original\")",
@@ -1759,7 +1865,7 @@ local LABELS = {
   visibility     = { "Hidden tracks",  "show and expand all tracks first", "green" },
   take_volume    = { "Take volume",    "merge take volume into item volume", "green" },
   take_pan       = { "Take pan",       "take pan not centered (review)", "review" },
-  mixed_channels = { "Mixed channels", "mono / stereo / multichannel items on one track (review)", "review" },
+  mixed_channels = { "Mixed channels", "mono / stereo / multichannel items on one track -> split into \"<track> mono / stereo / 4ch\"", "green" },
   folders        = { "Folders",        "flatten folders, keep the children (Keep Folder: only expand)", "green" },
   empty_tracks   = { "Empty tracks",   "tracks without items (aux, buses) -> delete", "green" },
   renumber       = { "Track names",    "number same-name tracks in order", "green" },
@@ -1771,9 +1877,9 @@ local LABELS = {
   crossfades     = { "Crossfades",     "broken crossfades -> match the overlap", "yellow" },
   fade_meet      = { "Fade overlap",   "fade-in and fade-out meet -> shorten", "yellow" },
   fade_shapes    = { "Fade shapes",    "set the standard shapes (Settings)", "yellow" },
-  source_range   = { "Source length limit", "item starts before / ends after its file -> trim (up to 1 frame) or print", "red" },
+  source_range   = { "Source length limit", "item starts before / ends after its file -> trim to the grid (up to 1 frame past) or print", "red" },
   media          = { "Media",          "files outside the project / not WAV / other sample rate", "review" },
-  off_grid       = { "Frame grid",     "edges off the frame grid -> snap (max. 1 frame)", "yellow" },
+  off_grid       = { "Off grid",       "edges off the project grid (%GRID%) -> snap (max. 1 grid step)", "yellow" },
   empty_midi     = { "Empty / MIDI",   "empty items and MIDI items (review)", "review" },
   channel_mode   = { "Channel mode",   "not \"normal\" (reverse, downmix, one channel, a pair): mono file -> reset, stereo / poly file -> print", "red" },
   inactive_takes = { "Inactive takes", "crop to the active take", "green" },
@@ -1789,6 +1895,7 @@ M.rule_by_id("off_grid").moves_edges = true     -- trims edges by up to one fram
 M.rule_by_id("needs_render").renders = true     -- new source file (RGWH print)
 M.rule_by_id("envelopes").renders = true
 M.rule_by_id("channel_mode").renders = true
+M.rule_by_id("mixed_channels").moves_tracks = true -- items move to "<track> mono / stereo / ..."
 M.rule_by_id("source_range").moves_edges = true -- trims up to one frame ...
 M.rule_by_id("source_range").renders = true     -- ... or prints longer overruns
 
@@ -2100,9 +2207,10 @@ function M.compare(before, after, d)
   local eps = 1.5 / sr -- a sample and a half
   local frame = 1 / r.TimeMap_curFrameRate(0)
   local may_delete = (d == nil) or d.may_delete
+  local moves_tracks = (d == nil) or d.moves_tracks
   local moves_edges = (d == nil) or d.moves_edges
   local renders = (d == nil) or d.renders
-  local out, changed, deleted, rendered, snapped, relinked = {}, 0, 0, 0, 0, 0
+  local out, changed, deleted, rendered, snapped, relinked, moved = {}, 0, 0, 0, 0, 0, 0
   local function base(path) return (path or ""):match("([^/\\]+)$") or "" end
   local function add(level, rec, cur, text)
     out[#out + 1] = { level = level, item = cur and cur.item or nil, where = (not cur) and rec.where or nil,
@@ -2116,13 +2224,17 @@ function M.compare(before, after, d)
       add(may_delete and "yellow" or "red", b, nil, may_delete and "item deleted (expected for this fix, please check)" or "item deleted")
     else
       local any = false
-      if a.track ~= b.track then add("red", b, a, "item moved to another track"); any = true end
+      if a.track ~= b.track then
+        any = true
+        if moves_tracks then moved = moved + 1 else add("red", b, a, "item moved to another track") end
+      end
       local ds, de = a.s - b.s, a.e - b.e
       if math.abs(ds) > eps or math.abs(de) > eps then
         any = true
         local edge = (math.abs(ds) > eps and "start " .. ms(ds) or "") .. ((math.abs(ds) > eps and math.abs(de) > eps) and ", " or "")
           .. (math.abs(de) > eps and "end " .. ms(de) or "")
-        if moves_edges and math.abs(ds) <= frame + eps and math.abs(de) <= frame + eps then
+        local allow = math.max(frame, grid_step(b.s)) + eps -- one grid step (the grid may be wider than a frame)
+        if moves_edges and math.abs(ds) <= allow and math.abs(de) <= allow then
           snapped = snapped + 1
         else
           add(a.src ~= b.src and "red" or "yellow", b, a, "edge moved: " .. edge)
@@ -2156,7 +2268,7 @@ function M.compare(before, after, d)
   table.sort(out, function(p, q) if p.level ~= q.level then return p.level == "red" end return (p.pos or 0) < (q.pos or 0) end)
   local reds = 0
   for _, p in ipairs(out) do if p.level == "red" then reds = reds + 1 end end
-  return out, { changed = changed, deleted = deleted, rendered = rendered, snapped = snapped, relinked = relinked, red = reds, yellow = #out - reds }
+  return out, { changed = changed, deleted = deleted, rendered = rendered, snapped = snapped, relinked = relinked, moved = moved, red = reds, yellow = #out - reds }
 end
 
 -- Plain-text report (for BEFORE / AFTER comparisons)

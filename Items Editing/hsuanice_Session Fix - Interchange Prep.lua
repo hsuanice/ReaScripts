@@ -1,10 +1,16 @@
 --[[
 @description Session Fix - Interchange Prep: check and fix a REAPER session before converting it with Interchanger
-@version 26.1015.1125
+@version 26.1015.1303
 @author hsuanice
 @noindex
 @changelog
-  - Change: each check shows a short coloured title and a one-line description; colour = impact on the sound in an editing session (red print / delete, orange big change, yellow small change, green sound unchanged, grey review only), with a legend above the list.
+  - Add: Mixed channels can be fixed - one track per channel count as played ("<track> mono / stereo / 4ch ..."); the group with the most items stays on the original track, fewer channels above, more below; folders stay intact. Runs after Channel mode.
+  - Change: Off grid (was Frame grid) follows the project grid setting (frames, beats ... as set in REAPER; needs SWS, otherwise the frame grid) and shows the current grid unit.
+  - Fix: an edge 1 sample off the grid (e.g. a file whose TimeReference is 1 sample late) was listed but never snapped; it is trimmed inward to the next grid line now.
+  - Change: clicking an off-grid edge zooms to one grid step either side of it.
+  - Change: Save report asks where to save (default: the session folder; needs js_ReaScriptAPI, otherwise the session folder).
+  - Change: the title bar has no fold arrow any more.
+  - Change: in the lists only the first column stretches; Track / Position / Take keep their width when a column is resized.
 @about
   # Session Fix - Interchange Prep
 
@@ -13,7 +19,7 @@
   track numbering, track volume / pan / width / polarity (L/R pairs hard left / right), mute /
   solo, envelopes, items that need a render (playrate, pitch, stretch markers, take FX,
   polarity), hidden overlaps and slivers, broken crossfades, meeting fades, fade shapes, items
-  past their source, frame-grid edges, empty and MIDI items, take channel mode, inactive takes.
+  past their source, edges off the project grid, empty and MIDI items, take channel mode, inactive takes.
   Media outside the project folder / not WAV / other sample rate is shown at the top.
 
   Workflow: Save as Interchange copy -> Scan -> Fix (each check, or Fix All) -> review -> Verify
@@ -166,9 +172,15 @@ local function save_report()
   if not state.results then do_scan() end
   local text = CORE.report(state.results, state.summary)
   local _, proj_path = r.EnumProjects(-1, "")
-  local dir = (proj_path or ""):match("^(.*[/\\])")
-  if not dir then dir = r.GetResourcePath() .. "/" end
-  local path = dir .. "SessionFix_report_" .. os.date("%y%m%d_%H%M%S") .. ".txt"
+  local dir = (proj_path or ""):match("^(.*[/\\])") -- default: the session folder (where the .rpp is)
+  if not dir then dir = r.GetProjectPath("") .. "/" end -- unsaved project: its media / recording path
+  local name = "SessionFix_report_" .. os.date("%y%m%d_%H%M%S") .. ".txt"
+  local path = dir .. name
+  if r.JS_Dialog_BrowseForSaveFile then -- ask where (js_ReaScriptAPI); without it: the session folder
+    local ok, chosen = r.JS_Dialog_BrowseForSaveFile("Save Session Fix report", dir, name, "Text files (*.txt)\0*.txt\0\0")
+    if ok ~= 1 or not chosen or chosen == "" then state.status = "Report not saved."; return end
+    path = chosen:match("%.txt$") and chosen or (chosen .. ".txt")
+  end
   local f = io.open(path, "w")
   if not f then
     r.MB("Could not write the report:\n" .. path, TITLE, 0)
@@ -204,6 +216,11 @@ local function reveal_issue(is)
     at = is.positions[is._next]
     state.status = "Showing: " .. (is.labels and is.labels[is._next] or "") ..
       (#is.positions > 1 and string.format("  (%d / %d, click again for the next edge)", is._next, #is.positions) or "")
+  end
+  if at and is.item and r.ValidatePtr2(0, is.item, "MediaItem*") then
+    -- one edge (e.g. off the frame grid): razor and zoom on one frame either side of it
+    local step = math.max(CORE.grid_step(at), 1 / r.TimeMap_curFrameRate(0))
+    CORE.highlight({ { track = r.GetMediaItem_Track(is.item), s = at - step, e = at + step } })
   end
   CORE.reveal(is, at) -- scroll horizontally and vertically to the item / track
 end
@@ -329,8 +346,8 @@ local function draw_audit()
   local a = state.audit
   if not a then return end
   local sm = a.summary
-  local info = string.format("%s: %d item%s changed (%d snapped to the grid, %d printed, %d media copied / relinked, %d deleted)",
-    a.title, sm.changed, sm.changed == 1 and "" or "s", sm.snapped, sm.rendered, sm.relinked or 0, sm.deleted)
+  local info = string.format("%s: %d item%s changed (%d snapped to the grid, %d printed, %d media copied / relinked, %d moved to a channel track, %d deleted)",
+    a.title, sm.changed, sm.changed == 1 and "" or "s", sm.snapped, sm.rendered, sm.relinked or 0, sm.moved or 0, sm.deleted)
   if sm.red > 0 then
     ImGui.TextColored(ctx, COL_RED, string.format("WARNING: %d problem%s - audio, crossfade or track changed. Check before you continue.", sm.red, sm.red == 1 and "" or "s"))
   elseif sm.yellow > 0 then
@@ -360,9 +377,9 @@ local function draw_audit()
   if #a.problems > 0 then
     local h = math.min(#a.problems, 6) * ImGui.GetTextLineHeightWithSpacing(ctx) + S(30)
     local flags = ImGui.TableFlags_Borders | ImGui.TableFlags_RowBg | ImGui.TableFlags_ScrollY
-    if ImGui.BeginTable(ctx, "audit", 3, flags, 0, h) then
+    if ImGui.BeginTable(ctx, "auditlist", 3, flags | ImGui.TableFlags_Resizable, 0, h) then
       ImGui.TableSetupColumn(ctx, "Change", ImGui.TableColumnFlags_WidthStretch, 3)
-      ImGui.TableSetupColumn(ctx, "Track", ImGui.TableColumnFlags_WidthStretch, 1.4)
+      ImGui.TableSetupColumn(ctx, "Track", ImGui.TableColumnFlags_WidthFixed, S(200))
       ImGui.TableSetupColumn(ctx, "Position", ImGui.TableColumnFlags_WidthFixed, S(90))
       ImGui.TableSetupScrollFreeze(ctx, 0, 1)
       ImGui.TableHeadersRow(ctx)
@@ -390,11 +407,12 @@ end
 
 local function draw_issue_table(d, list)
   local flags = ImGui.TableFlags_Borders | ImGui.TableFlags_RowBg | ImGui.TableFlags_Resizable
-  if not ImGui.BeginTable(ctx, "issues_" .. d.id, 4, flags) then return end
-  ImGui.TableSetupColumn(ctx, "Issue", ImGui.TableColumnFlags_WidthStretch, 3)
-  ImGui.TableSetupColumn(ctx, "Track", ImGui.TableColumnFlags_WidthStretch, 1.4)
+  if not ImGui.BeginTable(ctx, "issuelist_" .. d.id, 4, flags) then return end
+  -- first column stretches; the others keep their width, so dragging one does not squeeze the rest
+  ImGui.TableSetupColumn(ctx, "Issue", ImGui.TableColumnFlags_WidthStretch, 1)
+  ImGui.TableSetupColumn(ctx, "Track", ImGui.TableColumnFlags_WidthFixed, S(200))
   ImGui.TableSetupColumn(ctx, "Position", ImGui.TableColumnFlags_WidthFixed, S(90))
-  ImGui.TableSetupColumn(ctx, "Take / item", ImGui.TableColumnFlags_WidthStretch, 2.4)
+  ImGui.TableSetupColumn(ctx, "Take / item", ImGui.TableColumnFlags_WidthFixed, S(260))
   ImGui.TableHeadersRow(ctx)
   local sel = state.sel[d.id] or {}
   for k, is in ipairs(list) do
@@ -440,6 +458,15 @@ local function mark_reviewed(entries)
     n, n == 1 and "y" or "ies", kept, kept == 1 and "" or "s")
 end
 
+-- Description of a check; "%GRID%" = the project grid right now (e.g. "1 frame")
+local grid_cache = { t = -1, label = "" }
+local function desc_of(d)
+  if not d.desc:find("%GRID%", 1, true) then return d.desc end
+  local now = r.time_precise()
+  if now - grid_cache.t > 0.5 then grid_cache.t, grid_cache.label = now, CORE.grid_label() end
+  return (d.desc:gsub("%%GRID%%", grid_cache.label))
+end
+
 local function draw_history_table(d, hist)
   ImGui.TextColored(ctx, COL_INFO, "Done in this session (click to jump there):")
   local pending = {}
@@ -450,19 +477,19 @@ local function draw_history_table(d, hist)
     if ImGui.IsItemHovered(ctx) then ImGui.SetTooltip(ctx, "Deleted items: remove their review copies (<track> before / removed).\nPrinted items: the original stays, marked as reviewed. The list stays.") end
   end
   local flags = ImGui.TableFlags_Borders | ImGui.TableFlags_RowBg | ImGui.TableFlags_Resizable
-  if not ImGui.BeginTable(ctx, "hist_" .. d.id, 5, flags) then return end
-  ImGui.TableSetupColumn(ctx, "Done", ImGui.TableColumnFlags_WidthStretch, 3)
-  ImGui.TableSetupColumn(ctx, "Track", ImGui.TableColumnFlags_WidthStretch, 1.4)
+  if not ImGui.BeginTable(ctx, "donelist_" .. d.id, 5, flags) then return end
+  ImGui.TableSetupColumn(ctx, "Done", ImGui.TableColumnFlags_WidthStretch, 1)
+  ImGui.TableSetupColumn(ctx, "Track", ImGui.TableColumnFlags_WidthFixed, S(200))
   ImGui.TableSetupColumn(ctx, "Position", ImGui.TableColumnFlags_WidthFixed, S(90))
-  ImGui.TableSetupColumn(ctx, "Take / item", ImGui.TableColumnFlags_WidthStretch, 2.4)
+  ImGui.TableSetupColumn(ctx, "Take / item", ImGui.TableColumnFlags_WidthFixed, S(260))
   ImGui.TableSetupColumn(ctx, "Review", ImGui.TableColumnFlags_WidthFixed, 0)
   ImGui.TableHeadersRow(ctx)
   for k, e in ipairs(hist) do
     if k > MAX_LIST then break end
     ImGui.TableNextRow(ctx)
     ImGui.TableNextColumn(ctx)
-    local label = (e.kind == "printed" and "PRINTED: " or "DELETED: ") .. (e.reason or "")
-    ImGui.PushStyleColor(ctx, ImGui.Col_Text, e.kind == "printed" and COL_OK or COL_YEL)
+    local label = (e.kind == "printed" and "PRINTED: " or (e.kind == "split" and "SPLIT: " or "DELETED: ")) .. (e.reason or "")
+    ImGui.PushStyleColor(ctx, ImGui.Col_Text, (e.kind == "printed" or e.kind == "split") and COL_OK or COL_YEL)
     -- AllowOverlap: the row spans all columns, the Reviewed button at its end must still get clicks
     local sflags = ImGui.SelectableFlags_SpanAllColumns | (ImGui.SelectableFlags_AllowOverlap or ImGui.SelectableFlags_AllowItemOverlap or 0)
     if ImGui.Selectable(ctx, label .. "##h" .. k, false, sflags) then
@@ -480,6 +507,10 @@ local function draw_history_table(d, hist)
         CORE.highlight_issues({ { item = e.item } })
         CORE.reveal({ item = e.item })
         state.status = "Printed item: " .. (e.reason or "") .. " (the original is on \"<track> original\")"
+      elseif e.kind == "split" and e.track and r.ValidatePtr2(0, e.track, "MediaTrack*") then
+        CORE.select_issues({ { track = e.track } })
+        CORE.reveal({ track = e.track })
+        state.status = "Split by channel count: " .. (e.reason or "")
       elseif e.kind == "deleted" then
         r.SelectAllMediaItems(0, false)
         CORE.reveal_range(e.track, e.s, e.e) -- where it was: razor area on that track
@@ -599,14 +630,14 @@ local function draw_rules()
       ImGui.PopStyleColor(ctx)
       if ImGui.IsItemHovered(ctx) then ImGui.SetTooltip(ctx, d.title .. "\nFix: " .. d.fix_note) end
       ImGui.SameLine(ctx)
-      ImGui.TextColored(ctx, COL_INFO, d.desc .. tag)
+      ImGui.TextColored(ctx, COL_INFO, desc_of(d) .. tag)
       if todo > 0 and state.scroll_to_review then ImGui.SetScrollHereY(ctx, 0.1); state.scroll_to_review = nil end
     else
       ImGui.Indent(ctx, ImGui.GetTreeNodeToLabelSpacing(ctx)) -- line up with the titles that have an arrow
       ImGui.TextColored(ctx, LEVEL_COL[d.level] or COL_GREY, d.short)
       if ImGui.IsItemHovered(ctx) then ImGui.SetTooltip(ctx, d.title .. "\nFix: " .. d.fix_note) end
       ImGui.SameLine(ctx)
-      ImGui.TextColored(ctx, COL_INFO, d.desc)
+      ImGui.TextColored(ctx, COL_INFO, desc_of(d))
       ImGui.Unindent(ctx, ImGui.GetTreeNodeToLabelSpacing(ctx))
     end
 
@@ -878,7 +909,8 @@ end
 
 local function loop()
   ImGui.SetNextWindowSize(ctx, S(860), S(600), ImGui.Cond_FirstUseEver)
-  local wflags = prefs.allow_docking and 0 or ImGui.WindowFlags_NoDocking
+  -- NoCollapse: no fold arrow in the title bar (one click there made the window look gone)
+  local wflags = ImGui.WindowFlags_NoCollapse | (prefs.allow_docking and 0 or ImGui.WindowFlags_NoDocking)
   local visible, open = ImGui.Begin(ctx, TITLE .. "  v" .. VERSION .. "###sessionfixprep", true, wflags)
   if visible then
     ImGui.PushFont(ctx, nil, math.floor(FONT_BASE * prefs.font_scale + 0.5))

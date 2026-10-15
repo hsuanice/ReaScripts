@@ -1,5 +1,9 @@
 # hsuanice_Library.lua — Changelog
 
+## 26.1015.1303
+
+- Update: hsuanice_Session Fix Core.lua (Mixed channels fix).
+
 ## 26.1015.1125
 
 - Update: hsuanice_Session Fix Core.lua (short titles and impact levels for the checks).

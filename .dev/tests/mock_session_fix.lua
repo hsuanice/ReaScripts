@@ -37,6 +37,8 @@ ITEM(d1, 168*f, 10*f, { TAKE(wav2) }, { fi = 3*f })                      -- cros
 ITEM(d1, 200*f, 10*f, { TAKE(wav) }, { fi = 5*f, fo = 5*f })             -- triangle
 ITEM(d1, 220*f, 10*f, { TAKE(SRC(proj_dir.."short.wav","WAVE",1,0.1)) }) -- past source end
 ITEM(d1, 240*f + 0.003, 10*f, { TAKE(wav) })                             -- off grid start
+local iso = ITEM(d1, 420*f + 1/SR, 10*f - 1/SR, { TAKE(SRC(proj_dir.."iso.wav","WAVE",8,10*f - 1/SR)) }) -- ISO: TimeReference 1 sample late, plays the whole file
+ISO_ITEM = iso
 ITEM(d1, 360*f, 10*f, { TAKE(wav, { mode = 2 }) })                          -- channel mode on a mono file: reset
 ITEM(d1, 380*f, 10*f, { TAKE(st, { mode = 4 }) })                           -- right channel of a stereo file: print
 ITEM(d1, 400*f, 10*f, { TAKE(wav, { mode = 7 }) })                          -- mono channel 5 of a mono file: review
@@ -44,11 +46,14 @@ ITEM(d1, 280*f, 10*f, { TAKE(wav) }, { fi = 2*f, fo = 2*f, fis = 3, fod = 0.4 })
 ITEM(d1, 290*f, 4*f, { TAKE(wav) }, { foa = 1*f }); ITEM(d1, 293*f, 4*f, { TAKE(wav2) }, { fia = 1*f }) -- auto crossfade, linear
 ITEM(d1, 260*f, 10*f, { TAKE(SRC(proj_dir.."s2.wav","WAVE",1,9.5*f)) }, { loop = 1, fi = 1.5*f, fo = 2*f }) -- 0.5 frame past the source: trimmed
 ITEM(mix, 0, 10*f, { TAKE(wav) }); ITEM(mix, 20*f, 10*f, { TAKE(st) })    -- mixed channels
+ITEM(mix, 40*f, 10*f, { TAKE(st) }); ITEM(mix, 60*f, 10*f, { TAKE(SRC(proj_dir.."six.wav","WAVE",6)) }) -- stereo is the biggest group
+ITEM(mix, 80*f, 10*f, { TAKE(SRC(proj_dir.."six.wav","WAVE",6), { mode = 69 }) })  -- stereo pair 3-4 of a 6ch file = plays stereo
 ITEM(fx, 0, 10*f, { TAKE(mp3) }); ITEM(fx, 20*f, 10*f, { TAKE(sr44) })   -- media
 ITEM(scene, 0, 10*f, {})                                                 -- empty item
 ITEM(video, 0, 10*f, { TAKE(vid) })                                      -- video (excluded from media)
 ITEM(tracks[#tracks], 80*f, 10*f, { TAKE(wav, { rate = 1.1 }) }, {})    -- backup copy: must be ignored by every check
 ITEM(pwi, 0, 10*f, { TAKE(wav) }); ITEM(childA, 0, 10*f, { TAKE(wav) })   -- folder parent that holds an item
+ITEM(childA, 20*f, 10*f, { TAKE(wav) }); ITEM(childA, 40*f, 10*f, { TAKE(SRC(proj_dir.."six.wav","WAVE",6)) }) -- last child, mixed: split keeps the folder end
 ITEM(outer, 0, 10*f, { TAKE(wav) })
 ITEM(p1, 0, 10*f, { TAKE(wav) }); ITEM(p2, 0, 10*f, { TAKE(wav) }); ITEM(p5, 0, 10*f, { TAKE(wav) })
 for k = 19, 21 do ITEM(tracks[k], 0, 10*f, { TAKE(wav) }) end                -- Audio 9_L / _R pair + unpaired Lone_L
@@ -83,6 +88,7 @@ reaper = {
   DeleteTrack = function(tr) for i, t in ipairs(tracks) do if t == tr then table.remove(tracks, i) break end end; for i, t in ipairs(tracks) do t.num = i end
     for _, it in ipairs(tr.items) do for i, x in ipairs(items) do if x == it then table.remove(items, i) break end end end end,
   InsertTrackAtIndex = function(idx) table.insert(tracks, idx + 1, T("")); for i, t in ipairs(tracks) do t.num = i end end,
+  MoveMediaItemToTrack = function(it, tr) for i, x in ipairs(it.tr.items) do if x == it then table.remove(it.tr.items, i) break end end; it.tr = tr; tr.items[#tr.items + 1] = it; return true end,
   AddMediaItemToTrack = function(tr) local it = ITEM(tr, 0, 1, {}); items[#items + 1] = it; return it end,
   AddTakeToMediaItem = function(it) local tk = TAKE(nil); it.takes[#it.takes + 1] = tk; it.active = it.active or tk; return tk end,
   SetMediaItemTake_Source = function(tk, src) tk.src = src; tk.name = src.file; return true end,
@@ -211,6 +217,8 @@ for _, is in ipairs(M.scan({ keep_folders = true }).channel_mode) do print("  ch
 local again = M.scan({ keep_folders = true }).fade_shapes
 print(string.format("fade_shapes after fix + rescan: %d | read: auto %s, manual %s | tracks %d, temp track gone: %s", #again,
   EXT["hsuanice_SessionFix_shapes5/41529 ain"] or "-", EXT["hsuanice_SessionFix_shapes5/41529 in"] or "-", #tracks, tostring(tracks[#tracks].name ~= "")))
+print(string.format("ISO 1 sample late: start %.6f frames, offset %.6f s, length %.6f frames (expect start 421, inward to the next frame)",
+  ISO_ITEM.pos * FPS, ISO_ITEM.active.offs, ISO_ITEM.len * FPS))
 print("mute_solo left (review only): " .. #M.scan({ keep_folders = true }).mute_solo)
 -- the audit must catch a fix that moves audio, moves a crossfade or changes a source
 local snap0 = M.snapshot()
@@ -247,6 +255,18 @@ do -- key spot only: a crossfade = its overlap; clamp = the deleted item's span
   M.highlight_issues({ { item = A }, { item = B } }, 107, 108.5); local x2 = rz(tracks[1])
   print(string.format("zoom: view %.2f..%.2f (expect 106.62..108.88: 107..108.5 = 2/3 of the width, centred)", VIEW[1], VIEW[2]))
   print("razor key spot: crossfade '" .. x1 .. "' (expect 108..110) | clamped '" .. x2 .. "' (expect 107..108.5)")
+end
+do -- project grid via SWS: a 2-frame grid snaps to 2 frames; the label says so
+  local G = 2 * f
+  reaper.BR_GetClosestGridDivision = function(t) return math.floor(t / G + 0.5) * G end
+  reaper.BR_GetNextGridDivision = function(t) return (math.floor(t / G + 1e-9) + 1) * G end
+  reaper.BR_GetPrevGridDivision = function(t) return (math.ceil(t / G - 1e-9) - 1) * G end
+  reaper.GetCursorPosition = function() return 0 end
+  reaper.TimeMap2_timeToQN = function(_, t) return t * 2 end
+  local M2 = dofile("Library/hsuanice_Session Fix Core.lua")
+  print(string.format("grid: label '%s' (expect 2 frames) | q(3.1 frames) nearest %.2f floor %.2f ceil %.2f (expect 4, 2, 4 frames)",
+    M2.grid_label(), M2.grid_q(3.1 * f) * FPS, M2.grid_q(3.1 * f, "floor") * FPS, M2.grid_q(3.1 * f, "ceil") * FPS))
+  reaper.BR_GetClosestGridDivision, reaper.BR_GetNextGridDivision, reaper.BR_GetPrevGridDivision = nil, nil, nil
 end
 local keep = M.scan({ keep_folders = true })
 print("keep_folders: folders issues = " .. #keep.folders)
