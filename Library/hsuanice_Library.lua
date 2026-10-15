@@ -1,6 +1,6 @@
 --[[
 @description hsuanice Library - shared code used by hsuanice scripts (required)
-@version 26.1015.1303
+@version 26.1015.1425
 @author hsuanice
 @metapackage
 @provides
@@ -24,7 +24,7 @@
   [nomain] hsuanice_Process Exec.lua
   [nomain] json.lua
 @changelog
-  - Update: hsuanice_Session Fix Core.lua (Mixed channels fix).
+  - Update: hsuanice_Session Fix Core.lua (fade shapes on hidden tracks, check order).
 @about
   # hsuanice Library
 

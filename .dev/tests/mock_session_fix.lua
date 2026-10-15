@@ -88,6 +88,7 @@ reaper = {
   DeleteTrack = function(tr) for i, t in ipairs(tracks) do if t == tr then table.remove(tracks, i) break end end; for i, t in ipairs(tracks) do t.num = i end
     for _, it in ipairs(tr.items) do for i, x in ipairs(items) do if x == it then table.remove(items, i) break end end end end,
   InsertTrackAtIndex = function(idx) table.insert(tracks, idx + 1, T("")); for i, t in ipairs(tracks) do t.num = i end end,
+  GetParentTrack = function() return nil end,
   MoveMediaItemToTrack = function(it, tr) for i, x in ipairs(it.tr.items) do if x == it then table.remove(it.tr.items, i) break end end; it.tr = tr; tr.items[#tr.items + 1] = it; return true end,
   AddMediaItemToTrack = function(tr) local it = ITEM(tr, 0, 1, {}); items[#items + 1] = it; return it end,
   AddTakeToMediaItem = function(it) local tk = TAKE(nil); it.takes[#it.takes + 1] = tk; it.active = it.active or tk; return tk end,
@@ -103,7 +104,8 @@ reaper = {
   GetTakeName = function(tk) return tk.name end,
   GetMediaItem_Track = function(it) return it.tr end,
   GetMediaItemInfo_Value = function(it, k) return it[ITEMKEY[k]] end,
-  SetMediaItemInfo_Value = function(it, k, v) it[ITEMKEY[k]] = v; return true end,
+  SetMediaItemInfo_Value = function(it, k, v) if (k == "C_FADEINSHAPE" or k == "C_FADEOUTSHAPE") and v > 6 then v = -1 end -- like REAPER: reads 7, cannot write it
+    it[ITEMKEY[k]] = v; return true end,
   GetMediaItemTakeInfo_Value = function(tk, k) return tk[TAKEKEY[k]] end,
   GetMediaItemTake_Source = function(tk) return tk.src end,
   GetMediaSourceParent = function() return nil end,
@@ -154,10 +156,13 @@ reaper = {
     local FIN = { [41514] = 0, [41515] = 1, [41516] = 2, [41517] = 3, [41518] = 4, [41519] = 5, [41836] = 6 }
     local FOUT = { [41521] = 0, [41522] = 1, [41523] = 2, [41524] = 3, [41525] = 4, [41526] = 5, [41837] = 6 }
     local X = { [41528] = 0, [41529] = 1, [41530] = 2, [41531] = 3, [41532] = 4, [41533] = 5, [41838] = 6 }
-    for _, it in ipairs(items) do if it.sel and #it.takes > 0 then -- like (suspected) REAPER: empty items are skipped
+    for _, it in ipairs(items) do if it.sel and #it.takes > 0 and not it.tr.hidden then -- like REAPER: empty items / hidden tracks are skipped
       if FIN[cmd] then it.fis = FIN[cmd]; it.fid = 0 end
       if FOUT[cmd] then it.fos = FOUT[cmd]; it.fod = 0 end
-      if X[cmd] then for _, o in ipairs(it.tr.items) do if o ~= it and o.sel and o.pos < it.pos and o.pos + o.len > it.pos then
+      local function eff(v, a) return (a or -1) > 0 and a or v end
+      local function proper(o) local ov = math.min(o.pos + o.len, it.pos + it.len) - it.pos -- like REAPER: fades must match the overlap
+        return math.abs(eff(o.fo, o.foa) - ov) < 0.001 and math.abs(eff(it.fi, it.fia) - ov) < 0.001 end
+      if X[cmd] then for _, o in ipairs(it.tr.items) do if o ~= it and o.sel and o.pos < it.pos and o.pos + o.len > it.pos and proper(o) then
         if (it.fia or -1) > 0 then o.fos = X[cmd] + 6; it.fis = X[cmd] + 6; o.fod = 0; it.fid = 0     -- auto crossfade: undocumented 7
         else o.fos = X[cmd] + 10; it.fis = X[cmd] + 10; o.fod = 0.25; it.fid = -0.25 end end end end -- manual: something else + a curve
     end end
@@ -267,6 +272,26 @@ do -- project grid via SWS: a 2-frame grid snaps to 2 frames; the label says so
   print(string.format("grid: label '%s' (expect 2 frames) | q(3.1 frames) nearest %.2f floor %.2f ceil %.2f (expect 4, 2, 4 frames)",
     M2.grid_label(), M2.grid_q(3.1 * f) * FPS, M2.grid_q(3.1 * f, "floor") * FPS, M2.grid_q(3.1 * f, "ceil") * FPS))
   reaper.BR_GetClosestGridDivision, reaper.BR_GetNextGridDivision, reaper.BR_GetPrevGridDivision = nil, nil, nil
+end
+do -- fade shapes on a hidden track: the actions skip it, the fix shows the track for them
+  local ht = T("Hidden fades", { hidden = true }); tracks[#tracks + 1] = ht; ht.num = #tracks
+  local hi = ITEM(ht, 0, 10*f, { TAKE(wav) }, { fi = 2*f, fo = 2*f, fis = 3, fos = 3 }); hi.active = hi.takes[1]; items[#items + 1] = hi
+  local d = M.rule_by_id("fade_shapes")
+  local before, need = 0, "-"; for _, is in ipairs(M.scan({}).fade_shapes) do if is.item == hi then before = before + 1; need = is.needs end end
+  print("hidden-track item marked: " .. tostring(need) .. " (expect visibility)")
+  local _, msg = M.fix(d, M.scan({}).fade_shapes, {})
+  local after = 0; for _, is in ipairs(M.scan({}).fade_shapes) do if is.item == hi then after = after + 1 end end
+  print(string.format("hidden-track fades: listed %d -> %d after the fix, track hidden again: %s (expect 1 -> 0, true)", before, after, tostring(ht.hidden)))
+end
+do -- a broken crossfade (fade-out shorter than the overlap): REAPER's action skips it; flagged, never set to -1
+  local bt = T("Broken xfade"); tracks[#tracks + 1] = bt; bt.num = #tracks
+  local A = ITEM(bt, 0, 10*f, { TAKE(wav) }, { fo = 2*f }); A.active = A.takes[1]
+  local B = ITEM(bt, 6*f, 10*f, { TAKE(wav2) }, { fi = 4*f }); B.active = B.takes[1]
+  items[#items + 1] = A; items[#items + 1] = B
+  local list = {}; for _, is in ipairs(M.scan({}).fade_shapes) do if is.item == A or is.item == B then list[#list + 1] = is end end
+  local _, msg = M.fix(M.rule_by_id("fade_shapes"), list, {})
+  print(string.format("broken crossfade: flagged '%s' | shapes after fix %s/%s (never -1) | %s", (list[1] and list[1].needs) or "NOT FLAGGED",
+    tostring(A.fos), tostring(B.fis), msg:match("%d+ broken crossfade side%a* skipped") or msg))
 end
 local keep = M.scan({ keep_folders = true })
 print("keep_folders: folders issues = " .. #keep.folders)

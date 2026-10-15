@@ -1,12 +1,13 @@
 --[[
 @description hsuanice Session Fix Core - checks and fixes for preparing a REAPER session for Interchanger / Pro Tools / Nuendo
-@version 26.1015.1303
+@version 26.1015.1425
 @author hsuanice
 @noindex
 @changelog
-  - Add: Mixed channels can be fixed - one track per channel count as played ("<track> mono / stereo / 4ch ..."); the group with the most items stays on the original track, fewer channels above, more below; folders stay intact. Runs after Channel mode.
-  - Change: Off grid and the Source length limit trim use the project grid (SWS BR_GetClosest/Next/PrevGridDivision; frame grid without SWS); grid_label() describes it.
-  - Fix: an edge 1 sample off the grid was listed but never snapped (the fix used a 1-sample tolerance, the scan half a sample).
+  - Fix: Fade shapes on hidden tracks / inside collapsed folders were not fixed (REAPER's actions skip them); those tracks are shown for the actions and restored, and any fade still not reached gets the values read from the actions.
+  - Change: Folders comes right after Hidden tracks.
+  - Fix: crossfade shapes are only set by REAPER's action (the API reads values such as 7 but cannot write them - a crossfade became shape -1); broken crossfades are flagged "fix Crossfades first"; plain fades are written directly only with a value the API accepts, checked and restored otherwise.
+  - Add: issue.needs ("visibility" for items on hidden tracks / in collapsed folders, "crossfades" for broken crossfades in Fade shapes) and M.NEEDS labels / questions.
 @about
   Shared library behind "Session Fix - Interchange Prep".
   Every rule has: id, title, scope ("item" / "track" / "file"), scan() returning issues,
@@ -528,6 +529,43 @@ rule {
 }
 
 rule {
+  id = "folders", title = "Folder tracks", scope = "track",
+  fix_note = "Flatten the folder structure (skipped when \"Keep folder structure\" is on)",
+  scan = function(ctx)
+    local out = {}
+    if ctx.opts.keep_folders then return out end
+    for _, tr in ipairs(ctx.tracks) do
+      if r.GetMediaTrackInfo_Value(tr, "I_FOLDERDEPTH") > 0 then
+        local n = r.CountTrackMediaItems(tr)
+        out[#out + 1] = { track = tr, text = n > 0 and string.format("folder parent with %d items (kept as a normal track)", n)
+          or "folder parent (removed, children kept)" }
+      end
+    end
+    return out
+  end,
+  -- Flatten: every track becomes a top-level track (children are never deleted), then the
+  -- former parents that hold no items are removed. Deleting a folder parent in REAPER's UI
+  -- would delete its children too, so this never deletes before flattening.
+  fix = function(issues, ctx)
+    local parents = {}
+    for _, is in ipairs(issues) do
+      if is.track and r.ValidatePtr2(0, is.track, "MediaTrack*") then parents[#parents + 1] = is.track end
+    end
+    for _, tr in ipairs(ctx.tracks) do
+      if r.GetMediaTrackInfo_Value(tr, "I_FOLDERDEPTH") ~= 0 then r.SetMediaTrackInfo_Value(tr, "I_FOLDERDEPTH", 0) end
+    end
+    local removed, kept = 0, 0
+    for k = #parents, 1, -1 do
+      local tr = parents[k]
+      if r.CountTrackMediaItems(tr) == 0 then r.DeleteTrack(tr); removed = removed + 1 else kept = kept + 1 end
+    end
+    r.TrackList_AdjustWindows(false)
+    return #parents, string.format("%d folder%s flattened: %d empty parent track%s removed, %d kept (they hold items); all children kept",
+      #parents, #parents == 1 and "" or "s", removed, removed == 1 and "" or "s", kept)
+  end,
+}
+
+rule {
   id = "take_volume", title = "Take volume not 0 dB", scope = "item",
   fix_note = "Multiply into item volume, set take volume to 0 dB (take +3 dB, item -1 dB -> item +2 dB)",
   fix = function(issues)
@@ -578,43 +616,6 @@ rule {
       end
     end
     return out
-  end,
-}
-
-rule {
-  id = "folders", title = "Folder tracks", scope = "track",
-  fix_note = "Flatten the folder structure (skipped when \"Keep folder structure\" is on)",
-  scan = function(ctx)
-    local out = {}
-    if ctx.opts.keep_folders then return out end
-    for _, tr in ipairs(ctx.tracks) do
-      if r.GetMediaTrackInfo_Value(tr, "I_FOLDERDEPTH") > 0 then
-        local n = r.CountTrackMediaItems(tr)
-        out[#out + 1] = { track = tr, text = n > 0 and string.format("folder parent with %d items (kept as a normal track)", n)
-          or "folder parent (removed, children kept)" }
-      end
-    end
-    return out
-  end,
-  -- Flatten: every track becomes a top-level track (children are never deleted), then the
-  -- former parents that hold no items are removed. Deleting a folder parent in REAPER's UI
-  -- would delete its children too, so this never deletes before flattening.
-  fix = function(issues, ctx)
-    local parents = {}
-    for _, is in ipairs(issues) do
-      if is.track and r.ValidatePtr2(0, is.track, "MediaTrack*") then parents[#parents + 1] = is.track end
-    end
-    for _, tr in ipairs(ctx.tracks) do
-      if r.GetMediaTrackInfo_Value(tr, "I_FOLDERDEPTH") ~= 0 then r.SetMediaTrackInfo_Value(tr, "I_FOLDERDEPTH", 0) end
-    end
-    local removed, kept = 0, 0
-    for k = #parents, 1, -1 do
-      local tr = parents[k]
-      if r.CountTrackMediaItems(tr) == 0 then r.DeleteTrack(tr); removed = removed + 1 else kept = kept + 1 end
-    end
-    r.TrackList_AdjustWindows(false)
-    return #parents, string.format("%d folder%s flattened: %d empty parent track%s removed, %d kept (they hold items); all children kept",
-      #parents, #parents == 1 and "" or "s", removed, removed == 1 and "" or "s", kept)
   end,
 }
 
@@ -1307,6 +1308,18 @@ local function fade_edges(ctx)
         e.fi, e.fo = fades(e.it)
         e.x_in = prev and prev.e > e.s + ctx.sample_sec and crossfade_like(prev, e) and prev.it or nil
         e.x_out = nxt and e.e > nxt.s + ctx.sample_sec and crossfade_like(e, nxt) and nxt.it or nil
+        -- REAPER's crossfade shape action skips a crossfade whose fades do not match the overlap
+        local tol = 0.001
+        if e.x_in then
+          local ov = math.min(prev.e, e.e) - e.s
+          local _, pfo = fades(prev.it)
+          e.x_in_broken = math.abs(e.fi - ov) > tol or math.abs(pfo - ov) > tol
+        end
+        if e.x_out then
+          local ov = math.min(e.e, nxt.e) - nxt.s
+          local nfi = fades(nxt.it)
+          e.x_out_broken = math.abs(e.fo - ov) > tol or math.abs(nfi - ov) > tol
+        end
         out[#out + 1] = e
       end
     end
@@ -1322,7 +1335,7 @@ rule {
     local T = shape_targets(ctx)
     if not T.ok then return { { text = "Could not read the fade shapes from REAPER: " .. tostring(T.err) .. " (nothing checked)" } } end
     for _, e in ipairs(fade_edges(ctx)) do
-      local why = {}
+      local why, needs = {}, nil
       local si, di = r.GetMediaItemInfo_Value(e.it, "C_FADEINSHAPE"), r.GetMediaItemInfo_Value(e.it, "D_FADEINDIR")
       local so, dout = r.GetMediaItemInfo_Value(e.it, "C_FADEOUTSHAPE"), r.GetMediaItemInfo_Value(e.it, "D_FADEOUTDIR")
       local ain = (r.GetMediaItemInfo_Value(e.it, "D_FADEINLEN_AUTO") or -1) > 0
@@ -1335,13 +1348,15 @@ rule {
       if e.fi > 0 and not same_shape(si, di, wi) and not same_shape(si, di, alt_i) then
         why[#why + 1] = string.format("%s: %s %s (want %s %s)", e.x_in and "crossfade (in)" or "fade-in", shape_name(si, di, e.x_in), sv(si, di),
           e.x_in and T.SX.xname or T.SI.name, wi and sv(wi[1], wi[2]) or "")
+        if e.x_in_broken then needs = "crossfades" end
       end
       if e.fo > 0 and not same_shape(so, dout, wo) and not same_shape(so, dout, alt_o) then
         why[#why + 1] = string.format("%s: %s %s (want %s %s)", e.x_out and "crossfade (out)" or "fade-out", shape_name(so, dout, e.x_out), sv(so, dout),
           e.x_out and T.SX.xname or T.SO.name, wo and sv(wo[1], wo[2]) or "")
+        if e.x_out_broken then needs = "crossfades" end
       end
       if #why > 0 then
-        out[#out + 1] = { item = e.it, item2 = e.x_out or e.x_in, text = table.concat(why, "; ") }
+        out[#out + 1] = { item = e.it, item2 = e.x_out or e.x_in, text = table.concat(why, "; "), needs = needs }
       end
     end
     return out
@@ -1361,6 +1376,25 @@ rule {
         if e.x_out then want[e.x_out] = true end
       end
     end
+    -- REAPER's item actions skip items on tracks that are not shown (hidden, or inside a
+    -- collapsed folder): show / expand those tracks for the actions, then restore them
+    local restore_tcp, restore_compact = {}, {}
+    for it in pairs(want) do
+      local tr = r.GetMediaItem_Track(it)
+      if r.GetMediaTrackInfo_Value(tr, "B_SHOWINTCP") == 0 and not restore_tcp[tr] then
+        restore_tcp[tr] = true
+        r.SetMediaTrackInfo_Value(tr, "B_SHOWINTCP", 1)
+      end
+      local parent = r.GetParentTrack(tr)
+      while parent do
+        if restore_compact[parent] == nil and r.GetMediaTrackInfo_Value(parent, "I_FOLDERCOMPACT") ~= 0 then
+          restore_compact[parent] = r.GetMediaTrackInfo_Value(parent, "I_FOLDERCOMPACT")
+          r.SetMediaTrackInfo_Value(parent, "I_FOLDERCOMPACT", 0)
+        end
+        parent = r.GetParentTrack(parent)
+      end
+    end
+    r.TrackList_AdjustWindows(false)
     local sel = save_item_selection()
     r.SelectAllMediaItems(0, false)
     local n = 0
@@ -1387,10 +1421,43 @@ rule {
         end
       end
     end
+    -- safety net for plain fades the actions did not reach: write the value read from the action,
+    -- only when the API accepts it (it reads values such as 7 but cannot write them) and it reads
+    -- back the same; crossfades are left to REAPER's action (a broken one: fix Crossfades first)
+    local direct, broken = 0, 0
+    local function try_set(it, kshape, kdir, want_v)
+      if not want_v or want_v[1] < 0 or want_v[1] > 6 then return false end
+      local os_, od = r.GetMediaItemInfo_Value(it, kshape), r.GetMediaItemInfo_Value(it, kdir)
+      r.SetMediaItemInfo_Value(it, kshape, want_v[1]); r.SetMediaItemInfo_Value(it, kdir, want_v[2])
+      if same_shape(r.GetMediaItemInfo_Value(it, kshape), r.GetMediaItemInfo_Value(it, kdir), want_v) then return true end
+      r.SetMediaItemInfo_Value(it, kshape, os_); r.SetMediaItemInfo_Value(it, kdir, od) -- not accepted: restore
+      return false
+    end
+    for _, e in ipairs(fade_edges(ctx)) do
+      if want[e.it] then
+        local si, di = r.GetMediaItemInfo_Value(e.it, "C_FADEINSHAPE"), r.GetMediaItemInfo_Value(e.it, "D_FADEINDIR")
+        local so, dout = r.GetMediaItemInfo_Value(e.it, "C_FADEOUTSHAPE"), r.GetMediaItemInfo_Value(e.it, "D_FADEOUTDIR")
+        if e.x_in then
+          if e.x_in_broken and e.fi > 0 then broken = broken + 1 end
+        elseif e.fi > 0 and not same_shape(si, di, T.fin) and try_set(e.it, "C_FADEINSHAPE", "D_FADEINDIR", T.fin) then
+          direct = direct + 1
+        end
+        if e.x_out then
+          if e.x_out_broken and e.fo > 0 then broken = broken + 1 end
+        elseif e.fo > 0 and not same_shape(so, dout, T.fout) and try_set(e.it, "C_FADEOUTSHAPE", "D_FADEOUTDIR", T.fout) then
+          direct = direct + 1
+        end
+      end
+    end
     for it in pairs(want) do r.UpdateItemInProject(it) end
     restore_item_selection(sel)
-    return n, string.format("%d item%s, %d crossfade%s: fade shapes set with REAPER's actions (in: %s, out: %s, crossfade: %s)",
-      n, n == 1 and "" or "s", nx, nx == 1 and "" or "s", T.SI.name, T.SO.name, T.SX.xname)
+    for tr in pairs(restore_tcp) do r.SetMediaTrackInfo_Value(tr, "B_SHOWINTCP", 0) end
+    for tr, v in pairs(restore_compact) do r.SetMediaTrackInfo_Value(tr, "I_FOLDERCOMPACT", v) end
+    r.TrackList_AdjustWindows(false)
+    return n, string.format("%d item%s, %d crossfade%s: fade shapes set with REAPER's actions (in: %s, out: %s, crossfade: %s)%s",
+      n, n == 1 and "" or "s", nx, nx == 1 and "" or "s", T.SI.name, T.SO.name, T.SX.xname,
+      (direct > 0 and string.format("; %d fade%s set directly (the actions did not reach them)", direct, direct == 1 and "" or "s") or "")
+      .. (broken > 0 and string.format("; %d broken crossfade side%s skipped (fix Crossfades first)", broken, broken == 1 and "" or "s") or ""))
   end,
 }
 
@@ -1851,6 +1918,13 @@ rule {
   end,
 }
 
+-- Prerequisites an issue can need (is.needs = rule id): label shown in front of it, question
+-- asked before its check is fixed alone
+M.NEEDS = {
+  visibility = { tag = "Hidden track: show first", ask = "%d of these items are on hidden tracks or inside collapsed folders.\n\nShow and expand all tracks first (\"Hidden tracks\")?" },
+  crossfades = { tag = "Broken crossfade: fix Crossfades first", ask = "%d of these are broken crossfades (the fades do not match the overlap);\nREAPER cannot change their shape until they are fixed.\n\nFix these crossfades first (\"Crossfades\")?" },
+}
+
 M.RULES = RULES
 function M.rule_by_id(id)
   for _, d in ipairs(RULES) do if d.id == id then return d end end
@@ -1933,6 +2007,28 @@ function M.scan(opts)
     if not ok then res = { { text = "SCAN ERROR: " .. tostring(res) } } end
     results[d.id] = res
     total = total + #res
+  end
+  -- prerequisites: an item on a hidden track / inside a collapsed folder -> show the tracks first
+  local shown = {}
+  local function track_shown(tr)
+    if shown[tr] == nil then
+      local ok = r.GetMediaTrackInfo_Value(tr, "B_SHOWINTCP") ~= 0
+      local parent = r.GetParentTrack(tr)
+      while ok and parent do
+        if r.GetMediaTrackInfo_Value(parent, "I_FOLDERCOMPACT") == 2 then ok = false end
+        parent = r.GetParentTrack(parent)
+      end
+      shown[tr] = ok
+    end
+    return shown[tr]
+  end
+  for id, res in pairs(results) do
+    if id ~= "visibility" then
+      for _, is in ipairs(res) do
+        local it = is.item and r.ValidatePtr2(0, is.item, "MediaItem*") and is.item
+        if it and not is.needs and not track_shown(r.GetMediaItem_Track(it)) then is.needs = "visibility" end
+      end
+    end
   end
   return results, { total = total, items = #ctx.items, tracks = #ctx.tracks, fps = ctx.fps, sr = ctx.sr }
 end

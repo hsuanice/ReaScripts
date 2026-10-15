@@ -1,5 +1,9 @@
 # hsuanice_Library.lua — Changelog
 
+## 26.1015.1425
+
+- Update: hsuanice_Session Fix Core.lua (fade shapes on hidden tracks, check order).
+
 ## 26.1015.1303
 
 - Update: hsuanice_Session Fix Core.lua (Mixed channels fix).

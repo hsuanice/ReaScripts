@@ -1,16 +1,15 @@
 --[[
 @description Session Fix - Interchange Prep: check and fix a REAPER session before converting it with Interchanger
-@version 26.1015.1303
+@version 26.1015.1425
 @author hsuanice
 @noindex
 @changelog
-  - Add: Mixed channels can be fixed - one track per channel count as played ("<track> mono / stereo / 4ch ..."); the group with the most items stays on the original track, fewer channels above, more below; folders stay intact. Runs after Channel mode.
-  - Change: Off grid (was Frame grid) follows the project grid setting (frames, beats ... as set in REAPER; needs SWS, otherwise the frame grid) and shows the current grid unit.
-  - Fix: an edge 1 sample off the grid (e.g. a file whose TimeReference is 1 sample late) was listed but never snapped; it is trimmed inward to the next grid line now.
-  - Change: clicking an off-grid edge zooms to one grid step either side of it.
-  - Change: Save report asks where to save (default: the session folder; needs js_ReaScriptAPI, otherwise the session folder).
-  - Change: the title bar has no fold arrow any more.
-  - Change: in the lists only the first column stretches; Track / Position / Take keep their width when a column is resized.
+  - Fix: list columns were squeezed and jumped back when resized; columns now keep their width and the list scrolls sideways when it is wider than the window.
+  - Add: lists can be sorted - click a column header (up / down / original order); Shift+click selects a range in the order shown.
+  - Fix: Fix on Fade shapes missed fades on hidden tracks / inside collapsed folders (only Fix All reached them); they are fixed now.
+  - Change: Folders comes right after Hidden tracks; the title bar and its close button use the chosen font size.
+  - Fix: a broken crossfade (fades not matching the overlap) could not get its shape and was set to an invalid value; it is now marked "fix Crossfades first" and left alone until Crossfades has fixed it.
+  - Add: issues that need another check first (hidden tracks / collapsed folders, broken crossfades) show it in colour in front; fixing such a check alone asks to fix that first (Yes = first that, then this check).
 @about
   # Session Fix - Interchange Prep
 
@@ -226,14 +225,17 @@ local function reveal_issue(is)
 end
 
 -- Click handling in an issue list: plain = single, Cmd = toggle, Shift = range
-local function click_issue(d, k, list)
+local function click_issue(d, k, list, order)
   local mods = ImGui.GetKeyMods(ctx)
   local sel = state.sel[d.id] or {}
   if (mods & ImGui.Mod_Shift) ~= 0 and state.anchor[d.id] then
-    local a, b = state.anchor[d.id], k
+    -- range in the order shown (the list may be sorted)
+    local pos = {}
+    for p, i in ipairs(order or {}) do pos[i] = p end
+    local a, b = pos[state.anchor[d.id]] or state.anchor[d.id], pos[k] or k
     if a > b then a, b = b, a end
     if (mods & ImGui.Mod_Ctrl) == 0 then sel = {} end
-    for i = a, b do sel[i] = true end
+    for p = a, b do sel[order and order[p] or p] = true end
   elseif (mods & ImGui.Mod_Ctrl) ~= 0 then -- Cmd on macOS
     sel[k] = (not sel[k]) or nil
     state.anchor[d.id] = k
@@ -271,13 +273,57 @@ local function run_fix(d, selected_only)
     if r.MB(d.instructions, TITLE, 4) == 6 then r.Main_OnCommand(40022, 0) end -- File: Save project as...
     return
   end
+  -- prerequisites (hidden tracks, broken crossfades ...): offer to fix those first
+  local count, pre_done = {}, {}
+  for _, is in ipairs(issues) do
+    if is.needs and is.needs ~= d.id then count[is.needs] = (count[is.needs] or 0) + 1 end
+  end
+  for _, pd in ipairs(CORE.RULES) do
+    local n, q = count[pd.id], CORE.NEEDS[pd.id]
+    if n and q and pd.fix then
+      local ans = r.MB(string.format(q.ask, n) .. "\n\nYes = fix that first, then this check\nNo = fix this check now (those items may stay listed)",
+        TITLE, 3) -- 6 yes, 7 no, 2 cancel
+      if ans == 2 then return end
+      if ans == 6 then
+        local mine = {}
+        for _, is in ipairs(issues) do if is.item then mine[is.item] = true end; if is.item2 then mine[is.item2] = true end end
+        local pre = {}
+        for _, pis in ipairs(state.results[pd.id] or {}) do
+          -- crossfades: only the ones these issues need; hidden tracks: show everything
+          if pd.id ~= "crossfades" or mine[pis.item] or (pis.item2 and mine[pis.item2]) then pre[#pre + 1] = pis end
+        end
+        local _, pmsg, paudit = CORE.fix(pd, pre, scan_opts())
+        add_history(pd, paudit)
+        pre_done[#pre_done + 1] = pd.short .. ": " .. pmsg
+        do_scan()
+        if paudit and paudit.summary.red > 0 then
+          state.audit = { title = "After \"" .. pd.title .. "\" (done first)", problems = paudit.problems, summary = paudit.summary, undo = "Session Fix: " .. pd.title }
+          state.status = "Stopped: fixing \"" .. pd.short .. "\" first changed audio, a crossfade or a track. See the warning above."
+          return
+        end
+        -- pick this check's issues again from the new scan (same items when only some were selected)
+        local fresh = state.results[d.id] or {}
+        if partial then
+          local again = {}
+          for _, is in ipairs(fresh) do if is.item and mine[is.item] then again[#again + 1] = is end end
+          fresh = again
+        end
+        issues = fresh
+      end
+    end
+  end
+  if #issues == 0 then
+    state.status = "Done first: " .. table.concat(pre_done, " | ") .. ". Nothing left to fix in \"" .. d.short .. "\"."
+    return
+  end
   local question = d.confirm and d.confirm(issues) -- nil = nothing printed / deleted: no question
   if question and r.MB(question, TITLE, 1) ~= 1 then return end
   local _, msg, audit = CORE.fix(d, issues, scan_opts())
   add_history(d, audit)
   if audit then state.audit = { title = "After \"" .. d.title .. "\"", problems = audit.problems, summary = audit.summary, undo = "Session Fix: " .. d.title } end
   do_scan()
-  state.status = string.format("Fixed \"%s\"%s: %s. Rescanned: %d issue%s left in total.",
+  state.status = string.format("%sFixed \"%s\"%s: %s. Rescanned: %d issue%s left in total.",
+    #pre_done > 0 and ("Done first: " .. table.concat(pre_done, " | ") .. ". ") or "",
     d.title, partial and " (selected only)" or "", msg, state.summary.total, state.summary.total == 1 and "" or "s")
 end
 
@@ -341,6 +387,46 @@ local function verify_vs_start()
   state.audit = { title = "Since the start (" .. state.baseline.time .. ")", problems = problems, summary = summary, undo = false }
 end
 
+-- Lists use fixed, resizable columns and scroll sideways when they are wider than the window
+-- (stretch columns got squeezed and jumped back when dragged). Height: up to 12 rows.
+local LIST_FLAGS = ImGui.TableFlags_Borders | ImGui.TableFlags_RowBg | ImGui.TableFlags_Resizable
+  | ImGui.TableFlags_ScrollX | ImGui.TableFlags_ScrollY | ImGui.TableFlags_SizingFixedFit
+  | ImGui.TableFlags_Sortable | ImGui.TableFlags_SortTristate -- click a header: up / down / original order
+
+-- Display order of a list after the user's sort (call after the headers row). keyfn(row, column)
+-- gives a number or a lower-case string; ties keep the original order. Cached per list.
+local sort_cache = {}
+local function sort_order(key, rows, keyfn)
+  local _, has = ImGui.TableNeedSort(ctx)
+  local col, dir = -1, 0
+  if has then
+    local ok, ci, _, sd = ImGui.TableGetColumnSortSpecs(ctx, 0)
+    if ok then col, dir = ci, sd end
+  end
+  local c = sort_cache[key]
+  if c and c.rows == rows and c.n == #rows and c.col == col and c.dir == dir then return c.order end
+  local order, keys = {}, {}
+  for i = 1, #rows do order[i] = i end
+  if col >= 0 then
+    for i, row in ipairs(rows) do keys[i] = keyfn(row, col) end
+    local desc = dir == ImGui.SortDirection_Descending
+    table.sort(order, function(a, b)
+      local ka, kb = keys[a], keys[b]
+      if type(ka) ~= type(kb) then ka, kb = tostring(ka), tostring(kb) end
+      if ka == kb then return a < b end
+      if desc then return ka > kb end
+      return ka < kb
+    end)
+  end
+  sort_cache[key] = { rows = rows, n = #rows, col = col, dir = dir, order = order }
+  return order
+end
+local function lead_number(s) return tonumber((s or ""):match("^(%d+)")) or math.huge end
+local function list_height(rows)
+  local row = ImGui.GetTextLineHeightWithSpacing(ctx) + S(4)
+  return (math.min(math.max(rows, 1), 12) + 1) * row + S(18) -- + header + horizontal scrollbar
+end
+
 -- Before / after check of the last fix (or of the whole session since the start)
 local function draw_audit()
   local a = state.audit
@@ -375,16 +461,21 @@ local function draw_audit()
     ImGui.TreePop(ctx)
   end
   if #a.problems > 0 then
-    local h = math.min(#a.problems, 6) * ImGui.GetTextLineHeightWithSpacing(ctx) + S(30)
-    local flags = ImGui.TableFlags_Borders | ImGui.TableFlags_RowBg | ImGui.TableFlags_ScrollY
-    if ImGui.BeginTable(ctx, "auditlist", 3, flags | ImGui.TableFlags_Resizable, 0, h) then
-      ImGui.TableSetupColumn(ctx, "Change", ImGui.TableColumnFlags_WidthStretch, 3)
+    local h = math.min(#a.problems, 6) * ImGui.GetTextLineHeightWithSpacing(ctx) + S(48)
+    if ImGui.BeginTable(ctx, "audit", 3, LIST_FLAGS, 0, h) then
+      ImGui.TableSetupColumn(ctx, "Change", ImGui.TableColumnFlags_WidthFixed, S(420))
       ImGui.TableSetupColumn(ctx, "Track", ImGui.TableColumnFlags_WidthFixed, S(200))
       ImGui.TableSetupColumn(ctx, "Position", ImGui.TableColumnFlags_WidthFixed, S(90))
       ImGui.TableSetupScrollFreeze(ctx, 0, 1)
       ImGui.TableHeadersRow(ctx)
-      for k, p in ipairs(a.problems) do
-        if k > MAX_LIST then break end
+      local order = sort_order("audit", a.problems, function(p, col)
+        if col == 2 then return p.pos or -1 end
+        if col == 1 then return lead_number((CORE.issue_where(p))) end
+        return (p.level .. " " .. p.text):lower()
+      end)
+      for n, k in ipairs(order) do
+        local p = a.problems[k]
+        if n > MAX_LIST then break end
         local trk, pos = CORE.issue_where(p)
         ImGui.TableNextRow(ctx)
         ImGui.TableNextColumn(ctx)
@@ -406,17 +497,25 @@ local function draw_audit()
 end
 
 local function draw_issue_table(d, list)
-  local flags = ImGui.TableFlags_Borders | ImGui.TableFlags_RowBg | ImGui.TableFlags_Resizable
-  if not ImGui.BeginTable(ctx, "issuelist_" .. d.id, 4, flags) then return end
-  -- first column stretches; the others keep their width, so dragging one does not squeeze the rest
-  ImGui.TableSetupColumn(ctx, "Issue", ImGui.TableColumnFlags_WidthStretch, 1)
+  if not ImGui.BeginTable(ctx, "issues_" .. d.id, 4, LIST_FLAGS, 0, list_height(math.min(#list, MAX_LIST + 1))) then return end
+  ImGui.TableSetupScrollFreeze(ctx, 0, 1)
+  ImGui.TableSetupColumn(ctx, "Issue", ImGui.TableColumnFlags_WidthFixed, S(320))
   ImGui.TableSetupColumn(ctx, "Track", ImGui.TableColumnFlags_WidthFixed, S(200))
   ImGui.TableSetupColumn(ctx, "Position", ImGui.TableColumnFlags_WidthFixed, S(90))
   ImGui.TableSetupColumn(ctx, "Take / item", ImGui.TableColumnFlags_WidthFixed, S(260))
   ImGui.TableHeadersRow(ctx)
+  local order = sort_order("issues_" .. d.id, list, function(is, col)
+    if col == 2 then
+      return is.pos or (is.item and r.ValidatePtr2(0, is.item, "MediaItem*") and r.GetMediaItemInfo_Value(is.item, "D_POSITION")) or -1
+    end
+    local trk, _, name = CORE.issue_where(is)
+    if col == 1 then return lead_number(trk) end
+    return ((col == 0 and is.text or name) or ""):lower()
+  end)
   local sel = state.sel[d.id] or {}
-  for k, is in ipairs(list) do
-    if k > MAX_LIST then
+  for p, k in ipairs(order) do
+    local is = list[k]
+    if p > MAX_LIST then
       ImGui.TableNextRow(ctx)
       ImGui.TableNextColumn(ctx)
       ImGui.TextDisabled(ctx, string.format("... %d more (see the report)", #list - MAX_LIST))
@@ -425,8 +524,13 @@ local function draw_issue_table(d, list)
     local trk, pos, name = CORE.issue_where(is)
     ImGui.TableNextRow(ctx)
     ImGui.TableNextColumn(ctx)
+    local need = is.needs and CORE.NEEDS[is.needs]
+    if need then -- order matters: say what to do first, in colour, in front
+      ImGui.TextColored(ctx, COL_ORG, need.tag .. ":")
+      ImGui.SameLine(ctx)
+    end
     if ImGui.Selectable(ctx, (is.text or "") .. "##" .. k, sel[k] == true, ImGui.SelectableFlags_SpanAllColumns) then
-      click_issue(d, k, list)
+      click_issue(d, k, list, order)
     end
     ImGui.TableNextColumn(ctx); ImGui.Text(ctx, trk)
     ImGui.TableNextColumn(ctx); ImGui.Text(ctx, pos)
@@ -476,16 +580,23 @@ local function draw_history_table(d, hist)
     if ImGui.SmallButton(ctx, string.format("All reviewed (%d)##allrev", #pending)) then mark_reviewed(pending) end
     if ImGui.IsItemHovered(ctx) then ImGui.SetTooltip(ctx, "Deleted items: remove their review copies (<track> before / removed).\nPrinted items: the original stays, marked as reviewed. The list stays.") end
   end
-  local flags = ImGui.TableFlags_Borders | ImGui.TableFlags_RowBg | ImGui.TableFlags_Resizable
-  if not ImGui.BeginTable(ctx, "donelist_" .. d.id, 5, flags) then return end
-  ImGui.TableSetupColumn(ctx, "Done", ImGui.TableColumnFlags_WidthStretch, 1)
+  if not ImGui.BeginTable(ctx, "done_" .. d.id, 5, LIST_FLAGS, 0, list_height(math.min(#hist, MAX_LIST))) then return end
+  ImGui.TableSetupScrollFreeze(ctx, 0, 1)
+  ImGui.TableSetupColumn(ctx, "Done", ImGui.TableColumnFlags_WidthFixed, S(420))
   ImGui.TableSetupColumn(ctx, "Track", ImGui.TableColumnFlags_WidthFixed, S(200))
   ImGui.TableSetupColumn(ctx, "Position", ImGui.TableColumnFlags_WidthFixed, S(90))
   ImGui.TableSetupColumn(ctx, "Take / item", ImGui.TableColumnFlags_WidthFixed, S(260))
-  ImGui.TableSetupColumn(ctx, "Review", ImGui.TableColumnFlags_WidthFixed, 0)
+  ImGui.TableSetupColumn(ctx, "Review", ImGui.TableColumnFlags_WidthFixed | ImGui.TableColumnFlags_NoSort, 0)
   ImGui.TableHeadersRow(ctx)
-  for k, e in ipairs(hist) do
-    if k > MAX_LIST then break end
+  local order = sort_order("done_" .. d.id, hist, function(e, col)
+    if col == 1 then return lead_number(e.where and e.where[1]) end
+    if col == 2 then return e.s or -1 end
+    if col == 3 then return ((e.where and e.where[3]) or ""):lower() end
+    return (e.kind .. " " .. (e.reason or "")):lower()
+  end)
+  for p, k in ipairs(order) do
+    local e = hist[k]
+    if p > MAX_LIST then break end
     ImGui.TableNextRow(ctx)
     ImGui.TableNextColumn(ctx)
     local label = (e.kind == "printed" and "PRINTED: " or (e.kind == "split" and "SPLIT: " or "DELETED: ")) .. (e.reason or "")
@@ -911,15 +1022,16 @@ local function loop()
   ImGui.SetNextWindowSize(ctx, S(860), S(600), ImGui.Cond_FirstUseEver)
   -- NoCollapse: no fold arrow in the title bar (one click there made the window look gone)
   local wflags = ImGui.WindowFlags_NoCollapse | (prefs.allow_docking and 0 or ImGui.WindowFlags_NoDocking)
+  -- the font is pushed before Begin so the title bar (and its close button) use the chosen size too
+  ImGui.PushFont(ctx, nil, math.floor(FONT_BASE * prefs.font_scale + 0.5))
   local visible, open = ImGui.Begin(ctx, TITLE .. "  v" .. VERSION .. "###sessionfixprep", true, wflags)
   if visible then
-    ImGui.PushFont(ctx, nil, math.floor(FONT_BASE * prefs.font_scale + 0.5))
     draw_top_bar()
     draw_audit()
     draw_rules()
-    ImGui.PopFont(ctx)
     ImGui.End(ctx)
   end
+  ImGui.PopFont(ctx)
   if open then r.defer(loop) end
 end
 
