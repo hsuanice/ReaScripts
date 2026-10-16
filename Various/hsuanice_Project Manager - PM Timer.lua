@@ -1,11 +1,10 @@
 --[[
 @description Project Manager - PM Timer: scene-aware work timer
-@version 26.1012.1641
+@version 26.1016.1013
 @author hsuanice
 @noindex  (kept in the repository as a backup; Project Manager is not offered on ReaPack for now)
 @changelog
-  - Renamed to "Project Manager - PM Timer" (was "PM_Timer") as part of the 2026-10-12 naming clean-up.
-  - Reinstall the package from ReaPack and re-assign your shortcuts / toolbar buttons.
+  - Fix: a scene's Shots count was often 1 too high - a Picture Cut shot that only touches the scene edge (starts where the scene ends) was counted; a shot must now overlap the scene by more than half a frame.
 @about
   Scene-aware toggle timer for the hsuanice PM system.
   Uses gfx (no ReaImGui). 1-second display refresh via defer + time_precise.
@@ -898,15 +897,19 @@ local function compute_scene_metadata(scene_item)
   local scene_group = math.floor(r.GetMediaItemInfo_Value(scene_item, "I_GROUPID"))
   local scene_guid  = r.BR_GetMediaItemGUID(scene_item)
 
-  -- shots: Picture Cut items that overlap the scene range
+  -- shots: Picture Cut items that overlap the scene range by more than half a frame; a shot that
+  -- only touches the scene edge (starts where the scene ends) must not count, but a tiny
+  -- floating-point difference made it "overlap" and the count was often 1 too high
   local shots = 0
   local pic_track = get_track_by_name(PICTURE_TRACK_NAME)
   if pic_track then
+    local fps = r.TimeMap_curFrameRate(0)
+    local tol = 0.5 / ((fps and fps > 0) and fps or 24)
     for i = 0, r.CountTrackMediaItems(pic_track) - 1 do
       local pitem      = r.GetTrackMediaItem(pic_track, i)
       local item_start = r.GetMediaItemInfo_Value(pitem, "D_POSITION")
       local item_end   = item_start + r.GetMediaItemInfo_Value(pitem, "D_LENGTH")
-      if item_end > scene_start and item_start < scene_end then shots = shots + 1 end
+      if item_end > scene_start + tol and item_start < scene_end - tol then shots = shots + 1 end
     end
   end
 
