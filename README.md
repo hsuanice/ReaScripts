@@ -76,6 +76,7 @@ and background on/off scripts start with `Toggle`.
 | Toggle Track and Razor Item Link like Pro Tools | Pro Tools-style "Link Track and Edit Selection": tracks follow razor areas / item selection |
 | Toggle Razor and Item Link Overlap or Contain | Razor areas select the items they overlap or fully contain |
 | Toggle Set Time Selection to Items on Right Drag | After a right-button drag, the time selection follows the selected items |
+| Extend Razor Edit to Mouse Cursor like Pro Tools | Pro Tools-style Shift-click: grows the razor area (time range and tracks) to the mouse position, never shrinks it |
 
 ### Tracks
 
@@ -145,6 +146,8 @@ Original: "Renders selected plugin to selected media item", written for REAPER 5
 http://timchimes.com/scripting-with-reaper-audiosuite/
 
 Hover Editing - Toggle Hover Mode is based on / inspired by TJF's *Hover Mode Toggle* script.
+
+Extend Razor Edit to Mouse Cursor like Pro Tools is inspired by Daniel Kharrat's *Extend razor edit area to mouse cursor (select tracks in between)* script.
 
 Auto Color's palette (hue + per-row saturation / value) is modeled after rodilab's *Color palette* script.
 Auto Color's Shiny mode follows the ShinyColor behavior of *Chroma - Coloring Tool* by OLSHALOM — https://forum.cockos.com/showthread.php?t=281516
