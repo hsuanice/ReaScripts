@@ -1,9 +1,10 @@
 --[[
 @description Extend Razor Edit to Mouse Cursor like Pro Tools - Shift-click extends the edit selection
-@version 26.1017.1551
+@version 26.1017.1559
 @author hsuanice
 @changelog
-  - First release: Shift-click adds the clicked track and extends the shared time range (grow only).
+  - Add: Shift-click on an item extends the range to the item's start or end (covers the whole item).
+  - Fix: Shift-click on an item now adds the item's track.
 @about
   Pro Tools-style Shift-click: extends the current edit selection to the mouse position.
   The selection is one time range shared by a set of tracks.
@@ -16,13 +17,16 @@
     • The current selection is read from the existing razor areas (all tracks, union of their
       time ranges). Without razor areas: time selection + selected tracks. Without those:
       the edit cursor + the selected tracks (or the last touched track).
-    • The clicked position follows snap / grid settings. The edit cursor does not move.
+    • Clicking an item extends the range to cover the whole item (to its start or end).
+      Clicking empty track space extends to the mouse position, following snap / grid settings.
+    • The edit cursor does not move.
     • Track-level razor areas only; envelope-lane razor areas are kept but not extended.
     • Options inside the script: also set the time selection, the track selection and the item
       selection to the result.
 
   Suggested setup (suggestions only — nothing is assigned automatically):
-    Preferences > Editing Behavior > Mouse Modifiers > Track > Left click > Shift.
+    Preferences > Editing Behavior > Mouse Modifiers > Track > Left click > Shift,
+    and Media item bottom half (or Media item) > Left click > Shift (Action list...).
 
   Credits:
     Inspired by Daniel Kharrat's "Extend razor edit area to mouse cursor (select tracks in between)".
@@ -71,9 +75,20 @@ local function main()
   local n_tracks = reaper.CountTracks(0)
   if n_tracks == 0 then return end
 
-  local click_t = mouse_time()
+  -- Clicked span: an item under the mouse counts as its whole length (extends to its start / end),
+  -- otherwise the (snapped) mouse time
   local x, y = reaper.GetMousePosition()
-  local click_tr = reaper.GetTrackFromPoint(x, y)
+  local click_t0, click_t1, click_tr
+  local item = reaper.GetItemFromPoint(x, y, true)
+  if item then
+    click_t0 = reaper.GetMediaItemInfo_Value(item, "D_POSITION")
+    click_t1 = click_t0 + reaper.GetMediaItemInfo_Value(item, "D_LENGTH")
+    click_tr = reaper.GetMediaItem_Track(item)
+  else
+    click_t0 = mouse_time()
+    click_t1 = click_t0
+    click_tr = reaper.GetTrackFromPoint(x, y)
+  end
   local click_idx = click_tr and track_index(click_tr) or -1
   if click_idx < 0 then click_idx = nil end
 
@@ -109,7 +124,7 @@ local function main()
   end
 
   -- 2) Grow only: union with the clicked point / track
-  t0, t1 = math.min(t0, click_t), math.max(t1, click_t)
+  t0, t1 = math.min(t0, click_t0), math.max(t1, click_t1)
   if click_idx then sel[click_idx], has_sel = true, true end
   if not has_sel or t1 - t0 <= EPS then return end
 
