@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<index version="1" name="hsuanice Scripts" commit="b5f6399461112672ab3e34f0fa38ba49ee15d3a6">
+<index version="1" name="hsuanice Scripts" commit="a1d2bb2559a9946d96ae323f8adeefc92bee3bc0">
   <category name="Conform">
     <reapack name="hsuanice_Conform List Browser - CLB.lua" type="script" desc="Conform List Browser - CLB: conform EDL / AAF / XML / OTIO / subtitle lists (GUI + Jump / Link / Load / Reveal)">
       <metadata>
@@ -722,6 +722,33 @@
     </reapack>
   </category>
   <category name="Selection">
+    <reapack name="hsuanice_Extend Razor Edit to Mouse Cursor like Pro Tools.lua" type="script" desc="Extend Razor Edit to Mouse Cursor like Pro Tools - Shift-click extends the edit selection">
+      <metadata>
+        <description><![CDATA[{\rtf1\ansi\deff0{\fonttbl{\f0 \fswiss Helvetica;}{\f1 \fmodern Courier;}}
+{\colortbl;\red255\green0\blue0;\red0\green0\blue255;}
+\widowctrl\hyphauto
+
+{\pard \ql \f0 \sa180 \li0 \fi0 Pro Tools-style Shift-click: extends the current edit selection to the mouse position. The selection is one time range shared by a set of tracks.\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 Behavior: \u8226 ? Only grows, never shrinks. Clicking before the range extends its start, clicking after it extends its end, clicking inside it keeps the time range as it is. \u8226 ? Tracks: only the clicked track is added (like Cmd-click in Pro Tools); tracks in between are not. Every track of the selection gets the same, extended time range. \u8226 ? The current selection is read from the existing razor areas (all tracks, union of their time ranges). Without razor areas: time selection + selected tracks. Without those: the edit cursor + the selected tracks (or the last touched track). \u8226 ? REAPER clears razor areas when an item is clicked, before this action runs. With "Toggle Track and Razor Item Link like Pro Tools" running, the last razor area is remembered, so Shift-click on an item keeps the original tracks (used only while the time selection still equals that razor range). \u8226 ? Clicking an item extends the range to cover the whole item (to its start or end). Clicking empty track space extends to the mouse position, following snap / grid settings. \u8226 ? The edit cursor does not move. \u8226 ? Track-level razor areas only; envelope-lane razor areas are kept but not extended. \u8226 ? Options inside the script: also set the time selection, the track selection and the item selection to the result.\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 Suggested setup (suggestions only \u8212- nothing is assigned automatically): Preferences > Editing Behavior > Mouse Modifiers > Track > Left click > Shift, and Media item bottom half (or Media item) > Left click > Shift (Action list...).\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 Credits: Inspired by Daniel Kharrat's "Extend razor edit area to mouse cursor (select tracks in between)". Designed and tested by hsuanice; code written with Claude Code (AI).\par}
+}
+]]></description>
+      </metadata>
+      <version name="26.1017.1551" author="hsuanice" time="2026-10-17T07:51:31Z">
+        <changelog><![CDATA[- First release: Shift-click adds the clicked track and extends the shared time range (grow only).]]></changelog>
+        <source main="main">https://github.com/hsuanice/ReaScripts/raw/288ee012771ac55e5cef59c8ef1434ee5a1b4b80/Selection/hsuanice_Extend%20Razor%20Edit%20to%20Mouse%20Cursor%20like%20Pro%20Tools.lua</source>
+      </version>
+      <version name="26.1017.1559" author="hsuanice" time="2026-10-17T08:00:21Z">
+        <changelog><![CDATA[- Add: Shift-click on an item extends the range to the item's start or end (covers the whole item).
+- Fix: Shift-click on an item now adds the item's track.]]></changelog>
+        <source main="main">https://github.com/hsuanice/ReaScripts/raw/e768a75cc9884d3d853598f325e9f11576026170/Selection/hsuanice_Extend%20Razor%20Edit%20to%20Mouse%20Cursor%20like%20Pro%20Tools.lua</source>
+      </version>
+      <version name="26.1017.1609" author="hsuanice" time="2026-10-17T08:10:04Z">
+        <changelog><![CDATA[- Fix: Shift-click on an item keeps the original razor tracks (REAPER clears razor areas on item mouse-down). Needs Toggle Track and Razor Item Link like Pro Tools running.]]></changelog>
+        <source main="main">https://github.com/hsuanice/ReaScripts/raw/a1d2bb2559a9946d96ae323f8adeefc92bee3bc0/Selection/hsuanice_Extend%20Razor%20Edit%20to%20Mouse%20Cursor%20like%20Pro%20Tools.lua</source>
+      </version>
+    </reapack>
     <reapack name="hsuanice_Toggle Razor and Item Link Overlap or Contain.lua" type="script" desc="Toggle Razor and Item Link Overlap or Contain - razor areas select the items they overlap or contain">
       <metadata>
         <description><![CDATA[{\rtf1\ansi\deff0{\fonttbl{\f0 \fswiss Helvetica;}{\f1 \fmodern Courier;}}
@@ -778,6 +805,10 @@
         <changelog><![CDATA[- Renamed to "Toggle Track and Razor Item Link like Pro Tools" (was "Track and Razor Item Link like Pro Tools") as part of the 2026-10-12 naming clean-up.
 - Reinstall the package from ReaPack and re-assign your shortcuts / toolbar buttons.]]></changelog>
         <source main="main">https://github.com/hsuanice/ReaScripts/raw/69a8697e1b54666ea7228379b1490811fd778fa8/Selection/hsuanice_Toggle%20Track%20and%20Razor%20Item%20Link%20like%20Pro%20Tools.lua</source>
+      </version>
+      <version name="26.1017.1609" author="hsuanice" time="2026-10-17T08:10:04Z">
+        <changelog><![CDATA[- Add: remembers the last razor area (range + tracks) for Extend Razor Edit to Mouse Cursor like Pro Tools, because REAPER clears razor areas when an item is clicked. Session-only, not saved with the project.]]></changelog>
+        <source main="main">https://github.com/hsuanice/ReaScripts/raw/a1d2bb2559a9946d96ae323f8adeefc92bee3bc0/Selection/hsuanice_Toggle%20Track%20and%20Razor%20Item%20Link%20like%20Pro%20Tools.lua</source>
       </version>
     </reapack>
   </category>
@@ -982,7 +1013,7 @@ Packages
 {\pard \ql \f0 \sa180 \li0 \fi0 \outlinelevel2 \b \fs28 Items Properties\par}
 {\pard \ql \f0 \sa180 \li0 \fi0 | Package | What it does | |---|---| | Auto Color - Items by Take Name | Color items by take-name keywords with a palette (GUI + Toggle Background Coloring, By Palette, Smart Random, Follow Track Color, All Shiny Color) |\par}
 {\pard \ql \f0 \sa180 \li0 \fi0 \outlinelevel2 \b \fs28 Selection\par}
-{\pard \ql \f0 \sa180 \li0 \fi0 | Package | What it does | |---|---| | Toggle Track and Razor Item Link like Pro Tools | Pro Tools-style "Link Track and Edit Selection": tracks follow razor areas / item selection | | Toggle Razor and Item Link Overlap or Contain | Razor areas select the items they overlap or fully contain | | Toggle Set Time Selection to Items on Right Drag | After a right-button drag, the time selection follows the selected items |\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 | Package | What it does | |---|---| | Toggle Track and Razor Item Link like Pro Tools | Pro Tools-style "Link Track and Edit Selection": tracks follow razor areas / item selection | | Toggle Razor and Item Link Overlap or Contain | Razor areas select the items they overlap or fully contain | | Toggle Set Time Selection to Items on Right Drag | After a right-button drag, the time selection follows the selected items | | Extend Razor Edit to Mouse Cursor like Pro Tools | Pro Tools-style Shift-click: grows the razor area (time range and tracks) to the mouse position, never shrinks it |\par}
 {\pard \ql \f0 \sa180 \li0 \fi0 \outlinelevel2 \b \fs28 Tracks\par}
 {\pard \ql \f0 \sa180 \li0 \fi0 | Package | What it does | |---|---| | Auto Pan LR tracks | Pan adjacent XXX_L / XXX_R track pairs hard left / right | | Delete Selected Tracks with Warning | Safe delete: asks first when tracks have items, FX, routing or are folders | | Show Hide Folder Child Tracks in TCP | Show or hide the children of the selected folder tracks (or of their parent) | | Import Audio Folders to Tracks - Field Recorder | Import one folder per track; channel-split recorder files are grouped (GUI) | | Import Audio Folders to Tracks - Music Multitrack | Import one folder per track for music multitrack sessions (GUI) |\par}
 {\pard \ql \f0 \sa180 \li0 \fi0 \outlinelevel2 \b \fs28 Metadata\par}
@@ -1017,6 +1048,7 @@ Claude
 {\pard \ql \f0 \sa180 \li0 \fi0 The scripts in this repository are designed, tested and maintained by hsuanice, with code written together with AI tools (Claude, ChatGPT).\par}
 {\pard \ql \f0 \sa180 \li0 \fi0 AudioSweet is inspired by the AudioSuite-like script by Tim Chimes. "AudioSweet" is a name originally given by Tim Chimes; this project continues to use the name in reference to his original work. Original: "Renders selected plugin to selected media item", written for REAPER 5.1 with Lua (v1.1, 2015-12-22) \u8212- http://timchimes.com/scripting-with-reaper-audiosuite/\par}
 {\pard \ql \f0 \sa180 \li0 \fi0 Hover Editing - Toggle Hover Mode is based on / inspired by TJF's {\i Hover Mode Toggle} script.\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 Extend Razor Edit to Mouse Cursor like Pro Tools is inspired by Daniel Kharrat's {\i Extend razor edit area to mouse cursor (select tracks in between)} script.\par}
 {\pard \ql \f0 \sa180 \li0 \fi0 Auto Color's palette (hue + per-row saturation / value) is modeled after rodilab's {\i Color palette} script. Auto Color's Shiny mode follows the ShinyColor behavior of {\i Chroma - Coloring Tool} by OLSHALOM \u8212- https://forum.cockos.com/showthread.php?t=281516\par}
 {\pard \ql \f0 \sa180 \li0 \fi0 Conform List Browser uses {\field{\*\fldinst{HYPERLINK "https://github.com/AcademySoftwareFoundation/OpenTimelineIO"}}{\fldrslt{\ul
 OpenTimelineIO
