@@ -1,10 +1,9 @@
 --[[
 @description Toggle Track and Razor Item Link like Pro Tools - Link Track and Edit Selection
-@version 26.1012.1641
+@version 26.1017.1609
 @author hsuanice
 @changelog
-  - Renamed to "Toggle Track and Razor Item Link like Pro Tools" (was "Track and Razor Item Link like Pro Tools") as part of the 2026-10-12 naming clean-up.
-  - Reinstall the package from ReaPack and re-assign your shortcuts / toolbar buttons.
+  - Add: remembers the last razor area (range + tracks) for Extend Razor Edit to Mouse Cursor like Pro Tools, because REAPER clears razor areas when an item is clicked. Session-only, not saved with the project.
 @about
   Pro Tools-style "Link Track and Edit Selection".
   Edit Selection = Razor Area or Item Selection.
@@ -509,6 +508,22 @@ local function scan_razors_if_needed(psc)
   end
 
   Razor.sig = table.concat(sig_parts, "|")
+
+  -- Remember the last non-empty razor area (range + track GUIDs) for other scripts:
+  -- REAPER clears razor areas on mouse-down over an item, before a click action runs
+  -- (used by "Extend Razor Edit to Mouse Cursor like Pro Tools"). Not saved with the project.
+  if Razor.cnt_tracks_with > 0 then
+    local guids = {}
+    for i=0, tcnt-1 do
+      local g = track_guid(reaper.GetTrack(0,i))
+      if Razor.t_has[g] then guids[#guids+1] = g end
+    end
+    local v = string.format("%.17f %.17f %s", Razor.union_s, Razor.union_e, table.concat(guids, ","))
+    if v ~= Razor.last_remembered then
+      Razor.last_remembered = v
+      reaper.SetExtState("hsuanice_Link", "last_razor", v, false)
+    end
+  end
 end
 
 ----------------

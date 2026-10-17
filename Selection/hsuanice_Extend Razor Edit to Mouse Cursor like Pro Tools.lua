@@ -1,10 +1,9 @@
 --[[
 @description Extend Razor Edit to Mouse Cursor like Pro Tools - Shift-click extends the edit selection
-@version 26.1017.1559
+@version 26.1017.1609
 @author hsuanice
 @changelog
-  - Add: Shift-click on an item extends the range to the item's start or end (covers the whole item).
-  - Fix: Shift-click on an item now adds the item's track.
+  - Fix: Shift-click on an item keeps the original razor tracks (REAPER clears razor areas on item mouse-down). Needs Toggle Track and Razor Item Link like Pro Tools running.
 @about
   Pro Tools-style Shift-click: extends the current edit selection to the mouse position.
   The selection is one time range shared by a set of tracks.
@@ -17,6 +16,10 @@
     • The current selection is read from the existing razor areas (all tracks, union of their
       time ranges). Without razor areas: time selection + selected tracks. Without those:
       the edit cursor + the selected tracks (or the last touched track).
+    • REAPER clears razor areas when an item is clicked, before this action runs. With
+      "Toggle Track and Razor Item Link like Pro Tools" running, the last razor area is
+      remembered, so Shift-click on an item keeps the original tracks (used only while the
+      time selection still equals that razor range).
     • Clicking an item extends the range to cover the whole item (to its start or end).
       Clicking empty track space extends to the mouse position, following snap / grid settings.
     • The edit cursor does not move.
@@ -71,6 +74,26 @@ local function mouse_time()
   return t
 end
 
+-- REAPER clears razor areas on mouse-down over an item, before this click action runs.
+-- "Toggle Track and Razor Item Link like Pro Tools" remembers the last razor area; use it
+-- only when its range still equals the time selection (same selection, not a stale one).
+local function remembered_razor(sel)
+  local v = reaper.GetExtState("hsuanice_Link", "last_razor")
+  local a, b, list = v:match("^(%S+) (%S+) (%S+)$")
+  local s0, s1 = tonumber(a), tonumber(b)
+  if not (s0 and s1) then return nil end
+  local ts0, ts1 = reaper.GetSet_LoopTimeRange(false, false, 0, 0, false)
+  if math.abs(ts0 - s0) > 1e-6 or math.abs(ts1 - s1) > 1e-6 then return nil end
+  local want = {}
+  for g in list:gmatch("[^,]+") do want[g] = true end
+  local found = false
+  for i = 0, reaper.CountTracks(0) - 1 do
+    if want[reaper.GetTrackGUID(reaper.GetTrack(0, i))] then sel[i], found = true, true end
+  end
+  if not found then return nil end
+  return s0, s1, true
+end
+
 local function main()
   local n_tracks = reaper.CountTracks(0)
   if n_tracks == 0 then return end
@@ -102,6 +125,10 @@ local function main()
       t1 = t1 and math.max(t1, r[2]) or r[2]
       sel[i], has_sel = true, true
     end
+  end
+
+  if not t0 then
+    t0, t1, has_sel = remembered_razor(sel)
   end
 
   if not t0 then

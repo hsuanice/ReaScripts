@@ -4,6 +4,10 @@
 
 Track↔Edit link (Pro Tools style). Performance edition; focuses on Razor & item virtual ranges. This build removes menu guards for snappier click-select.
 
+## 26.1017.1609
+
+- Add: remembers the last razor area (range + tracks) for Extend Razor Edit to Mouse Cursor like Pro Tools, because REAPER clears razor areas when an item is clicked. Session-only, not saved with the project.
+
 ## 26.1012.1641
 
 - Renamed to "Toggle Track and Razor Item Link like Pro Tools" (was "Track and Razor Item Link like Pro Tools") as part of the 2026-10-12 naming clean-up.
