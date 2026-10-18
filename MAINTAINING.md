@@ -54,7 +54,7 @@ folder name on users' machines — hardcoded paths like
 | `Reaper Forum/` | yes | Images linked from forum posts — keep so old links work |
 | `.dev/` | yes | Maintenance tools (see §7) and `history/` (batch / rename configs used so far) |
 | `README.md`, `MAINTAINING.md`, `CLAUDE.md`, `.github/`, `.reapack-index.conf`, `index.xml` | yes | Docs, CI, generated index |
-| `Beta Testing/` | **no** | Local work in progress / not-yet-published scripts |
+| `Beta Testing/` | **no** (backup only for folders whitelisted in `.gitignore`, e.g. `REAPER PT Sync/`) | Local work in progress / not-yet-published scripts; a whitelisted folder is on GitHub for its history, scripts marked `@noindex ... backup`, never third-party SDKs |
 | `Archive/` | **no** | Retired scripts and `_backup/` snapshots (moved, never deleted) |
 | `PRO TOOLS/`, `PT2Reaper Project/`, `Tools/Apps/`, `Settings/`, `docs/` | **no** | Local projects, apps, user data, private notes |
 
