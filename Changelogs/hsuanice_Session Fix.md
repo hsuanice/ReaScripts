@@ -4,6 +4,13 @@
 
 Fix Tools - clean up edits before moving a REAPER session to Pro Tools or Nuendo
 
+## 26.1018.1239
+
+- Add: Workflow cues (last check) - removes the #in / #out / #Glue cues that glue / render leave in WAV files, only for files inside the session folder, in place (same file, audio untouched); other cues, take markers and project markers stay. Asks first (cannot be undone with Undo).
+- Add: Scan shows a progress bar with Cancel instead of freezing REAPER, and the time of each check (the slowest are shown).
+- Add: Tiny items check - editing slivers under 2 frames for review; 2-pops (xx:59:58:00 or after the last audio) are recognized and left out.
+- Add: Tiny items - mark tail pops as 2-pop from the list, or write "2-pop" / "tail pop" in the Item Notes, so they are left out.
+
 ## 26.1015.1425
 
 - Fix: list columns were squeezed and jumped back when resized; columns now keep their width and the list scrolls sideways when it is wider than the window.

@@ -1,15 +1,17 @@
 --[[
 @description Session Fix - Interchange Prep: check and fix a REAPER session before converting it with Interchanger
-@version 26.1015.1425
+@version 26.1018.1239
 @author hsuanice
 @noindex
 @changelog
-  - Fix: list columns were squeezed and jumped back when resized; columns now keep their width and the list scrolls sideways when it is wider than the window.
-  - Add: lists can be sorted - click a column header (up / down / original order); Shift+click selects a range in the order shown.
-  - Fix: Fix on Fade shapes missed fades on hidden tracks / inside collapsed folders (only Fix All reached them); they are fixed now.
-  - Change: Folders comes right after Hidden tracks; the title bar and its close button use the chosen font size.
-  - Fix: a broken crossfade (fades not matching the overlap) could not get its shape and was set to an invalid value; it is now marked "fix Crossfades first" and left alone until Crossfades has fixed it.
-  - Add: issues that need another check first (hidden tracks / collapsed folders, broken crossfades) show it in colour in front; fixing such a check alone asks to fix that first (Yes = first that, then this check).
+  - Add: Workflow cues (last check) - removes the #in / #out / #Glue cues that glue / render leave in WAV files, only for files inside the session folder, in place (same file, audio untouched); other cues, take markers and project markers stay. Asks first (cannot be undone with Undo).
+  - Add: Scan shows a progress bar (which check, how far inside it, time) with a Cancel button instead of freezing REAPER; Fix, Fix All and the rescans after them run the same way.
+  - Add: the time of each check - the slowest three after the frame rate line, all of them when hovering it, and in the report.
+  - Change: a project edit during the scan starts the scan again (the list never shows deleted items).
+  - Add: Tiny items - audio items under 2 frames (editing slivers) are their own check, review only (no automatic delete); 2-pops are recognized and left out: at xx:59:58:00 (one frame either way) or after all other audio (tail pop). The scan line says how many 2-pops were recognized.
+  - Change: Overlaps no longer lists a tiny item on its own; slivers inside a stacked crossfade are still listed and fixed there.
+  - Add: Tiny items - "Mark as 2-pop" for the selected entries (for tail pops that are not found automatically): a hidden flag saved with the project, no take marker; Settings > Clear 2-pop marks removes them.
+  - Add: "2-pop" / "2pop" / "tail pop" / "head pop" in REAPER's Item Notes also marks an item as a 2-pop.
 @about
   # Session Fix - Interchange Prep
 
@@ -17,8 +19,9 @@
   hidden / collapsed tracks, take volume / pan, mixed channel tracks, folders and empty tracks,
   track numbering, track volume / pan / width / polarity (L/R pairs hard left / right), mute /
   solo, envelopes, items that need a render (playrate, pitch, stretch markers, take FX,
-  polarity), hidden overlaps and slivers, broken crossfades, meeting fades, fade shapes, items
-  past their source, edges off the project grid, empty and MIDI items, take channel mode, inactive takes.
+  polarity), hidden overlaps and slivers, tiny items (2-pops left out), broken crossfades, meeting fades, fade shapes, items
+  past their source, edges off the project grid, empty and MIDI items, take channel mode, inactive takes,
+  workflow cues (#in / #out / #Glue) left in the session's WAV files by glue / render.
   Media outside the project folder / not WAV / other sample rate is shown at the top.
 
   Workflow: Save as Interchange copy -> Scan -> Fix (each check, or Fix All) -> review -> Verify
@@ -36,6 +39,10 @@
   - Done in this session: what each fix deleted / printed, with Reviewed buttons.
   - Settings: fade shapes (REAPER's own shape actions), track number format, keep deleted items
     for review, zoom to the clicked spot, allow docking, font size.
+
+  Credits: the Workflow cues fix releases and reloads the media files (offline / online, rebuild
+  peaks) the way amagalma's "Remove selected items' active takes' source file cue points (WAV only)"
+  (ReaTeam Scripts) does.
 
   Requires ReaImGui and the "hsuanice Library" package (Session Fix Core, RGWH Core).
   js_ReaScriptAPI is optional (vertical zoom / centring when a list entry is clicked).
@@ -131,6 +138,8 @@ local state = {
   sel = {},    -- [rule id] = { [issue index] = true }
   anchor = {}, -- [rule id] = last clicked index (for Shift+click)
   audit = nil,    -- last before / after check { title=, problems=, summary=, undo= }
+  job = nil,      -- running Scan / Fix / Fix All (coroutine), progress = its last scan progress
+  progress = nil, job_start = nil, job_change = nil,
   history = {},   -- [rule id] = { deleted / printed entries } from the fixes of this session
   history_proj = nil,
   force_open = {}, -- [rule id] = true: open its list on the next frame (after a fix that deleted / printed)
@@ -154,17 +163,59 @@ local function project_key()
   return tostring(proj) .. "|" .. (path or "")
 end
 
+local function scan_seconds(summary)
+  local sec = 0
+  for _, t in ipairs(summary and summary.times or {}) do sec = sec + t.sec end
+  return sec
+end
+
 local function do_scan()
-  state.results, state.summary = CORE.scan(scan_opts())
+  local opts = scan_opts()
+  opts.yield = true -- inside a job: the scan pauses now and then so the progress bar can draw
+  state.results, state.summary = CORE.scan(opts)
   state.scanned_change = r.GetProjectStateChangeCount(0)
   state.sel, state.anchor = {}, {}
-  state.status = string.format("Scanned %d tracks, %d items: %d issue%s.",
-    state.summary.tracks, state.summary.items, state.summary.total, state.summary.total == 1 and "" or "s")
+  local again = state.summary.restarts
+  local pops = state.summary.two_pops or 0
+  state.status = string.format("Scanned %d tracks, %d items: %d issue%s (%.1f s%s).%s",
+    state.summary.tracks, state.summary.items, state.summary.total, state.summary.total == 1 and "" or "s",
+    scan_seconds(state.summary), again and string.format(", started again %d time%s because the project was edited", again, again == 1 and "" or "s") or "",
+    pops > 0 and string.format(" %d 2-pop%s recognized (not listed).", pops, pops == 1 and "" or "s") or "")
 end
 
 -- Selecting / marking changes REAPER's state counter but not the scan result
 local function keep_scan_fresh()
   if state.results then state.scanned_change = r.GetProjectStateChangeCount(0) end
+end
+
+-- Scan / Fix / Fix All run as a job: a coroutine resumed once per frame. CORE.scan pauses about
+-- every 40 ms, so the window keeps drawing (progress bar, Cancel) instead of freezing REAPER.
+local function resume_job()
+  local co = state.job
+  local ok, prog = coroutine.resume(co)
+  if not ok then
+    state.job, state.progress = nil, nil
+    state.status = "ERROR: " .. tostring(prog)
+    r.ShowConsoleMsg(TITLE .. " error:\n" .. debug.traceback(co, tostring(prog)) .. "\n")
+  elseif coroutine.status(co) == "dead" then
+    state.job, state.progress = nil, nil
+  else
+    state.progress = prog
+  end
+end
+
+local function run_job(fn)
+  if state.job then return end
+  state.job, state.progress = coroutine.create(fn), nil
+  state.job_start, state.job_change = r.time_precise(), r.GetProjectStateChangeCount(0)
+  resume_job() -- quick work finishes right away
+end
+
+local function cancel_job()
+  state.job, state.progress = nil, nil
+  local changed = r.GetProjectStateChangeCount(0) ~= state.job_change
+  state.status = "Cancelled." .. (changed and " The fixes already done stay (Edit > Undo reverts them)." or "")
+    .. (state.results and " The list shows the previous scan." or "")
 end
 
 local function save_report()
@@ -449,8 +500,7 @@ local function draw_audit()
     if ImGui.Button(ctx, "Undo this fix") then
       r.Main_OnCommand(40029, 0) -- Edit: Undo
       state.audit = nil
-      do_scan()
-      state.status = "Undone: " .. (last or "")
+      run_job(function() do_scan(); state.status = "Undone: " .. (last or "") end)
     end
     ImGui.EndDisabled(ctx)
     ImGui.SameLine(ctx)
@@ -703,7 +753,7 @@ local function draw_rules()
     ImGui.SameLine(ctx)
     local can_fix = d.fix ~= nil or d.instructions ~= nil
     ImGui.BeginDisabled(ctx, not can_fix)
-    if ImGui.Button(ctx, "Fix##fix") then run_fix(d) end
+    if ImGui.Button(ctx, "Fix##fix") then run_job(function() run_fix(d) end) end
     ImGui.EndDisabled(ctx)
     if not can_fix and ImGui.IsItemHovered(ctx, ImGui.HoveredFlags_AllowWhenDisabled) then
       ImGui.SetTooltip(ctx, "Automatic fix comes in a later version")
@@ -759,7 +809,7 @@ local function draw_rules()
       local can_fix = d.fix ~= nil or d.instructions ~= nil
       ImGui.BeginDisabled(ctx, nsel == 0)
       ImGui.BeginDisabled(ctx, not can_fix)
-      if ImGui.Button(ctx, string.format("Fix selected (%d)##fixsel", nsel)) then run_fix(d, true) end
+      if ImGui.Button(ctx, string.format("Fix selected (%d)##fixsel", nsel)) then run_job(function() run_fix(d, true) end) end
       ImGui.EndDisabled(ctx)
       ImGui.BeginDisabled(ctx, d.scope == "track")
       if ImGui.Button(ctx, string.format("Mark selected (%d)##marksel", nsel)) then
@@ -768,6 +818,19 @@ local function draw_rules()
         keep_scan_fresh()
       end
       ImGui.EndDisabled(ctx)
+      if d.id == "tiny_items" then
+        if ImGui.Button(ctx, string.format("Mark as 2-pop (%d)##pop", nsel)) then
+          local n = CORE.mark_pops((target_issues(d, true)))
+          run_job(function()
+            do_scan()
+            state.status = string.format("%d item%s marked as 2-pop (left out from now on; Undo or Settings > Clear 2-pop marks to undo). ", n, n == 1 and "" or "s") .. state.status
+          end)
+        end
+        if ImGui.IsItemHovered(ctx, ImGui.HoveredFlags_AllowWhenDisabled) then
+          ImGui.SetTooltip(ctx, "For tail pops that are not found automatically: the selected items are left out of this check\n"
+            .. "(a hidden flag saved with the project, no take marker). Writing \"2-pop\" or \"tail pop\" in REAPER's Item Notes works too.")
+        end
+      end
       if nsel > 0 and ImGui.Button(ctx, "Clear selection##clr") then state.sel[d.id] = {} end
       ImGui.EndDisabled(ctx)
       if nsel == 0 then ImGui.TextDisabled(ctx, "Click / Cmd / Shift\nin the list") end
@@ -820,7 +883,7 @@ local function draw_settings_popup()
         for k, sh in ipairs(CORE.FADE_SHAPES) do
           if ImGui.MenuItem(ctx, sh[f[3]] .. "##" .. f[2] .. k, nil, prefs[f[2]] == k, true) then
             prefs[f[2]] = k; save_prefs()
-            if state.results then do_scan() end
+            if state.results then run_job(do_scan) end
           end
         end
         ImGui.EndMenu(ctx)
@@ -830,18 +893,30 @@ local function draw_settings_popup()
     ImGui.TextDisabled(ctx, "Fix runs REAPER's own \"Item: Set ... shape to ...\" actions")
     if ImGui.MenuItem(ctx, "Re-read fade shapes from REAPER", nil, false, true) then
       CORE.reset_fade_shapes()
-      if state.results then do_scan() end
-      state.status = "Fade shapes will be read again from REAPER's actions" .. (state.results and " (rescanned)." or " at the next scan.")
+      if state.results then
+        run_job(function() do_scan(); state.status = "Fade shapes will be read again from REAPER's actions (rescanned)." end)
+      else
+        state.status = "Fade shapes will be read again from REAPER's actions at the next scan."
+      end
     end
     ImGui.EndMenu(ctx)
   end
+  if ImGui.MenuItem(ctx, "Clear 2-pop marks", nil, false, true) then
+    local n = CORE.clear_pop_marks()
+    if state.results then
+      run_job(function() do_scan(); state.status = string.format("%d 2-pop mark%s cleared (Item Notes stay). ", n, n == 1 and "" or "s") .. state.status end)
+    else
+      state.status = string.format("%d 2-pop mark%s cleared (Item Notes stay).", n, n == 1 and "" or "s")
+    end
+  end
+  if ImGui.IsItemHovered(ctx) then ImGui.SetTooltip(ctx, "Tiny items lists the items marked with \"Mark as 2-pop\" again.") end
   if ImGui.BeginMenu(ctx, "Track number format") then
     for _, w in ipairs({ 1, 2, 3 }) do
       local sample = {}
       for k = 1, 3 do sample[#sample + 1] = string.format("%0" .. w .. "d", k) end
       if ImGui.MenuItem(ctx, table.concat(sample, " "), nil, prefs.number_width == w, true) then
         prefs.number_width = w; save_prefs()
-        if state.results then do_scan() end
+        if state.results then run_job(do_scan) end
       end
     end
     ImGui.EndMenu(ctx)
@@ -943,7 +1018,7 @@ local function draw_media_banner()
   if c.rate > 0 then parts[#parts + 1] = c.rate .. " at another sample rate" end
   ImGui.TextColored(ctx, COL_BAD, string.format("Media: %d file%s to sort out first - %s.", #list, #list == 1 and "" or "s", table.concat(parts, ", ")))
   ImGui.PushID(ctx, "media")
-  if ImGui.Button(ctx, "Copy media into project...") then run_fix(d) end
+  if ImGui.Button(ctx, "Copy media into project...") then run_job(function() run_fix(d) end) end
   if ImGui.IsItemHovered(ctx) then ImGui.SetTooltip(ctx, d.fix_note) end
   ImGui.SameLine(ctx)
   if ImGui.Button(ctx, "Select items") then CORE.select_issues(list); keep_scan_fresh() end
@@ -967,17 +1042,17 @@ local function draw_top_bar()
     ImGui.SetTooltip(ctx, "Fixes delete tracks and change items: work on a copy (e.g. name_IC.rpp), keep the original untouched.")
   end
   ImGui.SameLine(ctx)
-  if ImGui.Button(ctx, "Scan") then do_scan() end
+  if ImGui.Button(ctx, "Scan") then run_job(do_scan) end
   ImGui.SameLine(ctx)
   ImGui.BeginDisabled(ctx, state.results == nil)
-  if ImGui.Button(ctx, "Fix All") then run_fix_all() end
+  if ImGui.Button(ctx, "Fix All") then run_job(run_fix_all) end
   ImGui.EndDisabled(ctx)
   if ImGui.IsItemHovered(ctx, ImGui.HoveredFlags_AllowWhenDisabled) then
     ImGui.SetTooltip(ctx, "Run every automatic fix in order (one confirmation). Stops at the first fix that moves audio, a crossfade or a track.")
   end
   ImGui.SameLine(ctx)
   local rvk, keep = ImGui.Checkbox(ctx, "Keep Folder", prefs.keep_folders)
-  if rvk then prefs.keep_folders = keep; save_prefs(); if state.results then do_scan() end end
+  if rvk then prefs.keep_folders = keep; save_prefs(); if state.results then run_job(do_scan) end end
   if ImGui.IsItemHovered(ctx) then ImGui.SetTooltip(ctx, "On: folders are kept (only expanded). Off: folders are flattened, children kept.") end
   ImGui.SameLine(ctx)
   if ImGui.Button(ctx, "Settings") then ImGui.OpenPopup(ctx, "settings") end
@@ -1010,12 +1085,32 @@ local function draw_top_bar()
   end
   ImGui.TextColored(ctx, COL_INFO, state.status)
   if state.summary then
-    ImGui.TextColored(ctx, COL_INFO, string.format("Frame rate %.3f fps, project %d Hz. Hover a check to see how it will be fixed.",
-      state.summary.fps, state.summary.sr))
+    local slow = CORE.slowest(state.summary, 3, 0.05)
+    ImGui.TextColored(ctx, COL_INFO, string.format("Frame rate %.3f fps, project %d Hz. Scan %.1f s%s. Hover a check to see how it will be fixed.",
+      state.summary.fps, state.summary.sr, scan_seconds(state.summary), slow ~= "" and (" (slowest: " .. slow .. ")") or ""))
+    if ImGui.IsItemHovered(ctx) then ImGui.SetTooltip(ctx, "Time of each check in the last scan, slowest first:\n" .. CORE.slowest(state.summary, nil, 0, "\n")) end
   end
   draw_media_banner()
   draw_review_banner()
   ImGui.Separator(ctx)
+end
+
+-- Progress of the running job: which check, how far inside it, Cancel
+local function draw_progress()
+  local p = state.progress
+  local frac, text = 0, "Working..."
+  if p then
+    local within = (p.done and p.of and p.of > 0) and (p.done / p.of) or 0
+    frac = ((p.n - 1) + within) / math.max(1, p.total)
+    text = string.format("Scanning %d / %d: %s", p.n, p.total, p.title or "")
+    if p.done and p.of then text = text .. string.format(" (%d / %d)", p.done, p.of) end
+  end
+  text = text .. string.format("  -  %.0f s", r.time_precise() - (state.job_start or r.time_precise()))
+  if ImGui.Button(ctx, "Cancel##job") then cancel_job() end
+  if ImGui.IsItemHovered(ctx) then ImGui.SetTooltip(ctx, "Stop the scan. A fix that is already done stays (Undo reverts it); Fix All stops before the next fix.") end
+  ImGui.SameLine(ctx)
+  ImGui.ProgressBar(ctx, frac, -1, 0, text)
+  if p and p.restarts then ImGui.TextColored(ctx, COL_YEL, "The project was edited during the scan: started again.") end
 end
 
 local function loop()
@@ -1023,12 +1118,17 @@ local function loop()
   -- NoCollapse: no fold arrow in the title bar (one click there made the window look gone)
   local wflags = ImGui.WindowFlags_NoCollapse | (prefs.allow_docking and 0 or ImGui.WindowFlags_NoDocking)
   -- the font is pushed before Begin so the title bar (and its close button) use the chosen size too
+  if state.job then resume_job() end
   ImGui.PushFont(ctx, nil, math.floor(FONT_BASE * prefs.font_scale + 0.5))
   local visible, open = ImGui.Begin(ctx, TITLE .. "  v" .. VERSION .. "###sessionfixprep", true, wflags)
   if visible then
+    local busy = state.job ~= nil
+    if busy then draw_progress() end
+    ImGui.BeginDisabled(ctx, busy)
     draw_top_bar()
     draw_audit()
     draw_rules()
+    ImGui.EndDisabled(ctx)
     ImGui.End(ctx)
   end
   ImGui.PopFont(ctx)

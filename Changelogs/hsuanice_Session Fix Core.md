@@ -2,6 +2,15 @@
 
 hsuanice Session Fix Core - checks and fixes for preparing a REAPER session for Interchanger / Pro Tools / Nuendo
 
+## 26.1018.1239
+
+- Add: workflow_cues check and M.strip_workflow_cues (in-place cue / adtl rewrite with a JUNK filler; RIFF WAV only).
+- Add: the scan can pause (opts.yield, inside a coroutine) so the window can draw progress; it starts again when the project is edited during a pause.
+- Add: time of each check in the scan summary (summary.times, M.slowest), slowest checks in the report.
+- Add: Tiny items check (tiny_items, review only); 2-pops at xx:59:58:00 or after all other audio are left out and counted (summary.two_pops, report).
+- Change: Overlaps lists only stacked-crossfade slivers, not tiny items on their own.
+- Add: 2-pops marked by hand are left out of Tiny items: item flag (M.mark_pops / M.clear_pop_marks) or "2-pop" / "tail pop" in the Item Notes.
+
 ## 26.1015.1425
 
 - Fix: Fade shapes on hidden tracks / inside collapsed folders were not fixed (REAPER's actions skip them); those tracks are shown for the actions and restored, and any fade still not reached gets the values read from the actions.

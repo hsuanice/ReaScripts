@@ -2,6 +2,17 @@
 
 Session Fix - Interchange Prep: check and fix a REAPER session before converting it with Interchanger
 
+## 26.1018.1239
+
+- Add: Workflow cues (last check) - removes the #in / #out / #Glue cues that glue / render leave in WAV files, only for files inside the session folder, in place (same file, audio untouched); other cues, take markers and project markers stay. Asks first (cannot be undone with Undo).
+- Add: Scan shows a progress bar (which check, how far inside it, time) with a Cancel button instead of freezing REAPER; Fix, Fix All and the rescans after them run the same way.
+- Add: the time of each check - the slowest three after the frame rate line, all of them when hovering it, and in the report.
+- Change: a project edit during the scan starts the scan again (the list never shows deleted items).
+- Add: Tiny items - audio items under 2 frames (editing slivers) are their own check, review only (no automatic delete); 2-pops are recognized and left out: at xx:59:58:00 (one frame either way) or after all other audio (tail pop). The scan line says how many 2-pops were recognized.
+- Change: Overlaps no longer lists a tiny item on its own; slivers inside a stacked crossfade are still listed and fixed there.
+- Add: Tiny items - "Mark as 2-pop" for the selected entries (for tail pops that are not found automatically): a hidden flag saved with the project, no take marker; Settings > Clear 2-pop marks removes them.
+- Add: "2-pop" / "2pop" / "tail pop" / "head pop" in REAPER's Item Notes also marks an item as a 2-pop.
+
 ## 26.1015.1425
 
 - Fix: list columns were squeezed and jumped back when resized; columns now keep their width and the list scrolls sideways when it is wider than the window.

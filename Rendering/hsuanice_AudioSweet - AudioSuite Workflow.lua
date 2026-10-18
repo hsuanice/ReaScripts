@@ -1,6 +1,6 @@
 --[[
 @description AudioSweet - AudioSuite Workflow: Pro Tools-style offline FX processing (GUI + Run / Preview / Solo)
-@version 26.1012.1641
+@version 26.1016.1659
 @author hsuanice
 @links
   https://forum.cockos.com/showthread.php?p=2910884#post2910884
@@ -13,8 +13,7 @@
   [nomain] hsuanice_AudioSweet - FX Alias Export TSV.lua
   [nomain] hsuanice_AudioSweet - FX Alias Import TSV.lua
 @changelog
-  - Renamed to "AudioSweet - AudioSuite Workflow" (was "AudioSweet ReaImGui") as part of the 2026-10-12 naming clean-up.
-  - Reinstall the package from ReaPack and re-assign your shortcuts / toolbar buttons.
+  - Fix: AudioSweet no longer overwrites the RGWH Debug Level saved in the project; its Debug switch now applies to its own RGWH call only, so the RGWH Render / Glue shortcuts stop printing console logs after an AudioSweet run with Debug on.
 @about
   # AudioSweet ReaImGui
 
@@ -1875,9 +1874,6 @@ local function set_extstate_from_gui(mode_override)
   r.SetProjExtState(0, "RGWH", "HANDLE_SECONDS", tostring(handle_value))
   r.SetProjExtState(0, "RGWH", "TAIL_SECONDS", tostring(gui.tail_seconds or 0.0))
 
-  -- Set RGWH Core debug level (0 = silent, no console output)
-  r.SetProjExtState(0, "RGWH", "DEBUG_LEVEL", gui.debug and "2" or "0")
-
   -- Set FX name formatting options
   r.SetExtState("hsuanice_AS", "FXNAME_SHOW_TYPE", gui.fxname_show_type and "1" or "0", false)
   r.SetExtState("hsuanice_AS", "FXNAME_SHOW_VENDOR", gui.fxname_show_vendor and "1" or "0", false)
@@ -2516,7 +2512,6 @@ local function run_saved_chain_apply_mode(tr, chain_name, item_count)
   local handle_value = gui.use_whole_file and 999999 or gui.handle_seconds
   r.SetProjExtState(0, "RGWH", "HANDLE_SECONDS", tostring(handle_value))
   r.SetProjExtState(0, "RGWH", "TAIL_SECONDS", tostring(gui.tail_seconds or 0.0))
-  r.SetProjExtState(0, "RGWH", "DEBUG_LEVEL", gui.debug and "2" or "0")
 
   if gui.debug then
     local handle_display = gui.use_whole_file and "whole file" or string.format("%.1fs", gui.handle_seconds)

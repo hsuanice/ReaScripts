@@ -152,5 +152,7 @@ Extend Razor Edit to Mouse Cursor like Pro Tools is inspired by Daniel Kharrat's
 Auto Color's palette (hue + per-row saturation / value) is modeled after rodilab's *Color palette* script.
 Auto Color's Shiny mode follows the ShinyColor behavior of *Chroma - Coloring Tool* by OLSHALOM — https://forum.cockos.com/showthread.php?t=281516
 
+Session Fix - Interchange Prep's *Workflow cues* check takes its way of releasing and reloading media files (media offline / online, rebuild peaks) from amagalma's *Remove selected items' active takes' source file cue points (WAV only)* (ReaTeam Scripts).
+
 Conform List Browser uses [OpenTimelineIO](https://github.com/AcademySoftwareFoundation/OpenTimelineIO) (Academy Software Foundation) for timeline files and [LibAAF](https://github.com/agfline/LibAAF) by agfline (aaftool) for AAF.
 `Library/json.lua` is based on [rxi/json.lua](https://github.com/rxi/json.lua) (MIT License, Copyright (c) 2020 rxi); the full license notice is kept in the file.

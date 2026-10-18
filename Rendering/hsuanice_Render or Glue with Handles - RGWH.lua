@@ -1,6 +1,6 @@
 --[[
 @description Render or Glue with Handles - RGWH: render or glue items with handles (GUI + Glue / Render actions)
-@version 26.1012.1641
+@version 26.1016.1659
 @author hsuanice
 @links
   https://forum.cockos.com/showthread.php?t=305456
@@ -9,8 +9,7 @@
   [main] hsuanice_Render or Glue with Handles - RGWH Glue.lua
   [main] hsuanice_Render or Glue with Handles - RGWH Render.lua
 @changelog
-  - Renamed to "Render or Glue with Handles - RGWH" (was "RGWH ReaImGui") as part of the 2026-10-12 naming clean-up.
-  - Reinstall the package from ReaPack and re-assign your shortcuts / toolbar buttons.
+  - Change: the default Debug Level is now Silent (was Verbose), so new projects print no console log.
 @about
   ImGui-based GUI for configuring and running RGWH Core operations.
   Provides visual controls for all RGWH Wrapper Template parameters.
@@ -129,7 +128,7 @@ local gui = {
   glue_split_at_crossfades = false,  -- crossfading items are not grouped into the same unit
 
   -- Debug
-  debug_level = 2,           -- 0=silent, 1=normal, 2=verbose
+  debug_level = 0,           -- 0=silent, 1=normal, 2=verbose
   debug_no_clear = true,
 
   -- Selection policy (wrapper-only)

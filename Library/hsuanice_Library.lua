@@ -1,6 +1,6 @@
 --[[
 @description hsuanice Library - shared code used by hsuanice scripts (required)
-@version 26.1015.1425
+@version 26.1018.1239
 @author hsuanice
 @metapackage
 @provides
@@ -24,7 +24,8 @@
   [nomain] hsuanice_Process Exec.lua
   [nomain] json.lua
 @changelog
-  - Update: hsuanice_Session Fix Core.lua (fade shapes on hidden tracks, check order).
+  - Update: hsuanice_Session Fix Core.lua (Workflow cues check, scan progress and check times, Tiny items with 2-pop recognition and marking).
+  - Update: hsuanice_AudioSweet Core.lua (Debug switch no longer changes the RGWH Debug Level).
 @about
   # hsuanice Library
 

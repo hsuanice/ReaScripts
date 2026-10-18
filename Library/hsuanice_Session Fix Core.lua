@@ -1,13 +1,15 @@
 --[[
 @description hsuanice Session Fix Core - checks and fixes for preparing a REAPER session for Interchanger / Pro Tools / Nuendo
-@version 26.1015.1425
+@version 26.1018.1239
 @author hsuanice
 @noindex
 @changelog
-  - Fix: Fade shapes on hidden tracks / inside collapsed folders were not fixed (REAPER's actions skip them); those tracks are shown for the actions and restored, and any fade still not reached gets the values read from the actions.
-  - Change: Folders comes right after Hidden tracks.
-  - Fix: crossfade shapes are only set by REAPER's action (the API reads values such as 7 but cannot write them - a crossfade became shape -1); broken crossfades are flagged "fix Crossfades first"; plain fades are written directly only with a value the API accepts, checked and restored otherwise.
-  - Add: issue.needs ("visibility" for items on hidden tracks / in collapsed folders, "crossfades" for broken crossfades in Fade shapes) and M.NEEDS labels / questions.
+  - Add: workflow_cues check and M.strip_workflow_cues (in-place cue / adtl rewrite with a JUNK filler; RIFF WAV only).
+  - Add: the scan can pause (opts.yield, inside a coroutine) so the window can draw progress; it starts again when the project is edited during a pause.
+  - Add: time of each check in the scan summary (summary.times, M.slowest), slowest checks in the report.
+  - Add: Tiny items check (tiny_items, review only); 2-pops at xx:59:58:00 or after all other audio are left out and counted (summary.two_pops, report).
+  - Change: Overlaps lists only stacked-crossfade slivers, not tiny items on their own.
+  - Add: 2-pops marked by hand are left out of Tiny items: item flag (M.mark_pops / M.clear_pop_marks) or "2-pop" / "tail pop" in the Item Notes.
 @about
   Shared library behind "Session Fix - Interchange Prep".
   Every rule has: id, title, scope ("item" / "track" / "file"), scan() returning issues,
@@ -404,6 +406,143 @@ function M.clear_review(copies)
   return n
 end
 
+------------------------------------------------------------
+-- Workflow cues inside WAV files: RGWH glue / render writes "#in", "#out" and "#Glue: <name>"
+-- into the file's cue list. They are removed IN PLACE: the "cue " chunk and the "LIST adtl"
+-- chunk (cue names) are rewritten with only the cues to keep and the freed bytes become a JUNK
+-- chunk, so the file keeps its size and name and the audio data is never touched. Other cues
+-- (recorder markers ...) and every other chunk stay as they are.
+-- Approach to releasing the files (media offline / online, rebuild peaks) after amagalma's
+-- "Remove selected items' active takes' source file cue points (WAV only)" (ReaTeam).
+------------------------------------------------------------
+local function is_workflow_cue(name)
+  name = name or ""
+  return name == "#in" or name == "#out" or name:match("^#?Glue:") ~= nil or name:match("^GlueCue:") ~= nil
+end
+M.is_workflow_cue = is_workflow_cue
+
+-- Parse a WAV file's cue list: { ok, data_end, cue = {off, size, points = {id = {...}}}, adtl = {off, size, subs}, names = {id = name} }
+local function wav_cues(path)
+  local f = io.open(path, "rb")
+  if not f then return nil, "cannot open" end
+  local head = f:read(12)
+  if not head or #head < 12 or head:sub(9, 12) ~= "WAVE" then f:close(); return nil, "not a WAV file" end
+  if head:sub(1, 4) ~= "RIFF" then f:close(); return nil, "RF64 / other RIFF type not supported" end
+  local info = { names = {}, order = {} }
+  local pos = 12
+  local fsize = f:seek("end"); f:seek("set", 12)
+  while pos + 8 <= fsize do
+    f:seek("set", pos)
+    local h = f:read(8)
+    if not h or #h < 8 then break end
+    local id, size = h:sub(1, 4), string.unpack("<I4", h, 5)
+    if id == "data" then
+      info.data_start, info.data_end = pos, pos + 8 + size
+    elseif id == "cue " then
+      local body = f:read(size)
+      local n = string.unpack("<I4", body, 1)
+      local points = {}
+      for i = 0, n - 1 do
+        local raw = body:sub(5 + 24 * i, 4 + 24 * (i + 1))
+        if #raw == 24 then
+          local cid = string.unpack("<I4", raw, 1)
+          points[#points + 1] = { id = cid, raw = raw }
+        end
+      end
+      info.cue = { off = pos, size = size, points = points }
+    elseif id == "LIST" then
+      local body = f:read(size)
+      if body:sub(1, 4) == "adtl" then
+        local subs, i = {}, 5
+        while i + 8 <= #body + 1 do
+          local sid = body:sub(i, i + 3)
+          local ssz = string.unpack("<I4", body, i + 4)
+          local raw = body:sub(i, i + 7 + ssz + (ssz % 2))
+          local cid = (#body >= i + 11) and string.unpack("<I4", body, i + 8) or nil
+          subs[#subs + 1] = { id = sid, cue = cid, raw = raw }
+          if sid == "labl" or sid == "note" then
+            info.names[cid] = info.names[cid] or (body:sub(i + 12, i + 7 + ssz):match("^[^%z]*"))
+          end
+          i = i + 8 + ssz + (ssz % 2)
+        end
+        info.adtl = { off = pos, size = size, subs = subs }
+      end
+    end
+    pos = pos + 8 + size + (size % 2)
+  end
+  f:close()
+  return info
+end
+M.wav_cues = wav_cues
+
+-- Workflow cues in a WAV file: count to remove, names of the cues that stay
+function M.wav_workflow_cues(path)
+  local info, err = wav_cues(path)
+  if not info then return nil, err end
+  local remove, keep = 0, {}
+  for _, p in ipairs(info.cue and info.cue.points or {}) do
+    local name = info.names[p.id] or ""
+    if is_workflow_cue(name) then remove = remove + 1 else keep[#keep + 1] = name end
+  end
+  return remove, keep
+end
+
+-- Rewrite one chunk region (same total length) as <new chunk><JUNK filler>
+local function region_bytes(old_off, old_size, new_id, new_body)
+  local total = 8 + old_size + (old_size % 2)
+  if not new_body then -- nothing kept: the whole region becomes JUNK
+    return string.pack("<c4I4", "JUNK", total - 8) .. string.rep("\0", total - 8)
+  end
+  local nlen = #new_body
+  local chunk = string.pack("<c4I4", new_id, nlen) .. new_body .. ((nlen % 2 == 1) and "\0" or "")
+  local rest = total - #chunk
+  if rest == 0 then return chunk end
+  if rest < 8 then return nil end -- cannot fit a filler chunk: leave the file alone
+  return chunk .. string.pack("<c4I4", "JUNK", rest - 8) .. string.rep("\0", rest - 8)
+end
+
+-- Remove the workflow cues from a WAV file in place. Returns removed count (0 = untouched) or nil, error.
+function M.strip_workflow_cues(path)
+  local info, err = wav_cues(path)
+  if not info then return nil, err end
+  if not info.cue then return 0 end
+  local keep_ids, kept, removed = {}, {}, 0
+  for _, p in ipairs(info.cue.points) do
+    if is_workflow_cue(info.names[p.id]) then removed = removed + 1 else keep_ids[p.id] = true; kept[#kept + 1] = p end
+  end
+  if removed == 0 then return 0 end
+  local writes = {}
+  local cue_body = nil
+  if #kept > 0 then
+    local parts = { string.pack("<I4", #kept) }
+    for _, p in ipairs(kept) do parts[#parts + 1] = p.raw end
+    cue_body = table.concat(parts)
+  end
+  local cue_bytes = region_bytes(info.cue.off, info.cue.size, "cue ", cue_body)
+  if not cue_bytes then return nil, "cannot rewrite the cue chunk in place" end
+  writes[#writes + 1] = { off = info.cue.off, bytes = cue_bytes }
+  if info.adtl then
+    local parts, any = { "adtl" }, false
+    for _, sub in ipairs(info.adtl.subs) do
+      if sub.cue and keep_ids[sub.cue] then parts[#parts + 1] = sub.raw; any = true end
+    end
+    local adtl_bytes = region_bytes(info.adtl.off, info.adtl.size, "LIST", any and table.concat(parts) or nil)
+    if not adtl_bytes then return nil, "cannot rewrite the cue names in place" end
+    writes[#writes + 1] = { off = info.adtl.off, bytes = adtl_bytes }
+  end
+  -- never write inside the audio data
+  for _, w in ipairs(writes) do
+    if info.data_start and w.off < info.data_end and w.off + #w.bytes > info.data_start then
+      return nil, "cue chunk overlaps the audio data"
+    end
+  end
+  local f = io.open(path, "r+b")
+  if not f then return nil, "cannot write (read-only?)" end
+  for _, w in ipairs(writes) do f:seek("set", w.off); f:write(w.bytes) end
+  f:close()
+  return removed
+end
+
 local RGWH_CORE
 local function rgwh()
   if not RGWH_CORE then
@@ -503,7 +642,8 @@ rule {
   fix_note = "Show every track in the TCP and expand every folder (the folder structure itself is kept)",
   scan = function(ctx)
     local out = {}
-    for _, tr in ipairs(ctx.tracks) do
+    for ti, tr in ipairs(ctx.tracks) do
+      ctx.tick(ti, #ctx.tracks)
       local why = {}
       if r.GetMediaTrackInfo_Value(tr, "B_SHOWINTCP") == 0 then why[#why + 1] = "hidden in TCP" end
       if r.GetMediaTrackInfo_Value(tr, "I_FOLDERDEPTH") > 0 and r.GetMediaTrackInfo_Value(tr, "I_FOLDERCOMPACT") ~= 0 then
@@ -534,7 +674,8 @@ rule {
   scan = function(ctx)
     local out = {}
     if ctx.opts.keep_folders then return out end
-    for _, tr in ipairs(ctx.tracks) do
+    for ti, tr in ipairs(ctx.tracks) do
+      ctx.tick(ti, #ctx.tracks)
       if r.GetMediaTrackInfo_Value(tr, "I_FOLDERDEPTH") > 0 then
         local n = r.CountTrackMediaItems(tr)
         out[#out + 1] = { track = tr, text = n > 0 and string.format("folder parent with %d items (kept as a normal track)", n)
@@ -551,7 +692,8 @@ rule {
     for _, is in ipairs(issues) do
       if is.track and r.ValidatePtr2(0, is.track, "MediaTrack*") then parents[#parents + 1] = is.track end
     end
-    for _, tr in ipairs(ctx.tracks) do
+    for ti, tr in ipairs(ctx.tracks) do
+      ctx.tick(ti, #ctx.tracks)
       if r.GetMediaTrackInfo_Value(tr, "I_FOLDERDEPTH") ~= 0 then r.SetMediaTrackInfo_Value(tr, "I_FOLDERDEPTH", 0) end
     end
     local removed, kept = 0, 0
@@ -587,7 +729,8 @@ rule {
   end,
   scan = function(ctx)
     local out = {}
-    for _, it in ipairs(ctx.items) do
+    for ti, it in ipairs(ctx.items) do
+      ctx.tick(ti, #ctx.items)
       local take = r.GetActiveTake(it)
       if take then
         local v = r.GetMediaItemTakeInfo_Value(take, "D_VOL")
@@ -605,7 +748,8 @@ rule {
   fix_note = "Review only; option: reset to center (also removes the take pan envelope)",
   scan = function(ctx)
     local out = {}
-    for _, it in ipairs(ctx.items) do
+    for ti, it in ipairs(ctx.items) do
+      ctx.tick(ti, #ctx.items)
       local take = r.GetActiveTake(it)
       if take then
         local p = r.GetMediaItemTakeInfo_Value(take, "D_PAN")
@@ -647,7 +791,8 @@ rule {
   end,
   scan = function(ctx)
     local out = {}
-    for _, tr in ipairs(ctx.tracks) do
+    for ti, tr in ipairs(ctx.tracks) do
+      ctx.tick(ti, #ctx.tracks)
       if r.CountTrackMediaItems(tr) == 0 then
         local sends = r.GetTrackNumSends(tr, 0) + r.GetTrackNumSends(tr, -1)
         out[#out + 1] = { track = tr, text = sends > 0 and "routing / aux" or "no items" }
@@ -673,7 +818,8 @@ rule {
   scan = function(ctx)
     local out, groups, order = {}, {}, {}
     local width = ctx.opts.number_width or 2
-    for _, tr in ipairs(ctx.tracks) do
+    for ti, tr in ipairs(ctx.tracks) do
+      ctx.tick(ti, #ctx.tracks)
       local base, num = split_name(tr)
       if base ~= "" then
         if not groups[base] then groups[base] = { numbered = false }; order[#order + 1] = base end
@@ -759,7 +905,8 @@ rule {
   scan = function(ctx)
     local out = {}
     local targets = pan_targets(ctx.tracks)
-    for _, tr in ipairs(ctx.tracks) do
+    for ti, tr in ipairs(ctx.tracks) do
+      ctx.tick(ti, #ctx.tracks)
       local want = targets[tr]
       local why, envs = {}, {}
       local vol = r.GetMediaTrackInfo_Value(tr, "D_VOL")
@@ -821,7 +968,8 @@ rule {
   fix_note = "Review only: a mute can be on purpose",
   scan = function(ctx)
     local out = {}
-    for _, tr in ipairs(ctx.tracks) do
+    for ti, tr in ipairs(ctx.tracks) do
+      ctx.tick(ti, #ctx.tracks)
       local muted = r.GetMediaTrackInfo_Value(tr, "B_MUTE") ~= 0
       local solo = r.GetMediaTrackInfo_Value(tr, "I_SOLO") ~= 0
       if muted or solo then
@@ -865,7 +1013,8 @@ rule {
         end
       end
     end
-    for _, it in ipairs(ctx.items) do
+    for ti, it in ipairs(ctx.items) do
+      ctx.tick(ti, #ctx.items)
       local take = r.GetActiveTake(it)
       if take then
         for e = 0, r.CountTakeEnvelopes(take) - 1 do
@@ -946,7 +1095,8 @@ rule {
   end,
   scan = function(ctx)
     local out = {}
-    for _, it in ipairs(ctx.items) do
+    for ti, it in ipairs(ctx.items) do
+      ctx.tick(ti, #ctx.items)
       local take = r.GetActiveTake(it)
       if take and source_type(r.GetMediaItemTake_Source(take)) ~= "MIDI" then
         local why = {}
@@ -1042,7 +1192,8 @@ rule {
   scan = function(ctx)
     local out = {}
     local tol = ctx.sample_sec
-    for _, tr in ipairs(ctx.tracks) do
+    for ti, tr in ipairs(ctx.tracks) do
+      ctx.tick(ti, #ctx.tracks)
       local list = sorted_items(tr)
       for i = 1, #list do
         local A = list[i]
@@ -1063,24 +1214,104 @@ rule {
           end
         end
       end
-      -- 3 or more items sounding at once (e.g. a sliver left inside a crossfade) and slivers
+      -- 3 or more items sounding at once (e.g. a sliver left inside a crossfade); a tiny item on
+      -- its own is listed by Tiny items
       local flagged = {}
       for i, B in ipairs(list) do
-        local why = {}
         local prev, nxt = list[i - 1], list[i + 1]
-        if prev and nxt and prev.e > nxt.s + tol and B.s < prev.e and B.e > nxt.s then
-          why[#why + 1] = "3 items overlap here (stacked crossfade, e.g. a leftover sliver)"
-        end
-        local len_frames = (B.e - B.s) * ctx.fps
-        if len_frames < 2 and is_audio_item(B.it) then why[#why + 1] = string.format("tiny item (%.1f frames)", len_frames) end
-        if #why > 0 and not flagged[B.it] then
+        if prev and nxt and prev.e > nxt.s + tol and B.s < prev.e and B.e > nxt.s and not flagged[B.it] then
           flagged[B.it] = true
-          local stacked = prev and nxt and prev.e > nxt.s + tol and B.s < prev.e and B.e > nxt.s
-          out[#out + 1] = { item = B.it, pos = B.s, text = table.concat(why, "; "),
-            trio = stacked and { prev.it, B.it, nxt.it } or nil }
+          local text = "3 items overlap here (stacked crossfade, e.g. a leftover sliver)"
+          local len_frames = (B.e - B.s) * ctx.fps
+          if len_frames < 2 and is_audio_item(B.it) then text = text .. string.format("; tiny item (%.1f frames)", len_frames) end
+          out[#out + 1] = { item = B.it, pos = B.s, text = text, trio = { prev.it, B.it, nxt.it } }
         end
       end
     end
+    return out
+  end,
+}
+
+-- 2-pop at the head: a 1-frame sync beep 2 seconds before the hour (xx:59:58:00, one frame either way)
+local function at_head_pop(pos, fps)
+  local mm, ss, ff = tc(pos):match("(%d+)[:;](%d+)[:;](%d+)$")
+  if not mm then return false end
+  local f = math.floor(fps + 0.5)
+  local frames = (tonumber(mm) * 60 + tonumber(ss)) * f + tonumber(ff)
+  return math.abs(frames - (59 * 60 + 58) * f) <= 1
+end
+
+-- 2-pop marked by hand (a tail pop is not always at a fixed timecode): "Mark as 2-pop" in the
+-- Tiny items list (hidden flag, saved with the project), or "2-pop" / "2pop" / "tail pop" /
+-- "head pop" in REAPER's Item Notes
+local POP_KEY = "P_EXT:hsuanice_SessionFix_pop"
+local function marked_pop(it)
+  local _, flag = r.GetSetMediaItemInfo_String(it, POP_KEY, "", false)
+  if flag == "1" then return true end
+  local _, notes = r.GetSetMediaItemInfo_String(it, "P_NOTES", "", false)
+  notes = (notes or ""):lower()
+  return notes:find("2[%s%-]?pop") ~= nil or notes:find("tail[%s%-]?pop") ~= nil or notes:find("head[%s%-]?pop") ~= nil
+end
+
+function M.mark_pops(issues)
+  local n = 0
+  r.Undo_BeginBlock()
+  for _, is in ipairs(issues) do
+    if is.item and r.ValidatePtr2(0, is.item, "MediaItem*") then
+      r.GetSetMediaItemInfo_String(is.item, POP_KEY, "1", true)
+      n = n + 1
+    end
+  end
+  r.Undo_EndBlock("Session Fix: mark as 2-pop", -1)
+  return n
+end
+
+-- Remove every "Mark as 2-pop" flag (Item Notes are left alone)
+function M.clear_pop_marks()
+  local n = 0
+  r.Undo_BeginBlock()
+  for i = 0, r.CountMediaItems(0) - 1 do
+    local it = r.GetMediaItem(0, i)
+    local _, flag = r.GetSetMediaItemInfo_String(it, POP_KEY, "", false)
+    if flag ~= "" then r.GetSetMediaItemInfo_String(it, POP_KEY, "", true); n = n + 1 end
+  end
+  r.Undo_EndBlock("Session Fix: clear 2-pop marks", -1)
+  return n
+end
+
+rule {
+  id = "tiny_items", title = "Tiny audio items under 2 frames (editing slivers; 2-pops are left out)", scope = "item",
+  fix_note = "Review only: a short item can be on purpose. 2-pops are not listed: at xx:59:58:00, after all other audio,\n"
+    .. "or marked by hand (\"Mark as 2-pop\" in the list, or \"2-pop\" / \"tail pop\" in REAPER's Item Notes)",
+  scan = function(ctx)
+    local fr = 1 / ctx.fps
+    local tiny, last_end = {}, -math.huge
+    for ti, tr in ipairs(ctx.tracks) do
+      ctx.tick(ti, #ctx.tracks)
+      local list = sorted_items(tr)
+      for i, B in ipairs(list) do
+        if is_audio_item(B.it) then
+          if B.e - B.s < 2 * fr - ctx.sample_sec then
+            -- inside a stacked crossfade: listed (and fixed) by Overlaps
+            local prev, nxt = list[i - 1], list[i + 1]
+            local stacked = prev and nxt and prev.e > nxt.s + ctx.sample_sec and B.s < prev.e and B.e > nxt.s
+            if not stacked then tiny[#tiny + 1] = B end
+          elseif B.e > last_end then
+            last_end = B.e
+          end
+        end
+      end
+    end
+    -- 2-pops: at xx:59:58:00 (head), after all other audio (tail pop) or marked by hand
+    local out, pops = {}, 0
+    for _, B in ipairs(tiny) do
+      if at_head_pop(B.s, ctx.fps) or B.s >= last_end - ctx.sample_sec or marked_pop(B.it) then
+        pops = pops + 1
+      else
+        out[#out + 1] = { item = B.it, pos = B.s, text = string.format("tiny item (%.1f frames)", (B.e - B.s) * ctx.fps) }
+      end
+    end
+    ctx.two_pops = pops
     return out
   end,
 }
@@ -1117,7 +1348,8 @@ rule {
   scan = function(ctx)
     local out = {}
     local tol = ctx.sample_sec
-    for _, tr in ipairs(ctx.tracks) do
+    for ti, tr in ipairs(ctx.tracks) do
+      ctx.tick(ti, #ctx.tracks)
       local list = sorted_items(tr)
       for i = 1, #list - 1 do
         local A, B = list[i], list[i + 1]
@@ -1160,7 +1392,8 @@ rule {
   end,
   scan = function(ctx)
     local out = {}
-    for _, it in ipairs(ctx.items) do
+    for ti, it in ipairs(ctx.items) do
+      ctx.tick(ti, #ctx.items)
       local fi, fo = fades(it)
       local len = r.GetMediaItemInfo_Value(it, "D_LENGTH")
       if fi > 0 and fo > 0 and fi + fo >= len - ctx.sample_sec and is_audio_item(it) then
@@ -1300,7 +1533,8 @@ end
 -- Fade edges of each audio item, with crossfade neighbours: { it, fi, fo, x_in = prev, x_out = next }
 local function fade_edges(ctx)
   local out = {}
-  for _, tr in ipairs(ctx.tracks) do
+  for ti, tr in ipairs(ctx.tracks) do
+    ctx.tick(ti, #ctx.tracks)
     local list = sorted_items(tr)
     for k, e in ipairs(list) do
       if is_audio_item(e.it) then
@@ -1559,7 +1793,8 @@ rule {
   end,
   scan = function(ctx)
     local out = {}
-    for _, it in ipairs(ctx.items) do
+    for ti, it in ipairs(ctx.items) do
+      ctx.tick(ti, #ctx.items)
       local take = r.GetActiveTake(it)
       local audio = is_audio_item(it)
       local srclen = audio and r.GetMediaSourceLength(r.GetMediaItemTake_Source(take)) or 0
@@ -1588,7 +1823,8 @@ rule {
   scan = function(ctx)
     local out = {}
     local per_file = {}
-    for _, it in ipairs(ctx.items) do
+    for ti, it in ipairs(ctx.items) do
+      ctx.tick(ti, #ctx.items)
       local take = r.GetActiveTake(it)
       local src, file = nil, nil
       if take then src, file = take_source_file(take) end
@@ -1682,7 +1918,8 @@ rule {
     local out = {}
     local tol = 0.5 / ctx.sr -- half a sample
     local function off_grid(t) return math.abs(t - grid_q(t)) > tol end
-    for _, tr in ipairs(ctx.tracks) do
+    for ti, tr in ipairs(ctx.tracks) do
+      ctx.tick(ti, #ctx.tracks)
       local list = sorted_items(tr)
       for i, A in ipairs(list) do
         if not is_audio_item(A.it) then goto continue end
@@ -1709,7 +1946,8 @@ rule {
   fix_note = "Ask: convert to audio items, or delete",
   scan = function(ctx)
     local out = {}
-    for _, it in ipairs(ctx.items) do
+    for ti, it in ipairs(ctx.items) do
+      ctx.tick(ti, #ctx.items)
       local take = r.GetActiveTake(it)
       if not take then
         out[#out + 1] = { item = it, text = "empty item" }
@@ -1748,7 +1986,8 @@ rule {
   end,
   scan = function(ctx)
     local out = {}
-    for _, it in ipairs(ctx.items) do
+    for ti, it in ipairs(ctx.items) do
+      ctx.tick(ti, #ctx.items)
       local take = r.GetActiveTake(it)
       local src = take and r.GetMediaItemTake_Source(take)
       if src and source_type(src) ~= "MIDI" and not is_video(src) then
@@ -1834,7 +2073,8 @@ rule {
   fix_note = "Split into one track per channel count, named \"<track> mono / stereo / 4ch ...\"; the group with the most items stays on the original track, fewer channels above it, more below (items only move, nothing else changes)",
   scan = function(ctx)
     local out = {}
-    for _, tr in ipairs(ctx.tracks) do
+    for ti, tr in ipairs(ctx.tracks) do
+      ctx.tick(ti, #ctx.tracks)
       local groups, counts = channel_groups(tr)
       if #counts > 1 then
         local keep = keep_group(groups, counts)
@@ -1910,11 +2150,84 @@ rule {
   end,
   scan = function(ctx)
     local out = {}
-    for _, it in ipairs(ctx.items) do
+    for ti, it in ipairs(ctx.items) do
+      ctx.tick(ti, #ctx.items)
       local n = r.CountTakes(it)
       if n > 1 then out[#out + 1] = { item = it, text = string.format("%d takes", n) } end
     end
     return out
+  end,
+}
+
+rule {
+  id = "workflow_cues", title = "Workflow cues in WAV files (#in / #out / #Glue from glue / render)", scope = "file",
+  fix_note = "Remove the #in / #out / #Glue cues from the WAV files inside the session folder, in place (same file, audio untouched); other cues, take markers and project markers stay. Files outside the session folder are only listed",
+  confirm = function(issues)
+    local files, cues, outside = 0, 0, 0
+    for _, is in ipairs(issues) do
+      if is.outside then outside = outside + 1 else files = files + 1; cues = cues + (is.count or 0) end
+    end
+    if files == 0 then return nil end
+    return string.format("Remove %d workflow cue%s (#in / #out / #Glue) from %d WAV file%s in the session folder?\n\n"
+      .. "The files are changed in place: same name and size, the audio is not touched.\n"
+      .. "Other cues, take markers and project markers stay.%s\n\n"
+      .. "This cannot be undone with Undo. Continue?",
+      cues, cues == 1 and "" or "s", files, files == 1 and "" or "s",
+      outside > 0 and string.format("\n%d file%s outside the session folder %s only listed.", outside, outside == 1 and "" or "s", outside == 1 and "is" or "are") or "")
+  end,
+  scan = function(ctx)
+    local out, seen = {}, {}
+    for ti, it in ipairs(ctx.items) do
+      ctx.tick(ti, #ctx.items)
+      local take = r.GetActiveTake(it)
+      local src, file = nil, nil
+      if take then src, file = take_source_file(take) end
+      if file and file ~= "" and not seen[file] and file:lower():match("%.wav$") then
+        seen[file] = true
+        local n, keep = M.wav_workflow_cues(file)
+        if n and n > 0 then
+          local outside = ctx.project_dir == "" or file:sub(1, #ctx.project_dir) ~= ctx.project_dir
+          local text = string.format("%d workflow cue%s", n, n == 1 and "" or "s")
+          if #keep > 0 then text = text .. string.format("; keeps %d other cue%s: %s", #keep, #keep == 1 and "" or "s", table.concat(keep, ", ")) end
+          if outside then text = text .. " - outside the session folder: listed only (copy media into the project first)" end
+          out[#out + 1] = { item = it, file = file, count = n, outside = outside, text = file:match("[^/\\]+$") .. "  — " .. text }
+        end
+      end
+    end
+    return out
+  end,
+  fix = function(issues)
+    local files = {}
+    for _, is in ipairs(issues) do if is.file and not is.outside then files[#files + 1] = is.file end end
+    if #files == 0 then return 0, "nothing to change (all listed files are outside the session folder)" end
+    -- release the files while they are rewritten, then reload them and their peaks
+    r.Main_OnCommand(40100, 0) -- Item: Set all media offline
+    local removed, changed, failed = 0, 0, {}
+    for _, f in ipairs(files) do
+      local n, err = M.strip_workflow_cues(f)
+      if n then
+        if n > 0 then removed = removed + n; changed = changed + 1 end
+      else
+        failed[#failed + 1] = (f:match("[^/\\]+$") or f) .. ": " .. tostring(err)
+      end
+    end
+    r.Main_OnCommand(40101, 0) -- Item: Set all media online
+    local want = {}
+    for _, f in ipairs(files) do want[f] = true end
+    local sel = save_item_selection()
+    r.SelectAllMediaItems(0, false)
+    for i = 0, r.CountMediaItems(0) - 1 do
+      local it = r.GetMediaItem(0, i)
+      local take = r.GetActiveTake(it)
+      local _, file = nil, nil
+      if take then _, file = take_source_file(take) end
+      if file and want[file] then r.SetMediaItemSelected(it, true) end
+    end
+    r.Main_OnCommand(40441, 0) -- Peaks: Rebuild peaks for selected items
+    restore_item_selection(sel)
+    local msg = string.format("%d workflow cue%s removed from %d file%s", removed, removed == 1 and "" or "s", changed, changed == 1 and "" or "s")
+    if #failed > 0 then msg = msg .. string.format("; %d failed (%s)", #failed, failed[1]) end
+    return changed, msg
   end,
 }
 
@@ -1948,6 +2261,7 @@ local LABELS = {
   envelopes      = { "Automation",     "single-value take volume -> merge, changing take envelopes -> print, track envelopes -> remove", "red" },
   needs_render   = { "Render",         "playrate / pitch / stretch markers / take FX / polarity -> print with RGWH", "red" },
   overlaps       = { "Overlaps",       "hidden duplicates and leftover slivers -> delete", "red" },
+  tiny_items     = { "Tiny items",     "audio items under 2 frames: editing slivers (review); 2-pops are left out (xx:59:58:00, after the last audio, or marked)", "review" },
   crossfades     = { "Crossfades",     "broken crossfades -> match the overlap", "yellow" },
   fade_meet      = { "Fade overlap",   "fade-in and fade-out meet -> shorten", "yellow" },
   fade_shapes    = { "Fade shapes",    "set the standard shapes (Settings)", "yellow" },
@@ -1957,6 +2271,7 @@ local LABELS = {
   empty_midi     = { "Empty / MIDI",   "empty items and MIDI items (review)", "review" },
   channel_mode   = { "Channel mode",   "not \"normal\" (reverse, downmix, one channel, a pair): mono file -> reset, stereo / poly file -> print", "red" },
   inactive_takes = { "Inactive takes", "crop to the active take", "green" },
+  workflow_cues  = { "Workflow cues",  "#in / #out / #Glue cues inside the session's WAV files -> remove (other cues, take and project markers stay)", "green" },
 }
 for _, d in ipairs(RULES) do
   local l = LABELS[d.id]
@@ -1988,6 +2303,7 @@ function M.make_context(opts)
     opts = opts or {},
     tracks = all_tracks(false),
     items = {},
+    tick = function() end, -- progress inside a check (M.scan with opts.yield: lets the window redraw)
   }
   for i = 0, r.CountMediaItems(0) - 1 do
     local it = r.GetMediaItem(0, i)
@@ -1998,13 +2314,52 @@ function M.make_context(opts)
   return ctx
 end
 
--- Returns { [rule.id] = issues }, plus a summary { total=, items=, tracks= }
+-- Returns { [rule.id] = issues }, plus a summary { total=, items=, tracks=, times = { {id=, title=, sec=} } }
+-- opts.yield (only when called inside a coroutine): pause about every SCAN_SLICE seconds with
+-- coroutine.yield(progress) so the window can redraw; progress = { rule =, title =, n =, total =, done =, of = }.
+-- sec is the time spent in the check itself (the pauses are not counted).
+local SCAN_SLICE = 0.04
 function M.scan(opts)
   local ctx = M.make_context(opts)
-  local results, total = {}, 0
-  for _, d in ipairs(RULES) do
+  local results, total, times = {}, 0, {}
+  local yielding = opts and opts.yield and coroutine.isyieldable()
+  local now = r.time_precise
+  local slice_start, paused = now(), 0
+  local prog = { n = 0, total = #RULES, restarts = opts and opts.restarts }
+  local function pause()
+    local t, change = now(), r.GetProjectStateChangeCount(0)
+    coroutine.yield(prog)
+    -- edited while paused: items may be gone, start again
+    if r.GetProjectStateChangeCount(0) ~= change then error({ restart = true }, 0) end
+    local back = now()
+    paused = paused + (back - t)
+    slice_start = back
+  end
+  local function again() -- the project was edited during a pause: scan it again from the start
+    local o = {}
+    for k, v in pairs(opts) do o[k] = v end
+    o.restarts = (opts.restarts or 0) + 1
+    return M.scan(o)
+  end
+  if yielding then
+    ctx.tick = function(done, of)
+      if now() - slice_start >= SCAN_SLICE then prog.done, prog.of = done, of; pause() end
+    end
+  end
+  for i, d in ipairs(RULES) do
+    prog.n, prog.rule, prog.title, prog.done, prog.of = i, d.id, d.short or d.title, nil, nil
+    if yielding and now() - slice_start >= SCAN_SLICE then
+      local ok, err = pcall(pause)
+      if not ok then
+        if type(err) == "table" and err.restart then return again() end
+        error(err, 0)
+      end
+    end
+    local t0, p0 = now(), paused
     local ok, res = pcall(d.scan, ctx)
+    if not ok and type(res) == "table" and res.restart then return again() end
     if not ok then res = { { text = "SCAN ERROR: " .. tostring(res) } } end
+    times[#times + 1] = { id = d.id, title = d.short or d.title, sec = (now() - t0) - (paused - p0) }
     results[d.id] = res
     total = total + #res
   end
@@ -2030,7 +2385,18 @@ function M.scan(opts)
       end
     end
   end
-  return results, { total = total, items = #ctx.items, tracks = #ctx.tracks, fps = ctx.fps, sr = ctx.sr }
+  return results, { total = total, items = #ctx.items, tracks = #ctx.tracks, fps = ctx.fps, sr = ctx.sr, times = times, restarts = opts and opts.restarts,
+    two_pops = ctx.two_pops or 0 }
+end
+
+-- Check times of a scan, slowest first: "Workflow cues 4.2 s, Overlaps 1.1 s" (checks under min_sec left out)
+function M.slowest(summary, count, min_sec, sep)
+  local list = {}
+  for _, t in ipairs(summary and summary.times or {}) do if t.sec >= (min_sec or 0) then list[#list + 1] = t end end
+  table.sort(list, function(a, b) return a.sec > b.sec end)
+  local out = {}
+  for i = 1, math.min(count or #list, #list) do out[#out + 1] = string.format("%s %.1f s", list[i].title, list[i].sec) end
+  return table.concat(out, sep or ", ")
 end
 
 ------------------------------------------------------------
@@ -2376,6 +2742,8 @@ function M.report(results, summary)
     "Date    : " .. os.date("%Y-%m-%d %H:%M:%S"),
     string.format("Scanned : %d tracks, %d items, %.3f fps, %d Hz", summary.tracks, summary.items, summary.fps, summary.sr),
     string.format("Issues  : %d", summary.total),
+    string.format("2-pops  : %d (tiny items at xx:59:58:00, after the last audio or marked as 2-pop; not listed)", summary.two_pops or 0),
+    "Slowest : " .. (M.slowest(summary, 5) ~= "" and M.slowest(summary, 5) or "-"),
     "",
   }
   for _, d in ipairs(RULES) do

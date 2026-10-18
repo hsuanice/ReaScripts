@@ -144,6 +144,7 @@ reaper = {
   EnumProjects = function() return 0, proj_dir .. "test.rpp" end,
   TimeMap_curFrameRate = function() return FPS end,
   GetProjectTimeOffset = function() return 0 end,
+  time_precise = os.clock, GetProjectStateChangeCount = function() return STATE_CHANGE or 0 end,
   CountMediaItems = function() return #items end,
   GetMediaItem = function(_, i) return items[i+1] end,
   ValidatePtr2 = function(_, p) return p ~= nil end,
@@ -293,5 +294,90 @@ do -- a broken crossfade (fade-out shorter than the overlap): REAPER's action sk
   print(string.format("broken crossfade: flagged '%s' | shapes after fix %s/%s (never -1) | %s", (list[1] and list[1].needs) or "NOT FLAGGED",
     tostring(A.fos), tostring(B.fis), msg:match("%d+ broken crossfade side%a* skipped") or msg))
 end
+do -- workflow cues: listed only outside the session folder, removed inside it; other cues stay
+  local wav = os.getenv("SF_CUE_WAV")
+  if wav then
+    local ct = T("Glued"); tracks[#tracks + 1] = ct; ct.num = #tracks
+    local ci = ITEM(ct, 0, 1, { TAKE(SRC(wav)) }); ci.active = ci.takes[1]; items[#items + 1] = ci
+    local function cue_issue() for _, is in ipairs(M.scan({}).workflow_cues) do if is.file == wav then return is end end end
+    local is = cue_issue()
+    print("cues outside the session folder: " .. (is and (is.outside and "listed only" or "NOT outside") or "NOT LISTED") .. " | " .. (is and is.text or ""))
+    local real = reaper.EnumProjects
+    reaper.EnumProjects = function() return 0, wav:match("^(.*/)") .. "test.rpp" end
+    is = cue_issue()
+    print("inside: " .. (is and is.text or "NOT LISTED") .. " | confirm asks: " .. tostring(M.rule_by_id("workflow_cues").confirm({ is }) ~= nil))
+    local _, msg = M.fix(M.rule_by_id("workflow_cues"), { is }, {})
+    local left, keep = M.wav_workflow_cues(wav)
+    print("fixed: " .. msg .. " | left " .. tostring(left) .. ", kept: " .. table.concat(keep, ", ") .. " | listed again: " .. tostring(cue_issue() ~= nil))
+    reaper.EnumProjects = real
+  end
+end
 local keep = M.scan({ keep_folders = true })
 print("keep_folders: folders issues = " .. #keep.folders)
+do -- scan inside a coroutine (the window's job): pauses, same result as one go, starts again when edited
+  local function count(r0) local n = 0; for _, l in pairs(r0) do n = n + #l end return n end
+  local plain = M.scan({ keep_folders = true })
+  local clock, t = os.clock, 0
+  reaper.time_precise = function() t = t + 0.01; return t end -- every call "takes" 10 ms
+  local co = coroutine.create(function() return M.scan({ keep_folders = true, yield = true }) end)
+  local pauses, edited, ok, a, b = 0, false
+  repeat
+    ok, a, b = coroutine.resume(co)
+    assert(ok, a)
+    if coroutine.status(co) ~= "dead" then
+      pauses = pauses + 1
+      if pauses == 5 and not edited then edited = true; STATE_CHANGE = 1 end -- user edits during a pause
+    end
+  until coroutine.status(co) == "dead"
+  reaper.time_precise = clock
+  local slow = M.slowest(b, 3)
+  print(string.format("coroutine scan: %d pauses, %d issues (plain %d), restarts %s, %d check times, slowest: %s",
+    pauses, count(a), count(plain), tostring(b.restarts), #b.times, slow))
+  assert(pauses > 5 and count(a) == count(plain) and b.restarts == 1 and #b.times == #M.RULES and slow ~= "")
+  local sync = select(2, M.scan({ keep_folders = true, yield = true })) -- not in a coroutine: no pauses
+  assert(sync.total == count(plain))
+  print("coroutine scan OK")
+end
+do -- tiny items: slivers listed (review), 2-pops at xx:59:58:00 or after all other audio left out
+  local pt = T("Pops"); tracks[#tracks + 1] = pt; pt.num = #tracks
+  local head = ITEM(pt, 1000, f, { TAKE(wav) })        -- 03:59:58:00 below
+  local near = ITEM(pt, 1000 + 5 * f, f, { TAKE(wav) }) -- 03:59:58:05: not a pop
+  local mid = ITEM(pt, 1500, 1.5 * f, { TAKE(wav) })    -- sliver
+  local prog = ITEM(pt, 2000, 600, { TAKE(wav) })      -- the program audio
+  local tail = ITEM(pt, 99999, f, { TAKE(wav) })        -- after the last audio
+  for _, it in ipairs({ head, near, mid, prog, tail }) do it.active = it.takes[1]; items[#items + 1] = it end
+  local real = reaper.format_timestr_pos
+  reaper.format_timestr_pos = function(t)
+    local fr = math.floor((t + 14398 - 1000) * FPS + 0.5)
+    return string.format("%02d:%02d:%02d:%02d", fr // (3600 * FPS), fr // (60 * FPS) % 60, fr // FPS % 60, fr % FPS)
+  end
+  local res, sum = M.scan({})
+  local got = {}
+  for _, is in ipairs(res.tiny_items) do got[is.item] = true end
+  for _, is in ipairs(res.overlaps) do assert(not got[is.item], "listed twice") end
+  print(string.format("tiny items: %d listed, 2-pops %d | head %s, near %s, mid %s, tail %s", #res.tiny_items, sum.two_pops,
+    tostring(got[head] or false), tostring(got[near] or false), tostring(got[mid] or false), tostring(got[tail] or false)))
+  assert(sum.two_pops == 2 and not got[head] and not got[tail] and got[near] and got[mid])
+  -- marked by hand: "Mark as 2-pop" flag, or Item Notes
+  local nis
+  for _, is in ipairs(res.tiny_items) do if is.item == near then nis = is end end
+  assert(M.mark_pops({ nis }) == 1)
+  mid.ext = mid.ext or {}; mid.ext.P_NOTES = "Tail Pop"
+  local res2, sum2 = M.scan({})
+  print(string.format("marked: %d listed, 2-pops %d", #res2.tiny_items, sum2.two_pops))
+  assert(#res2.tiny_items == 0 and sum2.two_pops == 4)
+  mid.ext.P_NOTES = "pops and clicks"                                -- not a 2-pop note
+  assert(M.clear_pop_marks() == 1)
+  local res3, sum3 = M.scan({})
+  assert(#res3.tiny_items == 2 and sum3.two_pops == 2)
+  reaper.format_timestr_pos = real
+  print("tiny items OK")
+end
+do -- every check has the fields the window shows
+  for _, d in ipairs(M.RULES) do
+    for _, k in ipairs({ "id", "title", "scope", "fix_note", "short", "desc", "level" }) do
+      assert(type(d[k]) == "string", d.id .. ": missing " .. k)
+    end
+  end
+  print("rule fields OK")
+end

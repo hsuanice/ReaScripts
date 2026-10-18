@@ -1,10 +1,10 @@
 --[[
 @description AudioSweet Run
-@version 26.1012.1641
+@version 26.1016.1659
 @author hsuanice
 @noindex
 @changelog
-  - Renamed to "AudioSweet - Run" (was "AudioSweet Run") as part of the 2026-10-12 naming clean-up.
+  - Fix: AudioSweet no longer overwrites the RGWH Debug Level saved in the project; its Debug switch now applies to its own RGWH call only, so the RGWH Render / Glue shortcuts stop printing console logs after an AudioSweet run with Debug on.
 @about
   # AudioSweet Run
 
@@ -184,7 +184,6 @@ local function sync_gui_settings_to_core()
   -- RGWH Core reads handle settings from project ExtState "RGWH"
   r.SetProjExtState(0, "RGWH", "HANDLE_MODE", "seconds")
   r.SetProjExtState(0, "RGWH", "HANDLE_SECONDS", tostring(handle_to_set))
-  r.SetProjExtState(0, "RGWH", "DEBUG_LEVEL", debug_enabled and "2" or "0")
 
   return {
     action = action,

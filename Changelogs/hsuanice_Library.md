@@ -1,5 +1,10 @@
 # hsuanice_Library.lua — Changelog
 
+## 26.1018.1239
+
+- Update: hsuanice_Session Fix Core.lua (Workflow cues check, scan progress and check times, Tiny items with 2-pop recognition and marking).
+- Update: hsuanice_AudioSweet Core.lua (Debug switch no longer changes the RGWH Debug Level).
+
 ## 26.1015.1425
 
 - Update: hsuanice_Session Fix Core.lua (fade shapes on hidden tracks, check order).

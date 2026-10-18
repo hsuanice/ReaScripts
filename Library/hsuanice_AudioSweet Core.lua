@@ -1,11 +1,10 @@
 --[[
 @description AudioSweet Core - Focused Track FX render via RGWH Core
-@version 26.1011.2142
+@version 26.1016.1659
 @author hsuanice
 @noindex
 @changelog
-  - Released as part of the 26.1011.2142 package update.
-  - Full history of earlier versions: Changelogs/ in the repository (https://github.com/hsuanice/ReaScripts/tree/master/Changelogs)
+  - Fix: AudioSweet no longer overwrites the RGWH Debug Level saved in the project; its Debug switch now applies to its own RGWH call only, so the RGWH Render / Glue shortcuts stop printing console logs after an AudioSweet run with Debug on.
 @notes
   Tim Chimes (original), adapted by hsuanice for AudioSweet Core integration.
     Reference:
@@ -1568,6 +1567,7 @@ local function apply_focused_fx_to_item(item, FXmediaTrack, fxIndex, FXName, sou
     track_fx = true,
     merge_volumes = true,
     print_volumes = true,
+    debug = { level = debug_enabled() and 2 or 0 },  -- one-run: RGWH's own setting is kept
   }
 
   -- Call RGWH.core()
@@ -2419,6 +2419,7 @@ function main() -- main part of the script
             channel_mode = (apply_fx_mode == "mono") and "mono" or "auto",
             take_fx = true,
             track_fx = true,
+            debug = { level = debug_enabled() and 2 or 0 },  -- one-run: RGWH's own setting is kept
           }
           if use_render then
             args.cues = { render_keep_glue = render_keep_glue_cues }  -- one-run override

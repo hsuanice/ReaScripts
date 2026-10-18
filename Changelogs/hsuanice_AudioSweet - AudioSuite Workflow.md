@@ -4,6 +4,10 @@
 
 AudioSweet ReaImGui - AudioSuite Workflow (Pro Tools–Style)
 
+## 26.1016.1659
+
+- Fix: AudioSweet no longer overwrites the RGWH Debug Level saved in the project; its Debug switch now applies to its own RGWH call only, so the RGWH Render / Glue shortcuts stop printing console logs after an AudioSweet run with Debug on.
+
 ## 26.1012.1641
 
 - Renamed to "AudioSweet - AudioSuite Workflow" (was "AudioSweet ReaImGui") as part of the 2026-10-12 naming clean-up.

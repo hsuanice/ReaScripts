@@ -2,6 +2,14 @@
 
 AudioSweet Core - Focused Track FX render via RGWH Core
 
+## 26.1016.1659
+
+- Fix: AudioSweet no longer overwrites the RGWH Debug Level saved in the project; its Debug switch now applies to its own RGWH call only, so the RGWH Render / Glue shortcuts stop printing console logs after an AudioSweet run with Debug on.
+
+## 26.1011.2142
+
+- Released as part of the 26.1011.2142 package update.
+
 History before 26.1011.2142 (moved out of the script header; last header version: `0.3.8`).
 
 ```text

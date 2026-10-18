@@ -4,6 +4,10 @@
 
 RGWH ReaImGui - ImGui Interface for RGWH Core（Render or Glue with Handles）
 
+## 26.1016.1659
+
+- Change: the default Debug Level is now Silent (was Verbose), so new projects print no console log.
+
 ## 26.1012.1641
 
 - Renamed to "Render or Glue with Handles - RGWH" (was "RGWH ReaImGui") as part of the 2026-10-12 naming clean-up.
