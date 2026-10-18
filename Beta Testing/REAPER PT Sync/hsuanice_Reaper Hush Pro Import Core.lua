@@ -1,6 +1,6 @@
 --[[
 @description Hush Pro Import Core - shared code for importing Hush Pro Split files back into REAPER
-@version 26.1018.2043
+@version 26.1018.2105
 @author hsuanice
 @noindex  (kept in the repository as a backup; local REAPER <> Pro Tools tools, not offered on ReaPack)
 @about
@@ -159,28 +159,49 @@ local function find_source_item(stem)
   end
 end
 
-local function track_by_name(name)
-  for i = 0, r.CountTracks(0) - 1 do
-    local tr = r.GetTrack(0, i)
-    local _, n = r.GetTrackName(tr)
-    if n == name then return tr end
-  end
-end
-
--- Dialog / Reverb / Noise: reuse existing tracks, otherwise create them below `below`
+-- Dialog / Reverb / Noise: always three NEW tracks (existing tracks with these names are never
+-- used), at the same folder level as the source track:
+--   - normal track: right below it
+--   - last track of a folder (depth < 0): right below it, and the last new track takes over the
+--     folder end, so the new tracks stay inside the folder
+--   - folder parent (depth 1): after the whole folder, not as its children
+--   - no source track: at the end of the project
 local function target_tracks(below)
-  local out, idx = {}, below and math.floor(r.GetMediaTrackInfo_Value(below, "IP_TRACKNUMBER")) or r.CountTracks(0)
-  for k = 1, 3 do
-    local name = DUP_TRACKS[k]
-    local tr = track_by_name(name)
-    if not tr then
-      r.InsertTrackAtIndex(idx, true)
-      tr = r.GetTrack(0, idx)
-      r.GetSetMediaTrackInfo_String(tr, "P_NAME", name, true)
+  local idx = r.CountTracks(0) -- 0-based index for the first new track
+  local close_depth = 0        -- folder end to hand over to the last new track
+  if below then
+    local n = math.floor(r.GetMediaTrackInfo_Value(below, "IP_TRACKNUMBER")) -- 1-based
+    local depth = r.GetMediaTrackInfo_Value(below, "I_FOLDERDEPTH")
+    if depth > 0 then
+      -- skip the folder's children: walk until the running depth is back to the parent's level
+      local level, i = depth, n
+      while level > 0 and i < r.CountTracks(0) do
+        level = level + r.GetMediaTrackInfo_Value(r.GetTrack(0, i), "I_FOLDERDEPTH")
+        i = i + 1
+      end
+      idx = i
+      if level < 0 then -- the folder's last child also closed outer folders: keep them closed after us
+        local last = r.GetTrack(0, i - 1)
+        r.SetMediaTrackInfo_Value(last, "I_FOLDERDEPTH", r.GetMediaTrackInfo_Value(last, "I_FOLDERDEPTH") - level)
+        close_depth = level
+      end
+    else
+      idx = n
+      if depth < 0 then
+        r.SetMediaTrackInfo_Value(below, "I_FOLDERDEPTH", 0)
+        close_depth = depth
+      end
     end
-    idx = math.floor(r.GetMediaTrackInfo_Value(tr, "IP_TRACKNUMBER")) -- next one goes below this
+  end
+  local out = {}
+  for k = 1, 3 do
+    r.InsertTrackAtIndex(idx + k - 1, true)
+    local tr = r.GetTrack(0, idx + k - 1)
+    r.GetSetMediaTrackInfo_String(tr, "P_NAME", DUP_TRACKS[k], true)
+    r.SetMediaTrackInfo_Value(tr, "I_FOLDERDEPTH", 0)
     out[k] = tr
   end
+  if close_depth ~= 0 then r.SetMediaTrackInfo_Value(out[3], "I_FOLDERDEPTH", close_depth) end
   return out
 end
 
@@ -205,6 +226,7 @@ end
 M.basename, M.stem_of, M.join = basename, stem_of, join
 M.wav_info, M.same_audio, M.move_file, M.trash_file = wav_info, same_audio, move_file, trash_file
 M.find_source_item = find_source_item
+M.target_tracks = target_tracks
 
 ------------------------------------------------------------------------------
 -- Folder content

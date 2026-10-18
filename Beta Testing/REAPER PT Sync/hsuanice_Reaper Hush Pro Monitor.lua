@@ -1,6 +1,6 @@
 --[[
 @description Hush Pro Monitor - wait for Hush Pro Split output after Spot to Pro Tools and import it
-@version 26.1018.2043
+@version 26.1018.2105
 @author hsuanice
 @noindex  (kept in the repository as a backup; local REAPER <> Pro Tools tools, not offered on ReaPack)
 @about
@@ -16,8 +16,8 @@
 
   A group is imported as soon as dup1 / dup2 / dup3 are all complete (WAV header consistent
   with the file size, size unchanged for 3 seconds): files moved into the project media folder,
-  placed on tracks "Dialog" / "Reverb" / "Noise" below the source item's track at their
-  timecode, and Hush Pro's copy of the original goes to the Trash when its audio matches the
+  placed on three NEW tracks "Dialog" / "Reverb" / "Noise" at the same folder level as the
+  source item's track (inside its folder), at their timecode, and Hush Pro's copy of the original goes to the Trash when its audio matches the
   spotted file. The window closes by itself when every spotted item is done.
 
   Import now: import what is complete right away (no 3-second wait). Cancel / Esc / closing the

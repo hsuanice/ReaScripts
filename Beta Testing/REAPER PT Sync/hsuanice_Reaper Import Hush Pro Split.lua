@@ -1,6 +1,6 @@
 --[[
 @description Import Hush Pro Split - bring Hush Pro's dialog / reverb / noise files back from Pro Tools
-@version 26.1018.2043
+@version 26.1018.2105
 @author hsuanice
 @noindex  (kept in the repository as a backup; local REAPER <> Pro Tools tools, not offered on ReaPack)
 @about
@@ -11,9 +11,9 @@
     - "<stem>.dup2-HshSplt_NN.wav" -> track "Reverb"
     - "<stem>.dup3-HshSplt_NN.wav" -> track "Noise"
       moved into the project media folder (where Spot to Pro Tools stages its files) and
-      placed at the timecode stored in each file (BWF Time Reference), full length. The three
-      tracks are created right below the track of the source item (found from the file name:
-      source name + "__pt<sample position>"), or reused when they exist.
+      placed at the timecode stored in each file (BWF Time Reference), full length, on three
+      NEW tracks at the same folder level as the source item's track (found from the file name:
+      source name + "__pt<sample position>"); existing tracks with these names are never used.
     - Hush Pro's copy of the original ("<clip name>-HshSplt_NN.wav", no "dupN"): moved to the
       Trash only when its audio matches the file sent to Pro Tools (same length, channels and
       timecode, every sample within -120 dB); otherwise it is moved like the others.
