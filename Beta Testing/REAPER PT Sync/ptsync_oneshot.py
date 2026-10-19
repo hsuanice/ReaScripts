@@ -24,6 +24,14 @@ Manifest schema:
 
 Usage:
     python3 ptsync_oneshot.py /path/to/manifest.json
+    python3 ptsync_oneshot.py --delete-tracks /path/to/_ptsync_hush_tracks.json "<source track>"
+
+Hush Pro prep (manifest item with "prepare_hush": true): after the spot, three empty tracks
+"<source track>.dialog / .reverb / .noise" (same format) are created right after the source
+track, the four tracks are selected and the clip's range becomes the timeline selection, ready
+for Hush Pro Split (AudioSuite, run by hand). Their names are stored in
+"_ptsync_hush_tracks.json" next to the manifest; after the import into REAPER the
+"--delete-tracks" mode removes all four tracks (keeps the session small, e.g. for 8-track limits).
 
 Requirements:
     pip install py-ptsl
@@ -53,14 +61,120 @@ except ImportError:
     sys.exit(2)
 
 
+# DeleteTracks exists since Pro Tools 2025.10 but not yet in this py-ptsl version: an Operation
+# only needs the class name (py-ptsl maps CId_<Name> to the command and <Name>RequestBody).
+from ptsl.ops import Operation
+
+
+class CId_DeleteTracks(Operation):
+    pass
+
+
+HUSH_SUFFIXES = (".dialog", ".reverb", ".noise")   # Hush Pro Split outputs, in its track order
+HUSH_STATE = "_ptsync_hush_tracks.json"
+
+
+def wav_frames(path: str) -> int:
+    """Number of sample frames of a RIFF WAV file (0 when unreadable)."""
+    import struct
+    with open(path, "rb") as f:
+        head = f.read(12)
+        if head[:4] != b"RIFF" or head[8:12] != b"WAVE":
+            return 0
+        block = 0
+        while True:
+            h = f.read(8)
+            if len(h) < 8:
+                return 0
+            cid, size = h[:4], struct.unpack("<I", h[4:])[0]
+            if cid == b"fmt ":
+                fmt = f.read(size)
+                block = struct.unpack("<H", fmt[12:14])[0]
+                if size % 2:
+                    f.read(1)
+            elif cid == b"data":
+                return size // block if block else 0
+            else:
+                f.seek(size + (size % 2), 1)
+
+
+def prepare_hush(engine: Any, source_track: str, tc_samples: int, frames: int) -> tuple[bool, str, list]:
+    """Create <source>.dialog/.reverb/.noise after the source track, select the four tracks and
+    set the timeline selection to the clip. Returns (success, message, track names)."""
+    names = [source_track]
+    try:
+        fmt = pt.TF_Mono
+        for t in engine.track_list():
+            if t.name == source_track:
+                fmt = t.format
+                break
+        prev = source_track
+        for suffix in HUSH_SUFFIXES:
+            want = source_track + suffix
+            op = ops.CId_CreateNewTracks(
+                number_of_tracks=1, track_name=want, track_format=fmt,
+                track_type=pt.TT_Audio, track_timebase=pt.TTB_Samples,
+                insertion_point_position=pt.TIPoint_After, insertion_point_track_name=prev)
+            engine.client.run(op)
+            created = list(op.response.created_track_names) if op.response else []
+            got = created[0] if created else want
+            if got != want:  # Pro Tools renamed it (name clash): give it the wanted name
+                engine.client.run(ops.CId_RenameTargetTrack(current_name=got, new_name=want))
+            names.append(want)
+            prev = want
+        engine.select_tracks_by_name(names)
+        engine.client.run(ops.CId_SetTimelineSelection(
+            in_time=str(tc_samples), out_time=str(tc_samples + frames),
+            location_type=pt.TLType_Samples))
+    except Exception as e:
+        return False, f"hush prep failed after {names}: {e}", names
+    return True, f"hush tracks {', '.join(names[1:])}; selection {tc_samples}-{tc_samples + frames}", names
+
+
+def remember_hush_tracks(manifest_path: Path, source_track: str, names: list) -> None:
+    state_path = manifest_path.with_name(HUSH_STATE)
+    try:
+        state = json.loads(state_path.read_text(encoding="utf-8"))
+    except Exception:
+        state = {}
+    state[source_track] = names
+    state_path.write_text(json.dumps(state, ensure_ascii=False, indent=1), encoding="utf-8")
+
+
+def delete_tracks_main(state_path: Path, key: str) -> int:
+    """--delete-tracks: remove the Pro Tools tracks stored for <key> (source track name)."""
+    try:
+        state = json.loads(state_path.read_text(encoding="utf-8"))
+    except Exception as e:
+        print(f"[ptsync] no hush track list ({e})")
+        return 1
+    names = state.get(key)
+    if not names:
+        print(f"[ptsync] nothing stored for {key!r}")
+        return 1
+    try:
+        with open_engine(company_name="reaper-pt-sync", application_name="ptsync_oneshot") as engine:
+            engine.client.run(CId_DeleteTracks(
+                track_names=names,
+                delete_track_behavior_options=pt.DeleteTrackBehaviorOptions(
+                    keep_folder_members=False, keep_alternate_playlists=False, coalesce_automation=False)))
+    except Exception as e:
+        print(f"[ptsync] [FAIL] delete tracks {names}: {e}")
+        return 3
+    del state[key]
+    state_path.write_text(json.dumps(state, ensure_ascii=False, indent=1), encoding="utf-8")
+    print(f"[ptsync] [OK] deleted Pro Tools tracks: {', '.join(names)}")
+    return 0
+
+
 # ----------------------------------------------------------------------------
 # Per-item spot
 # ----------------------------------------------------------------------------
 
-def spot_one(engine: Any, item: dict) -> tuple[bool, str]:
+def spot_one(engine: Any, item: dict) -> tuple[bool, str, str]:
     """Spot a single manifest entry into the open PT session.
 
-    Returns (success, message).
+    Returns (success, message, name of the Pro Tools track the clip landed on).
     """
     source_path = item["source_path"]
     target_track = item["target_track"]
@@ -68,14 +182,17 @@ def spot_one(engine: Any, item: dict) -> tuple[bool, str]:
     tc_samples = item["tc_samples"]
 
     if not Path(source_path).is_file():
-        return False, f"source not found: {source_path}"
+        return False, f"source not found: {source_path}", ""
 
     # 1. Select the target track by exact name match.
     #    py-ptsl select_tracks_by_name takes a list of names.
+    #    Not fatal: the import makes its own track named after the file anyway, and the session
+    #    may have been emptied after the last Hush Pro round trip (all tracks deleted).
+    select_note = ""
     try:
         engine.select_tracks_by_name([target_track])
     except Exception as e:
-        return False, f"select_tracks_by_name({target_track!r}) failed: {e}"
+        select_note = f"no track {target_track!r} to select ({e}); "
 
     # 2. Import audio onto the selected track at the spot TC.
     #    NOTE: py-ptsl's Engine.import_audio() hard-codes import_type=1 which
@@ -101,7 +218,7 @@ def spot_one(engine: Any, item: dict) -> tuple[bool, str]:
         op = ops.CId_Import(import_type=pt.IType_Audio, audio_data=audio_data)
         engine.client.run(op)
     except Exception as e:
-        return False, f"import_audio failed: {e}"
+        return False, f"import_audio failed: {e}", ""
 
     # Give PT a moment to register the import.
     time.sleep(0.25)
@@ -148,7 +265,7 @@ def spot_one(engine: Any, item: dict) -> tuple[bool, str]:
         else:
             actions.append(f"cliplist:FAIL({e})")
 
-    return True, "ok (" + "; ".join(actions) + ")"
+    return True, select_note + "ok (" + "; ".join(actions) + ")", auto_track
 
 
 # ----------------------------------------------------------------------------
@@ -156,6 +273,8 @@ def spot_one(engine: Any, item: dict) -> tuple[bool, str]:
 # ----------------------------------------------------------------------------
 
 def main() -> int:
+    if len(sys.argv) >= 4 and sys.argv[1] == "--delete-tracks":
+        return delete_tracks_main(Path(sys.argv[2]), sys.argv[3])
     if len(sys.argv) < 2:
         sys.stderr.write("Usage: ptsync_oneshot.py <manifest.json>\n")
         return 1
@@ -199,7 +318,12 @@ def main() -> int:
         print(f"[ptsync] Spotting {len(items)} item(s)...")
 
         for idx, item in enumerate(items, start=1):
-            success, info = spot_one(engine, item)
+            success, info, pt_track = spot_one(engine, item)
+            if success and item.get("prepare_hush") and pt_track:
+                frames = wav_frames(item["source_path"])
+                hok, hinfo, hnames = prepare_hush(engine, pt_track, int(item["tc_samples"]), frames)
+                info += "; " + hinfo
+                remember_hush_tracks(manifest_path, pt_track, hnames)
             tag = "OK  " if success else "FAIL"
             print(
                 f"  [{tag}] {idx}/{len(items)}  "

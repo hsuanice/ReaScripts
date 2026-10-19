@@ -1,6 +1,6 @@
 --[[
 @description Hush Pro Import Core - shared code for importing Hush Pro Split files back into REAPER
-@version 26.1018.2105
+@version 26.1019.1046
 @author hsuanice
 @noindex  (kept in the repository as a backup; local REAPER <> Pro Tools tools, not offered on ReaPack)
 @about
@@ -139,6 +139,7 @@ end
 -- REAPER item whose source is <stem> (Spot used it as-is) or <base>__pt<N> (patched copy:
 -- source <base>, file origin at sample N on the timeline)
 local function find_source_item(stem)
+  stem = stem:gsub("%.A%d+$", "") -- Pro Tools adds ".A<n>" to the track of a poly channel file
   local base, n = stem:match("^(.*)__pt(%d+)$")
   for i = 0, r.CountMediaItems(0) - 1 do
     local it = r.GetMediaItem(0, i)
@@ -243,10 +244,15 @@ function M.list_files(dir)
   return files
 end
 
--- "<stem>.dupN-HshSplt_NN.wav" -> stem, N
+-- Hush Pro output name -> stem (= Pro Tools source track), N (1 dialog, 2 reverb, 3 noise):
+-- "<stem>.dialog|.reverb|.noise-HshSplt_NN.wav" (tracks made by the bridge) or
+-- "<stem>.dupN-HshSplt_NN.wav" (tracks duplicated by hand)
+local KIND = { dialog = 1, reverb = 2, noise = 3 }
 function M.split_name(name)
-  local stem, n = name:match("^(.-)%.dup(%d+)%-HshSplt_%d+%.[Ww][Aa][Vv]$")
-  return stem, n and tonumber(n)
+  local stem, kind = name:match("^(.-)%.(%a+)%-HshSplt_%d+%.[Ww][Aa][Vv]$")
+  if stem and KIND[kind:lower()] then return stem, KIND[kind:lower()] end
+  local s2, n = name:match("^(.-)%.dup(%d+)%-HshSplt_%d+%.[Ww][Aa][Vv]$")
+  return s2, n and tonumber(n)
 end
 -- Hush Pro's copy of the original: "<clip name>-HshSplt_NN.wav" without dupN
 function M.is_original_copy(name)
@@ -291,6 +297,7 @@ end
 
 -- The file that was sent to Pro Tools for a stem (patched copy in _PT_sync, or the source)
 function M.sent_file(stem, dest)
+  stem = stem:gsub("%.A%d+$", "")
   local sent = join(join(dest, SYNC_DIR), stem .. ".wav")
   if r.file_exists(sent) then return sent end
   local it = find_source_item(stem)
@@ -298,6 +305,42 @@ function M.sent_file(stem, dest)
   local src = take and r.GetMediaItemTake_Source(take)
   local p = src and r.GetMediaSourceFileName(src, "") or ""
   return (p ~= "" and r.file_exists(p)) and p or nil
+end
+
+------------------------------------------------------------------------------
+-- Pro Tools clean-up: delete the source track and its .dialog/.reverb/.noise tracks that the
+-- bridge stored in "_ptsync_hush_tracks.json" (needs Pro Tools 2025.10+ for DeleteTracks).
+------------------------------------------------------------------------------
+local HERE = debug.getinfo(1, "S").source:match("^@(.*[/\\])") or ""
+
+-- the Python used by Spot to Pro Tools (one place to configure it)
+local function python_cmd()
+  local f = io.open(HERE .. "hsuanice_Reaper Spot to Pro Tools.lua", "r")
+  if f then
+    local text = f:read("a")
+    f:close()
+    local p = text:match('local%s+PYTHON_CMD%s*=%s*"([^"]+)"')
+    if p then return p end
+  end
+  return "python3"
+end
+
+-- Returns a report line or nil (nothing stored for this track), and a warning or nil
+function M.delete_pt_tracks(stem, dest)
+  local state = join(dest, "_ptsync_hush_tracks.json")
+  local f = io.open(state, "r")
+  if not f then return nil end
+  local text = f:read("a")
+  f:close()
+  local key = '"' .. stem:gsub('\\', '\\\\'):gsub('"', '\\"') .. '"'
+  if not text:find(key, 1, true) then return nil end
+  local q = function(s) return "'" .. s:gsub("'", "'\\''") .. "'" end
+  local cmd = q(python_cmd()) .. " " .. q(HERE .. "ptsync_oneshot.py") .. " --delete-tracks " .. q(state) .. " " .. q(stem) .. " 2>&1"
+  local p = io.popen(cmd, "r")
+  local out = p and p:read("a") or ""
+  if p then p:close() end
+  if out:find("[OK]", 1, true) then return "PT     " .. (out:match("%[OK%]%s*(.-)%s*$") or "tracks deleted") end
+  return nil, "Pro Tools tracks not deleted: " .. (out:match("([^\n]+)%s*$") or "bridge did not answer")
 end
 
 ------------------------------------------------------------------------------
@@ -333,6 +376,13 @@ function M.import_group(stem, names, dest)
   r.Main_OnCommand(40047, 0) -- Peaks: Build any missing peaks
   r.UpdateArrange()
   r.Undo_EndBlock("Import Hush Pro Split", -1)
+  -- all three files are in REAPER now: clear the Pro Tools session (a partial import keeps the
+  -- Pro Tools tracks, so the missing part can still be rendered there)
+  if names[1] and names[2] and names[3] then
+    local line, warn = M.delete_pt_tracks(stem, dest)
+    if line then report[#report + 1] = line end
+    if warn then warnings[#warnings + 1] = warn end
+  end
   return report, warnings
 end
 

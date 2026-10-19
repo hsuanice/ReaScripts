@@ -1,6 +1,6 @@
 --[[
 @description Import Hush Pro Split - bring Hush Pro's dialog / reverb / noise files back from Pro Tools
-@version 26.1018.2105
+@version 26.1019.1046
 @author hsuanice
 @noindex  (kept in the repository as a backup; local REAPER <> Pro Tools tools, not offered on ReaPack)
 @about

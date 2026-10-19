@@ -1,6 +1,6 @@
 --[[
 @description Spot selected items to Pro Tools (REAPER <> PT Sync, v1)
-@version 26.1018.2043
+@version 26.1019.1046
 @author hsuanice
 @noindex  (kept in the repository as a backup; local REAPER <> Pro Tools tools, not offered on ReaPack)
 @about
@@ -11,7 +11,7 @@
 --]]
 -- @description Spot selected items to Pro Tools (REAPER<>PT, v1)
 -- @author Shanice
--- @version 26.1018.2043
+-- @version 26.1019.1046
 --
 -- v1 scope:
 --   * playrate must be 1.0 (no time-stretch) — render first if not
@@ -28,6 +28,12 @@
 -- Suggested convention: REAPER<>PT_01, REAPER<>PT_02, ...
 --
 -- Changelog:
+--   26.1019.1046
+--     * Pro Tools side of the Hush Pro round trip (bridge): after the spot, three empty
+--       tracks <track>.dialog / .reverb / .noise are created after the clip's track, the four
+--       tracks are selected and the clip range becomes the timeline selection. After the import
+--       into REAPER all four tracks are deleted again (Pro Tools 2025.10+). A missing target track
+--       is no longer an error (the import makes its own track).
 --   26.1018.2043
 --     * After a successful spot, open the Hush Pro Monitor window: it waits for Hush Pro's
 --       Split output (dup1/2/3) in the Hush Pro folder and imports it on Dialog / Reverb /
@@ -528,6 +534,7 @@ local function main()
               clip_name    = info.take_name,
               tc_samples   = target_samples,
               sample_rate  = sr,
+              prepare_hush = true, -- bridge: add .dialog/.reverb/.noise tracks, select the clip range
             }
           end
         end
