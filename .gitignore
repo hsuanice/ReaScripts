@@ -15,12 +15,8 @@
 # Images linked from REAPER forum posts — keep so old links keep working
 !/Reaper Forum/
 
-# Beta Testing: local work in progress. Folders listed here are BACKED UP on GitHub only (their
-# scripts carry "@noindex ... backup", ReaPack does not list them). Never third-party SDKs.
-!/Beta Testing/
-/Beta Testing/*
-!/Beta Testing/REAPER PT Sync/
-/Beta Testing/REAPER PT Sync/PTSL_SDK_CPP*
+# Beta Testing is NOT part of this public repository: it has its own private repositories
+# (hsuanice/Beta-Testing, and hsuanice/REAPER-PT-Sync for "Beta Testing/REAPER PT Sync").
 **/.DS_Store
 
 # Published categories
