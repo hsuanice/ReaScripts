@@ -67,7 +67,14 @@ from ptsl.ops import Operation
 
 
 class CId_DeleteTracks(Operation):
-    pass
+    def json_messup(self, in_json: str) -> str:
+        # py-ptsl sends empty fields too ("track_ids": []); Pro Tools then refuses with "Only one
+        # of 'track_ids' and 'track_names' must be defined". Drop whichever list is empty.
+        data = json.loads(in_json) if in_json else {}
+        for key in ("track_ids", "track_names"):
+            if key in data and not data[key]:
+                del data[key]
+        return json.dumps(data)
 
 
 HUSH_SUFFIXES = (".dialog", ".reverb", ".noise")   # Hush Pro Split outputs, in its track order

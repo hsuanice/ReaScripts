@@ -1,6 +1,6 @@
 --[[
 @description Spot selected items to Pro Tools (REAPER <> PT Sync, v1)
-@version 26.1019.1046
+@version 26.1019.1050
 @author hsuanice
 @noindex  (kept in the repository as a backup; local REAPER <> Pro Tools tools, not offered on ReaPack)
 @about
@@ -11,7 +11,7 @@
 --]]
 -- @description Spot selected items to Pro Tools (REAPER<>PT, v1)
 -- @author Shanice
--- @version 26.1019.1046
+-- @version 26.1019.1050
 --
 -- v1 scope:
 --   * playrate must be 1.0 (no time-stretch) — render first if not
@@ -28,6 +28,10 @@
 -- Suggested convention: REAPER<>PT_01, REAPER<>PT_02, ...
 --
 -- Changelog:
+--   26.1019.1050
+--     * Fix (bridge): deleting the Pro Tools tracks after the import failed with
+--       "Only one of 'track_ids' and 'track_names' must be defined" (py-ptsl also sent an empty
+--       track_ids list); the empty list is dropped now.
 --   26.1019.1046
 --     * Pro Tools side of the Hush Pro round trip (bridge): after the spot, three empty
 --       tracks <track>.dialog / .reverb / .noise are created after the clip's track, the four
