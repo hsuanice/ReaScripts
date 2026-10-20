@@ -1,14 +1,11 @@
 --[[
 @description Project Manager - PM Timer: scene-aware work timer
-@version 26.1020.1454pre1
+@version 26.1020.1529pre1
 @author hsuanice
 @noindex  (kept in the repository as a backup; Project Manager is not offered on ReaPack for now)
 @changelog
-  - New: Dialog work types 'mic select' (pick the needed mic channels, rough levels, spot possible ADR) and 'check' (final overall check).
-  - New: names typed via 'custom' are remembered per work mode (shared by all projects) and listed in the menu next time; 'remove custom...' deletes one.
-  - New: every work type gets a color - fixed colors for mic select, check, scene, ME, PAN, ME+PAN; saved custom types get an automatic color from their name.
-  - Change: Switch Type now offers the same list as Start (was only editing / denoise / custom).
-  - Change: item colors are only written when they differ.
+  - Fix: work item names stacked an outdated project prefix after the project was renamed (e.g. 'POINT R5 dialog | POINT R5 dialog_001 | POINT R5 dialog | scene'); names are now rebuilt as current prefix + work type, which also repairs existing items.
+  - Fix: a work item renamed by hand was renamed back on the next start; the new name now becomes the item's work type (and its color follows).
 @about
   Scene-aware toggle timer for the hsuanice PM system.
   Uses gfx (no ReaImGui). 1-second display refresh via defer + time_precise.
@@ -1618,6 +1615,25 @@ end
 -- Rebuilds take names for all Scene Mode work items (those with P_EXT:SCENE_GUID).
 -- Project Mode items (no SCENE_GUID) are naturally skipped by the sg ~= "" check.
 -- Name format: "work_type" only (scene metadata lives in P_NOTES, not the name)
+-- A work item renamed by hand keeps its new name: the text after the last
+-- " | " (or the whole name) differing from P_EXT:WORK_TYPE becomes the new
+-- work type, and the item color follows. Returns the (possibly new) type.
+local function adopt_renamed_work_type(item, take, wt)
+  local cur  = r.GetTakeName(take)
+  local base = cur:match(".* | (.-)$") or cur
+  base = base:gsub("^%s+", ""):gsub("%s+$", "")
+  if base == "" or base == wt then return wt end
+  set_item_ext(item, "WORK_TYPE", base)
+  r.SetMediaItemInfo_Value(item, "C_LOCK", 0)
+  apply_color_from_type(item)
+  r.SetMediaItemInfo_Value(item, "C_LOCK", 1)
+  if get_item_guid(item) == S.work_item_guid then
+    S.work_type = base
+    set_extstate("ACTIVE_WORK_TYPE", base)
+  end
+  return base
+end
+
 local function sync_work_item_names()
   local scene_track = nil
   for i = 0, r.CountTracks(0) - 1 do
@@ -1646,6 +1662,9 @@ local function sync_work_item_names()
           local work_type = (wt ~= "") and wt or ""
           local item_take = r.GetActiveTake(item)
           if not item_take then item_take = r.AddTakeToMediaItem(item) end
+          if work_type ~= "" then
+            work_type = adopt_renamed_work_type(item, item_take, work_type)
+          end
           local cur_name = r.GetTakeName(item_take)
 
           -- Base name is just the work type (scene metadata is in P_NOTES)
@@ -1684,6 +1703,8 @@ end
 
 -- Apply project prefix to ALL work items that are missing it (Project Mode,
 -- AAP, and any item sync_work_item_names() doesn't touch).
+-- A name ending in its WORK_TYPE is rebuilt as "<current prefix><work type>",
+-- so an outdated prefix (project renamed) is replaced instead of stacked.
 local function sync_all_prefixes()
   local prefix = get_proj_prefix()
   if prefix == "" then return end
@@ -1696,8 +1717,14 @@ local function sync_all_prefixes()
       if wt ~= "" then
         local take = r.GetActiveTake(item)
         if take then
+          wt = adopt_renamed_work_type(item, take, wt)
           local cur  = r.GetTakeName(take)
-          local new  = apply_proj_prefix(cur)
+          local new
+          if cur == wt or cur:sub(-(#wt + 3)) == " | " .. wt then
+            new = prefix .. wt
+          else
+            new = apply_proj_prefix(cur)
+          end
           if new ~= cur then
             if changed == 0 then r.Undo_BeginBlock() end
             r.SetMediaItemInfo_Value(item, "C_LOCK", 0)
