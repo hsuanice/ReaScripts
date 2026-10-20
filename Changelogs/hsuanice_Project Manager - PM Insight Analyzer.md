@@ -7,6 +7,13 @@ PM Insight Analyzer
 
 **Removed from ReaPack** (2026-10-15) while it is a work in progress; the script stays in the repository (`@noindex`) as a backup.
 
+## 26.1020.1550pre1
+
+- New: the Dialog project report is now an HTML page saved next to the project file (insight_YYMMDD_HHMMSS.html) and opened in the web browser; the console only shows the file path.
+- New: efficiency (Film/hr, Source/hr) for every work type, e.g. mic select, check, custom types - not only editing and denoise. A work type's rate uses every scene that has that work type.
+- New: scene list with one row per scene (time per work type, done mark); click a scene to jump to its detail block.
+- Change: each scene's detail is a separate block with a table of only the work types done on it.
+
 ## 26.1012.1641pre1
 
 - Renamed to "Project Manager - PM Insight Analyzer" (was "PM_InsightAnalyzer") as part of the 2026-10-12 naming clean-up.

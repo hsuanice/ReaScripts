@@ -1,17 +1,21 @@
 --[[
 @description Project Manager - PM Insight Analyzer: work-time analysis of PM Timer logs (work in progress)
-@version 26.1012.1641pre1
+@version 26.1020.1550pre1
 @author hsuanice
 @noindex  (kept in the repository as a backup; not offered on ReaPack while it is a work in progress)
 @changelog
-  - Renamed to "Project Manager - PM Insight Analyzer" (was "PM_InsightAnalyzer") as part of the 2026-10-12 naming clean-up.
-  - Reinstall the package from ReaPack and re-assign your shortcuts / toolbar buttons.
+  - New: the Dialog project report is now an HTML page saved next to the project file (insight_YYMMDD_HHMMSS.html) and opened in the web browser; the console only shows the file path.
+  - New: efficiency (Film/hr, Source/hr) for every work type, e.g. mic select, check, custom types - not only editing and denoise. A work type's rate uses every scene that has that work type.
+  - New: scene list with one row per scene (time per work type, done mark); click a scene to jump to its detail block.
+  - Change: each scene's detail is a separate block with a table of only the work types done on it.
 @about
   Read-only analysis script. Auto-detects project type:
 
   Dialog Project Mode (Scene Cut track present):
     Combines scene data, EDL source lengths, and work log.
-    Outputs per-scene efficiency metrics and project-wide summary.
+    Outputs per-scene efficiency metrics and project-wide summary as an
+    HTML report (insight_YYMMDD_HHMMSS.html next to the project file),
+    opened in the web browser. Efficiency is computed for every work type.
     Tracks required: "Scene Cut", "EDL" (folder).
 
   Work Log Mode (no Scene Cut track):
@@ -494,8 +498,7 @@ local function analyze()
       end_tc            = fmt_tc(pos + len),
       length_sec        = len,
       source_length_sec = 0,   -- from EDL attribution
-      editing_sec       = 0,   -- work_type == "editing"
-      denoise_sec       = 0,   -- work_type == "denoise"
+      wt_sec            = {},  -- work_type → secs on this scene
       total_sec         = 0,   -- all scene work types combined
     }
 
@@ -607,6 +610,8 @@ local function analyze()
   local project_work_total = 0   -- Project Mode work (no SCENE_GUID)
   local daily_totals       = {}  -- "YYYY-MM-DD" → total work secs that day
   local wt_totals          = {}  -- work_type → total secs across all items
+  local wt_project         = {}  -- work_type → secs of Project Mode work (no scene)
+  local wt_color           = {}  -- work_type → native item color (first seen)
 
   for i = sc_num, total_tracks - 1 do
     local t        = r.GetTrack(0, i)
@@ -628,18 +633,21 @@ local function analyze()
           if dur_secs > 0 then
             wt_totals[wt] = (wt_totals[wt] or 0) + dur_secs
           end
+          if not wt_color[wt] then
+            local c = math.floor(r.GetMediaItemInfo_Value(item, "I_CUSTOMCOLOR"))
+            if c & 0x1000000 ~= 0 then wt_color[wt] = c end
+          end
 
           local _, sg = r.GetSetMediaItemInfo_String(item, "P_EXT:SCENE_GUID", "", false)
           if sg ~= "" and scene_map[sg] then
             -- Scene Mode: attribute to scene
             local sc = scene_map[sg]
-            if     wt == "editing" then sc.editing_sec = sc.editing_sec + dur_secs
-            elseif wt == "denoise" then sc.denoise_sec = sc.denoise_sec + dur_secs
-            end
-            sc.total_sec = sc.total_sec + dur_secs
+            sc.wt_sec[wt] = (sc.wt_sec[wt] or 0) + dur_secs
+            sc.total_sec  = sc.total_sec + dur_secs
           else
             -- Project Mode: no scene attribution
             project_work_total = project_work_total + dur_secs
+            wt_project[wt] = (wt_project[wt] or 0) + dur_secs
           end
         end
       end
@@ -652,145 +660,217 @@ local function analyze()
   -- 6. Project-level aggregates ──────────────────────────────────────────────
   local project_film_total_sec  = 0
   local project_scene_total_sec = 0   -- sum of all scene work (not project work)
+  local completed_film_sec      = 0   -- progress by B_MUTE (scene marked done)
+  local remaining_film_sec      = 0
 
-  -- Progress aggregates (by B_MUTE)
-  local completed_film_sec = 0
-  local remaining_film_sec = 0
-
-  -- Efficiency accumulators (done scenes only)
-  local done_editing_sec = 0
-  local done_denoise_sec = 0
-  local done_total_sec   = 0
-  local done_source_sec  = 0
+  -- Efficiency per work type: every scene that has work of that type counts
+  -- (its film and source length), whether or not the scene is marked done.
+  local eff = {}          -- work_type → { scenes, film, source, work }
+  local eff_total = { scenes = 0, film = 0, source = 0, work = 0 }
 
   for _, guid in ipairs(scene_order) do
     local sc = scene_map[guid]
     project_film_total_sec  = project_film_total_sec  + sc.length_sec
     project_scene_total_sec = project_scene_total_sec + sc.total_sec
-
     if sc.is_done then
       completed_film_sec = completed_film_sec + sc.length_sec
-      done_editing_sec   = done_editing_sec   + sc.editing_sec
-      done_denoise_sec   = done_denoise_sec   + sc.denoise_sec
-      done_total_sec     = done_total_sec     + sc.total_sec
-      done_source_sec    = done_source_sec    + sc.source_length_sec
     else
       remaining_film_sec = remaining_film_sec + sc.length_sec
+    end
+    for wt, secs in pairs(sc.wt_sec) do
+      local e = eff[wt]
+      if not e then e = { scenes = 0, film = 0, source = 0, work = 0 }; eff[wt] = e end
+      e.scenes = e.scenes + 1
+      e.film   = e.film   + sc.length_sec
+      e.source = e.source + sc.source_length_sec
+      e.work   = e.work   + secs
+    end
+    if sc.total_sec > 0 then
+      eff_total.scenes = eff_total.scenes + 1
+      eff_total.film   = eff_total.film   + sc.length_sec
+      eff_total.source = eff_total.source + sc.source_length_sec
+      eff_total.work   = eff_total.work   + sc.total_sec
     end
   end
 
   local grand_total = project_scene_total_sec + project_work_total
-
-  -- 7. Build console output ──────────────────────────────────────────────────
-  local lines = {}
-  local function out(s) table.insert(lines, s) end
-
-  -- ── Project Overview ─────────────────────────────────────────────────────
-  out("=== hsuanice PM — Insight Report ===")
-  out("")
-  out("Project Overview")
-  out("--------------------------------")
-  out("Total Film Length:   " .. fmt_dur(project_film_total_sec))
-  out("Total Source Length: " .. fmt_dur(project_source_total_sec))
-  if project_film_total_sec > 0 then
-    out("Overall Source Ratio: "
-      .. string.format("%d%%", math.floor(project_source_total_sec / project_film_total_sec * 100)))
-  else
-    out("Overall Source Ratio: N/A")
-  end
-  out("")
-  out("Total Scene Work:   " .. fmt_dur(project_scene_total_sec))
-  out("Total Project Work: " .. fmt_dur(project_work_total))
   local dl_avg, dl_used, dl_all = trimmed_daily_avg(daily_totals, 0.1)
-  out("Grand Total Work:   " .. fmt_dur(grand_total))
-  do
-    local wt_keys = {}
-    for k in pairs(wt_totals) do table.insert(wt_keys, k) end
-    table.sort(wt_keys, function(a, b) return (wt_totals[a] or 0) > (wt_totals[b] or 0) end)
-    for _, k in ipairs(wt_keys) do
-      out(string.format("  %-14s %s", k .. ":", fmt_dur(wt_totals[k])))
-    end
-  end
-  out("Working Days:       " .. dl_all)
-  out("Avg Daily Work:     " .. (dl_all > 0
-    and (fmt_dur(dl_avg) .. string.format("  (mid %d days, 10-90%%)", dl_used))
-    or "N/A"))
 
-  -- ── Progress ─────────────────────────────────────────────────────────────
-  out("")
-  out("Progress")
-  out("--------------------------------")
-  out("Completed Film:  " .. fmt_dur(completed_film_sec))
-  out("Remaining Film:  " .. fmt_dur(remaining_film_sec))
-  if project_film_total_sec > 0 then
-    out("Completion:      "
-      .. string.format("%d%%", math.floor(completed_film_sec / project_film_total_sec * 100)))
-  else
-    out("Completion:      N/A")
+  -- Work types in workflow order, then any other (custom) types A-Z
+  local TYPE_ORDER = { "mic select", "editing", "denoise", "scene", "ME", "PAN", "ME+PAN", "check" }
+  local types, seen = {}, {}
+  for _, t in ipairs(TYPE_ORDER) do
+    if wt_totals[t] then types[#types + 1] = t; seen[t] = true end
   end
+  local others = {}
+  for t in pairs(wt_totals) do if not seen[t] then others[#others + 1] = t end end
+  table.sort(others, function(a, b) return a:lower() < b:lower() end)
+  for _, t in ipairs(others) do types[#types + 1] = t end
+  local scene_types = {}   -- types with scene work (columns of the scene list)
+  for _, t in ipairs(types) do if eff[t] then scene_types[#scene_types + 1] = t end end
 
-  -- ── Efficiency ────────────────────────────────────────────────────────────
-  out("")
-  out("Efficiency")
-  out("--------------------------------")
-  if completed_film_sec <= 0 then
-    out("N/A (No completed scenes)")
-  else
-    out("Editing Film/hr:   " .. rate_or_na(completed_film_sec, done_editing_sec))
-    out("Editing Source/hr: " .. rate_or_na(done_source_sec,    done_editing_sec))
-    out("")
-    out("Denoise Film/hr:   " .. rate_or_na(completed_film_sec, done_denoise_sec))
-    out("Denoise Source/hr: " .. rate_or_na(done_source_sec,    done_denoise_sec))
-    out("")
-    out("Total Film/hr:     " .. rate_or_na(completed_film_sec, done_total_sec))
-    out("Total Source/hr:   " .. rate_or_na(done_source_sec,    done_total_sec))
+  -- 7. Build the HTML report ─────────────────────────────────────────────────
+  local function esc(v)
+    return (tostring(v):gsub("&", "&amp;"):gsub("<", "&lt;"):gsub(">", "&gt;"):gsub('"', "&quot;"))
+  end
+  local function pct(a, b)
+    if b <= 0 then return "N/A" end
+    return string.format("%d%%", math.floor(a / b * 100))
+  end
+  local function dur_or_dash(secs)
+    return (secs and secs > 0) and fmt_dur(secs) or "–"
+  end
+  local function type_label(t)
+    local c = wt_color[t]
+    if not c then return esc(t) end
+    local cr, cg, cb = r.ColorFromNative(c & 0xFFFFFF)
+    return string.format('<span class="dot" style="background:rgb(%d,%d,%d)"></span>%s', cr, cg, cb, esc(t))
   end
 
-  -- ── Per Scene ─────────────────────────────────────────────────────────────
-  out("")
-  out("----------------------------------------")
-  out("Per Scene")
-  out("----------------------------------------")
+  local _, proj_path = r.EnumProjects(-1)
+  local proj_name = (proj_path or ""):match("([^/\\]+)$") or ""
+  proj_name = proj_name:gsub("%.[Rr][Pp][Pp]$", "")
+  if proj_name == "" then proj_name = "(unsaved project)" end
 
-  for _, guid in ipairs(scene_order) do
+  local h = {}
+  local function out(s) h[#h + 1] = s end
+
+  out([[<!doctype html><html><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PM Insight Report</title>
+<style>
+:root{--bg:#fafafa;--fg:#1d1d1f;--mut:#6e6e73;--line:#d2d2d7;--card:#fff;--head:#f0f0f3;--acc:#3b6fd8}
+@media (prefers-color-scheme:dark){:root{--bg:#1b1b1d;--fg:#e8e8ea;--mut:#9a9aa0;--line:#3a3a3f;--card:#242427;--head:#2d2d31;--acc:#7da2ff}}
+body{margin:0;padding:24px 16px 80px;background:var(--bg);color:var(--fg);font:14px/1.45 -apple-system,"Segoe UI",Helvetica,Arial,sans-serif}
+main{max-width:1200px;margin:0 auto}
+h1{font-size:22px;margin:0 0 2px}h2{font-size:17px;margin:32px 0 10px;padding-bottom:6px;border-bottom:2px solid var(--line)}
+.sub{color:var(--mut);margin-bottom:20px}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:10px}
+.kv{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:10px 12px}
+.kv b{display:block;font-size:12px;color:var(--mut);font-weight:500}.kv span{font:600 16px ui-monospace,Menlo,monospace}
+.wrap{overflow-x:auto}
+table{border-collapse:collapse;background:var(--card);border:1px solid var(--line);border-radius:8px;min-width:100%}
+th,td{padding:6px 10px;border-bottom:1px solid var(--line);text-align:right;white-space:nowrap}
+th{background:var(--head);font-size:12px;color:var(--mut);font-weight:600;position:sticky;top:0}
+td.l,th.l{text-align:left}td{font-family:ui-monospace,Menlo,monospace;font-size:13px}
+tr.total td{font-weight:700}tr.idle td{color:var(--mut)}
+a{color:var(--acc);text-decoration:none}a:hover{text-decoration:underline}
+.dot{display:inline-block;width:10px;height:10px;border-radius:3px;margin-right:6px;vertical-align:baseline}
+.scene{background:var(--card);border:1px solid var(--line);border-left:5px solid var(--acc);border-radius:8px;padding:12px 16px;margin:18px 0;scroll-margin-top:12px}
+.scene h3{margin:0 0 4px;font-size:16px}.scene .meta{color:var(--mut);font-family:ui-monospace,Menlo,monospace;font-size:13px;margin-bottom:10px}
+.scene table{border:none}.done{color:#2e9b55;font-weight:700}
+.note{color:var(--mut);font-size:12px;margin-top:6px}
+.top{position:fixed;right:16px;bottom:16px;background:var(--card);border:1px solid var(--line);border-radius:20px;padding:6px 12px}
+</style></head><body><main>]])
+  out('<h1 id="top">PM Insight Report</h1>')
+  out('<div class="sub">' .. esc(proj_name) .. ' · ' .. os.date("%Y-%m-%d %H:%M") .. '</div>')
+
+  -- Overview
+  out('<h2>Project Overview</h2><div class="grid">')
+  local function kv(k, v) out('<div class="kv"><b>' .. k .. '</b><span>' .. v .. '</span></div>') end
+  kv("Total Film Length", fmt_dur(project_film_total_sec))
+  kv("Total Source Length", fmt_dur(project_source_total_sec))
+  kv("Overall Source Ratio", pct(project_source_total_sec, project_film_total_sec))
+  kv("Grand Total Work", fmt_dur(grand_total))
+  kv("Scene Work", fmt_dur(project_scene_total_sec))
+  kv("Project Work (no scene)", fmt_dur(project_work_total))
+  kv("Working Days", tostring(dl_all))
+  kv("Avg Daily Work", dl_all > 0 and (fmt_dur(dl_avg) .. string.format(" <small>(mid %d)</small>", dl_used)) or "N/A")
+  kv("Completed Film", fmt_dur(completed_film_sec))
+  kv("Remaining Film", fmt_dur(remaining_film_sec))
+  kv("Completion", pct(completed_film_sec, project_film_total_sec))
+  out('</div>')
+
+  -- Efficiency per work type
+  out('<h2>Efficiency by Work Type</h2><div class="wrap"><table>')
+  out('<tr><th class="l">Work</th><th>Scenes</th><th>Film</th><th>Source</th><th>Scene Time</th>'
+    .. '<th>Film/hr</th><th>Source/hr</th><th>Project Time</th><th>Total Time</th></tr>')
+  for _, t in ipairs(types) do
+    local e = eff[t] or { scenes = 0, film = 0, source = 0, work = 0 }
+    out(string.format('<tr><td class="l">%s</td><td>%d</td><td>%s</td><td>%s</td><td>%s</td>'
+      .. '<td>%s</td><td>%s</td><td>%s</td><td>%s</td></tr>',
+      type_label(t), e.scenes, dur_or_dash(e.film), dur_or_dash(e.source), dur_or_dash(e.work),
+      e.work > 0 and rate_or_na(e.film, e.work) or "–", e.work > 0 and rate_or_na(e.source, e.work) or "–",
+      dur_or_dash(wt_project[t]), fmt_dur(wt_totals[t])))
+  end
+  out(string.format('<tr class="total"><td class="l">Total</td><td>%d</td><td>%s</td><td>%s</td><td>%s</td>'
+    .. '<td>%s</td><td>%s</td><td>%s</td><td>%s</td></tr>',
+    eff_total.scenes, dur_or_dash(eff_total.film), dur_or_dash(eff_total.source), dur_or_dash(eff_total.work),
+    rate_or_na(eff_total.film, eff_total.work), rate_or_na(eff_total.source, eff_total.work),
+    dur_or_dash(project_work_total), fmt_dur(grand_total)))
+  out('</table></div>')
+  out('<div class="note">Film/hr and Source/hr: film / source length of every scene that has this work type, '
+    .. 'per hour of that work. Project Time (work without a selected scene) is not included in the rates.</div>')
+
+  -- Scene list (one row per scene)
+  out('<h2>Scenes</h2><div class="wrap"><table>')
+  local hdr = '<tr><th>#</th><th class="l">Scene</th><th class="l">Range</th><th>Film</th><th>Source</th><th>Ratio</th>'
+  for _, t in ipairs(scene_types) do hdr = hdr .. '<th>' .. type_label(t) .. '</th>' end
+  out(hdr .. '<th>Total</th><th>Film/hr</th><th>Source/hr</th><th>Done</th></tr>')
+  for idx, guid in ipairs(scene_order) do
     local sc = scene_map[guid]
+    local name = esc(sc.name ~= "" and sc.name or "(unnamed)")
+    if sc.total_sec > 0 then name = '<a href="#s' .. idx .. '">' .. name .. '</a>' end
+    local row = string.format('<tr%s><td>%d</td><td class="l">%s</td><td class="l">%s – %s</td><td>%s</td><td>%s</td><td>%s</td>',
+      sc.total_sec > 0 and "" or ' class="idle"', idx, name, sc.start_tc, sc.end_tc,
+      fmt_dur(sc.length_sec), fmt_dur(sc.source_length_sec), pct(sc.source_length_sec, sc.length_sec))
+    for _, t in ipairs(scene_types) do row = row .. '<td>' .. dur_or_dash(sc.wt_sec[t]) .. '</td>' end
+    row = row .. string.format('<td>%s</td><td>%s</td><td>%s</td><td>%s</td></tr>',
+      dur_or_dash(sc.total_sec),
+      sc.total_sec > 0 and rate_or_na(sc.length_sec, sc.total_sec) or "–",
+      sc.total_sec > 0 and rate_or_na(sc.source_length_sec, sc.total_sec) or "–",
+      sc.is_done and '<span class="done">✓</span>' or "")
+    out(row)
+  end
+  out('</table></div>')
 
-    -- Skip scenes with no work at all
+  -- Per scene detail
+  out('<h2>Per Scene</h2>')
+  for idx, guid in ipairs(scene_order) do
+    local sc = scene_map[guid]
     if sc.total_sec > 0 then
-      out("")
-      out("Scene: " .. (sc.name ~= "" and sc.name or "(unnamed)"))
-      out("Range: " .. sc.start_tc .. " - " .. sc.end_tc)
-      out("")
-      out("Film Length:   " .. fmt_dur(sc.length_sec))
-      out("Source Length: " .. fmt_dur(sc.source_length_sec))
-      if sc.length_sec > 0 then
-        out("Source Ratio:  "
-          .. string.format("%d%%", math.floor(sc.source_length_sec / sc.length_sec * 100)))
-      else
-        out("Source Ratio:  N/A")
+      out('<section class="scene" id="s' .. idx .. '">')
+      out('<h3>#' .. idx .. ' · Scene ' .. esc(sc.name ~= "" and sc.name or "(unnamed)")
+        .. (sc.is_done and ' <span class="done">✓ done</span>' or '') .. '</h3>')
+      out('<div class="meta">' .. sc.start_tc .. ' – ' .. sc.end_tc
+        .. ' · Film ' .. fmt_dur(sc.length_sec) .. ' · Source ' .. fmt_dur(sc.source_length_sec)
+        .. ' · Ratio ' .. pct(sc.source_length_sec, sc.length_sec) .. '</div>')
+      out('<div class="wrap"><table><tr><th class="l">Work</th><th>Time</th><th>Film/hr</th><th>Source/hr</th></tr>')
+      for _, t in ipairs(scene_types) do
+        local secs = sc.wt_sec[t]
+        if secs and secs > 0 then
+          out(string.format('<tr><td class="l">%s</td><td>%s</td><td>%s</td><td>%s</td></tr>', type_label(t),
+            fmt_dur(secs), rate_or_na(sc.length_sec, secs), rate_or_na(sc.source_length_sec, secs)))
+        end
       end
-      out("")
-      out("Editing Time:     " .. (sc.editing_sec > 0 and fmt_dur(sc.editing_sec) or "N/A"))
-      out("Denoise Time:     " .. (sc.denoise_sec > 0 and fmt_dur(sc.denoise_sec) or "N/A"))
-      out("Total Scene Time: " .. fmt_dur(sc.total_sec))
-      out("")
-      out("Source Throughput")
-      out("Editing Source/hr: " .. rate_or_na(sc.source_length_sec, sc.editing_sec))
-      out("Denoise Source/hr: " .. rate_or_na(sc.source_length_sec, sc.denoise_sec))
-      out("Total Source/hr:   " .. rate_or_na(sc.source_length_sec, sc.total_sec))
-      out("")
-      out("Film Throughput")
-      out("Editing Film/hr: " .. rate_or_na(sc.length_sec, sc.editing_sec))
-      out("Denoise Film/hr: " .. rate_or_na(sc.length_sec, sc.denoise_sec))
-      out("Total Film/hr:   " .. rate_or_na(sc.length_sec, sc.total_sec))
+      out(string.format('<tr class="total"><td class="l">Total</td><td>%s</td><td>%s</td><td>%s</td></tr>',
+        fmt_dur(sc.total_sec), rate_or_na(sc.length_sec, sc.total_sec), rate_or_na(sc.source_length_sec, sc.total_sec)))
+      out('</table></div></section>')
     end
   end
+  out('<a class="top" href="#top">↑ Top</a></main></body></html>')
 
-  out("")
+  -- 8. Save next to the project file and open it in the browser ─────────────
+  local dir = (proj_path or ""):match("^(.*)[/\\]")
+  if not dir or dir == "" then dir = r.GetProjectPath("") end
+  local sep  = r.GetOS():match("^Win") and "\\" or "/"
+  local file = dir .. sep .. "insight_" .. os.date("%y%m%d_%H%M%S") .. ".html"
+  local fh = io.open(file, "w")
+  if not fh then
+    r.ShowMessageBox("Cannot write the report:\n" .. file, "PM Insight Analyzer", 0)
+    return
+  end
+  fh:write(table.concat(h, "\n"))
+  fh:close()
 
-  -- Write to console (clear first, then output)
-  r.ShowConsoleMsg("")
-  r.ShowConsoleMsg(table.concat(lines, "\n") .. "\n")
+  if r.CF_ShellExecute then
+    r.CF_ShellExecute(file)
+  elseif sep == "\\" then
+    os.execute('start "" "' .. file .. '"')
+  else
+    os.execute('open "' .. file .. '"')
+  end
+  r.ShowConsoleMsg("PM Insight report saved:\n" .. file .. "\n")
 end
 
 analyze()
