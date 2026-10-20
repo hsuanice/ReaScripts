@@ -1,10 +1,10 @@
 --[[
 @description Project Manager - PM Insight Analyzer: work-time analysis of PM Timer logs (work in progress)
-@version 26.1020.1550pre1
+@version 26.1020.1601pre1
 @author hsuanice
 @noindex  (kept in the repository as a backup; not offered on ReaPack while it is a work in progress)
 @changelog
-  - New: the Dialog project report is now an HTML page saved next to the project file (insight_YYMMDD_HHMMSS.html) and opened in the web browser; the console only shows the file path.
+  - New: the Dialog project report is now an HTML page next to the project file ('<project name> - PM Insight.html', replaced on every run) and opened in the web browser; the console only shows the file path.
   - New: efficiency (Film/hr, Source/hr) for every work type, e.g. mic select, check, custom types - not only editing and denoise. A work type's rate uses every scene that has that work type.
   - New: scene list with one row per scene (time per work type, done mark); click a scene to jump to its detail block.
   - Change: each scene's detail is a separate block with a table of only the work types done on it.
@@ -14,8 +14,8 @@
   Dialog Project Mode (Scene Cut track present):
     Combines scene data, EDL source lengths, and work log.
     Outputs per-scene efficiency metrics and project-wide summary as an
-    HTML report (insight_YYMMDD_HHMMSS.html next to the project file),
-    opened in the web browser. Efficiency is computed for every work type.
+    HTML report ("<project name> - PM Insight.html" next to the project file,
+    replaced on every run), opened in the web browser. Efficiency is computed for every work type.
     Tracks required: "Scene Cut", "EDL" (folder).
 
   Work Log Mode (no Scene Cut track):
@@ -851,10 +851,22 @@ a{color:var(--acc);text-decoration:none}a:hover{text-decoration:underline}
   out('<a class="top" href="#top">↑ Top</a></main></body></html>')
 
   -- 8. Save next to the project file and open it in the browser ─────────────
+  --    One report per project, overwritten on every run.
   local dir = (proj_path or ""):match("^(.*)[/\\]")
   if not dir or dir == "" then dir = r.GetProjectPath("") end
   local sep  = r.GetOS():match("^Win") and "\\" or "/"
-  local file = dir .. sep .. "insight_" .. os.date("%y%m%d_%H%M%S") .. ".html"
+  local base = (proj_path and proj_path ~= "") and proj_name or "Unsaved Project"
+  local file = dir .. sep .. base .. " - PM Insight.html"
+
+  -- Remove timestamped reports from earlier versions (insight_YYMMDD_HHMMSS.html)
+  local old_reports, k = {}, 0
+  while true do
+    local fn = r.EnumerateFiles(dir, k)
+    if not fn then break end
+    if fn:match("^insight_%d%d%d%d%d%d_%d%d%d%d%d%d%.html$") then old_reports[#old_reports + 1] = fn end
+    k = k + 1
+  end
+  for _, fn in ipairs(old_reports) do os.remove(dir .. sep .. fn) end
   local fh = io.open(file, "w")
   if not fh then
     r.ShowMessageBox("Cannot write the report:\n" .. file, "PM Insight Analyzer", 0)
