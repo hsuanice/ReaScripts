@@ -7,7 +7,7 @@ PM Timer - Scene-aware Work Timer
 
 **Removed from ReaPack** (2026-10-15) together with PM Insight Analyzer; the script stays in the repository (`@noindex`) as a backup.
 
-## 26.1020.1529pre1
+## 26.1020.1529
 
 - Fix: work item names stacked an outdated project prefix after the project was renamed (e.g. 'POINT R5 dialog | POINT R5 dialog_001 | POINT R5 dialog | scene'); names are now rebuilt as current prefix + work type, which also repairs existing items.
 - Fix: a work item renamed by hand was renamed back on the next start; the new name now becomes the item's work type (and its color follows).
