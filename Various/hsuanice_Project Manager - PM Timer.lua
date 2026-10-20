@@ -1,10 +1,14 @@
 --[[
 @description Project Manager - PM Timer: scene-aware work timer
-@version 26.1016.1013
+@version 26.1020.1454pre1
 @author hsuanice
 @noindex  (kept in the repository as a backup; Project Manager is not offered on ReaPack for now)
 @changelog
-  - Fix: a scene's Shots count was often 1 too high - a Picture Cut shot that only touches the scene edge (starts where the scene ends) was counted; a shot must now overlap the scene by more than half a frame.
+  - New: Dialog work types 'mic select' (pick the needed mic channels, rough levels, spot possible ADR) and 'check' (final overall check).
+  - New: names typed via 'custom' are remembered per work mode (shared by all projects) and listed in the menu next time; 'remove custom...' deletes one.
+  - New: every work type gets a color - fixed colors for mic select, check, scene, ME, PAN, ME+PAN; saved custom types get an automatic color from their name.
+  - Change: Switch Type now offers the same list as Start (was only editing / denoise / custom).
+  - Change: item colors are only written when they differ.
 @about
   Scene-aware toggle timer for the hsuanice PM system.
   Uses gfx (no ReaImGui). 1-second display refresh via defer + time_precise.
@@ -45,7 +49,15 @@ local WORK_COLORS = {
   ["pre-prod"]      = {255, 140, 0},     -- Orange (legacy)
   ["pre-production"] = {255, 140, 0},     -- Orange
   wrap             = {100, 220, 255},   -- Light blue
+  ["mic select"]   = {150, 80, 255},    -- Purple
+  check            = {0, 150, 130},     -- Teal
+  scene            = {255, 170, 80},    -- Light orange
+  ME               = {80, 140, 255},    -- Sky blue
+  PAN              = {255, 120, 170},   -- Pink
+  ["ME+PAN"]       = {140, 200, 80},    -- Olive green
 }
+-- Work types without an entry above (saved custom types...)
+-- get an automatic color derived from their name: same name = same color.
 
 -- ── Constants ──────────────────────────────────────────────────────────────
 local NS                = "hsuanice_PM"
@@ -56,7 +68,6 @@ local WIN_W, WIN_H           = 560, 140
 local BYTES_PER_SECOND       = 144000
 local BYTES_PER_GB           = 1000000000
 local WORK_TYPES          = { "pre-production", "wrap" }
-local SWITCH_TYPES        = { "editing", "denoise", "custom" }
 local MODE_TYPES          = { "Dialog", "AAP", "Conform" }
 local AAP_GENERAL_TYPES   = { "pre-production", "wrap", "custom" }   -- used when no folder is selected in AAP mode
 local AAP_FOLDER_DEFAULT_TYPE = "aap"
@@ -193,12 +204,95 @@ end
 
 local function get_work_types_for_mode()
   if S.work_mode == "Dialog" then
-    return { "editing", "denoise", "scene", "ME", "PAN", "ME+PAN", "custom" }
+    return { "mic select", "editing", "denoise", "scene", "ME", "PAN", "ME+PAN", "check", "custom" }
   end
   if S.work_mode == "Conform" then
     return { "conform", "picture cut", "subtitle", "custom" }
   end
   return WORK_TYPES
+end
+
+-- ── Saved custom work types ─────────────────────────────────────────────────
+-- Every name typed via "custom" is remembered per work mode (global ExtState,
+-- shared by all projects) and offered in the menu next time, so names stay
+-- consistent. "remove custom..." deletes a saved name.
+local CUSTOM_REMOVE_LABEL = "remove custom..."
+
+local function custom_types_key()
+  return "CUSTOM_TYPES_" .. ((S.work_mode ~= "" and S.work_mode) or "Dialog")
+end
+
+local function get_custom_types()
+  local list = {}
+  for name in (r.GetExtState(NS, custom_types_key()) or ""):gmatch("[^|]+") do
+    list[#list + 1] = name
+  end
+  return list
+end
+
+local function set_custom_types(list)
+  r.SetExtState(NS, custom_types_key(), table.concat(list, "|"), true)
+end
+
+-- gfx.showmenu treats "|" as a separator and a leading ! # > < as flags.
+local function clean_custom_name(name)
+  name = (name or ""):gsub("|", " "):gsub("^[%s!#<>]+", ""):gsub("%s+$", "")
+  return name
+end
+
+-- Shows the work type menu for `builtins` (a list ending with "custom"), with
+-- the saved custom types inserted before "custom". Returns the chosen type,
+-- or nil when cancelled.
+local function choose_work_type(builtins)
+  local saved = get_custom_types()
+  local items, parts = {}, {}
+  for _, t in ipairs(builtins) do
+    if t == "custom" then
+      if #saved > 0 then
+        parts[#parts] = parts[#parts] .. "|"   -- separator before saved types
+        for _, c in ipairs(saved) do
+          items[#items + 1] = c; parts[#parts + 1] = c
+        end
+        parts[#parts] = parts[#parts] .. "|"   -- separator after saved types
+      end
+    end
+    items[#items + 1] = t; parts[#parts + 1] = t
+  end
+  if #saved > 0 then
+    items[#items + 1] = CUSTOM_REMOVE_LABEL; parts[#parts + 1] = CUSTOM_REMOVE_LABEL
+  end
+
+  gfx.x, gfx.y = 10, 60
+  local choice = gfx.showmenu(table.concat(parts, "|"))
+  local picked = items[choice]
+  if not picked then return nil end
+
+  if picked == CUSTOM_REMOVE_LABEL then
+    gfx.x, gfx.y = 10, 60
+    local rm = gfx.showmenu("#Remove saved custom type:||" .. table.concat(saved, "|"))
+    if rm >= 2 and saved[rm - 1] then
+      table.remove(saved, rm - 1)
+      set_custom_types(saved)
+    end
+    return nil
+  end
+
+  if picked == "custom" then
+    local ok, val = r.GetUserInputs("Custom Work Type", 1, "Work type:,extrawidth=100", "")
+    if not ok then return nil end
+    val = clean_custom_name(val)
+    if val == "" then return nil end
+    local known = false
+    for _, t in ipairs(builtins) do if t == val then known = true end end
+    for _, c in ipairs(saved) do if c == val then known = true end end
+    if not known then
+      saved[#saved + 1] = val
+      set_custom_types(saved)
+    end
+    return val
+  end
+
+  return picked
 end
 
 local function reset_state()
@@ -466,9 +560,19 @@ local function apply_color_from_type(item)
   if not ok or work_type == "" then return end
 
   local c = WORK_COLORS[work_type]
-  if not c then return end
+  if not c then
+    -- Automatic color: hue from a hash of the name (stable across sessions)
+    local h = 0
+    for i = 1, #work_type do h = (h * 31 + work_type:byte(i)) % 360 end
+    local f = (h % 60) / 60
+    local v, lo = 235, 70
+    local up, dn = math.floor(lo + (v - lo) * f), math.floor(v - (v - lo) * f)
+    local seg = math.floor(h / 60)
+    c = ({ {v, up, lo}, {dn, v, lo}, {lo, v, up}, {lo, dn, v}, {up, lo, v}, {v, lo, dn} })[seg + 1]
+  end
 
   local color = reaper.ColorToNative(c[1], c[2], c[3]) | 0x1000000
+  if reaper.GetMediaItemInfo_Value(item, "I_CUSTOMCOLOR") == color then return end
   reaper.SetMediaItemInfo_Value(item, "I_CUSTOMCOLOR", color)
 end
 
@@ -783,15 +887,8 @@ local function action_start_aap(chain)
 
   if not stats then
     -- No folder: general pre-production work → show type menu
-    gfx.x, gfx.y = 10, 60
-    local choice = gfx.showmenu(table.concat(AAP_GENERAL_TYPES, "|"))
-    if choice == 0 then return end
-    local selected_type = AAP_GENERAL_TYPES[choice]
-    if selected_type == "custom" then
-      local ok, val = r.GetUserInputs("Custom Work Type", 1, "Work type:", "")
-      if not ok or val == "" then return end
-      selected_type = val
-    end
+    local selected_type = choose_work_type(AAP_GENERAL_TYPES)
+    if not selected_type then return end
     start_simple_aap_work(selected_type, chain)
     return
   end
@@ -1354,19 +1451,8 @@ local function action_start()
   end
 
   -- 3. Choose work type
-  local work_type
-  do
-    gfx.x, gfx.y = 10, 60
-    local work_types = get_work_types_for_mode()
-    local choice = gfx.showmenu(table.concat(work_types, "|"))
-    if choice == 0 then return end
-    work_type = work_types[choice]
-    if work_type == "custom" then
-      local ok, val = r.GetUserInputs("Custom Work Type", 1, "Work type:", "")
-      if not ok or val == "" then return end
-      work_type = val
-    end
-  end
+  local work_type = choose_work_type(get_work_types_for_mode())
+  if not work_type then return end
 
   -- 4. Item name = just work_type (scene metadata goes into P_NOTES)
   local item_name = work_type
@@ -1519,16 +1605,10 @@ local AAP_NEW_JOB_MENU = { "pre-production", "new day", "wrap", "custom" }
 local function action_aap_new_job()
   local end_time, end_pos = finish_aap_item("new_job")
   local chain = end_time and { end_time = end_time, end_pos = end_pos } or nil
-  gfx.x, gfx.y = 10, 60
-  local choice = gfx.showmenu(table.concat(AAP_NEW_JOB_MENU, "|"))
-  if choice == 0 then return end
-  local sel = AAP_NEW_JOB_MENU[choice]
+  local sel = choose_work_type(AAP_NEW_JOB_MENU)
+  if not sel then return end
   if sel == "new day" then
     action_start_aap(chain)
-  elseif sel == "custom" then
-    local ok, val = r.GetUserInputs("Custom Work Type", 1, "Work type:", "")
-    if not ok or val == "" then return end
-    start_simple_aap_work(val, chain)
   else
     start_simple_aap_work(sel, chain)
   end
@@ -1772,17 +1852,7 @@ local function action_switch_type()
   local end_time, end_pos = finish_current_item("switch", true)
   local now_clock = os.time()
 
-  gfx.x, gfx.y = 10, 60
-  local choice = gfx.showmenu(table.concat(SWITCH_TYPES, "|"))
-  local new_type = SWITCH_TYPES[choice] or S.work_type
-  if new_type == "custom" then
-    local ok, val = r.GetUserInputs("Custom Work Type", 1, "Work type:", "")
-    if ok and val ~= "" then
-      new_type = val
-    else
-      new_type = S.work_type
-    end
-  end
+  local new_type = choose_work_type(get_work_types_for_mode()) or S.work_type
 
   -- Item name = just new_type; scene metadata goes into P_NOTES
   local item_name = new_type
@@ -1841,17 +1911,7 @@ local function action_switch_scene()
   local end_time, end_pos = finish_current_item("switch_scene", true)
   local now_clock = os.time()
 
-  gfx.x, gfx.y = 10, 60
-  local choice = gfx.showmenu(table.concat(SWITCH_TYPES, "|"))
-  local new_type = SWITCH_TYPES[choice] or S.work_type
-  if new_type == "custom" then
-    local ok, val = r.GetUserInputs("Custom Work Type", 1, "Work type:", "")
-    if ok and val ~= "" then
-      new_type = val
-    else
-      new_type = S.work_type
-    end
-  end
+  local new_type = choose_work_type(get_work_types_for_mode()) or S.work_type
 
   -- Read new scene's metadata from Scene Cut note (owned by Scene Analyzer).
   local item_note = ""
@@ -2493,16 +2553,8 @@ local function action_add_record()
   end
 
   -- Work type via menu
-  gfx.x, gfx.y = 10, 60
-  local work_types = get_work_types_for_mode()
-  local choice = gfx.showmenu(table.concat(work_types, "|"))
-  if choice == 0 then return end
-  local work_type = work_types[choice]
-  if work_type == "custom" then
-    local ok2, val = r.GetUserInputs("Custom Work Type", 1, "Work type:", "")
-    if not ok2 or val == "" then return end
-    work_type = val
-  end
+  local work_type = choose_work_type(get_work_types_for_mode())
+  if not work_type then return end
 
   -- Input dialog
   local ok, raw = r.GetUserInputs("Add Record", 5,

@@ -7,6 +7,14 @@ PM Timer - Scene-aware Work Timer
 
 **Removed from ReaPack** (2026-10-15) together with PM Insight Analyzer; the script stays in the repository (`@noindex`) as a backup.
 
+## 26.1020.1454pre1
+
+- New: Dialog work types 'mic select' (pick the needed mic channels, rough levels, spot possible ADR) and 'check' (final overall check).
+- New: names typed via 'custom' are remembered per work mode (shared by all projects) and listed in the menu next time; 'remove custom...' deletes one.
+- New: every work type gets a color - fixed colors for mic select, check, scene, ME, PAN, ME+PAN; saved custom types get an automatic color from their name.
+- Change: Switch Type now offers the same list as Start (was only editing / denoise / custom).
+- Change: item colors are only written when they differ.
+
 ## 26.1016.1013
 
 - Fix: a scene's Shots count was often 1 too high - a Picture Cut shot that only touches the scene edge (starts where the scene ends) was counted; a shot must now overlap the scene by more than half a frame.
