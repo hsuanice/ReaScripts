@@ -7,6 +7,11 @@ PM Insight Analyzer
 
 **Removed from ReaPack** (2026-10-15) while it is a work in progress; the script stays in the repository (`@noindex`) as a backup.
 
+## 26.1023.1606pre1
+
+- New: Source/hr per work type uses the source that work starts from - EDL for mic select, Mic Selected ('Sel Len') for editing, Edited ('Edit Len') for denoise; EDL when that stage is missing.
+- New: Selected / Edited columns in the scene list and in each scene's detail.
+
 ## 26.1023.1405pre1
 
 - New: work items marked by PM Timer > Link Split Scenes have their time shared between the scene pieces by source length (film length if there is no source length).

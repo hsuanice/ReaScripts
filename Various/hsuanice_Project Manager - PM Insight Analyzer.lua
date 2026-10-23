@@ -1,10 +1,11 @@
 --[[
 @description Project Manager - PM Insight Analyzer: work-time analysis of PM Timer logs (work in progress)
-@version 26.1023.1405pre1
+@version 26.1023.1606pre1
 @author hsuanice
 @noindex  (kept in the repository as a backup; not offered on ReaPack while it is a work in progress)
 @changelog
-  - New: work items marked by PM Timer > Link Split Scenes have their time shared between the scene pieces by source length (film length if there is no source length).
+  - New: Source/hr per work type uses the source that work starts from - EDL for mic select, Mic Selected ('Sel Len') for editing, Edited ('Edit Len') for denoise; EDL when that stage is missing.
+  - New: Selected / Edited columns in the scene list and in each scene's detail.
 @about
   Read-only analysis script. Auto-detects project type:
 
@@ -584,6 +585,11 @@ local function analyze()
     if guid and scene_map[guid] then
       local _, notes = r.GetSetMediaItemInfo_String(item, "P_NOTES", "", false)
       if notes and notes ~= "" then
+        -- Later source stages (PM Timer, only when the folders exist)
+        for key, field in pairs({ Sel = "sel_len_sec", Edit = "edit_len_sec" }) do
+          local h, m, sec = notes:match(key .. "%sLen%s*:%s*(%d+):(%d+):(%d+)")
+          if h then scene_map[guid][field] = tonumber(h)*3600 + tonumber(m)*60 + tonumber(sec) end
+        end
         local src_len_str = notes:match("Src%sLen%s*:%s*([%d:]+)")
         if src_len_str then
           -- parse_timestr mis-handles HH:MM:SS:FF; extract H/M/S explicitly
@@ -683,8 +689,22 @@ local function analyze()
   local completed_film_sec      = 0   -- progress by B_MUTE (scene marked done)
   local remaining_film_sec      = 0
 
+  -- Source a work type starts from: mic select works on the EDL source,
+  -- editing on what is left in "Mic Selected", denoise on "Edited". Falls back
+  -- to the EDL source when the scene has no such stage.
+  local function input_source(sc, wt)
+    if wt == "editing" and sc.sel_len_sec then return sc.sel_len_sec end
+    if wt == "denoise" and sc.edit_len_sec then return sc.edit_len_sec end
+    return sc.source_length_sec
+  end
+  local has_sel, has_edit = false, false
+  for _, sc in ipairs(scenes) do
+    if sc.sel_len_sec  then has_sel  = true end
+    if sc.edit_len_sec then has_edit = true end
+  end
+
   -- Efficiency per work type: every scene that has work of that type counts
-  -- (its film and source length), whether or not the scene is marked done.
+  -- (its film and input source length), whether or not the scene is marked done.
   local eff = {}          -- work_type → { scenes, film, source, work }
   local eff_total = { scenes = 0, film = 0, source = 0, work = 0 }
 
@@ -702,7 +722,7 @@ local function analyze()
       if not e then e = { scenes = 0, film = 0, source = 0, work = 0 }; eff[wt] = e end
       e.scenes = e.scenes + 1
       e.film   = e.film   + sc.length_sec
-      e.source = e.source + sc.source_length_sec
+      e.source = e.source + input_source(sc, wt)
       e.work   = e.work   + secs
     end
     if sc.total_sec > 0 then
@@ -820,11 +840,14 @@ a{color:var(--acc);text-decoration:none}a:hover{text-decoration:underline}
     dur_or_dash(project_work_total), fmt_dur(grand_total)))
   out('</table></div>')
   out('<div class="note">Film/hr and Source/hr: film / source length of every scene that has this work type, '
-    .. 'per hour of that work. Project Time (work without a selected scene) is not included in the rates.</div>')
+    .. 'per hour of that work. Source = what the work starts from: EDL for mic select, Mic Selected for editing, '
+    .. 'Edited for denoise (EDL when that stage is missing). '
+    .. 'Project Time (work without a selected scene) is not included in the rates.</div>')
 
   -- Scene list (one row per scene)
   out('<h2>Scenes</h2><div class="wrap"><table>')
   local hdr = '<tr><th>#</th><th class="l">Scene</th><th class="l">Range</th><th>Film</th><th>Source</th><th>Ratio</th>'
+    .. (has_sel and '<th>Selected</th>' or '') .. (has_edit and '<th>Edited</th>' or '')
   for _, t in ipairs(scene_types) do hdr = hdr .. '<th>' .. type_label(t) .. '</th>' end
   out(hdr .. '<th>Total</th><th>Film/hr</th><th>Source/hr</th><th>Done</th></tr>')
   for idx, guid in ipairs(scene_order) do
@@ -834,6 +857,8 @@ a{color:var(--acc);text-decoration:none}a:hover{text-decoration:underline}
     local row = string.format('<tr%s><td>%d</td><td class="l">%s</td><td class="l">%s – %s</td><td>%s</td><td>%s</td><td>%s</td>',
       sc.total_sec > 0 and "" or ' class="idle"', idx, name, sc.start_tc, sc.end_tc,
       fmt_dur(sc.length_sec), fmt_dur(sc.source_length_sec), pct(sc.source_length_sec, sc.length_sec))
+    if has_sel  then row = row .. '<td>' .. dur_or_dash(sc.sel_len_sec)  .. '</td>' end
+    if has_edit then row = row .. '<td>' .. dur_or_dash(sc.edit_len_sec) .. '</td>' end
     for _, t in ipairs(scene_types) do row = row .. '<td>' .. dur_or_dash(sc.wt_sec[t]) .. '</td>' end
     row = row .. string.format('<td>%s</td><td>%s</td><td>%s</td><td>%s</td></tr>',
       dur_or_dash(sc.total_sec),
@@ -854,13 +879,15 @@ a{color:var(--acc);text-decoration:none}a:hover{text-decoration:underline}
         .. (sc.is_done and ' <span class="done">✓ done</span>' or '') .. '</h3>')
       out('<div class="meta">' .. sc.start_tc .. ' – ' .. sc.end_tc
         .. ' · Film ' .. fmt_dur(sc.length_sec) .. ' · Source ' .. fmt_dur(sc.source_length_sec)
-        .. ' · Ratio ' .. pct(sc.source_length_sec, sc.length_sec) .. '</div>')
+        .. ' · Ratio ' .. pct(sc.source_length_sec, sc.length_sec)
+        .. (sc.sel_len_sec  and (' · Selected ' .. fmt_dur(sc.sel_len_sec))  or '')
+        .. (sc.edit_len_sec and (' · Edited '   .. fmt_dur(sc.edit_len_sec)) or '') .. '</div>')
       out('<div class="wrap"><table><tr><th class="l">Work</th><th>Time</th><th>Film/hr</th><th>Source/hr</th></tr>')
       for _, t in ipairs(scene_types) do
         local secs = sc.wt_sec[t]
         if secs and secs > 0 then
           out(string.format('<tr><td class="l">%s</td><td>%s</td><td>%s</td><td>%s</td></tr>', type_label(t),
-            fmt_dur(secs), rate_or_na(sc.length_sec, secs), rate_or_na(sc.source_length_sec, secs)))
+            fmt_dur(secs), rate_or_na(sc.length_sec, secs), rate_or_na(input_source(sc, t), secs)))
         end
       end
       out(string.format('<tr class="total"><td class="l">Total</td><td>%s</td><td>%s</td><td>%s</td></tr>',
