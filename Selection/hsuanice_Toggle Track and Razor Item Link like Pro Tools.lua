@@ -1,9 +1,9 @@
 --[[
 @description Toggle Track and Razor Item Link like Pro Tools - Link Track and Edit Selection
-@version 26.1017.1609
+@version 26.1023.1358pre1
 @author hsuanice
 @changelog
-  - Add: remembers the last razor area (range + tracks) for Extend Razor Edit to Mouse Cursor like Pro Tools, because REAPER clears razor areas when an item is clicked. Session-only, not saved with the project.
+  - Change: part D (sync items when the Razor area or track selection changes) is now off by default (ENABLE_D = false): with D on, linking track selection to items also triggered the item-to-track direction, which cleared the intended selection.
 @about
   Pro Tools-style "Link Track and Edit Selection".
   Edit Selection = Razor Area or Item Selection.
