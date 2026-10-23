@@ -1,6 +1,6 @@
 --[[
 @description Fade Tool - frame-grid fades and crossfades by razor, time selection, mouse or edit cursor (Smart Fade, Crossfade in Razor, Scene Cut to Razor, Settings)
-@version 26.1023.2032pre1
+@version 26.1023.2042pre1
 @author hsuanice
 @metapackage
 @provides
@@ -9,9 +9,7 @@
   [main] hsuanice_Fade Tool - Scene Cut to Razor.lua
   [main] hsuanice_Fade Tool - Settings.lua
 @changelog
-  - Add: Smart Fade hold-and-drag for crossfade edges or the whole crossfade.
-  - Change: Smart Fade and Crossfade in Razor never change anything outside the arrange view (Scene Cut excepted).
-  - Change: a short Smart Fade press no longer adjusts one side of a crossfade.
+  - Add: Smart Fade drag - hold Cmd (Ctrl on Windows) to invert Snap for fine-tuning.
 @about
   # Fade Tool
 

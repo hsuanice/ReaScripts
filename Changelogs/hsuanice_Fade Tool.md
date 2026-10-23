@@ -1,5 +1,9 @@
 # hsuanice_Fade Tool.lua — Changelog
 
+## 26.1023.2042pre1
+
+- Add: Smart Fade drag - hold Cmd (Ctrl on Windows) to invert Snap for fine-tuning.
+
 ## 26.1023.2032pre1
 
 - Add: Smart Fade hold-and-drag for crossfade edges or the whole crossfade.

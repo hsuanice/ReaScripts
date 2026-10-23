@@ -1,5 +1,9 @@
 # hsuanice_Fade Tool - Smart Fade at Mouse or Edit Cursor.lua — Changelog
 
+## 26.1023.2042pre1
+
+- Add: hold Cmd (Ctrl on Windows) while dragging a crossfade to invert Snap - free fine-tuning when Snap is on, grid snapping when it is off.
+
 ## 26.1023.2032pre1
 
 - Add: hold the shortcut near a crossfade edge to drag that edge, or on the name bar / inside a crossfade to drag the whole crossfade (follows Snap, one undo point; needs js_ReaScriptAPI).

@@ -1,12 +1,10 @@
 --[[
 @description Fade Tool - Smart Fade at Mouse or Edit Cursor (razor, time selection, mouse top / bottom / label, Hover Mode aware)
-@version 26.1023.2032pre1
+@version 26.1023.2042pre1
 @author hsuanice
 @noindex
 @changelog
-  - Add: hold the shortcut near a crossfade edge to drag that edge, or on the name bar / inside a crossfade to drag the whole crossfade (follows Snap, one undo point; needs js_ReaScriptAPI).
-  - Change: a short press never changes a crossfade (no more one-sided adjustment by top / bottom half or mouse side); crossfaded edges are left alone.
-  - Change: never changes anything outside the arrange view (razor / time selection clipped, hidden or scrolled-out tracks and an edit cursor outside the view ignored).
+  - Add: hold Cmd (Ctrl on Windows) while dragging a crossfade to invert Snap - free fine-tuning when Snap is on, grid snapping when it is off.
 @about
   One shortcut for fades and crossfades. Never opens a window unless something had to be
   skipped. The first context that applies wins:
@@ -37,8 +35,9 @@
   Hold the shortcut (needs js_ReaScriptAPI) with the mouse within 1 frame (at least 4 pixels)
   of a crossfade edge to grab that edge, or on the item name bar / inside a crossfade to grab
   the whole crossfade; it follows the mouse (and Snap) until the key is released, one undo
-  point. The two edges stop 1 frame apart. A short press without moving the mouse is a
-  normal Smart Fade.
+  point. The two edges stop 1 frame apart. Hold Cmd (Ctrl on Windows) while dragging to
+  invert Snap: free fine-tuning when Snap is on, grid snapping when it is off. A short press
+  without moving the mouse is a normal Smart Fade.
 
   Never changes anything outside the arrange view: the razor / time selection part outside
   it, tracks scrolled out of view and an edit cursor outside the view are ignored.
@@ -90,9 +89,20 @@ local function skip(info, t, why)
 end
 
 local function px_to_sec(px) return px / math.max(r.GetHZoomLevel(), 1e-6) end
-local function snap(t)
-  if t and r.GetToggleCommandState(1157) == 1 then return r.SnapToGrid(0, t) end
+-- on: true / false forces snapping on or off; nil follows the project's Snap setting
+local function snap(t, on)
+  local project_on = r.GetToggleCommandState(1157) == 1
+  if on == nil then on = project_on end
+  if t and on then
+    if not project_on and r.BR_GetClosestGridDivision then return r.BR_GetClosestGridDivision(t) end
+    return r.SnapToGrid(0, t)
+  end
   return t
+end
+
+-- Cmd (macOS) / Ctrl (Windows) held right now
+local function cmd_down()
+  return r.JS_Mouse_GetState and (r.JS_Mouse_GetState(4) & 4) == 4
 end
 local function mouse_time()
   if r.BR_PositionAtMouseCursor then
@@ -255,6 +265,8 @@ local function hold(grab, t0)
   local fl = FT.frame_len()
   local xs0, xe0 = grab.b.pos, grab.a.fin
   local moved, intercepted = false, true
+  local project_snap = r.GetToggleCommandState(1157) == 1
+  local cmd0 = cmd_down()  -- Cmd that is part of the shortcut itself does not count
   local function release_keys()
     if intercepted then intercepted = false; r.JS_VKeys_Intercept(-1, -1) end
   end
@@ -263,7 +275,8 @@ local function hold(grab, t0)
 
   local function step()
     local released = r.JS_VKeys_GetState(start - 0.5):sub(VK_LO, VK_HI) == none
-    local t = snap(mouse_time())
+    -- Cmd / Ctrl while dragging inverts Snap (snap on -> free fine-tune, snap off -> grid)
+    local t = snap(mouse_time(), project_snap ~= (cmd_down() ~= cmd0))
     if t and math.abs(t - t0) > 1e-9 then moved = true end
     if moved and t then
       local xs, xe = xs0, xe0
