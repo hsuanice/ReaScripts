@@ -1,6 +1,6 @@
 --[[
 @description Fade Tool - frame-grid fades and crossfades by razor, time selection, mouse or edit cursor (Smart Fade, Crossfade in Razor, Scene Cut to Razor, Settings)
-@version 26.1023.2122pre1
+@version 26.1023.2124
 @author hsuanice
 @metapackage
 @provides
@@ -10,6 +10,7 @@
   [main] hsuanice_Fade Tool - Settings.lua
 @changelog
   - Fix: Smart Fade drag keeps a Cmd fine-tuned position when the keys are released.
+  - Release: tested in REAPER 7.82.
 @about
   # Fade Tool
 

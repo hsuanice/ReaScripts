@@ -1,5 +1,10 @@
 # hsuanice_Fade Tool.lua — Changelog
 
+## 26.1023.2124
+
+- Fix: Smart Fade drag keeps a Cmd fine-tuned position when the keys are released.
+- Release: tested in REAPER 7.82.
+
 ## 26.1023.2122pre1
 
 - Fix: Smart Fade drag keeps a Cmd fine-tuned position when the keys are released.
