@@ -7,6 +7,10 @@ PM Insight Analyzer
 
 **Removed from ReaPack** (2026-10-15) while it is a work in progress; the script stays in the repository (`@noindex`) as a backup.
 
+## 26.1023.1619pre1
+
+- Change: Project Overview shows the source stages side by side - Source (EDL), Selected (Mic Selected), Edited - each with Total Length, Ratio vs film (of the scenes that have that stage), Kept from previous stage, and Scenes.
+
 ## 26.1023.1606pre1
 
 - New: Source/hr per work type uses the source that work starts from - EDL for mic select, Mic Selected ('Sel Len') for editing, Edited ('Edit Len') for denoise; EDL when that stage is missing.

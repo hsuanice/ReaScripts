@@ -1,11 +1,10 @@
 --[[
 @description Project Manager - PM Insight Analyzer: work-time analysis of PM Timer logs (work in progress)
-@version 26.1023.1606pre1
+@version 26.1023.1619pre1
 @author hsuanice
 @noindex  (kept in the repository as a backup; not offered on ReaPack while it is a work in progress)
 @changelog
-  - New: Source/hr per work type uses the source that work starts from - EDL for mic select, Mic Selected ('Sel Len') for editing, Edited ('Edit Len') for denoise; EDL when that stage is missing.
-  - New: Selected / Edited columns in the scene list and in each scene's detail.
+  - Change: Project Overview shows the source stages side by side - Source (EDL), Selected (Mic Selected), Edited - each with Total Length, Ratio vs film (of the scenes that have that stage), Kept from previous stage, and Scenes.
 @about
   Read-only analysis script. Auto-detects project type:
 
@@ -787,6 +786,10 @@ h1{font-size:22px;margin:0 0 2px}h2{font-size:17px;margin:32px 0 10px;padding-bo
 .sub{color:var(--mut);margin-bottom:20px}
 .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:10px}
 .kv{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:10px 12px}
+.stages{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px;margin-top:10px}
+.stage{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:10px 12px}
+.stage h4{margin:0 0 6px;font-size:13px}.stage div{display:flex;justify-content:space-between;gap:8px;padding:2px 0}
+.stage div b{font-size:12px;color:var(--mut);font-weight:500}.stage div span{font:600 15px ui-monospace,Menlo,monospace}
 .kv b{display:block;font-size:12px;color:var(--mut);font-weight:500}.kv span{font:600 16px ui-monospace,Menlo,monospace}
 .wrap{overflow-x:auto}
 table{border-collapse:collapse;background:var(--card);border:1px solid var(--line);border-radius:8px;min-width:100%}
@@ -809,8 +812,6 @@ a{color:var(--acc);text-decoration:none}a:hover{text-decoration:underline}
   out('<h2>Project Overview</h2><div class="grid">')
   local function kv(k, v) out('<div class="kv"><b>' .. k .. '</b><span>' .. v .. '</span></div>') end
   kv("Total Film Length", fmt_dur(project_film_total_sec))
-  kv("Total Source Length", fmt_dur(project_source_total_sec))
-  kv("Overall Source Ratio", pct(project_source_total_sec, project_film_total_sec))
   kv("Grand Total Work", fmt_dur(grand_total))
   kv("Scene Work", fmt_dur(project_scene_total_sec))
   kv("Project Work (no scene)", fmt_dur(project_work_total))
@@ -820,6 +821,43 @@ a{color:var(--acc);text-decoration:none}a:hover{text-decoration:underline}
   kv("Remaining Film", fmt_dur(remaining_film_sec))
   kv("Completion", pct(completed_film_sec, project_film_total_sec))
   out('</div>')
+
+  -- Source stages side by side: EDL source → Mic Selected → Edited.
+  -- Ratio = stage length / film length of the scenes that have that stage;
+  -- Kept = stage length / previous stage length of the same scenes.
+  do
+    local src_scenes = 0
+    local sel = { len = 0, film = 0, prev = 0, n = 0 }
+    local edt = { len = 0, film = 0, prev = 0, n = 0 }
+    for _, sc in ipairs(scenes) do
+      if sc.source_length_sec > 0 then src_scenes = src_scenes + 1 end
+      if sc.sel_len_sec and sc.sel_len_sec > 0 then
+        sel.len, sel.film = sel.len + sc.sel_len_sec, sel.film + sc.length_sec
+        sel.prev, sel.n   = sel.prev + sc.source_length_sec, sel.n + 1
+      end
+      if sc.edit_len_sec and sc.edit_len_sec > 0 then
+        edt.len, edt.film = edt.len + sc.edit_len_sec, edt.film + sc.length_sec
+        edt.prev, edt.n   = edt.prev + ((sc.sel_len_sec and sc.sel_len_sec > 0) and sc.sel_len_sec or sc.source_length_sec), edt.n + 1
+      end
+    end
+    local function stage(title, len, ratio, kept, n)
+      out('<div class="stage"><h4>' .. title .. '</h4>')
+      out('<div><b>Total Length</b><span>' .. len .. '</span></div>')
+      out('<div><b>Ratio (vs film)</b><span>' .. ratio .. '</span></div>')
+      out('<div><b>Kept from previous</b><span>' .. kept .. '</span></div>')
+      out('<div><b>Scenes</b><span>' .. n .. '</span></div></div>')
+    end
+    out('<div class="stages">')
+    stage("Source (EDL)", fmt_dur(project_source_total_sec),
+      pct(project_source_total_sec, project_film_total_sec), "–", src_scenes)
+    if has_sel then
+      stage("Selected (Mic Selected)", fmt_dur(sel.len), pct(sel.len, sel.film), pct(sel.len, sel.prev), sel.n)
+    end
+    if has_edit then
+      stage("Edited", fmt_dur(edt.len), pct(edt.len, edt.film), pct(edt.len, edt.prev), edt.n)
+    end
+    out('</div>')
+  end
 
   -- Efficiency per work type
   out('<h2>Efficiency by Work Type</h2><div class="wrap"><table>')
