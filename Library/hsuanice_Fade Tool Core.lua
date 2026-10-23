@@ -1,10 +1,11 @@
 --[[
 @description hsuanice Fade Tool Core (shared razor / cut / edge / fade helpers for the Fade Tool scripts)
-@version 26.1023.1853pre1
+@version 26.1023.1942pre1
 @author hsuanice
 @noindex
 @changelog
-  - Fix: crossfade shape now applies (REAPER 7.71+ keeps it in the FADEINNEW / FADEOUTNEW chunk lines; format from hsuanice_PT_Fades.lua); it stayed Linear before.
+  - Fix: fade and crossfade shapes now apply on REAPER 7.82 (the shape was reset to Linear by also writing the curvature; FADEINNEW / FADEOUTNEW lines are no longer used).
+  - Change: REAPER's own shape list (Linear, Equal Power = 7, Slight / Sharp Convex, Concave, S-Curve); saved settings from the first release are converted.
 @about
   Shared code for "Fade Tool - Crossfade in Razor", "Fade Tool - Scene Cut to Razor" and
   "Fade Tool - Settings". Settings live in the ExtState section "hsuanice_FadeTool".
@@ -19,16 +20,18 @@ M.NS  = "hsuanice_FadeTool"
 M.TOL = 0.0005  -- items closer than this are treated as touching (seconds)
 
 M.ALIGNS = { "before", "center", "after" }
--- REAPER fade shape index (C_FADEINSHAPE / C_FADEOUTSHAPE) -> name
+-- REAPER fade shape index (C_FADEINSHAPE / C_FADEOUTSHAPE, checked on REAPER 7.82) -> name
 M.SHAPE_NAMES = {
-  [0] = "Linear", [1] = "Equal Power", [2] = "Slight Concave",
-  [3] = "Sharp Convex", [4] = "Sharp Concave", [5] = "S-Curve",
+  [0] = "Linear", [1] = "Slight Convex", [2] = "Slight Concave", [3] = "Sharp Convex",
+  [4] = "Sharp Concave", [5] = "Slight S-Curve", [6] = "Sharp S-Curve", [7] = "Equal Power",
 }
+-- Menu order: the two shapes used most first
+M.SHAPE_ORDER = { 0, 7, 1, 2, 3, 4, 5, 6 }
 
 M.DEFAULTS = {
   xfade_frames     = 1,
   xfade_align      = "before",
-  xfade_shape      = 1,
+  xfade_shape      = 7,
   scene_in_frames  = 1,
   scene_in_align   = "before",
   scene_out_frames = 1,
@@ -50,6 +53,15 @@ function M.load_settings()
       s[k] = (v ~= "" and v) or def
     end
   end
+  -- Releases before 26.1023 used their own shape list (1 = Equal Power, 5 = S-Curve)
+  if r.GetExtState(M.NS, "shape_list") ~= "2" then
+    local OLD = { [1] = 7, [5] = 5 }
+    for _, k in ipairs({ "xfade_shape", "scene_shape" }) do
+      if r.HasExtState(M.NS, k) then s[k] = OLD[s[k]] or s[k] end
+    end
+  end
+  if not M.SHAPE_NAMES[s.xfade_shape] then s.xfade_shape = M.DEFAULTS.xfade_shape end
+  if not M.SHAPE_NAMES[s.scene_shape] then s.scene_shape = M.DEFAULTS.scene_shape end
   return s
 end
 
@@ -57,6 +69,7 @@ function M.save_settings(s)
   for k in pairs(M.DEFAULTS) do
     if s[k] ~= nil then r.SetExtState(M.NS, k, tostring(s[k]), true) end
   end
+  r.SetExtState(M.NS, "shape_list", "2", true)
 end
 
 function M.valid_align(a)
@@ -251,38 +264,31 @@ local function clamp_fade(it, side, limit)
   end
 end
 
+-- Fade shape. Setting D_FADEINDIR / D_FADEOUTDIR after the shape resets the shape to the
+-- default (-1, Linear) on REAPER 7.82, so only the shape is written: REAPER sets the matching
+-- curvature itself. Slight S-Curve goes through the native action, which also writes the
+-- S-curve intensity that a plain C_FADE*SHAPE = 5 leaves out.
+local S_CURVE_ACTION = { IN = 41519, OUT = 41526 }
+
+function M.set_shape(it, side, shape)
+  if shape == 5 then
+    local sel = {}
+    for i = 0, r.CountSelectedMediaItems(0) - 1 do sel[#sel + 1] = r.GetSelectedMediaItem(0, i) end
+    r.SelectAllMediaItems(0, false)
+    r.SetMediaItemSelected(it, true)
+    r.Main_OnCommand(S_CURVE_ACTION[side], 0)
+    r.SelectAllMediaItems(0, false)
+    for _, s in ipairs(sel) do r.SetMediaItemSelected(s, true) end
+  else
+    r.SetMediaItemInfo_Value(it, "C_FADE" .. side .. "SHAPE", shape)
+  end
+end
+
 -- side = "IN" / "OUT"; auto = true writes a crossfade (auto fade) length, false a plain fade
 function M.set_fade(it, side, len, shape, auto)
   r.SetMediaItemInfo_Value(it, "D_FADE" .. side .. "LEN", len)
   r.SetMediaItemInfo_Value(it, "D_FADE" .. side .. "LEN_AUTO", auto and len or 0)
-  r.SetMediaItemInfo_Value(it, "C_FADE" .. side .. "SHAPE", shape)
-  r.SetMediaItemInfo_Value(it, "D_FADE" .. side .. "DIR", 0)
-end
-
--- REAPER 7.71+ keeps the shape of an auto fade (crossfade) in the FADEINNEW / FADEOUTNEW
--- chunk lines, so C_FADEINSHAPE alone leaves it Linear. Line format and values follow
--- hsuanice_PT_Fades.lua (build_new_line / patch_xfade_new): "10 0 0 <type> <curv> <flag>",
--- type 10 = curve, 11 = constant power, 12 = S-curve.
-local NEW_LINE = {
-  [0] = "10 0 0 10 0 0",     -- Linear
-  [1] = "10 0 0 11 0.5 0",   -- Equal Power
-  [2] = "10 0 0 10 -0.5 0",  -- Slight Concave
-  [3] = "10 0 0 10 1 0",     -- Sharp Convex
-  [4] = "10 0 0 10 -1 0",    -- Sharp Concave
-  [5] = "10 0 0 12 0 0.5",   -- S-Curve
-}
-
-function M.set_auto_fade_shape(it, side, shape)
-  local new_prefix = (side == "IN") and "FADEINNEW" or "FADEOUTNEW"
-  local old_prefix = (side == "IN") and "FADEIN" or "FADEOUT"
-  local ok, chunk = r.GetItemStateChunk(it, "", false)
-  if not ok or not chunk then return end
-  local data = NEW_LINE[shape] or NEW_LINE[0]
-  local out, n = chunk:gsub("(\n" .. new_prefix .. " )[^\n]+", "%1" .. data, 1)
-  if n == 0 then
-    out, n = chunk:gsub("(\n" .. old_prefix .. " [^\n]+)", "%1\n" .. new_prefix .. " " .. data, 1)
-  end
-  if n > 0 and out ~= chunk then r.SetItemStateChunk(it, out, false) end
+  M.set_shape(it, side, shape)
 end
 
 -- Crossfade a (left) and b (right) over [xs, xe]. Returns true, or false + reason.
@@ -302,8 +308,6 @@ function M.crossfade(a, b, xs, xe, shape)
   M.set_fade(b.item, "IN", len, shape, true)
   clamp_fade(a.item, "IN", xs - a.pos)
   clamp_fade(b.item, "OUT", b.fin - xe)
-  M.set_auto_fade_shape(a.item, "OUT", shape)
-  M.set_auto_fade_shape(b.item, "IN", shape)
   return true
 end
 

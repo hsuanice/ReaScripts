@@ -1,10 +1,10 @@
 --[[
 @description Fade Tool - Settings (crossfade and scene cut fade lengths, positions and shapes)
-@version 26.1023.1850pre1
+@version 26.1023.1942pre1
 @author hsuanice
 @noindex
 @changelog
-  - Change: native gfx window with radio buttons (before, center, after), [-] [+] length steppers, a shape menu and a checkbox instead of text fields; Enter = Save, Esc = Cancel.
+  - Change: shape menu lists all eight REAPER fade shapes (Linear and Equal Power first).
 @about
   The only Fade Tool script that opens a window (native gfx: steppers, radio buttons, shape
   menu, checkbox; Enter = Save, Esc = Cancel). The other Fade Tool scripts just read these
@@ -12,7 +12,7 @@
 
   - Lengths are in frames (project frame rate), decimals allowed.
   - Position: before / center / after the cut or the scene edge.
-  - Shape: 0 Linear, 1 Equal Power, 2 Slight Concave, 3 Sharp Convex, 4 Sharp Concave, 5 S-Curve.
+  - Shape: Linear, Equal Power, Slight / Sharp Convex, Slight / Sharp Concave, Slight / Sharp S-Curve.
 --]]
 -- hsuanice Library is a separate ReaPack package: tell the user if it is missing
 do
@@ -130,10 +130,10 @@ local function draw_shape(key, y)
   text("v", CTRL_X + w - 16, y + 3, 22)
   if h and clicked then
     local items = {}
-    for i = 0, 5 do items[#items + 1] = ((vals[key] == i) and "!" or "") .. FT.SHAPE_NAMES[i] end
+    for _, i in ipairs(FT.SHAPE_ORDER) do items[#items + 1] = ((vals[key] == i) and "!" or "") .. FT.SHAPE_NAMES[i] end
     gfx.x, gfx.y = P(CTRL_X), P(y + 25)
     local pick = gfx.showmenu(table.concat(items, "|"))
-    if pick > 0 then vals[key] = pick - 1 end
+    if pick > 0 then vals[key] = FT.SHAPE_ORDER[pick] end
   end
 end
 

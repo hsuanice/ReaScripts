@@ -1,5 +1,10 @@
 # hsuanice_Fade Tool.lua — Changelog
 
+## 26.1023.1942pre1
+
+- Fix: fade and crossfade shapes now apply (they always stayed Linear on REAPER 7.82).
+- Change: shape menu lists all eight REAPER fade shapes.
+
 ## 26.1023.1853pre1
 
 - Fix: Crossfade in Razor now applies the crossfade shape (Equal Power by default); it stayed Linear before.

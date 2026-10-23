@@ -1,5 +1,9 @@
 # hsuanice_Library.lua — Changelog
 
+## 26.1023.1942pre1
+
+- Update: hsuanice_Fade Tool Core.lua (fade shapes fixed on REAPER 7.82).
+
 ## 26.1023.1853pre1
 
 - Update: hsuanice_Fade Tool Core.lua (crossfade shape fix).
