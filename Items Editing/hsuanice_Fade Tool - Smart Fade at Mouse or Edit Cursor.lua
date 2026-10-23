@@ -1,13 +1,10 @@
 --[[
 @description Fade Tool - Smart Fade at Mouse or Edit Cursor (razor, time selection, mouse top / bottom / label, Hover Mode aware)
-@version 26.1023.2008pre1
+@version 26.1023.2012pre1
 @author hsuanice
 @noindex
 @changelog
-  - Add: on a crossfade, top half moves its end to the mouse and bottom half its start (one-sided adjustment, Hover Mode).
-  - Add: Hover Mode off - mouse left of the edit cursor = fade-in, right = fade-out (crossfade end / start); mouse on an item name bar centers its crossfade on the cursor.
-  - Add: Hover Mode on, mouse over empty arrange space opens Fade Tool - Settings.
-  - Credits: written out in full - Fade Tool is heavily based on AZ's Fade tool (ReaTeam Scripts).
+  - Fix: on an item with crossfades on both sides, only the crossfade nearer to the mouse / edit cursor is adjusted.
 @about
   One shortcut for fades and crossfades. Never opens a window unless something had to be
   skipped. The first context that applies wins:

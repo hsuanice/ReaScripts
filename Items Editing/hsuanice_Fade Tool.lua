@@ -1,6 +1,6 @@
 --[[
 @description Fade Tool - frame-grid fades and crossfades by razor, time selection, mouse or edit cursor (Smart Fade, Crossfade in Razor, Scene Cut to Razor, Settings)
-@version 26.1023.2008pre1
+@version 26.1023.2012pre1
 @author hsuanice
 @metapackage
 @provides
@@ -9,9 +9,7 @@
   [main] hsuanice_Fade Tool - Scene Cut to Razor.lua
   [main] hsuanice_Fade Tool - Settings.lua
 @changelog
-  - Add: Smart Fade adjusts one side of a crossfade (Hover: top half = end, bottom half = start; Hover off: mouse left / right of the edit cursor).
-  - Add: Smart Fade over empty arrange space (Hover Mode on) opens Settings.
-  - Credits: written out in full - Fade Tool is heavily based on AZ's Fade tool (ReaTeam Scripts).
+  - Fix: Smart Fade adjusts only the crossfade nearer to the mouse / edit cursor on an item with crossfades on both sides.
 @about
   # Fade Tool
 

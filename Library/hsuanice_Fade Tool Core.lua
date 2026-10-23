@@ -1,11 +1,10 @@
 --[[
 @description hsuanice Fade Tool Core (shared razor / cut / edge / fade helpers for the Fade Tool scripts)
-@version 26.1023.2008pre1
+@version 26.1023.2012pre1
 @author hsuanice
 @noindex
 @changelog
-  - Add: side_fade() - one-sided fade or crossfade end / start adjustment.
-  - Credits: written out in full - Fade Tool is heavily based on AZ's Fade tool (ReaTeam Scripts).
+  - Fix: an item with crossfades on both sides only moves the crossfade nearer to the mouse / edit cursor (a far crossfade was stretched across the item).
 @about
   Shared code for "Fade Tool - Crossfade in Razor", "Fade Tool - Scene Cut to Razor" and
   "Fade Tool - Settings". Settings live in the ExtState section "hsuanice_FadeTool".
@@ -393,6 +392,18 @@ function M.side_fade(info, t, side, S)
     if side == "in" then xe = t else xs = t end
     local ok, why = M.crossfade(info, right, xs, xe, nil)
     return ok, why, right.item
+  end
+  -- Crossfades on both sides and t outside them: only the nearer crossfade moves
+  -- (its edge facing t), so a far crossfade is never stretched across the item
+  if left and right then
+    local d_left, d_right = t - left.fin, right.pos - t
+    if side == "in" and d_right < d_left then
+      local ok, why = M.crossfade(info, right, t, info.fin, nil)
+      return ok, why, right.item
+    elseif side == "out" and d_left < d_right then
+      local ok, why = M.crossfade(left, info, info.pos, t, nil)
+      return ok, why, left.item
+    end
   end
   if side == "in" then
     local ok, why = M.fade_in_to(info, t, S)

@@ -1,5 +1,9 @@
 # hsuanice_Fade Tool - Smart Fade at Mouse or Edit Cursor.lua — Changelog
 
+## 26.1023.2012pre1
+
+- Fix: on an item with crossfades on both sides, only the crossfade nearer to the mouse / edit cursor is adjusted.
+
 ## 26.1023.2008pre1
 
 - Add: on a crossfade, top half moves its end to the mouse and bottom half its start (one-sided adjustment, Hover Mode).

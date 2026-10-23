@@ -1,5 +1,9 @@
 # hsuanice_Fade Tool Core.lua — Changelog
 
+## 26.1023.2012pre1
+
+- Fix: an item with crossfades on both sides only moves the crossfade nearer to the mouse / edit cursor (a far crossfade was stretched across the item).
+
 ## 26.1023.2008pre1
 
 - Add: side_fade() - one-sided fade or crossfade end / start adjustment.

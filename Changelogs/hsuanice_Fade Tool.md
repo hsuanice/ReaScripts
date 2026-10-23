@@ -1,5 +1,9 @@
 # hsuanice_Fade Tool.lua — Changelog
 
+## 26.1023.2012pre1
+
+- Fix: Smart Fade adjusts only the crossfade nearer to the mouse / edit cursor on an item with crossfades on both sides.
+
 ## 26.1023.2008pre1
 
 - Add: Smart Fade adjusts one side of a crossfade (Hover: top half = end, bottom half = start; Hover off: mouse left / right of the edit cursor).
