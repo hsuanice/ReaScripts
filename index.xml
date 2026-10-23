@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<index version="1" name="hsuanice Scripts" commit="fe039c11329e706795a9813ce3d2e4eccb31e984">
+<index version="1" name="hsuanice Scripts" commit="3f364ea086cc4ad291637eca75397286f729cd46">
   <category name="Conform">
     <reapack name="hsuanice_Conform List Browser - CLB.lua" type="script" desc="Conform List Browser - CLB: conform EDL / AAF / XML / OTIO / subtitle lists (GUI + Jump / Link / Load / Reveal)">
       <metadata>
@@ -230,6 +230,18 @@
         <source main="main" file="hsuanice_Fade Tool - Crossfade in Razor.lua">https://github.com/hsuanice/ReaScripts/raw/fe039c11329e706795a9813ce3d2e4eccb31e984/Items%20Editing/hsuanice_Fade%20Tool%20-%20Crossfade%20in%20Razor.lua</source>
         <source main="main" file="hsuanice_Fade Tool - Scene Cut to Razor.lua">https://github.com/hsuanice/ReaScripts/raw/fe039c11329e706795a9813ce3d2e4eccb31e984/Items%20Editing/hsuanice_Fade%20Tool%20-%20Scene%20Cut%20to%20Razor.lua</source>
         <source main="main" file="hsuanice_Fade Tool - Settings.lua">https://github.com/hsuanice/ReaScripts/raw/fe039c11329e706795a9813ce3d2e4eccb31e984/Items%20Editing/hsuanice_Fade%20Tool%20-%20Settings.lua</source>
+      </version>
+      <version name="26.1023.1850pre1" author="hsuanice" time="2026-10-23T10:50:55Z">
+        <changelog><![CDATA[- Change: Settings is now a gfx window with radio buttons, steppers, a shape menu and a checkbox.]]></changelog>
+        <source main="main" file="hsuanice_Fade Tool - Crossfade in Razor.lua">https://github.com/hsuanice/ReaScripts/raw/fd4912a45fbe9ada0994287194b5e0c19eea4f49/Items%20Editing/hsuanice_Fade%20Tool%20-%20Crossfade%20in%20Razor.lua</source>
+        <source main="main" file="hsuanice_Fade Tool - Scene Cut to Razor.lua">https://github.com/hsuanice/ReaScripts/raw/fd4912a45fbe9ada0994287194b5e0c19eea4f49/Items%20Editing/hsuanice_Fade%20Tool%20-%20Scene%20Cut%20to%20Razor.lua</source>
+        <source main="main" file="hsuanice_Fade Tool - Settings.lua">https://github.com/hsuanice/ReaScripts/raw/fd4912a45fbe9ada0994287194b5e0c19eea4f49/Items%20Editing/hsuanice_Fade%20Tool%20-%20Settings.lua</source>
+      </version>
+      <version name="26.1023.1853pre1" author="hsuanice" time="2026-10-23T10:53:23Z">
+        <changelog><![CDATA[- Fix: Crossfade in Razor now applies the crossfade shape (Equal Power by default); it stayed Linear before.]]></changelog>
+        <source main="main" file="hsuanice_Fade Tool - Crossfade in Razor.lua">https://github.com/hsuanice/ReaScripts/raw/3f364ea086cc4ad291637eca75397286f729cd46/Items%20Editing/hsuanice_Fade%20Tool%20-%20Crossfade%20in%20Razor.lua</source>
+        <source main="main" file="hsuanice_Fade Tool - Scene Cut to Razor.lua">https://github.com/hsuanice/ReaScripts/raw/3f364ea086cc4ad291637eca75397286f729cd46/Items%20Editing/hsuanice_Fade%20Tool%20-%20Scene%20Cut%20to%20Razor.lua</source>
+        <source main="main" file="hsuanice_Fade Tool - Settings.lua">https://github.com/hsuanice/ReaScripts/raw/3f364ea086cc4ad291637eca75397286f729cd46/Items%20Editing/hsuanice_Fade%20Tool%20-%20Settings.lua</source>
       </version>
     </reapack>
     <reapack name="hsuanice_Hover Editing.lua" type="script" desc="Hover Editing - Pro Tools-style Split / Trim at the mouse or edit cursor (Toggle Hover Mode, Split, Trim Left / Right)">
@@ -657,6 +669,29 @@
         <source file="hsuanice_Process Exec.lua">https://github.com/hsuanice/ReaScripts/raw/040a47e39426d53d7b40e47a049f13443ece8f1e/Library/hsuanice_Process%20Exec.lua</source>
         <source file="hsuanice_Fade Tool Core.lua">https://github.com/hsuanice/ReaScripts/raw/040a47e39426d53d7b40e47a049f13443ece8f1e/Library/hsuanice_Fade%20Tool%20Core.lua</source>
         <source file="json.lua">https://github.com/hsuanice/ReaScripts/raw/040a47e39426d53d7b40e47a049f13443ece8f1e/Library/json.lua</source>
+      </version>
+      <version name="26.1023.1853pre1" author="hsuanice" time="2026-10-23T10:53:23Z">
+        <changelog><![CDATA[- Update: hsuanice_Fade Tool Core.lua (crossfade shape fix).]]></changelog>
+        <source file="hsuanice_RGWH Core.lua">https://github.com/hsuanice/ReaScripts/raw/3f364ea086cc4ad291637eca75397286f729cd46/Library/hsuanice_RGWH%20Core.lua</source>
+        <source file="hsuanice_AudioSweet Core.lua">https://github.com/hsuanice/ReaScripts/raw/3f364ea086cc4ad291637eca75397286f729cd46/Library/hsuanice_AudioSweet%20Core.lua</source>
+        <source file="hsuanice_AS Preview Core.lua">https://github.com/hsuanice/ReaScripts/raw/3f364ea086cc4ad291637eca75397286f729cd46/Library/hsuanice_AS%20Preview%20Core.lua</source>
+        <source file="hsuanice_Metadata Embed.lua">https://github.com/hsuanice/ReaScripts/raw/3f364ea086cc4ad291637eca75397286f729cd46/Library/hsuanice_Metadata%20Embed.lua</source>
+        <source file="hsuanice_Metadata Read.lua">https://github.com/hsuanice/ReaScripts/raw/3f364ea086cc4ad291637eca75397286f729cd46/Library/hsuanice_Metadata%20Read.lua</source>
+        <source file="hsuanice_Hover.lua">https://github.com/hsuanice/ReaScripts/raw/3f364ea086cc4ad291637eca75397286f729cd46/Library/hsuanice_Hover.lua</source>
+        <source file="hsuanice_Mouse.lua">https://github.com/hsuanice/ReaScripts/raw/3f364ea086cc4ad291637eca75397286f729cd46/Library/hsuanice_Mouse.lua</source>
+        <source file="hsuanice_Metadata Cache.lua">https://github.com/hsuanice/ReaScripts/raw/3f364ea086cc4ad291637eca75397286f729cd46/Library/hsuanice_Metadata%20Cache.lua</source>
+        <source file="hsuanice_Metadata Rename Core.lua">https://github.com/hsuanice/ReaScripts/raw/3f364ea086cc4ad291637eca75397286f729cd46/Library/hsuanice_Metadata%20Rename%20Core.lua</source>
+        <source file="hsuanice_List Table.lua">https://github.com/hsuanice/ReaScripts/raw/3f364ea086cc4ad291637eca75397286f729cd46/Library/hsuanice_List%20Table.lua</source>
+        <source file="hsuanice_Time Format.lua">https://github.com/hsuanice/ReaScripts/raw/3f364ea086cc4ad291637eca75397286f729cd46/Library/hsuanice_Time%20Format.lua</source>
+        <source file="hsuanice_Metadata Generator.lua">https://github.com/hsuanice/ReaScripts/raw/3f364ea086cc4ad291637eca75397286f729cd46/Library/hsuanice_Metadata%20Generator.lua</source>
+        <source file="hsuanice_CLB Compare Engine.lua">https://github.com/hsuanice/ReaScripts/raw/3f364ea086cc4ad291637eca75397286f729cd46/Library/hsuanice_CLB%20Compare%20Engine.lua</source>
+        <source file="hsuanice_EDL Parser.lua">https://github.com/hsuanice/ReaScripts/raw/3f364ea086cc4ad291637eca75397286f729cd46/Library/hsuanice_EDL%20Parser.lua</source>
+        <source file="hsuanice_Session Fix Core.lua">https://github.com/hsuanice/ReaScripts/raw/3f364ea086cc4ad291637eca75397286f729cd46/Library/hsuanice_Session%20Fix%20Core.lua</source>
+        <source file="hsuanice_OTIO Bridge.lua">https://github.com/hsuanice/ReaScripts/raw/3f364ea086cc4ad291637eca75397286f729cd46/Library/hsuanice_OTIO%20Bridge.lua</source>
+        <source file="hsuanice_Subtitle Bridge.lua">https://github.com/hsuanice/ReaScripts/raw/3f364ea086cc4ad291637eca75397286f729cd46/Library/hsuanice_Subtitle%20Bridge.lua</source>
+        <source file="hsuanice_Process Exec.lua">https://github.com/hsuanice/ReaScripts/raw/3f364ea086cc4ad291637eca75397286f729cd46/Library/hsuanice_Process%20Exec.lua</source>
+        <source file="hsuanice_Fade Tool Core.lua">https://github.com/hsuanice/ReaScripts/raw/3f364ea086cc4ad291637eca75397286f729cd46/Library/hsuanice_Fade%20Tool%20Core.lua</source>
+        <source file="json.lua">https://github.com/hsuanice/ReaScripts/raw/3f364ea086cc4ad291637eca75397286f729cd46/Library/json.lua</source>
       </version>
     </reapack>
   </category>
