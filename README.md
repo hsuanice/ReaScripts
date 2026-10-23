@@ -51,7 +51,7 @@ and background on/off scripts start with `Toggle`.
 
 | Package | What it does |
 |---|---|
-| Fade Tool | Razor-based crossfades and scene cut fades on the frame grid (Crossfade in Razor, Scene Cut to Razor, Settings) |
+| Fade Tool | Frame-grid fades and crossfades by razor, time selection, mouse or edit cursor; Hover Mode aware (Smart Fade, Crossfade in Razor, Scene Cut to Razor, Settings) |
 | Hover Editing | Pro Tools-style Split / Trim at the mouse or edit cursor (Toggle Hover Mode, Split, Trim or Extend Left / Right Edge) |
 | Reorder - Sort Items Vertically | Vertical reorder and sort of selected items by metadata (GUI + Copy to Sort / Sort in Place / Upfill) |
 | Session Fix | Session Fix - Interchange Prep: one window that checks and fixes a session before converting it with Interchanger (Pro Tools / Nuendo / Cubase) — checklist, Fix All, before / after check, review tracks (ReaImGui; replaces the five earlier Session Fix scripts) |

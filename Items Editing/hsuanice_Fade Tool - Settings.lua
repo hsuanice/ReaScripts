@@ -1,10 +1,10 @@
 --[[
 @description Fade Tool - Settings (crossfade and scene cut fade lengths, positions and shapes)
-@version 26.1023.1944
+@version 26.1023.1958pre1
 @author hsuanice
 @noindex
 @changelog
-  - Initial public release (tested in REAPER 7.82).
+  - Add: Smart Fade section (Fade shape, Use time selection + selected tracks).
 @about
   The only Fade Tool script that opens a window (native gfx: steppers, radio buttons, shape
   menu, checkbox; Enter = Save, Esc = Cancel). The other Fade Tool scripts just read these
@@ -12,6 +12,8 @@
 
   - Lengths are in frames (project frame rate), decimals allowed.
   - Position: before / center / after the cut or the scene edge.
+  - Smart Fade: shape of plain fades (mouse / edit cursor / free item edges) and whether a
+    time selection on the selected tracks is used when there is no razor area.
   - Shape: Linear, Equal Power, Slight / Sharp Convex, Slight / Sharp Concave, Slight / Sharp S-Curve.
 --]]
 -- hsuanice Library is a separate ReaPack package: tell the user if it is missing
@@ -47,6 +49,9 @@ local ROWS = {
   { "len",   "scene_out_frames", "Fade-out length (frames)" },
   { "align", "scene_out_align",  "Fade-out position" },
   { "shape", "scene_shape",      "Fade shape" },
+  { "head",  nil,                "Smart Fade" },
+  { "shape", "fade_shape",       "Fade shape" },
+  { "check", "use_ts",           "Use time selection + selected tracks (when no razor)" },
   { "head",  nil,                "After run" },
   { "check", "clear_razor",      "Clear razor after run" },
 }

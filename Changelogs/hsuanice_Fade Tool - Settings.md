@@ -1,5 +1,9 @@
 # hsuanice_Fade Tool - Settings.lua — Changelog
 
+## 26.1023.1958pre1
+
+- Add: Smart Fade section (Fade shape, Use time selection + selected tracks).
+
 ## 26.1023.1944
 
 - Initial public release (tested in REAPER 7.82).

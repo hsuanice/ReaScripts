@@ -1,5 +1,11 @@
 # hsuanice_Fade Tool Core.lua — Changelog
 
+## 26.1023.1958pre1
+
+- Add: Smart Fade helpers (fade to mouse / cursor, crossfade neighbours, move crossfade, item name bar detection, time selection areas).
+- Add: a free item start / end inside a razor area gets a plain fade over the area.
+- Add: Fade shape and Use time selection settings.
+
 ## 26.1023.1944
 
 - Initial public release (tested in REAPER 7.82).

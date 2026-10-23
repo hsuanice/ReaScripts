@@ -1,5 +1,10 @@
 # hsuanice_Fade Tool.lua — Changelog
 
+## 26.1023.1958pre1
+
+- Add: Smart Fade at Mouse or Edit Cursor - razor, then time selection + selected tracks, then mouse (top half fade-in, bottom half fade-out, name bar moves the nearest crossfade) or edit cursor; shares Hover Mode with Hover Editing.
+- Add: Crossfade in Razor fades a free item edge inside the razor area.
+
 ## 26.1023.1944
 
 - Initial release: Crossfade in Razor (fit one cut to the razor area or crossfade every cut in it, Equal Power), Scene Cut to Razor (edge items trimmed or extended with 1-frame transition fades), Settings (gfx window).

@@ -1,5 +1,9 @@
 # hsuanice_Library.lua — Changelog
 
+## 26.1023.1958pre1
+
+- Update: hsuanice_Fade Tool Core.lua (Smart Fade support).
+
 ## 26.1023.1944
 
 - Add: hsuanice_Fade Tool Core.lua (used by the new Fade Tool package).

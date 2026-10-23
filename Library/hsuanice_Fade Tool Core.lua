@@ -1,10 +1,12 @@
 --[[
 @description hsuanice Fade Tool Core (shared razor / cut / edge / fade helpers for the Fade Tool scripts)
-@version 26.1023.1944
+@version 26.1023.1958pre1
 @author hsuanice
 @noindex
 @changelog
-  - Initial public release (tested in REAPER 7.82).
+  - Add: Smart Fade helpers (fade to mouse / cursor, crossfade neighbours, move crossfade, item name bar detection, time selection areas).
+  - Add: a free item start / end inside a razor area gets a plain fade over the area.
+  - Add: Fade shape and Use time selection settings.
 @about
   Shared code for "Fade Tool - Crossfade in Razor", "Fade Tool - Scene Cut to Razor" and
   "Fade Tool - Settings". Settings live in the ExtState section "hsuanice_FadeTool".
@@ -36,6 +38,8 @@ M.DEFAULTS = {
   scene_out_frames = 1,
   scene_out_align  = "before",
   scene_shape      = 0,
+  fade_shape       = 0,
+  use_ts           = 1,
   clear_razor      = 1,
 }
 
@@ -61,6 +65,7 @@ function M.load_settings()
   end
   if not M.SHAPE_NAMES[s.xfade_shape] then s.xfade_shape = M.DEFAULTS.xfade_shape end
   if not M.SHAPE_NAMES[s.scene_shape] then s.scene_shape = M.DEFAULTS.scene_shape end
+  if not M.SHAPE_NAMES[s.fade_shape] then s.fade_shape = M.DEFAULTS.fade_shape end
   return s
 end
 
@@ -269,7 +274,9 @@ end
 -- S-curve intensity that a plain C_FADE*SHAPE = 5 leaves out.
 local S_CURVE_ACTION = { IN = 41519, OUT = 41526 }
 
+-- shape nil = keep the item's current shape (moving or resizing an existing fade)
 function M.set_shape(it, side, shape)
+  if not shape then return end
   if shape == 5 then
     local sel = {}
     for i = 0, r.CountSelectedMediaItems(0) - 1 do sel[#sel + 1] = r.GetSelectedMediaItem(0, i) end
@@ -308,6 +315,185 @@ function M.crossfade(a, b, xs, xe, shape)
   clamp_fade(a.item, "IN", xs - a.pos)
   clamp_fade(b.item, "OUT", b.fin - xe)
   return true
+end
+
+----------------------------------------
+-- Plain fades, crossfade neighbours, moving a crossfade
+----------------------------------------
+function M.info(it) return item_info(it) end
+
+-- Same-lane item that overlaps (crossfades) the start ("left") or the end ("right") of info
+function M.xfade_neighbour(info, side)
+  local tr = r.GetMediaItem_Track(info.item)
+  local lane
+  if r.GetMediaTrackInfo_Value(tr, "I_FREEMODE") == 2 then
+    lane = r.GetMediaItemInfo_Value(info.item, "I_FIXEDLANE")
+  end
+  local best
+  for i = 0, r.CountTrackMediaItems(tr) - 1 do
+    local it = r.GetTrackMediaItem(tr, i)
+    if it ~= info.item and (not lane or r.GetMediaItemInfo_Value(it, "I_FIXEDLANE") == lane) then
+      local o = item_info(it)
+      if side == "left" then
+        if o.pos < info.pos - M.TOL and o.fin > info.pos + M.TOL and o.fin < info.fin then
+          if not best or o.fin > best.fin then best = o end
+        end
+      else
+        if o.fin > info.fin + M.TOL and o.pos < info.fin - M.TOL and o.pos > info.pos then
+          if not best or o.pos < best.pos then best = o end
+        end
+      end
+    end
+  end
+  return best
+end
+
+-- Fade-in from the item start to t. A crossfaded start keeps its start point and the
+-- crossfade is stretched or shortened to end at t (shape kept).
+function M.fade_in_to(info, t, S)
+  if M.is_locked(info.item) then return false, "locked item" end
+  if t <= info.pos + M.TOL or t >= info.fin - M.TOL then return false, "position is outside the item" end
+  local left = M.xfade_neighbour(info, "left")
+  if left then return M.crossfade(left, info, info.pos, t, nil) end
+  M.set_fade(info.item, "IN", t - info.pos, S.fade_shape, false)
+  clamp_fade(info.item, "OUT", info.fin - t)
+  return true
+end
+
+-- Fade-out from t to the item end (a crossfaded end: the crossfade now starts at t)
+function M.fade_out_from(info, t, S)
+  if M.is_locked(info.item) then return false, "locked item" end
+  if t <= info.pos + M.TOL or t >= info.fin - M.TOL then return false, "position is outside the item" end
+  local right = M.xfade_neighbour(info, "right")
+  if right then return M.crossfade(info, right, t, info.fin, nil) end
+  M.set_fade(info.item, "OUT", info.fin - t, S.fade_shape, false)
+  clamp_fade(info.item, "IN", t - info.pos)
+  return true
+end
+
+-- Move an existing crossfade (a over b) so it is centered on t; length and shape are kept
+function M.move_crossfade(a, b, t)
+  local len = a.fin - b.pos
+  if len <= M.TOL then return false, "no crossfade there" end
+  return M.crossfade(a, b, t - len / 2, t + len / 2, nil)
+end
+
+-- Item under the mouse and the part of it: "label" (name bar), "top" or "bottom" half.
+-- Probing technique from AZ's Fade tool: step down from the mouse by the item height and
+-- check whether the same item is still under that point.
+function M.mouse_item_part()
+  local x, y = r.GetMousePosition()
+  local it = r.GetItemFromPoint(x, y, true)
+  if not it then return nil end
+  local h = r.GetMediaItemInfo_Value(it, "I_LASTH")
+  local down = r.GetOS():match("^Win") and 1 or -1
+  if r.GetItemFromPoint(x, math.floor(y + (h - 1) * down), true) == it then return it, "label" end
+  if r.GetItemFromPoint(x, math.floor(y + h / 2 * down), true) ~= it then return it, "bottom" end
+  return it, "top"
+end
+
+----------------------------------------
+-- Razor / time selection areas
+----------------------------------------
+-- Per track (and fixed lane) inside each area { track, s, e, top, bot }:
+-- - one cut in the area: the crossfade fills the area
+-- - two or more cuts: each gets the default crossfade (frames + before / center / after)
+-- - no cut: an item start / end inside the area whose other end lies outside gets a plain
+--   fade over the area; otherwise the nearest cut in the arrange view is pulled in
+--   (two equally near cuts are reported)
+-- Returns changed count, skipped lines, touched tracks
+function M.fade_areas(areas, S)
+  local fl = M.frame_len()
+  local view_s, view_e = r.GetSet_ArrangeView2(0, false, 0, 0, 0, 0)
+  local skipped, touched, changed = {}, {}, 0
+
+  local function skip(area, t, why)
+    skipped[#skipped + 1] = string.format("%s @ %s: %s", M.track_name(area.track), M.fmt_time(t), why)
+  end
+  local function xfade(area, c, xs, xe)
+    local ok, why = M.crossfade(c.a, c.b, xs, xe, S.xfade_shape)
+    if ok then changed = changed + 1 else skip(area, xs, why) end
+  end
+
+  for _, area in ipairs(areas) do
+    touched[area.track] = true
+    local rs, re = area.s, area.e
+    for _, list in pairs(M.lane_items(area, math.min(rs, view_s), math.max(re, view_e))) do
+      local cuts = M.find_cuts(list)
+      local inside, outside, joined = {}, {}, {}
+      for _, c in ipairs(cuts) do
+        joined[c.a] = joined[c.a] or {}; joined[c.a].right = true
+        joined[c.b] = joined[c.b] or {}; joined[c.b].left = true
+        if c.je >= rs - M.TOL and c.js <= re + M.TOL then
+          inside[#inside + 1] = c
+        elseif c.je >= view_s and c.js <= view_e then
+          outside[#outside + 1] = c
+        end
+      end
+
+      local edges = 0
+      if #inside == 0 then
+        for _, info in ipairs(list) do
+          local j = joined[info] or {}
+          if not j.left and info.pos >= rs - M.TOL and info.pos < re - M.TOL and info.fin > re + M.TOL then
+            edges = edges + 1
+            if M.is_locked(info.item) then skip(area, info.pos, "locked item")
+            else
+              M.set_fade(info.item, "IN", re - info.pos, S.fade_shape, false)
+              clamp_fade(info.item, "OUT", info.fin - re)
+              changed = changed + 1
+            end
+          end
+          if not j.right and info.fin <= re + M.TOL and info.fin > rs + M.TOL and info.pos < rs - M.TOL then
+            edges = edges + 1
+            if M.is_locked(info.item) then skip(area, info.fin, "locked item")
+            else
+              M.set_fade(info.item, "OUT", info.fin - rs, S.fade_shape, false)
+              clamp_fade(info.item, "IN", rs - info.pos)
+              changed = changed + 1
+            end
+          end
+        end
+      end
+
+      if #inside == 1 then
+        xfade(area, inside[1], rs, re)
+      elseif #inside >= 2 then
+        local len = S.xfade_frames * fl
+        for _, c in ipairs(inside) do
+          local xs, xe = M.aligned_range(c.cut, len, S.xfade_align)
+          xfade(area, c, xs, xe)
+        end
+      elseif edges == 0 and #outside > 0 then
+        local best, best_d, tie
+        for _, c in ipairs(outside) do
+          local d = (c.js > re) and (c.js - re) or (rs - c.je)
+          if not best or d < best_d - M.TOL then
+            best, best_d, tie = c, d, false
+          elseif math.abs(d - best_d) <= M.TOL then
+            tie = true
+          end
+        end
+        if tie then
+          skip(area, rs, "two cuts are equally near; put the area over the one you want")
+        else
+          xfade(area, best, rs, re)
+        end
+      end
+    end
+  end
+  return changed, skipped, touched
+end
+
+-- Time selection on the selected tracks, as areas for fade_areas (nil when there is none)
+function M.time_selection_areas()
+  local ts, te = r.GetSet_LoopTimeRange2(0, false, false, 0, 0, false)
+  if te - ts <= M.TOL or r.CountSelectedTracks(0) == 0 then return nil end
+  local areas = {}
+  for i = 0, r.CountSelectedTracks(0) - 1 do
+    areas[#areas + 1] = { track = r.GetSelectedTrack(0, i), s = ts, e = te }
+  end
+  return areas
 end
 
 ----------------------------------------
