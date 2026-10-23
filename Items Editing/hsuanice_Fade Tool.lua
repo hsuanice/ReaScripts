@@ -1,6 +1,6 @@
 --[[
 @description Fade Tool - frame-grid fades and crossfades by razor, time selection, mouse or edit cursor (Smart Fade, Crossfade in Razor, Scene Cut to Razor, Settings)
-@version 26.1023.2012pre1
+@version 26.1023.2032pre1
 @author hsuanice
 @metapackage
 @provides
@@ -9,7 +9,9 @@
   [main] hsuanice_Fade Tool - Scene Cut to Razor.lua
   [main] hsuanice_Fade Tool - Settings.lua
 @changelog
-  - Fix: Smart Fade adjusts only the crossfade nearer to the mouse / edit cursor on an item with crossfades on both sides.
+  - Add: Smart Fade hold-and-drag for crossfade edges or the whole crossfade.
+  - Change: Smart Fade and Crossfade in Razor never change anything outside the arrange view (Scene Cut excepted).
+  - Change: a short Smart Fade press no longer adjusts one side of a crossfade.
 @about
   # Fade Tool
 
@@ -38,6 +40,9 @@
   = fade-out, the item name bar moving a crossfade (including AZ's way of detecting the name
   bar), razor crossfades and razor fades. The code is a new implementation by hsuanice with
   AI (Claude Code), with hsuanice's changes: frame-based defaults, no pop-up windows, Hover
-  Mode support, one-sided crossfade adjustment and Scene Cut.
+  Mode support, hold-and-drag crossfade edges and Scene Cut.
+
+  Hold-the-shortcut detection follows Sexan's "VT_SWIPE to Comp HOLD" (Virtual Track,
+  Sexan_Scripts).
 --]]
 -- This file only describes the package for ReaPack; it is not installed.

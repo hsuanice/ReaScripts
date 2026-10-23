@@ -1,10 +1,10 @@
 --[[
 @description Fade Tool - Crossfade in Razor (fit one cut to the razor area, or crossfade every cut inside it)
-@version 26.1023.2008pre1
+@version 26.1023.2032pre1
 @author hsuanice
 @noindex
 @changelog
-  - Credits: written out in full - Fade Tool is heavily based on AZ's Fade tool (ReaTeam Scripts).
+  - Change: only the part of the razor area inside the arrange view, on visible tracks, is used.
 @about
   Works only on razor edit areas (tracks and time range of each area). Never opens a window
   unless something had to be skipped.
@@ -29,7 +29,7 @@
   = fade-out, the item name bar moving a crossfade (including AZ's way of detecting the name
   bar), razor crossfades and razor fades. The code is a new implementation by hsuanice with
   AI (Claude Code), with hsuanice's changes: frame-based defaults, no pop-up windows, Hover
-  Mode support, one-sided crossfade adjustment and Scene Cut.
+  Mode support, hold-and-drag crossfade edges and Scene Cut.
 --]]
 -- hsuanice Library is a separate ReaPack package: tell the user if it is missing
 do

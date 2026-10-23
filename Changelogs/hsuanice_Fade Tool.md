@@ -1,5 +1,11 @@
 # hsuanice_Fade Tool.lua — Changelog
 
+## 26.1023.2032pre1
+
+- Add: Smart Fade hold-and-drag for crossfade edges or the whole crossfade.
+- Change: Smart Fade and Crossfade in Razor never change anything outside the arrange view (Scene Cut excepted).
+- Change: a short Smart Fade press no longer adjusts one side of a crossfade.
+
 ## 26.1023.2012pre1
 
 - Fix: Smart Fade adjusts only the crossfade nearer to the mouse / edit cursor on an item with crossfades on both sides.

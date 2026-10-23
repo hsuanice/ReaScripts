@@ -1,5 +1,10 @@
 # hsuanice_Fade Tool Core.lua — Changelog
 
+## 26.1023.2032pre1
+
+- Add: visible-area helpers (in_view, track_visible); razor / time selection areas are clipped to the arrange view.
+- Change: plain fades never touch a crossfade.
+
 ## 26.1023.2012pre1
 
 - Fix: an item with crossfades on both sides only moves the crossfade nearer to the mouse / edit cursor (a far crossfade was stretched across the item).

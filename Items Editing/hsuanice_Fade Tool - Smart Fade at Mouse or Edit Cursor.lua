@@ -1,10 +1,12 @@
 --[[
 @description Fade Tool - Smart Fade at Mouse or Edit Cursor (razor, time selection, mouse top / bottom / label, Hover Mode aware)
-@version 26.1023.2012pre1
+@version 26.1023.2032pre1
 @author hsuanice
 @noindex
 @changelog
-  - Fix: on an item with crossfades on both sides, only the crossfade nearer to the mouse / edit cursor is adjusted.
+  - Add: hold the shortcut near a crossfade edge to drag that edge, or on the name bar / inside a crossfade to drag the whole crossfade (follows Snap, one undo point; needs js_ReaScriptAPI).
+  - Change: a short press never changes a crossfade (no more one-sided adjustment by top / bottom half or mouse side); crossfaded edges are left alone.
+  - Change: never changes anything outside the arrange view (razor / time selection clipped, hidden or scrolled-out tracks and an edit cursor outside the view ignored).
 @about
   One shortcut for fades and crossfades. Never opens a window unless something had to be
   skipped. The first context that applies wins:
@@ -17,8 +19,6 @@
   3. Hover Mode ON (toggle: Hover Editing - Toggle Hover Mode), at the mouse:
      - top half: fade-in from the item start to the mouse
      - bottom half: fade-out from the mouse to the item end
-     - on a crossfade, top half moves the crossfade end to the mouse, bottom half its start
-       (adjust one side without a new razor)
      - item name bar (labels drawn above items): move the nearest crossfade of the item so it
        is centered on the mouse (length and shape kept)
      - empty arrange space: open Fade Tool - Settings
@@ -26,13 +26,22 @@
      mouse position. The mouse position follows Snap (e.g. a 1-frame grid).
   4. Hover Mode OFF (or the mouse on the ruler / TCP), at the edit cursor, on the selected
      items under it (or the items on the selected tracks):
-     - mouse left of the edit cursor: fade-in to the cursor (on a crossfade: its end)
-     - mouse right of the edit cursor: fade-out from the cursor (on a crossfade: its start)
+     - mouse left of the edit cursor: fade-in to the cursor
+     - mouse right of the edit cursor: fade-out from the cursor
      - mouse on an item name bar: move its nearest crossfade, centered on the cursor
      - mouse outside the arrange view or within 3 pixels of the cursor: the nearer item edge
-       decides, and a crossfade under the cursor is centered on it
 
-  A fade on a crossfaded edge stretches or shortens that crossfade instead of breaking it.
+  Plain fades never touch a crossfade: a crossfaded edge, or a position inside a crossfade,
+  is left alone. Crossfades are changed by razor, the name bar, or hold-and-drag:
+
+  Hold the shortcut (needs js_ReaScriptAPI) with the mouse within 1 frame (at least 4 pixels)
+  of a crossfade edge to grab that edge, or on the item name bar / inside a crossfade to grab
+  the whole crossfade; it follows the mouse (and Snap) until the key is released, one undo
+  point. The two edges stop 1 frame apart. A short press without moving the mouse is a
+  normal Smart Fade.
+
+  Never changes anything outside the arrange view: the razor / time selection part outside
+  it, tracks scrolled out of view and an edit cursor outside the view are ignored.
   Plain fades use the Fade shape from Settings (Linear by default), new crossfades the
   Crossfade shape (Equal Power by default).
 
@@ -45,7 +54,10 @@
   = fade-out, the item name bar moving a crossfade (including AZ's way of detecting the name
   bar), razor crossfades and razor fades. The code is a new implementation by hsuanice with
   AI (Claude Code), with hsuanice's changes: frame-based defaults, no pop-up windows, Hover
-  Mode support, one-sided crossfade adjustment and Scene Cut.
+  Mode support, hold-and-drag crossfade edges and Scene Cut.
+
+  Hold-the-shortcut detection follows Sexan's "VT_SWIPE to Comp HOLD" (Virtual Track,
+  Sexan_Scripts).
 --]]
 -- hsuanice Library is a separate ReaPack package: tell the user if it is missing
 do
@@ -69,11 +81,25 @@ local H = dofile(LIB .. "hsuanice_Hover.lua")
 local TITLE = "Fade Tool - Smart Fade"
 
 local S = FT.load_settings()
-local SIDE_PX = 3  -- mouse closer than this to the edit cursor = no side
+local SIDE_PX = 3   -- mouse closer than this to the edit cursor = no side
+local GRAB_PX = 4   -- minimum grab distance; the normal one is 1 frame
 local skipped = {}
 local function skip(info, t, why)
   skipped[#skipped + 1] = string.format("%s @ %s: %s",
     FT.track_name(r.GetMediaItem_Track(info.item)), FT.fmt_time(t), why)
+end
+
+local function px_to_sec(px) return px / math.max(r.GetHZoomLevel(), 1e-6) end
+local function snap(t)
+  if t and r.GetToggleCommandState(1157) == 1 then return r.SnapToGrid(0, t) end
+  return t
+end
+local function mouse_time()
+  if r.BR_PositionAtMouseCursor then
+    local t = r.BR_PositionAtMouseCursor(false)
+    if t and t >= 0 then return t end
+  end
+  return nil
 end
 
 -- Contexts 1 and 2: razor, then time selection + selected tracks
@@ -90,40 +116,41 @@ local function areas_context()
   return true
 end
 
--- Nearest crossfade of info to t: returns left, right items or nil
-local function nearest_crossfade(info, t)
-  local best_a, best_b, best_d
+-- Visible crossfades of an item: list of { a = left info, b = right info }
+local function item_crossfades(info)
+  local list = {}
   local left = FT.xfade_neighbour(info, "left")
-  if left then best_a, best_b, best_d = left, info, math.abs(t - (info.pos + left.fin) / 2) end
+  if left and FT.in_view(info.pos, left.fin) then list[#list + 1] = { a = left, b = info } end
   local right = FT.xfade_neighbour(info, "right")
-  if right then
-    local d = math.abs(t - (right.pos + info.fin) / 2)
-    if not best_d or d < best_d then best_a, best_b = info, right end
-  end
-  return best_a, best_b
+  if right and FT.in_view(right.pos, info.fin) then list[#list + 1] = { a = info, b = right } end
+  return list
 end
 
--- Name bar: center the item's nearest crossfade on t
+local function nearest_crossfade(info, t)
+  local best, best_d
+  for _, x in ipairs(item_crossfades(info)) do
+    local d = math.abs(t - (x.b.pos + x.a.fin) / 2)
+    if not best_d or d < best_d then best, best_d = x, d end
+  end
+  return best
+end
+
+-- Name bar: center the item's nearest visible crossfade on t
 local function move_nearest(it, t)
   local info = FT.info(it)
-  local a, b = nearest_crossfade(info, t)
-  if not a then skip(info, t, "no crossfade on this item") return end
-  local ok, why = FT.move_crossfade(a, b, t)
+  local x = nearest_crossfade(info, t)
+  if not x then skip(info, t, "no crossfade on this item") return end
+  local ok, why = FT.move_crossfade(x.a, x.b, t)
   if not ok then skip(info, t, why) end
 end
 
--- One-sided fades on several items; both items of a crossfade are changed only once
-local function side_fades(items, t, side)
-  local done = {}
+local function side_fades(items, t, side_of)
   for _, it in ipairs(items) do
-    if not done[it] then
-      done[it] = true
-      local info = FT.info(it)
-      if t > info.pos + FT.TOL and t < info.fin - FT.TOL then
-        local ok, why, partner = FT.side_fade(info, t, side, S)
-        if partner then done[partner] = true end
-        if not ok then skip(info, t, why) end
-      end
+    local info = FT.info(it)
+    if t > info.pos + FT.TOL and t < info.fin - FT.TOL
+      and FT.track_visible(r.GetMediaItem_Track(it)) then
+      local ok, why = FT.side_fade(info, t, side_of(info), S)
+      if not ok then skip(info, t, why) end
     end
   end
 end
@@ -139,32 +166,30 @@ local function mouse_context(t)
     items = {}
     for i = 0, r.CountSelectedMediaItems(0) - 1 do items[#items + 1] = r.GetSelectedMediaItem(0, i) end
   end
-  side_fades(items, t, (part == "top") and "in" or "out")
+  local side = (part == "top") and "in" or "out"
+  side_fades(items, t, function() return side end)
 end
 
 -- Mouse side of the edit cursor in the arrange view: "in" (left), "out" (right) or nil
 local function mouse_side(t)
   if not r.BR_GetMouseCursorContext then return nil end
-  local window = r.BR_GetMouseCursorContext()
-  if window ~= "arrange" then return nil end
+  if r.BR_GetMouseCursorContext() ~= "arrange" then return nil end
   local m = r.BR_GetMouseCursorContext_Position()
   if not m then return nil end
-  local px = SIDE_PX / math.max(r.GetHZoomLevel(), 1e-6)
-  if m < t - px then return "in" end
-  if m > t + px then return "out" end
+  if m < t - px_to_sec(SIDE_PX) then return "in" end
+  if m > t + px_to_sec(SIDE_PX) then return "out" end
   return nil
 end
 
 -- Context 4: edit cursor (Hover Mode off). Mouse left of the cursor = "in", right = "out",
--- on an item name bar = move its nearest crossfade to the cursor; otherwise the nearer
--- item edge decides and a crossfade under the cursor is centered on it.
+-- on an item name bar = move its nearest crossfade to the cursor; else the nearer edge.
 local function cursor_context(t)
+  if not FT.in_view(t) then return end
   local side = mouse_side(t)
   if side then
     local it, part = FT.mouse_item_part()
     if it and part == "label" then move_nearest(it, t) return end
   end
-
   local items = {}
   for i = 0, r.CountSelectedMediaItems(0) - 1 do items[#items + 1] = r.GetSelectedMediaItem(0, i) end
   if #items == 0 then
@@ -173,69 +198,101 @@ local function cursor_context(t)
       for j = 0, r.CountTrackMediaItems(tr) - 1 do items[#items + 1] = r.GetTrackMediaItem(tr, j) end
     end
   end
-  if side then side_fades(items, t, side) return end
+  side_fades(items, t, function(info)
+    return side or ((t - info.pos <= info.fin - t) and "in" or "out")
+  end)
+end
 
-  -- no mouse side: read every target before changing any (edges move during the pass)
-  local targets = {}
-  for _, it in ipairs(items) do
-    local o = FT.info(it)
-    if t > o.pos + FT.TOL and t < o.fin - FT.TOL then targets[#targets + 1] = o end
-  end
-  local done, jobs = {}, {}
-  for _, o in ipairs(targets) do
-    if not done[o.item] then
-      local right = FT.xfade_neighbour(o, "right")
-      if right and t > right.pos + FT.TOL then
-        done[o.item], done[right.item] = true, true
-        jobs[#jobs + 1] = { kind = "move", a = o, b = right }
-      end
-    end
-  end
-  for _, o in ipairs(targets) do
-    if not done[o.item] then
-      local left = FT.xfade_neighbour(o, "left")
-      done[o.item] = true
-      if left and t < left.fin - FT.TOL then
-        if not done[left.item] then
-          done[left.item] = true
-          jobs[#jobs + 1] = { kind = "move", a = left, b = o }
-        end
-      else
-        jobs[#jobs + 1] = { kind = (t - o.pos <= o.fin - t) and "in" or "out", o = o }
-      end
-    end
-  end
-  for _, j in ipairs(jobs) do
-    if j.kind == "move" then
-      local ok, why = FT.move_crossfade(FT.info(j.a.item), FT.info(j.b.item), t)
-      if not ok then skip(j.a, t, why) end
+-- Short press: the normal Smart Fade, one undo point
+local function tap()
+  r.Undo_BeginBlock()
+  r.PreventUIRefresh(1)
+  local result
+  if not areas_context() then
+    local t, is_hover = H.resolve_target_pos()
+    if is_hover and t then
+      result = mouse_context(snap(t))
     else
-      local info = FT.info(j.o.item)
-      local fn = (j.kind == "in") and FT.fade_in_to or FT.fade_out_from
-      local ok, why = fn(info, t, S)
-      if not ok then skip(info, t, why) end
+      cursor_context(r.GetCursorPosition())
     end
   end
+  r.PreventUIRefresh(-1)
+  r.UpdateArrange()
+  r.Undo_EndBlock(TITLE, -1)
+  FT.report(TITLE, skipped)
+  if result == "settings" then
+    local dir = debug.getinfo(1, "S").source:match("^@(.*[/\\])")
+    dofile(dir .. "hsuanice_Fade Tool - Settings.lua")
+  end
+end
+
+-- What a held key would grab at the mouse: { mode = "start" | "end" | "move", a, b } or nil
+local function grab_target(t)
+  local it, part = FT.mouse_item_part()
+  if not it then return nil end
+  local info = FT.info(it)
+  if part == "label" then
+    local x = nearest_crossfade(info, t)
+    return x and { mode = "move", a = x.a, b = x.b }
+  end
+  local reach = math.max(FT.frame_len(), px_to_sec(GRAB_PX))
+  local best, best_d
+  for _, x in ipairs(item_crossfades(info)) do
+    local ds, de = math.abs(t - x.b.pos), math.abs(t - x.a.fin)
+    if ds <= reach and (not best_d or ds < best_d) then best, best_d = { mode = "start", a = x.a, b = x.b }, ds end
+    if de <= reach and (not best_d or de < best_d) then best, best_d = { mode = "end", a = x.a, b = x.b }, de end
+    if not best and t > x.b.pos and t < x.a.fin then best = { mode = "move", a = x.a, b = x.b } end
+  end
+  return best
+end
+
+-- Hold-and-drag: follow the mouse until every key is released (pattern from Sexan's
+-- "VT_SWIPE to Comp HOLD": JS_VKeys state since launch, keys intercepted meanwhile)
+local VK_LO, VK_HI = 8, 0xFE
+local function hold(grab, t0)
+  local start = r.time_precise()
+  local none = string.rep("\0", VK_HI - VK_LO + 1)
+  local fl = FT.frame_len()
+  local xs0, xe0 = grab.b.pos, grab.a.fin
+  local moved, intercepted = false, true
+  local function release_keys()
+    if intercepted then intercepted = false; r.JS_VKeys_Intercept(-1, -1) end
+  end
+  r.JS_VKeys_Intercept(-1, 1)
+  r.atexit(release_keys)
+
+  local function step()
+    local released = r.JS_VKeys_GetState(start - 0.5):sub(VK_LO, VK_HI) == none
+    local t = snap(mouse_time())
+    if t and math.abs(t - t0) > 1e-9 then moved = true end
+    if moved and t then
+      local xs, xe = xs0, xe0
+      if grab.mode == "start" then xs = math.min(t, xe0 - fl)
+      elseif grab.mode == "end" then xe = math.max(t, xs0 + fl)
+      else xs, xe = xs0 + (t - t0), xe0 + (t - t0) end
+      r.PreventUIRefresh(1)
+      FT.crossfade(FT.info(grab.a.item), FT.info(grab.b.item), xs, xe, nil)  -- invalid = stays
+      r.PreventUIRefresh(-1)
+      r.UpdateArrange()
+    end
+    if released then
+      release_keys()
+      if moved then r.Undo_OnStateChange(TITLE .. " (drag crossfade)") else tap() end
+      return
+    end
+    r.defer(step)
+  end
+  step()
 end
 
 local function main()
-  if areas_context() then return end
-  local t, is_hover = H.resolve_target_pos()
-  if is_hover and t then
-    return mouse_context(H.snap_in_true_hover(t, true))
+  if r.JS_VKeys_GetState and #FT.get_razor_areas() == 0
+    and not (S.use_ts == 1 and FT.time_selection_areas()) then
+    local t0 = snap(mouse_time())
+    local grab = t0 and grab_target(t0)
+    if grab then hold(grab, t0) return end
   end
-  cursor_context(r.GetCursorPosition())
+  tap()
 end
 
-r.Undo_BeginBlock()
-r.PreventUIRefresh(1)
-local result = main()
-r.PreventUIRefresh(-1)
-r.UpdateArrange()
-r.Undo_EndBlock(TITLE, -1)
-FT.report(TITLE, skipped)
-
-if result == "settings" then
-  local dir = debug.getinfo(1, "S").source:match("^@(.*[/\\])")
-  dofile(dir .. "hsuanice_Fade Tool - Settings.lua")
-end
+main()

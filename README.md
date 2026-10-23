@@ -146,7 +146,7 @@ AudioSweet is inspired by the AudioSuite-like script by Tim Chimes.
 Original: "Renders selected plugin to selected media item", written for REAPER 5.1 with Lua (v1.1, 2015-12-22) —
 http://timchimes.com/scripting-with-reaper-audiosuite/
 
-Fade Tool is heavily based on AZ's *Fade tool (work on context of mouse, razor or time selection)* (ReaTeam Scripts) — https://forum.cockos.com/showthread.php?t=293335 . It closely follows AZ's design (context order razor / time selection / mouse, top half fade-in / bottom half fade-out, the item name bar moving a crossfade and AZ's way of detecting it, razor crossfades and fades); the code is a new implementation with hsuanice's changes (frame-based defaults, no pop-up windows, Hover Mode, one-sided crossfade adjustment, Scene Cut).
+Fade Tool is heavily based on AZ's *Fade tool (work on context of mouse, razor or time selection)* (ReaTeam Scripts) — https://forum.cockos.com/showthread.php?t=293335 . It closely follows AZ's design (context order razor / time selection / mouse, top half fade-in / bottom half fade-out, the item name bar moving a crossfade and AZ's way of detecting it, razor crossfades and fades); the code is a new implementation with hsuanice's changes (frame-based defaults, no pop-up windows, Hover Mode, hold-and-drag crossfades, Scene Cut). Smart Fade's hold-the-shortcut detection follows Sexan's *VT_SWIPE to Comp HOLD* (Virtual Track, Sexan_Scripts).
 
 Hover Editing - Toggle Hover Mode is based on / inspired by TJF's *Hover Mode Toggle* script.
 

@@ -1,10 +1,11 @@
 --[[
 @description hsuanice Fade Tool Core (shared razor / cut / edge / fade helpers for the Fade Tool scripts)
-@version 26.1023.2012pre1
+@version 26.1023.2032pre1
 @author hsuanice
 @noindex
 @changelog
-  - Fix: an item with crossfades on both sides only moves the crossfade nearer to the mouse / edit cursor (a far crossfade was stretched across the item).
+  - Add: visible-area helpers (in_view, track_visible); razor / time selection areas are clipped to the arrange view.
+  - Change: plain fades never touch a crossfade.
 @about
   Shared code for "Fade Tool - Crossfade in Razor", "Fade Tool - Scene Cut to Razor" and
   "Fade Tool - Settings". Settings live in the ExtState section "hsuanice_FadeTool".
@@ -16,7 +17,7 @@
   = fade-out, the item name bar moving a crossfade (including AZ's way of detecting the name
   bar), razor crossfades and razor fades. The code is a new implementation by hsuanice with
   AI (Claude Code), with hsuanice's changes: frame-based defaults, no pop-up windows, Hover
-  Mode support, one-sided crossfade adjustment and Scene Cut.
+  Mode support, hold-and-drag crossfade edges and Scene Cut.
 --]]
 local r = reaper
 local M = {}
@@ -352,65 +353,36 @@ function M.xfade_neighbour(info, side)
   return best
 end
 
--- Fade-in from the item start to t. A crossfaded start keeps its start point and the
--- crossfade is stretched or shortened to end at t (shape kept).
+-- Plain fade-in from the item start to t / fade-out from t to the item end
 function M.fade_in_to(info, t, S)
   if M.is_locked(info.item) then return false, "locked item" end
   if t <= info.pos + M.TOL or t >= info.fin - M.TOL then return false, "position is outside the item" end
-  local left = M.xfade_neighbour(info, "left")
-  if left then return M.crossfade(left, info, info.pos, t, nil) end
   M.set_fade(info.item, "IN", t - info.pos, S.fade_shape, false)
   clamp_fade(info.item, "OUT", info.fin - t)
   return true
 end
 
--- Fade-out from t to the item end (a crossfaded end: the crossfade now starts at t)
 function M.fade_out_from(info, t, S)
   if M.is_locked(info.item) then return false, "locked item" end
   if t <= info.pos + M.TOL or t >= info.fin - M.TOL then return false, "position is outside the item" end
-  local right = M.xfade_neighbour(info, "right")
-  if right then return M.crossfade(info, right, t, info.fin, nil) end
   M.set_fade(info.item, "OUT", info.fin - t, S.fade_shape, false)
   clamp_fade(info.item, "IN", t - info.pos)
   return true
 end
 
 -- One-sided fade at t: side "in" = fade-in to t, "out" = fade-out from t.
--- Inside a crossfade of the item, "in" moves the crossfade end to t and "out" its start.
--- Returns ok, why, partner (the other item of the crossfade, if one was changed)
+-- Crossfades are left alone (razor, the name bar or hold-and-drag adjust them): nothing
+-- happens when t is inside a crossfade or the faded edge is crossfaded. Returns ok, why.
 function M.side_fade(info, t, side, S)
   local left = M.xfade_neighbour(info, "left")
-  if left and t > info.pos + M.TOL and t < left.fin - M.TOL then
-    local xs, xe = info.pos, left.fin
-    if side == "in" then xe = t else xs = t end
-    local ok, why = M.crossfade(left, info, xs, xe, nil)
-    return ok, why, left.item
-  end
   local right = M.xfade_neighbour(info, "right")
-  if right and t > right.pos + M.TOL and t < info.fin - M.TOL then
-    local xs, xe = right.pos, info.fin
-    if side == "in" then xe = t else xs = t end
-    local ok, why = M.crossfade(info, right, xs, xe, nil)
-    return ok, why, right.item
-  end
-  -- Crossfades on both sides and t outside them: only the nearer crossfade moves
-  -- (its edge facing t), so a far crossfade is never stretched across the item
-  if left and right then
-    local d_left, d_right = t - left.fin, right.pos - t
-    if side == "in" and d_right < d_left then
-      local ok, why = M.crossfade(info, right, t, info.fin, nil)
-      return ok, why, right.item
-    elseif side == "out" and d_left < d_right then
-      local ok, why = M.crossfade(left, info, info.pos, t, nil)
-      return ok, why, left.item
-    end
-  end
+  if (left and t < left.fin + M.TOL) or (right and t > right.pos - M.TOL) then return true end
   if side == "in" then
-    local ok, why = M.fade_in_to(info, t, S)
-    return ok, why, left and left.item
+    if left then return true end
+    return M.fade_in_to(info, t, S)
   end
-  local ok, why = M.fade_out_from(info, t, S)
-  return ok, why, right and right.item
+  if right then return true end
+  return M.fade_out_from(info, t, S)
 end
 
 -- Move an existing crossfade (a over b) so it is centered on t; length and shape are kept
@@ -435,6 +407,43 @@ function M.mouse_item_part()
 end
 
 ----------------------------------------
+-- Visible area: the editing tools never change anything outside the arrange view
+----------------------------------------
+function M.view()
+  return r.GetSet_ArrangeView2(0, false, 0, 0, 0, 0)
+end
+
+function M.in_view(t1, t2)
+  local vs, ve = M.view()
+  return (t2 or t1) >= vs and t1 <= ve
+end
+
+local arrange_h
+local function arrange_height()
+  if arrange_h == nil then
+    arrange_h = false
+    if r.JS_Window_FindChildByID then
+      local hwnd = r.JS_Window_FindChildByID(r.GetMainHwnd(), 1000)
+      if hwnd then
+        local ok, _, h = r.JS_Window_GetClientSize(hwnd)
+        if ok then arrange_h = h end
+      end
+    end
+  end
+  return arrange_h
+end
+
+-- Track shown in the arrange view right now (vertical scroll; needs js_ReaScriptAPI,
+-- otherwise every track shown in the TCP counts)
+function M.track_visible(tr)
+  if not r.IsTrackVisible(tr, false) then return false end
+  local h = arrange_height()
+  if not h then return true end
+  local y = r.GetMediaTrackInfo_Value(tr, "I_TCPY")
+  return y + r.GetMediaTrackInfo_Value(tr, "I_TCPH") > 0 and y < h
+end
+
+----------------------------------------
 -- Razor / time selection areas
 ----------------------------------------
 -- Per track (and fixed lane) inside each area { track, s, e, top, bot }:
@@ -443,6 +452,7 @@ end
 -- - no cut: an item start / end inside the area whose other end lies outside gets a plain
 --   fade over the area; otherwise the nearest cut in the arrange view is pulled in
 --   (two equally near cuts are reported)
+-- Only the part of each area inside the arrange view is used, and only visible tracks.
 -- Returns changed count, skipped lines, touched tracks
 function M.fade_areas(areas, S)
   local fl = M.frame_len()
@@ -459,8 +469,12 @@ function M.fade_areas(areas, S)
 
   for _, area in ipairs(areas) do
     touched[area.track] = true
-    local rs, re = area.s, area.e
-    for _, list in pairs(M.lane_items(area, math.min(rs, view_s), math.max(re, view_e))) do
+    local rs, re = math.max(area.s, view_s), math.min(area.e, view_e)
+    local lanes = {}
+    if re - rs > M.TOL and M.track_visible(area.track) then
+      lanes = M.lane_items(area, view_s, view_e)
+    end
+    for _, list in pairs(lanes) do
       local cuts = M.find_cuts(list)
       local inside, outside, joined = {}, {}, {}
       for _, c in ipairs(cuts) do

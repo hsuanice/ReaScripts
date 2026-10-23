@@ -1,5 +1,9 @@
 # hsuanice_Library.lua — Changelog
 
+## 26.1023.2032pre1
+
+- Update: hsuanice_Fade Tool Core.lua (visible-area rule, plain fades leave crossfades alone).
+
 ## 26.1023.2012pre1
 
 - Update: hsuanice_Fade Tool Core.lua (Smart Fade nearest crossfade fix).
