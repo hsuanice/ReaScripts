@@ -1,11 +1,10 @@
 --[[
 @description Project Manager - PM Timer: scene-aware work timer
-@version 26.1020.1529
+@version 26.1023.1405pre1
 @author hsuanice
 @noindex  (kept in the repository as a backup; Project Manager is not offered on ReaPack for now)
 @changelog
-  - Fix: work item names stacked an outdated project prefix after the project was renamed (e.g. 'POINT R5 dialog | POINT R5 dialog_001 | POINT R5 dialog | scene'); names are now rebuilt as current prefix + work type, which also repairs existing items.
-  - Fix: a work item renamed by hand was renamed back on the next start; the new name now becomes the item's work type (and its color follows).
+  - New: right-click > Link Split Scenes - for a scene split on Scene Cut after work was logged: select all its pieces and run it; PM Insight then shares that work time between the pieces by source length. Run it with ONE scene selected to undo.
 @about
   Scene-aware toggle timer for the hsuanice PM system.
   Uses gfx (no ReaImGui). 1-second display refresh via defer + time_precise.
@@ -2475,6 +2474,58 @@ mirror_log_item_to_work_log = function(src_item)
   end
 end
 
+-- ── Link Split Scenes ───────────────────────────────────────────────────────
+-- A scene found to be wrongly cut (split in REAPER after work was logged) keeps
+-- all logged time on the piece that kept the original GUID. Select all pieces
+-- on Scene Cut and run this: every work item linked to any piece gets
+-- P_EXT:SCENE_SPLIT = "guid|guid|...", and PM Insight shares its time between
+-- the pieces by source length. Selecting ONE scene removes the sharing again.
+local function action_link_split_scenes()
+  local scene_track = get_track_by_name(SCENE_TRACK_NAME)
+  local pieces, in_set = {}, {}
+  for i = 0, r.CountSelectedMediaItems(0) - 1 do
+    local item = r.GetSelectedMediaItem(0, i)
+    if scene_track and r.GetMediaItemTrack(item) == scene_track then
+      local g = r.BR_GetMediaItemGUID(item)
+      pieces[#pieces + 1] = g; in_set[g] = true
+    end
+  end
+  if #pieces == 0 then
+    r.ShowMessageBox("Select the pieces of the split scene on the Scene Cut track"
+      .. " (or ONE scene to undo the sharing), then run Link Split Scenes again.", "PM Timer", 0)
+    return
+  end
+
+  -- Work items linked to any selected piece (by SCENE_GUID or an earlier SCENE_SPLIT)
+  local items = {}
+  for i = 0, r.CountTracks(0) - 1 do
+    local t = r.GetTrack(0, i)
+    for j = 0, r.CountTrackMediaItems(t) - 1 do
+      local item = r.GetTrackMediaItem(t, j)
+      local _, sg = r.GetSetMediaItemInfo_String(item, "P_EXT:SCENE_GUID", "", false)
+      local _, sp = r.GetSetMediaItemInfo_String(item, "P_EXT:SCENE_SPLIT", "", false)
+      local hit = in_set[sg]
+      for g in sp:gmatch("[^|]+") do if in_set[g] then hit = true end end
+      if hit then items[#items + 1] = item end
+    end
+  end
+  if #items == 0 then
+    r.ShowMessageBox("No work items are linked to the selected scene(s).", "PM Timer", 0)
+    return
+  end
+
+  local value = (#pieces > 1) and table.concat(pieces, "|") or ""
+  local msg = (#pieces > 1)
+    and string.format("Share the time of %d work item%s between the %d selected scene pieces"
+      .. " (by source length) in PM Insight?", #items, #items == 1 and "" or "s", #pieces)
+    or string.format("Remove time sharing from %d work item%s?", #items, #items == 1 and "" or "s")
+  if r.ShowMessageBox(msg, "Link Split Scenes", 1) ~= 1 then return end
+
+  r.Undo_BeginBlock()
+  for _, item in ipairs(items) do set_item_ext(item, "SCENE_SPLIT", value) end
+  r.Undo_EndBlock("PM: Link split scenes", -1)
+end
+
 -- ── Fix Duration ────────────────────────────────────────────────────────────
 -- For each selected REAPER item that has P_EXT:WORK_TYPE set,
 -- overwrite P_EXT:DURATION with the item's current D_LENGTH.
@@ -2886,7 +2937,7 @@ local function handle_mouse()
   if rb == 1 and mouse_r_prev == 0 then
     local is_docked = cur_dock ~= 0
     local dock_label = is_docked and "Undock window" or "Dock window"
-    local choice = gfx.showmenu(dock_label .. "|Fix Duration from item length|Fix Item Prefixes|Sync to Work Log|Update Scene Metadata|Relink to Selected Scene")
+    local choice = gfx.showmenu(dock_label .. "|Fix Duration from item length|Fix Item Prefixes|Sync to Work Log|Update Scene Metadata|Relink to Selected Scene|Link Split Scenes")
     if choice == 1 then
       gfx.dock(is_docked and 0 or 1)
       cur_dock = gfx.dock(-1)
@@ -2977,6 +3028,8 @@ local function handle_mouse()
           S.broken_links = #find_broken_scene_links()
         end
       end
+    elseif choice == 7 then
+      action_link_split_scenes()
     end
   end
   mouse_r_prev = rb

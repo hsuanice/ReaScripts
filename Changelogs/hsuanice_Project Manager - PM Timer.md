@@ -7,6 +7,10 @@ PM Timer - Scene-aware Work Timer
 
 **Removed from ReaPack** (2026-10-15) together with PM Insight Analyzer; the script stays in the repository (`@noindex`) as a backup.
 
+## 26.1023.1405pre1
+
+- New: right-click > Link Split Scenes - for a scene split on Scene Cut after work was logged: select all its pieces and run it; PM Insight then shares that work time between the pieces by source length. Run it with ONE scene selected to undo.
+
 ## 26.1020.1529
 
 - Fix: work item names stacked an outdated project prefix after the project was renamed (e.g. 'POINT R5 dialog | POINT R5 dialog_001 | POINT R5 dialog | scene'); names are now rebuilt as current prefix + work type, which also repairs existing items.
