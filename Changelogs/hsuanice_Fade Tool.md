@@ -1,5 +1,9 @@
 # hsuanice_Fade Tool.lua — Changelog
 
+## 26.1023.2122pre1
+
+- Fix: Smart Fade drag keeps a Cmd fine-tuned position when the keys are released.
+
 ## 26.1023.2047
 
 - Add: Smart Fade at Mouse or Edit Cursor - one shortcut that replaces a mouse / razor fade tool: razor, time selection + selected tracks, mouse (Hover Mode) or edit cursor; hold to drag crossfade edges or the whole crossfade, Cmd (Ctrl) inverts Snap.

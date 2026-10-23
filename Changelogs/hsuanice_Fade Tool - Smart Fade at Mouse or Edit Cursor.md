@@ -1,5 +1,9 @@
 # hsuanice_Fade Tool - Smart Fade at Mouse or Edit Cursor.lua — Changelog
 
+## 26.1023.2122pre1
+
+- Fix: a Cmd fine-tuned crossfade no longer jumps back to the grid when the keys are released (the drag ends when the shortcut is released, modifiers ignored; Cmd released up to 0.2 s before the shortcut keeps the free position).
+
 ## 26.1023.2047
 
 - Initial release: one shortcut for fades and crossfades - razor, then time selection + selected tracks, then the mouse (Hover Mode: top half fade-in, bottom half fade-out, name bar centers the nearest crossfade, empty space opens Settings) or the edit cursor (mouse left = fade-in, right = fade-out).

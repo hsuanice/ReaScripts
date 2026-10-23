@@ -1,6 +1,6 @@
 --[[
 @description Fade Tool - frame-grid fades and crossfades by razor, time selection, mouse or edit cursor (Smart Fade, Crossfade in Razor, Scene Cut to Razor, Settings)
-@version 26.1023.2047
+@version 26.1023.2122pre1
 @author hsuanice
 @metapackage
 @provides
@@ -9,10 +9,7 @@
   [main] hsuanice_Fade Tool - Scene Cut to Razor.lua
   [main] hsuanice_Fade Tool - Settings.lua
 @changelog
-  - Add: Smart Fade at Mouse or Edit Cursor - one shortcut that replaces a mouse / razor fade tool: razor, time selection + selected tracks, mouse (Hover Mode) or edit cursor; hold to drag crossfade edges or the whole crossfade, Cmd (Ctrl) inverts Snap.
-  - Change: Crossfade in Razor and Smart Fade never change anything outside the arrange view (Scene Cut excepted).
-  - Credits written out in full: heavily based on AZ's Fade tool; hold detection after Sexan's VT_SWIPE to Comp HOLD.
-  - Release: tested in REAPER 7.82.
+  - Fix: Smart Fade drag keeps a Cmd fine-tuned position when the keys are released.
 @about
   # Fade Tool
 

@@ -1,13 +1,10 @@
 --[[
 @description Fade Tool - Smart Fade at Mouse or Edit Cursor (razor, time selection, mouse top / bottom / label, Hover Mode aware)
-@version 26.1023.2047
+@version 26.1023.2122pre1
 @author hsuanice
 @noindex
 @changelog
-  - Initial release: one shortcut for fades and crossfades - razor, then time selection + selected tracks, then the mouse (Hover Mode: top half fade-in, bottom half fade-out, name bar centers the nearest crossfade, empty space opens Settings) or the edit cursor (mouse left = fade-in, right = fade-out).
-  - Hold the shortcut near a crossfade edge to drag it, or on the name bar / inside a crossfade to drag the whole crossfade; Cmd (Ctrl) inverts Snap while dragging.
-  - Never changes anything outside the arrange view.
-  - Release: tested in REAPER 7.82.
+  - Fix: a Cmd fine-tuned crossfade no longer jumps back to the grid when the keys are released (the drag ends when the shortcut is released, modifiers ignored; Cmd released up to 0.2 s before the shortcut keeps the free position).
 @about
   One shortcut for fades and crossfades. Never opens a window unless something had to be
   skipped. The first context that applies wins:
@@ -262,24 +259,49 @@ end
 -- Hold-and-drag: follow the mouse until every key is released (pattern from Sexan's
 -- "VT_SWIPE to Comp HOLD": JS_VKeys state since launch, keys intercepted meanwhile)
 local VK_LO, VK_HI = 8, 0xFE
+-- Modifier keys do not keep a drag alive: Shift, Ctrl, Alt, Win (left / right variants)
+local VK_MOD = { [0x10] = true, [0x11] = true, [0x12] = true, [0x5B] = true, [0x5C] = true,
+  [0xA0] = true, [0xA1] = true, [0xA2] = true, [0xA3] = true, [0xA4] = true, [0xA5] = true }
+local CMD_GRACE = 0.2  -- Cmd released this short before the shortcut keeps the free position
+
 local function hold(grab, t0)
   local start = r.time_precise()
-  local none = string.rep("\0", VK_HI - VK_LO + 1)
   local fl = FT.frame_len()
   local xs0, xe0 = grab.b.pos, grab.a.fin
   local moved, intercepted = false, true
   local project_snap = r.GetToggleCommandState(1157) == 1
   local cmd0 = cmd_down()  -- Cmd that is part of the shortcut itself does not count
+  local inverted, cmd_up_at = false, nil
   local function release_keys()
     if intercepted then intercepted = false; r.JS_VKeys_Intercept(-1, -1) end
+  end
+  local function shortcut_down()
+    local st = r.JS_VKeys_GetState(start - 0.5)
+    for vk = VK_LO, VK_HI do
+      if not VK_MOD[vk] and st:byte(vk) ~= 0 then return true end
+    end
+    return false
   end
   r.JS_VKeys_Intercept(-1, 1)
   r.atexit(release_keys)
 
   local function step()
-    local released = r.JS_VKeys_GetState(start - 0.5):sub(VK_LO, VK_HI) == none
-    -- Cmd / Ctrl while dragging inverts Snap (snap on -> free fine-tune, snap off -> grid)
-    local t = snap(mouse_time(), project_snap ~= (cmd_down() ~= cmd0))
+    -- releasing the shortcut ends the drag where it is (no new position on that frame)
+    if not shortcut_down() then
+      release_keys()
+      if moved then r.Undo_OnStateChange(TITLE .. " (drag crossfade)") else tap() end
+      return
+    end
+    -- Cmd / Ctrl inverts Snap (snap on -> free fine-tune, snap off -> grid); after Cmd is
+    -- released the snap comes back only once CMD_GRACE has passed
+    local now = r.time_precise()
+    if cmd_down() ~= cmd0 then
+      inverted, cmd_up_at = true, nil
+    elseif inverted then
+      cmd_up_at = cmd_up_at or now
+      if now - cmd_up_at >= CMD_GRACE then inverted = false end
+    end
+    local t = snap(mouse_time(), project_snap ~= inverted)
     if t and math.abs(t - t0) > 1e-9 then moved = true end
     if moved and t then
       local xs, xe = xs0, xe0
@@ -290,11 +312,6 @@ local function hold(grab, t0)
       FT.crossfade(FT.info(grab.a.item), FT.info(grab.b.item), xs, xe, nil)  -- invalid = stays
       r.PreventUIRefresh(-1)
       r.UpdateArrange()
-    end
-    if released then
-      release_keys()
-      if moved then r.Undo_OnStateChange(TITLE .. " (drag crossfade)") else tap() end
-      return
     end
     r.defer(step)
   end
