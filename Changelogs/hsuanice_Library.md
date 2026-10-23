@@ -1,5 +1,9 @@
 # hsuanice_Library.lua — Changelog
 
+## 26.1023.2008pre1
+
+- Update: hsuanice_Fade Tool Core.lua (one-sided crossfade adjustment).
+
 ## 26.1023.1958pre1
 
 - Update: hsuanice_Fade Tool Core.lua (Smart Fade support).

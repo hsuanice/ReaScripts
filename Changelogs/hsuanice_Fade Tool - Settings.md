@@ -1,5 +1,9 @@
 # hsuanice_Fade Tool - Settings.lua — Changelog
 
+## 26.1023.2008pre1
+
+- Credits: written out in full - Fade Tool is heavily based on AZ's Fade tool (ReaTeam Scripts).
+
 ## 26.1023.1958pre1
 
 - Add: Smart Fade section (Fade shape, Use time selection + selected tracks).

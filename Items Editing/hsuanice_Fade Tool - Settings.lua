@@ -1,10 +1,10 @@
 --[[
 @description Fade Tool - Settings (crossfade and scene cut fade lengths, positions and shapes)
-@version 26.1023.1958pre1
+@version 26.1023.2008pre1
 @author hsuanice
 @noindex
 @changelog
-  - Add: Smart Fade section (Fade shape, Use time selection + selected tracks).
+  - Credits: written out in full - Fade Tool is heavily based on AZ's Fade tool (ReaTeam Scripts).
 @about
   The only Fade Tool script that opens a window (native gfx: steppers, radio buttons, shape
   menu, checkbox; Enter = Save, Esc = Cancel). The other Fade Tool scripts just read these
@@ -15,6 +15,15 @@
   - Smart Fade: shape of plain fades (mouse / edit cursor / free item edges) and whether a
     time selection on the selected tracks is used when there is no razor area.
   - Shape: Linear, Equal Power, Slight / Sharp Convex, Slight / Sharp Concave, Slight / Sharp S-Curve.
+
+  Credits: heavily based on AZ's "Fade tool (work on context of mouse, razor or time
+  selection)" (ReaTeam Scripts) by AZ - https://forum.cockos.com/member.php?u=135221 ,
+  forum thread https://forum.cockos.com/showthread.php?t=293335 . Fade Tool follows its design
+  closely: the context order (razor, time selection, mouse), top half = fade-in / bottom half
+  = fade-out, the item name bar moving a crossfade (including AZ's way of detecting the name
+  bar), razor crossfades and razor fades. The code is a new implementation by hsuanice with
+  AI (Claude Code), with hsuanice's changes: frame-based defaults, no pop-up windows, Hover
+  Mode support, one-sided crossfade adjustment and Scene Cut.
 --]]
 -- hsuanice Library is a separate ReaPack package: tell the user if it is missing
 do

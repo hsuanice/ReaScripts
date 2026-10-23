@@ -1,5 +1,11 @@
 # hsuanice_Fade Tool.lua — Changelog
 
+## 26.1023.2008pre1
+
+- Add: Smart Fade adjusts one side of a crossfade (Hover: top half = end, bottom half = start; Hover off: mouse left / right of the edit cursor).
+- Add: Smart Fade over empty arrange space (Hover Mode on) opens Settings.
+- Credits: written out in full - Fade Tool is heavily based on AZ's Fade tool (ReaTeam Scripts).
+
 ## 26.1023.1958pre1
 
 - Add: Smart Fade at Mouse or Edit Cursor - razor, then time selection + selected tracks, then mouse (top half fade-in, bottom half fade-out, name bar moves the nearest crossfade) or edit cursor; shares Hover Mode with Hover Editing.

@@ -1,6 +1,6 @@
 --[[
 @description Fade Tool - frame-grid fades and crossfades by razor, time selection, mouse or edit cursor (Smart Fade, Crossfade in Razor, Scene Cut to Razor, Settings)
-@version 26.1023.1958pre1
+@version 26.1023.2008pre1
 @author hsuanice
 @metapackage
 @provides
@@ -9,8 +9,9 @@
   [main] hsuanice_Fade Tool - Scene Cut to Razor.lua
   [main] hsuanice_Fade Tool - Settings.lua
 @changelog
-  - Add: Smart Fade at Mouse or Edit Cursor - razor, then time selection + selected tracks, then mouse (top half fade-in, bottom half fade-out, name bar moves the nearest crossfade) or edit cursor; shares Hover Mode with Hover Editing.
-  - Add: Crossfade in Razor fades a free item edge inside the razor area.
+  - Add: Smart Fade adjusts one side of a crossfade (Hover: top half = end, bottom half = start; Hover off: mouse left / right of the edit cursor).
+  - Add: Smart Fade over empty arrange space (Hover Mode on) opens Settings.
+  - Credits: written out in full - Fade Tool is heavily based on AZ's Fade tool (ReaTeam Scripts).
 @about
   # Fade Tool
 
@@ -32,7 +33,13 @@
   Requires the hsuanice Library package. Hover Mode needs SWS and the Hover Editing package
   (Toggle Hover Mode); without them Smart Fade works at the edit cursor.
 
-  Design inspired by AZ's "Fade tool (work on context of mouse, razor or time selection)"
-  (ReaTeam Scripts, https://forum.cockos.com/showthread.php?t=293335). No code was copied.
+  Credits: heavily based on AZ's "Fade tool (work on context of mouse, razor or time
+  selection)" (ReaTeam Scripts) by AZ - https://forum.cockos.com/member.php?u=135221 ,
+  forum thread https://forum.cockos.com/showthread.php?t=293335 . Fade Tool follows its design
+  closely: the context order (razor, time selection, mouse), top half = fade-in / bottom half
+  = fade-out, the item name bar moving a crossfade (including AZ's way of detecting the name
+  bar), razor crossfades and razor fades. The code is a new implementation by hsuanice with
+  AI (Claude Code), with hsuanice's changes: frame-based defaults, no pop-up windows, Hover
+  Mode support, one-sided crossfade adjustment and Scene Cut.
 --]]
 -- This file only describes the package for ReaPack; it is not installed.

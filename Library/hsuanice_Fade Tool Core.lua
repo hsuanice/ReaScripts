@@ -1,18 +1,23 @@
 --[[
 @description hsuanice Fade Tool Core (shared razor / cut / edge / fade helpers for the Fade Tool scripts)
-@version 26.1023.1958pre1
+@version 26.1023.2008pre1
 @author hsuanice
 @noindex
 @changelog
-  - Add: Smart Fade helpers (fade to mouse / cursor, crossfade neighbours, move crossfade, item name bar detection, time selection areas).
-  - Add: a free item start / end inside a razor area gets a plain fade over the area.
-  - Add: Fade shape and Use time selection settings.
+  - Add: side_fade() - one-sided fade or crossfade end / start adjustment.
+  - Credits: written out in full - Fade Tool is heavily based on AZ's Fade tool (ReaTeam Scripts).
 @about
   Shared code for "Fade Tool - Crossfade in Razor", "Fade Tool - Scene Cut to Razor" and
   "Fade Tool - Settings". Settings live in the ExtState section "hsuanice_FadeTool".
 
-  Design inspired by AZ's "Fade tool (work on context of mouse, razor or time selection)"
-  (ReaTeam Scripts). No code was copied.
+  Credits: heavily based on AZ's "Fade tool (work on context of mouse, razor or time
+  selection)" (ReaTeam Scripts) by AZ - https://forum.cockos.com/member.php?u=135221 ,
+  forum thread https://forum.cockos.com/showthread.php?t=293335 . Fade Tool follows its design
+  closely: the context order (razor, time selection, mouse), top half = fade-in / bottom half
+  = fade-out, the item name bar moving a crossfade (including AZ's way of detecting the name
+  bar), razor crossfades and razor fades. The code is a new implementation by hsuanice with
+  AI (Claude Code), with hsuanice's changes: frame-based defaults, no pop-up windows, Hover
+  Mode support, one-sided crossfade adjustment and Scene Cut.
 --]]
 local r = reaper
 local M = {}
@@ -371,6 +376,32 @@ function M.fade_out_from(info, t, S)
   return true
 end
 
+-- One-sided fade at t: side "in" = fade-in to t, "out" = fade-out from t.
+-- Inside a crossfade of the item, "in" moves the crossfade end to t and "out" its start.
+-- Returns ok, why, partner (the other item of the crossfade, if one was changed)
+function M.side_fade(info, t, side, S)
+  local left = M.xfade_neighbour(info, "left")
+  if left and t > info.pos + M.TOL and t < left.fin - M.TOL then
+    local xs, xe = info.pos, left.fin
+    if side == "in" then xe = t else xs = t end
+    local ok, why = M.crossfade(left, info, xs, xe, nil)
+    return ok, why, left.item
+  end
+  local right = M.xfade_neighbour(info, "right")
+  if right and t > right.pos + M.TOL and t < info.fin - M.TOL then
+    local xs, xe = right.pos, info.fin
+    if side == "in" then xe = t else xs = t end
+    local ok, why = M.crossfade(info, right, xs, xe, nil)
+    return ok, why, right.item
+  end
+  if side == "in" then
+    local ok, why = M.fade_in_to(info, t, S)
+    return ok, why, left and left.item
+  end
+  local ok, why = M.fade_out_from(info, t, S)
+  return ok, why, right and right.item
+end
+
 -- Move an existing crossfade (a over b) so it is centered on t; length and shape are kept
 function M.move_crossfade(a, b, t)
   local len = a.fin - b.pos
@@ -379,8 +410,8 @@ function M.move_crossfade(a, b, t)
 end
 
 -- Item under the mouse and the part of it: "label" (name bar), "top" or "bottom" half.
--- Probing technique from AZ's Fade tool: step down from the mouse by the item height and
--- check whether the same item is still under that point.
+-- Name bar detection taken from AZ's Fade tool (GetTopBottomItemHalf): step down from the
+-- mouse by the item height and check whether the same item is still under that point.
 function M.mouse_item_part()
   local x, y = r.GetMousePosition()
   local it = r.GetItemFromPoint(x, y, true)

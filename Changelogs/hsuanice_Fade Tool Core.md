@@ -1,5 +1,10 @@
 # hsuanice_Fade Tool Core.lua — Changelog
 
+## 26.1023.2008pre1
+
+- Add: side_fade() - one-sided fade or crossfade end / start adjustment.
+- Credits: written out in full - Fade Tool is heavily based on AZ's Fade tool (ReaTeam Scripts).
+
 ## 26.1023.1958pre1
 
 - Add: Smart Fade helpers (fade to mouse / cursor, crossfade neighbours, move crossfade, item name bar detection, time selection areas).
