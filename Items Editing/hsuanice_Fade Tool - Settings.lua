@@ -1,10 +1,11 @@
 --[[
 @description Fade Tool - Settings (crossfade and scene cut fade lengths, positions and shapes)
-@version 26.1023.2008pre1
+@version 26.1023.2047
 @author hsuanice
 @noindex
 @changelog
-  - Credits: written out in full - Fade Tool is heavily based on AZ's Fade tool (ReaTeam Scripts).
+  - Add: Smart Fade section (Fade shape, Use time selection + selected tracks).
+  - Release: tested in REAPER 7.82.
 @about
   The only Fade Tool script that opens a window (native gfx: steppers, radio buttons, shape
   menu, checkbox; Enter = Save, Esc = Cancel). The other Fade Tool scripts just read these

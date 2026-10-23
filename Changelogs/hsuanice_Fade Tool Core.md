@@ -1,5 +1,10 @@
 # hsuanice_Fade Tool Core.lua — Changelog
 
+## 26.1023.2047
+
+- Smart Fade support: mouse / edit cursor fades, name bar crossfade move, visible-area rule (razor / time selection clipped to the arrange view), plain fades never touch a crossfade.
+- Release: tested in REAPER 7.82.
+
 ## 26.1023.2032pre1
 
 - Add: visible-area helpers (in_view, track_visible); razor / time selection areas are clipped to the arrange view.

@@ -1,5 +1,11 @@
 # hsuanice_Fade Tool - Crossfade in Razor.lua — Changelog
 
+## 26.1023.2047
+
+- Add: a free item start / end inside the razor area gets a plain fade over the area.
+- Change: only the part of the razor area inside the arrange view, on visible tracks, is used.
+- Release: tested in REAPER 7.82.
+
 ## 26.1023.2032pre1
 
 - Change: only the part of the razor area inside the arrange view, on visible tracks, is used.

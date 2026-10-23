@@ -1,10 +1,13 @@
 --[[
 @description Fade Tool - Smart Fade at Mouse or Edit Cursor (razor, time selection, mouse top / bottom / label, Hover Mode aware)
-@version 26.1023.2042pre1
+@version 26.1023.2047
 @author hsuanice
 @noindex
 @changelog
-  - Add: hold Cmd (Ctrl on Windows) while dragging a crossfade to invert Snap - free fine-tuning when Snap is on, grid snapping when it is off.
+  - Initial release: one shortcut for fades and crossfades - razor, then time selection + selected tracks, then the mouse (Hover Mode: top half fade-in, bottom half fade-out, name bar centers the nearest crossfade, empty space opens Settings) or the edit cursor (mouse left = fade-in, right = fade-out).
+  - Hold the shortcut near a crossfade edge to drag it, or on the name bar / inside a crossfade to drag the whole crossfade; Cmd (Ctrl) inverts Snap while dragging.
+  - Never changes anything outside the arrange view.
+  - Release: tested in REAPER 7.82.
 @about
   One shortcut for fades and crossfades. Never opens a window unless something had to be
   skipped. The first context that applies wins:

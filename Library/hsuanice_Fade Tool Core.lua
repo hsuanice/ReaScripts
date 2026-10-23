@@ -1,11 +1,11 @@
 --[[
 @description hsuanice Fade Tool Core (shared razor / cut / edge / fade helpers for the Fade Tool scripts)
-@version 26.1023.2032pre1
+@version 26.1023.2047
 @author hsuanice
 @noindex
 @changelog
-  - Add: visible-area helpers (in_view, track_visible); razor / time selection areas are clipped to the arrange view.
-  - Change: plain fades never touch a crossfade.
+  - Smart Fade support: mouse / edit cursor fades, name bar crossfade move, visible-area rule (razor / time selection clipped to the arrange view), plain fades never touch a crossfade.
+  - Release: tested in REAPER 7.82.
 @about
   Shared code for "Fade Tool - Crossfade in Razor", "Fade Tool - Scene Cut to Razor" and
   "Fade Tool - Settings". Settings live in the ExtState section "hsuanice_FadeTool".

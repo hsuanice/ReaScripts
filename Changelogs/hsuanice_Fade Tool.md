@@ -1,5 +1,12 @@
 # hsuanice_Fade Tool.lua — Changelog
 
+## 26.1023.2047
+
+- Add: Smart Fade at Mouse or Edit Cursor - one shortcut that replaces a mouse / razor fade tool: razor, time selection + selected tracks, mouse (Hover Mode) or edit cursor; hold to drag crossfade edges or the whole crossfade, Cmd (Ctrl) inverts Snap.
+- Change: Crossfade in Razor and Smart Fade never change anything outside the arrange view (Scene Cut excepted).
+- Credits written out in full: heavily based on AZ's Fade tool; hold detection after Sexan's VT_SWIPE to Comp HOLD.
+- Release: tested in REAPER 7.82.
+
 ## 26.1023.2042pre1
 
 - Add: Smart Fade drag - hold Cmd (Ctrl on Windows) to invert Snap for fine-tuning.

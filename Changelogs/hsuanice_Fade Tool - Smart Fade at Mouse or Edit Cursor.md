@@ -1,5 +1,12 @@
 # hsuanice_Fade Tool - Smart Fade at Mouse or Edit Cursor.lua — Changelog
 
+## 26.1023.2047
+
+- Initial release: one shortcut for fades and crossfades - razor, then time selection + selected tracks, then the mouse (Hover Mode: top half fade-in, bottom half fade-out, name bar centers the nearest crossfade, empty space opens Settings) or the edit cursor (mouse left = fade-in, right = fade-out).
+- Hold the shortcut near a crossfade edge to drag it, or on the name bar / inside a crossfade to drag the whole crossfade; Cmd (Ctrl) inverts Snap while dragging.
+- Never changes anything outside the arrange view.
+- Release: tested in REAPER 7.82.
+
 ## 26.1023.2042pre1
 
 - Add: hold Cmd (Ctrl on Windows) while dragging a crossfade to invert Snap - free fine-tuning when Snap is on, grid snapping when it is off.
