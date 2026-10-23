@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<index version="1" name="hsuanice Scripts" commit="63c9b8daadb632238264427151c64f5186554690">
+<index version="1" name="hsuanice Scripts" commit="fbd59464b2dd2022282c8569ec4f91c1ef9e2a27">
   <category name="Conform">
     <reapack name="hsuanice_Conform List Browser - CLB.lua" type="script" desc="Conform List Browser - CLB: conform EDL / AAF / XML / OTIO / subtitle lists (GUI + Jump / Link / Load / Reveal)">
       <metadata>
@@ -203,7 +203,7 @@
         <source main="main">https://github.com/hsuanice/ReaScripts/raw/69a8697e1b54666ea7228379b1490811fd778fa8/Items%20Editing/hsuanice_Explode%20Takes%20Across%20Tracks.lua</source>
       </version>
     </reapack>
-    <reapack name="hsuanice_Fade Tool.lua" type="script" desc="Fade Tool - razor-based crossfades and scene cut fades on the frame grid (Crossfade in Razor, Scene Cut to Razor, Settings)">
+    <reapack name="hsuanice_Fade Tool.lua" type="script" desc="Fade Tool - frame-grid fades and crossfades by razor, time selection, mouse or edit cursor (Smart Fade, Crossfade in Razor, Scene Cut to Razor, Settings)">
       <metadata>
         <description><![CDATA[{\rtf1\ansi\deff0{\fonttbl{\f0 \fswiss Helvetica;}{\f1 \fmodern Courier;}}
 {\colortbl;\red255\green0\blue0;\red0\green0\blue255;}
@@ -211,11 +211,13 @@
 
 {\pard \ql \f0 \sa180 \li0 \fi0 \outlinelevel0 \b \fs36 Fade Tool\par}
 {\pard \ql \f0 \sa180 \li0 \fi0 Frame-accurate fades for frame-grid editing. Everything works on razor edit areas and never opens a window unless something had to be skipped.\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Smart Fade at Mouse or Edit Cursor: one shortcut for everything. Razor first, then time selection + selected tracks, then the mouse (Hover Mode on: top half = fade-in, bottom half = fade-out, item name bar = move the nearest crossfade centered on the mouse), else the edit cursor. Shares Hover Mode with Hover Editing - Toggle Hover Mode.\par}
 {\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Crossfade in Razor: one cut in the razor area -> the crossfade fills the area exactly; no cut -> the nearest visible cut is moved into the area; several cuts -> each gets the default crossfade (e.g. 1 frame before the cut). Default shape: Equal Power.\par}
 {\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Scene Cut to Razor: the razor area is the scene; only the first and last item are trimmed or extended, with a fade-in before the scene start and a fade-out on its last frame (1 frame Linear by default). Items in between stay untouched.\par}
 {\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Settings: lengths in frames, positions (before / center / after) and shapes.\sa180\par}
-{\pard \ql \f0 \sa180 \li0 \fi0 Requires the hsuanice Library package.\par}
-{\pard \ql \f0 \sa180 \li0 \fi0 Design inspired by AZ's "Fade tool (work on context of mouse, razor or time selection)" (ReaTeam Scripts, https://forum.cockos.com/showthread.php?t=293335). No code was copied.\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 Requires the hsuanice Library package. Hover Mode needs SWS and the Hover Editing package (Toggle Hover Mode); without them Smart Fade works at the edit cursor.\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 Credits: heavily based on AZ's "Fade tool (work on context of mouse, razor or time selection)" (ReaTeam Scripts) by AZ - https://forum.cockos.com/member.php?u=135221 , forum thread https://forum.cockos.com/showthread.php?t=293335 . Fade Tool follows its design closely: the context order (razor, time selection, mouse), top half = fade-in / bottom half = fade-out, the item name bar moving a crossfade (including AZ's way of detecting the name bar), razor crossfades and razor fades. The code is a new implementation by hsuanice with AI (Claude Code), with hsuanice's changes: frame-based defaults, no pop-up windows, Hover Mode support, hold-and-drag crossfade edges and Scene Cut.\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 Hold-the-shortcut detection follows Sexan's "VT_SWIPE to Comp HOLD" (Virtual Track, Sexan_Scripts).\par}
 }
 ]]></description>
       </metadata>
@@ -255,6 +257,39 @@
         <source main="main" file="hsuanice_Fade Tool - Crossfade in Razor.lua">https://github.com/hsuanice/ReaScripts/raw/63c9b8daadb632238264427151c64f5186554690/Items%20Editing/hsuanice_Fade%20Tool%20-%20Crossfade%20in%20Razor.lua</source>
         <source main="main" file="hsuanice_Fade Tool - Scene Cut to Razor.lua">https://github.com/hsuanice/ReaScripts/raw/63c9b8daadb632238264427151c64f5186554690/Items%20Editing/hsuanice_Fade%20Tool%20-%20Scene%20Cut%20to%20Razor.lua</source>
         <source main="main" file="hsuanice_Fade Tool - Settings.lua">https://github.com/hsuanice/ReaScripts/raw/63c9b8daadb632238264427151c64f5186554690/Items%20Editing/hsuanice_Fade%20Tool%20-%20Settings.lua</source>
+      </version>
+      <version name="26.1023.1958pre1" author="hsuanice" time="2026-10-23T11:58:29Z">
+        <changelog><![CDATA[- Add: Smart Fade at Mouse or Edit Cursor - razor, then time selection + selected tracks, then mouse (top half fade-in, bottom half fade-out, name bar moves the nearest crossfade) or edit cursor; shares Hover Mode with Hover Editing.
+- Add: Crossfade in Razor fades a free item edge inside the razor area.]]></changelog>
+        <source main="main" file="hsuanice_Fade Tool - Smart Fade at Mouse or Edit Cursor.lua">https://github.com/hsuanice/ReaScripts/raw/b49a6160435ae611c07f3da3745144615538a485/Items%20Editing/hsuanice_Fade%20Tool%20-%20Smart%20Fade%20at%20Mouse%20or%20Edit%20Cursor.lua</source>
+        <source main="main" file="hsuanice_Fade Tool - Crossfade in Razor.lua">https://github.com/hsuanice/ReaScripts/raw/b49a6160435ae611c07f3da3745144615538a485/Items%20Editing/hsuanice_Fade%20Tool%20-%20Crossfade%20in%20Razor.lua</source>
+        <source main="main" file="hsuanice_Fade Tool - Scene Cut to Razor.lua">https://github.com/hsuanice/ReaScripts/raw/b49a6160435ae611c07f3da3745144615538a485/Items%20Editing/hsuanice_Fade%20Tool%20-%20Scene%20Cut%20to%20Razor.lua</source>
+        <source main="main" file="hsuanice_Fade Tool - Settings.lua">https://github.com/hsuanice/ReaScripts/raw/b49a6160435ae611c07f3da3745144615538a485/Items%20Editing/hsuanice_Fade%20Tool%20-%20Settings.lua</source>
+      </version>
+      <version name="26.1023.2008pre1" author="hsuanice" time="2026-10-23T12:08:49Z">
+        <changelog><![CDATA[- Add: Smart Fade adjusts one side of a crossfade (Hover: top half = end, bottom half = start; Hover off: mouse left / right of the edit cursor).
+- Add: Smart Fade over empty arrange space (Hover Mode on) opens Settings.
+- Credits: written out in full - Fade Tool is heavily based on AZ's Fade tool (ReaTeam Scripts).]]></changelog>
+        <source main="main" file="hsuanice_Fade Tool - Smart Fade at Mouse or Edit Cursor.lua">https://github.com/hsuanice/ReaScripts/raw/5be1ad5e40a527f0b3d5698c1de1ea950163deb7/Items%20Editing/hsuanice_Fade%20Tool%20-%20Smart%20Fade%20at%20Mouse%20or%20Edit%20Cursor.lua</source>
+        <source main="main" file="hsuanice_Fade Tool - Crossfade in Razor.lua">https://github.com/hsuanice/ReaScripts/raw/5be1ad5e40a527f0b3d5698c1de1ea950163deb7/Items%20Editing/hsuanice_Fade%20Tool%20-%20Crossfade%20in%20Razor.lua</source>
+        <source main="main" file="hsuanice_Fade Tool - Scene Cut to Razor.lua">https://github.com/hsuanice/ReaScripts/raw/5be1ad5e40a527f0b3d5698c1de1ea950163deb7/Items%20Editing/hsuanice_Fade%20Tool%20-%20Scene%20Cut%20to%20Razor.lua</source>
+        <source main="main" file="hsuanice_Fade Tool - Settings.lua">https://github.com/hsuanice/ReaScripts/raw/5be1ad5e40a527f0b3d5698c1de1ea950163deb7/Items%20Editing/hsuanice_Fade%20Tool%20-%20Settings.lua</source>
+      </version>
+      <version name="26.1023.2012pre1" author="hsuanice" time="2026-10-23T12:13:18Z">
+        <changelog><![CDATA[- Fix: Smart Fade adjusts only the crossfade nearer to the mouse / edit cursor on an item with crossfades on both sides.]]></changelog>
+        <source main="main" file="hsuanice_Fade Tool - Smart Fade at Mouse or Edit Cursor.lua">https://github.com/hsuanice/ReaScripts/raw/e350178497dbb052158b72cb3ba8d73c0bcc18ef/Items%20Editing/hsuanice_Fade%20Tool%20-%20Smart%20Fade%20at%20Mouse%20or%20Edit%20Cursor.lua</source>
+        <source main="main" file="hsuanice_Fade Tool - Crossfade in Razor.lua">https://github.com/hsuanice/ReaScripts/raw/e350178497dbb052158b72cb3ba8d73c0bcc18ef/Items%20Editing/hsuanice_Fade%20Tool%20-%20Crossfade%20in%20Razor.lua</source>
+        <source main="main" file="hsuanice_Fade Tool - Scene Cut to Razor.lua">https://github.com/hsuanice/ReaScripts/raw/e350178497dbb052158b72cb3ba8d73c0bcc18ef/Items%20Editing/hsuanice_Fade%20Tool%20-%20Scene%20Cut%20to%20Razor.lua</source>
+        <source main="main" file="hsuanice_Fade Tool - Settings.lua">https://github.com/hsuanice/ReaScripts/raw/e350178497dbb052158b72cb3ba8d73c0bcc18ef/Items%20Editing/hsuanice_Fade%20Tool%20-%20Settings.lua</source>
+      </version>
+      <version name="26.1023.2032pre1" author="hsuanice" time="2026-10-23T12:33:37Z">
+        <changelog><![CDATA[- Add: Smart Fade hold-and-drag for crossfade edges or the whole crossfade.
+- Change: Smart Fade and Crossfade in Razor never change anything outside the arrange view (Scene Cut excepted).
+- Change: a short Smart Fade press no longer adjusts one side of a crossfade.]]></changelog>
+        <source main="main" file="hsuanice_Fade Tool - Smart Fade at Mouse or Edit Cursor.lua">https://github.com/hsuanice/ReaScripts/raw/fbd59464b2dd2022282c8569ec4f91c1ef9e2a27/Items%20Editing/hsuanice_Fade%20Tool%20-%20Smart%20Fade%20at%20Mouse%20or%20Edit%20Cursor.lua</source>
+        <source main="main" file="hsuanice_Fade Tool - Crossfade in Razor.lua">https://github.com/hsuanice/ReaScripts/raw/fbd59464b2dd2022282c8569ec4f91c1ef9e2a27/Items%20Editing/hsuanice_Fade%20Tool%20-%20Crossfade%20in%20Razor.lua</source>
+        <source main="main" file="hsuanice_Fade Tool - Scene Cut to Razor.lua">https://github.com/hsuanice/ReaScripts/raw/fbd59464b2dd2022282c8569ec4f91c1ef9e2a27/Items%20Editing/hsuanice_Fade%20Tool%20-%20Scene%20Cut%20to%20Razor.lua</source>
+        <source main="main" file="hsuanice_Fade Tool - Settings.lua">https://github.com/hsuanice/ReaScripts/raw/fbd59464b2dd2022282c8569ec4f91c1ef9e2a27/Items%20Editing/hsuanice_Fade%20Tool%20-%20Settings.lua</source>
       </version>
     </reapack>
     <reapack name="hsuanice_Hover Editing.lua" type="script" desc="Hover Editing - Pro Tools-style Split / Trim at the mouse or edit cursor (Toggle Hover Mode, Split, Trim Left / Right)">
@@ -752,6 +787,98 @@
         <source file="hsuanice_Fade Tool Core.lua">https://github.com/hsuanice/ReaScripts/raw/63c9b8daadb632238264427151c64f5186554690/Library/hsuanice_Fade%20Tool%20Core.lua</source>
         <source file="json.lua">https://github.com/hsuanice/ReaScripts/raw/63c9b8daadb632238264427151c64f5186554690/Library/json.lua</source>
       </version>
+      <version name="26.1023.1958pre1" author="hsuanice" time="2026-10-23T11:58:29Z">
+        <changelog><![CDATA[- Update: hsuanice_Fade Tool Core.lua (Smart Fade support).]]></changelog>
+        <source file="hsuanice_RGWH Core.lua">https://github.com/hsuanice/ReaScripts/raw/b49a6160435ae611c07f3da3745144615538a485/Library/hsuanice_RGWH%20Core.lua</source>
+        <source file="hsuanice_AudioSweet Core.lua">https://github.com/hsuanice/ReaScripts/raw/b49a6160435ae611c07f3da3745144615538a485/Library/hsuanice_AudioSweet%20Core.lua</source>
+        <source file="hsuanice_AS Preview Core.lua">https://github.com/hsuanice/ReaScripts/raw/b49a6160435ae611c07f3da3745144615538a485/Library/hsuanice_AS%20Preview%20Core.lua</source>
+        <source file="hsuanice_Metadata Embed.lua">https://github.com/hsuanice/ReaScripts/raw/b49a6160435ae611c07f3da3745144615538a485/Library/hsuanice_Metadata%20Embed.lua</source>
+        <source file="hsuanice_Metadata Read.lua">https://github.com/hsuanice/ReaScripts/raw/b49a6160435ae611c07f3da3745144615538a485/Library/hsuanice_Metadata%20Read.lua</source>
+        <source file="hsuanice_Hover.lua">https://github.com/hsuanice/ReaScripts/raw/b49a6160435ae611c07f3da3745144615538a485/Library/hsuanice_Hover.lua</source>
+        <source file="hsuanice_Mouse.lua">https://github.com/hsuanice/ReaScripts/raw/b49a6160435ae611c07f3da3745144615538a485/Library/hsuanice_Mouse.lua</source>
+        <source file="hsuanice_Metadata Cache.lua">https://github.com/hsuanice/ReaScripts/raw/b49a6160435ae611c07f3da3745144615538a485/Library/hsuanice_Metadata%20Cache.lua</source>
+        <source file="hsuanice_Metadata Rename Core.lua">https://github.com/hsuanice/ReaScripts/raw/b49a6160435ae611c07f3da3745144615538a485/Library/hsuanice_Metadata%20Rename%20Core.lua</source>
+        <source file="hsuanice_List Table.lua">https://github.com/hsuanice/ReaScripts/raw/b49a6160435ae611c07f3da3745144615538a485/Library/hsuanice_List%20Table.lua</source>
+        <source file="hsuanice_Time Format.lua">https://github.com/hsuanice/ReaScripts/raw/b49a6160435ae611c07f3da3745144615538a485/Library/hsuanice_Time%20Format.lua</source>
+        <source file="hsuanice_Metadata Generator.lua">https://github.com/hsuanice/ReaScripts/raw/b49a6160435ae611c07f3da3745144615538a485/Library/hsuanice_Metadata%20Generator.lua</source>
+        <source file="hsuanice_CLB Compare Engine.lua">https://github.com/hsuanice/ReaScripts/raw/b49a6160435ae611c07f3da3745144615538a485/Library/hsuanice_CLB%20Compare%20Engine.lua</source>
+        <source file="hsuanice_EDL Parser.lua">https://github.com/hsuanice/ReaScripts/raw/b49a6160435ae611c07f3da3745144615538a485/Library/hsuanice_EDL%20Parser.lua</source>
+        <source file="hsuanice_Session Fix Core.lua">https://github.com/hsuanice/ReaScripts/raw/b49a6160435ae611c07f3da3745144615538a485/Library/hsuanice_Session%20Fix%20Core.lua</source>
+        <source file="hsuanice_OTIO Bridge.lua">https://github.com/hsuanice/ReaScripts/raw/b49a6160435ae611c07f3da3745144615538a485/Library/hsuanice_OTIO%20Bridge.lua</source>
+        <source file="hsuanice_Subtitle Bridge.lua">https://github.com/hsuanice/ReaScripts/raw/b49a6160435ae611c07f3da3745144615538a485/Library/hsuanice_Subtitle%20Bridge.lua</source>
+        <source file="hsuanice_Process Exec.lua">https://github.com/hsuanice/ReaScripts/raw/b49a6160435ae611c07f3da3745144615538a485/Library/hsuanice_Process%20Exec.lua</source>
+        <source file="hsuanice_Fade Tool Core.lua">https://github.com/hsuanice/ReaScripts/raw/b49a6160435ae611c07f3da3745144615538a485/Library/hsuanice_Fade%20Tool%20Core.lua</source>
+        <source file="json.lua">https://github.com/hsuanice/ReaScripts/raw/b49a6160435ae611c07f3da3745144615538a485/Library/json.lua</source>
+      </version>
+      <version name="26.1023.2008pre1" author="hsuanice" time="2026-10-23T12:08:49Z">
+        <changelog><![CDATA[- Update: hsuanice_Fade Tool Core.lua (one-sided crossfade adjustment).]]></changelog>
+        <source file="hsuanice_RGWH Core.lua">https://github.com/hsuanice/ReaScripts/raw/5be1ad5e40a527f0b3d5698c1de1ea950163deb7/Library/hsuanice_RGWH%20Core.lua</source>
+        <source file="hsuanice_AudioSweet Core.lua">https://github.com/hsuanice/ReaScripts/raw/5be1ad5e40a527f0b3d5698c1de1ea950163deb7/Library/hsuanice_AudioSweet%20Core.lua</source>
+        <source file="hsuanice_AS Preview Core.lua">https://github.com/hsuanice/ReaScripts/raw/5be1ad5e40a527f0b3d5698c1de1ea950163deb7/Library/hsuanice_AS%20Preview%20Core.lua</source>
+        <source file="hsuanice_Metadata Embed.lua">https://github.com/hsuanice/ReaScripts/raw/5be1ad5e40a527f0b3d5698c1de1ea950163deb7/Library/hsuanice_Metadata%20Embed.lua</source>
+        <source file="hsuanice_Metadata Read.lua">https://github.com/hsuanice/ReaScripts/raw/5be1ad5e40a527f0b3d5698c1de1ea950163deb7/Library/hsuanice_Metadata%20Read.lua</source>
+        <source file="hsuanice_Hover.lua">https://github.com/hsuanice/ReaScripts/raw/5be1ad5e40a527f0b3d5698c1de1ea950163deb7/Library/hsuanice_Hover.lua</source>
+        <source file="hsuanice_Mouse.lua">https://github.com/hsuanice/ReaScripts/raw/5be1ad5e40a527f0b3d5698c1de1ea950163deb7/Library/hsuanice_Mouse.lua</source>
+        <source file="hsuanice_Metadata Cache.lua">https://github.com/hsuanice/ReaScripts/raw/5be1ad5e40a527f0b3d5698c1de1ea950163deb7/Library/hsuanice_Metadata%20Cache.lua</source>
+        <source file="hsuanice_Metadata Rename Core.lua">https://github.com/hsuanice/ReaScripts/raw/5be1ad5e40a527f0b3d5698c1de1ea950163deb7/Library/hsuanice_Metadata%20Rename%20Core.lua</source>
+        <source file="hsuanice_List Table.lua">https://github.com/hsuanice/ReaScripts/raw/5be1ad5e40a527f0b3d5698c1de1ea950163deb7/Library/hsuanice_List%20Table.lua</source>
+        <source file="hsuanice_Time Format.lua">https://github.com/hsuanice/ReaScripts/raw/5be1ad5e40a527f0b3d5698c1de1ea950163deb7/Library/hsuanice_Time%20Format.lua</source>
+        <source file="hsuanice_Metadata Generator.lua">https://github.com/hsuanice/ReaScripts/raw/5be1ad5e40a527f0b3d5698c1de1ea950163deb7/Library/hsuanice_Metadata%20Generator.lua</source>
+        <source file="hsuanice_CLB Compare Engine.lua">https://github.com/hsuanice/ReaScripts/raw/5be1ad5e40a527f0b3d5698c1de1ea950163deb7/Library/hsuanice_CLB%20Compare%20Engine.lua</source>
+        <source file="hsuanice_EDL Parser.lua">https://github.com/hsuanice/ReaScripts/raw/5be1ad5e40a527f0b3d5698c1de1ea950163deb7/Library/hsuanice_EDL%20Parser.lua</source>
+        <source file="hsuanice_Session Fix Core.lua">https://github.com/hsuanice/ReaScripts/raw/5be1ad5e40a527f0b3d5698c1de1ea950163deb7/Library/hsuanice_Session%20Fix%20Core.lua</source>
+        <source file="hsuanice_OTIO Bridge.lua">https://github.com/hsuanice/ReaScripts/raw/5be1ad5e40a527f0b3d5698c1de1ea950163deb7/Library/hsuanice_OTIO%20Bridge.lua</source>
+        <source file="hsuanice_Subtitle Bridge.lua">https://github.com/hsuanice/ReaScripts/raw/5be1ad5e40a527f0b3d5698c1de1ea950163deb7/Library/hsuanice_Subtitle%20Bridge.lua</source>
+        <source file="hsuanice_Process Exec.lua">https://github.com/hsuanice/ReaScripts/raw/5be1ad5e40a527f0b3d5698c1de1ea950163deb7/Library/hsuanice_Process%20Exec.lua</source>
+        <source file="hsuanice_Fade Tool Core.lua">https://github.com/hsuanice/ReaScripts/raw/5be1ad5e40a527f0b3d5698c1de1ea950163deb7/Library/hsuanice_Fade%20Tool%20Core.lua</source>
+        <source file="json.lua">https://github.com/hsuanice/ReaScripts/raw/5be1ad5e40a527f0b3d5698c1de1ea950163deb7/Library/json.lua</source>
+      </version>
+      <version name="26.1023.2012pre1" author="hsuanice" time="2026-10-23T12:13:18Z">
+        <changelog><![CDATA[- Update: hsuanice_Fade Tool Core.lua (Smart Fade nearest crossfade fix).]]></changelog>
+        <source file="hsuanice_RGWH Core.lua">https://github.com/hsuanice/ReaScripts/raw/e350178497dbb052158b72cb3ba8d73c0bcc18ef/Library/hsuanice_RGWH%20Core.lua</source>
+        <source file="hsuanice_AudioSweet Core.lua">https://github.com/hsuanice/ReaScripts/raw/e350178497dbb052158b72cb3ba8d73c0bcc18ef/Library/hsuanice_AudioSweet%20Core.lua</source>
+        <source file="hsuanice_AS Preview Core.lua">https://github.com/hsuanice/ReaScripts/raw/e350178497dbb052158b72cb3ba8d73c0bcc18ef/Library/hsuanice_AS%20Preview%20Core.lua</source>
+        <source file="hsuanice_Metadata Embed.lua">https://github.com/hsuanice/ReaScripts/raw/e350178497dbb052158b72cb3ba8d73c0bcc18ef/Library/hsuanice_Metadata%20Embed.lua</source>
+        <source file="hsuanice_Metadata Read.lua">https://github.com/hsuanice/ReaScripts/raw/e350178497dbb052158b72cb3ba8d73c0bcc18ef/Library/hsuanice_Metadata%20Read.lua</source>
+        <source file="hsuanice_Hover.lua">https://github.com/hsuanice/ReaScripts/raw/e350178497dbb052158b72cb3ba8d73c0bcc18ef/Library/hsuanice_Hover.lua</source>
+        <source file="hsuanice_Mouse.lua">https://github.com/hsuanice/ReaScripts/raw/e350178497dbb052158b72cb3ba8d73c0bcc18ef/Library/hsuanice_Mouse.lua</source>
+        <source file="hsuanice_Metadata Cache.lua">https://github.com/hsuanice/ReaScripts/raw/e350178497dbb052158b72cb3ba8d73c0bcc18ef/Library/hsuanice_Metadata%20Cache.lua</source>
+        <source file="hsuanice_Metadata Rename Core.lua">https://github.com/hsuanice/ReaScripts/raw/e350178497dbb052158b72cb3ba8d73c0bcc18ef/Library/hsuanice_Metadata%20Rename%20Core.lua</source>
+        <source file="hsuanice_List Table.lua">https://github.com/hsuanice/ReaScripts/raw/e350178497dbb052158b72cb3ba8d73c0bcc18ef/Library/hsuanice_List%20Table.lua</source>
+        <source file="hsuanice_Time Format.lua">https://github.com/hsuanice/ReaScripts/raw/e350178497dbb052158b72cb3ba8d73c0bcc18ef/Library/hsuanice_Time%20Format.lua</source>
+        <source file="hsuanice_Metadata Generator.lua">https://github.com/hsuanice/ReaScripts/raw/e350178497dbb052158b72cb3ba8d73c0bcc18ef/Library/hsuanice_Metadata%20Generator.lua</source>
+        <source file="hsuanice_CLB Compare Engine.lua">https://github.com/hsuanice/ReaScripts/raw/e350178497dbb052158b72cb3ba8d73c0bcc18ef/Library/hsuanice_CLB%20Compare%20Engine.lua</source>
+        <source file="hsuanice_EDL Parser.lua">https://github.com/hsuanice/ReaScripts/raw/e350178497dbb052158b72cb3ba8d73c0bcc18ef/Library/hsuanice_EDL%20Parser.lua</source>
+        <source file="hsuanice_Session Fix Core.lua">https://github.com/hsuanice/ReaScripts/raw/e350178497dbb052158b72cb3ba8d73c0bcc18ef/Library/hsuanice_Session%20Fix%20Core.lua</source>
+        <source file="hsuanice_OTIO Bridge.lua">https://github.com/hsuanice/ReaScripts/raw/e350178497dbb052158b72cb3ba8d73c0bcc18ef/Library/hsuanice_OTIO%20Bridge.lua</source>
+        <source file="hsuanice_Subtitle Bridge.lua">https://github.com/hsuanice/ReaScripts/raw/e350178497dbb052158b72cb3ba8d73c0bcc18ef/Library/hsuanice_Subtitle%20Bridge.lua</source>
+        <source file="hsuanice_Process Exec.lua">https://github.com/hsuanice/ReaScripts/raw/e350178497dbb052158b72cb3ba8d73c0bcc18ef/Library/hsuanice_Process%20Exec.lua</source>
+        <source file="hsuanice_Fade Tool Core.lua">https://github.com/hsuanice/ReaScripts/raw/e350178497dbb052158b72cb3ba8d73c0bcc18ef/Library/hsuanice_Fade%20Tool%20Core.lua</source>
+        <source file="json.lua">https://github.com/hsuanice/ReaScripts/raw/e350178497dbb052158b72cb3ba8d73c0bcc18ef/Library/json.lua</source>
+      </version>
+      <version name="26.1023.2032pre1" author="hsuanice" time="2026-10-23T12:33:37Z">
+        <changelog><![CDATA[- Update: hsuanice_Fade Tool Core.lua (visible-area rule, plain fades leave crossfades alone).]]></changelog>
+        <source file="hsuanice_RGWH Core.lua">https://github.com/hsuanice/ReaScripts/raw/fbd59464b2dd2022282c8569ec4f91c1ef9e2a27/Library/hsuanice_RGWH%20Core.lua</source>
+        <source file="hsuanice_AudioSweet Core.lua">https://github.com/hsuanice/ReaScripts/raw/fbd59464b2dd2022282c8569ec4f91c1ef9e2a27/Library/hsuanice_AudioSweet%20Core.lua</source>
+        <source file="hsuanice_AS Preview Core.lua">https://github.com/hsuanice/ReaScripts/raw/fbd59464b2dd2022282c8569ec4f91c1ef9e2a27/Library/hsuanice_AS%20Preview%20Core.lua</source>
+        <source file="hsuanice_Metadata Embed.lua">https://github.com/hsuanice/ReaScripts/raw/fbd59464b2dd2022282c8569ec4f91c1ef9e2a27/Library/hsuanice_Metadata%20Embed.lua</source>
+        <source file="hsuanice_Metadata Read.lua">https://github.com/hsuanice/ReaScripts/raw/fbd59464b2dd2022282c8569ec4f91c1ef9e2a27/Library/hsuanice_Metadata%20Read.lua</source>
+        <source file="hsuanice_Hover.lua">https://github.com/hsuanice/ReaScripts/raw/fbd59464b2dd2022282c8569ec4f91c1ef9e2a27/Library/hsuanice_Hover.lua</source>
+        <source file="hsuanice_Mouse.lua">https://github.com/hsuanice/ReaScripts/raw/fbd59464b2dd2022282c8569ec4f91c1ef9e2a27/Library/hsuanice_Mouse.lua</source>
+        <source file="hsuanice_Metadata Cache.lua">https://github.com/hsuanice/ReaScripts/raw/fbd59464b2dd2022282c8569ec4f91c1ef9e2a27/Library/hsuanice_Metadata%20Cache.lua</source>
+        <source file="hsuanice_Metadata Rename Core.lua">https://github.com/hsuanice/ReaScripts/raw/fbd59464b2dd2022282c8569ec4f91c1ef9e2a27/Library/hsuanice_Metadata%20Rename%20Core.lua</source>
+        <source file="hsuanice_List Table.lua">https://github.com/hsuanice/ReaScripts/raw/fbd59464b2dd2022282c8569ec4f91c1ef9e2a27/Library/hsuanice_List%20Table.lua</source>
+        <source file="hsuanice_Time Format.lua">https://github.com/hsuanice/ReaScripts/raw/fbd59464b2dd2022282c8569ec4f91c1ef9e2a27/Library/hsuanice_Time%20Format.lua</source>
+        <source file="hsuanice_Metadata Generator.lua">https://github.com/hsuanice/ReaScripts/raw/fbd59464b2dd2022282c8569ec4f91c1ef9e2a27/Library/hsuanice_Metadata%20Generator.lua</source>
+        <source file="hsuanice_CLB Compare Engine.lua">https://github.com/hsuanice/ReaScripts/raw/fbd59464b2dd2022282c8569ec4f91c1ef9e2a27/Library/hsuanice_CLB%20Compare%20Engine.lua</source>
+        <source file="hsuanice_EDL Parser.lua">https://github.com/hsuanice/ReaScripts/raw/fbd59464b2dd2022282c8569ec4f91c1ef9e2a27/Library/hsuanice_EDL%20Parser.lua</source>
+        <source file="hsuanice_Session Fix Core.lua">https://github.com/hsuanice/ReaScripts/raw/fbd59464b2dd2022282c8569ec4f91c1ef9e2a27/Library/hsuanice_Session%20Fix%20Core.lua</source>
+        <source file="hsuanice_OTIO Bridge.lua">https://github.com/hsuanice/ReaScripts/raw/fbd59464b2dd2022282c8569ec4f91c1ef9e2a27/Library/hsuanice_OTIO%20Bridge.lua</source>
+        <source file="hsuanice_Subtitle Bridge.lua">https://github.com/hsuanice/ReaScripts/raw/fbd59464b2dd2022282c8569ec4f91c1ef9e2a27/Library/hsuanice_Subtitle%20Bridge.lua</source>
+        <source file="hsuanice_Process Exec.lua">https://github.com/hsuanice/ReaScripts/raw/fbd59464b2dd2022282c8569ec4f91c1ef9e2a27/Library/hsuanice_Process%20Exec.lua</source>
+        <source file="hsuanice_Fade Tool Core.lua">https://github.com/hsuanice/ReaScripts/raw/fbd59464b2dd2022282c8569ec4f91c1ef9e2a27/Library/hsuanice_Fade%20Tool%20Core.lua</source>
+        <source file="json.lua">https://github.com/hsuanice/ReaScripts/raw/fbd59464b2dd2022282c8569ec4f91c1ef9e2a27/Library/json.lua</source>
+      </version>
     </reapack>
   </category>
   <category name="Metadata">
@@ -1205,7 +1332,7 @@ Packages
 {\pard \ql \f0 \sa180 \li0 \fi0 \outlinelevel2 \b \fs28 Rendering\par}
 {\pard \ql \f0 \sa180 \li0 \fi0 | Package | What it does | |---|---| | Render or Glue with Handles - RGWH | Render or glue items with handles (GUI + Glue / Render actions) | | AudioSweet - AudioSuite Workflow | AudioSuite-style offline FX processing, Pro Tools style (GUI + Run / Toggle Preview / Toggle Solo, FX Alias tools) |\par}
 {\pard \ql \f0 \sa180 \li0 \fi0 \outlinelevel2 \b \fs28 Items Editing\par}
-{\pard \ql \f0 \sa180 \li0 \fi0 | Package | What it does | |---|---| | Fade Tool | Razor-based crossfades and scene cut fades on the frame grid (Crossfade in Razor, Scene Cut to Razor, Settings) | | Hover Editing | Pro Tools-style Split / Trim at the mouse or edit cursor (Toggle Hover Mode, Split, Trim or Extend Left / Right Edge) | | Reorder - Sort Items Vertically | Vertical reorder and sort of selected items by metadata (GUI + Copy to Sort / Sort in Place / Upfill) | | Session Fix | Session Fix - Interchange Prep: one window that checks and fixes a session before converting it with Interchanger (Pro Tools / Nuendo / Cubase) \u8212- checklist, Fix All, before / after check, review tracks (ReaImGui; replaces the five earlier Session Fix scripts) | | Copy / Cut Items and Envelope Points Respect Razor | Copy or cut items and envelope points, respecting razor edits | | Reposition Items | Space selected items by an interval (GUI) | | Move Selected Items to Track Under Mouse | Move items vertically, keeping their timeline position | | Toggle Mute Item Under Mouse | Mute / unmute the item under the mouse | | Explode Takes Across Tracks | Put each take of the selected items on its own track | | Explode Multichannel Poly Audio to Mono Items | Split poly files into one-channel items, keeping metadata | | Convert Empty Items to Audio Items | Keeps take names and notes | | Copy Unmuted Child Items to Parent Folder Track | Copy unmuted child items to the folder track (checks overlaps first) |\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 | Package | What it does | |---|---| | Fade Tool | Frame-grid fades and crossfades by razor, time selection, mouse or edit cursor; Hover Mode aware (Smart Fade, Crossfade in Razor, Scene Cut to Razor, Settings) | | Hover Editing | Pro Tools-style Split / Trim at the mouse or edit cursor (Toggle Hover Mode, Split, Trim or Extend Left / Right Edge) | | Reorder - Sort Items Vertically | Vertical reorder and sort of selected items by metadata (GUI + Copy to Sort / Sort in Place / Upfill) | | Session Fix | Session Fix - Interchange Prep: one window that checks and fixes a session before converting it with Interchanger (Pro Tools / Nuendo / Cubase) \u8212- checklist, Fix All, before / after check, review tracks (ReaImGui; replaces the five earlier Session Fix scripts) | | Copy / Cut Items and Envelope Points Respect Razor | Copy or cut items and envelope points, respecting razor edits | | Reposition Items | Space selected items by an interval (GUI) | | Move Selected Items to Track Under Mouse | Move items vertically, keeping their timeline position | | Toggle Mute Item Under Mouse | Mute / unmute the item under the mouse | | Explode Takes Across Tracks | Put each take of the selected items on its own track | | Explode Multichannel Poly Audio to Mono Items | Split poly files into one-channel items, keeping metadata | | Convert Empty Items to Audio Items | Keeps take names and notes | | Copy Unmuted Child Items to Parent Folder Track | Copy unmuted child items to the folder track (checks overlaps first) |\par}
 {\pard \ql \f0 \sa180 \li0 \fi0 \outlinelevel2 \b \fs28 Items Properties\par}
 {\pard \ql \f0 \sa180 \li0 \fi0 | Package | What it does | |---|---| | Auto Color - Items by Take Name | Color items by take-name keywords with a palette (GUI + Toggle Background Coloring, By Palette, Smart Random, Follow Track Color, All Shiny Color) |\par}
 {\pard \ql \f0 \sa180 \li0 \fi0 \outlinelevel2 \b \fs28 Selection\par}
@@ -1243,7 +1370,7 @@ Claude
 {\pard \ql \f0 \sa180 \li0 \fi0 \outlinelevel1 \b \fs32 Credits\par}
 {\pard \ql \f0 \sa180 \li0 \fi0 The scripts in this repository are designed, tested and maintained by hsuanice, with code written together with AI tools (Claude, ChatGPT).\par}
 {\pard \ql \f0 \sa180 \li0 \fi0 AudioSweet is inspired by the AudioSuite-like script by Tim Chimes. "AudioSweet" is a name originally given by Tim Chimes; this project continues to use the name in reference to his original work. Original: "Renders selected plugin to selected media item", written for REAPER 5.1 with Lua (v1.1, 2015-12-22) \u8212- http://timchimes.com/scripting-with-reaper-audiosuite/\par}
-{\pard \ql \f0 \sa180 \li0 \fi0 Fade Tool is inspired by AZ's {\i Fade tool (work on context of mouse, razor or time selection)} (ReaTeam Scripts) \u8212- https://forum.cockos.com/showthread.php?t=293335\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 Fade Tool is heavily based on AZ's {\i Fade tool (work on context of mouse, razor or time selection)} (ReaTeam Scripts) \u8212- https://forum.cockos.com/showthread.php?t=293335 . It closely follows AZ's design (context order razor / time selection / mouse, top half fade-in / bottom half fade-out, the item name bar moving a crossfade and AZ's way of detecting it, razor crossfades and fades); the code is a new implementation with hsuanice's changes (frame-based defaults, no pop-up windows, Hover Mode, hold-and-drag crossfades, Scene Cut). Smart Fade's hold-the-shortcut detection follows Sexan's {\i VT_SWIPE to Comp HOLD} (Virtual Track, Sexan_Scripts).\par}
 {\pard \ql \f0 \sa180 \li0 \fi0 Hover Editing - Toggle Hover Mode is based on / inspired by TJF's {\i Hover Mode Toggle} script.\par}
 {\pard \ql \f0 \sa180 \li0 \fi0 Extend Razor Edit to Mouse Cursor like Pro Tools is inspired by Daniel Kharrat's {\i Extend razor edit area to mouse cursor (select tracks in between)} script.\par}
 {\pard \ql \f0 \sa180 \li0 \fi0 Auto Color's palette (hue + per-row saturation / value) is modeled after rodilab's {\i Color palette} script. Auto Color's Shiny mode follows the ShinyColor behavior of {\i Chroma - Coloring Tool} by OLSHALOM \u8212- https://forum.cockos.com/showthread.php?t=281516\par}
