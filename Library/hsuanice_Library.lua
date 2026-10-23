@@ -1,6 +1,6 @@
 --[[
 @description hsuanice Library - shared code used by hsuanice scripts (required)
-@version 26.1023.1942pre1
+@version 26.1023.1944
 @author hsuanice
 @metapackage
 @provides
@@ -25,7 +25,7 @@
   [nomain] hsuanice_Fade Tool Core.lua
   [nomain] json.lua
 @changelog
-  - Update: hsuanice_Fade Tool Core.lua (fade shapes fixed on REAPER 7.82).
+  - Add: hsuanice_Fade Tool Core.lua (used by the new Fade Tool package).
 @about
   # hsuanice Library
 

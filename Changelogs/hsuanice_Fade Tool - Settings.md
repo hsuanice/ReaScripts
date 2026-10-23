@@ -1,5 +1,9 @@
 # hsuanice_Fade Tool - Settings.lua — Changelog
 
+## 26.1023.1944
+
+- Initial public release (tested in REAPER 7.82).
+
 ## 26.1023.1942pre1
 
 - Change: shape menu lists all eight REAPER fade shapes (Linear and Equal Power first).

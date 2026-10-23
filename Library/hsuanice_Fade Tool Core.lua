@@ -1,11 +1,10 @@
 --[[
 @description hsuanice Fade Tool Core (shared razor / cut / edge / fade helpers for the Fade Tool scripts)
-@version 26.1023.1942pre1
+@version 26.1023.1944
 @author hsuanice
 @noindex
 @changelog
-  - Fix: fade and crossfade shapes now apply on REAPER 7.82 (the shape was reset to Linear by also writing the curvature; FADEINNEW / FADEOUTNEW lines are no longer used).
-  - Change: REAPER's own shape list (Linear, Equal Power = 7, Slight / Sharp Convex, Concave, S-Curve); saved settings from the first release are converted.
+  - Initial public release (tested in REAPER 7.82).
 @about
   Shared code for "Fade Tool - Crossfade in Razor", "Fade Tool - Scene Cut to Razor" and
   "Fade Tool - Settings". Settings live in the ExtState section "hsuanice_FadeTool".

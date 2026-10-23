@@ -1,10 +1,10 @@
 --[[
 @description Fade Tool - Crossfade in Razor (fit one cut to the razor area, or crossfade every cut inside it)
-@version 26.1023.1800pre1
+@version 26.1023.1944
 @author hsuanice
 @noindex
 @changelog
-  - Initial release.
+  - Initial public release (tested in REAPER 7.82).
 @about
   Works only on razor edit areas (tracks and time range of each area). Never opens a window
   unless something had to be skipped.

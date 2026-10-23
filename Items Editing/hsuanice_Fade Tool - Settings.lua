@@ -1,10 +1,10 @@
 --[[
 @description Fade Tool - Settings (crossfade and scene cut fade lengths, positions and shapes)
-@version 26.1023.1942pre1
+@version 26.1023.1944
 @author hsuanice
 @noindex
 @changelog
-  - Change: shape menu lists all eight REAPER fade shapes (Linear and Equal Power first).
+  - Initial public release (tested in REAPER 7.82).
 @about
   The only Fade Tool script that opens a window (native gfx: steppers, radio buttons, shape
   menu, checkbox; Enter = Save, Esc = Cancel). The other Fade Tool scripts just read these

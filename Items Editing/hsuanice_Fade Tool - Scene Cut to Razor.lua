@@ -1,10 +1,10 @@
 --[[
 @description Fade Tool - Scene Cut to Razor (trim or extend the edge items to the scene with transition fades)
-@version 26.1023.1800pre1
+@version 26.1023.1944
 @author hsuanice
 @noindex
 @changelog
-  - Initial release.
+  - Initial public release (tested in REAPER 7.82).
 @about
   The razor edit area is the scene. Per track (and per fixed lane) inside each razor area:
   - The first item of the scene gets its start trimmed or extended to the scene start, plus a

@@ -1,6 +1,6 @@
 --[[
 @description Fade Tool - razor-based crossfades and scene cut fades on the frame grid (Crossfade in Razor, Scene Cut to Razor, Settings)
-@version 26.1023.1942pre1
+@version 26.1023.1944
 @author hsuanice
 @metapackage
 @provides
@@ -8,8 +8,7 @@
   [main] hsuanice_Fade Tool - Scene Cut to Razor.lua
   [main] hsuanice_Fade Tool - Settings.lua
 @changelog
-  - Fix: fade and crossfade shapes now apply (they always stayed Linear on REAPER 7.82).
-  - Change: shape menu lists all eight REAPER fade shapes.
+  - Initial release: Crossfade in Razor (fit one cut to the razor area or crossfade every cut in it, Equal Power), Scene Cut to Razor (edge items trimmed or extended with 1-frame transition fades), Settings (gfx window).
 @about
   # Fade Tool
 

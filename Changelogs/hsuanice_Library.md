@@ -1,5 +1,9 @@
 # hsuanice_Library.lua — Changelog
 
+## 26.1023.1944
+
+- Add: hsuanice_Fade Tool Core.lua (used by the new Fade Tool package).
+
 ## 26.1023.1942pre1
 
 - Update: hsuanice_Fade Tool Core.lua (fade shapes fixed on REAPER 7.82).
