@@ -7,6 +7,10 @@ PM Insight Analyzer
 
 **Removed from ReaPack** (2026-10-15) while it is a work in progress; the script stays in the repository (`@noindex`) as a backup.
 
+## 26.1023.1405pre1
+
+- New: work items marked by PM Timer > Link Split Scenes have their time shared between the scene pieces by source length (film length if there is no source length).
+
 ## 26.1023.1341pre1
 
 - Change: one report per session folder ('<folder name> - PM Insight.html') instead of one per .rpp, so daily .rpp backups in the same folder update the same page; older per-.rpp reports in the folder are removed.

@@ -1,10 +1,10 @@
 --[[
 @description Project Manager - PM Insight Analyzer: work-time analysis of PM Timer logs (work in progress)
-@version 26.1023.1341pre1
+@version 26.1023.1405pre1
 @author hsuanice
 @noindex  (kept in the repository as a backup; not offered on ReaPack while it is a work in progress)
 @changelog
-  - Change: one report per session folder ('<folder name> - PM Insight.html') instead of one per .rpp, so daily .rpp backups in the same folder update the same page; older per-.rpp reports in the folder are removed.
+  - New: work items marked by PM Timer > Link Split Scenes have their time shared between the scene pieces by source length (film length if there is no source length).
 @about
   Read-only analysis script. Auto-detects project type:
 
@@ -636,11 +636,34 @@ local function analyze()
           end
 
           local _, sg = r.GetSetMediaItemInfo_String(item, "P_EXT:SCENE_GUID", "", false)
-          if sg ~= "" and scene_map[sg] then
-            -- Scene Mode: attribute to scene
-            local sc = scene_map[sg]
-            sc.wt_sec[wt] = (sc.wt_sec[wt] or 0) + dur_secs
-            sc.total_sec  = sc.total_sec + dur_secs
+          -- Scene split after the work was logged (PM Timer > Link Split Scenes):
+          -- share the time between the pieces by source length (film length if
+          -- the pieces have no source length).
+          local _, sp = r.GetSetMediaItemInfo_String(item, "P_EXT:SCENE_SPLIT", "", false)
+          local shares = {}
+          for g in sp:gmatch("[^|]+") do
+            if scene_map[g] then shares[#shares + 1] = { sc = scene_map[g] } end
+          end
+          if #shares == 0 and sg ~= "" and scene_map[sg] then
+            shares[1] = { sc = scene_map[sg], w = 1 }
+          elseif #shares > 0 then
+            local src, film = 0, 0
+            for _, x in ipairs(shares) do
+              src = src + x.sc.source_length_sec; film = film + x.sc.length_sec
+            end
+            for _, x in ipairs(shares) do
+              if src > 0 then x.w = x.sc.source_length_sec / src
+              elseif film > 0 then x.w = x.sc.length_sec / film
+              else x.w = 1 / #shares end
+            end
+          end
+          if #shares > 0 then
+            -- Scene Mode: attribute to scene(s)
+            for _, x in ipairs(shares) do
+              local sc, secs = x.sc, dur_secs * x.w
+              sc.wt_sec[wt] = (sc.wt_sec[wt] or 0) + secs
+              sc.total_sec  = sc.total_sec + secs
+            end
           else
             -- Project Mode: no scene attribution
             project_work_total = project_work_total + dur_secs
