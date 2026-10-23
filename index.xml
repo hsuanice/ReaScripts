@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<index version="1" name="hsuanice Scripts" commit="7a6897b766101521dc2615e3cc9e62d9db46a878">
+<index version="1" name="hsuanice Scripts" commit="bfdc5e66adf455e1df05b82969a3ca4064bd4c8d">
   <category name="Conform">
     <reapack name="hsuanice_Conform List Browser - CLB.lua" type="script" desc="Conform List Browser - CLB: conform EDL / AAF / XML / OTIO / subtitle lists (GUI + Jump / Link / Load / Reveal)">
       <metadata>
@@ -855,6 +855,10 @@
       <version name="26.1017.1609" author="hsuanice" time="2026-10-17T08:10:04Z">
         <changelog><![CDATA[- Add: remembers the last razor area (range + tracks) for Extend Razor Edit to Mouse Cursor like Pro Tools, because REAPER clears razor areas when an item is clicked. Session-only, not saved with the project.]]></changelog>
         <source main="main">https://github.com/hsuanice/ReaScripts/raw/a1d2bb2559a9946d96ae323f8adeefc92bee3bc0/Selection/hsuanice_Toggle%20Track%20and%20Razor%20Item%20Link%20like%20Pro%20Tools.lua</source>
+      </version>
+      <version name="26.1023.1358pre1" author="hsuanice" time="2026-10-23T06:03:55Z">
+        <changelog><![CDATA[- Change: part D (sync items when the Razor area or track selection changes) is now off by default (ENABLE_D = false): with D on, linking track selection to items also triggered the item-to-track direction, which cleared the intended selection.]]></changelog>
+        <source main="main">https://github.com/hsuanice/ReaScripts/raw/bfdc5e66adf455e1df05b82969a3ca4064bd4c8d/Selection/hsuanice_Toggle%20Track%20and%20Razor%20Item%20Link%20like%20Pro%20Tools.lua</source>
       </version>
     </reapack>
   </category>
