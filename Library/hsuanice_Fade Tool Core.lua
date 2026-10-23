@@ -1,10 +1,10 @@
 --[[
 @description hsuanice Fade Tool Core (shared razor / cut / edge / fade helpers for the Fade Tool scripts)
-@version 26.1023.1800pre1
+@version 26.1023.1853pre1
 @author hsuanice
 @noindex
 @changelog
-  - Initial release.
+  - Fix: crossfade shape now applies (REAPER 7.71+ keeps it in the FADEINNEW / FADEOUTNEW chunk lines; format from hsuanice_PT_Fades.lua); it stayed Linear before.
 @about
   Shared code for "Fade Tool - Crossfade in Razor", "Fade Tool - Scene Cut to Razor" and
   "Fade Tool - Settings". Settings live in the ExtState section "hsuanice_FadeTool".
@@ -259,6 +259,32 @@ function M.set_fade(it, side, len, shape, auto)
   r.SetMediaItemInfo_Value(it, "D_FADE" .. side .. "DIR", 0)
 end
 
+-- REAPER 7.71+ keeps the shape of an auto fade (crossfade) in the FADEINNEW / FADEOUTNEW
+-- chunk lines, so C_FADEINSHAPE alone leaves it Linear. Line format and values follow
+-- hsuanice_PT_Fades.lua (build_new_line / patch_xfade_new): "10 0 0 <type> <curv> <flag>",
+-- type 10 = curve, 11 = constant power, 12 = S-curve.
+local NEW_LINE = {
+  [0] = "10 0 0 10 0 0",     -- Linear
+  [1] = "10 0 0 11 0.5 0",   -- Equal Power
+  [2] = "10 0 0 10 -0.5 0",  -- Slight Concave
+  [3] = "10 0 0 10 1 0",     -- Sharp Convex
+  [4] = "10 0 0 10 -1 0",    -- Sharp Concave
+  [5] = "10 0 0 12 0 0.5",   -- S-Curve
+}
+
+function M.set_auto_fade_shape(it, side, shape)
+  local new_prefix = (side == "IN") and "FADEINNEW" or "FADEOUTNEW"
+  local old_prefix = (side == "IN") and "FADEIN" or "FADEOUT"
+  local ok, chunk = r.GetItemStateChunk(it, "", false)
+  if not ok or not chunk then return end
+  local data = NEW_LINE[shape] or NEW_LINE[0]
+  local out, n = chunk:gsub("(\n" .. new_prefix .. " )[^\n]+", "%1" .. data, 1)
+  if n == 0 then
+    out, n = chunk:gsub("(\n" .. old_prefix .. " [^\n]+)", "%1\n" .. new_prefix .. " " .. data, 1)
+  end
+  if n > 0 and out ~= chunk then r.SetItemStateChunk(it, out, false) end
+end
+
 -- Crossfade a (left) and b (right) over [xs, xe]. Returns true, or false + reason.
 function M.crossfade(a, b, xs, xe, shape)
   if M.is_locked(a.item) or M.is_locked(b.item) then return false, "locked item" end
@@ -276,6 +302,8 @@ function M.crossfade(a, b, xs, xe, shape)
   M.set_fade(b.item, "IN", len, shape, true)
   clamp_fade(a.item, "IN", xs - a.pos)
   clamp_fade(b.item, "OUT", b.fin - xe)
+  M.set_auto_fade_shape(a.item, "OUT", shape)
+  M.set_auto_fade_shape(b.item, "IN", shape)
   return true
 end
 

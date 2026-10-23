@@ -1,5 +1,9 @@
 # hsuanice_Library.lua — Changelog
 
+## 26.1023.1853pre1
+
+- Update: hsuanice_Fade Tool Core.lua (crossfade shape fix).
+
 ## 26.1023.1800pre1
 
 - Add: hsuanice_Fade Tool Core.lua (used by the new Fade Tool package).

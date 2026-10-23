@@ -1,5 +1,9 @@
 # hsuanice_Fade Tool.lua — Changelog
 
+## 26.1023.1853pre1
+
+- Fix: Crossfade in Razor now applies the crossfade shape (Equal Power by default); it stayed Linear before.
+
 ## 26.1023.1850pre1
 
 - Change: Settings is now a gfx window with radio buttons, steppers, a shape menu and a checkbox.

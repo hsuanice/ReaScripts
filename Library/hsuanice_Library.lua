@@ -1,6 +1,6 @@
 --[[
 @description hsuanice Library - shared code used by hsuanice scripts (required)
-@version 26.1023.1800pre1
+@version 26.1023.1853pre1
 @author hsuanice
 @metapackage
 @provides
@@ -25,7 +25,7 @@
   [nomain] hsuanice_Fade Tool Core.lua
   [nomain] json.lua
 @changelog
-  - Add: hsuanice_Fade Tool Core.lua (used by the new Fade Tool package).
+  - Update: hsuanice_Fade Tool Core.lua (crossfade shape fix).
 @about
   # hsuanice Library
 

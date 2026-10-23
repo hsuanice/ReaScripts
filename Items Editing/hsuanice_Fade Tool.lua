@@ -1,6 +1,6 @@
 --[[
 @description Fade Tool - razor-based crossfades and scene cut fades on the frame grid (Crossfade in Razor, Scene Cut to Razor, Settings)
-@version 26.1023.1850pre1
+@version 26.1023.1853pre1
 @author hsuanice
 @metapackage
 @provides
@@ -8,7 +8,7 @@
   [main] hsuanice_Fade Tool - Scene Cut to Razor.lua
   [main] hsuanice_Fade Tool - Settings.lua
 @changelog
-  - Change: Settings is now a gfx window with radio buttons, steppers, a shape menu and a checkbox.
+  - Fix: Crossfade in Razor now applies the crossfade shape (Equal Power by default); it stayed Linear before.
 @about
   # Fade Tool
 
