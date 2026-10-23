@@ -1,10 +1,10 @@
 --[[
 @description Project Manager - PM Timer: scene-aware work timer
-@version 26.1023.1405pre1
+@version 26.1023.1606pre1
 @author hsuanice
 @noindex  (kept in the repository as a backup; Project Manager is not offered on ReaPack for now)
 @changelog
-  - New: right-click > Link Split Scenes - for a scene split on Scene Cut after work was logged: select all its pieces and run it; PM Insight then shares that work time between the pieces by source length. Run it with ONE scene selected to undo.
+  - New: scene notes get 'Sel Len' and 'Edit Len' - the source left in the 'Mic Selected' and 'Edited' folders (only when the folder exists). An item in the scene's item group counts in full; any other item counts with the part inside the scene range, so no linking is needed. The EDL 'Src Len' is unchanged.
 @about
   Scene-aware toggle timer for the hsuanice PM system.
   Uses gfx (no ReaImGui). 1-second display refresh via defer + time_precise.
@@ -70,6 +70,10 @@ local AAP_FOLDER_DEFAULT_TYPE = "aap"
 local DATE_PAT            = "^%d%d%d%d%-%d%d%-%d%d$"  -- matches YYYY-MM-DD
 local HEARTBEAT_INTERVAL  = 60   -- seconds between silent D_LENGTH updates
 local EDL_FOLDER_NAME     = "EDL"
+-- Later stages of the dialog source, after Mic Select and after Editing
+-- (scene note lines "Sel Len" / "Edit Len"; only when the folder exists)
+local MIC_SELECTED_FOLDER = "Mic Selected"
+local EDITED_FOLDER       = "Edited"
 local PICTURE_TRACK_NAME  = "Picture Cut"
 local auto_sync_work_log_if_open
 
@@ -982,6 +986,11 @@ end
 -- shots   : Picture Cut items overlapping the scene range
 -- src_cnt : EDL folder items attributed to the scene (P_EXT:SCENE_ID, else same item group)
 -- src_len : total D_LENGTH of the attributed EDL items (seconds)
+-- sel_len / edit_len : source left in the "Mic Selected" / "Edited" folders
+--           (nil when the folder does not exist). An item in the scene's item
+--           group counts in full; an item not grouped with any scene counts
+--           with the part that lies inside the scene range (pre-laps etc. are
+--           counted where they sit on the timeline).
 
 local function compute_scene_metadata(scene_item)
   local scene_start = r.GetMediaItemInfo_Value(scene_item, "D_POSITION")
@@ -1022,7 +1031,37 @@ local function compute_scene_metadata(scene_item)
     end
   end
 
-  return { shots = shots, src_cnt = src_cnt, src_len = src_len }
+  -- sel_len / edit_len: later stage folders, by item group, else by time range
+  local scene_groups = {}
+  local scene_track  = get_track_by_name(SCENE_TRACK_NAME)
+  if scene_track then
+    for i = 0, r.CountTrackMediaItems(scene_track) - 1 do
+      local g = math.floor(r.GetMediaItemInfo_Value(r.GetTrackMediaItem(scene_track, i), "I_GROUPID"))
+      if g ~= 0 then scene_groups[g] = true end
+    end
+  end
+  local function stage_len(folder_name)
+    if not get_track_by_name(folder_name) then return nil end
+    local total = 0
+    for _, t in ipairs(get_folder_children(folder_name)) do
+      for i = 0, r.CountTrackMediaItems(t) - 1 do
+        local item = r.GetTrackMediaItem(t, i)
+        local s0   = r.GetMediaItemInfo_Value(item, "D_POSITION")
+        local s1   = s0 + r.GetMediaItemInfo_Value(item, "D_LENGTH")
+        local g    = math.floor(r.GetMediaItemInfo_Value(item, "I_GROUPID"))
+        if g ~= 0 and scene_groups[g] then
+          if g == scene_group then total = total + (s1 - s0) end
+        else
+          local ov = math.min(s1, scene_end) - math.max(s0, scene_start)
+          if ov > 0 then total = total + ov end
+        end
+      end
+    end
+    return total
+  end
+
+  return { shots = shots, src_cnt = src_cnt, src_len = src_len,
+           sel_len = stage_len(MIC_SELECTED_FOLDER), edit_len = stage_len(EDITED_FOLDER) }
 end
 
 -- Extract user comment from a log item note: everything after the first blank
@@ -1161,6 +1200,8 @@ local function update_scene_note(scene_item, dry)
         or line:match("^Shots%s*:")
         or line:match("^Src Cnt%s*:")
         or line:match("^Src Len%s*:")
+        or line:match("^Sel Len%s*:")
+        or line:match("^Edit Len%s*:")
         or line:match("^[%w_]+=")
   end
 
@@ -1179,6 +1220,12 @@ local function update_scene_note(scene_item, dry)
     "Src Cnt  : " .. tostring(meta.src_cnt),
     "Src Len  : " .. src_len_tc,
   }
+  if meta.sel_len then
+    table.insert(parts, "Sel Len  : " .. r.format_timestr_len(meta.sel_len, "", 0, 5))
+  end
+  if meta.edit_len then
+    table.insert(parts, "Edit Len : " .. r.format_timestr_len(meta.edit_len, "", 0, 5))
+  end
   for _, l in ipairs(other) do table.insert(parts, l) end
 
   local new_note = table.concat(parts, "\n")

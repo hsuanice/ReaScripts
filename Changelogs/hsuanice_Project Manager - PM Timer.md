@@ -7,6 +7,10 @@ PM Timer - Scene-aware Work Timer
 
 **Removed from ReaPack** (2026-10-15) together with PM Insight Analyzer; the script stays in the repository (`@noindex`) as a backup.
 
+## 26.1023.1606pre1
+
+- New: scene notes get 'Sel Len' and 'Edit Len' - the source left in the 'Mic Selected' and 'Edited' folders (only when the folder exists). An item in the scene's item group counts in full; any other item counts with the part inside the scene range, so no linking is needed. The EDL 'Src Len' is unchanged.
+
 ## 26.1023.1405pre1
 
 - New: right-click > Link Split Scenes - for a scene split on Scene Cut after work was logged: select all its pieces and run it; PM Insight then shares that work time between the pieces by source length. Run it with ONE scene selected to undo.
