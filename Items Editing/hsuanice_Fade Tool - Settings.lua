@@ -1,10 +1,10 @@
 --[[
 @description Fade Tool - Settings (crossfade and scene cut fade lengths, positions and shapes)
-@version 26.1023.1800pre1
+@version 26.1023.1818pre1
 @author hsuanice
 @noindex
 @changelog
-  - Initial release.
+  - Fix: scene fade position fields now show the choices (before, center, after).
 @about
   The only Fade Tool script that opens a window. The other Fade Tool scripts just read these
   values and run.
@@ -38,9 +38,9 @@ local FIELDS = {
   { "xfade_align",      "Crossfade position before-center-after", "align" },
   { "xfade_shape",      "Crossfade shape 0-5",                  "shape" },
   { "scene_in_frames",  "Scene fade-in length (frames)",        "len"   },
-  { "scene_in_align",   "Scene fade-in position",               "align" },
+  { "scene_in_align",   "Scene fade-in position before-center-after", "align" },
   { "scene_out_frames", "Scene fade-out length (frames)",       "len"   },
-  { "scene_out_align",  "Scene fade-out position",              "align" },
+  { "scene_out_align",  "Scene fade-out position before-center-after", "align" },
   { "scene_shape",      "Scene fade shape 0-5",                 "shape" },
   { "clear_razor",      "Clear razor after run (y-n)",          "bool"  },
 }
