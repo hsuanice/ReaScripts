@@ -1,6 +1,6 @@
 --[[
 @description hsuanice Library - shared code used by hsuanice scripts (required)
-@version 26.1018.1239
+@version 26.1023.1800pre1
 @author hsuanice
 @metapackage
 @provides
@@ -22,10 +22,10 @@
   [nomain] hsuanice_OTIO Bridge.lua
   [nomain] hsuanice_Subtitle Bridge.lua
   [nomain] hsuanice_Process Exec.lua
+  [nomain] hsuanice_Fade Tool Core.lua
   [nomain] json.lua
 @changelog
-  - Update: hsuanice_Session Fix Core.lua (Workflow cues check, scan progress and check times, Tiny items with 2-pop recognition and marking).
-  - Update: hsuanice_AudioSweet Core.lua (Debug switch no longer changes the RGWH Debug Level).
+  - Add: hsuanice_Fade Tool Core.lua (used by the new Fade Tool package).
 @about
   # hsuanice Library
 

@@ -1,5 +1,9 @@
 # hsuanice_Library.lua — Changelog
 
+## 26.1023.1800pre1
+
+- Add: hsuanice_Fade Tool Core.lua (used by the new Fade Tool package).
+
 ## 26.1018.1239
 
 - Update: hsuanice_Session Fix Core.lua (Workflow cues check, scan progress and check times, Tiny items with 2-pop recognition and marking).

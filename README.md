@@ -51,6 +51,7 @@ and background on/off scripts start with `Toggle`.
 
 | Package | What it does |
 |---|---|
+| Fade Tool | Razor-based crossfades and scene cut fades on the frame grid (Crossfade in Razor, Scene Cut to Razor, Settings) |
 | Hover Editing | Pro Tools-style Split / Trim at the mouse or edit cursor (Toggle Hover Mode, Split, Trim or Extend Left / Right Edge) |
 | Reorder - Sort Items Vertically | Vertical reorder and sort of selected items by metadata (GUI + Copy to Sort / Sort in Place / Upfill) |
 | Session Fix | Session Fix - Interchange Prep: one window that checks and fixes a session before converting it with Interchanger (Pro Tools / Nuendo / Cubase) — checklist, Fix All, before / after check, review tracks (ReaImGui; replaces the five earlier Session Fix scripts) |
@@ -144,6 +145,8 @@ AudioSweet is inspired by the AudioSuite-like script by Tim Chimes.
 "AudioSweet" is a name originally given by Tim Chimes; this project continues to use the name in reference to his original work.
 Original: "Renders selected plugin to selected media item", written for REAPER 5.1 with Lua (v1.1, 2015-12-22) —
 http://timchimes.com/scripting-with-reaper-audiosuite/
+
+Fade Tool is inspired by AZ's *Fade tool (work on context of mouse, razor or time selection)* (ReaTeam Scripts) — https://forum.cockos.com/showthread.php?t=293335
 
 Hover Editing - Toggle Hover Mode is based on / inspired by TJF's *Hover Mode Toggle* script.
 
