@@ -1,10 +1,10 @@
 --[[
 @description Project Manager - PM Insight Analyzer: work-time analysis of PM Timer logs (work in progress)
-@version 26.1023.1619pre1
+@version 26.1024.1127pre1
 @author hsuanice
 @noindex  (kept in the repository as a backup; not offered on ReaPack while it is a work in progress)
 @changelog
-  - Change: Project Overview shows the source stages side by side - Source (EDL), Selected (Mic Selected), Edited - each with Total Length, Ratio vs film (of the scenes that have that stage), Kept from previous stage, and Scenes.
+  - Add: select one or more items on the Scene Cut track to report only those scenes - their work time, film length and Source / Mic Selected / Edited; project-wide figures (daily average, work without a scene, Total Time) are left out. Nothing selected = whole project, same report file.
 @about
   Read-only analysis script. Auto-detects project type:
 
@@ -18,6 +18,12 @@
   Work Log Mode (no Scene Cut track):
     Parses item names ("Proj | Scene | Module") to compute durations
     grouped by scene and module. No EDL data required.
+
+  Selected scenes: select one or more items on the Scene Cut track before running to
+  report only those scenes - their work time, film length and Source / Mic Selected /
+  Edited lengths (project-wide figures such as daily averages and work without a scene
+  are left out). Nothing selected = the whole project. Scene numbers stay the project
+  numbers. The report file is the same one either way (replaced on every run).
 
   Duration source: D_LENGTH (always). Does not write any data to the project.
 --]]
@@ -504,6 +510,20 @@ local function analyze()
     table.insert(scenes, sc)
   end
 
+  -- 2b. Selected Scene Cut items limit the report to those scenes (none = whole project).
+  --     Everything is still computed for every scene (split-scene shares need them
+  --     all); the selection only decides what is reported.
+  local picked, n_picked = {}, 0
+  for i = 0, r.CountTrackMediaItems(scene_track) - 1 do
+    local item = r.GetTrackMediaItem(scene_track, i)
+    if r.IsMediaItemSelected(item) then
+      picked[r.BR_GetMediaItemGUID(item)] = true
+      n_picked = n_picked + 1
+    end
+  end
+  local sel_mode = n_picked > 0
+  local function shown(sc) return not sel_mode or picked[sc.guid] == true end
+
   -- 3. Pre-compute colour-fallback lookup ranges (same as SceneAnalyzer) ─────
   --    range_start = prev scene start (or this scene start if first)
   --    range_end   = next scene end   (or this scene end  if last)
@@ -698,8 +718,10 @@ local function analyze()
   end
   local has_sel, has_edit = false, false
   for _, sc in ipairs(scenes) do
+    if not shown(sc) then goto next_scene end
     if sc.sel_len_sec  then has_sel  = true end
     if sc.edit_len_sec then has_edit = true end
+    ::next_scene::
   end
 
   -- Efficiency per work type: every scene that has work of that type counts
@@ -709,6 +731,7 @@ local function analyze()
 
   for _, guid in ipairs(scene_order) do
     local sc = scene_map[guid]
+    if not shown(sc) then goto next_guid end
     project_film_total_sec  = project_film_total_sec  + sc.length_sec
     project_scene_total_sec = project_scene_total_sec + sc.total_sec
     if sc.is_done then
@@ -730,6 +753,7 @@ local function analyze()
       eff_total.source = eff_total.source + sc.source_length_sec
       eff_total.work   = eff_total.work   + sc.total_sec
     end
+    ::next_guid::
   end
 
   local grand_total = project_scene_total_sec + project_work_total
@@ -738,11 +762,12 @@ local function analyze()
   -- Work types in workflow order, then any other (custom) types A-Z
   local TYPE_ORDER = { "mic select", "editing", "denoise", "scene", "ME", "PAN", "ME+PAN", "check" }
   local types, seen = {}, {}
+  local type_src = sel_mode and eff or wt_totals   -- selected scenes: only their work types
   for _, t in ipairs(TYPE_ORDER) do
-    if wt_totals[t] then types[#types + 1] = t; seen[t] = true end
+    if type_src[t] then types[#types + 1] = t; seen[t] = true end
   end
   local others = {}
-  for t in pairs(wt_totals) do if not seen[t] then others[#others + 1] = t end end
+  for t in pairs(type_src) do if not seen[t] then others[#others + 1] = t end end
   table.sort(others, function(a, b) return a:lower() < b:lower() end)
   for _, t in ipairs(others) do types[#types + 1] = t end
   local scene_types = {}   -- types with scene work (columns of the scene list)
@@ -807,16 +832,27 @@ a{color:var(--acc);text-decoration:none}a:hover{text-decoration:underline}
 </style></head><body><main>]])
   out('<h1 id="top">PM Insight Report</h1>')
   out('<div class="sub">' .. esc(proj_name) .. ' · ' .. os.date("%Y-%m-%d %H:%M") .. '</div>')
+  if sel_mode then
+    local names = {}
+    for _, guid in ipairs(scene_order) do
+      local sc = scene_map[guid]
+      if shown(sc) then names[#names + 1] = esc(sc.name ~= "" and sc.name or "(unnamed)") end
+    end
+    out(string.format('<div class="sub"><b>Selected scenes: %d of %d</b> · %s</div>',
+      n_picked, #scene_order, table.concat(names, ", ")))
+  end
 
-  -- Overview
-  out('<h2>Project Overview</h2><div class="grid">')
+  -- Overview (selected scenes: only what belongs to those scenes)
+  out('<h2>' .. (sel_mode and 'Selected Scenes Overview' or 'Project Overview') .. '</h2><div class="grid">')
   local function kv(k, v) out('<div class="kv"><b>' .. k .. '</b><span>' .. v .. '</span></div>') end
   kv("Total Film Length", fmt_dur(project_film_total_sec))
-  kv("Grand Total Work", fmt_dur(grand_total))
+  if not sel_mode then kv("Grand Total Work", fmt_dur(grand_total)) end
   kv("Scene Work", fmt_dur(project_scene_total_sec))
-  kv("Project Work (no scene)", fmt_dur(project_work_total))
-  kv("Working Days", tostring(dl_all))
-  kv("Avg Daily Work", dl_all > 0 and (fmt_dur(dl_avg) .. string.format(" <small>(mid %d)</small>", dl_used)) or "N/A")
+  if not sel_mode then
+    kv("Project Work (no scene)", fmt_dur(project_work_total))
+    kv("Working Days", tostring(dl_all))
+    kv("Avg Daily Work", dl_all > 0 and (fmt_dur(dl_avg) .. string.format(" <small>(mid %d)</small>", dl_used)) or "N/A")
+  end
   kv("Completed Film", fmt_dur(completed_film_sec))
   kv("Remaining Film", fmt_dur(remaining_film_sec))
   kv("Completion", pct(completed_film_sec, project_film_total_sec))
@@ -826,11 +862,13 @@ a{color:var(--acc);text-decoration:none}a:hover{text-decoration:underline}
   -- Ratio = stage length / film length of the scenes that have that stage;
   -- Kept = stage length / previous stage length of the same scenes.
   do
-    local src_scenes = 0
+    local src_scenes, src_len = 0, 0
     local sel = { len = 0, film = 0, prev = 0, n = 0 }
     local edt = { len = 0, film = 0, prev = 0, n = 0 }
     for _, sc in ipairs(scenes) do
+      if not shown(sc) then goto next_stage end
       if sc.source_length_sec > 0 then src_scenes = src_scenes + 1 end
+      src_len = src_len + sc.source_length_sec
       if sc.sel_len_sec and sc.sel_len_sec > 0 then
         sel.len, sel.film = sel.len + sc.sel_len_sec, sel.film + sc.length_sec
         sel.prev, sel.n   = sel.prev + sc.source_length_sec, sel.n + 1
@@ -839,7 +877,10 @@ a{color:var(--acc);text-decoration:none}a:hover{text-decoration:underline}
         edt.len, edt.film = edt.len + sc.edit_len_sec, edt.film + sc.length_sec
         edt.prev, edt.n   = edt.prev + ((sc.sel_len_sec and sc.sel_len_sec > 0) and sc.sel_len_sec or sc.source_length_sec), edt.n + 1
       end
+      ::next_stage::
     end
+    -- whole project: every EDL item; selected scenes: their attributed source only
+    local source_total = sel_mode and src_len or project_source_total_sec
     local function stage(title, len, ratio, kept, n)
       out('<div class="stage"><h4>' .. title .. '</h4>')
       out('<div><b>Total Length</b><span>' .. len .. '</span></div>')
@@ -848,8 +889,8 @@ a{color:var(--acc);text-decoration:none}a:hover{text-decoration:underline}
       out('<div><b>Scenes</b><span>' .. n .. '</span></div></div>')
     end
     out('<div class="stages">')
-    stage("Source (EDL)", fmt_dur(project_source_total_sec),
-      pct(project_source_total_sec, project_film_total_sec), "–", src_scenes)
+    stage("Source (EDL)", fmt_dur(source_total),
+      pct(source_total, project_film_total_sec), "–", src_scenes)
     if has_sel then
       stage("Selected (Mic Selected)", fmt_dur(sel.len), pct(sel.len, sel.film), pct(sel.len, sel.prev), sel.n)
     end
@@ -861,26 +902,31 @@ a{color:var(--acc);text-decoration:none}a:hover{text-decoration:underline}
 
   -- Efficiency per work type
   out('<h2>Efficiency by Work Type</h2><div class="wrap"><table>')
+  -- (selected scenes: no Project Time / Total Time, they are not per scene)
   out('<tr><th class="l">Work</th><th>Scenes</th><th>Film</th><th>Source</th><th>Scene Time</th>'
-    .. '<th>Film/hr</th><th>Source/hr</th><th>Project Time</th><th>Total Time</th></tr>')
+    .. '<th>Film/hr</th><th>Source/hr</th>'
+    .. (sel_mode and '' or '<th>Project Time</th><th>Total Time</th>') .. '</tr>')
   for _, t in ipairs(types) do
     local e = eff[t] or { scenes = 0, film = 0, source = 0, work = 0 }
     out(string.format('<tr><td class="l">%s</td><td>%d</td><td>%s</td><td>%s</td><td>%s</td>'
-      .. '<td>%s</td><td>%s</td><td>%s</td><td>%s</td></tr>',
+      .. '<td>%s</td><td>%s</td>',
       type_label(t), e.scenes, dur_or_dash(e.film), dur_or_dash(e.source), dur_or_dash(e.work),
-      e.work > 0 and rate_or_na(e.film, e.work) or "–", e.work > 0 and rate_or_na(e.source, e.work) or "–",
-      dur_or_dash(wt_project[t]), fmt_dur(wt_totals[t])))
+      e.work > 0 and rate_or_na(e.film, e.work) or "–", e.work > 0 and rate_or_na(e.source, e.work) or "–")
+      .. (sel_mode and '' or string.format('<td>%s</td><td>%s</td>', dur_or_dash(wt_project[t]), fmt_dur(wt_totals[t])))
+      .. '</tr>')
   end
   out(string.format('<tr class="total"><td class="l">Total</td><td>%d</td><td>%s</td><td>%s</td><td>%s</td>'
-    .. '<td>%s</td><td>%s</td><td>%s</td><td>%s</td></tr>',
+    .. '<td>%s</td><td>%s</td>',
     eff_total.scenes, dur_or_dash(eff_total.film), dur_or_dash(eff_total.source), dur_or_dash(eff_total.work),
-    rate_or_na(eff_total.film, eff_total.work), rate_or_na(eff_total.source, eff_total.work),
-    dur_or_dash(project_work_total), fmt_dur(grand_total)))
+    rate_or_na(eff_total.film, eff_total.work), rate_or_na(eff_total.source, eff_total.work))
+    .. (sel_mode and '' or string.format('<td>%s</td><td>%s</td>', dur_or_dash(project_work_total), fmt_dur(grand_total)))
+    .. '</tr>')
   out('</table></div>')
   out('<div class="note">Film/hr and Source/hr: film / source length of every scene that has this work type, '
     .. 'per hour of that work. Source = what the work starts from: EDL for mic select, Mic Selected for editing, '
     .. 'Edited for denoise (EDL when that stage is missing). '
-    .. 'Project Time (work without a selected scene) is not included in the rates.</div>')
+    .. (sel_mode and 'Only the selected scenes are counted.'
+      or 'Project Time (work without a selected scene) is not included in the rates.') .. '</div>')
 
   -- Scene list (one row per scene)
   out('<h2>Scenes</h2><div class="wrap"><table>')
@@ -890,6 +936,7 @@ a{color:var(--acc);text-decoration:none}a:hover{text-decoration:underline}
   out(hdr .. '<th>Total</th><th>Film/hr</th><th>Source/hr</th><th>Done</th></tr>')
   for idx, guid in ipairs(scene_order) do
     local sc = scene_map[guid]
+    if not shown(sc) then goto next_row end
     local name = esc(sc.name ~= "" and sc.name or "(unnamed)")
     if sc.total_sec > 0 then name = '<a href="#s' .. idx .. '">' .. name .. '</a>' end
     local row = string.format('<tr%s><td>%d</td><td class="l">%s</td><td class="l">%s – %s</td><td>%s</td><td>%s</td><td>%s</td>',
@@ -904,6 +951,7 @@ a{color:var(--acc);text-decoration:none}a:hover{text-decoration:underline}
       sc.total_sec > 0 and rate_or_na(sc.source_length_sec, sc.total_sec) or "–",
       sc.is_done and '<span class="done">✓</span>' or "")
     out(row)
+    ::next_row::
   end
   out('</table></div>')
 
@@ -911,7 +959,7 @@ a{color:var(--acc);text-decoration:none}a:hover{text-decoration:underline}
   out('<h2>Per Scene</h2>')
   for idx, guid in ipairs(scene_order) do
     local sc = scene_map[guid]
-    if sc.total_sec > 0 then
+    if sc.total_sec > 0 and shown(sc) then
       out('<section class="scene" id="s' .. idx .. '">')
       out('<h3>#' .. idx .. ' · Scene ' .. esc(sc.name ~= "" and sc.name or "(unnamed)")
         .. (sc.is_done and ' <span class="done">✓ done</span>' or '') .. '</h3>')
