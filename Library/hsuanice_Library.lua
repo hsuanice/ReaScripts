@@ -1,6 +1,6 @@
 --[[
 @description hsuanice Library - shared code used by hsuanice scripts (required)
-@version 26.1024.1004pre1
+@version 26.1024.1009
 @author hsuanice
 @metapackage
 @provides

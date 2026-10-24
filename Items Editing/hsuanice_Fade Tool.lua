@@ -1,6 +1,6 @@
 --[[
 @description Fade Tool - frame-grid fades and crossfades by razor, time selection, mouse or edit cursor (Smart Fade, Crossfade in Razor, Scene Cut to Razor, Settings)
-@version 26.1024.1004pre1
+@version 26.1024.1009
 @author hsuanice
 @metapackage
 @provides
@@ -10,6 +10,7 @@
   [main] hsuanice_Fade Tool - Settings.lua
 @changelog
   - Add: crossfade across a gap between two items - a razor inside the gap, or over both gap edges, extends both items into a crossfade over the razor (it made two separate fades before).
+  - Release: tested in REAPER 7.82.
 @about
   # Fade Tool
 
