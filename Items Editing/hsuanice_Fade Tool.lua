@@ -1,6 +1,6 @@
 --[[
 @description Fade Tool - frame-grid fades and crossfades by razor, time selection, mouse or edit cursor (Smart Fade, Crossfade in Razor, Scene Cut to Razor, Settings)
-@version 26.1024.1009
+@version 26.1024.1906pre1
 @author hsuanice
 @metapackage
 @provides
@@ -9,8 +9,7 @@
   [main] hsuanice_Fade Tool - Scene Cut to Razor.lua
   [main] hsuanice_Fade Tool - Settings.lua
 @changelog
-  - Add: crossfade across a gap between two items - a razor inside the gap, or over both gap edges, extends both items into a crossfade over the razor (it made two separate fades before).
-  - Release: tested in REAPER 7.82.
+  - Add: Scene Cut to Razor without a razor - select items and the scene they cover completely on the Scene Cut track is used.
 @about
   # Fade Tool
 
@@ -24,7 +23,8 @@
   - Crossfade in Razor: one cut in the razor area -> the crossfade fills the area exactly;
     no cut -> the nearest visible cut is moved into the area; several cuts -> each gets the
     default crossfade (e.g. 1 frame before the cut). Default shape: Equal Power.
-  - Scene Cut to Razor: the razor area is the scene; only the first and last item are trimmed
+  - Scene Cut to Razor: the razor area is the scene (no razor: the scene on the "Scene Cut"
+    track that the selected items cover completely); only the first and last item are trimmed
     or extended, with a fade-in before the scene start and a fade-out on its last frame
     (1 frame Linear by default). Items in between stay untouched.
   - Settings: lengths in frames, positions (before / center / after) and shapes.

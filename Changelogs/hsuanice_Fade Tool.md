@@ -1,5 +1,9 @@
 # hsuanice_Fade Tool.lua — Changelog
 
+## 26.1024.1906pre1
+
+- Add: Scene Cut to Razor without a razor - select items and the scene they cover completely on the Scene Cut track is used.
+
 ## 26.1024.1009
 
 - Add: crossfade across a gap between two items - a razor inside the gap, or over both gap edges, extends both items into a crossfade over the razor (it made two separate fades before).

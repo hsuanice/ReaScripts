@@ -48,7 +48,8 @@ reaper = {
     if k == "P_RAZOREDITS_EXT" then return true, tr.razor end
     return true, ""
   end,
-  GetMediaTrackInfo_Value = function() return 0 end,
+  GetMediaTrackInfo_Value = function(tr, k) return (tr.v and tr.v[k]) or 0 end,
+  GetTakeName = function(t) return t.name or "" end,
   IsTrackVisible = function(tr) return not tr.hidden end,
   CountTrackMediaItems = function(tr) return #tr.items end,
   GetTrackMediaItem = function(tr, i) return tr.items[i + 1] end,
@@ -381,6 +382,55 @@ check("39 dragging on after Cmd is released: snaps again", near(S(B), 253 / FPS)
 A, B = xpair("K5"); SNAP = false; mouse = { item = B, part = "top" }
 cmd_frames(1, 99); hold_run(4, { 10.02, 10.53, 10.53, 10.53, 10.53 })
 check("40 snap off + Cmd: grid", near(S(B), 253 / FPS))
+
+-- Scene Cut from the Scene Cut track (no razor, selected items) ---------------------
+local function scene_project()
+  reset()
+  local sct = new_track("Scene Cut", ""); sct.v = { I_FOLDERDEPTH = 1 }
+  local log = new_track("2026-10-20", ""); log.v = { I_FOLDERDEPTH = -1 }
+  for i, r_ in ipairs({ { 0, 10, "80" }, { 10, 20, "81" }, { 20, 24, "33" }, { 24, 40, "82" } }) do
+    local it = new_item(sct, r_[1], r_[2] - r_[1], r_[1], 100); it.take.name = r_[3]
+  end
+  local rt = new_track("RT", "")
+  return sct, log, rt
+end
+local sct, log, rt, rt2
+sct, log, rt = scene_project()
+A = new_item(rt, 8, 6, -10, 100); A.sel = true          -- pieces covering scene 81 (10..20)
+B = new_item(rt, 14, 4, -10, 100)                        -- middle piece, not selected
+C = new_item(rt, 18, 4.5, -10, 100); C.sel = true
+D = new_item(rt, 30, 5, -10, 100)                        -- other scene, untouched
+run("Scene Cut to Razor")
+check("41 selection covering scene 81: first / last selected trimmed to it",
+  near(S(A), 10 - fl) and near(A.v.D_FADEINLEN, fl) and near(E(C), 20) and near(C.v.D_FADEOUTLEN, fl))
+check("41 partly covered neighbours ignored, unselected items untouched",
+  near(S(B), 14) and near(E(B), 18) and near(S(D), 30) and mb == nil)
+
+sct, log, rt = scene_project()
+A = new_item(rt, 12, 7, -10, 100); A.sel = true          -- inside 81, not covering it
+run("Scene Cut to Razor")
+check("42 only part of a scene: nothing, listed", near(S(A), 12) and mb and mb:find("whole scene"))
+
+sct, log, rt = scene_project()
+A = new_item(rt, 9, 16, -10, 100); A.sel = true          -- covers 81 and 33 completely
+run("Scene Cut to Razor")
+check("43 several whole scenes: nothing, listed with names", near(S(A), 9) and mb and mb:find("81, 33"))
+
+sct, log, rt = scene_project()
+rt.razor = '2 6 ""'
+A = new_item(rt, 0, 9, -10, 100); A.sel = true
+run("Scene Cut to Razor")
+check("44 razor wins over the selection", near(S(A), 2 - fl) and near(E(A), 6))
+
+sct, log, rt = scene_project()
+rt2 = new_track("RT2", "")
+A = new_item(rt, 9, 12, -10, 100); A.sel = true
+B = new_item(rt2, 19.5, 5.5, 0, 100); B.sel = true      -- covers scene 33 (20..24) on its own track
+sct.items[1].sel = true                                  -- a selected scene item itself
+local L = new_item(log, 0, 5, 0, 5); L.sel = true        -- a work-log item in the folder
+run("Scene Cut to Razor")
+check("45 each track its own scene", near(S(A), 10 - fl) and near(E(A), 20) and near(S(B), 20 - fl) and near(E(B), 24))
+check("45 Scene Cut track and its folder never cut", near(S(sct.items[1]), 0) and near(E(sct.items[1]), 10) and near(S(L), 0))
 
 print(string.format("%d passed, %d failed", passes, fails))
 os.exit(fails == 0 and 0 or 1)
