@@ -1,10 +1,11 @@
 --[[
 @description Fade Tool - Scene Cut to Razor (trim or extend the edge items to the scene with transition fades)
-@version 26.1024.1906pre1
+@version 26.1024.1910
 @author hsuanice
 @noindex
 @changelog
   - Add: no razor - select the items to cut and the scene they cover completely on the "Scene Cut" track is used (partly covered scenes do not count; several whole scenes are listed, not guessed). Razor still wins.
+  - Release: tested in REAPER 7.82.
 @about
   The scene comes from the razor edit area, or - with no razor - from the "Scene Cut" track:
   select the items to cut (they must cover the whole scene, start to end) and the scene

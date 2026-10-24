@@ -1,5 +1,10 @@
 # hsuanice_Fade Tool - Scene Cut to Razor.lua — Changelog
 
+## 26.1024.1910
+
+- Add: no razor - select the items to cut and the scene they cover completely on the "Scene Cut" track is used (partly covered scenes do not count; several whole scenes are listed, not guessed). Razor still wins.
+- Release: tested in REAPER 7.82.
+
 ## 26.1024.1906pre1
 
 - Add: no razor - select the items to cut and the scene they cover completely on the "Scene Cut" track is used (partly covered scenes do not count; several whole scenes are listed, not guessed). Razor still wins.

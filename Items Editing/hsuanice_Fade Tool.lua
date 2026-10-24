@@ -1,6 +1,6 @@
 --[[
 @description Fade Tool - frame-grid fades and crossfades by razor, time selection, mouse or edit cursor (Smart Fade, Crossfade in Razor, Scene Cut to Razor, Settings)
-@version 26.1024.1906pre1
+@version 26.1024.1910
 @author hsuanice
 @metapackage
 @provides
@@ -10,6 +10,7 @@
   [main] hsuanice_Fade Tool - Settings.lua
 @changelog
   - Add: Scene Cut to Razor without a razor - select items and the scene they cover completely on the Scene Cut track is used.
+  - Release: tested in REAPER 7.82.
 @about
   # Fade Tool
 
