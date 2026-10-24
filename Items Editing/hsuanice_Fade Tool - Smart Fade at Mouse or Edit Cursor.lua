@@ -1,11 +1,10 @@
 --[[
 @description Fade Tool - Smart Fade at Mouse or Edit Cursor (razor, time selection, mouse top / bottom / label, Hover Mode aware)
-@version 26.1023.2124
+@version 26.1024.1004pre1
 @author hsuanice
 @noindex
 @changelog
-  - Fix: a Cmd fine-tuned crossfade no longer jumps back to the grid when the keys are released (the drag ends when the shortcut is released, modifiers ignored; Cmd released up to 0.2 s before the shortcut keeps the free position).
-  - Release: tested in REAPER 7.82.
+  - Add: crossfade across a gap between two items - a razor inside the gap, or over both gap edges, extends both items into a crossfade over the razor (it made two separate fades before).
 @about
   One shortcut for fades and crossfades. Never opens a window unless something had to be
   skipped. The first context that applies wins:

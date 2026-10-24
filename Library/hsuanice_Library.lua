@@ -1,6 +1,6 @@
 --[[
 @description hsuanice Library - shared code used by hsuanice scripts (required)
-@version 26.1023.2047
+@version 26.1024.1004pre1
 @author hsuanice
 @metapackage
 @provides
@@ -25,7 +25,7 @@
   [nomain] hsuanice_Fade Tool Core.lua
   [nomain] json.lua
 @changelog
-  - Update: hsuanice_Fade Tool Core.lua (Smart Fade support).
+  - Update: hsuanice_Fade Tool Core.lua (crossfade across a gap).
 @about
   # hsuanice Library
 

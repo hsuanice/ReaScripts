@@ -1,6 +1,6 @@
 --[[
 @description Fade Tool - frame-grid fades and crossfades by razor, time selection, mouse or edit cursor (Smart Fade, Crossfade in Razor, Scene Cut to Razor, Settings)
-@version 26.1023.2124
+@version 26.1024.1004pre1
 @author hsuanice
 @metapackage
 @provides
@@ -9,8 +9,7 @@
   [main] hsuanice_Fade Tool - Scene Cut to Razor.lua
   [main] hsuanice_Fade Tool - Settings.lua
 @changelog
-  - Fix: Smart Fade drag keeps a Cmd fine-tuned position when the keys are released.
-  - Release: tested in REAPER 7.82.
+  - Add: crossfade across a gap between two items - a razor inside the gap, or over both gap edges, extends both items into a crossfade over the razor (it made two separate fades before).
 @about
   # Fade Tool
 

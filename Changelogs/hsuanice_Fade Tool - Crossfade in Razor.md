@@ -1,5 +1,9 @@
 # hsuanice_Fade Tool - Crossfade in Razor.lua — Changelog
 
+## 26.1024.1004pre1
+
+- Add: crossfade across a gap between two items - a razor inside the gap, or over both gap edges, extends both items into a crossfade over the razor (it made two separate fades before).
+
 ## 26.1023.2047
 
 - Add: a free item start / end inside the razor area gets a plain fade over the area.

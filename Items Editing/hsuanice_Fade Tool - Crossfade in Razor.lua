@@ -1,12 +1,10 @@
 --[[
 @description Fade Tool - Crossfade in Razor (fit one cut to the razor area, or crossfade every cut inside it)
-@version 26.1023.2047
+@version 26.1024.1004pre1
 @author hsuanice
 @noindex
 @changelog
-  - Add: a free item start / end inside the razor area gets a plain fade over the area.
-  - Change: only the part of the razor area inside the arrange view, on visible tracks, is used.
-  - Release: tested in REAPER 7.82.
+  - Add: crossfade across a gap between two items - a razor inside the gap, or over both gap edges, extends both items into a crossfade over the razor (it made two separate fades before).
 @about
   Works only on razor edit areas (tracks and time range of each area). Never opens a window
   unless something had to be skipped.

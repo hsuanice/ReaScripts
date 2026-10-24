@@ -1,11 +1,10 @@
 --[[
 @description hsuanice Fade Tool Core (shared razor / cut / edge / fade helpers for the Fade Tool scripts)
-@version 26.1023.2047
+@version 26.1024.1004pre1
 @author hsuanice
 @noindex
 @changelog
-  - Smart Fade support: mouse / edit cursor fades, name bar crossfade move, visible-area rule (razor / time selection clipped to the arrange view), plain fades never touch a crossfade.
-  - Release: tested in REAPER 7.82.
+  - Add: crossfade across a gap between two items - a razor inside the gap, or over both gap edges, extends both items into a crossfade over the razor (it made two separate fades before).
 @about
   Shared code for "Fade Tool - Crossfade in Razor", "Fade Tool - Scene Cut to Razor" and
   "Fade Tool - Settings". Settings live in the ExtState section "hsuanice_FadeTool".
@@ -196,6 +195,19 @@ function M.find_cuts(list)
     end
   end
   return cuts
+end
+
+-- Neighbouring items of a sorted lane list with a gap between them: { a, b, js, je, cut }
+-- where [js, je] is the gap (a's end to b's start) and cut its middle on the frame grid
+function M.find_gaps(list)
+  local gaps = {}
+  for i = 1, #list - 1 do
+    local a, b = list[i], list[i + 1]
+    if b.pos > a.fin + M.TOL and b.fin > a.fin then
+      gaps[#gaps + 1] = { a = a, b = b, js = a.fin, je = b.pos, cut = M.snap_frame((a.fin + b.pos) / 2) }
+    end
+  end
+  return gaps
 end
 
 function M.is_locked(it)
@@ -447,6 +459,8 @@ end
 -- Razor / time selection areas
 ----------------------------------------
 -- Per track (and fixed lane) inside each area { track, s, e, top, bot }:
+-- - a gap between two items counts as a cut when the area covers both gap edges or lies
+--   inside the gap (both items are extended into the crossfade)
 -- - one cut in the area: the crossfade fills the area
 -- - two or more cuts: each gets the default crossfade (frames + before / center / after)
 -- - no cut: an item start / end inside the area whose other end lies outside gets a plain
@@ -484,6 +498,18 @@ function M.fade_areas(areas, S)
           inside[#inside + 1] = c
         elseif c.je >= view_s and c.js <= view_e then
           outside[#outside + 1] = c
+        end
+      end
+      -- a gap counts as a cut when the area covers both of its edges, or lies inside it
+      -- without touching either item: both items are extended into the crossfade.
+      -- An area over just one edge keeps the plain fade below.
+      for _, g in ipairs(M.find_gaps(list)) do
+        local covers = g.js >= rs - M.TOL and g.je <= re + M.TOL
+        local within = rs >= g.js - M.TOL and re <= g.je + M.TOL
+        if covers or within then
+          joined[g.a] = joined[g.a] or {}; joined[g.a].right = true
+          joined[g.b] = joined[g.b] or {}; joined[g.b].left = true
+          inside[#inside + 1] = g
         end
       end
 
