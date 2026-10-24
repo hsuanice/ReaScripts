@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<index version="1" name="hsuanice Scripts" commit="dec4f310f12d1e5e762c0b2b3915956632abaf81">
+<index version="1" name="hsuanice Scripts" commit="3c478295bdb1b38b02dfbd24bde5e1fe439c8311">
   <category name="Conform">
     <reapack name="hsuanice_Conform List Browser - CLB.lua" type="script" desc="Conform List Browser - CLB: conform EDL / AAF / XML / OTIO / subtitle lists (GUI + Jump / Link / Load / Reveal)">
       <metadata>
@@ -213,7 +213,7 @@
 {\pard \ql \f0 \sa180 \li0 \fi0 Frame-accurate fades for frame-grid editing. Everything works on razor edit areas and never opens a window unless something had to be skipped.\par}
 {\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Smart Fade at Mouse or Edit Cursor: one shortcut for everything. Razor first, then time selection + selected tracks, then the mouse (Hover Mode on: top half = fade-in, bottom half = fade-out, item name bar = move the nearest crossfade centered on the mouse), else the edit cursor. Shares Hover Mode with Hover Editing - Toggle Hover Mode.\par}
 {\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Crossfade in Razor: one cut in the razor area -> the crossfade fills the area exactly; no cut -> the nearest visible cut is moved into the area; several cuts -> each gets the default crossfade (e.g. 1 frame before the cut). Default shape: Equal Power.\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Scene Cut to Razor: the razor area is the scene; only the first and last item are trimmed or extended, with a fade-in before the scene start and a fade-out on its last frame (1 frame Linear by default). Items in between stay untouched.\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Scene Cut to Razor: the razor area is the scene (no razor: the scene on the "Scene Cut" track that the selected items cover completely); only the first and last item are trimmed or extended, with a fade-in before the scene start and a fade-out on its last frame (1 frame Linear by default). Items in between stay untouched.\par}
 {\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Settings: lengths in frames, positions (before / center / after) and shapes.\sa180\par}
 {\pard \ql \f0 \sa180 \li0 \fi0 Requires the hsuanice Library package. Hover Mode needs SWS and the Hover Editing package (Toggle Hover Mode); without them Smart Fade works at the edit cursor.\par}
 {\pard \ql \f0 \sa180 \li0 \fi0 Credits: heavily based on AZ's "Fade tool (work on context of mouse, razor or time selection)" (ReaTeam Scripts) by AZ - https://forum.cockos.com/member.php?u=135221 , forum thread https://forum.cockos.com/showthread.php?t=293335 . Fade Tool follows its design closely: the context order (razor, time selection, mouse), top half = fade-in / bottom half = fade-out, the item name bar moving a crossfade (including AZ's way of detecting the name bar), razor crossfades and razor fades. The code is a new implementation by hsuanice with AI (Claude Code), with hsuanice's changes: frame-based defaults, no pop-up windows, Hover Mode support, hold-and-drag crossfade edges and Scene Cut.\par}
@@ -337,6 +337,13 @@
         <source main="main" file="hsuanice_Fade Tool - Crossfade in Razor.lua">https://github.com/hsuanice/ReaScripts/raw/dec4f310f12d1e5e762c0b2b3915956632abaf81/Items%20Editing/hsuanice_Fade%20Tool%20-%20Crossfade%20in%20Razor.lua</source>
         <source main="main" file="hsuanice_Fade Tool - Scene Cut to Razor.lua">https://github.com/hsuanice/ReaScripts/raw/dec4f310f12d1e5e762c0b2b3915956632abaf81/Items%20Editing/hsuanice_Fade%20Tool%20-%20Scene%20Cut%20to%20Razor.lua</source>
         <source main="main" file="hsuanice_Fade Tool - Settings.lua">https://github.com/hsuanice/ReaScripts/raw/dec4f310f12d1e5e762c0b2b3915956632abaf81/Items%20Editing/hsuanice_Fade%20Tool%20-%20Settings.lua</source>
+      </version>
+      <version name="26.1024.1906pre1" author="hsuanice" time="2026-10-24T11:07:17Z">
+        <changelog><![CDATA[- Add: Scene Cut to Razor without a razor - select items and the scene they cover completely on the Scene Cut track is used.]]></changelog>
+        <source main="main" file="hsuanice_Fade Tool - Smart Fade at Mouse or Edit Cursor.lua">https://github.com/hsuanice/ReaScripts/raw/3c478295bdb1b38b02dfbd24bde5e1fe439c8311/Items%20Editing/hsuanice_Fade%20Tool%20-%20Smart%20Fade%20at%20Mouse%20or%20Edit%20Cursor.lua</source>
+        <source main="main" file="hsuanice_Fade Tool - Crossfade in Razor.lua">https://github.com/hsuanice/ReaScripts/raw/3c478295bdb1b38b02dfbd24bde5e1fe439c8311/Items%20Editing/hsuanice_Fade%20Tool%20-%20Crossfade%20in%20Razor.lua</source>
+        <source main="main" file="hsuanice_Fade Tool - Scene Cut to Razor.lua">https://github.com/hsuanice/ReaScripts/raw/3c478295bdb1b38b02dfbd24bde5e1fe439c8311/Items%20Editing/hsuanice_Fade%20Tool%20-%20Scene%20Cut%20to%20Razor.lua</source>
+        <source main="main" file="hsuanice_Fade Tool - Settings.lua">https://github.com/hsuanice/ReaScripts/raw/3c478295bdb1b38b02dfbd24bde5e1fe439c8311/Items%20Editing/hsuanice_Fade%20Tool%20-%20Settings.lua</source>
       </version>
     </reapack>
     <reapack name="hsuanice_Hover Editing.lua" type="script" desc="Hover Editing - Pro Tools-style Split / Trim at the mouse or edit cursor (Toggle Hover Mode, Split, Trim Left / Right)">
