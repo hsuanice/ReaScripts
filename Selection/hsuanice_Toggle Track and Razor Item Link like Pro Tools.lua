@@ -1,9 +1,10 @@
 --[[
 @description Toggle Track and Razor Item Link like Pro Tools - Link Track and Edit Selection
-@version 26.1023.1358pre1
+@version 26.1025.1206pre1
 @author hsuanice
 @changelog
-  - Change: part D (sync items when the Razor area or track selection changes) is now off by default (ENABLE_D = false): with D on, linking track selection to items also triggered the item-to-track direction, which cleared the intended selection.
+  - Fix: linking now goes one way per change - item / razor changes the script makes itself no longer count as user changes, so they are not linked back (e.g. Option+double-click on the TCP to select all tracks: part D selected the items in the range, then part B shrank the track selection to the item tracks).
+  - Correction: part D is ON (ENABLE_D = true). The 26.1023.1358pre1 note said it was turned off, but only the note changed; with this fix D is safe to keep on.
 @about
   Pro Tools-style "Link Track and Edit Selection".
   Edit Selection = Razor Area or Item Selection.
@@ -722,6 +723,11 @@ local function mainloop()
   -- Did items change this tick?
   local items_changed_this_tick = (it_sel_sig ~= prev.it_sel_sig) or (it_tr_sig ~= prev.it_tr_sig)
   local tracks_changed_by_items = false
+  -- One direction per change: what this script writes itself (items in C / D, razor in C) is
+  -- re-read before the state is saved, so the next loop does not take it for a user change
+  -- and link it back the other way (e.g. Select all tracks -> D selects items -> B used to
+  -- shrink the track selection to the item tracks).
+  local items_written, razor_written = false, false
 
   -- LATCH management (with suppression)
   if Razor.cnt_tracks_with > 0 or (ts and te) then
@@ -817,13 +823,16 @@ local function mainloop()
           set_track_level_ranges(tr, { {ts, te} })
           if is_razor_item_link_enabled() then
             track_select_items_matching_range(tr, ts, te, true,  1) -- Overlap
+            items_written = true
           end
         else
           set_track_level_ranges(tr, {})
           if is_razor_item_link_enabled() then
             track_select_items_matching_range(tr, ts, te, false, 1) -- Overlap
+            items_written = true
           end
         end
+        razor_written = true
       end
     end
     reaper.PreventUIRefresh(-1); reaper.UpdateArrange()
@@ -869,7 +878,19 @@ local function mainloop()
     reaper.PreventUIRefresh(-1); reaper.UpdateArrange()
     suppress_latch_next = true
     triggered_side = "TRACKS"
+    items_written = true
     dbg("D fired: Razor/Tracks→Items (Active=%s)", a_src or "none")
+  end
+
+  -- Our own writes are not user changes (see items_written above)
+  if items_written then
+    it_info = get_selected_items_info()
+    it_sel_sig, it_tr_sig = it_info.sig, it_info.tr_sig
+  end
+  if razor_written then
+    psc = reaper.GetProjectStateChangeCount(0)
+    Razor.last_scan_psc = -1   -- rescan even if the change count did not move
+    scan_razors_if_needed(psc)
   end
 
   -- Publish (monitor)
