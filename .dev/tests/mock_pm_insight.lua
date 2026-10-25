@@ -141,9 +141,17 @@ check("plan: hours used / target and per day", has(plan, "3.8h / 20h") and has(p
 check("plan: estimate fits the hours left", has(plan, "✓ fits"))
 check("plan: per day as part of a 5h working day", has(plan, "1.6h <small>(33% of a 5h day)</small>"))
 check("plan: 2.2h left at 5h a day = 1 day, before delivery", has(plan, "At 5h a day</b><span>1 days · done ~") and has(plan, "Hours available to delivery</b><span>50.0h"))
+-- pace needed: 2 scenes left (660s source, 150s film), 10 days x 5h = 50h
+check("pace: header with days x hours", has(plan, "Pace needed for the 2 scenes left") and has(plan, "10 days × 5h = 50.0h"))
+check("pace: source 1m 6s per day, 0m 13s per hour, now 6m 0s ✓",
+  has(plan, '<td class="l">Source</td><td>1m 6s</td><td>0m 13s</td><td>6m 0s <span class="ok">✓</span>'))
+check("pace: film 0m 15s per day, 0m 3s per hour, now 1m 0s ✓",
+  has(plan, '<td class="l">Film</td><td>0m 15s</td><td>0m 3s</td><td>1m 0s <span class="ok">✓</span>'))
 projext.HOURS_PER_DAY = "1"
 local p1 = run({})
 check("plan: 1h a day -> 3 days, 10h available", has(p1, "At 1h a day</b><span>3 days") and has(p1, "Hours available to delivery</b><span>10.0h"))
+projext.HOURS_PER_DAY = "0.01"   -- 36 s of work a day: far too little
+check("pace: too slow -> warning with factor", has(run({}), '<span class="warn">⚠ ×'))
 projext.HOURS_PER_DAY = nil
 check("plan: source per day per stage", has(plan, "Denoise source / day</b><span>66s"))
 projext.TARGET_HOURS = "5"
