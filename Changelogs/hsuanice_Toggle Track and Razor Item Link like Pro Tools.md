@@ -4,6 +4,12 @@
 
 Track↔Edit link (Pro Tools style). Performance edition; focuses on Razor & item virtual ranges. This build removes menu guards for snappier click-select.
 
+## 26.1025.1209
+
+- Fix: linking now goes one way per change - item / razor changes the script makes itself no longer count as user changes, so they are not linked back (e.g. Option+double-click on the TCP to select all tracks: part D selected the items in the range, then part B shrank the track selection to the item tracks).
+- Correction: part D is ON (ENABLE_D = true). The 26.1023.1358pre1 note said it was turned off, but only the note changed; with this fix D is safe to keep on.
+- Release: tested in REAPER 7.82.
+
 ## 26.1025.1206pre1
 
 - Fix: linking now goes one way per change - item / razor changes the script makes itself no longer count as user changes, so they are not linked back (e.g. Option+double-click on the TCP to select all tracks: part D selected the items in the range, then part B shrank the track selection to the item tracks).
