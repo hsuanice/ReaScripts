@@ -1,6 +1,6 @@
 --[[
 @description AudioSweet - AudioSuite Workflow: Pro Tools-style offline FX processing (GUI + Run / Preview / Solo)
-@version 26.1025.2058pre1
+@version 26.1025.2104
 @author hsuanice
 @links
   https://forum.cockos.com/showthread.php?p=2910884#post2910884
@@ -13,7 +13,7 @@
   [nomain] hsuanice_AudioSweet - FX Alias Export TSV.lua
   [nomain] hsuanice_AudioSweet - FX Alias Import TSV.lua
 @changelog
-  - Change: the main window now shows one row: Split at Mute, Split at Crossfade and Single Item Render. Glue grouping (All / RGWH / AS) and Retain Glue Cues are back in Settings > Glue & Render only. Ticking a split box switches Glue grouping to AudioSweet settings.
+  - New: Split at Mute, Split at Crossfade and Single Item Render are on the main window, below the Whole File / Tail row (same settings as Settings > Glue & Render; ticking a split box switches Glue grouping to AudioSweet settings).
 @about
   # AudioSweet ReaImGui
 
