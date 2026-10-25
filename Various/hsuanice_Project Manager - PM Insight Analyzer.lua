@@ -1,11 +1,13 @@
 --[[
 @description Project Manager - PM Insight Analyzer: work-time analysis of PM Timer logs (work in progress)
-@version 26.1025.1235
+@version 26.1025.1249pre1
 @author hsuanice
 @noindex  (kept in the repository as a backup; not offered on ReaPack while it is a work in progress)
 @changelog
-  - Add: select one or more items on the Scene Cut track to report only those scenes - their work time, film length and Source / Mic Selected / Edited; project-wide figures (daily average, work without a scene, Total Time) are left out. Nothing selected = whole project, same report file.
-  - Release: tested in REAPER 7.82.
+  - Change: the report opens with an overview of the four questions - work time (total, working days, typical day, last 7 days), efficiency (film / EDL source per hour), progress by stage and plan; the detailed tables are collapsed below.
+  - Add: progress by stage - Mic select (EDL), Editing (Mic Selected), Denoise (Edited): a stage is done for a scene when all its items there are muted; a stage with no items is done when a later stage already has items (skipped), else not done. Remaining EDL source and estimated work hours per stage.
+  - Add: plan from PM Timer's target hours and delivery date - days left, hours used / left, hours per day, whether the estimated work fits, source per day per stage.
+  - Change: Source/hr always uses the EDL source (not Mic Selected / Edited lengths).
 @about
   Read-only analysis script. Auto-detects project type:
 
@@ -33,6 +35,8 @@ local r = reaper
 
 local SCENE_TRACK_NAME  = "Scene Cut"
 local EDL_FOLDER_NAME   = "EDL"
+local MIC_SELECTED_FOLDER = "Mic Selected"   -- same folder names as PM Timer
+local EDITED_FOLDER       = "Edited"
 local DURATION_LOG_NAME = "DurationOnly_Log"
 local DATE_PAT          = "^%d%d%d%d%-%d%d%-%d%d$"
 local WIN_W, WIN_H      = 1100, 760
@@ -504,6 +508,8 @@ local function analyze()
       source_length_sec = 0,   -- from EDL attribution
       wt_sec            = {},  -- work_type → secs on this scene
       total_sec         = 0,   -- all scene work types combined
+      group             = math.floor(r.GetMediaItemInfo_Value(item, "I_GROUPID")),
+      stage             = {},  -- key → { n = items, open = items not muted yet }
     }
 
     scene_map[guid] = sc
@@ -553,7 +559,9 @@ local function analyze()
 
       -- Priority 1: P_EXT:SCENE_ID exact GUID match
       local _, scene_id = r.GetSetMediaItemInfo_String(item, "P_EXT:SCENE_ID", "", false)
+      local att
       if scene_id ~= "" and scene_map[scene_id] then
+        att = scene_map[scene_id]
         scene_map[scene_id].source_length_sec =
           scene_map[scene_id].source_length_sec + item_len
 
@@ -564,10 +572,18 @@ local function analyze()
             local rng = scene_ranges[idx]
             if item_start >= rng.range_start and item_end <= rng.range_end then
               sc.source_length_sec = sc.source_length_sec + item_len
+              att = sc
               break
             end
           end
         end
+      end
+      -- stage progress: an EDL item is done (mic select) once it is muted
+      if att then
+        local st = att.stage.edl or { n = 0, open = 0 }
+        att.stage.edl = st
+        st.n = st.n + 1
+        if r.GetMediaItemInfo_Value(item, "B_MUTE") ~= 1 then st.open = st.open + 1 end
       end
     end
   end
@@ -623,6 +639,63 @@ local function analyze()
         end
       end
     end
+  end
+
+  -- 4d. Later stage folders (same attribution as PM Timer's Sel Len / Edit Len): an item in a
+  --     scene's item group belongs to that scene; an item not grouped with any scene belongs to
+  --     the scenes it overlaps. Muted = that stage is done for the item.
+  local STAGES = {
+    { key = "edl",  folder = EDL_FOLDER_NAME,       wt = "mic select", label = "Mic select",  src = "EDL" },
+    { key = "sel",  folder = MIC_SELECTED_FOLDER,   wt = "editing",    label = "Editing",     src = "Mic Selected" },
+    { key = "edit", folder = EDITED_FOLDER,         wt = "denoise",    label = "Denoise",     src = "Edited" },
+  }
+  local scene_by_group = {}
+  for _, sc in ipairs(scenes) do if sc.group ~= 0 then scene_by_group[sc.group] = sc end end
+  local stage_exists = { edl = #edl_tracks > 0 }
+  for _, stg in ipairs(STAGES) do
+    if stg.key ~= "edl" then
+      local kids = find_folder_children(stg.folder)
+      stage_exists[stg.key] = #kids > 0
+      for _, t in ipairs(kids) do
+        for i = 0, r.CountTrackMediaItems(t) - 1 do
+          local item = r.GetTrackMediaItem(t, i)
+          local s0 = r.GetMediaItemInfo_Value(item, "D_POSITION")
+          local s1 = s0 + r.GetMediaItemInfo_Value(item, "D_LENGTH")
+          local open = r.GetMediaItemInfo_Value(item, "B_MUTE") ~= 1
+          local g = math.floor(r.GetMediaItemInfo_Value(item, "I_GROUPID"))
+          local targets = {}
+          if g ~= 0 and scene_by_group[g] then
+            targets[1] = scene_by_group[g]
+          else
+            for _, sc in ipairs(scenes) do
+              if math.min(s1, sc.end_pos) - math.max(s0, sc.start_pos) > 0 then targets[#targets + 1] = sc end
+            end
+          end
+          for _, sc in ipairs(targets) do
+            local st = sc.stage[stg.key] or { n = 0, open = 0 }
+            sc.stage[stg.key] = st
+            st.n = st.n + 1
+            if open then st.open = st.open + 1 end
+          end
+        end
+      end
+    end
+  end
+  -- "done" = the scene has items in that stage folder and all of them are muted. A stage with
+  -- no items is skipped (done) when a later stage already has items for the scene
+  -- (e.g. EDL -> Edited directly, Mic Selected left empty); otherwise it is not done yet.
+  local function stage_done(sc, key)
+    local st = sc.stage[key]
+    if st and st.n > 0 then return st.open == 0 end
+    local later = false
+    for _, stg in ipairs(STAGES) do
+      if later then
+        local s2 = sc.stage[stg.key]
+        if s2 and s2.n > 0 then return true end
+      end
+      if stg.key == key then later = true end
+    end
+    return false
   end
 
   -- 5. Walk Scene Cut child tracks and accumulate work times ─────────────────
@@ -709,12 +782,8 @@ local function analyze()
   local completed_film_sec      = 0   -- progress by B_MUTE (scene marked done)
   local remaining_film_sec      = 0
 
-  -- Source a work type starts from: mic select works on the EDL source,
-  -- editing on what is left in "Mic Selected", denoise on "Edited". Falls back
-  -- to the EDL source when the scene has no such stage.
-  local function input_source(sc, wt)
-    if wt == "editing" and sc.sel_len_sec then return sc.sel_len_sec end
-    if wt == "denoise" and sc.edit_len_sec then return sc.edit_len_sec end
+  -- Source/hr always uses the EDL source, whatever the work type (user choice 26.1025)
+  local function input_source(sc)
     return sc.source_length_sec
   end
   local has_sel, has_edit = false, false
@@ -829,6 +898,16 @@ a{color:var(--acc);text-decoration:none}a:hover{text-decoration:underline}
 .scene h3{margin:0 0 4px;font-size:16px}.scene .meta{color:var(--mut);font-family:ui-monospace,Menlo,monospace;font-size:13px;margin-bottom:10px}
 .scene table{border:none}.done{color:#2e9b55;font-weight:700}
 .note{color:var(--mut);font-size:12px;margin-top:6px}
+.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:12px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:12px 14px}
+.card h3{margin:0 0 8px;font-size:14px;color:var(--mut);font-weight:600}
+.row{display:flex;justify-content:space-between;gap:10px;padding:3px 0}
+.row b{font-weight:500;color:var(--mut)}.row span{font:600 15px ui-monospace,Menlo,monospace;text-align:right}
+.big{font:700 22px ui-monospace,Menlo,monospace}
+.bar{height:8px;border-radius:4px;background:var(--line);overflow:hidden;margin:4px 0 8px}
+.bar i{display:block;height:100%;background:var(--acc)}
+.ok{color:#2e9b55;font-weight:700}.warn{color:#d0731b;font-weight:700}
+details{margin-top:18px}summary{cursor:pointer;font-size:16px;font-weight:600;padding:6px 0}
 .top{position:fixed;right:16px;bottom:16px;background:var(--card);border:1px solid var(--line);border-radius:20px;padding:6px 12px}
 </style></head><body><main>]])
   out('<h1 id="top">PM Insight Report</h1>')
@@ -843,22 +922,121 @@ a{color:var(--acc);text-decoration:none}a:hover{text-decoration:underline}
       n_picked, #scene_order, table.concat(names, ", ")))
   end
 
-  -- Overview (selected scenes: only what belongs to those scenes)
-  out('<h2>' .. (sel_mode and 'Selected Scenes Overview' or 'Project Overview') .. '</h2><div class="grid">')
-  local function kv(k, v) out('<div class="kv"><b>' .. k .. '</b><span>' .. v .. '</span></div>') end
-  kv("Total Film Length", fmt_dur(project_film_total_sec))
-  if not sel_mode then kv("Grand Total Work", fmt_dur(grand_total)) end
-  kv("Scene Work", fmt_dur(project_scene_total_sec))
-  if not sel_mode then
-    kv("Project Work (no scene)", fmt_dur(project_work_total))
-    kv("Working Days", tostring(dl_all))
-    kv("Avg Daily Work", dl_all > 0 and (fmt_dur(dl_avg) .. string.format(" <small>(mid %d)</small>", dl_used)) or "N/A")
+  -- Overview: the four questions first (time, efficiency, progress, plan); details below
+  local function fmt_h(secs) return string.format("%.1fh", (secs or 0) / 3600) end
+  local function card(title) out('<div class="card"><h3>' .. title .. '</h3>') end
+  local function row(k, v) out('<div class="row"><b>' .. k .. '</b><span>' .. v .. '</span></div>') end
+  local function bar(frac)
+    frac = math.max(0, math.min(1, frac or 0))
+    out(string.format('<div class="bar"><i style="width:%.1f%%"></i></div>', frac * 100))
   end
-  kv("Completed Film", fmt_dur(completed_film_sec))
-  kv("Remaining Film", fmt_dur(remaining_film_sec))
-  kv("Completion", pct(completed_film_sec, project_film_total_sec))
+  -- source per second of work for a work type (EDL source), nil without work
+  local function src_rate(wt)
+    local e = eff[wt]
+    if e and e.work > 0 and e.source > 0 then return e.source / e.work end
+  end
+
+  out('<h2>' .. (sel_mode and 'Selected Scenes' or 'Overview') .. '</h2><div class="cards">')
+
+  -- 1. Time
+  card("Work time")
+  local work_total = sel_mode and project_scene_total_sec or grand_total
+  out('<div class="big">' .. fmt_h(work_total) .. '</div>')
+  if not sel_mode then
+    local cutoff = os.date("%Y-%m-%d", os.time() - 6 * 86400)
+    local last7 = 0
+    for day, secs in pairs(daily_totals) do if day >= cutoff then last7 = last7 + secs end end
+    row("Working days", tostring(dl_all))
+    row("Per day (typical)", dl_all > 0 and fmt_h(dl_avg) or "N/A")
+    row("Last 7 days", fmt_h(last7))
+    row("Without a scene", fmt_h(project_work_total))
+  end
   out('</div>')
 
+  -- 2. Efficiency (EDL source)
+  card("Efficiency (per hour of scene work)")
+  row("Film", rate_or_na(eff_total.film, eff_total.work))
+  row("Source (EDL)", rate_or_na(eff_total.source, eff_total.work))
+  for _, wt in ipairs({ "mic select", "editing", "denoise" }) do
+    local e = eff[wt]
+    if e and e.work > 0 then row("&nbsp;&nbsp;" .. esc(wt) .. " source", rate_or_na(e.source, e.work)) end
+  end
+  out('</div>')
+
+  -- 3. Progress by stage: a stage is done for a scene when all its items there are muted
+  --    (skipped stages count as done); remaining = EDL source of the scenes not done yet
+  local n_scenes = 0
+  for _, sc in ipairs(scenes) do if shown(sc) then n_scenes = n_scenes + 1 end end
+  local remaining_work, any_estimate = 0, false   -- seconds of work still needed (estimate)
+  local per_stage = {}
+  card("Progress")
+  for _, stg in ipairs(STAGES) do
+    if stage_exists[stg.key] then
+      local done, rem_src = 0, 0
+      for _, sc in ipairs(scenes) do
+        if shown(sc) then
+          if stage_done(sc, stg.key) then done = done + 1 else rem_src = rem_src + sc.source_length_sec end
+        end
+      end
+      local rate = src_rate(stg.wt)
+      local est = rate and rem_src / rate
+      if est then remaining_work = remaining_work + est; any_estimate = true end
+      per_stage[#per_stage + 1] = { stg = stg, rem_src = rem_src }
+      row(stg.label .. " <small>(" .. stg.src .. ")</small>", string.format("%d / %d", done, n_scenes))
+      bar(n_scenes > 0 and done / n_scenes or 0)
+      row("&nbsp;&nbsp;source left · est. work", fmt_dur(rem_src) .. " · " .. (est and fmt_h(est) or "N/A"))
+    end
+  end
+  row("Scenes marked done", string.format("%d / %d", (function()
+    local n = 0; for _, sc in ipairs(scenes) do if shown(sc) and sc.is_done then n = n + 1 end end; return n end)(), n_scenes))
+  bar(project_film_total_sec > 0 and completed_film_sec / project_film_total_sec or 0)
+  if any_estimate then row("Estimated work left", '<span class="big">' .. fmt_h(remaining_work) .. '</span>') end
+  out('</div>')
+
+  -- 4. Plan: target hours and delivery date (set in PM Timer, saved in the project)
+  if not sel_mode then
+    local _, t_hours = r.GetProjExtState(0, "hsuanice_PM", "TARGET_HOURS")
+    local _, due = r.GetProjExtState(0, "hsuanice_PM", "DUE_DATE")
+    t_hours = tonumber(t_hours)
+    local y, m, d = (due or ""):match("^(%d%d%d%d)%-(%d%d)%-(%d%d)$")
+    card("Plan")
+    if not t_hours and not y then
+      out('<div class="note">Set the target hours and the delivery date in PM Timer (top right).</div>')
+    else
+      local days
+      if y then
+        local due_t = os.time({ year = tonumber(y), month = tonumber(m), day = tonumber(d), hour = 12 })
+        local now = os.date("*t")
+        local today_t = os.time({ year = now.year, month = now.month, day = now.day, hour = 12 })
+        days = math.floor((due_t - today_t) / 86400 + 0.5)
+        row("Delivery", esc(due) .. " · " .. (days > 0 and (days .. " days left") or days == 0 and "today"
+          or ('<span class="warn">' .. -days .. " days late</span>")))
+      end
+      local per_day_div = (days and days > 0) and days or 1
+      if t_hours then
+        local left = t_hours * 3600 - grand_total
+        row("Work hours", fmt_h(grand_total) .. " / " .. string.format("%gh", t_hours))
+        bar(grand_total / (t_hours * 3600))
+        row("Hours left", left >= 0 and fmt_h(left) or ('<span class="warn">' .. fmt_h(-left) .. " over</span>"))
+        if days then row("Per day", fmt_h(math.max(left, 0) / per_day_div)) end
+        if any_estimate then
+          local fits = remaining_work <= left   -- both in seconds of work
+          row("Estimated work left", fmt_h(remaining_work) .. " " .. (fits and '<span class="ok">✓ fits</span>'
+            or ('<span class="warn">' .. fmt_h(remaining_work - left) .. " short</span>")))
+        end
+      end
+      if days then
+        for _, x in ipairs(per_stage) do
+          if x.rem_src > 0 then row(x.stg.label .. " source / day", fmt_dur(x.rem_src / per_day_div)) end
+        end
+      end
+    end
+    out('</div>')
+  end
+  out('</div>')
+
+  -- Details (collapsed)
+  out('<details><summary>Source lengths (EDL / Mic Selected / Edited)</summary>')
   -- Source stages side by side: EDL source → Mic Selected → Edited.
   -- Ratio = stage length / film length of the scenes that have that stage;
   -- Kept = stage length / previous stage length of the same scenes.
@@ -901,8 +1079,10 @@ a{color:var(--acc);text-decoration:none}a:hover{text-decoration:underline}
     out('</div>')
   end
 
+  out('</details>')
+
   -- Efficiency per work type
-  out('<h2>Efficiency by Work Type</h2><div class="wrap"><table>')
+  out('<details><summary>Efficiency by Work Type</summary><div class="wrap"><table>')
   -- (selected scenes: no Project Time / Total Time, they are not per scene)
   out('<tr><th class="l">Work</th><th>Scenes</th><th>Film</th><th>Source</th><th>Scene Time</th>'
     .. '<th>Film/hr</th><th>Source/hr</th>'
@@ -924,16 +1104,20 @@ a{color:var(--acc);text-decoration:none}a:hover{text-decoration:underline}
     .. '</tr>')
   out('</table></div>')
   out('<div class="note">Film/hr and Source/hr: film / source length of every scene that has this work type, '
-    .. 'per hour of that work. Source = what the work starts from: EDL for mic select, Mic Selected for editing, '
-    .. 'Edited for denoise (EDL when that stage is missing). '
+    .. 'per hour of that work. Source is always the EDL source. '
     .. (sel_mode and 'Only the selected scenes are counted.'
       or 'Project Time (work without a selected scene) is not included in the rates.') .. '</div>')
 
+  out('</details>')
+
   -- Scene list (one row per scene)
-  out('<h2>Scenes</h2><div class="wrap"><table>')
+  out('<details><summary>Scenes</summary><div class="wrap"><table>')
   local hdr = '<tr><th>#</th><th class="l">Scene</th><th class="l">Range</th><th>Film</th><th>Source</th><th>Ratio</th>'
     .. (has_sel and '<th>Selected</th>' or '') .. (has_edit and '<th>Edited</th>' or '')
   for _, t in ipairs(scene_types) do hdr = hdr .. '<th>' .. type_label(t) .. '</th>' end
+  for _, stg in ipairs(STAGES) do
+    if stage_exists[stg.key] then hdr = hdr .. '<th>' .. stg.label .. ' ✓</th>' end
+  end
   out(hdr .. '<th>Total</th><th>Film/hr</th><th>Source/hr</th><th>Done</th></tr>')
   for idx, guid in ipairs(scene_order) do
     local sc = scene_map[guid]
@@ -946,6 +1130,11 @@ a{color:var(--acc);text-decoration:none}a:hover{text-decoration:underline}
     if has_sel  then row = row .. '<td>' .. dur_or_dash(sc.sel_len_sec)  .. '</td>' end
     if has_edit then row = row .. '<td>' .. dur_or_dash(sc.edit_len_sec) .. '</td>' end
     for _, t in ipairs(scene_types) do row = row .. '<td>' .. dur_or_dash(sc.wt_sec[t]) .. '</td>' end
+    for _, stg in ipairs(STAGES) do
+      if stage_exists[stg.key] then
+        row = row .. '<td>' .. (stage_done(sc, stg.key) and '<span class="done">✓</span>' or '·') .. '</td>'
+      end
+    end
     row = row .. string.format('<td>%s</td><td>%s</td><td>%s</td><td>%s</td></tr>',
       dur_or_dash(sc.total_sec),
       sc.total_sec > 0 and rate_or_na(sc.length_sec, sc.total_sec) or "–",
@@ -956,8 +1145,10 @@ a{color:var(--acc);text-decoration:none}a:hover{text-decoration:underline}
   end
   out('</table></div>')
 
+  out('</details>')
+
   -- Per scene detail
-  out('<h2>Per Scene</h2>')
+  out('<details><summary>Per Scene</summary>')
   for idx, guid in ipairs(scene_order) do
     local sc = scene_map[guid]
     if sc.total_sec > 0 and shown(sc) then
@@ -982,7 +1173,12 @@ a{color:var(--acc);text-decoration:none}a:hover{text-decoration:underline}
       out('</table></div></section>')
     end
   end
-  out('<a class="top" href="#top">↑ Top</a></main></body></html>')
+  out('</details>')
+  out('<a class="top" href="#top">↑ Top</a></main>')
+  -- a scene link opens the collapsed section it points into
+  out('<script>document.querySelectorAll(\'a[href^="#s"]\').forEach(function(a){a.addEventListener("click",'
+    .. 'function(){var t=document.querySelector(a.getAttribute("href"));var d=t&&t.closest("details");if(d)d.open=true;});});</script>')
+  out('</body></html>')
 
   -- 8. Save next to the project file and open it in the browser ─────────────
   --    One report per session folder (daily .rpp backups in the same folder

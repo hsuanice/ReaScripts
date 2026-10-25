@@ -7,6 +7,11 @@ PM Timer - Scene-aware Work Timer
 
 **Removed from ReaPack** (2026-10-15) together with PM Insight Analyzer; the script stays in the repository (`@noindex`) as a backup.
 
+## 26.1025.1249pre1
+
+- Add: target box at the top right - click to set the target work hours and the delivery date (saved in the project; PM Insight Analyzer plans with them). Shows e.g. 'Due 11-15 · 21d · 120h'.
+- Change: compact buttons (26 px instead of 40 px high, smaller font) and a lower window, so the whole timer fits in a short dock.
+
 ## 26.1023.1606pre1
 
 - New: scene notes get 'Sel Len' and 'Edit Len' - the source left in the 'Mic Selected' and 'Edited' folders (only when the folder exists). An item in the scene's item group counts in full; any other item counts with the part inside the scene range, so no linking is needed. The EDL 'Src Len' is unchanged.

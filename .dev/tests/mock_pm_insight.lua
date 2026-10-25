@@ -13,7 +13,7 @@ local function item(o)
   return { pos = o.pos, len = o.len, name = o.name or "", notes = o.notes or "", ext = o.ext or {},
     color = o.color or 0, mute = o.mute or 0, sel = o.sel or false, guid = o.guid or tostring(math.random()) }
 end
-local tracks
+local tracks, projext = nil, {}
 local function build(selected)
   local sc1 = item({ pos = 0,  len = 60, name = "10", guid = "{S1}", notes = "Src Len : 00:05:00:00\nSel Len : 00:02:00:00" })
   local sc2 = item({ pos = 60, len = 30, name = "11", guid = "{S2}", notes = "Src Len : 00:03:00:00", mute = 1 })
@@ -31,7 +31,16 @@ local function build(selected)
     { name = "Scene Cut", depth = 1, items = { sc1, sc2, sc3 } },
     { name = "2026-10-20", depth = -1, items = log },
     { name = "EDL", depth = 1, items = { item({ pos = 0, len = 900 }) } },
-    { name = "EDL A", depth = -1, items = { item({ pos = 0, len = 500 }) } },
+    -- EDL items of each scene; muted = mic select done
+    { name = "EDL A", depth = -1, items = {
+      item({ pos = 0, len = 100, ext = { SCENE_ID = "{S1}" }, mute = 1 }),
+      item({ pos = 60, len = 100, ext = { SCENE_ID = "{S2}" }, mute = 1 }),
+      item({ pos = 90, len = 300, ext = { SCENE_ID = "{S3}" } }) } },
+    -- Mic Selected: only scene 10 (done); scene 11 skips it (has Edited items)
+    { name = "Mic Selected", depth = 1, items = {} },
+    { name = "MS A", depth = -1, items = { item({ pos = 10, len = 20, mute = 1 }) } },
+    { name = "Edited", depth = 1, items = {} },
+    { name = "ED A", depth = -1, items = { item({ pos = 65, len = 10 }) } },
   }
   for i, t in ipairs(tracks) do t.num = i end
 end
@@ -71,6 +80,7 @@ reaper = {
   CF_ShellExecute = function() end,
   ShowConsoleMsg = function() end,
   ShowMessageBox = function(m) print("MB: " .. m) end,
+  GetProjExtState = function(_, _, k) local v = projext[k]; return v and 1 or 0, v or "" end,
 }
 
 local function run(selected)
@@ -88,15 +98,17 @@ end
 local function has(h, s) return h:find(s, 1, true) ~= nil end
 
 local all = run({})
-check("whole project: Project Overview + project-wide figures", has(all, "Project Overview") and has(all, "Avg Daily Work") and has(all, "Project Work (no scene)"))
+check("whole project: overview + project-wide figures", has(all, "<h2>Overview</h2>") and has(all, "Per day (typical)") and has(all, "Without a scene"))
+check("work time total 3.8h, last 7 days present", has(all, '<div class="big">3.8h</div>') and has(all, "Last 7 days"))
+check("no target yet: hint to set it in PM Timer", has(all, "Set the target hours and the delivery date in PM Timer"))
 check("whole project: every work type", has(all, '<td class="l">denoise</td>') and has(all, '<td class="l">check</td>'))
 check("whole project: all three scenes listed", has(all, ">10<") and has(all, ">11<") and has(all, ">12<"))
 check("whole project: EDL total source 1400s", has(all, "1400s"))
 
 local one = run({ "{S1}" })
 check("selected: header names the scene", has(one, "Selected scenes: 1 of 3") and has(one, "· 10</div>"))
-check("selected: no project-wide figures", not has(one, "Avg Daily Work") and not has(one, "Project Work (no scene)")
-  and not has(one, "Grand Total Work") and not has(one, "<th>Project Time</th>"))
+check("selected: no project-wide figures", not has(one, "Per day (typical)") and not has(one, "Without a scene")
+  and not has(one, "<h3>Plan</h3>") and not has(one, "<th>Project Time</th>"))
 check("selected: only scene 10 in the list", has(one, ">10<") and not has(one, ">11<") and not has(one, ">12<"))
 check("selected: its source and Mic Selected", has(one, "300s") and has(one, "120s"))
 check("selected: only its work types", has(one, '<td class="l">editing</td>') and not has(one, '<td class="l">denoise</td>') and not has(one, '<td class="l">check</td>'))
@@ -105,6 +117,29 @@ check("selected: scene keeps its project number", has(one, 'id="s1"'))
 local two = run({ "{S2}", "{S3}" })
 check("two selected: 2 of 3, numbers kept", has(two, "Selected scenes: 2 of 3") and has(two, 'id="s3"') and not has(two, ">10<"))
 check("two selected: source = 180s + 360s", has(two, "540s"))
+
+-- stages: EDL muted = mic select done; Mic Selected skipped when Edited has items; no items = not done
+check("Mic select stage 2 / 3", has(all, "Mic select <small>(EDL)</small></b><span>2 / 3"))
+check("Editing stage 2 / 3 (scene 11 skipped Mic Selected)", has(all, "Editing <small>(Mic Selected)</small></b><span>2 / 3"))
+check("Denoise stage 0 / 3", has(all, "Denoise <small>(Edited)</small></b><span>0 / 3"))
+check("remaining source + estimate per stage", has(all, "360s · 1.0h") and has(all, "360s · 1.2h") and has(all, "840s · 4.7h"))
+check("estimated work left 6.9h", has(all, "6.9h"))
+check("scene table has stage columns", has(all, "<th>Mic select ✓</th>") and has(all, "<th>Denoise ✓</th>"))
+check("Source/hr uses EDL source for every work type", not has(all, "Mic Selected for editing"))
+
+-- plan: target hours + delivery date in 10 days
+projext.TARGET_HOURS = "20"
+projext.DUE_DATE = os.date("%Y-%m-%d", os.time() + 10 * 86400)
+local plan = run({})
+check("plan: days left", has(plan, "10 days left"))
+check("plan: hours used / target and per day", has(plan, "3.8h / 20h") and has(plan, "Per day</b><span>1.6h"))
+check("plan: estimate fits the hours left", has(plan, "✓ fits"))
+check("plan: source per day per stage", has(plan, "Denoise source / day</b><span>84s"))
+projext.TARGET_HOURS = "5"
+check("plan: estimate over the hours left", has(run({}), " short</span>"))
+projext.DUE_DATE = os.date("%Y-%m-%d", os.time() - 2 * 86400)
+check("plan: late delivery date", has(run({}), "2 days late"))
+projext = {}
 
 os.execute('rm -rf "' .. OUT_DIR .. '"')
 print(string.format("%d passed, %d failed", passes, fails))

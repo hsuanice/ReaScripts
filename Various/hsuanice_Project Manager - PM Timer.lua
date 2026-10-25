@@ -1,10 +1,11 @@
 --[[
 @description Project Manager - PM Timer: scene-aware work timer
-@version 26.1023.1606pre1
+@version 26.1025.1249pre1
 @author hsuanice
 @noindex  (kept in the repository as a backup; Project Manager is not offered on ReaPack for now)
 @changelog
-  - New: scene notes get 'Sel Len' and 'Edit Len' - the source left in the 'Mic Selected' and 'Edited' folders (only when the folder exists). An item in the scene's item group counts in full; any other item counts with the part inside the scene range, so no linking is needed. The EDL 'Src Len' is unchanged.
+  - Add: target box at the top right - click to set the target work hours and the delivery date (saved in the project; PM Insight Analyzer plans with them). Shows e.g. 'Due 11-15 · 21d · 120h'.
+  - Change: compact buttons (26 px instead of 40 px high, smaller font) and a lower window, so the whole timer fits in a short dock.
 @about
   Scene-aware toggle timer for the hsuanice PM system.
   Uses gfx (no ReaImGui). 1-second display refresh via defer + time_precise.
@@ -60,7 +61,7 @@ local NS                = "hsuanice_PM"
 local SCENE_TRACK_NAME  = "Scene Cut"
 local WORK_LOG_NAME     = "Work Log"
 local DURATION_LOG_NAME = "DurationOnly_Log"
-local WIN_W, WIN_H           = 560, 140
+local WIN_W, WIN_H           = 560, 92
 local BYTES_PER_SECOND       = 144000
 local BYTES_PER_GB           = 1000000000
 local WORK_TYPES          = { "pre-production", "wrap" }
@@ -2847,6 +2848,42 @@ local function draw_btn_disabled(x, y, w, h, label)
   gfx.drawstr(label)
 end
 
+-- ── Target (work hours + delivery date) ─────────────────────────────────────
+-- Saved in the project (TARGET_HOURS, DUE_DATE); PM Insight Analyzer plans with them.
+local function target_label()
+  local hours, due = get_extstate("TARGET_HOURS"), get_extstate("DUE_DATE")
+  if not hours and not due then return "Set target" end
+  local parts = {}
+  local y, m, d = (due or ""):match("^(%d%d%d%d)%-(%d%d)%-(%d%d)$")
+  if y then
+    local now = os.date("*t")
+    local days = math.floor((os.time({ year = tonumber(y), month = tonumber(m), day = tonumber(d), hour = 12 })
+      - os.time({ year = now.year, month = now.month, day = now.day, hour = 12 })) / 86400 + 0.5)
+    parts[#parts + 1] = "Due " .. m .. "-" .. d
+    parts[#parts + 1] = (days >= 0) and (days .. "d") or (-days .. "d late")
+  end
+  if hours then parts[#parts + 1] = hours .. "h" end
+  return table.concat(parts, " · ")
+end
+
+local function action_set_target()
+  local hours, due = get_extstate("TARGET_HOURS") or "", get_extstate("DUE_DATE") or ""
+  local ok, csv = r.GetUserInputs("PM Timer - Target", 2,
+    "Target work hours (empty = none),Delivery date YYYY-MM-DD,extrawidth=60", hours .. "," .. due)
+  if not ok then return end
+  local h, d = csv:match("^%s*(.-)%s*,%s*(.-)%s*$")
+  h, d = h or "", d or ""
+  if h ~= "" and not (tonumber(h) and tonumber(h) > 0) then
+    r.ShowMessageBox("Target work hours must be a number above 0 (or empty).", "PM Timer", 0); return
+  end
+  local y, m, dd = d:match("^(%d%d%d%d)%-(%d%d)%-(%d%d)$")
+  if d ~= "" and not (y and tonumber(m) >= 1 and tonumber(m) <= 12 and tonumber(dd) >= 1 and tonumber(dd) <= 31) then
+    r.ShowMessageBox("Delivery date must look like 2026-11-15 (or empty).", "PM Timer", 0); return
+  end
+  set_extstate("TARGET_HOURS", h)
+  set_extstate("DUE_DATE", d)
+end
+
 local function draw()
   local aap_working = (S.work_mode == "AAP" and S.mode == "WORKING")
 
@@ -2900,6 +2937,7 @@ local function draw()
       gfx.set(0.7, 0.7, 0.7, 1); gfx.drawstr("IDLE")
     end
 
+    local row1_end = gfx.x
     gfx.x, gfx.y = 10, 28
     gfx.set(0.7, 0.7, 0.7, 1); gfx.drawstr("Start: ")
     gfx.set(1,   1,   1,   1); gfx.drawstr(start_disp)
@@ -2916,19 +2954,33 @@ local function draw()
       gfx.drawstr(string.format("! %d broken scene link%s", S.broken_links, S.broken_links > 1 and "s" or ""))
     end
 
+    -- Target box at the right of the info rows (click to set)
+    local label = target_label()
+    local tw, th = gfx.measurestr(label)
+    local bw, bh = tw + 14, 30
+    local bx = math.max(math.max(gfx.x, row1_end) + 12, gfx.w - bw - 10)
+    local by = 8
+    gfx.set(0.22, 0.22, 0.25, 1); gfx.rect(bx, by, bw, bh, 1)
+    gfx.set(0.45, 0.45, 0.50, 1); gfx.rect(bx, by, bw, bh, 0)
+    gfx.set(label == "Set target" and 0.6 or 1, label == "Set target" and 0.6 or 0.85, label == "Set target" and 0.6 or 0.4, 1)
+    gfx.x, gfx.y = bx + 7, by + math.floor((bh - th) / 2)
+    gfx.drawstr(label)
+    table.insert(BTN, { rect = { x = bx, y = by, w = bw, h = bh }, action = action_set_target })
+
     sep(44)
   end
 
   -- ── Horizontal buttons ──────────────────────────────────────────────────
+  -- compact buttons (were 40 px high): the whole window fits in a short dock
   local btn_w   = 129
-  local btn_h   = 40
-  local btn_y   = 58
+  local btn_h   = 26
+  local btn_y   = 54
   local btn_gap = 8
   local btn_x0  = 10
 
   local dlg_working = (S.mode == "WORKING" and not aap_working)
 
-  gfx.setfont(1)
+  gfx.setfont(3)
   local function btn_x(i) return btn_x0 + (i - 1) * (btn_w + btn_gap) end
 
   -- Use table.insert so BTN is always a dense array (ipairs stops at first nil gap).
