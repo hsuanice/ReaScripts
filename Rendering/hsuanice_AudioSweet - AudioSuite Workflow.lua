@@ -1,6 +1,6 @@
 --[[
 @description AudioSweet - AudioSuite Workflow: Pro Tools-style offline FX processing (GUI + Run / Preview / Solo)
-@version 26.1016.1659
+@version 26.1025.2050pre1
 @author hsuanice
 @links
   https://forum.cockos.com/showthread.php?p=2910884#post2910884
@@ -13,7 +13,7 @@
   [nomain] hsuanice_AudioSweet - FX Alias Export TSV.lua
   [nomain] hsuanice_AudioSweet - FX Alias Import TSV.lua
 @changelog
-  - Fix: AudioSweet no longer overwrites the RGWH Debug Level saved in the project; its Debug switch now applies to its own RGWH call only, so the RGWH Render / Glue shortcuts stop printing console logs after an AudioSweet run with Debug on.
+  - New: Glue grouping (All / RGWH / AS, Mute separate, Split at XF) and Single item Render (Retain Glue Cues) are now on the main window, below the Whole File / Tail row. They are the same settings as Settings > Glue & Render.
 @about
   # AudioSweet ReaImGui
 
@@ -4449,6 +4449,72 @@ end
       gui.tail_seconds = math.max(0, new_tail)
       save_gui_settings()
     end
+
+    -- === ROW 3: Glue grouping (same settings as Settings > Glue & Render) ===
+    ImGui.Text(ctx, "Glue:")
+    ImGui.SameLine(ctx)
+    local grouping_labels = {"All##main_grouping", "RGWH##main_grouping", "AS##main_grouping"}
+    local grouping_tips = {
+      "Glue all: touching and crossfading items on a track become one unit\nMute state is ignored",
+      "Follow RGWH GUI's \"Keep MUTED as separate unit\" and \"Split at crossfades\"\n(read from this project's RGWH settings at run time)",
+      "Use the two AudioSweet options on the right",
+    }
+    for i = 0, 2 do
+      if i > 0 then ImGui.SameLine(ctx) end
+      if ImGui.RadioButton(ctx, grouping_labels[i + 1], gui.glue_grouping == i) then
+        gui.glue_grouping = i
+        save_gui_settings()
+      end
+      if ImGui.IsItemHovered(ctx) then
+        ImGui.SetTooltip(ctx, grouping_tips[i + 1] .. "\n\nItem selection only (a Time Selection glues as before)")
+      end
+    end
+    ImGui.SameLine(ctx, 0, 20)
+    if gui.glue_grouping ~= 2 then ImGui.BeginDisabled(ctx) end
+    local rv_mute, new_mute = ImGui.Checkbox(ctx, "Mute separate##main_glue", gui.glue_muted_separate)
+    if rv_mute then
+      gui.glue_muted_separate = new_mute
+      save_gui_settings()
+    end
+    if ImGui.IsItemHovered(ctx, ImGui.HoveredFlags_AllowWhenDisabled) then
+      ImGui.SetTooltip(ctx, "Keep MUTED as separate unit\nMuted and unmuted items never share a unit\n(adjacent muted items still group together)\nUsed when Glue is set to AS")
+    end
+    ImGui.SameLine(ctx)
+    local rv_xf, new_xf = ImGui.Checkbox(ctx, "Split at XF##main_glue", gui.glue_split_at_crossfades)
+    if rv_xf then
+      gui.glue_split_at_crossfades = new_xf
+      save_gui_settings()
+    end
+    if ImGui.IsItemHovered(ctx, ImGui.HoveredFlags_AllowWhenDisabled) then
+      ImGui.SetTooltip(ctx, "Split at crossfades\nCrossfading items are not grouped into the same unit\nOnly touching items share a unit\nUsed when Glue is set to AS")
+    end
+    if gui.glue_grouping ~= 2 then ImGui.EndDisabled(ctx) end
+
+    -- === ROW 4: Single item Render (same settings as Settings > Glue & Render) ===
+    ImGui.Text(ctx, "     ")
+    ImGui.SameLine(ctx)
+    local rv_render, new_render = ImGui.Checkbox(ctx, "Single item Render##main_render", gui.single_item_render)
+    if rv_render then
+      gui.single_item_render = new_render
+      save_gui_settings()
+    end
+    if ImGui.IsItemHovered(ctx) then
+      ImGui.SetTooltip(ctx, "A unit with only one item is rendered to a new take instead of glued\n" ..
+        "Older takes are kept\n" ..
+        "Item selection only: with a Time Selection, items are glued as before\n" ..
+        "Tail Seconds does not apply to Render")
+    end
+    ImGui.SameLine(ctx, 0, 20)
+    if not gui.single_item_render then ImGui.BeginDisabled(ctx) end
+    local rv_keep, new_keep = ImGui.Checkbox(ctx, "Retain Glue Cues##main_render", gui.render_keep_glue_cues)
+    if rv_keep then
+      gui.render_keep_glue_cues = new_keep
+      save_gui_settings()
+    end
+    if ImGui.IsItemHovered(ctx, ImGui.HoveredFlags_AllowWhenDisabled) then
+      ImGui.SetTooltip(ctx, "Render keeps the Glue cues already in the source file\n(e.g. from an earlier glue of the edit). Requires SWS")
+    end
+    if not gui.single_item_render then ImGui.EndDisabled(ctx) end
   end
 
   ImGui.Separator(ctx)

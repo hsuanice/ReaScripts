@@ -4,6 +4,10 @@
 
 AudioSweet ReaImGui - AudioSuite Workflow (Pro Tools–Style)
 
+## 26.1025.2050pre1
+
+- New: Glue grouping (All / RGWH / AS, Mute separate, Split at XF) and Single item Render (Retain Glue Cues) are now on the main window, below the Whole File / Tail row. They are the same settings as Settings > Glue & Render.
+
 ## 26.1016.1659
 
 - Fix: AudioSweet no longer overwrites the RGWH Debug Level saved in the project; its Debug switch now applies to its own RGWH call only, so the RGWH Render / Glue shortcuts stop printing console logs after an AudioSweet run with Debug on.
