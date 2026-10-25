@@ -1,6 +1,6 @@
 --[[
 @description Project Manager - PM Insight Analyzer: work-time analysis of PM Timer logs (work in progress)
-@version 26.1025.1401pre1
+@version 26.1025.1402
 @author hsuanice
 @noindex  (kept in the repository as a backup; not offered on ReaPack while it is a work in progress)
 @changelog
@@ -9,8 +9,8 @@
   - Add: progress by stage - Mic select (EDL), Editing (Mic Selected), Denoise (Edited): done when all the scene's items there are muted, when a later stage already has items (skipped), or when the scene is marked done. Remaining EDL source and estimated work per stage, from the rates of finished stages.
   - Add: plan from PM Timer's target hours, delivery date and work hours per day (default 5) - days left, hours used / left, hours per day, whether the estimated work fits, working days needed and finish date, source per day per stage.
   - Add: pace needed - source and film left per day and per hour, for the days left at the work hours per day, next to the pace of the finished scenes (✓, or ⚠ ×N).
-  - Fix: the pace table (and its header) fits inside the Plan card.
   - Change: Source/hr always uses the EDL source.
+  - Release: tested in REAPER 7.82.
 @about
   Read-only analysis script. Auto-detects project type:
 
