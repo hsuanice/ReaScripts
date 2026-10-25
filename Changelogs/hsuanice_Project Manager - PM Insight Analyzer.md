@@ -7,6 +7,11 @@ PM Insight Analyzer
 
 **Removed from ReaPack** (2026-10-15) while it is a work in progress; the script stays in the repository (`@noindex`) as a backup.
 
+## 26.1025.1235
+
+- Add: select one or more items on the Scene Cut track to report only those scenes - their work time, film length and Source / Mic Selected / Edited; project-wide figures (daily average, work without a scene, Total Time) are left out. Nothing selected = whole project, same report file.
+- Release: tested in REAPER 7.82.
+
 ## 26.1024.1127pre1
 
 - Add: select one or more items on the Scene Cut track to report only those scenes - their work time, film length and Source / Mic Selected / Edited; project-wide figures (daily average, work without a scene, Total Time) are left out. Nothing selected = whole project, same report file.

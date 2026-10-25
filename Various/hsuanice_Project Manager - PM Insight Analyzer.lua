@@ -1,10 +1,11 @@
 --[[
 @description Project Manager - PM Insight Analyzer: work-time analysis of PM Timer logs (work in progress)
-@version 26.1024.1127pre1
+@version 26.1025.1235
 @author hsuanice
 @noindex  (kept in the repository as a backup; not offered on ReaPack while it is a work in progress)
 @changelog
   - Add: select one or more items on the Scene Cut track to report only those scenes - their work time, film length and Source / Mic Selected / Edited; project-wide figures (daily average, work without a scene, Total Time) are left out. Nothing selected = whole project, same report file.
+  - Release: tested in REAPER 7.82.
 @about
   Read-only analysis script. Auto-detects project type:
 
