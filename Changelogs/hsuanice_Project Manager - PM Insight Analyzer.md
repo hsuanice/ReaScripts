@@ -7,6 +7,12 @@ PM Insight Analyzer
 
 **Removed from ReaPack** (2026-10-15) while it is a work in progress; the script stays in the repository (`@noindex`) as a backup.
 
+## 26.1025.1501pre1
+
+- Change: a scene is finished when every stage is done (its items muted in EDL / Mic Selected / Edited; skipped stages count). The Scene Cut mute no longer means finished (it is used as a temporary marker); only a project without stage folders still uses it. Efficiency, remaining work and pace follow this.
+- Add: Daily progress (open, below the overview) - per day the scenes finished, their film and source, the stages finished (with scenes) and the work hours. A stage counts on the last day its work type was logged on the scene; a scene on the latest of its stage days.
+- Change: Plan's source per day per stage reads like the pace table (12m 25s instead of 00:12:24:21).
+
 ## 26.1025.1403pre1
 
 - Change: Plan's source per day per stage reads like the pace table (12m 25s instead of 00:12:24:21).

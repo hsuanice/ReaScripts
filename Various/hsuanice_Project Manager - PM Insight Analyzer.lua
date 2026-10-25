@@ -1,9 +1,11 @@
 --[[
 @description Project Manager - PM Insight Analyzer: work-time analysis of PM Timer logs (work in progress)
-@version 26.1025.1403pre1
+@version 26.1025.1501pre1
 @author hsuanice
 @noindex  (kept in the repository as a backup; not offered on ReaPack while it is a work in progress)
 @changelog
+  - Change: a scene is finished when every stage is done (its items muted in EDL / Mic Selected / Edited; skipped stages count). The Scene Cut mute no longer means finished (it is used as a temporary marker); only a project without stage folders still uses it. Efficiency, remaining work and pace follow this.
+  - Add: Daily progress (open, below the overview) - per day the scenes finished, their film and source, the stages finished (with scenes) and the work hours. A stage counts on the last day its work type was logged on the scene; a scene on the latest of its stage days.
   - Change: Plan's source per day per stage reads like the pace table (12m 25s instead of 00:12:24:21).
 @about
   Read-only analysis script. Auto-detects project type:
@@ -682,7 +684,6 @@ local function analyze()
   -- no items is skipped (done) when a later stage already has items for the scene
   -- (e.g. EDL -> Edited directly, Mic Selected left empty); otherwise it is not done yet.
   local function stage_done(sc, key)
-    if sc.is_done then return true end   -- scene marked done on Scene Cut = every stage done
     local st = sc.stage[key]
     if st and st.n > 0 then return st.open == 0 end
     local later = false
@@ -694,6 +695,21 @@ local function analyze()
       if stg.key == key then later = true end
     end
     return false
+  end
+
+  -- A scene is finished when every stage is done (user rule 26.1025: the Scene Cut mute is
+  -- sometimes used as a temporary marker, e.g. "mic select done", so it does not mean finished).
+  -- Only a project without any stage folder still uses the Scene Cut mute.
+  local any_stage = stage_exists.edl or stage_exists.sel or stage_exists.edit
+  for _, sc in ipairs(scenes) do
+    sc.muted = sc.is_done
+    if any_stage then
+      local all = true
+      for _, stg in ipairs(STAGES) do
+        if stage_exists[stg.key] and not stage_done(sc, stg.key) then all = false; break end
+      end
+      sc.is_done = all
+    end
   end
 
   -- 5. Walk Scene Cut child tracks and accumulate work times ─────────────────
@@ -760,6 +776,13 @@ local function analyze()
               local sc, secs = x.sc, dur_secs * x.w
               sc.wt_sec[wt] = (sc.wt_sec[wt] or 0) + secs
               sc.total_sec  = sc.total_sec + secs
+              -- dates: last day of each work type (stage finish dates) and work per day
+              if tname:match(DATE_PAT) and dur_secs > 0 then
+                sc.last_date = sc.last_date or {}
+                if not sc.last_date[wt] or tname > sc.last_date[wt] then sc.last_date[wt] = tname end
+                sc.day_work = sc.day_work or {}
+                sc.day_work[tname] = (sc.day_work[tname] or 0) + secs
+              end
             end
           else
             -- Project Mode: no scene attribution
@@ -980,7 +1003,7 @@ details{margin-top:18px}summary{cursor:pointer;font-size:16px;font-weight:600;pa
     out('<div class="note">' .. done_n .. ' finished scene' .. (done_n > 1 and 's' or '') .. ': film ' .. fmt_dur(done_film)
       .. ' · source ' .. fmt_dur(done_src) .. ' · work ' .. fmt_h(done_work) .. '</div>')
   else
-    out('<div class="note">No finished scene with logged work yet (mark a scene done by muting it on Scene Cut).</div>')
+    out('<div class="note">No finished scene with logged work yet (a scene is finished when its items are muted in every stage folder).</div>')
   end
   local first = true
   for _, stg in ipairs(STAGES) do
@@ -1018,8 +1041,9 @@ details{margin-top:18px}summary{cursor:pointer;font-size:16px;font-weight:600;pa
       row("&nbsp;&nbsp;source left · est. work", fmt_dur(rem_src) .. " · " .. (est and fmt_h(est) or "N/A"))
     end
   end
-  row("Scenes marked done", string.format("%d / %d", (function()
+  row("Scenes finished", string.format("%d / %d", (function()
     local n = 0; for _, sc in ipairs(scenes) do if shown(sc) and sc.is_done then n = n + 1 end end; return n end)(), n_scenes))
+  out('<div class="note">Finished = every stage done (items muted in EDL / Mic Selected / Edited).</div>')
   bar(project_film_total_sec > 0 and completed_film_sec / project_film_total_sec or 0)
   if any_estimate then row("Estimated work left", '<span class="big">' .. fmt_h(remaining_work) .. '</span>') end
   out('</div>')
@@ -1112,6 +1136,83 @@ details{margin-top:18px}summary{cursor:pointer;font-size:16px;font-weight:600;pa
     out('</div>')
   end
   out('</div>')
+
+  -- Daily progress: a stage finished on the last day that work of its type was logged on the
+  -- scene (user: correct - no more work of that type after it is done); a scene finished on
+  -- the latest of its stage days. Skipped stages have no day.
+  do
+    local days = {}
+    local function day(d)
+      local x = days[d]
+      if not x then x = { stages = {}, scenes = {}, film = 0, src = 0 }; days[d] = x end
+      return x
+    end
+    local undated = 0
+    for _, sc in ipairs(scenes) do
+      if shown(sc) then
+        local name = esc(sc.name ~= "" and sc.name or "(unnamed)")
+        local latest
+        for _, stg in ipairs(STAGES) do
+          if stage_exists[stg.key] and stage_done(sc, stg.key) then
+            local st = sc.stage[stg.key]
+            local d = st and st.n > 0 and sc.last_date and sc.last_date[stg.wt]
+            if d then
+              local x = day(d)
+              x.stages[stg.key] = x.stages[stg.key] or {}
+              table.insert(x.stages[stg.key], name)
+              if not latest or d > latest then latest = d end
+            end
+          end
+        end
+        if sc.is_done then
+          if latest then
+            local x = day(latest)
+            x.scenes[#x.scenes + 1] = name
+            x.film, x.src = x.film + sc.length_sec, x.src + sc.source_length_sec
+          else
+            undated = undated + 1
+          end
+        end
+      end
+    end
+    -- work per day: the whole project, or only the selected scenes
+    local work = {}
+    if sel_mode then
+      for _, sc in ipairs(scenes) do
+        if shown(sc) and sc.day_work then
+          for d, secs in pairs(sc.day_work) do work[d] = (work[d] or 0) + secs end
+        end
+      end
+    else
+      for d, secs in pairs(daily_totals) do work[d] = secs end
+    end
+    local dates = {}
+    for d in pairs(days) do dates[#dates + 1] = d end
+    for d in pairs(work) do if not days[d] then dates[#dates + 1] = d end end
+    table.sort(dates, function(a, b) return a > b end)
+
+    out('<details open><summary>Daily progress</summary><div class="wrap"><table>')
+    out('<tr><th class="l">Date</th><th class="l">Finished scenes</th><th>Film</th><th>Source</th>'
+      .. '<th class="l">Stages finished</th><th>Work</th></tr>')
+    for _, d in ipairs(dates) do
+      local x = days[d] or { stages = {}, scenes = {}, film = 0, src = 0 }
+      local parts = {}
+      for _, stg in ipairs(STAGES) do
+        local list = x.stages[stg.key]
+        if list then parts[#parts + 1] = string.format("%s %d: %s", esc(stg.wt), #list, table.concat(list, ", ")) end
+      end
+      out(string.format('<tr><td class="l">%s</td><td class="l">%s</td><td>%s</td><td>%s</td>'
+        .. '<td class="l" style="white-space:normal">%s</td><td>%s</td></tr>',
+        d, #x.scenes > 0 and table.concat(x.scenes, ", ") or "–",
+        x.film > 0 and fmt_rate(x.film) or "–", x.src > 0 and fmt_rate(x.src) or "–",
+        #parts > 0 and table.concat(parts, "<br>") or "–", work[d] and fmt_h(work[d]) or "–"))
+    end
+    out('</table></div>')
+    out('<div class="note">A stage counts on the last day its work type was logged on the scene; a scene is finished '
+      .. 'on the latest of those days. Skipped stages have no day.'
+      .. (undated > 0 and (' ' .. undated .. ' finished scene' .. (undated > 1 and 's have' or ' has') .. ' no logged work to date it.') or '')
+      .. '</div></details>')
+  end
 
   -- Details (collapsed)
   out('<details><summary>Source lengths (EDL / Mic Selected / Edited)</summary>')
