@@ -1,6 +1,6 @@
 --[[
 @description AudioSweet - AudioSuite Workflow: Pro Tools-style offline FX processing (GUI + Run / Preview / Solo)
-@version 26.1025.2050pre1
+@version 26.1025.2058pre1
 @author hsuanice
 @links
   https://forum.cockos.com/showthread.php?p=2910884#post2910884
@@ -13,7 +13,7 @@
   [nomain] hsuanice_AudioSweet - FX Alias Export TSV.lua
   [nomain] hsuanice_AudioSweet - FX Alias Import TSV.lua
 @changelog
-  - New: Glue grouping (All / RGWH / AS, Mute separate, Split at XF) and Single item Render (Retain Glue Cues) are now on the main window, below the Whole File / Tail row. They are the same settings as Settings > Glue & Render.
+  - Change: the main window now shows one row: Split at Mute, Split at Crossfade and Single Item Render. Glue grouping (All / RGWH / AS) and Retain Glue Cues are back in Settings > Glue & Render only. Ticking a split box switches Glue grouping to AudioSweet settings.
 @about
   # AudioSweet ReaImGui
 
@@ -4450,71 +4450,52 @@ end
       save_gui_settings()
     end
 
-    -- === ROW 3: Glue grouping (same settings as Settings > Glue & Render) ===
-    ImGui.Text(ctx, "Glue:")
-    ImGui.SameLine(ctx)
-    local grouping_labels = {"All##main_grouping", "RGWH##main_grouping", "AS##main_grouping"}
-    local grouping_tips = {
-      "Glue all: touching and crossfading items on a track become one unit\nMute state is ignored",
-      "Follow RGWH GUI's \"Keep MUTED as separate unit\" and \"Split at crossfades\"\n(read from this project's RGWH settings at run time)",
-      "Use the two AudioSweet options on the right",
-    }
-    for i = 0, 2 do
-      if i > 0 then ImGui.SameLine(ctx) end
-      if ImGui.RadioButton(ctx, grouping_labels[i + 1], gui.glue_grouping == i) then
-        gui.glue_grouping = i
-        save_gui_settings()
-      end
-      if ImGui.IsItemHovered(ctx) then
-        ImGui.SetTooltip(ctx, grouping_tips[i + 1] .. "\n\nItem selection only (a Time Selection glues as before)")
-      end
+    -- === ROW 3: Glue / Render options (same settings as Settings > Glue & Render) ===
+    -- A box shows what AudioSweet will do: when Glue grouping is not "AudioSweet settings",
+    -- both split boxes read unticked, and ticking one switches the grouping to AudioSweet.
+    local own = (gui.glue_grouping == 2)
+    local shown_mute = own and gui.glue_muted_separate
+    local shown_xf = own and gui.glue_split_at_crossfades
+    local function use_own_grouping()
+      gui.glue_muted_separate = shown_mute
+      gui.glue_split_at_crossfades = shown_xf
+      gui.glue_grouping = 2
     end
-    ImGui.SameLine(ctx, 0, 20)
-    if gui.glue_grouping ~= 2 then ImGui.BeginDisabled(ctx) end
-    local rv_mute, new_mute = ImGui.Checkbox(ctx, "Mute separate##main_glue", gui.glue_muted_separate)
+    ImGui.Text(ctx, "  ")
+    ImGui.SameLine(ctx)
+    local rv_mute, new_mute = ImGui.Checkbox(ctx, "Split at Mute##main_glue", shown_mute)
     if rv_mute then
+      use_own_grouping()
       gui.glue_muted_separate = new_mute
       save_gui_settings()
     end
-    if ImGui.IsItemHovered(ctx, ImGui.HoveredFlags_AllowWhenDisabled) then
-      ImGui.SetTooltip(ctx, "Keep MUTED as separate unit\nMuted and unmuted items never share a unit\n(adjacent muted items still group together)\nUsed when Glue is set to AS")
+    if ImGui.IsItemHovered(ctx) then
+      ImGui.SetTooltip(ctx, "Keep MUTED as separate unit\nMuted and unmuted items never share a unit\n" ..
+        "(adjacent muted items still group together)\nItem selection only")
     end
-    ImGui.SameLine(ctx)
-    local rv_xf, new_xf = ImGui.Checkbox(ctx, "Split at XF##main_glue", gui.glue_split_at_crossfades)
+    ImGui.SameLine(ctx, 0, 20)
+    local rv_xf, new_xf = ImGui.Checkbox(ctx, "Split at Crossfade##main_glue", shown_xf)
     if rv_xf then
+      use_own_grouping()
       gui.glue_split_at_crossfades = new_xf
       save_gui_settings()
     end
-    if ImGui.IsItemHovered(ctx, ImGui.HoveredFlags_AllowWhenDisabled) then
-      ImGui.SetTooltip(ctx, "Split at crossfades\nCrossfading items are not grouped into the same unit\nOnly touching items share a unit\nUsed when Glue is set to AS")
+    if ImGui.IsItemHovered(ctx) then
+      ImGui.SetTooltip(ctx, "Crossfading items are not grouped into the same unit\nOnly touching items share a unit\n" ..
+        "Item selection only")
     end
-    if gui.glue_grouping ~= 2 then ImGui.EndDisabled(ctx) end
-
-    -- === ROW 4: Single item Render (same settings as Settings > Glue & Render) ===
-    ImGui.Text(ctx, "     ")
-    ImGui.SameLine(ctx)
-    local rv_render, new_render = ImGui.Checkbox(ctx, "Single item Render##main_render", gui.single_item_render)
+    ImGui.SameLine(ctx, 0, 20)
+    local rv_render, new_render = ImGui.Checkbox(ctx, "Single Item Render##main_render", gui.single_item_render)
     if rv_render then
       gui.single_item_render = new_render
       save_gui_settings()
     end
     if ImGui.IsItemHovered(ctx) then
       ImGui.SetTooltip(ctx, "A unit with only one item is rendered to a new take instead of glued\n" ..
-        "Older takes are kept\n" ..
+        "Older takes are kept (Retain Glue Cues: Settings > Glue & Render)\n" ..
         "Item selection only: with a Time Selection, items are glued as before\n" ..
         "Tail Seconds does not apply to Render")
     end
-    ImGui.SameLine(ctx, 0, 20)
-    if not gui.single_item_render then ImGui.BeginDisabled(ctx) end
-    local rv_keep, new_keep = ImGui.Checkbox(ctx, "Retain Glue Cues##main_render", gui.render_keep_glue_cues)
-    if rv_keep then
-      gui.render_keep_glue_cues = new_keep
-      save_gui_settings()
-    end
-    if ImGui.IsItemHovered(ctx, ImGui.HoveredFlags_AllowWhenDisabled) then
-      ImGui.SetTooltip(ctx, "Render keeps the Glue cues already in the source file\n(e.g. from an earlier glue of the edit). Requires SWS")
-    end
-    if not gui.single_item_render then ImGui.EndDisabled(ctx) end
   end
 
   ImGui.Separator(ctx)

@@ -4,6 +4,10 @@
 
 AudioSweet ReaImGui - AudioSuite Workflow (Pro Tools–Style)
 
+## 26.1025.2058pre1
+
+- Change: the main window now shows one row: Split at Mute, Split at Crossfade and Single Item Render. Glue grouping (All / RGWH / AS) and Retain Glue Cues are back in Settings > Glue & Render only. Ticking a split box switches Glue grouping to AudioSweet settings.
+
 ## 26.1025.2050pre1
 
 - New: Glue grouping (All / RGWH / AS, Mute separate, Split at XF) and Single item Render (Retain Glue Cues) are now on the main window, below the Whole File / Tail row. They are the same settings as Settings > Glue & Render.
