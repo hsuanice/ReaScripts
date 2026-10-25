@@ -1,11 +1,10 @@
 --[[
 @description RGWH Core - Core Library of Render or Glue with Handles
-@version 26.1011.2142
+@version 26.1025.2110pre1
 @author hsuanice
 @noindex
 @changelog
-  - Released as part of the 26.1011.2142 package update.
-  - Full history of earlier versions: Changelogs/ in the repository (https://github.com/hsuanice/ReaScripts/tree/master/Changelogs)
+  - Fix: Render and Glue now restore item fades exactly (shape, curve, S-curve intensity). Render lost a dragged fade curve (wrong field name), Glue reset it; the FADEIN / FADEOUT lines are now copied from the item chunk.
 @about
   Core library for handle-aware Render/Glue workflows with clear, single-entry API.
   Features:
@@ -329,7 +328,37 @@ local function restore_takefx_offline(tk, snap)
 end
 
 -- -- Fade snapshot helpers -----------------------------------------
+-- The item chunk's FADEIN / FADEOUT lines hold shape, length, curve and S-curve intensity
+-- together. The API fields cannot restore them exactly: writing C_FADE*SHAPE resets the
+-- curve (D_FADE*DIR), writing the curve resets the shape to Linear, and fractional shapes
+-- (Equal Power 1.1, sharp S 5.1) read back as whole numbers. So the lines are copied as-is.
+local function item_fade_lines(it)
+  local ok, chunk = r.GetItemStateChunk(it, "", false)
+  if not ok or not chunk then return nil, nil end
+  local cut = chunk:find("\n<", 1, true) or #chunk  -- item-level lines come before any <TAKE / <SOURCE block
+  local head = chunk:sub(1, cut)
+  return head:match("\n(FADEIN [^\r\n]*)"), head:match("\n(FADEOUT [^\r\n]*)")
+end
+
+-- Write FADEIN / FADEOUT lines (from item_fade_lines) into an item; nil leaves that line alone
+local function set_item_fade_lines(it, fin_line, fout_line)
+  if not fin_line and not fout_line then return end
+  local ok, chunk = r.GetItemStateChunk(it, "", false)
+  if not ok or not chunk then return end
+  local cut = chunk:find("\n<", 1, true) or #chunk
+  local head, rest = chunk:sub(1, cut), chunk:sub(cut + 1)
+  local new_head = head
+  if fin_line then
+    new_head = new_head:gsub("\nFADEIN [^\r\n]*", function() return "\n" .. fin_line end, 1)
+  end
+  if fout_line then
+    new_head = new_head:gsub("\nFADEOUT [^\r\n]*", function() return "\n" .. fout_line end, 1)
+  end
+  if new_head ~= head then r.SetItemStateChunk(it, new_head .. rest, false) end
+end
+
 local function snapshot_fades(it)
+  local in_line, out_line = item_fade_lines(it)
   return {
     inLen   = r.GetMediaItemInfo_Value(it, "D_FADEINLEN") or 0.0,
     outLen  = r.GetMediaItemInfo_Value(it, "D_FADEOUTLEN") or 0.0,
@@ -337,8 +366,8 @@ local function snapshot_fades(it)
     outAuto = r.GetMediaItemInfo_Value(it, "D_FADEOUTLEN_AUTO") or 0.0,
     inShape = r.GetMediaItemInfo_Value(it, "C_FADEINSHAPE") or 0,
     outShape= r.GetMediaItemInfo_Value(it, "C_FADEOUTSHAPE") or 0,
-    inDir   = r.GetMediaItemInfo_Value(it, "C_FADEINDIR") or 0.0,
-    outDir  = r.GetMediaItemInfo_Value(it, "C_FADEOUTDIR") or 0.0,
+    inLine  = in_line,
+    outLine = out_line,
   }
 end
 
@@ -357,8 +386,8 @@ local function restore_fades(it, f)
   r.SetMediaItemInfo_Value(it, "D_FADEOUTLEN_AUTO",  f.outAuto)
   r.SetMediaItemInfo_Value(it, "C_FADEINSHAPE",      f.inShape)
   r.SetMediaItemInfo_Value(it, "C_FADEOUTSHAPE",     f.outShape)
-  r.SetMediaItemInfo_Value(it, "C_FADEINDIR",        f.inDir)
-  r.SetMediaItemInfo_Value(it, "C_FADEOUTDIR",       f.outDir)
+  -- exact shape / curve from the chunk (the API values above are the fallback)
+  set_item_fade_lines(it, f.inLine, f.outLine)
 end
 
 ------------------------------------------------------------
@@ -1472,19 +1501,20 @@ local function glue_unit(tr, u, cfg)
   local first_it = members[1] and members[1].it or nil
   local last_it  = members[#members] and members[#members].it or nil
 
-  local fin_len, fin_dir, fin_shape, fin_auto = 0,0,0,0
-  local fout_len, fout_dir, fout_shape, fout_auto = 0,0,0,0
+  local fin_len, fin_shape, fin_auto, fin_line = 0,0,0,nil
+  local fout_len, fout_shape, fout_auto, fout_line = 0,0,0,nil
   if first_it then
     fin_len   = r.GetMediaItemInfo_Value(first_it,"D_FADEINLEN") or 0
-    fin_dir   = r.GetMediaItemInfo_Value(first_it,"D_FADEINDIR") or 0
     fin_shape = r.GetMediaItemInfo_Value(first_it,"C_FADEINSHAPE") or 0
     fin_auto  = r.GetMediaItemInfo_Value(first_it,"D_FADEINLEN_AUTO") or 0
+    fin_line  = (item_fade_lines(first_it))
   end
   if last_it then
     fout_len   = r.GetMediaItemInfo_Value(last_it,"D_FADEOUTLEN") or 0
-    fout_dir   = r.GetMediaItemInfo_Value(last_it,"D_FADEOUTDIR") or 0
     fout_shape = r.GetMediaItemInfo_Value(last_it,"C_FADEOUTSHAPE") or 0
     fout_auto  = r.GetMediaItemInfo_Value(last_it,"D_FADEOUTLEN_AUTO") or 0
+    local _, out_line = item_fade_lines(last_it)
+    fout_line = out_line
   end
 
   -- Compute UL/UR (handles + clamp)
@@ -1744,13 +1774,13 @@ local function glue_unit(tr, u, cfg)
 
     -- Restore the outer-edge fade in/out
     r.SetMediaItemInfo_Value(glued,"D_FADEINLEN",      fin_len)
-    r.SetMediaItemInfo_Value(glued,"D_FADEINDIR",      fin_dir)
     r.SetMediaItemInfo_Value(glued,"C_FADEINSHAPE",    fin_shape)
     r.SetMediaItemInfo_Value(glued,"D_FADEINLEN_AUTO", fin_auto)
     r.SetMediaItemInfo_Value(glued,"D_FADEOUTLEN",      fout_len)
-    r.SetMediaItemInfo_Value(glued,"D_FADEOUTDIR",      fout_dir)
     r.SetMediaItemInfo_Value(glued,"C_FADEOUTSHAPE",    fout_shape)
     r.SetMediaItemInfo_Value(glued,"D_FADEOUTLEN_AUTO", fout_auto)
+    -- exact shape / curve from the chunk (the API values above are the fallback)
+    set_item_fade_lines(glued, fin_line, fout_line)
     r.UpdateItemInProject(glued)
 
     -- Volume handling intentionally skipped for Glue (native behavior already prints item+take volume).

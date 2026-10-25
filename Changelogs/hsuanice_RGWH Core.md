@@ -2,6 +2,14 @@
 
 RGWH Core - Core Library of Render or Glue with Handles
 
+## 26.1025.2110pre1
+
+- Fix: Render and Glue now restore item fades exactly (shape, curve, S-curve intensity). Render lost a dragged fade curve (wrong field name), Glue reset it; the FADEIN / FADEOUT lines are now copied from the item chunk.
+
+## 26.1011.2142
+
+- Released as part of the 26.1011.2142 package update.
+
 History before 26.1011.2142 (moved out of the script header; last header version: `0.3.13`).
 
 ```text
