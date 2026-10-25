@@ -7,6 +7,14 @@ PM Insight Analyzer
 
 **Removed from ReaPack** (2026-10-15) while it is a work in progress; the script stays in the repository (`@noindex`) as a backup.
 
+## 26.1025.1313pre1
+
+- Change: the report opens with an overview - work time, efficiency, progress by stage and plan; the detailed tables are collapsed below.
+- Change: efficiency = the whole film / the whole EDL source per hour of ALL work (every work type and work without a scene); the per work type rates stay for the estimates.
+- Add: progress by stage - Mic select (EDL), Editing (Mic Selected), Denoise (Edited): done when all the scene's items there are muted; a stage with no items is done when a later stage already has items (skipped). Remaining EDL source and estimated work hours per stage.
+- Add: plan from PM Timer's target hours and delivery date - days left, hours used / left, hours per day, whether the estimated work fits, source per day per stage.
+- Change: Source/hr always uses the EDL source.
+
 ## 26.1025.1249pre1
 
 - Change: the report opens with an overview of the four questions - work time (total, working days, typical day, last 7 days), efficiency (film / EDL source per hour), progress by stage and plan; the detailed tables are collapsed below.

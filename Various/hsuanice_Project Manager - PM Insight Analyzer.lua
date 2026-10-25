@@ -1,13 +1,14 @@
 --[[
 @description Project Manager - PM Insight Analyzer: work-time analysis of PM Timer logs (work in progress)
-@version 26.1025.1249pre1
+@version 26.1025.1313pre1
 @author hsuanice
 @noindex  (kept in the repository as a backup; not offered on ReaPack while it is a work in progress)
 @changelog
-  - Change: the report opens with an overview of the four questions - work time (total, working days, typical day, last 7 days), efficiency (film / EDL source per hour), progress by stage and plan; the detailed tables are collapsed below.
-  - Add: progress by stage - Mic select (EDL), Editing (Mic Selected), Denoise (Edited): a stage is done for a scene when all its items there are muted; a stage with no items is done when a later stage already has items (skipped), else not done. Remaining EDL source and estimated work hours per stage.
+  - Change: the report opens with an overview - work time, efficiency, progress by stage and plan; the detailed tables are collapsed below.
+  - Change: efficiency = the whole film / the whole EDL source per hour of ALL work (every work type and work without a scene); the per work type rates stay for the estimates.
+  - Add: progress by stage - Mic select (EDL), Editing (Mic Selected), Denoise (Edited): done when all the scene's items there are muted; a stage with no items is done when a later stage already has items (skipped). Remaining EDL source and estimated work hours per stage.
   - Add: plan from PM Timer's target hours and delivery date - days left, hours used / left, hours per day, whether the estimated work fits, source per day per stage.
-  - Change: Source/hr always uses the EDL source (not Mic Selected / Edited lengths).
+  - Change: Source/hr always uses the EDL source.
 @about
   Read-only analysis script. Auto-detects project type:
 
@@ -953,13 +954,26 @@ details{margin-top:18px}summary{cursor:pointer;font-size:16px;font-weight:600;pa
   end
   out('</div>')
 
-  -- 2. Efficiency (EDL source)
-  card("Efficiency (per hour of scene work)")
-  row("Film", rate_or_na(eff_total.film, eff_total.work))
-  row("Source (EDL)", rate_or_na(eff_total.source, eff_total.work))
+  -- 2. Efficiency: whole film / whole EDL source per hour of ALL work (every work type,
+  --    and work without a scene); selected scenes: their film / source per hour of their work
+  local shown_film, shown_src = 0, 0
+  for _, sc in ipairs(scenes) do
+    if shown(sc) then shown_film, shown_src = shown_film + sc.length_sec, shown_src + sc.source_length_sec end
+  end
+  local all_src = sel_mode and shown_src or project_source_total_sec
+  card("Efficiency (per hour of all work)")
+  row("Film", rate_or_na(shown_film, work_total))
+  row("Source (EDL)", rate_or_na(all_src, work_total))
+  out('<div class="note">Film ' .. fmt_dur(shown_film) .. ' · Source ' .. fmt_dur(all_src) .. ' · Work '
+    .. fmt_h(work_total) .. '</div>')
+  -- per work type: EDL source of the scenes with that work, per hour of it (used for the estimates)
+  local first = true
   for _, wt in ipairs({ "mic select", "editing", "denoise" }) do
     local e = eff[wt]
-    if e and e.work > 0 then row("&nbsp;&nbsp;" .. esc(wt) .. " source", rate_or_na(e.source, e.work)) end
+    if e and e.work > 0 then
+      if first then out('<div class="note" style="margin-top:8px">By work type (source per hour of that work):</div>'); first = false end
+      row("&nbsp;&nbsp;" .. esc(wt), rate_or_na(e.source, e.work))
+    end
   end
   out('</div>')
 

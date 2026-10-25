@@ -1,10 +1,10 @@
 --[[
 @description Project Manager - PM Timer: scene-aware work timer
-@version 26.1025.1249pre1
+@version 26.1025.1313pre1
 @author hsuanice
 @noindex  (kept in the repository as a backup; Project Manager is not offered on ReaPack for now)
 @changelog
-  - Add: target box at the top right - click to set the target work hours and the delivery date (saved in the project; PM Insight Analyzer plans with them). Shows e.g. 'Due 11-15 · 21d · 120h'.
+  - Add: target box at the top right - click to set the target work hours and the delivery date (saved in the project; PM Insight Analyzer plans with them). Shows the days to delivery and the hours LEFT of the target (target minus the work logged so far, live while the timer runs), e.g. 'Due 11-02 · 8d · 45.6h left'.
   - Change: compact buttons (26 px instead of 40 px high, smaller font) and a lower window, so the whole timer fits in a short dock.
 @about
   Scene-aware toggle timer for the hsuanice PM system.
@@ -2850,6 +2850,36 @@ end
 
 -- ── Target (work hours + delivery date) ─────────────────────────────────────
 -- Saved in the project (TARGET_HOURS, DUE_DATE); PM Insight Analyzer plans with them.
+-- Work logged so far (seconds): every work item under the Scene Cut folder (date tracks and
+-- the duration-only log), as PM Insight Analyzer counts it. Cached until the project changes;
+-- the running session counts with its live elapsed time (its item is only updated every 60 s).
+local used_cache = { psc = -1, secs = 0, active_len = 0 }
+local function used_work_secs()
+  local psc = r.GetProjectStateChangeCount(0)
+  if psc ~= used_cache.psc then
+    local total, active_len = 0, 0
+    for _, t in ipairs(get_folder_children(SCENE_TRACK_NAME)) do
+      local _, tname = r.GetTrackName(t)
+      if tname:match(DATE_PAT) or tname == DURATION_LOG_NAME then
+        for i = 0, r.CountTrackMediaItems(t) - 1 do
+          local item = r.GetTrackMediaItem(t, i)
+          local _, wt = r.GetSetMediaItemInfo_String(item, "P_EXT:WORK_TYPE", "", false)
+          if wt ~= "" then
+            local len = math.max(0, r.GetMediaItemInfo_Value(item, "D_LENGTH"))
+            total = total + len
+            if S.work_item_guid and r.BR_GetMediaItemGUID(item) == S.work_item_guid then active_len = len end
+          end
+        end
+      end
+    end
+    used_cache.psc, used_cache.secs, used_cache.active_len = psc, total, active_len
+  end
+  if S.mode == "WORKING" then
+    return used_cache.secs - used_cache.active_len + elapsed_secs()
+  end
+  return used_cache.secs
+end
+
 local function target_label()
   local hours, due = get_extstate("TARGET_HOURS"), get_extstate("DUE_DATE")
   if not hours and not due then return "Set target" end
@@ -2862,7 +2892,10 @@ local function target_label()
     parts[#parts + 1] = "Due " .. m .. "-" .. d
     parts[#parts + 1] = (days >= 0) and (days .. "d") or (-days .. "d late")
   end
-  if hours then parts[#parts + 1] = hours .. "h" end
+  if tonumber(hours) then
+    local left = tonumber(hours) - used_work_secs() / 3600
+    parts[#parts + 1] = (left >= 0) and string.format("%.1fh left", left) or string.format("%.1fh over", -left)
+  end
   return table.concat(parts, " · ")
 end
 
