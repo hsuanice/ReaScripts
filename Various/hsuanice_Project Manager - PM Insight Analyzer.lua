@@ -1,12 +1,12 @@
 --[[
 @description Project Manager - PM Insight Analyzer: work-time analysis of PM Timer logs (work in progress)
-@version 26.1025.1313pre1
+@version 26.1025.1322pre1
 @author hsuanice
 @noindex  (kept in the repository as a backup; not offered on ReaPack while it is a work in progress)
 @changelog
   - Change: the report opens with an overview - work time, efficiency, progress by stage and plan; the detailed tables are collapsed below.
-  - Change: efficiency = the whole film / the whole EDL source per hour of ALL work (every work type and work without a scene); the per work type rates stay for the estimates.
-  - Add: progress by stage - Mic select (EDL), Editing (Mic Selected), Denoise (Edited): done when all the scene's items there are muted; a stage with no items is done when a later stage already has items (skipped). Remaining EDL source and estimated work hours per stage.
+  - Change: efficiency counts finished content only - film / EDL source of the scenes marked done on Scene Cut (muted, with logged work) per hour of all the work on them; unfinished scenes no longer make it look better.
+  - Add: progress by stage - Mic select (EDL), Editing (Mic Selected), Denoise (Edited): done when all the scene's items there are muted, when a later stage already has items (skipped), or when the scene is marked done. Remaining EDL source and estimated work per stage, from the rates of finished stages.
   - Add: plan from PM Timer's target hours and delivery date - days left, hours used / left, hours per day, whether the estimated work fits, source per day per stage.
   - Change: Source/hr always uses the EDL source.
 @about
@@ -686,6 +686,7 @@ local function analyze()
   -- no items is skipped (done) when a later stage already has items for the scene
   -- (e.g. EDL -> Edited directly, Mic Selected left empty); otherwise it is not done yet.
   local function stage_done(sc, key)
+    if sc.is_done then return true end   -- scene marked done on Scene Cut = every stage done
     local st = sc.stage[key]
     if st and st.n > 0 then return st.open == 0 end
     local later = false
@@ -931,10 +932,19 @@ details{margin-top:18px}summary{cursor:pointer;font-size:16px;font-weight:600;pa
     frac = math.max(0, math.min(1, frac or 0))
     out(string.format('<div class="bar"><i style="width:%.1f%%"></i></div>', frac * 100))
   end
-  -- source per second of work for a work type (EDL source), nil without work
-  local function src_rate(wt)
-    local e = eff[wt]
-    if e and e.work > 0 and e.source > 0 then return e.source / e.work end
+  -- Efficiency only counts finished content: work on a scene that is still in progress would
+  -- make the rate look better than it is (user rule 26.1025).
+  -- Stage rate = EDL source of the scenes whose stage is done, per second of that stage's work
+  -- on them (used for the estimates); nil when no finished scene has that work.
+  local function stage_rate(stg)
+    local src, work = 0, 0
+    for _, sc in ipairs(scenes) do
+      local w = sc.wt_sec[stg.wt]
+      if shown(sc) and w and w > 0 and stage_done(sc, stg.key) then
+        src, work = src + sc.source_length_sec, work + w
+      end
+    end
+    if work > 0 and src > 0 then return src / work, work end
   end
 
   out('<h2>' .. (sel_mode and 'Selected Scenes' or 'Overview') .. '</h2><div class="cards">')
@@ -954,25 +964,33 @@ details{margin-top:18px}summary{cursor:pointer;font-size:16px;font-weight:600;pa
   end
   out('</div>')
 
-  -- 2. Efficiency: whole film / whole EDL source per hour of ALL work (every work type,
-  --    and work without a scene); selected scenes: their film / source per hour of their work
-  local shown_film, shown_src = 0, 0
+  -- 2. Efficiency from finished scenes only (Scene Cut item muted): their film / EDL source
+  --    per hour of all the work logged on them (every work type). Scenes without logged work
+  --    are left out (nothing to divide by).
+  local done_n, done_film, done_src, done_work = 0, 0, 0, 0
   for _, sc in ipairs(scenes) do
-    if shown(sc) then shown_film, shown_src = shown_film + sc.length_sec, shown_src + sc.source_length_sec end
+    if shown(sc) and sc.is_done and sc.total_sec > 0 then
+      done_n = done_n + 1
+      done_film, done_src, done_work = done_film + sc.length_sec, done_src + sc.source_length_sec, done_work + sc.total_sec
+    end
   end
-  local all_src = sel_mode and shown_src or project_source_total_sec
-  card("Efficiency (per hour of all work)")
-  row("Film", rate_or_na(shown_film, work_total))
-  row("Source (EDL)", rate_or_na(all_src, work_total))
-  out('<div class="note">Film ' .. fmt_dur(shown_film) .. ' · Source ' .. fmt_dur(all_src) .. ' · Work '
-    .. fmt_h(work_total) .. '</div>')
-  -- per work type: EDL source of the scenes with that work, per hour of it (used for the estimates)
+  card("Efficiency (finished scenes)")
+  row("Film per hour", rate_or_na(done_film, done_work))
+  row("Source (EDL) per hour", rate_or_na(done_src, done_work))
+  if done_n > 0 then
+    out('<div class="note">' .. done_n .. ' finished scene' .. (done_n > 1 and 's' or '') .. ': film ' .. fmt_dur(done_film)
+      .. ' · source ' .. fmt_dur(done_src) .. ' · work ' .. fmt_h(done_work) .. '</div>')
+  else
+    out('<div class="note">No finished scene with logged work yet (mark a scene done by muting it on Scene Cut).</div>')
+  end
   local first = true
-  for _, wt in ipairs({ "mic select", "editing", "denoise" }) do
-    local e = eff[wt]
-    if e and e.work > 0 then
-      if first then out('<div class="note" style="margin-top:8px">By work type (source per hour of that work):</div>'); first = false end
-      row("&nbsp;&nbsp;" .. esc(wt), rate_or_na(e.source, e.work))
+  for _, stg in ipairs(STAGES) do
+    if stage_exists[stg.key] then
+      local rate = stage_rate(stg)
+      if rate then
+        if first then out('<div class="note" style="margin-top:8px">By stage (source per hour of that work, finished stages only):</div>'); first = false end
+        row("&nbsp;&nbsp;" .. esc(stg.wt), fmt_rate(rate * 3600))
+      end
     end
   end
   out('</div>')
@@ -992,7 +1010,7 @@ details{margin-top:18px}summary{cursor:pointer;font-size:16px;font-weight:600;pa
           if stage_done(sc, stg.key) then done = done + 1 else rem_src = rem_src + sc.source_length_sec end
         end
       end
-      local rate = src_rate(stg.wt)
+      local rate = stage_rate(stg)
       local est = rate and rem_src / rate
       if est then remaining_work = remaining_work + est; any_estimate = true end
       per_stage[#per_stage + 1] = { stg = stg, rem_src = rem_src }
