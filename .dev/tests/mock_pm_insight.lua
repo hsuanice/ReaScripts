@@ -139,6 +139,12 @@ local plan = run({})
 check("plan: days left", has(plan, "10 days left"))
 check("plan: hours used / target and per day", has(plan, "3.8h / 20h") and has(plan, "Per day</b><span>1.6h"))
 check("plan: estimate fits the hours left", has(plan, "✓ fits"))
+check("plan: per day as part of a 5h working day", has(plan, "1.6h <small>(33% of a 5h day)</small>"))
+check("plan: 2.2h left at 5h a day = 1 day, before delivery", has(plan, "At 5h a day</b><span>1 days · done ~") and has(plan, "Hours available to delivery</b><span>50.0h"))
+projext.HOURS_PER_DAY = "1"
+local p1 = run({})
+check("plan: 1h a day -> 3 days, 10h available", has(p1, "At 1h a day</b><span>3 days") and has(p1, "Hours available to delivery</b><span>10.0h"))
+projext.HOURS_PER_DAY = nil
 check("plan: source per day per stage", has(plan, "Denoise source / day</b><span>66s"))
 projext.TARGET_HOURS = "5"
 check("plan: estimate over the hours left", has(run({}), " short</span>"))

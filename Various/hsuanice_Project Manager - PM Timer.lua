@@ -1,10 +1,10 @@
 --[[
 @description Project Manager - PM Timer: scene-aware work timer
-@version 26.1025.1313pre1
+@version 26.1025.1333pre1
 @author hsuanice
 @noindex  (kept in the repository as a backup; Project Manager is not offered on ReaPack for now)
 @changelog
-  - Add: target box at the top right - click to set the target work hours and the delivery date (saved in the project; PM Insight Analyzer plans with them). Shows the days to delivery and the hours LEFT of the target (target minus the work logged so far, live while the timer runs), e.g. 'Due 11-02 · 8d · 45.6h left'.
+  - Add: target box at the top right - click to set the target work hours, the delivery date and the work hours per day (default 5; saved in the project; PM Insight Analyzer plans with them). Shows the days to delivery and the hours left of the target (live while the timer runs), e.g. 'Due 11-02 · 8d · 45.6h left'.
   - Change: compact buttons (26 px instead of 40 px high, smaller font) and a lower window, so the whole timer fits in a short dock.
 @about
   Scene-aware toggle timer for the hsuanice PM system.
@@ -2849,7 +2849,8 @@ local function draw_btn_disabled(x, y, w, h, label)
 end
 
 -- ── Target (work hours + delivery date) ─────────────────────────────────────
--- Saved in the project (TARGET_HOURS, DUE_DATE); PM Insight Analyzer plans with them.
+-- Saved in the project (TARGET_HOURS, DUE_DATE, HOURS_PER_DAY = a working day, default 5);
+-- PM Insight Analyzer plans with them.
 -- Work logged so far (seconds): every work item under the Scene Cut folder (date tracks and
 -- the duration-only log), as PM Insight Analyzer counts it. Cached until the project changes;
 -- the running session counts with its live elapsed time (its item is only updated every 60 s).
@@ -2901,11 +2902,16 @@ end
 
 local function action_set_target()
   local hours, due = get_extstate("TARGET_HOURS") or "", get_extstate("DUE_DATE") or ""
-  local ok, csv = r.GetUserInputs("PM Timer - Target", 2,
-    "Target work hours (empty = none),Delivery date YYYY-MM-DD,extrawidth=60", hours .. "," .. due)
+  local per_day = get_extstate("HOURS_PER_DAY") or "5"
+  local ok, csv = r.GetUserInputs("PM Timer - Target", 3,
+    "Target work hours (empty = none),Delivery date YYYY-MM-DD,Work hours per day,extrawidth=60",
+    hours .. "," .. due .. "," .. per_day)
   if not ok then return end
-  local h, d = csv:match("^%s*(.-)%s*,%s*(.-)%s*$")
-  h, d = h or "", d or ""
+  local h, d, pd = csv:match("^%s*(.-)%s*,%s*(.-)%s*,%s*(.-)%s*$")
+  h, d, pd = h or "", d or "", pd or ""
+  if not (tonumber(pd) and tonumber(pd) > 0 and tonumber(pd) <= 24) then
+    r.ShowMessageBox("Work hours per day must be a number between 0 and 24.", "PM Timer", 0); return
+  end
   if h ~= "" and not (tonumber(h) and tonumber(h) > 0) then
     r.ShowMessageBox("Target work hours must be a number above 0 (or empty).", "PM Timer", 0); return
   end
@@ -2915,6 +2921,7 @@ local function action_set_target()
   end
   set_extstate("TARGET_HOURS", h)
   set_extstate("DUE_DATE", d)
+  set_extstate("HOURS_PER_DAY", pd)
 end
 
 local function draw()

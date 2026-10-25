@@ -1,13 +1,13 @@
 --[[
 @description Project Manager - PM Insight Analyzer: work-time analysis of PM Timer logs (work in progress)
-@version 26.1025.1322pre1
+@version 26.1025.1333pre1
 @author hsuanice
 @noindex  (kept in the repository as a backup; not offered on ReaPack while it is a work in progress)
 @changelog
   - Change: the report opens with an overview - work time, efficiency, progress by stage and plan; the detailed tables are collapsed below.
-  - Change: efficiency counts finished content only - film / EDL source of the scenes marked done on Scene Cut (muted, with logged work) per hour of all the work on them; unfinished scenes no longer make it look better.
+  - Change: efficiency counts finished content only - film / EDL source of the scenes marked done on Scene Cut (muted, with logged work) per hour of all the work on them.
   - Add: progress by stage - Mic select (EDL), Editing (Mic Selected), Denoise (Edited): done when all the scene's items there are muted, when a later stage already has items (skipped), or when the scene is marked done. Remaining EDL source and estimated work per stage, from the rates of finished stages.
-  - Add: plan from PM Timer's target hours and delivery date - days left, hours used / left, hours per day, whether the estimated work fits, source per day per stage.
+  - Add: plan from PM Timer's target hours, delivery date and work hours per day (default 5) - days left, hours used / left, hours per day (as part of a working day), whether the estimated work fits, how many working days it takes and when it would be done, hours available to the delivery, source per day per stage.
   - Change: Source/hr always uses the EDL source.
 @about
   Read-only analysis script. Auto-detects project type:
@@ -1029,6 +1029,9 @@ details{margin-top:18px}summary{cursor:pointer;font-size:16px;font-weight:600;pa
   if not sel_mode then
     local _, t_hours = r.GetProjExtState(0, "hsuanice_PM", "TARGET_HOURS")
     local _, due = r.GetProjExtState(0, "hsuanice_PM", "DUE_DATE")
+    local _, per_day_h = r.GetProjExtState(0, "hsuanice_PM", "HOURS_PER_DAY")
+    per_day_h = tonumber(per_day_h) or 5          -- one working day (PM Timer target, default 5h)
+    local day_secs = per_day_h * 3600
     t_hours = tonumber(t_hours)
     local y, m, d = (due or ""):match("^(%d%d%d%d)%-(%d%d)%-(%d%d)$")
     card("Plan")
@@ -1050,12 +1053,24 @@ details{margin-top:18px}summary{cursor:pointer;font-size:16px;font-weight:600;pa
         row("Work hours", fmt_h(grand_total) .. " / " .. string.format("%gh", t_hours))
         bar(grand_total / (t_hours * 3600))
         row("Hours left", left >= 0 and fmt_h(left) or ('<span class="warn">' .. fmt_h(-left) .. " over</span>"))
-        if days then row("Per day", fmt_h(math.max(left, 0) / per_day_div)) end
+        if days then
+          local need = math.max(left, 0) / per_day_div
+          row("Per day", fmt_h(need) .. string.format(" <small>(%d%% of a %gh day)</small>", math.floor(need / day_secs * 100 + 0.5), per_day_h))
+        end
         if any_estimate then
           local fits = remaining_work <= left   -- both in seconds of work
           row("Estimated work left", fmt_h(remaining_work) .. " " .. (fits and '<span class="ok">✓ fits</span>'
             or ('<span class="warn">' .. fmt_h(remaining_work - left) .. " short</span>")))
         end
+      end
+      -- working days of per_day_h hours: what fits before the delivery, when the work is done
+      if any_estimate then
+        local days_needed = math.ceil(remaining_work / day_secs)
+        local finish = os.date("%Y-%m-%d", os.time() + days_needed * 86400)
+        local late = days and days_needed > math.max(days, 0)
+        row(string.format("At %gh a day", per_day_h), days_needed .. " days · done ~" .. finish
+          .. (days and (late and ' <span class="warn">after delivery</span>' or ' <span class="ok">✓</span>') or ""))
+        if days and days > 0 then row("Hours available to delivery", fmt_h(days * day_secs)) end
       end
       if days then
         for _, x in ipairs(per_stage) do
