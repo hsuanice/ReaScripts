@@ -1,5 +1,9 @@
 # hsuanice_Fade Tool - Crossfade in Razor.lua — Changelog
 
+## 26.1025.1227pre1
+
+- Change: an existing fade or crossfade side (length > 0) keeps its own shape; the default shape from Settings is only used for a new fade.
+
 ## 26.1024.1009
 
 - Add: crossfade across a gap between two items - a razor inside the gap, or over both gap edges, extends both items into a crossfade over the razor (it made two separate fades before).

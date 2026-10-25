@@ -383,6 +383,41 @@ A, B = xpair("K5"); SNAP = false; mouse = { item = B, part = "top" }
 cmd_frames(1, 99); hold_run(4, { 10.02, 10.53, 10.53, 10.53, 10.53 })
 check("40 snap off + Cmd: grid", near(S(B), 253 / FPS))
 
+-- Existing fade shapes are kept; only new fades get the default (26.1025) ---------------
+reset()
+t = new_track("KS1", string.format('%.10f 10 ""', 10 - fl))
+A = new_item(t, 0, 10, -5, 30); B = new_item(t, 10, 10, 5, 30)
+A.v.D_FADEOUTLEN, A.v.C_FADEOUTSHAPE = 0.5, 6          -- left side already has a Sharp S-Curve fade-out
+run("Crossfade in Razor")
+check("46 existing fade-out keeps its shape, new fade-in gets Equal Power", A.v.C_FADEOUTSHAPE == 6 and B.v.C_FADEINSHAPE == 7)
+reset()
+t = new_track("KS2", '9 12 ""')
+A = new_item(t, 0, 11, -5, 40); B = new_item(t, 10, 10, 5, 40)
+A.v.D_FADEOUTLEN_AUTO, B.v.D_FADEINLEN_AUTO = 1, 1
+A.v.C_FADEOUTSHAPE, B.v.C_FADEINSHAPE = 3, 3
+run("Crossfade in Razor")
+check("47 resized crossfade keeps its shape", near(S(B), 9) and near(E(A), 12) and A.v.C_FADEOUTSHAPE == 3 and B.v.C_FADEINSHAPE == 3)
+reset()
+t = new_track("KS3", string.format('%.10f 10 ""', 10 - fl))
+A = new_item(t, 0, 10, -5, 30); B = new_item(t, 10, 10, 5, 30)
+A.v.D_FADEOUTLEN, A.v.C_FADEOUTSHAPE = 0.2, -1          -- a fade whose shape was never set
+run("Crossfade in Razor")
+check("48 existing fade with shape -1 stays -1", A.v.C_FADEOUTSHAPE == -1 and B.v.C_FADEINSHAPE == 7)
+no_hold()
+reset(); ext.HoverMode = "true"
+t = new_track("KS4", "")
+A = new_item(t, 0, 10, -5, 30); A.v.D_FADEINLEN, A.v.C_FADEINSHAPE = 1, 2
+B = new_item(t, 20, 10, -5, 30); B.v.C_FADEINSHAPE = 4     -- no fade (length 0): shape value is stale
+mouse = { item = A, part = "top", t = 3 }; SF()
+check("49 Smart Fade: existing fade-in keeps its shape", near(A.v.D_FADEINLEN, 3) and A.v.C_FADEINSHAPE == 2)
+mouse = { item = B, part = "top", t = 23 }; SF()
+check("49 Smart Fade: new fade-in gets the Fade shape (Linear)", near(B.v.D_FADEINLEN, 3) and B.v.C_FADEINSHAPE == 0)
+reset()
+t = new_track("KS5", '3 20 ""')
+D = new_item(t, 5, 10, -10, 60); D.v.D_FADEINLEN, D.v.C_FADEINSHAPE = 0.5, 3
+run("Scene Cut to Razor")
+check("50 Scene Cut always uses the Scene fade shape", D.v.C_FADEINSHAPE == 0 and near(D.v.D_FADEINLEN, fl))
+
 -- Scene Cut from the Scene Cut track (no razor, selected items) ---------------------
 local function scene_project()
   reset()

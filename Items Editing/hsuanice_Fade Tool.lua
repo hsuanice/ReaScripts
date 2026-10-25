@@ -1,6 +1,6 @@
 --[[
 @description Fade Tool - frame-grid fades and crossfades by razor, time selection, mouse or edit cursor (Smart Fade, Crossfade in Razor, Scene Cut to Razor, Settings)
-@version 26.1024.1910
+@version 26.1025.1227pre1
 @author hsuanice
 @metapackage
 @provides
@@ -9,8 +9,7 @@
   [main] hsuanice_Fade Tool - Scene Cut to Razor.lua
   [main] hsuanice_Fade Tool - Settings.lua
 @changelog
-  - Add: Scene Cut to Razor without a razor - select items and the scene they cover completely on the Scene Cut track is used.
-  - Release: tested in REAPER 7.82.
+  - Change: an existing fade or crossfade side (length > 0) keeps its own shape; the default shape from Settings is only used for a new fade. (Scene Cut still always uses the Scene fade shape.)
 @about
   # Fade Tool
 
@@ -29,6 +28,9 @@
     or extended, with a fade-in before the scene start and a fade-out on its last frame
     (1 frame Linear by default). Items in between stay untouched.
   - Settings: lengths in frames, positions (before / center / after) and shapes.
+
+  Shapes: a fade or crossfade side that already exists (length > 0) keeps its own shape; the
+  Settings shapes are only used for new fades. Scene Cut always uses the Scene fade shape.
 
   Requires the hsuanice Library package. Hover Mode needs SWS and the Hover Editing package
   (Toggle Hover Mode); without them Smart Fade works at the edit cursor.

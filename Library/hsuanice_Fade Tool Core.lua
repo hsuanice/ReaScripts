@@ -1,11 +1,10 @@
 --[[
 @description hsuanice Fade Tool Core (shared razor / cut / edge / fade helpers for the Fade Tool scripts)
-@version 26.1024.1009
+@version 26.1025.1227pre1
 @author hsuanice
 @noindex
 @changelog
-  - Add: crossfade across a gap between two items - a razor inside the gap, or over both gap edges, extends both items into a crossfade over the razor (it made two separate fades before).
-  - Release: tested in REAPER 7.82.
+  - Change: an existing fade or crossfade side (length > 0) keeps its own shape; the default shape from Settings is only used for a new fade.
 @about
   Shared code for "Fade Tool - Crossfade in Razor", "Fade Tool - Scene Cut to Razor" and
   "Fade Tool - Settings". Settings live in the ExtState section "hsuanice_FadeTool".
@@ -308,6 +307,13 @@ function M.set_shape(it, side, shape)
   end
 end
 
+-- Shape for a fade that is about to be written: an existing fade (length > 0) keeps its own
+-- shape (nil = do not write it); only a new fade gets the default shape
+function M.new_fade_shape(it, side, default)
+  if fade_len(it, side) > 0 then return nil end
+  return default
+end
+
 -- side = "IN" / "OUT"; auto = true writes a crossfade (auto fade) length, false a plain fade
 function M.set_fade(it, side, len, shape, auto)
   r.SetMediaItemInfo_Value(it, "D_FADE" .. side .. "LEN", len)
@@ -325,11 +331,17 @@ function M.crossfade(a, b, xs, xe, shape)
   ok, miss = M.can_set_edges(b.item, xs, b.fin)
   if not ok then return false, string.format("right item needs %.3f s more handle", miss) end
 
+  -- existing fade / crossfade sides keep their shape (read before anything changes)
+  local shape_a, shape_b
+  if shape then
+    shape_a = M.new_fade_shape(a.item, "OUT", shape)
+    shape_b = M.new_fade_shape(b.item, "IN", shape)
+  end
   M.set_end(a.item, xe)
   M.set_start(b.item, xs)
   local len = xe - xs
-  M.set_fade(a.item, "OUT", len, shape, true)
-  M.set_fade(b.item, "IN", len, shape, true)
+  M.set_fade(a.item, "OUT", len, shape_a, true)
+  M.set_fade(b.item, "IN", len, shape_b, true)
   clamp_fade(a.item, "IN", xs - a.pos)
   clamp_fade(b.item, "OUT", b.fin - xe)
   return true
@@ -370,7 +382,7 @@ end
 function M.fade_in_to(info, t, S)
   if M.is_locked(info.item) then return false, "locked item" end
   if t <= info.pos + M.TOL or t >= info.fin - M.TOL then return false, "position is outside the item" end
-  M.set_fade(info.item, "IN", t - info.pos, S.fade_shape, false)
+  M.set_fade(info.item, "IN", t - info.pos, M.new_fade_shape(info.item, "IN", S.fade_shape), false)
   clamp_fade(info.item, "OUT", info.fin - t)
   return true
 end
@@ -378,7 +390,7 @@ end
 function M.fade_out_from(info, t, S)
   if M.is_locked(info.item) then return false, "locked item" end
   if t <= info.pos + M.TOL or t >= info.fin - M.TOL then return false, "position is outside the item" end
-  M.set_fade(info.item, "OUT", info.fin - t, S.fade_shape, false)
+  M.set_fade(info.item, "OUT", info.fin - t, M.new_fade_shape(info.item, "OUT", S.fade_shape), false)
   clamp_fade(info.item, "IN", t - info.pos)
   return true
 end
@@ -522,7 +534,7 @@ function M.fade_areas(areas, S)
             edges = edges + 1
             if M.is_locked(info.item) then skip(area, info.pos, "locked item")
             else
-              M.set_fade(info.item, "IN", re - info.pos, S.fade_shape, false)
+              M.set_fade(info.item, "IN", re - info.pos, M.new_fade_shape(info.item, "IN", S.fade_shape), false)
               clamp_fade(info.item, "OUT", info.fin - re)
               changed = changed + 1
             end
@@ -531,7 +543,7 @@ function M.fade_areas(areas, S)
             edges = edges + 1
             if M.is_locked(info.item) then skip(area, info.fin, "locked item")
             else
-              M.set_fade(info.item, "OUT", info.fin - rs, S.fade_shape, false)
+              M.set_fade(info.item, "OUT", info.fin - rs, M.new_fade_shape(info.item, "OUT", S.fade_shape), false)
               clamp_fade(info.item, "IN", rs - info.pos)
               changed = changed + 1
             end

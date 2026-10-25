@@ -1,5 +1,9 @@
 # hsuanice_Fade Tool.lua — Changelog
 
+## 26.1025.1227pre1
+
+- Change: an existing fade or crossfade side (length > 0) keeps its own shape; the default shape from Settings is only used for a new fade. (Scene Cut still always uses the Scene fade shape.)
+
 ## 26.1024.1910
 
 - Add: Scene Cut to Razor without a razor - select items and the scene they cover completely on the Scene Cut track is used.
