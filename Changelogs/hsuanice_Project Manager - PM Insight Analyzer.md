@@ -7,6 +7,10 @@ PM Insight Analyzer
 
 **Removed from ReaPack** (2026-10-15) while it is a work in progress; the script stays in the repository (`@noindex`) as a backup.
 
+## 26.1025.1403pre1
+
+- Change: Plan's source per day per stage reads like the pace table (12m 25s instead of 00:12:24:21).
+
 ## 26.1025.1402
 
 - Change: the report opens with an overview - work time, efficiency, progress by stage and plan; the detailed tables are collapsed below.

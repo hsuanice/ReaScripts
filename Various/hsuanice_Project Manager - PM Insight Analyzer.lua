@@ -1,16 +1,10 @@
 --[[
 @description Project Manager - PM Insight Analyzer: work-time analysis of PM Timer logs (work in progress)
-@version 26.1025.1402
+@version 26.1025.1403pre1
 @author hsuanice
 @noindex  (kept in the repository as a backup; not offered on ReaPack while it is a work in progress)
 @changelog
-  - Change: the report opens with an overview - work time, efficiency, progress by stage and plan; the detailed tables are collapsed below.
-  - Change: efficiency counts finished content only - film / EDL source of the scenes marked done on Scene Cut (muted, with logged work) per hour of all the work on them.
-  - Add: progress by stage - Mic select (EDL), Editing (Mic Selected), Denoise (Edited): done when all the scene's items there are muted, when a later stage already has items (skipped), or when the scene is marked done. Remaining EDL source and estimated work per stage, from the rates of finished stages.
-  - Add: plan from PM Timer's target hours, delivery date and work hours per day (default 5) - days left, hours used / left, hours per day, whether the estimated work fits, working days needed and finish date, source per day per stage.
-  - Add: pace needed - source and film left per day and per hour, for the days left at the work hours per day, next to the pace of the finished scenes (✓, or ⚠ ×N).
-  - Change: Source/hr always uses the EDL source.
-  - Release: tested in REAPER 7.82.
+  - Change: Plan's source per day per stage reads like the pace table (12m 25s instead of 00:12:24:21).
 @about
   Read-only analysis script. Auto-detects project type:
 
@@ -1111,7 +1105,7 @@ details{margin-top:18px}summary{cursor:pointer;font-size:16px;font-weight:600;pa
       end
       if days then
         for _, x in ipairs(per_stage) do
-          if x.rem_src > 0 then row(x.stg.label .. " source / day", fmt_dur(x.rem_src / per_day_div)) end
+          if x.rem_src > 0 then row(x.stg.label .. " source / day", fmt_rate(x.rem_src / per_day_div)) end
         end
       end
     end

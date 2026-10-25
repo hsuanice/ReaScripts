@@ -153,7 +153,7 @@ check("plan: 1h a day -> 3 days, 10h available", has(p1, "At 1h a day</b><span>3
 projext.HOURS_PER_DAY = "0.01"   -- 36 s of work a day: far too little
 check("pace: too slow -> warning with factor", has(run({}), '<span class="warn">⚠ ×'))
 projext.HOURS_PER_DAY = nil
-check("plan: source per day per stage", has(plan, "Denoise source / day</b><span>66s"))
+check("plan: source per day per stage as 1m 6s", has(plan, "Denoise source / day</b><span>1m 6s"))
 projext.TARGET_HOURS = "5"
 check("plan: estimate over the hours left", has(run({}), " short</span>"))
 projext.DUE_DATE = os.date("%Y-%m-%d", os.time() - 2 * 86400)
