@@ -1,5 +1,10 @@
 # hsuanice_Fade Tool - Crossfade in Razor.lua — Changelog
 
+## 26.1025.1231
+
+- Change: an existing fade or crossfade side (length > 0) keeps its own shape; the default shape from Settings is only used for a new fade.
+- Release: tested in REAPER 7.82.
+
 ## 26.1025.1227pre1
 
 - Change: an existing fade or crossfade side (length > 0) keeps its own shape; the default shape from Settings is only used for a new fade.

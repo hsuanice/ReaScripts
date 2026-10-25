@@ -1,10 +1,11 @@
 --[[
 @description Fade Tool - Smart Fade at Mouse or Edit Cursor (razor, time selection, mouse top / bottom / label, Hover Mode aware)
-@version 26.1025.1227pre1
+@version 26.1025.1231
 @author hsuanice
 @noindex
 @changelog
   - Change: an existing fade or crossfade side (length > 0) keeps its own shape; the default shape from Settings is only used for a new fade.
+  - Release: tested in REAPER 7.82.
 @about
   One shortcut for fades and crossfades. Never opens a window unless something had to be
   skipped. The first context that applies wins:
