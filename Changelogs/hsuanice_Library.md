@@ -1,5 +1,9 @@
 # hsuanice_Library.lua — Changelog
 
+## 26.1025.2114
+
+- Update: hsuanice_RGWH Core.lua (Render / Glue keep the exact fade shape and curve).
+
 ## 26.1025.2110pre1
 
 - Update: hsuanice_RGWH Core.lua (Render / Glue keep the exact fade shape and curve).

@@ -1,6 +1,6 @@
 --[[
 @description RGWH Core - Core Library of Render or Glue with Handles
-@version 26.1025.2110pre1
+@version 26.1025.2114
 @author hsuanice
 @noindex
 @changelog
