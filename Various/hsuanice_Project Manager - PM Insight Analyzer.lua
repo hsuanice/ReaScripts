@@ -1,6 +1,6 @@
 --[[
 @description Project Manager - PM Insight Analyzer: work-time analysis of PM Timer logs (work in progress)
-@version 26.1025.1352pre1
+@version 26.1025.1401pre1
 @author hsuanice
 @noindex  (kept in the repository as a backup; not offered on ReaPack while it is a work in progress)
 @changelog
@@ -9,7 +9,7 @@
   - Add: progress by stage - Mic select (EDL), Editing (Mic Selected), Denoise (Edited): done when all the scene's items there are muted, when a later stage already has items (skipped), or when the scene is marked done. Remaining EDL source and estimated work per stage, from the rates of finished stages.
   - Add: plan from PM Timer's target hours, delivery date and work hours per day (default 5) - days left, hours used / left, hours per day, whether the estimated work fits, working days needed and finish date, source per day per stage.
   - Add: pace needed - source and film left per day and per hour, for the days left at the work hours per day, next to the pace of the finished scenes (✓, or ⚠ ×N).
-  - Fix: the pace table fits inside the Plan card.
+  - Fix: the pace table (and its header) fits inside the Plan card.
   - Change: Source/hr always uses the EDL source.
 @about
   Read-only analysis script. Auto-detects project type:
@@ -912,7 +912,7 @@ a{color:var(--acc);text-decoration:none}a:hover{text-decoration:underline}
 .bar i{display:block;height:100%;background:var(--acc)}
 .ok{color:#2e9b55;font-weight:700}.warn{color:#d0731b;font-weight:700}
 .card table{width:100%;min-width:0;table-layout:fixed;border:none;background:none;margin-top:4px}
-.card th,.card td{padding:3px 4px;font-size:12px}.card td:last-child{white-space:normal}
+.card th,.card td{padding:3px 4px;font-size:12px}.card td:last-child,.card th{white-space:normal}
 .card th:first-child,.card td:first-child{width:22%}
 details{margin-top:18px}summary{cursor:pointer;font-size:16px;font-weight:600;padding:6px 0}
 .top{position:fixed;right:16px;bottom:16px;background:var(--card);border:1px solid var(--line);border-radius:20px;padding:6px 12px}
@@ -1092,7 +1092,7 @@ details{margin-top:18px}summary{cursor:pointer;font-size:16px;font-weight:600;pa
             .. fmt_dur(left_src) .. ' · film ' .. fmt_dur(left_film) .. '), ' .. days .. ' days × '
             .. string.format("%gh", per_day_h) .. ' = ' .. fmt_h(hours_avail) .. ':</div>')
           out('<table><tr><th class="l"></th><th>Per day</th>'
-            .. '<th>Per hour</th><th>Now (finished)</th></tr>')
+            .. '<th>Per hour</th><th>Now</th></tr>')
           local function pace_row(label, left, done_len)
             local need_hr = left / hours_avail * 3600          -- length per hour needed
             local now = (done_work > 0 and done_len > 0) and (done_len / done_work * 3600) or nil
@@ -1106,7 +1106,7 @@ details{margin-top:18px}summary{cursor:pointer;font-size:16px;font-weight:600;pa
           end
           pace_row("Source", left_src, done_src)
           pace_row("Film", left_film, done_film)
-          out('</table><div class="note">⚠ ×N = the pace needed is N times the pace of the finished scenes.</div>')
+          out('</table><div class="note">Now = the pace of the finished scenes. ⚠ ×N = the pace needed is N times it.</div>')
         end
       end
       if days then
