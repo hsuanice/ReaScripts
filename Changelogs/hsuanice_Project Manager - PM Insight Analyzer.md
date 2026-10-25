@@ -7,6 +7,13 @@ PM Insight Analyzer
 
 **Removed from ReaPack** (2026-10-15) while it is a work in progress; the script stays in the repository (`@noindex`) as a backup.
 
+## 26.1025.2139pre1
+
+- New: Work Log mode (no Scene Cut track) is now the same kind of HTML report instead of the gfx window: overview (Total Work - was 'Year total work' -, items, days, daily average, projects), a year filter, By Month, By Project (click a project for its tasks, work types and sessions), By Work Type / Task / Day.
+- Change: work type and task names that differ only in upper / lower case are merged (Scene / scene, Export / EXPORT); the older Chinese name for mic select counts as mic select; a task's save-copy suffix (Conform_001) is ignored.
+- Fix: duplicate work log items (same day, position and length - a copy of a project synced to the Work Log too) are counted once; the report says how many were skipped.
+- Fix: the work type is read from the last part of the item name - items with a stacked project prefix showed a project name as their work type.
+
 ## 26.1025.1501pre1
 
 - Change: a scene is finished when every stage is done (its items muted in EDL / Mic Selected / Edited; skipped stages count). The Scene Cut mute no longer means finished (it is used as a temporary marker); only a project without stage folders still uses it. Efficiency, remaining work and pace follow this.

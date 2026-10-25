@@ -1,12 +1,13 @@
 --[[
 @description Project Manager - PM Insight Analyzer: work-time analysis of PM Timer logs (work in progress)
-@version 26.1025.1501pre1
+@version 26.1025.2139pre1
 @author hsuanice
 @noindex  (kept in the repository as a backup; not offered on ReaPack while it is a work in progress)
 @changelog
-  - Change: a scene is finished when every stage is done (its items muted in EDL / Mic Selected / Edited; skipped stages count). The Scene Cut mute no longer means finished (it is used as a temporary marker); only a project without stage folders still uses it. Efficiency, remaining work and pace follow this.
-  - Add: Daily progress (open, below the overview) - per day the scenes finished, their film and source, the stages finished (with scenes) and the work hours. A stage counts on the last day its work type was logged on the scene; a scene on the latest of its stage days.
-  - Change: Plan's source per day per stage reads like the pace table (12m 25s instead of 00:12:24:21).
+  - New: Work Log mode (no Scene Cut track) is now the same kind of HTML report instead of the gfx window: overview (Total Work - was 'Year total work' -, items, days, daily average, projects), a year filter, By Month, By Project (click a project for its tasks, work types and sessions), By Work Type / Task / Day.
+  - Change: work type and task names that differ only in upper / lower case are merged (Scene / scene, Export / EXPORT); the older Chinese name for mic select counts as mic select; a task's save-copy suffix (Conform_001) is ignored.
+  - Fix: duplicate work log items (same day, position and length - a copy of a project synced to the Work Log too) are counted once; the report says how many were skipped.
+  - Fix: the work type is read from the last part of the item name - items with a stacked project prefix showed a project name as their work type.
 @about
   Read-only analysis script. Auto-detects project type:
 
@@ -18,8 +19,10 @@
     Tracks required: "Scene Cut", "EDL" (folder).
 
   Work Log Mode (no Scene Cut track):
-    Parses item names ("Proj | Scene | Module") to compute durations
-    grouped by scene and module. No EDL data required.
+    Parses item names ("Proj | Scene | Module") to compute durations by
+    project, task, work type, month and day, as the same kind of HTML report
+    (with a year filter). Work type names differing only in case are merged;
+    duplicate items (same day, position and length) are counted once.
 
   Selected scenes: select one or more items on the Scene Cut track before running to
   report only those scenes - their work time, film length and Source / Mic Selected /
@@ -38,9 +41,6 @@ local MIC_SELECTED_FOLDER = "Mic Selected"   -- same folder names as PM Timer
 local EDITED_FOLDER       = "Edited"
 local DURATION_LOG_NAME = "DurationOnly_Log"
 local DATE_PAT          = "^%d%d%d%d%-%d%d%-%d%d$"
-local WIN_W, WIN_H      = 1100, 760
-local LINE_H            = 18
-local SECTION_GAP       = 8
 
 -- ── Helpers ────────────────────────────────────────────────────────────────
 
@@ -128,8 +128,10 @@ local function parse_wl_item_name(name)
     table.insert(parts, s:sub(1, a - 1))
     s = s:sub(b + 1)
   end
+  -- The work type is always the last part (older items can carry a stacked
+  -- prefix: "Proj A | Proj B | ... | module")
   if #parts >= 3 then
-    return { scene = parts[2], module = parts[3] }
+    return { scene = parts[2], module = parts[#parts] }
   elseif #parts == 2 then
     return { scene = nil, module = parts[2] }
   end
@@ -166,17 +168,6 @@ local function parse_note_fields(note)
   return info
 end
 
-local function new_project_bucket(name)
-  return {
-    name = name,
-    total_sec = 0,
-    task_totals = {},
-    module_totals = {},
-    day_totals = {},
-    items = {},
-  }
-end
-
 local function sort_keys_by_value(tbl)
   local keys = {}
   for k in pairs(tbl) do table.insert(keys, k) end
@@ -189,22 +180,140 @@ local function sort_keys_by_value(tbl)
   return keys
 end
 
-local function collect_work_log_data()
-  local data = {
-    grand_total = 0,
-    daily_totals = {},
-    task_totals = {},
-    module_totals = {},
-    project_data = {},
-    project_order = {},
-    item_count = 0,
-  }
+local REPORT_HEAD = [[<!doctype html><html><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PM Insight Report</title>
+<style>
+:root{--bg:#fafafa;--fg:#1d1d1f;--mut:#6e6e73;--line:#d2d2d7;--card:#fff;--head:#f0f0f3;--acc:#3b6fd8}
+@media (prefers-color-scheme:dark){:root{--bg:#1b1b1d;--fg:#e8e8ea;--mut:#9a9aa0;--line:#3a3a3f;--card:#242427;--head:#2d2d31;--acc:#7da2ff}}
+body{margin:0;padding:24px 16px 80px;background:var(--bg);color:var(--fg);font:14px/1.45 -apple-system,"Segoe UI",Helvetica,Arial,sans-serif}
+main{max-width:1200px;margin:0 auto}
+h1{font-size:22px;margin:0 0 2px}h2{font-size:17px;margin:32px 0 10px;padding-bottom:6px;border-bottom:2px solid var(--line)}
+.sub{color:var(--mut);margin-bottom:20px}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:10px}
+.kv{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:10px 12px}
+.stages{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px;margin-top:10px}
+.stage{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:10px 12px}
+.stage h4{margin:0 0 6px;font-size:13px}.stage div{display:flex;justify-content:space-between;gap:8px;padding:2px 0}
+.stage div b{font-size:12px;color:var(--mut);font-weight:500}.stage div span{font:600 15px ui-monospace,Menlo,monospace}
+.kv b{display:block;font-size:12px;color:var(--mut);font-weight:500}.kv span{font:600 16px ui-monospace,Menlo,monospace}
+.wrap{overflow-x:auto}
+table{border-collapse:collapse;background:var(--card);border:1px solid var(--line);border-radius:8px;min-width:100%}
+th,td{padding:6px 10px;border-bottom:1px solid var(--line);text-align:right;white-space:nowrap}
+th{background:var(--head);font-size:12px;color:var(--mut);font-weight:600;position:sticky;top:0}
+td.l,th.l{text-align:left}td{font-family:ui-monospace,Menlo,monospace;font-size:13px}
+tr.total td{font-weight:700}tr.idle td{color:var(--mut)}
+a{color:var(--acc);text-decoration:none}a:hover{text-decoration:underline}
+.dot{display:inline-block;width:10px;height:10px;border-radius:3px;margin-right:6px;vertical-align:baseline}
+.scene{background:var(--card);border:1px solid var(--line);border-left:5px solid var(--acc);border-radius:8px;padding:12px 16px;margin:18px 0;scroll-margin-top:12px}
+.scene h3{margin:0 0 4px;font-size:16px}.scene .meta{color:var(--mut);font-family:ui-monospace,Menlo,monospace;font-size:13px;margin-bottom:10px}
+.scene table{border:none}.done{color:#2e9b55;font-weight:700}
+.note{color:var(--mut);font-size:12px;margin-top:6px}
+.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:12px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:12px 14px}
+.card h3{margin:0 0 8px;font-size:14px;color:var(--mut);font-weight:600}
+.row{display:flex;justify-content:space-between;gap:10px;padding:3px 0}
+.row b{font-weight:500;color:var(--mut)}.row span{font:600 15px ui-monospace,Menlo,monospace;text-align:right}
+.big{font:700 22px ui-monospace,Menlo,monospace}
+.bar{height:8px;border-radius:4px;background:var(--line);overflow:hidden;margin:4px 0 8px}
+.bar i{display:block;height:100%;background:var(--acc)}
+.ok{color:#2e9b55;font-weight:700}.warn{color:#d0731b;font-weight:700}
+.card table{width:100%;min-width:0;table-layout:fixed;border:none;background:none;margin-top:4px}
+.card th,.card td{padding:3px 4px;font-size:12px}.card td:last-child,.card th{white-space:normal}
+.card th:first-child,.card td:first-child{width:22%}
+details{margin-top:18px}summary{cursor:pointer;font-size:16px;font-weight:600;padding:6px 0}
+.top{position:fixed;right:16px;bottom:16px;background:var(--card);border:1px solid var(--line);border-radius:20px;padding:6px 12px}
+</style></head><body><main>]]
 
+-- ── Report page (shared by both modes) ──────────────────────────────────────
+local function html_esc(v)
+  return (tostring(v):gsub("&", "&amp;"):gsub("<", "&lt;"):gsub(">", "&gt;"):gsub('"', "&quot;"))
+end
+
+-- Saves the page in the project folder as "<folder name> - PM Insight.html"
+-- (one report per folder, replaced on every run) and opens it in the browser.
+local function write_and_open_report(h)
+  local _, proj_path = r.EnumProjects(-1)
+  local dir = (proj_path or ""):match("^(.*)[/\\]")
+  if not dir or dir == "" then dir = r.GetProjectPath("") end
+  local sep  = r.GetOS():match("^Win") and "\\" or "/"
+  local base = dir:match("([^/\\]+)$") or "Session"
+  local name = base .. " - PM Insight.html"
+  local file = dir .. sep .. name
+
+  -- Remove reports from earlier versions: one per .rpp ("<project> - PM Insight.html")
+  -- and timestamped ones (insight_YYMMDD_HHMMSS.html)
+  local old_reports, k = {}, 0
+  while true do
+    local fn = r.EnumerateFiles(dir, k)
+    if not fn then break end
+    if fn ~= name and (fn:match(" %- PM Insight%.html$")
+        or fn:match("^insight_%d%d%d%d%d%d_%d%d%d%d%d%d%.html$")) then
+      old_reports[#old_reports + 1] = fn
+    end
+    k = k + 1
+  end
+  for _, fn in ipairs(old_reports) do os.remove(dir .. sep .. fn) end
+  local fh = io.open(file, "w")
+  if not fh then
+    r.ShowMessageBox("Cannot write the report:\n" .. file, "PM Insight Analyzer", 0)
+    return
+  end
+  fh:write(table.concat(h, "\n"))
+  fh:close()
+
+  if r.CF_ShellExecute then
+    r.CF_ShellExecute(file)
+  elseif sep == "\\" then
+    os.execute('start "" "' .. file .. '"')
+  else
+    os.execute('open "' .. file .. '"')
+  end
+  r.ShowConsoleMsg("PM Insight report saved:\n" .. file .. "\n")
+end
+
+-- ── Work Log Mode ───────────────────────────────────────────────────────────
+-- Work type names that mean the same thing (lowercase → name in the report).
+-- "\u{6311}mic" is the older Chinese name for mic select ("pick mic").
+local MODULE_ALIASES = { ["\u{6311}mic"] = "mic select" }
+-- Spelling used when names differ only in upper / lower case
+local KNOWN_TYPES = { "mic select", "editing", "denoise", "scene", "ME", "PAN", "ME+PAN", "check",
+  "conform", "picture cut", "subtitle", "aap", "pre-production", "wrap" }
+
+-- Picks one spelling per lowercase name: a known work type (use_known), else the
+-- most used one (lowercase wins a tie).
+local function canonical_names(values, use_known)
+  local known = {}
+  if use_known then for _, t in ipairs(KNOWN_TYPES) do known[t:lower()] = t end end
+  local counts = {}
+  for _, v in ipairs(values) do
+    local lk = v:lower()
+    counts[lk] = counts[lk] or {}
+    counts[lk][v] = (counts[lk][v] or 0) + 1
+  end
+  local pick = {}
+  for lk, spellings in pairs(counts) do
+    if known[lk] then pick[lk] = known[lk]
+    else
+      local best, bn = nil, -1
+      for s, n in pairs(spellings) do
+        if n > bn or (n == bn and (s == lk or (best ~= lk and s < best))) then best, bn = s, n end
+      end
+      pick[lk] = best
+    end
+  end
+  return pick
+end
+
+-- All work log items as records, names normalized, duplicates removed.
+-- A duplicate = same date track, position and length (e.g. a copy of a project
+-- also synced to the Work Log); the copy whose project has more items is kept.
+local function collect_work_log_records()
+  local raw = {}
   for i = 0, r.CountTracks(0) - 1 do
     local track = r.GetTrack(0, i)
     local _, track_name = r.GetTrackName(track)
-    local is_date_track = track_name:match(DATE_PAT)
-
+    local is_date_track = track_name:match(DATE_PAT) ~= nil
     for j = 0, r.CountTrackMediaItems(track) - 1 do
       local item = r.GetTrackMediaItem(track, j)
       local take = r.GetActiveTake(item)
@@ -213,250 +322,226 @@ local function collect_work_log_data()
       local dur = r.GetMediaItemInfo_Value(item, "D_LENGTH")
       if parsed and dur > 0 then
         local _, note = r.GetSetMediaItemInfo_String(item, "P_NOTES", "", false)
-        local note_info = parse_note_fields(note)
+        local ni  = parse_note_fields(note)
         local pos = r.GetMediaItemInfo_Value(item, "D_POSITION")
-        local start_tc = fmt_tc(pos)
-        local end_tc = fmt_tc(pos + dur)
-        local prefix, project, task = split_prefix(take_name)
-        if project == "" then project = "(unknown)" end
-        if task == "" then task = "(unknown)" end
+        local _, project, task = split_prefix(take_name)
         local module = (parsed.module ~= "") and parsed.module or "other"
-        local date_name = is_date_track and track_name or "(no date track)"
-
-        data.grand_total = data.grand_total + dur
-        data.item_count = data.item_count + 1
-        data.daily_totals[date_name] = (data.daily_totals[date_name] or 0) + dur
-        data.task_totals[task] = (data.task_totals[task] or 0) + dur
-        data.module_totals[module] = (data.module_totals[module] or 0) + dur
-
-        if not data.project_data[project] then
-          data.project_data[project] = new_project_bucket(project)
-          table.insert(data.project_order, project)
-        end
-
-        local pd = data.project_data[project]
-        pd.total_sec = pd.total_sec + dur
-        pd.task_totals[task] = (pd.task_totals[task] or 0) + dur
-        pd.module_totals[module] = (pd.module_totals[module] or 0) + dur
-        pd.day_totals[date_name] = (pd.day_totals[date_name] or 0) + dur
-        table.insert(pd.items, {
-          date = date_name,
-          start_tc = start_tc,
-          end_tc = end_tc,
-          length_sec = dur,
-          take_name = take_name,
-          note = note or "",
-          task = task,
-          module = module,
-          prefix = prefix,
-          project = project,
-          shots = note_info.shots,
-          src_cnt = note_info.src_cnt,
-          src_len = note_info.src_len,
-          scope = note_info.scope,
-          scenes = note_info.scenes,
-          reel_len = note_info.reel_len,
-          note_range = note_info.range,
-          note_length = note_info.length,
-        })
+        module = MODULE_ALIASES[module:lower()] or module
+        task = task:gsub("_%d+$", "")   -- "Conform_001": save-as copy of the project
+        local color = math.floor(r.GetMediaItemInfo_Value(item, "I_CUSTOMCOLOR"))
+        raw[#raw + 1] = {
+          track = i, pos = pos, len = dur,
+          date = is_date_track and track_name or "(no date)",
+          start_tc = fmt_tc(pos), end_tc = fmt_tc(pos + dur),
+          project = project ~= "" and project or "(unknown)",
+          task = task ~= "" and task or "(unknown)",
+          module = module, color = (color & 0x1000000 ~= 0) and color or nil,
+          shots = ni.shots, src_cnt = ni.src_cnt, src_len = ni.src_len,
+          scope = ni.scope, scenes = ni.scenes,
+        }
       end
     end
   end
 
-  for _, project in ipairs(data.project_order) do
-    table.sort(data.project_data[project].items, function(a, b)
-      if a.date == b.date then return a.start_tc < b.start_tc end
-      return a.date < b.date
-    end)
+  for _, field in ipairs({ "project", "task", "module" }) do
+    local vals = {}
+    for _, x in ipairs(raw) do vals[#vals + 1] = x[field] end
+    local pick = canonical_names(vals, field == "module")
+    for _, x in ipairs(raw) do x[field] = pick[x[field]:lower()] end
   end
 
-  table.sort(data.project_order, function(a, b)
-    local av = data.project_data[a].total_sec or 0
-    local bv = data.project_data[b].total_sec or 0
-    if av == bv then return a < b end
-    return av > bv
+  local proj_count = {}
+  for _, x in ipairs(raw) do proj_count[x.project] = (proj_count[x.project] or 0) + 1 end
+  local by_key, order = {}, {}
+  for _, x in ipairs(raw) do
+    local key = string.format("%d:%.1f:%.1f", x.track, x.pos, x.len)
+    local cur = by_key[key]
+    if not cur then by_key[key] = x; order[#order + 1] = key
+    elseif proj_count[x.project] > proj_count[cur.project] then by_key[key] = x end
+  end
+  local recs = {}
+  for _, key in ipairs(order) do recs[#recs + 1] = by_key[key] end
+  table.sort(recs, function(a, b)
+    if a.date ~= b.date then return a.date < b.date end
+    return a.pos < b.pos
   end)
-
-  return data
+  return recs, #raw - #recs
 end
 
-local function build_work_log_lines(data)
-  local lines = {}
-  local function out(s) table.insert(lines, s) end
-
-  local wl_avg, wl_used, wl_all = trimmed_daily_avg(data.daily_totals, 0.1)
-  local daily_keys = sort_keys_by_value(data.daily_totals)
-  local project_keys = data.project_order
-
-  out("PM Insight Analyzer")
-  out("Work Log Report")
-  out(string.rep("=", 64))
-  out(string.format("Year total work: %s", fmt_dur(data.grand_total)))
-  out(string.format("Work items: %d", data.item_count))
-  out(string.format("Working days: %d", wl_all))
-  out(string.format("Avg daily work: %s", wl_all > 0 and (fmt_dur(wl_avg) .. string.format("  (mid %d days)", wl_used)) or "N/A"))
-  out("")
-
-  out("By Project")
-  out(string.rep("-", 64))
-  if #project_keys == 0 then
-    out("(no work log items found)")
-  else
-    for _, pname in ipairs(project_keys) do
-      local pd = data.project_data[pname]
-      out(string.format("%s  [%s]", pname, fmt_dur(pd.total_sec)))
-      out(string.format("  Tasks: %d  Modules: %d  Days: %d  Items: %d", #sort_keys_by_value(pd.task_totals), #sort_keys_by_value(pd.module_totals), #sort_keys_by_value(pd.day_totals), #pd.items))
-      local task_keys = sort_keys_by_value(pd.task_totals)
-      if #task_keys > 0 then
-        out("  Task totals:")
-        for _, task in ipairs(task_keys) do
-          out(string.format("    %-18s %s", task .. ":", fmt_dur(pd.task_totals[task])))
-        end
-      end
-      local module_keys = sort_keys_by_value(pd.module_totals)
-      if #module_keys > 0 then
-        out("  Module totals:")
-        for _, mod in ipairs(module_keys) do
-          out(string.format("    %-18s %s", mod .. ":", fmt_dur(pd.module_totals[mod])))
-        end
-      end
-      out("  Sessions:")
-      for _, item in ipairs(pd.items) do
-        local note_bits = {}
-        if item.scope ~= "" then table.insert(note_bits, "Scope " .. item.scope) end
-        if item.scenes ~= "" then table.insert(note_bits, "Scenes " .. item.scenes) end
-        if item.shots ~= "" then table.insert(note_bits, "Shots " .. item.shots) end
-        if item.src_cnt ~= "" then table.insert(note_bits, "Src Cnt " .. item.src_cnt) end
-        if item.src_len ~= "" then table.insert(note_bits, "Src Len " .. item.src_len) end
-        local note_summary = (#note_bits > 0) and (" | " .. table.concat(note_bits, ", ")) or ""
-        out(string.format("    %s  %s-%s  %s  %s / %s%s",
-          item.date, item.start_tc, item.end_tc, fmt_dur(item.length_sec), item.task, item.module, note_summary))
-      end
-      out("")
+-- Writes one report section (all years or one year) for the given records.
+local function work_log_section(out, recs, sid)
+  local total, daily, months, projects, proj_order = 0, {}, {}, {}, {}
+  local tasks, modules, mod_color = {}, {}, {}
+  for _, x in ipairs(recs) do
+    total = total + x.len
+    daily[x.date] = (daily[x.date] or 0) + x.len
+    local ym = x.date:match("^(%d%d%d%d%-%d%d)") or "(no date)"
+    local m = months[ym]
+    if not m then m = { total = 0, days = {}, items = 0 }; months[ym] = m end
+    m.total, m.items, m.days[x.date] = m.total + x.len, m.items + 1, true
+    local p = projects[x.project]
+    if not p then
+      p = { total = 0, days = {}, items = {}, tasks = {}, modules = {}, first = x.date, last = x.date }
+      projects[x.project] = p; proj_order[#proj_order + 1] = x.project
     end
+    p.total = p.total + x.len
+    p.days[x.date] = (p.days[x.date] or 0) + x.len
+    p.items[#p.items + 1] = x
+    p.tasks[x.task]     = (p.tasks[x.task] or 0) + x.len
+    p.modules[x.module] = (p.modules[x.module] or 0) + x.len
+    if x.date < p.first then p.first = x.date end
+    if x.date > p.last  then p.last  = x.date end
+    tasks[x.task]     = (tasks[x.task] or 0) + x.len
+    modules[x.module] = (modules[x.module] or 0) + x.len
+    if x.color and not mod_color[x.module] then mod_color[x.module] = x.color end
   end
+  table.sort(proj_order, function(a, b) return projects[a].total > projects[b].total end)
 
-  out("By Day")
-  out(string.rep("-", 64))
-  for _, day in ipairs(daily_keys) do
-    out(string.format("%s  %s", day, fmt_dur(data.daily_totals[day])))
+  local function count(t) local n = 0 for _ in pairs(t) do n = n + 1 end return n end
+  local function pct(a, b) return b > 0 and string.format("%d%%", math.floor(a / b * 100 + 0.5)) or "–" end
+  local function mod_label(m)
+    local c = mod_color[m]
+    if not c then return html_esc(m) end
+    local cr, cg, cb = r.ColorFromNative(c & 0xFFFFFF)
+    return string.format('<span class="dot" style="background:rgb(%d,%d,%d)"></span>%s', cr, cg, cb, html_esc(m))
   end
-
-  out("")
-  out("By Task")
-  out(string.rep("-", 64))
-  for _, task in ipairs(sort_keys_by_value(data.task_totals)) do
-    out(string.format("%s  %s", task, fmt_dur(data.task_totals[task])))
-  end
-
-  out("")
-  out("By Module")
-  out(string.rep("-", 64))
-  for _, mod in ipairs(sort_keys_by_value(data.module_totals)) do
-    out(string.format("%s  %s", mod, fmt_dur(data.module_totals[mod])))
-  end
-
-  return lines
-end
-
-local function show_console_report(lines)
-  r.ShowConsoleMsg("")
-  r.ShowConsoleMsg(table.concat(lines, "\n") .. "\n")
-end
-
-local function draw_wrapped_line(x, y, w, text)
-  gfx.x = x
-  gfx.y = y
-  gfx.drawstr(text, 0)
-end
-
-local WORK_LOG_GUI = nil
-
-local function render_work_log_gui(lines)
-  WORK_LOG_GUI = {
-    lines = lines,
-    scroll = 0,
-    line_count = #lines,
-  }
-
-  local function draw_work_log_gui()
-    if not WORK_LOG_GUI then return end
-    local line_count = WORK_LOG_GUI.line_count
-    local visible_lines = math.max(1, math.floor((WIN_H - 34) / LINE_H))
-    local max_scroll = math.max(0, line_count - visible_lines)
-    local scroll = WORK_LOG_GUI.scroll
-
-    gfx.set(0.10, 0.10, 0.11, 1)
-    gfx.rect(0, 0, WIN_W, WIN_H, 1)
-    gfx.set(0.22, 0.22, 0.25, 1)
-    gfx.rect(0, 0, WIN_W, 28, 1)
-    gfx.set(1, 1, 1, 1)
-    gfx.x, gfx.y = 12, 8
-    gfx.drawstr("Work Log Report")
-    gfx.x, gfx.y = WIN_W - 180, 8
-    gfx.drawstr(string.format("%d lines", line_count))
-
-    local y = 38
-    for i = scroll + 1, math.min(line_count, scroll + visible_lines) do
-      local line = WORK_LOG_GUI.lines[i]
-      if line == "" then
-        y = y + LINE_H - 4
-      else
-        if line:match("^By ") or line:match("^%-%-+") or line:match("^=+") then
-          gfx.set(0.85, 0.85, 0.92, 1)
-        elseif line:match("^%s%s%S") then
-          gfx.set(0.78, 0.78, 0.82, 1)
-        else
-          gfx.set(0.95, 0.95, 0.95, 1)
-        end
-        gfx.x, gfx.y = 12, y
-        gfx.drawstr(line)
-        y = y + LINE_H
-      end
+  local function totals_table(title, tbl, label_fn, open)
+    out('<details' .. (open and ' open' or '') .. '><summary>' .. title .. '</summary><div class="wrap"><table>')
+    out('<tr><th class="l">Name</th><th>Time</th><th>Share</th></tr>')
+    for _, k in ipairs(sort_keys_by_value(tbl)) do
+      out(string.format('<tr><td class="l">%s</td><td>%s</td><td>%s</td></tr>',
+        (label_fn or html_esc)(k), fmt_dur(tbl[k]), pct(tbl[k], total)))
     end
-
-    gfx.set(0.45, 0.45, 0.50, 1)
-    gfx.rect(WIN_W - 12, 28, 6, WIN_H - 40, 1)
-    if max_scroll > 0 then
-      local thumb_h = math.max(28, (WIN_H - 44) * visible_lines / line_count)
-      local thumb_y = 30 + (WIN_H - 44 - thumb_h) * (scroll / max_scroll)
-      gfx.set(0.85, 0.85, 0.95, 0.85)
-      gfx.rect(WIN_W - 12, thumb_y, 6, thumb_h, 1)
-    end
-
-    gfx.update()
+    out('</table></div></details>')
   end
 
-  local function loop_work_log_gui()
-    if not WORK_LOG_GUI then return end
-    if gfx.getchar() < 0 then
-      WORK_LOG_GUI = nil
-      return
-    end
+  local avg, used, ndays = trimmed_daily_avg(daily, 0.1)
+  out('<div class="grid">')
+  local function kv(k, v) out('<div class="kv"><b>' .. k .. '</b><span>' .. v .. '</span></div>') end
+  kv("Total Work", fmt_dur(total))
+  kv("Work Items", tostring(#recs))
+  kv("Working Days", tostring(ndays))
+  kv("Avg Daily Work", ndays > 0 and (fmt_dur(avg) .. string.format(" <small>(mid %d)</small>", used)) or "N/A")
+  kv("Projects", tostring(#proj_order))
+  out('</div>')
 
-    local wheel = gfx.mouse_wheel or 0
-    if wheel ~= 0 then
-      local visible_lines = math.max(1, math.floor((WIN_H - 34) / LINE_H))
-      local max_scroll = math.max(0, WORK_LOG_GUI.line_count - visible_lines)
-      WORK_LOG_GUI.scroll = math.max(0, math.min(max_scroll, WORK_LOG_GUI.scroll - math.floor(wheel / 120)))
-      gfx.mouse_wheel = 0
-    end
-
-    draw_work_log_gui()
-    r.defer(loop_work_log_gui)
+  -- By Month
+  local mkeys = {}
+  for k in pairs(months) do mkeys[#mkeys + 1] = k end
+  table.sort(mkeys)
+  out('<details open><summary>By Month</summary><div class="wrap"><table>')
+  out('<tr><th class="l">Month</th><th>Total</th><th>Days</th><th>Avg / Day</th><th>Items</th></tr>')
+  for _, k in ipairs(mkeys) do
+    local m, nd = months[k], count(months[k].days)
+    out(string.format('<tr><td class="l">%s</td><td>%s</td><td>%d</td><td>%s</td><td>%d</td></tr>',
+      k, fmt_dur(m.total), nd, fmt_dur(nd > 0 and m.total / nd or 0), m.items))
   end
+  out('</table></div></details>')
 
-  gfx.init("PM Insight Analyzer - Work Log", WIN_W, WIN_H, 0, 120, 120)
-  gfx.setfont(1, "Arial", 16)
-  draw_work_log_gui()
-  r.defer(loop_work_log_gui)
+  -- By Project
+  out('<details open><summary>By Project</summary><div class="wrap"><table>')
+  out('<tr><th class="l">Project</th><th>Total</th><th>Share</th><th>Days</th><th>Items</th>'
+    .. '<th class="l">First</th><th class="l">Last</th></tr>')
+  for n, pname in ipairs(proj_order) do
+    local p = projects[pname]
+    out(string.format('<tr><td class="l"><a href="#%s-p%d">%s</a></td><td>%s</td><td>%s</td><td>%d</td><td>%d</td>'
+      .. '<td class="l">%s</td><td class="l">%s</td></tr>', sid, n, html_esc(pname), fmt_dur(p.total),
+      pct(p.total, total), count(p.days), #p.items, p.first, p.last))
+  end
+  out('</table></div></details>')
+
+  -- Per project
+  out('<details><summary>Per Project</summary>')
+  for n, pname in ipairs(proj_order) do
+    local p = projects[pname]
+    out('<section class="scene" id="' .. sid .. '-p' .. n .. '">')
+    out('<h3>' .. html_esc(pname) .. '</h3>')
+    out('<div class="meta">' .. fmt_dur(p.total) .. ' · ' .. count(p.days) .. ' days · '
+      .. #p.items .. ' items · ' .. p.first .. ' – ' .. p.last .. '</div>')
+    out('<div class="wrap"><table><tr><th class="l">Task</th><th>Time</th><th>Share</th></tr>')
+    for _, k in ipairs(sort_keys_by_value(p.tasks)) do
+      out(string.format('<tr><td class="l">%s</td><td>%s</td><td>%s</td></tr>',
+        html_esc(k), fmt_dur(p.tasks[k]), pct(p.tasks[k], p.total)))
+    end
+    out('</table></div><div class="wrap" style="margin-top:8px"><table>'
+      .. '<tr><th class="l">Work Type</th><th>Time</th><th>Share</th></tr>')
+    for _, k in ipairs(sort_keys_by_value(p.modules)) do
+      out(string.format('<tr><td class="l">%s</td><td>%s</td><td>%s</td></tr>',
+        mod_label(k), fmt_dur(p.modules[k]), pct(p.modules[k], p.total)))
+    end
+    out('</table></div>')
+    out('<details><summary>Sessions (' .. #p.items .. ')</summary><div class="wrap"><table>')
+    out('<tr><th class="l">Date</th><th class="l">Time</th><th>Length</th><th class="l">Task</th>'
+      .. '<th class="l">Work Type</th><th>Shots</th><th>Src Cnt</th><th>Src Len</th><th class="l">Scope</th></tr>')
+    for _, x in ipairs(p.items) do
+      local scope = x.scope
+      if x.scenes ~= "" then scope = scope .. (scope ~= "" and " · " or "") .. x.scenes .. " scenes" end
+      out(string.format('<tr><td class="l">%s</td><td class="l">%s – %s</td><td>%s</td><td class="l">%s</td>'
+        .. '<td class="l">%s</td><td>%s</td><td>%s</td><td>%s</td><td class="l">%s</td></tr>',
+        x.date, x.start_tc, x.end_tc, fmt_dur(x.len), html_esc(x.task), mod_label(x.module),
+        html_esc(x.shots), html_esc(x.src_cnt), html_esc(x.src_len), html_esc(scope)))
+    end
+    out('</table></div></details></section>')
+  end
+  out('</details>')
+
+  totals_table("By Work Type", modules, mod_label, false)
+  totals_table("By Task", tasks, nil, false)
+
+  -- By Day (newest first)
+  local dkeys = {}
+  for k in pairs(daily) do dkeys[#dkeys + 1] = k end
+  table.sort(dkeys, function(a, b) return a > b end)
+  out('<details><summary>By Day</summary><div class="wrap"><table><tr><th class="l">Date</th><th>Total</th></tr>')
+  for _, k in ipairs(dkeys) do
+    out(string.format('<tr><td class="l">%s</td><td>%s</td></tr>', k, fmt_dur(daily[k])))
+  end
+  out('</table></div></details>')
 end
 
 local function analyze_work_log()
-  local data = collect_work_log_data()
-  local lines = build_work_log_lines(data)
-  show_console_report(lines)
-  render_work_log_gui(lines)
+  local recs, dups = collect_work_log_records()
+  local years, yset = {}, {}
+  for _, x in ipairs(recs) do
+    local y = x.date:match("^(%d%d%d%d)")
+    if y and not yset[y] then yset[y] = true; years[#years + 1] = y end
+  end
+  table.sort(years, function(a, b) return a > b end)
+
+  local h = {}
+  local function out(s) h[#h + 1] = s end
+  out(REPORT_HEAD)
+  out('<h1 id="top">PM Insight · Work Log</h1>')
+  local _, proj_path = r.EnumProjects(-1)
+  local pname = ((proj_path or ""):match("([^/\\]+)$") or ""):gsub("%.[Rr][Pp][Pp]$", "")
+  out('<div class="sub">' .. html_esc(pname) .. ' · ' .. os.date("%Y-%m-%d %H:%M") .. '</div>')
+  out('<div class="sub">Year: <select id="year"><option value="all">All</option>')
+  for _, y in ipairs(years) do out('<option value="' .. y .. '">' .. y .. '</option>') end
+  out('</select></div>')
+  if dups > 0 then
+    out(string.format('<div class="note">%d duplicate item%s skipped (same day, position and length - '
+      .. 'e.g. a copy of a project also synced to the Work Log).</div>', dups, dups == 1 and "" or "s"))
+  end
+  if #recs == 0 then out('<p>(no work log items found)</p>') end
+
+  out('<div class="yr" data-y="all">')
+  work_log_section(out, recs, "all")
+  out('</div>')
+  for _, y in ipairs(years) do
+    local sub = {}
+    for _, x in ipairs(recs) do if x.date:sub(1, 4) == y then sub[#sub + 1] = x end end
+    out('<div class="yr" data-y="' .. y .. '" style="display:none">')
+    work_log_section(out, sub, "y" .. y)
+    out('</div>')
+  end
+  out('<a class="top" href="#top">↑ Top</a></main>')
+  out([[<script>
+document.getElementById("year").addEventListener("change",function(e){
+  document.querySelectorAll(".yr").forEach(function(d){d.style.display=d.dataset.y===e.target.value?"":"none";});});
+document.querySelectorAll('a[href*="-p"]').forEach(function(a){a.addEventListener("click",function(){
+  var t=document.querySelector(a.getAttribute("href"));var d=t&&t.parentElement.closest("details");if(d)d.open=true;});});
+</script></body></html>]])
+  write_and_open_report(h)
 end
 local function analyze()
 
@@ -890,50 +975,7 @@ local function analyze()
   local h = {}
   local function out(s) h[#h + 1] = s end
 
-  out([[<!doctype html><html><head><meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>PM Insight Report</title>
-<style>
-:root{--bg:#fafafa;--fg:#1d1d1f;--mut:#6e6e73;--line:#d2d2d7;--card:#fff;--head:#f0f0f3;--acc:#3b6fd8}
-@media (prefers-color-scheme:dark){:root{--bg:#1b1b1d;--fg:#e8e8ea;--mut:#9a9aa0;--line:#3a3a3f;--card:#242427;--head:#2d2d31;--acc:#7da2ff}}
-body{margin:0;padding:24px 16px 80px;background:var(--bg);color:var(--fg);font:14px/1.45 -apple-system,"Segoe UI",Helvetica,Arial,sans-serif}
-main{max-width:1200px;margin:0 auto}
-h1{font-size:22px;margin:0 0 2px}h2{font-size:17px;margin:32px 0 10px;padding-bottom:6px;border-bottom:2px solid var(--line)}
-.sub{color:var(--mut);margin-bottom:20px}
-.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:10px}
-.kv{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:10px 12px}
-.stages{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px;margin-top:10px}
-.stage{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:10px 12px}
-.stage h4{margin:0 0 6px;font-size:13px}.stage div{display:flex;justify-content:space-between;gap:8px;padding:2px 0}
-.stage div b{font-size:12px;color:var(--mut);font-weight:500}.stage div span{font:600 15px ui-monospace,Menlo,monospace}
-.kv b{display:block;font-size:12px;color:var(--mut);font-weight:500}.kv span{font:600 16px ui-monospace,Menlo,monospace}
-.wrap{overflow-x:auto}
-table{border-collapse:collapse;background:var(--card);border:1px solid var(--line);border-radius:8px;min-width:100%}
-th,td{padding:6px 10px;border-bottom:1px solid var(--line);text-align:right;white-space:nowrap}
-th{background:var(--head);font-size:12px;color:var(--mut);font-weight:600;position:sticky;top:0}
-td.l,th.l{text-align:left}td{font-family:ui-monospace,Menlo,monospace;font-size:13px}
-tr.total td{font-weight:700}tr.idle td{color:var(--mut)}
-a{color:var(--acc);text-decoration:none}a:hover{text-decoration:underline}
-.dot{display:inline-block;width:10px;height:10px;border-radius:3px;margin-right:6px;vertical-align:baseline}
-.scene{background:var(--card);border:1px solid var(--line);border-left:5px solid var(--acc);border-radius:8px;padding:12px 16px;margin:18px 0;scroll-margin-top:12px}
-.scene h3{margin:0 0 4px;font-size:16px}.scene .meta{color:var(--mut);font-family:ui-monospace,Menlo,monospace;font-size:13px;margin-bottom:10px}
-.scene table{border:none}.done{color:#2e9b55;font-weight:700}
-.note{color:var(--mut);font-size:12px;margin-top:6px}
-.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:12px}
-.card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:12px 14px}
-.card h3{margin:0 0 8px;font-size:14px;color:var(--mut);font-weight:600}
-.row{display:flex;justify-content:space-between;gap:10px;padding:3px 0}
-.row b{font-weight:500;color:var(--mut)}.row span{font:600 15px ui-monospace,Menlo,monospace;text-align:right}
-.big{font:700 22px ui-monospace,Menlo,monospace}
-.bar{height:8px;border-radius:4px;background:var(--line);overflow:hidden;margin:4px 0 8px}
-.bar i{display:block;height:100%;background:var(--acc)}
-.ok{color:#2e9b55;font-weight:700}.warn{color:#d0731b;font-weight:700}
-.card table{width:100%;min-width:0;table-layout:fixed;border:none;background:none;margin-top:4px}
-.card th,.card td{padding:3px 4px;font-size:12px}.card td:last-child,.card th{white-space:normal}
-.card th:first-child,.card td:first-child{width:22%}
-details{margin-top:18px}summary{cursor:pointer;font-size:16px;font-weight:600;padding:6px 0}
-.top{position:fixed;right:16px;bottom:16px;background:var(--card);border:1px solid var(--line);border-radius:20px;padding:6px 12px}
-</style></head><body><main>]])
+  out(REPORT_HEAD)
   out('<h1 id="top">PM Insight Report</h1>')
   out('<div class="sub">' .. esc(proj_name) .. ' · ' .. os.date("%Y-%m-%d %H:%M") .. '</div>')
   if sel_mode then
@@ -1359,45 +1401,7 @@ details{margin-top:18px}summary{cursor:pointer;font-size:16px;font-weight:600;pa
     .. 'function(){var t=document.querySelector(a.getAttribute("href"));var d=t&&t.closest("details");if(d)d.open=true;});});</script>')
   out('</body></html>')
 
-  -- 8. Save next to the project file and open it in the browser ─────────────
-  --    One report per session folder (daily .rpp backups in the same folder
-  --    continue the same work), overwritten on every run.
-  local dir = (proj_path or ""):match("^(.*)[/\\]")
-  if not dir or dir == "" then dir = r.GetProjectPath("") end
-  local sep  = r.GetOS():match("^Win") and "\\" or "/"
-  local base = dir:match("([^/\\]+)$") or "Session"
-  local name = base .. " - PM Insight.html"
-  local file = dir .. sep .. name
-
-  -- Remove reports from earlier versions: one per .rpp ("<project> - PM Insight.html")
-  -- and timestamped ones (insight_YYMMDD_HHMMSS.html)
-  local old_reports, k = {}, 0
-  while true do
-    local fn = r.EnumerateFiles(dir, k)
-    if not fn then break end
-    if fn ~= name and (fn:match(" %- PM Insight%.html$")
-        or fn:match("^insight_%d%d%d%d%d%d_%d%d%d%d%d%d%.html$")) then
-      old_reports[#old_reports + 1] = fn
-    end
-    k = k + 1
-  end
-  for _, fn in ipairs(old_reports) do os.remove(dir .. sep .. fn) end
-  local fh = io.open(file, "w")
-  if not fh then
-    r.ShowMessageBox("Cannot write the report:\n" .. file, "PM Insight Analyzer", 0)
-    return
-  end
-  fh:write(table.concat(h, "\n"))
-  fh:close()
-
-  if r.CF_ShellExecute then
-    r.CF_ShellExecute(file)
-  elseif sep == "\\" then
-    os.execute('start "" "' .. file .. '"')
-  else
-    os.execute('open "' .. file .. '"')
-  end
-  r.ShowConsoleMsg("PM Insight report saved:\n" .. file .. "\n")
+  write_and_open_report(h)
 end
 
 analyze()
