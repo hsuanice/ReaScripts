@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<index version="1" name="hsuanice Scripts" commit="27789198905bb4da2f17df0a01bf52d6e0e05ff7">
+<index version="1" name="hsuanice Scripts" commit="6fdd6dc4f04005ad70e049cf0b46a9d45b274107">
   <category name="Conform">
     <reapack name="hsuanice_Conform List Browser - CLB.lua" type="script" desc="Conform List Browser - CLB: conform EDL / AAF / XML / OTIO / subtitle lists (GUI + Jump / Link / Load / Reveal)">
       <metadata>
@@ -1268,6 +1268,12 @@
         <changelog><![CDATA[- Fix: linking now goes one way per change - item / razor changes the script makes itself no longer count as user changes, so they are not linked back (e.g. Option+double-click on the TCP to select all tracks: part D selected the items in the range, then part B shrank the track selection to the item tracks).
 - Correction: part D is ON (ENABLE_D = true). The 26.1023.1358pre1 note said it was turned off, but only the note changed; with this fix D is safe to keep on.]]></changelog>
         <source main="main">https://github.com/hsuanice/ReaScripts/raw/27789198905bb4da2f17df0a01bf52d6e0e05ff7/Selection/hsuanice_Toggle%20Track%20and%20Razor%20Item%20Link%20like%20Pro%20Tools.lua</source>
+      </version>
+      <version name="26.1025.1209" author="hsuanice" time="2026-10-25T04:10:16Z">
+        <changelog><![CDATA[- Fix: linking now goes one way per change - item / razor changes the script makes itself no longer count as user changes, so they are not linked back (e.g. Option+double-click on the TCP to select all tracks: part D selected the items in the range, then part B shrank the track selection to the item tracks).
+- Correction: part D is ON (ENABLE_D = true). The 26.1023.1358pre1 note said it was turned off, but only the note changed; with this fix D is safe to keep on.
+- Release: tested in REAPER 7.82.]]></changelog>
+        <source main="main">https://github.com/hsuanice/ReaScripts/raw/6fdd6dc4f04005ad70e049cf0b46a9d45b274107/Selection/hsuanice_Toggle%20Track%20and%20Razor%20Item%20Link%20like%20Pro%20Tools.lua</source>
       </version>
     </reapack>
   </category>
