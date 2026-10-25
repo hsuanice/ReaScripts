@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<index version="1" name="hsuanice Scripts" commit="865aff8a8c19cf5dbb6c5d6623fd9afa24a56c9c">
+<index version="1" name="hsuanice Scripts" commit="27789198905bb4da2f17df0a01bf52d6e0e05ff7">
   <category name="Conform">
     <reapack name="hsuanice_Conform List Browser - CLB.lua" type="script" desc="Conform List Browser - CLB: conform EDL / AAF / XML / OTIO / subtitle lists (GUI + Jump / Link / Load / Reveal)">
       <metadata>
@@ -1263,6 +1263,11 @@
       <version name="26.1023.1358pre1" author="hsuanice" time="2026-10-23T06:03:55Z">
         <changelog><![CDATA[- Change: part D (sync items when the Razor area or track selection changes) is now off by default (ENABLE_D = false): with D on, linking track selection to items also triggered the item-to-track direction, which cleared the intended selection.]]></changelog>
         <source main="main">https://github.com/hsuanice/ReaScripts/raw/bfdc5e66adf455e1df05b82969a3ca4064bd4c8d/Selection/hsuanice_Toggle%20Track%20and%20Razor%20Item%20Link%20like%20Pro%20Tools.lua</source>
+      </version>
+      <version name="26.1025.1206pre1" author="hsuanice" time="2026-10-25T04:06:25Z">
+        <changelog><![CDATA[- Fix: linking now goes one way per change - item / razor changes the script makes itself no longer count as user changes, so they are not linked back (e.g. Option+double-click on the TCP to select all tracks: part D selected the items in the range, then part B shrank the track selection to the item tracks).
+- Correction: part D is ON (ENABLE_D = true). The 26.1023.1358pre1 note said it was turned off, but only the note changed; with this fix D is safe to keep on.]]></changelog>
+        <source main="main">https://github.com/hsuanice/ReaScripts/raw/27789198905bb4da2f17df0a01bf52d6e0e05ff7/Selection/hsuanice_Toggle%20Track%20and%20Razor%20Item%20Link%20like%20Pro%20Tools.lua</source>
       </version>
     </reapack>
   </category>
