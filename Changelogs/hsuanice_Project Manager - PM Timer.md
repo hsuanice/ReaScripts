@@ -7,6 +7,10 @@ PM Timer - Scene-aware Work Timer
 
 **Removed from ReaPack** (2026-10-15) together with PM Insight Analyzer; the script stays in the repository (`@noindex`) as a backup.
 
+## 26.1026.2333pre1
+
+- Change: the original source folder is now called ISO; a project whose folder is still called EDL keeps working (Src Len, Src Cnt and the project-scope note read 'ISO', else 'EDL').
+
 ## 26.1025.1402
 
 - Add: target box at the top right - click to set the target work hours, the delivery date and the work hours per day (default 5; saved in the project; PM Insight Analyzer plans with them). Shows the days to delivery and the hours left of the target (live while the timer runs), e.g. 'Due 11-02 · 8d · 45.6h left'.

@@ -1,12 +1,10 @@
 --[[
 @description Project Manager - PM Timer: scene-aware work timer
-@version 26.1025.1402
+@version 26.1026.2333pre1
 @author hsuanice
 @noindex  (kept in the repository as a backup; Project Manager is not offered on ReaPack for now)
 @changelog
-  - Add: target box at the top right - click to set the target work hours, the delivery date and the work hours per day (default 5; saved in the project; PM Insight Analyzer plans with them). Shows the days to delivery and the hours left of the target (live while the timer runs), e.g. 'Due 11-02 · 8d · 45.6h left'.
-  - Change: compact buttons (26 px instead of 40 px high, smaller font) and a lower window, so the whole timer fits in a short dock.
-  - Release: tested in REAPER 7.82.
+  - Change: the original source folder is now called ISO; a project whose folder is still called EDL keeps working (Src Len, Src Cnt and the project-scope note read 'ISO', else 'EDL').
 @about
   Scene-aware toggle timer for the hsuanice PM system.
   Uses gfx (no ReaImGui). 1-second display refresh via defer + time_precise.
@@ -71,7 +69,8 @@ local AAP_GENERAL_TYPES   = { "pre-production", "wrap", "custom" }   -- used whe
 local AAP_FOLDER_DEFAULT_TYPE = "aap"
 local DATE_PAT            = "^%d%d%d%d%-%d%d%-%d%d$"  -- matches YYYY-MM-DD
 local HEARTBEAT_INTERVAL  = 60   -- seconds between silent D_LENGTH updates
-local EDL_FOLDER_NAME     = "EDL"
+-- Original (ISO) source folder: "ISO"; older projects use "EDL" (fallback)
+local ISO_FOLDER_NAMES    = { "ISO", "EDL" }
 -- Later stages of the dialog source, after Mic Select and after Editing
 -- (scene note lines "Sel Len" / "Edit Len"; only when the folder exists)
 local MIC_SELECTED_FOLDER = "Mic Selected"
@@ -385,6 +384,14 @@ local function get_track_by_name(name)
     if tname == name then return t end
   end
   return nil
+end
+
+-- Name of the ISO source folder in this project: "ISO", else the older "EDL".
+local function iso_folder_name()
+  for _, name in ipairs(ISO_FOLDER_NAMES) do
+    if get_track_by_name(name) then return name end
+  end
+  return ISO_FOLDER_NAMES[1]
 end
 
 -- Returns an array of all direct child tracks inside a named folder track.
@@ -986,8 +993,8 @@ end
 --   Src Len  : <duration>
 --
 -- shots   : Picture Cut items overlapping the scene range
--- src_cnt : EDL folder items attributed to the scene (P_EXT:SCENE_ID, else same item group)
--- src_len : total D_LENGTH of the attributed EDL items (seconds)
+-- src_cnt : ISO (or older EDL) folder items attributed to the scene (P_EXT:SCENE_ID, else same item group)
+-- src_len : total D_LENGTH of the attributed ISO items (seconds)
 -- sel_len / edit_len : source left in the "Mic Selected" / "Edited" folders
 --           (nil when the folder does not exist). An item in the scene's item
 --           group counts in full; an item not grouped with any scene counts
@@ -1017,10 +1024,10 @@ local function compute_scene_metadata(scene_item)
     end
   end
 
-  -- src_cnt / src_len: EDL items attributed to this scene
+  -- src_cnt / src_len: ISO items attributed to this scene
   local src_cnt = 0
   local src_len = 0
-  for _, t in ipairs(get_folder_children(EDL_FOLDER_NAME)) do
+  for _, t in ipairs(get_folder_children(iso_folder_name())) do
     for i = 0, r.CountTrackMediaItems(t) - 1 do
       local item  = r.GetTrackMediaItem(t, i)
       local ilen  = r.GetMediaItemInfo_Value(item, "D_LENGTH")
@@ -1399,7 +1406,7 @@ local function build_work_item_note(scene_item)
   return note or ""
 end
 
--- Computes project-scope metadata (all scenes, all EDL, all shots) for the
+-- Computes project-scope metadata (all scenes, all ISO source, all shots) for the
 -- note of a Project-scope work item (no scene selected).
 local function build_project_scope_note()
   -- Reel length & scene count: sum of all Scene Cut items
@@ -1421,10 +1428,10 @@ local function build_project_scope_note()
     shots = r.CountTrackMediaItems(pic_track)
   end
 
-  -- EDL source: all items across all EDL folder children
+  -- ISO source: all items across all ISO folder children
   local src_cnt = 0
   local src_len = 0
-  for _, t in ipairs(get_folder_children(EDL_FOLDER_NAME)) do
+  for _, t in ipairs(get_folder_children(iso_folder_name())) do
     for i = 0, r.CountTrackMediaItems(t) - 1 do
       local item = r.GetTrackMediaItem(t, i)
       src_cnt = src_cnt + 1
