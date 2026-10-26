@@ -1,10 +1,11 @@
 --[[
 @description Fade Tool - Crossfade in Razor (fit one cut to the razor area, or crossfade every cut inside it)
-@version 26.1026.1230pre1
+@version 26.1026.1232
 @author hsuanice
 @noindex
 @changelog
   - Add: a razor area inside an item with no neighbour on either side fades in from the item start to the area start and fades out from the area end to the item end (as AZ's Fade tool). An item with a neighbour still gets its nearest cut pulled into the area.
+  - Release: tested in REAPER 7.82.
 @about
   Works only on razor edit areas (tracks and time range of each area). Never opens a window
   unless something had to be skipped.

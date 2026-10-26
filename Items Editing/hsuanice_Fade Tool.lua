@@ -1,6 +1,6 @@
 --[[
 @description Fade Tool - frame-grid fades and crossfades by razor, time selection, mouse or edit cursor (Smart Fade, Crossfade in Razor, Scene Cut to Razor, Settings)
-@version 26.1026.1230pre1
+@version 26.1026.1232
 @author hsuanice
 @metapackage
 @provides
@@ -10,6 +10,7 @@
   [main] hsuanice_Fade Tool - Settings.lua
 @changelog
   - Add: a razor area inside an item with no neighbour on either side fades in from the item start to the area start and fades out from the area end to the item end (as AZ's Fade tool). An item with a neighbour still gets its nearest cut pulled into the area.
+  - Release: tested in REAPER 7.82.
 @about
   # Fade Tool
 

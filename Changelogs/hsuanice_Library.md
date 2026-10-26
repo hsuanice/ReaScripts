@@ -1,5 +1,9 @@
 # hsuanice_Library.lua — Changelog
 
+## 26.1026.1232
+
+- Update: hsuanice_Fade Tool Core.lua (razor inside an item: fade in and out).
+
 ## 26.1026.1230pre1
 
 - Update: hsuanice_Fade Tool Core.lua (razor inside an item: fade in and out).
