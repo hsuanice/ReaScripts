@@ -7,6 +7,10 @@ PM Insight Analyzer
 
 **Removed from ReaPack** (2026-10-15) while it is a work in progress; the script stays in the repository (`@noindex`) as a backup.
 
+## 26.1026.2300pre1
+
+- Change: a stage with no items, and no items in any later stage, now counts as done when the scene is muted on Scene Cut - a scene without dialogue no longer stays unfinished.
+
 ## 26.1026.2251pre1
 
 - Change: Completion shows two percentages - Film (film of the scenes muted on Scene Cut / all film) and Source (EDL source of the finished scenes, every stage done / all source) - each with done / total and a bar, plus Scenes marked done and Scenes finished.

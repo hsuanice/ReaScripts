@@ -1,10 +1,10 @@
 --[[
 @description Project Manager - PM Insight Analyzer: work-time analysis of PM Timer logs (work in progress)
-@version 26.1026.2251pre1
+@version 26.1026.2300pre1
 @author hsuanice
 @noindex  (kept in the repository as a backup; not offered on ReaPack while it is a work in progress)
 @changelog
-  - Change: Completion shows two percentages - Film (film of the scenes muted on Scene Cut / all film) and Source (EDL source of the finished scenes, every stage done / all source) - each with done / total and a bar, plus Scenes marked done and Scenes finished.
+  - Change: a stage with no items, and no items in any later stage, now counts as done when the scene is muted on Scene Cut - a scene without dialogue no longer stays unfinished.
 @about
   Read-only analysis script. Auto-detects project type:
 
@@ -764,7 +764,9 @@ local function analyze()
   end
   -- "done" = the scene has items in that stage folder and all of them are muted. A stage with
   -- no items is skipped (done) when a later stage already has items for the scene
-  -- (e.g. EDL -> Edited directly, Mic Selected left empty); otherwise it is not done yet.
+  -- (e.g. EDL -> Edited directly, Mic Selected left empty), or when nothing later has items
+  -- and the scene is muted on Scene Cut (a scene without dialogue - user 26.1026);
+  -- otherwise it is not done yet.
   local function stage_done(sc, key)
     local st = sc.stage[key]
     if st and st.n > 0 then return st.open == 0 end
@@ -776,7 +778,7 @@ local function analyze()
       end
       if stg.key == key then later = true end
     end
-    return false
+    return sc.muted == true
   end
 
   -- A scene is finished when every stage is done (user rule 26.1025: the Scene Cut mute is
