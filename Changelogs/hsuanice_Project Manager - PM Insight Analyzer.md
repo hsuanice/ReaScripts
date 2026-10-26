@@ -7,6 +7,10 @@ PM Insight Analyzer
 
 **Removed from ReaPack** (2026-10-15) while it is a work in progress; the script stays in the repository (`@noindex`) as a backup.
 
+## 26.1026.2153pre1
+
+- Change: Completion and Work time are one card again. '% done' is now the film of the finished scenes / all film (no time estimate), with Film done, Source done and Scenes done of the total, then the work time and daily figures. Work time no longer shows estimated hours left / total.
+
 ## 26.1026.2118pre1
 
 - Change: Overview starts with a Completion card - '% done' with a bar, then Film left, Source left (EDL) and Scenes left, each of the total. The hours (done, Left (est.), Total (est.), daily figures) are in the Work time card next to it. The overview cards are narrower so the five fit in one row (page up to 1400 px wide).

@@ -1,10 +1,10 @@
 --[[
 @description Project Manager - PM Insight Analyzer: work-time analysis of PM Timer logs (work in progress)
-@version 26.1026.2118pre1
+@version 26.1026.2153pre1
 @author hsuanice
 @noindex  (kept in the repository as a backup; not offered on ReaPack while it is a work in progress)
 @changelog
-  - Change: Overview starts with a Completion card - '% done' with a bar, then Film left, Source left (EDL) and Scenes left, each of the total. The hours (done, Left (est.), Total (est.), daily figures) are in the Work time card next to it. The overview cards are narrower so the five fit in one row (page up to 1400 px wide).
+  - Change: Completion and Work time are one card again. '% done' is now the film of the finished scenes / all film (no time estimate), with Film done, Source done and Scenes done of the total, then the work time and daily figures. Work time no longer shows estimated hours left / total.
 @about
   Read-only analysis script. Auto-detects project type:
 
@@ -206,7 +206,7 @@ a{color:var(--acc);text-decoration:none}a:hover{text-decoration:underline}
 .scene h3{margin:0 0 4px;font-size:16px}.scene .meta{color:var(--mut);font-family:ui-monospace,Menlo,monospace;font-size:13px;margin-bottom:10px}
 .scene table{border:none}.done{color:#2e9b55;font-weight:700}
 .note{color:var(--mut);font-size:12px;margin-top:6px}
-.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:12px}
+.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:12px}
 .card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:12px 14px}
 .card h3{margin:0 0 8px;font-size:14px;color:var(--mut);font-weight:600}
 .row{display:flex;justify-content:space-between;gap:10px;padding:3px 0}
@@ -1038,39 +1038,28 @@ local function analyze()
 
   out('<h2>' .. (sel_mode and 'Selected Scenes' or 'Overview') .. '</h2><div class="cards">')
 
-  -- 1. Completion: work done / (work done + estimated work left), by finished scenes when
-  --    there is no estimate yet; then the film and EDL source of the scenes not finished
+  -- 1. Completion and work time in one card. % done = film of the finished scenes / all
+  --    film (no time estimate - user 26.1026: estimates are not reliable enough to lead)
   local work_total = sel_mode and project_scene_total_sec or grand_total
-  local film_all, film_left, src_all, src_left = 0, 0, 0, 0
+  local film_all, film_done, src_all, src_done = 0, 0, 0, 0
   for _, sc in ipairs(scenes) do
     if shown(sc) then
       film_all, src_all = film_all + sc.length_sec, src_all + sc.source_length_sec
-      if not sc.is_done then
-        film_left, src_left = film_left + sc.length_sec, src_left + sc.source_length_sec
+      if sc.is_done then
+        film_done, src_done = film_done + sc.length_sec, src_done + sc.source_length_sec
       end
     end
   end
-  local has_estimate = any_estimate and work_total + remaining_work > 0
-  local frac = has_estimate and work_total / (work_total + remaining_work)
-    or (n_scenes > 0 and n_finished / n_scenes or 0)
+  local frac = film_all > 0 and film_done / film_all or 0
   card("Completion")
   out('<div class="big">' .. math.floor(frac * 100 + 0.5) .. '% done</div>')
   bar(frac)
-  if not has_estimate then
-    out('<div class="note">By finished scenes - no work estimate yet (needs a finished stage).</div>')
-  end
-  row("Film left", fmt_dur(film_left) .. ' <small>/ ' .. fmt_dur(film_all) .. '</small>')
-  row("Source left", fmt_dur(src_left) .. ' <small>/ ' .. fmt_dur(src_all) .. '</small>')
-  row("Scenes left", string.format("%d / %d", n_scenes - n_finished, n_scenes))
-  out('</div>')
-
-  -- 2. Work time: done, estimated left and total, and the daily figures
-  card("Work time")
-  out('<div class="big">' .. fmt_h(work_total) .. '</div>')
-  if has_estimate then
-    row("Left (est.)", fmt_h(remaining_work))
-    row("Total (est.)", fmt_h(work_total + remaining_work))
-  end
+  row("Film done", fmt_dur(film_done) .. ' <small>/ ' .. fmt_dur(film_all) .. '</small>')
+  row("Source done", fmt_dur(src_done) .. ' <small>/ ' .. fmt_dur(src_all) .. '</small>')
+  row("Scenes done", string.format("%d / %d", n_finished, n_scenes))
+  out('<div class="note">Done = finished scenes (every stage done: items muted in EDL / Mic Selected / Edited).</div>')
+  out('<div style="border-top:1px solid var(--line);margin:8px 0 4px"></div>')
+  row("Work time", '<span class="big" style="font-size:18px">' .. fmt_h(work_total) .. '</span>')
   if not sel_mode then
     local cutoff = os.date("%Y-%m-%d", os.time() - 6 * 86400)
     local last7 = 0
@@ -1082,7 +1071,7 @@ local function analyze()
   end
   out('</div>')
 
-  -- 3. Efficiency from finished scenes only (Scene Cut item muted): their film / EDL source
+  -- 2. Efficiency from finished scenes only (Scene Cut item muted): their film / EDL source
   --    per hour of all the work logged on them (every work type). Scenes without logged work
   --    are left out (nothing to divide by).
   local done_n, done_film, done_src, done_work = 0, 0, 0, 0
@@ -1113,7 +1102,7 @@ local function analyze()
   end
   out('</div>')
 
-  -- 4. Progress by stage (computed above)
+  -- 3. Progress by stage (computed above)
   local per_stage = {}
   card("Progress")
   for _, si in ipairs(stage_info) do
@@ -1129,7 +1118,7 @@ local function analyze()
   if any_estimate then row("Estimated work left", '<span class="big">' .. fmt_h(remaining_work) .. '</span>') end
   out('</div>')
 
-  -- 5. Plan: target hours and delivery date (set in PM Timer, saved in the project)
+  -- 4. Plan: target hours and delivery date (set in PM Timer, saved in the project)
   if not sel_mode then
     local _, t_hours = r.GetProjExtState(0, "hsuanice_PM", "TARGET_HOURS")
     local _, due = r.GetProjExtState(0, "hsuanice_PM", "DUE_DATE")
