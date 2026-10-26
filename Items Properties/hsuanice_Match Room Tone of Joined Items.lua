@@ -1,11 +1,12 @@
 --[[
 @description Match Room Tone of Joined Items - level-match the background noise of touching / crossfaded items (take volume)
-@version 26.1026.1456pre1
+@version 26.1026.1501pre1
 @author hsuanice
 @changelog
   - Initial release: level-match the room tone of touching / crossfaded selected items by take volume; more than 12 dB off -> moved to a '<track> - RT mismatch' track; only groups fully in view.
   - Room tone is measured on the WHOLE source file (quietest 10 %), so movement in the trimmed pauses does not count; an item whose own part is more than 6 dB louder than its file's quietest is listed.
-  - Spectrum check: the room tone's 1/3-octave spectrum (63 Hz - 6.3 kHz, level removed) is compared with the group's median; a different room tone (generator, air conditioning, another room: one band > 8 dB or > 3 dB on average off) is not level-matched but moved to the mismatch track, with the band named (e.g. '+14 dB around 100 Hz'). Two items that differ are both listed and left alone. The reference is chosen among the matching items.
+  - Spectrum check: the room tone's 1/3-octave spectrum (63 Hz - 6.3 kHz, level removed) is compared with the group's median; a different room tone (generator, air conditioning, another room) is moved to the mismatch track with the band named.
+  - Progress window (gfx) while analyzing; Esc / close cancels with nothing changed; all changes applied together at the end.
 @about
   Makes the room tone of joined items the same level, so they can be glued and denoised in one
   pass (e.g. in RX) without the background jumping between takes.
@@ -30,7 +31,9 @@
     the way through measures far too loud and ends up there too.
   - The reference is chosen among the items whose room tone matches the majority.
   - Only groups fully inside the arrange view are processed (never changes what you cannot see).
-  - One undo point. A window only lists what was moved or skipped.
+  - A progress window (native gfx) shows the analysis; Esc or closing it cancels, and then
+    nothing is changed. All changes are applied together at the end: one undo point. A window
+    only lists what was moved or skipped.
 
   Take volume envelopes are not taken into account.
 
@@ -80,6 +83,18 @@ local function quiet_level(powers)
   return 10 * math.log(q, 10), 10 * math.log(loud / q, 10) >= SPREAD_DB
 end
 
+-- Progress (shown in a gfx window while analyzing): the analysis runs in a coroutine that
+-- yields every ~30 ms so the window can redraw; Esc / closing the window cancels.
+local PROG = { total = 0, done = 0, n = 0, i = 0, label = "", cancel = false, last = 0, restore = nil }
+local function tick(sec)
+  PROG.done = PROG.done + (sec or 0)
+  if coroutine.isyieldable() and r.time_precise() - PROG.last > 0.03 then
+    coroutine.yield()
+    PROG.last = r.time_precise()
+  end
+  return PROG.cancel
+end
+
 -- 1/3-octave bands from 63 Hz to 6.3 kHz
 local BANDS = {}
 for i = 0, 20 do
@@ -103,6 +118,7 @@ local function quiet_spectrum(acc, nch, times)
   for b = 1, #BANDS do acc_pow[b] = 0 end
   local bin_hz = ANALYSIS_SR / FFT_SIZE
   for _, t in ipairs(times) do
+    if tick() then break end
     raw.clear()
     r.GetAudioAccessorSamples(acc, ANALYSIS_SR, nch, t, FFT_SIZE, raw)
     for i = 0, FFT_SIZE - 1 do
@@ -150,6 +166,20 @@ local function room_tone(item)
   local item_s = saved.offs / rate                -- the item's part, in timeline seconds of the file
   local item_e = item_s + saved.len
 
+  -- the arrange is not redrawn while the item is opened up (this spans several defer cycles)
+  r.PreventUIRefresh(1)
+  local function restore()
+    r.SetMediaItemTakeInfo_Value(take, "D_STARTOFFS", saved.offs)
+    r.SetMediaItemInfo_Value(item, "D_LENGTH", saved.len)
+    r.SetMediaItemTakeInfo_Value(take, "D_VOL", saved.vol)
+    r.SetMediaItemInfo_Value(item, "D_FADEINLEN", saved.fin)
+    r.SetMediaItemInfo_Value(item, "D_FADEOUTLEN", saved.fout)
+    r.SetMediaItemInfo_Value(item, "D_FADEINLEN_AUTO", saved.fina)
+    r.SetMediaItemInfo_Value(item, "D_FADEOUTLEN_AUTO", saved.fouta)
+    r.PreventUIRefresh(-1)
+    PROG.restore = nil
+  end
+  PROG.restore = restore
   r.SetMediaItemTakeInfo_Value(take, "D_STARTOFFS", 0)
   r.SetMediaItemInfo_Value(item, "D_LENGTH", full_len)
   r.SetMediaItemTakeInfo_Value(take, "D_VOL", 1)
@@ -173,13 +203,14 @@ local function room_tone(item)
       if t >= item_s - 1e-9 and t + WINDOW_SEC <= item_e + 1e-9 then part[#part + 1] = p end
     end
     t = t + WINDOW_SEC
+    if tick(WINDOW_SEC) then break end
   end
   -- spectrum of the room tone: FFT windows (longer than the level windows) that stay at room
   -- tone level all the way through - every level window they cover is within SPEC_NEAR_DB of
   -- the quietest QUIET_SHARE's level - so no speech edge leaks in; not overlapping, spread over
   -- the file
   local spec
-  if #all >= 4 then
+  if #all >= 4 and not PROG.cancel then
     local sorted = {}
     for i = 1, #all do sorted[i] = all[i] end
     table.sort(sorted)
@@ -204,13 +235,8 @@ local function room_tone(item)
     if #quiet >= 3 then spec = quiet_spectrum(acc, nch, quiet) end
   end
   r.DestroyAudioAccessor(acc)
-  r.SetMediaItemTakeInfo_Value(take, "D_STARTOFFS", saved.offs)
-  r.SetMediaItemInfo_Value(item, "D_LENGTH", saved.len)
-  r.SetMediaItemTakeInfo_Value(take, "D_VOL", saved.vol)
-  r.SetMediaItemInfo_Value(item, "D_FADEINLEN", saved.fin)
-  r.SetMediaItemInfo_Value(item, "D_FADEOUTLEN", saved.fout)
-  r.SetMediaItemInfo_Value(item, "D_FADEINLEN_AUTO", saved.fina)
-  r.SetMediaItemInfo_Value(item, "D_FADEOUTLEN_AUTO", saved.fouta)
+  restore()
+  if PROG.cancel then return nil, "cancelled" end
 
   local full = quiet_level(all)
   if not full then return nil, "no audio to measure" end
@@ -276,10 +302,19 @@ local function mismatch_track(tr)
   return new
 end
 
-local function main()
-  local groups = build_groups()
-  if #groups == 0 then return {} end
-  local lines, moved, adjusted = {}, 0, 0
+-- Seconds of audio to analyze for an item (its whole source file)
+local function file_secs(item)
+  local take = r.GetActiveTake(item)
+  if not take or r.TakeIsMIDI(take) then return 0 end
+  local rate = r.GetMediaItemTakeInfo_Value(take, "D_PLAYRATE")
+  return r.GetMediaSourceLength(r.GetMediaItemTake_Source(take)) / ((rate > 0) and rate or 1)
+end
+
+-- Analyze every group (slow, yields for the progress window) and decide what to do; nothing is
+-- changed here. Returns lines (for the window), actions (applied by apply_actions) or nil when
+-- cancelled.
+local function analyze(groups)
+  local lines, actions = {}, {}
   local function note(info, tr, why)
     lines[#lines + 1] = string.format("%s @ %s: %s", track_name(tr), fmt_time(info.pos), why)
   end
@@ -287,6 +322,16 @@ local function main()
   for _, g in ipairs(groups) do
     local s0, e0 = g.items[1].pos, g.items[1].fin
     for _, info in ipairs(g.items) do s0, e0 = math.min(s0, info.pos), math.max(e0, info.fin) end
+    g.run = #g.items >= 2 and in_view(s0, e0)
+    g.s0, g.e0 = s0, e0
+    if g.run then
+      for _, info in ipairs(g.items) do PROG.total, PROG.n = PROG.total + file_secs(info.item), PROG.n + 1 end
+    end
+  end
+
+  for _, g in ipairs(groups) do
+    local s0, e0 = g.s0, g.e0
+    if PROG.cancel then return nil end
     if #g.items < 2 then
       -- a single item has nothing to match
     elseif not in_view(s0, e0) then
@@ -297,7 +342,10 @@ local function main()
       local ref, ref_any
       for _, info in ipairs(g.items) do
         local take = r.GetActiveTake(info.item)
+        PROG.i = PROG.i + 1
+        PROG.label = take and r.GetTakeName(take) or ""
         local m, why = room_tone(info.item)
+        if PROG.cancel then return nil end
         if m then
           info.rt, info.pauses = m.full, m.pauses
           if m.item and m.item - m.full > NOTE_DIFF_DB then
@@ -381,19 +429,15 @@ local function main()
             elseif r.GetMediaItemInfo_Value(info.item, "C_LOCK") % 2 == 1 then
               note(info, g.track, "locked item")
             elseif info.spec_off then
-              r.MoveMediaItemToTrack(info.item, mismatch_track(g.track))
-              moved = moved + 1
+              actions[#actions + 1] = { move = info.item, track = g.track }
               note(info, g.track, "different room tone: " .. info.spec_off .. " - moved to the mismatch track")
             else
               local diff = target - heard_db(info)
               if math.abs(diff) > MAX_CHANGE_DB then
-                r.MoveMediaItemToTrack(info.item, mismatch_track(g.track))
-                moved = moved + 1
+                actions[#actions + 1] = { move = info.item, track = g.track }
                 note(info, g.track, string.format("needs %+.1f dB - moved to the mismatch track", diff))
               elseif math.abs(diff) >= 0.05 then
-                local take = r.GetActiveTake(info.item)
-                r.SetMediaItemTakeInfo_Value(take, "D_VOL", info.take_vol * 10 ^ (diff / 20))
-                adjusted = adjusted + 1
+                actions[#actions + 1] = { take = r.GetActiveTake(info.item), vol = info.take_vol * 10 ^ (diff / 20) }
               end
             end
           end
@@ -401,19 +445,84 @@ local function main()
       end
     end
   end
-  return lines, moved, adjusted
+  return lines, actions
 end
 
-r.Undo_BeginBlock()
-r.PreventUIRefresh(1)
-local lines = main()
-r.PreventUIRefresh(-1)
-r.TrackList_AdjustWindows(false)
-r.UpdateArrange()
-r.Undo_EndBlock(TITLE, -1)
-if lines and #lines > 0 then
-  local out = {}
-  for i = 1, math.min(#lines, 25) do out[#out + 1] = lines[i] end
-  if #lines > 25 then out[#out + 1] = string.format("... and %d more", #lines - 25) end
-  r.MB(table.concat(out, "\n"), TITLE, 0)
+local function apply_actions(actions)
+  r.Undo_BeginBlock()
+  r.PreventUIRefresh(1)
+  for _, a in ipairs(actions) do
+    if a.move then r.MoveMediaItemToTrack(a.move, mismatch_track(a.track))
+    else r.SetMediaItemTakeInfo_Value(a.take, "D_VOL", a.vol) end
+  end
+  r.PreventUIRefresh(-1)
+  r.TrackList_AdjustWindows(false)
+  r.UpdateArrange()
+  r.Undo_EndBlock(TITLE, -1)
 end
+
+local function show_lines(lines)
+  if lines and #lines > 0 then
+    local out = {}
+    for i = 1, math.min(#lines, 25) do out[#out + 1] = lines[i] end
+    if #lines > 25 then out[#out + 1] = string.format("... and %d more", #lines - 25) end
+    r.MB(table.concat(out, "\n"), TITLE, 0)
+  end
+end
+
+-- Progress window (native gfx)
+local W, H = 460, 96
+local function draw()
+  gfx.set(0.16, 0.16, 0.17, 1); gfx.rect(0, 0, gfx.w, gfx.h, 1)
+  gfx.setfont(1, "Arial", 15)
+  gfx.set(0.9, 0.9, 0.9, 1)
+  gfx.x, gfx.y = 12, 10
+  gfx.drawstr(PROG.cancel and "Cancelling..." or string.format("Analyzing room tone %d / %d", PROG.i, PROG.n))
+  gfx.set(0.6, 0.6, 0.6, 1)
+  gfx.x, gfx.y = 12, 30
+  local label = PROG.label
+  while #label > 4 and gfx.measurestr(label) > gfx.w - 24 do label = label:sub(1, -5) .. "..." end
+  gfx.drawstr(label)
+  local frac = PROG.total > 0 and math.min(1, PROG.done / PROG.total) or 0
+  gfx.set(0.3, 0.3, 0.32, 1); gfx.rect(12, 52, gfx.w - 70, 12, 1)
+  gfx.set(0.30, 0.58, 0.92, 1); gfx.rect(12, 52, math.floor((gfx.w - 70) * frac), 12, 1)
+  gfx.set(0.9, 0.9, 0.9, 1)
+  gfx.x, gfx.y = gfx.w - 50, 50
+  gfx.drawstr(string.format("%d%%", math.floor(frac * 100)))
+  gfx.set(0.5, 0.5, 0.5, 1)
+  gfx.x, gfx.y = 12, 72
+  gfx.drawstr("Esc or close = cancel (nothing is changed)")
+  gfx.update()
+end
+
+local groups = build_groups()
+if #groups == 0 then return end
+local co = coroutine.create(analyze)
+local window = false
+r.atexit(function() if PROG.restore then PROG.restore() end end)   -- never leave an item opened up
+
+local function step()
+  if window then
+    local ch = gfx.getchar()
+    if ch == 27 or ch < 0 then PROG.cancel = true end
+  end
+  PROG.last = r.time_precise()
+  local ok, lines, actions = coroutine.resume(co, groups)
+  if not ok then
+    if PROG.restore then PROG.restore() end
+    if window then gfx.quit() end
+    error(lines)
+  end
+  if coroutine.status(co) == "dead" then
+    if window then gfx.quit() end
+    if lines and not PROG.cancel then
+      apply_actions(actions)
+      show_lines(lines)
+    end
+    return
+  end
+  if not window then gfx.init(TITLE, W, H); window = true end
+  draw()
+  r.defer(step)
+end
+step()

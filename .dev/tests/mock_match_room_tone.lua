@@ -6,6 +6,7 @@ local REPO = debug.getinfo(1, "S").source:match("^@(.*)/%.dev/tests/") or "."
 local SCRIPT = REPO .. "/Items Properties/hsuanice_Match Room Tone of Joined Items.lua"
 
 local tracks, mb, VIEW
+local queue, getchar_val, gfx_opened = {}, 0, false
 local function amp(dbv) return 10 ^ (dbv / 20) end
 local function new_track(name) local t = { name = name, items = {}, depth = 0 }; tracks[#tracks + 1] = t; return t end
 -- noise_db: room tone of the file; speech: fraction of the ITEM's part that is speech (-20 dB,
@@ -133,8 +134,24 @@ reaper = {
   format_timestr_pos = function(t) return string.format("%.2f", t) end,
   MB = function(m) mb = m end,
   Undo_BeginBlock = function() end, Undo_EndBlock = function() end,
-  PreventUIRefresh = function() end, UpdateArrange = function() end, TrackList_AdjustWindows = function() end,
+  PreventUIRefresh = function(n) ui_hold = (ui_hold or 0) + n end,
+  UpdateArrange = function() end, TrackList_AdjustWindows = function() end,
+  GetTakeName = function() return "take" end,
+  time_precise = function() return os.clock() end,
+  defer = function(f) queue[#queue + 1] = f end,
+  atexit = function() end,
 }
+gfx = { w = 460, h = 96, x = 0, y = 0,
+  init = function() gfx_opened = true end, quit = function() end, set = function() end, rect = function() end,
+  setfont = function() end, drawstr = function() end, update = function() end,
+  measurestr = function(t) return #t * 7, 14 end, getchar = function() return getchar_val end }
+-- run the script and its defer cycles until it is done
+local function run_script()
+  queue, gfx_opened = {}, false
+  dofile(SCRIPT)
+  local n = 0
+  while #queue > 0 and n < 100000 do n = n + 1; table.remove(queue, 1)() end
+end
 
 local fails, passes = 0, 0
 local function check(name, cond)
@@ -151,7 +168,7 @@ local C = new_item(t1, 13.5, 2.5, -66, 0.4)        -- overlaps B (crossfade)
 local D = new_item(t1, 16, 2, -80, 0.4)
 local E = new_item(t1, 30, 3, -40, 0.4)            -- separate group (single item)
 local t2 = new_track("DIA 2")
-dofile(SCRIPT)
+run_script()
 check("reference (longest) untouched", near_db(A.take.vol, 1, 0.01))
 check("B 6 dB louder -> take volume -6 dB", near_db(B.take.vol, amp(-6)))
 check("C 6 dB quieter (crossfaded) -> +6 dB", near_db(C.take.vol, amp(6)))
@@ -166,7 +183,7 @@ t1 = new_track("DIA")
 A = new_item(t1, 0, 10, -60, 0.5)
 B = new_item(t1, 10, 4, -60, 0.5, { vol = amp(6) })            -- item volume +6 dB
 C = new_item(t1, 14, 4, -63, 0.5, { take_vol = amp(-3) })      -- heard -66 dB
-dofile(SCRIPT)
+run_script()
 check("item volume +6 dB compensated by take volume -6 dB", near_db(B.take.vol, amp(-6)))
 check("existing -3 dB take volume (heard -66): +6 dB -> +3 dB", near_db(C.take.vol, amp(3)))
 check("no window when nothing was skipped", mb == nil)
@@ -178,7 +195,7 @@ t1 = new_track("DIA")
 A = new_item(t1, 0, 10, -60, 0.5)
 B = new_item(t1, 10, 4, -50, 1.0)
 C = new_item(t1, 14, 3, -57, 0)
-dofile(SCRIPT)
+run_script()
 check("speech all through -> moved", B.tr ~= t1 and near_db(B.take.vol, 1, 0.01))
 check("room tone only item matched (-3 dB)", near_db(C.take.vol, amp(-3)))
 setup()
@@ -186,7 +203,7 @@ t1 = new_track("DIA")
 A = new_item(t1, 0, 12, -50, 1.0)
 B = new_item(t1, 12, 8, -60, 0.5)
 C = new_item(t1, 20, 4, -54, 0.5)
-dofile(SCRIPT)
+run_script()
 check("reference = longest item with pauses", near_db(B.take.vol, 1, 0.01) and near_db(C.take.vol, amp(-6)) and A.tr ~= t1)
 
 -- 4. the WHOLE file is measured: movement in the item's pauses, clean room tone in the handles
@@ -195,7 +212,7 @@ t1 = new_track("DIA")
 A = new_item(t1, 0, 10, -60, 0.5)
 -- B plays 30..34 s of a 60 s file whose room tone is -60, but its own pauses are full of movement (-45)
 B = new_item(t1, 10, 4, -60, 0.6, { offs = 30, src_len = 60, motion = { { 30, 34, -45 } } })
-dofile(SCRIPT)
+run_script()
 check("movement in the pauses ignored: matched by the whole file (no change)", near_db(B.take.vol, 1, 0.05))
 check("listed: own part louder than the quietest of the file", mb and mb:find("louder than the quietest of its file", 1, true) ~= nil)
 check("item restored after the measurement", near_db(B.take.offs + 1, 31, 0.001) and math.abs(B.len - 4) < 1e-9
@@ -204,7 +221,7 @@ setup()
 t1 = new_track("DIA")
 A = new_item(t1, 0, 10, -60, 0.5)
 B = new_item(t1, 10, 4, -54, 0.5, { offs = 20, src_len = 50 })     -- clean file, 6 dB louder
-dofile(SCRIPT)
+run_script()
 check("longer clean file: -6 dB as before, nothing listed", near_db(B.take.vol, amp(-6)) and mb == nil)
 
 -- 5. never outside the view; unselected items are not part of a group; a gap splits groups
@@ -213,14 +230,14 @@ t1 = new_track("DIA")
 A = new_item(t1, 0, 10, -60, 0.5)
 B = new_item(t1, 10, 4, -54, 0.5)
 VIEW = { 0, 12 }
-dofile(SCRIPT)
+run_script()
 check("group partly outside the view: skipped, listed", near_db(B.take.vol, 1, 0.01) and mb and mb:find("not fully in view", 1, true))
 setup()
 t1 = new_track("DIA")
 A = new_item(t1, 0, 10, -60, 0.5)
 B = new_item(t1, 10, 4, -54, 0.5, { sel = false })
 C = new_item(t1, 14.5, 4, -54, 0.5)
-dofile(SCRIPT)
+run_script()
 check("unselected item untouched, gap = separate groups", near_db(B.take.vol, 1, 0.01) and near_db(C.take.vol, 1, 0.01))
 
 -- 6. stereo items, folder end kept on the new track
@@ -230,7 +247,7 @@ t1 = new_track("DIA"); t1.depth = -1
 A = new_item(t1, 0, 10, -60, 0.5, { ch = 2 })
 B = new_item(t1, 10, 4, -54, 0.5, { ch = 2 })
 D = new_item(t1, 14, 2, -85, 0.4, { ch = 2 })
-dofile(SCRIPT)
+run_script()
 check("stereo measured", near_db(B.take.vol, amp(-6)))
 check("folder end moves to the mismatch track", t1.depth == 0 and tracks[3].name == "DIA - RT mismatch" and tracks[3].depth == -1)
 
@@ -241,7 +258,7 @@ A = new_item(t1, 0, 10, -60, 0.5)
 B = new_item(t1, 10, 6, -57, 0.5)
 C = new_item(t1, 16, 5, -60, 0.5, { hum = { 100, -58 } })        -- generator hum at 100 Hz
 D = new_item(t1, 21, 6, -63, 0.5)
-dofile(SCRIPT)
+run_script()
 check("generator shot moved, not level-matched", C.tr ~= t1 and near_db(C.take.vol, 1, 0.01))
 check("window names the band", mb and mb:find("around 100 Hz", 1, true) ~= nil and mb:find("different room tone", 1, true) ~= nil)
 check("the others are still level-matched", near_db(B.take.vol, amp(-3), 0.3) and near_db(D.take.vol, amp(3), 0.3))
@@ -251,16 +268,30 @@ t1 = new_track("DIA")
 A = new_item(t1, 0, 6, -60, 0.5)
 B = new_item(t1, 6, 20, -60, 0.5, { hum = { 100, -58 } })
 C = new_item(t1, 26, 5, -54, 0.5)
-dofile(SCRIPT)
+run_script()
 check("longest item with a generator is not the reference", B.tr ~= t1 and near_db(C.take.vol, amp(-6), 0.3))
 -- only two items that differ: both listed, nothing changed
 setup()
 t1 = new_track("DIA")
 A = new_item(t1, 0, 10, -60, 0.5)
 B = new_item(t1, 10, 5, -54, 0.5, { hum = { 100, -56 } })
-dofile(SCRIPT)
+run_script()
 check("two different items: both listed, nothing changed", near_db(B.take.vol, 1, 0.01) and A.tr == t1 and B.tr == t1
   and mb and select(2, mb:gsub("the two items' room tone differs", "")) == 2)
+
+-- 8. progress window and cancel
+check("progress window opened for a long analysis", gfx_opened)
+check("UI refresh released after the analysis", (ui_hold or 0) == 0)
+setup()
+t1 = new_track("DIA")
+A = new_item(t1, 0, 10, -60, 0.5, { offs = 100, src_len = 400 })   -- long files: several cycles
+B = new_item(t1, 10, 4, -54, 0.5, { offs = 50, src_len = 400 })
+getchar_val = 27                                                     -- Esc
+run_script()
+getchar_val = 0
+check("cancel: nothing changed", near_db(B.take.vol, 1, 0.01) and B.tr == t1 and mb == nil)
+check("cancel: item restored, UI refresh released", math.abs(A.len - 10) < 1e-9 and math.abs(A.take.offs - 100) < 1e-9
+  and math.abs(B.len - 4) < 1e-9 and (ui_hold or 0) == 0)
 
 print(string.format("%d passed, %d failed", passes, fails))
 os.exit(fails == 0 and 0 or 1)
