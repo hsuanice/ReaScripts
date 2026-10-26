@@ -1,10 +1,10 @@
 --[[
 @description Project Manager - PM Insight Analyzer: work-time analysis of PM Timer logs (work in progress)
-@version 26.1026.2310pre1
+@version 26.1026.2314pre1
 @author hsuanice
 @noindex  (kept in the repository as a backup; not offered on ReaPack while it is a work in progress)
 @changelog
-  - New: Progress card has a Source / Film switch - each stage and Scenes finished as % of the EDL source or of the film of the scenes where it is done, with the scene count in brackets. Default Source; the choice is remembered in the browser.
+  - Change: Progress Source / Film switch now also switches the lengths - each stage shows 'source done' or 'film done' (done / total) and 'source left' or 'film left' with the estimated work - so the switch is visible even when both percentages happen to round the same.
 @about
   Read-only analysis script. Auto-detects project type:
 
@@ -1134,12 +1134,17 @@ local function analyze()
   --    Shown as % of the EDL source or of the film (Source / Film switch at the top of the
   --    card, remembered in the browser), with the scene count
   local per_stage = {}
-  local function by_mode(label, count, d_film, d_src)
+  -- est: estimated work hours left for a stage (shown in both modes), nil = no left row
+  local function by_mode(label, count, d_film, d_src, est)
     for _, m in ipairs({ { "source", d_src, tot_src }, { "film", d_film, tot_film } }) do
       local frac = m[3] > 0 and m[2] / m[3] or 0
       out('<div class="pm" data-m="' .. m[1] .. '">')
       row(label, string.format('%d%% <small>(%s)</small>', math.floor(frac * 100 + 0.5), count))
       bar(frac)
+      row("&nbsp;&nbsp;" .. m[1] .. " done", fmt_dur(m[2]) .. ' <small>/ ' .. fmt_dur(m[3]) .. '</small>')
+      if est ~= nil then
+        row("&nbsp;&nbsp;" .. m[1] .. " left · est. work", fmt_dur(m[3] - m[2]) .. " · " .. (est and fmt_h(est) or "N/A"))
+      end
       out('</div>')
     end
   end
@@ -1149,8 +1154,7 @@ local function analyze()
     local stg = si.stg
     per_stage[#per_stage + 1] = { stg = stg, rem_src = si.rem_src }
     by_mode(stg.label .. " <small>(" .. stg.src .. ")</small>", string.format("%d / %d", si.done, n_scenes),
-      si.done_film, si.done_src)
-    row("&nbsp;&nbsp;source left · est. work", fmt_dur(si.rem_src) .. " · " .. (si.est and fmt_h(si.est) or "N/A"))
+      si.done_film, si.done_src, si.est or false)
   end
   by_mode("Scenes finished", string.format("%d / %d", n_finished, n_scenes), fin_film, fin_src)
   out('<div class="note">Finished = every stage done (items muted in EDL / Mic Selected / Edited).</div>')

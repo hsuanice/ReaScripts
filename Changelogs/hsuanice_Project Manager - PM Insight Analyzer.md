@@ -7,6 +7,10 @@ PM Insight Analyzer
 
 **Removed from ReaPack** (2026-10-15) while it is a work in progress; the script stays in the repository (`@noindex`) as a backup.
 
+## 26.1026.2314pre1
+
+- Change: Progress Source / Film switch now also switches the lengths - each stage shows 'source done' or 'film done' (done / total) and 'source left' or 'film left' with the estimated work - so the switch is visible even when both percentages happen to round the same.
+
 ## 26.1026.2310pre1
 
 - New: Progress card has a Source / Film switch - each stage and Scenes finished as % of the EDL source or of the film of the scenes where it is done, with the scene count in brackets. Default Source; the choice is remembered in the browser.

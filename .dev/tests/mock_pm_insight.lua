@@ -140,6 +140,9 @@ check("Editing stage 2 / 3 (scene 11 skipped Mic Selected)",
 check("Denoise stage 1 / 3: source 36%, film 33%",
   has(all, "Denoise <small>(Edited)</small></b><span>36% <small>(1 / 3)</small>")
   and has(all, "Denoise <small>(Edited)</small></b><span>33% <small>(1 / 3)</small>"))
+check("Progress Editing: done / left lengths switch too (source 480s / 840s, film 90s / 180s)",
+  has(all, "source done</b><span>480s <small>/ 840s</small>") and has(all, "source left · est. work</b><span>360s · ")
+  and has(all, "film done</b><span>90s <small>/ 180s</small>") and has(all, "film left · est. work</b><span>90s · "))
 check("Progress Source / Film switch", has(all, '<div class="pmode"><button data-m="source">Source</button><button data-m="film">Film</button></div>')
   and has(all, '<div class="pm" data-m="film">') and has(all, 'localStorage'))
 check("remaining source + estimate per stage", has(all, "360s · 0.5h") and has(all, "360s · 1.2h") and has(all, "540s · 0.9h"))
