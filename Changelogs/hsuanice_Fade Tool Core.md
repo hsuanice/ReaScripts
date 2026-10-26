@@ -1,5 +1,9 @@
 # hsuanice_Fade Tool Core.lua — Changelog
 
+## 26.1026.1230pre1
+
+- Add: a razor area inside an item with no neighbour on either side fades in from the item start to the area start and fades out from the area end to the item end (as AZ's Fade tool). An item with a neighbour still gets its nearest cut pulled into the area.
+
 ## 26.1025.1231
 
 - Change: an existing fade or crossfade side (length > 0) keeps its own shape; the default shape from Settings is only used for a new fade.

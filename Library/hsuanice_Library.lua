@@ -1,6 +1,6 @@
 --[[
 @description hsuanice Library - shared code used by hsuanice scripts (required)
-@version 26.1025.2114
+@version 26.1026.1230pre1
 @author hsuanice
 @metapackage
 @provides
@@ -25,7 +25,7 @@
   [nomain] hsuanice_Fade Tool Core.lua
   [nomain] json.lua
 @changelog
-  - Update: hsuanice_RGWH Core.lua (Render / Glue keep the exact fade shape and curve).
+  - Update: hsuanice_Fade Tool Core.lua (razor inside an item: fade in and out).
 @about
   # hsuanice Library
 

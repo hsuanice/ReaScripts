@@ -1,11 +1,10 @@
 --[[
 @description hsuanice Fade Tool Core (shared razor / cut / edge / fade helpers for the Fade Tool scripts)
-@version 26.1025.1231
+@version 26.1026.1230pre1
 @author hsuanice
 @noindex
 @changelog
-  - Change: an existing fade or crossfade side (length > 0) keeps its own shape; the default shape from Settings is only used for a new fade.
-  - Release: tested in REAPER 7.82.
+  - Add: a razor area inside an item with no neighbour on either side fades in from the item start to the area start and fades out from the area end to the item end (as AZ's Fade tool). An item with a neighbour still gets its nearest cut pulled into the area.
 @about
   Shared code for "Fade Tool - Crossfade in Razor", "Fade Tool - Scene Cut to Razor" and
   "Fade Tool - Settings". Settings live in the ExtState section "hsuanice_FadeTool".
@@ -552,7 +551,23 @@ function M.fade_areas(areas, S)
         end
       end
 
-      if #inside == 1 then
+      -- Area inside one item that has no neighbour on either side (nothing to crossfade with):
+      -- fade in from the item start to the area start, fade out from the area end (as AZ's tool)
+      local host
+      if #inside == 0 and edges == 0 then
+        for _, info in ipairs(list) do
+          if info.pos < rs - M.TOL and info.fin > re + M.TOL then host = info; break end
+        end
+        local j = host and joined[host]
+        if j and (j.left or j.right) then host = nil end
+      end
+
+      if host then
+        local ok, why = M.fade_in_to(host, rs, S)
+        if ok then changed = changed + 1 else skip(area, rs, why) end
+        ok, why = M.fade_out_from(M.info(host.item), re, S)
+        if ok then changed = changed + 1 else skip(area, re, why) end
+      elseif #inside == 1 then
         xfade(area, inside[1], rs, re)
       elseif #inside >= 2 then
         local len = S.xfade_frames * fl

@@ -467,5 +467,26 @@ run("Scene Cut to Razor")
 check("45 each track its own scene", near(S(A), 10 - fl) and near(E(A), 20) and near(S(B), 20 - fl) and near(E(B), 24))
 check("45 Scene Cut track and its folder never cut", near(S(sct.items[1]), 0) and near(E(sct.items[1]), 10) and near(S(L), 0))
 
+-- Razor inside an item without neighbours: fade in to the razor start, fade out from its end (26.1026)
+reset()
+t = new_track("IN1", '3 15 ""')
+A = new_item(t, 0, 20, -5, 40)
+C = new_item(t, 40, 5, 35, 20); D = new_item(t, 45, 5, 40, 20)     -- a cut elsewhere in view
+run("Crossfade in Razor")
+check("51 isolated item: fade-in 3 s, fade-out 5 s, edges unchanged",
+  near(A.v.D_FADEINLEN, 3) and near(A.v.D_FADEOUTLEN, 5) and near(S(A), 0) and near(E(A), 20))
+check("51 the far cut is not pulled in", near(E(C), 45) and near(S(D), 45) and mb == nil)
+check("51 new fades get the Fade shape (Linear)", A.v.C_FADEINSHAPE == 0 and A.v.C_FADEOUTSHAPE == 0)
+reset()
+t = new_track("IN2", '3 15 ""')
+A = new_item(t, 0, 20, -5, 40); A.v.D_FADEINLEN, A.v.C_FADEINSHAPE = 1, 2
+SF()
+check("52 Smart Fade razor: same, existing fade-in keeps its shape", near(A.v.D_FADEINLEN, 3) and A.v.C_FADEINSHAPE == 2 and near(A.v.D_FADEOUTLEN, 5))
+reset()
+t = new_track("IN3", '5 6 ""')
+A = new_item(t, 0, 10, -5, 30); B = new_item(t, 10, 10, 5, 30)
+run("Crossfade in Razor")
+check("53 item with a neighbour: the cut is still pulled in", near(E(A), 6) and near(S(B), 5) and A.v.D_FADEINLEN == 0)
+
 print(string.format("%d passed, %d failed", passes, fails))
 os.exit(fails == 0 and 0 or 1)
