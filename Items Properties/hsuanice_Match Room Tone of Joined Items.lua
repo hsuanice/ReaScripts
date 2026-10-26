@@ -1,10 +1,11 @@
 --[[
 @description Match Room Tone of Joined Items - level-match the background noise of touching / crossfaded items (take volume)
-@version 26.1026.1446pre1
+@version 26.1026.1456pre1
 @author hsuanice
 @changelog
-  - Initial release: level-match the room tone of touching / crossfaded selected items by take volume (reference = the longest item with pauses); more than 12 dB off -> moved to a '<track> - RT mismatch' track; only groups fully in view.
+  - Initial release: level-match the room tone of touching / crossfaded selected items by take volume; more than 12 dB off -> moved to a '<track> - RT mismatch' track; only groups fully in view.
   - Room tone is measured on the WHOLE source file (quietest 10 %), so movement in the trimmed pauses does not count; an item whose own part is more than 6 dB louder than its file's quietest is listed.
+  - Spectrum check: the room tone's 1/3-octave spectrum (63 Hz - 6.3 kHz, level removed) is compared with the group's median; a different room tone (generator, air conditioning, another room: one band > 8 dB or > 3 dB on average off) is not level-matched but moved to the mismatch track, with the band named (e.g. '+14 dB around 100 Hz'). Two items that differ are both listed and left alone. The reference is chosen among the matching items.
 @about
   Makes the room tone of joined items the same level, so they can be glued and denoised in one
   pass (e.g. in RX) without the background jumping between takes.
@@ -18,9 +19,16 @@
   - Each group matches the room tone of its longest item that has pauses (quiet and loud parts),
     else of its longest item: only the take volume of the other items changes (dialogue level
     changes with it).
-  - An item needing more than 12 dB is not adjusted: it moves to a track "<track> - RT mismatch"
-    right below its track (created once, reused), so it can be checked by ear. An item with
-    speech all the way through measures far too loud and ends up there too.
+  - The room tone's spectrum is compared too (1/3-octave bands from 63 Hz to 6.3 kHz, level
+    removed) against the group's median: an item with a different room tone - a generator, air
+    conditioning, another room - is not level-matched. Different = one band more than 8 dB off
+    or the bands more than 3 dB off on average. With only 2 items there is no majority: when
+    they differ, both are listed and left alone.
+  - An item with a different room tone, or needing more than 12 dB, is not adjusted: it moves to
+    a track "<track> - RT mismatch" right below its track (created once, reused), so it can be
+    checked by ear; the window says why (e.g. "+14 dB around 100 Hz"). An item with speech all
+    the way through measures far too loud and ends up there too.
+  - The reference is chosen among the items whose room tone matches the majority.
   - Only groups fully inside the arrange view are processed (never changes what you cannot see).
   - One undo point. A window only lists what was moved or skipped.
 
@@ -41,6 +49,12 @@ local SPREAD_DB     = 10     -- quiet part this much below the loud part = the i
 local ANALYSIS_SR   = 16000  -- analysis sample rate (the accessor resamples; whole files are read)
 local NOTE_DIFF_DB  = 6      -- whole file this much quieter than the item's own part: listed
 local MISMATCH_SUFFIX = " - RT mismatch"
+-- Spectrum check: the room tone's spectral shape (level removed) against the group's median
+local SPEC_BAND_DB  = 8      -- any 1/3-octave band this far off = a different room tone (e.g. generator)
+local SPEC_MEAN_DB  = 3      -- or the bands this far off on average (e.g. another room)
+local FFT_SIZE      = 2048   -- at ANALYSIS_SR: 7.8 Hz bins
+local MAX_FFT_WINS  = 120    -- quiet windows used for the spectrum (spread over the file)
+local SPEC_NEAR_DB  = 6      -- FFT windows must stay within this of the room tone level (no speech)
 ---------------------------------------------------------------------------
 
 local TOL = 0.0005
@@ -64,6 +78,51 @@ local function quiet_level(powers)
   q = q / n
   local loud = powers[math.max(1, math.floor(#powers * 0.9))]
   return 10 * math.log(q, 10), 10 * math.log(loud / q, 10) >= SPREAD_DB
+end
+
+-- 1/3-octave bands from 63 Hz to 6.3 kHz
+local BANDS = {}
+for i = 0, 20 do
+  local fc = 63 * 2 ^ (i / 3)
+  BANDS[#BANDS + 1] = { fc = fc, lo = fc * 2 ^ (-1 / 6), hi = fc * 2 ^ (1 / 6) }
+end
+local HANN = {}
+for i = 0, FFT_SIZE - 1 do HANN[i + 1] = 0.5 - 0.5 * math.cos(2 * math.pi * i / (FFT_SIZE - 1)) end
+
+local function band_label(i)
+  local fc = BANDS[i].fc
+  if fc >= 1000 then return string.format("%.1f kHz", fc / 1000) end
+  return string.format("%d Hz", math.floor(fc / 10 + 0.5) * 10)
+end
+
+-- Band powers (dB) of the quiet windows at times `times` (mono mix, Hann window)
+local function quiet_spectrum(acc, nch, times)
+  local raw = r.new_array(FFT_SIZE * nch)
+  local mono = r.new_array(FFT_SIZE)
+  local acc_pow = {}
+  for b = 1, #BANDS do acc_pow[b] = 0 end
+  local bin_hz = ANALYSIS_SR / FFT_SIZE
+  for _, t in ipairs(times) do
+    raw.clear()
+    r.GetAudioAccessorSamples(acc, ANALYSIS_SR, nch, t, FFT_SIZE, raw)
+    for i = 0, FFT_SIZE - 1 do
+      local v = 0
+      for c = 1, nch do v = v + raw[i * nch + c] end
+      mono[i + 1] = v / nch * HANN[i + 1]
+    end
+    mono.fft_real(FFT_SIZE, true)
+    -- layout: [1],[2] = DC / Nyquist, then (re, im) pairs for bins 1 .. FFT_SIZE/2 - 1
+    for k = 1, FFT_SIZE / 2 - 1 do
+      local f = k * bin_hz
+      local re, im = mono[2 * k + 1], mono[2 * k + 2]
+      for b = 1, #BANDS do
+        if f >= BANDS[b].lo and f < BANDS[b].hi then acc_pow[b] = acc_pow[b] + re * re + im * im; break end
+      end
+    end
+  end
+  local out = {}
+  for b = 1, #BANDS do out[b] = 10 * math.log(acc_pow[b] / math.max(1, #times) + 1e-20, 10) end
+  return out
 end
 
 -- Room tone of the whole source file of the item's take (dB, take and item volume excluded).
@@ -99,7 +158,7 @@ local function room_tone(item)
   end
   local acc = r.CreateTakeAudioAccessor(take)
   local win = math.floor(ANALYSIS_SR * WINDOW_SEC)
-  local all, part = {}, {}
+  local all, part, times = {}, {}, {}
   local buf = r.new_array(win * nch)
   local t = 0
   while t + WINDOW_SEC <= full_len + 1e-9 do
@@ -110,9 +169,39 @@ local function room_tone(item)
     local p = sum / (win * nch)
     if p > 1e-12 then                              -- digital silence (-120 dB) ignored
       all[#all + 1] = p
+      times[#times + 1] = t
       if t >= item_s - 1e-9 and t + WINDOW_SEC <= item_e + 1e-9 then part[#part + 1] = p end
     end
     t = t + WINDOW_SEC
+  end
+  -- spectrum of the room tone: FFT windows (longer than the level windows) that stay at room
+  -- tone level all the way through - every level window they cover is within SPEC_NEAR_DB of
+  -- the quietest QUIET_SHARE's level - so no speech edge leaks in; not overlapping, spread over
+  -- the file
+  local spec
+  if #all >= 4 then
+    local sorted = {}
+    for i = 1, #all do sorted[i] = all[i] end
+    table.sort(sorted)
+    local n_q, q = math.max(1, math.floor(#sorted * QUIET_SHARE)), 0
+    for i = 1, n_q do q = q + sorted[i] end
+    local thr = q / n_q * 10 ^ (SPEC_NEAR_DB / 10)
+    local span = math.ceil((FFT_SIZE / ANALYSIS_SR) / WINDOW_SEC)   -- level windows per FFT window
+    local quiet, i = {}, 1
+    while i + span - 1 <= #all do
+      local ok = times[i] + FFT_SIZE / ANALYSIS_SR <= full_len + 1e-9
+      for j = 0, span - 1 do
+        if not ok then break end
+        ok = all[i + j] <= thr and math.abs(times[i + j] - (times[i] + j * WINDOW_SEC)) < 1e-6
+      end
+      if ok then quiet[#quiet + 1] = times[i]; i = i + span else i = i + 1 end
+    end
+    if #quiet > MAX_FFT_WINS then
+      local pick, step = {}, #quiet / MAX_FFT_WINS
+      for k = 0, MAX_FFT_WINS - 1 do pick[#pick + 1] = quiet[math.floor(k * step) + 1] end
+      quiet = pick
+    end
+    if #quiet >= 3 then spec = quiet_spectrum(acc, nch, quiet) end
   end
   r.DestroyAudioAccessor(acc)
   r.SetMediaItemTakeInfo_Value(take, "D_STARTOFFS", saved.offs)
@@ -126,7 +215,7 @@ local function room_tone(item)
   local full = quiet_level(all)
   if not full then return nil, "no audio to measure" end
   local item_db, pauses = quiet_level(part)
-  return { full = full, item = item_db, pauses = pauses or false }
+  return { full = full, item = item_db, pauses = pauses or false, spec = spec }
 end
 
 -- Effective room tone of an item as heard: source level x take volume x item volume
@@ -221,12 +310,68 @@ local function main()
         info.take_vol = take and r.GetMediaItemTakeInfo_Value(take, "D_VOL") or 1
         info.item_vol = r.GetMediaItemInfo_Value(info.item, "D_VOL")
         info.len = info.fin - info.pos
-        if info.rt and info.pauses and (not ref or info.len > ref.len) then ref = info end
-        if info.rt and (not ref_any or info.len > ref_any.len) then ref_any = info end
+        if m and m.spec then
+          -- spectral shape: band levels with the overall level removed
+          local mean = 0
+          for b = 1, #m.spec do mean = mean + m.spec[b] end
+          mean = mean / #m.spec
+          info.shape = {}
+          for b = 1, #m.spec do info.shape[b] = m.spec[b] - mean end
+        end
+      end
+
+      -- Spectrum check against the group's median shape: a room tone that differs (generator,
+      -- air conditioning, another room) is not level-matched. With 2 items there is no
+      -- majority, so both are listed instead.
+      local shaped = {}
+      for _, info in ipairs(g.items) do if info.rt and info.shape then shaped[#shaped + 1] = info end end
+      local function compare(a_shape, b_shape)
+        local worst, worst_b, sum = 0, 1, 0
+        for b = 1, #BANDS do
+          local d = a_shape[b] - b_shape[b]
+          sum = sum + math.abs(d)
+          if math.abs(d) > math.abs(worst) then worst, worst_b = d, b end
+        end
+        local avg = sum / #BANDS
+        return (math.abs(worst) > SPEC_BAND_DB or avg > SPEC_MEAN_DB), worst, worst_b, avg
+      end
+      if #shaped >= 3 then
+        local median = {}
+        for b = 1, #BANDS do
+          local v = {}
+          for _, info in ipairs(shaped) do v[#v + 1] = info.shape[b] end
+          table.sort(v)
+          median[b] = (#v % 2 == 1) and v[(#v + 1) / 2] or (v[#v / 2] + v[#v / 2 + 1]) / 2
+        end
+        for _, info in ipairs(shaped) do
+          local off, worst, wb, avg = compare(info.shape, median)
+          if off then info.spec_off = string.format("%+.1f dB around %s (bands %.1f dB off on average)", worst, band_label(wb), avg) end
+        end
+      elseif #shaped == 2 then
+        local off, worst, wb, avg = compare(shaped[1].shape, shaped[2].shape)
+        if off then
+          for _, info in ipairs(shaped) do
+            info.spec_pair = string.format("the two items' room tone differs (%+.1f dB around %s, %.1f dB on average) - "
+              .. "not matched, check by ear", worst, band_label(wb), avg)
+          end
+        end
+      end
+
+      local ref, ref_any
+      for _, info in ipairs(g.items) do
+        if info.rt and not info.spec_off and not info.spec_pair then
+          if info.pauses and (not ref or info.len > ref.len) then ref = info end
+          if not ref_any or info.len > ref_any.len then ref_any = info end
+        end
       end
       ref = ref or ref_any
       if not ref then
-        note(g.items[1], g.track, "nothing to measure in this group - skipped")
+        if shaped[1] and shaped[1].spec_pair then
+          note(shaped[1], g.track, shaped[1].spec_pair)
+          note(shaped[2], g.track, shaped[2].spec_pair)
+        else
+          note(g.items[1], g.track, "nothing to measure in this group - skipped")
+        end
       else
         local target = heard_db(ref)
         for _, info in ipairs(g.items) do
@@ -235,6 +380,10 @@ local function main()
               note(info, g.track, info.why)
             elseif r.GetMediaItemInfo_Value(info.item, "C_LOCK") % 2 == 1 then
               note(info, g.track, "locked item")
+            elseif info.spec_off then
+              r.MoveMediaItemToTrack(info.item, mismatch_track(g.track))
+              moved = moved + 1
+              note(info, g.track, "different room tone: " .. info.spec_off .. " - moved to the mismatch track")
             else
               local diff = target - heard_db(info)
               if math.abs(diff) > MAX_CHANGE_DB then

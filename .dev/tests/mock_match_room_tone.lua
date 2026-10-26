@@ -16,7 +16,7 @@ local function new_item(tr, pos, len, noise_db, speech, o)
   local offs = o.offs or 0
   local sp = speech or 0.5
   local take = { vol = o.take_vol or 1, noise = amp(noise_db), src_ch = o.ch or 1, offs = offs,
-    src_len = o.src_len or (offs + len), rate = 1, motion = o.motion or {},
+    src_len = o.src_len or (offs + len), rate = 1, motion = o.motion or {}, hum = o.hum,
     speech = { offs + len * (0.5 - sp / 2), offs + len * (0.5 + sp / 2) } }
   local it = { tr = tr, pos = pos, len = len, sel = o.sel ~= false, vol = o.vol or 1, lock = o.lock or 0,
     take = take, fades = { D_FADEINLEN = 0.1, D_FADEOUTLEN = 0.1, D_FADEINLEN_AUTO = 0, D_FADEOUTLEN_AUTO = 0 } }
@@ -33,6 +33,46 @@ local function src_amp(tk, ts)
   if ts >= tk.speech[1] and ts < tk.speech[2] then return amp(-20) end
   for _, m in ipairs(tk.motion) do if ts >= m[1] and ts < m[2] then return amp(m[3]) end end
   return tk.noise
+end
+-- white noise (random signs, exact RMS) + optional hum {hz, db} (e.g. a generator)
+local function src_sample(tk, ts, sr)
+  local z = math.floor(ts * sr + 0.5) + 0x9E3779B97F4A7C15     -- splitmix64 hash of the sample index
+  z = (z ~ (z >> 30)) * 0xBF58476D1CE4E5B9
+  z = (z ~ (z >> 27)) * 0x94D049BB133111EB
+  z = z ~ (z >> 31)
+  local v = ((z & 1) == 0 and 1 or -1) * src_amp(tk, ts)
+  if tk.hum then v = v + amp(tk.hum[2]) * math.sqrt(2) * math.sin(2 * math.pi * tk.hum[1] * ts) end
+  return v
+end
+-- REAPER's array.fft_real layout: [1] DC, [2] Nyquist, then (re, im) of bins 1 .. n/2-1
+local function fft_real(a, n)
+  local re, im = {}, {}
+  for i = 0, n - 1 do re[i] = a[i + 1]; im[i] = 0 end
+  local j = 0
+  for i = 0, n - 2 do
+    if i < j then re[i], re[j] = re[j], re[i]; im[i], im[j] = im[j], im[i] end
+    local m = n // 2
+    while m >= 1 and j >= m do j = j - m; m = m // 2 end
+    j = j + m
+  end
+  local len = 2
+  while len <= n do
+    local ang = -2 * math.pi / len
+    local wr, wi = math.cos(ang), math.sin(ang)
+    for i = 0, n - 1, len do
+      local cr, ci = 1, 0
+      for k = 0, len // 2 - 1 do
+        local ar, ai = re[i + k + len // 2], im[i + k + len // 2]
+        local tr, ti = ar * cr - ai * ci, ar * ci + ai * cr
+        re[i + k + len // 2], im[i + k + len // 2] = re[i + k] - tr, im[i + k] - ti
+        re[i + k], im[i + k] = re[i + k] + tr, im[i + k] + ti
+        cr, ci = cr * wr - ci * wi, cr * wi + ci * wr
+      end
+    end
+    len = len * 2
+  end
+  a[1], a[2] = re[0], re[n // 2]
+  for k = 1, n // 2 - 1 do a[2 * k + 1], a[2 * k + 2] = re[k], im[k] end
 end
 
 reaper = {
@@ -66,13 +106,13 @@ reaper = {
   new_array = function(n)
     local a = {}
     a.clear = function() for i = 1, n do a[i] = 0 end end
+    a.fft_real = function(size) fft_real(a, size) end
     return a
   end,
   GetAudioAccessorSamples = function(acc, sr, nch, t0, n, buf)
     for i = 0, n - 1 do
       local t = t0 + i / sr
-      local a = (t < acc.len) and src_amp(acc.take, acc.offs + t) or 0
-      local v = ((i % 2 == 0) and 1 or -1) * a * acc.gain
+      local v = (t < acc.len) and src_sample(acc.take, acc.offs + t, sr) * acc.gain or 0
       for c = 1, nch do buf[i * nch + c] = v end
     end
   end,
@@ -193,6 +233,34 @@ D = new_item(t1, 14, 2, -85, 0.4, { ch = 2 })
 dofile(SCRIPT)
 check("stereo measured", near_db(B.take.vol, amp(-6)))
 check("folder end moves to the mismatch track", t1.depth == 0 and tracks[3].name == "DIA - RT mismatch" and tracks[3].depth == -1)
+
+-- 7. spectrum: a generator in one shot -> different room tone -> moved, even at the same level
+setup()
+t1 = new_track("DIA")
+A = new_item(t1, 0, 10, -60, 0.5)
+B = new_item(t1, 10, 6, -57, 0.5)
+C = new_item(t1, 16, 5, -60, 0.5, { hum = { 100, -58 } })        -- generator hum at 100 Hz
+D = new_item(t1, 21, 6, -63, 0.5)
+dofile(SCRIPT)
+check("generator shot moved, not level-matched", C.tr ~= t1 and near_db(C.take.vol, 1, 0.01))
+check("window names the band", mb and mb:find("around 100 Hz", 1, true) ~= nil and mb:find("different room tone", 1, true) ~= nil)
+check("the others are still level-matched", near_db(B.take.vol, amp(-3), 0.3) and near_db(D.take.vol, amp(3), 0.3))
+-- the generator shot is the longest: it must not become the reference
+setup()
+t1 = new_track("DIA")
+A = new_item(t1, 0, 6, -60, 0.5)
+B = new_item(t1, 6, 20, -60, 0.5, { hum = { 100, -58 } })
+C = new_item(t1, 26, 5, -54, 0.5)
+dofile(SCRIPT)
+check("longest item with a generator is not the reference", B.tr ~= t1 and near_db(C.take.vol, amp(-6), 0.3))
+-- only two items that differ: both listed, nothing changed
+setup()
+t1 = new_track("DIA")
+A = new_item(t1, 0, 10, -60, 0.5)
+B = new_item(t1, 10, 5, -54, 0.5, { hum = { 100, -56 } })
+dofile(SCRIPT)
+check("two different items: both listed, nothing changed", near_db(B.take.vol, 1, 0.01) and A.tr == t1 and B.tr == t1
+  and mb and select(2, mb:gsub("the two items' room tone differs", "")) == 2)
 
 print(string.format("%d passed, %d failed", passes, fails))
 os.exit(fails == 0 and 0 or 1)

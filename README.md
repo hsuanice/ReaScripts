@@ -69,7 +69,7 @@ and background on/off scripts start with `Toggle`.
 | Package | What it does |
 |---|---|
 | Auto Color - Items by Take Name | Color items by take-name keywords with a palette (GUI + Toggle Background Coloring, By Palette, Smart Random, Follow Track Color, All Shiny Color) |
-| Match Room Tone of Joined Items | Level-match the room tone of touching / crossfaded items by take volume before gluing (items far off go to a mismatch track) |
+| Match Room Tone of Joined Items | Level-match the room tone of touching / crossfaded items by take volume before gluing; items whose room tone level or spectrum is far off (e.g. a generator) go to a mismatch track |
 
 ### Selection
 
