@@ -1,11 +1,10 @@
 --[[
 @description Project Manager - PM Insight Analyzer: work-time analysis of PM Timer logs (work in progress)
-@version 26.1026.2333pre1
+@version 26.1026.2352pre1
 @author hsuanice
 @noindex  (kept in the repository as a backup; not offered on ReaPack while it is a work in progress)
 @changelog
-  - Change: the original source folder is now called ISO (a folder still called EDL keeps working); the report says ISO instead of EDL.
-  - Change: Progress shows the state the source has reached, latest on top, each in its own color: Denoised (= finished, every stage done; magenta), Edited (yellow), Mic Selected (purple) and the ISO source itself at the bottom as the base (grey blue).
+  - Change: Completion's done percentages and their Film done / Source done bars are green (the same green as the ✓ marks).
 @about
   Read-only analysis script. Auto-detects project type:
 
@@ -1092,14 +1091,15 @@ local function analyze()
     end
   end
   local function pct_of(a, b) return b > 0 and math.floor(a / b * 100 + 0.5) or 0 end
+  local DONE_GREEN = "#2e9b55"   -- same green as the ✓ marks
   card("Completion")
   out('<div style="display:flex;gap:18px">'
-    .. '<div><div class="big">' .. pct_of(film_done, film_all) .. '%</div><small>film</small></div>'
-    .. '<div><div class="big">' .. pct_of(src_done, src_all) .. '%</div><small>source</small></div></div>')
+    .. '<div><div class="big" style="color:' .. DONE_GREEN .. '">' .. pct_of(film_done, film_all) .. '%</div><small>film</small></div>'
+    .. '<div><div class="big" style="color:' .. DONE_GREEN .. '">' .. pct_of(src_done, src_all) .. '%</div><small>source</small></div></div>')
   row("Film done", fmt_dur(film_done) .. ' <small>/ ' .. fmt_dur(film_all) .. '</small>')
-  bar(film_all > 0 and film_done / film_all or 0)
+  bar(film_all > 0 and film_done / film_all or 0, DONE_GREEN)
   row("Source done", fmt_dur(src_done) .. ' <small>/ ' .. fmt_dur(src_all) .. '</small>')
-  bar(src_all > 0 and src_done / src_all or 0)
+  bar(src_all > 0 and src_done / src_all or 0, DONE_GREEN)
   row("Scenes marked done", string.format("%d / %d", n_marked, n_scenes))
   row("Scenes finished", string.format("%d / %d", n_finished, n_scenes))
   out('<div class="note">Film: scenes muted on Scene Cut. Source: ISO source of the finished scenes '

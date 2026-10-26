@@ -113,10 +113,10 @@ check("work time total 2.7h, no time estimate", has(all, '<b>Work time</b><span>
   and has(all, "Last 7 days") and not has(all, "Left (est.)") and not has(all, "Total (est.)"))
 -- film: scene 11 is muted on Scene Cut (not finished); source: scene 10 is finished (not muted)
 check("completion film % from Scene Cut mute (scene 11: 30s of 180s = 17%)",
-  has(all, '<div><div class="big">17%</div><small>film</small></div>')
+  has(all, '<div><div class="big" style="color:#2e9b55">17%</div><small>film</small></div>')
   and has(all, "<b>Film done</b><span>30s <small>/ 180s</small>") and has(all, "<b>Scenes marked done</b><span>1 / 3</span>"))
 check("completion source % from finished scenes (scene 10: 300s of 840s = 36%)",
-  has(all, '<div><div class="big">36%</div><small>source</small></div>')
+  has(all, '<div><div class="big" style="color:#2e9b55">36%</div><small>source</small></div>')
   and has(all, "<b>Source done</b><span>300s <small>/ 840s</small>") and has(all, "<b>Scenes finished</b><span>1 / 3</span>"))
 check("every work type in the table", has(all, '<td class="l">denoise</td>') and has(all, '<td class="l">check</td>'))
 check("all three scenes listed", has(all, ">10<") and has(all, ">11<") and has(all, ">12<"))
