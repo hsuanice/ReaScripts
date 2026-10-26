@@ -18,6 +18,7 @@ local function new_item(tr, pos, len, noise_db, speech, o)
   local sp = speech or 0.5
   local take = { vol = o.take_vol or 1, noise = amp(noise_db), src_ch = o.ch or 1, offs = offs,
     src_len = o.src_len or (offs + len), rate = 1, motion = o.motion or {}, hum = o.hum,
+    file = o.file or tostring({}),
     speech = { offs + len * (0.5 - sp / 2), offs + len * (0.5 + sp / 2) } }
   local it = { tr = tr, pos = pos, len = len, sel = o.sel ~= false, vol = o.vol or 1, lock = o.lock or 0,
     take = take, fades = { D_FADEINLEN = 0.1, D_FADEOUTLEN = 0.1, D_FADEINLEN_AUTO = 0, D_FADEOUTLEN_AUTO = 0 } }
@@ -97,6 +98,8 @@ reaper = {
   GetMediaItemTake_Source = function(t) return t end,
   GetMediaSourceNumChannels = function(t) return t.src_ch end,
   GetMediaSourceLength = function(t) return t.src_len, false end,
+  GetMediaSourceParent = function() return nil end,
+  GetMediaSourceFileName = function(t) return t.file end,
   GetMediaItemTakeInfo_Value = function(t, k)
     if k == "D_VOL" then return t.vol elseif k == "D_STARTOFFS" then return t.offs elseif k == "D_PLAYRATE" then return t.rate end
     return 0
@@ -105,7 +108,10 @@ reaper = {
     if k == "D_VOL" then t.vol = v elseif k == "D_STARTOFFS" then t.offs = v end
   end,
   -- the accessor plays the take as it is when created, at its take volume (worst case)
-  CreateTakeAudioAccessor = function(t) return { take = t, gain = t.vol, offs = t.offs, len = t.item.len } end,
+  CreateTakeAudioAccessor = function(t)
+    accessors = (accessors or 0) + 1
+    return { take = t, gain = t.vol, offs = t.offs, len = t.item.len }
+  end,
   DestroyAudioAccessor = function() end,
   new_array = function(n)
     local a = {}
@@ -292,6 +298,22 @@ C = new_item(t1, 20, 10, -60, 0.5, { take_vol = amp(-30) })
 run_script()
 check("+24 dB item volume -> take -24 dB, not moved", B.tr == t1 and near_db(B.take.vol, amp(-24), 0.3))
 check("-30 dB take volume -> back to 0 dB, not moved", C.tr == t1 and near_db(C.take.vol, 1, 0.3) and mb == nil)
+
+-- 7c. items from the same file share one analysis (the user's scene: 10 items from 2 files)
+setup()
+t1 = new_track("DIA")
+local items = {}
+for k = 0, 5 do
+  local file, noise = (k % 2 == 0) and "BK0609" or "BK0608", (k % 2 == 0) and -60 or -54
+  items[#items + 1] = new_item(t1, k * 4, 4, noise, 0.5, { file = file, offs = 20 + k * 4, src_len = 60 })
+end
+-- same file = same signal: give each file's items the same speech layout in source time
+for _, it in ipairs(items) do it.take.speech = { 0, 0 } end
+accessors = 0
+run_script()
+check("6 items from 2 files: 2 analyses", accessors == 2)
+check("the -54 dB file is matched to the -60 dB one (longest with pauses = first)",
+  near_db(items[2].take.vol, amp(-6), 0.3) and near_db(items[3].take.vol, 1, 0.05))
 
 -- 8. progress window and cancel
 check("progress window opened for a long analysis", gfx_opened)

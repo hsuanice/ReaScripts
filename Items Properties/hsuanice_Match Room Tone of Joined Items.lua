@@ -1,12 +1,13 @@
 --[[
 @description Match Room Tone of Joined Items - level-match the background noise of touching / crossfaded items (take volume)
-@version 26.1026.1503pre1
+@version 26.1026.1523pre1
 @author hsuanice
 @changelog
   - Initial release: level-match the room tone of touching / crossfaded selected items by take volume - however far apart the levels are; only groups fully in view.
-  - Room tone is measured on the WHOLE source file (quietest 10 %), so movement in the trimmed pauses does not count; an item whose own part is more than 6 dB louder than its file's quietest is listed.
-  - Spectrum check: the room tone's 1/3-octave spectrum (63 Hz - 6.3 kHz, level removed) is compared with the group's median; only a different room tone (generator, air conditioning, another room, or speech all the way through) is moved to a '<track> - RT mismatch' track, with the band named. A level difference alone never moves an item.
-  - Progress window (gfx) while analyzing; Esc / close cancels with nothing changed; all changes applied together at the end.
+  - Room tone is measured on the WHOLE source file (quietest 10 %), so movement in the trimmed pauses does not count; an item whose own part is more than 6 dB louder than its file's quietest is listed. Items that play the same file share one analysis.
+  - Spectrum check: the room tone's 1/3-octave spectrum (63 Hz - 6.3 kHz, level removed) is compared with the group's median; only a different room tone (generator, air conditioning, another room, or speech all the way through) is moved to a '<track> - RT mismatch' track, with the band named.
+  - Progress window (gfx), updated between items; Esc / close cancels with nothing changed; all changes applied together at the end.
+  - Fix: an item was left opened up across defer cycles while measuring - REAPER drew it stretched and its audio stopped reading ('nothing to measure', no volume change). Each item is now measured in one go; items that cannot be measured are listed with the reason.
 @about
   Makes the room tone of joined items the same level, so they can be glued and denoised in one
   pass (e.g. in RX) without the background jumping between takes.
@@ -86,14 +87,13 @@ local function quiet_level(powers)
 end
 
 -- Progress (shown in a gfx window while analyzing): the analysis runs in a coroutine that
--- yields every ~30 ms so the window can redraw; Esc / closing the window cancels.
-local PROG = { total = 0, done = 0, n = 0, i = 0, label = "", cancel = false, last = 0, restore = nil }
-local function tick(sec)
+-- yields BETWEEN items, so the window can redraw; Esc / closing the window cancels. An item is
+-- always measured in one go (opened up, read, restored in the same defer cycle): an item left
+-- opened up across cycles was drawn by REAPER, and its audio accessor stopped reading.
+local PROG = { total = 0, done = 0, n = 0, i = 0, label = "", cancel = false, restore = nil }
+local function next_item(sec)
   PROG.done = PROG.done + (sec or 0)
-  if coroutine.isyieldable() and r.time_precise() - PROG.last > 0.03 then
-    coroutine.yield()
-    PROG.last = r.time_precise()
-  end
+  if coroutine.isyieldable() then coroutine.yield() end
   return PROG.cancel
 end
 
@@ -120,7 +120,6 @@ local function quiet_spectrum(acc, nch, times)
   for b = 1, #BANDS do acc_pow[b] = 0 end
   local bin_hz = ANALYSIS_SR / FFT_SIZE
   for _, t in ipairs(times) do
-    if tick() then break end
     raw.clear()
     r.GetAudioAccessorSamples(acc, ANALYSIS_SR, nch, t, FFT_SIZE, raw)
     for i = 0, FFT_SIZE - 1 do
@@ -148,6 +147,9 @@ end
 -- no fades) and restored right after. Returns
 --   { full = dB of the whole file, item = dB of the part the item plays, pauses = item has
 --     pauses }  or nil + reason
+-- Whole-file analysis is shared by every item that plays the same file at the same rate
+local FILE_CACHE = {}
+
 local function room_tone(item)
   local take = r.GetActiveTake(item)
   if not take or r.TakeIsMIDI(take) then return nil, "no audio take" end
@@ -168,7 +170,17 @@ local function room_tone(item)
   local item_s = saved.offs / rate                -- the item's part, in timeline seconds of the file
   local item_e = item_s + saved.len
 
-  -- the arrange is not redrawn while the item is opened up (this spans several defer cycles)
+  local key
+  if not r.GetMediaSourceParent(src) then        -- a section source plays only part of its file
+    key = (r.GetMediaSourceFileName(src, "") or "") .. "|" .. rate .. "|" .. nch
+  end
+  local cached = key and FILE_CACHE[key]
+  local all, times, spec
+  if cached then
+    all, times, spec = cached.all, cached.times, cached.spec
+  else
+
+  -- the arrange is not redrawn while the item is opened up
   r.PreventUIRefresh(1)
   local function restore()
     r.SetMediaItemTakeInfo_Value(take, "D_STARTOFFS", saved.offs)
@@ -190,7 +202,7 @@ local function room_tone(item)
   end
   local acc = r.CreateTakeAudioAccessor(take)
   local win = math.floor(ANALYSIS_SR * WINDOW_SEC)
-  local all, part, times = {}, {}, {}
+  all, times = {}, {}
   local buf = r.new_array(win * nch)
   local t = 0
   while t + WINDOW_SEC <= full_len + 1e-9 do
@@ -202,17 +214,14 @@ local function room_tone(item)
     if p > 1e-12 then                              -- digital silence (-120 dB) ignored
       all[#all + 1] = p
       times[#times + 1] = t
-      if t >= item_s - 1e-9 and t + WINDOW_SEC <= item_e + 1e-9 then part[#part + 1] = p end
     end
     t = t + WINDOW_SEC
-    if tick(WINDOW_SEC) then break end
   end
   -- spectrum of the room tone: FFT windows (longer than the level windows) that stay at room
   -- tone level all the way through - every level window they cover is within SPEC_NEAR_DB of
   -- the quietest QUIET_SHARE's level - so no speech edge leaks in; not overlapping, spread over
   -- the file
-  local spec
-  if #all >= 4 and not PROG.cancel then
+  if #all >= 4 then
     local sorted = {}
     for i = 1, #all do sorted[i] = all[i] end
     table.sort(sorted)
@@ -238,9 +247,17 @@ local function room_tone(item)
   end
   r.DestroyAudioAccessor(acc)
   restore()
-  if PROG.cancel then return nil, "cancelled" end
+  if key then FILE_CACHE[key] = { all = all, times = times, spec = spec } end
+  end
 
-  local full = quiet_level(all)
+  local part = {}
+  for i = 1, #all do
+    if times[i] >= item_s - 1e-9 and times[i] + WINDOW_SEC <= item_e + 1e-9 then part[#part + 1] = all[i] end
+  end
+
+  local copy = {}
+  for i = 1, #all do copy[i] = all[i] end
+  local full = quiet_level(copy)
   if not full then return nil, "no audio to measure" end
   local item_db, pauses = quiet_level(part)
   return { full = full, item = item_db, pauses = pauses or false, spec = spec }
@@ -346,8 +363,9 @@ local function analyze(groups)
         local take = r.GetActiveTake(info.item)
         PROG.i = PROG.i + 1
         PROG.label = take and r.GetTakeName(take) or ""
+        if next_item() then return nil end            -- redraw the window, check for cancel
         local m, why = room_tone(info.item)
-        if PROG.cancel then return nil end
+        PROG.done = PROG.done + file_secs(info.item)
         if m then
           info.rt, info.pauses = m.full, m.pauses
           if m.item and m.item - m.full > NOTE_DIFF_DB then
@@ -420,7 +438,10 @@ local function analyze(groups)
           note(shaped[1], g.track, shaped[1].spec_pair)
           note(shaped[2], g.track, shaped[2].spec_pair)
         else
-          note(g.items[1], g.track, "nothing to measure in this group - skipped")
+          for _, info in ipairs(g.items) do
+            note(info, g.track, "not measured: " .. (info.why or (info.spec_off and ("different room tone: " .. info.spec_off)) or "?"))
+          end
+          note(g.items[1], g.track, "no item to match against in this group - skipped")
         end
       else
         local target = heard_db(ref)
@@ -519,7 +540,8 @@ local function step()
     if window then gfx.quit() end
     if lines and not PROG.cancel then
       apply_actions(actions)
-      show_lines(lines)
+      -- next cycle: the arrange redraws first, so the window never shows a stale picture
+      r.defer(function() show_lines(lines) end)
     end
     return
   end
