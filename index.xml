@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<index version="1" name="hsuanice Scripts" commit="d972b69b0b73a05bc36de7ac02c8374ae8d54d6e">
+<index version="1" name="hsuanice Scripts" commit="e67fd079af5d5149656bd794c9ba81ce54bd03d5">
   <category name="Conform">
     <reapack name="hsuanice_Conform List Browser - CLB.lua" type="script" desc="Conform List Browser - CLB: conform EDL / AAF / XML / OTIO / subtitle lists (GUI + Jump / Link / Load / Reveal)">
       <metadata>
@@ -598,6 +598,72 @@
         <source main="main" file="hsuanice_Auto Color - Smart Random.lua">https://github.com/hsuanice/ReaScripts/raw/69a8697e1b54666ea7228379b1490811fd778fa8/Items%20Properties/hsuanice_Auto%20Color%20-%20Smart%20Random.lua</source>
         <source main="main" file="hsuanice_Auto Color - Follow Track Color.lua">https://github.com/hsuanice/ReaScripts/raw/69a8697e1b54666ea7228379b1490811fd778fa8/Items%20Properties/hsuanice_Auto%20Color%20-%20Follow%20Track%20Color.lua</source>
         <source main="main" file="hsuanice_Auto Color - All Shiny Color.lua">https://github.com/hsuanice/ReaScripts/raw/69a8697e1b54666ea7228379b1490811fd778fa8/Items%20Properties/hsuanice_Auto%20Color%20-%20All%20Shiny%20Color.lua</source>
+      </version>
+    </reapack>
+    <reapack name="hsuanice_Match Room Tone of Joined Items.lua" type="script" desc="Match Room Tone of Joined Items - level-match the background noise of touching / crossfaded items (take volume)">
+      <metadata>
+        <description><![CDATA[{\rtf1\ansi\deff0{\fonttbl{\f0 \fswiss Helvetica;}{\f1 \fmodern Courier;}}
+{\colortbl;\red255\green0\blue0;\red0\green0\blue255;}
+\widowctrl\hyphauto
+
+{\pard \ql \f0 \sa180 \li0 \fi0 Makes the room tone of joined items the same level, so they can be glued and denoised in one pass (e.g. in RX) without the background jumping between takes.\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Selected items on the same track (and fixed lane) that touch or crossfade form a group; a gap starts a new group. Unselected items are never changed.\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Room tone level of an item = the mean of the quietest 10 % of its WHOLE source file (50 ms windows, all channels; digital silence ignored), so pauses full of movement in the trimmed part do not count; the item volume is included. When the item's own part is more than 6 dB louder than that, the item is listed (noise may change within the file).\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Each group matches the room tone of its longest item that has pauses (quiet and loud parts), else of its longest item: only the take volume of the other items changes (dialogue level changes with it).\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab The room tone's spectrum is compared too (1/3-octave bands from 63 Hz to 6.3 kHz, level removed) against the group's median: an item with a different room tone - a generator, air conditioning, another room - is not level-matched. Different = one band more than 8 dB off or the bands more than 3 dB off on average. With only 2 items there is no majority: when they differ, both are listed and left alone.\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab The level difference alone never moves an item: the same room tone is level-matched however far apart (user rule 26.1026). An item with a different room tone is not adjusted: it moves to a track " - RT mismatch" right below its track (created once, reused), so it can be checked by ear; the window says why (e.g. "+14 dB around 100 Hz"). An item with speech all the way through measures speech, whose spectrum differs, so it ends up there too.\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab The reference is chosen among the items whose room tone matches the majority.\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Only groups fully inside the arrange view are processed (never changes what you cannot see).\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab A progress window (native gfx) shows the analysis; Esc or closing it cancels, and then nothing is changed. All changes are applied together at the end: one undo point. A window only lists what was moved or skipped.\sa180\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 Take volume envelopes are not taken into account.\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 Written with Claude Code (AI); designed and tested by hsuanice.\par}
+}
+]]></description>
+      </metadata>
+      <version name="26.1026.1430pre1" author="hsuanice" time="2026-10-26T06:31:00Z">
+        <changelog><![CDATA[- Initial release: level-match the room tone of touching / crossfaded selected items by take volume (reference = the longest item with pauses); more than 12 dB off -> moved to a '<track> - RT mismatch' track; only groups fully in view.]]></changelog>
+        <source main="main">https://github.com/hsuanice/ReaScripts/raw/a2dd2a146a3f944cea891fba4a9402baa9d3bab0/Items%20Properties/hsuanice_Match%20Room%20Tone%20of%20Joined%20Items.lua</source>
+      </version>
+      <version name="26.1026.1446pre1" author="hsuanice" time="2026-10-26T06:47:05Z">
+        <changelog><![CDATA[- Initial release: level-match the room tone of touching / crossfaded selected items by take volume (reference = the longest item with pauses); more than 12 dB off -> moved to a '<track> - RT mismatch' track; only groups fully in view.
+- Room tone is measured on the WHOLE source file (quietest 10 %), so movement in the trimmed pauses does not count; an item whose own part is more than 6 dB louder than its file's quietest is listed.]]></changelog>
+        <source main="main">https://github.com/hsuanice/ReaScripts/raw/42288ad633cac8e9f31d66c5c289fe8eadc11a54/Items%20Properties/hsuanice_Match%20Room%20Tone%20of%20Joined%20Items.lua</source>
+      </version>
+      <version name="26.1026.1456pre1" author="hsuanice" time="2026-10-26T06:56:45Z">
+        <changelog><![CDATA[- Initial release: level-match the room tone of touching / crossfaded selected items by take volume; more than 12 dB off -> moved to a '<track> - RT mismatch' track; only groups fully in view.
+- Room tone is measured on the WHOLE source file (quietest 10 %), so movement in the trimmed pauses does not count; an item whose own part is more than 6 dB louder than its file's quietest is listed.
+- Spectrum check: the room tone's 1/3-octave spectrum (63 Hz - 6.3 kHz, level removed) is compared with the group's median; a different room tone (generator, air conditioning, another room: one band > 8 dB or > 3 dB on average off) is not level-matched but moved to the mismatch track, with the band named (e.g. '+14 dB around 100 Hz'). Two items that differ are both listed and left alone. The reference is chosen among the matching items.]]></changelog>
+        <source main="main">https://github.com/hsuanice/ReaScripts/raw/59bd99d07a007bc5d0a7391170957e219ad853e6/Items%20Properties/hsuanice_Match%20Room%20Tone%20of%20Joined%20Items.lua</source>
+      </version>
+      <version name="26.1026.1501pre1" author="hsuanice" time="2026-10-26T07:02:21Z">
+        <changelog><![CDATA[- Initial release: level-match the room tone of touching / crossfaded selected items by take volume; more than 12 dB off -> moved to a '<track> - RT mismatch' track; only groups fully in view.
+- Room tone is measured on the WHOLE source file (quietest 10 %), so movement in the trimmed pauses does not count; an item whose own part is more than 6 dB louder than its file's quietest is listed.
+- Spectrum check: the room tone's 1/3-octave spectrum (63 Hz - 6.3 kHz, level removed) is compared with the group's median; a different room tone (generator, air conditioning, another room) is moved to the mismatch track with the band named.
+- Progress window (gfx) while analyzing; Esc / close cancels with nothing changed; all changes applied together at the end.]]></changelog>
+        <source main="main">https://github.com/hsuanice/ReaScripts/raw/2f2dff6a2f5bb737f763650517a01914b549e743/Items%20Properties/hsuanice_Match%20Room%20Tone%20of%20Joined%20Items.lua</source>
+      </version>
+      <version name="26.1026.1503pre1" author="hsuanice" time="2026-10-26T07:03:40Z">
+        <changelog><![CDATA[- Initial release: level-match the room tone of touching / crossfaded selected items by take volume - however far apart the levels are; only groups fully in view.
+- Room tone is measured on the WHOLE source file (quietest 10 %), so movement in the trimmed pauses does not count; an item whose own part is more than 6 dB louder than its file's quietest is listed.
+- Spectrum check: the room tone's 1/3-octave spectrum (63 Hz - 6.3 kHz, level removed) is compared with the group's median; only a different room tone (generator, air conditioning, another room, or speech all the way through) is moved to a '<track> - RT mismatch' track, with the band named. A level difference alone never moves an item.
+- Progress window (gfx) while analyzing; Esc / close cancels with nothing changed; all changes applied together at the end.]]></changelog>
+        <source main="main">https://github.com/hsuanice/ReaScripts/raw/4ee656befc6cd51fc503414004ee7d81f29f9a6c/Items%20Properties/hsuanice_Match%20Room%20Tone%20of%20Joined%20Items.lua</source>
+      </version>
+      <version name="26.1026.1523pre1" author="hsuanice" time="2026-10-26T07:24:20Z">
+        <changelog><![CDATA[- Initial release: level-match the room tone of touching / crossfaded selected items by take volume - however far apart the levels are; only groups fully in view.
+- Room tone is measured on the WHOLE source file (quietest 10 %), so movement in the trimmed pauses does not count; an item whose own part is more than 6 dB louder than its file's quietest is listed. Items that play the same file share one analysis.
+- Spectrum check: the room tone's 1/3-octave spectrum (63 Hz - 6.3 kHz, level removed) is compared with the group's median; only a different room tone (generator, air conditioning, another room, or speech all the way through) is moved to a '<track> - RT mismatch' track, with the band named.
+- Progress window (gfx), updated between items; Esc / close cancels with nothing changed; all changes applied together at the end.
+- Fix: an item was left opened up across defer cycles while measuring - REAPER drew it stretched and its audio stopped reading ('nothing to measure', no volume change). Each item is now measured in one go; items that cannot be measured are listed with the reason.]]></changelog>
+        <source main="main">https://github.com/hsuanice/ReaScripts/raw/c4b6efa45787ebe8f14584c5db7841f4670f8689/Items%20Properties/hsuanice_Match%20Room%20Tone%20of%20Joined%20Items.lua</source>
+      </version>
+      <version name="26.1026.1534pre1" author="hsuanice" time="2026-10-26T07:34:57Z">
+        <changelog><![CDATA[- Initial release: level-match the room tone of touching / crossfaded selected items by take volume - however far apart the levels are; only groups fully in view.
+- Room tone is measured on the WHOLE source file (quietest 10 %), so movement in the trimmed pauses does not count; an item whose own part is more than 6 dB louder than its file's quietest is listed. Items that play the same file share one analysis.
+- Spectrum check: the room tone's 1/3-octave spectrum (63 Hz - 6.3 kHz, level removed) is compared with the group's median; only a different room tone (generator, air conditioning, another room, or speech all the way through) is moved to a '<track> - RT mismatch' track, with the band named.
+- Progress window (gfx), one item per update; Esc / close cancels with nothing changed; all changes applied together at the end.
+- Fix: nothing was measured ('no audio to measure') since the progress window - REAPER's audio accessor reads nothing inside a Lua coroutine (probed on REAPER 7.83). The analysis no longer uses a coroutine.]]></changelog>
+        <source main="main">https://github.com/hsuanice/ReaScripts/raw/e67fd079af5d5149656bd794c9ba81ce54bd03d5/Items%20Properties/hsuanice_Match%20Room%20Tone%20of%20Joined%20Items.lua</source>
       </version>
     </reapack>
   </category>
@@ -1675,7 +1741,7 @@ Packages
 {\pard \ql \f0 \sa180 \li0 \fi0 \outlinelevel2 \b \fs28 Items Editing\par}
 {\pard \ql \f0 \sa180 \li0 \fi0 | Package | What it does | |---|---| | Fade Tool | Frame-grid fades and crossfades by razor, time selection, mouse or edit cursor; Hover Mode aware (Smart Fade, Crossfade in Razor, Scene Cut to Razor, Settings) | | Hover Editing | Pro Tools-style Split / Trim at the mouse or edit cursor (Toggle Hover Mode, Split, Trim or Extend Left / Right Edge) | | Reorder - Sort Items Vertically | Vertical reorder and sort of selected items by metadata (GUI + Copy to Sort / Sort in Place / Upfill) | | Session Fix | Session Fix - Interchange Prep: one window that checks and fixes a session before converting it with Interchanger (Pro Tools / Nuendo / Cubase) \u8212- checklist, Fix All, before / after check, review tracks (ReaImGui; replaces the five earlier Session Fix scripts) | | Copy / Cut Items and Envelope Points Respect Razor | Copy or cut items and envelope points, respecting razor edits | | Reposition Items | Space selected items by an interval (GUI) | | Move Selected Items to Track Under Mouse | Move items vertically, keeping their timeline position | | Toggle Mute Item Under Mouse | Mute / unmute the item under the mouse | | Explode Takes Across Tracks | Put each take of the selected items on its own track | | Explode Multichannel Poly Audio to Mono Items | Split poly files into one-channel items, keeping metadata | | Convert Empty Items to Audio Items | Keeps take names and notes | | Copy Unmuted Child Items to Parent Folder Track | Copy unmuted child items to the folder track (checks overlaps first) |\par}
 {\pard \ql \f0 \sa180 \li0 \fi0 \outlinelevel2 \b \fs28 Items Properties\par}
-{\pard \ql \f0 \sa180 \li0 \fi0 | Package | What it does | |---|---| | Auto Color - Items by Take Name | Color items by take-name keywords with a palette (GUI + Toggle Background Coloring, By Palette, Smart Random, Follow Track Color, All Shiny Color) |\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 | Package | What it does | |---|---| | Auto Color - Items by Take Name | Color items by take-name keywords with a palette (GUI + Toggle Background Coloring, By Palette, Smart Random, Follow Track Color, All Shiny Color) | | Match Room Tone of Joined Items | Level-match the room tone of touching / crossfaded items by take volume before gluing; items with a different room tone spectrum (e.g. a generator) go to a mismatch track |\par}
 {\pard \ql \f0 \sa180 \li0 \fi0 \outlinelevel2 \b \fs28 Selection\par}
 {\pard \ql \f0 \sa180 \li0 \fi0 | Package | What it does | |---|---| | Toggle Track and Razor Item Link like Pro Tools | Pro Tools-style "Link Track and Edit Selection": tracks follow razor areas / item selection | | Toggle Razor and Item Link Overlap or Contain | Razor areas select the items they overlap or fully contain | | Toggle Set Time Selection to Items on Right Drag | After a right-button drag, the time selection follows the selected items | | Extend Razor Edit to Mouse Cursor like Pro Tools | Pro Tools-style Shift-click: grows the razor area (time range and tracks) to the mouse position, never shrinks it |\par}
 {\pard \ql \f0 \sa180 \li0 \fi0 \outlinelevel2 \b \fs28 Tracks\par}
