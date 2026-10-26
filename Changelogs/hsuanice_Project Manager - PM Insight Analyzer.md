@@ -7,6 +7,10 @@ PM Insight Analyzer
 
 **Removed from ReaPack** (2026-10-15) while it is a work in progress; the script stays in the repository (`@noindex`) as a backup.
 
+## 26.1026.2251pre1
+
+- Change: Completion shows two percentages - Film (film of the scenes muted on Scene Cut / all film) and Source (EDL source of the finished scenes, every stage done / all source) - each with done / total and a bar, plus Scenes marked done and Scenes finished.
+
 ## 26.1026.2153pre1
 
 - Change: Completion and Work time are one card again. '% done' is now the film of the finished scenes / all film (no time estimate), with Film done, Source done and Scenes done of the total, then the work time and daily figures. Work time no longer shows estimated hours left / total.

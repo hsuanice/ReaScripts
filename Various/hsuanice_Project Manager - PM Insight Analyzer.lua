@@ -1,10 +1,10 @@
 --[[
 @description Project Manager - PM Insight Analyzer: work-time analysis of PM Timer logs (work in progress)
-@version 26.1026.2153pre1
+@version 26.1026.2251pre1
 @author hsuanice
 @noindex  (kept in the repository as a backup; not offered on ReaPack while it is a work in progress)
 @changelog
-  - Change: Completion and Work time are one card again. '% done' is now the film of the finished scenes / all film (no time estimate), with Film done, Source done and Scenes done of the total, then the work time and daily figures. Work time no longer shows estimated hours left / total.
+  - Change: Completion shows two percentages - Film (film of the scenes muted on Scene Cut / all film) and Source (EDL source of the finished scenes, every stage done / all source) - each with done / total and a bar, plus Scenes marked done and Scenes finished.
 @about
   Read-only analysis script. Auto-detects project type:
 
@@ -1038,26 +1038,31 @@ local function analyze()
 
   out('<h2>' .. (sel_mode and 'Selected Scenes' or 'Overview') .. '</h2><div class="cards">')
 
-  -- 1. Completion and work time in one card. % done = film of the finished scenes / all
-  --    film (no time estimate - user 26.1026: estimates are not reliable enough to lead)
+  -- 1. Completion and work time in one card, no time estimate (user 26.1026):
+  --    Film   = film of the scenes marked done on Scene Cut (item muted) / all film
+  --    Source = EDL source of the finished scenes (every stage done) / all source
   local work_total = sel_mode and project_scene_total_sec or grand_total
-  local film_all, film_done, src_all, src_done = 0, 0, 0, 0
+  local film_all, film_done, src_all, src_done, n_marked = 0, 0, 0, 0, 0
   for _, sc in ipairs(scenes) do
     if shown(sc) then
       film_all, src_all = film_all + sc.length_sec, src_all + sc.source_length_sec
-      if sc.is_done then
-        film_done, src_done = film_done + sc.length_sec, src_done + sc.source_length_sec
-      end
+      if sc.muted then film_done, n_marked = film_done + sc.length_sec, n_marked + 1 end
+      if sc.is_done then src_done = src_done + sc.source_length_sec end
     end
   end
-  local frac = film_all > 0 and film_done / film_all or 0
+  local function pct_of(a, b) return b > 0 and math.floor(a / b * 100 + 0.5) or 0 end
   card("Completion")
-  out('<div class="big">' .. math.floor(frac * 100 + 0.5) .. '% done</div>')
-  bar(frac)
+  out('<div style="display:flex;gap:18px">'
+    .. '<div><div class="big">' .. pct_of(film_done, film_all) .. '%</div><small>film</small></div>'
+    .. '<div><div class="big">' .. pct_of(src_done, src_all) .. '%</div><small>source</small></div></div>')
   row("Film done", fmt_dur(film_done) .. ' <small>/ ' .. fmt_dur(film_all) .. '</small>')
+  bar(film_all > 0 and film_done / film_all or 0)
   row("Source done", fmt_dur(src_done) .. ' <small>/ ' .. fmt_dur(src_all) .. '</small>')
-  row("Scenes done", string.format("%d / %d", n_finished, n_scenes))
-  out('<div class="note">Done = finished scenes (every stage done: items muted in EDL / Mic Selected / Edited).</div>')
+  bar(src_all > 0 and src_done / src_all or 0)
+  row("Scenes marked done", string.format("%d / %d", n_marked, n_scenes))
+  row("Scenes finished", string.format("%d / %d", n_finished, n_scenes))
+  out('<div class="note">Film: scenes muted on Scene Cut. Source: EDL source of the finished scenes '
+    .. '(every stage done - items muted in EDL / Mic Selected / Edited).</div>')
   out('<div style="border-top:1px solid var(--line);margin:8px 0 4px"></div>')
   row("Work time", '<span class="big" style="font-size:18px">' .. fmt_h(work_total) .. '</span>')
   if not sel_mode then
