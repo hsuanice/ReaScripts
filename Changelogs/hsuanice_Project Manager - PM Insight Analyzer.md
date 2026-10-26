@@ -7,6 +7,10 @@ PM Insight Analyzer
 
 **Removed from ReaPack** (2026-10-15) while it is a work in progress; the script stays in the repository (`@noindex`) as a backup.
 
+## 26.1026.2053pre1
+
+- Change: the Work time card leads with the overall completion - '% done' with a bar, then Done, Left (est.) and Total (est.) hours and Scenes finished. % done = work done / (work done + estimated work left, the same estimate as in Progress); by finished scenes when there is no estimate yet.
+
 ## 26.1025.2139pre1
 
 - New: Work Log mode (no Scene Cut track) is now the same kind of HTML report instead of the gfx window: overview (Total Work - was 'Year total work' -, items, days, daily average, projects), a year filter, By Month, By Project (click a project for its tasks, work types and sessions), By Work Type / Task / Day.

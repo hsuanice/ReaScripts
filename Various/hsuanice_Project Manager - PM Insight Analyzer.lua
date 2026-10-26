@@ -1,13 +1,10 @@
 --[[
 @description Project Manager - PM Insight Analyzer: work-time analysis of PM Timer logs (work in progress)
-@version 26.1025.2139pre1
+@version 26.1026.2053pre1
 @author hsuanice
 @noindex  (kept in the repository as a backup; not offered on ReaPack while it is a work in progress)
 @changelog
-  - New: Work Log mode (no Scene Cut track) is now the same kind of HTML report instead of the gfx window: overview (Total Work - was 'Year total work' -, items, days, daily average, projects), a year filter, By Month, By Project (click a project for its tasks, work types and sessions), By Work Type / Task / Day.
-  - Change: work type and task names that differ only in upper / lower case are merged (Scene / scene, Export / EXPORT); the older Chinese name for mic select counts as mic select; a task's save-copy suffix (Conform_001) is ignored.
-  - Fix: duplicate work log items (same day, position and length - a copy of a project synced to the Work Log too) are counted once; the report says how many were skipped.
-  - Fix: the work type is read from the last part of the item name - items with a stacked project prefix showed a project name as their work type.
+  - Change: the Work time card leads with the overall completion - '% done' with a bar, then Done, Left (est.) and Total (est.) hours and Scenes finished. % done = work done / (work done + estimated work left, the same estimate as in Progress); by finished scenes when there is no estimate yet.
 @about
   Read-only analysis script. Auto-detects project type:
 
@@ -1011,12 +1008,56 @@ local function analyze()
     if work > 0 and src > 0 then return src / work, work end
   end
 
+  -- Progress by stage, computed first so Work time can show the overall completion:
+  -- a stage is done for a scene when all its items there are muted (skipped stages
+  -- count as done); remaining = EDL source of the scenes not done yet, estimated with
+  -- the stage rate of the finished scenes
+  local n_scenes, n_finished = 0, 0
+  for _, sc in ipairs(scenes) do
+    if shown(sc) then
+      n_scenes = n_scenes + 1
+      if sc.is_done then n_finished = n_finished + 1 end
+    end
+  end
+  local remaining_work, any_estimate = 0, false   -- seconds of work still needed (estimate)
+  local stage_info = {}
+  for _, stg in ipairs(STAGES) do
+    if stage_exists[stg.key] then
+      local done, rem_src = 0, 0
+      for _, sc in ipairs(scenes) do
+        if shown(sc) then
+          if stage_done(sc, stg.key) then done = done + 1 else rem_src = rem_src + sc.source_length_sec end
+        end
+      end
+      local rate = stage_rate(stg)
+      local est = rate and rem_src / rate
+      if est then remaining_work = remaining_work + est; any_estimate = true end
+      stage_info[#stage_info + 1] = { stg = stg, done = done, rem_src = rem_src, est = est }
+    end
+  end
+
   out('<h2>' .. (sel_mode and 'Selected Scenes' or 'Overview') .. '</h2><div class="cards">')
 
-  -- 1. Time
+  -- 1. Time, with the overall completion: work done / (work done + estimated work left);
+  --    by finished scenes when there is no estimate yet
   card("Work time")
   local work_total = sel_mode and project_scene_total_sec or grand_total
-  out('<div class="big">' .. fmt_h(work_total) .. '</div>')
+  if any_estimate and work_total + remaining_work > 0 then
+    local frac = work_total / (work_total + remaining_work)
+    out('<div class="big">' .. math.floor(frac * 100 + 0.5) .. '% done</div>')
+    bar(frac)
+    row("Done", fmt_h(work_total))
+    row("Left (est.)", fmt_h(remaining_work))
+    row("Total (est.)", fmt_h(work_total + remaining_work))
+  else
+    local frac = n_scenes > 0 and n_finished / n_scenes or 0
+    out('<div class="big">' .. math.floor(frac * 100 + 0.5) .. '% done</div>')
+    bar(frac)
+    out('<div class="note">By finished scenes - no work estimate yet (needs a finished stage).</div>')
+    row("Done", fmt_h(work_total))
+  end
+  row("Scenes finished", string.format("%d / %d", n_finished, n_scenes))
+  out('<div class="note" style="border-top:1px solid var(--line);margin:6px 0 2px"></div>')
   if not sel_mode then
     local cutoff = os.date("%Y-%m-%d", os.time() - 6 * 86400)
     local last7 = 0
@@ -1059,32 +1100,17 @@ local function analyze()
   end
   out('</div>')
 
-  -- 3. Progress by stage: a stage is done for a scene when all its items there are muted
-  --    (skipped stages count as done); remaining = EDL source of the scenes not done yet
-  local n_scenes = 0
-  for _, sc in ipairs(scenes) do if shown(sc) then n_scenes = n_scenes + 1 end end
-  local remaining_work, any_estimate = 0, false   -- seconds of work still needed (estimate)
+  -- 3. Progress by stage (computed above)
   local per_stage = {}
   card("Progress")
-  for _, stg in ipairs(STAGES) do
-    if stage_exists[stg.key] then
-      local done, rem_src = 0, 0
-      for _, sc in ipairs(scenes) do
-        if shown(sc) then
-          if stage_done(sc, stg.key) then done = done + 1 else rem_src = rem_src + sc.source_length_sec end
-        end
-      end
-      local rate = stage_rate(stg)
-      local est = rate and rem_src / rate
-      if est then remaining_work = remaining_work + est; any_estimate = true end
-      per_stage[#per_stage + 1] = { stg = stg, rem_src = rem_src }
-      row(stg.label .. " <small>(" .. stg.src .. ")</small>", string.format("%d / %d", done, n_scenes))
-      bar(n_scenes > 0 and done / n_scenes or 0)
-      row("&nbsp;&nbsp;source left · est. work", fmt_dur(rem_src) .. " · " .. (est and fmt_h(est) or "N/A"))
-    end
+  for _, si in ipairs(stage_info) do
+    local stg = si.stg
+    per_stage[#per_stage + 1] = { stg = stg, rem_src = si.rem_src }
+    row(stg.label .. " <small>(" .. stg.src .. ")</small>", string.format("%d / %d", si.done, n_scenes))
+    bar(n_scenes > 0 and si.done / n_scenes or 0)
+    row("&nbsp;&nbsp;source left · est. work", fmt_dur(si.rem_src) .. " · " .. (si.est and fmt_h(si.est) or "N/A"))
   end
-  row("Scenes finished", string.format("%d / %d", (function()
-    local n = 0; for _, sc in ipairs(scenes) do if shown(sc) and sc.is_done then n = n + 1 end end; return n end)(), n_scenes))
+  row("Scenes finished", string.format("%d / %d", n_finished, n_scenes))
   out('<div class="note">Finished = every stage done (items muted in EDL / Mic Selected / Edited).</div>')
   bar(project_film_total_sec > 0 and completed_film_sec / project_film_total_sec or 0)
   if any_estimate then row("Estimated work left", '<span class="big">' .. fmt_h(remaining_work) .. '</span>') end

@@ -104,7 +104,9 @@ local function has(h, s) return h:find(s, 1, true) ~= nil end
 -- Whole project ------------------------------------------------------------------
 local all = run({})
 check("overview + project-wide figures", has(all, "<h2>Overview</h2>") and has(all, "Per day (typical)") and has(all, "Without a scene"))
-check("work time total 2.7h", has(all, '<div class="big">2.7h</div>') and has(all, "Last 7 days"))
+check("work time total 2.7h", has(all, "<b>Done</b><span>2.7h</span>") and has(all, "Last 7 days"))
+check("work time completion 51% (2.7h done + 2.6h left)", has(all, '<div class="big">51% done</div>')
+  and has(all, "<b>Left (est.)</b><span>2.6h</span>") and has(all, "<b>Total (est.)</b><span>5.3h</span>"))
 check("every work type in the table", has(all, '<td class="l">denoise</td>') and has(all, '<td class="l">check</td>'))
 check("all three scenes listed", has(all, ">10<") and has(all, ">11<") and has(all, ">12<"))
 check("EDL total source 1400s", has(all, "1400s"))
