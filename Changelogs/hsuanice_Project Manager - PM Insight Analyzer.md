@@ -7,6 +7,10 @@ PM Insight Analyzer
 
 **Removed from ReaPack** (2026-10-15) while it is a work in progress; the script stays in the repository (`@noindex`) as a backup.
 
+## 26.1026.2327pre1
+
+- Change: Progress lists the latest step on top - Scenes finished, Denoise (Edited), Editing (Mic Selected), then Mic select (EDL) at the bottom.
+
 ## 26.1026.2314pre1
 
 - Change: Progress Source / Film switch now also switches the lengths - each stage shows 'source done' or 'film done' (done / total) and 'source left' or 'film left' with the estimated work - so the switch is visible even when both percentages happen to round the same.

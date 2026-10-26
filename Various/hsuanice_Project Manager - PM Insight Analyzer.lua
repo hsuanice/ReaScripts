@@ -1,10 +1,10 @@
 --[[
 @description Project Manager - PM Insight Analyzer: work-time analysis of PM Timer logs (work in progress)
-@version 26.1026.2314pre1
+@version 26.1026.2327pre1
 @author hsuanice
 @noindex  (kept in the repository as a backup; not offered on ReaPack while it is a work in progress)
 @changelog
-  - Change: Progress Source / Film switch now also switches the lengths - each stage shows 'source done' or 'film done' (done / total) and 'source left' or 'film left' with the estimated work - so the switch is visible even when both percentages happen to round the same.
+  - Change: Progress lists the latest step on top - Scenes finished, Denoise (Edited), Editing (Mic Selected), then Mic select (EDL) at the bottom.
 @about
   Read-only analysis script. Auto-detects project type:
 
@@ -1150,14 +1150,15 @@ local function analyze()
   end
   card("Progress")
   out('<div class="pmode"><button data-m="source">Source</button><button data-m="film">Film</button></div>')
-  for _, si in ipairs(stage_info) do
-    local stg = si.stg
-    per_stage[#per_stage + 1] = { stg = stg, rem_src = si.rem_src }
+  -- Latest step on top (user 26.1026): Scenes finished, Denoise, Editing, Mic select at the bottom
+  by_mode("Scenes finished", string.format("%d / %d", n_finished, n_scenes), fin_film, fin_src)
+  out('<div class="note">Finished = every stage done (items muted in EDL / Mic Selected / Edited).</div>')
+  for _, si in ipairs(stage_info) do per_stage[#per_stage + 1] = { stg = si.stg, rem_src = si.rem_src } end
+  for i = #stage_info, 1, -1 do
+    local si, stg = stage_info[i], stage_info[i].stg
     by_mode(stg.label .. " <small>(" .. stg.src .. ")</small>", string.format("%d / %d", si.done, n_scenes),
       si.done_film, si.done_src, si.est or false)
   end
-  by_mode("Scenes finished", string.format("%d / %d", n_finished, n_scenes), fin_film, fin_src)
-  out('<div class="note">Finished = every stage done (items muted in EDL / Mic Selected / Edited).</div>')
   if any_estimate then row("Estimated work left", '<span class="big">' .. fmt_h(remaining_work) .. '</span>') end
   out('</div>')
 
