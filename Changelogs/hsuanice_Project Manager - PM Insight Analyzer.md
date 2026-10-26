@@ -7,6 +7,10 @@ PM Insight Analyzer
 
 **Removed from ReaPack** (2026-10-15) while it is a work in progress; the script stays in the repository (`@noindex`) as a backup.
 
+## 26.1026.2310pre1
+
+- New: Progress card has a Source / Film switch - each stage and Scenes finished as % of the EDL source or of the film of the scenes where it is done, with the scene count in brackets. Default Source; the choice is remembered in the browser.
+
 ## 26.1026.2304pre1
 
 - Fix: an ungrouped Mic Selected / Edited item that only touches a scene edge (ends where the next scene starts) was also counted for the next scene, because of a tiny floating-point difference - its muted items made e.g. Denoise done there before Editing. An item must now overlap a scene by more than half a frame (same fix as PM Timer's Shots count).

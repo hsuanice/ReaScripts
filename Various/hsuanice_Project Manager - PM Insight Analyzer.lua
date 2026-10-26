@@ -1,10 +1,10 @@
 --[[
 @description Project Manager - PM Insight Analyzer: work-time analysis of PM Timer logs (work in progress)
-@version 26.1026.2304pre1
+@version 26.1026.2310pre1
 @author hsuanice
 @noindex  (kept in the repository as a backup; not offered on ReaPack while it is a work in progress)
 @changelog
-  - Fix: an ungrouped Mic Selected / Edited item that only touches a scene edge (ends where the next scene starts) was also counted for the next scene, because of a tiny floating-point difference - its muted items made e.g. Denoise done there before Editing. An item must now overlap a scene by more than half a frame (same fix as PM Timer's Shots count).
+  - New: Progress card has a Source / Film switch - each stage and Scenes finished as % of the EDL source or of the film of the scenes where it is done, with the scene count in brackets. Default Source; the choice is remembered in the browser.
 @about
   Read-only analysis script. Auto-detects project type:
 
@@ -219,6 +219,9 @@ a{color:var(--acc);text-decoration:none}a:hover{text-decoration:underline}
 .card th,.card td{padding:3px 4px;font-size:12px}.card td:last-child,.card th{white-space:normal}
 .card th:first-child,.card td:first-child{width:22%}
 details{margin-top:18px}summary{cursor:pointer;font-size:16px;font-weight:600;padding:6px 0}
+.pm[data-m="film"]{display:none}html[data-pm="film"] .pm[data-m="film"]{display:block}html[data-pm="film"] .pm[data-m="source"]{display:none}
+.pmode{display:flex;gap:4px;margin:-2px 0 8px}.pmode button{flex:1;font:600 12px -apple-system,Helvetica,sans-serif;padding:4px 8px;border:1px solid var(--line);border-radius:6px;background:var(--head);color:var(--mut);cursor:pointer}
+.pmode button.on{background:var(--acc);border-color:var(--acc);color:#fff}
 .top{position:fixed;right:16px;bottom:16px;background:var(--card);border:1px solid var(--line);border-radius:20px;padding:6px 12px}
 </style></head><body><main>]]
 
@@ -1028,18 +1031,31 @@ local function analyze()
   end
   local remaining_work, any_estimate = 0, false   -- seconds of work still needed (estimate)
   local stage_info = {}
+  local tot_film, tot_src, fin_film, fin_src = 0, 0, 0, 0
+  for _, sc in ipairs(scenes) do
+    if shown(sc) then
+      tot_film, tot_src = tot_film + sc.length_sec, tot_src + sc.source_length_sec
+      if sc.is_done then fin_film, fin_src = fin_film + sc.length_sec, fin_src + sc.source_length_sec end
+    end
+  end
   for _, stg in ipairs(STAGES) do
     if stage_exists[stg.key] then
-      local done, rem_src = 0, 0
+      local done, rem_src, done_film, done_src = 0, 0, 0, 0
       for _, sc in ipairs(scenes) do
         if shown(sc) then
-          if stage_done(sc, stg.key) then done = done + 1 else rem_src = rem_src + sc.source_length_sec end
+          if stage_done(sc, stg.key) then
+            done = done + 1
+            done_film, done_src = done_film + sc.length_sec, done_src + sc.source_length_sec
+          else
+            rem_src = rem_src + sc.source_length_sec
+          end
         end
       end
       local rate = stage_rate(stg)
       local est = rate and rem_src / rate
       if est then remaining_work = remaining_work + est; any_estimate = true end
-      stage_info[#stage_info + 1] = { stg = stg, done = done, rem_src = rem_src, est = est }
+      stage_info[#stage_info + 1] = { stg = stg, done = done, rem_src = rem_src, est = est,
+        done_film = done_film, done_src = done_src }
     end
   end
 
@@ -1115,18 +1131,29 @@ local function analyze()
   out('</div>')
 
   -- 3. Progress by stage (computed above)
+  --    Shown as % of the EDL source or of the film (Source / Film switch at the top of the
+  --    card, remembered in the browser), with the scene count
   local per_stage = {}
+  local function by_mode(label, count, d_film, d_src)
+    for _, m in ipairs({ { "source", d_src, tot_src }, { "film", d_film, tot_film } }) do
+      local frac = m[3] > 0 and m[2] / m[3] or 0
+      out('<div class="pm" data-m="' .. m[1] .. '">')
+      row(label, string.format('%d%% <small>(%s)</small>', math.floor(frac * 100 + 0.5), count))
+      bar(frac)
+      out('</div>')
+    end
+  end
   card("Progress")
+  out('<div class="pmode"><button data-m="source">Source</button><button data-m="film">Film</button></div>')
   for _, si in ipairs(stage_info) do
     local stg = si.stg
     per_stage[#per_stage + 1] = { stg = stg, rem_src = si.rem_src }
-    row(stg.label .. " <small>(" .. stg.src .. ")</small>", string.format("%d / %d", si.done, n_scenes))
-    bar(n_scenes > 0 and si.done / n_scenes or 0)
+    by_mode(stg.label .. " <small>(" .. stg.src .. ")</small>", string.format("%d / %d", si.done, n_scenes),
+      si.done_film, si.done_src)
     row("&nbsp;&nbsp;source left · est. work", fmt_dur(si.rem_src) .. " · " .. (si.est and fmt_h(si.est) or "N/A"))
   end
-  row("Scenes finished", string.format("%d / %d", n_finished, n_scenes))
+  by_mode("Scenes finished", string.format("%d / %d", n_finished, n_scenes), fin_film, fin_src)
   out('<div class="note">Finished = every stage done (items muted in EDL / Mic Selected / Edited).</div>')
-  bar(project_film_total_sec > 0 and completed_film_sec / project_film_total_sec or 0)
   if any_estimate then row("Estimated work left", '<span class="big">' .. fmt_h(remaining_work) .. '</span>') end
   out('</div>')
 
@@ -1437,6 +1464,12 @@ local function analyze()
   out('</details>')
   out('<a class="top" href="#top">↑ Top</a></main>')
   -- a scene link opens the collapsed section it points into
+  -- Progress Source / Film switch (choice remembered in this browser)
+  out([[<script>(function(){var k="pm_progress_mode",m="source";try{m=localStorage.getItem(k)||m}catch(e){}
+function set(v){m=v;document.documentElement.setAttribute("data-pm",v);
+document.querySelectorAll(".pmode button").forEach(function(b){b.classList.toggle("on",b.dataset.m===v)});
+try{localStorage.setItem(k,v)}catch(e){}}
+document.querySelectorAll(".pmode button").forEach(function(b){b.addEventListener("click",function(){set(b.dataset.m)})});set(m);})();</script>]])
   out('<script>document.querySelectorAll(\'a[href^="#s"]\').forEach(function(a){a.addEventListener("click",'
     .. 'function(){var t=document.querySelector(a.getAttribute("href"));var d=t&&t.closest("details");if(d)d.open=true;});});</script>')
   out('</body></html>')

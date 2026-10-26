@@ -108,7 +108,7 @@ local function has(h, s) return h:find(s, 1, true) ~= nil end
 local all = run({})
 check("overview + project-wide figures", has(all, "<h2>Overview</h2>") and has(all, "Per day (typical)") and has(all, "Without a scene"))
 check("an Edited item that only touches scene 12 does not make its denoise done (1 / 3)",
-  has(all, "<b>Denoise <small>(Edited)</small></b><span>1 / 3</span>"))
+  has(all, '<b>Denoise <small>(Edited)</small></b><span>36% <small>(1 / 3)</small></span>'))
 check("work time total 2.7h, no time estimate", has(all, '<b>Work time</b><span><span class="big" style="font-size:18px">2.7h</span>')
   and has(all, "Last 7 days") and not has(all, "Left (est.)") and not has(all, "Total (est.)"))
 -- film: scene 11 is muted on Scene Cut (not finished); source: scene 10 is finished (not muted)
@@ -124,15 +124,24 @@ check("EDL total source 1400s", has(all, "1400s"))
 check("no target yet: hint to set it in PM Timer", has(all, "Set the target hours and the delivery date in PM Timer"))
 
 -- finished = every stage done; the Scene Cut mute of scene 11 does not count
-check("scenes finished 1 / 3 (Scene Cut mute ignored)", has(all, "Scenes finished</b><span>1 / 3"))
+check("scenes finished 1 / 3 (Scene Cut mute ignored)", has(all, "Scenes finished</b><span>1 / 3")
+  and has(all, 'Scenes finished</b><span>36% <small>(1 / 3)</small>'))
 check("efficiency from scene 10 only: film 60s / 6000s = 0m 36s", has(all, "Film per hour</b><span>0m 36s"))
 check("efficiency: source 300s / 6000s = 3m 0s", has(all, "Source (EDL) per hour</b><span>3m 0s"))
 check("efficiency note", has(all, "1 finished scene: film 60s · source 300s · work 1.7h"))
 
 -- stages: EDL muted = mic select done; Mic Selected skipped when Edited has items
-check("Mic select stage 2 / 3", has(all, "Mic select <small>(EDL)</small></b><span>2 / 3"))
-check("Editing stage 2 / 3 (scene 11 skipped Mic Selected)", has(all, "Editing <small>(Mic Selected)</small></b><span>2 / 3"))
-check("Denoise stage 1 / 3", has(all, "Denoise <small>(Edited)</small></b><span>1 / 3"))
+-- Progress: % of the EDL source (840s) and of the film (180s); scenes 10 + 11 = 480s / 90s, scene 10 = 300s / 60s
+check("Mic select stage 2 / 3: source 57%, film 50%",
+  has(all, "Mic select <small>(EDL)</small></b><span>57% <small>(2 / 3)</small>")
+  and has(all, "Mic select <small>(EDL)</small></b><span>50% <small>(2 / 3)</small>"))
+check("Editing stage 2 / 3 (scene 11 skipped Mic Selected)",
+  has(all, "Editing <small>(Mic Selected)</small></b><span>57% <small>(2 / 3)</small>"))
+check("Denoise stage 1 / 3: source 36%, film 33%",
+  has(all, "Denoise <small>(Edited)</small></b><span>36% <small>(1 / 3)</small>")
+  and has(all, "Denoise <small>(Edited)</small></b><span>33% <small>(1 / 3)</small>"))
+check("Progress Source / Film switch", has(all, '<div class="pmode"><button data-m="source">Source</button><button data-m="film">Film</button></div>')
+  and has(all, '<div class="pm" data-m="film">') and has(all, 'localStorage'))
 check("remaining source + estimate per stage", has(all, "360s · 0.5h") and has(all, "360s · 1.2h") and has(all, "540s · 0.9h"))
 check("estimated work left 2.6h", has(all, 'Estimated work left</b><span><span class="big">2.6h'))
 check("scene table has stage columns", has(all, "<th>Mic select ✓</th>") and has(all, "<th>Denoise ✓</th>"))
