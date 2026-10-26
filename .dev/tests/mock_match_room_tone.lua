@@ -1,5 +1,6 @@
 -- @noindex  (local test for Items Properties/hsuanice_Match Room Tone of Joined Items.lua; not a ReaPack package)
--- Mock REAPER project with synthetic audio: each item has a room tone level and speech bursts.
+-- Mock REAPER project with synthetic audio. Each take has a source file: room tone level,
+-- speech bursts and movement noise, given in source time; the item plays part of it.
 -- usage (repo root): lua .dev/tests/mock_match_room_tone.lua
 local REPO = debug.getinfo(1, "S").source:match("^@(.*)/%.dev/tests/") or "."
 local SCRIPT = REPO .. "/Items Properties/hsuanice_Match Room Tone of Joined Items.lua"
@@ -7,12 +8,19 @@ local SCRIPT = REPO .. "/Items Properties/hsuanice_Match Room Tone of Joined Ite
 local tracks, mb, VIEW
 local function amp(dbv) return 10 ^ (dbv / 20) end
 local function new_track(name) local t = { name = name, items = {}, depth = 0 }; tracks[#tracks + 1] = t; return t end
--- noise_db: room tone; speech: fraction of the item that is speech at -20 dB (bursts in the middle)
+-- noise_db: room tone of the file; speech: fraction of the ITEM's part that is speech (-20 dB,
+-- in its middle). o.offs / o.src_len: where the item sits in a longer file; o.motion: list of
+-- {from, to, db} in source time (louder noise such as movement)
 local function new_item(tr, pos, len, noise_db, speech, o)
   o = o or {}
+  local offs = o.offs or 0
+  local sp = speech or 0.5
+  local take = { vol = o.take_vol or 1, noise = amp(noise_db), src_ch = o.ch or 1, offs = offs,
+    src_len = o.src_len or (offs + len), rate = 1, motion = o.motion or {},
+    speech = { offs + len * (0.5 - sp / 2), offs + len * (0.5 + sp / 2) } }
   local it = { tr = tr, pos = pos, len = len, sel = o.sel ~= false, vol = o.vol or 1, lock = o.lock or 0,
-    take = { vol = o.take_vol or 1, noise = amp(noise_db), speech = speech or 0.5, src_ch = o.ch or 1 } }
-  it.take.item = it
+    take = take, fades = { D_FADEINLEN = 0.1, D_FADEOUTLEN = 0.1, D_FADEINLEN_AUTO = 0, D_FADEOUTLEN_AUTO = 0 } }
+  take.item = it
   tr.items[#tr.items + 1] = it
   return it
 end
@@ -21,23 +29,39 @@ local function all_items() local o = {}; for _, t in ipairs(tracks) do for _, i 
 local function sel_items() local o = {}; for _, i in ipairs(all_items()) do if i.sel then o[#o + 1] = i end end; return o end
 local function idx_of(t) for i, x in ipairs(tracks) do if x == t then return i end end end
 
+local function src_amp(tk, ts)
+  if ts >= tk.speech[1] and ts < tk.speech[2] then return amp(-20) end
+  for _, m in ipairs(tk.motion) do if ts >= m[1] and ts < m[2] then return amp(m[3]) end end
+  return tk.noise
+end
+
 reaper = {
   CountSelectedMediaItems = function() return #sel_items() end,
   GetSelectedMediaItem = function(_, i) return sel_items()[i + 1] end,
   GetMediaItem_Track = function(it) return it.tr end,
   GetMediaItemInfo_Value = function(it, k)
     if k == "D_POSITION" then return it.pos elseif k == "D_LENGTH" then return it.len
-    elseif k == "D_VOL" then return it.vol elseif k == "C_LOCK" then return it.lock end
+    elseif k == "D_VOL" then return it.vol elseif k == "C_LOCK" then return it.lock
+    elseif it.fades[k] then return it.fades[k] end
     return 0
+  end,
+  SetMediaItemInfo_Value = function(it, k, v)
+    if k == "D_LENGTH" then it.len = v elseif it.fades[k] then it.fades[k] = v end
   end,
   GetActiveTake = function(it) return it.take end,
   TakeIsMIDI = function() return false end,
   GetMediaItemTake_Source = function(t) return t end,
   GetMediaSourceNumChannels = function(t) return t.src_ch end,
-  GetMediaItemTakeInfo_Value = function(t, k) if k == "D_VOL" then return t.vol end return 0 end,
-  SetMediaItemTakeInfo_Value = function(t, k, v) if k == "D_VOL" then t.vol = v end end,
-  -- the accessor plays the take at its current take volume (worst case for the script)
-  CreateTakeAudioAccessor = function(t) return { take = t, gain = t.vol } end,
+  GetMediaSourceLength = function(t) return t.src_len, false end,
+  GetMediaItemTakeInfo_Value = function(t, k)
+    if k == "D_VOL" then return t.vol elseif k == "D_STARTOFFS" then return t.offs elseif k == "D_PLAYRATE" then return t.rate end
+    return 0
+  end,
+  SetMediaItemTakeInfo_Value = function(t, k, v)
+    if k == "D_VOL" then t.vol = v elseif k == "D_STARTOFFS" then t.offs = v end
+  end,
+  -- the accessor plays the take as it is when created, at its take volume (worst case)
+  CreateTakeAudioAccessor = function(t) return { take = t, gain = t.vol, offs = t.offs, len = t.item.len } end,
   DestroyAudioAccessor = function() end,
   new_array = function(n)
     local a = {}
@@ -45,12 +69,9 @@ reaper = {
     return a
   end,
   GetAudioAccessorSamples = function(acc, sr, nch, t0, n, buf)
-    local tk = acc.take
-    local len = tk.item.len
-    local s_from, s_to = len * (0.5 - tk.speech / 2), len * (0.5 + tk.speech / 2)
     for i = 0, n - 1 do
       local t = t0 + i / sr
-      local a = (t >= s_from and t < s_to) and amp(-20) or tk.noise
+      local a = (t < acc.len) and src_amp(acc.take, acc.offs + t) or 0
       local v = ((i % 2 == 0) and 1 or -1) * a * acc.gain
       for c = 1, nch do buf[i * nch + c] = v end
     end
@@ -104,31 +125,49 @@ setup()
 t1 = new_track("DIA")
 A = new_item(t1, 0, 10, -60, 0.5)
 B = new_item(t1, 10, 4, -60, 0.5, { vol = amp(6) })            -- item volume +6 dB
-C = new_item(t1, 14, 4, -63, 0.5, { take_vol = amp(-3) })      -- already -3 dB take volume
+C = new_item(t1, 14, 4, -63, 0.5, { take_vol = amp(-3) })      -- heard -66 dB
 dofile(SCRIPT)
 check("item volume +6 dB compensated by take volume -6 dB", near_db(B.take.vol, amp(-6)))
 check("existing -3 dB take volume (heard -66): +6 dB -> +3 dB", near_db(C.take.vol, amp(3)))
 check("no window when nothing was skipped", mb == nil)
 
--- 3. speech all the way through measures at speech level (-20) -> far off -> mismatch track;
---    a pure room tone item (no speech) is measured normally; the reference must have pauses
+-- 3. speech all the way through -> far off -> mismatch track; room tone only item measured;
+--    the reference must have pauses
 setup()
 t1 = new_track("DIA")
 A = new_item(t1, 0, 10, -60, 0.5)
 B = new_item(t1, 10, 4, -50, 1.0)
-C = new_item(t1, 14, 3, -57, 0)                    -- room tone only
+C = new_item(t1, 14, 3, -57, 0)
 dofile(SCRIPT)
 check("speech all through -> moved", B.tr ~= t1 and near_db(B.take.vol, 1, 0.01))
 check("room tone only item matched (-3 dB)", near_db(C.take.vol, amp(-3)))
 setup()
 t1 = new_track("DIA")
-A = new_item(t1, 0, 12, -50, 1.0)                  -- longest, but speech all the way through
-B = new_item(t1, 12, 8, -60, 0.5)                  -- has pauses -> reference
+A = new_item(t1, 0, 12, -50, 1.0)
+B = new_item(t1, 12, 8, -60, 0.5)
 C = new_item(t1, 20, 4, -54, 0.5)
 dofile(SCRIPT)
 check("reference = longest item with pauses", near_db(B.take.vol, 1, 0.01) and near_db(C.take.vol, amp(-6)) and A.tr ~= t1)
 
--- 4. never outside the view; unselected items are not part of a group; a gap splits groups
+-- 4. the WHOLE file is measured: movement in the item's pauses, clean room tone in the handles
+setup()
+t1 = new_track("DIA")
+A = new_item(t1, 0, 10, -60, 0.5)
+-- B plays 30..34 s of a 60 s file whose room tone is -60, but its own pauses are full of movement (-45)
+B = new_item(t1, 10, 4, -60, 0.6, { offs = 30, src_len = 60, motion = { { 30, 34, -45 } } })
+dofile(SCRIPT)
+check("movement in the pauses ignored: matched by the whole file (no change)", near_db(B.take.vol, 1, 0.05))
+check("listed: own part louder than the quietest of the file", mb and mb:find("louder than the quietest of its file", 1, true) ~= nil)
+check("item restored after the measurement", near_db(B.take.offs + 1, 31, 0.001) and math.abs(B.len - 4) < 1e-9
+  and math.abs(B.fades.D_FADEINLEN - 0.1) < 1e-9 and math.abs(B.fades.D_FADEOUTLEN - 0.1) < 1e-9)
+setup()
+t1 = new_track("DIA")
+A = new_item(t1, 0, 10, -60, 0.5)
+B = new_item(t1, 10, 4, -54, 0.5, { offs = 20, src_len = 50 })     -- clean file, 6 dB louder
+dofile(SCRIPT)
+check("longer clean file: -6 dB as before, nothing listed", near_db(B.take.vol, amp(-6)) and mb == nil)
+
+-- 5. never outside the view; unselected items are not part of a group; a gap splits groups
 setup()
 t1 = new_track("DIA")
 A = new_item(t1, 0, 10, -60, 0.5)
@@ -140,11 +179,11 @@ setup()
 t1 = new_track("DIA")
 A = new_item(t1, 0, 10, -60, 0.5)
 B = new_item(t1, 10, 4, -54, 0.5, { sel = false })
-C = new_item(t1, 14.5, 4, -54, 0.5)                             -- gap after A, B unselected
+C = new_item(t1, 14.5, 4, -54, 0.5)
 dofile(SCRIPT)
 check("unselected item untouched, gap = separate groups", near_db(B.take.vol, 1, 0.01) and near_db(C.take.vol, 1, 0.01))
 
--- 5. stereo items, folder end kept on the new track
+-- 6. stereo items, folder end kept on the new track
 setup()
 local fold = new_track("Folder"); fold.depth = 1
 t1 = new_track("DIA"); t1.depth = -1

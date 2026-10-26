@@ -1,18 +1,20 @@
 --[[
 @description Match Room Tone of Joined Items - level-match the background noise of touching / crossfaded items (take volume)
-@version 26.1026.1430pre1
+@version 26.1026.1446pre1
 @author hsuanice
 @changelog
   - Initial release: level-match the room tone of touching / crossfaded selected items by take volume (reference = the longest item with pauses); more than 12 dB off -> moved to a '<track> - RT mismatch' track; only groups fully in view.
+  - Room tone is measured on the WHOLE source file (quietest 10 %), so movement in the trimmed pauses does not count; an item whose own part is more than 6 dB louder than its file's quietest is listed.
 @about
   Makes the room tone of joined items the same level, so they can be glued and denoised in one
   pass (e.g. in RX) without the background jumping between takes.
 
   - Selected items on the same track (and fixed lane) that touch or crossfade form a group;
     a gap starts a new group. Unselected items are never changed.
-  - Room tone level of an item = the mean of its quietest 10 % (50 ms windows, all channels;
-    digital silence ignored), measured on the part of the source the item plays, including
-    the item volume.
+  - Room tone level of an item = the mean of the quietest 10 % of its WHOLE source file (50 ms
+    windows, all channels; digital silence ignored), so pauses full of movement in the trimmed
+    part do not count; the item volume is included. When the item's own part is more than 6 dB
+    louder than that, the item is listed (noise may change within the file).
   - Each group matches the room tone of its longest item that has pauses (quiet and loud parts),
     else of its longest item: only the take volume of the other items changes (dialogue level
     changes with it).
@@ -36,7 +38,8 @@ local QUIET_SHARE   = 0.10   -- the quietest share of the item that counts as ro
 local WINDOW_SEC    = 0.05   -- analysis window
 local MAX_CHANGE_DB = 12     -- more than this: move the item to the mismatch track
 local SPREAD_DB     = 10     -- quiet part this much below the loud part = the item has pauses
-local ANALYSIS_SR   = 24000  -- analysis sample rate (the accessor resamples)
+local ANALYSIS_SR   = 16000  -- analysis sample rate (the accessor resamples; whole files are read)
+local NOTE_DIFF_DB  = 6      -- whole file this much quieter than the item's own part: listed
 local MISMATCH_SUFFIX = " - RT mismatch"
 ---------------------------------------------------------------------------
 
@@ -50,37 +53,10 @@ end
 
 local function fmt_time(t) return r.format_timestr_pos(t, "", 5) end
 
--- Room tone level (dB, take volume and item volume excluded): returns level_db, has_pauses
--- (quiet and loud parts both present), or nil + reason
-local function room_tone_db(item)
-  local take = r.GetActiveTake(item)
-  if not take or r.TakeIsMIDI(take) then return nil, "no audio take" end
-  local src = r.GetMediaItemTake_Source(take)
-  local nch = math.max(1, math.floor(r.GetMediaSourceNumChannels(src)))
-  local len = r.GetMediaItemInfo_Value(item, "D_LENGTH")
-  if len < WINDOW_SEC * 4 then return nil, "too short to measure" end
-
-  -- measure the source as the take plays it, with take volume 1 (restored right after)
-  local vol = r.GetMediaItemTakeInfo_Value(take, "D_VOL")
-  r.SetMediaItemTakeInfo_Value(take, "D_VOL", 1)
-  local acc = r.CreateTakeAudioAccessor(take)
-  local win = math.floor(ANALYSIS_SR * WINDOW_SEC)
-  local powers = {}
-  local buf = r.new_array(win * nch)
-  local t = 0
-  while t + WINDOW_SEC <= len + 1e-9 do
-    buf.clear()
-    r.GetAudioAccessorSamples(acc, ANALYSIS_SR, nch, t, win, buf)
-    local sum = 0
-    for i = 1, win * nch do local v = buf[i]; sum = sum + v * v end
-    local p = sum / (win * nch)
-    if p > 1e-12 then powers[#powers + 1] = p end   -- digital silence (-120 dB) ignored
-    t = t + WINDOW_SEC
-  end
-  r.DestroyAudioAccessor(acc)
-  r.SetMediaItemTakeInfo_Value(take, "D_VOL", vol)
-
-  if #powers < 4 then return nil, "no audio to measure" end
+-- Mean power of the quietest QUIET_SHARE of a list of window powers (dB), and whether the
+-- list has pauses (its loud part is SPREAD_DB above the quiet part)
+local function quiet_level(powers)
+  if #powers < 4 then return nil end
   table.sort(powers)
   local n = math.max(1, math.floor(#powers * QUIET_SHARE))
   local q = 0
@@ -88,6 +64,69 @@ local function room_tone_db(item)
   q = q / n
   local loud = powers[math.max(1, math.floor(#powers * 0.9))]
   return 10 * math.log(q, 10), 10 * math.log(loud / q, 10) >= SPREAD_DB
+end
+
+-- Room tone of the whole source file of the item's take (dB, take and item volume excluded).
+-- The item is opened up to the full source for the measurement (position kept, take volume 1,
+-- no fades) and restored right after. Returns
+--   { full = dB of the whole file, item = dB of the part the item plays, pauses = item has
+--     pauses }  or nil + reason
+local function room_tone(item)
+  local take = r.GetActiveTake(item)
+  if not take or r.TakeIsMIDI(take) then return nil, "no audio take" end
+  local src = r.GetMediaItemTake_Source(take)
+  local nch = math.max(1, math.floor(r.GetMediaSourceNumChannels(src)))
+  local src_len = r.GetMediaSourceLength(src)
+  local rate = r.GetMediaItemTakeInfo_Value(take, "D_PLAYRATE")
+  if rate <= 0 then rate = 1 end
+  local saved = {
+    len = r.GetMediaItemInfo_Value(item, "D_LENGTH"),
+    offs = r.GetMediaItemTakeInfo_Value(take, "D_STARTOFFS"),
+    vol = r.GetMediaItemTakeInfo_Value(take, "D_VOL"),
+    fin = r.GetMediaItemInfo_Value(item, "D_FADEINLEN"), fout = r.GetMediaItemInfo_Value(item, "D_FADEOUTLEN"),
+    fina = r.GetMediaItemInfo_Value(item, "D_FADEINLEN_AUTO"), fouta = r.GetMediaItemInfo_Value(item, "D_FADEOUTLEN_AUTO"),
+  }
+  if saved.len < WINDOW_SEC * 4 then return nil, "too short to measure" end
+  local full_len = src_len / rate
+  local item_s = saved.offs / rate                -- the item's part, in timeline seconds of the file
+  local item_e = item_s + saved.len
+
+  r.SetMediaItemTakeInfo_Value(take, "D_STARTOFFS", 0)
+  r.SetMediaItemInfo_Value(item, "D_LENGTH", full_len)
+  r.SetMediaItemTakeInfo_Value(take, "D_VOL", 1)
+  for _, k in ipairs({ "D_FADEINLEN", "D_FADEOUTLEN", "D_FADEINLEN_AUTO", "D_FADEOUTLEN_AUTO" }) do
+    r.SetMediaItemInfo_Value(item, k, 0)
+  end
+  local acc = r.CreateTakeAudioAccessor(take)
+  local win = math.floor(ANALYSIS_SR * WINDOW_SEC)
+  local all, part = {}, {}
+  local buf = r.new_array(win * nch)
+  local t = 0
+  while t + WINDOW_SEC <= full_len + 1e-9 do
+    buf.clear()
+    r.GetAudioAccessorSamples(acc, ANALYSIS_SR, nch, t, win, buf)
+    local sum = 0
+    for i = 1, win * nch do local v = buf[i]; sum = sum + v * v end
+    local p = sum / (win * nch)
+    if p > 1e-12 then                              -- digital silence (-120 dB) ignored
+      all[#all + 1] = p
+      if t >= item_s - 1e-9 and t + WINDOW_SEC <= item_e + 1e-9 then part[#part + 1] = p end
+    end
+    t = t + WINDOW_SEC
+  end
+  r.DestroyAudioAccessor(acc)
+  r.SetMediaItemTakeInfo_Value(take, "D_STARTOFFS", saved.offs)
+  r.SetMediaItemInfo_Value(item, "D_LENGTH", saved.len)
+  r.SetMediaItemTakeInfo_Value(take, "D_VOL", saved.vol)
+  r.SetMediaItemInfo_Value(item, "D_FADEINLEN", saved.fin)
+  r.SetMediaItemInfo_Value(item, "D_FADEOUTLEN", saved.fout)
+  r.SetMediaItemInfo_Value(item, "D_FADEINLEN_AUTO", saved.fina)
+  r.SetMediaItemInfo_Value(item, "D_FADEOUTLEN_AUTO", saved.fouta)
+
+  local full = quiet_level(all)
+  if not full then return nil, "no audio to measure" end
+  local item_db, pauses = quiet_level(part)
+  return { full = full, item = item_db, pauses = pauses or false }
 end
 
 -- Effective room tone of an item as heard: source level x take volume x item volume
@@ -169,8 +208,16 @@ local function main()
       local ref, ref_any
       for _, info in ipairs(g.items) do
         local take = r.GetActiveTake(info.item)
-        local rt, x = room_tone_db(info.item)
-        if rt then info.rt, info.pauses = rt, x else info.why = x end
+        local m, why = room_tone(info.item)
+        if m then
+          info.rt, info.pauses = m.full, m.pauses
+          if m.item and m.item - m.full > NOTE_DIFF_DB then
+            note(info, g.track, string.format("own part %.1f dB louder than the quietest of its file (noise or "
+              .. "movement in the pauses?) - matched by the whole file", m.item - m.full))
+          end
+        else
+          info.why = why
+        end
         info.take_vol = take and r.GetMediaItemTakeInfo_Value(take, "D_VOL") or 1
         info.item_vol = r.GetMediaItemInfo_Value(info.item, "D_VOL")
         info.len = info.fin - info.pos
