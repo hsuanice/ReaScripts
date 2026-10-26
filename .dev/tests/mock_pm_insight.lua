@@ -44,7 +44,9 @@ local function build(selected)
     { name = "Mic Selected", depth = 1, items = {} },
     { name = "MS A", depth = -1, items = { item({ pos = 10, len = 20, mute = 1 }) } },
     { name = "Edited", depth = 1, items = {} },
-    { name = "ED A", depth = -1, items = { item({ pos = 10, len = 20, mute = 1 }), item({ pos = 65, len = 10 }) } },
+    { name = "ED A", depth = -1, items = { item({ pos = 10, len = 20, mute = 1 }), item({ pos = 65, len = 10 }),
+      -- muted, ends where scene 12 starts (+ a floating-point hair): belongs to scene 11 only
+      item({ pos = 85, len = 5 + 1e-9, mute = 1 }) } },
   }
   for i, t in ipairs(tracks) do t.num = i end
 end
@@ -67,6 +69,7 @@ reaper = {
   end,
   IsMediaItemSelected = function(it) return it.sel end,
   BR_GetMediaItemGUID = function(it) return it.guid end,
+  TimeMap_curFrameRate = function() return 24 end,
   GetActiveTake = function(it) return it end,
   GetTakeName = function(it) return it.name end,
   GetSetMediaItemInfo_String = function(it, k)
@@ -104,6 +107,8 @@ local function has(h, s) return h:find(s, 1, true) ~= nil end
 -- Whole project ------------------------------------------------------------------
 local all = run({})
 check("overview + project-wide figures", has(all, "<h2>Overview</h2>") and has(all, "Per day (typical)") and has(all, "Without a scene"))
+check("an Edited item that only touches scene 12 does not make its denoise done (1 / 3)",
+  has(all, "<b>Denoise <small>(Edited)</small></b><span>1 / 3</span>"))
 check("work time total 2.7h, no time estimate", has(all, '<b>Work time</b><span><span class="big" style="font-size:18px">2.7h</span>')
   and has(all, "Last 7 days") and not has(all, "Left (est.)") and not has(all, "Total (est.)"))
 -- film: scene 11 is muted on Scene Cut (not finished); source: scene 10 is finished (not muted)

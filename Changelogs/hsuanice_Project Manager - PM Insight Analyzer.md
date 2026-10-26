@@ -7,6 +7,10 @@ PM Insight Analyzer
 
 **Removed from ReaPack** (2026-10-15) while it is a work in progress; the script stays in the repository (`@noindex`) as a backup.
 
+## 26.1026.2304pre1
+
+- Fix: an ungrouped Mic Selected / Edited item that only touches a scene edge (ends where the next scene starts) was also counted for the next scene, because of a tiny floating-point difference - its muted items made e.g. Denoise done there before Editing. An item must now overlap a scene by more than half a frame (same fix as PM Timer's Shots count).
+
 ## 26.1026.2300pre1
 
 - Change: a stage with no items, and no items in any later stage, now counts as done when the scene is muted on Scene Cut - a scene without dialogue no longer stays unfinished.

@@ -1,10 +1,10 @@
 --[[
 @description Project Manager - PM Insight Analyzer: work-time analysis of PM Timer logs (work in progress)
-@version 26.1026.2300pre1
+@version 26.1026.2304pre1
 @author hsuanice
 @noindex  (kept in the repository as a backup; not offered on ReaPack while it is a work in progress)
 @changelog
-  - Change: a stage with no items, and no items in any later stage, now counts as done when the scene is muted on Scene Cut - a scene without dialogue no longer stays unfinished.
+  - Fix: an ungrouped Mic Selected / Edited item that only touches a scene edge (ends where the next scene starts) was also counted for the next scene, because of a tiny floating-point difference - its muted items made e.g. Denoise done there before Editing. An item must now overlap a scene by more than half a frame (same fix as PM Timer's Shots count).
 @about
   Read-only analysis script. Auto-detects project type:
 
@@ -732,6 +732,11 @@ local function analyze()
   }
   local scene_by_group = {}
   for _, sc in ipairs(scenes) do if sc.group ~= 0 then scene_by_group[sc.group] = sc end end
+  -- an item must overlap a scene by more than half a frame: one that only touches the scene
+  -- edge (ends where the scene starts) belongs to the neighbour, but a tiny floating-point
+  -- difference made it "overlap" (same fix as PM Timer's Shots count)
+  local fps = r.TimeMap_curFrameRate(0)
+  local edge_tol = 0.5 / ((fps and fps > 0) and fps or 24)
   local stage_exists = { edl = #edl_tracks > 0 }
   for _, stg in ipairs(STAGES) do
     if stg.key ~= "edl" then
@@ -749,7 +754,7 @@ local function analyze()
             targets[1] = scene_by_group[g]
           else
             for _, sc in ipairs(scenes) do
-              if math.min(s1, sc.end_pos) - math.max(s0, sc.start_pos) > 0 then targets[#targets + 1] = sc end
+              if math.min(s1, sc.end_pos) - math.max(s0, sc.start_pos) > edge_tol then targets[#targets + 1] = sc end
             end
           end
           for _, sc in ipairs(targets) do
