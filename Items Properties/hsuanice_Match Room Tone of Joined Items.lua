@@ -1,11 +1,11 @@
 --[[
 @description Match Room Tone of Joined Items - level-match the background noise of touching / crossfaded items (take volume)
-@version 26.1026.1501pre1
+@version 26.1026.1503pre1
 @author hsuanice
 @changelog
-  - Initial release: level-match the room tone of touching / crossfaded selected items by take volume; more than 12 dB off -> moved to a '<track> - RT mismatch' track; only groups fully in view.
+  - Initial release: level-match the room tone of touching / crossfaded selected items by take volume - however far apart the levels are; only groups fully in view.
   - Room tone is measured on the WHOLE source file (quietest 10 %), so movement in the trimmed pauses does not count; an item whose own part is more than 6 dB louder than its file's quietest is listed.
-  - Spectrum check: the room tone's 1/3-octave spectrum (63 Hz - 6.3 kHz, level removed) is compared with the group's median; a different room tone (generator, air conditioning, another room) is moved to the mismatch track with the band named.
+  - Spectrum check: the room tone's 1/3-octave spectrum (63 Hz - 6.3 kHz, level removed) is compared with the group's median; only a different room tone (generator, air conditioning, another room, or speech all the way through) is moved to a '<track> - RT mismatch' track, with the band named. A level difference alone never moves an item.
   - Progress window (gfx) while analyzing; Esc / close cancels with nothing changed; all changes applied together at the end.
 @about
   Makes the room tone of joined items the same level, so they can be glued and denoised in one
@@ -25,10 +25,11 @@
     conditioning, another room - is not level-matched. Different = one band more than 8 dB off
     or the bands more than 3 dB off on average. With only 2 items there is no majority: when
     they differ, both are listed and left alone.
-  - An item with a different room tone, or needing more than 12 dB, is not adjusted: it moves to
-    a track "<track> - RT mismatch" right below its track (created once, reused), so it can be
-    checked by ear; the window says why (e.g. "+14 dB around 100 Hz"). An item with speech all
-    the way through measures far too loud and ends up there too.
+  - The level difference alone never moves an item: the same room tone is level-matched however
+    far apart (user rule 26.1026). An item with a different room tone is not adjusted: it moves
+    to a track "<track> - RT mismatch" right below its track (created once, reused), so it can
+    be checked by ear; the window says why (e.g. "+14 dB around 100 Hz"). An item with speech
+    all the way through measures speech, whose spectrum differs, so it ends up there too.
   - The reference is chosen among the items whose room tone matches the majority.
   - Only groups fully inside the arrange view are processed (never changes what you cannot see).
   - A progress window (native gfx) shows the analysis; Esc or closing it cancels, and then
@@ -47,7 +48,8 @@ local TITLE = "Match Room Tone of Joined Items"
 ---------------------------------------------------------------------------
 local QUIET_SHARE   = 0.10   -- the quietest share of the item that counts as room tone
 local WINDOW_SEC    = 0.05   -- analysis window
-local MAX_CHANGE_DB = 12     -- more than this: move the item to the mismatch track
+local MAX_CHANGE_DB = nil    -- nil = no limit: a matching room tone is level-matched however far
+                             -- (set e.g. 24 to move items needing more to the mismatch track)
 local SPREAD_DB     = 10     -- quiet part this much below the loud part = the item has pauses
 local ANALYSIS_SR   = 16000  -- analysis sample rate (the accessor resamples; whole files are read)
 local NOTE_DIFF_DB  = 6      -- whole file this much quieter than the item's own part: listed
@@ -433,7 +435,7 @@ local function analyze(groups)
               note(info, g.track, "different room tone: " .. info.spec_off .. " - moved to the mismatch track")
             else
               local diff = target - heard_db(info)
-              if math.abs(diff) > MAX_CHANGE_DB then
+              if MAX_CHANGE_DB and math.abs(diff) > MAX_CHANGE_DB then
                 actions[#actions + 1] = { move = info.item, track = g.track }
                 note(info, g.track, string.format("needs %+.1f dB - moved to the mismatch track", diff))
               elseif math.abs(diff) >= 0.05 then

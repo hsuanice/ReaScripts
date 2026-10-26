@@ -43,6 +43,9 @@ local function src_sample(tk, ts, sr)
   z = z ~ (z >> 31)
   local v = ((z & 1) == 0 and 1 or -1) * src_amp(tk, ts)
   if tk.hum then v = v + amp(tk.hum[2]) * math.sqrt(2) * math.sin(2 * math.pi * tk.hum[1] * ts) end
+  if ts >= tk.speech[1] and ts < tk.speech[2] then          -- speech is not white: a 250 Hz part
+    v = v + amp(-23) * math.sqrt(2) * math.sin(2 * math.pi * 250 * ts)
+  end
   return v
 end
 -- REAPER's array.fft_real layout: [1] DC, [2] Nyquist, then (re, im) of bins 1 .. n/2-1
@@ -172,10 +175,10 @@ run_script()
 check("reference (longest) untouched", near_db(A.take.vol, 1, 0.01))
 check("B 6 dB louder -> take volume -6 dB", near_db(B.take.vol, amp(-6)))
 check("C 6 dB quieter (crossfaded) -> +6 dB", near_db(C.take.vol, amp(6)))
-check("D needs +20 dB -> moved, not adjusted", D.tr ~= t1 and near_db(D.take.vol, 1, 0.01))
-check("mismatch track right below, named after the track", tracks[2].name == "DIA 1 - RT mismatch" and D.tr == tracks[2] and tracks[3] == t2)
+check("D needs +20 dB, same room tone -> level-matched, not moved", D.tr == t1 and near_db(D.take.vol, amp(20), 0.3))
+check("no mismatch track when only levels differ", tracks[2] == t2 and #tracks == 2)
 check("single item group untouched", near_db(E.take.vol, 1, 0.01))
-check("window lists the moved item", mb and mb:find("moved to the mismatch track", 1, true) ~= nil)
+check("no window when everything matched", mb == nil)
 
 -- 2. item volume counts; existing take volume is kept as the starting point
 setup()
@@ -196,7 +199,8 @@ A = new_item(t1, 0, 10, -60, 0.5)
 B = new_item(t1, 10, 4, -50, 1.0)
 C = new_item(t1, 14, 3, -57, 0)
 run_script()
-check("speech all through -> moved", B.tr ~= t1 and near_db(B.take.vol, 1, 0.01))
+check("speech all through: different spectrum -> moved", B.tr ~= t1 and near_db(B.take.vol, 1, 0.01)
+  and mb and mb:find("different room tone", 1, true) ~= nil)
 check("room tone only item matched (-3 dB)", near_db(C.take.vol, amp(-3)))
 setup()
 t1 = new_track("DIA")
@@ -246,7 +250,7 @@ local fold = new_track("Folder"); fold.depth = 1
 t1 = new_track("DIA"); t1.depth = -1
 A = new_item(t1, 0, 10, -60, 0.5, { ch = 2 })
 B = new_item(t1, 10, 4, -54, 0.5, { ch = 2 })
-D = new_item(t1, 14, 2, -85, 0.4, { ch = 2 })
+D = new_item(t1, 14, 2, -60, 0.4, { ch = 2, hum = { 100, -56 } })   -- generator -> mismatch track
 run_script()
 check("stereo measured", near_db(B.take.vol, amp(-6)))
 check("folder end moves to the mismatch track", t1.depth == 0 and tracks[3].name == "DIA - RT mismatch" and tracks[3].depth == -1)
@@ -278,6 +282,16 @@ B = new_item(t1, 10, 5, -54, 0.5, { hum = { 100, -56 } })
 run_script()
 check("two different items: both listed, nothing changed", near_db(B.take.vol, 1, 0.01) and A.tr == t1 and B.tr == t1
   and mb and select(2, mb:gsub("the two items' room tone differs", "")) == 2)
+
+-- 7b. the user's test: the same item made much louder / quieter -> just level-matched
+setup()
+t1 = new_track("DIA")
+A = new_item(t1, 0, 10, -60, 0.5)
+B = new_item(t1, 10, 10, -60, 0.5, { vol = amp(24) })    -- item volume +24 dB
+C = new_item(t1, 20, 10, -60, 0.5, { take_vol = amp(-30) })
+run_script()
+check("+24 dB item volume -> take -24 dB, not moved", B.tr == t1 and near_db(B.take.vol, amp(-24), 0.3))
+check("-30 dB take volume -> back to 0 dB, not moved", C.tr == t1 and near_db(C.take.vol, 1, 0.3) and mb == nil)
 
 -- 8. progress window and cancel
 check("progress window opened for a long analysis", gfx_opened)

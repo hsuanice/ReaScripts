@@ -1,5 +1,12 @@
 # hsuanice_Match Room Tone of Joined Items.lua — Changelog
 
+## 26.1026.1503pre1
+
+- Initial release: level-match the room tone of touching / crossfaded selected items by take volume - however far apart the levels are; only groups fully in view.
+- Room tone is measured on the WHOLE source file (quietest 10 %), so movement in the trimmed pauses does not count; an item whose own part is more than 6 dB louder than its file's quietest is listed.
+- Spectrum check: the room tone's 1/3-octave spectrum (63 Hz - 6.3 kHz, level removed) is compared with the group's median; only a different room tone (generator, air conditioning, another room, or speech all the way through) is moved to a '<track> - RT mismatch' track, with the band named. A level difference alone never moves an item.
+- Progress window (gfx) while analyzing; Esc / close cancels with nothing changed; all changes applied together at the end.
+
 ## 26.1026.1501pre1
 
 - Initial release: level-match the room tone of touching / crossfaded selected items by take volume; more than 12 dB off -> moved to a '<track> - RT mismatch' track; only groups fully in view.
