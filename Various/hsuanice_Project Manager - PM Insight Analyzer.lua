@@ -1,19 +1,20 @@
 --[[
 @description Project Manager - PM Insight Analyzer: work-time analysis of PM Timer logs (work in progress)
-@version 26.1026.2327pre1
+@version 26.1026.2333pre1
 @author hsuanice
 @noindex  (kept in the repository as a backup; not offered on ReaPack while it is a work in progress)
 @changelog
-  - Change: Progress lists the latest step on top - Scenes finished, Denoise (Edited), Editing (Mic Selected), then Mic select (EDL) at the bottom.
+  - Change: the original source folder is now called ISO (a folder still called EDL keeps working); the report says ISO instead of EDL.
+  - Change: Progress shows the state the source has reached, latest on top, each in its own color: Denoised (= finished, every stage done; magenta), Edited (yellow), Mic Selected (purple) and the ISO source itself at the bottom as the base (grey blue).
 @about
   Read-only analysis script. Auto-detects project type:
 
   Dialog Project Mode (Scene Cut track present):
-    Combines scene data, EDL source lengths, and work log.
+    Combines scene data, ISO source lengths, and work log.
     Outputs per-scene efficiency metrics and project-wide summary as an
     HTML report ("<session folder name> - PM Insight.html" in the project
     folder, replaced on every run), opened in the web browser. Efficiency is computed for every work type.
-    Tracks required: "Scene Cut", "EDL" (folder).
+    Tracks required: "Scene Cut", "ISO" (folder; "EDL" in older projects).
 
   Work Log Mode (no Scene Cut track):
     Parses item names ("Proj | Scene | Module") to compute durations by
@@ -33,7 +34,9 @@
 local r = reaper
 
 local SCENE_TRACK_NAME  = "Scene Cut"
-local EDL_FOLDER_NAME   = "EDL"
+-- Original (ISO) source folder: "ISO"; older projects use "EDL" (fallback)
+local ISO_FOLDER_NAMES  = { "ISO", "EDL" }
+local EDL_FOLDER_NAME   = "ISO"   -- resolved at run time by resolve_iso_folder()
 local MIC_SELECTED_FOLDER = "Mic Selected"   -- same folder names as PM Timer
 local EDITED_FOLDER       = "Edited"
 local DURATION_LOG_NAME = "DurationOnly_Log"
@@ -543,7 +546,18 @@ document.querySelectorAll('a[href*="-p"]').forEach(function(a){a.addEventListene
 </script></body></html>]])
   write_and_open_report(h)
 end
+local function resolve_iso_folder()
+  for _, name in ipairs(ISO_FOLDER_NAMES) do
+    for i = 0, r.CountTracks(0) - 1 do
+      local _, tname = r.GetTrackName(r.GetTrack(0, i))
+      if tname == name then return name end
+    end
+  end
+  return ISO_FOLDER_NAMES[1]
+end
+
 local function analyze()
+  EDL_FOLDER_NAME = resolve_iso_folder()
 
   -- 1. Find Scene Cut track ──────────────────────────────────────────────────
   local scene_track = nil
@@ -729,9 +743,9 @@ local function analyze()
   --     scene's item group belongs to that scene; an item not grouped with any scene belongs to
   --     the scenes it overlaps. Muted = that stage is done for the item.
   local STAGES = {
-    { key = "edl",  folder = EDL_FOLDER_NAME,       wt = "mic select", label = "Mic select",  src = "EDL" },
-    { key = "sel",  folder = MIC_SELECTED_FOLDER,   wt = "editing",    label = "Editing",     src = "Mic Selected" },
-    { key = "edit", folder = EDITED_FOLDER,         wt = "denoise",    label = "Denoise",     src = "Edited" },
+    { key = "edl",  folder = EDL_FOLDER_NAME,       wt = "mic select", label = "Mic select",  src = "ISO",          state = "Mic Selected", color = "#9650ff" },
+    { key = "sel",  folder = MIC_SELECTED_FOLDER,   wt = "editing",    label = "Editing",     src = "Mic Selected", state = "Edited",       color = "#e0b400" },
+    { key = "edit", folder = EDITED_FOLDER,         wt = "denoise",    label = "Denoise",     src = "Edited",       state = "Denoised",     color = "#e040e0" },
   }
   local scene_by_group = {}
   for _, sc in ipairs(scenes) do if sc.group ~= 0 then scene_by_group[sc.group] = sc end end
@@ -999,8 +1013,12 @@ local function analyze()
   local function fmt_h(secs) return string.format("%.1fh", (secs or 0) / 3600) end
   local function card(title) out('<div class="card"><h3>' .. title .. '</h3>') end
   local function row(k, v) out('<div class="row"><b>' .. k .. '</b><span>' .. v .. '</span></div>') end
-  local function bar(frac)
+  local function bar(frac, color)
     frac = math.max(0, math.min(1, frac or 0))
+    if color then
+      out(string.format('<div class="bar"><i style="width:%.1f%%;background:%s"></i></div>', frac * 100, color))
+      return
+    end
     out(string.format('<div class="bar"><i style="width:%.1f%%"></i></div>', frac * 100))
   end
   -- Efficiency only counts finished content: work on a scene that is still in progress would
@@ -1084,8 +1102,8 @@ local function analyze()
   bar(src_all > 0 and src_done / src_all or 0)
   row("Scenes marked done", string.format("%d / %d", n_marked, n_scenes))
   row("Scenes finished", string.format("%d / %d", n_finished, n_scenes))
-  out('<div class="note">Film: scenes muted on Scene Cut. Source: EDL source of the finished scenes '
-    .. '(every stage done - items muted in EDL / Mic Selected / Edited).</div>')
+  out('<div class="note">Film: scenes muted on Scene Cut. Source: ISO source of the finished scenes '
+    .. '(every stage done - items muted in ISO / Mic Selected / Edited).</div>')
   out('<div style="border-top:1px solid var(--line);margin:8px 0 4px"></div>')
   row("Work time", '<span class="big" style="font-size:18px">' .. fmt_h(work_total) .. '</span>')
   if not sel_mode then
@@ -1111,7 +1129,7 @@ local function analyze()
   end
   card("Efficiency (finished scenes)")
   row("Film per hour", rate_or_na(done_film, done_work))
-  row("Source (EDL) per hour", rate_or_na(done_src, done_work))
+  row("Source (ISO) per hour", rate_or_na(done_src, done_work))
   if done_n > 0 then
     out('<div class="note">' .. done_n .. ' finished scene' .. (done_n > 1 and 's' or '') .. ': film ' .. fmt_dur(done_film)
       .. ' · source ' .. fmt_dur(done_src) .. ' · work ' .. fmt_h(done_work) .. '</div>')
@@ -1135,12 +1153,12 @@ local function analyze()
   --    card, remembered in the browser), with the scene count
   local per_stage = {}
   -- est: estimated work hours left for a stage (shown in both modes), nil = no left row
-  local function by_mode(label, count, d_film, d_src, est)
+  local function by_mode(label, count, d_film, d_src, est, color)
     for _, m in ipairs({ { "source", d_src, tot_src }, { "film", d_film, tot_film } }) do
       local frac = m[3] > 0 and m[2] / m[3] or 0
       out('<div class="pm" data-m="' .. m[1] .. '">')
       row(label, string.format('%d%% <small>(%s)</small>', math.floor(frac * 100 + 0.5), count))
-      bar(frac)
+      bar(frac, color)
       row("&nbsp;&nbsp;" .. m[1] .. " done", fmt_dur(m[2]) .. ' <small>/ ' .. fmt_dur(m[3]) .. '</small>')
       if est ~= nil then
         row("&nbsp;&nbsp;" .. m[1] .. " left · est. work", fmt_dur(m[3] - m[2]) .. " · " .. (est and fmt_h(est) or "N/A"))
@@ -1150,14 +1168,32 @@ local function analyze()
   end
   card("Progress")
   out('<div class="pmode"><button data-m="source">Source</button><button data-m="film">Film</button></div>')
-  -- Latest step on top (user 26.1026): Scenes finished, Denoise, Editing, Mic select at the bottom
-  by_mode("Scenes finished", string.format("%d / %d", n_finished, n_scenes), fin_film, fin_src)
-  out('<div class="note">Finished = every stage done (items muted in EDL / Mic Selected / Edited).</div>')
+  -- The state the source has reached, latest on top (user 26.1026): Denoised (= finished, every
+  -- stage done), Edited, Mic Selected, and the ISO source itself at the bottom as the base
+  local function state_label(name, color)
+    return '<span style="color:' .. color .. ';font-weight:700">' .. name .. '</span>'
+  end
   for _, si in ipairs(stage_info) do per_stage[#per_stage + 1] = { stg = si.stg, rem_src = si.rem_src } end
-  for i = #stage_info, 1, -1 do
+  local last = stage_info[#stage_info]
+  local top_is_denoise = last and last.stg.key == "edit"
+  local top_est = nil                 -- nil = no "left" row; false = left row with N/A estimate
+  if top_is_denoise then top_est = last.est or false end
+  by_mode(top_is_denoise and state_label("Denoised", last.stg.color) or "Finished",
+    string.format("%d / %d", n_finished, n_scenes), fin_film, fin_src,
+    top_est, top_is_denoise and last.stg.color or nil)
+  out('<div class="note">' .. (top_is_denoise and "Denoised = finished: " or "Finished: ")
+    .. 'every stage done (items muted in ISO / Mic Selected / Edited).</div>')
+  for i = #stage_info - (top_is_denoise and 1 or 0), 1, -1 do
     local si, stg = stage_info[i], stage_info[i].stg
-    by_mode(stg.label .. " <small>(" .. stg.src .. ")</small>", string.format("%d / %d", si.done, n_scenes),
-      si.done_film, si.done_src, si.est or false)
+    by_mode(state_label(stg.state, stg.color), string.format("%d / %d", si.done, n_scenes),
+      si.done_film, si.done_src, si.est or false, stg.color)
+  end
+  local ISO_COLOR = "#7f9cc0"
+  for _, m in ipairs({ { "source", tot_src }, { "film", tot_film } }) do
+    out('<div class="pm" data-m="' .. m[1] .. '">')
+    row(state_label("ISO", ISO_COLOR), fmt_dur(m[2]) .. ' <small>(' .. n_scenes .. ' scenes)</small>')
+    bar(1, ISO_COLOR)
+    out('</div>')
   end
   if any_estimate then row("Estimated work left", '<span class="big">' .. fmt_h(remaining_work) .. '</span>') end
   out('</div>')
@@ -1329,7 +1365,7 @@ local function analyze()
   end
 
   -- Details (collapsed)
-  out('<details><summary>Source lengths (EDL / Mic Selected / Edited)</summary>')
+  out('<details><summary>Source lengths (ISO / Mic Selected / Edited)</summary>')
   -- Source stages side by side: EDL source → Mic Selected → Edited.
   -- Ratio = stage length / film length of the scenes that have that stage;
   -- Kept = stage length / previous stage length of the same scenes.
@@ -1361,7 +1397,7 @@ local function analyze()
       out('<div><b>Scenes</b><span>' .. n .. '</span></div></div>')
     end
     out('<div class="stages">')
-    stage("Source (EDL)", fmt_dur(source_total),
+    stage("Source (ISO)", fmt_dur(source_total),
       pct(source_total, project_film_total_sec), "–", src_scenes)
     if has_sel then
       stage("Selected (Mic Selected)", fmt_dur(sel.len), pct(sel.len, sel.film), pct(sel.len, sel.prev), sel.n)
@@ -1397,7 +1433,7 @@ local function analyze()
     .. '</tr>')
   out('</table></div>')
   out('<div class="note">Film/hr and Source/hr: film / source length of every scene that has this work type, '
-    .. 'per hour of that work. Source is always the EDL source. '
+    .. 'per hour of that work. Source is always the ISO source. '
     .. (sel_mode and 'Only the selected scenes are counted.'
       or 'Project Time (work without a selected scene) is not included in the rates.') .. '</div>')
 

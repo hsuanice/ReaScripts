@@ -108,7 +108,7 @@ local function has(h, s) return h:find(s, 1, true) ~= nil end
 local all = run({})
 check("overview + project-wide figures", has(all, "<h2>Overview</h2>") and has(all, "Per day (typical)") and has(all, "Without a scene"))
 check("an Edited item that only touches scene 12 does not make its denoise done (1 / 3)",
-  has(all, '<b>Denoise <small>(Edited)</small></b><span>36% <small>(1 / 3)</small></span>'))
+  has(all, 'Denoised</span></b><span>36% <small>(1 / 3)</small></span>'))
 check("work time total 2.7h, no time estimate", has(all, '<b>Work time</b><span><span class="big" style="font-size:18px">2.7h</span>')
   and has(all, "Last 7 days") and not has(all, "Left (est.)") and not has(all, "Total (est.)"))
 -- film: scene 11 is muted on Scene Cut (not finished); source: scene 10 is finished (not muted)
@@ -125,28 +125,33 @@ check("no target yet: hint to set it in PM Timer", has(all, "Set the target hour
 
 -- finished = every stage done; the Scene Cut mute of scene 11 does not count
 check("scenes finished 1 / 3 (Scene Cut mute ignored)", has(all, "Scenes finished</b><span>1 / 3")
-  and has(all, 'Scenes finished</b><span>36% <small>(1 / 3)</small>'))
+  and has(all, 'Denoised</span></b><span>36% <small>(1 / 3)</small>'))
 check("efficiency from scene 10 only: film 60s / 6000s = 0m 36s", has(all, "Film per hour</b><span>0m 36s"))
-check("efficiency: source 300s / 6000s = 3m 0s", has(all, "Source (EDL) per hour</b><span>3m 0s"))
+check("efficiency: source 300s / 6000s = 3m 0s", has(all, "Source (ISO) per hour</b><span>3m 0s"))
 check("efficiency note", has(all, "1 finished scene: film 60s · source 300s · work 1.7h"))
 
 -- stages: EDL muted = mic select done; Mic Selected skipped when Edited has items
 -- Progress: % of the EDL source (840s) and of the film (180s); scenes 10 + 11 = 480s / 90s, scene 10 = 300s / 60s
 check("Mic select stage 2 / 3: source 57%, film 50%",
-  has(all, "Mic select <small>(EDL)</small></b><span>57% <small>(2 / 3)</small>")
-  and has(all, "Mic select <small>(EDL)</small></b><span>50% <small>(2 / 3)</small>"))
+  has(all, "Mic Selected</span></b><span>57% <small>(2 / 3)</small>")
+  and has(all, "Mic Selected</span></b><span>50% <small>(2 / 3)</small>"))
 check("Editing stage 2 / 3 (scene 11 skipped Mic Selected)",
-  has(all, "Editing <small>(Mic Selected)</small></b><span>57% <small>(2 / 3)</small>"))
+  has(all, "Edited</span></b><span>57% <small>(2 / 3)</small>"))
 check("Denoise stage 1 / 3: source 36%, film 33%",
-  has(all, "Denoise <small>(Edited)</small></b><span>36% <small>(1 / 3)</small>")
-  and has(all, "Denoise <small>(Edited)</small></b><span>33% <small>(1 / 3)</small>"))
+  has(all, "Denoised</span></b><span>36% <small>(1 / 3)</small>")
+  and has(all, "Denoised</span></b><span>33% <small>(1 / 3)</small>"))
 check("Progress Editing: done / left lengths switch too (source 480s / 840s, film 90s / 180s)",
   has(all, "source done</b><span>480s <small>/ 840s</small>") and has(all, "source left · est. work</b><span>360s · ")
   and has(all, "film done</b><span>90s <small>/ 180s</small>") and has(all, "film left · est. work</b><span>90s · "))
 do -- Progress order: latest step on top, Mic select (EDL) at the bottom
-  local a, b = all:find("Scenes finished</b><span>36%", 1, true), all:find("Denoise <small>(Edited)</small></b><span>36%", 1, true)
-  local c, d = all:find("Editing <small>(Mic Selected)</small></b><span>57%", 1, true), all:find("Mic select <small>(EDL)</small></b><span>57%", 1, true)
-  check("Progress order: finished, denoise, editing, mic select", a and b and c and d and a < b and b < c and c < d)
+  local a, b = all:find("Denoised</span></b><span>36%", 1, true), all:find("Edited</span></b><span>57%", 1, true)
+  local c, d = all:find("Mic Selected</span></b><span>57%", 1, true), all:find("ISO</span></b><span>840s <small>(3 scenes)</small>", 1, true)
+  check("Progress order (states): Denoised, Edited, Mic Selected, ISO at the bottom", a and b and c and d and a < b and b < c and c < d)
+  check("Progress state colors", has(all, 'color:#e040e0;font-weight:700">Denoised') and has(all, 'color:#e0b400;font-weight:700">Edited')
+    and has(all, 'color:#9650ff;font-weight:700">Mic Selected') and has(all, 'background:#7f9cc0'))
+  check("ISO fallback: the mock's folder is still called EDL", has(all, "ISO</span></b><span>840s"))
+  local den = all:sub(a, b)   -- the Denoised block (up to Edited) has its own left row
+  check("Denoised has a source left row (scenes 11 + 12: 540s)", has(den, "source left · est. work</b><span>540s · "))
 end
 check("Progress Source / Film switch", has(all, '<div class="pmode"><button data-m="source">Source</button><button data-m="film">Film</button></div>')
   and has(all, '<div class="pm" data-m="film">') and has(all, 'localStorage'))

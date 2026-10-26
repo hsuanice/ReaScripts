@@ -7,6 +7,11 @@ PM Insight Analyzer
 
 **Removed from ReaPack** (2026-10-15) while it is a work in progress; the script stays in the repository (`@noindex`) as a backup.
 
+## 26.1026.2333pre1
+
+- Change: the original source folder is now called ISO (a folder still called EDL keeps working); the report says ISO instead of EDL.
+- Change: Progress shows the state the source has reached, latest on top, each in its own color: Denoised (= finished, every stage done; magenta), Edited (yellow), Mic Selected (purple) and the ISO source itself at the bottom as the base (grey blue).
+
 ## 26.1026.2327pre1
 
 - Change: Progress lists the latest step on top - Scenes finished, Denoise (Edited), Editing (Mic Selected), then Mic select (EDL) at the bottom.
