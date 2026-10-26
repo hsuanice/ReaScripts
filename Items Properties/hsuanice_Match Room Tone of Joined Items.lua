@@ -1,13 +1,13 @@
 --[[
 @description Match Room Tone of Joined Items - level-match the background noise of touching / crossfaded items (take volume)
-@version 26.1026.1523pre1
+@version 26.1026.1534pre1
 @author hsuanice
 @changelog
   - Initial release: level-match the room tone of touching / crossfaded selected items by take volume - however far apart the levels are; only groups fully in view.
   - Room tone is measured on the WHOLE source file (quietest 10 %), so movement in the trimmed pauses does not count; an item whose own part is more than 6 dB louder than its file's quietest is listed. Items that play the same file share one analysis.
   - Spectrum check: the room tone's 1/3-octave spectrum (63 Hz - 6.3 kHz, level removed) is compared with the group's median; only a different room tone (generator, air conditioning, another room, or speech all the way through) is moved to a '<track> - RT mismatch' track, with the band named.
-  - Progress window (gfx), updated between items; Esc / close cancels with nothing changed; all changes applied together at the end.
-  - Fix: an item was left opened up across defer cycles while measuring - REAPER drew it stretched and its audio stopped reading ('nothing to measure', no volume change). Each item is now measured in one go; items that cannot be measured are listed with the reason.
+  - Progress window (gfx), one item per update; Esc / close cancels with nothing changed; all changes applied together at the end.
+  - Fix: nothing was measured ('no audio to measure') since the progress window - REAPER's audio accessor reads nothing inside a Lua coroutine (probed on REAPER 7.83). The analysis no longer uses a coroutine.
 @about
   Makes the room tone of joined items the same level, so they can be glued and denoised in one
   pass (e.g. in RX) without the background jumping between takes.
@@ -86,16 +86,12 @@ local function quiet_level(powers)
   return 10 * math.log(q, 10), 10 * math.log(loud / q, 10) >= SPREAD_DB
 end
 
--- Progress (shown in a gfx window while analyzing): the analysis runs in a coroutine that
--- yields BETWEEN items, so the window can redraw; Esc / closing the window cancels. An item is
--- always measured in one go (opened up, read, restored in the same defer cycle): an item left
--- opened up across cycles was drawn by REAPER, and its audio accessor stopped reading.
+-- Progress (shown in a gfx window while analyzing): one item is measured per defer cycle and
+-- the window redraws in between; Esc / closing the window cancels. No coroutine: REAPER's
+-- take audio accessor reads nothing inside a Lua coroutine (probed on REAPER 7.83). An item is
+-- measured in one go (opened up, read, restored in the same cycle): an item left opened up
+-- across cycles is drawn stretched.
 local PROG = { total = 0, done = 0, n = 0, i = 0, label = "", cancel = false, restore = nil }
-local function next_item(sec)
-  PROG.done = PROG.done + (sec or 0)
-  if coroutine.isyieldable() then coroutine.yield() end
-  return PROG.cancel
-end
 
 -- 1/3-octave bands from 63 Hz to 6.3 kHz
 local BANDS = {}
@@ -329,65 +325,65 @@ local function file_secs(item)
   return r.GetMediaSourceLength(r.GetMediaItemTake_Source(take)) / ((rate > 0) and rate or 1)
 end
 
--- Analyze every group (slow, yields for the progress window) and decide what to do; nothing is
--- changed here. Returns lines (for the window), actions (applied by apply_actions) or nil when
--- cancelled.
-local function analyze(groups)
+-- Groups to analyze: sets g.run / g.s0 / g.e0 and returns the items to measure, in order
+local function prepare(groups)
+  local todo = {}
+  for _, g in ipairs(groups) do
+    local s0, e0 = g.items[1].pos, g.items[1].fin
+    for _, info in ipairs(g.items) do s0, e0 = math.min(s0, info.pos), math.max(e0, info.fin) end
+    g.s0, g.e0 = s0, e0
+    g.run = #g.items >= 2 and in_view(s0, e0)
+    g.mnotes = {}
+    if g.run then
+      for _, info in ipairs(g.items) do
+        todo[#todo + 1] = { info = info, g = g }
+        PROG.total, PROG.n = PROG.total + file_secs(info.item), PROG.n + 1
+      end
+    end
+  end
+  return todo
+end
+
+-- Measure one item (slow): fills info.rt / pauses / shape / volumes, or info.why
+local function measure(info, g)
+  local take = r.GetActiveTake(info.item)
+  local m, why = room_tone(info.item)
+  if m then
+    info.rt, info.pauses = m.full, m.pauses
+    if m.item and m.item - m.full > NOTE_DIFF_DB then
+      g.mnotes[#g.mnotes + 1] = { info = info, text = string.format("own part %.1f dB louder than the quietest of "
+        .. "its file (noise or movement in the pauses?) - matched by the whole file", m.item - m.full) }
+    end
+  else
+    info.why = why
+  end
+  info.take_vol = take and r.GetMediaItemTakeInfo_Value(take, "D_VOL") or 1
+  info.item_vol = r.GetMediaItemInfo_Value(info.item, "D_VOL")
+  info.len = info.fin - info.pos
+  if m and m.spec then
+    -- spectral shape: band levels with the overall level removed
+    local mean = 0
+    for b = 1, #m.spec do mean = mean + m.spec[b] end
+    mean = mean / #m.spec
+    info.shape = {}
+    for b = 1, #m.spec do info.shape[b] = m.spec[b] - mean end
+  end
+end
+
+-- Decide what to do with every measured group (fast); nothing is changed here.
+-- Returns lines (for the window) and actions (applied by apply_actions)
+local function decide(groups)
   local lines, actions = {}, {}
   local function note(info, tr, why)
     lines[#lines + 1] = string.format("%s @ %s: %s", track_name(tr), fmt_time(info.pos), why)
   end
-
   for _, g in ipairs(groups) do
-    local s0, e0 = g.items[1].pos, g.items[1].fin
-    for _, info in ipairs(g.items) do s0, e0 = math.min(s0, info.pos), math.max(e0, info.fin) end
-    g.run = #g.items >= 2 and in_view(s0, e0)
-    g.s0, g.e0 = s0, e0
-    if g.run then
-      for _, info in ipairs(g.items) do PROG.total, PROG.n = PROG.total + file_secs(info.item), PROG.n + 1 end
-    end
-  end
-
-  for _, g in ipairs(groups) do
-    local s0, e0 = g.s0, g.e0
-    if PROG.cancel then return nil end
     if #g.items < 2 then
       -- a single item has nothing to match
-    elseif not in_view(s0, e0) then
+    elseif not g.run then
       note(g.items[1], g.track, "group not fully in view - skipped")
     else
-      -- measure every item. Reference = the longest item with pauses (quiet and loud parts, so
-      -- its quiet part is surely room tone); without one, the longest measured item
-      local ref, ref_any
-      for _, info in ipairs(g.items) do
-        local take = r.GetActiveTake(info.item)
-        PROG.i = PROG.i + 1
-        PROG.label = take and r.GetTakeName(take) or ""
-        if next_item() then return nil end            -- redraw the window, check for cancel
-        local m, why = room_tone(info.item)
-        PROG.done = PROG.done + file_secs(info.item)
-        if m then
-          info.rt, info.pauses = m.full, m.pauses
-          if m.item and m.item - m.full > NOTE_DIFF_DB then
-            note(info, g.track, string.format("own part %.1f dB louder than the quietest of its file (noise or "
-              .. "movement in the pauses?) - matched by the whole file", m.item - m.full))
-          end
-        else
-          info.why = why
-        end
-        info.take_vol = take and r.GetMediaItemTakeInfo_Value(take, "D_VOL") or 1
-        info.item_vol = r.GetMediaItemInfo_Value(info.item, "D_VOL")
-        info.len = info.fin - info.pos
-        if m and m.spec then
-          -- spectral shape: band levels with the overall level removed
-          local mean = 0
-          for b = 1, #m.spec do mean = mean + m.spec[b] end
-          mean = mean / #m.spec
-          info.shape = {}
-          for b = 1, #m.spec do info.shape[b] = m.spec[b] - mean end
-        end
-      end
-
+      for _, n in ipairs(g.mnotes) do note(n.info, g.track, n.text) end
       -- Spectrum check against the group's median shape: a room tone that differs (generator,
       -- air conditioning, another room) is not level-matched. With 2 items there is no
       -- majority, so both are listed instead.
@@ -520,31 +516,33 @@ end
 
 local groups = build_groups()
 if #groups == 0 then return end
-local co = coroutine.create(analyze)
+local todo = prepare(groups)
 local window = false
 r.atexit(function() if PROG.restore then PROG.restore() end end)   -- never leave an item opened up
 
+local function finish()
+  if window then gfx.quit() end
+  if PROG.cancel then return end
+  local lines, actions = decide(groups)
+  apply_actions(actions)
+  -- next cycle: the arrange redraws first, so the window never shows a stale picture
+  r.defer(function() show_lines(lines) end)
+end
+
+local next_i = 1
 local function step()
   if window then
     local ch = gfx.getchar()
     if ch == 27 or ch < 0 then PROG.cancel = true end
   end
-  PROG.last = r.time_precise()
-  local ok, lines, actions = coroutine.resume(co, groups)
-  if not ok then
-    if PROG.restore then PROG.restore() end
-    if window then gfx.quit() end
-    error(lines)
-  end
-  if coroutine.status(co) == "dead" then
-    if window then gfx.quit() end
-    if lines and not PROG.cancel then
-      apply_actions(actions)
-      -- next cycle: the arrange redraws first, so the window never shows a stale picture
-      r.defer(function() show_lines(lines) end)
-    end
-    return
-  end
+  if PROG.cancel or next_i > #todo then return finish() end
+  local job = todo[next_i]
+  next_i = next_i + 1
+  local take = r.GetActiveTake(job.info.item)
+  PROG.i, PROG.label = next_i - 1, take and r.GetTakeName(take) or ""
+  measure(job.info, job.g)
+  PROG.done = PROG.done + file_secs(job.info.item)
+  if next_i > #todo then return finish() end
   if not window then gfx.init(TITLE, W, H); window = true end
   draw()
   r.defer(step)

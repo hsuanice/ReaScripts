@@ -1,5 +1,13 @@
 # hsuanice_Match Room Tone of Joined Items.lua — Changelog
 
+## 26.1026.1534pre1
+
+- Initial release: level-match the room tone of touching / crossfaded selected items by take volume - however far apart the levels are; only groups fully in view.
+- Room tone is measured on the WHOLE source file (quietest 10 %), so movement in the trimmed pauses does not count; an item whose own part is more than 6 dB louder than its file's quietest is listed. Items that play the same file share one analysis.
+- Spectrum check: the room tone's 1/3-octave spectrum (63 Hz - 6.3 kHz, level removed) is compared with the group's median; only a different room tone (generator, air conditioning, another room, or speech all the way through) is moved to a '<track> - RT mismatch' track, with the band named.
+- Progress window (gfx), one item per update; Esc / close cancels with nothing changed; all changes applied together at the end.
+- Fix: nothing was measured ('no audio to measure') since the progress window - REAPER's audio accessor reads nothing inside a Lua coroutine (probed on REAPER 7.83). The analysis no longer uses a coroutine.
+
 ## 26.1026.1523pre1
 
 - Initial release: level-match the room tone of touching / crossfaded selected items by take volume - however far apart the levels are; only groups fully in view.

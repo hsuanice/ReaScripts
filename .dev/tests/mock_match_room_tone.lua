@@ -120,6 +120,8 @@ reaper = {
     return a
   end,
   GetAudioAccessorSamples = function(acc, sr, nch, t0, n, buf)
+    -- like REAPER 7.83 (probed): inside a Lua coroutine the accessor reads nothing
+    if coroutine.isyieldable() then return nil end
     for i = 0, n - 1 do
       local t = t0 + i / sr
       local v = (t < acc.len) and src_sample(acc.take, acc.offs + t, sr) * acc.gain or 0
