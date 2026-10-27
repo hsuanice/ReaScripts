@@ -57,6 +57,7 @@ and background on/off scripts start with `Toggle`.
 | Session Fix | Session Fix - Interchange Prep: one window that checks and fixes a session before converting it with Interchanger (Pro Tools / Nuendo / Cubase) — checklist, Fix All, before / after check, review tracks (ReaImGui; replaces the five earlier Session Fix scripts) |
 | Copy / Cut Items and Envelope Points Respect Razor | Copy or cut items and envelope points, respecting razor edits |
 | Reposition Items | Space selected items by an interval (GUI) |
+| Grab Item | Hold the shortcut to drag the item under the mouse, release to drop it (time and track with Snap / Cmd inverts Snap, or vertical only); trims items behind it, Esc cancels |
 | Move Selected Items to Track Under Mouse | Move items vertically, keeping their timeline position |
 | Toggle Mute Item Under Mouse | Mute / unmute the item under the mouse |
 | Explode Takes Across Tracks | Put each take of the selected items on its own track |
@@ -148,6 +149,8 @@ Original: "Renders selected plugin to selected media item", written for REAPER 5
 http://timchimes.com/scripting-with-reaper-audiosuite/
 
 Fade Tool is heavily based on AZ's *Fade tool (work on context of mouse, razor or time selection)* (ReaTeam Scripts) — https://forum.cockos.com/showthread.php?t=293335 . It closely follows AZ's design (context order razor / time selection / mouse, top half fade-in / bottom half fade-out, the item name bar moving a crossfade and AZ's way of detecting it, razor crossfades and fades); the code is a new implementation with hsuanice's changes (frame-based defaults, no pop-up windows, Hover Mode, hold-and-drag crossfades, Scene Cut). Smart Fade's hold-the-shortcut detection follows Sexan's *VT_SWIPE to Comp HOLD* (Virtual Track, Sexan_Scripts).
+
+Grab Item's hold-the-shortcut detection also follows Sexan's *VT_SWIPE to Comp HOLD* (Virtual Track, Sexan_Scripts).
 
 Hover Editing - Toggle Hover Mode is based on / inspired by TJF's *Hover Mode Toggle* script.
 
