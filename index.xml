@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<index version="1" name="hsuanice Scripts" commit="e67fd079af5d5149656bd794c9ba81ce54bd03d5">
+<index version="1" name="hsuanice Scripts" commit="62e0d6cb389a8c7fb417e497cbadc1c058c6be82">
   <category name="Conform">
     <reapack name="hsuanice_Conform List Browser - CLB.lua" type="script" desc="Conform List Browser - CLB: conform EDL / AAF / XML / OTIO / subtitle lists (GUI + Jump / Link / Load / Reveal)">
       <metadata>
@@ -383,6 +383,33 @@
         <source main="main" file="hsuanice_Fade Tool - Crossfade in Razor.lua">https://github.com/hsuanice/ReaScripts/raw/d972b69b0b73a05bc36de7ac02c8374ae8d54d6e/Items%20Editing/hsuanice_Fade%20Tool%20-%20Crossfade%20in%20Razor.lua</source>
         <source main="main" file="hsuanice_Fade Tool - Scene Cut to Razor.lua">https://github.com/hsuanice/ReaScripts/raw/d972b69b0b73a05bc36de7ac02c8374ae8d54d6e/Items%20Editing/hsuanice_Fade%20Tool%20-%20Scene%20Cut%20to%20Razor.lua</source>
         <source main="main" file="hsuanice_Fade Tool - Settings.lua">https://github.com/hsuanice/ReaScripts/raw/d972b69b0b73a05bc36de7ac02c8374ae8d54d6e/Items%20Editing/hsuanice_Fade%20Tool%20-%20Settings.lua</source>
+      </version>
+    </reapack>
+    <reapack name="hsuanice_Grab Item - Move Item Under Mouse While Key Held.lua" type="script" desc="Grab Item - Move Item Under Mouse While Key Held (hold the shortcut to drag one item, Snap aware, Cmd inverts Snap)">
+      <metadata>
+        <description><![CDATA[{\rtf1\ansi\deff0{\fonttbl{\f0 \fswiss Helvetica;}{\f1 \fmodern Courier;}}
+{\colortbl;\red255\green0\blue0;\red0\green0\blue255;}
+\widowctrl\hyphauto
+
+{\pard \ql \f0 \sa180 \li0 \fi0 \outlinelevel0 \b \fs36 Grab Item\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 Move one item without selecting it first: hold the shortcut with the mouse over an item, move the mouse, release the shortcut to drop the item. Item selection is left as it is, and only the item under the mouse moves (even when other items are selected).\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Move Item Under Mouse While Key Held: the item follows the mouse in time and across tracks. The item start (or its snap offset) follows Snap; hold Cmd (Ctrl on Windows) while dragging to invert Snap: free movement when Snap is on, grid snapping when it is off.\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Move Item Under Mouse Vertically While Key Held: the item only changes track and keeps its timeline position (Snap does not apply).\sa180\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 While dragging:\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Below the last track, a new track is added for the item (removed again when the mouse goes back up).\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Esc cancels: the item goes back to where it was.\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab On release, existing items on the destination track under the dropped item are trimmed away, like REAPER's "Trim content behind media items" (locked items are left alone). One undo point.\sa180\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 Locked items are not grabbed. Requires js_ReaScriptAPI (key hold detection) and SWS (mouse position).\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 \outlinelevel1 \b \fs32 Suggested shortcuts\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 None: pick any key that is free in your setup. Shortcuts are suggestions only \u8212- nothing is assigned automatically.\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 Hold-the-shortcut detection follows Sexan's "VT_SWIPE to Comp HOLD" (Virtual Track, Sexan_Scripts). Designed and tested by hsuanice; written with AI (Claude Code).\par}
+}
+]]></description>
+      </metadata>
+      <version name="26.1027.1536pre1" author="hsuanice" time="2026-10-27T07:38:05Z">
+        <changelog><![CDATA[- New: hold the shortcut to grab the item under the mouse, release to drop it (time and track, or vertical only).]]></changelog>
+        <source main="main">https://github.com/hsuanice/ReaScripts/raw/62e0d6cb389a8c7fb417e497cbadc1c058c6be82/Items%20Editing/hsuanice_Grab%20Item%20-%20Move%20Item%20Under%20Mouse%20While%20Key%20Held.lua</source>
+        <source main="main" file="hsuanice_Grab Item - Move Item Under Mouse Vertically While Key Held.lua">https://github.com/hsuanice/ReaScripts/raw/62e0d6cb389a8c7fb417e497cbadc1c058c6be82/Items%20Editing/hsuanice_Grab%20Item%20-%20Move%20Item%20Under%20Mouse%20Vertically%20While%20Key%20Held.lua</source>
       </version>
     </reapack>
     <reapack name="hsuanice_Hover Editing.lua" type="script" desc="Hover Editing - Pro Tools-style Split / Trim at the mouse or edit cursor (Toggle Hover Mode, Split, Trim Left / Right)">
@@ -1739,7 +1766,7 @@ Packages
 {\pard \ql \f0 \sa180 \li0 \fi0 \outlinelevel2 \b \fs28 Rendering\par}
 {\pard \ql \f0 \sa180 \li0 \fi0 | Package | What it does | |---|---| | Render or Glue with Handles - RGWH | Render or glue items with handles (GUI + Glue / Render actions) | | AudioSweet - AudioSuite Workflow | AudioSuite-style offline FX processing, Pro Tools style (GUI + Run / Toggle Preview / Toggle Solo, FX Alias tools) |\par}
 {\pard \ql \f0 \sa180 \li0 \fi0 \outlinelevel2 \b \fs28 Items Editing\par}
-{\pard \ql \f0 \sa180 \li0 \fi0 | Package | What it does | |---|---| | Fade Tool | Frame-grid fades and crossfades by razor, time selection, mouse or edit cursor; Hover Mode aware (Smart Fade, Crossfade in Razor, Scene Cut to Razor, Settings) | | Hover Editing | Pro Tools-style Split / Trim at the mouse or edit cursor (Toggle Hover Mode, Split, Trim or Extend Left / Right Edge) | | Reorder - Sort Items Vertically | Vertical reorder and sort of selected items by metadata (GUI + Copy to Sort / Sort in Place / Upfill) | | Session Fix | Session Fix - Interchange Prep: one window that checks and fixes a session before converting it with Interchanger (Pro Tools / Nuendo / Cubase) \u8212- checklist, Fix All, before / after check, review tracks (ReaImGui; replaces the five earlier Session Fix scripts) | | Copy / Cut Items and Envelope Points Respect Razor | Copy or cut items and envelope points, respecting razor edits | | Reposition Items | Space selected items by an interval (GUI) | | Move Selected Items to Track Under Mouse | Move items vertically, keeping their timeline position | | Toggle Mute Item Under Mouse | Mute / unmute the item under the mouse | | Explode Takes Across Tracks | Put each take of the selected items on its own track | | Explode Multichannel Poly Audio to Mono Items | Split poly files into one-channel items, keeping metadata | | Convert Empty Items to Audio Items | Keeps take names and notes | | Copy Unmuted Child Items to Parent Folder Track | Copy unmuted child items to the folder track (checks overlaps first) |\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 | Package | What it does | |---|---| | Fade Tool | Frame-grid fades and crossfades by razor, time selection, mouse or edit cursor; Hover Mode aware (Smart Fade, Crossfade in Razor, Scene Cut to Razor, Settings) | | Hover Editing | Pro Tools-style Split / Trim at the mouse or edit cursor (Toggle Hover Mode, Split, Trim or Extend Left / Right Edge) | | Reorder - Sort Items Vertically | Vertical reorder and sort of selected items by metadata (GUI + Copy to Sort / Sort in Place / Upfill) | | Session Fix | Session Fix - Interchange Prep: one window that checks and fixes a session before converting it with Interchanger (Pro Tools / Nuendo / Cubase) \u8212- checklist, Fix All, before / after check, review tracks (ReaImGui; replaces the five earlier Session Fix scripts) | | Copy / Cut Items and Envelope Points Respect Razor | Copy or cut items and envelope points, respecting razor edits | | Reposition Items | Space selected items by an interval (GUI) | | Grab Item | Hold the shortcut to drag the item under the mouse, release to drop it (time and track with Snap / Cmd inverts Snap, or vertical only); trims items behind it, Esc cancels | | Move Selected Items to Track Under Mouse | Move items vertically, keeping their timeline position | | Toggle Mute Item Under Mouse | Mute / unmute the item under the mouse | | Explode Takes Across Tracks | Put each take of the selected items on its own track | | Explode Multichannel Poly Audio to Mono Items | Split poly files into one-channel items, keeping metadata | | Convert Empty Items to Audio Items | Keeps take names and notes | | Copy Unmuted Child Items to Parent Folder Track | Copy unmuted child items to the folder track (checks overlaps first) |\par}
 {\pard \ql \f0 \sa180 \li0 \fi0 \outlinelevel2 \b \fs28 Items Properties\par}
 {\pard \ql \f0 \sa180 \li0 \fi0 | Package | What it does | |---|---| | Auto Color - Items by Take Name | Color items by take-name keywords with a palette (GUI + Toggle Background Coloring, By Palette, Smart Random, Follow Track Color, All Shiny Color) | | Match Room Tone of Joined Items | Level-match the room tone of touching / crossfaded items by take volume before gluing; items with a different room tone spectrum (e.g. a generator) go to a mismatch track |\par}
 {\pard \ql \f0 \sa180 \li0 \fi0 \outlinelevel2 \b \fs28 Selection\par}
@@ -1778,6 +1805,7 @@ Claude
 {\pard \ql \f0 \sa180 \li0 \fi0 The scripts in this repository are designed, tested and maintained by hsuanice, with code written together with AI tools (Claude, ChatGPT).\par}
 {\pard \ql \f0 \sa180 \li0 \fi0 AudioSweet is inspired by the AudioSuite-like script by Tim Chimes. "AudioSweet" is a name originally given by Tim Chimes; this project continues to use the name in reference to his original work. Original: "Renders selected plugin to selected media item", written for REAPER 5.1 with Lua (v1.1, 2015-12-22) \u8212- http://timchimes.com/scripting-with-reaper-audiosuite/\par}
 {\pard \ql \f0 \sa180 \li0 \fi0 Fade Tool is heavily based on AZ's {\i Fade tool (work on context of mouse, razor or time selection)} (ReaTeam Scripts) \u8212- https://forum.cockos.com/showthread.php?t=293335 . It closely follows AZ's design (context order razor / time selection / mouse, top half fade-in / bottom half fade-out, the item name bar moving a crossfade and AZ's way of detecting it, razor crossfades and fades); the code is a new implementation with hsuanice's changes (frame-based defaults, no pop-up windows, Hover Mode, hold-and-drag crossfades, Scene Cut). Smart Fade's hold-the-shortcut detection follows Sexan's {\i VT_SWIPE to Comp HOLD} (Virtual Track, Sexan_Scripts).\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 Grab Item's hold-the-shortcut detection also follows Sexan's {\i VT_SWIPE to Comp HOLD} (Virtual Track, Sexan_Scripts).\par}
 {\pard \ql \f0 \sa180 \li0 \fi0 Hover Editing - Toggle Hover Mode is based on / inspired by TJF's {\i Hover Mode Toggle} script.\par}
 {\pard \ql \f0 \sa180 \li0 \fi0 Extend Razor Edit to Mouse Cursor like Pro Tools is inspired by Daniel Kharrat's {\i Extend razor edit area to mouse cursor (select tracks in between)} script.\par}
 {\pard \ql \f0 \sa180 \li0 \fi0 Auto Color's palette (hue + per-row saturation / value) is modeled after rodilab's {\i Color palette} script. Auto Color's Shiny mode follows the ShinyColor behavior of {\i Chroma - Coloring Tool} by OLSHALOM \u8212- https://forum.cockos.com/showthread.php?t=281516\par}
