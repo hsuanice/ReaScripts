@@ -1,11 +1,11 @@
 --[[
 @description hsuanice Fade Tool Core (shared razor / cut / edge / fade helpers for the Fade Tool scripts)
-@version 26.1026.1232
+@version 26.1027.1553pre1
 @author hsuanice
 @noindex
 @changelog
-  - Add: a razor area inside an item with no neighbour on either side fades in from the item start to the area start and fades out from the area end to the item end (as AZ's Fade tool). An item with a neighbour still gets its nearest cut pulled into the area.
-  - Release: tested in REAPER 7.82.
+  - Fix: a razor over several tracks no longer pulls cuts into tracks where it only covers empty space or the middle of an item (e.g. extending both items of a gap) when other tracks have cuts or item edges in the razor.
+  - Add: Settings option "Pull nearby cuts into an empty area" (on by default) to turn these pull-ins off.
 @about
   Shared code for "Fade Tool - Crossfade in Razor", "Fade Tool - Scene Cut to Razor" and
   "Fade Tool - Settings". Settings live in the ExtState section "hsuanice_FadeTool".
@@ -46,6 +46,7 @@ M.DEFAULTS = {
   fade_shape       = 0,
   use_ts           = 1,
   clear_razor      = 1,
+  pull_cuts        = 1,
 }
 
 ----------------------------------------
@@ -472,14 +473,85 @@ end
 ----------------------------------------
 -- Razor / time selection areas
 ----------------------------------------
+-- What one lane of one area would do (nothing is changed here):
+-- - direct: cuts in the area, and gaps whose both edges the area covers
+-- - within: gaps the area lies inside without touching either item (a pull-in)
+-- - edges: { info, side } item starts / ends in the area with the other end outside
+--   (only when there is no direct cut)
+-- - host: the item the area lies inside (no cut or edge), host_joined when it has a neighbour
+-- - outside: visible cuts outside the area (candidates for the nearest-cut pull-in)
+local function plan_lane(list, rs, re, view_s, view_e)
+  local p = { list = list, direct = {}, within = {}, outside = {}, edges = {} }
+  local joined = {}
+  for _, c in ipairs(M.find_cuts(list)) do
+    joined[c.a] = joined[c.a] or {}; joined[c.a].right = true
+    joined[c.b] = joined[c.b] or {}; joined[c.b].left = true
+    if c.je >= rs - M.TOL and c.js <= re + M.TOL then
+      p.direct[#p.direct + 1] = c
+    elseif c.je >= view_s and c.js <= view_e then
+      p.outside[#p.outside + 1] = c
+    end
+  end
+  -- a gap counts as a cut when the area covers both of its edges, or lies inside it
+  -- without touching either item: both items are extended into the crossfade.
+  -- An area over just one edge keeps the plain fade.
+  for _, g in ipairs(M.find_gaps(list)) do
+    local covers = g.js >= rs - M.TOL and g.je <= re + M.TOL
+    local within = rs >= g.js - M.TOL and re <= g.je + M.TOL
+    if covers or within then
+      joined[g.a] = joined[g.a] or {}; joined[g.a].right = true
+      joined[g.b] = joined[g.b] or {}; joined[g.b].left = true
+      local t = covers and p.direct or p.within
+      t[#t + 1] = g
+    end
+  end
+  if #p.direct == 0 and #p.within == 0 then
+    for _, info in ipairs(list) do
+      local j = joined[info] or {}
+      if not j.left and info.pos >= rs - M.TOL and info.pos < re - M.TOL and info.fin > re + M.TOL then
+        p.edges[#p.edges + 1] = { info = info, side = "IN" }
+      end
+      if not j.right and info.fin <= re + M.TOL and info.fin > rs + M.TOL and info.pos < rs - M.TOL then
+        p.edges[#p.edges + 1] = { info = info, side = "OUT" }
+      end
+    end
+    if #p.edges == 0 then
+      for _, info in ipairs(list) do
+        if info.pos < rs - M.TOL and info.fin > re + M.TOL then
+          local j = joined[info]
+          p.host, p.host_joined = info, (j and (j.left or j.right)) and true or false
+          break
+        end
+      end
+    end
+  end
+  return p
+end
+
+-- Plans of every visible lane of an area: rs, re (the area inside the view), { plan, ... }
+local function plan_area(area, view_s, view_e)
+  local rs, re = math.max(area.s, view_s), math.min(area.e, view_e)
+  local plans = {}
+  if re - rs > M.TOL and M.track_visible(area.track) then
+    for _, list in pairs(M.lane_items(area, view_s, view_e)) do
+      plans[#plans + 1] = plan_lane(list, rs, re, view_s, view_e)
+    end
+  end
+  return rs, re, plans
+end
+
 -- Per track (and fixed lane) inside each area { track, s, e, top, bot }:
 -- - a gap between two items counts as a cut when the area covers both gap edges or lies
 --   inside the gap (both items are extended into the crossfade)
 -- - one cut in the area: the crossfade fills the area
 -- - two or more cuts: each gets the default crossfade (frames + before / center / after)
 -- - no cut: an item start / end inside the area whose other end lies outside gets a plain
---   fade over the area; otherwise the nearest cut in the arrange view is pulled in
---   (two equally near cuts are reported)
+--   fade over the area; an area inside an item without neighbours fades in / out to it;
+--   otherwise the nearest cut in the arrange view is pulled in (two equally near cuts are
+--   reported)
+-- Pull-ins (an area inside a gap, the nearest cut pulled in) happen only when no lane of any
+-- area has a cut, edge or neighbourless item of its own, and Settings allow them (pull_cuts):
+-- a razor over several tracks then only works where it touches items.
 -- Only the part of each area inside the arrange view is used, and only visible tracks.
 -- Returns changed count, skipped lines, touched tracks
 function M.fade_areas(areas, S)
@@ -495,74 +567,46 @@ function M.fade_areas(areas, S)
     if ok then changed = changed + 1 else skip(area, xs, why) end
   end
 
+  -- dry pass: does any lane have work of its own?
+  local pull = S.pull_cuts ~= 0
+  for _, area in ipairs(areas) do
+    if not pull then break end
+    local _, _, plans = plan_area(area, view_s, view_e)
+    for _, p in ipairs(plans) do
+      if #p.direct > 0 or #p.edges > 0 or (p.host and not p.host_joined) then pull = false; break end
+    end
+  end
+
+  -- each area is planned again here: an earlier area may have changed items of this track
   for _, area in ipairs(areas) do
     touched[area.track] = true
-    local rs, re = math.max(area.s, view_s), math.min(area.e, view_e)
-    local lanes = {}
-    if re - rs > M.TOL and M.track_visible(area.track) then
-      lanes = M.lane_items(area, view_s, view_e)
-    end
-    for _, list in pairs(lanes) do
-      local cuts = M.find_cuts(list)
-      local inside, outside, joined = {}, {}, {}
-      for _, c in ipairs(cuts) do
-        joined[c.a] = joined[c.a] or {}; joined[c.a].right = true
-        joined[c.b] = joined[c.b] or {}; joined[c.b].left = true
-        if c.je >= rs - M.TOL and c.js <= re + M.TOL then
-          inside[#inside + 1] = c
-        elseif c.je >= view_s and c.js <= view_e then
-          outside[#outside + 1] = c
-        end
-      end
-      -- a gap counts as a cut when the area covers both of its edges, or lies inside it
-      -- without touching either item: both items are extended into the crossfade.
-      -- An area over just one edge keeps the plain fade below.
-      for _, g in ipairs(M.find_gaps(list)) do
-        local covers = g.js >= rs - M.TOL and g.je <= re + M.TOL
-        local within = rs >= g.js - M.TOL and re <= g.je + M.TOL
-        if covers or within then
-          joined[g.a] = joined[g.a] or {}; joined[g.a].right = true
-          joined[g.b] = joined[g.b] or {}; joined[g.b].left = true
-          inside[#inside + 1] = g
-        end
-      end
+    local rs, re, plans = plan_area(area, view_s, view_e)
+    for _, p in ipairs(plans) do
+      local inside = p.direct
+      if pull then for _, g in ipairs(p.within) do inside[#inside + 1] = g end end
 
-      local edges = 0
-      if #inside == 0 then
-        for _, info in ipairs(list) do
-          local j = joined[info] or {}
-          if not j.left and info.pos >= rs - M.TOL and info.pos < re - M.TOL and info.fin > re + M.TOL then
-            edges = edges + 1
-            if M.is_locked(info.item) then skip(area, info.pos, "locked item")
-            else
-              M.set_fade(info.item, "IN", re - info.pos, M.new_fade_shape(info.item, "IN", S.fade_shape), false)
-              clamp_fade(info.item, "OUT", info.fin - re)
-              changed = changed + 1
-            end
+      for _, e in ipairs(p.edges) do
+        local info = e.info
+        if e.side == "IN" then
+          if M.is_locked(info.item) then skip(area, info.pos, "locked item")
+          else
+            M.set_fade(info.item, "IN", re - info.pos, M.new_fade_shape(info.item, "IN", S.fade_shape), false)
+            clamp_fade(info.item, "OUT", info.fin - re)
+            changed = changed + 1
           end
-          if not j.right and info.fin <= re + M.TOL and info.fin > rs + M.TOL and info.pos < rs - M.TOL then
-            edges = edges + 1
-            if M.is_locked(info.item) then skip(area, info.fin, "locked item")
-            else
-              M.set_fade(info.item, "OUT", info.fin - rs, M.new_fade_shape(info.item, "OUT", S.fade_shape), false)
-              clamp_fade(info.item, "IN", rs - info.pos)
-              changed = changed + 1
-            end
+        else
+          if M.is_locked(info.item) then skip(area, info.fin, "locked item")
+          else
+            M.set_fade(info.item, "OUT", info.fin - rs, M.new_fade_shape(info.item, "OUT", S.fade_shape), false)
+            clamp_fade(info.item, "IN", rs - info.pos)
+            changed = changed + 1
           end
         end
       end
 
       -- Area inside one item that has no neighbour on either side (nothing to crossfade with):
       -- fade in from the item start to the area start, fade out from the area end (as AZ's tool)
-      local host
-      if #inside == 0 and edges == 0 then
-        for _, info in ipairs(list) do
-          if info.pos < rs - M.TOL and info.fin > re + M.TOL then host = info; break end
-        end
-        local j = host and joined[host]
-        if j and (j.left or j.right) then host = nil end
-      end
-
+      local host = not p.host_joined and p.host or nil
       if host then
         local ok, why = M.fade_in_to(host, rs, S)
         if ok then changed = changed + 1 else skip(area, rs, why) end
@@ -576,9 +620,9 @@ function M.fade_areas(areas, S)
           local xs, xe = M.aligned_range(c.cut, len, S.xfade_align)
           xfade(area, c, xs, xe)
         end
-      elseif edges == 0 and #outside > 0 then
+      elseif pull and #p.edges == 0 and #p.outside > 0 then
         local best, best_d, tie
-        for _, c in ipairs(outside) do
+        for _, c in ipairs(p.outside) do
           local d = (c.js > re) and (c.js - re) or (rs - c.je)
           if not best or d < best_d - M.TOL then
             best, best_d, tie = c, d, false

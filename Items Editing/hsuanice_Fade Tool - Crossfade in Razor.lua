@@ -1,11 +1,11 @@
 --[[
 @description Fade Tool - Crossfade in Razor (fit one cut to the razor area, or crossfade every cut inside it)
-@version 26.1026.1232
+@version 26.1027.1553pre1
 @author hsuanice
 @noindex
 @changelog
-  - Add: a razor area inside an item with no neighbour on either side fades in from the item start to the area start and fades out from the area end to the item end (as AZ's Fade tool). An item with a neighbour still gets its nearest cut pulled into the area.
-  - Release: tested in REAPER 7.82.
+  - Fix: a razor over several tracks no longer pulls cuts into tracks where it only covers empty space or the middle of an item (e.g. extending both items of a gap) when other tracks have cuts or item edges in the razor.
+  - Add: Settings option "Pull nearby cuts into an empty area" (on by default) to turn these pull-ins off.
 @about
   Works only on razor edit areas (tracks and time range of each area). Never opens a window
   unless something had to be skipped.
@@ -14,7 +14,10 @@
   - One cut in the area: the crossfade fills the razor area exactly.
   - No cut in the area: the nearest cut inside the visible arrange view is moved into the
     area and crossfaded over it (no need to move the cut first). Two equally near cuts are
-    reported instead of guessed.
+    reported instead of guessed. The same for an area inside a gap (both items are extended).
+    These pull-ins only happen when no track in the razor has a cut or item edge of its own:
+    a razor over several tracks only works where it touches items. They can be turned off in
+    Settings ("Pull nearby cuts into an empty area").
   - Two or more cuts in the area: every cut gets the default crossfade
     (length in frames and position before / center / after the cut, from Fade Tool - Settings).
   - An item start or end inside the area without a neighbour: a plain fade-in / fade-out over

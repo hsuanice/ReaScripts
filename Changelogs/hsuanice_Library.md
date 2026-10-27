@@ -1,5 +1,9 @@
 # hsuanice_Library.lua — Changelog
 
+## 26.1027.1553pre1
+
+- Fade Tool Core: Fix: a razor over several tracks no longer pulls cuts into tracks where it only covers empty space or the middle of an item (e.g. extending both items of a gap) when other tracks have cuts or item edges in the razor.
+
 ## 26.1026.1232
 
 - Update: hsuanice_Fade Tool Core.lua (razor inside an item: fade in and out).

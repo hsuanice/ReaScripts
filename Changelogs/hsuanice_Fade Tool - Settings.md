@@ -1,5 +1,9 @@
 # hsuanice_Fade Tool - Settings.lua — Changelog
 
+## 26.1027.1553pre1
+
+- Add: Settings option "Pull nearby cuts into an empty area" (on by default) to turn these pull-ins off.
+
 ## 26.1023.2047
 
 - Add: Smart Fade section (Fade shape, Use time selection + selected tracks).

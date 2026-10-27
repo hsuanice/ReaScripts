@@ -1,5 +1,10 @@
 # hsuanice_Fade Tool - Crossfade in Razor.lua — Changelog
 
+## 26.1027.1553pre1
+
+- Fix: a razor over several tracks no longer pulls cuts into tracks where it only covers empty space or the middle of an item (e.g. extending both items of a gap) when other tracks have cuts or item edges in the razor.
+- Add: Settings option "Pull nearby cuts into an empty area" (on by default) to turn these pull-ins off.
+
 ## 26.1026.1232
 
 - Add: a razor area inside an item with no neighbour on either side fades in from the item start to the area start and fades out from the area end to the item end (as AZ's Fade tool). An item with a neighbour still gets its nearest cut pulled into the area.

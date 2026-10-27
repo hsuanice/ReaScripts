@@ -488,5 +488,33 @@ A = new_item(t, 0, 10, -5, 30); B = new_item(t, 10, 10, 5, 30)
 run("Crossfade in Razor")
 check("53 item with a neighbour: the cut is still pulled in", near(E(A), 6) and near(S(B), 5) and A.v.D_FADEINLEN == 0)
 
+-- Pull-ins only when no lane has work of its own; Settings can turn them off (26.1027)
+reset()
+t = new_track("P1", '10 10.5 ""'); A = new_item(t, 10.2, 5, 5, 40)
+local t2 = new_track("P2", '10 10.5 ""'); B = new_item(t2, 0, 5, -5, 40); C = new_item(t2, 15, 5, 10, 40)
+local t3 = new_track("P3", '10 10.5 ""'); D = new_item(t3, 10.2, 5, 5, 40)
+run("Crossfade in Razor")
+check("54 razor over 3 tracks: fade-ins where it touches items", near(A.v.D_FADEINLEN, 0.3) and near(D.v.D_FADEINLEN, 0.3))
+check("54 the gap on the middle track is left alone", near(E(B), 5) and near(S(C), 15) and mb == nil)
+reset()
+t = new_track("P4", '5 6 ""'); A = new_item(t, 0, 10, -5, 30); B = new_item(t, 10, 10, 5, 30)
+t2 = new_track("P5", '5 6 ""'); C = new_item(t2, 5.5, 5, 0, 30)
+run("Crossfade in Razor")
+check("55 item with a neighbour + work on another track: cut not pulled in",
+  near(E(A), 10) and near(S(B), 10) and near(C.v.D_FADEINLEN, 0.5))
+reset()
+ext.pull_cuts = "0"
+t = new_track("P6", '9.9 10.2 ""'); A = new_item(t, 0, 9.8, -5, 40); B = new_item(t, 10.3, 9.7, 5, 40)
+t2 = new_track("P7", '5 6 ""'); C = new_item(t2, 0, 10, -5, 30); D = new_item(t2, 10, 10, 5, 30)
+run("Crossfade in Razor")
+check("56 pull_cuts off: gap and nearest cut both left alone",
+  near(E(A), 9.8) and near(S(B), 10.3) and near(E(C), 10) and near(S(D), 10))
+reset()
+ext.pull_cuts = "0"
+t = new_track("P8", string.format('%.10f 10 ""', 10 - fl))
+A = new_item(t, 0, 10, -5, 30); B = new_item(t, 10, 10, 5, 30)
+run("Crossfade in Razor")
+check("57 pull_cuts off: a cut in the razor still crossfades", near(S(B), 10 - fl))
+
 print(string.format("%d passed, %d failed", passes, fails))
 os.exit(fails == 0 and 0 or 1)

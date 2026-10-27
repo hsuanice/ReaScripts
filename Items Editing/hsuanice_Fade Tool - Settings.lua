@@ -1,11 +1,10 @@
 --[[
 @description Fade Tool - Settings (crossfade and scene cut fade lengths, positions and shapes)
-@version 26.1023.2047
+@version 26.1027.1553pre1
 @author hsuanice
 @noindex
 @changelog
-  - Add: Smart Fade section (Fade shape, Use time selection + selected tracks).
-  - Release: tested in REAPER 7.82.
+  - Add: Settings option "Pull nearby cuts into an empty area" (on by default) to turn these pull-ins off.
 @about
   The only Fade Tool script that opens a window (native gfx: steppers, radio buttons, shape
   menu, checkbox; Enter = Save, Esc = Cancel). The other Fade Tool scripts just read these
@@ -13,6 +12,8 @@
 
   - Lengths are in frames (project frame rate), decimals allowed.
   - Position: before / center / after the cut or the scene edge.
+  - Pull nearby cuts into an empty area: a razor / time selection with no cut or item edge
+    pulls the nearest cut (or both items of a gap) into it; off = such areas are left alone.
   - Smart Fade: shape of plain fades (mouse / edit cursor / free item edges) and whether a
     time selection on the selected tracks is used when there is no razor area.
   - Shape: Linear, Equal Power, Slight / Sharp Convex, Slight / Sharp Concave, Slight / Sharp S-Curve.
@@ -53,6 +54,7 @@ local ROWS = {
   { "len",   "xfade_frames",     "Length (frames)" },
   { "align", "xfade_align",      "Position" },
   { "shape", "xfade_shape",      "Shape" },
+  { "check", "pull_cuts",        "Pull nearby cuts into an empty area" },
   { "head",  nil,                "Scene Cut" },
   { "len",   "scene_in_frames",  "Fade-in length (frames)" },
   { "align", "scene_in_align",   "Fade-in position" },

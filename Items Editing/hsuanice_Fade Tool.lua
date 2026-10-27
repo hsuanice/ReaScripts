@@ -1,6 +1,6 @@
 --[[
 @description Fade Tool - frame-grid fades and crossfades by razor, time selection, mouse or edit cursor (Smart Fade, Crossfade in Razor, Scene Cut to Razor, Settings)
-@version 26.1026.1232
+@version 26.1027.1553pre1
 @author hsuanice
 @metapackage
 @provides
@@ -9,8 +9,8 @@
   [main] hsuanice_Fade Tool - Scene Cut to Razor.lua
   [main] hsuanice_Fade Tool - Settings.lua
 @changelog
-  - Add: a razor area inside an item with no neighbour on either side fades in from the item start to the area start and fades out from the area end to the item end (as AZ's Fade tool). An item with a neighbour still gets its nearest cut pulled into the area.
-  - Release: tested in REAPER 7.82.
+  - Fix: a razor over several tracks no longer pulls cuts into tracks where it only covers empty space or the middle of an item (e.g. extending both items of a gap) when other tracks have cuts or item edges in the razor.
+  - Add: Settings option "Pull nearby cuts into an empty area" (on by default) to turn these pull-ins off.
 @about
   # Fade Tool
 
@@ -23,7 +23,8 @@
     else the edit cursor. Shares Hover Mode with Hover Editing - Toggle Hover Mode.
   - Crossfade in Razor: one cut in the razor area -> the crossfade fills the area exactly;
     no cut -> the nearest visible cut is moved into the area; several cuts -> each gets the
-    default crossfade (e.g. 1 frame before the cut). Default shape: Equal Power.
+    default crossfade (e.g. 1 frame before the cut). Default shape: Equal Power. Over several
+    tracks, empty parts of the razor are left alone when other tracks have cuts or item edges.
   - Scene Cut to Razor: the razor area is the scene (no razor: the scene on the "Scene Cut"
     track that the selected items cover completely); only the first and last item are trimmed
     or extended, with a fade-in before the scene start and a fade-out on its last frame
