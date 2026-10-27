@@ -1,9 +1,9 @@
 --[[
 @description Grab Item - Move Item Under Mouse While Key Held (hold the shortcut to drag one item, Snap aware, Cmd inverts Snap)
-@version 26.1027.1536pre1
+@version 26.1027.1547
 @author hsuanice
 @changelog
-  - New: hold the shortcut to grab the item under the mouse, release to drop it (time and track, or vertical only).
+  - Release: tested in REAPER.
 @provides
   [main] .
   [main] hsuanice_Grab Item - Move Item Under Mouse Vertically While Key Held.lua
