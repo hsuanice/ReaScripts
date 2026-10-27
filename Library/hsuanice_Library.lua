@@ -1,6 +1,6 @@
 --[[
 @description hsuanice Library - shared code used by hsuanice scripts (required)
-@version 26.1027.1553pre1
+@version 26.1027.1608
 @author hsuanice
 @metapackage
 @provides
@@ -26,6 +26,7 @@
   [nomain] json.lua
 @changelog
   - Fade Tool Core: Fix: a razor over several tracks no longer pulls cuts into tracks where it only covers empty space or the middle of an item (e.g. extending both items of a gap) when other tracks have cuts or item edges in the razor.
+  - Release: tested in REAPER 7.82.
 @about
   # hsuanice Library
 

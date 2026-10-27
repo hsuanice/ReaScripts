@@ -1,11 +1,12 @@
 --[[
 @description hsuanice Fade Tool Core (shared razor / cut / edge / fade helpers for the Fade Tool scripts)
-@version 26.1027.1553pre1
+@version 26.1027.1608
 @author hsuanice
 @noindex
 @changelog
   - Fix: a razor over several tracks no longer pulls cuts into tracks where it only covers empty space or the middle of an item (e.g. extending both items of a gap) when other tracks have cuts or item edges in the razor.
   - Add: Settings option "Pull nearby cuts into an empty area" (on by default) to turn these pull-ins off.
+  - Release: tested in REAPER 7.82.
 @about
   Shared code for "Fade Tool - Crossfade in Razor", "Fade Tool - Scene Cut to Razor" and
   "Fade Tool - Settings". Settings live in the ExtState section "hsuanice_FadeTool".

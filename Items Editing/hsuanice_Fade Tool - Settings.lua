@@ -1,10 +1,11 @@
 --[[
 @description Fade Tool - Settings (crossfade and scene cut fade lengths, positions and shapes)
-@version 26.1027.1553pre1
+@version 26.1027.1608
 @author hsuanice
 @noindex
 @changelog
   - Add: Settings option "Pull nearby cuts into an empty area" (on by default) to turn these pull-ins off.
+  - Release: tested in REAPER 7.82.
 @about
   The only Fade Tool script that opens a window (native gfx: steppers, radio buttons, shape
   menu, checkbox; Enter = Save, Esc = Cancel). The other Fade Tool scripts just read these

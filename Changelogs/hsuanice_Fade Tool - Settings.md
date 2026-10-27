@@ -1,5 +1,10 @@
 # hsuanice_Fade Tool - Settings.lua — Changelog
 
+## 26.1027.1608
+
+- Add: Settings option "Pull nearby cuts into an empty area" (on by default) to turn these pull-ins off.
+- Release: tested in REAPER 7.82.
+
 ## 26.1027.1553pre1
 
 - Add: Settings option "Pull nearby cuts into an empty area" (on by default) to turn these pull-ins off.
