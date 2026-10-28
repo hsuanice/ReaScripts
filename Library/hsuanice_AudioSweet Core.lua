@@ -1,10 +1,10 @@
 --[[
 @description AudioSweet Core - Focused Track FX render via RGWH Core
-@version 26.1016.1659
+@version 26.1028.2243pre1
 @author hsuanice
 @noindex
 @changelog
-  - Fix: AudioSweet no longer overwrites the RGWH Debug Level saved in the project; its Debug switch now applies to its own RGWH call only, so the RGWH Render / Glue shortcuts stop printing console logs after an AudioSweet run with Debug on.
+  - Fix: a hidden FX track (e.g. pinned and hidden) no longer makes AudioSweet fail. The FX track and any hidden parent folder are shown for the run and hidden again afterwards (also after an error).
 @notes
   Tim Chimes (original), adapted by hsuanice for AudioSweet Core integration.
     Reference:
@@ -1718,6 +1718,35 @@ function setNudge()
   reaper.ApplyNudge(0, 0, 0, 0, -1, false, 0)
 end
 
+-- Hidden FX track: REAPER item actions (apply FX, glue) skip items on a track hidden in the
+-- TCP, so the run failed when the FX track was hidden (e.g. pinned and hidden). The FX track
+-- and any hidden parent folder are shown for the run and hidden again afterwards.
+local AS_unhidden_tracks = {}
+
+local function show_hidden_fx_track(tr)
+  local t = tr
+  while t do
+    if reaper.GetMediaTrackInfo_Value(t, "B_SHOWINTCP") == 0 then
+      reaper.SetMediaTrackInfo_Value(t, "B_SHOWINTCP", 1)
+      AS_unhidden_tracks[#AS_unhidden_tracks + 1] = t
+      log_step("HIDDEN-TRACK", "shown for this run: %s", tostring(t))
+    end
+    t = reaper.GetParentTrack(t)
+  end
+  if #AS_unhidden_tracks > 0 then reaper.TrackList_AdjustWindows(false) end
+end
+
+local function restore_hidden_tracks()
+  if #AS_unhidden_tracks == 0 then return end
+  for _, t in ipairs(AS_unhidden_tracks) do
+    if reaper.ValidatePtr2(0, t, "MediaTrack*") then
+      reaper.SetMediaTrackInfo_Value(t, "B_SHOWINTCP", 0)
+    end
+  end
+  AS_unhidden_tracks = {}
+  reaper.TrackList_AdjustWindows(false)
+end
+
 function main() -- main part of the script
   -- Check if external caller wants to manage undo (for single undo in GUI/standalone scripts)
   -- Set ExtState "hsuanice_AS/EXTERNAL_UNDO_CONTROL" = "1" to disable Core's internal undo block
@@ -1799,6 +1828,7 @@ function main() -- main part of the script
       reaper.SetMediaTrackInfo_Value(FXmediaTrack, "I_NCHAN", track_nchan_snapshot)
       log_step("RESTORE", "track channel count = %d", track_nchan_snapshot)
     end
+    restore_hidden_tracks()  -- FX track hidden again (if it was shown for this run)
   end
 
   -- Determine naming token based on mode (focused vs chain)
@@ -1837,6 +1867,10 @@ function main() -- main part of the script
   end
   -- === End COPY branch; continue into APPLY flow ===
 
+  -- Hidden FX track: show it for this run; restore_track_nchan() hides it again before the
+  -- undo block closes (and the caller of main() does it on an error)
+  if FXmediaTrack then show_hidden_fx_track(FXmediaTrack) end
+
 
   -- Build units from current selection (v0.2.2: using RGWH.utils)
   -- v0.3.5: grouping follows AS_GLUE_GROUPING (all / rgwh / custom)
@@ -1857,6 +1891,7 @@ function main() -- main part of the script
   local render_keep_glue_cues = (reaper.GetExtState("hsuanice_AS", "AS_RENDER_KEEP_GLUE_CUES") == "1")
   log_step("UNITS", "hasTS=%s single_item_render=%s", tostring(run_has_ts), tostring(single_item_render))
   if #rgwh_units == 0 then
+    restore_hidden_tracks()
     reaper.MB("No media items selected.", "AudioSweet", 0)
     reaper.PreventUIRefresh(-1)
     if not external_undo then
@@ -2549,6 +2584,7 @@ local function as_err_handler(err)
   return tostring(err)
 end
 local ok, err = xpcall(main, as_err_handler)
+restore_hidden_tracks()
 if not ok then
   local msg = "[AS][ERROR] " .. tostring(err)
   reaper.ShowConsoleMsg(msg .. "\n")

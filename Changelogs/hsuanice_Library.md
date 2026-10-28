@@ -1,5 +1,9 @@
 # hsuanice_Library.lua — Changelog
 
+## 26.1028.2243pre1
+
+- Update: hsuanice_AudioSweet Core.lua (works with a hidden FX track).
+
 ## 26.1027.1608
 
 - Fade Tool Core: Fix: a razor over several tracks no longer pulls cuts into tracks where it only covers empty space or the middle of an item (e.g. extending both items of a gap) when other tracks have cuts or item edges in the razor.
