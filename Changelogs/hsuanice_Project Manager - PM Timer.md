@@ -7,6 +7,12 @@ PM Timer - Scene-aware Work Timer
 
 **Removed from ReaPack** (2026-10-15) together with PM Insight Analyzer; the script stays in the repository (`@noindex`) as a backup.
 
+## 26.1028.1328pre1
+
+- New: right-click > Apply Names to Work Log - every Work Log item (and DurationOnly_Log project track) whose name starts with a known spelling gets the latest official name ('POINT R5 Dialog | editing' -> 'TEST R5 Dialog | editing'); names not in the list are left alone. Undo-able in the Work Log project.
+- Change: Rename Project / Merge Projects apply the new name to the Work Log right away when it is open in a tab, so the latest name is used everywhere.
+- Change: an official project name is one word - spaces become _ - because the Work Log and PM Insight take the first word of an item name as the project.
+
 ## 26.1028.1303pre1
 
 - New: right-click > Rename Project... - a new official name for this project; the old name becomes an older spelling, so other projects saved with it follow. A name that is already another project offers to merge the two.

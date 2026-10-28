@@ -1,11 +1,12 @@
 --[[
 @description Project Manager - PM Timer: scene-aware work timer
-@version 26.1028.1303pre1
+@version 26.1028.1328pre1
 @author hsuanice
 @noindex  (kept in the repository as a backup; Project Manager is not offered on ReaPack for now)
 @changelog
-  - New: right-click > Rename Project... - a new official name for this project; the old name becomes an older spelling, so other projects saved with it follow. A name that is already another project offers to merge the two.
-  - New: right-click > Merge Projects... - pick another project in the list; its name and older spellings become spellings of this one. Both update this project's item names; Work Log items keep theirs (PM Insight reads the list).
+  - New: right-click > Apply Names to Work Log - every Work Log item (and DurationOnly_Log project track) whose name starts with a known spelling gets the latest official name ('POINT R5 Dialog | editing' -> 'TEST R5 Dialog | editing'); names not in the list are left alone. Undo-able in the Work Log project.
+  - Change: Rename Project / Merge Projects apply the new name to the Work Log right away when it is open in a tab, so the latest name is used everywhere.
+  - Change: an official project name is one word - spaces become _ - because the Work Log and PM Insight take the first word of an item name as the project.
 @about
   Scene-aware toggle timer for the hsuanice PM system.
   Uses gfx (no ReaImGui). 1-second display refresh via defer + time_precise.
@@ -528,6 +529,12 @@ local function master_lookup(name)
   return nil
 end
 
+-- An official name is one word: Work Log items and PM Insight take the first word
+-- of an item name as the project, so spaces become "_"
+local function clean_project_name(name)
+  return ((name or ""):gsub("[|,=]", " "):match("^%s*(.-)%s*$"):gsub("%s+", "_"))
+end
+
 local function master_entry(name)
   if not MASTER then load_master() end
   local l = (name or ""):lower()
@@ -555,7 +562,7 @@ end
 -- Returns "renamed", "exists" (new_name is another project: merge instead) or nil.
 local function master_rename(old_name, new_name)
   local e = master_entry(old_name)
-  new_name = (new_name or ""):gsub("[|,=]", " "):match("^%s*(.-)%s*$")
+  new_name = clean_project_name(new_name)
   if not e or new_name == "" or new_name == e.name then return nil end
   local other = master_entry(new_name)
   if other and other ~= e then return "exists" end
@@ -630,11 +637,11 @@ local function check_project_name(force)
   local choice = gfx.showmenu((menu:gsub("|$", "")))
   local name
   if choice == 2 then
-    name = raw
+    name = clean_project_name(raw)
   elseif choice == 3 then
     local ok, val = r.GetUserInputs("New project", 1, "Official project name:,extrawidth=120", raw)
     if not ok then return end
-    name = val:gsub("[|,=]", " "):match("^%s*(.-)%s*$")
+    name = clean_project_name(val)
     if name == "" then return end
   elseif choice >= first then
     name = MASTER.list[choice - first + 1].name
@@ -2735,6 +2742,53 @@ mirror_log_item_to_work_log = function(src_item)
   end
 end
 
+-- ── Apply the project list to the Work Log ──────────────────────────────────
+-- Every Work Log item whose name starts with a known spelling ("POINT R5 Dialog |
+-- editing") gets the official name in front; DurationOnly_Log project tracks too.
+-- Names not in the list (e.g. "aap | aap") are left alone. Undo-able in the Work Log.
+-- Returns the number of renamed items, or nil when the Work Log is not open.
+local function apply_master_to_work_log()
+  local wl_proj = find_work_log_project()
+  if not wl_proj then return nil end
+  load_master()
+  local renamed = 0
+  r.Undo_BeginBlock2(wl_proj)
+  for i = 0, r.CountTracks(wl_proj) - 1 do
+    local t = r.GetTrack(wl_proj, i)
+    local _, tname = r.GetTrackName(t)
+    local tofficial = master_lookup(tname)
+    if tofficial and tofficial ~= tname then r.GetSetMediaTrackInfo_String(t, "P_NAME", tofficial, true) end
+    for j = 0, r.CountTrackMediaItems(t) - 1 do
+      local item = r.GetTrackMediaItem(t, j)
+      local take = r.GetActiveTake(item)
+      local name = take and r.GetTakeName(take) or ""
+      local first = name:find(" | ", 1, true) and name:match("^(%S+)")
+      local official = first and master_lookup(first)
+      if official and official ~= first then
+        local locked = r.GetMediaItemInfo_Value(item, "C_LOCK")
+        r.SetMediaItemInfo_Value(item, "C_LOCK", 0)
+        r.GetSetMediaItemTakeInfo_String(take, "P_NAME", official .. name:sub(#first + 1), true)
+        r.SetMediaItemInfo_Value(item, "C_LOCK", locked)
+        renamed = renamed + 1
+      end
+    end
+  end
+  r.Undo_EndBlock2(wl_proj, "PM: Apply project names to Work Log", -1)
+  return renamed
+end
+
+local function action_apply_names_to_work_log(quiet)
+  local n = apply_master_to_work_log()
+  if n == nil then
+    r.ShowMessageBox("Open Work Log.RPP in a project tab, then run Apply Names to Work Log"
+      .. " to rename its items too.", "PM Timer", 0)
+  elseif not quiet or n > 0 then
+    r.UpdateArrange()
+    r.ShowMessageBox(n > 0 and string.format("Work Log: %d item%s renamed to the official project name.", n, n == 1 and "" or "s")
+      or "Work Log already uses the official project names.", "PM Timer", 0)
+  end
+end
+
 -- ── Rename / merge projects (master list) ───────────────────────────────────
 -- Changes only the list (and this project's item names); other projects follow
 -- through their saved name, which is now an alias. Work Log items keep their names
@@ -2757,6 +2811,7 @@ local function after_master_change(name)
   set_extstate("PROJECT_NAME", name)
   sync_work_item_names()
   sync_all_prefixes()
+  action_apply_names_to_work_log(true)
 end
 
 local function action_rename_project()
@@ -3359,7 +3414,7 @@ local function handle_mouse()
   if rb == 1 and mouse_r_prev == 0 then
     local is_docked = cur_dock ~= 0
     local dock_label = is_docked and "Undock window" or "Dock window"
-    local choice = gfx.showmenu(dock_label .. "|Fix Duration from item length|Fix Item Prefixes|Sync to Work Log|Update Scene Metadata|Relink to Selected Scene|Link Split Scenes|Project Name...|Rename Project...|Merge Projects...")
+    local choice = gfx.showmenu(dock_label .. "|Fix Duration from item length|Fix Item Prefixes|Sync to Work Log|Update Scene Metadata|Relink to Selected Scene|Link Split Scenes|Project Name...|Rename Project...|Merge Projects...|Apply Names to Work Log")
     if choice == 1 then
       gfx.dock(is_docked and 0 or 1)
       cur_dock = gfx.dock(-1)
@@ -3460,6 +3515,8 @@ local function handle_mouse()
       action_rename_project()
     elseif choice == 10 then
       action_merge_projects()
+    elseif choice == 11 then
+      action_apply_names_to_work_log()
     end
   end
   mouse_r_prev = rb
