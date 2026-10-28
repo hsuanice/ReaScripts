@@ -7,6 +7,12 @@ PM Timer - Scene-aware Work Timer
 
 **Removed from ReaPack** (2026-10-15) together with PM Insight Analyzer; the script stays in the repository (`@noindex`) as a backup.
 
+## 26.1028.1257pre1
+
+- New: project master list 'PM Projects.txt' next to the Work Log project (created and updated by PM Timer): one line per project, official name = older spellings. The project name in the .rpp file name is looked up there (any case) and replaced by the official name in all work item names; the choice is saved in the project, so daily save-as copies keep it.
+- New: a project name that is not in the list asks once which project this is - add it as a new project (as written or typed) or pick an existing one; the file-name spelling then becomes an alias. Right-click > Project Name... changes it later. The first time, PM Timer asks where Work Log.RPP is (or remembers it from an open Work Log tab / Sync).
+- Change: the window shows the official project name before the mode (e.g. 'POINT · Dialog'), and the task in item names is always Conform / AAP / Dialog (e.g. 'dialog' becomes 'Dialog').
+
 ## 26.1026.2333pre1
 
 - Change: the original source folder is now called ISO; a project whose folder is still called EDL keeps working (Src Len, Src Cnt and the project-scope note read 'ISO', else 'EDL').

@@ -1,10 +1,12 @@
 --[[
 @description Project Manager - PM Timer: scene-aware work timer
-@version 26.1026.2333pre1
+@version 26.1028.1257pre1
 @author hsuanice
 @noindex  (kept in the repository as a backup; Project Manager is not offered on ReaPack for now)
 @changelog
-  - Change: the original source folder is now called ISO; a project whose folder is still called EDL keeps working (Src Len, Src Cnt and the project-scope note read 'ISO', else 'EDL').
+  - New: project master list 'PM Projects.txt' next to the Work Log project (created and updated by PM Timer): one line per project, official name = older spellings. The project name in the .rpp file name is looked up there (any case) and replaced by the official name in all work item names; the choice is saved in the project, so daily save-as copies keep it.
+  - New: a project name that is not in the list asks once which project this is - add it as a new project (as written or typed) or pick an existing one; the file-name spelling then becomes an alias. Right-click > Project Name... changes it later. The first time, PM Timer asks where Work Log.RPP is (or remembers it from an open Work Log tab / Sync).
+  - Change: the window shows the official project name before the mode (e.g. 'POINT · Dialog'), and the task in item names is always Conform / AAP / Dialog (e.g. 'dialog' becomes 'Dialog').
 @about
   Scene-aware toggle timer for the hsuanice PM system.
   Uses gfx (no ReaImGui). 1-second display refresh via defer + time_precise.
@@ -449,6 +451,166 @@ local function set_item_ext(item, key, val)
   r.GetSetMediaItemInfo_String(item, "P_EXT:" .. key, tostring(val), true)
 end
 
+-- ── Project master list ─────────────────────────────────────────────────────
+-- One place for project names: "PM Projects.txt" next to the Work Log project,
+-- created and updated by PM Timer (plain text, one project per line):
+--   POINT = Point, PointUp_AAP        official name = older spellings (aliases)
+-- The project name in a .rpp file name is looked up there (case-insensitive) and
+-- replaced by the official name; the choice is saved in the project (PROJECT_NAME),
+-- so daily save-as copies keep it. Aliases are project names only, never modules.
+local PROJECTS_FILE = "PM Projects.txt"
+local TASK_NAMES    = { conform = "Conform", aap = "AAP", dialog = "Dialog" }
+local MASTER        = nil   -- { path = file or nil, list = { { name =, aliases = {} } } }
+
+-- Folder of the Work Log project: remembered (global ExtState), else an open Work Log tab
+local function work_log_dir()
+  local d = r.GetExtState(NS, "WORK_LOG_DIR")
+  if d ~= "" then return d end
+  local i = 0
+  while true do
+    local proj, fn = r.EnumProjects(i)
+    if not proj then break end
+    if (fn:match("([^/\\]+)$") or fn):find("Work Log", 1, true) then
+      d = fn:match("^(.*)[/\\]") or ""
+      if d ~= "" then r.SetExtState(NS, "WORK_LOG_DIR", d, true); return d end
+    end
+    i = i + 1
+  end
+  return nil
+end
+
+local function load_master()
+  local dir  = work_log_dir()
+  local path = dir and (dir .. "/" .. PROJECTS_FILE) or nil
+  local list = {}
+  local fh = path and io.open(path, "r")
+  if fh then
+    for raw_line in fh:lines() do
+      local line = raw_line:gsub("\r$", "")
+      if line:match("%S") and not line:match("^%s*#") then
+        local name, rest = line:match("^%s*(.-)%s*=%s*(.-)%s*$")
+        if not name then name, rest = line:match("^%s*(.-)%s*$"), "" end
+        local e = { name = name, aliases = {} }
+        for a_raw in rest:gmatch("[^,]+") do
+          local a = a_raw:match("^%s*(.-)%s*$")
+          if a ~= "" then e.aliases[#e.aliases + 1] = a end
+        end
+        if name ~= "" then list[#list + 1] = e end
+      end
+    end
+    fh:close()
+  end
+  MASTER = { path = path, list = list }
+  return MASTER
+end
+
+local function save_master()
+  if not (MASTER and MASTER.path) then return false end
+  local fh = io.open(MASTER.path, "w")
+  if not fh then return false end
+  fh:write("# PM Projects - official project names for PM Timer / PM Insight (managed by PM Timer)\n")
+  fh:write("# One project per line:  OfficialName = older spelling, another spelling\n")
+  for _, e in ipairs(MASTER.list) do
+    fh:write(e.name .. (#e.aliases > 0 and (" = " .. table.concat(e.aliases, ", ")) or "") .. "\n")
+  end
+  fh:close()
+  return true
+end
+
+-- Official name for a project name or alias (case-insensitive), or nil
+local function master_lookup(name)
+  if not MASTER then load_master() end
+  local l = (name or ""):lower()
+  if l == "" then return nil end
+  for _, e in ipairs(MASTER.list) do
+    if e.name:lower() == l then return e.name end
+    for _, a in ipairs(e.aliases) do if a:lower() == l then return e.name end end
+  end
+  return nil
+end
+
+-- Parts of the project file name "YYMMDD----Project----Scope----Task----Note"
+local function proj_file_parts()
+  local _, proj_path = r.EnumProjects(-1)
+  if not proj_path or proj_path == "" then return {} end
+  local name = (proj_path:match("([^/\\]+)$") or proj_path):gsub("%.%a+$", "")
+  local parts = {}
+  for p in (name .. "----"):gmatch("(.-)%-%-%-%-") do parts[#parts + 1] = p end
+  return parts
+end
+
+-- Official name of this project: the saved choice, else the file-name part,
+-- each run through the master list
+local function official_project_name(raw)
+  local n = get_extstate("PROJECT_NAME") or raw or ""
+  if n == "" then return "" end
+  return master_lookup(n) or n
+end
+
+-- Conform / AAP / Dialog in one spelling
+local function norm_task(t)
+  if not t or t == "" then return t end
+  return TASK_NAMES[t:lower()] or t
+end
+
+-- Asks which project this is when its file-name project name is not in the
+-- master list (once per project per run; force = always, from the menu).
+local asked_project = {}
+local function check_project_name(force)
+  local raw = proj_file_parts()[2]
+  if not raw or raw == "" then return end           -- not a "YYMMDD----Project----..." file
+  local id = get_proj_identity()
+  if not force then
+    if asked_project[id] then return end
+    asked_project[id] = true
+  end
+  if not work_log_dir() then
+    local ok, fn = r.GetUserFileNameForRead("", "PM Timer: locate Work Log.RPP (the project list is kept next to it)", ".RPP")
+    if not ok or fn == "" then return end
+    r.SetExtState(NS, "WORK_LOG_DIR", fn:match("^(.*)[/\\]") or "", true)
+  end
+  load_master()
+  if not MASTER.path then return end
+  local saved = get_extstate("PROJECT_NAME")
+  if not force then
+    local official = master_lookup(saved or raw)
+    if official then
+      if official ~= saved then set_extstate("PROJECT_NAME", official) end
+      return
+    end
+  end
+
+  -- Menu: add the file-name name as a new project, type one, or pick an existing one
+  local cur = official_project_name(raw)
+  local entries = { "#Project of this file (file name: " .. raw .. ")", "Add as a new project: " .. raw,
+    "Add a new project (type the name)...", "#Or it is the same project as:" }
+  local first = #entries + 1
+  for _, e in ipairs(MASTER.list) do entries[#entries + 1] = (e.name == cur and "!" or "") .. e.name end
+  local menu = table.concat(entries, "|", 1, 3) .. "||" .. table.concat(entries, "|", 4)
+  gfx.x, gfx.y = 10, 30
+  local choice = gfx.showmenu((menu:gsub("|$", "")))
+  local name
+  if choice == 2 then
+    name = raw
+  elseif choice == 3 then
+    local ok, val = r.GetUserInputs("New project", 1, "Official project name:,extrawidth=120", raw)
+    if not ok then return end
+    name = val:gsub("[|,=]", " "):match("^%s*(.-)%s*$")
+    if name == "" then return end
+  elseif choice >= first then
+    name = MASTER.list[choice - first + 1].name
+  else
+    return
+  end
+  local entry
+  for _, e in ipairs(MASTER.list) do if e.name:lower() == name:lower() then entry = e end end
+  if not entry then entry = { name = name, aliases = {} }; MASTER.list[#MASTER.list + 1] = entry end
+  -- the file-name spelling becomes an alias, so the next file with it needs no question
+  if raw:lower() ~= entry.name:lower() and not master_lookup(raw) then entry.aliases[#entry.aliases + 1] = raw end
+  save_master()
+  set_extstate("PROJECT_NAME", entry.name)
+end
+
 -- ── Project prefix ──────────────────────────────────────────────────────────
 -- Parses the project filename using the format:
 --   YYMMDD----Project----Scope----Task----OptionalNote
@@ -463,9 +625,9 @@ local function get_proj_prefix()
     parts[#parts + 1] = p
   end
   -- parts[1]=YYMMDD, parts[2]=Project, parts[3]=Scope, parts[4]=Task
-  local project = parts[2]
+  local project = parts[2] and official_project_name(parts[2])
   local scope   = parts[3]
-  local task    = parts[4]
+  local task    = norm_task(parts[4])
   if not project or project == "" then return "" end
   if not scope   or scope   == "" then return "" end
   if not task    or task    == "" then return "" end
@@ -495,7 +657,7 @@ local function get_proj_task()
   for p in (name .. "----"):gmatch("(.-)%-%-%-%-") do
     parts[#parts + 1] = p
   end
-  return parts[4] or ""
+  return norm_task(parts[4]) or ""
 end
 
 -- Prepend the project prefix to name. No-ops if prefix is empty or already present.
@@ -518,8 +680,8 @@ local function get_project_workflow_prefix_fallback()
   for p in (name .. "----"):gmatch("(.-)%-%-%-%-") do
     parts[#parts + 1] = p
   end
-  local project  = parts[2] or ""
-  local workflow = parts[3] or ""
+  local project  = official_project_name(parts[2])
+  local workflow = norm_task(parts[3]) or ""
   if project ~= "" and workflow ~= "" then
     return project .. " " .. workflow .. " | "
   end
@@ -536,7 +698,7 @@ local function get_project_label_fallback()
   for p in (name .. "----"):gmatch("(.-)%-%-%-%-") do
     parts[#parts + 1] = p
   end
-  if parts[2] and parts[2] ~= "" then return parts[2] end
+  if parts[2] and parts[2] ~= "" then return official_project_name(parts[2]) end
   return name
 end
 
@@ -2071,7 +2233,11 @@ local function find_work_log_project()
     local proj, fn = r.EnumProjects(i)
     if not proj then break end
     local base = (fn:match("([^/\\]+)$") or fn):gsub("%.%a+$", "")
-    if base:find("Work Log", 1, true) then return proj end
+    if base:find("Work Log", 1, true) then
+      local d = fn:match("^(.*)[/\\]")
+      if d and d ~= "" and r.GetExtState(NS, "WORK_LOG_DIR") ~= d then r.SetExtState(NS, "WORK_LOG_DIR", d, true) end
+      return proj
+    end
     i = i + 1
   end
   return nil
@@ -2970,7 +3136,15 @@ local function draw()
     gfx.setfont(3)
     gfx.x, gfx.y = 10, 12
 
-    gfx.set(0.7, 0.7, 0.7, 1); gfx.drawstr("Mode: ")
+    -- Official project name (master list) as a reminder, then the work mode
+    local proj_disp = official_project_name(proj_file_parts()[2])
+    if proj_disp ~= "" then
+      if #proj_disp > 16 then proj_disp = proj_disp:sub(1, 15) .. "..." end
+      gfx.set(0.45, 0.75, 1.0, 1); gfx.drawstr(proj_disp)
+      gfx.set(0.7, 0.7, 0.7, 1);  gfx.drawstr(" · ")
+    else
+      gfx.set(0.7, 0.7, 0.7, 1); gfx.drawstr("Mode: ")
+    end
     gfx.set(1,   1,   1,   1); gfx.drawstr(mode_disp)
     gfx.set(0.7, 0.7, 0.7, 1); gfx.drawstr(scene_label)
     gfx.set(1,   1,   1,   1); gfx.drawstr(name_disp)
@@ -3084,7 +3258,7 @@ local function handle_mouse()
   if rb == 1 and mouse_r_prev == 0 then
     local is_docked = cur_dock ~= 0
     local dock_label = is_docked and "Undock window" or "Dock window"
-    local choice = gfx.showmenu(dock_label .. "|Fix Duration from item length|Fix Item Prefixes|Sync to Work Log|Update Scene Metadata|Relink to Selected Scene|Link Split Scenes")
+    local choice = gfx.showmenu(dock_label .. "|Fix Duration from item length|Fix Item Prefixes|Sync to Work Log|Update Scene Metadata|Relink to Selected Scene|Link Split Scenes|Project Name...")
     if choice == 1 then
       gfx.dock(is_docked and 0 or 1)
       cur_dock = gfx.dock(-1)
@@ -3177,6 +3351,9 @@ local function handle_mouse()
       end
     elseif choice == 7 then
       action_link_split_scenes()
+    elseif choice == 8 then
+      check_project_name(true)
+      sync_all_prefixes()
     end
   end
   mouse_r_prev = rb
@@ -3319,6 +3496,7 @@ local function loop()
     last_proj_identity = cur_proj_id
     reset_state()
     try_recover()
+    check_project_name()
     sync_work_item_names()
     sync_all_prefixes()
     sync_work_item_colors()
@@ -3371,6 +3549,7 @@ last_proj_identity = get_proj_identity()  -- lock in current project after recov
 gfx.init("hsuanice PM Timer", WIN_W, WIN_H, cur_dock, win_x, win_y)
 setup_fonts()
 draw()
+check_project_name()
 sync_work_item_names()
 sync_all_prefixes()
 sync_work_item_colors()
