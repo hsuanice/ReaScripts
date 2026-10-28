@@ -1,12 +1,11 @@
 --[[
 @description Project Manager - PM Timer: scene-aware work timer
-@version 26.1028.1257pre1
+@version 26.1028.1303pre1
 @author hsuanice
 @noindex  (kept in the repository as a backup; Project Manager is not offered on ReaPack for now)
 @changelog
-  - New: project master list 'PM Projects.txt' next to the Work Log project (created and updated by PM Timer): one line per project, official name = older spellings. The project name in the .rpp file name is looked up there (any case) and replaced by the official name in all work item names; the choice is saved in the project, so daily save-as copies keep it.
-  - New: a project name that is not in the list asks once which project this is - add it as a new project (as written or typed) or pick an existing one; the file-name spelling then becomes an alias. Right-click > Project Name... changes it later. The first time, PM Timer asks where Work Log.RPP is (or remembers it from an open Work Log tab / Sync).
-  - Change: the window shows the official project name before the mode (e.g. 'POINT · Dialog'), and the task in item names is always Conform / AAP / Dialog (e.g. 'dialog' becomes 'Dialog').
+  - New: right-click > Rename Project... - a new official name for this project; the old name becomes an older spelling, so other projects saved with it follow. A name that is already another project offers to merge the two.
+  - New: right-click > Merge Projects... - pick another project in the list; its name and older spellings become spellings of this one. Both update this project's item names; Work Log items keep theirs (PM Insight reads the list).
 @about
   Scene-aware toggle timer for the hsuanice PM system.
   Uses gfx (no ReaImGui). 1-second display refresh via defer + time_precise.
@@ -527,6 +526,46 @@ local function master_lookup(name)
     for _, a in ipairs(e.aliases) do if a:lower() == l then return e.name end end
   end
   return nil
+end
+
+local function master_entry(name)
+  if not MASTER then load_master() end
+  local l = (name or ""):lower()
+  for i, e in ipairs(MASTER.list) do if e.name:lower() == l then return e, i end end
+end
+
+local function add_alias(entry, alias)
+  if alias == "" or alias:lower() == entry.name:lower() then return end
+  for _, a in ipairs(entry.aliases) do if a:lower() == alias:lower() then return end end
+  entry.aliases[#entry.aliases + 1] = alias
+end
+
+-- Merges project `from` into `into`: its name and aliases become aliases of `into`
+local function master_merge(from_name, into_name)
+  local from, fi = master_entry(from_name)
+  local into = master_entry(into_name)
+  if not (from and into) or from == into then return false end
+  add_alias(into, from.name)
+  for _, a in ipairs(from.aliases) do add_alias(into, a) end
+  table.remove(MASTER.list, fi)
+  return true
+end
+
+-- Renames a project; the old name becomes an alias (not for a change of case only).
+-- Returns "renamed", "exists" (new_name is another project: merge instead) or nil.
+local function master_rename(old_name, new_name)
+  local e = master_entry(old_name)
+  new_name = (new_name or ""):gsub("[|,=]", " "):match("^%s*(.-)%s*$")
+  if not e or new_name == "" or new_name == e.name then return nil end
+  local other = master_entry(new_name)
+  if other and other ~= e then return "exists" end
+  local old = e.name
+  e.name = new_name
+  add_alias(e, old)
+  for i = #e.aliases, 1, -1 do
+    if e.aliases[i]:lower() == new_name:lower() then table.remove(e.aliases, i) end
+  end
+  return "renamed"
 end
 
 -- Parts of the project file name "YYMMDD----Project----Scope----Task----Note"
@@ -2696,6 +2735,68 @@ mirror_log_item_to_work_log = function(src_item)
   end
 end
 
+-- ── Rename / merge projects (master list) ───────────────────────────────────
+-- Changes only the list (and this project's item names); other projects follow
+-- through their saved name, which is now an alias. Work Log items keep their names
+-- (PM Insight reads the list).
+local function current_master_entry()
+  load_master()
+  if not MASTER.path then
+    r.ShowMessageBox("The project list is kept next to Work Log.RPP - use Project Name... first.", "PM Timer", 0)
+    return nil
+  end
+  local e = master_entry(official_project_name(proj_file_parts()[2]))
+  if not e then
+    r.ShowMessageBox("This project is not in the project list yet - use Project Name... first.", "PM Timer", 0)
+  end
+  return e
+end
+
+local function after_master_change(name)
+  save_master()
+  set_extstate("PROJECT_NAME", name)
+  sync_work_item_names()
+  sync_all_prefixes()
+end
+
+local function action_rename_project()
+  local e = current_master_entry()
+  if not e then return end
+  local ok, val = r.GetUserInputs("Rename Project", 1, "New official name:,extrawidth=120", e.name)
+  if not ok then return end
+  local old = e.name
+  local res = master_rename(old, val)
+  if res == "exists" then
+    local into = master_entry(val).name
+    if r.ShowMessageBox(string.format("'%s' is already in the project list.\n\nMerge '%s' into '%s'?"
+      .. "\n('%s' and its older spellings become spellings of '%s'.)", into, old, into, old, into),
+      "Rename Project", 1) ~= 1 then return end
+    master_merge(old, into)
+    after_master_change(into)
+  elseif res == "renamed" then
+    after_master_change(e.name)
+  end
+end
+
+local function action_merge_projects()
+  local e = current_master_entry()
+  if not e then return end
+  local others = {}
+  for _, x in ipairs(MASTER.list) do if x ~= e then others[#others + 1] = x.name end end
+  if #others == 0 then
+    r.ShowMessageBox("There is no other project in the list.", "Merge Projects", 0)
+    return
+  end
+  gfx.x, gfx.y = 10, 30
+  local choice = gfx.showmenu("#Merge into " .. e.name .. ":||" .. table.concat(others, "|"))
+  local from = others[choice - 1]
+  if not from then return end
+  if r.ShowMessageBox(string.format("Merge '%s' into '%s'?\n\n'%s' and its older spellings become spellings of '%s'.",
+    from, e.name, from, e.name), "Merge Projects", 1) ~= 1 then return end
+  master_merge(from, e.name)
+  after_master_change(e.name)
+end
+
 -- ── Link Split Scenes ───────────────────────────────────────────────────────
 -- A scene found to be wrongly cut (split in REAPER after work was logged) keeps
 -- all logged time on the piece that kept the original GUID. Select all pieces
@@ -3258,7 +3359,7 @@ local function handle_mouse()
   if rb == 1 and mouse_r_prev == 0 then
     local is_docked = cur_dock ~= 0
     local dock_label = is_docked and "Undock window" or "Dock window"
-    local choice = gfx.showmenu(dock_label .. "|Fix Duration from item length|Fix Item Prefixes|Sync to Work Log|Update Scene Metadata|Relink to Selected Scene|Link Split Scenes|Project Name...")
+    local choice = gfx.showmenu(dock_label .. "|Fix Duration from item length|Fix Item Prefixes|Sync to Work Log|Update Scene Metadata|Relink to Selected Scene|Link Split Scenes|Project Name...|Rename Project...|Merge Projects...")
     if choice == 1 then
       gfx.dock(is_docked and 0 or 1)
       cur_dock = gfx.dock(-1)
@@ -3353,7 +3454,12 @@ local function handle_mouse()
       action_link_split_scenes()
     elseif choice == 8 then
       check_project_name(true)
+      sync_work_item_names()
       sync_all_prefixes()
+    elseif choice == 9 then
+      action_rename_project()
+    elseif choice == 10 then
+      action_merge_projects()
     end
   end
   mouse_r_prev = rb

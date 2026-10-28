@@ -25,7 +25,7 @@ gfx = { showmenu = function(m) menus[#menus + 1] = m; return menu_choice end }
 local env = setmetatable({ r = r, gfx = gfx, NS = "hsuanice_PM",
   get_extstate = function(k) return ext[k] end, set_extstate = function(k, v) ext[k] = v end,
   get_proj_identity = function() return proj_fn end }, { __index = _G })
-local fn = assert(load(chunk .. "\nreturn { check = check_project_name, prefix = get_proj_prefix, wf = get_project_workflow_prefix_fallback, task = get_proj_task, official = official_project_name, load = load_master, lookup = master_lookup }", "chunk", "t", env))
+local fn = assert(load(chunk .. "\nreturn { check = check_project_name, prefix = get_proj_prefix, wf = get_project_workflow_prefix_fallback, task = get_proj_task, official = official_project_name, load = load_master, lookup = master_lookup, rename = master_rename, merge = master_merge, save = save_master }", "chunk", "t", env))
 local M = fn()
 local pass, fail = 0, 0
 local function check(name, c) if c then pass = pass + 1 else fail = fail + 1; print("FAIL " .. name) end end
@@ -73,6 +73,24 @@ check("file keeps the header comment", readf():find("^# PM Projects"))
 ext = {}; proj_fn = "/x/z/261101----Other----R1----Dialog.RPP"; menu_choice = 0
 M.check(); check("cancel: nothing saved", ext.PROJECT_NAME == nil and not readf():find("Other", 1, true))
 check("cancel: prefix keeps the file-name name", M.prefix() == "Other R1 Dialog | ")
+-- 6. rename: old name becomes an alias; a saved old name follows
+local function setlist(txt) local f = io.open(WL .. "/PM Projects.txt", "w"); f:write(txt); f:close(); M.load() end
+setlist("POINT = Point, PointUp_AAP\nFishTown\nTheFixer\n")
+check("rename", M.rename("POINT", "Point Up") == "renamed" and M.save())
+check("rename: old name is an alias (POINT is covered by Point - case-insensitive)",
+  readf():find("\nPoint Up = Point, PointUp_AAP\n", 1, true) and M.lookup("POINT") == "Point Up")
+ext = { PROJECT_NAME = "POINT" }; proj_fn = "/x/R5/261026----POINT----R5----dialog.RPP"
+check("rename: saved old name resolves to the new one", M.official("POINT") == "Point Up" and M.prefix() == "Point Up R5 Dialog | ")
+check("rename: change of case only adds no alias", M.rename("TheFixer", "THEFIXER") == "renamed" and M.save()
+  and readf():find("\nTHEFIXER\n", 1, true))
+check("rename to another project's name -> exists", M.rename("FishTown", "point up") == "exists")
+check("rename to the same name -> nothing", M.rename("FishTown", "FishTown") == nil)
+-- 7. merge: name + aliases move, entry removed
+setlist("POINT = Point\nPointUp_AAP = PointUp\nFishTown\n")
+check("merge", M.merge("PointUp_AAP", "POINT") and M.save())
+check("merge: list", readf():find("\nPOINT = Point, PointUp_AAP, PointUp\nFishTown\n", 1, true) and not readf():find("\nPointUp_AAP =", 1, true))
+check("merge: old name resolves", M.lookup("pointup") == "POINT" and M.lookup("PointUp_AAP") == "POINT")
+check("merge into itself -> false", M.merge("POINT", "point") == false)
 print(pass .. " passed, " .. fail .. " failed")
 os.execute('rm -rf "' .. WL_DIR .. '"')
 if fail > 0 then os.exit(1) end

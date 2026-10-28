@@ -7,6 +7,11 @@ PM Timer - Scene-aware Work Timer
 
 **Removed from ReaPack** (2026-10-15) together with PM Insight Analyzer; the script stays in the repository (`@noindex`) as a backup.
 
+## 26.1028.1303pre1
+
+- New: right-click > Rename Project... - a new official name for this project; the old name becomes an older spelling, so other projects saved with it follow. A name that is already another project offers to merge the two.
+- New: right-click > Merge Projects... - pick another project in the list; its name and older spellings become spellings of this one. Both update this project's item names; Work Log items keep theirs (PM Insight reads the list).
+
 ## 26.1028.1257pre1
 
 - New: project master list 'PM Projects.txt' next to the Work Log project (created and updated by PM Timer): one line per project, official name = older spellings. The project name in the .rpp file name is looked up there (any case) and replaced by the official name in all work item names; the choice is saved in the project, so daily save-as copies keep it.
