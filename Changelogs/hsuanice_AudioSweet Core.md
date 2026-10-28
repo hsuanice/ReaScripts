@@ -2,6 +2,10 @@
 
 AudioSweet Core - Focused Track FX render via RGWH Core
 
+## 26.1028.2249
+
+- Fix: a hidden FX track (e.g. pinned and hidden) no longer makes AudioSweet fail. The FX track and any hidden parent folder are shown for the run and hidden again afterwards (also after an error).
+
 ## 26.1028.2243pre1
 
 - Fix: a hidden FX track (e.g. pinned and hidden) no longer makes AudioSweet fail. The FX track and any hidden parent folder are shown for the run and hidden again afterwards (also after an error).

@@ -1,5 +1,9 @@
 # hsuanice_Library.lua — Changelog
 
+## 26.1028.2249
+
+- Update: hsuanice_AudioSweet Core.lua (works with a hidden FX track).
+
 ## 26.1028.2243pre1
 
 - Update: hsuanice_AudioSweet Core.lua (works with a hidden FX track).
