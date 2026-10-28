@@ -87,6 +87,7 @@ and background on/off scripts start with `Toggle`.
 |---|---|
 | Auto Pan LR tracks | Pan adjacent XXX_L / XXX_R track pairs hard left / right |
 | Delete Selected Tracks with Warning | Safe delete: asks first when tracks have items, FX, routing or are folders |
+| Play from Mouse and Solo Track Under Mouse While Key Held | Hold the shortcut to play from the mouse with the track under it soloed (pinned tracks aware), release to stop and restore solo |
 | Show Hide Folder Child Tracks in TCP | Show or hide the children of the selected folder tracks (or of their parent) |
 | Import Audio Folders to Tracks - Field Recorder | Import one folder per track; channel-split recorder files are grouped (GUI) |
 | Import Audio Folders to Tracks - Music Multitrack | Import one folder per track for music multitrack sessions (GUI) |
@@ -151,6 +152,8 @@ http://timchimes.com/scripting-with-reaper-audiosuite/
 Fade Tool is heavily based on AZ's *Fade tool (work on context of mouse, razor or time selection)* (ReaTeam Scripts) — https://forum.cockos.com/showthread.php?t=293335 . It closely follows AZ's design (context order razor / time selection / mouse, top half fade-in / bottom half fade-out, the item name bar moving a crossfade and AZ's way of detecting it, razor crossfades and fades); the code is a new implementation with hsuanice's changes (frame-based defaults, no pop-up windows, Hover Mode, hold-and-drag crossfades, Scene Cut). Smart Fade's hold-the-shortcut detection follows Sexan's *VT_SWIPE to Comp HOLD* (Virtual Track, Sexan_Scripts).
 
 Grab Item's hold-the-shortcut detection also follows Sexan's *VT_SWIPE to Comp HOLD* (Virtual Track, Sexan_Scripts).
+
+Play from Mouse and Solo Track Under Mouse While Key Held is inspired by SWS/BR *Play from mouse cursor position and solo item and track under mouse for the duration* (Breeder, SWS Extension); its hold-the-shortcut detection follows Sexan's *VT_SWIPE to Comp HOLD*.
 
 Hover Editing - Toggle Hover Mode is based on / inspired by TJF's *Hover Mode Toggle* script.
 
