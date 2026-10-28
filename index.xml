@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<index version="1" name="hsuanice Scripts" commit="366b4e305193758da7855f2a598fc6c9c0fbefee">
+<index version="1" name="hsuanice Scripts" commit="9974ddce76d63d9c7d4b2b6921ec3c62065c2eea">
   <category name="Conform">
     <reapack name="hsuanice_Conform List Browser - CLB.lua" type="script" desc="Conform List Browser - CLB: conform EDL / AAF / XML / OTIO / subtitle lists (GUI + Jump / Link / Load / Reveal)">
       <metadata>
@@ -1745,6 +1745,32 @@
         <source main="main">https://github.com/hsuanice/ReaScripts/raw/69a8697e1b54666ea7228379b1490811fd778fa8/Tracks/hsuanice_Import%20Audio%20Folders%20to%20Tracks%20-%20Music%20Multitrack.lua</source>
       </version>
     </reapack>
+    <reapack name="hsuanice_Play from Mouse and Solo Track Under Mouse While Key Held.lua" type="script" desc="Play from Mouse and Solo Track Under Mouse While Key Held (pinned tracks aware)">
+      <metadata>
+        <description><![CDATA[{\rtf1\ansi\deff0{\fonttbl{\f0 \fswiss Helvetica;}{\f1 \fmodern Courier;}}
+{\colortbl;\red255\green0\blue0;\red0\green0\blue255;}
+\widowctrl\hyphauto
+
+{\pard \ql \f0 \sa180 \li0 \fi0 \outlinelevel0 \b \fs36 Play from Mouse and Solo Track Under Mouse While Key Held\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 Hold the shortcut: playback starts from the mouse position and the track under the mouse is soloed. Release the shortcut: playback stops and every track's solo goes back to what it was. Works like SWS/BR "Play from mouse cursor position and solo item and track under mouse for the duration", but finds the track with REAPER's own hit test, so pinned tracks (Pin track to top of arrange view) give the right track.\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Mouse over an item: its track is soloed. When that item is selected, the tracks of all selected items are soloed.\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Mouse over an empty lane or a track panel: that track is soloed.\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Solo uses the solo mode of REAPER's preferences (e.g. solo in place). Track grouping and selection ganging do not spread the solo.\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab The edit cursor does not move; on stop the play cursor goes back to it, as with SWS.\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Over a track panel (no timeline position under the mouse) playback starts from the edit cursor.\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Item mute is never changed, and no undo point is added.\sa180\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 Requires js_ReaScriptAPI (key hold detection) and SWS (mouse position).\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 \outlinelevel1 \b \fs32 Suggested shortcuts\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 None: pick any key that is free in your setup. Shortcuts are suggestions only \u8212- nothing is assigned automatically.\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 Inspired by SWS/BR "Play from mouse cursor position and solo item and track under mouse for the duration" (_BR_CONT_PLAY_MOUSE_SOLO_ITEM, by Breeder, SWS Extension). Hold-the-shortcut detection follows Sexan's "VT_SWIPE to Comp HOLD" (Virtual Track, Sexan_Scripts). Designed and tested by hsuanice; written with AI (Claude Code).\par}
+}
+]]></description>
+      </metadata>
+      <version name="26.1028.2147pre1" author="hsuanice" time="2026-10-28T13:47:53Z">
+        <changelog><![CDATA[- First release: hold the shortcut to play from the mouse and solo the track under it (pinned tracks aware); release to stop and restore solo.]]></changelog>
+        <source main="main">https://github.com/hsuanice/ReaScripts/raw/9974ddce76d63d9c7d4b2b6921ec3c62065c2eea/Tracks/hsuanice_Play%20from%20Mouse%20and%20Solo%20Track%20Under%20Mouse%20While%20Key%20Held.lua</source>
+      </version>
+    </reapack>
     <reapack name="hsuanice_Show Hide Folder Child Tracks in TCP.lua" type="script" desc="Show Hide Folder Child Tracks in TCP - for the selected folders, or the parent of a selected child">
       <metadata>
         <description><![CDATA[{\rtf1\ansi\deff0{\fonttbl{\f0 \fswiss Helvetica;}{\f1 \fmodern Courier;}}
@@ -1841,7 +1867,7 @@ Packages
 {\pard \ql \f0 \sa180 \li0 \fi0 \outlinelevel2 \b \fs28 Selection\par}
 {\pard \ql \f0 \sa180 \li0 \fi0 | Package | What it does | |---|---| | Toggle Track and Razor Item Link like Pro Tools | Pro Tools-style "Link Track and Edit Selection": tracks follow razor areas / item selection | | Toggle Razor and Item Link Overlap or Contain | Razor areas select the items they overlap or fully contain | | Toggle Set Time Selection to Items on Right Drag | After a right-button drag, the time selection follows the selected items | | Extend Razor Edit to Mouse Cursor like Pro Tools | Pro Tools-style Shift-click: grows the razor area (time range and tracks) to the mouse position, never shrinks it |\par}
 {\pard \ql \f0 \sa180 \li0 \fi0 \outlinelevel2 \b \fs28 Tracks\par}
-{\pard \ql \f0 \sa180 \li0 \fi0 | Package | What it does | |---|---| | Auto Pan LR tracks | Pan adjacent XXX_L / XXX_R track pairs hard left / right | | Delete Selected Tracks with Warning | Safe delete: asks first when tracks have items, FX, routing or are folders | | Show Hide Folder Child Tracks in TCP | Show or hide the children of the selected folder tracks (or of their parent) | | Import Audio Folders to Tracks - Field Recorder | Import one folder per track; channel-split recorder files are grouped (GUI) | | Import Audio Folders to Tracks - Music Multitrack | Import one folder per track for music multitrack sessions (GUI) |\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 | Package | What it does | |---|---| | Auto Pan LR tracks | Pan adjacent XXX_L / XXX_R track pairs hard left / right | | Delete Selected Tracks with Warning | Safe delete: asks first when tracks have items, FX, routing or are folders | | Play from Mouse and Solo Track Under Mouse While Key Held | Hold the shortcut to play from the mouse with the track under it soloed (pinned tracks aware), release to stop and restore solo | | Show Hide Folder Child Tracks in TCP | Show or hide the children of the selected folder tracks (or of their parent) | | Import Audio Folders to Tracks - Field Recorder | Import one folder per track; channel-split recorder files are grouped (GUI) | | Import Audio Folders to Tracks - Music Multitrack | Import one folder per track for music multitrack sessions (GUI) |\par}
 {\pard \ql \f0 \sa180 \li0 \fi0 \outlinelevel2 \b \fs28 Metadata\par}
 {\pard \ql \f0 \sa180 \li0 \fi0 | Package | What it does | |---|---| | Rename from Metadata | Rename the active take or the source file from BWF / iXML metadata tokens, with live preview (GUI) | | Item List | Spreadsheet-style item tables with metadata columns: Item List Browser - ILB, Item List Editor - ILE (GUI) | | BWF / iXML Embed Tools | Embed BWF iXML Metadata from Take 1, Embed Timecode to BWF and iXML, Embed SMPTE UMID (needs BWF MetaEdit) |\par}
 {\pard \ql \f0 \sa180 \li0 \fi0 \outlinelevel2 \b \fs28 Conform\par}
@@ -1875,6 +1901,7 @@ Claude
 {\pard \ql \f0 \sa180 \li0 \fi0 AudioSweet is inspired by the AudioSuite-like script by Tim Chimes. "AudioSweet" is a name originally given by Tim Chimes; this project continues to use the name in reference to his original work. Original: "Renders selected plugin to selected media item", written for REAPER 5.1 with Lua (v1.1, 2015-12-22) \u8212- http://timchimes.com/scripting-with-reaper-audiosuite/\par}
 {\pard \ql \f0 \sa180 \li0 \fi0 Fade Tool is heavily based on AZ's {\i Fade tool (work on context of mouse, razor or time selection)} (ReaTeam Scripts) \u8212- https://forum.cockos.com/showthread.php?t=293335 . It closely follows AZ's design (context order razor / time selection / mouse, top half fade-in / bottom half fade-out, the item name bar moving a crossfade and AZ's way of detecting it, razor crossfades and fades); the code is a new implementation with hsuanice's changes (frame-based defaults, no pop-up windows, Hover Mode, hold-and-drag crossfades, Scene Cut). Smart Fade's hold-the-shortcut detection follows Sexan's {\i VT_SWIPE to Comp HOLD} (Virtual Track, Sexan_Scripts).\par}
 {\pard \ql \f0 \sa180 \li0 \fi0 Grab Item's hold-the-shortcut detection also follows Sexan's {\i VT_SWIPE to Comp HOLD} (Virtual Track, Sexan_Scripts).\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 Play from Mouse and Solo Track Under Mouse While Key Held is inspired by SWS/BR {\i Play from mouse cursor position and solo item and track under mouse for the duration} (Breeder, SWS Extension); its hold-the-shortcut detection follows Sexan's {\i VT_SWIPE to Comp HOLD}.\par}
 {\pard \ql \f0 \sa180 \li0 \fi0 Hover Editing - Toggle Hover Mode is based on / inspired by TJF's {\i Hover Mode Toggle} script.\par}
 {\pard \ql \f0 \sa180 \li0 \fi0 Extend Razor Edit to Mouse Cursor like Pro Tools is inspired by Daniel Kharrat's {\i Extend razor edit area to mouse cursor (select tracks in between)} script.\par}
 {\pard \ql \f0 \sa180 \li0 \fi0 Auto Color's palette (hue + per-row saturation / value) is modeled after rodilab's {\i Color palette} script. Auto Color's Shiny mode follows the ShinyColor behavior of {\i Chroma - Coloring Tool} by OLSHALOM \u8212- https://forum.cockos.com/showthread.php?t=281516\par}
