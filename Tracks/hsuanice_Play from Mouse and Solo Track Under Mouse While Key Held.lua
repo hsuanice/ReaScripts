@@ -1,9 +1,9 @@
 --[[
 @description Play from Mouse and Solo Track Under Mouse While Key Held (pinned tracks aware)
-@version 26.1028.2147pre1
+@version 26.1028.2151
 @author hsuanice
 @changelog
-  - First release: hold the shortcut to play from the mouse and solo the track under it (pinned tracks aware); release to stop and restore solo.
+  - Release: tested in REAPER (pinned tracks, solo restore, solo mode, selected items, restart while playing).
 @about
   # Play from Mouse and Solo Track Under Mouse While Key Held
 
