@@ -1,10 +1,10 @@
 --[[
 @description RGWH Core - Core Library of Render or Glue with Handles
-@version 26.1025.2114
+@version 26.1029.1359pre1
 @author hsuanice
 @noindex
 @changelog
-  - Fix: Render and Glue now restore item fades exactly (shape, curve, S-curve intensity). Render lost a dragged fade curve (wrong field name), Glue reset it; the FADEIN / FADEOUT lines are now copied from the item chunk.
+  - Fix: Render failed after rendering ("bad argument #1 to GetSetMediaItemTakeInfo_String") on an item with an empty take; the new take was left without its -renderedN name and AudioSweet stopped before naming it
 @about
   Core library for handle-aware Render/Glue workflows with clear, single-entry API.
   Features:
@@ -254,9 +254,11 @@ local function max_rendered_n_on_item(it)
   local tc = reaper.CountTakes(it)
   for i = 0, tc-1 do
     local tk = reaper.GetTake(it, i)
-    local _, nm = reaper.GetSetMediaItemTakeInfo_String(tk, "P_NAME", "", false)
-    local n = extract_rendered_n(nm or "")
-    if n > maxn then maxn = n end
+    if tk then  -- an empty take (e.g. an empty take lane) has no take object
+      local _, nm = reaper.GetSetMediaItemTakeInfo_String(tk, "P_NAME", "", false)
+      local n = extract_rendered_n(nm or "")
+      if n > maxn then maxn = n end
+    end
   end
   return maxn
 end

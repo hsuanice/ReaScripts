@@ -2,6 +2,10 @@
 
 RGWH Core - Core Library of Render or Glue with Handles
 
+## 26.1029.1359pre1
+
+- Fix: Render failed after rendering ("bad argument #1 to GetSetMediaItemTakeInfo_String") on an item with an empty take; the new take was left without its -renderedN name and AudioSweet stopped before naming it
+
 ## 26.1025.2114
 
 - Fix: Render and Glue now restore item fades exactly (shape, curve, S-curve intensity). Render lost a dragged fade curve (wrong field name), Glue reset it; the FADEIN / FADEOUT lines are now copied from the item chunk.

@@ -1,5 +1,10 @@
 # hsuanice_Library.lua — Changelog
 
+## 26.1029.1359pre1
+
+- Update: hsuanice_RGWH Core.lua (render no longer fails on an item with an empty take).
+- Update: hsuanice_Metadata Read.lua (UMID fallback runs bwfmetaedit once instead of twice).
+
 ## 26.1029.1330pre1
 
 - Update: hsuanice_Metadata Read.lua (UMID fallback runs bwfmetaedit once instead of twice).
