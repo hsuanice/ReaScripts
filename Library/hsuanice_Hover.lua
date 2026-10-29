@@ -1,11 +1,10 @@
 --[[
 @description hsuanice Hover Library (Shared helpers for Hover Mode editing tools)
-@version 26.1012.0736
+@version 26.1029.1741pre1
 @author hsuanice
 @noindex
 @changelog
-  - Released as part of the 26.1012.0736 package update.
-  - Full history: Changelogs/ in the repository (https://github.com/hsuanice/ReaScripts/tree/master/Changelogs)
+  - Fix: Trim or Extend Left / Right Edge no longer resets the fade shape and curve to Linear
 @about
   Common utilities for Hover Mode scripts (Split / Trim / Extend).
   Centralizes hover/edit cursor decision, snap behavior, pixel epsilon,
@@ -399,6 +398,42 @@ local function _max_right_end_audio(it, take)
   return st + tail
 end
 
+-- The item chunk's FADEIN / FADEOUT line holds shape, length, curve and S-curve intensity.
+-- Writing the fade fields through the API can reset the shape and curve to Linear, so the
+-- line is read before an edge edit and its shape/curve tokens are put back afterwards.
+local function _item_head(it)
+  local ok, chunk = reaper.GetItemStateChunk(it, "", false)
+  if not ok or not chunk then return nil end
+  local cut = chunk:find("\n<", 1, true) or #chunk  -- item-level lines come before any <TAKE / <SOURCE block
+  return chunk, cut
+end
+
+local function _fade_line(it, key)
+  local chunk, cut = _item_head(it)
+  if not chunk then return nil end
+  return chunk:sub(1, cut):match("\n(" .. key .. " [^\r\n]*)")
+end
+
+-- Keep the new length tokens (2 and 3) and restore every other token from old_line
+local function _restore_fade_shape(it, key, old_line)
+  if not old_line then return end
+  local chunk, cut = _item_head(it)
+  if not chunk then return end
+  local head, rest = chunk:sub(1, cut), chunk:sub(cut + 1)
+  local new_line = head:match("\n(" .. key .. " [^\r\n]*)")
+  if not new_line or new_line == old_line then return end
+  local old_t, new_t = {}, {}
+  for t in old_line:gmatch("%S+") do old_t[#old_t + 1] = t end
+  for t in new_line:gmatch("%S+") do new_t[#new_t + 1] = t end
+  if #old_t ~= #new_t or #new_t < 4 then return end
+  old_t[3], old_t[4] = new_t[3], new_t[4]  -- [1] is the key itself
+  local merged = table.concat(old_t, " ")
+  if merged == new_line then return end
+  local new_head = head:gsub("\n" .. key .. " [^\r\n]*", function() return "\n" .. merged end, 1)
+  reaper.SetItemStateChunk(it, new_head .. rest, false)
+  LOGF("[HoverLib] %s shape restored: %s", key, merged)
+end
+
 -- Left edge: preserve fade-in END; update audio offset; no flicker
 function M.apply_left_edge_no_flicker(it, target_pos)
   if not M.is_item_visible(it) then return end
@@ -432,6 +467,7 @@ function M.apply_left_edge_no_flicker(it, target_pos)
   local old_fi  = reaper.GetMediaItemInfo_Value(it, "D_FADEINLEN") or 0
   local fade_end = st + math.max(0, old_fi)
   local new_fi  = (old_fi > 0) and math.max(0, fade_end - new_st) or 0
+  local fi_line = (new_fi > 0) and _fade_line(it, "FADEIN") or nil
 
   reaper.SetMediaItemInfo_Value(it, "D_FADEINLEN_AUTO", 0)
   local delta_pos = new_st - st
@@ -442,6 +478,7 @@ function M.apply_left_edge_no_flicker(it, target_pos)
   reaper.SetMediaItemInfo_Value(it, "D_POSITION",  new_st)
   reaper.SetMediaItemInfo_Value(it, "D_LENGTH",    new_ln)
   reaper.SetMediaItemInfo_Value(it, "D_FADEINLEN", new_fi)
+  _restore_fade_shape(it, "FADEIN", fi_line)
   LOGF("[HoverLib] left-edge: applied pos=%.9f len=%.9f fade_in=%.9f", new_st, new_ln, new_fi)
 end
 
@@ -482,10 +519,12 @@ function M.apply_right_edge_no_flicker(it, target_pos)
   local old_fo = reaper.GetMediaItemInfo_Value(it, "D_FADEOUTLEN") or 0
   local fade_start = en0 - math.max(0, old_fo)
   local new_fo = (old_fo > 0) and math.max(0, desired - fade_start) or 0
+  local fo_line = (new_fo > 0) and _fade_line(it, "FADEOUT") or nil
 
   reaper.SetMediaItemInfo_Value(it, "D_FADEOUTLEN_AUTO", 0)
   reaper.SetMediaItemInfo_Value(it, "D_LENGTH", new_ln)
   reaper.SetMediaItemInfo_Value(it, "D_FADEOUTLEN", new_fo)
+  _restore_fade_shape(it, "FADEOUT", fo_line)
   LOGF("[HoverLib] right-edge: applied pos=%.9f len=%.9f fade_out=%.9f", st, new_ln, new_fo)
 end
 

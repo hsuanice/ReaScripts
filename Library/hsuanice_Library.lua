@@ -1,6 +1,6 @@
 --[[
 @description hsuanice Library - shared code used by hsuanice scripts (required)
-@version 26.1029.1405
+@version 26.1029.1741pre1
 @author hsuanice
 @metapackage
 @provides
@@ -25,8 +25,7 @@
   [nomain] hsuanice_Fade Tool Core.lua
   [nomain] json.lua
 @changelog
-  - Update: hsuanice_RGWH Core.lua (render no longer fails on an item with an empty take).
-  - Update: hsuanice_Metadata Read.lua (UMID fallback runs bwfmetaedit once instead of twice).
+  - Hover: edge trim / extend keeps the fade shape
 @about
   # hsuanice Library
 
