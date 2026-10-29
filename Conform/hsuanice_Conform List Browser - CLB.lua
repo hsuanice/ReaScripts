@@ -1,6 +1,6 @@
 --[[
 @description Conform List Browser - CLB: conform EDL / AAF / XML / OTIO / subtitle lists (GUI + Jump / Link / Load / Reveal)
-@version 26.1015.1954
+@version 26.1029.1250pre1
 @author hsuanice
 @provides
   [main] .
@@ -12,7 +12,7 @@
   [nomain] ../Tools/aaf_to_otio.py
   [nomain] ../Tools/subtitle_to_clb.py
 @changelog
-  - Fix: CLB Jump Old New TC - on the boundary of two back-to-back Recut items it jumped from the wrong one (e.g. 3 frames early); jumps also land exactly on the frame, and DME Recut stores jump targets with full precision.
+  - Fix: the Apply report now also opens on Windows
 @about
   Note: the Compare view (old vs new cut, reconform) is a work in progress and not finished yet.
 
@@ -12469,7 +12469,11 @@ function CMP.write_apply_report(title, summary_line, rows)
   f:write("</table>\n</body></html>\n")
   f:close()
 
-  os.execute(string.format('open %s', ("'" .. filepath:gsub("'", "'\\''") .. "'")))
+  if reaper.GetOS():match("Win") then
+    os.execute('start "" "' .. filepath .. '"')
+  else
+    os.execute(string.format('open %s', ("'" .. filepath:gsub("'", "'\\''") .. "'")))
+  end
   console_msg("Apply report saved: " .. filepath)
   return filepath
 end

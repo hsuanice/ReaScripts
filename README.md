@@ -23,6 +23,14 @@ REAPER scripts for audio post-production, by hsuanice.
 - **Python 3 + OpenTimelineIO** (`pip install opentimelineio`) — only for *Conform List Browser* AAF / XML / OTIO import; EDL needs nothing extra. AAF also needs **aaftool** from LibAAF.
 - **BWF MetaEdit** (`bwfmetaedit` command-line tool) — optional; only needed for timecode (BWF TimeReference) embedding.
 
+### Platforms
+
+Developed and tested on **macOS** only. Most scripts use only the REAPER API and should work on
+Windows, but they have **not been tested there**. Known limitation: *Conform List Browser*'s
+AAF / XML / OTIO import and subtitle import run Python through a macOS / Linux shell and do not
+work on Windows yet (EDL import does not need Python). If you use these scripts on Windows,
+please report what works and what does not.
+
 ### Moving from hsuanice/PublicBeta
 
 This repository replaces `hsuanice/PublicBeta`, which is no longer updated.

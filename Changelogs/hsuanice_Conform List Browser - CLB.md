@@ -4,6 +4,10 @@
 
 Conform List Browser
 
+## 26.1029.1250pre1
+
+- Fix: the Apply report now also opens on Windows
+
 ## 26.1015.1954
 
 - Fix: CLB Jump Old New TC - on the boundary of two back-to-back Recut items it jumped from the wrong one (e.g. 3 frames early); jumps also land exactly on the frame, and DME Recut stores jump targets with full precision.

@@ -1,5 +1,9 @@
 # hsuanice_Library.lua — Changelog
 
+## 26.1029.1250pre1
+
+- Metadata Read: bwfmetaedit fallback finds the tool on Windows and on Intel Macs
+
 ## 26.1028.2249
 
 - Update: hsuanice_AudioSweet Core.lua (works with a hidden FX track).

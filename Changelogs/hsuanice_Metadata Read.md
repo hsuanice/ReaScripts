@@ -2,6 +2,15 @@
 
 Metadata Read (reader / normalizer / tokens)
 
+## 26.1029.1250pre1
+
+- Fix: the bwfmetaedit fallback (UMID / iXML track list) no longer assumes the macOS Homebrew path; it uses the path saved by the Embed tools, then the usual install folders on macOS or Windows, then PATH
+- Fix: Windows quoting for the bwfmetaedit command
+
+## 26.1011.2142
+
+- Released as part of the 26.1011.2142 package update.
+
 History before 26.1011.2142 (moved out of the script header; last header version: `0.3.11`).
 
 ```text

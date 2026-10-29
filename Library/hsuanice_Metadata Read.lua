@@ -1,11 +1,11 @@
 --[[
 @description Metadata Read (reader / normalizer / tokens)
-@version 26.1011.2142
+@version 26.1029.1250pre1
 @author hsuanice
 @noindex
 @changelog
-  - Released as part of the 26.1011.2142 package update.
-  - Full history of earlier versions: Changelogs/ in the repository (https://github.com/hsuanice/ReaScripts/tree/master/Changelogs)
+  - Fix: the bwfmetaedit fallback (UMID / iXML track list) no longer assumes the macOS Homebrew path; it uses the path saved by the Embed tools, then the usual install folders on macOS or Windows, then PATH
+  - Fix: Windows quoting for the bwfmetaedit command
 @about
   Read-only metadata utilities for REAPER items:
   - Unwrap SECTION to real parent source
@@ -71,14 +71,43 @@ end
 
 local parse_ixml_tracklist_from_chunk
 
+local IS_WIN = reaper.GetOS():match("Win") ~= nil
+
+-- Default bwfmetaedit path, resolved once per session without launching a process:
+-- the path saved by the Embed tools (hsuanice_Metadata Embed.lua E.CLI_Resolve), then
+-- the usual install locations per OS, then plain "bwfmetaedit" (found via PATH).
+local _default_cli
+local function default_cli()
+  if _default_cli then return _default_cli end
+  local cands = { reaper.GetExtState("hsuanice_TCTools", "BWFMetaEditPath") }
+  if IS_WIN then
+    cands[#cands+1] = [[C:\Program Files\BWF MetaEdit\bwfmetaedit.exe]]
+    cands[#cands+1] = [[C:\Program Files (x86)\BWF MetaEdit\bwfmetaedit.exe]]
+  else
+    cands[#cands+1] = "/opt/homebrew/bin/bwfmetaedit"
+    cands[#cands+1] = "/usr/local/bin/bwfmetaedit"
+  end
+  for _, p in ipairs(cands) do
+    if p ~= "" and reaper.file_exists(p) then _default_cli = p; return p end
+  end
+  _default_cli = "bwfmetaedit"
+  return _default_cli
+end
+
+-- io.popen on Windows runs "cmd /c <cmd>", which strips the first and last quote of a
+-- command that starts with a quote; one extra pair keeps the quoted paths intact.
+local function popen_cmd(cmd)
+  return IS_WIN and ('"' .. cmd .. '"') or cmd
+end
+
 -- CLI fallback when BWF:UMID cannot be read (bwfmetaedit --out-xml)
 local function read_umid_via_cli_abs(path_to_cli, wav_path)
-  local cli = path_to_cli or "/opt/homebrew/bin/bwfmetaedit"
+  local cli = path_to_cli or default_cli()
   local cmd = string.format('"%s" --out-xml=- "%s"', cli, wav_path)
   local ok, out = reaper.ExecProcess and reaper.ExecProcess(cmd, 10000) or nil, nil
   if type(ok) == "number" then out = select(2, reaper.ExecProcess(cmd, 10000)) end
   if not out or out == "" then
-    local fh = io.popen(cmd); out = fh and fh:read("*a") or ""; if fh then fh:close() end
+    local fh = io.popen(popen_cmd(cmd)); out = fh and fh:read("*a") or ""; if fh then fh:close() end
   end
   if not out or out == "" then return nil end
   -- Find <UMID>…</UMID> (bext section)
@@ -96,10 +125,10 @@ local function read_tracklist_via_cli_abs(path_to_cli, wav_path)
   if path == "" then return nil end
   if TRACKLIST_CLI_CACHE[path] ~= nil then return TRACKLIST_CLI_CACHE[path] end
 
-  local cli = path_to_cli or "/opt/homebrew/bin/bwfmetaedit"
+  local cli = path_to_cli or default_cli()
   local cmd = string.format('"%s" --out-xml=- "%s"', cli, path)
   local xml = ""
-  local fh = io.popen(cmd)
+  local fh = io.popen(popen_cmd(cmd))
   if fh then
     xml = fh:read("*a") or ""
     fh:close()
@@ -457,7 +486,7 @@ function M.collect_item_fields(item)
 
     -- 2) If that fails, use the CLI fallback (bwfmetaedit --out-xml)
     if not t.umid and t.srcpath and t.srcpath ~= "" then
-      local hex = read_umid_via_cli_abs(nil, t.srcpath)  -- nil = default /opt/homebrew/bin/bwfmetaedit
+      local hex = read_umid_via_cli_abs(nil, t.srcpath)  -- nil = default_cli()
       if hex then set_umid_fields(hex) end
     end
 

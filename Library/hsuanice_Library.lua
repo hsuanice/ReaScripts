@@ -1,6 +1,6 @@
 --[[
 @description hsuanice Library - shared code used by hsuanice scripts (required)
-@version 26.1028.2249
+@version 26.1029.1250pre1
 @author hsuanice
 @metapackage
 @provides
@@ -25,7 +25,7 @@
   [nomain] hsuanice_Fade Tool Core.lua
   [nomain] json.lua
 @changelog
-  - Update: hsuanice_AudioSweet Core.lua (works with a hidden FX track).
+  - Metadata Read: bwfmetaedit fallback finds the tool on Windows and on Intel Macs
 @about
   # hsuanice Library
 
