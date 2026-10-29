@@ -1,5 +1,9 @@
 # hsuanice_Library.lua — Changelog
 
+## 26.1029.2330
+
+- Hover: edge trim / extend keeps the fade shape (tested)
+
 ## 26.1029.1741pre1
 
 - Hover: edge trim / extend keeps the fade shape

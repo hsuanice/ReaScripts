@@ -1,10 +1,10 @@
 --[[
 @description hsuanice Hover Library (Shared helpers for Hover Mode editing tools)
-@version 26.1029.1741pre1
+@version 26.1029.2330
 @author hsuanice
 @noindex
 @changelog
-  - Fix: Trim or Extend Left / Right Edge no longer resets the fade shape and curve to Linear
+  - Fix: Trim or Extend Left / Right Edge no longer resets the fade shape and curve to Linear (tested)
 @about
   Common utilities for Hover Mode scripts (Split / Trim / Extend).
   Centralizes hover/edit cursor decision, snap behavior, pixel epsilon,
