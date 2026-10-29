@@ -2,6 +2,10 @@
 
 Metadata Read (reader / normalizer / tokens)
 
+## 26.1029.1405
+
+- Fix: the bwfmetaedit UMID fallback runs the tool once per file instead of twice (tested)
+
 ## 26.1029.1330pre1
 
 - Fix: the bwfmetaedit UMID fallback ran the tool twice per file (the first result was misread and discarded); it now runs once

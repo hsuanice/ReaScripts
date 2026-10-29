@@ -2,6 +2,10 @@
 
 RGWH Core - Core Library of Render or Glue with Handles
 
+## 26.1029.1405
+
+- Fix: Render no longer fails on an item with an empty take; the new take keeps its -renderedN name (tested)
+
 ## 26.1029.1359pre1
 
 - Fix: Render failed after rendering ("bad argument #1 to GetSetMediaItemTakeInfo_String") on an item with an empty take; the new take was left without its -renderedN name and AudioSweet stopped before naming it

@@ -1,10 +1,10 @@
 --[[
 @description RGWH Core - Core Library of Render or Glue with Handles
-@version 26.1029.1359pre1
+@version 26.1029.1405
 @author hsuanice
 @noindex
 @changelog
-  - Fix: Render failed after rendering ("bad argument #1 to GetSetMediaItemTakeInfo_String") on an item with an empty take; the new take was left without its -renderedN name and AudioSweet stopped before naming it
+  - Fix: Render no longer fails on an item with an empty take; the new take keeps its -renderedN name (tested)
 @about
   Core library for handle-aware Render/Glue workflows with clear, single-entry API.
   Features:
