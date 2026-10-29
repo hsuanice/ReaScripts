@@ -4,6 +4,10 @@
 
 Conform List Browser
 
+## 26.1029.1329
+
+- Fix: the Apply report now also opens on Windows (tested on macOS)
+
 ## 26.1029.1250pre1
 
 - Fix: the Apply report now also opens on Windows

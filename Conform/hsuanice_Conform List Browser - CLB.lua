@@ -1,6 +1,6 @@
 --[[
 @description Conform List Browser - CLB: conform EDL / AAF / XML / OTIO / subtitle lists (GUI + Jump / Link / Load / Reveal)
-@version 26.1029.1250pre1
+@version 26.1029.1329
 @author hsuanice
 @provides
   [main] .
@@ -12,7 +12,7 @@
   [nomain] ../Tools/aaf_to_otio.py
   [nomain] ../Tools/subtitle_to_clb.py
 @changelog
-  - Fix: the Apply report now also opens on Windows
+  - Fix: the Apply report now also opens on Windows (tested on macOS)
 @about
   Note: the Compare view (old vs new cut, reconform) is a work in progress and not finished yet.
 

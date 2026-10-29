@@ -1,11 +1,10 @@
 --[[
 @description Metadata Read (reader / normalizer / tokens)
-@version 26.1029.1250pre1
+@version 26.1029.1329
 @author hsuanice
 @noindex
 @changelog
-  - Fix: the bwfmetaedit fallback (UMID / iXML track list) no longer assumes the macOS Homebrew path; it uses the path saved by the Embed tools, then the usual install folders on macOS or Windows, then PATH
-  - Fix: Windows quoting for the bwfmetaedit command
+  - Fix: the bwfmetaedit fallback (UMID / iXML track list) finds the tool on Windows and on Intel Macs (tested on macOS)
 @about
   Read-only metadata utilities for REAPER items:
   - Unwrap SECTION to real parent source

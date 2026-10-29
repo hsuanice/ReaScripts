@@ -1,5 +1,9 @@
 # hsuanice_Library.lua — Changelog
 
+## 26.1029.1329
+
+- Update: hsuanice_Metadata Read.lua (bwfmetaedit fallback finds the tool on Windows and on Intel Macs).
+
 ## 26.1029.1250pre1
 
 - Metadata Read: bwfmetaedit fallback finds the tool on Windows and on Intel Macs
