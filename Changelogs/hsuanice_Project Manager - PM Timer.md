@@ -7,6 +7,11 @@ PM Timer - Scene-aware Work Timer
 
 **Removed from ReaPack** (2026-10-15) together with PM Insight Analyzer; the script stays in the repository (`@noindex`) as a backup.
 
+## 26.1029.1521pre1
+
+- New: WIP button (Switch Scene | Switch Type | Break | WIP | Finish) - ends the session but keeps the scene and work type as unfinished; the timer shows Status: WIP
+- New: Start offers to continue the WIP scene (Yes = continue it with its work type, no Scene Cut selection needed; No = start from the current selection and clear the WIP); Finish on the same scene clears it
+
 ## 26.1028.1328pre1
 
 - New: right-click > Apply Names to Work Log - every Work Log item (and DurationOnly_Log project track) whose name starts with a known spelling gets the latest official name ('POINT R5 Dialog | editing' -> 'TEST R5 Dialog | editing'); names not in the list are left alone. Undo-able in the Work Log project.

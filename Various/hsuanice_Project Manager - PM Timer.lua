@@ -1,12 +1,11 @@
 --[[
 @description Project Manager - PM Timer: scene-aware work timer
-@version 26.1028.1328pre1
+@version 26.1029.1521pre1
 @author hsuanice
 @noindex  (kept in the repository as a backup; Project Manager is not offered on ReaPack for now)
 @changelog
-  - New: right-click > Apply Names to Work Log - every Work Log item (and DurationOnly_Log project track) whose name starts with a known spelling gets the latest official name ('POINT R5 Dialog | editing' -> 'TEST R5 Dialog | editing'); names not in the list are left alone. Undo-able in the Work Log project.
-  - Change: Rename Project / Merge Projects apply the new name to the Work Log right away when it is open in a tab, so the latest name is used everywhere.
-  - Change: an official project name is one word - spaces become _ - because the Work Log and PM Insight take the first word of an item name as the project.
+  - New: WIP button (Switch Scene | Switch Type | Break | WIP | Finish) - ends the session but keeps the scene and work type as unfinished; the timer shows Status: WIP
+  - New: Start offers to continue the WIP scene (Yes = continue it with its work type, no Scene Cut selection needed; No = start from the current selection and clear the WIP); Finish on the same scene clears it
 @about
   Scene-aware toggle timer for the hsuanice PM system.
   Uses gfx (no ReaImGui). 1-second display refresh via defer + time_precise.
@@ -365,6 +364,34 @@ local function clear_break_state()
   set_extstate("BREAK_AAP_ITEM_COUNT",    "")
   set_extstate("BREAK_AAP_TOTAL_SECONDS", "")
   set_extstate("BREAK_AAP_EST_SIZE",      "")
+end
+
+-- ── WIP (work in progress) ─────────────────────────────────────────────────
+-- WIP button: the scene is not finished, work ends for now (e.g. for the day). One WIP per
+-- project (saved in the project). The next Start offers to continue it, so the scene does not
+-- depend on the Scene Cut selection. Cleared by Finish on the same scene, by choosing No at
+-- Start, or when a new WIP is saved.
+local WIP = {}
+function WIP.get()
+  local guid = get_extstate("WIP_SCENE_GUID")
+  if not guid then return nil end
+  return {
+    scene_guid = guid,
+    scene_name = get_extstate("WIP_SCENE_NAME") or "",
+    work_type  = get_extstate("WIP_WORK_TYPE") or "",
+    date       = get_extstate("WIP_DATE") or "",
+  }
+end
+function WIP.save()
+  set_extstate("WIP_SCENE_GUID", S.scene_guid)
+  set_extstate("WIP_SCENE_NAME", S.scene_name)
+  set_extstate("WIP_WORK_TYPE",  S.work_type)
+  set_extstate("WIP_DATE",       os.date("%Y-%m-%d"))
+end
+function WIP.clear()
+  for _, k in ipairs({ "WIP_SCENE_GUID", "WIP_SCENE_NAME", "WIP_WORK_TYPE", "WIP_DATE" }) do
+    set_extstate(k, "")
+  end
 end
 
 local function get_item_by_guid(guid)
@@ -1704,14 +1731,36 @@ local function action_start()
     sel_scene = get_selected_scene_info(scene_track)
   end
 
+  -- 2b. Unfinished scene (WIP): offer to continue it, whatever is selected on Scene Cut
+  local wip_type = nil
+  local wip = (S.work_mode == "Dialog") and WIP.get() or nil
+  if wip then
+    local wip_item = find_scene_item_by_guid(wip.scene_guid)
+    if not wip_item then
+      WIP.clear()  -- the scene no longer exists (e.g. Scene Cut regenerated)
+    else
+      local choice = r.ShowMessageBox(string.format(
+        "Continue the unfinished scene (WIP)?\n\n  Scene: %s\n  Type: %s\n  WIP since: %s\n\n"
+          .. "Yes = continue it\nNo = start from the current selection (the WIP is cleared)\n"
+          .. "Cancel = do nothing",
+        wip.scene_name, wip.work_type, wip.date), "PM Timer", 3)
+      if choice == 2 then return end
+      WIP.clear()
+      if choice == 6 then
+        sel_scene = get_scene_info_from_item(wip_item)
+        if wip.work_type ~= "" then wip_type = wip.work_type end
+      end
+    end
+  end
+
   local scene_guid, scene_name = "", ""
   if sel_scene then
     scene_guid = sel_scene.guid
     scene_name = sel_scene.name
   end
 
-  -- 3. Choose work type
-  local work_type = choose_work_type(get_work_types_for_mode())
+  -- 3. Choose work type (a continued WIP keeps its type; Switch Type changes it)
+  local work_type = wip_type or choose_work_type(get_work_types_for_mode())
   if not work_type then return end
 
   -- 4. Item name = just work_type (scene metadata goes into P_NOTES)
@@ -2011,11 +2060,28 @@ local function action_finish()
   else
     local was_project_scope = (S.scene_guid == "")
     local finishing_guid = S.work_item_guid
+    local wip = WIP.get()
+    if wip and S.scene_guid ~= "" and wip.scene_guid == S.scene_guid then WIP.clear() end
     finish_current_item("finish"); sync_work_item_names()
     local log_item = get_item_by_guid(finishing_guid)
     if log_item then PM_SyncSceneMetadataToLogItem(log_item) end
     if was_project_scope then PM_SyncProjectScopeNotes() end
   end
+end
+
+-- WIP: end the session like Finish, but remember the scene and work type as unfinished
+local function action_wip()
+  if S.scene_guid == "" then
+    r.ShowMessageBox("This session has no scene (it is logged for the whole reel), so there is "
+      .. "nothing to keep as WIP.\n\nUse Finish, or select the scene on Scene Cut and use Switch Scene first.",
+      "PM Timer", 0)
+    return
+  end
+  WIP.save()
+  local finishing_guid = S.work_item_guid
+  finish_current_item("wip"); sync_work_item_names()
+  local log_item = get_item_by_guid(finishing_guid)
+  if log_item then PM_SyncSceneMetadataToLogItem(log_item) end
 end
 local function action_break()
   if S.work_mode == "AAP" then
@@ -3270,6 +3336,8 @@ local function draw()
     local name_disp
     local type_src  = S.work_type
     local bs_idle   = (S.mode == "IDLE") and BREAK_STATE or nil
+    -- idle without a break: show the unfinished scene (WIP), if any
+    local wip_idle  = (S.mode == "IDLE" and not bs_idle and S.work_mode == "Dialog") and WIP.get() or nil
     if S.work_mode == "AAP" then
       scene_label = "  |  Day: "
       name_disp   = S.aap_day_name ~= "" and S.aap_day_name or "---"
@@ -3278,6 +3346,9 @@ local function draw()
       if bs_idle then
         name_disp = bs_idle.scene_name
         type_src  = bs_idle.work_type
+      elseif wip_idle then
+        name_disp = wip_idle.scene_name
+        type_src  = wip_idle.work_type
       else
         name_disp = S.scene_name
       end
@@ -3311,6 +3382,8 @@ local function draw()
       gfx.set(0.2, 1.0, 0.2, 1); gfx.drawstr("WORKING")
     elseif on_break then
       gfx.set(1.0, 0.7, 0.2, 1); gfx.drawstr("ON BREAK")
+    elseif wip_idle then
+      gfx.set(0.9, 0.5, 1.0, 1); gfx.drawstr("WIP")
     else
       gfx.set(0.7, 0.7, 0.7, 1); gfx.drawstr("IDLE")
     end
@@ -3350,13 +3423,15 @@ local function draw()
 
   -- ── Horizontal buttons ──────────────────────────────────────────────────
   -- compact buttons (were 40 px high): the whole window fits in a short dock
-  local btn_w   = 129
   local btn_h   = 26
   local btn_y   = 54
   local btn_gap = 8
   local btn_x0  = 10
 
   local dlg_working = (S.mode == "WORKING" and not aap_working)
+  -- 4 buttons per row (129 px); 5 while working in Dialog mode (WIP added)
+  local btn_n   = dlg_working and 5 or 4
+  local btn_w   = math.floor((WIN_W - 2 * btn_x0 - (btn_n - 1) * btn_gap) / btn_n)
 
   gfx.setfont(3)
   local function btn_x(i) return btn_x0 + (i - 1) * (btn_w + btn_gap) end
@@ -3375,7 +3450,8 @@ local function draw()
     add_btn(1, "Switch Scene", action_switch_scene)
     add_btn(2, "Switch Type",  action_switch_type)
     add_btn(3, "Break",        action_break)
-    add_btn(4, "Finish",       action_finish)
+    add_btn(4, "WIP",          action_wip)
+    add_btn(5, "Finish",       action_finish)
   elseif BREAK_STATE then
     add_btn(1, "Continue",   action_continue)
     add_btn(2, "Start New",  action_start)

@@ -164,9 +164,10 @@ check("Source/hr uses EDL source for every work type", not has(all, "Mic Selecte
 check("daily progress section, open", has(all, "<details open><summary>Daily progress</summary>"))
 check("10-22: scene 10 finished (1m 0s film, 5m 0s source), denoise done, 1.0h work",
   has(all, '<td class="l">2026-10-22</td><td class="l">10</td><td>1m 0s</td><td>5m 0s</td>')
-  and has(all, "denoise 1: 10</td><td>1.0h"))
-check("10-21: editing of scene 10", has(all, '<td class="l">2026-10-21</td><td class="l">–</td>') and has(all, "editing 1: 10</td><td>1.0h"))
-check("10-20: mic select of 10 and 11, 0.7h", has(all, "mic select 2: 10, 11</td><td>0.7h"))
+  and has(all, "denoise 1: 10</td><td class=\"l\" style=\"white-space:normal\">12 (mic select)</td><td>1.0h"))
+check("10-21: editing of scene 10", has(all, '<td class="l">2026-10-21</td><td class="l">–</td>') and has(all, "editing 1: 10</td><td class=\"l\" style=\"white-space:normal\">10 (editing)</td><td>1.0h"))
+check("10-20: mic select of 10 and 11, 0.7h", has(all, "mic select 2: 10, 11</td><td class=\"l\" style=\"white-space:normal\">10 (mic select)<br>11 (mic select)</td><td>0.7h"))
+check("In progress column + note", has(all, '<th class="l">In progress</th>') and has(all, "In progress = work logged on a scene"))
 check("newest day first", all:find("2026-10-22", 1, true) < all:find("2026-10-20", 1, true))
 
 -- Selected scenes ------------------------------------------------------------------
@@ -179,7 +180,7 @@ check("selected: its source and Mic Selected", has(one, "300s") and has(one, "12
 check("selected: only its work types", has(one, '<td class="l">editing</td>') and not has(one, '<td class="l">check</td>'))
 check("selected: scene keeps its project number", has(one, 'id="s1"'))
 check("selected: finished scene has its efficiency", has(one, "Film per hour</b><span>0m 36s"))
-check("selected: daily work is only the scene's (10-22 = 0.5h)", has(one, "denoise 1: 10</td><td>0.5h"))
+check("selected: daily work is only the scene's (10-22 = 0.5h)", has(one, "denoise 1: 10</td><td class=\"l\" style=\"white-space:normal\">–</td><td>0.5h"))
 
 local unfinished = run({ "{S3}" })
 check("selected: unfinished scene has no efficiency yet", has(unfinished, "Film per hour</b><span>N/A") and has(unfinished, "No finished scene"))

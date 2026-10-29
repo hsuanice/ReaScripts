@@ -1,10 +1,10 @@
 --[[
 @description Project Manager - PM Insight Analyzer: work-time analysis of PM Timer logs (work in progress)
-@version 26.1026.2352pre1
+@version 26.1029.1521pre1
 @author hsuanice
 @noindex  (kept in the repository as a backup; not offered on ReaPack while it is a work in progress)
 @changelog
-  - Change: Completion's done percentages and their Film done / Source done bars are green (the same green as the ✓ marks).
+  - New: Daily progress has an In progress column - scenes with work logged that day that were not finished yet, with the work types
 @about
   Read-only analysis script. Auto-detects project type:
 
@@ -887,6 +887,10 @@ local function analyze()
                 if not sc.last_date[wt] or tname > sc.last_date[wt] then sc.last_date[wt] = tname end
                 sc.day_work = sc.day_work or {}
                 sc.day_work[tname] = (sc.day_work[tname] or 0) + secs
+                -- work types per day (Daily progress "In progress")
+                sc.day_wt = sc.day_wt or {}
+                sc.day_wt[tname] = sc.day_wt[tname] or {}
+                sc.day_wt[tname][wt] = true
               end
             end
           else
@@ -1294,7 +1298,7 @@ local function analyze()
     local days = {}
     local function day(d)
       local x = days[d]
-      if not x then x = { stages = {}, scenes = {}, film = 0, src = 0 }; days[d] = x end
+      if not x then x = { stages = {}, scenes = {}, wip = {}, film = 0, src = 0 }; days[d] = x end
       return x
     end
     local undated = 0
@@ -1323,6 +1327,18 @@ local function analyze()
             undated = undated + 1
           end
         end
+        -- In progress: work logged on the scene that day, but the scene was not finished yet
+        -- (not done at all, or finished on a later day)
+        local finished_on = sc.is_done and latest or nil
+        for d, wts in pairs(sc.day_wt or {}) do
+          if not finished_on or d < finished_on then
+            local list = {}
+            for wt in pairs(wts) do list[#list + 1] = esc(wt) end
+            table.sort(list)
+            local x = day(d)
+            x.wip[#x.wip + 1] = name .. " (" .. table.concat(list, ", ") .. ")"
+          end
+        end
       end
     end
     -- work per day: the whole project, or only the selected scenes
@@ -1343,23 +1359,25 @@ local function analyze()
 
     out('<details open><summary>Daily progress</summary><div class="wrap"><table>')
     out('<tr><th class="l">Date</th><th class="l">Finished scenes</th><th>Film</th><th>Source</th>'
-      .. '<th class="l">Stages finished</th><th>Work</th></tr>')
+      .. '<th class="l">Stages finished</th><th class="l">In progress</th><th>Work</th></tr>')
     for _, d in ipairs(dates) do
-      local x = days[d] or { stages = {}, scenes = {}, film = 0, src = 0 }
+      local x = days[d] or { stages = {}, scenes = {}, wip = {}, film = 0, src = 0 }
       local parts = {}
       for _, stg in ipairs(STAGES) do
         local list = x.stages[stg.key]
         if list then parts[#parts + 1] = string.format("%s %d: %s", esc(stg.wt), #list, table.concat(list, ", ")) end
       end
       out(string.format('<tr><td class="l">%s</td><td class="l">%s</td><td>%s</td><td>%s</td>'
-        .. '<td class="l" style="white-space:normal">%s</td><td>%s</td></tr>',
+        .. '<td class="l" style="white-space:normal">%s</td><td class="l" style="white-space:normal">%s</td><td>%s</td></tr>',
         d, #x.scenes > 0 and table.concat(x.scenes, ", ") or "–",
         x.film > 0 and fmt_rate(x.film) or "–", x.src > 0 and fmt_rate(x.src) or "–",
-        #parts > 0 and table.concat(parts, "<br>") or "–", work[d] and fmt_h(work[d]) or "–"))
+        #parts > 0 and table.concat(parts, "<br>") or "–",
+        #x.wip > 0 and table.concat(x.wip, "<br>") or "–", work[d] and fmt_h(work[d]) or "–"))
     end
     out('</table></div>')
     out('<div class="note">A stage counts on the last day its work type was logged on the scene; a scene is finished '
-      .. 'on the latest of those days. Skipped stages have no day.'
+      .. 'on the latest of those days. Skipped stages have no day. In progress = work logged on a scene '
+      .. 'that was not finished yet on that day (work types in brackets).'
       .. (undated > 0 and (' ' .. undated .. ' finished scene' .. (undated > 1 and 's have' or ' has') .. ' no logged work to date it.') or '')
       .. '</div></details>')
   end
