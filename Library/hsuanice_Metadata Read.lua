@@ -1,10 +1,10 @@
 --[[
 @description Metadata Read (reader / normalizer / tokens)
-@version 26.1029.1329
+@version 26.1029.1330pre1
 @author hsuanice
 @noindex
 @changelog
-  - Fix: the bwfmetaedit fallback (UMID / iXML track list) finds the tool on Windows and on Intel Macs (tested on macOS)
+  - Fix: the bwfmetaedit UMID fallback ran the tool twice per file (the first result was misread and discarded); it now runs once
 @about
   Read-only metadata utilities for REAPER items:
   - Unwrap SECTION to real parent source
@@ -99,12 +99,25 @@ local function popen_cmd(cmd)
   return IS_WIN and ('"' .. cmd .. '"') or cmd
 end
 
+-- Run a command through the OS shell with reaper.ExecProcess (same wrapper as
+-- hsuanice_Metadata Embed.lua). ExecProcess returns "<exit code>\n<output>" as one
+-- string; returns the output only when the exit code is 0.
+local function exec_cli(cmd, ms)
+  if not reaper.ExecProcess then return nil end
+  local wrapped = IS_WIN and ('cmd.exe /C "' .. cmd .. '"')
+    or ("/bin/sh -lc '" .. cmd:gsub("'", [['"'"']]) .. "'")
+  local code, out = (reaper.ExecProcess(wrapped, ms) or ""):match("^(%-?%d+)\n(.*)$")
+  if tonumber(code) == 0 then return out end
+  return nil
+end
+
 -- CLI fallback when BWF:UMID cannot be read (bwfmetaedit --out-xml)
 local function read_umid_via_cli_abs(path_to_cli, wav_path)
   local cli = path_to_cli or default_cli()
   local cmd = string.format('"%s" --out-xml=- "%s"', cli, wav_path)
-  local ok, out = reaper.ExecProcess and reaper.ExecProcess(cmd, 10000) or nil, nil
-  if type(ok) == "number" then out = select(2, reaper.ExecProcess(cmd, 10000)) end
+  -- One launch normally; io.popen only when ExecProcess is missing or fails.
+  -- (Before: the ExecProcess result was misread and thrown away, so the tool always ran twice.)
+  local out = exec_cli(cmd, 10000)
   if not out or out == "" then
     local fh = io.popen(popen_cmd(cmd)); out = fh and fh:read("*a") or ""; if fh then fh:close() end
   end

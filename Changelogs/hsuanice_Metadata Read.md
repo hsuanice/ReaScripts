@@ -2,6 +2,10 @@
 
 Metadata Read (reader / normalizer / tokens)
 
+## 26.1029.1330pre1
+
+- Fix: the bwfmetaedit UMID fallback ran the tool twice per file (the first result was misread and discarded); it now runs once
+
 ## 26.1029.1329
 
 - Fix: the bwfmetaedit fallback (UMID / iXML track list) finds the tool on Windows and on Intel Macs (tested on macOS)

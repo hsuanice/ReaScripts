@@ -1,5 +1,9 @@
 # hsuanice_Library.lua — Changelog
 
+## 26.1029.1330pre1
+
+- Update: hsuanice_Metadata Read.lua (UMID fallback runs bwfmetaedit once instead of twice).
+
 ## 26.1029.1329
 
 - Update: hsuanice_Metadata Read.lua (bwfmetaedit fallback finds the tool on Windows and on Intel Macs).
