@@ -7,6 +7,10 @@ PM Timer - Scene-aware Work Timer
 
 **Removed from ReaPack** (2026-10-15) together with PM Insight Analyzer; the script stays in the repository (`@noindex`) as a backup.
 
+## 26.1029.1741
+
+- New: WIP button ends the session without finishing the scene; the next Start offers to continue it (tested)
+
 ## 26.1029.1521pre1
 
 - New: WIP button (Switch Scene | Switch Type | Break | WIP | Finish) - ends the session but keeps the scene and work type as unfinished; the timer shows Status: WIP

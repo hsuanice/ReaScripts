@@ -1,11 +1,10 @@
 --[[
 @description Project Manager - PM Timer: scene-aware work timer
-@version 26.1029.1521pre1
+@version 26.1029.1741
 @author hsuanice
 @noindex  (kept in the repository as a backup; Project Manager is not offered on ReaPack for now)
 @changelog
-  - New: WIP button (Switch Scene | Switch Type | Break | WIP | Finish) - ends the session but keeps the scene and work type as unfinished; the timer shows Status: WIP
-  - New: Start offers to continue the WIP scene (Yes = continue it with its work type, no Scene Cut selection needed; No = start from the current selection and clear the WIP); Finish on the same scene clears it
+  - New: WIP button ends the session without finishing the scene; the next Start offers to continue it (tested)
 @about
   Scene-aware toggle timer for the hsuanice PM system.
   Uses gfx (no ReaImGui). 1-second display refresh via defer + time_precise.

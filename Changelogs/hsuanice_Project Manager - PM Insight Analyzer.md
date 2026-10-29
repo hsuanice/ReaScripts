@@ -7,6 +7,10 @@ PM Insight Analyzer
 
 **Removed from ReaPack** (2026-10-15) while it is a work in progress; the script stays in the repository (`@noindex`) as a backup.
 
+## 26.1029.1741
+
+- New: In progress column in Daily progress (tested)
+
 ## 26.1029.1521pre1
 
 - New: Daily progress has an In progress column - scenes with work logged that day that were not finished yet, with the work types

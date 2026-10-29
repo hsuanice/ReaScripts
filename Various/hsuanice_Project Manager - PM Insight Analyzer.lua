@@ -1,10 +1,10 @@
 --[[
 @description Project Manager - PM Insight Analyzer: work-time analysis of PM Timer logs (work in progress)
-@version 26.1029.1521pre1
+@version 26.1029.1741
 @author hsuanice
 @noindex  (kept in the repository as a backup; not offered on ReaPack while it is a work in progress)
 @changelog
-  - New: Daily progress has an In progress column - scenes with work logged that day that were not finished yet, with the work types
+  - New: In progress column in Daily progress (tested)
 @about
   Read-only analysis script. Auto-detects project type:
 
