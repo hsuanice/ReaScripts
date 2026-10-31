@@ -1,11 +1,11 @@
 --[[
 @description Hover Editing - Nudge Take Volume with Mousewheel (Pro Tools-style clip gain)
-@version 26.1031.1544pre1
+@version 26.1031.1833pre1
 @author hsuanice
 @noindex
 @changelog
   - New: nudge the active take volume (clip gain) of the item under the mouse or the selected items with the mousewheel; shows the new value next to the mouse.
-  - Full history: Changelogs/ in the repository (https://github.com/hsuanice/ReaScripts/tree/master/Changelogs)
+  - Fix: wheel down after wheel up no longer keeps going up (each step is a fresh launch; undo merge and value display moved to a background timer)
 @about
   Mousewheel clip gain like Pro Tools. Assign this script to a mousewheel shortcut in the
   Action List (for example Shift+Cmd+Wheel). Wheel up = louder, wheel down = quieter.
@@ -21,6 +21,11 @@
   empty takes are skipped. The polarity (a negative take volume) is kept.
   Continuous wheel steps are merged into one undo point, written when the wheel has been
   still for MERGE_SECONDS (REAPER 7.03+; older versions write one undo point per step).
+
+  This script ends right after each step, so every wheel step is a fresh launch that carries
+  its own direction (a script relaunched while still running gets no wheel value). The undo
+  point and the value display are timed by "Hover Editing - Nudge Take Volume Timer", which
+  runs in the background only while needed.
 
   Hover Mode is set by "Hover Editing - Toggle Hover Mode".
 
@@ -45,12 +50,13 @@ end
 ----------------------------------------
 -- USER OPTIONS
 ----------------------------------------
-local STEP_DB      = 1.0    -- ← dB per wheel step (e.g. 0.5 or 0.1 for finer steps)
-local MIN_DB       = -150   -- ← the volume does not go below this
-local MAX_DB       = 24     -- ← the volume does not go above this
-local SHOW_VALUE   = true   -- ← show the new value next to the mouse
-local SHOW_SECONDS = 1.2    -- ← how long the value stays on screen
+local STEP_DB       = 1.0   -- ← dB per wheel step (e.g. 0.5 or 0.1 for finer steps)
+local MIN_DB        = -150  -- ← the volume does not go below this
+local MAX_DB        = 24    -- ← the volume does not go above this
+local SHOW_VALUE    = true  -- ← show the new value next to the mouse
+local SHOW_SECONDS  = 1.2   -- ← how long the value stays on screen
 local MERGE_SECONDS = 1.0   -- ← wheel steps closer together than this share one undo point
+local DEBUG         = false -- ← print the mousewheel values to the ReaScript console
 
 ----------------------------------------
 -- Load shared Hover library
@@ -62,16 +68,36 @@ if not ok or type(hover) ~= "table" then
   return
 end
 
--- A new wheel step restarts the script (ends the previous timer) instead of asking
-local CAN_MERGE = reaper.set_action_options ~= nil
+-- Shared with the Timer script
+local NS = "hsuanice_HoverWheelVol"
+local function ext_num(k) return tonumber(reaper.GetExtState(NS, k)) end
+local function ext_set(k, v) reaper.SetExtState(NS, k, tostring(v), false) end
+
+local TIMER_PATH = reaper.GetResourcePath()
+  .. "/Scripts/hsuanice Scripts/Items Editing/hsuanice_Hover Editing - Nudge Take Volume Timer.lua"
+local CAN_MERGE = reaper.set_action_options ~= nil and reaper.file_exists(TIMER_PATH)
+-- Two steps less than one defer cycle apart would ask "already running": restart instead
 if CAN_MERGE then reaper.set_action_options(1 | 2) end
 
--- Running total of the current wheel burst (for the merged undo point's name)
-local EXT_NS, EXT_KEY = "hsuanice_HoverWheelVol", "burst_db"
-
-local _, _, _, _, _, _, val = reaper.get_action_context()
-if not val or val == 0 then val = 1 end  -- run from the Action List: one step up
-local step = (val > 0) and STEP_DB or -STEP_DB
+----------------------------------------
+-- Direction
+----------------------------------------
+local now = reaper.time_precise()
+local is_new, _, _, _, mode, res, val, ctx = reaper.get_action_context()
+if DEBUG then
+  reaper.ShowConsoleMsg(string.format("[Wheel] t=%.3f is_new=%s mode=%s res=%s val=%s ctx=%s\n",
+    now, tostring(is_new), tostring(mode), tostring(res), tostring(val), tostring(ctx)))
+end
+local dir
+if is_new and mode ~= -1 and val and val ~= 0 then
+  dir = (val > 0) and 1 or -1
+else
+  -- No wheel value: a restart during a fast burst keeps the burst's direction;
+  -- run from the Action List = one step up
+  local last_t = ext_num("last_time")
+  dir = (last_t and now - last_t < MERGE_SECONDS) and (ext_num("last_dir") or 1) or 1
+end
+local step = dir * STEP_DB
 
 ----------------------------------------
 -- Targets
@@ -118,13 +144,7 @@ local function fmt_db(db)
   return string.format("%+.1f dB", db)
 end
 
-----------------------------------------
--- Main
-----------------------------------------
-local targets = collect_targets()
-if #targets == 0 then return end
-
-local function apply()
+local function apply(targets)
   reaper.PreventUIRefresh(1)
   local count, last_db = 0, nil
   for _, it in ipairs(targets) do
@@ -136,45 +156,51 @@ local function apply()
   return count, last_db
 end
 
+-- Start the Timer unless it is already running (it refreshes "alive" every defer cycle)
+local function ensure_timer()
+  local alive = ext_num("alive")
+  if alive and now - alive < 0.5 then return end
+  local cmd = ext_num("timer_cmd")
+  if not cmd or cmd == 0 then
+    cmd = reaper.AddRemoveReaScript(true, 0, TIMER_PATH, true)
+    ext_set("timer_cmd", cmd)
+  end
+  if cmd and cmd ~= 0 then reaper.Main_OnCommand(cmd, 0) end
+end
+
+----------------------------------------
+-- Main
+----------------------------------------
+local targets = collect_targets()
+if #targets == 0 then return end
+
 local count, last_db, burst
 if CAN_MERGE then
-  -- No undo block here: a script that ends with defer gets no automatic undo point, so the
-  -- merged point is written by the timer below once the wheel stops
-  count, last_db = apply()
+  -- No undo block: a script that ends with defer gets no automatic undo point; the Timer
+  -- writes one merged point once the wheel stops
+  count, last_db = apply(targets)
   if count == 0 then return end
-  burst = (tonumber(reaper.GetExtState(EXT_NS, EXT_KEY)) or 0) + step
-  reaper.SetExtState(EXT_NS, EXT_KEY, tostring(burst), false)
+  burst = (ext_num("burst_db") or 0) + step
+  ext_set("burst_db", burst)
+  ext_set("last_time", now)
+  ext_set("last_dir", dir)
+  ext_set("merge_s", MERGE_SECONDS)
 else
   reaper.Undo_BeginBlock()
-  count, last_db = apply()
+  count, last_db = apply(targets)
   reaper.Undo_EndBlock(string.format("Nudge take volume %+.1f dB", step), 4)
   if count == 0 then return end
 end
 
-local mx, my = reaper.GetMousePosition()
 if SHOW_VALUE then
   local text = (count == 1) and ("Take vol: " .. fmt_db(last_db))
     or string.format("Take vol: %+.1f dB (%d items)", burst or step, count)
+  local mx, my = reaper.GetMousePosition()
   reaper.TrackCtl_SetToolTip(text, mx + 18, my + 18, true)
+  if CAN_MERGE then ext_set("tip_until", now + SHOW_SECONDS) end
 end
 
-if not CAN_MERGE then return end
-
--- A new wheel step restarts the script and both timers; the last step of a burst writes the
--- undo point (state before the burst -> state now) and clears the tooltip
-local t0 = reaper.time_precise()
-local undo_done, tip_done = false, not SHOW_VALUE
-local function wait()
-  local t = reaper.time_precise() - t0
-  if not undo_done and t >= MERGE_SECONDS then
-    undo_done = true
-    reaper.SetExtState(EXT_NS, EXT_KEY, "0", false)
-    reaper.Undo_OnStateChange2(0, string.format("Nudge take volume %+.1f dB", burst))
-  end
-  if not tip_done and t >= SHOW_SECONDS then
-    tip_done = true
-    reaper.TrackCtl_SetToolTip("", 0, 0, true)
-  end
-  if not (undo_done and tip_done) then reaper.defer(wait) end
+if CAN_MERGE then
+  ensure_timer()
+  reaper.defer(function() end)
 end
-reaper.defer(wait)

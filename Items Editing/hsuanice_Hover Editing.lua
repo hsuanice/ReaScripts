@@ -1,6 +1,6 @@
 --[[
 @description Hover Editing - Pro Tools-style Split / Trim / clip gain at the mouse or edit cursor (Toggle Hover Mode, Split, Trim Left / Right, Nudge Take Volume)
-@version 26.1031.1544pre1
+@version 26.1031.1833pre1
 @author hsuanice
 @metapackage
 @provides
@@ -9,6 +9,7 @@
   [main] hsuanice_Hover Editing - Trim or Extend Left Edge.lua
   [main] hsuanice_Hover Editing - Trim or Extend Right Edge.lua
   [main] hsuanice_Hover Editing - Nudge Take Volume with Mousewheel.lua
+  [nomain] hsuanice_Hover Editing - Nudge Take Volume Timer.lua
 @changelog
   - New: Nudge Take Volume with Mousewheel (Pro Tools-style clip gain, Hover aware, merged undo)
 @about
