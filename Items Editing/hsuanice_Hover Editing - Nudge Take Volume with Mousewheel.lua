@@ -1,14 +1,16 @@
 --[[
 @description Hover Editing - Nudge Take Volume with Mousewheel (Pro Tools-style clip gain)
-@version 26.1031.1833pre1
+@version 26.1031.1836pre1
 @author hsuanice
 @noindex
 @changelog
   - New: nudge the active take volume (clip gain) of the item under the mouse or the selected items with the mousewheel; shows the new value next to the mouse.
-  - Fix: wheel down after wheel up no longer keeps going up (each step is a fresh launch; undo merge and value display moved to a background timer)
+  - Fix: Shift+wheel on macOS (a horizontal wheel) no longer runs the wrong way round; REVERSE user option added
 @about
   Mousewheel clip gain like Pro Tools. Assign this script to a mousewheel shortcut in the
   Action List (for example Shift+Cmd+Wheel). Wheel up = louder, wheel down = quieter.
+  macOS sends Shift+wheel as a horizontal wheel; its direction is flipped to match.
+  Set REVERSE in the user options if the direction still feels the wrong way round.
 
   Targets:
     • Hover Mode ON, mouse over an item:
@@ -56,6 +58,7 @@ local MAX_DB        = 24    -- ← the volume does not go above this
 local SHOW_VALUE    = true  -- ← show the new value next to the mouse
 local SHOW_SECONDS  = 1.2   -- ← how long the value stays on screen
 local MERGE_SECONDS = 1.0   -- ← wheel steps closer together than this share one undo point
+local REVERSE       = false -- ← true flips the direction (wheel up = quieter)
 local DEBUG         = false -- ← print the mousewheel values to the ReaScript console
 
 ----------------------------------------
@@ -91,6 +94,9 @@ end
 local dir
 if is_new and mode ~= -1 and val and val ~= 0 then
   dir = (val > 0) and 1 or -1
+  -- macOS turns Shift+wheel into a horizontal wheel, whose sign is the other way round
+  if tostring(ctx or ""):match("^hwheel") then dir = -dir end
+  if REVERSE then dir = -dir end
 else
   -- No wheel value: a restart during a fast burst keeps the burst's direction;
   -- run from the Action List = one step up
