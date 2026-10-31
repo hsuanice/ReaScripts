@@ -1,5 +1,9 @@
 # hsuanice_Library.lua — Changelog
 
+## 26.1031.1150pre1
+
+- Hover: fade shape helpers shared with other edit scripts
+
 ## 26.1029.2330
 
 - Hover: edge trim / extend keeps the fade shape (tested)

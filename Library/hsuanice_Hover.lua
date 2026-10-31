@@ -1,10 +1,10 @@
 --[[
 @description hsuanice Hover Library (Shared helpers for Hover Mode editing tools)
-@version 26.1029.2330
+@version 26.1031.1150pre1
 @author hsuanice
 @noindex
 @changelog
-  - Fix: Trim or Extend Left / Right Edge no longer resets the fade shape and curve to Linear (tested)
+  - Change: fade_line / restore_fade_shape are shared with other edit scripts
 @about
   Common utilities for Hover Mode scripts (Split / Trim / Extend).
   Centralizes hover/edit cursor decision, snap behavior, pixel epsilon,
@@ -433,6 +433,10 @@ local function _restore_fade_shape(it, key, old_line)
   reaper.SetItemStateChunk(it, new_head .. rest, false)
   LOGF("[HoverLib] %s shape restored: %s", key, merged)
 end
+
+-- Shared with other edit scripts (e.g. Pro Tools Delete Selection)
+M.fade_line = _fade_line
+M.restore_fade_shape = _restore_fade_shape
 
 -- Left edge: preserve fade-in END; update audio offset; no flicker
 function M.apply_left_edge_no_flicker(it, target_pos)

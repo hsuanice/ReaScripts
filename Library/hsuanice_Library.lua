@@ -1,6 +1,6 @@
 --[[
 @description hsuanice Library - shared code used by hsuanice scripts (required)
-@version 26.1029.2330
+@version 26.1031.1150pre1
 @author hsuanice
 @metapackage
 @provides
@@ -25,7 +25,7 @@
   [nomain] hsuanice_Fade Tool Core.lua
   [nomain] json.lua
 @changelog
-  - Hover: edge trim / extend keeps the fade shape (tested)
+  - Hover: fade shape helpers shared with other edit scripts
 @about
   # hsuanice Library
 
