@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<index version="1" name="hsuanice Scripts" commit="332f9f5ef2110ff1f08a45fb8900ef02a7c60c9e">
+<index version="1" name="hsuanice Scripts" commit="7613624e9996c5b096e43d8cb196ca38552946ab">
   <category name="Conform">
     <reapack name="hsuanice_Conform List Browser - CLB.lua" type="script" desc="Conform List Browser - CLB: conform EDL / AAF / XML / OTIO / subtitle lists (GUI + Jump / Link / Load / Reveal)">
       <metadata>
@@ -520,6 +520,15 @@
         <source main="main" file="hsuanice_Hover Editing - Trim or Extend Right Edge.lua">https://github.com/hsuanice/ReaScripts/raw/332f9f5ef2110ff1f08a45fb8900ef02a7c60c9e/Items%20Editing/hsuanice_Hover%20Editing%20-%20Trim%20or%20Extend%20Right%20Edge.lua</source>
         <source main="main" file="hsuanice_Hover Editing - Nudge Take Volume with Mousewheel.lua">https://github.com/hsuanice/ReaScripts/raw/332f9f5ef2110ff1f08a45fb8900ef02a7c60c9e/Items%20Editing/hsuanice_Hover%20Editing%20-%20Nudge%20Take%20Volume%20with%20Mousewheel.lua</source>
         <source file="hsuanice_Hover Editing - Nudge Take Volume Timer.lua">https://github.com/hsuanice/ReaScripts/raw/332f9f5ef2110ff1f08a45fb8900ef02a7c60c9e/Items%20Editing/hsuanice_Hover%20Editing%20-%20Nudge%20Take%20Volume%20Timer.lua</source>
+      </version>
+      <version name="26.1031.1841" author="hsuanice" time="2026-10-31T10:42:29Z">
+        <changelog><![CDATA[- New: Nudge Take Volume with Mousewheel (Pro Tools-style clip gain, Hover aware, merged undo) (tested)]]></changelog>
+        <source main="main" file="hsuanice_Hover Editing - Toggle Hover Mode.lua">https://github.com/hsuanice/ReaScripts/raw/7613624e9996c5b096e43d8cb196ca38552946ab/Items%20Editing/hsuanice_Hover%20Editing%20-%20Toggle%20Hover%20Mode.lua</source>
+        <source main="main" file="hsuanice_Hover Editing - Split Items at Mouse or Edit Cursor.lua">https://github.com/hsuanice/ReaScripts/raw/7613624e9996c5b096e43d8cb196ca38552946ab/Items%20Editing/hsuanice_Hover%20Editing%20-%20Split%20Items%20at%20Mouse%20or%20Edit%20Cursor.lua</source>
+        <source main="main" file="hsuanice_Hover Editing - Trim or Extend Left Edge.lua">https://github.com/hsuanice/ReaScripts/raw/7613624e9996c5b096e43d8cb196ca38552946ab/Items%20Editing/hsuanice_Hover%20Editing%20-%20Trim%20or%20Extend%20Left%20Edge.lua</source>
+        <source main="main" file="hsuanice_Hover Editing - Trim or Extend Right Edge.lua">https://github.com/hsuanice/ReaScripts/raw/7613624e9996c5b096e43d8cb196ca38552946ab/Items%20Editing/hsuanice_Hover%20Editing%20-%20Trim%20or%20Extend%20Right%20Edge.lua</source>
+        <source main="main" file="hsuanice_Hover Editing - Nudge Take Volume with Mousewheel.lua">https://github.com/hsuanice/ReaScripts/raw/7613624e9996c5b096e43d8cb196ca38552946ab/Items%20Editing/hsuanice_Hover%20Editing%20-%20Nudge%20Take%20Volume%20with%20Mousewheel.lua</source>
+        <source file="hsuanice_Hover Editing - Nudge Take Volume Timer.lua">https://github.com/hsuanice/ReaScripts/raw/7613624e9996c5b096e43d8cb196ca38552946ab/Items%20Editing/hsuanice_Hover%20Editing%20-%20Nudge%20Take%20Volume%20Timer.lua</source>
       </version>
     </reapack>
     <reapack name="hsuanice_Move Selected Items to Track Under Mouse.lua" type="script" desc="Move Selected Items to Track Under Mouse - vertical only, keeps the timeline position">
