@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<index version="1" name="hsuanice Scripts" commit="70e81383bb0c2caad05784cc19e7b85aee8965e3">
+<index version="1" name="hsuanice Scripts" commit="eb1fc183793119c31d18e67e04a0319672b95fcc">
   <category name="Conform">
     <reapack name="hsuanice_Conform List Browser - CLB.lua" type="script" desc="Conform List Browser - CLB: conform EDL / AAF / XML / OTIO / subtitle lists (GUI + Jump / Link / Load / Reveal)">
       <metadata>
@@ -456,7 +456,7 @@
         <source main="main" file="hsuanice_Grab Item - Move Item Under Mouse Vertically While Key Held.lua">https://github.com/hsuanice/ReaScripts/raw/ca37278877b8a9e5cf71c8f96c4aafaf05c2d049/Items%20Editing/hsuanice_Grab%20Item%20-%20Move%20Item%20Under%20Mouse%20Vertically%20While%20Key%20Held.lua</source>
       </version>
     </reapack>
-    <reapack name="hsuanice_Hover Editing.lua" type="script" desc="Hover Editing - Pro Tools-style Split / Trim at the mouse or edit cursor (Toggle Hover Mode, Split, Trim Left / Right)">
+    <reapack name="hsuanice_Hover Editing.lua" type="script" desc="Hover Editing - Pro Tools-style Split / Trim / clip gain at the mouse or edit cursor (Toggle Hover Mode, Split, Trim Left / Right, Nudge Take Volume)">
       <metadata>
         <description><![CDATA[{\rtf1\ansi\deff0{\fonttbl{\f0 \fswiss Helvetica;}{\f1 \fmodern Courier;}}
 {\colortbl;\red255\green0\blue0;\red0\green0\blue255;}
@@ -466,12 +466,14 @@
 {\pard \ql \f0 \sa180 \li0 \fi0 Pro Tools-style editing that follows the mouse (Hover Mode on) or the edit cursor (Hover Mode off).\par}
 {\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Toggle Hover Mode: switch Hover Mode on/off (toolbar-friendly)\par}
 {\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Split: split items at the selection, edit cursor or mouse\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Trim Left / Right: trim or extend the item edge to the cursor, keeping fades\sa180\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Trim Left / Right: trim or extend the item edge to the cursor, keeping fades\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Nudge Take Volume with Mousewheel: clip gain on the item under the mouse or the selection\sa180\par}
 {\pard \ql \f0 \sa180 \li0 \fi0 Toggle Hover Mode is based on / inspired by TJF's "Hover Mode Toggle" script.\par}
 {\pard \ql \f0 \sa180 \li0 \fi0 \outlinelevel1 \b \fs32 Suggested shortcuts\par}
 {\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Hover Mode Split Item by Selection or Edit or Mouse Cursor: B\par}
 {\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Hover Mode Trim or Extend Left Edge of Item: A\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Hover Mode Trim or Extend Right Edge of Item: S\sa180\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Hover Mode Trim or Extend Right Edge of Item: S\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Hover Editing - Nudge Take Volume with Mousewheel: Shift+Cmd+Mousewheel\sa180\par}
 {\pard \ql \f0 \sa180 \li0 \fi0 Shortcuts are suggestions only \u8212- nothing is assigned automatically. macOS names; on Windows Cmd = Ctrl, Option = Alt, Control = Win.\par}
 }
 ]]></description>
@@ -483,6 +485,14 @@
         <source main="main" file="hsuanice_Hover Editing - Split Items at Mouse or Edit Cursor.lua">https://github.com/hsuanice/ReaScripts/raw/69a8697e1b54666ea7228379b1490811fd778fa8/Items%20Editing/hsuanice_Hover%20Editing%20-%20Split%20Items%20at%20Mouse%20or%20Edit%20Cursor.lua</source>
         <source main="main" file="hsuanice_Hover Editing - Trim or Extend Left Edge.lua">https://github.com/hsuanice/ReaScripts/raw/69a8697e1b54666ea7228379b1490811fd778fa8/Items%20Editing/hsuanice_Hover%20Editing%20-%20Trim%20or%20Extend%20Left%20Edge.lua</source>
         <source main="main" file="hsuanice_Hover Editing - Trim or Extend Right Edge.lua">https://github.com/hsuanice/ReaScripts/raw/69a8697e1b54666ea7228379b1490811fd778fa8/Items%20Editing/hsuanice_Hover%20Editing%20-%20Trim%20or%20Extend%20Right%20Edge.lua</source>
+      </version>
+      <version name="26.1031.1544pre1" author="hsuanice" time="2026-10-31T07:44:58Z">
+        <changelog><![CDATA[- New: Nudge Take Volume with Mousewheel (Pro Tools-style clip gain, Hover aware, merged undo)]]></changelog>
+        <source main="main" file="hsuanice_Hover Editing - Toggle Hover Mode.lua">https://github.com/hsuanice/ReaScripts/raw/eb1fc183793119c31d18e67e04a0319672b95fcc/Items%20Editing/hsuanice_Hover%20Editing%20-%20Toggle%20Hover%20Mode.lua</source>
+        <source main="main" file="hsuanice_Hover Editing - Split Items at Mouse or Edit Cursor.lua">https://github.com/hsuanice/ReaScripts/raw/eb1fc183793119c31d18e67e04a0319672b95fcc/Items%20Editing/hsuanice_Hover%20Editing%20-%20Split%20Items%20at%20Mouse%20or%20Edit%20Cursor.lua</source>
+        <source main="main" file="hsuanice_Hover Editing - Trim or Extend Left Edge.lua">https://github.com/hsuanice/ReaScripts/raw/eb1fc183793119c31d18e67e04a0319672b95fcc/Items%20Editing/hsuanice_Hover%20Editing%20-%20Trim%20or%20Extend%20Left%20Edge.lua</source>
+        <source main="main" file="hsuanice_Hover Editing - Trim or Extend Right Edge.lua">https://github.com/hsuanice/ReaScripts/raw/eb1fc183793119c31d18e67e04a0319672b95fcc/Items%20Editing/hsuanice_Hover%20Editing%20-%20Trim%20or%20Extend%20Right%20Edge.lua</source>
+        <source main="main" file="hsuanice_Hover Editing - Nudge Take Volume with Mousewheel.lua">https://github.com/hsuanice/ReaScripts/raw/eb1fc183793119c31d18e67e04a0319672b95fcc/Items%20Editing/hsuanice_Hover%20Editing%20-%20Nudge%20Take%20Volume%20with%20Mousewheel.lua</source>
       </version>
     </reapack>
     <reapack name="hsuanice_Move Selected Items to Track Under Mouse.lua" type="script" desc="Move Selected Items to Track Under Mouse - vertical only, keeps the timeline position">
