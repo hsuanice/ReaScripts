@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<index version="1" name="hsuanice Scripts" commit="fa0eccb8ce04412b997d6cc54eb2dfa8de478a62">
+<index version="1" name="hsuanice Scripts" commit="70e81383bb0c2caad05784cc19e7b85aee8965e3">
   <category name="Conform">
     <reapack name="hsuanice_Conform List Browser - CLB.lua" type="script" desc="Conform List Browser - CLB: conform EDL / AAF / XML / OTIO / subtitle lists (GUI + Jump / Link / Load / Reveal)">
       <metadata>
@@ -1640,6 +1640,29 @@
         <source file="hsuanice_Process Exec.lua">https://github.com/hsuanice/ReaScripts/raw/fa0eccb8ce04412b997d6cc54eb2dfa8de478a62/Library/hsuanice_Process%20Exec.lua</source>
         <source file="hsuanice_Fade Tool Core.lua">https://github.com/hsuanice/ReaScripts/raw/fa0eccb8ce04412b997d6cc54eb2dfa8de478a62/Library/hsuanice_Fade%20Tool%20Core.lua</source>
         <source file="json.lua">https://github.com/hsuanice/ReaScripts/raw/fa0eccb8ce04412b997d6cc54eb2dfa8de478a62/Library/json.lua</source>
+      </version>
+      <version name="26.1031.1234" author="hsuanice" time="2026-10-31T04:34:45Z">
+        <changelog><![CDATA[- Fade Tool Core: existing fades keep their shape when resized (tested)]]></changelog>
+        <source file="hsuanice_RGWH Core.lua">https://github.com/hsuanice/ReaScripts/raw/70e81383bb0c2caad05784cc19e7b85aee8965e3/Library/hsuanice_RGWH%20Core.lua</source>
+        <source file="hsuanice_AudioSweet Core.lua">https://github.com/hsuanice/ReaScripts/raw/70e81383bb0c2caad05784cc19e7b85aee8965e3/Library/hsuanice_AudioSweet%20Core.lua</source>
+        <source file="hsuanice_AS Preview Core.lua">https://github.com/hsuanice/ReaScripts/raw/70e81383bb0c2caad05784cc19e7b85aee8965e3/Library/hsuanice_AS%20Preview%20Core.lua</source>
+        <source file="hsuanice_Metadata Embed.lua">https://github.com/hsuanice/ReaScripts/raw/70e81383bb0c2caad05784cc19e7b85aee8965e3/Library/hsuanice_Metadata%20Embed.lua</source>
+        <source file="hsuanice_Metadata Read.lua">https://github.com/hsuanice/ReaScripts/raw/70e81383bb0c2caad05784cc19e7b85aee8965e3/Library/hsuanice_Metadata%20Read.lua</source>
+        <source file="hsuanice_Hover.lua">https://github.com/hsuanice/ReaScripts/raw/70e81383bb0c2caad05784cc19e7b85aee8965e3/Library/hsuanice_Hover.lua</source>
+        <source file="hsuanice_Mouse.lua">https://github.com/hsuanice/ReaScripts/raw/70e81383bb0c2caad05784cc19e7b85aee8965e3/Library/hsuanice_Mouse.lua</source>
+        <source file="hsuanice_Metadata Cache.lua">https://github.com/hsuanice/ReaScripts/raw/70e81383bb0c2caad05784cc19e7b85aee8965e3/Library/hsuanice_Metadata%20Cache.lua</source>
+        <source file="hsuanice_Metadata Rename Core.lua">https://github.com/hsuanice/ReaScripts/raw/70e81383bb0c2caad05784cc19e7b85aee8965e3/Library/hsuanice_Metadata%20Rename%20Core.lua</source>
+        <source file="hsuanice_List Table.lua">https://github.com/hsuanice/ReaScripts/raw/70e81383bb0c2caad05784cc19e7b85aee8965e3/Library/hsuanice_List%20Table.lua</source>
+        <source file="hsuanice_Time Format.lua">https://github.com/hsuanice/ReaScripts/raw/70e81383bb0c2caad05784cc19e7b85aee8965e3/Library/hsuanice_Time%20Format.lua</source>
+        <source file="hsuanice_Metadata Generator.lua">https://github.com/hsuanice/ReaScripts/raw/70e81383bb0c2caad05784cc19e7b85aee8965e3/Library/hsuanice_Metadata%20Generator.lua</source>
+        <source file="hsuanice_CLB Compare Engine.lua">https://github.com/hsuanice/ReaScripts/raw/70e81383bb0c2caad05784cc19e7b85aee8965e3/Library/hsuanice_CLB%20Compare%20Engine.lua</source>
+        <source file="hsuanice_EDL Parser.lua">https://github.com/hsuanice/ReaScripts/raw/70e81383bb0c2caad05784cc19e7b85aee8965e3/Library/hsuanice_EDL%20Parser.lua</source>
+        <source file="hsuanice_Session Fix Core.lua">https://github.com/hsuanice/ReaScripts/raw/70e81383bb0c2caad05784cc19e7b85aee8965e3/Library/hsuanice_Session%20Fix%20Core.lua</source>
+        <source file="hsuanice_OTIO Bridge.lua">https://github.com/hsuanice/ReaScripts/raw/70e81383bb0c2caad05784cc19e7b85aee8965e3/Library/hsuanice_OTIO%20Bridge.lua</source>
+        <source file="hsuanice_Subtitle Bridge.lua">https://github.com/hsuanice/ReaScripts/raw/70e81383bb0c2caad05784cc19e7b85aee8965e3/Library/hsuanice_Subtitle%20Bridge.lua</source>
+        <source file="hsuanice_Process Exec.lua">https://github.com/hsuanice/ReaScripts/raw/70e81383bb0c2caad05784cc19e7b85aee8965e3/Library/hsuanice_Process%20Exec.lua</source>
+        <source file="hsuanice_Fade Tool Core.lua">https://github.com/hsuanice/ReaScripts/raw/70e81383bb0c2caad05784cc19e7b85aee8965e3/Library/hsuanice_Fade%20Tool%20Core.lua</source>
+        <source file="json.lua">https://github.com/hsuanice/ReaScripts/raw/70e81383bb0c2caad05784cc19e7b85aee8965e3/Library/json.lua</source>
       </version>
     </reapack>
   </category>
