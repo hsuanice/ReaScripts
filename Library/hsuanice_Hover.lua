@@ -1,10 +1,10 @@
 --[[
 @description hsuanice Hover Library (Shared helpers for Hover Mode editing tools)
-@version 26.1031.1150pre1
+@version 26.1031.1157
 @author hsuanice
 @noindex
 @changelog
-  - Change: fade_line / restore_fade_shape are shared with other edit scripts
+  - Change: fade_line / restore_fade_shape are shared with other edit scripts (tested)
 @about
   Common utilities for Hover Mode scripts (Split / Trim / Extend).
   Centralizes hover/edit cursor decision, snap behavior, pixel epsilon,

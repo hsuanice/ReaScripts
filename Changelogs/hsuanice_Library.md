@@ -1,5 +1,9 @@
 # hsuanice_Library.lua — Changelog
 
+## 26.1031.1157
+
+- Hover: fade shape helpers shared with other edit scripts (tested)
+
 ## 26.1031.1150pre1
 
 - Hover: fade shape helpers shared with other edit scripts

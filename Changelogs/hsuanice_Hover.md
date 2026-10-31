@@ -2,6 +2,10 @@
 
 hsuanice Hover Library (Shared helpers for Hover Mode editing tools)
 
+## 26.1031.1157
+
+- Change: fade_line / restore_fade_shape are shared with other edit scripts (tested)
+
 ## 26.1031.1150pre1
 
 - Change: fade_line / restore_fade_shape are shared with other edit scripts
