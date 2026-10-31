@@ -1,6 +1,6 @@
 --[[
 @description hsuanice Library - shared code used by hsuanice scripts (required)
-@version 26.1031.1225pre1
+@version 26.1031.1234
 @author hsuanice
 @metapackage
 @provides
@@ -25,7 +25,7 @@
   [nomain] hsuanice_Fade Tool Core.lua
   [nomain] json.lua
 @changelog
-  - Fade Tool Core: existing fades keep their shape when resized
+  - Fade Tool Core: existing fades keep their shape when resized (tested)
 @about
   # hsuanice Library
 

@@ -1,5 +1,9 @@
 # hsuanice_Library.lua — Changelog
 
+## 26.1031.1234
+
+- Fade Tool Core: existing fades keep their shape when resized (tested)
+
 ## 26.1031.1225pre1
 
 - Fade Tool Core: existing fades keep their shape when resized

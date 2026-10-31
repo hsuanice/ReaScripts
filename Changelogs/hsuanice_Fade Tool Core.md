@@ -1,5 +1,9 @@
 # hsuanice_Fade Tool Core.lua — Changelog
 
+## 26.1031.1234
+
+- Fix: resizing an existing fade or crossfade (Smart Fade and the other Fade Tool scripts) no longer resets its shape and curve to Linear (tested)
+
 ## 26.1031.1225pre1
 
 - Fix: resizing an existing fade or crossfade (Smart Fade and the other Fade Tool scripts) no longer resets its shape and curve to Linear

@@ -1,10 +1,10 @@
 --[[
 @description hsuanice Fade Tool Core (shared razor / cut / edge / fade helpers for the Fade Tool scripts)
-@version 26.1031.1225pre1
+@version 26.1031.1234
 @author hsuanice
 @noindex
 @changelog
-  - Fix: resizing an existing fade or crossfade (Smart Fade and the other Fade Tool scripts) no longer resets its shape and curve to Linear
+  - Fix: resizing an existing fade or crossfade (Smart Fade and the other Fade Tool scripts) no longer resets its shape and curve to Linear (tested)
 @about
   Shared code for "Fade Tool - Crossfade in Razor", "Fade Tool - Scene Cut to Razor" and
   "Fade Tool - Settings". Settings live in the ExtState section "hsuanice_FadeTool".
