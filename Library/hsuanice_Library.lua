@@ -1,6 +1,6 @@
 --[[
 @description hsuanice Library - shared code used by hsuanice scripts (required)
-@version 26.1031.1157
+@version 26.1031.1225pre1
 @author hsuanice
 @metapackage
 @provides
@@ -25,7 +25,7 @@
   [nomain] hsuanice_Fade Tool Core.lua
   [nomain] json.lua
 @changelog
-  - Hover: fade shape helpers shared with other edit scripts (tested)
+  - Fade Tool Core: existing fades keep their shape when resized
 @about
   # hsuanice Library
 

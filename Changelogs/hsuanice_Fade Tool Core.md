@@ -1,5 +1,9 @@
 # hsuanice_Fade Tool Core.lua — Changelog
 
+## 26.1031.1225pre1
+
+- Fix: resizing an existing fade or crossfade (Smart Fade and the other Fade Tool scripts) no longer resets its shape and curve to Linear
+
 ## 26.1027.1608
 
 - Fix: a razor over several tracks no longer pulls cuts into tracks where it only covers empty space or the middle of an item (e.g. extending both items of a gap) when other tracks have cuts or item edges in the razor.

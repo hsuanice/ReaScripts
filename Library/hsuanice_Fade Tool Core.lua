@@ -1,12 +1,10 @@
 --[[
 @description hsuanice Fade Tool Core (shared razor / cut / edge / fade helpers for the Fade Tool scripts)
-@version 26.1027.1608
+@version 26.1031.1225pre1
 @author hsuanice
 @noindex
 @changelog
-  - Fix: a razor over several tracks no longer pulls cuts into tracks where it only covers empty space or the middle of an item (e.g. extending both items of a gap) when other tracks have cuts or item edges in the razor.
-  - Add: Settings option "Pull nearby cuts into an empty area" (on by default) to turn these pull-ins off.
-  - Release: tested in REAPER 7.82.
+  - Fix: resizing an existing fade or crossfade (Smart Fade and the other Fade Tool scripts) no longer resets its shape and curve to Linear
 @about
   Shared code for "Fade Tool - Crossfade in Razor", "Fade Tool - Scene Cut to Razor" and
   "Fade Tool - Settings". Settings live in the ExtState section "hsuanice_FadeTool".
@@ -22,6 +20,10 @@
 --]]
 local r = reaper
 local M = {}
+
+-- Hover Library: fade line snapshot / shape restore (shape, curve, S-curve intensity)
+local okHover, Hover = pcall(dofile, r.GetResourcePath() .. "/Scripts/hsuanice Scripts/Library/hsuanice_Hover.lua")
+if not okHover or type(Hover) ~= "table" or not Hover.restore_fade_shape then Hover = nil end
 
 M.NS  = "hsuanice_FadeTool"
 M.TOL = 0.0005  -- items closer than this are treated as touching (seconds)
@@ -281,10 +283,12 @@ end
 local function clamp_fade(it, side, limit)
   if fade_len(it, side) > limit then
     limit = math.max(0, limit)
+    local line = (limit > 0) and Hover and Hover.fade_line(it, "FADE" .. side)
     r.SetMediaItemInfo_Value(it, "D_FADE" .. side .. "LEN", limit)
     if r.GetMediaItemInfo_Value(it, "D_FADE" .. side .. "LEN_AUTO") > 0 then
       r.SetMediaItemInfo_Value(it, "D_FADE" .. side .. "LEN_AUTO", limit)
     end
+    if line then Hover.restore_fade_shape(it, "FADE" .. side, line) end
   end
 end
 
@@ -317,10 +321,14 @@ function M.new_fade_shape(it, side, default)
   return default
 end
 
--- side = "IN" / "OUT"; auto = true writes a crossfade (auto fade) length, false a plain fade
+-- side = "IN" / "OUT"; auto = true writes a crossfade (auto fade) length, false a plain fade.
+-- shape nil keeps the current shape: writing the length can reset it to Linear, so the
+-- item's fade line is read first and its shape / curve put back afterwards.
 function M.set_fade(it, side, len, shape, auto)
+  local line = (not shape) and len > 0 and Hover and Hover.fade_line(it, "FADE" .. side)
   r.SetMediaItemInfo_Value(it, "D_FADE" .. side .. "LEN", len)
   r.SetMediaItemInfo_Value(it, "D_FADE" .. side .. "LEN_AUTO", auto and len or 0)
+  if line then Hover.restore_fade_shape(it, "FADE" .. side, line) end
   M.set_shape(it, side, shape)
 end
 
