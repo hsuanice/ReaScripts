@@ -1,11 +1,10 @@
 --[[
 @description Hover Editing - Nudge Take Volume with Mousewheel (Pro Tools-style clip gain)
-@version 26.1031.1836pre1
+@version 26.1031.1841
 @author hsuanice
 @noindex
 @changelog
-  - New: nudge the active take volume (clip gain) of the item under the mouse or the selected items with the mousewheel; shows the new value next to the mouse.
-  - Fix: Shift+wheel on macOS (a horizontal wheel) no longer runs the wrong way round; REVERSE user option added
+  - New: nudge the active take volume (clip gain) of the item under the mouse or the selected items with the mousewheel; shows the new value next to the mouse; continuous steps share one undo point (tested)
 @about
   Mousewheel clip gain like Pro Tools. Assign this script to a mousewheel shortcut in the
   Action List (for example Shift+Cmd+Wheel). Wheel up = louder, wheel down = quieter.

@@ -1,5 +1,9 @@
 # hsuanice_Hover Editing - Nudge Take Volume Timer.lua — Changelog
 
+## 26.1031.1841
+
+- New: background timer for Nudge Take Volume with Mousewheel (tested)
+
 ## 26.1031.1839pre1
 
 - New: background timer for Nudge Take Volume with Mousewheel.

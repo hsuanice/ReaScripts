@@ -1,11 +1,10 @@
 --[[
 @description Hover Editing - Nudge Take Volume Timer (background helper)
-@version 26.1031.1839pre1
+@version 26.1031.1841
 @author hsuanice
 @noindex
 @changelog
-  - New: background timer for Nudge Take Volume with Mousewheel.
-  - Fix: no "already running" dialog when started again while REAPER was busy; it restarts quietly
+  - New: background timer for Nudge Take Volume with Mousewheel (tested)
 @about
   Started by "Hover Editing - Nudge Take Volume with Mousewheel"; not meant to be run by hand.
   Runs in the background only while a wheel burst is going on: once the wheel has been still

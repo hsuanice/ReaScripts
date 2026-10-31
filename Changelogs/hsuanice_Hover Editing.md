@@ -4,6 +4,10 @@
 
 Hover Mode - Pro Tools-style Split / Trim at the mouse or edit cursor
 
+## 26.1031.1841
+
+- New: Nudge Take Volume with Mousewheel (Pro Tools-style clip gain, Hover aware, merged undo) (tested)
+
 ## 26.1031.1839pre1
 
 - New: Nudge Take Volume with Mousewheel (Pro Tools-style clip gain, Hover aware, merged undo)
