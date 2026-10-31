@@ -1,6 +1,6 @@
 --[[
 @description Hover Editing - Pro Tools-style Split / Trim / clip gain at the mouse or edit cursor (Toggle Hover Mode, Split, Trim Left / Right, Nudge Take Volume)
-@version 26.1031.1836pre1
+@version 26.1031.1839pre1
 @author hsuanice
 @metapackage
 @provides

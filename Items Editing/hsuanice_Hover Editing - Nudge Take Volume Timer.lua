@@ -1,10 +1,11 @@
 --[[
 @description Hover Editing - Nudge Take Volume Timer (background helper)
-@version 26.1031.1833pre1
+@version 26.1031.1839pre1
 @author hsuanice
 @noindex
 @changelog
   - New: background timer for Nudge Take Volume with Mousewheel.
+  - Fix: no "already running" dialog when started again while REAPER was busy; it restarts quietly
 @about
   Started by "Hover Editing - Nudge Take Volume with Mousewheel"; not meant to be run by hand.
   Runs in the background only while a wheel burst is going on: once the wheel has been still
@@ -13,6 +14,10 @@
 local NS = "hsuanice_HoverWheelVol"
 local function ext_num(k) return tonumber(reaper.GetExtState(NS, k)) end
 local function ext_set(k, v) reaper.SetExtState(NS, k, tostring(v), false) end
+
+-- Started again while running (the wheel script missed the heartbeat while REAPER was busy):
+-- restart quietly instead of asking; the state lives in ExtState, so nothing is lost
+if reaper.set_action_options then reaper.set_action_options(1 | 2) end
 
 reaper.atexit(function() ext_set("alive", "") end)
 
