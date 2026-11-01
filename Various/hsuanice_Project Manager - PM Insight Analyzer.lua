@@ -1,10 +1,11 @@
 --[[
 @description Project Manager - PM Insight Analyzer: work-time analysis of PM Timer logs (work in progress)
-@version 26.1101.1548pre1
+@version 26.1101.1715pre1
 @author hsuanice
 @noindex  (kept in the repository as a backup; not offered on ReaPack while it is a work in progress)
 @changelog
-  - New: Work Log report - reels / episodes (R5, EP06, the word between the project and the task) per project: By Reel table with time, days, film, source, scenes and film / source per hour for each reel and each work type; By Project gains reels, reel work, average per reel and film / source per hour
+  - Fix: Work Log By Reel - a scene logged with a range a frame off or moved by a recut was counted twice (POINT R5 film 44:24 instead of 27:52); a scene is now the same name with an overlapping range, and a reel with a whole-reel item (Reel Len) uses that length
+  - New: alternating row colors and a highlighted row under the mouse in all report tables; reel rows stand out in By Reel
 @about
   Read-only analysis script. Auto-detects project type:
 
@@ -157,6 +158,18 @@ local function split_prefix(name)
   return prefix, project, task, reel
 end
 
+-- Scene identity of a scene item: its name (the first note line without ":") and its
+-- range "HH:MM:SS:FF - HH:MM:SS:FF" in seconds (frames at 30 fps: only used for overlap)
+local function scene_ident(note)
+  local name = (note or ""):match("^%s*([^\r\n:]+)\r?\n")
+  local function sec(tc)
+    local h, m, x, f = tc:match("(%d+):(%d+):(%d+):(%d+)")
+    return h and (tonumber(h) * 3600 + tonumber(m) * 60 + tonumber(x) + tonumber(f) / 30) or nil
+  end
+  local a, b = (note or ""):match("Range%s*:%s*([%d:]+)%s*%-%s*([%d:]+)")
+  return name and name:gsub("%s+$", "") or nil, a and sec(a), b and sec(b)
+end
+
 -- "HH:MM:SS:FF" → seconds (frames ignored); nil when missing or zero
 local function tc_sec(str)
   local h, m, sec = (str or ""):match("^(%d+):(%d+):(%d+)")
@@ -204,8 +217,8 @@ local REPORT_HEAD = [[<!doctype html><html><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>PM Insight Report</title>
 <style>
-:root{--bg:#fafafa;--fg:#1d1d1f;--mut:#6e6e73;--line:#d2d2d7;--card:#fff;--head:#f0f0f3;--acc:#3b6fd8}
-@media (prefers-color-scheme:dark){:root{--bg:#1b1b1d;--fg:#e8e8ea;--mut:#9a9aa0;--line:#3a3a3f;--card:#242427;--head:#2d2d31;--acc:#7da2ff}}
+:root{--bg:#fafafa;--fg:#1d1d1f;--mut:#6e6e73;--line:#d2d2d7;--card:#fff;--head:#f0f0f3;--acc:#3b6fd8;--stripe:#f5f6f9;--hover:#e6edfb}
+@media (prefers-color-scheme:dark){:root{--bg:#1b1b1d;--fg:#e8e8ea;--mut:#9a9aa0;--line:#3a3a3f;--card:#242427;--head:#2d2d31;--acc:#7da2ff;--stripe:#2a2a2e;--hover:#33405c}}
 body{margin:0;padding:24px 16px 80px;background:var(--bg);color:var(--fg);font:14px/1.45 -apple-system,"Segoe UI",Helvetica,Arial,sans-serif}
 main{max-width:1400px;margin:0 auto}
 h1{font-size:22px;margin:0 0 2px}h2{font-size:17px;margin:32px 0 10px;padding-bottom:6px;border-bottom:2px solid var(--line)}
@@ -222,6 +235,8 @@ table{border-collapse:collapse;background:var(--card);border:1px solid var(--lin
 th,td{padding:6px 10px;border-bottom:1px solid var(--line);text-align:right;white-space:nowrap}
 th{background:var(--head);font-size:12px;color:var(--mut);font-weight:600;position:sticky;top:0}
 td.l,th.l{text-align:left}td{font-family:ui-monospace,Menlo,monospace;font-size:13px}
+tr:nth-child(even) td{background:var(--stripe)}tr:hover td{background:var(--hover)}
+tr.reel td{background:var(--head);border-top:2px solid var(--line)}
 tr.total td{font-weight:700}tr.idle td{color:var(--mut)}
 a{color:var(--acc);text-decoration:none}a:hover{text-decoration:underline}
 .dot{display:inline-block;width:10px;height:10px;border-radius:3px;margin-right:6px;vertical-align:baseline}
@@ -362,12 +377,13 @@ local function collect_work_log_records()
           shots = ni.shots, src_cnt = ni.src_cnt, src_len = ni.src_len,
           scope = ni.scope, scenes = ni.scenes,
           reel = reel,
-          -- scene items: film (Length) and source of one scene, keyed by its range;
+          -- scene items: film (Length) and source of one scene, its name and range;
           -- whole-reel items (Reel Len): length, source and scene count of the reel
           film = tc_sec(ni.length), src_sec = tc_sec(ni.src_len),
-          scene_key = (ni.length ~= "") and (ni.range ~= "" and ni.range or ni.length) or nil,
           reel_len = tc_sec(ni.reel_len), reel_scenes = tonumber(ni.scenes),
         }
+        local rec = raw[#raw]
+        rec.sc_name, rec.sc_s, rec.sc_e = scene_ident(note)
       end
     end
   end
@@ -397,24 +413,32 @@ local function collect_work_log_records()
   return recs, #raw - #recs
 end
 
--- Film / source covered by a set of records: each scene counted once (its largest
--- values: the ISO source, as later stages may log less); a whole-reel item (Reel Len)
--- covers the whole reel. Returns film, source,
--- scenes worked, scenes in the reel (nil when unknown).
+-- Film / source covered by a set of records (oldest first). Scene items of the same
+-- scene count once: same name and overlapping ranges (a range can move by a frame or
+-- with a recut); film = its latest length, source = its largest (the ISO source, as
+-- later stages may log less). A whole-reel item (Reel Len) gives the whole reel instead.
+-- Returns film, source, scenes worked, scenes in the reel (nil when unknown).
 local function coverage(list)
-  local scenes, n, film, src = {}, 0, 0, 0
+  local scenes, film, src = {}, 0, 0
   local reel_film, reel_src, reel_n
   for _, x in ipairs(list) do
     if x.reel_len then
-      reel_film, reel_src, reel_n = x.reel_len, x.src_sec, x.reel_scenes or reel_n
-    elseif x.scene_key then
-      local sc = scenes[x.scene_key]
-      if not sc then sc = { film = 0, src = 0 }; scenes[x.scene_key] = sc; n = n + 1 end
-      sc.film, sc.src = math.max(sc.film, x.film or 0), math.max(sc.src, x.src_sec or 0)
+      reel_film, reel_n = x.reel_len, x.reel_scenes or reel_n
+      reel_src = x.src_sec or reel_src
+    elseif x.film then
+      local sc
+      for _, c in ipairs(scenes) do
+        if c.name == x.sc_name and (not (x.sc_s and c.s) or (x.sc_s < c.e and x.sc_e > c.s)) then
+          sc = c; break
+        end
+      end
+      if not sc then sc = { name = x.sc_name, src = 0 }; scenes[#scenes + 1] = sc end
+      sc.s, sc.e, sc.film = x.sc_s, x.sc_e, x.film
+      sc.src = math.max(sc.src, x.src_sec or 0)
     end
   end
-  for _, sc in pairs(scenes) do film, src = film + sc.film, src + sc.src end
-  return math.max(film, reel_film or 0), math.max(src, reel_src or 0), n, reel_n
+  for _, sc in ipairs(scenes) do film, src = film + sc.film, src + sc.src end
+  return reel_film or film, (reel_src and reel_src > 0) and reel_src or src, #scenes, reel_n
 end
 
 -- Reel names in a natural order (R2 before R10); "All" and no reel last
@@ -575,7 +599,7 @@ local function work_log_section(out, recs, sid)
       local rl = p.reels[k]
       local sc = rl.nsc > 0 and tostring(rl.nsc) or "–"
       if rl.reel_n then sc = (rl.nsc > 0 and rl.nsc or "–") .. " / " .. rl.reel_n end
-      out(string.format('<tr class="total"><td class="l">%s</td><td>%s</td><td>%s</td><td>%d</td>'
+      out(string.format('<tr class="total reel"><td class="l">%s</td><td>%s</td><td>%s</td><td>%d</td>'
         .. '<td class="l">%s – %s</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td></tr>',
         html_esc(k ~= "" and k or "(no reel)"), fmt_dur(rl.total), pct(rl.total, p.total), count(rl.days),
         rl.first, rl.last, len_cell(rl.film), len_cell(rl.src), sc,

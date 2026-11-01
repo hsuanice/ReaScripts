@@ -3,7 +3,9 @@
 -- usage (repo root): lua .dev/tests/mock_pm_insight_worklog.lua
 --
 -- Proj R1 Dialog: scene A (60s film / 600s source) mic select 1h + editing 1h (A again: once);
---                 scene B (120s / 900s) editing 1h - logged with a smaller Src Len later (max kept)
+--                 scene B (120s / 900s) editing 1h - logged a frame later with a smaller Src Len
+--                 (same scene: max source kept); notes in REAPER use CRLF
+-- Proj R3 Dialog: scene "80" twice at different places (2 scenes) + "80" again a frame off (same)
 -- Proj R2 Dialog: whole-reel ME+PAN 1h (Reel Len 300s, source 1800s, 5 scenes)
 -- Proj All Conform: conform 1h (not a reel) · "Proj | aap": no reel · "261020 Proj R2 | check": date ignored
 -- Proj R1 Dialog | export: 5 s of work -> no rate
@@ -13,11 +15,15 @@ local OUT_DIR = os.tmpname() .. "_dir"
 os.execute('mkdir -p "' .. OUT_DIR .. '"')
 
 local function it(pos, len, name, notes) return { pos = pos, len = len, name = name, notes = notes or "" } end
-local A = "Range    : 01:00:00:00 - 01:01:00:00\nLength   : 00:01:00:00\nSrc Len  : 00:10:00:00"
-local B1 = "Range    : 01:01:00:00 - 01:03:00:00\nLength   : 00:02:00:00\nSrc Len  : 00:15:00:00"
-local B2 = "Range    : 01:01:00:00 - 01:03:00:00\nLength   : 00:02:00:00\nSrc Len  : 00:05:00:00"
+local A = "10\r\nRange    : 01:00:00:00 - 01:01:00:00\nLength   : 00:01:00:00\nSrc Len  : 00:10:00:00"
+local B1 = "20\nRange    : 01:01:00:00 - 01:03:00:00\nLength   : 00:02:00:00\nSrc Len  : 00:15:00:00"
+local B2 = "20\nRange    : 01:01:00:01 - 01:03:00:01\nLength   : 00:02:00:00\nSrc Len  : 00:05:00:00"
 local REEL = "Scope    : R2\nScenes   : 5\nReel Len : 00:05:00:00\nSrc Len  : 00:30:00:00"
+local function s80(a, b) return "80\nRange    : " .. a .. " - " .. b .. "\nLength   : 00:00:30:00" end
 local tracks = {
+  { name = "2026-09-30", items = { it(0, 1800, "Proj R3 Dialog | editing", s80("03:00:00:00", "03:00:30:00")),
+    it(2000, 1800, "Proj R3 Dialog | editing", s80("03:05:00:00", "03:05:30:00")),
+    it(4000, 1800, "Proj R3 Dialog | denoise", s80("03:00:00:01", "03:00:30:01")) } },
   { name = "2026-10-01", items = { it(0, 3600, "Proj R1 Dialog | mic select", A),
     it(4000, 3600, "Proj R1 Dialog | editing", B1), it(8000, 5, "Proj R1 Dialog | export") } },
   { name = "2026-10-02", items = { it(0, 3600, "Proj R1 dialog | editing", A),
@@ -54,17 +60,21 @@ local function has(s) return all:find(s, 1, true) ~= nil end
 
 -- By Project: 2 reels; reel work 5h + 600s check (R2) = 18605s incl. the 5 s export
 -- film 60+120 (R1) + 300 (R2) = 480s; source 600+900 (max) + 1800 = 3300s
-check("By Project reel columns", has('<td>2</td><td>18605s</td><td>9302s</td><td>480s</td><td>3300s</td>'))
-check("By Project film/hr 480s / 18605s = 1m 32s", has('<td>1m 32s</td><td>10m 38s</td>'))
+-- R3: 1.5h, film 60s -> totals 3 reels, 24005s, film 540s, source 3300s
+check("By Project reel columns", has('<td>3</td><td>24005s</td><td>8002s</td><td>540s</td><td>3300s</td>'))
+check("By Project film/hr 540s / 24005s = 1m 20s", has('<td>1m 20s</td><td>8m 14s</td>'))
+check("R3: same name at two places = 2 scenes, a frame off = same scene",
+  has('<td class="l">R3</td><td>5400s</td>') and has('<td>60s</td><td>–</td><td>2</td>'))
 -- By Reel: R1 = 4h + 5s, scenes A + B once each, film 180s, source 1500s (max of B)
-check("R1 row", has('<tr class="total"><td class="l">R1</td><td>14405s</td>') and has('<td>180s</td><td>1500s</td><td>2</td>'))
+check("R1 row", has('<tr class="total reel"><td class="l">R1</td><td>14405s</td>') and has('<td>180s</td><td>1500s</td><td>2</td>'))
 check("R1 editing: scenes A + B in 2h", has('editing</td><td>7200s</td>') and has('<td>180s</td><td>1500s</td><td>2</td><td>1m 30s</td><td>12m 30s</td>'))
 check("export of 5 s: no rate", has('export</td><td>5s</td><td>0%</td><td>1</td><td class="l"></td><td>–</td><td>–</td><td>–</td><td>–</td><td>–</td>'))
 check("R2 whole-reel item: Reel Len, source, scenes – / 5",
   has('<td class="l">R2</td><td>4200s</td>') and has('<td>300s</td><td>1800s</td><td>– / 5</td>'))
 check("dated name ignored: check counted on R2", has('check</td><td>600s</td>') and not has('>261020<'))
 check("All and no reel rows, not counted as reels", has('<td class="l">All</td>') and has('<td class="l">(no reel)</td>')
-  and has('2 reels</div>'))
+  and has('3 reels</div>'))
+check("zebra rows + reel rows", html:find("tr:nth-child(even) td{background:var(--stripe)}", 1, true) ~= nil)
 check("reel order R1, R2, All, (no reel)", all:find(">R1<", 1, true) < all:find(">R2<", 1, true)
   and all:find(">R2<", 1, true) < all:find(">All<", 1, true) and all:find(">All<", 1, true) < all:find(">(no reel)<", 1, true))
 check("task still the last word (dialog / Dialog merged)", has('<td class="l">Dialog</td>') and not has('<td class="l">dialog</td>'))
