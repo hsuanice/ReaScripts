@@ -1,11 +1,11 @@
 --[[
 @description hsuanice Session Fix Core - checks and fixes for preparing a REAPER session for Interchanger / Pro Tools / Nuendo
-@version 26.1101.1423pre1
+@version 26.1101.1425
 @author hsuanice
 @noindex
 @changelog
-  - New: Scene cuts check (review only): scene changes on the Scene Cut track cut differently from the Fade Tool Settings standard, items running across a scene change without a fade-out, and scene changes not cut on any track; reference / source tracks skipped; Mark as OK
-  - Fix: clicking a Scene cuts entry zooms to the edge in question with about 2 s on each side (scene change and neighbours visible); the report shows each issue's own position (not the item start) and notes items changed after the scan
+  - New: Scene cuts check (review only): scene changes on the Scene Cut track cut differently from the Fade Tool Settings standard, items running across a scene change without a fade-out, and scene changes not cut on any track; reference / source tracks skipped; Mark as OK (tested)
+  - Fix: clicking a Scene cuts entry zooms to the edge in question with about 2 s on each side; the report shows each issue's own position (not the item start) and notes items changed after the scan (tested)
 @about
   Shared library behind "Session Fix - Interchange Prep".
   Every rule has: id, title, scope ("item" / "track" / "file"), scan() returning issues,

@@ -1,12 +1,12 @@
 --[[
 @description Session Fix - check and fix a REAPER session before moving it to Pro Tools, Nuendo or Cubase (Interchanger)
-@version 26.1101.1423pre1
+@version 26.1101.1425
 @author hsuanice
 @metapackage
 @provides
   [main] hsuanice_Session Fix - Interchange Prep.lua
 @changelog
-  - New: Scene cuts check (review only) with Mark as OK
+  - New: Scene cuts check (review only) with Mark as OK (tested)
 @about
   # Session Fix
 

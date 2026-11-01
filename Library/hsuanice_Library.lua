@@ -1,6 +1,6 @@
 --[[
 @description hsuanice Library - shared code used by hsuanice scripts (required)
-@version 26.1101.1423pre1
+@version 26.1101.1425
 @author hsuanice
 @metapackage
 @provides
@@ -25,7 +25,7 @@
   [nomain] hsuanice_Fade Tool Core.lua
   [nomain] json.lua
 @changelog
-  - Session Fix Core: Scene cuts check with Mark as OK; report positions; wider scene cut zoom
+  - Session Fix Core: Scene cuts check with Mark as OK; report positions (tested)
 @about
   # hsuanice Library
 
