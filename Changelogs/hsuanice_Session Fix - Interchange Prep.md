@@ -2,6 +2,11 @@
 
 Session Fix - Interchange Prep: check and fix a REAPER session before converting it with Interchanger
 
+## 26.1101.1349pre1
+
+- New: Scene cuts check (review only); Settings > Scene cut window and Scene cuts: skip tracks
+- New: Mark as OK button in the Scene cuts list; Settings > Clear scene cut OK marks
+
 ## 26.1101.1346pre1
 
 - New: Scene cuts check (review only); Settings > Scene cut window (frames around a scene change, default 6)

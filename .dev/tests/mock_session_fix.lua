@@ -409,6 +409,22 @@ do -- scene cuts: standard = 1 frame fade-in starting 1 frame before the scene, 
   local listed = {}
   for _, is in ipairs(res_all.scene_cuts) do if is.item then listed[is.item] = true end end
   assert(listed[edl] and listed[edited], "empty skip list should check every track")
+  -- Mark as OK: the marked spots are left out until that edge moves
+  local pick = {}
+  for _, is in ipairs(res.scene_cuts) do if is.item == bad_end or is.item == cross or is.text:find("NOT CUT", 1, true) then pick[#pick + 1] = is end end
+  assert(#pick == 3 and M.approve_scene_cuts(pick) == 3)
+  local res_ok, sum_ok = M.scan({ scene_window = 6 })
+  local left = {}
+  for _, is in ipairs(res_ok.scene_cuts) do left[is.item] = true; assert(not is.text:find("NOT CUT", 1, true), "approved NOT CUT listed") end
+  assert(not left[bad_end] and not left[cross] and left[bad_start] and left[shape], "approve left out the wrong spots")
+  assert(sum_ok.scene_ok == 3, "scene_ok count " .. tostring(sum_ok.scene_ok))
+  bad_end.len = bad_end.len + f                                                         -- edge moved: listed again
+  local res_mv = M.scan({ scene_window = 6 })
+  local again = false
+  for _, is in ipairs(res_mv.scene_cuts) do if is.item == bad_end then again = true end end
+  assert(again, "moved edge should be listed again")
+  assert(M.clear_scene_oks() == 3)
+  print("scene cuts mark as OK: " .. #res.scene_cuts .. " -> " .. #res_ok.scene_cuts .. " listed, " .. sum_ok.scene_ok .. " OK")
   for _, it in ipairs(new) do if it.tr == ok_t then assert(not by[it], "standard cut listed") end end
   assert(first.text:find("NOT CUT on any track", 1, true) and math.abs(first.pos - D) < 1e-9, "uncut scene change not first")
   local n_notcut = 0

@@ -1,11 +1,11 @@
 --[[
 @description Session Fix - Interchange Prep: check and fix a REAPER session before converting it with Interchanger
-@version 26.1101.1346pre1
+@version 26.1101.1349pre1
 @author hsuanice
 @noindex
 @changelog
-  - New: Scene cuts check (review only); Settings > Scene cut window (frames around a scene change, default 6)
-  - New: Settings > Scene cuts: skip tracks (reference / source tracks, by name start)
+  - New: Scene cuts check (review only); Settings > Scene cut window and Scene cuts: skip tracks
+  - New: Mark as OK button in the Scene cuts list; Settings > Clear scene cut OK marks
 @about
   # Session Fix - Interchange Prep
 
@@ -179,6 +179,10 @@ local function do_scan()
     state.summary.tracks, state.summary.items, state.summary.total, state.summary.total == 1 and "" or "s",
     scan_seconds(state.summary), again and string.format(", started again %d time%s because the project was edited", again, again == 1 and "" or "s") or "",
     pops > 0 and string.format(" %d 2-pop%s recognized (not listed).", pops, pops == 1 and "" or "s") or "")
+  local oks = state.summary.scene_ok or 0
+  if oks > 0 then
+    state.status = state.status .. string.format(" %d scene cut%s marked as OK (not listed).", oks, oks == 1 and "" or "s")
+  end
 end
 
 -- Selecting / marking changes REAPER's state counter but not the scan result
@@ -829,6 +833,20 @@ local function draw_rules()
             .. "(a hidden flag saved with the project, no take marker). Writing \"2-pop\" or \"tail pop\" in REAPER's Item Notes works too.")
         end
       end
+      if d.id == "scene_cuts" then
+        if ImGui.Button(ctx, string.format("Mark as OK (%d)##sceneok", nsel)) then
+          local n = CORE.approve_scene_cuts((target_issues(d, true)))
+          run_job(function()
+            do_scan()
+            state.status = string.format("%d scene cut%s marked as OK (left out until that edge moves; Undo or Settings > Clear scene cut OK marks to undo). ",
+              n, n == 1 and "" or "s") .. state.status
+          end)
+        end
+        if ImGui.IsItemHovered(ctx, ImGui.HoveredFlags_AllowWhenDisabled) then
+          ImGui.SetTooltip(ctx, "You checked these spots and they are fine: they are left out of this check\n"
+            .. "(a hidden flag saved with the project). Moving that edge later lists it again.")
+        end
+      end
       if nsel > 0 and ImGui.Button(ctx, "Clear selection##clr") then state.sel[d.id] = {} end
       ImGui.EndDisabled(ctx)
       if nsel == 0 then ImGui.TextDisabled(ctx, "Click / Cmd / Shift\nin the list") end
@@ -908,6 +926,16 @@ local function draw_settings_popup()
     end
   end
   if ImGui.IsItemHovered(ctx) then ImGui.SetTooltip(ctx, "Tiny items lists the items marked with \"Mark as 2-pop\" again.") end
+  if ImGui.MenuItem(ctx, "Clear scene cut OK marks", nil, false, true) then
+    local n = CORE.clear_scene_oks()
+    local msg = string.format("Scene cut OK marks cleared on %d item%s. ", n, n == 1 and "" or "s")
+    if state.results then
+      run_job(function() do_scan(); state.status = msg .. state.status end)
+    else
+      state.status = msg
+    end
+  end
+  if ImGui.IsItemHovered(ctx) then ImGui.SetTooltip(ctx, "Scene cuts lists the spots marked with \"Mark as OK\" again.") end
   if ImGui.BeginMenu(ctx, "Scene cut window") then
     for _, f in ipairs({ 2, 4, 6, 8, 12, 24 }) do
       if ImGui.MenuItem(ctx, string.format("%d frames", f), nil, prefs.scene_window == f, true) then

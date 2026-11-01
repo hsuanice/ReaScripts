@@ -1,11 +1,11 @@
 --[[
 @description hsuanice Session Fix Core - checks and fixes for preparing a REAPER session for Interchanger / Pro Tools / Nuendo
-@version 26.1101.1346pre1
+@version 26.1101.1349pre1
 @author hsuanice
 @noindex
 @changelog
-  - New: Scene cuts check (review only): scene changes on the Scene Cut track cut differently from the Fade Tool Settings standard, items running across a scene change without a fade-out, and scene changes not cut on any track
-  - Fix: Scene cuts no longer checks reference / source tracks (Picture Cut, EDL, Edited, Subtitle, Character by default)
+  - New: Scene cuts check (review only): scene changes on the Scene Cut track cut differently from the Fade Tool Settings standard, items running across a scene change without a fade-out, and scene changes not cut on any track; reference / source tracks skipped
+  - New: Mark as OK for checked scene cut spots (listed again when that edge moves)
 @about
   Shared library behind "Session Fix - Interchange Prep".
   Every rule has: id, title, scope ("item" / "track" / "file"), scan() returning issues,
@@ -1998,12 +1998,51 @@ local function scene_name(it)
   return name ~= "" and name or tc(r.GetMediaItemInfo_Value(it, "D_POSITION"))
 end
 
+-- "Mark as OK" in the Scene cuts list: a hidden flag on the item (saved with the project) that
+-- names the edge and where it was ("s@<scene>:<edge>"), so moving that edge lists it again
+local SCENE_OK_KEY = "P_EXT:hsuanice_SessionFix_sceneok"
+local function scene_ok_tokens(it)
+  local _, v = r.GetSetMediaItemInfo_String(it, SCENE_OK_KEY, "", false)
+  local set = {}
+  for tok in (v or ""):gmatch("%S+") do set[tok] = true end
+  return set, v or ""
+end
+
+function M.approve_scene_cuts(issues)
+  local n = 0
+  r.Undo_BeginBlock()
+  for _, is in ipairs(issues) do
+    if is.item and is.ok_key and r.ValidatePtr2(0, is.item, "MediaItem*") then
+      local set, v = scene_ok_tokens(is.item)
+      if not set[is.ok_key] then
+        r.GetSetMediaItemInfo_String(is.item, SCENE_OK_KEY, (v ~= "" and v .. " " or "") .. is.ok_key, true)
+      end
+      n = n + 1
+    end
+  end
+  r.Undo_EndBlock("Session Fix: mark scene cuts as OK", -1)
+  return n
+end
+
+function M.clear_scene_oks()
+  local n = 0
+  r.Undo_BeginBlock()
+  for i = 0, r.CountMediaItems(0) - 1 do
+    local it = r.GetMediaItem(0, i)
+    local _, v = r.GetSetMediaItemInfo_String(it, SCENE_OK_KEY, "", false)
+    if v ~= "" then r.GetSetMediaItemInfo_String(it, SCENE_OK_KEY, "", true); n = n + 1 end
+  end
+  r.Undo_EndBlock("Session Fix: clear scene cut OK marks", -1)
+  return n
+end
+
 rule {
   id = "scene_cuts", title = "Scene cuts not done the standard way, or not done (Scene Cut track; standard = Fade Tool Settings)", scope = "item",
   fix_note = "Review only: check each scene change by hand (Fade Tool - Scene Cut to Razor cuts a scene the standard way).\n"
     .. "Edges within the window of a scene change must match the standard; items crossing it need a fade-out\n"
     .. "(an item running into the next scene with a fade-out is taken as an intended late end).\n"
-    .. "Reference / source tracks (Settings > Scene cuts: skip tracks) are not checked",
+    .. "Reference / source tracks (Settings > Scene cuts: skip tracks) are not checked.\n"
+    .. "\"Mark as OK\" in the list leaves a checked spot out (until that edge moves)",
   scan = function(ctx)
     local scene_track, folder = scene_folder()
     if not scene_track then return {} end
@@ -2042,6 +2081,12 @@ rule {
     local out, firsts = {}, {}
     local cut_at, cross_at, change_of = {}, {}, {}
     local function key(t) return string.format("%.4f", t) end
+    local oks, approved = {}, 0
+    -- list an issue unless it was marked as OK (same edge, same place)
+    local function add(list, is)
+      oks[is.item] = oks[is.item] or scene_ok_tokens(is.item)
+      if oks[is.item][is.ok_key] then approved = approved + 1 else list[#list + 1] = is end
+    end
     for i, sc in ipairs(scenes) do
       change_of[key(sc.s)] = change_of[key(sc.s)] or { item = sc.it, pos = sc.s, text = "start of scene " .. sc.name }
       change_of[key(sc.e)] = change_of[key(sc.e)] or { item = sc.it, pos = sc.e, text = "end of scene " .. sc.name }
@@ -2076,7 +2121,8 @@ rule {
                 probs[#probs + 1] = string.format("fade-in shape %s (standard %s)", shape_name(shape_of(A.it, "IN")), shape_name(want_shape))
               end
               if #probs > 0 then
-                out[#out + 1] = { item = A.it, pos = A.s, text = "scene " .. sc.name .. " start: " .. table.concat(probs, ", ") }
+                add(out, { item = A.it, pos = A.s, ok_key = "s@" .. key(sc.s) .. ":" .. key(A.s),
+                  text = "scene " .. sc.name .. " start: " .. table.concat(probs, ", ") })
               end
             end
             -- scene end: the last item's end near the scene change
@@ -2093,7 +2139,8 @@ rule {
                 probs[#probs + 1] = string.format("fade-out shape %s (standard %s)", shape_name(shape_of(A.it, "OUT")), shape_name(want_shape))
               end
               if #probs > 0 then
-                out[#out + 1] = { item = A.it, pos = A.e, text = "scene " .. sc.name .. " end: " .. table.concat(probs, ", ") }
+                add(out, { item = A.it, pos = A.e, ok_key = "e@" .. key(sc.e) .. ":" .. key(A.e),
+                  text = "scene " .. sc.name .. " end: " .. table.concat(probs, ", ") })
               end
             end
             -- an item running across a scene change, edges far from it: needs a fade-out
@@ -2103,7 +2150,8 @@ rule {
                 crossed[tostring(A.it) .. k] = true
                 if fo <= tol then
                   cross_at[k] = true
-                  out[#out + 1] = { item = A.it, pos = t, text = string.format("runs across %s with no fade-out (not cut?)", change_of[k].text) }
+                  add(out, { item = A.it, pos = t, ok_key = "x@" .. k .. ":" .. key(A.s) .. ":" .. key(A.e),
+                    text = string.format("runs across %s with no fade-out (not cut?)", change_of[k].text) })
                 end
               end
             end
@@ -2114,11 +2162,12 @@ rule {
     -- scene changes that no track cuts at all: listed first
     for k, c in pairs(change_of) do
       if cross_at[k] and not cut_at[k] then
-        firsts[#firsts + 1] = { item = c.item, pos = c.pos, text = "NOT CUT on any track: " .. c.text }
+        add(firsts, { item = c.item, pos = c.pos, ok_key = "n@" .. k, text = "NOT CUT on any track: " .. c.text })
       end
     end
     table.sort(firsts, function(a, b) return a.pos < b.pos end)
     for i = #firsts, 1, -1 do table.insert(out, 1, firsts[i]) end
+    ctx.scene_ok = approved
     return out
   end,
 }
@@ -2569,7 +2618,7 @@ function M.scan(opts)
     end
   end
   return results, { total = total, items = #ctx.items, tracks = #ctx.tracks, fps = ctx.fps, sr = ctx.sr, times = times, restarts = opts and opts.restarts,
-    two_pops = ctx.two_pops or 0 }
+    two_pops = ctx.two_pops or 0, scene_ok = ctx.scene_ok or 0 }
 end
 
 -- Check times of a scan, slowest first: "Workflow cues 4.2 s, Overlaps 1.1 s" (checks under min_sec left out)

@@ -1,5 +1,9 @@
 # hsuanice_Library.lua — Changelog
 
+## 26.1101.1349pre1
+
+- Session Fix Core: Scene cuts check with Mark as OK
+
 ## 26.1101.1346pre1
 
 - Session Fix Core: Scene cuts check
