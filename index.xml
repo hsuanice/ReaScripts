@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<index version="1" name="hsuanice Scripts" commit="aaae0e25a445e020e1d92ff1bdaf11e035f687d9">
+<index version="1" name="hsuanice Scripts" commit="95d632e6d29357abb8b8951bad757c79043aab45">
   <category name="Conform">
     <reapack name="hsuanice_Conform List Browser - CLB.lua" type="script" desc="Conform List Browser - CLB: conform EDL / AAF / XML / OTIO / subtitle lists (GUI + Jump / Link / Load / Reveal)">
       <metadata>
@@ -684,6 +684,10 @@
       <version name="26.1101.1349pre1" author="hsuanice" time="2026-11-01T05:49:56Z">
         <changelog><![CDATA[- New: Scene cuts check (review only) with Mark as OK]]></changelog>
         <source main="main" file="hsuanice_Session Fix - Interchange Prep.lua">https://github.com/hsuanice/ReaScripts/raw/aaae0e25a445e020e1d92ff1bdaf11e035f687d9/Items%20Editing/hsuanice_Session%20Fix%20-%20Interchange%20Prep.lua</source>
+      </version>
+      <version name="26.1101.1419pre1" author="hsuanice" time="2026-11-01T06:21:38Z">
+        <changelog><![CDATA[- New: Scene cuts check (review only) with Mark as OK]]></changelog>
+        <source main="main" file="hsuanice_Session Fix - Interchange Prep.lua">https://github.com/hsuanice/ReaScripts/raw/95d632e6d29357abb8b8951bad757c79043aab45/Items%20Editing/hsuanice_Session%20Fix%20-%20Interchange%20Prep.lua</source>
       </version>
     </reapack>
     <reapack name="hsuanice_Toggle Mute Item Under Mouse.lua" type="script" desc="Toggle Mute Item Under Mouse">
@@ -1790,6 +1794,29 @@
         <source file="hsuanice_Process Exec.lua">https://github.com/hsuanice/ReaScripts/raw/aaae0e25a445e020e1d92ff1bdaf11e035f687d9/Library/hsuanice_Process%20Exec.lua</source>
         <source file="hsuanice_Fade Tool Core.lua">https://github.com/hsuanice/ReaScripts/raw/aaae0e25a445e020e1d92ff1bdaf11e035f687d9/Library/hsuanice_Fade%20Tool%20Core.lua</source>
         <source file="json.lua">https://github.com/hsuanice/ReaScripts/raw/aaae0e25a445e020e1d92ff1bdaf11e035f687d9/Library/json.lua</source>
+      </version>
+      <version name="26.1101.1419pre1" author="hsuanice" time="2026-11-01T06:21:38Z">
+        <changelog><![CDATA[- Session Fix Core: Scene cuts check with Mark as OK; report positions]]></changelog>
+        <source file="hsuanice_RGWH Core.lua">https://github.com/hsuanice/ReaScripts/raw/95d632e6d29357abb8b8951bad757c79043aab45/Library/hsuanice_RGWH%20Core.lua</source>
+        <source file="hsuanice_AudioSweet Core.lua">https://github.com/hsuanice/ReaScripts/raw/95d632e6d29357abb8b8951bad757c79043aab45/Library/hsuanice_AudioSweet%20Core.lua</source>
+        <source file="hsuanice_AS Preview Core.lua">https://github.com/hsuanice/ReaScripts/raw/95d632e6d29357abb8b8951bad757c79043aab45/Library/hsuanice_AS%20Preview%20Core.lua</source>
+        <source file="hsuanice_Metadata Embed.lua">https://github.com/hsuanice/ReaScripts/raw/95d632e6d29357abb8b8951bad757c79043aab45/Library/hsuanice_Metadata%20Embed.lua</source>
+        <source file="hsuanice_Metadata Read.lua">https://github.com/hsuanice/ReaScripts/raw/95d632e6d29357abb8b8951bad757c79043aab45/Library/hsuanice_Metadata%20Read.lua</source>
+        <source file="hsuanice_Hover.lua">https://github.com/hsuanice/ReaScripts/raw/95d632e6d29357abb8b8951bad757c79043aab45/Library/hsuanice_Hover.lua</source>
+        <source file="hsuanice_Mouse.lua">https://github.com/hsuanice/ReaScripts/raw/95d632e6d29357abb8b8951bad757c79043aab45/Library/hsuanice_Mouse.lua</source>
+        <source file="hsuanice_Metadata Cache.lua">https://github.com/hsuanice/ReaScripts/raw/95d632e6d29357abb8b8951bad757c79043aab45/Library/hsuanice_Metadata%20Cache.lua</source>
+        <source file="hsuanice_Metadata Rename Core.lua">https://github.com/hsuanice/ReaScripts/raw/95d632e6d29357abb8b8951bad757c79043aab45/Library/hsuanice_Metadata%20Rename%20Core.lua</source>
+        <source file="hsuanice_List Table.lua">https://github.com/hsuanice/ReaScripts/raw/95d632e6d29357abb8b8951bad757c79043aab45/Library/hsuanice_List%20Table.lua</source>
+        <source file="hsuanice_Time Format.lua">https://github.com/hsuanice/ReaScripts/raw/95d632e6d29357abb8b8951bad757c79043aab45/Library/hsuanice_Time%20Format.lua</source>
+        <source file="hsuanice_Metadata Generator.lua">https://github.com/hsuanice/ReaScripts/raw/95d632e6d29357abb8b8951bad757c79043aab45/Library/hsuanice_Metadata%20Generator.lua</source>
+        <source file="hsuanice_CLB Compare Engine.lua">https://github.com/hsuanice/ReaScripts/raw/95d632e6d29357abb8b8951bad757c79043aab45/Library/hsuanice_CLB%20Compare%20Engine.lua</source>
+        <source file="hsuanice_EDL Parser.lua">https://github.com/hsuanice/ReaScripts/raw/95d632e6d29357abb8b8951bad757c79043aab45/Library/hsuanice_EDL%20Parser.lua</source>
+        <source file="hsuanice_Session Fix Core.lua">https://github.com/hsuanice/ReaScripts/raw/95d632e6d29357abb8b8951bad757c79043aab45/Library/hsuanice_Session%20Fix%20Core.lua</source>
+        <source file="hsuanice_OTIO Bridge.lua">https://github.com/hsuanice/ReaScripts/raw/95d632e6d29357abb8b8951bad757c79043aab45/Library/hsuanice_OTIO%20Bridge.lua</source>
+        <source file="hsuanice_Subtitle Bridge.lua">https://github.com/hsuanice/ReaScripts/raw/95d632e6d29357abb8b8951bad757c79043aab45/Library/hsuanice_Subtitle%20Bridge.lua</source>
+        <source file="hsuanice_Process Exec.lua">https://github.com/hsuanice/ReaScripts/raw/95d632e6d29357abb8b8951bad757c79043aab45/Library/hsuanice_Process%20Exec.lua</source>
+        <source file="hsuanice_Fade Tool Core.lua">https://github.com/hsuanice/ReaScripts/raw/95d632e6d29357abb8b8951bad757c79043aab45/Library/hsuanice_Fade%20Tool%20Core.lua</source>
+        <source file="json.lua">https://github.com/hsuanice/ReaScripts/raw/95d632e6d29357abb8b8951bad757c79043aab45/Library/json.lua</source>
       </version>
     </reapack>
   </category>
