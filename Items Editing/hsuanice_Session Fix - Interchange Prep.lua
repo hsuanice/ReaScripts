@@ -1,11 +1,11 @@
 --[[
 @description Session Fix - Interchange Prep: check and fix a REAPER session before converting it with Interchanger
-@version 26.1101.1419pre1
+@version 26.1101.1423pre1
 @author hsuanice
 @noindex
 @changelog
   - New: Scene cuts check (review only) with Mark as OK; Settings > Scene cut window, Scene cuts: skip tracks, Clear scene cut OK marks
-  - Fix: clicking a Scene cuts entry zooms to the edge in question; the report shows each issue's own position (not the item start) and notes items changed after the scan
+  - Fix: clicking a Scene cuts entry zooms to the edge in question with about 2 s on each side (scene change and neighbours visible); the report shows each issue's own position (not the item start) and notes items changed after the scan
 @about
   # Session Fix - Interchange Prep
 
@@ -272,7 +272,7 @@ local function reveal_issue(is)
   if at and is.item and r.ValidatePtr2(0, is.item, "MediaItem*") then
     -- one edge (e.g. off the frame grid): razor and zoom on one frame either side of it
     local step = math.max(CORE.grid_step(at), 1 / r.TimeMap_curFrameRate(0))
-    CORE.highlight({ { track = r.GetMediaItem_Track(is.item), s = at - step, e = at + step } })
+    CORE.highlight({ { track = r.GetMediaItem_Track(is.item), s = at - step, e = at + step } }, is.zoom_pad)
   end
   CORE.reveal(is, at) -- scroll horizontally and vertically to the item / track
 end

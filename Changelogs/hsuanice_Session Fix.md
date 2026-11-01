@@ -4,6 +4,10 @@
 
 Fix Tools - clean up edits before moving a REAPER session to Pro Tools or Nuendo
 
+## 26.1101.1423pre1
+
+- New: Scene cuts check (review only) with Mark as OK
+
 ## 26.1101.1419pre1
 
 - New: Scene cuts check (review only) with Mark as OK

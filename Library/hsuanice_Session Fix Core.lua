@@ -1,11 +1,11 @@
 --[[
 @description hsuanice Session Fix Core - checks and fixes for preparing a REAPER session for Interchanger / Pro Tools / Nuendo
-@version 26.1101.1419pre1
+@version 26.1101.1423pre1
 @author hsuanice
 @noindex
 @changelog
   - New: Scene cuts check (review only): scene changes on the Scene Cut track cut differently from the Fade Tool Settings standard, items running across a scene change without a fade-out, and scene changes not cut on any track; reference / source tracks skipped; Mark as OK
-  - Fix: clicking a Scene cuts entry zooms to the edge in question; the report shows each issue's own position (not the item start) and notes items changed after the scan
+  - Fix: clicking a Scene cuts entry zooms to the edge in question with about 2 s on each side (scene change and neighbours visible); the report shows each issue's own position (not the item start) and notes items changed after the scan
 @about
   Shared library behind "Session Fix - Interchange Prep".
   Every rule has: id, title, scope ("item" / "track" / "file"), scan() returning issues,
@@ -2001,6 +2001,9 @@ end
 -- "Mark as OK" in the Scene cuts list: a hidden flag on the item (saved with the project) that
 -- names the edge and where it was ("s@<scene>:<edge>"), so moving that edge lists it again
 local SCENE_OK_KEY = "P_EXT:hsuanice_SessionFix_sceneok"
+-- Clicking a Scene cuts entry zooms to the edge plus this much (seconds) on each side, so the
+-- scene change and the neighbouring items show too
+local SCENE_VIEW_PAD = 2
 local function scene_ok_tokens(it)
   local _, v = r.GetSetMediaItemInfo_String(it, SCENE_OK_KEY, "", false)
   local set = {}
@@ -2086,6 +2089,7 @@ rule {
     local function add(list, is)
       -- a click jumps to the edge itself (not the whole item)
       is.positions, is.labels = { is.pos }, { is.text }
+      is.zoom_pad = SCENE_VIEW_PAD
       oks[is.item] = oks[is.item] or scene_ok_tokens(is.item)
       if oks[is.item][is.ok_key] then approved = approved + 1 else list[#list + 1] = is end
     end
@@ -2760,7 +2764,9 @@ end
 
 -- Highlight with razor areas: { { track =, s =, e = }, ... }. Every other razor area is cleared
 -- first; time selection and track selection are not touched (track / razor link scripts stay calm).
-function M.highlight(ranges)
+-- zoom_pad (seconds, optional): the zoom also shows this much before and after the ranges
+-- (the razor stays on the ranges), e.g. a scene cut edge together with the scene change around it
+function M.highlight(ranges, zoom_pad)
   local per = {}
   for _, g in ipairs(ranges) do
     if g.track and r.ValidatePtr2(0, g.track, "MediaTrack*") and g.s and g.e and g.e > g.s then
@@ -2786,7 +2792,12 @@ function M.highlight(ranges)
   end
   if M.auto_zoom then
     local list = {}
-    for _, g in ipairs(ranges) do if g.track and r.ValidatePtr2(0, g.track, "MediaTrack*") and g.e > g.s then list[#list + 1] = g end end
+    local pad = zoom_pad or 0
+    for _, g in ipairs(ranges) do
+      if g.track and r.ValidatePtr2(0, g.track, "MediaTrack*") and g.e > g.s then
+        list[#list + 1] = { track = g.track, s = g.s - pad, e = g.e + pad }
+      end
+    end
     M._focused = M.focus(list) -- the next reveal() only moves the edit cursor
   end
   r.UpdateArrange()

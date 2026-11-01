@@ -435,6 +435,15 @@ do -- scene cuts: standard = 1 frame fade-in starting 1 frame before the scene, 
   reaper.ValidatePtr2 = function(pr, o, t) if type(o) == "table" and o.dead then return false end return real_vp(pr, o, t) end
   assert(M.report(gone, { tracks = 0, items = 0, fps = FPS, sr = SR, total = 1 }):find("item changed or removed after the scan", 1, true))
   reaper.ValidatePtr2 = real_vp
+  -- a click zooms to the edge plus 2 s each side (razor stays on the edge +-1 frame)
+  local is_end
+  for _, is in ipairs(res.scene_cuts) do if is.item == bad_end then is_end = is end end
+  assert(is_end.zoom_pad == 2 and is_end.positions[1] == is_end.pos, "scene cut entry needs an edge position and zoom pad")
+  M.auto_zoom = true
+  M.highlight({ { track = bad_t, s = is_end.pos - f, e = is_end.pos + f } }, is_end.zoom_pad)
+  local v0, v1 = reaper.GetSet_ArrangeView2(0, false, 0, 0)
+  print(string.format("scene cut zoom: %.2f s .. %.2f s around the edge (expect about -3 .. +3)", v0 - is_end.pos, v1 - is_end.pos))
+  assert(v0 < is_end.pos - 2 and v1 > is_end.pos + 2, "zoom should show 2 s around the edge")
   print("scene cuts mark as OK: " .. #res.scene_cuts .. " -> " .. #res_ok.scene_cuts .. " listed, " .. sum_ok.scene_ok .. " OK")
   for _, it in ipairs(new) do if it.tr == ok_t then assert(not by[it], "standard cut listed") end end
   assert(first.text:find("NOT CUT on any track", 1, true) and math.abs(first.pos - D) < 1e-9, "uncut scene change not first")
