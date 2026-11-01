@@ -1,11 +1,10 @@
 --[[
 @description Project Manager - PM Insight Analyzer: work-time analysis of PM Timer logs (work in progress)
-@version 26.1101.1715pre1
+@version 26.1101.1723pre1
 @author hsuanice
 @noindex  (kept in the repository as a backup; not offered on ReaPack while it is a work in progress)
 @changelog
-  - Fix: Work Log By Reel - a scene logged with a range a frame off or moved by a recut was counted twice (POINT R5 film 44:24 instead of 27:52); a scene is now the same name with an overlapping range, and a reel with a whole-reel item (Reel Len) uses that length
-  - New: alternating row colors and a highlighted row under the mouse in all report tables; reel rows stand out in By Reel
+  - Change: Work Log By Project no longer shows the Share column
 @about
   Read-only analysis script. Auto-detects project type:
 
@@ -564,15 +563,15 @@ local function work_log_section(out, recs, sid)
 
   -- By Project
   out('<details open><summary>By Project</summary><div class="wrap"><table>')
-  out('<tr><th class="l">Project</th><th>Total</th><th>Share</th><th>Reels</th><th>Reel Work</th>'
+  out('<tr><th class="l">Project</th><th>Total</th><th>Reels</th><th>Reel Work</th>'
     .. '<th>Avg / Reel</th><th>Film</th><th>Source</th><th>Film/hr</th><th>Source/hr</th>'
     .. '<th>Days</th><th>Items</th><th class="l">First</th><th class="l">Last</th></tr>')
   for n, pname in ipairs(proj_order) do
     local p = projects[pname]
-    out(string.format('<tr><td class="l"><a href="#%s-p%d">%s</a></td><td>%s</td><td>%s</td><td>%s</td><td>%s</td>'
+    out(string.format('<tr><td class="l"><a href="#%s-p%d">%s</a></td><td>%s</td><td>%s</td><td>%s</td>'
       .. '<td>%s</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td><td>%d</td><td>%d</td>'
       .. '<td class="l">%s</td><td class="l">%s</td></tr>', sid, n, html_esc(pname), fmt_dur(p.total),
-      pct(p.total, total), p.nreels > 0 and tostring(p.nreels) or "–", len_cell(p.reel_work),
+      p.nreels > 0 and tostring(p.nreels) or "–", len_cell(p.reel_work),
       p.nreels > 0 and fmt_dur(p.reel_work / p.nreels) or "–", len_cell(p.reel_film), len_cell(p.reel_src),
       rate_cell(p.reel_film, p.reel_work), rate_cell(p.reel_src, p.reel_work),
       count(p.days), #p.items, p.first, p.last))

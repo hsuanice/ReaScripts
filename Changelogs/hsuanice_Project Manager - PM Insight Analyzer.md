@@ -7,6 +7,10 @@ PM Insight Analyzer
 
 **Removed from ReaPack** (2026-10-15) while it is a work in progress; the script stays in the repository (`@noindex`) as a backup.
 
+## 26.1101.1723pre1
+
+- Change: Work Log By Project no longer shows the Share column
+
 ## 26.1101.1715pre1
 
 - Fix: Work Log By Reel - a scene logged with a range a frame off or moved by a recut was counted twice (POINT R5 film 44:24 instead of 27:52); a scene is now the same name with an overlapping range, and a reel with a whole-reel item (Reel Len) uses that length

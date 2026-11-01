@@ -61,7 +61,7 @@ local function has(s) return all:find(s, 1, true) ~= nil end
 -- By Project: 2 reels; reel work 5h + 600s check (R2) = 18605s incl. the 5 s export
 -- film 60+120 (R1) + 300 (R2) = 480s; source 600+900 (max) + 1800 = 3300s
 -- R3: 1.5h, film 60s -> totals 3 reels, 24005s, film 540s, source 3300s
-check("By Project reel columns", has('<td>3</td><td>24005s</td><td>8002s</td><td>540s</td><td>3300s</td>'))
+check("By Project reel columns, no Share", not has('<th>Total</th><th>Share</th><th>Reels</th>') and has('<td>3</td><td>24005s</td><td>8002s</td><td>540s</td><td>3300s</td>'))
 check("By Project film/hr 540s / 24005s = 1m 20s", has('<td>1m 20s</td><td>8m 14s</td>'))
 check("R3: same name at two places = 2 scenes, a frame off = same scene",
   has('<td class="l">R3</td><td>5400s</td>') and has('<td>60s</td><td>–</td><td>2</td>'))
