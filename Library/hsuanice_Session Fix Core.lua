@@ -1,10 +1,11 @@
 --[[
 @description hsuanice Session Fix Core - checks and fixes for preparing a REAPER session for Interchanger / Pro Tools / Nuendo
-@version 26.1101.1338pre1
+@version 26.1101.1346pre1
 @author hsuanice
 @noindex
 @changelog
   - New: Scene cuts check (review only): scene changes on the Scene Cut track cut differently from the Fade Tool Settings standard, items running across a scene change without a fade-out, and scene changes not cut on any track
+  - Fix: Scene cuts no longer checks reference / source tracks (Picture Cut, EDL, Edited, Subtitle, Character by default)
 @about
   Shared library behind "Session Fix - Interchange Prep".
   Every rule has: id, title, scope ("item" / "track" / "file"), scan() returning issues,
@@ -1940,6 +1941,17 @@ rule {
 -- Fade Tool - Scene Cut to Razor uses); the standard is Fade Tool's Settings (scene fade-in /
 -- fade-out length, position and shape). Must run before Empty / MIDI, which removes those items.
 local SCENE_TRACK_NAME = "Scene Cut"
+-- Reference / source tracks that are cut hard to the picture: not checked (name starts with one
+-- of these, any case; Settings > Scene cuts: skip tracks)
+M.SCENE_SKIP_DEFAULT = "Picture Cut, EDL, Edited, Subtitle, Character"
+local function scene_skip_list(str)
+  local list = {}
+  for part in (str or M.SCENE_SKIP_DEFAULT):gmatch("[^,]+") do
+    local name = part:match("^%s*(.-)%s*$"):lower()
+    if name ~= "" then list[#list + 1] = name end
+  end
+  return list
+end
 
 -- The Scene Cut track and its folder children (work logs)
 local function scene_folder()
@@ -1990,11 +2002,19 @@ rule {
   id = "scene_cuts", title = "Scene cuts not done the standard way, or not done (Scene Cut track; standard = Fade Tool Settings)", scope = "item",
   fix_note = "Review only: check each scene change by hand (Fade Tool - Scene Cut to Razor cuts a scene the standard way).\n"
     .. "Edges within the window of a scene change must match the standard; items crossing it need a fade-out\n"
-    .. "(an item running into the next scene with a fade-out is taken as an intended late end)",
+    .. "(an item running into the next scene with a fade-out is taken as an intended late end).\n"
+    .. "Reference / source tracks (Settings > Scene cuts: skip tracks) are not checked",
   scan = function(ctx)
     local scene_track, folder = scene_folder()
     if not scene_track then return {} end
     local S, aligned_range, shape_names = scene_standard()
+    local skip_names = scene_skip_list(ctx.opts.scene_skip)
+    local function skipped(tr)
+      local _, name = r.GetTrackName(tr)
+      name = (name or ""):lower()
+      for _, pre in ipairs(skip_names) do if name:sub(1, #pre) == pre then return true end end
+      return false
+    end
     local fr = 1 / ctx.fps
     local in_len, out_len = S.scene_in_frames * fr, S.scene_out_frames * fr
     local win = (ctx.opts.scene_window or 6) * fr
@@ -2033,7 +2053,7 @@ rule {
 
     for ti, tr in ipairs(ctx.tracks) do
       ctx.tick(ti, #ctx.tracks)
-      if not folder[tr] then
+      if not folder[tr] and not skipped(tr) then
         local list = {}
         for _, A in ipairs(sorted_items(tr)) do if is_audio_item(A.it) then list[#list + 1] = A end end
         local crossed = {}

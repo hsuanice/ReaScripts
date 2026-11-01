@@ -2,6 +2,11 @@
 
 hsuanice Session Fix Core - checks and fixes for preparing a REAPER session for Interchanger / Pro Tools / Nuendo
 
+## 26.1101.1346pre1
+
+- New: Scene cuts check (review only): scene changes on the Scene Cut track cut differently from the Fade Tool Settings standard, items running across a scene change without a fade-out, and scene changes not cut on any track
+- Fix: Scene cuts no longer checks reference / source tracks (Picture Cut, EDL, Edited, Subtitle, Character by default)
+
 ## 26.1101.1338pre1
 
 - New: Scene cuts check (review only): scene changes on the Scene Cut track cut differently from the Fade Tool Settings standard, items running across a scene change without a fade-out, and scene changes not cut on any track

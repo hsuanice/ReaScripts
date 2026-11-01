@@ -387,6 +387,9 @@ do -- scene cuts: standard = 1 frame fade-in starting 1 frame before the scene, 
   local late = add(late_t, B - 5, 5 + 20 * f, { fo = 3 * f })                           -- intended late end (fade-out): not listed
   local shape = add(shape_t, B - 5, 5, { fo = f, fos = 2 })                             -- right length, wrong shape
   local lone = add(none_t, D - 5, 10)                                                   -- D is not cut on any track
+  local pic = add(track("Picture Cut"), A, 10)                                       -- reference tracks: hard cuts, not checked
+  local edl = add(track("EDL - A1 - 1"), B - 5, 10)
+  local edited = add(track("edited 11"), D - 5, 10)                                    -- any case
   local res = M.scan({ scene_window = 6 })
   local by = {}
   for _, is in ipairs(res.scene_cuts) do
@@ -401,6 +404,11 @@ do -- scene cuts: standard = 1 frame fade-in starting 1 frame before the scene, 
   assert(by[shape] and by[shape]:find("fade-out shape", 1, true))
   assert(by[lone] and by[lone]:find("no fade-out", 1, true))
   assert(not by[late], "intended late end listed")
+  assert(not by[pic] and not by[edl] and not by[edited], "reference track listed")
+  local res_all = M.scan({ scene_window = 6, scene_skip = "" })                        -- empty skip list: checked
+  local listed = {}
+  for _, is in ipairs(res_all.scene_cuts) do if is.item then listed[is.item] = true end end
+  assert(listed[edl] and listed[edited], "empty skip list should check every track")
   for _, it in ipairs(new) do if it.tr == ok_t then assert(not by[it], "standard cut listed") end end
   assert(first.text:find("NOT CUT on any track", 1, true) and math.abs(first.pos - D) < 1e-9, "uncut scene change not first")
   local n_notcut = 0

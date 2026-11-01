@@ -1,10 +1,11 @@
 --[[
 @description Session Fix - Interchange Prep: check and fix a REAPER session before converting it with Interchanger
-@version 26.1101.1338pre1
+@version 26.1101.1346pre1
 @author hsuanice
 @noindex
 @changelog
   - New: Scene cuts check (review only); Settings > Scene cut window (frames around a scene change, default 6)
+  - New: Settings > Scene cuts: skip tracks (reference / source tracks, by name start)
 @about
   # Session Fix - Interchange Prep
 
@@ -104,6 +105,7 @@ local prefs = {
   keep_removed = pref_get("keep_removed", "0") == "1", -- review copies of deleted items (<track> before / removed)
   auto_zoom = pref_get("auto_zoom", "1") == "1", -- clicking a list entry zooms to it (centre, ~2/3 wide)
   scene_window = tonumber(pref_get("scene_window", "6")) or 6, -- Scene cuts: frames around a scene change
+  scene_skip = pref_get("scene_skip", CORE.SCENE_SKIP_DEFAULT), -- Scene cuts: reference tracks not checked
 }
 local function save_prefs()
   r.SetExtState(EXT_NS, "font_scale", tostring(prefs.font_scale), true)
@@ -116,13 +118,14 @@ local function save_prefs()
   r.SetExtState(EXT_NS, "keep_removed", prefs.keep_removed and "1" or "0", true)
   r.SetExtState(EXT_NS, "auto_zoom", prefs.auto_zoom and "1" or "0", true)
   r.SetExtState(EXT_NS, "scene_window", tostring(prefs.scene_window), true)
+  r.SetExtState(EXT_NS, "scene_skip", prefs.scene_skip, true)
   CORE.auto_zoom = prefs.auto_zoom
 end
 local function S(v) return math.floor(v * prefs.font_scale + 0.5) end -- scale a pixel size with the font
 local function scan_opts()
   return { keep_folders = prefs.keep_folders, number_width = prefs.number_width,
     fade_in_shape = prefs.fade_in_shape, fade_out_shape = prefs.fade_out_shape, xfade_shape = prefs.xfade_shape,
-    keep_removed = prefs.keep_removed, scene_window = prefs.scene_window }
+    keep_removed = prefs.keep_removed, scene_window = prefs.scene_window, scene_skip = prefs.scene_skip }
 end
 
 local ctx = ImGui.CreateContext(TITLE)
@@ -916,6 +919,17 @@ local function draw_settings_popup()
   end
   if ImGui.IsItemHovered(ctx) then
     ImGui.SetTooltip(ctx, "Scene cuts: item edges this close to a scene change must match the standard;\nfarther away = an intended early start / late end")
+  end
+  if ImGui.MenuItem(ctx, "Scene cuts: skip tracks...", nil, false, true) then
+    local ok, v = r.GetUserInputs("Scene cuts: skip tracks", 1,
+      "Track names starting with (comma separated),extrawidth=300,separator=|", prefs.scene_skip)
+    if ok then
+      prefs.scene_skip = v; save_prefs()
+      if state.results then run_job(do_scan) end
+    end
+  end
+  if ImGui.IsItemHovered(ctx) then
+    ImGui.SetTooltip(ctx, "Reference / source tracks cut hard to the picture (not checked by Scene cuts).\nNow: " .. prefs.scene_skip)
   end
   if ImGui.BeginMenu(ctx, "Track number format") then
     for _, w in ipairs({ 1, 2, 3 }) do
