@@ -373,6 +373,41 @@ do -- tiny items: slivers listed (review), 2-pops at xx:59:58:00 or after all ot
   reaper.format_timestr_pos = real
   print("tiny items OK")
 end
+do -- scene cuts: standard = 1 frame fade-in starting 1 frame before the scene, 1 frame fade-out ending at the scene end
+  local new = {}
+  local function add(tr, pos, len, o) local it = ITEM(tr, pos, len, { TAKE(wav) }, o); it.active = it.takes[1]; items[#items + 1] = it; new[#new + 1] = it; return it end
+  local function track(name) local t = T(name); tracks[#tracks + 1] = t; t.num = #tracks; return t end
+  local A, B, C, D = 5000, 5010, 5030, 5040 -- scenes A..B, B..+10, C..D, D..+10
+  for _, s in ipairs({ { A, 10 }, { B, 10 }, { C, 10 }, { D, 10 } }) do local it = ITEM(scene, s[1], s[2], {}); items[#items + 1] = it end
+  local ok_t, bad_t, cross_t, late_t, shape_t, none_t = track("SC ok"), track("SC bad"), track("SC cross"), track("SC late"), track("SC shape"), track("SC none")
+  add(ok_t, B - 5, 5, { fo = f });          add(ok_t, B - f, 5, { fi = f })            -- standard: not listed
+  local bad_end = add(bad_t, B - 5, 5 + 2 * f)                                         -- ends 2 frames late, no fade-out
+  local bad_start = add(bad_t, B, 5, { fi = 2 * f })                                    -- starts at the scene, 2-frame fade-in
+  local cross = add(cross_t, B - 5, 10)                                                 -- runs across B, no fade-out
+  local late = add(late_t, B - 5, 5 + 20 * f, { fo = 3 * f })                           -- intended late end (fade-out): not listed
+  local shape = add(shape_t, B - 5, 5, { fo = f, fos = 2 })                             -- right length, wrong shape
+  local lone = add(none_t, D - 5, 10)                                                   -- D is not cut on any track
+  local res = M.scan({ scene_window = 6 })
+  local by = {}
+  for _, is in ipairs(res.scene_cuts) do
+    if is.item then by[is.item] = (by[is.item] and by[is.item] .. " | " or "") .. is.text end
+  end
+  for _, it in ipairs({ bad_end, bad_start, cross, shape, lone }) do print("scene cuts: " .. tostring(by[it])) end
+  local first = res.scene_cuts[1]
+  print("scene cuts first: " .. first.text)
+  assert(by[bad_end] and by[bad_end]:find("ends 2 fr after the scene end (standard: at the scene end)", 1, true) and by[bad_end]:find("fade%-out 0 fr"))
+  assert(by[bad_start] and by[bad_start]:find("starts at the scene start (standard: 1 fr before the scene start)", 1, true) and by[bad_start]:find("fade%-in 2 fr"))
+  assert(by[cross] and by[cross]:find("no fade-out", 1, true))
+  assert(by[shape] and by[shape]:find("fade-out shape", 1, true))
+  assert(by[lone] and by[lone]:find("no fade-out", 1, true))
+  assert(not by[late], "intended late end listed")
+  for _, it in ipairs(new) do if it.tr == ok_t then assert(not by[it], "standard cut listed") end end
+  assert(first.text:find("NOT CUT on any track", 1, true) and math.abs(first.pos - D) < 1e-9, "uncut scene change not first")
+  local n_notcut = 0
+  for _, is in ipairs(res.scene_cuts) do if is.text:find("NOT CUT", 1, true) then n_notcut = n_notcut + 1 end end
+  assert(n_notcut == 1, "only D is uncut (B is cut on other tracks)")
+  print("scene cuts OK")
+end
 do -- every check has the fields the window shows
   for _, d in ipairs(M.RULES) do
     for _, k in ipairs({ "id", "title", "scope", "fix_note", "short", "desc", "level" }) do

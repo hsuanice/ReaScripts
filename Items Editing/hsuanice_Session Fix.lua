@@ -1,15 +1,12 @@
 --[[
 @description Session Fix - check and fix a REAPER session before moving it to Pro Tools, Nuendo or Cubase (Interchanger)
-@version 26.1018.1239
+@version 26.1101.1338pre1
 @author hsuanice
 @metapackage
 @provides
   [main] hsuanice_Session Fix - Interchange Prep.lua
 @changelog
-  - Add: Workflow cues (last check) - removes the #in / #out / #Glue cues that glue / render leave in WAV files, only for files inside the session folder, in place (same file, audio untouched); other cues, take markers and project markers stay. Asks first (cannot be undone with Undo).
-  - Add: Scan shows a progress bar with Cancel instead of freezing REAPER, and the time of each check (the slowest are shown).
-  - Add: Tiny items check - editing slivers under 2 frames for review; 2-pops (xx:59:58:00 or after the last audio) are recognized and left out.
-  - Add: Tiny items - mark tail pops as 2-pop from the list, or write "2-pop" / "tail pop" in the Item Notes, so they are left out.
+  - New: Scene cuts check (review only)
 @about
   # Session Fix
 

@@ -1,17 +1,10 @@
 --[[
 @description Session Fix - Interchange Prep: check and fix a REAPER session before converting it with Interchanger
-@version 26.1018.1239
+@version 26.1101.1338pre1
 @author hsuanice
 @noindex
 @changelog
-  - Add: Workflow cues (last check) - removes the #in / #out / #Glue cues that glue / render leave in WAV files, only for files inside the session folder, in place (same file, audio untouched); other cues, take markers and project markers stay. Asks first (cannot be undone with Undo).
-  - Add: Scan shows a progress bar (which check, how far inside it, time) with a Cancel button instead of freezing REAPER; Fix, Fix All and the rescans after them run the same way.
-  - Add: the time of each check - the slowest three after the frame rate line, all of them when hovering it, and in the report.
-  - Change: a project edit during the scan starts the scan again (the list never shows deleted items).
-  - Add: Tiny items - audio items under 2 frames (editing slivers) are their own check, review only (no automatic delete); 2-pops are recognized and left out: at xx:59:58:00 (one frame either way) or after all other audio (tail pop). The scan line says how many 2-pops were recognized.
-  - Change: Overlaps no longer lists a tiny item on its own; slivers inside a stacked crossfade are still listed and fixed there.
-  - Add: Tiny items - "Mark as 2-pop" for the selected entries (for tail pops that are not found automatically): a hidden flag saved with the project, no take marker; Settings > Clear 2-pop marks removes them.
-  - Add: "2-pop" / "2pop" / "tail pop" / "head pop" in REAPER's Item Notes also marks an item as a 2-pop.
+  - New: Scene cuts check (review only); Settings > Scene cut window (frames around a scene change, default 6)
 @about
   # Session Fix - Interchange Prep
 
@@ -110,6 +103,7 @@ local prefs = {
   xfade_shape = tonumber(pref_get("xfade_idx", "2")) or 2,
   keep_removed = pref_get("keep_removed", "0") == "1", -- review copies of deleted items (<track> before / removed)
   auto_zoom = pref_get("auto_zoom", "1") == "1", -- clicking a list entry zooms to it (centre, ~2/3 wide)
+  scene_window = tonumber(pref_get("scene_window", "6")) or 6, -- Scene cuts: frames around a scene change
 }
 local function save_prefs()
   r.SetExtState(EXT_NS, "font_scale", tostring(prefs.font_scale), true)
@@ -121,13 +115,14 @@ local function save_prefs()
   r.SetExtState(EXT_NS, "xfade_idx", tostring(prefs.xfade_shape), true)
   r.SetExtState(EXT_NS, "keep_removed", prefs.keep_removed and "1" or "0", true)
   r.SetExtState(EXT_NS, "auto_zoom", prefs.auto_zoom and "1" or "0", true)
+  r.SetExtState(EXT_NS, "scene_window", tostring(prefs.scene_window), true)
   CORE.auto_zoom = prefs.auto_zoom
 end
 local function S(v) return math.floor(v * prefs.font_scale + 0.5) end -- scale a pixel size with the font
 local function scan_opts()
   return { keep_folders = prefs.keep_folders, number_width = prefs.number_width,
     fade_in_shape = prefs.fade_in_shape, fade_out_shape = prefs.fade_out_shape, xfade_shape = prefs.xfade_shape,
-    keep_removed = prefs.keep_removed }
+    keep_removed = prefs.keep_removed, scene_window = prefs.scene_window }
 end
 
 local ctx = ImGui.CreateContext(TITLE)
@@ -910,6 +905,18 @@ local function draw_settings_popup()
     end
   end
   if ImGui.IsItemHovered(ctx) then ImGui.SetTooltip(ctx, "Tiny items lists the items marked with \"Mark as 2-pop\" again.") end
+  if ImGui.BeginMenu(ctx, "Scene cut window") then
+    for _, f in ipairs({ 2, 4, 6, 8, 12, 24 }) do
+      if ImGui.MenuItem(ctx, string.format("%d frames", f), nil, prefs.scene_window == f, true) then
+        prefs.scene_window = f; save_prefs()
+        if state.results then run_job(do_scan) end
+      end
+    end
+    ImGui.EndMenu(ctx)
+  end
+  if ImGui.IsItemHovered(ctx) then
+    ImGui.SetTooltip(ctx, "Scene cuts: item edges this close to a scene change must match the standard;\nfarther away = an intended early start / late end")
+  end
   if ImGui.BeginMenu(ctx, "Track number format") then
     for _, w in ipairs({ 1, 2, 3 }) do
       local sample = {}

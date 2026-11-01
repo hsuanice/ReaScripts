@@ -1,15 +1,10 @@
 --[[
 @description hsuanice Session Fix Core - checks and fixes for preparing a REAPER session for Interchanger / Pro Tools / Nuendo
-@version 26.1018.1239
+@version 26.1101.1338pre1
 @author hsuanice
 @noindex
 @changelog
-  - Add: workflow_cues check and M.strip_workflow_cues (in-place cue / adtl rewrite with a JUNK filler; RIFF WAV only).
-  - Add: the scan can pause (opts.yield, inside a coroutine) so the window can draw progress; it starts again when the project is edited during a pause.
-  - Add: time of each check in the scan summary (summary.times, M.slowest), slowest checks in the report.
-  - Add: Tiny items check (tiny_items, review only); 2-pops at xx:59:58:00 or after all other audio are left out and counted (summary.two_pops, report).
-  - Change: Overlaps lists only stacked-crossfade slivers, not tiny items on their own.
-  - Add: 2-pops marked by hand are left out of Tiny items: item flag (M.mark_pops / M.clear_pop_marks) or "2-pop" / "tail pop" in the Item Notes.
+  - New: Scene cuts check (review only): scene changes on the Scene Cut track cut differently from the Fade Tool Settings standard, items running across a scene change without a fade-out, and scene changes not cut on any track
 @about
   Shared library behind "Session Fix - Interchange Prep".
   Every rule has: id, title, scope ("item" / "track" / "file"), scan() returning issues,
@@ -1941,6 +1936,173 @@ rule {
   end,
 }
 
+-- Scene cuts: the scene changes are the item edges on the "Scene Cut" track (the same track
+-- Fade Tool - Scene Cut to Razor uses); the standard is Fade Tool's Settings (scene fade-in /
+-- fade-out length, position and shape). Must run before Empty / MIDI, which removes those items.
+local SCENE_TRACK_NAME = "Scene Cut"
+
+-- The Scene Cut track and its folder children (work logs)
+local function scene_folder()
+  local folder, scene_track, depth = {}, nil, 0
+  for i = 0, r.CountTracks(0) - 1 do
+    local tr = r.GetTrack(0, i)
+    if scene_track then
+      if depth <= 0 then break end
+      folder[tr] = true
+      depth = depth + r.GetMediaTrackInfo_Value(tr, "I_FOLDERDEPTH")
+    else
+      local _, name = r.GetTrackName(tr)
+      if name == SCENE_TRACK_NAME then
+        scene_track, folder[tr] = tr, true
+        depth = r.GetMediaTrackInfo_Value(tr, "I_FOLDERDEPTH")
+      end
+    end
+  end
+  return scene_track, folder
+end
+
+-- Fade Tool's scene cut settings (defaults when Fade Tool is not installed)
+local function scene_standard()
+  local ok, FT = pcall(dofile, r.GetResourcePath() .. "/Scripts/hsuanice Scripts/Library/hsuanice_Fade Tool Core.lua")
+  if ok and type(FT) == "table" and FT.load_settings then
+    return FT.load_settings(), FT.aligned_range, FT.SHAPE_NAMES or {}
+  end
+  local function aligned_range(t, len, align)
+    if align == "after" then return t, t + len end
+    if align == "center" then return t - len / 2, t + len / 2 end
+    return t - len, t
+  end
+  return { scene_in_frames = 1, scene_in_align = "before", scene_out_frames = 1, scene_out_align = "before",
+    scene_shape = 0 }, aligned_range, {}
+end
+
+local function scene_name(it)
+  local take = r.GetActiveTake(it)
+  local name = take and r.GetTakeName(take) or ""
+  if name == "" then
+    local _, notes = r.GetSetMediaItemInfo_String(it, "P_NOTES", "", false)
+    name = (notes or ""):match("^[^\r\n]*") or ""
+  end
+  return name ~= "" and name or tc(r.GetMediaItemInfo_Value(it, "D_POSITION"))
+end
+
+rule {
+  id = "scene_cuts", title = "Scene cuts not done the standard way, or not done (Scene Cut track; standard = Fade Tool Settings)", scope = "item",
+  fix_note = "Review only: check each scene change by hand (Fade Tool - Scene Cut to Razor cuts a scene the standard way).\n"
+    .. "Edges within the window of a scene change must match the standard; items crossing it need a fade-out\n"
+    .. "(an item running into the next scene with a fade-out is taken as an intended late end)",
+  scan = function(ctx)
+    local scene_track, folder = scene_folder()
+    if not scene_track then return {} end
+    local S, aligned_range, shape_names = scene_standard()
+    local fr = 1 / ctx.fps
+    local in_len, out_len = S.scene_in_frames * fr, S.scene_out_frames * fr
+    local win = (ctx.opts.scene_window or 6) * fr
+    local tol = 0.1 * fr
+    local function frames(t) return (string.format("%.1f", t / fr):gsub("%.0$", "")) end
+    local function shape_of(it, side)
+      local v = math.floor(r.GetMediaItemInfo_Value(it, "C_FADE" .. side .. "SHAPE") + 0.5)
+      return (v == -1) and 0 or v -- -1 = REAPER's default (Linear)
+    end
+    local function shape_name(v) return shape_names[v] or tostring(v) end
+    -- "2 fr before the scene start" / "at the scene start"
+    local function where(t, ref, what)
+      if math.abs(t - ref) <= tol then return "at the " .. what end
+      return string.format("%s fr %s the %s", frames(math.abs(t - ref)), t < ref and "before" or "after", what)
+    end
+    local want_shape = (S.scene_shape == -1) and 0 or S.scene_shape
+
+    local scenes = {}
+    for _, B in ipairs(sorted_items(scene_track)) do
+      B.name = scene_name(B.it)
+      scenes[#scenes + 1] = B
+    end
+    if #scenes == 0 then return {} end
+
+    local out, firsts = {}, {}
+    local cut_at, cross_at, change_of = {}, {}, {}
+    local function key(t) return string.format("%.4f", t) end
+    for i, sc in ipairs(scenes) do
+      change_of[key(sc.s)] = change_of[key(sc.s)] or { item = sc.it, pos = sc.s, text = "start of scene " .. sc.name }
+      change_of[key(sc.e)] = change_of[key(sc.e)] or { item = sc.it, pos = sc.e, text = "end of scene " .. sc.name }
+      local nxt = scenes[i + 1]
+      if nxt and math.abs(nxt.s - sc.e) <= tol then
+        change_of[key(sc.e)].text = string.format("scene %s -> %s", sc.name, nxt.name)
+      end
+    end
+
+    for ti, tr in ipairs(ctx.tracks) do
+      ctx.tick(ti, #ctx.tracks)
+      if not folder[tr] then
+        local list = {}
+        for _, A in ipairs(sorted_items(tr)) do if is_audio_item(A.it) then list[#list + 1] = A end end
+        local crossed = {}
+        for _, sc in ipairs(scenes) do
+          local std_s = aligned_range(sc.s, in_len, S.scene_in_align)
+          local _, std_e = aligned_range(sc.e, out_len, S.scene_out_align)
+          for _, A in ipairs(list) do
+            local fi, fo = fades(A.it)
+            -- scene start: the first item's start near the scene change
+            if math.abs(A.s - sc.s) <= win and A.e > sc.s + tol then
+              cut_at[key(sc.s)] = true
+              local probs = {}
+              if math.abs(A.s - std_s) > tol then
+                probs[#probs + 1] = string.format("starts %s (standard: %s)",
+                  where(A.s, sc.s, "scene start"), where(std_s, sc.s, "scene start"))
+              end
+              if math.abs(fi - in_len) > tol then
+                probs[#probs + 1] = string.format("fade-in %s fr (standard %s)", frames(fi), frames(in_len))
+              elseif fi > 0 and shape_of(A.it, "IN") ~= want_shape then
+                probs[#probs + 1] = string.format("fade-in shape %s (standard %s)", shape_name(shape_of(A.it, "IN")), shape_name(want_shape))
+              end
+              if #probs > 0 then
+                out[#out + 1] = { item = A.it, pos = A.s, text = "scene " .. sc.name .. " start: " .. table.concat(probs, ", ") }
+              end
+            end
+            -- scene end: the last item's end near the scene change
+            if math.abs(A.e - sc.e) <= win and A.s < sc.e - tol then
+              cut_at[key(sc.e)] = true
+              local probs = {}
+              if math.abs(A.e - std_e) > tol then
+                probs[#probs + 1] = string.format("ends %s (standard: %s)",
+                  where(A.e, sc.e, "scene end"), where(std_e, sc.e, "scene end"))
+              end
+              if math.abs(fo - out_len) > tol then
+                probs[#probs + 1] = string.format("fade-out %s fr (standard %s)", frames(fo), frames(out_len))
+              elseif fo > 0 and shape_of(A.it, "OUT") ~= want_shape then
+                probs[#probs + 1] = string.format("fade-out shape %s (standard %s)", shape_name(shape_of(A.it, "OUT")), shape_name(want_shape))
+              end
+              if #probs > 0 then
+                out[#out + 1] = { item = A.it, pos = A.e, text = "scene " .. sc.name .. " end: " .. table.concat(probs, ", ") }
+              end
+            end
+            -- an item running across a scene change, edges far from it: needs a fade-out
+            for _, t in ipairs({ sc.s, sc.e }) do
+              local k = key(t)
+              if A.s < t - win and A.e > t + win and not crossed[tostring(A.it) .. k] then
+                crossed[tostring(A.it) .. k] = true
+                if fo <= tol then
+                  cross_at[k] = true
+                  out[#out + 1] = { item = A.it, pos = t, text = string.format("runs across %s with no fade-out (not cut?)", change_of[k].text) }
+                end
+              end
+            end
+          end
+        end
+      end
+    end
+    -- scene changes that no track cuts at all: listed first
+    for k, c in pairs(change_of) do
+      if cross_at[k] and not cut_at[k] then
+        firsts[#firsts + 1] = { item = c.item, pos = c.pos, text = "NOT CUT on any track: " .. c.text }
+      end
+    end
+    table.sort(firsts, function(a, b) return a.pos < b.pos end)
+    for i = #firsts, 1, -1 do table.insert(out, 1, firsts[i]) end
+    return out
+  end,
+}
+
 rule {
   id = "empty_midi", title = "Empty items and MIDI items (e.g. Scene Cut, PM work logs)", scope = "item",
   fix_note = "Ask: convert to audio items, or delete",
@@ -2268,6 +2430,7 @@ local LABELS = {
   source_range   = { "Source length limit", "item starts before / ends after its file -> trim to the grid (up to 1 frame past) or print", "red" },
   media          = { "Media",          "files outside the project / not WAV / other sample rate", "review" },
   off_grid       = { "Off grid",       "edges off the project grid (%GRID%) -> snap (max. 1 grid step)", "yellow" },
+  scene_cuts     = { "Scene cuts",     "scene changes (Scene Cut track) not cut the standard way (Fade Tool Settings) or not cut at all (review)", "review" },
   empty_midi     = { "Empty / MIDI",   "empty items and MIDI items (review)", "review" },
   channel_mode   = { "Channel mode",   "not \"normal\" (reverse, downmix, one channel, a pair): mono file -> reset, stereo / poly file -> print", "red" },
   inactive_takes = { "Inactive takes", "crop to the active take", "green" },

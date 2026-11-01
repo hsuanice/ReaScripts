@@ -4,6 +4,10 @@
 
 Fix Tools - clean up edits before moving a REAPER session to Pro Tools or Nuendo
 
+## 26.1101.1338pre1
+
+- New: Scene cuts check (review only)
+
 ## 26.1018.1239
 
 - Add: Workflow cues (last check) - removes the #in / #out / #Glue cues that glue / render leave in WAV files, only for files inside the session folder, in place (same file, audio untouched); other cues, take markers and project markers stay. Asks first (cannot be undone with Undo).
