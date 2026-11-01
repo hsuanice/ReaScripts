@@ -7,6 +7,12 @@ PM Insight Analyzer
 
 **Removed from ReaPack** (2026-10-15) while it is a work in progress; the script stays in the repository (`@noindex`) as a backup.
 
+## 26.1101.1739
+
+- New: Work Log report by reel / episode - By Reel table per project (time, days, film, source, scenes, film / source per hour, also per work type); By Project gains reels, reel work, average per reel and film / source per hour, and drops Share (tested)
+- Fix: a scene logged with a range a frame off or moved by a recut is counted once (tested)
+- Change: work time as hours and minutes (12h 05m); film and source lengths stay in timecode; alternating row colors in all tables (tested)
+
 ## 26.1101.1729pre1
 
 - Change: work time is shown as hours and minutes, rounded to the minute (12h 05m); film and source lengths stay in timecode

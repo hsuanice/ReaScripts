@@ -1,10 +1,12 @@
 --[[
 @description Project Manager - PM Insight Analyzer: work-time analysis of PM Timer logs (work in progress)
-@version 26.1101.1729pre1
+@version 26.1101.1739
 @author hsuanice
 @noindex  (kept in the repository as a backup; not offered on ReaPack while it is a work in progress)
 @changelog
-  - Change: work time is shown as hours and minutes, rounded to the minute (12h 05m); film and source lengths stay in timecode
+  - New: Work Log report by reel / episode - By Reel table per project (time, days, film, source, scenes, film / source per hour, also per work type); By Project gains reels, reel work, average per reel and film / source per hour, and drops Share (tested)
+  - Fix: a scene logged with a range a frame off or moved by a recut is counted once (tested)
+  - Change: work time as hours and minutes (12h 05m); film and source lengths stay in timecode; alternating row colors in all tables (tested)
 @about
   Read-only analysis script. Auto-detects project type:
 
