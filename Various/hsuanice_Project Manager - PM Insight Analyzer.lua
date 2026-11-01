@@ -1,10 +1,10 @@
 --[[
 @description Project Manager - PM Insight Analyzer: work-time analysis of PM Timer logs (work in progress)
-@version 26.1101.1728pre1
+@version 26.1101.1729pre1
 @author hsuanice
 @noindex  (kept in the repository as a backup; not offered on ReaPack while it is a work in progress)
 @changelog
-  - Change: work time is shown as hours, minutes and seconds (12h 05m 30s); film and source lengths stay in timecode
+  - Change: work time is shown as hours and minutes, rounded to the minute (12h 05m); film and source lengths stay in timecode
 @about
   Read-only analysis script. Auto-detects project type:
 
@@ -50,10 +50,10 @@ local function fmt_dur(secs)
   return r.format_timestr_len(secs, "", 0, 5)
 end
 
--- Work time → "12h 05m 30s" (lengths of film / source stay in timecode: fmt_dur)
+-- Work time → "12h 05m", rounded to the minute (lengths of film / source stay in timecode: fmt_dur)
 local function fmt_work(secs)
-  local t = math.floor((secs or 0) + 0.5)
-  return string.format("%dh %02dm %02ds", t // 3600, t % 3600 // 60, t % 60)
+  local t = math.floor((secs or 0) / 60 + 0.5)
+  return string.format("%dh %02dm", t // 60, t % 60)
 end
 
 local function fmt_tc(pos)

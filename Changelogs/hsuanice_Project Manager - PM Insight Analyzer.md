@@ -7,6 +7,10 @@ PM Insight Analyzer
 
 **Removed from ReaPack** (2026-10-15) while it is a work in progress; the script stays in the repository (`@noindex`) as a backup.
 
+## 26.1101.1729pre1
+
+- Change: work time is shown as hours and minutes, rounded to the minute (12h 05m); film and source lengths stay in timecode
+
 ## 26.1101.1728pre1
 
 - Change: work time is shown as hours, minutes and seconds (12h 05m 30s); film and source lengths stay in timecode
