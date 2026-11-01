@@ -1,10 +1,10 @@
 --[[
 @description Project Manager - PM Insight Analyzer: work-time analysis of PM Timer logs (work in progress)
-@version 26.1101.1723pre1
+@version 26.1101.1728pre1
 @author hsuanice
 @noindex  (kept in the repository as a backup; not offered on ReaPack while it is a work in progress)
 @changelog
-  - Change: Work Log By Project no longer shows the Share column
+  - Change: work time is shown as hours, minutes and seconds (12h 05m 30s); film and source lengths stay in timecode
 @about
   Read-only analysis script. Auto-detects project type:
 
@@ -48,6 +48,12 @@ local DATE_PAT          = "^%d%d%d%d%-%d%d%-%d%d$"
 local function fmt_dur(secs)
   -- IMPORTANT: format_timestr_len requires 4 args; offset=0 must NOT be omitted
   return r.format_timestr_len(secs, "", 0, 5)
+end
+
+-- Work time → "12h 05m 30s" (lengths of film / source stay in timecode: fmt_dur)
+local function fmt_work(secs)
+  local t = math.floor((secs or 0) + 0.5)
+  return string.format("%dh %02dm %02ds", t // 3600, t % 3600 // 60, t % 60)
 end
 
 local function fmt_tc(pos)
@@ -513,7 +519,7 @@ local function work_log_section(out, recs, sid)
     out('<tr><th class="l">Name</th><th>Time</th><th>Share</th></tr>')
     for _, k in ipairs(sort_keys_by_value(tbl)) do
       out(string.format('<tr><td class="l">%s</td><td>%s</td><td>%s</td></tr>',
-        (label_fn or html_esc)(k), fmt_dur(tbl[k]), pct(tbl[k], total)))
+        (label_fn or html_esc)(k), fmt_work(tbl[k]), pct(tbl[k], total)))
     end
     out('</table></div></details>')
   end
@@ -541,10 +547,10 @@ local function work_log_section(out, recs, sid)
   local avg, used, ndays = trimmed_daily_avg(daily, 0.1)
   out('<div class="grid">')
   local function kv(k, v) out('<div class="kv"><b>' .. k .. '</b><span>' .. v .. '</span></div>') end
-  kv("Total Work", fmt_dur(total))
+  kv("Total Work", fmt_work(total))
   kv("Work Items", tostring(#recs))
   kv("Working Days", tostring(ndays))
-  kv("Avg Daily Work", ndays > 0 and (fmt_dur(avg) .. string.format(" <small>(mid %d)</small>", used)) or "N/A")
+  kv("Avg Daily Work", ndays > 0 and (fmt_work(avg) .. string.format(" <small>(mid %d)</small>", used)) or "N/A")
   kv("Projects", tostring(#proj_order))
   out('</div>')
 
@@ -557,7 +563,7 @@ local function work_log_section(out, recs, sid)
   for _, k in ipairs(mkeys) do
     local m, nd = months[k], count(months[k].days)
     out(string.format('<tr><td class="l">%s</td><td>%s</td><td>%d</td><td>%s</td><td>%d</td></tr>',
-      k, fmt_dur(m.total), nd, fmt_dur(nd > 0 and m.total / nd or 0), m.items))
+      k, fmt_work(m.total), nd, fmt_work(nd > 0 and m.total / nd or 0), m.items))
   end
   out('</table></div></details>')
 
@@ -570,9 +576,9 @@ local function work_log_section(out, recs, sid)
     local p = projects[pname]
     out(string.format('<tr><td class="l"><a href="#%s-p%d">%s</a></td><td>%s</td><td>%s</td><td>%s</td>'
       .. '<td>%s</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td><td>%d</td><td>%d</td>'
-      .. '<td class="l">%s</td><td class="l">%s</td></tr>', sid, n, html_esc(pname), fmt_dur(p.total),
-      p.nreels > 0 and tostring(p.nreels) or "–", len_cell(p.reel_work),
-      p.nreels > 0 and fmt_dur(p.reel_work / p.nreels) or "–", len_cell(p.reel_film), len_cell(p.reel_src),
+      .. '<td class="l">%s</td><td class="l">%s</td></tr>', sid, n, html_esc(pname), fmt_work(p.total),
+      p.nreels > 0 and tostring(p.nreels) or "–", (p.reel_work > 0 and fmt_work(p.reel_work) or "–"),
+      p.nreels > 0 and fmt_work(p.reel_work / p.nreels) or "–", len_cell(p.reel_film), len_cell(p.reel_src),
       rate_cell(p.reel_film, p.reel_work), rate_cell(p.reel_src, p.reel_work),
       count(p.days), #p.items, p.first, p.last))
   end
@@ -587,7 +593,7 @@ local function work_log_section(out, recs, sid)
     local p = projects[pname]
     out('<section class="scene" id="' .. sid .. '-p' .. n .. '">')
     out('<h3>' .. html_esc(pname) .. '</h3>')
-    out('<div class="meta">' .. fmt_dur(p.total) .. ' · ' .. count(p.days) .. ' days · '
+    out('<div class="meta">' .. fmt_work(p.total) .. ' · ' .. count(p.days) .. ' days · '
       .. #p.items .. ' items · ' .. p.first .. ' – ' .. p.last
       .. (p.nreels > 0 and (' · ' .. p.nreels .. (p.nreels == 1 and ' reel' or ' reels')) or '') .. '</div>')
     -- By Reel: one bold row per reel, then its work types
@@ -600,7 +606,7 @@ local function work_log_section(out, recs, sid)
       if rl.reel_n then sc = (rl.nsc > 0 and rl.nsc or "–") .. " / " .. rl.reel_n end
       out(string.format('<tr class="total reel"><td class="l">%s</td><td>%s</td><td>%s</td><td>%d</td>'
         .. '<td class="l">%s – %s</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td></tr>',
-        html_esc(k ~= "" and k or "(no reel)"), fmt_dur(rl.total), pct(rl.total, p.total), count(rl.days),
+        html_esc(k ~= "" and k or "(no reel)"), fmt_work(rl.total), pct(rl.total, p.total), count(rl.days),
         rl.first, rl.last, len_cell(rl.film), len_cell(rl.src), sc,
         rate_cell(rl.film, rl.total), rate_cell(rl.src, rl.total)))
       for _, t in ipairs(sort_keys_by_value((function()
@@ -609,7 +615,7 @@ local function work_log_section(out, recs, sid)
         local film, src, nsc = coverage(tl.items)
         out(string.format('<tr><td class="l" style="padding-left:24px">%s</td><td>%s</td><td>%s</td><td>%d</td>'
           .. '<td class="l">%s</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td></tr>',
-          mod_label(t), fmt_dur(tl.total), pct(tl.total, rl.total), count(tl.days), "",
+          mod_label(t), fmt_work(tl.total), pct(tl.total, rl.total), count(tl.days), "",
           len_cell(film), len_cell(src), nsc > 0 and tostring(nsc) or "–",
           rate_cell(film, tl.total), rate_cell(src, tl.total)))
       end
@@ -618,13 +624,13 @@ local function work_log_section(out, recs, sid)
     out('<div class="wrap" style="margin-top:8px"><table><tr><th class="l">Task</th><th>Time</th><th>Share</th></tr>')
     for _, k in ipairs(sort_keys_by_value(p.tasks)) do
       out(string.format('<tr><td class="l">%s</td><td>%s</td><td>%s</td></tr>',
-        html_esc(k), fmt_dur(p.tasks[k]), pct(p.tasks[k], p.total)))
+        html_esc(k), fmt_work(p.tasks[k]), pct(p.tasks[k], p.total)))
     end
     out('</table></div><div class="wrap" style="margin-top:8px"><table>'
       .. '<tr><th class="l">Work Type</th><th>Time</th><th>Share</th></tr>')
     for _, k in ipairs(sort_keys_by_value(p.modules)) do
       out(string.format('<tr><td class="l">%s</td><td>%s</td><td>%s</td></tr>',
-        mod_label(k), fmt_dur(p.modules[k]), pct(p.modules[k], p.total)))
+        mod_label(k), fmt_work(p.modules[k]), pct(p.modules[k], p.total)))
     end
     out('</table></div>')
     out('<details><summary>Sessions (' .. #p.items .. ')</summary><div class="wrap"><table>')
@@ -635,7 +641,7 @@ local function work_log_section(out, recs, sid)
       if x.scenes ~= "" then scope = scope .. (scope ~= "" and " · " or "") .. x.scenes .. " scenes" end
       out(string.format('<tr><td class="l">%s</td><td class="l">%s – %s</td><td>%s</td><td class="l">%s</td>'
         .. '<td class="l">%s</td><td>%s</td><td>%s</td><td>%s</td><td class="l">%s</td></tr>',
-        x.date, x.start_tc, x.end_tc, fmt_dur(x.len), html_esc(x.task), mod_label(x.module),
+        x.date, x.start_tc, x.end_tc, fmt_work(x.len), html_esc(x.task), mod_label(x.module),
         html_esc(x.shots), html_esc(x.src_cnt), html_esc(x.src_len), html_esc(scope)))
     end
     out('</table></div></details></section>')
@@ -651,7 +657,7 @@ local function work_log_section(out, recs, sid)
   table.sort(dkeys, function(a, b) return a > b end)
   out('<details><summary>By Day</summary><div class="wrap"><table><tr><th class="l">Date</th><th>Total</th></tr>')
   for _, k in ipairs(dkeys) do
-    out(string.format('<tr><td class="l">%s</td><td>%s</td></tr>', k, fmt_dur(daily[k])))
+    out(string.format('<tr><td class="l">%s</td><td>%s</td></tr>', k, fmt_work(daily[k])))
   end
   out('</table></div></details>')
 end
@@ -1139,6 +1145,9 @@ local function analyze()
   local function dur_or_dash(secs)
     return (secs and secs > 0) and fmt_dur(secs) or "–"
   end
+  local function work_or_dash(secs)
+    return (secs and secs > 0) and fmt_work(secs) or "–"
+  end
   local function type_label(t)
     local c = wt_color[t]
     if not c then return esc(t) end
@@ -1593,16 +1602,16 @@ local function analyze()
     local e = eff[t] or { scenes = 0, film = 0, source = 0, work = 0 }
     out(string.format('<tr><td class="l">%s</td><td>%d</td><td>%s</td><td>%s</td><td>%s</td>'
       .. '<td>%s</td><td>%s</td>',
-      type_label(t), e.scenes, dur_or_dash(e.film), dur_or_dash(e.source), dur_or_dash(e.work),
+      type_label(t), e.scenes, dur_or_dash(e.film), dur_or_dash(e.source), work_or_dash(e.work),
       e.work > 0 and rate_or_na(e.film, e.work) or "–", e.work > 0 and rate_or_na(e.source, e.work) or "–")
-      .. (sel_mode and '' or string.format('<td>%s</td><td>%s</td>', dur_or_dash(wt_project[t]), fmt_dur(wt_totals[t])))
+      .. (sel_mode and '' or string.format('<td>%s</td><td>%s</td>', work_or_dash(wt_project[t]), fmt_work(wt_totals[t])))
       .. '</tr>')
   end
   out(string.format('<tr class="total"><td class="l">Total</td><td>%d</td><td>%s</td><td>%s</td><td>%s</td>'
     .. '<td>%s</td><td>%s</td>',
-    eff_total.scenes, dur_or_dash(eff_total.film), dur_or_dash(eff_total.source), dur_or_dash(eff_total.work),
+    eff_total.scenes, dur_or_dash(eff_total.film), dur_or_dash(eff_total.source), work_or_dash(eff_total.work),
     rate_or_na(eff_total.film, eff_total.work), rate_or_na(eff_total.source, eff_total.work))
-    .. (sel_mode and '' or string.format('<td>%s</td><td>%s</td>', dur_or_dash(project_work_total), fmt_dur(grand_total)))
+    .. (sel_mode and '' or string.format('<td>%s</td><td>%s</td>', work_or_dash(project_work_total), fmt_work(grand_total)))
     .. '</tr>')
   out('</table></div>')
   out('<div class="note">Film/hr and Source/hr: film / source length of every scene that has this work type, '
@@ -1631,14 +1640,14 @@ local function analyze()
       fmt_dur(sc.length_sec), fmt_dur(sc.source_length_sec), pct(sc.source_length_sec, sc.length_sec))
     if has_sel  then row = row .. '<td>' .. dur_or_dash(sc.sel_len_sec)  .. '</td>' end
     if has_edit then row = row .. '<td>' .. dur_or_dash(sc.edit_len_sec) .. '</td>' end
-    for _, t in ipairs(scene_types) do row = row .. '<td>' .. dur_or_dash(sc.wt_sec[t]) .. '</td>' end
+    for _, t in ipairs(scene_types) do row = row .. '<td>' .. work_or_dash(sc.wt_sec[t]) .. '</td>' end
     for _, stg in ipairs(STAGES) do
       if stage_exists[stg.key] then
         row = row .. '<td>' .. (stage_done(sc, stg.key) and '<span class="done">✓</span>' or '·') .. '</td>'
       end
     end
     row = row .. string.format('<td>%s</td><td>%s</td><td>%s</td><td>%s</td></tr>',
-      dur_or_dash(sc.total_sec),
+      work_or_dash(sc.total_sec),
       sc.total_sec > 0 and rate_or_na(sc.length_sec, sc.total_sec) or "–",
       sc.total_sec > 0 and rate_or_na(sc.source_length_sec, sc.total_sec) or "–",
       sc.is_done and '<span class="done">✓</span>' or "")
@@ -1667,11 +1676,11 @@ local function analyze()
         local secs = sc.wt_sec[t]
         if secs and secs > 0 then
           out(string.format('<tr><td class="l">%s</td><td>%s</td><td>%s</td><td>%s</td></tr>', type_label(t),
-            fmt_dur(secs), rate_or_na(sc.length_sec, secs), rate_or_na(input_source(sc, t), secs)))
+            fmt_work(secs), rate_or_na(sc.length_sec, secs), rate_or_na(input_source(sc, t), secs)))
         end
       end
       out(string.format('<tr class="total"><td class="l">Total</td><td>%s</td><td>%s</td><td>%s</td></tr>',
-        fmt_dur(sc.total_sec), rate_or_na(sc.length_sec, sc.total_sec), rate_or_na(sc.source_length_sec, sc.total_sec)))
+        fmt_work(sc.total_sec), rate_or_na(sc.length_sec, sc.total_sec), rate_or_na(sc.source_length_sec, sc.total_sec)))
       out('</table></div></section>')
     end
   end

@@ -61,22 +61,24 @@ local function has(s) return all:find(s, 1, true) ~= nil end
 -- By Project: 2 reels; reel work 5h + 600s check (R2) = 18605s incl. the 5 s export
 -- film 60+120 (R1) + 300 (R2) = 480s; source 600+900 (max) + 1800 = 3300s
 -- R3: 1.5h, film 60s -> totals 3 reels, 24005s, film 540s, source 3300s
-check("By Project reel columns, no Share", not has('<th>Total</th><th>Share</th><th>Reels</th>') and has('<td>3</td><td>24005s</td><td>8002s</td><td>540s</td><td>3300s</td>'))
+check("By Project reel columns, no Share", not has('<th>Total</th><th>Share</th><th>Reels</th>') and has('<td>3</td><td>6h 40m 05s</td><td>2h 13m 22s</td><td>540s</td><td>3300s</td>'))
 check("By Project film/hr 540s / 24005s = 1m 20s", has('<td>1m 20s</td><td>8m 14s</td>'))
 check("R3: same name at two places = 2 scenes, a frame off = same scene",
-  has('<td class="l">R3</td><td>5400s</td>') and has('<td>60s</td><td>–</td><td>2</td>'))
+  has('<td class="l">R3</td><td>1h 30m 00s</td>') and has('<td>60s</td><td>–</td><td>2</td>'))
 -- By Reel: R1 = 4h + 5s, scenes A + B once each, film 180s, source 1500s (max of B)
-check("R1 row", has('<tr class="total reel"><td class="l">R1</td><td>14405s</td>') and has('<td>180s</td><td>1500s</td><td>2</td>'))
-check("R1 editing: scenes A + B in 2h", has('editing</td><td>7200s</td>') and has('<td>180s</td><td>1500s</td><td>2</td><td>1m 30s</td><td>12m 30s</td>'))
-check("export of 5 s: no rate", has('export</td><td>5s</td><td>0%</td><td>1</td><td class="l"></td><td>–</td><td>–</td><td>–</td><td>–</td><td>–</td>'))
+check("R1 row", has('<tr class="total reel"><td class="l">R1</td><td>4h 00m 05s</td>') and has('<td>180s</td><td>1500s</td><td>2</td>'))
+check("R1 editing: scenes A + B in 2h", has('editing</td><td>2h 00m 00s</td>') and has('<td>180s</td><td>1500s</td><td>2</td><td>1m 30s</td><td>12m 30s</td>'))
+check("export of 5 s: no rate", has('export</td><td>0h 00m 05s</td><td>0%</td><td>1</td><td class="l"></td><td>–</td><td>–</td><td>–</td><td>–</td><td>–</td>'))
 check("R2 whole-reel item: Reel Len, source, scenes – / 5",
-  has('<td class="l">R2</td><td>4200s</td>') and has('<td>300s</td><td>1800s</td><td>– / 5</td>'))
-check("dated name ignored: check counted on R2", has('check</td><td>600s</td>') and not has('>261020<'))
+  has('<td class="l">R2</td><td>1h 10m 00s</td>') and has('<td>300s</td><td>1800s</td><td>– / 5</td>'))
+check("dated name ignored: check counted on R2", has('check</td><td>0h 10m 00s</td>') and not has('>261020<'))
 check("All and no reel rows, not counted as reels", has('<td class="l">All</td>') and has('<td class="l">(no reel)</td>')
   and has('3 reels</div>'))
 check("zebra rows + reel rows", html:find("tr:nth-child(even) td{background:var(--stripe)}", 1, true) ~= nil)
 check("reel order R1, R2, All, (no reel)", all:find(">R1<", 1, true) < all:find(">R2<", 1, true)
   and all:find(">R2<", 1, true) < all:find(">All<", 1, true) and all:find(">All<", 1, true) < all:find(">(no reel)<", 1, true))
+check("work time as XhXXmXXs, lengths stay timecode", has('<b>Total Work</b><span>8h 10m 05s</span>')
+  and has('<td>300s</td><td>1800s</td>'))
 check("task still the last word (dialog / Dialog merged)", has('<td class="l">Dialog</td>') and not has('<td class="l">dialog</td>'))
 
 os.execute('rm -rf "' .. OUT_DIR .. '"')
