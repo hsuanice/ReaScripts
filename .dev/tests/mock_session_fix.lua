@@ -424,6 +424,17 @@ do -- scene cuts: standard = 1 frame fade-in starting 1 frame before the scene, 
   for _, is in ipairs(res_mv.scene_cuts) do if is.item == bad_end then again = true end end
   assert(again, "moved edge should be listed again")
   assert(M.clear_scene_oks() == 3)
+  -- report: the edge position (not the item start); a vanished item says so
+  local rep_txt = M.report(res, { tracks = 0, items = 0, fps = FPS, sr = SR, total = 0 })
+  local edge_tc = M.tc(B + 2 * f)
+  local line
+  for l in rep_txt:gmatch("[^\n]+") do if l:find("scene 5000.000 end: ends 2 fr after", 1, true) then line = l end end
+  assert(line and line:find(edge_tc, 1, true), "report should show the edge position: " .. tostring(line))
+  local gone = { scene_cuts = { { item = { dead = true }, pos = B, text = "x" } } }
+  local real_vp = reaper.ValidatePtr2
+  reaper.ValidatePtr2 = function(pr, o, t) if type(o) == "table" and o.dead then return false end return real_vp(pr, o, t) end
+  assert(M.report(gone, { tracks = 0, items = 0, fps = FPS, sr = SR, total = 1 }):find("item changed or removed after the scan", 1, true))
+  reaper.ValidatePtr2 = real_vp
   print("scene cuts mark as OK: " .. #res.scene_cuts .. " -> " .. #res_ok.scene_cuts .. " listed, " .. sum_ok.scene_ok .. " OK")
   for _, it in ipairs(new) do if it.tr == ok_t then assert(not by[it], "standard cut listed") end end
   assert(first.text:find("NOT CUT on any track", 1, true) and math.abs(first.pos - D) < 1e-9, "uncut scene change not first")

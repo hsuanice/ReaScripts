@@ -1,11 +1,11 @@
 --[[
 @description Session Fix - Interchange Prep: check and fix a REAPER session before converting it with Interchanger
-@version 26.1101.1349pre1
+@version 26.1101.1419pre1
 @author hsuanice
 @noindex
 @changelog
-  - New: Scene cuts check (review only); Settings > Scene cut window and Scene cuts: skip tracks
-  - New: Mark as OK button in the Scene cuts list; Settings > Clear scene cut OK marks
+  - New: Scene cuts check (review only) with Mark as OK; Settings > Scene cut window, Scene cuts: skip tracks, Clear scene cut OK marks
+  - Fix: clicking a Scene cuts entry zooms to the edge in question; the report shows each issue's own position (not the item start) and notes items changed after the scan
 @about
   # Session Fix - Interchange Prep
 

@@ -1,6 +1,6 @@
 --[[
 @description Session Fix - check and fix a REAPER session before moving it to Pro Tools, Nuendo or Cubase (Interchanger)
-@version 26.1101.1349pre1
+@version 26.1101.1419pre1
 @author hsuanice
 @metapackage
 @provides

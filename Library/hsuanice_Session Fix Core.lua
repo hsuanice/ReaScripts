@@ -1,11 +1,11 @@
 --[[
 @description hsuanice Session Fix Core - checks and fixes for preparing a REAPER session for Interchanger / Pro Tools / Nuendo
-@version 26.1101.1349pre1
+@version 26.1101.1419pre1
 @author hsuanice
 @noindex
 @changelog
-  - New: Scene cuts check (review only): scene changes on the Scene Cut track cut differently from the Fade Tool Settings standard, items running across a scene change without a fade-out, and scene changes not cut on any track; reference / source tracks skipped
-  - New: Mark as OK for checked scene cut spots (listed again when that edge moves)
+  - New: Scene cuts check (review only): scene changes on the Scene Cut track cut differently from the Fade Tool Settings standard, items running across a scene change without a fade-out, and scene changes not cut on any track; reference / source tracks skipped; Mark as OK
+  - Fix: clicking a Scene cuts entry zooms to the edge in question; the report shows each issue's own position (not the item start) and notes items changed after the scan
 @about
   Shared library behind "Session Fix - Interchange Prep".
   Every rule has: id, title, scope ("item" / "track" / "file"), scan() returning issues,
@@ -2084,6 +2084,8 @@ rule {
     local oks, approved = {}, 0
     -- list an issue unless it was marked as OK (same edge, same place)
     local function add(list, is)
+      -- a click jumps to the edge itself (not the whole item)
+      is.positions, is.labels = { is.pos }, { is.text }
       oks[is.item] = oks[is.item] or scene_ok_tokens(is.item)
       if oks[is.item][is.ok_key] then approved = approved + 1 else list[#list + 1] = is end
     end
@@ -2982,8 +2984,14 @@ function M.report(results, summary)
     local list = results[d.id] or {}
     lines[#lines + 1] = string.format("[%s] %s: %d", #list == 0 and "OK" or "!!", d.title, #list)
     for _, is in ipairs(list) do
-      local where = is.item and r.ValidatePtr2(0, is.item, "MediaItem*") and item_label(is.item)
-        or (is.track and r.ValidatePtr2(0, is.track, "MediaTrack*") and track_name(is.track)) or ""
+      -- track | the issue's own position (an edge, a crossfade ...) or the item start | name
+      local where = ""
+      if is.item and not r.ValidatePtr2(0, is.item, "MediaItem*") then
+        where = "(item changed or removed after the scan)"
+      else
+        local tn, pos, name = M.issue_where(is)
+        if is.item then where = string.format("%s | %s | %s", tn, pos, name) else where = tn end
+      end
       lines[#lines + 1] = "    " .. (where ~= "" and (where .. "  —  ") or "") .. (is.text or "")
     end
   end
