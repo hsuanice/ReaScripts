@@ -7,6 +7,10 @@ PM Insight Analyzer
 
 **Removed from ReaPack** (2026-10-15) while it is a work in progress; the script stays in the repository (`@noindex`) as a backup.
 
+## 26.1101.1548pre1
+
+- New: Work Log report - reels / episodes (R5, EP06, the word between the project and the task) per project: By Reel table with time, days, film, source, scenes and film / source per hour for each reel and each work type; By Project gains reels, reel work, average per reel and film / source per hour
+
 ## 26.1029.1741
 
 - New: In progress column in Daily progress (tested)

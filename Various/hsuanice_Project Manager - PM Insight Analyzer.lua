@@ -1,10 +1,10 @@
 --[[
 @description Project Manager - PM Insight Analyzer: work-time analysis of PM Timer logs (work in progress)
-@version 26.1029.1741
+@version 26.1101.1548pre1
 @author hsuanice
 @noindex  (kept in the repository as a backup; not offered on ReaPack while it is a work in progress)
 @changelog
-  - New: In progress column in Daily progress (tested)
+  - New: Work Log report - reels / episodes (R5, EP06, the word between the project and the task) per project: By Reel table with time, days, film, source, scenes and film / source per hour for each reel and each work type; By Project gains reels, reel work, average per reel and film / source per hour
 @about
   Read-only analysis script. Auto-detects project type:
 
@@ -20,6 +20,8 @@
     project, task, work type, month and day, as the same kind of HTML report
     (with a year filter). Work type names differing only in case are merged;
     duplicate items (same day, position and length) are counted once.
+    Reels / episodes ("Proj R5 Dialog", "Proj EP06 Dialog") get their own rows per
+    project: time, film, source and film / source per hour, also per work type.
 
   Selected scenes: select one or more items on the Scene Cut track before running to
   report only those scenes - their work time, film length and Source / Mic Selected /
@@ -137,11 +139,30 @@ local function parse_wl_item_name(name)
   return nil
 end
 
+-- "Proj Reel Task" → project (first word), task (last word), reel (the words between,
+-- e.g. R5, EP06, All). "Proj R5" (no task) → reel R5. A leading 6-digit date
+-- ("261020 POINT R5", a dated test copy) is ignored.
 local function split_prefix(name)
   local prefix = name:match("^(.-) | ") or name
-  local project = prefix:match("^(%S+)") or ""
-  local task = prefix:match("(%S+)%s*$") or ""
-  return prefix, project, task
+  prefix = prefix:gsub("^%d%d%d%d%d%d%s+", "")
+  local words = {}
+  for w in prefix:gmatch("%S+") do words[#words + 1] = w end
+  local project, task, reel = words[1] or "", "", ""
+  if #words >= 3 then
+    task, reel = words[#words], table.concat(words, " ", 2, #words - 1)
+  elseif #words == 2 then
+    local w = words[2]
+    if w:match("^[Rr]%d+$") or w:upper():match("^EP%d+$") then reel = w else task = w end
+  end
+  return prefix, project, task, reel
+end
+
+-- "HH:MM:SS:FF" → seconds (frames ignored); nil when missing or zero
+local function tc_sec(str)
+  local h, m, sec = (str or ""):match("^(%d+):(%d+):(%d+)")
+  if not h then return nil end
+  local v = tonumber(h) * 3600 + tonumber(m) * 60 + tonumber(sec)
+  return v > 0 and v or nil
 end
 
 local function parse_note_fields(note)
@@ -326,7 +347,7 @@ local function collect_work_log_records()
         local _, note = r.GetSetMediaItemInfo_String(item, "P_NOTES", "", false)
         local ni  = parse_note_fields(note)
         local pos = r.GetMediaItemInfo_Value(item, "D_POSITION")
-        local _, project, task = split_prefix(take_name)
+        local _, project, task, reel = split_prefix(take_name)
         local module = (parsed.module ~= "") and parsed.module or "other"
         module = MODULE_ALIASES[module:lower()] or module
         task = task:gsub("_%d+$", "")   -- "Conform_001": save-as copy of the project
@@ -340,12 +361,18 @@ local function collect_work_log_records()
           module = module, color = (color & 0x1000000 ~= 0) and color or nil,
           shots = ni.shots, src_cnt = ni.src_cnt, src_len = ni.src_len,
           scope = ni.scope, scenes = ni.scenes,
+          reel = reel,
+          -- scene items: film (Length) and source of one scene, keyed by its range;
+          -- whole-reel items (Reel Len): length, source and scene count of the reel
+          film = tc_sec(ni.length), src_sec = tc_sec(ni.src_len),
+          scene_key = (ni.length ~= "") and (ni.range ~= "" and ni.range or ni.length) or nil,
+          reel_len = tc_sec(ni.reel_len), reel_scenes = tonumber(ni.scenes),
         }
       end
     end
   end
 
-  for _, field in ipairs({ "project", "task", "module" }) do
+  for _, field in ipairs({ "project", "task", "module", "reel" }) do
     local vals = {}
     for _, x in ipairs(raw) do vals[#vals + 1] = x[field] end
     local pick = canonical_names(vals, field == "module")
@@ -370,6 +397,46 @@ local function collect_work_log_records()
   return recs, #raw - #recs
 end
 
+-- Film / source covered by a set of records: each scene counted once (its largest
+-- values: the ISO source, as later stages may log less); a whole-reel item (Reel Len)
+-- covers the whole reel. Returns film, source,
+-- scenes worked, scenes in the reel (nil when unknown).
+local function coverage(list)
+  local scenes, n, film, src = {}, 0, 0, 0
+  local reel_film, reel_src, reel_n
+  for _, x in ipairs(list) do
+    if x.reel_len then
+      reel_film, reel_src, reel_n = x.reel_len, x.src_sec, x.reel_scenes or reel_n
+    elseif x.scene_key then
+      local sc = scenes[x.scene_key]
+      if not sc then sc = { film = 0, src = 0 }; scenes[x.scene_key] = sc; n = n + 1 end
+      sc.film, sc.src = math.max(sc.film, x.film or 0), math.max(sc.src, x.src_sec or 0)
+    end
+  end
+  for _, sc in pairs(scenes) do film, src = film + sc.film, src + sc.src end
+  return math.max(film, reel_film or 0), math.max(src, reel_src or 0), n, reel_n
+end
+
+-- Reel names in a natural order (R2 before R10); "All" and no reel last
+local function reel_sort(a, b)
+  local function key(v)
+    if v == "" then return 3, "", 0 end
+    if v:lower() == "all" then return 2, "", 0 end
+    local pre, num = v:match("^(%D*)(%d+)$")
+    if pre then return 1, pre:upper(), tonumber(num) end
+    return 1, v:upper(), -1
+  end
+  local ga, pa, na = key(a)
+  local gb, pb, nb = key(b)
+  if ga ~= gb then return ga < gb end
+  if pa ~= pb then return pa < pb end
+  if na ~= nb then return na < nb end
+  return a < b
+end
+
+-- A real reel / episode (not "All" and not the work without a reel)
+local function is_reel(v) return v ~= "" and v:lower() ~= "all" end
+
 -- Writes one report section (all years or one year) for the given records.
 local function work_log_section(out, recs, sid)
   local total, daily, months, projects, proj_order = 0, {}, {}, {}, {}
@@ -383,12 +450,23 @@ local function work_log_section(out, recs, sid)
     m.total, m.items, m.days[x.date] = m.total + x.len, m.items + 1, true
     local p = projects[x.project]
     if not p then
-      p = { total = 0, days = {}, items = {}, tasks = {}, modules = {}, first = x.date, last = x.date }
+      p = { total = 0, days = {}, items = {}, tasks = {}, modules = {}, reels = {},
+        first = x.date, last = x.date }
       projects[x.project] = p; proj_order[#proj_order + 1] = x.project
     end
     p.total = p.total + x.len
     p.days[x.date] = (p.days[x.date] or 0) + x.len
     p.items[#p.items + 1] = x
+    local rl = p.reels[x.reel]
+    if not rl then rl = { total = 0, days = {}, items = {}, types = {} }; p.reels[x.reel] = rl end
+    rl.total, rl.days[x.date] = rl.total + x.len, true
+    rl.items[#rl.items + 1] = x
+    rl.first = (not rl.first or x.date < rl.first) and x.date or rl.first
+    rl.last  = (not rl.last  or x.date > rl.last)  and x.date or rl.last
+    local tl = rl.types[x.module]
+    if not tl then tl = { total = 0, days = {}, items = {} }; rl.types[x.module] = tl end
+    tl.total, tl.days[x.date] = tl.total + x.len, true
+    tl.items[#tl.items + 1] = x
     p.tasks[x.task]     = (p.tasks[x.task] or 0) + x.len
     p.modules[x.module] = (p.modules[x.module] or 0) + x.len
     if x.date < p.first then p.first = x.date end
@@ -417,6 +495,26 @@ local function work_log_section(out, recs, sid)
     out('</table></div></details>')
   end
 
+  -- film / hr and source / hr cells: "–" without a length or under a minute of work
+  local function rate_cell(amount, secs)
+    return (amount > 0 and secs >= 60) and fmt_rate(amount * 3600 / secs) or "–"
+  end
+  local function len_cell(v) return v > 0 and fmt_dur(v) or "–" end
+  -- Per project: reels in order, and the reel totals used by By Project
+  for _, pname in ipairs(proj_order) do
+    local p = projects[pname]
+    p.reel_order, p.nreels, p.reel_work, p.reel_film, p.reel_src = {}, 0, 0, 0, 0
+    for k, rl in pairs(p.reels) do
+      p.reel_order[#p.reel_order + 1] = k
+      rl.film, rl.src, rl.nsc, rl.reel_n = coverage(rl.items)
+      if is_reel(k) then
+        p.nreels, p.reel_work = p.nreels + 1, p.reel_work + rl.total
+        p.reel_film, p.reel_src = p.reel_film + rl.film, p.reel_src + rl.src
+      end
+    end
+    table.sort(p.reel_order, reel_sort)
+  end
+
   local avg, used, ndays = trimmed_daily_avg(daily, 0.1)
   out('<div class="grid">')
   local function kv(k, v) out('<div class="kv"><b>' .. k .. '</b><span>' .. v .. '</span></div>') end
@@ -442,15 +540,23 @@ local function work_log_section(out, recs, sid)
 
   -- By Project
   out('<details open><summary>By Project</summary><div class="wrap"><table>')
-  out('<tr><th class="l">Project</th><th>Total</th><th>Share</th><th>Days</th><th>Items</th>'
-    .. '<th class="l">First</th><th class="l">Last</th></tr>')
+  out('<tr><th class="l">Project</th><th>Total</th><th>Share</th><th>Reels</th><th>Reel Work</th>'
+    .. '<th>Avg / Reel</th><th>Film</th><th>Source</th><th>Film/hr</th><th>Source/hr</th>'
+    .. '<th>Days</th><th>Items</th><th class="l">First</th><th class="l">Last</th></tr>')
   for n, pname in ipairs(proj_order) do
     local p = projects[pname]
-    out(string.format('<tr><td class="l"><a href="#%s-p%d">%s</a></td><td>%s</td><td>%s</td><td>%d</td><td>%d</td>'
+    out(string.format('<tr><td class="l"><a href="#%s-p%d">%s</a></td><td>%s</td><td>%s</td><td>%s</td><td>%s</td>'
+      .. '<td>%s</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td><td>%d</td><td>%d</td>'
       .. '<td class="l">%s</td><td class="l">%s</td></tr>', sid, n, html_esc(pname), fmt_dur(p.total),
-      pct(p.total, total), count(p.days), #p.items, p.first, p.last))
+      pct(p.total, total), p.nreels > 0 and tostring(p.nreels) or "–", len_cell(p.reel_work),
+      p.nreels > 0 and fmt_dur(p.reel_work / p.nreels) or "–", len_cell(p.reel_film), len_cell(p.reel_src),
+      rate_cell(p.reel_film, p.reel_work), rate_cell(p.reel_src, p.reel_work),
+      count(p.days), #p.items, p.first, p.last))
   end
-  out('</table></div></details>')
+  out('</table></div><div class="note">Reels = reels / episodes (the word between the project and the task, '
+    .. 'e.g. R5, EP06; "All" is not counted). Film / Source = what the reels\' work covered: the reel length '
+    .. 'from a whole-reel item (Reel Len), otherwise every scene worked on counted once. Film/hr, Source/hr '
+    .. '= that length ÷ all the work on the reels.</div></details>')
 
   -- Per project
   out('<details><summary>Per Project</summary>')
@@ -459,8 +565,34 @@ local function work_log_section(out, recs, sid)
     out('<section class="scene" id="' .. sid .. '-p' .. n .. '">')
     out('<h3>' .. html_esc(pname) .. '</h3>')
     out('<div class="meta">' .. fmt_dur(p.total) .. ' · ' .. count(p.days) .. ' days · '
-      .. #p.items .. ' items · ' .. p.first .. ' – ' .. p.last .. '</div>')
-    out('<div class="wrap"><table><tr><th class="l">Task</th><th>Time</th><th>Share</th></tr>')
+      .. #p.items .. ' items · ' .. p.first .. ' – ' .. p.last
+      .. (p.nreels > 0 and (' · ' .. p.nreels .. (p.nreels == 1 and ' reel' or ' reels')) or '') .. '</div>')
+    -- By Reel: one bold row per reel, then its work types
+    out('<div class="wrap"><table><tr><th class="l">Reel / Work Type</th><th>Time</th><th>Share</th>'
+      .. '<th>Days</th><th class="l">Dates</th><th>Film</th><th>Source</th><th>Scenes</th>'
+      .. '<th>Film/hr</th><th>Source/hr</th></tr>')
+    for _, k in ipairs(p.reel_order) do
+      local rl = p.reels[k]
+      local sc = rl.nsc > 0 and tostring(rl.nsc) or "–"
+      if rl.reel_n then sc = (rl.nsc > 0 and rl.nsc or "–") .. " / " .. rl.reel_n end
+      out(string.format('<tr class="total"><td class="l">%s</td><td>%s</td><td>%s</td><td>%d</td>'
+        .. '<td class="l">%s – %s</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td></tr>',
+        html_esc(k ~= "" and k or "(no reel)"), fmt_dur(rl.total), pct(rl.total, p.total), count(rl.days),
+        rl.first, rl.last, len_cell(rl.film), len_cell(rl.src), sc,
+        rate_cell(rl.film, rl.total), rate_cell(rl.src, rl.total)))
+      for _, t in ipairs(sort_keys_by_value((function()
+          local m = {} for tk, tv in pairs(rl.types) do m[tk] = tv.total end return m end)())) do
+        local tl = rl.types[t]
+        local film, src, nsc = coverage(tl.items)
+        out(string.format('<tr><td class="l" style="padding-left:24px">%s</td><td>%s</td><td>%s</td><td>%d</td>'
+          .. '<td class="l">%s</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td></tr>',
+          mod_label(t), fmt_dur(tl.total), pct(tl.total, rl.total), count(tl.days), "",
+          len_cell(film), len_cell(src), nsc > 0 and tostring(nsc) or "–",
+          rate_cell(film, tl.total), rate_cell(src, tl.total)))
+      end
+    end
+    out('</table></div>')
+    out('<div class="wrap" style="margin-top:8px"><table><tr><th class="l">Task</th><th>Time</th><th>Share</th></tr>')
     for _, k in ipairs(sort_keys_by_value(p.tasks)) do
       out(string.format('<tr><td class="l">%s</td><td>%s</td><td>%s</td></tr>',
         html_esc(k), fmt_dur(p.tasks[k]), pct(p.tasks[k], p.total)))
