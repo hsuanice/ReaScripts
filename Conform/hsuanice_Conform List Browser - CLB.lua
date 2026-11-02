@@ -1,6 +1,6 @@
 --[[
 @description Conform List Browser - CLB: conform EDL / AAF / XML / OTIO / subtitle lists (GUI + Jump / Link / Load / Reveal)
-@version 26.1103.0155pre1
+@version 26.1103.0212pre1
 @author hsuanice
 @provides
   [main] .
@@ -12,8 +12,8 @@
   [nomain] ../Tools/aaf_to_otio.py
   [nomain] ../Tools/subtitle_to_clb.py
 @changelog
-  - Fix: Generate Items crossfades — the incoming item now also extends back into the dissolve (an empty item's take was treated as having no handle, so only the outgoing side extended)
-  - Change: Picture Cut's tracks start with V (V Picture Cut, V Overlay 1, V Text 1, V Image 1, V Matte 1); its groups sit right under Video in that order, Video is unchecked and they are checked; generated tracks follow the same order
+  - New: Include Unmatched (checkbox under Conform Sel, on by default) — Conform All / Sel also place events with no matched audio as empty items (same as Generate Items) on the same tracks, so one run spots the whole list
+  - Change: items conformed with audio are colored green
 @about
   Note: the Compare view (old vs new cut, reconform) is a work in progress and not finished yet.
 
@@ -508,6 +508,11 @@ local CLB = {
   -- volume automation, pan, fades — read from AAF, see row.mix).
   -- Persisted, on by default.
   restore_mix = true,
+
+  -- Conform All / Sel: rows with no matched audio get an empty item (as
+  -- Generate Items makes) on the same tracks, so one run spots the whole
+  -- list. Persisted, on by default.
+  conform_include_unmatched = true,
 
   -- "Follow Reaper" (see CLB.reveal_reaper_item): when on, selecting an
   -- item in Reaper reveals its event row(s). Persisted, off by default.
@@ -2045,6 +2050,7 @@ local function save_prefs()
   reaper.SetExtState(EXT_NS, "ref_media_scope", CLB.ref_media_scope or "visible", true)
   reaper.SetExtState(EXT_NS, "ref_load_auto_match", CLB.ref_load_auto_match and "1" or "0", true)
   reaper.SetExtState(EXT_NS, "restore_mix", CLB.restore_mix and "1" or "0", true)
+  reaper.SetExtState(EXT_NS, "conform_include_unmatched", CLB.conform_include_unmatched and "1" or "0", true)
   reaper.SetExtState(EXT_NS, "follow_reaper_sel", CLB.follow_reaper_sel and "1" or "0", true)
   reaper.SetExtState(EXT_NS, "ref_load_merge_mode", CLB.ref_load_merge_mode or "ask", true)
   reaper.SetExtState(EXT_NS, "last_dir", CLB.last_dir or "", true)
@@ -2132,6 +2138,7 @@ local function load_prefs()
   end
   CLB.ref_load_auto_match = get("ref_load_auto_match", "0") == "1"
   CLB.restore_mix = get("restore_mix", "1") == "1"
+  CLB.conform_include_unmatched = get("conform_include_unmatched", "1") == "1"
   CLB.follow_reaper_sel = get("follow_reaper_sel", "0") == "1"
   CLB.ref_load_merge_mode = get("ref_load_merge_mode", "ask")
   if CLB.ref_load_merge_mode ~= "ask" and CLB.ref_load_merge_mode ~= "replace" and CLB.ref_load_merge_mode ~= "append" then
@@ -5937,6 +5944,58 @@ function CLB.generate_reference_media_independent(pending)
   }
 end
 
+--- One empty conform item for a row on track tr: position/length from Rec
+--- TC, take named by clip name, item note + P_EXT metadata, audio mix.
+--- Used by Generate Items, and by Conform for unmatched rows ("Include
+--- Unmatched"). skip_pan = the pan is on the track (CLB.track_pans).
+function CLB.create_empty_item(tr, row, skip_pan)
+  local pos = CLB.rec_tc_seconds(row.rec_tc_in, row)
+  local pos_out = CLB.rec_tc_seconds(row.rec_tc_out, row)
+  local length = pos_out - pos
+  if length <= 0 then length = 0.001 end  -- minimum length
+
+  local item = reaper.AddMediaItemToTrack(tr)
+  reaper.SetMediaItemInfo_Value(item, "D_POSITION", pos)
+  reaper.SetMediaItemInfo_Value(item, "D_LENGTH", length)
+
+  local take = reaper.AddTakeToMediaItem(item)
+  if take then
+    -- Take name = clip name
+    reaper.GetSetMediaItemTakeInfo_String(take, "P_NAME", row.clip_name or "", true)
+
+    -- Item note: Source TC In/Out + Reel/Scene/Take (human-readable)
+    local note_parts = {}
+    note_parts[#note_parts + 1] = "Reel: " .. (row.reel or "")
+    if row.scene and row.scene ~= "" then note_parts[#note_parts + 1] = "Scene: " .. row.scene end
+    if row.take  and row.take  ~= "" then note_parts[#note_parts + 1] = "Take: "  .. row.take  end
+    note_parts[#note_parts + 1] = "Src In: " .. (row.src_tc_in or "")
+    note_parts[#note_parts + 1] = "Src Out: " .. (row.src_tc_out or "")
+    CLB.add_note_details(note_parts, row)
+    if row.notes and row.notes ~= "" then
+      note_parts[#note_parts + 1] = ""
+      note_parts[#note_parts + 1] = row.notes
+    end
+    local note_text = table.concat(note_parts, "\n")
+    reaper.GetSetMediaItemInfo_String(item, "P_NOTES", note_text, true)
+
+    -- Store all metadata as P_EXT fields
+    reaper.GetSetMediaItemTakeInfo_String(take, "P_EXT:CLB_EVENT", row.event_num or "", true)
+    reaper.GetSetMediaItemTakeInfo_String(take, "P_EXT:CLB_REEL", row.reel or "", true)
+    reaper.GetSetMediaItemTakeInfo_String(take, "P_EXT:CLB_TRACK", row.track or "", true)
+    reaper.GetSetMediaItemTakeInfo_String(take, "P_EXT:CLB_EDIT_TYPE", row.edit_type or "", true)
+    reaper.GetSetMediaItemTakeInfo_String(take, "P_EXT:CLB_SRC_TC_IN", row.src_tc_in or "", true)
+    reaper.GetSetMediaItemTakeInfo_String(take, "P_EXT:CLB_SRC_TC_OUT", row.src_tc_out or "", true)
+    reaper.GetSetMediaItemTakeInfo_String(take, "P_EXT:CLB_REC_TC_IN", row.rec_tc_in or "", true)
+    reaper.GetSetMediaItemTakeInfo_String(take, "P_EXT:CLB_REC_TC_OUT", row.rec_tc_out or "", true)
+    reaper.GetSetMediaItemTakeInfo_String(take, "P_EXT:CLB_SOURCE_FILE", row.source_file or "", true)
+    if row.notes and row.notes ~= "" then
+      reaper.GetSetMediaItemTakeInfo_String(take, "P_EXT:CLB_NOTES", row.notes, true)
+    end
+  end
+  CLB.apply_mix(item, row, true, skip_pan)
+  return item
+end
+
 local function generate_items()
   if CLB.batch_job then
     reaper.ShowMessageBox("Another operation (" .. (CLB.batch_job.label or "batch job") .. ") is still running — wait for it to finish first.", SCRIPT_NAME, 0)
@@ -6031,50 +6090,7 @@ local function generate_items()
       if not tr then tr = track_map[track_names_order[1]] end
       if not tr then return end
 
-      local pos = CLB.rec_tc_seconds(row.rec_tc_in, row)
-      local pos_out = CLB.rec_tc_seconds(row.rec_tc_out, row)
-      local length = pos_out - pos
-      if length <= 0 then length = 0.001 end  -- minimum length
-
-      local item = reaper.AddMediaItemToTrack(tr)
-      reaper.SetMediaItemInfo_Value(item, "D_POSITION", pos)
-      reaper.SetMediaItemInfo_Value(item, "D_LENGTH", length)
-
-      local take = reaper.AddTakeToMediaItem(item)
-      if take then
-        -- Take name = clip name
-        reaper.GetSetMediaItemTakeInfo_String(take, "P_NAME", row.clip_name or "", true)
-
-        -- Item note: Source TC In/Out + Reel/Scene/Take (human-readable)
-        local note_parts = {}
-        note_parts[#note_parts + 1] = "Reel: " .. (row.reel or "")
-        if row.scene and row.scene ~= "" then note_parts[#note_parts + 1] = "Scene: " .. row.scene end
-        if row.take  and row.take  ~= "" then note_parts[#note_parts + 1] = "Take: "  .. row.take  end
-        note_parts[#note_parts + 1] = "Src In: " .. (row.src_tc_in or "")
-        note_parts[#note_parts + 1] = "Src Out: " .. (row.src_tc_out or "")
-        CLB.add_note_details(note_parts, row)
-        if row.notes and row.notes ~= "" then
-          note_parts[#note_parts + 1] = ""
-          note_parts[#note_parts + 1] = row.notes
-        end
-        local note_text = table.concat(note_parts, "\n")
-        reaper.GetSetMediaItemInfo_String(item, "P_NOTES", note_text, true)
-
-        -- Store all metadata as P_EXT fields
-        reaper.GetSetMediaItemTakeInfo_String(take, "P_EXT:CLB_EVENT", row.event_num or "", true)
-        reaper.GetSetMediaItemTakeInfo_String(take, "P_EXT:CLB_REEL", row.reel or "", true)
-        reaper.GetSetMediaItemTakeInfo_String(take, "P_EXT:CLB_TRACK", row.track or "", true)
-        reaper.GetSetMediaItemTakeInfo_String(take, "P_EXT:CLB_EDIT_TYPE", row.edit_type or "", true)
-        reaper.GetSetMediaItemTakeInfo_String(take, "P_EXT:CLB_SRC_TC_IN", row.src_tc_in or "", true)
-        reaper.GetSetMediaItemTakeInfo_String(take, "P_EXT:CLB_SRC_TC_OUT", row.src_tc_out or "", true)
-        reaper.GetSetMediaItemTakeInfo_String(take, "P_EXT:CLB_REC_TC_IN", row.rec_tc_in or "", true)
-        reaper.GetSetMediaItemTakeInfo_String(take, "P_EXT:CLB_REC_TC_OUT", row.rec_tc_out or "", true)
-        reaper.GetSetMediaItemTakeInfo_String(take, "P_EXT:CLB_SOURCE_FILE", row.source_file or "", true)
-        if row.notes and row.notes ~= "" then
-          reaper.GetSetMediaItemTakeInfo_String(take, "P_EXT:CLB_NOTES", row.notes, true)
-        end
-      end
-      CLB.apply_mix(item, row, true, track_pans[track_name] ~= nil)
+      CLB.create_empty_item(tr, row, track_pans[track_name] ~= nil)
 
       job.created = job.created + 1
     end,
@@ -6378,10 +6394,15 @@ local function conform_matched_items(selected_only)
     rows_to_process = get_view_rows() or ROWS  -- Only visible/filtered events
   end
 
-  -- Filter to matched rows only
+  -- Matched rows get their audio; with "Include Unmatched" the rest get an
+  -- empty item (CLB.create_empty_item) on the same tracks — skipping
+  -- unmatched rows linked to a Reaper item, which already exist there.
+  -- matched_rows keeps the list order and holds both kinds.
   local matched_rows = {}
+  local unmatched = {}   -- row -> true: empty item instead of audio
   local found_count = 0
   local multi_count = 0
+  local unmatched_count = 0
 
   for _, row in ipairs(rows_to_process) do
     if row.match_status == "Found" or row.match_status == "Fallback" then
@@ -6390,10 +6411,14 @@ local function conform_matched_items(selected_only)
     elseif row.match_status == "Multiple" and row.__match_candidates then
       matched_rows[#matched_rows + 1] = row
       multi_count = multi_count + 1
+    elseif CLB.conform_include_unmatched and not CLB.row_linked_item(row) then
+      matched_rows[#matched_rows + 1] = row
+      unmatched[row] = true
+      unmatched_count = unmatched_count + 1
     end
   end
 
-  if #matched_rows == 0 then
+  if found_count + multi_count == 0 and unmatched_count == 0 then
     reaper.ShowMessageBox(
       "No matched events to conform.\n\n" ..
       "Load audio files and run matching first.",
@@ -6457,11 +6482,12 @@ local function conform_matched_items(selected_only)
   local msg = string.format(
     "Conform %d matched events?\n\n" ..
     "• %d single matches (1 take each)\n" ..
-    "• %d multiple matches (multiple takes)%s\n\n" ..
+    "• %d multiple matches (multiple takes)%s%s\n\n" ..
     "Tracks: %s\n" ..
     "FPS: %s%s\n\n" ..
     "Audio files will be inserted at timeline positions.",
-    #matched_rows, found_count, multi_count, linked_note,
+    found_count + multi_count, found_count, multi_count, linked_note,
+    unmatched_count > 0 and string.format("\n• %d unmatched (empty items, as Generate Items)", unmatched_count) or "",
     tracks_preview,
     tostring(CLB.fps),
     CLB.is_drop and " (Drop Frame)" or ""
@@ -6511,6 +6537,16 @@ local function conform_matched_items(selected_only)
     batch_size = 25,
     step = function(job, i)
       local row = matched_rows[i]
+
+      if unmatched[row] then
+        local track_name = row_to_trackname[row.__guid]
+        local tr = track_map[track_name] or track_map[track_names_order[1]]
+        if tr then
+          CLB.create_empty_item(tr, row, track_pans[track_name] ~= nil)
+          job.empty_created = (job.empty_created or 0) + 1
+        end
+        return
+      end
 
       -- Source offset: src_tc_in - audio's TimeReference
       local src_in_sec = EDL.tc_to_seconds(row.src_tc_in, CLB.fps, CLB.is_drop)
@@ -6651,6 +6687,10 @@ local function conform_matched_items(selected_only)
       -- linked item is the user's own, already mixed and positioned.
       if not is_linked then
         CLB.apply_mix(item, row, true, track_pans[row_to_trackname[row.__guid]] ~= nil)
+        -- Green = conformed with audio (unmatched empty items keep the
+        -- default color). New items only, never a linked item.
+        reaper.SetMediaItemInfo_Value(item, "I_CUSTOMCOLOR",
+          reaper.ColorToNative(70, 160, 80) | 0x1000000)
       end
 
       job.created = job.created + 1
@@ -6660,8 +6700,10 @@ local function conform_matched_items(selected_only)
       reaper.UpdateArrange()
       reaper.Undo_EndBlock("CLB: Conform " .. job.created .. " items (" .. job.takes_created .. " takes)", -1)
       reaper.ShowMessageBox(
-        string.format("Conformed %d items with %d takes on %d track(s).%s",
+        string.format("Conformed %d items with %d takes on %d track(s).%s%s",
           job.created, job.takes_created, #track_names_order,
+          (job.empty_created or 0) > 0
+            and string.format("\n%d unmatched event(s) added as empty items.", job.empty_created) or "",
           (linked_count > 0 and string.format("\n(%d added as a new take on their own linked Reaper item.)", linked_count) or "")
           .. ((job.takes_skipped or 0) > 0
             and string.format("\n(%d take(s) skipped — that linked item already had a take of the same file.)", job.takes_skipped) or "")),
@@ -9323,6 +9365,15 @@ function CLB.draw_left_sidebar()
       reaper.ImGui_BeginTooltip(ctx)
       reaper.ImGui_Text(ctx, "Insert matched audio for selected rows only")
       reaper.ImGui_EndTooltip(ctx)
+    end
+
+    local chg_iu, new_iu = reaper.ImGui_Checkbox(ctx, "Include Unmatched##clb_conform_unmatched", CLB.conform_include_unmatched)
+    if chg_iu then CLB.conform_include_unmatched = new_iu; save_prefs() end
+    if reaper.ImGui_IsItemHovered(ctx) then
+      reaper.ImGui_SetTooltip(ctx,
+        "Conform All / Sel also place events with no matched audio,\n"
+        .. "as empty items (like Generate Items) on the same tracks.\n"
+        .. "Conformed items with audio are colored green.")
     end
   end
 

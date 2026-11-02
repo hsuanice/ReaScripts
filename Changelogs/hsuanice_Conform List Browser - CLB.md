@@ -4,6 +4,11 @@
 
 Conform List Browser
 
+## 26.1103.0212pre1
+
+- New: Include Unmatched (checkbox under Conform Sel, on by default) — Conform All / Sel also place events with no matched audio as empty items (same as Generate Items) on the same tracks, so one run spots the whole list
+- Change: items conformed with audio are colored green
+
 ## 26.1103.0155pre1
 
 - Fix: Generate Items crossfades — the incoming item now also extends back into the dissolve (an empty item's take was treated as having no handle, so only the outgoing side extended)
