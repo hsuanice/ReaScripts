@@ -4,6 +4,11 @@
 
 Conform List Browser
 
+## 26.1102.2353pre1
+
+- Change: loading several files whose time ranges don't overlap (e.g. one AAF per reel) shares tracks — every reel's V2 stays V2, A5 stays A5 — instead of adding a separate set of tracks per file; files that overlap in time still get per-file track names
+- Change: Consolidate and Consolidate Tracks... keep the original track order — an event can share a track with anything it doesn't overlap, but always stays above overlapping events from lower tracks, so video layering is preserved
+
 ## 26.1102.2330pre1
 
 - Fix: an AAF that holds several compositions (e.g. the cut plus every sync clip from the bin) now loads the cut sequence, video clips included, instead of a few clips from one sync clip

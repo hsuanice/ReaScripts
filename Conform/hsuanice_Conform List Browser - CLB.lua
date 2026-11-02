@@ -1,6 +1,6 @@
 --[[
 @description Conform List Browser - CLB: conform EDL / AAF / XML / OTIO / subtitle lists (GUI + Jump / Link / Load / Reveal)
-@version 26.1102.2330pre1
+@version 26.1102.2353pre1
 @author hsuanice
 @provides
   [main] .
@@ -12,9 +12,8 @@
   [nomain] ../Tools/aaf_to_otio.py
   [nomain] ../Tools/subtitle_to_clb.py
 @changelog
-  - Fix: an AAF that holds several compositions (e.g. the cut plus every sync clip from the bin) now loads the cut sequence, video clips included, instead of a few clips from one sync clip
-  - Fix: an AAF load that fails (for example when aaftool is missing) now shows the error instead of staying on Loading forever
-  - Change: while a file is parsing, the status shows the seconds elapsed and the bar shows how many files are done, so a long AAF parse no longer looks stuck
+  - Change: loading several files whose time ranges don't overlap (e.g. one AAF per reel) shares tracks — every reel's V2 stays V2, A5 stays A5 — instead of adding a separate set of tracks per file; files that overlap in time still get per-file track names
+  - Change: Consolidate and Consolidate Tracks... keep the original track order — an event can share a track with anything it doesn't overlap, but always stays above overlapping events from lower tracks, so video layering is preserved
 @about
   Note: the Compare view (old vs new cut, reconform) is a work in progress and not finished yet.
 
@@ -2771,11 +2770,49 @@ local function _apply_track_suffixes()
   -- track names like "A1" were coming out mangled with a confusing "- N"
   -- source-index suffix appended, every time any other source besides
   -- that Reaper load pushed CLB.edl_sources above 1).
+  --
+  -- Sources whose record TC ranges don't overlap (e.g. one AAF/EDL per
+  -- reel, R01 at 01:00:00:00, R02 at 02:00:00:00) share tracks instead:
+  -- every source's V2 stays V2, A5 stays A5 — the original track layout,
+  -- empty tracks and gaps included, with no extra tracks. Only sources
+  -- that overlap another source in time keep the per-source suffix.
+  local ranges = {}
+  for _, row in ipairs(ROWS) do
+    if not row.__reaper_item then
+      local si = row.__source_idx or 1
+      local ri = EDL.tc_to_seconds(row.rec_tc_in, CLB.fps, CLB.is_drop)
+      local ro = EDL.tc_to_seconds(row.rec_tc_out, CLB.fps, CLB.is_drop)
+      local r = ranges[si]
+      if not r then
+        ranges[si] = { lo = ri, hi = ro }
+      else
+        if ri < r.lo then r.lo = ri end
+        if ro > r.hi then r.hi = ro end
+      end
+    end
+  end
+  local overlapping = {}
+  for si, a in pairs(ranges) do
+    for sj, b in pairs(ranges) do
+      if si < sj and a.lo < b.hi and b.lo < a.hi then
+        overlapping[si] = true
+        overlapping[sj] = true
+      end
+    end
+  end
+
+  local n_overlap = 0
+  for _ in pairs(overlapping) do n_overlap = n_overlap + 1 end
+  if n_overlap > 0 then
+    console_msg(string.format(
+      "%d source(s) overlap another source in time — their tracks keep a per-source suffix", n_overlap))
+  end
+
   for _, row in ipairs(ROWS) do
     if not row.__reaper_item then
       local orig = row.__orig_track or row.track
       local src_idx = row.__source_idx or 1
-      row.track = _rename_track_with_suffix(orig, src_idx)
+      row.track = overlapping[src_idx] and _rename_track_with_suffix(orig, src_idx) or orig
     end
   end
 end
@@ -6796,6 +6833,96 @@ local function remove_duplicates()
 end
 
 ---------------------------------------------------------------------------
+-- Order-preserving track packing (Consolidate, Consolidate Tracks...)
+---------------------------------------------------------------------------
+--- Pack events { row, start, stop } into as few tracks as possible while
+--- keeping the original stacking order. Sets evt.track_no (1-based) on
+--- every event and returns the track count.
+---
+--- An event may share a track with anything it doesn't overlap in time,
+--- but always lands above every overlapping event from a lower original
+--- track — so V3 still covers V2 wherever both have picture, while tracks
+--- left sparse (or empty) still collapse.
+---
+--- Layer of a row = its current track's position (V=1, V2=2, A5=5 ...).
+--- A row still on its loaded track is read through __orig_track, so a
+--- per-source name like "V1-2" (source 1, V2) counts as layer 2.
+function CLB.pack_ordered(evts)
+  local function layer_key(row)
+    local name = row.track or ""
+    local orig = row.__orig_track
+    if orig and (name == orig
+        or name == _rename_track_with_suffix(orig, row.__source_idx or 1)) then
+      name = orig
+    end
+    return tonumber(name:match("(%d+)%s*$")) or 1, name
+  end
+
+  -- Events on one track don't overlap and are sorted by start (so also by
+  -- stop): binary-search the last one starting before `stop`, then walk
+  -- back while it still ends after `start`.
+  local EPS = 1e-6
+  local function overlaps(list, start, stop)
+    local lo, hi = 1, #list
+    while lo <= hi do
+      local mid = (lo + hi) // 2
+      if list[mid].start < stop - EPS then lo = mid + 1 else hi = mid - 1 end
+    end
+    local found = {}
+    for i = hi, 1, -1 do
+      if list[i].stop <= start + EPS then break end
+      found[#found + 1] = list[i]
+    end
+    return found
+  end
+
+  local layers, layer_list, layer_of = {}, {}, {}
+  for _, evt in ipairs(evts) do
+    local num, name = layer_key(evt.row)
+    if not layers[name] then
+      layers[name] = { num = num, name = name }
+      layer_list[#layer_list + 1] = layers[name]
+    end
+    layer_of[evt] = layers[name]
+  end
+  table.sort(layer_list, function(a, b)
+    if a.num ~= b.num then return a.num < b.num end
+    return a.name < b.name
+  end)
+  for rank, l in ipairs(layer_list) do l.rank = rank end
+  for _, evt in ipairs(evts) do evt.layer = layer_of[evt].rank end
+
+  -- Lower original tracks first, so each event's floor is already known.
+  table.sort(evts, function(a, b)
+    if a.layer ~= b.layer then return a.layer < b.layer end
+    return a.start < b.start
+  end)
+
+  local tracks = {}   -- tracks[t] = placed events, sorted by start
+  for _, evt in ipairs(evts) do
+    local lowest = 1
+    for t = #tracks, 1, -1 do
+      local below = false
+      for _, p in ipairs(overlaps(tracks[t], evt.start, evt.stop)) do
+        if p.layer < evt.layer then below = true break end
+      end
+      if below then lowest = t + 1 break end
+    end
+    local assigned = lowest
+    while tracks[assigned] and #overlaps(tracks[assigned], evt.start, evt.stop) > 0 do
+      assigned = assigned + 1
+    end
+    tracks[assigned] = tracks[assigned] or {}
+    local list = tracks[assigned]
+    local pos = #list + 1
+    while pos > 1 and list[pos - 1].start > evt.start do pos = pos - 1 end
+    table.insert(list, pos, evt)
+    evt.track_no = assigned
+  end
+  return #tracks
+end
+
+---------------------------------------------------------------------------
 -- Consolidate Tracks by Group
 ---------------------------------------------------------------------------
 local function consolidate_by_group()
@@ -6833,8 +6960,10 @@ local function consolidate_by_group()
   local msg = string.format(
     "Consolidate tracks by group?\n\n" ..
     "%s\n\n" ..
-    "Events in each group will be bin-packed into minimal\n" ..
-    "non-overlapping tracks. Naming rules:\n" ..
+    "Events in each group will be packed into as few\n" ..
+    "non-overlapping tracks as possible, keeping the\n" ..
+    "original track order (upper tracks stay on top).\n" ..
+    "Naming rules:\n" ..
     "  Audio → A1, A2, A3 ...\n" ..
     "  Video → V1, V2, V3 ...\n" ..
     "  Others → GroupName 1, GroupName 2, ...\n" ..
@@ -6854,30 +6983,13 @@ local function consolidate_by_group()
     return g .. " "
   end
 
-  -- Bin-pack each group; each group gets its OWN track counter starting at 1
+  -- Pack each group, keeping the original stacking order (CLB.pack_ordered);
+  -- each group gets its OWN track counter starting at 1.
   for _, g in ipairs(group_order) do
-    local evts = groups[g]
     local prefix = _group_prefix(g)
-
-    -- Sort by start time
-    table.sort(evts, function(a, b) return a.start < b.start end)
-
-    -- Bin-packing
-    local track_ends = {}
-    for _, evt in ipairs(evts) do
-      local assigned = nil
-      for ti, te in ipairs(track_ends) do
-        if evt.start >= te then
-          track_ends[ti] = evt.stop
-          assigned = ti
-          break
-        end
-      end
-      if not assigned then
-        track_ends[#track_ends + 1] = evt.stop
-        assigned = #track_ends
-      end
-      evt.row.track = prefix .. tostring(assigned)
+    CLB.pack_ordered(groups[g])
+    for _, evt in ipairs(groups[g]) do
+      evt.row.track = prefix .. tostring(evt.track_no)
     end
   end
 
@@ -8792,7 +8904,7 @@ function CLB.draw_left_sidebar()
   end
   if reaper.ImGui_IsItemHovered(ctx) then
     reaper.ImGui_BeginTooltip(ctx)
-    reaper.ImGui_Text(ctx, "Consolidate tracks by group (bin-pack + renumber)")
+    reaper.ImGui_Text(ctx, "Consolidate tracks by group (pack + renumber, keeps track order)")
     reaper.ImGui_EndTooltip(ctx)
   end
 
@@ -9209,37 +9321,27 @@ local function draw_track_filter_panel()
         end
       end
 
-      -- Calculate estimated result (bin-packing preview)
-      local estimated_tracks = 0
-      if sel_track_count > 0 then
-        -- Collect events from selected tracks
+      -- Estimated result (same packing as Apply). Cached per selection —
+      -- this popup redraws every frame.
+      local cons = CLB.consolidate_tracks
+      local sel_key = {}
+      for i in ipairs(CLB.track_filters) do
+        if cons.selected[i] then sel_key[#sel_key + 1] = i end
+      end
+      sel_key = table.concat(sel_key, ",") .. "|" .. #ROWS
+      if cons.preview_key ~= sel_key then
         local events = {}
         for _, row in ipairs(ROWS) do
           if sel_track_names[row.track] then
             local ri_sec = EDL.tc_to_seconds(row.rec_tc_in, CLB.fps, CLB.is_drop)
             local ro_sec = EDL.tc_to_seconds(row.rec_tc_out, CLB.fps, CLB.is_drop)
-            table.insert(events, { row = row, start = ri_sec, stop = ro_sec })
+            events[#events + 1] = { row = row, start = ri_sec, stop = ro_sec }
           end
         end
-        -- Sort by start time
-        table.sort(events, function(a, b) return a.start < b.start end)
-        -- Bin-packing: count required tracks
-        local track_ends = {}  -- track_ends[i] = end time of track i
-        for _, evt in ipairs(events) do
-          local placed = false
-          for ti, te in ipairs(track_ends) do
-            if evt.start >= te then
-              track_ends[ti] = evt.stop
-              placed = true
-              break
-            end
-          end
-          if not placed then
-            table.insert(track_ends, evt.stop)
-          end
-        end
-        estimated_tracks = #track_ends
+        cons.preview_key = sel_key
+        cons.preview_tracks = CLB.pack_ordered(events)
       end
+      local estimated_tracks = cons.preview_tracks or 0
 
       reaper.ImGui_TextDisabled(ctx, string.format(
         "Selected: %d tracks, %d events -> ~%d track(s)",
@@ -9266,26 +9368,10 @@ local function draw_track_filter_panel()
           end
         end
 
-        -- Sort by start time
-        table.sort(events, function(a, b) return a.start < b.start end)
-
-        -- Bin-packing: assign track numbers
-        local track_ends = {}  -- track_ends[i] = end time of track i
+        -- Pack, keeping the original track order
+        CLB.pack_ordered(events)
         for _, evt in ipairs(events) do
-          local assigned_track = nil
-          for ti, te in ipairs(track_ends) do
-            if evt.start >= te then
-              track_ends[ti] = evt.stop
-              assigned_track = ti
-              break
-            end
-          end
-          if not assigned_track then
-            table.insert(track_ends, evt.stop)
-            assigned_track = #track_ends
-          end
-          -- Assign new track name
-          evt.row.track = prefix .. tostring(assigned_track)
+          evt.row.track = prefix .. tostring(evt.track_no)
         end
 
         -- Rebuild filters and refresh
