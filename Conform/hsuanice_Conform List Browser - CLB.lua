@@ -1,6 +1,6 @@
 --[[
 @description Conform List Browser - CLB: conform EDL / AAF / XML / OTIO / subtitle lists (GUI + Jump / Link / Load / Reveal)
-@version 26.1103.0116pre1
+@version 26.1103.0135pre1
 @author hsuanice
 @provides
   [main] .
@@ -12,8 +12,8 @@
   [nomain] ../Tools/aaf_to_otio.py
   [nomain] ../Tools/subtitle_to_clb.py
 @changelog
-  - Change: OTIO video tracks (AAF / XML) are always numbered — V1, V2, V3 ... instead of V, V2, V3
-  - New: AAF speed changes (Speed Control, incl. reverse) are read — Src TC Out covers the source actually used, and the Speed column shows the rate like an EDL M2 line
+  - New: Picture Cut button (under Consolidate) — flattens the video into a Picture Cut track/group: what is on screen, top footage layer only, lower layers trimmed with Src TC following (speed changes included). Text (titles), Image, Matte (generated / adjustment) and Overlay (scaled below 100%) move to their own groups and tracks; reframes (100% and up) stay footage. Re-running replaces the previous Picture Cut
+  - Change: Generate Items and Conform item notes also show Rec In/Out, speed changes and video reframe scale
 @about
   Note: the Compare view (old vs new cut, reconform) is a work in progress and not finished yet.
 
@@ -3277,8 +3277,9 @@ end
 --   fi/fo  fade in/out length (sec)      fis/fos  "power" | "linear"
 --   ei/eo  item extends this far before rec in / after rec out (sec) into
 --          a dissolve; the row's TCs (the cut) are never changed by it.
+--   sc     video only: smallest Video Scale (1 = 100%) — see video_kind
 
-CLB.MIX_KEYS = { "gain", "pan", "fi", "fis", "fo", "fos", "ei", "eo" }
+CLB.MIX_KEYS = { "gain", "pan", "fi", "fis", "fo", "fos", "ei", "eo", "sc" }
 
 --- row.mix -> "gain=4.4668;fi=1;fis=power;env=0.29:0.708,0.75:1" ("" if none)
 function CLB.mix_encode(mix)
@@ -3353,6 +3354,47 @@ function CLB.track_pans(rows, row_to_trackname)
     if not mixed[name] and p ~= 0 then out[name] = p end
   end
   return out
+end
+
+--- Extra item-note lines shared by Generate Items and Conform: Rec TC,
+--- speed change (aux_rate, from an EDL M2 line or an AAF Speed Control)
+--- and video reframe scale.
+function CLB.add_note_details(parts, row)
+  parts[#parts + 1] = "Rec In: " .. (row.rec_tc_in or "")
+  parts[#parts + 1] = "Rec Out: " .. (row.rec_tc_out or "")
+  if row.aux_rate and CLB.fps and CLB.fps > 0 then
+    local pct = row.aux_rate / CLB.fps * 100
+    parts[#parts + 1] = pct < 0
+      and string.format("Speed: reverse %.0f%% (source rate %.1f)", -pct, row.aux_rate)
+      or  string.format("Speed: %.0f%% (source rate %.1f)", pct, row.aux_rate)
+  end
+  local sc = row.mix and row.mix.sc
+  if sc and math.abs(sc - 1) > 1e-6 then
+    parts[#parts + 1] = string.format("%s: %.0f%%", sc >= 1 and "Reframed" or "Scaled", sc * 100)
+  end
+end
+
+--- Picture Cut category of a video row:
+---   "Text"    Avid Graphic / title (no media file, numeric name)
+---   "Matte"   other generated picture: Black Video (adjustment), Color
+---             Matte, Counting Leader ...
+---   "Image"   still image file
+---   "Overlay" footage shrunk below 100% (picture-in-picture)
+---   "Video"   footage — a reframe / push-in (scale >= 100%) still fills
+---             the frame, so it stays Video
+function CLB.video_kind(row)
+  local sf = row.source_file or ""
+  local fname = sf:match("([^/\\]+)$") or sf
+  local ext = (fname:match("%.([%w]+)$") or ""):lower()
+  if ext == "" then
+    if (row.clip_name or "") == "Graphic" or fname:match("^%d+$") then return "Text" end
+    return "Matte"
+  end
+  local images = { png = 1, jpg = 1, jpeg = 1, tif = 1, tiff = 1, psd = 1,
+                   bmp = 1, gif = 1, tga = 1, pict = 1, heic = 1 }
+  if images[ext] then return "Image" end
+  if row.mix and row.mix.sc and row.mix.sc < 1 - 1e-6 then return "Overlay" end
+  return "Video"
 end
 
 --- True when the row's source list is an AAF file.
@@ -5986,6 +6028,7 @@ local function generate_items()
         if row.take  and row.take  ~= "" then note_parts[#note_parts + 1] = "Take: "  .. row.take  end
         note_parts[#note_parts + 1] = "Src In: " .. (row.src_tc_in or "")
         note_parts[#note_parts + 1] = "Src Out: " .. (row.src_tc_out or "")
+        CLB.add_note_details(note_parts, row)
         if row.notes and row.notes ~= "" then
           note_parts[#note_parts + 1] = ""
           note_parts[#note_parts + 1] = row.notes
@@ -6569,6 +6612,7 @@ local function conform_matched_items(selected_only)
       if row.take  and row.take  ~= "" then note_parts[#note_parts + 1] = "Take: "  .. row.take  end
       note_parts[#note_parts + 1] = "Src In: " .. (row.src_tc_in or "")
       note_parts[#note_parts + 1] = "Src Out: " .. (row.src_tc_out or "")
+      CLB.add_note_details(note_parts, row)
       if #audio_files > 1 then
         note_parts[#note_parts + 1] = ""
         note_parts[#note_parts + 1] = string.format("(%d takes from multiple matches)", #audio_files)
@@ -7064,19 +7108,21 @@ end
 --- left sparse (or empty) still collapse.
 ---
 --- Layer of a row = its current track's position (V=1, V2=2, A5=5,
---- A3_L=3 ...; same number -> load order).
+--- A3_L=3 ...; same number -> load order) — CLB.track_layer.
 --- A row still on its loaded track is read through __orig_track, so a
 --- per-source name like "V1-2" (source 1, V2) counts as layer 2.
-function CLB.pack_ordered(evts)
-  local function layer_key(row)
-    local name = row.track or ""
-    local orig = row.__orig_track
-    if orig and (name == orig
-        or name == _rename_track_with_suffix(orig, row.__source_idx or 1)) then
-      name = orig
-    end
-    return tonumber(name:match("(%d+)")) or 1, name
+function CLB.track_layer(row)
+  local name = row.track or ""
+  local orig = row.__orig_track
+  if orig and (name == orig
+      or name == _rename_track_with_suffix(orig, row.__source_idx or 1)) then
+    name = orig
   end
+  return tonumber(name:match("(%d+)")) or 1, name
+end
+
+function CLB.pack_ordered(evts)
+  local layer_key = CLB.track_layer
 
   -- Events on one track don't overlap and are sorted by start (so also by
   -- stop): binary-search the last one starting before `stop`, then walk
@@ -7144,6 +7190,170 @@ function CLB.pack_ordered(evts)
     evt.track_no = assigned
   end
   return #tracks
+end
+
+---------------------------------------------------------------------------
+-- Picture Cut (flatten video)
+---------------------------------------------------------------------------
+--- Sort the video rows by kind (CLB.video_kind) and flatten the footage:
+---   - Text / Image / Matte / Overlay rows move to their own group and
+---     tracks ("Text 1", "Image 1", ...), packed keeping their order;
+---   - footage stays where it is, and a new "Picture Cut" track/group gets
+---     what is actually on screen: at each moment the top footage layer,
+---     lower layers trimmed where covered. Src TC follows each trim (speed
+---     changes included); fades are kept only on untrimmed edges.
+--- Re-running replaces the previous Picture Cut rows. Source rows' TCs
+--- are never changed.
+function CLB.build_picture_cut()
+  local KINDS = { Video = true, Text = true, Image = true, Matte = true, Overlay = true }
+  local keep, footage, by_kind = {}, {}, {}
+  for _, row in ipairs(ROWS) do
+    if row.group ~= "Picture Cut" then
+      keep[#keep + 1] = row
+      if KINDS[row.group or ""] or (row.group or "") == "" and _get_track_group(row.track) == "Video" then
+        local kind = CLB.video_kind(row)
+        if kind == "Video" then
+          footage[#footage + 1] = row
+        else
+          by_kind[kind] = by_kind[kind] or {}
+          table.insert(by_kind[kind], row)
+        end
+      end
+    end
+  end
+  if #footage == 0 then
+    reaper.ShowMessageBox("No video footage events found.", SCRIPT_NAME, 0)
+    return
+  end
+
+  local fps, is_drop = CLB.fps, CLB.is_drop
+  local function sec(tc) return EDL.tc_to_seconds(tc or "00:00:00:00", fps, is_drop) end
+
+  -- Flatten: sweep the cut points, keep the top layer at each interval.
+  local evs, bounds, seen = {}, {}, {}
+  for _, row in ipairs(footage) do
+    local a, b = sec(row.rec_tc_in), sec(row.rec_tc_out)
+    if b > a then
+      evs[#evs + 1] = { row = row, start = a, stop = b, layer = CLB.track_layer(row) }
+      for _, t in ipairs({ a, b }) do
+        if not seen[t] then seen[t] = true; bounds[#bounds + 1] = t end
+      end
+    end
+  end
+  table.sort(bounds)
+  table.sort(evs, function(x, y) return x.start < y.start end)
+
+  local segs, active, nxt = {}, {}, 1
+  for i = 1, #bounds - 1 do
+    local t0, t1 = bounds[i], bounds[i + 1]
+    while nxt <= #evs and evs[nxt].start <= t0 + 1e-9 do
+      active[#active + 1] = evs[nxt]; nxt = nxt + 1
+    end
+    local top
+    for k = #active, 1, -1 do
+      local e = active[k]
+      if e.stop <= t0 + 1e-9 then
+        table.remove(active, k)
+      elseif not top or e.layer > top.layer
+          or (e.layer == top.layer and e.start > top.start) then
+        top = e
+      end
+    end
+    if top then
+      local last = segs[#segs]
+      if last and last.ev == top and math.abs(last.stop - t0) < 1e-9 then
+        last.stop = t1
+      else
+        segs[#segs + 1] = { ev = top, start = t0, stop = t1 }
+      end
+    end
+  end
+
+  -- Preview
+  local n_text = by_kind.Text and #by_kind.Text or 0
+  local n_img = by_kind.Image and #by_kind.Image or 0
+  local n_matte = by_kind.Matte and #by_kind.Matte or 0
+  local n_over = by_kind.Overlay and #by_kind.Overlay or 0
+  local msg = string.format(
+    "Build Picture Cut?\n\n"
+    .. "  Footage: %d events -> Picture Cut: %d events (top layer only)\n"
+    .. "  Text: %d   Image: %d   Matte: %d   Overlay (scaled < 100%%): %d\n\n"
+    .. "Footage stays on its tracks. Picture Cut is added as its own\n"
+    .. "track/group; Text, Image, Matte and Overlay move to their own\n"
+    .. "groups and tracks. A previous Picture Cut is replaced.",
+    #footage, #segs, n_text, n_img, n_matte, n_over)
+  if reaper.ShowMessageBox(msg, SCRIPT_NAME, 1) ~= 1 then return end
+
+  ROWS = keep
+
+  for kind, rows in pairs(by_kind) do
+    local packed = {}
+    for _, row in ipairs(rows) do
+      packed[#packed + 1] = { row = row, start = sec(row.rec_tc_in), stop = sec(row.rec_tc_out) }
+    end
+    CLB.pack_ordered(packed)
+    for _, e in ipairs(packed) do
+      e.row.group = kind
+      e.row.track = kind .. " " .. e.track_no
+    end
+  end
+  for _, row in ipairs(footage) do row.group = "Video" end
+
+  for _, sg in ipairs(segs) do
+    local src = sg.ev.row
+    local speed = (src.aux_rate and fps > 0) and math.abs(src.aux_rate) / fps or 1
+    local src_in = sec(src.src_tc_in) + (sg.start - sg.ev.start) * speed
+    local row = {}
+    for k, v in pairs(src) do row[k] = v end
+    _guid_counter = _guid_counter + 1
+    row.__event_idx = _guid_counter
+    row.__guid = string.format("clb_%06d", _guid_counter)
+    row.__orig_track = "Picture Cut"
+    row.__reaper_item = nil
+    row.reaper_item_guid = nil
+    row.track = "Picture Cut"
+    row.group = "Picture Cut"
+    row.rec_tc_in = EDL.seconds_to_tc(sg.start, fps, is_drop)
+    row.rec_tc_out = EDL.seconds_to_tc(sg.stop, fps, is_drop)
+    row.src_tc_in = EDL.seconds_to_tc(src_in, fps, is_drop)
+    row.src_tc_out = EDL.seconds_to_tc(src_in + (sg.stop - sg.start) * speed, fps, is_drop)
+    row.duration = EDL.seconds_to_tc(sg.stop - sg.start, fps, is_drop)
+    if src.mix then
+      local m = {}
+      for k, v in pairs(src.mix) do m[k] = v end
+      if sg.start > sg.ev.start + 1e-9 then m.fi, m.fis, m.ei = nil, nil, nil end
+      if sg.stop < sg.ev.stop - 1e-9 then m.fo, m.fos, m.eo = nil, nil, nil end
+      row.mix = next(m) and m or nil
+    end
+    row.__search_text = table.concat({
+      row.event_num or "", row.reel or "", row.track,
+      row.clip_name or "", row.source_file or "", row.notes or "",
+      row.group, row.level or "",
+      row.scene or "", row.take or "",
+      row.src_tc_in, row.src_tc_out,
+      row.rec_tc_in, row.rec_tc_out,
+      row.duration,
+    }, " "):lower()
+    ROWS[#ROWS + 1] = row
+  end
+
+  local src_counts = {}
+  for _, row in ipairs(ROWS) do
+    local si = row.__source_idx or 0
+    src_counts[si] = (src_counts[si] or 0) + 1
+  end
+  for i, src in ipairs(CLB.edl_sources) do src.event_count = src_counts[i] or 0 end
+
+  sel_clear()
+  EDIT = nil
+  _rebuild_track_filters()
+  _rebuild_reel_filters()
+  _rebuild_group_filters()
+  CLB.cached_rows = nil
+  undo_snapshot()
+  console_msg(string.format(
+    "Picture Cut: %d events from %d footage events; Text %d, Image %d, Matte %d, Overlay %d",
+    #segs, #footage, n_text, n_img, n_matte, n_over))
 end
 
 ---------------------------------------------------------------------------
@@ -9141,6 +9351,20 @@ function CLB.draw_left_sidebar()
     reaper.ImGui_BeginTooltip(ctx)
     reaper.ImGui_Text(ctx, "Consolidate tracks by group (pack + renumber, keeps track order)")
     reaper.ImGui_EndTooltip(ctx)
+  end
+
+  -- Picture Cut button (flatten video, sort Text / Image / Matte / Overlay)
+  CLB.push_btn_color("list")
+  local picture_cut_clicked = reaper.ImGui_Button(ctx, "Picture Cut", btn_w, btn_h)
+  CLB.pop_btn_color("list")
+  if picture_cut_clicked then
+    CLB.build_picture_cut()
+  end
+  if reaper.ImGui_IsItemHovered(ctx) then
+    reaper.ImGui_SetTooltip(ctx,
+      "Flatten the video into a \"Picture Cut\" track: what is on screen,\n"
+      .. "top footage layer only. Text, Image, Matte and Overlay (scaled\n"
+      .. "below 100%) move to their own groups and tracks.")
   end
 
   reaper.ImGui_Spacing(ctx)

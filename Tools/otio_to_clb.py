@@ -1065,6 +1065,7 @@ def _aaf_mix(clip, track, prev_tr, next_tr, before, after, is_audio):
              normalized so its loudest point is 1.0 (the rest is in gain)
       pan    -1 (L) .. 1 (R), from the track's Mono Audio Pan
       fi/fo  fade in/out length (sec); fis/fos shape: 'power' | 'linear'
+      sc     video only: smallest Video Scale (1.0 = 100%)
       ei/eo  how far the item extends before rec in / after rec out (sec)
              into a dissolve — the clip's TC range itself is unchanged
     A dissolve to/from filler is a fade; between two clips it is a
@@ -1083,6 +1084,21 @@ def _aaf_mix(clip, track, prev_tr, next_tr, before, after, is_audio):
         mix["fo"] = (next_tr.in_offset + next_tr.out_offset).to_seconds()
         mix["fos"] = _fade_shape(next_tr, isinstance(after, otio.schema.Clip))
     if not is_audio:
+        # Video Scale: smallest scale over X/Y and every keyframe — < 1 is
+        # a shrunk picture-in-picture (CLB's Picture Cut puts it on an
+        # Overlay track), >= 1 a reframe / push-in that still fills frame.
+        for e in clip.effects:
+            if e.name != "Video Scale":
+                continue
+            params = _aaf_params(e.metadata.get("AAF"))
+            vals = []
+            for axis in ("ScaleX", "ScaleY"):
+                const, pts, _ = _aaf_param(params, axis)
+                if const is not None:
+                    vals.append(const)
+                vals += [x for _, x in (pts or [])]
+            if vals:
+                mix["sc"] = min(vals + [mix.get("sc", min(vals))])
         return mix
 
     # Gain: Mono Audio Gain on the clip (constant clip gain and/or keyframed

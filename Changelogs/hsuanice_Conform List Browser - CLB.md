@@ -4,6 +4,11 @@
 
 Conform List Browser
 
+## 26.1103.0135pre1
+
+- New: Picture Cut button (under Consolidate) — flattens the video into a Picture Cut track/group: what is on screen, top footage layer only, lower layers trimmed with Src TC following (speed changes included). Text (titles), Image, Matte (generated / adjustment) and Overlay (scaled below 100%) move to their own groups and tracks; reframes (100% and up) stay footage. Re-running replaces the previous Picture Cut
+- Change: Generate Items and Conform item notes also show Rec In/Out, speed changes and video reframe scale
+
 ## 26.1103.0116pre1
 
 - Change: OTIO video tracks (AAF / XML) are always numbered — V1, V2, V3 ... instead of V, V2, V3
