@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<index version="1" name="hsuanice Scripts" commit="251d3475bb6d1631742e63a80842099bada9a87a">
+<index version="1" name="hsuanice Scripts" commit="68647b3245bad96528fb448624e8e5dddacad9f9">
   <category name="Conform">
     <reapack name="hsuanice_Conform List Browser - CLB.lua" type="script" desc="Conform List Browser - CLB: conform EDL / AAF / XML / OTIO / subtitle lists (GUI + Jump / Link / Load / Reveal)">
       <metadata>
@@ -145,6 +145,32 @@
         <source file="../Tools/otio_to_clb.py">https://github.com/hsuanice/ReaScripts/raw/251d3475bb6d1631742e63a80842099bada9a87a/Tools/otio_to_clb.py</source>
         <source file="../Tools/aaf_to_otio.py">https://github.com/hsuanice/ReaScripts/raw/251d3475bb6d1631742e63a80842099bada9a87a/Tools/aaf_to_otio.py</source>
         <source file="../Tools/subtitle_to_clb.py">https://github.com/hsuanice/ReaScripts/raw/251d3475bb6d1631742e63a80842099bada9a87a/Tools/subtitle_to_clb.py</source>
+      </version>
+      <version name="26.1103.0018pre1" author="hsuanice" time="2026-11-02T16:19:11Z">
+        <changelog><![CDATA[- New: Restore Mix (checkbox under Generate Items, on by default) — Generate Items and Conform restore each AAF audio clip's gain, volume automation (as a take volume envelope), pan, fades and crossfades; fade shapes follow the AAF (Equal Power or Linear), Equal Power when it says nothing; saved in .clb projects]]></changelog>
+        <source main="main">https://github.com/hsuanice/ReaScripts/raw/667b00cda29553ba9ccd81ffe5acc8ef8342138e/Conform/hsuanice_Conform%20List%20Browser%20-%20CLB.lua</source>
+        <source main="main" file="hsuanice_Conform List Browser - CLB Jump Old New TC.lua">https://github.com/hsuanice/ReaScripts/raw/667b00cda29553ba9ccd81ffe5acc8ef8342138e/Conform/hsuanice_Conform%20List%20Browser%20-%20CLB%20Jump%20Old%20New%20TC.lua</source>
+        <source main="main" file="hsuanice_Conform List Browser - CLB Link REAPER Items.lua">https://github.com/hsuanice/ReaScripts/raw/667b00cda29553ba9ccd81ffe5acc8ef8342138e/Conform/hsuanice_Conform%20List%20Browser%20-%20CLB%20Link%20REAPER%20Items.lua</source>
+        <source main="main" file="hsuanice_Conform List Browser - CLB Load from REAPER.lua">https://github.com/hsuanice/ReaScripts/raw/667b00cda29553ba9ccd81ffe5acc8ef8342138e/Conform/hsuanice_Conform%20List%20Browser%20-%20CLB%20Load%20from%20REAPER.lua</source>
+        <source main="main" file="hsuanice_Conform List Browser - CLB Reveal Item.lua">https://github.com/hsuanice/ReaScripts/raw/667b00cda29553ba9ccd81ffe5acc8ef8342138e/Conform/hsuanice_Conform%20List%20Browser%20-%20CLB%20Reveal%20Item.lua</source>
+        <source file="../Tools/otio_to_clb.py">https://github.com/hsuanice/ReaScripts/raw/667b00cda29553ba9ccd81ffe5acc8ef8342138e/Tools/otio_to_clb.py</source>
+        <source file="../Tools/aaf_to_otio.py">https://github.com/hsuanice/ReaScripts/raw/667b00cda29553ba9ccd81ffe5acc8ef8342138e/Tools/aaf_to_otio.py</source>
+        <source file="../Tools/subtitle_to_clb.py">https://github.com/hsuanice/ReaScripts/raw/667b00cda29553ba9ccd81ffe5acc8ef8342138e/Tools/subtitle_to_clb.py</source>
+      </version>
+      <version name="26.1103.0053pre1" author="hsuanice" time="2026-11-02T16:54:13Z">
+        <changelog><![CDATA[- Change: AAF audio tracks keep the AAF's own track numbering and order (A1, A2, A3_L, A3_R, A3 ...) instead of A1-A38; Generate Items, Conform and Consolidate keep that order
+- New: video clips restore their fades and crossfades too
+- Change: a fade the AAF gives no shape for is Linear; a crossfade with no shape is Equal Power
+- Change: a generated track whose clips all share one pan (e.g. every clip on A3_L panned left) gets it as track pan instead of take pan
+- Change: conformed AAF takes are named by clip name instead of the media file name]]></changelog>
+        <source main="main">https://github.com/hsuanice/ReaScripts/raw/68647b3245bad96528fb448624e8e5dddacad9f9/Conform/hsuanice_Conform%20List%20Browser%20-%20CLB.lua</source>
+        <source main="main" file="hsuanice_Conform List Browser - CLB Jump Old New TC.lua">https://github.com/hsuanice/ReaScripts/raw/68647b3245bad96528fb448624e8e5dddacad9f9/Conform/hsuanice_Conform%20List%20Browser%20-%20CLB%20Jump%20Old%20New%20TC.lua</source>
+        <source main="main" file="hsuanice_Conform List Browser - CLB Link REAPER Items.lua">https://github.com/hsuanice/ReaScripts/raw/68647b3245bad96528fb448624e8e5dddacad9f9/Conform/hsuanice_Conform%20List%20Browser%20-%20CLB%20Link%20REAPER%20Items.lua</source>
+        <source main="main" file="hsuanice_Conform List Browser - CLB Load from REAPER.lua">https://github.com/hsuanice/ReaScripts/raw/68647b3245bad96528fb448624e8e5dddacad9f9/Conform/hsuanice_Conform%20List%20Browser%20-%20CLB%20Load%20from%20REAPER.lua</source>
+        <source main="main" file="hsuanice_Conform List Browser - CLB Reveal Item.lua">https://github.com/hsuanice/ReaScripts/raw/68647b3245bad96528fb448624e8e5dddacad9f9/Conform/hsuanice_Conform%20List%20Browser%20-%20CLB%20Reveal%20Item.lua</source>
+        <source file="../Tools/otio_to_clb.py">https://github.com/hsuanice/ReaScripts/raw/68647b3245bad96528fb448624e8e5dddacad9f9/Tools/otio_to_clb.py</source>
+        <source file="../Tools/aaf_to_otio.py">https://github.com/hsuanice/ReaScripts/raw/68647b3245bad96528fb448624e8e5dddacad9f9/Tools/aaf_to_otio.py</source>
+        <source file="../Tools/subtitle_to_clb.py">https://github.com/hsuanice/ReaScripts/raw/68647b3245bad96528fb448624e8e5dddacad9f9/Tools/subtitle_to_clb.py</source>
       </version>
     </reapack>
   </category>
@@ -1907,6 +1933,29 @@
         <source file="hsuanice_Process Exec.lua">https://github.com/hsuanice/ReaScripts/raw/aaf1d5e915db7ed903a110478607887c1ec109e4/Library/hsuanice_Process%20Exec.lua</source>
         <source file="hsuanice_Fade Tool Core.lua">https://github.com/hsuanice/ReaScripts/raw/aaf1d5e915db7ed903a110478607887c1ec109e4/Library/hsuanice_Fade%20Tool%20Core.lua</source>
         <source file="json.lua">https://github.com/hsuanice/ReaScripts/raw/aaf1d5e915db7ed903a110478607887c1ec109e4/Library/json.lua</source>
+      </version>
+      <version name="26.1103.0018pre1" author="hsuanice" time="2026-11-02T16:19:11Z">
+        <changelog><![CDATA[- OTIO Bridge: AAF events carry their audio mix (gain, automation, pan, fades)]]></changelog>
+        <source file="hsuanice_RGWH Core.lua">https://github.com/hsuanice/ReaScripts/raw/667b00cda29553ba9ccd81ffe5acc8ef8342138e/Library/hsuanice_RGWH%20Core.lua</source>
+        <source file="hsuanice_AudioSweet Core.lua">https://github.com/hsuanice/ReaScripts/raw/667b00cda29553ba9ccd81ffe5acc8ef8342138e/Library/hsuanice_AudioSweet%20Core.lua</source>
+        <source file="hsuanice_AS Preview Core.lua">https://github.com/hsuanice/ReaScripts/raw/667b00cda29553ba9ccd81ffe5acc8ef8342138e/Library/hsuanice_AS%20Preview%20Core.lua</source>
+        <source file="hsuanice_Metadata Embed.lua">https://github.com/hsuanice/ReaScripts/raw/667b00cda29553ba9ccd81ffe5acc8ef8342138e/Library/hsuanice_Metadata%20Embed.lua</source>
+        <source file="hsuanice_Metadata Read.lua">https://github.com/hsuanice/ReaScripts/raw/667b00cda29553ba9ccd81ffe5acc8ef8342138e/Library/hsuanice_Metadata%20Read.lua</source>
+        <source file="hsuanice_Hover.lua">https://github.com/hsuanice/ReaScripts/raw/667b00cda29553ba9ccd81ffe5acc8ef8342138e/Library/hsuanice_Hover.lua</source>
+        <source file="hsuanice_Mouse.lua">https://github.com/hsuanice/ReaScripts/raw/667b00cda29553ba9ccd81ffe5acc8ef8342138e/Library/hsuanice_Mouse.lua</source>
+        <source file="hsuanice_Metadata Cache.lua">https://github.com/hsuanice/ReaScripts/raw/667b00cda29553ba9ccd81ffe5acc8ef8342138e/Library/hsuanice_Metadata%20Cache.lua</source>
+        <source file="hsuanice_Metadata Rename Core.lua">https://github.com/hsuanice/ReaScripts/raw/667b00cda29553ba9ccd81ffe5acc8ef8342138e/Library/hsuanice_Metadata%20Rename%20Core.lua</source>
+        <source file="hsuanice_List Table.lua">https://github.com/hsuanice/ReaScripts/raw/667b00cda29553ba9ccd81ffe5acc8ef8342138e/Library/hsuanice_List%20Table.lua</source>
+        <source file="hsuanice_Time Format.lua">https://github.com/hsuanice/ReaScripts/raw/667b00cda29553ba9ccd81ffe5acc8ef8342138e/Library/hsuanice_Time%20Format.lua</source>
+        <source file="hsuanice_Metadata Generator.lua">https://github.com/hsuanice/ReaScripts/raw/667b00cda29553ba9ccd81ffe5acc8ef8342138e/Library/hsuanice_Metadata%20Generator.lua</source>
+        <source file="hsuanice_CLB Compare Engine.lua">https://github.com/hsuanice/ReaScripts/raw/667b00cda29553ba9ccd81ffe5acc8ef8342138e/Library/hsuanice_CLB%20Compare%20Engine.lua</source>
+        <source file="hsuanice_EDL Parser.lua">https://github.com/hsuanice/ReaScripts/raw/667b00cda29553ba9ccd81ffe5acc8ef8342138e/Library/hsuanice_EDL%20Parser.lua</source>
+        <source file="hsuanice_Session Fix Core.lua">https://github.com/hsuanice/ReaScripts/raw/667b00cda29553ba9ccd81ffe5acc8ef8342138e/Library/hsuanice_Session%20Fix%20Core.lua</source>
+        <source file="hsuanice_OTIO Bridge.lua">https://github.com/hsuanice/ReaScripts/raw/667b00cda29553ba9ccd81ffe5acc8ef8342138e/Library/hsuanice_OTIO%20Bridge.lua</source>
+        <source file="hsuanice_Subtitle Bridge.lua">https://github.com/hsuanice/ReaScripts/raw/667b00cda29553ba9ccd81ffe5acc8ef8342138e/Library/hsuanice_Subtitle%20Bridge.lua</source>
+        <source file="hsuanice_Process Exec.lua">https://github.com/hsuanice/ReaScripts/raw/667b00cda29553ba9ccd81ffe5acc8ef8342138e/Library/hsuanice_Process%20Exec.lua</source>
+        <source file="hsuanice_Fade Tool Core.lua">https://github.com/hsuanice/ReaScripts/raw/667b00cda29553ba9ccd81ffe5acc8ef8342138e/Library/hsuanice_Fade%20Tool%20Core.lua</source>
+        <source file="json.lua">https://github.com/hsuanice/ReaScripts/raw/667b00cda29553ba9ccd81ffe5acc8ef8342138e/Library/json.lua</source>
       </version>
     </reapack>
   </category>
