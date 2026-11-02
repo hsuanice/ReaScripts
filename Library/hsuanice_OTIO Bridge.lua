@@ -1,11 +1,10 @@
 --[[
 @description hsuanice_OTIO Bridge.lua
-@version 26.1012.1206
+@version 26.1103.0018pre1
 @author hsuanice
 @noindex
 @changelog
-  - Released as part of the 26.1012.1206 package update.
-  - Full history: Changelogs/ in the repository (https://github.com/hsuanice/ReaScripts/tree/master/Changelogs)
+  - New: AAF events carry their audio mix (gain, automation, pan, fades) through to CLB
 @about
   v0.4.1
   Calls the OpenTimelineIO Python wrapper (Tools/otio_to_clb.py) and converts
@@ -321,6 +320,7 @@ function M._to_parsed(data, source_path, default_fps)
       source_file      = ev.source_file or "",
       scene            = ev.scene       or "",
       take             = ev.take        or "",
+      mix              = ev.mix,                  -- AAF audio gain/automation/pan/fades, or nil
       comments         = {},
       -- Pre-computed (same fields that EDL.parse() produces)
       duration_seconds = dur_sec,

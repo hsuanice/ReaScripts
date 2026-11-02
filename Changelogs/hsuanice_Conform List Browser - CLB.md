@@ -4,6 +4,10 @@
 
 Conform List Browser
 
+## 26.1103.0018pre1
+
+- New: Restore Mix (checkbox under Generate Items, on by default) — Generate Items and Conform restore each AAF audio clip's gain, volume automation (as a take volume envelope), pan, fades and crossfades; fade shapes follow the AAF (Equal Power or Linear), Equal Power when it says nothing; saved in .clb projects
+
 ## 26.1102.2353pre1
 
 - Change: loading several files whose time ranges don't overlap (e.g. one AAF per reel) shares tracks — every reel's V2 stays V2, A5 stays A5 — instead of adding a separate set of tracks per file; files that overlap in time still get per-file track names

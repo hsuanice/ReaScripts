@@ -1,5 +1,9 @@
 # hsuanice_Library.lua — Changelog
 
+## 26.1103.0018pre1
+
+- OTIO Bridge: AAF events carry their audio mix (gain, automation, pan, fades)
+
 ## 26.1101.1425
 
 - Session Fix Core: Scene cuts check with Mark as OK; report positions (tested)

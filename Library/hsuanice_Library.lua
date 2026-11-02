@@ -1,6 +1,6 @@
 --[[
 @description hsuanice Library - shared code used by hsuanice scripts (required)
-@version 26.1101.1425
+@version 26.1103.0018pre1
 @author hsuanice
 @metapackage
 @provides
@@ -25,7 +25,7 @@
   [nomain] hsuanice_Fade Tool Core.lua
   [nomain] json.lua
 @changelog
-  - Session Fix Core: Scene cuts check with Mark as OK; report positions (tested)
+  - OTIO Bridge: AAF events carry their audio mix (gain, automation, pan, fades)
 @about
   # hsuanice Library
 

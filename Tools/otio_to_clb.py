@@ -812,6 +812,14 @@ def _timeline_to_clb(tl, fmt, progress_file=""):
             src_in  = _rt_to_tc(src_start, fps, is_drop, ot)
             src_out = _rt_to_tc(src_end,   fps, is_drop, ot)
 
+            # Audio mix (AAF only for now): gain, automation, pan, fades
+            mix = {}
+            if fmt == "AAF" and kind == otio_inner.schema.TrackKind.Audio:
+                nxt = children[i + 1] if i + 1 < len(children) else None
+                mix = _aaf_audio_mix(
+                    clip, track, pending_transition,
+                    nxt if isinstance(nxt, otio_inner.schema.Transition) else None)
+
             # Edit type / dissolve
             edit_type    = "C"
             dissolve_len = None
@@ -884,6 +892,8 @@ def _timeline_to_clb(tl, fmt, progress_file=""):
                 "scene":        scene,
                 "take":         take,
             })
+            if mix:
+                events[-1]["mix"] = mix
 
     return {
         "format":   fmt,
@@ -911,6 +921,142 @@ def _load_otio(path, progress_file=""):
     _write_progress(progress_file, "parsing", 0, 0, Path(path).name)
     tl = otio.adapters.read_from_file(path, adapter_name="otio_json")
     return _timeline_to_clb(tl, "OTIO", progress_file)
+
+
+# ---------------------------------------------------------------------------
+# AAF audio mix: clip gain, volume automation, pan, fades
+# ---------------------------------------------------------------------------
+
+# Avid writes most audio dissolves with PowerInterp (equal power); the OTIO
+# AAF adapter only knows Constant/Linear/Bezier/Cubic and reports every
+# other interpolation as "Linear". Teach it PowerInterp so fade shapes
+# survive. AUID from the AAF dictionary of a Media Composer export.
+_POWER_INTERP_AUID = "c09153f7-bd18-4e5a-ad09-cbdd654fa001"
+
+
+def _register_power_interp():
+    # Patch the module instance OTIO's plugin loader actually uses (it loads
+    # adapters by file path, separate from a plain import of the package).
+    try:
+        import aaf2.auid
+        import opentimelineio as otio
+        aafa = otio.adapters.from_name("AAF").module()
+        aafa._PROPERTY_INTERPOLATION_MAP.setdefault(
+            aaf2.auid.AUID(_POWER_INTERP_AUID), "Power")
+    except Exception:
+        pass
+
+
+def _aaf_params(meta):
+    """Parameters dict of an AAF OperationGroup's OTIO metadata."""
+    p = (meta or {}).get("Parameters")
+    if isinstance(p, str):
+        import ast
+        try:
+            p = ast.literal_eval(p)
+        except (ValueError, SyntaxError):
+            return {}
+    return p if hasattr(p, "get") else {}
+
+
+def _aaf_number(v):
+    """'316227776/100000000' / number -> float (None if not numeric)."""
+    if isinstance(v, (int, float)):
+        return float(v)
+    if isinstance(v, str):
+        m = re.match(r"^\s*(-?\d+(?:\.\d+)?)\s*/\s*(\d+(?:\.\d+)?)\s*$", v)
+        if m:
+            den = float(m.group(2))
+            return float(m.group(1)) / den if den else None
+        try:
+            return float(v)
+        except ValueError:
+            return None
+    return None
+
+
+def _aaf_param(params, name):
+    """
+    One AAF parameter -> (constant, keyframes, interpolation).
+    constant is a float for a ConstantValue (or a keyframed value that never
+    changes); keyframes is [(t 0..1, value), ...] for a real curve.
+    """
+    v = params.get(name)
+    if v is None:
+        return None, None, None
+    if hasattr(v, "get"):
+        pts = [(float(t), float(x)) for t, x in (v.get("keyframe_values") or [])]
+        interp = v.get("keyframe_interpolation")
+        if not pts:
+            return None, None, interp
+        if len({round(x, 6) for _, x in pts}) == 1:
+            return pts[0][1], None, interp
+        return None, pts, interp
+    return _aaf_number(v), None, None
+
+
+def _fade_shape(transition):
+    """'power' or 'linear' from an audio dissolve; 'power' when unknown."""
+    og = (transition.metadata.get("AAF") or {}).get("OperationGroup") or {}
+    _, _, interp = _aaf_param(_aaf_params(og), "Level")
+    return "linear" if interp == "Linear" else "power"
+
+
+def _aaf_audio_mix(clip, track, prev_tr, next_tr):
+    """
+    Mix data of one AAF audio clip, for Generate Items / Conform to restore:
+      gain   item volume (amplitude; 0 = muted)
+      env    take volume envelope [[sec from item start, amplitude], ...],
+             normalized so its loudest point is 1.0 (the rest is in gain)
+      pan    -1 (L) .. 1 (R), from the track's Mono Audio Pan
+      fi/fo  fade in/out length (sec); fis/fos shape: 'power' | 'linear'
+      ei/eo  how far the item extends before rec in / after rec out (sec)
+             into a dissolve — the clip's TC range itself is unchanged
+    A dissolve to/from filler is a fade; between two clips it is a
+    crossfade (both items overlap and fade). Returns {} when there is
+    nothing to restore.
+    """
+    mix = {}
+    if prev_tr is not None:
+        mix["ei"] = prev_tr.in_offset.to_seconds()
+        mix["fi"] = (prev_tr.in_offset + prev_tr.out_offset).to_seconds()
+        mix["fis"] = _fade_shape(prev_tr)
+    if next_tr is not None:
+        mix["eo"] = next_tr.out_offset.to_seconds()
+        mix["fo"] = (next_tr.in_offset + next_tr.out_offset).to_seconds()
+        mix["fos"] = _fade_shape(next_tr)
+
+    # Gain: Mono Audio Gain on the clip (constant clip gain and/or keyframed
+    # automation; several nested gains multiply). Keyframe times are 0..1 of
+    # the effect's span = clip + both dissolve extensions = the item length.
+    gain, env = 1.0, None
+    span = clip.range_in_parent().duration.to_seconds() + mix.get("ei", 0) + mix.get("eo", 0)
+    for e in clip.effects:
+        if e.name != "Mono Audio Gain":
+            continue
+        const, pts, _ = _aaf_param(_aaf_params(e.metadata.get("AAF")), "Amplitude multiplier")
+        if pts and env is None:
+            env = [[t * span, x] for t, x in pts]
+        elif pts:
+            gain *= max(x for _, x in pts)
+        elif const is not None:
+            gain *= const
+    if env:
+        peak = max(x for _, x in env)
+        if peak > 0:
+            gain *= peak
+            env = [[t, x / peak] for t, x in env]
+        mix["env"] = env
+    if abs(gain - 1.0) > 1e-6:
+        mix["gain"] = gain
+
+    # Pan: Mono Audio Pan on the track (AAF 0 = left, 0.5 = center, 1 = right)
+    for e in track.effects:
+        if e.name == "Mono Audio Pan":
+            p, _, _ = _aaf_param(_aaf_params(e.metadata.get("AAF")), "Pan value")
+            if p is not None and abs(p - 0.5) > 1e-6:
+                mix["pan"] = max(-1.0, min(1.0, p * 2.0 - 1.0))
+    return mix
 
 
 def _pick_main_timeline(collection, path):
@@ -957,6 +1103,7 @@ def _load_aaf(path, progress_file=""):
 
     # Prefer native OTIO AAF adapter: gives correct absolute source TC
     try:
+        _register_power_interp()
         tl = otio.adapters.read_from_file(path, adapter_name="AAF")
         warning = ""
         if isinstance(tl, otio.schema.SerializableCollection):

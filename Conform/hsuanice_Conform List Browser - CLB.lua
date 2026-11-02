@@ -1,6 +1,6 @@
 --[[
 @description Conform List Browser - CLB: conform EDL / AAF / XML / OTIO / subtitle lists (GUI + Jump / Link / Load / Reveal)
-@version 26.1102.2353pre1
+@version 26.1103.0018pre1
 @author hsuanice
 @provides
   [main] .
@@ -12,8 +12,7 @@
   [nomain] ../Tools/aaf_to_otio.py
   [nomain] ../Tools/subtitle_to_clb.py
 @changelog
-  - Change: loading several files whose time ranges don't overlap (e.g. one AAF per reel) shares tracks — every reel's V2 stays V2, A5 stays A5 — instead of adding a separate set of tracks per file; files that overlap in time still get per-file track names
-  - Change: Consolidate and Consolidate Tracks... keep the original track order — an event can share a track with anything it doesn't overlap, but always stays above overlapping events from lower tracks, so video layering is preserved
+  - New: Restore Mix (checkbox under Generate Items, on by default) — Generate Items and Conform restore each AAF audio clip's gain, volume automation (as a take volume envelope), pan, fades and crossfades; fade shapes follow the AAF (Equal Power or Linear), Equal Power when it says nothing; saved in .clb projects
 @about
   Note: the Compare view (old vs new cut, reconform) is a work in progress and not finished yet.
 
@@ -503,6 +502,11 @@ local CLB = {
   -- plain "just read the selection into a list" action never surprises
   -- with an automatic match the user didn't ask for that run.
   ref_load_auto_match = false,
+
+  -- Generate Items / Conform: restore the list's audio mix (clip gain,
+  -- volume automation, pan, fades — read from AAF, see row.mix).
+  -- Persisted, on by default.
+  restore_mix = true,
 
   -- "Follow Reaper" (see CLB.reveal_reaper_item): when on, selecting an
   -- item in Reaper reveals its event row(s). Persisted, off by default.
@@ -2039,6 +2043,7 @@ local function save_prefs()
   reaper.SetExtState(EXT_NS, "ref_media_name_format", CLB.ref_media_name_format or "!CLB_Mute_${timestamp}", true)
   reaper.SetExtState(EXT_NS, "ref_media_scope", CLB.ref_media_scope or "visible", true)
   reaper.SetExtState(EXT_NS, "ref_load_auto_match", CLB.ref_load_auto_match and "1" or "0", true)
+  reaper.SetExtState(EXT_NS, "restore_mix", CLB.restore_mix and "1" or "0", true)
   reaper.SetExtState(EXT_NS, "follow_reaper_sel", CLB.follow_reaper_sel and "1" or "0", true)
   reaper.SetExtState(EXT_NS, "ref_load_merge_mode", CLB.ref_load_merge_mode or "ask", true)
   reaper.SetExtState(EXT_NS, "last_dir", CLB.last_dir or "", true)
@@ -2125,6 +2130,7 @@ local function load_prefs()
     CLB.ref_media_scope = "visible"
   end
   CLB.ref_load_auto_match = get("ref_load_auto_match", "0") == "1"
+  CLB.restore_mix = get("restore_mix", "1") == "1"
   CLB.follow_reaper_sel = get("follow_reaper_sel", "0") == "1"
   CLB.ref_load_merge_mode = get("ref_load_merge_mode", "ask")
   if CLB.ref_load_merge_mode ~= "ask" and CLB.ref_load_merge_mode ~= "replace" and CLB.ref_load_merge_mode ~= "append" then
@@ -2866,6 +2872,10 @@ local function _make_rows_from_events(events, fps, is_drop, source_idx)
       -- not otherwise acted on (see CLB.generate_reference_media).
       aux_rate = evt.aux_rate,
 
+      -- Audio mix from the AAF (gain, automation, pan, fades) — restored
+      -- by Generate Items / Conform, see CLB.apply_mix. nil = none.
+      mix = evt.mix,
+
       -- Only ever set by CLB.load_from_reaper_selection — a direct link
       -- back to the real Reaper item this row was read from, so Clip
       -- Name can jump/select it (see the main table's click handler) and
@@ -3257,6 +3267,142 @@ local function _clb_escape(s)
   return s
 end
 
+---------------------------------------------------------------------------
+-- Audio mix (row.mix): clip gain, volume automation, pan, fades
+---------------------------------------------------------------------------
+-- row.mix comes from Tools/otio_to_clb.py (AAF audio clips only):
+--   gain   item volume (amplitude)       pan   take pan, -1 (L) .. 1 (R)
+--   env    take volume envelope { {sec from item start, amplitude}, ... }
+--   fi/fo  fade in/out length (sec)      fis/fos  "power" | "linear"
+--   ei/eo  item extends this far before rec in / after rec out (sec) into
+--          a dissolve; the row's TCs (the cut) are never changed by it.
+
+CLB.MIX_KEYS = { "gain", "pan", "fi", "fis", "fo", "fos", "ei", "eo" }
+
+--- row.mix -> "gain=4.4668;fi=1;fis=power;env=0.29:0.708,0.75:1" ("" if none)
+function CLB.mix_encode(mix)
+  if not mix then return "" end
+  local parts = {}
+  for _, k in ipairs(CLB.MIX_KEYS) do
+    local v = mix[k]
+    if v ~= nil then
+      parts[#parts + 1] = k .. "=" .. (type(v) == "number" and string.format("%.9g", v) or tostring(v))
+    end
+  end
+  if mix.env and #mix.env > 0 then
+    local pts = {}
+    for _, pt in ipairs(mix.env) do
+      pts[#pts + 1] = string.format("%.9g:%.9g", pt[1], pt[2])
+    end
+    parts[#parts + 1] = "env=" .. table.concat(pts, ",")
+  end
+  return table.concat(parts, ";")
+end
+
+--- Inverse of CLB.mix_encode; nil for "" / nil.
+function CLB.mix_decode(str)
+  if not str or str == "" then return nil end
+  local mix = {}
+  for k, v in str:gmatch("([%w_]+)=([^;]*)") do
+    if k == "env" then
+      mix.env = {}
+      for t, a in v:gmatch("([^:,]+):([^,]+)") do
+        mix.env[#mix.env + 1] = { tonumber(t), tonumber(a) }
+      end
+    elseif k == "fis" or k == "fos" then
+      mix[k] = v
+    else
+      mix[k] = tonumber(v)
+    end
+  end
+  return next(mix) and mix or nil
+end
+
+--- Restore row.mix on a freshly created item: volume, pan, fades and the
+--- take volume envelope. extend = also move/lengthen the item into its
+--- dissolves (ei/eo) — never for an existing linked item. Takes with a
+--- source are slid back by the same amount so the cut stays in sync;
+--- if a take lacks that much handle, the extension shrinks to fit.
+--- Fade shape "power" = REAPER Equal Power (7), "linear" = 0; each
+--- length is written before its shape (a length write resets the shape).
+function CLB.apply_mix(item, row, extend)
+  local mix = row and row.mix
+  if not CLB.restore_mix or not mix then return end
+
+  local ei, eo = mix.ei or 0, mix.eo or 0
+  if extend and (ei > 0 or eo > 0) then
+    for t = 0, reaper.CountTakes(item) - 1 do
+      local take = reaper.GetTake(item, t)
+      if take and reaper.GetMediaItemTake_Source(take) then
+        local offs = reaper.GetMediaItemTakeInfo_Value(take, "D_STARTOFFS")
+        if offs < ei then ei = math.max(0, offs) end
+      end
+    end
+    for t = 0, reaper.CountTakes(item) - 1 do
+      local take = reaper.GetTake(item, t)
+      if take and reaper.GetMediaItemTake_Source(take) then
+        reaper.SetMediaItemTakeInfo_Value(take, "D_STARTOFFS",
+          reaper.GetMediaItemTakeInfo_Value(take, "D_STARTOFFS") - ei)
+      end
+    end
+    local pos = reaper.GetMediaItemInfo_Value(item, "D_POSITION")
+    local len = reaper.GetMediaItemInfo_Value(item, "D_LENGTH")
+    reaper.SetMediaItemInfo_Value(item, "D_POSITION", pos - ei)
+    reaper.SetMediaItemInfo_Value(item, "D_LENGTH", len + ei + eo)
+  else
+    ei = 0
+  end
+
+  if mix.gain then reaper.SetMediaItemInfo_Value(item, "D_VOL", mix.gain) end
+  if mix.fi and mix.fi > 0 then
+    reaper.SetMediaItemInfo_Value(item, "D_FADEINLEN", mix.fi)
+    reaper.SetMediaItemInfo_Value(item, "C_FADEINSHAPE", mix.fis == "linear" and 0 or 7)
+  end
+  if mix.fo and mix.fo > 0 then
+    reaper.SetMediaItemInfo_Value(item, "D_FADEOUTLEN", mix.fo)
+    reaper.SetMediaItemInfo_Value(item, "C_FADEOUTSHAPE", mix.fos == "linear" and 0 or 7)
+  end
+  for t = 0, reaper.CountTakes(item) - 1 do
+    local take = reaper.GetTake(item, t)
+    if take and mix.pan then reaper.SetMediaItemTakeInfo_Value(take, "D_PAN", mix.pan) end
+  end
+
+  -- Take volume envelope on every take, written into the item chunk:
+  -- one VOLENV block at the end of each take's section (before the next
+  -- top-level TAKE line, and before the item's closing ">"). Point times
+  -- are from the AAF item start; shift if the extension was cut short.
+  if mix.env and #mix.env > 0 then
+    local shift = (mix.ei or 0) - ei
+    local pts = {}
+    for _, pt in ipairs(mix.env) do
+      pts[#pts + 1] = string.format("PT %.10f %.10f 0", math.max(0, pt[1] - shift), pt[2])
+    end
+    local function env_block()
+      return "<VOLENV\nEGUID " .. reaper.genGuid("") .. "\nACT 1 -1\nVIS 1 1 1\n"
+        .. "LANEHEIGHT 0 0\nARM 0\nDEFSHAPE 0 -1 -1\n" .. table.concat(pts, "\n") .. "\n>"
+    end
+    local ok, chunk = reaper.GetItemStateChunk(item, "", false)
+    if ok then
+      local out, depth = {}, 0
+      local lines = {}
+      for line in (chunk .. "\n"):gmatch("([^\n]*)\n") do lines[#lines + 1] = line end
+      for _, line in ipairs(lines) do
+        local trimmed = line:match("^%s*(.-)%s*$")
+        -- depth 1 = directly inside <ITEM: a TAKE line starts the next
+        -- take, a ">" closes the item (nested blocks close at depth 2+)
+        if depth == 1 and (trimmed == "TAKE" or trimmed:match("^TAKE%s")
+            or trimmed == ">") then
+          out[#out + 1] = env_block()
+        end
+        out[#out + 1] = line
+        if trimmed:sub(1, 1) == "<" then depth = depth + 1
+        elseif trimmed == ">" then depth = depth - 1 end
+      end
+      reaper.SetItemStateChunk(item, table.concat(out, "\n"), false)
+    end
+  end
+end
+
 --- Split a CLB line by unescaped '|', unescaping as we go.
 local function _clb_split(line)
   local parts = {}
@@ -3334,10 +3480,10 @@ local function save_clb_project(filepath, silent)
   --           src_tc_in|src_tc_out|rec_tc_in|rec_tc_out|
   --           clip_name|source_file|notes|
   --           match_status|matched_path|group|orig_track|source_idx|level|
-  --           scene|take|aux_rate|reaper_item_guid
+  --           scene|take|aux_rate|reaper_item_guid|mix
   f:write(string.format("ROWS|%d\n", #ROWS))
   for _, row in ipairs(ROWS) do
-    f:write(string.format("R|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%d|%s|%s|%s|%s|%s\n",
+    f:write(string.format("R|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%d|%s|%s|%s|%s|%s|%s\n",
       _clb_escape(row.event_num    or ""),   -- p[2]
       _clb_escape(row.reel         or ""),   -- p[3]
       _clb_escape(row.track        or ""),   -- p[4]
@@ -3359,7 +3505,8 @@ local function save_clb_project(filepath, silent)
       _clb_escape(row.scene        or ""),   -- p[20]
       _clb_escape(row.take         or ""),   -- p[21]
       _clb_escape(row.aux_rate and tostring(row.aux_rate) or ""), -- p[22], EDL M2 rate
-      _clb_escape(row.reaper_item_guid or ""))) -- p[23], Link Reaper Items
+      _clb_escape(row.reaper_item_guid or ""), -- p[23], Link Reaper Items
+      _clb_escape(CLB.mix_encode(row.mix))))   -- p[24], audio mix (AAF)
   end
 
   -- Filter panel visibility flags
@@ -3558,6 +3705,7 @@ local function _parse_clb_file(filepath)
           take         = p[21] or "",
           aux_rate     = (p[22] and p[22] ~= "") and tonumber(p[22]) or nil, -- nil for files saved before this field existed
           reaper_item_guid = (p[23] and p[23] ~= "") and p[23] or nil, -- see CLB.link_reaper_items_selection; nil for older files
+          mix          = CLB.mix_decode(p[24]), -- nil for older files / no mix
           duration     = dur,
         }
         row.__search_text = table.concat({
@@ -5806,6 +5954,7 @@ local function generate_items()
           reaper.GetSetMediaItemTakeInfo_String(take, "P_EXT:CLB_NOTES", row.notes, true)
         end
       end
+      CLB.apply_mix(item, row, true)
 
       job.created = job.created + 1
     end,
@@ -6365,6 +6514,10 @@ local function conform_matched_items(selected_only)
         note_parts[#note_parts + 1] = row.notes
       end
       reaper.GetSetMediaItemInfo_String(item, "P_NOTES", table.concat(note_parts, "\n"), true)
+
+      -- Audio mix (gain / automation / pan / fades) on new items only — a
+      -- linked item is the user's own, already mixed and positioned.
+      if not is_linked then CLB.apply_mix(item, row, true) end
 
       job.created = job.created + 1
     end,
@@ -8731,6 +8884,17 @@ function CLB.draw_left_sidebar()
     reaper.ImGui_Text(ctx, "Create empty items on REAPER tracks at absolute TC positions")
     reaper.ImGui_Text(ctx, "Metadata stored as P_EXT fields on each take")
     reaper.ImGui_EndTooltip(ctx)
+  end
+
+  -- Restore Mix: Generate Items / Conform apply each row's audio mix
+  -- (CLB.apply_mix). A setting, so always shown, like Auto Match.
+  local chg_rm, new_rm = reaper.ImGui_Checkbox(ctx, "Restore Mix##clb_restore_mix", CLB.restore_mix)
+  if chg_rm then CLB.restore_mix = new_rm; save_prefs() end
+  if reaper.ImGui_IsItemHovered(ctx) then
+    reaper.ImGui_SetTooltip(ctx,
+      "Generate Items / Conform also restore the audio mix from the AAF:\n"
+      .. "clip gain, volume automation (take volume envelope), pan,\n"
+      .. "fades and crossfades (Equal Power or Linear, as in the AAF).")
   end
 
   -- Generate Ref Media button — opens a scope-picker popup (Selected
