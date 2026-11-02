@@ -1,6 +1,6 @@
 --[[
 @description Conform List Browser - CLB: conform EDL / AAF / XML / OTIO / subtitle lists (GUI + Jump / Link / Load / Reveal)
-@version 26.1102.2310pre1
+@version 26.1102.2330pre1
 @author hsuanice
 @provides
   [main] .
@@ -12,7 +12,9 @@
   [nomain] ../Tools/aaf_to_otio.py
   [nomain] ../Tools/subtitle_to_clb.py
 @changelog
+  - Fix: an AAF that holds several compositions (e.g. the cut plus every sync clip from the bin) now loads the cut sequence, video clips included, instead of a few clips from one sync clip
   - Fix: an AAF load that fails (for example when aaftool is missing) now shows the error instead of staying on Loading forever
+  - Change: while a file is parsing, the status shows the seconds elapsed and the bar shows how many files are done, so a long AAF parse no longer looks stuck
 @about
   Note: the Compare view (old vs new cut, reconform) is a work in progress and not finished yet.
 
@@ -3792,6 +3794,7 @@ local function _load_timeline_via_otio(dialog_title, file_filter, fallback_ext)
     errors       = {},
     default_fps  = CLB.fps,
     start_time   = reaper.time_precise(),
+    file_start   = reaper.time_precise(),
   }
 
   -- Immediate console feedback (UI progress bar appears next frame)
@@ -5212,6 +5215,7 @@ local function process_otio_loading()
     local handle = OTIO.parse_async_start(fp, { default_fps = state.default_fps,
                                                 python      = OTIO.python })
     state.active_handle = handle
+    state.file_start = reaper.time_precise()
     return true
   end
 
@@ -11246,9 +11250,6 @@ local function draw_loading_progress()
     local n     = #state.filepaths
     local idx   = state.current_idx
     local fname = (state.filepaths[idx] or ""):match("([^/\\]+)$") or ""
-    local elapsed = reaper.time_precise() - (state.start_time or 0)
-    local dots  = string.rep(".", math.floor(elapsed * 2) % 4)
-
     -- Try to read granular progress from Python's progress file
     local prog = state.active_handle and OTIO.parse_async_progress(state.active_handle)
 
@@ -11262,20 +11263,19 @@ local function draw_loading_progress()
       reaper.ImGui_Text(ctx, string.format(
         "Loading %s — clip %d / %d%s", file_label, prog.current, prog.total, clip_name))
       reaper.ImGui_ProgressBar(ctx, fraction, -1, 0)
-    elseif prog and prog.phase == "parsing" then
-      -- Indeterminate: AAF/XML file is being parsed (before clip count known)
-      local file_label = n > 1
-        and string.format("(%d/%d) %s", idx, n, fname)
-        or  fname
-      reaper.ImGui_Text(ctx, string.format("Parsing %s%s", file_label, dots))
-      reaper.ImGui_ProgressBar(ctx, -1, -1, 0)
     else
-      -- No progress file yet (process just launched)
+      -- Parsing (or process just launched): no clip count yet, and the
+      -- AAF/XML reader reports none. An indeterminate bar doesn't animate
+      -- here, so show the files done so far plus a ticking seconds count
+      -- for the current file — visibly alive during a long parse.
       local file_label = n > 1
         and string.format("(%d/%d) %s", idx, n, fname)
         or  fname
-      reaper.ImGui_Text(ctx, string.format("Loading %s%s", file_label, dots))
-      reaper.ImGui_ProgressBar(ctx, -1, -1, 0)
+      local verb = (prog and prog.phase == "parsing") and "Parsing" or "Loading"
+      local secs = math.floor(reaper.time_precise() - (state.file_start or state.start_time or 0))
+      reaper.ImGui_Text(ctx, string.format("%s %s — %d s", verb, file_label, secs))
+      reaper.ImGui_ProgressBar(ctx, (idx - 1) / n, -1, 0,
+        n > 1 and string.format("%d / %d files done", idx - 1, n) or string.format("%d s", secs))
     end
   end
 

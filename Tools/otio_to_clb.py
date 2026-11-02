@@ -913,6 +913,28 @@ def _load_otio(path, progress_file=""):
     return _timeline_to_clb(tl, "OTIO", progress_file)
 
 
+def _pick_main_timeline(collection, path):
+    """
+    An AAF can hold several top-level compositions (e.g. an Avid export of
+    the cut sequence plus every sync clip from the bin). The OTIO adapter
+    then returns a SerializableCollection of timelines. Pick the cut:
+    the timeline named like the AAF file, else the one with the most clips.
+    Returns (timeline, warning).
+    """
+    import opentimelineio as otio
+    tls = [t for t in collection if isinstance(t, otio.schema.Timeline)]
+    if not tls:
+        raise ValueError("AAF contains no timeline")
+    if len(tls) == 1:
+        return tls[0], ""
+    stem = Path(path).stem
+    named = [t for t in tls if (t.name or "") == stem]
+    main = named[0] if named else max(
+        tls, key=lambda t: sum(1 for _ in t.find_clips()))
+    return main, (f"AAF has {len(tls)} compositions; "
+                  f"using '{main.name}' and skipping the others")
+
+
 def _load_aaf(path, progress_file=""):
     """
     Load an AAF file via the OTIO native AAF adapter (aaf2 / pyaaf2).
@@ -936,7 +958,13 @@ def _load_aaf(path, progress_file=""):
     # Prefer native OTIO AAF adapter: gives correct absolute source TC
     try:
         tl = otio.adapters.read_from_file(path, adapter_name="AAF")
-        return _timeline_to_clb(tl, "AAF", progress_file)
+        warning = ""
+        if isinstance(tl, otio.schema.SerializableCollection):
+            tl, warning = _pick_main_timeline(tl, path)
+        clb = _timeline_to_clb(tl, "AAF", progress_file)
+        if warning:
+            clb["warning"] = warning
+        return clb
     except Exception:
         pass
 

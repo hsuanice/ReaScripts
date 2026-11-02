@@ -4,6 +4,12 @@
 
 Conform List Browser
 
+## 26.1102.2330pre1
+
+- Fix: an AAF that holds several compositions (e.g. the cut plus every sync clip from the bin) now loads the cut sequence, video clips included, instead of a few clips from one sync clip
+- Fix: an AAF load that fails (for example when aaftool is missing) now shows the error instead of staying on Loading forever
+- Change: while a file is parsing, the status shows the seconds elapsed and the bar shows how many files are done, so a long AAF parse no longer looks stuck
+
 ## 26.1102.2310pre1
 
 - Fix: an AAF load that fails (for example when aaftool is missing) now shows the error instead of staying on Loading forever
