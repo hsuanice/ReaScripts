@@ -1,6 +1,6 @@
 --[[
 @description Conform List Browser - CLB: conform EDL / AAF / XML / OTIO / subtitle lists (GUI + Jump / Link / Load / Reveal)
-@version 26.1103.0243pre1
+@version 26.1103.0254pre1
 @author hsuanice
 @provides
   [main] .
@@ -12,7 +12,8 @@
   [nomain] ../Tools/aaf_to_otio.py
   [nomain] ../Tools/subtitle_to_clb.py
 @changelog
-  - Change: an Audio Folder can serve several groups — click it and tick groups; a group belongs to one folder at a time (ticking it moves it from another folder), and All serves only the groups no folder has. A Picture Cut group with no folder of its own uses the Video folder
+  - Fix: reopening a .clb keeps the Groups list — its order and the empty default groups (Dialog, Music ...); Picture Cut's groups always sit right under Video; groups found in the list are added in list order instead of a random one
+  - Change: Audio Folder buttons stay short — folder name up to 16 characters and at most 2 group names (+N); the tooltip has the full path and groups
 @about
   Note: the Compare view (old vs new cut, reconform) is a work in progress and not finished yet.
 
@@ -3301,10 +3302,16 @@ local function _rebuild_group_filters()
     end
   end
 
-  -- Second: add any groups found in rows but not in user-defined list
-  for g_name, count in pairs(group_counts) do
-    if not seen[g_name] then
-      seen[g_name] = true
+  -- Second: add any groups found in rows but not in user-defined list,
+  -- in the order rows first use them (pairs() order was random)
+  local discovered = {}
+  for _, row in ipairs(ROWS) do
+    local g = row.group or ""
+    if not seen[g] then seen[g] = true; discovered[#discovered + 1] = g end
+  end
+  for _, g_name in ipairs(discovered) do
+    local count = group_counts[g_name]
+    do
       local tracks = {}
       for track_name in pairs(group_tracks[g_name] or {}) do
         tracks[#tracks + 1] = track_name
@@ -3317,6 +3324,25 @@ local function _rebuild_group_filters()
         tracks = tracks,
       }
     end
+  end
+
+  -- Picture Cut's sub-groups always sit right under Video, in order
+  local sub, by_name = {}, {}
+  for _, g in ipairs(CLB.VIDEO_SUBGROUPS or {}) do sub[g] = true end
+  for _, gf in ipairs(new_filters) do by_name[gf.name] = gf end
+  if by_name.Video then
+    local ordered = {}
+    for _, gf in ipairs(new_filters) do
+      if not sub[gf.name] then
+        ordered[#ordered + 1] = gf
+        if gf.name == "Video" then
+          for _, g in ipairs(CLB.VIDEO_SUBGROUPS) do
+            if by_name[g] then ordered[#ordered + 1] = by_name[g] end
+          end
+        end
+      end
+    end
+    new_filters = ordered
   end
 
   CLB.group_filters = new_filters
@@ -3788,6 +3814,10 @@ local function save_clb_project(filepath, silent)
       f:write(string.format("HIDDEN_GROUP|%s\n", _clb_escape(gf.name)))
     end
   end
+  -- The whole Groups list in its order, empty ones included
+  for _, gf in ipairs(CLB.group_filters) do
+    f:write(string.format("GROUP|%s\n", _clb_escape(gf.name)))
+  end
 
   f:close()
   console_msg("Saved CLB project: " .. filepath)
@@ -3846,6 +3876,7 @@ local function _parse_clb_file(filepath)
   local hidden_tracks        = {}
   local hidden_reels         = {}
   local hidden_groups        = {}
+  local group_order          = {}
 
   for line in f:lines() do
     if line ~= "" then
@@ -3912,6 +3943,7 @@ local function _parse_clb_file(filepath)
       elseif key == "HIDDEN_TRACK"  then hidden_tracks[p[2] or ""] = true
       elseif key == "HIDDEN_REEL"   then hidden_reels [p[2] or ""] = true
       elseif key == "HIDDEN_GROUP"  then hidden_groups[p[2] or ""] = true
+      elseif key == "GROUP"         then group_order[#group_order + 1] = p[2] or ""
 
       elseif key == "S" then
         -- p[6]/p[7]/p[8] (tc_calib_*, Rec/"New" axis) and p[9]/p[10]/p[11]
@@ -4002,6 +4034,7 @@ local function _parse_clb_file(filepath)
     show_group = new_show_group, show_sources = new_show_sources,
     show_audio = new_show_audio,
     hidden_tracks = hidden_tracks, hidden_reels = hidden_reels, hidden_groups = hidden_groups,
+    group_order = group_order,
   }
 end
 
@@ -4041,7 +4074,15 @@ local function load_clb_project(filepath)
   CLB.loaded_format = data.source_format
   CLB.loaded_is_clb = true
 
-  -- Rebuild filter panels, then apply saved hidden states
+  -- Rebuild filter panels, then apply saved hidden states. Groups start
+  -- from the saved list (its order, empty groups included); files saved
+  -- before GROUP lines existed get the default groups.
+  CLB.group_filters = {}
+  local saved_groups = (#data.group_order > 0) and data.group_order or DEFAULT_GROUP_NAMES
+  for _, name in ipairs(saved_groups) do
+    CLB.group_filters[#CLB.group_filters + 1] =
+      { name = name, count = 0, visible = (name ~= "Delete" or #data.group_order > 0), tracks = {} }
+  end
   _rebuild_track_filters()
   _rebuild_reel_filters()
   _rebuild_group_filters()
@@ -11226,7 +11267,19 @@ local function draw_audio_panel_header()
     reaper.ImGui_SameLine(ctx)
     local name = fd.path:match("([^/\\]+)$") or fd.path
     local groups_text = CLB.audio_folder_group_text(fd)
-    if reaper.ImGui_SmallButton(ctx, string.format("%s \xE2\x86\x92 %s##audio_folder_%d", name, groups_text, i)) then
+    -- Short button label (full path + groups in the tooltip): name up to
+    -- 16 characters (UTF-8 aware), at most 2 group names then "+N"
+    local short = name
+    if utf8.len(name) and utf8.len(name) > 16 then
+      short = name:sub(1, utf8.offset(name, 16) - 1) .. "\xE2\x80\xA6"
+    end
+    local short_groups = groups_text
+    local list = {}
+    for g in groups_text:gmatch("[^,]+") do list[#list + 1] = g:match("^%s*(.-)%s*$") end
+    if #list > 2 then
+      short_groups = list[1] .. ", " .. list[2] .. string.format(" +%d", #list - 2)
+    end
+    if reaper.ImGui_SmallButton(ctx, string.format("%s \xE2\x86\x92 %s##audio_folder_%d", short, short_groups, i)) then
       reaper.ImGui_OpenPopup(ctx, "##audio_folder_popup_" .. i)
     end
     if reaper.ImGui_IsItemHovered(ctx) then

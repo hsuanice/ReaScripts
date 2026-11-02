@@ -4,6 +4,11 @@
 
 Conform List Browser
 
+## 26.1103.0254pre1
+
+- Fix: reopening a .clb keeps the Groups list — its order and the empty default groups (Dialog, Music ...); Picture Cut's groups always sit right under Video; groups found in the list are added in list order instead of a random one
+- Change: Audio Folder buttons stay short — folder name up to 16 characters and at most 2 group names (+N); the tooltip has the full path and groups
+
 ## 26.1103.0243pre1
 
 - Change: an Audio Folder can serve several groups — click it and tick groups; a group belongs to one folder at a time (ticking it moves it from another folder), and All serves only the groups no folder has. A Picture Cut group with no folder of its own uses the Video folder
