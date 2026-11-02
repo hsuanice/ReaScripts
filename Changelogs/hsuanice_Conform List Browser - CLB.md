@@ -4,6 +4,11 @@
 
 Conform List Browser
 
+## 26.1103.0155pre1
+
+- Fix: Generate Items crossfades — the incoming item now also extends back into the dissolve (an empty item's take was treated as having no handle, so only the outgoing side extended)
+- Change: Picture Cut's tracks start with V (V Picture Cut, V Overlay 1, V Text 1, V Image 1, V Matte 1); its groups sit right under Video in that order, Video is unchecked and they are checked; generated tracks follow the same order
+
 ## 26.1103.0135pre1
 
 - New: Picture Cut button (under Consolidate) — flattens the video into a Picture Cut track/group: what is on screen, top footage layer only, lower layers trimmed with Src TC following (speed changes included). Text (titles), Image, Matte (generated / adjustment) and Overlay (scaled below 100%) move to their own groups and tracks; reframes (100% and up) stay footage. Re-running replaces the previous Picture Cut

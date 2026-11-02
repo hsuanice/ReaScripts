@@ -1,6 +1,6 @@
 --[[
 @description Conform List Browser - CLB: conform EDL / AAF / XML / OTIO / subtitle lists (GUI + Jump / Link / Load / Reveal)
-@version 26.1103.0135pre1
+@version 26.1103.0155pre1
 @author hsuanice
 @provides
   [main] .
@@ -12,8 +12,8 @@
   [nomain] ../Tools/aaf_to_otio.py
   [nomain] ../Tools/subtitle_to_clb.py
 @changelog
-  - New: Picture Cut button (under Consolidate) — flattens the video into a Picture Cut track/group: what is on screen, top footage layer only, lower layers trimmed with Src TC following (speed changes included). Text (titles), Image, Matte (generated / adjustment) and Overlay (scaled below 100%) move to their own groups and tracks; reframes (100% and up) stay footage. Re-running replaces the previous Picture Cut
-  - Change: Generate Items and Conform item notes also show Rec In/Out, speed changes and video reframe scale
+  - Fix: Generate Items crossfades — the incoming item now also extends back into the dissolve (an empty item's take was treated as having no handle, so only the outgoing side extended)
+  - Change: Picture Cut's tracks start with V (V Picture Cut, V Overlay 1, V Text 1, V Image 1, V Matte 1); its groups sit right under Video in that order, Video is unchecked and they are checked; generated tracks follow the same order
 @about
   Note: the Compare view (old vs new cut, reconform) is a work in progress and not finished yet.
 
@@ -3325,13 +3325,25 @@ end
 --- "AAF - A3") in the order their first event was loaded — the source's
 --- own track order. first_idx[name] = lowest row.__event_idx on it.
 function CLB.sort_track_names(names, first_idx)
-  local function base(n) return n:match("^(%D*%d+)") or n end
+  -- "V Picture Cut", "V Overlay 1" ... sort in CLB.VIDEO_SUBGROUPS order
+  local function key(n)
+    for i, sg in ipairs(CLB.VIDEO_SUBGROUPS) do
+      local a, b = n:find("V " .. sg, 1, true)
+      if a then return n:sub(1, a + 1) .. string.format("%02d", i) .. n:sub(b + 1) end
+    end
+    return n
+  end
+  local function base(n)
+    local k = key(n)
+    if k ~= n then return k end   -- sub-group: whole name ("Text 1" < "Text 2")
+    return n:match("^(%D*%d+)") or n
+  end
   table.sort(names, function(a, b)
     local ba, bb = base(a), base(b)
     if ba ~= bb then return _natural_sort_cmp(ba, bb) end
     local ia, ib = first_idx[a] or math.huge, first_idx[b] or math.huge
     if ia ~= ib then return ia < ib end
-    return a < b
+    return key(a) < key(b)
   end)
 end
 
@@ -3382,6 +3394,12 @@ end
 ---   "Overlay" footage shrunk below 100% (picture-in-picture)
 ---   "Video"   footage — a reframe / push-in (scale >= 100%) still fills
 ---             the frame, so it stays Video
+--- Picture Cut's groups, in this order right under "Video" in the Groups
+--- panel (and as generated tracks). Their tracks start with "V " ("V
+--- Picture Cut", "V Text 1", ...) so they read as video at a glance (and
+--- _get_track_group sees Video).
+CLB.VIDEO_SUBGROUPS = { "Picture Cut", "Overlay", "Text", "Image", "Matte" }
+
 function CLB.video_kind(row)
   local sf = row.source_file or ""
   local fname = sf:match("([^/\\]+)$") or sf
@@ -3415,18 +3433,24 @@ function CLB.apply_mix(item, row, extend, skip_pan)
   local mix = row and row.mix
   if not CLB.restore_mix or not mix then return end
 
+  -- A take on an empty item still reports a (fileless) source at offset
+  -- 0 — only a real media file has handles to check / slide.
+  local function media_take(take)
+    local src = take and reaper.GetMediaItemTake_Source(take)
+    return src and (reaper.GetMediaSourceFileName(src, "") or "") ~= ""
+  end
   local ei, eo = mix.ei or 0, mix.eo or 0
   if extend and (ei > 0 or eo > 0) then
     for t = 0, reaper.CountTakes(item) - 1 do
       local take = reaper.GetTake(item, t)
-      if take and reaper.GetMediaItemTake_Source(take) then
+      if media_take(take) then
         local offs = reaper.GetMediaItemTakeInfo_Value(take, "D_STARTOFFS")
         if offs < ei then ei = math.max(0, offs) end
       end
     end
     for t = 0, reaper.CountTakes(item) - 1 do
       local take = reaper.GetTake(item, t)
-      if take and reaper.GetMediaItemTake_Source(take) then
+      if media_take(take) then
         reaper.SetMediaItemTakeInfo_Value(take, "D_STARTOFFS",
           reaper.GetMediaItemTakeInfo_Value(take, "D_STARTOFFS") - ei)
       end
@@ -7279,8 +7303,9 @@ function CLB.build_picture_cut()
     .. "  Footage: %d events -> Picture Cut: %d events (top layer only)\n"
     .. "  Text: %d   Image: %d   Matte: %d   Overlay (scaled < 100%%): %d\n\n"
     .. "Footage stays on its tracks. Picture Cut is added as its own\n"
-    .. "track/group; Text, Image, Matte and Overlay move to their own\n"
-    .. "groups and tracks. A previous Picture Cut is replaced.",
+    .. "track/group; Overlay, Text, Image and Matte move to their own\n"
+    .. "groups and tracks (\"V ...\"), listed under Video. Video is then\n"
+    .. "hidden and these shown. A previous Picture Cut is replaced.",
     #footage, #segs, n_text, n_img, n_matte, n_over)
   if reaper.ShowMessageBox(msg, SCRIPT_NAME, 1) ~= 1 then return end
 
@@ -7294,7 +7319,7 @@ function CLB.build_picture_cut()
     CLB.pack_ordered(packed)
     for _, e in ipairs(packed) do
       e.row.group = kind
-      e.row.track = kind .. " " .. e.track_no
+      e.row.track = "V " .. kind .. " " .. e.track_no
     end
   end
   for _, row in ipairs(footage) do row.group = "Video" end
@@ -7308,10 +7333,10 @@ function CLB.build_picture_cut()
     _guid_counter = _guid_counter + 1
     row.__event_idx = _guid_counter
     row.__guid = string.format("clb_%06d", _guid_counter)
-    row.__orig_track = "Picture Cut"
+    row.__orig_track = "V Picture Cut"
     row.__reaper_item = nil
     row.reaper_item_guid = nil
-    row.track = "Picture Cut"
+    row.track = "V Picture Cut"
     row.group = "Picture Cut"
     row.rec_tc_in = EDL.seconds_to_tc(sg.start, fps, is_drop)
     row.rec_tc_out = EDL.seconds_to_tc(sg.stop, fps, is_drop)
@@ -7349,6 +7374,26 @@ function CLB.build_picture_cut()
   _rebuild_track_filters()
   _rebuild_reel_filters()
   _rebuild_group_filters()
+
+  -- Groups panel: the sub-groups right under Video, in VIDEO_SUBGROUPS
+  -- order; show them, hide Video
+  local sub, by_name, out = {}, {}, {}
+  for _, g in ipairs(CLB.VIDEO_SUBGROUPS) do sub[g] = true end
+  for _, gf in ipairs(CLB.group_filters) do by_name[gf.name] = gf end
+  local function add_subs()
+    for _, g in ipairs(CLB.VIDEO_SUBGROUPS) do
+      if by_name[g] then by_name[g].visible = true; out[#out + 1] = by_name[g] end
+    end
+  end
+  for _, gf in ipairs(CLB.group_filters) do
+    if not sub[gf.name] then
+      out[#out + 1] = gf
+      if gf.name == "Video" then gf.visible = false; add_subs() end
+    end
+  end
+  if not by_name.Video then add_subs() end
+  CLB.group_filters = out
+
   CLB.cached_rows = nil
   undo_snapshot()
   console_msg(string.format(
@@ -7414,6 +7459,9 @@ local function consolidate_by_group()
     local up = g:upper()
     if up == "AUDIO" then return "A" end
     if up == "VIDEO" then return "V" end
+    for _, sg in ipairs(CLB.VIDEO_SUBGROUPS) do
+      if g == sg then return "V " .. g .. " " end
+    end
     return g .. " "
   end
 
