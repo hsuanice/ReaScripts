@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<index version="1" name="hsuanice Scripts" commit="f12e24d13bacb54694abf125d5d1ca0ed1156d94">
+<index version="1" name="hsuanice Scripts" commit="c9e14e6bcd81ccb7e3cfb17f35f6f7ba6e107352">
   <category name="Conform">
     <reapack name="hsuanice_Conform List Browser - CLB.lua" type="script" desc="Conform List Browser - CLB: conform EDL / AAF / XML / OTIO / subtitle lists (GUI + Jump / Link / Load / Reveal)">
       <metadata>
@@ -219,6 +219,40 @@
         <source file="../Tools/otio_to_clb.py">https://github.com/hsuanice/ReaScripts/raw/f12e24d13bacb54694abf125d5d1ca0ed1156d94/Tools/otio_to_clb.py</source>
         <source file="../Tools/aaf_to_otio.py">https://github.com/hsuanice/ReaScripts/raw/f12e24d13bacb54694abf125d5d1ca0ed1156d94/Tools/aaf_to_otio.py</source>
         <source file="../Tools/subtitle_to_clb.py">https://github.com/hsuanice/ReaScripts/raw/f12e24d13bacb54694abf125d5d1ca0ed1156d94/Tools/subtitle_to_clb.py</source>
+      </version>
+      <version name="26.1103.0228pre1" author="hsuanice" time="2026-11-02T18:28:53Z">
+        <changelog><![CDATA[- New: Audio Folders — Load Audio... adds a folder instead of replacing the last one; each folder shows in the Audio panel as "name → group" and serves one group (or All): events only match audio from the folders of their group, e.g. AAF events from the AAF media, Picture Cut from the ISO folder. A Video folder also serves Picture Cut, Overlay, Text, Image and Matte. Click a folder to change its group or remove it (matching re-runs); saved in .clb projects]]></changelog>
+        <source main="main">https://github.com/hsuanice/ReaScripts/raw/c2618bec0865f3d436b5ddd00514fbe61c8cd097/Conform/hsuanice_Conform%20List%20Browser%20-%20CLB.lua</source>
+        <source main="main" file="hsuanice_Conform List Browser - CLB Jump Old New TC.lua">https://github.com/hsuanice/ReaScripts/raw/c2618bec0865f3d436b5ddd00514fbe61c8cd097/Conform/hsuanice_Conform%20List%20Browser%20-%20CLB%20Jump%20Old%20New%20TC.lua</source>
+        <source main="main" file="hsuanice_Conform List Browser - CLB Link REAPER Items.lua">https://github.com/hsuanice/ReaScripts/raw/c2618bec0865f3d436b5ddd00514fbe61c8cd097/Conform/hsuanice_Conform%20List%20Browser%20-%20CLB%20Link%20REAPER%20Items.lua</source>
+        <source main="main" file="hsuanice_Conform List Browser - CLB Load from REAPER.lua">https://github.com/hsuanice/ReaScripts/raw/c2618bec0865f3d436b5ddd00514fbe61c8cd097/Conform/hsuanice_Conform%20List%20Browser%20-%20CLB%20Load%20from%20REAPER.lua</source>
+        <source main="main" file="hsuanice_Conform List Browser - CLB Reveal Item.lua">https://github.com/hsuanice/ReaScripts/raw/c2618bec0865f3d436b5ddd00514fbe61c8cd097/Conform/hsuanice_Conform%20List%20Browser%20-%20CLB%20Reveal%20Item.lua</source>
+        <source file="../Tools/otio_to_clb.py">https://github.com/hsuanice/ReaScripts/raw/c2618bec0865f3d436b5ddd00514fbe61c8cd097/Tools/otio_to_clb.py</source>
+        <source file="../Tools/aaf_to_otio.py">https://github.com/hsuanice/ReaScripts/raw/c2618bec0865f3d436b5ddd00514fbe61c8cd097/Tools/aaf_to_otio.py</source>
+        <source file="../Tools/subtitle_to_clb.py">https://github.com/hsuanice/ReaScripts/raw/c2618bec0865f3d436b5ddd00514fbe61c8cd097/Tools/subtitle_to_clb.py</source>
+      </version>
+      <version name="26.1103.0243pre1" author="hsuanice" time="2026-11-02T18:43:39Z">
+        <changelog><![CDATA[- Change: an Audio Folder can serve several groups — click it and tick groups; a group belongs to one folder at a time (ticking it moves it from another folder), and All serves only the groups no folder has. A Picture Cut group with no folder of its own uses the Video folder]]></changelog>
+        <source main="main">https://github.com/hsuanice/ReaScripts/raw/c777f06e1e38f2835d6a31ca27b0e3348e2e43a8/Conform/hsuanice_Conform%20List%20Browser%20-%20CLB.lua</source>
+        <source main="main" file="hsuanice_Conform List Browser - CLB Jump Old New TC.lua">https://github.com/hsuanice/ReaScripts/raw/c777f06e1e38f2835d6a31ca27b0e3348e2e43a8/Conform/hsuanice_Conform%20List%20Browser%20-%20CLB%20Jump%20Old%20New%20TC.lua</source>
+        <source main="main" file="hsuanice_Conform List Browser - CLB Link REAPER Items.lua">https://github.com/hsuanice/ReaScripts/raw/c777f06e1e38f2835d6a31ca27b0e3348e2e43a8/Conform/hsuanice_Conform%20List%20Browser%20-%20CLB%20Link%20REAPER%20Items.lua</source>
+        <source main="main" file="hsuanice_Conform List Browser - CLB Load from REAPER.lua">https://github.com/hsuanice/ReaScripts/raw/c777f06e1e38f2835d6a31ca27b0e3348e2e43a8/Conform/hsuanice_Conform%20List%20Browser%20-%20CLB%20Load%20from%20REAPER.lua</source>
+        <source main="main" file="hsuanice_Conform List Browser - CLB Reveal Item.lua">https://github.com/hsuanice/ReaScripts/raw/c777f06e1e38f2835d6a31ca27b0e3348e2e43a8/Conform/hsuanice_Conform%20List%20Browser%20-%20CLB%20Reveal%20Item.lua</source>
+        <source file="../Tools/otio_to_clb.py">https://github.com/hsuanice/ReaScripts/raw/c777f06e1e38f2835d6a31ca27b0e3348e2e43a8/Tools/otio_to_clb.py</source>
+        <source file="../Tools/aaf_to_otio.py">https://github.com/hsuanice/ReaScripts/raw/c777f06e1e38f2835d6a31ca27b0e3348e2e43a8/Tools/aaf_to_otio.py</source>
+        <source file="../Tools/subtitle_to_clb.py">https://github.com/hsuanice/ReaScripts/raw/c777f06e1e38f2835d6a31ca27b0e3348e2e43a8/Tools/subtitle_to_clb.py</source>
+      </version>
+      <version name="26.1103.0254pre1" author="hsuanice" time="2026-11-02T18:54:58Z">
+        <changelog><![CDATA[- Fix: reopening a .clb keeps the Groups list — its order and the empty default groups (Dialog, Music ...); Picture Cut's groups always sit right under Video; groups found in the list are added in list order instead of a random one
+- Change: Audio Folder buttons stay short — folder name up to 16 characters and at most 2 group names (+N); the tooltip has the full path and groups]]></changelog>
+        <source main="main">https://github.com/hsuanice/ReaScripts/raw/c9e14e6bcd81ccb7e3cfb17f35f6f7ba6e107352/Conform/hsuanice_Conform%20List%20Browser%20-%20CLB.lua</source>
+        <source main="main" file="hsuanice_Conform List Browser - CLB Jump Old New TC.lua">https://github.com/hsuanice/ReaScripts/raw/c9e14e6bcd81ccb7e3cfb17f35f6f7ba6e107352/Conform/hsuanice_Conform%20List%20Browser%20-%20CLB%20Jump%20Old%20New%20TC.lua</source>
+        <source main="main" file="hsuanice_Conform List Browser - CLB Link REAPER Items.lua">https://github.com/hsuanice/ReaScripts/raw/c9e14e6bcd81ccb7e3cfb17f35f6f7ba6e107352/Conform/hsuanice_Conform%20List%20Browser%20-%20CLB%20Link%20REAPER%20Items.lua</source>
+        <source main="main" file="hsuanice_Conform List Browser - CLB Load from REAPER.lua">https://github.com/hsuanice/ReaScripts/raw/c9e14e6bcd81ccb7e3cfb17f35f6f7ba6e107352/Conform/hsuanice_Conform%20List%20Browser%20-%20CLB%20Load%20from%20REAPER.lua</source>
+        <source main="main" file="hsuanice_Conform List Browser - CLB Reveal Item.lua">https://github.com/hsuanice/ReaScripts/raw/c9e14e6bcd81ccb7e3cfb17f35f6f7ba6e107352/Conform/hsuanice_Conform%20List%20Browser%20-%20CLB%20Reveal%20Item.lua</source>
+        <source file="../Tools/otio_to_clb.py">https://github.com/hsuanice/ReaScripts/raw/c9e14e6bcd81ccb7e3cfb17f35f6f7ba6e107352/Tools/otio_to_clb.py</source>
+        <source file="../Tools/aaf_to_otio.py">https://github.com/hsuanice/ReaScripts/raw/c9e14e6bcd81ccb7e3cfb17f35f6f7ba6e107352/Tools/aaf_to_otio.py</source>
+        <source file="../Tools/subtitle_to_clb.py">https://github.com/hsuanice/ReaScripts/raw/c9e14e6bcd81ccb7e3cfb17f35f6f7ba6e107352/Tools/subtitle_to_clb.py</source>
       </version>
     </reapack>
   </category>
