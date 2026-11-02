@@ -1,6 +1,6 @@
 --[[
 @description hsuanice Library - shared code used by hsuanice scripts (required)
-@version 26.1103.0018pre1
+@version 26.1103.0116pre1
 @author hsuanice
 @metapackage
 @provides
@@ -25,7 +25,7 @@
   [nomain] hsuanice_Fade Tool Core.lua
   [nomain] json.lua
 @changelog
-  - OTIO Bridge: AAF events carry their audio mix (gain, automation, pan, fades)
+  - OTIO Bridge: AAF events carry their speed change
 @about
   # hsuanice Library
 

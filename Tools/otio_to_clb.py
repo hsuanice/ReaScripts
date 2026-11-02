@@ -711,13 +711,13 @@ def _write_progress(progress_file, phase, current, total, name=""):
 # ---------------------------------------------------------------------------
 
 def _track_label(track, audio_idx, video_idx):
-    """Return a track label like 'A1', 'A2', 'V', 'V2'."""
+    """Return a track label like 'A1', 'A2', 'V1', 'V2' (always numbered)."""
     import opentimelineio as otio
     kind = getattr(track, "kind", None)
     if kind == otio.schema.TrackKind.Audio:
         return f"A{audio_idx}" if audio_idx > 1 else "A1"
     if kind == otio.schema.TrackKind.Video:
-        return "V" if video_idx == 1 else f"V{video_idx}"
+        return f"V{video_idx}"
     return track.name or "X"
 
 
@@ -813,6 +813,19 @@ def _timeline_to_clb(tl, fmt, progress_file="", audio_track_names=None):
             src_start = sr.start_time if sr else ot.RationalTime(0, fps)
             src_end   = src_start + (sr.duration if sr else rp.duration)
 
+            # Speed change (AAF Speed Control): the source range covers the
+            # timeline length, but the clip plays 1/ratio of it per frame.
+            # Src out = what it really uses; aux_rate = the same signed
+            # "native rate" the EDL M2 line gives (fps x speed, < 0 reverse).
+            aux_rate = None
+            if fmt == "AAF":
+                speed = _aaf_speed(clip)
+                if speed is not None:
+                    aux_rate = round(fps * speed, 3)
+                    src_end = src_start + ot.RationalTime(
+                        (sr.duration if sr else rp.duration).value * abs(speed),
+                        (sr.duration if sr else rp.duration).rate)
+
             # Convert to TC strings (rescale to project fps so 48 kHz
             # audio RationalTimes from the native AAF adapter work correctly)
             rec_in  = _rt_to_tc(rec_start, fps, is_drop, ot)
@@ -904,6 +917,8 @@ def _timeline_to_clb(tl, fmt, progress_file="", audio_track_names=None):
                 "scene":        scene,
                 "take":         take,
             })
+            if aux_rate is not None:
+                events[-1]["aux_rate"] = aux_rate
             if mix:
                 events[-1]["mix"] = mix
 
@@ -1013,6 +1028,18 @@ def _aaf_param(params, name):
             return pts[0][1], None, interp
         return None, pts, interp
     return _aaf_number(v), None, None
+
+
+def _aaf_speed(clip):
+    """Playback speed of a clip with an AAF Speed Control effect (Speed
+    Ratio = timeline / source: 0.37 -> 2.7x, -1 -> reverse), else None."""
+    for e in clip.effects:
+        if "Speed" not in (e.name or ""):
+            continue
+        ratio, _, _ = _aaf_param(_aaf_params(e.metadata.get("AAF")), "Speed Ratio")
+        if ratio and abs(ratio - 1.0) > 1e-6:
+            return 1.0 / ratio
+    return None
 
 
 def _fade_shape(transition, crossfade):

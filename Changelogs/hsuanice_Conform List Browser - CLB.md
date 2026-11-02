@@ -4,6 +4,11 @@
 
 Conform List Browser
 
+## 26.1103.0116pre1
+
+- Change: OTIO video tracks (AAF / XML) are always numbered — V1, V2, V3 ... instead of V, V2, V3
+- New: AAF speed changes (Speed Control, incl. reverse) are read — Src TC Out covers the source actually used, and the Speed column shows the rate like an EDL M2 line
+
 ## 26.1103.0053pre1
 
 - Change: AAF audio tracks keep the AAF's own track numbering and order (A1, A2, A3_L, A3_R, A3 ...) instead of A1-A38; Generate Items, Conform and Consolidate keep that order

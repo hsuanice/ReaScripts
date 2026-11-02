@@ -1,10 +1,10 @@
 --[[
 @description hsuanice_OTIO Bridge.lua
-@version 26.1103.0018pre1
+@version 26.1103.0116pre1
 @author hsuanice
 @noindex
 @changelog
-  - New: AAF events carry their audio mix (gain, automation, pan, fades) through to CLB
+  - New: AAF events carry their speed change (aux_rate) through to CLB
 @about
   v0.4.1
   Calls the OpenTimelineIO Python wrapper (Tools/otio_to_clb.py) and converts
@@ -321,6 +321,7 @@ function M._to_parsed(data, source_path, default_fps)
       scene            = ev.scene       or "",
       take             = ev.take        or "",
       mix              = ev.mix,                  -- AAF audio gain/automation/pan/fades, or nil
+      aux_rate         = ev.aux_rate,             -- AAF speed change (fps x speed, < 0 reverse), or nil
       comments         = {},
       -- Pre-computed (same fields that EDL.parse() produces)
       duration_seconds = dur_sec,

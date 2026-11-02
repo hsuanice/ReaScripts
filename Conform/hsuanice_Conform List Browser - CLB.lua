@@ -1,6 +1,6 @@
 --[[
 @description Conform List Browser - CLB: conform EDL / AAF / XML / OTIO / subtitle lists (GUI + Jump / Link / Load / Reveal)
-@version 26.1103.0053pre1
+@version 26.1103.0116pre1
 @author hsuanice
 @provides
   [main] .
@@ -12,11 +12,8 @@
   [nomain] ../Tools/aaf_to_otio.py
   [nomain] ../Tools/subtitle_to_clb.py
 @changelog
-  - Change: AAF audio tracks keep the AAF's own track numbering and order (A1, A2, A3_L, A3_R, A3 ...) instead of A1-A38; Generate Items, Conform and Consolidate keep that order
-  - New: video clips restore their fades and crossfades too
-  - Change: a fade the AAF gives no shape for is Linear; a crossfade with no shape is Equal Power
-  - Change: a generated track whose clips all share one pan (e.g. every clip on A3_L panned left) gets it as track pan instead of take pan
-  - Change: conformed AAF takes are named by clip name instead of the media file name
+  - Change: OTIO video tracks (AAF / XML) are always numbered — V1, V2, V3 ... instead of V, V2, V3
+  - New: AAF speed changes (Speed Control, incl. reverse) are read — Src TC Out covers the source actually used, and the Speed column shows the rate like an EDL M2 line
 @about
   Note: the Compare view (old vs new cut, reconform) is a work in progress and not finished yet.
 
@@ -5851,7 +5848,7 @@ function CLB.generate_reference_media_independent(pending)
       if row.take  and row.take  ~= "" then note_parts[#note_parts + 1] = "Take: "  .. row.take  end
       if row.aux_rate then
         note_parts[#note_parts + 1] = string.format(
-          "\xE2\x9A\xA0 Speed: %.1f (EDL M2 — retimed or reverse source; this file's Source TC assumes normal speed)",
+          "\xE2\x9A\xA0 Speed: %.1f (EDL M2 / AAF speed change — retimed or reverse source; this file's Source TC assumes normal speed)",
           row.aux_rate)
       end
       reaper.GetSetMediaItemInfo_String(item, "P_NOTES", table.concat(note_parts, "\n"), true)

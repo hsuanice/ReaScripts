@@ -1,5 +1,9 @@
 # hsuanice_Library.lua — Changelog
 
+## 26.1103.0116pre1
+
+- OTIO Bridge: AAF events carry their speed change
+
 ## 26.1103.0018pre1
 
 - OTIO Bridge: AAF events carry their audio mix (gain, automation, pan, fades)
