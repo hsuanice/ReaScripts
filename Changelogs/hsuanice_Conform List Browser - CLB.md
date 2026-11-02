@@ -4,6 +4,10 @@
 
 Conform List Browser
 
+## 26.1102.2310pre1
+
+- Fix: an AAF load that fails (for example when aaftool is missing) now shows the error instead of staying on Loading forever
+
 ## 26.1029.1329
 
 - Fix: the Apply report now also opens on Windows (tested on macOS)
