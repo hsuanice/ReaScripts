@@ -1,6 +1,6 @@
 --[[
 @description Conform List Browser - CLB: conform EDL / AAF / XML / OTIO / subtitle lists (GUI + Jump / Link / Load / Reveal)
-@version 26.1103.0228pre1
+@version 26.1103.0243pre1
 @author hsuanice
 @provides
   [main] .
@@ -12,7 +12,7 @@
   [nomain] ../Tools/aaf_to_otio.py
   [nomain] ../Tools/subtitle_to_clb.py
 @changelog
-  - New: Audio Folders — Load Audio... adds a folder instead of replacing the last one; each folder shows in the Audio panel as "name → group" and serves one group (or All): events only match audio from the folders of their group, e.g. AAF events from the AAF media, Picture Cut from the ISO folder. A Video folder also serves Picture Cut, Overlay, Text, Image and Matte. Click a folder to change its group or remove it (matching re-runs); saved in .clb projects
+  - Change: an Audio Folder can serve several groups — click it and tick groups; a group belongs to one folder at a time (ticking it moves it from another folder), and All serves only the groups no folder has. A Picture Cut group with no folder of its own uses the Video folder
 @about
   Note: the Compare view (old vs new cut, reconform) is a work in progress and not finished yet.
 
@@ -545,9 +545,9 @@ local CLB = {
   -- Audio file matching state
   audio_files = {},           -- { {path, filename, basename, folder, metadata={}}, ... }
   audio_folder = "",          -- Last loaded audio folder path (display)
-  -- Audio Folders: every loaded folder and the group it serves
-  -- ({ path, group }; group "All" = every row) — see
-  -- CLB.audio_folder_allows. Files carry their folder as af.__root.
+  -- Audio Folders: every loaded folder and the groups it serves
+  -- ({ path, groups = { [name] = true }, all = bool }) — see
+  -- CLB.audio_files_for_group. Files carry their folder as af.__root.
   audio_folders = {},
   audio_recursive = true,     -- Recursive search enabled
   show_audio_panel = false,   -- Show audio panel (auto-enabled when files loaded)
@@ -1491,30 +1491,73 @@ end
 
 local _rebuild_reel_filters  -- forward declaration (defined later)
 
---- Does an Audio Folder assigned to fgroup serve a row in rgroup? "All"
---- serves every row; "Video" also serves Picture Cut's sub-groups.
-function CLB.audio_folder_allows(fgroup, rgroup)
-  if fgroup == "All" or fgroup == rgroup then return true end
-  if fgroup == "Video" then
+--- Folders serving a row group. Each group belongs to at most one folder
+--- (CLB.set_audio_folder_group keeps them apart); a Picture Cut
+--- sub-group with no folder of its own uses the Video folder; anything
+--- still unclaimed uses the "All" folders.
+function CLB.audio_folders_for_group(rgroup)
+  local function claiming(g)
+    local out = {}
+    for _, fd in ipairs(CLB.audio_folders) do
+      if fd.groups and fd.groups[g] then out[#out + 1] = fd end
+    end
+    return out
+  end
+  local out = claiming(rgroup or "")
+  if #out == 0 then
     for _, sg in ipairs(CLB.VIDEO_SUBGROUPS or {}) do
-      if rgroup == sg then return true end
+      if rgroup == sg then out = claiming("Video") break end
     end
   end
-  return false
-end
-
---- Audio files a row of this group may match: files from the folders
---- assigned to it (files with no folder record count as "All").
-function CLB.audio_files_for_group(rgroup)
-  local group_of = {}
-  for _, fd in ipairs(CLB.audio_folders) do group_of[fd.path] = fd.group end
-  local out = {}
-  for _, af in ipairs(CLB.audio_files) do
-    if CLB.audio_folder_allows(group_of[af.__root or ""] or "All", rgroup or "") then
-      out[#out + 1] = af
+  if #out == 0 then
+    for _, fd in ipairs(CLB.audio_folders) do
+      if fd.all then out[#out + 1] = fd end
     end
   end
   return out
+end
+
+--- Audio files a row of this group may match (files with no folder record
+--- — none in practice — count as "All").
+function CLB.audio_files_for_group(rgroup)
+  local serves, known = {}, {}
+  for _, fd in ipairs(CLB.audio_folders_for_group(rgroup)) do serves[fd.path] = true end
+  for _, fd in ipairs(CLB.audio_folders) do known[fd.path] = true end
+  local out = {}
+  for _, af in ipairs(CLB.audio_files) do
+    if serves[af.__root or ""] or not known[af.__root or ""] then out[#out + 1] = af end
+  end
+  return out
+end
+
+--- Toggle group g on folder fd. Turning a group on takes it away from any
+--- other folder (no overlap); "All" on clears the folder's own groups,
+--- and a group on clears its "All".
+function CLB.set_audio_folder_group(fd, g, on)
+  fd.groups = fd.groups or {}
+  if g == "All" then
+    fd.all = on
+    if on then fd.groups = {} end
+    return
+  end
+  if on then
+    for _, other in ipairs(CLB.audio_folders) do
+      if other ~= fd and other.groups then other.groups[g] = nil end
+    end
+    fd.groups[g] = true
+    fd.all = false
+  else
+    fd.groups[g] = nil
+  end
+end
+
+--- "Audio, Dialog" / "All" / "-" (nothing) — button label + .clb value.
+function CLB.audio_folder_group_text(fd, sep)
+  if fd.all then return "All" end
+  local names = {}
+  for g in pairs(fd.groups or {}) do names[#names + 1] = g end
+  table.sort(names)
+  return #names > 0 and table.concat(names, sep or ", ") or "-"
 end
 
 --- Add (or re-add) one folder's scanned files: replaces that folder's
@@ -1526,7 +1569,7 @@ function CLB.add_audio_files(root, files)
     if fd.path == root then found = true break end
   end
   if not found then
-    CLB.audio_folders[#CLB.audio_folders + 1] = { path = root, group = "All" }
+    CLB.audio_folders[#CLB.audio_folders + 1] = { path = root, groups = {}, all = true }
   end
   local keep, have = {}, {}
   for _, af in ipairs(CLB.audio_files) do
@@ -1571,8 +1614,8 @@ local function match_audio_files()
   console_msg("Starting audio matching...")
 
   -- Build audio file indexes, one set per Audio Folders scope: a row only
-  -- searches the folders assigned to its group (or to "All") — see
-  -- CLB.audio_folder_allows. Built lazily, once per group.
+  -- searches the folder(s) serving its group — see
+  -- CLB.audio_files_for_group. Built lazily, once per group.
   local function build_index(files)
     local by_basename   = {}   -- filename (lowercase, no ext) → {audio_file, ...}
     local by_tape       = {}   -- tape/reel metadata (lowercase) → {audio_file, ...}
@@ -3656,7 +3699,9 @@ local function save_clb_project(filepath, silent)
   f:write(string.format("AUDIO_FOLDER|%s\n",
     _clb_escape(CLB.audio_folders[1] and CLB.audio_folders[1].path or CLB.audio_folder or "")))
   for _, fd in ipairs(CLB.audio_folders) do
-    f:write(string.format("AUDIO_FOLDERS|%s|%s\n", _clb_escape(fd.path), _clb_escape(fd.group or "All")))
+    -- groups as "Audio,Dialog", or "All" / "-"
+    f:write(string.format("AUDIO_FOLDERS|%s|%s\n", _clb_escape(fd.path),
+      _clb_escape(CLB.audio_folder_group_text(fd, ","))))
   end
   f:write(string.format("AUDIO_RECURSIVE|%s\n",
     CLB.audio_recursive and "1" or "0"))
@@ -3822,7 +3867,14 @@ local function _parse_clb_file(filepath)
 
       elseif key == "AUDIO_FOLDERS" then
         if (p[2] or "") ~= "" then
-          new_audio_folders[#new_audio_folders + 1] = { path = p[2], group = (p[3] ~= nil and p[3] ~= "") and p[3] or "All" }
+          local fd = { path = p[2], groups = {}, all = false }
+          local v = p[3] or "All"
+          if v == "All" or v == "" then
+            fd.all = true
+          elseif v ~= "-" then
+            for g in v:gmatch("[^,]+") do fd.groups[g] = true end
+          end
+          new_audio_folders[#new_audio_folders + 1] = fd
         end
 
       elseif key == "AUDIO_RECURSIVE" then
@@ -4020,7 +4072,7 @@ local function load_clb_project(filepath)
   CLB.show_audio_panel = false
   local folders = data.audio_folders or {}
   if #folders == 0 and data.audio_folder ~= "" then
-    folders = { { path = data.audio_folder, group = "All" } }
+    folders = { { path = data.audio_folder, groups = {}, all = true } }
   end
   for _, fd in ipairs(folders) do
     local cached = load_audio_cache(fd.path, data.audio_recursive)
@@ -4028,11 +4080,11 @@ local function load_clb_project(filepath)
       CLB.add_audio_files(fd.path, cached)
       console_msg(string.format("Restored %d audio files from cache: %s", #cached, fd.path))
     else
-      CLB.audio_folders[#CLB.audio_folders + 1] = { path = fd.path, group = fd.group }
+      CLB.audio_folders[#CLB.audio_folders + 1] = { path = fd.path }
       console_msg("Audio cache not found — click 'Load Audio...' to re-scan: " .. fd.path)
     end
     for _, x in ipairs(CLB.audio_folders) do
-      if x.path == fd.path then x.group = fd.group end
+      if x.path == fd.path then x.groups, x.all = fd.groups, fd.all end
     end
   end
   if #CLB.audio_files > 0 then
@@ -11173,23 +11225,32 @@ local function draw_audio_panel_header()
   for i, fd in ipairs(CLB.audio_folders) do
     reaper.ImGui_SameLine(ctx)
     local name = fd.path:match("([^/\\]+)$") or fd.path
-    if reaper.ImGui_SmallButton(ctx, string.format("%s \xE2\x86\x92 %s##audio_folder_%d", name, fd.group or "All", i)) then
+    local groups_text = CLB.audio_folder_group_text(fd)
+    if reaper.ImGui_SmallButton(ctx, string.format("%s \xE2\x86\x92 %s##audio_folder_%d", name, groups_text, i)) then
       reaper.ImGui_OpenPopup(ctx, "##audio_folder_popup_" .. i)
     end
     if reaper.ImGui_IsItemHovered(ctx) then
       reaper.ImGui_SetTooltip(ctx, string.format(
         "%s\n%d file(s)\nUsed for: %s — click to change or remove",
-        fd.path, fd.count or 0, fd.group or "All"))
+        fd.path, fd.count or 0, groups_text))
     end
     if reaper.ImGui_BeginPopup(ctx, "##audio_folder_popup_" .. i) then
-      reaper.ImGui_TextDisabled(ctx, "Match events of group:")
-      local choices = { "All" }
-      for _, gf in ipairs(CLB.group_filters) do choices[#choices + 1] = gf.name end
-      for _, g in ipairs(choices) do
-        if reaper.ImGui_Selectable(ctx, g .. "##afg_" .. i .. "_" .. g, fd.group == g) then
-          fd.group = g
-          folder_changed = true
+      -- Checkboxes keep the popup open; matching re-runs once it closes
+      reaper.ImGui_TextDisabled(ctx, "Match events of groups:")
+      local chg_all, new_all = reaper.ImGui_Checkbox(ctx, "All (groups no folder has)##afg_" .. i .. "_all", fd.all == true)
+      if chg_all then CLB.set_audio_folder_group(fd, "All", new_all); CLB.audio_folders_dirty = true end
+      reaper.ImGui_Separator(ctx)
+      for _, gf in ipairs(CLB.group_filters) do
+        local g = gf.name
+        local owner
+        for _, other in ipairs(CLB.audio_folders) do
+          if other ~= fd and other.groups and other.groups[g] then
+            owner = other.path:match("([^/\\]+)$") or other.path
+          end
         end
+        local label = owner and string.format("%s  (now: %s)", g, owner) or g
+        local chg, on = reaper.ImGui_Checkbox(ctx, label .. "##afg_" .. i .. "_" .. g, fd.groups and fd.groups[g] == true)
+        if chg then CLB.set_audio_folder_group(fd, g, on); CLB.audio_folders_dirty = true end
       end
       reaper.ImGui_Separator(ctx)
       if reaper.ImGui_Selectable(ctx, "Remove folder##afrm_" .. i) then
@@ -11197,6 +11258,9 @@ local function draw_audio_panel_header()
         folder_changed = true
       end
       reaper.ImGui_EndPopup(ctx)
+    elseif CLB.audio_folders_dirty and not reaper.ImGui_IsPopupOpen(ctx, "", reaper.ImGui_PopupFlags_AnyPopupId()) then
+      CLB.audio_folders_dirty = false
+      folder_changed = true
     end
     if folder_changed then break end
   end

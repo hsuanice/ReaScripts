@@ -4,6 +4,10 @@
 
 Conform List Browser
 
+## 26.1103.0243pre1
+
+- Change: an Audio Folder can serve several groups — click it and tick groups; a group belongs to one folder at a time (ticking it moves it from another folder), and All serves only the groups no folder has. A Picture Cut group with no folder of its own uses the Video folder
+
 ## 26.1103.0228pre1
 
 - New: Audio Folders — Load Audio... adds a folder instead of replacing the last one; each folder shows in the Audio panel as "name → group" and serves one group (or All): events only match audio from the folders of their group, e.g. AAF events from the AAF media, Picture Cut from the ISO folder. A Video folder also serves Picture Cut, Overlay, Text, Image and Matte. Click a folder to change its group or remove it (matching re-runs); saved in .clb projects
