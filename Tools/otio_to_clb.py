@@ -725,11 +725,14 @@ def _track_label(track, audio_idx, video_idx):
 # OTIO timeline → CLB events
 # ---------------------------------------------------------------------------
 
-def _timeline_to_clb(tl, fmt, progress_file=""):
+def _timeline_to_clb(tl, fmt, progress_file="", audio_track_names=None):
     """
     Convert an opentimelineio Timeline to a CLB dict.
     progress_file: optional path; if given, writes phase/current/total/name
                    progress records so the caller can display a progress bar.
+    audio_track_names: optional list of the source's own audio track names
+                   (AAF slot names, in track order) — labels keep their
+                   numbering: "Audio 3_L" -> "A3_L".
     """
     otio, ot = _import_otio()
 
@@ -765,6 +768,11 @@ def _timeline_to_clb(tl, fmt, progress_file=""):
             v_idx += 1
 
         trk_label = _track_label(track, a_idx, v_idx)
+        if (audio_track_names and kind == otio_inner.schema.TrackKind.Audio
+                and a_idx <= len(audio_track_names)):
+            m = re.match(r"^\D*?(\d.*)$", audio_track_names[a_idx - 1] or "")
+            if m:
+                trk_label = "A" + m.group(1).strip()
         pending_transition = None   # (in_offset_rt, out_offset_rt, name)
 
         children = list(track)
@@ -812,13 +820,17 @@ def _timeline_to_clb(tl, fmt, progress_file=""):
             src_in  = _rt_to_tc(src_start, fps, is_drop, ot)
             src_out = _rt_to_tc(src_end,   fps, is_drop, ot)
 
-            # Audio mix (AAF only for now): gain, automation, pan, fades
+            # Mix (AAF only for now): fades on every clip; gain, automation
+            # and pan on audio clips
             mix = {}
-            if fmt == "AAF" and kind == otio_inner.schema.TrackKind.Audio:
+            if fmt == "AAF":
                 nxt = children[i + 1] if i + 1 < len(children) else None
-                mix = _aaf_audio_mix(
+                mix = _aaf_mix(
                     clip, track, pending_transition,
-                    nxt if isinstance(nxt, otio_inner.schema.Transition) else None)
+                    nxt if isinstance(nxt, otio_inner.schema.Transition) else None,
+                    children[i - 2] if i >= 2 else None,
+                    children[i + 2] if i + 2 < len(children) else None,
+                    kind == otio_inner.schema.TrackKind.Audio)
 
             # Edit type / dissolve
             edit_type    = "C"
@@ -934,6 +946,13 @@ def _load_otio(path, progress_file=""):
 _POWER_INTERP_AUID = "c09153f7-bd18-4e5a-ad09-cbdd654fa001"
 
 
+class _InterpMap(dict):
+    """The adapter calls .get(auid, "Linear"): report unknown as None, so an
+    unspecified shape can get its own default instead of looking Linear."""
+    def get(self, key, default=None):
+        return dict.get(self, key)
+
+
 def _register_power_interp():
     # Patch the module instance OTIO's plugin loader actually uses (it loads
     # adapters by file path, separate from a plain import of the package).
@@ -941,8 +960,9 @@ def _register_power_interp():
         import aaf2.auid
         import opentimelineio as otio
         aafa = otio.adapters.from_name("AAF").module()
-        aafa._PROPERTY_INTERPOLATION_MAP.setdefault(
-            aaf2.auid.AUID(_POWER_INTERP_AUID), "Power")
+        m = _InterpMap(aafa._PROPERTY_INTERPOLATION_MAP)
+        m[aaf2.auid.AUID(_POWER_INTERP_AUID)] = "Power"
+        aafa._PROPERTY_INTERPOLATION_MAP = m
     except Exception:
         pass
 
@@ -995,16 +1015,24 @@ def _aaf_param(params, name):
     return _aaf_number(v), None, None
 
 
-def _fade_shape(transition):
-    """'power' or 'linear' from an audio dissolve; 'power' when unknown."""
+def _fade_shape(transition, crossfade):
+    """
+    'power' or 'linear' as the dissolve says; when it says nothing, a fade
+    to/from filler is linear and a crossfade between clips is equal power.
+    """
     og = (transition.metadata.get("AAF") or {}).get("OperationGroup") or {}
     _, _, interp = _aaf_param(_aaf_params(og), "Level")
-    return "linear" if interp == "Linear" else "power"
+    if interp == "Power":
+        return "power"
+    if interp == "Linear":
+        return "linear"
+    return "power" if crossfade else "linear"
 
 
-def _aaf_audio_mix(clip, track, prev_tr, next_tr):
+def _aaf_mix(clip, track, prev_tr, next_tr, before, after, is_audio):
     """
-    Mix data of one AAF audio clip, for Generate Items / Conform to restore:
+    Mix data of one AAF clip, for Generate Items / Conform to restore
+    (fades on every clip; gain, automation and pan on audio only):
       gain   item volume (amplitude; 0 = muted)
       env    take volume envelope [[sec from item start, amplitude], ...],
              normalized so its loudest point is 1.0 (the rest is in gain)
@@ -1014,17 +1042,21 @@ def _aaf_audio_mix(clip, track, prev_tr, next_tr):
              into a dissolve — the clip's TC range itself is unchanged
     A dissolve to/from filler is a fade; between two clips it is a
     crossfade (both items overlap and fade). Returns {} when there is
-    nothing to restore.
+    nothing to restore. before/after = the items on the far side of the
+    dissolves (a Clip there makes it a crossfade).
     """
+    import opentimelineio as otio
     mix = {}
     if prev_tr is not None:
         mix["ei"] = prev_tr.in_offset.to_seconds()
         mix["fi"] = (prev_tr.in_offset + prev_tr.out_offset).to_seconds()
-        mix["fis"] = _fade_shape(prev_tr)
+        mix["fis"] = _fade_shape(prev_tr, isinstance(before, otio.schema.Clip))
     if next_tr is not None:
         mix["eo"] = next_tr.out_offset.to_seconds()
         mix["fo"] = (next_tr.in_offset + next_tr.out_offset).to_seconds()
-        mix["fos"] = _fade_shape(next_tr)
+        mix["fos"] = _fade_shape(next_tr, isinstance(after, otio.schema.Clip))
+    if not is_audio:
+        return mix
 
     # Gain: Mono Audio Gain on the clip (constant clip gain and/or keyframed
     # automation; several nested gains multiply). Keyframe times are 0..1 of
@@ -1057,6 +1089,26 @@ def _aaf_audio_mix(clip, track, prev_tr, next_tr):
             if p is not None and abs(p - 0.5) > 1e-6:
                 mix["pan"] = max(-1.0, min(1.0, p * 2.0 - 1.0))
     return mix
+
+
+def _aaf_audio_track_names(path, comp_name, n_audio):
+    """
+    The composition's own audio track names ("Audio 1", "Audio 3_L", ...)
+    in slot order — the OTIO adapter names every track "Sequence". None if
+    unreadable or the count doesn't match the OTIO audio tracks.
+    """
+    try:
+        import aaf2
+        with aaf2.open(str(path), "r") as f:
+            comps = [m for m in f.content.toplevel() if m.name == comp_name] \
+                or list(f.content.toplevel())
+            if not comps:
+                return None
+            names = [s.name or "" for s in comps[0].slots
+                     if s.media_kind == "Sound"]
+        return names if len(names) == n_audio else None
+    except Exception:
+        return None
 
 
 def _pick_main_timeline(collection, path):
@@ -1108,7 +1160,9 @@ def _load_aaf(path, progress_file=""):
         warning = ""
         if isinstance(tl, otio.schema.SerializableCollection):
             tl, warning = _pick_main_timeline(tl, path)
-        clb = _timeline_to_clb(tl, "AAF", progress_file)
+        names = _aaf_audio_track_names(path, tl.name,
+                                       len(tl.audio_tracks()))
+        clb = _timeline_to_clb(tl, "AAF", progress_file, names)
         if warning:
             clb["warning"] = warning
         return clb

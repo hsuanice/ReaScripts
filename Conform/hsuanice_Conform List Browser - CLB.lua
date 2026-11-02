@@ -1,6 +1,6 @@
 --[[
 @description Conform List Browser - CLB: conform EDL / AAF / XML / OTIO / subtitle lists (GUI + Jump / Link / Load / Reveal)
-@version 26.1103.0018pre1
+@version 26.1103.0053pre1
 @author hsuanice
 @provides
   [main] .
@@ -12,7 +12,11 @@
   [nomain] ../Tools/aaf_to_otio.py
   [nomain] ../Tools/subtitle_to_clb.py
 @changelog
-  - New: Restore Mix (checkbox under Generate Items, on by default) — Generate Items and Conform restore each AAF audio clip's gain, volume automation (as a take volume envelope), pan, fades and crossfades; fade shapes follow the AAF (Equal Power or Linear), Equal Power when it says nothing; saved in .clb projects
+  - Change: AAF audio tracks keep the AAF's own track numbering and order (A1, A2, A3_L, A3_R, A3 ...) instead of A1-A38; Generate Items, Conform and Consolidate keep that order
+  - New: video clips restore their fades and crossfades too
+  - Change: a fade the AAF gives no shape for is Linear; a crossfade with no shape is Equal Power
+  - Change: a generated track whose clips all share one pan (e.g. every clip on A3_L panned left) gets it as track pan instead of take pan
+  - Change: conformed AAF takes are named by clip name instead of the media file name
 @about
   Note: the Compare view (old vs new cut, reconform) is a work in progress and not finished yet.
 
@@ -3318,14 +3322,57 @@ function CLB.mix_decode(str)
   return next(mix) and mix or nil
 end
 
+--- Sort generated track names: natural order of the part up to the first
+--- number ("AAF - A3"), and names sharing it ("AAF - A3_L", "AAF - A3_R",
+--- "AAF - A3") in the order their first event was loaded — the source's
+--- own track order. first_idx[name] = lowest row.__event_idx on it.
+function CLB.sort_track_names(names, first_idx)
+  local function base(n) return n:match("^(%D*%d+)") or n end
+  table.sort(names, function(a, b)
+    local ba, bb = base(a), base(b)
+    if ba ~= bb then return _natural_sort_cmp(ba, bb) end
+    local ia, ib = first_idx[a] or math.huge, first_idx[b] or math.huge
+    if ia ~= ib then return ia < ib end
+    return a < b
+  end)
+end
+
+--- Track pan from the mix: a generated track whose rows all carry the same
+--- pan (e.g. every row on "AAF - A3_L" panned left) gets it as TRACK pan,
+--- and those items keep center take pan. Returns { [track name] = pan }.
+function CLB.track_pans(rows, row_to_trackname)
+  if not CLB.restore_mix then return {} end
+  local pans, mixed = {}, {}
+  for _, row in ipairs(rows) do
+    local name = row_to_trackname[row.__guid]
+    if name and not mixed[name] then
+      local p = row.mix and row.mix.pan or 0
+      if pans[name] == nil then pans[name] = p
+      elseif pans[name] ~= p then mixed[name] = true end
+    end
+  end
+  local out = {}
+  for name, p in pairs(pans) do
+    if not mixed[name] and p ~= 0 then out[name] = p end
+  end
+  return out
+end
+
+--- True when the row's source list is an AAF file.
+function CLB.row_is_aaf(row)
+  local src = row and CLB.edl_sources[row.__source_idx or 0]
+  return src and (src.path or ""):lower():match("%.aaf$") ~= nil or false
+end
+
 --- Restore row.mix on a freshly created item: volume, pan, fades and the
 --- take volume envelope. extend = also move/lengthen the item into its
---- dissolves (ei/eo) — never for an existing linked item. Takes with a
+--- dissolves (ei/eo) — never for an existing linked item. skip_pan = the
+--- pan is on the track instead (CLB.track_pans). Takes with a
 --- source are slid back by the same amount so the cut stays in sync;
 --- if a take lacks that much handle, the extension shrinks to fit.
 --- Fade shape "power" = REAPER Equal Power (7), "linear" = 0; each
 --- length is written before its shape (a length write resets the shape).
-function CLB.apply_mix(item, row, extend)
+function CLB.apply_mix(item, row, extend, skip_pan)
   local mix = row and row.mix
   if not CLB.restore_mix or not mix then return end
 
@@ -3364,7 +3411,7 @@ function CLB.apply_mix(item, row, extend)
   end
   for t = 0, reaper.CountTakes(item) - 1 do
     local take = reaper.GetTake(item, t)
-    if take and mix.pan then reaper.SetMediaItemTakeInfo_Value(take, "D_PAN", mix.pan) end
+    if take and mix.pan and not skip_pan then reaper.SetMediaItemTakeInfo_Value(take, "D_PAN", mix.pan) end
   end
 
   -- Take volume envelope on every take, written into the item chunk:
@@ -5616,6 +5663,7 @@ end
 --- track_names_order (for diagnostics/messages).
 function CLB._build_track_map_for_rows(rows)
   local track_names_set, track_names_order, row_to_trackname = {}, {}, {}
+  local first_idx = {}
   for _, row in ipairs(rows) do
     local rtokens = build_row_tokens(row)
     local expanded = _expand_track_name(CLB.track_name_format, rtokens)
@@ -5624,8 +5672,10 @@ function CLB._build_track_map_for_rows(rows)
       track_names_set[expanded] = true
       track_names_order[#track_names_order + 1] = expanded
     end
+    local ei = row.__event_idx or math.huge
+    if ei < (first_idx[expanded] or math.huge) then first_idx[expanded] = ei end
   end
-  table.sort(track_names_order, _natural_sort_cmp)
+  CLB.sort_track_names(track_names_order, first_idx)
   local track_map = {}
   for _, name in ipairs(track_names_order) do
     reaper.InsertTrackAtIndex(reaper.CountTracks(0), true)
@@ -5842,6 +5892,7 @@ local function generate_items()
   local track_names_order = {}
   local row_to_trackname = {}  -- row.__guid -> expanded track name
 
+  local first_idx = {}
   for _, row in ipairs(visible_rows) do
     local tokens = build_row_tokens(row)
     local expanded_name = _expand_track_name(CLB.track_name_format, tokens)
@@ -5851,10 +5902,13 @@ local function generate_items()
       track_names_set[expanded_name] = true
       track_names_order[#track_names_order + 1] = expanded_name
     end
+    local ei = row.__event_idx or math.huge
+    if ei < (first_idx[expanded_name] or math.huge) then first_idx[expanded_name] = ei end
   end
 
-  -- Sort track names (natural sort: A1, A2, A10 instead of A1, A10, A2)
-  table.sort(track_names_order, _natural_sort_cmp)
+  -- Sort track names: natural order, same-number tracks (A3_L, A3_R, A3)
+  -- in the source's own order (CLB.sort_track_names)
+  CLB.sort_track_names(track_names_order, first_idx)
 
   -- Confirmation
   local preview_tracks = {}
@@ -5888,10 +5942,12 @@ local function generate_items()
   -- conform_matched_items()'s existing behavior (see there).
   local track_map = {}  -- expanded_name -> MediaTrack*
 
+  local track_pans = CLB.track_pans(visible_rows, row_to_trackname)
   for _, name in ipairs(track_names_order) do
     reaper.InsertTrackAtIndex(reaper.CountTracks(0), true)
     local found = reaper.GetTrack(0, reaper.CountTracks(0) - 1)
     reaper.GetSetMediaTrackInfo_String(found, "P_NAME", name, true)
+    if track_pans[name] then reaper.SetMediaTrackInfo_Value(found, "D_PAN", track_pans[name]) end
     track_map[name] = found
   end
 
@@ -5954,7 +6010,7 @@ local function generate_items()
           reaper.GetSetMediaItemTakeInfo_String(take, "P_EXT:CLB_NOTES", row.notes, true)
         end
       end
-      CLB.apply_mix(item, row, true)
+      CLB.apply_mix(item, row, true, track_pans[track_name] ~= nil)
 
       job.created = job.created + 1
     end,
@@ -6288,6 +6344,7 @@ local function conform_matched_items(selected_only)
   local track_names_set = {}
   local track_names_order = {}
   local row_to_trackname = {}  -- row.__guid -> expanded track name
+  local first_idx = {}         -- expanded track name -> first row.__event_idx
   local linked_count = 0
 
   for _, row in ipairs(matched_rows) do
@@ -6302,11 +6359,14 @@ local function conform_matched_items(selected_only)
         track_names_set[expanded_name] = true
         track_names_order[#track_names_order + 1] = expanded_name
       end
+      local ei = row.__event_idx or math.huge
+      if ei < (first_idx[expanded_name] or math.huge) then first_idx[expanded_name] = ei end
     end
   end
 
-  -- Sort track names (natural sort: A1, A2, A10 instead of A1, A10, A2)
-  table.sort(track_names_order, _natural_sort_cmp)
+  -- Sort track names: natural order, same-number tracks (A3_L, A3_R, A3)
+  -- in the source's own order (CLB.sort_track_names)
+  CLB.sort_track_names(track_names_order, first_idx)
 
   -- Confirmation
   local preview_tracks = {}
@@ -6350,11 +6410,13 @@ local function conform_matched_items(selected_only)
   -- Create or find tracks by expanded name
   local track_map = {}  -- expanded_name -> MediaTrack*
 
+  local track_pans = CLB.track_pans(matched_rows, row_to_trackname)
   for _, name in ipairs(track_names_order) do
     -- Always create a new track (never reuse existing tracks)
     reaper.InsertTrackAtIndex(reaper.CountTracks(0), true)
     local found = reaper.GetTrack(0, reaper.CountTracks(0) - 1)
     reaper.GetSetMediaTrackInfo_String(found, "P_NAME", name, true)
+    if track_pans[name] then reaper.SetMediaTrackInfo_Value(found, "D_PAN", track_pans[name]) end
     track_map[name] = found
   end
 
@@ -6482,7 +6544,12 @@ local function conform_matched_items(selected_only)
               -- elsewhere (item Notes, P_EXT, the event list itself) and
               -- isn't what you need at a glance on the take itself —
               -- which file actually got matched is.
+              -- Exception: an AAF row uses its clip name — AAF media is
+              -- usually named by GUID (hsuanice's request, 26.1103).
               local take_name = af.filename or af.basename or row.clip_name or ("Take " .. ti)
+              if CLB.row_is_aaf(row) and (row.clip_name or "") ~= "" then
+                take_name = row.clip_name
+              end
               reaper.GetSetMediaItemTakeInfo_String(take, "P_NAME", take_name, true)
 
               -- Store metadata as P_EXT
@@ -6517,7 +6584,9 @@ local function conform_matched_items(selected_only)
 
       -- Audio mix (gain / automation / pan / fades) on new items only — a
       -- linked item is the user's own, already mixed and positioned.
-      if not is_linked then CLB.apply_mix(item, row, true) end
+      if not is_linked then
+        CLB.apply_mix(item, row, true, track_pans[row_to_trackname[row.__guid]] ~= nil)
+      end
 
       job.created = job.created + 1
     end,
@@ -6997,7 +7066,8 @@ end
 --- track — so V3 still covers V2 wherever both have picture, while tracks
 --- left sparse (or empty) still collapse.
 ---
---- Layer of a row = its current track's position (V=1, V2=2, A5=5 ...).
+--- Layer of a row = its current track's position (V=1, V2=2, A5=5,
+--- A3_L=3 ...; same number -> load order).
 --- A row still on its loaded track is read through __orig_track, so a
 --- per-source name like "V1-2" (source 1, V2) counts as layer 2.
 function CLB.pack_ordered(evts)
@@ -7008,7 +7078,7 @@ function CLB.pack_ordered(evts)
         or name == _rename_track_with_suffix(orig, row.__source_idx or 1)) then
       name = orig
     end
-    return tonumber(name:match("(%d+)%s*$")) or 1, name
+    return tonumber(name:match("(%d+)")) or 1, name
   end
 
   -- Events on one track don't overlap and are sorted by start (so also by
@@ -7029,17 +7099,21 @@ function CLB.pack_ordered(evts)
     return found
   end
 
+  -- Same number (A3_L, A3_R, A3): the source's own order = load order.
   local layers, layer_list, layer_of = {}, {}, {}
   for _, evt in ipairs(evts) do
     local num, name = layer_key(evt.row)
     if not layers[name] then
-      layers[name] = { num = num, name = name }
+      layers[name] = { num = num, name = name, first = math.huge }
       layer_list[#layer_list + 1] = layers[name]
     end
-    layer_of[evt] = layers[name]
+    local l = layers[name]
+    l.first = math.min(l.first, evt.row.__event_idx or math.huge)
+    layer_of[evt] = l
   end
   table.sort(layer_list, function(a, b)
     if a.num ~= b.num then return a.num < b.num end
+    if a.first ~= b.first then return a.first < b.first end
     return a.name < b.name
   end)
   for rank, l in ipairs(layer_list) do l.rank = rank end

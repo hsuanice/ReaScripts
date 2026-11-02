@@ -4,6 +4,14 @@
 
 Conform List Browser
 
+## 26.1103.0053pre1
+
+- Change: AAF audio tracks keep the AAF's own track numbering and order (A1, A2, A3_L, A3_R, A3 ...) instead of A1-A38; Generate Items, Conform and Consolidate keep that order
+- New: video clips restore their fades and crossfades too
+- Change: a fade the AAF gives no shape for is Linear; a crossfade with no shape is Equal Power
+- Change: a generated track whose clips all share one pan (e.g. every clip on A3_L panned left) gets it as track pan instead of take pan
+- Change: conformed AAF takes are named by clip name instead of the media file name
+
 ## 26.1103.0018pre1
 
 - New: Restore Mix (checkbox under Generate Items, on by default) — Generate Items and Conform restore each AAF audio clip's gain, volume automation (as a take volume envelope), pan, fades and crossfades; fade shapes follow the AAF (Equal Power or Linear), Equal Power when it says nothing; saved in .clb projects
