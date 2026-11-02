@@ -4,6 +4,10 @@
 
 Conform List Browser
 
+## 26.1103.0228pre1
+
+- New: Audio Folders — Load Audio... adds a folder instead of replacing the last one; each folder shows in the Audio panel as "name → group" and serves one group (or All): events only match audio from the folders of their group, e.g. AAF events from the AAF media, Picture Cut from the ISO folder. A Video folder also serves Picture Cut, Overlay, Text, Image and Matte. Click a folder to change its group or remove it (matching re-runs); saved in .clb projects
+
 ## 26.1103.0212pre1
 
 - New: Include Unmatched (checkbox under Conform Sel, on by default) — Conform All / Sel also place events with no matched audio as empty items (same as Generate Items) on the same tracks, so one run spots the whole list
