@@ -59,6 +59,7 @@ and background on/off scripts start with `Toggle`.
 
 | Package | What it does |
 |---|---|
+| Dual Recorder Sync | Sync a second recorder's items to the first recorder by waveform (its mix-in channel as reference), sample-accurate, start / end checked for drift; optional length match to the reference (DRS Waveform Sync, DRS Set Reference Track) |
 | Fade Tool | Frame-grid fades and crossfades by razor, time selection, mouse or edit cursor; Hover Mode aware (Smart Fade, Crossfade in Razor, Scene Cut to Razor, Settings) |
 | Hover Editing | Pro Tools-style Split / Trim at the mouse or edit cursor (Toggle Hover Mode, Split, Trim or Extend Left / Right Edge) |
 | Reorder - Sort Items Vertically | Vertical reorder and sort of selected items by metadata (GUI + Copy to Sort / Sort in Place / Upfill) |
@@ -156,6 +157,8 @@ AudioSweet is inspired by the AudioSuite-like script by Tim Chimes.
 "AudioSweet" is a name originally given by Tim Chimes; this project continues to use the name in reference to his original work.
 Original: "Renders selected plugin to selected media item", written for REAPER 5.1 with Lua (v1.1, 2015-12-22) —
 http://timchimes.com/scripting-with-reaper-audiosuite/
+
+Dual Recorder Sync finds offsets with GCC-PHAT cross-correlation (C. Knapp and G. Carter, "The generalized correlation method for estimation of time delay", IEEE Trans. ASSP, 1976).
 
 Fade Tool is heavily based on AZ's *Fade tool (work on context of mouse, razor or time selection)* (ReaTeam Scripts) — https://forum.cockos.com/showthread.php?t=293335 . It closely follows AZ's design (context order razor / time selection / mouse, top half fade-in / bottom half fade-out, the item name bar moving a crossfade and AZ's way of detecting it, razor crossfades and fades); the code is a new implementation with hsuanice's changes (frame-based defaults, no pop-up windows, Hover Mode, hold-and-drag crossfades, Scene Cut). Smart Fade's hold-the-shortcut detection follows Sexan's *VT_SWIPE to Comp HOLD* (Virtual Track, Sexan_Scripts).
 

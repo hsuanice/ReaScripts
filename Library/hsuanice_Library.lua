@@ -1,6 +1,6 @@
 --[[
 @description hsuanice Library - shared code used by hsuanice scripts (required)
-@version 26.1103.0116pre1
+@version 26.1103.1536pre1
 @author hsuanice
 @metapackage
 @provides
@@ -23,9 +23,10 @@
   [nomain] hsuanice_Subtitle Bridge.lua
   [nomain] hsuanice_Process Exec.lua
   [nomain] hsuanice_Fade Tool Core.lua
+  [nomain] hsuanice_Waveform Sync Core.lua
   [nomain] json.lua
 @changelog
-  - OTIO Bridge: AAF events carry their speed change
+  - Add: Waveform Sync Core (used by Dual Recorder Sync)
 @about
   # hsuanice Library
 

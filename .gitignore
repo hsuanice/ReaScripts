@@ -59,6 +59,7 @@
 !/Library/hsuanice_Subtitle Bridge.lua
 !/Library/hsuanice_Process Exec.lua
 !/Library/hsuanice_Fade Tool Core.lua
+!/Library/hsuanice_Waveform Sync Core.lua
 !/Library/json.lua
 
 .DS_Store
