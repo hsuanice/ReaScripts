@@ -1,10 +1,10 @@
 --[[
 @description Project Manager - PM Timer: scene-aware work timer
-@version 26.1029.1741
+@version 26.1103.1329pre1
 @author hsuanice
 @noindex  (kept in the repository as a backup; Project Manager is not offered on ReaPack for now)
 @changelog
-  - New: WIP button ends the session without finishing the scene; the next Start offers to continue it (tested)
+  - Fix: log items now get "Project Workflow | " when the project file name has no Scope/Task (e.g. 261102----AMA----conform -> "AMA Conform | pre"), in Scene mode and Add Record too, not only in AAP mode; PM Insight can then tell which project the hours belong to.
 @about
   Scene-aware toggle timer for the hsuanice PM system.
   Uses gfx (no ReaImGui). 1-second display refresh via defer + time_precise.
@@ -1012,7 +1012,13 @@ local function create_work_item(date_track, scene_guid, item_name, work_type, po
   r.SetMediaItemInfo_Value(item, "D_POSITION", pos)
   r.SetMediaItemInfo_Value(item, "D_LENGTH",   1)  -- updated on Finish/Break
 
-  item_name = apply_proj_prefix(item_name)
+  -- A short project file name (no Scope/Task) still gets "Project Workflow | ",
+  -- so PM Insight can tell which project the hours belong to.
+  if item_name:find(" | ", 1, true) then
+    item_name = apply_proj_prefix(item_name)
+  else
+    item_name = build_project_process_name(item_name)
+  end
   local take = r.AddTakeToMediaItem(item)
   r.GetSetMediaItemTakeInfo_String(take, "P_NAME", item_name, true)
 
@@ -3142,7 +3148,7 @@ local function action_add_record()
   end
 
   -- Item name = just work_type (scene metadata goes into P_NOTES)
-  local item_name = apply_proj_prefix(work_type)
+  local item_name = build_project_process_name(work_type)
 
   -- Build scene metadata note (if scene is linked)
   local item_note = ""

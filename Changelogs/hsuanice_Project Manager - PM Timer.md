@@ -7,6 +7,10 @@ PM Timer - Scene-aware Work Timer
 
 **Removed from ReaPack** (2026-10-15) together with PM Insight Analyzer; the script stays in the repository (`@noindex`) as a backup.
 
+## 26.1103.1329pre1
+
+- Fix: log items now get "Project Workflow | " when the project file name has no Scope/Task (e.g. 261102----AMA----conform -> "AMA Conform | pre"), in Scene mode and Add Record too, not only in AAP mode; PM Insight can then tell which project the hours belong to.
+
 ## 26.1029.1741
 
 - New: WIP button ends the session without finishing the scene; the next Start offers to continue it (tested)
