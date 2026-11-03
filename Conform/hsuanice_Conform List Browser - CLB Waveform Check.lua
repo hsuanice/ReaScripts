@@ -1,6 +1,6 @@
 --[[
 @description Conform List Browser - CLB Waveform Check (compare conformed ISO audio with the AAF's audio; markers, mute verified AAF items)
-@version 26.1103.2221pre1
+@version 26.1103.2234pre1
 @author hsuanice
 @noindex
 @changelog
@@ -17,8 +17,9 @@
     "AAF - A3_L" / "AAF - A3_R" count as A3. When no track has that label, or nothing is
     conformed under an AAF item on it (e.g. A2 = the other channel of A1's mix, removed by
     Remove Dups), or no clear match there (tracks packed by Consolidate), with all conformed
-    tracks. Every conformed event under an AAF item is checked, every channel on its own; the
-    clearest channel gives the result.
+    tracks. Every conformed event under an AAF item is checked, every channel on its own (each
+    take of a conformed item - one per ISO channel - or one track per channel after exploding
+    takes); the channel closest to the AAF gives the result (any channel on the sample = in sync).
   - The offset is found by cross-correlation (GCC-PHAT, Waveform Sync Core) within +/- the
     search range (setting, default 1 s).
   - Results:
@@ -107,16 +108,20 @@ for i = 0, r.CountTracks(0) - 1 do
   if label then
     ref_tracks[#ref_tracks + 1] = { track = tr, label = label, name = name }
   else
-    -- conformed items: active take carries CLB_EVENT (written by CLB Conform)
+    -- conformed takes: every take carrying CLB_EVENT (written by CLB Conform) -
+    -- an item holds one take per ISO channel, and each channel is checked
     local items = {}
     for j = 0, r.CountTrackMediaItems(tr) - 1 do
       local it = r.GetTrackMediaItem(tr, j)
-      local tk = file_take(it)
-      if tk then
-        local _, ev = r.GetSetMediaItemTakeInfo_String(tk, "P_EXT:CLB_EVENT", "", false)
-        if ev ~= "" then
-          local s, e = span(it)
-          items[#items + 1] = { item = it, take = tk, s = s, e = e, event = ev }
+      local s, e = span(it)
+      for t = 0, r.CountTakes(it) - 1 do
+        local tk = r.GetTake(it, t)
+        local src = tk and not r.TakeIsMIDI(tk) and r.GetMediaItemTake_Source(tk)
+        if src and (r.GetMediaSourceFileName(src, "") or "") ~= "" then
+          local _, ev = r.GetSetMediaItemTakeInfo_String(tk, "P_EXT:CLB_EVENT", "", false)
+          if ev ~= "" then
+            items[#items + 1] = { item = it, take = tk, s = s, e = e, event = ev, name = r.GetTakeName(tk) }
+          end
         end
       end
     end
@@ -245,9 +250,12 @@ local function analyse(c)
         local ti = x.ti
         local s, e = math.max(rs, ti.s), math.min(re, ti.e)
         local res = WS.find_offset(ref, { { take = ti.take, pos = ti.s } }, s, e, { fps = FPS })
-        res.track, res.file = x.track, take_name(ti.item)
+        res.track, res.file = x.track, ti.name
         if res.ok then
-          if not best or res.ratio > best.ratio then best, best_g = res, g end
+          -- the channel closest to the AAF wins (any channel on the sample = in
+          -- sync; the others are Auto Align-moved or further mics); ties: clearest
+          local d, bd = math.abs(res.samples), best and math.abs(best.samples)
+          if not best or d < bd or (d == bd and res.ratio > best.ratio) then best, best_g = res, g end
         elseif not best_why then
           best_why = res
         end
@@ -265,7 +273,7 @@ local function analyse(c)
     local why = best_why and best_why.reason or "no result"
     c.kind = (why == "too short" or why:find("silent", 1, true)) and "?" or "NO MATCH"
     c.why = why
-    c.file = list[1].items[1] and take_name(list[1].items[1].ti.item)
+    c.file = list[1].items[1] and list[1].items[1].ti.name
     c.partial = list[1].ov < (re - rs) - 2 / FPS
     return
   end

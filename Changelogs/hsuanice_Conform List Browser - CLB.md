@@ -4,6 +4,10 @@
 
 Conform List Browser
 
+## 26.1103.2234pre1
+
+- Fix: CLB Waveform Check compares every take of a conformed item (one take per ISO channel), not only the active take, and the channel closest to the AAF gives the result - takes no longer need exploding first; an Auto Align-moved first channel no longer shows ~ x ms when another channel is on the sample
+
 ## 26.1103.2221pre1
 
 - Change: CLB Waveform Check also tries every conformed track when the AAF item's own track number gives no clear match - so it works after Consolidate (tracks packed and renumbered) as well as after Remove Dups

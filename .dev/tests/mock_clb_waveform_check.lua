@@ -69,7 +69,8 @@ local tracks, items_by = {}, {}
 local function track(name) local t = { name = name, items = {} }; tracks[#tracks + 1] = t; return t end
 local function item(tr, pos, len, fn, ext, name)
   local it = { track = tr, pos = pos, len = len, mute = 0, ext = ext or {}, name = name or "clip", markers = {} }
-  it.take = { item = it, fn = function(t) return fn(pos + t) end, file = "x.wav", ext = it.ext }
+  it.take = { item = it, fn = function(t) return fn(pos + t) end, file = "x.wav", ext = it.ext, name = it.name }
+  it.takes = { it.take }
   tr.items[#tr.items + 1] = it
   return it
 end
@@ -99,6 +100,13 @@ local E3 = track("EDL - A3")
 item(AAF, 70, 6, voice, nil, "packed")
 item(E1, 70, 6, other, { ["P_EXT:CLB_EVENT"] = "008" })
 item(E3, 70, 6, voice, { ["P_EXT:CLB_EVENT"] = "009" })
+-- 9: one item, two takes (ISO channels): active take Auto Align-delayed, second take exact
+do
+  local it = item(E1, 80, 6, function(t) return voice(t - d_aap) end, { ["P_EXT:CLB_EVENT"] = "010" }, "multi")
+  it.takes[2] = { item = it, fn = function(t) return voice(80 + t) end, file = "x.wav",
+    ext = { ["P_EXT:CLB_EVENT"] = "010" }, name = "multi.A2" }
+  item(AAF, 80, 6, voice, nil, "multi take")
+end
 -- 7: A2 (other channel of the mix) over audio conformed on A1 only (Remove Dups)
 item(AAF2, 10, 6, voice, nil, "a2 dup")
 
@@ -128,7 +136,9 @@ reaper = {
   CountSelectedMediaItems = function() return 0 end,
   GetMediaItem_Track = function(it) return it.track end,
   GetSet_LoopTimeRange = function() return 0, 0 end,
-  GetTakeName = function(tk) return tk.item.name end,
+  GetTakeName = function(tk) return tk.name or tk.item.name end,
+  CountTakes = function(it) return #it.takes end,
+  GetTake = function(it, t) return it.takes[t + 1] end,
   GetExtState = function() return "" end, SetExtState = function() end,
   GetUserInputs = function(_, _, _, def) return true, def end,
   TimeMap_curFrameRate = function() return FPS end,
@@ -158,8 +168,8 @@ dofile("Conform/hsuanice_Conform List Browser - CLB Waveform Check.lua")
 while #deferred > 0 do table.remove(deferred, 1)() end
 print(table.concat(console))
 local expect = { sync = "WC OK", ["aap only"] = "WC ~ ", ["two late"] = "WC SYNC -2f", ["other take"] = "WC NO MATCH",
-  short = "WC ?", ["no audio"] = "WC NO AUDIO", ["a2 dup"] = "WC OK", packed = "WC OK EDL - A3" }
-local pos_name = { [10] = "sync", [20] = "aap only", [30] = "two late", [40] = "other take", [50] = "short", [60] = "no audio", [70] = "packed" }
+  short = "WC ?", ["no audio"] = "WC NO AUDIO", ["a2 dup"] = "WC OK", packed = "WC OK EDL - A3", ["multi take"] = "WC OK" }
+local pos_name = { [10] = "sync", [20] = "aap only", [30] = "two late", [40] = "other take", [50] = "short", [60] = "no audio", [70] = "packed", [80] = "multi take" }
 local fails = 0
 for _, m in ipairs(markers) do
   local want = expect[pos_name[math.floor(m.pos + 0.5)]]
@@ -171,6 +181,6 @@ end
 local muted = {}
 for _, it in ipairs(AAF.items) do if it.mute == 1 then muted[#muted + 1] = it.name end end
 print("muted: " .. table.concat(muted, ", "))
-if table.concat(muted, ",") ~= "sync,aap only,packed" then fails = fails + 1; print("  FAIL mute") end
+if table.concat(muted, ",") ~= "sync,aap only,packed,multi take" then fails = fails + 1; print("  FAIL mute") end
 if AAF2.items[1].mute ~= 1 then fails = fails + 1; print("  FAIL a2 dup not muted") end
-print(fails == 0 and #markers == 8 and "ALL PASS" or (fails .. " FAILED"))
+print(fails == 0 and #markers == 9 and "ALL PASS" or (fails .. " FAILED"))
