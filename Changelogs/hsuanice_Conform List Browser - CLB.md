@@ -4,6 +4,10 @@
 
 Conform List Browser
 
+## 26.1103.2023
+
+- Release: AAF audio on the editor's exact sample (polarity null against Vordio), AAF clip gain / automation / pan / fades, speed changes, Picture Cut and Include Unmatched (tested)
+
 ## 26.1103.1954pre1
 
 - Fix: AAF audio lands on the editor's exact sample - the take's start offset uses the AAF's exact source position (samples) instead of the whole-frame Src In; item edges stay on the frame grid, the list TC is unchanged. Fixes a 1-sample early start (Avid media starting a sample past the frame) and sub-frame slips; R01 A1 now matches Vordio on all 212 items. Saved in .clb (older files keep using the TC)

@@ -1,6 +1,6 @@
 --[[
 @description Conform List Browser - CLB: conform EDL / AAF / XML / OTIO / subtitle lists (GUI + Jump / Link / Load / Reveal)
-@version 26.1103.1954pre1
+@version 26.1103.2023
 @author hsuanice
 @provides
   [main] .
@@ -12,7 +12,7 @@
   [nomain] ../Tools/aaf_to_otio.py
   [nomain] ../Tools/subtitle_to_clb.py
 @changelog
-  - Fix: AAF audio lands on the editor's exact sample - the take's start offset uses the AAF's exact source position (samples) instead of the whole-frame Src In; item edges stay on the frame grid, the list TC is unchanged. Fixes a 1-sample early start (Avid media starting a sample past the frame) and sub-frame slips; R01 A1 now matches Vordio on all 212 items. Saved in .clb (older files keep using the TC)
+  - Release: AAF audio on the editor's exact sample (polarity null against Vordio), AAF clip gain / automation / pan / fades, speed changes, Picture Cut and Include Unmatched (tested)
 @about
   Note: the Compare view (old vs new cut, reconform) is a work in progress and not finished yet.
 

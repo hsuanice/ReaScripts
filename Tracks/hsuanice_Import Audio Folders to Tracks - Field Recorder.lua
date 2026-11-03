@@ -1,11 +1,9 @@
 --[[
 @description Import Audio Folders to Tracks - Field Recorder: one folder per track, channel-split files grouped (GUI)
-@version 26.1103.1338pre1
+@version 26.1103.2023
 @author hsuanice
 @changelog
-  - Fix: new folder tracks always go to the top level at the bottom of the project; a folder left open at the end (hidden or not) is closed first, so imports no longer land inside it.
-  - Fix: Spot to original timecode reads the BWF TimeReference itself (no more error dialog per file); files without timecode stay in sequence and are listed in the summary.
-  - Fix: the import pauses while another project tab is shown instead of writing into it.
+  - Release: imports go below any folder left open at the end of the project; spot to BWF TC lists files without TC; waits while another project tab is active (tested)
 @about
   - Pre-confirm dialog: shows total folders/files, lets you choose a channel naming pattern or a custom mask, then offers [Import] / [Cancel].
     - Sequence only (append at the end of the target track).

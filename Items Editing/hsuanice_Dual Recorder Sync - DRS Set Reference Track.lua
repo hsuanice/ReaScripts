@@ -1,6 +1,6 @@
 --[[
 @description Dual Recorder Sync - DRS Set Reference Track (the selected track, e.g. the 2nd mix-in of the first recorder)
-@version 26.1103.1536pre1
+@version 26.1103.2023
 @author hsuanice
 @noindex
 @changelog

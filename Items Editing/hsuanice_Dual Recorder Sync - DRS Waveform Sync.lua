@@ -1,13 +1,12 @@
 --[[
 @description Dual Recorder Sync - DRS Waveform Sync (move a second recorder's items onto the reference by waveform, optional length match)
-@version 26.1103.1543pre1
+@version 26.1103.2023
 @author hsuanice
 @provides
   [main] .
   [main] hsuanice_Dual Recorder Sync - DRS Set Reference Track.lua
 @changelog
-  - Change: the results are printed in the ReaScript console instead of a message box.
-  - Tested by hsuanice on 9 takes (75-1 to 75-5): all synced, drift 0.0 frames.
+  - Release: sync a second recorder to the first by waveform, optional length match, results in the console (tested)
 @about
   Syncs the items of a second recorder to the first recorder by waveform, when the second
   recorder's timecode is right but its recording started late (or early).

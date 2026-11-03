@@ -1,6 +1,6 @@
 --[[
 @description Waveform Sync Core - find the time offset between two recordings of the same sound
-@version 26.1103.1536pre1
+@version 26.1103.2023
 @author hsuanice
 @noindex
 @about

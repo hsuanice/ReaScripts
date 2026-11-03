@@ -1,10 +1,10 @@
 --[[
 @description hsuanice_OTIO Bridge.lua
-@version 26.1103.1954pre1
+@version 26.1103.2023
 @author hsuanice
 @noindex
 @changelog
-  - New: AAF events carry the exact source start in samples (src_smp) through to CLB
+  - Release: AAF exact source start, mix and speed change carried to CLB (tested)
 @about
   v0.4.1
   Calls the OpenTimelineIO Python wrapper (Tools/otio_to_clb.py) and converts

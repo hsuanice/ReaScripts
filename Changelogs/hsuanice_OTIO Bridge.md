@@ -2,6 +2,10 @@
 
 hsuanice_OTIO Bridge.lua
 
+## 26.1103.2023
+
+- Release: AAF exact source start, mix and speed change carried to CLB (tested)
+
 ## 26.1103.1954pre1
 
 - New: AAF events carry the exact source start in samples (src_smp) through to CLB

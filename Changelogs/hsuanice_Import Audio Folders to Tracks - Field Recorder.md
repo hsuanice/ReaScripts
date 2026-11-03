@@ -4,6 +4,10 @@
 
 ReaImGui - Import audio: one folder per track; channel-split files go to child tracks. Sequence only.
 
+## 26.1103.2023
+
+- Release: imports go below any folder left open at the end of the project; spot to BWF TC lists files without TC; waits while another project tab is active (tested)
+
 ## 26.1103.1338pre1
 
 - Fix: new folder tracks always go to the top level at the bottom of the project; a folder left open at the end (hidden or not) is closed first, so imports no longer land inside it.
