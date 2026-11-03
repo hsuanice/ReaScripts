@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<index version="1" name="hsuanice Scripts" commit="8571ec2c9b50dc7c83d002f6a837116eb052be21">
+<index version="1" name="hsuanice Scripts" commit="b36d9ec23ce51c49c055edfb189830acbcb7a229">
   <category name="Conform">
     <reapack name="hsuanice_Conform List Browser - CLB.lua" type="script" desc="Conform List Browser - CLB: conform EDL / AAF / XML / OTIO / subtitle lists (GUI + Jump / Link / Load / Reveal)">
       <metadata>
@@ -2445,6 +2445,11 @@
         <changelog><![CDATA[- Renamed to "Import Audio Folders to Tracks - Field Recorder" (was "Import audio files per folder into separate tracks Field Recorder") as part of the 2026-10-12 naming clean-up.
 - Reinstall the package from ReaPack and re-assign your shortcuts / toolbar buttons.]]></changelog>
         <source main="main">https://github.com/hsuanice/ReaScripts/raw/69a8697e1b54666ea7228379b1490811fd778fa8/Tracks/hsuanice_Import%20Audio%20Folders%20to%20Tracks%20-%20Field%20Recorder.lua</source>
+      </version>
+      <version name="26.1103.1329pre1" author="hsuanice" time="2026-11-03T05:30:12Z">
+        <changelog><![CDATA[- Fix: Spot to original timecode no longer uses REAPER's "Move to source preferred position" action; it reads the BWF TimeReference itself, so a file without timecode no longer shows an error dialog for every file (it stays in sequence and is listed in the summary).
+- Fix: the import is tied to the project it started in; if another project tab is shown during the import, it pauses (shown in the progress window) instead of putting tracks and items into that other project.]]></changelog>
+        <source main="main">https://github.com/hsuanice/ReaScripts/raw/b36d9ec23ce51c49c055edfb189830acbcb7a229/Tracks/hsuanice_Import%20Audio%20Folders%20to%20Tracks%20-%20Field%20Recorder.lua</source>
       </version>
     </reapack>
     <reapack name="hsuanice_Import Audio Folders to Tracks - Music Multitrack.lua" type="script" desc="Import Audio Folders to Tracks - Music Multitrack: one folder per track (GUI)">
