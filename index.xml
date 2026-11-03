@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<index version="1" name="hsuanice Scripts" commit="b4d98b7787822c4fe4426055c6e2a9f39b6b383c">
+<index version="1" name="hsuanice Scripts" commit="e194ab668d6588ddfd6274d075252fef99c4aeaf">
   <category name="Conform">
     <reapack name="hsuanice_Conform List Browser - CLB.lua" type="script" desc="Conform List Browser - CLB: conform EDL / AAF / XML / OTIO / subtitle lists (GUI + Jump / Link / Load / Reveal)">
       <metadata>
@@ -321,6 +321,30 @@
         <source file="../Tools/otio_to_clb.py">https://github.com/hsuanice/ReaScripts/raw/b4d98b7787822c4fe4426055c6e2a9f39b6b383c/Tools/otio_to_clb.py</source>
         <source file="../Tools/aaf_to_otio.py">https://github.com/hsuanice/ReaScripts/raw/b4d98b7787822c4fe4426055c6e2a9f39b6b383c/Tools/aaf_to_otio.py</source>
         <source file="../Tools/subtitle_to_clb.py">https://github.com/hsuanice/ReaScripts/raw/b4d98b7787822c4fe4426055c6e2a9f39b6b383c/Tools/subtitle_to_clb.py</source>
+      </version>
+      <version name="26.1103.2219pre1" author="hsuanice" time="2026-11-03T14:20:01Z">
+        <changelog><![CDATA[- Change: CLB Waveform Check looks on every conformed track when nothing is conformed on the AAF item's own track number - e.g. A2 = the other channel of A1's mix, whose ISO copy Remove Dups removed (it keeps A1's, as the EDL lists A1 first)]]></changelog>
+        <source main="main">https://github.com/hsuanice/ReaScripts/raw/a29cfffbaca0a8171cc7d21c1067e37b57f8f8e9/Conform/hsuanice_Conform%20List%20Browser%20-%20CLB.lua</source>
+        <source main="main" file="hsuanice_Conform List Browser - CLB Jump Old New TC.lua">https://github.com/hsuanice/ReaScripts/raw/a29cfffbaca0a8171cc7d21c1067e37b57f8f8e9/Conform/hsuanice_Conform%20List%20Browser%20-%20CLB%20Jump%20Old%20New%20TC.lua</source>
+        <source main="main" file="hsuanice_Conform List Browser - CLB Link REAPER Items.lua">https://github.com/hsuanice/ReaScripts/raw/a29cfffbaca0a8171cc7d21c1067e37b57f8f8e9/Conform/hsuanice_Conform%20List%20Browser%20-%20CLB%20Link%20REAPER%20Items.lua</source>
+        <source main="main" file="hsuanice_Conform List Browser - CLB Load from REAPER.lua">https://github.com/hsuanice/ReaScripts/raw/a29cfffbaca0a8171cc7d21c1067e37b57f8f8e9/Conform/hsuanice_Conform%20List%20Browser%20-%20CLB%20Load%20from%20REAPER.lua</source>
+        <source main="main" file="hsuanice_Conform List Browser - CLB Reveal Item.lua">https://github.com/hsuanice/ReaScripts/raw/a29cfffbaca0a8171cc7d21c1067e37b57f8f8e9/Conform/hsuanice_Conform%20List%20Browser%20-%20CLB%20Reveal%20Item.lua</source>
+        <source main="main" file="hsuanice_Conform List Browser - CLB Waveform Check.lua">https://github.com/hsuanice/ReaScripts/raw/a29cfffbaca0a8171cc7d21c1067e37b57f8f8e9/Conform/hsuanice_Conform%20List%20Browser%20-%20CLB%20Waveform%20Check.lua</source>
+        <source file="../Tools/otio_to_clb.py">https://github.com/hsuanice/ReaScripts/raw/a29cfffbaca0a8171cc7d21c1067e37b57f8f8e9/Tools/otio_to_clb.py</source>
+        <source file="../Tools/aaf_to_otio.py">https://github.com/hsuanice/ReaScripts/raw/a29cfffbaca0a8171cc7d21c1067e37b57f8f8e9/Tools/aaf_to_otio.py</source>
+        <source file="../Tools/subtitle_to_clb.py">https://github.com/hsuanice/ReaScripts/raw/a29cfffbaca0a8171cc7d21c1067e37b57f8f8e9/Tools/subtitle_to_clb.py</source>
+      </version>
+      <version name="26.1103.2221pre1" author="hsuanice" time="2026-11-03T14:21:38Z">
+        <changelog><![CDATA[- Change: CLB Waveform Check also tries every conformed track when the AAF item's own track number gives no clear match - so it works after Consolidate (tracks packed and renumbered) as well as after Remove Dups]]></changelog>
+        <source main="main">https://github.com/hsuanice/ReaScripts/raw/e194ab668d6588ddfd6274d075252fef99c4aeaf/Conform/hsuanice_Conform%20List%20Browser%20-%20CLB.lua</source>
+        <source main="main" file="hsuanice_Conform List Browser - CLB Jump Old New TC.lua">https://github.com/hsuanice/ReaScripts/raw/e194ab668d6588ddfd6274d075252fef99c4aeaf/Conform/hsuanice_Conform%20List%20Browser%20-%20CLB%20Jump%20Old%20New%20TC.lua</source>
+        <source main="main" file="hsuanice_Conform List Browser - CLB Link REAPER Items.lua">https://github.com/hsuanice/ReaScripts/raw/e194ab668d6588ddfd6274d075252fef99c4aeaf/Conform/hsuanice_Conform%20List%20Browser%20-%20CLB%20Link%20REAPER%20Items.lua</source>
+        <source main="main" file="hsuanice_Conform List Browser - CLB Load from REAPER.lua">https://github.com/hsuanice/ReaScripts/raw/e194ab668d6588ddfd6274d075252fef99c4aeaf/Conform/hsuanice_Conform%20List%20Browser%20-%20CLB%20Load%20from%20REAPER.lua</source>
+        <source main="main" file="hsuanice_Conform List Browser - CLB Reveal Item.lua">https://github.com/hsuanice/ReaScripts/raw/e194ab668d6588ddfd6274d075252fef99c4aeaf/Conform/hsuanice_Conform%20List%20Browser%20-%20CLB%20Reveal%20Item.lua</source>
+        <source main="main" file="hsuanice_Conform List Browser - CLB Waveform Check.lua">https://github.com/hsuanice/ReaScripts/raw/e194ab668d6588ddfd6274d075252fef99c4aeaf/Conform/hsuanice_Conform%20List%20Browser%20-%20CLB%20Waveform%20Check.lua</source>
+        <source file="../Tools/otio_to_clb.py">https://github.com/hsuanice/ReaScripts/raw/e194ab668d6588ddfd6274d075252fef99c4aeaf/Tools/otio_to_clb.py</source>
+        <source file="../Tools/aaf_to_otio.py">https://github.com/hsuanice/ReaScripts/raw/e194ab668d6588ddfd6274d075252fef99c4aeaf/Tools/aaf_to_otio.py</source>
+        <source file="../Tools/subtitle_to_clb.py">https://github.com/hsuanice/ReaScripts/raw/e194ab668d6588ddfd6274d075252fef99c4aeaf/Tools/subtitle_to_clb.py</source>
       </version>
     </reapack>
   </category>
