@@ -1,10 +1,10 @@
 --[[
 @description Import Audio Folders to Tracks - Field Recorder: one folder per track, channel-split files grouped (GUI)
-@version 26.1012.1641
+@version 26.1103.1329pre1
 @author hsuanice
 @changelog
-  - Renamed to "Import Audio Folders to Tracks - Field Recorder" (was "Import audio files per folder into separate tracks Field Recorder") as part of the 2026-10-12 naming clean-up.
-  - Reinstall the package from ReaPack and re-assign your shortcuts / toolbar buttons.
+  - Fix: Spot to original timecode no longer uses REAPER's "Move to source preferred position" action; it reads the BWF TimeReference itself, so a file without timecode no longer shows an error dialog for every file (it stays in sequence and is listed in the summary).
+  - Fix: the import is tied to the project it started in; if another project tab is shown during the import, it pauses (shown in the progress window) instead of putting tracks and items into that other project.
 @about
   - Pre-confirm dialog: shows total folders/files, lets you choose a channel naming pattern or a custom mask, then offers [Import] / [Cancel].
     - Sequence only (append at the end of the target track).
@@ -399,6 +399,24 @@ local function insert_sequence(tr, file_abs)
   return false, nil
 end
 
+-- Move an item to its BWF TimeReference without REAPER's "Move to source preferred
+-- position" action (that action shows a modal error per file when it fails).
+-- Returns false when the file has no usable timecode; the item stays where it is.
+local function spot_to_bwf_tc(item)
+  local take = reaper.GetActiveTake(item)
+  local src = take and reaper.GetMediaItemTake_Source(take)
+  if not src then return false end
+  local ok, v = reaper.GetMediaFileMetadata(src, "BWF:TimeReference")
+  local smp = ok and tonumber(v) or 0
+  local sr = reaper.GetMediaSourceSampleRate(src)
+  if smp <= 0 or not sr or sr <= 0 then return false end
+  local offs = reaper.GetMediaItemTakeInfo_Value(take, "D_STARTOFFS")
+  local pos = smp / sr + offs - reaper.GetProjectTimeOffset(0, false)
+  if pos < 0 then return false end
+  reaper.SetMediaItemInfo_Value(item, "D_POSITION", pos)
+  return true
+end
+
 -- ========= folder helpers (2 levels: Parent -> Children) =========
 local parents = {}        -- key = rel(full) or "" -> {tr, children, lastChild}
 local current_parent_key  = nil
@@ -509,12 +527,16 @@ local function ui_progress_open(total_files, total_groups)
   UI_PROGRESS.ctx = reaper.ImGui_CreateContext('Importing...')
   local function loop()
     if not UI_PROGRESS.ctx then return end
-    reaper.ImGui_SetNextWindowSize(UI_PROGRESS.ctx, 360, 135, reaper.ImGui_Cond_Once())
+    reaper.ImGui_SetNextWindowSize(UI_PROGRESS.ctx, 360, 175, reaper.ImGui_Cond_Once())
     reaper.ImGui_PushFont(UI_PROGRESS.ctx, nil, FONT_SIZE)
     local visible, open = reaper.ImGui_Begin(UI_PROGRESS.ctx, 'Importing...', true)
     if visible then
       reaper.ImGui_Text(UI_PROGRESS.ctx, ('Folders (groups): %d'):format(total_groups or 0))
       reaper.ImGui_Text(UI_PROGRESS.ctx, ('Files: %d / %d'):format(UI_PROGRESS.done, UI_PROGRESS.total))
+      if UI_PROGRESS.paused then
+        reaper.ImGui_TextColored(UI_PROGRESS.ctx, 0xFF6060FF, 'Paused: switch back to the project tab')
+        reaper.ImGui_TextColored(UI_PROGRESS.ctx, 0xFF6060FF, UI_PROGRESS.paused)
+      end
       reaper.ImGui_Separator(UI_PROGRESS.ctx)
       if reaper.ImGui_Button(UI_PROGRESS.ctx, 'Stop', 320, 28) then UI_PROGRESS.stop = true end
       reaper.ImGui_Text(UI_PROGRESS.ctx, '(ESC also works)')
@@ -757,6 +779,11 @@ local function run_after_confirm(base, list)
 
   local imported = 0
   local aborted  = false
+  local no_tc    = {}
+  -- Tracks and items always go to the active project, so the import pauses
+  -- while another project tab is shown instead of spilling into it.
+  local import_proj, import_path = reaper.EnumProjects(-1)
+  local import_name = (import_path or ""):match("([^/\\]+)$") or "(unsaved project)"
 
   local function finish()
     finish_all_parents()
@@ -764,6 +791,11 @@ local function run_after_confirm(base, list)
     local dt = reaper.time_precise() - t0
     local msg = string.format("Imported folders: %d\nImported files: %d\nStatus: %s\nElapsed: %.2fs",
                               #order, imported, (aborted and "Aborted" or "Completed"), dt)
+    if #no_tc > 0 then
+      msg = msg .. string.format("\n\nNo timecode (left in sequence): %d", #no_tc)
+      for i = 1, math.min(#no_tc, 10) do msg = msg .. "\n  " .. no_tc[i] end
+      if #no_tc > 10 then msg = msg .. "\n  ..." end
+    end
     ui_post_open(msg)
   end
 
@@ -773,6 +805,13 @@ local function run_after_confirm(base, list)
       finish()
       return
     end
+
+    if reaper.EnumProjects(-1) ~= import_proj then
+      UI_PROGRESS.paused = import_name
+      reaper.defer(step)
+      return
+    end
+    UI_PROGRESS.paused = nil
 
     if parent_idx > #order then
       finish()
@@ -833,10 +872,12 @@ local function run_after_confirm(base, list)
           UI_PROGRESS.done = UI_PROGRESS.done + 1
           debug("    ✓ Successfully inserted")
           if SPOT_TO_TC and new_item then
-            reaper.SelectAllMediaItems(0, false)
-            reaper.SetMediaItemSelected(new_item, true)
-            reaper.Main_OnCommand(40299, 0)
-            debug("    ✓ Spotted to original timecode")
+            if spot_to_bwf_tc(new_item) then
+              debug("    ✓ Spotted to original timecode")
+            else
+              no_tc[#no_tc+1] = fn
+              debug("    ✗ No usable timecode, left at sequence position")
+            end
           end
         else
           debug("    ✗ Failed to insert")

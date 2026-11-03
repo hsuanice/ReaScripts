@@ -4,6 +4,11 @@
 
 ReaImGui - Import audio: one folder per track; channel-split files go to child tracks. Sequence only.
 
+## 26.1103.1329pre1
+
+- Fix: Spot to original timecode no longer uses REAPER's "Move to source preferred position" action; it reads the BWF TimeReference itself, so a file without timecode no longer shows an error dialog for every file (it stays in sequence and is listed in the summary).
+- Fix: the import is tied to the project it started in; if another project tab is shown during the import, it pauses (shown in the progress window) instead of putting tracks and items into that other project.
+
 ## 26.1012.1641
 
 - Renamed to "Import Audio Folders to Tracks - Field Recorder" (was "Import audio files per folder into separate tracks Field Recorder") as part of the 2026-10-12 naming clean-up.
