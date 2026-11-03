@@ -1,6 +1,6 @@
 --[[
 @description hsuanice Library - shared code used by hsuanice scripts (required)
-@version 26.1103.2023
+@version 26.1103.2212pre1
 @author hsuanice
 @metapackage
 @provides
@@ -26,7 +26,7 @@
   [nomain] hsuanice_Waveform Sync Core.lua
   [nomain] json.lua
 @changelog
-  - Release: Waveform Sync Core and OTIO Bridge (tested)
+  - EDL Parser: AUD lines
 @about
   # hsuanice Library
 

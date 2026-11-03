@@ -1,11 +1,10 @@
 --[[
 @description hsuanice_EDL Parser.lua
-@version 26.1012.1206
+@version 26.1103.2212pre1
 @author hsuanice
 @noindex
 @changelog
-  - Released as part of the 26.1012.1206 package update.
-  - Full history: Changelogs/ in the repository (https://github.com/hsuanice/ReaScripts/tree/master/Changelogs)
+  - New: reads AUD lines (audio channels 3 / 4) into event.aud_channels
 @about
   v261007.1253
   CMX3600 Edit Decision List parser and writer for REAPER scripts.
@@ -292,6 +291,16 @@ function M.parse(filepath, opts)
     -- at least SURFACE which events are retimed/reversed — this parser
     -- does not attempt to "correct" anything itself (see CLB's own
     -- aux_rate column/notes — surfaced for human review, not guessed at).
+    -- AUD 3 / AUD 3 4: the event also uses audio channels 3 and 4 (CMX3600
+    -- carries channels 1-2 in the track field: A, A2/B, AA; "NONE" + AUD
+    -- = channels 3-4 only). Stored as numbers in event.aud_channels.
+    elseif line:match("^AUD%s") then
+      if current_event then
+        local chs = {}
+        for n in line:sub(4):gmatch("(%d+)") do chs[#chs + 1] = tonumber(n) end
+        current_event.aud_channels = chs
+      end
+
     elseif line:match("^M2%s") then
       local rate = line:match("^M2%s+%S+%s+(%-?%d+%.?%d*)")
       if rate and current_event then

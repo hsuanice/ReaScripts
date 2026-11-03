@@ -4,6 +4,10 @@
 
 Conform List Browser
 
+## 26.1103.2212pre1
+
+- New: EDL Audio setting (Stereo tracks default / Mono tracks / As in EDL) - an EDL's audio channels become the editor's tracks: each ..._A<k>.edl file holds 4 channels, with stereo tracks ch 1+2 = A(2k-1), ch 3+4 = A(2k) (verified against the AAF on R01, R02, R04: no overlaps left inside a track, every AAF event on its track). Conformed EDL tracks are named like the AAF's (EDL - A1 / AAF - A1). CLB Waveform Check pairs by track number (A3_L / A3_R count as A3) and checks every overlapping event
+
 ## 26.1103.2153pre1
 
 - New: CLB Waveform Check (new action) - compares conformed ISO audio with the AAF's audio by waveform under each AAF item: OK / ~ x ms (Auto Align channel) / SYNC +-n f / NO MATCH / ? / NO AUDIO as project or take markers, mutes the verified AAF items, results in the console. Frame Align (Conform, on by default) from 26.1103.2111pre1 is tested and kept

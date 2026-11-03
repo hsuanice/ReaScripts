@@ -1,5 +1,9 @@
 # hsuanice_Library.lua — Changelog
 
+## 26.1103.2212pre1
+
+- EDL Parser: AUD lines
+
 ## 26.1103.2023
 
 - Release: Waveform Sync Core and OTIO Bridge (tested)

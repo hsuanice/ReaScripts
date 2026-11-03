@@ -1,6 +1,6 @@
 --[[
 @description Conform List Browser - CLB: conform EDL / AAF / XML / OTIO / subtitle lists (GUI + Jump / Link / Load / Reveal)
-@version 26.1103.2153pre1
+@version 26.1103.2212pre1
 @author hsuanice
 @provides
   [main] .
@@ -13,7 +13,7 @@
   [nomain] ../Tools/aaf_to_otio.py
   [nomain] ../Tools/subtitle_to_clb.py
 @changelog
-  - New: CLB Waveform Check (new action) - compares conformed ISO audio with the AAF's audio by waveform under each AAF item: OK / ~ x ms (Auto Align channel) / SYNC +-n f / NO MATCH / ? / NO AUDIO as project or take markers, mutes the verified AAF items, results in the console. Frame Align (Conform, on by default) from 26.1103.2111pre1 is tested and kept
+  - New: EDL Audio setting (Stereo tracks default / Mono tracks / As in EDL) - an EDL's audio channels become the editor's tracks: each ..._A<k>.edl file holds 4 channels, with stereo tracks ch 1+2 = A(2k-1), ch 3+4 = A(2k) (verified against the AAF on R01, R02, R04: no overlaps left inside a track, every AAF event on its track). Conformed EDL tracks are named like the AAF's (EDL - A1 / AAF - A1). CLB Waveform Check pairs by track number (A3_L / A3_R count as A3) and checks every overlapping event
 @about
   Note: the Compare view (old vs new cut, reconform) is a work in progress and not finished yet.
 
@@ -518,6 +518,11 @@ local CLB = {
   -- the audio file's own start, when that is only a sample or two away
   -- (CLB.frame_align_offset). Persisted, on by default.
   conform_frame_align = true,
+
+  -- EDL audio channels -> the editor's tracks (CLB.map_edl_audio_tracks):
+  -- "stereo" (2 tracks per EDL file: ch 1+2, ch 3+4), "mono" (4 per file)
+  -- or "edl" (the EDL's own track field, as before). Persisted.
+  edl_audio_tracks = "stereo",
 
   -- "Follow Reaper" (see CLB.reveal_reaper_item): when on, selecting an
   -- item in Reaper reveals its event row(s). Persisted, off by default.
@@ -2190,6 +2195,7 @@ local function save_prefs()
   reaper.SetExtState(EXT_NS, "restore_mix", CLB.restore_mix and "1" or "0", true)
   reaper.SetExtState(EXT_NS, "conform_include_unmatched", CLB.conform_include_unmatched and "1" or "0", true)
   reaper.SetExtState(EXT_NS, "conform_frame_align", CLB.conform_frame_align and "1" or "0", true)
+  reaper.SetExtState(EXT_NS, "edl_audio_tracks", CLB.edl_audio_tracks or "stereo", true)
   reaper.SetExtState(EXT_NS, "follow_reaper_sel", CLB.follow_reaper_sel and "1" or "0", true)
   reaper.SetExtState(EXT_NS, "ref_load_merge_mode", CLB.ref_load_merge_mode or "ask", true)
   reaper.SetExtState(EXT_NS, "last_dir", CLB.last_dir or "", true)
@@ -2279,6 +2285,8 @@ local function load_prefs()
   CLB.restore_mix = get("restore_mix", "1") == "1"
   CLB.conform_include_unmatched = get("conform_include_unmatched", "1") == "1"
   CLB.conform_frame_align = get("conform_frame_align", "1") == "1"
+  CLB.edl_audio_tracks = get("edl_audio_tracks", "stereo")
+  if CLB.edl_audio_tracks ~= "mono" and CLB.edl_audio_tracks ~= "edl" then CLB.edl_audio_tracks = "stereo" end
   CLB.follow_reaper_sel = get("follow_reaper_sel", "0") == "1"
   CLB.ref_load_merge_mode = get("ref_load_merge_mode", "ask")
   if CLB.ref_load_merge_mode ~= "ask" and CLB.ref_load_merge_mode ~= "replace" and CLB.ref_load_merge_mode ~= "append" then
@@ -3371,6 +3379,67 @@ local function _auto_assign_groups()
 end
 
 -- Replace all rows (fresh load)
+--- EDL audio channels -> the editor's audio tracks. A CMX3600 EDL holds 4
+--- audio channels (track field A / A2 / B / AA = ch 1-2, "AUD 3 4" line =
+--- ch 3-4), so an Avid sequence with more tracks is exported as several
+--- files ("..._A1.edl", "..._A2.edl", ...). Stereo tracks take 2 channels:
+--- file k, ch 1+2 = A(2k-1), ch 3+4 = A(2k) (verified on an Avid cut against
+--- its AAF, every reel). Mono tracks: ch c = A(4(k-1)+c). An event on
+--- channels of two tracks becomes one event per track. Video events and
+--- events without audio channels are left as they are. File number k from
+--- the file name's "_A<k>" (else 1). Rewrites parsed.events in place.
+CLB.EDL_AUDIO_LABELS = { stereo = "Stereo tracks", mono = "Mono tracks", edl = "As in EDL" }
+function CLB.map_edl_audio_tracks(parsed, source_path)
+  local mode = CLB.edl_audio_tracks or "stereo"
+  if mode == "edl" or not parsed or parsed.format ~= "CMX3600" or not parsed.events then return end
+  local fname = (source_path or ""):match("([^/\\]+)$") or ""
+  local k = tonumber(fname:match("[_%s%-][Aa](%d+)%.[Ee][Dd][Ll]$")) or 1
+  local per_file = mode == "mono" and 4 or 2
+  local CH = { A = { 1 }, A1 = { 1 }, A2 = { 2 }, B = { 2 }, AA = { 1, 2 }, A3 = { 3 }, A4 = { 4 } }
+  local out, mapped, used = {}, 0, {}
+  for _, evt in ipairs(parsed.events) do
+    local has_video, chs = false, {}
+    for part in ((evt.track or ""):upper() .. "/"):gmatch("([^/]*)/") do
+      if part == "V" then has_video = true end
+      for _, c in ipairs(CH[part] or {}) do chs[c] = true end
+    end
+    for _, c in ipairs(evt.aud_channels or {}) do chs[c] = true end
+    local tracks, seen = {}, {}
+    if not has_video then
+      for c = 1, 4 do
+        if chs[c] then
+          local n = mode == "mono" and (4 * (k - 1) + c) or (2 * (k - 1) + (c + 1) // 2)
+          if not seen[n] then seen[n] = true; tracks[#tracks + 1] = n end
+        end
+      end
+    end
+    if #tracks == 0 then
+      out[#out + 1] = evt
+    else
+      mapped = mapped + 1
+      for ti, n in ipairs(tracks) do
+        local e = evt
+        if ti > 1 then
+          e = {}
+          for key, v in pairs(evt) do e[key] = v end
+        end
+        e.track = "A" .. n
+        out[#out + 1] = e
+        used[n] = true
+      end
+    end
+  end
+  parsed.events = out
+  if mapped > 0 then
+    local list = {}
+    for n in pairs(used) do list[#list + 1] = n end
+    table.sort(list)
+    for i, n in ipairs(list) do list[i] = "A" .. n end
+    console_msg(string.format("%s: %d audio events -> tracks %s (%s, file %d)", fname, mapped,
+      table.concat(list, ", "), CLB.EDL_AUDIO_LABELS[mode], k))
+  end
+end
+
 local function build_rows_from_parsed(parsed, source_path)
   ROWS = {}
   _guid_counter = 0
@@ -3386,6 +3455,7 @@ local function build_rows_from_parsed(parsed, source_path)
       { name = name, count = 0, visible = (name ~= "Delete"), tracks = {} }
   end
   if not parsed or not parsed.events then return end
+  CLB.map_edl_audio_tracks(parsed, source_path or parsed.source_path)
 
   CLB.fps = parsed.fps or 24
   CLB.is_drop = parsed.is_drop or false
@@ -3412,6 +3482,7 @@ end
 -- Append rows from additional EDL (keeps existing rows)
 local function append_rows_from_parsed(parsed, source_path)
   if not parsed or not parsed.events then return end
+  CLB.map_edl_audio_tracks(parsed, source_path or parsed.source_path)
 
   local src_idx = _register_source(
     source_path or parsed.source_path or "?", #parsed.events)
@@ -9680,6 +9751,27 @@ function CLB.draw_left_sidebar()
       "Generate Items / Conform also restore the audio mix from the AAF:\n"
       .. "clip gain, volume automation (take volume envelope), pan,\n"
       .. "fades and crossfades (Equal Power or Linear, as in the AAF).")
+  end
+
+  -- EDL audio tracks: how an EDL's audio channels map to the editor's tracks
+  -- (CLB.map_edl_audio_tracks). Applied when an EDL is loaded.
+  reaper.ImGui_SetNextItemWidth(ctx, 130)
+  if reaper.ImGui_BeginCombo(ctx, "EDL Audio##clb_edl_audio", CLB.EDL_AUDIO_LABELS[CLB.edl_audio_tracks] or "") then
+    for _, key in ipairs({ "stereo", "mono", "edl" }) do
+      if reaper.ImGui_Selectable(ctx, CLB.EDL_AUDIO_LABELS[key], CLB.edl_audio_tracks == key) then
+        CLB.edl_audio_tracks = key; save_prefs()
+      end
+    end
+    reaper.ImGui_EndCombo(ctx)
+  end
+  if reaper.ImGui_IsItemHovered(ctx) then
+    reaper.ImGui_SetTooltip(ctx,
+      "How an EDL's audio channels become the editor's tracks (applied when an EDL is loaded).\n"
+      .. "An EDL holds 4 audio channels, so an Avid cut comes as several files: ..._A1.edl, _A2.edl ...\n"
+      .. "Stereo tracks: each file = 2 tracks (ch 1+2 = A1, ch 3+4 = A2; file _A2 = A3, A4 ...).\n"
+      .. "Mono tracks: each file = 4 tracks (ch 1-4 = A1-A4; file _A2 = A5-A8 ...).\n"
+      .. "As in EDL: the EDL's own track field (AA, NONE ...), as before.\n"
+      .. "Tracks then match the AAF's (AAF - A1 / EDL - A1). Reload the EDL after changing this.")
   end
 
   reaper.ImGui_Spacing(ctx)

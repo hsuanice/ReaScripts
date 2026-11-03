@@ -1,10 +1,10 @@
 --[[
 @description Conform List Browser - CLB Waveform Check (compare conformed ISO audio with the AAF's audio; markers, mute verified AAF items)
-@version 26.1103.2153pre1
+@version 26.1103.2212pre1
 @author hsuanice
 @noindex
 @changelog
-  - Initial release
+  - Initial release (pairs by track number; checks every overlapping event)
 @about
   Checks a conform by waveform: every AAF item (the editor's audio, on the "AAF - ..." tracks
   that CLB generates) is compared with the conformed ISO items under it (items CLB placed with
@@ -13,9 +13,10 @@
   Use: run it with nothing selected to check every AAF item (or only those inside the time
   selection), or select AAF items to check just those.
   - Pairing: an AAF track "AAF - A1" is compared with the conformed tracks whose name has the
-    same track label ("EDL - A1 - 1", "EDL - A1 - 2" ...); when no track has that label, with
-    all conformed tracks. Under each AAF item, the conformed event that overlaps it most is
-    checked, every channel on its own; the clearest channel gives the result.
+    same track label ("EDL - A1", or "EDL - A1 - 1", "EDL - A1 - 2" ... after exploding takes);
+    "AAF - A3_L" / "AAF - A3_R" count as A3. When no track has that label, with all conformed
+    tracks. Every conformed event under an AAF item is checked, every channel on its own; the
+    clearest channel gives the result.
   - The offset is found by cross-correlation (GCC-PHAT, Waveform Sync Core) within +/- the
     search range (setting, default 1 s).
   - Results:
@@ -71,10 +72,11 @@ local function tokens(name)
   return t
 end
 
--- "AAF - A1" -> "A1"; nil for other tracks
+-- "AAF - A1" -> "A1"; "AAF - A3_L" / "AAF - A3_R" -> "A3" (the stereo clips of the
+-- editor's track A3); nil for other tracks
 local function aaf_label(name)
   local t = tokens(name)
-  if t[1] == "AAF" and t[2] and t[2] ~= "" then return t[2] end
+  if t[1] == "AAF" and t[2] and t[2] ~= "" then return (t[2]:gsub("_[LR]$", "")) end
 end
 
 local function span(item)
@@ -224,31 +226,37 @@ local function analyse(c)
       end
     end
   end
-  local best_g
-  for _, g in pairs(events) do if not best_g or g.ov > best_g.ov then best_g = g end end
-  if not best_g then c.kind = "NO AUDIO"; return end
-  c.event = best_g.event
-  c.partial = best_g.ov < (re - rs) - 2 / FPS
+  -- every overlapping event is checked (several tracks can overlap here),
+  -- most overlap first; the clearest channel of any of them gives the result
+  local list = {}
+  for _, g in pairs(events) do list[#list + 1] = g end
+  if #list == 0 then c.kind = "NO AUDIO"; return end
+  table.sort(list, function(a, b) return a.ov > b.ov end)
   local ref = { { take = r.GetActiveTake(item), pos = rs } }
-  local best, best_why
-  for _, x in ipairs(best_g.items) do
-    local ti = x.ti
-    local s, e = math.max(rs, ti.s), math.min(re, ti.e)
-    local res = WS.find_offset(ref, { { take = ti.take, pos = ti.s } }, s, e, { fps = FPS })
-    res.track, res.file = x.track, take_name(ti.item)
-    if res.ok then
-      if not best or res.ratio > best.ratio then best = res end
-    elseif not best_why then
-      best_why = res
+  local best, best_g, best_why
+  for _, g in ipairs(list) do
+    for _, x in ipairs(g.items) do
+      local ti = x.ti
+      local s, e = math.max(rs, ti.s), math.min(re, ti.e)
+      local res = WS.find_offset(ref, { { take = ti.take, pos = ti.s } }, s, e, { fps = FPS })
+      res.track, res.file = x.track, take_name(ti.item)
+      if res.ok then
+        if not best or res.ratio > best.ratio then best, best_g = res, g end
+      elseif not best_why then
+        best_why = res
+      end
     end
   end
   if not best then
     local why = best_why and best_why.reason or "no result"
     c.kind = (why == "too short" or why:find("silent", 1, true)) and "?" or "NO MATCH"
     c.why = why
-    c.file = best_g.items[1] and take_name(best_g.items[1].ti.item)
+    c.file = list[1].items[1] and take_name(list[1].items[1].ti.item)
+    c.partial = list[1].ov < (re - rs) - 2 / FPS
     return
   end
+  c.event = best_g.event
+  c.partial = best_g.ov < (re - rs) - 2 / FPS
   c.res = best
   if math.abs(best.samples) <= 1 then c.kind = "OK"
   elseif math.abs(best.offset) * FPS < 1 then c.kind = "~"
