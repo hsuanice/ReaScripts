@@ -1,12 +1,13 @@
 --[[
 @description Dual Recorder Sync - DRS Waveform Sync (move a second recorder's items onto the reference by waveform, optional length match)
-@version 26.1103.1536pre1
+@version 26.1103.1543pre1
 @author hsuanice
 @provides
   [main] .
   [main] hsuanice_Dual Recorder Sync - DRS Set Reference Track.lua
 @changelog
-  - Initial release
+  - Change: the results are printed in the ReaScript console instead of a message box.
+  - Tested by hsuanice on 9 takes (75-1 to 75-5): all synced, drift 0.0 frames.
 @about
   Syncs the items of a second recorder to the first recorder by waveform, when the second
   recorder's timecode is right but its recording started late (or early).
@@ -28,7 +29,8 @@
   - Match length (setting, on by default): after the move, each item gets the reference item's
     start and length - "Loop source" is turned off first, so added space is silence, and the
     excess is trimmed. Timecode then equals the reference: render with RGWH TC mode "current".
-  - The offset is written in each item's note ("DRS: +3s16f ...").
+  - The offset is written in each item's note ("DRS: +3s16f ..."); the results are printed in
+    the ReaScript console.
   - Progress window (native gfx); Esc or closing it cancels with nothing changed. All moves are
     applied together at the end: one undo point. Locked items are skipped and listed.
 
@@ -267,10 +269,8 @@ local function apply()
 end
 
 local function show_lines(lines)
-  local out = {}
-  for i = 1, math.min(#lines, 40) do out[#out + 1] = lines[i] end
-  if #lines > 40 then out[#out + 1] = string.format("... and %d more", #lines - 40) end
-  r.MB(table.concat(out, "\n"), TITLE, 0)
+  r.ShowConsoleMsg("\n=== " .. TITLE .. "  " .. os.date("%Y-%m-%d %H:%M:%S") .. " ===\n"
+    .. table.concat(lines, "\n") .. "\n")
 end
 
 local window = false
