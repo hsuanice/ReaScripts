@@ -4,6 +4,10 @@
 
 Conform List Browser
 
+## 26.1103.2219pre1
+
+- Change: CLB Waveform Check looks on every conformed track when nothing is conformed on the AAF item's own track number - e.g. A2 = the other channel of A1's mix, whose ISO copy Remove Dups removed (it keeps A1's, as the EDL lists A1 first)
+
 ## 26.1103.2212pre1
 
 - New: EDL Audio setting (Stereo tracks default / Mono tracks / As in EDL) - an EDL's audio channels become the editor's tracks: each ..._A<k>.edl file holds 4 channels, with stereo tracks ch 1+2 = A(2k-1), ch 3+4 = A(2k) (verified against the AAF on R01, R02, R04: no overlaps left inside a track, every AAF event on its track). Conformed EDL tracks are named like the AAF's (EDL - A1 / AAF - A1). CLB Waveform Check pairs by track number (A3_L / A3_R count as A3) and checks every overlapping event

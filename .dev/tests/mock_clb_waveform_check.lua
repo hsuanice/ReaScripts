@@ -74,6 +74,7 @@ local function item(tr, pos, len, fn, ext, name)
   return it
 end
 local AAF, E1, E2 = track("AAF - A1"), track("EDL - A1 - 1"), track("EDL - A1 - 2")
+local AAF2 = track("AAF - A2")
 local d_aap = 100 / 48000
 -- 1: in sync (ch1 exact, ch2 Auto Align-delayed)
 item(AAF, 10, 6, voice, nil, "sync")
@@ -93,6 +94,8 @@ item(AAF, 50, 0.7, voice, nil, "short")
 item(E1, 50, 0.7, voice, { ["P_EXT:CLB_EVENT"] = "005" })
 -- 6: nothing conformed
 item(AAF, 60, 4, voice, nil, "no audio")
+-- 7: A2 (other channel of the mix) over audio conformed on A1 only (Remove Dups)
+item(AAF2, 10, 6, voice, nil, "a2 dup")
 
 local markers, console, deferred = {}, {}, {}
 reaper = {
@@ -150,11 +153,12 @@ dofile("Conform/hsuanice_Conform List Browser - CLB Waveform Check.lua")
 while #deferred > 0 do table.remove(deferred, 1)() end
 print(table.concat(console))
 local expect = { sync = "WC OK", ["aap only"] = "WC ~ ", ["two late"] = "WC SYNC -2f", ["other take"] = "WC NO MATCH",
-  short = "WC ?", ["no audio"] = "WC NO AUDIO" }
+  short = "WC ?", ["no audio"] = "WC NO AUDIO", ["a2 dup"] = "WC OK" }
 local pos_name = { [10] = "sync", [20] = "aap only", [30] = "two late", [40] = "other take", [50] = "short", [60] = "no audio" }
 local fails = 0
 for _, m in ipairs(markers) do
   local want = expect[pos_name[math.floor(m.pos + 0.5)]]
+  if m.pos == 10 and m.name ~= "WC OK EDL - A1 - 1" then want = "WC OK" end
   local ok = m.name:sub(1, #want) == want
   if not ok then fails = fails + 1 end
   print((ok and "  ok   " or "  FAIL ") .. m.pos .. "  " .. m.name)
@@ -163,4 +167,5 @@ local muted = {}
 for _, it in ipairs(AAF.items) do if it.mute == 1 then muted[#muted + 1] = it.name end end
 print("muted: " .. table.concat(muted, ", "))
 if table.concat(muted, ",") ~= "sync,aap only" then fails = fails + 1; print("  FAIL mute") end
-print(fails == 0 and #markers == 6 and "ALL PASS" or (fails .. " FAILED"))
+if AAF2.items[1].mute ~= 1 then fails = fails + 1; print("  FAIL a2 dup not muted") end
+print(fails == 0 and #markers == 7 and "ALL PASS" or (fails .. " FAILED"))

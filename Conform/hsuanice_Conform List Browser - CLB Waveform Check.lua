@@ -1,6 +1,6 @@
 --[[
 @description Conform List Browser - CLB Waveform Check (compare conformed ISO audio with the AAF's audio; markers, mute verified AAF items)
-@version 26.1103.2212pre1
+@version 26.1103.2219pre1
 @author hsuanice
 @noindex
 @changelog
@@ -14,8 +14,9 @@
   selection), or select AAF items to check just those.
   - Pairing: an AAF track "AAF - A1" is compared with the conformed tracks whose name has the
     same track label ("EDL - A1", or "EDL - A1 - 1", "EDL - A1 - 2" ... after exploding takes);
-    "AAF - A3_L" / "AAF - A3_R" count as A3. When no track has that label, with all conformed
-    tracks. Every conformed event under an AAF item is checked, every channel on its own; the
+    "AAF - A3_L" / "AAF - A3_R" count as A3. When no track has that label, or nothing is
+    conformed under an AAF item on it (e.g. A2 = the other channel of A1's mix, removed by
+    Remove Dups), with all conformed tracks. Every conformed event under an AAF item is checked, every channel on its own; the
     clearest channel gives the result.
   - The offset is found by cross-correlation (GCC-PHAT, Waveform Sync Core) within +/- the
     search range (setting, default 1 s).
@@ -215,17 +216,23 @@ local function analyse(c)
   c.rs, c.re = rs, re
   -- conformed event overlapping this AAF item most
   local events = {}
-  for _, ct in ipairs(targets_for(label_of[r.GetMediaItem_Track(item)])) do
-    for _, ti in ipairs(ct.items) do
-      local ov = math.min(re, ti.e) - math.max(rs, ti.s)
-      if ov >= MIN_OVERLAP then
-        local g = events[ti.event]
-        if not g then g = { event = ti.event, ov = 0, items = {} }; events[ti.event] = g end
-        g.ov = math.max(g.ov, ov)
-        g.items[#g.items + 1] = { ti = ti, track = ct.name }
+  local function collect(tracks)
+    for _, ct in ipairs(tracks) do
+      for _, ti in ipairs(ct.items) do
+        local ov = math.min(re, ti.e) - math.max(rs, ti.s)
+        if ov >= MIN_OVERLAP then
+          local g = events[ti.event]
+          if not g then g = { event = ti.event, ov = 0, items = {} }; events[ti.event] = g end
+          g.ov = math.max(g.ov, ov)
+          g.items[#g.items + 1] = { ti = ti, track = ct.name }
+        end
       end
     end
   end
+  collect(targets_for(label_of[r.GetMediaItem_Track(item)]))
+  -- nothing on the same track number (e.g. A2 = the other channel of A1's mix,
+  -- removed by Remove Dups): look on every conformed track
+  if next(events) == nil then collect(conf_tracks) end
   -- every overlapping event is checked (several tracks can overlap here),
   -- most overlap first; the clearest channel of any of them gives the result
   local list = {}
