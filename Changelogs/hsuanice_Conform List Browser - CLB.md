@@ -4,6 +4,10 @@
 
 Conform List Browser
 
+## 26.1103.2111pre1
+
+- New: Frame Align (Conform, on by default) - each take's source offset is aligned to whole frames counted from the audio file's own start when it is only 1-2 samples away. Recorder files often start a sample past a frame (TimeReference ...001), so an EDL's Src In landed one sample early; R01 A1 EDL conform now matches the AAF to the sample (waveform check: 76 clips at 0). Never moves more than 2 samples; AAF rows keep the AAF's exact samples
+
 ## 26.1103.2023
 
 - Release: AAF audio on the editor's exact sample (polarity null against Vordio), AAF clip gain / automation / pan / fades, speed changes, Picture Cut and Include Unmatched (tested)

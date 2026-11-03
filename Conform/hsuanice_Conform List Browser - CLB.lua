@@ -1,6 +1,6 @@
 --[[
 @description Conform List Browser - CLB: conform EDL / AAF / XML / OTIO / subtitle lists (GUI + Jump / Link / Load / Reveal)
-@version 26.1103.2023
+@version 26.1103.2111pre1
 @author hsuanice
 @provides
   [main] .
@@ -12,7 +12,7 @@
   [nomain] ../Tools/aaf_to_otio.py
   [nomain] ../Tools/subtitle_to_clb.py
 @changelog
-  - Release: AAF audio on the editor's exact sample (polarity null against Vordio), AAF clip gain / automation / pan / fades, speed changes, Picture Cut and Include Unmatched (tested)
+  - New: Frame Align (Conform, on by default) - each take's source offset is aligned to whole frames counted from the audio file's own start when it is only 1-2 samples away. Recorder files often start a sample past a frame (TimeReference ...001), so an EDL's Src In landed one sample early; R01 A1 EDL conform now matches the AAF to the sample (waveform check: 76 clips at 0). Never moves more than 2 samples; AAF rows keep the AAF's exact samples
 @about
   Note: the Compare view (old vs new cut, reconform) is a work in progress and not finished yet.
 
@@ -512,6 +512,11 @@ local CLB = {
   -- Generate Items makes) on the same tracks, so one run spots the whole
   -- list. Persisted, on by default.
   conform_include_unmatched = true,
+
+  -- Conform: align each take's source offset to whole frames counted from
+  -- the audio file's own start, when that is only a sample or two away
+  -- (CLB.frame_align_offset). Persisted, on by default.
+  conform_frame_align = true,
 
   -- "Follow Reaper" (see CLB.reveal_reaper_item): when on, selecting an
   -- item in Reaper reveals its event row(s). Persisted, off by default.
@@ -2183,6 +2188,7 @@ local function save_prefs()
   reaper.SetExtState(EXT_NS, "ref_load_auto_match", CLB.ref_load_auto_match and "1" or "0", true)
   reaper.SetExtState(EXT_NS, "restore_mix", CLB.restore_mix and "1" or "0", true)
   reaper.SetExtState(EXT_NS, "conform_include_unmatched", CLB.conform_include_unmatched and "1" or "0", true)
+  reaper.SetExtState(EXT_NS, "conform_frame_align", CLB.conform_frame_align and "1" or "0", true)
   reaper.SetExtState(EXT_NS, "follow_reaper_sel", CLB.follow_reaper_sel and "1" or "0", true)
   reaper.SetExtState(EXT_NS, "ref_load_merge_mode", CLB.ref_load_merge_mode or "ask", true)
   reaper.SetExtState(EXT_NS, "last_dir", CLB.last_dir or "", true)
@@ -2271,6 +2277,7 @@ local function load_prefs()
   CLB.ref_load_auto_match = get("ref_load_auto_match", "0") == "1"
   CLB.restore_mix = get("restore_mix", "1") == "1"
   CLB.conform_include_unmatched = get("conform_include_unmatched", "1") == "1"
+  CLB.conform_frame_align = get("conform_frame_align", "1") == "1"
   CLB.follow_reaper_sel = get("follow_reaper_sel", "0") == "1"
   CLB.ref_load_merge_mode = get("ref_load_merge_mode", "ask")
   if CLB.ref_load_merge_mode ~= "ask" and CLB.ref_load_merge_mode ~= "replace" and CLB.ref_load_merge_mode ~= "append" then
@@ -6589,13 +6596,32 @@ end
 --- so the content lands on the editor's exact sample while the item edges stay
 --- on the frame grid (from Rec TC). The samples are used only while they still
 --- agree with Src In within a frame - an edited Src In falls back to the TC.
+--- Returns seconds, and true when they are the exact AAF samples.
 function CLB.src_in_seconds(row)
   local tc = EDL.tc_to_seconds(row.src_tc_in, CLB.fps, CLB.is_drop)
   if row.src_smp and row.src_smp_rate and row.src_smp_rate > 0 and CLB.fps and CLB.fps > 0 then
     local exact = row.src_smp / row.src_smp_rate
-    if math.abs(exact - tc) < 1 / CLB.fps then return exact end
+    if math.abs(exact - tc) < 1 / CLB.fps then return exact, true end
   end
-  return tc
+  return tc, false
+end
+
+--- Frame Align (EDL and other whole-frame lists): an editor's cut sits a whole
+--- number of frames into the media, counted from the file's own start. A
+--- recorder file often starts a sample past a frame (TimeReference ...001), so
+--- Src In TC - file start lands a sample early. When the offset is within
+--- FRAME_ALIGN_MAX_SAMPLES of a whole frame, it is moved onto it; otherwise
+--- (a start far off the grid, other frame rate) it is left as it is. Never
+--- moves more than those few samples. Not used for exact AAF samples.
+CLB.FRAME_ALIGN_MAX_SAMPLES = 2
+function CLB.frame_align_offset(offset, audio_file)
+  if not CLB.conform_frame_align or not CLB.fps or CLB.fps <= 0 then return offset end
+  local meta = audio_file and audio_file.metadata
+  local sr = meta and tonumber(meta.samplerate) or 48000
+  if sr <= 0 then sr = 48000 end
+  local aligned = math.floor(offset * CLB.fps + 0.5) / CLB.fps
+  if math.abs(aligned - offset) * sr <= CLB.FRAME_ALIGN_MAX_SAMPLES then return aligned end
+  return offset
 end
 
 ---------------------------------------------------------------------------
@@ -6778,7 +6804,7 @@ local function conform_matched_items(selected_only)
       end
 
       -- Source offset: src_tc_in (exact AAF samples when known) - audio's TimeReference
-      local src_in_sec = CLB.src_in_seconds(row)
+      local src_in_sec, src_exact = CLB.src_in_seconds(row)
 
       -- Get audio files to insert
       local audio_files = {}
@@ -6853,6 +6879,7 @@ local function conform_matched_items(selected_only)
           -- Calculate source offset for this audio file
           local audio_start = get_audio_start_sec(af)
           local source_offset = src_in_sec - audio_start
+          if not src_exact then source_offset = CLB.frame_align_offset(source_offset, af) end
           if source_offset < 0 then source_offset = 0 end
 
           -- Insert media source
@@ -9629,6 +9656,17 @@ function CLB.draw_left_sidebar()
         "Conform All / Sel also place events with no matched audio,\n"
         .. "as empty items (like Generate Items) on the same tracks.\n"
         .. "Conformed items with audio are colored green.")
+    end
+
+    local chg_fa, new_fa = reaper.ImGui_Checkbox(ctx, "Frame Align##clb_conform_frame_align", CLB.conform_frame_align)
+    if chg_fa then CLB.conform_frame_align = new_fa; save_prefs() end
+    if reaper.ImGui_IsItemHovered(ctx) then
+      reaper.ImGui_SetTooltip(ctx,
+        "Align each take's source offset to whole frames counted from the\n"
+        .. "audio file's own start, when it is only 1-2 samples away\n"
+        .. "(recorder files starting a sample past a frame: EDL Src In\n"
+        .. "would otherwise land one sample early). AAF rows use the\n"
+        .. "AAF's exact samples instead.")
     end
   end
 
