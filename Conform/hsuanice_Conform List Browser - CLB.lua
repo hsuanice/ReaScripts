@@ -1,6 +1,6 @@
 --[[
 @description Conform List Browser - CLB: conform EDL / AAF / XML / OTIO / subtitle lists (GUI + Jump / Link / Load / Reveal)
-@version 26.1103.1047pre1
+@version 26.1103.1954pre1
 @author hsuanice
 @provides
   [main] .
@@ -12,7 +12,7 @@
   [nomain] ../Tools/aaf_to_otio.py
   [nomain] ../Tools/subtitle_to_clb.py
 @changelog
-  - Change: left sidebar regrouped in rainbow order — green Generate Items + Generate Ref Media; new sky-blue group Match All, Auto Match, Conform All / Sel, Include Unmatched, Restore Mix; indigo Remove Dups, Consolidate, Picture Cut, Scene Cuts
+  - Fix: AAF audio lands on the editor's exact sample - the take's start offset uses the AAF's exact source position (samples) instead of the whole-frame Src In; item edges stay on the frame grid, the list TC is unchanged. Fixes a 1-sample early start (Avid media starting a sample past the frame) and sub-frame slips; R01 A1 now matches Vordio on all 212 items. Saved in .clb (older files keep using the TC)
 @about
   Note: the Compare view (old vs new cut, reconform) is a work in progress and not finished yet.
 
@@ -3012,6 +3012,11 @@ local function _make_rows_from_events(events, fps, is_drop, source_idx)
       -- not otherwise acted on (see CLB.generate_reference_media).
       aux_rate = evt.aux_rate,
 
+      -- AAF exact source start (samples at src_smp_rate): the take's start
+      -- offset uses it instead of the whole-frame Src In (CLB.src_in_seconds).
+      src_smp = evt.src_smp,
+      src_smp_rate = evt.src_smp_rate,
+
       -- Audio mix from the AAF (gain, automation, pan, fades) — restored
       -- by Generate Items / Conform, see CLB.apply_mix. nil = none.
       mix = evt.mix,
@@ -3761,10 +3766,10 @@ local function save_clb_project(filepath, silent)
   --           src_tc_in|src_tc_out|rec_tc_in|rec_tc_out|
   --           clip_name|source_file|notes|
   --           match_status|matched_path|group|orig_track|source_idx|level|
-  --           scene|take|aux_rate|reaper_item_guid|mix
+  --           scene|take|aux_rate|reaper_item_guid|mix|src_smp
   f:write(string.format("ROWS|%d\n", #ROWS))
   for _, row in ipairs(ROWS) do
-    f:write(string.format("R|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%d|%s|%s|%s|%s|%s|%s\n",
+    f:write(string.format("R|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%d|%s|%s|%s|%s|%s|%s|%s\n",
       _clb_escape(row.event_num    or ""),   -- p[2]
       _clb_escape(row.reel         or ""),   -- p[3]
       _clb_escape(row.track        or ""),   -- p[4]
@@ -3787,7 +3792,8 @@ local function save_clb_project(filepath, silent)
       _clb_escape(row.take         or ""),   -- p[21]
       _clb_escape(row.aux_rate and tostring(row.aux_rate) or ""), -- p[22], EDL M2 rate
       _clb_escape(row.reaper_item_guid or ""), -- p[23], Link Reaper Items
-      _clb_escape(CLB.mix_encode(row.mix))))   -- p[24], audio mix (AAF)
+      _clb_escape(CLB.mix_encode(row.mix)),    -- p[24], audio mix (AAF)
+      (row.src_smp and row.src_smp_rate) and string.format("%d@%d", row.src_smp, row.src_smp_rate) or "")) -- p[25], AAF exact source start
   end
 
   -- Filter panel visibility flags
@@ -4006,6 +4012,8 @@ local function _parse_clb_file(filepath)
           aux_rate     = (p[22] and p[22] ~= "") and tonumber(p[22]) or nil, -- nil for files saved before this field existed
           reaper_item_guid = (p[23] and p[23] ~= "") and p[23] or nil, -- see CLB.link_reaper_items_selection; nil for older files
           mix          = CLB.mix_decode(p[24]), -- nil for older files / no mix
+          src_smp      = tonumber((p[25] or ""):match("^(%d+)@")), -- nil for older files / not AAF
+          src_smp_rate = tonumber((p[25] or ""):match("@(%d+)$")),
           duration     = dur,
         }
         row.__search_text = table.concat({
@@ -6575,6 +6583,21 @@ function CLB.calibrate_tc_to_target(target_tc_raw, axis)
     src.name or "?", ax.label, sign, delta_tc), "Calibrate to Target TC", 0)
 end
 
+--- Source In of a row in seconds for the take's start offset. AAF rows carry
+--- the exact source start in samples (src_smp at src_smp_rate): a media file
+--- starting a sample past the frame (Avid: ...001) or a sub-frame slip is kept,
+--- so the content lands on the editor's exact sample while the item edges stay
+--- on the frame grid (from Rec TC). The samples are used only while they still
+--- agree with Src In within a frame - an edited Src In falls back to the TC.
+function CLB.src_in_seconds(row)
+  local tc = EDL.tc_to_seconds(row.src_tc_in, CLB.fps, CLB.is_drop)
+  if row.src_smp and row.src_smp_rate and row.src_smp_rate > 0 and CLB.fps and CLB.fps > 0 then
+    local exact = row.src_smp / row.src_smp_rate
+    if math.abs(exact - tc) < 1 / CLB.fps then return exact end
+  end
+  return tc
+end
+
 ---------------------------------------------------------------------------
 -- Conform Matched Items (insert actual audio files)
 ---------------------------------------------------------------------------
@@ -6754,8 +6777,8 @@ local function conform_matched_items(selected_only)
         return
       end
 
-      -- Source offset: src_tc_in - audio's TimeReference
-      local src_in_sec = EDL.tc_to_seconds(row.src_tc_in, CLB.fps, CLB.is_drop)
+      -- Source offset: src_tc_in (exact AAF samples when known) - audio's TimeReference
+      local src_in_sec = CLB.src_in_seconds(row)
 
       -- Get audio files to insert
       local audio_files = {}

@@ -1,10 +1,10 @@
 --[[
 @description hsuanice_OTIO Bridge.lua
-@version 26.1103.0116pre1
+@version 26.1103.1954pre1
 @author hsuanice
 @noindex
 @changelog
-  - New: AAF events carry their speed change (aux_rate) through to CLB
+  - New: AAF events carry the exact source start in samples (src_smp) through to CLB
 @about
   v0.4.1
   Calls the OpenTimelineIO Python wrapper (Tools/otio_to_clb.py) and converts
@@ -322,6 +322,8 @@ function M._to_parsed(data, source_path, default_fps)
       take             = ev.take        or "",
       mix              = ev.mix,                  -- AAF audio gain/automation/pan/fades, or nil
       aux_rate         = ev.aux_rate,             -- AAF speed change (fps x speed, < 0 reverse), or nil
+      src_smp          = ev.src_smp,              -- AAF exact source start (samples at src_smp_rate), or nil
+      src_smp_rate     = ev.src_smp_rate,
       comments         = {},
       -- Pre-computed (same fields that EDL.parse() produces)
       duration_seconds = dur_sec,

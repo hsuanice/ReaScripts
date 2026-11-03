@@ -2,6 +2,10 @@
 
 hsuanice_OTIO Bridge.lua
 
+## 26.1103.1954pre1
+
+- New: AAF events carry the exact source start in samples (src_smp) through to CLB
+
 ## 26.1103.0116pre1
 
 - New: AAF events carry their speed change (aux_rate) through to CLB

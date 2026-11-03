@@ -1,5 +1,9 @@
 # hsuanice_Library.lua — Changelog
 
+## 26.1103.1954pre1
+
+- OTIO Bridge: AAF exact source start in samples
+
 ## 26.1103.1536pre1
 
 - Add: Waveform Sync Core (used by Dual Recorder Sync)

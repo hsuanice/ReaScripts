@@ -832,6 +832,14 @@ def _timeline_to_clb(tl, fmt, progress_file="", audio_track_names=None):
             rec_out = _rt_to_tc(rec_end,   fps, is_drop, ot)
             src_in  = _rt_to_tc(src_start, fps, is_drop, ot)
             src_out = _rt_to_tc(src_end,   fps, is_drop, ot)
+            # Exact source start in samples (AAF audio: the native adapter
+            # gives the source position at the audio rate). The TC above is
+            # whole frames, which loses a sub-frame slip and a media start
+            # that is a sample past the frame (Avid: ...001); CLB uses this
+            # for the take's start offset - item edges stay on the frame grid.
+            src_smp = None
+            if fmt == "AAF" and src_start.rate >= 8000:
+                src_smp = (int(round(src_start.value)), int(src_start.rate))
 
             # Mix (AAF only for now): fades on every clip; gain, automation
             # and pan on audio clips
@@ -892,6 +900,7 @@ def _timeline_to_clb(tl, fmt, progress_file="", audio_track_names=None):
 
                     src_in  = _rt_to_tc(src_start, fps, is_drop, ot)
                     src_out = _rt_to_tc(src_end,   fps, is_drop, ot)
+                    src_smp = None  # rebuilt from frames: no exact samples
 
                 if not reel:
                     reel = AAF_NO_REEL
@@ -919,6 +928,8 @@ def _timeline_to_clb(tl, fmt, progress_file="", audio_track_names=None):
             })
             if aux_rate is not None:
                 events[-1]["aux_rate"] = aux_rate
+            if src_smp is not None:
+                events[-1]["src_smp"], events[-1]["src_smp_rate"] = src_smp
             if mix:
                 events[-1]["mix"] = mix
 

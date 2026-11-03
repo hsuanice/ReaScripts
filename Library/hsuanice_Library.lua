@@ -1,6 +1,6 @@
 --[[
 @description hsuanice Library - shared code used by hsuanice scripts (required)
-@version 26.1103.1536pre1
+@version 26.1103.1954pre1
 @author hsuanice
 @metapackage
 @provides
@@ -26,7 +26,7 @@
   [nomain] hsuanice_Waveform Sync Core.lua
   [nomain] json.lua
 @changelog
-  - Add: Waveform Sync Core (used by Dual Recorder Sync)
+  - OTIO Bridge: AAF exact source start in samples
 @about
   # hsuanice Library
 
