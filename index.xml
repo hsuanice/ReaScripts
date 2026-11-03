@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<index version="1" name="hsuanice Scripts" commit="b36d9ec23ce51c49c055edfb189830acbcb7a229">
+<index version="1" name="hsuanice Scripts" commit="ec9376f25de96601cf680937e7db0f6681e429dd">
   <category name="Conform">
     <reapack name="hsuanice_Conform List Browser - CLB.lua" type="script" desc="Conform List Browser - CLB: conform EDL / AAF / XML / OTIO / subtitle lists (GUI + Jump / Link / Load / Reveal)">
       <metadata>
@@ -2450,6 +2450,12 @@
         <changelog><![CDATA[- Fix: Spot to original timecode no longer uses REAPER's "Move to source preferred position" action; it reads the BWF TimeReference itself, so a file without timecode no longer shows an error dialog for every file (it stays in sequence and is listed in the summary).
 - Fix: the import is tied to the project it started in; if another project tab is shown during the import, it pauses (shown in the progress window) instead of putting tracks and items into that other project.]]></changelog>
         <source main="main">https://github.com/hsuanice/ReaScripts/raw/b36d9ec23ce51c49c055edfb189830acbcb7a229/Tracks/hsuanice_Import%20Audio%20Folders%20to%20Tracks%20-%20Field%20Recorder.lua</source>
+      </version>
+      <version name="26.1103.1338pre1" author="hsuanice" time="2026-11-03T05:39:02Z">
+        <changelog><![CDATA[- Fix: new folder tracks always go to the top level at the bottom of the project; a folder left open at the end (hidden or not) is closed first, so imports no longer land inside it.
+- Fix: Spot to original timecode reads the BWF TimeReference itself (no more error dialog per file); files without timecode stay in sequence and are listed in the summary.
+- Fix: the import pauses while another project tab is shown instead of writing into it.]]></changelog>
+        <source main="main">https://github.com/hsuanice/ReaScripts/raw/ec9376f25de96601cf680937e7db0f6681e429dd/Tracks/hsuanice_Import%20Audio%20Folders%20to%20Tracks%20-%20Field%20Recorder.lua</source>
       </version>
     </reapack>
     <reapack name="hsuanice_Import Audio Folders to Tracks - Music Multitrack.lua" type="script" desc="Import Audio Folders to Tracks - Music Multitrack: one folder per track (GUI)">
