@@ -1,12 +1,10 @@
 --[[
 @description Project Manager - PM Insight Analyzer: work-time analysis of PM Timer logs (work in progress)
-@version 26.1101.1739
+@version 26.1103.1758pre1
 @author hsuanice
 @noindex  (kept in the repository as a backup; not offered on ReaPack while it is a work in progress)
 @changelog
-  - New: Work Log report by reel / episode - By Reel table per project (time, days, film, source, scenes, film / source per hour, also per work type); By Project gains reels, reel work, average per reel and film / source per hour, and drops Share (tested)
-  - Fix: a scene logged with a range a frame off or moved by a recut is counted once (tested)
-  - Change: work time as hours and minutes (12h 05m); film and source lengths stay in timecode; alternating row colors in all tables (tested)
+  - New: Recording Days section for aap work (Work Log mode) - work, items, source length and size per recording day, average / median per day, work per source hour and per GB, and an estimate for 10 / 20 / 30 days; slow days in orange
 @about
   Read-only analysis script. Auto-detects project type:
 
@@ -24,6 +22,10 @@
     duplicate items (same day, position and length) are counted once.
     Reels / episodes ("Proj R5 Dialog", "Proj EP06 Dialog") get their own rows per
     project: time, film, source and film / source per hour, also per work type.
+    Recording Days (aap items whose note has "Recording Date", from PM Timer): work per
+    recording day of the production sound with its items, source length and size, the
+    average / median per day, work per source hour and per GB, and an estimate for 10 / 20 /
+    30 recording days. Only shown when such items exist.
 
   Selected scenes: select one or more items on the Scene Cut track before running to
   report only those scenes - their work time, film length and Source / Mic Selected /
@@ -195,6 +197,7 @@ local function parse_note_fields(note)
     scope = "",
     scenes = "",
     reel_len = "",
+    rec_date = "", rec_items = "", rec_src = "", rec_size = "",
   }
   if not note or note == "" then return info end
   info.range   = note:match("Range%s*:%s*([^\n]+)")   or ""
@@ -205,6 +208,11 @@ local function parse_note_fields(note)
   info.scope   = note:match("Scope%s*:%s*([^\n]+)")   or ""
   info.scenes  = note:match("Scenes%s*:%s*([^\n]+)")  or ""
   info.reel_len = note:match("Reel Len%s*:%s*([^\n]+)") or ""
+  -- aap items (PM Timer): one recording day of the production sound
+  info.rec_date  = note:match("Recording Date%s*:%s*([^\n]-)%s*\n") or note:match("Recording Date%s*:%s*([^\n]+)") or ""
+  info.rec_items = note:match("\nItems%s*:%s*(%d+)") or ""
+  info.rec_src   = note:match("Source Len%s*:%s*([^\n]+)") or ""
+  info.rec_size  = note:match("Source Size%s*:%s*([%d%.]+)%s*GB") or ""
   return info
 end
 
@@ -391,6 +399,10 @@ local function collect_work_log_records()
         }
         local rec = raw[#raw]
         rec.sc_name, rec.sc_s, rec.sc_e = scene_ident(note)
+        if ni.rec_date ~= "" then
+          rec.rec_date, rec.rec_items = ni.rec_date, tonumber(ni.rec_items)
+          rec.rec_src, rec.rec_gb = tc_sec(ni.rec_src), tonumber(ni.rec_size)
+        end
       end
     end
   end
@@ -467,6 +479,96 @@ end
 
 -- A real reel / episode (not "All" and not the work without a reel)
 local function is_reel(v) return v ~= "" and v:lower() ~= "all" end
+
+-- Recording Days (aap items from PM Timer, note "Recording Date : ..."): work per recording
+-- day of the production sound, against its items, source length and size, plus figures to
+-- estimate a new job. Items of the same recording day are summed (a day done in two goes);
+-- its source is counted once. Writes nothing when no item has a recording date.
+local function recording_days_section(out, recs)
+  local projs, order = {}, {}
+  for _, x in ipairs(recs) do
+    if x.rec_date then
+      local p = projs[x.project]
+      if not p then p = { days = {}, keys = {} }; projs[x.project] = p; order[#order + 1] = x.project end
+      local d = p.days[x.rec_date]
+      if not d then
+        d = { work = 0, items = 0, src = 0, gb = 0, dates = {} }
+        p.days[x.rec_date] = d; p.keys[#p.keys + 1] = x.rec_date
+      end
+      d.work, d.dates[x.date] = d.work + x.len, true
+      d.items = math.max(d.items, x.rec_items or 0)
+      d.src   = math.max(d.src, x.rec_src or 0)
+      d.gb    = math.max(d.gb, x.rec_gb or 0)
+    end
+  end
+  if #order == 0 then return end
+  local function median(t)
+    if #t == 0 then return 0 end
+    table.sort(t)
+    local m = (#t + 1) // 2
+    return #t % 2 == 1 and t[m] or (t[m] + t[m + 1]) / 2
+  end
+  local function per_src_hr(work, src) return src > 0 and work / 60 / (src / 3600) or nil end
+
+  out('<details open><summary>Recording Days</summary>')
+  for _, pname in ipairs(order) do
+    local p = projs[pname]
+    table.sort(p.keys)
+    local work, items, src, gb, works, rates = 0, 0, 0, 0, {}, {}
+    for _, k in ipairs(p.keys) do
+      local d = p.days[k]
+      work, items, src, gb = work + d.work, items + d.items, src + d.src, gb + d.gb
+      works[#works + 1] = d.work
+      rates[#rates + 1] = per_src_hr(d.work, d.src)
+    end
+    local n = #p.keys
+    local med_rate = median(rates)
+    local rate = per_src_hr(work, src)
+    local avg_day = work / n
+
+    out('<section class="scene"><h3>' .. html_esc(pname) .. '</h3>')
+    out(string.format('<div class="meta">%d recording days · %s work · %s source · %d items · %.1f GB</div>',
+      n, fmt_work(work), fmt_work(src), items, gb))
+    out('<div class="cards"><div class="card"><h3>Per recording day</h3>')
+    out('<div class="row"><b>Average work</b><span>' .. fmt_work(avg_day) .. '</span></div>')
+    out('<div class="row"><b>Median work</b><span>' .. fmt_work(median(works)) .. '</span></div>')
+    out('<div class="row"><b>Average source</b><span>' .. fmt_work(src / n) .. '</span></div>')
+    out(string.format('<div class="row"><b>Average size</b><span>%.1f GB</span></div>', gb / n))
+    out('</div><div class="card"><h3>Estimate</h3>')
+    out('<div class="row"><b>Work per source hour</b><span>'
+      .. (rate and string.format("%.1f min", rate) or "–") .. '</span></div>')
+    out('<div class="row"><b>Work per GB</b><span>'
+      .. (gb > 0 and string.format("%.1f min", work / 60 / gb) or "–") .. '</span></div>')
+    for _, days in ipairs({ 10, 20, 30 }) do
+      out('<div class="row"><b>' .. days .. ' recording days</b><span>≈ ' .. fmt_work(avg_day * days)
+        .. '</span></div>')
+    end
+    out('</div></div>')
+
+    out('<div class="wrap" style="margin-top:10px"><table><tr><th class="l">Recording Day</th><th>Work</th>'
+      .. '<th>Items</th><th>Source</th><th>Size</th><th>Work / Source hr</th><th class="l">Worked On</th></tr>')
+    for _, k in ipairs(p.keys) do
+      local d = p.days[k]
+      local r_day = per_src_hr(d.work, d.src)
+      local slow = r_day and med_rate > 0 and r_day > 2 * med_rate
+      local dates = {}
+      for dt in pairs(d.dates) do dates[#dates + 1] = dt end
+      table.sort(dates)
+      out(string.format('<tr><td class="l">%s</td><td%s>%s</td><td>%d</td><td>%s</td><td>%.1f GB</td>'
+        .. '<td%s>%s</td><td class="l">%s</td></tr>', html_esc(k), slow and ' class="warn"' or '',
+        fmt_work(d.work), d.items, fmt_work(d.src), d.gb, slow and ' class="warn"' or '',
+        r_day and string.format("%.1f min", r_day) or "–", table.concat(dates, ", ")))
+    end
+    out(string.format('<tr class="total"><td class="l">Total (%d days)</td><td>%s</td><td>%d</td><td>%s</td>'
+      .. '<td>%.1f GB</td><td>%s</td><td></td></tr>', n, fmt_work(work), items, fmt_work(src), gb,
+      rate and string.format("%.1f min", rate) or "–"))
+    out('</table></div><div class="note">From the aap work items (note "Recording Date"); items of the same '
+      .. 'recording day are summed. Orange = more than twice the median work per source hour (e.g. a day '
+      .. 'with several booms or a second recorder). Size is PM Timer\'s estimate from the source length.</div>'
+      .. '</section>')
+  end
+  out('</details>')
+end
 
 -- Writes one report section (all years or one year) for the given records.
 local function work_log_section(out, recs, sid)
@@ -588,6 +690,8 @@ local function work_log_section(out, recs, sid)
     .. 'e.g. R5, EP06; "All" is not counted). Film / Source = what the reels\' work covered: the reel length '
     .. 'from a whole-reel item (Reel Len), otherwise every scene worked on counted once. Film/hr, Source/hr '
     .. '= that length ÷ all the work on the reels.</div></details>')
+
+  recording_days_section(out, recs)
 
   -- Per project
   out('<details><summary>Per Project</summary>')
