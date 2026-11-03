@@ -1,10 +1,11 @@
 --[[
 @description Import Audio Folders to Tracks - Field Recorder: one folder per track, channel-split files grouped (GUI)
-@version 26.1103.1329pre1
+@version 26.1103.1338pre1
 @author hsuanice
 @changelog
-  - Fix: Spot to original timecode no longer uses REAPER's "Move to source preferred position" action; it reads the BWF TimeReference itself, so a file without timecode no longer shows an error dialog for every file (it stays in sequence and is listed in the summary).
-  - Fix: the import is tied to the project it started in; if another project tab is shown during the import, it pauses (shown in the progress window) instead of putting tracks and items into that other project.
+  - Fix: new folder tracks always go to the top level at the bottom of the project; a folder left open at the end (hidden or not) is closed first, so imports no longer land inside it.
+  - Fix: Spot to original timecode reads the BWF TimeReference itself (no more error dialog per file); files without timecode stay in sequence and are listed in the summary.
+  - Fix: the import pauses while another project tab is shown instead of writing into it.
 @about
   - Pre-confirm dialog: shows total folders/files, lets you choose a channel naming pattern or a custom mask, then offers [Import] / [Cancel].
     - Sequence only (append at the end of the target track).
@@ -431,10 +432,26 @@ local function finish_parent(key)
   end
 end
 
+-- A folder left open at the end of the project (hidden or not) would swallow
+-- the new tracks; close it on the last track so imports always land at the top level.
+local function close_open_folders()
+  local n = reaper.CountTracks(0)
+  if n == 0 then return end
+  local open = 0
+  for i = 0, n - 1 do
+    open = open + reaper.GetMediaTrackInfo_Value(reaper.GetTrack(0, i), "I_FOLDERDEPTH")
+  end
+  if open > 0 then
+    local last = reaper.GetTrack(0, n - 1)
+    set_depth(last, reaper.GetMediaTrackInfo_Value(last, "I_FOLDERDEPTH") - open)
+  end
+end
+
 local function begin_parent(key, display_name)
   if current_parent_key and parents[current_parent_key] then
     finish_parent(current_parent_key)
   end
+  close_open_folders()
   local tr = append_track(display_name, 1)   -- open folder
   parents[key] = { tr=tr, children=0, lastChild=nil }
   current_parent_key = key

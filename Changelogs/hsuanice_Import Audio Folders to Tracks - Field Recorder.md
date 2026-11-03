@@ -4,6 +4,12 @@
 
 ReaImGui - Import audio: one folder per track; channel-split files go to child tracks. Sequence only.
 
+## 26.1103.1338pre1
+
+- Fix: new folder tracks always go to the top level at the bottom of the project; a folder left open at the end (hidden or not) is closed first, so imports no longer land inside it.
+- Fix: Spot to original timecode reads the BWF TimeReference itself (no more error dialog per file); files without timecode stay in sequence and are listed in the summary.
+- Fix: the import pauses while another project tab is shown instead of writing into it.
+
 ## 26.1103.1329pre1
 
 - Fix: Spot to original timecode no longer uses REAPER's "Move to source preferred position" action; it reads the BWF TimeReference itself, so a file without timecode no longer shows an error dialog for every file (it stays in sequence and is listed in the summary).
