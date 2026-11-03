@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<index version="1" name="hsuanice Scripts" commit="7679b06320fba3f7aeb1bf8fb87269bbef1b4ecb">
+<index version="1" name="hsuanice Scripts" commit="451b14787e2bd56ca3042e3e105d9191bc032984">
   <category name="Conform">
     <reapack name="hsuanice_Conform List Browser - CLB.lua" type="script" desc="Conform List Browser - CLB: conform EDL / AAF / XML / OTIO / subtitle lists (GUI + Jump / Link / Load / Reveal)">
       <metadata>
@@ -297,6 +297,18 @@
         <source file="../Tools/otio_to_clb.py">https://github.com/hsuanice/ReaScripts/raw/7679b06320fba3f7aeb1bf8fb87269bbef1b4ecb/Tools/otio_to_clb.py</source>
         <source file="../Tools/aaf_to_otio.py">https://github.com/hsuanice/ReaScripts/raw/7679b06320fba3f7aeb1bf8fb87269bbef1b4ecb/Tools/aaf_to_otio.py</source>
         <source file="../Tools/subtitle_to_clb.py">https://github.com/hsuanice/ReaScripts/raw/7679b06320fba3f7aeb1bf8fb87269bbef1b4ecb/Tools/subtitle_to_clb.py</source>
+      </version>
+      <version name="26.1103.2153pre1" author="hsuanice" time="2026-11-03T13:54:22Z">
+        <changelog><![CDATA[- New: CLB Waveform Check (new action) - compares conformed ISO audio with the AAF's audio by waveform under each AAF item: OK / ~ x ms (Auto Align channel) / SYNC +-n f / NO MATCH / ? / NO AUDIO as project or take markers, mutes the verified AAF items, results in the console. Frame Align (Conform, on by default) from 26.1103.2111pre1 is tested and kept]]></changelog>
+        <source main="main">https://github.com/hsuanice/ReaScripts/raw/451b14787e2bd56ca3042e3e105d9191bc032984/Conform/hsuanice_Conform%20List%20Browser%20-%20CLB.lua</source>
+        <source main="main" file="hsuanice_Conform List Browser - CLB Jump Old New TC.lua">https://github.com/hsuanice/ReaScripts/raw/451b14787e2bd56ca3042e3e105d9191bc032984/Conform/hsuanice_Conform%20List%20Browser%20-%20CLB%20Jump%20Old%20New%20TC.lua</source>
+        <source main="main" file="hsuanice_Conform List Browser - CLB Link REAPER Items.lua">https://github.com/hsuanice/ReaScripts/raw/451b14787e2bd56ca3042e3e105d9191bc032984/Conform/hsuanice_Conform%20List%20Browser%20-%20CLB%20Link%20REAPER%20Items.lua</source>
+        <source main="main" file="hsuanice_Conform List Browser - CLB Load from REAPER.lua">https://github.com/hsuanice/ReaScripts/raw/451b14787e2bd56ca3042e3e105d9191bc032984/Conform/hsuanice_Conform%20List%20Browser%20-%20CLB%20Load%20from%20REAPER.lua</source>
+        <source main="main" file="hsuanice_Conform List Browser - CLB Reveal Item.lua">https://github.com/hsuanice/ReaScripts/raw/451b14787e2bd56ca3042e3e105d9191bc032984/Conform/hsuanice_Conform%20List%20Browser%20-%20CLB%20Reveal%20Item.lua</source>
+        <source main="main" file="hsuanice_Conform List Browser - CLB Waveform Check.lua">https://github.com/hsuanice/ReaScripts/raw/451b14787e2bd56ca3042e3e105d9191bc032984/Conform/hsuanice_Conform%20List%20Browser%20-%20CLB%20Waveform%20Check.lua</source>
+        <source file="../Tools/otio_to_clb.py">https://github.com/hsuanice/ReaScripts/raw/451b14787e2bd56ca3042e3e105d9191bc032984/Tools/otio_to_clb.py</source>
+        <source file="../Tools/aaf_to_otio.py">https://github.com/hsuanice/ReaScripts/raw/451b14787e2bd56ca3042e3e105d9191bc032984/Tools/aaf_to_otio.py</source>
+        <source file="../Tools/subtitle_to_clb.py">https://github.com/hsuanice/ReaScripts/raw/451b14787e2bd56ca3042e3e105d9191bc032984/Tools/subtitle_to_clb.py</source>
       </version>
     </reapack>
   </category>
@@ -2766,7 +2778,7 @@ Packages
 {\pard \ql \f0 \sa180 \li0 \fi0 \outlinelevel2 \b \fs28 Metadata\par}
 {\pard \ql \f0 \sa180 \li0 \fi0 | Package | What it does | |---|---| | Rename from Metadata | Rename the active take or the source file from BWF / iXML metadata tokens, with live preview (GUI) | | Item List | Spreadsheet-style item tables with metadata columns: Item List Browser - ILB, Item List Editor - ILE (GUI) | | BWF / iXML Embed Tools | Embed BWF iXML Metadata from Take 1, Embed Timecode to BWF and iXML, Embed SMPTE UMID (needs BWF MetaEdit) |\par}
 {\pard \ql \f0 \sa180 \li0 \fi0 \outlinelevel2 \b \fs28 Conform\par}
-{\pard \ql \f0 \sa180 \li0 \fi0 | Package | What it does | |---|---| | Conform List Browser - CLB | Conform tool for EDL / AAF / XML / OTIO / subtitle lists: match source media, generate and link items, compare old / new cuts {\i (compare: work in progress)} (GUI + Jump Old New TC, Link REAPER Items, Load from REAPER, Reveal Item) |\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 | Package | What it does | |---|---| | Conform List Browser - CLB | Conform tool for EDL / AAF / XML / OTIO / subtitle lists: match source media, generate and link items, compare old / new cuts {\i (compare: work in progress)}, check a conform against the AAF's audio by waveform (GUI + Jump Old New TC, Link REAPER Items, Load from REAPER, Reveal Item, Waveform Check) |\par}
 {\pard \ql \f0 \sa180 \li0 \fi0 \outlinelevel2 \b \fs28 Various\par}
 {\pard \ql \f0 \sa180 \li0 \fi0 | Package | What it does | |---|---| | Clock with Date 24H | Resizable, dockable clock window | | Count Items and Tracks - Selection HUD | Pro Tools-style selection info: item / track counts, start / end / length |\par}
 {\pard \ql \f0 \sa180 \li0 \fi0 \outlinelevel2 \b \fs28 Library\par}
