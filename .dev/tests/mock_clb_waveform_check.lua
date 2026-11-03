@@ -94,6 +94,11 @@ item(AAF, 50, 0.7, voice, nil, "short")
 item(E1, 50, 0.7, voice, { ["P_EXT:CLB_EVENT"] = "005" })
 -- 6: nothing conformed
 item(AAF, 60, 4, voice, nil, "no audio")
+-- 8: Consolidate moved another track's event under AAF A1; the matching one sits on A3
+local E3 = track("EDL - A3")
+item(AAF, 70, 6, voice, nil, "packed")
+item(E1, 70, 6, other, { ["P_EXT:CLB_EVENT"] = "008" })
+item(E3, 70, 6, voice, { ["P_EXT:CLB_EVENT"] = "009" })
 -- 7: A2 (other channel of the mix) over audio conformed on A1 only (Remove Dups)
 item(AAF2, 10, 6, voice, nil, "a2 dup")
 
@@ -153,8 +158,8 @@ dofile("Conform/hsuanice_Conform List Browser - CLB Waveform Check.lua")
 while #deferred > 0 do table.remove(deferred, 1)() end
 print(table.concat(console))
 local expect = { sync = "WC OK", ["aap only"] = "WC ~ ", ["two late"] = "WC SYNC -2f", ["other take"] = "WC NO MATCH",
-  short = "WC ?", ["no audio"] = "WC NO AUDIO", ["a2 dup"] = "WC OK" }
-local pos_name = { [10] = "sync", [20] = "aap only", [30] = "two late", [40] = "other take", [50] = "short", [60] = "no audio" }
+  short = "WC ?", ["no audio"] = "WC NO AUDIO", ["a2 dup"] = "WC OK", packed = "WC OK EDL - A3" }
+local pos_name = { [10] = "sync", [20] = "aap only", [30] = "two late", [40] = "other take", [50] = "short", [60] = "no audio", [70] = "packed" }
 local fails = 0
 for _, m in ipairs(markers) do
   local want = expect[pos_name[math.floor(m.pos + 0.5)]]
@@ -166,6 +171,6 @@ end
 local muted = {}
 for _, it in ipairs(AAF.items) do if it.mute == 1 then muted[#muted + 1] = it.name end end
 print("muted: " .. table.concat(muted, ", "))
-if table.concat(muted, ",") ~= "sync,aap only" then fails = fails + 1; print("  FAIL mute") end
+if table.concat(muted, ",") ~= "sync,aap only,packed" then fails = fails + 1; print("  FAIL mute") end
 if AAF2.items[1].mute ~= 1 then fails = fails + 1; print("  FAIL a2 dup not muted") end
-print(fails == 0 and #markers == 7 and "ALL PASS" or (fails .. " FAILED"))
+print(fails == 0 and #markers == 8 and "ALL PASS" or (fails .. " FAILED"))

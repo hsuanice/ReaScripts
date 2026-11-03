@@ -1,6 +1,6 @@
 --[[
 @description Conform List Browser - CLB: conform EDL / AAF / XML / OTIO / subtitle lists (GUI + Jump / Link / Load / Reveal)
-@version 26.1103.2219pre1
+@version 26.1103.2221pre1
 @author hsuanice
 @provides
   [main] .
@@ -13,7 +13,7 @@
   [nomain] ../Tools/aaf_to_otio.py
   [nomain] ../Tools/subtitle_to_clb.py
 @changelog
-  - Change: CLB Waveform Check looks on every conformed track when nothing is conformed on the AAF item's own track number - e.g. A2 = the other channel of A1's mix, whose ISO copy Remove Dups removed (it keeps A1's, as the EDL lists A1 first)
+  - Change: CLB Waveform Check also tries every conformed track when the AAF item's own track number gives no clear match - so it works after Consolidate (tracks packed and renumbered) as well as after Remove Dups
 @about
   Note: the Compare view (old vs new cut, reconform) is a work in progress and not finished yet.
 

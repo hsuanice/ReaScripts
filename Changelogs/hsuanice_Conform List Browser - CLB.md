@@ -4,6 +4,10 @@
 
 Conform List Browser
 
+## 26.1103.2221pre1
+
+- Change: CLB Waveform Check also tries every conformed track when the AAF item's own track number gives no clear match - so it works after Consolidate (tracks packed and renumbered) as well as after Remove Dups
+
 ## 26.1103.2219pre1
 
 - Change: CLB Waveform Check looks on every conformed track when nothing is conformed on the AAF item's own track number - e.g. A2 = the other channel of A1's mix, whose ISO copy Remove Dups removed (it keeps A1's, as the EDL lists A1 first)

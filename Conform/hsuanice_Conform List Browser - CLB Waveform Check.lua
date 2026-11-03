@@ -1,6 +1,6 @@
 --[[
 @description Conform List Browser - CLB Waveform Check (compare conformed ISO audio with the AAF's audio; markers, mute verified AAF items)
-@version 26.1103.2219pre1
+@version 26.1103.2221pre1
 @author hsuanice
 @noindex
 @changelog
@@ -16,7 +16,8 @@
     same track label ("EDL - A1", or "EDL - A1 - 1", "EDL - A1 - 2" ... after exploding takes);
     "AAF - A3_L" / "AAF - A3_R" count as A3. When no track has that label, or nothing is
     conformed under an AAF item on it (e.g. A2 = the other channel of A1's mix, removed by
-    Remove Dups), with all conformed tracks. Every conformed event under an AAF item is checked, every channel on its own; the
+    Remove Dups), or no clear match there (tracks packed by Consolidate), with all conformed
+    tracks. Every conformed event under an AAF item is checked, every channel on its own; the
     clearest channel gives the result.
   - The offset is found by cross-correlation (GCC-PHAT, Waveform Sync Core) within +/- the
     search range (setting, default 1 s).
@@ -229,31 +230,37 @@ local function analyse(c)
       end
     end
   end
-  collect(targets_for(label_of[r.GetMediaItem_Track(item)]))
-  -- nothing on the same track number (e.g. A2 = the other channel of A1's mix,
-  -- removed by Remove Dups): look on every conformed track
-  if next(events) == nil then collect(conf_tracks) end
   -- every overlapping event is checked (several tracks can overlap here),
   -- most overlap first; the clearest channel of any of them gives the result
-  local list = {}
-  for _, g in pairs(events) do list[#list + 1] = g end
-  if #list == 0 then c.kind = "NO AUDIO"; return end
-  table.sort(list, function(a, b) return a.ov > b.ov end)
   local ref = { { take = r.GetActiveTake(item), pos = rs } }
+  local list, done = {}, {}
   local best, best_g, best_why
-  for _, g in ipairs(list) do
-    for _, x in ipairs(g.items) do
-      local ti = x.ti
-      local s, e = math.max(rs, ti.s), math.min(re, ti.e)
-      local res = WS.find_offset(ref, { { take = ti.take, pos = ti.s } }, s, e, { fps = FPS })
-      res.track, res.file = x.track, take_name(ti.item)
-      if res.ok then
-        if not best or res.ratio > best.ratio then best, best_g = res, g end
-      elseif not best_why then
-        best_why = res
+  local function check_events()
+    local new = {}
+    for ev, g in pairs(events) do if not done[ev] then done[ev] = true; new[#new + 1] = g end end
+    table.sort(new, function(a, b) return a.ov > b.ov end)
+    for _, g in ipairs(new) do
+      list[#list + 1] = g
+      for _, x in ipairs(g.items) do
+        local ti = x.ti
+        local s, e = math.max(rs, ti.s), math.min(re, ti.e)
+        local res = WS.find_offset(ref, { { take = ti.take, pos = ti.s } }, s, e, { fps = FPS })
+        res.track, res.file = x.track, take_name(ti.item)
+        if res.ok then
+          if not best or res.ratio > best.ratio then best, best_g = res, g end
+        elseif not best_why then
+          best_why = res
+        end
       end
     end
   end
+  collect(targets_for(label_of[r.GetMediaItem_Track(item)]))
+  check_events()
+  -- no clear match on the same track number (A2 = the other channel of A1's
+  -- mix removed by Remove Dups, or tracks packed by Consolidate): every
+  -- conformed track
+  if not best then collect(conf_tracks); check_events() end
+  if #list == 0 then c.kind = "NO AUDIO"; return end
   if not best then
     local why = best_why and best_why.reason or "no result"
     c.kind = (why == "too short" or why:find("silent", 1, true)) and "?" or "NO MATCH"
