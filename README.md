@@ -113,7 +113,7 @@ and background on/off scripts start with `Toggle`.
 
 | Package | What it does |
 |---|---|
-| Conform List Browser - CLB | Conform tool for EDL / AAF / XML / OTIO / subtitle lists: match source media, generate and link items, compare old / new cuts *(compare: work in progress)* (GUI + Jump Old New TC, Link REAPER Items, Load from REAPER, Reveal Item) |
+| Conform List Browser - CLB | Conform tool for EDL / AAF / XML / OTIO / subtitle lists: match source media, generate and link items, compare old / new cuts *(compare: work in progress)*, check a conform against the AAF's audio by waveform (GUI + Jump Old New TC, Link REAPER Items, Load from REAPER, Reveal Item, Waveform Check) |
 
 ### Various
 

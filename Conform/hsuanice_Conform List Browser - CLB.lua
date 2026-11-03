@@ -1,6 +1,6 @@
 --[[
 @description Conform List Browser - CLB: conform EDL / AAF / XML / OTIO / subtitle lists (GUI + Jump / Link / Load / Reveal)
-@version 26.1103.2111pre1
+@version 26.1103.2153pre1
 @author hsuanice
 @provides
   [main] .
@@ -8,11 +8,12 @@
   [main] hsuanice_Conform List Browser - CLB Link REAPER Items.lua
   [main] hsuanice_Conform List Browser - CLB Load from REAPER.lua
   [main] hsuanice_Conform List Browser - CLB Reveal Item.lua
+  [main] hsuanice_Conform List Browser - CLB Waveform Check.lua
   [nomain] ../Tools/otio_to_clb.py
   [nomain] ../Tools/aaf_to_otio.py
   [nomain] ../Tools/subtitle_to_clb.py
 @changelog
-  - New: Frame Align (Conform, on by default) - each take's source offset is aligned to whole frames counted from the audio file's own start when it is only 1-2 samples away. Recorder files often start a sample past a frame (TimeReference ...001), so an EDL's Src In landed one sample early; R01 A1 EDL conform now matches the AAF to the sample (waveform check: 76 clips at 0). Never moves more than 2 samples; AAF rows keep the AAF's exact samples
+  - New: CLB Waveform Check (new action) - compares conformed ISO audio with the AAF's audio by waveform under each AAF item: OK / ~ x ms (Auto Align channel) / SYNC +-n f / NO MATCH / ? / NO AUDIO as project or take markers, mutes the verified AAF items, results in the console. Frame Align (Conform, on by default) from 26.1103.2111pre1 is tested and kept
 @about
   Note: the Compare view (old vs new cut, reconform) is a work in progress and not finished yet.
 
