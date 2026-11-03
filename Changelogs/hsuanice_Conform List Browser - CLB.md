@@ -4,6 +4,10 @@
 
 Conform List Browser
 
+## 26.1103.1047pre1
+
+- Change: left sidebar regrouped in rainbow order — green Generate Items + Generate Ref Media; new sky-blue group Match All, Auto Match, Conform All / Sel, Include Unmatched, Restore Mix; indigo Remove Dups, Consolidate, Picture Cut, Scene Cuts
+
 ## 26.1103.0254pre1
 
 - Fix: reopening a .clb keeps the Groups list — its order and the empty default groups (Dialog, Music ...); Picture Cut's groups always sit right under Video; groups found in the list are added in list order instead of a random one

@@ -1,6 +1,6 @@
 --[[
 @description Conform List Browser - CLB: conform EDL / AAF / XML / OTIO / subtitle lists (GUI + Jump / Link / Load / Reveal)
-@version 26.1103.0254pre1
+@version 26.1103.1047pre1
 @author hsuanice
 @provides
   [main] .
@@ -12,8 +12,7 @@
   [nomain] ../Tools/aaf_to_otio.py
   [nomain] ../Tools/subtitle_to_clb.py
 @changelog
-  - Fix: reopening a .clb keeps the Groups list — its order and the empty default groups (Dialog, Music ...); Picture Cut's groups always sit right under Video; groups found in the list are added in list order instead of a random one
-  - Change: Audio Folder buttons stay short — folder name up to 16 characters and at most 2 group names (+N); the tooltip has the full path and groups
+  - Change: left sidebar regrouped in rainbow order — green Generate Items + Generate Ref Media; new sky-blue group Match All, Auto Match, Conform All / Sel, Include Unmatched, Restore Mix; indigo Remove Dups, Consolidate, Picture Cut, Scene Cuts
 @about
   Note: the Compare view (old vs new cut, reconform) is a work in progress and not finished yet.
 
@@ -8667,20 +8666,22 @@ end
 -- Toolbar button color coding, by function group (user-requested, see
 -- project memory) — purely visual grouping, no behavior change. Each
 -- entry is {Button, ButtonHovered, ButtonActive} in ImGui's 0xRRGGBBAA
--- format. Seven groups:
+-- format. Eight groups:
 --   danger Destructive/reset: Clear List, Clear Audio
---   list   List editing/cleanup: Remove Dups, Consolidate
+--   list   List editing/cleanup: Remove Dups, Consolidate, Picture Cut,
+--          Scene Cuts
 --   io     Input/Output: Load List, Load Audio, Export EDL
 --   align  Position correction: Shift Range, Calibrate TC
 --   recut  Recut/reconform: Compare, DME Recut
---   build  Build real content from the list: Generate Items, Conform
---          All/Sel, Scene Cuts, Match All
+--   build  Build items from the list: Generate Items, Generate Ref Media
+--   match  Match audio + conform it: Match All, Conform All/Sel (sky blue,
+--          the sidebar's blue; io's darker blue is the top toolbar)
 --   link   Reaper item <-> event links: Link Reaper Items, Reveal Item
 -- Anything not wrapped in one of these stays the theme's default color.
 --
 -- Rainbow order red-orange-yellow-green-blue-indigo-violet (user's own request), following the left
--- sidebar top→bottom: danger red, recut orange, align yellow, build green, io blue (top
--- toolbar), list indigo, link violet — link deliberately muted (lower saturation +
+-- sidebar top→bottom: danger red, recut orange, align yellow, build green, match blue
+-- (io's darker blue in the top toolbar), list indigo, link violet — link deliberately muted (lower saturation +
 -- alpha): user's own call, its actions aren't consequential enough to
 -- need an eye-catching color. Optional 4th entry = text color, for a
 -- background too light for the theme's default white text (yellow).
@@ -8690,6 +8691,7 @@ CLB.BTN_GROUP_COLORS = {
   align  = { 0xD4B23AC8, 0xE3C452D8, 0xB3952CD8, 0x1E1E1EFF },
   build  = { 0x3D8C40C0, 0x4FA352D0, 0x2F6E31D0 },
   io     = { 0x3366CCC0, 0x4477DDD0, 0x2855AAD0 },
+  match  = { 0x2E8FC4C0, 0x3FA2D6D0, 0x2577A6D0 },
   list   = { 0x5B3FB0C0, 0x6E52C6D0, 0x4A3391D0 },
   link   = { 0x8C7096A0, 0x9C80A8B8, 0x76607FB8 },
 }
@@ -9465,17 +9467,6 @@ function CLB.draw_left_sidebar()
     reaper.ImGui_EndTooltip(ctx)
   end
 
-  -- Restore Mix: Generate Items / Conform apply each row's audio mix
-  -- (CLB.apply_mix). A setting, so always shown, like Auto Match.
-  local chg_rm, new_rm = reaper.ImGui_Checkbox(ctx, "Restore Mix##clb_restore_mix", CLB.restore_mix)
-  if chg_rm then CLB.restore_mix = new_rm; save_prefs() end
-  if reaper.ImGui_IsItemHovered(ctx) then
-    reaper.ImGui_SetTooltip(ctx,
-      "Generate Items / Conform also restore the audio mix from the AAF:\n"
-      .. "clip gain, volume automation (take volume envelope), pan,\n"
-      .. "fades and crossfades (Equal Power or Linear, as in the AAF).")
-  end
-
   -- Generate Ref Media button — opens a scope-picker popup (Selected
   -- rows vs. the visible/filtered list, see CLB.ref_media_scope's doc
   -- comment) instead of generating directly, same prepare/popup/execute
@@ -9540,71 +9531,14 @@ function CLB.draw_left_sidebar()
     CLB.generate_reference_media_pick_folder_and_run()
   end
 
-  -- Conform Matched buttons (with audio)
-  local has_matches = false
-  for _, row in ipairs(ROWS) do
-    if row.match_status == "Found" or row.match_status == "Fallback" or row.match_status == "Multiple" then
-      has_matches = true
-      break
-    end
-  end
+  reaper.ImGui_Spacing(ctx)
+  reaper.ImGui_Separator(ctx)
+  reaper.ImGui_Spacing(ctx)
 
-  if has_matches then
-    CLB.push_btn_color("build")
-    local conform_all_clicked = reaper.ImGui_Button(ctx, "Conform All", btn_w, btn_h)
-    CLB.pop_btn_color("build")
-    if conform_all_clicked then
-      conform_matched_items(false)
-    end
-    if reaper.ImGui_IsItemHovered(ctx) then
-      reaper.ImGui_BeginTooltip(ctx)
-      reaper.ImGui_Text(ctx, "Insert matched audio files as items")
-      reaper.ImGui_Text(ctx, "Multiple matches = multiple takes on same item")
-      reaper.ImGui_EndTooltip(ctx)
-    end
-
-    CLB.push_btn_color("build")
-    local conform_sel_clicked = reaper.ImGui_Button(ctx, "Conform Sel", btn_w, btn_h)
-    CLB.pop_btn_color("build")
-    if conform_sel_clicked then
-      conform_matched_items(true)
-    end
-    if reaper.ImGui_IsItemHovered(ctx) then
-      reaper.ImGui_BeginTooltip(ctx)
-      reaper.ImGui_Text(ctx, "Insert matched audio for selected rows only")
-      reaper.ImGui_EndTooltip(ctx)
-    end
-
-    local chg_iu, new_iu = reaper.ImGui_Checkbox(ctx, "Include Unmatched##clb_conform_unmatched", CLB.conform_include_unmatched)
-    if chg_iu then CLB.conform_include_unmatched = new_iu; save_prefs() end
-    if reaper.ImGui_IsItemHovered(ctx) then
-      reaper.ImGui_SetTooltip(ctx,
-        "Conform All / Sel also place events with no matched audio,\n"
-        .. "as empty items (like Generate Items) on the same tracks.\n"
-        .. "Conformed items with audio are colored green.")
-    end
-  end
-
-  -- Scene Cut Track button
-  if #ROWS > 0 then
-    CLB.push_btn_color("build")
-    local scene_cuts_clicked = reaper.ImGui_Button(ctx, "Scene Cuts", btn_w, btn_h)
-    CLB.pop_btn_color("build")
-    if scene_cuts_clicked then
-      create_scene_cut_track()
-    end
-    if reaper.ImGui_IsItemHovered(ctx) then
-      reaper.ImGui_BeginTooltip(ctx)
-      reaper.ImGui_Text(ctx, "Create a 'Scene Cuts' track with empty items for each scene")
-      reaper.ImGui_Text(ctx, "Clip name format: EP_Scene_Shot_Ttake[_Camera]")
-      reaper.ImGui_Text(ctx, "Example: 06_01B_01_T05_A")
-      reaper.ImGui_EndTooltip(ctx)
-    end
-  end
-
+  -- Match + Conform (blue "match" group)
   -- Match All button (only show when both EDL and audio are loaded)
   if #ROWS > 0 and #CLB.audio_files > 0 then
-    CLB.push_btn_color("build")
+    CLB.push_btn_color("match")
     local match_all_clicked = reaper.ImGui_Button(ctx, "Match All", btn_w, btn_h)
     CLB.pop_btn_color("build")
     if match_all_clicked then
@@ -9628,6 +9562,62 @@ function CLB.draw_left_sidebar()
       "After \"Load From Reaper\", also run Find Match — loads Audio\n"
       .. "first (same folder picker as \"Load Audio...\") if none is\n"
       .. "loaded yet.")
+  end
+
+  -- Conform Matched buttons (with audio)
+  local has_matches = false
+  for _, row in ipairs(ROWS) do
+    if row.match_status == "Found" or row.match_status == "Fallback" or row.match_status == "Multiple" then
+      has_matches = true
+      break
+    end
+  end
+
+  if has_matches then
+    CLB.push_btn_color("match")
+    local conform_all_clicked = reaper.ImGui_Button(ctx, "Conform All", btn_w, btn_h)
+    CLB.pop_btn_color("build")
+    if conform_all_clicked then
+      conform_matched_items(false)
+    end
+    if reaper.ImGui_IsItemHovered(ctx) then
+      reaper.ImGui_BeginTooltip(ctx)
+      reaper.ImGui_Text(ctx, "Insert matched audio files as items")
+      reaper.ImGui_Text(ctx, "Multiple matches = multiple takes on same item")
+      reaper.ImGui_EndTooltip(ctx)
+    end
+
+    CLB.push_btn_color("match")
+    local conform_sel_clicked = reaper.ImGui_Button(ctx, "Conform Sel", btn_w, btn_h)
+    CLB.pop_btn_color("build")
+    if conform_sel_clicked then
+      conform_matched_items(true)
+    end
+    if reaper.ImGui_IsItemHovered(ctx) then
+      reaper.ImGui_BeginTooltip(ctx)
+      reaper.ImGui_Text(ctx, "Insert matched audio for selected rows only")
+      reaper.ImGui_EndTooltip(ctx)
+    end
+
+    local chg_iu, new_iu = reaper.ImGui_Checkbox(ctx, "Include Unmatched##clb_conform_unmatched", CLB.conform_include_unmatched)
+    if chg_iu then CLB.conform_include_unmatched = new_iu; save_prefs() end
+    if reaper.ImGui_IsItemHovered(ctx) then
+      reaper.ImGui_SetTooltip(ctx,
+        "Conform All / Sel also place events with no matched audio,\n"
+        .. "as empty items (like Generate Items) on the same tracks.\n"
+        .. "Conformed items with audio are colored green.")
+    end
+  end
+
+  -- Restore Mix: Conform / Generate Items apply each row's audio mix
+  -- (CLB.apply_mix). A setting, so always shown, like Auto Match.
+  local chg_rm, new_rm = reaper.ImGui_Checkbox(ctx, "Restore Mix##clb_restore_mix", CLB.restore_mix)
+  if chg_rm then CLB.restore_mix = new_rm; save_prefs() end
+  if reaper.ImGui_IsItemHovered(ctx) then
+    reaper.ImGui_SetTooltip(ctx,
+      "Generate Items / Conform also restore the audio mix from the AAF:\n"
+      .. "clip gain, volume automation (take volume envelope), pan,\n"
+      .. "fades and crossfades (Equal Power or Linear, as in the AAF).")
   end
 
   reaper.ImGui_Spacing(ctx)
@@ -9672,6 +9662,23 @@ function CLB.draw_left_sidebar()
       "Flatten the video into a \"Picture Cut\" track: what is on screen,\n"
       .. "top footage layer only. Text, Image, Matte and Overlay (scaled\n"
       .. "below 100%) move to their own groups and tracks.")
+  end
+
+  -- Scene Cut Track button
+  if #ROWS > 0 then
+    CLB.push_btn_color("list")
+    local scene_cuts_clicked = reaper.ImGui_Button(ctx, "Scene Cuts", btn_w, btn_h)
+    CLB.pop_btn_color("build")
+    if scene_cuts_clicked then
+      create_scene_cut_track()
+    end
+    if reaper.ImGui_IsItemHovered(ctx) then
+      reaper.ImGui_BeginTooltip(ctx)
+      reaper.ImGui_Text(ctx, "Create a 'Scene Cuts' track with empty items for each scene")
+      reaper.ImGui_Text(ctx, "Clip name format: EP_Scene_Shot_Ttake[_Camera]")
+      reaper.ImGui_Text(ctx, "Example: 06_01B_01_T05_A")
+      reaper.ImGui_EndTooltip(ctx)
+    end
   end
 
   reaper.ImGui_Spacing(ctx)
