@@ -1,10 +1,10 @@
 --[[
 @description Project Manager - PM Insight Analyzer: work-time analysis of PM Timer logs (work in progress)
-@version 26.1103.1758pre1
+@version 26.1103.1811
 @author hsuanice
 @noindex  (kept in the repository as a backup; not offered on ReaPack while it is a work in progress)
 @changelog
-  - New: Recording Days section for aap work (Work Log mode) - work, items, source length and size per recording day, average / median per day, work per source hour and per GB, and an estimate for 10 / 20 / 30 days; slow days in orange
+  - New: AAP - Recording Days section for aap work (Work Log mode) - work, items, source length and size per recording day, average / median per day, work per source hour and per GB, and an estimate for 10 / 20 / 30 days; slow days in orange (tested)
 @about
   Read-only analysis script. Auto-detects project type:
 
@@ -22,7 +22,7 @@
     duplicate items (same day, position and length) are counted once.
     Reels / episodes ("Proj R5 Dialog", "Proj EP06 Dialog") get their own rows per
     project: time, film, source and film / source per hour, also per work type.
-    Recording Days (aap items whose note has "Recording Date", from PM Timer): work per
+    AAP - Recording Days (aap items whose note has "Recording Date", from PM Timer): work per
     recording day of the production sound with its items, source length and size, the
     average / median per day, work per source hour and per GB, and an estimate for 10 / 20 /
     30 recording days. Only shown when such items exist.
@@ -510,7 +510,7 @@ local function recording_days_section(out, recs)
   end
   local function per_src_hr(work, src) return src > 0 and work / 60 / (src / 3600) or nil end
 
-  out('<details open><summary>Recording Days</summary>')
+  out('<details open><summary>AAP - Recording Days</summary>')
   for _, pname in ipairs(order) do
     local p = projs[pname]
     table.sort(p.keys)

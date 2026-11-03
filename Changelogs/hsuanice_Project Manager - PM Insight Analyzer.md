@@ -7,6 +7,10 @@ PM Insight Analyzer
 
 **Removed from ReaPack** (2026-10-15) while it is a work in progress; the script stays in the repository (`@noindex`) as a backup.
 
+## 26.1103.1811
+
+- New: AAP - Recording Days section for aap work (Work Log mode) - work, items, source length and size per recording day, average / median per day, work per source hour and per GB, and an estimate for 10 / 20 / 30 days; slow days in orange (tested)
+
 ## 26.1103.1758pre1
 
 - New: Recording Days section for aap work (Work Log mode) - work, items, source length and size per recording day, average / median per day, work per source hour and per GB, and an estimate for 10 / 20 / 30 days; slow days in orange
