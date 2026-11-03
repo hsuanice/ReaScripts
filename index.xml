@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<index version="1" name="hsuanice Scripts" commit="83c9565a770fe0273e4748c248aa623a65aa5675">
+<index version="1" name="hsuanice Scripts" commit="fca97a0f1d825fb74130a83ee1f5f27a0739d353">
   <category name="Conform">
     <reapack name="hsuanice_Conform List Browser - CLB.lua" type="script" desc="Conform List Browser - CLB: conform EDL / AAF / XML / OTIO / subtitle lists (GUI + Jump / Link / Load / Reveal)">
       <metadata>
@@ -276,6 +276,17 @@
         <source file="../Tools/aaf_to_otio.py">https://github.com/hsuanice/ReaScripts/raw/83c9565a770fe0273e4748c248aa623a65aa5675/Tools/aaf_to_otio.py</source>
         <source file="../Tools/subtitle_to_clb.py">https://github.com/hsuanice/ReaScripts/raw/83c9565a770fe0273e4748c248aa623a65aa5675/Tools/subtitle_to_clb.py</source>
       </version>
+      <version name="26.1103.2023" author="hsuanice" time="2026-11-03T12:24:16Z">
+        <changelog><![CDATA[- Release: AAF audio on the editor's exact sample (polarity null against Vordio), AAF clip gain / automation / pan / fades, speed changes, Picture Cut and Include Unmatched (tested)]]></changelog>
+        <source main="main">https://github.com/hsuanice/ReaScripts/raw/fca97a0f1d825fb74130a83ee1f5f27a0739d353/Conform/hsuanice_Conform%20List%20Browser%20-%20CLB.lua</source>
+        <source main="main" file="hsuanice_Conform List Browser - CLB Jump Old New TC.lua">https://github.com/hsuanice/ReaScripts/raw/fca97a0f1d825fb74130a83ee1f5f27a0739d353/Conform/hsuanice_Conform%20List%20Browser%20-%20CLB%20Jump%20Old%20New%20TC.lua</source>
+        <source main="main" file="hsuanice_Conform List Browser - CLB Link REAPER Items.lua">https://github.com/hsuanice/ReaScripts/raw/fca97a0f1d825fb74130a83ee1f5f27a0739d353/Conform/hsuanice_Conform%20List%20Browser%20-%20CLB%20Link%20REAPER%20Items.lua</source>
+        <source main="main" file="hsuanice_Conform List Browser - CLB Load from REAPER.lua">https://github.com/hsuanice/ReaScripts/raw/fca97a0f1d825fb74130a83ee1f5f27a0739d353/Conform/hsuanice_Conform%20List%20Browser%20-%20CLB%20Load%20from%20REAPER.lua</source>
+        <source main="main" file="hsuanice_Conform List Browser - CLB Reveal Item.lua">https://github.com/hsuanice/ReaScripts/raw/fca97a0f1d825fb74130a83ee1f5f27a0739d353/Conform/hsuanice_Conform%20List%20Browser%20-%20CLB%20Reveal%20Item.lua</source>
+        <source file="../Tools/otio_to_clb.py">https://github.com/hsuanice/ReaScripts/raw/fca97a0f1d825fb74130a83ee1f5f27a0739d353/Tools/otio_to_clb.py</source>
+        <source file="../Tools/aaf_to_otio.py">https://github.com/hsuanice/ReaScripts/raw/fca97a0f1d825fb74130a83ee1f5f27a0739d353/Tools/aaf_to_otio.py</source>
+        <source file="../Tools/subtitle_to_clb.py">https://github.com/hsuanice/ReaScripts/raw/fca97a0f1d825fb74130a83ee1f5f27a0739d353/Tools/subtitle_to_clb.py</source>
+      </version>
     </reapack>
   </category>
   <category name="Items Editing">
@@ -376,6 +387,11 @@
 - Tested by hsuanice on 9 takes (75-1 to 75-5): all synced, drift 0.0 frames.]]></changelog>
         <source main="main">https://github.com/hsuanice/ReaScripts/raw/9b55c3b1c8fef95fcd21f735fd1980835dfb9e22/Items%20Editing/hsuanice_Dual%20Recorder%20Sync%20-%20DRS%20Waveform%20Sync.lua</source>
         <source main="main" file="hsuanice_Dual Recorder Sync - DRS Set Reference Track.lua">https://github.com/hsuanice/ReaScripts/raw/9b55c3b1c8fef95fcd21f735fd1980835dfb9e22/Items%20Editing/hsuanice_Dual%20Recorder%20Sync%20-%20DRS%20Set%20Reference%20Track.lua</source>
+      </version>
+      <version name="26.1103.2023" author="hsuanice" time="2026-11-03T12:24:16Z">
+        <changelog><![CDATA[- Release: sync a second recorder to the first by waveform, optional length match, results in the console (tested)]]></changelog>
+        <source main="main">https://github.com/hsuanice/ReaScripts/raw/fca97a0f1d825fb74130a83ee1f5f27a0739d353/Items%20Editing/hsuanice_Dual%20Recorder%20Sync%20-%20DRS%20Waveform%20Sync.lua</source>
+        <source main="main" file="hsuanice_Dual Recorder Sync - DRS Set Reference Track.lua">https://github.com/hsuanice/ReaScripts/raw/fca97a0f1d825fb74130a83ee1f5f27a0739d353/Items%20Editing/hsuanice_Dual%20Recorder%20Sync%20-%20DRS%20Set%20Reference%20Track.lua</source>
       </version>
     </reapack>
     <reapack name="hsuanice_Explode Multichannel Poly Audio to Mono Items.lua" type="script" desc="Explode Multichannel Poly Audio to Mono Items - one-channel items, metadata preserved">
@@ -2164,6 +2180,30 @@
         <source file="hsuanice_Waveform Sync Core.lua">https://github.com/hsuanice/ReaScripts/raw/83c9565a770fe0273e4748c248aa623a65aa5675/Library/hsuanice_Waveform%20Sync%20Core.lua</source>
         <source file="json.lua">https://github.com/hsuanice/ReaScripts/raw/83c9565a770fe0273e4748c248aa623a65aa5675/Library/json.lua</source>
       </version>
+      <version name="26.1103.2023" author="hsuanice" time="2026-11-03T12:24:16Z">
+        <changelog><![CDATA[- Release: Waveform Sync Core and OTIO Bridge (tested)]]></changelog>
+        <source file="hsuanice_RGWH Core.lua">https://github.com/hsuanice/ReaScripts/raw/fca97a0f1d825fb74130a83ee1f5f27a0739d353/Library/hsuanice_RGWH%20Core.lua</source>
+        <source file="hsuanice_AudioSweet Core.lua">https://github.com/hsuanice/ReaScripts/raw/fca97a0f1d825fb74130a83ee1f5f27a0739d353/Library/hsuanice_AudioSweet%20Core.lua</source>
+        <source file="hsuanice_AS Preview Core.lua">https://github.com/hsuanice/ReaScripts/raw/fca97a0f1d825fb74130a83ee1f5f27a0739d353/Library/hsuanice_AS%20Preview%20Core.lua</source>
+        <source file="hsuanice_Metadata Embed.lua">https://github.com/hsuanice/ReaScripts/raw/fca97a0f1d825fb74130a83ee1f5f27a0739d353/Library/hsuanice_Metadata%20Embed.lua</source>
+        <source file="hsuanice_Metadata Read.lua">https://github.com/hsuanice/ReaScripts/raw/fca97a0f1d825fb74130a83ee1f5f27a0739d353/Library/hsuanice_Metadata%20Read.lua</source>
+        <source file="hsuanice_Hover.lua">https://github.com/hsuanice/ReaScripts/raw/fca97a0f1d825fb74130a83ee1f5f27a0739d353/Library/hsuanice_Hover.lua</source>
+        <source file="hsuanice_Mouse.lua">https://github.com/hsuanice/ReaScripts/raw/fca97a0f1d825fb74130a83ee1f5f27a0739d353/Library/hsuanice_Mouse.lua</source>
+        <source file="hsuanice_Metadata Cache.lua">https://github.com/hsuanice/ReaScripts/raw/fca97a0f1d825fb74130a83ee1f5f27a0739d353/Library/hsuanice_Metadata%20Cache.lua</source>
+        <source file="hsuanice_Metadata Rename Core.lua">https://github.com/hsuanice/ReaScripts/raw/fca97a0f1d825fb74130a83ee1f5f27a0739d353/Library/hsuanice_Metadata%20Rename%20Core.lua</source>
+        <source file="hsuanice_List Table.lua">https://github.com/hsuanice/ReaScripts/raw/fca97a0f1d825fb74130a83ee1f5f27a0739d353/Library/hsuanice_List%20Table.lua</source>
+        <source file="hsuanice_Time Format.lua">https://github.com/hsuanice/ReaScripts/raw/fca97a0f1d825fb74130a83ee1f5f27a0739d353/Library/hsuanice_Time%20Format.lua</source>
+        <source file="hsuanice_Metadata Generator.lua">https://github.com/hsuanice/ReaScripts/raw/fca97a0f1d825fb74130a83ee1f5f27a0739d353/Library/hsuanice_Metadata%20Generator.lua</source>
+        <source file="hsuanice_CLB Compare Engine.lua">https://github.com/hsuanice/ReaScripts/raw/fca97a0f1d825fb74130a83ee1f5f27a0739d353/Library/hsuanice_CLB%20Compare%20Engine.lua</source>
+        <source file="hsuanice_EDL Parser.lua">https://github.com/hsuanice/ReaScripts/raw/fca97a0f1d825fb74130a83ee1f5f27a0739d353/Library/hsuanice_EDL%20Parser.lua</source>
+        <source file="hsuanice_Session Fix Core.lua">https://github.com/hsuanice/ReaScripts/raw/fca97a0f1d825fb74130a83ee1f5f27a0739d353/Library/hsuanice_Session%20Fix%20Core.lua</source>
+        <source file="hsuanice_OTIO Bridge.lua">https://github.com/hsuanice/ReaScripts/raw/fca97a0f1d825fb74130a83ee1f5f27a0739d353/Library/hsuanice_OTIO%20Bridge.lua</source>
+        <source file="hsuanice_Subtitle Bridge.lua">https://github.com/hsuanice/ReaScripts/raw/fca97a0f1d825fb74130a83ee1f5f27a0739d353/Library/hsuanice_Subtitle%20Bridge.lua</source>
+        <source file="hsuanice_Process Exec.lua">https://github.com/hsuanice/ReaScripts/raw/fca97a0f1d825fb74130a83ee1f5f27a0739d353/Library/hsuanice_Process%20Exec.lua</source>
+        <source file="hsuanice_Fade Tool Core.lua">https://github.com/hsuanice/ReaScripts/raw/fca97a0f1d825fb74130a83ee1f5f27a0739d353/Library/hsuanice_Fade%20Tool%20Core.lua</source>
+        <source file="hsuanice_Waveform Sync Core.lua">https://github.com/hsuanice/ReaScripts/raw/fca97a0f1d825fb74130a83ee1f5f27a0739d353/Library/hsuanice_Waveform%20Sync%20Core.lua</source>
+        <source file="json.lua">https://github.com/hsuanice/ReaScripts/raw/fca97a0f1d825fb74130a83ee1f5f27a0739d353/Library/json.lua</source>
+      </version>
     </reapack>
   </category>
   <category name="Metadata">
@@ -2547,6 +2587,10 @@
 - Fix: Spot to original timecode reads the BWF TimeReference itself (no more error dialog per file); files without timecode stay in sequence and are listed in the summary.
 - Fix: the import pauses while another project tab is shown instead of writing into it.]]></changelog>
         <source main="main">https://github.com/hsuanice/ReaScripts/raw/ec9376f25de96601cf680937e7db0f6681e429dd/Tracks/hsuanice_Import%20Audio%20Folders%20to%20Tracks%20-%20Field%20Recorder.lua</source>
+      </version>
+      <version name="26.1103.2023" author="hsuanice" time="2026-11-03T12:24:16Z">
+        <changelog><![CDATA[- Release: imports go below any folder left open at the end of the project; spot to BWF TC lists files without TC; waits while another project tab is active (tested)]]></changelog>
+        <source main="main">https://github.com/hsuanice/ReaScripts/raw/fca97a0f1d825fb74130a83ee1f5f27a0739d353/Tracks/hsuanice_Import%20Audio%20Folders%20to%20Tracks%20-%20Field%20Recorder.lua</source>
       </version>
     </reapack>
     <reapack name="hsuanice_Import Audio Folders to Tracks - Music Multitrack.lua" type="script" desc="Import Audio Folders to Tracks - Music Multitrack: one folder per track (GUI)">
