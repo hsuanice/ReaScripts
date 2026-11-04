@@ -4,6 +4,10 @@
 
 Conform List Browser
 
+## 26.1104.1051pre1
+
+- Change: the event table sorts text columns in natural order (A1, A2, A10 - not A1, A10, A11, A2), numbers before letters, like the filter lists and the Audio Files table; sort values are worked out once per row, so large lists sort as fast as before
+
 ## 26.1104.1004pre1
 
 - Fix: CLB Waveform Check run a second time showed ? (silent) everywhere - a muted item reads as silence, and the first check mutes the verified AAF items; the AAF and ISO items are now unmuted while they are read and muted again right after

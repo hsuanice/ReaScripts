@@ -1,6 +1,6 @@
 --[[
 @description Conform List Browser - CLB Waveform Check (compare conformed ISO audio with the AAF's audio; markers, mute verified AAF items)
-@version 26.1104.1004pre1
+@version 26.1104.1051pre1
 @author hsuanice
 @noindex
 @changelog

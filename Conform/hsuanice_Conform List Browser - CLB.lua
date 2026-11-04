@@ -1,6 +1,6 @@
 --[[
 @description Conform List Browser - CLB: conform EDL / AAF / XML / OTIO / subtitle lists (GUI + Jump / Link / Load / Reveal)
-@version 26.1104.1004pre1
+@version 26.1104.1051pre1
 @author hsuanice
 @provides
   [main] .
@@ -13,7 +13,7 @@
   [nomain] ../Tools/aaf_to_otio.py
   [nomain] ../Tools/subtitle_to_clb.py
 @changelog
-  - Fix: CLB Waveform Check run a second time showed ? (silent) everywhere - a muted item reads as silence, and the first check mutes the verified AAF items; the AAF and ISO items are now unmuted while they are read and muted again right after
+  - Change: the event table sorts text columns in natural order (A1, A2, A10 - not A1, A10, A11, A2), numbers before letters, like the filter lists and the Audio Files table; sort values are worked out once per row, so large lists sort as fast as before
 @about
   Note: the Compare view (old vs new cut, reconform) is a work in progress and not finished yet.
 
@@ -2735,13 +2735,30 @@ end
 ---------------------------------------------------------------------------
 -- Sorting
 ---------------------------------------------------------------------------
+-- Natural sort key: every run of digits padded to the same width, so a plain
+-- string compare orders A1, A2, A10 (not A1, A10, A2); numbers before letters.
+function CLB.natural_key(v)
+  if type(v) ~= "string" then return v end
+  return (v:gsub("%d+", function(d)
+    d = d:gsub("^0+(%d)", "%1")
+    return #d < 16 and (("0"):rep(16 - #d) .. d) or d
+  end))
+end
+
 local function sort_rows()
   if #SORT_STATE.columns == 0 then return end
 
+  -- sort values computed once per row and column (not on every comparison)
+  local keys = {}
+  for _, row in ipairs(ROWS) do
+    local k = {}
+    for i, sc in ipairs(SORT_STATE.columns) do k[i] = CLB.natural_key(get_sort_value(row, sc.col_id)) end
+    keys[row] = k
+  end
   table.sort(ROWS, function(a, b)
-    for _, sc in ipairs(SORT_STATE.columns) do
-      local va = get_sort_value(a, sc.col_id)
-      local vb = get_sort_value(b, sc.col_id)
+    local ka, kb = keys[a], keys[b]
+    for i, sc in ipairs(SORT_STATE.columns) do
+      local va, vb = ka[i], kb[i]
       if va ~= vb then
         if sc.ascending then
           return va < vb
