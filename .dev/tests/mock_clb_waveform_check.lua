@@ -152,7 +152,13 @@ reaper = {
     return 0
   end,
   SetMediaItemInfo_Value = function(it, k, v) if k == "B_MUTE" then it.mute = v end end,
-  GetMediaItemTakeInfo_Value = function() return 0 end,
+  GetMediaItemTakeInfo_Value = function(tk, k)
+    if k == "D_STARTOFFS" then return tk.offs or 10 end   -- 10 s into the file
+    if k == "D_PLAYRATE" then return 1 end
+    return 0
+  end,
+  SetMediaItemTakeInfo_Value = function(tk, k, v) if k == "D_STARTOFFS" then tk.offs = v end end,
+  GetSetMediaItemInfo_String = function(it, k, v, set) if set then it.note = v end return true, it.note or "" end,
   CountSelectedMediaItems = function() return 0 end,
   GetMediaItem_Track = function(it) return it.track end,
   GetSet_LoopTimeRange = function() return 0, 0 end,
@@ -162,7 +168,7 @@ reaper = {
   GetExtState = function() return "" end, SetExtState = function() end,
   GetUserInputs = function(_, _, _, def) return true, def end,
   TimeMap_curFrameRate = function() return FPS end,
-  MB = function(m) print("MB: " .. m) end,
+  MB = function(m) print("MB: " .. m:gsub("\n.*", "")); return 6 end,
   Undo_BeginBlock = function() end, Undo_EndBlock = function() end,
   PreventUIRefresh = function() end, UpdateArrange = function() end,
   CountProjectMarkers = function() return 0, #markers, 0 end,
@@ -194,13 +200,23 @@ local fails = 0
 for _, m in ipairs(markers) do
   local want = expect[pos_name[math.floor(m.pos + 0.5)]]
   if m.pos == 10 and m.name ~= "WC OK EDL - A1 - 1" then want = "WC OK" end
-  local ok = m.name:sub(1, #want) == want and not (m.name:find("cut differs", 1, true) and want == "WC OK EDL - A1 - 1")
+  local name = m.name:gsub("^WC FIXED ", "WC ")   -- fixed results keep their measured text
+  local ok = name:sub(1, #want) == want and not (m.name:find("cut differs", 1, true) and want == "WC OK EDL - A1 - 1")
   if not ok then fails = fails + 1 end
   print((ok and "  ok   " or "  FAIL ") .. m.pos .. "  " .. m.name)
 end
 local muted = {}
 for _, it in ipairs(AAF.items) do if it.mute == 1 then muted[#muted + 1] = it.name end end
 print("muted: " .. table.concat(muted, ", "))
-if table.concat(muted, ",") ~= "sync,aap only,short,xfade,packed,multi take" then fails = fails + 1; print("  FAIL mute") end
+if table.concat(muted, ",") ~= "sync,aap only,two late,short,xfade,packed,multi take" then fails = fails + 1; print("  FAIL mute") end
 if AAF2.items[1].mute ~= 1 then fails = fails + 1; print("  FAIL a2 dup not muted") end
+-- Fix: the two-frames-late event slid 2 frames (content 2 f earlier = start offset + 2 f)
+local late = E1.items[1]
+for _, it in ipairs(E1.items) do if it.pos == 30 then late = it end end
+local moved = (late.take.offs or 10) - 10
+print(string.format("two late: content slid %+.5f s, note: %s", moved, late.note or ""))
+if math.abs(moved - 2 / FPS) > 2 / 48000 then fails = fails + 1; print("  FAIL fix amount") end
+local untouched = 0
+for _, it in ipairs(E1.items) do if it.pos == 10 and (it.take.offs or 10) ~= 10 then untouched = untouched + 1 end end
+if untouched > 0 then fails = fails + 1; print("  FAIL in-sync item moved") end
 print(fails == 0 and #markers == 11 and "ALL PASS" or (fails .. " FAILED"))

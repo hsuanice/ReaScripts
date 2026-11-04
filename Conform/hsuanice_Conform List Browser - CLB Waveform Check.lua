@@ -1,6 +1,6 @@
 --[[
 @description Conform List Browser - CLB Waveform Check (compare conformed ISO audio with the AAF's audio; markers, mute verified AAF items)
-@version 26.1104.0858pre1
+@version 26.1104.0911pre1
 @author hsuanice
 @noindex
 @changelog
@@ -34,9 +34,17 @@
     a crossfade adds to the AAF item does not count).
   - Markers (setting): project markers or take markers on the AAF items, named "WC ...";
     the previous "WC" markers there are replaced on every run.
+  - Fix ISO (setting, on by default): after the check, a question lists what is out (any offset
+    of a sample or more: OK +/- 1 sample, ~ x ms and SYNC) and, on Yes, slides the conformed
+    ISO content onto the AAF: every take of the event's items (all ISO channels together, so
+    their relation stays as it is) moves by the measured offset inside the item - the item's
+    start and end stay where they are, and the AAF is never changed. The item note gets a
+    "WC: content slid ..." line. Locked items, and items whose content would start before the
+    file's start, are left as they are and listed. Running the check again then shows OK.
   - Mute verified (setting, on by default): AAF items whose conformed audio matched (OK or
-    ~ x ms) are muted, so what is left playing still needs a look. Items are never unmuted.
-  - Nothing else is changed. Results are also printed in the ReaScript console. One undo point.
+    ~ x ms, or fixed) are muted, so what is left playing still needs a look. Items are never
+    unmuted.
+  - Results are also printed in the ReaScript console. Everything is one undo point.
   - Progress window (native gfx); Esc or closing it cancels with nothing changed.
 
   Requires the hsuanice Library package.
@@ -187,19 +195,23 @@ end
 local mark_def = r.GetExtState(NS, "MARKERS")
 local lag_def = r.GetExtState(NS, "MAX_LAG")
 local mute_def = r.GetExtState(NS, "MUTE")
-local ok_in, csv = r.GetUserInputs(TITLE .. " - " .. #checks .. " " .. scope, 3,
-  "Markers (project / take / none),Max search +/- (seconds),Mute verified AAF items (y/n),extrawidth=60",
+local fix_def = r.GetExtState(NS, "FIX")
+local ok_in, csv = r.GetUserInputs(TITLE .. " - " .. #checks .. " " .. scope, 4,
+  "Markers (project / take / none),Max search +/- (seconds),Mute verified AAF items (y/n),"
+    .. "Fix ISO: slide onto AAF (y/n),extrawidth=60",
   (mark_def ~= "" and mark_def or "project") .. "," .. (lag_def ~= "" and lag_def or "1") .. ","
-    .. (mute_def ~= "" and mute_def or "y"))
+    .. (mute_def ~= "" and mute_def or "y") .. "," .. (fix_def ~= "" and fix_def or "y"))
 if not ok_in then return end
-local mark_s, lag_s, mute_s = csv:match("^([^,]*),([^,]*),([^,]*)$")
+local mark_s, lag_s, mute_s, fix_s = csv:match("^([^,]*),([^,]*),([^,]*),([^,]*)$")
 local MARKERS = (mark_s or ""):lower():match("^%s*(%a)") or "p"
 MARKERS = (MARKERS == "t" and "take") or (MARKERS == "n" and "none") or "project"
 local MAX_LAG = math.max(0.1, math.min(tonumber(lag_s) or 1, 10))
 local MUTE = (mute_s or "y"):lower():match("^%s*n") == nil
 r.SetExtState(NS, "MARKERS", MARKERS, true)
 r.SetExtState(NS, "MAX_LAG", tostring(MAX_LAG), true)
+local FIX = (fix_s or "y"):lower():match("^%s*n") == nil
 r.SetExtState(NS, "MUTE", MUTE and "y" or "n", true)
+r.SetExtState(NS, "FIX", FIX and "y" or "n", true)
 WS.MAX_LAG_SEC = MAX_LAG
 WS.MIN_SPAN_SEC = 0.25        -- dialogue pieces under a second are checked too
 WS.CHUNK_SEC = math.min(10, 32768 / WS.COARSE_SR - 2 * MAX_LAG - 0.1)
@@ -233,8 +245,10 @@ local function analyse(c)
       for _, ti in ipairs(ct.items) do
         local ov = math.min(re, ti.e) - math.max(rs, ti.s)
         if ov >= MIN_OVERLAP then
-          local g = events[ti.event]
-          if not g then g = { event = ti.event, ov = 0, items = {} }; events[ti.event] = g end
+          -- one event = its number at one position (several list files can share numbers)
+          local key = ti.event .. "@" .. string.format("%.4f", ti.s)
+          local g = events[key]
+          if not g then g = { event = ti.event, ov = 0, items = {} }; events[key] = g end
           g.ov = math.max(g.ov, ov)
           g.items[#g.items + 1] = { ti = ti, track = ct.name }
         end
@@ -284,6 +298,7 @@ local function analyse(c)
     return
   end
   c.event = best_g.event
+  c.group = best_g
   c.partial = partial(best_g.ov)
   c.res = best
   if math.abs(best.samples) <= 1 then c.kind = "OK"
@@ -354,16 +369,74 @@ local function clear_markers(lo, hi)
   end
 end
 
-local function apply()
+-- Fixes: every conformed item of an event that is out by a sample or more, with
+-- the offset of the AAF item that overlaps it most (an event under two AAF
+-- items moves once)
+local function plan_fixes()
+  local by_item, order = {}, {}
+  for _, c in ipairs(checks) do
+    if c.res and c.group and math.abs(c.res.samples) >= 1 then
+      for _, x in ipairs(c.group.items) do
+        local it = x.ti.item
+        local f = by_item[it]
+        if not f then order[#order + 1] = it end
+        if not f or c.group.ov > f.ov then by_item[it] = { item = it, c = c, ov = c.group.ov } end
+      end
+    end
+  end
+  local list, events = {}, {}
+  for _, it in ipairs(order) do
+    list[#list + 1] = by_item[it]
+    events[by_item[it].c] = true
+  end
+  local n_ev = 0
+  for _ in pairs(events) do n_ev = n_ev + 1 end
+  return list, n_ev
+end
+
+-- Slide every take of the item by the offset inside the item (edges stay)
+local function slide(f)
+  local it, off = f.item, f.c.res.offset
+  if r.GetMediaItemInfo_Value(it, "C_LOCK") % 2 == 1 then return "locked" end
+  local new = {}
+  for t = 0, r.CountTakes(it) - 1 do
+    local tk = r.GetTake(it, t)
+    if tk then
+      local offs = r.GetMediaItemTakeInfo_Value(tk, "D_STARTOFFS")
+        - off * r.GetMediaItemTakeInfo_Value(tk, "D_PLAYRATE")
+      if offs < -1e-9 then return "would start before the file's start" end
+      new[#new + 1] = { tk, math.max(0, offs) }
+    end
+  end
+  for _, x in ipairs(new) do r.SetMediaItemTakeInfo_Value(x[1], "D_STARTOFFS", x[2]) end
+  local _, note = r.GetSetMediaItemInfo_String(it, "P_NOTES", "", false)
+  note = (note ~= "" and (note:gsub("%s+$", "") .. "\n") or "")
+    .. string.format("WC: content slid %+d smp at %d Hz (%+.2f ms) onto the AAF",
+      f.c.res.samples, f.c.res.sr or 0, off * 1000)
+  r.GetSetMediaItemInfo_String(it, "P_NOTES", note, true)
+  f.c.fixed = true
+end
+
+local function apply(fixes)
   local counts, lines, muted = {}, {}, 0
   r.Undo_BeginBlock()
   r.PreventUIRefresh(1)
+  local fixed_items, not_fixed = 0, {}
+  for _, f in ipairs(fixes or {}) do
+    local why = slide(f)
+    if why then
+      not_fixed[#not_fixed + 1] = string.format("%s  %s: not moved, %s", tc(r.GetMediaItemInfo_Value(f.item, "D_POSITION")),
+        take_name(f.item), why)
+    else
+      fixed_items = fixed_items + 1
+    end
+  end
   local lo, hi = math.huge, -math.huge
   for _, c in ipairs(checks) do lo, hi = math.min(lo, c.rs), math.max(hi, c.rs) end
   clear_markers(lo, hi)
   for _, c in ipairs(checks) do
     counts[c.kind] = (counts[c.kind] or 0) + 1
-    local text = result_text(c)
+    local text = (c.fixed and "FIXED " or "") .. result_text(c)
     local col = COLORS[c.kind] or COLORS["?"]
     local native = r.ColorToNative(col[1], col[2], col[3]) | 0x1000000
     if MARKERS == "project" then
@@ -376,7 +449,7 @@ local function apply()
       end
       r.SetTakeMarker(tk, -1, MARK .. text, r.GetMediaItemTakeInfo_Value(tk, "D_STARTOFFS"), native)
     end
-    local verified = c.kind == "OK" or c.kind == "~"
+    local verified = c.kind == "OK" or c.kind == "~" or c.fixed
     if MUTE and verified and r.GetMediaItemInfo_Value(c.item, "B_MUTE") == 0 then
       r.SetMediaItemInfo_Value(c.item, "B_MUTE", 1)
       muted = muted + 1
@@ -393,9 +466,12 @@ local function apply()
   for _, k in ipairs({ "OK", "~", "SYNC", "NO MATCH", "?", "NO AUDIO" }) do
     if counts[k] then summary[#summary + 1] = string.format("%s %d", k, counts[k]) end
   end
-  table.insert(lines, 1, string.format("Checked %d %s (search +/- %g s). %s\nAAF items muted: %d%s\n",
-    #checks, scope, MAX_LAG, table.concat(summary, ", "), muted,
-    #lines > 0 and "\nNot OK (OK lines are not listed):" or ""))
+  for _, l in ipairs(not_fixed) do lines[#lines + 1] = l end
+  table.insert(lines, 1, string.format("Checked %d %s (search +/- %g s). %s\nAAF items muted: %d\n"
+    .. "ISO items slid onto the AAF: %d%s%s\n",
+    #checks, scope, MAX_LAG, table.concat(summary, ", "), muted, fixed_items,
+    #not_fixed > 0 and string.format(" (%d not moved, listed at the end)", #not_fixed) or "",
+    #lines > 0 and "\n\nNot OK (OK lines are not listed; FIXED = slid onto the AAF):" or ""))
   return lines
 end
 
@@ -409,7 +485,19 @@ local next_i = 1
 local function finish()
   if window then gfx.quit() end
   if PROG.cancel then return end
-  local lines = apply()
+  local fixes = {}
+  if FIX then
+    local list, n_ev = plan_fixes()
+    if #list > 0 then
+      local ans = r.MB(string.format("%d event(s) are out by a sample or more (%d conformed item(s)).\n\n"
+        .. "Slide their ISO content onto the AAF?\n"
+        .. "The items' start and end stay; all ISO channels of an event move together; the AAF is not changed.\n\n"
+        .. "Yes = slide and mark, No = only mark, Cancel = nothing", n_ev, #list), TITLE, 3)
+      if ans == 2 then return end
+      if ans == 6 then fixes = list end
+    end
+  end
+  local lines = apply(fixes)
   r.defer(function() show_lines(lines) end)
 end
 

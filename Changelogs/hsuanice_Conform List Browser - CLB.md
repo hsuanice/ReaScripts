@@ -4,6 +4,10 @@
 
 Conform List Browser
 
+## 26.1104.0911pre1
+
+- New: CLB Waveform Check can fix (setting Fix ISO, on by default): after the check it asks, then slides the conformed ISO content onto the AAF - every take of the event's items by the measured offset (a sample or more: OK +/- 1, ~ and SYNC), item edges and the AAF unchanged, all ISO channels together; note WC: content slid ...; locked items or content before the file start are skipped and listed. Events are told apart by number and position (several list files can share numbers)
+
 ## 26.1104.0858pre1
 
 - Change: CLB Waveform Check also checks pieces from 0.25 s (was 1 s: 18 short dialogue pieces in R01 A1 came out ?) and overlaps from 0.1 s; the part a crossfade adds to an AAF item no longer counts as cut differs
