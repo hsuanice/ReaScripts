@@ -1,6 +1,6 @@
 --[[
 @description Conform List Browser - CLB Waveform Check (compare conformed ISO audio with the AAF's audio; markers, mute verified AAF items)
-@version 26.1104.0929pre1
+@version 26.1104.1004pre1
 @author hsuanice
 @noindex
 @changelog
@@ -270,7 +270,17 @@ local function analyse(c)
       for _, x in ipairs(g.items) do
         local ti = x.ti
         local s, e = math.max(rs, ti.s), math.min(re, ti.e)
+        -- a muted item reads as silence: unmute the pair while reading (the
+        -- AAF item is muted by an earlier check), then put it back
+        local muted = {}
+        for _, it in ipairs({ item, ti.item }) do
+          if r.GetMediaItemInfo_Value(it, "B_MUTE") ~= 0 then
+            muted[#muted + 1] = it
+            r.SetMediaItemInfo_Value(it, "B_MUTE", 0)
+          end
+        end
         local res = WS.find_offset(ref, { { take = ti.take, pos = ti.s } }, s, e, { fps = FPS })
+        for _, it in ipairs(muted) do r.SetMediaItemInfo_Value(it, "B_MUTE", 1) end
         res.track, res.file = x.track, ti.name
         if res.ok then
           -- the earliest channel wins: Auto Align Post only delays channels

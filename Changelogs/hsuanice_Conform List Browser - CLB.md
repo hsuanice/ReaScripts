@@ -4,6 +4,10 @@
 
 Conform List Browser
 
+## 26.1104.1004pre1
+
+- Fix: CLB Waveform Check run a second time showed ? (silent) everywhere - a muted item reads as silence, and the first check mutes the verified AAF items; the AAF and ISO items are now unmuted while they are read and muted again right after
+
 ## 26.1104.0929pre1
 
 - Fix: CLB Waveform Check takes the earliest ISO channel as the reference (was the one closest to the AAF) - Auto Align Post only delays channels, so with ISO early a delayed channel looked closest and the fix fell short (01-1-5: 34.3 ms early, slid back only 24.65 ms); late ISO was already right

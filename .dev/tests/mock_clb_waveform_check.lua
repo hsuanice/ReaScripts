@@ -190,7 +190,8 @@ reaper = {
   CreateTakeAudioAccessor = function(tk) return tk end,
   DestroyAudioAccessor = function() end,
   GetAudioAccessorSamples = function(acc, sr, _, t, n, buf)
-    for i = 0, n - 1 do buf[i + 1] = acc.fn(t + i / sr) end
+    local silent = acc.item and acc.item.mute ~= 0     -- REAPER reads a muted item as silence
+    for i = 0, n - 1 do buf[i + 1] = silent and 0 or acc.fn(t + i / sr) end
     return 1
   end,
   defer = function(f) deferred[#deferred + 1] = f end,
@@ -238,4 +239,15 @@ for _, it in ipairs(E1.items) do
     end
   end
 end
-print(fails == 0 and #markers == 12 and "ALL PASS" or (fails .. " FAILED"))
+-- second run: the AAF items are muted now; nothing may come out "?" for that
+local first = #markers
+markers = {}
+dofile("Conform/hsuanice_Conform List Browser - CLB Waveform Check.lua")
+while #deferred > 0 do table.remove(deferred, 1)() end
+local q = 0
+for _, m in ipairs(markers) do if m.name:find("^WC %?") and m.pos ~= 52 then q = q + 1; print("  FAIL 2nd run " .. m.name) end end
+fails = fails + q
+local still = 0
+for _, it in ipairs(AAF.items) do if it.mute == 1 then still = still + 1 end end
+print("2nd run: " .. #markers .. " markers, muted AAF items kept muted: " .. still)
+print(fails == 0 and first == 12 and "ALL PASS" or (fails .. " FAILED"))
