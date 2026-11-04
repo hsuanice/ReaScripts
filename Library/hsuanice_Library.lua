@@ -1,6 +1,6 @@
 --[[
 @description hsuanice Library - shared code used by hsuanice scripts (required)
-@version 26.1103.2212pre1
+@version 26.1104.0858pre1
 @author hsuanice
 @metapackage
 @provides
@@ -26,7 +26,7 @@
   [nomain] hsuanice_Waveform Sync Core.lua
   [nomain] json.lua
 @changelog
-  - EDL Parser: AUD lines
+  - Waveform Sync Core: MIN_SPAN_SEC setting
 @about
   # hsuanice Library
 

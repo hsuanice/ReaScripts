@@ -1,6 +1,6 @@
 --[[
 @description Waveform Sync Core - find the time offset between two recordings of the same sound
-@version 26.1103.2023
+@version 26.1104.0858pre1
 @author hsuanice
 @noindex
 @about
@@ -35,6 +35,7 @@ M.MAX_LAG_SEC    = 10     -- search range +/- (s)
 -- the last pass only has to pick the exact sample.
 M.REFINE = { { sr = 8000, lag = 0.003, win = 4 }, { sr = nil, lag = 0.0003, win = 0.6 } }
 M.MIN_RATIO      = 2.0    -- peak / next peak (outside +/- 20 ms) needed to trust a match
+M.MIN_SPAN_SEC   = 1.0    -- shorter target spans are reported "too short"
 M.FFT_MAX        = 32768  -- REAPER array FFT limit (complex points)
 local READ_BLOCK = 8192
 
@@ -190,7 +191,7 @@ function M.find_offset(ref, tgt, span_start, span_end, opts)
     local cs = M.COARSE_SR
     local span = span_end - span_start
     local n = math.floor(span * cs)
-    if n < cs then res.reason = "too short"; return end
+    if span < M.MIN_SPAN_SEC or n < 100 then res.reason = "too short"; return end
     -- 10 ms energy envelope of the target to place the chunks
     local mono = read_mono(tgt, span_start, n, cs)
     local hop = math.floor(cs / 100)

@@ -1,6 +1,6 @@
 --[[
 @description Conform List Browser - CLB Waveform Check (compare conformed ISO audio with the AAF's audio; markers, mute verified AAF items)
-@version 26.1103.2234pre1
+@version 26.1104.0858pre1
 @author hsuanice
 @noindex
 @changelog
@@ -28,9 +28,10 @@
                   Post moved, or a mic further away; normal for those channels
       SYNC +2f    one frame or more out (ISO early / late)
       NO MATCH    no clear match: another take, or not the same sound
-      ?           too short or silent to tell
+      ?           too short (under 0.25 s) or silent to tell
       NO AUDIO    nothing conformed under this AAF item
-    "cut differs" is added when the conformed event covers only part of the AAF item.
+    "cut differs" is added when the conformed event covers only part of the AAF item (the part
+    a crossfade adds to the AAF item does not count).
   - Markers (setting): project markers or take markers on the AAF items, named "WC ...";
     the previous "WC" markers there are replaced on every run.
   - Mute verified (setting, on by default): AAF items whose conformed audio matched (OK or
@@ -62,7 +63,7 @@ local WS = dofile(r.GetResourcePath() .. "/Scripts/hsuanice Scripts/Library/hsua
 local TITLE = "CLB Waveform Check"
 local NS = "hsuanice_CLB_WaveCheck"
 local MARK = "WC "            -- prefix of every marker this script writes
-local MIN_OVERLAP = 0.5       -- seconds of overlap for a conformed item to count
+local MIN_OVERLAP = 0.1       -- seconds of overlap for a conformed item to count
 
 ---------------------------------------------------------------------------
 -- Tracks and items
@@ -200,6 +201,7 @@ r.SetExtState(NS, "MARKERS", MARKERS, true)
 r.SetExtState(NS, "MAX_LAG", tostring(MAX_LAG), true)
 r.SetExtState(NS, "MUTE", MUTE and "y" or "n", true)
 WS.MAX_LAG_SEC = MAX_LAG
+WS.MIN_SPAN_SEC = 0.25        -- dialogue pieces under a second are checked too
 WS.CHUNK_SEC = math.min(10, 32768 / WS.COARSE_SR - 2 * MAX_LAG - 0.1)
 
 local FPS = r.TimeMap_curFrameRate(0)
@@ -220,6 +222,10 @@ local function analyse(c)
   local item = c.item
   local rs, re = span(item)
   c.rs, c.re = rs, re
+  -- a crossfade extends the AAF item past the list's cut (half the fade each
+  -- side): that part is not "cut differs"
+  local fade = r.GetMediaItemInfo_Value(item, "D_FADEINLEN") + r.GetMediaItemInfo_Value(item, "D_FADEOUTLEN")
+  local function partial(ov) return ov < (re - rs) - fade - 2 / FPS end
   -- conformed event overlapping this AAF item most
   local events = {}
   local function collect(tracks)
@@ -274,11 +280,11 @@ local function analyse(c)
     c.kind = (why == "too short" or why:find("silent", 1, true)) and "?" or "NO MATCH"
     c.why = why
     c.file = list[1].items[1] and list[1].items[1].ti.name
-    c.partial = list[1].ov < (re - rs) - 2 / FPS
+    c.partial = partial(list[1].ov)
     return
   end
   c.event = best_g.event
-  c.partial = best_g.ov < (re - rs) - 2 / FPS
+  c.partial = partial(best_g.ov)
   c.res = best
   if math.abs(best.samples) <= 1 then c.kind = "OK"
   elseif math.abs(best.offset) * FPS < 1 then c.kind = "~"

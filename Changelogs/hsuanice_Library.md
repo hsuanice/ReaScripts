@@ -1,5 +1,9 @@
 # hsuanice_Library.lua — Changelog
 
+## 26.1104.0858pre1
+
+- Waveform Sync Core: MIN_SPAN_SEC setting
+
 ## 26.1103.2212pre1
 
 - EDL Parser: AUD lines

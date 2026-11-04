@@ -4,6 +4,10 @@
 
 Conform List Browser
 
+## 26.1104.0858pre1
+
+- Change: CLB Waveform Check also checks pieces from 0.25 s (was 1 s: 18 short dialogue pieces in R01 A1 came out ?) and overlaps from 0.1 s; the part a crossfade adds to an AAF item no longer counts as cut differs
+
 ## 26.1103.2234pre1
 
 - Fix: CLB Waveform Check compares every take of a conformed item (one take per ISO channel), not only the active take, and the channel closest to the AAF gives the result - takes no longer need exploding first; an Auto Align-moved first channel no longer shows ~ x ms when another channel is on the sample

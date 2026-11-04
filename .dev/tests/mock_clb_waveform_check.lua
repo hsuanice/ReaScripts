@@ -62,7 +62,18 @@ local function make_voice(dur)
     return 0
   end
 end
-local voice, other = make_voice(200), make_voice(200)
+-- real speech has broadband content (breath, room): a little fixed noise per
+-- 48 kHz sample, so the phase transform has more than harmonics to lock onto
+local function with_noise(f, amp)
+  local noise = {}          -- each sound has its own noise
+  return function(x)
+    local i = math.floor(x * 48000 + 0.5)
+    local n = noise[i]
+    if not n then n = rnd() - 0.5; noise[i] = n end
+    return f(x) + amp * n
+  end
+end
+local voice, other = with_noise(make_voice(200), 0.05), with_noise(make_voice(200), 0.05)
 local FPS = 24
 -- sources: fn(project time) for simplicity; accessor time is relative to item start
 local tracks, items_by = {}, {}
@@ -90,9 +101,17 @@ item(E1, 30, 6, function(t) return voice(t - 2 / FPS) end, { ["P_EXT:CLB_EVENT"]
 -- 4: another sound
 item(AAF, 40, 6, voice, nil, "other take")
 item(E1, 40, 6, other, { ["P_EXT:CLB_EVENT"] = "004" })
--- 5: too short (0.7 s)
+-- 5: short (0.7 s) - checked; 5b: 0.2 s - too short
 item(AAF, 50, 0.7, voice, nil, "short")
 item(E1, 50, 0.7, voice, { ["P_EXT:CLB_EVENT"] = "005" })
+item(AAF, 52, 0.2, voice, nil, "tiny")
+item(E1, 52, 0.2, voice, { ["P_EXT:CLB_EVENT"] = "011" })
+-- 10: AAF item extended 0.5 s by a 1 s crossfade fade-out; the event ends at the cut
+do
+  local it = item(AAF, 90, 4.5, voice, nil, "xfade")
+  it.fadeout = 1.0
+  item(E1, 90, 4.0, voice, { ["P_EXT:CLB_EVENT"] = "012" })
+end
 -- 6: nothing conformed
 item(AAF, 60, 4, voice, nil, "no audio")
 -- 8: Consolidate moved another track's event under AAF A1; the matching one sits on A3
@@ -129,6 +148,7 @@ reaper = {
   GetSetMediaItemTakeInfo_String = function(tk, k) return true, tk.ext[k] or "" end,
   GetMediaItemInfo_Value = function(it, k)
     if k == "D_POSITION" then return it.pos elseif k == "D_LENGTH" then return it.len elseif k == "B_MUTE" then return it.mute end
+    if k == "D_FADEOUTLEN" then return it.fadeout or 0 end
     return 0
   end,
   SetMediaItemInfo_Value = function(it, k, v) if k == "B_MUTE" then it.mute = v end end,
@@ -168,19 +188,19 @@ dofile("Conform/hsuanice_Conform List Browser - CLB Waveform Check.lua")
 while #deferred > 0 do table.remove(deferred, 1)() end
 print(table.concat(console))
 local expect = { sync = "WC OK", ["aap only"] = "WC ~ ", ["two late"] = "WC SYNC -2f", ["other take"] = "WC NO MATCH",
-  short = "WC ?", ["no audio"] = "WC NO AUDIO", ["a2 dup"] = "WC OK", packed = "WC OK EDL - A3", ["multi take"] = "WC OK" }
-local pos_name = { [10] = "sync", [20] = "aap only", [30] = "two late", [40] = "other take", [50] = "short", [60] = "no audio", [70] = "packed", [80] = "multi take" }
+  short = "WC OK", tiny = "WC ?", xfade = "WC OK EDL - A1 - 1", ["no audio"] = "WC NO AUDIO", ["a2 dup"] = "WC OK", packed = "WC OK EDL - A3", ["multi take"] = "WC OK" }
+local pos_name = { [10] = "sync", [20] = "aap only", [30] = "two late", [40] = "other take", [50] = "short", [60] = "no audio", [70] = "packed", [80] = "multi take", [52] = "tiny", [90] = "xfade" }
 local fails = 0
 for _, m in ipairs(markers) do
   local want = expect[pos_name[math.floor(m.pos + 0.5)]]
   if m.pos == 10 and m.name ~= "WC OK EDL - A1 - 1" then want = "WC OK" end
-  local ok = m.name:sub(1, #want) == want
+  local ok = m.name:sub(1, #want) == want and not (m.name:find("cut differs", 1, true) and want == "WC OK EDL - A1 - 1")
   if not ok then fails = fails + 1 end
   print((ok and "  ok   " or "  FAIL ") .. m.pos .. "  " .. m.name)
 end
 local muted = {}
 for _, it in ipairs(AAF.items) do if it.mute == 1 then muted[#muted + 1] = it.name end end
 print("muted: " .. table.concat(muted, ", "))
-if table.concat(muted, ",") ~= "sync,aap only,packed,multi take" then fails = fails + 1; print("  FAIL mute") end
+if table.concat(muted, ",") ~= "sync,aap only,short,xfade,packed,multi take" then fails = fails + 1; print("  FAIL mute") end
 if AAF2.items[1].mute ~= 1 then fails = fails + 1; print("  FAIL a2 dup not muted") end
-print(fails == 0 and #markers == 9 and "ALL PASS" or (fails .. " FAILED"))
+print(fails == 0 and #markers == 11 and "ALL PASS" or (fails .. " FAILED"))
