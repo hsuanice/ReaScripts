@@ -1,6 +1,6 @@
 --[[
 @description Conform List Browser - CLB Waveform Check (compare conformed ISO audio with the AAF's audio; markers, mute verified AAF items)
-@version 26.1104.0911pre1
+@version 26.1104.0929pre1
 @author hsuanice
 @noindex
 @changelog
@@ -19,7 +19,8 @@
     Remove Dups), or no clear match there (tracks packed by Consolidate), with all conformed
     tracks. Every conformed event under an AAF item is checked, every channel on its own (each
     take of a conformed item - one per ISO channel - or one track per channel after exploding
-    takes); the channel closest to the AAF gives the result (any channel on the sample = in sync).
+    takes); the earliest channel gives the result - Auto Align Post only delays channels (and a
+    further mic is only later), so the earliest one is where the mix had them.
   - The offset is found by cross-correlation (GCC-PHAT, Waveform Sync Core) within +/- the
     search range (setting, default 1 s).
   - Results:
@@ -272,10 +273,12 @@ local function analyse(c)
         local res = WS.find_offset(ref, { { take = ti.take, pos = ti.s } }, s, e, { fps = FPS })
         res.track, res.file = x.track, ti.name
         if res.ok then
-          -- the channel closest to the AAF wins (any channel on the sample = in
-          -- sync; the others are Auto Align-moved or further mics); ties: clearest
-          local d, bd = math.abs(res.samples), best and math.abs(best.samples)
-          if not best or d < bd or (d == bd and res.ratio > best.ratio) then best, best_g = res, g end
+          -- the earliest channel wins: Auto Align Post only delays channels
+          -- (and a further mic is only later), so the earliest one is where
+          -- the mix had them - in sync = it sits on the AAF's sample. ("Closest
+          -- to the AAF" picked a delayed channel when the ISO was early.)
+          if not best or res.samples > best.samples
+              or (res.samples == best.samples and res.ratio > best.ratio) then best, best_g = res, g end
         elseif not best_why then
           best_why = res
         end

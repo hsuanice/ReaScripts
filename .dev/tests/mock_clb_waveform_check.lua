@@ -126,6 +126,15 @@ do
     ext = { ["P_EXT:CLB_EVENT"] = "010" }, name = "multi.A2" }
   item(AAF, 80, 6, voice, nil, "multi take")
 end
+-- 11: whole ISO item dragged 34 ms early; take 2 is a channel Auto Align delayed by 10 ms
+-- (so it reads only 24 ms early): the earliest channel (take 1) must give the offset
+do
+  local early, aap = 0.0343, 0.0096
+  local it = item(E1, 100, 6, function(t) return voice(t + early) end, { ["P_EXT:CLB_EVENT"] = "013" }, "early")
+  it.takes[2] = { item = it, fn = function(t) return voice(100 + t + early - aap) end, file = "x.wav",
+    ext = { ["P_EXT:CLB_EVENT"] = "013" }, name = "early.A2" }
+  item(AAF, 100, 6, voice, nil, "early drag")
+end
 -- 7: A2 (other channel of the mix) over audio conformed on A1 only (Remove Dups)
 item(AAF2, 10, 6, voice, nil, "a2 dup")
 
@@ -194,8 +203,8 @@ dofile("Conform/hsuanice_Conform List Browser - CLB Waveform Check.lua")
 while #deferred > 0 do table.remove(deferred, 1)() end
 print(table.concat(console))
 local expect = { sync = "WC OK", ["aap only"] = "WC ~ ", ["two late"] = "WC SYNC -2f", ["other take"] = "WC NO MATCH",
-  short = "WC OK", tiny = "WC ?", xfade = "WC OK EDL - A1 - 1", ["no audio"] = "WC NO AUDIO", ["a2 dup"] = "WC OK", packed = "WC OK EDL - A3", ["multi take"] = "WC OK" }
-local pos_name = { [10] = "sync", [20] = "aap only", [30] = "two late", [40] = "other take", [50] = "short", [60] = "no audio", [70] = "packed", [80] = "multi take", [52] = "tiny", [90] = "xfade" }
+  short = "WC OK", tiny = "WC ?", xfade = "WC OK EDL - A1 - 1", ["no audio"] = "WC NO AUDIO", ["a2 dup"] = "WC OK", packed = "WC OK EDL - A3", ["multi take"] = "WC OK", ["early drag"] = "WC ~ +34.29 ms ISO early EDL - A1 - 1" }
+local pos_name = { [10] = "sync", [20] = "aap only", [30] = "two late", [40] = "other take", [50] = "short", [60] = "no audio", [70] = "packed", [80] = "multi take", [52] = "tiny", [90] = "xfade", [100] = "early drag" }
 local fails = 0
 for _, m in ipairs(markers) do
   local want = expect[pos_name[math.floor(m.pos + 0.5)]]
@@ -208,7 +217,7 @@ end
 local muted = {}
 for _, it in ipairs(AAF.items) do if it.mute == 1 then muted[#muted + 1] = it.name end end
 print("muted: " .. table.concat(muted, ", "))
-if table.concat(muted, ",") ~= "sync,aap only,two late,short,xfade,packed,multi take" then fails = fails + 1; print("  FAIL mute") end
+if table.concat(muted, ",") ~= "sync,aap only,two late,short,xfade,packed,multi take,early drag" then fails = fails + 1; print("  FAIL mute") end
 if AAF2.items[1].mute ~= 1 then fails = fails + 1; print("  FAIL a2 dup not muted") end
 -- Fix: the two-frames-late event slid 2 frames (content 2 f earlier = start offset + 2 f)
 local late = E1.items[1]
@@ -219,4 +228,14 @@ if math.abs(moved - 2 / FPS) > 2 / 48000 then fails = fails + 1; print("  FAIL f
 local untouched = 0
 for _, it in ipairs(E1.items) do if it.pos == 10 and (it.take.offs or 10) ~= 10 then untouched = untouched + 1 end end
 if untouched > 0 then fails = fails + 1; print("  FAIL in-sync item moved") end
-print(fails == 0 and #markers == 11 and "ALL PASS" or (fails .. " FAILED"))
+-- the early-dragged item slides back the full 34.3 ms (start offset - 34.3 ms), both takes
+for _, it in ipairs(E1.items) do
+  if it.pos == 100 then
+    for i, tk in ipairs(it.takes) do
+      local d = (tk.offs or 10) - 10
+      print(string.format("early drag take %d: start offset %+.5f s", i, d))
+      if math.abs(d + 0.0343) > 2 / 48000 then fails = fails + 1; print("  FAIL early drag amount") end
+    end
+  end
+end
+print(fails == 0 and #markers == 12 and "ALL PASS" or (fails .. " FAILED"))

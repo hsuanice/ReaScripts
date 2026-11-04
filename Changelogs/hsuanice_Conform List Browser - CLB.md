@@ -4,6 +4,10 @@
 
 Conform List Browser
 
+## 26.1104.0929pre1
+
+- Fix: CLB Waveform Check takes the earliest ISO channel as the reference (was the one closest to the AAF) - Auto Align Post only delays channels, so with ISO early a delayed channel looked closest and the fix fell short (01-1-5: 34.3 ms early, slid back only 24.65 ms); late ISO was already right
+
 ## 26.1104.0911pre1
 
 - New: CLB Waveform Check can fix (setting Fix ISO, on by default): after the check it asks, then slides the conformed ISO content onto the AAF - every take of the event's items by the measured offset (a sample or more: OK +/- 1, ~ and SYNC), item edges and the AAF unchanged, all ISO channels together; note WC: content slid ...; locked items or content before the file start are skipped and listed. Events are told apart by number and position (several list files can share numbers)
