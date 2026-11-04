@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<index version="1" name="hsuanice Scripts" commit="0975d9d02a172b6b5260b4b15323d792cb71d1e2">
+<index version="1" name="hsuanice Scripts" commit="e147de594e72c0076855b30e935e61f2e6809d65">
   <category name="Conform">
     <reapack name="hsuanice_Conform List Browser - CLB.lua" type="script" desc="Conform List Browser - CLB: conform EDL / AAF / XML / OTIO / subtitle lists (GUI + Jump / Link / Load / Reveal)">
       <metadata>
@@ -381,6 +381,18 @@
         <source file="../Tools/otio_to_clb.py">https://github.com/hsuanice/ReaScripts/raw/0975d9d02a172b6b5260b4b15323d792cb71d1e2/Tools/otio_to_clb.py</source>
         <source file="../Tools/aaf_to_otio.py">https://github.com/hsuanice/ReaScripts/raw/0975d9d02a172b6b5260b4b15323d792cb71d1e2/Tools/aaf_to_otio.py</source>
         <source file="../Tools/subtitle_to_clb.py">https://github.com/hsuanice/ReaScripts/raw/0975d9d02a172b6b5260b4b15323d792cb71d1e2/Tools/subtitle_to_clb.py</source>
+      </version>
+      <version name="26.1104.0929pre1" author="hsuanice" time="2026-11-04T01:30:15Z">
+        <changelog><![CDATA[- Fix: CLB Waveform Check takes the earliest ISO channel as the reference (was the one closest to the AAF) - Auto Align Post only delays channels, so with ISO early a delayed channel looked closest and the fix fell short (01-1-5: 34.3 ms early, slid back only 24.65 ms); late ISO was already right]]></changelog>
+        <source main="main">https://github.com/hsuanice/ReaScripts/raw/e147de594e72c0076855b30e935e61f2e6809d65/Conform/hsuanice_Conform%20List%20Browser%20-%20CLB.lua</source>
+        <source main="main" file="hsuanice_Conform List Browser - CLB Jump Old New TC.lua">https://github.com/hsuanice/ReaScripts/raw/e147de594e72c0076855b30e935e61f2e6809d65/Conform/hsuanice_Conform%20List%20Browser%20-%20CLB%20Jump%20Old%20New%20TC.lua</source>
+        <source main="main" file="hsuanice_Conform List Browser - CLB Link REAPER Items.lua">https://github.com/hsuanice/ReaScripts/raw/e147de594e72c0076855b30e935e61f2e6809d65/Conform/hsuanice_Conform%20List%20Browser%20-%20CLB%20Link%20REAPER%20Items.lua</source>
+        <source main="main" file="hsuanice_Conform List Browser - CLB Load from REAPER.lua">https://github.com/hsuanice/ReaScripts/raw/e147de594e72c0076855b30e935e61f2e6809d65/Conform/hsuanice_Conform%20List%20Browser%20-%20CLB%20Load%20from%20REAPER.lua</source>
+        <source main="main" file="hsuanice_Conform List Browser - CLB Reveal Item.lua">https://github.com/hsuanice/ReaScripts/raw/e147de594e72c0076855b30e935e61f2e6809d65/Conform/hsuanice_Conform%20List%20Browser%20-%20CLB%20Reveal%20Item.lua</source>
+        <source main="main" file="hsuanice_Conform List Browser - CLB Waveform Check.lua">https://github.com/hsuanice/ReaScripts/raw/e147de594e72c0076855b30e935e61f2e6809d65/Conform/hsuanice_Conform%20List%20Browser%20-%20CLB%20Waveform%20Check.lua</source>
+        <source file="../Tools/otio_to_clb.py">https://github.com/hsuanice/ReaScripts/raw/e147de594e72c0076855b30e935e61f2e6809d65/Tools/otio_to_clb.py</source>
+        <source file="../Tools/aaf_to_otio.py">https://github.com/hsuanice/ReaScripts/raw/e147de594e72c0076855b30e935e61f2e6809d65/Tools/aaf_to_otio.py</source>
+        <source file="../Tools/subtitle_to_clb.py">https://github.com/hsuanice/ReaScripts/raw/e147de594e72c0076855b30e935e61f2e6809d65/Tools/subtitle_to_clb.py</source>
       </version>
     </reapack>
   </category>
