@@ -1,10 +1,12 @@
 --[[
 @description Project Manager - PM Timer: scene-aware work timer
-@version 26.1103.1329pre1
+@version 26.1119.1303pre1
 @author hsuanice
 @noindex  (kept in the repository as a backup; Project Manager is not offered on ReaPack for now)
 @changelog
-  - Fix: log items now get "Project Workflow | " when the project file name has no Scope/Task (e.g. 261102----AMA----conform -> "AMA Conform | pre"), in Scene mode and Add Record too, not only in AAP mode; PM Insight can then tell which project the hours belong to.
+  - UI: the layout now follows the window size: buttons split the real window width and use the height left below the info rows (max 26 px, keep shrinking in a very short dock), so they are no longer cut off when docked.
+  - UI: tighter info rows and a smaller Set target box; the whole window fits in about 60 px of height (was 80 px).
+  - UI: redraws immediately when the window or dock is resized.
 @about
   Scene-aware toggle timer for the hsuanice PM system.
   Uses gfx (no ReaImGui). 1-second display refresh via defer + time_precise.
@@ -60,7 +62,7 @@ local NS                = "hsuanice_PM"
 local SCENE_TRACK_NAME  = "Scene Cut"
 local WORK_LOG_NAME     = "Work Log"
 local DURATION_LOG_NAME = "DurationOnly_Log"
-local WIN_W, WIN_H           = 560, 92
+local WIN_W, WIN_H           = 560, 72   -- initial size; the layout follows the real window size
 local BYTES_PER_SECOND       = 144000
 local BYTES_PER_GB           = 1000000000
 local WORK_TYPES          = { "pre-production", "wrap" }
@@ -98,6 +100,7 @@ local S = {
 
 -- ── Refresh + mouse state ──────────────────────────────────────────────────
 local last_draw_time      = 0
+local last_draw_w, last_draw_h = 0, 0  -- window size at the last draw (resize detection)
 local last_heartbeat_time = 0
 local mouse_prev          = 0
 local mouse_r_prev    = 0
@@ -3225,7 +3228,7 @@ end
 
 local function sep(y)
   gfx.set(0.35, 0.35, 0.35, 1)
-  gfx.line(0, y, WIN_W, y)
+  gfx.line(0, y, gfx.w, y)
 end
 
 local function draw_btn(x, y, w, h, label)
@@ -3330,7 +3333,7 @@ local function draw()
 
   gfx.setfont(1)
   gfx.set(0.15, 0.15, 0.15, 1)
-  gfx.rect(0, 0, WIN_W, WIN_H, 1)
+  gfx.rect(0, 0, gfx.w, gfx.h, 1)
   BTN = {}
 
   -- ── Info rows ───────────────────────────────────────────────────────────
@@ -3366,7 +3369,7 @@ local function draw()
     local start_disp = (S.mode == "WORKING") and fmt_clock(S.start_clock) or "--:--:--"
 
     gfx.setfont(3)
-    gfx.x, gfx.y = 10, 12
+    gfx.x, gfx.y = 10, 4
 
     -- Official project name (master list) as a reminder, then the work mode
     local proj_disp = official_project_name(proj_file_parts()[2])
@@ -3394,7 +3397,7 @@ local function draw()
     end
 
     local row1_end = gfx.x
-    gfx.x, gfx.y = 10, 28
+    gfx.x, gfx.y = 10, 20
     gfx.set(0.7, 0.7, 0.7, 1); gfx.drawstr("Start: ")
     gfx.set(1,   1,   1,   1); gfx.drawstr(start_disp)
     gfx.set(0.7, 0.7, 0.7, 1); gfx.drawstr("  |  Elapsed: ")
@@ -3413,9 +3416,10 @@ local function draw()
     -- Target box at the right of the info rows (click to set)
     local label = target_label()
     local tw, th = gfx.measurestr(label)
-    local bw, bh = tw + 14, 30
+    -- compact box, centered on the two info rows (y 4..36)
+    local bw, bh = tw + 14, th + 6
     local bx = math.max(math.max(gfx.x, row1_end) + 12, gfx.w - bw - 10)
-    local by = 8
+    local by = 20 - math.floor(bh / 2)
     gfx.set(0.22, 0.22, 0.25, 1); gfx.rect(bx, by, bw, bh, 1)
     gfx.set(0.45, 0.45, 0.50, 1); gfx.rect(bx, by, bw, bh, 0)
     gfx.set(label == "Set target" and 0.6 or 1, label == "Set target" and 0.6 or 0.85, label == "Set target" and 0.6 or 0.4, 1)
@@ -3423,20 +3427,21 @@ local function draw()
     gfx.drawstr(label)
     table.insert(BTN, { rect = { x = bx, y = by, w = bw, h = bh }, action = action_set_target })
 
-    sep(44)
+    sep(38)
   end
 
   -- ── Horizontal buttons ──────────────────────────────────────────────────
-  -- compact buttons (were 40 px high): the whole window fits in a short dock
-  local btn_h   = 26
-  local btn_y   = 54
-  local btn_gap = 8
+  -- Buttons follow the window size: width splits the real window width, height uses
+  -- the space left below the info rows (max 26 px; keeps shrinking in a very short dock).
+  local btn_y   = 42
+  local btn_h   = math.max(8, math.min(26, gfx.h - btn_y - 4))
+  local btn_gap = 6
   local btn_x0  = 10
 
   local dlg_working = (S.mode == "WORKING" and not aap_working)
   -- 4 buttons per row (129 px); 5 while working in Dialog mode (WIP added)
   local btn_n   = dlg_working and 5 or 4
-  local btn_w   = math.floor((WIN_W - 2 * btn_x0 - (btn_n - 1) * btn_gap) / btn_n)
+  local btn_w   = math.max(20, math.floor((gfx.w - 2 * btn_x0 - (btn_n - 1) * btn_gap) / btn_n))
 
   gfx.setfont(3)
   local function btn_x(i) return btn_x0 + (i - 1) * (btn_w + btn_gap) end
@@ -3764,7 +3769,10 @@ local function loop()
   end
 
   local now = r.time_precise()
-  if now - last_draw_time >= 1.0 then
+  -- redraw at once when the window/dock is resized, so the layout follows it
+  local resized = (gfx.w ~= last_draw_w or gfx.h ~= last_draw_h)
+  if resized or now - last_draw_time >= 1.0 then
+    last_draw_w, last_draw_h = gfx.w, gfx.h
     draw()
     last_draw_time = now
   end

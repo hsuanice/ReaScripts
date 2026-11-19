@@ -7,6 +7,12 @@ PM Timer - Scene-aware Work Timer
 
 **Removed from ReaPack** (2026-10-15) together with PM Insight Analyzer; the script stays in the repository (`@noindex`) as a backup.
 
+## 26.1119.1303pre1
+
+- UI: the layout now follows the window size: buttons split the real window width and use the height left below the info rows (max 26 px, keep shrinking in a very short dock), so they are no longer cut off when docked.
+- UI: tighter info rows and a smaller Set target box; the whole window fits in about 60 px of height (was 80 px).
+- UI: redraws immediately when the window or dock is resized.
+
 ## 26.1103.1329pre1
 
 - Fix: log items now get "Project Workflow | " when the project file name has no Scope/Task (e.g. 261102----AMA----conform -> "AMA Conform | pre"), in Scene mode and Add Record too, not only in AAP mode; PM Insight can then tell which project the hours belong to.
