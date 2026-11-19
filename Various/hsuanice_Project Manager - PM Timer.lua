@@ -1,6 +1,6 @@
 --[[
 @description Project Manager - PM Timer: scene-aware work timer
-@version 26.1119.1303pre1
+@version 26.1119.1303
 @author hsuanice
 @noindex  (kept in the repository as a backup; Project Manager is not offered on ReaPack for now)
 @changelog
