@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<index version="1" name="hsuanice Scripts" commit="cb29f2578e37cb3d817b6e610eb79258bc5e8d13">
+<index version="1" name="hsuanice Scripts" commit="a1b7bfe23a324edb9575bfed23d07d37ac047461">
   <category name="Conform">
     <reapack name="hsuanice_Conform List Browser - CLB.lua" type="script" desc="Conform List Browser - CLB: conform EDL / AAF / XML / OTIO / subtitle lists (GUI + Jump / Link / Load / Reveal)">
       <metadata>
@@ -38,7 +38,7 @@
 {\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab AAF (.aaf) \u8212- via LibAAF (aaftool) + OpenTimelineIO. Confirmed via real project files: Adobe Premiere Pro, versions 15.0.0 / 25.6.4 / 26.3.0 (read from the AAF's own Identification chain via aaf2/pyaaf2 \u8212- see Tools/format_tests/aaf_identify.py).\par}
 {\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Subtitles / dialogue lists \u8212- no embedded software/version info: .srt SubRip absolute time .csv / .tsv Tabular dialogue lists with auto IN/OUT detection .xlsx / .xlsm Excel dialogue lists; multi-sheet picker\sa180\par}
 {\pard \ql \f0 \sa180 \li0 \fi0 Regression coverage: Tools/format_tests/ holds a golden-snapshot test harness (39 real production samples across all formats above, referenced by external path \u8212- not copied into the repo) that verifies a change to one format's parsing doesn't silently break another. Run with: lua5.4 Tools/format_tests/run_regression.lua\par}
-{\pard \ql \f0 \sa180 \li0 \fi0 Requires: ReaImGui (install via ReaPack) Optional: js_ReaScriptAPI (for folder selection) Required: Python 3 + opentimelineio (pip3 install opentimelineio) Optional: openpyxl (pip3 install openpyxl) \u8212- only for .xlsx subtitle import Required for AAF: aaftool in PATH (https://github.com/agfline/LibAAF)\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 Requires: ReaImGui (install via ReaPack) Optional: js_ReaScriptAPI (for folder selection) Required for AAF / XML / OTIO: Python 3 + opentimelineio, otio-aaf-adapter, otio-fcp-adapter, pyaaf2; recommended: bwfmetaedit (reel / TC from BWF). On macOS CLB offers to install all of them in Terminal when they are missing (or Options > Install Python Tools...). Optional: openpyxl \u8212- only for .xlsx subtitle import (included in the installer) Optional: aaftool (LibAAF) \u8212- fallback AAF reader if otio-aaf-adapter is missing\par}
 }
 ]]></description>
       </metadata>
@@ -417,6 +417,20 @@
         <source file="../Tools/otio_to_clb.py">https://github.com/hsuanice/ReaScripts/raw/cb29f2578e37cb3d817b6e610eb79258bc5e8d13/Tools/otio_to_clb.py</source>
         <source file="../Tools/aaf_to_otio.py">https://github.com/hsuanice/ReaScripts/raw/cb29f2578e37cb3d817b6e610eb79258bc5e8d13/Tools/aaf_to_otio.py</source>
         <source file="../Tools/subtitle_to_clb.py">https://github.com/hsuanice/ReaScripts/raw/cb29f2578e37cb3d817b6e610eb79258bc5e8d13/Tools/subtitle_to_clb.py</source>
+      </version>
+      <version name="26.1119.1841pre1" author="hsuanice" time="2026-11-19T10:42:01Z">
+        <changelog><![CDATA[- New: when you load an AAF / XML / OTIO and the Python tools are missing, CLB offers to install them - Terminal opens with the commands ready (macOS); press Return and type the Mac password if asked. Also in Options > Install Python Tools...
+- Installs Homebrew (if needed), Python 3.13, BWF MetaEdit, opentimelineio, otio-aaf-adapter, otio-fcp-adapter, pyaaf2 and openpyxl (Python 3.13 because opentimelineio has no 3.14 build yet)
+- Fix: AAF import now picks a Python that has the OpenTimelineIO AAF adapter, instead of one with OpenTimelineIO only (that one silently fell back to aaftool, or failed)]]></changelog>
+        <source main="main">https://github.com/hsuanice/ReaScripts/raw/a1b7bfe23a324edb9575bfed23d07d37ac047461/Conform/hsuanice_Conform%20List%20Browser%20-%20CLB.lua</source>
+        <source main="main" file="hsuanice_Conform List Browser - CLB Jump Old New TC.lua">https://github.com/hsuanice/ReaScripts/raw/a1b7bfe23a324edb9575bfed23d07d37ac047461/Conform/hsuanice_Conform%20List%20Browser%20-%20CLB%20Jump%20Old%20New%20TC.lua</source>
+        <source main="main" file="hsuanice_Conform List Browser - CLB Link REAPER Items.lua">https://github.com/hsuanice/ReaScripts/raw/a1b7bfe23a324edb9575bfed23d07d37ac047461/Conform/hsuanice_Conform%20List%20Browser%20-%20CLB%20Link%20REAPER%20Items.lua</source>
+        <source main="main" file="hsuanice_Conform List Browser - CLB Load from REAPER.lua">https://github.com/hsuanice/ReaScripts/raw/a1b7bfe23a324edb9575bfed23d07d37ac047461/Conform/hsuanice_Conform%20List%20Browser%20-%20CLB%20Load%20from%20REAPER.lua</source>
+        <source main="main" file="hsuanice_Conform List Browser - CLB Reveal Item.lua">https://github.com/hsuanice/ReaScripts/raw/a1b7bfe23a324edb9575bfed23d07d37ac047461/Conform/hsuanice_Conform%20List%20Browser%20-%20CLB%20Reveal%20Item.lua</source>
+        <source main="main" file="hsuanice_Conform List Browser - CLB Waveform Check.lua">https://github.com/hsuanice/ReaScripts/raw/a1b7bfe23a324edb9575bfed23d07d37ac047461/Conform/hsuanice_Conform%20List%20Browser%20-%20CLB%20Waveform%20Check.lua</source>
+        <source file="../Tools/otio_to_clb.py">https://github.com/hsuanice/ReaScripts/raw/a1b7bfe23a324edb9575bfed23d07d37ac047461/Tools/otio_to_clb.py</source>
+        <source file="../Tools/aaf_to_otio.py">https://github.com/hsuanice/ReaScripts/raw/a1b7bfe23a324edb9575bfed23d07d37ac047461/Tools/aaf_to_otio.py</source>
+        <source file="../Tools/subtitle_to_clb.py">https://github.com/hsuanice/ReaScripts/raw/a1b7bfe23a324edb9575bfed23d07d37ac047461/Tools/subtitle_to_clb.py</source>
       </version>
     </reapack>
   </category>
@@ -2383,6 +2397,30 @@
         <source file="hsuanice_Waveform Sync Core.lua">https://github.com/hsuanice/ReaScripts/raw/a0b911650ecee73d3ec3786a0e64db15a5edb200/Library/hsuanice_Waveform%20Sync%20Core.lua</source>
         <source file="json.lua">https://github.com/hsuanice/ReaScripts/raw/a0b911650ecee73d3ec3786a0e64db15a5edb200/Library/json.lua</source>
       </version>
+      <version name="26.1119.1841pre1" author="hsuanice" time="2026-11-19T10:42:01Z">
+        <changelog><![CDATA[- OTIO Bridge: AAF-adapter-aware Python detection and the Python tools installer used by Conform List Browser]]></changelog>
+        <source file="hsuanice_RGWH Core.lua">https://github.com/hsuanice/ReaScripts/raw/a1b7bfe23a324edb9575bfed23d07d37ac047461/Library/hsuanice_RGWH%20Core.lua</source>
+        <source file="hsuanice_AudioSweet Core.lua">https://github.com/hsuanice/ReaScripts/raw/a1b7bfe23a324edb9575bfed23d07d37ac047461/Library/hsuanice_AudioSweet%20Core.lua</source>
+        <source file="hsuanice_AS Preview Core.lua">https://github.com/hsuanice/ReaScripts/raw/a1b7bfe23a324edb9575bfed23d07d37ac047461/Library/hsuanice_AS%20Preview%20Core.lua</source>
+        <source file="hsuanice_Metadata Embed.lua">https://github.com/hsuanice/ReaScripts/raw/a1b7bfe23a324edb9575bfed23d07d37ac047461/Library/hsuanice_Metadata%20Embed.lua</source>
+        <source file="hsuanice_Metadata Read.lua">https://github.com/hsuanice/ReaScripts/raw/a1b7bfe23a324edb9575bfed23d07d37ac047461/Library/hsuanice_Metadata%20Read.lua</source>
+        <source file="hsuanice_Hover.lua">https://github.com/hsuanice/ReaScripts/raw/a1b7bfe23a324edb9575bfed23d07d37ac047461/Library/hsuanice_Hover.lua</source>
+        <source file="hsuanice_Mouse.lua">https://github.com/hsuanice/ReaScripts/raw/a1b7bfe23a324edb9575bfed23d07d37ac047461/Library/hsuanice_Mouse.lua</source>
+        <source file="hsuanice_Metadata Cache.lua">https://github.com/hsuanice/ReaScripts/raw/a1b7bfe23a324edb9575bfed23d07d37ac047461/Library/hsuanice_Metadata%20Cache.lua</source>
+        <source file="hsuanice_Metadata Rename Core.lua">https://github.com/hsuanice/ReaScripts/raw/a1b7bfe23a324edb9575bfed23d07d37ac047461/Library/hsuanice_Metadata%20Rename%20Core.lua</source>
+        <source file="hsuanice_List Table.lua">https://github.com/hsuanice/ReaScripts/raw/a1b7bfe23a324edb9575bfed23d07d37ac047461/Library/hsuanice_List%20Table.lua</source>
+        <source file="hsuanice_Time Format.lua">https://github.com/hsuanice/ReaScripts/raw/a1b7bfe23a324edb9575bfed23d07d37ac047461/Library/hsuanice_Time%20Format.lua</source>
+        <source file="hsuanice_Metadata Generator.lua">https://github.com/hsuanice/ReaScripts/raw/a1b7bfe23a324edb9575bfed23d07d37ac047461/Library/hsuanice_Metadata%20Generator.lua</source>
+        <source file="hsuanice_CLB Compare Engine.lua">https://github.com/hsuanice/ReaScripts/raw/a1b7bfe23a324edb9575bfed23d07d37ac047461/Library/hsuanice_CLB%20Compare%20Engine.lua</source>
+        <source file="hsuanice_EDL Parser.lua">https://github.com/hsuanice/ReaScripts/raw/a1b7bfe23a324edb9575bfed23d07d37ac047461/Library/hsuanice_EDL%20Parser.lua</source>
+        <source file="hsuanice_Session Fix Core.lua">https://github.com/hsuanice/ReaScripts/raw/a1b7bfe23a324edb9575bfed23d07d37ac047461/Library/hsuanice_Session%20Fix%20Core.lua</source>
+        <source file="hsuanice_OTIO Bridge.lua">https://github.com/hsuanice/ReaScripts/raw/a1b7bfe23a324edb9575bfed23d07d37ac047461/Library/hsuanice_OTIO%20Bridge.lua</source>
+        <source file="hsuanice_Subtitle Bridge.lua">https://github.com/hsuanice/ReaScripts/raw/a1b7bfe23a324edb9575bfed23d07d37ac047461/Library/hsuanice_Subtitle%20Bridge.lua</source>
+        <source file="hsuanice_Process Exec.lua">https://github.com/hsuanice/ReaScripts/raw/a1b7bfe23a324edb9575bfed23d07d37ac047461/Library/hsuanice_Process%20Exec.lua</source>
+        <source file="hsuanice_Fade Tool Core.lua">https://github.com/hsuanice/ReaScripts/raw/a1b7bfe23a324edb9575bfed23d07d37ac047461/Library/hsuanice_Fade%20Tool%20Core.lua</source>
+        <source file="hsuanice_Waveform Sync Core.lua">https://github.com/hsuanice/ReaScripts/raw/a1b7bfe23a324edb9575bfed23d07d37ac047461/Library/hsuanice_Waveform%20Sync%20Core.lua</source>
+        <source file="json.lua">https://github.com/hsuanice/ReaScripts/raw/a1b7bfe23a324edb9575bfed23d07d37ac047461/Library/json.lua</source>
+      </version>
     </reapack>
   </category>
   <category name="Metadata">
@@ -2910,8 +2948,33 @@ Packages
 {\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab {\b ReaImGui} \u8212- needed by the GUI scripts; install with ReaPack ({\i ReaTeam Extensions} repository, included by default).\par}
 {\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab {\b SWS Extension} \u8212- optional; a few features use it (e.g. {\i Retain Glue Cues}, Session Fix's Off grid).\par}
 {\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab {\b js_ReaScriptAPI} \u8212- needed by {\i Toggle Set Time Selection to Items on Right Drag}, recommended for {\i Toggle Track and Razor Item Link like Pro Tools}; install with ReaPack ({\i ReaTeam Extensions}).\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab {\b Python 3 + OpenTimelineIO} ({\f1 pip install opentimelineio}) \u8212- only for {\i Conform List Browser} AAF / XML / OTIO import; EDL needs nothing extra. AAF also needs {\b aaftool} from LibAAF.\par}
-{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab {\b BWF MetaEdit} ({\f1 bwfmetaedit} command-line tool) \u8212- optional; only needed for timecode (BWF TimeReference) embedding.\sa180\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab {\b Python tools for {\i Conform List Browser}} \u8212- only for AAF / XML / OTIO import (EDL needs nothing extra); see {\field{\*\fldinst{HYPERLINK "#conform-list-browser-python-tools"}}{\fldrslt{\ul
+below
+}}}
+.\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab {\b BWF MetaEdit} ({\f1 bwfmetaedit} command-line tool) \u8212- optional; needed for timecode (BWF TimeReference) embedding, and lets {\i Conform List Browser} read reel / timecode from the AAF's BWF media.\sa180\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 \outlinelevel2 \b \fs28 Conform List Browser: Python tools\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 AAF / XML / OTIO import needs Python 3.13 with OpenTimelineIO and its AAF / XML adapters.\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 {\b Automatic (macOS):} load an AAF / XML in {\i Conform List Browser}. If the tools are missing, CLB asks whether to install them and opens {\b Terminal} with the commands ready. Press {\b Return} and type your Mac password when asked (nothing shows while you type). When Terminal says {\i All done}, load the file again. You can also start it any time from {\b Options > Install Python Tools...}.\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 The installer runs these steps:\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 1.\tx360\tab Installs {\field{\*\fldinst{HYPERLINK "https://brew.sh/"}}{\fldrslt{\ul
+Homebrew
+}}}
+ if it is not installed yet (Homebrew also installs Apple's Command Line Tools).\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 2.\tx360\tab {\f1 brew install python@3.13 bwfmetaedit} (Intel Macs also get {\f1 cmake}, used to build OpenTimelineIO).\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 3.\tx360\tab Installs the Python packages {\f1 opentimelineio otio-aaf-adapter otio-fcp-adapter pyaaf2 openpyxl}, then checks them.\sa180\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 {\b Manual:} in Terminal:\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 \f1 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"   # skip if Homebrew is installed\line
+brew install python@3.13 bwfmetaedit\line
+$(brew --prefix)/opt/python@3.13/bin/python3.13 -m pip install --break-system-packages \\\line
+  opentimelineio otio-aaf-adapter otio-fcp-adapter pyaaf2 openpyxl\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 Notes:\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab Python {\b 3.13}, not the newest Python: OpenTimelineIO has no ready-made build for Python 3.14 yet.\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab {\f1 --break-system-packages} lets pip install into Homebrew's Python (Homebrew blocks this by default). If a later Homebrew update removes these packages, CLB notices and offers to install them again.\par}
+{\pard \ql \f0 \sa0 \li360 \fi-360 \bullet \tx360\tab {\b aaftool} ({\field{\*\fldinst{HYPERLINK "https://github.com/agfline/LibAAF"}}{\fldrslt{\ul
+LibAAF
+}}}
+) is optional: CLB uses it only if the AAF adapter is missing. It is not in Homebrew; build it from source ({\f1 cmake} + {\f1 make}).\sa180\par}
 {\pard \ql \f0 \sa180 \li0 \fi0 \outlinelevel2 \b \fs28 Platforms\par}
 {\pard \ql \f0 \sa180 \li0 \fi0 Developed and tested on {\b macOS} only. Most scripts use only the REAPER API and should work on Windows, but they have {\b not been tested there}. Known limitation: {\i Conform List Browser}'s AAF / XML / OTIO import and subtitle import run Python through a macOS / Linux shell and do not work on Windows yet (EDL import does not need Python). If you use these scripts on Windows, please report what works and what does not.\par}
 {\pard \ql \f0 \sa180 \li0 \fi0 \outlinelevel2 \b \fs28 Moving from hsuanice/PublicBeta\par}
@@ -2973,10 +3036,19 @@ Claude
 {\pard \ql \f0 \sa180 \li0 \fi0 Conform List Browser uses {\field{\*\fldinst{HYPERLINK "https://github.com/AcademySoftwareFoundation/OpenTimelineIO"}}{\fldrslt{\ul
 OpenTimelineIO
 }}}
- (Academy Software Foundation) for timeline files and {\field{\*\fldinst{HYPERLINK "https://github.com/agfline/LibAAF"}}{\fldrslt{\ul
+ (Academy Software Foundation) for timeline files, its {\field{\*\fldinst{HYPERLINK "https://github.com/OpenTimelineIO/otio-aaf-adapter"}}{\fldrslt{\ul
+AAF adapter
+}}}
+ with {\field{\*\fldinst{HYPERLINK "https://github.com/markreidvfx/pyaaf2"}}{\fldrslt{\ul
+pyaaf2
+}}}
+ by Mark Reid for AAF, and {\field{\*\fldinst{HYPERLINK "https://github.com/agfline/LibAAF"}}{\fldrslt{\ul
 LibAAF
 }}}
- by agfline (aaftool) for AAF. {\f1 Library/json.lua} is based on {\field{\*\fldinst{HYPERLINK "https://github.com/rxi/json.lua"}}{\fldrslt{\ul
+ by agfline (aaftool) as the AAF fallback. Its Python tools installer uses {\field{\*\fldinst{HYPERLINK "https://brew.sh/"}}{\fldrslt{\ul
+Homebrew
+}}}
+; the Terminal installer idea comes from hsuanice's Wave Manager for Post. {\f1 Library/json.lua} is based on {\field{\*\fldinst{HYPERLINK "https://github.com/rxi/json.lua"}}{\fldrslt{\ul
 rxi/json.lua
 }}}
  (MIT License, Copyright (c) 2020 rxi); the full license notice is kept in the file.\par}
