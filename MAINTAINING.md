@@ -56,7 +56,11 @@ folder name on users' machines — hardcoded paths like
 | `README.md`, `MAINTAINING.md`, `CLAUDE.md`, `.github/`, `.reapack-index.conf`, `index.xml` | yes | Docs, CI, generated index |
 | `Beta Testing/` | **no** — own **private** repositories | Local work in progress / not-yet-published scripts. `Beta Testing/` is the private repo `hsuanice/Beta-Testing`; `Beta Testing/REAPER PT Sync/` is the private repo `hsuanice/REAPER-PT-Sync` (Avid PTSL SDK excluded). Claude commits there too; hsuanice syncs each repo in VS Code |
 | `Archive/` | **no** | Retired scripts and `_backup/` snapshots (moved, never deleted) |
-| `PRO TOOLS/`, `PT2Reaper Project/`, `Tools/Apps/`, `Settings/`, `docs/` | **no** | Local projects, apps, user data, private notes |
+| `PRO TOOLS/`, `Tools/Apps/`, `Settings/`, `docs/` | **no** | Local projects, apps, user data, private notes |
+
+PT2Reaper is **not** in this folder: it lives in `Scripts/PT2Reaper/` (public repo `hsuanice/PT2Reaper`,
+its local `PT2Reaper Project/` inside), the same path ReaPack installs it to, so shortcuts and
+configurations can be shared as they are. Never install PT2Reaper with ReaPack on this machine.
 
 `.gitignore` is a **whitelist**: everything is ignored except the paths listed in it. When a new
 category or Library file is published, add it there.
