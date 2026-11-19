@@ -4,6 +4,12 @@
 
 Conform List Browser
 
+## 26.1119.1841pre1
+
+- New: when you load an AAF / XML / OTIO and the Python tools are missing, CLB offers to install them - Terminal opens with the commands ready (macOS); press Return and type the Mac password if asked. Also in Options > Install Python Tools...
+- Installs Homebrew (if needed), Python 3.13, BWF MetaEdit, opentimelineio, otio-aaf-adapter, otio-fcp-adapter, pyaaf2 and openpyxl (Python 3.13 because opentimelineio has no 3.14 build yet)
+- Fix: AAF import now picks a Python that has the OpenTimelineIO AAF adapter, instead of one with OpenTimelineIO only (that one silently fell back to aaftool, or failed)
+
 ## 26.1104.1051pre1
 
 - Change: the event table sorts text columns in natural order (A1, A2, A10 - not A1, A10, A11, A2), numbers before letters, like the filter lists and the Audio Files table; sort values are worked out once per row, so large lists sort as fast as before

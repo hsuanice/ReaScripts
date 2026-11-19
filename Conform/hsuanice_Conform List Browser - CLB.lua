@@ -1,6 +1,6 @@
 --[[
 @description Conform List Browser - CLB: conform EDL / AAF / XML / OTIO / subtitle lists (GUI + Jump / Link / Load / Reveal)
-@version 26.1104.1051pre1
+@version 26.1119.1841pre1
 @author hsuanice
 @provides
   [main] .
@@ -13,7 +13,9 @@
   [nomain] ../Tools/aaf_to_otio.py
   [nomain] ../Tools/subtitle_to_clb.py
 @changelog
-  - Change: the event table sorts text columns in natural order (A1, A2, A10 - not A1, A10, A11, A2), numbers before letters, like the filter lists and the Audio Files table; sort values are worked out once per row, so large lists sort as fast as before
+  - New: when you load an AAF / XML / OTIO and the Python tools are missing, CLB offers to install them - Terminal opens with the commands ready (macOS); press Return and type the Mac password if asked. Also in Options > Install Python Tools...
+  - Installs Homebrew (if needed), Python 3.13, BWF MetaEdit, opentimelineio, otio-aaf-adapter, otio-fcp-adapter, pyaaf2 and openpyxl (Python 3.13 because opentimelineio has no 3.14 build yet)
+  - Fix: AAF import now picks a Python that has the OpenTimelineIO AAF adapter, instead of one with OpenTimelineIO only (that one silently fell back to aaftool, or failed)
 @about
   Note: the Compare view (old vs new cut, reconform) is a work in progress and not finished yet.
 
@@ -80,9 +82,12 @@
 
   Requires: ReaImGui (install via ReaPack)
   Optional: js_ReaScriptAPI (for folder selection)
-  Required: Python 3 + opentimelineio (pip3 install opentimelineio)
-  Optional: openpyxl  (pip3 install openpyxl) — only for .xlsx subtitle import
-  Required for AAF: aaftool in PATH (https://github.com/agfline/LibAAF)
+  Required for AAF / XML / OTIO: Python 3 + opentimelineio, otio-aaf-adapter,
+    otio-fcp-adapter, pyaaf2; recommended: bwfmetaedit (reel / TC from BWF).
+    On macOS CLB offers to install all of them in Terminal when they are
+    missing (or Options > Install Python Tools...).
+  Optional: openpyxl — only for .xlsx subtitle import (included in the installer)
+  Optional: aaftool (LibAAF) — fallback AAF reader if otio-aaf-adapter is missing
 --]]
 -- hsuanice Library is a separate ReaPack package: tell the user if it is missing
 do
@@ -4338,6 +4343,59 @@ local function confirm_fps()
   return true
 end
 
+--- Before loading .aaf / .xml / .otio: check that a Python with
+--- OpenTimelineIO (and the adapter that format needs) exists. If not, offer
+--- to open Terminal with the install commands ready (macOS).
+--- @param filepaths string[]
+--- @return boolean  true = go on loading
+function CLB.ensure_python_tools(filepaths)
+  local missing, seen = {}, {}
+  for _, fp in ipairs(filepaths) do
+    local ext = (fp:match("%.([^./\\]+)$") or ""):lower()
+    if (ext == "aaf" or ext == "xml" or ext == "otio") and not seen[ext] then
+      seen[ext] = true
+      if not OTIO.find_ready_python(ext, OTIO.python) then
+        missing[#missing + 1] = ext:upper()
+      end
+    end
+  end
+  if #missing == 0 then return true end
+
+  local what = table.concat(missing, " / ")
+  local is_mac = (reaper.GetOS() or ""):match("^OSX") or (reaper.GetOS() or ""):match("^macOS")
+  if not is_mac then
+    local r = reaper.ShowMessageBox(
+      "Loading " .. what .. " needs Python 3 with OpenTimelineIO and its\n"
+      .. "AAF / XML adapters, which were not found.\n\nInstall with:\n\n"
+      .. "pip install " .. table.concat(OTIO.PIP_PACKAGES, " ")
+      .. "\n\nOK = try loading anyway, Cancel = stop.",
+      SCRIPT_NAME, 1)
+    return r == 1
+  end
+
+  local r = reaper.ShowMessageBox(
+    "Loading " .. what .. " needs Python tools that are not installed on this Mac\n"
+    .. "(Python 3, OpenTimelineIO with its AAF / XML adapters, BWF MetaEdit).\n\n"
+    .. "Install them now? Terminal opens with the commands ready:\n"
+    .. "press Return and type your Mac password if asked.\n\n"
+    .. "Yes = open Terminal and install\n"
+    .. "No = try loading anyway\n"
+    .. "Cancel = stop",
+    SCRIPT_NAME, 3)
+  if r == 6 then
+    local ok, err = OTIO.open_installer()
+    if not ok then
+      reaper.ShowMessageBox("Could not open the installer:\n\n" .. tostring(err)
+        .. "\n\nInstall manually in Terminal:\n\n" .. OTIO.manual_install_text(),
+        SCRIPT_NAME, 0)
+    else
+      console_msg("Python tools installer opened in Terminal. Load the file again when it says All done.")
+    end
+    return false
+  end
+  return r == 7
+end
+
 --- Shared timeline loader: opens a file dialog, parses via OTIO Bridge,
 --- then replaces or appends rows. Used by load_edl_file() and load_xml_file().
 ---
@@ -4378,6 +4436,7 @@ local function _load_timeline_via_otio(dialog_title, file_filter, fallback_ext)
   end
 
   if #filepaths == 0 then return end
+  if not CLB.ensure_python_tools(filepaths) then return end
 
   -- Launch async background parse for all files.
   -- parse_async_start is non-blocking for .aaf/.xml (spawns Python in background).
@@ -5760,6 +5819,7 @@ function CMP.load_side(side)
     end
 
   elseif ext == "edl" or ext == "xml" or ext == "aaf" then
+    if not CLB.ensure_python_tools({ filepath }) then return end
     console_msg("Compare: loading " .. fname .. " ...")
     local parsed, err = OTIO.parse(filepath, { default_fps = CLB.fps, python = OTIO.python })
     if not parsed then
@@ -8928,7 +8988,7 @@ local function draw_toolbar()
       end
       if reaper.ImGui_Selectable(ctx, "Load AAF...") then load_aaf_file() end
       if reaper.ImGui_IsItemHovered(ctx) then
-        reaper.ImGui_SetTooltip(ctx, "AAF — requires: aaftool (LibAAF) in PATH\nhttps://github.com/agfline/LibAAF")
+        reaper.ImGui_SetTooltip(ctx, "AAF - needs Python 3 + OpenTimelineIO + otio-aaf-adapter\n(offers to install them if missing; Options > Install Python Tools...)")
       end
       if reaper.ImGui_Selectable(ctx, "Load Subtitle...") then load_subtitle_file() end
       if reaper.ImGui_IsItemHovered(ctx) then
@@ -9087,6 +9147,18 @@ local function draw_toolbar()
         status_msg = "",
         status_ok  = nil,
       }
+    end
+
+    -- Python tools for AAF / XML / OTIO (opens Terminal, macOS)
+    if reaper.ImGui_Selectable(ctx, "   Install Python Tools...") then
+      local ok, err = OTIO.open_installer()
+      if not ok then
+        reaper.ShowMessageBox(tostring(err) .. "\n\nInstall manually:\n\n"
+          .. "pip install " .. table.concat(OTIO.PIP_PACKAGES, " "), SCRIPT_NAME, 0)
+      end
+    end
+    if reaper.ImGui_IsItemHovered(ctx) then
+      reaper.ImGui_SetTooltip(ctx, "Opens Terminal and installs Python, OpenTimelineIO,\nthe AAF / XML adapters and BWF MetaEdit (needed for AAF / XML / OTIO)")
     end
 
     reaper.ImGui_Separator(ctx)

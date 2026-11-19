@@ -1,10 +1,10 @@
 --[[
 @description hsuanice_OTIO Bridge.lua
-@version 26.1103.2023
+@version 26.1119.1841pre1
 @author hsuanice
 @noindex
 @changelog
-  - Release: AAF exact source start, mix and speed change carried to CLB (tested)
+  - New: find_ready_python / open_installer - Python detection for AAF requires the OpenTimelineIO AAF adapter; Terminal installer for the Python tools (macOS)
 @about
   v0.4.1
   Calls the OpenTimelineIO Python wrapper (Tools/otio_to_clb.py) and converts
@@ -31,6 +31,16 @@
     Tools/otio_to_clb.py
     Python 3 with opentimelineio installed
   Changelog:
+    v0.5.0  Python detection for .aaf now prefers a Python that has the
+            OpenTimelineIO AAF adapter (otio-aaf-adapter), falling back to any
+            Python with OpenTimelineIO (for the aaftool path) only if none has
+            it. New M.find_ready_python(ext, preferred) reports whether a
+            Python with everything a format needs exists (nil if not), and
+            M.open_installer() opens Terminal with a ready-made install
+            script (Homebrew, python@3.13, bwfmetaedit, opentimelineio,
+            otio-aaf-adapter, otio-fcp-adapter, pyaaf2, openpyxl; Python 3.13
+            since opentimelineio has no 3.14 build yet) - the user
+            only presses Return and types the Mac password if asked. macOS only.
     v0.4.4  Refactor: _python_supports/detect_python/_resolve_python_for_ext's
             "run python, optionally require an extra import to succeed, else
             scan a candidate path list" logic moved into the new shared
@@ -71,7 +81,7 @@
     v0.1.0  Initial release: EDL, FCP7 XML, Resolve XML support.
 --]]
 local M = {}
-M.VERSION = "0.4.4"
+M.VERSION = "0.5.0"
 
 -- ---------------------------------------------------------------------------
 -- Path discovery
@@ -127,13 +137,15 @@ M.python = "python3"
 local shell_quote = PX.shell_quote
 
 --- Build the extra-import probe for a given extension: OTIO Bridge needs
---- opentimelineio itself, plus (for .xml) the fcp_xml adapter specifically,
---- since a python can have OTIO installed without that adapter.
+--- opentimelineio itself, plus (for .xml) the fcp_xml adapter and (for .aaf)
+--- the AAF adapter, since a python can have OTIO installed without them.
 local function _otio_probe(ext)
   local probe = "import opentimelineio as otio"
   local lower_ext = tostring(ext or ""):lower()
   if lower_ext == "xml" then
     probe = probe .. "; otio.adapters.from_name(\"fcp_xml\")"
+  elseif lower_ext == "aaf" then
+    probe = probe .. "; otio.adapters.from_name(\"AAF\")"
   end
   return probe
 end
@@ -146,6 +158,7 @@ local function _otio_candidates()
   return {
     "/opt/homebrew/bin/python3",
     "/opt/homebrew/opt/python@3.13/bin/python3.13",
+    "/usr/local/opt/python@3.13/bin/python3.13",
     "/usr/local/bin/python3",
     "/Library/Developer/CommandLineTools/usr/bin/python3",
     home .. "/.pyenv/versions/otio-env/bin/python",
@@ -159,20 +172,125 @@ function M.python_supports(py, ext)
   return PX.python_works(py, { probe = _otio_probe(ext) })
 end
 
--- Auto-detect a Python that has opentimelineio installed.
--- Checks common locations; returns the first working path, or "python3" as fallback.
-function M.detect_python(ext)
-  return PX.resolve_python(nil, {
+--- Return a Python that has everything the given format needs
+--- (preferred first, then the candidate list), or nil if there is none.
+function M.find_ready_python(ext, preferred)
+  local py = PX.resolve_python(preferred, {
     probe      = _otio_probe(ext),
     candidates = _otio_candidates(),
+    fallback   = "",
   })
+  if py == "" then return nil end
+  return py
 end
 
 local function _resolve_python_for_ext(py, ext)
-  return PX.resolve_python(py, {
-    probe      = _otio_probe(ext),
-    candidates = _otio_candidates(),
-  })
+  local found = M.find_ready_python(ext, py)
+  if found then return found end
+  -- .aaf without the AAF adapter can still use the aaftool fallback,
+  -- which only needs OpenTimelineIO itself.
+  if tostring(ext or ""):lower() == "aaf" then
+    return PX.resolve_python(py, {
+      probe      = _otio_probe(""),
+      candidates = _otio_candidates(),
+    })
+  end
+  return "python3"
+end
+
+-- Auto-detect a Python that has opentimelineio installed.
+-- Checks common locations; returns the first working path, or "python3" as fallback.
+function M.detect_python(ext)
+  return _resolve_python_for_ext(nil, ext)
+end
+
+-- ---------------------------------------------------------------------------
+-- Installer (macOS): Terminal with the install commands ready to run
+-- ---------------------------------------------------------------------------
+
+--- Python packages needed for AAF / XML / OTIO import (+ openpyxl for .xlsx
+--- subtitle lists). Also listed in the README "Requirements" section.
+M.PIP_PACKAGES = { "opentimelineio", "otio-aaf-adapter", "otio-fcp-adapter",
+                   "pyaaf2", "openpyxl" }
+
+--- Manual install commands, for messages and the README.
+--- Python 3.13 on purpose: opentimelineio 0.18.1 has no 3.14 build yet, and
+--- building it from source for 3.14 gives a broken module.
+function M.manual_install_text()
+  return "brew install python@3.13 bwfmetaedit\n"
+      .. "$(brew --prefix)/opt/python@3.13/bin/python3.13 -m pip install --break-system-packages "
+      .. table.concat(M.PIP_PACKAGES, " ")
+end
+
+--- The bash script the installer runs in Terminal.
+function M.installer_script()
+  local pkgs = table.concat(M.PIP_PACKAGES, " ")
+  return table.concat({
+    "#!/bin/bash",
+    "clear",
+    "fail() {",
+    "  echo",
+    "  echo \"Install did not finish: $1\"",
+    "  echo \"Please send a screenshot of this window to the person who set up REAPER for you.\"",
+    "  read -n 1 -s -r -p \"Press any key to close this window...\"",
+    "  echo",
+    "  exit 1",
+    "}",
+    "find_brew() {",
+    "  if [ -x /opt/homebrew/bin/brew ]; then BREW=/opt/homebrew/bin/brew",
+    "  elif [ -x /usr/local/bin/brew ]; then BREW=/usr/local/bin/brew",
+    "  else BREW=\"\"; fi",
+    "}",
+    "echo \"Conform List Browser (CLB) - installing the Python tools for AAF / XML / OTIO import\"",
+    "echo",
+    "find_brew",
+    "if [ -z \"$BREW\" ]; then",
+    "  echo \"Step 1/3: installing Homebrew (the Mac package manager).\"",
+    "  echo \"Press Return when asked, then type your Mac password (nothing shows while you type) and press Return.\"",
+    "  echo",
+    "  /bin/bash -c \"$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)\" || fail \"Homebrew\"",
+    "  find_brew",
+    "  [ -n \"$BREW\" ] || fail \"Homebrew was not found after installing\"",
+    "else",
+    "  echo \"Step 1/3: Homebrew is already installed.\"",
+    "fi",
+    "echo",
+    "echo \"Step 2/3: installing Python 3.13 and BWF MetaEdit...\"",
+    "FORMULAE=\"python@3.13 bwfmetaedit\"",
+    -- Intel Macs: no ready-made opentimelineio build, pip compiles it (needs cmake)
+    "[ \"$(uname -m)\" = \"arm64\" ] || FORMULAE=\"$FORMULAE cmake\"",
+    "\"$BREW\" install $FORMULAE || fail \"brew install $FORMULAE\"",
+    "PY=\"$(\"$BREW\" --prefix)/opt/python@3.13/bin/python3.13\"",
+    "[ -x \"$PY\" ] || fail \"Python 3.13 was not found at $PY\"",
+    "echo",
+    "echo \"Step 3/3: installing OpenTimelineIO and the AAF / XML adapters...\"",
+    "\"$PY\" -m pip install --upgrade --break-system-packages " .. pkgs
+      .. " || fail \"pip install\"",
+    "echo",
+    "\"$PY\" -c 'import opentimelineio as o; o.adapters.from_name(\"AAF\"); o.adapters.from_name(\"fcp_xml\"); import openpyxl' \\",
+    "  || fail \"the final check\"",
+    "echo \"All done. Close this window and load the AAF / XML in Conform List Browser again.\"",
+    "read -n 1 -s -r -p \"Press any key to close this window...\"",
+    "echo",
+  }, "\n") .. "\n"
+end
+
+--- Write the installer script and open it in Terminal (macOS only).
+--- @return boolean ok, string|nil err
+function M.open_installer()
+  local os_name = (reaper and reaper.GetOS and reaper.GetOS()) or ""
+  if not os_name:match("^OSX") and not os_name:match("^macOS") then
+    return false, "The automatic installer is for macOS only."
+  end
+  local path = "/tmp/hsuanice_CLB_install_python_tools.command"
+  local f = io.open(path, "w")
+  if not f then return false, "Cannot write " .. path end
+  f:write(M.installer_script())
+  f:close()
+  os.execute("chmod 755 " .. shell_quote(path))
+  local ok = os.execute("open -a Terminal " .. shell_quote(path))
+  if not ok then return false, "Could not open Terminal." end
+  return true
 end
 
 -- ---------------------------------------------------------------------------

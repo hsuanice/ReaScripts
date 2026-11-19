@@ -2,6 +2,10 @@
 
 hsuanice_OTIO Bridge.lua
 
+## 26.1119.1841pre1
+
+- New: find_ready_python / open_installer - Python detection for AAF requires the OpenTimelineIO AAF adapter; Terminal installer for the Python tools (macOS)
+
 ## 26.1103.2023
 
 - Release: AAF exact source start, mix and speed change carried to CLB (tested)

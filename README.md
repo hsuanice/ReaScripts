@@ -20,8 +20,40 @@ REAPER scripts for audio post-production, by hsuanice.
 - **ReaImGui** — needed by the GUI scripts; install with ReaPack (*ReaTeam Extensions* repository, included by default).
 - **SWS Extension** — optional; a few features use it (e.g. *Retain Glue Cues*, Session Fix's Off grid).
 - **js_ReaScriptAPI** — needed by *Toggle Set Time Selection to Items on Right Drag*, recommended for *Toggle Track and Razor Item Link like Pro Tools*; install with ReaPack (*ReaTeam Extensions*).
-- **Python 3 + OpenTimelineIO** (`pip install opentimelineio`) — only for *Conform List Browser* AAF / XML / OTIO import; EDL needs nothing extra. AAF also needs **aaftool** from LibAAF.
-- **BWF MetaEdit** (`bwfmetaedit` command-line tool) — optional; only needed for timecode (BWF TimeReference) embedding.
+- **Python tools for *Conform List Browser*** — only for AAF / XML / OTIO import (EDL needs nothing extra); see [below](#conform-list-browser-python-tools).
+- **BWF MetaEdit** (`bwfmetaedit` command-line tool) — optional; needed for timecode (BWF TimeReference) embedding, and lets *Conform List Browser* read reel / timecode from the AAF's BWF media.
+
+### Conform List Browser: Python tools
+
+AAF / XML / OTIO import needs Python 3.13 with OpenTimelineIO and its AAF / XML adapters.
+
+**Automatic (macOS):** load an AAF / XML in *Conform List Browser*. If the tools are missing, CLB asks
+whether to install them and opens **Terminal** with the commands ready. Press **Return** and type your
+Mac password when asked (nothing shows while you type). When Terminal says *All done*, load the file again.
+You can also start it any time from **Options > Install Python Tools...**.
+
+The installer runs these steps:
+
+1. Installs [Homebrew](https://brew.sh/) if it is not installed yet (Homebrew also installs Apple's Command Line Tools).
+2. `brew install python@3.13 bwfmetaedit` (Intel Macs also get `cmake`, used to build OpenTimelineIO).
+3. Installs the Python packages `opentimelineio otio-aaf-adapter otio-fcp-adapter pyaaf2 openpyxl`, then checks them.
+
+**Manual:** in Terminal:
+
+```sh
+/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"   # skip if Homebrew is installed
+brew install python@3.13 bwfmetaedit
+$(brew --prefix)/opt/python@3.13/bin/python3.13 -m pip install --break-system-packages \
+  opentimelineio otio-aaf-adapter otio-fcp-adapter pyaaf2 openpyxl
+```
+
+Notes:
+
+- Python **3.13**, not the newest Python: OpenTimelineIO has no ready-made build for Python 3.14 yet.
+- `--break-system-packages` lets pip install into Homebrew's Python (Homebrew blocks this by default).
+  If a later Homebrew update removes these packages, CLB notices and offers to install them again.
+- **aaftool** ([LibAAF](https://github.com/agfline/LibAAF)) is optional: CLB uses it only if the AAF adapter is missing.
+  It is not in Homebrew; build it from source (`cmake` + `make`).
 
 ### Platforms
 
@@ -175,5 +207,5 @@ Auto Color's Shiny mode follows the ShinyColor behavior of *Chroma - Coloring To
 
 Session Fix - Interchange Prep's *Workflow cues* check takes its way of releasing and reloading media files (media offline / online, rebuild peaks) from amagalma's *Remove selected items' active takes' source file cue points (WAV only)* (ReaTeam Scripts).
 
-Conform List Browser uses [OpenTimelineIO](https://github.com/AcademySoftwareFoundation/OpenTimelineIO) (Academy Software Foundation) for timeline files and [LibAAF](https://github.com/agfline/LibAAF) by agfline (aaftool) for AAF.
+Conform List Browser uses [OpenTimelineIO](https://github.com/AcademySoftwareFoundation/OpenTimelineIO) (Academy Software Foundation) for timeline files, its [AAF adapter](https://github.com/OpenTimelineIO/otio-aaf-adapter) with [pyaaf2](https://github.com/markreidvfx/pyaaf2) by Mark Reid for AAF, and [LibAAF](https://github.com/agfline/LibAAF) by agfline (aaftool) as the AAF fallback. Its Python tools installer uses [Homebrew](https://brew.sh/); the Terminal installer idea comes from hsuanice's Wave Manager for Post.
 `Library/json.lua` is based on [rxi/json.lua](https://github.com/rxi/json.lua) (MIT License, Copyright (c) 2020 rxi); the full license notice is kept in the file.

@@ -1,5 +1,9 @@
 # hsuanice_Library.lua — Changelog
 
+## 26.1119.1841pre1
+
+- OTIO Bridge: AAF-adapter-aware Python detection and the Python tools installer used by Conform List Browser
+
 ## 26.1104.0858pre1
 
 - Waveform Sync Core: MIN_SPAN_SEC setting
