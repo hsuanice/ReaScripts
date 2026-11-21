@@ -1,6 +1,6 @@
 --[[
 @description Conform List Browser - CLB: conform EDL / AAF / XML / OTIO / subtitle lists (GUI + Jump / Link / Load / Reveal)
-@version 26.1121.1322pre1
+@version 26.1121.1509pre1
 @author hsuanice
 @provides
   [main] .
@@ -13,8 +13,7 @@
   [nomain] ../Tools/aaf_to_otio.py
   [nomain] ../Tools/subtitle_to_clb.py
 @changelog
-  - Fix: EDLs named with a track range (Premiere: ..._A1-4.edl, _A5-8.edl, _A13-15.edl) now land on their own tracks (ch 1-4 = A5-A8 for _A5-8) instead of all on A1-A2, where they overlapped
-  - Add: several EDLs loaded together with no number in their names are numbered 1, 2, 3 ... in file name order (EDL Audio setting decides 2 or 4 tracks per file)
+  - Change: every item CLB creates (Generate Items, Conform, Scene Cut track, Recut / DME Recut) has Loop source off, whatever REAPER's default for new items
 @about
   Note: the Compare view (old vs new cut, reconform) is a work in progress and not finished yet.
 
@@ -6371,6 +6370,7 @@ function CLB.create_empty_item(tr, row, skip_pan)
   if length <= 0 then length = 0.001 end  -- minimum length
 
   local item = reaper.AddMediaItemToTrack(tr)
+  reaper.SetMediaItemInfo_Value(item, "B_LOOPSRC", 0) -- CLB items never loop the source
   reaper.SetMediaItemInfo_Value(item, "D_POSITION", pos)
   reaper.SetMediaItemInfo_Value(item, "D_LENGTH", length)
 
@@ -7047,6 +7047,7 @@ local function conform_matched_items(selected_only)
         if length <= 0 then length = 0.001 end
 
         item = reaper.AddMediaItemToTrack(tr)
+        reaper.SetMediaItemInfo_Value(item, "B_LOOPSRC", 0) -- CLB items never loop the source
         reaper.SetMediaItemInfo_Value(item, "D_POSITION", pos)
         reaper.SetMediaItemInfo_Value(item, "D_LENGTH", length)
       end
@@ -8201,6 +8202,7 @@ local function create_scene_cut_track()
     if length <= 0 then length = 0.001 end
 
     local item = reaper.AddMediaItemToTrack(tr)
+    reaper.SetMediaItemInfo_Value(item, "B_LOOPSRC", 0) -- CLB items never loop the source
     reaper.SetMediaItemInfo_Value(item, "D_POSITION", si.rec_in)
     reaper.SetMediaItemInfo_Value(item, "D_LENGTH", length)
     if si.__overlap then
@@ -8458,6 +8460,7 @@ function CLB.populate_recut_track(moves, fps, is_drop)
 
   local function add_marker_item(pos, len, label, jump_to_sec, color)
     local item = reaper.AddMediaItemToTrack(tr)
+    reaper.SetMediaItemInfo_Value(item, "B_LOOPSRC", 0) -- CLB items never loop the source
     reaper.SetMediaItemInfo_Value(item, "D_POSITION", pos)
     reaper.SetMediaItemInfo_Value(item, "D_LENGTH", math.max(len, 0.001))
     reaper.SetMediaItemInfo_Value(item, "I_CUSTOMCOLOR", color)
@@ -8550,6 +8553,7 @@ function CLB.dme_recut_execute()
             local new_pos    = mv.rec_in + rel_offset
 
             local new_item = reaper.AddMediaItemToTrack(track)
+            reaper.SetMediaItemInfo_Value(new_item, "B_LOOPSRC", 0) -- CLB items never loop the source
             reaper.SetMediaItemInfo_Value(new_item, "D_POSITION", new_pos)
             reaper.SetMediaItemInfo_Value(new_item, "D_LENGTH", chunk_len)
             reaper.SetMediaItemInfo_Value(new_item, "D_VOL",

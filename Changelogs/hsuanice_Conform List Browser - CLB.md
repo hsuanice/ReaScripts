@@ -4,6 +4,10 @@
 
 Conform List Browser
 
+## 26.1121.1509pre1
+
+- Change: every item CLB creates (Generate Items, Conform, Scene Cut track, Recut / DME Recut) has Loop source off, whatever REAPER's default for new items
+
 ## 26.1121.1322pre1
 
 - Fix: EDLs named with a track range (Premiere: ..._A1-4.edl, _A5-8.edl, _A13-15.edl) now land on their own tracks (ch 1-4 = A5-A8 for _A5-8) instead of all on A1-A2, where they overlapped
