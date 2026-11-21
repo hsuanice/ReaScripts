@@ -1,11 +1,10 @@
 --[[
 @description Import Audio Folders to Tracks - Field Recorder: one folder per track, channel-split files grouped (GUI)
-@version 26.1121.1245pre2
+@version 26.1121.1250
 @author hsuanice
 @changelog
-  - Add: hover info on the three Channel tracks options (File order is the fastest, Recorder Ch + Track Name the slowest)
-  - Change: metadata is read file by file while importing (streaming), so tracks and items appear right away instead of after the whole folder is read
-  - Add: console progress, one line per file (file -> track) plus the summary at the end
+  - Release: Channel tracks option on import — File order (fastest), Recorder Ch, or Recorder Ch + Track Name (default, slowest; e.g. "Ch 03 — CHING HAN"), with hover info
+  - Release: streaming import with console progress (one line per file); files without recorder metadata use the file name channel and are listed in the summary (tested)
 @about
   - Pre-confirm dialog: shows total folders/files, lets you choose a channel naming pattern or a custom mask, then offers [Import] / [Cancel].
     - Sequence only (append at the end of the target track).

@@ -4,6 +4,11 @@
 
 ReaImGui - Import audio: one folder per track; channel-split files go to child tracks. Sequence only.
 
+## 26.1121.1250
+
+- Release: Channel tracks option on import — File order (fastest), Recorder Ch, or Recorder Ch + Track Name (default, slowest; e.g. "Ch 03 — CHING HAN"), with hover info
+- Release: streaming import with console progress (one line per file); files without recorder metadata use the file name channel and are listed in the summary (tested)
+
 ## 26.1121.1245pre2
 
 - Add: hover info on the three Channel tracks options (File order is the fastest, Recorder Ch + Track Name the slowest)
