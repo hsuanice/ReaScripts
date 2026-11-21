@@ -1,15 +1,22 @@
 --[[
 @description Import Audio Folders to Tracks - Field Recorder: one folder per track, channel-split files grouped (GUI)
-@version 26.1103.2023
+@version 26.1121.1236pre1
 @author hsuanice
 @changelog
-  - Release: imports go below any folder left open at the end of the project; spot to BWF TC lists files without TC; waits while another project tab is active (tested)
+  - Add: Channel tracks option in the import dialog — File order (original), Recorder Ch, or Recorder Ch + Track Name (default; e.g. "Ch 03 — CHING HAN"), so Copy to Sort is no longer needed after import
+  - Files without recorder metadata fall back to the file name channel and are listed in the finish summary
+  - Needs the hsuanice Library package (Metadata Read)
 @about
   - Pre-confirm dialog: shows total folders/files, lets you choose a channel naming pattern or a custom mask, then offers [Import] / [Cancel].
     - Sequence only (append at the end of the target track).
     - Every directory that contains audio becomes a folder parent track (including the selected root).
     - Non–channel-split files (no ".A<number>" or "_<number>" match) go onto the PARENT folder track (one track per folder, including root).
-    - Channel-split files → child tracks named "Ch XX" (XX is the parsed channel number).
+    - Channel-split files → child tracks, laid out by the "Channel tracks" option (remembered):
+        File order: "Ch XX" from the number in the file name (original behavior).
+        Recorder Ch: "Ch XX" from the recorder channel in the metadata (iXML CHANNEL_INDEX).
+        Recorder Ch + Track Name (default): "Ch XX — Name"; a channel renamed mid-day gets one track per name.
+      Channel and name are read like "Reorder - Copy to Sort" (hsuanice Metadata Read). Files without
+      recorder metadata fall back to the file name channel and are listed in the finish summary.
     - Recursively scans all subfolders but does NOT nest folder tracks beyond two levels: each directory with files is its own parent+children block.
     - Streaming import with a small ReaImGui "Stop" window (ESC also works on some systems). On completion/abort: auto-close progress, then show a finish summary.
     - No ImGui Destroy/Detach calls (avoids crashes on some builds).
@@ -55,6 +62,26 @@ local CHAN_CUSTOM_MASK = reaper.GetExtState(MODE_SECTION, MASK_KEY) or ""
 
 local SPOT_KEY  = "SpotToTC"
 local SPOT_TO_TC = (reaper.GetExtState(MODE_SECTION, SPOT_KEY) == "1")
+
+-- Channel track layout for split files
+-- 1 = File order        : "Ch XX" from the file name number (original behavior)
+-- 2 = Recorder Ch       : "Ch XX" from the recorder channel (iXML CHANNEL_INDEX)
+-- 3 = Recorder Ch + Name: "Ch XX — Track Name"; one track per channel + name
+local LAYOUT_KEY  = "ChannelLayout"
+local LAYOUT_MODE = tonumber(reaper.GetExtState(MODE_SECTION, LAYOUT_KEY)) or 3
+if LAYOUT_MODE < 1 or LAYOUT_MODE > 3 then LAYOUT_MODE = 3 end
+
+-- hsuanice Library is a separate ReaPack package: tell the user if it is missing
+local LIB_DIR = reaper.GetResourcePath() .. "/Scripts/hsuanice Scripts/Library/"
+if not reaper.file_exists(LIB_DIR .. "hsuanice_Metadata Read.lua") then
+  reaper.MB('This script needs the "hsuanice Library" package.\n\n'
+    .. 'Please install it with ReaPack (Extensions > ReaPack > Browse packages),\n'
+    .. 'then run this script again.\n\nMissing file: hsuanice_Metadata Read.lua',
+    'hsuanice Library not found', 0)
+  if reaper.ReaPack_BrowsePackages then reaper.ReaPack_BrowsePackages('hsuanice Library') end
+  return
+end
+local META = dofile(LIB_DIR .. "hsuanice_Metadata Read.lua")
 
 -- === Custom Mask Presets (ExtState) =========================================
 local MASK_PRESET_SECTION = "hsuanice_ImportAudio_Folder"
@@ -484,6 +511,44 @@ local function finish_all_parents()
   if current_parent_key then finish_parent(current_parent_key) end
 end
 
+-- ========= recorder metadata (Recorder Ch / Track Name) =========
+local function trim(s) return (tostring(s or ""):gsub("^%s+", ""):gsub("%s+$", "")) end
+
+-- Read the recorder channel and track name of one file through a temporary item
+-- on `tr` (the library reads fields from items). Same resolution as Reorder - Copy to Sort.
+-- Returns ch, name; ch is nil when the file has no recorder metadata.
+local function read_recorder_meta(tr, file_abs)
+  local src = reaper.PCM_Source_CreateFromFile(file_abs)
+  if not src then return nil, "" end
+  local it = reaper.AddMediaItemToTrack(tr)
+  local tk = reaper.AddTakeToMediaItem(it)
+  reaper.SetMediaItemTake_Source(tk, src)
+  local ch, name
+  local ok, f = pcall(META.collect_item_fields, it)
+  if ok and f then
+    local has_meta = type(f.__ixml_tracks) == "table" and #f.__ixml_tracks > 0
+    if not has_meta then
+      for k in pairs(f) do
+        if k:match("^[Tt][Rr][Kk]%d+$") then has_meta = true; break end
+      end
+    end
+    if has_meta then
+      local nm, c = META.trk_name_and_channel(f, 1)
+      ch = tonumber(c)
+      name = trim(nm)
+      if name == "" then name = trim(META.expand("${trk}", f, nil, false)) end
+    end
+  end
+  reaper.DeleteTrackMediaItem(tr, it)  -- also destroys the take's source
+  return ch, name or ""
+end
+
+local function channel_label(ch, name)
+  local s = string.format("Ch %02d", ch)
+  if name and name ~= "" then s = s .. " — " .. name end
+  return s
+end
+
 
 
 -- ========= UIs =========
@@ -496,7 +561,7 @@ local function ui_pre_open(base_name, folders, files, on_decide)
   UI_PRE.ctx = reaper.ImGui_CreateContext('Confirm Import')
   local function loop()
     if not UI_PRE.ctx then return end
-    reaper.ImGui_SetNextWindowSize(UI_PRE.ctx, 480, 240, reaper.ImGui_Cond_Once())
+    reaper.ImGui_SetNextWindowSize(UI_PRE.ctx, 480, 340, reaper.ImGui_Cond_Once())
     reaper.ImGui_PushFont(UI_PRE.ctx, nil, FONT_SIZE)
     local vis, open = reaper.ImGui_Begin(UI_PRE.ctx, 'Confirm Import', true)
     if vis then
@@ -509,6 +574,20 @@ local function ui_pre_open(base_name, folders, files, on_decide)
       local spot_changed
       spot_changed, SPOT_TO_TC = reaper.ImGui_Checkbox(UI_PRE.ctx, 'Spot to original timecode (BWF)', SPOT_TO_TC)
       if spot_changed then reaper.SetExtState(MODE_SECTION, SPOT_KEY, SPOT_TO_TC and "1" or "0", true) end
+
+      reaper.ImGui_Separator(UI_PRE.ctx)
+      reaper.ImGui_Text(UI_PRE.ctx, 'Channel tracks:')
+      local layouts = {
+        'File order  (Ch XX from the file name)',
+        'Recorder Ch  (Ch XX from metadata)',
+        'Recorder Ch + Track Name  (Ch XX — Name)',
+      }
+      for i, lbl in ipairs(layouts) do
+        if reaper.ImGui_RadioButton(UI_PRE.ctx, lbl .. '##layout' .. i, LAYOUT_MODE == i) then
+          LAYOUT_MODE = i
+          reaper.SetExtState(MODE_SECTION, LAYOUT_KEY, tostring(i), true)
+        end
+      end
 
       reaper.ImGui_Separator(UI_PRE.ctx)
       local avail = reaper.ImGui_GetContentRegionAvail(UI_PRE.ctx)
@@ -772,29 +851,51 @@ local function run_after_confirm(base, list)
   local file_idx_in_parent = 1
   local current_key = nil
 
-  local function precreate_channel_children_for(key)
-    local G = groups[key]; if not G or G.ch_precreated then return end
-    local set = {}
-    for _,f in ipairs(G.files) do
-      local fn = f:match("([^/\\]+)$") or f
-      local ch = chan_from_filename(fn)
-      if ch and ch > 0 then set[ch] = true end
-    end
-    if next(set) then
-      local listn = {}
-      for n,_ in pairs(set) do listn[#listn+1]=n end
-      table.sort(listn, function(a,b) return a<b end)
-      for _,n in ipairs(listn) do
-        local child_name = string.format("Ch %02d", n)
-        ensure_child_under(key, child_name)
-      end
-    end
-    G.ch_precreated = true
-  end
-
   local imported = 0
   local aborted  = false
   local no_tc    = {}
+  local no_meta  = {}   -- split files without recorder metadata (fell back to the file name channel)
+
+  -- Decide the child track of every split file in the folder (G.labels[file] = track name),
+  -- then create the child tracks in order: channel first, then track name.
+  local function precreate_channel_children_for(key)
+    local G = groups[key]; if not G or G.ch_precreated then return end
+    G.labels = {}
+    local P = parents[key]
+    local slots, seen = {}, {}
+    if LAYOUT_MODE ~= 1 and META.begin_batch then META.begin_batch() end
+    for _,f in ipairs(G.files) do
+      local fn = f:match("([^/\\]+)$") or f
+      local ch = chan_from_filename(fn)
+      if ch and ch > 0 then
+        local name = ""
+        if LAYOUT_MODE ~= 1 and P then
+          local mch, mname = read_recorder_meta(P.tr, f)
+          if mch and mch > 0 then
+            ch = mch
+            if LAYOUT_MODE == 3 then name = mname end
+          else
+            no_meta[#no_meta+1] = fn
+          end
+        end
+        local label = channel_label(ch, name)
+        G.labels[f] = label
+        if not seen[label] then
+          seen[label] = true
+          slots[#slots+1] = { ch = ch, name = name, label = label }
+        end
+        debug("    "..fn.." -> "..label)
+      end
+    end
+    if LAYOUT_MODE ~= 1 and META.end_batch then META.end_batch() end
+    table.sort(slots, function(a, b)
+      if a.ch ~= b.ch then return a.ch < b.ch end
+      if a.name ~= b.name then return nat_less(a.name, b.name) end
+      return false
+    end)
+    for _,s in ipairs(slots) do ensure_child_under(key, s.label) end
+    G.ch_precreated = true
+  end
   -- Tracks and items always go to the active project, so the import pauses
   -- while another project tab is shown instead of spilling into it.
   local import_proj, import_path = reaper.EnumProjects(-1)
@@ -810,6 +911,11 @@ local function run_after_confirm(base, list)
       msg = msg .. string.format("\n\nNo timecode (left in sequence): %d", #no_tc)
       for i = 1, math.min(#no_tc, 10) do msg = msg .. "\n  " .. no_tc[i] end
       if #no_tc > 10 then msg = msg .. "\n  ..." end
+    end
+    if #no_meta > 0 then
+      msg = msg .. string.format("\n\nNo recorder metadata (used the file name channel): %d", #no_meta)
+      for i = 1, math.min(#no_meta, 10) do msg = msg .. "\n  " .. no_meta[i] end
+      if #no_meta > 10 then msg = msg .. "\n  ..." end
     end
     ui_post_open(msg)
   end
@@ -857,15 +963,14 @@ local function run_after_confirm(base, list)
       if esc_pressed() or UI_PROGRESS.stop then break end
       local f = files[file_idx_in_parent]; file_idx_in_parent = file_idx_in_parent + 1
       local fn = f:match("([^/\\]+)$") or f
-      local ch = chan_from_filename(fn)
+      local child_name = G.labels and G.labels[f]
 
       debug(">>> Processing file: "..fn)
       debug("    Folder key: '"..key.."'")
 
       local target_tr
-      if ch and ch > 0 then
-        -- channel-split -> child "Ch XX"
-        local child_name = string.format("Ch %02d", ch)
+      if child_name then
+        -- channel-split -> child "Ch XX" (or "Ch XX — Name")
         debug("    -> Placing on CHILD track: '"..child_name.."'")
         target_tr = ensure_child_under(key, child_name)
       else

@@ -130,7 +130,7 @@ and background on/off scripts start with `Toggle`.
 | Delete Selected Tracks with Warning | Safe delete: asks first when tracks have items, FX, routing or are folders |
 | Play from Mouse and Solo Track Under Mouse While Key Held | Hold the shortcut to play from the mouse with the track under it soloed (pinned tracks aware), release to stop and restore solo |
 | Show Hide Folder Child Tracks in TCP | Show or hide the children of the selected folder tracks (or of their parent) |
-| Import Audio Folders to Tracks - Field Recorder | Import one folder per track; channel-split recorder files are grouped (GUI) |
+| Import Audio Folders to Tracks - Field Recorder | Import one folder per track; channel-split recorder files are grouped by file order, recorder channel, or recorder channel + track name (GUI) |
 | Import Audio Folders to Tracks - Music Multitrack | Import one folder per track for music multitrack sessions (GUI) |
 
 ### Metadata

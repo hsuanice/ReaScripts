@@ -4,6 +4,12 @@
 
 ReaImGui - Import audio: one folder per track; channel-split files go to child tracks. Sequence only.
 
+## 26.1121.1236pre1
+
+- Add: Channel tracks option in the import dialog — File order (original), Recorder Ch, or Recorder Ch + Track Name (default; e.g. "Ch 03 — CHING HAN"), so Copy to Sort is no longer needed after import
+- Files without recorder metadata fall back to the file name channel and are listed in the finish summary
+- Needs the hsuanice Library package (Metadata Read)
+
 ## 26.1103.2023
 
 - Release: imports go below any folder left open at the end of the project; spot to BWF TC lists files without TC; waits while another project tab is active (tested)
