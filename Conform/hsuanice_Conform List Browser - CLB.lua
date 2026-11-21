@@ -1,6 +1,6 @@
 --[[
 @description Conform List Browser - CLB: conform EDL / AAF / XML / OTIO / subtitle lists (GUI + Jump / Link / Load / Reveal)
-@version 26.1119.1841pre1
+@version 26.1121.1322pre1
 @author hsuanice
 @provides
   [main] .
@@ -13,9 +13,8 @@
   [nomain] ../Tools/aaf_to_otio.py
   [nomain] ../Tools/subtitle_to_clb.py
 @changelog
-  - New: when you load an AAF / XML / OTIO and the Python tools are missing, CLB offers to install them - Terminal opens with the commands ready (macOS); press Return and type the Mac password if asked. Also in Options > Install Python Tools...
-  - Installs Homebrew (if needed), Python 3.13, BWF MetaEdit, opentimelineio, otio-aaf-adapter, otio-fcp-adapter, pyaaf2 and openpyxl (Python 3.13 because opentimelineio has no 3.14 build yet)
-  - Fix: AAF import now picks a Python that has the OpenTimelineIO AAF adapter, instead of one with OpenTimelineIO only (that one silently fell back to aaftool, or failed)
+  - Fix: EDLs named with a track range (Premiere: ..._A1-4.edl, _A5-8.edl, _A13-15.edl) now land on their own tracks (ch 1-4 = A5-A8 for _A5-8) instead of all on A1-A2, where they overlapped
+  - Add: several EDLs loaded together with no number in their names are numbered 1, 2, 3 ... in file name order (EDL Audio setting decides 2 or 4 tracks per file)
 @about
   Note: the Compare view (old vs new cut, reconform) is a work in progress and not finished yet.
 
@@ -3409,14 +3408,21 @@ end
 --- its AAF, every reel). Mono tracks: ch c = A(4(k-1)+c). An event on
 --- channels of two tracks becomes one event per track. Video events and
 --- events without audio channels are left as they are. File number k from
---- the file name's "_A<k>" (else 1). Rewrites parsed.events in place.
+--- the file name's "_A<k>"; when several EDLs without it are loaded together,
+--- k counts up in file name order (CLB._edl_auto_k); else 1. A file name with
+--- a track range "_A5-8" (Premiere) names its tracks directly: ch c = A(5+c-1),
+--- one track per channel, whatever the Stereo / Mono setting. Rewrites
+--- parsed.events in place.
 CLB.EDL_AUDIO_LABELS = { stereo = "Stereo tracks", mono = "Mono tracks", edl = "As in EDL" }
 function CLB.map_edl_audio_tracks(parsed, source_path)
   local mode = CLB.edl_audio_tracks or "stereo"
   if mode == "edl" or not parsed or parsed.format ~= "CMX3600" or not parsed.events then return end
   local fname = (source_path or ""):match("([^/\\]+)$") or ""
-  local k = tonumber(fname:match("[_%s%-][Aa](%d+)%.[Ee][Dd][Ll]$")) or 1
-  local per_file = mode == "mono" and 4 or 2
+  local r_lo, r_hi = fname:match("[_%s%-][Aa](%d+)%-(%d+)%.[Ee][Dd][Ll]$")
+  r_lo, r_hi = tonumber(r_lo), tonumber(r_hi)
+  if r_lo and r_hi and r_hi < r_lo then r_lo, r_hi = nil, nil end
+  local k_auto = CLB._edl_auto_k and CLB._edl_auto_k[source_path or ""]
+  local k = tonumber(fname:match("[_%s%-][Aa](%d+)%.[Ee][Dd][Ll]$")) or k_auto or 1
   local CH = { A = { 1 }, A1 = { 1 }, A2 = { 2 }, B = { 2 }, AA = { 1, 2 }, A3 = { 3 }, A4 = { 4 } }
   local out, mapped, used = {}, 0, {}
   for _, evt in ipairs(parsed.events) do
@@ -3430,7 +3436,12 @@ function CLB.map_edl_audio_tracks(parsed, source_path)
     if not has_video then
       for c = 1, 4 do
         if chs[c] then
-          local n = mode == "mono" and (4 * (k - 1) + c) or (2 * (k - 1) + (c + 1) // 2)
+          local n
+          if r_lo then
+            n = r_lo + c - 1
+          else
+            n = mode == "mono" and (4 * (k - 1) + c) or (2 * (k - 1) + (c + 1) // 2)
+          end
           if not seen[n] then seen[n] = true; tracks[#tracks + 1] = n end
         end
       end
@@ -3457,8 +3468,18 @@ function CLB.map_edl_audio_tracks(parsed, source_path)
     for n in pairs(used) do list[#list + 1] = n end
     table.sort(list)
     for i, n in ipairs(list) do list[i] = "A" .. n end
-    console_msg(string.format("%s: %d audio events -> tracks %s (%s, file %d)", fname, mapped,
-      table.concat(list, ", "), CLB.EDL_AUDIO_LABELS[mode], k))
+    local how
+    if r_lo then
+      how = string.format("track range A%d-%d in the file name", r_lo, r_hi)
+    else
+      how = string.format("%s, file %d%s", CLB.EDL_AUDIO_LABELS[mode], k,
+        (k_auto and not fname:match("[_%s%-][Aa](%d+)%.[Ee][Dd][Ll]$")) and " by file order" or "")
+    end
+    console_msg(string.format("%s: %d audio events -> tracks %s (%s)", fname, mapped,
+      table.concat(list, ", "), how))
+    if r_lo and used[r_hi + 1] then
+      console_msg(string.format("  WARNING %s: audio on a channel past A%d (the file name's range)", fname, r_hi))
+    end
   end
 end
 
@@ -4679,6 +4700,31 @@ end
 local function _apply_timeline_results(all_parsed, filepaths, default_fps, opts)
   opts = opts or {}
   if #all_parsed == 0 then return false end
+
+  -- Several CMX3600 EDLs whose names carry no "_A<k>" / "_A<lo>-<hi>": number
+  -- them 1, 2, 3 ... in file name order so their audio lands on separate tracks
+  -- (CLB.map_edl_audio_tracks) instead of all on A1-A2.
+  CLB._edl_auto_k = nil
+  do
+    local plain = {}
+    for _, ap in ipairs(all_parsed) do
+      local fname = (ap.path or ""):match("([^/\\]+)$") or ""
+      if ap.parsed and ap.parsed.format == "CMX3600"
+        and not fname:match("[_%s%-][Aa]%d+%.[Ee][Dd][Ll]$")
+        and not fname:match("[_%s%-][Aa]%d+%-%d+%.[Ee][Dd][Ll]$") then
+        plain[#plain + 1] = ap.path
+      end
+    end
+    if #plain > 1 then
+      local function nat_key(path)
+        return ((path:match("([^/\\]+)$") or path):lower():gsub("%d+", function(d)
+          return string.format("%012d", tonumber(d)) end))
+      end
+      table.sort(plain, function(a, b) return nat_key(a) < nat_key(b) end)
+      CLB._edl_auto_k = {}
+      for i, path in ipairs(plain) do CLB._edl_auto_k[path] = i end
+    end
+  end
 
   -- Count total events for the dialog
   local total_events = 0
@@ -9860,6 +9906,9 @@ function CLB.draw_left_sidebar()
       .. "Stereo tracks: each file = 2 tracks (ch 1+2 = A1, ch 3+4 = A2; file _A2 = A3, A4 ...).\n"
       .. "Mono tracks: each file = 4 tracks (ch 1-4 = A1-A4; file _A2 = A5-A8 ...).\n"
       .. "As in EDL: the EDL's own track field (AA, NONE ...), as before.\n"
+      .. "A file name with a track range (Premiere: ..._A1-4.edl, _A5-8.edl ...) names its tracks:\n"
+      .. "  ch 1-4 = A5-A8 for _A5-8, whatever Stereo / Mono says.\n"
+      .. "Several EDLs with no number in the name: numbered 1, 2, 3 ... in file name order.\n"
       .. "Tracks then match the AAF's (AAF - A1 / EDL - A1). Reload the EDL after changing this.")
   end
 

@@ -4,6 +4,11 @@
 
 Conform List Browser
 
+## 26.1121.1322pre1
+
+- Fix: EDLs named with a track range (Premiere: ..._A1-4.edl, _A5-8.edl, _A13-15.edl) now land on their own tracks (ch 1-4 = A5-A8 for _A5-8) instead of all on A1-A2, where they overlapped
+- Add: several EDLs loaded together with no number in their names are numbered 1, 2, 3 ... in file name order (EDL Audio setting decides 2 or 4 tracks per file)
+
 ## 26.1119.1841pre1
 
 - New: when you load an AAF / XML / OTIO and the Python tools are missing, CLB offers to install them - Terminal opens with the commands ready (macOS); press Return and type the Mac password if asked. Also in Options > Install Python Tools...
