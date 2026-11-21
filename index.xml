@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<index version="1" name="hsuanice Scripts" commit="bdc5c1a335944882ef6d955a0e557930f3741a02">
+<index version="1" name="hsuanice Scripts" commit="0a28e50d9aaf1c5049eab67ad3f61b45b824b463">
   <category name="Conform">
     <reapack name="hsuanice_Conform List Browser - CLB.lua" type="script" desc="Conform List Browser - CLB: conform EDL / AAF / XML / OTIO / subtitle lists (GUI + Jump / Link / Load / Reveal)">
       <metadata>
@@ -2821,6 +2821,11 @@
 - Change: metadata is read file by file while importing (streaming), so tracks and items appear right away instead of after the whole folder is read
 - Add: console progress, one line per file (file -> track) plus the summary at the end]]></changelog>
         <source main="main">https://github.com/hsuanice/ReaScripts/raw/bdc5c1a335944882ef6d955a0e557930f3741a02/Tracks/hsuanice_Import%20Audio%20Folders%20to%20Tracks%20-%20Field%20Recorder.lua</source>
+      </version>
+      <version name="26.1121.1250" author="hsuanice" time="2026-11-21T04:50:32Z">
+        <changelog><![CDATA[- Release: Channel tracks option on import — File order (fastest), Recorder Ch, or Recorder Ch + Track Name (default, slowest; e.g. "Ch 03 — CHING HAN"), with hover info
+- Release: streaming import with console progress (one line per file); files without recorder metadata use the file name channel and are listed in the summary (tested)]]></changelog>
+        <source main="main">https://github.com/hsuanice/ReaScripts/raw/0a28e50d9aaf1c5049eab67ad3f61b45b824b463/Tracks/hsuanice_Import%20Audio%20Folders%20to%20Tracks%20-%20Field%20Recorder.lua</source>
       </version>
     </reapack>
     <reapack name="hsuanice_Import Audio Folders to Tracks - Music Multitrack.lua" type="script" desc="Import Audio Folders to Tracks - Music Multitrack: one folder per track (GUI)">
