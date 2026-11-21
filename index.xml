@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<index version="1" name="hsuanice Scripts" commit="a1b7bfe23a324edb9575bfed23d07d37ac047461">
+<index version="1" name="hsuanice Scripts" commit="bdc5c1a335944882ef6d955a0e557930f3741a02">
   <category name="Conform">
     <reapack name="hsuanice_Conform List Browser - CLB.lua" type="script" desc="Conform List Browser - CLB: conform EDL / AAF / XML / OTIO / subtitle lists (GUI + Jump / Link / Load / Reveal)">
       <metadata>
@@ -2772,7 +2772,8 @@
 {\pard \ql \f0 \sa0 \li720 \fi-360 \endash \tx360\tab Sequence only (append at the end of the target track).\par}
 {\pard \ql \f0 \sa0 \li720 \fi-360 \endash \tx360\tab Every directory that contains audio becomes a folder parent track (including the selected root).\par}
 {\pard \ql \f0 \sa0 \li720 \fi-360 \endash \tx360\tab Non\u8211-channel-split files (no ".A" or "_" match) go onto the PARENT folder track (one track per folder, including root).\par}
-{\pard \ql \f0 \sa0 \li720 \fi-360 \endash \tx360\tab Channel-split files \u8594 ? child tracks named "Ch XX" (XX is the parsed channel number).\par}
+{\pard \ql \f0 \sa0 \li720 \fi-360 \endash \tx360\tab Channel-split files \u8594 ? child tracks, laid out by the "Channel tracks" option (remembered): File order: "Ch XX" from the number in the file name (original behavior). Recorder Ch: "Ch XX" from the recorder channel in the metadata (iXML CHANNEL_INDEX). Recorder Ch + Track Name (default): "Ch XX \u8212- Name"; a channel renamed mid-day gets one track per name. Channel and name are read like "Reorder - Copy to Sort" (hsuanice Metadata Read). Files without recorder metadata fall back to the file name channel and are listed in the finish summary. Speed: File order is the fastest (no metadata read); Recorder Ch + Track Name is the slowest. Hover an option in the dialog for details.\par}
+{\pard \ql \f0 \sa0 \li720 \fi-360 \endash \tx360\tab Streaming: metadata is read file by file, so tracks and items appear while the import runs (new channel tracks are inserted at their sorted place). Progress is printed to the ReaScript console, one line per file, with a summary at the end.\par}
 {\pard \ql \f0 \sa0 \li720 \fi-360 \endash \tx360\tab Recursively scans all subfolders but does NOT nest folder tracks beyond two levels: each directory with files is its own parent+children block.\par}
 {\pard \ql \f0 \sa0 \li720 \fi-360 \endash \tx360\tab Streaming import with a small ReaImGui "Stop" window (ESC also works on some systems). On completion/abort: auto-close progress, then show a finish summary.\par}
 {\pard \ql \f0 \sa0 \li720 \fi-360 \endash \tx360\tab No ImGui Destroy/Detach calls (avoids crashes on some builds).\sa180\sa180\par}
@@ -2808,6 +2809,18 @@
       <version name="26.1103.2023" author="hsuanice" time="2026-11-03T12:24:16Z">
         <changelog><![CDATA[- Release: imports go below any folder left open at the end of the project; spot to BWF TC lists files without TC; waits while another project tab is active (tested)]]></changelog>
         <source main="main">https://github.com/hsuanice/ReaScripts/raw/fca97a0f1d825fb74130a83ee1f5f27a0739d353/Tracks/hsuanice_Import%20Audio%20Folders%20to%20Tracks%20-%20Field%20Recorder.lua</source>
+      </version>
+      <version name="26.1121.1236pre1" author="hsuanice" time="2026-11-21T04:36:55Z">
+        <changelog><![CDATA[- Add: Channel tracks option in the import dialog — File order (original), Recorder Ch, or Recorder Ch + Track Name (default; e.g. "Ch 03 — CHING HAN"), so Copy to Sort is no longer needed after import
+- Files without recorder metadata fall back to the file name channel and are listed in the finish summary
+- Needs the hsuanice Library package (Metadata Read)]]></changelog>
+        <source main="main">https://github.com/hsuanice/ReaScripts/raw/79f2e855e5177988a2f712104bed416e7331aedb/Tracks/hsuanice_Import%20Audio%20Folders%20to%20Tracks%20-%20Field%20Recorder.lua</source>
+      </version>
+      <version name="26.1121.1245pre2" author="hsuanice" time="2026-11-21T04:45:07Z">
+        <changelog><![CDATA[- Add: hover info on the three Channel tracks options (File order is the fastest, Recorder Ch + Track Name the slowest)
+- Change: metadata is read file by file while importing (streaming), so tracks and items appear right away instead of after the whole folder is read
+- Add: console progress, one line per file (file -> track) plus the summary at the end]]></changelog>
+        <source main="main">https://github.com/hsuanice/ReaScripts/raw/bdc5c1a335944882ef6d955a0e557930f3741a02/Tracks/hsuanice_Import%20Audio%20Folders%20to%20Tracks%20-%20Field%20Recorder.lua</source>
       </version>
     </reapack>
     <reapack name="hsuanice_Import Audio Folders to Tracks - Music Multitrack.lua" type="script" desc="Import Audio Folders to Tracks - Music Multitrack: one folder per track (GUI)">
@@ -2993,7 +3006,7 @@ LibAAF
 {\pard \ql \f0 \sa180 \li0 \fi0 \outlinelevel2 \b \fs28 Selection\par}
 {\pard \ql \f0 \sa180 \li0 \fi0 | Package | What it does | |---|---| | Toggle Track and Razor Item Link like Pro Tools | Pro Tools-style "Link Track and Edit Selection": tracks follow razor areas / item selection | | Toggle Razor and Item Link Overlap or Contain | Razor areas select the items they overlap or fully contain | | Toggle Set Time Selection to Items on Right Drag | After a right-button drag, the time selection follows the selected items | | Extend Razor Edit to Mouse Cursor like Pro Tools | Pro Tools-style Shift-click: grows the razor area (time range and tracks) to the mouse position, never shrinks it |\par}
 {\pard \ql \f0 \sa180 \li0 \fi0 \outlinelevel2 \b \fs28 Tracks\par}
-{\pard \ql \f0 \sa180 \li0 \fi0 | Package | What it does | |---|---| | Auto Pan LR tracks | Pan adjacent XXX_L / XXX_R track pairs hard left / right | | Delete Selected Tracks with Warning | Safe delete: asks first when tracks have items, FX, routing or are folders | | Play from Mouse and Solo Track Under Mouse While Key Held | Hold the shortcut to play from the mouse with the track under it soloed (pinned tracks aware), release to stop and restore solo | | Show Hide Folder Child Tracks in TCP | Show or hide the children of the selected folder tracks (or of their parent) | | Import Audio Folders to Tracks - Field Recorder | Import one folder per track; channel-split recorder files are grouped (GUI) | | Import Audio Folders to Tracks - Music Multitrack | Import one folder per track for music multitrack sessions (GUI) |\par}
+{\pard \ql \f0 \sa180 \li0 \fi0 | Package | What it does | |---|---| | Auto Pan LR tracks | Pan adjacent XXX_L / XXX_R track pairs hard left / right | | Delete Selected Tracks with Warning | Safe delete: asks first when tracks have items, FX, routing or are folders | | Play from Mouse and Solo Track Under Mouse While Key Held | Hold the shortcut to play from the mouse with the track under it soloed (pinned tracks aware), release to stop and restore solo | | Show Hide Folder Child Tracks in TCP | Show or hide the children of the selected folder tracks (or of their parent) | | Import Audio Folders to Tracks - Field Recorder | Import one folder per track; channel-split recorder files are grouped by file order, recorder channel, or recorder channel + track name (GUI) | | Import Audio Folders to Tracks - Music Multitrack | Import one folder per track for music multitrack sessions (GUI) |\par}
 {\pard \ql \f0 \sa180 \li0 \fi0 \outlinelevel2 \b \fs28 Metadata\par}
 {\pard \ql \f0 \sa180 \li0 \fi0 | Package | What it does | |---|---| | Rename from Metadata | Rename the active take or the source file from BWF / iXML metadata tokens, with live preview (GUI) | | Item List | Spreadsheet-style item tables with metadata columns: Item List Browser - ILB, Item List Editor - ILE (GUI) | | BWF / iXML Embed Tools | Embed BWF iXML Metadata from Take 1, Embed Timecode to BWF and iXML, Embed SMPTE UMID (needs BWF MetaEdit) |\par}
 {\pard \ql \f0 \sa180 \li0 \fi0 \outlinelevel2 \b \fs28 Conform\par}
