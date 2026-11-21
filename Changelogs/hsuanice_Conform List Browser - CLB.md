@@ -4,6 +4,11 @@
 
 Conform List Browser
 
+## 26.1121.1606pre1
+
+- Add: Conform warns about silent takes — the matched file has no timecode (BWF TC 00:00:00:00, e.g. a render that lost its TC) or Src In is past the file's end: item note line, red item when no take can play, console list, count in the summary
+- Change: every item CLB creates has Loop source off (from 26.1121.1509pre1)
+
 ## 26.1121.1509pre1
 
 - Change: every item CLB creates (Generate Items, Conform, Scene Cut track, Recut / DME Recut) has Loop source off, whatever REAPER's default for new items

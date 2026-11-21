@@ -1,6 +1,6 @@
 --[[
 @description Conform List Browser - CLB: conform EDL / AAF / XML / OTIO / subtitle lists (GUI + Jump / Link / Load / Reveal)
-@version 26.1121.1509pre1
+@version 26.1121.1606pre1
 @author hsuanice
 @provides
   [main] .
@@ -13,7 +13,8 @@
   [nomain] ../Tools/aaf_to_otio.py
   [nomain] ../Tools/subtitle_to_clb.py
 @changelog
-  - Change: every item CLB creates (Generate Items, Conform, Scene Cut track, Recut / DME Recut) has Loop source off, whatever REAPER's default for new items
+  - Add: Conform warns about silent takes — the matched file has no timecode (BWF TC 00:00:00:00, e.g. a render that lost its TC) or Src In is past the file's end: item note line, red item when no take can play, console list, count in the summary
+  - Change: every item CLB creates has Loop source off (from 26.1121.1509pre1)
 @about
   Note: the Compare view (old vs new cut, reconform) is a work in progress and not finished yet.
 
@@ -7066,6 +7067,12 @@ local function conform_matched_items(selected_only)
         end
       end
 
+      -- Takes whose file can't place the event's audio: no timecode (BWF
+      -- TimeReference 0, e.g. a render that lost its TC) or an offset past
+      -- the file's end. The take is still added (as before) but would be
+      -- silent, so it is flagged in the note / color / console / summary.
+      local tc_warns, takes_ok = {}, 0
+
       -- Add takes for each audio file
       for ti, af in ipairs(audio_files) do
         if existing_src[af.path or ""] then
@@ -7086,6 +7093,25 @@ local function conform_matched_items(selected_only)
             if take then
               reaper.SetMediaItemTake_Source(take, source)
               reaper.SetMediaItemTakeInfo_Value(take, "D_STARTOFFS", source_offset)
+
+              local src_len = reaper.GetMediaSourceLength(source) or 0
+              local why
+              if audio_start <= 0 then
+                why = "no timecode (BWF TC 00:00:00:00)"
+              elseif src_len > 0 and source_offset >= src_len then
+                why = string.format("Src In is past the file's end (%.1f s into a %.1f s file)", source_offset, src_len)
+              end
+              if why then
+                local fname = af.filename or af.basename or (af.path or ""):match("([^/\\]+)$") or "?"
+                tc_warns[#tc_warns + 1] = fname .. ": " .. why
+                job.tc_warn_list = job.tc_warn_list or {}
+                job.tc_warn_list[#job.tc_warn_list + 1] = string.format("  Event %s  %s  %s: %s",
+                  row.event_num or "?", row.rec_tc_in or "", fname, why)
+                job.tc_warn_files = job.tc_warn_files or {}
+                job.tc_warn_files[af.path or fname] = true
+              else
+                takes_ok = takes_ok + 1
+              end
 
               -- Take name: the MATCHED FILE's own name, always — not the
               -- EDL clip name. Real user report with a screenshot: every
@@ -7133,6 +7159,12 @@ local function conform_matched_items(selected_only)
         note_parts[#note_parts + 1] = ""
         note_parts[#note_parts + 1] = row.notes
       end
+      if #tc_warns > 0 then
+        note_parts[#note_parts + 1] = ""
+        for _, w in ipairs(tc_warns) do
+          note_parts[#note_parts + 1] = "WARNING (silent take) " .. w
+        end
+      end
       reaper.GetSetMediaItemInfo_String(item, "P_NOTES", table.concat(note_parts, "\n"), true)
 
       -- Audio mix (gain / automation / pan / fades) on new items only — a
@@ -7141,8 +7173,12 @@ local function conform_matched_items(selected_only)
         CLB.apply_mix(item, row, true, track_pans[row_to_trackname[row.__guid]] ~= nil)
         -- Green = conformed with audio (unmatched empty items keep the
         -- default color). New items only, never a linked item.
+        -- Red when no take can play the event (every matched file has no
+        -- timecode or ends before Src In) — same red as other "needs a look" items.
+        local all_bad = #tc_warns > 0 and takes_ok == 0
         reaper.SetMediaItemInfo_Value(item, "I_CUSTOMCOLOR",
-          reaper.ColorToNative(70, 160, 80) | 0x1000000)
+          all_bad and (reaper.ColorToNative(200, 60, 60) | 0x1000000)
+                  or (reaper.ColorToNative(70, 160, 80) | 0x1000000))
       end
 
       job.created = job.created + 1
@@ -7151,6 +7187,19 @@ local function conform_matched_items(selected_only)
       reaper.PreventUIRefresh(-1)
       reaper.UpdateArrange()
       reaper.Undo_EndBlock("CLB: Conform " .. job.created .. " items (" .. job.takes_created .. " takes)", -1)
+      local warn_text = ""
+      if job.tc_warn_list and #job.tc_warn_list > 0 then
+        local n_files = 0
+        for _ in pairs(job.tc_warn_files) do n_files = n_files + 1 end
+        console_msg(string.format("WARNING: %d take(s) from %d file(s) are silent - the file has no timecode, "
+          .. "or Src In is past its end:", #job.tc_warn_list, n_files))
+        for _, l in ipairs(job.tc_warn_list) do console_msg(l) end
+        console_msg("  Fix the files' timecode (BWF TimeReference), rescan the audio folder, then Conform these events again.")
+        warn_text = string.format("\n\nWARNING: %d take(s) from %d file(s) are SILENT:\n"
+          .. "the file has no timecode (TC 00:00:00:00) or Src In is past its end.\n"
+          .. "Those items are red when no take can play; the list is in the ReaScript console.",
+          #job.tc_warn_list, n_files)
+      end
       reaper.ShowMessageBox(
         string.format("Conformed %d items with %d takes on %d track(s).%s%s",
           job.created, job.takes_created, #track_names_order,
@@ -7158,7 +7207,8 @@ local function conform_matched_items(selected_only)
             and string.format("\n%d unmatched event(s) added as empty items.", job.empty_created) or "",
           (linked_count > 0 and string.format("\n(%d added as a new take on their own linked Reaper item.)", linked_count) or "")
           .. ((job.takes_skipped or 0) > 0
-            and string.format("\n(%d take(s) skipped — that linked item already had a take of the same file.)", job.takes_skipped) or "")),
+            and string.format("\n(%d take(s) skipped — that linked item already had a take of the same file.)", job.takes_skipped) or "")
+          .. warn_text),
         SCRIPT_NAME, 0)
     end,
   }
