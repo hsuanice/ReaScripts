@@ -4,6 +4,13 @@
 
 Conform List Browser
 
+## 26.1123.0047pre1
+
+- Add: matching marks events whose matched file can't play them — no timecode (BWF TC 00:00:00:00), Src In before the file's start (plays the wrong audio) or past its end: ⚠ in the Match column, red Match / Matched File text (yellow when only some candidates are affected), the reason on hover, and a list in the console after matching; rechecked when Src In, the match or the audio folder changes
+- Change: Conform's warning uses the same check, so it now also flags Src In before the file's start (it used to play from the file's start without a warning)
+- Add: Conform warns about silent takes — item note line, red item when no take can play, console list, count in the summary (from 26.1121.1606pre1)
+- Change: every item CLB creates has Loop source off (from 26.1121.1509pre1)
+
 ## 26.1121.1606pre1
 
 - Add: Conform warns about silent takes — the matched file has no timecode (BWF TC 00:00:00:00, e.g. a render that lost its TC) or Src In is past the file's end: item note line, red item when no take can play, console list, count in the summary

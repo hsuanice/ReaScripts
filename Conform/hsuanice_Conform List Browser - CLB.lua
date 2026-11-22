@@ -1,6 +1,6 @@
 --[[
 @description Conform List Browser - CLB: conform EDL / AAF / XML / OTIO / subtitle lists (GUI + Jump / Link / Load / Reveal)
-@version 26.1121.1606pre1
+@version 26.1123.0047pre1
 @author hsuanice
 @provides
   [main] .
@@ -13,7 +13,9 @@
   [nomain] ../Tools/aaf_to_otio.py
   [nomain] ../Tools/subtitle_to_clb.py
 @changelog
-  - Add: Conform warns about silent takes — the matched file has no timecode (BWF TC 00:00:00:00, e.g. a render that lost its TC) or Src In is past the file's end: item note line, red item when no take can play, console list, count in the summary
+  - Add: matching marks events whose matched file can't play them — no timecode (BWF TC 00:00:00:00), Src In before the file's start (plays the wrong audio) or past its end: ⚠ in the Match column, red Match / Matched File text (yellow when only some candidates are affected), the reason on hover, and a list in the console after matching; rechecked when Src In, the match or the audio folder changes
+  - Change: Conform's warning uses the same check, so it now also flags Src In before the file's start (it used to play from the file's start without a warning)
+  - Add: Conform warns about silent takes — item note line, red item when no take can play, console list, count in the summary (from 26.1121.1606pre1)
   - Change: every item CLB creates has Loop source off (from 26.1121.1509pre1)
 @about
   Note: the Compare view (old vs new cut, reconform) is a work in progress and not finished yet.
@@ -1962,6 +1964,26 @@ local function match_audio_files()
     "Matching complete: %d found, %d multiple, %d not found%s",
     job.found_count, job.multiple_count, job.not_found_count,
     #fallback_parts > 0 and (", " .. table.concat(fallback_parts, ", ")) or ""))
+
+  -- Matched files that can't place the event's audio (CLB.take_problem) —
+  -- found here, before Conform; the table marks the same rows with ⚠.
+  local tp_lines, tp_rows, tp_all = {}, 0, 0
+  for _, row in ipairs(ROWS) do
+    local tp = CLB.row_take_problems(row)
+    if tp then
+      tp_rows = tp_rows + 1
+      if tp.bad == tp.total then tp_all = tp_all + 1 end
+      for _, l in ipairs(tp.lines) do
+        tp_lines[#tp_lines + 1] = string.format("    Event %s  %s  %s", row.event_num or "?", row.rec_tc_in or "", l)
+      end
+    end
+  end
+  if tp_rows > 0 then
+    console_msg(string.format(
+      "  WARNING: %d matched event(s) would be silent or play the wrong audio (%d with no usable file) - marked ⚠ in the Match column:",
+      tp_rows, tp_all))
+    for _, l in ipairs(tp_lines) do console_msg(l) end
+  end
 
   -- Strategy 6 detail: which parsers matched how many clips
   local s6_total = 0
@@ -6820,6 +6842,97 @@ function CLB.frame_align_offset(offset, audio_file)
   return offset
 end
 
+--- Why a matched file can't place an event's audio, or nil when it can.
+--- Shared by matching (table marks) and Conform (note / red item / console),
+--- so both always agree:
+---   - no timecode (BWF TimeReference 0, e.g. a render that lost its TC):
+---     the take plays from the file's start, usually silence
+---   - Src In more than a frame before the file's start: Conform clamps the
+---     offset to 0, so the take plays the WRONG audio (harder to notice
+---     than silence; nearly always a wrong match or a wrong file TC)
+---   - Src In at or past the file's end: the take is silent
+--- src_len: the source length in seconds (Conform passes the real source's
+--- length; matching uses the length read when the folder was scanned).
+function CLB.take_problem(audio_file, src_in_sec, src_exact, src_len)
+  local meta = audio_file and audio_file.metadata
+  if not meta then return nil end
+  local tr = tonumber(meta.timereference) or 0
+  local sr = tonumber(meta.samplerate) or 48000
+  if sr <= 0 then sr = 48000 end
+  if tr <= 0 then return "no timecode (BWF TC 00:00:00:00)" end
+  local offset = src_in_sec - tr / sr
+  if not src_exact then offset = CLB.frame_align_offset(offset, audio_file) end
+  local frame = (CLB.fps and CLB.fps > 0) and (1 / CLB.fps) or (1 / 30)
+  if offset <= -frame then
+    return string.format("Src In is before the file's start (%.2f s early) - plays the wrong audio", -offset)
+  end
+  src_len = src_len or tonumber(meta.duration) or 0
+  if src_len > 0 and offset >= src_len then
+    return string.format("Src In is past the file's end (%.1f s into a %.1f s file)", offset, src_len)
+  end
+  return nil
+end
+
+--- CLB.audio_files entry by path (index rebuilt when the list changes).
+function CLB.audio_file_by_path(path)
+  local list = CLB.audio_files or {}
+  if CLB._af_index_src ~= list or CLB._af_index_n ~= #list then
+    local idx = {}
+    for _, af in ipairs(list) do
+      if af.path then idx[af.path] = af end
+    end
+    CLB._af_index, CLB._af_index_src, CLB._af_index_n = idx, list, #list
+  end
+  return CLB._af_index[path]
+end
+
+--- The audio files a matched row conforms with: its single matched file, or
+--- its candidates (Multiple, or Fallback with several files). Empty when
+--- nothing is matched, or the candidates were lost with a .clb reload.
+function CLB.row_match_files(row)
+  local files = {}
+  local path = row.matched_path or ""
+  if (row.match_status == "Found" or row.match_status == "Fallback") and
+     path ~= "" and not path:match("^%(") then
+    files[1] = CLB.audio_file_by_path(path)
+  elseif row.__match_candidates then
+    files = row.__match_candidates
+  end
+  return files
+end
+
+--- Match-time check of a row's matched files with CLB.take_problem.
+--- Returns nil when every file can place the event, else
+--- { bad = n, total = m, lines = { "file: why", ... } }  (bad == total:
+--- no take can play the event). Cached on the row until Src In, the match
+--- or the audio list changes, so the table can call it every frame.
+function CLB.row_take_problems(row)
+  local list = CLB.audio_files or {}
+  local key = table.concat({
+    row.src_tc_in or "", tostring(row.src_smp or ""), tostring(row.src_smp_rate or ""),
+    row.match_status or "", row.matched_path or "", tostring(row.__match_candidates),
+    tostring(list), tostring(#list), tostring(CLB.fps), tostring(CLB.is_drop),
+    tostring(CLB.conform_frame_align),
+  }, "|")
+  if row.__tp_key == key then return row.__tp end
+  local result = nil
+  local files = CLB.row_match_files(row)
+  if #files > 0 then
+    local src_in_sec, src_exact = CLB.src_in_seconds(row)
+    local lines = {}
+    for _, af in ipairs(files) do
+      local why = CLB.take_problem(af, src_in_sec, src_exact)
+      if why then
+        local fname = af.filename or af.basename or (af.path or ""):match("([^/\\]+)$") or "?"
+        lines[#lines + 1] = fname .. ": " .. why
+      end
+    end
+    if #lines > 0 then result = { bad = #lines, total = #files, lines = lines } end
+  end
+  row.__tp_key, row.__tp = key, result
+  return result
+end
+
 ---------------------------------------------------------------------------
 -- Conform Matched Items (insert actual audio files)
 ---------------------------------------------------------------------------
@@ -7003,20 +7116,8 @@ local function conform_matched_items(selected_only)
       local src_in_sec, src_exact = CLB.src_in_seconds(row)
 
       -- Get audio files to insert
-      local audio_files = {}
-      if (row.match_status == "Found" or row.match_status == "Fallback") and
-         row.matched_path and not row.matched_path:match("^%(") then
-        -- Single match: find the audio file entry by path
-        for _, af in ipairs(CLB.audio_files) do
-          if af.path == row.matched_path then
-            audio_files[1] = af
-            break
-          end
-        end
-      elseif row.__match_candidates then
-        -- Multiple candidates (Multiple or Fallback with multiple results)
-        audio_files = row.__match_candidates
-      end
+      -- (single match by path, or the candidates of a Multiple / Fallback row)
+      local audio_files = CLB.row_match_files(row)
 
       if #audio_files == 0 then
         -- Fallback/Multiple rows lose __match_candidates after .clb reload;
@@ -7067,10 +7168,10 @@ local function conform_matched_items(selected_only)
         end
       end
 
-      -- Takes whose file can't place the event's audio: no timecode (BWF
-      -- TimeReference 0, e.g. a render that lost its TC) or an offset past
-      -- the file's end. The take is still added (as before) but would be
-      -- silent, so it is flagged in the note / color / console / summary.
+      -- Takes whose file can't place the event's audio (CLB.take_problem:
+      -- no timecode, Src In before the file's start or past its end). The
+      -- take is still added (as before) but is silent or plays the wrong
+      -- audio, so it is flagged in the note / color / console / summary.
       local tc_warns, takes_ok = {}, 0
 
       -- Add takes for each audio file
@@ -7095,12 +7196,7 @@ local function conform_matched_items(selected_only)
               reaper.SetMediaItemTakeInfo_Value(take, "D_STARTOFFS", source_offset)
 
               local src_len = reaper.GetMediaSourceLength(source) or 0
-              local why
-              if audio_start <= 0 then
-                why = "no timecode (BWF TC 00:00:00:00)"
-              elseif src_len > 0 and source_offset >= src_len then
-                why = string.format("Src In is past the file's end (%.1f s into a %.1f s file)", source_offset, src_len)
-              end
+              local why = CLB.take_problem(af, src_in_sec, src_exact, src_len)
               if why then
                 local fname = af.filename or af.basename or (af.path or ""):match("([^/\\]+)$") or "?"
                 tc_warns[#tc_warns + 1] = fname .. ": " .. why
@@ -7162,7 +7258,7 @@ local function conform_matched_items(selected_only)
       if #tc_warns > 0 then
         note_parts[#note_parts + 1] = ""
         for _, w in ipairs(tc_warns) do
-          note_parts[#note_parts + 1] = "WARNING (silent take) " .. w
+          note_parts[#note_parts + 1] = "WARNING (silent or wrong take) " .. w
         end
       end
       reaper.GetSetMediaItemInfo_String(item, "P_NOTES", table.concat(note_parts, "\n"), true)
@@ -7173,8 +7269,8 @@ local function conform_matched_items(selected_only)
         CLB.apply_mix(item, row, true, track_pans[row_to_trackname[row.__guid]] ~= nil)
         -- Green = conformed with audio (unmatched empty items keep the
         -- default color). New items only, never a linked item.
-        -- Red when no take can play the event (every matched file has no
-        -- timecode or ends before Src In) — same red as other "needs a look" items.
+        -- Red when no take can play the event (CLB.take_problem for every
+        -- matched file) — same red as other "needs a look" items.
         local all_bad = #tc_warns > 0 and takes_ok == 0
         reaper.SetMediaItemInfo_Value(item, "I_CUSTOMCOLOR",
           all_bad and (reaper.ColorToNative(200, 60, 60) | 0x1000000)
@@ -7191,12 +7287,12 @@ local function conform_matched_items(selected_only)
       if job.tc_warn_list and #job.tc_warn_list > 0 then
         local n_files = 0
         for _ in pairs(job.tc_warn_files) do n_files = n_files + 1 end
-        console_msg(string.format("WARNING: %d take(s) from %d file(s) are silent - the file has no timecode, "
-          .. "or Src In is past its end:", #job.tc_warn_list, n_files))
+        console_msg(string.format("WARNING: %d take(s) from %d file(s) are silent or play the wrong audio - the file has no timecode, "
+          .. "or Src In is before its start or past its end:", #job.tc_warn_list, n_files))
         for _, l in ipairs(job.tc_warn_list) do console_msg(l) end
         console_msg("  Fix the files' timecode (BWF TimeReference), rescan the audio folder, then Conform these events again.")
-        warn_text = string.format("\n\nWARNING: %d take(s) from %d file(s) are SILENT:\n"
-          .. "the file has no timecode (TC 00:00:00:00) or Src In is past its end.\n"
+        warn_text = string.format("\n\nWARNING: %d take(s) from %d file(s) are SILENT or play the WRONG audio:\n"
+          .. "the file has no timecode (TC 00:00:00:00), or Src In is before its start or past its end.\n"
           .. "Those items are red when no take can play; the list is in the ReaScript console.",
           #job.tc_warn_list, n_files)
       end
@@ -11069,7 +11165,20 @@ local function draw_table(table_height)
           local is_repaired_row = row.__repaired == true
           local is_scene_inferred_row = row.__scene_inferred == true
           local push_color = 0
-          if is_repaired_row and col == COL.MATCH_STATUS then
+          -- ⚠ = a matched file can't place the event's audio (no timecode,
+          -- Src In before its start or past its end — CLB.take_problem):
+          -- red when no matched file can, yellow when only some can't.
+          -- Overrides the Fallback / Repaired colors on these two columns.
+          local take_problems = (col == COL.MATCH_STATUS or col == COL.MATCHED_PATH)
+            and CLB.row_take_problems(row) or nil
+          if take_problems then
+            if col == COL.MATCH_STATUS then
+              text = text .. (is_repaired_row and " ✦" or "") .. " ⚠"
+            end
+            reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Text(),
+              take_problems.bad == take_problems.total and 0xFF4040FF or 0xFFD040FF)
+            push_color = 1
+          elseif is_repaired_row and col == COL.MATCH_STATUS then
             text = text .. " ✦"
             reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Text(), 0x00EEFFFF)
             push_color = 1
@@ -11095,8 +11204,30 @@ local function draw_table(table_height)
           reaper.ImGui_Selectable(ctx, display, selected)
           if push_color > 0 then reaper.ImGui_PopStyleColor(ctx) end
 
+          -- Tooltip for ⚠ rows: which matched files can't place the audio, and why
+          if take_problems and reaper.ImGui_IsItemHovered(ctx) then
+            if reaper.ImGui_BeginTooltip(ctx) then
+              if take_problems.bad == take_problems.total then
+                reaper.ImGui_Text(ctx, "No matched file can play this event - Conform would make it silent or wrong:")
+              else
+                reaper.ImGui_Text(ctx, string.format("%d of %d matched files can't play this event:",
+                  take_problems.bad, take_problems.total))
+              end
+              for _, l in ipairs(take_problems.lines) do reaper.ImGui_Text(ctx, "  " .. l) end
+              reaper.ImGui_Separator(ctx)
+              reaper.ImGui_Text(ctx, "Check the match, or fix the file's timecode (BWF TimeReference) and rescan.")
+              if is_fallback_row then
+                reaper.ImGui_Text(ctx, row.__fallback_kind == "scene_take"
+                  and "Fallback: Scene+Take match only - source TC was NOT checked."
+                  or "Fallback: Tape+TC match only - the clip name did not match.")
+              end
+              if is_repaired_row then
+                reaper.ImGui_Text(ctx, "✦ Tape / Clip Name repaired from matched ISO audio (originals in Notes).")
+              end
+              reaper.ImGui_EndTooltip(ctx)
+            end
           -- Tooltip for repaired rows
-          if is_repaired_row and col == COL.MATCH_STATUS and
+          elseif is_repaired_row and col == COL.MATCH_STATUS and
              reaper.ImGui_IsItemHovered(ctx) then
             if reaper.ImGui_BeginTooltip(ctx) then
               reaper.ImGui_Text(ctx, "Tape / Clip Name repaired from matched ISO audio.")
@@ -11106,7 +11237,8 @@ local function draw_table(table_height)
           end
 
           -- Tooltip for fallback-matched Matched File cell
-          if is_fallback_row and col == COL.MATCHED_PATH and
+          -- (a ⚠ row's tooltip above already names the fallback kind)
+          if is_fallback_row and col == COL.MATCHED_PATH and not take_problems and
              reaper.ImGui_IsItemHovered(ctx) then
             if reaper.ImGui_BeginTooltip(ctx) then
               if row.__fallback_kind == "scene_take" then
